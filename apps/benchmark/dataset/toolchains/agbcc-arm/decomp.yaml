@@ -1,0 +1,24 @@
+# The decomp.yaml the benchmark scores asmlift through on GBA — and a working example of the
+# config you would put at your own project's root.
+#
+# `compiler` is the command asmlift runs to compile a decompiled candidate for byte-matching.
+# It is a shell one-liner: {{inputPath}} is the candidate .c file, {{outputPath}} is the object
+# it must produce. Write it the way your project's Makefile compiles a single file — same
+# compiler, same flags. This one is agbcc's three-step compile: preprocess with cpp, compile
+# with agbcc, assemble with as.
+#
+# To use this in your project, replace:
+#   $ASMLIFT_AGBCC  → the path to your agbcc binary (e.g. tools/agbcc/bin/agbcc)
+#   $ASMLIFT_ARM_AS → your GNU ARM assembler (usually just arm-none-eabi-as)
+# (The variables exist only to keep machine paths out of this repo — the benchmark fills
+# them in when it runs.)
+name: asmlift benchmark (agbcc-arm)
+platform: gba
+tools:
+  asmlift:
+    target: agbcc-arm
+    compiler: >-
+      cpp -P -nostdinc {{inputPath}} > {{inputPath}}.pp.c 2>/dev/null;
+      "$ASMLIFT_AGBCC" {{inputPath}}.pp.c -o {{inputPath}}.s
+      -mthumb-interwork -Wimplicit -O2 -fhex-asm -fprologue-bugfix &&
+      "$ASMLIFT_ARM_AS" -mthumb -mthumb-interwork {{inputPath}}.s -o {{outputPath}}

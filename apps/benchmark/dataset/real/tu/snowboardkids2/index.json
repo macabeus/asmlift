@@ -1,0 +1,130 @@
+{
+  "func_800B0DC0_1DCF60": {
+    "tu": "func_800B0DC0_1DCF60.i.gz",
+    "ctx": "ctx-93f69baa6337.i.gz"
+  },
+  "getTableEntryByU16Index": {
+    "tu": "getTableEntryByU16Index.i.gz",
+    "ctx": "ctx-dae213959c33.i.gz"
+  },
+  "func_80038000_38C00": {
+    "tu": "func_80038000_38C00.i.gz",
+    "ctx": "ctx-fcf65f728876.i.gz"
+  },
+  "func_80037FE0_38BE0": {
+    "tu": "func_80037FE0_38BE0.i.gz",
+    "ctx": "ctx-fcf65f728876.i.gz"
+  },
+  "func_80018DC0_199C0": {
+    "tu": "func_80018DC0_199C0.i.gz",
+    "ctx": "ctx-163252facba5.i.gz"
+  },
+  "func_80021C00_22800": {
+    "tu": "func_80021C00_22800.i.gz",
+    "ctx": "ctx-c3df422c9dc8.i.gz"
+  },
+  "func_80021D88_22988": {
+    "tu": "func_80021D88_22988.i.gz",
+    "ctx": "ctx-e0cb1bd24f0c.i.gz"
+  },
+  "initSteppedMatrixController": {
+    "tu": "initSteppedMatrixController.i.gz",
+    "ctx": "ctx-1f4f9d8c2067.i.gz"
+  },
+  "GenericTriggerInit": {
+    "tu": "GenericTriggerInit.i.gz",
+    "ctx": "ctx-179f8d5e0521.i.gz"
+  },
+  "func_80035F80_36B80": {
+    "tu": "func_80035F80_36B80.i.gz",
+    "ctx": "ctx-cd71a6e037df.i.gz"
+  },
+  "func_80014440_15040": {
+    "tu": "func_80014440_15040.i.gz",
+    "ctx": "ctx-e897f4e7ad97.i.gz"
+  },
+  "func_8002ADB4_2B9B4": {
+    "tu": "func_8002ADB4_2B9B4.i.gz",
+    "ctx": "ctx-604cfced04f4.i.gz"
+  },
+  "func_8002B4B8_2C0B8": {
+    "tu": "func_8002B4B8_2C0B8.i.gz",
+    "ctx": "ctx-604cfced04f4.i.gz"
+  },
+  "func_8001BD74_1C974": {
+    "tu": "func_8001BD74_1C974.i.gz",
+    "ctx": "ctx-604cfced04f4.i.gz"
+  },
+  "func_8001BCDC_1C8DC": {
+    "tu": "func_8001BCDC_1C8DC.i.gz",
+    "ctx": "ctx-0d2a3578b259.i.gz"
+  },
+  "func_8002BE94_2CA94": {
+    "tu": "func_8002BE94_2CA94.i.gz",
+    "ctx": "ctx-3530a10a8fde.i.gz"
+  },
+  "loadAssetGroupResources": {
+    "tu": "loadAssetGroupResources.i.gz",
+    "ctx": "ctx-96e61b4ff9f1.i.gz"
+  },
+  "func_800167B0_173B0": {
+    "tu": "func_800167B0_173B0.i.gz",
+    "ctx": "ctx-02e6b011bd38.i.gz"
+  },
+  "func_8002ACFC_2B8FC": {
+    "tu": "func_8002ACFC_2B8FC.i.gz",
+    "ctx": "ctx-5824633536c6.i.gz"
+  },
+  "func_8002A390_2AF90": {
+    "tu": "func_8002A390_2AF90.i.gz",
+    "ctx": "ctx-937ca5ffc20b.i.gz"
+  },
+  "func_800154A8_160A8": {
+    "tu": "func_800154A8_160A8.i.gz",
+    "ctx": "ctx-604cfced04f4.i.gz"
+  },
+  "func_800B4B30_1E1BE0": {
+    "tu": "func_800B4B30_1E1BE0.i.gz",
+    "ctx": "ctx-7a362db8d24a.i.gz"
+  },
+  "func_800B5B7C_1E2C2C": {
+    "tu": "func_800B5B7C_1E2C2C.i.gz",
+    "ctx": "ctx-5382865af359.i.gz"
+  },
+  "func_800B68F4_1E39A4": {
+    "tu": "func_800B68F4_1E39A4.i.gz",
+    "ctx": "ctx-a4c705864fbb.i.gz"
+  },
+  "func_800B93F0_1E64A0": {
+    "tu": "func_800B93F0_1E64A0.i.gz",
+    "ctx": "ctx-69a8ba814aa8.i.gz"
+  },
+  "func_80028BB0_297B0": {
+    "tu": "func_80028BB0_297B0.i.gz",
+    "ctx": "ctx-778569b77f08.i.gz"
+  },
+  "func_80028D90_29990": {
+    "tu": "func_80028D90_29990.i.gz",
+    "ctx": "ctx-778569b77f08.i.gz"
+  },
+  "func_800B7620_1E46D0": {
+    "tu": "func_800B7620_1E46D0.i.gz",
+    "ctx": "ctx-a4c705864fbb.i.gz"
+  },
+  "func_800B7760_1E4810": {
+    "tu": "func_800B7760_1E4810.i.gz",
+    "ctx": "ctx-a4c705864fbb.i.gz"
+  },
+  "func_800B9C20_1E6CD0": {
+    "tu": "func_800B9C20_1E6CD0.i.gz",
+    "ctx": "ctx-69a8ba814aa8.i.gz"
+  },
+  "func_8002A2D0_2AED0": {
+    "tu": "func_8002A2D0_2AED0.i.gz",
+    "ctx": "ctx-778569b77f08.i.gz"
+  },
+  "func_80051C80_52880": {
+    "tu": "func_80051C80_52880.i.gz",
+    "ctx": "ctx-976642cfe6fd.i.gz"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  // The COMPILER-LEVEL browser-purity gate (twin of test/browser-safe.test.ts): the root
+  // tsconfig injects `types: ["node"]`, which ambiently grants core the very globals it must
+  // not use — under THIS config (`types: []`, ES lib only) `process.env`/Node builtins fail to
+  // typecheck. Run via the root `typecheck` script; CI-gated.
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"],
+    "strict": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": []
+  },
+  "include": ["src"]
+}

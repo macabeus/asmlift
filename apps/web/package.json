@@ -1,0 +1,41 @@
+{
+  "name": "asmlift-web",
+  "version": "0.0.0",
+  "private": true,
+  "license": "GPL-2.0-only",
+  "type": "module",
+  "description": "The asmlift playground and benchmark web app",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json && vite build",
+    "preview": "vite preview",
+    "check-deps": "depcruise 'src/**/*.{ts,tsx}' --config .dependency-cruiser.cjs"
+  },
+  "dependencies": {
+    "@asmlift/bench-schema": "workspace:*",
+    "@asmlift/core": "workspace:*",
+    "@codemirror/language": "^6.10.6",
+    "@codemirror/legacy-modes": "^6.4.2",
+    "@uiw/react-codemirror": "^4.23.7",
+    "@wooorm/starry-night": "^3.10.0",
+    "agbcc": "0.2.0",
+    "echarts": "^5.5.1",
+    "echarts-for-react": "^3.0.2",
+    "lz-string": "^1.5.0",
+    "nuqs": "^2.9.0",
+    "objdiff-wasm": "3.7.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.0.0",
+    "@types/hast": "^3.0.4",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "dependency-cruiser": "^17.3.9",
+    "tailwindcss": "^4.0.0",
+    "typescript": "^6.0.2",
+    "vite": "^6.0.5"
+  }
+}

@@ -1,0 +1,60 @@
+# Hosted CI gate: `tsc --noEmit` (packages/* + apps/benchmark/src), lint + format, every
+# TOOLCHAIN-FREE suite, and the webapp's build (playground + benchmark, one Vite app).
+# The pre-recovery pass list, the IR-op arities, and the dominator/structuring passes are all
+# type-load-bearing — a drift here (e.g. a recognizer added to one call site with the wrong
+# signature) should fail the build, not just a runtime test on the toolchain box. The full
+# `pnpm test` compiles real ARM/MIPS/PPC via toolchains absent from GitHub runners, so it can't
+# be a hosted gate — but everything toolchain-free is one: the scorer on committed fixture
+# objects and the IR-level suites (frontend decode from asm text, raising, structuring,
+# backends, contracts) via `test:offline`. The suite list in package.json is SELF-VERIFYING:
+# test/offline-list.test.ts derives the offline set from the suites' imports and fails on drift.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run typecheck
+      - run: pnpm run lint
+      - run: pnpm run format:check
+      - run: pnpm run test:offline
+      # The benchmark harness's own toolchain-free tests (normalizer/heuristic/policy pins):
+      # no Docker, no compilers — everything heavy is lazily invoked, never at import.
+      - run: pnpm exec vitest run apps/benchmark/test
+
+  # The webapp — playground + benchmark, one Vite build: its own tsconfig (vite/DOM types) —
+  # `tsc --noEmit && vite build` plus its unit tests are the gate. (This build type-checks the
+  # benchmark sources too; it's how the report's schema/consumers can't silently drift apart.)
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Architecture boundaries: pages (src/pages/*) must not import each other and are reachable
+      # from outside only via their entry component; src/shared/* must not depend on a page.
+      - run: cd apps/web && pnpm run check-deps
+      - run: pnpm exec vitest run apps/web/test
+      # Build in the DEPLOY shape (the site is served at /asmlift/) — this is the gate that catches
+      # a base-path or dist regression before it reaches a deploy (deploy-pages.yml is manual-only).
+      - name: Build the site (deploy shape)
+        run: |
+          (cd apps/web && VITE_BASE_URL=/asmlift/ pnpm run build)
+          test -f apps/web/dist/index.html
+          grep -q '/asmlift/assets/' apps/web/dist/index.html

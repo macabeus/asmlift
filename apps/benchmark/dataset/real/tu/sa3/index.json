@@ -1,0 +1,130 @@
+{
+  "AbsMax": {
+    "tu": "AbsMax.i.gz",
+    "ctx": "ctx-bef3af60bae2.i.gz"
+  },
+  "SeedRng": {
+    "tu": "SeedRng.i.gz",
+    "ctx": "ctx-3c6c541b53d3.i.gz"
+  },
+  "Random": {
+    "tu": "Random.i.gz",
+    "ctx": "ctx-3c6c541b53d3.i.gz"
+  },
+  "sa2__sub_808558C": {
+    "tu": "sa2__sub_808558C.i.gz",
+    "ctx": "ctx-bef3af60bae2.i.gz"
+  },
+  "sa2__sub_8085654": {
+    "tu": "sa2__sub_8085654.i.gz",
+    "ctx": "ctx-bef3af60bae2.i.gz"
+  },
+  "sa2__sub_80855C0": {
+    "tu": "sa2__sub_80855C0.i.gz",
+    "ctx": "ctx-bef3af60bae2.i.gz"
+  },
+  "sa2__sub_80856DC": {
+    "tu": "sa2__sub_80856DC.i.gz",
+    "ctx": "ctx-bef3af60bae2.i.gz"
+  },
+  "sa2__sub_8085714": {
+    "tu": "sa2__sub_8085714.i.gz",
+    "ctx": "ctx-bef3af60bae2.i.gz"
+  },
+  "sa2__sub_8085758": {
+    "tu": "sa2__sub_8085758.i.gz",
+    "ctx": "ctx-bef3af60bae2.i.gz"
+  },
+  "EwramInitHeap": {
+    "tu": "EwramInitHeap.i.gz",
+    "ctx": "ctx-bef3af60bae2.i.gz"
+  },
+  "EwramMalloc": {
+    "tu": "EwramMalloc.i.gz",
+    "ctx": "ctx-bef3af60bae2.i.gz"
+  },
+  "EwramFree": {
+    "tu": "EwramFree.i.gz",
+    "ctx": "ctx-bef3af60bae2.i.gz"
+  },
+  "numToASCII": {
+    "tu": "numToASCII.i.gz",
+    "ctx": "ctx-bef3af60bae2.i.gz"
+  },
+  "Base10DigitsToHexNibbles": {
+    "tu": "Base10DigitsToHexNibbles.i.gz",
+    "ctx": "ctx-bef3af60bae2.i.gz"
+  },
+  "VerifyFlashSector_Core": {
+    "tu": "VerifyFlashSector_Core.i.gz",
+    "ctx": "ctx-bef3af60bae2.i.gz"
+  },
+  "sa2__sub_8004418": {
+    "tu": "sa2__sub_8004418.i.gz",
+    "ctx": "ctx-4e7a3b17981a.i.gz"
+  },
+  "GetSaveSectorChecksum": {
+    "tu": "GetSaveSectorChecksum.i.gz",
+    "ctx": "ctx-5fd34bf1b6b5.i.gz"
+  },
+  "VramMalloc": {
+    "tu": "VramMalloc.i.gz",
+    "ctx": "ctx-648ffdb40ca9.i.gz"
+  },
+  "VramGetTotalAllocatedTiles": {
+    "tu": "VramGetTotalAllocatedTiles.i.gz",
+    "ctx": "ctx-648ffdb40ca9.i.gz"
+  },
+  "GetInput": {
+    "tu": "GetInput.i.gz",
+    "ctx": "ctx-9580348e8bae.i.gz"
+  },
+  "sa2__sub_8007858": {
+    "tu": "sa2__sub_8007858.i.gz",
+    "ctx": "ctx-0fac75cf4324.i.gz"
+  },
+  "sa2__sub_8007958": {
+    "tu": "sa2__sub_8007958.i.gz",
+    "ctx": "ctx-0fac75cf4324.i.gz"
+  },
+  "sa2__sub_80856F8": {
+    "tu": "sa2__sub_80856F8.i.gz",
+    "ctx": "ctx-bef3af60bae2.i.gz"
+  },
+  "sa2__sub_8085720": {
+    "tu": "sa2__sub_8085720.i.gz",
+    "ctx": "ctx-bef3af60bae2.i.gz"
+  },
+  "sa2__sub_8085798": {
+    "tu": "sa2__sub_8085798.i.gz",
+    "ctx": "ctx-bef3af60bae2.i.gz"
+  },
+  "sa2__sub_808595C": {
+    "tu": "sa2__sub_808595C.i.gz",
+    "ctx": "ctx-bef3af60bae2.i.gz"
+  },
+  "sa2__sub_80838CC": {
+    "tu": "sa2__sub_80838CC.i.gz",
+    "ctx": "ctx-f2e738026532.i.gz"
+  },
+  "sa2__sub_808399C": {
+    "tu": "sa2__sub_808399C.i.gz",
+    "ctx": "ctx-f2e738026532.i.gz"
+  },
+  "OamMalloc": {
+    "tu": "OamMalloc.i.gz",
+    "ctx": "ctx-9580348e8bae.i.gz"
+  },
+  "sa2__sub_8083504": {
+    "tu": "sa2__sub_8083504.i.gz",
+    "ctx": "ctx-13f369a7ed62.i.gz"
+  },
+  "ProcessOamBuffers": {
+    "tu": "ProcessOamBuffers.i.gz",
+    "ctx": "ctx-0fac75cf4324.i.gz"
+  },
+  "sa2__sub_80078D4": {
+    "tu": "sa2__sub_80078D4.i.gz",
+    "ctx": "ctx-0fac75cf4324.i.gz"
+  }
+}

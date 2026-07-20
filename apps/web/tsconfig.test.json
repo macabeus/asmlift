@@ -1,0 +1,9 @@
+{
+  // Typecheck domain for what tsconfig.json's `include: ["src"]` leaves dark: the vitest tests and
+  // vite.config.ts. Chained in the `build` script so no file ships type-unchecked.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["vite/client", "node"]
+  },
+  "include": ["src", "test", "vite.config.ts"]
+}

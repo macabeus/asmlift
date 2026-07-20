@@ -1,0 +1,480 @@
+{
+  "project": "snowboardkids2",
+  "toolchain": "gcc-mips",
+  "repoDir": "snowboardkids2-decomp",
+  "cppIncludes": [
+    "-nostdinc",
+    "-Iinclude",
+    "-Ilib/ultralib/include",
+    "-Ilib/ultralib/include/PR",
+    "-Ilib/f3dex2/PR",
+    "-Isrc"
+  ],
+  "headers": [
+    "common.h"
+  ],
+  "defines": [
+    "-D_LANGUAGE_C",
+    "-D_MIPS_SZLONG=32",
+    "-D_MIPS_SZINT=32",
+    "-D__USE_ISOC99",
+    "-DF3DEX_GBI_2",
+    "-DNDEBUG",
+    "-D_FINALROM",
+    "-DM2CTX"
+  ],
+  "functions": [
+    {
+      "sym": "func_800B0DC0_1DCF60",
+      "features": [
+        "pointer",
+        "struct",
+        "cast",
+        "memory"
+      ],
+      "note": "src/1DCF60.c: reads a count field via base-relative offset; pure leaf",
+      "prependC": "typedef struct {\n    s32 entriesOffset;\n    s32 countOffset;\n} TableHeader;",
+      "funcC": "s32 func_800B0DC0_1DCF60(TableHeader *table) {\n    return *(s32 *)(table->countOffset + (s32)table);\n}",
+      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/1DCF60.c#L14-L16"
+    },
+    {
+      "sym": "getTableEntryByU16Index",
+      "features": [
+        "struct",
+        "array",
+        "field",
+        "pointer"
+      ],
+      "note": "src/19E80.c: table lookup, pointer/array arithmetic, no calls",
+      "prependC": "typedef struct {\n    u32 data_offset;\n    u16 index_offset;\n    u16 field1;\n    u16 field2;\n    u8 padding[6];\n} TableEntry_19E80;\n\ntypedef struct {\n    u8 header[4];\n    u32 index_table_offset;\n    TableEntry_19E80 entries[1];\n} DataTable_19E80;\n\ntypedef struct {\n    u8 *data_ptr;\n    TableEntry_19E80 *index_ptr;\n    u16 field1;\n    u16 field2;\n} OutputStruct_19E80;",
+      "funcC": "void getTableEntryByU16Index(DataTable_19E80 *arg0, u16 arg1, OutputStruct_19E80 *arg2) {\n    u16 index_offset;\n    TableEntry_19E80 *entry_ptr;\n    TableEntry_19E80 *index_table;\n    TableEntry_19E80 *entry;\n\n    entry_ptr = arg0->entries;\n    index_table = &entry_ptr[arg0->index_table_offset];\n    entry_ptr = &entry_ptr[arg1];\n\n    arg2->data_ptr = &arg0->header[entry_ptr->data_offset];\n    arg2->index_ptr = &index_table[entry_ptr->index_offset * 2];\n    arg2->field1 = entry_ptr->field1;\n    arg2->field2 = entry_ptr->field2;\n}",
+      "proto": {
+        "getTableEntryByU16Index": {
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/19E80.c#L3-L17"
+    },
+    {
+      "sym": "func_80038000_38C00",
+      "features": [
+        "branch",
+        "global",
+        "struct",
+        "field"
+      ],
+      "note": "src/38BE0.c: settings getter with if-chain over a global struct; leaf",
+      "prependC": "#include \"EepromSaveData_type.h\"",
+      "funcC": "u8 func_80038000_38C00(u8 arg0) {\n    arg0 &= 0xFF;\n    if (arg0 < 6) {\n        return 1;\n    }\n    if (arg0 == 6) {\n        return EepromSaveData->setting_4E;\n    }\n    if (arg0 == 7) {\n        return EepromSaveData->setting_4F;\n    }\n    return EepromSaveData->setting_50;\n}",
+      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/38BE0.c#L8-L20"
+    },
+    {
+      "sym": "func_80037FE0_38BE0",
+      "features": [
+        "array",
+        "global",
+        "compare"
+      ],
+      "note": "src/38BE0.c: save-slot-in-use predicate; leaf",
+      "prependC": "#include \"EepromSaveData_type.h\"",
+      "funcC": "s32 func_80037FE0_38BE0(u8 arg0) {\n    return EepromSaveData->save_slot_status[arg0] == 1;\n}",
+      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/38BE0.c#L4-L6"
+    },
+    {
+      "sym": "func_80018DC0_199C0",
+      "features": [
+        "struct",
+        "call",
+        "global",
+        "branch"
+      ],
+      "note": "src/199C0.c: task init; allocates task memory, dispatches by global index",
+      "prependC": "typedef struct {\n    s16 unk0;\n    u8 unk2;\n} task_mem_199C0;\n\nextern u8 D_800A8CC8_A0038;\nextern void (*D_8008D78C_8E38C[])(void);\nvoid func_800574A0_580A0(s32);\nvoid *allocateTaskMemory(s32);\nvoid createTaskQueue(void (*)(void), s32);\nvoid setGameStateHandler(void (*)(void));\nvoid func_80018E2C_19A2C(void);",
+      "funcC": "void func_80018DC0_199C0(void) {\n    task_mem_199C0 *mem;\n\n    mem = (task_mem_199C0 *)allocateTaskMemory(4);\n    mem->unk2 = 0;\n    mem->unk0 = 0;\n\n    if (D_800A8CC8_A0038 != 4) {\n        func_800574A0_580A0(2);\n    }\n\n    createTaskQueue(D_8008D78C_8E38C[D_800A8CC8_A0038], 0x5A);\n    setGameStateHandler(func_80018E2C_19A2C);\n}",
+      "proto": {
+        "func_80018DC0_199C0": {
+          "returnsVoid": true
+        }
+      },
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/199C0.c#L16-L29"
+    },
+    {
+      "sym": "func_80021C00_22800",
+      "features": [
+        "call",
+        "branch",
+        "compare"
+      ],
+      "note": "src/227D0.c: game-state dispatch on a poll result",
+      "prependC": "s16 func_80069810_6A410(void);\nvoid terminateSchedulerWithCallback(void (*)(void));\nvoid setGameStateHandler(void (*)(void));\nvoid func_80021D00_22900(void);\nvoid func_80021C58_22858(void);",
+      "funcC": "void func_80021C00_22800(void) {\n    s16 result = func_80069810_6A410();\n\n    if (result == 0xFF) {\n        terminateSchedulerWithCallback(&func_80021D00_22900);\n    } else if (result == 1) {\n        setGameStateHandler(&func_80021C58_22858);\n    }\n}",
+      "proto": {
+        "func_80021C00_22800": {
+          "returnsVoid": true
+        }
+      },
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/227D0.c#L18-L26"
+    },
+    {
+      "sym": "func_80021D88_22988",
+      "features": [
+        "call",
+        "branch",
+        "local"
+      ],
+      "note": "src/22920.c: game-state dispatch",
+      "prependC": "void *getCurrentAllocation(void);\ns16 func_80069810_6A410(void);\nvoid setGameStateHandler(void (*)(void));\nvoid terminateSchedulerWithCallback(void (*)(void));\nvoid func_80021DE8_229E8(void);\nvoid func_80022108_22D08(void);",
+      "funcC": "void func_80021D88_22988(void) {\n    s16 result;\n\n    getCurrentAllocation();\n    result = func_80069810_6A410();\n\n    if (result == 1) {\n        setGameStateHandler(func_80021DE8_229E8);\n    } else if (result == 0xFF) {\n        terminateSchedulerWithCallback(func_80022108_22D08);\n    }\n}",
+      "proto": {
+        "func_80021D88_22988": {
+          "returnsVoid": true
+        }
+      },
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/22920.c#L35-L46"
+    },
+    {
+      "sym": "initSteppedMatrixController",
+      "features": [
+        "struct",
+        "call",
+        "memory",
+        "global"
+      ],
+      "note": "src/76B0.c: copies identity matrix into task state, registers callbacks",
+      "prependC": "#include \"geometry.h\"\n\nextern u8 identityMatrix[];\n\ntypedef struct {\n    u8 padding[0x3C];\n    s8 isDestroyed;\n    s8 actionMode;\n    u8 padding2[0xB2];\n    u8 transformMatrix[0x20];\n} SteppedMatrixOwner;\n\ntypedef struct {\n    SteppedMatrixOwner *owner;\n    Transform3D matrix;\n    s16 frameDelay;\n    u8 padding[0x2];\n    s16 stepIndex;\n} SteppedMatrixState;\n\nvoid cleanupSteppedMatrixController(void);\nvoid updateSteppedMatrixController(SteppedMatrixState *state);\nvoid setCleanupCallback(void (*)(void));\nvoid setCallback(void (*)(SteppedMatrixState *));",
+      "funcC": "void initSteppedMatrixController(SteppedMatrixState *state) {\n    memcpy(&state->matrix, identityMatrix, 0x20);\n    state->frameDelay = 0;\n    state->stepIndex = 0;\n    setCleanupCallback(cleanupSteppedMatrixController);\n    setCallback(updateSteppedMatrixController);\n}",
+      "proto": {
+        "initSteppedMatrixController": {
+          "returnsVoid": true
+        }
+      },
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/76B0.c#L30-L36"
+    },
+    {
+      "sym": "GenericTriggerInit",
+      "features": [
+        "struct",
+        "field",
+        "call",
+        "global"
+      ],
+      "note": "src/198B0.c: initializes an event trigger struct and registers its check callback",
+      "prependC": "typedef struct {\n    s8 eventId;\n    s8 unk1;\n    char padding[2];\n    s16 unk4;\n    s16 unk6;\n    s16 unk8;\n    void *unkC;\n} EventTrigger;\n\nextern u8 D_8008D714_8E314[];\nvoid GenericTriggerCheck(EventTrigger *);\nvoid setCallback(void (*)(EventTrigger *));",
+      "funcC": "void GenericTriggerInit(EventTrigger *arg0) {\n    u8 eventId = arg0->eventId;\n    arg0->unk1 = 0;\n    arg0->unk4 = 0;\n    arg0->unk6 = -0x68;\n    arg0->unk8 = 0;\n    arg0->unkC = &D_8008D714_8E314[eventId * 20];\n    setCallback(GenericTriggerCheck);\n}",
+      "proto": {
+        "GenericTriggerInit": {
+          "returnsVoid": true
+        }
+      },
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/198B0.c#L10-L18"
+    },
+    {
+      "sym": "func_80035F80_36B80",
+      "features": [
+        "branch",
+        "call",
+        "cast",
+        "return"
+      ],
+      "note": "src/36B80.c: selects one of two compressed assets to load",
+      "prependC": "extern u32 *_3F6950_ROM_START;\nextern u32 *_3F6950_ROM_END;\nextern u32 *_459E00_ROM_START;\nextern u32 *_459E00_ROM_END;\nvoid *loadCompressedData(void *, void *, s32);",
+      "funcC": "void *func_80035F80_36B80(s32 arg0) {\n    if ((u8)arg0 != 1) {\n        return loadCompressedData(&_3F6950_ROM_START, &_3F6950_ROM_END, 0x508);\n    } else {\n        return loadCompressedData(&_459E00_ROM_START, &_459E00_ROM_END, 0x22E8);\n    }\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/36B80.c#L8-L14"
+    },
+    {
+      "sym": "func_80014440_15040",
+      "features": [
+        "loop",
+        "global",
+        "array"
+      ],
+      "note": "src/10AD0.c: fills a font palette global; index 0 cleared, rest set to white",
+      "prependC": "extern u16 gDefaultFontPalette[];",
+      "funcC": "void func_80014440_15040(void) {\n    s32 i;\n\n    gDefaultFontPalette[0] = 0;\n    for (i = 1; i < 256; i++) {\n        gDefaultFontPalette[i] = 0xFFFF;\n    }\n}",
+      "proto": {
+        "func_80014440_15040": {
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/10AD0.c#L32-L39"
+    },
+    {
+      "sym": "func_8002ADB4_2B9B4",
+      "features": [
+        "fixedpoint",
+        "bitwise",
+        "branch",
+        "compare"
+      ],
+      "note": "src/2AF90.c: angle interpolation with wrap handling; pure leaf, uses ABS macro",
+      "funcC": "s16 func_8002ADB4_2B9B4(s16 arg0, s16 arg1) {\n    s16 target;\n    s16 current;\n    s32 diff;\n    s16 absDiff;\n    s16 direction;\n\n    target = arg0;\n    current = arg1;\n\n    if (arg0 == arg1) {\n        goto done;\n    }\n\n    diff = arg0 - arg1;\n    diff = ABS(diff);\n\n    if ((s16)diff >= 0x1001) {\n        if (arg1 < arg0) {\n            current = arg1 + 0x2000;\n        } else {\n            target = arg0 + 0x2000;\n        }\n    }\n\n    arg0 = target;\n    arg1 = current;\n\n    diff = arg0 - arg1;\n    absDiff = ABS(diff);\n\n    if (absDiff >= 0xAAB) {\n        current += 0x1000;\n        goto done;\n    }\n\n    if (arg1 < arg0) {\n        direction = 1;\n    } else {\n        direction = -1;\n    }\n\n    if (absDiff >= 0x80) {\n        current += direction << 7;\n        goto done;\n    }\n\n    current = (current + absDiff * direction) & 0x1FFF;\n\ndone:\n    return current;\n}",
+      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/2AF90.c#L103-L162"
+    },
+    {
+      "sym": "func_8002B4B8_2C0B8",
+      "features": [
+        "bitwise",
+        "branch",
+        "fixedpoint"
+      ],
+      "note": "src/2AF90.c: signed angle difference in 13-bit angle space; pure leaf",
+      "funcC": "s16 func_8002B4B8_2C0B8(u16 arg0, u16 arg1) {\n    s16 diff;\n\n    arg0 &= 0x1FFF;\n    arg1 &= 0x1FFF;\n    diff = (arg1 - arg0) & 0x1FFF;\n\n    if (diff >= 0x1001) {\n        diff |= 0xE000;\n    }\n\n    return diff;\n}",
+      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/2AF90.c#L168-L180"
+    },
+    {
+      "sym": "func_8001BD74_1C974",
+      "features": [
+        "branch",
+        "pointer",
+        "memory"
+      ],
+      "note": "src/1BBA0.c: remaps a state byte through a pointer via an if-chain; pure leaf",
+      "funcC": "void func_8001BD74_1C974(s8 *a0) {\n    if (*a0 == 3) {\n        *a0 = 2;\n    } else if (*a0 == 8) {\n        *a0 = 7;\n    } else if (*a0 != 4) {\n    } else {\n        *a0 = 0;\n    }\n}",
+      "proto": {
+        "func_8001BD74_1C974": {
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/1BBA0.c#L108-L117"
+    },
+    {
+      "sym": "func_8001BCDC_1C8DC",
+      "features": [
+        "loop",
+        "struct",
+        "field",
+        "global",
+        "branch"
+      ],
+      "note": "src/1BBA0.c: nested loop counting active players, clears a flag row when none remain",
+      "prependC": "#include \"gamestate.h\"\n#include \"D_800AFE8C_A71FC_type.h\"\n#include \"task_scheduler.h\"",
+      "funcC": "void func_8001BCDC_1C8DC(void) {\n    GameState *state = getCurrentAllocation();\n    s32 i;\n    s32 j;\n    u8 count;\n\n    for (i = 0; i < 9; i++) {\n        count = 0;\n\n        for (j = 0; j < D_800AFE8C_A71FC->unk8; j++) {\n            if (state->unk59A[j] == 1 || state->unk59A[j] == 3) {\n                count++;\n            }\n        }\n\n        if (count == 0) {\n            state->unk5B8[i] = 0;\n        }\n    }\n}",
+      "proto": {
+        "func_8001BCDC_1C8DC": {
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/1BBA0.c#L87-L106"
+    },
+    {
+      "sym": "func_8002BE94_2CA94",
+      "features": [
+        "loop",
+        "struct",
+        "array",
+        "call"
+      ],
+      "note": "src/2C8F0.c: destroys each scene model in a fixed array up to a live count",
+      "prependC": "#include \"20F0.h\"\n#include \"geometry.h\"\n\ntypedef struct {\n    SceneModel *unk0;\n    u8 pad4[0x3C];\n    s32 unk40;\n    s32 unk44;\n    u8 pad48[0x4];\n    void *unk4C;\n    u8 pad50[0x14];\n} Elem2C8F0;\n\ntypedef struct {\n    Elem2C8F0 elems[2];\n    u8 padC8[0xC];\n    u8 unkD4;\n    u8 unkD5;\n} Struct2C8F0;",
+      "funcC": "void func_8002BE94_2CA94(Struct2C8F0 *arg0) {\n    s32 i;\n\n    for (i = 0; i < arg0->unkD5; i++) {\n        arg0->elems[i].unk0 = destroySceneModel(arg0->elems[i].unk0);\n    }\n}",
+      "proto": {
+        "func_8002BE94_2CA94": {
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/2C8F0.c#L47-L53"
+    },
+    {
+      "sym": "loadAssetGroupResources",
+      "features": [
+        "loop",
+        "struct",
+        "array",
+        "call",
+        "cast"
+      ],
+      "note": "src/3B80.c: loads each compressed asset in a group into a freshly allocated pointer array",
+      "prependC": "#include \"task_scheduler.h\"\n\ntypedef struct {\n    void *unk0;\n    void *unk4;\n    s32 unk8;\n} AssetEntry;\n\ntypedef struct {\n    AssetEntry *assetList;\n    u8 _pad4[0x4];\n    u8 assetCount;\n    u8 _pad9[0x3];\n} AssetGroupTableEntry;\n\ntypedef struct {\n    void *context;\n    void **loadedAssets;\n    s32 param;\n    void *unkC;\n    void *unk10;\n    u8 _pad14[0xB0];\n    u8 groupIndex;\n    u8 unkC5;\n} AssetGroupTaskData;\n\nextern AssetGroupTableEntry assetGroupTable[];\nextern void func_80003184_3D84(void *);\nvoid freeAssetGroupResources(AssetGroupTaskData *taskData);",
+      "funcC": "void loadAssetGroupResources(AssetGroupTaskData *taskData) {\n    AssetGroupTableEntry *entry;\n    AssetEntry *assetList;\n    s32 i;\n\n    entry = &assetGroupTable[taskData->groupIndex];\n    assetList = entry->assetList;\n\n    setCleanupCallback(freeAssetGroupResources);\n    i = 0;\n\n    taskData->unk10 = NULL;\n    taskData->unkC = NULL;\n\n    taskData->loadedAssets = allocateNodeMemory(entry->assetCount * 4);\n\n    for (i = 0; i < entry->assetCount; i++) {\n        taskData->loadedAssets[i] = loadCompressedData(assetList[i].unk0, assetList[i].unk4, assetList[i].unk8);\n    }\n\n    setCallback(func_80003184_3D84);\n}",
+      "proto": {
+        "loadAssetGroupResources": {
+          "returnsVoid": true
+        }
+      },
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/3B80.c#L80-L101"
+    },
+    {
+      "sym": "func_800167B0_173B0",
+      "features": [
+        "bitwise",
+        "struct",
+        "field",
+        "call"
+      ],
+      "note": "src/16FA0.c: animation ticker; toggles a frame index with bit math then re-enqueues itself",
+      "prependC": "#include \"16FA0.h\"\n#include \"6E840.h\"\n#include \"10AD0.h\"",
+      "funcC": "void func_800167B0_173B0(Struct16728 *arg0) {\n    if (arg0->unkC == 0) {\n        arg0->unkD++;\n        if ((arg0->unkD & 1) == 0) {\n            arg0->unkE = (arg0->unkE + 1) & 1;\n            arg0->unk8 = arg0->unkE + 7;\n        }\n        if (arg0->unkD == 0x10) {\n            arg0->unkD = 0;\n            arg0->unkC = 0x1E;\n        }\n    } else {\n        arg0->unkC--;\n    }\n    debugEnqueueCallback(8, 1, func_8000FED0_10AD0, arg0);\n}",
+      "proto": {
+        "func_800167B0_173B0": {
+          "returnsVoid": true
+        }
+      },
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/16FA0.c#L132-L147"
+    },
+    {
+      "sym": "func_8002ACFC_2B8FC",
+      "features": [
+        "call",
+        "fixedpoint",
+        "branch",
+        "global"
+      ],
+      "note": "src/2AF90.c: proximity/heading test against the player position; fixed-point distance check",
+      "prependC": "#include \"gamestate.h\"\n#include \"geometry.h\"\n#include \"task_scheduler.h\"",
+      "funcC": "s32 func_8002ACFC_2B8FC(s32 arg0, s32 arg1, s16 arg2) {\n    GameState *state;\n    s16 angle;\n\n    state = getCurrentAllocation();\n    angle = func_8006D21C_6DE1C(state->unk3EC, state->unk3F0, arg0, arg1);\n\n    if (arg2 - 0x238 < angle && angle < arg2 + 0x238) {\n        if (distance_2d(state->unk3EC - arg0, state->unk3F0 - arg1) <= 0x280000) {\n            return 1;\n        }\n    }\n    return 0;\n}",
+      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/2AF90.c#L88-L101"
+    },
+    {
+      "sym": "func_8002A390_2AF90",
+      "features": [
+        "switch",
+        "struct",
+        "call",
+        "branch",
+        "global"
+      ],
+      "note": "src/2AF90.c: state-machine step with fall-through switch cases over a mode byte",
+      "prependC": "#include \"gamestate.h\"\n#include \"geometry.h\"\n#include \"task_scheduler.h\"\n\ntypedef struct {\n    void *model;\n    Transform3D matrix;\n    u8 pad24[0xA];\n    s16 unk2E;\n    u8 pad30[0x7];\n    u8 unk37;\n    u8 pad38[0x14];\n    u16 *unk4C;\n    u16 unk50;\n    u8 pad52[0x2];\n    u16 unk54;\n    u8 pad56[0x6];\n    u8 unk5C;\n    u8 unk5D;\n    u8 unk5E;\n    u8 pad5F[0x2];\n    u8 unk61;\n} Func8002A390Arg;\n\nextern s32 func_8002A4AC_2B0AC(void *, u8);\nextern s32 func_8002A7CC_2B3CC(void *);\ns32 func_8002ACFC_2B8FC(s32, s32, s16);",
+      "funcC": "s32 func_8002A390_2AF90(Func8002A390Arg *arg0) {\n    GameState *state;\n    s32 stateVal;\n\n    state = getCurrentAllocation();\n    stateVal = arg0->unk5E;\n\n    switch (stateVal) {\n        case 0:\n            if (func_8002A4AC_2B0AC(&arg0->matrix, arg0->unk5D) != 0) {\n                return 1;\n            }\n            if (state->unk421 != 0) {\n                return 0;\n            }\n            if (func_8002ACFC_2B8FC(arg0->matrix.translation.x, arg0->matrix.translation.z, arg0->unk2E) == 0) {\n                return 0;\n            }\n            arg0->unk54 = arg0->unk50;\n            if (arg0->unk5D == 5) {\n                arg0->unk50 = 0x21;\n            } else {\n                arg0->unk50 = 0;\n            }\n            arg0->unk61 = arg0->unk5E;\n            arg0->unk5E = 0x44;\n            break;\n        case 1:\n        case 2:\n        case 3:\n        case 4:\n            if (func_8002A7CC_2B3CC(arg0) == 0) {\n                return 0;\n            }\n            arg0->unk61 = arg0->unk5E;\n            arg0->unk5E = 0;\n            break;\n        case 0x44:\n            if (func_8002A7CC_2B3CC(arg0) == 0) {\n                return 0;\n            }\n            arg0->unk61 = arg0->unk5E;\n            arg0->unk5E = 0;\n            arg0->unk50 = arg0->unk54;\n            break;\n    }\n\n    return 0;\n}",
+      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/2AF90.c#L34-L82"
+    },
+    {
+      "sym": "func_800154A8_160A8",
+      "features": [
+        "loop",
+        "branch",
+        "call"
+      ],
+      "funcC": "void func_800154A8_160A8(s8 *arg0, u16 arg1) {\n    s32 end;\n    s32 ptr;\n\n    if (arg1 == 0) {\n        return;\n    }\n\n    ptr = (s32)arg0;\n    end = arg1 + ptr;\n    do {\n        *(s8 *)ptr = 0;\n        ptr++;\n    } while (ptr < end);\n}",
+      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/15690.c#L304-L318"
+    },
+    {
+      "sym": "func_800B4B30_1E1BE0",
+      "features": [
+        "branch",
+        "call"
+      ],
+      "prependC": "#include \"1DFAA0.h\"\n#include \"20F0.h\"\n#include \"3E160.h\"\n#include \"common.h\"\n#include \"displaylist.h\"\n#include \"geometry.h\"\n#include \"graphics.h\"\n#include \"overlay.h\"\n#include \"task_scheduler.h\"",
+      "funcC": "void func_800B4B30_1E1BE0(s16 arg0, s16 arg1, s16 arg2, s16 arg3) {\n    s16 temp;\n\n    if (arg3 <= 0) {\n        temp = func_800B4AFC_1E1BAC(arg0);\n        func_80058360_58F60(temp, arg1, arg2 + 0x80, 0);\n    } else {\n        temp = func_800B4AFC_1E1BAC(arg0);\n        func_80057DF0_589F0(temp, arg1, arg2 + 0x80, 0, arg3);\n    }\n}",
+      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/1E1BA0.c#L40-L50",
+      "m2cCtx": true
+    },
+    {
+      "sym": "func_800B5B7C_1E2C2C",
+      "features": [
+        "struct"
+      ],
+      "prependC": "#include \"1E2BE0.h\"",
+      "funcC": "void func_800B5B7C_1E2C2C(func_800B5E64_1E2F14_arg0 *arg0, u16 arg1) {\n    arg0->unk20 = 0;\n    arg0->unk22 = 0;\n    arg0->unk24 = 0;\n    arg0->unk26 = 0;\n    arg0->unk28 = 0;\n    arg0->unk2A = 0;\n    arg0->unk2C = 0;\n    arg0->unk2E = 0;\n    arg0->unk30 = 0;\n    arg0->unk32 = 0;\n    arg0->unk34 = 0;\n    arg0->unk38 = 0;\n    arg0->unk3C = 0;\n    arg0->unk40 = 0;\n    arg0->unk44 = 0;\n    arg0->unk48 = 0;\n    arg0->unk4C = 0;\n    arg0->unk50 = 0;\n    arg0->unk54 = 0;\n    arg0->unk58 = 0;\n    arg0->unk5A = 0;\n    arg0->unk5C = 0;\n    arg0->unk5E = 0;\n    arg0->unk60 = 0;\n    arg0->unk62 = 0;\n    arg0->unk64 = 0;\n    arg0->unk68 = 0;\n    arg0->unk6C = 0;\n    arg0->unk6E = arg1;\n    arg0->unk70 = 0;\n    arg0->unk71 = 0;\n}",
+      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/1E2BE0.c#L21-L53"
+    },
+    {
+      "sym": "func_800B68F4_1E39A4",
+      "features": [
+        "struct"
+      ],
+      "prependC": "#include \"1E36C0.h\"",
+      "funcC": "void func_800B68F4_1E39A4(unk_func_800B68F4_1E39A4 *arg0, s32 arg1, s32 arg2, s32 arg3) {\n    arg0->unk60 = arg1;\n    arg0->unk54 = arg1;\n    arg0->unk64 = arg2;\n    arg0->unk58 = arg2;\n    arg0->unk68 = arg3;\n    arg0->unk5C = arg3;\n}",
+      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/1E36C0.c#L134-L141"
+    },
+    {
+      "sym": "func_800B93F0_1E64A0",
+      "features": [
+        "branch",
+        "call"
+      ],
+      "prependC": "#include \"1E64A0.h\"",
+      "funcC": "s32 func_800B93F0_1E64A0(s32 arg0) {\n    s32 result;\n\n    if (arg0 == 0) {\n        arg0 = 1;\n    }\n\n    result = 0x4000000 / arg0;\n\n    if (result >= 0x4000) {\n        result = 0x4000;\n    }\n\n    return result;\n}",
+      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/1E64A0.c#L16-L30"
+    },
+    {
+      "sym": "func_80028BB0_297B0",
+      "features": [
+        "struct",
+        "bitwise",
+        "call"
+      ],
+      "prependC": "#include \"297B0.h\"\n#include \"20F0.h\"\n#include \"3E160.h\"\n#include \"B040.h\"\n#include \"common.h\"\n#include \"geometry.h\"\n#include \"graphics.h\"\n#include \"rand.h\"\n#include \"task_scheduler.h\"",
+      "funcC": "void func_80028BB0_297B0(Func297D8Arg *arg0) {\n    arg0->unk5E = 0;\n    arg0->unk61 = 0;\n    arg0->unk62 = 0;\n    arg0->unk5A = randB() & 0xF;\n    createYRotationMatrix(&arg0->matrix, arg0->rotation);\n    func_8002A290_2AE90(arg0);\n    setCallback(func_80028C08_29808);\n}",
+      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/297B0.c#L42-L50",
+      "m2cCtx": true
+    },
+    {
+      "sym": "func_80028D90_29990",
+      "features": [
+        "struct",
+        "bitwise",
+        "call"
+      ],
+      "prependC": "#include \"297B0.h\"\n#include \"20F0.h\"\n#include \"3E160.h\"\n#include \"B040.h\"\n#include \"common.h\"\n#include \"geometry.h\"\n#include \"graphics.h\"\n#include \"rand.h\"\n#include \"task_scheduler.h\"",
+      "funcC": "void func_80028D90_29990(Func297D8Arg *arg0) {\n    arg0->unk5E = 0;\n    arg0->unk61 = 0;\n    arg0->unk62 = 0;\n    arg0->unk5A = arg0->unk5A + (randB() & 0xF);\n    createYRotationMatrix(&arg0->matrix, arg0->rotation);\n    func_8002A290_2AE90(arg0);\n    setCallback(func_80028DF0_299F0);\n}",
+      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/297B0.c#L123-L131",
+      "m2cCtx": true
+    },
+    {
+      "sym": "func_800B7620_1E46D0",
+      "features": [
+        "struct",
+        "bitwise",
+        "branch",
+        "call"
+      ],
+      "prependC": "#include \"1E36C0.h\"",
+      "funcC": "void func_800B7620_1E46D0(CutsceneSlotData *arg0, s32 arg1, s16 arg2, s16 arg3) {\n    s32 temp_a0;\n    s32 temp_v0;\n    s32 temp_v1;\n    s32 var_v0;\n    s32 var_v1;\n\n    arg0->unk0.Two = 6;\n    arg0->unk94 = arg1;\n    arg0->unk92 = arg3;\n    arg0->unk84 = arg2;\n    arg0->unk86 = arg2;\n    temp_a0 = ((s16)atan2Fixed(arg0->unk20_u.unk20_s32, arg0->unk2C) + 0x1000) & 0x1FFF;\n    arg0->unk9C_u.unk9C_s32 = temp_a0;\n    temp_v1 = approximateCos(temp_a0) << 2;\n    if (temp_v1 == 0) {\n        var_v1 = (arg0->unk20_u.unk20_s32 << 8) / ((approximateSin(arg0->unk9C_u.s.unk9E) << 2) >> 8);\n        var_v1 = (var_v1 > 0) ? var_v1 : -var_v1;\n        arg0->unk98 = var_v1;\n    } else {\n        var_v0 = (arg0->unk2C << 8) / (temp_v1 >> 8);\n        var_v0 = (var_v0 > 0) ? var_v0 : -var_v0;\n        arg0->unk98 = var_v0;\n    }\n    temp_v0 = arg0->unk94;\n    if (temp_v0 > 0) {\n        arg0->unk7A = (arg0->unk9C_u.unk9C_s32 + 0x800) & 0x1FFF;\n    } else if (temp_v0 < 0) {\n        arg0->unk7A = (arg0->unk9C_u.unk9C_s32 - 0x800) & 0x1FFF;\n    }\n}",
+      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/1E36C0.c#L576-L606"
+    },
+    {
+      "sym": "func_800B7760_1E4810",
+      "features": [
+        "struct",
+        "branch",
+        "call"
+      ],
+      "prependC": "#include \"1E36C0.h\"",
+      "funcC": "void func_800B7760_1E4810(CutsceneSlotData *arg0, s32 arg1, s16 arg2) {\n    s32 diff;\n    s32 delta;\n\n    if (arg2 > 0) {\n        diff = arg1 - arg0->unk54;\n        delta = diff / arg2;\n        arg0->unk60 = arg1;\n        arg0->unk6C = delta;\n    } else {\n        arg0->unk54 = arg1;\n        arg0->unk60 = arg1;\n        arg0->unk6C = 0;\n    }\n}",
+      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/1E36C0.c#L608-L622"
+    },
+    {
+      "sym": "func_800B9C20_1E6CD0",
+      "features": [
+        "struct",
+        "call"
+      ],
+      "prependC": "#include \"1E64A0.h\"",
+      "funcC": "void func_800B9C20_1E6CD0(cutsceneSys2Wait_exec_asset *arg0) {\n    arg0->unkA0 = freeNodeMemory(arg0->unkA0);\n    arg0->unk8 = freeNodeMemory(arg0->unk8);\n    arg0->unkC = freeNodeMemory(arg0->unkC);\n}",
+      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/1E64A0.c#L201-L205"
+    },
+    {
+      "sym": "func_8002A2D0_2AED0",
+      "features": [
+        "struct",
+        "bitwise",
+        "branch",
+        "call"
+      ],
+      "prependC": "#include \"297B0.h\"\n#include \"20F0.h\"\n#include \"3E160.h\"\n#include \"B040.h\"\n#include \"common.h\"\n#include \"geometry.h\"\n#include \"graphics.h\"\n#include \"rand.h\"\n#include \"task_scheduler.h\"",
+      "funcC": "void func_8002A2D0_2AED0(Func297D8Arg *arg0) {\n    s32 result;\n\n    getCurrentAllocation();\n    applyTransformToModel(arg0->model, &arg0->matrix);\n\n    if (arg0->unk50 != arg0->unk52) {\n        arg0->unk52 = arg0->unk50;\n        setModelAnimation(arg0->model, arg0->unk50);\n        arg0->unk62 = 0;\n    }\n\n    if (arg0->unk62 != -1) {\n        result = clearModelRotation(arg0->model);\n    } else {\n        result = 0;\n    }\n\n    if (result != 0) {\n        arg0->unk37 = 1;\n        arg0->unk62 = (arg0->unk62 & 0x7F) + 1;\n        if (arg0->unk50 == 0x98) {\n            if (arg0->unk5E == 2) {\n                arg0->unk50 = 0x90;\n            } else {\n                arg0->unk50 = arg0->unk58;\n            }\n        }\n    }\n\n    updateModelGeometry(arg0->model);\n}",
+      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/297B0.c#L862-L893",
+      "m2cCtx": true
+    },
+    {
+      "sym": "func_80051C80_52880",
+      "features": [
+        "branch",
+        "call",
+        "array"
+      ],
+      "prependC": "#include \"52880.h\"",
+      "funcC": "void func_80051C80_52880(s32 *arg0, s32 arg1) {\n    s32 dist;\n\n    dist = distance_2d(arg0[0], arg0[2]);\n\n    if (!(dist >= 0x20000)) {\n        if (dist != 0) {\n            arg0[0] = (s64)((s64)arg0[0] * 0x20000) / dist;\n            arg0[2] = (s64)((s64)arg0[2] * 0x20000) / dist;\n        } else {\n            arg0[2] = 0x20000;\n        }\n    }\n\n    dist = distance_3d(arg0[0], arg0[1], arg0[2]);\n\n    if (dist != 0) {\n        arg0[0] = (s64)((s64)arg0[0] * arg1) / dist;\n        arg0[1] = (s64)((s64)arg0[1] * arg1) / dist;\n        arg0[2] = (s64)((s64)arg0[2] * arg1) / dist;\n    }\n}",
+      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/52880.c#L137-L158"
+    }
+  ]
+}

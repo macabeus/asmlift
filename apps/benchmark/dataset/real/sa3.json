@@ -1,0 +1,461 @@
+{
+  "project": "sa3",
+  "toolchain": "agbcc-arm",
+  "repoDir": "sa3",
+  "cppIncludes": [
+    "-iquote",
+    "include",
+    "-nostdinc",
+    "-I",
+    "tools/agbcc/include"
+  ],
+  "headers": [
+    "global.h",
+    "malloc_ewram.h"
+  ],
+  "defines": [
+    "-D",
+    "EUROPE",
+    "-D",
+    "PLATFORM_GBA=1",
+    "-D",
+    "CPU_ARCH_ARM=1"
+  ],
+  "functions": [
+    {
+      "sym": "AbsMax",
+      "features": [
+        "arithmetic",
+        "branch",
+        "abs"
+      ],
+      "funcC": "u32 AbsMax(s32 a, s32 b)\n{\n    if (a < 0) {\n        a = -a;\n    }\n\n    if (b < 0) {\n        b = -b;\n    }\n\n    if (b < a) {\n        return a;\n    }\n    return b;\n}",
+      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L433-L447"
+    },
+    {
+      "sym": "SeedRng",
+      "features": [
+        "global",
+        "store"
+      ],
+      "prependC": "u32 gRngPrevValue;\nu32 gRngValue;",
+      "funcC": "void SeedRng(u32 a, u32 b)\n{\n    gRngPrevValue = a;\n    gRngValue = b;\n}",
+      "proto": {
+        "SeedRng": {
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L427-L431"
+    },
+    {
+      "sym": "Random",
+      "features": [
+        "global",
+        "pointer",
+        "arithmetic"
+      ],
+      "prependC": "u32 gRngPrevValue;\nu32 gRngValue;\n#define RAND_CONST 0x37119371",
+      "funcC": "u16 Random(void)\n{\n    u32 new;\n    u32 *pPrev = &gRngPrevValue;\n    u32 *pCurrent = &gRngValue;\n\n    u32 prev = *pPrev;\n    gRngPrevValue = *pCurrent;\n\n    new = prev + RAND_CONST;\n    new += *pCurrent;\n\n    gRngValue = new;\n\n    return ((u16 *)&gRngValue)[1];\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L402-L425"
+    },
+    {
+      "sym": "sa2__sub_808558C",
+      "features": [
+        "arithmetic",
+        "bitwise",
+        "branch",
+        "shift"
+      ],
+      "funcC": "s16 SA2_LABEL(sub_808558C)(u16 angleA, u16 angleB, u8 numDecimalBits)\n{\n    u32 c1 = (1 << numDecimalBits);\n    u16 c2 = c1 - 1;\n\n    angleB -= angleA;\n    angleB &= c2;\n\n    if (angleB <= (c1 / 2)) {\n        return angleB;\n    } else {\n        return (angleB - c1);\n    }\n}",
+      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L469-L482"
+    },
+    {
+      "sym": "sa2__sub_8085654",
+      "features": [
+        "loop",
+        "arithmetic",
+        "int64",
+        "shift"
+      ],
+      "funcC": "s32 SA2_LABEL(sub_8085654)(s32 a, s32 b, s32 c, u8 d, u8 e)\n{\n    do {\n        a -= (((s64)c * (s64)(a - b))) >> d;\n        e -= 1;\n    } while (e != 0xFF);\n\n    return a;\n}",
+      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L509-L517"
+    },
+    {
+      "sym": "sa2__sub_80855C0",
+      "features": [
+        "arithmetic",
+        "int64",
+        "shift"
+      ],
+      "funcC": "u32 SA2_LABEL(sub_80855C0)(s32 a, s32 b, s32 c, u8 d)\n{\n    s64 e = (s64)c * (a - b);\n\n    return a - (e >> d);\n}",
+      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L484-L489"
+    },
+    {
+      "sym": "sa2__sub_80856DC",
+      "features": [
+        "arithmetic",
+        "soft-div"
+      ],
+      "funcC": "s32 SA2_LABEL(sub_80856DC)(s32 a, s32 b, s32 c) { return (a * 7 + b * 6 - c) / 12; }",
+      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L529-L529"
+    },
+    {
+      "sym": "sa2__sub_8085714",
+      "features": [
+        "arithmetic",
+        "shift"
+      ],
+      "funcC": "s32 SA2_LABEL(sub_8085714)(s32 a, s32 b, s32 c) { return ((a + b * 8) - c) >> 3; }",
+      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L533-L533"
+    },
+    {
+      "sym": "sa2__sub_8085758",
+      "features": [
+        "arithmetic"
+      ],
+      "funcC": "s32 SA2_LABEL(sub_8085758)(s32 a, s32 b) { return b - a; }",
+      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L539-L539"
+    },
+    {
+      "sym": "EwramInitHeap",
+      "features": [
+        "struct",
+        "field",
+        "global",
+        "pointer"
+      ],
+      "funcC": "void EwramInitHeap(void)\n{\n    struct EwramNode *root = (struct EwramNode *)&gEwramHeap[0];\n    root->next = NULL;\n    root->state = sizeof(gEwramHeap);\n}",
+      "proto": {
+        "EwramInitHeap": {
+          "returnsVoid": true
+        }
+      },
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/malloc_ewram.c#L7-L12"
+    },
+    {
+      "sym": "EwramMalloc",
+      "features": [
+        "loop",
+        "struct",
+        "field",
+        "pointer",
+        "branch"
+      ],
+      "funcC": "void *EwramMalloc(u32 req)\n{\n    struct EwramNode *node;\n    s32 requestedSpace = req;\n\n    requestedSpace = (req + 3) / 4;\n    if (requestedSpace != 0) {\n        requestedSpace = requestedSpace * 4 + sizeof(struct EwramNode);\n        node = (struct EwramNode *)gEwramHeap;\n        while (1) {\n            if (requestedSpace <= (u32)node->state) {\n                if (requestedSpace == node->state) {\n                    node->state = -requestedSpace;\n                    return node->space;\n                }\n\n                if (requestedSpace + (s32)sizeof(struct EwramNode) <= node->state) {\n                    struct EwramNode *addr = (void *)node + requestedSpace;\n\n                    addr->next = node->next;\n                    ++node;\n                    --node;\n                    addr->state = node->state - requestedSpace;\n                    node->next = addr;\n                    node->state = -requestedSpace;\n                    return node->space;\n                }\n            }\n            ++requestedSpace;\n            --requestedSpace;\n            if (!node->next)\n                return ewram_end;\n            node = node->next;\n        }\n    }\n    return ewram_end;\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/malloc_ewram.c#L14-L61"
+    },
+    {
+      "sym": "EwramFree",
+      "features": [
+        "struct",
+        "field",
+        "pointer",
+        "loop",
+        "branch"
+      ],
+      "funcC": "void EwramFree(void *p)\n{\n    struct EwramNode *node, *slow, *fast, *tmp;\n\n    if (p && ewram_end != p) {\n        node = p - offsetof(struct EwramNode, space);\n\n        for (fast = slow = (struct EwramNode *)gEwramHeap; node != fast; fast = fast->next)\n            slow = fast;\n\n        if (node->state < 0)\n            node->state = -node->state;\n\n        if ((void *)slow + slow->state == node && slow->state > 0) {\n            slow->next = fast->next;\n            slow->state += node->state;\n            node = slow;\n        }\n\n        tmp = (void *)node + node->state;\n        if (tmp == node->next && tmp->state > 0) {\n            node->state += tmp->state;\n            node->next = tmp->next;\n        }\n    }\n}",
+      "proto": {
+        "EwramFree": {
+          "returnsVoid": true
+        }
+      },
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/malloc_ewram.c#L63-L97"
+    },
+    {
+      "sym": "numToASCII",
+      "features": [
+        "loop",
+        "array",
+        "bitwise",
+        "branch",
+        "shift"
+      ],
+      "funcC": "void numToASCII(u8 digits[5], u16 number)\n{\n    u8 i;\n\n    for (i = 0; i < 4; number <<= 4, i++) {\n        u16 value = ((number & 0xF000) >> 12);\n        if (value > 9) {\n            digits[i] = value + 87;\n        } else {\n            digits[i] = value + '0';\n        }\n    }\n\n    digits[i] = 0;\n}",
+      "proto": {
+        "numToASCII": {
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/sprite.c#L127-L141"
+    },
+    {
+      "sym": "Base10DigitsToHexNibbles",
+      "features": [
+        "loop",
+        "soft-div",
+        "bitwise",
+        "shift"
+      ],
+      "funcC": "u32 Base10DigitsToHexNibbles(u16 num)\n{\n    u8 i;\n    u16 result;\n    u8 lowDigit;\n    u16 remainder = num;\n\n    result = 0;\n    for (i = 0; i < 4; i++) {\n        s32 divisor = Div(remainder, 10);\n        lowDigit = remainder - (divisor * 10);\n        remainder = divisor;\n\n        result |= lowDigit << (i * 4);\n    }\n\n    return result;\n}\n",
+      "note": "Div() resolves to an inline macro (int division) \u2014 soft-div idiom.",
+      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/sprite.c#L147-L164"
+    },
+    {
+      "sym": "VerifyFlashSector_Core",
+      "features": [
+        "loop",
+        "pointer",
+        "cast",
+        "branch"
+      ],
+      "funcC": "u32 VerifyFlashSector_Core(u8 *src, u8 *tgt, u32 size)\n{\n    while (size-- != 0) {\n        if (*tgt++ != *src++)\n            return (uintptr_t)(tgt - 1);\n    }\n\n    return 0;\n}",
+      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/lib/agb_flash/agb_flash.c#L286-L294"
+    },
+    {
+      "sym": "sa2__sub_8004418",
+      "features": [
+        "branch",
+        "cast",
+        "fixed-point",
+        "array",
+        "memcpy"
+      ],
+      "prependC": "#include <string.h>\nstatic const u8 unkFractions[8] = { I(Q(0.5 * 2)), I(Q(0.0 * 2)), I(Q(1.0 * 2)), I(Q(1.5 * 2)), I(Q(3.0 * 2)), I(Q(3.5 * 2)), I(Q(2.5 * 2)), I(Q(2.0 * 2)) };",
+      "funcC": "s16 sa2__sub_8004418(s16 x, s16 y)\n{\n    s16 fraction;\n    s32 result;\n    u8 index = 0;\n    u8 array[8];\n    memcpy(array, unkFractions, sizeof(array));\n\n    if ((x | y) == 0) {\n        result = -1;\n    } else {\n        if (x <= 0) {\n            x = -x;\n            index = 4;\n        }\n        if (y <= 0) {\n            y = -y;\n            index += 2;\n        }\n        if (x >= y) {\n            // fraction = y*0.5 / x\n            y *= Q(0.5);\n\n            if (x == 0) {\n                fraction = y;\n            } else {\n                fraction = y / x;\n            }\n        } else {\n            index += 1;\n\n            x *= Q(0.5);\n\n            if (y == 0) {\n                fraction = x;\n            } else {\n                fraction = x / y;\n            }\n        }\n\n        if (array[index] & 0x01) {\n            fraction = Q(0.5) - fraction;\n        }\n\n        {\n            s32 val = array[index] * Q(0.5);\n            fraction += val;\n            result = ((u32)(fraction << 22) >> 22);\n        }\n    }\n\n    return result;\n}",
+      "proto": {
+        "memcpy": {
+          "params": 3
+        }
+      },
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/sprite.c#L73-L125"
+    },
+    {
+      "sym": "GetSaveSectorChecksum",
+      "features": [
+        "loop",
+        "pointer",
+        "cast",
+        "sizeof",
+        "struct"
+      ],
+      "prependC": "#include \"game/save.h\"",
+      "funcC": "u32 GetSaveSectorChecksum(SaveSectorData *sector)\n{\n    u8 *ptr = (u8 *)sector;\n\n    u32 checkSum = 0;\n    u32 i = 0;\n\n    u32 size = (sizeof(SaveSectorData) - sizeof(sector->checksum));\n\n    for (; i < size; i += sizeof(u32)) {\n        checkSum += *((u32 *)(ptr + i));\n    }\n\n    return checkSum;\n}",
+      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/code_0_0.c#L1036-L1050"
+    },
+    {
+      "sym": "VramMalloc",
+      "features": [
+        "loop",
+        "nested",
+        "global",
+        "array",
+        "branch",
+        "pointer"
+      ],
+      "prependC": "#include \"core.h\"\n#include \"malloc_vram.h\"",
+      "funcC": "void *VramMalloc(u32 numTiles)\n{\n    u16 i, j;\n    u32 count = numTiles;\n    count = (count + (VRAM_TILE_SLOTS_PER_SEGMENT - 1)) / VRAM_TILE_SLOTS_PER_SEGMENT; // round up\n\n    for (i = 0; i < gVramHeapMaxTileSlots / VRAM_TILE_SLOTS_PER_SEGMENT; i++) {\n        if (gVramHeapState[i] == 0) {\n            for (j = 0; j < count; j++) {\n                if (i + j >= (gVramHeapMaxTileSlots / VRAM_TILE_SLOTS_PER_SEGMENT)) {\n                    return ewram_end;\n                }\n                if (gVramHeapState[i + j] != 0) {\n                    break;\n                }\n            }\n\n            if (j == count) {\n                gVramHeapState[i] = count;\n                return (void *)(gVramHeapStartAddr + i * VRAM_HEAP_SEGMENT_SIZE);\n            }\n        } else {\n            i = (gVramHeapState[i] - 1) + i; // next slot to check, -1 because of ++i\n        }\n    }\n    return ewram_end;\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/malloc_vram.c#L5-L31"
+    },
+    {
+      "sym": "VramGetTotalAllocatedTiles",
+      "features": [
+        "loop",
+        "global",
+        "array",
+        "branch"
+      ],
+      "prependC": "#include \"core.h\"\n#include \"malloc_vram.h\"",
+      "funcC": "u16 VramGetTotalAllocatedTiles(void)\n{\n    u16 i;\n    u16 count = 0;\n\n    for (i = 0; i < gVramHeapMaxTileSlots / VRAM_TILE_SLOTS_PER_SEGMENT; ++i) {\n        if (gVramHeapState[i]) {\n            count += gVramHeapState[i];\n            i = gVramHeapState[i] - 1 + i; // next slot to check, -1 because of ++i\n        }\n    }\n    return count * VRAM_TILE_SLOTS_PER_SEGMENT;\n}\n",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/malloc_vram.c#L46-L58"
+    },
+    {
+      "sym": "GetInput",
+      "features": [
+        "loop",
+        "bitwise",
+        "array",
+        "branch",
+        "global",
+        "shift"
+      ],
+      "prependC": "#include \"core.h\"\n#include \"input_recorder.h\"",
+      "funcC": "void GetInput(void)\n{\n    s8 i;\n    u8 *repeatKeyCounters = gRepeatedKeysTestCounter, *firstIntervals = gKeysFirstRepeatIntervals,\n       *continuedHoldIntervals = gKeysContinuedRepeatIntervals;\n\n    gInput = (~REG_KEYINPUT & KEYS_MASK);\n\n    // My guess is that whilst the input recorder\n    // is running we still want to know the actual\n    // input. For example; to be able to know when\n    // to exit the demo\n    gPhysicalInput = gInput;\n\n#ifndef COLLECT_RINGS_ROM\n    if (gInputRecorder.mode == RECORDER_RECORD) {\n        InputRecorderWrite(gInput);\n    } else if (gInputRecorder.mode == RECORDER_PLAYBACK) {\n        gInput = InputRecorderRead();\n    }\n#endif\n\n    gPressedKeys = (gInput ^ gPrevInput) & gInput;\n    gReleasedKeys = (gInput ^ gPrevInput) & gPrevInput;\n    gPrevInput = gInput;\n\n    // Repeated keys will be the currently pressed keys\n    gRepeatedKeys = gPressedKeys;\n\n    // Calculate the next repeated state for every key\n    for (i = 0; i < 10; i++) {\n        if (!GetBit(gInput, i)) {\n            // If a key is not pressed, reset its counter\n            // to the settings for that key's\n            // first repeat interval\n            repeatKeyCounters[i] = firstIntervals[i];\n        } else if (repeatKeyCounters[i] > 0) {\n            // If the key is not yet ready to be repeated\n            // continue to wait\n            repeatKeyCounters[i]--;\n        } else {\n            // If the key is ready to be repeated,\n            // add the key to the repeated keys\n            gRepeatedKeys |= 1 << i;\n            // And reset its counter to the settings\n            // for continued hold interval\n            repeatKeyCounters[i] = continuedHoldIntervals[i];\n        }\n    }\n}",
+      "proto": {
+        "GetInput": {
+          "returnsVoid": true
+        },
+        "InputRecorderRead": {
+          "params": 0
+        },
+        "InputRecorderWrite": {
+          "params": 1,
+          "returnsVoid": true
+        }
+      },
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/core.c#L971-L1020"
+    },
+    {
+      "sym": "sa2__sub_8007858",
+      "features": [
+        "loop",
+        "pointer",
+        "global",
+        "bitwise",
+        "cast"
+      ],
+      "prependC": "#include \"core.h\"\n#include \"flags.h\"",
+      "funcC": "void sa2__sub_8007858(u8 param0, int_vcount minY, int_vcount maxY, u16 param3, u16 param4)\n{\n    u16 *cursor;\n\n    gFlags |= FLAGS_EXECUTE_HBLANK_COPY;\n\n    gHBlankCopyTarget = (void *)&((u8 *)&REG_BG0HOFS)[param0 * 4];\n    gHBlankCopySize = 4;\n\n    cursor = &((u16 *)gBgOffsetsHBlankPrimary)[minY * 2];\n\n    param4 = (param4 - minY) & 0x1FF;\n    param3 &= 0x1FF;\n\n    while (minY < maxY) {\n        *cursor = param3;\n        cursor++;\n        *cursor = param4--;\n        cursor++;\n\n        minY++;\n    }\n}",
+      "proto": {
+        "sa2__sub_8007858": {
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/bg_triangles.c#L826-L848"
+    },
+    {
+      "sym": "sa2__sub_8007958",
+      "features": [
+        "loop",
+        "pointer",
+        "global",
+        "bitwise",
+        "arithmetic"
+      ],
+      "prependC": "#include \"core.h\"\n#include \"flags.h\"",
+      "funcC": "void sa2__sub_8007958(u8 bg, int_vcount minY, int_vcount maxY, s16 param3, s8 param4, u16 param5, u16 param6)\n{\n    u16 *cursor;\n\n    gFlags |= FLAGS_EXECUTE_HBLANK_COPY;\n\n    gHBlankCopyTarget = (void *)&((u8 *)&REG_BG0HOFS)[bg * 4];\n    gHBlankCopySize = 4;\n\n    cursor = &((u16 *)gBgOffsetsHBlankPrimary)[minY * 2];\n\n    while (minY < maxY) {\n        *cursor = (param3 + param5) & 0x1FF;\n        cursor++;\n        *cursor = param6;\n        cursor++;\n\n        param3 = -(param3 + param4);\n        param4 = -param4;\n\n        minY++;\n    }\n}\n",
+      "proto": {
+        "sa2__sub_8007958": {
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/bg_triangles.c#L866-L888"
+    },
+    {
+      "sym": "sa2__sub_80856F8",
+      "features": [
+        "arithmetic",
+        "soft-div"
+      ],
+      "funcC": "s32 SA2_LABEL(sub_80856F8)(s32 a, s32 b, s32 c) { return ((b * 6 - a) + c * 7) / 12; }",
+      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L531-L531"
+    },
+    {
+      "sym": "sa2__sub_8085720",
+      "features": [
+        "arithmetic",
+        "shift"
+      ],
+      "funcC": "s32 SA2_LABEL(sub_8085720)(s32 a, s32 b, s32 c) { return ((b * 8 - a) + c) >> 3; }",
+      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L535-L535"
+    },
+    {
+      "sym": "sa2__sub_8085798",
+      "features": [
+        "arithmetic",
+        "shift"
+      ],
+      "funcC": "s32 SA2_LABEL(sub_8085798)(s32 a, s32 b, s32 c) { return ((c - a) + ((c - a) >> 1)) - (b >> 1); }",
+      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L549-L549"
+    },
+    {
+      "sym": "sa2__sub_808595C",
+      "features": [
+        "arithmetic",
+        "shift"
+      ],
+      "funcC": "s32 SA2_LABEL(sub_808595C)(s32 a, s32 b, s32 c)\n{\n    s32 e = (b - a);\n    s32 f = (c - b);\n    f -= e;\n    f >>= 1;\n    return e + f;\n}",
+      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L580-L587"
+    },
+    {
+      "sym": "sa2__sub_80838CC",
+      "features": [
+        "struct",
+        "field",
+        "arithmetic",
+        "shift"
+      ],
+      "prependC": "typedef struct {\n    s16 unk0;\n    s16 unk2;\n    s16 unk4;\n    s16 unk6;\n    u16 unk8;\n    u16 unkA;\n    u16 unkC;\n    u16 unkE;\n    u16 unk10;\n    u16 unk12;\n    u32 unk14;\n    u32 unk18;\n    u32 unk1C;\n} UNK_8085D14;",
+      "proto": {
+        "sa2__sub_80838CC": {
+          "returnsVoid": true
+        }
+      },
+      "funcC": "void SA2_LABEL(sub_80838CC)(UNK_8085D14 *arg0, UNK_8085D14 *arg1, UNK_8085D14 *arg2)\n{\n    arg2->unk0 = (((arg0->unk6 * arg1->unk0) + (arg0->unk0 * arg1->unk6) + (arg0->unk2 * arg1->unk4)) - (arg0->unk4 * arg1->unk2)) >> 0xA;\n    arg2->unk2 = (((arg0->unk6 * arg1->unk2) - (arg0->unk0 * arg1->unk4)) + (arg0->unk2 * arg1->unk6) + (arg0->unk4 * arg1->unk0)) >> 0xA;\n    arg2->unk4 = ((((arg0->unk6 * arg1->unk4) + (arg0->unk0 * arg1->unk2)) - (arg0->unk2 * arg1->unk0)) + (arg0->unk4 * arg1->unk6)) >> 0xA;\n    arg2->unk6 = ((((arg0->unk6 * arg1->unk6) - (arg0->unk0 * arg1->unk0)) - (arg0->unk2 * arg1->unk2)) - (arg0->unk4 * arg1->unk4)) >> 0xA;\n}",
+      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L177-L183"
+    },
+    {
+      "sym": "sa2__sub_808399C",
+      "features": [
+        "struct",
+        "field",
+        "arithmetic",
+        "shift"
+      ],
+      "prependC": "typedef struct {\n    s16 unk0;\n    s16 unk2;\n    s16 unk4;\n    s16 unk6;\n    u16 unk8;\n    u16 unkA;\n    u16 unkC;\n    u16 unkE;\n    u16 unk10;\n    u16 unk12;\n    u32 unk14;\n    u32 unk18;\n    u32 unk1C;\n} UNK_8085D14;",
+      "proto": {
+        "sa2__sub_808399C": {
+          "returnsVoid": true
+        }
+      },
+      "funcC": "void SA2_LABEL(sub_808399C)(UNK_8085D14 *arg0, UNK_8085D14 *arg1)\n{\n    s16 r6 = arg0->unk0;\n    s16 r5 = arg0->unk2;\n    s16 r4 = arg0->unk4;\n    arg0->unk0 = (((arg0->unk6 * arg1->unk0) + (r6 * arg1->unk6) + (r5 * arg1->unk4)) - (r4 * arg1->unk2)) >> 10;\n    arg0->unk2 = (((arg0->unk6 * arg1->unk2) - (r6 * arg1->unk4)) + (r5 * arg1->unk6) + (r4 * arg1->unk0)) >> 10;\n    arg0->unk4 = ((((arg0->unk6 * arg1->unk4) + (r6 * arg1->unk2)) - (r5 * arg1->unk0)) + (r4 * arg1->unk6)) >> 10;\n    arg0->unk6 = ((((arg0->unk6 * arg1->unk6) - (r6 * arg1->unk0)) - (r5 * arg1->unk2)) - (r4 * arg1->unk4)) >> 10;\n}",
+      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L185-L194"
+    },
+    {
+      "sym": "OamMalloc",
+      "features": [
+        "branch",
+        "global",
+        "array",
+        "struct",
+        "field"
+      ],
+      "prependC": "#include \"core.h\"\n#include \"sprite.h\"",
+      "funcC": "OamData *OamMalloc(u8 order)\n{\n    OamData *result;\n\n    if (order > 31) {\n        order = 31;\n    }\n\n    if (gOamFreeIndex > OAM_ENTRY_COUNT - 1) {\n        result = (OamData *)iwram_end;\n    } else {\n        if (gOamMallocOrders_StartIndex[order] == 0xFF) {\n            gOamMallocBuffer[gOamFreeIndex].split.fractional = 0xFF;\n            gOamMallocOrders_StartIndex[order] = gOamFreeIndex;\n            gOamMallocOrders_EndIndex[order] = gOamFreeIndex;\n        } else {\n            gOamMallocBuffer[gOamFreeIndex].split.fractional = 0xFF;\n            gOamMallocBuffer[gOamMallocOrders_EndIndex[order]].split.fractional = gOamFreeIndex;\n            gOamMallocOrders_EndIndex[order] = gOamFreeIndex;\n        }\n\n        gOamFreeIndex++;\n        result = &gOamMallocBuffer[gOamFreeIndex - 1];\n    }\n\n    return result;\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/sprite.c#L931-L957"
+    },
+    {
+      "sym": "sa2__sub_8083504",
+      "features": [
+        "struct",
+        "field",
+        "branch",
+        "fixed-point",
+        "shift"
+      ],
+      "prependC": "typedef struct {\n    u16 unk0;\n    s16 unk2;\n    s16 unk4;\n    s16 unk6;\n    s32 unk8;\n    s32 unkC;\n    u16 unk10;\n    u16 unk12;\n    u32 unk14;\n    u32 unk18;\n    u32 unk1C;\n} UNK_8085D14_2;\n#include \"trig.h\"",
+      "proto": {
+        "sa2__sub_8083504": {
+          "returnsVoid": true
+        }
+      },
+      "funcC": "void SA2_LABEL(sub_8083504)(UNK_8085D14_2 *arg0, UNK_8085D14_2 *arg1, UNK_8085D14_2 *arg2)\n{\n    s32 var_r3, var_r4;\n\n    if (arg1->unk2 != 0x400) {\n        var_r3 = (arg1->unk2 * arg0->unk8) >> 0xA;\n        arg2->unk2 = ((arg1->unk2 * arg0->unk2) >> 0xA);\n    } else {\n        var_r3 = arg0->unk8;\n    }\n    if (arg1->unk4 != 0x400) {\n        var_r4 = (arg1->unk4 * arg0->unkC) >> 0xA;\n        arg2->unk4 = ((arg1->unk4 * arg0->unk4) >> 0xA);\n    } else {\n        var_r4 = arg0->unkC;\n    }\n\n    if (arg1->unk0 != 0) {\n        arg2->unk8 = (arg1->unk8 + (((var_r3 * (COS(arg1->unk0) >> 6)) >> 8) - ((var_r4 * (SIN(arg1->unk0) >> 6)) >> 8)));\n        arg2->unkC = arg1->unkC + (((var_r3 * (SIN(arg1->unk0) >> 6)) >> 8) + ((var_r4 * (COS(arg1->unk0) >> 6)) >> 8));\n    } else {\n        arg2->unk8 = (arg1->unk8 + var_r3);\n        arg2->unkC = arg1->unkC + var_r4;\n    }\n    arg2->unk0 = ((arg0->unk0 + arg1->unk0) & (SIN_PERIOD - 1));\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L67-L92"
+    },
+    {
+      "sym": "ProcessOamBuffers",
+      "features": [
+        "global",
+        "struct",
+        "loop",
+        "dma",
+        "call"
+      ],
+      "prependC": "#include \"core.h\"\n#include \"flags.h\"\n#include \"sprite.h\"",
+      "funcC": "void ProcessOamBuffers(void)\n{\n    OamData *dstOam = &gOamBuffer[0];\n    u8 i = 0;\n    s32 r3;\n\n    for (r3 = 0; r3 < 32; r3++) {\n        s8 index = gOamMallocOrders_StartIndex[r3];\n\n        while (index != -1) {\n            u8 newI;\n            u8 *byteArray = gOamMallocCopiedOrder;\n            DmaCopy16(3, &gOamMallocBuffer[index], dstOam, sizeof(OamDataShort));\n            dstOam++;\n\n            byteArray += index;\n            newI = i++;\n            *byteArray = newI;\n            index = gOamMallocBuffer[index].split.fractional;\n        };\n    }\n\n    if (gFlags & FLAGS_800) {\n        r3 = gOamFreeIndex;\n        dstOam = &gOamBuffer[r3];\n\n        while (r3 < gOamFirstPausedIndex) {\n            DmaFill16(3, 0x200, dstOam, sizeof(OamDataShort));\n            dstOam++;\n            r3++;\n        }\n    } else if (gFlags & FLAGS_PAUSE_GAME) {\n        /* Push all active OAM entries to te end of OAM temporarily while\n         * the game is paused */\n        s32 k, l;\n        r3 = gOamFreeIndex - 1;\n        dstOam = &gOamBuffer[r3];\n\n        for (k = l = 0; r3 >= 0;) {\n            s32 size = sizeof(OamDataShort);\n            DmaCopy16(3, dstOam - k, &gOamBuffer[OAM_ENTRY_COUNT - 1 - l], size);\n            k++, r3--, l++;\n        }\n\n        // _08005A5E\n\n        gOamFirstPausedIndex = OAM_ENTRY_COUNT - gOamFreeIndex;\n\n        for (r3 = 0; r3 < gOamFirstPausedIndex; r3++) {\n            DmaFill16(3, 0x200, &gOamBuffer[r3], sizeof(OamDataShort));\n#ifndef NON_MATCHING\n            // unlike when using --, using ++ changes the condition to something entirely\n            // different unless we tell the compiler that we want to use r3's values\n            // (without actually doing so)\n            asm(\"\" ::\"r\"(r3));\n#endif\n        }\n\n    } else {\n        gOamFirstPausedIndex = 0;\n    }\n\n    gOamFreeIndex = 0;\n    if (gFlags & FLAGS_4000) {\n        CpuFill32(-1, gOamMallocOrders_StartIndex, sizeof(gOamMallocOrders_StartIndex));\n        CpuFill32(-1, gOamMallocOrders_EndIndex, sizeof(gOamMallocOrders_EndIndex));\n    } else {\n        DmaFill32(3, -1, gOamMallocOrders_StartIndex, sizeof(gOamMallocOrders_StartIndex));\n        DmaFill32(3, -1, gOamMallocOrders_EndIndex, sizeof(gOamMallocOrders_EndIndex));\n    }\n}",
+      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/sprite.c#L959-L1029",
+      "m2cCtx": true
+    },
+    {
+      "sym": "sa2__sub_80078D4",
+      "features": [
+        "mmio",
+        "global",
+        "dma",
+        "bitwise"
+      ],
+      "prependC": "#include \"core.h\"\n#include \"flags.h\"",
+      "funcC": "void sa2__sub_80078D4(u8 bg, int_vcount minY, int_vcount maxY, u16 offsetEven, u16 offsetOdd)\n{\n    s32 fillVal;\n\n    gFlags |= FLAGS_EXECUTE_HBLANK_COPY;\n\n    gHBlankCopyTarget = (void *)&((u8 *)&REG_BG0HOFS)[bg * 4];\n    gHBlankCopySize = 4;\n\n    if (minY < maxY) {\n        fillVal = (offsetEven %= 512u) | ((offsetOdd % 512u) << 16);\n\n        DmaFill32(3, fillVal, &((u16 *)gBgOffsetsHBlankPrimary)[minY * 2], (maxY - minY) * 4);\n    }\n}",
+      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/bg_triangles.c#L850-L864"
+    }
+  ]
+}

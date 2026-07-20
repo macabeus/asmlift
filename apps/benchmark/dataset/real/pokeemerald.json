@@ -1,0 +1,446 @@
+{
+  "project": "pokeemerald",
+  "toolchain": "agbcc-arm",
+  "repoDir": "pokeemerald",
+  "cppIncludes": [
+    "-nostdinc",
+    "-undef",
+    "-std=gnu89",
+    "-I",
+    "tools/agbcc/include",
+    "-I",
+    "tools/agbcc",
+    "-iquote",
+    "include"
+  ],
+  "headers": [
+    "global.h"
+  ],
+  "defines": [
+    "-DMODERN=0"
+  ],
+  "functions": [
+    {
+      "sym": "MathUtil_Mul16",
+      "features": [
+        "arithmetic",
+        "fixed-point",
+        "soft-div"
+      ],
+      "funcC": "s16 MathUtil_Mul16(s16 x, s16 y)\n{\n    s32 result;\n\n    result = x;\n    result *= y;\n    result /= 256;\n    return result;\n}",
+      "sourceUrl": "https://github.com/pret/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/math_util.c#L3-L11"
+    },
+    {
+      "sym": "MathUtil_Mul16Shift",
+      "features": [
+        "arithmetic",
+        "fixed-point",
+        "soft-div",
+        "shift"
+      ],
+      "funcC": "s16 MathUtil_Mul16Shift(u8 s, s16 x, s16 y)\n{\n    s32 result;\n\n    result = x;\n    result *= y;\n    result /= (1 << s);\n    return result;\n}",
+      "sourceUrl": "https://github.com/pret/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/math_util.c#L13-L21"
+    },
+    {
+      "sym": "MathUtil_Mul32",
+      "features": [
+        "arithmetic",
+        "fixed-point",
+        "long-long",
+        "soft-div"
+      ],
+      "funcC": "s32 MathUtil_Mul32(s32 x, s32 y)\n{\n    s64 result;\n\n    result = x;\n    result *= y;\n    result /= 256;\n    return result;\n}",
+      "sourceUrl": "https://github.com/pret/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/math_util.c#L23-L31"
+    },
+    {
+      "sym": "MathUtil_Div16",
+      "features": [
+        "arithmetic",
+        "soft-div",
+        "branch",
+        "shift"
+      ],
+      "funcC": "s16 MathUtil_Div16(s16 x, s16 y)\n{\n    if (y == 0)\n    {\n        return 0;\n    }\n    return (x << 8) / y;\n}",
+      "sourceUrl": "https://github.com/pret/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/math_util.c#L33-L40"
+    },
+    {
+      "sym": "MathUtil_Div16Shift",
+      "features": [
+        "arithmetic",
+        "soft-div",
+        "branch",
+        "shift"
+      ],
+      "funcC": "s16 MathUtil_Div16Shift(u8 s, s16 x, s16 y)\n{\n    if (y == 0)\n    {\n        return 0;\n    }\n    return (x << s) / y;\n}",
+      "sourceUrl": "https://github.com/pret/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/math_util.c#L42-L49"
+    },
+    {
+      "sym": "MathUtil_Inv16",
+      "features": [
+        "arithmetic",
+        "soft-div"
+      ],
+      "funcC": "s16 MathUtil_Inv16(s16 y)\n{\n    s32 x;\n\n    x = 0x10000;\n    return x / y;\n}",
+      "sourceUrl": "https://github.com/pret/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/math_util.c#L64-L70"
+    },
+    {
+      "sym": "StoreWordInTwoHalfwords",
+      "features": [
+        "memory",
+        "pointer",
+        "array",
+        "shift"
+      ],
+      "funcC": "void StoreWordInTwoHalfwords(u16 *h, u32 w)\n{\n    h[0] = (u16)(w);\n    h[1] = (u16)(w >> 16);\n}",
+      "proto": {
+        "StoreWordInTwoHalfwords": {
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/pret/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/util.c#L127-L131"
+    },
+    {
+      "sym": "LoadWordFromTwoHalfwords",
+      "features": [
+        "memory",
+        "pointer",
+        "array",
+        "bitwise",
+        "shift"
+      ],
+      "funcC": "void LoadWordFromTwoHalfwords(u16 *h, u32 *w)\n{\n    *w = h[0] | (s16)h[1] << 16;\n}",
+      "proto": {
+        "LoadWordFromTwoHalfwords": {
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/pret/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/util.c#L133-L136"
+    },
+    {
+      "sym": "CountTrailingZeroBits",
+      "features": [
+        "bitwise",
+        "loop",
+        "branch",
+        "shift"
+      ],
+      "funcC": "int CountTrailingZeroBits(u32 value)\n{\n    u8 i;\n\n    for (i = 0; i < 32; i++)\n    {\n        if ((value & 1) == 0)\n            value >>= 1;\n        else\n            return i;\n    }\n    return 0;\n}",
+      "sourceUrl": "https://github.com/pret/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/util.c#L208-L220"
+    },
+    {
+      "sym": "CalcByteArraySum",
+      "features": [
+        "arithmetic",
+        "loop",
+        "pointer",
+        "array"
+      ],
+      "funcC": "u32 CalcByteArraySum(const u8 *data, u32 length)\n{\n    u32 sum, i;\n    for (sum = 0, i = 0; i < length; i++)\n        sum += data[i];\n    return sum;\n}",
+      "sourceUrl": "https://github.com/pret/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/util.c#L256-L262"
+    },
+    {
+      "sym": "CalcCRC16",
+      "features": [
+        "bitwise",
+        "loop",
+        "branch",
+        "nested-loop"
+      ],
+      "funcC": "u16 CalcCRC16(const u8 *data, s32 length)\n{\n    u16 i, j;\n    u16 crc = 0x1121;\n\n    for (i = 0; i < length; i++)\n    {\n        crc ^= data[i];\n        for (j = 0; j < 8; j++)\n        {\n            if (crc & 1)\n                crc = (crc >> 1) ^ 0x8408;\n            else\n                crc >>= 1;\n        }\n    }\n    return ~crc;\n}",
+      "sourceUrl": "https://github.com/pret/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/util.c#L222-L239"
+    },
+    {
+      "sym": "Random",
+      "features": [
+        "global",
+        "arithmetic",
+        "shift",
+        "call"
+      ],
+      "funcC": "u16 Random(void)\n{\n    gRngValue = ISO_RANDOMIZE1(gRngValue);\n    sRandCount++;\n    return gRngValue >> 16;\n}",
+      "prependC": "#include \"random.h\"\nstatic u32 sRandCount;",
+      "sourceUrl": "https://github.com/pret/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/random.c#L11-L16"
+    },
+    {
+      "sym": "StringLength",
+      "features": [
+        "loop",
+        "pointer",
+        "array",
+        "branch"
+      ],
+      "funcC": "u16 StringLength(const u8 *str)\n{\n    u16 length = 0;\n\n    while (str[length] != EOS)\n        length++;\n\n    return length;\n}",
+      "prependC": "#include \"constants/characters.h\"",
+      "sourceUrl": "https://github.com/pret/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/string_util.c#L114-L122"
+    },
+    {
+      "sym": "StringCompare",
+      "features": [
+        "loop",
+        "branch",
+        "pointer",
+        "arithmetic"
+      ],
+      "funcC": "s32 StringCompare(const u8 *str1, const u8 *str2)\n{\n    while (*str1 == *str2)\n    {\n        if (*str1 == EOS)\n            return 0;\n        str1++;\n        str2++;\n    }\n\n    return *str1 - *str2;\n}",
+      "prependC": "#include \"constants/characters.h\"",
+      "sourceUrl": "https://github.com/pret/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/string_util.c#L124-L135"
+    },
+    {
+      "sym": "StringCompareN",
+      "features": [
+        "loop",
+        "branch",
+        "pointer",
+        "arithmetic"
+      ],
+      "funcC": "s32 StringCompareN(const u8 *str1, const u8 *str2, u32 n)\n{\n    while (*str1 == *str2)\n    {\n        if (*str1 == EOS)\n            return 0;\n        str1++;\n        str2++;\n        if (--n == 0)\n            return 0;\n    }\n\n    return *str1 - *str2;\n}",
+      "prependC": "#include \"constants/characters.h\"",
+      "sourceUrl": "https://github.com/pret/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/string_util.c#L137-L150"
+    },
+    {
+      "sym": "StringCopy",
+      "features": [
+        "loop",
+        "pointer",
+        "branch"
+      ],
+      "funcC": "u8 *StringCopy(u8 *dest, const u8 *src)\n{\n    while (*src != EOS)\n    {\n        *dest = *src;\n        dest++;\n        src++;\n    }\n\n    *dest = EOS;\n    return dest;\n}",
+      "prependC": "#include \"constants/characters.h\"",
+      "sourceUrl": "https://github.com/pret/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/string_util.c#L75-L86"
+    },
+    {
+      "sym": "StringAppend",
+      "features": [
+        "loop",
+        "pointer",
+        "call",
+        "branch"
+      ],
+      "funcC": "u8 *StringAppend(u8 *dest, const u8 *src)\n{\n    while (*dest != EOS)\n        dest++;\n\n    return StringCopy(dest, src);\n}",
+      "prependC": "#include \"constants/characters.h\"\nu8 *StringCopy(u8 *dest, const u8 *src);",
+      "proto": {
+        "StringCopy": {
+          "params": 2
+        }
+      },
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/pret/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/string_util.c#L88-L94"
+    },
+    {
+      "sym": "IsStringLengthAtLeast",
+      "features": [
+        "loop",
+        "branch",
+        "pointer",
+        "array"
+      ],
+      "funcC": "bool8 IsStringLengthAtLeast(const u8 *str, s32 n)\n{\n    u8 i;\n\n    for (i = 0; i < n; i++)\n        if (str[i] && str[i] != EOS)\n            return TRUE;\n\n    return FALSE;\n}",
+      "prependC": "#include \"constants/characters.h\"",
+      "sourceUrl": "https://github.com/pret/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/string_util.c#L152-L161"
+    },
+    {
+      "sym": "StringCopyN",
+      "features": [
+        "loop",
+        "pointer",
+        "array"
+      ],
+      "funcC": "u8 *StringCopyN(u8 *dest, const u8 *src, u8 n)\n{\n    u16 i;\n\n    for (i = 0; i < n; i++)\n        dest[i] = src[i];\n\n    return &dest[n];\n}",
+      "sourceUrl": "https://github.com/pret/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/string_util.c#L96-L104"
+    },
+    {
+      "sym": "CalcCRC16WithTable",
+      "features": [
+        "loop",
+        "array",
+        "bitwise",
+        "cast",
+        "table"
+      ],
+      "funcC": "u16 CalcCRC16WithTable(const u8 *data, u32 length)\n{\n    u16 i;\n    u16 crc = 0x1121;\n    u8 byte;\n\n    for (i = 0; i < length; i++)\n    {\n        byte = crc >> 8;\n        crc ^= data[i];\n        crc = byte ^ sCrc16Table[(u8)crc];\n    }\n    return ~crc;\n}",
+      "prependC": "static const u16 sCrc16Table[] = {0x0000,0x1189,0x2312,0x329B,0x4624,0x57AD,0x6536,0x74BF,0x8C48,0x9DC1,0xAF5A,0xBED3,0xCA6C,0xDBE5,0xE97E,0xF8F7,0x1081,0x0108,0x3393,0x221A,0x56A5,0x472C,0x75B7,0x643E,0x9CC9,0x8D40,0xBFDB,0xAE52,0xDAED,0xCB64,0xF9FF,0xE876,0x2102,0x308B,0x0210,0x1399,0x6726,0x76AF,0x4434,0x55BD,0xAD4A,0xBCC3,0x8E58,0x9FD1,0xEB6E,0xFAE7,0xC87C,0xD9F5,0x3183,0x200A,0x1291,0x0318,0x77A7,0x662E,0x54B5,0x453C,0xBDCB,0xAC42,0x9ED9,0x8F50,0xFBEF,0xEA66,0xD8FD,0xC974,0x4204,0x538D,0x6116,0x709F,0x0420,0x15A9,0x2732,0x36BB,0xCE4C,0xDFC5,0xED5E,0xFCD7,0x8868,0x99E1,0xAB7A,0xBAF3,0x5285,0x430C,0x7197,0x601E,0x14A1,0x0528,0x37B3,0x263A,0xDECD,0xCF44,0xFDDF,0xEC56,0x98E9,0x8960,0xBBFB,0xAA72,0x6306,0x728F,0x4014,0x519D,0x2522,0x34AB,0x0630,0x17B9,0xEF4E,0xFEC7,0xCC5C,0xDDD5,0xA96A,0xB8E3,0x8A78,0x9BF1,0x7387,0x620E,0x5095,0x411C,0x35A3,0x242A,0x16B1,0x0738,0xFFCF,0xEE46,0xDCDD,0xCD54,0xB9EB,0xA862,0x9AF9,0x8B70,0x8408,0x9581,0xA71A,0xB693,0xC22C,0xD3A5,0xE13E,0xF0B7,0x0840,0x19C9,0x2B52,0x3ADB,0x4E64,0x5FED,0x6D76,0x7CFF,0x9489,0x8500,0xB79B,0xA612,0xD2AD,0xC324,0xF1BF,0xE036,0x18C1,0x0948,0x3BD3,0x2A5A,0x5EE5,0x4F6C,0x7DF7,0x6C7E,0xA50A,0xB483,0x8618,0x9791,0xE32E,0xF2A7,0xC03C,0xD1B5,0x2942,0x38CB,0x0A50,0x1BD9,0x6F66,0x7EEF,0x4C74,0x5DFD,0xB58B,0xA402,0x9699,0x8710,0xF3AF,0xE226,0xD0BD,0xC134,0x39C3,0x284A,0x1AD1,0x0B58,0x7FE7,0x6E6E,0x5CF5,0x4D7C,0xC60C,0xD785,0xE51E,0xF497,0x8028,0x91A1,0xA33A,0xB2B3,0x4A44,0x5BCD,0x6956,0x78DF,0x0C60,0x1DE9,0x2F72,0x3EFB,0xD68D,0xC704,0xF59F,0xE416,0x90A9,0x8120,0xB3BB,0xA232,0x5AC5,0x4B4C,0x79D7,0x685E,0x1CE1,0x0D68,0x3FF3,0x2E7A,0xE70E,0xF687,0xC41C,0xD595,0xA12A,0xB0A3,0x8238,0x93B1,0x6B46,0x7ACF,0x4854,0x59DD,0x2D62,0x3CEB,0x0E70,0x1FF9,0xF78F,0xE606,0xD49D,0xC514,0xB1AB,0xA022,0x92B9,0x8330,0x7BC7,0x6A4E,0x58D5,0x495C,0x3DE3,0x2C6A,0x1EF1,0x0F78};",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/pret/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/util.c#L241-L254"
+    },
+    {
+      "sym": "ModifyStatByNature",
+      "features": [
+        "switch",
+        "branch",
+        "arithmetic",
+        "soft-div",
+        "global"
+      ],
+      "funcC": "u16 ModifyStatByNature(u8 nature, u16 stat, u8 statIndex)\n{\n    u16 retVal;\n\n    // Don't modify HP, Accuracy, or Evasion by nature\n    if (statIndex <= STAT_HP || statIndex > NUM_NATURE_STATS)\n        return stat;\n\n    switch (gNatureStatTable[nature][statIndex - 1])\n    {\n    case 1:\n        retVal = stat * 110;\n        retVal /= 100;\n        break;\n    case -1:\n        retVal = stat * 90;\n        retVal /= 100;\n        break;\n    default:\n        retVal = stat;\n        break;\n    }\n\n    return retVal;\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/pret/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/pokemon.c#L5864-L5898"
+    },
+    {
+      "sym": "GetGenderFromSpeciesAndPersonality",
+      "features": [
+        "switch",
+        "branch",
+        "global",
+        "struct"
+      ],
+      "funcC": "u8 GetGenderFromSpeciesAndPersonality(u16 species, u32 personality)\n{\n    switch (gSpeciesInfo[species].genderRatio)\n    {\n    case MON_MALE:\n    case MON_FEMALE:\n    case MON_GENDERLESS:\n        return gSpeciesInfo[species].genderRatio;\n    }\n\n    if (gSpeciesInfo[species].genderRatio > (personality & 0xFF))\n        return MON_FEMALE;\n    else\n        return MON_MALE;\n}",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/pret/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/pokemon.c#L3471-L3485"
+    },
+    {
+      "sym": "Sin2",
+      "features": [
+        "arithmetic",
+        "soft-div",
+        "bitwise",
+        "branch",
+        "table"
+      ],
+      "funcC": "s16 Sin2(u16 angle)\n{\n    s32 angleMod = angle % 180;\n    s32 negate = ((angle / 180) & 1);\n    s16 value = gSineDegreeTable[angleMod];\n\n    if (negate)\n        return -value;\n    else\n        return value;\n}",
+      "prependC": "extern const s16 gSineDegreeTable[];",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/pret/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/trig.c#L527-L537"
+    },
+    {
+      "sym": "Cos2",
+      "features": [
+        "arithmetic",
+        "call"
+      ],
+      "funcC": "s16 Cos2(u16 angle)\n{\n    return Sin2(angle + 90);\n}",
+      "prependC": "s16 Sin2(u16 angle);",
+      "proto": {
+        "Sin2": {
+          "params": 1
+        }
+      },
+      "sourceUrl": "https://github.com/pret/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/trig.c#L540-L543"
+    },
+    {
+      "sym": "PutMemBlockHeader",
+      "features": [
+        "memory",
+        "pointer",
+        "struct"
+      ],
+      "funcC": "void PutMemBlockHeader(void *block, struct MemBlock *prev, struct MemBlock *next, u32 size)\n{\n    struct MemBlock *header = (struct MemBlock *)block;\n\n    header->flag = FALSE;\n    header->magic = MALLOC_SYSTEM_ID;\n    header->size = size;\n    header->prev = prev;\n    header->next = next;\n}",
+      "prependC": "#define MALLOC_SYSTEM_ID 0xA3A3\nstruct MemBlock {\n    bool16 flag;\n    u16 magic;\n    u32 size;\n    struct MemBlock *prev;\n    struct MemBlock *next;\n    u8 data[0];\n};",
+      "proto": {
+        "PutMemBlockHeader": {
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/pret/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/malloc.c#L31-L40"
+    },
+    {
+      "sym": "PutFirstMemBlockHeader",
+      "features": [
+        "pointer",
+        "struct",
+        "call"
+      ],
+      "funcC": "void PutFirstMemBlockHeader(void *block, u32 size)\n{\n    PutMemBlockHeader(block, (struct MemBlock *)block, (struct MemBlock *)block, size - sizeof(struct MemBlock));\n}",
+      "prependC": "#define MALLOC_SYSTEM_ID 0xA3A3\nstruct MemBlock {\n    bool16 flag;\n    u16 magic;\n    u32 size;\n    struct MemBlock *prev;\n    struct MemBlock *next;\n    u8 data[0];\n};\nvoid PutMemBlockHeader(void *block, struct MemBlock *prev, struct MemBlock *next, u32 size);",
+      "proto": {
+        "PutFirstMemBlockHeader": {
+          "returnsVoid": true
+        },
+        "PutMemBlockHeader": {
+          "returnsVoid": true,
+          "params": 4
+        }
+      },
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/pret/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/malloc.c#L42-L45"
+    },
+    {
+      "sym": "StopScript",
+      "features": [
+        "memory",
+        "pointer",
+        "struct",
+        "branch"
+      ],
+      "funcC": "void StopScript(struct ScriptContext *ctx)\n{\n    ctx->mode = SCRIPT_MODE_STOPPED;\n    ctx->scriptPtr = NULL;\n}",
+      "prependC": "#include \"script.h\"\nenum {\n    SCRIPT_MODE_STOPPED,\n    SCRIPT_MODE_BYTECODE,\n    SCRIPT_MODE_NATIVE,\n};",
+      "proto": {
+        "StopScript": {
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/pret/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/script.c#L65-L69"
+    },
+    {
+      "sym": "SetupBytecodeScript",
+      "features": [
+        "memory",
+        "pointer",
+        "struct"
+      ],
+      "funcC": "u8 SetupBytecodeScript(struct ScriptContext *ctx, const u8 *ptr)\n{\n    ctx->scriptPtr = ptr;\n    ctx->mode = SCRIPT_MODE_BYTECODE;\n    return 1;\n}",
+      "prependC": "#include \"script.h\"\nenum {\n    SCRIPT_MODE_STOPPED,\n    SCRIPT_MODE_BYTECODE,\n    SCRIPT_MODE_NATIVE,\n};",
+      "sourceUrl": "https://github.com/pret/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/script.c#L52-L57"
+    },
+    {
+      "sym": "TranslateBigMonSizeTableIndex",
+      "features": [
+        "loop",
+        "branch",
+        "array",
+        "struct",
+        "table"
+      ],
+      "funcC": "static u8 TranslateBigMonSizeTableIndex(u16 a)\n{\n    u8 i;\n\n    for (i = 1; i < 15; i++)\n    {\n        if (a < sBigMonSizeTable[i].unk4)\n            return i - 1;\n    }\n    return i;\n}",
+      "prependC": "struct UnknownStruct\n{\n    u16 unk0;\n    u8 unk2;\n    u16 unk4;\n};\n\nstatic const struct UnknownStruct sBigMonSizeTable[] =\n{\n    {  290,   1,      0 },\n    {  300,   1,     10 },\n    {  400,   2,    110 },\n    {  500,   4,    310 },\n    {  600,  20,    710 },\n    {  700,  50,   2710 },\n    {  800, 100,   7710 },\n    {  900, 150,  17710 },\n    { 1000, 150,  32710 },\n    { 1100, 100, -17826 },\n    { 1200,  50,  -7826 },\n    { 1300,  20,  -2826 },\n    { 1400,   5,   -826 },\n    { 1500,   2,   -326 },\n    { 1600,   1,   -126 },\n    { 1700,   1,   -26 },\n};",
+      "sourceUrl": "https://github.com/pret/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/pokemon_size_record.c#L67-L77"
+    },
+    {
+      "sym": "FeebasRandom",
+      "features": [
+        "arithmetic",
+        "shift",
+        "global"
+      ],
+      "funcC": "static u16 FeebasRandom(void)\n{\n    sFeebasRngValue = ISO_RANDOMIZE2(sFeebasRngValue);\n    return sFeebasRngValue >> 16;\n}",
+      "prependC": "#include \"random.h\"\nstatic u32 sFeebasRngValue;",
+      "sourceUrl": "https://github.com/pret/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/wild_encounter.c#L170-L174"
+    },
+    {
+      "sym": "CalculatePPWithBonus",
+      "features": [
+        "arithmetic",
+        "shift",
+        "bitwise",
+        "soft-div",
+        "global",
+        "table"
+      ],
+      "funcC": "u8 CalculatePPWithBonus(u16 move, u8 ppBonuses, u8 moveIndex)\n{\n    u8 basePP = gBattleMoves[move].pp;\n    return basePP + ((basePP * 20 * ((gPPUpGetMask[moveIndex] & ppBonuses) >> (2 * moveIndex))) / 100);\n}",
+      "prependC": "#include \"pokemon.h\"",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/pret/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/pokemon.c#L4636-L4640"
+    },
+    {
+      "sym": "GiveBerryPowder",
+      "features": [
+        "branch",
+        "call",
+        "memory",
+        "global"
+      ],
+      "funcC": "bool8 GiveBerryPowder(u32 amountToAdd)\n{\n    u32 *powder = &gSaveBlock2Ptr->berryCrush.berryPowderAmount;\n    u32 amount = DecryptBerryPowder(powder) + amountToAdd;\n    if (amount > MAX_BERRY_POWDER)\n    {\n        SetBerryPowder(powder, MAX_BERRY_POWDER);\n        return FALSE;\n    }\n    else\n    {\n        SetBerryPowder(powder, amount);\n        return TRUE;\n    }\n}",
+      "prependC": "#define MAX_BERRY_POWDER 99999\nu32 DecryptBerryPowder(u32 *powder);\nvoid SetBerryPowder(u32 *powder, u32 amount);",
+      "proto": {
+        "DecryptBerryPowder": {
+          "params": 1
+        },
+        "SetBerryPowder": {
+          "returnsVoid": true,
+          "params": 2
+        }
+      },
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/pret/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/berry_powder.c#L162-L176"
+    }
+  ]
+}

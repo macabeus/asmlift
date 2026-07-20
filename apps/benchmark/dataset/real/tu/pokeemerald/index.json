@@ -1,0 +1,134 @@
+{
+  "MathUtil_Mul16": {
+    "tu": "MathUtil_Mul16.i.gz",
+    "ctx": "ctx-b98da8e28d15.i.gz"
+  },
+  "MathUtil_Mul16Shift": {
+    "tu": "MathUtil_Mul16Shift.i.gz",
+    "ctx": "ctx-b98da8e28d15.i.gz"
+  },
+  "MathUtil_Mul32": {
+    "tu": "MathUtil_Mul32.i.gz",
+    "ctx": "ctx-b98da8e28d15.i.gz"
+  },
+  "MathUtil_Div16": {
+    "tu": "MathUtil_Div16.i.gz",
+    "ctx": "ctx-b98da8e28d15.i.gz"
+  },
+  "MathUtil_Div16Shift": {
+    "tu": "MathUtil_Div16Shift.i.gz",
+    "ctx": "ctx-b98da8e28d15.i.gz"
+  },
+  "MathUtil_Inv16": {
+    "tu": "MathUtil_Inv16.i.gz",
+    "ctx": "ctx-b98da8e28d15.i.gz"
+  },
+  "StoreWordInTwoHalfwords": {
+    "tu": "StoreWordInTwoHalfwords.i.gz",
+    "ctx": "ctx-b98da8e28d15.i.gz"
+  },
+  "LoadWordFromTwoHalfwords": {
+    "tu": "LoadWordFromTwoHalfwords.i.gz",
+    "ctx": "ctx-b98da8e28d15.i.gz"
+  },
+  "CountTrailingZeroBits": {
+    "tu": "CountTrailingZeroBits.i.gz",
+    "ctx": "ctx-b98da8e28d15.i.gz"
+  },
+  "CalcByteArraySum": {
+    "tu": "CalcByteArraySum.i.gz",
+    "ctx": "ctx-b98da8e28d15.i.gz"
+  },
+  "CalcCRC16": {
+    "tu": "CalcCRC16.i.gz",
+    "ctx": "ctx-b98da8e28d15.i.gz"
+  },
+  "Random": {
+    "tu": "Random.i.gz",
+    "ctx": "ctx-d7b4f615b5ba.i.gz"
+  },
+  "StringLength": {
+    "tu": "StringLength.i.gz",
+    "ctx": "ctx-b98da8e28d15.i.gz"
+  },
+  "StringCompare": {
+    "tu": "StringCompare.i.gz",
+    "ctx": "ctx-b98da8e28d15.i.gz"
+  },
+  "StringCompareN": {
+    "tu": "StringCompareN.i.gz",
+    "ctx": "ctx-b98da8e28d15.i.gz"
+  },
+  "StringCopy": {
+    "tu": "StringCopy.i.gz",
+    "ctx": "ctx-b98da8e28d15.i.gz"
+  },
+  "StringAppend": {
+    "tu": "StringAppend.i.gz",
+    "ctx": "ctx-9801ce0c65ce.i.gz"
+  },
+  "IsStringLengthAtLeast": {
+    "tu": "IsStringLengthAtLeast.i.gz",
+    "ctx": "ctx-b98da8e28d15.i.gz"
+  },
+  "StringCopyN": {
+    "tu": "StringCopyN.i.gz",
+    "ctx": "ctx-b98da8e28d15.i.gz"
+  },
+  "CalcCRC16WithTable": {
+    "tu": "CalcCRC16WithTable.i.gz",
+    "ctx": "ctx-dbb6d12e4277.i.gz"
+  },
+  "ModifyStatByNature": {
+    "tu": "ModifyStatByNature.i.gz",
+    "ctx": "ctx-b98da8e28d15.i.gz"
+  },
+  "GetGenderFromSpeciesAndPersonality": {
+    "tu": "GetGenderFromSpeciesAndPersonality.i.gz",
+    "ctx": "ctx-b98da8e28d15.i.gz"
+  },
+  "Sin2": {
+    "tu": "Sin2.i.gz",
+    "ctx": "ctx-3b544fd3decb.i.gz"
+  },
+  "Cos2": {
+    "tu": "Cos2.i.gz",
+    "ctx": "ctx-7611fc42abc5.i.gz"
+  },
+  "PutMemBlockHeader": {
+    "tu": "PutMemBlockHeader.i.gz",
+    "ctx": "ctx-fbaccdeef3a1.i.gz"
+  },
+  "PutFirstMemBlockHeader": {
+    "tu": "PutFirstMemBlockHeader.i.gz",
+    "ctx": "ctx-92d4b72c07b6.i.gz"
+  },
+  "StopScript": {
+    "tu": "StopScript.i.gz",
+    "ctx": "ctx-6b8054819029.i.gz"
+  },
+  "SetupBytecodeScript": {
+    "tu": "SetupBytecodeScript.i.gz",
+    "ctx": "ctx-6b8054819029.i.gz"
+  },
+  "TranslateBigMonSizeTableIndex": {
+    "tu": "TranslateBigMonSizeTableIndex.i.gz",
+    "ctx": "ctx-10a1589370ba.i.gz"
+  },
+  "FeebasRandom": {
+    "tu": "FeebasRandom.i.gz",
+    "ctx": "ctx-398e4284d4ad.i.gz"
+  },
+  "CalculatePPWithBonus": {
+    "tu": "CalculatePPWithBonus.i.gz",
+    "ctx": "ctx-b98da8e28d15.i.gz"
+  },
+  "GiveBerryPowder": {
+    "tu": "GiveBerryPowder.i.gz",
+    "ctx": "ctx-264361caa05e.i.gz"
+  },
+  "GetGameStat": {
+    "tu": "GetGameStat.i.gz",
+    "ctx": "ctx-b98da8e28d15.i.gz"
+  }
+}

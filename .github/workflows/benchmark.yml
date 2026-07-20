@@ -1,0 +1,155 @@
+# Runs the FULL benchmark on a hosted runner and refreshes the committed data when it is
+# measurement-stale — then deploys the site.
+#
+# Everything the benchmark needs is publicly fetchable, following the same conventions the
+# decomp community's own CI uses (decomp-toolkit / decomp.me / the projects' Makefiles):
+#   - agbcc:        built from pret/agbcc (the binary lands in the repo root)
+#   - IDO 7.1:      decompals/ido-static-recomp release (linux)
+#   - KMC GCC:      decompals/mips-gcc-2.7.2 + mips-binutils-2.6 releases (linux/i386 — the same
+#                   URLs snowboardkids2-decomp's tools/Makefile fetches); runs in the
+#                   i386/ubuntu:bionic container exactly as locally, natively on x86_64
+#   - mwcc_242_81:  files.decomp.dev compilers pack, dir GC/1.3.2 (the exact mapping decomp.me's
+#                   own mwcc_242_81 image uses); runs through the asmlift-ppc image (wibo), built
+#                   here from packages/toolchains/ppc-docker
+#   - m2c:          PINNED commit — the m2c result cache and the baseline's meaning are keyed to
+#                   it; bump deliberately, never float
+#   - real tier:    fully self-contained — the dataset vendors each function's PREPROCESSED
+#                   translation unit (dataset/real/tu/, `bench vendor`), so no project checkouts
+#                   exist here at all
+#
+# Staleness is measurement-level (`bench stale-check`): timestamps, provenance and scratch-dir
+# names never count. The check REFUSES (fails the job) if the fresh run shrank coverage — a run
+# with a broken toolchain can never clobber the dataset — or carries dirty provenance.
+#
+# The data commit is pushed with GITHUB_TOKEN, which deliberately does not trigger push-based
+# workflows — so the Pages deploy is dispatched explicitly. That step needs Pages enabled
+# (Settings → Pages → Source: GitHub Actions); until then it fails loudly, same as running
+# deploy-pages by hand.
+#
+# NOTE for the first run: a different objdump/binutils build than the local one can legitimately
+# change disassembly text (and therefore rows) — review the first automated commit against a
+# local run before trusting the cadence.
+name: benchmark
+
+on:
+  workflow_dispatch:
+  # manual-only: no cron. An unattended refresh could push data + deploy the site without the
+  # human review the first-run NOTE above calls for; re-add a schedule deliberately if wanted.
+
+permissions:
+  contents: write # push the refreshed data
+  actions: write # dispatch deploy-pages
+
+concurrency:
+  group: benchmark
+  cancel-in-progress: false
+
+env:
+  COMPILERS_TAG: '20251015' # files.decomp.dev pack (the tag decomp.me pins)
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      DEPS: ${{ github.workspace }}/.deps
+      ASMLIFT_AGBCC: ${{ github.workspace }}/.deps/agbcc/agbcc
+      ASMLIFT_IDO_CC: ${{ github.workspace }}/.deps/ido71/cc
+      ASMLIFT_KMC_DIR: ${{ github.workspace }}/.deps/gcc_kmc
+      ASMLIFT_MWCC_DIR: ${{ github.workspace }}/.deps/mwcc_242_81
+      ASMLIFT_M2C_DIR: ${{ github.workspace }}/.deps/m2c
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read the m2c pin (apps/benchmark/M2C_COMMIT — the one source of truth)
+        run: echo "M2C_COMMIT=$(cat apps/benchmark/M2C_COMMIT)" >> "$GITHUB_ENV"
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Install host toolchain packages (arm cpp/as, MIPS objdump)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends gcc-arm-none-eabi binutils-mips-linux-gnu
+
+      - name: Cache fetched toolchains + m2c
+        id: deps
+        uses: actions/cache@v4
+        with:
+          path: .deps
+          key: bench-deps-${{ env.COMPILERS_TAG }}-${{ env.M2C_COMMIT }}-v4
+
+      - name: Fetch toolchains + m2c (pinned)
+        if: steps.deps.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p "$DEPS/gcc_kmc" "$DEPS/ido71"
+
+          # agbcc — build from source (the binary lands in the repo root)
+          git clone --depth 1 https://github.com/pret/agbcc "$DEPS/agbcc"
+          (cd "$DEPS/agbcc" && ./build.sh)
+
+          # IDO 7.1 (static recomp, linux)
+          curl -fsSL https://github.com/decompals/ido-static-recomp/releases/latest/download/ido-7.1-recomp-linux.tar.gz \
+            | tar -xz -C "$DEPS/ido71"
+
+          # KMC GCC 2.7.2 + binutils 2.6 (linux/i386 — container-run, same as locally)
+          curl -fsSL https://github.com/decompals/mips-gcc-2.7.2/releases/latest/download/gcc-2.7.2-linux.tar.gz \
+            | tar -xz -C "$DEPS/gcc_kmc"
+          curl -fsSL https://github.com/decompals/mips-binutils-2.6/releases/latest/download/binutils-2.6-linux.tar.gz \
+            | tar -xz -C "$DEPS/gcc_kmc"
+
+          # CodeWarrior mwcc_242_81 = GC/1.3.2 in the compilers pack (decomp.me's own mapping)
+          curl -fsSL "https://files.decomp.dev/compilers_${COMPILERS_TAG}.zip" -o /tmp/compilers.zip
+          unzip -q /tmp/compilers.zip 'GC/1.3.2/*' -d /tmp/compilers
+          mv /tmp/compilers/GC/1.3.2 "$DEPS/mwcc_242_81"
+          rm -rf /tmp/compilers.zip /tmp/compilers
+
+          # m2c — the pinned baseline
+          git clone https://github.com/matt-kempster/m2c "$DEPS/m2c"
+          git -C "$DEPS/m2c" checkout --quiet "$M2C_COMMIT"
+
+      - uses: docker/setup-buildx-action@v3
+      - name: Build the asmlift-ppc image (wibo + PowerPC objdump)
+        uses: docker/build-push-action@v6
+        with:
+          context: packages/toolchains/ppc-docker
+          tags: asmlift-ppc:latest
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run the benchmark (synthetic + real tiers)
+        run: pnpm bench run
+
+      - name: Script-fidelity gate (re-runs both repro scripts for every function)
+        run: pnpm bench fidelity
+
+      - name: Merge tier results + publish into apps/web
+        run: pnpm bench merge
+
+      - name: Check whether results changed (fails if coverage shrank)
+        id: stale
+        run: pnpm bench stale-check
+
+      - name: Commit the refreshed data
+        if: steps.stale.outputs.stale == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/benchmark/results/results.json \
+                  apps/web/src/pages/benchmark/data/results.json \
+                  apps/web/src/data/summary.json
+          git commit -m "bench: refresh results (automated run)"
+          # tolerate commits that landed on main during the run (artifact commits rebase cleanly;
+          # a genuine artifact conflict still fails loudly)
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+          git push
+
+      - name: Deploy the site
+        if: steps.stale.outputs.stale == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run deploy-pages.yml --ref ${{ github.ref_name }}

@@ -1,0 +1,30 @@
+{
+  "name": "@asmlift/cli",
+  "version": "0.1.0",
+  "license": "MIT",
+  "type": "module",
+  "description": "The asmlift command line: decompile one function to C/Pascal from the terminal",
+  "bin": {
+    "asmlift": "./dist/asmlift.mjs"
+  },
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "build": "esbuild src/main.ts --bundle --platform=node --format=esm --target=node18 --external:objdiff-wasm --external:yaml --banner:js=\"#!/usr/bin/env node\" --outfile=dist/asmlift.mjs",
+    "prepublishOnly": "pnpm run build"
+  },
+  "dependencies": {
+    "@asmlift/core": "workspace:*",
+    "objdiff-wasm": "3.7.3",
+    "yaml": "^2.9.0"
+  },
+  "devDependencies": {
+    "@asmlift/toolchains": "workspace:*",
+    "esbuild": "^0.28.1"
+  },
+  "files": [
+    "dist",
+    "src"
+  ]
+}

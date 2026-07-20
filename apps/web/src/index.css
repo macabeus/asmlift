@@ -1,0 +1,136 @@
+@import 'tailwindcss';
+
+/* ── Shared design system (Mizuchi / Transmuter / gba-kit) ──────────────────
+   Slate surfaces + a fixed diagonal gradient, thin slate scrollbars, and the
+   VS Code dark starry-night palette. asmlift's brand accent is teal (the water
+   spirit) + gold/amber (the code scrolls); those live in the components. */
+
+:root {
+  color-scheme: dark; /* native controls + scrollbars render dark */
+  scrollbar-width: thin;
+  background-color: #0f172a;
+}
+
+html {
+  min-height: 100%;
+}
+
+body {
+  min-height: 100%;
+  background: linear-gradient(to bottom right, #0f172a, #1e293b, #0f172a);
+  background-attachment: fixed;
+}
+
+/* Slim slate scrollbars, app-wide (the family baseline) + the .scroll-slim opt-in. */
+::-webkit-scrollbar,
+.scroll-slim::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track,
+.scroll-slim::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb,
+.scroll-slim::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover,
+.scroll-slim::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+
+/* Starry-night syntax highlighting — VS Code dark theme, shared across the family.
+   Applied globally (both the Playground and Benchmark code blocks emit .pl-* spans). */
+.pl-c {
+  color: #6a9955;
+}
+.pl-c1,
+.pl-s .pl-v {
+  color: #b5cea8;
+}
+.pl-e,
+.pl-en {
+  color: #dcdcaa;
+}
+.pl-s .pl-s1,
+.pl-smi {
+  color: #9cdcfe;
+}
+.pl-ent {
+  color: #4ec9b0;
+}
+.pl-k {
+  color: #569cd6;
+}
+.pl-pds,
+.pl-s,
+.pl-s .pl-pse .pl-s1,
+.pl-sr,
+.pl-sr .pl-cce,
+.pl-sr .pl-sra,
+.pl-sr .pl-sre {
+  color: #ce9178;
+}
+.pl-v,
+.pl-smw {
+  color: #9cdcfe;
+}
+.pl-bu {
+  color: #f44747;
+}
+.pl-ii {
+  color: #f44747;
+  background-color: #f44747;
+}
+.pl-c2 {
+  color: #d7ba7d;
+  background-color: #b5cea8;
+}
+.pl-sr .pl-cce {
+  color: #4ec9b0;
+}
+.pl-ml {
+  color: #b5cea8;
+}
+.pl-mh,
+.pl-mh .pl-en,
+.pl-ms {
+  color: #569cd6;
+}
+.pl-mi {
+  color: #9cdcfe;
+}
+.pl-mb {
+  color: #ce9178;
+}
+.pl-md {
+  color: #f44747;
+  background-color: #5a1d1d;
+}
+.pl-mi1 {
+  color: #b5cea8;
+  background-color: #1a3a1a;
+}
+.pl-mc {
+  color: #b5cea8;
+  background-color: #1a3a1a;
+}
+.pl-mi2 {
+  color: #d4d4d4;
+  background-color: #1a3a3a;
+}
+.pl-mdr {
+  color: #dcdcaa;
+}
+.pl-ba {
+  color: #9cdcfe;
+}
+.pl-sg {
+  color: #808080;
+}
+.pl-corl {
+  text-decoration: underline;
+  color: #ce9178;
+}

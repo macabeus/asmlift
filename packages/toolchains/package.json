@@ -1,0 +1,16 @@
+{
+  "name": "@asmlift/toolchains",
+  "version": "0.0.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "description": "asmlift's toolchains for benchmark and testing pourposes",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*.ts"
+  },
+  "dependencies": {
+    "@asmlift/core": "workspace:*",
+    "@asmlift/cli": "workspace:*"
+  }
+}

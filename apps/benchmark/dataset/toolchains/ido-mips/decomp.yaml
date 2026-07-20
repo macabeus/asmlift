@@ -1,0 +1,19 @@
+# The decomp.yaml the benchmark scores asmlift through on N64/IDO — and a working example of
+# the simplest `compiler` command: IDO's cc goes straight from .c to .o, so it is one
+# invocation with the project's flags (these mirror oot-style Makefiles).
+#
+# {{inputPath}} is the candidate .c file, {{outputPath}} is the object it must produce.
+#
+# To use this in your project, replace:
+#   $ASMLIFT_IDO_CC → the path to your IDO cc binary (e.g. tools/ido_7.1/cc, or the
+#                     ido-static-recomp build of it)
+# (The variable exists only to keep the machine path out of this repo — the benchmark fills
+# it in when it runs.)
+name: asmlift benchmark (ido-mips)
+platform: n64
+tools:
+  asmlift:
+    target: ido-mips
+    compiler: >-
+      "$ASMLIFT_IDO_CC" -c -mips2 -O2 -32 -non_shared -Xcpluscomm -G 0
+      -o {{outputPath}} {{inputPath}}

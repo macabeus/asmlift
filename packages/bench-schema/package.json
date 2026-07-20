@@ -1,0 +1,11 @@
+{
+  "name": "@asmlift/bench-schema",
+  "version": "0.0.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "description": "The asmlift's benchmark result schema (types only)",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

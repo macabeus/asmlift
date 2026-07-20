@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    // Beyond-strict flags kept at zero errors (audit R14 Q2-11a). Deliberately OFF:
+    // noUncheckedIndexedAccess (~950 sites, out of scope), exactOptionalPropertyTypes (~17 sites,
+    // candidate follow-up).
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": ["node"]
+  },
+  // One root typecheck spans both packages and the benchmark harness (all CI-gated);
+  // apps/web is a separate vite app with its own tsconfig (its `tsc && vite build` is the gate).
+  "include": ["packages/*/src", "packages/*/test", "apps/benchmark/src"]
+}

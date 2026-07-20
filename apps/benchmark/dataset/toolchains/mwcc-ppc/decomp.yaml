@@ -1,0 +1,34 @@
+# The decomp.yaml for GameCube/CodeWarrior — a working example of a `compiler` command for a
+# Win32 compiler: `mwcceppc.exe` runs through the wibo shim inside a one-shot `docker run`,
+# with the (proprietary, never-committed) compiler dir bind-mounted and the candidate's
+# directory mounted at /work, file names rebased with $(dirname)/$(basename).
+#
+# {{inputPath}} is the candidate .c file, {{outputPath}} is the object it must produce. Flags
+# mirror decomp.me's mwcc invocation (-O4,p, -enum int and -inline auto are the load-bearing
+# GameCube matching flags).
+#
+# To use this in your project, replace:
+#   $ASMLIFT_DOCKER    → docker
+#   $ASMLIFT_MWCC_DIR  → the directory holding mwcceppc.exe (e.g. tools/mwcc_242_81)
+#   $ASMLIFT_PPC_IMAGE → a linux/386 image bundling the wibo shim (this repo builds one
+#                        from packages/toolchains/ppc-docker)
+#   $ASMLIFT_WIBO      → wibo (the Win32-API shim binary inside that image)
+# (The variables exist only to keep machine paths out of this repo — the benchmark fills
+# them in when it runs.)
+#
+# (The benchmark's own scoring skips this command and reuses a pooled long-lived container;
+# the reproduction scripts run it as written.)
+name: asmlift benchmark (mwcc-ppc)
+platform: gc
+tools:
+  asmlift:
+    target: mwcc-ppc
+    compiler: >-
+      "$ASMLIFT_DOCKER" run --rm
+      -v "$ASMLIFT_MWCC_DIR":/mwcc:ro -v "$(dirname {{inputPath}})":/work
+      "$ASMLIFT_PPC_IMAGE"
+      $ASMLIFT_WIBO /mwcc/mwcceppc.exe
+      '-pragma' 'msg_show_realref off' '-c' '-proc' 'gekko' '-nostdinc'
+      '-stderr' '-O4,p' '-enum' 'int' '-inline' 'auto' '-fp' 'hard'
+      '-Cpp_exceptions' 'off'
+      -o "/work/$(basename {{outputPath}})" "/work/$(basename {{inputPath}})"

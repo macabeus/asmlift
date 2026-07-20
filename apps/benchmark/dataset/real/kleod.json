@@ -1,0 +1,546 @@
+{
+  "project": "kleod",
+  "toolchain": "agbcc-arm",
+  "repoDir": "klonoa-empire-of-dreams",
+  "cppIncludes": [
+    "-nostdinc",
+    "-I",
+    "tools/agbcc/include",
+    "-iquote",
+    "include"
+  ],
+  "headers": [
+    "global.h",
+    "globals.h",
+    "structs/variables.h"
+  ],
+  "functions": [
+    {
+      "sym": "ReturnOne",
+      "features": [
+        "baseline"
+      ],
+      "funcC": "s32 ReturnOne(void) {\n    return 1;\n}",
+      "sourceUrl": "https://github.com/macabeus/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/system.c#L12-L14"
+    },
+    {
+      "sym": "StrCpy",
+      "features": [
+        "memory",
+        "loop",
+        "pointer"
+      ],
+      "funcC": "void StrCpy(u8 *dst, u8 *src) {\n    u32 c;\n    do {\n        c = *src;\n        *dst = c;\n        c = *src;\n        dst++;\n        src++;\n    } while (c != 0);\n}",
+      "proto": {
+        "StrCpy": {
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/macabeus/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/system.c#L16-L25"
+    },
+    {
+      "sym": "MultiplyQ8",
+      "features": [
+        "arithmetic",
+        "fixed-point",
+        "branch"
+      ],
+      "funcC": "s16 MultiplyQ8(s16 num1, s16 num2) {\n    s32 product;\n    s32 rounded;\n\n    product = num1 * num2;\n    rounded = product;\n    if (rounded < 0) {\n        rounded += 0xFF;\n    }\n    product = rounded >> 8;\n    return product;\n}",
+      "sourceUrl": "https://github.com/macabeus/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/system.c#L116-L127"
+    },
+    {
+      "sym": "MultiplyQ4",
+      "features": [
+        "arithmetic",
+        "fixed-point",
+        "branch"
+      ],
+      "funcC": "s16 MultiplyQ4(s16 num1, s16 num2) {\n    s32 product;\n    s32 rounded;\n\n    product = num1 * num2;\n    rounded = product;\n    if (rounded < 0) {\n        rounded += 0xF;\n    }\n    product = rounded >> 4;\n    return product;\n}",
+      "sourceUrl": "https://github.com/macabeus/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/math.c#L25-L36"
+    },
+    {
+      "sym": "DivideQ8",
+      "features": [
+        "arithmetic",
+        "soft-div",
+        "shift"
+      ],
+      "funcC": "s16 DivideQ8(s16 num1, s16 num2) {\n    return (num1 << 8) / num2;\n}",
+      "sourceUrl": "https://github.com/macabeus/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/math.c#L11-L13"
+    },
+    {
+      "sym": "ReciprocalQ8",
+      "features": [
+        "arithmetic",
+        "soft-div"
+      ],
+      "funcC": "s16 ReciprocalQ8(s16 num1) {\n    s32 numerator = 0x10000;\n    return (numerator / num1);\n}",
+      "sourceUrl": "https://github.com/macabeus/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/math.c#L19-L22"
+    },
+    {
+      "sym": "DivideQ4",
+      "features": [
+        "arithmetic",
+        "soft-div",
+        "shift"
+      ],
+      "funcC": "s16 DivideQ4(s16 num1, s16 num2) {\n    return ((num1 << 4) / num2);\n}",
+      "sourceUrl": "https://github.com/macabeus/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/math.c#L42-L44"
+    },
+    {
+      "sym": "ReciprocalQ4",
+      "features": [
+        "arithmetic",
+        "soft-div"
+      ],
+      "funcC": "s16 ReciprocalQ4(s16 num1) {\n    s32 numerator = 0x100;\n    return (numerator / num1);\n}",
+      "sourceUrl": "https://github.com/macabeus/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/math.c#L50-L53"
+    },
+    {
+      "sym": "ReadKeyInput",
+      "features": [
+        "mmio",
+        "global",
+        "bitwise",
+        "branch",
+        "call"
+      ],
+      "funcC": "void ReadKeyInput(void) {\n    u16 pressed = REG_KEYINPUT ^ 0x3FF;\n\n    gKeysPressed = pressed & ~gKeysPrevious;\n    gKeysPrevious = pressed;\n    if ((pressed & 0x0F) == 0x0F) {\n        SoftResetRom(0xFF);\n    }\n    if (gKeysPrevious & 1) {\n        gAButtonHold++;\n    } else {\n        gAButtonHold = 0;\n    }\n}",
+      "ctx": "void SoftResetRom(u8);",
+      "proto": {
+        "ReadKeyInput": {
+          "returnsVoid": true
+        },
+        "SoftResetRom": {
+          "params": [
+            "u8"
+          ],
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/macabeus/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/system.c#L44-L57"
+    },
+    {
+      "sym": "VBlankHandlerMinimal",
+      "features": [
+        "mmio",
+        "global",
+        "call"
+      ],
+      "funcC": "void VBlankHandlerMinimal(void) {\n    m4aSoundVSync();\n    m4aSoundMain();\n    gIMEAcknowledge = 1;\n}",
+      "ctx": "void m4aSoundVSync(void);\nvoid m4aSoundMain(void);",
+      "proto": {
+        "VBlankHandlerMinimal": {
+          "returnsVoid": true
+        },
+        "m4aSoundVSync": {
+          "params": 0,
+          "returnsVoid": true
+        },
+        "m4aSoundMain": {
+          "params": 0,
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/macabeus/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/math.c#L71-L75"
+    },
+    {
+      "sym": "ReadUnalignedU32",
+      "features": [
+        "bitwise",
+        "pointer",
+        "cast",
+        "memory"
+      ],
+      "funcC": "u32 ReadUnalignedU32(u8 *ptr) {\n    return ptr[0] + (ptr[1] << 8) + (ptr[2] << 16) + (ptr[3] << 24);\n}",
+      "sourceUrl": "https://github.com/macabeus/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/gfx.c#L70-L72"
+    },
+    {
+      "sym": "GetEntityLookupData",
+      "features": [
+        "array",
+        "pointer",
+        "cast",
+        "global",
+        "memory"
+      ],
+      "funcC": "void GetEntityLookupData(u8 idx) {\n    u8 *flags = gGameFlagsPtr;\n    const u8 *table = gEntityDataTable;\n    const u8 *entry = &table[(u32)idx * 8];\n    flags[0x11] = entry[5];\n    flags[0x12] = entry[6];\n}",
+      "proto": {
+        "GetEntityLookupData": {
+          "returnsVoid": true
+        }
+      },
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/code_3.c#L63-L69"
+    },
+    {
+      "sym": "UpdateEntities",
+      "features": [
+        "loop",
+        "branch",
+        "call",
+        "cast"
+      ],
+      "funcC": "void UpdateEntities(void) {\n    u8 i;\n    for (i = 0; i <= 6; i++) {\n        if ((u8)CheckWorldCompletion(i)) {\n            CopyWorldMapTiles(i);\n            UpdateWorldMapNodeTile(i);\n        }\n    }\n}",
+      "ctx": "u32 CheckWorldCompletion(u8);\nvoid CopyWorldMapTiles(u8);\nvoid UpdateWorldMapNodeTile(u8);",
+      "proto": {
+        "UpdateEntities": {
+          "returnsVoid": true
+        },
+        "CheckWorldCompletion": {
+          "params": [
+            "u8"
+          ]
+        },
+        "CopyWorldMapTiles": {
+          "params": [
+            "u8"
+          ],
+          "returnsVoid": true
+        },
+        "UpdateWorldMapNodeTile": {
+          "params": [
+            "u8"
+          ],
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/macabeus/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/code_3.c#L40-L48"
+    },
+    {
+      "sym": "GameUpdate",
+      "features": [
+        "branch",
+        "global",
+        "call"
+      ],
+      "funcC": "void GameUpdate(void) {\n    if (gPauseFlag == 0) {\n        UpdateWorldMapNodeState();\n        UpdatePlayerInput();\n        InitPlayerCollision();\n        UpdateWorldMapCursor();\n    }\n    UpdatePaletteAnimations();\n}",
+      "ctx": "void UpdateWorldMapNodeState(void);\nvoid UpdatePlayerInput(void);\nvoid InitPlayerCollision(void);\nvoid UpdateWorldMapCursor(void);\nvoid UpdatePaletteAnimations(void);",
+      "proto": {
+        "GameUpdate": {
+          "returnsVoid": true
+        },
+        "UpdateWorldMapNodeState": {
+          "params": 0,
+          "returnsVoid": true
+        },
+        "UpdatePlayerInput": {
+          "params": 0,
+          "returnsVoid": true
+        },
+        "InitPlayerCollision": {
+          "params": 0,
+          "returnsVoid": true
+        },
+        "UpdateWorldMapCursor": {
+          "params": 0,
+          "returnsVoid": true
+        },
+        "UpdatePaletteAnimations": {
+          "params": 0,
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/macabeus/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/code_3.c#L165-L173"
+    },
+    {
+      "sym": "Decompress",
+      "features": [
+        "branch",
+        "bitwise",
+        "cast",
+        "call",
+        "memory"
+      ],
+      "funcC": "void Decompress(void *dest, void *src) {\n    void *heapPtr;\n\n    if (((u32 *)src)[0] & 0x80000000) {\n        heapPtr = thunk_HeapAlloc(((u32 *)src)[1] >> 8, 0);\n        HuffUnComp((u8 *)src + 4, heapPtr);\n        LZ77UnCompWram(heapPtr, dest);\n        thunk_HeapFree(heapPtr);\n    } else {\n        LZ77UnCompWram((u8 *)src + 4, dest);\n    }\n}",
+      "ctx": "void *thunk_HeapAlloc(u32, u32);\nvoid thunk_HeapFree(void *);\nvoid HuffUnComp(void *, void *);\nvoid LZ77UnCompWram(void *, void *);",
+      "proto": {
+        "Decompress": {
+          "returnsVoid": true
+        },
+        "thunk_HeapAlloc": {
+          "params": 2
+        },
+        "thunk_HeapFree": {
+          "params": 1,
+          "returnsVoid": true
+        },
+        "HuffUnComp": {
+          "params": 2,
+          "returnsVoid": true
+        },
+        "LZ77UnCompWram": {
+          "params": 2,
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/macabeus/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/code_3.c#L110-L121"
+    },
+    {
+      "sym": "DecompressDma",
+      "features": [
+        "call",
+        "bitwise",
+        "cast",
+        "memory",
+        "dma"
+      ],
+      "funcC": "void DecompressDma(void *src, void *dest, u16 size) {\n    void *heapPtr;\n\n    heapPtr = thunk_HeapAlloc(((u32 *)src)[0] & 0x7FFFFFFF, 0);\n    Decompress(heapPtr, src);\n    DmaCopy16Wait(3, (u8 *)heapPtr + 4, dest, size);\n    thunk_HeapFree(heapPtr);\n}",
+      "ctx": "void *thunk_HeapAlloc(u32, u32);\nvoid thunk_HeapFree(void *);\nvoid Decompress(void *, void *);",
+      "proto": {
+        "DecompressDma": {
+          "returnsVoid": true
+        },
+        "thunk_HeapAlloc": {
+          "params": 2
+        },
+        "thunk_HeapFree": {
+          "params": 1,
+          "returnsVoid": true
+        },
+        "Decompress": {
+          "params": 2,
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/macabeus/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/code_3.c#L129-L136"
+    },
+    {
+      "sym": "CheckTileCollisionVertical",
+      "features": [
+        "loop",
+        "struct",
+        "branch",
+        "pointer",
+        "memory"
+      ],
+      "funcC": "struct Unk_08014184 *CheckTileCollisionVertical(struct Unk_08014184 *arg0, u16 arg1, u16 arg2, u8 arg3) {\n    u32 var_r3;\n    struct Unk_08014184 var_r4;\n\n    for (var_r3 = gUnk_03004D80->unk2; var_r3 < gUnk_03004D80->unk0; var_r3++) {\n        if ((arg2 >= gUnk_03004D80->unk4[var_r3].unk2) && (gUnk_03004D80->unk4[var_r3].unk6 >= (arg2 - arg3))\n            && (arg1 < (gUnk_03004D80->unk4[var_r3].unk0 + 3)) && ((gUnk_03004D80->unk4[var_r3].unk0 - 3) < arg1)) {\n            var_r4.unk0 = gUnk_03004D80->unk4[var_r3].unk0 - 3;\n            var_r4.unk2 = gUnk_03004D80->unk4[var_r3].unk8;\n            *arg0 = var_r4;\n            goto exit;\n            return arg0;\n        }\n    }\n\n    var_r4.unk0 = -1;\n    *arg0 = var_r4;\nexit:\n    return arg0;\n}",
+      "prependC": "struct Unk_08014184 {\n    u16 unk0;\n    u8 unk2;\n    u8 pad3[0x4 - 0x3];\n};",
+      "sourceUrl": "https://github.com/macabeus/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/code_1.c#L43-L62"
+    },
+    {
+      "sym": "ProcessHBlankWait",
+      "features": [
+        "mmio",
+        "branch",
+        "memory",
+        "pointer",
+        "shift"
+      ],
+      "funcC": "u32 ProcessHBlankWait(u32 idx) {\n    volatile u16 *ie;\n    volatile u16 *dispstat;\n    u8 *buf;\n    u32 off;\n    u8 *entry;\n    u32 timer;\n\n    ie = &REG_IE;\n    *ie |= 2;\n    dispstat = &REG_DISPSTAT;\n    *dispstat |= 0x10;\n\n    buf = gBuffer_52A4;\n    off = idx * 9;\n    off <<= 2;\n    off += (u32)buf;\n    entry = (u8 *)off;\n\n    if (entry[3] >> 7) {\n        return 1;\n    }\n    timer = *(u16 *)(entry + 0x14) - 1;\n    *(u16 *)(entry + 0x14) = timer;\n    if ((s32)(timer << 16) < 0) {\n        *ie &= 0xFFFD;\n        *dispstat &= 0xFFEF;\n        return 0;\n    }\n    return 1;\n}",
+      "sourceUrl": "https://github.com/macabeus/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/gfx.c#L536-L566"
+    },
+    {
+      "sym": "DecompressAlloc",
+      "features": [
+        "call",
+        "cast",
+        "bitwise",
+        "memory",
+        "pointer"
+      ],
+      "funcC": "void *DecompressAlloc(void *src) {\n    void *heapPtr;\n\n    heapPtr = thunk_HeapAlloc(((u32 *)src)[0] & 0x7FFFFFFF, 0);\n    Decompress(heapPtr, src);\n    return heapPtr;\n}",
+      "prependC": "void *thunk_HeapAlloc(u32, u32);\nvoid Decompress(void *, void *);",
+      "proto": {
+        "thunk_HeapAlloc": {
+          "params": 2
+        },
+        "Decompress": {
+          "params": 2,
+          "returnsVoid": true
+        }
+      },
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/code_3.c#L142-L148"
+    },
+    {
+      "sym": "WritePaletteColor",
+      "features": [
+        "call",
+        "global",
+        "pointer",
+        "memory",
+        "mmio"
+      ],
+      "funcC": "void WritePaletteColor(void) {\n    u8 **gp = &gStreamPtr;\n    u16 color = ReadUnalignedU16(*gp + 3);\n    u8 *ptr = *gp;\n    *(u16 *)(BG_PAL_RAM + ptr[2] * 2) = color;\n    *gp = ptr + 5;\n}",
+      "prependC": "u32 ReadUnalignedU16(u8 *);",
+      "proto": {
+        "WritePaletteColor": {
+          "returnsVoid": true
+        },
+        "ReadUnalignedU16": {
+          "params": 1
+        }
+      },
+      "sourceUrl": "https://github.com/macabeus/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/gfx.c#L448-L454"
+    },
+    {
+      "sym": "ReadUnalignedU16",
+      "features": [
+        "bitwise",
+        "pointer",
+        "memory"
+      ],
+      "funcC": "u32 ReadUnalignedU16(u8 *ptr) {\n    return ptr[0] | (ptr[1] << 8);\n}",
+      "sourceUrl": "https://github.com/macabeus/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/gfx.c#L54-L56"
+    },
+    {
+      "sym": "FreeAllDecompBuffers",
+      "features": [
+        "global",
+        "call",
+        "pointer",
+        "branch"
+      ],
+      "funcC": "void FreeAllDecompBuffers(void) {\n    u32 *decompBuffers = (u32 *)gDecompBufferCtrl;\n\n    thunk_HeapFree(decompBuffers[1] - 4);\n    thunk_HeapFree(decompBuffers[0] - 4);\n    thunk_HeapFree(decompBuffers[3] - 4);\n    thunk_HeapFree(decompBuffers[2] - 4);\n    thunk_HeapFree(decompBuffers[5] - 4);\n    thunk_HeapFree(decompBuffers[4] - 4);\n\n    if (gCollisionMapPtr != 0) {\n        thunk_HeapFree(gCollisionMapPtr - 4);\n        gCollisionMapPtr = 0;\n    }\n\n    m4aSongNumStart(0x8D);\n    m4aSongNumStart(0x8E);\n    m4aSongNumStart(0x8F);\n    m4aSongNumStart(0x90);\n}",
+      "prependC": "void thunk_HeapFree(u32);\nvoid m4aSongNumStart(u16);",
+      "proto": {
+        "FreeAllDecompBuffers": {
+          "returnsVoid": true
+        },
+        "thunk_HeapFree": {
+          "params": 1,
+          "returnsVoid": true
+        },
+        "m4aSongNumStart": {
+          "params": 1,
+          "returnsVoid": true
+        }
+      },
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/system.c#L91-L110"
+    },
+    {
+      "sym": "DmaSpriteToObjVram",
+      "features": [
+        "pointer",
+        "mmio",
+        "dma",
+        "cast",
+        "memory"
+      ],
+      "funcC": "void DmaSpriteToObjVram(u32 entryIdx, u32 frameIdx) {\n    vu32 *dma3 = &REG_DMA3SAD;\n    u32 base = *(vu32 *)&gGfxStreamBuffer;\n    u8 *entry = (u8 *)(entryIdx * 8 + base);\n    u16 tileCount = *(u16 *)(entry + 6);\n    dma3[0] = *(u32 *)entry + tileCount * (frameIdx << 5);\n\n    dma3[1] = (u32) * (u16 *)(entry + 4) * 32 + OBJ_VRAM;\n\n    dma3[2] = (*(u16 *)(entry + 6) << 4) | (0x80 << 24);\n    dma3[2];\n}",
+      "proto": {
+        "DmaSpriteToObjVram": {
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/macabeus/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/gfx.c#L349-L360"
+    },
+    {
+      "sym": "StreamCmd_SetWindowRegs",
+      "features": [
+        "mmio",
+        "pointer",
+        "bitwise",
+        "global"
+      ],
+      "funcC": "void StreamCmd_SetWindowRegs(void) {\n    vu16 *reg = &REG_WININ;\n    u8 **streamPtrAddr = &gStreamPtr;\n    u8 *stream = *streamPtrAddr;\n\n    *reg = stream[2] | (stream[3] << 8);\n    reg++;\n    *reg = stream[4] | (stream[5] << 8);\n    *streamPtrAddr = stream + 6;\n}",
+      "proto": {
+        "StreamCmd_SetWindowRegs": {
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/macabeus/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/gfx.c#L667-L676"
+    },
+    {
+      "sym": "RollRandomLevelVariant",
+      "features": [
+        "arithmetic",
+        "call",
+        "global",
+        "bitwise"
+      ],
+      "funcC": "void RollRandomLevelVariant(void) {\n    u8 *state = gGameFlags;\n    u8 difficulty = state[0x0C];\n    u32 difficultyIndex = (u8)(difficulty - 1);\n    u32 rng = thunk_sub_080002A0();\n    u8 *levelState = gControlBlock;\n    u32 parity = difficultyIndex & 1;\n    u32 variant = sub_0805193C((u8)rng, 5 - difficultyIndex);\n    levelState[0x0E] = parity + variant + 1;\n}",
+      "prependC": "u32 thunk_sub_080002A0(void);\nu32 sub_0805193C(u8, u32);",
+      "proto": {
+        "RollRandomLevelVariant": {
+          "returnsVoid": true
+        }
+      },
+      "sourceUrl": "https://github.com/macabeus/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/code_3.c#L80-L89"
+    },
+    {
+      "sym": "TransformSingleEntityToScreen",
+      "features": [
+        "global",
+        "struct",
+        "array",
+        "switch",
+        "arithmetic"
+      ],
+      "funcC": "void TransformSingleEntityToScreen(u8 arg0, s8 arg1, s8 arg2) {\n    s32 temp_r0;\n    s32 temp_r0_2;\n    s16 temp_r1;\n    s16 temp_r2;\n    s32 var_r2;\n    s32 var_r4;\n    struct Unk_0300466C_4 *var_r0;\n\n    arg1++, arg1--; /* fake */\n    gUnk_03002920[arg0].xPosScreen = gUnk_03002920[arg0].xPosBg2 - arg1 - gUnk_03003430.bg2HOfs;\n    gUnk_03002920[arg0].yPosScreen = gUnk_03002920[arg0].yPosBg2 - arg2 - gUnk_03003430.bg2VOfs;\n\n    temp_r1 = gUnk_03003430.bg2HOfs - gUnk_03002920[arg0].xPosScreen;\n    temp_r2 = gUnk_03003430.bg2VOfs - gUnk_03002920[arg0].yPosScreen;\n\n    temp_r0 = temp_r1 * gBg2XMag;\n    if (temp_r0 < 0) {\n        temp_r0 += 0xFF;\n    }\n    var_r4 = temp_r0 >> 8;\n\n    temp_r0_2 = temp_r2 * gBg2YMag;\n    if (temp_r0_2 < 0) {\n        temp_r0_2 += 0xFF;\n    }\n    var_r2 = temp_r0_2 >> 8;\n\n    var_r4 = gUnk_03003430.bg2HOfs - var_r4;\n    if (arg0 > 0xC) {\n        var_r0 = (void *)gUnk_030051DC[arg0 - 0xD].unk4;\n    } else {\n        var_r0 = gUnk_08078FC8[arg0].unk4;\n    }\n\n    switch (var_r0->shape_size & 0xF) {\n        case 3:\n        case 11:\n            var_r2 = gUnk_03003430.bg2VOfs - var_r2 + ((0x100 - gBg2YMag) >> 3);\n            break;\n        case 1:\n        case 6:\n        case 8:\n            var_r2 = gUnk_03003430.bg2VOfs - var_r2 + ((0x100 - gBg2YMag) >> 5);\n            break;\n        case 0:\n        case 4:\n        case 5:\n            var_r2 = gUnk_03003430.bg2VOfs - var_r2 + ((0x100 - gBg2YMag) >> 6);\n            break;\n        default:\n            var_r2 = gUnk_03003430.bg2VOfs - var_r2 + ((0x100 - gBg2YMag) >> 4);\n            break;\n    }\n\n    gUnk_03002920[arg0].xPosScreen = var_r4;\n    gUnk_03002920[arg0].yPosScreen = var_r2;\n}",
+      "sourceUrl": "https://github.com/macabeus/kl-eod-decomp/blob/ebe9bd0eccaa3a763a96321af92e17fdede003c4/src/code_0.c#L1407-L1464"
+    },
+    {
+      "sym": "CopyBGScrollTiles",
+      "features": [
+        "global",
+        "array",
+        "loop",
+        "branch"
+      ],
+      "funcC": "void CopyBGScrollTiles(void) {\n    u32 var_r5;\n    u32 var_r6;\n\n    for (var_r6 = 0; var_r6 < 3; var_r6++) {\n        if (var_r6 < gUnk_03005220.hearts) {\n            var_r5 = 0;\n        } else {\n            var_r5 = 2;\n        }\n        gBgTilemapBufs[0][(var_r6 * 2) + 0x241] = gBgTilemapBufs[0][(var_r6 * 2) + ((var_r5 + 0x14) << 5)];\n        gBgTilemapBufs[0][(var_r6 * 2) + 0x242] = gBgTilemapBufs[0][(var_r6 * 2 + 1) + ((var_r5 + 0x14) << 5)];\n        gBgTilemapBufs[0][(var_r6 * 2) + 0x261] = gBgTilemapBufs[0][(var_r6 * 2) + ((var_r5 + 0x15) << 5)];\n        gBgTilemapBufs[0][(var_r6 * 2) + 0x262] = gBgTilemapBufs[0][(var_r6 * 2 + 1) + ((var_r5 + 0x15) << 5)];\n    }\n}",
+      "sourceUrl": "https://github.com/macabeus/kl-eod-decomp/blob/ebe9bd0eccaa3a763a96321af92e17fdede003c4/src/code_1.c#L1165-L1180",
+      "m2cCtx": true
+    },
+    {
+      "sym": "UpdateHUDCounterDisplay",
+      "features": [
+        "global",
+        "array",
+        "branch",
+        "soft-div"
+      ],
+      "funcC": "s32 UpdateHUDCounterDisplay(void) {\n    s32 var_r5;\n    s32 var_sb;\n\n    var_sb = 0;\n    if ((gUnk_03004C20.unkA == 1) || (gUnk_03004C20.level == 6)) {\n        var_r5 = 0x64;\n    } else {\n        var_r5 = 0x1E;\n    }\n    if (var_r5 == gUnk_03005220.dreamStones) {\n        var_sb = 1;\n    }\n\n    if ((gUnk_03004C20.unkA == 1) || (gUnk_03004C20.level == 6)) {\n        var_r5 = 1;\n        if (gUnk_03005220.dreamStones > 0x63) {\n            gBgTilemapBufs[0][0x252] += 0;\n            gBgTilemapBufs[0][0x252] = gBgTilemapBufs[0][0x293];\n            gBgTilemapBufs[0][0x272] += 0;\n            gBgTilemapBufs[0][0x272] = gBgTilemapBufs[0][0x2B3];\n        }\n    } else {\n        var_r5 = 0;\n    }\n\n    if (gUnk_03005220.dreamStones > 9) {\n        gBgTilemapBufs[0][0x254 - var_r5] = gBgTilemapBufs[0][(gUnk_03005220.dreamStones / 10) + 0x292];\n        gBgTilemapBufs[0][0x274 - var_r5] = gBgTilemapBufs[0][(gUnk_03005220.dreamStones / 10) + 0x2B2];\n    }\n\n    gBgTilemapBufs[0][0x255 - var_r5] = gBgTilemapBufs[0][(gUnk_03005220.dreamStones % 10) + 0x292];\n    gBgTilemapBufs[0][0x275 - var_r5] = gBgTilemapBufs[0][(gUnk_03005220.dreamStones % 10) + 0x2B2];\n    return var_sb;\n}",
+      "sourceUrl": "https://github.com/macabeus/kl-eod-decomp/blob/ebe9bd0eccaa3a763a96321af92e17fdede003c4/src/code_1.c#L1184-L1218",
+      "m2cCtx": true
+    },
+    {
+      "sym": "CheckWorldCompletion",
+      "features": [
+        "global",
+        "struct",
+        "nested-loop",
+        "bitwise",
+        "branch"
+      ],
+      "funcC": "u8 CheckWorldCompletion(u8 arg0) {\n    u32 var_r0;\n    u32 var_r2;\n    u8 var_sl;\n    u8 var_ip;\n    u8 var_r6;\n    u8 var_r8;\n    u8 v50;\n    if (arg0 < 4) {\n        if (((gUnk_03004670->unk8[arg0][7] & 0x80) != 0) && ((gUnk_03004670->unk8[arg0 + 1][0] & 0x7F) != 0x7F))\n            return 1;\n    } else if ((gUnk_03004670->unk8[5][7] & 0x80) != 0) {\n        var_r8 = 0;\n        var_ip = 0;\n        var_r6 = 0;\n        var_sl = 0;\n        for (var_r0 = 0; var_r0 < 5; var_r0++) {\n            for (var_r2 = 0; var_r2 < 7; var_r2++) {\n                if ((var_r2 == 3 || var_r2 == 5) && (gUnk_03004670->unk8[var_r0][var_r2] & 0x7F) == 0x64)\n                    var_r8 += 1;\n                else if ((var_r2 != 7) && ((gUnk_03004670->unk8[var_r0][var_r2] & 0x7F) == 0x1E))\n                    var_ip += 1;\n                if (gUnk_03004670->unk8[var_r0][var_r2] & 0x80)\n                    var_r6 += 1;\n            }\n        }\n        v50 = gUnk_03004670->unk8[5][0] & 0x7F;\n        if (v50 == 0x1E)\n            var_sl += 1;\n        if ((gUnk_03004670->unk8[5][1] & 0x7F) == 0x1E)\n            var_sl += 1;\n        if ((arg0 == 4) && (v50 != 0x7F) && (var_r6 == 0x23))\n            return 1;\n        if ((arg0 == 5) && ((gUnk_03004670->unk8[5][1] & 0x7F) != 0x7F) && ((var_ip + var_r8) > 0x18))\n            return 1;\n        if ((arg0 == 6) && ((gUnk_03004670->unk8[5][2] & 0x7F) != 0x7F) && ((var_ip + var_r8 + var_sl) == 0x25))\n            return 1;\n    }\n    return 0;\n}",
+      "sourceUrl": "https://github.com/macabeus/kl-eod-decomp/blob/ebe9bd0eccaa3a763a96321af92e17fdede003c4/src/code_3.c#L1752-L1791"
+    },
+    {
+      "sym": "UpdateWorldMapNodeTile",
+      "features": [
+        "global",
+        "array",
+        "branch",
+        "table"
+      ],
+      "funcC": "void UpdateWorldMapNodeTile(u8 arg0) {\n    vu32 a; // Required to match\n    if (arg0 < 4) {\n        gBgTilemapBufs[1][gUnk_08116748[arg0][0] + (gUnk_08116748[arg0][1] << 5)]\n            = gBgTilemapBufs[1][((gUnk_08116880[arg0] + 0x1C) * 0x20) + 0];\n        gBgTilemapBufs[1][gUnk_08116748[arg0][2] + (gUnk_08116748[arg0][3] << 5)]\n            = gBgTilemapBufs[1][((gUnk_08116880[arg0] + 0x1C) * 0x20) + 1];\n        gBgTilemapBufs[1][gUnk_08116748[arg0][4] + (gUnk_08116748[arg0][5] << 5)]\n            = gBgTilemapBufs[1][((gUnk_08116880[arg0] + 0x1C) * 0x20) + 2];\n        gBgTilemapBufs[1][gUnk_08116748[arg0][6] + (gUnk_08116748[arg0][7] << 5)]\n            = gBgTilemapBufs[1][((gUnk_08116880[arg0] + 0x1C) * 0x20) + 3];\n    } else {\n        gBgTilemapBufs[1][gUnk_08116748[arg0][0] + (gUnk_08116748[arg0][1] << 5)]\n            = gBgTilemapBufs[1][((gUnk_08116880[arg0] + 0x1C) * 0x20) + 4];\n        gBgTilemapBufs[1][gUnk_08116748[arg0][2] + (gUnk_08116748[arg0][3] << 5)]\n            = gBgTilemapBufs[1][((gUnk_08116880[arg0] + 0x1C) * 0x20) + 5];\n        gBgTilemapBufs[1][gUnk_08116748[arg0][4] + (gUnk_08116748[arg0][5] << 5)]\n            = gBgTilemapBufs[1][((gUnk_08116880[arg0] + 0x1C) * 0x20) + 6];\n        gBgTilemapBufs[1][gUnk_08116748[arg0][6] + (gUnk_08116748[arg0][7] << 5)]\n            = gBgTilemapBufs[1][((gUnk_08116880[arg0] + 0x1C) * 0x20) + 7];\n    }\n}",
+      "sourceUrl": "https://github.com/macabeus/kl-eod-decomp/blob/ebe9bd0eccaa3a763a96321af92e17fdede003c4/src/code_3.c#L1849-L1870",
+      "m2cCtx": true
+    },
+    {
+      "sym": "UpdateFadeEffect",
+      "features": [
+        "mmio",
+        "global",
+        "call"
+      ],
+      "funcC": "void UpdateFadeEffect(void) {\n    vu8 *vcount_reg = &REG_VCOUNT_L;\n    u8 *entity = gEntityArray;\n    u8 fade = sub_08051A0C(*vcount_reg, entity[0x08]);\n\n    if (fade <= 16) {\n        REG_BLDALPHA = ((u32)fade << 8) | fade;\n    }\n}",
+      "sourceUrl": "https://github.com/macabeus/kl-eod-decomp/blob/ebe9bd0eccaa3a763a96321af92e17fdede003c4/src/engine.c#L48-L56",
+      "m2cCtx": true
+    },
+    {
+      "sym": "StreamCmd_SetBGScroll",
+      "features": [
+        "global",
+        "struct",
+        "pointer",
+        "call"
+      ],
+      "funcC": "void StreamCmd_SetBGScroll(void) {\n    u16 scrollX = ReadUnalignedU16(gStreamPtr + 3);\n    struct BGLayerState *tbl = gBGLayerState;\n    u8 *p = gStreamPtr;\n    u16 scrollY;\n    u8 *p2;\n    tbl[p[2]].scrollX = scrollX << 4;\n    scrollY = ReadUnalignedU16(p + 5);\n    p2 = gStreamPtr;\n    tbl[p2[2]].scrollY = scrollY << 4;\n    gStreamPtr = p2 + 7;\n}",
+      "sourceUrl": "https://github.com/macabeus/kl-eod-decomp/blob/ebe9bd0eccaa3a763a96321af92e17fdede003c4/src/gfx.c#L429-L440"
+    }
+  ]
+}
