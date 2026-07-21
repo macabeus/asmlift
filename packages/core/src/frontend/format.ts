@@ -9,12 +9,14 @@
 // hand-written instructions) stays "unknown" and flows through to the frontend — the
 // decode-level loud-fail nets still own that case.
 import { FrontendUnsupportedError } from './errors';
+import { isSplatMips } from './splat';
 
-export type AsmTextFormat = 'objdump' | 'gnu-as';
+export type AsmTextFormat = 'objdump' | 'gnu-as' | 'splat';
 
 const FORMAT_LABEL: Record<AsmTextFormat, string> = {
   objdump: 'objdump disassembly (`objdump -d --no-show-raw-insn` output)',
   'gnu-as': 'GNU-as assembly text (compiler-emitted `.s`)',
+  splat: 'Splat-disassembled MIPS (`glabel` + `/* rom vram bytes */` `.s`)',
 };
 
 // objdump output: `ADDR <sym>:` section headers, address-prefixed instruction lines, or the
@@ -23,8 +25,13 @@ const OBJDUMP_SIGNAL = /^[0-9a-f]{2,} <[^>]+>:|^\s+[0-9a-f]+:\t|file format /im;
 const GNU_AS_SIGNAL =
   /^\s*\.(text|code|align|globl|global|thumb_func|section|syntax|arch|cpu|set|ent|type|size|file)\b/im;
 
-/** Classify assembly TEXT by positive signals; "unknown" when neither (or both) match. */
+/** Classify assembly TEXT by positive signals; "unknown" when neither (or both) match. Splat is
+ *  checked FIRST: its files also carry GNU-as directives (`.section`/`.align`), so a bare gnu-as
+ *  match would mislabel them — the Splat-specific `glabel`/instruction-comment signal is decisive. */
 export function classifyAsmText(text: string): AsmTextFormat | 'unknown' {
+  if (isSplatMips(text)) {
+    return 'splat';
+  }
   const objdump = OBJDUMP_SIGNAL.test(text);
   const gnuAs = GNU_AS_SIGNAL.test(text);
   if (objdump === gnuAs) {
@@ -42,6 +49,7 @@ export function assertInputFormat(frontendId: string, expected: AsmTextFormat, a
   }
   throw new FrontendUnsupportedError(
     `cannot lift: input looks like ${FORMAT_LABEL[got]}, but the '${frontendId}' frontend reads ` +
-      `${FORMAT_LABEL[expected]} — MIPS/PPC targets take objdump output; the ARM/agbcc target takes agbcc .s text`,
+      `${FORMAT_LABEL[expected]} — the ARM/agbcc target takes agbcc .s text; MIPS/PPC take objdump output ` +
+      `(the MIPS frontend also reads Splat .s)`,
   );
 }

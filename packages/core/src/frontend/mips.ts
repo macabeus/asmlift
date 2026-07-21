@@ -30,6 +30,7 @@ import { FrontendUnsupportedError } from './errors';
 import { assertInputFormat } from './format';
 import type { Frontend } from './frontend';
 import { opaqueDest } from './opaque';
+import { isSplatMips, parseSplatMips } from './splat';
 import { abiSortEntryParams } from './ssa';
 import { makeSsaBuilder } from './ssa';
 
@@ -370,8 +371,15 @@ export function lift(
   _prototypes: Prototypes = {},
   asmData?: AsmData,
 ): Fn {
-  assertInputFormat('mips', 'objdump', asm);
-  const instrs = parseDisasm(sliceSymbol(asm, name)); // ONE function only — an absent symbol declines loud
+  // Two input dialects reach this frontend: `objdump -d` text (IDO/KMC — no compiler-emitted asm),
+  // and Splat-disassembled `.s` (pmret-style N64 projects). Splat is normalised to the SAME
+  // DisasmInstr[] shape (frontend/splat.ts) so everything below is dialect-agnostic.
+  const splat = isSplatMips(asm);
+  if (!splat) {
+    assertInputFormat('mips', 'objdump', asm);
+  }
+  // ONE function only — an absent symbol declines loud (either dialect's slicer enforces this).
+  const instrs = splat ? parseSplatMips(asm, name) : parseDisasm(sliceSymbol(asm, name));
   if (instrs.length === 0) {
     throw new FrontendUnsupportedError(`cannot lift '${name}': no instructions found in the input text`);
   }

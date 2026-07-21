@@ -22,11 +22,15 @@ test('decompiles agbcc .s text (name from .globl)', async () => {
   expect(r.stdout).toBe('s32 clamp0(s32 a0) {\n    if (a0 < 0) a0 = 0;\n    return a0;\n}\n');
 });
 
-test('name detection covers objdump headers, .globl, and bare labels', async () => {
+test('name detection covers objdump headers, Splat glabel, .globl, and bare labels', async () => {
   expect(detectName('00000000 <add1>:\n   0:\tjr\tra\n')).toBe('add1');
   expect(detectName(corpus('agbcc-clamp0.s'))).toBe('clamp0');
   expect(detectName('foo:\n\tnop\n')).toBe('foo');
   expect(detectName('\t.text\n')).toBeUndefined();
+  // Splat `.s`: the `glabel` marker names the function (no --name needed for single-function files)
+  expect(detectName('glabel func_80022198_22D98\n    /* 100 80000100 03E00008 */  jr $ra\n')).toBe(
+    'func_80022198_22D98',
+  );
 });
 
 test('usage errors: unknown target, missing input, missing flag value', async () => {
