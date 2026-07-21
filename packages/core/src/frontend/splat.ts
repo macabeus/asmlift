@@ -15,10 +15,10 @@
 //   • constant immediate EXPRESSIONS (`(0x660104 >> 16)`, `(x & 0xFFFF)`) — the assembler's hi/lo
 //     split of a 32-bit literal, evaluated here to the plain number the decode switch parses.
 //
-// `%hi`/`%lo` (and the other GOT/PIC relocation operands) are declined LOUD: MIPS *global* data
-// access is not modelled — exactly as the objdump/IDO path declines its gp-relative equivalent.
-// A silent NaN immediate (what `parseImm('%hi(SYM)')` would produce) is the cardinal-rule failure
-// this decline exists to prevent.
+// `%hi`/`%lo` operands (a global's address) are preserved verbatim so the MIPS frontend can fold
+// them into a `gaddr` (frontend/mips.ts). The other GOT/PIC relocations (`%gp_rel`, `%got`, …) are
+// declined LOUD — small-data / position-independent access is not modelled. Preserving rather than
+// blindly evaluating is what keeps `parseImm('%hi(SYM)')` from silently becoming a NaN immediate.
 import type { DisasmInstr } from './disasm';
 import { FrontendUnsupportedError } from './errors';
 
@@ -28,8 +28,10 @@ const INSN_LINE = /^\/\*\s*[0-9A-Fa-f]+\s+([0-9A-Fa-f]+)\s+[0-9A-Fa-f]+\s*\*\/\s
 const INSN_SIGNAL = /\/\*\s*[0-9A-Fa-f]+\s+[0-9A-Fa-f]+\s+[0-9A-Fa-f]+\s*\*\//;
 // A local-label DEFINITION on its own line (`.L800011C0_1DC0:`); the colon is required.
 const LABEL_DEF = /^(\.[\w.$]+):$/;
-// A GOT/PIC/hi-lo relocation operand — global data access, declined loud (see the file header).
-const RELOC_OP = /%(hi|lo|gp_rel|gprel|got|call16|call_hi|call_lo|higher|highest|neg|tprel|dtprel)\b/i;
+// A GOT/PIC relocation operand this reader does not support (small-data / position-independent
+// access) — declined loud. `%hi`/`%lo` are NOT here: they name a global's address and are preserved
+// verbatim for the MIPS frontend to fold into a `gaddr` (see normalizeOperand / frontend/mips.ts).
+const RELOC_OP = /%(gp_rel|gprel|got|call16|call_hi|call_lo|higher|highest|neg|tprel|dtprel)\b/i;
 // Data directives whose bytes could encode an effect: skipping one inside a function slice would
 // silently delete it, so they decline (mirrors the Thumb frontend's in-code-data guard).
 const DATA_DIRECTIVE =
@@ -192,11 +194,17 @@ function splitOperands(s: string): string[] {
 
 // Rewrite one Splat operand into the canonical objdump spelling the frontend consumes: strip the
 // `$` register sigil, fold a memory operand's displacement expression, evaluate a bare constant
-// expression, and decline a global relocation operand.
+// expression, preserve a `%hi`/`%lo` global reference, and decline an unsupported PIC relocation.
 function normalizeOperand(name: string, op: string): string {
+  // `%hi(SYM)` / `%lo(SYM + N)` / `%lo(SYM)(base)` — a global's address. Preserved verbatim (with a
+  // de-sigiled base) for the MIPS frontend to fold into a `gaddr`; NOT declined like the PIC relocs.
+  const hilo = op.match(/^(%(?:hi|lo)\([^)]*\))(?:\((\$?[A-Za-z]\w*)\))?$/);
+  if (hilo) {
+    return hilo[2] ? `${hilo[1]}(${hilo[2].replace(/^\$/, '')})` : hilo[1];
+  }
   if (RELOC_OP.test(op)) {
     throw new FrontendUnsupportedError(
-      `cannot lift '${name}': relocation operand '${op}' (global / PIC data access) — MIPS global data access is not yet modelled`,
+      `cannot lift '${name}': relocation operand '${op}' (small-data / PIC data access) — not modelled`,
     );
   }
   // Memory operand `DISP(base)` — base is a register (letter-first), DISP a constant/expression.

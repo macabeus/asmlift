@@ -97,6 +97,17 @@ export function assertDerefsTyped(sfn: SFn): void {
         }
       }
     }
+    // A bare global ADDRESS `&SYM` under `+`/`-` is an ESCAPING interior pointer: C scales the byte
+    // offset by sizeof(SYM), which is unknown for a header-typed global, so `&SYM + N` is byte-
+    // inexact. A load/store base folds the offset byte-correctly (globalOf turns `&SYM + N` into an
+    // `index`/`field` node whose base is a bare `addr`, never an `addr` under a `bin`), so an `addr`
+    // reaching a `+`/`-` operand here escaped to a value context — flag it rather than emit wrong bytes.
+    if (e.k === 'bin' && (e.op === '+' || e.op === '-')) {
+      const addrSide = e.l.k === 'addr' ? e.l : e.r.k === 'addr' ? e.r : undefined;
+      if (addrSide) {
+        bad.push(`interior pointer arithmetic on the global address '&${addrSide.name}'`);
+      }
+    }
     // `!p` is legal C (pointer truthiness); `-p`/`~p` are not.
     if (e.k === 'un' && e.op !== '!' && ctype(e.e)?.kind === 'ptr') {
       bad.push(`pointer operand under unary '${e.op}'`);

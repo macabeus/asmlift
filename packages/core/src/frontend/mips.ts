@@ -88,6 +88,23 @@ const isXfer = (ins: Instr) => isReturn(ins) || isUncond(ins) || isCond(ins);
 // `sll`+`addu` before the access, so no `base+index` addressing form appears in parseMem input.
 const parseDisasm = (disasm: string): Instr[] => parseSharedDisasm(disasm);
 
+// A MIPS `%hi`/`%lo` relocation operand — the assembler's HI16/LO16 split that materialises the
+// address of a named global: `%hi(SYM)`, `%lo(SYM)`, `%hi(SYM + N)`, or the memory form
+// `%lo(SYM + N)(base)`. Splat spells global access this way and the Splat parser preserves it
+// verbatim (frontend/splat.ts); `lift` folds a `lui %hi` + its consuming `%lo` into a single
+// `gaddr(SYM)` (the same op the Thumb frontend emits for a pool-loaded global), carrying the
+// addend as the access offset. Returns null for a non-`%hi/%lo` operand. The objdump dialect never
+// produces these (IDO resolves globals via `gp`), so this path is Splat-only.
+function parseReloc(kind: 'hi' | 'lo', operand: string): { sym: string; addend: number; base?: string } | null {
+  const m = operand.match(
+    new RegExp(String.raw`^%${kind}\(\s*([A-Za-z_.$][\w.$]*)\s*(?:\+\s*(0x[0-9a-fA-F]+|\d+))?\s*\)(?:\((\w+)\))?$`),
+  );
+  if (!m) {
+    return null;
+  }
+  return { sym: m[1], addend: m[2] ? parseImm(m[2]) : 0, base: m[3] };
+}
+
 interface MipsBlock {
   startAddr: number;
   body: Instr[]; // computation instructions (excludes the branch and its delay slot)
@@ -459,9 +476,30 @@ export function lift(
 
   const fillBlock = (b: MipsBlock, bi: number) => {
     const ops = irBlocks[bi].ops;
+    // Pending `lui rX, %hi(SYM)` relocations awaiting their consuming `%lo` (a load/store base or an
+    // `addiu`). Block-local: the pair is emitted adjacently, so a `%lo` with no matching in-scope
+    // `%hi` (a cross-block or gp-relative access) declines LOUD rather than fabricating a base.
+    const hiReloc = new Map<string, { sym: string; addend: number }>();
+    // Materialise the address of a named global — the same `gaddr` op the Thumb frontend emits; the
+    // structurer lowers a load/store through it to `SYM` (scalar) or `((T *)&SYM)[i]` (aggregate).
+    const emitGaddr = (sym: string): Value => {
+      const g = mkValue(T.unk(32));
+      ops.push(mkOp('gaddr', { results: [g], attrs: { sym } }));
+      return g;
+    };
     const read = (r: string): Value => {
       if (isZero(r)) {
         return constVal(0);
+      }
+      // A `%hi(SYM)` register read as DATA before its `%lo` completes the address is a split hi/lo
+      // relocation (the high half used alone) this frontend does not model — decline rather than
+      // treat the partial address as a value. The legit consumers (load/store/addiu `%lo`) validate
+      // `hiReloc` directly and never route the base through `read`, so this fires only on misuse.
+      const hr = hiReloc.get(r);
+      if (hr) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': %hi(${hr.sym}) register used as data before a matching %lo — split hi/lo relocation not modelled`,
+        );
       }
       // Reading `sp` as a DATA operand means frame-pointer arithmetic or an address-taken local
       // (`addiu a0,sp,8` = `&local`) — not modellable without a stack abstraction. Fabricating a
@@ -485,6 +523,10 @@ export function lift(
       return readVar(r, bi);
     };
     const write = (r: string, v: Value) => {
+      // Writing a register clears any pending `%hi` it held — the high-half address is gone once the
+      // register is reassigned (e.g. `lw rHi, %lo(SYM)(rHi)` reuses the base as the load dest). A
+      // `%hi` NOT overwritten persists across multiple `%lo` uses (the read-modify-write idiom).
+      hiReloc.delete(r);
       if (!isZero(r)) {
         writeVar(r, bi, v);
       }
@@ -535,6 +577,22 @@ export function lift(
         // and raise/const.ts folds the const/const pair into one 32-bit const — the form that
         // recompiles to this exact `lui;ori`.
         case 'lui':
+          // `lui rD, %hi(SYM)` is the high half of a global's address — record it, pending the `%lo`
+          // that completes it (below), instead of materialising a bogus numeric const. rD's SSA value
+          // is deliberately NOT written: the high half is meaningless alone, so the `gaddr` is emitted
+          // at the consuming `%lo`. A read of rD as data before that is caught by the `read` guard;
+          // an UNconsumed `%hi` (no `%lo`) is a dead `lui` whose rD is never read — the residual case
+          // (an unconsumed `%hi` reg read via a `readVar` bypass) does not occur in compiler output.
+          if (s.startsWith('%')) {
+            const hi = parseReloc('hi', s);
+            if (!hi) {
+              throw new FrontendUnsupportedError(`cannot lift '${name}': unsupported relocation immediate '${s}'`);
+            }
+            if (!isZero(d)) {
+              hiReloc.set(d, { sym: hi.sym, addend: hi.addend });
+            }
+            break;
+          }
           write(d, constVal((parseImm(s) << 16) >> 0));
           break;
         case 'addiu':
@@ -543,6 +601,24 @@ export function lift(
           // keys slots by literal sp-offset, so the frame base never needs a value). Skip it,
           // mirroring PPC's `addi r1`. Any OTHER read of sp falls through to `read`, which loud-fails.
           if (isStackPtr(d)) {
+            break;
+          }
+          // `addiu rD, rHi, %lo(SYM)` completes a global's address materialised by a `lui %hi(SYM)`:
+          // rD = &SYM (+ addend for a byte offset into the global). Emits the shared `gaddr` op.
+          if (t.startsWith('%')) {
+            const lo = parseReloc('lo', t);
+            const hr = lo ? hiReloc.get(s) : undefined;
+            if (!lo || !hr || hr.sym !== lo.sym || hr.addend !== lo.addend) {
+              throw new FrontendUnsupportedError(
+                `cannot lift '${name}': %lo relocation '${t}' with no matching in-scope %hi — split/cross-block hi/lo not modelled`,
+              );
+            }
+            // `&SYM` (addend 0), or `&SYM + N` for a byte offset into the global. The `add` tree is
+            // folded byte-correctly by memAccess when this address is a load/store base; if it
+            // instead ESCAPES as a value, `assertDerefsTyped` declines it (the byte offset would
+            // element-scale in C) — see the interior-global-pointer guard there.
+            const g = emitGaddr(lo.sym);
+            lo.addend !== 0 ? emitBin('add', d, g, constVal(lo.addend)) : write(d, g);
             break;
           }
           if (isZero(s)) {
@@ -714,6 +790,16 @@ export function lift(
     // drop its destination register — emit an honest `opaque`: dead ⇒ it vanishes; live ⇒
     // assertResolved fails LOUD (see frontend/opaque.ts for the policy).
     const emitOpaqueDest = (ins: Instr) => {
+      // A `%hi`/`%lo` operand on an instruction NOT modelled as a global consumer — an FP load/store
+      // (`lwc1`/`ldc1`), or any unmodelled op — reaches here (the modelled consumers handle their own
+      // `%hi`/`%lo` and return before the default case). Dropping it to an opaque would silently
+      // delete the global access (its base is not a bare register the opaque srcReg scan can see), so
+      // decline LOUD rather than lose it.
+      if (ins.ops.some((o) => o.startsWith('%'))) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': unmodelled instruction '${ins.mnemonic}' with a %hi/%lo global operand — not modelled`,
+        );
+      }
       // storeClass: unmodelled MIPS stores — incl. the unaligned pair swl/swr and the FPU stores,
       // whose FIRST token is a register (a SOURCE, not a dest) that would otherwise fabricate an
       // opaque write to it while dropping the real memory write.
@@ -738,7 +824,30 @@ export function lift(
     };
     const emitUn = kit.un;
     const emitShImm = (opc: Opcode, d: string, x: Value, sa: string) => kit.shImm(opc, d, x, parseImm(sa));
+    // Resolve a `%lo(SYM + N)(rHi)` memory operand to a global address: validate it pairs with an
+    // in-scope `%hi`, emit the `gaddr`, and return it as the base with the addend as the access
+    // offset. A non-`%lo` operand returns null (the caller falls through to the normal off(base)).
+    const globalBase = (mem: string): { base: Value; off: number } | null => {
+      if (!mem.startsWith('%')) {
+        return null;
+      }
+      const lo = parseReloc('lo', mem);
+      const hr = lo && lo.base ? hiReloc.get(lo.base) : undefined;
+      if (!lo || !lo.base || !hr || hr.sym !== lo.sym || hr.addend !== lo.addend) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': %lo access '${mem}' with no matching in-scope %hi — split/cross-block hi/lo not modelled`,
+        );
+      }
+      return { base: emitGaddr(lo.sym), off: lo.addend };
+    };
     const emitLoad = (d: string, mem: string, width: number, signed: boolean) => {
+      const g = globalBase(mem);
+      if (g) {
+        const res = mkValue(T.unk(32));
+        ops.push(mkOp('load', { operands: [g.base], results: [res], attrs: { off: g.off, width, signed } }));
+        write(d, res);
+        return;
+      }
       const { off, base } = parseMem(mem);
       // A word reload from a stack slot is transparent to dataflow — the SAME value spilled — so
       // route it through the slot SSA variable, not a `load` through `sp` (which would make `sp` a
@@ -764,6 +873,11 @@ export function lift(
       write(d, res);
     };
     const emitStore = (srcReg: string, mem: string, width: number) => {
+      const g = globalBase(mem);
+      if (g) {
+        ops.push(mkOp('store', { operands: [g.base, read(srcReg)], attrs: { off: g.off, width } }));
+        return;
+      }
       const { off, base } = parseMem(mem);
       // A word spill to a stack slot (an argument home slot `sw a0,0(sp)`, or a local): record the
       // slot's value in SSA, do NOT emit a `store` through `sp`. A never-reloaded spill (the ABI
