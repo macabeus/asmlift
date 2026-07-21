@@ -1,8 +1,8 @@
 // Splat-dialect MIPS reader (frontend/splat.ts): the pmret/decomp.me `.s` flavour normalises into
 // the same DisasmInstr[] the objdump path yields. These pin the dialect-specific behaviour —
 // `glabel`/`endlabel` slicing, `/* rom vram bytes */` prefixes, `$`-register stripping, `.L`-label
-// branch targets, constant-expression immediates — plus the loud declines that keep a global
-// relocation (`%hi`/`%lo`) from silently becoming a NaN immediate.
+// branch targets, constant-expression immediates, and `%hi`/`%lo` global recovery (the pair folds
+// to a `gaddr`) — plus the loud declines (unpaired `%lo`, PIC relocs, in-code data, tail calls).
 import { expect, test } from 'vitest';
 
 import { FrontendUnsupportedError } from '../src/frontend/errors';
@@ -48,7 +48,7 @@ glabel add2
 endlabel add2
 `;
 
-// A global access (`%hi`/`%lo`) — not modelled; must decline loud, never a NaN immediate.
+// A scalar global read via the `%hi`/`%lo` pair — recovers to the bare global name `D_800A2884`.
 const SPLAT_GLOBAL = `glabel getGlobal
     /* 200 80000200 3C02800A */  lui        $v0, %hi(D_800A2884)
     /* 204 80000204 03E00008 */  jr         $ra
@@ -87,12 +87,81 @@ test('splat: the requested name selects ITS function; an absent symbol declines 
   expect(() => parseSplatMips(SPLAT_TWO, 'ghost')).toThrow(/functions present: add1, add2/);
 });
 
-test('splat: a global relocation operand declines loud, never a NaN immediate', () => {
-  expect(() => decompile('getGlobal', SPLAT_GLOBAL, MIPS_IDO)).toThrow(FrontendUnsupportedError);
-  expect(() => decompile('getGlobal', SPLAT_GLOBAL, MIPS_IDO)).toThrow(/%hi\(D_800A2884\).*global.*not yet modelled/);
-  // annotate mode names the gap instead of crashing
-  const annotated = decompile('getGlobal', SPLAT_GLOBAL, MIPS_IDO, { onGap: 'annotate' });
-  expect(annotated.source).toContain('ASMLIFT_ERROR');
+test('splat: a lui %hi + lw %lo pair recovers a scalar global read (bare name, no NaN)', () => {
+  // the whole point of preserving %hi/%lo: they fold to a `gaddr`, not a NaN immediate
+  expect(decompile('getGlobal', SPLAT_GLOBAL, MIPS_IDO).source).toBe(
+    's32 getGlobal(void) {\n    return D_800A2884;\n}\n',
+  );
+});
+
+test('splat: a read-modify-write through one global recovers to `g = g + 1`', () => {
+  const rmw = `glabel bump
+    /* 100 80000100 3C02800A */  lui        $v0, %hi(gCounter)
+    /* 104 80000104 8C430000 */  lw         $v1, %lo(gCounter)($v0)
+    /* 108 80000108 24630001 */  addiu      $v1, $v1, 1
+    /* 10C 8000010C 03E00008 */  jr         $ra
+    /* 110 80000110 AC430000 */   sw        $v1, %lo(gCounter)($v0)
+endlabel bump
+`;
+  expect(decompile('bump', rmw, MIPS_IDO).source).toContain('gCounter = gCounter + 1;');
+});
+
+test('splat: a %hi/%lo pair with an addend recovers an aggregate access through the symbol', () => {
+  // `%hi(SYM + 0x8)` / `%lo(SYM + 0x8)` → the global accessed at byte offset 8 → the `&`-address form
+  const agg = `glabel getField
+    /* 100 80000100 3C02800A */  lui        $v0, %hi(gStruct + 0x8)
+    /* 104 80000104 03E00008 */  jr         $ra
+    /* 108 80000108 8C420008 */   lw        $v0, %lo(gStruct + 0x8)($v0)
+endlabel getField
+`;
+  expect(decompile('getField', agg, MIPS_IDO).source).toContain('&gStruct');
+});
+
+test('splat: an escaping interior global pointer (&SYM + N as a value) declines, never element-scales', () => {
+  // `addiu a1, rHi, %lo(SYM + 0x18)` makes `&SYM + 24 bytes`; returning it as a VALUE would emit
+  // `&SYM + 24`, which C element-scales by sizeof(SYM). The structurer's interior-pointer guard
+  // declines rather than silently miscompile. (An addend that stays a load/store BASE is fine —
+  // memAccess folds it byte-correctly — so only the escaping form is caught.)
+  const interior = `glabel f
+    /* 100 80000100 3C05800A */  lui        $a1, %hi(GwPlayer + 0x18)
+    /* 104 80000104 24A50018 */  addiu      $a1, $a1, %lo(GwPlayer + 0x18)
+    /* 108 80000108 03E00008 */  jr         $ra
+    /* 10C 8000010C 00A01021 */   addu      $v0, $a1, $zero
+endlabel f
+`;
+  expect(() => decompile('f', interior, MIPS_IDO)).toThrow(/interior pointer arithmetic on the global address/);
+});
+
+test('splat: an FP global load (lwc1 %lo) declines loud, never a silently dropped access', () => {
+  const fp = `glabel getF
+    /* 100 80000100 3C02800A */  lui        $v0, %hi(gFloat)
+    /* 104 80000104 C4400000 */  lwc1       $f0, %lo(gFloat)($v0)
+    /* 108 80000108 03E00008 */  jr         $ra
+    /* 10C 8000010C 00000000 */   nop
+endlabel getF
+`;
+  expect(() => decompile('getF', fp, MIPS_IDO)).toThrow(/unmodelled instruction 'lwc1' with a %hi\/%lo/);
+});
+
+test('splat: an unpaired %lo (no matching %hi in scope) declines loud, never a fabricated base', () => {
+  const unpaired = `glabel f
+    /* 100 80000100 8C820000 */  lw         $v0, %lo(gX)($a0)
+    /* 104 80000104 03E00008 */  jr         $ra
+    /* 108 80000108 00000000 */   nop
+endlabel f
+`;
+  expect(() => decompile('f', unpaired, MIPS_IDO)).toThrow(/no matching in-scope %hi/);
+});
+
+test('splat: a GOT/PIC relocation operand still declines loud (small-data access not modelled)', () => {
+  const got = `glabel f
+    /* 100 80000100 8F820000 */  lw         $v0, %got(gX)($gp)
+    /* 104 80000104 03E00008 */  jr         $ra
+    /* 108 80000108 00000000 */   nop
+endlabel f
+`;
+  expect(() => decompile('f', got, MIPS_IDO)).toThrow(FrontendUnsupportedError);
+  expect(() => decompile('f', got, MIPS_IDO)).toThrow(/PIC data access/);
 });
 
 test('splat: a data directive in the code stream declines (no silent deletion)', () => {
