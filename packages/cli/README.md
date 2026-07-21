@@ -19,15 +19,14 @@ byte-compared with the community `objdiff` engine. Exit 0 means byte-exact match
 
 ## Inputs
 
-| Input                                   | Accepted for                                                                                                                                                                                                                                                                                        |
-| --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Compiler `.s` text (agbcc/GNU-as style) | `agbcc-arm`                                                                                                                                                                                                                                                                                         |
-| `objdump -d --no-show-raw-insn` text    | `ido-mips`, `gcc-mips`, `mwcc-ppc`                                                                                                                                                                                                                                                                  |
-| ELF object file (`.o`)                  | MIPS/PPC targets — the CLI disassembles it with the target family's objdump (`mips-linux-gnu-objdump` / `powerpc-eabi-objdump` from PATH, `ASMLIFT_{MIPS,PPC}_OBJDUMP`, or `tools.asmlift.objdump`) and extracts jump-table data automatically. No objdump ⇒ a loud error naming all three remedies |
-| `-` (stdin)                             | text formats only                                                                                                                                                                                                                                                                                   |
+| Input                                | Accepted for                       |
+| ------------------------------------ | ---------------------------------- |
+| Compiler `.s` text                   | All targets                        |
+| `objdump -d --no-show-raw-insn` text | `ido-mips`, `gcc-mips`, `mwcc-ppc` |
+| ELF object file (`.o`)               | MIPS/PPC targets                   |
+| `-` (stdin)                          | text formats only                  |
 
-Multi-function input is fine — `--name` (or the auto-detected symbol) selects one function.
-Feeding the wrong text format for a target is a clear error naming both formats.
+If the file includes multi-functions, pass the `--name` flag.
 
 ## CLI reference
 
