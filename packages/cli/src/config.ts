@@ -5,7 +5,7 @@
 // spec-compliant `tools.asmlift` block. Loader shape: upward walk trying decomp.yaml AND
 // decomp.yml, an explicit path short-circuits, `null` when absent — the config is an
 // enhancement, never required. One deliberate choice: on an ambiguous platform
-// (n64 ⇒ ido7.1 or gcc2.7.2kmc) asmlift DECLINES naming the candidates instead of falling back
+// (n64 ⇒ ido7.1, gcc2.7.2kmc or gcc2.7.2) asmlift DECLINES naming the candidates instead of falling back
 // to a generic default — per the cardinal rule, a guessed compiler mis-scores candidates.
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -13,7 +13,7 @@ import YAML from 'yaml';
 
 /** asmlift's payload inside `tools.asmlift` (arbitrary tool blocks are part of the spec). */
 export interface AsmliftToolConfig {
-  /** the asmlift target key (agbcc | ido7.1 | gcc2.7.2kmc | mwcc_242_81) — disambiguates
+  /** the asmlift target key (agbcc | ido7.1 | gcc2.7.2kmc | gcc2.7.2 | mwcc_242_81) — disambiguates
    *  platforms that map to several compilers */
   target?: string;
   /** candidate-compile command template ({{inputPath}}/{{outputPath}}/{{symbol}}) — the
@@ -87,7 +87,7 @@ function readConfig(path: string): LoadedConfig {
 // `tools.asmlift.target` to disambiguate (resolveTarget declines, listing these).
 const PLATFORM_TARGETS: Record<string, string[]> = {
   gba: ['agbcc'],
-  n64: ['ido7.1', 'gcc2.7.2kmc'],
+  n64: ['ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
   gc: ['mwcc_242_81'],
   gamecube: ['mwcc_242_81'],
   wii: ['mwcc_242_81'],

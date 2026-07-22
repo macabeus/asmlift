@@ -8,30 +8,30 @@ byte-compared with the community `objdiff` engine. Exit 0 means byte-exact match
 
 ## Features
 
-| Feature                   |                                                                                                                                                                                                              |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Decompile one function    | from compiler `.s` text, `objdump -d` text, or an ELF `.o`                                                                                                                                                   |
-| Verify byte-exactness     | `--score-against target.o` (the original object file — the 'target object') recompiles the output and objdiff-scores it — with **your** project's compiler                                                   |
-| Ranked candidates         | genuinely ambiguous choices (e.g. signedness) become candidates; the byte-diff picks the winner                                                                                                              |
-| `decomp.yaml` integration | inside a configured project, no flags needed — target and compiler come from [decomp_settings](https://github.com/ethteck/decomp_settings)                                                                   |
-| Honest failure            | what asmlift can't lift faithfully is annotated in-source (`ASMLIFT_ERROR`) or declined with a typed reason — never plausible wrong code                                                                     |
-| Four supported targets    | agbcc (GBA), IDO 7.1 (N64), KMC GCC (N64), CodeWarrior (GameCube) — the compiler families asmlift understands (calibration toolchains live in the repo's private `packages/toolchains`, not in this package) |
+| Feature                   |                                                                                                                                                                                                                               |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Decompile one function    | from compiler `.s` text, `objdump -d` text, or an ELF `.o`                                                                                                                                                                    |
+| Verify byte-exactness     | `--score-against target.o` (the original object file — the 'target object') recompiles the output and objdiff-scores it — with **your** project's compiler                                                                    |
+| Ranked candidates         | genuinely ambiguous choices (e.g. signedness) become candidates; the byte-diff picks the winner                                                                                                                               |
+| `decomp.yaml` integration | inside a configured project, no flags needed — target and compiler come from [decomp_settings](https://github.com/ethteck/decomp_settings)                                                                                    |
+| Honest failure            | what asmlift can't lift faithfully is annotated in-source (`ASMLIFT_ERROR`) or declined with a typed reason — never plausible wrong code                                                                                      |
+| Multiple targets          | agbcc (GBA), IDO 7.1 (N64), KMC GCC (N64), GCC 2.7.2 (N64), CodeWarrior (GameCube) — the compiler families asmlift understands (calibration toolchains live in the repo's private `packages/toolchains`, not in this package) |
 
 ## Inputs
 
-| Input                                | Accepted for                           |
-| ------------------------------------ | -------------------------------------- |
-| Compiler `.s` text                   | All targets                            |
-| `objdump -d --no-show-raw-insn` text | `ido7.1`, `gcc2.7.2kmc`, `mwcc_242_81` |
-| ELF object file (`.o`)               | MIPS/PPC targets                       |
-| `-` (stdin)                          | text formats only                      |
+| Input                                | Accepted for                                       |
+| ------------------------------------ | -------------------------------------------------- |
+| Compiler `.s` text                   | All targets                                        |
+| `objdump -d --no-show-raw-insn` text | `ido7.1`, `gcc2.7.2kmc`, `gcc2.7.2`, `mwcc_242_81` |
+| ELF object file (`.o`)               | MIPS/PPC targets                                   |
+| `-` (stdin)                          | text formats only                                  |
 
 If the file includes multi-functions, pass the `--name` flag.
 
 ## CLI reference
 
 ```
-usage: asmlift <file.s|file.asm|file.o|-> [--target <agbcc|ido7.1|gcc2.7.2kmc|mwcc_242_81>]
+usage: asmlift <file.s|file.asm|file.o|-> [--target <agbcc|ido7.1|gcc2.7.2kmc|gcc2.7.2|mwcc_242_81>]
                 [--name <symbol>] [--backend <c|pascal>] [--strict]
                 [--config <decomp.yaml>] [--score-against <target.o>]
                 [--asm-data <dump.txt>] [--proto <proto.json>]
@@ -58,7 +58,7 @@ All asmlift settings live in a spec-compliant `tools.asmlift` block:
 
 | Field      | Meaning                                                                                                                                              |
 | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `target`   | asmlift target key — needed when the `platform` maps to several compilers (`n64` → `ido7.1` or `gcc2.7.2kmc`)                                        |
+| `target`   | asmlift target key — needed when the `platform` maps to several compilers (`n64` → `ido7.1`, `gcc2.7.2kmc` or `gcc2.7.2`)                            |
 | `compiler` | Candidate-compile command template: source file in, relocatable object out. Runs via `sh` with the decomp.yaml's directory as cwd                    |
 | `objdump`  | Host objdump binary for `.o` input (overrides the PATH/env-resolved default: `mips-linux-gnu-objdump` / `powerpc-eabi-objdump`)                      |
 | `prelude`  | Prepend asmlift's `s32`/`u32`… typedefs to candidates (default `true`; set `false` if your command injects project headers that already define them) |
