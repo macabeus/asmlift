@@ -28,16 +28,6 @@
   ],
   "functions": [
     {
-      "sym": "func_800465D0_471D0",
-      "features": [
-        "global"
-      ],
-      "funcC": "s32 func_800465D0_471D0(void) {\n    return D_800B23B0_B2FB0;\n}",
-      "sourceUrl": "https://github.com/mariopartyrd/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/471D0.c#L5-L7",
-      "prependC": "extern s8 D_800B23B0_B2FB0;",
-      "m2cCtx": true
-    },
-    {
       "sym": "func_800600C0_60CC0",
       "features": [
         "struct",
@@ -286,21 +276,6 @@
       }
     },
     {
-      "sym": "func_80060848_61448",
-      "features": [
-        "global"
-      ],
-      "funcC": "void func_80060848_61448() {\n    D_800CD2A4_CDEA4 = 1;\n}",
-      "sourceUrl": "https://github.com/mariopartyrd/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/window.c#L434-L436",
-      "prependC": "extern s8 D_800CD2A4_CDEA4;",
-      "m2cCtx": true,
-      "proto": {
-        "func_80060848_61448": {
-          "returnsVoid": true
-        }
-      }
-    },
-    {
       "sym": "func_800560D8_56CD8",
       "features": [
         "struct",
@@ -325,19 +300,6 @@
       "m2cCtx": true,
       "proto": {
         "func_8008A0D0_8ACD0": {
-          "returnsVoid": true
-        }
-      }
-    },
-    {
-      "sym": "func_80013D44_14944",
-      "features": [
-        "arithmetic"
-      ],
-      "funcC": "void func_80013D44_14944(void) {\n}",
-      "sourceUrl": "https://github.com/mariopartyrd/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/13F90.c#L15-L16",
-      "proto": {
-        "func_80013D44_14944": {
           "returnsVoid": true
         }
       }
@@ -376,22 +338,6 @@
       }
     },
     {
-      "sym": "func_80000F08_1B08",
-      "features": [
-        "arithmetic"
-      ],
-      "funcC": "s32 func_80000F08_1B08(s32 arg0) {\n    return 0;\n}",
-      "sourceUrl": "https://github.com/mariopartyrd/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/1140.c#L23-L25"
-    },
-    {
-      "sym": "func_80001134_1D34",
-      "features": [
-        "arithmetic"
-      ],
-      "funcC": "s32 func_80001134_1D34(s32 arg0, s32 arg1) {\n    return 0;\n}",
-      "sourceUrl": "https://github.com/mariopartyrd/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/1140.c#L39-L41"
-    },
-    {
       "sym": "func_8000F04C_FC4C",
       "features": [
         "pointer",
@@ -425,14 +371,6 @@
           "returnsVoid": true
         }
       }
-    },
-    {
-      "sym": "func_8004B2C0_4BEC0",
-      "features": [
-        "arithmetic"
-      ],
-      "funcC": "s32 func_8004B2C0_4BEC0() {\n    return 0;\n}",
-      "sourceUrl": "https://github.com/mariopartyrd/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/audio.c#L178-L180"
     },
     {
       "sym": "GWMgNoSet",
@@ -494,6 +432,78 @@
           "returnsVoid": true
         }
       }
+    },
+    {
+      "sym": "func_80045314_45F14",
+      "features": [
+        "branch",
+        "arithmetic"
+      ],
+      "funcC": "s32 func_80045314_45F14(void) {\n    switch (omovl) {\n        case 2:\n            return 20;\n        case 3:\n            return -20;\n        default:\n            return 0;\n    }\n}",
+      "sourceUrl": "https://github.com/mariopartyrd/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/gamemes.c#L743-L752",
+      "prependC": "extern s32 omovl;"
+    },
+    {
+      "sym": "func_80056C98_57898",
+      "features": [
+        "pointer",
+        "arithmetic"
+      ],
+      "funcC": "u32 func_80056C98_57898(u8 **arg0) {\n    u8 *p = *arg0;\n    u32 val = (p[0] << 24) + (p[1] << 16) + (p[2] << 8) + p[3];\n\n    *arg0 = p + 4;\n    return val;\n}",
+      "sourceUrl": "https://github.com/mariopartyrd/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/sprman.c#L777-L783"
+    },
+    {
+      "sym": "UnlinkProcess",
+      "features": [
+        "struct",
+        "pointer",
+        "branch",
+        "arithmetic"
+      ],
+      "funcC": "static void UnlinkProcess(Process **root, Process *process) {\n    if (process->next) {\n        process->next->youngest_child = process->youngest_child;\n    }\n    if (process->youngest_child) {\n        process->youngest_child->next = process->next;\n    } else {\n        *root = process->next;\n    }\n}",
+      "sourceUrl": "https://github.com/mariopartyrd/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/process.c#L45-L54",
+      "m2cCtx": true,
+      "proto": {
+        "UnlinkProcess": {
+          "returnsVoid": true
+        }
+      }
+    },
+    {
+      "sym": "func_80011460_12060",
+      "features": [
+        "pointer",
+        "loop",
+        "arithmetic"
+      ],
+      "funcC": "s16 func_80011460_12060(u8 *arg0) {\n    s32 sum = 0;\n    s16 i = 1;\n    u8 c = arg0[0];\n\n    while (c != 0 && i < 28) {\n        sum += i * c;\n        arg0++;\n        i++;\n        c = arg0[0];\n    }\n    return sum;\n}",
+      "sourceUrl": "https://github.com/mariopartyrd/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/hmfload.c#L31-L43"
+    },
+    {
+      "sym": "func_80052E14_53A14",
+      "features": [
+        "struct",
+        "pointer",
+        "arithmetic"
+      ],
+      "funcC": "void func_80052E14_53A14(HuSprite *arg0) {\n    arg0->unk_68.unk00 = arg0->unk_84;\n    arg0->unk_68.unk04 = arg0->unk_88;\n    arg0->unk_68.unk06 = arg0->unk_0E;\n    arg0->unk_68.unk0A = arg0->unk_8A;\n    arg0->unk_68.unk08 = arg0->unk_0C;\n    arg0->unk_68.unk0C = arg0->unk_8C;\n    arg0->unk_68.unk10 = arg0->unk_10;\n    arg0->unk_68.unk16 = arg0->unk_92;\n    arg0->unk_68.unk14 = arg0->unk_90;\n    arg0->unk_68.unk18 = 0;\n    arg0->unk_68.unk17 = 0;\n}",
+      "sourceUrl": "https://github.com/mariopartyrd/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/sprman.c#L213-L225",
+      "m2cCtx": true,
+      "proto": {
+        "func_80052E14_53A14": {
+          "returnsVoid": true
+        }
+      }
+    },
+    {
+      "sym": "GWBoardRecordGet",
+      "features": [
+        "pointer",
+        "branch",
+        "arithmetic"
+      ],
+      "funcC": "u8 *GWBoardRecordGet(s16 arg0) {\n    s16 idx = arg0;\n\n    if (arg0 < 0) {\n        idx = GwSystem.current_board_index;\n    }\n\n    if (GwSystem.playMode & 1) {\n        return (u8 *)&GwCommon.unk_1D[2] + idx * 9;\n    }\n    return (u8 *)&GwCommon.unk_1D[0x38] + idx * 9;\n}",
+      "sourceUrl": "https://github.com/mariopartyrd/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/save.c#L80-L91"
     }
   ]
 }

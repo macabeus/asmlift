@@ -1,8 +1,4 @@
 {
-  "func_800465D0_471D0": {
-    "tu": "func_800465D0_471D0.i.gz",
-    "ctx": "ctx-39c75a5b526b.i.gz"
-  },
   "func_800600C0_60CC0": {
     "tu": "func_800600C0_60CC0.i.gz",
     "ctx": "ctx-634bc95b6a8b.i.gz"
@@ -67,20 +63,12 @@
     "tu": "func_80056254_56E54.i.gz",
     "ctx": "ctx-0eb9f921480c.i.gz"
   },
-  "func_80060848_61448": {
-    "tu": "func_80060848_61448.i.gz",
-    "ctx": "ctx-940d7bfd7a71.i.gz"
-  },
   "func_800560D8_56CD8": {
     "tu": "func_800560D8_56CD8.i.gz",
     "ctx": "ctx-11cca7d0b904.i.gz"
   },
   "func_8008A0D0_8ACD0": {
     "tu": "func_8008A0D0_8ACD0.i.gz",
-    "ctx": "ctx-0eb9f921480c.i.gz"
-  },
-  "func_80013D44_14944": {
-    "tu": "func_80013D44_14944.i.gz",
     "ctx": "ctx-0eb9f921480c.i.gz"
   },
   "func_8004A444_4B044": {
@@ -91,14 +79,6 @@
     "tu": "func_80056260_56E60.i.gz",
     "ctx": "ctx-11cca7d0b904.i.gz"
   },
-  "func_80000F08_1B08": {
-    "tu": "func_80000F08_1B08.i.gz",
-    "ctx": "ctx-0eb9f921480c.i.gz"
-  },
-  "func_80001134_1D34": {
-    "tu": "func_80001134_1D34.i.gz",
-    "ctx": "ctx-0eb9f921480c.i.gz"
-  },
   "func_8000F04C_FC4C": {
     "tu": "func_8000F04C_FC4C.i.gz",
     "ctx": "ctx-5423b0a9a65c.i.gz"
@@ -106,10 +86,6 @@
   "func_8005614C_56D4C": {
     "tu": "func_8005614C_56D4C.i.gz",
     "ctx": "ctx-11cca7d0b904.i.gz"
-  },
-  "func_8004B2C0_4BEC0": {
-    "tu": "func_8004B2C0_4BEC0.i.gz",
-    "ctx": "ctx-0eb9f921480c.i.gz"
   },
   "GWMgNoSet": {
     "tu": "GWMgNoSet.i.gz",
@@ -126,5 +102,29 @@
   "func_8000F024_FC24": {
     "tu": "func_8000F024_FC24.i.gz",
     "ctx": "ctx-82fa83cc231e.i.gz"
+  },
+  "func_80045314_45F14": {
+    "tu": "func_80045314_45F14.i.gz",
+    "ctx": "ctx-12088568eb1f.i.gz"
+  },
+  "func_80056C98_57898": {
+    "tu": "func_80056C98_57898.i.gz",
+    "ctx": "ctx-0eb9f921480c.i.gz"
+  },
+  "UnlinkProcess": {
+    "tu": "UnlinkProcess.i.gz",
+    "ctx": "ctx-0eb9f921480c.i.gz"
+  },
+  "func_80011460_12060": {
+    "tu": "func_80011460_12060.i.gz",
+    "ctx": "ctx-0eb9f921480c.i.gz"
+  },
+  "func_80052E14_53A14": {
+    "tu": "func_80052E14_53A14.i.gz",
+    "ctx": "ctx-0eb9f921480c.i.gz"
+  },
+  "GWBoardRecordGet": {
+    "tu": "GWBoardRecordGet.i.gz",
+    "ctx": "ctx-0eb9f921480c.i.gz"
   }
 }
