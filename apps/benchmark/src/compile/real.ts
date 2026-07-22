@@ -74,7 +74,11 @@ export function makeRealCompile(toolchain: ToolchainId, prependC: string, ctxI: 
         continue;
       }
       try {
-        return rc.compileCandidate(`${prelude}${candC}\n`, sym);
+        // COMPAT: the vendored context is PREPROCESSED, so the standard `NULL` macro is expanded
+        // away — a candidate that spells a null check the idiomatic way (`p != NULL`, as m2c does)
+        // would fail to compile purely for that, while a `p != 0` candidate (as asmlift emits) would
+        // not. Re-provide it so both decompilers' output is judged on the code, not on this artifact.
+        return rc.compileCandidate(`#define NULL ((void *)0)\n${prelude}${candC}\n`, sym);
       } catch (e) {
         lastErr = (e as Error).message;
       }
