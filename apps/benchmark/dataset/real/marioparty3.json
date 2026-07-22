@@ -1,0 +1,499 @@
+{
+  "project": "marioparty3",
+  "note": "Mario Party 3 (N64) matched functions, compiled with mainline GCC 2.7.2 at -O1 (the project's own tools/gcc_2.7.2). Project headers preprocess under host cpp, so funcC uses common.h types + per-function extern decls for file-local globals; include_asm.h's top-level `asm(\".include ...\")` (the INCLUDE_ASM machinery) is stripped at preprocess so the vendored object is self-contained.",
+  "toolchain": "gcc2.7.2",
+  "repoDir": "marioparty3",
+  "cppIncludes": [
+    "-nostdinc",
+    "-I",
+    "include",
+    "-I",
+    "include/PR",
+    "-I",
+    "include/gcc",
+    "-I",
+    "build/include",
+    "-I",
+    "src"
+  ],
+  "headers": [
+    "common.h"
+  ],
+  "defines": [
+    "-DNDEBUG",
+    "-D_MIPS_SZLONG=32",
+    "-DF3DEX_GBI_2",
+    "-D_LANGUAGE_C",
+    "-DOLD_GCC"
+  ],
+  "functions": [
+    {
+      "sym": "func_800465D0_471D0",
+      "features": [
+        "global"
+      ],
+      "funcC": "s32 func_800465D0_471D0(void) {\n    return D_800B23B0_B2FB0;\n}",
+      "sourceUrl": "https://github.com/mariopartyrd/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/471D0.c#L5-L7",
+      "prependC": "extern s8 D_800B23B0_B2FB0;",
+      "m2cCtx": true
+    },
+    {
+      "sym": "func_800600C0_60CC0",
+      "features": [
+        "struct",
+        "pointer",
+        "branch",
+        "global",
+        "arithmetic"
+      ],
+      "funcC": "void func_800600C0_60CC0(s16 winId, s32 arg1) {\n    TextWindow *window;\n\n    window = &D_800CC69C_CD29C[winId];\n    if (arg1 != 0) {\n        window->unk_38 |= 0x10;\n    } else {\n        window->unk_38 &= ~0x10;\n    }\n}",
+      "sourceUrl": "https://github.com/mariopartyrd/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/window.c#L325-L334",
+      "prependC": "extern TextWindow *D_800CC69C_CD29C;",
+      "m2cCtx": true,
+      "proto": {
+        "func_800600C0_60CC0": {
+          "returnsVoid": true
+        }
+      }
+    },
+    {
+      "sym": "func_80045350_45F50",
+      "features": [
+        "struct",
+        "pointer",
+        "loop",
+        "branch",
+        "global",
+        "arithmetic"
+      ],
+      "funcC": "void func_80045350_45F50(void) {\n    s32 var_v1;\n\n    if (D_800A6D44_A7944[GwSystem.minigame_index - 1].minigameType == 6) {\n        return;\n    }\n    for (var_v1 = 0; var_v1 < 4; var_v1++) {\n        GW_PLAYER *temp_v0 = &GwPlayer[var_v1];\n\n        temp_v0->gameCoin = 0;\n        temp_v0->bonusCoin = 0;\n    }\n}",
+      "sourceUrl": "https://github.com/mariopartyrd/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/pause.c#L61-L73",
+      "prependC": "extern MinigameTable D_800A6D44_A7944[];",
+      "m2cCtx": true,
+      "proto": {
+        "func_80045350_45F50": {
+          "returnsVoid": true
+        }
+      }
+    },
+    {
+      "sym": "func_800123F4_12FF4",
+      "features": [
+        "global"
+      ],
+      "funcC": "void func_800123F4_12FF4(void) {\n    D_800D418E_D4D8E = D_800D2008_D2C08;\n}",
+      "sourceUrl": "https://github.com/mariopartyrd/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/camera.c#L53-L55",
+      "prependC": "extern s16 D_800D418E_D4D8E;\nextern u8 D_800D2008_D2C08;",
+      "m2cCtx": true,
+      "proto": {
+        "func_800123F4_12FF4": {
+          "returnsVoid": true
+        }
+      }
+    },
+    {
+      "sym": "func_8000F088_FC88",
+      "features": [
+        "pointer",
+        "global",
+        "arithmetic"
+      ],
+      "funcC": "void func_8000F088_FC88(s32 *uCodeAdresses) {\n    gUCodeAddresses = uCodeAdresses;\n}",
+      "sourceUrl": "https://github.com/mariopartyrd/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/graphics.c#L245-L247",
+      "prependC": "extern s32 *gUCodeAddresses;",
+      "m2cCtx": true,
+      "proto": {
+        "func_8000F088_FC88": {
+          "returnsVoid": true
+        }
+      }
+    },
+    {
+      "sym": "HuMemUsedMemorySizeGet",
+      "features": [
+        "struct",
+        "pointer",
+        "loop",
+        "branch",
+        "arithmetic"
+      ],
+      "funcC": "u32 HuMemUsedMemorySizeGet(HeapNode *heap) {\n    HeapNode *cur_heap;\n    u32 total_size;\n\n    cur_heap = heap;\n    total_size = 0;\n    do {\n        if (cur_heap->active == TRUE) {\n            total_size += cur_heap->size;\n        }\n        cur_heap = cur_heap->next;\n    } while (cur_heap != heap);\n\n    return total_size;\n}",
+      "sourceUrl": "https://github.com/mariopartyrd/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/malloc.c#L139-L153",
+      "m2cCtx": true
+    },
+    {
+      "sym": "func_800570A8_57CA8",
+      "features": [
+        "struct",
+        "pointer",
+        "loop",
+        "global",
+        "arithmetic"
+      ],
+      "funcC": "void func_800570A8_57CA8(s16 group, s16 member, s16 arg2) {\n    HuSprite *sprite = HuSprGrpData[group]->members[member];\n    s32 i;\n\n    sprite->unk_98 = D_800D0A50_D1650[arg2];\n    sprite->unk_FC.f = 1.0f;\n    for (i = 0; i < 0x10; i++) {\n        sprite->unk_9C[i] = 0xFFFF;\n        sprite->unk_BC[i] = 0;\n    }\n    sprite->unk_104 = 0;\n}",
+      "sourceUrl": "https://github.com/mariopartyrd/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/sprman.c#L823-L834",
+      "prependC": "extern HuSprAnmDesc *D_800D0A50_D1650[0x100];",
+      "m2cCtx": true,
+      "proto": {
+        "func_800570A8_57CA8": {
+          "returnsVoid": true
+        }
+      }
+    },
+    {
+      "sym": "func_8001D330_1DF30",
+      "features": [
+        "global"
+      ],
+      "funcC": "void func_8001D330_1DF30(s16 arg0) {\n    D_800A0A78_A1678 = arg0;\n}",
+      "sourceUrl": "https://github.com/mariopartyrd/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/hmfman.c#L525-L527",
+      "prependC": "extern s16 D_800A0A78_A1678;",
+      "m2cCtx": true,
+      "proto": {
+        "func_8001D330_1DF30": {
+          "returnsVoid": true
+        }
+      }
+    },
+    {
+      "sym": "func_8001FBBC_207BC",
+      "features": [
+        "struct",
+        "pointer",
+        "branch",
+        "arithmetic"
+      ],
+      "funcC": "void func_8001FBBC_207BC(s16 arg0, s8 arg1, s8 arg2, s8 arg3) {\n    HmfModel *other;\n\n    other = HmfModelData[arg0].unkB4;\n    if (other != NULL) {\n        other->unk00 = arg1;\n        other->unk01 = arg2;\n        other->unk02 = arg3;\n    }\n}",
+      "sourceUrl": "https://github.com/mariopartyrd/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/hmfman.c#L615-L624",
+      "m2cCtx": true,
+      "proto": {
+        "func_8001FBBC_207BC": {
+          "returnsVoid": true
+        }
+      }
+    },
+    {
+      "sym": "HuMemUsedMemoryBlockGet",
+      "features": [
+        "struct",
+        "pointer",
+        "loop",
+        "arithmetic"
+      ],
+      "funcC": "u32 HuMemUsedMemoryBlockGet(HeapNode *heap) {\n    HeapNode *cur_heap;\n    u32 count_free;\n\n    cur_heap = heap;\n    count_free = 0;\n    do {\n        count_free += (cur_heap->active ^ TRUE) == FALSE ? 1 : 0;\n        cur_heap = cur_heap->next;\n    } while (cur_heap != heap);\n\n    return count_free;\n}",
+      "sourceUrl": "https://github.com/mariopartyrd/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/malloc.c#L158-L170",
+      "m2cCtx": true
+    },
+    {
+      "sym": "func_80045BF0_467F0",
+      "features": [
+        "loop",
+        "branch",
+        "global",
+        "arithmetic"
+      ],
+      "funcC": "s32 func_80045BF0_467F0(s32 arg0) {\n    u32 var_v0;\n    u32 var_v1;\n\n    for (var_v1 = 0; var_v1 < 9; var_v1++) {\n        if ((arg0 & 0xFF) == D_800A1590_A2190[var_v1]) {\n            break;\n        }\n    }\n    if (var_v1 >= 9) {\n        var_v1 = -1;\n    }\n    return var_v1;\n}",
+      "sourceUrl": "https://github.com/mariopartyrd/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/pause.c#L217-L230",
+      "prependC": "extern u8 D_800A1590_A2190[];",
+      "m2cCtx": true
+    },
+    {
+      "sym": "func_8002FD48_30948",
+      "features": [
+        "struct",
+        "pointer",
+        "arithmetic"
+      ],
+      "funcC": "void func_8002FD48_30948(HmfData *arg0) {\n    arg0->unkA0 = 0;\n}",
+      "sourceUrl": "https://github.com/mariopartyrd/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/22EB0.c#L208-L210",
+      "m2cCtx": true,
+      "proto": {
+        "func_8002FD48_30948": {
+          "returnsVoid": true
+        }
+      }
+    },
+    {
+      "sym": "func_80071B40_72740",
+      "features": [
+        "struct",
+        "pointer",
+        "arithmetic"
+      ],
+      "funcC": "void func_80071B40_72740(ALVoice *voice, s16 priority) {\n    voice->priority = priority;\n}",
+      "sourceUrl": "https://github.com/mariopartyrd/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/72740.c#L3-L5",
+      "m2cCtx": true,
+      "proto": {
+        "func_80071B40_72740": {
+          "returnsVoid": true
+        }
+      }
+    },
+    {
+      "sym": "func_8006014C_60D4C",
+      "features": [
+        "global"
+      ],
+      "funcC": "s8 func_8006014C_60D4C(s32 winId) {\n    return D_800CC69C_CD29C[winId].unk_31;\n}",
+      "sourceUrl": "https://github.com/mariopartyrd/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/window.c#L345-L347",
+      "prependC": "extern TextWindow *D_800CC69C_CD29C;",
+      "m2cCtx": true
+    },
+    {
+      "sym": "func_8005FA90_60690",
+      "features": [
+        "pointer",
+        "loop",
+        "branch",
+        "global",
+        "arithmetic"
+      ],
+      "funcC": "u8 func_8005FA90_60690(u8 *arg0) {\n    s16 i, j;\n\n    for (i = 0; i < 10; i += 2) {\n        if (D_800A232C_A2F2C[i] == arg0[0] && D_800A232C_A2F2C[i + 1] == arg0[1]) {\n            return i / 2;\n        }\n    }\n    for (i = 0; i < 16; i++) {\n        for (j = 0; j < 32; j += 2) {\n            if (D_800A2344_A2F44[i][j] == arg0[0] && D_800A2344_A2F44[i][j + 1] == arg0[1]) {\n                return i * 16 + j / 2;\n            }\n        }\n    }\n    return 16;\n}",
+      "sourceUrl": "https://github.com/mariopartyrd/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/window.c#L297-L313",
+      "prependC": "extern u8 *D_800A2344_A2F44[];\nextern u8 D_800A232C_A2F2C[];",
+      "m2cCtx": true
+    },
+    {
+      "sym": "func_80047E90_48A90",
+      "features": [
+        "struct",
+        "pointer",
+        "arithmetic"
+      ],
+      "funcC": "void func_80047E90_48A90(omObjData *obj, s32 arg1) {\n    obj->unk10 |= arg1;\n}",
+      "sourceUrl": "https://github.com/mariopartyrd/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/objmain.c#L516-L518",
+      "m2cCtx": true,
+      "proto": {
+        "func_80047E90_48A90": {
+          "returnsVoid": true
+        }
+      }
+    },
+    {
+      "sym": "func_80056254_56E54",
+      "features": [
+        "struct",
+        "pointer",
+        "arithmetic"
+      ],
+      "funcC": "void *func_80056254_56E54(HuSprite_Unk84_Struct **arg0) {\n    return (*arg0)->unk0C;\n}",
+      "sourceUrl": "https://github.com/mariopartyrd/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/sprman.c#L676-L678",
+      "m2cCtx": true,
+      "proto": {
+        "func_80056254_56E54": {
+          "returnsVoid": true
+        }
+      }
+    },
+    {
+      "sym": "func_80060848_61448",
+      "features": [
+        "global"
+      ],
+      "funcC": "void func_80060848_61448() {\n    D_800CD2A4_CDEA4 = 1;\n}",
+      "sourceUrl": "https://github.com/mariopartyrd/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/window.c#L434-L436",
+      "prependC": "extern s8 D_800CD2A4_CDEA4;",
+      "m2cCtx": true,
+      "proto": {
+        "func_80060848_61448": {
+          "returnsVoid": true
+        }
+      }
+    },
+    {
+      "sym": "func_800560D8_56CD8",
+      "features": [
+        "struct",
+        "pointer",
+        "global",
+        "arithmetic"
+      ],
+      "funcC": "HuSprite_Unk84_Unk00_Struct *func_800560D8_56CD8(s16 arg0, u16 arg1) {\n    return &D_800C9530_CA130[arg0]->unk00[arg1];\n}",
+      "sourceUrl": "https://github.com/mariopartyrd/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/sprman.c#L636-L638",
+      "prependC": "extern HuSprite_Unk84_Struct *D_800C9530_CA130[];",
+      "m2cCtx": true
+    },
+    {
+      "sym": "func_8008A0D0_8ACD0",
+      "features": [
+        "struct",
+        "pointer",
+        "arithmetic"
+      ],
+      "funcC": "void func_8008A0D0_8ACD0(Mtx *arg0) {\n    arg0->m[0][1] =\n        arg0->m[0][3] =\n            arg0->m[1][0] =\n                arg0->m[1][2] =\n                    arg0->m[2][0] =\n                        arg0->m[2][1] =\n                            arg0->m[2][2] =\n                                arg0->m[2][3] =\n                                    arg0->m[3][0] =\n                                        arg0->m[3][1] =\n                                            arg0->m[3][2] =\n                                                arg0->m[3][3] = 0;\n    arg0->m[0][0] = arg0->m[1][1] = 0x10000;\n    arg0->m[0][2] = arg0->m[1][3] = 1;\n}",
+      "sourceUrl": "https://github.com/mariopartyrd/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/8ACD0.c#L3-L18",
+      "m2cCtx": true,
+      "proto": {
+        "func_8008A0D0_8ACD0": {
+          "returnsVoid": true
+        }
+      }
+    },
+    {
+      "sym": "func_80013D44_14944",
+      "features": [
+        "arithmetic"
+      ],
+      "funcC": "void func_80013D44_14944(void) {\n}",
+      "sourceUrl": "https://github.com/mariopartyrd/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/13F90.c#L15-L16",
+      "proto": {
+        "func_80013D44_14944": {
+          "returnsVoid": true
+        }
+      }
+    },
+    {
+      "sym": "func_8004A444_4B044",
+      "features": [
+        "global"
+      ],
+      "funcC": "void func_8004A444_4B044(s32 arg0) {\n    D_800A1780_A2380 = 1;\n    D_800D0A3A_D163A = 4;\n    D_800D1710_D2310 = arg0;\n}",
+      "sourceUrl": "https://github.com/mariopartyrd/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/objmain.c#L1053-L1057",
+      "prependC": "extern s16 D_800A1780_A2380;\nextern s8 D_800D1710_D2310;\nextern u16 D_800D0A3A_D163A;",
+      "m2cCtx": true,
+      "proto": {
+        "func_8004A444_4B044": {
+          "returnsVoid": true
+        }
+      }
+    },
+    {
+      "sym": "func_80056260_56E60",
+      "features": [
+        "struct",
+        "pointer",
+        "global",
+        "arithmetic"
+      ],
+      "funcC": "void *func_80056260_56E60(s16 arg0) {\n    return D_800C9530_CA130[arg0]->unk0C;\n}",
+      "sourceUrl": "https://github.com/mariopartyrd/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/sprman.c#L680-L682",
+      "prependC": "extern HuSprite_Unk84_Struct *D_800C9530_CA130[];",
+      "m2cCtx": true,
+      "proto": {
+        "func_80056260_56E60": {
+          "returnsVoid": true
+        }
+      }
+    },
+    {
+      "sym": "func_80000F08_1B08",
+      "features": [
+        "arithmetic"
+      ],
+      "funcC": "s32 func_80000F08_1B08(s32 arg0) {\n    return 0;\n}",
+      "sourceUrl": "https://github.com/mariopartyrd/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/1140.c#L23-L25"
+    },
+    {
+      "sym": "func_80001134_1D34",
+      "features": [
+        "arithmetic"
+      ],
+      "funcC": "s32 func_80001134_1D34(s32 arg0, s32 arg1) {\n    return 0;\n}",
+      "sourceUrl": "https://github.com/mariopartyrd/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/1140.c#L39-L41"
+    },
+    {
+      "sym": "func_8000F04C_FC4C",
+      "features": [
+        "pointer",
+        "global",
+        "arithmetic"
+      ],
+      "funcC": "void func_8000F04C_FC4C(u64 **threadStacks) {\n    gThread3Stack = *threadStacks++;\n    gThreadOutStack = *threadStacks++;\n    gThreadOutStackSize = *threadStacks++;\n    gThreadYieldStack = *threadStacks;\n}",
+      "sourceUrl": "https://github.com/mariopartyrd/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/graphics.c#L237-L242",
+      "prependC": "extern s32 gThreadOutStack;\nextern s32 gThreadOutStackSize;\nextern s32 gThreadYieldStack;\nextern u64 *gThread3Stack;",
+      "m2cCtx": true,
+      "proto": {
+        "func_8000F04C_FC4C": {
+          "returnsVoid": true
+        }
+      }
+    },
+    {
+      "sym": "func_8005614C_56D4C",
+      "features": [
+        "struct",
+        "pointer",
+        "global",
+        "arithmetic"
+      ],
+      "funcC": "void *func_8005614C_56D4C(s16 arg0, u16 arg1) {\n    HuSprite_Unk84_Unk00_Struct *entry = &D_800C9530_CA130[arg0]->unk00[arg1];\n\n    return entry->unk00;\n}",
+      "sourceUrl": "https://github.com/mariopartyrd/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/sprman.c#L650-L654",
+      "prependC": "extern HuSprite_Unk84_Struct *D_800C9530_CA130[];",
+      "m2cCtx": true,
+      "proto": {
+        "func_8005614C_56D4C": {
+          "returnsVoid": true
+        }
+      }
+    },
+    {
+      "sym": "func_8004B2C0_4BEC0",
+      "features": [
+        "arithmetic"
+      ],
+      "funcC": "s32 func_8004B2C0_4BEC0() {\n    return 0;\n}",
+      "sourceUrl": "https://github.com/mariopartyrd/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/audio.c#L178-L180"
+    },
+    {
+      "sym": "GWMgNoSet",
+      "features": [
+        "arithmetic"
+      ],
+      "funcC": "void GWMgNoSet(s8 arg0) {\n    GwSystem.minigame_index = arg0;\n}",
+      "sourceUrl": "https://github.com/mariopartyrd/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/save.c#L17-L19",
+      "proto": {
+        "GWMgNoSet": {
+          "returnsVoid": true
+        }
+      }
+    },
+    {
+      "sym": "func_8004A468_4B068",
+      "features": [
+        "global"
+      ],
+      "funcC": "void func_8004A468_4B068(u16 arg0, u16 arg1, u16 arg2) {\n    D_800D4082_D4C82 = arg0;\n    D_800CD2F4_CDEF4 = arg1;\n    D_800D6A56_D7656 = arg2;\n    D_800A1780_A2380 = 1;\n    D_800D0A3A_D163A = 4;\n}",
+      "sourceUrl": "https://github.com/mariopartyrd/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/objmain.c#L1059-L1065",
+      "prependC": "extern s16 D_800A1780_A2380;\nextern u16 D_800CD2F4_CDEF4;\nextern u16 D_800D0A3A_D163A;\nextern u16 D_800D4082_D4C82;\nextern u16 D_800D6A56_D7656;",
+      "m2cCtx": true,
+      "proto": {
+        "func_8004A468_4B068": {
+          "returnsVoid": true
+        }
+      }
+    },
+    {
+      "sym": "CameraScissorSet",
+      "features": [
+        "struct",
+        "pointer",
+        "global",
+        "arithmetic"
+      ],
+      "funcC": "void CameraScissorSet(s16 camIndex, RectF *arg1) {\n    HuCamera *camera = &gCameraList[camIndex];\n    camera->screenLeft = arg1->x1;\n    camera->screenTop = arg1->y1;\n    camera->screenRight = arg1->x2;\n    camera->screenBottom = arg1->y2;\n}",
+      "sourceUrl": "https://github.com/mariopartyrd/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/camera.c#L72-L78",
+      "prependC": "extern HuCamera *gCameraList;",
+      "m2cCtx": true,
+      "proto": {
+        "CameraScissorSet": {
+          "returnsVoid": true
+        }
+      }
+    },
+    {
+      "sym": "func_8000F024_FC24",
+      "features": [
+        "pointer",
+        "arithmetic"
+      ],
+      "funcC": "void func_8000F024_FC24(void **pool, u16 size, u16 segment) {\n    frameBufferPool = pool;\n    frameBufferCount = size;\n    frameBufferSegmentID = segment;\n}",
+      "sourceUrl": "https://github.com/mariopartyrd/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/graphics.c#L225-L229",
+      "prependC": "extern u16 frameBufferCount;\nextern u16 frameBufferSegmentID;\nextern void **frameBufferPool;",
+      "proto": {
+        "func_8000F024_FC24": {
+          "returnsVoid": true
+        }
+      }
+    }
+  ]
+}

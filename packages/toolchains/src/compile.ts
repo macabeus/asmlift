@@ -15,7 +15,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
-import { GCC_KMC_TOOLCHAIN, IDO_TOOLCHAIN, MWCC_PPC_TOOLCHAIN, TOOLCHAIN } from './toolchain';
+import { GCC272_TOOLCHAIN, GCC_KMC_TOOLCHAIN, IDO_TOOLCHAIN, MWCC_PPC_TOOLCHAIN, TOOLCHAIN } from './toolchain';
 
 const noPascal = (compiler: string): never => {
   throw new Error(`${compiler} target has no Pascal backend`);
@@ -127,6 +127,25 @@ export function compileMipsTarget(cSource: string, _symbol: string): { obj: stri
   return { obj: oPath, asm: dis.stdout };
 }
 
+/** Mainline GCC 2.7.2 / MIPS — synthetic-tier target build (native, no Docker; `-B`/COMPILER_PATH
+ *  let the old driver find its `cc1`/`as`). Mirrors compileMipsTarget with GCC 2.7.2's flags. */
+export function compileMipsGcc272Target(cSource: string, _symbol: string): { obj: string; asm: string } {
+  const { dir, ccFlags, objdump, objdumpFlags } = GCC272_TOOLCHAIN;
+  const d = contentShareableDir('asmlift-mgcc272-ref-', cSource);
+  const cPath = join(d, 'ref.c');
+  const oPath = join(d, 'ref.o');
+  writeFileSync(cPath, C_TYPEDEFS + cSource);
+  const cc = run(join(dir, 'gcc'), ['-B', `${dir}/`, ...ccFlags, '-o', oPath, cPath], { COMPILER_PATH: dir });
+  if (cc.status !== 0) {
+    throw new Error(`gcc 2.7.2 failed: ${cc.stderr || cc.stdout}`);
+  }
+  const dis = run(objdump, [...objdumpFlags, oPath]);
+  if (dis.status !== 0) {
+    throw new Error(`objdump failed: ${dis.stderr}`);
+  }
+  return { obj: oPath, asm: dis.stdout };
+}
+
 /** Compile candidate IDO Pascal (via `cc`→`upas`, routed by the `.p` extension); returns the
  *  object path. No C typedefs: Pascal source stands alone. */
 export function compileCandIdoPascal(pascalSource: string): string {
@@ -182,6 +201,10 @@ export function agbccAvailable(): boolean {
 /** Is the pinned IDO 7.1 `cc` present? Same PATH caveat as agbccAvailable. */
 export function idoAvailable(): boolean {
   return existsSync(IDO_TOOLCHAIN.cc);
+}
+
+export function gcc272Available(): boolean {
+  return existsSync(join(GCC272_TOOLCHAIN.dir, 'gcc'));
 }
 
 export function mkShareableTmp(prefix: string): string {

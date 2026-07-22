@@ -17,7 +17,7 @@
 import { type CandidateCompiler, compileFromCommand } from '@asmlift/cli/compile-command';
 import { loadDecompConfig, resolveTarget } from '@asmlift/cli/config';
 import { type MatchScore, scoreObjects } from '@asmlift/cli/score';
-import { GCC_KMC_TOOLCHAIN, IDO_TOOLCHAIN, MWCC_PPC_TOOLCHAIN, TOOLCHAIN } from '@asmlift/toolchains';
+import { GCC272_TOOLCHAIN, GCC_KMC_TOOLCHAIN, IDO_TOOLCHAIN, MWCC_PPC_TOOLCHAIN, TOOLCHAIN } from '@asmlift/toolchains';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -36,6 +36,7 @@ const PLACEHOLDER_VALUES: Record<string, string> = {
   ASMLIFT_AGBCC: TOOLCHAIN.agbcc,
   ASMLIFT_ARM_AS: TOOLCHAIN.as,
   ASMLIFT_IDO_CC: IDO_TOOLCHAIN.cc,
+  ASMLIFT_GCC272_DIR: GCC272_TOOLCHAIN.dir,
   ASMLIFT_DOCKER: GCC_KMC_TOOLCHAIN.docker,
   ASMLIFT_KMC_DIR: GCC_KMC_TOOLCHAIN.dir,
   ASMLIFT_KMC_IMAGE: GCC_KMC_TOOLCHAIN.image,

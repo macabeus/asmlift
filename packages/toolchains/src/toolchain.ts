@@ -111,3 +111,15 @@ export const MWCC_PPC_TOOLCHAIN = {
   // in the relocation — the PPC frontend reads it there to recover the call target (parseDisasm).
   objdumpFlags: ['-d', '-r', '--no-show-raw-insn'],
 };
+
+/** Mainline GCC 2.7.2 toolchain — the compiler the Mario Party 3 (N64) decomp uses, vendored in
+ *  that project's `tools/gcc_2.7.2/<os>`. A DIFFERENT compiler from KMC's `gcc2.7.2kmc`: plain FSF
+ *  GCC 2.7.2 at `-O1`, not Kyoto-Microcomputer's N64 build at `-O2`. Runs NATIVELY (no Docker) —
+ *  the binary needs `-B <dir>/` + `COMPILER_PATH=<dir>` to find its own `cc1`. Flags mirror
+ *  marioparty3's Makefile. Overridable via ASMLIFT_GCC272_DIR / ASMLIFT_MIPS_OBJDUMP. */
+export const GCC272_TOOLCHAIN = {
+  dir: env('ASMLIFT_GCC272_DIR', join(WORKSPACE, 'marioparty3/tools/gcc_2.7.2/mac')),
+  ccFlags: ['-c', '-G0', '-mips3', '-mgp32', '-mfp32', '-O1', '-Wa,--vr4300mul-off', '-nostdinc'],
+  objdump: MIPS_OBJDUMP,
+  objdumpFlags: ['-d', '--no-show-raw-insn'],
+};

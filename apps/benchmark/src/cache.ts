@@ -11,7 +11,7 @@ import type { DecompilerResult } from '@asmlift/bench-schema';
 import { type AsmData, parseAsmData } from '@asmlift/core/frontend/asmdata';
 import type { TargetDescription } from '@asmlift/core/target';
 import { extractAsmData, mipsObjdumpText, ppcObjdumpText } from '@asmlift/toolchains';
-import { GCC_KMC_TOOLCHAIN, IDO_TOOLCHAIN, MWCC_PPC_TOOLCHAIN, TOOLCHAIN } from '@asmlift/toolchains';
+import { GCC272_TOOLCHAIN, GCC_KMC_TOOLCHAIN, IDO_TOOLCHAIN, MWCC_PPC_TOOLCHAIN, TOOLCHAIN } from '@asmlift/toolchains';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
@@ -36,6 +36,7 @@ const TC_CFG: Record<ToolchainId, unknown> = {
   agbcc: TOOLCHAIN,
   'ido7.1': IDO_TOOLCHAIN,
   'gcc2.7.2kmc': GCC_KMC_TOOLCHAIN,
+  'gcc2.7.2': GCC272_TOOLCHAIN,
   mwcc_242_81: MWCC_PPC_TOOLCHAIN,
 };
 
@@ -91,6 +92,9 @@ export function cachedAsmDumpText(obj: string, tcId: ToolchainId): string | unde
   }
   if (tcId === 'gcc2.7.2kmc') {
     return mipsObjdumpText(obj, GCC_KMC_TOOLCHAIN.objdump);
+  }
+  if (tcId === 'gcc2.7.2') {
+    return mipsObjdumpText(obj, GCC272_TOOLCHAIN.objdump);
   }
   return undefined;
 }

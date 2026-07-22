@@ -1,0 +1,18 @@
+# The decomp.yaml the benchmark scores asmlift through on N64 / mainline GCC 2.7.2 (Mario Party 3).
+# GCC 2.7.2 goes straight from .c to .o (its own cpp + compile + assemble), so it is one
+# invocation with the project's flags. It is an OLD driver: `-B <dir>/` and `COMPILER_PATH` point
+# it at its own bundled `cc1`/`as`.
+#
+# {{inputPath}} is the candidate .c file, {{outputPath}} is the object it must produce.
+#
+# To use this in your project, replace:
+#   $ASMLIFT_GCC272_DIR → the dir holding your gcc 2.7.2 driver (e.g. tools/gcc_2.7.2/<os>)
+name: asmlift benchmark (gcc2.7.2)
+platform: n64
+tools:
+  asmlift:
+    target: gcc2.7.2
+    compiler: >-
+      COMPILER_PATH="$ASMLIFT_GCC272_DIR" "$ASMLIFT_GCC272_DIR"/gcc -B "$ASMLIFT_GCC272_DIR"/
+      -c -G0 -mips3 -mgp32 -mfp32 -O1 -Wa,--vr4300mul-off -nostdinc
+      -o {{outputPath}} {{inputPath}}
