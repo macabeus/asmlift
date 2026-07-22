@@ -23,6 +23,10 @@ export interface AsmliftToolConfig {
   objdump?: string;
   /** prepend asmlift's typedef prelude to candidates (default true) — see compile-command.ts */
   prelude?: boolean;
+  /** the project's built ELF (relative to this decomp.yaml) — the address→symbol source:
+   *  names from `.symtab`, declaration shapes from the linked-in DWARF types-sidecar when
+   *  present. Absent ⇒ no symbol map (today's behavior). */
+  elf?: string;
 }
 
 export interface DecompVersion {

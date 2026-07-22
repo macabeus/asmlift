@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@asmlift/core": "workspace:^",
+    "@gba-kit/debug-info": "^0.3.0",
     "objdiff-wasm": "3.7.3",
     "yaml": "^2.9.0"
   },

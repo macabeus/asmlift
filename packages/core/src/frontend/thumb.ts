@@ -19,7 +19,9 @@ import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
 import { type Prototypes, protoArity } from '../proto';
 import { RUNTIME_HELPERS } from '../raise/softdiv';
+import { type SymbolMap, lookupInterior, lookupSymbol } from '../symbols';
 import type { TargetDescription } from '../target';
+import type { AsmData } from './asmdata';
 import { pushSwitchBr } from './emit';
 import { FrontendUnsupportedError } from './errors';
 import { assertInputFormat } from './format';
@@ -171,10 +173,15 @@ function splitOperands(s: string): string[] {
 // Parse a Thumb memory addressing operand `[base]` or `[base, #off]` into base register +
 // constant byte offset. (Register-scaled indices like `[base, r1, lsl #2]` are not handled
 // yet — agbcc materialises those as explicit add/lsl before the load in the cases we target.)
-function parseAddr(operand: string): { base: string; off: number } {
+function parseAddr(operand: string): { base: string; off: number; regOff?: string } {
   const inner = operand.replace(/[[\]]/g, '').trim();
   const parts = inner.split(',').map((s) => s.trim());
   const base = parts[0];
+  // `[rB, rX]` — REGISTER-offset addressing. Surfaced to the caller so load/store DECLINE
+  // loud: silently reading `[rB]` (the old behavior) dropped the index — a silent miscompile.
+  if (parts[1] !== undefined && !parts[1].startsWith('#')) {
+    return { base, off: 0, regOff: parts[1] };
+  }
   const off = parts[1]?.startsWith('#') ? imm(parts[1]) : 0;
   return { base, off };
 }
@@ -816,7 +823,14 @@ function recoverJumpTable(
 /** Lift decoded asm → an L1 Fn with block-argument SSA. `prototypes` supplies each callee's
  *  declared parameter count (from the project's headers); it is authoritative for recovering
  *  how many argument registers a `bl` passes (falling back to a heuristic when absent). */
-export function lift(name: string, asm: string, target: TargetDescription, prototypes: Prototypes = {}): Fn {
+export function lift(
+  name: string,
+  asm: string,
+  target: TargetDescription,
+  prototypes: Prototypes = {},
+  _asmData?: AsmData,
+  symbols?: SymbolMap,
+): Fn {
   assertInputFormat('thumb', 'gnu-as', asm);
   const { blocks: rawBlocks, dataWords } = decode(name, asm);
 
@@ -1278,6 +1292,39 @@ export function lift(name: string, asm: string, target: TargetDescription, proto
           if (ins.mnemonic === 'ldr' && b !== undefined) {
             const pr = poolRef(b, dataWords);
             if (pr?.kind === 'const') {
+              // Numeric-pool PROMOTION (symbols.ts): a pool-loaded word whose value the
+              // project's symbol map knows becomes the NAMED global's address — the same
+              // `gaddr` the symbol-pool path emits, so everything downstream is the existing
+              // named-global machinery. Only pool-loaded words promote (an address built by
+              // arithmetic never reaches here); a promoted `code` symbol carries `code: true`
+              // so the structurer spells it `(u32)Name`, not `&Name`.
+              const si = symbols ? lookupSymbol(symbols, pr.value) : null;
+              if (si) {
+                const res = mkValue(T.unk(32));
+                irb.ops.push(
+                  mkOp('gaddr', {
+                    results: [res],
+                    attrs: { sym: si.name, ...(si.kind === 'code' ? { code: true } : {}) },
+                  }),
+                );
+                writeVar(reg(a), bi, res);
+                break;
+              }
+              // INTERIOR attribution: a value strictly inside a sized data symbol becomes
+              // `gaddr sym + offset` — the `&gSym + K` tree structure.ts already lowers (and,
+              // with a struct layout, spells as the named field). Sized symbols only; an
+              // unattributed address stays a raw const — nothing guesses.
+              const interior = symbols ? lookupInterior(symbols, pr.value) : null;
+              if (interior) {
+                const g = mkValue(T.unk(32));
+                const k = mkValue(T.unk(32));
+                const res = mkValue(T.unk(32));
+                irb.ops.push(mkOp('gaddr', { results: [g], attrs: { sym: interior.info.name } }));
+                irb.ops.push(mkOp('const', { results: [k], attrs: { value: interior.offset } }));
+                irb.ops.push(mkOp('add', { operands: [g, k], results: [res] }));
+                writeVar(reg(a), bi, res);
+                break;
+              }
               const res = mkValue(T.unk(32));
               irb.ops.push(mkOp('const', { results: [res], attrs: { value: pr.value } }));
               writeVar(reg(a), bi, res);
@@ -1303,9 +1350,19 @@ export function lift(name: string, asm: string, target: TargetDescription, proto
           }
           const width = /b/.test(ins.mnemonic) ? 1 : /h/.test(ins.mnemonic) ? 2 : 4;
           const signed = ins.mnemonic === 'ldr' || /s/.test(ins.mnemonic.slice(3));
-          const { base, off } = parseAddr(b);
+          const { base, off, regOff } = parseAddr(b);
+          // `[rB, rX]` register-offset: lower EXACTLY as `rB + rX` then a load at offset 0 —
+          // the same address arithmetic the encoding performs. (parseAddr used to silently
+          // read `[rB]`, dropping the index — a silent miscompile; ldrsh exists ONLY in this
+          // form in Thumb-1, so every ldrsh went through here.)
+          let baseVal = readData(base, bi);
+          if (regOff !== undefined) {
+            const sum = mkValue(T.unk(32));
+            irb.ops.push(mkOp('add', { operands: [baseVal, readData(regOff, bi)], results: [sum] }));
+            baseVal = sum;
+          }
           const res = mkValue(T.unk(32));
-          irb.ops.push(mkOp('load', { operands: [readData(base, bi)], results: [res], attrs: { off, width, signed } }));
+          irb.ops.push(mkOp('load', { operands: [baseVal], results: [res], attrs: { off, width, signed } }));
           writeVar(reg(a), bi, res);
           break;
         }
@@ -1318,8 +1375,15 @@ export function lift(name: string, asm: string, target: TargetDescription, proto
             break;
           }
           const width = /b/.test(ins.mnemonic) ? 1 : /h/.test(ins.mnemonic) ? 2 : 4;
-          const { base, off } = parseAddr(b);
-          irb.ops.push(mkOp('store', { operands: [readData(base, bi), readData(reg(a), bi)], attrs: { off, width } }));
+          const { base, off, regOff } = parseAddr(b);
+          let storeBase = readData(base, bi);
+          if (regOff !== undefined) {
+            // register-offset store: same exact `rB + rX` lowering as the load path above
+            const sum = mkValue(T.unk(32));
+            irb.ops.push(mkOp('add', { operands: [storeBase, readData(regOff, bi)], results: [sum] }));
+            storeBase = sum;
+          }
+          irb.ops.push(mkOp('store', { operands: [storeBase, readData(reg(a), bi)], attrs: { off, width } }));
           break;
         }
         case 'bl':

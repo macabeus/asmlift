@@ -27,6 +27,10 @@ export type VarTypes = (name: string) => IrType | undefined;
 
 export function declaredTypes(fn: SFn): VarTypes {
   const m = new Map<string, IrType>();
+  // shape-known project globals first, so a (theoretical) local of the same name wins
+  for (const g of fn.globals ?? []) {
+    m.set(g.name, g.type);
+  }
   for (const p of fn.params) {
     m.set(p.name, p.type);
   }

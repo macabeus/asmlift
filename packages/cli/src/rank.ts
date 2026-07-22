@@ -9,6 +9,7 @@ import type { LanguageBackend } from '@asmlift/core/l3/ast';
 import { RewritePattern } from '@asmlift/core/pattern/engine';
 import type { Prototypes } from '@asmlift/core/proto';
 import { type RankedResult as CoreRankedResult, type Scored, enumerateCandidates, rankBy } from '@asmlift/core/rank';
+import type { SymbolMap } from '@asmlift/core/symbols';
 import { type TargetDescription } from '@asmlift/core/target';
 
 import { type CandidateCompiler, MatchScore, scoreSource } from './score';
@@ -28,6 +29,8 @@ export function decompileRanked(
     backend?: LanguageBackend;
     prototypes?: Prototypes;
     asmData?: AsmData;
+    /** address→symbol map (core symbols.ts) — same contract as DecompileOptions.symbols */
+    symbols?: SymbolMap;
     /** a project's own toolchain — overrides the compiler registry */
     compile?: CandidateCompiler;
   } = {},
@@ -38,6 +41,7 @@ export function decompileRanked(
     backend,
     prototypes: opts.prototypes,
     asmData: opts.asmData,
+    symbols: opts.symbols,
   });
   return rankBy(candidates, name, (source, symbol) =>
     scoreSource(source, symbol, targetObj, target, backend.id, opts.compile),

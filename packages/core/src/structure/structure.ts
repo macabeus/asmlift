@@ -42,6 +42,7 @@ import { BinOp, Expr, SFn, Stmt, SwitchCase, exprChildren, mapExprChildren } fro
 import { exprCType, ptrElemBytes } from '../l3/typing';
 import { returnType } from '../raise/recover';
 import { collectStructs } from '../raise/structs';
+import type { SymbolInfo } from '../symbols';
 import { analyze } from './analysis';
 import { makeLoopHazards, updateWriteSet } from './hazards';
 import { analyzeLoops, dominators } from './loops';
@@ -103,6 +104,34 @@ function globalOf(e: Expr, width: number): { name: string; idx: Expr } | null {
   return null;
 }
 
+/** The symbol-map rendering context threaded into memAccess/arrayAccess: shape facts per
+ *  global name, plus a callback registering an array-shaped global's env type (so the bare
+ *  `gSym[i]` spelling passes the stride check uncast). Absent ⇒ today's spellings. */
+interface SymRenderCtx {
+  info(name: string): SymbolInfo | undefined;
+  noteArray(name: string, type: IrType): void;
+}
+
+// The (name, byte offset) of a global access with a CONSTANT total offset — `&gSym` → off,
+// `&gSym + K` → K + off. The exact byte is what a struct-layout field lookup needs; a variable
+// residual returns null (no field spelling — falls through to the index/cast forms).
+function globalConstByte(baseExpr: Expr, off: number): { name: string; byte: number } | null {
+  if (baseExpr.k === 'addr') {
+    return { name: baseExpr.name, byte: off };
+  }
+  if (baseExpr.k === 'bin' && baseExpr.op === '+') {
+    for (const [a, b] of [
+      [baseExpr.l, baseExpr.r],
+      [baseExpr.r, baseExpr.l],
+    ] as const) {
+      if (a.k === 'addr' && b.k === 'const') {
+        return { name: a.name, byte: b.value + off };
+      }
+    }
+  }
+  return null;
+}
+
 function memAccess(
   base: Value,
   baseExpr: Expr,
@@ -111,6 +140,7 @@ function memAccess(
   signed: boolean,
   ctype: (e: Expr) => IrType | undefined,
   scalarGlobals: Set<string>,
+  sym?: SymRenderCtx,
 ): Expr {
   // A deref of a global's address collapses to the bare global: `*(&gSym)` at off 0 is `gSym`;
   // at off N the global is an array — `gSym[N/width]` (a C global name decays to a pointer, so
@@ -118,6 +148,20 @@ function memAccess(
   // `*(&gSym + i)` → `gSym[i + off/width]` (byte offset `i` peeled from the tree; for a u8 global
   // the residual IS the index). This is what makes an agbcc `.word gSym` pool access a named
   // global read/element rather than a phantom-pointer deref.
+  // Declaration-shape spellings (symbol map): a STRUCT global's constant-offset access is the
+  // named field (`gSym.field` — the source spelling a folded literal can never match); an ARRAY
+  // global indexes its BARE name (`gSym[i]`, see below). Exact field match only (offset AND
+  // width) — anything else falls through to the honest cast forms, never a guessed field.
+  if (sym) {
+    const gb = globalConstByte(baseExpr, off);
+    const si = gb ? sym.info(gb.name) : undefined;
+    if (gb && si?.shape === 'struct' && si.layout) {
+      const fld = si.layout.find((f) => f.offset === gb.byte && f.size === width);
+      if (fld) {
+        return { k: 'field', base: { k: 'var', name: gb.name }, name: fld.name, dot: true };
+      }
+    }
+  }
   const g = globalOf(baseExpr, width);
   if (g) {
     const idxVal = g.idx;
@@ -136,6 +180,14 @@ function memAccess(
         : idxVal.k === 'const'
           ? { k: 'const', value: idxVal.value + off / width }
           : { k: 'bin', op: '+', l: idxVal, r: { k: 'const', value: off / width } };
+    // ARRAY-declared global (symbol map): index the bare name — `gSym[i]`, the spelling the
+    // dogfood proved agbcc needs for ROM tables — with the element type registered in the env
+    // so the stride check passes and no cast is added. Element-width match only.
+    const siArr = sym?.info(g.name);
+    if (siArr?.shape === 'array' && siArr.elemSize === width) {
+      sym!.noteArray(g.name, T.ptr(T.int(width * 8, siArr.elemSigned ?? false)));
+      return { k: 'index', base: { k: 'var', name: g.name }, idx, width, signed };
+    }
     return { k: 'index', base: { k: 'addr', name: g.name }, idx, width, signed };
   }
   const bt = base.type;
@@ -169,11 +221,18 @@ function arrayAccess(
   elemSize: number,
   signed: boolean,
   ctype: (e: Expr) => IrType | undefined,
+  sym?: SymRenderCtx,
 ): Expr {
   // A variable-index access off a global's address indexes the ADDRESS `&gSym` (the cast form
   // `((T *)&gSym)[i]` — valid for a struct global too, unlike casting the bare value). A
   // struct-array-of-globals (fieldOff) through `&gSym` is out of scope — fall through.
   if (baseExpr.k === 'addr' && fieldOff === undefined) {
+    // ARRAY-declared global (symbol map): the bare-name spelling, same rule as memAccess.
+    const si = sym?.info(baseExpr.name);
+    if (si?.shape === 'array' && si.elemSize === elemSize) {
+      sym!.noteArray(baseExpr.name, T.ptr(T.int(elemSize * 8, si.elemSigned ?? false)));
+      return { k: 'index', base: { k: 'var', name: baseExpr.name }, idx: idxExpr, width: elemSize, signed };
+    }
     return { k: 'index', base: baseExpr, idx: idxExpr, width: elemSize, signed };
   }
   const bt = base.type;
@@ -306,6 +365,11 @@ export interface StructureOptions {
   //   "annotate" — a `marker` node that spells as the undefined ASMLIFT_ERROR(...) symbol (loud in
   //              the ARTIFACT: the function emits complete, but cannot compile un-acknowledged).
   onGap?: 'strict' | 'annotate';
+  /** NAME-keyed project symbol facts (symbols.ts `symbolsByName`) — drives the byte-sensitive
+   *  declaration-shape spellings: `shape:'array'` forces the aggregate classification and the
+   *  bare `gSym[i]` form; `shape:'struct'`+layout spells interiors as `gSym.field`. Absent (or
+   *  a symbol not in the map) ⇒ today's usage-inferred behavior, byte-identical. */
+  symbols?: Map<string, SymbolInfo>;
 }
 
 export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
@@ -316,6 +380,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     orderArgCopiesByComputation = true,
     switchAllowsNeqCase = true,
     onGap = 'strict',
+    symbols,
   } = opts;
   const defs = defOpMap(fn);
   const preds = predecessorBlocks(fn);
@@ -370,7 +435,24 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
         scalarGlobals.add(sym);
       }
     }
+    // Declaration-shape OVERRIDE (symbol map): a project-declared array/struct global is an
+    // AGGREGATE whatever the usage inference saw — a lone off-0 access to `extern u16 tbl[]`
+    // must still spell through the aggregate/array forms, never the bare scalar `tbl`.
+    if (symbols) {
+      for (const [n, si] of symbols) {
+        if (si.shape === 'array' || si.shape === 'struct') {
+          scalarGlobals.delete(n);
+        }
+      }
+    }
   }
+
+  // Symbol-map rendering context (memAccess/arrayAccess): shape lookups + the env registry for
+  // array-shaped globals actually referenced (they surface as SFn.globals — typed, undeclared).
+  const shapedGlobalTypes = new Map<string, IrType>();
+  const symCtx: SymRenderCtx | undefined = symbols
+    ? { info: (n) => symbols.get(n), noteArray: (n, t) => shapedGlobalTypes.set(n, t) }
+    : undefined;
 
   // --- loop discovery (loops.ts): natural loops via dominator back-edges + the nesting forest ---
   const forest = analyzeLoops(fn, dom);
@@ -896,6 +978,12 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
       return { k: 'call', fn: d.attrs.target as string, args: d.operands.map(e) };
     }
     if (d.opcode === 'gaddr') {
+      // A promoted CODE symbol (frontend `code: true`) is a function pointer stored as an
+      // integer: spelled `(u32)Name` — the source idiom — never `&Name` (defect G of the
+      // dogfood report; the & form compiles but is a different, non-matching spelling).
+      if (d.attrs.code === true) {
+        return { k: 'cast', to: T.int(32, false), e: { k: 'var', name: d.attrs.sym as string } };
+      }
       return { k: 'addr', name: d.attrs.sym as string };
     }
     if (d.opcode === 'load') {
@@ -907,6 +995,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
         (d.attrs.signed as boolean) ?? false,
         ctype,
         scalarGlobals,
+        symCtx,
       );
     }
     // aload carries a runtime index operand (variable-index array access) — `base[index]`, or
@@ -920,6 +1009,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
         d.attrs.elemSize as number,
         (d.attrs.signed as boolean) ?? false,
         ctype,
+        symCtx,
       );
     }
     return d.opcode === 'opaque'
@@ -1035,6 +1125,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
           width === 4,
           ctype,
           scalarGlobals,
+          symCtx,
         );
         if (lval0.k === 'var') {
           globalNames.add(lval0.name);
@@ -1056,6 +1147,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
             elemSize,
             elemSize === 4,
             ctype,
+            symCtx,
           ),
           value: expr(op.operands[2]),
         });
@@ -1481,6 +1573,13 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     name: fn.name,
     params: entry.params.map((p, i) => ({ name: `a${i}`, type: p.type })),
     locals: localNames.map((n) => ({ name: n, type: varType.get(n)! })),
+    ...(shapedGlobalTypes.size
+      ? {
+          globals: [...shapedGlobalTypes]
+            .map(([name, type]) => ({ name, type }))
+            .sort((a, b) => a.name.localeCompare(b.name)),
+        }
+      : {}),
     retType: returnsVoid ? T.void() : returnType(fn),
     body,
     ...(structs.length ? { structs } : {}),
