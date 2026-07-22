@@ -55,12 +55,12 @@ export const GAP_BUCKET_COLOR: Record<GapBucketKey, string> = {
   '31+': '#075985', // sky-800
 };
 
-/** Human labels for the four toolchains. */
+/** Human labels for the four toolchains — the precise compiler (version + vendor) each id names. */
 export const TOOLCHAIN_LABEL: Record<ToolchainId, string> = {
   agbcc: 'agbcc / ARM',
-  'ido7.1': 'ido / MIPS',
-  'gcc2.7.2kmc': 'gcc / MIPS',
-  mwcc_242_81: 'mwcc / PPC',
+  'ido7.1': 'IDO 7.1 / MIPS',
+  'gcc2.7.2kmc': 'KMC GCC 2.7.2 / MIPS',
+  mwcc_242_81: 'CodeWarrior 2.4.2 / PPC',
 };
 
 export const TOOLCHAIN_ORDER: ToolchainId[] = ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'mwcc_242_81'];
