@@ -55,15 +55,15 @@ export const GAP_BUCKET_COLOR: Record<GapBucketKey, string> = {
   '31+': '#075985', // sky-800
 };
 
-/** Human labels for the four toolchains. */
+/** Human labels for the four toolchains — the precise compiler (version + vendor) each id names. */
 export const TOOLCHAIN_LABEL: Record<ToolchainId, string> = {
-  'agbcc-arm': 'agbcc / ARM',
-  'ido-mips': 'ido / MIPS',
-  'gcc-mips': 'gcc / MIPS',
-  'mwcc-ppc': 'mwcc / PPC',
+  agbcc: 'agbcc / ARM',
+  'ido7.1': 'IDO 7.1 / MIPS',
+  'gcc2.7.2kmc': 'KMC GCC 2.7.2 / MIPS',
+  mwcc_242_81: 'CodeWarrior 2.4.2 / PPC',
 };
 
-export const TOOLCHAIN_ORDER: ToolchainId[] = ['agbcc-arm', 'ido-mips', 'gcc-mips', 'mwcc-ppc'];
+export const TOOLCHAIN_ORDER: ToolchainId[] = ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'mwcc_242_81'];
 
 /** Human labels for the ISAs (the "assembly" axis) and compilers. */
 export const ISA_LABEL: Record<string, string> = {

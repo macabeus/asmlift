@@ -59,8 +59,8 @@ export interface Toolchain {
 }
 
 export const TOOLCHAINS: Record<ToolchainId, Toolchain> = {
-  'agbcc-arm': {
-    id: 'agbcc-arm',
+  agbcc: {
+    id: 'agbcc',
     isa: 'arm',
     compiler: 'agbcc',
     label: 'agbcc / ARM (GBA)',
@@ -72,10 +72,10 @@ export const TOOLCHAINS: Record<ToolchainId, Toolchain> = {
       const obj = assembleTarget(asm); // assemble that .s → scoring target
       return { obj, asm };
     },
-    score: scoreViaBenchConfig('agbcc-arm', scoreC),
+    score: scoreViaBenchConfig('agbcc', scoreC),
   },
-  'ido-mips': {
-    id: 'ido-mips',
+  'ido7.1': {
+    id: 'ido7.1',
     isa: 'mips',
     compiler: 'ido',
     label: 'IDO / MIPS (N64)',
@@ -83,10 +83,10 @@ export const TOOLCHAINS: Record<ToolchainId, Toolchain> = {
     asmKind: 'objdump',
     available: () => idoAvailable(),
     buildTarget: (refC, sym) => compileMipsTarget(refC, sym),
-    score: scoreViaBenchConfig('ido-mips', scoreCMips),
+    score: scoreViaBenchConfig('ido7.1', scoreCMips),
   },
-  'gcc-mips': {
-    id: 'gcc-mips',
+  'gcc2.7.2kmc': {
+    id: 'gcc2.7.2kmc',
     isa: 'mips',
     compiler: 'gcc',
     label: 'KMC GCC / MIPS (N64)',
@@ -94,10 +94,10 @@ export const TOOLCHAINS: Record<ToolchainId, Toolchain> = {
     asmKind: 'objdump',
     available: () => dockerAvailable(),
     buildTarget: (refC, sym) => compileMipsGccTarget(refC, sym),
-    score: scoreViaBenchConfig('gcc-mips', scoreCMipsGcc),
+    score: scoreViaBenchConfig('gcc2.7.2kmc', scoreCMipsGcc),
   },
-  'mwcc-ppc': {
-    id: 'mwcc-ppc',
+  mwcc_242_81: {
+    id: 'mwcc_242_81',
     isa: 'ppc',
     compiler: 'mwcc',
     label: 'CodeWarrior / PowerPC (GC)',
@@ -105,7 +105,7 @@ export const TOOLCHAINS: Record<ToolchainId, Toolchain> = {
     asmKind: 'objdump',
     available: () => ppcDockerAvailable(),
     buildTarget: (refC, sym, lang) => (lang === 'c++' ? compilePpcCppTarget(refC, sym) : compilePpcTarget(refC, sym)),
-    score: scoreViaBenchConfig('mwcc-ppc', scoreCPpc),
+    score: scoreViaBenchConfig('mwcc_242_81', scoreCPpc),
   },
 };
 

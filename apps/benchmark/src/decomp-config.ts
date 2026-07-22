@@ -45,7 +45,7 @@ const PLACEHOLDER_VALUES: Record<string, string> = {
 };
 
 /** The pooled pair: scoring compiles through the built-in registry (long-lived containers). */
-const POOLED: ReadonlySet<ToolchainId> = new Set(['gcc-mips', 'mwcc-ppc']);
+const POOLED: ReadonlySet<ToolchainId> = new Set(['gcc2.7.2kmc', 'mwcc_242_81']);
 
 /** `"$VAR"` becomes the shell-quoted machine value; a bare `$VAR` substitutes verbatim.
  *  Unknown $ASMLIFT_* names are a loud error — a typo would otherwise reach sh unexpanded. */

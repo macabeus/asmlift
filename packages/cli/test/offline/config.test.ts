@@ -38,11 +38,11 @@ test('malformed YAML and non-mapping top levels throw loud with the file path', 
 
 test('target resolution precedence: flag > tools.asmlift.target > platform', () => {
   const root = tmp();
-  writeFileSync(join(root, 'decomp.yaml'), 'platform: gba\ntools:\n  asmlift:\n    target: ido-mips\n');
+  writeFileSync(join(root, 'decomp.yaml'), 'platform: gba\ntools:\n  asmlift:\n    target: ido7.1\n');
   const loaded = loadDecompConfig(undefined, root);
-  expect(resolveTarget('mwcc-ppc', loaded)).toEqual({ targetKey: 'mwcc-ppc', trace: '--target flag' });
+  expect(resolveTarget('mwcc_242_81', loaded)).toEqual({ targetKey: 'mwcc_242_81', trace: '--target flag' });
   const viaTool = resolveTarget(undefined, loaded);
-  expect('targetKey' in viaTool && viaTool.targetKey).toBe('ido-mips');
+  expect('targetKey' in viaTool && viaTool.targetKey).toBe('ido7.1');
   const platformOnly = loadDecompConfig(
     undefined,
     (() => {
@@ -52,14 +52,14 @@ test('target resolution precedence: flag > tools.asmlift.target > platform', () 
     })(),
   );
   const viaPlatform = resolveTarget(undefined, platformOnly);
-  expect('targetKey' in viaPlatform && viaPlatform.targetKey).toBe('agbcc-arm');
+  expect('targetKey' in viaPlatform && viaPlatform.targetKey).toBe('agbcc');
 });
 
 test('ambiguous and unknown platforms DECLINE naming the candidates, never guess', () => {
   const n64 = tmp();
   writeFileSync(join(n64, 'decomp.yaml'), 'platform: n64\n');
   const amb = resolveTarget(undefined, loadDecompConfig(undefined, n64));
-  expect('error' in amb && amb.error).toMatch(/ido-mips or gcc-mips/);
+  expect('error' in amb && amb.error).toMatch(/ido7.1 or gcc2.7.2kmc/);
 
   const weird = tmp();
   writeFileSync(join(weird, 'decomp.yaml'), 'platform: dreamcast\n');
@@ -80,7 +80,7 @@ test('CLI: --target becomes optional inside a configured project (trace on stder
   const r = await runCli([file]);
   expect(r.code).toBe(0);
   expect(r.stdout).toContain('s32 clamp0(s32 a0)');
-  expect(r.stderr).toContain('[config] target agbcc-arm');
+  expect(r.stderr).toContain('[config] target agbcc');
 });
 
 test('CLI: ambiguous platform without --target is a usage error naming both', async () => {
@@ -90,7 +90,7 @@ test('CLI: ambiguous platform without --target is a usage error naming both', as
   writeFileSync(file, '00000000 <f>:\n   0:\tjr\tra\n   4:\tnop\n');
   const r = await runCli([file]);
   expect(r.code).toBe(64);
-  expect(r.stderr).toContain('ido-mips or gcc-mips');
+  expect(r.stderr).toContain('ido7.1 or gcc2.7.2kmc');
 });
 
 test('CLI: --score-against without tools.asmlift.compiler is a usage error, never a fallback', async () => {

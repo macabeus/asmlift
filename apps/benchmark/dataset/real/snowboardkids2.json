@@ -1,6 +1,6 @@
 {
   "project": "snowboardkids2",
-  "toolchain": "gcc-mips",
+  "toolchain": "gcc2.7.2kmc",
   "repoDir": "snowboardkids2-decomp",
   "cppIncludes": [
     "-nostdinc",

@@ -65,8 +65,8 @@ platform: gba
 tools:
   asmlift:
     # Optional. Used only for disambiguation when multiple toolchains are available.
-    # Possible values: agbcc-arm, ido-mips, gcc-mips, mwcc-ppc
-    target: agbcc-arm
+    # Possible values: agbcc, ido7.1, gcc2.7.2kmc, mwcc_242_81
+    target: agbcc
 
     # Optional. Used only for the `--score-against`
     compiler: |
@@ -85,7 +85,7 @@ asmlift build/src/gfx.s --name ReadUnalignedU16 --score-against build/src/gfx.o
 s32 ReadUnalignedU16(u8 * a0) {
     return *a0 | a0[1] << 8;
 }
-asmlift: [config] target agbcc-arm (platform 'gba' in ./decomp.yaml)
+asmlift: [config] target agbcc (platform 'gba' in ./decomp.yaml)
 asmlift: [score] unsigned: 0 (match)
 ```
 

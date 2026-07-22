@@ -4,7 +4,7 @@ import { expect, test } from 'vitest';
 import { encodeShare } from '../src/shared/utils/permalink';
 import { parseAsShareState } from '../src/shared/utils/url-state';
 
-const share = { target: 'agbcc-arm', backend: 'c', name: 'add1', asm: 'add1:\n\tadd r0, r0, #1\n\tbx lr\n' };
+const share = { target: 'agbcc', backend: 'c', name: 'add1', asm: 'add1:\n\tadd r0, r0, #1\n\tbx lr\n' };
 
 test('ShareState round-trips through the ?s= parser', () => {
   expect(parseAsShareState.parse(parseAsShareState.serialize(share))).toEqual(share);

@@ -10,14 +10,14 @@ const corpus = (f: string) => readFileSync(join(import.meta.dirname, '../../../c
 const run = (file: string, ...flags: string[]) => runCli([file, ...flags], corpus);
 
 test('decompiles an objdump corpus file end-to-end (name auto-detected)', async () => {
-  const r = await run('ido-add1.asm', '--target', 'ido-mips');
+  const r = await run('ido-add1.asm', '--target', 'ido7.1');
   expect(r.code).toBe(0);
   expect(r.stderr).toBe('');
   expect(r.stdout).toBe('s32 add1(s32 a0) {\n    return a0 + 1;\n}\n');
 });
 
 test('decompiles agbcc .s text (name from .globl)', async () => {
-  const r = await run('agbcc-clamp0.s', '--target', 'agbcc-arm');
+  const r = await run('agbcc-clamp0.s', '--target', 'agbcc');
   expect(r.code).toBe(0);
   expect(r.stdout).toBe('s32 clamp0(s32 a0) {\n    if (a0 < 0) a0 = 0;\n    return a0;\n}\n');
 });
@@ -40,21 +40,21 @@ test('usage errors: unknown target, missing input, missing flag value', async ()
 });
 
 test('an unknown flag is a usage error, never silently ignored', async () => {
-  const r = await run('ido-add1.asm', '--target', 'ido-mips', '--nmae', 'foo');
+  const r = await run('ido-add1.asm', '--target', 'ido7.1', '--nmae', 'foo');
   expect(r.code).toBe(64);
   expect(r.stderr).toContain('unknown flag --nmae');
-  expect((await run('ido-add1.asm', '--target', 'ido-mips', '--backned', 'pascal')).code).toBe(64);
+  expect((await run('ido-add1.asm', '--target', 'ido7.1', '--backned', 'pascal')).code).toBe(64);
 });
 
 test('--flag=value form works; --strict=x rejected', async () => {
-  const r = await run('ido-add1.asm', '--target=ido-mips');
+  const r = await run('ido-add1.asm', '--target=ido7.1');
   expect(r.code).toBe(0);
   expect(r.stdout).toContain('add1');
-  expect((await run('ido-add1.asm', '--target=ido-mips', '--strict=yes')).code).toBe(64);
+  expect((await run('ido-add1.asm', '--target=ido7.1', '--strict=yes')).code).toBe(64);
 });
 
 test('an unreadable input is exit 66 with a clean message, not a stack trace', async () => {
-  const r = await runCli(['/nonexistent/nope.s', '--target', 'ido-mips'], () => {
+  const r = await runCli(['/nonexistent/nope.s', '--target', 'ido7.1'], () => {
     throw new Error('ENOENT: no such file');
   });
   expect(r.code).toBe(66);
@@ -63,16 +63,16 @@ test('an unreadable input is exit 66 with a clean message, not a stack trace', a
 });
 
 test('--name must be a valid identifier (empty and hostile names are usage errors)', async () => {
-  expect((await run('ido-add1.asm', '--target', 'ido-mips', '--name', '')).code).toBe(64);
-  expect((await run('ido-add1.asm', '--target', 'ido-mips', '--name', 'a; rm -rf /')).code).toBe(64);
+  expect((await run('ido-add1.asm', '--target', 'ido7.1', '--name', '')).code).toBe(64);
+  expect((await run('ido-add1.asm', '--target', 'ido7.1', '--name', 'a; rm -rf /')).code).toBe(64);
 });
 
 test('gaps exit 1 with markers; strict declines are tagged, not internal', async () => {
   const swi = '\t.code\t16\n\t.globl\tf\n\t.thumb_func\nf:\n\tswi\t5\n\tbx\tlr\n';
-  const gap = await runCli(['x.s', '--target', 'agbcc-arm'], () => swi);
+  const gap = await runCli(['x.s', '--target', 'agbcc'], () => swi);
   expect(gap.code).toBe(1);
   expect(gap.stdout).toContain('ASMLIFT_ERROR');
-  const strict = await runCli(['x.s', '--target', 'agbcc-arm', '--strict'], () => swi);
+  const strict = await runCli(['x.s', '--target', 'agbcc', '--strict'], () => swi);
   expect(strict.code).toBe(1);
   expect(strict.stderr).toContain('[declined]');
   expect(strict.stderr).not.toContain('[internal error]');

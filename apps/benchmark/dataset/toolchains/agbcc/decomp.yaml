@@ -12,11 +12,11 @@
 #   $ASMLIFT_ARM_AS → your GNU ARM assembler (usually just arm-none-eabi-as)
 # (The variables exist only to keep machine paths out of this repo — the benchmark fills
 # them in when it runs.)
-name: asmlift benchmark (agbcc-arm)
+name: asmlift benchmark (agbcc)
 platform: gba
 tools:
   asmlift:
-    target: agbcc-arm
+    target: agbcc
     compiler: >-
       cpp -P -nostdinc {{inputPath}} > {{inputPath}}.pp.c 2>/dev/null;
       "$ASMLIFT_AGBCC" {{inputPath}}.pp.c -o {{inputPath}}.s

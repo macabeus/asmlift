@@ -18,10 +18,10 @@ import type { RealCompile, RealProjectCfg } from './types';
 export type { RealProjectCfg } from './types';
 
 const REAL_COMPILERS: Record<ToolchainId, RealCompile | null> = {
-  'agbcc-arm': agbccReal,
-  'ido-mips': idoReal,
-  'gcc-mips': kmcReal,
-  'mwcc-ppc': mwccReal, // typed "not wired" — see compile/mwcc.ts
+  agbcc: agbccReal,
+  'ido7.1': idoReal,
+  'gcc2.7.2kmc': kmcReal,
+  mwcc_242_81: mwccReal, // typed "not wired" — see compile/mwcc.ts
 };
 
 /** Build the full translation unit: project #includes + any per-function prelude + the function.
@@ -34,7 +34,7 @@ export function makeTU(cfg: RealProjectCfg, prependC: string, funcC: string): st
 export function realCompilerFor(toolchain: ToolchainId): RealCompile {
   const rc = REAL_COMPILERS[toolchain];
   if (!rc) {
-    throw new Error(`real tier not wired for ${toolchain} (see compile/${toolchain.split('-')[0]}.ts)`);
+    throw new Error(`real tier not wired for ${toolchain} (add it to REAL_COMPILERS in compile/real.ts)`);
   }
   return rc;
 }

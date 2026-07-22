@@ -34,7 +34,7 @@ describe('parseShard (pinned)', () => {
 describe('runCases toolchain availability (pinned)', () => {
   test('an unavailable toolchain skips its case — no row, no throw', () => {
     const c: Case = {
-      id: 'synthetic:ghost:agbcc-arm',
+      id: 'synthetic:ghost:agbcc',
       tier: 'synthetic',
       sym: 'ghost',
       project: 'synthetic',
@@ -57,7 +57,7 @@ describe('runCases toolchain availability (pinned)', () => {
 describe('runCases build failures (pinned)', () => {
   test('a target that cannot build fails the shard loudly, after flushing the other rows', () => {
     const c: Case = {
-      id: 'synthetic:ghost:mwcc-ppc',
+      id: 'synthetic:ghost:mwcc_242_81',
       tier: 'synthetic',
       sym: 'ghost',
       project: 'synthetic',
@@ -71,7 +71,7 @@ describe('runCases build failures (pinned)', () => {
       },
     };
     const outPath = join(mkdtempSync(join(tmpdir(), 'bench-runner-test-')), 'part.json');
-    expect(() => runCases([c], outPath)).toThrow(/1 target build\(s\) failed .* synthetic:ghost:mwcc-ppc/);
+    expect(() => runCases([c], outPath)).toThrow(/1 target build\(s\) failed .* synthetic:ghost:mwcc_242_81/);
     // the part file is still written, so surviving rows are never lost to the throw
     expect(JSON.parse(readFileSync(outPath, 'utf8')).results).toEqual([]);
   });
@@ -80,13 +80,13 @@ describe('runCases build failures (pinned)', () => {
 describe('benchMeta (pinned)', () => {
   test('counts tiers and dedupes toolchains', () => {
     const rows = [
-      { tier: 'synthetic', toolchain: 'agbcc-arm' },
-      { tier: 'synthetic', toolchain: 'ido-mips' },
-      { tier: 'real', toolchain: 'agbcc-arm' },
+      { tier: 'synthetic', toolchain: 'agbcc' },
+      { tier: 'synthetic', toolchain: 'ido7.1' },
+      { tier: 'real', toolchain: 'agbcc' },
     ] as FunctionResult[];
     const m = benchMeta(rows);
     expect(m.counts).toEqual({ total: 3, synthetic: 2, real: 1 });
-    expect(m.toolchains).toEqual(['agbcc-arm', 'ido-mips']);
+    expect(m.toolchains).toEqual(['agbcc', 'ido7.1']);
     // no machine identity in published artifacts (meta must never carry a hostname)
     expect(m).not.toHaveProperty('host');
   });

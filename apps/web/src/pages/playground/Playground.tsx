@@ -22,10 +22,10 @@ import { EXAMPLES } from './examples';
 import { useRanking } from './useRanking';
 
 const TARGETS: Record<string, { desc: TargetDescription; label: string; format: string }> = {
-  'agbcc-arm': { desc: ARMV4T_AGBCC, label: 'GBA — agbcc / ARMv4T', format: 'agbcc textual .s' },
-  'ido-mips': { desc: MIPS_IDO, label: 'N64 — IDO / MIPS', format: 'mips objdump -d --no-show-raw-insn' },
-  'gcc-mips': { desc: MIPS_GCC, label: 'N64 — KMC GCC / MIPS', format: 'mips objdump -d --no-show-raw-insn' },
-  'mwcc-ppc': { desc: PPC_MWCC, label: 'GC/Wii — mwcc / PPC', format: 'ppc objdump -d -r --no-show-raw-insn' },
+  agbcc: { desc: ARMV4T_AGBCC, label: 'GBA — agbcc / ARMv4T', format: 'agbcc textual .s' },
+  'ido7.1': { desc: MIPS_IDO, label: 'N64 — IDO / MIPS', format: 'mips objdump -d --no-show-raw-insn' },
+  'gcc2.7.2kmc': { desc: MIPS_GCC, label: 'N64 — KMC GCC / MIPS', format: 'mips objdump -d --no-show-raw-insn' },
+  mwcc_242_81: { desc: PPC_MWCC, label: 'GC/Wii — mwcc / PPC', format: 'ppc objdump -d -r --no-show-raw-insn' },
 };
 
 // cpp has no static backend: cppBackend(spec) is built per run from the user/derived spec.

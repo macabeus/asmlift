@@ -1,6 +1,6 @@
 {
   "project": "pokeemerald",
-  "toolchain": "agbcc-arm",
+  "toolchain": "agbcc",
   "repoDir": "pokeemerald",
   "cppIncludes": [
     "-nostdinc",

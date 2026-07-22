@@ -5,7 +5,7 @@
 //
 // `toolchains` lists which toolchains to run each function on. MIPS-IDO is steered away from calls
 // (its PIC codegen makes external calls unfriendly to both decompilers).
-// C++ runs on mwcc-ppc only (the `.cp` frontend). `ctx` is the m2c --context (prototypes only — no
+// C++ runs on mwcc_242_81 only (the `.cp` frontend). `ctx` is the m2c --context (prototypes only — no
 // struct layouts, so both decompilers must RECOVER structure); `proto` feeds asmlift the same info.
 import type { Prototypes } from '@asmlift/core/proto';
 
@@ -22,8 +22,8 @@ export interface SynthSpec {
   note?: string;
 }
 
-const ALL: ToolchainId[] = ['agbcc-arm', 'ido-mips', 'gcc-mips', 'mwcc-ppc'];
-const CALL: ToolchainId[] = ['agbcc-arm', 'gcc-mips', 'mwcc-ppc']; // IDO PIC-unfriendly for calls
+const ALL: ToolchainId[] = ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'mwcc_242_81'];
+const CALL: ToolchainId[] = ['agbcc', 'gcc2.7.2kmc', 'mwcc_242_81']; // IDO PIC-unfriendly for calls
 
 export const SYNTHETIC: SynthSpec[] = [
   // ── arithmetic ────────────────────────────────────────────────────────────────────────
@@ -703,7 +703,7 @@ export const SYNTHETIC_CPP: SynthSpec[] = [
     lang: 'c++',
     src: 'struct Vec{int x;int y;int len2(){ return x*x+y*y; }};\nextern "C" int Vec__len2(Vec*v){ return v->len2(); }',
     features: ['c++', 'method', 'this-ptr'],
-    toolchains: ['mwcc-ppc'],
+    toolchains: ['mwcc_242_81'],
     note: 'C++ method via this-pointer',
   },
   {
@@ -711,7 +711,7 @@ export const SYNTHETIC_CPP: SynthSpec[] = [
     lang: 'c++',
     src: 'struct Counter{int n;void inc(){ n++; }};\nextern "C" void Counter__inc(Counter*c){ c->inc(); }',
     features: ['c++', 'method', 'mutate'],
-    toolchains: ['mwcc-ppc'],
+    toolchains: ['mwcc_242_81'],
     // `struct` spelled out: the ctx must parse as C (m2c's context parser) AND as C++
     ctx: 'struct Counter; void Counter__inc(struct Counter*);',
     proto: { Counter__inc: { returnsVoid: true } },

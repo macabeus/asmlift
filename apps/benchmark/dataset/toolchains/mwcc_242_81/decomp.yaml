@@ -18,11 +18,11 @@
 #
 # (The benchmark's own scoring skips this command and reuses a pooled long-lived container;
 # the reproduction scripts run it as written.)
-name: asmlift benchmark (mwcc-ppc)
+name: asmlift benchmark (mwcc_242_81)
 platform: gc
 tools:
   asmlift:
-    target: mwcc-ppc
+    target: mwcc_242_81
     compiler: >-
       "$ASMLIFT_DOCKER" run --rm
       -v "$ASMLIFT_MWCC_DIR":/mwcc:ro -v "$(dirname {{inputPath}})":/work

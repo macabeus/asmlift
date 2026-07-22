@@ -1,5 +1,5 @@
 // Magic-number constant-division recovery (src/raise/magicdiv.ts). Offline (IR-level): each
-// golden shape is the exact DAG the frontends lift from real gcc-mips/mwcc-ppc output; each
+// golden shape is the exact DAG the frontends lift from real gcc2.7.2kmc/mwcc_242_81 output; each
 // negative is a near-miss that must DECLINE (leave the transient mulh in place → the
 // structurer loud-fails on it — never a nonsense divide).
 //

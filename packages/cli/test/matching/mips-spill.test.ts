@@ -1,4 +1,4 @@
-// B2 regression — `sp`-relative argument-spill mislift (ido-mips).
+// B2 regression — `sp`-relative argument-spill mislift (ido7.1).
 //
 // IDO spills a narrow (`signed char`/`unsigned char`) parameter to its o32 ABI home slot with
 // `sw a0,0(sp)`. Lifting that as a store THROUGH `sp` read as an ordinary register makes `sp` a

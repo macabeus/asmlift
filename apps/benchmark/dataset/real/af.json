@@ -1,6 +1,6 @@
 {
   "project": "af",
-  "toolchain": "ido-mips",
+  "toolchain": "ido7.1",
   "repoDir": "af",
   "cppIncludes": [
     "-nostdinc"

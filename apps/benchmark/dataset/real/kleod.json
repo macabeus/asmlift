@@ -1,6 +1,6 @@
 {
   "project": "kleod",
-  "toolchain": "agbcc-arm",
+  "toolchain": "agbcc",
   "repoDir": "klonoa-empire-of-dreams",
   "cppIncludes": [
     "-nostdinc",

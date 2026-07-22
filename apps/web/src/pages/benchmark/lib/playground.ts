@@ -11,7 +11,7 @@ import type { FunctionResult } from '@asmlift/bench-schema';
 import type { ShareState } from '../../../shared/utils/permalink';
 
 // The playground's TARGETS keys — identical to the benchmark toolchain ids by construction.
-const PLAYGROUND_TARGETS = new Set(['agbcc-arm', 'ido-mips', 'gcc-mips', 'mwcc-ppc']);
+const PLAYGROUND_TARGETS = new Set(['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'mwcc_242_81']);
 // Past this the editor state gets unwieldy (and a shared permalink would break); refuse instead.
 const MAX_ASM_CHARS = 30_000;
 

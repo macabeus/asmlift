@@ -6,21 +6,21 @@ import { describe, expect, test } from 'vitest';
 
 import { disasmToM2c } from '../src/eval/m2c-normalizer';
 
-// synthetic:breakloop:mwcc-ppc — mwcc counted loop: the bdnz back-edge MUST get its .LADDR
+// synthetic:breakloop:mwcc_242_81 — mwcc counted loop: the bdnz back-edge MUST get its .LADDR
 // label, conditional branches label normally, blr stays bare.
 const PPC_LOOP_IN =
   '\n/host-tmp/asmlift-ppc-ref-6IxApi/ref.o:     file format elf32-powerpc\n\n\nDisassembly of section .text:\n\n00000000 <breakloop>:\n   0:\tli      r5,0\n   4:\tmtctr   r4\n   8:\tcmpwi   r4,0\n   c:\tble     28 <breakloop+0x28>\n  10:\tlwz     r0,0(r3)\n  14:\tcmpwi   r0,0\n  18:\tblt     28 <breakloop+0x28>\n  1c:\taddi    r3,r3,4\n  20:\taddi    r5,r5,1\n  24:\tbdnz    10 <breakloop+0x10>\n  28:\tmr      r3,r5\n  2c:\tblr\n';
 const PPC_LOOP_OUT =
   'glabel breakloop\n    li      r5,0\n    mtctr   r4\n    cmpwi   r4,0\n    ble      .L28\n.L10:\n    lwz     r0,0(r3)\n    cmpwi   r0,0\n    blt      .L28\n    addi    r3,r3,4\n    addi    r5,r5,1\n    bdnz     .L10\n.L28:\n    mr      r3,r5\n    blr\n';
 
-// synthetic:call2:mwcc-ppc — a bl whose target arrives as an R_PPC_REL24 reloc: the symbol is
+// synthetic:call2:mwcc_242_81 — a bl whose target arrives as an R_PPC_REL24 reloc: the symbol is
 // spliced onto the call, no local label is fabricated, *lr forms stay bare.
 const PPC_CALL_IN =
   '\n/host-tmp/asmlift-ppc-ref-ZML1gR/ref.o:     file format elf32-powerpc\n\n\nDisassembly of section .text:\n\n00000000 <call2>:\n   0:\tstwu    r1,-16(r1)\n   4:\tmflr    r0\n   8:\tadd     r5,r3,r4\n   c:\tstw     r0,20(r1)\n  10:\tbl      10 <call2+0x10>\n\t\t\t10: R_PPC_REL24\tadd3\n  14:\tlwz     r0,20(r1)\n  18:\tmtlr    r0\n  1c:\taddi    r1,r1,16\n  20:\tblr\n';
 const PPC_CALL_OUT =
   'glabel call2\n    stwu    r1,-16(r1)\n    mflr    r0\n    add     r5,r3,r4\n    stw     r0,20(r1)\n    bl       add3\n    lwz     r0,20(r1)\n    mtlr    r0\n    addi    r1,r1,16\n    blr\n';
 
-// synthetic:arraysum:ido-mips — MIPS register $-prefixing incl. off(base) memory operands,
+// synthetic:arraysum:ido7.1 — MIPS register $-prefixing incl. off(base) memory operands,
 // multiple branch targets, jr $ra bare, delay slots preserved in order.
 const MIPS_MEM_IN =
   '\n/var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/asmlift-mips-ref-aETz5J/ref.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <arraysum>:\n   0:\tmove\tv1,zero\n   4:\tblez\ta1,70 <arraysum+0x70>\n   8:\tmove\tv0,zero\n   c:\tandi\tt0,a1,0x3\n  10:\tbeqz\tt0,38 <arraysum+0x38>\n  14:\tmove\ta3,t0\n  18:\tsll\tt6,zero,0x2\n  1c:\taddu\ta2,a0,t6\n  20:\tlw\tt7,0(a2)\n  24:\taddiu\tv0,v0,1\n  28:\taddiu\ta2,a2,4\n  2c:\tbne\ta3,v0,20 <arraysum+0x20>\n  30:\taddu\tv1,v1,t7\n  34:\tbeq\tv0,a1,70 <arraysum+0x70>\n  38:\tsll\tt8,v0,0x2\n  3c:\tsll\tt9,a1,0x2\n  40:\taddu\ta3,t9,a0\n  44:\taddu\ta2,a0,t8\n  48:\tlw\tt1,0(a2)\n  4c:\tlw\tt2,4(a2)\n  50:\tlw\tt3,8(a2)\n  54:\taddu\tv1,v1,t1\n  58:\tlw\tt4,12(a2)\n  5c:\taddu\tv1,v1,t2\n  60:\taddiu\ta2,a2,16\n  64:\taddu\tv1,v1,t3\n  68:\tbne\ta2,a3,48 <arraysum+0x48>\n  6c:\taddu\tv1,v1,t4\n  70:\tjr\tra\n  74:\tmove\tv0,v1\n\t...\n';
