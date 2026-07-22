@@ -23,7 +23,6 @@ export type Verdict = (typeof VERDICTS)[number];
 export const FILTER_PARSERS = {
   project: parseAsString.withDefault(''),
   isa: parseAsString.withDefault(''),
-  compiler: parseAsString.withDefault(''),
   toolchain: parseAsString.withDefault(''),
   tier: parseAsString.withDefault(''),
   outcomeDecompiler: parseAsStringLiteral(['any', 'asmlift', 'm2c'] as const).withDefault('any'),
@@ -38,7 +37,6 @@ export const FILTER_PARSERS = {
 export const FILTER_URL_KEYS = {
   project: 'project',
   isa: 'isa',
-  compiler: 'cc',
   toolchain: 'tc',
   tier: 'tier',
   outcomeDecompiler: 'of',
@@ -56,7 +54,6 @@ export type ExplorerPreset = Partial<Filters>;
 export const FILTERS_RESET: { [K in keyof Filters]: null } = {
   project: null,
   isa: null,
-  compiler: null,
   toolchain: null,
   tier: null,
   outcomeDecompiler: null,

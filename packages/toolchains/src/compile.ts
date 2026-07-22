@@ -15,7 +15,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
-import { GCC_KMC_TOOLCHAIN, IDO_TOOLCHAIN, MWCC_PPC_TOOLCHAIN, TOOLCHAIN } from './toolchain';
+import { GCC272_TOOLCHAIN, GCC_KMC_TOOLCHAIN, IDO_TOOLCHAIN, MWCC_PPC_TOOLCHAIN, TOOLCHAIN } from './toolchain';
 
 const noPascal = (compiler: string): never => {
   throw new Error(`${compiler} target has no Pascal backend`);
@@ -127,6 +127,81 @@ export function compileMipsTarget(cSource: string, _symbol: string): { obj: stri
   return { obj: oPath, asm: dis.stdout };
 }
 
+/** Compile one C/`.i` file → object with Mario Party 3's GCC 2.7.2 inside its linux/386 container
+ *  (pooled, with a one-shot `docker run` fallback) — the same shape as kmcCompile. `-B` +
+ *  COMPILER_PATH point the old driver at its bundled `cc1` and binutils under the mounted dir. */
+export function gcc272Compile(dir: string, srcC: string, outObj: string): void {
+  const t = GCC272_TOOLCHAIN;
+  const w = hostTmp(dir);
+  if (w) {
+    const name = poolName('gcc272', `${t.image}|${t.dir}`);
+    const mounts = ['-v', `${t.dir}:/gcc272:ro`, '-v', '/tmp:/host-tmp'];
+    const cc = poolExec(t.docker, t.image, name, mounts, [
+      '-w',
+      w,
+      '-e',
+      'COMPILER_PATH=/gcc272',
+      name,
+      '/gcc272/gcc',
+      '-B',
+      '/gcc272/',
+      ...t.ccFlags,
+      '-c',
+      '-o',
+      `${w}/${outObj}`,
+      `${w}/${srcC}`,
+    ]);
+    if (cc) {
+      if (cc.status !== 0) {
+        throw new Error(`gcc 2.7.2 (docker) failed: ${cc.stderr || cc.stdout}`);
+      }
+      return;
+    }
+  }
+  const cc = run(t.docker, [
+    'run',
+    '--rm',
+    '--platform',
+    'linux/386',
+    '-v',
+    `${t.dir}:/gcc272:ro`,
+    '-v',
+    `${dir}:/work`,
+    '-w',
+    '/work',
+    '-e',
+    'COMPILER_PATH=/gcc272',
+    t.image,
+    '/gcc272/gcc',
+    '-B',
+    '/gcc272/',
+    ...t.ccFlags,
+    '-c',
+    '-o',
+    `/work/${outObj}`,
+    `/work/${srcC}`,
+  ]);
+  if (cc.status !== 0) {
+    throw new Error(`gcc 2.7.2 (docker) failed: ${cc.stderr || cc.stdout}`);
+  }
+}
+
+/** GCC 2.7.2 / MIPS — synthetic-tier target build. The C→object step runs in the linux/386
+ *  container (gcc272Compile); the object is disassembled + scored on the host, mirroring the KMC
+ *  path. */
+export function compileMipsGcc272Target(cSource: string, _symbol: string): { obj: string; asm: string } {
+  const { objdump, objdumpFlags } = GCC272_TOOLCHAIN;
+  const dir = contentShareableDir('asmlift-mgcc272-ref-', cSource);
+  writeFileSync(join(dir, 'ref.c'), C_TYPEDEFS + cSource);
+  gcc272Compile(dir, 'ref.c', 'ref.o');
+  const oPath = join(dir, 'ref.o');
+  const dis = run(objdump, [...objdumpFlags, oPath]);
+  if (dis.status !== 0) {
+    throw new Error(`objdump failed: ${dis.stderr}`);
+  }
+  return { obj: oPath, asm: dis.stdout };
+}
+
 /** Compile candidate IDO Pascal (via `cc`→`upas`, routed by the `.p` extension); returns the
  *  object path. No C typedefs: Pascal source stands alone. */
 export function compileCandIdoPascal(pascalSource: string): string {
@@ -182,6 +257,10 @@ export function agbccAvailable(): boolean {
 /** Is the pinned IDO 7.1 `cc` present? Same PATH caveat as agbccAvailable. */
 export function idoAvailable(): boolean {
   return existsSync(IDO_TOOLCHAIN.cc);
+}
+
+export function gcc272Available(): boolean {
+  return dockerAvailable() && existsSync(join(GCC272_TOOLCHAIN.dir, 'gcc'));
 }
 
 export function mkShareableTmp(prefix: string): string {

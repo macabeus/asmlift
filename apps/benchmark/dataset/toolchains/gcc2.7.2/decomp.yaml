@@ -1,0 +1,27 @@
+# The decomp.yaml for N64 / GCC 2.7.2 (Mario Party 3) — a `compiler` command whose compiler cannot
+# run natively: it is `decompals/mips-gcc-2.7.2`, a Linux/i386 binary, so the command wraps it in a
+# one-shot `docker run`, the same shape as the KMC config next door. The candidate's directory is
+# mounted at /work and the file names are rebased into the container with $(dirname)/$(basename).
+#
+# {{inputPath}} is the candidate .c file, {{outputPath}} is the object it must produce. Flags mirror
+# the Mario Party 3 Makefile (-O1). `-B /gcc272/` + COMPILER_PATH point the old driver at its
+# bundled `cc1` and binutils under the mounted dir (the gcc tarball ships no assembler — the dir
+# must also hold decompals/mips-binutils-2.6's `as`/`ld`).
+#
+# To use this in your project, replace:
+#   $ASMLIFT_DOCKER       → docker
+#   $ASMLIFT_GCC272_DIR   → the dir holding your gcc 2.7.2 driver + binutils (e.g. tools/gcc_2.7.2/linux)
+#   $ASMLIFT_GCC272_IMAGE → i386/ubuntu:bionic (any linux/386 image with libc works)
+# (The variables exist only to keep machine paths out of this repo — the benchmark fills them in
+# when it runs.)
+name: asmlift benchmark (gcc2.7.2)
+platform: n64
+tools:
+  asmlift:
+    target: gcc2.7.2
+    compiler: >-
+      "$ASMLIFT_DOCKER" run --rm --platform linux/386
+      -v "$ASMLIFT_GCC272_DIR":/gcc272:ro -v "$(dirname {{inputPath}})":/work -e COMPILER_PATH=/gcc272
+      "$ASMLIFT_GCC272_IMAGE"
+      /gcc272/gcc -B /gcc272/ -G0 -mips3 -mgp32 -mfp32 -O1 -Wa,--vr4300mul-off -nostdinc
+      -c -o "/work/$(basename {{outputPath}})" "/work/$(basename {{inputPath}})"

@@ -10,6 +10,7 @@ import { C_TYPEDEFS } from '@asmlift/core/target';
 
 import type { BuiltTarget, ToolchainId } from '../toolchains';
 import { agbccReal, stripPrototype } from './agbcc';
+import { gcc272Real } from './gcc272';
 import { idoReal } from './ido';
 import { kmcReal } from './kmc';
 import { mwccReal } from './mwcc';
@@ -21,6 +22,7 @@ const REAL_COMPILERS: Record<ToolchainId, RealCompile | null> = {
   agbcc: agbccReal,
   'ido7.1': idoReal,
   'gcc2.7.2kmc': kmcReal,
+  'gcc2.7.2': gcc272Real,
   mwcc_242_81: mwccReal, // typed "not wired" — see compile/mwcc.ts
 };
 
@@ -72,7 +74,11 @@ export function makeRealCompile(toolchain: ToolchainId, prependC: string, ctxI: 
         continue;
       }
       try {
-        return rc.compileCandidate(`${prelude}${candC}\n`, sym);
+        // COMPAT: the vendored context is PREPROCESSED, so the standard `NULL` macro is expanded
+        // away — a candidate that spells a null check the idiomatic way (`p != NULL`, as m2c does)
+        // would fail to compile purely for that, while a `p != 0` candidate (as asmlift emits) would
+        // not. Re-provide it so both decompilers' output is judged on the code, not on this artifact.
+        return rc.compileCandidate(`#define NULL ((void *)0)\n${prelude}${candC}\n`, sym);
       } catch (e) {
         lastErr = (e as Error).message;
       }
