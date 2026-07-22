@@ -139,7 +139,7 @@ importers:
   packages/cli:
     dependencies:
       '@asmlift/core':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../core
       objdiff-wasm:
         specifier: 3.7.3

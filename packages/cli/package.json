@@ -1,6 +1,6 @@
 {
   "name": "@asmlift/cli",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "license": "MIT",
   "type": "module",
   "description": "The asmlift command line: decompile one function to C/Pascal from the terminal",
@@ -15,7 +15,7 @@
     "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
-    "@asmlift/core": "workspace:*",
+    "@asmlift/core": "workspace:^",
     "objdiff-wasm": "3.7.3",
     "yaml": "^2.9.0"
   },
