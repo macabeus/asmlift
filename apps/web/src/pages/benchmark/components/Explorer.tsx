@@ -7,7 +7,7 @@ import { DECLINE_CLASSES, OTHER_CLASS, declineClassesOf } from '../lib/declines'
 import { FILTER_PARSERS, FILTER_URL_KEYS, SORT_PARSERS, type SortKey, type Verdict } from '../lib/explorer-url';
 import { canOpenInPlayground, playgroundShare } from '../lib/playground';
 import { distinct, distinctFeatures } from '../lib/stats';
-import { COMPILER_LABEL, DECOMPILER_COLOR, ISA_LABEL, OUTCOME_LABEL, OUTCOME_ORDER, TOOLCHAIN_LABEL } from '../theme';
+import { DECOMPILER_COLOR, ISA_LABEL, OUTCOME_LABEL, OUTCOME_ORDER, TOOLCHAIN_LABEL } from '../theme';
 import { FunctionDetail } from './FunctionDetail';
 import { Chip, GapBadge, OutcomeBadge } from './ui/Badge';
 
@@ -78,7 +78,6 @@ export function Explorer({
 
   const projects = useMemo(() => distinct(rows, (r) => r.project), [rows]);
   const isas = useMemo(() => distinct(rows, (r) => r.isa), [rows]);
-  const compilers = useMemo(() => distinct(rows, (r) => r.compiler), [rows]);
   const toolchains = useMemo(() => distinct(rows, (r) => r.toolchain), [rows]);
   const features = useMemo(() => distinctFeatures(rows), [rows]);
 
@@ -91,9 +90,6 @@ export function Explorer({
         return false;
       }
       if (filters.isa && r.isa !== filters.isa) {
-        return false;
-      }
-      if (filters.compiler && r.compiler !== filters.compiler) {
         return false;
       }
       if (filters.toolchain && r.toolchain !== filters.toolchain) {
@@ -197,15 +193,6 @@ export function Explorer({
           value={filters.isa}
           onChange={(v) => set({ isa: v })}
           options={[{ value: '', label: 'All' }, ...isas.map((t) => ({ value: t, label: ISA_LABEL[t] ?? t }))]}
-        />
-        <Select
-          label="Compiler"
-          value={filters.compiler}
-          onChange={(v) => set({ compiler: v })}
-          options={[
-            { value: '', label: 'All' },
-            ...compilers.map((t) => ({ value: t, label: COMPILER_LABEL[t] ?? t })),
-          ]}
         />
         <Select
           label="Toolchain"

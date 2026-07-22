@@ -66,7 +66,14 @@ export const TOOLCHAIN_LABEL: Record<ToolchainId, string> = {
 
 export const TOOLCHAIN_ORDER: ToolchainId[] = ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'];
 
-/** Human labels for the ISAs (the "assembly" axis) and compilers. */
+/** Human labels for the ISAs (the "assembly" axis).
+ *
+ *  There is deliberately NO coarse "by compiler" axis. The dataset's `compiler` field
+ *  ('agbcc' | 'ido' | 'gcc' | 'mwcc') is an m2c-target / asmlift-behavior key, not a compiler
+ *  identity: `gcc2.7.2kmc` (KMC's fork) and mainline `gcc2.7.2` both map to it, so grouping by it
+ *  would merge two distinct compilers under one bar — while agbcc (itself a GCC 2.9 fork) sits in
+ *  its own bucket, making the axis incoherent as a "compiler" grouping. The precise per-compiler
+ *  view is `TOOLCHAIN_*` (five unambiguous ISA × compiler targets). */
 export const ISA_LABEL: Record<string, string> = {
   arm: 'ARM (GBA)',
   mips: 'MIPS (N64)',
@@ -74,15 +81,6 @@ export const ISA_LABEL: Record<string, string> = {
 };
 
 export const ISA_ORDER: string[] = ['arm', 'mips', 'ppc'];
-
-export const COMPILER_LABEL: Record<string, string> = {
-  agbcc: 'agbcc',
-  ido: 'IDO',
-  gcc: 'GCC', // groups both gcc toolchains (KMC 2.7.2 + mainline 2.7.2); the toolchain label distinguishes them
-  mwcc: 'CodeWarrior',
-};
-
-export const COMPILER_ORDER: string[] = ['agbcc', 'ido', 'gcc', 'mwcc'];
 
 /** Head-to-head verdict colors (both-match / asmlift-only / m2c-only / neither). */
 export const H2H_COLOR = {
