@@ -8,6 +8,8 @@
 #   - KMC GCC:      decompals/mips-gcc-2.7.2 + mips-binutils-2.6 releases (linux/i386 — the same
 #                   URLs snowboardkids2-decomp's tools/Makefile fetches); runs in the
 #                   i386/ubuntu:bionic container exactly as locally, natively on x86_64
+#   - GCC 2.7.2:    the SAME decompals/mips-gcc-2.7.2 + mips-binutils-2.6 linux release (the URLs
+#                   Mario Party 3's tools/Makefile fetches), at -O1; runs in the same i386 container
 #   - mwcc_242_81:  files.decomp.dev compilers pack, dir GC/1.3.2 (the exact mapping decomp.me's
 #                   own mwcc_242_81 image uses); runs through the asmlift-ppc image (wibo), built
 #                   here from packages/toolchains/ppc-docker
@@ -56,6 +58,7 @@ jobs:
       ASMLIFT_AGBCC: ${{ github.workspace }}/.deps/agbcc/agbcc
       ASMLIFT_IDO_CC: ${{ github.workspace }}/.deps/ido71/cc
       ASMLIFT_KMC_DIR: ${{ github.workspace }}/.deps/gcc_kmc
+      ASMLIFT_GCC272_DIR: ${{ github.workspace }}/.deps/gcc272
       ASMLIFT_MWCC_DIR: ${{ github.workspace }}/.deps/mwcc_242_81
       ASMLIFT_M2C_DIR: ${{ github.workspace }}/.deps/m2c
     steps:
@@ -79,13 +82,13 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .deps
-          key: bench-deps-${{ env.COMPILERS_TAG }}-${{ env.M2C_COMMIT }}-v4
+          key: bench-deps-${{ env.COMPILERS_TAG }}-${{ env.M2C_COMMIT }}-v5
 
       - name: Fetch toolchains + m2c (pinned)
         if: steps.deps.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
-          mkdir -p "$DEPS/gcc_kmc" "$DEPS/ido71"
+          mkdir -p "$DEPS/gcc_kmc" "$DEPS/gcc272" "$DEPS/ido71"
 
           # agbcc — build from source (the binary lands in the repo root)
           git clone --depth 1 https://github.com/pret/agbcc "$DEPS/agbcc"
@@ -100,6 +103,13 @@ jobs:
             | tar -xz -C "$DEPS/gcc_kmc"
           curl -fsSL https://github.com/decompals/mips-binutils-2.6/releases/latest/download/binutils-2.6-linux.tar.gz \
             | tar -xz -C "$DEPS/gcc_kmc"
+
+          # Mario Party 3's GCC 2.7.2: the SAME decompals release, at -O1 (its tools/Makefile fetches
+          # these exact URLs). Separate dir so its provenance is independent of the KMC toolchain.
+          curl -fsSL https://github.com/decompals/mips-gcc-2.7.2/releases/latest/download/gcc-2.7.2-linux.tar.gz \
+            | tar -xz -C "$DEPS/gcc272"
+          curl -fsSL https://github.com/decompals/mips-binutils-2.6/releases/latest/download/binutils-2.6-linux.tar.gz \
+            | tar -xz -C "$DEPS/gcc272"
 
           # CodeWarrior mwcc_242_81 = GC/1.3.2 in the compilers pack (decomp.me's own mapping)
           curl -fsSL "https://files.decomp.dev/compilers_${COMPILERS_TAG}.zip" -o /tmp/compilers.zip

@@ -112,14 +112,20 @@ export const MWCC_PPC_TOOLCHAIN = {
   objdumpFlags: ['-d', '-r', '--no-show-raw-insn'],
 };
 
-/** Mainline GCC 2.7.2 toolchain — the compiler the Mario Party 3 (N64) decomp uses, vendored in
- *  that project's `tools/gcc_2.7.2/<os>`. A DIFFERENT compiler from KMC's `gcc2.7.2kmc`: plain FSF
- *  GCC 2.7.2 at `-O1`, not Kyoto-Microcomputer's N64 build at `-O2`. Runs NATIVELY (no Docker) —
- *  the binary needs `-B <dir>/` + `COMPILER_PATH=<dir>` to find its own `cc1`. Flags mirror
- *  marioparty3's Makefile. Overridable via ASMLIFT_GCC272_DIR / ASMLIFT_MIPS_OBJDUMP. */
+/** GCC 2.7.2 / MIPS — the compiler the Mario Party 3 (N64) decomp uses: `decompals/mips-gcc-2.7.2`
+ *  at `-O1`. A DIFFERENT flag convention from KMC's `gcc2.7.2kmc` (Kyoto's `-O2` Snowboard Kids 2
+ *  build), though both are that same redistributed GCC 2.7.2 (marioparty3's own tools/Makefile
+ *  fetches from that repo). The published binary is a Linux/i386 ELF, so — exactly like KMC — the
+ *  C→object step runs inside a linux/386 container with the compiler dir mounted; the object is
+ *  then disassembled + scored with the native host binutils/objdiff. The mounted dir must hold the
+ *  gcc driver + its bundled `cc1` AND `decompals/mips-binutils-2.6`'s `as`/`ld` (the gcc tarball
+ *  ships no assembler); `-B`/COMPILER_PATH point the old driver at them. Overridable via
+ *  ASMLIFT_GCC272_DIR / ASMLIFT_GCC272_IMAGE / ASMLIFT_DOCKER / ASMLIFT_MIPS_OBJDUMP. */
 export const GCC272_TOOLCHAIN = {
-  dir: env('ASMLIFT_GCC272_DIR', join(WORKSPACE, 'marioparty3/tools/gcc_2.7.2/mac')),
-  ccFlags: ['-c', '-G0', '-mips3', '-mgp32', '-mfp32', '-O1', '-Wa,--vr4300mul-off', '-nostdinc'],
+  docker: env('ASMLIFT_DOCKER', 'docker'),
+  image: env('ASMLIFT_GCC272_IMAGE', 'i386/ubuntu:bionic'),
+  dir: env('ASMLIFT_GCC272_DIR', join(WORKSPACE, 'marioparty3/tools/gcc_2.7.2/linux')),
+  ccFlags: ['-G0', '-mips3', '-mgp32', '-mfp32', '-O1', '-Wa,--vr4300mul-off', '-nostdinc'],
   objdump: MIPS_OBJDUMP,
   objdumpFlags: ['-d', '--no-show-raw-insn'],
 };

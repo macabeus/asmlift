@@ -1,10 +1,10 @@
-// Mainline GCC 2.7.2 / MIPS (N64, Mario Party 3) — real-tier target build + candidate compile.
-// Runs NATIVELY (the binary is on this host, unlike KMC's Docker path): the `-B <dir>/` +
-// `COMPILER_PATH=<dir>` let the old driver find its bundled `cc1`/`as`. Flags come from
-// @asmlift/toolchains. A DIFFERENT compiler from `gcc2.7.2kmc` — plain FSF GCC 2.7.2 at `-O1`.
-import { GCC272_TOOLCHAIN } from '@asmlift/toolchains';
+// GCC 2.7.2 / MIPS (N64, Mario Party 3, Docker) — real-tier target build + candidate compile.
+// A DIFFERENT flag convention from `gcc2.7.2kmc` (`-O1`, not `-O2`), but the same i386-Linux
+// situation: the published binary is `decompals/mips-gcc-2.7.2`, so the .c/.i compiles inside a
+// linux/386 container via the pooled helper (gcc272Compile) that score.ts also uses. The object
+// is disassembled + scored with the native host binutils/objdiff.
+import { GCC272_TOOLCHAIN, gcc272Compile } from '@asmlift/toolchains';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { CPP } from '../config';
@@ -13,14 +13,12 @@ import { stripPrototype } from './agbcc';
 import type { RealCompile, RealProjectCfg } from './types';
 import { compilerDiagnostics, contentDir, run } from './util';
 
-/** .i → GCC 2.7.2 cc → .o. Shared by target and candidate. */
-function compile(iPath: string, oPath: string): void {
-  const { dir, ccFlags } = GCC272_TOOLCHAIN;
-  const cc = run(join(dir, 'gcc'), ['-B', `${dir}/`, ...ccFlags, '-o', oPath, iPath], undefined, {
-    COMPILER_PATH: dir,
-  });
-  if (cc.status !== 0) {
-    throw new Error(`gcc 2.7.2 failed: ${compilerDiagnostics(cc.stderr || cc.stdout)}`);
+/** .i → pooled docker GCC 2.7.2 → .o (same helper score.ts uses). */
+function compile(dir: string, iName: string, oName: string): void {
+  try {
+    gcc272Compile(dir, iName, oName);
+  } catch (e) {
+    throw new Error(`gcc 2.7.2 failed: ${compilerDiagnostics((e as Error).message)}`);
   }
 }
 
@@ -35,14 +33,14 @@ function disasm(oPath: string): string {
 export const gcc272Real: RealCompile = {
   buildTarget(iText): BuiltTarget {
     const dir = contentDir('gcc272', iText);
-    const iPath = join(dir, 'u.i'),
-      oPath = join(dir, 'u.o');
-    writeFileSync(iPath, iText);
-    compile(iPath, oPath);
+    const oPath = join(dir, 'u.o');
+    writeFileSync(join(dir, 'u.i'), iText);
+    compile(dir, 'u.i', 'u.o');
     return { obj: oPath, asm: disasm(oPath) };
   },
   compileCandidate(tu, sym): string {
-    const dir = mkdtempSync(join(tmpdir(), 'bench-cand-'));
+    // candidate scratch must live under /tmp (the container pool's mount)
+    const dir = mkdtempSync(join('/tmp', 'bench-cand-'));
     const cPath = join(dir, 'c.c'),
       iPath = join(dir, 'c.i'),
       oPath = join(dir, 'c.o');
@@ -52,11 +50,11 @@ export const gcc272Real: RealCompile = {
       throw new Error(`cpp failed: ${compilerDiagnostics(cpp.stderr)}`);
     }
     writeFileSync(iPath, stripPrototype(readFileSync(iPath, 'utf8'), sym));
-    compile(iPath, oPath);
+    compile(dir, 'c.i', 'c.o');
     return oPath;
   },
   preprocess(cfg: RealProjectCfg, tu: string): string {
-    const dir = mkdtempSync(join(tmpdir(), 'bench-vendor-'));
+    const dir = mkdtempSync(join('/tmp', 'bench-vendor-'));
     const cPath = join(dir, 'u.c'),
       iPath = join(dir, 'u.i');
     writeFileSync(cPath, tu);

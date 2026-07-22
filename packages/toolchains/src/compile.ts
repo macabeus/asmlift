@@ -127,18 +127,74 @@ export function compileMipsTarget(cSource: string, _symbol: string): { obj: stri
   return { obj: oPath, asm: dis.stdout };
 }
 
-/** Mainline GCC 2.7.2 / MIPS — synthetic-tier target build (native, no Docker; `-B`/COMPILER_PATH
- *  let the old driver find its `cc1`/`as`). Mirrors compileMipsTarget with GCC 2.7.2's flags. */
-export function compileMipsGcc272Target(cSource: string, _symbol: string): { obj: string; asm: string } {
-  const { dir, ccFlags, objdump, objdumpFlags } = GCC272_TOOLCHAIN;
-  const d = contentShareableDir('asmlift-mgcc272-ref-', cSource);
-  const cPath = join(d, 'ref.c');
-  const oPath = join(d, 'ref.o');
-  writeFileSync(cPath, C_TYPEDEFS + cSource);
-  const cc = run(join(dir, 'gcc'), ['-B', `${dir}/`, ...ccFlags, '-o', oPath, cPath], { COMPILER_PATH: dir });
-  if (cc.status !== 0) {
-    throw new Error(`gcc 2.7.2 failed: ${cc.stderr || cc.stdout}`);
+/** Compile one C/`.i` file → object with Mario Party 3's GCC 2.7.2 inside its linux/386 container
+ *  (pooled, with a one-shot `docker run` fallback) — the same shape as kmcCompile. `-B` +
+ *  COMPILER_PATH point the old driver at its bundled `cc1` and binutils under the mounted dir. */
+export function gcc272Compile(dir: string, srcC: string, outObj: string): void {
+  const t = GCC272_TOOLCHAIN;
+  const w = hostTmp(dir);
+  if (w) {
+    const name = poolName('gcc272', `${t.image}|${t.dir}`);
+    const mounts = ['-v', `${t.dir}:/gcc272:ro`, '-v', '/tmp:/host-tmp'];
+    const cc = poolExec(t.docker, t.image, name, mounts, [
+      '-w',
+      w,
+      '-e',
+      'COMPILER_PATH=/gcc272',
+      name,
+      '/gcc272/gcc',
+      '-B',
+      '/gcc272/',
+      ...t.ccFlags,
+      '-c',
+      '-o',
+      `${w}/${outObj}`,
+      `${w}/${srcC}`,
+    ]);
+    if (cc) {
+      if (cc.status !== 0) {
+        throw new Error(`gcc 2.7.2 (docker) failed: ${cc.stderr || cc.stdout}`);
+      }
+      return;
+    }
   }
+  const cc = run(t.docker, [
+    'run',
+    '--rm',
+    '--platform',
+    'linux/386',
+    '-v',
+    `${t.dir}:/gcc272:ro`,
+    '-v',
+    `${dir}:/work`,
+    '-w',
+    '/work',
+    '-e',
+    'COMPILER_PATH=/gcc272',
+    t.image,
+    '/gcc272/gcc',
+    '-B',
+    '/gcc272/',
+    ...t.ccFlags,
+    '-c',
+    '-o',
+    `/work/${outObj}`,
+    `/work/${srcC}`,
+  ]);
+  if (cc.status !== 0) {
+    throw new Error(`gcc 2.7.2 (docker) failed: ${cc.stderr || cc.stdout}`);
+  }
+}
+
+/** GCC 2.7.2 / MIPS — synthetic-tier target build. The C→object step runs in the linux/386
+ *  container (gcc272Compile); the object is disassembled + scored on the host, mirroring the KMC
+ *  path. */
+export function compileMipsGcc272Target(cSource: string, _symbol: string): { obj: string; asm: string } {
+  const { objdump, objdumpFlags } = GCC272_TOOLCHAIN;
+  const dir = contentShareableDir('asmlift-mgcc272-ref-', cSource);
+  writeFileSync(join(dir, 'ref.c'), C_TYPEDEFS + cSource);
+  gcc272Compile(dir, 'ref.c', 'ref.o');
+  const oPath = join(dir, 'ref.o');
   const dis = run(objdump, [...objdumpFlags, oPath]);
   if (dis.status !== 0) {
     throw new Error(`objdump failed: ${dis.stderr}`);
@@ -204,7 +260,7 @@ export function idoAvailable(): boolean {
 }
 
 export function gcc272Available(): boolean {
-  return existsSync(join(GCC272_TOOLCHAIN.dir, 'gcc'));
+  return dockerAvailable() && existsSync(join(GCC272_TOOLCHAIN.dir, 'gcc'));
 }
 
 export function mkShareableTmp(prefix: string): string {
