@@ -18,9 +18,9 @@ export function syntheticCases(filter: SyntheticFilter = {}): Case[] {
       if (filter.toolchain && tcId !== filter.toolchain) {
         continue;
       }
-      if (spec.lang === 'c++' && tcId !== 'mwcc-ppc') {
+      if (spec.lang === 'c++' && tcId !== 'mwcc_242_81') {
         // only the mwcc adapter has a C++ build path; any other pairing would compile C++ as C
-        throw new Error(`${spec.sym}: c++ specs must target mwcc-ppc only, got ${tcId}`);
+        throw new Error(`${spec.sym}: c++ specs must target mwcc_242_81 only, got ${tcId}`);
       }
       const tc = TOOLCHAINS[tcId];
       cases.push({

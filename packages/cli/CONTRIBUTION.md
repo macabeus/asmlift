@@ -18,7 +18,7 @@ that needs a real machine — process spawning, toolchains, Docker, the objdiff 
 | `src/rank.ts`            | `decompileRanked` — candidates from `@asmlift/core/rank`, scored for real and ranked: types are differ-ranked levers, not guesses                                                                                                                                                                                                                                                                                                                                                |
 | `src/report.ts`          | `decompileWithReport` — the core `TraceReport` enriched with scores, per-pattern deltas, ranked candidates                                                                                                                                                                                                                                                                                                                                                                       |
 
-The `mwcc-ppc` Docker image (`asmlift-ppc:latest`) is built from
+The `mwcc_242_81` Docker image (`asmlift-ppc:latest`) is built from
 [`packages/toolchains/ppc-docker/Dockerfile`](../toolchains/ppc-docker/Dockerfile) — 32-bit wibo + PowerPC
 objdump; the proprietary CodeWarrior dir is bind-mounted at run time, never baked in.
 

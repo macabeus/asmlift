@@ -33,10 +33,10 @@ function put(path: string, data: string | Buffer): void {
 // The toolchain config participates in every reference key so a flag/path change invalidates
 // naturally. These are the exact objects score.ts compiles with — no second copy to drift.
 const TC_CFG: Record<ToolchainId, unknown> = {
-  'agbcc-arm': TOOLCHAIN,
-  'ido-mips': IDO_TOOLCHAIN,
-  'gcc-mips': GCC_KMC_TOOLCHAIN,
-  'mwcc-ppc': MWCC_PPC_TOOLCHAIN,
+  agbcc: TOOLCHAIN,
+  'ido7.1': IDO_TOOLCHAIN,
+  'gcc2.7.2kmc': GCC_KMC_TOOLCHAIN,
+  mwcc_242_81: MWCC_PPC_TOOLCHAIN,
 };
 
 /** `tc.buildTarget`, cached by (toolchain config, reference source, symbol, and — for c++ —
@@ -83,13 +83,13 @@ function cachedPpcDumpText(obj: string): string {
  *  content-cached dockerized dump; MIPS via the native objdump (cheap, uncached); ARM none
  *  (agbcc `.s` needs no normalization). */
 export function cachedAsmDumpText(obj: string, tcId: ToolchainId): string | undefined {
-  if (tcId === 'mwcc-ppc') {
+  if (tcId === 'mwcc_242_81') {
     return cachedPpcDumpText(obj);
   }
-  if (tcId === 'ido-mips') {
+  if (tcId === 'ido7.1') {
     return mipsObjdumpText(obj, IDO_TOOLCHAIN.objdump);
   }
-  if (tcId === 'gcc-mips') {
+  if (tcId === 'gcc2.7.2kmc') {
     return mipsObjdumpText(obj, GCC_KMC_TOOLCHAIN.objdump);
   }
   return undefined;

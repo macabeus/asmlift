@@ -38,7 +38,7 @@ describe('CLI --score-against (agbcc, real toolchain)', () => {
       `platform: gba\ntools:\n  asmlift:\n    compiler: ${JSON.stringify(cmd)}\n`,
     );
     const r = await runCli([asmPath, '--name', 'ushr', '--score-against', obj]);
-    expect(r.stderr).toContain('[config] target agbcc-arm'); // resolved from the platform
+    expect(r.stderr).toContain('[config] target agbcc'); // resolved from the platform
     expect(r.code).toBe(0);
     expect(r.stdout).toContain('ushr(u32 a0)');
     expect(r.stderr).toContain('(match)');

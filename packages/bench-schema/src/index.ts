@@ -2,7 +2,7 @@
 // and the consumer (apps/web). Types only, zero deps, zero runtime code — browser-safe by
 // construction.
 
-export type ToolchainId = 'agbcc-arm' | 'ido-mips' | 'gcc-mips' | 'mwcc-ppc';
+export type ToolchainId = 'agbcc' | 'ido7.1' | 'gcc2.7.2kmc' | 'mwcc_242_81';
 
 export type DecompilerId = 'asmlift' | 'm2c';
 

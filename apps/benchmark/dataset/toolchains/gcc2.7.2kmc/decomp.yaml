@@ -15,11 +15,11 @@
 #
 # (The benchmark's own scoring skips this command and reuses a pooled long-lived container;
 # the reproduction scripts run it as written.)
-name: asmlift benchmark (gcc-mips)
+name: asmlift benchmark (gcc2.7.2kmc)
 platform: n64
 tools:
   asmlift:
-    target: gcc-mips
+    target: gcc2.7.2kmc
     compiler: >-
       "$ASMLIFT_DOCKER" run --rm --platform linux/386
       -v "$ASMLIFT_KMC_DIR":/kmc:ro -v "$(dirname {{inputPath}})":/work -e COMPILER_PATH=/kmc

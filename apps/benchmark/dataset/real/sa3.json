@@ -1,6 +1,6 @@
 {
   "project": "sa3",
-  "toolchain": "agbcc-arm",
+  "toolchain": "agbcc",
   "repoDir": "sa3",
   "cppIncludes": [
     "-iquote",

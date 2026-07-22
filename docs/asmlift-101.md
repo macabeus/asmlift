@@ -459,7 +459,7 @@ checked-in expected output, snapshot-test style) is a particularly good guided t
 | **Decline**               | asmlift's typed refusal when it cannot be byte-faithful                                                                                                               |
 | **Annotate mode**         | `onGap: "annotate"` — emit best-effort source with `ASMLIFT_ERROR` markers instead of throwing                                                                        |
 | **Toolchain**             | The exact vintage compiler+assembler that is the spec (agbcc, IDO, KMC GCC, mwcc)                                                                                     |
-| **Target**                | asmlift's ID for one ISA+toolchain pair (`agbcc-arm`, `ido-mips`, `gcc-mips`, `mwcc-ppc`); "target object" = the original object a candidate is byte-compared against |
+| **Target**                | asmlift's ID for one ISA+toolchain pair (`agbcc`, `ido7.1`, `gcc2.7.2kmc`, `mwcc_242_81`); "target object" = the original object a candidate is byte-compared against |
 | **Case / row**            | The benchmark's measurement unit: one function × one toolchain — a "case" before the run, a "row" of `results.json` after                                             |
 | **Prototype (here)**      | Caller-supplied callee arity/void-ness, standing in for a project's headers                                                                                           |
 

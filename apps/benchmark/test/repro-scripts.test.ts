@@ -20,7 +20,7 @@ const row = (id: string): FunctionResult => {
 
 describe('m2cScript (pinned)', () => {
   test('ARM rows embed the agbcc .s verbatim', () => {
-    const fn = row('synthetic:add:agbcc-arm');
+    const fn = row('synthetic:add:agbcc');
     const s = m2cScript(fn);
     expect(s).toContain(fn.targetAsm.trimEnd());
     expect(s).toContain('--target gba');
@@ -37,13 +37,13 @@ describe('m2cScript (pinned)', () => {
       expect(s, fn.id).toContain(fn.ctx!.trimEnd());
       expect(s, fn.id).toContain('--context ctx.h');
     }
-    const bare = m2cScript(row('synthetic:add:agbcc-arm'));
+    const bare = m2cScript(row('synthetic:add:agbcc'));
     expect(bare).toContain('NO context header');
     expect(bare).not.toContain('--context');
   });
 
   test('MIPS/PPC rows embed the normalized GNU-as text, not raw objdump', () => {
-    const fn = row('synthetic:add:mwcc-ppc');
+    const fn = row('synthetic:add:mwcc_242_81');
     const s = m2cScript(fn);
     expect(s).toContain(`glabel add`); // normalizer output
     expect(s).not.toContain('Disassembly of section'); // raw objdump header must be gone
@@ -64,13 +64,13 @@ describe('m2cScript (pinned)', () => {
   });
 
   test('jump-table rows embed their data sections (the published asmDump feeds the normalizer)', () => {
-    const s = m2cScript(row('synthetic:sw_jt:gcc-mips'));
+    const s = m2cScript(row('synthetic:sw_jt:gcc2.7.2kmc'));
     expect(s).toContain('.rodata'); // the emitted jump-table block
     expect(s).toContain('jtbl_'); // named for m2c's jtbl requirement
   });
 
   test('the c++ rows select the ppc-mwcc-c++ dialect', () => {
-    expect(m2cScript(row('synthetic:Vec__len2:mwcc-ppc'))).toContain('--target ppc-mwcc-c++');
+    expect(m2cScript(row('synthetic:Vec__len2:mwcc_242_81'))).toContain('--target ppc-mwcc-c++');
   });
 
   test('every row produces a script with a well-formed heredoc', () => {
@@ -108,11 +108,11 @@ describe('long symbols never glue the flag to its comment', () => {
 
 describe('asmliftScript (pinned)', () => {
   test('pre-step + visible CLI flags + mandatory benchmark-grade scoring', () => {
-    const fn = row('synthetic:add:ido-mips');
+    const fn = row('synthetic:add:ido7.1');
     const s = asmliftScript(fn);
     expect(s).toContain(`pnpm --dir "$ASMLIFT_PATH" bench target ${fn.id} --out "$PWD" 1>&2`);
     expect(s).toContain(fn.targetAsm.trimEnd());
-    expect(s).toContain('--target ido-mips');
+    expect(s).toContain('--target ido7.1');
     expect(s).toContain('--name add');
     expect(s).toContain('--config decomp.yaml');
     expect(s).toContain('--score-against target.o');
@@ -122,10 +122,10 @@ describe('asmliftScript (pinned)', () => {
   });
 
   test('rows with a dump embed it and pass --asm-data; ARM rows have neither', () => {
-    const s = asmliftScript(row('synthetic:sw_jt:gcc-mips'));
+    const s = asmliftScript(row('synthetic:sw_jt:gcc2.7.2kmc'));
     expect(s).toMatch(/cat > dump\.txt <<'DUMP_INPUT'\n[\s\S]*\nDUMP_INPUT\n/);
     expect(s).toContain('--asm-data dump.txt');
-    const arm = asmliftScript(row('synthetic:add:agbcc-arm'));
+    const arm = asmliftScript(row('synthetic:add:agbcc'));
     expect(arm).not.toContain('DUMP_INPUT');
     expect(arm).not.toContain('--asm-data');
   });
@@ -142,6 +142,6 @@ describe('asmliftScript (pinned)', () => {
     if (real) {
       expect(asmliftScript(real)).toContain('real tier:');
     }
-    expect(asmliftScript(row('synthetic:add:ido-mips'))).not.toContain('real tier:');
+    expect(asmliftScript(row('synthetic:add:ido7.1'))).not.toContain('real tier:');
   });
 });

@@ -18,13 +18,13 @@ test('isElfObject: magic detected, text and short buffers are not', async () => 
 });
 
 test('object via stdin declines with exit 66', async () => {
-  const r = await runCli(['-', '--target', 'ido-mips'], () => ELF);
+  const r = await runCli(['-', '--target', 'ido7.1'], () => ELF);
   expect(r.code).toBe(66);
   expect(r.stderr).toContain('stdin');
 });
 
-test('object for the agbcc-arm target is a [declined], not a crash', async () => {
-  const r = await runCli(['fn.o', '--target', 'agbcc-arm'], () => ELF);
+test('object for the agbcc target is a [declined], not a crash', async () => {
+  const r = await runCli(['fn.o', '--target', 'agbcc'], () => ELF);
   expect(r.code).toBe(1);
   expect(r.stderr).toContain('[declined]');
   expect(r.stderr).toContain('agbcc .s text');
@@ -37,7 +37,7 @@ test('object input disassembles and decompiles; side-table failure only warns', 
       throw new Error('objdump -s -r -t unavailable');
     },
   };
-  const r = await runCli(['fn.o', '--target', 'ido-mips', '--name', 'add1'], () => ELF, fake);
+  const r = await runCli(['fn.o', '--target', 'ido7.1', '--name', 'add1'], () => ELF, fake);
   expect(r.code).toBe(0);
   expect(r.stdout).toContain('s32 add1(s32 a0)');
   expect(r.stderr).toContain('warning: no jump-table side-table');
@@ -50,7 +50,7 @@ test("disassembly failure is exit 66 with the tool's message", async () => {
     },
     asmData: () => undefined,
   };
-  const r = await runCli(['fn.o', '--target', 'ido-mips'], () => ELF, fake);
+  const r = await runCli(['fn.o', '--target', 'ido7.1'], () => ELF, fake);
   expect(r.code).toBe(66);
   expect(r.stderr).toContain('cannot disassemble');
   expect(r.stderr).toContain('objdump not found');
@@ -58,7 +58,7 @@ test("disassembly failure is exit 66 with the tool's message", async () => {
 
 test('text input passed as bytes decodes and decompiles', async () => {
   const bytes = new TextEncoder().encode(corpus('ido-add1.asm'));
-  const r = await runCli(['fn.asm', '--target', 'ido-mips', '--name', 'add1'], () => bytes);
+  const r = await runCli(['fn.asm', '--target', 'ido7.1', '--name', 'add1'], () => bytes);
   expect(r.code).toBe(0);
   expect(r.stdout).toContain('s32 add1(s32 a0)');
 });
@@ -72,7 +72,7 @@ test('mwcc .o with no PowerPC objdump anywhere fails loud naming every remedy', 
   const prev = process.env.ASMLIFT_PPC_OBJDUMP;
   process.env.ASMLIFT_PPC_OBJDUMP = '/nonexistent/powerpc-eabi-objdump';
   try {
-    const r = await runCli(['fn.o', '--target', 'mwcc-ppc', '--name', 'f'], () => ELF);
+    const r = await runCli(['fn.o', '--target', 'mwcc_242_81', '--name', 'f'], () => ELF);
     expect(r.code).toBe(66);
     expect(r.stderr).toContain('no PowerPC objdump');
     expect(r.stderr).toContain('ASMLIFT_PPC_OBJDUMP');

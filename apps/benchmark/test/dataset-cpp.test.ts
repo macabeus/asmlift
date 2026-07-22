@@ -11,7 +11,7 @@ describe('SYNTHETIC_CPP (pinned)', () => {
     expect(SYNTHETIC_CPP.length).toBeGreaterThan(0);
     for (const spec of SYNTHETIC_CPP) {
       expect(spec.lang, spec.sym).toBe('c++');
-      expect(spec.toolchains, spec.sym).toEqual(['mwcc-ppc']);
+      expect(spec.toolchains, spec.sym).toEqual(['mwcc_242_81']);
       expect(spec.src, spec.sym).toContain(`extern "C"`);
       expect(spec.src, spec.sym).toContain(spec.sym);
     }
@@ -20,7 +20,7 @@ describe('SYNTHETIC_CPP (pinned)', () => {
   test('the c++ specs become cases (the silent-absence regression guard)', () => {
     const ids = syntheticCases().map((c) => c.id);
     for (const spec of SYNTHETIC_CPP) {
-      expect(ids).toContain(`synthetic:${spec.sym}:mwcc-ppc`);
+      expect(ids).toContain(`synthetic:${spec.sym}:mwcc_242_81`);
     }
   });
 });

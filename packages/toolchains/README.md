@@ -19,7 +19,7 @@ Paths resolve from env vars with sibling-checkout defaults (`src/toolchain.ts`):
 `ASMLIFT_PPC_OBJDUMP`, `ASMLIFT_WIBO`, `ASMLIFT_DOCKER`. `ASMLIFT_DOCKER_POOL=0` disables the
 persistent container pool (the benchmark's A/B baseline switch).
 
-The `mwcc-ppc` Docker image (`asmlift-ppc:latest`) is a **local build** (no registry pull):
+The `mwcc_242_81` Docker image (`asmlift-ppc:latest`) is a **local build** (no registry pull):
 `docker build -t asmlift-ppc:latest packages/toolchains/ppc-docker` — 32-bit wibo + PowerPC
 objdump ([`ppc-docker/Dockerfile`](ppc-docker/Dockerfile)); the proprietary CodeWarrior dir is
 bind-mounted at run time, never baked in.

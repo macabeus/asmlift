@@ -11,8 +11,8 @@ import { shq } from '../src/compile/util';
 import { renderScoreCommand } from '../src/decomp-config';
 
 describe('committed decomp.yaml configs mirror the built-in toolchain invocations', () => {
-  test('agbcc-arm: cpp → agbcc → as, built-in flags (compileCandAgbcc)', () => {
-    expect(renderScoreCommand('agbcc-arm')).toBe(
+  test('agbcc: cpp → agbcc → as, built-in flags (compileCandAgbcc)', () => {
+    expect(renderScoreCommand('agbcc')).toBe(
       [
         `cpp -P -nostdinc {{inputPath}} > {{inputPath}}.pp.c 2>/dev/null;`,
         `${shq(TOOLCHAIN.agbcc)} {{inputPath}}.pp.c -o {{inputPath}}.s ${TOOLCHAIN.agbccFlags.join(' ')} &&`,
@@ -21,14 +21,14 @@ describe('committed decomp.yaml configs mirror the built-in toolchain invocation
     );
   });
 
-  test('ido-mips: IDO cc, built-in flags (compileCandIdoC)', () => {
-    expect(renderScoreCommand('ido-mips')).toBe(
+  test('ido7.1: IDO cc, built-in flags (compileCandIdoC)', () => {
+    expect(renderScoreCommand('ido7.1')).toBe(
       `${shq(IDO_TOOLCHAIN.cc)} ${IDO_TOOLCHAIN.ccFlags.join(' ')} -o {{outputPath}} {{inputPath}}`,
     );
   });
 
-  test('gcc-mips: one-shot docker run mirroring kmcCompile (image, mounts, flags)', () => {
-    expect(renderScoreCommand('gcc-mips')).toBe(
+  test('gcc2.7.2kmc: one-shot docker run mirroring kmcCompile (image, mounts, flags)', () => {
+    expect(renderScoreCommand('gcc2.7.2kmc')).toBe(
       [
         `${shq(GCC_KMC_TOOLCHAIN.docker)} run --rm --platform linux/386`,
         `-v ${shq(GCC_KMC_TOOLCHAIN.dir)}:/kmc:ro -v "$(dirname {{inputPath}})":/work -e COMPILER_PATH=/kmc`,
@@ -38,8 +38,8 @@ describe('committed decomp.yaml configs mirror the built-in toolchain invocation
     );
   });
 
-  test("mwcc-ppc: one-shot docker run mirroring ppcContainer's wibo invocation", () => {
-    expect(renderScoreCommand('mwcc-ppc')).toBe(
+  test("mwcc_242_81: one-shot docker run mirroring ppcContainer's wibo invocation", () => {
+    expect(renderScoreCommand('mwcc_242_81')).toBe(
       [
         `${shq(MWCC_PPC_TOOLCHAIN.docker)} run --rm`,
         `-v ${shq(MWCC_PPC_TOOLCHAIN.dir)}:/mwcc:ro -v "$(dirname {{inputPath}})":/work`,

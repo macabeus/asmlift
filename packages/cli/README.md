@@ -19,19 +19,19 @@ byte-compared with the community `objdiff` engine. Exit 0 means byte-exact match
 
 ## Inputs
 
-| Input                                | Accepted for                       |
-| ------------------------------------ | ---------------------------------- |
-| Compiler `.s` text                   | All targets                        |
-| `objdump -d --no-show-raw-insn` text | `ido-mips`, `gcc-mips`, `mwcc-ppc` |
-| ELF object file (`.o`)               | MIPS/PPC targets                   |
-| `-` (stdin)                          | text formats only                  |
+| Input                                | Accepted for                           |
+| ------------------------------------ | -------------------------------------- |
+| Compiler `.s` text                   | All targets                            |
+| `objdump -d --no-show-raw-insn` text | `ido7.1`, `gcc2.7.2kmc`, `mwcc_242_81` |
+| ELF object file (`.o`)               | MIPS/PPC targets                       |
+| `-` (stdin)                          | text formats only                      |
 
 If the file includes multi-functions, pass the `--name` flag.
 
 ## CLI reference
 
 ```
-usage: asmlift <file.s|file.asm|file.o|-> [--target <agbcc-arm|ido-mips|gcc-mips|mwcc-ppc>]
+usage: asmlift <file.s|file.asm|file.o|-> [--target <agbcc|ido7.1|gcc2.7.2kmc|mwcc_242_81>]
                 [--name <symbol>] [--backend <c|pascal>] [--strict]
                 [--config <decomp.yaml>] [--score-against <target.o>]
                 [--asm-data <dump.txt>] [--proto <proto.json>]
@@ -58,7 +58,7 @@ All asmlift settings live in a spec-compliant `tools.asmlift` block:
 
 | Field      | Meaning                                                                                                                                              |
 | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `target`   | asmlift target key — needed when the `platform` maps to several compilers (`n64` → `ido-mips` or `gcc-mips`)                                         |
+| `target`   | asmlift target key — needed when the `platform` maps to several compilers (`n64` → `ido7.1` or `gcc2.7.2kmc`)                                        |
 | `compiler` | Candidate-compile command template: source file in, relocatable object out. Runs via `sh` with the decomp.yaml's directory as cwd                    |
 | `objdump`  | Host objdump binary for `.o` input (overrides the PATH/env-resolved default: `mips-linux-gnu-objdump` / `powerpc-eabi-objdump`)                      |
 | `prelude`  | Prepend asmlift's `s32`/`u32`… typedefs to candidates (default `true`; set `false` if your command injects project headers that already define them) |

@@ -1,7 +1,7 @@
 // agbcc / ARM (GBA) — EVERY harness-side spelling of "compile C with agbcc": the real-tier
 // target build, the real-tier candidate compile (same steps, shared). Flags come from
 // @asmlift/toolchains; the decomp.yaml candidate command lives in
-// dataset/toolchains/agbcc-arm/decomp.yaml.
+// dataset/toolchains/agbcc/decomp.yaml.
 import { TOOLCHAIN } from '@asmlift/toolchains';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';

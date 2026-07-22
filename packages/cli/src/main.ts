@@ -1,6 +1,6 @@
 // asmlift — the command-line entry point. Decompile one function's assembly to source:
 //
-//   asmlift <file.s|file.asm|file.o|-> --target <agbcc-arm|ido-mips|gcc-mips|mwcc-ppc> [options]
+//   asmlift <file.s|file.asm|file.o|-> --target <agbcc|ido7.1|gcc2.7.2kmc|mwcc_242_81> [options]
 //
 // Reads GNU-as text (agbcc), objdump -d text (IDO/KMC-GCC/mwcc), or an ELF OBJECT FILE — an
 // object is disassembled with the target's own objdump (objfile.ts), and its jump-table
@@ -36,10 +36,10 @@ import { ObjectInputUnsupportedError, asmDataForObject, disasmObject, isElfObjec
 export { detectName };
 
 const TARGETS: Record<string, TargetDescription> = {
-  'agbcc-arm': ARMV4T_AGBCC,
-  'ido-mips': MIPS_IDO,
-  'gcc-mips': MIPS_GCC,
-  'mwcc-ppc': PPC_MWCC,
+  agbcc: ARMV4T_AGBCC,
+  'ido7.1': MIPS_IDO,
+  'gcc2.7.2kmc': MIPS_GCC,
+  mwcc_242_81: PPC_MWCC,
 };
 
 const BACKENDS: Record<string, LanguageBackend> = {

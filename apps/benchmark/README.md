@@ -58,12 +58,12 @@ while for the dockerized pair (KMC GCC, mwcc) the harness strips the compiler so
 built-ins (with container pooling) serve it, the same either/or a user gets. The reproduction
 scripts (`bench target`) get the command intact on every toolchain:
 
-| id          | ISA / compiler                     | asm both decompilers read                   |
-| ----------- | ---------------------------------- | ------------------------------------------- |
-| `agbcc-arm` | agbcc / ARM (GBA)                  | agbcc `.s` (shared by both — ARM is free)   |
-| `ido-mips`  | IDO / MIPS (N64)                   | `objdump -d` → normalized to GNU-as for m2c |
-| `gcc-mips`  | KMC GCC / MIPS (N64, Docker)       | `objdump -d` → normalized for m2c           |
-| `mwcc-ppc`  | CodeWarrior / PowerPC (GC, Docker) | `objdump -d` → normalized for m2c           |
+| id            | ISA / compiler                     | asm both decompilers read                   |
+| ------------- | ---------------------------------- | ------------------------------------------- |
+| `agbcc`       | agbcc / ARM (GBA)                  | agbcc `.s` (shared by both — ARM is free)   |
+| `ido7.1`      | IDO / MIPS (N64)                   | `objdump -d` → normalized to GNU-as for m2c |
+| `gcc2.7.2kmc` | KMC GCC / MIPS (N64, Docker)       | `objdump -d` → normalized for m2c           |
+| `mwcc_242_81` | CodeWarrior / PowerPC (GC, Docker) | `objdump -d` → normalized for m2c           |
 
 asmlift's MIPS/PPC frontends consume `objdump`; m2c wants GNU-as text, so `src/eval/m2c-normalizer.ts`
 normalizes objdump -> GNU-as (faithful: same instructions/order, resyntaxed). ARM needs no

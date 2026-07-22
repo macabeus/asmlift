@@ -9,11 +9,11 @@
 #                     ido-static-recomp build of it)
 # (The variable exists only to keep the machine path out of this repo — the benchmark fills
 # it in when it runs.)
-name: asmlift benchmark (ido-mips)
+name: asmlift benchmark (ido7.1)
 platform: n64
 tools:
   asmlift:
-    target: ido-mips
+    target: ido7.1
     compiler: >-
       "$ASMLIFT_IDO_CC" -c -mips2 -O2 -32 -non_shared -Xcpluscomm -G 0
       -o {{outputPath}} {{inputPath}}

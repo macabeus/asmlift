@@ -1,4 +1,4 @@
-// asmlift — magic-number constant-division recovery (L1 recognition; gcc-mips + mwcc-ppc).
+// asmlift — magic-number constant-division recovery (L1 recognition; gcc2.7.2kmc + mwcc_242_81).
 //
 // A compiler replaces `x / C` for a non-power-of-2 constant `C` with a HIGH-WORD MULTIPLY by a
 // precomputed "magic" reciprocal `M`, a shift `s`, and a sign correction. The frontend lifts the

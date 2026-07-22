@@ -9,12 +9,12 @@ import { canOpenInPlayground, playgroundShare } from '../src/pages/benchmark/lib
 import { decodeShare, encodeShare } from '../src/shared/utils/permalink';
 
 const row = (over: Partial<FunctionResult>): FunctionResult =>
-  ({ toolchain: 'ido-mips', sym: 'add1', targetAsm: '00000000 <add1>:\n   0:\tjr\tra\n', ...over }) as FunctionResult;
+  ({ toolchain: 'ido7.1', sym: 'add1', targetAsm: '00000000 <add1>:\n   0:\tjr\tra\n', ...over }) as FunctionResult;
 
 test("a row's share is the exact playground state and round-trips through the permalink codec", () => {
   const share = playgroundShare(row({}))!;
   expect(share).toEqual({
-    target: 'ido-mips',
+    target: 'ido7.1',
     backend: 'c',
     name: 'add1',
     asm: '00000000 <add1>:\n   0:\tjr\tra\n',
@@ -25,7 +25,7 @@ test("a row's share is the exact playground state and round-trips through the pe
 });
 
 test('every benchmark toolchain id is a playground-eligible target', () => {
-  for (const t of ['agbcc-arm', 'ido-mips', 'gcc-mips', 'mwcc-ppc'] as FunctionResult['toolchain'][]) {
+  for (const t of ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'mwcc_242_81'] as FunctionResult['toolchain'][]) {
     expect(canOpenInPlayground(row({ toolchain: t }))).toBe(true);
   }
 });
