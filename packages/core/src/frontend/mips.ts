@@ -91,10 +91,11 @@ const parseDisasm = (disasm: string): Instr[] => parseSharedDisasm(disasm);
 // A MIPS `%hi`/`%lo` relocation operand — the assembler's HI16/LO16 split that materialises the
 // address of a named global: `%hi(SYM)`, `%lo(SYM)`, `%hi(SYM + N)`, or the memory form
 // `%lo(SYM + N)(base)`. Splat spells global access this way and the Splat parser preserves it
-// verbatim (frontend/splat.ts); `lift` folds a `lui %hi` + its consuming `%lo` into a single
-// `gaddr(SYM)` (the same op the Thumb frontend emits for a pool-loaded global), carrying the
-// addend as the access offset. Returns null for a non-`%hi/%lo` operand. The objdump dialect never
-// produces these (IDO resolves globals via `gp`), so this path is Splat-only.
+// verbatim (frontend/splat.ts); the objdump dialect hides the symbol in a relocation, which
+// `applyMipsGlobalRelocs` rewrites into the same `%hi`/`%lo` operands. Either way `lift` folds a
+// `lui %hi` + its consuming `%lo` into a single `gaddr(SYM)` (the op the Thumb frontend also emits
+// for a pool-loaded global), carrying the addend as the access offset. Returns null for a
+// non-`%hi/%lo` operand.
 function parseReloc(kind: 'hi' | 'lo', operand: string): { sym: string; addend: number; base?: string } | null {
   const m = operand.match(
     new RegExp(String.raw`^%${kind}\(\s*([A-Za-z_.$][\w.$]*)\s*(?:\+\s*(0x[0-9a-fA-F]+|\d+))?\s*\)(?:\((\w+)\))?$`),
@@ -103,6 +104,81 @@ function parseReloc(kind: 'hi' | 'lo', operand: string): { sym: string; addend: 
     return null;
   }
   return { sym: m[1], addend: m[2] ? parseImm(m[2]) : 0, base: m[3] };
+}
+
+// Bridge objdump global-access relocations into the `%hi`/`%lo` operands `parseReloc` reads, so the
+// gaddr recognition recovers named globals from an object file the same way it does from Splat text.
+// In objdump a global load shows `lui rX,0x0` with the symbol ONLY in the `R_MIPS_HI16`/`LO16`
+// reloc records — without this the base decodes as address 0 and the access reads `*(T *)0`. Using
+// asmData, rewrite each `lui`'s immediate to `%hi(SYM)` and its paired consumer's operand to
+// `%lo(SYM[+N])`. Mirrors the harness's disasmToM2c rewrite, so asmlift and m2c recover the same
+// symbols. NAMED object symbols only — a reloc against a `.rodata`/`.data` SECTION is a jump-table
+// base (Regime B) or section-relative data, left untouched.
+function applyMipsGlobalRelocs(instrs: Instr[], ad: AsmData): void {
+  const byAddr = new Map(instrs.map((ins) => [ins.addr, ins]));
+  const his: { addr: number; sym: string }[] = [];
+  const los = new Map<number, string>(); // LO16 instruction addr → symbol
+  for (const r of ad.relocs) {
+    if (r.section !== '.text' || r.sym.startsWith('.')) {
+      continue; // section-symbol relocs are jump tables / anonymous data — not named globals
+    }
+    if (r.type === 'R_MIPS_HI16') {
+      his.push({ addr: r.offset, sym: r.sym });
+    } else if (r.type === 'R_MIPS_LO16') {
+      los.set(r.offset, r.sym);
+    }
+  }
+  if (his.length === 0) {
+    return;
+  }
+  his.sort((a, b) => a.addr - b.addr);
+  const loAddrs = [...los.keys()].sort((a, b) => a - b);
+  const consumed = new Set<number>();
+  for (const hi of his) {
+    const lui = byAddr.get(hi.addr);
+    if (!lui || lui.mnemonic !== 'lui') {
+      continue;
+    }
+    // Pair with the first not-yet-consumed same-symbol LO16 after the lui (GCC emits the pair with
+    // the base register threaded, so a 1:1 by-symbol-and-order match is the observed shape).
+    const loAddr = loAddrs.find((a) => a > hi.addr && !consumed.has(a) && los.get(a) === hi.sym);
+    const lo = loAddr !== undefined ? byAddr.get(loAddr) : undefined;
+    if (!lo) {
+      continue;
+    }
+    // The addend N rides in the instruction fields, not the reloc record: `(HI16 imm << 16) + the
+    // LO16 instruction's signed immediate`. HI16 imm is 0 in a relocatable object.
+    const rw = rewriteLoReloc(lo, hi.sym, parseImm(lui.ops[1] ?? '0') << 16);
+    if (rw === null) {
+      continue; // an unmodelled consumer (FP load, …) — leave the pair raw; it declines downstream
+    }
+    lui.ops[1] = rw.n === 0 ? `%hi(${hi.sym})` : `%hi(${hi.sym} + 0x${rw.n.toString(16)})`;
+    consumed.add(loAddr!);
+  }
+}
+
+// Rewrite a LO16 consumer's operand to `%lo(SYM[+N])`, returning the addend N, or null when the
+// instruction is not a modelled global consumer (leave it raw). `hiBase` is the HI16 imm << 16.
+function rewriteLoReloc(lo: Instr, sym: string, hiBase: number): { n: number } | null {
+  const macro = (n: number) => (n === 0 ? `%lo(${sym})` : `%lo(${sym} + 0x${n.toString(16)})`);
+  if (lo.mnemonic === 'addiu' || lo.mnemonic === 'addi') {
+    const n = hiBase + parseImm(lo.ops[2] ?? '0');
+    if (n < 0) {
+      return null; // a negative interior offset — unusual; leave raw
+    }
+    lo.ops[2] = macro(n);
+    return { n };
+  }
+  if (/^(lw|lh|lhu|lb|lbu|sw|sh|sb)$/.test(lo.mnemonic)) {
+    const mem = parseMem(lo.ops[lo.ops.length - 1] ?? '');
+    const n = hiBase + mem.off;
+    if (n < 0) {
+      return null;
+    }
+    lo.ops[lo.ops.length - 1] = `${macro(n)}(${mem.base})`;
+    return { n };
+  }
+  return null;
 }
 
 interface MipsBlock {
@@ -405,6 +481,12 @@ export function lift(
   // exempted from the loud-fail below; an UNrecovered `jr <non-ra>` still fails loud.
   const jts = asmData ? recoverMipsJumpTables(instrs, asmData) : new Map<number, MipsJT>();
   const recoveredJr = new Set([...jts.values()].map((j) => j.jrAddr));
+  // Bridge global-access relocations into `%hi`/`%lo` operands (objdump dialect only — Splat text
+  // already carries them). Runs AFTER jump-table recovery so its raw `.rodata` table-base relocs are
+  // read pristine; global rewrites target NAMED symbols and never touch a jump-table base.
+  if (!splat && asmData) {
+    applyMipsGlobalRelocs(instrs, asmData);
+  }
   // TRUSTWORTHINESS: fail LOUD on a control transfer this frontend cannot model — the `opaque`
   // path cannot catch these (implicit or no register destination). `jal`/`jalr` clobber `v0`
   // implicitly, so dropping a call fabricates `v0` from a stale value; a `jr` to anything but `ra`
