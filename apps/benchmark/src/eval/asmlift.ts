@@ -68,6 +68,9 @@ export function runAsmlift(
   let annotated: string;
   let activeOpts = opts;
   let usedSymbols = Boolean(symbols);
+  // The backstop's retirement telemetry: set exactly when the retry-without-map engages, and
+  // carried on EVERY return path below. Zero occurrences across runs ⇒ the backstop can go.
+  let symbolMapFellBack = false;
   try {
     let dec = decompile(sym, asm, tc.targetDesc, { ...activeOpts, onGap: 'annotate' });
     if (dec.diagnostics.length > 0 && usedSymbols) {
@@ -76,6 +79,7 @@ export function runAsmlift(
       if (raw.diagnostics.length === 0) {
         activeOpts = rawOpts;
         usedSymbols = false;
+        symbolMapFellBack = true;
         dec = raw;
       }
     }
@@ -83,6 +87,7 @@ export function runAsmlift(
       return {
         decompiler: 'asmlift',
         ...(usedSymbols ? { symbolMap: true as const } : {}),
+        ...(symbolMapFellBack ? { symbolMapFellBack: true as const } : {}),
         outcome: 'declined',
         source: dec.source,
         score: null,
@@ -100,6 +105,7 @@ export function runAsmlift(
     return {
       decompiler: 'asmlift',
       ...(usedSymbols ? { symbolMap: true as const } : {}),
+      ...(symbolMapFellBack ? { symbolMapFellBack: true as const } : {}),
       outcome: 'failed',
       source: msg,
       score: null,
@@ -117,6 +123,7 @@ export function runAsmlift(
     return {
       decompiler: 'asmlift',
       ...(usedSymbols ? { symbolMap: true as const } : {}),
+      ...(symbolMapFellBack ? { symbolMapFellBack: true as const } : {}),
       outcome: s.match ? 'match' : 'nonmatch',
       source: best.source,
       score: s.score,
@@ -133,6 +140,7 @@ export function runAsmlift(
     return {
       decompiler: 'asmlift',
       ...(usedSymbols ? { symbolMap: true as const } : {}),
+      ...(symbolMapFellBack ? { symbolMapFellBack: true as const } : {}),
       outcome: 'noncompile',
       source: annotated,
       score: null,

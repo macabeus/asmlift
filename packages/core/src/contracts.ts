@@ -73,6 +73,8 @@ export function assertDerefsTyped(sfn: SFn): void {
   const bad: string[] = [];
   // Ops C rejects outright on a pointer operand (the additive ops and &&/|| are legal C).
   const NO_PTR_OPS = new Set(['&', '|', '^', '<<', '>>', '*', '/', '%']);
+  // The comparison operators — where a bare `&SYM` operand is SIGN-ambiguous, not ill-formed.
+  const CMP_OPS = new Set(['<', '<=', '>', '>=', '==', '!=']);
   // 1/2/4 only: the decomp typedef vocabulary (C_TYPEDEFS) has no 64-bit scalar, so a width-8
   // access would print as the nonexistent `(s64 *)` — exactly the three-stages-later failure
   // this rule pre-empts. (If f64 loads ever land they are floats, not a scalar width here.)
@@ -108,6 +110,21 @@ export function assertDerefsTyped(sfn: SFn): void {
       const addrSide = e.l.k === 'addr' ? e.l : e.r.k === 'addr' ? e.r : undefined;
       if (addrSide) {
         bad.push(`interior pointer arithmetic on the global address '&${addrSide.name}'`);
+      }
+    }
+    // A bare global address `&SYM` as a COMPARISON operand is the same unspelled escape under a
+    // different operator — and worse than ill-formed: the compare's SIGNEDNESS is spelled by the
+    // operand TYPES (the structurer maps icmp_ult and icmp_slt to the same '<'), and `&SYM`'s C
+    // type is the project's own declaration, unknowable here — so the emitted compare can flip
+    // signedness against the asm's, silently. The cmp lowering intifies it signedness-aware
+    // (`(u32)`/`(s32)&SYM` — structure.ts intifyAddrCmp; the cast types int, so it never lands
+    // here). A bare `addr` reaching a comparison operand is therefore a lowering REGRESSION —
+    // flag it rather than emit sign-ambiguous C.
+    if (e.k === 'bin' && CMP_OPS.has(e.op)) {
+      for (const side of [e.l, e.r]) {
+        if (side.k === 'addr') {
+          bad.push(`bare global address '&${side.name}' as a comparison operand`);
+        }
       }
     }
     // `!p` is legal C (pointer truthiness); `-p`/`~p` are not.

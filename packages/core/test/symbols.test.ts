@@ -184,6 +184,50 @@ describe('value-context escapes intify — a named address never declines what r
   });
 });
 
+describe('comparison operands intify SIGNEDNESS-AWARE — a compare never sees a bare &gSym', () => {
+  // The cmp-path hole the adversarial reviewer of the additive intify flagged: a bare `&gSym`
+  // reaching a COMPARISON is unspelled the same way (its C type is the project's declaration),
+  // and worse — the compare's SIGNEDNESS lives in the operand types (icmp_ult and icmp_slt both
+  // spell '<'), so the project's declaration would pick the emitted compare, silently
+  // byte-inexact when it disagrees with the asm. The cast must AGREE with the opcode:
+  // unsigned compares (and sign-agnostic ==/!=) spell (u32)&gSym, signed compares (s32)&gSym.
+  // The assertDerefsTyped comparison rule makes any regression here a loud decline.
+  const CMP_POOL = (cond: string) =>
+    `\tldr\tr1, .L9\n\tcmp\tr1, r0\n\t${cond}\t.L2\n\tmovs\tr0, #0x0\n\tbx\tlr\n` +
+    `.L2:\n\tmovs\tr0, #0x1\n\tbx\tlr\n.L9:\n\t.word\t0x03001234\n`;
+  const CMP_IMM = (cond: string) =>
+    `\tldr\tr1, .L9\n\tcmp\tr1, #0x50\n\t${cond}\t.L2\n\tmovs\tr0, #0x0\n\tbx\tlr\n` +
+    `.L2:\n\tmovs\tr0, #0x1\n\tbx\tlr\n.L9:\n\t.word\t0x03001234\n`;
+  const NAMED = mapOf([[0x03001234, { name: 'gCounter', kind: 'data' }]]);
+
+  test('an UNSIGNED compare of a promoted address spells (u32)&gSym — vs a value and vs a constant', () => {
+    for (const body of [CMP_POOL('bhi'), CMP_IMM('bhi')]) {
+      const src = run('f', body, NAMED); // strict mode: a bare-addr contract hit would THROW
+      expect(src).toContain('(u32)&gCounter');
+      expect(src).not.toMatch(/[^)]&gCounter/); // no bare, declaration-typed &gCounter anywhere
+    }
+  });
+
+  test('a SIGNED compare of a promoted address spells (s32)&gSym — vs a value and vs a constant', () => {
+    for (const body of [CMP_POOL('blt'), CMP_IMM('blt')]) {
+      const src = run('f', body, NAMED);
+      expect(src).toContain('(s32)&gCounter'); // (u32) here would flip the compare to unsigned
+      expect(src).not.toMatch(/[^)]&gCounter/);
+    }
+  });
+
+  test('the symbol-carrying pool path (.word gSym, no map) has the same spelling', () => {
+    // The pre-existing non-map path: the pool word IS the symbol, lowered as `gaddr` — the same
+    // `addr` node reaches the compare, so the same hole and the same signedness-aware fix.
+    const body =
+      `\tldr\tr1, .L9\n\tcmp\tr1, r0\n\tbhi\t.L2\n\tmovs\tr0, #0x0\n\tbx\tlr\n` +
+      `.L2:\n\tmovs\tr0, #0x1\n\tbx\tlr\n.L9:\n\t.word\tgCounter\n`;
+    const src = run('f', body); // NO map — the symbol arrives from the pool itself
+    expect(src).toContain('(u32)&gCounter');
+    expect(src).not.toMatch(/[^)]&gCounter/);
+  });
+});
+
 describe('register-offset addressing lowers exactly (never a silent index drop)', () => {
   // parseAddr used to silently read `[rB]`, dropping the index register — a silent miscompile
   // (ldrsh exists ONLY in this form in Thumb-1). Now it lowers as `rB + rX` then the access.

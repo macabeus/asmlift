@@ -905,7 +905,30 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
       return { k: 'const', value: d.attrs.value as number };
     }
     if (CMP_TO_BIN[d.opcode]) {
-      return { k: 'bin', op: CMP_TO_BIN[d.opcode], l: e(d.operands[0]), r: e(d.operands[1]) };
+      // A bare global address `&gSym` as a COMPARISON operand is the same unspelled escape as the
+      // arithmetic case below (see intifyAddr): its C type comes from the PROJECT's own
+      // declaration, unknowable here. Worse, the compare's SIGNEDNESS lives in the operand types
+      // (CMP_TO_BIN maps icmp_ult and icmp_slt to the same '<'), so leaving `&gSym` untyped lets
+      // the project's declaration pick the compare the compiler emits — silently byte-inexact
+      // whenever it disagrees with the asm. The honest spelling is integer math on the address
+      // with the cast AGREEING with the opcode's signedness: unsigned compares (and the
+      // sign-agnostic ==/!=) spell `(u32)&gSym`, signed compares `(s32)&gSym` — exactly the
+      // compare the asm did. The deref folds never see a compare operand, so no named spelling is
+      // lost; a NARROWING cast (`(u8)&gSym`) is not a bare `addr` and keeps its truncation.
+      // SCOPE (adversarial review): this closes the hole for BARE addr operands only. An
+      // addr-carrying arithmetic tree (`(u32)&gSym + 4`, spelled by intifyAddr below) under an
+      // icmp_s* still compares unsigned in C (u32 wins the usual-arithmetic-conversions) — the
+      // same pre-existing wrongness the old ptr-vs-int spelling had, surfacing as a scoring
+      // nonmatch, never a silent regression of a formerly-correct compare. Rare shape; an outer
+      // signed cast on addr-carrying trees is the follow-up if it ever costs a row.
+      const t = /^icmp_s/.test(d.opcode) ? T.s(32) : T.u(32);
+      const intifyAddrCmp = (x: Expr): Expr => (x.k === 'addr' ? { k: 'cast', to: t, e: x } : x);
+      return {
+        k: 'bin',
+        op: CMP_TO_BIN[d.opcode],
+        l: intifyAddrCmp(e(d.operands[0])),
+        r: intifyAddrCmp(e(d.operands[1])),
+      };
     }
     if (ARITH_TO_BIN[d.opcode]) {
       let l = e(d.operands[0]);

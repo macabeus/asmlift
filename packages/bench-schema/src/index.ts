@@ -56,6 +56,10 @@ export interface DecompilerResult {
    *  shapes derived from its ELF — the analogue of m2c's context input). Absent ⇒ no map was
    *  available; the report must not read mixed tables as apples-to-apples. */
   symbolMap?: true;
+  /** asmlift only: the never-worse BACKSTOP engaged — the symbol map induced a gap and the row
+   *  re-ran (and classified) RAW, without the map. Zero occurrences across runs is the signal
+   *  the backstop can be retired. */
+  symbolMapFellBack?: true;
 }
 
 /** MEASURED size of the remaining gap (merge-time): the best compiling candidate's absolute
