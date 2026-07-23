@@ -84,3 +84,22 @@ export function symbolsByName(map: SymbolMap): Map<string, SymbolInfo> {
   }
   return byName;
 }
+
+/** Serialize a SymbolMap to a byte-stable JSON object (hex keys, sorted; array order kept —
+ *  `[0]` is the canonical pick). The benchmark vendors this; the ELF itself never leaves the
+ *  project checkout. */
+export function symbolMapToJson(map: SymbolMap): Record<string, SymbolInfo[]> {
+  const out: Record<string, SymbolInfo[]> = {};
+  for (const addr of [...map.keys()].sort((a, b) => a - b)) {
+    out[`0x${addr.toString(16).padStart(8, '0')}`] = map.get(addr)!;
+  }
+  return out;
+}
+
+export function symbolMapFromJson(obj: Record<string, SymbolInfo[]>): SymbolMap {
+  const map: SymbolMap = new Map();
+  for (const [k, infos] of Object.entries(obj)) {
+    map.set(Number.parseInt(k, 16), infos);
+  }
+  return map;
+}

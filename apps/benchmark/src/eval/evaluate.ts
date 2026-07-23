@@ -4,6 +4,7 @@
 import type { DecompilerResult, FunctionResult } from '@asmlift/bench-schema';
 import type { CandidateCompiler } from '@asmlift/cli/compile-command';
 import type { Prototypes } from '@asmlift/core/proto';
+import type { SymbolMap } from '@asmlift/core/symbols';
 
 import { cachedAsmDumpText, cachedM2cResult } from '../cache';
 import type { Toolchain } from '../toolchains';
@@ -25,6 +26,8 @@ export interface EvalSpec {
   ctx?: string; // m2c --context (full text)
   ctxRef?: string; // published on the row in place of large vendored ctx text
   proto?: Prototypes; // asmlift prototypes
+  /** the project's vendored symbol map — asmlift-only input (m2c's analogue is its ctx) */
+  symbols?: SymbolMap;
   note?: string;
 }
 
@@ -140,7 +143,7 @@ export function evaluate(
   } catch {
     // text-only fallback
   }
-  const asmlift = runAsmlift(tc, spec.sym, asm, obj, spec.proto, compile);
+  const asmlift = runAsmlift(tc, spec.sym, asm, obj, spec.proto, compile, spec.symbols);
   // m2c is a frozen baseline (pinned checkout): its half of the row is cached by everything it
   // depends on — m2c commit, toolchain, inputs, target object (cache.ts). asmlift is NEVER cached.
   const m2c = cachedM2cResult({ tcId: tc.id, sym: spec.sym, asm, ctx: spec.ctx, obj, lang: spec.language }, () =>

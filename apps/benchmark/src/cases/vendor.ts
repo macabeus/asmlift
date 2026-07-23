@@ -13,9 +13,14 @@
 //
 // Preprocessing uses -P (no linemarkers): vendored blobs must carry NO machine paths — enforced
 // here and by test/real-manifests.test.ts.
+import { loadDecompConfig } from '@asmlift/cli/config';
+import { loadSymbolMap } from '@asmlift/cli/symbols-provider';
+import { symbolMapToJson } from '@asmlift/core/symbols';
 import { execSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { gzipSync } from 'node:zlib';
 
 import { sha } from '../cache';
@@ -26,7 +31,27 @@ import { REAL_DIR, loadManifestsForVendor, resolveProjectRoot } from './manifest
 
 const MACHINE_PATH = /\/Users\/|\/home\/|\/private\/var\//;
 
-export function vendor(filterProject?: string): void {
+/** Vendor the project's symbol map (symbol-map-benchmark-plan-2026-07-23.md): the checkout's
+ *  own decomp.yaml names its ELF (tools.asmlift.elf); the derived name/shape map is project
+ *  METADATA (ldscript + headers), vendorable where the ELF itself (game code) is not. */
+async function vendorSymbols(project: string, root: string, outDir: string): Promise<void> {
+  const loaded = loadDecompConfig(undefined, root);
+  const elfRel = loaded?.config.tools?.asmlift?.elf;
+  if (!elfRel) {
+    return; // project doesn't expose an ELF — no symbol map, rows run as before
+  }
+  const elfPath = resolve(dirname(loaded!.path), elfRel);
+  if (!existsSync(elfPath)) {
+    console.warn(`${project}: tools.asmlift.elf points at ${elfRel} but it is not built — symbols NOT vendored`);
+    return;
+  }
+  const map = await loadSymbolMap(elfPath);
+  const json = JSON.stringify(symbolMapToJson(map));
+  writeFileSync(join(outDir, 'symbols.json.gz'), gzipSync(Buffer.from(json), { level: 9 }));
+  console.log(`${project}: vendored symbol map (${map.size} addresses)`);
+}
+
+export async function vendor(filterProject?: string): Promise<void> {
   const manifests = loadManifestsForVendor().filter((m) => !filterProject || m.project === filterProject);
   for (const man of manifests) {
     const root = resolveProjectRoot(man);
@@ -78,5 +103,6 @@ export function vendor(filterProject?: string): void {
     writeFileSync(join(outDir, 'index.json'), JSON.stringify(index, null, 2) + '\n');
     writeFileSync(join(outDir, 'PROVENANCE.json'), JSON.stringify(provenance, null, 2) + '\n');
     console.log(`${man.project}: vendored ${done} TUs (${ctxSeen.size} unique context(s)) → ${outDir}`);
+    await vendorSymbols(man.project, root, outDir);
   }
 }

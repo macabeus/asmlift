@@ -37,6 +37,7 @@ export function realCases(filter: RealFilter = {}): Case[] {
         ctx: f.m2cCtx ? m2cRealCtx(man, f) : f.ctx,
         ctxRef: f.m2cCtx ? man.ctxPath(f.sym) : undefined,
         proto: f.proto,
+        symbols: man.symbols,
         note: f.note,
         toolchain: tc,
         build: () => buildRealTarget(man.toolchain, man.vendored(f.sym).tuI),

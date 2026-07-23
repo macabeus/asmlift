@@ -8,6 +8,7 @@ import { decompileRanked } from '@asmlift/cli/rank';
 import type { MatchScore } from '@asmlift/cli/score';
 import { decompile } from '@asmlift/core/pipeline';
 import type { Prototypes } from '@asmlift/core/proto';
+import type { SymbolMap } from '@asmlift/core/symbols';
 
 import { cachedExtractAsmData } from '../cache';
 import { benchCompilerFor } from '../decomp-config';
@@ -28,6 +29,7 @@ export function runAsmlift(
   obj: string,
   prototypes?: Prototypes,
   contextCompile?: CandidateCompiler,
+  symbols?: SymbolMap,
 ): DecompilerResult {
   // Side-table: extract the data-section jump table + relocations from the SAME target object so a
   // dense MIPS/PPC switch can recover. Best-effort — a missing/failed objdump (or agbcc, whose
@@ -48,6 +50,9 @@ export function runAsmlift(
     ...(prototypes ? { prototypes } : {}),
     ...(asmData ? { asmData } : {}),
     ...(compile ? { compile } : {}),
+    // the project's vendored symbol map (names + declaration shapes). The '/raw-globals'
+    // ranked lever rides along, so a symbol-fed row can never score worse than without.
+    ...(symbols ? { symbols } : {}),
   };
   // Phase 1 — single-shot decompile in annotate mode: every detected gap becomes an inline
   // ASMLIFT_ERROR marker plus a structured diagnostic. Gapped ⇒ outcome "declined", never
@@ -59,6 +64,7 @@ export function runAsmlift(
     if (dec.diagnostics.length > 0) {
       return {
         decompiler: 'asmlift',
+        ...(symbols ? { symbolMap: true as const } : {}),
         outcome: 'declined',
         source: dec.source,
         score: null,
@@ -75,6 +81,7 @@ export function runAsmlift(
     const msg = (e as Error).message ?? String(e);
     return {
       decompiler: 'asmlift',
+      ...(symbols ? { symbolMap: true as const } : {}),
       outcome: 'failed',
       source: msg,
       score: null,
@@ -91,6 +98,7 @@ export function runAsmlift(
     const s = best.score;
     return {
       decompiler: 'asmlift',
+      ...(symbols ? { symbolMap: true as const } : {}),
       outcome: s.match ? 'match' : 'nonmatch',
       source: best.source,
       score: s.score,
@@ -106,6 +114,7 @@ export function runAsmlift(
     const msg = (e as Error).message ?? String(e);
     return {
       decompiler: 'asmlift',
+      ...(symbols ? { symbolMap: true as const } : {}),
       outcome: 'noncompile',
       source: annotated,
       score: null,

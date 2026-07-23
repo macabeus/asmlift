@@ -147,7 +147,7 @@ switch (command) {
     break;
   case 'vendor': {
     const { vendor } = await import('./cases/vendor');
-    vendor(opts.project);
+    await vendor(opts.project);
     break;
   }
   case 'verify': {

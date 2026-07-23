@@ -10,6 +10,7 @@
 // file name, not mid-run with a compile error; projects missing on this machine are reported
 // once, aggregated, and skipped.
 import type { Prototypes } from '@asmlift/core/proto';
+import { type SymbolMap, symbolMapFromJson } from '@asmlift/core/symbols';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { gunzipSync } from 'node:zlib';
@@ -53,6 +54,8 @@ export interface VendoredManifest extends RealManifest {
   vendored: (sym: string) => { tuI: string; ctxI: string };
   /** sym → repo-relative path of the vendored context blob (for the row's ctxRef). */
   ctxPath: (sym: string) => string;
+  /** the project's vendored symbol map (names + declaration shapes), when it exposes an ELF */
+  symbols?: SymbolMap;
 }
 
 export const REAL_DIR = join(import.meta.dirname, '..', '..', 'dataset', 'real');
@@ -131,8 +134,15 @@ export function loadManifests(): VendoredManifest[] {
       continue;
     }
     const index = JSON.parse(readFileSync(indexPath, 'utf8')) as Record<string, { tu: string; ctx: string }>;
+    // the project's vendored symbol map (name/shape metadata derived from its ELF at vendor
+    // time) — absent for projects without a tools.asmlift.elf, and rows then run as before
+    const symbolsPath = join(dir, 'symbols.json.gz');
+    const symbols = existsSync(symbolsPath)
+      ? symbolMapFromJson(JSON.parse(gunzipSync(readFileSync(symbolsPath)).toString('utf8')))
+      : undefined;
     available.push({
       ...man,
+      symbols,
       vendored: (sym) => {
         const entry = index[sym];
         if (!entry) {

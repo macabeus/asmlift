@@ -52,6 +52,10 @@ export interface DecompilerResult {
   /** declined: decline-marker names (m2c) or `<stage>: <reason>` diagnostics (asmlift);
    *  noncompile: compiler diagnostic lines; failed: a first-line summary. */
   errorMarkers?: string[];
+  /** asmlift only: this row ran WITH the project's vendored symbol map (names + declaration
+   *  shapes derived from its ELF — the analogue of m2c's context input). Absent ⇒ no map was
+   *  available; the report must not read mixed tables as apples-to-apples. */
+  symbolMap?: true;
 }
 
 /** MEASURED size of the remaining gap (merge-time): the best compiling candidate's absolute
