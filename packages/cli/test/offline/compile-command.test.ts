@@ -58,3 +58,13 @@ test('exit 0 without producing {out} throws (a compiler that lies about success)
   const compile = compileFromCommand('true # {{inputPath}} {{outputPath}}');
   expect(() => compile('int x;', 'f', 'c')).toThrow(/produced no object/);
 });
+
+test('a FAILING middle step aborts even when the last step would succeed (sh -e)', () => {
+  // The gcc-2.9 partial-output hazard: cc1 exits nonzero on a hard error yet still writes a
+  // truncated .s, and the assemble step then "succeeds" — scoring a truncated object is the one
+  // forbidden outcome, so any failing step must abort the template, not just the last one.
+  const compile = compileFromCommand(
+    "sh -c 'echo partial > {{outputPath}}.s; echo undeclared >&2; exit 1' ; cp {{outputPath}}.s {{outputPath}}\ntrue # {{inputPath}}",
+  );
+  expect(() => compile('int x;', 'f', 'c')).toThrow(/exit 1[\s\S]*undeclared/);
+});

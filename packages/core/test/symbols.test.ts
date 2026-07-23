@@ -138,6 +138,52 @@ describe('declaration shapes (P2)', () => {
   });
 });
 
+describe('value-context escapes intify — a named address never declines what raw C compiled', () => {
+  // The S1 decline family (kleod StreamCmd_SetBGScroll): promotion puts `&gSym` into arithmetic
+  // the fold rules cannot consume — a struct-array stride (`&gSym + i*28`, access width 2) or an
+  // interior address escaping as a VALUE. Emitting bare `&gSym + K` would element-scale by the
+  // project's sizeof (byte-inexact ⇒ assertDerefsTyped declined the function); the additive
+  // lowering now spells integer math on the address, `(u32)&gSym + K` — byte-exact, legal C.
+  test('an ESCAPING struct-array stride base spells (u32)&gSym math, not a decline', () => {
+    // r1 = &gBgInfo + a0*28; strh r2,[r1,#8]; return r1 — the escaping element pointer fails the
+    // struct-array raise's clean gate (exactly the kleod shape, where it escaped as a call arg),
+    // the 28-byte stride never divides the 2-byte access width so globalOf declines the
+    // whole-global spelling, and the `&gBgInfo + i*28` tree reaches both a deref base and a
+    // value context. Both must render as integer math on the address.
+    const body =
+      '\tldr\tr1, .L1\n\tlsls\tr2, r0, #0x3\n\tsubs\tr2, r2, r0\n\tlsls\tr2, r2, #0x2\n' +
+      '\tadds\tr1, r1, r2\n\tmovs\tr2, #0x1\n\tstrh\tr2, [r1, #0x8]\n\tadds\tr0, r1, #0x0\n' +
+      '\tbx\tlr\n.L1:\n\t.word\t0x03003430\n';
+    const map = mapOf([[0x03003430, { name: 'gBgInfo', kind: 'data', shape: 'array', elemSize: 28, size: 112 }]]);
+    const src = run('f', body, map); // strict mode: an interior-pointer contract hit would THROW
+    expect(src).toContain('(u32)&gBgInfo');
+    expect(src).not.toMatch(/[^)]&gBgInfo/); // no bare, element-scaling &gBgInfo anywhere
+  });
+
+  test('an interior-attributed address escaping as a VALUE spells (u32)&gSym + K', () => {
+    // pool word strictly inside gState (base+4), returned — a value context with no deref to fold
+    const body = '\tldr\tr0, .L1\n\tbx\tlr\n.L1:\n\t.word\t0x03002004\n';
+    const map = mapOf([[0x03002000, { name: 'gState', kind: 'data', shape: 'struct', size: 24 }]]);
+    const src = run('f', body, map);
+    expect(src).toContain('(u32)&gState + 4');
+  });
+
+  test('a NARROWED address ((u8)&gSym) never folds back to the named global', () => {
+    // lsls#24/lsrs#24 truncates the promoted address to its low byte BEFORE the deref: the asm
+    // reads address 0x30, not gBgInfo. addrIn must fold ONLY the value-preserving 32-bit cast —
+    // folding the narrowing cast would spell `*(u8 *)&gBgInfo` (or worse, a named field) and
+    // silently read the wrong address (the adversarial reviewer's wrong-address probe family).
+    const body =
+      '\tldr\tr0, .L1\n\tlsls\tr0, r0, #0x18\n\tlsrs\tr0, r0, #0x18\n\tldrb\tr0, [r0]\n' +
+      '\tbx\tlr\n.L1:\n\t.word\t0x03003430\n';
+    const map = mapOf([[0x03003430, { name: 'gBgInfo', kind: 'data', shape: 'array', elemSize: 28, size: 112 }]]);
+    const src = run('f', body, map);
+    expect(src).toContain('(u8)&gBgInfo'); // the truncation survives…
+    expect(src).not.toContain('*(u8 *)&gBgInfo'); // …and never becomes an untruncated named read
+    expect(src).not.toContain('gBgInfo['); // nor a named element at the wrong address
+  });
+});
+
 describe('register-offset addressing lowers exactly (never a silent index drop)', () => {
   // parseAddr used to silently read `[rB]`, dropping the index register — a silent miscompile
   // (ldrsh exists ONLY in this form in Thumb-1). Now it lowers as `rB + rX` then the access.

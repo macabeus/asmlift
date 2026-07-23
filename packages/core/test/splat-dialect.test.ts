@@ -117,11 +117,12 @@ endlabel getField
   expect(decompile('getField', agg, MIPS_IDO).source).toContain('&gStruct');
 });
 
-test('splat: an escaping interior global pointer (&SYM + N as a value) declines, never element-scales', () => {
-  // `addiu a1, rHi, %lo(SYM + 0x18)` makes `&SYM + 24 bytes`; returning it as a VALUE would emit
-  // `&SYM + 24`, which C element-scales by sizeof(SYM). The structurer's interior-pointer guard
-  // declines rather than silently miscompile. (An addend that stays a load/store BASE is fine —
-  // memAccess folds it byte-correctly — so only the escaping form is caught.)
+test('splat: an escaping interior global pointer (&SYM + N as a value) intifies, never element-scales', () => {
+  // `addiu a1, rHi, %lo(SYM + 0x18)` makes `&SYM + 24 bytes`; returning it as a VALUE must not
+  // emit `&SYM + 24` (C element-scales by sizeof(SYM), unknowable here). The additive lowering
+  // spells the honest integer math on the address instead — `(u32)&SYM + 24`, byte-exact under
+  // any project declaration. (An addend that stays a load/store BASE folds byte-correctly via
+  // memAccess; this pins the escaping VALUE form, which used to decline the whole function.)
   const interior = `glabel f
     /* 100 80000100 3C05800A */  lui        $a1, %hi(GwPlayer + 0x18)
     /* 104 80000104 24A50018 */  addiu      $a1, $a1, %lo(GwPlayer + 0x18)
@@ -129,7 +130,9 @@ test('splat: an escaping interior global pointer (&SYM + N as a value) declines,
     /* 10C 8000010C 00A01021 */   addu      $v0, $a1, $zero
 endlabel f
 `;
-  expect(() => decompile('f', interior, MIPS_IDO)).toThrow(/interior pointer arithmetic on the global address/);
+  const src = decompile('f', interior, MIPS_IDO).source;
+  expect(src).toContain('(u32)&GwPlayer + 24');
+  expect(src).not.toMatch(/[^)]&GwPlayer \+/); // the bare, element-scaling form must be gone
 });
 
 test('splat: an FP global load (lwc1 %lo) declines loud, never a silently dropped access', () => {

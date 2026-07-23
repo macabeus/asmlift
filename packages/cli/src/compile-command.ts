@@ -43,9 +43,13 @@ const safe = (value: string, what: string): string => {
 /** Build a CandidateCompiler from a `decomp.yaml` command template. `{{inputPath}}` and
  *  `{{outputPath}}` are REQUIRED placeholders (substituted with absolute paths);
  *  `{{symbol}}` is optional. The placeholder style matches other decomp tools' `compiler`
- *  templates, so a project's tool blocks read uniformly. The command runs via `sh -c`; a non-zero exit
- *  or a missing output object throws with the full command + its stderr — configured means
- *  configured, there is no fallback. */
+ *  templates, so a project's tool blocks read uniformly. The command runs via `sh -ec` — EVERY
+ *  step must succeed, not just the last one: gcc-2.9-family compilers exit nonzero on a hard
+ *  error (an undeclared identifier, even an invalid flag) yet still write a PARTIAL .s with the
+ *  erroring statements deleted, so without `-e` a later assemble step "succeeds" and a silently
+ *  TRUNCATED object gets scored (found scoring real 22/28/38 phantoms in the klonoa dogfood).
+ *  A non-zero exit or a missing output object throws with the full command + its stderr —
+ *  configured means configured, there is no fallback. */
 export function compileFromCommand(template: string, opts: CompileCommandOptions = {}): CandidateCompiler {
   if (!template.includes('{{inputPath}}') || !template.includes('{{outputPath}}')) {
     throw new Error(`compiler command must contain {{inputPath}} and {{outputPath}} placeholders — got: ${template}`);
@@ -68,7 +72,7 @@ export function compileFromCommand(template: string, opts: CompileCommandOptions
       .replaceAll('{{inputPath}}', safe(inPath, '{{inputPath}}'))
       .replaceAll('{{outputPath}}', safe(outPath, '{{outputPath}}'))
       .replaceAll('{{symbol}}', safe(symbol, 'the symbol name'));
-    const r = spawnSync('sh', ['-c', cmd], { encoding: 'utf8', cwd: opts.cwd });
+    const r = spawnSync('sh', ['-ec', cmd], { encoding: 'utf8', cwd: opts.cwd });
     if (r.status !== 0) {
       throw new Error(
         `compile command failed (exit ${r.status ?? 'signal'}): ${cmd}\n${(r.stderr || r.stdout).trim()}`,

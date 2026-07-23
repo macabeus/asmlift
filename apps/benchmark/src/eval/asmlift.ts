@@ -59,10 +59,12 @@ export function runAsmlift(
   // scored (the marker could compile via an implicit declaration and grade meaningless code).
   // Gap-free ⇒ proceed to ranked scoring.
   //
-  // NEVER-WORSE contract for the symbol map: a map-induced gap (e.g. an interior-attributed
-  // global address escaping to a value context, correctly flagged by the contracts) must
-  // degrade to "the map didn't help", never to a decline the raw path wouldn't have had — so
-  // a gapped symbol-fed decompile retries WITHOUT the map before declining.
+  // NEVER-WORSE contract for the symbol map — BACKSTOP ONLY: core now spells every known
+  // map-induced escape legally (the additive lowering intifies `&gSym` to `(u32)&gSym`, so an
+  // interior/stride address in a value context renders byte-exact instead of tripping the
+  // interior-pointer contract). No current row takes this path; it stays as defense-in-depth so
+  // an UNKNOWN future map-induced gap degrades to "the map didn't help", never to a decline the
+  // raw path wouldn't have had — a gapped symbol-fed decompile retries WITHOUT the map first.
   let annotated: string;
   let activeOpts = opts;
   let usedSymbols = Boolean(symbols);

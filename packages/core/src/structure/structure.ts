@@ -60,20 +60,39 @@ import { makeSwitchRecovery } from './switch-recover';
 // TODAY — carrying the struct name (resolved against SFn.structs) is the same move as width and
 // the named follow-up; until then no backend pays a tax for the tree cast (Pascal loud-fails
 // `field` regardless, C++ falls through its leaf hook to the shared C spelling).
+// `&gSym`, possibly wearing the value-context integer cast the additive lowering adds
+// (`(u32)&gSym` — see lowerDef's addr-intify): both spell the same link-time constant, so the
+// fold rules match through the cast and every access that CAN spell a named element still does.
+// WIDTH 32 ONLY — a NARROWING cast (`(u8)&gSym`, from a zext/sext lowering) is a different
+// VALUE (`addr & 0xFF`), and folding through it would read the named global at a wrong address
+// (the adversarial round's probe: `*(u8*)(u8)&gSym` must keep its truncation, never become
+// `*(u8*)&gSym` — let alone a confidently-named `gSym.field`).
+function addrIn(e: Expr): Extract<Expr, { k: 'addr' }> | null {
+  if (e.k === 'addr') {
+    return e;
+  }
+  if (e.k === 'cast' && e.to.kind === 'int' && e.to.width === 32 && e.e.k === 'addr') {
+    return e.e;
+  }
+  return null;
+}
+
 // If `e` is a global address `&gSym` (optionally `+ index`), return the global name and the
 // element index (byte residual divided by the access width). `&gSym` alone → idx const 0;
 // `&gSym + i` → idx `i / width` (exact division only — a non-multiple residual is a mid-element
 // access this whole-global spelling can't express, so it declines to null and the caller casts).
 function globalOf(e: Expr, width: number): { name: string; idx: Expr } | null {
-  if (e.k === 'addr') {
-    return { name: e.name, idx: { k: 'const', value: 0 } };
+  const top = addrIn(e);
+  if (top) {
+    return { name: top.name, idx: { k: 'const', value: 0 } };
   }
   if (e.k === 'bin' && e.op === '+') {
-    for (const [addrSide, other] of [
+    for (const [side, other] of [
       [e.l, e.r],
       [e.r, e.l],
     ] as const) {
-      if (addrSide.k === 'addr') {
+      const addrSide = addrIn(side);
+      if (addrSide) {
         // width 1 → the byte residual IS the index; width>1 → a constant residual divides, a
         // non-constant residual must already be element-scaled (`i * width`) to divide exactly.
         if (width === 1) {
@@ -116,16 +135,18 @@ interface SymRenderCtx {
 // `&gSym + K` → K + off. The exact byte is what a struct-layout field lookup needs; a variable
 // residual returns null (no field spelling — falls through to the index/cast forms).
 function globalConstByte(baseExpr: Expr, off: number): { name: string; byte: number } | null {
-  if (baseExpr.k === 'addr') {
-    return { name: baseExpr.name, byte: off };
+  const top = addrIn(baseExpr);
+  if (top) {
+    return { name: top.name, byte: off };
   }
   if (baseExpr.k === 'bin' && baseExpr.op === '+') {
     for (const [a, b] of [
       [baseExpr.l, baseExpr.r],
       [baseExpr.r, baseExpr.l],
     ] as const) {
-      if (a.k === 'addr' && b.k === 'const') {
-        return { name: a.name, byte: b.value + off };
+      const a2 = addrIn(a);
+      if (a2 && b.k === 'const') {
+        return { name: a2.name, byte: b.value + off };
       }
     }
   }
@@ -412,14 +433,16 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
           if (s) {
             (offsets.get(s) ?? offsets.set(s, new Set()).get(s)!).add(op.attrs.off as number);
           }
-          // a `+`-tree base holding a gaddr (global array element) is aggregate
-          const d = defs.get(op.operands[0]);
-          if (d?.opcode === 'add') {
-            for (const o of d.operands) {
-              const s2 = gaddrSym(o);
-              if (s2) {
-                bumpAgg(s2);
-              }
+        } else if (op.opcode === 'add' || op.opcode === 'sub') {
+          // ANY arithmetic on the symbol's address is interior addressing ⇒ aggregate — even when
+          // the sum only reaches memory through a copy/phi (a pointer-walk loop `p = &g + 2;
+          // do { *p++ … }` never makes the add a DIRECT load/store base, which is all the old
+          // check saw; the symbol then classified scalar and emitted the bare `g = 0` spelling,
+          // which a project declaring `extern u16 g[]` rejects as an incomplete-type assignment).
+          for (const o of op.operands) {
+            const s2 = gaddrSym(o);
+            if (s2) {
+              bumpAgg(s2);
             }
           }
         } else if (op.opcode === 'aload' || op.opcode === 'astore') {
@@ -926,6 +949,18 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
       } else if (op === '-' && ctype(l)?.kind !== 'ptr' && ctype(r)?.kind === 'ptr') {
         r = intify(r); // int - ptr is not C
       }
+      // A bare global address `&gSym` under ANY of these operators is never emitted as-is: its C
+      // type comes from the PROJECT's own declaration (unknowable here — exprCType types `addr`
+      // undefined, so the ptr-keyed intify above never fires on it), which makes `&gSym + K`
+      // byte-INEXACT (C scales K by sizeof(gSym)) and `&gSym & K` ill-formed. The honest spelling
+      // is integer math on the address — `(u32)&gSym + K`, exactly the arithmetic the asm did.
+      // The deref folds (globalOf / globalConstByte, via addrIn) look through this cast, so every
+      // access that CAN spell a named element/field still does; only a genuine value-context
+      // escape (a call argument, a stored address, a compare) keeps it — previously such an
+      // escape tripped assertDerefsTyped's interior-pointer rule and declined the whole function.
+      const intifyAddr = (x: Expr): Expr => (x.k === 'addr' ? { k: 'cast', to: T.u(32), e: x } : x);
+      l = intifyAddr(l);
+      r = intifyAddr(r);
       return { k: 'bin', op, l, r };
     }
     // `-`/`~` on a pointer rendering is equally not C — same honest integer cast as above.
@@ -961,11 +996,11 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     }
     if (d.opcode === 'neg') {
       const x = e(d.operands[0]);
-      return { k: 'un', op: '-', e: ctype(x)?.kind === 'ptr' ? { k: 'cast', to: T.s(32), e: x } : x };
+      return { k: 'un', op: '-', e: ctype(x)?.kind === 'ptr' || x.k === 'addr' ? { k: 'cast', to: T.s(32), e: x } : x };
     }
     if (d.opcode === 'not') {
       const x = e(d.operands[0]);
-      return { k: 'un', op: '~', e: ctype(x)?.kind === 'ptr' ? { k: 'cast', to: T.s(32), e: x } : x };
+      return { k: 'un', op: '~', e: ctype(x)?.kind === 'ptr' || x.k === 'addr' ? { k: 'cast', to: T.s(32), e: x } : x };
     }
     // Width-narrowing casts: `zext`/`sext` widen a `width`-bit value back to 32 → C `(u8)e`/`(s8)e`.
     if (d.opcode === 'zext') {
