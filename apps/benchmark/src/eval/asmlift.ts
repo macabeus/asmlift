@@ -58,13 +58,29 @@ export function runAsmlift(
   // ASMLIFT_ERROR marker plus a structured diagnostic. Gapped ⇒ outcome "declined", never
   // scored (the marker could compile via an implicit declaration and grade meaningless code).
   // Gap-free ⇒ proceed to ranked scoring.
+  //
+  // NEVER-WORSE contract for the symbol map: a map-induced gap (e.g. an interior-attributed
+  // global address escaping to a value context, correctly flagged by the contracts) must
+  // degrade to "the map didn't help", never to a decline the raw path wouldn't have had — so
+  // a gapped symbol-fed decompile retries WITHOUT the map before declining.
   let annotated: string;
+  let activeOpts = opts;
+  let usedSymbols = Boolean(symbols);
   try {
-    const dec = decompile(sym, asm, tc.targetDesc, { ...opts, onGap: 'annotate' });
+    let dec = decompile(sym, asm, tc.targetDesc, { ...activeOpts, onGap: 'annotate' });
+    if (dec.diagnostics.length > 0 && usedSymbols) {
+      const { symbols: _dropped, ...rawOpts } = activeOpts as typeof opts & { symbols?: SymbolMap };
+      const raw = decompile(sym, asm, tc.targetDesc, { ...rawOpts, onGap: 'annotate' });
+      if (raw.diagnostics.length === 0) {
+        activeOpts = rawOpts;
+        usedSymbols = false;
+        dec = raw;
+      }
+    }
     if (dec.diagnostics.length > 0) {
       return {
         decompiler: 'asmlift',
-        ...(symbols ? { symbolMap: true as const } : {}),
+        ...(usedSymbols ? { symbolMap: true as const } : {}),
         outcome: 'declined',
         source: dec.source,
         score: null,
@@ -81,7 +97,7 @@ export function runAsmlift(
     const msg = (e as Error).message ?? String(e);
     return {
       decompiler: 'asmlift',
-      ...(symbols ? { symbolMap: true as const } : {}),
+      ...(usedSymbols ? { symbolMap: true as const } : {}),
       outcome: 'failed',
       source: msg,
       score: null,
@@ -94,11 +110,11 @@ export function runAsmlift(
 
   // Phase 2 — rank candidates (compile + objdiff-score each) and take the differ-picked best.
   try {
-    const best = decompileRanked(sym, asm, tc.targetDesc, obj, opts).best;
+    const best = decompileRanked(sym, asm, tc.targetDesc, obj, activeOpts).best;
     const s = best.score;
     return {
       decompiler: 'asmlift',
-      ...(symbols ? { symbolMap: true as const } : {}),
+      ...(usedSymbols ? { symbolMap: true as const } : {}),
       outcome: s.match ? 'match' : 'nonmatch',
       source: best.source,
       score: s.score,
@@ -114,7 +130,7 @@ export function runAsmlift(
     const msg = (e as Error).message ?? String(e);
     return {
       decompiler: 'asmlift',
-      ...(symbols ? { symbolMap: true as const } : {}),
+      ...(usedSymbols ? { symbolMap: true as const } : {}),
       outcome: 'noncompile',
       source: annotated,
       score: null,

@@ -99,6 +99,16 @@ export function Methodology({ rows }: { rows: FunctionResult[] }) {
           contexts contain exactly what the project declares, never authored types. Remaining declines are genuine
           capability gaps on both sides.
         </P>
+        <P>
+          asmlift's analogue of that context is the project's <em>symbol map</em>: names and declaration shapes
+          derived at vendor time from the ELF the project's own <span className="font-mono">decomp.yaml</span>{' '}
+          declares (<span className="font-mono">.symtab</span> names; struct layouts and array element types from the
+          DWARF types-sidecar the project links in). The same boundary applies — the map carries exactly what the
+          project's ldscript and headers declare, never authored knowledge. Rows that ran with a map are flagged{' '}
+          <span className="font-mono">symbolMap</span> in their provenance, so with-map and without-map rows are never
+          read as the same experiment. Both spellings (named and raw-address) are candidate-ranked, so the map can
+          reveal capability but never masks a regression.
+        </P>
       </section>
 
       <section>

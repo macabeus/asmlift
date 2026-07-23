@@ -102,6 +102,7 @@ export function runCases(cases: Case[], outPath: string, shard: Shard = { idx: 0
       ctx: c.ctx,
       ctxRef: c.ctxRef,
       proto: c.proto,
+      symbols: c.symbols,
       note: c.note,
     };
     const r = evaluate(c.toolchain, spec, obj, asm, c.scorer, c.compile);
