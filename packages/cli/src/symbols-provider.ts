@@ -46,6 +46,12 @@ export async function loadSymbolMap(elfPath: string): Promise<SymbolMap> {
     const kind: SymbolInfo['kind'] = s.type === STT_FUNC ? 'code' : 'data';
     const info: SymbolInfo = { name: s.name, kind };
     if (kind === 'data') {
+      // Sized symtabs (GC/Wii-class projects carry st_size on every object symbol) enable
+      // interior attribution from the symtab alone; GBA ldscript ABS symbols are size-0 and
+      // skip this — their sizes come from the sidecar DWARF below, which also overrides.
+      if (s.size > 0) {
+        info.size = s.size;
+      }
       const sh = shapeOf(s.name);
       if (sh) {
         info.declared = true;
@@ -63,7 +69,7 @@ export async function loadSymbolMap(elfPath: string): Promise<SymbolMap> {
         } else if (sh.kind === 'struct') {
           info.shape = 'struct';
           if (sh.size !== null) {
-            info.size = sh.size;
+            info.size = sh.size; // DWARF wins over st_size — it is the declaration's own size
           }
           const layout = sh.structName ? di.struct(sh.structName) : null;
           if (layout) {
