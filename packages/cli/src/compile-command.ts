@@ -19,9 +19,6 @@ import { join } from 'node:path';
 export type CandidateCompiler = (source: string, symbol: string, backendId: string) => string;
 
 export interface CompileCommandOptions {
-  /** Prepend asmlift's `s32`/`u32`… typedefs to the candidate C (default true). Set false when
-   *  the command injects project headers that already define them (C89 forbids re-typedefs). */
-  prelude?: boolean;
   /** Working directory for the command — the decomp.yaml's directory, so project-relative
    *  paths (`./tools/agbcc/bin/agbcc`) resolve regardless of where asmlift was invoked. */
   cwd?: string;
@@ -62,25 +59,58 @@ export function compileFromCommand(template: string, opts: CompileCommandOptions
       `compiler command has an unknown placeholder ${unknown[0]} — supported: {{inputPath}}, {{outputPath}}, {{symbol}}`,
     );
   }
-  return (source, symbol, backendId) => {
+  // One template execution: write `content`, substitute, run under `sh -ec`, demand the object.
+  const execute = (content: string, symbol: string, ext: 'c' | 'p'): { ok: boolean; cmd: string; err: string } => {
     const dir = mkdtempSync(join(tmpdir(), 'asmlift-usercc-'));
-    const inPath = join(dir, backendId === 'pascal' ? 'cand.p' : 'cand.c');
+    const inPath = join(dir, `cand.${ext}`);
     const outPath = join(dir, 'cand.o');
-    const prelude = backendId === 'pascal' || opts.prelude === false ? '' : C_TYPEDEFS;
-    writeFileSync(inPath, prelude + source);
+    writeFileSync(inPath, content);
     const cmd = template
       .replaceAll('{{inputPath}}', safe(inPath, '{{inputPath}}'))
       .replaceAll('{{outputPath}}', safe(outPath, '{{outputPath}}'))
       .replaceAll('{{symbol}}', safe(symbol, 'the symbol name'));
     const r = spawnSync('sh', ['-ec', cmd], { encoding: 'utf8', cwd: opts.cwd });
     if (r.status !== 0) {
-      throw new Error(
-        `compile command failed (exit ${r.status ?? 'signal'}): ${cmd}\n${(r.stderr || r.stdout).trim()}`,
-      );
+      return {
+        ok: false,
+        cmd,
+        err: `compile command failed (exit ${r.status ?? 'signal'}): ${cmd}\n${(r.stderr || r.stdout).trim()}`,
+      };
     }
     if (!existsSync(outPath)) {
-      throw new Error(`compile command exited 0 but produced no object at {{outputPath}}: ${cmd}`);
+      return { ok: false, cmd, err: `compile command exited 0 but produced no object at {{outputPath}}: ${cmd}` };
     }
-    return outPath;
+    return { ok: true, cmd: outPath, err: '' };
+  };
+
+  // Whether asmlift's typedef prelude coexists with whatever the template injects — PROBED, never
+  // configured. A template that wraps candidates with project headers already defines u8/u16/…,
+  // and C89 hard-errors on a duplicate typedef; a bare template needs the prelude or nothing
+  // compiles. The compiler itself is the only authority on which world we're in, so ask it once:
+  // compile `C_TYPEDEFS + one harmless decl`. Success ⇒ prelude compatible. Failure ⇒ try the
+  // decl alone: success confirms the collision (drop the prelude); failure means the TEMPLATE is
+  // broken — keep the prelude so the first real candidate fails with the template's own loud
+  // diagnostics. Exit-code-only: no error-message parsing (gcc-2.9/IDO/mwcc all format
+  // differently). Cached per compiler instance — two tiny compiles worst case, ever.
+  const PROBE = 'int asmlift_prelude_probe;\n';
+  let preludeOk: boolean | undefined;
+  const probePrelude = (symbol: string): boolean => {
+    if (execute(C_TYPEDEFS + PROBE, symbol, 'c').ok) {
+      return true;
+    }
+    return !execute(PROBE, symbol, 'c').ok;
+  };
+
+  return (source, symbol, backendId) => {
+    let prelude = '';
+    if (backendId !== 'pascal') {
+      preludeOk ??= probePrelude(symbol);
+      prelude = preludeOk ? C_TYPEDEFS : '';
+    }
+    const r = execute(prelude + source, symbol, backendId === 'pascal' ? 'p' : 'c');
+    if (!r.ok) {
+      throw new Error(r.err);
+    }
+    return r.cmd;
   };
 }

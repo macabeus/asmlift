@@ -25,12 +25,40 @@ test('happy path: command runs via sh, {in} carries the typedef prelude, {out} i
   expect(written).toContain('s32 f(s32 a0)');
 });
 
-test('prelude: false and the pascal backend both write the raw source', () => {
+test('the pascal backend writes the raw source (no C prelude, no probe)', () => {
   const raw = 'function f(a0: Integer): Integer;\n';
-  const noPrelude = compileFromCommand('cp {{inputPath}} {{outputPath}}', { prelude: false })('int x;', 'f', 'c');
-  expect(readFileSync(noPrelude, 'utf8')).toBe('int x;');
   const pascal = compileFromCommand('cp {{inputPath}} {{outputPath}}')(raw, 'f', 'pascal');
   expect(readFileSync(pascal, 'utf8')).toBe(raw);
+});
+
+// The prelude is PROBED, never configured (no `prelude:` flag exists): a template whose injected
+// headers already own u8/u16/… rejects the typedef probe, and the prelude is dropped for every
+// candidate — the C89-collision behavior gcc-2.9 projects exhibit, simulated here by a template
+// that fails on any input containing `typedef`.
+test('a typedef-rejecting template (header-injecting project) drops the prelude automatically', () => {
+  const compile = compileFromCommand('! grep -q typedef {{inputPath}} && cp {{inputPath}} {{outputPath}}');
+  const obj = compile('u8 f(void) { return gState.timer; }\n', 'f', 'c');
+  const written = readFileSync(obj, 'utf8');
+  expect(written).not.toContain('typedef'); // prelude dropped — headers own the types
+  expect(written).toContain('gState.timer');
+});
+
+test('a prelude-tolerant template keeps the prelude (probe verdict cached across candidates)', () => {
+  // the counter file records every template execution: 1 probe + 2 candidates = 3, not 4 —
+  // the verdict is cached per compiler instance
+  const counter = `${process.env.TMPDIR ?? '/tmp'}/asmlift-probe-count-${process.pid}`;
+  const compile = compileFromCommand(`echo x >> ${counter} && cp {{inputPath}} {{outputPath}}`);
+  const first = compile('s32 f(void) { return 1; }\n', 'f', 'c');
+  expect(readFileSync(first, 'utf8').startsWith(C_TYPEDEFS)).toBe(true);
+  compile('s32 g(void) { return 2; }\n', 'g', 'c');
+  expect(readFileSync(counter, 'utf8').trim().split('\n')).toHaveLength(3);
+});
+
+test('a broken template keeps the prelude and fails loudly on the real candidate', () => {
+  // both probe variants fail ⇒ the template itself is broken; the candidate compile must throw
+  // the template's own error, never a silent prelude decision
+  const compile = compileFromCommand('test -f {{inputPath}} && false && cp {{inputPath}} {{outputPath}}');
+  expect(() => compile('s32 f(void) { return 1; }\n', 'f', 'c')).toThrow(/compile command failed/);
 });
 
 test('{symbol} substitutes raw; a shell-unsafe symbol REFUSES (injection guard)', () => {
