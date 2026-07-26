@@ -16,6 +16,8 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { enforceCheckoutPin } from '../cases/checkout';
+import { loadManifestsForVendor } from '../cases/manifests';
 import { M2C_DIR, REPO_ROOT, RESULTS_DIR } from '../config';
 import { asmliftScript, m2cScript } from '../report/repro-scripts';
 
@@ -115,10 +117,30 @@ async function checkAsmlift(r: FunctionResult): Promise<Verdict> {
   return { id: r.id, tool: 'asmlift', status: r.tier === 'real' ? 'warn' : 'fail', reason };
 }
 
-export async function fidelity(jobs: number): Promise<void> {
+export interface FidelityFilter {
+  project?: string;
+  only?: string; // substring match on the symbol (spot-checks)
+}
+
+export async function fidelity(jobs: number, filter: FidelityFilter = {}): Promise<void> {
   const { assertM2cPinned } = await import('../eval/m2c');
   assertM2cPinned();
-  const rows = loadRows();
+  let rows = loadRows();
+  if (filter.project) {
+    rows = rows.filter((r) => r.project === filter.project);
+  }
+  const only = filter.only;
+  if (only) {
+    rows = rows.filter((r) => r.sym.includes(only));
+  }
+  // Checkout-pin pre-step: the published rows claim provenance from each project's pinned
+  // benchmark branch; a drifted LOCAL checkout can't invalidate the vendored dataset the
+  // scripts run against, but it CAN mean the published pin no longer describes reality — so
+  // verify before certifying the scripts. Missing checkouts warn (CI runs checkout-free).
+  const realProjects = new Set(rows.filter((r) => r.tier === 'real').map((r) => r.project));
+  for (const man of loadManifestsForVendor().filter((m) => realProjects.has(m.project))) {
+    enforceCheckoutPin(man, 'fidelity', { onMissing: 'warn' });
+  }
   const work = rows.flatMap((r) => [() => checkM2c(r), () => checkAsmlift(r)]);
   const verdicts: Verdict[] = [];
   let next = 0;

@@ -2,6 +2,8 @@
   "project": "kleod",
   "toolchain": "agbcc",
   "repoDir": "klonoa-empire-of-dreams",
+  "repo": "macabeus/kl-eod-decomp",
+  "branch": "asmlift-benchmark",
   "cppIncludes": [
     "-nostdinc",
     "-I",

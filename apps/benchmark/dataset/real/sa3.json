@@ -2,6 +2,8 @@
   "project": "sa3",
   "toolchain": "agbcc",
   "repoDir": "sa3",
+  "repo": "macabeus/sa3",
+  "branch": "asmlift-benchmark",
   "cppIncludes": [
     "-iquote",
     "include",

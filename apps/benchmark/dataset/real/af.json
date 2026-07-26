@@ -2,6 +2,9 @@
   "project": "af",
   "toolchain": "ido7.1",
   "repoDir": "af",
+  "repo": "macabeus/af",
+  "branch": "asmlift-benchmark",
+  "elfMake": "asmlift-elf",
   "cppIncludes": [
     "-nostdinc"
   ],

@@ -3,6 +3,9 @@
   "note": "Mario Party 3 (N64) matched functions, compiled with mainline GCC 2.7.2 at -O1 (the project's own tools/gcc_2.7.2). Project headers preprocess under host cpp, so funcC uses common.h types + per-function extern decls for file-local globals; include_asm.h's top-level `asm(\".include ...\")` (the INCLUDE_ASM machinery) is stripped at preprocess so the vendored object is self-contained.",
   "toolchain": "gcc2.7.2",
   "repoDir": "marioparty3",
+  "repo": "macabeus/marioparty3",
+  "branch": "asmlift-benchmark",
+  "elfMake": "asmlift-elf",
   "cppIncludes": [
     "-nostdinc",
     "-I",

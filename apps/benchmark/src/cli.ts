@@ -4,7 +4,10 @@
 //   pnpm bench run [--jobs N] [--tier synthetic|real|both] [--only s] [--project p]
 //                  [--serial] [--shard i/N] [--toolchain id]
 //   pnpm bench target <id> --out <dir>   # repro-script pre-step: target object + decomp.yaml
-//   pnpm bench fidelity [--jobs N]       # pre-publish gate: re-run BOTH repro scripts, every function
+//   pnpm bench setup [--project p]       # clone missing PINNED project checkouts (existing ones are
+//                                        # only reported, never touched) + fetch bench-owned toolchains
+//   pnpm bench fidelity [--jobs N] [--project p] [--only s]
+//                                        # pre-publish gate: re-run BOTH repro scripts, every function
 //   pnpm bench merge                     # tiers → results.json, then publish
 //   pnpm bench publish                   # re-stage results.json into the web app
 //   pnpm bench stale-check               # committed vs fresh results (measurement-level)
@@ -113,7 +116,12 @@ switch (command) {
       process.exit(2);
     }
     const { fidelity } = await import('./run/fidelity');
-    await fidelity(jobs);
+    await fidelity(jobs, { project: opts.project, only: opts.only });
+    break;
+  }
+  case 'setup': {
+    const { setup } = await import('./cases/setup');
+    await setup(opts.project);
     break;
   }
   case 'merge':
@@ -161,7 +169,7 @@ switch (command) {
   }
   default:
     console.error(
-      `usage: bench <run|target|fidelity|merge|publish|stale-check|regression|smoke|verify|vendor> — got ${JSON.stringify(command)}`,
+      `usage: bench <run|target|setup|fidelity|merge|publish|stale-check|regression|smoke|verify|vendor> — got ${JSON.stringify(command)}`,
     );
     process.exit(2);
 }

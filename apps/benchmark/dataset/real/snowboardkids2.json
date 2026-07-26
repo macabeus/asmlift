@@ -2,6 +2,9 @@
   "project": "snowboardkids2",
   "toolchain": "gcc2.7.2kmc",
   "repoDir": "snowboardkids2-decomp",
+  "repo": "macabeus/snowboardkids2-decomp",
+  "branch": "asmlift-benchmark",
+  "elfMake": "asmlift-elf",
   "cppIncludes": [
     "-nostdinc",
     "-Iinclude",

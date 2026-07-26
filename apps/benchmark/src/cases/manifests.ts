@@ -42,6 +42,14 @@ export interface RealManifest {
   note?: string;
   toolchain: ToolchainId;
   repoDir: string; // project checkout dir name, resolved against WORKSPACE (or ASMLIFT_PROJ_*)
+  /** GitHub `owner/name` of the benchmark fork (never a URL) — `bench setup` clones it. */
+  repo: string;
+  /** The pinned integration branch on that fork (provenance base + one integration commit);
+   *  `bench vendor`/`bench fidelity` verify the checkout sits on its remote head. */
+  branch: string;
+  /** Make target that derives the ELF `decomp.yaml` names (DWARF types-sidecar projects:
+   *  af/marioparty3/snowboardkids2). Absent ⇒ the plain project build produces the ELF. */
+  elfMake?: string;
   cppIncludes: string[]; // preprocessor flags (e.g. ["-nostdinc","-I","tools/agbcc/include"])
   headers: string[]; // project headers to #include so types resolve
   defines?: string[]; // extra -D macros
@@ -78,6 +86,16 @@ export function validateManifest(m: unknown, file: string): string[] {
   }
   if (typeof man.repoDir !== 'string' || !man.repoDir || man.repoDir.startsWith('/')) {
     problems.push(`${file}: "repoDir" must be a workspace-relative directory name (no absolute paths)`);
+  }
+  // `owner/name` only — a URL (scheme, host, extra slashes) must fail here, not mid-clone
+  if (typeof man.repo !== 'string' || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(man.repo)) {
+    problems.push(`${file}: "repo" must be a GitHub owner/name (no URL)`);
+  }
+  if (typeof man.branch !== 'string' || !man.branch) {
+    problems.push(`${file}: "branch" must be a non-empty string`);
+  }
+  if (man.elfMake !== undefined && (typeof man.elfMake !== 'string' || !man.elfMake)) {
+    problems.push(`${file}: "elfMake" must be a non-empty string when present`);
   }
   if (!Array.isArray(man.cppIncludes) || !Array.isArray(man.headers)) {
     problems.push(`${file}: "cppIncludes"/"headers" must be arrays`);

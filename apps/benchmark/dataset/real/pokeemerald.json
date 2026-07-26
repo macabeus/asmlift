@@ -2,6 +2,8 @@
   "project": "pokeemerald",
   "toolchain": "agbcc",
   "repoDir": "pokeemerald",
+  "repo": "macabeus/pokeemerald",
+  "branch": "asmlift-benchmark",
   "cppIncludes": [
     "-nostdinc",
     "-undef",
