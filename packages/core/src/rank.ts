@@ -15,15 +15,15 @@ import { frontendFor } from './frontend/registry';
 import { Fn } from './ir/core';
 import { T } from './ir/types';
 import { verify } from './ir/verify';
-import type { LanguageBackend, SFn, SymbolRef } from './l3/ast';
+import type { LanguageBackend, SFn } from './l3/ast';
 import { registerishSpellings } from './l3/regspell';
 import { reindexWalks } from './l3/reindex';
+import { type SymbolRef, collectSymbolRefs } from './l3/symbol-refs';
 import { RewritePattern } from './pattern/engine';
 import { applyIdiomPatterns, raiseRecovered, structureChecked } from './pipeline';
 import type { Prototypes } from './proto';
 import { runPreRecovery } from './raise/pre-recovery';
 import { recoverTypes } from './raise/recover';
-import { collectSymbolRefs } from './structure/structure';
 import { type SymbolMap, symbolsByName } from './symbols';
 import { type TargetDescription, structureOptionsFor } from './target';
 
@@ -66,9 +66,12 @@ export interface EnumerateOptions {
 export interface Candidate {
   label: string;
   source: string;
-  /** the map-derived VALUE references this candidate's tree contains ({@link SFn.symbolRefs}) —
-   *  what the scoring layer's declaration synthesis renders. Absent without a map (or for the
-   *  '/raw-globals' spelling, which names no mapped symbol) — synthesis then has nothing to do. */
+  /** the map-derived VALUE references this candidate's tree contains — what the scoring
+   *  layer's declaration synthesis renders. DERIVED, never carried: computed once from the
+   *  exact tree this candidate's source was emitted from, at the moment the candidate is
+   *  finalized (l3/symbol-refs.ts — no pipeline stage caches refs, so they cannot go stale).
+   *  Absent without a map (or for the '/raw-globals' spelling, which names no mapped symbol)
+   *  — synthesis then has nothing to do. */
   symbolRefs?: SymbolRef[];
 }
 /** A candidate paired with its score `S` (the injected scorer's result shape — must carry `.score`). */
@@ -152,8 +155,17 @@ export function enumerateCandidates(
         // when a loop re-spells, BOTH representations are emitted and the differ referees. The
         // re-spelling passes the same boundary contracts as the primary; one that fails them is
         // dropped here — never scored, never able to win.
+        // Each spelling's symbol refs are DERIVED from its own final tree right where the
+        // spelling is emitted — the single point a candidate comes into existence. No pipeline
+        // stage carries refs (SFn has no such field), so a future l3 pass that rewrites the tree
+        // can never leave a stale ref behind: whatever tree reaches emit is the tree the refs
+        // describe, by construction.
+        const refsOf = (tree: SFn): { symbolRefs?: SymbolRef[] } => {
+          const refs = svOpts.symbols ? collectSymbolRefs(tree.body, svOpts.symbols, tree.name) : [];
+          return refs.length ? { symbolRefs: refs } : {};
+        };
         const spellings: { suffix: string; source: string; symbolRefs?: SymbolRef[] }[] = [
-          { suffix: '', source: backend.emit(sfn), ...(sfn.symbolRefs?.length ? { symbolRefs: sfn.symbolRefs } : {}) },
+          { suffix: '', source: backend.emit(sfn), ...refsOf(sfn) },
         ];
         // Representation re-spellings — each a lever on the same footing as signedness/branch sense,
         // each guarded: it must pass the same boundary contracts as the primary AND emit (a backend
@@ -167,13 +179,6 @@ export function enumerateCandidates(
         // to the user — a semantically-wrong re-spelling there is plausible-but-wrong output, the
         // defect class this project exists to avoid. Hence each lever's decline-over-approximate
         // gates, adversarially audited.
-        // Each spelling carries ITS OWN tree's symbol refs: a re-spelling can change which
-        // mapped names the body references, so refs are recomputed per alt tree (the collector
-        // is the same one structure() used for the primary), never carried over stale.
-        const refsOf = (tree: SFn): { symbolRefs?: SymbolRef[] } => {
-          const refs = svOpts.symbols ? collectSymbolRefs(tree.body, svOpts.symbols, tree.name) : [];
-          return refs.length ? { symbolRefs: refs } : {};
-        };
         const respell = (suffix: string, alt: SFn): void => {
           try {
             assertResolved(alt);

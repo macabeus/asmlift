@@ -47,12 +47,36 @@ export function cType(t: IrType): string {
 }
 
 /** Declare a name of a given type, C declarator rules: an array puts its length AFTER the name
- *  (`u8 _pad[4]`), everything else is the prefix `cType name`. */
+ *  (`u8 _pad[4]`), a pointer binds its `*` to the declarator (`void *p`), everything else is
+ *  the prefix `cType name`. */
 function cDeclare(t: IrType, name: string): string {
   if (t.kind === 'array') {
     return `${cType(t.elem)} ${name}[${t.count}]`;
   }
+  if (t.kind === 'ptr') {
+    return `${cType(t.to)} *${name}`;
+  }
   return `${cType(t)} ${name}`;
+}
+
+/** One field of a rendered struct declaration — the minimal input shape shared by the two
+ *  producers of `struct N { ... };` text: the backend's recovered structs (SFn.structs, whose
+ *  StructType fields already carry pads as real `u8[N]` members) and the cli's map-layout
+ *  declaration synthesis (declare.ts, which seats fields at exact offsets by interleaving pad
+ *  fields itself). `volatile` is the MMIO member idiom (`volatile u16 gain;`) — only the
+ *  map-derived synthesis sets it today; recovered structs never do. */
+export interface StructFieldDecl {
+  name: string;
+  type: IrType;
+  volatile?: boolean;
+}
+
+/** THE struct-declaration spelling — every `struct N { ... };` asmlift prints comes from here,
+ *  so the backend's recovered-struct decls and the scoring layer's synthesized decls cannot
+ *  drift apart. One line, fields in caller order (the type is self-describing: padding is the
+ *  caller's discipline, already present as real fields). */
+export function renderStructDecl(name: string, fields: StructFieldDecl[]): string {
+  return `struct ${name} { ${fields.map((f) => `${f.volatile ? 'volatile ' : ''}${cDeclare(f.type, f.name)};`).join(' ')} };`;
 }
 
 // A LEAF hook lets a C-family backend override how a `var` or `index` node spells WITHOUT
@@ -337,9 +361,7 @@ function cFamilyBody(fn0: SFn, leaf?: LeafHook): string[] {
  *  raise/structs.ts (unaccessed leading/interior gaps) interleave them where natural C alignment
  *  does not already cover the offset. This just declares each field in order. */
 function structDecls(fn: SFn): string[] {
-  return (fn.structs ?? []).map(
-    (s) => `struct ${s.name} { ${s.fields.map((f) => cDeclare(f.type, f.name) + ';').join(' ')} };`,
-  );
+  return (fn.structs ?? []).map((s) => renderStructDecl(s.name, s.fields));
 }
 
 /** Assemble a full C-family function from a caller-supplied signature line and the shared body. */

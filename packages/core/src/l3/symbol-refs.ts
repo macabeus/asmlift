@@ -1,0 +1,57 @@
+// asmlift — SELF-DECLARING CANDIDATES: the pure map-reference query
+// (research/self-declaring-candidates-2026-07-26.md).
+//
+// `collectSymbolRefs` derives, from a FINAL structured tree, every map-derived symbol the body
+// references in a VALUE context — the input to the scoring layer's declaration synthesis
+// (@asmlift/cli declare.ts). It is a pure tree query with no pipeline state: the enumeration
+// layer (rank.ts) calls it exactly once per candidate, on the tree the candidate's source was
+// emitted from, at the moment the candidate is finalized. There is deliberately NO cached
+// `symbolRefs` field on `SFn` — a carried field would oblige every future l3 pass to remember
+// to recompute it (a dead-store DCE that drops a tree's only reference would otherwise leave a
+// stale ref, transitively reintroducing the hazards the collector excludes). Deriving at the
+// consumption point makes staleness impossible by construction.
+import type { SymbolInfo } from '../symbols';
+import { Expr, Stmt, exprChildren, stmtChildren, stmtExprs } from './ast';
+
+/** One recorded map-symbol VALUE reference — a name the tree references plus its map facts. */
+export interface SymbolRef {
+  name: string;
+  info: SymbolInfo;
+}
+
+/** The map-derived symbols a structured body references in a VALUE context — the input to the
+ *  scoring layer's declaration synthesis. A name counts when it appears as a `var`/`addr` leaf
+ *  and the map knows it (bare `gSym`, `&gSym`, `(u32)Func`, a `field` base — all reduce to
+ *  those leaves). A name that is ANY call's target is excluded entirely, even if also
+ *  value-referenced: prototyping a called symbol `void F(void);` hard-errors under gcc-2.9
+ *  when the call passes args, while leaving it undeclared keeps today's implicit-declaration
+ *  behavior (the one honest option without arity knowledge). The function's OWN name
+ *  (`selfName`) is excluded too — the candidate's definition IS its declaration, and a
+ *  synthesized `void F(void);` above `s32 F(...)` is a conflicting-types hard error (a
+ *  self-address reference resolves against the definition itself). */
+export function collectSymbolRefs(body: Stmt[], symbols: Map<string, SymbolInfo>, selfName: string): SymbolRef[] {
+  const called = new Set<string>();
+  const valueRefs = new Set<string>();
+  const visitExpr = (e: Expr): void => {
+    if (e.k === 'call') {
+      called.add(e.fn);
+    } else if ((e.k === 'var' || e.k === 'addr') && symbols.has(e.name)) {
+      valueRefs.add(e.name);
+    }
+    exprChildren(e).forEach(visitExpr);
+  };
+  const visitStmt = (s: Stmt): void => {
+    // an `assign` carries its target as a NAME, not an Expr — a scalar global WRITE
+    // (`gSym = x;`) references the symbol every bit as much as a read does
+    if (s.k === 'assign' && symbols.has(s.name)) {
+      valueRefs.add(s.name);
+    }
+    stmtExprs(s).forEach(visitExpr);
+    stmtChildren(s).forEach(visitStmt);
+  };
+  body.forEach(visitStmt);
+  return [...valueRefs]
+    .filter((n) => !called.has(n) && n !== selfName)
+    .sort()
+    .map((n) => ({ name: n, info: symbols.get(n)! }));
+}

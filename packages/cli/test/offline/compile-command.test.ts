@@ -122,14 +122,20 @@ test('headers world: the declaration block drops WITH the prelude (headers own e
 
 test('the probe itself carries a representative decl block (struct/volatile/const/prototype vocabulary)', () => {
   // capture every input the template sees: the probe must exercise the same declaration
-  // vocabulary synthesis emits, so a world that accepts the probe accepts any real block
+  // vocabulary synthesis emits, so a world that accepts the probe accepts any real block —
+  // and it IS synthesis output (renderDeclarations over a fixed synthetic ref set), so the
+  // vocabulary below is pinned as rendered: signed narrow member, interior/tail pads,
+  // volatile member, pointer member, volatile scalar, const array, void prototype
   const log = `${process.env.TMPDIR ?? '/tmp'}/asmlift-probe-decls-${process.pid}`;
   const compile = compileFromCommand(`cat {{inputPath}} >> ${log} && cp {{inputPath}} {{outputPath}}`);
   compile('s32 f(void) { return 1; }\n', 'f', 'c');
   const seen = readFileSync(log, 'utf8');
-  expect(seen).toContain('struct AsmliftProbeShape');
-  expect(seen).toContain('volatile');
-  expect(seen).toContain('const u16 gAsmliftProbeTable[];');
+  expect(seen).toContain(
+    'struct AsmliftProbeShape { s8 lvl; u8 asmlift_pad_0[1]; volatile u16 gain; void *next; u8 asmlift_pad_1[4]; };',
+  );
+  expect(seen).toContain('extern volatile struct AsmliftProbeShape gAsmliftProbeShape;');
+  expect(seen).toContain('extern volatile u16 gAsmliftProbeMmio;');
+  expect(seen).toContain('extern const u16 gAsmliftProbeTable[];');
   expect(seen).toContain('void AsmliftProbeFn(void);');
 });
 

@@ -38,18 +38,7 @@
 // header also entered by a plain br).
 import { Block, Fn, Op, Value, defOpMap, successorsOf } from '../ir/core';
 import { type IrType, T } from '../ir/types';
-import {
-  BinOp,
-  Expr,
-  SFn,
-  Stmt,
-  SwitchCase,
-  type SymbolRef,
-  exprChildren,
-  mapExprChildren,
-  stmtChildren,
-  stmtExprs,
-} from '../l3/ast';
+import { BinOp, Expr, SFn, Stmt, SwitchCase, exprChildren, mapExprChildren } from '../l3/ast';
 import { exprCType, ptrElemBytes } from '../l3/typing';
 import { returnType } from '../raise/recover';
 import { collectStructs } from '../raise/structs';
@@ -1632,13 +1621,6 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
   };
 
   const body = recognizeForLoops(structureRegion(entry, null));
-  // SELF-DECLARING CANDIDATES channel: every map-derived symbol the EMITTED body references in
-  // a value context, with its map facts, so the scoring layer can synthesize declarations
-  // (research/self-declaring-candidates-2026-07-26.md). Computed from this stage's final tree;
-  // structureChecked RECOMPUTES over the post-l3-pass body (dead-store DCE / base hoisting can
-  // drop a tree's only reference), so downstream consumers never see a stale ref. No map ⇒
-  // field absent.
-  const symbolRefs = symbols ? collectSymbolRefs(body, symbols, fn.name) : [];
   // v* = coalesced/materialized locals; t* = sequentialize's swap-cycle temps (varType-only —
   // they have no Value, so they are collected from varType, not varName).
   const localNames = [...new Set([...varName.values(), ...[...varType.keys()].filter((n) => /^t\d+$/.test(n))])].filter(
@@ -1656,49 +1638,10 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
             .sort((a, b) => a.name.localeCompare(b.name)),
         }
       : {}),
-    ...(symbolRefs.length ? { symbolRefs } : {}),
     retType: returnsVoid ? T.void() : returnType(fn),
     body,
     ...(structs.length ? { structs } : {}),
   };
-}
-
-/** The map-derived symbols a structured body references in a VALUE context — the input to the
- *  scoring layer's declaration synthesis ({@link SFn.symbolRefs}). A name counts when it appears
- *  as a `var`/`addr` leaf and the map knows it (bare `gSym`, `&gSym`, `(u32)Func`, a `field`
- *  base — all reduce to those leaves). A name that is ANY call's target is excluded entirely,
- *  even if also value-referenced: prototyping a called symbol `void F(void);` hard-errors under
- *  gcc-2.9 when the call passes args, while leaving it undeclared keeps today's
- *  implicit-declaration behavior (the one honest option without arity knowledge). The function's
- *  OWN name (`selfName`) is excluded too — the candidate's definition IS its declaration, and a
- *  synthesized `void F(void);` above `s32 F(...)` is a conflicting-types hard error (a
- *  self-address reference resolves against the definition itself). Exported so the enumeration
- *  layer can RECOMPUTE refs for re-spelled candidate trees. */
-export function collectSymbolRefs(body: Stmt[], symbols: Map<string, SymbolInfo>, selfName: string): SymbolRef[] {
-  const called = new Set<string>();
-  const valueRefs = new Set<string>();
-  const visitExpr = (e: Expr): void => {
-    if (e.k === 'call') {
-      called.add(e.fn);
-    } else if ((e.k === 'var' || e.k === 'addr') && symbols.has(e.name)) {
-      valueRefs.add(e.name);
-    }
-    exprChildren(e).forEach(visitExpr);
-  };
-  const visitStmt = (s: Stmt): void => {
-    // an `assign` carries its target as a NAME, not an Expr — a scalar global WRITE
-    // (`gSym = x;`) references the symbol every bit as much as a read does
-    if (s.k === 'assign' && symbols.has(s.name)) {
-      valueRefs.add(s.name);
-    }
-    stmtExprs(s).forEach(visitExpr);
-    stmtChildren(s).forEach(visitStmt);
-  };
-  body.forEach(visitStmt);
-  return [...valueRefs]
-    .filter((n) => !called.has(n) && n !== selfName)
-    .sort()
-    .map((n) => ({ name: n, info: symbols.get(n)! }));
 }
 
 // Does any statement CONTINUE this loop (vs. a nested one)? A `continue` inside a nested while/dowhile/

@@ -3,7 +3,8 @@
 //
 // A scored candidate that names map-derived symbols must compile WITHOUT the project's headers:
 // this module renders the declaration block for exactly the symbols the candidate's tree
-// references in a value context (SFn.symbolRefs → Candidate.symbolRefs). It is a SCORING-LAYER
+// references in a value context (Candidate.symbolRefs — derived from the candidate's final
+// tree at enumeration, core l3/symbol-refs.ts). It is a SCORING-LAYER
 // concern only — backends never print declarations (a project user compiles asmlift output
 // against their own headers, where a second declaration would collide).
 //
@@ -23,7 +24,9 @@
 //     C89 enum=int rule. For a true enum that is the header truth; the residual mis-spell class
 //     (a 4-byte nested-struct member word-read via a dot field) can only LOSE score — the
 //     target bytes derive from the truth decls, so a divergent compile can never false-match.
-import type { SymbolRef } from '@asmlift/core/l3/ast';
+import { type StructFieldDecl, renderStructDecl } from '@asmlift/core/backend/cfamily';
+import { type IrType, T } from '@asmlift/core/ir/types';
+import type { SymbolRef } from '@asmlift/core/l3/symbol-refs';
 import type { SymbolInfo, SymbolStructField } from '@asmlift/core/symbols';
 
 /** The u8/s8/u16/s16/u32/s32 spelling for a 1/2/4-byte cell, or null (no faithful narrow type). */
@@ -37,31 +40,35 @@ function quals(info: SymbolInfo): string {
   return `${info.volatile ? 'volatile ' : ''}${info.const ? 'const ' : ''}`;
 }
 
-/** One struct field line, seated at its exact offset by the caller's pad discipline. A POINTER
- *  member spells `void *` — an integer guess flips relational compares of the loaded value
+/** One struct field's type, seated at its exact offset by the caller's pad discipline. A POINTER
+ *  member types `void *` — an integer guess flips relational compares of the loaded value
  *  (s32 `blt` vs the pointer truth's `bcc`), the audit's confirmed wrong-bytes class. Member
- *  volatility is kept (`vu16 field;` — dropping it lets the compiler fold repeated reads).
- *  Fields whose size is not a 1/2/4 scalar cell (nested structs, char[N], 8-byte members)
- *  become `u8 name[size]` byte arrays — same bytes, and the layout's field-spelling gate in
- *  core only ever names exact (offset, width∈{1,2,4}) matches, so such a field is never
- *  dot-accessed. Signedness default mirrors core's env typing (`signed ?? false` — unsigned),
- *  EXCEPT the 4-byte no-base-type case (an enum member): C89 enums are int, so s32. */
-function fieldDecl(f: SymbolStructField & { size: number }): string {
-  const vol = f.volatile ? 'volatile ' : '';
+ *  volatility is kept on the field decl (`vu16 field;` — dropping it lets the compiler fold
+ *  repeated reads). Fields whose size is not a 1/2/4 scalar cell (nested structs, char[N],
+ *  8-byte members) become `u8 name[size]` byte arrays — same bytes, and the layout's
+ *  field-spelling gate in core only ever names exact (offset, width∈{1,2,4}) matches, so such
+ *  a field is never dot-accessed. Signedness default mirrors core's env typing
+ *  (`signed ?? false` — unsigned), EXCEPT the 4-byte no-base-type case (an enum member): C89
+ *  enums are int, so s32. */
+function fieldType(f: SymbolStructField & { size: number }): IrType {
   if (f.pointer && f.size === 4) {
-    return `${vol}void *${f.name};`;
+    return T.ptr(T.void());
   }
-  const t = intType(f.size, f.signed ?? (f.size === 4 ? enumIsSigned : false));
-  return t !== null ? `${vol}${t} ${f.name};` : `${vol}u8 ${f.name}[${f.size}];`;
+  if (f.size === 1 || f.size === 2 || f.size === 4) {
+    return T.int(f.size * 8, f.signed ?? (f.size === 4 ? enumIsSigned : false));
+  }
+  return T.array(T.u(8), f.size);
 }
 // A 4-byte member/scalar with NO base-type signedness is the enum idiom — C89 says int.
 const enumIsSigned = true;
 
-/** The padded `struct Tag { ... };` declaration for a layout — the backend structDecls idiom
- *  (fields seated at exact offsets, gaps as explicit u8 pad arrays), rebuilt from map facts.
- *  Returns null when the layout cannot be reproduced faithfully (an unsized member). */
+/** The padded `struct Tag { ... };` declaration for a layout: fields seated at exact offsets,
+ *  gaps as explicit u8 pad arrays, rendered by THE shared struct renderer (core
+ *  backend/cfamily.ts renderStructDecl — the same spelling the backend's recovered-struct
+ *  decls use, so the two cannot drift). Returns null when the layout cannot be reproduced
+ *  faithfully (an unsized member). */
 function structDecl(tag: string, layout: SymbolStructField[], size: number | undefined): string | null {
-  const fields: string[] = [];
+  const fields: StructFieldDecl[] = [];
   let cursor = 0;
   let pad = 0;
   const members = [...layout].sort((a, b) => a.offset - b.offset);
@@ -74,15 +81,20 @@ function structDecl(tag: string, layout: SymbolStructField[], size: number | und
     }
     if (m.offset > cursor) {
       // asmlift_-prefixed so a REAL member named pad_N (a decomp-header idiom) never collides
-      fields.push(`u8 asmlift_pad_${pad++}[${m.offset - cursor}];`);
+      fields.push({ name: `asmlift_pad_${pad++}`, type: T.array(T.u(8), m.offset - cursor) });
     }
-    fields.push(fieldDecl(m as SymbolStructField & { size: number }));
+    fields.push({
+      name: m.name,
+      type: fieldType(m as SymbolStructField & { size: number }),
+      ...(m.volatile ? { volatile: true } : {}),
+    });
     cursor = m.offset + m.size;
   }
   if (size !== undefined && size > cursor) {
-    fields.push(`u8 asmlift_pad_${pad}[${size - cursor}];`); // tail padding to the declared size
+    // tail padding to the declared size
+    fields.push({ name: `asmlift_pad_${pad}`, type: T.array(T.u(8), size - cursor) });
   }
-  return `struct ${tag} { ${fields.join(' ')} };`;
+  return renderStructDecl(tag, fields);
 }
 
 /**

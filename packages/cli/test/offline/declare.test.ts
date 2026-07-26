@@ -3,7 +3,7 @@
 // spells s8-vs-u8 (an s8 read is ldrb+lsl+asr, u8 is ldrb alone), volatile/const survive,
 // struct layouts are padded to exact offsets, and NOTHING guesses (a shapeless symbol is
 // skipped so the candidate fails loud, never a silently-wrong declaration).
-import type { SymbolRef } from '@asmlift/core/l3/ast';
+import type { SymbolRef } from '@asmlift/core/l3/symbol-refs';
 import { expect, test } from 'vitest';
 
 import { renderDeclarations } from '../../src/declare';

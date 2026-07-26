@@ -1,7 +1,7 @@
-// SELF-DECLARING CANDIDATES — the core reference channel (SFn.symbolRefs →
-// Candidate.symbolRefs), research/self-declaring-candidates-2026-07-26.md.
+// SELF-DECLARING CANDIDATES — Candidate.symbolRefs, derived by l3/symbol-refs.ts from each
+// candidate's final tree at enumeration (research/self-declaring-candidates-2026-07-26.md).
 //
-// Pins the channel's contracts: a map-derived VALUE reference (data global, `(u32)Func`) is
+// Pins the derivation's contracts: a map-derived VALUE reference (data global, `(u32)Func`) is
 // recorded with its SymbolInfo; a CALL target is NEVER recorded — not even when the same symbol
 // is also value-referenced (prototyping a called symbol is C89 poison, verified fact 3 of the
 // research doc); the '/raw-globals' lever names nothing so it carries no refs; and INERTNESS —
