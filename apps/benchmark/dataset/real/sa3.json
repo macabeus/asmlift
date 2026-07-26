@@ -30,7 +30,7 @@
         "abs"
       ],
       "funcC": "u32 AbsMax(s32 a, s32 b)\n{\n    if (a < 0) {\n        a = -a;\n    }\n\n    if (b < 0) {\n        b = -b;\n    }\n\n    if (b < a) {\n        return a;\n    }\n    return b;\n}",
-      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L433-L447"
+      "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L433-L447"
     },
     {
       "sym": "SeedRng",
@@ -45,7 +45,7 @@
           "returnsVoid": true
         }
       },
-      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L427-L431"
+      "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L427-L431"
     },
     {
       "sym": "Random",
@@ -57,7 +57,7 @@
       "prependC": "u32 gRngPrevValue;\nu32 gRngValue;\n#define RAND_CONST 0x37119371",
       "funcC": "u16 Random(void)\n{\n    u32 new;\n    u32 *pPrev = &gRngPrevValue;\n    u32 *pCurrent = &gRngValue;\n\n    u32 prev = *pPrev;\n    gRngPrevValue = *pCurrent;\n\n    new = prev + RAND_CONST;\n    new += *pCurrent;\n\n    gRngValue = new;\n\n    return ((u16 *)&gRngValue)[1];\n}",
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L402-L425"
+      "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L402-L425"
     },
     {
       "sym": "sa2__sub_808558C",
@@ -68,7 +68,7 @@
         "shift"
       ],
       "funcC": "s16 SA2_LABEL(sub_808558C)(u16 angleA, u16 angleB, u8 numDecimalBits)\n{\n    u32 c1 = (1 << numDecimalBits);\n    u16 c2 = c1 - 1;\n\n    angleB -= angleA;\n    angleB &= c2;\n\n    if (angleB <= (c1 / 2)) {\n        return angleB;\n    } else {\n        return (angleB - c1);\n    }\n}",
-      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L469-L482"
+      "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L469-L482"
     },
     {
       "sym": "sa2__sub_8085654",
@@ -79,7 +79,7 @@
         "shift"
       ],
       "funcC": "s32 SA2_LABEL(sub_8085654)(s32 a, s32 b, s32 c, u8 d, u8 e)\n{\n    do {\n        a -= (((s64)c * (s64)(a - b))) >> d;\n        e -= 1;\n    } while (e != 0xFF);\n\n    return a;\n}",
-      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L509-L517"
+      "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L509-L517"
     },
     {
       "sym": "sa2__sub_80855C0",
@@ -89,7 +89,7 @@
         "shift"
       ],
       "funcC": "u32 SA2_LABEL(sub_80855C0)(s32 a, s32 b, s32 c, u8 d)\n{\n    s64 e = (s64)c * (a - b);\n\n    return a - (e >> d);\n}",
-      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L484-L489"
+      "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L484-L489"
     },
     {
       "sym": "sa2__sub_80856DC",
@@ -98,7 +98,7 @@
         "soft-div"
       ],
       "funcC": "s32 SA2_LABEL(sub_80856DC)(s32 a, s32 b, s32 c) { return (a * 7 + b * 6 - c) / 12; }",
-      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L529-L529"
+      "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L529-L529"
     },
     {
       "sym": "sa2__sub_8085714",
@@ -107,7 +107,7 @@
         "shift"
       ],
       "funcC": "s32 SA2_LABEL(sub_8085714)(s32 a, s32 b, s32 c) { return ((a + b * 8) - c) >> 3; }",
-      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L533-L533"
+      "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L533-L533"
     },
     {
       "sym": "sa2__sub_8085758",
@@ -115,7 +115,7 @@
         "arithmetic"
       ],
       "funcC": "s32 SA2_LABEL(sub_8085758)(s32 a, s32 b) { return b - a; }",
-      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L539-L539"
+      "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L539-L539"
     },
     {
       "sym": "EwramInitHeap",
@@ -132,7 +132,7 @@
         }
       },
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/malloc_ewram.c#L7-L12"
+      "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/malloc_ewram.c#L7-L12"
     },
     {
       "sym": "EwramMalloc",
@@ -145,7 +145,7 @@
       ],
       "funcC": "void *EwramMalloc(u32 req)\n{\n    struct EwramNode *node;\n    s32 requestedSpace = req;\n\n    requestedSpace = (req + 3) / 4;\n    if (requestedSpace != 0) {\n        requestedSpace = requestedSpace * 4 + sizeof(struct EwramNode);\n        node = (struct EwramNode *)gEwramHeap;\n        while (1) {\n            if (requestedSpace <= (u32)node->state) {\n                if (requestedSpace == node->state) {\n                    node->state = -requestedSpace;\n                    return node->space;\n                }\n\n                if (requestedSpace + (s32)sizeof(struct EwramNode) <= node->state) {\n                    struct EwramNode *addr = (void *)node + requestedSpace;\n\n                    addr->next = node->next;\n                    ++node;\n                    --node;\n                    addr->state = node->state - requestedSpace;\n                    node->next = addr;\n                    node->state = -requestedSpace;\n                    return node->space;\n                }\n            }\n            ++requestedSpace;\n            --requestedSpace;\n            if (!node->next)\n                return ewram_end;\n            node = node->next;\n        }\n    }\n    return ewram_end;\n}",
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/malloc_ewram.c#L14-L61"
+      "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/malloc_ewram.c#L14-L61"
     },
     {
       "sym": "EwramFree",
@@ -163,7 +163,7 @@
         }
       },
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/malloc_ewram.c#L63-L97"
+      "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/malloc_ewram.c#L63-L97"
     },
     {
       "sym": "numToASCII",
@@ -180,7 +180,7 @@
           "returnsVoid": true
         }
       },
-      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/sprite.c#L127-L141"
+      "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/sprite.c#L127-L141"
     },
     {
       "sym": "Base10DigitsToHexNibbles",
@@ -192,7 +192,7 @@
       ],
       "funcC": "u32 Base10DigitsToHexNibbles(u16 num)\n{\n    u8 i;\n    u16 result;\n    u8 lowDigit;\n    u16 remainder = num;\n\n    result = 0;\n    for (i = 0; i < 4; i++) {\n        s32 divisor = Div(remainder, 10);\n        lowDigit = remainder - (divisor * 10);\n        remainder = divisor;\n\n        result |= lowDigit << (i * 4);\n    }\n\n    return result;\n}\n",
       "note": "Div() resolves to an inline macro (int division) \u2014 soft-div idiom.",
-      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/sprite.c#L147-L164"
+      "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/sprite.c#L147-L164"
     },
     {
       "sym": "VerifyFlashSector_Core",
@@ -203,7 +203,7 @@
         "branch"
       ],
       "funcC": "u32 VerifyFlashSector_Core(u8 *src, u8 *tgt, u32 size)\n{\n    while (size-- != 0) {\n        if (*tgt++ != *src++)\n            return (uintptr_t)(tgt - 1);\n    }\n\n    return 0;\n}",
-      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/lib/agb_flash/agb_flash.c#L286-L294"
+      "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/lib/agb_flash/agb_flash.c#L286-L294"
     },
     {
       "sym": "sa2__sub_8004418",
@@ -222,7 +222,7 @@
         }
       },
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/sprite.c#L73-L125"
+      "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/sprite.c#L73-L125"
     },
     {
       "sym": "GetSaveSectorChecksum",
@@ -235,7 +235,7 @@
       ],
       "prependC": "#include \"game/save.h\"",
       "funcC": "u32 GetSaveSectorChecksum(SaveSectorData *sector)\n{\n    u8 *ptr = (u8 *)sector;\n\n    u32 checkSum = 0;\n    u32 i = 0;\n\n    u32 size = (sizeof(SaveSectorData) - sizeof(sector->checksum));\n\n    for (; i < size; i += sizeof(u32)) {\n        checkSum += *((u32 *)(ptr + i));\n    }\n\n    return checkSum;\n}",
-      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/code_0_0.c#L1036-L1050"
+      "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/code_0_0.c#L1036-L1050"
     },
     {
       "sym": "VramMalloc",
@@ -250,7 +250,7 @@
       "prependC": "#include \"core.h\"\n#include \"malloc_vram.h\"",
       "funcC": "void *VramMalloc(u32 numTiles)\n{\n    u16 i, j;\n    u32 count = numTiles;\n    count = (count + (VRAM_TILE_SLOTS_PER_SEGMENT - 1)) / VRAM_TILE_SLOTS_PER_SEGMENT; // round up\n\n    for (i = 0; i < gVramHeapMaxTileSlots / VRAM_TILE_SLOTS_PER_SEGMENT; i++) {\n        if (gVramHeapState[i] == 0) {\n            for (j = 0; j < count; j++) {\n                if (i + j >= (gVramHeapMaxTileSlots / VRAM_TILE_SLOTS_PER_SEGMENT)) {\n                    return ewram_end;\n                }\n                if (gVramHeapState[i + j] != 0) {\n                    break;\n                }\n            }\n\n            if (j == count) {\n                gVramHeapState[i] = count;\n                return (void *)(gVramHeapStartAddr + i * VRAM_HEAP_SEGMENT_SIZE);\n            }\n        } else {\n            i = (gVramHeapState[i] - 1) + i; // next slot to check, -1 because of ++i\n        }\n    }\n    return ewram_end;\n}",
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/malloc_vram.c#L5-L31"
+      "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/malloc_vram.c#L5-L31"
     },
     {
       "sym": "VramGetTotalAllocatedTiles",
@@ -263,7 +263,7 @@
       "prependC": "#include \"core.h\"\n#include \"malloc_vram.h\"",
       "funcC": "u16 VramGetTotalAllocatedTiles(void)\n{\n    u16 i;\n    u16 count = 0;\n\n    for (i = 0; i < gVramHeapMaxTileSlots / VRAM_TILE_SLOTS_PER_SEGMENT; ++i) {\n        if (gVramHeapState[i]) {\n            count += gVramHeapState[i];\n            i = gVramHeapState[i] - 1 + i; // next slot to check, -1 because of ++i\n        }\n    }\n    return count * VRAM_TILE_SLOTS_PER_SEGMENT;\n}\n",
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/malloc_vram.c#L46-L58"
+      "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/malloc_vram.c#L46-L58"
     },
     {
       "sym": "GetInput",
@@ -290,7 +290,7 @@
         }
       },
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/core.c#L971-L1020"
+      "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/core.c#L971-L1020"
     },
     {
       "sym": "sa2__sub_8007858",
@@ -308,7 +308,7 @@
           "returnsVoid": true
         }
       },
-      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/bg_triangles.c#L826-L848"
+      "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/bg_triangles.c#L826-L848"
     },
     {
       "sym": "sa2__sub_8007958",
@@ -326,7 +326,7 @@
           "returnsVoid": true
         }
       },
-      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/bg_triangles.c#L866-L888"
+      "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/bg_triangles.c#L866-L888"
     },
     {
       "sym": "sa2__sub_80856F8",
@@ -335,7 +335,7 @@
         "soft-div"
       ],
       "funcC": "s32 SA2_LABEL(sub_80856F8)(s32 a, s32 b, s32 c) { return ((b * 6 - a) + c * 7) / 12; }",
-      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L531-L531"
+      "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L531-L531"
     },
     {
       "sym": "sa2__sub_8085720",
@@ -344,7 +344,7 @@
         "shift"
       ],
       "funcC": "s32 SA2_LABEL(sub_8085720)(s32 a, s32 b, s32 c) { return ((b * 8 - a) + c) >> 3; }",
-      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L535-L535"
+      "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L535-L535"
     },
     {
       "sym": "sa2__sub_8085798",
@@ -353,7 +353,7 @@
         "shift"
       ],
       "funcC": "s32 SA2_LABEL(sub_8085798)(s32 a, s32 b, s32 c) { return ((c - a) + ((c - a) >> 1)) - (b >> 1); }",
-      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L549-L549"
+      "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L549-L549"
     },
     {
       "sym": "sa2__sub_808595C",
@@ -362,7 +362,7 @@
         "shift"
       ],
       "funcC": "s32 SA2_LABEL(sub_808595C)(s32 a, s32 b, s32 c)\n{\n    s32 e = (b - a);\n    s32 f = (c - b);\n    f -= e;\n    f >>= 1;\n    return e + f;\n}",
-      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L580-L587"
+      "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L580-L587"
     },
     {
       "sym": "sa2__sub_80838CC",
@@ -379,7 +379,7 @@
         }
       },
       "funcC": "void SA2_LABEL(sub_80838CC)(UNK_8085D14 *arg0, UNK_8085D14 *arg1, UNK_8085D14 *arg2)\n{\n    arg2->unk0 = (((arg0->unk6 * arg1->unk0) + (arg0->unk0 * arg1->unk6) + (arg0->unk2 * arg1->unk4)) - (arg0->unk4 * arg1->unk2)) >> 0xA;\n    arg2->unk2 = (((arg0->unk6 * arg1->unk2) - (arg0->unk0 * arg1->unk4)) + (arg0->unk2 * arg1->unk6) + (arg0->unk4 * arg1->unk0)) >> 0xA;\n    arg2->unk4 = ((((arg0->unk6 * arg1->unk4) + (arg0->unk0 * arg1->unk2)) - (arg0->unk2 * arg1->unk0)) + (arg0->unk4 * arg1->unk6)) >> 0xA;\n    arg2->unk6 = ((((arg0->unk6 * arg1->unk6) - (arg0->unk0 * arg1->unk0)) - (arg0->unk2 * arg1->unk2)) - (arg0->unk4 * arg1->unk4)) >> 0xA;\n}",
-      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L177-L183"
+      "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L177-L183"
     },
     {
       "sym": "sa2__sub_808399C",
@@ -396,7 +396,7 @@
         }
       },
       "funcC": "void SA2_LABEL(sub_808399C)(UNK_8085D14 *arg0, UNK_8085D14 *arg1)\n{\n    s16 r6 = arg0->unk0;\n    s16 r5 = arg0->unk2;\n    s16 r4 = arg0->unk4;\n    arg0->unk0 = (((arg0->unk6 * arg1->unk0) + (r6 * arg1->unk6) + (r5 * arg1->unk4)) - (r4 * arg1->unk2)) >> 10;\n    arg0->unk2 = (((arg0->unk6 * arg1->unk2) - (r6 * arg1->unk4)) + (r5 * arg1->unk6) + (r4 * arg1->unk0)) >> 10;\n    arg0->unk4 = ((((arg0->unk6 * arg1->unk4) + (r6 * arg1->unk2)) - (r5 * arg1->unk0)) + (r4 * arg1->unk6)) >> 10;\n    arg0->unk6 = ((((arg0->unk6 * arg1->unk6) - (r6 * arg1->unk0)) - (r5 * arg1->unk2)) - (r4 * arg1->unk4)) >> 10;\n}",
-      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L185-L194"
+      "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L185-L194"
     },
     {
       "sym": "OamMalloc",
@@ -410,7 +410,7 @@
       "prependC": "#include \"core.h\"\n#include \"sprite.h\"",
       "funcC": "OamData *OamMalloc(u8 order)\n{\n    OamData *result;\n\n    if (order > 31) {\n        order = 31;\n    }\n\n    if (gOamFreeIndex > OAM_ENTRY_COUNT - 1) {\n        result = (OamData *)iwram_end;\n    } else {\n        if (gOamMallocOrders_StartIndex[order] == 0xFF) {\n            gOamMallocBuffer[gOamFreeIndex].split.fractional = 0xFF;\n            gOamMallocOrders_StartIndex[order] = gOamFreeIndex;\n            gOamMallocOrders_EndIndex[order] = gOamFreeIndex;\n        } else {\n            gOamMallocBuffer[gOamFreeIndex].split.fractional = 0xFF;\n            gOamMallocBuffer[gOamMallocOrders_EndIndex[order]].split.fractional = gOamFreeIndex;\n            gOamMallocOrders_EndIndex[order] = gOamFreeIndex;\n        }\n\n        gOamFreeIndex++;\n        result = &gOamMallocBuffer[gOamFreeIndex - 1];\n    }\n\n    return result;\n}",
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/sprite.c#L931-L957"
+      "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/sprite.c#L931-L957"
     },
     {
       "sym": "sa2__sub_8083504",
@@ -429,7 +429,7 @@
       },
       "funcC": "void SA2_LABEL(sub_8083504)(UNK_8085D14_2 *arg0, UNK_8085D14_2 *arg1, UNK_8085D14_2 *arg2)\n{\n    s32 var_r3, var_r4;\n\n    if (arg1->unk2 != 0x400) {\n        var_r3 = (arg1->unk2 * arg0->unk8) >> 0xA;\n        arg2->unk2 = ((arg1->unk2 * arg0->unk2) >> 0xA);\n    } else {\n        var_r3 = arg0->unk8;\n    }\n    if (arg1->unk4 != 0x400) {\n        var_r4 = (arg1->unk4 * arg0->unkC) >> 0xA;\n        arg2->unk4 = ((arg1->unk4 * arg0->unk4) >> 0xA);\n    } else {\n        var_r4 = arg0->unkC;\n    }\n\n    if (arg1->unk0 != 0) {\n        arg2->unk8 = (arg1->unk8 + (((var_r3 * (COS(arg1->unk0) >> 6)) >> 8) - ((var_r4 * (SIN(arg1->unk0) >> 6)) >> 8)));\n        arg2->unkC = arg1->unkC + (((var_r3 * (SIN(arg1->unk0) >> 6)) >> 8) + ((var_r4 * (COS(arg1->unk0) >> 6)) >> 8));\n    } else {\n        arg2->unk8 = (arg1->unk8 + var_r3);\n        arg2->unkC = arg1->unkC + var_r4;\n    }\n    arg2->unk0 = ((arg0->unk0 + arg1->unk0) & (SIN_PERIOD - 1));\n}",
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L67-L92"
+      "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L67-L92"
     },
     {
       "sym": "ProcessOamBuffers",
@@ -442,7 +442,7 @@
       ],
       "prependC": "#include \"core.h\"\n#include \"flags.h\"\n#include \"sprite.h\"",
       "funcC": "void ProcessOamBuffers(void)\n{\n    OamData *dstOam = &gOamBuffer[0];\n    u8 i = 0;\n    s32 r3;\n\n    for (r3 = 0; r3 < 32; r3++) {\n        s8 index = gOamMallocOrders_StartIndex[r3];\n\n        while (index != -1) {\n            u8 newI;\n            u8 *byteArray = gOamMallocCopiedOrder;\n            DmaCopy16(3, &gOamMallocBuffer[index], dstOam, sizeof(OamDataShort));\n            dstOam++;\n\n            byteArray += index;\n            newI = i++;\n            *byteArray = newI;\n            index = gOamMallocBuffer[index].split.fractional;\n        };\n    }\n\n    if (gFlags & FLAGS_800) {\n        r3 = gOamFreeIndex;\n        dstOam = &gOamBuffer[r3];\n\n        while (r3 < gOamFirstPausedIndex) {\n            DmaFill16(3, 0x200, dstOam, sizeof(OamDataShort));\n            dstOam++;\n            r3++;\n        }\n    } else if (gFlags & FLAGS_PAUSE_GAME) {\n        /* Push all active OAM entries to te end of OAM temporarily while\n         * the game is paused */\n        s32 k, l;\n        r3 = gOamFreeIndex - 1;\n        dstOam = &gOamBuffer[r3];\n\n        for (k = l = 0; r3 >= 0;) {\n            s32 size = sizeof(OamDataShort);\n            DmaCopy16(3, dstOam - k, &gOamBuffer[OAM_ENTRY_COUNT - 1 - l], size);\n            k++, r3--, l++;\n        }\n\n        // _08005A5E\n\n        gOamFirstPausedIndex = OAM_ENTRY_COUNT - gOamFreeIndex;\n\n        for (r3 = 0; r3 < gOamFirstPausedIndex; r3++) {\n            DmaFill16(3, 0x200, &gOamBuffer[r3], sizeof(OamDataShort));\n#ifndef NON_MATCHING\n            // unlike when using --, using ++ changes the condition to something entirely\n            // different unless we tell the compiler that we want to use r3's values\n            // (without actually doing so)\n            asm(\"\" ::\"r\"(r3));\n#endif\n        }\n\n    } else {\n        gOamFirstPausedIndex = 0;\n    }\n\n    gOamFreeIndex = 0;\n    if (gFlags & FLAGS_4000) {\n        CpuFill32(-1, gOamMallocOrders_StartIndex, sizeof(gOamMallocOrders_StartIndex));\n        CpuFill32(-1, gOamMallocOrders_EndIndex, sizeof(gOamMallocOrders_EndIndex));\n    } else {\n        DmaFill32(3, -1, gOamMallocOrders_StartIndex, sizeof(gOamMallocOrders_StartIndex));\n        DmaFill32(3, -1, gOamMallocOrders_EndIndex, sizeof(gOamMallocOrders_EndIndex));\n    }\n}",
-      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/sprite.c#L959-L1029",
+      "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/sprite.c#L959-L1029",
       "m2cCtx": true
     },
     {
@@ -455,7 +455,7 @@
       ],
       "prependC": "#include \"core.h\"\n#include \"flags.h\"",
       "funcC": "void sa2__sub_80078D4(u8 bg, int_vcount minY, int_vcount maxY, u16 offsetEven, u16 offsetOdd)\n{\n    s32 fillVal;\n\n    gFlags |= FLAGS_EXECUTE_HBLANK_COPY;\n\n    gHBlankCopyTarget = (void *)&((u8 *)&REG_BG0HOFS)[bg * 4];\n    gHBlankCopySize = 4;\n\n    if (minY < maxY) {\n        fillVal = (offsetEven %= 512u) | ((offsetOdd % 512u) << 16);\n\n        DmaFill32(3, fillVal, &((u16 *)gBgOffsetsHBlankPrimary)[minY * 2], (maxY - minY) * 4);\n    }\n}",
-      "sourceUrl": "https://github.com/SAT-R/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/bg_triangles.c#L850-L864"
+      "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/bg_triangles.c#L850-L864"
     }
   ]
 }
