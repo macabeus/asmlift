@@ -20,6 +20,7 @@ import { enforceCheckoutPin } from '../cases/checkout';
 import { loadManifestsForVendor } from '../cases/manifests';
 import { M2C_DIR, REPO_ROOT, RESULTS_DIR } from '../config';
 import { asmliftScript, m2cScript } from '../report/repro-scripts';
+import { checkSymbolMapDrift, vendoredMapPath } from './symbol-drift';
 
 interface Verdict {
   id: string;
@@ -139,7 +140,15 @@ export async function fidelity(jobs: number, filter: FidelityFilter = {}): Promi
   // verify before certifying the scripts. Missing checkouts warn (CI runs checkout-free).
   const realProjects = new Set(rows.filter((r) => r.tier === 'real').map((r) => r.project));
   for (const man of loadManifestsForVendor().filter((m) => realProjects.has(m.project))) {
-    enforceCheckoutPin(man, 'fidelity', { onMissing: 'warn' });
+    const st = enforceCheckoutPin(man, 'fidelity', { onMissing: 'warn' });
+    // Map-drift: symbol-fed rows are only trustworthy if the vendored map still IS what the
+    // checkout's ELF derives. Requires the checkout; without one the pin warning above already
+    // fired — restate that the map specifically went unverified.
+    if (st.present && st.head) {
+      await checkSymbolMapDrift(man);
+    } else if (vendoredMapPath(man.project)) {
+      console.warn(`WARN fidelity: ${man.project}: no checkout — vendored symbol map NOT verified`);
+    }
   }
   const work = rows.flatMap((r) => [() => checkM2c(r), () => checkAsmlift(r)]);
   const verdicts: Verdict[] = [];
