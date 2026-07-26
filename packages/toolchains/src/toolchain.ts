@@ -6,6 +6,7 @@
 // Toolchain paths are portable, not machine-pinned: every external binary resolves from an env
 // var, defaulting to the canonical sibling-checkout layout (`decompiler/{asmlift,transmuter,
 // snowboardkids2-decomp,decomp.me}`). Any other layout overrides via env.
+import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -121,10 +122,19 @@ export const MWCC_PPC_TOOLCHAIN = {
  *  gcc driver + its bundled `cc1` AND `decompals/mips-binutils-2.6`'s `as`/`ld` (the gcc tarball
  *  ships no assembler); `-B`/COMPILER_PATH point the old driver at them. Overridable via
  *  ASMLIFT_GCC272_DIR / ASMLIFT_GCC272_IMAGE / ASMLIFT_DOCKER / ASMLIFT_MIPS_OBJDUMP. */
+// The BENCH-OWNED gcc 2.7.2 dir: `pnpm bench setup` fetches the decompals gcc-2.7.2 +
+// binutils-2.6 linux releases here (gitignored). Preferred when present so the toolchain no
+// longer depends on the marioparty3 checkout's vendored copy of the SAME release; the
+// sibling-checkout path stays as the fallback and ASMLIFT_GCC272_DIR still overrides both.
+const BENCH_GCC272_DIR = join(REPO_ROOT, 'apps/benchmark/toolchains/gcc272-linux');
+
 export const GCC272_TOOLCHAIN = {
   docker: env('ASMLIFT_DOCKER', 'docker'),
   image: env('ASMLIFT_GCC272_IMAGE', 'i386/ubuntu:bionic'),
-  dir: env('ASMLIFT_GCC272_DIR', join(WORKSPACE, 'marioparty3/tools/gcc_2.7.2/linux')),
+  dir: env(
+    'ASMLIFT_GCC272_DIR',
+    existsSync(BENCH_GCC272_DIR) ? BENCH_GCC272_DIR : join(WORKSPACE, 'marioparty3/tools/gcc_2.7.2/linux'),
+  ),
   ccFlags: ['-G0', '-mips3', '-mgp32', '-mfp32', '-O1', '-Wa,--vr4300mul-off', '-nostdinc'],
   objdump: MIPS_OBJDUMP,
   objdumpFlags: ['-d', '--no-show-raw-insn'],

@@ -4,10 +4,14 @@
 //     a missing checkout is shallow-cloned at that branch, an EXISTING checkout is only
 //     reported against the remote head — the maintainer's checkouts carry WIP and must never
 //     be mutated by a harness command.
+//   - the gcc 2.7.2 toolchain: fetched from the decompals releases into a BENCH-OWNED
+//     gitignored dir (@asmlift/toolchains prefers it over the marioparty3 checkout's copy),
+//     skipped when already present.
 // Ends with a per-project status table; nonzero exit when any clone failed or a fresh clone
 // failed verification.
 import { execSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 
 import { type RemoteLookup, checkoutStatus, git, provenanceCommit, remoteBranchHead } from './checkout';
 import { type RealManifest, loadManifestsForVendor, resolveProjectRoot } from './manifests';
@@ -97,10 +101,38 @@ function printTable(rows: SetupRow[]): void {
   }
 }
 
+// The decompals releases marioparty3's own tools/Makefile fetches (and CI's .deps/gcc272
+// mirrors): the gcc driver + cc1 come from mips-gcc-2.7.2, the assembler/linker from
+// mips-binutils-2.6 — the old driver needs both in ONE dir.
+const GCC272_URLS = [
+  'https://github.com/decompals/mips-gcc-2.7.2/releases/latest/download/gcc-2.7.2-linux.tar.gz',
+  'https://github.com/decompals/mips-binutils-2.6/releases/latest/download/binutils-2.6-linux.tar.gz',
+];
+export const BENCH_GCC272_DIR = join(import.meta.dirname, '..', '..', 'toolchains', 'gcc272-linux');
+
+/** Fetch the bench-owned gcc 2.7.2 toolchain unless it is already there. */
+export function fetchGcc272(): string {
+  if (existsSync(join(BENCH_GCC272_DIR, 'gcc')) && existsSync(join(BENCH_GCC272_DIR, 'as'))) {
+    return `gcc2.7.2 toolchain: present at ${BENCH_GCC272_DIR}`;
+  }
+  mkdirSync(BENCH_GCC272_DIR, { recursive: true });
+  for (const url of GCC272_URLS) {
+    console.log(`fetching ${url}`);
+    execSync(`curl -fsSL ${JSON.stringify(url)} | tar -xz -C ${JSON.stringify(BENCH_GCC272_DIR)}`, {
+      stdio: 'inherit',
+    });
+  }
+  if (!existsSync(join(BENCH_GCC272_DIR, 'gcc')) || !existsSync(join(BENCH_GCC272_DIR, 'as'))) {
+    throw new Error(`setup: gcc2.7.2 fetch left no gcc/as in ${BENCH_GCC272_DIR}`);
+  }
+  return `gcc2.7.2 toolchain: fetched into ${BENCH_GCC272_DIR}`;
+}
+
 export async function setup(filterProject?: string): Promise<void> {
   const manifests = loadManifestsForVendor().filter((m) => !filterProject || m.project === filterProject);
   const rows = manifests.map((m) => setupProject(m));
   printTable(rows);
+  console.log(`\n${fetchGcc272()}`);
   const failed = rows.filter((r) => r.action === 'clone FAILED' || r.notes.some((n) => n.startsWith('VERIFY')));
   if (failed.length > 0) {
     throw new Error(
