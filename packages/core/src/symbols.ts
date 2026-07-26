@@ -17,6 +17,15 @@ export interface SymbolStructField {
   offset: number;
   /** bytes read at `offset` (null for flexible/unknown members) */
   size: number | null;
+  /** the field type's base-type signedness (absent = not a base type / unknown) — drives the
+   *  u8-vs-s8 spelling of a SYNTHESIZED field decl (an s8 read is ldrb+lsl+asr, u8 is ldrb) */
+  signed?: boolean;
+  /** the field's resolved type is a pointer — synthesis must spell it `void *`, or relational
+   *  compares of the loaded value flip signedness (s32 `blt` vs the pointer truth's `bcc`) */
+  pointer?: boolean;
+  /** the field's type chain is volatile-qualified (the `vu16 field;` MMIO idiom) — a decl that
+   *  drops it lets the compiler fold repeated reads (wrong bytes AND wrong semantics) */
+  volatile?: boolean;
 }
 
 export interface SymbolInfo {
@@ -28,10 +37,21 @@ export interface SymbolInfo {
   size?: number;
   /** the byte-sensitive declaration shape (drives P2 rendering; absent ⇒ name-only) */
   shape?: 'scalar' | 'array' | 'struct' | 'pointer';
+  /** scalar signedness for `shape:'scalar'` (absent = not a base type, e.g. an enum) — types
+   *  the synthesized `extern T name;` declaration */
+  signed?: boolean;
   /** element byte width for `shape:'array'` — enables the bare `gSym[i]` spelling */
   elemSize?: number;
   /** element signedness for `shape:'array'` (default unsigned) — types the env entry */
   elemSigned?: boolean;
+  /** the real struct tag for `shape:'struct'` — names the synthesized struct declaration
+   *  (absent ⇒ synthesis mints a placeholder tag; the tag is codegen-arbitrary) */
+  structName?: string;
+  /** the declaration is volatile-qualified — load-bearing for synthesis: a non-volatile decl
+   *  of an MMIO global lets the compiler fold/reorder accesses (wrong bytes AND semantics) */
+  volatile?: boolean;
+  /** the declaration is const-qualified (ROM tables) — spelling fidelity */
+  const?: boolean;
   /** field names/offsets for `shape:'struct'` — enables `gSym.field` interior spelling */
   layout?: SymbolStructField[];
 }

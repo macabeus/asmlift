@@ -18,7 +18,7 @@ import { RaiseUnsupportedError } from './raise/errors';
 import { type PreRecoveryPass, runPreRecovery } from './raise/pre-recovery';
 import { recoverTypes } from './raise/recover';
 import { sinkReturns } from './raise/retsink';
-import { StructureError, structure } from './structure/structure';
+import { StructureError, collectSymbolRefs, structure } from './structure/structure';
 import { type SymbolMap, symbolsByName } from './symbols';
 import { type TargetDescription, structureOptionsFor } from './target';
 
@@ -201,6 +201,19 @@ export function structureChecked(fn: Fn, opts: Parameters<typeof structure>[1]):
   // local's initializer, so re-validate deref typing on the rewritten tree.
   const sfn = hoistReusedGlobalBases(eliminateDeadStores(raw));
   assertDerefsTyped(sfn);
+  // symbolRefs must describe the FINAL tree: the l3 passes above can drop a statement that was
+  // the only reference to a mapped symbol (dead store), and a stale ref would transitively
+  // reintroduce hazards the collector excludes (a dead self-reference, a dead struct ref whose
+  // synthesized decl collides). Recompute over the rewritten body — same collector, same
+  // exclusions (structure()'s own field stays the honest channel for direct callers).
+  if (opts?.symbols) {
+    const refs = collectSymbolRefs(sfn.body, opts.symbols, sfn.name);
+    if (refs.length) {
+      sfn.symbolRefs = refs;
+    } else {
+      delete sfn.symbolRefs;
+    }
+  }
   return sfn;
 }
 

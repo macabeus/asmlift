@@ -2,6 +2,7 @@
 // concrete language (C / Pascal / C++) and prints it. "Return a value" and binary ops
 // are neutral nodes here; each backend owns its own spelling.
 import type { IrType } from '../ir/types';
+import type { SymbolInfo } from '../symbols';
 
 export type Expr =
   | { k: 'var'; name: string }
@@ -115,11 +116,26 @@ export interface SFn {
    *  legalization env (exprCType) but NEVER declared by a backend: the project's own headers
    *  declare them, exactly like every other global name asmlift emits. */
   globals?: { name: string; type: IrType }[];
+  /** every map-derived symbol the emitted body references in a VALUE context (a data global
+   *  read/written/addressed, or a code symbol used as a value — `(u32)Func`), with its map
+   *  facts. Call targets are NEVER recorded — even when also value-referenced: a synthesized
+   *  `void F(void);` followed by `F(x)` is a hard C89 error, while an undeclared call merely
+   *  implicit-declares with a warning (research/self-declaring-candidates-2026-07-26.md).
+   *  Consumed ONLY by the scoring layer's declaration synthesis (@asmlift/cli); backends never
+   *  print declarations (project users compile against their own headers — collision). Absent
+   *  without a map, or when the body references no mapped name — the inertness contract. */
+  symbolRefs?: SymbolRef[];
   retType: IrType;
   body: Stmt[];
   /** Struct types this function's fields reference, declared above it by the backend. Empty
    *  unless raise/structs.ts recovered a struct. Sorted by name for deterministic output. */
   structs?: StructType[];
+}
+
+/** One recorded map-symbol VALUE reference (see {@link SFn.symbolRefs}). */
+export interface SymbolRef {
+  name: string;
+  info: SymbolInfo;
 }
 
 /** A struct declaration surfaced to the backend (name + field list). Mirrors the IR struct

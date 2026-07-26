@@ -15,7 +15,7 @@ import { frontendFor } from './frontend/registry';
 import { Fn } from './ir/core';
 import { T } from './ir/types';
 import { verify } from './ir/verify';
-import type { LanguageBackend, SFn } from './l3/ast';
+import type { LanguageBackend, SFn, SymbolRef } from './l3/ast';
 import { registerishSpellings } from './l3/regspell';
 import { reindexWalks } from './l3/reindex';
 import { RewritePattern } from './pattern/engine';
@@ -23,6 +23,7 @@ import { applyIdiomPatterns, raiseRecovered, structureChecked } from './pipeline
 import type { Prototypes } from './proto';
 import { runPreRecovery } from './raise/pre-recovery';
 import { recoverTypes } from './raise/recover';
+import { collectSymbolRefs } from './structure/structure';
 import { type SymbolMap, symbolsByName } from './symbols';
 import { type TargetDescription, structureOptionsFor } from './target';
 
@@ -65,6 +66,10 @@ export interface EnumerateOptions {
 export interface Candidate {
   label: string;
   source: string;
+  /** the map-derived VALUE references this candidate's tree contains ({@link SFn.symbolRefs}) —
+   *  what the scoring layer's declaration synthesis renders. Absent without a map (or for the
+   *  '/raw-globals' spelling, which names no mapped symbol) — synthesis then has nothing to do. */
+  symbolRefs?: SymbolRef[];
 }
 /** A candidate paired with its score `S` (the injected scorer's result shape — must carry `.score`). */
 export interface Scored<S> extends Candidate {
@@ -147,7 +152,9 @@ export function enumerateCandidates(
         // when a loop re-spells, BOTH representations are emitted and the differ referees. The
         // re-spelling passes the same boundary contracts as the primary; one that fails them is
         // dropped here — never scored, never able to win.
-        const spellings: { suffix: string; source: string }[] = [{ suffix: '', source: backend.emit(sfn) }];
+        const spellings: { suffix: string; source: string; symbolRefs?: SymbolRef[] }[] = [
+          { suffix: '', source: backend.emit(sfn), ...(sfn.symbolRefs?.length ? { symbolRefs: sfn.symbolRefs } : {}) },
+        ];
         // Representation re-spellings — each a lever on the same footing as signedness/branch sense,
         // each guarded: it must pass the same boundary contracts as the primary AND emit (a backend
         // that declines by throwing — Pascal loud-fails unspellable shapes — drops the candidate,
@@ -160,11 +167,18 @@ export function enumerateCandidates(
         // to the user — a semantically-wrong re-spelling there is plausible-but-wrong output, the
         // defect class this project exists to avoid. Hence each lever's decline-over-approximate
         // gates, adversarially audited.
+        // Each spelling carries ITS OWN tree's symbol refs: a re-spelling can change which
+        // mapped names the body references, so refs are recomputed per alt tree (the collector
+        // is the same one structure() used for the primary), never carried over stale.
+        const refsOf = (tree: SFn): { symbolRefs?: SymbolRef[] } => {
+          const refs = svOpts.symbols ? collectSymbolRefs(tree.body, svOpts.symbols, tree.name) : [];
+          return refs.length ? { symbolRefs: refs } : {};
+        };
         const respell = (suffix: string, alt: SFn): void => {
           try {
             assertResolved(alt);
             assertDerefsTyped(alt);
-            spellings.push({ suffix, source: backend.emit(alt) });
+            spellings.push({ suffix, source: backend.emit(alt), ...refsOf(alt) });
           } catch {
             // contract-failing or unspellable re-spelling: drop it, keep the primary
           }
@@ -189,7 +203,11 @@ export function enumerateCandidates(
             continue;
           }
           seen.add(source);
-          out.push({ label: `${cand.label}${s.suffix}${sp.suffix}${sv.suffix}`, source });
+          out.push({
+            label: `${cand.label}${s.suffix}${sp.suffix}${sv.suffix}`,
+            source,
+            ...(sp.symbolRefs ? { symbolRefs: sp.symbolRefs } : {}),
+          });
         }
       }
     }
@@ -206,13 +224,13 @@ export function enumerateCandidates(
 export function rankBy<S extends { score: number }>(
   candidates: Candidate[],
   symbol: string,
-  scoreFn: (source: string, symbol: string) => S,
+  scoreFn: (source: string, symbol: string, candidate: Candidate) => S,
 ): RankedResult<S> {
   const results: Scored<S>[] = [];
   let lastScoreErr: unknown = null; // a candidate's C that failed to compile; only fatal if ALL do
   for (const c of candidates) {
     try {
-      results.push({ ...c, score: scoreFn(c.source, symbol) });
+      results.push({ ...c, score: scoreFn(c.source, symbol, c) });
     } catch (e) {
       lastScoreErr = e;
     }

@@ -96,3 +96,46 @@ test('a FAILING middle step aborts even when the last step would succeed (sh -e)
   );
   expect(() => compile('int x;', 'f', 'c')).toThrow(/exit 1[\s\S]*undeclared/);
 });
+
+// ── self-declaring candidates: the generalized world probe (declarations ride the prelude) ──
+
+test('self-declared world: the synthesized declaration block joins the typedef prelude', () => {
+  const compile = compileFromCommand('cp {{inputPath}} {{outputPath}}');
+  const decls = 'extern volatile u16 gMmio;\nvoid DoThing(void);\n';
+  const obj = compile('u16 f(void) { return gMmio; }\n', 'f', 'c', decls);
+  const written = readFileSync(obj, 'utf8');
+  expect(written.startsWith(C_TYPEDEFS)).toBe(true);
+  expect(written.indexOf(decls)).toBe(C_TYPEDEFS.length); // prelude first, then the decls
+  expect(written).toContain('return gMmio;');
+});
+
+test('headers world: the declaration block drops WITH the prelude (headers own everything)', () => {
+  // the typedef-rejecting template simulates a header-injecting project (C89 duplicate-typedef
+  // collision); the synthesized decls would equally collide (duplicate struct/extern), so both go
+  const compile = compileFromCommand('! grep -q typedef {{inputPath}} && cp {{inputPath}} {{outputPath}}');
+  const obj = compile('u16 f(void) { return gMmio; }\n', 'f', 'c', 'extern volatile u16 gMmio;\n');
+  const written = readFileSync(obj, 'utf8');
+  expect(written).not.toContain('typedef');
+  expect(written).not.toContain('extern volatile u16 gMmio;');
+  expect(written).toContain('return gMmio;');
+});
+
+test('the probe itself carries a representative decl block (struct/volatile/const/prototype vocabulary)', () => {
+  // capture every input the template sees: the probe must exercise the same declaration
+  // vocabulary synthesis emits, so a world that accepts the probe accepts any real block
+  const log = `${process.env.TMPDIR ?? '/tmp'}/asmlift-probe-decls-${process.pid}`;
+  const compile = compileFromCommand(`cat {{inputPath}} >> ${log} && cp {{inputPath}} {{outputPath}}`);
+  compile('s32 f(void) { return 1; }\n', 'f', 'c');
+  const seen = readFileSync(log, 'utf8');
+  expect(seen).toContain('struct AsmliftProbeShape');
+  expect(seen).toContain('volatile');
+  expect(seen).toContain('const u16 gAsmliftProbeTable[];');
+  expect(seen).toContain('void AsmliftProbeFn(void);');
+});
+
+test('no declarations argument ⇒ exactly the historical prelude behavior', () => {
+  const compile = compileFromCommand('cp {{inputPath}} {{outputPath}}');
+  const obj = compile('s32 f(void) { return 1; }\n', 'f', 'c');
+  const written = readFileSync(obj, 'utf8');
+  expect(written).toBe(C_TYPEDEFS + 's32 f(void) { return 1; }\n');
+});

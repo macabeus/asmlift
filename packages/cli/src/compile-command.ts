@@ -15,8 +15,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 /** Compile one candidate translation unit into a relocatable object; returns the object path.
- *  Throws on any failure — a candidate that cannot be compiled must never score. */
-export type CandidateCompiler = (source: string, symbol: string, backendId: string) => string;
+ *  Throws on any failure — a candidate that cannot be compiled must never score.
+ *
+ *  `declarations` (optional) is the candidate's SYNTHESIZED declaration block (declare.ts —
+ *  self-declaring candidates): joined to the typedef prelude in the self-declared world,
+ *  dropped with it in the headers world (the probe below arbitrates). Compilers that inject
+ *  their own context (the benchmark's vendored-ctx real-tier compile, @asmlift/toolchains)
+ *  simply ignore the argument — their context IS the headers world. */
+export type CandidateCompiler = (source: string, symbol: string, backendId: string, declarations?: string) => string;
 
 export interface CompileCommandOptions {
   /** Working directory for the command — the decomp.yaml's directory, so project-relative
@@ -83,29 +89,44 @@ export function compileFromCommand(template: string, opts: CompileCommandOptions
     return { ok: true, cmd: outPath, err: '' };
   };
 
-  // Whether asmlift's typedef prelude coexists with whatever the template injects — PROBED, never
-  // configured. A template that wraps candidates with project headers already defines u8/u16/…,
-  // and C89 hard-errors on a duplicate typedef; a bare template needs the prelude or nothing
-  // compiles. The compiler itself is the only authority on which world we're in, so ask it once:
-  // compile `C_TYPEDEFS + one harmless decl`. Success ⇒ prelude compatible. Failure ⇒ try the
-  // decl alone: success confirms the collision (drop the prelude); failure means the TEMPLATE is
-  // broken — keep the prelude so the first real candidate fails with the template's own loud
-  // diagnostics. Exit-code-only: no error-message parsing (gcc-2.9/IDO/mwcc all format
-  // differently). Cached per compiler instance — two tiny compiles worst case, ever.
+  // Which WORLD candidates compile in — PROBED, never configured. Two worlds exist:
+  //   • SELF-DECLARED: a bare template compiles the candidate alone, so it needs asmlift's
+  //     typedef prelude plus the candidate's synthesized declaration block (declare.ts);
+  //   • HEADERS: the template injects project headers, which already own u8/u16/… AND every
+  //     global/struct declaration — C89 hard-errors on a duplicate typedef and on a duplicate
+  //     struct definition, so prelude and synthesized decls must BOTH be dropped.
+  // The compiler itself is the only authority, so ask it once: compile the prelude + a
+  // REPRESENTATIVE declaration block (one exemplar of every construct synthesis emits — a
+  // padded struct with a signed narrow field, a volatile scalar, a const unsized array, a void
+  // prototype) + one harmless decl. The block is representative rather than per-candidate
+  // because decls vary per candidate while the verdict is per COMPILER INSTANCE (cached) — and
+  // real blocks use exactly this vocabulary, so accepting the exemplar accepts them all.
+  // Success ⇒ self-declared world. Failure ⇒ try the bare decl alone: success confirms the
+  // headers collision (drop prelude + decls); failure means the TEMPLATE is broken — keep
+  // everything so the first real candidate fails with the template's own loud diagnostics.
+  // Exit-code-only: no error-message parsing (gcc-2.9/IDO/mwcc all format differently).
   const PROBE = 'int asmlift_prelude_probe;\n';
+  const PROBE_DECLS =
+    'struct AsmliftProbeShape { u8 pad_0[1]; s8 lvl; u16 gain; };\n' +
+    'extern volatile struct AsmliftProbeShape gAsmliftProbeShape;\n' +
+    'extern volatile u16 gAsmliftProbeMmio;\n' +
+    'extern const u16 gAsmliftProbeTable[];\n' +
+    'void AsmliftProbeFn(void);\n';
   let preludeOk: boolean | undefined;
   const probePrelude = (symbol: string): boolean => {
-    if (execute(C_TYPEDEFS + PROBE, symbol, 'c').ok) {
+    if (execute(C_TYPEDEFS + PROBE_DECLS + PROBE, symbol, 'c').ok) {
       return true;
     }
     return !execute(PROBE, symbol, 'c').ok;
   };
 
-  return (source, symbol, backendId) => {
+  return (source, symbol, backendId, declarations) => {
     let prelude = '';
     if (backendId !== 'pascal') {
       preludeOk ??= probePrelude(symbol);
-      prelude = preludeOk ? C_TYPEDEFS : '';
+      // headers world ⇒ BOTH the prelude and the synthesized declarations drop — the injected
+      // headers own the types and every declaration (a second copy is a C89 collision).
+      prelude = preludeOk ? C_TYPEDEFS + (declarations ?? '') : '';
     }
     const r = execute(prelude + source, symbol, backendId === 'pascal' ? 'p' : 'c');
     if (!r.ok) {

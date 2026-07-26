@@ -16,12 +16,21 @@ import type { SymbolInfo, SymbolMap } from '@asmlift/core/symbols';
 import { readFileSync } from 'node:fs';
 
 /** `variableShape` result (@gba-kit/debug-info ≥0.4) — declared structurally so this package
- *  keeps compiling against 0.3.x, where the method (and the runtime feature) simply degrade. */
+ *  keeps compiling against 0.3.x, where the method (and the runtime feature) simply degrade.
+ *  The cv-qualifier flags are optional at THIS boundary for the same reason: an older package
+ *  omits them and the fields simply stay unset (never a wrong `false`-means-checked claim). */
 type DwarfShape =
-  | { kind: 'scalar'; size: number | null; signed: boolean | null }
-  | { kind: 'pointer' }
-  | { kind: 'array'; elemSize: number | null; elemSigned: boolean | null; length: number | null }
-  | { kind: 'struct'; structName: string | null; size: number | null };
+  | { kind: 'scalar'; size: number | null; signed: boolean | null; volatile?: boolean; const?: boolean }
+  | { kind: 'pointer'; volatile?: boolean; const?: boolean }
+  | {
+      kind: 'array';
+      elemSize: number | null;
+      elemSigned: boolean | null;
+      length: number | null;
+      volatile?: boolean;
+      const?: boolean;
+    }
+  | { kind: 'struct'; structName: string | null; size: number | null; volatile?: boolean; const?: boolean };
 type ShapeCapable = { variableShape?: (name: string) => DwarfShape | null };
 
 /** `sub_08xxxxxx` / `_08xxxxxx`-style placeholder names — real symbols, but names no header
@@ -55,6 +64,14 @@ export async function loadSymbolMap(elfPath: string): Promise<SymbolMap> {
       const sh = shapeOf(s.name);
       if (sh) {
         info.declared = true;
+        // cv-qualifiers ride every shape (declaration-fidelity for the synthesis layer:
+        // volatile is load-bearing for MMIO codegen, const is the ROM-table spelling)
+        if (sh.volatile) {
+          info.volatile = true;
+        }
+        if (sh.const) {
+          info.const = true;
+        }
         if (sh.kind === 'array') {
           info.shape = 'array';
           if (sh.elemSize !== null) {
@@ -71,13 +88,28 @@ export async function loadSymbolMap(elfPath: string): Promise<SymbolMap> {
           if (sh.size !== null) {
             info.size = sh.size; // DWARF wins over st_size — it is the declaration's own size
           }
+          if (sh.structName !== null) {
+            info.structName = sh.structName; // the real tag, for a readable synthesized decl
+          }
           const layout = sh.structName ? di.struct(sh.structName) : null;
           if (layout) {
             // bitfield members are excluded: their read width never equals a field size, so
-            // they must fall through to the honest cast spelling, never a wrong field name
+            // they must fall through to the honest cast spelling, never a wrong field name.
+            // `signed`/`pointer`/`volatile` (@gba-kit/debug-info ≥0.4) are kept only when
+            // present — null/undefined stays absent, never a guessed fact.
             info.layout = layout.members
               .filter((m) => m.bitWidth === undefined)
-              .map((m) => ({ name: m.name, offset: m.offset, size: m.size }));
+              .map((m) => {
+                const facts = m as { signed?: boolean | null; pointer?: true; volatile?: true };
+                return {
+                  name: m.name,
+                  offset: m.offset,
+                  size: m.size,
+                  ...(typeof facts.signed === 'boolean' ? { signed: facts.signed } : {}),
+                  ...(facts.pointer === true ? { pointer: true } : {}),
+                  ...(facts.volatile === true ? { volatile: true } : {}),
+                };
+              });
           }
         } else if (sh.kind === 'pointer') {
           info.shape = 'pointer';
@@ -85,6 +117,9 @@ export async function loadSymbolMap(elfPath: string): Promise<SymbolMap> {
           info.shape = 'scalar';
           if (sh.size !== null) {
             info.size = sh.size;
+          }
+          if (sh.signed !== null) {
+            info.signed = sh.signed; // types the synthesized `extern T name;` decl
           }
         }
       }
