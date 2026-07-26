@@ -470,7 +470,7 @@
         "arithmetic"
       ],
       "funcC": "void TransformSingleEntityToScreen(u8 arg0, s8 arg1, s8 arg2) {\n    s32 temp_r0;\n    s32 temp_r0_2;\n    s16 temp_r1;\n    s16 temp_r2;\n    s32 var_r2;\n    s32 var_r4;\n    struct Unk_0300466C_4 *var_r0;\n\n    arg1++, arg1--; /* fake */\n    gUnk_03002920[arg0].xPosScreen = gUnk_03002920[arg0].xPosBg2 - arg1 - gUnk_03003430.bg2HOfs;\n    gUnk_03002920[arg0].yPosScreen = gUnk_03002920[arg0].yPosBg2 - arg2 - gUnk_03003430.bg2VOfs;\n\n    temp_r1 = gUnk_03003430.bg2HOfs - gUnk_03002920[arg0].xPosScreen;\n    temp_r2 = gUnk_03003430.bg2VOfs - gUnk_03002920[arg0].yPosScreen;\n\n    temp_r0 = temp_r1 * gBg2XMag;\n    if (temp_r0 < 0) {\n        temp_r0 += 0xFF;\n    }\n    var_r4 = temp_r0 >> 8;\n\n    temp_r0_2 = temp_r2 * gBg2YMag;\n    if (temp_r0_2 < 0) {\n        temp_r0_2 += 0xFF;\n    }\n    var_r2 = temp_r0_2 >> 8;\n\n    var_r4 = gUnk_03003430.bg2HOfs - var_r4;\n    if (arg0 > 0xC) {\n        var_r0 = (void *)gUnk_030051DC[arg0 - 0xD].unk4;\n    } else {\n        var_r0 = gUnk_08078FC8[arg0].unk4;\n    }\n\n    switch (var_r0->shape_size & 0xF) {\n        case 3:\n        case 11:\n            var_r2 = gUnk_03003430.bg2VOfs - var_r2 + ((0x100 - gBg2YMag) >> 3);\n            break;\n        case 1:\n        case 6:\n        case 8:\n            var_r2 = gUnk_03003430.bg2VOfs - var_r2 + ((0x100 - gBg2YMag) >> 5);\n            break;\n        case 0:\n        case 4:\n        case 5:\n            var_r2 = gUnk_03003430.bg2VOfs - var_r2 + ((0x100 - gBg2YMag) >> 6);\n            break;\n        default:\n            var_r2 = gUnk_03003430.bg2VOfs - var_r2 + ((0x100 - gBg2YMag) >> 4);\n            break;\n    }\n\n    gUnk_03002920[arg0].xPosScreen = var_r4;\n    gUnk_03002920[arg0].yPosScreen = var_r2;\n}",
-      "sourceUrl": "https://github.com/macabeus/kl-eod-decomp/blob/ebe9bd0eccaa3a763a96321af92e17fdede003c4/src/code_0.c#L1407-L1464"
+      "sourceUrl": "https://github.com/macabeus/kl-eod-decomp/blob/9400132178f58db2d8b2638349ffa86155ed2e53/src/code_0.c#L1407-L1464"
     },
     {
       "sym": "CopyBGScrollTiles",
@@ -481,7 +481,7 @@
         "branch"
       ],
       "funcC": "void CopyBGScrollTiles(void) {\n    u32 var_r5;\n    u32 var_r6;\n\n    for (var_r6 = 0; var_r6 < 3; var_r6++) {\n        if (var_r6 < gUnk_03005220.hearts) {\n            var_r5 = 0;\n        } else {\n            var_r5 = 2;\n        }\n        gBgTilemapBufs[0][(var_r6 * 2) + 0x241] = gBgTilemapBufs[0][(var_r6 * 2) + ((var_r5 + 0x14) << 5)];\n        gBgTilemapBufs[0][(var_r6 * 2) + 0x242] = gBgTilemapBufs[0][(var_r6 * 2 + 1) + ((var_r5 + 0x14) << 5)];\n        gBgTilemapBufs[0][(var_r6 * 2) + 0x261] = gBgTilemapBufs[0][(var_r6 * 2) + ((var_r5 + 0x15) << 5)];\n        gBgTilemapBufs[0][(var_r6 * 2) + 0x262] = gBgTilemapBufs[0][(var_r6 * 2 + 1) + ((var_r5 + 0x15) << 5)];\n    }\n}",
-      "sourceUrl": "https://github.com/macabeus/kl-eod-decomp/blob/ebe9bd0eccaa3a763a96321af92e17fdede003c4/src/code_1.c#L1165-L1180",
+      "sourceUrl": "https://github.com/macabeus/kl-eod-decomp/blob/ed09229e28615a1bd585a5be6b1a9ba2c8a77315/src/code_1.c#L1165-L1180",
       "m2cCtx": true
     },
     {
@@ -493,7 +493,7 @@
         "soft-div"
       ],
       "funcC": "s32 UpdateHUDCounterDisplay(void) {\n    s32 var_r5;\n    s32 var_sb;\n\n    var_sb = 0;\n    if ((gUnk_03004C20.unkA == 1) || (gUnk_03004C20.level == 6)) {\n        var_r5 = 0x64;\n    } else {\n        var_r5 = 0x1E;\n    }\n    if (var_r5 == gUnk_03005220.dreamStones) {\n        var_sb = 1;\n    }\n\n    if ((gUnk_03004C20.unkA == 1) || (gUnk_03004C20.level == 6)) {\n        var_r5 = 1;\n        if (gUnk_03005220.dreamStones > 0x63) {\n            gBgTilemapBufs[0][0x252] += 0;\n            gBgTilemapBufs[0][0x252] = gBgTilemapBufs[0][0x293];\n            gBgTilemapBufs[0][0x272] += 0;\n            gBgTilemapBufs[0][0x272] = gBgTilemapBufs[0][0x2B3];\n        }\n    } else {\n        var_r5 = 0;\n    }\n\n    if (gUnk_03005220.dreamStones > 9) {\n        gBgTilemapBufs[0][0x254 - var_r5] = gBgTilemapBufs[0][(gUnk_03005220.dreamStones / 10) + 0x292];\n        gBgTilemapBufs[0][0x274 - var_r5] = gBgTilemapBufs[0][(gUnk_03005220.dreamStones / 10) + 0x2B2];\n    }\n\n    gBgTilemapBufs[0][0x255 - var_r5] = gBgTilemapBufs[0][(gUnk_03005220.dreamStones % 10) + 0x292];\n    gBgTilemapBufs[0][0x275 - var_r5] = gBgTilemapBufs[0][(gUnk_03005220.dreamStones % 10) + 0x2B2];\n    return var_sb;\n}",
-      "sourceUrl": "https://github.com/macabeus/kl-eod-decomp/blob/ebe9bd0eccaa3a763a96321af92e17fdede003c4/src/code_1.c#L1184-L1218",
+      "sourceUrl": "https://github.com/macabeus/kl-eod-decomp/blob/ed09229e28615a1bd585a5be6b1a9ba2c8a77315/src/code_1.c#L1184-L1218",
       "m2cCtx": true
     },
     {
@@ -506,7 +506,7 @@
         "branch"
       ],
       "funcC": "u8 CheckWorldCompletion(u8 arg0) {\n    u32 var_r0;\n    u32 var_r2;\n    u8 var_sl;\n    u8 var_ip;\n    u8 var_r6;\n    u8 var_r8;\n    u8 v50;\n    if (arg0 < 4) {\n        if (((gUnk_03004670->unk8[arg0][7] & 0x80) != 0) && ((gUnk_03004670->unk8[arg0 + 1][0] & 0x7F) != 0x7F))\n            return 1;\n    } else if ((gUnk_03004670->unk8[5][7] & 0x80) != 0) {\n        var_r8 = 0;\n        var_ip = 0;\n        var_r6 = 0;\n        var_sl = 0;\n        for (var_r0 = 0; var_r0 < 5; var_r0++) {\n            for (var_r2 = 0; var_r2 < 7; var_r2++) {\n                if ((var_r2 == 3 || var_r2 == 5) && (gUnk_03004670->unk8[var_r0][var_r2] & 0x7F) == 0x64)\n                    var_r8 += 1;\n                else if ((var_r2 != 7) && ((gUnk_03004670->unk8[var_r0][var_r2] & 0x7F) == 0x1E))\n                    var_ip += 1;\n                if (gUnk_03004670->unk8[var_r0][var_r2] & 0x80)\n                    var_r6 += 1;\n            }\n        }\n        v50 = gUnk_03004670->unk8[5][0] & 0x7F;\n        if (v50 == 0x1E)\n            var_sl += 1;\n        if ((gUnk_03004670->unk8[5][1] & 0x7F) == 0x1E)\n            var_sl += 1;\n        if ((arg0 == 4) && (v50 != 0x7F) && (var_r6 == 0x23))\n            return 1;\n        if ((arg0 == 5) && ((gUnk_03004670->unk8[5][1] & 0x7F) != 0x7F) && ((var_ip + var_r8) > 0x18))\n            return 1;\n        if ((arg0 == 6) && ((gUnk_03004670->unk8[5][2] & 0x7F) != 0x7F) && ((var_ip + var_r8 + var_sl) == 0x25))\n            return 1;\n    }\n    return 0;\n}",
-      "sourceUrl": "https://github.com/macabeus/kl-eod-decomp/blob/ebe9bd0eccaa3a763a96321af92e17fdede003c4/src/code_3.c#L1752-L1791"
+      "sourceUrl": "https://github.com/macabeus/kl-eod-decomp/blob/ed09229e28615a1bd585a5be6b1a9ba2c8a77315/src/code_3.c#L1752-L1791"
     },
     {
       "sym": "UpdateWorldMapNodeTile",
@@ -517,7 +517,7 @@
         "table"
       ],
       "funcC": "void UpdateWorldMapNodeTile(u8 arg0) {\n    vu32 a; // Required to match\n    if (arg0 < 4) {\n        gBgTilemapBufs[1][gUnk_08116748[arg0][0] + (gUnk_08116748[arg0][1] << 5)]\n            = gBgTilemapBufs[1][((gUnk_08116880[arg0] + 0x1C) * 0x20) + 0];\n        gBgTilemapBufs[1][gUnk_08116748[arg0][2] + (gUnk_08116748[arg0][3] << 5)]\n            = gBgTilemapBufs[1][((gUnk_08116880[arg0] + 0x1C) * 0x20) + 1];\n        gBgTilemapBufs[1][gUnk_08116748[arg0][4] + (gUnk_08116748[arg0][5] << 5)]\n            = gBgTilemapBufs[1][((gUnk_08116880[arg0] + 0x1C) * 0x20) + 2];\n        gBgTilemapBufs[1][gUnk_08116748[arg0][6] + (gUnk_08116748[arg0][7] << 5)]\n            = gBgTilemapBufs[1][((gUnk_08116880[arg0] + 0x1C) * 0x20) + 3];\n    } else {\n        gBgTilemapBufs[1][gUnk_08116748[arg0][0] + (gUnk_08116748[arg0][1] << 5)]\n            = gBgTilemapBufs[1][((gUnk_08116880[arg0] + 0x1C) * 0x20) + 4];\n        gBgTilemapBufs[1][gUnk_08116748[arg0][2] + (gUnk_08116748[arg0][3] << 5)]\n            = gBgTilemapBufs[1][((gUnk_08116880[arg0] + 0x1C) * 0x20) + 5];\n        gBgTilemapBufs[1][gUnk_08116748[arg0][4] + (gUnk_08116748[arg0][5] << 5)]\n            = gBgTilemapBufs[1][((gUnk_08116880[arg0] + 0x1C) * 0x20) + 6];\n        gBgTilemapBufs[1][gUnk_08116748[arg0][6] + (gUnk_08116748[arg0][7] << 5)]\n            = gBgTilemapBufs[1][((gUnk_08116880[arg0] + 0x1C) * 0x20) + 7];\n    }\n}",
-      "sourceUrl": "https://github.com/macabeus/kl-eod-decomp/blob/ebe9bd0eccaa3a763a96321af92e17fdede003c4/src/code_3.c#L1849-L1870",
+      "sourceUrl": "https://github.com/macabeus/kl-eod-decomp/blob/ed09229e28615a1bd585a5be6b1a9ba2c8a77315/src/code_3.c#L1849-L1870",
       "m2cCtx": true
     },
     {
@@ -528,7 +528,7 @@
         "call"
       ],
       "funcC": "void UpdateFadeEffect(void) {\n    vu8 *vcount_reg = &REG_VCOUNT_L;\n    u8 *entity = gEntityArray;\n    u8 fade = sub_08051A0C(*vcount_reg, entity[0x08]);\n\n    if (fade <= 16) {\n        REG_BLDALPHA = ((u32)fade << 8) | fade;\n    }\n}",
-      "sourceUrl": "https://github.com/macabeus/kl-eod-decomp/blob/ebe9bd0eccaa3a763a96321af92e17fdede003c4/src/engine.c#L48-L56",
+      "sourceUrl": "https://github.com/macabeus/kl-eod-decomp/blob/ed09229e28615a1bd585a5be6b1a9ba2c8a77315/src/engine.c#L48-L56",
       "m2cCtx": true
     },
     {
@@ -540,7 +540,7 @@
         "call"
       ],
       "funcC": "void StreamCmd_SetBGScroll(void) {\n    u16 scrollX = ReadUnalignedU16(gStreamPtr + 3);\n    struct BGLayerState *tbl = gBGLayerState;\n    u8 *p = gStreamPtr;\n    u16 scrollY;\n    u8 *p2;\n    tbl[p[2]].scrollX = scrollX << 4;\n    scrollY = ReadUnalignedU16(p + 5);\n    p2 = gStreamPtr;\n    tbl[p2[2]].scrollY = scrollY << 4;\n    gStreamPtr = p2 + 7;\n}",
-      "sourceUrl": "https://github.com/macabeus/kl-eod-decomp/blob/ebe9bd0eccaa3a763a96321af92e17fdede003c4/src/gfx.c#L429-L440"
+      "sourceUrl": "https://github.com/macabeus/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/gfx.c#L429-L440"
     }
   ]
 }
