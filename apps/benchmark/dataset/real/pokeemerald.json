@@ -4,6 +4,7 @@
   "repoDir": "pokeemerald",
   "repo": "macabeus/pokeemerald",
   "branch": "asmlift-benchmark",
+  "elfMake": "asmlift-elf",
   "cppIncludes": [
     "-nostdinc",
     "-undef",

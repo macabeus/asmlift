@@ -4,6 +4,7 @@
   "repoDir": "sa3",
   "repo": "macabeus/sa3",
   "branch": "asmlift-benchmark",
+  "elfMake": "asmlift-elf",
   "cppIncludes": [
     "-iquote",
     "include",
@@ -193,7 +194,7 @@
         "shift"
       ],
       "funcC": "u32 Base10DigitsToHexNibbles(u16 num)\n{\n    u8 i;\n    u16 result;\n    u8 lowDigit;\n    u16 remainder = num;\n\n    result = 0;\n    for (i = 0; i < 4; i++) {\n        s32 divisor = Div(remainder, 10);\n        lowDigit = remainder - (divisor * 10);\n        remainder = divisor;\n\n        result |= lowDigit << (i * 4);\n    }\n\n    return result;\n}\n",
-      "note": "Div() resolves to an inline macro (int division) \u2014 soft-div idiom.",
+      "note": "Div() resolves to an inline macro (int division) — soft-div idiom.",
       "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/sprite.c#L147-L164"
     },
     {
