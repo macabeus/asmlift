@@ -4,8 +4,9 @@
 // `bench verify` loop; consumed by the real case provider.
 //
 // PORTABILITY: manifests carry NO absolute paths — the project root is a workspace-relative
-// directory name (`repoDir`) resolved against the sibling-checkout WORKSPACE convention,
-// overridable per project via ASMLIFT_PROJ_<PROJECT> (uppercased, non-alphanumerics → _).
+// directory name (`repoDir`), resolved in order: ASMLIFT_PROJ_<PROJECT> env override
+// (uppercased, non-alphanumerics → _) > bench-owned checkout (apps/benchmark/checkouts/,
+// materialized by `bench setup`) > sibling-checkout WORKSPACE dir.
 // Shape is VALIDATED at load time so a typo fails with the
 // file name, not mid-run with a compile error; projects missing on this machine are reported
 // once, aggregated, and skipped.
@@ -68,10 +69,29 @@ export interface VendoredManifest extends RealManifest {
 
 export const REAL_DIR = join(import.meta.dirname, '..', '..', 'dataset', 'real');
 
-/** ASMLIFT_PROJ_<PROJECT> override, else the sibling-checkout default. */
-export function resolveProjectRoot(m: RealManifest): string {
+/** The gitignored dir where `bench setup` clones the HARNESS-OWNED project checkouts —
+ *  disposable clones the harness may freely mutate (build, split, venv), unlike the sibling
+ *  WORKSPACE checkouts which carry the maintainer's WIP and are never touched.
+ *  ASMLIFT_BENCH_CHECKOUTS relocates it (tests use a tmpdir). */
+export function benchCheckoutsDir(): string {
+  return process.env.ASMLIFT_BENCH_CHECKOUTS ?? join(import.meta.dirname, '..', '..', 'checkouts');
+}
+
+/** The project's ASMLIFT_PROJ_<PROJECT> env override, if set. */
+export function projectEnvOverride(m: RealManifest): string | undefined {
   const envName = `ASMLIFT_PROJ_${m.project.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`;
-  return process.env[envName] ?? join(WORKSPACE, m.repoDir);
+  return process.env[envName];
+}
+
+/** Checkout resolution order: ASMLIFT_PROJ_<PROJECT> env override > bench-owned checkout
+ *  (apps/benchmark/checkouts/<repoDir>, when present) > sibling WORKSPACE dir. */
+export function resolveProjectRoot(m: RealManifest): string {
+  const override = projectEnvOverride(m);
+  if (override) {
+    return override;
+  }
+  const owned = join(benchCheckoutsDir(), m.repoDir);
+  return existsSync(owned) ? owned : join(WORKSPACE, m.repoDir);
 }
 
 /** Validate one manifest's shape. Returns the problems (empty = valid). */

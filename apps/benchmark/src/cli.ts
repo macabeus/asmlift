@@ -4,8 +4,12 @@
 //   pnpm bench run [--jobs N] [--tier synthetic|real|both] [--only s] [--project p]
 //                  [--serial] [--shard i/N] [--toolchain id]
 //   pnpm bench target <id> --out <dir>   # repro-script pre-step: target object + decomp.yaml
-//   pnpm bench setup [--project p]       # clone missing PINNED project checkouts (existing ones are
-//                                        # only reported, never touched) + fetch bench-owned toolchains
+//   pnpm bench setup [--project p] [--build]
+//                                        # materialize the BENCH-OWNED project checkouts
+//                                        # (apps/benchmark/checkouts/: clone + baseroms + prepare;
+//                                        # --build runs each project's full verified build) + fetch
+//                                        # bench-owned toolchains; non-bench-owned checkouts are
+//                                        # only reported, never touched
 //   pnpm bench fidelity [--jobs N] [--project p] [--only s]
 //                                        # pre-publish gate: re-run BOTH repro scripts, every function
 //   pnpm bench merge                     # tiers → results.json, then publish
@@ -46,6 +50,7 @@ const { values: opts, positionals } = parseArgs({
     toolchain: { type: 'string' },
     shard: { type: 'string' },
     serial: { type: 'boolean', default: false },
+    build: { type: 'boolean', default: false },
     out: { type: 'string' },
   },
 });
@@ -121,7 +126,7 @@ switch (command) {
   }
   case 'setup': {
     const { setup } = await import('./cases/setup');
-    await setup(opts.project);
+    await setup(opts.project, { build: opts.build });
     break;
   }
   case 'merge':

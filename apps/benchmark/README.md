@@ -128,9 +128,37 @@ key derivation is in `src/cache.ts`; the m2c side fails closed on a dirty m2c ch
 
 Harness path defaults live in `src/config.ts`, following the sibling-checkout WORKSPACE
 convention: `ASMLIFT_M2C_DIR` overrides the m2c checkout; `ASMLIFT_CPP` names the GNU cpp used
-for real-tier preprocessing (Apple's `/usr/bin/cpp` ignores `-o`). Real-tier manifests carry NO machine paths — each project resolves as
-`WORKSPACE/<repoDir>`, overridable per project via `ASMLIFT_PROJ_<PROJECT>`; projects missing on
-this machine are skipped with one aggregated warning.
+for real-tier preprocessing (Apple's `/usr/bin/cpp` ignores `-o`). Real-tier manifests carry NO
+machine paths — each project's checkout resolves in order: `ASMLIFT_PROJ_<PROJECT>` env override
+
+> bench-owned checkout (`apps/benchmark/checkouts/<repoDir>`, materialized by `pnpm bench
+setup`) > sibling `WORKSPACE/<repoDir>`; projects missing on this machine are skipped with one
+> aggregated warning.
+
+### Bench-owned checkouts (`pnpm bench setup [--build]`)
+
+`bench setup` materializes a HARNESS-OWNED workspace under the gitignored
+`apps/benchmark/checkouts/`: every real-tier fork is cloned at its pinned branch (submodules
+included; ssh submodule URLs are rewritten to https), baseroms are copied in from the sibling
+user checkout when present, and each project's preparation recipe runs
+(`src/cases/project-setup.ts`: agbcc builds, venvs, splat splits, generated sources).
+`--build` then runs every project's full build through its own byte-compare gate (plus its
+`elfMake` symbol-ELF target). These clones are disposable and freely mutated by the harness;
+NON-bench-owned checkouts (env override or sibling WORKSPACE) are only ever reported — setup
+never mutates them.
+
+Host prerequisites (macOS; verified empirically):
+
+- Xcode CLT (`/usr/bin/cc` — host tools build with `/usr/bin` ahead of homebrew, several
+  projects' host tools miscompile under homebrew gcc), plus homebrew `gmake`, `wget`, `libpng`
+- an `arm-none-eabi` toolchain on PATH (GBA projects: pokeemerald, sa3, kleod)
+- python >= 3.11 first on PATH for kleod's `setup.sh`; any python3 for the others
+- big-endian `mips-linux-gnu` binutils under `/opt/cross` (af), and Rosetta
+  (`softwareupdate --install-rosetta` — af's IDO recomp and marioparty3's KMC gcc are x86_64)
+- Docker (snowboardkids2 builds inside a linux/amd64 container; the `asmlift-elf` DWARF
+  sidecar targets also fall back to Docker when no host `mips-linux-gnu-gcc` exists)
+- baseroms: setup copies them from the sibling user checkouts when found; otherwise place them
+  manually (the status table names the missing file and destination)
 
 ## Harness layout (`src/`)
 

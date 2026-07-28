@@ -8,8 +8,9 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, test } from 'vitest';
 
 import { checkoutStatus } from '../src/cases/checkout';
-import { type RealManifest, validateManifest } from '../src/cases/manifests';
+import { type RealManifest, benchCheckoutsDir, resolveProjectRoot, validateManifest } from '../src/cases/manifests';
 import { setupProject } from '../src/cases/setup';
+import { WORKSPACE } from '../src/config';
 
 const base: RealManifest = {
   project: 'fakeproj',
@@ -44,6 +45,95 @@ describe('validateManifest: repo/branch pins', () => {
   test('elfMake, when present, must be a non-empty string', () => {
     expect(validateManifest({ ...base, elfMake: 'asmlift-elf' }, 'x.json')).toEqual([]);
     expect(validateManifest({ ...base, elfMake: '' }, 'x.json').join('\n')).toContain('"elfMake"');
+  });
+});
+
+describe('checkout resolution order: env override > bench-owned > sibling WORKSPACE', () => {
+  const dirs: string[] = [];
+  const scratch = (): string => {
+    const d = mkdtempSync(join(tmpdir(), 'asmlift-resolve-test-'));
+    dirs.push(d);
+    return d;
+  };
+  afterEach(() => {
+    delete process.env.ASMLIFT_PROJ_FAKEPROJ;
+    delete process.env.ASMLIFT_BENCH_CHECKOUTS;
+    for (const d of dirs.splice(0)) {
+      rmSync(d, { recursive: true, force: true });
+    }
+  });
+
+  test('sibling WORKSPACE dir is the fallback when nothing else exists', () => {
+    process.env.ASMLIFT_BENCH_CHECKOUTS = scratch(); // empty — no bench-owned checkout
+    expect(resolveProjectRoot(base)).toBe(join(WORKSPACE, 'fakeproj'));
+  });
+
+  test('a present bench-owned checkout wins over the sibling dir', () => {
+    const checkouts = scratch();
+    process.env.ASMLIFT_BENCH_CHECKOUTS = checkouts;
+    mkdirSync(join(checkouts, 'fakeproj'));
+    expect(resolveProjectRoot(base)).toBe(join(checkouts, 'fakeproj'));
+    expect(benchCheckoutsDir()).toBe(checkouts);
+  });
+
+  test('the ASMLIFT_PROJ_* env override wins over everything', () => {
+    const checkouts = scratch();
+    process.env.ASMLIFT_BENCH_CHECKOUTS = checkouts;
+    mkdirSync(join(checkouts, 'fakeproj'));
+    process.env.ASMLIFT_PROJ_FAKEPROJ = '/somewhere/else';
+    expect(resolveProjectRoot(base)).toBe('/somewhere/else');
+  });
+});
+
+describe('bench setup clones into the bench-owned workspace', () => {
+  const dirs: string[] = [];
+  const scratch = (): string => {
+    const d = mkdtempSync(join(tmpdir(), 'asmlift-benchowned-test-'));
+    dirs.push(d);
+    return d;
+  };
+  afterEach(() => {
+    delete process.env.ASMLIFT_PROJ_FAKEPROJ;
+    delete process.env.ASMLIFT_BENCH_CHECKOUTS;
+    for (const d of dirs.splice(0)) {
+      rmSync(d, { recursive: true, force: true });
+    }
+  });
+
+  test('with no env override, the clone target is the bench-owned dir — never the sibling', () => {
+    const checkouts = scratch();
+    process.env.ASMLIFT_BENCH_CHECKOUTS = checkouts;
+    const cloned: string[] = [];
+    const row = setupProject(
+      base,
+      () => 'f'.repeat(40),
+      (repo, branch, dir) => {
+        cloned.push(`${repo}#${branch} -> ${dir}`);
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(join(dir, 'decomp.yaml'), 'name: fake\n');
+      },
+    );
+    expect(cloned).toEqual([`macabeus/fakeproj#asmlift-benchmark -> ${join(checkouts, 'fakeproj')}`]);
+    expect(row.action).toBe('cloned');
+    expect(row.dir).toBe(join(checkouts, 'fakeproj'));
+  });
+
+  test('an existing bench-owned checkout with no recipe is kept as-is (no clone, no writes)', () => {
+    const checkouts = scratch();
+    process.env.ASMLIFT_BENCH_CHECKOUTS = checkouts;
+    const owned = join(checkouts, 'fakeproj');
+    mkdirSync(owned);
+    writeFileSync(join(owned, 'a-file.txt'), 'kept\n');
+    const before = readdirSync(owned, { recursive: true }).map(String).sort().join('\n');
+    const row = setupProject(
+      base,
+      () => 'f'.repeat(40),
+      () => {
+        throw new Error('clone must not run');
+      },
+    );
+    expect(row.action).toBe('kept');
+    expect(readdirSync(owned, { recursive: true }).map(String).sort().join('\n')).toBe(before);
   });
 });
 
