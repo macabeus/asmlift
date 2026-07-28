@@ -14,7 +14,7 @@
 //   - snowboardkids2 builds inside a linux/amd64 Docker container;
 //   - the KMC gcc 2.7.2 mac binaries (marioparty3) are x86_64 → Rosetta as well.
 import { execSync } from 'node:child_process';
-import { existsSync, mkdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { cpus } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -63,6 +63,9 @@ function python311Env(): NodeJS.ProcessEnv {
 
 const jobs = (): string => `-j${Math.min(8, cpus().length || 4)}`;
 
+/** Missing or contentless — an `mkdir` alone must not satisfy an "already extracted" guard. */
+const emptyDir = (p: string): boolean => !existsSync(p) || readdirSync(p).length === 0;
+
 /** Clone (cached under checkouts/.tools) + build an agbcc fork, and install it into the
  *  project (tools/agbcc/{bin,include,lib}). Skipped when the project already has the binary. */
 function installAgbcc(fork: string, projDir: string): void {
@@ -90,7 +93,8 @@ function installAgbcc(fork: string, projDir: string): void {
 function sbk2DockerBuild(dir: string): void {
   const script = [
     'apt-get update -qq >/dev/null',
-    'DEBIAN_FRONTEND=noninteractive apt-get install -y -qq build-essential binutils-mips-linux-gnu python3 python3-pip git wget file >/dev/null',
+    // clang: the project's CC_CHECK advisory pass runs it on every TU
+    'DEBIAN_FRONTEND=noninteractive apt-get install -y -qq build-essential clang binutils-mips-linux-gnu python3 python3-pip git wget file >/dev/null',
     'pip3 install -q --break-system-packages -r requirements.txt',
     "git config --global --add safe.directory '*'",
     'make setup',
@@ -173,7 +177,7 @@ export const PROJECT_RECIPES: Record<string, ProjectRecipe> = {
 
   af: {
     baseroms: ['baseroms/jp/baserom.z64'],
-    prepare: () => {
+    prepare: (dir) => {
       requireHost(
         () => existsSync('/opt/cross/bin/mips-linux-gnu-ld'),
         'mips-linux-gnu binutils under /opt/cross',
@@ -187,6 +191,17 @@ export const PROJECT_RECIPES: Record<string, ProjectRecipe> = {
         'Rosetta (af runs the x86_64 IDO recomp binaries)',
         'softwareupdate --install-rosetta --agree-to-license',
       );
+      // the project's own bootstrap chain: venv → setup (tools + baserom decompress) → extract
+      if (!existsSync(join(dir, '.venv'))) {
+        sh('gmake venv', dir, afBuildEnv());
+      }
+      if (!existsSync(join(dir, 'baseroms', 'jp', 'baserom-decompressed.z64'))) {
+        sh('gmake setup', dir, afBuildEnv());
+      }
+      // the split may have left EMPTY dirs behind — only a populated tree counts as extracted
+      if (emptyDir(join(dir, 'asm', 'jp')) || emptyDir(join(dir, 'assets', 'jp'))) {
+        sh('gmake extract', dir, afBuildEnv());
+      }
     },
     build: (dir) => sh(`gmake ${jobs()}`, dir, afBuildEnv()), // COMPARE=1 checks baseroms/jp/checksum.md5
   },
