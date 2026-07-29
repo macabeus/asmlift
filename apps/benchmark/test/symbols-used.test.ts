@@ -6,6 +6,7 @@
 import type { CandidateCompiler } from '@asmlift/cli/compile-command';
 import { decompileRanked } from '@asmlift/cli/rank';
 import type { MatchScore } from '@asmlift/cli/score';
+import { decompile } from '@asmlift/core/pipeline';
 import { enumerateCandidates } from '@asmlift/core/rank';
 import type { SymbolInfo, SymbolMap } from '@asmlift/core/symbols';
 import { ARMV4T_AGBCC } from '@asmlift/core/target';
@@ -15,6 +16,12 @@ import { runAsmlift, symbolShape, symbolsUsedFrom } from '../src/eval/asmlift';
 import type { Toolchain } from '../src/toolchains';
 
 vi.mock('@asmlift/cli/rank', () => ({ decompileRanked: vi.fn() }));
+// Real decompile, but call-countable — pins the backstop's RETIREMENT (exactly ONE phase-1
+// decompile per row; the old retry-without-map second call must never come back).
+vi.mock('@asmlift/core/pipeline', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@asmlift/core/pipeline')>();
+  return { ...actual, decompile: vi.fn(actual.decompile) };
+});
 
 const ranked = vi.mocked(decompileRanked);
 
@@ -100,6 +107,20 @@ describe('symbolsUsed / candidateLabel capture (pinned)', () => {
     expect(r.outcome).toBe('noncompile');
     expect(r).not.toHaveProperty('symbolsUsed');
     expect(r).not.toHaveProperty('candidateLabel');
+  });
+
+  test('BACKSTOP RETIRED: a gapped map row declines WITH the map — one decompile, no retry, no fell-back marker', () => {
+    // `clz` is unmodelled → annotate mode reports a diagnostic and the row declines. The retired
+    // never-worse backstop used to re-run decompile WITHOUT the map here; retirement means
+    // exactly one call, the row keeps its honest symbolMap provenance, and symbolMapFellBack
+    // (schema-historical) is never set.
+    const gapped = 'f:\n\tclz\tr0, r0\n\tbx\tlr\n';
+    vi.mocked(decompile).mockClear();
+    const r = runAsmlift(TC, 'f', gapped, '/nonexistent.o', undefined, noCompile, MAP);
+    expect(r.outcome).toBe('declined');
+    expect(r.symbolMap).toBe(true);
+    expect(r).not.toHaveProperty('symbolMapFellBack');
+    expect(decompile).toHaveBeenCalledTimes(1);
   });
 });
 

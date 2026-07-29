@@ -60,35 +60,19 @@ export function runAsmlift(
   // scored (the marker could compile via an implicit declaration and grade meaningless code).
   // Gap-free ⇒ proceed to ranked scoring.
   //
-  // NEVER-WORSE contract for the symbol map — BACKSTOP ONLY: core now spells every known
-  // map-induced escape legally (the additive lowering intifies `&gSym` to `(u32)&gSym`, so an
-  // interior/stride address in a value context renders byte-exact instead of tripping the
-  // interior-pointer contract). No current row takes this path; it stays as defense-in-depth so
-  // an UNKNOWN future map-induced gap degrades to "the map didn't help", never to a decline the
-  // raw path wouldn't have had — a gapped symbol-fed decompile retries WITHOUT the map first.
+  // The never-worse retry-without-map BACKSTOP that used to live here is RETIRED: its
+  // `symbolMapFellBack` telemetry stayed ZERO across every run since instrumentation (core
+  // spells all known map-induced escapes legally — the addr-intify + the CMP-path fix), so a
+  // map-fed decompile now classifies exactly once, WITH the map. The schema field survives as
+  // a historical marker only (bench-schema doc-comment).
   let annotated: string;
-  let activeOpts = opts;
-  let usedSymbols = Boolean(symbols);
-  // The backstop's retirement telemetry: set exactly when the retry-without-map engages, and
-  // carried on EVERY return path below. Zero occurrences across runs ⇒ the backstop can go.
-  let symbolMapFellBack = false;
+  const usedSymbols = Boolean(symbols);
   try {
-    let dec = decompile(sym, asm, tc.targetDesc, { ...activeOpts, onGap: 'annotate' });
-    if (dec.diagnostics.length > 0 && usedSymbols) {
-      const { symbols: _dropped, ...rawOpts } = activeOpts as typeof opts & { symbols?: SymbolMap };
-      const raw = decompile(sym, asm, tc.targetDesc, { ...rawOpts, onGap: 'annotate' });
-      if (raw.diagnostics.length === 0) {
-        activeOpts = rawOpts;
-        usedSymbols = false;
-        symbolMapFellBack = true;
-        dec = raw;
-      }
-    }
+    const dec = decompile(sym, asm, tc.targetDesc, { ...opts, onGap: 'annotate' });
     if (dec.diagnostics.length > 0) {
       return {
         decompiler: 'asmlift',
         ...(usedSymbols ? { symbolMap: true as const } : {}),
-        ...(symbolMapFellBack ? { symbolMapFellBack: true as const } : {}),
         outcome: 'declined',
         source: dec.source,
         score: null,
@@ -106,7 +90,6 @@ export function runAsmlift(
     return {
       decompiler: 'asmlift',
       ...(usedSymbols ? { symbolMap: true as const } : {}),
-      ...(symbolMapFellBack ? { symbolMapFellBack: true as const } : {}),
       outcome: 'failed',
       source: msg,
       score: null,
@@ -119,12 +102,11 @@ export function runAsmlift(
 
   // Phase 2 — rank candidates (compile + objdiff-score each) and take the differ-picked best.
   try {
-    const best = decompileRanked(sym, asm, tc.targetDesc, obj, activeOpts).best;
+    const best = decompileRanked(sym, asm, tc.targetDesc, obj, opts).best;
     const s = best.score;
     return {
       decompiler: 'asmlift',
       ...(usedSymbols ? { symbolMap: true as const } : {}),
-      ...(symbolMapFellBack ? { symbolMapFellBack: true as const } : {}),
       // Provenance of the WINNER: which candidate spelling the differ picked, and (map rows)
       // which map symbols its output references — best.symbolRefs is derived in core from the
       // exact tree the winning source was emitted from (post-DCE value refs only; call targets
@@ -147,7 +129,6 @@ export function runAsmlift(
     return {
       decompiler: 'asmlift',
       ...(usedSymbols ? { symbolMap: true as const } : {}),
-      ...(symbolMapFellBack ? { symbolMapFellBack: true as const } : {}),
       outcome: 'noncompile',
       source: annotated,
       score: null,

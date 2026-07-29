@@ -248,11 +248,15 @@ function protoHintLabel(hint: { params?: number | string[]; returnsVoid?: boolea
 /** ALL input provenance for the row, consolidated in one collapsed accordion: the prototype
  *  hints asmlift received, the context m2c received, and the symbol map's state (used /
  *  present-but-unused / fell back / none) with the map symbols the winning candidate references
- *  and the candidate spelling that won. Every field is optional — old data carries none. */
+ *  and the candidate spelling that won. Every field is optional — old data carries none.
+ *  `symbolsUsed` exists exactly when the row was SCORED with a map: a declined/failed map row
+ *  has no winning spelling, so it makes no usage claim at all (the "none" state) — never the
+ *  false "present, unused" (which asserts a winner that named nothing). */
 function Provenance({ fn }: { fn: FunctionResult }) {
   const [open, setOpen] = useState(false);
   const r = fn.asmlift; // the symbol-map fields are asmlift-only (m2c rows never carry them)
-  const fellBack = r.symbolMapFellBack === true;
+  const fellBack = r.symbolMapFellBack === true; // historical rows only — the backstop is retired
+  const scored = r.symbolsUsed !== undefined; // present ⇔ a winning spelling exists (scored row)
   const symbols = r.symbolsUsed ?? [];
   const protoEntries = Object.entries(fn.proto ?? {});
 
@@ -261,7 +265,7 @@ function Provenance({ fn }: { fn: FunctionResult }) {
   const digest: string[] = [];
   if (fellBack) {
     digest.push('symbols fell back');
-  } else if (r.symbolMap) {
+  } else if (r.symbolMap && scored) {
     digest.push(symbols.length > 0 ? `${symbols.length} symbol${symbols.length === 1 ? '' : 's'}` : 'symbols unused');
   }
   if (r.candidateLabel) {
@@ -319,7 +323,7 @@ function Provenance({ fn }: { fn: FunctionResult }) {
               <span className="text-amber-300">
                 fell back — the map induced a gap; the never-worse backstop re-ran (and classified) this row raw
               </span>
-            ) : r.symbolMap ? (
+            ) : r.symbolMap && scored ? (
               symbols.length > 0 ? (
                 <span className="text-teal-300">
                   used — the winning candidate references {symbols.length} map symbol{symbols.length === 1 ? '' : 's'}
@@ -328,6 +332,7 @@ function Provenance({ fn }: { fn: FunctionResult }) {
                 <span className="text-slate-400">present, unused — the winning spelling named none of its symbols</span>
               )
             ) : (
+              // no map, OR a declined/failed map row (no winner exists → no usage claim)
               <span className="text-slate-500">none</span>
             )}
             {symbols.length > 0 && (

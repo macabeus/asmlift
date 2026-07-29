@@ -141,13 +141,14 @@ export function cachedM2cResult(inputs: M2cKeyInputs, compute: () => DecompilerR
   if (!enabled() || !commit) {
     return compute();
   }
-  // The objdump→GNU-as normalizer, the m2c scoring prelude and the outcome classifier all run
-  // INSIDE this cached computation but are not part of the key — any change to them MUST bump
-  // `v`, or fixed rows keep serving stale results. `lang` enters the key only for c++ so every
-  // existing C entry keeps its identity.
+  // The objdump→GNU-as normalizer, the m2c scoring prelude, the outcome classifier and the
+  // quality heuristic all run INSIDE this cached computation but are not part of the key — any
+  // change to them MUST bump `v`, or fixed rows keep serving stale results. `lang` enters the
+  // key only for c++ so every existing C entry keeps its identity.
+  // v13: assessQuality exempts project-idiom address casts from the casts count.
   const key = sha(
     JSON.stringify({
-      v: 12,
+      v: 13,
       kind: 'm2c',
       commit,
       tc: tcId,

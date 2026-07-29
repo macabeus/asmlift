@@ -35,6 +35,26 @@ describe('assessQuality (pinned)', () => {
     expect(q).toEqual({ score: 90, lines: 3, gotos: 0, casts: 5, unkGlue: 0, rawMem: 1, addrDeref: 0 });
   });
 
+  test('project-idiom address casts are exempt: (u32)&Sym, (s32)&Sym, (u32)Func', () => {
+    const q = assessQuality(
+      'void f(u32 a0) {\n' + // (the parameter-list `(void)` artifact would count — irrelevant here)
+        '    if ((u32)&gBgInfo == (u32)&GwCommon + 4) {\n' +
+        '        DoThing((s32)&gDefaultFontPalette < 0, (u32)thunk_sub_080002A0);\n' +
+        '    }\n' +
+        '}\n',
+    );
+    expect(q.casts).toBe(0); // all four are the correct address spelling, not cast noise
+    expect(q.score).toBe(100);
+  });
+
+  test('u32 casts of generic locals and of call RESULTS stay counted', () => {
+    // (u32)a0 / (u32)var_x truncate a LOCAL value; (u32)DoThing(1) casts a call result —
+    // none of them is an address spelling, so all three still count (plus (s16)2 = 4 > 2).
+    const q = assessQuality('u32 f(s32 a0) {\n    return (u32)a0 + (u32)var_x + (u32)DoThing(1) + (s16)2;\n}\n');
+    expect(q.casts).toBe(4);
+    expect(q.score).toBe(96);
+  });
+
   test('absolute-address derefs are counted but not score-penalized', () => {
     const q = assessQuality('void f(void) {\n    *(vu16 *)0x04000052 = 0x100;\n}\n');
     expect(q.addrDeref).toBe(1);
