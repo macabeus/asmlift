@@ -10,6 +10,15 @@ import type { Ranking } from './useRanking';
 const dump =
   'scroll-slim overflow-x-auto whitespace-pre rounded bg-slate-950/70 p-2 font-mono text-[11px] leading-relaxed text-slate-300';
 
+// One-sentence stage descriptions for behavior a single run's dump cannot show on its own —
+// what a symbol map changes at each end of the tower.
+const STAGE_DESCRIPTIONS: Record<string, string> = {
+  'stage:lift':
+    'With a symbol map, numeric pool words matching a mapped address lift as named gaddr ops instead of raw constants — visible in the IR dump.',
+  'stage:structure':
+    'Symbol-map declaration shapes are spelled here: a struct global becomes a dot-field (gState.timer), an array global a bare element (gTable[i]).',
+};
+
 function PatternCard({ ev }: { ev: PatternEvent }) {
   return (
     <div className="mt-2 rounded-md border border-teal-900/60 bg-teal-950/20 p-2">
@@ -52,6 +61,9 @@ function StageCard({ stage, changed, events }: { stage: StageTrace; changed: boo
         </summary>
         {stage.irDump !== undefined && <pre className={`mt-2 ${dump}`}>{stage.irDump}</pre>}
       </details>
+      {STAGE_DESCRIPTIONS[stage.id] && (
+        <p className="mt-1 text-[11px] leading-relaxed text-slate-500">{STAGE_DESCRIPTIONS[stage.id]}</p>
+      )}
       {events.map((ev) => (
         <PatternCard key={ev.id} ev={ev} />
       ))}

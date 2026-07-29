@@ -19,6 +19,18 @@ test('the C++ spec text round-trips', () => {
   expect(decodeShare(encodeShare(s))).toEqual(s);
 });
 
+test('the symbols JSON rides the same channel: omitted when absent, preserved when present', () => {
+  const s = {
+    target: 'agbcc',
+    backend: 'c',
+    symbols: '{"0x03001234": [{"name": "gCounter", "kind": "data"}]}',
+    asm: 'f:\n\tbx lr\n',
+  };
+  expect(decodeShare(encodeShare(s))).toEqual(s);
+  const bare = decodeShare(encodeShare({ target: 'agbcc', backend: 'c', asm: 'f:\n\tbx lr\n' }));
+  expect(bare && 'symbols' in bare).toBe(false);
+});
+
 test('garbage payloads decode to null, never throw', () => {
   expect(decodeShare('')).toBeNull();
   expect(decodeShare('not-lz-data-!!!')).toBeNull();

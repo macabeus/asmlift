@@ -7,6 +7,7 @@ export interface ShareState {
   backend: string;
   name?: string; // only when the user overrode autodetection
   spec?: string; // C++ signature JSON, only when the backend is cpp and the user set one
+  symbols?: string; // symbol-map JSON (the Symbols pane's text), only when non-empty
   asm: string;
 }
 
@@ -33,6 +34,7 @@ export function decodeShare(hash: string): ShareState | null {
       asm: o.asm,
       ...(typeof o.name === 'string' ? { name: o.name } : {}),
       ...(typeof o.spec === 'string' ? { spec: o.spec } : {}),
+      ...(typeof o.symbols === 'string' ? { symbols: o.symbols } : {}),
     };
   } catch {
     return null;
