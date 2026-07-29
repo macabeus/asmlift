@@ -6,7 +6,7 @@ import type { ShareState } from '../../../shared/utils/permalink';
 import { formatC } from '../lib/format-c';
 import { playgroundShare } from '../lib/playground';
 import { DECOMPILER_COLOR, TOOLCHAIN_LABEL } from '../theme';
-import { Chip, GapBadge, OutcomeBadge, SymbolsBadge } from './ui/Badge';
+import { Chip, GapBadge, OutcomeBadge } from './ui/Badge';
 
 // The Benchmark's code-block chrome (the shared CodeBlock only fixes scroll/whitespace/mono).
 const CODE_PRE = 'max-h-[46vh] rounded-md bg-slate-950/70 p-3 text-[12px] leading-relaxed text-slate-200';
@@ -60,28 +60,11 @@ function DecompilerColumn({
         </span>
         <div className="flex items-center gap-2">
           <OutcomeBadge outcome={result.outcome} />
-          <SymbolsBadge result={result} />
           <span className="font-mono text-xs text-slate-400">objdiff {scoreLabel(result)}</span>
         </div>
       </div>
-      {/* Map-symbol provenance: every map symbol the winning candidate's output references. */}
-      {result.symbolsUsed && result.symbolsUsed.length > 0 && (
-        <div className="flex flex-wrap gap-1">
-          {result.symbolsUsed.map((s) => (
-            <Chip key={s.name}>
-              {s.name}
-              {s.shape && <span className="ml-1 text-slate-500">{s.shape}</span>}
-            </Chip>
-          ))}
-        </div>
-      )}
       <Code text={result.source} language={language} />
       <div className="text-xs text-slate-400 space-y-1">
-        {result.candidateLabel && (
-          <div className="font-mono text-slate-500" title="the candidate spelling that won the differ ranking">
-            winner: {result.candidateLabel}
-          </div>
-        )}
         <div className="flex flex-wrap gap-x-3 gap-y-1 font-mono">
           {result.outcome === 'declined' || result.outcome === 'failed' ? (
             // Marker stubs and failure text have no meaningful readability — a number here
@@ -232,6 +215,140 @@ function CollapsibleCode({
       {open && (
         <div className="mt-2">
           <Code text={text} language={language} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** One labeled block inside the Provenance accordion. */
+function ProvenanceRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{label}</div>
+      <div className="mt-1">{children}</div>
+    </div>
+  );
+}
+
+/** Compact spelling of one prototype hint (arity or typed params, plus void-ness). */
+function protoHintLabel(hint: { params?: number | string[]; returnsVoid?: boolean }): string {
+  const parts: string[] = [];
+  if (Array.isArray(hint.params)) {
+    parts.push(`(${hint.params.join(', ')})`);
+  } else if (typeof hint.params === 'number') {
+    parts.push(`(${hint.params} arg${hint.params === 1 ? '' : 's'})`);
+  }
+  if (hint.returnsVoid !== undefined) {
+    parts.push(hint.returnsVoid ? '→ void' : '→ non-void');
+  }
+  return parts.join(' ');
+}
+
+/** ALL input provenance for the row, consolidated in one collapsed accordion: the prototype
+ *  hints asmlift received, the context m2c received, and the symbol map's state (used /
+ *  present-but-unused / fell back / none) with the map symbols the winning candidate references
+ *  and the candidate spelling that won. Every field is optional — old data carries none. */
+function Provenance({ fn }: { fn: FunctionResult }) {
+  const [open, setOpen] = useState(false);
+  const r = fn.asmlift; // the symbol-map fields are asmlift-only (m2c rows never carry them)
+  const fellBack = r.symbolMapFellBack === true;
+  const symbols = r.symbolsUsed ?? [];
+  const protoEntries = Object.entries(fn.proto ?? {});
+
+  // Summary digest: `Provenance — 3 symbols · winner unsigned/raw-globals`; the fell-back
+  // warning replaces the count so it stays discoverable without expanding.
+  const digest: string[] = [];
+  if (fellBack) {
+    digest.push('symbols fell back');
+  } else if (r.symbolMap) {
+    digest.push(symbols.length > 0 ? `${symbols.length} symbol${symbols.length === 1 ? '' : 's'}` : 'symbols unused');
+  }
+  if (r.candidateLabel) {
+    digest.push(`winner ${r.candidateLabel}`);
+  }
+
+  return (
+    <div
+      className={`rounded-lg border p-3 ${fellBack ? 'border-amber-500/30 bg-amber-500/5' : 'border-slate-800 bg-slate-900/40'}`}
+    >
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className={`flex items-center gap-2 text-sm font-semibold ${
+          fellBack ? 'text-amber-300 hover:text-amber-200' : 'text-slate-300 hover:text-white'
+        }`}
+      >
+        <span className={fellBack ? 'text-amber-500/70' : 'text-slate-500'}>{open ? '▾' : '▸'}</span>
+        Provenance
+        {digest.length > 0 && (
+          <span className={`font-normal ${fellBack ? 'text-amber-300/80' : 'text-slate-500'}`}>
+            — {digest.join(' · ')}
+          </span>
+        )}
+      </button>
+      {open && (
+        <div className="mt-3 space-y-3 text-xs">
+          <ProvenanceRow label="Prototype hints">
+            {protoEntries.length > 0 ? (
+              <div className="flex flex-wrap gap-x-4 gap-y-1 font-mono text-slate-300">
+                {protoEntries.map(([name, hint]) => (
+                  <span key={name}>
+                    {name} <span className="text-slate-500">{protoHintLabel(hint)}</span>
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <span className="text-slate-500">none</span>
+            )}
+          </ProvenanceRow>
+          <ProvenanceRow label="Context">
+            {fn.ctxRef ? (
+              <span className="font-mono text-slate-300">
+                {fn.ctxRef} <span className="font-sans text-slate-500">(vendored project headers, via --context)</span>
+              </span>
+            ) : fn.ctx ? (
+              <span className="text-slate-400">
+                inline context header ({fn.ctx.split('\n').length} lines, via --context)
+              </span>
+            ) : (
+              <span className="text-slate-500">signature only</span>
+            )}
+          </ProvenanceRow>
+          <ProvenanceRow label="Symbol map">
+            {fellBack ? (
+              <span className="text-amber-300">
+                fell back — the map induced a gap; the never-worse backstop re-ran (and classified) this row raw
+              </span>
+            ) : r.symbolMap ? (
+              symbols.length > 0 ? (
+                <span className="text-teal-300">
+                  used — the winning candidate references {symbols.length} map symbol{symbols.length === 1 ? '' : 's'}
+                </span>
+              ) : (
+                <span className="text-slate-400">present, unused — the winning spelling named none of its symbols</span>
+              )
+            ) : (
+              <span className="text-slate-500">none</span>
+            )}
+            {symbols.length > 0 && (
+              <div className="mt-1.5 flex flex-wrap gap-1">
+                {symbols.map((s) => (
+                  <Chip key={s.name}>
+                    {s.name}
+                    {s.shape && <span className="ml-1 text-slate-500">{s.shape}</span>}
+                  </Chip>
+                ))}
+              </div>
+            )}
+            {r.candidateLabel && (
+              <div
+                className="mt-1.5 font-mono text-slate-500"
+                title="the candidate spelling that won the differ ranking"
+              >
+                winner: {r.candidateLabel}
+              </div>
+            )}
+          </ProvenanceRow>
         </div>
       )}
     </div>
@@ -391,6 +508,9 @@ export function FunctionDetail({
               />
             </>
           )}
+
+          {/* Everything the decompilers were given as input, in one collapsed place. */}
+          <Provenance fn={fn} />
         </div>
       </div>
     </div>

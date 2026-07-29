@@ -107,10 +107,10 @@ export function Methodology({ rows }: { rows: FunctionResult[] }) {
           ldscript and headers declare, never authored knowledge. Rows that ran with a map are flagged{' '}
           <span className="font-mono">symbolMap</span> in their provenance, so with-map and without-map rows are never
           read as the same experiment. Both spellings (named and raw-address) are candidate-ranked, so the map can
-          reveal capability but never masks a regression. Each map row's detail spells this out as badges:{' '}
-          <span className="font-mono">symbols</span> (the winning candidate references map symbols, listed as chips),{' '}
-          <span className="font-mono">symbols: unused</span> (the map was in scope but the winning spelling named none),
-          and <span className="font-mono">symbols: fell back</span> (the never-worse backstop re-ran the row raw).
+          reveal capability but never masks a regression. Each row's detail consolidates all of this in a collapsed{' '}
+          <span className="font-mono">Provenance</span> section at the bottom: the prototype hints asmlift received, the
+          context m2c received, and the symbol map's state (used / present-but-unused / fell back / none) with every map
+          symbol the winning candidate references and the candidate spelling that won.
         </P>
       </section>
 
