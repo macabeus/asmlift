@@ -109,7 +109,10 @@ describe('symbolShape formatting (pinned)', () => {
     [{ name: 'g', kind: 'data', shape: 'struct', size: 8 }, 'struct ? (8 B)'],
     [{ name: 'g', kind: 'data', shape: 'array', elemSize: 2 }, 'u16[]'],
     [{ name: 'g', kind: 'data', shape: 'array', elemSize: 1, elemSigned: true }, 's8[]'],
+    // a struct-element array must not masquerade as a giant int type (kleod gBgInfo is 28 B/elem)
+    [{ name: 'g', kind: 'data', shape: 'array', elemSize: 28 }, 'array (28 B/elem)'],
     [{ name: 'g', kind: 'data', shape: 'scalar', size: 1 }, 'scalar u8'],
+    [{ name: 'g', kind: 'data', shape: 'scalar', size: 12 }, 'scalar (12 B)'],
     [{ name: 'g', kind: 'data', shape: 'scalar', size: 4, signed: true }, 'scalar s32'],
     [{ name: 'g', kind: 'data', shape: 'pointer' }, 'pointer'],
     [{ name: 'F', kind: 'code' }, 'code'],

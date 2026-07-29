@@ -176,9 +176,21 @@ export function symbolShape(info: SymbolInfo): string | undefined {
       return `struct ${info.structName ?? '?'}${size}`;
     }
     case 'array':
-      return info.elemSize !== undefined ? `${intType(info.elemSize, info.elemSigned ?? false)}[]` : 'array';
+      if (info.elemSize === undefined) {
+        return 'array';
+      }
+      // Only a genuine scalar width spells an int type — a struct-element array (e.g. 28 B
+      // elements) must not masquerade as a `u224[]`.
+      return SCALAR_BYTES.has(info.elemSize)
+        ? `${intType(info.elemSize, info.elemSigned ?? false)}[]`
+        : `array (${info.elemSize} B/elem)`;
     case 'scalar':
-      return info.size !== undefined ? `scalar ${intType(info.size, info.signed ?? false)}` : 'scalar';
+      if (info.size === undefined) {
+        return 'scalar';
+      }
+      return SCALAR_BYTES.has(info.size)
+        ? `scalar ${intType(info.size, info.signed ?? false)}`
+        : `scalar (${info.size} B)`;
     case 'pointer':
       return 'pointer';
     default:
@@ -186,6 +198,7 @@ export function symbolShape(info: SymbolInfo): string | undefined {
   }
 }
 
+const SCALAR_BYTES = new Set([1, 2, 4, 8]);
 const intType = (bytes: number, signed: boolean): string => `${signed ? 's' : 'u'}${bytes * 8}`;
 
 /** The winning candidate's map references as the schema's provenance rows — name plus the
