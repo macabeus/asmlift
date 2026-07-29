@@ -60,6 +60,15 @@ export interface DecompilerResult {
    *  re-ran (and classified) RAW, without the map. Zero occurrences across runs is the signal
    *  the backstop can be retired. */
   symbolMapFellBack?: true;
+  /** asmlift only, scored map rows: EVERY map symbol the WINNING candidate's output references
+   *  (value references — call targets are excluded upstream), each with its declaration shape
+   *  pre-formatted for display ("struct Unk_03004C20 (24 B)", "u16[]", "scalar u8", "code";
+   *  absent for name-only symbols). Sorted by name, uncapped. Present exactly when a scored
+   *  row ran with the map; EMPTY ⇒ the winning spelling (e.g. '/raw-globals') named none. */
+  symbolsUsed?: { name: string; shape?: string }[];
+  /** asmlift only, scored rows: the label of the candidate spelling that won the differ
+   *  ranking (e.g. "unsigned/raw-globals") — which lever combination produced `source`. */
+  candidateLabel?: string;
 }
 
 /** MEASURED size of the remaining gap (merge-time): the best compiling candidate's absolute
