@@ -104,6 +104,9 @@ export function Explorer({
       if (filters.decline && !declineClassesOf(r).includes(filters.decline)) {
         return false;
       }
+      if (filters.symbols === 'with' && !r.asmlift.symbolMap) {
+        return false;
+      }
       if (q && !r.sym.toLowerCase().includes(q)) {
         return false;
       }
@@ -261,6 +264,17 @@ export function Explorer({
           onChange={(v) => set({ feature: v })}
           options={[{ value: '', label: 'All' }, ...features.map((f) => ({ value: f, label: f }))]}
         />
+        <button
+          onClick={() => set({ symbols: filters.symbols === 'with' ? '' : 'with' })}
+          title="only rows asmlift ran with the project's symbol map"
+          className={`rounded-md border px-3 py-1.5 text-xs ${
+            filters.symbols === 'with'
+              ? 'border-teal-600 bg-teal-900/40 text-teal-300'
+              : 'border-slate-700 text-slate-300 hover:bg-slate-800'
+          }`}
+        >
+          with symbols
+        </button>
         <button
           onClick={() => void setFilters(null)}
           className="rounded-md border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-800"

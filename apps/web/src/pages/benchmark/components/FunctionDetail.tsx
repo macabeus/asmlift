@@ -6,7 +6,7 @@ import type { ShareState } from '../../../shared/utils/permalink';
 import { formatC } from '../lib/format-c';
 import { playgroundShare } from '../lib/playground';
 import { DECOMPILER_COLOR, TOOLCHAIN_LABEL } from '../theme';
-import { Chip, GapBadge, OutcomeBadge } from './ui/Badge';
+import { Chip, GapBadge, OutcomeBadge, SymbolsBadge } from './ui/Badge';
 
 // The Benchmark's code-block chrome (the shared CodeBlock only fixes scroll/whitespace/mono).
 const CODE_PRE = 'max-h-[46vh] rounded-md bg-slate-950/70 p-3 text-[12px] leading-relaxed text-slate-200';
@@ -60,11 +60,28 @@ function DecompilerColumn({
         </span>
         <div className="flex items-center gap-2">
           <OutcomeBadge outcome={result.outcome} />
+          <SymbolsBadge result={result} />
           <span className="font-mono text-xs text-slate-400">objdiff {scoreLabel(result)}</span>
         </div>
       </div>
+      {/* Map-symbol provenance: every map symbol the winning candidate's output references. */}
+      {result.symbolsUsed && result.symbolsUsed.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {result.symbolsUsed.map((s) => (
+            <Chip key={s.name}>
+              {s.name}
+              {s.shape && <span className="ml-1 text-slate-500">{s.shape}</span>}
+            </Chip>
+          ))}
+        </div>
+      )}
       <Code text={result.source} language={language} />
       <div className="text-xs text-slate-400 space-y-1">
+        {result.candidateLabel && (
+          <div className="font-mono text-slate-500" title="the candidate spelling that won the differ ranking">
+            winner: {result.candidateLabel}
+          </div>
+        )}
         <div className="flex flex-wrap gap-x-3 gap-y-1 font-mono">
           {result.outcome === 'declined' || result.outcome === 'failed' ? (
             // Marker stubs and failure text have no meaningful readability — a number here
