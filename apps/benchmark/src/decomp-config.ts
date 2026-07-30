@@ -161,10 +161,20 @@ export function writeScoreConfig(id: ToolchainId, dir: string, elf?: string, ctx
  *  asmlift's typedef prelude added only when the context does not already own `u8` — a
  *  duplicate typedef is a C89 hard error, a missing one makes every candidate noncompile. */
 export function materializeScoringContext(ctxI: string, sym: string, dir: string): string {
-  const ownsU8 = /typedef\s+[^;]*\bu8\s*;/.test(ctxI);
-  writeFileSync(
-    join(dir, 'ctx.i'),
-    `#define NULL ((void *)0)\n${ownsU8 ? '' : `${C_TYPEDEFS}\n`}${stripPrototype(ctxI, sym)}\n`,
-  );
+  // Per-NAME, not all-or-nothing: a context can own SOME of the prelude's typedefs (af's
+  // header-less manifests vendor just `typedef short s16;`). Adding the whole prelude then
+  // re-typedefs that name — a C89 hard error that makes every candidate noncompile — while
+  // adding none leaves the rest of the family undeclared. So keep exactly the ones the
+  // context does not already define.
+  const kept = C_TYPEDEFS.trim()
+    .split(';')
+    .filter((d) => d.trim())
+    .map((d) => `${d.trim()};`)
+    .filter((d) => {
+      const name = d.match(/(\w+);$/)?.[1];
+      return name ? !new RegExp(`typedef\\s+[^;]*\\b${name}\\s*;`).test(ctxI) : false;
+    });
+  const prelude = kept.length > 0 ? `${kept.join('')}\n` : '';
+  writeFileSync(join(dir, 'ctx.i'), `#define NULL ((void *)0)\n${prelude}${stripPrototype(ctxI, sym)}\n`);
   return 'ctx.i';
 }

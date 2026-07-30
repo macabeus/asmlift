@@ -102,9 +102,24 @@ describe('real-row scoring context (ctx.i + wrapped compile command)', () => {
     inDir((dir) => {
       const ctxI = 'typedef unsigned char u8;\ns32 keepMe(s32);\ns32 sq(s32);\n';
       expect(materializeScoringContext(ctxI, 'sq', dir)).toBe('ctx.i');
-      expect(readFileSync(join(dir, 'ctx.i'), 'utf8')).toBe(
-        '#define NULL ((void *)0)\ntypedef unsigned char u8;\ns32 keepMe(s32);\n\n',
-      );
+      const text = readFileSync(join(dir, 'ctx.i'), 'utf8');
+      expect(text.startsWith('#define NULL ((void *)0)\n')).toBe(true);
+      expect(text.endsWith('typedef unsigned char u8;\ns32 keepMe(s32);\n\n')).toBe(true); // verbatim, own proto gone
+      expect(text).not.toContain('typedef unsigned char u8;typedef'); // the ctx already owns u8
+      expect(text).toContain('typedef int s32;'); // …but not s32, so the prelude supplies it
+    });
+  });
+
+  test('the typedef guard is PER NAME — a context owning only s16 keeps the rest of the family', () => {
+    // af's manifests are header-less (host cpp cannot preprocess them), so their vendored
+    // context is literally `typedef short s16;`. An all-or-nothing guard either re-typedefs
+    // s16 (C89 hard error → every candidate noncompiles) or leaves u8/u32/… undeclared.
+    inDir((dir) => {
+      materializeScoringContext('typedef short s16;\n', 'f', dir);
+      const text = readFileSync(join(dir, 'ctx.i'), 'utf8');
+      expect(text.match(/typedef short s16;/g)).toHaveLength(1);
+      expect(text).toContain('typedef unsigned char u8;');
+      expect(text).toContain('typedef int s32;');
     });
   });
 
