@@ -891,11 +891,20 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     }
   }
 
-  // An unresolvable value: strict mode keeps the `"?"` sentinel (assertResolved trips at the
-  // boundary — loud in the PROCESS); annotate mode emits a marker (the undefined ASMLIFT_ERROR
-  // symbol — loud in the ARTIFACT, function still complete).
-  const mkGap = (reason: string, args: Expr[]): Expr =>
-    onGap === 'annotate' ? { k: 'marker', reason, args } : { k: 'var', name: '?' };
+  // An unresolvable value: strict mode keeps the `"?"` sentinel AND records the reason — the
+  // decline thrown below names the actual gaps ("unmodelled instruction 'adde'"), the same
+  // reasons annotate mode's markers carry, instead of the anonymous `?` that assertResolved
+  // would report at the boundary (assertResolved stays as the backstop for any other producer).
+  // Annotate mode emits a marker (the undefined ASMLIFT_ERROR symbol — loud in the ARTIFACT,
+  // function still complete).
+  const strictGaps: string[] = [];
+  const mkGap = (reason: string, args: Expr[]): Expr => {
+    if (onGap === 'annotate') {
+      return { k: 'marker', reason, args };
+    }
+    strictGaps.push(reason);
+    return { k: 'var', name: '?' };
+  };
 
   // Lower ONE def's operation to an Expr, rendering operands through `e`. Shared between the
   // inline-at-use path (exprWith) and the materialized-temp path (sideEffects), so both spell a
@@ -1621,6 +1630,14 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
   };
 
   const body = recognizeForLoops(structureRegion(entry, null));
+  // Strict-mode gaps decline HERE, naming the reasons — the same text annotate's markers
+  // carry, so the two mode surfaces report the same decline (the reproduction scripts run
+  // strict; the benchmark rows store annotate markers — fidelity holds them against each
+  // other). Without this, the `?` sentinels reach assertResolved and decline anonymously.
+  if (strictGaps.length > 0) {
+    const reasons = [...new Set(strictGaps)].join('; ');
+    throw new StructureError(`${strictGaps.length} unresolvable value(s) in '${fn.name}' — ${reasons}`);
+  }
   // v* = coalesced/materialized locals; t* = sequentialize's swap-cycle temps (varType-only —
   // they have no Value, so they are collected from varType, not varName).
   const localNames = [...new Set([...varName.values(), ...[...varType.keys()].filter((n) => /^t\d+$/.test(n))])].filter(
