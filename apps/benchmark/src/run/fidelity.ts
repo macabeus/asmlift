@@ -122,6 +122,22 @@ async function checkAsmlift(r: FunctionResult): Promise<Verdict> {
       reason: `declined row: exit ${code}, stderr lacks [declined]`,
     };
   }
+  if (r.asmlift.outcome === 'noncompile') {
+    // the row's `source` is the ANNOTATE-mode emission (marker-free, but it does not compile);
+    // the scoring-mode CLI the script runs never gets a scorable object, so it exits 1 with an
+    // EMPTY stdout. Comparing stdout to the row's source would therefore always "diverge" —
+    // what must reproduce is the FAILURE, so assert the exit + the no-candidate signature and
+    // leave stdout alone.
+    if (code === 1 && stderr.includes(`no scorable candidate for '${r.sym}'`)) {
+      return { id: r.id, tool: 'asmlift', status: 'ok' };
+    }
+    return {
+      id: r.id,
+      tool: 'asmlift',
+      status: r.tier === 'real' ? 'warn' : 'fail',
+      reason: `noncompile row: exit ${code}, stderr lacks "no scorable candidate for '${r.sym}'"`,
+    };
+  }
   const wantExit = r.asmlift.outcome === 'match' ? 0 : 1;
   const sameExit = code === wantExit;
   const sameSource = stdout.trim() === r.asmlift.source.trim();
