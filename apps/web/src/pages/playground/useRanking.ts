@@ -9,6 +9,7 @@
 // current one — a superseded response is dropped. So the ranked source shown is always for the asm
 // on screen, or nothing.
 import type { RankedResult } from '@asmlift/core/rank';
+import type { SymbolMap } from '@asmlift/core/symbols';
 import type { TargetDescription } from '@asmlift/core/target';
 import { useEffect, useRef, useState } from 'react';
 
@@ -27,10 +28,13 @@ export interface RankingInput {
   name: string | undefined;
   targetId: string;
   target: TargetDescription;
+  /** the Symbols pane's parsed map — the worker enumerates+scores the named spellings with it
+   *  (self-declared, via core's declaration synthesis); a new map identity re-ranks (H1). */
+  symbols?: SymbolMap;
 }
 
 export function useRanking(input: RankingInput): Ranking {
-  const { eligible, asm, name, targetId, target } = input;
+  const { eligible, asm, name, targetId, target, symbols } = input;
   const [ranking, setRanking] = useState<Ranking>({ status: 'off' });
   const workerRef = useRef<Worker | null>(null);
   const currentReqId = useRef(0); // the id of the latest posted request — the stale-guard anchor
@@ -70,8 +74,8 @@ export function useRanking(input: RankingInput): Ranking {
     }
     const reqId = ++currentReqId.current; // new request supersedes anything in flight
     setRanking({ status: 'loading' }); // clear any prior result from the view immediately (H1 layer 1)
-    workerRef.current?.postMessage({ reqId, name, asm, target } satisfies RankRequest);
-  }, [eligible, asm, name, targetId, target]);
+    workerRef.current?.postMessage({ reqId, name, asm, target, ...(symbols ? { symbols } : {}) } satisfies RankRequest);
+  }, [eligible, asm, name, targetId, target, symbols]);
 
   return ranking;
 }

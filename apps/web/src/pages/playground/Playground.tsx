@@ -245,20 +245,21 @@ export function Playground({
     active && // don't run WASM scoring while this view is hidden (e.g. a benchmark deep-link)
     rankTarget.compiler === 'agbcc' &&
     debounced.backendId === 'c' &&
-    // A symbol-mapped run stays DETERMINISTIC: the wasm scorer compiles candidates without the
-    // cli's declaration synthesis (declare.ts), so a map-named candidate cannot compile and only
-    // the /raw-globals spellings would survive — the ranked "best" would then silently replace
-    // the named spellings in the Source view. Off until synthesis is ported to the browser scorer.
-    !symbolMap &&
     !!fnName &&
     !nameInvalid &&
     !!debounced.asm.trim();
+  // Symbol-mapped runs rank too: the worker enumerates the named spellings alongside
+  // '/raw-globals' and compiles each self-declared — core's declaration synthesis
+  // (@asmlift/core/declare, the same renderer the cli scorer prepends), so a map-named
+  // candidate scores instead of silently losing to its raw sibling. A parse-errored Symbols
+  // pane leaves symbolMap undefined — ranked raw, matching the decompile it sits beside.
   const ranking = useRanking({
     eligible: rankEligible,
     asm: debounced.asm,
     name: fnName,
     targetId: debounced.targetId,
     target: rankTarget,
+    ...(symbolMap ? { symbols: symbolMap } : {}),
   });
   // The Source view shows the RANKED-BEST C when scoring has resolved for the current input;
   // otherwise the deterministic decompile (instant, and the fallback if ranking is off/loading/
