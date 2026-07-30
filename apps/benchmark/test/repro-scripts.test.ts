@@ -137,12 +137,19 @@ describe('asmliftScript (pinned)', () => {
     }
   });
 
-  test('real rows carry the context-scoring caveat; synthetic rows do not', () => {
-    const real = rows.find((r) => r.tier === 'real');
-    if (real) {
-      expect(asmliftScript(real)).toContain('real tier:');
+  test('real rows state the ctx-world scoring (step 1 materializes the vendored context)', () => {
+    const real = rows.filter((r) => r.tier === 'real');
+    expect(real.length).toBeGreaterThan(0);
+    for (const fn of real) {
+      const s = asmliftScript(fn);
+      expect(s, fn.id).toContain('real tier:');
+      expect(s, fn.id).toContain('ctx.i'); // the materialized scoring context is named
+      // the old "may grade differently" caveat is gone — scoring now happens IN the ctx world
+      expect(s, fn.id).not.toContain('may grade');
     }
-    expect(asmliftScript(row('synthetic:add:ido7.1'))).not.toContain('real tier:');
+    const synth = asmliftScript(row('synthetic:add:ido7.1'));
+    expect(synth).not.toContain('real tier:');
+    expect(synth).not.toContain('ctx.i');
   });
 
   test('real rows state the pinned-checkout recipe with real commands (comments only)', () => {

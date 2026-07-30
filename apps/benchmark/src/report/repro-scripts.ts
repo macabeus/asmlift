@@ -209,9 +209,9 @@ PROTO_INPUT`
   const realNote =
     fn.tier === 'real'
       ? `
-# (real tier: the benchmark scored candidates inside the project's own typedef context; this
-# standalone score uses the plain typedef prelude, so a compile-sensitive candidate may grade
-# differently than the published row)`
+# (real tier: candidates are scored INSIDE the project's own context — step 1 materializes the
+# row's vendored context next to target.o as ctx.i, and the generated decomp.yaml concatenates
+# it ahead of every candidate, so this scores in the same world the benchmark did)`
       : '';
   return `#!/usr/bin/env bash
 # Reproduce asmlift on \`${fn.sym}\` — benchmark function ${fn.id}.

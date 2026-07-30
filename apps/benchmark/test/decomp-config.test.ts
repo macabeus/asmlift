@@ -12,7 +12,7 @@ import { describe, expect, test } from 'vitest';
 import YAML from 'yaml';
 
 import { shq } from '../src/compile/util';
-import { renderScoreCommand, writeScoreConfig } from '../src/decomp-config';
+import { materializeScoringContext, renderScoreCommand, writeScoreConfig } from '../src/decomp-config';
 
 describe('committed decomp.yaml configs mirror the built-in toolchain invocations', () => {
   test('agbcc: cpp → agbcc → as, built-in flags (compileCandAgbcc)', () => {
@@ -78,5 +78,70 @@ describe('writeScoreConfig (the repro decomp.yaml)', () => {
 
   test('map-free rows: no elf key at all', () => {
     expect('elf' in written().tools.asmlift).toBe(false);
+  });
+});
+
+// Real rows are SCORED inside the row's vendored project context (makeRealCompile's richest
+// strategy, compile/real.ts) — `bench target` materializes that exact prelude as ctx.i and the
+// generated compile command concatenates it ahead of every candidate, so the repro scripts
+// grade in the same world the benchmark did.
+describe('real-row scoring context (ctx.i + wrapped compile command)', () => {
+  interface Doc {
+    tools: { asmlift: { target: string; compiler?: string; elf?: string } };
+  }
+  const inDir = <T>(f: (dir: string) => T): T => {
+    const dir = mkdtempSync(join(tmpdir(), 'score-ctx-'));
+    try {
+      return f(dir);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+
+  test('ctx.i mirrors makeRealCompile: NULL re-provided, own prototype stripped, rest verbatim', () => {
+    inDir((dir) => {
+      const ctxI = 'typedef unsigned char u8;\ns32 keepMe(s32);\ns32 sq(s32);\n';
+      expect(materializeScoringContext(ctxI, 'sq', dir)).toBe('ctx.i');
+      expect(readFileSync(join(dir, 'ctx.i'), 'utf8')).toBe(
+        '#define NULL ((void *)0)\ntypedef unsigned char u8;\ns32 keepMe(s32);\n\n',
+      );
+    });
+  });
+
+  test("a context that does not own u8 (af's header-less manifests) gets the typedef prelude", () => {
+    inDir((dir) => {
+      // mirror of makeRealCompile's proDefsU8 guard, generalized to the vendored context: a
+      // duplicate typedef is a C89 hard error, a missing one makes every candidate noncompile
+      materializeScoringContext('typedef struct { unsigned int w0; } Gfx;\n', 'sq', dir);
+      const text = readFileSync(join(dir, 'ctx.i'), 'utf8');
+      expect(text).toContain('typedef unsigned char u8;');
+      expect(text.startsWith('#define NULL ((void *)0)\n')).toBe(true);
+      // and one that already owns u8 must NOT get a second copy
+      materializeScoringContext('typedef uint8_t u8;\n', 'sq', dir);
+      expect(readFileSync(join(dir, 'ctx.i'), 'utf8')).not.toContain('typedef unsigned char u8;');
+    });
+  });
+
+  test('the generated compile command concatenates ctx.i ahead of the candidate', () => {
+    inDir((dir) => {
+      writeScoreConfig('agbcc', dir, undefined, 'ctx.i');
+      const doc = YAML.parse(readFileSync(join(dir, 'decomp.yaml'), 'utf8')) as Doc;
+      expect(doc.tools.asmlift.compiler).toBe(
+        'cat ctx.i {{inputPath}} > {{inputPath}}.ctx.c && ' +
+          renderScoreCommand('agbcc').replaceAll('{{inputPath}}', '{{inputPath}}.ctx.c'),
+      );
+    });
+  });
+
+  test('every toolchain template stays substitutable after the wrap (placeholders intact)', () => {
+    inDir((dir) => {
+      for (const id of ['agbcc', 'ido7.1', 'gcc2.7.2', 'gcc2.7.2kmc'] as const) {
+        writeScoreConfig(id, dir, undefined, 'ctx.i');
+        const doc = YAML.parse(readFileSync(join(dir, 'decomp.yaml'), 'utf8')) as Doc;
+        expect(doc.tools.asmlift.compiler, id).toContain('{{inputPath}}');
+        expect(doc.tools.asmlift.compiler, id).toContain('{{outputPath}}');
+        expect(doc.tools.asmlift.compiler, id).toContain('cat ctx.i {{inputPath}}');
+      }
+    });
   });
 });

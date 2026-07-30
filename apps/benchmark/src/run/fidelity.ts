@@ -7,9 +7,11 @@
 //   fail — the script itself broke (bash/usage/timeout/pre-step), the m2c output diverged from
 //          the row (its inputs are fully published, byte-equality is the contract), or an
 //          asmlift SYNTHETIC run landed on a different outcome/source than the row.
-//   warn — an asmlift divergence in a class the scripts themselves document as approximate:
-//          real-tier scoring context, and prototype hints the CLI cannot carry. Warns are
-//          listed one-per-row — visible, never silent — but do not block publish.
+//   warn — an asmlift divergence on a real-tier row. The scripts reproduce the benchmark's
+//          scoring context by construction (`bench target` materializes the row's vendored
+//          ctx into the compile command), so drift here means environment skew, not a
+//          documented approximation. Warns are listed one-per-row — visible, never silent —
+//          but do not block publish.
 import type { FunctionResult } from '@asmlift/bench-schema';
 import { execSync, spawn } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -129,8 +131,9 @@ async function checkAsmlift(r: FunctionResult): Promise<Verdict> {
   const reason = `${sameExit ? '' : `exit ${code} (row: ${r.asmlift.outcome})`}${sameExit || sameSource ? '' : '; '}${
     sameSource ? '' : 'source diverged'
   }`;
-  // real tier scores outside the project context; prototype hints are not expressible via the
-  // CLI — both documented in the scripts themselves. Divergence there is a WARN, not a fail.
+  // real tier: the script scores inside the row's vendored context (`bench target`
+  // materializes it), so a divergence here is environment skew — kept a visible WARN rather
+  // than a hard fail so one machine quirk cannot block publish silently or loudly wrongly.
   return { id: r.id, tool: 'asmlift', status: r.tier === 'real' ? 'warn' : 'fail', reason };
 }
 

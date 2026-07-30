@@ -28,12 +28,12 @@ import { cpus } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 
-import { loadManifestsForVendor, resolveProjectRoot } from './cases/manifests';
+import { loadManifests, loadManifestsForVendor, resolveProjectRoot } from './cases/manifests';
 import { resolveProjectElf } from './cases/project-elf';
 import { realCases } from './cases/real';
 import { syntheticCases } from './cases/synthetic';
 import { RESULTS_DIR } from './config';
-import { writeScoreConfig } from './decomp-config';
+import { materializeScoringContext, writeScoreConfig } from './decomp-config';
 import { merge } from './report/merge';
 import { publish } from './report/publish';
 import { type Tier, orchestrate } from './run/orchestrate';
@@ -138,8 +138,22 @@ switch (command) {
         }
       }
     }
-    writeScoreConfig(c.toolchain.id, out, elf);
-    console.log(`Wrote ${join(out, 'target.o')} + decomp.yaml (${c.toolchain.id}${elf ? ' + symbol-map ELF' : ''})`);
+    // REAL rows are scored inside the project's vendored context — materialize it so the
+    // generated compile command grades the candidate in the same world the benchmark did
+    // (synthetic rows have no context: they are scored bare, and the config stays bare).
+    let ctxFile: string | undefined;
+    if (c.tier === 'real') {
+      const man = loadManifests().find((m) => m.project === c.project);
+      if (man) {
+        ctxFile = materializeScoringContext(man.vendored(c.sym).ctxI, c.sym, out);
+      }
+    }
+    writeScoreConfig(c.toolchain.id, out, elf, ctxFile);
+    console.log(
+      `Wrote ${join(out, 'target.o')} + decomp.yaml (${c.toolchain.id}${elf ? ' + symbol-map ELF' : ''}${
+        ctxFile ? ' + scoring context' : ''
+      })`,
+    );
     break;
   }
   case 'fidelity': {
