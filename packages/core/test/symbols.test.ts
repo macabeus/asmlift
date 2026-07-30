@@ -253,3 +253,48 @@ describe('register-offset addressing lowers exactly (never a silent index drop)'
     expect(src).toContain('a1'); // the index register (r2 = a2? — at minimum both regs participate)
   });
 });
+
+describe('a POINTER-shaped global under arithmetic is spelled CAST-THEN-ADD', () => {
+  // A pointer global's declaration is the PROJECT's, and the map deliberately does not model the
+  // pointee (declare.ts spells every pointer global `void *` — "load/store/compare of the 4-byte
+  // cell are identical for any object-pointer type"). True of the CELL; false of arithmetic on
+  // the loaded VALUE: C scales `gPtr + K` by sizeof(*gPtr), which is 1 under the synthesized
+  // `void *` and 0x5C under (say) the project's real struct pointer. Add-then-cast
+  // `(u8 *)(gPtr + a0)` is therefore byte-correct in exactly ONE world — a silent wrongness that
+  // scores as a match here and reads the wrong address in the user's tree. The honest spelling
+  // makes the stride explicit: `(u8 *)gPtr + a0` — the same address in EVERY world.
+  // (snowboardkids2:func_80037FE0_38BE0 flipped nonmatch → match on exactly this.)
+  const PTR_MAP = mapOf([[0x03001234, { name: 'gPtr', kind: 'data', shape: 'pointer' }]]);
+  // r1 = gPtr (the cell's value); r1 += a0; read at +16
+  const derefAt = (ld: string) =>
+    `\tldr\tr1, .L1\n\tldr\tr1, [r1]\n\tadds\tr1, r1, r0\n\t${ld}\n\tbx\tlr\n.L1:\n\t.word\t0x03001234\n`;
+
+  test('byte access: the pointer is cast BEFORE the add, and the offset stays in the index', () => {
+    const src = run('f', derefAt('ldrb\tr0, [r1, #0x10]'), PTR_MAP);
+    expect(src).toContain('((u8 *)gPtr + a0)[16]');
+    expect(src).not.toContain('(u8 *)(gPtr'); // add-then-cast: right only under `void *`
+    expect(src).not.toContain('((u8 *)gPtr)[a0'); // folding into the index re-scales by the width
+  });
+
+  test('a WIDER access keeps the byte add and casts the whole base to the access type', () => {
+    // the add is bytes either way; only the deref changes stride, so the byte-pointer add stays
+    // inside and the access-width cast wraps it — address gPtr + a0 + 16 in every world
+    const src = run('f', derefAt('ldr\tr0, [r1, #0x10]'), PTR_MAP);
+    expect(src).toContain('((s32 *)((u8 *)gPtr + a0))[4]'); // 16 bytes / 4-byte stride
+    expect(src).not.toMatch(/\*\)\(gPtr \+/); // never the add-then-cast shape at any width
+  });
+
+  test('under an operator C rejects for pointers, the cell spells integer math', () => {
+    // `gPtr & 0xFF` is not C at all; the asm did 32-bit integer math on the address value
+    const body =
+      '\tldr\tr1, .L1\n\tldr\tr1, [r1]\n\tmovs\tr0, #0xFF\n\tands\tr0, r1\n\tbx\tlr\n.L1:\n\t.word\t0x03001234\n';
+    const src = run('f', body, PTR_MAP);
+    expect(src).toContain('(u32)gPtr');
+  });
+
+  test('INERT without the shape fact: a plain data symbol keeps the raw add', () => {
+    const plain = mapOf([[0x03001234, { name: 'gPtr', kind: 'data' }]]);
+    const src = run('f', derefAt('ldrb\tr0, [r1, #0x10]'), plain);
+    expect(src).not.toContain('(u8 *)gPtr +'); // nothing to legalize — gPtr is not a pointer cell
+  });
+});

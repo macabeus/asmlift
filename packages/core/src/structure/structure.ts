@@ -477,6 +477,19 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     ? { info: (n) => symbols.get(n), noteArray: (n, t) => shapedGlobalTypes.set(n, t) }
     : undefined;
 
+  /** A bare `gSym` naming a map-declared POINTER global — the VALUE of a pointer cell. Its C
+   *  type is whatever the PROJECT's own header says it points at, which the map deliberately
+   *  does not model (declare.ts spells every pointer global `void *`: "load/store/compare of the
+   *  4-byte cell are identical for any object-pointer type"). That holds for the CELL, but NOT
+   *  for arithmetic on the loaded value — see spellPtrGlobalArith. `ctype` cannot see this: it
+   *  types only params/locals, so a pointer global renders `undefined` there. */
+  const isPtrGlobal = (x: Expr): boolean => x.k === 'var' && symCtx?.info(x.name)?.shape === 'pointer';
+
+  /** Operands `-`/`~` cannot take as spelled: a rendered pointer, a bare `&gSym`, a pointer
+   *  global's value. All three are ill-formed C under a unary arithmetic operator — the asm did
+   *  32-bit integer math on the address, so that is what gets spelled. */
+  const needsIntSpelling = (x: Expr): boolean => ctype(x)?.kind === 'ptr' || x.k === 'addr' || isPtrGlobal(x);
+
   // --- loop discovery (loops.ts): natural loops via dominator back-edges + the nesting forest ---
   const forest = analyzeLoops(fn, dom);
 
@@ -993,6 +1006,38 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
       const intifyAddr = (x: Expr): Expr => (x.k === 'addr' ? { k: 'cast', to: T.u(32), e: x } : x);
       l = intifyAddr(l);
       r = intifyAddr(r);
+      // The SAME hazard one level down, for a POINTER-shaped global's VALUE (`gPtr`, isPtrGlobal):
+      // C scales `gPtr + K` by sizeof(*gPtr) — 1 under the map's synthesized `void *`, but
+      // whatever the PROJECT's header declares (a 0x5C-byte struct, say) in the world a user
+      // actually recompiles in. The asm added BYTES, so the honest spelling makes the stride
+      // explicit: CAST-THEN-ADD, `(u8 *)gPtr + K`, the same address in EVERY world. Add-then-cast
+      // (`(u8 *)(gPtr + K)`, what the backend's deref legalization would otherwise produce) is
+      // byte-correct in exactly one of them — a silent wrongness, the class this project refuses.
+      // NOT foldable into the deref index either: `((u8 *)gPtr)[K + off]` re-scales K by the
+      // ACCESS width, a different address whenever that width is not 1.
+      // Under the non-additive operators C rejects a pointer outright, so there the honest
+      // spelling is integer math on the cell — exactly intifyAddr's `(u32)&gSym` rule.
+      const bytePtr = (x: Expr): Expr => ({ k: 'cast', to: T.ptr(T.u(8)), e: x });
+      const intifyPtrGlobal = (x: Expr): Expr => ({ k: 'cast', to: T.u(32), e: x });
+      if (op === '+' || op === '-') {
+        // `ptr ± int` and `ptr - ptr` are byte arithmetic once both sides are byte pointers;
+        // `ptr + ptr` and `int - ptr` are not C at all, so the second pointer goes integer.
+        const bothPtr = isPtrGlobal(l) && isPtrGlobal(r);
+        if (isPtrGlobal(l)) {
+          l = bytePtr(l);
+        }
+        if (isPtrGlobal(r)) {
+          r = bothPtr && op === '-' ? bytePtr(r) : op === '+' && !bothPtr ? bytePtr(r) : intifyPtrGlobal(r);
+        }
+      } else if (op !== '&&' && op !== '||') {
+        // (`&&`/`||` take a pointer operand legally — a truth test, no arithmetic.)
+        l = isPtrGlobal(l) ? intifyPtrGlobal(l) : l;
+        r = isPtrGlobal(r) ? intifyPtrGlobal(r) : r;
+      }
+      // SCOPE: this and intifyAddr cover the ARITHMETIC escapes. A pointer global under a
+      // COMPARISON (`gPtr < K` — C compares unsigned whatever the asm's icmp_s* said) is the same
+      // class as intifyAddrCmp's `addr` rule and is deliberately left alone here: it is valid C
+      // today, so closing it would churn spellings for a signedness case no row exercises.
       return { k: 'bin', op, l, r };
     }
     // `-`/`~` on a pointer rendering is equally not C — same honest integer cast as above.
@@ -1028,11 +1073,11 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     }
     if (d.opcode === 'neg') {
       const x = e(d.operands[0]);
-      return { k: 'un', op: '-', e: ctype(x)?.kind === 'ptr' || x.k === 'addr' ? { k: 'cast', to: T.s(32), e: x } : x };
+      return { k: 'un', op: '-', e: needsIntSpelling(x) ? { k: 'cast', to: T.s(32), e: x } : x };
     }
     if (d.opcode === 'not') {
       const x = e(d.operands[0]);
-      return { k: 'un', op: '~', e: ctype(x)?.kind === 'ptr' || x.k === 'addr' ? { k: 'cast', to: T.s(32), e: x } : x };
+      return { k: 'un', op: '~', e: needsIntSpelling(x) ? { k: 'cast', to: T.s(32), e: x } : x };
     }
     // Width-narrowing casts: `zext`/`sext` widen a `width`-bit value back to 32 → C `(u8)e`/`(s8)e`.
     if (d.opcode === 'zext') {
