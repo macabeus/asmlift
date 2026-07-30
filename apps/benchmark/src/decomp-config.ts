@@ -17,14 +17,12 @@
 import { type CandidateCompiler, compileFromCommand } from '@asmlift/cli/compile-command';
 import { loadDecompConfig, resolveTarget } from '@asmlift/cli/config';
 import { type MatchScore, scoreObjects } from '@asmlift/cli/score';
-import { C_TYPEDEFS } from '@asmlift/core/target';
 import { GCC272_TOOLCHAIN, GCC_KMC_TOOLCHAIN, IDO_TOOLCHAIN, MWCC_PPC_TOOLCHAIN, TOOLCHAIN } from '@asmlift/toolchains';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
 
-import { stripPrototype } from './compile/agbcc';
 import { shq } from './compile/util';
 import type { ToolchainId } from './toolchains';
 
@@ -142,8 +140,9 @@ export function writeScoreConfig(id: ToolchainId, dir: string, elf?: string, ctx
     doc.tools.asmlift.elf = elf;
   }
   if (ctxFile) {
-    // REAL rows are scored INSIDE the project's vendored context (compile/real.ts's richest
-    // strategy) — the same world m2c is scored in. Wrap the toolchain's own command so every
+    // REAL rows are scored INSIDE the escalation rung compile/real.ts stopped at for this row
+    // (usually the project's vendored context) — the same world m2c is scored in. Wrap the
+    // toolchain's own command so every
     // candidate is concatenated after that context: the reproduction grades where the
     // benchmark graded. The CLI's prelude probe sees a context-injecting template and drops
     // its typedefs + synthesized declarations on its own, so no flag says any of this.
@@ -155,26 +154,13 @@ export function writeScoreConfig(id: ToolchainId, dir: string, elf?: string, ctx
 }
 
 /** Materialize one real row's scoring context as `<dir>/ctx.i` (returns its basename, the name
- *  the generated compile command concatenates). Mirrors makeRealCompile's richest strategy
- *  exactly: `NULL` re-provided (the vendored context is preprocessed, so the macro is gone),
- *  the function's OWN prototype stripped (the candidate's definition must be the only one), and
- *  asmlift's typedef prelude added only when the context does not already own `u8` — a
- *  duplicate typedef is a C89 hard error, a missing one makes every candidate noncompile. */
-export function materializeScoringContext(ctxI: string, sym: string, dir: string): string {
-  // Per-NAME, not all-or-nothing: a context can own SOME of the prelude's typedefs (af's
-  // header-less manifests vendor just `typedef short s16;`). Adding the whole prelude then
-  // re-typedefs that name — a C89 hard error that makes every candidate noncompile — while
-  // adding none leaves the rest of the family undeclared. So keep exactly the ones the
-  // context does not already define.
-  const kept = C_TYPEDEFS.trim()
-    .split(';')
-    .filter((d) => d.trim())
-    .map((d) => `${d.trim()};`)
-    .filter((d) => {
-      const name = d.match(/(\w+);$/)?.[1];
-      return name ? !new RegExp(`typedef\\s+[^;]*\\b${name}\\s*;`).test(ctxI) : false;
-    });
-  const prelude = kept.length > 0 ? `${kept.join('')}\n` : '';
-  writeFileSync(join(dir, 'ctx.i'), `#define NULL ((void *)0)\n${prelude}${stripPrototype(ctxI, sym)}\n`);
+ *  the generated compile command concatenates ahead of every candidate).
+ *
+ *  `prelude` is a rung of compile/real.ts's escalation ladder — the ONE the harness actually
+ *  scored this row's source in (compile/real.ts's resolveScoringPrelude picks it). It is not
+ *  always the richest: a project context can REJECT what bare typedefs accept, and materializing
+ *  the vendored context for such a row leaves the script with no scorable candidate at all. */
+export function materializeScoringContext(prelude: string, dir: string): string {
+  writeFileSync(join(dir, 'ctx.i'), prelude);
   return 'ctx.i';
 }
