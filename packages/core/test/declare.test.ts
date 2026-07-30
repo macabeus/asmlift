@@ -63,8 +63,28 @@ test('a value-referenced code symbol gets a void prototype', () => {
   expect(renderDeclarations([ref('DoThing', { kind: 'code' })])).toBe('void DoThing(void);\n');
 });
 
-test('nothing guesses: a shapeless data symbol renders NO declaration', () => {
-  expect(renderDeclarations([ref('gMystery', { kind: 'data' })])).toBe('');
+test('a shapeless (name-only) data symbol declares the u32 cell — the documented exception', () => {
+  // symtab-only map projects (marioparty3) publish named-spelling rows whose eval compiled
+  // inside project headers; the self-declared world needs SOME object decl for the name. The
+  // u32 cell is address-identical for `&name` forms and word-exact for the bare spelling; a
+  // narrower bare access under it can only LOSE score (target bytes derive from truth decls).
+  expect(renderDeclarations([ref('gMystery', { kind: 'data' })])).toBe('extern u32 gMystery;\n');
+  expect(renderDeclarations([ref('gRom', { kind: 'data', const: true })])).toBe('extern const u32 gRom;\n');
+});
+
+test('a name-only symbol with IR access facts declares that exact cell (the width authority)', () => {
+  // rank.ts attaches the candidate's own bare off-0 access width/signedness; the decl must
+  // reproduce it exactly — `extern u16 g;` compiles `g = v` to `sh` where a u32 guess is `sw`.
+  const at = (name: string, access: { width: number; signed: boolean }) => ({
+    ...ref(name, { kind: 'data' }),
+    access,
+  });
+  expect(renderDeclarations([at('frameBufferCount', { width: 2, signed: false })])).toBe(
+    'extern u16 frameBufferCount;\n',
+  );
+  expect(renderDeclarations([at('gLevel', { width: 1, signed: true })])).toBe('extern s8 gLevel;\n');
+  // an un-declarable width (8-byte cell) falls back to the u32 address cell
+  expect(renderDeclarations([at('gWide', { width: 8, signed: false })])).toBe('extern u32 gWide;\n');
 });
 
 test('a narrow scalar without signedness is skipped; a 4-byte one is the C89 enum (s32)', () => {

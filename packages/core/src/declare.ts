@@ -21,13 +21,15 @@
 //     accesses), `const` is the ROM-table spelling;
 //   • code symbols get `void Name(void);` ONLY when value-referenced — call targets are never
 //     in `symbolRefs` (core excludes them: prototyping a called symbol is C89 poison);
-//   • nothing guesses, with ONE documented exception: a symbol without the facts to declare
-//     faithfully is SKIPPED — the candidate then fails to compile LOUDLY and is dropped by
-//     rankBy, while the '/raw-globals' sibling (which names nothing) still scores. The
-//     exception is the 4-byte signless-non-pointer cell (see enumIsSigned): spelled s32 on the
-//     C89 enum=int rule. For a true enum that is the header truth; the residual mis-spell class
-//     (a 4-byte nested-struct member word-read via a dot field) can only LOSE score — the
-//     target bytes derive from the truth decls, so a divergent compile can never false-match.
+//   • nothing guesses, with TWO documented exceptions: a SHAPED symbol without the facts to
+//     declare faithfully is SKIPPED — the candidate then fails to compile LOUDLY and is
+//     dropped by rankBy. Exception one is the 4-byte signless-non-pointer cell (see
+//     enumIsSigned): spelled s32 on the C89 enum=int rule. For a true enum that is the header
+//     truth; the residual mis-spell class (a 4-byte nested-struct member word-read via a dot
+//     field) can only LOSE score — the target bytes derive from the truth decls, so a
+//     divergent compile can never false-match. Exception two is the NAME-ONLY data symbol
+//     (`extern u32 name;` — see the default case): required to reproduce symtab-only map
+//     rows outside project headers, justified by the same only-loses-score argument.
 import { type StructFieldDecl, renderStructDecl } from './backend/cfamily';
 import { type IrType, T } from './ir/types';
 import type { SymbolRef } from './l3/symbol-refs';
@@ -111,7 +113,7 @@ function structDecl(tag: string, layout: SymbolStructField[], size: number | und
 export function renderDeclarations(refs: SymbolRef[]): string {
   const lines: string[] = [];
   const declaredTags = new Set<string>();
-  for (const { name, info } of refs) {
+  for (const { name, info, access } of refs) {
     if (info.kind === 'code') {
       // value-referenced code symbol ((u32)Func): any prototype makes the name visible, and
       // the address is arity-independent. Call targets never reach this module (core excludes
@@ -162,10 +164,24 @@ export function renderDeclarations(refs: SymbolRef[]): string {
         // top-level cv chain the provider collected.
         lines.push(`extern void *${info.volatile ? 'volatile ' : ''}${info.const ? 'const ' : ''}${name};`);
         break;
-      default:
-        // name-only (no sidecar shape): nothing guesses — skip; the candidate fails loud and
-        // the '/raw-globals' sibling keeps scoring.
+      default: {
+        // Name-only (no sidecar shape) — the second documented exception (see the module note;
+        // the first is the 4-byte signless enum cell). Skipping here was the original rule, but
+        // it made every named-spelling row of a symtab-only map project (marioparty3: names
+        // with no DWARF shapes) unreproducible in the self-declared world — the benchmark
+        // compiled those candidates inside the project headers, which declare the symbol.
+        // The width authority is the candidate's OWN IR (ref.access, rank.ts
+        // bareGlobalAccessFacts): a bare `name = v` / `x = name` compiles to the access the
+        // tree performed only under a decl of that exact width (`extern u16 g;` is `sh` where
+        // a guessed u32 is `sw`). Without a bare off-0 access fact, every core spelling goes
+        // through `&name` casts, where any object decl is address-identical — u32 is the
+        // fallback cell. A divergent decl can only LOSE score — the target bytes derive from
+        // the truth decls, so a mis-declared compile can never false-match (same argument as
+        // enumIsSigned).
+        const t = access ? intType(access.width, access.signed) : null;
+        lines.push(`extern ${quals(info)}${t ?? 'u32'} ${name};`);
         break;
+      }
     }
   }
   return lines.length ? lines.join('\n') + '\n' : '';

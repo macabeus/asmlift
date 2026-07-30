@@ -180,4 +180,30 @@ describe('asmliftScript (pinned)', () => {
     }
     expect(asmliftScript(row('synthetic:add:ido7.1'))).not.toContain('SYMBOLS:');
   });
+
+  test('symbol-fed rows LOAD the map: PROJECT_PATH placeholder + --project-root on the pre-step', () => {
+    const withMap = rows.filter((r) => r.asmlift.symbolMap);
+    expect(withMap.length).toBeGreaterThan(0);
+    for (const fn of withMap) {
+      const s = asmliftScript(fn);
+      // the placeholder names the same checkout dir the clone recipe creates
+      const dir = /^#\s+git clone --branch \S+ \S+\.git (\S+)$/m.exec(s)?.[1];
+      expect(dir, fn.id).toBeTruthy();
+      expect(s, fn.id).toContain(`PROJECT_PATH='/path/to/${dir}'`);
+      expect(s, fn.id).toContain(`bench target ${fn.id} --out "$PWD" --project-root "$PROJECT_PATH" 1>&2`);
+      // the old "standalone run does NOT load it" caveat is gone — the script loads the map now
+      expect(s, fn.id).not.toContain('does NOT load');
+    }
+    // kleod's repoDir differs from its GitHub repo name — the placeholder must use repoDir
+    const kleod = withMap.find((r) => r.project === 'kleod');
+    if (kleod) {
+      expect(asmliftScript(kleod)).toContain("PROJECT_PATH='/path/to/klonoa-empire-of-dreams'");
+    }
+    // map-free rows keep the plain pre-step and no placeholder
+    for (const fn of rows.filter((r) => !r.asmlift.symbolMap)) {
+      const s = asmliftScript(fn);
+      expect(s, fn.id).not.toContain('PROJECT_PATH');
+      expect(s, fn.id).not.toContain('--project-root');
+    }
+  });
 });

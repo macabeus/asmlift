@@ -11,13 +11,13 @@
 //          real-tier scoring context, and prototype hints the CLI cannot carry. Warns are
 //          listed one-per-row — visible, never silent — but do not block publish.
 import type { FunctionResult } from '@asmlift/bench-schema';
-import { spawn } from 'node:child_process';
+import { execSync, spawn } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { enforceCheckoutPin } from '../cases/checkout';
-import { loadManifestsForVendor } from '../cases/manifests';
+import { loadManifestsForVendor, resolveProjectRoot } from '../cases/manifests';
 import { M2C_DIR, REPO_ROOT, RESULTS_DIR } from '../config';
 import { asmliftScript, m2cScript } from '../report/repro-scripts';
 import { checkSymbolMapDrift, vendoredMapPath } from './symbol-drift';
@@ -55,11 +55,26 @@ function runScript(script: string): Promise<{ code: number; stdout: string; stde
   });
 }
 
-/** Fill the user placeholders with this machine's real paths — the ONLY edit a user makes. */
-function materialize(script: string): string {
-  return script
+/** Fill the user placeholders with this machine's real paths — the ONLY edit a user makes.
+ *  `projectRoot` (symbol-fed rows) replaces the script's PROJECT_PATH checkout placeholder,
+ *  whatever repoDir it names. Exported for the substitution unit test. */
+export function materialize(script: string, projectRoot?: string): string {
+  let s = script
     .replace("M2C_PATH='/path/to/m2c'", `M2C_PATH='${M2C_DIR}'`)
     .replace("ASMLIFT_PATH='/path/to/asmlift'", `ASMLIFT_PATH='${REPO_ROOT}'`);
+  if (projectRoot !== undefined) {
+    s = s.replace(/PROJECT_PATH='\/path\/to\/[^']*'/, `PROJECT_PATH='${projectRoot}'`);
+  }
+  return s;
+}
+
+// The row's checkout, resolved exactly as vendor does (env override > bench-owned > sibling
+// workspace). Missing checkouts still substitute — `bench target` then warns loudly and the
+// script runs map-less, the same visible degradation a user without the checkout gets.
+let rootCache: Map<string, string> | null = null;
+function projectRootFor(project: string): string | undefined {
+  rootCache ??= new Map(loadManifestsForVendor().map((m) => [m.project, resolveProjectRoot(m)]));
+  return rootCache.get(project);
 }
 
 async function checkM2c(r: FunctionResult): Promise<Verdict> {
@@ -76,7 +91,8 @@ async function checkM2c(r: FunctionResult): Promise<Verdict> {
 }
 
 async function checkAsmlift(r: FunctionResult): Promise<Verdict> {
-  const { code, stdout, stderr } = await runScript(materialize(asmliftScript(r)));
+  const root = r.tier === 'real' ? projectRootFor(r.project) : undefined;
+  const { code, stdout, stderr } = await runScript(materialize(asmliftScript(r), root));
   if (code >= 2) {
     return { id: r.id, tool: 'asmlift', status: 'fail', reason: `script exited ${code}: ${stderr.slice(0, 200)}` };
   }
@@ -126,6 +142,11 @@ export interface FidelityFilter {
 export async function fidelity(jobs: number, filter: FidelityFilter = {}): Promise<void> {
   const { assertM2cPinned } = await import('../eval/m2c');
   assertM2cPinned();
+  // The asmlift scripts invoke the checkout's own bin — packages/cli/dist/asmlift.mjs, a
+  // GITIGNORED esbuild bundle. Rebuild it first: certifying the published scripts against a
+  // stale (or absent) bundle silently tests old code — the exact drift this gate exists to
+  // catch. Loud on failure; ~20ms when up to date.
+  execSync('pnpm --dir packages/cli build', { cwd: REPO_ROOT, stdio: 'pipe' });
   let rows = loadRows();
   if (filter.project) {
     rows = rows.filter((r) => r.project === filter.project);

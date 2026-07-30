@@ -49,13 +49,13 @@ function checkoutRecipe(fn: FunctionResult): string {
   if (!man) {
     return '';
   }
-  const dir = man.repo.split('/')[1];
+  const dir = man.repoDir;
   return `
 
 # This function's decomp project — the PINNED benchmark branch (provenance base + one
 # integration commit). Not needed to run this script (inputs are embedded/vendored); to
 # rebuild the project itself:
-#   git clone --branch ${man.branch} https://github.com/${man.repo}.git
+#   git clone --branch ${man.branch} https://github.com/${man.repo}.git ${dir}
 #   make -C ${dir}${
     man.elfMake
       ? `
@@ -64,21 +64,32 @@ function checkoutRecipe(fn: FunctionResult): string {
   }`;
 }
 
+/** Whether this row's script must load the project's symbol map (the row was measured with
+ *  it, and the committed manifest names the checkout dir the script's placeholder points at). */
+function usesSymbolMap(fn: FunctionResult): boolean {
+  return fn.tier === 'real' && Boolean(fn.asmlift.symbolMap) && manifestFor(fn.project) !== null;
+}
+
 /** The symbol-map provenance note for a real row (asmlift script only — the map is asmlift's
- *  analogue of m2c's context input). */
+ *  analogue of m2c's context input). Map rows also declare the PROJECT_PATH placeholder here:
+ *  step 1 grafts that checkout's tools.asmlift.elf into the scoring config, so the CLI loads
+ *  the same map the benchmark fed this function. */
 function symbolsNote(fn: FunctionResult): string {
   if (fn.tier !== 'real') {
     return '';
   }
-  if (fn.asmlift.symbolMap) {
+  if (usesSymbolMap(fn)) {
     const rel = `apps/benchmark/dataset/real/tu/${fn.project}/symbols.json.gz`;
     const sha = vendoredMapSha(fn.project);
     return `
 # SYMBOLS: this row ran WITH the project's symbol map (names + declaration shapes derived
 # from the ELF its decomp.yaml names), vendored at ${rel}
 #   sha256 of the decompressed map JSON: ${sha ?? 'unavailable (vendored blob not present)'}
-# The CLI picks the map up from the checkout's decomp.yaml (tools.asmlift.elf) when run
-# inside the project; this standalone run does NOT load it, so output may differ from the row.`;
+# Set PROJECT_PATH to your BUILT checkout of the project above (clone recipe in the comments);
+# step 1 then points the scoring config at the checkout's decomp.yaml (tools.asmlift.elf) —
+# the CLI loads the same map, so this run reproduces the row's named spellings. A missing
+# checkout/ELF warns and runs map-less (output may then differ from the row).
+PROJECT_PATH='/path/to/${manifestFor(fn.project)!.repoDir}'`;
   }
   return `
 # (no symbols needed: this row ran without a project symbol map.)`;
@@ -214,9 +225,16 @@ ASMLIFT_PATH='/path/to/asmlift'${checkoutRecipe(fn)}${symbolsNote(fn)}
 
 # ── Step 1: scoring inputs ───────────────────────────────────────────────────
 # Builds this function's target object (content-cached) and writes a decomp.yaml whose compile
-# command is the benchmark's own toolchain invocation — what --score-against compiles with.
+# command is the benchmark's own toolchain invocation — what --score-against compiles with.${
+    usesSymbolMap(fn)
+      ? `
+# --project-root grafts the checkout's tools.asmlift.elf (the symbol map) into that decomp.yaml.`
+      : ''
+  }
 # (progress goes to stderr so the script's stdout stays purely the decompiled source)
-pnpm --dir "$ASMLIFT_PATH" bench target ${fn.id} --out "$PWD" 1>&2
+pnpm --dir "$ASMLIFT_PATH" bench target ${fn.id} --out "$PWD"${
+    usesSymbolMap(fn) ? ' --project-root "$PROJECT_PATH"' : ''
+  } 1>&2
 
 # ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────
 # The exact ${asmKind} text.

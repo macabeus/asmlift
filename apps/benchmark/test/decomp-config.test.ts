@@ -5,10 +5,14 @@
 // expected strings below are built from the same pins the built-in compile path uses, so a flag
 // edited in only one place fails here loudly.
 import { GCC_KMC_TOOLCHAIN, IDO_TOOLCHAIN, MWCC_PPC_TOOLCHAIN, TOOLCHAIN } from '@asmlift/toolchains';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
+import YAML from 'yaml';
 
 import { shq } from '../src/compile/util';
-import { renderScoreCommand } from '../src/decomp-config';
+import { renderScoreCommand, writeScoreConfig } from '../src/decomp-config';
 
 describe('committed decomp.yaml configs mirror the built-in toolchain invocations', () => {
   test('agbcc: cpp → agbcc → as, built-in flags (compileCandAgbcc)', () => {
@@ -48,5 +52,31 @@ describe('committed decomp.yaml configs mirror the built-in toolchain invocation
         `-o "/work/$(basename {{outputPath}})" "/work/$(basename {{inputPath}})"`,
       ].join(' '),
     );
+  });
+});
+
+describe('writeScoreConfig (the repro decomp.yaml)', () => {
+  interface Doc {
+    tools: { asmlift: { target: string; compiler?: string; elf?: string } };
+  }
+  const written = (elf?: string): Doc => {
+    const dir = mkdtempSync(join(tmpdir(), 'score-config-'));
+    try {
+      writeScoreConfig('agbcc', dir, elf);
+      return YAML.parse(readFileSync(join(dir, 'decomp.yaml'), 'utf8')) as Doc;
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+
+  test('symbol-fed rows: the project ELF lands as tools.asmlift.elf beside the compile command', () => {
+    const doc = written('/checkouts/pokeemerald/pokeemerald-syms.elf');
+    expect(doc.tools.asmlift.elf).toBe('/checkouts/pokeemerald/pokeemerald-syms.elf');
+    expect(doc.tools.asmlift.compiler).toBe(renderScoreCommand('agbcc'));
+    expect(doc.tools.asmlift.target).toBe('agbcc');
+  });
+
+  test('map-free rows: no elf key at all', () => {
+    expect('elf' in written().tools.asmlift).toBe(false);
   });
 });

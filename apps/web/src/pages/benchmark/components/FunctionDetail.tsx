@@ -109,8 +109,21 @@ function DecompilerColumn({
 
 // The reproduction scripts open with placeholder checkout paths (M2C_PATH='/path/to/m2c' …).
 // A visitor types their real paths once — persisted per browser — and every script renders
-// copy-paste runnable, both on screen and through the Copy button.
-const PATH_STORAGE_KEYS = { m2c: 'bench:m2c-path', asmlift: 'bench:asmlift-path' } as const;
+// copy-paste runnable, both on screen and through the Copy button. Symbol-fed rows add a
+// PROJECT_PATH placeholder (the decomp-project checkout the script loads the symbol map
+// from) — that input only appears when the script carries the placeholder, and persists
+// PER PROJECT (each project is its own checkout).
+const PATH_STORAGE_KEYS = {
+  m2c: 'bench:m2c-path',
+  asmlift: 'bench:asmlift-path',
+  project: 'bench:project-path',
+} as const;
+
+/** The script's PROJECT_PATH placeholder assignment (e.g. `PROJECT_PATH='/path/to/pokeemerald'`),
+ *  or null for rows without one. */
+function projectPlaceholder(script: string): string | null {
+  return /PROJECT_PATH='\/path\/to\/[^']*'/.exec(script)?.[0] ?? null;
+}
 
 function usePersistedPath(key: string): [string, (v: string) => void] {
   const [value, setValue] = useState(() => {
@@ -138,13 +151,17 @@ function usePersistedPath(key: string): [string, (v: string) => void] {
 const shellQuote = (s: string) => `'${s.replaceAll("'", `'\\''`)}'`;
 
 /** Rewrite a script's placeholder path assignments with the visitor's checkouts. */
-function fillScriptPaths(script: string, m2cPath: string, asmliftPath: string): string {
+function fillScriptPaths(script: string, m2cPath: string, asmliftPath: string, projectPath = ''): string {
   let out = script;
   if (m2cPath.trim()) {
     out = out.replace(`M2C_PATH='/path/to/m2c'`, `M2C_PATH=${shellQuote(m2cPath.trim())}`);
   }
   if (asmliftPath.trim()) {
     out = out.replace(`ASMLIFT_PATH='/path/to/asmlift'`, `ASMLIFT_PATH=${shellQuote(asmliftPath.trim())}`);
+  }
+  const placeholder = projectPlaceholder(out);
+  if (projectPath.trim() && placeholder) {
+    out = out.replace(placeholder, `PROJECT_PATH=${shellQuote(projectPath.trim())}`);
   }
   return out;
 }
@@ -372,6 +389,9 @@ export function FunctionDetail({
   const share = useMemo(() => playgroundShare(fn), [fn]);
   const [m2cPath, setM2cPath] = usePersistedPath(PATH_STORAGE_KEYS.m2c);
   const [asmliftPath, setAsmliftPath] = usePersistedPath(PATH_STORAGE_KEYS.asmlift);
+  // symbol-fed rows only: the decomp-project checkout, persisted per project
+  const [projectPath, setProjectPath] = usePersistedPath(`${PATH_STORAGE_KEYS.project}:${fn.project}`);
+  const projectDefault = fn.scripts ? projectPlaceholder(fn.scripts.asmlift) : null;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -497,16 +517,26 @@ export function FunctionDetail({
                   onChange={setAsmliftPath}
                   placeholder="/path/to/asmlift"
                 />
+                {projectDefault && (
+                  // only symbol-fed rows carry the placeholder: the BUILT decomp-project
+                  // checkout the asmlift script loads the symbol map from
+                  <PathInput
+                    label="PROJECT_PATH"
+                    value={projectPath}
+                    onChange={setProjectPath}
+                    placeholder={projectDefault.slice("PROJECT_PATH='".length, -1)}
+                  />
+                )}
               </div>
               <CollapsibleCode
                 title="m2c script"
-                text={fillScriptPaths(fn.scripts.m2c, m2cPath, asmliftPath)}
+                text={fillScriptPaths(fn.scripts.m2c, m2cPath, asmliftPath, projectPath)}
                 language="bash"
                 copy
               />
               <CollapsibleCode
                 title="asmlift script"
-                text={fillScriptPaths(fn.scripts.asmlift, m2cPath, asmliftPath)}
+                text={fillScriptPaths(fn.scripts.asmlift, m2cPath, asmliftPath, projectPath)}
                 language="bash"
                 copy
               />

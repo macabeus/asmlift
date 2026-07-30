@@ -12,7 +12,7 @@ import { cBackend } from './backend/c';
 import { assertDerefsTyped, assertResolved } from './contracts';
 import type { AsmData } from './frontend/asmdata';
 import { frontendFor } from './frontend/registry';
-import { Fn } from './ir/core';
+import { Fn, type Value, defOpMap } from './ir/core';
 import { T } from './ir/types';
 import { verify } from './ir/verify';
 import type { LanguageBackend, SFn } from './l3/ast';
@@ -53,6 +53,63 @@ function pinScalarParams(fn: Fn, signed: boolean, ptrIdx: Set<number>): void {
   });
 }
 
+/** Bare-global ACCESS FACTS for name-only map symbols — the width/signedness authority the
+ *  declaration synthesis (declare.ts) uses when the map has no shape. The map knows only the
+ *  NAME (symtab-only projects: marioparty3); the candidate's own IR knows exactly how the cell
+ *  is accessed, and the bare `gSym = v` / `x = gSym` spelling compiles to those bytes only
+ *  under a decl of that exact width (`extern u16 g;` is `sh` where a guessed u32 is `sw`).
+ *  Mirrors structure()'s scalar-global rule: a fact is recorded only for a symbol accessed
+ *  EXCLUSIVELY at offset 0 with ONE width and ONE load signedness — anything else (interior
+ *  offsets, address arithmetic, width or sign conflicts) records nothing, because those
+ *  spellings go through `&gSym` casts where every object decl is address-identical. */
+function bareGlobalAccessFacts(fn: Fn): Map<string, { width: number; signed: boolean }> {
+  const defs = defOpMap(fn);
+  const symOf = (v: Value): string | null => {
+    const d = defs.get(v);
+    return d?.opcode === 'gaddr' && d.attrs.code !== true ? (d.attrs.sym as string) : null;
+  };
+  const acc = new Map<string, { widths: Set<number>; signs: Set<boolean>; interior: boolean }>();
+  const get = (s: string) => acc.get(s) ?? acc.set(s, { widths: new Set(), signs: new Set(), interior: false }).get(s)!;
+  for (const b of fn.blocks) {
+    for (const op of b.ops) {
+      if (op.opcode === 'load' || op.opcode === 'store') {
+        const s = symOf(op.operands[0]);
+        if (s) {
+          const a = get(s);
+          if ((op.attrs.off as number) !== 0) {
+            a.interior = true;
+          } else {
+            a.widths.add(op.attrs.width as number);
+            if (op.opcode === 'load') {
+              a.signs.add(((op.attrs.signed as boolean) ?? false) && (op.attrs.width as number) < 4);
+            }
+          }
+        }
+      } else if (op.opcode === 'aload' || op.opcode === 'astore') {
+        const s = symOf(op.operands[0]);
+        if (s) {
+          get(s).interior = true;
+        }
+      } else {
+        // any other use of the address (arithmetic, a call arg, a comparison) is interior/escape
+        for (const o of op.operands) {
+          const s = symOf(o);
+          if (s) {
+            get(s).interior = true;
+          }
+        }
+      }
+    }
+  }
+  const out = new Map<string, { width: number; signed: boolean }>();
+  for (const [s, a] of acc) {
+    if (!a.interior && a.widths.size === 1 && a.signs.size <= 1) {
+      out.set(s, { width: [...a.widths][0], signed: a.signs.has(true) });
+    }
+  }
+  return out;
+}
+
 export interface EnumerateOptions {
   patterns?: RewritePattern[];
   backend?: LanguageBackend;
@@ -70,8 +127,9 @@ export interface Candidate {
    *  layer's declaration synthesis renders. DERIVED, never carried: computed once from the
    *  exact tree this candidate's source was emitted from, at the moment the candidate is
    *  finalized (l3/symbol-refs.ts — no pipeline stage caches refs, so they cannot go stale).
-   *  Absent without a map (or for the '/raw-globals' spelling, which names no mapped symbol)
-   *  — synthesis then has nothing to do. */
+   *  Present on EVERY spelling variant that names mapped symbols — including '/raw-globals',
+   *  whose tree still names pool/reloc-derived globals (it only drops the map's shaped
+   *  SPELLINGS). Absent without a map — synthesis then has nothing to do. */
   symbolRefs?: SymbolRef[];
 }
 /** A candidate paired with its score `S` (the injected scorer's result shape — must carry `.score`). */
@@ -121,6 +179,9 @@ export function enumerateCandidates(
   runPreRecovery(probe, target, () => verify(probe));
   recoverTypes(probe);
   const ptrIdx = new Set<number>(probe.blocks[0].params.flatMap((p, i) => (NO_PIN_KINDS.has(p.type.kind) ? [i] : [])));
+  // Access facts for name-only symbol declarations (see bareGlobalAccessFacts) — derived once
+  // from the probe: widths/offsets are lift-time facts, identical across every candidate.
+  const accessFacts = opts.symbols ? bareGlobalAccessFacts(probe) : new Map<string, never>();
 
   const seen = new Set<string>();
   const out: Candidate[] = [];
@@ -159,9 +220,21 @@ export function enumerateCandidates(
         // spelling is emitted — the single point a candidate comes into existence. No pipeline
         // stage carries refs (SFn has no such field), so a future l3 pass that rewrites the tree
         // can never leave a stale ref behind: whatever tree reaches emit is the tree the refs
-        // describe, by construction.
+        // describe, by construction. Collected against the FULL name-keyed map for EVERY
+        // spelling variant — the '/raw-globals' sibling drops the map's shaped SPELLINGS, but
+        // its tree still NAMES pool/reloc-derived globals (ARM `.word gSym`, MIPS `%lo(gSym)`),
+        // and those references need declarations in the self-declared scoring world exactly
+        // like the named variant's (without them every raw sibling fails to compile there,
+        // and the eval-winning raw candidate becomes unreproducible outside project headers).
         const refsOf = (tree: SFn): { symbolRefs?: SymbolRef[] } => {
-          const refs = svOpts.symbols ? collectSymbolRefs(tree.body, svOpts.symbols, tree.name) : [];
+          const refs = baseOpts.symbols
+            ? collectSymbolRefs(tree.body, baseOpts.symbols, tree.name).map((r) => {
+                // name-only symbols carry the IR-derived access facts — the width authority
+                // for their synthesized declaration (shaped symbols keep the map's truth)
+                const access = r.info.shape === undefined ? accessFacts.get(r.name) : undefined;
+                return access ? { ...r, access } : r;
+              })
+            : [];
           return refs.length ? { symbolRefs: refs } : {};
         };
         const spellings: { suffix: string; source: string; symbolRefs?: SymbolRef[] }[] = [

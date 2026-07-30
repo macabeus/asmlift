@@ -370,6 +370,9 @@ export function Explorer({
 
       {selected && (
         <FunctionDetail
+          // Keyed by row: the drawer holds per-PROJECT persisted state (PROJECT_PATH input),
+          // which must re-read its storage key when the selected function changes.
+          key={selected.id}
           fn={selected}
           // Replace, not push: Back after closing must not reopen the detail.
           onClose={() => void setSelectedId(null, { history: 'replace' })}

@@ -17,6 +17,10 @@ import { Expr, Stmt, exprChildren, stmtChildren, stmtExprs } from './ast';
 export interface SymbolRef {
   name: string;
   info: SymbolInfo;
+  /** NAME-ONLY symbols (no map shape): the bare off-0 access facts observed in the candidate's
+   *  own IR — attached by the enumeration (rank.ts bareGlobalAccessFacts), consumed by the
+   *  declaration synthesis (declare.ts) as the width/signedness authority for `extern T name;`. */
+  access?: { width: number; signed: boolean };
 }
 
 /** The map-derived symbols a structured body references in a VALUE context — the input to the
