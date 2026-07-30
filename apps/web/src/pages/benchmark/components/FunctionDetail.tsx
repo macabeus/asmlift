@@ -276,12 +276,9 @@ function Provenance({ fn }: { fn: FunctionResult }) {
   const symbols = r.symbolsUsed ?? [];
   const protoEntries = Object.entries(fn.proto ?? {});
 
-  // Summary digest: `Provenance — 3 symbols · winner unsigned/raw-globals`; the fell-back
-  // warning replaces the count so it stays discoverable without expanding.
+  // Summary digest: `Provenance — 3 symbols · winner unsigned/raw-globals`.
   const digest: string[] = [];
-  if (fellBack) {
-    digest.push('symbols fell back');
-  } else if (r.symbolMap && scored) {
+  if (r.symbolMap && scored) {
     digest.push(symbols.length > 0 ? `${symbols.length} symbol${symbols.length === 1 ? '' : 's'}` : 'symbols unused');
   }
   if (r.candidateLabel) {
@@ -289,22 +286,14 @@ function Provenance({ fn }: { fn: FunctionResult }) {
   }
 
   return (
-    <div
-      className={`rounded-lg border p-3 ${fellBack ? 'border-amber-500/30 bg-amber-500/5' : 'border-slate-800 bg-slate-900/40'}`}
-    >
+    <div className="rounded-lg border border-slate-800 bg-slate-900/40 p-3">
       <button
         onClick={() => setOpen((v) => !v)}
-        className={`flex items-center gap-2 text-sm font-semibold ${
-          fellBack ? 'text-amber-300 hover:text-amber-200' : 'text-slate-300 hover:text-white'
-        }`}
+        className="flex items-center gap-2 text-sm font-semibold text-slate-300 hover:text-white"
       >
-        <span className={fellBack ? 'text-amber-500/70' : 'text-slate-500'}>{open ? '▾' : '▸'}</span>
+        <span className="text-slate-500">{open ? '▾' : '▸'}</span>
         Provenance
-        {digest.length > 0 && (
-          <span className={`font-normal ${fellBack ? 'text-amber-300/80' : 'text-slate-500'}`}>
-            — {digest.join(' · ')}
-          </span>
-        )}
+        {digest.length > 0 && <span className="font-normal text-slate-500">— {digest.join(' · ')}</span>}
       </button>
       {open && (
         <div className="mt-3 space-y-3 text-xs">
@@ -335,11 +324,7 @@ function Provenance({ fn }: { fn: FunctionResult }) {
             )}
           </ProvenanceRow>
           <ProvenanceRow label="Symbol map">
-            {fellBack ? (
-              <span className="text-amber-300">
-                fell back — the map induced a gap; the never-worse backstop re-ran (and classified) this row raw
-              </span>
-            ) : r.symbolMap && scored ? (
+            {r.symbolMap && scored ? (
               symbols.length > 0 ? (
                 <span className="text-teal-300">
                   used — the winning candidate references {symbols.length} map symbol{symbols.length === 1 ? '' : 's'}
