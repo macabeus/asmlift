@@ -110,16 +110,12 @@ describe('symbolsUsed / candidateLabel capture (pinned)', () => {
   });
 
   test('BACKSTOP RETIRED: a gapped map row declines WITH the map — one decompile, no retry, no fell-back marker', () => {
-    // `clz` is unmodelled → annotate mode reports a diagnostic and the row declines. The retired
-    // never-worse backstop used to re-run decompile WITHOUT the map here; retirement means
-    // exactly one call, the row keeps its honest symbolMap provenance, and symbolMapFellBack
     // (schema-historical) is never set.
     const gapped = 'f:\n\tclz\tr0, r0\n\tbx\tlr\n';
     vi.mocked(decompile).mockClear();
     const r = runAsmlift(TC, 'f', gapped, '/nonexistent.o', undefined, noCompile, MAP);
     expect(r.outcome).toBe('declined');
     expect(r.symbolMap).toBe(true);
-    expect(r).not.toHaveProperty('symbolMapFellBack');
     expect(decompile).toHaveBeenCalledTimes(1);
   });
 });

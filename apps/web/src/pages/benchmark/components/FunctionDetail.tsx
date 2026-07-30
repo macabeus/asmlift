@@ -255,7 +255,6 @@ function protoHintLabel(hint: { params?: number | string[]; returnsVoid?: boolea
 function Provenance({ fn }: { fn: FunctionResult }) {
   const [open, setOpen] = useState(false);
   const r = fn.asmlift; // the symbol-map fields are asmlift-only (m2c rows never carry them)
-  const fellBack = r.symbolMapFellBack === true; // historical rows only — the backstop is retired
   const scored = r.symbolsUsed !== undefined; // present ⇔ a winning spelling exists (scored row)
   const symbols = r.symbolsUsed ?? [];
   const protoEntries = Object.entries(fn.proto ?? {});

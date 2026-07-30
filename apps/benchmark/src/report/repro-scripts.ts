@@ -81,11 +81,7 @@ function symbolsNote(fn: FunctionResult): string {
 # inside the project; this standalone run does NOT load it, so output may differ from the row.`;
   }
   return `
-# (no symbols needed: ${
-    fn.asmlift.symbolMapFellBack
-      ? "the never-worse backstop re-ran this row WITHOUT the project's symbol map, and that raw result is the published one"
-      : 'this row ran without a project symbol map'
-  }.)`;
+# (no symbols needed: this row ran without a project symbol map.)`;
 }
 
 /** One bash-array element with its explanatory comment, comment column aligned. A long flag

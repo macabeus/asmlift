@@ -56,11 +56,6 @@ export interface DecompilerResult {
    *  shapes derived from its ELF — the analogue of m2c's context input). Absent ⇒ no map was
    *  available; the report must not read mixed tables as apples-to-apples. */
   symbolMap?: true;
-  /** asmlift only — RETIRED (historical): the never-worse backstop's marker. The retry-without-
-   *  map fallback was deleted from eval/asmlift.ts after this stayed ZERO across every run since
-   *  instrumentation (core spells all known map-induced escapes legally). No new row ever sets
-   *  it; the field remains so old published datasets still typecheck. */
-  symbolMapFellBack?: true;
   /** asmlift only, scored map rows: EVERY map symbol the WINNING candidate's output references
    *  (value references — call targets are excluded upstream), each with its declaration shape
    *  pre-formatted for display ("struct Unk_03004C20 (24 B)", "u16[]", "scalar u8", "code";
