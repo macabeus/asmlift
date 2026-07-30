@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generatedAt": "2026-07-30T21:58:19.850Z",
+    "generatedAt": "2026-07-30T23:49:48.188Z",
     "toolchains": [
       "ido7.1",
       "agbcc",
@@ -14,7 +14,7 @@
       "real": 192
     },
     "asmlift": {
-      "commit": "81b07302f506b9f9fff68f34aaea148dda818a67",
+      "commit": "5b923cfdc7f3eb0e1ed16d2f360826a023c84b2a",
       "dirty": false
     },
     "m2c": {
@@ -3524,7 +3524,16 @@
         "decompiler": "asmlift",
         "symbolMap": true,
         "candidateLabel": "unsigned/raw-globals",
-        "symbolsUsed": [],
+        "symbolsUsed": [
+          {
+            "name": "gEntityDataTable",
+            "shape": "u8[]"
+          },
+          {
+            "name": "gGameFlagsPtr",
+            "shape": "u8[]"
+          }
+        ],
         "outcome": "nonmatch",
         "source": "void GetEntityLookupData(u32 a0) {\n    u8 * p0;\n    u8 * p1;\n    p0 = (u8 *)&gGameFlagsPtr;\n    p1 = (u8 *)&gEntityDataTable;\n    p0[17] = p1[(a0 << 24 >> 21) + 5];\n    p0[18] = p1[(a0 << 24 >> 21) + 6];\n    return;\n}\n",
         "score": 4,
@@ -7274,7 +7283,7 @@
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "candidateLabel": "unsigned",
+        "candidateLabel": "unsigned/raw-globals",
         "symbolsUsed": [
           {
             "name": "D_800CC69C_CD29C",
@@ -8180,7 +8189,16 @@
         "decompiler": "asmlift",
         "symbolMap": true,
         "candidateLabel": "signed/raw-globals",
-        "symbolsUsed": [],
+        "symbolsUsed": [
+          {
+            "name": "gBattleMoves",
+            "shape": "array (12 B/elem)"
+          },
+          {
+            "name": "gPPUpGetMask",
+            "shape": "u8[]"
+          }
+        ],
         "outcome": "nonmatch",
         "source": "struct Elem0 { u8 _pad0[4]; u8 field_4; u8 _pad1[7]; };\ns32 CalculatePPWithBonus(s32 a0, s32 a1, s32 a2) {\n    return (u8)(((struct Elem0 *)&gBattleMoves)[(u16)a0].field_4 + ((((u8 *)&gPPUpGetMask)[(u8)a2] & a1) >> ((u8)a2 << 1)) * 20 * ((struct Elem0 *)&gBattleMoves)[(u16)a0].field_4 / 100);\n}\n",
         "score": 17,
@@ -9812,7 +9830,12 @@
         "decompiler": "asmlift",
         "symbolMap": true,
         "candidateLabel": "unsigned/raw-globals",
-        "symbolsUsed": [],
+        "symbolsUsed": [
+          {
+            "name": "gSineDegreeTable",
+            "shape": "s16[]"
+          }
+        ],
         "outcome": "nonmatch",
         "source": "s32 Sin2(u32 a0) {\n    s32 v0;\n    u16 * p0;\n    p0 = (u16 *)&gSineDegreeTable;\n    if (((u16)a0 / 180 & 1) != 0) {\n        v0 = -(p0[(u16)((u16)a0 % 180)] << 16);\n    } else {\n        v0 = p0[(u16)((u16)a0 % 180)] << 16;\n    }\n    return v0 >> 16;\n}\n",
         "score": 34,
@@ -11802,7 +11825,12 @@
         "decompiler": "asmlift",
         "symbolMap": true,
         "candidateLabel": "unsigned/raw-globals",
-        "symbolsUsed": [],
+        "symbolsUsed": [
+          {
+            "name": "gSineTable",
+            "shape": "s16[]"
+          }
+        ],
         "outcome": "nonmatch",
         "source": "struct Struct0 { u16 field_0; u8 _pad0[6]; s32 field_8; s32 field_12; };\nstruct Struct1 { u16 field_0; u16 field_2; u16 field_4; s32 field_8; s32 field_12; };\nstruct Struct2 { u16 field_0; u8 _pad0[6]; s32 field_8; s32 field_12; };\nvoid sa2__sub_8083504(struct Struct0 * a0, struct Struct2 * a1, struct Struct1 * a2, u32 a3) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    s32 v5;\n    s32 v6;\n    u16 * p0;\n    p0 = (u16 *)&gSineTable;\n    v0 = *(s16 *)(a1 + 2);\n    if (v0 == 128 << 3) {\n        v4 = a0->field_8;\n    } else {\n        v1 = a0->field_8;\n        a2->field_2 = *(s16 *)(a0 + 2) * v0 >> 10;\n        v4 = v1 * v0 >> 10;\n    }\n    v2 = *(s16 *)(a1 + 4);\n    if (v2 == 128 << 3) {\n        v5 = a0->field_12;\n    } else {\n        v3 = a0->field_12;\n        a2->field_4 = *(s16 *)(a0 + 4) * v2 >> 10;\n        v5 = v3 * v2 >> 10;\n    }\n    if (a1->field_0 == 0) {\n        a2->field_8 = a1->field_8 + v4;\n        v6 = a1->field_12 + v5;\n    } else {\n        a2->field_8 = a1->field_8 + ((v4 * (p0[a1->field_0 + (128 << 1)] << 16 >> 22) >> 8) - ((p0[a1->field_0] << 16 >> 22) * v5 >> 8));\n        v6 = a1->field_12 + ((v4 * (p0[a1->field_0] << 16 >> 22) >> 8) + ((p0[a1->field_0 + (128 << 1)] << 16 >> 22) * v5 >> 8));\n    }\n    a2->field_12 = v6;\n    a2->field_0 = a1->field_0 + a0->field_0 & 1023;\n    return;\n}\n",
         "score": 85,
@@ -14596,17 +14624,17 @@
             "shape": "pointer"
           }
         ],
-        "outcome": "nonmatch",
-        "source": "u32 func_80037FE0_38BE0(u32 a0) {\n    return (((u8 *)(EepromSaveData + (a0 & 255)))[16] ^ 1) < 1;\n}\n",
-        "score": 9,
-        "maxScore": 13,
+        "outcome": "match",
+        "source": "u32 func_80037FE0_38BE0(u32 a0) {\n    return (((u8 *)EepromSaveData + (a0 & 255))[16] ^ 1) < 1;\n}\n",
+        "score": 0,
+        "maxScore": 8,
         "compileErrors": null,
         "breakdown": {
-          "insert": 5,
+          "insert": 0,
           "delete": 0,
-          "replace": 1,
+          "replace": 0,
           "opMismatch": 0,
-          "argMismatch": 3
+          "argMismatch": 0
         },
         "quality": {
           "score": 100,
@@ -14641,19 +14669,7 @@
         ]
       },
       "note": "src/38BE0.c: save-slot-in-use predicate; leaf",
-      "gapSize": {
-        "decompiler": "asmlift",
-        "score": 9,
-        "maxScore": 13,
-        "ratio": 0.6923076923076923,
-        "kinds": {
-          "insert": 5,
-          "delete": 0,
-          "replace": 1,
-          "opMismatch": 0,
-          "argMismatch": 3
-        }
-      },
+      "gapSize": null,
       "scripts": {
         "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `func_80037FE0_38BE0` — benchmark function snowboardkids2:func_80037FE0_38BE0:gcc2.7.2kmc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit 94098d4:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout 94098d4de68c2fcc13fb8cf1096a1520eb171abe\nM2C_PATH='/path/to/m2c'\n\n# The benchmark's objdump→GNU-as normalization of this function's disassembly (m2c cannot\n# read raw objdump), including the jump-table/const data sections recovered from the target\n# object — the exact text the benchmark fed m2c.\ncat > in.s <<'ASM_INPUT'\nglabel func_80037FE0_38BE0\n    lui\t$v0, %hi(EepromSaveData)\n    lw\t$v0, %lo(EepromSaveData)($v0)\n    andi\t$a0, $a0, 0xff\n    addu\t$v0, $v0, $a0\n    lbu\t$v0, 16($v0)\n    xori\t$v0, $v0, 0x1\n    jr\t$ra\n    sltiu\t$v0, $v0, 1\nASM_INPUT\n\n# (This function ran with NO context header — the benchmark fed m2c the assembly alone.)\n\nargs=(\n  --target mips-gcc-c     # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function func_80037FE0_38BE0 # the symbol to decompile from in.s\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
         "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `func_80037FE0_38BE0` — benchmark function snowboardkids2:func_80037FE0_38BE0:gcc2.7.2kmc.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# This function's decomp project — the PINNED benchmark branch (provenance base + one\n# integration commit). Not needed to run this script (inputs are embedded/vendored); to\n# rebuild the project itself:\n#   git clone --branch asmlift-benchmark https://github.com/macabeus/snowboardkids2-decomp.git snowboardkids2-decomp\n#   make -C snowboardkids2-decomp\n#   make -C snowboardkids2-decomp asmlift-elf   # derive the symbols ELF (DWARF types-sidecar)\n# SYMBOLS: this row ran WITH the project's symbol map (names + declaration shapes derived\n# from the ELF its decomp.yaml names), vendored at apps/benchmark/dataset/real/tu/snowboardkids2/symbols.json.gz\n#   sha256 of the decompressed map JSON: 72b5019f794f8b9dd1030fdd5bc069c516b247810b42bceb6b2d97d6b2c9c5ae\n# Set PROJECT_PATH to your BUILT checkout of the project above (clone recipe in the comments);\n# step 1 then points the scoring config at the checkout's decomp.yaml (tools.asmlift.elf) —\n# the CLI loads the same map, so this run reproduces the row's named spellings. A missing\n# checkout/ELF warns and runs map-less (output may then differ from the row).\nPROJECT_PATH='/path/to/snowboardkids2-decomp'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# --project-root grafts the checkout's tools.asmlift.elf (the symbol map) into that decomp.yaml.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target snowboardkids2:func_80037FE0_38BE0:gcc2.7.2kmc --out \"$PWD\" --project-root \"$PROJECT_PATH\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact `objdump -d --no-show-raw-insn` text.\ncat > in.asm <<'ASM_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <func_80037FE0_38BE0>:\n   0:\tlui\tv0,0x0\n   4:\tlw\tv0,0(v0)\n   8:\tandi\ta0,a0,0xff\n   c:\taddu\tv0,v0,a0\n  10:\tlbu\tv0,16(v0)\n  14:\txori\tv0,v0,0x1\n  18:\tjr\tra\n  1c:\tsltiu\tv0,v0,1\nASM_INPUT\n\n# The target object's objdump -s -r -t dump — the data sections (jump tables, anonymous\n# constants) the text-only disassembly lacks; the benchmark recovered them from the object.\ncat > dump.txt <<'DUMP_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /host-tmp/bench-real-gcc-ce80f7f2e88c6fb7/u.i\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t00000020 func_80037FE0_38BE0\n00000000         *UND*\t00000000 EepromSaveData\n\n\nRELOCATION RECORDS FOR [.text]:\nOFFSET   TYPE              VALUE\n00000000 R_MIPS_HI16       EepromSaveData\n00000004 R_MIPS_LO16       EepromSaveData\n\n\nContents of section .text:\n 0000 3c020000 8c420000 308400ff 00441021  <....B..0....D.!\n 0010 90420010 38420001 03e00008 2c420001  .B..8B......,B..\nContents of section .reginfo:\n 0000 80000014 00000000 00000000 00000000  ................\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.\nDUMP_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\n# (real tier: candidates are scored INSIDE the project's own context — step 1 materializes the\n# row's vendored context next to target.o as ctx.i, and the generated decomp.yaml concatenates\n# it ahead of every candidate, so this scores in the same world the benchmark did)\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target gcc2.7.2kmc    # frontend + target description (ISA, calling convention, compiler idioms)\n  --name func_80037FE0_38BE0 # the symbol to decompile (multi-function input selects by name)\n  --asm-data dump.txt     # the data sections above (jump-table/const recovery)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
