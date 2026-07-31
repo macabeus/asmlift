@@ -12,6 +12,7 @@ import { type RankedResult as CoreRankedResult, type Scored, enumerateCandidates
 import type { SymbolMap } from '@asmlift/core/symbols';
 import { type TargetDescription } from '@asmlift/core/target';
 
+import { renderDeclarations } from './declare';
 import { type CandidateCompiler, MatchScore, scoreSource } from './score';
 
 // The cli's candidate/result shapes are the core generics pinned to the objdiff MatchScore.
@@ -43,7 +44,19 @@ export function decompileRanked(
     asmData: opts.asmData,
     symbols: opts.symbols,
   });
-  return rankBy(candidates, name, (source, symbol) =>
-    scoreSource(source, symbol, targetObj, target, backend.id, opts.compile),
+  // Self-declaring candidates: a candidate that names map-derived symbols carries their refs
+  // (Candidate.symbolRefs) — rendered here into its per-candidate declaration block. The
+  // compiler seam decides whether the block is USED (probed self-declared world) or ignored
+  // (headers world / context-injecting compilers) — see compile-command.ts.
+  return rankBy(candidates, name, (source, symbol, cand) =>
+    scoreSource(
+      source,
+      symbol,
+      targetObj,
+      target,
+      backend.id,
+      opts.compile,
+      cand.symbolRefs?.length ? renderDeclarations(cand.symbolRefs) : undefined,
+    ),
   );
 }

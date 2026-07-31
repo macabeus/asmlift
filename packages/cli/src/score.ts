@@ -31,7 +31,9 @@ export function registerCandidateCompiler(compiler: string, fn: CandidateCompile
 
 /** Score `source` for `target`+`backendId` — the target-aware entry every scoring path must
  *  use. `compile` overrides the registry (a project's own toolchain); with neither, throws
- *  rather than compiling with the wrong one. */
+ *  rather than compiling with the wrong one. `declarations` is the candidate's synthesized
+ *  declaration block (declare.ts), forwarded to the compiler seam — compilers that inject
+ *  their own headers ignore it (see CandidateCompiler). */
 export function scoreSource(
   source: string,
   symbol: string,
@@ -39,6 +41,7 @@ export function scoreSource(
   target: TargetDescription,
   backendId: string,
   compile?: CandidateCompiler,
+  declarations?: string,
 ): MatchScore {
   const fn = compile ?? CANDIDATE_COMPILERS.get(target.compiler);
   if (!fn) {
@@ -46,5 +49,5 @@ export function scoreSource(
       `no candidate compiler for '${target.compiler}' — register one or pass a compile override`,
     );
   }
-  return scoreObjects(targetObj, fn(source, symbol, backendId), symbol);
+  return scoreObjects(targetObj, fn(source, symbol, backendId, declarations), symbol);
 }

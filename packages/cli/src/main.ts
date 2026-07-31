@@ -304,7 +304,7 @@ export async function runCli(
     }
     let compile: CandidateCompiler;
     try {
-      compile = compileFromCommand(toolCfg.compiler, { prelude: toolCfg.prelude, cwd: configDir });
+      compile = compileFromCommand(toolCfg.compiler, { cwd: configDir });
     } catch (e) {
       return usage(`tools.asmlift.compiler: ${e instanceof Error ? e.message : e}`);
     }
