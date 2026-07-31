@@ -12,12 +12,13 @@ import { cBackend } from './backend/c';
 import { assertDerefsTyped, assertResolved } from './contracts';
 import type { AsmData } from './frontend/asmdata';
 import { frontendFor } from './frontend/registry';
-import { Fn } from './ir/core';
+import { Fn, type Value, defOpMap } from './ir/core';
 import { T } from './ir/types';
 import { verify } from './ir/verify';
 import type { LanguageBackend, SFn } from './l3/ast';
 import { registerishSpellings } from './l3/regspell';
 import { reindexWalks } from './l3/reindex';
+import { type SymbolRef, collectSymbolRefs } from './l3/symbol-refs';
 import { RewritePattern } from './pattern/engine';
 import { applyIdiomPatterns, raiseRecovered, structureChecked } from './pipeline';
 import type { Prototypes } from './proto';
@@ -52,6 +53,63 @@ function pinScalarParams(fn: Fn, signed: boolean, ptrIdx: Set<number>): void {
   });
 }
 
+/** Bare-global ACCESS FACTS for name-only map symbols — the width/signedness authority the
+ *  declaration synthesis (declare.ts) uses when the map has no shape. The map knows only the
+ *  NAME (symtab-only projects: marioparty3); the candidate's own IR knows exactly how the cell
+ *  is accessed, and the bare `gSym = v` / `x = gSym` spelling compiles to those bytes only
+ *  under a decl of that exact width (`extern u16 g;` is `sh` where a guessed u32 is `sw`).
+ *  Mirrors structure()'s scalar-global rule: a fact is recorded only for a symbol accessed
+ *  EXCLUSIVELY at offset 0 with ONE width and ONE load signedness — anything else (interior
+ *  offsets, address arithmetic, width or sign conflicts) records nothing, because those
+ *  spellings go through `&gSym` casts where every object decl is address-identical. */
+function bareGlobalAccessFacts(fn: Fn): Map<string, { width: number; signed: boolean }> {
+  const defs = defOpMap(fn);
+  const symOf = (v: Value): string | null => {
+    const d = defs.get(v);
+    return d?.opcode === 'gaddr' && d.attrs.code !== true ? (d.attrs.sym as string) : null;
+  };
+  const acc = new Map<string, { widths: Set<number>; signs: Set<boolean>; interior: boolean }>();
+  const get = (s: string) => acc.get(s) ?? acc.set(s, { widths: new Set(), signs: new Set(), interior: false }).get(s)!;
+  for (const b of fn.blocks) {
+    for (const op of b.ops) {
+      if (op.opcode === 'load' || op.opcode === 'store') {
+        const s = symOf(op.operands[0]);
+        if (s) {
+          const a = get(s);
+          if ((op.attrs.off as number) !== 0) {
+            a.interior = true;
+          } else {
+            a.widths.add(op.attrs.width as number);
+            if (op.opcode === 'load') {
+              a.signs.add(((op.attrs.signed as boolean) ?? false) && (op.attrs.width as number) < 4);
+            }
+          }
+        }
+      } else if (op.opcode === 'aload' || op.opcode === 'astore') {
+        const s = symOf(op.operands[0]);
+        if (s) {
+          get(s).interior = true;
+        }
+      } else {
+        // any other use of the address (arithmetic, a call arg, a comparison) is interior/escape
+        for (const o of op.operands) {
+          const s = symOf(o);
+          if (s) {
+            get(s).interior = true;
+          }
+        }
+      }
+    }
+  }
+  const out = new Map<string, { width: number; signed: boolean }>();
+  for (const [s, a] of acc) {
+    if (!a.interior && a.widths.size === 1 && a.signs.size <= 1) {
+      out.set(s, { width: [...a.widths][0], signed: a.signs.has(true) });
+    }
+  }
+  return out;
+}
+
 export interface EnumerateOptions {
   patterns?: RewritePattern[];
   backend?: LanguageBackend;
@@ -65,6 +123,14 @@ export interface EnumerateOptions {
 export interface Candidate {
   label: string;
   source: string;
+  /** the map-derived VALUE references this candidate's tree contains — what the scoring
+   *  layer's declaration synthesis renders. DERIVED, never carried: computed once from the
+   *  exact tree this candidate's source was emitted from, at the moment the candidate is
+   *  finalized (l3/symbol-refs.ts — no pipeline stage caches refs, so they cannot go stale).
+   *  Present on EVERY spelling variant that names mapped symbols — including '/raw-globals',
+   *  whose tree still names pool/reloc-derived globals (it only drops the map's shaped
+   *  SPELLINGS). Absent without a map — synthesis then has nothing to do. */
+  symbolRefs?: SymbolRef[];
 }
 /** A candidate paired with its score `S` (the injected scorer's result shape — must carry `.score`). */
 export interface Scored<S> extends Candidate {
@@ -113,6 +179,9 @@ export function enumerateCandidates(
   runPreRecovery(probe, target, () => verify(probe));
   recoverTypes(probe);
   const ptrIdx = new Set<number>(probe.blocks[0].params.flatMap((p, i) => (NO_PIN_KINDS.has(p.type.kind) ? [i] : [])));
+  // Access facts for name-only symbol declarations (see bareGlobalAccessFacts) — derived once
+  // from the probe: widths/offsets are lift-time facts, identical across every candidate.
+  const accessFacts = opts.symbols ? bareGlobalAccessFacts(probe) : new Map<string, never>();
 
   const seen = new Set<string>();
   const out: Candidate[] = [];
@@ -147,7 +216,30 @@ export function enumerateCandidates(
         // when a loop re-spells, BOTH representations are emitted and the differ referees. The
         // re-spelling passes the same boundary contracts as the primary; one that fails them is
         // dropped here — never scored, never able to win.
-        const spellings: { suffix: string; source: string }[] = [{ suffix: '', source: backend.emit(sfn) }];
+        // Each spelling's symbol refs are DERIVED from its own final tree right where the
+        // spelling is emitted — the single point a candidate comes into existence. No pipeline
+        // stage carries refs (SFn has no such field), so a future l3 pass that rewrites the tree
+        // can never leave a stale ref behind: whatever tree reaches emit is the tree the refs
+        // describe, by construction. Collected against the FULL name-keyed map for EVERY
+        // spelling variant — the '/raw-globals' sibling drops the map's shaped SPELLINGS, but
+        // its tree still NAMES pool/reloc-derived globals (ARM `.word gSym`, MIPS `%lo(gSym)`),
+        // and those references need declarations in the self-declared scoring world exactly
+        // like the named variant's (without them every raw sibling fails to compile there,
+        // and the eval-winning raw candidate becomes unreproducible outside project headers).
+        const refsOf = (tree: SFn): { symbolRefs?: SymbolRef[] } => {
+          const refs = baseOpts.symbols
+            ? collectSymbolRefs(tree.body, baseOpts.symbols, tree.name).map((r) => {
+                // name-only symbols carry the IR-derived access facts — the width authority
+                // for their synthesized declaration (shaped symbols keep the map's truth)
+                const access = r.info.shape === undefined ? accessFacts.get(r.name) : undefined;
+                return access ? { ...r, access } : r;
+              })
+            : [];
+          return refs.length ? { symbolRefs: refs } : {};
+        };
+        const spellings: { suffix: string; source: string; symbolRefs?: SymbolRef[] }[] = [
+          { suffix: '', source: backend.emit(sfn), ...refsOf(sfn) },
+        ];
         // Representation re-spellings — each a lever on the same footing as signedness/branch sense,
         // each guarded: it must pass the same boundary contracts as the primary AND emit (a backend
         // that declines by throwing — Pascal loud-fails unspellable shapes — drops the candidate,
@@ -164,7 +256,7 @@ export function enumerateCandidates(
           try {
             assertResolved(alt);
             assertDerefsTyped(alt);
-            spellings.push({ suffix, source: backend.emit(alt) });
+            spellings.push({ suffix, source: backend.emit(alt), ...refsOf(alt) });
           } catch {
             // contract-failing or unspellable re-spelling: drop it, keep the primary
           }
@@ -189,7 +281,11 @@ export function enumerateCandidates(
             continue;
           }
           seen.add(source);
-          out.push({ label: `${cand.label}${s.suffix}${sp.suffix}${sv.suffix}`, source });
+          out.push({
+            label: `${cand.label}${s.suffix}${sp.suffix}${sv.suffix}`,
+            source,
+            ...(sp.symbolRefs ? { symbolRefs: sp.symbolRefs } : {}),
+          });
         }
       }
     }
@@ -206,13 +302,13 @@ export function enumerateCandidates(
 export function rankBy<S extends { score: number }>(
   candidates: Candidate[],
   symbol: string,
-  scoreFn: (source: string, symbol: string) => S,
+  scoreFn: (source: string, symbol: string, candidate: Candidate) => S,
 ): RankedResult<S> {
   const results: Scored<S>[] = [];
   let lastScoreErr: unknown = null; // a candidate's C that failed to compile; only fatal if ALL do
   for (const c of candidates) {
     try {
-      results.push({ ...c, score: scoreFn(c.source, symbol) });
+      results.push({ ...c, score: scoreFn(c.source, symbol, c) });
     } catch (e) {
       lastScoreErr = e;
     }
