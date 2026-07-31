@@ -1,14 +1,18 @@
-// The ELF symbol-map provider's two POLICIES, pinned offline (the loader itself needs an ELF and
-// is exercised by the checkout-gated matching suite; these rules are pure and had no coverage).
+// The ELF symbol-map provider's POLICIES, pinned offline (the loader itself needs an ELF and is
+// exercised by the checkout-gated matching suite; these rules are pure and had no coverage).
 //
 //  1. the ALIAS ORDER — which of several symbols sharing an address is the canonical pick, i.e.
 //     the name every downstream spelling will actually emit;
-//  2. the PLACEHOLDER shape — `sub_08xxxxxx`-style names are real symbols that no header
+//  2. the LAYOUT MAPPING — which of @gba-kit/debug-info's member facts are carried, and which
+//     absences are meaningful rather than defaultable;
+//  3. the CAPABILITY GATE — what counts as a witness that the installed package reports the
+//     facts the spelling rules read, and when an unwitnessed package is refused;
+//  4. the PLACEHOLDER shape — `sub_08xxxxxx`-style names are real symbols that no header
 //     declares, so emitting one produces output that cannot compile.
 import type { SymbolInfo } from '@asmlift/core/symbols';
 import { describe, expect, test } from 'vitest';
 
-import { PLACEHOLDER, canonicalOrder, layoutOf } from '../../src/symbols-provider';
+import { PLACEHOLDER, assertPointeeCapabilityWitnessed, canonicalOrder, layoutOf } from '../../src/symbols-provider';
 
 const sym = (name: string, declared?: true): SymbolInfo => ({
   name,
@@ -99,6 +103,34 @@ describe('layoutOf — the package facts a layout is allowed to carry', () => {
     expect(() => layoutOf(di([{ name: 'x', offset: 0, size: 4 }]), 'S', '/tmp/x.elf')).toThrow(
       /struct-member signedness/,
     );
+  });
+});
+
+describe('assertPointeeCapabilityWitnessed — the end-of-load capability settlement', () => {
+  // The per-variable probe only fires on a POINTER shape, so an ELF with none never exercises it;
+  // and the release's member-level array facts can never be witnessed by ABSENCE at all, since a
+  // non-array member legitimately has none. The witness therefore has to be positive, and is
+  // settled once for the whole ELF rather than per variable.
+  const settle = (witnessed: boolean, layouts: number) =>
+    assertPointeeCapabilityWitnessed(witnessed, layouts, '/tmp/x.elf');
+
+  test('a witnessed capability passes, however many layouts were read', () => {
+    expect(() => settle(true, 0)).not.toThrow();
+    expect(() => settle(true, 12)).not.toThrow();
+  });
+
+  test('REFUSES when layouts were read but nothing ever witnessed the facts', () => {
+    // the silent failure this stops: with `elemSize` missing every array member reads as a plain
+    // one, so a one-element array would be spelled `->x` for a member that is not an lvalue of
+    // that width — plausible, wrong, and invisible
+    expect(() => settle(false, 3)).toThrow(/never demonstrated the pointer-target\/array-member facts/);
+    expect(() => settle(false, 3)).toThrow(/3 struct layout\(s\) read/);
+  });
+
+  test('an ELF with NO layouts at all is not refused — nothing could depend on the facts', () => {
+    // a names-only map (no DWARF sidecar, or no struct/pointee layouts) spells no member, so an
+    // unwitnessed package cannot mislead it
+    expect(() => settle(false, 0)).not.toThrow();
   });
 });
 

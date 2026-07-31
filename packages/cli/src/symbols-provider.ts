@@ -128,7 +128,7 @@ function assertPointeeFactPresent(sh: DwarfShape, elfPath: string): void {
  *  a one-element array matches an exact-width field lookup and gets spelled `->x` for a member
  *  that is not an lvalue of that width. That is the plausible-but-wrong class, so an unproven
  *  package is refused rather than degraded. */
-function assertPointeeCapabilityWitnessed(witnessed: boolean, layoutsSeen: number, elfPath: string): void {
+export function assertPointeeCapabilityWitnessed(witnessed: boolean, layoutsSeen: number, elfPath: string): void {
   if (!witnessed && layoutsSeen > 0) {
     throw new Error(
       `cannot build a symbol map from ${elfPath}: the installed @gba-kit/debug-info never ` +
