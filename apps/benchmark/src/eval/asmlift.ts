@@ -6,8 +6,10 @@ import type { DecompilerResult } from '@asmlift/bench-schema';
 import type { CandidateCompiler } from '@asmlift/cli/compile-command';
 import { decompileRanked } from '@asmlift/cli/rank';
 import type { MatchScore } from '@asmlift/cli/score';
+import type { SymbolRef } from '@asmlift/core/l3/symbol-refs';
 import { decompile } from '@asmlift/core/pipeline';
 import type { Prototypes } from '@asmlift/core/proto';
+import type { SymbolInfo, SymbolMap } from '@asmlift/core/symbols';
 
 import { cachedExtractAsmData } from '../cache';
 import { benchCompilerFor } from '../decomp-config';
@@ -28,6 +30,7 @@ export function runAsmlift(
   obj: string,
   prototypes?: Prototypes,
   contextCompile?: CandidateCompiler,
+  symbols?: SymbolMap,
 ): DecompilerResult {
   // Side-table: extract the data-section jump table + relocations from the SAME target object so a
   // dense MIPS/PPC switch can recover. Best-effort — a missing/failed objdump (or agbcc, whose
@@ -48,17 +51,21 @@ export function runAsmlift(
     ...(prototypes ? { prototypes } : {}),
     ...(asmData ? { asmData } : {}),
     ...(compile ? { compile } : {}),
+    // the project's vendored symbol map (names + declaration shapes). The '/raw-globals'
+    // ranked lever rides along, so a symbol-fed row can never score worse than without.
+    ...(symbols ? { symbols } : {}),
   };
-  // Phase 1 — single-shot decompile in annotate mode: every detected gap becomes an inline
-  // ASMLIFT_ERROR marker plus a structured diagnostic. Gapped ⇒ outcome "declined", never
-  // scored (the marker could compile via an implicit declaration and grade meaningless code).
-  // Gap-free ⇒ proceed to ranked scoring.
+  // spells all known map-induced escapes legally — the addr-intify + the CMP-path fix), so a
+  // map-fed decompile now classifies exactly once, WITH the map. The schema field survives as
+  // a historical marker only (bench-schema doc-comment).
   let annotated: string;
+  const usedSymbols = Boolean(symbols);
   try {
     const dec = decompile(sym, asm, tc.targetDesc, { ...opts, onGap: 'annotate' });
     if (dec.diagnostics.length > 0) {
       return {
         decompiler: 'asmlift',
+        ...(usedSymbols ? { symbolMap: true as const } : {}),
         outcome: 'declined',
         source: dec.source,
         score: null,
@@ -75,6 +82,7 @@ export function runAsmlift(
     const msg = (e as Error).message ?? String(e);
     return {
       decompiler: 'asmlift',
+      ...(usedSymbols ? { symbolMap: true as const } : {}),
       outcome: 'failed',
       source: msg,
       score: null,
@@ -91,6 +99,13 @@ export function runAsmlift(
     const s = best.score;
     return {
       decompiler: 'asmlift',
+      ...(usedSymbols ? { symbolMap: true as const } : {}),
+      // Provenance of the WINNER: which candidate spelling the differ picked, and (map rows)
+      // which map symbols its output references — best.symbolRefs is derived in core from the
+      // exact tree the winning source was emitted from (post-DCE value refs only; call targets
+      // excluded). A raw-globals winner names nothing ⇒ the honest empty list.
+      candidateLabel: best.label,
+      ...(usedSymbols ? { symbolsUsed: symbolsUsedFrom(best.symbolRefs) } : {}),
       outcome: s.match ? 'match' : 'nonmatch',
       source: best.source,
       score: s.score,
@@ -106,6 +121,7 @@ export function runAsmlift(
     const msg = (e as Error).message ?? String(e);
     return {
       decompiler: 'asmlift',
+      ...(usedSymbols ? { symbolMap: true as const } : {}),
       outcome: 'noncompile',
       source: annotated,
       score: null,
@@ -119,6 +135,56 @@ export function runAsmlift(
 
 function firstLine(s: string): string {
   return s.split('\n')[0].slice(0, 200);
+}
+
+/** The report's human spelling of one map symbol's declaration shape ("struct Unk_03004C20
+ *  (24 B)", "u16[]", "scalar u8", "code") — pre-formatted HERE so the schema and the web UI
+ *  never learn SymbolInfo's field vocabulary. Name-only symbols (no shape facts) get none. */
+export function symbolShape(info: SymbolInfo): string | undefined {
+  if (info.kind === 'code') {
+    return 'code';
+  }
+  switch (info.shape) {
+    case 'struct': {
+      const size = info.size !== undefined ? ` (${info.size} B)` : '';
+      return `struct ${info.structName ?? '?'}${size}`;
+    }
+    case 'array':
+      if (info.elemSize === undefined) {
+        return 'array';
+      }
+      // Only a genuine scalar width spells an int type — a struct-element array (e.g. 28 B
+      // elements) must not masquerade as a `u224[]`.
+      return SCALAR_BYTES.has(info.elemSize)
+        ? `${intType(info.elemSize, info.elemSigned ?? false)}[]`
+        : `array (${info.elemSize} B/elem)`;
+    case 'scalar':
+      if (info.size === undefined) {
+        return 'scalar';
+      }
+      return SCALAR_BYTES.has(info.size)
+        ? `scalar ${intType(info.size, info.signed ?? false)}`
+        : `scalar (${info.size} B)`;
+    case 'pointer':
+      return 'pointer';
+    default:
+      return undefined;
+  }
+}
+
+const SCALAR_BYTES = new Set([1, 2, 4, 8]);
+const intType = (bytes: number, signed: boolean): string => `${signed ? 's' : 'u'}${bytes * 8}`;
+
+/** The winning candidate's map references as the schema's provenance rows — name plus the
+ *  pre-formatted shape, sorted by name, uncapped. Absent refs (a '/raw-globals' winner names
+ *  nothing) become the honest empty list: the map was in scope, the winner used none of it. */
+export function symbolsUsedFrom(refs: SymbolRef[] | undefined): { name: string; shape?: string }[] {
+  return (refs ?? [])
+    .map((r) => {
+      const shape = symbolShape(r.info);
+      return { name: r.name, ...(shape ? { shape } : {}) };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /** Best-effort count of distinct compiler diagnostics in a captured error string. */
