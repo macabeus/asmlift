@@ -22,6 +22,7 @@ import { sha } from '../cache';
 import { makeTU, realCompilerFor } from '../compile/real';
 import type { RealProjectCfg } from '../compile/types';
 import { CPP } from '../config';
+import { enforceCheckoutPin } from './checkout';
 import { REAL_DIR, loadManifestsForVendor, resolveProjectRoot } from './manifests';
 
 const MACHINE_PATH = /\/Users\/|\/home\/|\/private\/var\//;
@@ -29,6 +30,9 @@ const MACHINE_PATH = /\/Users\/|\/home\/|\/private\/var\//;
 export function vendor(filterProject?: string): void {
   const manifests = loadManifestsForVendor().filter((m) => !filterProject || m.project === filterProject);
   for (const man of manifests) {
+    // the vendored dataset must be reproducible from the pinned branch — a drifted checkout
+    // fails loud here (ASMLIFT_ALLOW_DIRTY_CHECKOUT=1 downgrades to a warning for WIP machines)
+    enforceCheckoutPin(man, 'vendor');
     const root = resolveProjectRoot(man);
     const cfg: RealProjectCfg = {
       project: man.project,

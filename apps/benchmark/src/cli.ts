@@ -4,6 +4,12 @@
 //   pnpm bench run [--jobs N] [--tier synthetic|real|both] [--only s] [--project p]
 //                  [--serial] [--shard i/N] [--toolchain id]
 //   pnpm bench target <id> --out <dir>   # repro-script pre-step: target object + decomp.yaml
+//   pnpm bench setup [--project p] [--build]
+//                                        # materialize the BENCH-OWNED project checkouts
+//                                        # (apps/benchmark/checkouts/: clone + baseroms + prepare;
+//                                        # --build runs each project's full verified build) + fetch
+//                                        # bench-owned toolchains; non-bench-owned checkouts are
+//                                        # only reported, never touched
 //   pnpm bench fidelity [--jobs N]       # pre-publish gate: re-run BOTH repro scripts, every function
 //   pnpm bench merge                     # tiers → results.json, then publish
 //   pnpm bench publish                   # re-stage results.json into the web app
@@ -43,6 +49,7 @@ const { values: opts, positionals } = parseArgs({
     toolchain: { type: 'string' },
     shard: { type: 'string' },
     serial: { type: 'boolean', default: false },
+    build: { type: 'boolean', default: false },
     out: { type: 'string' },
   },
 });
@@ -116,6 +123,11 @@ switch (command) {
     await fidelity(jobs);
     break;
   }
+  case 'setup': {
+    const { setup } = await import('./cases/setup');
+    await setup(opts.project, { build: opts.build });
+    break;
+  }
   case 'merge':
     merge();
     publish();
@@ -161,7 +173,7 @@ switch (command) {
   }
   default:
     console.error(
-      `usage: bench <run|target|fidelity|merge|publish|stale-check|regression|smoke|verify|vendor> — got ${JSON.stringify(command)}`,
+      `usage: bench <run|target|setup|fidelity|merge|publish|stale-check|regression|smoke|verify|vendor> — got ${JSON.stringify(command)}`,
     );
     process.exit(2);
 }
