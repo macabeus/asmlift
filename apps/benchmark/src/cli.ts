@@ -22,11 +22,13 @@
 // `run` fans shard child processes by default (see run/orchestrate.ts); `--serial` runs
 // in-process — the debugging path, and also HOW the shard children themselves run (the parent
 // spawns `run --serial --shard i/N`, which writes `<tier>.part<i>.json` for the stitcher).
-import { copyFileSync, mkdirSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
 import { cpus } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 
+import { loadManifestsForVendor, resolveProjectRoot } from './cases/manifests';
+import { resolveProjectElf } from './cases/project-elf';
 import { realCases } from './cases/real';
 import { syntheticCases } from './cases/synthetic';
 import { RESULTS_DIR } from './config';
@@ -51,6 +53,7 @@ const { values: opts, positionals } = parseArgs({
     serial: { type: 'boolean', default: false },
     build: { type: 'boolean', default: false },
     out: { type: 'string' },
+    'project-root': { type: 'string' },
   },
 });
 
@@ -91,14 +94,17 @@ switch (command) {
     break;
   }
   case 'target': {
-    // target <rowId> --out <dir> — the repro scripts' pre-step: build this function's target
-    // object (content-cached) and write a decomp.yaml whose compile command is the benchmark's
-    // own toolchain invocation, so `asmlift --config decomp.yaml --score-against target.o`
-    // scores exactly what the benchmark scored.
+    // target <rowId> --out <dir> [--project-root <dir>] — the repro scripts' pre-step: build
+    // this function's target object (content-cached) and write a decomp.yaml whose compile
+    // command is the benchmark's own toolchain invocation, so `asmlift --config decomp.yaml
+    // --score-against target.o` scores exactly what the benchmark scored. Symbol-fed rows
+    // additionally graft the project checkout's tools.asmlift.elf (the symbol-map source) into
+    // that decomp.yaml — --project-root names the checkout (default: the same resolution the
+    // harness uses); a missing checkout/ELF warns LOUDLY and degrades to a map-less config.
     const rowId = positionals[1];
     const out = opts.out;
     if (!rowId || !out) {
-      console.error('usage: pnpm bench target <project:sym:toolchain> --out <dir>');
+      console.error('usage: pnpm bench target <project:sym:toolchain> --out <dir> [--project-root <dir>]');
       process.exit(2);
     }
     const c = [...syntheticCases(), ...realCases()].find((x) => x.id === rowId);
@@ -109,8 +115,30 @@ switch (command) {
     mkdirSync(out, { recursive: true });
     const { obj } = c.build();
     copyFileSync(obj, join(out, 'target.o'));
-    writeScoreConfig(c.toolchain.id, out);
-    console.log(`Wrote ${join(out, 'target.o')} + decomp.yaml (${c.toolchain.id})`);
+    let elf: string | undefined;
+    if (c.symbols) {
+      // the row was MEASURED with the project's symbol map — resolve the checkout's derived
+      // symbols ELF so the CLI loads the same map the benchmark fed this function
+      const man = loadManifestsForVendor().find((m) => m.project === c.project);
+      const root = opts['project-root'] ?? (man ? resolveProjectRoot(man) : undefined);
+      const mapless = (why: string): void =>
+        console.error(
+          `WARN: ${c.project}: ${why} — decomp.yaml written WITHOUT tools.asmlift.elf (the ` +
+            `symbol map); output may differ from the published row`,
+        );
+      if (root === undefined || !existsSync(root)) {
+        mapless(`project checkout not found${root ? ` at ${root}` : ''} (set PROJECT_PATH / --project-root)`);
+      } else {
+        const res = resolveProjectElf(c.project, root);
+        if (res.elf !== null) {
+          elf = res.elf;
+        } else {
+          mapless(`symbol map unavailable (${res.reason})`);
+        }
+      }
+    }
+    writeScoreConfig(c.toolchain.id, out, elf);
+    console.log(`Wrote ${join(out, 'target.o')} + decomp.yaml (${c.toolchain.id}${elf ? ' + symbol-map ELF' : ''})`);
     break;
   }
   case 'fidelity': {

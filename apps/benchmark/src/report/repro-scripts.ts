@@ -5,10 +5,95 @@
 // the target object + a decomp.yaml carrying the benchmark's own compile command, then the
 // plain CLI decompiles the embedded input and --score-against ranks candidates against it.
 import type { FunctionResult } from '@asmlift/bench-schema';
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { gunzipSync } from 'node:zlib';
 
+import { REAL_DIR, type RealManifest, loadManifestsForVendor } from '../cases/manifests';
 import { m2cFnPrototype } from '../cases/real';
 import { M2C_PINNED_COMMIT as M2C_COMMIT } from '../config';
 import { M2C_CTX_ATTRIBUTE_RE, disasmToM2c, m2cTarget } from '../eval/m2c-normalizer';
+
+// ── real-tier provenance preambles (comments only — nothing here executes) ────────────────
+// The committed manifests are part of the dataset, so the generator can name each project's
+// pinned fork/branch and the vendored symbol map without any checkout present.
+let manifestCache: Map<string, RealManifest> | null = null;
+function manifestFor(project: string): RealManifest | null {
+  manifestCache ??= new Map(loadManifestsForVendor().map((m) => [m.project, m]));
+  return manifestCache.get(project) ?? null;
+}
+
+const mapShaCache = new Map<string, string | null>();
+/** sha256 of the DECOMPRESSED vendored symbol-map JSON — the map's identity across machines
+ *  (the .gz bytes vary with compressor settings; the JSON is byte-stable by construction). */
+function vendoredMapSha(project: string): string | null {
+  let sha = mapShaCache.get(project);
+  if (sha === undefined) {
+    const p = join(REAL_DIR, 'tu', project, 'symbols.json.gz');
+    sha = existsSync(p)
+      ? createHash('sha256')
+          .update(gunzipSync(readFileSync(p)))
+          .digest('hex')
+      : null;
+    mapShaCache.set(project, sha);
+  }
+  return sha;
+}
+
+/** The full checkout recipe for a real row: the PINNED benchmark branch of the project's fork
+ *  (provenance base + one integration commit), the build, and — sidecar projects — the derived
+ *  symbols ELF. Comments only: the vendored inputs below keep the script itself checkout-free. */
+function checkoutRecipe(fn: FunctionResult): string {
+  const man = fn.tier === 'real' ? manifestFor(fn.project) : null;
+  if (!man) {
+    return '';
+  }
+  const dir = man.repoDir;
+  return `
+
+# This function's decomp project — the PINNED benchmark branch (provenance base + one
+# integration commit). Not needed to run this script (inputs are embedded/vendored); to
+# rebuild the project itself:
+#   git clone --branch ${man.branch} https://github.com/${man.repo}.git ${dir}
+#   make -C ${dir}${
+    man.elfMake
+      ? `
+#   make -C ${dir} ${man.elfMake}   # derive the symbols ELF (DWARF types-sidecar)`
+      : ''
+  }`;
+}
+
+/** Whether this row's script must load the project's symbol map (the row was measured with
+ *  it, and the committed manifest names the checkout dir the script's placeholder points at). */
+function usesSymbolMap(fn: FunctionResult): boolean {
+  return fn.tier === 'real' && Boolean(fn.asmlift.symbolMap) && manifestFor(fn.project) !== null;
+}
+
+/** The symbol-map provenance note for a real row (asmlift script only — the map is asmlift's
+ *  analogue of m2c's context input). Map rows also declare the PROJECT_PATH placeholder here:
+ *  step 1 grafts that checkout's tools.asmlift.elf into the scoring config, so the CLI loads
+ *  the same map the benchmark fed this function. */
+function symbolsNote(fn: FunctionResult): string {
+  if (fn.tier !== 'real') {
+    return '';
+  }
+  if (usesSymbolMap(fn)) {
+    const rel = `apps/benchmark/dataset/real/tu/${fn.project}/symbols.json.gz`;
+    const sha = vendoredMapSha(fn.project);
+    return `
+# SYMBOLS: this row ran WITH the project's symbol map (names + declaration shapes derived
+# from the ELF its decomp.yaml names), vendored at ${rel}
+#   sha256 of the decompressed map JSON: ${sha ?? 'unavailable (vendored blob not present)'}
+# Set PROJECT_PATH to your BUILT checkout of the project above (clone recipe in the comments);
+# step 1 then points the scoring config at the checkout's decomp.yaml (tools.asmlift.elf) —
+# the CLI loads the same map, so this run reproduces the row's named spellings. A missing
+# checkout/ELF warns and runs map-less (output may then differ from the row).
+PROJECT_PATH='/path/to/${manifestFor(fn.project)!.repoDir}'`;
+  }
+  return `
+# (no symbols needed: this row ran without a project symbol map.)`;
+}
 
 /** One bash-array element with its explanatory comment, comment column aligned. A long flag
  *  must still get ≥1 space before `#` — a glued `flag#comment` is NOT a comment in bash and
@@ -133,15 +218,23 @@ PROTO_INPUT`
 set -euo pipefail
 
 # asmlift checkout — run \`pnpm install\` there once, with this function's toolchain available
-# (apps/benchmark/README lists the env vars; .github/workflows/benchmark.yml shows a complete
-# from-scratch setup):
-ASMLIFT_PATH='/path/to/asmlift'
+# (\`pnpm bench setup\` fetches bench-owned toolchains + pinned project checkouts;
+# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a
+# complete from-scratch setup):
+ASMLIFT_PATH='/path/to/asmlift'${checkoutRecipe(fn)}${symbolsNote(fn)}
 
 # ── Step 1: scoring inputs ───────────────────────────────────────────────────
 # Builds this function's target object (content-cached) and writes a decomp.yaml whose compile
-# command is the benchmark's own toolchain invocation — what --score-against compiles with.
+# command is the benchmark's own toolchain invocation — what --score-against compiles with.${
+    usesSymbolMap(fn)
+      ? `
+# --project-root grafts the checkout's tools.asmlift.elf (the symbol map) into that decomp.yaml.`
+      : ''
+  }
 # (progress goes to stderr so the script's stdout stays purely the decompiled source)
-pnpm --dir "$ASMLIFT_PATH" bench target ${fn.id} --out "$PWD" 1>&2
+pnpm --dir "$ASMLIFT_PATH" bench target ${fn.id} --out "$PWD"${
+    usesSymbolMap(fn) ? ' --project-root "$PROJECT_PATH"' : ''
+  } 1>&2
 
 # ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────
 # The exact ${asmKind} text.

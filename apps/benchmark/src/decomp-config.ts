@@ -64,7 +64,7 @@ function substitutePlaceholders(cmd: string, id: ToolchainId): string {
 interface BenchDoc {
   name: string;
   platform: string;
-  tools: { asmlift: { target: string; compiler?: string } };
+  tools: { asmlift: { target: string; compiler?: string; elf?: string } };
 }
 
 /** The committed config for one toolchain, with placeholders materialized. */
@@ -132,7 +132,12 @@ export function scoreViaBenchConfig(
 /** Write `<dir>/decomp.yaml` for one toolchain with the candidate-compile command intact on
  *  EVERY toolchain (one-shot docker for the pooled pair) — the config `bench target` hands the
  *  reproduction scripts so `asmlift --config decomp.yaml --score-against` can compile with
- *  the benchmark's own toolchain. */
-export function writeScoreConfig(id: ToolchainId, dir: string): void {
-  writeFileSync(join(dir, 'decomp.yaml'), YAML.stringify(benchDoc(id, `asmlift benchmark repro (${id})`)));
+ *  the benchmark's own toolchain. `elf` (absolute path — symbol-fed rows) lands as
+ *  tools.asmlift.elf so the CLI loads the project's symbol map exactly as the benchmark did. */
+export function writeScoreConfig(id: ToolchainId, dir: string, elf?: string): void {
+  const doc = benchDoc(id, `asmlift benchmark repro (${id})`);
+  if (elf) {
+    doc.tools.asmlift.elf = elf;
+  }
+  writeFileSync(join(dir, 'decomp.yaml'), YAML.stringify(doc));
 }
