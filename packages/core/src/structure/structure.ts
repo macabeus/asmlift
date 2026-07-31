@@ -477,6 +477,19 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     ? { info: (n) => symbols.get(n), noteArray: (n, t) => shapedGlobalTypes.set(n, t) }
     : undefined;
 
+  /** A bare `gSym` naming a map-declared POINTER global — the VALUE of a pointer cell. Its C
+   *  type is whatever the PROJECT's own header says it points at, which the map deliberately
+   *  does not model (declare.ts spells every pointer global `void *`: "load/store/compare of the
+   *  4-byte cell are identical for any object-pointer type"). That holds for the CELL, but NOT
+   *  for arithmetic on the loaded value — see spellPtrGlobalArith. `ctype` cannot see this: it
+   *  types only params/locals, so a pointer global renders `undefined` there. */
+  const isPtrGlobal = (x: Expr): boolean => x.k === 'var' && symCtx?.info(x.name)?.shape === 'pointer';
+
+  /** Operands `-`/`~` cannot take as spelled: a rendered pointer, a bare `&gSym`, a pointer
+   *  global's value. All three are ill-formed C under a unary arithmetic operator — the asm did
+   *  32-bit integer math on the address, so that is what gets spelled. */
+  const needsIntSpelling = (x: Expr): boolean => ctype(x)?.kind === 'ptr' || x.k === 'addr' || isPtrGlobal(x);
+
   // --- loop discovery (loops.ts): natural loops via dominator back-edges + the nesting forest ---
   const forest = analyzeLoops(fn, dom);
 
@@ -905,7 +918,30 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
       return { k: 'const', value: d.attrs.value as number };
     }
     if (CMP_TO_BIN[d.opcode]) {
-      return { k: 'bin', op: CMP_TO_BIN[d.opcode], l: e(d.operands[0]), r: e(d.operands[1]) };
+      // A bare global address `&gSym` as a COMPARISON operand is the same unspelled escape as the
+      // arithmetic case below (see intifyAddr): its C type comes from the PROJECT's own
+      // declaration, unknowable here. Worse, the compare's SIGNEDNESS lives in the operand types
+      // (CMP_TO_BIN maps icmp_ult and icmp_slt to the same '<'), so leaving `&gSym` untyped lets
+      // the project's declaration pick the compare the compiler emits — silently byte-inexact
+      // whenever it disagrees with the asm. The honest spelling is integer math on the address
+      // with the cast AGREEING with the opcode's signedness: unsigned compares (and the
+      // sign-agnostic ==/!=) spell `(u32)&gSym`, signed compares `(s32)&gSym` — exactly the
+      // compare the asm did. The deref folds never see a compare operand, so no named spelling is
+      // lost; a NARROWING cast (`(u8)&gSym`) is not a bare `addr` and keeps its truncation.
+      // SCOPE (adversarial review): this closes the hole for BARE addr operands only. An
+      // addr-carrying arithmetic tree (`(u32)&gSym + 4`, spelled by intifyAddr below) under an
+      // icmp_s* still compares unsigned in C (u32 wins the usual-arithmetic-conversions) — the
+      // same pre-existing wrongness the old ptr-vs-int spelling had, surfacing as a scoring
+      // nonmatch, never a silent regression of a formerly-correct compare. Rare shape; an outer
+      // signed cast on addr-carrying trees is the follow-up if it ever costs a row.
+      const t = /^icmp_s/.test(d.opcode) ? T.s(32) : T.u(32);
+      const intifyAddrCmp = (x: Expr): Expr => (x.k === 'addr' ? { k: 'cast', to: t, e: x } : x);
+      return {
+        k: 'bin',
+        op: CMP_TO_BIN[d.opcode],
+        l: intifyAddrCmp(e(d.operands[0])),
+        r: intifyAddrCmp(e(d.operands[1])),
+      };
     }
     if (ARITH_TO_BIN[d.opcode]) {
       let l = e(d.operands[0]);
@@ -949,6 +985,50 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
       } else if (op === '-' && ctype(l)?.kind !== 'ptr' && ctype(r)?.kind === 'ptr') {
         r = intify(r); // int - ptr is not C
       }
+      // A bare global address `&gSym` under ANY of these operators is never emitted as-is: its C
+      // type comes from the PROJECT's own declaration (unknowable here — exprCType types `addr`
+      // undefined, so the ptr-keyed intify above never fires on it), which makes `&gSym + K`
+      // byte-INEXACT (C scales K by sizeof(gSym)) and `&gSym & K` ill-formed. The honest spelling
+      // is integer math on the address — `(u32)&gSym + K`, exactly the arithmetic the asm did.
+      // The deref folds (globalOf / globalConstByte, via addrIn) look through this cast, so every
+      // access that CAN spell a named element/field still does; only a genuine value-context
+      // escape (a call argument, a stored address, a compare) keeps it — previously such an
+      // escape tripped assertDerefsTyped's interior-pointer rule and declined the whole function.
+      const intifyAddr = (x: Expr): Expr => (x.k === 'addr' ? { k: 'cast', to: T.u(32), e: x } : x);
+      l = intifyAddr(l);
+      r = intifyAddr(r);
+      // The SAME hazard one level down, for a POINTER-shaped global's VALUE (`gPtr`, isPtrGlobal):
+      // C scales `gPtr + K` by sizeof(*gPtr) — 1 under the map's synthesized `void *`, but
+      // whatever the PROJECT's header declares (a 0x5C-byte struct, say) in the world a user
+      // actually recompiles in. The asm added BYTES, so the honest spelling makes the stride
+      // explicit: CAST-THEN-ADD, `(u8 *)gPtr + K`, the same address in EVERY world. Add-then-cast
+      // (`(u8 *)(gPtr + K)`, what the backend's deref legalization would otherwise produce) is
+      // byte-correct in exactly one of them — a silent wrongness, the class this project refuses.
+      // NOT foldable into the deref index either: `((u8 *)gPtr)[K + off]` re-scales K by the
+      // ACCESS width, a different address whenever that width is not 1.
+      // Under the non-additive operators C rejects a pointer outright, so there the honest
+      // spelling is integer math on the cell — exactly intifyAddr's `(u32)&gSym` rule.
+      const bytePtr = (x: Expr): Expr => ({ k: 'cast', to: T.ptr(T.u(8)), e: x });
+      const intifyPtrGlobal = (x: Expr): Expr => ({ k: 'cast', to: T.u(32), e: x });
+      if (op === '+' || op === '-') {
+        // `ptr ± int` and `ptr - ptr` are byte arithmetic once both sides are byte pointers;
+        // `ptr + ptr` and `int - ptr` are not C at all, so the second pointer goes integer.
+        const bothPtr = isPtrGlobal(l) && isPtrGlobal(r);
+        if (isPtrGlobal(l)) {
+          l = bytePtr(l);
+        }
+        if (isPtrGlobal(r)) {
+          r = bothPtr && op === '-' ? bytePtr(r) : op === '+' && !bothPtr ? bytePtr(r) : intifyPtrGlobal(r);
+        }
+      } else if (op !== '&&' && op !== '||') {
+        // (`&&`/`||` take a pointer operand legally — a truth test, no arithmetic.)
+        l = isPtrGlobal(l) ? intifyPtrGlobal(l) : l;
+        r = isPtrGlobal(r) ? intifyPtrGlobal(r) : r;
+      }
+      // SCOPE: this and intifyAddr cover the ARITHMETIC escapes. A pointer global under a
+      // COMPARISON (`gPtr < K` — C compares unsigned whatever the asm's icmp_s* said) is the same
+      // class as intifyAddrCmp's `addr` rule and is deliberately left alone here: it is valid C
+      // today, so closing it would churn spellings for a signedness case no row exercises.
       return { k: 'bin', op, l, r };
     }
     // `-`/`~` on a pointer rendering is equally not C — same honest integer cast as above.
@@ -984,11 +1064,11 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     }
     if (d.opcode === 'neg') {
       const x = e(d.operands[0]);
-      return { k: 'un', op: '-', e: ctype(x)?.kind === 'ptr' ? { k: 'cast', to: T.s(32), e: x } : x };
+      return { k: 'un', op: '-', e: needsIntSpelling(x) ? { k: 'cast', to: T.s(32), e: x } : x };
     }
     if (d.opcode === 'not') {
       const x = e(d.operands[0]);
-      return { k: 'un', op: '~', e: ctype(x)?.kind === 'ptr' ? { k: 'cast', to: T.s(32), e: x } : x };
+      return { k: 'un', op: '~', e: needsIntSpelling(x) ? { k: 'cast', to: T.s(32), e: x } : x };
     }
     // Width-narrowing casts: `zext`/`sext` widen a `width`-bit value back to 32 → C `(u8)e`/`(s8)e`.
     if (d.opcode === 'zext') {
