@@ -15,6 +15,7 @@ export interface Example {
   target: string; // toolchain id (App's TARGETS key)
   backend?: string; // App BACKENDS key; default "c"
   spec?: string; // C++ signature JSON (backend "cpp")
+  symbols?: string; // symbol-map JSON for the Symbols pane; absent ⇒ the pane loads empty
   asm: string;
 }
 
@@ -58,10 +59,72 @@ half:
 \tbx\tlr
 `;
 
+// A symbol-map showcase: the pool-word shapes symbols.test.ts pins, unioned into one plausible
+// function. With the paired map every absolute address gets its project spelling — a named
+// scalar (gCounter), a struct interior via layout (gState.timer), a bare array element
+// (gBlendModeTable[i]), and a Thumb code pointer ((u32)DoThing). Without the map the same asm
+// decompiles to raw literals — the map only ever ADDS names, it never blocks a run.
+export const SYMBOL_MAP_ASM = `\t.code\t16
+\t.globl\tUpdateTimer
+\t.thumb_func
+UpdateTimer:
+\tldr\tr1, .L4
+\tldr\tr1, [r1]
+\tldr\tr2, .L5
+\tldr\tr2, [r2]
+\tadds\tr1, r1, r2
+\tldr\tr3, .L6
+\tlsls\tr0, r0, #0x1
+\tadds\tr0, r3, r0
+\tldrh\tr0, [r0]
+\tadds\tr0, r0, r1
+\tldr\tr1, .L5
+\tstr\tr0, [r1]
+\tldr\tr0, .L7
+\tbx\tlr
+.L4:
+\t.word\t0x03001234
+.L5:
+\t.word\t0x03002004
+.L6:
+\t.word\t0x08057B4C
+.L7:
+\t.word\t0x08012345
+`;
+
+// The vendored-map format (symbolMapToJson): hex address → SymbolInfo[]. Note DoThing is keyed
+// at the EVEN address — ELF stores Thumb function addresses with bit 0 cleared, while the pool
+// word carries the odd Thumb pointer; the kind-aware masked probe bridges the two.
+export const SYMBOL_MAP_JSON = `{
+  "0x03001234": [{ "name": "gCounter", "kind": "data" }],
+  "0x03002000": [
+    {
+      "name": "gState",
+      "kind": "data",
+      "shape": "struct",
+      "size": 24,
+      "structName": "GameState",
+      "layout": [
+        { "name": "frames", "offset": 0, "size": 4 },
+        { "name": "timer", "offset": 4, "size": 4 }
+      ]
+    }
+  ],
+  "0x08057b4c": [{ "name": "gBlendModeTable", "kind": "data", "shape": "array", "elemSize": 2 }],
+  "0x08012344": [{ "name": "DoThing", "kind": "code" }]
+}
+`;
+
 export const EXAMPLES: Example[] = [
   { label: 'GBA / agbcc — clamp to zero (if-assign)', target: 'agbcc', asm: agbccClamp0 },
   { label: 'GBA / agbcc — pointer deref', target: 'agbcc', asm: agbccDeref },
   { label: 'GBA / agbcc — x / 2 (idiom folding: watch the Pipeline tab)', target: 'agbcc', asm: AGBCC_HALF_ASM },
+  {
+    label: 'GBA / agbcc — symbol map (named globals, struct fields, arrays)',
+    target: 'agbcc',
+    symbols: SYMBOL_MAP_JSON,
+    asm: SYMBOL_MAP_ASM,
+  },
   { label: 'N64 / IDO — countdown loop (while + coalesced induction var)', target: 'ido7.1', asm: idoCountdown },
   { label: 'N64 / IDO — clamp to zero (divergent if)', target: 'ido7.1', asm: idoClamp0 },
   { label: 'N64 / IDO — max(a, b)', target: 'ido7.1', asm: idoMaxab },

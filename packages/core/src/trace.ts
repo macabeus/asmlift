@@ -14,6 +14,7 @@ import type { LanguageBackend } from './l3/ast';
 import { DEFAULT_IDIOM_PATTERNS, RewritePattern, applyPattern, dce, patternApplies } from './pattern/engine';
 import { type OnGap, raiseRecovered, structureChecked, stubResult } from './pipeline';
 import type { Prototypes } from './proto';
+import { type SymbolMap, symbolsByName } from './symbols';
 import { type TargetDescription, structureOptionsFor } from './target';
 
 export interface StageTrace {
@@ -60,6 +61,7 @@ export interface TraceOptions {
   backend?: LanguageBackend;
   prototypes?: Prototypes; // header facts (callee arities + void-ness), keyed by symbol
   asmData?: AsmData; // data-section side table (Regime-B jump tables), as in decompile()
+  symbols?: SymbolMap; // address→symbol map (symbols.ts), as in decompile(); absent ⇒ inert
   onGap?: OnGap; // "strict" (default) | "annotate", as in decompile()
   /** Score probe at pattern boundaries (cli report's objdiff hook). One call per boundary:
    *  pattern N's after-score is pattern N+1's before-score. Absent ⇒ score fields stay unset. */
@@ -130,7 +132,7 @@ function traceTower(
   const patternEvents: PatternEvent[] = [];
 
   // (1) lift → typed-SSA IR
-  const fn = frontendFor(target).lift(name, asm, target, prototypes, opts.asmData);
+  const fn = frontendFor(target).lift(name, asm, target, prototypes, opts.asmData, opts.symbols);
   verify(fn);
   trace.push({ id: 'stage:lift', title: 'Lift (ISA frontend → typed-SSA IR)', irDump: print(fn), verified: true });
 
@@ -200,7 +202,11 @@ function traceTower(
 
   // (4) structure → neutral AST; boundary contract: no unresolved value leaked (strict) or
   // spelled as a loud ASMLIFT_ERROR marker (annotate) — same onGap lever as decompile()
-  const sfn = structureChecked(fn, { ...structureOptionsFor(target, returnsVoid), onGap: opts.onGap ?? 'strict' });
+  const sfn = structureChecked(fn, {
+    ...structureOptionsFor(target, returnsVoid),
+    onGap: opts.onGap ?? 'strict',
+    ...(opts.symbols ? { symbols: symbolsByName(opts.symbols) } : {}),
+  });
   trace.push({
     id: 'stage:structure',
     title: 'Structuring (IR → neutral AST)',

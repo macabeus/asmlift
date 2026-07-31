@@ -12,7 +12,9 @@
 // would mask an alignment bug as a perpetual "closest"). FAIL-CLOSED: nothing here is caught; any
 // engine failure throws, and a row that cannot be displayed can never count as matched.
 import { cBackend } from '@asmlift/core/backend/c';
+import { renderDeclarations } from '@asmlift/core/declare';
 import { type RankedResult, type Scored, enumerateCandidates } from '@asmlift/core/rank';
+import type { SymbolMap } from '@asmlift/core/symbols';
 import { C_TYPEDEFS, type TargetDescription } from '@asmlift/core/target';
 import { assemble, compileToObject } from 'agbcc';
 import type * as ObjdiffWasm from 'objdiff-wasm';
@@ -27,6 +29,9 @@ export interface RankRequest {
   name: string;
   asm: string;
   target: TargetDescription;
+  /** the Symbols pane's parsed address→symbol map — structured-clones fine (a Map of plain
+   *  objects); absent ⇒ the plain raw-globals-only enumeration */
+  symbols?: SymbolMap;
 }
 export type RankResponse =
   { reqId: number; ok: true; result: RankedResult<MatchScore> } | { reqId: number; ok: false; error: string };
@@ -161,14 +166,21 @@ const firstLine = (s: string) => (s || '').split('\n').find((l) => l.trim() !== 
  *  `@asmlift/core/rank`'s `rankBy` semantics — a candidate whose compile/score throws is skipped so
  *  it cannot sink a matching sibling; only if EVERY candidate fails is the failure surfaced.
  *
+ *  SELF-DECLARING CANDIDATES: with a symbol map, a candidate that names map symbols carries
+ *  their refs (Candidate.symbolRefs) — its synthesized declaration block (the SAME core
+ *  renderer the cli scorer uses) is prepended after the typedefs, exactly the cli's
+ *  self-declared world (rank.ts). agbcc-wasm compiles bare candidates (no project headers),
+ *  so the probe arbitration is unnecessary here: this scorer is ALWAYS the self-declared world.
+ *
  *  Ranking always uses `cBackend` regardless of the UI backend selector — choosing cpp/pascal
  *  turns ranking off (it is gated to the agbcc target + C backend in Playground.tsx). */
 export async function rankCandidatesInBrowser(
   name: string,
   asm: string,
   target: TargetDescription,
+  symbols?: SymbolMap,
 ): Promise<RankedResult<MatchScore>> {
-  const candidates = enumerateCandidates(name, asm, target, { backend: cBackend });
+  const candidates = enumerateCandidates(name, asm, target, { backend: cBackend, ...(symbols ? { symbols } : {}) });
 
   const t = await assemble(asm);
   if (!t.ok) {
@@ -179,7 +191,8 @@ export async function rankCandidatesInBrowser(
   let lastErr: unknown = null;
   for (const c of candidates) {
     try {
-      const cc = await compileToObject(c.source, { context: C_TYPEDEFS });
+      const decls = c.symbolRefs?.length ? renderDeclarations(c.symbolRefs) : '';
+      const cc = await compileToObject(c.source, { context: C_TYPEDEFS + decls });
       if (!cc.ok) {
         lastErr = new Error(`agbcc could not compile candidate '${c.label}': ${firstLine(cc.stderr)}`);
         continue;

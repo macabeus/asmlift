@@ -10,9 +10,9 @@ import { type RankRequest, type RankResponse, preloadScorers, rankCandidatesInBr
 preloadScorers();
 
 self.onmessage = async (e: MessageEvent<RankRequest>) => {
-  const { reqId, name, asm, target } = e.data;
+  const { reqId, name, asm, target, symbols } = e.data;
   try {
-    const result = await rankCandidatesInBrowser(name, asm, target);
+    const result = await rankCandidatesInBrowser(name, asm, target, symbols);
     postMessage({ reqId, ok: true, result } satisfies RankResponse);
   } catch (err) {
     postMessage({ reqId, ok: false, error: err instanceof Error ? err.message : String(err) } satisfies RankResponse);
