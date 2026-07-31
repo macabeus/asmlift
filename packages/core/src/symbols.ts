@@ -146,23 +146,24 @@ export function declaredFields(layout: SymbolStructField[] | undefined): Declare
   if (!Array.isArray(layout)) {
     return null;
   }
-  const members = [...layout].sort((a, b) => (a as SymbolStructField).offset - (b as SymbolStructField).offset);
-  const out: DeclaredField[] = [];
-  let cursor = 0;
-  for (const m of members) {
-    if (!wellFormedField(m)) {
-      return null;
-    }
-    if (m.size === null) {
+  // Validate BEFORE sorting: the comparator reads `.offset`, so a malformed entry would throw
+  // there rather than decline here — the crash this function exists to prevent.
+  for (const m of layout) {
+    if (!wellFormedField(m) || m.size === null) {
       return null;
     }
     if (isArrayField(m) && m.length !== undefined && m.elemSize! * m.length !== m.size) {
       return null;
     }
+  }
+  const members = (layout as DeclaredField[]).slice().sort((a, b) => a.offset - b.offset);
+  const out: DeclaredField[] = [];
+  let cursor = 0;
+  for (const m of members) {
     if (m.offset < cursor) {
       continue; // an overlapping (union) member: the first view is declared, the alias is not
     }
-    out.push(m as DeclaredField);
+    out.push(m);
     cursor = m.offset + m.size;
   }
   return out;

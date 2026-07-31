@@ -567,8 +567,22 @@ describe('a POINTER global with a known POINTEE spells the interior as gPtr->mem
 
   test('a MALFORMED layout is declined, never a crash (SymbolMap is public API)', () => {
     // the webapp accepts a caller-supplied map, so a layout that is not a list of members — or a
-    // list holding a non-member — must degrade to the unshaped spelling rather than throw
-    for (const layout of [42, 'nope', null, [null], [{ name: 'x' }], [{ name: 1, offset: 0, size: 1 }]]) {
+    // list holding a non-member — must degrade to the unshaped spelling rather than throw.
+    // The MULTI-entry cases matter on their own: sorting a layout by offset only invokes the
+    // comparator when there are two of them, so a one-element probe cannot reach a `.offset` read
+    // on a malformed entry — which is exactly where the crash would be.
+    for (const layout of [
+      42,
+      'nope',
+      null,
+      [null],
+      [{ name: 'x' }],
+      [{ name: 1, offset: 0, size: 1 }],
+      [null, null],
+      [{ name: 'a', offset: 0, size: 1 }, null],
+      [null, { name: 'a', offset: 0, size: 1 }],
+      [{}, {}],
+    ]) {
       const info = { kind: 'data', shape: 'pointer', pointee: { structName: 'Save', size: 92, layout } };
       expect(() => run('f', BYTE_AT_78, mapOf([[0x03001234, { name: 'gPtr', ...info }]]))).not.toThrow();
       expect(() => declOf(info)).not.toThrow();
