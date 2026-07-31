@@ -134,7 +134,9 @@ export function Methodology({ rows }: { rows: FunctionResult[] }) {
         <P>
           Each output also gets a 0–100 readability score (penalizing gotos, redundant casts, and undecompiled glue — a
           proxy for how much a human would rewrite), and non-matching functions record their <em>gap size</em>: the best
-          compiling candidate's objdiff diff.
+          compiling candidate's objdiff diff. The cast metric exempts project-idiom address casts (
+          <span className="font-mono">(u32)&amp;gSymbol</span>, <span className="font-mono">(u32)FuncName</span>) — the
+          correct C spelling of a link-time address, not noise.
         </P>
       </section>
 
