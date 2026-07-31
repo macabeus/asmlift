@@ -1,4 +1,5 @@
 // Shared helpers for the per-toolchain compile modules.
+import { C_TYPEDEFS } from '@asmlift/core/target';
 import { spawnFailure } from '@asmlift/toolchains';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -70,3 +71,27 @@ export function contentDir(tag: string, tu: string): string {
 }
 
 export const shq = (s: string): string => `'${s.replaceAll("'", `'\\''`)}'`;
+
+/** asmlift's typedef prelude, reduced to the names a VENDORED context does not already define.
+ *
+ *  Per-NAME, not all-or-nothing: a context can own SOME of the family (af's header-less
+ *  manifests vendor just `typedef short s16;`). Adding the whole prelude then re-typedefs that
+ *  name — a C89 hard error that makes every candidate noncompile — while adding none leaves
+ *  the rest of the family (u8/u32/…) undeclared, which is the same noncompile from the other
+ *  side. So keep exactly the ones the context lacks.
+ *
+ *  ONE definition, deliberately: both the scoring path (compile/real.ts's richest strategy) and
+ *  the reproduction path (decomp-config.ts's materialized ctx.i) build the same prelude, and a
+ *  drift between them means the published script grades in a different world than the harness
+ *  did. Returns '' when the context already owns the whole family. */
+export function ctxTypedefPrelude(ctxI: string): string {
+  const kept = C_TYPEDEFS.trim()
+    .split(';')
+    .filter((d) => d.trim())
+    .map((d) => `${d.trim()};`)
+    .filter((d) => {
+      const name = d.match(/(\w+);$/)?.[1];
+      return name ? !new RegExp(`typedef\\s+[^;]*\\b${name}\\s*;`).test(ctxI) : false;
+    });
+  return kept.length > 0 ? `${kept.join('')}\n` : '';
+}

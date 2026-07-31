@@ -15,6 +15,7 @@ import { idoReal } from './ido';
 import { kmcReal } from './kmc';
 import { mwccReal } from './mwcc';
 import type { RealCompile, RealProjectCfg } from './types';
+import { ctxTypedefPrelude } from './util';
 
 export type { RealProjectCfg } from './types';
 
@@ -52,39 +53,77 @@ export function buildRealTarget(toolchain: ToolchainId, tuI: string): BuiltTarge
 // not a decompiler weakness. The scorer therefore escalates context, up to the function's
 // VENDORED preprocessed context (the same text the target compiled against).
 
-/** Compile a candidate in the project's escalating context, returning the object of the FIRST
- *  prelude that compiles (cheap C_TYPEDEFS → +prependC → the vendored project context). The
- *  context is what lets an emission referencing project types/GLOBALS compile at all — the same
- *  context m2c is scored in, so asmlift's real-tier scoring is symmetric. Throws if none compile. */
-export function makeRealCompile(toolchain: ToolchainId, prependC: string, ctxI: string) {
+/** The escalation ladder for ONE real function: complete prelude texts, cheapest → richest,
+ *  each ready to be concatenated ahead of a candidate.
+ *
+ *    1. bare C_TYPEDEFS — enough for a candidate that names nothing of the project;
+ *    2. + the manifest's prependC (skipping C_TYPEDEFS when that prelude owns `u8` already);
+ *    3. the function's VENDORED preprocessed context — its real types + extern globals, with the
+ *       prototype of `sym` itself stripped (the candidate's definition must be the only one) and
+ *       the typedefs that context does not itself define added back (ctxTypedefPrelude — the SAME
+ *       helper decomp-config.ts materializes into the reproduction's ctx.i).
+ *
+ *  Every rung re-provides `NULL`: the vendored context is PREPROCESSED, so the standard macro is
+ *  expanded away, and a candidate spelling a null check the idiomatic way (`p != NULL`, as m2c
+ *  does) would fail to compile purely for that while a `p != 0` candidate (as asmlift emits)
+ *  would not. Both decompilers are judged on the code, not on this artifact.
+ *
+ *  EXPORTED because the reproduction scripts must materialize the very rung the harness used —
+ *  see resolveScoringPrelude. */
+export function scoringPreludes(prependC: string, ctxI: string, sym: string): string[] {
   const proDefsU8 = /typedef\s+unsigned\s+char\s+u8\b/.test(prependC);
+  const rungs = [
+    `${C_TYPEDEFS}\n`,
+    `${proDefsU8 ? '' : C_TYPEDEFS}\n${prependC}\n`,
+    ...(ctxI ? [`${ctxTypedefPrelude(ctxI)}${stripPrototype(ctxI, sym)}\n`] : []),
+  ];
+  return rungs.map((r) => `#define NULL ((void *)0)\n${r}`);
+}
+
+/** Compile a candidate in the project's escalating context, returning the object of the FIRST
+ *  prelude that compiles. The context is what lets an emission referencing project types/GLOBALS
+ *  compile at all — the same context m2c is scored in, so asmlift's real-tier scoring is
+ *  symmetric. Throws if none compile. */
+export function makeRealCompile(toolchain: ToolchainId, prependC: string, ctxI: string) {
   const rc = realCompilerFor(toolchain);
   return (candC: string, sym: string): string => {
-    // cheap → rich. candidate never typedefs u8, so C_TYPEDEFS is safe in (1); in (2) skip it if
-    // the prelude already defines u8; (3) uses the vendored context's own types + extern globals
-    // (the prototype of `sym` itself stripped, so the candidate's own definition is the only one).
-    const strategies: (string | null)[] = [
-      `${C_TYPEDEFS}\n`,
-      `${proDefsU8 ? '' : C_TYPEDEFS}\n${prependC}\n`,
-      ctxI ? `${stripPrototype(ctxI, sym)}\n` : null,
-    ];
     let lastErr = '';
-    for (const prelude of strategies) {
-      if (prelude === null) {
-        continue;
-      }
+    for (const prelude of scoringPreludes(prependC, ctxI, sym)) {
       try {
-        // COMPAT: the vendored context is PREPROCESSED, so the standard `NULL` macro is expanded
-        // away — a candidate that spells a null check the idiomatic way (`p != NULL`, as m2c does)
-        // would fail to compile purely for that, while a `p != 0` candidate (as asmlift emits) would
-        // not. Re-provide it so both decompilers' output is judged on the code, not on this artifact.
-        return rc.compileCandidate(`#define NULL ((void *)0)\n${prelude}${candC}\n`, sym);
+        return rc.compileCandidate(`${prelude}${candC}\n`, sym);
       } catch (e) {
         lastErr = (e as Error).message;
       }
     }
     throw new Error(lastErr || 'candidate did not compile in any context');
   };
+}
+
+/** Which rung of the ladder a KNOWN source actually compiles in — i.e. the world the harness
+ *  scored that source in. `bench target` replays it over a published row's winning source so the
+ *  reproduction script grades where the benchmark graded: materializing the richest rung
+ *  unconditionally is wrong whenever escalation stopped earlier, because a richer context can
+ *  REJECT what a poorer one accepts (a project prototype vs. the candidate's implicitly-declared
+ *  call). Costs 1–3 candidate compiles. Falls back to the richest rung when nothing compiles —
+ *  the same context today's unconditional materialization would have used. */
+export function resolveScoringPrelude(
+  toolchain: ToolchainId,
+  prependC: string,
+  ctxI: string,
+  sym: string,
+  candC: string,
+): { prelude: string; rung: number } {
+  const rc = realCompilerFor(toolchain);
+  const preludes = scoringPreludes(prependC, ctxI, sym);
+  for (const [i, prelude] of preludes.entries()) {
+    try {
+      rc.compileCandidate(`${prelude}${candC}\n`, sym);
+      return { prelude, rung: i + 1 };
+    } catch {
+      // next rung
+    }
+  }
+  return { prelude: preludes[preludes.length - 1], rung: preludes.length };
 }
 
 /** A context-aware Scorer (real tier): compile the candidate in project context, then objdiff it

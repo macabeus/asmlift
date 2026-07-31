@@ -134,10 +134,33 @@ export function scoreViaBenchConfig(
  *  reproduction scripts so `asmlift --config decomp.yaml --score-against` can compile with
  *  the benchmark's own toolchain. `elf` (absolute path — symbol-fed rows) lands as
  *  tools.asmlift.elf so the CLI loads the project's symbol map exactly as the benchmark did. */
-export function writeScoreConfig(id: ToolchainId, dir: string, elf?: string): void {
+export function writeScoreConfig(id: ToolchainId, dir: string, elf?: string, ctxFile?: string): void {
   const doc = benchDoc(id, `asmlift benchmark repro (${id})`);
   if (elf) {
     doc.tools.asmlift.elf = elf;
   }
+  if (ctxFile) {
+    // REAL rows are scored INSIDE the escalation rung compile/real.ts stopped at for this row
+    // (usually the project's vendored context) — the same world m2c is scored in. Wrap the
+    // toolchain's own command so every
+    // candidate is concatenated after that context: the reproduction grades where the
+    // benchmark graded. The CLI's prelude probe sees a context-injecting template and drops
+    // its typedefs + synthesized declarations on its own, so no flag says any of this.
+    doc.tools.asmlift.compiler =
+      `cat ${ctxFile} {{inputPath}} > {{inputPath}}.ctx.c && ` +
+      doc.tools.asmlift.compiler!.replaceAll('{{inputPath}}', '{{inputPath}}.ctx.c');
+  }
   writeFileSync(join(dir, 'decomp.yaml'), YAML.stringify(doc));
+}
+
+/** Materialize one real row's scoring context as `<dir>/ctx.i` (returns its basename, the name
+ *  the generated compile command concatenates ahead of every candidate).
+ *
+ *  `prelude` is a rung of compile/real.ts's escalation ladder — the ONE the harness actually
+ *  scored this row's source in (compile/real.ts's resolveScoringPrelude picks it). It is not
+ *  always the richest: a project context can REJECT what bare typedefs accept, and materializing
+ *  the vendored context for such a row leaves the script with no scorable candidate at all. */
+export function materializeScoringContext(prelude: string, dir: string): string {
+  writeFileSync(join(dir, 'ctx.i'), prelude);
+  return 'ctx.i';
 }
