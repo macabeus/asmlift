@@ -48,7 +48,7 @@ import {
   type SymbolStructField,
   declaredFields,
   isArrayField,
-  pointeeStructType,
+  pointeeFields,
 } from '../symbols';
 import { analyze } from './analysis';
 import { makeLoopHazards, updateWriteSet } from './hazards';
@@ -110,11 +110,11 @@ function globalOf(e: Expr, width: number): { name: string; idx: Expr } | null {
 
 // A BYTE residual read as an ELEMENT index of `elemSize`-wide elements, or null when it is not one
 // — the residual then addresses mid-element and no whole-element spelling can express it, so the
-// caller falls through to the honest cast forms. THE one copy of the rule (the `&gSym`-based array
-// spelling and the pointee-array spelling both index by it): width 1 → the byte residual IS the
-// index; wider → a constant residual must divide exactly, and a non-constant one must already be
-// element-scaled (`i * elemSize` / `i << log2(elemSize)`), which is exactly what the asm's own
-// index scaling produced.
+// caller falls through to the honest cast forms. THE one copy of the rule, indexing the
+// `&gSym`-based array spelling: width 1 → the byte residual IS the index; wider → a constant
+// residual must divide exactly, and a non-constant one must already be element-scaled
+// (`i * elemSize` / `i << log2(elemSize)`), which is exactly what the asm's own index scaling
+// produced.
 function elementIndex(residual: Expr, elemSize: number): Expr | null {
   if (elemSize === 1) {
     return residual;
@@ -249,66 +249,48 @@ function memberQualsAllow(f: SymbolStructField, containerConst: boolean | undefi
   return !(isStore && (f.const || containerConst));
 }
 
-// A member's byte offset within the pointee at which the INDEXED spelling `gPtr->arr[i]` is
-// byte-identical to the `((u8 *)gPtr + i)[K]` cast form it replaces. Measured, not argued: for a
-// nonzero K the two forms are NOT interchangeable — agbcc folds K into the load's own immediate
-// for the cast form but materialises `base + K` into a register for the arrow form (an extra
-// `adds r1, #16`; 10 bytes against 12), and the widths and directions do not agree with each
-// other either. At K = 0 there is no constant to fold and both forms address the base register
-// directly. Core cannot see which target it is emitting for, so the gate is the offset that holds
-// on ALL of them. The CONSTANT-offset form `gPtr->member` is not gated: it is a single load whose
-// member offset becomes the same load immediate the cast form used.
-const INDEXED_MEMBER_BYTE_NEUTRAL_OFFSET = 0;
+// WHY THERE IS NO INDEXED `gPtr->arr[i]` SPELLING.
+//
+// Naming a member is only allowed where it is byte-identical to the cast form it replaces, and
+// for the INDEXED form that was measured to be false. Against agbcc, `gPtr->arr[i]` and
+// `((u8 *)gPtr + i)[K]` differ at EVERY nonzero K and for every width and direction — agbcc does
+// not reassociate `(base + K) + i` into `(base + i) + K`, so it materialises the offset instead of
+// folding it into the load (`adds r1, #16`; +2 code bytes at width 1, +4 at widths 2 and 4). At
+// K = 0 the two still differ for widths 2 and 4, where the commutative `adds` picks a different
+// destination register. The single agbcc case that did measure identical — width 1 at K = 0 —
+// survives only a BARE index in a function with ONE such access: `i & 255`, `i + 1`, `i >> 2` and
+// a second access that lets the cast side CSE its base all break it. A spelling rule decides one
+// expression at a time and cannot see the neighbouring access that changes the answer, so there is
+// no local gate that makes this form safe. (Both MIPS targets accept it freely, but core is
+// target-agnostic — it cannot condition on the compiler it is emitting for.)
+//
+// The CONSTANT-offset form below is the opposite case, and is emitted unconditionally: measured
+// identical on all three targets for widths 1/2/4, loads and stores, at every offset tested up to
+// 4096 — including offsets past Thumb's immediate range, and under multi-member, across-a-call
+// and in-a-loop shapes. It is one load whose member offset becomes the same immediate the cast
+// form used, and unlike the indexed form it composes.
 
 /** The pointee a global's value may be spelled through: the members the declaration synthesis
- *  DECLARES, plus the struct type the legalization env needs. Null when nothing may be named
- *  through it — THE shared gate (symbols.ts pointeeStructType / declaredFields), so core never
- *  names a member that synthesis would not declare, and never sees a member synthesis drops (a
- *  union alias behind the first view at that offset). A VOLATILE pointee declines outright: every
- *  named access through it would be a volatile access where the cast form it replaces was plain. */
+ *  DECLARES. Null when nothing may be named through it — THE shared gate (symbols.ts
+ *  pointeeFields), so core never names a member that synthesis would not declare, and never sees a
+ *  member synthesis drops (a union alias behind the first view at that offset). A VOLATILE pointee
+ *  declines outright: every named access through it would be a volatile access where the cast form
+ *  it replaces was plain. */
 function spellablePointee(
   name: string,
   sym: SymRenderCtx,
-): { fields: DeclaredField[]; type: IrType; const: boolean | undefined } | null {
+): { fields: DeclaredField[]; const: boolean | undefined } | null {
   const pointee = sym.info(name)?.pointee;
-  const type = pointeeStructType(pointee);
-  const fields = declaredFields(pointee?.layout);
-  if (type === null || fields === null || pointee!.volatile) {
+  const fields = pointeeFields(pointee);
+  if (fields === null || pointee!.volatile) {
     return null;
   }
-  return { fields, type, const: pointee!.const };
+  return { fields, const: pointee!.const };
 }
 
-/** `gPtr->arr[i]` for an ALREADY-element-scaled index — the member must start at the byte offset
- *  the indexed form is byte-neutral at and stride the access width exactly. Shared by the two
- *  lowerings that can produce an indexed access through a pointer global: a plain load off a
- *  `gPtr + i` base (memAccess) and a recovered array access (arrayAccess). */
-function pointeeIndexed(
-  name: string,
-  totalByte: number,
-  idx: Expr,
-  width: number,
-  signed: boolean,
-  isStore: boolean,
-  sym: SymRenderCtx,
-): Expr | null {
-  if (totalByte !== INDEXED_MEMBER_BYTE_NEUTRAL_OFFSET) {
-    return null;
-  }
-  const p = spellablePointee(name, sym);
-  const f = p?.fields.find((m) => m.offset === totalByte && m.elemSize === width && m.length !== undefined);
-  if (!p || !f || !spellsAccessType(f.elemSigned, width, signed) || !memberQualsAllow(f, p.const, isStore)) {
-    return null;
-  }
-  // The env entry is registered ONLY on this path: the plain `->member` form needs no legalization
-  // (a field node spells arrow unconditionally), while an INDEX over the member does — uncast only
-  // if the env knows the member's array type.
-  sym.noteGlobal(name, p.type);
-  return { k: 'index', base: { k: 'field', base: { k: 'var', name }, name: f.name }, idx, width, signed };
-}
-
-/** `gPtr->member` / `gPtr->member[i]` for an access through a pointer global's value, or null when
- *  the offset is not provably ONE member's (see the block comment above). */
+/** `gPtr->member` for an access through a pointer global's value, or null when the offset is not
+ *  provably ONE member's (see the block comment above). A VARIABLE index declines whatever it
+ *  lands on — the indexed form is not byte-neutral and has no spelling here. */
 function pointeeAccess(
   pg: PtrGlobalBase,
   off: number,
@@ -317,13 +299,10 @@ function pointeeAccess(
   isStore: boolean,
   sym: SymRenderCtx,
 ): Expr | null {
-  const total = pg.byte + off;
   if (pg.idx !== null) {
-    // Variable index: the member must START at the constant offset (a mid-array constant is
-    // `&m[k] + i`, which this spelling cannot express); the byte residual becomes an element index.
-    const idx = elementIndex(pg.idx, width);
-    return idx ? pointeeIndexed(pg.name, total, idx, width, signed, isStore, sym) : null;
+    return null;
   }
+  const total = pg.byte + off;
   // Constant offset: the member must match EXACTLY — offset, read width, and the SPELLED type
   // (spellsAccessType). An ARRAY member is excluded whatever its size: `u8 x[1]` would match a
   // byte access by (offset, size) and spell `->x`, which is not an lvalue of that width at all.
@@ -462,21 +441,7 @@ function arrayAccess(
   signed: boolean,
   ctype: (e: Expr) => IrType | undefined,
   sym?: SymRenderCtx,
-  isStore = false,
 ): Expr {
-  // The indexed interior of a POINTER global's pointee (`gPtr->arr[i]`) — the SAME rule memAccess
-  // applies, reached by the other lowering: an off-0 access with a scaled index recovers as an
-  // array access, so without this the byte-neutral offset-0 case could never be spelled. The index
-  // here is already in ELEMENTS (the aload's own stride), so no residual division is needed.
-  if (sym) {
-    const pg = ptrGlobalBase(baseExpr, (n) => sym.info(n)?.shape === 'pointer');
-    if (pg && pg.idx === null) {
-      const spelled = pointeeIndexed(pg.name, pg.byte + (fieldOff ?? 0), idxExpr, elemSize, signed, isStore, sym);
-      if (spelled) {
-        return spelled;
-      }
-    }
-  }
   // A variable-index access off a global's address indexes the ADDRESS `&gSym` (the cast form
   // `((T *)&gSym)[i]` — valid for a struct global too, unlike casting the bare value). A
   // struct-array-of-globals (fieldOff) through `&gSym` is out of scope — fall through.
@@ -1494,7 +1459,6 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
             elemSize === 4,
             ctype,
             symCtx,
-            true, // an lvalue: a member whose declaration is const cannot be NAMED as the target
           ),
           value: expr(op.operands[2]),
         });

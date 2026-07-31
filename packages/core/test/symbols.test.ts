@@ -331,36 +331,32 @@ describe('a POINTER global with a known POINTEE spells the interior as gPtr->mem
     expect(src).not.toContain('(u8 *)gPtr'); // the byte-cast spelling is exactly what this replaces
   });
 
-  // The INDEXED spelling is gated to a member seated at offset 0 of the pointee
-  // (INDEXED_MEMBER_BYTE_NEUTRAL_OFFSET). At a NONZERO offset the two forms are not
-  // interchangeable: the cast form folds the member offset into the load's own immediate, while
-  // the arrow form materialises `base + offset` into a register first — measurably different
-  // bytes. At offset 0 there is no constant to fold and both address the base register directly.
+  // A VARIABLE index never takes a member's name, at any offset and any width. `gPtr->arr[i]` and
+  // `((u8 *)gPtr + i)[K]` were MEASURED against agbcc and are not the same bytes: at every nonzero
+  // K the arrow form materialises `base + K` instead of folding it into the load (+2 code bytes at
+  // width 1, +4 at widths 2 and 4), and even at K = 0 the two differ for widths 2 and 4 by which
+  // register the commutative `adds` targets. The one case that did measure identical — width 1 at
+  // K = 0 — holds only for a bare index in a function with a single such access, so no rule
+  // deciding one expression at a time can rely on it.
   const AT_ZERO = [
     { name: 'slots', offset: 0, size: 16, elemSize: 1, elemSigned: false, length: 16 },
     { name: 'flag', offset: 78, size: 1, signed: false },
   ];
 
-  test('a variable index into an ARRAY member at offset 0 spells gPtr->member[i], uncast', () => {
-    const src = run('f', derefAt('ldrb\tr0, [r1]', INDEXED), mapOf([[0x03001234, pointee(AT_ZERO)]]));
-    expect(src).toContain('gPtr->slots[a0]');
-    expect(src).not.toContain('(u8 *)'); // the member's own array type strides the access width
+  test('an indexed ARRAY member is NEVER named — at offset 0 or anywhere else', () => {
+    const atZero = run('f', derefAt('ldrb\tr0, [r1]', INDEXED), mapOf([[0x03001234, pointee(AT_ZERO)]]));
+    expect(atZero).not.toContain('->slots');
+    expect(atZero).toContain('(u8 *)gPtr'); // the arithmetic spelling the bytes were matched against
+
+    const atSixteen = run('f', derefAt('ldrb\tr0, [r1, #0x10]', INDEXED), mapOf([[0x03001234, pointee(SLOTS)]]));
+    expect(atSixteen).not.toContain('->slots');
+    expect(atSixteen).toContain('((u8 *)gPtr + a0)[16]');
   });
 
-  test('a WIDER array member at offset 0 indexes by ELEMENTS, not bytes', () => {
-    // ldrh through `r0 << 1`: the byte residual is element-scaled already, so the index is a0
+  test('a WIDER indexed member is not named either — the width-2/4 case differs even at offset 0', () => {
     const layout = [{ name: 'words', offset: 0, size: 32, elemSize: 2, elemSigned: false, length: 16 }];
     const body = derefAt('ldrh\tr0, [r1]', '\tlsls\tr0, r0, #0x1\n' + INDEXED);
-    expect(run('f', body, mapOf([[0x03001234, pointee(layout)]]))).toContain('gPtr->words[a0]');
-  });
-
-  test('an indexed member at a NONZERO offset falls back to the CAST form — not byte-neutral', () => {
-    // The same array member, moved off the base. `gPtr->slots[a0]` and `((u8 *)gPtr + a0)[16]`
-    // denote one address but do NOT compile to one instruction sequence, so the name is declined
-    // and the arithmetic spelling — the one the bytes were matched against — stands.
-    const src = run('f', derefAt('ldrb\tr0, [r1, #0x10]', INDEXED), mapOf([[0x03001234, pointee(SLOTS)]]));
-    expect(src).not.toContain('->slots');
-    expect(src).toContain('((u8 *)gPtr + a0)[16]');
+    expect(run('f', body, mapOf([[0x03001234, pointee(layout)]]))).not.toContain('->words');
   });
 
   test('a WIDTH mismatch falls back to the cast spelling, never a wrong member', () => {
@@ -551,17 +547,16 @@ describe('a POINTER global with a known POINTEE spells the interior as gPtr->mem
     expect(run('f', store, mapOf([[0x03001234, { name: 'gPtr', ...info }]]))).not.toContain('->flag');
   });
 
-  test('an index that does NOT stride the element width declines — bytes are not elements', () => {
-    // The member strides 2 bytes, but the asm added an UNSCALED byte residual, so consecutive `i`
-    // address overlapping halfwords — something `->words[i]` cannot express at all. (The
-    // complementary positive case is the element-scaled `lsls #1` test above, which IS named.)
-    // This is the same rule that keeps a `(u16 *)`-cast base from being folded into the member
-    // arithmetic: only a residual counted in the member's own elements may become its index.
+  test('an UNSCALED byte residual keeps the honest byte-arithmetic spelling', () => {
+    // The member strides 2 bytes but the asm added an unscaled residual, so consecutive `i`
+    // address OVERLAPPING halfwords — an address relationship no member spelling could express
+    // even if the indexed form were allowed. What the map may never do is round it to something
+    // expressible: the arithmetic that describes the real address stands.
     const layout = [{ name: 'words', offset: 0, size: 32, elemSize: 2, elemSigned: false, length: 16 }];
     const body = derefAt('ldrh\tr0, [r1]', INDEXED);
     const src = run('f', body, mapOf([[0x03001234, pointee(layout)]]));
     expect(src).not.toContain('->words');
-    expect(src).toContain('(u16 *)((u8 *)gPtr + a0)'); // the honest byte-arithmetic spelling
+    expect(src).toContain('(u16 *)((u8 *)gPtr + a0)');
   });
 
   test('TWO variable terms decline — only a single residual can be one member index', () => {

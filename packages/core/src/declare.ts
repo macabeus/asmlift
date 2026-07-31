@@ -38,7 +38,7 @@ import {
   type SymbolInfo,
   type SymbolStructField,
   declaredFields,
-  pointeeStructType,
+  pointeeFields,
   symbolFieldType,
 } from './symbols';
 
@@ -163,11 +163,11 @@ export function renderDeclarations(refs: SymbolRef[]): string {
         // identical for any object-pointer type, and the output then never derefs through the
         // decl's pointee. Qualifiers bind to the VARIABLE (`void *volatile g`), matching the
         // top-level cv chain the provider collected.
-        // THE shared gate (symbols.ts pointeeStructType): the typed extern is emitted on exactly
+        // THE shared gate (symbols.ts pointeeFields): the typed extern is emitted on exactly
         // the condition under which core may spell `gPtr->member`, so the two cannot disagree.
         const tag = info.pointee?.structName;
         const decl =
-          pointeeStructType(info.pointee) !== null ? structDecl(tag!, info.pointee!.layout, info.pointee!.size) : null;
+          pointeeFields(info.pointee) !== null ? structDecl(tag!, info.pointee!.layout, info.pointee!.size) : null;
         if (decl !== null && !declaredTags.has(tag!)) {
           declaredTags.add(tag!);
           lines.push(decl);

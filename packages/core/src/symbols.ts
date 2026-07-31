@@ -205,29 +205,19 @@ export function symbolFieldType(f: DeclaredField): IrType {
 export const ENUM_IS_SIGNED = true;
 
 /**
- * THE gate on every spelling through a POINTER global's value: the pointee's type as the
- * legalization env needs it (a pointer to the struct, fields typed), or null when nothing may be
- * spelled through it. Null unless the pointee is named (synthesis has no tag to declare it under
- * otherwise), sized (the struct type is incomplete otherwise), and its layout is declarable
- * ({@link declaredFields}) — the same three conditions declare.ts needs to emit
- * `struct Tag *gPtr;` rather than falling back to `extern void *gPtr;`. Both must decline
- * together: core naming a member of an undeclared pointee is non-compiling C.
+ * THE gate on every spelling through a POINTER global's value: the members a `gPtr->member`
+ * spelling may name, or null when nothing may be named through this pointee at all. Null unless
+ * the pointee is named (synthesis has no tag to declare it under otherwise), sized (the struct
+ * type is incomplete otherwise), and its layout is declarable ({@link declaredFields}) — the same
+ * three conditions declare.ts needs to emit `struct Tag *gPtr;` rather than falling back to
+ * `extern void *gPtr;`. Both must decline together: core naming a member of an undeclared pointee
+ * is non-compiling C.
  */
-export function pointeeStructType(pointee: SymbolPointee | undefined): IrType | null {
+export function pointeeFields(pointee: SymbolPointee | undefined): DeclaredField[] | null {
   if (pointee?.structName === undefined || pointee.size === undefined) {
     return null;
   }
-  const fields = declaredFields(pointee.layout);
-  if (fields === null) {
-    return null;
-  }
-  return T.ptr(
-    T.struct(
-      pointee.structName,
-      fields.map((f) => ({ name: f.name, off: f.offset, type: symbolFieldType(f) })),
-      pointee.size,
-    ),
-  );
+  return declaredFields(pointee.layout);
 }
 
 /** Kind-aware two-probe lookup for a pool-loaded 32-bit value. Exact match first (any kind);
