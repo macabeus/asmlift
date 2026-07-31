@@ -24,6 +24,7 @@ import { type OnGap, decompile } from '@asmlift/core/pipeline';
 import type { Prototypes } from '@asmlift/core/proto';
 import { RaiseUnsupportedError } from '@asmlift/core/raise/errors';
 import { StructureError } from '@asmlift/core/structure/structure';
+import type { SymbolMap } from '@asmlift/core/symbols';
 import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC, type TargetDescription } from '@asmlift/core/target';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -255,6 +256,23 @@ export async function runCli(
     }
   }
 
+  // tools.asmlift.elf → the project's symbol map (names + declaration shapes). Explicit
+  // config, so an unreadable ELF is a loud input error, never a silent names-less run.
+  let symbols: SymbolMap | undefined;
+  if (toolCfg?.elf) {
+    const elfPath = resolve(configDir!, toolCfg.elf);
+    try {
+      const { loadSymbolMap } = await import('./symbols-provider');
+      symbols = await loadSymbolMap(elfPath);
+    } catch (e) {
+      return {
+        code: 66,
+        stdout: '',
+        stderr: `asmlift: cannot load symbols from tools.asmlift.elf (${elfPath}): ${e instanceof Error ? e.message : e}\n`,
+      };
+    }
+  }
+
   const name = nameFlag ?? detectName(asm);
   if (!name) {
     return {
@@ -292,7 +310,7 @@ export async function runCli(
     }
     try {
       const { decompileRanked } = await import('./rank');
-      const ranked = decompileRanked(name, asm, target, targetObj, { backend, asmData, prototypes, compile });
+      const ranked = decompileRanked(name, asm, target, targetObj, { backend, asmData, prototypes, symbols, compile });
       const table = ranked.candidates
         .map((c) => `asmlift: [score] ${c.label}: ${c.score.score}${c.score.match ? ' (match)' : ''}\n`)
         .join('');
@@ -309,7 +327,7 @@ export async function runCli(
 
   const onGap: OnGap = flags.has('strict') ? 'strict' : 'annotate';
   try {
-    const result = decompile(name, asm, target, { backend, onGap, asmData, prototypes });
+    const result = decompile(name, asm, target, { backend, onGap, asmData, prototypes, symbols });
     const stderr = targetTrace + warn + result.diagnostics.map((d) => `asmlift: [${d.stage}] ${d.reason}\n`).join('');
     return { code: result.diagnostics.length === 0 ? 0 : 1, stdout: result.source, stderr };
   } catch (e) {
