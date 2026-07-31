@@ -10,7 +10,8 @@
 //                                        # --build runs each project's full verified build) + fetch
 //                                        # bench-owned toolchains; non-bench-owned checkouts are
 //                                        # only reported, never touched
-//   pnpm bench fidelity [--jobs N]       # pre-publish gate: re-run BOTH repro scripts, every function
+//   pnpm bench fidelity [--jobs N] [--project p] [--only s]
+//                                        # pre-publish gate: re-run BOTH repro scripts, every function
 //   pnpm bench merge                     # tiers → results.json, then publish
 //   pnpm bench publish                   # re-stage results.json into the web app
 //   pnpm bench stale-check               # committed vs fresh results (measurement-level)
@@ -208,7 +209,7 @@ switch (command) {
       process.exit(2);
     }
     const { fidelity } = await import('./run/fidelity');
-    await fidelity(jobs);
+    await fidelity(jobs, { project: opts.project, only: opts.only });
     break;
   }
   case 'setup': {
