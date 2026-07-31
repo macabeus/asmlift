@@ -4,6 +4,7 @@
 // for target→frontend dispatch.
 import type { Fn } from '../ir/core';
 import type { Prototypes } from '../proto';
+import type { SymbolMap } from '../symbols';
 import type { TargetDescription } from '../target';
 import type { AsmData } from './asmdata';
 import type { AsmTextFormat } from './format';
@@ -17,6 +18,15 @@ export interface Frontend {
   /** decode one function's assembly into an L1 Fn. `prototypes` supplies callee arities
    *  (and any other header facts the frontend needs); an empty map is valid. `asmData` is the
    *  OPTIONAL Regime-B side-table (data-section jump tables + relocations); absent ⇒ a
-   *  dense-switch dispatch declines/loud-fails. */
-  lift(name: string, asm: string, target: TargetDescription, prototypes: Prototypes, asmData?: AsmData): Fn;
+   *  dense-switch dispatch declines/loud-fails. `symbols` is the OPTIONAL address→symbol map
+   *  (symbols.ts); today only the Thumb frontend consumes it (numeric-pool promotion) — the
+   *  MIPS/PPC objdump dialect already carries symbol names in the asm text. */
+  lift(
+    name: string,
+    asm: string,
+    target: TargetDescription,
+    prototypes: Prototypes,
+    asmData?: AsmData,
+    symbols?: SymbolMap,
+  ): Fn;
 }

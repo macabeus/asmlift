@@ -19,6 +19,7 @@ import { type PreRecoveryPass, runPreRecovery } from './raise/pre-recovery';
 import { recoverTypes } from './raise/recover';
 import { sinkReturns } from './raise/retsink';
 import { StructureError, structure } from './structure/structure';
+import type { SymbolMap } from './symbols';
 import { type TargetDescription, structureOptionsFor } from './target';
 
 /** How a gap (a construct asmlift cannot faithfully model) degrades:
@@ -53,6 +54,10 @@ export interface DecompileOptions {
    *  MIPS/PPC switch declines/loud-fails; present ⇒ the frontend recovers the `switch_br`.
    *  Produced by `extractAsmData(obj, target)` from the scoring object. */
   asmData?: AsmData;
+  /** OPTIONAL address→symbol map (symbols.ts) — the project's own names (ELF symtab) and
+   *  declaration shapes (DWARF types-sidecar). Drives the Thumb numeric-pool promotion and the
+   *  byte-sensitive global spellings. Absent ⇒ byte-identical to today. */
+  symbols?: SymbolMap;
   /** gap policy — see `OnGap`. Default "strict". */
   onGap?: OnGap;
 }
@@ -99,7 +104,7 @@ function runTower(
   const backend = opts.backend ?? cBackend;
   const prototypes = opts.prototypes ?? {};
   // (1) lift: ISA frontend (resolved by target) → L1 with block-argument SSA
-  const fn = frontendFor(target).lift(name, asm, target, prototypes, opts.asmData);
+  const fn = frontendFor(target).lift(name, asm, target, prototypes, opts.asmData, opts.symbols);
   verify(fn);
   const raw = print(fn);
 

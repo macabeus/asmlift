@@ -896,6 +896,12 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
       return { k: 'call', fn: d.attrs.target as string, args: d.operands.map(e) };
     }
     if (d.opcode === 'gaddr') {
+      // A promoted CODE symbol (frontend `code: true`) is a function pointer stored as an
+      // integer: spelled `(u32)Name` — the source idiom — never `&Name` (defect G of the
+      // dogfood report; the & form compiles but is a different, non-matching spelling).
+      if (d.attrs.code === true) {
+        return { k: 'cast', to: T.int(32, false), e: { k: 'var', name: d.attrs.sym as string } };
+      }
       return { k: 'addr', name: d.attrs.sym as string };
     }
     if (d.opcode === 'load') {
