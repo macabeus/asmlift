@@ -2,6 +2,9 @@
   "project": "af",
   "toolchain": "ido7.1",
   "repoDir": "af",
+  "repo": "macabeus/af",
+  "branch": "asmlift-benchmark",
+  "elfMake": "asmlift-elf",
   "cppIncludes": [
     "-nostdinc"
   ],
@@ -17,7 +20,7 @@
       ],
       "prependC": "typedef struct { unsigned int w0; unsigned int w1; } Gfx;",
       "funcC": "Gfx* gfxopen(Gfx* gfxHead) {\n    return gfxHead + 1;\n}",
-      "sourceUrl": "https://github.com/zeldaret/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/gfxalloc.c#L4-L6"
+      "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/gfxalloc.c#L4-L6"
     },
     {
       "sym": "ListAlloc_Init",
@@ -28,7 +31,7 @@
       ],
       "prependC": "#define NULL ((void*)0)\ntypedef struct ListAlloc {\n    struct ListAlloc* prev;\n    struct ListAlloc* next;\n} ListAlloc;",
       "funcC": "ListAlloc* ListAlloc_Init(ListAlloc* this) {\n    this->prev = NULL;\n    this->next = NULL;\n    return this;\n}",
-      "sourceUrl": "https://github.com/zeldaret/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/listalloc.c#L4-L8"
+      "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/listalloc.c#L4-L8"
     },
     {
       "sym": "mem_copy",
@@ -44,7 +47,7 @@
           "returnsVoid": true
         }
       },
-      "sourceUrl": "https://github.com/zeldaret/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L14-L21"
+      "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L14-L21"
     },
     {
       "sym": "mem_clear",
@@ -60,7 +63,7 @@
           "returnsVoid": true
         }
       },
-      "sourceUrl": "https://github.com/zeldaret/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L23-L29"
+      "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L23-L29"
     },
     {
       "sym": "mem_cmp",
@@ -71,7 +74,7 @@
       ],
       "prependC": "typedef unsigned char u8;\ntypedef int s32;\ntypedef unsigned int size_t;",
       "funcC": "s32 mem_cmp(u8* ptr1, u8* ptr2, size_t len) {\n    while (len != 0) {\n        if (*ptr1 != *ptr2) {\n            return 0;\n        }\n        ptr1++;\n        ptr2++;\n        len--;\n    }\n    return 1;\n}",
-      "sourceUrl": "https://github.com/zeldaret/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L31-L41"
+      "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L31-L41"
     },
     {
       "sym": "chase_s",
@@ -82,7 +85,7 @@
       ],
       "prependC": "typedef short s16;\ntypedef int s32;\n#define TRUE 1\n#define FALSE 0",
       "funcC": "s32 chase_s(s16* pValue, s16 target, s16 step) {\n    if (step) {\n        if (*pValue > target) {\n            step = -step;\n        }\n\n        *pValue += step;\n\n        if ((step * (*pValue - target)) >= 0) {\n            *pValue = target;\n            return TRUE;\n        }\n    } else {\n        if (*pValue == target) {\n            return TRUE;\n        }\n    }\n    return FALSE;\n}",
-      "sourceUrl": "https://github.com/zeldaret/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L72-L90"
+      "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L72-L90"
     },
     {
       "sym": "chase_s2",
@@ -93,7 +96,7 @@
       ],
       "prependC": "typedef short s16;\ntypedef int s32;",
       "funcC": "s32 chase_s2(s16* pValue, s16 limit, s16 step) {\n    s16 prev = *pValue;\n\n    *pValue += step;\n    if ((*pValue - limit) * (prev - limit) <= 0) {\n        *pValue = limit;\n        return 1;\n    }\n    return 0;\n}",
-      "sourceUrl": "https://github.com/zeldaret/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L124-L133"
+      "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L124-L133"
     },
     {
       "sym": "lbRk_IsLeapMonth",
@@ -103,7 +106,7 @@
       ],
       "prependC": "typedef int s32;\n#define lbRk_KYUU_LEAP_MONTH 13",
       "funcC": "s32 lbRk_IsLeapMonth(s32 month) {\n    if (month == lbRk_KYUU_LEAP_MONTH) {\n        return 1;\n    }\n\n    return 0;\n}",
-      "sourceUrl": "https://github.com/zeldaret/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/lb_reki.c#L77-L83"
+      "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/lb_reki.c#L77-L83"
     },
     {
       "sym": "lbRk_SeirekiDays",
@@ -115,7 +118,7 @@
       "prependC": "typedef unsigned char u8;\ntypedef int s32;\ntypedef u8 lbRTC_day_t;\nextern lbRTC_day_t t_seiyo_days_tbl[2][13];",
       "funcC": "s32 lbRk_SeirekiDays(s32 year, s32 month) {\n    s32 idx = 0;\n\n    if ((year % 4) == 0) {\n        idx = 1;\n    }\n\n    return t_seiyo_days_tbl[idx][month];\n}",
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/zeldaret/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/lb_reki.c#L51-L59"
+      "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/lb_reki.c#L51-L59"
     },
     {
       "sym": "lbRk_IsKyuurekiLeapYear",
@@ -127,7 +130,7 @@
       "prependC": "typedef int s32;\n#define lbRk_YEAR_MIN 2000\nextern s32 l_lbRk_leapdays[33];",
       "funcC": "s32 lbRk_IsKyuurekiLeapYear(s32 year) {\n    if (l_lbRk_leapdays[year - lbRk_YEAR_MIN] != 0) {\n        return 1;\n    };\n\n    return 0;\n}",
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/zeldaret/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/lb_reki.c#L69-L75"
+      "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/lb_reki.c#L69-L75"
     },
     {
       "sym": "chase_s3",
@@ -139,7 +142,7 @@
       ],
       "prependC": "typedef short s16;\ntypedef int s32;\n#define TRUE 1\n#define FALSE 0",
       "funcC": "s32 chase_s3(s16* pValue, s16 target, s16 step) {\n    if (step) {\n        s32 diff = target - *pValue;\n\n        if (diff < 0) {\n            step = -step;\n        }\n\n        if (diff >= 0x8000) {\n            step = -step;\n            diff = -0xFFFF - -diff;\n        } else if (diff <= -0x8000) {\n            step = -step;\n            diff += 0xFFFF;\n        }\n\n        *pValue += step;\n\n        if ((diff * step) <= 0) {\n            *pValue = target;\n            return TRUE;\n        }\n\n    } else if (target == *pValue) {\n        return TRUE;\n    }\n    return FALSE;\n}",
-      "sourceUrl": "https://github.com/zeldaret/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L135-L162"
+      "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L135-L162"
     },
     {
       "sym": "get_percent",
@@ -150,7 +153,7 @@
       ],
       "prependC": "typedef int s32;\ntypedef float f32;",
       "funcC": "f32 get_percent(s32 max, s32 min, s32 x) {\n    f32 denom;\n    f32 percent;\n\n    percent = 1.0f;\n    if (x < min) {\n        percent = 0.0f;\n    } else if (x < max) {\n        denom = (f32)(max - min);\n        if (denom != 0.0f) {\n            percent = (f32)(x - min) / denom;\n            if (percent > 1.0f) {\n                percent = 1.0f;\n            }\n        }\n    }\n    return percent;\n}",
-      "sourceUrl": "https://github.com/zeldaret/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L737-L754"
+      "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L737-L754"
     },
     {
       "sym": "check_percent_abs",
@@ -161,7 +164,7 @@
       ],
       "prependC": "typedef int s32;\ntypedef float f32;",
       "funcC": "f32 check_percent_abs(f32 x, f32 min, f32 max, f32 scale, s32 shiftMin) {\n    if ((-min <= x) && (x <= min)) {\n        return 0.0f;\n    }\n    if (x >= max) {\n        return 1.0f;\n    }\n    if (x <= -max) {\n        return -1.0f;\n    }\n    if (shiftMin) {\n        if (x > 0.0f) {\n            return (x - min) * scale;\n        } else {\n            return (x + min) * scale;\n        }\n    } else {\n        return x * scale;\n    }\n}",
-      "sourceUrl": "https://github.com/zeldaret/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L652-L671"
+      "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L652-L671"
     },
     {
       "sym": "add_calc2",
@@ -177,7 +180,7 @@
           "returnsVoid": true
         }
       },
-      "sourceUrl": "https://github.com/zeldaret/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L410-L423"
+      "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L410-L423"
     },
     {
       "sym": "add_calc0",
@@ -193,7 +196,7 @@
           "returnsVoid": true
         }
       },
-      "sourceUrl": "https://github.com/zeldaret/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L425-L435"
+      "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L425-L435"
     },
     {
       "sym": "adds",
@@ -209,7 +212,7 @@
           "returnsVoid": true
         }
       },
-      "sourceUrl": "https://github.com/zeldaret/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L565-L580"
+      "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L565-L580"
     },
     {
       "sym": "add_calc_short_angle3",
@@ -220,7 +223,7 @@
       ],
       "prependC": "typedef short s16;\ntypedef unsigned short u16;\ntypedef int s32;\ntypedef float f32;",
       "funcC": "s16 add_calc_short_angle3(s16* pValue, s16 target, f32 fraction, s16 maxStep, s16 minStep) {\n    f32 stepSize;\n    s32 uTarget;\n    s32 newValue;\n    s32 uValue;\n\n    if (target != *pValue) {\n        uValue = (u16)*pValue;\n        uTarget = (u16)target;\n\n        if (uValue > uTarget) {\n            uTarget += 0x10000;\n        }\n\n        stepSize = (uTarget - uValue) * fraction;\n\n        if (stepSize > maxStep) {\n            stepSize = maxStep;\n        } else if (stepSize < minStep) {\n            stepSize = minStep;\n        }\n\n        newValue = uValue + (s32)stepSize;\n        if (newValue > uTarget) {\n            newValue = uTarget;\n        }\n        *pValue = newValue;\n    }\n\n    return target - *pValue;\n}",
-      "sourceUrl": "https://github.com/zeldaret/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L533-L563"
+      "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L533-L563"
     },
     {
       "sym": "xyz_t_sub",
@@ -236,7 +239,7 @@
           "returnsVoid": true
         }
       },
-      "sourceUrl": "https://github.com/zeldaret/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L242-L246"
+      "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L242-L246"
     },
     {
       "sym": "rgba_t_move",
@@ -252,7 +255,7 @@
           "returnsVoid": true
         }
       },
-      "sourceUrl": "https://github.com/zeldaret/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L582-L587"
+      "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L582-L587"
     },
     {
       "sym": "ValueSet__s_xyz",
@@ -268,7 +271,7 @@
           "returnsVoid": true
         }
       },
-      "sourceUrl": "https://github.com/zeldaret/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L357-L364"
+      "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L357-L364"
     },
     {
       "sym": "never_zero",
@@ -279,7 +282,7 @@
       ],
       "prependC": "typedef float f32;\n#define CLAMP_MAX(x, max) ((x) > (max) ? (max) : (x))\n#define CLAMP_MIN(x, min) ((x) < (min) ? (min) : (x))",
       "funcC": "f32 never_zero(f32 val, f32 min) {\n    if (val < 0.0f) {\n        return CLAMP_MAX(val, -min);\n    } else {\n        return CLAMP_MIN(val, min);\n    }\n}",
-      "sourceUrl": "https://github.com/zeldaret/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_olib.c#L38-L44"
+      "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_olib.c#L38-L44"
     },
     {
       "sym": "limiter",
@@ -290,7 +293,7 @@
       ],
       "prependC": "typedef float f32;\n#define CLAMP_MAX(x, max) ((x) > (max) ? (max) : (x))\n#define CLAMP_MIN(x, min) ((x) < (min) ? (min) : (x))",
       "funcC": "f32 limiter(f32 val, f32 max) {\n    if (val < 0.0f) {\n        return CLAMP_MIN(val, -max);\n    } else {\n        return CLAMP_MAX(val, max);\n    }\n}",
-      "sourceUrl": "https://github.com/zeldaret/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_olib.c#L50-L56"
+      "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_olib.c#L50-L56"
     },
     {
       "sym": "mRmTp_ItemNo2FtrSize",
@@ -302,7 +305,7 @@
       "prependC": "typedef unsigned char u8;\ntypedef unsigned short u16;\ntypedef int s32;\n#define UNUSED\nextern u8 mRmTp_ftr_size[];",
       "funcC": "s32 mRmTp_ItemNo2FtrSize(u16 name) {\n    if (name >= 0x1000 && name < 0x1ECD) {\n        UNUSED s32 scoped;\n        return mRmTp_ftr_size[(name - 0x1000) >> 2];\n    }\n    return 0;\n}",
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/zeldaret/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_room_type.c#L455-L461"
+      "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_room_type.c#L455-L461"
     },
     {
       "sym": "chase_angle",
@@ -314,7 +317,7 @@
       ],
       "prependC": "typedef short s16;\ntypedef int s32;\ntypedef float f32;\n#define TRUE 1\n#define FALSE 0\nextern f32 game_GameFrame_2F;",
       "funcC": "s32 chase_angle(s16* pValue, s16 target, s16 step) {\n    if (step != 0) {\n        f32 updateScale = game_GameFrame_2F;\n\n        if ((s16)(*pValue - target) > 0) {\n            step = -step;\n        }\n\n        *pValue += (s16)(step * updateScale);\n\n        if (((s16)(*pValue - target) * step) >= 0) {\n            *pValue = target;\n            return TRUE;\n        }\n    } else if (*pValue == target) {\n        return TRUE;\n    }\n\n    return FALSE;\n}",
-      "sourceUrl": "https://github.com/zeldaret/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L51-L70"
+      "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L51-L70"
     },
     {
       "sym": "chase_f",
@@ -325,7 +328,7 @@
       ],
       "prependC": "typedef int s32;\ntypedef float f32;\n#define TRUE 1\n#define FALSE 0",
       "funcC": "s32 chase_f(f32* pValue, f32 target, f32 step) {\n    if (step) {\n        if (*pValue > target) {\n            step = -step;\n        }\n\n        *pValue += step;\n\n        if ((step * (*pValue - target)) >= 0.0f) {\n            *pValue = target;\n            return TRUE;\n        }\n    } else {\n        if (*pValue == target) {\n            return TRUE;\n        }\n    }\n    return FALSE;\n}",
-      "sourceUrl": "https://github.com/zeldaret/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L92-L110"
+      "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L92-L110"
     },
     {
       "sym": "chase_f3",
@@ -336,7 +339,7 @@
       ],
       "prependC": "typedef int s32;\ntypedef float f32;",
       "funcC": "s32 chase_f3(f32* pValue, f32 target, f32 incrStep, f32 decrStep) {\n    f32 step = (target >= *pValue) ? incrStep : decrStep;\n\n    if (step != 0.0f) {\n        if (target < *pValue) {\n            step = -step;\n        }\n\n        *pValue += step;\n\n        if (((*pValue - target) * step) >= 0) {\n            *pValue = target;\n            return 1;\n        }\n    } else if (target == *pValue) {\n        return 1;\n    }\n\n    return 0;\n}",
-      "sourceUrl": "https://github.com/zeldaret/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L175-L194"
+      "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L175-L194"
     },
     {
       "sym": "inter_float",
@@ -347,7 +350,7 @@
       ],
       "prependC": "typedef int s32;\ntypedef float f32;",
       "funcC": "void inter_float(f32* pValue, f32 arg1, s32 stepCount) {\n    if (stepCount <= 0) {\n        *pValue = arg1;\n    } else {\n        f32 diff = arg1 - *pValue;\n\n        *pValue += diff / stepCount;\n    }\n}",
-      "sourceUrl": "https://github.com/zeldaret/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L196-L204"
+      "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L196-L204"
     },
     {
       "sym": "xyz_t_add",
@@ -356,7 +359,7 @@
       ],
       "prependC": "typedef float f32;\ntypedef struct xyz_t { f32 x; f32 y; f32 z; } xyz_t;",
       "funcC": "void xyz_t_add(xyz_t* augend, xyz_t* addend, xyz_t* total) {\n    total->x = augend->x + addend->x;\n    total->y = augend->y + addend->y;\n    total->z = augend->z + addend->z;\n}",
-      "sourceUrl": "https://github.com/zeldaret/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L236-L240"
+      "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L236-L240"
     },
     {
       "sym": "xyz_t_mult_v",
@@ -366,7 +369,7 @@
       ],
       "prependC": "typedef float f32;\ntypedef struct xyz_t { f32 x; f32 y; f32 z; } xyz_t;",
       "funcC": "void xyz_t_mult_v(xyz_t* multiplicand, f32 multiplier) {\n    multiplicand->x *= multiplier;\n    multiplicand->y *= multiplier;\n    multiplicand->z *= multiplier;\n}",
-      "sourceUrl": "https://github.com/zeldaret/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L254-L258"
+      "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L254-L258"
     },
     {
       "sym": "search_position_angleY",
@@ -377,7 +380,7 @@
       ],
       "prependC": "typedef short s16;\ntypedef float f32;\ntypedef struct xyz_t { f32 x; f32 y; f32 z; } xyz_t;\n#define SQ(x) ((x) * (x))\ns16 atans_table(f32 x, f32 y);",
       "funcC": "s16 search_position_angleY(xyz_t* subtrahend, xyz_t* minuend) {\n    f32 diffX = minuend->x - subtrahend->x;\n    f32 diffZ = minuend->z - subtrahend->z;\n\n    return atans_table(diffZ, diffX);\n}",
-      "sourceUrl": "https://github.com/zeldaret/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L287-L292",
+      "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L287-L292",
       "m2cCtx": true
     },
     {
@@ -387,7 +390,7 @@
       ],
       "prependC": "typedef short s16;\ntypedef float f32;\ntypedef struct xyz_t { f32 x; f32 y; f32 z; } xyz_t;\ntypedef struct s_xyz { s16 x; s16 y; s16 z; } s_xyz;",
       "funcC": "void xyz_t_sub_ss(xyz_t* dest, s_xyz* minuend, s_xyz* subtrahend) {\n    dest->x = minuend->x - subtrahend->x;\n    dest->y = minuend->y - subtrahend->y;\n    dest->z = minuend->z - subtrahend->z;\n}",
-      "sourceUrl": "https://github.com/zeldaret/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L248-L252"
+      "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L248-L252"
     },
     {
       "sym": "spolar2world",
@@ -398,7 +401,7 @@
       ],
       "prependC": "typedef short s16;\ntypedef float f32;\ntypedef struct xyz_t { f32 x; f32 y; f32 z; } xyz_t;\ntypedef struct { f32 r; s16 pitch; s16 yaw; } VecSphGeo;\ntypedef VecSphGeo VecSph;\nf32 cos_s(s16 angle);\nf32 sin_s(s16 angle);",
       "funcC": "xyz_t spolar2world(VecSph* sph) {\n    xyz_t v;\n    f32 sinPitch;\n    f32 cosPitch = cos_s(sph->pitch);\n    f32 sinYaw;\n    f32 cosYaw = cos_s(sph->yaw);\n\n    sinPitch = sin_s(sph->pitch);\n    sinYaw = sin_s(sph->yaw);\n\n    v.x = sph->r * sinPitch * sinYaw;\n    v.y = sph->r * cosPitch;\n    v.z = sph->r * sinPitch * cosYaw;\n\n    return v;\n}",
-      "sourceUrl": "https://github.com/zeldaret/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_olib.c#L82-L97"
+      "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_olib.c#L82-L97"
     }
   ]
 }
