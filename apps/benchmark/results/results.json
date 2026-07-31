@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generatedAt": "2026-07-31T23:55:59.529Z",
+    "generatedAt": "2026-07-31T23:59:08.795Z",
     "toolchains": [
       "ido7.1",
       "agbcc",
@@ -14,7 +14,7 @@
       "real": 192
     },
     "asmlift": {
-      "commit": "cc0619ed6309c43fd9663e3cedfebc64976537ef",
+      "commit": "005f9deacc7698b70a3b46a29a79f2d42164343a",
       "dirty": false
     },
     "m2c": {
