@@ -23,6 +23,7 @@ import { applyIdiomPatterns, raiseRecovered, structureChecked } from './pipeline
 import type { Prototypes } from './proto';
 import { runPreRecovery } from './raise/pre-recovery';
 import { recoverTypes } from './raise/recover';
+import { type SymbolMap, symbolsByName } from './symbols';
 import { type TargetDescription, structureOptionsFor } from './target';
 
 /** The signedness of the entry parameters — the classic ambiguity asm cannot resolve.
@@ -56,6 +57,8 @@ export interface EnumerateOptions {
   backend?: LanguageBackend;
   prototypes?: Prototypes;
   asmData?: AsmData;
+  /** address→symbol map (symbols.ts) — same contract as DecompileOptions.symbols */
+  symbols?: SymbolMap;
 }
 
 /** One distinct candidate spelling (a signedness × branch-sense lever combination), emitted to source. */
@@ -85,7 +88,10 @@ export function enumerateCandidates(
   const backend = opts.backend ?? cBackend;
   const prototypes = opts.prototypes ?? {};
   const frontend = frontendFor(target);
-  const baseOpts = structureOptionsFor(target, prototypes[name]?.returnsVoid ?? false);
+  const baseOpts = {
+    ...structureOptionsFor(target, prototypes[name]?.returnsVoid ?? false),
+    ...(opts.symbols ? { symbols: symbolsByName(opts.symbols) } : {}),
+  };
   // Branch-sense is a differ-ranked LEVER, the same class as param signedness: a divergent `if`
   // can be spelled with either sense (`if (c) A else B` vs `if (!c) B else A`), and which one the
   // source compiler emitted is genuinely ambiguous from asm. There is no safe global heuristic
@@ -101,7 +107,7 @@ export function enumerateCandidates(
   // so they are excluded from the signedness axis (see NO_PIN_KINDS). One extra lift+recover, no
   // compile. (The probe deliberately stops after recoverTypes — it only reads the param KINDS, so
   // the totality contract / return-sinking of the full spine are not run on it.)
-  const probe = frontend.lift(name, asm, target, prototypes, opts.asmData);
+  const probe = frontend.lift(name, asm, target, prototypes, opts.asmData, opts.symbols);
   verify(probe);
   applyIdiomPatterns(probe, target, opts.patterns);
   runPreRecovery(probe, target, () => verify(probe));
@@ -110,66 +116,81 @@ export function enumerateCandidates(
 
   const seen = new Set<string>();
   const out: Candidate[] = [];
-  for (const cand of SIGN_CANDS) {
-    const fn = frontend.lift(name, asm, target, prototypes, opts.asmData);
-    verify(fn);
-    applyIdiomPatterns(fn, target, opts.patterns);
-    // The shared tower spine (pipeline.ts) — the candidate's ONE difference from decompile() is the
-    // signedness pin, injected between pre-recovery and recoverTypes via the beforeRecover hook.
-    raiseRecovered(fn, target, { beforeRecover: () => pinScalarParams(fn, cand.signed, ptrIdx) });
-    for (const s of senseCands) {
-      // structure() reads `fn` and produces a fresh SFn (it does not mutate `fn`), so both branch
-      // senses structure the same recovered function without re-lifting.
-      const sfn = structureChecked(fn, { ...baseOpts, preserveDivergentBranchSense: s.sense });
-      // The walk→index re-spelling (l3/reindex.ts) is a THIRD lever on the same footing as
-      // signedness and branch sense: whether the source spelled `*p; p++` or `arr[i]` is
-      // genuinely ambiguous from asm (compilers strength-reduce the latter into the former), so
-      // when a loop re-spells, BOTH representations are emitted and the differ referees. The
-      // re-spelling passes the same boundary contracts as the primary; one that fails them is
-      // dropped here — never scored, never able to win.
-      const spellings: { suffix: string; source: string }[] = [{ suffix: '', source: backend.emit(sfn) }];
-      // Representation re-spellings — each a lever on the same footing as signedness/branch sense,
-      // each guarded: it must pass the same boundary contracts as the primary AND emit (a backend
-      // that declines by throwing — Pascal loud-fails unspellable shapes — drops the candidate,
-      // never aborts the enumeration). A dropped re-spelling loses nothing: the primary remains.
-      //
-      // POLICY: re-spellings derive from the BASE spelling only — levers do not compose
-      // (an /indexed + /regcopy product is deferred until a row demands it). And a lever must
-      // PRESERVE SEMANTICS by construction: the differ referees byte-exactness (a wrong candidate
-      // can never fake a score-0 match), but on a NONMATCH row the best-scoring source is shown
-      // to the user — a semantically-wrong re-spelling there is plausible-but-wrong output, the
-      // defect class this project exists to avoid. Hence each lever's decline-over-approximate
-      // gates, adversarially audited.
-      const respell = (suffix: string, alt: SFn): void => {
-        try {
-          assertResolved(alt);
-          assertDerefsTyped(alt);
-          spellings.push({ suffix, source: backend.emit(alt) });
-        } catch {
-          // contract-failing or unspellable re-spelling: drop it, keep the primary
+  // The SYMBOL-MAP spelling is itself a ranked LEVER on the same footing as signedness/branch
+  // sense: naming a global changes agbcc's codegen (the eager-load effect), and which side
+  // byte-wins is genuinely per-function — the dogfood's landed matches split between extern
+  // spellings and raw-address macros. So when a map is present the raw-global spelling is ALSO
+  // enumerated ('/raw-globals') and the differ referees; the dedup below collapses the pair
+  // wherever the map changed nothing, so this never scores worse than either side alone.
+  const symbolVariants: { suffix: string; symbols?: typeof opts.symbols }[] = opts.symbols
+    ? [
+        { suffix: '', symbols: opts.symbols },
+        { suffix: '/raw-globals', symbols: undefined },
+      ]
+    : [{ suffix: '' }];
+  for (const sv of symbolVariants) {
+    const svOpts = sv.symbols ? baseOpts : { ...baseOpts, symbols: undefined };
+    for (const cand of SIGN_CANDS) {
+      const fn = frontend.lift(name, asm, target, prototypes, opts.asmData, sv.symbols);
+      verify(fn);
+      applyIdiomPatterns(fn, target, opts.patterns);
+      // The shared tower spine (pipeline.ts) — the candidate's ONE difference from decompile() is the
+      // signedness pin, injected between pre-recovery and recoverTypes via the beforeRecover hook.
+      raiseRecovered(fn, target, { beforeRecover: () => pinScalarParams(fn, cand.signed, ptrIdx) });
+      for (const s of senseCands) {
+        // structure() reads `fn` and produces a fresh SFn (it does not mutate `fn`), so both branch
+        // senses structure the same recovered function without re-lifting.
+        const sfn = structureChecked(fn, { ...svOpts, preserveDivergentBranchSense: s.sense });
+        // The walk→index re-spelling (l3/reindex.ts) is a THIRD lever on the same footing as
+        // signedness and branch sense: whether the source spelled `*p; p++` or `arr[i]` is
+        // genuinely ambiguous from asm (compilers strength-reduce the latter into the former), so
+        // when a loop re-spells, BOTH representations are emitted and the differ referees. The
+        // re-spelling passes the same boundary contracts as the primary; one that fails them is
+        // dropped here — never scored, never able to win.
+        const spellings: { suffix: string; source: string }[] = [{ suffix: '', source: backend.emit(sfn) }];
+        // Representation re-spellings — each a lever on the same footing as signedness/branch sense,
+        // each guarded: it must pass the same boundary contracts as the primary AND emit (a backend
+        // that declines by throwing — Pascal loud-fails unspellable shapes — drops the candidate,
+        // never aborts the enumeration). A dropped re-spelling loses nothing: the primary remains.
+        //
+        // POLICY: re-spellings derive from the BASE spelling only — levers do not compose
+        // (an /indexed + /regcopy product is deferred until a row demands it). And a lever must
+        // PRESERVE SEMANTICS by construction: the differ referees byte-exactness (a wrong candidate
+        // can never fake a score-0 match), but on a NONMATCH row the best-scoring source is shown
+        // to the user — a semantically-wrong re-spelling there is plausible-but-wrong output, the
+        // defect class this project exists to avoid. Hence each lever's decline-over-approximate
+        // gates, adversarially audited.
+        const respell = (suffix: string, alt: SFn): void => {
+          try {
+            assertResolved(alt);
+            assertDerefsTyped(alt);
+            spellings.push({ suffix, source: backend.emit(alt) });
+          } catch {
+            // contract-failing or unspellable re-spelling: drop it, keep the primary
+          }
+        };
+        const indexed = reindexWalks(sfn);
+        if (indexed) {
+          respell('/indexed', indexed);
         }
-      };
-      const indexed = reindexWalks(sfn);
-      if (indexed) {
-        respell('/indexed', indexed);
-      }
-      // the register-copy spelling (l3/regspell.ts): 0–3 variants (base; tail assign-back reusing
-      // the dead value var; tail assign-back into a fresh var — the tail choice is allocator-
-      // ambiguous, so both are ranked)
-      const REGCOPY_LABELS = ['/regcopy', '/regcopy-ret', '/regcopy-ret-fresh'];
-      registerishSpellings(sfn).forEach((alt, i) => respell(REGCOPY_LABELS[i] ?? `/regcopy-${i}`, alt));
-      for (const sp of spellings) {
-        const source = sp.source;
-        // Collapse a spelling that produced identical source (a function with no divergent `if`
-        // structures the same either way): no point scoring a duplicate spelling. Deduping the
-        // WHOLE emitted set (not just scored survivors) is equivalent — an identical source
-        // scores identically, so it can never change `best` — and it keeps the candidate set to
-        // the genuinely distinct spellings.
-        if (seen.has(source)) {
-          continue;
+        // the register-copy spelling (l3/regspell.ts): 0–3 variants (base; tail assign-back reusing
+        // the dead value var; tail assign-back into a fresh var — the tail choice is allocator-
+        // ambiguous, so both are ranked)
+        const REGCOPY_LABELS = ['/regcopy', '/regcopy-ret', '/regcopy-ret-fresh'];
+        registerishSpellings(sfn).forEach((alt, i) => respell(REGCOPY_LABELS[i] ?? `/regcopy-${i}`, alt));
+        for (const sp of spellings) {
+          const source = sp.source;
+          // Collapse a spelling that produced identical source (a function with no divergent `if`
+          // structures the same either way): no point scoring a duplicate spelling. Deduping the
+          // WHOLE emitted set (not just scored survivors) is equivalent — an identical source
+          // scores identically, so it can never change `best` — and it keeps the candidate set to
+          // the genuinely distinct spellings.
+          if (seen.has(source)) {
+            continue;
+          }
+          seen.add(source);
+          out.push({ label: `${cand.label}${s.suffix}${sp.suffix}${sv.suffix}`, source });
         }
-        seen.add(source);
-        out.push({ label: `${cand.label}${s.suffix}${sp.suffix}`, source });
       }
     }
   }

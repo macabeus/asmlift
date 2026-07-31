@@ -19,7 +19,7 @@ import { type PreRecoveryPass, runPreRecovery } from './raise/pre-recovery';
 import { recoverTypes } from './raise/recover';
 import { sinkReturns } from './raise/retsink';
 import { StructureError, structure } from './structure/structure';
-import type { SymbolMap } from './symbols';
+import { type SymbolMap, symbolsByName } from './symbols';
 import { type TargetDescription, structureOptionsFor } from './target';
 
 /** How a gap (a construct asmlift cannot faithfully model) degrades:
@@ -120,7 +120,11 @@ function runTower(
 
   // (4) structure: IR → neutral AST; boundary contract: no unresolved value leaked (strict), or
   // every unresolved value spelled as a loud ASMLIFT_ERROR marker (annotate).
-  const sfn = structureChecked(fn, { ...structureOptionsFor(target, prototypes[name]?.returnsVoid ?? false), onGap });
+  const sfn = structureChecked(fn, {
+    ...structureOptionsFor(target, prototypes[name]?.returnsVoid ?? false),
+    onGap,
+    ...(opts.symbols ? { symbols: symbolsByName(opts.symbols) } : {}),
+  });
 
   // (5) lower + print: neutral AST → target language
   const source = backend.emit(sfn);

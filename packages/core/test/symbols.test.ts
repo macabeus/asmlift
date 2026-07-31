@@ -8,7 +8,7 @@
 import { describe, expect, test } from 'vitest';
 
 import { decompile } from '../src/pipeline';
-import { type SymbolMap, lookupSymbol } from '../src/symbols';
+import { type SymbolMap, lookupInterior, lookupSymbol } from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
 
 const asmOf = (sym: string, body: string) => `${sym}:\n${body}`;
@@ -62,6 +62,82 @@ describe('the numeric-pool promotion (P1 names)', () => {
   });
 });
 
+describe('declaration shapes (P2)', () => {
+  test('a struct global with a layout spells a constant-offset interior as gSym.field (dot)', () => {
+    // pool word = base+4 interior; load word there
+    const body = '\tldr\tr0, .L1\n\tldr\tr0, [r0]\n\tbx\tlr\n.L1:\n\t.word\t0x03002004\n';
+    const map = mapOf([
+      [
+        0x03002000,
+        {
+          name: 'gState',
+          kind: 'data',
+          shape: 'struct',
+          size: 24,
+          layout: [
+            { name: 'frames', offset: 0, size: 4 },
+            { name: 'timer', offset: 4, size: 4 },
+          ],
+        },
+      ],
+    ]);
+    const src = run('f', body, map);
+    expect(src).toContain('return gState.timer;');
+  });
+
+  test('a load offset off a struct base composes into the field lookup', () => {
+    // pool word = base; ldr r0,[r0,#4]
+    const body = '\tldr\tr0, .L1\n\tldr\tr0, [r0, #0x4]\n\tbx\tlr\n.L1:\n\t.word\t0x03002000\n';
+    const map = mapOf([
+      [
+        0x03002000,
+        {
+          name: 'gState',
+          kind: 'data',
+          shape: 'struct',
+          size: 24,
+          layout: [{ name: 'timer', offset: 4, size: 4 }],
+        },
+      ],
+    ]);
+    expect(run('f', body, map)).toContain('return gState.timer;');
+  });
+
+  test('a width-mismatched field falls back to the cast spelling, never a wrong field name', () => {
+    // byte load at offset 4, but the layout field there is 4 bytes wide
+    const body = '\tldr\tr0, .L1\n\tldrb\tr0, [r0, #0x4]\n\tbx\tlr\n.L1:\n\t.word\t0x03002000\n';
+    const map = mapOf([
+      [
+        0x03002000,
+        { name: 'gState', kind: 'data', shape: 'struct', size: 24, layout: [{ name: 'timer', offset: 4, size: 4 }] },
+      ],
+    ]);
+    const src = run('f', body, map);
+    expect(src).not.toContain('.timer');
+    expect(src).toContain('gState'); // still named (interior/index spelling), just not a field
+  });
+
+  test('an array global spells the BARE gSym[i], uncast', () => {
+    // u16 table indexed by a0*2: ldr r1,=tbl; lsls r0,#1; adds r0,r1,r0; ldrh r0,[r0]
+    const body =
+      '\tldr\tr1, .L1\n\tlsls\tr0, r0, #0x1\n\tadds\tr0, r1, r0\n\tldrh\tr0, [r0]\n\tbx\tlr\n.L1:\n\t.word\t0x08057B4C\n';
+    const map = mapOf([
+      [0x08057b4c, { name: 'gBlendModeTable', kind: 'data', shape: 'array', elemSize: 2, elemSigned: false }],
+    ]);
+    const src = run('f', body, map);
+    expect(src).toContain('gBlendModeTable[');
+    expect(src).not.toContain('&gBlendModeTable'); // the cast-aggregate form is exactly what this replaces
+  });
+
+  test('interior attribution requires a size — an unsized symbol never attributes', () => {
+    expect(lookupInterior(mapOf([[0x03002000, { name: 'gU', kind: 'data' }]]), 0x03002004)).toBeNull();
+    expect(lookupInterior(mapOf([[0x03002000, { name: 'gS', kind: 'data', size: 8 }]]), 0x03002004)?.offset).toBe(4);
+    // strictly inside only: the end is exclusive, the base is not interior
+    expect(lookupInterior(mapOf([[0x03002000, { name: 'gS', kind: 'data', size: 8 }]]), 0x03002008)).toBeNull();
+    expect(lookupInterior(mapOf([[0x03002000, { name: 'gS', kind: 'data', size: 8 }]]), 0x03002000)).toBeNull();
+  });
+});
+
 describe('register-offset addressing lowers exactly (never a silent index drop)', () => {
   // parseAddr used to silently read `[rB]`, dropping the index register — a silent miscompile
   // (ldrsh exists ONLY in this form in Thumb-1). Now it lowers as `rB + rX` then the access.
@@ -71,6 +147,14 @@ describe('register-offset addressing lowers exactly (never a silent index drop)'
     // the index register participates (never dropped); the const is ELEMENT-scaled because the
     // recovered operand is u16* — 134576972 bytes = 67288486 u16 elements: byte-exact C
     expect(src).toContain('return *(67288486 + a0);');
+  });
+
+  test('ldrh rD, [rB, rX] off an array-mapped global spells gSym[…]', () => {
+    const body = '\tldr\tr1, .L1\n\tlsls\tr0, r0, #0x1\n\tldrh\tr0, [r1, r0]\n\tbx\tlr\n.L1:\n\t.word\t0x08057B4C\n';
+    const map = mapOf([
+      [0x08057b4c, { name: 'gBlendModeTable', kind: 'data', shape: 'array', elemSize: 2, elemSigned: false }],
+    ]);
+    expect(run('f', body, map)).toContain('gBlendModeTable[a0]');
   });
 
   test('strh rS, [rB, rX] stores through base + index', () => {

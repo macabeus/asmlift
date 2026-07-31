@@ -121,6 +121,10 @@ function printExpr(e: Expr, parentPrec: number, vt: VarTypes, leaf?: LeafHook): 
         const baseTxt = hooked ?? `${rec(ix.base, 1)}[${rec(ix.idx, 99)}]`;
         return `${baseTxt}.${e.name}`;
       }
+      // explicit dot: a struct-VALUE global's field (`gSym.field`, symbol-map layout spelling)
+      if (e.dot) {
+        return `${rec(e.base, 1)}.${e.name}`;
+      }
       return `${rec(e.base, 1)}->${e.name}`;
     }
     case 'un': {
