@@ -109,8 +109,8 @@ export function Methodology({ rows }: { rows: FunctionResult[] }) {
           read as the same experiment. Both spellings (named and raw-address) are candidate-ranked, so the map can
           reveal capability but never masks a regression. Each row's detail consolidates all of this in a collapsed{' '}
           <span className="font-mono">Provenance</span> section at the bottom: the prototype hints asmlift received, the
-          context m2c received, and the symbol map's state (used / present-but-unused / fell back / none) with every map
-          symbol the winning candidate references and the candidate spelling that won.
+          context m2c received, and the symbol map's state (used / present-but-unused / none) with every map symbol the
+          winning candidate references and the candidate spelling that won.
         </P>
       </section>
 

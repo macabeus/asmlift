@@ -55,9 +55,13 @@ export function runAsmlift(
     // ranked lever rides along, so a symbol-fed row can never score worse than without.
     ...(symbols ? { symbols } : {}),
   };
-  // spells all known map-induced escapes legally — the addr-intify + the CMP-path fix), so a
-  // map-fed decompile now classifies exactly once, WITH the map. The schema field survives as
-  // a historical marker only (bench-schema doc-comment).
+  // Phase 1 — single-shot decompile in annotate mode: every detected gap becomes an inline
+  // ASMLIFT_ERROR marker plus a structured diagnostic. Gapped ⇒ outcome "declined", never
+  // scored (the marker could compile via an implicit declaration and grade meaningless code).
+  // Gap-free ⇒ proceed to ranked scoring.
+  // Run exactly ONCE, with the map: the core lowering spells every known map-induced escape
+  // legally (the addr-intify and the comparison-path rules), so a map can no longer turn a
+  // clean function into a decline — there is no never-worse fallback pass to arbitrate.
   let annotated: string;
   const usedSymbols = Boolean(symbols);
   try {
