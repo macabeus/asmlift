@@ -169,10 +169,9 @@ export function declaredFields(layout: SymbolStructField[] | undefined): Declare
 }
 
 /**
- * THE one copy of "what C type does a map field declare" — consumed by the declaration SYNTHESIS
- * (declare.ts, which prints it) and by the structurer's legalization env (a pointee's fields, so
- * the printer can see that `gPtr->arr` already strides the access width). A per-consumer copy
- * would let the emitted declaration and the type the emitter reasoned against disagree.
+ * THE one copy of "what C type does a map field declare", consumed by the declaration SYNTHESIS
+ * (declare.ts, which prints it). A per-consumer copy would let the emitted declaration and the
+ * type a consumer reasoned against disagree about what a member is.
  *
  * An ARRAY field declares its own element type and length — spelling `u16 x[8]` as `u8 x[16]`
  * keeps the layout but makes `x[i]` index BYTES, a wrong address. That spelling is used ONLY when

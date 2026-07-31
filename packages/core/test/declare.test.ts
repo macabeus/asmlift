@@ -123,7 +123,7 @@ test('a pointer global with NO pointee layout declares as void* (quals bind the 
 });
 
 test('a pointer global WITH a pointee layout declares the padded pointee and a typed extern', () => {
-  // what the `gPtr->member` / `gPtr->member[i]` spellings compile against. The array member keeps
+  // what the `gPtr->member` spelling compiles against. The array member keeps
   // its OWN element type: `u8 slots[16]` spelled as the byte array of the same size would index
   // identically, but `u16 words[8]` spelled `u8 words[16]` would index BYTES — a wrong address.
   const out = renderDeclarations([

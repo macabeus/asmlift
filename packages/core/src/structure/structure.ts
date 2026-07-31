@@ -139,9 +139,8 @@ function elementIndex(residual: Expr, elemSize: number): Expr | null {
 }
 
 /** The symbol-map rendering context threaded into memAccess/arrayAccess: shape facts per
- *  global name, plus a callback registering a global's env type (so a spelling that must pass the
- *  stride check uncast — the bare `gSym[i]`, and the pointee `gPtr->arr[i]` — does). Absent ⇒
- *  today's spellings. */
+ *  global name, plus a callback registering a global's env type (so the bare `gSym[i]` spelling,
+ *  which must pass the stride check uncast, does). Absent ⇒ today's spellings. */
 interface SymRenderCtx {
   info(name: string): SymbolInfo | undefined;
   noteGlobal(name: string, type: IrType): void;
@@ -370,9 +369,9 @@ function memAccess(
         return { k: 'field', base: { k: 'var', name: gb.name }, name: fld.name, dot: true };
       }
     }
-    // …and the same idea one indirection down: an access through a POINTER global's VALUE is a
-    // member of what it points at (`gPtr->member`, `gPtr->member[i]`) when the map knows the
-    // pointee's layout — see pointeeAccess for the guards.
+    // …and the same idea one indirection down: an access at a CONSTANT offset through a POINTER
+    // global's VALUE is a named member of what it points at (`gPtr->member`) when the map knows
+    // the pointee's layout — see pointeeAccess for the guards.
     const pg = ptrGlobalBase(baseExpr, (n) => sym.info(n)?.shape === 'pointer');
     if (pg) {
       const spelled = pointeeAccess(pg, off, width, signed, isStore, sym);

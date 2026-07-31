@@ -161,8 +161,7 @@ export function renderDeclarations(refs: SymbolRef[]): string {
         // expression is scaled by this type.
         // Without one, pointee fidelity is unnecessary — load/store/compare of the cell are
         // identical for any object-pointer type, and the output then never derefs through the
-        // decl's pointee. Qualifiers bind to the VARIABLE (`void *volatile g`), matching the
-        // top-level cv chain the provider collected.
+        // decl's pointee.
         // THE shared gate (symbols.ts pointeeFields): the typed extern is emitted on exactly
         // the condition under which core may spell `gPtr->member`, so the two cannot disagree.
         const tag = info.pointee?.structName;
