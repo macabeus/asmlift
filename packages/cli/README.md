@@ -56,12 +56,12 @@ the stderr tag says which (`[declined]` = principled refusal, `[internal error]`
 
 All asmlift settings live in a spec-compliant `tools.asmlift` block:
 
-| Field      | Meaning                                                                                                                                              |
-| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `target`   | asmlift target key — needed when the `platform` maps to several compilers (`n64` → `ido7.1`, `gcc2.7.2kmc` or `gcc2.7.2`)                            |
-| `compiler` | Candidate-compile command template: source file in, relocatable object out. Runs via `sh` with the decomp.yaml's directory as cwd                    |
-| `objdump`  | Host objdump binary for `.o` input (overrides the PATH/env-resolved default: `mips-linux-gnu-objdump` / `powerpc-eabi-objdump`)                      |
-| `prelude`  | Prepend asmlift's `s32`/`u32`… typedefs to candidates (default `true`; set `false` if your command injects project headers that already define them) |
+| Field      | Meaning                                                                                                                                                                                                                                                                                            |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `target`   | asmlift target key — needed when the `platform` maps to several compilers (`n64` → `ido7.1`, `gcc2.7.2kmc` or `gcc2.7.2`)                                                                                                                                                                          |
+| `compiler` | Candidate-compile command template: source file in, relocatable object out. Runs via `sh` with the decomp.yaml's directory as cwd                                                                                                                                                                  |
+| `objdump`  | Host objdump binary for `.o` input (overrides the PATH/env-resolved default: `mips-linux-gnu-objdump` / `powerpc-eabi-objdump`)                                                                                                                                                                    |
+| `elf`      | The project's built ELF, relative to this `decomp.yaml` — the address→symbol source: names from `.symtab`, declaration shapes from the DWARF types-sidecar when the project links one in. Absent ⇒ no symbol map. An unreadable ELF is a loud input error (exit `66`), never a silent map-less run |
 
 Template placeholders: `{{inputPath}}` (candidate source path),
 `{{outputPath}}` (where the object must land), `{{symbol}}` (the function name). An unknown
@@ -79,6 +79,10 @@ Scoring rules, in the project's spirit of never guessing:
 - `compiler` executes **only** when you pass `--score-against`; a plain decompile never runs
   config-supplied commands. (`objdump` is the one exception: like the default objdump, it
   runs on `.o` input to disassemble it — argument-array spawn, no shell.)
+- There is no typedef-prelude flag. asmlift **probes** your `compiler` template once: a
+  template that injects the project's own headers rejects the probe (C89 duplicate typedef)
+  and asmlift then drops both its typedefs and its synthesized declarations for every
+  candidate; a template that accepts it keeps both. The verdict is cached per run.
 
 ## Using it as a library
 
