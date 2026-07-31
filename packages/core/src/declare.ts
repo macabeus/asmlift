@@ -33,7 +33,14 @@
 import { type StructFieldDecl, renderStructDecl } from './backend/cfamily';
 import { T } from './ir/types';
 import type { SymbolRef } from './l3/symbol-refs';
-import { ENUM_IS_SIGNED, type SymbolInfo, type SymbolStructField, symbolFieldType } from './symbols';
+import {
+  ENUM_IS_SIGNED,
+  type SymbolInfo,
+  type SymbolStructField,
+  declaredFields,
+  pointeeStructType,
+  symbolFieldType,
+} from './symbols';
 
 /** The u8/s8/u16/s16/u32/s32 spelling for a 1/2/4-byte cell, or null (no faithful narrow type). */
 function intType(size: number, signed: boolean): string | null {
@@ -58,25 +65,26 @@ const fieldType = symbolFieldType;
  *  backend/cfamily.ts renderStructDecl — the same spelling the backend's recovered-struct
  *  decls use, so the two cannot drift). Returns null when the layout cannot be reproduced
  *  faithfully (an unsized member). */
-function structDecl(tag: string, layout: SymbolStructField[], size: number | undefined): string | null {
+function structDecl(tag: string, layout: SymbolStructField[] | undefined, size: number | undefined): string | null {
+  // THE shared spellability predicate (symbols.ts): which members exist, and whether the layout
+  // can be reproduced at all. Core's access rules gate on the SAME call, so a member this
+  // declaration omits — an unsizable layout declined whole, a union alias dropped for its first
+  // view — is a member no emitted expression can name.
+  const members = declaredFields(layout);
+  if (members === null) {
+    return null;
+  }
   const fields: StructFieldDecl[] = [];
   let cursor = 0;
   let pad = 0;
-  const members = [...layout].sort((a, b) => a.offset - b.offset);
   for (const m of members) {
-    if (m.size === null) {
-      return null; // an unsizable member — no faithful layout, decline the whole struct
-    }
-    if (m.offset < cursor) {
-      continue; // an overlapping (union) member: keep the first view, skip the alias
-    }
     if (m.offset > cursor) {
       // asmlift_-prefixed so a REAL member named pad_N (a decomp-header idiom) never collides
       fields.push({ name: `asmlift_pad_${pad++}`, type: T.array(T.u(8), m.offset - cursor) });
     }
     fields.push({
       name: m.name,
-      type: fieldType(m as SymbolStructField & { size: number }),
+      type: fieldType(m),
       ...(m.volatile ? { volatile: true } : {}),
     });
     cursor = m.offset + m.size;
@@ -132,7 +140,7 @@ export function renderDeclarations(refs: SymbolRef[]): string {
         // compiles against it). Without one, every core spelling is &gSym-based (a struct
         // global never spells bare), so an unsized u8[] extern is codegen-identical.
         const tag = info.structName ?? `Asmlift_${name}`;
-        const decl = info.layout ? structDecl(tag, info.layout, info.size) : null;
+        const decl = structDecl(tag, info.layout, info.size);
         if (decl !== null) {
           if (!declaredTags.has(tag)) {
             declaredTags.add(tag);
@@ -155,15 +163,20 @@ export function renderDeclarations(refs: SymbolRef[]): string {
         // identical for any object-pointer type, and the output then never derefs through the
         // decl's pointee. Qualifiers bind to the VARIABLE (`void *volatile g`), matching the
         // top-level cv chain the provider collected.
+        // THE shared gate (symbols.ts pointeeStructType): the typed extern is emitted on exactly
+        // the condition under which core may spell `gPtr->member`, so the two cannot disagree.
         const tag = info.pointee?.structName;
-        const decl = tag && info.pointee?.layout ? structDecl(tag, info.pointee.layout, info.pointee.size) : null;
-        if (decl !== null && tag) {
-          if (!declaredTags.has(tag)) {
-            declaredTags.add(tag);
-            lines.push(decl);
-          }
+        const decl =
+          pointeeStructType(info.pointee) !== null ? structDecl(tag!, info.pointee!.layout, info.pointee!.size) : null;
+        if (decl !== null && !declaredTags.has(tag!)) {
+          declaredTags.add(tag!);
+          lines.push(decl);
         }
-        const pointeeType = decl !== null && tag ? `struct ${tag} *` : 'void *';
+        // The POINTEE's own qualifiers bind to the pointed-at type (`volatile struct S *g`); the
+        // cell's bind to the VARIABLE (`struct S *volatile g`). They are independent declarations
+        // of two different objects, and the synthesis reproduces each on its own side of the `*`.
+        const pointeeQuals = `${info.pointee?.volatile ? 'volatile ' : ''}${info.pointee?.const ? 'const ' : ''}`;
+        const pointeeType = decl !== null ? `${pointeeQuals}struct ${tag} *` : `${pointeeQuals}void *`;
         lines.push(`extern ${pointeeType}${info.volatile ? 'volatile ' : ''}${info.const ? 'const ' : ''}${name};`);
         break;
       }

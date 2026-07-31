@@ -10,17 +10,18 @@
 // kept, ordered so `[0]` is the canonical pick — header-declared (DIE-joined) names first,
 // placeholder names (`sub_08xxxxxx` rename leftovers, declared in no header) last.
 //
-// CAPABILITY GATE (`assertShapeFactsPresent`): shape recovery needs @gba-kit/debug-info's 0.4
-// facts — member signedness and the cv-qualifier flags. A 0.3-era package DOES export
-// `variableShape`, so a method-existence check passes while the facts silently go missing, and
-// the emitted map is PARTIAL: every `volatile` MMIO global loses its qualifier and every struct
-// member loses its signedness, which are exactly the facts the declaration synthesis needs to
-// spell bytes correctly. That is the plausible-but-wrong class this project refuses, so the
+// CAPABILITY GATE (`assertShapeFactsPresent`): shape recovery needs facts — member signedness and
+// the cv-qualifier flags — that an older @gba-kit/debug-info does not report. Such a package DOES
+// export `variableShape`, so a method-existence check passes while the facts silently go missing,
+// and the emitted map is PARTIAL: every `volatile` MMIO global loses its qualifier and every
+// struct member loses its signedness, which are exactly the facts the declaration synthesis needs
+// to spell bytes correctly. That is the plausible-but-wrong class this project refuses, so the
 // provider REFUSES LOUDLY instead (the CLI converts the throw to exit 66). Probed by KEY
-// PRESENCE, never by version string — the shipped package labelling is not a reliable witness
-// of its own capability. `assertPointeeFactPresent` is the same gate one release later, for the
-// facts an INTERIOR spelling through a pointer global needs (what it points at, and which of a
-// layout's members are arrays).
+// PRESENCE, never by version string — the shipped package labelling is not a reliable witness of
+// its own capability, so `UPGRADE` names the required version in ONE place, as remediation advice
+// rather than as the test. `assertPointeeFactPresent` and `assertPointeeCapabilityWitnessed` are
+// the same gate one release later, for the facts an INTERIOR spelling through a pointer global
+// needs (what it points at, and which of a layout's members are arrays).
 import type { SymbolInfo, SymbolMap, SymbolStructField } from '@asmlift/core/symbols';
 import { readFileSync } from 'node:fs';
 
@@ -32,10 +33,12 @@ type DwarfShape =
   | { kind: 'scalar'; size: number | null; signed: boolean | null; volatile?: boolean; const?: boolean }
   | {
       kind: 'pointer';
-      /** the struct/union the pointer targets (null = it targets something else). OPTIONAL at this
-       *  boundary only because the type must also describe a package that predates the fact; its
-       *  runtime AVAILABILITY is asserted separately (assertPointeeFactPresent). */
-      pointee?: { structName: string | null; size: number | null } | null;
+      /** the struct/union the pointer targets (null = it targets something else), with the
+       *  qualifiers of the TARGET type — independent of this pointer variable's own, below.
+       *  OPTIONAL at this boundary only because the type must also describe a package that
+       *  predates the fact; its runtime AVAILABILITY is asserted separately
+       *  (assertPointeeFactPresent). */
+      pointee?: { structName: string | null; size: number | null; volatile?: boolean; const?: boolean } | null;
       volatile?: boolean;
       const?: boolean;
     }
@@ -59,6 +62,7 @@ interface DwarfMember {
   signed?: boolean | null;
   pointer?: true;
   volatile?: true;
+  const?: true;
   bitWidth?: number;
   elemSize?: number;
   elemSigned?: boolean;
@@ -74,9 +78,9 @@ const UPGRADE = 'upgrade @gba-kit/debug-info to >= 0.4.0 (or drop tools.asmlift.
 /** The cv-qualifier facts, probed on the first shaped variable. A 0.3-era package returns the
  *  same object KINDS from `variableShape` but never sets `volatile`/`const`, so a
  *  method-existence check passes while every volatile MMIO global silently loses the qualifier
- *  its correct declaration needs. Key presence is the only honest witness — the package labels
- *  itself 0.3.0 in builds that DO carry the facts, so a version comparison would be wrong in
- *  both directions. */
+ *  its correct declaration needs. Key presence is the only honest witness — an unreleased build
+ *  still carries its PREVIOUS version in package.json while already reporting the facts, so a
+ *  version comparison would be wrong in both directions. */
 function assertShapeFactsPresent(sh: DwarfShape, elfPath: string): void {
   if (!('volatile' in sh)) {
     throw new Error(
@@ -99,23 +103,38 @@ function assertMemberFactsPresent(m: object, elfPath: string): void {
   }
 }
 
-/** The same probe for the POINTER arm's pointee. `pointee` is present on EVERY pointer shape a
- *  0.4.2+ package reports (null when the target is not a struct), so key presence is again the
- *  honest witness — and this is the only one of the release's new facts key presence can witness:
- *  the member-level array facts (`elemSize`/`elemSigned`/`length`) are legitimately ABSENT on a
- *  non-array member, so there is no member on which their absence means anything. They ship in
- *  the same release, and this probe stands for both: with the pointee reported but `elemSize`
- *  silently missing, every array member would look like a plain one — a one-element array would
- *  match an exact-width field lookup and spell `->x` for a member that is not an lvalue of that
- *  width, and no indexed spelling could ever fire. That is the plausible-but-wrong class again,
- *  so a package that reports one without the other is refused here rather than degraded. */
+/** The same probe for the POINTER arm's pointee — but this fact cannot be witnessed on every
+ *  variable, so the witness is tracked across the whole load and settled by
+ *  {@link assertPointeeCapabilityWitnessed}. A pointer shape carries `pointee` whatever it points
+ *  at (null when the target is not a struct), so a pointer variable witnesses it directly. */
 function assertPointeeFactPresent(sh: DwarfShape, elfPath: string): void {
   if (sh.kind === 'pointer' && !('pointee' in sh)) {
     throw new Error(
       `cannot build a symbol map from ${elfPath}: the installed @gba-kit/debug-info reports no ` +
         `pointer target facts (a pointer variableShape() result has no 'pointee' key), so every ` +
-        `pointer global would lose the layout it addresses and every struct member its array ` +
-        `element facts — ${UPGRADE}`,
+        `pointer global would lose the layout it addresses — ${UPGRADE}`,
+    );
+  }
+}
+
+/** Settle the pointee-release capability once the whole ELF has been read. The probe above only
+ *  runs on a POINTER variable, so an ELF with none never exercises it — and the release's other
+ *  facts, the member-level `elemSize`/`elemSigned`/`length`, can never be witnessed by absence at
+ *  all (a non-array member legitimately has none). So the witness has to be POSITIVE, and either
+ *  fact serves as one: a pointer shape carrying `pointee`, or any member carrying `elemSize`.
+ *
+ *  Seeing NEITHER while layouts were nonetheless consumed leaves the capability unproven, and the
+ *  failure it hides is silent: with `elemSize` missing every array member reads as a plain one, so
+ *  a one-element array matches an exact-width field lookup and gets spelled `->x` for a member
+ *  that is not an lvalue of that width. That is the plausible-but-wrong class, so an unproven
+ *  package is refused rather than degraded. */
+function assertPointeeCapabilityWitnessed(witnessed: boolean, layoutsSeen: number, elfPath: string): void {
+  if (!witnessed && layoutsSeen > 0) {
+    throw new Error(
+      `cannot build a symbol map from ${elfPath}: the installed @gba-kit/debug-info never ` +
+        `demonstrated the pointer-target/array-member facts (${layoutsSeen} struct layout(s) read, ` +
+        `none carrying a member 'elemSize' and no pointer global to probe for 'pointee'), so an ` +
+        `array member would be indistinguishable from a plain one — ${UPGRADE}`,
     );
   }
 }
@@ -129,7 +148,7 @@ function assertPointeeFactPresent(sh: DwarfShape, elfPath: string): void {
  *  stays absent rather than guessed. `pointer`/`volatile` and the array element facts are kept
  *  only when the package states them, same rule — an absent `elemSize` means "not an array", which
  *  is exactly what the field rules read it as. */
-function layoutOf(
+export function layoutOf(
   di: { struct(name: string): { members: DwarfMember[] } | null },
   name: string | null,
   elfPath: string,
@@ -149,6 +168,7 @@ function layoutOf(
         ...(typeof m.signed === 'boolean' ? { signed: m.signed } : {}),
         ...(m.pointer === true ? { pointer: true } : {}),
         ...(m.volatile === true ? { volatile: true } : {}),
+        ...(m.const === true ? { const: true } : {}),
         ...(typeof m.elemSize === 'number' ? { elemSize: m.elemSize } : {}),
         ...(typeof m.elemSigned === 'boolean' ? { elemSigned: m.elemSigned } : {}),
         ...(typeof m.length === 'number' ? { length: m.length } : {}),
@@ -164,6 +184,11 @@ export async function loadSymbolMap(elfPath: string): Promise<SymbolMap> {
     di.hasTypeInfo && typeof types.variableShape === 'function'
       ? (name: string) => types.variableShape!(name)
       : (): DwarfShape | null => null;
+
+  // The pointee-release capability witness (see assertPointeeCapabilityWitnessed): counted across
+  // the whole ELF because no single variable can be relied on to exercise it.
+  let pointeeWitnessed = false;
+  let layoutsSeen = 0;
 
   const map: SymbolMap = new Map();
   for (const s of di.symbols.symbols) {
@@ -184,6 +209,9 @@ export async function loadSymbolMap(elfPath: string): Promise<SymbolMap> {
       if (sh) {
         assertShapeFactsPresent(sh, elfPath);
         assertPointeeFactPresent(sh, elfPath);
+        if (sh.kind === 'pointer') {
+          pointeeWitnessed = true; // the probe above ran and passed on a real pointer shape
+        }
         info.declared = true;
         // cv-qualifiers ride every shape (declaration-fidelity for the synthesis layer:
         // volatile is load-bearing for MMIO codegen, const is the ROM-table spelling)
@@ -215,6 +243,7 @@ export async function loadSymbolMap(elfPath: string): Promise<SymbolMap> {
           const layout = layoutOf(di, sh.structName, elfPath);
           if (layout) {
             info.layout = layout;
+            layoutsSeen++;
           }
         } else if (sh.kind === 'pointer') {
           info.shape = 'pointer';
@@ -226,9 +255,17 @@ export async function loadSymbolMap(elfPath: string): Promise<SymbolMap> {
           const pointee = sh.pointee ?? null;
           if (pointee) {
             const layout = layoutOf(di, pointee.structName, elfPath);
+            if (layout) {
+              layoutsSeen++;
+            }
+            // The TARGET's own cv-qualifiers, kept apart from the cell's (`volatile struct S *g`
+            // qualifies what is pointed AT; `struct S *volatile g` qualifies the variable). They
+            // are separate declarations of separate objects, and synthesis reproduces both.
             info.pointee = {
               ...(pointee.structName !== null ? { structName: pointee.structName } : {}),
               ...(pointee.size !== null ? { size: pointee.size } : {}),
+              ...(pointee.volatile === true ? { volatile: true } : {}),
+              ...(pointee.const === true ? { const: true } : {}),
               ...(layout ? { layout } : {}),
             };
           }
@@ -250,9 +287,16 @@ export async function loadSymbolMap(elfPath: string): Promise<SymbolMap> {
       map.set(s.address, [info]);
     }
   }
+  // Any member carrying `elemSize` is the OTHER positive witness of the same release.
   for (const infos of map.values()) {
     infos.sort(canonicalOrder);
+    if (!pointeeWitnessed) {
+      pointeeWitnessed = infos.some((i) =>
+        [...(i.layout ?? []), ...(i.pointee?.layout ?? [])].some((f) => f.elemSize !== undefined),
+      );
+    }
   }
+  assertPointeeCapabilityWitnessed(pointeeWitnessed, layoutsSeen, elfPath);
   return map;
 }
 

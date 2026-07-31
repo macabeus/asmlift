@@ -7,6 +7,8 @@
 // nothing-guesses rules (unmapped stays raw; width/field mismatches fall back loudly).
 import { describe, expect, test } from 'vitest';
 
+import { renderDeclarations } from '../src/declare';
+import type { SymbolRef } from '../src/l3/symbol-refs';
 import { decompile } from '../src/pipeline';
 import { type SymbolMap, lookupInterior, lookupSymbol } from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
@@ -329,17 +331,36 @@ describe('a POINTER global with a known POINTEE spells the interior as gPtr->mem
     expect(src).not.toContain('(u8 *)gPtr'); // the byte-cast spelling is exactly what this replaces
   });
 
-  test('a variable index into an ARRAY member spells gPtr->member[i], uncast', () => {
-    const src = run('f', derefAt('ldrb\tr0, [r1, #0x10]', INDEXED), mapOf([[0x03001234, pointee(SLOTS)]]));
+  // The INDEXED spelling is gated to a member seated at offset 0 of the pointee
+  // (INDEXED_MEMBER_BYTE_NEUTRAL_OFFSET). At a NONZERO offset the two forms are not
+  // interchangeable: the cast form folds the member offset into the load's own immediate, while
+  // the arrow form materialises `base + offset` into a register first — measurably different
+  // bytes. At offset 0 there is no constant to fold and both address the base register directly.
+  const AT_ZERO = [
+    { name: 'slots', offset: 0, size: 16, elemSize: 1, elemSigned: false, length: 16 },
+    { name: 'flag', offset: 78, size: 1, signed: false },
+  ];
+
+  test('a variable index into an ARRAY member at offset 0 spells gPtr->member[i], uncast', () => {
+    const src = run('f', derefAt('ldrb\tr0, [r1]', INDEXED), mapOf([[0x03001234, pointee(AT_ZERO)]]));
     expect(src).toContain('gPtr->slots[a0]');
     expect(src).not.toContain('(u8 *)'); // the member's own array type strides the access width
   });
 
-  test('a WIDER array member indexes by ELEMENTS, not bytes', () => {
+  test('a WIDER array member at offset 0 indexes by ELEMENTS, not bytes', () => {
     // ldrh through `r0 << 1`: the byte residual is element-scaled already, so the index is a0
-    const layout = [{ name: 'words', offset: 16, size: 32, elemSize: 2, elemSigned: false, length: 16 }];
-    const body = derefAt('ldrh\tr0, [r1, #0x10]', '\tlsls\tr0, r0, #0x1\n' + INDEXED);
+    const layout = [{ name: 'words', offset: 0, size: 32, elemSize: 2, elemSigned: false, length: 16 }];
+    const body = derefAt('ldrh\tr0, [r1]', '\tlsls\tr0, r0, #0x1\n' + INDEXED);
     expect(run('f', body, mapOf([[0x03001234, pointee(layout)]]))).toContain('gPtr->words[a0]');
+  });
+
+  test('an indexed member at a NONZERO offset falls back to the CAST form — not byte-neutral', () => {
+    // The same array member, moved off the base. `gPtr->slots[a0]` and `((u8 *)gPtr + a0)[16]`
+    // denote one address but do NOT compile to one instruction sequence, so the name is declined
+    // and the arithmetic spelling — the one the bytes were matched against — stands.
+    const src = run('f', derefAt('ldrb\tr0, [r1, #0x10]', INDEXED), mapOf([[0x03001234, pointee(SLOTS)]]));
+    expect(src).not.toContain('->slots');
+    expect(src).toContain('((u8 *)gPtr + a0)[16]');
   });
 
   test('a WIDTH mismatch falls back to the cast spelling, never a wrong member', () => {
@@ -396,5 +417,170 @@ describe('a POINTER global with a known POINTEE spells the interior as gPtr->mem
   test('INERTNESS: no map ⇒ unchanged output', () => {
     const body = derefAt('ldrb\tr0, [r1, #0x10]', INDEXED);
     expect(run('f', body, new Map())).toBe(run('f', body));
+  });
+
+  // ── the spelling rules and the declaration synthesis are ONE decision ────────────────────────
+  // A member core NAMES must be a member declare.ts DECLARES: naming one it does not is C that
+  // does not compile. Both consult the same predicate (symbols.ts declaredFields /
+  // pointeeStructType), so each case below asserts the PAIR — what core spells AND what the
+  // self-declared world declares for the same map.
+  const declOf = (info: Record<string, unknown>) =>
+    renderDeclarations([{ name: 'gPtr', info: { name: 'gPtr', ...info } } as SymbolRef]);
+  const BYTE_AT_78 = derefAt('ldrb\tr0, [r1, #0x4E]');
+
+  test('an UNSIZABLE pointee member declines the arrow AND leaves the extern void* — as a pair', () => {
+    // declare.ts cannot seat the members after an unsizable one, so it declines the whole struct
+    // and falls back to `void *`. Core must therefore name nothing through it, including the
+    // members BEFORE the unsizable one, which on their own look perfectly spellable.
+    const info = {
+      kind: 'data',
+      shape: 'pointer',
+      pointee: {
+        structName: 'Save',
+        size: 92,
+        layout: [
+          { name: 'flag', offset: 78, size: 1, signed: false },
+          { name: 'rest', offset: 80, size: null },
+        ],
+      },
+    };
+    expect(run('f', BYTE_AT_78, mapOf([[0x03001234, { name: 'gPtr', ...info }]]))).not.toContain('->flag');
+    expect(declOf(info)).toBe('extern void *gPtr;\n');
+  });
+
+  test('a union ALIAS is never named — the declaration carries only the first view at that offset', () => {
+    // `struct { u32 word; u16 half; }` both at offset 78: the padded synthesis declares `word` and
+    // drops `half`, so a halfword read at 78 may NOT be spelled `->half` — that name does not
+    // exist in the declaration the candidate compiles against.
+    const info = {
+      kind: 'data',
+      shape: 'pointer',
+      pointee: {
+        structName: 'Save',
+        size: 92,
+        layout: [
+          { name: 'word', offset: 78, size: 4, signed: true },
+          { name: 'half', offset: 78, size: 2, signed: false },
+        ],
+      },
+    };
+    const src = run('f', derefAt('ldrh\tr0, [r1, #0x4E]'), mapOf([[0x03001234, { name: 'gPtr', ...info }]]));
+    expect(src).not.toContain('->half');
+    expect(declOf(info)).toContain('struct Save { u8 asmlift_pad_0[78]; s32 word;');
+    expect(declOf(info)).not.toContain('half');
+  });
+
+  test('an UNNAMED or UNSIZED pointee declines the arrow AND the typed extern — as a pair', () => {
+    // No tag ⇒ synthesis has nothing to declare the struct under; no size ⇒ the struct type is
+    // incomplete. Either way the extern stays `void *`, so no member may be named.
+    const layout = [{ name: 'flag', offset: 78, size: 1, signed: false }];
+    for (const pointee of [
+      { size: 92, layout },
+      { structName: 'Save', layout },
+    ]) {
+      const info = { kind: 'data', shape: 'pointer', pointee };
+      expect(run('f', BYTE_AT_78, mapOf([[0x03001234, { name: 'gPtr', ...info }]]))).not.toContain('->flag');
+      expect(declOf(info)).toBe('extern void *gPtr;\n');
+    }
+  });
+
+  test('a VOLATILE member is never named — the cast form it replaces carries no qualifier', () => {
+    // `gPtr->vreg` is a volatile access; `((u8 *)gPtr)[78]` is a plain one. Same address, DIFFERENT
+    // instruction sequence, so the member is not nameable and the arithmetic spelling stands.
+    const info = {
+      kind: 'data',
+      shape: 'pointer',
+      pointee: {
+        structName: 'Io',
+        size: 92,
+        layout: [{ name: 'vreg', offset: 78, size: 1, signed: false, volatile: true }],
+      },
+    };
+    const src = run('f', BYTE_AT_78, mapOf([[0x03001234, { name: 'gPtr', ...info }]]));
+    expect(src).not.toContain('->vreg');
+    expect(src).toContain('((u8 *)gPtr)[78]');
+    expect(declOf(info)).toContain('volatile u8 vreg;'); // still DECLARED faithfully
+  });
+
+  test('a VOLATILE POINTEE declines every arrow spelling, and synthesis reproduces the qualifier', () => {
+    const info = {
+      kind: 'data',
+      shape: 'pointer',
+      pointee: {
+        structName: 'Io',
+        size: 92,
+        volatile: true,
+        layout: [{ name: 'flag', offset: 78, size: 1, signed: false }],
+      },
+    };
+    expect(run('f', BYTE_AT_78, mapOf([[0x03001234, { name: 'gPtr', ...info }]]))).not.toContain('->flag');
+    expect(declOf(info)).toContain('extern volatile struct Io *gPtr;');
+  });
+
+  test('a CONST pointee reads through the member name but never STORES through it', () => {
+    // A store through a const-qualified pointee is a hard error where the cast form only cast the
+    // qualifier away — so the load names the member and the store does not.
+    const info = {
+      kind: 'data',
+      shape: 'pointer',
+      pointee: {
+        structName: 'Rom',
+        size: 92,
+        const: true,
+        layout: [{ name: 'flag', offset: 78, size: 1, signed: false }],
+      },
+    };
+    const map = mapOf([[0x03001234, { name: 'gPtr', ...info }]]);
+    expect(run('f', BYTE_AT_78, map)).toContain('->flag');
+    const store = `\tldr\tr1, .L1\n\tldr\tr1, [r1]\n\tmovs\tr0, #0x1\n\tstrb\tr0, [r1, #0x4E]\n\tbx\tlr\n.L1:\n\t.word\t0x03001234\n`;
+    expect(run('f', store, map)).not.toContain('->flag');
+    expect(declOf(info)).toContain('extern const struct Rom *gPtr;');
+  });
+
+  test('a CONST MEMBER is never a store target either', () => {
+    const info = {
+      kind: 'data',
+      shape: 'pointer',
+      pointee: {
+        structName: 'Save',
+        size: 92,
+        layout: [{ name: 'flag', offset: 78, size: 1, signed: false, const: true }],
+      },
+    };
+    const store = `\tldr\tr1, .L1\n\tldr\tr1, [r1]\n\tmovs\tr0, #0x1\n\tstrb\tr0, [r1, #0x4E]\n\tbx\tlr\n.L1:\n\t.word\t0x03001234\n`;
+    expect(run('f', store, mapOf([[0x03001234, { name: 'gPtr', ...info }]]))).not.toContain('->flag');
+  });
+
+  test('an index that does NOT stride the element width declines — bytes are not elements', () => {
+    // The member strides 2 bytes, but the asm added an UNSCALED byte residual, so consecutive `i`
+    // address overlapping halfwords — something `->words[i]` cannot express at all. (The
+    // complementary positive case is the element-scaled `lsls #1` test above, which IS named.)
+    // This is the same rule that keeps a `(u16 *)`-cast base from being folded into the member
+    // arithmetic: only a residual counted in the member's own elements may become its index.
+    const layout = [{ name: 'words', offset: 0, size: 32, elemSize: 2, elemSigned: false, length: 16 }];
+    const body = derefAt('ldrh\tr0, [r1]', INDEXED);
+    const src = run('f', body, mapOf([[0x03001234, pointee(layout)]]));
+    expect(src).not.toContain('->words');
+    expect(src).toContain('(u16 *)((u8 *)gPtr + a0)'); // the honest byte-arithmetic spelling
+  });
+
+  test('TWO variable terms decline — only a single residual can be one member index', () => {
+    const layout = [{ name: 'slots', offset: 0, size: 16, elemSize: 1, elemSigned: false, length: 16 }];
+    const body = derefAt('ldrb\tr0, [r1]', '\tadds\tr1, r1, r0\n\tadds\tr1, r1, r2\n');
+    expect(run('f', body, mapOf([[0x03001234, pointee(layout)]]))).not.toContain('->slots');
+  });
+
+  test('a MALFORMED layout is declined, never a crash (SymbolMap is public API)', () => {
+    // the webapp accepts a caller-supplied map, so a layout that is not a list of members — or a
+    // list holding a non-member — must degrade to the unshaped spelling rather than throw
+    for (const layout of [42, 'nope', null, [null], [{ name: 'x' }], [{ name: 1, offset: 0, size: 1 }]]) {
+      const info = { kind: 'data', shape: 'pointer', pointee: { structName: 'Save', size: 92, layout } };
+      expect(() => run('f', BYTE_AT_78, mapOf([[0x03001234, { name: 'gPtr', ...info }]]))).not.toThrow();
+      expect(() => declOf(info)).not.toThrow();
+      expect(declOf(info)).toBe('extern void *gPtr;\n');
+    }
+    // …and the same for a STRUCT global's own layout
+    const bad = { name: 'gS', kind: 'data', shape: 'struct', structName: 'S', size: 4, layout: 42 };
+    expect(() => run('f', LOADW, mapOf([[0x03001234, bad]]))).not.toThrow();
   });
 });

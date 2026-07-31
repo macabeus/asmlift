@@ -143,6 +143,42 @@ test('a pointer global WITH a pointee layout declares the padded pointee and a t
   expect(out).toBe('struct Save { u32 checksum; u8 asmlift_pad_0[4]; u16 words[8]; };\nextern struct Save *gSave;\n');
 });
 
+test('an array of NON-base-type elements declares as bytes — it must not acquire alignment', () => {
+  // `elemSize` is the ELEMENT TYPE's size, which for an array of 2-byte STRUCTS is 2 — but that
+  // member has the alignment of the struct (1), not of `u16`. Declared `u16 x[3]` at an odd
+  // offset the compiler would insert a pad byte before it and shift every later member. The
+  // witness that an element IS a base type is `elemSigned`; without it the honest spelling is the
+  // byte array of the member's own size, which has no alignment to acquire.
+  const out = renderDeclarations([
+    ref('gS', {
+      kind: 'data',
+      shape: 'struct',
+      structName: 'S',
+      size: 8,
+      layout: [
+        { name: 'tag', offset: 0, size: 1, signed: false },
+        { name: 'pairs', offset: 1, size: 6, elemSize: 2, length: 3 }, // array of 2-byte structs
+      ],
+    }),
+  ]);
+  expect(out).toBe('struct S { u8 tag; u8 pairs[6]; u8 asmlift_pad_0[1]; };\nextern struct S gS;\n');
+});
+
+test('an array member whose elemSize*length contradicts its size declines the WHOLE struct', () => {
+  // The three facts cannot all be true, so none of them can be trusted to seat the members after
+  // it — the same rule an unsizable member gets.
+  const out = renderDeclarations([
+    ref('gBad', {
+      kind: 'data',
+      shape: 'struct',
+      structName: 'Bad',
+      size: 16,
+      layout: [{ name: 'x', offset: 0, size: 16, elemSize: 2, elemSigned: false, length: 4 }], // 2*4 != 16
+    }),
+  ]);
+  expect(out).toBe('extern u8 gBad[];\n');
+});
+
 test('an unsizable pointee member declines the typed extern — never a shifted layout', () => {
   const out = renderDeclarations([
     ref('gFlexPtr', {

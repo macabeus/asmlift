@@ -8,7 +8,7 @@
 import type { SymbolInfo } from '@asmlift/core/symbols';
 import { describe, expect, test } from 'vitest';
 
-import { PLACEHOLDER, canonicalOrder } from '../../src/symbols-provider';
+import { PLACEHOLDER, canonicalOrder, layoutOf } from '../../src/symbols-provider';
 
 const sym = (name: string, declared?: true): SymbolInfo => ({
   name,
@@ -43,6 +43,62 @@ describe('canonicalOrder — which alias wins an address', () => {
         .sort(canonicalOrder)
         .map((s) => s.name),
     ).toEqual(['gA', 'gB', 'gC']);
+  });
+});
+
+describe('layoutOf — the package facts a layout is allowed to carry', () => {
+  // The ONE mapping from @gba-kit/debug-info's members to core's `SymbolStructField`, shared by a
+  // struct global's own layout and by a pointer global's pointee. Every fact is kept only when
+  // the package STATES it — an absent fact must stay absent rather than become a default, because
+  // the spelling rules read absence as a meaning ("not an array", "signedness unknown").
+  const di = (members: unknown[]) => ({ struct: () => ({ members }) }) as Parameters<typeof layoutOf>[0];
+
+  test('keeps each stated fact and omits every unstated one', () => {
+    const out = layoutOf(
+      di([
+        { name: 'flag', offset: 0, size: 1, signed: false },
+        { name: 'vreg', offset: 2, size: 2, signed: false, volatile: true },
+        { name: 'kind', offset: 4, size: 4, signed: true, const: true },
+        { name: 'next', offset: 8, size: 4, signed: null, pointer: true },
+        { name: 'slots', offset: 12, size: 16, signed: null, elemSize: 1, elemSigned: false, length: 16 },
+      ]),
+      'S',
+      '/tmp/x.elf',
+    );
+    expect(out).toEqual([
+      { name: 'flag', offset: 0, size: 1, signed: false },
+      { name: 'vreg', offset: 2, size: 2, signed: false, volatile: true },
+      { name: 'kind', offset: 4, size: 4, signed: true, const: true },
+      { name: 'next', offset: 8, size: 4, pointer: true }, // a null signedness is NOT a fact
+      { name: 'slots', offset: 12, size: 16, elemSize: 1, elemSigned: false, length: 16 },
+    ]);
+  });
+
+  test('drops BITFIELD members — no read width ever equals their size', () => {
+    // a bitfield must fall through to the honest cast spelling, never to a wrong field name
+    const out = layoutOf(
+      di([
+        { name: 'bits', offset: 0, size: 1, signed: false, bitWidth: 3, bitOffset: 0 },
+        { name: 'plain', offset: 4, size: 4, signed: true },
+      ]),
+      'S',
+      '/tmp/x.elf',
+    );
+    expect(out?.map((m) => m.name)).toEqual(['plain']);
+  });
+
+  test('an unnamed type, or one the sidecar has no layout for, yields null — never a guess', () => {
+    expect(layoutOf(di([]), null, '/tmp/x.elf')).toBeNull();
+    expect(layoutOf({ struct: () => null }, 'Missing', '/tmp/x.elf')).toBeNull();
+  });
+
+  test('REFUSES LOUDLY when the package reports no member signedness at all', () => {
+    // key presence, not a version string: a package that omits `signed` would have every
+    // synthesized member declared at a GUESSED signedness, which changes the bytes a load
+    // compiles to — so the map is refused rather than silently emitted partial
+    expect(() => layoutOf(di([{ name: 'x', offset: 0, size: 4 }]), 'S', '/tmp/x.elf')).toThrow(
+      /struct-member signedness/,
+    );
   });
 });
 
