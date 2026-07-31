@@ -11,7 +11,7 @@
     "test": "vitest run && vitest run --config vitest.matching.config.ts",
     "test:offline": "vitest run packages/core/test packages/cli/test/offline",
     "test:matching": "vitest run --config vitest.matching.config.ts",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p packages/core",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p packages/core && tsc --noEmit -p apps/web",
     "bench": "tsx apps/benchmark/src/cli.ts",
     "bench:merge": "tsx apps/benchmark/src/cli.ts merge",
     "bench:smoke": "tsx apps/benchmark/src/cli.ts smoke",
