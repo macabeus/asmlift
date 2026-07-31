@@ -9,6 +9,7 @@
 // An address legitimately carries SEVERAL symbols in real projects (ldscript aliases, rename
 // leftovers, deliberate typed views of one RAM region), hence `SymbolInfo[]` per address with
 // the provider's canonical pick at index 0.
+import { type IrType, T } from './ir/types';
 
 /** One field of a struct-shaped global, from the sidecar DWARF layout. */
 export interface SymbolStructField {
@@ -26,6 +27,34 @@ export interface SymbolStructField {
   /** the field's type chain is volatile-qualified (the `vu16 field;` MMIO idiom) — a decl that
    *  drops it lets the compiler fold repeated reads (wrong bytes AND wrong semantics) */
   volatile?: boolean;
+  /** ARRAY field only: the byte size of ONE element — `size` above is the WHOLE member (`u8
+   *  x[16]` → 16), so this is the stride an indexed `field[i]` spelling needs. Its PRESENCE is
+   *  what marks a field an array, which the exact-match field rules must exclude: a one-element
+   *  array (`u8 x[1]`, size 1) would otherwise match a byte access and spell `->x`, which is not
+   *  an lvalue of that width. */
+  elemSize?: number;
+  /** ARRAY field only: the ELEMENT's base-type signedness (absent = not a base type) — the same
+   *  u8-vs-s8 fact `signed` carries for a scalar field, and the guard an indexed spelling needs
+   *  (an s8 element read is ldrb+lsl+asr where u8 is ldrb alone) */
+  elemSigned?: boolean;
+  /** ARRAY field only: the element count (absent for a flexible array member, which declares a
+   *  stride but no bound) — types the synthesized `T name[n];` field decl */
+  length?: number;
+}
+
+/** What a `shape:'pointer'` global POINTS AT, when the sidecar says its target is a struct/union.
+ *  The pointer cell itself is 4 bytes whatever it addresses; this is about the OTHER end — it is
+ *  what lets an access through the LOADED pointer spell `gPtr->field` instead of byte arithmetic
+ *  on the cell's value. Absent when the target is not a struct (a scalar/pointer/function target). */
+export interface SymbolPointee {
+  /** the name the pointee type is declared under — a struct tag, or the typedef alias for the
+   *  `typedef struct {…} T;` idiom (absent when the DWARF gives the target no name at all) */
+  structName?: string;
+  /** total byte size of the pointee type */
+  size?: number;
+  /** the pointee's fields — absent when the sidecar carries no layout for the named type, which
+   *  is exactly when no field spelling may be attempted */
+  layout?: SymbolStructField[];
 }
 
 export interface SymbolInfo {
@@ -54,10 +83,42 @@ export interface SymbolInfo {
   const?: boolean;
   /** field names/offsets for `shape:'struct'` — enables `gSym.field` interior spelling */
   layout?: SymbolStructField[];
+  /** the pointee facts for `shape:'pointer'` — enables the `gPtr->field` interior spelling
+   *  (absent ⇒ the target is not a struct, or the sidecar named no layout for it) */
+  pointee?: SymbolPointee;
 }
 
 /** address → symbols at that address; `[0]` is the provider's canonical pick. */
 export type SymbolMap = Map<number, SymbolInfo[]>;
+
+/**
+ * THE one copy of "what C type does a map field declare" — consumed by the declaration SYNTHESIS
+ * (declare.ts, which prints it) and by the structurer's legalization env (a pointee's fields, so
+ * the printer can see that `gPtr->arr` already strides the access width). A per-consumer copy
+ * would let the emitted declaration and the type the emitter reasoned against disagree.
+ *
+ * An ARRAY field declares its own element type and length — spelling `u16 x[8]` as `u8 x[16]`
+ * keeps the layout but makes `x[i]` index BYTES, a wrong address. A POINTER field types `void *`
+ * (an integer guess flips relational compares of the loaded value). Everything else is the 1/2/4
+ * scalar cell at its declared signedness — with the 4-byte no-base-type case (an enum member)
+ * spelled s32 on the C89 enum=int rule — or a `u8 name[size]` byte array when it is no scalar
+ * cell at all (a nested struct, an 8-byte member).
+ */
+export function symbolFieldType(f: SymbolStructField & { size: number }): IrType {
+  if (f.elemSize !== undefined && f.length !== undefined) {
+    const elem = f.elemSize === 1 || f.elemSize === 2 || f.elemSize === 4;
+    return T.array(elem ? T.int(f.elemSize * 8, f.elemSigned ?? false) : T.u(8), elem ? f.length : f.size);
+  }
+  if (f.pointer && f.size === 4) {
+    return T.ptr(T.void());
+  }
+  if (f.size === 1 || f.size === 2 || f.size === 4) {
+    return T.int(f.size * 8, f.signed ?? (f.size === 4 ? ENUM_IS_SIGNED : false));
+  }
+  return T.array(T.u(8), f.size);
+}
+/** A 4-byte member/scalar with NO base-type signedness is the enum idiom — C89 says int. */
+export const ENUM_IS_SIGNED = true;
 
 /** Kind-aware two-probe lookup for a pool-loaded 32-bit value. Exact match first (any kind);
  *  on miss, `value & ~1` — accepted ONLY when the hit is code, because ELF function addresses

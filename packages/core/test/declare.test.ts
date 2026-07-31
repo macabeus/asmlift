@@ -111,11 +111,47 @@ test('an unnamed struct mints a placeholder tag; a layoutless struct degrades to
   );
 });
 
-test('a pointer global declares as void* (pointee fidelity unnecessary; quals bind the variable)', () => {
+test('a pointer global with NO pointee layout declares as void* (quals bind the variable)', () => {
   expect(renderDeclarations([ref('gPtr', { kind: 'data', shape: 'pointer' })])).toBe('extern void *gPtr;\n');
   expect(renderDeclarations([ref('gVolPtr', { kind: 'data', shape: 'pointer', volatile: true })])).toBe(
     'extern void *volatile gVolPtr;\n',
   );
+  // named but layout-less: still void*, since no `->member` spelling can be emitted for it
+  expect(
+    renderDeclarations([ref('gOpaque', { kind: 'data', shape: 'pointer', pointee: { structName: 'Save', size: 8 } })]),
+  ).toBe('extern void *gOpaque;\n');
+});
+
+test('a pointer global WITH a pointee layout declares the padded pointee and a typed extern', () => {
+  // what the `gPtr->member` / `gPtr->member[i]` spellings compile against. The array member keeps
+  // its OWN element type: `u8 slots[16]` spelled as the byte array of the same size would index
+  // identically, but `u16 words[8]` spelled `u8 words[16]` would index BYTES — a wrong address.
+  const out = renderDeclarations([
+    ref('gSave', {
+      kind: 'data',
+      shape: 'pointer',
+      pointee: {
+        structName: 'Save',
+        size: 24,
+        layout: [
+          { name: 'checksum', offset: 0, size: 4, signed: false },
+          { name: 'words', offset: 8, size: 16, elemSize: 2, elemSigned: false, length: 8 },
+        ],
+      },
+    }),
+  ]);
+  expect(out).toBe('struct Save { u32 checksum; u8 asmlift_pad_0[4]; u16 words[8]; };\nextern struct Save *gSave;\n');
+});
+
+test('an unsizable pointee member declines the typed extern — never a shifted layout', () => {
+  const out = renderDeclarations([
+    ref('gFlexPtr', {
+      kind: 'data',
+      shape: 'pointer',
+      pointee: { structName: 'Flex', size: 8, layout: [{ name: 'data', offset: 4, size: null }] },
+    }),
+  ]);
+  expect(out).toBe('extern void *gFlexPtr;\n');
 });
 
 test('an unsizable layout member declines the WHOLE struct decl (never a shifted layout)', () => {

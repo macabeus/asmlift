@@ -42,7 +42,7 @@ import { BinOp, Expr, SFn, Stmt, SwitchCase, exprChildren, mapExprChildren } fro
 import { exprCType, ptrElemBytes } from '../l3/typing';
 import { returnType } from '../raise/recover';
 import { collectStructs } from '../raise/structs';
-import type { SymbolInfo } from '../symbols';
+import { type SymbolInfo, symbolFieldType } from '../symbols';
 import { analyze } from './analysis';
 import { makeLoopHazards, updateWriteSet } from './hazards';
 import { analyzeLoops, dominators } from './loops';
@@ -93,42 +93,190 @@ function globalOf(e: Expr, width: number): { name: string; idx: Expr } | null {
     ] as const) {
       const addrSide = addrIn(side);
       if (addrSide) {
-        // width 1 → the byte residual IS the index; width>1 → a constant residual divides, a
-        // non-constant residual must already be element-scaled (`i * width`) to divide exactly.
-        if (width === 1) {
-          return { name: addrSide.name, idx: other };
-        }
-        if (other.k === 'const') {
-          return other.value % width === 0
-            ? { name: addrSide.name, idx: { k: 'const', value: other.value / width } }
-            : null;
-        }
-        if (other.k === 'bin' && (other.op === '*' || other.op === '<<')) {
-          const factor =
-            other.op === '<<'
-              ? other.r.k === 'const'
-                ? 1 << other.r.value
-                : 0
-              : other.r.k === 'const'
-                ? other.r.value
-                : 0;
-          if (factor === width) {
-            return { name: addrSide.name, idx: other.l };
-          }
-        }
-        return null; // a non-element-aligned residual — decline the global-array spelling
+        const idx = elementIndex(other, width);
+        return idx ? { name: addrSide.name, idx } : null;
       }
     }
   }
   return null;
 }
 
+// A BYTE residual read as an ELEMENT index of `elemSize`-wide elements, or null when it is not one
+// — the residual then addresses mid-element and no whole-element spelling can express it, so the
+// caller falls through to the honest cast forms. THE one copy of the rule (the `&gSym`-based array
+// spelling and the pointee-array spelling both index by it): width 1 → the byte residual IS the
+// index; wider → a constant residual must divide exactly, and a non-constant one must already be
+// element-scaled (`i * elemSize` / `i << log2(elemSize)`), which is exactly what the asm's own
+// index scaling produced.
+function elementIndex(residual: Expr, elemSize: number): Expr | null {
+  if (elemSize === 1) {
+    return residual;
+  }
+  if (residual.k === 'const') {
+    return residual.value % elemSize === 0 ? { k: 'const', value: residual.value / elemSize } : null;
+  }
+  if (residual.k === 'bin' && (residual.op === '*' || residual.op === '<<')) {
+    const factor =
+      residual.op === '<<'
+        ? residual.r.k === 'const'
+          ? 1 << residual.r.value
+          : 0
+        : residual.r.k === 'const'
+          ? residual.r.value
+          : 0;
+    if (factor === elemSize) {
+      return residual.l;
+    }
+  }
+  return null;
+}
+
 /** The symbol-map rendering context threaded into memAccess/arrayAccess: shape facts per
- *  global name, plus a callback registering an array-shaped global's env type (so the bare
- *  `gSym[i]` spelling passes the stride check uncast). Absent ⇒ today's spellings. */
+ *  global name, plus a callback registering a global's env type (so a spelling that must pass the
+ *  stride check uncast — the bare `gSym[i]`, and the pointee `gPtr->arr[i]` — does). Absent ⇒
+ *  today's spellings. */
 interface SymRenderCtx {
   info(name: string): SymbolInfo | undefined;
-  noteArray(name: string, type: IrType): void;
+  noteGlobal(name: string, type: IrType): void;
+}
+
+// ── interior spelling through a POINTER-shaped global ────────────────────────────────────────
+// A pointer global's VALUE is the address of the object the project's header says it points at.
+// With that pointee's layout in the map, an access at a known offset is a NAMED member of it —
+// `gPtr->member` — which is the source spelling; without it the access is byte arithmetic on the
+// loaded cell (`((u8 *)gPtr + i)[16]`), honest but opaque. The address computed is IDENTICAL
+// either way: `->member` adds the member's DWARF offset, which is the same constant the arithmetic
+// added, and an index into an array member scales by the member's own element size, which the
+// rules below require to equal the access width. Everything not provably that — a partial overlap,
+// a width mismatch, an unnamed offset, a member whose declared signedness differs from the
+// access's (an s8 read is ldrb+lsl+asr where u8 is ldrb alone), a missing layout — falls THROUGH
+// to the cast forms. A member is never guessed.
+
+/** The global named by a pointer global's VALUE as the additive lowering spells it: the bare
+ *  `gPtr`, or that value wearing the byte-pointer / u32 cast that lowering adds (cast-then-add,
+ *  see spellPtrGlobalArith). Both denote the same address and add BYTES to it, so both fold here;
+ *  a cast to any other pointer type is NOT looked through — it would re-scale what follows. */
+function ptrGlobalValueName(x: Expr): string | null {
+  if (x.k === 'var') {
+    return x.name;
+  }
+  if (x.k === 'cast' && x.e.k === 'var') {
+    const t = x.to;
+    const bytePtr = t.kind === 'ptr' && t.to.kind === 'int' && t.to.width === 8;
+    return bytePtr || (t.kind === 'int' && t.width === 32) ? x.e.name : null;
+  }
+  return null;
+}
+
+/** Decompose an access base into "the VALUE of a map-declared POINTER global + a constant byte
+ *  offset + at most ONE variable term": `gPtr`, `gPtr + K`, `(u8 *)gPtr + i`, `(u8 *)gPtr + (i <<
+ *  2) + K`. Null for anything else — two variable terms, no such global, a non-`+` operator —
+ *  because only a single residual can be read as one member's index. */
+function ptrGlobalBase(e: Expr, isPtrGlobal: (n: string) => boolean): { name: string; byte: number; idx: Expr | null } {
+  let name: string | null = null;
+  let byte = 0;
+  let idx: Expr | null = null;
+  let ok = true;
+  const visit = (x: Expr): void => {
+    if (!ok) {
+      return;
+    }
+    if (x.k === 'bin' && x.op === '+') {
+      visit(x.l);
+      visit(x.r);
+      return;
+    }
+    const global = ptrGlobalValueName(x);
+    if (global !== null && name === null && isPtrGlobal(global)) {
+      name = global;
+      return;
+    }
+    if (x.k === 'const') {
+      byte += x.value;
+      return;
+    }
+    if (idx !== null) {
+      ok = false;
+      return;
+    }
+    idx = x;
+  };
+  visit(e);
+  return { name: ok ? (name ?? '') : '', byte, idx };
+}
+
+/** The env type for a pointee-spelled global: a pointer to the pointee struct, its fields typed so
+ *  the legalization env (exprCType) can see that `gPtr->arr` already strides the access width and
+ *  the deref contract can see that the member is declared. Null when the pointee is not fully
+ *  known — the caller then declines the spelling rather than registering a partial type. */
+function pointeeIrType(info: SymbolInfo): IrType | null {
+  const p = info.pointee;
+  if (!p?.layout || p.structName === undefined || p.size === undefined) {
+    return null;
+  }
+  const fields = [];
+  for (const f of p.layout) {
+    if (f.size === null) {
+      continue; // unsizable member: unspellable by the rules below, so it need not be declared
+    }
+    // THE shared map-field typing — the same rule the declaration synthesis PRINTS (symbols.ts),
+    // so the env this reasons against and the decl a self-declaring candidate compiles cannot
+    // disagree about what `gPtr->member` is.
+    fields.push({ name: f.name, off: f.offset, type: symbolFieldType({ ...f, size: f.size }) });
+  }
+  return T.ptr(T.struct(p.structName, fields, p.size));
+}
+
+/** Does a member declared at signedness `declared` read as EXACTLY the type the cast spelling this
+ *  replaces would have produced — `scalarTypeForAccess(width, signed)`? That is the whole
+ *  byte-exactness argument for naming a member instead of casting: same address, same read width,
+ *  same C type, so every operator downstream compiles identically. A 4-byte access renders s32
+ *  whatever the load said (the ISA has one word load), so only a SIGNED member may take its place;
+ *  narrower accesses carry their own signedness and must match it. An undeclared signedness (the
+ *  member is not a base type — a nested struct, an enum, a pointer) is never assumed to match. */
+function spellsAccessType(declared: boolean | undefined, width: number, signed: boolean): boolean {
+  return declared === (width === 4 ? true : signed);
+}
+
+/** `gPtr->member` / `gPtr->member[i]` for an access through a pointer global's value, or null when
+ *  the offset is not provably ONE member's (see the block comment above). */
+function pointeeAccess(
+  pg: { name: string; byte: number; idx: Expr | null },
+  off: number,
+  width: number,
+  signed: boolean,
+  sym: SymRenderCtx,
+): Expr | null {
+  const info = sym.info(pg.name);
+  const layout = info?.pointee?.layout;
+  if (!layout) {
+    return null;
+  }
+  const total = pg.byte + off;
+  const base: Expr = { k: 'var', name: pg.name };
+  if (pg.idx === null) {
+    // Constant offset: the member must match EXACTLY — offset, read width, and the SPELLED type
+    // (spellsAccessType). An ARRAY member is excluded whatever its size: `u8 x[1]` would match a
+    // byte access by (offset, size) and spell `->x`, which is not an lvalue of that width at all.
+    const f = layout.find((m) => m.offset === total && m.size === width && m.elemSize === undefined);
+    return f && spellsAccessType(f.signed, width, signed) ? { k: 'field', base, name: f.name } : null;
+  }
+  // Variable index: the member must START at the constant offset (a mid-array constant is
+  // `&m[k] + i`, which this spelling cannot express) and stride the access width exactly.
+  const f = layout.find((m) => m.offset === total && m.elemSize === width && m.length !== undefined);
+  if (!f || !spellsAccessType(f.elemSigned, width, signed)) {
+    return null;
+  }
+  const idx = elementIndex(pg.idx, width);
+  const type = pointeeIrType(info!);
+  if (!idx || !type) {
+    return null;
+  }
+  // The env entry is registered ONLY here: the plain `->member` form above needs no legalization
+  // (a field node spells arrow unconditionally), while an INDEX over the member does — uncast only
+  // if the env knows the member's array type.
+  sym.noteGlobal(pg.name, type);
+  return { k: 'index', base: { k: 'field', base, name: f.name }, idx, width, signed };
 }
 
 // The (name, byte offset) of a global access with a CONSTANT total offset — `&gSym` → off,
@@ -177,9 +325,21 @@ function memAccess(
     const gb = globalConstByte(baseExpr, off);
     const si = gb ? sym.info(gb.name) : undefined;
     if (gb && si?.shape === 'struct' && si.layout) {
-      const fld = si.layout.find((f) => f.offset === gb.byte && f.size === width);
+      // an ARRAY member is excluded here for the same reason as in pointeeAccess: `u8 x[1]` would
+      // match a byte access by (offset, size) and spell `.x`, which is not an lvalue of that width
+      const fld = si.layout.find((f) => f.offset === gb.byte && f.size === width && f.elemSize === undefined);
       if (fld) {
         return { k: 'field', base: { k: 'var', name: gb.name }, name: fld.name, dot: true };
+      }
+    }
+    // …and the same idea one indirection down: an access through a POINTER global's VALUE is a
+    // member of what it points at (`gPtr->member`, `gPtr->member[i]`) when the map knows the
+    // pointee's layout — see pointeeAccess for the guards.
+    const pg = ptrGlobalBase(baseExpr, (n) => sym.info(n)?.shape === 'pointer');
+    if (pg.name) {
+      const spelled = pointeeAccess(pg, off, width, signed, sym);
+      if (spelled) {
+        return spelled;
       }
     }
   }
@@ -206,7 +366,7 @@ function memAccess(
     // so the stride check passes and no cast is added. Element-width match only.
     const siArr = sym?.info(g.name);
     if (siArr?.shape === 'array' && siArr.elemSize === width) {
-      sym!.noteArray(g.name, T.ptr(T.int(width * 8, siArr.elemSigned ?? false)));
+      sym!.noteGlobal(g.name, T.ptr(T.int(width * 8, siArr.elemSigned ?? false)));
       return { k: 'index', base: { k: 'var', name: g.name }, idx, width, signed };
     }
     return { k: 'index', base: { k: 'addr', name: g.name }, idx, width, signed };
@@ -251,7 +411,7 @@ function arrayAccess(
     // ARRAY-declared global (symbol map): the bare-name spelling, same rule as memAccess.
     const si = sym?.info(baseExpr.name);
     if (si?.shape === 'array' && si.elemSize === elemSize) {
-      sym!.noteArray(baseExpr.name, T.ptr(T.int(elemSize * 8, si.elemSigned ?? false)));
+      sym!.noteGlobal(baseExpr.name, T.ptr(T.int(elemSize * 8, si.elemSigned ?? false)));
       return { k: 'index', base: { k: 'var', name: baseExpr.name }, idx: idxExpr, width: elemSize, signed };
     }
     return { k: 'index', base: baseExpr, idx: idxExpr, width: elemSize, signed };
@@ -474,7 +634,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
   // array-shaped globals actually referenced (they surface as SFn.globals — typed, undeclared).
   const shapedGlobalTypes = new Map<string, IrType>();
   const symCtx: SymRenderCtx | undefined = symbols
-    ? { info: (n) => symbols.get(n), noteArray: (n, t) => shapedGlobalTypes.set(n, t) }
+    ? { info: (n) => symbols.get(n), noteGlobal: (n, t) => shapedGlobalTypes.set(n, t) }
     : undefined;
 
   /** A bare `gSym` naming a map-declared POINTER global — the VALUE of a pointer cell. Its C

@@ -24,16 +24,16 @@
 //   • nothing guesses, with TWO documented exceptions: a SHAPED symbol without the facts to
 //     declare faithfully is SKIPPED — the candidate then fails to compile LOUDLY and is
 //     dropped by rankBy. Exception one is the 4-byte signless-non-pointer cell (see
-//     enumIsSigned): spelled s32 on the C89 enum=int rule. For a true enum that is the header
+//     ENUM_IS_SIGNED): spelled s32 on the C89 enum=int rule. For a true enum that is the header
 //     truth; the residual mis-spell class (a 4-byte nested-struct member word-read via a dot
 //     field) can only LOSE score — the target bytes derive from the truth decls, so a
 //     divergent compile can never false-match. Exception two is the NAME-ONLY data symbol
 //     (`extern u32 name;` — see the default case): required to reproduce symtab-only map
 //     rows outside project headers, justified by the same only-loses-score argument.
 import { type StructFieldDecl, renderStructDecl } from './backend/cfamily';
-import { type IrType, T } from './ir/types';
+import { T } from './ir/types';
 import type { SymbolRef } from './l3/symbol-refs';
-import type { SymbolInfo, SymbolStructField } from './symbols';
+import { ENUM_IS_SIGNED, type SymbolInfo, type SymbolStructField, symbolFieldType } from './symbols';
 
 /** The u8/s8/u16/s16/u32/s32 spelling for a 1/2/4-byte cell, or null (no faithful narrow type). */
 function intType(size: number, signed: boolean): string | null {
@@ -46,27 +46,12 @@ function quals(info: SymbolInfo): string {
   return `${info.volatile ? 'volatile ' : ''}${info.const ? 'const ' : ''}`;
 }
 
-/** One struct field's type, seated at its exact offset by the caller's pad discipline. A POINTER
- *  member types `void *` — an integer guess flips relational compares of the loaded value
- *  (s32 `blt` vs the pointer truth's `bcc`), the audit's confirmed wrong-bytes class. Member
- *  volatility is kept on the field decl (`vu16 field;` — dropping it lets the compiler fold
- *  repeated reads). Fields whose size is not a 1/2/4 scalar cell (nested structs, char[N],
- *  8-byte members) become `u8 name[size]` byte arrays — same bytes, and the layout's
- *  field-spelling gate in core only ever names exact (offset, width∈{1,2,4}) matches, so such
- *  a field is never dot-accessed. Signedness default mirrors core's env typing
- *  (`signed ?? false` — unsigned), EXCEPT the 4-byte no-base-type case (an enum member): C89
- *  enums are int, so s32. */
-function fieldType(f: SymbolStructField & { size: number }): IrType {
-  if (f.pointer && f.size === 4) {
-    return T.ptr(T.void());
-  }
-  if (f.size === 1 || f.size === 2 || f.size === 4) {
-    return T.int(f.size * 8, f.signed ?? (f.size === 4 ? enumIsSigned : false));
-  }
-  return T.array(T.u(8), f.size);
-}
-// A 4-byte member/scalar with NO base-type signedness is the enum idiom — C89 says int.
-const enumIsSigned = true;
+/** One struct field's type, seated at its exact offset by the caller's pad discipline — THE shared
+ *  map-field typing (symbols.ts `symbolFieldType`, which core's own legalization env also reads,
+ *  so the declaration and the type the emitter reasoned against cannot drift). Member volatility
+ *  is kept on the field decl here (`vu16 field;` — dropping it lets the compiler fold repeated
+ *  reads), being a decl-only fact. */
+const fieldType = symbolFieldType;
 
 /** The padded `struct Tag { ... };` declaration for a layout: fields seated at exact offsets,
  *  gaps as explicit u8 pad arrays, rendered by THE shared struct renderer (core
@@ -126,7 +111,9 @@ export function renderDeclarations(refs: SymbolRef[]): string {
         // Signedness default: absent + 4 bytes is the enum idiom (int ⇒ s32); absent + narrow
         // has no honest spelling — skip (loud, see module note).
         const t =
-          info.size !== undefined ? intType(info.size, info.signed ?? (info.size === 4 ? enumIsSigned : false)) : null;
+          info.size !== undefined
+            ? intType(info.size, info.signed ?? (info.size === 4 ? ENUM_IS_SIGNED : false))
+            : null;
         if (t !== null && (info.signed !== undefined || info.size === 4)) {
           lines.push(`extern ${quals(info)}${t} ${name};`);
         }
@@ -157,13 +144,29 @@ export function renderDeclarations(refs: SymbolRef[]): string {
         }
         break;
       }
-      case 'pointer':
-        // Pointee fidelity is unnecessary: load/store/compare of the 4-byte cell are identical
-        // for any object-pointer type, and asmlift's cast-heavy output never derefs through the
+      case 'pointer': {
+        // With a POINTEE layout the emitter may spell an interior as `gPtr->member`, which only
+        // compiles against a pointer to that struct — so the pointee is declared here (the same
+        // padded synthesis a struct global gets) and the extern is typed. The declared pointee
+        // never changes bytes: the cell is 4 bytes whatever it addresses, and core's own lowering
+        // makes every arithmetic stride EXPLICIT (`(u8 *)gPtr + K` / `(u32)gPtr`), so no emitted
+        // expression is scaled by this type.
+        // Without one, pointee fidelity is unnecessary — load/store/compare of the cell are
+        // identical for any object-pointer type, and the output then never derefs through the
         // decl's pointee. Qualifiers bind to the VARIABLE (`void *volatile g`), matching the
         // top-level cv chain the provider collected.
-        lines.push(`extern void *${info.volatile ? 'volatile ' : ''}${info.const ? 'const ' : ''}${name};`);
+        const tag = info.pointee?.structName;
+        const decl = tag && info.pointee?.layout ? structDecl(tag, info.pointee.layout, info.pointee.size) : null;
+        if (decl !== null && tag) {
+          if (!declaredTags.has(tag)) {
+            declaredTags.add(tag);
+            lines.push(decl);
+          }
+        }
+        const pointeeType = decl !== null && tag ? `struct ${tag} *` : 'void *';
+        lines.push(`extern ${pointeeType}${info.volatile ? 'volatile ' : ''}${info.const ? 'const ' : ''}${name};`);
         break;
+      }
       default: {
         // Name-only (no sidecar shape) — the second documented exception (see the module note;
         // the first is the 4-byte signless enum cell). Skipping here was the original rule, but

@@ -298,3 +298,103 @@ describe('a POINTER-shaped global under arithmetic is spelled CAST-THEN-ADD', ()
     expect(src).not.toContain('(u8 *)gPtr +'); // nothing to legalize — gPtr is not a pointer cell
   });
 });
+
+describe('a POINTER global with a known POINTEE spells the interior as gPtr->member', () => {
+  // One indirection past the block above: the map now carries what the pointer points AT (its
+  // struct name, size and layout — @gba-kit/debug-info's `variableShape().pointee`), so an access
+  // at a known offset is a NAMED member of that struct rather than byte arithmetic on the cell.
+  // The address is identical either way — `->member` adds the member's own DWARF offset, and an
+  // index into an array member scales by the element size the rule REQUIRES to equal the access
+  // width — so this changes readability, never bytes.
+  // (snowboardkids2:func_80037FE0_38BE0 is the shape: `EepromSaveData->save_slot_status[arg0]`.)
+  const pointee = (layout: unknown[]) => ({
+    name: 'gPtr',
+    kind: 'data',
+    shape: 'pointer',
+    pointee: { structName: 'Save', size: 92, layout },
+  });
+  const SLOTS = [
+    { name: 'checksum', offset: 8, size: 4, signed: false },
+    { name: 'slots', offset: 16, size: 16, elemSize: 1, elemSigned: false, length: 16 },
+    { name: 'flag', offset: 78, size: 1, signed: false },
+  ];
+  // r1 = gPtr (the cell's value); optional index add; read at a constant offset
+  const derefAt = (ld: string, pre = '') =>
+    `\tldr\tr1, .L1\n\tldr\tr1, [r1]\n${pre}\t${ld}\n\tbx\tlr\n.L1:\n\t.word\t0x03001234\n`;
+  const INDEXED = '\tadds\tr1, r1, r0\n';
+
+  test('a constant offset matching a member exactly spells the ARROW field', () => {
+    const src = run('f', derefAt('ldrb\tr0, [r1, #0x4E]'), mapOf([[0x03001234, pointee(SLOTS)]]));
+    expect(src).toContain('return gPtr->flag;');
+    expect(src).not.toContain('(u8 *)gPtr'); // the byte-cast spelling is exactly what this replaces
+  });
+
+  test('a variable index into an ARRAY member spells gPtr->member[i], uncast', () => {
+    const src = run('f', derefAt('ldrb\tr0, [r1, #0x10]', INDEXED), mapOf([[0x03001234, pointee(SLOTS)]]));
+    expect(src).toContain('gPtr->slots[a0]');
+    expect(src).not.toContain('(u8 *)'); // the member's own array type strides the access width
+  });
+
+  test('a WIDER array member indexes by ELEMENTS, not bytes', () => {
+    // ldrh through `r0 << 1`: the byte residual is element-scaled already, so the index is a0
+    const layout = [{ name: 'words', offset: 16, size: 32, elemSize: 2, elemSigned: false, length: 16 }];
+    const body = derefAt('ldrh\tr0, [r1, #0x10]', '\tlsls\tr0, r0, #0x1\n' + INDEXED);
+    expect(run('f', body, mapOf([[0x03001234, pointee(layout)]]))).toContain('gPtr->words[a0]');
+  });
+
+  test('a WIDTH mismatch falls back to the cast spelling, never a wrong member', () => {
+    // a HALFWORD read at offset 8, where the layout declares a 4-byte member
+    const src = run('f', derefAt('ldrh\tr0, [r1, #0x8]'), mapOf([[0x03001234, pointee(SLOTS)]]));
+    expect(src).not.toContain('->checksum');
+    expect(src).toContain('gPtr'); // still the named cell, just not a member of it
+  });
+
+  test('a WORD member is spelled only when declared SIGNED — the type the cast form rendered', () => {
+    // A 4-byte access renders `(s32 *)` whatever the load said (one word load in the ISA), so
+    // naming a u32-declared member in its place would change the operand TYPE, and with it what
+    // every downstream operator compiles to. The s32 member keeps the type and is named.
+    const u32 = [{ name: 'checksum', offset: 8, size: 4, signed: false }];
+    const s32 = [{ name: 'count', offset: 8, size: 4, signed: true }];
+    expect(run('f', derefAt('ldr\tr0, [r1, #0x8]'), mapOf([[0x03001234, pointee(u32)]]))).not.toContain('->checksum');
+    expect(run('f', derefAt('ldr\tr0, [r1, #0x8]'), mapOf([[0x03001234, pointee(s32)]]))).toContain(
+      'return gPtr->count;',
+    );
+  });
+
+  test('a SIGNEDNESS mismatch falls back — an s8 read is not the u8 member', () => {
+    // ldrsb sign-extends; spelling the u8-declared member would compile to ldrb (wrong bytes)
+    const src = run('f', derefAt('ldrsb\tr0, [r1, r2]', '\tmovs\tr2, #0x4E\n'), mapOf([[0x03001234, pointee(SLOTS)]]));
+    expect(src).not.toContain('->flag');
+  });
+
+  test('an offset naming NO member falls back — nothing is guessed', () => {
+    const src = run('f', derefAt('ldrb\tr0, [r1, #0x4D]'), mapOf([[0x03001234, pointee(SLOTS)]]));
+    expect(src).not.toContain('->');
+    expect(src).toContain('((u8 *)gPtr)[77]');
+  });
+
+  test('a ONE-ELEMENT array member is never spelled as a scalar field', () => {
+    // `u8 x[1]` matches a byte access by (offset, size) alone — but `gPtr->x` is not an lvalue of
+    // that width, so the array facts must exclude it from the exact-match rule
+    const layout = [{ name: 'x', offset: 16, size: 1, elemSize: 1, elemSigned: false, length: 1 }];
+    const src = run('f', derefAt('ldrb\tr0, [r1, #0x10]'), mapOf([[0x03001234, pointee(layout)]]));
+    expect(src).not.toContain('->x;');
+  });
+
+  test('NO layout ⇒ the pre-pointee spelling, byte-identical', () => {
+    // a pointee the DWARF named but has no layout for, and a bare pointer shape, must both emit
+    // exactly what the map emitted before pointees existed
+    const bare = mapOf([[0x03001234, { name: 'gPtr', kind: 'data', shape: 'pointer' }]]);
+    const named = mapOf([
+      [0x03001234, { name: 'gPtr', kind: 'data', shape: 'pointer', pointee: { structName: 'Save', size: 92 } }],
+    ]);
+    const body = derefAt('ldrb\tr0, [r1, #0x10]', INDEXED);
+    expect(run('f', body, named)).toBe(run('f', body, bare));
+    expect(run('f', body, bare)).toContain('((u8 *)gPtr + a0)[16]');
+  });
+
+  test('INERTNESS: no map ⇒ unchanged output', () => {
+    const body = derefAt('ldrb\tr0, [r1, #0x10]', INDEXED);
+    expect(run('f', body, new Map())).toBe(run('f', body));
+  });
+});

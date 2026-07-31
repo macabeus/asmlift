@@ -18,8 +18,10 @@
 // spell bytes correctly. That is the plausible-but-wrong class this project refuses, so the
 // provider REFUSES LOUDLY instead (the CLI converts the throw to exit 66). Probed by KEY
 // PRESENCE, never by version string — the shipped package labelling is not a reliable witness
-// of its own capability.
-import type { SymbolInfo, SymbolMap } from '@asmlift/core/symbols';
+// of its own capability. `assertPointeeFactPresent` is the same gate one release later, for the
+// facts an INTERIOR spelling through a pointer global needs (what it points at, and which of a
+// layout's members are arrays).
+import type { SymbolInfo, SymbolMap, SymbolStructField } from '@asmlift/core/symbols';
 import { readFileSync } from 'node:fs';
 
 /** `variableShape` result — declared structurally so this package does not depend on
@@ -28,7 +30,15 @@ import { readFileSync } from 'node:fs';
  *  runtime AVAILABILITY is asserted separately (assertShapeFactsPresent). */
 type DwarfShape =
   | { kind: 'scalar'; size: number | null; signed: boolean | null; volatile?: boolean; const?: boolean }
-  | { kind: 'pointer'; volatile?: boolean; const?: boolean }
+  | {
+      kind: 'pointer';
+      /** the struct/union the pointer targets (null = it targets something else). OPTIONAL at this
+       *  boundary only because the type must also describe a package that predates the fact; its
+       *  runtime AVAILABILITY is asserted separately (assertPointeeFactPresent). */
+      pointee?: { structName: string | null; size: number | null } | null;
+      volatile?: boolean;
+      const?: boolean;
+    }
   | {
       kind: 'array';
       elemSize: number | null;
@@ -39,6 +49,21 @@ type DwarfShape =
     }
   | { kind: 'struct'; structName: string | null; size: number | null; volatile?: boolean; const?: boolean };
 type ShapeCapable = { variableShape?: (name: string) => DwarfShape | null };
+
+/** `struct()`'s member — same structural declaration, same reason. Every fact but name/offset/size
+ *  is optional here so the type also describes a member that simply is not a pointer/array. */
+interface DwarfMember {
+  name: string;
+  offset: number;
+  size: number | null;
+  signed?: boolean | null;
+  pointer?: true;
+  volatile?: true;
+  bitWidth?: number;
+  elemSize?: number;
+  elemSigned?: boolean;
+  length?: number;
+}
 
 /** `sub_08xxxxxx` / `_08xxxxxx`-style placeholder names — real symbols, but names no header
  *  declares; emitting one produces non-compiling output, so they never win the canonical pick. */
@@ -74,6 +99,63 @@ function assertMemberFactsPresent(m: object, elfPath: string): void {
   }
 }
 
+/** The same probe for the POINTER arm's pointee. `pointee` is present on EVERY pointer shape a
+ *  0.4.2+ package reports (null when the target is not a struct), so key presence is again the
+ *  honest witness — and this is the only one of the release's new facts key presence can witness:
+ *  the member-level array facts (`elemSize`/`elemSigned`/`length`) are legitimately ABSENT on a
+ *  non-array member, so there is no member on which their absence means anything. They ship in
+ *  the same release, and this probe stands for both: with the pointee reported but `elemSize`
+ *  silently missing, every array member would look like a plain one — a one-element array would
+ *  match an exact-width field lookup and spell `->x` for a member that is not an lvalue of that
+ *  width, and no indexed spelling could ever fire. That is the plausible-but-wrong class again,
+ *  so a package that reports one without the other is refused here rather than degraded. */
+function assertPointeeFactPresent(sh: DwarfShape, elfPath: string): void {
+  if (sh.kind === 'pointer' && !('pointee' in sh)) {
+    throw new Error(
+      `cannot build a symbol map from ${elfPath}: the installed @gba-kit/debug-info reports no ` +
+        `pointer target facts (a pointer variableShape() result has no 'pointee' key), so every ` +
+        `pointer global would lose the layout it addresses and every struct member its array ` +
+        `element facts — ${UPGRADE}`,
+    );
+  }
+}
+
+/** A named type's sidecar layout, mapped to the core `SymbolStructField[]` — the ONE copy, shared
+ *  by a struct global's own layout and by a pointer global's pointee.
+ *
+ *  Bitfield members are excluded: their read width never equals a field size, so they must fall
+ *  through to the honest cast spelling, never a wrong field name. `signed` must be REPORTED by the
+ *  package (assertMemberFactsPresent); a reported null value is a genuine "DWARF didn't say" and
+ *  stays absent rather than guessed. `pointer`/`volatile` and the array element facts are kept
+ *  only when the package states them, same rule — an absent `elemSize` means "not an array", which
+ *  is exactly what the field rules read it as. */
+function layoutOf(
+  di: { struct(name: string): { members: DwarfMember[] } | null },
+  name: string | null,
+  elfPath: string,
+): SymbolStructField[] | null {
+  const layout = name ? di.struct(name) : null;
+  if (!layout) {
+    return null;
+  }
+  return layout.members
+    .filter((m) => m.bitWidth === undefined)
+    .map((m) => {
+      assertMemberFactsPresent(m, elfPath);
+      return {
+        name: m.name,
+        offset: m.offset,
+        size: m.size,
+        ...(typeof m.signed === 'boolean' ? { signed: m.signed } : {}),
+        ...(m.pointer === true ? { pointer: true } : {}),
+        ...(m.volatile === true ? { volatile: true } : {}),
+        ...(typeof m.elemSize === 'number' ? { elemSize: m.elemSize } : {}),
+        ...(typeof m.elemSigned === 'boolean' ? { elemSigned: m.elemSigned } : {}),
+        ...(typeof m.length === 'number' ? { length: m.length } : {}),
+      };
+    });
+}
+
 export async function loadSymbolMap(elfPath: string): Promise<SymbolMap> {
   const { DebugInfo, STT_FUNC } = await import('@gba-kit/debug-info');
   const di = DebugInfo.fromElf(readFileSync(elfPath));
@@ -101,6 +183,7 @@ export async function loadSymbolMap(elfPath: string): Promise<SymbolMap> {
       const sh = shapeOf(s.name);
       if (sh) {
         assertShapeFactsPresent(sh, elfPath);
+        assertPointeeFactPresent(sh, elfPath);
         info.declared = true;
         // cv-qualifiers ride every shape (declaration-fidelity for the synthesis layer:
         // volatile is load-bearing for MMIO codegen, const is the ROM-table spelling)
@@ -129,30 +212,26 @@ export async function loadSymbolMap(elfPath: string): Promise<SymbolMap> {
           if (sh.structName !== null) {
             info.structName = sh.structName; // the real tag, for a readable synthesized decl
           }
-          const layout = sh.structName ? di.struct(sh.structName) : null;
+          const layout = layoutOf(di, sh.structName, elfPath);
           if (layout) {
-            // bitfield members are excluded: their read width never equals a field size, so
-            // they must fall through to the honest cast spelling, never a wrong field name.
-            // `signed` must be REPORTED by the package (assertMemberFactsPresent); a reported
-            // null value is a genuine "DWARF didn't say", and stays absent rather than guessed.
-            // `pointer`/`volatile` are kept only when true, same rule.
-            info.layout = layout.members
-              .filter((m) => m.bitWidth === undefined)
-              .map((m) => {
-                assertMemberFactsPresent(m, elfPath);
-                const facts = m as { signed?: boolean | null; pointer?: true; volatile?: true };
-                return {
-                  name: m.name,
-                  offset: m.offset,
-                  size: m.size,
-                  ...(typeof facts.signed === 'boolean' ? { signed: facts.signed } : {}),
-                  ...(facts.pointer === true ? { pointer: true } : {}),
-                  ...(facts.volatile === true ? { volatile: true } : {}),
-                };
-              });
+            info.layout = layout;
           }
         } else if (sh.kind === 'pointer') {
           info.shape = 'pointer';
+          // The pointee is carried WHOLE — its name, its size, and the layout that name resolves
+          // to — because the interior spelling through a loaded pointer needs all three: the name
+          // to declare it, the size to bound it, the layout to name a field at an offset. A
+          // pointee the DWARF names but has no layout for reports the name alone; core then finds
+          // no field and falls through to the honest cast forms.
+          const pointee = sh.pointee ?? null;
+          if (pointee) {
+            const layout = layoutOf(di, pointee.structName, elfPath);
+            info.pointee = {
+              ...(pointee.structName !== null ? { structName: pointee.structName } : {}),
+              ...(pointee.size !== null ? { size: pointee.size } : {}),
+              ...(layout ? { layout } : {}),
+            };
+          }
         } else {
           info.shape = 'scalar';
           if (sh.size !== null) {
