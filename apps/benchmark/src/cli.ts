@@ -70,22 +70,30 @@ if (opts.tier !== 'both' && opts.tier !== 'synthetic' && opts.tier !== 'real') {
 /** Human names for compile/real.ts's escalation rungs, for the `bench target` log line. */
 const RUNG_NAMES = ['bare typedefs', '+ manifest prependC', 'vendored ctx'];
 
-/** The published WINNING source for one real row, from the committed results — but only when
- *  asmlift's outcome was actually scored. `bench target` replays the scoring escalation over it
- *  to recover the context rung the harness used. Missing results (a row not yet published, a
- *  fresh checkout) or an unscored outcome return undefined, and the caller falls back to the
+/** The published WINNING source for one real row — but only when asmlift's outcome was actually
+ *  SCORED (a declined/noncompile/failed row's stored text compiles nowhere, so it pins nothing).
+ *  `bench target` replays the scoring escalation over it to recover the context rung the harness
+ *  used.
+ *
+ *  `results.json` first, because that is the COMMITTED file every checkout has — a user running a
+ *  published reproduction script must land on the same rung the benchmark did. The per-tier
+ *  `real.json` is gitignored (present only right after a local `bench run`) and serves the
+ *  pre-merge loop. Neither present, or the row unscored ⇒ undefined, and the caller takes the
  *  richest rung — the behavior before the rung was derived at all. */
 function publishedAsmliftSource(rowId: string): string | undefined {
-  let results: FunctionResult[];
-  try {
-    ({ results } = JSON.parse(readFileSync(join(RESULTS_DIR, 'real.json'), 'utf8')) as { results: FunctionResult[] });
-  } catch {
-    return undefined;
+  for (const file of ['results.json', 'real.json']) {
+    let results: FunctionResult[];
+    try {
+      ({ results } = JSON.parse(readFileSync(join(RESULTS_DIR, file), 'utf8')) as { results: FunctionResult[] });
+    } catch {
+      continue;
+    }
+    const row = results.find((r) => r.id === rowId);
+    if (row) {
+      return row.asmlift.outcome === 'match' || row.asmlift.outcome === 'nonmatch' ? row.asmlift.source : undefined;
+    }
   }
-  const row = results.find((r) => r.id === rowId);
-  return row && (row.asmlift.outcome === 'match' || row.asmlift.outcome === 'nonmatch')
-    ? row.asmlift.source
-    : undefined;
+  return undefined;
 }
 
 function casesFor(tier: Tier) {
