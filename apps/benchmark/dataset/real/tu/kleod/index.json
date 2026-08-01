@@ -73,11 +73,11 @@
   },
   "DecompressAlloc": {
     "tu": "DecompressAlloc.i.gz",
-    "ctx": "ctx-b4ae03db0859.i.gz"
+    "ctx": "ctx-bbb0f9d88b2b.i.gz"
   },
   "WritePaletteColor": {
     "tu": "WritePaletteColor.i.gz",
-    "ctx": "ctx-b4ae03db0859.i.gz"
+    "ctx": "ctx-057283b93369.i.gz"
   },
   "ReadUnalignedU16": {
     "tu": "ReadUnalignedU16.i.gz",
@@ -85,7 +85,7 @@
   },
   "FreeAllDecompBuffers": {
     "tu": "FreeAllDecompBuffers.i.gz",
-    "ctx": "ctx-b4ae03db0859.i.gz"
+    "ctx": "ctx-f808d4b2fde6.i.gz"
   },
   "DmaSpriteToObjVram": {
     "tu": "DmaSpriteToObjVram.i.gz",

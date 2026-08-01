@@ -24,7 +24,7 @@ import { type OnGap, decompile } from '@asmlift/core/pipeline';
 import type { Prototypes } from '@asmlift/core/proto';
 import { RaiseUnsupportedError } from '@asmlift/core/raise/errors';
 import { StructureError } from '@asmlift/core/structure/structure';
-import type { SymbolMap } from '@asmlift/core/symbols';
+import { type SymbolMap, asIfUndecompiled } from '@asmlift/core/symbols';
 import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC, type TargetDescription } from '@asmlift/core/target';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -280,6 +280,16 @@ export async function runCli(
       stdout: '',
       stderr: 'asmlift: could not detect the function name from the asm — pass --name <symbol>\n',
     };
+  }
+
+  // NEVER consume the TARGET's own definition-derived DWARF. A project that has already
+  // decompiled `name` carries its signature (and later its locals) in this ELF, so using it
+  // would make the output depend on already having the answer — and it is a fact a user
+  // decompiling an `INCLUDE_ASM` function cannot have. Globals, struct layouts and CALLEE
+  // signatures all survive; only the target's own compiled facts are withheld. The benchmark
+  // applies the same filter, so a reproduction of a published row grades what was scored.
+  if (symbols) {
+    symbols = asIfUndecompiled(symbols, name);
   }
 
   // --score-against: compile the output (and every ranked candidate) with the project's own
