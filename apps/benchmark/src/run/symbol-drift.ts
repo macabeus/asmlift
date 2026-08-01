@@ -5,7 +5,6 @@
 // the remedy (`bench vendor --project <p>`). The comparison is over the DECOMPRESSED JSON
 // (symbolMapToJson is byte-stable: hex keys sorted, array order preserved — the exact bytes
 // vendor wrote); gzip envelopes vary by compressor and never participate.
-import { loadSymbolMap } from '@asmlift/cli/symbols-provider';
 import { symbolMapToJson } from '@asmlift/core/symbols';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
@@ -15,6 +14,7 @@ import { gunzipSync } from 'node:zlib';
 import { allowDirtyCheckout } from '../cases/checkout';
 import { REAL_DIR, type RealManifest, resolveProjectRoot } from '../cases/manifests';
 import { resolveProjectElf } from '../cases/project-elf';
+import { buildVendoredMap } from '../cases/vendor';
 
 const sha256 = (s: string | Buffer): string => createHash('sha256').update(s).digest('hex');
 
@@ -55,7 +55,7 @@ export async function checkSymbolMapDrift(man: RealManifest): Promise<void> {
     complain(`${man.project}: vendored symbol map is UNVERIFIABLE — ${res.reason}`);
     return;
   }
-  const derived = JSON.stringify(symbolMapToJson(await loadSymbolMap(res.elf)));
+  const derived = JSON.stringify(symbolMapToJson(await buildVendoredMap(man, resolveProjectRoot(man), res.elf)));
   const vendored = gunzipSync(readFileSync(vendoredPath)).toString('utf8');
   const drift = symbolMapDrift(vendored, derived);
   if (drift) {
