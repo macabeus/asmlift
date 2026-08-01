@@ -56,12 +56,12 @@ the stderr tag says which (`[declined]` = principled refusal, `[internal error]`
 
 All asmlift settings live in a spec-compliant `tools.asmlift` block:
 
-| Field      | Meaning                                                                                                                                                                                                                                                                                            |
-| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `target`   | asmlift target key — needed when the `platform` maps to several compilers (`n64` → `ido7.1`, `gcc2.7.2kmc` or `gcc2.7.2`)                                                                                                                                                                          |
-| `compiler` | Candidate-compile command template: source file in, relocatable object out. Runs via `sh` with the decomp.yaml's directory as cwd                                                                                                                                                                  |
-| `objdump`  | Host objdump binary for `.o` input (overrides the PATH/env-resolved default: `mips-linux-gnu-objdump` / `powerpc-eabi-objdump`)                                                                                                                                                                    |
-| `elf`      | The project's built ELF, relative to this `decomp.yaml` — the address→symbol source: names from `.symtab`, declaration shapes from the DWARF types-sidecar when the project links one in. Absent ⇒ no symbol map. An unreadable ELF is a loud input error (exit `66`), never a silent map-less run |
+| Field      | Meaning                                                                                                                                                                                                                                                                    |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `target`   | asmlift target key — needed when the `platform` maps to several compilers (`n64` → `ido7.1`, `gcc2.7.2kmc` or `gcc2.7.2`)                                                                                                                                                  |
+| `compiler` | Candidate-compile command template: source file in, relocatable object out. Runs via `sh` with the decomp.yaml's directory as cwd                                                                                                                                          |
+| `objdump`  | Host objdump binary for `.o` input (overrides the PATH/env-resolved default: `mips-linux-gnu-objdump` / `powerpc-eabi-objdump`)                                                                                                                                            |
+| `elf`      | The project's built ELF, relative to this `decomp.yaml` — the address→symbol source. Absent ⇒ no symbol map. An unreadable ELF is a loud input error (exit `66`), never a silent map-less run. What it feeds and how to produce one: [The symbol map](#the-symbol-map-elf) |
 
 Template placeholders: `{{inputPath}}` (candidate source path),
 `{{outputPath}}` (where the object must land), `{{symbol}}` (the function name). An unknown
@@ -83,6 +83,46 @@ Scoring rules, in the project's spirit of never guessing:
   template that injects the project's own headers rejects the probe (C89 duplicate typedef)
   and asmlift then drops both its typedefs and its synthesized declarations for every
   candidate; a template that accepts it keeps both. The verdict is cached per run.
+
+## The symbol map: `elf`
+
+Pointed at the project's built ELF, asmlift stops emitting raw addresses and starts speaking the
+project's own vocabulary. Three independent channels feed the map — each one the ELF happens to
+carry is used, and a missing one degrades to the row above it, never to a guess:
+
+| The ELF carries          | asmlift gains                                                                                                                                                                                                                                 |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `.symtab` (always there) | Names for globals and functions — `gInputState` instead of `*(u16 *)0x03004668`                                                                                                                                                               |
+| DWARF (`-g`)             | Declaration shapes — array/struct/pointer, signedness, `volatile`/`const` — that drive typed spellings like `gCtx.frameCounter`, and the **signature of every compiled function**: callee arity is the fact call-argument recovery needs most |
+| `.debug_macinfo` (`-g3`) | Address-cast macro names (`#define gCounter (*(u16 *)0x03001234)`) — names no symbol table can carry. The macro spelling also matches the **numeric** literal-pool word the original build has, where an extern would emit a relocated one    |
+
+Names are byte-neutral; where a declaration fact could move bytes it enters the ranked
+candidates, and `--score-against`'s byte-diff still picks the winner.
+
+### Producing the ELF
+
+asmlift only cares which sections end up in the one file `elf:` names — how they got there is
+your build's business, so mix and match:
+
+- **Start with what you have.** Most decomp builds already link an ELF; pointing `elf:` at it
+  lights up the `.symtab` channel with zero build changes.
+- **Types and signatures: compile with `-g`**, if your era compiler emits DWARF (agbcc does).
+  Debug sections are non-alloc, so the ROM bytes do not move — keep your project's checksum
+  gate on and let it prove that.
+- **When the compiler can't** (most era MIPS/PPC toolchains): build a _types-sidecar_ — a
+  generated TU that `#include`s every project header, compiled by a **modern** cross-gcc for
+  the same arch/ABI with `-g -fno-eliminate-unused-debug-types` — and merge its debug sections
+  into a derived copy of the ELF with `objcopy --add-section`. Never graft a section name the
+  ELF already owns: readers take the first match, silently shadowing the real compiler's DWARF.
+- **Macro names need `-g3`, spelled `-gdwarf-2 -g3 -gstrict-dwarf`** — that emits one
+  self-contained `.debug_macinfo` with inline strings, the only macro form that survives a
+  section graft (DWARF 5's `.debug_macro` splits across COMDAT groups and leans on
+  `.debug_str`).
+
+A worked example with all three channels is the Klonoa decomp's
+[`asmlift-elf` target](https://github.com/Dream-Atelier/kl-eod-decomp/blob/main/Makefile):
+agbcc `-g` for shapes and signatures, plus a macro-only sidecar graft, sha-verified on every
+build.
 
 ## Using it as a library
 
