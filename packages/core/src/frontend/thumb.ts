@@ -731,6 +731,37 @@ function poolRef(operand: string, dataWords: Map<string, string[]>): PoolRef | n
   return { kind: 'unmodelled', why: `pool word '${w}' is a symbol offset or code label` };
 }
 
+/** Does this function's literal pool name at least one EXTERNAL symbol?
+ *
+ *  agbcc emits a pool word symbolically exactly when the source expression named a linker symbol,
+ *  and numerically when it did not (`*(vu16 *)0x4000130`, an address-cast macro). So within one
+ *  function, a numeric word sitting alongside a symbolic one is numeric *by the source's choice* —
+ *  which is what lets {@link liftThumb} refuse to invent a name for it.
+ *
+ *  The witness is required because that inference only holds for asm that KEPT its symbols. A
+ *  linked-ROM disassembly resolves every relocation to a number, and there "numeric" says nothing
+ *  about the source; vetoing on it would disable the map's naming for the users who need it most.
+ *  A function whose pool names nothing external is therefore left alone (both spellings still
+ *  enumerate, and the differ referees) rather than being read as evidence of anything.
+ *
+ *  Labels DEFINED in this same asm — the jump-table pointer word, a pret-style `_08012358` pool
+ *  label — are not external symbols and never witness: they survive disassembly whether or not
+ *  relocations did. */
+function poolNamesASymbol(dataWords: Map<string, string[]>, blockLabels: Set<string>): boolean {
+  for (const [, words] of dataWords) {
+    for (const raw of words) {
+      const w = raw.trim();
+      if (!/^[A-Za-z_]\w*$/.test(w) || w.startsWith('.L')) {
+        continue;
+      }
+      if (!dataWords.has(w) && !blockLabels.has(w)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 // Recover an agbcc Thumb jump-table dispatch. Given a dispatch block `disp` ending in `mov pc, rV`
 // and its unique bounds predecessor `bounds` ending in `cmp rX,#(N-1); bhi DEF`, verify the exact
 // idiom and read the inline table — else return null (→ the indirect-jump loud-fail fires). The
@@ -839,6 +870,9 @@ export function lift(
   // dispatch block is ELIDED from the CFG. A `mov pc` that is NOT a recognised table falls through
   // to the loud-fail below.
   const blockLabels = new Set(rawBlocks.map((b) => b.label));
+  // Whether THIS asm preserves symbol names in its literal pools — the witness the numeric-pool
+  // naming veto needs (see poolNamesASymbol).
+  const poolNamesSymbols = poolNamesASymbol(dataWords, blockLabels);
   // Any label referenced as a branch target (so we can tell if an elided dispatch block has a SECOND
   // predecessor — a `b disp` from elsewhere — which would dangle after elision; decline if so).
   const branchTargets = new Set<string>();
@@ -1298,7 +1332,16 @@ export function lift(
               // named-global machinery. Only pool-loaded words promote (an address built by
               // arithmetic never reaches here); a promoted `code` symbol carries `code: true`
               // so the structurer spells it `(u32)Name`, not `&Name`.
-              const si = symbols ? lookupSymbol(symbols, pr.value) : null;
+              //
+              // VETOED when this asm's pool names other symbols (poolNamesASymbol): agbcc would
+              // have emitted THIS word symbolically too had the source named it, so promoting it
+              // spells a name the source did not use. That is not merely a fidelity nicety — the
+              // named form measurably loses bytes on the rows where it fires (the true source
+              // reached those addresses through address-cast macros, which no `extern` spelling
+              // reproduces). Nothing is guessed in its place: the word stays the raw constant the
+              // target says it is.
+              const vetoed = poolNamesSymbols;
+              const si = symbols && !vetoed ? lookupSymbol(symbols, pr.value) : null;
               if (si) {
                 const res = mkValue(T.unk(32));
                 irb.ops.push(
@@ -1314,7 +1357,7 @@ export function lift(
               // `gaddr sym + offset` — the `&gSym + K` tree structure.ts already lowers (and,
               // with a struct layout, spells as the named field). Sized symbols only; an
               // unattributed address stays a raw const — nothing guesses.
-              const interior = symbols ? lookupInterior(symbols, pr.value) : null;
+              const interior = symbols && !vetoed ? lookupInterior(symbols, pr.value) : null;
               if (interior) {
                 const g = mkValue(T.unk(32));
                 const k = mkValue(T.unk(32));
