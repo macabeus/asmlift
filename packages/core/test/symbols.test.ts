@@ -11,7 +11,7 @@ import { renderDeclarations } from '../src/declare';
 import type { SymbolRef } from '../src/l3/symbol-refs';
 import { decompile } from '../src/pipeline';
 import { enumerateCandidates, rankBy } from '../src/rank';
-import { type SymbolMap, lookupInterior, lookupSymbol } from '../src/symbols';
+import { type SymbolMap, asIfUndecompiled, lookupInterior, lookupSymbol } from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
 
 const asmOf = (sym: string, body: string) => `${sym}:\n${body}`;
@@ -615,5 +615,84 @@ describe('ranking prefers the named spelling when bytes are equal', () => {
     const cands = enumerateCandidates('f', asmOf('f', body), ARMV4T_AGBCC, { symbols });
     const best = rankBy(cands, 'f', (_s, _sym, c) => ({ score: c.label.includes('raw') ? 1 : 2 })).best;
     expect(best.label).toBe('unsigned/raw-globals');
+  });
+});
+
+describe('the numeric-pool naming VETO (a name the source did not spell)', () => {
+  // agbcc emits a pool word symbolically exactly when the source named a linker symbol. So a
+  // numeric word sitting beside a symbolic one in the SAME function is numeric by the source's
+  // choice, and adopting a map name for it spells something the source never wrote.
+  const MIXED =
+    '\tldr\tr0, .L1\n\tldr\tr0, [r0]\n\tldr\tr1, .L1+4\n\tldr\tr1, [r1]\n\tadd\tr0, r0, r1\n' +
+    '\tbx\tlr\n.L1:\n\t.word\t0x03001234\n\t.word\tgNamed\n';
+
+  test('a numeric word is NOT named when the same pool names a symbol', () => {
+    const symbols = mapOf([[0x03001234, { name: 'gVetoed', kind: 'data' }]]);
+    const src = run('f', MIXED, symbols);
+    expect(src).not.toContain('gVetoed'); // the veto fired
+    expect(src).toContain('50336308'); // the raw literal the target actually says
+    expect(src).toContain('gNamed'); // the SYMBOLIC word still names its global
+  });
+
+  test('the veto also refuses INTERIOR attribution into a sized symbol', () => {
+    const symbols = mapOf([[0x03001230, { name: 'gStruct', kind: 'data', size: 32 }]]);
+    expect(run('f', MIXED, symbols)).not.toContain('gStruct');
+  });
+
+  test('an all-numeric pool still promotes — no witness that this asm kept its symbols', () => {
+    // A linked-ROM disassembly resolves every relocation to a number; reading "numeric" as
+    // "the source did not name it" there would disable the map for the users who need it most.
+    const src = run('f', LOADW, mapOf([[0x03001234, { name: 'gCounter', kind: 'data' }]]));
+    expect(src).toContain('return gCounter;');
+  });
+
+  test('a label defined in this same asm never witnesses — it is not an external symbol', () => {
+    // The jump-table pointer word `.word .L2` and a pret-style local pool label survive
+    // disassembly whether or not relocations did, so neither proves symbols were kept.
+    const body =
+      '\tldr\tr0, .L1\n\tldr\tr0, [r0]\n\tbx\tlr\n.L1:\n\t.word\t0x03001234\n\t.word\t_08012358\n' +
+      '_08012358:\n\t.word\t0x00000000\n';
+    expect(run('f', body, mapOf([[0x03001234, { name: 'gCounter', kind: 'data' }]]))).toContain('gCounter');
+  });
+});
+
+describe('asIfUndecompiled — the map a user actually has', () => {
+  test("strips the row's own DEFINITION-derived facts but keeps its symtab name", () => {
+    const map: SymbolMap = new Map([
+      [0x08001000, [{ name: 'TargetFn', kind: 'code', declared: true } as never]],
+      [0x03001234, [{ name: 'gGlobal', kind: 'data', declared: true, shape: 'scalar', size: 2 } as never]],
+    ]);
+    const filtered = asIfUndecompiled(map, 'TargetFn');
+    const own = filtered.get(0x08001000)![0];
+    expect(own.name).toBe('TargetFn'); // an INCLUDE_ASM function still has a .symtab entry
+    expect(own.declared).toBeUndefined(); // …but no DWARF DIE describes it
+    expect(filtered.get(0x03001234)![0]).toEqual(map.get(0x03001234)![0]); // globals untouched
+  });
+
+  test('callees keep everything — those facts transfer', () => {
+    const map: SymbolMap = new Map([[0x08002000, [{ name: 'Callee', kind: 'code', declared: true } as never]]]);
+    expect(asIfUndecompiled(map, 'TargetFn').get(0x08002000)![0].declared).toBe(true);
+  });
+
+  test('a map with nothing to strip is returned unchanged (identity)', () => {
+    const map = mapOf([[0x03001234, { name: 'gCounter', kind: 'data' }]]);
+    expect(asIfUndecompiled(map, 'TargetFn')).toBe(map);
+  });
+
+  test('aliases keep their order — [0] stays the canonical pick', () => {
+    const map: SymbolMap = new Map([
+      [
+        0x08001000,
+        [
+          { name: 'TargetFn', kind: 'code', declared: true },
+          { name: 'TargetFnAlias', kind: 'code' },
+        ] as never,
+      ],
+    ]);
+    expect(
+      asIfUndecompiled(map, 'TargetFn')
+        .get(0x08001000)!
+        .map((i) => i.name),
+    ).toEqual(['TargetFn', 'TargetFnAlias']);
   });
 });

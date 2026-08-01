@@ -254,6 +254,64 @@ export function lookupInterior(map: SymbolMap, value: number): { info: SymbolInf
   return null;
 }
 
+/** The `SymbolInfo` keys a project's DWARF can only carry because the symbol's DEFINITION was
+ *  compiled from C. Everything else in the map survives a function that is still `INCLUDE_ASM`:
+ *  its `.symtab` entry exists (the asm defines the label), and its globals are typed by the OTHER
+ *  translation units that declare them. Listed here, once, so {@link asIfUndecompiled} and any
+ *  later definition-derived fact (a signature, a local's type, a register location) stay in sync. */
+const DEFINITION_DERIVED_KEYS = ['declared'] as const satisfies readonly (keyof SymbolInfo)[];
+
+/** The map a user actually has while decompiling `fn` — i.e. with `fn` still an `INCLUDE_ASM`
+ *  stub in their project.
+ *
+ *  Every benchmark row is a function someone ALREADY decompiled, so the project ELF carries
+ *  facts about it that exist only *because* the work is done. Scoring against those facts
+ *  measures the harness, not the tool: it flatters any feature that reads them and transfers
+ *  nothing to the user, who is decompiling the one function whose definition is absent. This
+ *  rebuilds the map as that user's ELF would give it.
+ *
+ *  What it strips is the row's own DEFINITION-derived facts ({@link DEFINITION_DERIVED_KEYS}),
+ *  NOT its name: an `INCLUDE_ASM` function still has a `.symtab` entry, so dropping the symbol
+ *  outright would understate what a user has and make the map look worse than it is. Callee
+ *  signatures, globals and struct layouts all stay — those are the transferable facts, and they
+ *  are the point.
+ *
+ *  Address identity is preserved (aliases keep their order, `[0]` stays canonical) so a filtered
+ *  map is a drop-in for the unfiltered one. */
+export function asIfUndecompiled(map: SymbolMap, fn: string): SymbolMap {
+  const leaks = (info: SymbolInfo): boolean =>
+    info.kind === 'code' && info.name === fn && DEFINITION_DERIVED_KEYS.some((k) => info[k] !== undefined);
+  // Return the SAME map when the row's own symbol carries no definition-derived fact — the common
+  // case today, and it keeps the filter free to apply unconditionally on every row of a run.
+  let any = false;
+  for (const infos of map.values()) {
+    if (infos.some(leaks)) {
+      any = true;
+      break;
+    }
+  }
+  if (!any) {
+    return map;
+  }
+  const out: SymbolMap = new Map();
+  for (const [addr, infos] of map) {
+    out.set(
+      addr,
+      infos.map((info) => {
+        if (!leaks(info)) {
+          return info;
+        }
+        const stripped = { ...info };
+        for (const k of DEFINITION_DERIVED_KEYS) {
+          delete stripped[k];
+        }
+        return stripped;
+      }),
+    );
+  }
+  return out;
+}
+
 /** NAME-keyed view over every symbol in the map — what the structurer consumes (it sees gaddr
  *  symbol names, not addresses). Aliases at one address each appear under their own name. */
 export function symbolsByName(map: SymbolMap): Map<string, SymbolInfo> {
