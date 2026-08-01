@@ -65,7 +65,7 @@
   },
   "StringAppend": {
     "tu": "StringAppend.i.gz",
-    "ctx": "ctx-9801ce0c65ce.i.gz"
+    "ctx": "ctx-b98da8e28d15.i.gz"
   },
   "IsStringLengthAtLeast": {
     "tu": "IsStringLengthAtLeast.i.gz",
@@ -101,7 +101,7 @@
   },
   "PutFirstMemBlockHeader": {
     "tu": "PutFirstMemBlockHeader.i.gz",
-    "ctx": "ctx-92d4b72c07b6.i.gz"
+    "ctx": "ctx-fbaccdeef3a1.i.gz"
   },
   "StopScript": {
     "tu": "StopScript.i.gz",
@@ -125,6 +125,6 @@
   },
   "GiveBerryPowder": {
     "tu": "GiveBerryPowder.i.gz",
-    "ctx": "ctx-264361caa05e.i.gz"
+    "ctx": "ctx-b98da8e28d15.i.gz"
   }
 }

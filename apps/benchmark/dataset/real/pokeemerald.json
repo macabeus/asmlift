@@ -220,7 +220,7 @@
         "branch"
       ],
       "funcC": "u8 *StringAppend(u8 *dest, const u8 *src)\n{\n    while (*dest != EOS)\n        dest++;\n\n    return StringCopy(dest, src);\n}",
-      "prependC": "#include \"constants/characters.h\"\nu8 *StringCopy(u8 *dest, const u8 *src);",
+      "prependC": "#include \"constants/characters.h\"",
       "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/string_util.c#L88-L94"
     },
@@ -333,7 +333,7 @@
         "call"
       ],
       "funcC": "void PutFirstMemBlockHeader(void *block, u32 size)\n{\n    PutMemBlockHeader(block, (struct MemBlock *)block, (struct MemBlock *)block, size - sizeof(struct MemBlock));\n}",
-      "prependC": "#define MALLOC_SYSTEM_ID 0xA3A3\nstruct MemBlock {\n    bool16 flag;\n    u16 magic;\n    u32 size;\n    struct MemBlock *prev;\n    struct MemBlock *next;\n    u8 data[0];\n};\nvoid PutMemBlockHeader(void *block, struct MemBlock *prev, struct MemBlock *next, u32 size);",
+      "prependC": "#define MALLOC_SYSTEM_ID 0xA3A3\nstruct MemBlock {\n    bool16 flag;\n    u16 magic;\n    u32 size;\n    struct MemBlock *prev;\n    struct MemBlock *next;\n    u8 data[0];\n};",
       "proto": {
         "PutFirstMemBlockHeader": {
           "returnsVoid": true
@@ -418,7 +418,7 @@
         "global"
       ],
       "funcC": "bool8 GiveBerryPowder(u32 amountToAdd)\n{\n    u32 *powder = &gSaveBlock2Ptr->berryCrush.berryPowderAmount;\n    u32 amount = DecryptBerryPowder(powder) + amountToAdd;\n    if (amount > MAX_BERRY_POWDER)\n    {\n        SetBerryPowder(powder, MAX_BERRY_POWDER);\n        return FALSE;\n    }\n    else\n    {\n        SetBerryPowder(powder, amount);\n        return TRUE;\n    }\n}",
-      "prependC": "#define MAX_BERRY_POWDER 99999\nu32 DecryptBerryPowder(u32 *powder);\nvoid SetBerryPowder(u32 *powder, u32 amount);",
+      "prependC": "#define MAX_BERRY_POWDER 99999",
       "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/berry_powder.c#L162-L176"
     }

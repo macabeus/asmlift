@@ -265,7 +265,6 @@
         "pointer"
       ],
       "funcC": "void *DecompressAlloc(void *src) {\n    void *heapPtr;\n\n    heapPtr = thunk_HeapAlloc(((u32 *)src)[0] & 0x7FFFFFFF, 0);\n    Decompress(heapPtr, src);\n    return heapPtr;\n}",
-      "prependC": "void *thunk_HeapAlloc(u32, u32);\nvoid Decompress(void *, void *);",
       "m2cCtx": true,
       "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/code_3.c#L142-L148"
     },
@@ -279,7 +278,6 @@
         "mmio"
       ],
       "funcC": "void WritePaletteColor(void) {\n    u8 **gp = &gStreamPtr;\n    u16 color = ReadUnalignedU16(*gp + 3);\n    u8 *ptr = *gp;\n    *(u16 *)(BG_PAL_RAM + ptr[2] * 2) = color;\n    *gp = ptr + 5;\n}",
-      "prependC": "u32 ReadUnalignedU16(u8 *);",
       "proto": {
         "WritePaletteColor": {
           "returnsVoid": true
@@ -306,7 +304,6 @@
         "branch"
       ],
       "funcC": "void FreeAllDecompBuffers(void) {\n    u32 *decompBuffers = (u32 *)gDecompBufferCtrl;\n\n    thunk_HeapFree(decompBuffers[1] - 4);\n    thunk_HeapFree(decompBuffers[0] - 4);\n    thunk_HeapFree(decompBuffers[3] - 4);\n    thunk_HeapFree(decompBuffers[2] - 4);\n    thunk_HeapFree(decompBuffers[5] - 4);\n    thunk_HeapFree(decompBuffers[4] - 4);\n\n    if (gCollisionMapPtr != 0) {\n        thunk_HeapFree(gCollisionMapPtr - 4);\n        gCollisionMapPtr = 0;\n    }\n\n    m4aSongNumStart(0x8D);\n    m4aSongNumStart(0x8E);\n    m4aSongNumStart(0x8F);\n    m4aSongNumStart(0x90);\n}",
-      "prependC": "void thunk_HeapFree(u32);\nvoid m4aSongNumStart(u16);",
       "proto": {
         "FreeAllDecompBuffers": {
           "returnsVoid": true
@@ -357,13 +354,13 @@
         "bitwise"
       ],
       "funcC": "void RollRandomLevelVariant(void) {\n    u8 *state = gGameFlags;\n    u8 difficulty = state[0x0C];\n    u32 difficultyIndex = (u8)(difficulty - 1);\n    u32 rng = thunk_sub_080002A0();\n    u8 *levelState = gControlBlock;\n    u32 parity = difficultyIndex & 1;\n    u32 variant = sub_0805193C((u8)rng, 5 - difficultyIndex);\n    levelState[0x0E] = parity + variant + 1;\n}",
-      "prependC": "u32 thunk_sub_080002A0(void);\nu32 sub_0805193C(u8, u32);",
       "proto": {
         "RollRandomLevelVariant": {
           "returnsVoid": true
         }
       },
-      "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/code_3.c#L80-L89"
+      "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/code_3.c#L80-L89",
+      "prependC": "u32 thunk_sub_080002A0(void);\nu32 sub_0805193C(u8, u32);"
     },
     {
       "sym": "TransformSingleEntityToScreen",
