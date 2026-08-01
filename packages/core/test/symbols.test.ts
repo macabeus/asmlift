@@ -10,6 +10,7 @@ import { describe, expect, test } from 'vitest';
 import { renderDeclarations } from '../src/declare';
 import type { SymbolRef } from '../src/l3/symbol-refs';
 import { decompile } from '../src/pipeline';
+import { enumerateCandidates, rankBy } from '../src/rank';
 import { type SymbolMap, lookupInterior, lookupSymbol } from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
 
@@ -591,5 +592,28 @@ describe('a POINTER global with a known POINTEE spells the interior as gPtr->mem
     // …and the same for a STRUCT global's own layout
     const bad = { name: 'gS', kind: 'data', shape: 'struct', structName: 'S', size: 4, layout: 42 };
     expect(() => run('f', LOADW, mapOf([[0x03001234, bad]]))).not.toThrow();
+  });
+});
+
+describe('ranking prefers the named spelling when bytes are equal', () => {
+  // The map spelling and its `/raw-globals` sibling often compile identically. Which one the
+  // user is shown must not depend on enumeration order surviving a stable sort, so rankBy
+  // breaks a score tie on enumeration order and enumerateCandidates puts the named one first.
+  test('an exact tie is won by the candidate that names the global', () => {
+    const body = '\tldr\tr0, .L1\n\tldr\tr0, [r0]\n\tbx\tlr\n.L1:\n\t.word\t0x03001234\n';
+    const symbols = mapOf([[0x03001234, { name: 'gCounter', kind: 'data' }]]);
+    const cands = enumerateCandidates('f', asmOf('f', body), ARMV4T_AGBCC, { symbols });
+    expect(cands.map((c) => c.label)).toEqual(['unsigned', 'unsigned/raw-globals']);
+    const best = rankBy(cands, 'f', () => ({ score: 7 })).best; // every candidate scores the same
+    expect(best.label).toBe('unsigned');
+    expect(best.source).toContain('return gCounter;');
+  });
+
+  test('a strictly better raw spelling still wins — the tie-break never overrides bytes', () => {
+    const body = '\tldr\tr0, .L1\n\tldr\tr0, [r0]\n\tbx\tlr\n.L1:\n\t.word\t0x03001234\n';
+    const symbols = mapOf([[0x03001234, { name: 'gCounter', kind: 'data' }]]);
+    const cands = enumerateCandidates('f', asmOf('f', body), ARMV4T_AGBCC, { symbols });
+    const best = rankBy(cands, 'f', (_s, _sym, c) => ({ score: c.label.includes('raw') ? 1 : 2 })).best;
+    expect(best.label).toBe('unsigned/raw-globals');
   });
 });

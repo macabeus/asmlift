@@ -304,15 +304,15 @@ export function rankBy<S extends { score: number }>(
   symbol: string,
   scoreFn: (source: string, symbol: string, candidate: Candidate) => S,
 ): RankedResult<S> {
-  const results: Scored<S>[] = [];
+  const results: (Scored<S> & { order: number })[] = [];
   let lastScoreErr: unknown = null; // a candidate's C that failed to compile; only fatal if ALL do
-  for (const c of candidates) {
+  candidates.forEach((c, order) => {
     try {
-      results.push({ ...c, score: scoreFn(c.source, symbol, c) });
+      results.push({ ...c, order, score: scoreFn(c.source, symbol, c) });
     } catch (e) {
       lastScoreErr = e;
     }
-  }
+  });
   if (results.length === 0) {
     const why =
       lastScoreErr instanceof Error
@@ -320,6 +320,11 @@ export function rankBy<S extends { score: number }>(
         : String(lastScoreErr ?? 'no candidate produced');
     throw new Error(`no scorable candidate for '${symbol}': ${why}`, { cause: lastScoreErr });
   }
-  results.sort((a, b) => a.score.score - b.score.score);
-  return { best: results[0], candidates: results };
+  // Score first; ENUMERATION ORDER breaks a tie. That order is meaningful, not incidental:
+  // enumerateCandidates emits the symbol-map spellings before their `/raw-globals` siblings, so
+  // when both compile to the same bytes the named one wins and the reader gets `gCounter` rather
+  // than a bare address. Spelled as an explicit comparator because relying on Array#sort's
+  // stability would make the preference an accident of two unrelated decisions.
+  results.sort((a, b) => a.score.score - b.score.score || a.order - b.order);
+  return { best: results[0], candidates: results.map(({ order: _order, ...c }) => c) };
 }
