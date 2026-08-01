@@ -11,7 +11,14 @@ import { renderDeclarations } from '../src/declare';
 import type { SymbolRef } from '../src/l3/symbol-refs';
 import { decompile } from '../src/pipeline';
 import { enumerateCandidates, rankBy } from '../src/rank';
-import { type SymbolMap, asIfUndecompiled, lookupInterior, lookupSymbol } from '../src/symbols';
+import {
+  type SymbolInfo,
+  type SymbolMap,
+  asIfUndecompiled,
+  lookupInterior,
+  lookupSymbol,
+  symbolsByName,
+} from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
 
 const asmOf = (sym: string, body: string) => `${sym}:\n${body}`;
@@ -694,5 +701,43 @@ describe('asIfUndecompiled — the map a user actually has', () => {
         .get(0x08001000)!
         .map((i) => i.name),
     ).toEqual(['TargetFn', 'TargetFnAlias']);
+  });
+});
+
+describe('symbolsByName under a name collision', () => {
+  const at = (addr: number, info: object): [number, SymbolInfo[]] => [addr, [info as SymbolInfo]];
+
+  test('identical entries at many addresses collapse silently — no conflict', () => {
+    // `InitSprite` sits at 16 sa3 addresses as 16 identical name-only entries.
+    const map: SymbolMap = new Map([
+      at(0x08001000, { name: 'InitSprite', kind: 'code' }),
+      at(0x08002000, { name: 'InitSprite', kind: 'code' }),
+    ]);
+    expect(symbolsByName(map).get('InitSprite')).toEqual({ name: 'InitSprite', kind: 'code' });
+  });
+
+  test('DISAGREEING entries degrade to name-only — one address’s shape is never applied to another’s', () => {
+    const map: SymbolMap = new Map([
+      at(0x03001000, { name: 'sMenu', kind: 'data', shape: 'struct', structName: 'A', size: 8 }),
+      at(0x03002000, { name: 'sMenu', kind: 'data', shape: 'struct', structName: 'B', size: 64 }),
+    ]);
+    expect(symbolsByName(map).get('sMenu')).toEqual({ name: 'sMenu', kind: 'data' });
+  });
+
+  test('the name SURVIVES the conflict — declaration synthesis still has something to declare', () => {
+    const map: SymbolMap = new Map([
+      at(0x03001000, { name: 'g', kind: 'data', shape: 'scalar', size: 2 }),
+      at(0x03002000, { name: 'g', kind: 'data', shape: 'scalar', size: 4 }),
+    ]);
+    expect(symbolsByName(map).has('g')).toBe(true);
+  });
+
+  test('a conflict on one name leaves every other name untouched', () => {
+    const map: SymbolMap = new Map([
+      at(0x03001000, { name: 'g', kind: 'data', shape: 'scalar', size: 2 }),
+      at(0x03002000, { name: 'g', kind: 'data', shape: 'scalar', size: 4 }),
+      at(0x03003000, { name: 'gOther', kind: 'data', shape: 'scalar', size: 1 }),
+    ]);
+    expect(symbolsByName(map).get('gOther')).toMatchObject({ shape: 'scalar', size: 1 });
   });
 });

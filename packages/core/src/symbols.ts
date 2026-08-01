@@ -21,9 +21,18 @@ export interface SymbolStructField {
   /** the field type's base-type signedness (absent = not a base type / unknown) — drives the
    *  u8-vs-s8 spelling of a SYNTHESIZED field decl (an s8 read is ldrb+lsl+asr, u8 is ldrb) */
   signed?: boolean;
-  /** the field's resolved type is a pointer — synthesis must spell it `void *`, or relational
+  /** the field's resolved type is a pointer — synthesis must spell it as one, or relational
    *  compares of the loaded value flip signedness (s32 `blt` vs the pointer truth's `bcc`) */
   pointer?: boolean;
+  /** POINTER field only: the byte width of what it points AT, when that is a base type
+   *  (`u16 *p` → 2). The cell is 4 bytes whatever it addresses; this is the OTHER end, and it is
+   *  byte-load-bearing because POINTER ARITHMETIC SCALES BY IT — `p - 4` through a `u16 *` and
+   *  through a `void *` address different memory. Absent ⇒ the target is not a base type
+   *  (`void *`, `struct S *`) and `void *` remains the honest spelling. */
+  pointeeSize?: number;
+  /** POINTER field only: signedness of the pointed-at base type, on the same terms as
+   *  {@link pointeeSize} — it types the LOAD through the pointer (`s8` is ldrsb, `u8` ldrb). */
+  pointeeSigned?: boolean;
   /** the field's type chain is volatile-qualified (the `vu16 field;` MMIO idiom) — a decl that
    *  drops it lets the compiler fold repeated reads (wrong bytes AND wrong semantics) */
   volatile?: boolean;
@@ -194,7 +203,12 @@ export function symbolFieldType(f: DeclaredField): IrType {
       : T.array(T.u(8), f.size);
   }
   if (f.pointer && f.size === 4) {
-    return T.ptr(T.void());
+    // The pointee width is byte-load-bearing: arithmetic on the loaded pointer scales by it, so
+    // `p - 4` through the header's `u16 *` and through a guessed `void *` reach different bytes.
+    // Only a base-type target is spelled; anything else keeps `void *`, which is address-identical
+    // for any object pointer and never derefs.
+    const scalarPointee = f.pointeeSize === 1 || f.pointeeSize === 2 || f.pointeeSize === 4;
+    return T.ptr(scalarPointee ? T.int(f.pointeeSize! * 8, f.pointeeSigned ?? false) : T.void());
   }
   if (f.size === 1 || f.size === 2 || f.size === 4) {
     return T.int(f.size * 8, f.signed ?? (f.size === 4 ? ENUM_IS_SIGNED : false));
@@ -312,14 +326,45 @@ export function asIfUndecompiled(map: SymbolMap, fn: string): SymbolMap {
   return out;
 }
 
+/** Every fact but the name, canonically ordered — the equality a name collision is judged by. */
+function factsOf(info: SymbolInfo): string {
+  return JSON.stringify(
+    Object.keys(info)
+      .filter((k) => k !== 'name')
+      .sort()
+      .map((k) => [k, info[k as keyof SymbolInfo]]),
+  );
+}
+
 /** NAME-keyed view over every symbol in the map — what the structurer consumes (it sees gaddr
- *  symbol names, not addresses). Aliases at one address each appear under their own name. */
+ *  symbol names, not addresses). Aliases at one address each appear under their own name.
+ *
+ *  One name can sit at SEVERAL addresses in a real project (file-static `sMenu` in two
+ *  translation units, a `.symtab` full of same-named locals). Where those entries agree on their
+ *  facts the collision is harmless — `InitSprite` at 16 sa3 addresses is 16 identical name-only
+ *  entries. Where they DISAGREE, silently keeping whichever the map iterated last would apply one
+ *  address's declaration shape to another address's global: the same layout, the wrong struct.
+ *
+ *  So a disagreeing name degrades to NAME-ONLY rather than picking. The name survives (dropping it
+ *  outright would leave the reference undeclarable in the self-declared scoring world, turning a
+ *  spelling question into a compile failure); only the shape facts, which are what could be wrong,
+ *  are withheld — the honest cast spellings take over. `kind` is kept: it never disagrees in the
+ *  vendored maps, and it is settled address-side by `lookupSymbol` before a name is ever used. */
 export function symbolsByName(map: SymbolMap): Map<string, SymbolInfo> {
   const byName = new Map<string, SymbolInfo>();
+  const conflicted = new Set<string>();
   for (const infos of map.values()) {
     for (const info of infos) {
-      byName.set(info.name, info);
+      const prev = byName.get(info.name);
+      if (prev === undefined) {
+        byName.set(info.name, info);
+      } else if (factsOf(prev) !== factsOf(info)) {
+        conflicted.add(info.name);
+      }
     }
+  }
+  for (const name of conflicted) {
+    byName.set(name, { name, kind: byName.get(name)!.kind });
   }
   return byName;
 }

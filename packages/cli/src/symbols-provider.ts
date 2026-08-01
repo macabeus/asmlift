@@ -61,6 +61,8 @@ interface DwarfMember {
   size: number | null;
   signed?: boolean | null;
   pointer?: true;
+  pointeeSize?: number;
+  pointeeSigned?: boolean;
   volatile?: true;
   const?: true;
   bitWidth?: number;
@@ -167,6 +169,11 @@ export function layoutOf(
         size: m.size,
         ...(typeof m.signed === 'boolean' ? { signed: m.signed } : {}),
         ...(m.pointer === true ? { pointer: true } : {}),
+        // POINTER member: what it points AT, when the DWARF resolves that to a base type.
+        // Pointer arithmetic scales by this width, so dropping it declares `void *` and makes
+        // `p - 4` address different bytes than the header's `u16 *` does.
+        ...(typeof m.pointeeSize === 'number' ? { pointeeSize: m.pointeeSize } : {}),
+        ...(typeof m.pointeeSigned === 'boolean' ? { pointeeSigned: m.pointeeSigned } : {}),
         ...(m.volatile === true ? { volatile: true } : {}),
         ...(m.const === true ? { const: true } : {}),
         ...(typeof m.elemSize === 'number' ? { elemSize: m.elemSize } : {}),
