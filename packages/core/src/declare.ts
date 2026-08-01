@@ -107,6 +107,13 @@ export function renderDeclarations(refs: SymbolRef[]): string {
   const lines: string[] = [];
   const declaredTags = new Set<string>();
   for (const { name, info, access } of refs) {
+    // An address-cast macro declares itself: the header's own body, verbatim. It must NOT become
+    // an `extern` — that is the whole point of the fact (an extern emits a relocated pool word
+    // where the macro emits the numeric one the target shows).
+    if (info.macroBody !== undefined) {
+      lines.push(`#define ${name} ${info.macroBody}`);
+      continue;
+    }
     if (info.kind === 'code') {
       // value-referenced code symbol ((u32)Func): any prototype makes the name visible, and
       // the address is arity-independent. Call targets never reach this module (core excludes
@@ -199,5 +206,20 @@ export function renderDeclarations(refs: SymbolRef[]): string {
       }
     }
   }
+  return lines.length ? lines.join('\n') + '\n' : '';
+}
+
+/** The object-like `#define`s out of a rendered declaration block.
+ *
+ *  Address-cast macro defines are the one part of a synthesized block that must survive into the
+ *  HEADERS world too. Everything else there is owned by the injected headers (a duplicate typedef
+ *  or struct definition is a C89 hard error), but a duplicate `#define` with an identical body is
+ *  legal — and a PREPROCESSED project context has no macros left at all, so dropping these turns a
+ *  macro-named candidate into an `undeclared identifier` rather than a spelling choice. */
+export function macroDefinesOf(declarations: string | undefined): string {
+  if (!declarations) {
+    return '';
+  }
+  const lines = declarations.split('\n').filter((l) => l.startsWith('#define '));
   return lines.length ? lines.join('\n') + '\n' : '';
 }

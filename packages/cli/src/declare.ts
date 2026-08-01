@@ -3,4 +3,4 @@
 // declarations the cli's Node/objdiff scorer does; this module only preserves the cli's
 // historical import path. No behavior of its own — the A/B matching suite
 // (test/matching/self-declared-ab.test.ts) pins the compiled bytes either way.
-export { renderDeclarations } from '@asmlift/core/declare';
+export { macroDefinesOf, renderDeclarations } from '@asmlift/core/declare';

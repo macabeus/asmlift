@@ -6,6 +6,7 @@
 // asmlift's canonical flags for the ISA (not the project's exact flags): the target is our
 // deterministic re-compile of real game code, not the shipped ROM object.
 import { type MatchScore, scoreObjects } from '@asmlift/cli/score';
+import { macroDefinesOf } from '@asmlift/core/declare';
 import { C_TYPEDEFS } from '@asmlift/core/target';
 
 import type { BuiltTarget, ToolchainId } from '../toolchains';
@@ -86,11 +87,16 @@ export function scoringPreludes(prependC: string, ctxI: string, sym: string): st
  *  symmetric. Throws if none compile. */
 export function makeRealCompile(toolchain: ToolchainId, prependC: string, ctxI: string) {
   const rc = realCompilerFor(toolchain);
-  return (candC: string, sym: string): string => {
+  return (candC: string, sym: string, _backendId?: string, declarations?: string): string => {
+    // The candidate's ADDRESS-CAST MACRO defines ride every rung. Every rung here is a headers
+    // world — rungs 1/2 are asmlift's own prelude, rung 3 the project's PREPROCESSED context —
+    // and none of them can contain a macro, so a macro-named candidate is `undeclared identifier`
+    // without this. The rest of the synthesized block stays dropped: the context owns it.
+    const macros = macroDefinesOf(declarations);
     let lastErr = '';
     for (const prelude of scoringPreludes(prependC, ctxI, sym)) {
       try {
-        return rc.compileCandidate(`${prelude}${candC}\n`, sym);
+        return rc.compileCandidate(`${prelude}${macros}${candC}\n`, sym);
       } catch (e) {
         lastErr = (e as Error).message;
       }

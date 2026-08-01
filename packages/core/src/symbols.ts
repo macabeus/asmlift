@@ -106,6 +106,18 @@ export interface SymbolInfo {
   /** the pointee facts for `shape:'pointer'` — enables the `gPtr->field` interior spelling
    *  (absent ⇒ the target is not a struct, or the sidecar named no layout for it) */
   pointee?: SymbolPointee;
+  /** This name is an ADDRESS-CAST MACRO, and this is its body verbatim from the project header
+   *  (`(*(u32 *)0x03005290)`). Some projects name a fixed RAM cell that way instead of declaring
+   *  an `extern` — and the two are not interchangeable in the bytes: an `extern` makes the
+   *  compiler emit a RELOCATED pool word (`.word gSym`), while the macro expands to a literal
+   *  address and emits a NUMERIC one (`.word 0x3005290`). Matching a target that shows the
+   *  numeric word therefore requires the macro spelling, not merely a name.
+   *
+   *  Everything else about it is already the global machinery: the macro expands to an lvalue, so
+   *  `gName`, `gName = v` and `&gName` all mean what they mean for an `extern`. Only the
+   *  DECLARATION differs — `#define name body` instead of `extern T name;` — which is why the
+   *  body is carried rather than reconstructed. */
+  macroBody?: string;
 }
 
 /** address → symbols at that address; `[0]` is the provider's canonical pick. */
