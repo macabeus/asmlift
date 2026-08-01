@@ -24,6 +24,7 @@
 // in-process — the debugging path, and also HOW the shard children themselves run (the parent
 // spawns `run --serial --shard i/N`, which writes `<tier>.part<i>.json` for the stitcher).
 import type { FunctionResult } from '@asmlift/bench-schema';
+import { macroDefinesUsedBy } from '@asmlift/core/macros';
 import { copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { cpus } from 'node:os';
 import { join } from 'node:path';
@@ -184,14 +185,18 @@ switch (command) {
         const prependC = man.functions.find((f) => f.sym === c.sym)?.prependC ?? '';
         const source = publishedAsmliftSource(rowId);
         const ladder = scoringPreludes(prependC, ctxI, c.sym);
+        // Address-cast macro defines the published source NAMES. Every rung needs them (the
+        // scoring compile prepends them too), and the reproduction context must carry them or
+        // the published script cannot build the source the benchmark published.
+        const macros = source && man.symbols ? macroDefinesUsedBy(man.symbols, source) : '';
         // Only a SCORED row's source pins a rung. declined/noncompile/failed rows have no source
         // that compiles anywhere (a marker stub, an error string), so replaying would just burn
         // three compiles to land on the richest rung — take it directly.
         const picked = source
-          ? resolveScoringPrelude(c.toolchain.id, prependC, ctxI, c.sym, source)
+          ? resolveScoringPrelude(c.toolchain.id, prependC, ctxI, c.sym, source, macros)
           : { prelude: ladder[ladder.length - 1], rung: ladder.length };
         ctxRung = picked.rung;
-        ctxFile = materializeScoringContext(picked.prelude, out);
+        ctxFile = materializeScoringContext(picked.prelude + macros, out);
       }
     }
     writeScoreConfig(c.toolchain.id, out, elf, ctxFile);

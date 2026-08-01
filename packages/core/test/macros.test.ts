@@ -4,7 +4,7 @@
 // the plausible-but-wrong class this project exists to avoid).
 import { describe, expect, test } from 'vitest';
 
-import { addressCastMacros } from '../src/macros';
+import { addressCastMacros, macroDefinesUsedBy } from '../src/macros';
 
 const one = (text: string) => [...addressCastMacros(text).values()];
 
@@ -54,5 +54,38 @@ describe('addressCastMacros', () => {
   test('a redefinition of the SAME name at the same address is not a collision', () => {
     const text = '#define g (*(u16 *)0x03001234)\n#define g (*(u16 *)0x03001234)\n';
     expect(one(text)).toHaveLength(1);
+  });
+});
+
+describe('macroDefinesUsedBy — a reproduction must carry what the published source names', () => {
+  const map = new Map([
+    [0x03005290, [{ name: 'gCollisionMapPtr', macroBody: '(*(u32 *)0x03005290)' }]],
+    [0x03007ff8, [{ name: 'gIMEAcknowledge', macroBody: '(*(u16 *)0x03007FF8)' }]],
+    [0x03001234, [{ name: 'gPlainExtern' }]],
+  ]);
+
+  test('emits a define for each macro the source names, and only those', () => {
+    expect(macroDefinesUsedBy(map, 'void f(void) { gCollisionMapPtr = 0; }')).toBe(
+      '#define gCollisionMapPtr (*(u32 *)0x03005290)\n',
+    );
+  });
+
+  test('name-sorted, so the materialized context is byte-stable', () => {
+    const src = 'gIMEAcknowledge = gCollisionMapPtr;';
+    expect(macroDefinesUsedBy(map, src)).toBe(
+      '#define gCollisionMapPtr (*(u32 *)0x03005290)\n#define gIMEAcknowledge (*(u16 *)0x03007FF8)\n',
+    );
+  });
+
+  test('a non-macro symbol contributes nothing — it is declared, not defined', () => {
+    expect(macroDefinesUsedBy(map, 'x = gPlainExtern;')).toBe('');
+  });
+
+  test('matches on word boundaries — a longer identifier is not a use', () => {
+    expect(macroDefinesUsedBy(map, 'x = gCollisionMapPtrOther;')).toBe('');
+  });
+
+  test('a source naming nothing mapped yields an empty context addition', () => {
+    expect(macroDefinesUsedBy(map, 'return 0;')).toBe('');
   });
 });

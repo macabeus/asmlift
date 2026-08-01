@@ -118,12 +118,15 @@ export function resolveScoringPrelude(
   ctxI: string,
   sym: string,
   candC: string,
+  /** the candidate's address-cast macro defines — every rung needs them (see makeRealCompile),
+   *  and replaying the ladder WITHOUT them would fail every rung and pick the wrong one */
+  macros = '',
 ): { prelude: string; rung: number } {
   const rc = realCompilerFor(toolchain);
   const preludes = scoringPreludes(prependC, ctxI, sym);
   for (const [i, prelude] of preludes.entries()) {
     try {
-      rc.compileCandidate(`${prelude}${candC}\n`, sym);
+      rc.compileCandidate(`${prelude}${macros}${candC}\n`, sym);
       return { prelude, rung: i + 1 };
     } catch {
       // next rung

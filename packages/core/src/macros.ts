@@ -89,3 +89,32 @@ export function addressCastMacros(cppOutput: string): Map<number, AddressMacro> 
   }
   return byAddress;
 }
+
+/**
+ * The `#define` lines for every address-cast macro in `symbols` that `source` actually names.
+ *
+ * A published source that spells `gCollisionMapPtr` only compiles where that macro is defined —
+ * and a REPRODUCTION of it must therefore carry the definition, or the script the benchmark
+ * publishes cannot build the very source it publishes. Selected by the names the source uses
+ * rather than by the whole map, so a reproduction context stays the size of what it needs.
+ *
+ * Name-sorted and deduplicated: the materialized context must be byte-stable across machines.
+ */
+export function macroDefinesUsedBy(
+  symbols: Map<number, { name: string; macroBody?: string }[]>,
+  source: string,
+): string {
+  const used = new Map<string, string>();
+  for (const infos of symbols.values()) {
+    for (const info of infos) {
+      if (info.macroBody === undefined || used.has(info.name)) {
+        continue;
+      }
+      if (new RegExp(`\\b${info.name}\\b`).test(source)) {
+        used.set(info.name, info.macroBody);
+      }
+    }
+  }
+  const names = [...used.keys()].sort();
+  return names.length ? names.map((n) => `#define ${n} ${used.get(n)}`).join('\n') + '\n' : '';
+}
