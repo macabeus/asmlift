@@ -77,9 +77,34 @@ export interface SymbolPointee {
   const?: boolean;
 }
 
+/** One declared type in a signature — width, signedness, pointer-ness. Deliberately the same
+ *  vocabulary a struct member uses, so a parameter and a field of the same C type describe
+ *  identically. `size: null` = the DWARF did not size it. */
+export interface SymbolTypeFacts {
+  size: number | null;
+  signed: boolean | null;
+  pointer?: boolean;
+}
+
+/** A CODE symbol's declared signature, read from the project's own DWARF.
+ *
+ *  LEAKAGE WARNING, and it is the whole reason `asIfUndecompiled` exists: a compiler emits this
+ *  only for a function it COMPILED. Every benchmark row is already decompiled, so the row's own
+ *  signature is present there and absent for the user, who is decompiling the one function whose
+ *  definition their project does not have. Only CALLEE signatures transfer. */
+export interface SymbolSignature {
+  /** the return type, or null for `void` */
+  returns: SymbolTypeFacts | null;
+  /** the definition's own parameter list — authoritative (a definition records what it takes) */
+  params: SymbolTypeFacts[];
+}
+
 export interface SymbolInfo {
   name: string;
   kind: 'code' | 'data';
+  /** `kind: 'code'` only — the declared signature from the project's DWARF. DEFINITION-DERIVED:
+   *  see {@link SymbolSignature} and {@link asIfUndecompiled}. */
+  signature?: SymbolSignature;
   /** a DWARF DIE exists for this name ⇒ the project headers declare it (safe to emit) */
   declared?: boolean;
   /** total byte size — complete-typed globals only; an unsized extern array has none */
@@ -285,7 +310,7 @@ export function lookupInterior(map: SymbolMap, value: number): { info: SymbolInf
  *  its `.symtab` entry exists (the asm defines the label), and its globals are typed by the OTHER
  *  translation units that declare them. Listed here, once, so {@link asIfUndecompiled} and any
  *  later definition-derived fact (a signature, a local's type, a register location) stay in sync. */
-const DEFINITION_DERIVED_KEYS = ['declared'] as const satisfies readonly (keyof SymbolInfo)[];
+const DEFINITION_DERIVED_KEYS = ['declared', 'signature'] as const satisfies readonly (keyof SymbolInfo)[];
 
 /** The map a user actually has while decompiling `fn` — i.e. with `fn` still an `INCLUDE_ASM`
  *  stub in their project.

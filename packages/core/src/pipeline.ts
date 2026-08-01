@@ -13,7 +13,7 @@ import { Expr, LanguageBackend, SFn, Stmt, exprChildren, stmtChildren, stmtExprs
 import { hoistReusedGlobalBases } from './l3/basecse';
 import { eliminateDeadStores } from './l3/dce';
 import { DEFAULT_IDIOM_PATTERNS, RewritePattern, applyPattern, dce, patternApplies } from './pattern/engine';
-import type { Prototypes } from './proto';
+import { type Prototypes, prototypesFromSymbols } from './proto';
 import { RaiseUnsupportedError } from './raise/errors';
 import { type PreRecoveryPass, runPreRecovery } from './raise/pre-recovery';
 import { recoverTypes } from './raise/recover';
@@ -102,7 +102,9 @@ function runTower(
   onGap: OnGap,
 ): DecompileResult {
   const backend = opts.backend ?? cBackend;
-  const prototypes = opts.prototypes ?? {};
+  // The project's own DWARF signatures fill in what the caller did not state — in practice the
+  // CALLEES (a function still in assembly has none), which is what makes this transferable.
+  const prototypes = prototypesFromSymbols(opts.symbols, opts.prototypes ?? {});
   // (1) lift: ISA frontend (resolved by target) → L1 with block-argument SSA
   const fn = frontendFor(target).lift(name, asm, target, prototypes, opts.asmData, opts.symbols);
   verify(fn);

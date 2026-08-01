@@ -5,7 +5,8 @@
 import { describe, expect, test } from 'vitest';
 
 import { decompile } from '../src/pipeline';
-import { protoArity } from '../src/proto';
+import { protoArity, prototypesFromSymbols } from '../src/proto';
+import type { SymbolInfo, SymbolMap } from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
 
 describe('protoArity', () => {
@@ -37,5 +38,69 @@ describe('call-argument recovery honors both proto forms', () => {
 
   test('a COUNT callee proto recovers the argument identically', () => {
     expect(dc(1)).toContain('callee(5)');
+  });
+});
+
+describe('prototypesFromSymbols — the project DWARF fills in what the caller did not state', () => {
+  const codeAt = (addr: number, name: string, signature: unknown): [number, SymbolInfo[]] => [
+    addr,
+    [{ name, kind: 'code', signature } as SymbolInfo],
+  ];
+
+  test('a callee signature becomes a typed proto', () => {
+    const map: SymbolMap = new Map([
+      codeAt(0x08001000, 'Callee', {
+        returns: { size: 2, signed: false },
+        params: [
+          { size: 1, signed: false },
+          { size: 4, signed: true },
+        ],
+      }),
+    ]);
+    expect(prototypesFromSymbols(map)).toEqual({ Callee: { params: ['u8', 's32'] } });
+  });
+
+  test('a void return is recorded as returnsVoid', () => {
+    const map: SymbolMap = new Map([codeAt(0x08001000, 'DoThing', { returns: null, params: [] })]);
+    expect(prototypesFromSymbols(map)).toEqual({ DoThing: { params: [], returnsVoid: true } });
+  });
+
+  test('a pointer parameter spells void * — nothing is guessed about the target', () => {
+    const map: SymbolMap = new Map([
+      codeAt(0x08001000, 'Copy', { returns: null, params: [{ size: 4, signed: null, pointer: true }] }),
+    ]);
+    expect(prototypesFromSymbols(map).Copy.params).toEqual(['void *']);
+  });
+
+  test('the CALLER always wins — a user/manifest proto is never overwritten', () => {
+    const map: SymbolMap = new Map([
+      codeAt(0x08001000, 'Callee', { returns: null, params: [{ size: 1, signed: false }] }),
+    ]);
+    expect(prototypesFromSymbols(map, { Callee: { params: 3 } })).toEqual({ Callee: { params: 3 } });
+  });
+
+  test('an unspellable parameter drops the WHOLE entry — a partial list would give a right arity with wrong widths', () => {
+    const map: SymbolMap = new Map([
+      codeAt(0x08001000, 'Odd', {
+        returns: null,
+        params: [
+          { size: 1, signed: null },
+          { size: 4, signed: true },
+        ],
+      }),
+    ]);
+    expect(prototypesFromSymbols(map)).toEqual({});
+  });
+
+  test('data symbols and unsignatured code symbols contribute nothing', () => {
+    const map: SymbolMap = new Map([
+      [0x03001000, [{ name: 'gData', kind: 'data' } as SymbolInfo]],
+      [0x08001000, [{ name: 'StillAsm', kind: 'code' } as SymbolInfo]],
+    ]);
+    expect(prototypesFromSymbols(map)).toEqual({});
+  });
+
+  test('no map ⇒ the base table, untouched', () => {
+    expect(prototypesFromSymbols(undefined, { F: { params: 1 } })).toEqual({ F: { params: 1 } });
   });
 });

@@ -51,7 +51,17 @@ type DwarfShape =
       const?: boolean;
     }
   | { kind: 'struct'; structName: string | null; size: number | null; volatile?: boolean; const?: boolean };
-type ShapeCapable = { variableShape?: (name: string) => DwarfShape | null };
+type ShapeCapable = {
+  variableShape?: (name: string) => DwarfShape | null;
+  /** present from the release that reads subprogram DIEs; absent ⇒ no signatures, gracefully */
+  functionSignature?: (name: string) => DwarfSignature | null;
+};
+
+/** `functionSignature`'s result, declared structurally for the same reason as DwarfShape. */
+interface DwarfSignature {
+  returns: { size: number | null; signed: boolean | null; pointer?: true } | null;
+  params: { size: number | null; signed: boolean | null; pointer?: true }[];
+}
 
 /** `struct()`'s member — same structural declaration, same reason. Every fact but name/offset/size
  *  is optional here so the type also describes a member that simply is not a pointer/array. */
@@ -191,6 +201,10 @@ export async function loadSymbolMap(elfPath: string): Promise<SymbolMap> {
     di.hasTypeInfo && typeof types.variableShape === 'function'
       ? (name: string) => types.variableShape!(name)
       : (): DwarfShape | null => null;
+  const signatureOf =
+    di.hasTypeInfo && typeof types.functionSignature === 'function'
+      ? (name: string) => types.functionSignature!(name)
+      : (): DwarfSignature | null => null;
 
   // The pointee-release capability witness (see assertPointeeCapabilityWitnessed): counted across
   // the whole ELF because no single variable can be relied on to exercise it.
@@ -205,6 +219,15 @@ export async function loadSymbolMap(elfPath: string): Promise<SymbolMap> {
     }
     const kind: SymbolInfo['kind'] = s.type === STT_FUNC ? 'code' : 'data';
     const info: SymbolInfo = { name: s.name, kind };
+    if (kind === 'code') {
+      // The declared signature, when this ELF compiled the function from C. Absent for anything
+      // still hand-written assembly — which is exactly the function a user is decompiling, so
+      // this channel only ever supplies CALLEE facts to them (see SymbolSignature).
+      const sig = signatureOf(s.name);
+      if (sig) {
+        info.signature = { returns: sig.returns, params: sig.params };
+      }
+    }
     if (kind === 'data') {
       // Sized symtabs (GC/Wii-class projects carry st_size on every object symbol) enable
       // interior attribution from the symtab alone; GBA ldscript ABS symbols are size-0 and

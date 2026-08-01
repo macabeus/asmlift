@@ -21,7 +21,7 @@ import { reindexWalks } from './l3/reindex';
 import { type SymbolRef, collectSymbolRefs } from './l3/symbol-refs';
 import { RewritePattern } from './pattern/engine';
 import { applyIdiomPatterns, raiseRecovered, structureChecked } from './pipeline';
-import type { Prototypes } from './proto';
+import { type Prototypes, prototypesFromSymbols } from './proto';
 import { runPreRecovery } from './raise/pre-recovery';
 import { recoverTypes } from './raise/recover';
 import { type SymbolMap, symbolsByName } from './symbols';
@@ -164,7 +164,9 @@ export function enumerateCandidates(
   opts: EnumerateOptions = {},
 ): Candidate[] {
   const backend = opts.backend ?? cBackend;
-  const prototypes = opts.prototypes ?? {};
+  // Same merge as `decompile`: the project's DWARF signatures fill in what the caller did not
+  // state, so both the annotate pass and the ranked candidates reason about one prototype table.
+  const prototypes = prototypesFromSymbols(opts.symbols, opts.prototypes ?? {});
   const frontend = frontendFor(target);
   const baseOpts = {
     ...structureOptionsFor(target, prototypes[name]?.returnsVoid ?? false),
