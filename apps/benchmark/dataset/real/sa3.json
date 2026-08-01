@@ -219,11 +219,6 @@
       ],
       "prependC": "#include <string.h>\nstatic const u8 unkFractions[8] = { I(Q(0.5 * 2)), I(Q(0.0 * 2)), I(Q(1.0 * 2)), I(Q(1.5 * 2)), I(Q(3.0 * 2)), I(Q(3.5 * 2)), I(Q(2.5 * 2)), I(Q(2.0 * 2)) };",
       "funcC": "s16 sa2__sub_8004418(s16 x, s16 y)\n{\n    s16 fraction;\n    s32 result;\n    u8 index = 0;\n    u8 array[8];\n    memcpy(array, unkFractions, sizeof(array));\n\n    if ((x | y) == 0) {\n        result = -1;\n    } else {\n        if (x <= 0) {\n            x = -x;\n            index = 4;\n        }\n        if (y <= 0) {\n            y = -y;\n            index += 2;\n        }\n        if (x >= y) {\n            // fraction = y*0.5 / x\n            y *= Q(0.5);\n\n            if (x == 0) {\n                fraction = y;\n            } else {\n                fraction = y / x;\n            }\n        } else {\n            index += 1;\n\n            x *= Q(0.5);\n\n            if (y == 0) {\n                fraction = x;\n            } else {\n                fraction = x / y;\n            }\n        }\n\n        if (array[index] & 0x01) {\n            fraction = Q(0.5) - fraction;\n        }\n\n        {\n            s32 val = array[index] * Q(0.5);\n            fraction += val;\n            result = ((u32)(fraction << 22) >> 22);\n        }\n    }\n\n    return result;\n}",
-      "proto": {
-        "memcpy": {
-          "params": 3
-        }
-      },
       "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/sprite.c#L73-L125"
     },
@@ -282,13 +277,6 @@
       "funcC": "void GetInput(void)\n{\n    s8 i;\n    u8 *repeatKeyCounters = gRepeatedKeysTestCounter, *firstIntervals = gKeysFirstRepeatIntervals,\n       *continuedHoldIntervals = gKeysContinuedRepeatIntervals;\n\n    gInput = (~REG_KEYINPUT & KEYS_MASK);\n\n    // My guess is that whilst the input recorder\n    // is running we still want to know the actual\n    // input. For example; to be able to know when\n    // to exit the demo\n    gPhysicalInput = gInput;\n\n#ifndef COLLECT_RINGS_ROM\n    if (gInputRecorder.mode == RECORDER_RECORD) {\n        InputRecorderWrite(gInput);\n    } else if (gInputRecorder.mode == RECORDER_PLAYBACK) {\n        gInput = InputRecorderRead();\n    }\n#endif\n\n    gPressedKeys = (gInput ^ gPrevInput) & gInput;\n    gReleasedKeys = (gInput ^ gPrevInput) & gPrevInput;\n    gPrevInput = gInput;\n\n    // Repeated keys will be the currently pressed keys\n    gRepeatedKeys = gPressedKeys;\n\n    // Calculate the next repeated state for every key\n    for (i = 0; i < 10; i++) {\n        if (!GetBit(gInput, i)) {\n            // If a key is not pressed, reset its counter\n            // to the settings for that key's\n            // first repeat interval\n            repeatKeyCounters[i] = firstIntervals[i];\n        } else if (repeatKeyCounters[i] > 0) {\n            // If the key is not yet ready to be repeated\n            // continue to wait\n            repeatKeyCounters[i]--;\n        } else {\n            // If the key is ready to be repeated,\n            // add the key to the repeated keys\n            gRepeatedKeys |= 1 << i;\n            // And reset its counter to the settings\n            // for continued hold interval\n            repeatKeyCounters[i] = continuedHoldIntervals[i];\n        }\n    }\n}",
       "proto": {
         "GetInput": {
-          "returnsVoid": true
-        },
-        "InputRecorderRead": {
-          "params": 0
-        },
-        "InputRecorderWrite": {
-          "params": 1,
           "returnsVoid": true
         }
       },

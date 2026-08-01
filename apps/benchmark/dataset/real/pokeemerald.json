@@ -221,11 +221,6 @@
       ],
       "funcC": "u8 *StringAppend(u8 *dest, const u8 *src)\n{\n    while (*dest != EOS)\n        dest++;\n\n    return StringCopy(dest, src);\n}",
       "prependC": "#include \"constants/characters.h\"\nu8 *StringCopy(u8 *dest, const u8 *src);",
-      "proto": {
-        "StringCopy": {
-          "params": 2
-        }
-      },
       "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/string_util.c#L88-L94"
     },
@@ -312,11 +307,6 @@
       ],
       "funcC": "s16 Cos2(u16 angle)\n{\n    return Sin2(angle + 90);\n}",
       "prependC": "s16 Sin2(u16 angle);",
-      "proto": {
-        "Sin2": {
-          "params": 1
-        }
-      },
       "sourceUrl": "https://github.com/macabeus/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/trig.c#L540-L543"
     },
     {
@@ -347,10 +337,6 @@
       "proto": {
         "PutFirstMemBlockHeader": {
           "returnsVoid": true
-        },
-        "PutMemBlockHeader": {
-          "returnsVoid": true,
-          "params": 4
         }
       },
       "m2cCtx": true,
@@ -433,15 +419,6 @@
       ],
       "funcC": "bool8 GiveBerryPowder(u32 amountToAdd)\n{\n    u32 *powder = &gSaveBlock2Ptr->berryCrush.berryPowderAmount;\n    u32 amount = DecryptBerryPowder(powder) + amountToAdd;\n    if (amount > MAX_BERRY_POWDER)\n    {\n        SetBerryPowder(powder, MAX_BERRY_POWDER);\n        return FALSE;\n    }\n    else\n    {\n        SetBerryPowder(powder, amount);\n        return TRUE;\n    }\n}",
       "prependC": "#define MAX_BERRY_POWDER 99999\nu32 DecryptBerryPowder(u32 *powder);\nvoid SetBerryPowder(u32 *powder, u32 amount);",
-      "proto": {
-        "DecryptBerryPowder": {
-          "params": 1
-        },
-        "SetBerryPowder": {
-          "returnsVoid": true,
-          "params": 2
-        }
-      },
       "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/berry_powder.c#L162-L176"
     }

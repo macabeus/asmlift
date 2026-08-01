@@ -112,12 +112,6 @@
       "proto": {
         "ReadKeyInput": {
           "returnsVoid": true
-        },
-        "SoftResetRom": {
-          "params": [
-            "u8"
-          ],
-          "returnsVoid": true
         }
       },
       "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/system.c#L44-L57"
@@ -133,14 +127,6 @@
       "ctx": "void m4aSoundVSync(void);\nvoid m4aSoundMain(void);",
       "proto": {
         "VBlankHandlerMinimal": {
-          "returnsVoid": true
-        },
-        "m4aSoundVSync": {
-          "params": 0,
-          "returnsVoid": true
-        },
-        "m4aSoundMain": {
-          "params": 0,
           "returnsVoid": true
         }
       },
@@ -188,23 +174,6 @@
       "proto": {
         "UpdateEntities": {
           "returnsVoid": true
-        },
-        "CheckWorldCompletion": {
-          "params": [
-            "u8"
-          ]
-        },
-        "CopyWorldMapTiles": {
-          "params": [
-            "u8"
-          ],
-          "returnsVoid": true
-        },
-        "UpdateWorldMapNodeTile": {
-          "params": [
-            "u8"
-          ],
-          "returnsVoid": true
         }
       },
       "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/code_3.c#L40-L48"
@@ -220,26 +189,6 @@
       "ctx": "void UpdateWorldMapNodeState(void);\nvoid UpdatePlayerInput(void);\nvoid InitPlayerCollision(void);\nvoid UpdateWorldMapCursor(void);\nvoid UpdatePaletteAnimations(void);",
       "proto": {
         "GameUpdate": {
-          "returnsVoid": true
-        },
-        "UpdateWorldMapNodeState": {
-          "params": 0,
-          "returnsVoid": true
-        },
-        "UpdatePlayerInput": {
-          "params": 0,
-          "returnsVoid": true
-        },
-        "InitPlayerCollision": {
-          "params": 0,
-          "returnsVoid": true
-        },
-        "UpdateWorldMapCursor": {
-          "params": 0,
-          "returnsVoid": true
-        },
-        "UpdatePaletteAnimations": {
-          "params": 0,
           "returnsVoid": true
         }
       },
@@ -259,21 +208,6 @@
       "proto": {
         "Decompress": {
           "returnsVoid": true
-        },
-        "thunk_HeapAlloc": {
-          "params": 2
-        },
-        "thunk_HeapFree": {
-          "params": 1,
-          "returnsVoid": true
-        },
-        "HuffUnComp": {
-          "params": 2,
-          "returnsVoid": true
-        },
-        "LZ77UnCompWram": {
-          "params": 2,
-          "returnsVoid": true
         }
       },
       "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/code_3.c#L110-L121"
@@ -291,17 +225,6 @@
       "ctx": "void *thunk_HeapAlloc(u32, u32);\nvoid thunk_HeapFree(void *);\nvoid Decompress(void *, void *);",
       "proto": {
         "DecompressDma": {
-          "returnsVoid": true
-        },
-        "thunk_HeapAlloc": {
-          "params": 2
-        },
-        "thunk_HeapFree": {
-          "params": 1,
-          "returnsVoid": true
-        },
-        "Decompress": {
-          "params": 2,
           "returnsVoid": true
         }
       },
@@ -343,15 +266,6 @@
       ],
       "funcC": "void *DecompressAlloc(void *src) {\n    void *heapPtr;\n\n    heapPtr = thunk_HeapAlloc(((u32 *)src)[0] & 0x7FFFFFFF, 0);\n    Decompress(heapPtr, src);\n    return heapPtr;\n}",
       "prependC": "void *thunk_HeapAlloc(u32, u32);\nvoid Decompress(void *, void *);",
-      "proto": {
-        "thunk_HeapAlloc": {
-          "params": 2
-        },
-        "Decompress": {
-          "params": 2,
-          "returnsVoid": true
-        }
-      },
       "m2cCtx": true,
       "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/code_3.c#L142-L148"
     },
@@ -369,9 +283,6 @@
       "proto": {
         "WritePaletteColor": {
           "returnsVoid": true
-        },
-        "ReadUnalignedU16": {
-          "params": 1
         }
       },
       "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/gfx.c#L448-L454"
@@ -398,14 +309,6 @@
       "prependC": "void thunk_HeapFree(u32);\nvoid m4aSongNumStart(u16);",
       "proto": {
         "FreeAllDecompBuffers": {
-          "returnsVoid": true
-        },
-        "thunk_HeapFree": {
-          "params": 1,
-          "returnsVoid": true
-        },
-        "m4aSongNumStart": {
-          "params": 1,
           "returnsVoid": true
         }
       },
