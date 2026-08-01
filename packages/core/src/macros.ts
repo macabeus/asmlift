@@ -53,10 +53,16 @@ const ADDRESS_CAST = /^\s*#define\s+([A-Za-z_]\w*)\s+(\(\s*\*\s*\(\s*(\w+)\s*\*\
  *  - one name defined at two addresses, which no correct spelling can disambiguate.
  */
 export function addressCastMacros(cppOutput: string): Map<number, AddressMacro> {
+  return addressCastMacrosFrom(cppOutput.split('\n'));
+}
+
+/** The same recognizer over already-split `#define NAME body` lines — what a DWARF
+ *  `.debug_macinfo` reader produces once each definition is re-spelled as a directive. */
+export function addressCastMacrosFrom(defineLines: readonly string[]): Map<number, AddressMacro> {
   const byAddress = new Map<number, AddressMacro>();
   const collided = new Set<number>();
   const seenNames = new Map<string, number>();
-  for (const line of cppOutput.split('\n')) {
+  for (const line of defineLines) {
     const m = ADDRESS_CAST.exec(line);
     if (!m) {
       continue;

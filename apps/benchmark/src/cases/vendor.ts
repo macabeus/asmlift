@@ -14,11 +14,9 @@
 // Preprocessing uses -P (no linemarkers): vendored blobs must carry NO machine paths — enforced
 // here and by test/real-manifests.test.ts.
 import { loadSymbolMap } from '@asmlift/cli/symbols-provider';
-import { type AddressMacro, addressCastMacros } from '@asmlift/core/macros';
-import { type SymbolInfo, type SymbolMap, symbolMapToJson } from '@asmlift/core/symbols';
-import { execSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { symbolMapToJson } from '@asmlift/core/symbols';
+import { execSync } from 'node:child_process';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 
@@ -31,56 +29,6 @@ import { REAL_DIR, type RealManifest, loadManifestsForVendor, resolveProjectRoot
 import { resolveProjectElf } from './project-elf';
 
 const MACHINE_PATH = /\/Users\/|\/home\/|\/private\/var\//;
-
-/** The project's address-cast macros, from ITS OWN headers under ITS OWN preprocessor flags.
- *
- *  `cpp -dD` keeps the `#define`s alongside the expansion, so this sees exactly the macros a
- *  compile of this project sees — no header globbing, no guessing at include order. Recognition
- *  and every refusal live in core (`addressCastMacros`); this only supplies the text.
- *
- *  Best-effort by design: a project whose headers do not preprocess cleanly on their own simply
- *  contributes no macros, exactly as a project with no ELF contributes no map. */
-function projectMacros(man: RealManifest, root: string): Map<number, AddressMacro> {
-  const dir = mkdtempSync(join(tmpdir(), 'bench-macros-'));
-  const cPath = join(dir, 'macros.c');
-  writeFileSync(cPath, man.headers.map((h) => `#include "${h}"\n`).join(''));
-  const cpp = spawnSync(CPP, ['-P', '-dD', ...man.cppIncludes, ...(man.defines ?? []), cPath], {
-    cwd: root,
-    encoding: 'utf8',
-  });
-  if (cpp.status !== 0) {
-    console.warn(`${man.project}: headers did not preprocess for macro extraction — no macro names vendored`);
-    return new Map();
-  }
-  return addressCastMacros(cpp.stdout);
-}
-
-/** THE vendored map, built from a project's two sources: its ELF (names + declaration shapes)
- *  and its headers (address-cast macro names). Exported because the fidelity gate re-derives the
- *  map to hold the vendored blob honest — it must build it the SAME way or every macro-bearing
- *  project reports permanent drift. One builder, so the two cannot disagree. */
-export async function buildVendoredMap(man: RealManifest, root: string, elf: string): Promise<SymbolMap> {
-  const map = await loadSymbolMap(elf);
-  // Address-cast macros join the map as the CANONICAL name at their address. They are
-  // source-faithful where a symtab name is not: these projects reach the cell through the macro,
-  // and the macro is what makes the compiler emit the numeric pool word the target shows. The
-  // symtab name stays as an alias, and the `/raw-globals` sibling still enumerates, so the differ
-  // keeps refereeing.
-  for (const [addr, mac] of projectMacros(man, root)) {
-    const info: SymbolInfo = {
-      name: mac.name,
-      kind: 'data',
-      declared: true,
-      shape: 'scalar',
-      size: mac.size,
-      signed: mac.signed,
-      macroBody: mac.body,
-    };
-    const prior = map.get(addr);
-    map.set(addr, prior ? [info, ...prior] : [info]);
-  }
-  return map;
-}
 
 /** Vendor the project's symbol map (symbol-map-benchmark-plan-2026-07-23.md): the checkout's
  *  own decomp.yaml names its ELF (tools.asmlift.elf); the derived name/shape map is project
@@ -98,7 +46,7 @@ async function vendorSymbols(man: RealManifest, root: string, outDir: string): P
     console.warn(`${project}: tools.asmlift.elf points at ${res.elfRel} but ${res.reason} — symbols NOT vendored`);
     return;
   }
-  const map = await buildVendoredMap(man, root, res.elf);
+  const map = await loadSymbolMap(res.elf);
   const json = JSON.stringify(symbolMapToJson(map));
   writeFileSync(join(outDir, 'symbols.json.gz'), gzipSync(Buffer.from(json), { level: 9 }));
   console.log(`${project}: vendored symbol map (${map.size} addresses)`);

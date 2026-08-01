@@ -22,6 +22,7 @@
 // rather than as the test. `assertPointeeFactPresent` and `assertPointeeCapabilityWitnessed` are
 // the same gate one release later, for the facts an INTERIOR spelling through a pointer global
 // needs (what it points at, and which of a layout's members are arrays).
+import { addressCastMacrosFrom } from '@asmlift/core/macros';
 import type { SymbolInfo, SymbolMap, SymbolStructField } from '@asmlift/core/symbols';
 import { readFileSync } from 'node:fs';
 
@@ -327,7 +328,42 @@ export async function loadSymbolMap(elfPath: string): Promise<SymbolMap> {
     }
   }
   assertPointeeCapabilityWitnessed(pointeeWitnessed, layoutsSeen, elfPath);
+  addMacroNames(di as unknown as DebugInfoWithMacros, map);
   return map;
+}
+
+/** The `-g3` macro record, when the package reports one (absent on an older release, and on any
+ *  ELF built without it — both degrade to no macro names, never to an error). */
+type DebugInfoWithMacros = { macros?: { name: string; body: string }[] };
+
+/** Adopt the project's ADDRESS-CAST MACRO names as the canonical name at their address.
+ *
+ *  Some projects name a fixed RAM cell `#define gCounter (*(u16 *)0x03001234)` instead of
+ *  declaring an extern, and the two are not interchangeable in the bytes an old compiler emits:
+ *  an extern produces a RELOCATED literal-pool word, the macro the NUMERIC one a target shows.
+ *  A `.symtab` cannot carry these names — a macro is not a symbol — so the compiler's own macro
+ *  record is the only place they exist.
+ *
+ *  The symtab name (when there is one) stays as an alias; recognition and every refusal live in
+ *  core (`addressCastMacrosFrom`). */
+function addMacroNames(di: DebugInfoWithMacros, map: SymbolMap): void {
+  if (!Array.isArray(di.macros) || di.macros.length === 0) {
+    return;
+  }
+  const lines = di.macros.map((m) => `#define ${m.name} ${m.body}`);
+  for (const [addr, mac] of addressCastMacrosFrom(lines)) {
+    const info: SymbolInfo = {
+      name: mac.name,
+      kind: 'data',
+      declared: true,
+      shape: 'scalar',
+      size: mac.size,
+      signed: mac.signed,
+      macroBody: mac.body,
+    };
+    const prior = map.get(addr);
+    map.set(addr, prior ? [info, ...prior] : [info]);
+  }
 }
 
 /** declared-first, placeholders-last, then name — a deterministic canonical pick. Exported so
