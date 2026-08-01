@@ -49,7 +49,7 @@ function rankPicking(pick: (label: string) => boolean): void {
       throw new Error(`no candidate matches the pick among: ${cands.map((c) => c.label).join(', ')}`);
     }
     const scored = { ...cand, score: SCORE };
-    return { best: scored, candidates: [scored] };
+    return { best: scored, candidates: [scored], dropped: [] };
   });
 }
 
@@ -146,5 +146,27 @@ describe('symbolShape formatting (pinned)', () => {
     ]);
     expect(used).toEqual([{ name: 'gAlpha', shape: 'scalar u16' }, { name: 'gZeta' }]);
     expect(used[1]).not.toHaveProperty('shape');
+  });
+});
+
+describe('dropped candidates are recorded, never silently swallowed', () => {
+  test('a spelling that failed to build is published with its diagnostic', () => {
+    ranked.mockImplementation((name, asm, target, _obj, opts) => {
+      const cands = enumerateCandidates(name, asm, target, opts);
+      const scored = { ...cands[0], score: SCORE };
+      return {
+        best: scored,
+        candidates: [scored],
+        dropped: [{ label: 'unsigned', error: "too many arguments to `thunk_sub_080002A0'" }],
+      };
+    });
+    const r = runAsmlift(TC, 'f', LOADH, 'obj', undefined, noCompile, MAP);
+    expect(r.outcome).toBe('nonmatch');
+    expect(r.droppedCandidates).toEqual([{ label: 'unsigned', error: "too many arguments to `thunk_sub_080002A0'" }]);
+  });
+
+  test('every candidate building ⇒ the field is absent, not an empty array', () => {
+    rankPicking(() => true);
+    expect(runAsmlift(TC, 'f', LOADH, 'obj', undefined, noCompile, MAP)).not.toHaveProperty('droppedCandidates');
   });
 });

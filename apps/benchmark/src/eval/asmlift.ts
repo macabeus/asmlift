@@ -99,7 +99,8 @@ export function runAsmlift(
 
   // Phase 2 — rank candidates (compile + objdiff-score each) and take the differ-picked best.
   try {
-    const best = decompileRanked(sym, asm, tc.targetDesc, obj, opts).best;
+    const ranked = decompileRanked(sym, asm, tc.targetDesc, obj, opts);
+    const best = ranked.best;
     const s = best.score;
     return {
       decompiler: 'asmlift',
@@ -109,6 +110,10 @@ export function runAsmlift(
       // exact tree the winning source was emitted from (post-DCE value refs only; call targets
       // excluded). A raw-globals winner names nothing ⇒ the honest empty list.
       candidateLabel: best.label,
+      // Spellings that FAILED TO BUILD. rankBy drops them so a broken sibling cannot sink a
+      // candidate that compiles — but dropping them SILENTLY published a clean win over a
+      // hidden failure, which is exactly what a scoring harness must not do.
+      ...(ranked.dropped.length ? { droppedCandidates: ranked.dropped } : {}),
       ...(usedSymbols ? { symbolsUsed: symbolsUsedFrom(best.symbolRefs) } : {}),
       outcome: s.match ? 'match' : 'nonmatch',
       source: best.source,

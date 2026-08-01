@@ -65,6 +65,11 @@ export interface DecompilerResult {
   /** asmlift only, scored rows: the label of the candidate spelling that won the differ
    *  ranking (e.g. "unsigned/raw-globals") — which lever combination produced `source`. */
   candidateLabel?: string;
+  /** asmlift only, scored rows: candidate spellings that FAILED TO BUILD and were dropped from
+   *  the ranking, each with the compiler's first diagnostic line. A dropped sibling is a defect
+   *  (in the emitter, or in the facts it was handed), and without this the row publishes a clean
+   *  win with no trace that another spelling was refused. Absent ⇒ every candidate built. */
+  droppedCandidates?: { label: string; error: string }[];
 }
 
 /** MEASURED size of the remaining gap (merge-time): the best compiling candidate's absolute

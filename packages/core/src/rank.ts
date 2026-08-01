@@ -136,9 +136,21 @@ export interface Candidate {
 export interface Scored<S> extends Candidate {
   score: S;
 }
+/** A candidate the scorer REFUSED — its C did not build. Recorded rather than discarded: a
+ *  spelling that fails to compile is a defect in the emitter or in the facts it was given, and a
+ *  scoring harness that shows only the surviving sibling reports a clean win over a hidden
+ *  failure. */
+export interface DroppedCandidate {
+  label: string;
+  /** the scorer's first error line (a compiler diagnostic, usually) */
+  error: string;
+}
+
 export interface RankedResult<S> {
   best: Scored<S>; // lowest score
   candidates: Scored<S>[]; // sorted best (lowest) first
+  /** candidates whose scoreFn threw — empty when every spelling built */
+  dropped: DroppedCandidate[];
 }
 
 /** Emit the DISTINCT type/branch-sense candidate spellings for `name` — PURE, no scoring.
@@ -305,20 +317,18 @@ export function rankBy<S extends { score: number }>(
   scoreFn: (source: string, symbol: string, candidate: Candidate) => S,
 ): RankedResult<S> {
   const results: (Scored<S> & { order: number })[] = [];
-  let lastScoreErr: unknown = null; // a candidate's C that failed to compile; only fatal if ALL do
+  const dropped: DroppedCandidate[] = []; // spellings that failed to build; only fatal if ALL do
+  let lastScoreErr: unknown = null;
   candidates.forEach((c, order) => {
     try {
       results.push({ ...c, order, score: scoreFn(c.source, symbol, c) });
     } catch (e) {
       lastScoreErr = e;
+      dropped.push({ label: c.label, error: firstLine(e) });
     }
   });
   if (results.length === 0) {
-    const why =
-      lastScoreErr instanceof Error
-        ? lastScoreErr.message.split('\n')[0]
-        : String(lastScoreErr ?? 'no candidate produced');
-    throw new Error(`no scorable candidate for '${symbol}': ${why}`, { cause: lastScoreErr });
+    throw new Error(`no scorable candidate for '${symbol}': ${firstLine(lastScoreErr)}`, { cause: lastScoreErr });
   }
   // Score first; ENUMERATION ORDER breaks a tie. That order is meaningful, not incidental:
   // enumerateCandidates emits the symbol-map spellings before their `/raw-globals` siblings, so
@@ -326,5 +336,10 @@ export function rankBy<S extends { score: number }>(
   // than a bare address. Spelled as an explicit comparator because relying on Array#sort's
   // stability would make the preference an accident of two unrelated decisions.
   results.sort((a, b) => a.score.score - b.score.score || a.order - b.order);
-  return { best: results[0], candidates: results.map(({ order: _order, ...c }) => c) };
+  return { best: results[0], candidates: results.map(({ order: _order, ...c }) => c), dropped };
+}
+
+/** First line of whatever the scorer threw — the compiler's own diagnostic, not a stack. */
+function firstLine(e: unknown): string {
+  return e instanceof Error ? e.message.split('\n')[0] : String(e ?? 'no candidate produced');
 }
