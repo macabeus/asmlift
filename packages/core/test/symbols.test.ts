@@ -741,3 +741,33 @@ describe('symbolsByName under a name collision', () => {
     expect(symbolsByName(map).get('gOther')).toMatchObject({ shape: 'scalar', size: 1 });
   });
 });
+
+describe('the numeric-pool veto exempts MACRO names — the veto is about relocation', () => {
+  const MIXED =
+    '\tldr\tr0, .L1\n\tldr\tr0, [r0]\n\tldr\tr1, .L1+4\n\tldr\tr1, [r1]\n\tadd\tr0, r0, r1\n' +
+    '\tbx\tlr\n.L1:\n\t.word\t0x03001234\n\t.word\tgNamed\n';
+
+  test('a MACRO name survives the veto — it expands to the same numeric word', () => {
+    // An `extern` makes agbcc emit a RELOCATED pool word, contradicting the numeric one the
+    // target shows; the macro expands to that literal, so it is compatible by construction.
+    const symbols = mapOf([
+      [
+        0x03001234,
+        {
+          name: 'gMacroNamed',
+          kind: 'data',
+          shape: 'scalar',
+          size: 4,
+          signed: false,
+          macroBody: '(*(u32 *)0x03001234)',
+        },
+      ],
+    ]);
+    expect(run('f', MIXED, symbols)).toContain('gMacroNamed');
+  });
+
+  test('an EXTERN name at the same address is still vetoed', () => {
+    const symbols = mapOf([[0x03001234, { name: 'gExtern', kind: 'data', shape: 'scalar', size: 4, signed: false }]]);
+    expect(run('f', MIXED, symbols)).not.toContain('gExtern');
+  });
+});

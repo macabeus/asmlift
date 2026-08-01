@@ -1335,13 +1335,17 @@ export function lift(
               //
               // VETOED when this asm's pool names other symbols (poolNamesASymbol): agbcc would
               // have emitted THIS word symbolically too had the source named it, so promoting it
-              // spells a name the source did not use. That is not merely a fidelity nicety — the
-              // named form measurably loses bytes on the rows where it fires (the true source
-              // reached those addresses through address-cast macros, which no `extern` spelling
-              // reproduces). Nothing is guessed in its place: the word stays the raw constant the
-              // target says it is.
-              const vetoed = poolNamesSymbols;
-              const si = symbols && !vetoed ? lookupSymbol(symbols, pr.value) : null;
+              // spells a name the source did not use.
+              //
+              // …but the veto is really about RELOCATION, not about naming. An `extern` name makes
+              // the compiler emit a relocated pool word, which contradicts the numeric word the
+              // target shows. An address-cast MACRO expands to that same numeric literal, so it is
+              // COMPATIBLE with the evidence by construction and is never vetoed — indeed it is
+              // the spelling the numeric word is evidence FOR (klonoa's true source reaches these
+              // cells through exactly such macros). Nothing is guessed in either case: a vetoed
+              // word stays the raw constant the target says it is.
+              const found = symbols ? lookupSymbol(symbols, pr.value) : null;
+              const si = found && (!poolNamesSymbols || found.macroBody !== undefined) ? found : null;
               if (si) {
                 const res = mkValue(T.unk(32));
                 irb.ops.push(
@@ -1357,7 +1361,9 @@ export function lift(
               // `gaddr sym + offset` — the `&gSym + K` tree structure.ts already lowers (and,
               // with a struct layout, spells as the named field). Sized symbols only; an
               // unattributed address stays a raw const — nothing guesses.
-              const interior = symbols && !vetoed ? lookupInterior(symbols, pr.value) : null;
+              // Interior attribution is always an `&gSym + K` spelling — extern-shaped, hence
+              // relocated — so the veto applies to it without the macro exemption above.
+              const interior = symbols && !poolNamesSymbols ? lookupInterior(symbols, pr.value) : null;
               if (interior) {
                 const g = mkValue(T.unk(32));
                 const k = mkValue(T.unk(32));
