@@ -38,7 +38,13 @@ export type Expr =
   // Variable-index `a[i]` is recovered at the IR level (`aload`/`astore` carry elemSize;
   // raise/arrays.ts) but still LOWERS to this one C-shaped `index` node, so it stays C-only
   // (a Pascal array-access spelling is future work). Treat `index` with idx ≠ 0 as C-shaped.
-  | { k: 'index'; base: Expr; idx: Expr; width: number; signed: boolean }
+  // `lead` prefixes CONSTANT subscripts before `idx` — `g[0][i]` rather than `g[i]`. It exists for
+  // exactly one inhabitant: the bare-name spelling of a MULTIDIMENSIONAL array global, where one
+  // subscript reaches a row and the element needs the leading dimensions pinned first. The node
+  // still denotes ONE `width`-byte element, so its type, its legalization and its stride contract
+  // are unchanged — this is a spelling of the same address, not a new kind of access. Absent for
+  // every rank-1 access, which is why it is optional rather than an empty array.
+  | { k: 'index'; base: Expr; idx: Expr; width: number; signed: boolean; lead?: number[] }
   // A named struct-field access `base->name` (raise/structs.ts recovered `base` as a struct
   // pointer, so the byte offset resolves to a named field instead of a scaled array index).
   // Unlike `index`, this carries the field NAME (which encodes the byte offset, `field_<off>`),
@@ -189,7 +195,18 @@ export function exprEquals(a: Expr, b: Expr): boolean {
     }
     case 'index': {
       const bb = b as typeof a;
-      return a.width === bb.width && a.signed === bb.signed && exprEquals(a.base, bb.base) && exprEquals(a.idx, bb.idx);
+      // `lead` is part of the ADDRESS (`g[0][i]` and `g[1][i]` are different elements), so it
+      // must be compared — an omission here would let CSE/dedup collapse two distinct accesses.
+      const lead = a.lead ?? [];
+      const bLead = bb.lead ?? [];
+      return (
+        a.width === bb.width &&
+        a.signed === bb.signed &&
+        lead.length === bLead.length &&
+        lead.every((v, i) => v === bLead[i]) &&
+        exprEquals(a.base, bb.base) &&
+        exprEquals(a.idx, bb.idx)
+      );
     }
     case 'field': {
       const bb = b as typeof a;

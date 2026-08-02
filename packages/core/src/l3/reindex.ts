@@ -163,6 +163,10 @@ function reindexExpr(e: Expr, walk: WalkLoop, iv: string): Expr | null {
     if (mentionsVar(e.idx, walk.p)) {
       return null; // a p-dependent element offset — beyond the v1 shape
     }
+    if (e.lead && e.lead.length > 0) {
+      return null; // leading subscripts (a multidim array global) — the rebuild below would drop
+      // them, turning an element access into a row's. Decline rather than reindex.
+    }
     const idx: Expr =
       e.idx.k === 'const' && e.idx.value === 0
         ? { k: 'var', name: iv }

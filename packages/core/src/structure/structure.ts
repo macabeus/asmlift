@@ -46,6 +46,7 @@ import {
   type DeclaredField,
   type SymbolInfo,
   type SymbolStructField,
+  arrayInnerExtents,
   declaredFields,
   isArrayField,
   pointeeFields,
@@ -106,6 +107,32 @@ function globalOf(e: Expr, width: number): { name: string; idx: Expr } | null {
     }
   }
   return null;
+}
+
+// THE one gate on the BARE-NAME array-global spelling (`gSym[i]` rather than `((T *)&gSym)[i]`),
+// shared by the constant-offset and variable-index access paths so the two cannot disagree.
+// Returns the `index` node's `lead` fragment when the bare form is spellable, or null to fall
+// through to the always-valid `&gSym` cast form.
+//
+// Two facts are required, not one. The element WIDTH must match, as it always has. And the RANK
+// must be SPELLABLE, because one subscript reaches an element only on a rank-1 array: on `u16
+// g[4][0x400]`, `g[i]` is a ROW. Against the project's own header that is usually a type error,
+// but where the row address flows into an integer context it is merely a warning and the emitted C
+// then addresses a different object than the asm did — silently.
+//
+// A rank > 1 pins the leading dimensions at 0 and puts the whole flat element index in the last
+// subscript (`g[0][i]`) — the same address arithmetic, and the spelling a decomp author writes
+// when the split is not observable in the asm either (the reference source for
+// kleod:CopyBGScrollTiles spells exactly this). A rank the map states but cannot spell (an unknown
+// inner extent) gets no bare form at all; `((T *)&gSym)[i]` is byte-identical and valid under ANY
+// declaration, which is why it is the safe fallback. See symbols.ts arrayInnerExtents for why an
+// ABSENT rank is read as 1 rather than as unknown.
+function bareArrayLead(si: SymbolInfo, width: number): { lead?: number[] } | null {
+  if (si.shape !== 'array' || si.elemSize !== width) {
+    return null;
+  }
+  const inner = arrayInnerExtents(si);
+  return inner === null ? null : inner.length === 0 ? {} : { lead: new Array<number>(inner.length).fill(0) };
 }
 
 // A BYTE residual read as an ELEMENT index of `elemSize`-wide elements, or null when it is not one
@@ -402,9 +429,10 @@ function memAccess(
     // dogfood proved agbcc needs for ROM tables — with the element type registered in the env
     // so the stride check passes and no cast is added. Element-width match only.
     const siArr = sym?.info(g.name);
-    if (siArr?.shape === 'array' && siArr.elemSize === width) {
-      sym!.noteGlobal(g.name, T.ptr(T.int(width * 8, siArr.elemSigned ?? false)));
-      return { k: 'index', base: { k: 'var', name: g.name }, idx, width, signed };
+    const lead = siArr === undefined ? null : bareArrayLead(siArr, width);
+    if (lead !== null) {
+      sym!.noteGlobal(g.name, T.ptr(T.int(width * 8, siArr!.elemSigned ?? false)));
+      return { k: 'index', base: { k: 'var', name: g.name }, idx, width, signed, ...lead };
     }
     return { k: 'index', base: { k: 'addr', name: g.name }, idx, width, signed };
   }
@@ -447,9 +475,10 @@ function arrayAccess(
   if (baseExpr.k === 'addr' && fieldOff === undefined) {
     // ARRAY-declared global (symbol map): the bare-name spelling, same rule as memAccess.
     const si = sym?.info(baseExpr.name);
-    if (si?.shape === 'array' && si.elemSize === elemSize) {
-      sym!.noteGlobal(baseExpr.name, T.ptr(T.int(elemSize * 8, si.elemSigned ?? false)));
-      return { k: 'index', base: { k: 'var', name: baseExpr.name }, idx: idxExpr, width: elemSize, signed };
+    const lead = si === undefined ? null : bareArrayLead(si, elemSize);
+    if (lead !== null) {
+      sym!.noteGlobal(baseExpr.name, T.ptr(T.int(elemSize * 8, si!.elemSigned ?? false)));
+      return { k: 'index', base: { k: 'var', name: baseExpr.name }, idx: idxExpr, width: elemSize, signed, ...lead };
     }
     return { k: 'index', base: baseExpr, idx: idxExpr, width: elemSize, signed };
   }

@@ -123,6 +123,11 @@ function printExpr(e: Expr, parentPrec: number, vt: VarTypes, leaf?: LeafHook): 
       // binds tighter than any prefix operator, so a cast/unary/deref base is printed at prec 1
       // and parenthesizes itself: `((u8 *)p)[1]`). The postfix form needs no outer parentheses.
       const base = legalized(e);
+      // Leading constant subscripts (a multidimensional array global's bare spelling) keep the
+      // postfix form whatever `idx` is: `g[0][0]` is the element, `*g[0]` would be its ROW.
+      if (e.lead && e.lead.length > 0) {
+        return `${rec(base, 1)}${e.lead.map((l) => `[${l}]`).join('')}[${rec(e.idx, 99)}]`;
+      }
       if (e.idx.k === 'const' && e.idx.value === 0) {
         const s = `*${rec(base, 2)}`;
         return parentPrec < 2 ? `(${s})` : s;

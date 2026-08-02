@@ -90,7 +90,9 @@ export function cppBackend(spec: CppFnSpec): LanguageBackend {
       // class pointer, and print an unscaled `this[2]` that C++ strides by sizeof(class).
       // Correct bytes over idiomatic spelling, never the reverse.
       const leaf: LeafHook = (e: Expr) => {
-        if (e.k === 'index' && e.base.k === 'var' && e.idx.k === 'const') {
+        // `lead` (a multidimensional array global) is not a receiver access and must not be
+        // rewritten to one — the hook returns text, so a dropped subscript would be silent.
+        if (e.k === 'index' && e.base.k === 'var' && e.idx.k === 'const' && !e.lead?.length) {
           const r = recv.get(e.base.name);
           if (r) {
             if (e.width === 4) {
