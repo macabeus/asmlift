@@ -390,6 +390,7 @@ function addMacroNames(di: DebugInfoWithMacros, map: SymbolMap): void {
       shape: 'scalar',
       size: mac.size,
       signed: mac.signed,
+      ...(mac.volatile ? { volatile: true } : {}),
       macroBody: mac.body,
     };
     const prior = map.get(addr);
