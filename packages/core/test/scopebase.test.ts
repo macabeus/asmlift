@@ -12,6 +12,11 @@ import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
 import { hoistScopedBases } from '../src/l3/scopebase';
 
+// `g` stands for an ARRAY-shaped global. `SFn.globals` entries carry a POINTER IrType because that
+// is the type of the decayed base, not because the symbol is a pointer global — a pointer-shaped
+// global is never put in this list by the structurer and must never become eligible (naming its
+// cell instead of its target would be silently the wrong address). Spelled out because the fixture
+// reads exactly like the case that must not work.
 const G = [{ name: 'g', type: T.ptr(T.u(16)) }];
 
 const ix = (idx: number, extra: Partial<Extract<Expr, { k: 'index' }>> = {}): Expr => ({
@@ -36,7 +41,9 @@ const fn = (body: Stmt[], globals = G): SFn => ({
 
 /** The hoist assignments introduced at the head of a statement list. */
 const hoists = (list: Stmt[]): string[] =>
-  list.filter((s): s is Extract<Stmt, { k: 'assign' }> => s.k === 'assign' && s.name.startsWith('p')).map((s) => s.name);
+  list
+    .filter((s): s is Extract<Stmt, { k: 'assign' }> => s.k === 'assign' && s.name.startsWith('p'))
+    .map((s) => s.name);
 
 describe('scope choice', () => {
   test('two uses inside ONE if-arm hoist INSIDE that arm, not at the top', () => {
@@ -76,7 +83,9 @@ describe('scope choice', () => {
 
   test('a single use does not fire — one access re-materializes as cheaply as a local', () => {
     expect(
-      hoistScopedBases(fn([{ k: 'if', cond: { k: 'const', value: 1 }, then: [store(ix(1), { k: 'const', value: 0 })], else: [] }])),
+      hoistScopedBases(
+        fn([{ k: 'if', cond: { k: 'const', value: 1 }, then: [store(ix(1), { k: 'const', value: 0 })], else: [] }]),
+      ),
     ).toBeNull();
   });
 });
@@ -125,10 +134,7 @@ describe('refusals', () => {
 
 describe('the rewrite', () => {
   test('two WIDTHS through one base get two locals — the pointer type is part of the key', () => {
-    const arm: Stmt[] = [
-      store(ix(1), ix(2)),
-      store(ix(3, { width: 1 }), ix(4, { width: 1 })),
-    ];
+    const arm: Stmt[] = [store(ix(1), ix(2)), store(ix(3, { width: 1 }), ix(4, { width: 1 }))];
     const out = hoistScopedBases(fn([{ k: 'if', cond: { k: 'const', value: 1 }, then: arm, else: [] }]));
     expect(out).not.toBeNull();
     expect(hoists((out!.body[0] as Extract<Stmt, { k: 'if' }>).then)).toEqual(['p0', 'p1']);
@@ -174,7 +180,9 @@ describe('the refusals found by the adversarial round', () => {
     // to refuse. basecse.ts and argbase.ts both treat a loop's own condition as inside the loop.
     expect(
       hoistScopedBases(
-        loopFn([], { k: 'bin', op: '!=', l: ix(1), r: { k: 'const', value: 0 } }, [store(ix(2), { k: 'const', value: 0 })]),
+        loopFn([], { k: 'bin', op: '!=', l: ix(1), r: { k: 'const', value: 0 } }, [
+          store(ix(2), { k: 'const', value: 0 }),
+        ]),
       ),
     ).toBeNull();
   });
@@ -195,12 +203,12 @@ describe('the refusals found by the adversarial round', () => {
     const nop: Stmt = { k: 'assign', name: 'i', value: { k: 'const', value: 0 } };
     // inc reads the base every iteration → refuse
     expect(
-      hoistScopedBases(forWith(nop, { k: 'assign', name: 'i', value: ix(1) }, [store(ix(2), { k: 'const', value: 0 })])),
+      hoistScopedBases(
+        forWith(nop, { k: 'assign', name: 'i', value: ix(1) }, [store(ix(2), { k: 'const', value: 0 })]),
+      ),
     ).toBeNull();
     // init reads it ONCE, at the enclosing cadence → eligible, and counted
-    const out = hoistScopedBases(
-      forWith({ k: 'assign', name: 'i', value: ix(1) }, nop, []),
-    );
+    const out = hoistScopedBases(forWith({ k: 'assign', name: 'i', value: ix(1) }, nop, []));
     expect(out).toBeNull(); // only ONE use — but it was seen (the next case proves counting)
     const two = hoistScopedBases(
       fn([
@@ -208,7 +216,13 @@ describe('the refusals found by the adversarial round', () => {
           k: 'if',
           cond: { k: 'const', value: 1 },
           then: [
-            { k: 'for', init: { k: 'assign', name: 'i', value: ix(1) }, cond: { k: 'const', value: 1 }, inc: nop, body: [] },
+            {
+              k: 'for',
+              init: { k: 'assign', name: 'i', value: ix(1) },
+              cond: { k: 'const', value: 1 },
+              inc: nop,
+              body: [],
+            },
             store(ix(2), { k: 'const', value: 0 }),
           ],
           else: [],

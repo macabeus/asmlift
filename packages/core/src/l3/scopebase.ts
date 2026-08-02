@@ -47,9 +47,13 @@ import { nameAllocator } from './hoist';
 
 /** A base this lever may name: a leaf whose value is a fixed address.
  *
- *  `var` is included ONLY for a name the tree itself declares as an array-shaped global (SFn.globals
- *  — populated by the structurer for exactly those). A local `var` is excluded: it can be assigned
- *  between the hoist point and a use, which would change what is dereferenced. */
+ *  `var` is included ONLY for a name in `SFn.globals`. That list is populated by ONE call site —
+ *  the structurer's `noteGlobal`, reached only on the `bareArrayLead` path, which requires
+ *  `shape === 'array'` — so a `var` base here is always an ARRAY-declared global and `(T *)&gSym`
+ *  is its start address under any declaration. The invariant is worth stating because it is what
+ *  keeps a POINTER-shaped global out: for one of those, `(T *)&gPtr` names the pointer CELL rather
+ *  than the object it points at, which would be silently the wrong address. A local `var` is
+ *  excluded for the ordinary reason: it can be assigned between the hoist point and a use. */
 type LeafBase = Extract<Expr, { k: 'addr' } | { k: 'const' } | { k: 'var' }>;
 const isLeaf = (e: Expr, globals: ReadonlySet<string>): e is LeafBase =>
   e.k === 'addr' || e.k === 'const' || (e.k === 'var' && globals.has(e.name));
@@ -219,12 +223,12 @@ export function hoistScopedBases(sfn: SFn): SFn | null {
     if ([...rec.constOff.values()].some((n) => n >= 2)) {
       continue;
     }
-    const found = commonScope(rec.uses);
-    if (!found || underNestedLoop(rec.uses, found.depth)) {
+    const at = commonScope(rec.uses);
+    if (!at || underNestedLoop(rec.uses, at.depth)) {
       continue;
     }
     const type = T.ptr(scalarTypeForAccess(rec.sample.width, rec.sample.signed));
-    plan.push({ scope: found.scope, key, name: fresh(), type, base: rec.sample.base as LeafBase });
+    plan.push({ scope: at.scope, key, name: fresh(), type, base: rec.sample.base as LeafBase });
   }
   if (plan.length === 0) {
     return null;
