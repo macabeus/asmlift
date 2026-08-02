@@ -69,8 +69,8 @@ tools:
     target: agbcc
 
     # Optional. The project's built ELF. asmlift reads its symbol table and debug info to
-    # name what the assembly only addresses — globals, struct fields, callee signatures,
-    # address-cast macros — instead of emitting raw pointer casts. How to produce a good
+    # name the globals and struct fields the assembly only addresses, recover callee
+    # signatures, and adopt the project's address-cast macro names. How to produce a good
     # one is covered in the CLI documentation linked below.
     elf: rom.elf
 

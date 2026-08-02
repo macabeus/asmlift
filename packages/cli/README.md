@@ -86,29 +86,30 @@ Scoring rules, in the project's spirit of never guessing:
 
 ## The symbol map: `elf`
 
-Pointed at the project's built ELF, asmlift stops emitting raw addresses and starts speaking the
-project's own vocabulary. Three independent channels feed the map — each one the ELF happens to
-carry is used, and a missing one degrades to the row above it, never to a guess:
+Pointed at the project's built ELF, asmlift names what the map covers instead of emitting raw
+address casts. Three channels feed the map — each one the ELF carries is used, and a missing one
+just means fewer names, never a guess:
 
-| The ELF carries          | asmlift gains                                                                                                                                                                                                                                 |
-| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `.symtab` (always there) | Names for globals and functions — `gInputState` instead of `*(u16 *)0x03004668`                                                                                                                                                               |
-| DWARF (`-g`)             | Declaration shapes — array/struct/pointer, signedness, `volatile`/`const` — that drive typed spellings like `gCtx.frameCounter`, and the **signature of every compiled function**: callee arity is the fact call-argument recovery needs most |
-| `.debug_macinfo` (`-g3`) | Address-cast macro names (`#define gCounter (*(u16 *)0x03001234)`) — names no symbol table can carry. The macro spelling also matches the **numeric** literal-pool word the original build has, where an extern would emit a relocated one    |
+| The ELF carries                         | asmlift gains                                                                                                                                                                                                                                  |
+| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `.symtab` (any unstripped link has one) | Names for globals and functions — `gInputState` instead of `*(u16 *)0x03004668`                                                                                                                                                                |
+| DWARF (`-g`)                            | Declaration shapes — array/struct/pointer, signedness, `volatile`/`const` — that drive typed spellings like `gCtx.frameCounter`, and signatures for the functions this ELF compiled from C: a callee's arity drives its call-argument recovery |
+| `.debug_macinfo` (`-g3`)                | Address-cast macro names (`#define gCounter (*(u16 *)0x03001234)`) — names no symbol table can carry. The macro spelling also matches the **numeric** literal-pool word the original build has, where an extern would emit a relocated one     |
 
-Names are byte-neutral; where a declaration fact could move bytes it enters the ranked
-candidates, and `--score-against`'s byte-diff still picks the winner.
+Every map fact is a ranked lever, never an override: naming a global can change an old
+compiler's codegen, so the named spelling and its raw-address sibling are both enumerated, and
+`--score-against`'s byte-diff picks the winner — a tie goes to the name. Unmapped addresses
+(MMIO registers, unnamed cells) keep the honest cast spelling.
 
 ### Producing the ELF
 
-asmlift only cares which sections end up in the one file `elf:` names — how they got there is
-your build's business, so mix and match:
+asmlift only cares which sections end up in the one file `elf:` names, so mix and match:
 
 - **Start with what you have.** Most decomp builds already link an ELF; pointing `elf:` at it
   lights up the `.symtab` channel with zero build changes.
 - **Types and signatures: compile with `-g`**, if your era compiler emits DWARF (agbcc does).
-  Debug sections are non-alloc, so the ROM bytes do not move — keep your project's checksum
-  gate on and let it prove that.
+  Debug sections are non-alloc and stay out of the image — keep your project's checksum gate
+  on and let it prove `-g` really moved nothing.
 - **When the compiler can't** (most era MIPS/PPC toolchains): build a _types-sidecar_ — a
   generated TU that `#include`s every project header, compiled by a **modern** cross-gcc for
   the same arch/ABI with `-g -fno-eliminate-unused-debug-types` — and merge its debug sections
@@ -121,8 +122,8 @@ your build's business, so mix and match:
 
 A worked example with all three channels is the Klonoa decomp's
 [`asmlift-elf` target](https://github.com/Dream-Atelier/kl-eod-decomp/blob/main/Makefile):
-agbcc `-g` for shapes and signatures, plus a macro-only sidecar graft, sha-verified on every
-build.
+agbcc `-g` for shapes and signatures, plus a macro-only sidecar graft; the project's default
+`make` sha-verifies the same link.
 
 ## Using it as a library
 
