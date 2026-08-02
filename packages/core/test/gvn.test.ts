@@ -11,7 +11,9 @@ import { parse } from '../src/ir/parse';
 import { print } from '../src/ir/print';
 import { simplifyTrivialPhis } from '../src/ir/simplify';
 import { verify } from '../src/ir/verify';
+import { decompile } from '../src/pipeline';
 import { numberPureValues } from '../src/raise/gvn';
+import { ARMV4T_AGBCC } from '../src/target';
 
 const TWO_ARMS = `fn f {
 ^bb0(%0: s32):
@@ -124,5 +126,27 @@ describe('trivial phis (ir/simplify.ts)', () => {
 `);
     expect(simplifyTrivialPhis(fn)).toBe(0);
     expect(fn.blocks[0].params).toHaveLength(1);
+  });
+});
+
+describe('the refusal found by the adversarial round', () => {
+  test('a group with a member in an UNREACHABLE block is left alone', () => {
+    // The entry dominates every REACHABLE block — not an unreachable one, whose dominator set
+    // converges to itself. Numbering across that boundary deletes the local definition and leaves
+    // the use reading the entry's, which fails verify and turns a fully-decompiled function into an
+    // ASMLIFT_ERROR stub. The thumb frontend deliberately keeps unreachable blocks, so the shape is
+    // supported rather than malformed.
+    const asm =
+      'f:\n\tpush\t{lr}\n\tldr\tr0, .L1\n\tldr\tr0, [r0]\n\tb\t.L3\n.L2:\n\tldr\tr1, .L1\n' +
+      '\tldr\tr1, [r1]\n\tadd\tr0, r0, r1\n.L3:\n\tpop\t{r1}\n\tbx\tr1\n.L1:\n\t.word\tgSeed\n';
+    const res = decompile('f', asm, ARMV4T_AGBCC, {}, 'annotate');
+    expect(res.source).toContain('gSeed');
+    expect(res.source).not.toContain('ASMLIFT_ERROR');
+  });
+
+  test('the pass still fires when every member IS reachable', () => {
+    const fn = parse(TWO_ARMS);
+    expect(numberPureValues(fn)).toBe(2);
+    verify(fn);
   });
 });

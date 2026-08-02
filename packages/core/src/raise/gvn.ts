@@ -31,8 +31,9 @@
 // once. The gate is a MATCHING policy, not a property of the opcode — which is why it is not a flag
 // on the opcode table, where `const` would satisfy it.
 //
-// PLACEMENT. One fresh definition per class is created in the ENTRY block, which dominates
-// everything, so no use can precede it (the originals are deleted rather than moved — a fresh Value
+// PLACEMENT. One fresh definition per class is created in the ENTRY block, which dominates every
+// REACHABLE block — so no reachable use can precede it (unreachable blocks are excluded from the
+// scan for exactly that reason; see `reachable` below) (the originals are deleted rather than moved — a fresh Value
 // keeps the rewrite uniform, including for a duplicate that was already in the entry block). That is safe here precisely because the op is free: `gaddr` lowers to
 // nothing on its own — the structurer inlines a pure non-`const` value at each use site (see
 // analysis.ts, whose materialize-into-a-local rule covers `const`, `call` and the memory reads, NOT
@@ -51,7 +52,7 @@
 // the same local, one level up. Three modules now answer "is this
 // address a local?" with independent policies (here: never; basecse: when reused 2+ times;
 // l3/scopebase.ts: at the innermost scope), and reconciling them is recorded debt.
-import { Fn, Op, Value, mkOp, replaceAllUsesWith } from '../ir/core';
+import { Block, Fn, Op, Value, mkOp, replaceAllUsesWith } from '../ir/core';
 
 /** Ops whose result depends on `attrs` alone — no operands, no memory, no control flow. */
 const NUMBERABLE = new Set(['gaddr']);
@@ -70,8 +71,33 @@ function keyOf(op: Op): string {
  * block. Returns the number of definitions removed (0 when nothing changed).
  */
 export function numberPureValues(fn: Fn): number {
+  // REACHABLE blocks only. The entry dominates everything REACHABLE — it does not dominate an
+  // unreachable block, and verify()'s dominator fixpoint models that faithfully (a block with no
+  // predecessors converges to dom = {itself}). Numbering a group with a member in such a block
+  // deletes its local definition and leaves the use reading one the entry holds, which fails
+  // `def does not dominate use` — turning a fully-decompiled function into an ASMLIFT_ERROR stub.
+  // Loud, not silent, but a real loss: the thumb frontend deliberately KEEPS unreachable blocks
+  // ("Other unreachable blocks are LEFT ALONE"), so this shape is supported, not malformed.
+  const reachable = new Set<Block>();
+  const walk = (b: Block): void => {
+    if (reachable.has(b)) {
+      return;
+    }
+    reachable.add(b);
+    for (const op of b.ops) {
+      for (const s of op.successors) {
+        walk(s.block);
+      }
+    }
+  };
+  if (fn.blocks[0]) {
+    walk(fn.blocks[0]);
+  }
   const groups = new Map<string, { op: Op; block: number }[]>();
   fn.blocks.forEach((b, bi) => {
+    if (!reachable.has(b)) {
+      return;
+    }
     for (const op of b.ops) {
       if (NUMBERABLE.has(op.opcode) && op.results.length === 1) {
         const k = keyOf(op);
