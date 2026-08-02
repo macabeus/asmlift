@@ -1,4 +1,16 @@
-// asmlift — boolean-value short-circuit recovery (F-CFG; successor-aware, agbcc-class).
+// asmlift — short-circuit connective recovery (F-CFG; successor-aware, agbcc-class).
+//
+// A `&&`/`||` reaches the IR in two shapes, and this module recovers BOTH into the SAME pair of
+// opcodes (`logic_and`/`logic_or`) the backend already prints as `&&`/`||`:
+//
+//   - the VALUE form (`return a && b`) — a diamond whose merge phi is the boolean. That is
+//     `recognizeShortCircuit`, described below.
+//   - the CONTROL-FLOW form (`if (a || b) X else Y`) — no value at all, just two `cond_br` blocks
+//     that share a target. That is `recognizeBranchShortCircuit`, at the bottom of this file.
+//
+// They are one concept and stay in one file, but they are separate passes because their inputs do
+// not overlap: the value form needs the second block to end in `br` carrying a phi argument, the
+// branch form needs it to end in `cond_br`.
 //
 // `return a && b` compiles (agbcc) to a value-producing diamond: `if (a==0) result=0; else result=(b!=0)`,
 // where the merge block returns the phi. The structurer lowers that as `if (a==0){v0=0}else{v0=(-b|b)>>31}
@@ -204,4 +216,175 @@ export function recognizeShortCircuit(fn: Fn): boolean {
     }
   }
   return changed;
+}
+
+// ── the CONTROL-FLOW form ───────────────────────────────────────────────────────────────────────
+//
+// `if (a || b) X else Y` produces no value: it is two `cond_br` blocks that SHARE a target.
+//
+//     ^h:  cond_br c1, ^X, ^g          <- `a`
+//     ^g:  … ; cond_br c2, ^Y, ^X      <- `b`   (sole predecessor ^h)
+//
+// Nothing in the tower recognizes that today, so the structurer reaches ^X from two arms and
+// TAIL-DUPLICATES it — `if (a) X else { if (b') Y else X }`. The duplicate is correct C but it is
+// not the C the compiler compiled, and the duplicated tail costs every byte it contains.
+//
+// The fold rewrites ^h's terminator to one `cond_br` over a connective and drops ^g. Which
+// connective, and which successor slot, follows from WHICH of ^h's edges leads to ^g:
+//
+//   ^g is ^h's FALL   → ^g runs iff !c1, so the SHARED block is taken iff `c1 || cShared`
+//                       ⇒ cond_br(logic_or(c1, cShared))[shared, other]
+//   ^g is ^h's TAKEN  → ^g runs iff  c1, so the OTHER  block is taken iff `c1 && cOther`
+//                       ⇒ cond_br(logic_and(c1, cOther))[other, shared]
+//
+// where `cShared`/`cOther` is ^g's own condition ORIENTED at that block — ^g's `cond_br` operand
+// when it already branches there, otherwise its negation (so ^g's condition must be a negatable
+// icmp, exactly as in the value form). Both spellings keep ^h's original successor ORDER for the
+// edge that did not change, so the branch sense the frontend read out of the asm is preserved.
+//
+// REFUSALS (each one a real way this could be wrong, not a hypothetical):
+//
+//   - ^g has a predecessor other than ^h — folding would delete a block still reachable elsewhere.
+//   - ^g has block params — ^h's edge binds them, and dropping the edge drops the binding.
+//   - ^g holds a side effect — its ops move into ^h, which runs UNCONDITIONALLY. A store in `b`
+//     would then execute even when `a` already decided the branch. (`a || (*p = 1)`.)
+//   - a value defined in ^g is used outside ^g, or used more than once. Then the structurer
+//     MATERIALIZES it into a local, which renders as a statement BEFORE the `if` — turning `b`'s
+//     conditional computation into an unconditional one. Single-use-and-local is precisely the
+//     shape analysis.ts inlines into the connective's right operand, where C's own short-circuit
+//     re-guards it. This is what keeps a load in `b` from being hoisted across the guard in `a`.
+//   - the two edges into the shared block carry DIFFERENT args. Only one edge survives the fold,
+//     so it can only carry one argument list; picking either would silently drop the other path's
+//     phi input.
+//   - ^g's two successors are the same block, or ^g's condition is not a negatable icmp when the
+//     orientation needs negating.
+//
+// Every refusal falls through untouched, leaving the tail-duplicated spelling — a miss, never a
+// miscompile. Applied ITERATIVELY, so `a || b || c` folds left-to-right, each round consuming one
+// more condition block.
+export function recognizeBranchShortCircuit(fn: Fn): boolean {
+  let changed = false;
+  const term = (b: Block) => b.ops[b.ops.length - 1];
+  let progress = true;
+  while (progress) {
+    progress = false;
+    const defs = defOpMap(fn);
+    const preds = predecessors(fn);
+    outer: for (const h of fn.blocks) {
+      const ht = term(h);
+      if (ht.opcode !== 'cond_br') {
+        continue;
+      }
+      const [taken, fall] = ht.successors;
+      // Try ^g = the fall edge, then ^g = the taken edge. `gIsFall` picks the connective.
+      for (const gIsFall of [true, false]) {
+        const gEdge = gIsFall ? fall : taken;
+        const sharedFromH = gIsFall ? taken : fall;
+        const g = gEdge.block;
+        if (g === h || g === sharedFromH.block || g.params.length > 0) {
+          continue;
+        }
+        if ((preds.get(g) ?? []).length !== 1) {
+          continue;
+        }
+        const gt = term(g);
+        if (gt.opcode !== 'cond_br') {
+          continue;
+        }
+        const [gTaken, gFall] = gt.successors;
+        if (gTaken.block === gFall.block) {
+          continue;
+        }
+        // ^g's body must be pure, and every value it defines must be consumed only by ^g itself —
+        // see the REFUSALS note: an escaping or reused value becomes a statement hoisted out of the
+        // short circuit.
+        const body = g.ops.slice(0, -1);
+        if (body.some((op) => SIDE_EFFECT.has(op.opcode))) {
+          continue;
+        }
+        if (!definedValuesStayLocal(fn, g)) {
+          continue;
+        }
+        // Which of ^g's edges rejoins ^h's other successor? That is the shared block.
+        const sharedEdge =
+          gTaken.block === sharedFromH.block ? gTaken : gFall.block === sharedFromH.block ? gFall : null;
+        if (!sharedEdge) {
+          continue;
+        }
+        const otherEdge = sharedEdge === gTaken ? gFall : gTaken;
+        if (!sameArgs(sharedFromH.args, sharedEdge.args)) {
+          continue;
+        }
+        // The second operand, oriented at the block whose slot it decides: `logic_or` asks "does ^g
+        // reach the SHARED block", `logic_and` asks "does ^g reach the OTHER block".
+        const wantEdge = gIsFall ? sharedEdge : otherEdge;
+        const c2 = gt.operands[0];
+        const c2Def = defs.get(c2);
+        let second = c2;
+        const negated: Op[] = [];
+        if (wantEdge !== gTaken) {
+          if (!c2Def || !NEGATE_ICMP[c2Def.opcode]) {
+            continue;
+          }
+          second = mkValue(T.unk(32));
+          negated.push(mkOp(NEGATE_ICMP[c2Def.opcode], { operands: [...c2Def.operands], results: [second] }));
+        }
+        const res = mkValue(T.unk(32));
+        const connective = mkOp(gIsFall ? 'logic_or' : 'logic_and', {
+          operands: [ht.operands[0], second],
+          results: [res],
+        });
+        // ^g's body moves ahead of ^h's terminator; ^h keeps the successor SLOT that did not change
+        // (taken=shared for `||`, taken=other for `&&`), so the frontend's branch sense survives.
+        h.ops.splice(h.ops.length - 1, 1, ...body, ...negated, connective, {
+          ...mkOp('cond_br', { operands: [res] }),
+          successors: gIsFall
+            ? [
+                { block: sharedEdge.block, args: [...sharedEdge.args] },
+                { block: otherEdge.block, args: [...otherEdge.args] },
+              ]
+            : [
+                { block: otherEdge.block, args: [...otherEdge.args] },
+                { block: sharedEdge.block, args: [...sharedEdge.args] },
+              ],
+        });
+        fn.blocks = fn.blocks.filter((x) => x !== g);
+        changed = true;
+        progress = true;
+        break outer; // defs/preds are stale after the mutation — recompute on the next round
+      }
+    }
+  }
+  return changed;
+}
+
+/** True when every value `g` defines is read at most once, and any read is inside `g`. */
+function definedValuesStayLocal(fn: Fn, g: Block): boolean {
+  const defined = new Set<Value>(g.ops.flatMap((op) => op.results));
+  if (defined.size === 0) {
+    return true;
+  }
+  const uses = new Map<Value, number>();
+  for (const b of fn.blocks) {
+    for (const op of b.ops) {
+      for (const v of [...op.operands, ...op.successors.flatMap((s) => s.args)]) {
+        if (!defined.has(v)) {
+          continue;
+        }
+        if (b !== g) {
+          return false; // escapes ^g — the structurer would render it before the `if`
+        }
+        uses.set(v, (uses.get(v) ?? 0) + 1);
+      }
+    }
+  }
+  // ZERO uses is fine — a dead op renders nothing at all, so it cannot escape the short circuit.
+  // TWO or more is not: analysis.ts materializes a multi-consumer value into a local, which is a
+  // statement, and a statement lands before the `if`.
+  return [...defined].every((v) => (uses.get(v) ?? 0) <= 1);
+}
+
+/** Two successor argument lists that a fold may collapse into one: same values, same order. */
+function sameArgs(a: Value[], b: Value[]): boolean {
+  return a.length === b.length && a.every((v, i) => v === b[i]);
 }

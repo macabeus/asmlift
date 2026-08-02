@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generatedAt": "2026-08-02T18:51:34.042Z",
+    "generatedAt": "2026-08-02T19:25:03.460Z",
     "toolchains": [
       "ido7.1",
       "agbcc",
@@ -14,8 +14,8 @@
       "real": 192
     },
     "asmlift": {
-      "commit": "6552b7f7e371c4b894afc4d2764578fb17a82760",
-      "dirty": false
+      "commit": "affe2373c5cc793a76f538029b0825b8671dcce9",
+      "dirty": true
     },
     "m2c": {
       "commit": "94098d4de68c2fcc13fb8cf1096a1520eb171abe"
@@ -2719,7 +2719,7 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-RBdYCy/c.c:1077: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-OsPy1e/c.c:1077: invalid operands to binary <<"
           }
         ],
         "symbolsUsed": [
@@ -3347,7 +3347,7 @@
         "droppedCandidates": [
           {
             "label": "unsigned",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-OKADE2/c.c:1076: `gBgDataPtrs' undeclared (first use in this function)"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-03Ab0Q/c.c:1076: `gBgDataPtrs' undeclared (first use in this function)"
           }
         ],
         "symbolsUsed": [],
@@ -4333,7 +4333,7 @@
         "droppedCandidates": [
           {
             "label": "unsigned",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-AK6MsS/c.c:1077: too many arguments to function `thunk_sub_080002A0'"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-WiNqbv/c.c:1077: too many arguments to function `thunk_sub_080002A0'"
           }
         ],
         "symbolsUsed": [],
@@ -4918,11 +4918,11 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-x6bCro/c.c:1088: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-8DZpOq/c.c:1086: incompatible types in assignment"
           },
           {
             "label": "signed/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-BRvVHt/c.c:1088: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-NvwW8i/c.c:1086: incompatible types in assignment"
           }
         ],
         "symbolsUsed": [
@@ -4940,22 +4940,22 @@
           }
         ],
         "outcome": "nonmatch",
-        "source": "s32 UpdateHUDCounterDisplay(u32 a0, u32 a1) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    u16 * v5;\n    if (gUnk_03004C20.unkA == 1) {\n        v2 = 100;\n    } else {\n        if (gUnk_03004C20.level != 6) {\n            v2 = 30;\n        } else {\n            v2 = 100;\n        }\n    }\n    v0 = *(u16 *)&gUnk_03005220;\n    if (v2 != (u32)(v0 << 20) >> 25) {\n        v3 = 0;\n    } else {\n        v3 = 1;\n    }\n    if (gUnk_03004C20.unkA == 1) {\n        if ((u32)(v0 << 20) >> 25 <= 99) {\n            v4 = 1;\n            v5 = &gBgTilemapBufs;\n        } else {\n            gBgTilemapBufs[0][594] = gBgTilemapBufs[0][659];\n            gBgTilemapBufs[0][626] = gBgTilemapBufs[0][691];\n            v4 = 1;\n            v5 = &gBgTilemapBufs;\n        }\n    } else {\n        if (gUnk_03004C20.level != 6) {\n            v4 = 0;\n            v5 = &gBgTilemapBufs;\n        } else {\n            if ((u32)(v0 << 20) >> 25 <= 99) {\n                v4 = 1;\n                v5 = &gBgTilemapBufs;\n            } else {\n                gBgTilemapBufs[0][594] = gBgTilemapBufs[0][659];\n                gBgTilemapBufs[0][626] = gBgTilemapBufs[0][691];\n                v4 = 1;\n                v5 = &gBgTilemapBufs;\n            }\n        }\n    }\n    v1 = *(u16 *)&gUnk_03005220;\n    if ((u32)(v1 << 20) >> 25 > 9) {\n        v5[(149 << 2) - v4] = v5[((u32)(v1 << 20) >> 25) / 10 + 658];\n        v5[(157 << 2) - v4] = v5[((u32)(*(u16 *)&gUnk_03005220 << 20) >> 25) / 10 + 690];\n    }\n    v5[597 - v4] = v5[((u32)(*(u16 *)&gUnk_03005220 << 20) >> 25) % 10 + 658];\n    v5[629 - v4] = v5[((u32)(*(u16 *)&gUnk_03005220 << 20) >> 25) % 10 + 690];\n    return v3;\n}\n",
-        "score": 127,
-        "maxScore": 181,
+        "source": "s32 UpdateHUDCounterDisplay(u32 a0, u32 a1) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    u16 * v5;\n    if (gUnk_03004C20.unkA == 1 || gUnk_03004C20.level == 6) {\n        v2 = 100;\n    } else {\n        v2 = 30;\n    }\n    v0 = *(u16 *)&gUnk_03005220;\n    if (v2 != (u32)(v0 << 20) >> 25) {\n        v3 = 0;\n    } else {\n        v3 = 1;\n    }\n    if (gUnk_03004C20.unkA == 1 || gUnk_03004C20.level == 6) {\n        if ((u32)(v0 << 20) >> 25 <= 99) {\n            v4 = 1;\n            v5 = &gBgTilemapBufs;\n        } else {\n            gBgTilemapBufs[0][594] = gBgTilemapBufs[0][659];\n            gBgTilemapBufs[0][626] = gBgTilemapBufs[0][691];\n            v4 = 1;\n            v5 = &gBgTilemapBufs;\n        }\n    } else {\n        v4 = 0;\n        v5 = &gBgTilemapBufs;\n    }\n    v1 = *(u16 *)&gUnk_03005220;\n    if ((u32)(v1 << 20) >> 25 > 9) {\n        v5[(149 << 2) - v4] = v5[((u32)(v1 << 20) >> 25) / 10 + 658];\n        v5[(157 << 2) - v4] = v5[((u32)(*(u16 *)&gUnk_03005220 << 20) >> 25) / 10 + 690];\n    }\n    v5[597 - v4] = v5[((u32)(*(u16 *)&gUnk_03005220 << 20) >> 25) % 10 + 658];\n    v5[629 - v4] = v5[((u32)(*(u16 *)&gUnk_03005220 << 20) >> 25) % 10 + 690];\n    return v3;\n}\n",
+        "score": 81,
+        "maxScore": 155,
         "compileErrors": null,
         "breakdown": {
-          "insert": 45,
-          "delete": 20,
-          "replace": 5,
-          "opMismatch": 9,
-          "argMismatch": 48
+          "insert": 19,
+          "delete": 16,
+          "replace": 0,
+          "opMismatch": 3,
+          "argMismatch": 43
         },
         "quality": {
           "score": 88,
-          "lines": 57,
+          "lines": 41,
           "gotos": 0,
-          "casts": 13,
+          "casts": 12,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -4987,15 +4987,15 @@
       },
       "gapSize": {
         "decompiler": "asmlift",
-        "score": 127,
-        "maxScore": 181,
-        "ratio": 0.7016574585635359,
+        "score": 81,
+        "maxScore": 155,
+        "ratio": 0.5225806451612903,
         "kinds": {
-          "insert": 45,
-          "delete": 20,
-          "replace": 5,
-          "opMismatch": 9,
-          "argMismatch": 48
+          "insert": 19,
+          "delete": 16,
+          "replace": 0,
+          "opMismatch": 3,
+          "argMismatch": 43
         }
       },
       "scripts": {
@@ -8541,7 +8541,7 @@
           }
         ],
         "outcome": "nonmatch",
-        "source": "struct Elem0 { u8 _pad0[16]; u8 field_16; u8 _pad1[11]; };\ns32 GetGenderFromSpeciesAndPersonality(u32 a0, u32 a1) {\n    s32 v0;\n    if (((struct Elem0 *)&gSpeciesInfo)[(u16)a0].field_16 == 0) {\n        v0 = ((struct Elem0 *)&gSpeciesInfo)[(u16)a0].field_16;\n    } else {\n        if (((struct Elem0 *)&gSpeciesInfo)[(u16)a0].field_16 < 0) {\n            if (((struct Elem0 *)&gSpeciesInfo)[(u16)a0].field_16 > (255 & a1)) {\n                v0 = 254;\n            } else {\n                v0 = 0;\n            }\n        } else {\n            if (((struct Elem0 *)&gSpeciesInfo)[(u16)a0].field_16 > 255) {\n                if (((struct Elem0 *)&gSpeciesInfo)[(u16)a0].field_16 > (255 & a1)) {\n                    v0 = 254;\n                } else {\n                    v0 = 0;\n                }\n            } else {\n                if (((struct Elem0 *)&gSpeciesInfo)[(u16)a0].field_16 >= 254) {\n                    v0 = ((struct Elem0 *)&gSpeciesInfo)[(u16)a0].field_16;\n                } else {\n                    if (((struct Elem0 *)&gSpeciesInfo)[(u16)a0].field_16 > (255 & a1)) {\n                        v0 = 254;\n                    } else {\n                        v0 = 0;\n                    }\n                }\n            }\n        }\n    }\n    return v0;\n}\n",
+        "source": "struct Elem0 { u8 _pad0[16]; u8 field_16; u8 _pad1[11]; };\ns32 GetGenderFromSpeciesAndPersonality(u32 a0, u32 a1) {\n    s32 v0;\n    if (((struct Elem0 *)&gSpeciesInfo)[(u16)a0].field_16 == 0) {\n        v0 = ((struct Elem0 *)&gSpeciesInfo)[(u16)a0].field_16;\n    } else {\n        if (((struct Elem0 *)&gSpeciesInfo)[(u16)a0].field_16 < 0 || ((struct Elem0 *)&gSpeciesInfo)[(u16)a0].field_16 > 255 || ((struct Elem0 *)&gSpeciesInfo)[(u16)a0].field_16 < 254) {\n            if (((struct Elem0 *)&gSpeciesInfo)[(u16)a0].field_16 > (255 & a1)) {\n                v0 = 254;\n            } else {\n                v0 = 0;\n            }\n        } else {\n            v0 = ((struct Elem0 *)&gSpeciesInfo)[(u16)a0].field_16;\n        }\n    }\n    return v0;\n}\n",
         "score": 32,
         "maxScore": 37,
         "compileErrors": null,
@@ -8549,14 +8549,14 @@
           "insert": 6,
           "delete": 9,
           "replace": 4,
-          "opMismatch": 5,
-          "argMismatch": 8
+          "opMismatch": 4,
+          "argMismatch": 9
         },
         "quality": {
-          "score": 88,
-          "lines": 34,
+          "score": 90,
+          "lines": 18,
           "gotos": 0,
-          "casts": 9,
+          "casts": 7,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -8720,23 +8720,23 @@
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "candidateLabel": "signed",
+        "candidateLabel": "unsigned",
         "symbolsUsed": [],
         "outcome": "nonmatch",
-        "source": "s32 IsStringLengthAtLeast(s32 a0, s32 a1) {\n    s32 v0;\n    if (0 < a1) {\n        v0 = 0;\n        do {\n            if (*(u8 *)(a0 + v0) != 0) {\n                if (*(u8 *)(a0 + v0) != 255) return 1;\n            }\n            v0 = (u8)(v0 + 1);\n        } while (v0 < a1);\n        return 0;\n    } else {\n        return 0;\n    }\n}\n",
-        "score": 10,
-        "maxScore": 23,
+        "source": "s32 IsStringLengthAtLeast(u32 a0, u32 a1) {\n    s32 v0;\n    if (0 < a1) {\n        v0 = 0;\n        while (*(u8 *)(a0 + v0) == 0 || *(u8 *)(a0 + v0) == 255) {\n            v0 = (u8)(v0 + 1);\n            if (v0 >= a1) return 0;\n        }\n        return 1;\n    } else {\n        return 0;\n    }\n}\n",
+        "score": 20,
+        "maxScore": 27,
         "compileErrors": null,
         "breakdown": {
-          "insert": 4,
-          "delete": 3,
-          "replace": 0,
+          "insert": 8,
+          "delete": 6,
+          "replace": 1,
           "opMismatch": 2,
-          "argMismatch": 1
+          "argMismatch": 3
         },
         "quality": {
           "score": 90,
-          "lines": 15,
+          "lines": 13,
           "gotos": 0,
           "casts": 3,
           "unkGlue": 0,
@@ -8766,15 +8766,15 @@
       },
       "gapSize": {
         "decompiler": "asmlift",
-        "score": 10,
-        "maxScore": 23,
-        "ratio": 0.43478260869565216,
+        "score": 20,
+        "maxScore": 27,
+        "ratio": 0.7407407407407407,
         "kinds": {
-          "insert": 4,
-          "delete": 3,
-          "replace": 0,
+          "insert": 8,
+          "delete": 6,
+          "replace": 1,
           "opMismatch": 2,
-          "argMismatch": 1
+          "argMismatch": 3
         }
       },
       "scripts": {
@@ -17437,24 +17437,24 @@
       "asmDump": "\ntarget.o:     file format elf32-powerpc\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 ref.c\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .mwcats.text\t00000000 .mwcats.text\n00000000 g     F .text\t000000b0 arraysum\n\n\nRELOCATION RECORDS FOR [.mwcats.text]:\nOFFSET   TYPE              VALUE\n00000004 R_PPC_ADDR32      arraysum\n\n\nContents of section .text:\n 0000 2c040000 38e00000 39000000 4081009c  ,...8...9...@...\n 0010 2c040008 38a4fff8 40810068 38050007  ,...8...@..h8...\n 0020 7c661b78 5400e8fe 7c0903a6 2c050000  |f.xT...|...,...\n 0030 40810050 80a60000 39080008 80060004  @..P....9.......\n 0040 7ce72a14 80a60008 7ce70214 8006000c  |.*.....|.......\n 0050 7ce72a14 80a60010 7ce70214 80060014  |.*.....|.......\n 0060 7ce72a14 80a60018 7ce70214 8006001c  |.*.....|.......\n 0070 7ce72a14 38c60020 7ce70214 4200ffb8  |.*.8.. |...B...\n 0080 5505103a 7c082050 7c632a14 7c0903a6  U..:|. P|c*.|...\n 0090 7c082000 40800014 80030000 38630004  |. .@.......8c..\n 00a0 7ce70214 4200fff4 7ce33b78 4e800020  |...B...|.;xN.. \nContents of section .mwcats.text:\n 0000 020000b0 00000000                    ........        \nContents of section .comment:\n 0000 436f6465 57617272 696f720a 02040201  CodeWarrior.....\n 0010 01020016 2c000000 00000000 00000000  ....,...........\n 0020 00000000 00000000 00000000 00000000  ................\n 0030 00000000 00000001 00000000 00000004  ................\n 0040 00000000 00000004 00000000 00000004  ................\n 0050 00000000                             ....            \n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned",
+        "candidateLabel": "signed",
         "outcome": "nonmatch",
-        "source": "s32 arraysum(s32 * a0, u32 a1) {\n    s32 * v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 * v4;\n    s32 v5;\n    s32 v6;\n    if (a1 <= 0) {\n        v2 = 0;\n    } else {\n        if (a1 <= 8) {\n            v1 = 0;\n            v2 = 0;\n        } else {\n            v0 = a0;\n            v1 = 0;\n            v2 = 0;\n            for (v3 = a1 + -8 + 7 >> 3; v3 != 0; v3 = v3 - 1) {\n                v1 = v1 + 8;\n                v2 = v2 + *v0 + v0[1] + v0[2] + v0[3] + v0[4] + v0[5] + v0[6] + v0[7];\n                v0 = v0 + 8;\n            }\n        }\n        v5 = v2;\n        v6 = a1 - v1;\n        v4 = a0 + (v1 << 2);\n        while (v6 != 0) {\n            v5 = v5 + *v4;\n            v4 = v4 + 1;\n            v6 = v6 - 1;\n        }\n        v2 = v5;\n    }\n    return v2;\n}\n",
-        "score": 113,
-        "maxScore": 120,
+        "source": "s32 arraysum(s32 * a0, s32 a1) {\n    s32 * v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 * v4;\n    s32 v5;\n    s32 v6;\n    if (a1 <= 0) {\n        v2 = 0;\n    } else {\n        v0 = a0;\n        v1 = 0;\n        v2 = 0;\n        for (v3 = (u32)(a1 + -8 + 7) >> 3; v3 != 0; v3 = v3 - 1) {\n            v1 = v1 + 8;\n            v2 = v2 + *v0 + v0[1] + v0[2] + v0[3] + v0[4] + v0[5] + v0[6] + v0[7];\n            v0 = v0 + 8;\n        }\n        v5 = v2;\n        v6 = a1 - v1;\n        v4 = a0 + (v1 << 2);\n        while (v6 != 0) {\n            v5 = v5 + *v4;\n            v4 = v4 + 1;\n            v6 = v6 - 1;\n        }\n        v2 = v5;\n    }\n    return v2;\n}\n",
+        "score": 107,
+        "maxScore": 115,
         "compileErrors": null,
         "breakdown": {
-          "insert": 76,
+          "insert": 71,
           "delete": 3,
           "replace": 6,
-          "opMismatch": 6,
-          "argMismatch": 22
+          "opMismatch": 4,
+          "argMismatch": 23
         },
         "quality": {
           "score": 100,
-          "lines": 36,
+          "lines": 31,
           "gotos": 0,
-          "casts": 0,
+          "casts": 1,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -17486,15 +17486,15 @@
       },
       "gapSize": {
         "decompiler": "asmlift",
-        "score": 113,
-        "maxScore": 120,
-        "ratio": 0.9416666666666667,
+        "score": 107,
+        "maxScore": 115,
+        "ratio": 0.9304347826086956,
         "kinds": {
-          "insert": 76,
+          "insert": 71,
           "delete": 3,
           "replace": 6,
-          "opMismatch": 6,
-          "argMismatch": 22
+          "opMismatch": 4,
+          "argMismatch": 23
         }
       },
       "scripts": {
@@ -19276,23 +19276,28 @@
       "targetAsm": "@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tbreakloop\n\t.type\t breakloop,function\n\t.thumb_func\nbreakloop:\n\tadd\tr2, r0, #0\n\tmov\tr3, #0x0\n\tb\t.L9\n.L5:\n\tadd\tr2, r2, #0x4\n\tadd\tr3, r3, #0x1\n.L9:\n\tcmp\tr3, r1\n\tbge\t.L4\t@cond_branch\n\tldr\tr0, [r2]\n\tcmp\tr0, #0\n\tbge\t.L5\t@cond_branch\n.L4:\n\tadd\tr0, r3, #0\n\tbx\tlr\n.Lfe1:\n\t.size\t breakloop,.Lfe1-breakloop\n",
       "asmlift": {
         "decompiler": "asmlift",
-        "outcome": "declined",
-        "source": "/* asmlift could not decompile 'breakloop' — structure: cannot structure 'breakloop': unrecovered back-edge into block #2 (loop-recovery declined this shape: multi-latch, irreducible/overlapping loops, a conditional continue, or an unsafe break) */\n/* original assembly: */\n/*   @ Generated by gcc 2.9-arm-000512 for Thumb/elf */\n/*   \t.code\t16 */\n/*   .gcc2_compiled.: */\n/*   .text */\n/*   \t.align\t2, 0 */\n/*   \t.globl\tbreakloop */\n/*   \t.type\t breakloop,function */\n/*   \t.thumb_func */\n/*   breakloop: */\n/*   \tadd\tr2, r0, #0 */\n/*   \tmov\tr3, #0x0 */\n/*   \tb\t.L9 */\n/*   .L5: */\n/*   \tadd\tr2, r2, #0x4 */\n/*   \tadd\tr3, r3, #0x1 */\n/*   .L9: */\n/*   \tcmp\tr3, r1 */\n/*   \tbge\t.L4\t@cond_branch */\n/*   \tldr\tr0, [r2] */\n/*   \tcmp\tr0, #0 */\n/*   \tbge\t.L5\t@cond_branch */\n/*   .L4: */\n/*   \tadd\tr0, r3, #0 */\n/*   \tbx\tlr */\n/*   .Lfe1: */\n/*   \t.size\t breakloop,.Lfe1-breakloop */\nvoid breakloop(void) {\n    ASMLIFT_ERROR(\"could not decompile (structure): cannot structure 'breakloop': unrecovered back-edge into block #2 (loop-recovery declined this shape: multi-latch, irreducible/overlapping loops, a conditional continue, or an unsafe break)\");\n}\n",
-        "score": null,
-        "maxScore": null,
+        "candidateLabel": "signed",
+        "outcome": "match",
+        "source": "s32 breakloop(s32 * a0, s32 a1) {\n    s32 v0;\n    s32 * v1;\n    v1 = a0;\n    for (v0 = 0; !(v0 >= a1 || *v1 < 0); v0 = v0 + 1) {\n        v1 = v1 + 1;\n    }\n    return v0;\n}\n",
+        "score": 0,
+        "maxScore": 12,
         "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 0
+        },
         "quality": {
-          "score": 88,
-          "lines": 31,
+          "score": 100,
+          "lines": 9,
           "gotos": 0,
-          "casts": 1,
-          "unkGlue": 1,
+          "casts": 0,
+          "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
-        },
-        "errorMarkers": [
-          "structure: cannot structure 'breakloop': unrecovered back-edge into block #2 (loop-recovery declined this shape: multi-latch, irreducible/overlapping loops, a conditional continue, or an unsafe break)"
-        ]
+        }
       },
       "m2c": {
         "decompiler": "m2c",
@@ -19318,19 +19323,7 @@
           "addrDeref": 0
         }
       },
-      "gapSize": {
-        "decompiler": "m2c",
-        "score": 7,
-        "maxScore": 15,
-        "ratio": 0.4666666666666667,
-        "kinds": {
-          "insert": 3,
-          "delete": 3,
-          "replace": 0,
-          "opMismatch": 1,
-          "argMismatch": 0
-        }
-      },
+      "gapSize": null,
       "scripts": {
         "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `breakloop` — benchmark function synthetic:breakloop:agbcc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit 94098d4:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout 94098d4de68c2fcc13fb8cf1096a1520eb171abe\nM2C_PATH='/path/to/m2c'\n\n# The exact agbcc `.s` text the benchmark fed m2c, verbatim.\ncat > in.s <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tbreakloop\n\t.type\t breakloop,function\n\t.thumb_func\nbreakloop:\n\tadd\tr2, r0, #0\n\tmov\tr3, #0x0\n\tb\t.L9\n.L5:\n\tadd\tr2, r2, #0x4\n\tadd\tr3, r3, #0x1\n.L9:\n\tcmp\tr3, r1\n\tbge\t.L4\t@cond_branch\n\tldr\tr0, [r2]\n\tcmp\tr0, #0\n\tbge\t.L5\t@cond_branch\n.L4:\n\tadd\tr0, r3, #0\n\tbx\tlr\n.Lfe1:\n\t.size\t breakloop,.Lfe1-breakloop\nASM_INPUT\n\n# (This function ran with NO context header — the benchmark fed m2c the assembly alone.)\n\nargs=(\n  --target gba            # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function breakloop    # the symbol to decompile from in.s\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
         "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `breakloop` — benchmark function synthetic:breakloop:agbcc.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:breakloop:agbcc --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact agbcc `.s` text.\ncat > in.asm <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tbreakloop\n\t.type\t breakloop,function\n\t.thumb_func\nbreakloop:\n\tadd\tr2, r0, #0\n\tmov\tr3, #0x0\n\tb\t.L9\n.L5:\n\tadd\tr2, r2, #0x4\n\tadd\tr3, r3, #0x1\n.L9:\n\tcmp\tr3, r1\n\tbge\t.L4\t@cond_branch\n\tldr\tr0, [r2]\n\tcmp\tr0, #0\n\tbge\t.L5\t@cond_branch\n.L4:\n\tadd\tr0, r3, #0\n\tbx\tlr\n.Lfe1:\n\t.size\t breakloop,.Lfe1-breakloop\nASM_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target agbcc          # frontend + target description (ISA, calling convention, compiler idioms)\n  --name breakloop        # the symbol to decompile (multi-function input selects by name)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
@@ -27384,24 +27377,24 @@
       "asmDump": "\ntarget.o:     file format elf32-powerpc\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 ref.c\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .mwcats.text\t00000000 .mwcats.text\n00000000 g     F .text\t00000084 fib\n\n\nRELOCATION RECORDS FOR [.mwcats.text]:\nOFFSET   TYPE              VALUE\n00000004 R_PPC_ADDR32      fib\n\n\nContents of section .text:\n 0000 2c030000 38c00000 38a00001 38e00000  ,...8...8...8...\n 0010 4081006c 2c030008 3883fff8 40810040  @..l,...8...@..@\n 0020 38040007 5400e8fe 7c0903a6 2c040000  8...T...|...,...\n 0030 4081002c 7c862a14 38e70008 7c052214  @..,|.*.8...|.\".\n 0040 7c840214 7c002214 7c840214 7c002214  |...|.\".|...|.\".\n 0050 7cc40214 7ca03214 4200ffdc 7c071850  |...|.2.B...|..P\n 0060 7c0903a6 7c071800 40800014 7c062a14  |...|...@...|.*.\n 0070 7ca62b78 7c050378 4200fff4 7cc33378  |.+x|..xB...|.3x\n 0080 4e800020                             N..             \nContents of section .mwcats.text:\n 0000 02000084 00000000                    ........        \nContents of section .comment:\n 0000 436f6465 57617272 696f720a 02040201  CodeWarrior.....\n 0010 01020016 2c000000 00000000 00000000  ....,...........\n 0020 00000000 00000000 00000000 00000000  ................\n 0030 00000000 00000001 00000000 00000004  ................\n 0040 00000000 00000004 00000000 00000004  ................\n 0050 00000000                             ....            \n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned",
+        "candidateLabel": "signed",
         "outcome": "nonmatch",
-        "source": "s32 fib(u32 a0) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    s32 v5;\n    s32 v6;\n    s32 t0;\n    s32 t1;\n    if (a0 <= 0) {\n        v0 = 0;\n    } else {\n        if (a0 <= 8) {\n            v2 = 0;\n            v0 = 0;\n            v1 = 1;\n        } else {\n            v0 = 0;\n            v1 = 1;\n            v2 = 0;\n            v3 = a0 + -8 + 7 >> 3;\n            while (v3 != 0) {\n                v2 = v2 + 8;\n                v3 = v3 - 1;\n                t0 = v0;\n                v0 = v0 + v1 + (v1 + (v0 + v1)) + (v1 + (v0 + v1) + (v0 + v1 + (v1 + (v0 + v1)))) + (v1 + (v0 + v1) + (v0 + v1 + (v1 + (v0 + v1))) + (v0 + v1 + (v1 + (v0 + v1)) + (v1 + (v0 + v1) + (v0 + v1 + (v1 + (v0 + v1))))));\n                v1 = v1 + (t0 + v1) + (t0 + v1 + (v1 + (t0 + v1))) + (t0 + v1 + (v1 + (t0 + v1)) + (v1 + (t0 + v1) + (t0 + v1 + (v1 + (t0 + v1))))) + (t0 + v1 + (v1 + (t0 + v1)) + (v1 + (t0 + v1) + (t0 + v1 + (v1 + (t0 + v1)))) + (v1 + (t0 + v1) + (t0 + v1 + (v1 + (t0 + v1))) + (t0 + v1 + (v1 + (t0 + v1)) + (v1 + (t0 + v1) + (t0 + v1 + (v1 + (t0 + v1)))))));\n            }\n        }\n        v4 = v0;\n        v5 = v1;\n        v6 = a0 - v2;\n        while (v6 != 0) {\n            v6 = v6 - 1;\n            t1 = v4;\n            v4 = v5;\n            v5 = t1 + v5;\n        }\n        v0 = v4;\n    }\n    return v0;\n}\n",
-        "score": 129,
-        "maxScore": 133,
+        "source": "s32 fib(s32 a0) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    s32 v5;\n    s32 v6;\n    s32 t0;\n    s32 t1;\n    if (a0 <= 0) {\n        v0 = 0;\n    } else {\n        v0 = 0;\n        v1 = 1;\n        v2 = 0;\n        v3 = (u32)(a0 + -8 + 7) >> 3;\n        while (v3 != 0) {\n            v2 = v2 + 8;\n            v3 = v3 - 1;\n            t0 = v0;\n            v0 = v0 + v1 + (v1 + (v0 + v1)) + (v1 + (v0 + v1) + (v0 + v1 + (v1 + (v0 + v1)))) + (v1 + (v0 + v1) + (v0 + v1 + (v1 + (v0 + v1))) + (v0 + v1 + (v1 + (v0 + v1)) + (v1 + (v0 + v1) + (v0 + v1 + (v1 + (v0 + v1))))));\n            v1 = v1 + (t0 + v1) + (t0 + v1 + (v1 + (t0 + v1))) + (t0 + v1 + (v1 + (t0 + v1)) + (v1 + (t0 + v1) + (t0 + v1 + (v1 + (t0 + v1))))) + (t0 + v1 + (v1 + (t0 + v1)) + (v1 + (t0 + v1) + (t0 + v1 + (v1 + (t0 + v1)))) + (v1 + (t0 + v1) + (t0 + v1 + (v1 + (t0 + v1))) + (t0 + v1 + (v1 + (t0 + v1)) + (v1 + (t0 + v1) + (t0 + v1 + (v1 + (t0 + v1)))))));\n        }\n        v4 = v0;\n        v5 = v1;\n        v6 = a0 - v2;\n        while (v6 != 0) {\n            v6 = v6 - 1;\n            t1 = v4;\n            v4 = v5;\n            v5 = t1 + v5;\n        }\n        v0 = v4;\n    }\n    return v0;\n}\n",
+        "score": 122,
+        "maxScore": 127,
         "compileErrors": null,
         "breakdown": {
-          "insert": 100,
+          "insert": 94,
           "delete": 4,
-          "replace": 4,
-          "opMismatch": 4,
-          "argMismatch": 17
+          "replace": 3,
+          "opMismatch": 5,
+          "argMismatch": 16
         },
         "quality": {
           "score": 100,
-          "lines": 43,
+          "lines": 37,
           "gotos": 0,
-          "casts": 0,
+          "casts": 1,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -31698,22 +31691,22 @@
       "targetAsm": "@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tllcmp\n\t.type\t llcmp,function\n\t.thumb_func\nllcmp:\n\tpush\t{r4, lr}\n\tmov\tr4, #0x0\n\tcmp\tr3, r1\n\tbgt\t.L4\t@cond_branch\n\tcmp\tr3, r1\n\tbne\t.L3\t@cond_branch\n\tcmp\tr2, r0\n\tbls\t.L3\t@cond_branch\n.L4:\n\tmov\tr4, #0x1\n.L3:\n\tadd\tr0, r4, #0\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n.Lfe1:\n\t.size\t llcmp,.Lfe1-llcmp\n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned/flip-branch",
+        "candidateLabel": "unsigned",
         "outcome": "nonmatch",
-        "source": "s32 llcmp(u32 a0, u32 a1, u32 a2, u32 a3) {\n    s32 v0;\n    if (a3 > a1) {\n        return 1;\n    } else {\n        if (a3 != a1) {\n            v0 = 0;\n            return v0;\n        } else {\n            if (a2 <= a0) {\n                v0 = 0;\n                return v0;\n            } else {\n                return 1;\n            }\n        }\n    }\n}\n",
-        "score": 9,
+        "source": "s32 llcmp(u32 a0, u32 a1, u32 a2, u32 a3) {\n    s32 v0;\n    if (a3 <= a1) {\n        if (!(a3 != a1 || a2 <= a0)) {\n            return 1;\n        } else {\n            v0 = 0;\n            return v0;\n        }\n    } else {\n        return 1;\n    }\n}\n",
+        "score": 11,
         "maxScore": 14,
         "compileErrors": null,
         "breakdown": {
           "insert": 1,
           "delete": 4,
           "replace": 0,
-          "opMismatch": 1,
-          "argMismatch": 3
+          "opMismatch": 2,
+          "argMismatch": 4
         },
         "quality": {
           "score": 100,
-          "lines": 18,
+          "lines": 13,
           "gotos": 0,
           "casts": 0,
           "unkGlue": 0,
@@ -31770,22 +31763,22 @@
       "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /host-tmp/asmlift-mgcc-ref-87d3352b1f51be25/ref.c\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t0000002c llcmp\n\n\nContents of section .text:\n 0000 0086102a 14400006 00001821 14c40005  ...*.@.....!....\n 0010 00000000 00a7102b 10400002 00000000  .......+.@......\n 0020 24030001 03e00008 00601021 00000000  $........`.!....\nContents of section .reginfo:\n 0000 800000fc 00000000 00000000 00000000  ................\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.              \n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "signed",
+        "candidateLabel": "signed/flip-branch",
         "outcome": "nonmatch",
-        "source": "s32 llcmp(s32 a0, s32 a1, s32 a2, s32 a3) {\n    s32 v1;\n    if (a0 >= a2) {\n        if (a2 == a0) {\n            if (a1 < a3) {\n                return 1;\n            } else {\n                v1 = 0;\n                return v1;\n            }\n        } else {\n            v1 = 0;\n            return v1;\n        }\n    } else {\n        return 1;\n    }\n}\n",
-        "score": 12,
-        "maxScore": 14,
+        "source": "s32 llcmp(s32 a0, s32 a1, s32 a2, s32 a3) {\n    s32 v1;\n    if (a0 < a2) {\n        return 1;\n    } else {\n        if (a2 != a0 || a1 >= a3) {\n            v1 = 0;\n            return v1;\n        } else {\n            return 1;\n        }\n    }\n}\n",
+        "score": 10,
+        "maxScore": 12,
         "compileErrors": null,
         "breakdown": {
-          "insert": 3,
-          "delete": 6,
-          "replace": 2,
+          "insert": 1,
+          "delete": 1,
+          "replace": 6,
           "opMismatch": 0,
-          "argMismatch": 1
+          "argMismatch": 2
         },
         "quality": {
           "score": 100,
-          "lines": 18,
+          "lines": 13,
           "gotos": 0,
           "casts": 0,
           "unkGlue": 0,
@@ -33502,9 +33495,9 @@
       "targetAsm": "@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tlor\n\t.type\t lor,function\n\t.thumb_func\nlor:\n\tmov\tr2, #0x0\n\tcmp\tr0, #0\n\tbne\t.L4\t@cond_branch\n\tcmp\tr1, #0\n\tbeq\t.L3\t@cond_branch\n.L4:\n\tmov\tr2, #0x1\n.L3:\n\tadd\tr0, r2, #0\n\tbx\tlr\n.Lfe1:\n\t.size\t lor,.Lfe1-lor\n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned/flip-branch",
+        "candidateLabel": "unsigned",
         "outcome": "nonmatch",
-        "source": "s32 lor(u32 a0, u32 a1) {\n    s32 v0;\n    if (a0 != 0) {\n        return 1;\n    } else {\n        if (a1 == 0) {\n            v0 = 0;\n            return v0;\n        } else {\n            return 1;\n        }\n    }\n}\n",
+        "source": "s32 lor(u32 a0, u32 a1) {\n    s32 v0;\n    if (a0 != 0 || a1 != 0) {\n        v0 = 1;\n    } else {\n        v0 = 0;\n    }\n    return v0;\n}\n",
         "score": 4,
         "maxScore": 9,
         "compileErrors": null,
@@ -33517,7 +33510,7 @@
         },
         "quality": {
           "score": 100,
-          "lines": 13,
+          "lines": 9,
           "gotos": 0,
           "casts": 0,
           "unkGlue": 0,
@@ -33732,20 +33725,20 @@
         "decompiler": "asmlift",
         "candidateLabel": "signed",
         "outcome": "nonmatch",
-        "source": "s32 lor(s32 a0, s32 a1) {\n    if (a0 == 0) {\n        if (a1 != 0) {\n            return 1;\n        } else {\n            return 0;\n        }\n    } else {\n        return 1;\n    }\n}\n",
-        "score": 5,
+        "source": "s32 lor(s32 a0, s32 a1) {\n    if (!(a0 != 0 || a1 != 0)) {\n        return 0;\n    } else {\n        return 1;\n    }\n}\n",
+        "score": 4,
         "maxScore": 9,
         "compileErrors": null,
         "breakdown": {
           "insert": 2,
           "delete": 1,
-          "replace": 1,
+          "replace": 0,
           "opMismatch": 1,
           "argMismatch": 0
         },
         "quality": {
           "score": 100,
-          "lines": 11,
+          "lines": 7,
           "gotos": 0,
           "casts": 0,
           "unkGlue": 0,
@@ -33779,13 +33772,13 @@
       },
       "gapSize": {
         "decompiler": "asmlift",
-        "score": 5,
+        "score": 4,
         "maxScore": 9,
-        "ratio": 0.5555555555555556,
+        "ratio": 0.4444444444444444,
         "kinds": {
           "insert": 2,
           "delete": 1,
-          "replace": 1,
+          "replace": 0,
           "opMismatch": 1,
           "argMismatch": 0
         }
@@ -35262,20 +35255,20 @@
         "decompiler": "asmlift",
         "candidateLabel": "signed",
         "outcome": "nonmatch",
-        "source": "void memcpy1(s32 a0, s32 a1, s32 a2) {\n    s32 v0;\n    s32 v1;\n    u8 * v2;\n    u8 * v3;\n    s32 v4;\n    if (a2 > 0) {\n        if (a2 <= 8) {\n            v0 = 0;\n        } else {\n            v0 = 0;\n            for (v1 = (u32)(a2 + -8 + 7) >> 3; v1 != 0; v1 = v1 - 1) {\n                *(u8 *)(a0 + v0) = *(u8 *)(a1 + v0);\n                ((u8 *)(a0 + v0))[1] = ((u8 *)(a1 + v0))[1];\n                ((u8 *)(a0 + v0))[2] = ((u8 *)(a1 + v0))[2];\n                ((u8 *)(a0 + v0))[3] = ((u8 *)(a1 + v0))[3];\n                ((u8 *)(a0 + v0))[4] = ((u8 *)(a1 + v0))[4];\n                ((u8 *)(a0 + v0))[5] = ((u8 *)(a1 + v0))[5];\n                ((u8 *)(a0 + v0))[6] = ((u8 *)(a1 + v0))[6];\n                ((u8 *)(a0 + v0))[7] = ((u8 *)(a1 + v0))[7];\n                v0 = v0 + 8;\n            }\n        }\n        if (v0 < a2) {\n            v4 = a2 - v0;\n            v2 = (u8 *)(a1 + v0);\n            v3 = (u8 *)(a0 + v0);\n            do {\n                *v3 = *v2;\n                v2 = v2 + 1;\n                v3 = v3 + 1;\n                v4 = v4 - 1;\n            } while (v4 != 0);\n            return;\n        } else {\n            return;\n        }\n    } else {\n        return;\n    }\n}\n",
-        "score": 80,
-        "maxScore": 91,
+        "source": "void memcpy1(s32 a0, s32 a1, s32 a2) {\n    s32 v0;\n    s32 v1;\n    u8 * v2;\n    u8 * v3;\n    s32 v4;\n    if (a2 > 0) {\n        v0 = 0;\n        for (v1 = (u32)(a2 + -8 + 7) >> 3; v1 != 0; v1 = v1 - 1) {\n            *(u8 *)(a0 + v0) = *(u8 *)(a1 + v0);\n            ((u8 *)(a0 + v0))[1] = ((u8 *)(a1 + v0))[1];\n            ((u8 *)(a0 + v0))[2] = ((u8 *)(a1 + v0))[2];\n            ((u8 *)(a0 + v0))[3] = ((u8 *)(a1 + v0))[3];\n            ((u8 *)(a0 + v0))[4] = ((u8 *)(a1 + v0))[4];\n            ((u8 *)(a0 + v0))[5] = ((u8 *)(a1 + v0))[5];\n            ((u8 *)(a0 + v0))[6] = ((u8 *)(a1 + v0))[6];\n            ((u8 *)(a0 + v0))[7] = ((u8 *)(a1 + v0))[7];\n            v0 = v0 + 8;\n        }\n        if (v0 < a2) {\n            v4 = a2 - v0;\n            v2 = (u8 *)(a1 + v0);\n            v3 = (u8 *)(a0 + v0);\n            do {\n                *v3 = *v2;\n                v2 = v2 + 1;\n                v3 = v3 + 1;\n                v4 = v4 - 1;\n            } while (v4 != 0);\n            return;\n        } else {\n            return;\n        }\n    } else {\n        return;\n    }\n}\n",
+        "score": 79,
+        "maxScore": 88,
         "compileErrors": null,
         "breakdown": {
-          "insert": 48,
-          "delete": 3,
+          "insert": 45,
+          "delete": 4,
           "replace": 3,
-          "opMismatch": 3,
+          "opMismatch": 4,
           "argMismatch": 23
         },
         "quality": {
           "score": 80,
-          "lines": 41,
+          "lines": 37,
           "gotos": 0,
           "casts": 19,
           "unkGlue": 0,
@@ -35307,14 +35300,14 @@
       },
       "gapSize": {
         "decompiler": "asmlift",
-        "score": 80,
-        "maxScore": 91,
-        "ratio": 0.8791208791208791,
+        "score": 79,
+        "maxScore": 88,
+        "ratio": 0.8977272727272727,
         "kinds": {
-          "insert": 48,
-          "delete": 3,
+          "insert": 45,
+          "delete": 4,
           "replace": 3,
-          "opMismatch": 3,
+          "opMismatch": 4,
           "argMismatch": 23
         }
       },
@@ -35604,20 +35597,20 @@
         "decompiler": "asmlift",
         "candidateLabel": "signed",
         "outcome": "nonmatch",
-        "source": "void memset1(s32 a0, s32 a1, s32 a2) {\n    s32 v0;\n    s32 v1;\n    u8 * v2;\n    s32 v3;\n    if (a1 > 0) {\n        if (a1 <= 8) {\n            v0 = 0;\n        } else {\n            v0 = 0;\n            for (v1 = (u32)(a1 + -8 + 7) >> 3; v1 != 0; v1 = v1 - 1) {\n                *(u8 *)(a0 + v0) = a2;\n                ((u8 *)(a0 + v0))[1] = a2;\n                ((u8 *)(a0 + v0))[2] = a2;\n                ((u8 *)(a0 + v0))[3] = a2;\n                ((u8 *)(a0 + v0))[4] = a2;\n                ((u8 *)(a0 + v0))[5] = a2;\n                ((u8 *)(a0 + v0))[6] = a2;\n                ((u8 *)(a0 + v0))[7] = a2;\n                v0 = v0 + 8;\n            }\n        }\n        if (v0 < a1) {\n            v3 = a1 - v0;\n            v2 = (u8 *)(a0 + v0);\n            do {\n                *v2 = a2;\n                v2 = v2 + 1;\n                v3 = v3 - 1;\n            } while (v3 != 0);\n            return;\n        } else {\n            return;\n        }\n    } else {\n        return;\n    }\n}\n",
-        "score": 75,
-        "maxScore": 83,
+        "source": "void memset1(s32 a0, s32 a1, s32 a2) {\n    s32 v0;\n    s32 v1;\n    u8 * v2;\n    s32 v3;\n    if (a1 > 0) {\n        v0 = 0;\n        for (v1 = (u32)(a1 + -8 + 7) >> 3; v1 != 0; v1 = v1 - 1) {\n            *(u8 *)(a0 + v0) = a2;\n            ((u8 *)(a0 + v0))[1] = a2;\n            ((u8 *)(a0 + v0))[2] = a2;\n            ((u8 *)(a0 + v0))[3] = a2;\n            ((u8 *)(a0 + v0))[4] = a2;\n            ((u8 *)(a0 + v0))[5] = a2;\n            ((u8 *)(a0 + v0))[6] = a2;\n            ((u8 *)(a0 + v0))[7] = a2;\n            v0 = v0 + 8;\n        }\n        if (v0 < a1) {\n            v3 = a1 - v0;\n            v2 = (u8 *)(a0 + v0);\n            do {\n                *v2 = a2;\n                v2 = v2 + 1;\n                v3 = v3 - 1;\n            } while (v3 != 0);\n            return;\n        } else {\n            return;\n        }\n    } else {\n        return;\n    }\n}\n",
+        "score": 71,
+        "maxScore": 78,
         "compileErrors": null,
         "breakdown": {
-          "insert": 52,
-          "delete": 5,
-          "replace": 0,
-          "opMismatch": 5,
+          "insert": 47,
+          "delete": 4,
+          "replace": 3,
+          "opMismatch": 4,
           "argMismatch": 13
         },
         "quality": {
           "score": 84,
-          "lines": 38,
+          "lines": 34,
           "gotos": 0,
           "casts": 10,
           "unkGlue": 0,
@@ -35648,14 +35641,14 @@
       },
       "gapSize": {
         "decompiler": "asmlift",
-        "score": 75,
-        "maxScore": 83,
-        "ratio": 0.9036144578313253,
+        "score": 71,
+        "maxScore": 78,
+        "ratio": 0.9102564102564102,
         "kinds": {
-          "insert": 52,
-          "delete": 5,
-          "replace": 0,
-          "opMismatch": 5,
+          "insert": 47,
+          "delete": 4,
+          "replace": 3,
+          "opMismatch": 4,
           "argMismatch": 13
         }
       },
@@ -36719,7 +36712,7 @@
         "decompiler": "asmlift",
         "candidateLabel": "unsigned",
         "outcome": "nonmatch",
-        "source": "s32 modpow2(u32 a0) {\n    s32 v0;\n    if (a0 >= 0) {\n        v0 = a0 & 15;\n    } else {\n        if ((a0 & 15) == 0) {\n            v0 = a0 & 15;\n        } else {\n            v0 = (a0 & 15) + -16;\n        }\n    }\n    return v0;\n}\n",
+        "source": "s32 modpow2(u32 a0) {\n    s32 v0;\n    if (a0 >= 0 || (a0 & 15) == 0) {\n        v0 = a0 & 15;\n    } else {\n        v0 = (a0 & 15) + -16;\n    }\n    return v0;\n}\n",
         "score": 6,
         "maxScore": 7,
         "compileErrors": null,
@@ -36732,7 +36725,7 @@
         },
         "quality": {
           "score": 100,
-          "lines": 13,
+          "lines": 9,
           "gotos": 0,
           "casts": 0,
           "unkGlue": 0,
@@ -38882,20 +38875,20 @@
         "decompiler": "asmlift",
         "candidateLabel": "signed",
         "outcome": "nonmatch",
-        "source": "s32 nestedloop(s32 a0) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    s32 v5;\n    s32 v6;\n    s32 v7;\n    s32 v8;\n    s32 v9;\n    s32 v10;\n    v9 = 0;\n    v10 = 0;\n    for (v8 = 0; v8 < a0; v8 = v8 + 1) {\n        if (a0 > 0) {\n            if (a0 <= 8) {\n                v0 = 0;\n            } else {\n                v0 = 0;\n                v1 = v9;\n                v2 = 0;\n                for (v3 = (u32)(a0 + -8 + 7) >> 3; v3 != 0; v3 = v3 - 1) {\n                    v1 = v1 + v2 + v8 * (v0 + 1) + v8 * (v0 + 2) + v8 * (v0 + 3) + v8 * (v0 + 4) + v8 * (v0 + 5) + v8 * (v0 + 6) + v8 * (v0 + 7);\n                    v2 = v2 + v10;\n                    v0 = v0 + 8;\n                }\n                v9 = v1;\n            }\n            v4 = v9;\n            v6 = v0;\n            v5 = v0 * v8;\n            for (v7 = a0 - v0; v7 != 0; v7 = v7 - 1) {\n                v4 = v4 + v5;\n                v5 = v5 + v8;\n                v6 = v6 + 1;\n            }\n            v9 = v4;\n        }\n        v10 = v10 + 8;\n    }\n    return v9;\n}\n",
-        "score": 142,
-        "maxScore": 152,
+        "source": "s32 nestedloop(s32 a0) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    s32 v5;\n    s32 v6;\n    s32 v7;\n    s32 v8;\n    s32 v9;\n    s32 v10;\n    v9 = 0;\n    v10 = 0;\n    for (v8 = 0; v8 < a0; v8 = v8 + 1) {\n        if (a0 > 0) {\n            v0 = 0;\n            v1 = v9;\n            v2 = 0;\n            for (v3 = (u32)(a0 + -8 + 7) >> 3; v3 != 0; v3 = v3 - 1) {\n                v1 = v1 + v2 + v8 * (v0 + 1) + v8 * (v0 + 2) + v8 * (v0 + 3) + v8 * (v0 + 4) + v8 * (v0 + 5) + v8 * (v0 + 6) + v8 * (v0 + 7);\n                v2 = v2 + v10;\n                v0 = v0 + 8;\n            }\n            v9 = v1;\n            v4 = v9;\n            v6 = v0;\n            v5 = v0 * v8;\n            for (v7 = a0 - v0; v7 != 0; v7 = v7 - 1) {\n                v4 = v4 + v5;\n                v5 = v5 + v8;\n                v6 = v6 + 1;\n            }\n            v9 = v4;\n        }\n        v10 = v10 + 8;\n    }\n    return v9;\n}\n",
+        "score": 139,
+        "maxScore": 148,
         "compileErrors": null,
         "breakdown": {
-          "insert": 90,
-          "delete": 6,
+          "insert": 86,
+          "delete": 7,
           "replace": 5,
           "opMismatch": 5,
           "argMismatch": 36
         },
         "quality": {
           "score": 100,
-          "lines": 43,
+          "lines": 39,
           "gotos": 0,
           "casts": 1,
           "unkGlue": 0,
@@ -39496,24 +39489,24 @@
       "asmDump": "\ntarget.o:     file format elf32-powerpc\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 ref.c\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .mwcats.text\t00000000 .mwcats.text\n00000000 g     F .text\t00000078 powi\n\n\nRELOCATION RECORDS FOR [.mwcats.text]:\nOFFSET   TYPE              VALUE\n00000004 R_PPC_ADDR32      powi\n\n\nContents of section .text:\n 0000 2c040000 38c00001 38e00000 40810064  ,...8...8...@..d\n 0010 2c040008 38a4fff8 40810040 38050007  ,...8...@..@8...\n 0020 5400e8fe 7c0903a6 2c050000 4081002c  T...|...,...@..,\n 0030 7cc619d6 38e70008 7cc619d6 7cc619d6  |...8...|...|...\n 0040 7cc619d6 7cc619d6 7cc619d6 7cc619d6  |...|...|...|...\n 0050 7cc619d6 4200ffdc 7c072050 7c0903a6  |...B...|. P|...\n 0060 7c072000 4080000c 7cc619d6 4200fffc  |. .@...|...B...\n 0070 7cc33378 4e800020                    |.3xN..         \nContents of section .mwcats.text:\n 0000 02000078 00000000                    ...x....        \nContents of section .comment:\n 0000 436f6465 57617272 696f720a 02040201  CodeWarrior.....\n 0010 01020016 2c000000 00000000 00000000  ....,...........\n 0020 00000000 00000000 00000000 00000000  ................\n 0030 00000000 00000001 00000000 00000004  ................\n 0040 00000000 00000004 00000000 00000004  ................\n 0050 00000000                             ....            \n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned",
+        "candidateLabel": "signed",
         "outcome": "nonmatch",
-        "source": "s32 powi(u32 a0, u32 a1) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    if (a1 <= 0) {\n        v0 = 1;\n    } else {\n        if (a1 <= 8) {\n            v1 = 0;\n            v0 = 1;\n        } else {\n            v0 = 1;\n            v1 = 0;\n            for (v2 = a1 + -8 + 7 >> 3; v2 != 0; v2 = v2 - 1) {\n                v1 = v1 + 8;\n                v0 = v0 * a0 * a0 * a0 * a0 * a0 * a0 * a0 * a0;\n            }\n        }\n        v3 = v0;\n        for (v4 = a1 - v1; v4 != 0; v4 = v4 - 1) {\n            v3 = v3 * a0;\n        }\n        v0 = v3;\n    }\n    return v0;\n}\n",
-        "score": 87,
-        "maxScore": 92,
+        "source": "s32 powi(s32 a0, s32 a1) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    if (a1 <= 0) {\n        v0 = 1;\n    } else {\n        v0 = 1;\n        v1 = 0;\n        for (v2 = (u32)(a1 + -8 + 7) >> 3; v2 != 0; v2 = v2 - 1) {\n            v1 = v1 + 8;\n            v0 = v0 * a0 * a0 * a0 * a0 * a0 * a0 * a0 * a0;\n        }\n        v3 = v0;\n        for (v4 = a1 - v1; v4 != 0; v4 = v4 - 1) {\n            v3 = v3 * a0;\n        }\n        v0 = v3;\n    }\n    return v0;\n}\n",
+        "score": 81,
+        "maxScore": 87,
         "compileErrors": null,
         "breakdown": {
-          "insert": 62,
+          "insert": 57,
           "delete": 4,
           "replace": 3,
-          "opMismatch": 4,
-          "argMismatch": 14
+          "opMismatch": 5,
+          "argMismatch": 12
         },
         "quality": {
           "score": 100,
-          "lines": 28,
+          "lines": 23,
           "gotos": 0,
-          "casts": 0,
+          "casts": 1,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -44951,23 +44944,28 @@
       "targetAsm": "@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tstrcmp1\n\t.type\t strcmp1,function\n\t.thumb_func\nstrcmp1:\n\tb\t.L8\n.L5:\n\tadd\tr0, r0, #0x1\n\tadd\tr1, r1, #0x1\n.L8:\n\tldrb\tr2, [r0]\n\tcmp\tr2, #0\n\tbeq\t.L4\t@cond_branch\n\tldrb\tr3, [r1]\n\tcmp\tr2, r3\n\tbeq\t.L5\t@cond_branch\n.L4:\n\tldrb\tr0, [r0]\n\tldrb\tr1, [r1]\n\tsub\tr0, r0, r1\n\tbx\tlr\n.Lfe1:\n\t.size\t strcmp1,.Lfe1-strcmp1\n",
       "asmlift": {
         "decompiler": "asmlift",
-        "outcome": "declined",
-        "source": "/* asmlift could not decompile 'strcmp1' — structure: cannot structure 'strcmp1': unrecovered back-edge into block #2 (loop-recovery declined this shape: multi-latch, irreducible/overlapping loops, a conditional continue, or an unsafe break) */\n/* original assembly: */\n/*   @ Generated by gcc 2.9-arm-000512 for Thumb/elf */\n/*   \t.code\t16 */\n/*   .gcc2_compiled.: */\n/*   .text */\n/*   \t.align\t2, 0 */\n/*   \t.globl\tstrcmp1 */\n/*   \t.type\t strcmp1,function */\n/*   \t.thumb_func */\n/*   strcmp1: */\n/*   \tb\t.L8 */\n/*   .L5: */\n/*   \tadd\tr0, r0, #0x1 */\n/*   \tadd\tr1, r1, #0x1 */\n/*   .L8: */\n/*   \tldrb\tr2, [r0] */\n/*   \tcmp\tr2, #0 */\n/*   \tbeq\t.L4\t@cond_branch */\n/*   \tldrb\tr3, [r1] */\n/*   \tcmp\tr2, r3 */\n/*   \tbeq\t.L5\t@cond_branch */\n/*   .L4: */\n/*   \tldrb\tr0, [r0] */\n/*   \tldrb\tr1, [r1] */\n/*   \tsub\tr0, r0, r1 */\n/*   \tbx\tlr */\n/*   .Lfe1: */\n/*   \t.size\t strcmp1,.Lfe1-strcmp1 */\nvoid strcmp1(void) {\n    ASMLIFT_ERROR(\"could not decompile (structure): cannot structure 'strcmp1': unrecovered back-edge into block #2 (loop-recovery declined this shape: multi-latch, irreducible/overlapping loops, a conditional continue, or an unsafe break)\");\n}\n",
-        "score": null,
-        "maxScore": null,
+        "candidateLabel": "unsigned",
+        "outcome": "match",
+        "source": "s32 strcmp1(u8 * a0, u8 * a1) {\n    u8 * v0;\n    u8 * v1;\n    v0 = a0;\n    for (v1 = a1; !(*v0 == 0 || *v0 != *v1); v1 = v1 + 1) {\n        v0 = v0 + 1;\n    }\n    return *v0 - *v1;\n}\n",
+        "score": 0,
+        "maxScore": 13,
         "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 0
+        },
         "quality": {
-          "score": 88,
-          "lines": 32,
+          "score": 100,
+          "lines": 9,
           "gotos": 0,
-          "casts": 1,
-          "unkGlue": 1,
+          "casts": 0,
+          "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
-        },
-        "errorMarkers": [
-          "structure: cannot structure 'strcmp1': unrecovered back-edge into block #2 (loop-recovery declined this shape: multi-latch, irreducible/overlapping loops, a conditional continue, or an unsafe break)"
-        ]
+        }
       },
       "m2c": {
         "decompiler": "m2c",
@@ -44993,19 +44991,7 @@
           "addrDeref": 0
         }
       },
-      "gapSize": {
-        "decompiler": "m2c",
-        "score": 10,
-        "maxScore": 15,
-        "ratio": 0.6666666666666666,
-        "kinds": {
-          "insert": 2,
-          "delete": 3,
-          "replace": 2,
-          "opMismatch": 1,
-          "argMismatch": 2
-        }
-      },
+      "gapSize": null,
       "scripts": {
         "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `strcmp1` — benchmark function synthetic:strcmp1:agbcc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit 94098d4:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout 94098d4de68c2fcc13fb8cf1096a1520eb171abe\nM2C_PATH='/path/to/m2c'\n\n# The exact agbcc `.s` text the benchmark fed m2c, verbatim.\ncat > in.s <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tstrcmp1\n\t.type\t strcmp1,function\n\t.thumb_func\nstrcmp1:\n\tb\t.L8\n.L5:\n\tadd\tr0, r0, #0x1\n\tadd\tr1, r1, #0x1\n.L8:\n\tldrb\tr2, [r0]\n\tcmp\tr2, #0\n\tbeq\t.L4\t@cond_branch\n\tldrb\tr3, [r1]\n\tcmp\tr2, r3\n\tbeq\t.L5\t@cond_branch\n.L4:\n\tldrb\tr0, [r0]\n\tldrb\tr1, [r1]\n\tsub\tr0, r0, r1\n\tbx\tlr\n.Lfe1:\n\t.size\t strcmp1,.Lfe1-strcmp1\nASM_INPUT\n\n# (This function ran with NO context header — the benchmark fed m2c the assembly alone.)\n\nargs=(\n  --target gba            # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function strcmp1      # the symbol to decompile from in.s\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
         "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `strcmp1` — benchmark function synthetic:strcmp1:agbcc.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:strcmp1:agbcc --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact agbcc `.s` text.\ncat > in.asm <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tstrcmp1\n\t.type\t strcmp1,function\n\t.thumb_func\nstrcmp1:\n\tb\t.L8\n.L5:\n\tadd\tr0, r0, #0x1\n\tadd\tr1, r1, #0x1\n.L8:\n\tldrb\tr2, [r0]\n\tcmp\tr2, #0\n\tbeq\t.L4\t@cond_branch\n\tldrb\tr3, [r1]\n\tcmp\tr2, r3\n\tbeq\t.L5\t@cond_branch\n.L4:\n\tldrb\tr0, [r0]\n\tldrb\tr1, [r1]\n\tsub\tr0, r0, r1\n\tbx\tlr\n.Lfe1:\n\t.size\t strcmp1,.Lfe1-strcmp1\nASM_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target agbcc          # frontend + target description (ISA, calling convention, compiler idioms)\n  --name strcmp1          # the symbol to decompile (multi-function input selects by name)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
@@ -45166,23 +45152,28 @@
       "asmDump": "\ntarget.o:     file format elf32-powerpc\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 ref.c\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .mwcats.text\t00000000 .mwcats.text\n00000000 g     F .text\t00000040 strcmp1\n\n\nRELOCATION RECORDS FOR [.mwcats.text]:\nOFFSET   TYPE              VALUE\n00000004 R_PPC_ADDR32      strcmp1\n\n\nContents of section .text:\n 0000 4800000c 38630001 38840001 88c30000  H...8c..8.......\n 0010 7cc00775 41820018 88040000 7cc50774  |..uA.......|..t\n 0020 7c000774 7c050000 4182ffdc 88640000  |..t|...A....d..\n 0030 7cc00774 7c630774 7c630050 4e800020  |..t|c.t|c.PN.. \nContents of section .mwcats.text:\n 0000 02000040 00000000                    ...@....        \nContents of section .comment:\n 0000 436f6465 57617272 696f720a 02040201  CodeWarrior.....\n 0010 01020016 2c000000 00000000 00000000  ....,...........\n 0020 00000000 00000000 00000000 00000000  ................\n 0030 00000000 00000001 00000000 00000004  ................\n 0040 00000000 00000004 00000000 00000004  ................\n 0050 00000000                             ....            \n",
       "asmlift": {
         "decompiler": "asmlift",
-        "outcome": "declined",
-        "source": "/* asmlift could not decompile 'strcmp1' — structure: cannot structure 'strcmp1': unrecovered back-edge into block #2 (loop-recovery declined this shape: multi-latch, irreducible/overlapping loops, a conditional continue, or an unsafe break) */\n/* original assembly: */\n/*   target.o:     file format elf32-powerpc */\n/*   Disassembly of section .text: */\n/*   00000000 <strcmp1>: */\n/*      0:\tb       c <strcmp1+0xc> */\n/*      4:\taddi    r3,r3,1 */\n/*      8:\taddi    r4,r4,1 */\n/*      c:\tlbz     r6,0(r3) */\n/*     10:\textsb.  r0,r6 */\n/*     14:\tbeq     2c <strcmp1+0x2c> */\n/*     18:\tlbz     r0,0(r4) */\n/*     1c:\textsb   r5,r6 */\n/*     20:\textsb   r0,r0 */\n/*     24:\tcmpw    r5,r0 */\n/*     28:\tbeq     4 <strcmp1+0x4> */\n/*     2c:\tlbz     r3,0(r4) */\n/*     30:\textsb   r0,r6 */\n/*     34:\textsb   r3,r3 */\n/*     38:\tsubf    r3,r3,r0 */\n/*     3c:\tblr */\nvoid strcmp1(void) {\n    ASMLIFT_ERROR(\"could not decompile (structure): cannot structure 'strcmp1': unrecovered back-edge into block #2 (loop-recovery declined this shape: multi-latch, irreducible/overlapping loops, a conditional continue, or an unsafe break)\");\n}\n",
-        "score": null,
-        "maxScore": null,
+        "candidateLabel": "unsigned",
+        "outcome": "nonmatch",
+        "source": "s32 strcmp1(u8 * a0, u8 * a1) {\n    u8 * v0;\n    u8 * v1;\n    v0 = a0;\n    for (v1 = a1; !((s8)*v0 == 0 || (s8)*v0 != (s8)*v1); v1 = v1 + 1) {\n        v0 = v0 + 1;\n    }\n    return (s8)*v0 - (s8)*v1;\n}\n",
+        "score": 8,
+        "maxScore": 16,
         "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 2,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 6
+        },
         "quality": {
-          "score": 88,
-          "lines": 24,
+          "score": 94,
+          "lines": 9,
           "gotos": 0,
-          "casts": 1,
-          "unkGlue": 1,
+          "casts": 5,
+          "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
-        },
-        "errorMarkers": [
-          "structure: cannot structure 'strcmp1': unrecovered back-edge into block #2 (loop-recovery declined this shape: multi-latch, irreducible/overlapping loops, a conditional continue, or an unsafe break)"
-        ]
+        }
       },
       "m2c": {
         "decompiler": "m2c",
@@ -45209,16 +45200,16 @@
         }
       },
       "gapSize": {
-        "decompiler": "m2c",
-        "score": 23,
-        "maxScore": 25,
-        "ratio": 0.92,
+        "decompiler": "asmlift",
+        "score": 8,
+        "maxScore": 16,
+        "ratio": 0.5,
         "kinds": {
-          "insert": 9,
-          "delete": 11,
+          "insert": 0,
+          "delete": 2,
           "replace": 0,
           "opMismatch": 0,
-          "argMismatch": 3
+          "argMismatch": 6
         }
       },
       "scripts": {
@@ -45773,24 +45764,24 @@
       "asmDump": "\ntarget.o:     file format elf32-powerpc\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 ref.c\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .mwcats.text\t00000000 .mwcats.text\n00000000 g     F .text\t000000b0 structarr\n\n\nRELOCATION RECORDS FOR [.mwcats.text]:\nOFFSET   TYPE              VALUE\n00000004 R_PPC_ADDR32      structarr\n\n\nContents of section .text:\n 0000 2c040000 38e00000 39000000 4081009c  ,...8...9...@...\n 0010 2c040008 38a4fff8 40810068 38050007  ,...8...@..h8...\n 0020 7c661b78 5400e8fe 7c0903a6 2c050000  |f.xT...|...,...\n 0030 40810050 80a60000 39080008 80060008  @..P....9.......\n 0040 7ce72a14 80a60010 7ce70214 80060018  |.*.....|.......\n 0050 7ce72a14 80a60020 7ce70214 80060028  |.*.... |......(\n 0060 7ce72a14 80a60030 7ce70214 80060038  |.*....0|......8\n 0070 7ce72a14 38c60040 7ce70214 4200ffb8  |.*.8..@|...B...\n 0080 55051838 7c082050 7c632a14 7c0903a6  U..8|. P|c*.|...\n 0090 7c082000 40800014 80030000 38630008  |. .@.......8c..\n 00a0 7ce70214 4200fff4 7ce33b78 4e800020  |...B...|.;xN.. \nContents of section .mwcats.text:\n 0000 020000b0 00000000                    ........        \nContents of section .comment:\n 0000 436f6465 57617272 696f720a 02040201  CodeWarrior.....\n 0010 01020016 2c000000 00000000 00000000  ....,...........\n 0020 00000000 00000000 00000000 00000000  ................\n 0030 00000000 00000001 00000000 00000004  ................\n 0040 00000000 00000004 00000000 00000004  ................\n 0050 00000000                             ....            \n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned",
+        "candidateLabel": "signed",
         "outcome": "nonmatch",
-        "source": "s32 structarr(s32 * a0, u32 a1) {\n    s32 * v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 * v4;\n    s32 v5;\n    s32 v6;\n    if (a1 <= 0) {\n        v2 = 0;\n    } else {\n        if (a1 <= 8) {\n            v1 = 0;\n            v2 = 0;\n        } else {\n            v0 = a0;\n            v1 = 0;\n            v2 = 0;\n            for (v3 = a1 + -8 + 7 >> 3; v3 != 0; v3 = v3 - 1) {\n                v1 = v1 + 8;\n                v2 = v2 + *v0 + v0[2] + v0[4] + v0[6] + v0[8] + v0[10] + v0[12] + v0[14];\n                v0 = v0 + 16;\n            }\n        }\n        v5 = v2;\n        v6 = a1 - v1;\n        v4 = a0 + (v1 << 3);\n        while (v6 != 0) {\n            v5 = v5 + *v4;\n            v4 = v4 + 2;\n            v6 = v6 - 1;\n        }\n        v2 = v5;\n    }\n    return v2;\n}\n",
-        "score": 113,
-        "maxScore": 120,
+        "source": "s32 structarr(s32 * a0, s32 a1) {\n    s32 * v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 * v4;\n    s32 v5;\n    s32 v6;\n    if (a1 <= 0) {\n        v2 = 0;\n    } else {\n        v0 = a0;\n        v1 = 0;\n        v2 = 0;\n        for (v3 = (u32)(a1 + -8 + 7) >> 3; v3 != 0; v3 = v3 - 1) {\n            v1 = v1 + 8;\n            v2 = v2 + *v0 + v0[2] + v0[4] + v0[6] + v0[8] + v0[10] + v0[12] + v0[14];\n            v0 = v0 + 16;\n        }\n        v5 = v2;\n        v6 = a1 - v1;\n        v4 = a0 + (v1 << 3);\n        while (v6 != 0) {\n            v5 = v5 + *v4;\n            v4 = v4 + 2;\n            v6 = v6 - 1;\n        }\n        v2 = v5;\n    }\n    return v2;\n}\n",
+        "score": 107,
+        "maxScore": 115,
         "compileErrors": null,
         "breakdown": {
-          "insert": 76,
+          "insert": 71,
           "delete": 3,
           "replace": 6,
-          "opMismatch": 6,
-          "argMismatch": 22
+          "opMismatch": 4,
+          "argMismatch": 23
         },
         "quality": {
           "score": 100,
-          "lines": 36,
+          "lines": 31,
           "gotos": 0,
-          "casts": 0,
+          "casts": 1,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -45822,15 +45813,15 @@
       },
       "gapSize": {
         "decompiler": "asmlift",
-        "score": 113,
-        "maxScore": 120,
-        "ratio": 0.9416666666666667,
+        "score": 107,
+        "maxScore": 115,
+        "ratio": 0.9304347826086956,
         "kinds": {
-          "insert": 76,
+          "insert": 71,
           "delete": 3,
           "replace": 6,
-          "opMismatch": 6,
-          "argMismatch": 22
+          "opMismatch": 4,
+          "argMismatch": 23
         }
       },
       "scripts": {
@@ -46369,24 +46360,24 @@
       "asmDump": "\ntarget.o:     file format elf32-powerpc\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 ref.c\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .mwcats.text\t00000000 .mwcats.text\n00000000 g     F .text\t00000098 sumto\n\n\nRELOCATION RECORDS FOR [.mwcats.text]:\nOFFSET   TYPE              VALUE\n00000004 R_PPC_ADDR32      sumto\n\n\nContents of section .text:\n 0000 2c030000 38a00000 38c00000 40810084  ,...8...8...@...\n 0010 2c030008 3883fff8 4081005c 38040007  ,...8...@..\\8...\n 0020 5400e8fe 7c0903a6 2c040000 40810048  T...|...,...@..H\n 0030 7ca53214 7ca62a14 38a50001 7ca62a14  |.2.|.*.8...|.*.\n 0040 38a50002 7ca62a14 38a50003 7ca62a14  8...|.*.8...|.*.\n 0050 38a50004 7ca62a14 38a50005 7ca62a14  8...|.*.8...|.*.\n 0060 38a50006 7ca62a14 38c60008 38a50007  8...|.*.8...8...\n 0070 4200ffc0 7c061850 7c0903a6 7c061800  B...|..P|...|...\n 0080 40800010 7ca53214 38c60001 4200fff8  @...|.2.8...B...\n 0090 7ca32b78 4e800020                    |.+xN..         \nContents of section .mwcats.text:\n 0000 02000098 00000000                    ........        \nContents of section .comment:\n 0000 436f6465 57617272 696f720a 02040201  CodeWarrior.....\n 0010 01020016 2c000000 00000000 00000000  ....,...........\n 0020 00000000 00000000 00000000 00000000  ................\n 0030 00000000 00000001 00000000 00000004  ................\n 0040 00000000 00000004 00000000 00000004  ................\n 0050 00000000                             ....            \n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned",
+        "candidateLabel": "signed",
         "outcome": "nonmatch",
-        "source": "s32 sumto(u32 a0) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    s32 v5;\n    if (a0 <= 0) {\n        v0 = 0;\n    } else {\n        if (a0 <= 8) {\n            v1 = 0;\n            v0 = 0;\n        } else {\n            v0 = 0;\n            v1 = 0;\n            for (v2 = a0 + -8 + 7 >> 3; v2 != 0; v2 = v2 - 1) {\n                v0 = v1 + (v1 + (v1 + (v1 + (v1 + (v1 + (v1 + (v0 + v1) + 1) + 2) + 3) + 4) + 5) + 6) + 7;\n                v1 = v1 + 8;\n            }\n        }\n        v3 = v0;\n        v4 = v1;\n        for (v5 = a0 - v1; v5 != 0; v5 = v5 - 1) {\n            v3 = v3 + v4;\n            v4 = v4 + 1;\n        }\n        v0 = v3;\n    }\n    return v0;\n}\n",
-        "score": 105,
-        "maxScore": 110,
+        "source": "s32 sumto(s32 a0) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    s32 v5;\n    if (a0 <= 0) {\n        v0 = 0;\n    } else {\n        v0 = 0;\n        v1 = 0;\n        for (v2 = (u32)(a0 + -8 + 7) >> 3; v2 != 0; v2 = v2 - 1) {\n            v0 = v1 + (v1 + (v1 + (v1 + (v1 + (v1 + (v1 + (v0 + v1) + 1) + 2) + 3) + 4) + 5) + 6) + 7;\n            v1 = v1 + 8;\n        }\n        v3 = v0;\n        v4 = v1;\n        for (v5 = a0 - v1; v5 != 0; v5 = v5 - 1) {\n            v3 = v3 + v4;\n            v4 = v4 + 1;\n        }\n        v0 = v3;\n    }\n    return v0;\n}\n",
+        "score": 97,
+        "maxScore": 105,
         "compileErrors": null,
         "breakdown": {
-          "insert": 72,
+          "insert": 67,
           "delete": 4,
           "replace": 3,
-          "opMismatch": 4,
-          "argMismatch": 22
+          "opMismatch": 5,
+          "argMismatch": 18
         },
         "quality": {
           "score": 100,
-          "lines": 31,
+          "lines": 26,
           "gotos": 0,
-          "casts": 0,
+          "casts": 1,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0

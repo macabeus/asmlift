@@ -16,7 +16,7 @@ import type { TargetDescription } from '../target';
 import { recognizeArrays } from './arrays';
 import { recognizeConsts } from './const';
 import { recognizeMagicDivision } from './magicdiv';
-import { recognizeShortCircuit } from './shortcircuit';
+import { recognizeBranchShortCircuit, recognizeShortCircuit } from './shortcircuit';
 import { recognizeSoftDiv } from './softdiv';
 import { recognizeStructArrays } from './struct-arrays';
 import { recognizeStructs } from './structs';
@@ -46,6 +46,10 @@ export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
   { id: 'struct-arrays', run: recognizeStructArrays, dce: true },
   { id: 'structs', run: recognizeStructs, dce: false },
   { id: 'shortcircuit', run: recognizeShortCircuit, dce: true },
+  // The control-flow sibling, AFTER the value form: the value form's diamond is the more specific
+  // shape (its second block ends in `br`, not `cond_br`, so the two never compete for the same
+  // input), and folding a value diamond first can leave a plain `cond_br` chain this one then eats.
+  { id: 'branch-shortcircuit', run: recognizeBranchShortCircuit, dce: true },
 ];
 
 /** Run the pre-recovery passes in order. For each pass whose gate passes and that CHANGES the IR, run
