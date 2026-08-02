@@ -163,3 +163,68 @@ describe('the rewrite', () => {
     expect(hoists((out!.body[0] as Extract<Stmt, { k: 'if' }>).then)).toEqual(['p1']);
   });
 });
+
+describe('the refusals found by the adversarial round', () => {
+  const loopFn = (body: Stmt[], cond: Expr, extra: Stmt[] = []): SFn =>
+    fn([{ k: 'if', cond: { k: 'const', value: 1 }, then: [{ k: 'while', cond, body }, ...extra], else: [] }]);
+
+  test('a use in a LOOP CONDITION is refused — it runs every iteration, the scope does not', () => {
+    // The condition lives at the ENCLOSING list, so the path carries no loop flag for it; hoisting
+    // there puts the assignment ABOVE the loop, which is the loop-invariant motion this pass claims
+    // to refuse. basecse.ts and argbase.ts both treat a loop's own condition as inside the loop.
+    expect(
+      hoistScopedBases(
+        loopFn([], { k: 'bin', op: '!=', l: ix(1), r: { k: 'const', value: 0 } }, [store(ix(2), { k: 'const', value: 0 })]),
+      ),
+    ).toBeNull();
+  });
+
+  test('a `for` INC use is refused, and a `for` INIT use is collected', () => {
+    // Both are STATEMENTS: reached by neither stmtExprs nor childLists, yet rewriteStmt rewrites
+    // them. Collect and rewrite must see the same tree or an access gets repointed at a local whose
+    // assignment does not dominate it.
+    const forWith = (init: Stmt, inc: Stmt, body: Stmt[]): SFn =>
+      fn([
+        {
+          k: 'if',
+          cond: { k: 'const', value: 1 },
+          then: [{ k: 'for', init, cond: { k: 'const', value: 1 }, inc, body }],
+          else: [],
+        },
+      ]);
+    const nop: Stmt = { k: 'assign', name: 'i', value: { k: 'const', value: 0 } };
+    // inc reads the base every iteration → refuse
+    expect(
+      hoistScopedBases(forWith(nop, { k: 'assign', name: 'i', value: ix(1) }, [store(ix(2), { k: 'const', value: 0 })])),
+    ).toBeNull();
+    // init reads it ONCE, at the enclosing cadence → eligible, and counted
+    const out = hoistScopedBases(
+      forWith({ k: 'assign', name: 'i', value: ix(1) }, nop, []),
+    );
+    expect(out).toBeNull(); // only ONE use — but it was seen (the next case proves counting)
+    const two = hoistScopedBases(
+      fn([
+        {
+          k: 'if',
+          cond: { k: 'const', value: 1 },
+          then: [
+            { k: 'for', init: { k: 'assign', name: 'i', value: ix(1) }, cond: { k: 'const', value: 1 }, inc: nop, body: [] },
+            store(ix(2), { k: 'const', value: 0 }),
+          ],
+          else: [],
+        },
+      ]),
+    );
+    expect(two).not.toBeNull();
+    // and the rewrite reached the init, so no access is left pointing at the raw base
+    const arm = (two!.body[0] as Extract<Stmt, { k: 'if' }>).then;
+    const init = (arm[1] as Extract<Stmt, { k: 'for' }>).init as Extract<Stmt, { k: 'assign' }>;
+    expect(init.value).toMatchObject({ k: 'index', base: { k: 'var', name: 'p0' } });
+  });
+
+  test('a REPEATED constant offset is refused — the compiler re-materializes a fixed scalar', () => {
+    // basecse.ts learned this by losing the ProcessHBlankWait match; inherited rather than re-lost.
+    const arm: Stmt[] = [store(ix(7), ix(7)), store(ix(7), ix(7))];
+    expect(hoistScopedBases(fn([{ k: 'if', cond: { k: 'const', value: 1 }, then: arm, else: [] }]))).toBeNull();
+  });
+});

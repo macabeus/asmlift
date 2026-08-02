@@ -6,10 +6,13 @@
 //
 //   PLACEMENT. A base used only inside one `if` arm, hoisted to the function top, is live across
 //   everything before that arm — a live range the original never had, which is the register-pressure
-//   failure basecse's own loop gate exists for. Measured on kleod:UpdateHUDCounterDisplay: hoisting
-//   the `gBgTilemapBufs` store base inside the arm that uses it is byte-EXACT, and hoisting the same
-//   base to the function top costs 24. basecse's header already names this gap — "a loop-body base
-//   is left inline for a future scope-aware hoist" — and this is that hoist.
+//   failure basecse's own loop gate exists for. Measured on kleod:UpdateHUDCounterDisplay by
+//   hand-editing the REFERENCE source: naming the `gBgTilemapBufs` store base inside the arm that
+//   uses it is byte-exact, and moving that same declaration to the function top costs 24. What THIS
+//   lever does to that row is smaller — 81 to 70, still a nonmatch — because the row needs several
+//   other capabilities too; the placement figure is the reason the lever is scope-aware, not a claim
+//   about what it achieves alone. basecse's header already names the gap — "a loop-body base is left
+//   inline for a future scope-aware hoist" — and this is that hoist.
 //
 //   ELIGIBILITY. With a symbol map that states an array's RANK, the access renders as the bare
 //   `gSym[0][i]`, whose base node is a `var` naming the global, not an `addr`. basecse's
@@ -26,9 +29,17 @@
 // a match.
 //
 // SEMANTICS ARE PRESERVED BY CONSTRUCTION. The hoisted value is a pure ADDRESS of a global — no
-// load, nothing observable, nothing that can fault — so evaluating it earlier within the same scope
-// is invisible. The rewritten accesses keep their own width/signedness, so every stride is
-// unchanged.
+// load, nothing observable, nothing that can fault — so evaluating it earlier in a scope that
+// DOMINATES every use is invisible. The rewritten accesses keep their own width/signedness, so
+// every stride is unchanged. Domination is the load-bearing half: `collect` and `rewriteStmt` must
+// walk the SAME tree, or an access the planner never placed gets repointed at a local whose
+// assignment does not reach it — compiling C that reads an uninitialized pointer, which neither
+// boundary contract catches (they check resolution and deref typing, not definite assignment).
+//
+// ORDERING: `hoistReusedGlobalBases` (basecse) runs unconditionally in `structureChecked`, BEFORE
+// rank's levers see the tree. So this pass's `addr`/`const` input is only what basecse REFUSED —
+// loop uses and repeated-constant-offset uses — which is why it carries basecse's const-offset gate
+// rather than assuming those bases never arrive.
 import { type IrType, T, scalarTypeForAccess } from '../ir/types';
 import type { Expr, SFn, Stmt } from './ast';
 import { mapExprChildren, stmtExprs } from './ast';
@@ -77,32 +88,52 @@ const keyOf = (n: Extract<Expr, { k: 'index' }>): string => `${baseId(n.base as 
 interface Site {
   path: Stmt[][];
   loop: boolean[];
+  /** the use runs EVERY ITERATION of a loop whose body is not on `path` — a loop's own condition,
+   *  or a `for`'s increment. No scope reachable from `path` runs at that cadence, so a key with any
+   *  such use is refused outright rather than hoisted to a point that runs once. */
+  perIteration: boolean;
 }
 
 /** Walk every expression in the tree, recording each eligible access's key and its scope path. */
 function collect(
   body: Stmt[],
   globals: ReadonlySet<string>,
-  out: Map<string, { uses: Site[]; sample: Extract<Expr, { k: 'index' }> }>,
+  out: Map<string, { uses: Site[]; sample: Extract<Expr, { k: 'index' }>; constOff: Map<number, number> }>,
   path: Stmt[][],
   loop: boolean[],
 ): void {
-  const visit = (e: Expr): void => {
+  const visit = (e: Expr, perIteration: boolean): void => {
     const ix = eligible(e, globals);
     if (ix) {
       const k = keyOf(ix);
-      const rec = out.get(k) ?? { uses: [], sample: ix };
-      rec.uses.push({ path, loop });
+      const rec = out.get(k) ?? { uses: [], sample: ix, constOff: new Map<number, number>() };
+      rec.uses.push({ path, loop, perIteration });
+      if (ix.idx.k === 'const') {
+        rec.constOff.set(ix.idx.value, (rec.constOff.get(ix.idx.value) ?? 0) + 1);
+      }
       out.set(k, rec);
     }
     mapExprChildren(e, (c) => {
-      visit(c);
+      visit(c, perIteration);
       return c;
     });
   };
   for (const s of body) {
-    stmtExprs(s).forEach(visit);
     const isLoop = s.k === 'while' || s.k === 'dowhile' || s.k === 'for';
+    // A loop's OWN condition runs every iteration — a base there is loop-invariant exactly as a
+    // body use is, and it lives at THIS list, which does not. basecse.ts and argbase.ts both make
+    // the same call; this pass used to attribute it to the enclosing list with loop=false and would
+    // hoist above the loop, contradicting its own stated invariant.
+    stmtExprs(s).forEach((e) => visit(e, isLoop));
+    if (s.k === 'for') {
+      // `init` and `inc` are STATEMENTS, so their expressions are reached by neither `stmtExprs`
+      // nor `childLists` — yet `rewriteStmt` rewrites them. Collect and rewrite MUST see the same
+      // tree: an access the planner never counted would still be repointed, at a local whose
+      // assignment need not dominate it (`for (i = p0[3]; …)` after an `if` arm that defines p0).
+      // `init` runs once, at this list's cadence; `inc` runs every iteration, like the condition.
+      stmtExprs(s.init).forEach((e) => visit(e, false));
+      stmtExprs(s.inc).forEach((e) => visit(e, true));
+    }
     for (const child of childLists(s)) {
       collect(child, globals, out, [...path, child], [...loop, isLoop]);
     }
@@ -124,7 +155,15 @@ function childLists(s: Stmt): Stmt[][] {
       return [s.body];
     case 'switch':
       return [...s.cases.map((c) => c.body), ...(s.default ? [s.default] : [])];
-    default:
+    // Exhaustive on purpose — no `default`. A future Stmt kind carrying a nested list must be a
+    // COMPILE error here, exactly as it is in `stmtChildren`: a silent `[]` would collect that
+    // kind's uses at the wrong scope while `rewriteStmt`, which IS exhaustive, still rewrote them.
+    case 'assign':
+    case 'store':
+    case 'exprstmt':
+    case 'return':
+    case 'break':
+    case 'continue':
       return [];
   }
 }
@@ -149,7 +188,7 @@ function commonScope(uses: Site[]): { scope: Stmt[]; depth: number } | null {
  *  exists. When EVERY use is inside the loop, the common scope IS the loop body: the assignment
  *  then runs per iteration exactly as the inline spelling did, and there is nothing to refuse. */
 function underNestedLoop(uses: Site[], depth: number): boolean {
-  return uses.some((u) => u.loop.slice(depth).some(Boolean));
+  return uses.some((u) => u.perIteration || u.loop.slice(depth).some(Boolean));
 }
 
 /**
@@ -158,7 +197,10 @@ function underNestedLoop(uses: Site[], depth: number): boolean {
  */
 export function hoistScopedBases(sfn: SFn): SFn | null {
   const globals = new Set((sfn.globals ?? []).map((g) => g.name));
-  const found = new Map<string, { uses: Site[]; sample: Extract<Expr, { k: 'index' }> }>();
+  const found = new Map<
+    string,
+    { uses: Site[]; sample: Extract<Expr, { k: 'index' }>; constOff: Map<number, number> }
+  >();
   collect(sfn.body, globals, found, [], []);
 
   const fresh = nameAllocator(sfn);
@@ -168,6 +210,14 @@ export function hoistScopedBases(sfn: SFn): SFn | null {
   for (const [key, rec] of found) {
     if (rec.uses.length < 2) {
       continue; // one access re-materializes as cheaply as a named local
+    }
+    // A constant offset touched 2+ times is a SCALAR re-access at one fixed location (an MMIO
+    // read-modify-write, a repeated `*p`), which the compiler re-materializes rather than
+    // register-holds. basecse.ts learned this by LOSING the ProcessHBlankWait match to it; the gate
+    // is inherited here rather than re-lost, and it governs a large share of this lever's reachable
+    // input because basecse runs first and refuses these bases, leaving them to be seen here.
+    if ([...rec.constOff.values()].some((n) => n >= 2)) {
+      continue;
     }
     const found = commonScope(rec.uses);
     if (!found || underNestedLoop(rec.uses, found.depth)) {
