@@ -15,6 +15,7 @@ import { frontendFor } from './frontend/registry';
 import { Fn, type Value, defOpMap } from './ir/core';
 import { T } from './ir/types';
 import { verify } from './ir/verify';
+import { materializeArgBases } from './l3/argbase';
 import type { LanguageBackend, SFn } from './l3/ast';
 import { registerishSpellings } from './l3/regspell';
 import { reindexWalks } from './l3/reindex';
@@ -286,6 +287,13 @@ export function enumerateCandidates(
             // contract-failing or unspellable re-spelling: drop it, keep the primary
           }
         };
+        // `/argbase` — name a call's argument bases before the call (l3/argbase.ts). A lever on the
+        // same footing as the others: the primary inline spelling stays in the list, so the differ
+        // referees and this can never cost a match.
+        const argbased = materializeArgBases(sfn);
+        if (argbased) {
+          respell('/argbase', argbased);
+        }
         const indexed = reindexWalks(sfn);
         if (indexed) {
           respell('/indexed', indexed);
