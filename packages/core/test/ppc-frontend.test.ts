@@ -146,3 +146,37 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
     expect(() => dis('glob', '0:\tstw     r0,0(0)\n4:\tblr\n')).toThrow(/SDA\/global-relative access not supported/);
   });
 });
+
+describe('an operand-less `ret` is VOID, not an untyped s32', () => {
+  // Every frontend already says "this function produces no return value" the same way — an
+  // operand-less `ret`. PPC/MIPS emit one when the return register has no reaching definition;
+  // Thumb when the epilogue branches THROUGH that register (`bx r0`). Typing it `s32` produced a
+  // non-void signature over a body with no `return` value — C's implicit-int function that falls
+  // off its end — so the fix is in the shared return-type derivation, not per ISA.
+  test('a function that never writes the return register types void', () => {
+    expect(dis('nothing', '0:\tblr\n')).toBe('void nothing(void) {\n    return;\n}\n');
+  });
+
+  test('control: a function that DOES write it keeps its value and its type', () => {
+    expect(dis('five', '0:\tli      r3,5\n4:\tblr\n')).toBe('s32 five(void) {\n    return 5;\n}\n');
+  });
+
+  test('EVERY exit must agree — one valued `ret` keeps the function non-void', () => {
+    // A frontend decides per BLOCK whether the return register holds anything, so an operand-less
+    // `ret` beside a valued one is a real shape. Answering void off the first would declare void
+    // over a body the structurer still emits `return expr;` in — ill-formed C, and a signature
+    // that contradicts its own body.
+    // The return register must NOT be a parameter: a parameter always has a reaching definition,
+    // so both exits would carry a value and this would pass with the rule reverted. Branching on
+    // r4 leaves r3 genuinely unwritten on one path.
+    // Two conditions, both load-bearing: the return register must NOT be a parameter (a parameter
+    // always has a reaching definition, so both exits would carry a value), and the value-LESS
+    // exit must come FIRST in block order — that is the ordering the old first-ret rule read.
+    const src = dis(
+      'mixed',
+      '0:\tcmpwi   r4,0\n4:\tbeq     10 <mixed+0x10>\n8:\tblr\nc:\tnop\n10:\tli      r3,5\n14:\tblr\n',
+    );
+    expect(src).not.toContain('void mixed');
+    expect(src).toContain('return 5;');
+  });
+});

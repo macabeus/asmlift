@@ -390,6 +390,11 @@ function addMacroNames(di: DebugInfoWithMacros, map: SymbolMap): void {
       shape: 'scalar',
       size: mac.size,
       signed: mac.signed,
+      // A true fact about the cell, recorded for any consumer that reasons about it. It is NOT
+      // how the qualifier reaches the artifact: declare.ts emits a macro's BODY verbatim and
+      // returns before the `quals()` path, so the body string is the channel (macros.ts keeps it
+      // compilable for exactly that reason).
+      ...(mac.volatile ? { volatile: true } : {}),
       macroBody: mac.body,
     };
     const prior = map.get(addr);

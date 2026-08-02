@@ -71,6 +71,19 @@ export function assertDerefsTyped(sfn: SFn): void {
   const vt = declaredTypes(sfn);
   const ctype = (e: Expr): IrType | undefined => exprCType(e, vt);
   const bad: string[] = [];
+  // A `void` function must not RETURN A VALUE. Holds by construction today — returnType() answers
+  // void only when every `ret` is operand-less — but `retType` has two producers (the recovered
+  // type and the prototype's `returnsVoid`) and the value-suppression lives in a third place
+  // (structure.ts's return lowering), so a regressing edit to any of them prints `return expr;`
+  // inside a void function. That is ill-formed C the candidate compiler only rejects two stages
+  // later, with a diagnostic pointing at the symptom rather than the pass. Cheap to state here.
+  if (sfn.retType.kind === 'void') {
+    const valued = (stmts: Stmt[]): boolean =>
+      stmts.some((s) => (s.k === 'return' && s.value !== undefined) || valued(stmtChildren(s)));
+    if (valued(sfn.body)) {
+      bad.push(`function '${sfn.name}' is typed void but a return carries a value`);
+    }
+  }
   // Ops C rejects outright on a pointer operand (the additive ops and &&/|| are legal C).
   const NO_PTR_OPS = new Set<BinOp>(['&', '|', '^', '<<', '>>', '>>>', '*', '/', '%']);
   // The comparison operators — where a bare `&SYM` operand is SIGN-ambiguous, not ill-formed.

@@ -15,6 +15,7 @@ import { frontendFor } from './frontend/registry';
 import { Fn, type Value, defOpMap } from './ir/core';
 import { T } from './ir/types';
 import { verify } from './ir/verify';
+import { materializeArgBases } from './l3/argbase';
 import type { LanguageBackend, SFn } from './l3/ast';
 import { registerishSpellings } from './l3/regspell';
 import { reindexWalks } from './l3/reindex';
@@ -277,24 +278,33 @@ export function enumerateCandidates(
         // to the user — a semantically-wrong re-spelling there is plausible-but-wrong output, the
         // defect class this project exists to avoid. Hence each lever's decline-over-approximate
         // gates, adversarially audited.
-        const respell = (suffix: string, alt: SFn): void => {
+        // Takes a THUNK, so the lever's own computation is inside the try too. A lever that threw
+        // from the pass itself — rather than from the contracts or the backend — would escape and
+        // abort the whole enumeration for this row, primary included: the one way a lever can cost
+        // a match. Making that structural rather than per-call-site means no lever can opt out.
+        const respell = (suffix: string, make: () => SFn | null | undefined): void => {
           try {
+            const alt = make();
+            if (!alt) {
+              return; // the lever declined to fire — no candidate, not a duplicate of the primary
+            }
             assertResolved(alt);
             assertDerefsTyped(alt);
             spellings.push({ suffix, source: backend.emit(alt), ...refsOf(alt) });
           } catch {
-            // contract-failing or unspellable re-spelling: drop it, keep the primary
+            // a throwing lever, a contract failure, or an unspellable re-spelling: keep the primary
           }
         };
-        const indexed = reindexWalks(sfn);
-        if (indexed) {
-          respell('/indexed', indexed);
-        }
+        // `/argbase` — name a call's argument bases before the call (l3/argbase.ts). A lever on the
+        // same footing as the others: the primary inline spelling stays in the list, so the differ
+        // referees and this can never cost a match.
+        respell('/argbase', () => materializeArgBases(sfn));
+        respell('/indexed', () => reindexWalks(sfn));
         // the register-copy spelling (l3/regspell.ts): 0–3 variants (base; tail assign-back reusing
         // the dead value var; tail assign-back into a fresh var — the tail choice is allocator-
         // ambiguous, so both are ranked)
         const REGCOPY_LABELS = ['/regcopy', '/regcopy-ret', '/regcopy-ret-fresh'];
-        registerishSpellings(sfn).forEach((alt, i) => respell(REGCOPY_LABELS[i] ?? `/regcopy-${i}`, alt));
+        registerishSpellings(sfn).forEach((alt, i) => respell(REGCOPY_LABELS[i] ?? `/regcopy-${i}`, () => alt));
         for (const sp of spellings) {
           const source = sp.source;
           // Collapse a spelling that produced identical source (a function with no divergent `if`

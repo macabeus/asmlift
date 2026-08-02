@@ -202,14 +202,28 @@ function propagatePointers(fn: Fn): void {
   }
 }
 
-/** The recovered return type = the type of the value returned by the first `ret`. */
+/** The recovered return type: `void` when EVERY `ret` is operand-less, otherwise the type of the
+ *  first value any `ret` carries. */
 export function returnType(fn: Fn): IrType {
+  // VOID needs EVERY exit to agree. A function can have several `ret`s, and a frontend decides
+  // per block whether the return register holds anything — so an operand-less FIRST `ret` beside a
+  // valued second one is a real shape (MIPS/PPC compute it per block). Answering `void` off the
+  // first would declare void over a body the structurer still emits `return expr;` in, which is
+  // ill-formed C and a signature that contradicts its own body.
+  const rets = fn.blocks.map((b) => b.ops[b.ops.length - 1]).filter((t) => t?.opcode === 'ret');
+  if (rets.length > 0 && rets.every((t) => t!.operands.length === 0)) {
+    // NO operand is not "unknown type", it is NO VALUE. Every frontend already says it the same
+    // way: MIPS/PPC emit an operand-less `ret` when the return register has no reaching
+    // definition, and Thumb when the epilogue branches THROUGH that register (`bx r0`, where r0
+    // is the return address and so cannot also be a value). Defaulting to `s32` produced a
+    // non-void signature over a body with no `return` value — C's implicit-int function that
+    // falls off its end — contradicting the project's own prototype and keeping otherwise-dead
+    // computation alive to feed a return that never happens.
+    return T.void();
+  }
   for (const b of fn.blocks) {
     const term = b.ops[b.ops.length - 1];
-    if (term?.opcode === 'ret') {
-      if (term.operands.length === 0) {
-        return T.s(32);
-      }
+    if (term?.opcode === 'ret' && term.operands.length > 0) {
       const v = term.operands[0];
       return v.type.kind === 'unknown' ? T.s(32) : v.type;
     }

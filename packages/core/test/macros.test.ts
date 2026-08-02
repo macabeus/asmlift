@@ -20,8 +20,28 @@ describe('addressCastMacros', () => {
     expect(one('#define g   (*( u32 * ) 0x03005290)')[0].body).toBe('(*( u32 * ) 0x03005290)');
   });
 
-  test('REFUSES a volatile alias — the qualifier must never be silently dropped', () => {
-    expect(one('#define gPauseFlag (*(vu8 *)0x030034E4)')).toEqual([]);
+  test('ACCEPTS a volatile alias, CARRYING the qualifier', () => {
+    // Superseded refusal. The guarantee was "the qualifier is never silently dropped", and it
+    // used to be met by refusing the macro outright — which cost every MMIO register name a GBA
+    // project has, since those are exactly the cells one declares volatile. It is now met by
+    // carrying the fact instead, which is the same guarantee at none of the cost.
+    expect(one('#define gPauseFlag (*(vu8 *)0x030034E4)')).toEqual([
+      // the body is re-spelled even though the address was already a literal: `vu8` is a PROJECT
+      // typedef and the prelude a candidate compiles against has none, so keeping it verbatim
+      // republishes a `#define` that does not compile
+      {
+        name: 'gPauseFlag',
+        address: 0x030034e4,
+        body: '(*(volatile u8 *)0x30034E4)',
+        size: 1,
+        signed: false,
+        volatile: true,
+      },
+    ]);
+  });
+
+  test('a NON-volatile alias carries no qualifier — the flag is a fact, not a default', () => {
+    expect(one('#define gPlain (*(u8 *)0x030034E4)')[0]).not.toHaveProperty('volatile');
   });
 
   test('REFUSES an unknown type spelling rather than guessing its width', () => {
@@ -40,15 +60,73 @@ describe('addressCastMacros', () => {
     expect(one(text)).toEqual([]);
   });
 
-  test('ignores everything that is not the exact shape', () => {
+  test('ignores everything that is not an address cast', () => {
     const text = [
-      '#define REG_KEYINPUT (*(vu16 *)REG_ADDR_KEYINPUT)', // two-level
-      '#define OBJ_VRAM 0x06010000', // bare constant
+      '#define OBJ_VRAM 0x06010000', // bare constant — names no cell
       '#define MAX(a, b) ((a) > (b) ? (a) : (b))', // function-like
-      '#define gOff (*(u16 *)(0x03001234 + 2))', // offset expression
+      '#define gPtrPtr (*(u16 **)0x03001234)', // two-LEVEL indirection, not a cell
       'u16 gNotAMacro;',
     ].join('\n');
     expect(one(text)).toEqual([]);
+  });
+
+  test('an ADDRESS EXPRESSION is folded — a literal is not the only spelling', () => {
+    // The real Klonoa header shape: the cast names a helper macro, which names a base and an
+    // offset, and the base is a `void *` the header does byte arithmetic on. A literal-only
+    // recognizer sees none of the 466 REG_* names and reads every MMIO cell as a decimal.
+    const text = [
+      '#define REG_BASE (void *)0x4000000',
+      '#define REG_OFFSET_BLDALPHA 0x52',
+      '#define REG_ADDR_BLDALPHA (REG_BASE + REG_OFFSET_BLDALPHA)',
+      '#define REG_BLDALPHA (*(vu16 *)REG_ADDR_BLDALPHA)',
+    ].join('\n');
+    expect(one(text)).toEqual([
+      // the body is RE-SPELLED self-contained: it is republished as the definition a reproduction
+      // compiles against, and the original names three more macros. `volatile u16`, not `vu16` —
+      // the typedef prelude has no volatile aliases.
+      {
+        name: 'REG_BLDALPHA',
+        address: 0x04000052,
+        body: '(*(volatile u16 *)0x4000052)',
+        size: 2,
+        signed: false,
+        volatile: true,
+      },
+    ]);
+  });
+
+  test("a literal address keeps the project's OWN body verbatim", () => {
+    expect(one('#define gOff (*(u16 *)0x03001234)')[0].body).toBe('(*(u16 *)0x03001234)');
+  });
+
+  test('an offset expression over a literal folds too', () => {
+    expect(one('#define gOff (*(u16 *)(0x03001234 + 2))')[0].address).toBe(0x03001236);
+  });
+
+  test('REFUSES an expression it cannot be sure of', () => {
+    // an undefined name, a cycle, a token outside the grammar, and a function-like call
+    expect(one('#define g (*(u16 *)UNDEFINED_BASE)')).toEqual([]);
+    expect(one('#define A B\n#define B A\n#define g (*(u16 *)A)')).toEqual([]);
+    expect(one('#define g (*(u16 *)(0x1000 * 2))')).toEqual([]);
+    expect(one('#define MAX(a,b) 1\n#define g (*(u16 *)MAX(1,2))')).toEqual([]);
+  });
+
+  test('REFUSES a SCALING pointer cast — stripping one names the WRONG cell', () => {
+    // C pointer arithmetic scales by the pointee: `(vu16 *)0x4000000 + 5` is 0x400000A, not
+    // 0x4000005. Folding it wrong would be undetectable downstream — the synthesized body
+    // republishes the same wrong address, so the candidate still byte-matches the numeric pool
+    // word it was looked up by while naming a different register.
+    expect(one('#define S (*(vu16 *)((vu16 *)0x4000000 + 5))')).toEqual([]);
+    expect(one('#define S (*(u32 *)((u32 *)0x4000000 + 1))')).toEqual([]);
+  });
+
+  test('a BYTE-sized pointer cast is still stripped — that one does not scale', () => {
+    expect(one('#define S (*(vu16 *)((void *)0x4000000 + 5))')[0].address).toBe(0x04000005);
+    expect(one('#define S (*(u8 *)((u8 *)0x4000000 + 5))')[0].address).toBe(0x04000005);
+  });
+
+  test('REFUSES a NEGATIVE result rather than wrapping it into an address', () => {
+    expect(one('#define LO 0x10\n#define g (*(u16 *)(LO - 0x20))')).toEqual([]);
   });
 
   test('a redefinition of the SAME name at the same address is not a collision', () => {
