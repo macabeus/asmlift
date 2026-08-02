@@ -1,4 +1,16 @@
-// asmlift — boolean-value short-circuit recovery (F-CFG; successor-aware, agbcc-class).
+// asmlift — short-circuit connective recovery (F-CFG; successor-aware, agbcc-class).
+//
+// A `&&`/`||` reaches the IR in two shapes, and this module recovers BOTH into the SAME pair of
+// opcodes (`logic_and`/`logic_or`) the backend already prints as `&&`/`||`:
+//
+//   - the VALUE form (`return a && b`) — a diamond whose merge phi is the boolean. That is
+//     `recognizeShortCircuit`, described below.
+//   - the CONTROL-FLOW form (`if (a || b) X else Y`) — no value at all, just two `cond_br` blocks
+//     that share a target. That is `recognizeBranchShortCircuit`, at the bottom of this file.
+//
+// They are one concept and stay in one file, but they are separate passes because their inputs do
+// not overlap: the value form needs the second block to end in `br` carrying a phi argument, the
+// branch form needs it to end in `cond_br`.
 //
 // `return a && b` compiles (agbcc) to a value-producing diamond: `if (a==0) result=0; else result=(b!=0)`,
 // where the merge block returns the phi. The structurer lowers that as `if (a==0){v0=0}else{v0=(-b|b)>>31}
@@ -28,7 +40,7 @@
 // negatable icmp, and any deviation falls through untouched (a miss, never a miscompile).
 import { Block, Fn, Op, Value, defOpMap, mkOp, mkValue, predecessors, replaceAllUsesWith } from '../ir/core';
 import type { Opcode } from '../ir/opcodes';
-import { EFFECTFUL_OPS } from '../ir/opcodes';
+import { HOIST_UNSAFE_OPS } from '../ir/opcodes';
 import { T } from '../ir/types';
 
 const NEGATE_ICMP: Record<string, Opcode> = {
@@ -44,9 +56,6 @@ const NEGATE_ICMP: Record<string, Opcode> = {
   icmp_ule: 'icmp_ugt',
 };
 const BOOL_OPS = new Set([...Object.keys(NEGATE_ICMP), 'logic_and', 'logic_or']);
-// Ops with an observable side effect — unsafe to HOIST out of a short-circuit's conditional arm
-// (they would run unconditionally). Derived from the ONE effect table in ir/opcodes.ts.
-const SIDE_EFFECT = EFFECTFUL_OPS;
 
 /** Fold `(-x | x) >> 31` (logical shift) → `x != 0`, in place. agbcc's branchless is-nonzero idiom. */
 // NOT exported: it must run before the diamond fold, an ordering only recognizeShortCircuit's
@@ -124,6 +133,16 @@ export function recognizeShortCircuit(fn: Fn): boolean {
         if (bp.length !== 1) {
           continue;
         }
+        // The ENTRY block is never a feeder, for the same reason it is never ^g in the branch form
+        // below: `predecessors()` walks successor edges only, so an entry block that is also a loop
+        // header shows one predecessor while actually running BEFORE it on the first iteration.
+        // Hoisting its body then reorders it and deleting it moves `fn.blocks[0]`. Silent — verify,
+        // assertResolved and assertDerefsTyped all pass. PRE-EXISTING (this fold predates the branch
+        // form and `main` miscompiles the same MIPS input); fixed here because the branch form's
+        // note used to assert this one was safe.
+        if (bfeed === fn.blocks[0]) {
+          continue;
+        }
         const h = bp[0];
         const ht = term(h);
         if (ht.opcode !== 'cond_br') {
@@ -171,7 +190,7 @@ export function recognizeShortCircuit(fn: Fn): boolean {
         // expression, where C's own short-circuit re-guards them. Any side effect ⇒ DECLINE the fold — the
         // merge-variable spelling the fall-through leaves is correct (the side effect stays in B's block),
         // just possibly non-matching.
-        if (bfeed.ops.slice(0, -1).some((op) => SIDE_EFFECT.has(op.opcode))) {
+        if (bfeed.ops.slice(0, -1).some((op) => HOIST_UNSAFE_OPS.has(op.opcode))) {
           continue;
         }
         bfeed.ops.slice(0, -1).forEach(before); // hoist B's pure body (defines Vb; harmless if a dead const)
@@ -204,4 +223,240 @@ export function recognizeShortCircuit(fn: Fn): boolean {
     }
   }
   return changed;
+}
+
+// ── the CONTROL-FLOW form ───────────────────────────────────────────────────────────────────────
+//
+// `if (a || b) X else Y` produces no value: it is two `cond_br` blocks that SHARE a target.
+//
+//     ^h:  cond_br c1, ^X, ^g          <- `a`
+//     ^g:  … ; cond_br c2, ^Y, ^X      <- `b`   (sole predecessor ^h)
+//
+// Nothing in the tower recognizes that today, so the structurer reaches ^X from two arms and
+// TAIL-DUPLICATES it — `if (a) X else { if (b') Y else X }`. The duplicate is correct C but it is
+// not the C the compiler compiled, and the duplicated tail costs every byte it contains.
+//
+// The fold rewrites ^h's terminator to one `cond_br` over a connective and drops ^g. Which
+// connective, and which successor slot, follows from WHICH of ^h's edges leads to ^g:
+//
+//   ^g is ^h's FALL   → ^g runs iff !c1, so the SHARED block is taken iff `c1 || cShared`
+//                       ⇒ cond_br(logic_or(c1, cShared))[shared, other]
+//   ^g is ^h's TAKEN  → ^g runs iff  c1, so the OTHER  block is taken iff `c1 && cOther`
+//                       ⇒ cond_br(logic_and(c1, cOther))[other, shared]
+//
+// where `cShared`/`cOther` is ^g's own condition ORIENTED at that block — ^g's `cond_br` operand
+// when it already branches there, otherwise its negation (so ^g's condition must be a negatable
+// icmp, exactly as in the value form). Both spellings keep ^h's original successor ORDER for the
+// edge that did not change, so the branch sense the frontend read out of the asm is preserved.
+//
+// REFUSALS (each one a real way this could be wrong, not a hypothetical):
+//
+//   - ^g is the ENTRY block. `predecessors()` walks successor edges only — it does not model the
+//     implicit edge into `fn.blocks[0]` — so an entry block that is ALSO a loop header (its one
+//     real predecessor being its own latch) passes the sole-predecessor test below while the whole
+//     soundness argument fails for it: on the first iteration ^g runs BEFORE ^h, so hoisting ^g's
+//     body into ^h reorders it, and deleting ^g moves the entry to another block entirely. That
+//     turns an entry-guarded `while` into a `do…while` whose body runs once unconditionally —
+//     silent wrong code, caught by no contract (verify, assertResolved and assertDerefsTyped all
+//     pass). MIPS and PPC reach this: only thumb.ts inserts a synthetic preheader that would give
+//     the header a second predecessor. `retsink.ts` guards the same way (`fn.blocks[0] !== m`).
+//   - ^g has a predecessor other than ^h — folding would delete a block still reachable elsewhere.
+//   - ^g has block params — ^h's edge binds them, and dropping the edge drops the binding.
+//   - ^h and ^g both test the SAME value against CONSTANTS — that is a comparison-tree `switch`,
+//     not a hand-written `||`. switch-recover.ts requires every test's `cond_br` operand to be an
+//     `icmp` (its `isCmpOpcode` gate), and a `logic_or` is not one, so folding first PERMANENTLY
+//     disqualifies the recovery and a clean `switch (x) { case 1: case 2: … }` degrades to a chain
+//     of nested `if`s. The switch is the better recovery and it is the more specific one, so it
+//     wins the shape. Cost: a genuine source-level `x == 1 || x == 2` that is NOT part of a wider
+//     tree also declines — the same conservative trade loops.ts makes when it refuses to infer a
+//     header from `cond_br` shape.
+//   - ^g holds a side effect — its ops move into ^h, which runs UNCONDITIONALLY. A store in `b`
+//     would then execute even when `a` already decided the branch. (`a || (*p = 1)`.)
+//   - a value defined in ^g is used outside ^g, or used more than once. Then the structurer
+//     MATERIALIZES it into a local, which renders as a statement BEFORE the `if` — turning `b`'s
+//     conditional computation into an unconditional one. Single-use-and-local is precisely the
+//     shape analysis.ts inlines into the connective's right operand, where C's own short-circuit
+//     re-guards it. This is what keeps a load in `b` from being hoisted across the guard in `a`.
+//   - the two edges into the shared block carry DIFFERENT args. Only one edge survives the fold,
+//     so it can only carry one argument list; picking either would silently drop the other path's
+//     phi input.
+//   - ^g's two successors are the same block, or ^g's condition is not a negatable icmp when the
+//     orientation needs negating.
+//
+// Every refusal falls through untouched, leaving the tail-duplicated spelling — a miss, never a
+// miscompile. Applied ITERATIVELY, so `a || b || c` folds left-to-right, each round consuming one
+// more condition block.
+export function recognizeBranchShortCircuit(fn: Fn): boolean {
+  let changed = false;
+  const term = (b: Block) => b.ops[b.ops.length - 1];
+  let progress = true;
+  while (progress) {
+    progress = false;
+    const defs = defOpMap(fn);
+    const preds = predecessors(fn);
+    outer: for (const h of fn.blocks) {
+      const ht = term(h);
+      if (ht.opcode !== 'cond_br') {
+        continue;
+      }
+      const [taken, fall] = ht.successors;
+      // Try ^g = the fall edge, then ^g = the taken edge. `gIsFall` picks the connective.
+      for (const gIsFall of [true, false]) {
+        const gEdge = gIsFall ? fall : taken;
+        const sharedFromH = gIsFall ? taken : fall;
+        const g = gEdge.block;
+        if (g === h || g === sharedFromH.block || g.params.length > 0) {
+          continue;
+        }
+        // The ENTRY block is never ^g — see the REFUSALS note. `predecessors()` cannot see the
+        // implicit entry edge, so this is the only thing standing between an entry-block loop
+        // header and a silently reordered function body.
+        if (g === fn.blocks[0]) {
+          continue;
+        }
+        if ((preds.get(g) ?? []).length !== 1) {
+          continue;
+        }
+        const gt = term(g);
+        if (gt.opcode !== 'cond_br') {
+          continue;
+        }
+        const [gTaken, gFall] = gt.successors;
+        if (gTaken.block === gFall.block) {
+          continue;
+        }
+        // A comparison TREE over one scrutinee belongs to switch recovery, not to this fold.
+        if (sameScrutineeConstTests(defs, ht.operands[0], gt.operands[0])) {
+          continue;
+        }
+        // ^g's body must be pure, and every value it defines must be consumed only by ^g itself —
+        // see the REFUSALS note: an escaping or reused value becomes a statement hoisted out of the
+        // short circuit.
+        // HOIST_UNSAFE_OPS, not EFFECTFUL_OPS: a live `opaque` is an instruction asmlift could not
+        // model, and moving it out of the arm that guards it is the reordering this refuses. Loud
+        // either way today (a decline under `onGap: 'strict'`, an ASMLIFT_ERROR marker under
+        // `annotate`, the CLI and benchmark default), so this closes a model gap rather than fixing
+        // an observed bug.
+        const body = g.ops.slice(0, -1);
+        if (body.some((op) => HOIST_UNSAFE_OPS.has(op.opcode))) {
+          continue;
+        }
+        if (!definedValuesStayLocal(fn, g)) {
+          continue;
+        }
+        // Which of ^g's edges rejoins ^h's other successor? That is the shared block.
+        const sharedEdge =
+          gTaken.block === sharedFromH.block ? gTaken : gFall.block === sharedFromH.block ? gFall : null;
+        if (!sharedEdge) {
+          continue;
+        }
+        const otherEdge = sharedEdge === gTaken ? gFall : gTaken;
+        if (!sameArgs(sharedFromH.args, sharedEdge.args)) {
+          continue;
+        }
+        // The second operand, oriented at the block whose slot it decides: `logic_or` asks "does ^g
+        // reach the SHARED block", `logic_and` asks "does ^g reach the OTHER block".
+        const wantEdge = gIsFall ? sharedEdge : otherEdge;
+        const c2 = gt.operands[0];
+        const c2Def = defs.get(c2);
+        let second = c2;
+        const negated: Op[] = [];
+        if (wantEdge !== gTaken) {
+          if (!c2Def || !NEGATE_ICMP[c2Def.opcode]) {
+            continue;
+          }
+          second = mkValue(T.unk(32));
+          negated.push(mkOp(NEGATE_ICMP[c2Def.opcode], { operands: [...c2Def.operands], results: [second] }));
+        }
+        const res = mkValue(T.unk(32));
+        const connective = mkOp(gIsFall ? 'logic_or' : 'logic_and', {
+          operands: [ht.operands[0], second],
+          results: [res],
+        });
+        // ^g's body moves ahead of ^h's terminator; ^h keeps the successor SLOT that did not change
+        // (taken=shared for `||`, taken=other for `&&`), so the frontend's branch sense survives.
+        h.ops.splice(h.ops.length - 1, 1, ...body, ...negated, connective, {
+          ...mkOp('cond_br', { operands: [res] }),
+          successors: gIsFall
+            ? [
+                { block: sharedEdge.block, args: [...sharedEdge.args] },
+                { block: otherEdge.block, args: [...otherEdge.args] },
+              ]
+            : [
+                { block: otherEdge.block, args: [...otherEdge.args] },
+                { block: sharedEdge.block, args: [...sharedEdge.args] },
+              ],
+        });
+        fn.blocks = fn.blocks.filter((x) => x !== g);
+        changed = true;
+        progress = true;
+        break outer; // defs/preds are stale after the mutation — recompute on the next round
+      }
+    }
+  }
+  return changed;
+}
+
+/** Do `c1` and `c2` compare the SAME value against CONSTANTS? That is the signature of a
+ *  comparison-tree `switch`, which switch-recover.ts owns — see the REFUSALS note. Equality tests
+ *  only: a switch tree dispatches on `==`/`!=`, while a RELATIONAL pair (`x >= lo && x <= hi`, the
+ *  range check) is a genuine connective this fold should still take. */
+function sameScrutineeConstTests(defs: Map<Value, Op>, c1: Value, c2: Value): boolean {
+  const eqTest = (v: Value): { scrutinee: Value } | null => {
+    const d = defs.get(v);
+    if (!d || (d.opcode !== 'icmp_eq' && d.opcode !== 'icmp_ne')) {
+      return null;
+    }
+    const [x, y] = d.operands;
+    const xc = defs.get(x)?.opcode === 'const';
+    const yc = defs.get(y)?.opcode === 'const';
+    // exactly one side constant — `x == y` between two variables is no switch test
+    return xc === yc ? null : { scrutinee: xc ? y : x };
+  };
+  const a = eqTest(c1);
+  const b = eqTest(c2);
+  return a !== null && b !== null && a.scrutinee === b.scrutinee;
+}
+
+/** True when every value `g` defines is read at most once, and any read is inside `g`.
+ *
+ *  The VALUE form above needs no such check, and the asymmetry is real rather than drift: its feeder
+ *  ends in `br M`, so the feeder has no successor of its own to dominate and every value it defines
+ *  is either read in the feeder or carried to `M` as the phi argument the fold consumes. Here ^g
+ *  ends in `cond_br` and its `other` successor IS ^g-dominated, so a ^g-defined value genuinely can
+ *  escape, and only this check stops it.
+ *
+ *  An earlier version of this note justified the asymmetry by "the feeder dominates nothing but
+ *  itself because M has 2+ predecessors", and told the reader not to unify the guards. That was
+ *  WRONG — the entry block dominates every block whatever M's predecessor count — and it was wrong
+ *  about the one guard the two folds genuinely DO share, the `fn.blocks[0]` refusal, which the value
+ *  form was missing entirely. Both now have it. When changing either fold, check the other. */
+function definedValuesStayLocal(fn: Fn, g: Block): boolean {
+  const defined = new Set<Value>(g.ops.flatMap((op) => op.results));
+  if (defined.size === 0) {
+    return true;
+  }
+  const uses = new Map<Value, number>();
+  for (const b of fn.blocks) {
+    for (const op of b.ops) {
+      for (const v of [...op.operands, ...op.successors.flatMap((s) => s.args)]) {
+        if (!defined.has(v)) {
+          continue;
+        }
+        if (b !== g) {
+          return false; // escapes ^g — the structurer would render it before the `if`
+        }
+        uses.set(v, (uses.get(v) ?? 0) + 1);
+      }
+    }
+  }
+  // ZERO uses is fine — a dead op renders nothing at all, so it cannot escape the short circuit.
+  // TWO or more is not: analysis.ts materializes a multi-consumer value into a local, which is a
+  // statement, and a statement lands before the `if`.
+  return [...defined].every((v) => (uses.get(v) ?? 0) <= 1);
+}
+
+/** Two successor argument lists that a fold may collapse into one: same values, same order. */
+function sameArgs(a: Value[], b: Value[]): boolean {
+  return a.length === b.length && a.every((v, i) => v === b[i]);
 }

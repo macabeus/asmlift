@@ -432,3 +432,73 @@ test('F6: a GUARDED self-loop keeps the emitWhile un-rotation (ownership is excl
   const src = cBackend.emit(structure(fn));
   expect(src).not.toContain('do {'); // the guarded path un-rotates to while/for, never do-while
 });
+
+// ── negation of a short-circuit connective (De Morgan) ──────────────────────────────────────────
+//
+// A source `&&` and its De Morgan dual `||` compile to the SAME branch graph, so the recognizers in
+// raise/shortcircuit.ts must pick whichever the asm's branch senses spell. When the structurer then
+// has to negate that condition (an empty-then peephole, a divergent-if flip, a loop-test polarity),
+// wrapping it in `!` produces a spelling no author writes AND hides the dual. `negate()` therefore
+// distributes instead.
+
+// `if (a || b) return 1; else return 0;` with an EMPTY then-arm, so mkIf's peephole negates the
+// connective: `if (!(a || b)) return 0;`.
+const NEGATED_OR = `fn negor {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=0}
+  %3: u32 = icmp_ne %0, %2
+  %4: u32 = icmp_ne %1, %2
+  %5: s32 = logic_or %3, %4
+  cond_br %5, ^bb1(), ^bb2()
+^bb1():
+  %6: s32 = const {value=1}
+  ret %6
+^bb2():
+  %7: s32 = const {value=0}
+  ret %7
+}
+`;
+
+// The same shape with `&&`, which must dualize the other way.
+const NEGATED_AND = NEGATED_OR.replace('logic_or', 'logic_and').replace('fn negor', 'fn negand');
+
+const emitIr = (ir: string): string => {
+  const fn = parse(ir);
+  verify(fn);
+  recoverTypes(fn);
+  return cBackend.emit(structure(fn));
+};
+
+test('negating `a || b` yields `!a && !b`, not `!(a || b)`', () => {
+  const out = emitIr(NEGATED_OR);
+  expect(out).toContain('a0 == 0 && a1 == 0');
+  expect(out).not.toContain('!(');
+});
+
+test('negating `a && b` yields `!a || !b`', () => {
+  const out = emitIr(NEGATED_AND);
+  expect(out).toContain('a0 == 0 || a1 == 0');
+  expect(out).not.toContain('!(');
+});
+
+test('the distribution is RECURSIVE — a nested connective dualizes too', () => {
+  const nested = `fn negnested {
+^bb0(%0: s32, %1: s32, %2: s32):
+  %3: s32 = const {value=0}
+  %4: u32 = icmp_ne %0, %3
+  %5: u32 = icmp_ne %1, %3
+  %6: u32 = icmp_ne %2, %3
+  %7: s32 = logic_and %5, %6
+  %8: s32 = logic_or %4, %7
+  cond_br %8, ^bb1(), ^bb2()
+^bb1():
+  %9: s32 = const {value=1}
+  ret %9
+^bb2():
+  %10: s32 = const {value=0}
+  ret %10
+}
+`;
+  // !(a || (b && c))  →  !a && (!b || !c)
+  expect(emitIr(nested)).toContain('a0 == 0 && (a1 == 0 || a2 == 0)');
+});

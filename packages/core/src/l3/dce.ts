@@ -22,7 +22,7 @@
 // unresolved `?` value trips the contract first and never reaches DCE; `mustKeep` treating `?` as
 // keep is defense-in-depth for any future caller that skips that check.
 import type { Expr, SFn, Stmt } from './ast';
-import { exprChildren, stmtChildren, stmtExprs } from './ast';
+import { exprChildren, negateCond, stmtChildren, stmtExprs } from './ast';
 
 /** Accumulate every LOCAL-eligible `var` name read anywhere in `e` (recurses all sub-exprs). An
  *  `addr` node names a global, not a local, so it is not a local read. */
@@ -68,27 +68,6 @@ function allReadsInto(stmts: Stmt[], out: Set<string>): void {
     }
     allReadsInto(stmtChildren(s), out);
   }
-}
-
-/** Negate a condition, flipping a relational operator directly (`!= → ==`, `< → >=`, …) so an
- *  empty-then flip reads cleanly; anything else wraps in `!( … )`. Both forms are semantically
- *  exact over C's total integer order. */
-function negate(cond: Expr): Expr {
-  if (cond.k === 'bin') {
-    const table: Record<string, '==' | '!=' | '<' | '<=' | '>' | '>='> = {
-      '==': '!=',
-      '!=': '==',
-      '<': '>=',
-      '>=': '<',
-      '>': '<=',
-      '<=': '>',
-    };
-    const f = table[cond.op];
-    if (f) {
-      return { k: 'bin', op: f, l: cond.l, r: cond.r };
-    }
-  }
-  return { k: 'un', op: '!', e: cond };
 }
 
 /** Backward live-variable walk over one block. `liveOut` is the set of locals live on exit;
@@ -171,7 +150,7 @@ function dceBlock(
             rev.push({ k: 'exprstmt', value: s.cond });
           }
         } else if (t.out.length === 0) {
-          rev.push({ k: 'if', cond: negate(s.cond), then: e.out, else: [] });
+          rev.push({ k: 'if', cond: negateCond(s.cond), then: e.out, else: [] });
         } else {
           rev.push({ k: 'if', cond: s.cond, then: t.out, else: e.out });
         }

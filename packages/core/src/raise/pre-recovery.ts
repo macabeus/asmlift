@@ -16,7 +16,7 @@ import type { TargetDescription } from '../target';
 import { recognizeArrays } from './arrays';
 import { recognizeConsts } from './const';
 import { recognizeMagicDivision } from './magicdiv';
-import { recognizeShortCircuit } from './shortcircuit';
+import { recognizeBranchShortCircuit, recognizeShortCircuit } from './shortcircuit';
 import { recognizeSoftDiv } from './softdiv';
 import { recognizeStructArrays } from './struct-arrays';
 import { recognizeStructs } from './structs';
@@ -46,6 +46,15 @@ export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
   { id: 'struct-arrays', run: recognizeStructArrays, dce: true },
   { id: 'structs', run: recognizeStructs, dce: false },
   { id: 'shortcircuit', run: recognizeShortCircuit, dce: true },
+  // The control-flow sibling, and this order IS load-bearing — value form FIRST.
+  //
+  // Their input SHAPES are disjoint (the value form's second block ends in `br` carrying a phi
+  // argument, this one's ends in `cond_br`), so neither can eat the other's literal pattern. But
+  // this pass REWRITES its head's condition into a `logic_or`/`logic_and`, and the value form
+  // refuses any head whose condition is not a negatable icmp — so running this one first can
+  // permanently disqualify a value fold that was available. The reverse cannot happen: the value
+  // form replaces its head's `cond_br` with a `br`, which this pass never matches.
+  { id: 'branch-shortcircuit', run: recognizeBranchShortCircuit, dce: true },
 ];
 
 /** Run the pre-recovery passes in order. For each pass whose gate passes and that CHANGES the IR, run

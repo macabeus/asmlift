@@ -426,3 +426,102 @@ describe('C-family pointer-write legalization (the assign-side sibling, F6)', ()
     expect(src).toMatch(/until \(not \(/);
   });
 });
+
+// ── the address of an AGGREGATE assigned to an element pointer ───────────────────────────────────
+//
+// The same rendered-vs-value type split as the derefs above, on the other side of an assignment.
+// A `gaddr` value legitimately has type `T *` — that is what the asm loaded — but `&gArr` renders
+// as `T (*)[n]` and `&gStruct` as `struct S *`, neither of which is assignable to `T *`. agbcc only
+// WARNS and computes the right address anyway, which is how this survived; the Klonoa project's own
+// template makes it fatal, so the emitted C does not build where its author would put it.
+describe('assigning &gSym to a pointer local', () => {
+  // A merge whose phi is a pointer fed by `gaddr` from both arms — the shape that materializes the
+  // address into a local (kleod:UpdateHUDCounterDisplay's `gBgTilemapBufs` base register).
+  const PHI_OF_GADDR = `fn f {
+^bb0(%0: s32):
+  %1: s32 = const {value=0}
+  %2: u32 = icmp_ne %0, %1
+  cond_br %2, ^bb1(), ^bb2()
+^bb1():
+  %3: u16* = gaddr {sym="gArr"}
+  br ^bb3(%3)
+^bb2():
+  %4: u16* = gaddr {sym="gArr"}
+  %5: s32 = const {value=7}
+  store %4, %5 {off=2, width=2}
+  br ^bb3(%4)
+^bb3(%6: u16*):
+  %7: s32 = load %6 {off=0, signed=false, width=2}
+  ret %7
+}
+`;
+
+  /** Same shape but width 4, so the destination local is `s32 *` — the pointee the
+   *  declaration-side rule has to match exactly. */
+  const emitS32 = (info: Record<string, unknown>): string => {
+    const fn = parse(PHI_OF_GADDR.replace(/u16\*/g, 's32*').replace(/width=2/g, 'width=4'));
+    verify(fn);
+    recoverTypes(fn);
+    const symbols = new Map([['gArr', { name: 'gArr', kind: 'data', ...info }]]);
+    return cBackend.emit(structure(fn, { symbols: symbols as never }));
+  };
+
+  const emitWith = (info: Record<string, unknown>): string => {
+    const fn = parse(PHI_OF_GADDR);
+    verify(fn);
+    recoverTypes(fn);
+    const symbols = new Map([['gArr', { name: 'gArr', kind: 'data', ...info }]]);
+    return cBackend.emit(structure(fn, { symbols: symbols as never }));
+  };
+
+  // The destination local is `u16 *` throughout (the load in ^bb3 is width 2).
+  test('an ARRAY-shaped global gets the cast — `&gArr` is `T (*)[n]`, not `T *`', () => {
+    const out = emitWith({ shape: 'array', elemSize: 2, dims: [4, 8] });
+    expect(out).toContain('v0 = (u16 *)&gArr;');
+    expect(out).not.toMatch(/v0 = &gArr;/);
+  });
+
+  test('a STRUCT-shaped global gets it too — `&gStruct` is `struct S *`', () => {
+    expect(emitWith({ shape: 'struct', size: 16 })).toContain('v0 = (u16 *)&gArr;');
+  });
+
+  test('a POINTER-shaped global gets it — it declares `void *g`, so `&g` is `void **`', () => {
+    expect(emitWith({ shape: 'pointer', size: 4 })).toContain('v0 = (u16 *)&gArr;');
+  });
+
+  test('a NAME-ONLY global gets it — the synthesized `extern u32 g;` makes `&g` a `u32 *`', () => {
+    expect(emitWith({})).toContain('v0 = (u16 *)&gArr;');
+  });
+
+  test('a SCALAR of a DIFFERENT width gets it — `&g` is `s32 *`, the slot is `u16 *`', () => {
+    expect(emitWith({ shape: 'scalar', size: 4, signed: true })).toContain('v0 = (u16 *)&gArr;');
+  });
+
+  // The destination pointee is `u16` in these; the four below use a `s32 *` destination instead,
+  // so they pin the DECLARATION-side rule rather than the access-side one.
+  test('a width-4 UNSIGNED scalar gets the cast — `extern u32 g;` makes `&g` a `u32 *`', () => {
+    // Regression: scalarTypeForAccess(4, …) collapses to s32 whatever the signedness, so an
+    // access-side comparison called this equal to `s32 *` and let it through uncast.
+    expect(emitS32({ shape: 'scalar', size: 4, signed: false })).toContain('v0 = (s32 *)&gArr;');
+  });
+
+  test('a VOLATILE scalar gets it — omitting would discard the qualifier from `volatile T *`', () => {
+    expect(emitS32({ shape: 'scalar', size: 4, volatile: true })).toContain('v0 = (s32 *)&gArr;');
+  });
+
+  test('a width-4 SIGNED scalar does NOT — `&g` is exactly `s32 *`', () => {
+    expect(emitS32({ shape: 'scalar', size: 4, signed: true })).toContain('v0 = &gArr;');
+  });
+
+  test('a width-4 scalar with NO signedness does NOT — the enum idiom declares `s32`', () => {
+    expect(emitS32({ shape: 'scalar', size: 4 })).toContain('v0 = &gArr;');
+  });
+
+  test('a SCALAR whose cell type IS the pointee does NOT — the cast would be pure noise', () => {
+    const out = emitWith({ shape: 'scalar', size: 2, signed: false });
+    expect(out).toContain('v0 = &gArr;');
+    // scoped to the ASSIGN — the `((u16 *)&gArr)[1]` in the other arm is the ACCESS path's own
+    // cast (memAccess), which is correct and predates this rule
+    expect(out).not.toContain('v0 = (u16 *)&gArr;');
+  });
+});

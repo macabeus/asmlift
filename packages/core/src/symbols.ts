@@ -283,13 +283,31 @@ export function symbolFieldType(f: DeclaredField): IrType {
     const scalarPointee = f.pointeeSize === 1 || f.pointeeSize === 2 || f.pointeeSize === 4;
     return T.ptr(scalarPointee ? T.int(f.pointeeSize! * 8, f.pointeeSigned ?? false) : T.void());
   }
-  if (f.size === 1 || f.size === 2 || f.size === 4) {
-    return T.int(f.size * 8, f.signed ?? (f.size === 4 ? ENUM_IS_SIGNED : false));
+  if (isScalarCellSize(f.size)) {
+    return scalarCellType(f.size, f.signed);
   }
   return T.array(T.u(8), f.size);
 }
 /** A 4-byte member/scalar with NO base-type signedness is the enum idiom — C89 says int. */
 export const ENUM_IS_SIGNED = true;
+
+/** Is this byte size one a base type can spell? */
+export function isScalarCellSize(size: number | undefined): size is 1 | 2 | 4 {
+  return size === 1 || size === 2 || size === 4;
+}
+
+/** THE DECLARED type of a 1/2/4-byte scalar cell — what `extern T gSym;` synthesis writes, and
+ *  therefore what `&gSym` actually points to.
+ *
+ *  Extracted because this rule had drifted into a fourth copy. It is NOT `scalarTypeForAccess`,
+ *  which answers a different question — the type an ACCESS of that width reads — and collapses
+ *  every 4-byte access to `s32` whatever the signedness. Using that one to decide "does `&gSym`
+ *  already have the destination's type" silently answered YES for a `u32` cell reaching an
+ *  `s32 *`, and the incompatible-pointer assignment survived. Declaration side and access side are
+ *  separate facts; this is the declaration one. */
+export function scalarCellType(size: 1 | 2 | 4, signed: boolean | undefined): IrType {
+  return T.int(size * 8, signed ?? (size === 4 ? ENUM_IS_SIGNED : false));
+}
 
 /**
  * THE gate on every spelling through a POINTER global's value: the members a `gPtr->member`

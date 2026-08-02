@@ -38,7 +38,7 @@
 // header also entered by a plain br).
 import { Block, Fn, Op, Value, defOpMap, successorsOf } from '../ir/core';
 import { type IrType, T, scalarTypeForAccess, typeEquals } from '../ir/types';
-import { BinOp, Expr, SFn, Stmt, SwitchCase, exprChildren, mapExprChildren } from '../l3/ast';
+import { BinOp, Expr, SFn, Stmt, SwitchCase, exprChildren, mapExprChildren, negateCond } from '../l3/ast';
 import { exprCType, ptrElemBytes } from '../l3/typing';
 import { returnType } from '../raise/recover';
 import { collectStructs } from '../raise/structs';
@@ -49,7 +49,9 @@ import {
   arrayInnerExtents,
   declaredFields,
   isArrayField,
+  isScalarCellSize,
   pointeeFields,
+  scalarCellType,
 } from '../symbols';
 import { analyze } from './analysis';
 import { makeLoopHazards, updateWriteSet } from './hazards';
@@ -554,7 +556,6 @@ const ARITH_TO_BIN: Record<string, BinOp> = {
   logic_and: '&&',
   logic_or: '||', // short-circuit connectives (raise/shortcircuit.ts)
 };
-const NEGATE: Record<string, BinOp> = { '<': '>=', '>=': '<', '>': '<=', '<=': '>', '==': '!=', '!=': '==' };
 
 // Recovered info for a self-loop header: its exit block and the per-parameter back-edge
 // arg it feeds (the value on the header→header edge). The back-edge arg is the "next"
@@ -924,6 +925,50 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
   // The C static type of a rendered expression, over the declared variable types — what decides
   // whether a memory access's base may be dereferenced as spelled (memAccess/arrayAccess).
   const ctype = (e0: Expr): IrType | undefined => exprCType(e0, (n) => varType.get(n));
+
+  /** `&gSym` assigned to a `T *` local: the address of an AGGREGATE is not a pointer to its
+   *  element. `&gArr` is `T (*)[n]`, `&gStruct` is `struct S *`, and neither is assignable to
+   *  `T *` — yet the IR's `gaddr` value legitimately has type `T *`, because that is what the asm
+   *  loaded. The bare spelling therefore states a type the project's own header contradicts.
+   *
+   *  It survived because agbcc only WARNS ("assignment from incompatible pointer type") and
+   *  computes the right address anyway. That leniency is not something to rely on: the Klonoa
+   *  project's own build template treats these as fatal, so the row's emitted C does not build
+   *  where its author would put it. The cast is the always-valid spelling — the same fallback
+   *  `bareArrayLead` documents for the indexed form — and it is byte-identical (measured on
+   *  kleod:UpdateHUDCounterDisplay: 81 with and without).
+   *
+   *  The test is whether `&gSym`'s rendered type PROVABLY equals the destination's, not whether the
+   *  symbol looks like an aggregate. A shape enumeration got this wrong three ways, each a real
+   *  miss: `shape:'pointer'` declares a pointer cell (`void *gSym`, or `struct Tag *gSym` when the
+   *  pointee has a declarable layout), so `&gSym` is a pointer-to-pointer either way; a `shape:'scalar'`
+   *  whose width differs from the destination's pointee gives `s32 *` for a `u16 *` slot; and a
+   *  NAME-ONLY symbol is synthesized as `extern u32 gSym;` (declare.ts), which is `u32 *` — not the
+   *  `T *` the older comment here claimed. So the default is to CAST, and the cast is omitted only
+   *  where the declared cell type is known and matches exactly. Byte-identical either way, so the
+   *  cost of casting one time too many is a redundant `(T *)`, never a wrong address. */
+  const castAggregateAddr = (name: string, value: Expr): Expr => {
+    const t = varType.get(name);
+    if (t?.kind !== 'ptr' || value.k !== 'addr') {
+      return value;
+    }
+    // The only provably-redundant case: a NON-VOLATILE scalar cell whose DECLARED type is the
+    // destination's pointee, where `&gSym` already denotes exactly `T *`.
+    //
+    // `scalarCellType` and not `scalarTypeForAccess`: the latter answers what an ACCESS of that
+    // width reads and collapses every 4-byte access to `s32`, so it called a `u32` cell equal to an
+    // `s32 *` destination and let the incompatible assignment through. And a `volatile` cell makes
+    // `&gSym` a `volatile T *`, so omitting the cast would DISCARD the qualifier — the same class of
+    // fatal-under-a-strict-build defect this rule exists to remove.
+    const si = symCtx?.info(value.name);
+    if (si?.shape === 'scalar' && !si.volatile && isScalarCellSize(si.size)) {
+      if (typeEquals(scalarCellType(si.size, si.signed), t.to)) {
+        return value;
+      }
+    }
+    return { k: 'cast', to: t, e: value };
+  };
+
   let fresh = 0;
   // Materialized defs are named FIRST: the temp is the register the compiler held the
   // value in, so downstream coalescing (loop inits, merge params) may adopt it — subject to the
@@ -1421,7 +1466,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
       if ((sub?.get(arg) ?? varName.get(arg)) === name) {
         return;
       } // identity copy — coalesced away
-      copies.push({ name, value: argExpr(arg), arg });
+      copies.push({ name, value: castAggregateAddr(name, argExpr(arg)), arg });
     });
     // Emit in the order the args are COMPUTED in `pred` — a compiler that lays the defining ops
     // (and thus the copies that read them) out in that order matches with no spurious arg-swap.
@@ -1497,7 +1542,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
       } else if (op.opcode === 'call' && op.results.length && !useSitesOf.has(op.results[0])) {
         out.push({ k: 'exprstmt', value: expr(op.results[0]) });
       } else if (materialize.has(op)) {
-        out.push({ k: 'assign', name: varName.get(op.results[0])!, value: lowerDef(op, expr) });
+        const nm = varName.get(op.results[0])!;
+        out.push({ k: 'assign', name: nm, value: castAggregateAddr(nm, lowerDef(op, expr)) });
       }
     }
     return out;
@@ -1758,7 +1804,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
         out.push(...updateCopies); // the loop update, RAW (i++, p>>=1, …)
         let leaveCond = exprWith(sub)(term.operands[0]);
         if (contIsTaken) {
-          leaveCond = negate(leaveCond);
+          leaveCond = negateCond(leaveCond);
         } // continue is `taken` → leave when NOT it
         const exitArm = isBreak
           ? [...argAssigns(b, loopCtx.exit, sub), { k: 'break' } as Stmt] // break to the loop exit
@@ -1792,7 +1838,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
       // IDO/MIPS; agbcc/GCC canonicalise either way, so it is safe there too. A compiler that
       // inverts branch canonicalization sets preserveDivergentBranchSense false and falls through
       // to the positive form below.
-      out.push({ k: 'if', cond: negate(cond), then: elseS, else: thenS });
+      out.push({ k: 'if', cond: negateCond(cond), then: elseS, else: thenS });
       return out;
     }
     out.push(mkIf(cond, thenS, elseS));
@@ -1821,7 +1867,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     const term = li.header.ops[li.header.ops.length - 1];
     let cond = exprWith(loopSub(li))(term.operands[0]);
     if (term.successors[0].block !== li.header) {
-      cond = negate(cond);
+      cond = negateCond(cond);
     } // loop-continue must be `taken`
     const body = [...sideEffects(li.header), ...(updates ?? argAssigns(li.header, li.header))];
     return { k: 'while', cond, body };
@@ -1835,7 +1881,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     const term = wl.header.ops[wl.header.ops.length - 1];
     let cond = expr(term.operands[0]);
     if (term.successors[1].block === wl.bodyEntry) {
-      cond = negate(cond);
+      cond = negateCond(cond);
     }
     // The header→bodyEntry edge may carry non-identity phi args (a value the header COMPUTED and passes
     // into the body). Those copies must open the body — dropping them reads an uninitialised local.
@@ -1897,7 +1943,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     const body = [...inner, ...sideEffects(dw.latch), ...updates];
     let cond = exprWith(sub)(lterm.operands[0]);
     if (lterm.successors[1].block === dw.header) {
-      cond = negate(cond);
+      cond = negateCond(cond);
     } // continue edge must be `taken`
     const out: Stmt[] = [{ k: 'dowhile', cond, body }];
     // The exit region reads latch back-edge values under `sub` (post-loop they live in the loop vars).
@@ -2080,15 +2126,9 @@ function substVar(e: Expr, from: string, to: string): Expr {
 // empty-then peephole: `if (c) {} else { S }` → `if (!c) { S }`
 function mkIf(cond: Expr, thenS: Stmt[], elseS: Stmt[]): Stmt {
   if (thenS.length === 0 && elseS.length > 0) {
-    return { k: 'if', cond: negate(cond), then: elseS, else: [] };
+    return { k: 'if', cond: negateCond(cond), then: elseS, else: [] };
   }
   return { k: 'if', cond, then: thenS, else: elseS };
-}
-function negate(e: Expr): Expr {
-  if (e.k === 'bin' && NEGATE[e.op]) {
-    return { ...e, op: NEGATE[e.op] };
-  }
-  return { k: 'un', op: '!', e };
 }
 
 // --- CFG utilities ---

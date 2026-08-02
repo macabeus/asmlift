@@ -359,3 +359,58 @@ export function stmtChildren(s: Stmt): Stmt[] {
       return [...s.cases.flatMap((c) => c.body), ...(s.default ?? [])];
   }
 }
+
+// THE negation of a CONDITION — the one implementation, shared by every L3 pass that flips one.
+//
+// There were two, and they drifted: structure.ts's empty-then peephole learned to distribute over
+// the short-circuit connectives while l3/dce.ts's copy kept wrapping in `!`, and because
+// `eliminateDeadStores` runs AFTER structuring it re-introduced the very spelling the other one had
+// just removed. That is the l3/hoist.ts failure mode verbatim — a copied helper silently losing the
+// newer rule — so this lives with the AST vocabulary and the passes call it.
+//
+// Three rules, in order:
+//   1. a relational operator flips directly (`!=` → `==`, `<` → `>=`, …), exact over C's total
+//      integer order;
+//   2. DE MORGAN — `!(a && b)` becomes `!a || !b`. Sound including EVALUATION ORDER: `a && b` runs
+//      `b` only when `a` holds, and `!a || !b` runs `!b` only when `!a` is false, i.e. when `a`
+//      holds. Same operands, same inputs — which is what makes it safe over a `b` that loads. It
+//      matters because a source `&&` and its dual `||` compile to the SAME branch graph, so the
+//      recognizers in raise/shortcircuit.ts can only pick whichever the asm's branch senses spell;
+//      distributing is what lets the `/flip-branch` candidate reach the other one;
+//   3. `!!x` collapses to `x`, reachable only from a double flip that rule 2 now produces.
+//
+// CONTEXT REQUIREMENT, and it is the reason this is `negateCond` and not `negate`: rule 3 is valid
+// only in a TRUTH-VALUE context, where `x` and `!!x` are interchangeable. `!!5` is 1 and `5` is 5,
+// so this must never be used to negate a general integer expression — only an `if`/loop test or an
+// operand of one of the connectives above.
+//
+// SCOPE of rule 2: it only gives the differ a second spelling where a candidate lever already flips
+// the condition, and `preserveDivergentBranchSense` covers divergent `if`s ONLY. A connective that
+// ended up as a LOOP test therefore has no dual candidate at all — the differ never sees the other
+// form, so on such a row this rule changes how the code READS and nothing else. Widening the
+// branch-sense lever to loop tests is what would make it a matching lever there, and that is a
+// separate change.
+const NEGATE_REL: Partial<Record<BinOp, BinOp>> = {
+  '<': '>=',
+  '>=': '<',
+  '>': '<=',
+  '<=': '>',
+  '==': '!=',
+  '!=': '==',
+};
+
+export function negateCond(e: Expr): Expr {
+  if (e.k === 'bin') {
+    const flipped = NEGATE_REL[e.op];
+    if (flipped) {
+      return { ...e, op: flipped };
+    }
+    if (e.op === '&&' || e.op === '||') {
+      return { ...e, op: e.op === '&&' ? '||' : '&&', l: negateCond(e.l), r: negateCond(e.r) };
+    }
+  }
+  if (e.k === 'un' && e.op === '!') {
+    return e.e;
+  }
+  return { k: 'un', op: '!', e };
+}
