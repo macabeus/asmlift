@@ -456,26 +456,42 @@ describe('assigning &gSym to a pointer local', () => {
 }
 `;
 
-  const emitWithShape = (shape: 'array' | 'scalar' | 'struct'): string => {
+  const emitWith = (info: Record<string, unknown>): string => {
     const fn = parse(PHI_OF_GADDR);
     verify(fn);
     recoverTypes(fn);
-    const symbols = new Map([['gArr', { name: 'gArr', kind: 'data', shape, elemSize: 2, dims: [4, 8] }]]);
+    const symbols = new Map([['gArr', { name: 'gArr', kind: 'data', ...info }]]);
     return cBackend.emit(structure(fn, { symbols: symbols as never }));
   };
 
+  // The destination local is `u16 *` throughout (the load in ^bb3 is width 2).
   test('an ARRAY-shaped global gets the cast — `&gArr` is `T (*)[n]`, not `T *`', () => {
-    const out = emitWithShape('array');
+    const out = emitWith({ shape: 'array', elemSize: 2, dims: [4, 8] });
     expect(out).toContain('v0 = (u16 *)&gArr;');
     expect(out).not.toMatch(/v0 = &gArr;/);
   });
 
   test('a STRUCT-shaped global gets it too — `&gStruct` is `struct S *`', () => {
-    expect(emitWithShape('struct')).toContain('v0 = (u16 *)&gArr;');
+    expect(emitWith({ shape: 'struct', size: 16 })).toContain('v0 = (u16 *)&gArr;');
   });
 
-  test('a SCALAR-shaped global does NOT — `&gScalar` really is `T *`, so a cast is noise', () => {
-    const out = emitWithShape('scalar');
+  test('a POINTER-shaped global gets it — it declares `void *g`, so `&g` is `void **`', () => {
+    expect(emitWith({ shape: 'pointer', size: 4 })).toContain('v0 = (u16 *)&gArr;');
+  });
+
+  test('a NAME-ONLY global gets it — the synthesized `extern u32 g;` makes `&g` a `u32 *`', () => {
+    expect(emitWith({})).toContain('v0 = (u16 *)&gArr;');
+  });
+
+  test('a SCALAR of a DIFFERENT width gets it — `&g` is `s32 *`, the slot is `u16 *`', () => {
+    expect(emitWith({ shape: 'scalar', size: 4, signed: true })).toContain('v0 = (u16 *)&gArr;');
+  });
+
+  test('a SCALAR whose cell type IS the pointee does NOT — the cast would be pure noise', () => {
+    const out = emitWith({ shape: 'scalar', size: 2, signed: false });
     expect(out).toContain('v0 = &gArr;');
+    // scoped to the ASSIGN — the `((u16 *)&gArr)[1]` in the other arm is the ACCESS path's own
+    // cast (memAccess), which is correct and predates this rule
+    expect(out).not.toContain('v0 = (u16 *)&gArr;');
   });
 });
