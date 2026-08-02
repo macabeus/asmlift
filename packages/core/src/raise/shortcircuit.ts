@@ -40,7 +40,7 @@
 // negatable icmp, and any deviation falls through untouched (a miss, never a miscompile).
 import { Block, Fn, Op, Value, defOpMap, mkOp, mkValue, predecessors, replaceAllUsesWith } from '../ir/core';
 import type { Opcode } from '../ir/opcodes';
-import { EFFECTFUL_OPS } from '../ir/opcodes';
+import { EFFECTFUL_OPS, HOIST_UNSAFE_OPS } from '../ir/opcodes';
 import { T } from '../ir/types';
 
 const NEGATE_ICMP: Record<string, Opcode> = {
@@ -325,8 +325,13 @@ export function recognizeBranchShortCircuit(fn: Fn): boolean {
         // ^g's body must be pure, and every value it defines must be consumed only by ^g itself —
         // see the REFUSALS note: an escaping or reused value becomes a statement hoisted out of the
         // short circuit.
+        // HOIST_UNSAFE_OPS, not EFFECTFUL_OPS: a live `opaque` is an instruction asmlift could not
+        // model, and moving it out of the arm that guards it is the reordering this refuses. Loud
+        // either way today (a decline under `onGap: 'strict'`, an ASMLIFT_ERROR marker under
+        // `annotate`, the CLI and benchmark default), so this closes a model gap rather than fixing
+        // an observed bug.
         const body = g.ops.slice(0, -1);
-        if (body.some((op) => HOIST_UNSAFE.has(op.opcode))) {
+        if (body.some((op) => HOIST_UNSAFE_OPS.has(op.opcode))) {
           continue;
         }
         if (!definedValuesStayLocal(fn, g)) {
@@ -384,16 +389,6 @@ export function recognizeBranchShortCircuit(fn: Fn): boolean {
   }
   return changed;
 }
-
-// What may NOT move out of a conditional arm into the unconditionally-executed head.
-//
-// `EFFECTFUL_OPS` is the declared-effects table, and it does not include `opaque` — but
-// analysis.ts puts `opaque` in its memory-write set and treats it as a render barrier, so the two
-// effect models disagree. This fold takes the STRICTER of the two: an `opaque` is an instruction
-// asmlift could not model, and hoisting one out of the arm that guards it is exactly the reordering
-// this gate exists to refuse. (Not exploitable today — a live `opaque` declines at
-// `assertResolved` either way — so this is closing the model gap, not fixing an observed bug.)
-const HOIST_UNSAFE: ReadonlySet<string> = new Set([...SIDE_EFFECT, 'opaque']);
 
 /** Do `c1` and `c2` compare the SAME value against CONSTANTS? That is the signature of a
  *  comparison-tree `switch`, which switch-recover.ts owns — see the REFUSALS note. Equality tests

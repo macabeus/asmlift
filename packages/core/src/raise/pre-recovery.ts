@@ -46,10 +46,14 @@ export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
   { id: 'struct-arrays', run: recognizeStructArrays, dce: true },
   { id: 'structs', run: recognizeStructs, dce: false },
   { id: 'shortcircuit', run: recognizeShortCircuit, dce: true },
-  // The control-flow sibling. Their inputs are DISJOINT — the value form's second block ends in
-  // `br` carrying a phi argument, this one's ends in `cond_br` — so the order between them is not
-  // load-bearing and neither can consume the other's shape. Listed second because the value form is
-  // the more specific pattern.
+  // The control-flow sibling, and this order IS load-bearing — value form FIRST.
+  //
+  // Their input SHAPES are disjoint (the value form's second block ends in `br` carrying a phi
+  // argument, this one's ends in `cond_br`), so neither can eat the other's literal pattern. But
+  // this pass REWRITES its head's condition into a `logic_or`/`logic_and`, and the value form
+  // refuses any head whose condition is not a negatable icmp — so running this one first can
+  // permanently disqualify a value fold that was available. The reverse cannot happen: the value
+  // form replaces its head's `cond_br` with a `br`, which this pass never matches.
   { id: 'branch-shortcircuit', run: recognizeBranchShortCircuit, dce: true },
 ];
 

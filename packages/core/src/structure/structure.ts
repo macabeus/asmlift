@@ -49,7 +49,9 @@ import {
   arrayInnerExtents,
   declaredFields,
   isArrayField,
+  isScalarCellSize,
   pointeeFields,
+  scalarCellType,
 } from '../symbols';
 import { analyze } from './analysis';
 import { makeLoopHazards, updateWriteSet } from './hazards';
@@ -938,7 +940,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
    *
    *  The test is whether `&gSym`'s rendered type PROVABLY equals the destination's, not whether the
    *  symbol looks like an aggregate. A shape enumeration got this wrong three ways, each a real
-   *  miss: `shape:'pointer'` declares `void *gSym`, so `&gSym` is `void **`; a `shape:'scalar'`
+   *  miss: `shape:'pointer'` declares a pointer cell (`void *gSym`, or `struct Tag *gSym` when the
+   *  pointee has a declarable layout), so `&gSym` is a pointer-to-pointer either way; a `shape:'scalar'`
    *  whose width differs from the destination's pointee gives `s32 *` for a `u16 *` slot; and a
    *  NAME-ONLY symbol is synthesized as `extern u32 gSym;` (declare.ts), which is `u32 *` — not the
    *  `T *` the older comment here claimed. So the default is to CAST, and the cast is omitted only
@@ -949,12 +952,17 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     if (t?.kind !== 'ptr' || value.k !== 'addr') {
       return value;
     }
-    // The only provably-redundant case: a SCALAR cell whose own type is the destination's pointee,
-    // where `&gSym` already denotes exactly `T *`.
+    // The only provably-redundant case: a NON-VOLATILE scalar cell whose DECLARED type is the
+    // destination's pointee, where `&gSym` already denotes exactly `T *`.
+    //
+    // `scalarCellType` and not `scalarTypeForAccess`: the latter answers what an ACCESS of that
+    // width reads and collapses every 4-byte access to `s32`, so it called a `u32` cell equal to an
+    // `s32 *` destination and let the incompatible assignment through. And a `volatile` cell makes
+    // `&gSym` a `volatile T *`, so omitting the cast would DISCARD the qualifier — the same class of
+    // fatal-under-a-strict-build defect this rule exists to remove.
     const si = symCtx?.info(value.name);
-    if (si?.shape === 'scalar' && si.size !== undefined) {
-      const cell = scalarTypeForAccess(si.size, si.signed ?? false);
-      if (typeEquals(cell, t.to)) {
+    if (si?.shape === 'scalar' && !si.volatile && isScalarCellSize(si.size)) {
+      if (typeEquals(scalarCellType(si.size, si.signed), t.to)) {
         return value;
       }
     }

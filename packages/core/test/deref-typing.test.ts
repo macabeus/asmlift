@@ -456,6 +456,16 @@ describe('assigning &gSym to a pointer local', () => {
 }
 `;
 
+  /** Same shape but width 4, so the destination local is `s32 *` — the pointee the
+   *  declaration-side rule has to match exactly. */
+  const emitS32 = (info: Record<string, unknown>): string => {
+    const fn = parse(PHI_OF_GADDR.replace(/u16\*/g, 's32*').replace(/width=2/g, 'width=4'));
+    verify(fn);
+    recoverTypes(fn);
+    const symbols = new Map([['gArr', { name: 'gArr', kind: 'data', ...info }]]);
+    return cBackend.emit(structure(fn, { symbols: symbols as never }));
+  };
+
   const emitWith = (info: Record<string, unknown>): string => {
     const fn = parse(PHI_OF_GADDR);
     verify(fn);
@@ -485,6 +495,26 @@ describe('assigning &gSym to a pointer local', () => {
 
   test('a SCALAR of a DIFFERENT width gets it — `&g` is `s32 *`, the slot is `u16 *`', () => {
     expect(emitWith({ shape: 'scalar', size: 4, signed: true })).toContain('v0 = (u16 *)&gArr;');
+  });
+
+  // The destination pointee is `u16` in these; the four below use a `s32 *` destination instead,
+  // so they pin the DECLARATION-side rule rather than the access-side one.
+  test('a width-4 UNSIGNED scalar gets the cast — `extern u32 g;` makes `&g` a `u32 *`', () => {
+    // Regression: scalarTypeForAccess(4, …) collapses to s32 whatever the signedness, so an
+    // access-side comparison called this equal to `s32 *` and let it through uncast.
+    expect(emitS32({ shape: 'scalar', size: 4, signed: false })).toContain('v0 = (s32 *)&gArr;');
+  });
+
+  test('a VOLATILE scalar gets it — omitting would discard the qualifier from `volatile T *`', () => {
+    expect(emitS32({ shape: 'scalar', size: 4, volatile: true })).toContain('v0 = (s32 *)&gArr;');
+  });
+
+  test('a width-4 SIGNED scalar does NOT — `&g` is exactly `s32 *`', () => {
+    expect(emitS32({ shape: 'scalar', size: 4, signed: true })).toContain('v0 = &gArr;');
+  });
+
+  test('a width-4 scalar with NO signedness does NOT — the enum idiom declares `s32`', () => {
+    expect(emitS32({ shape: 'scalar', size: 4 })).toContain('v0 = &gArr;');
   });
 
   test('a SCALAR whose cell type IS the pointee does NOT — the cast would be pure noise', () => {
