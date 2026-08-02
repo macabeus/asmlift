@@ -40,7 +40,7 @@
 // negatable icmp, and any deviation falls through untouched (a miss, never a miscompile).
 import { Block, Fn, Op, Value, defOpMap, mkOp, mkValue, predecessors, replaceAllUsesWith } from '../ir/core';
 import type { Opcode } from '../ir/opcodes';
-import { EFFECTFUL_OPS, HOIST_UNSAFE_OPS } from '../ir/opcodes';
+import { HOIST_UNSAFE_OPS } from '../ir/opcodes';
 import { T } from '../ir/types';
 
 const NEGATE_ICMP: Record<string, Opcode> = {
@@ -56,9 +56,6 @@ const NEGATE_ICMP: Record<string, Opcode> = {
   icmp_ule: 'icmp_ugt',
 };
 const BOOL_OPS = new Set([...Object.keys(NEGATE_ICMP), 'logic_and', 'logic_or']);
-// Ops with an observable side effect — unsafe to HOIST out of a short-circuit's conditional arm
-// (they would run unconditionally). Derived from the ONE effect table in ir/opcodes.ts.
-const SIDE_EFFECT = EFFECTFUL_OPS;
 
 /** Fold `(-x | x) >> 31` (logical shift) → `x != 0`, in place. agbcc's branchless is-nonzero idiom. */
 // NOT exported: it must run before the diamond fold, an ordering only recognizeShortCircuit's
@@ -136,6 +133,16 @@ export function recognizeShortCircuit(fn: Fn): boolean {
         if (bp.length !== 1) {
           continue;
         }
+        // The ENTRY block is never a feeder, for the same reason it is never ^g in the branch form
+        // below: `predecessors()` walks successor edges only, so an entry block that is also a loop
+        // header shows one predecessor while actually running BEFORE it on the first iteration.
+        // Hoisting its body then reorders it and deleting it moves `fn.blocks[0]`. Silent — verify,
+        // assertResolved and assertDerefsTyped all pass. PRE-EXISTING (this fold predates the branch
+        // form and `main` miscompiles the same MIPS input); fixed here because the branch form's
+        // note used to assert this one was safe.
+        if (bfeed === fn.blocks[0]) {
+          continue;
+        }
         const h = bp[0];
         const ht = term(h);
         if (ht.opcode !== 'cond_br') {
@@ -183,7 +190,7 @@ export function recognizeShortCircuit(fn: Fn): boolean {
         // expression, where C's own short-circuit re-guards them. Any side effect ⇒ DECLINE the fold — the
         // merge-variable spelling the fall-through leaves is correct (the side effect stays in B's block),
         // just possibly non-matching.
-        if (bfeed.ops.slice(0, -1).some((op) => SIDE_EFFECT.has(op.opcode))) {
+        if (bfeed.ops.slice(0, -1).some((op) => HOIST_UNSAFE_OPS.has(op.opcode))) {
           continue;
         }
         bfeed.ops.slice(0, -1).forEach(before); // hoist B's pure body (defines Vb; harmless if a dead const)
@@ -413,11 +420,17 @@ function sameScrutineeConstTests(defs: Map<Value, Op>, c1: Value, c2: Value): bo
 
 /** True when every value `g` defines is read at most once, and any read is inside `g`.
  *
- *  The VALUE form above needs no such check, and the asymmetry is deliberate rather than drift: its
- *  feeder block ends in `br M` where `M` has 2+ predecessors, so the feeder dominates nothing but
- *  itself and no value it defines can be read anywhere else. Here ^g ends in `cond_br`, and the
- *  `other` successor IS dominated by ^g — so a ^g-defined value genuinely can escape, and only this
- *  check stops it. Do not "unify" the two guards. */
+ *  The VALUE form above needs no such check, and the asymmetry is real rather than drift: its feeder
+ *  ends in `br M`, so the feeder has no successor of its own to dominate and every value it defines
+ *  is either read in the feeder or carried to `M` as the phi argument the fold consumes. Here ^g
+ *  ends in `cond_br` and its `other` successor IS ^g-dominated, so a ^g-defined value genuinely can
+ *  escape, and only this check stops it.
+ *
+ *  An earlier version of this note justified the asymmetry by "the feeder dominates nothing but
+ *  itself because M has 2+ predecessors", and told the reader not to unify the guards. That was
+ *  WRONG — the entry block dominates every block whatever M's predecessor count — and it was wrong
+ *  about the one guard the two folds genuinely DO share, the `fn.blocks[0]` refusal, which the value
+ *  form was missing entirely. Both now have it. When changing either fold, check the other. */
 function definedValuesStayLocal(fn: Fn, g: Block): boolean {
   const defined = new Set<Value>(g.ops.flatMap((op) => op.results));
   if (defined.size === 0) {

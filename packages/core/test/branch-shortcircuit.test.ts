@@ -11,7 +11,7 @@ import { describe, expect, test } from 'vitest';
 import { type Block, type Fn, type Op, type Value, mkOp, mkValue } from '../src/ir/core';
 import { T } from '../src/ir/types';
 import { verify } from '../src/ir/verify';
-import { recognizeBranchShortCircuit } from '../src/raise/shortcircuit';
+import { recognizeBranchShortCircuit, recognizeShortCircuit } from '../src/raise/shortcircuit';
 
 const blk = (ops: Op[], params: Value[] = []): Block => ({ params, ops });
 
@@ -412,5 +412,33 @@ describe('the refusals found by the adversarial round', () => {
       ],
     });
     expect(recognizeBranchShortCircuit(fn)).toBe(false);
+  });
+});
+
+describe('the VALUE form shares the entry-block refusal', () => {
+  test('a feeder that is the entry block is not folded away', () => {
+    // Same hazard, same file, opposite fold: `recognizeShortCircuit` deletes its feeder too, and
+    // `predecessors()` is blind to the entry edge for it as well. PRE-EXISTING — `main` miscompiles
+    // the MIPS shape this mirrors — and fixed alongside the branch form because the branch form's
+    // own note used to claim this fold was safe.
+    const merge = blk([mkOp('ret', { operands: [] })], [mkValue(T.unk(32))]);
+    const vb = mkValue(T.unk(32));
+    const entry = blk(cmp(vb)); // entry AND the value form's feeder
+    const c = mkValue(T.unk(32));
+    const head = blk(cmp(c));
+    const zero = mkValue(T.unk(32));
+    head.ops.splice(head.ops.length - 1, 0, mkOp('const', { results: [zero], attrs: { value: 0 } }));
+    head.ops.push({
+      ...mkOp('cond_br', { operands: [c] }),
+      successors: [
+        { block: merge, args: [zero] },
+        { block: entry, args: [] },
+      ],
+    });
+    entry.ops.push({ ...mkOp('br'), successors: [{ block: merge, args: [vb] }] });
+    const other = blk([{ ...mkOp('br'), successors: [{ block: merge, args: [vb] }] }]);
+    const fn: Fn = { name: 'f', blocks: [entry, head, other, merge] };
+    expect(recognizeShortCircuit(fn)).toBe(false);
+    expect(fn.blocks[0]).toBe(entry);
   });
 });
