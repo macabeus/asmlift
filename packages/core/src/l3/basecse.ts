@@ -21,6 +21,7 @@
 import { type IrType, T, scalarTypeForAccess } from '../ir/types';
 import type { Expr, SFn, Stmt } from './ast';
 import { mapExprChildren, stmtChildren, stmtExprs } from './ast';
+import { nameAllocator } from './hoist';
 
 // A HOISTABLE base is a bare `addr` (a global address) or a bare `const` (a numeric pointer
 // address). Both are relocation-invariant leaves whose value the compiler keeps in one register
@@ -136,15 +137,6 @@ function rewriteStmt(s: Stmt, localFor: Map<string, string>): Stmt {
 }
 
 /** A name not already used by a param/local/global in `sfn`, of the form `p<n>`. */
-function freshName(taken: Set<string>): string {
-  let n = 0;
-  while (taken.has(`p${n}`)) {
-    n++;
-  }
-  const nm = `p${n}`;
-  taken.add(nm);
-  return nm;
-}
 
 export function hoistReusedGlobalBases(sfn: SFn): SFn {
   const c: Collected = { count: new Map(), order: [], meta: new Map(), inLoop: new Set(), constOffCount: new Map() };
@@ -171,9 +163,7 @@ export function hoistReusedGlobalBases(sfn: SFn): SFn {
     return sfn;
   }
 
-  const taken = new Set<string>([...sfn.params.map((p) => p.name), ...sfn.locals.map((l) => l.name)]);
-  // globals are referenced by name; a hoist name must not shadow one that appears in the body.
-  collectNames(sfn.body, taken);
+  const fresh = nameAllocator(sfn);
 
   const localFor = new Map<string, string>();
   const newLocals: { name: string; type: IrType }[] = [];
@@ -181,7 +171,7 @@ export function hoistReusedGlobalBases(sfn: SFn): SFn {
   for (const k of hoisted) {
     const m = meta.get(k)!;
     const ptrType = T.ptr(scalarTypeForAccess(m.width, m.signed));
-    const nm = freshName(taken);
+    const nm = fresh();
     localFor.set(k, nm);
     newLocals.push({ name: nm, type: ptrType });
     // `p = (T *)base` — the cast makes the local the access's pointer type so each `p[i]` strides it.
@@ -194,25 +184,3 @@ export function hoistReusedGlobalBases(sfn: SFn): SFn {
 
 /** Every `var`/`addr`/called-function name mentioned anywhere in `stmts` (so a hoist name collides
  *  with none — a global via `addr`, a local via `var`, OR a callee via `call.fn`). */
-function collectNames(stmts: Stmt[], out: Set<string>): void {
-  const walk = (e: Expr): void => {
-    if (e.k === 'var' || e.k === 'addr') {
-      out.add(e.name);
-    }
-    if (e.k === 'call') {
-      out.add(e.fn); // a hoist local must not shadow a called function symbol
-    }
-    for (const c of exprChildrenOf(e)) {
-      walk(c);
-    }
-  };
-  for (const s of stmts) {
-    if (s.k === 'assign') {
-      out.add(s.name);
-    }
-    for (const e of stmtExprs(s)) {
-      walk(e);
-    }
-    collectNames(stmtChildren(s), out);
-  }
-}

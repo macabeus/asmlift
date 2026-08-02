@@ -39,7 +39,8 @@
 // leaves the diff at 2; both together take it to 0.)
 import { type IrType, T, scalarTypeForAccess } from '../ir/types';
 import type { Expr, SFn, Stmt } from './ast';
-import { exprEquals, mapExprChildren, stmtChildren, stmtExprs } from './ast';
+import { exprEquals, mapExprChildren, stmtExprs } from './ast';
+import { nameAllocator } from './hoist';
 
 /** A base this pass may evaluate early: pure, and not something a store can change under us. */
 function eligibleBase(base: Expr, globals: ReadonlySet<string>): boolean {
@@ -75,38 +76,6 @@ function distinctBases(nodes: Extract<Expr, { k: 'index' }>[]): Extract<Expr, { 
   return out;
 }
 
-function freshName(taken: Set<string>): string {
-  for (let i = 0; ; i++) {
-    const n = `p${i}`;
-    if (!taken.has(n)) {
-      taken.add(n);
-      return n;
-    }
-  }
-}
-
-function collectNames(stmts: Stmt[], into: Set<string>): void {
-  const visit = (e: Expr): void => {
-    if (e.k === 'var' || e.k === 'addr') {
-      into.add(e.name);
-    }
-    if (e.k === 'call') {
-      into.add(e.fn); // a hoist local must not shadow a called function symbol
-    }
-    mapExprChildren(e, (c) => {
-      visit(c);
-      return c;
-    });
-  };
-  for (const s of stmts) {
-    if (s.k === 'assign') {
-      into.add(s.name);
-    }
-    stmtExprs(s).forEach(visit);
-    collectNames(stmtChildren(s), into);
-  }
-}
-
 /** The (base, width, signedness) key an `index` shares with every other access through the same
  *  base — so ALL of a base's uses in one call rewrite to the same local, not just the first. */
 function baseKey(n: Extract<Expr, { k: 'index' }>): string {
@@ -121,8 +90,7 @@ function baseKey(n: Extract<Expr, { k: 'index' }>): string {
  */
 export function materializeArgBases(sfn: SFn): SFn | null {
   const globals = new Set((sfn.globals ?? []).map((g) => g.name));
-  const taken = new Set<string>([...sfn.params.map((p) => p.name), ...sfn.locals.map((l) => l.name)]);
-  collectNames(sfn.body, taken);
+  const fresh = nameAllocator(sfn);
   const newLocals: { name: string; type: IrType }[] = [];
   let fired = false;
 
@@ -144,7 +112,14 @@ export function materializeArgBases(sfn: SFn): SFn | null {
     const localFor = new Map<string, string>();
     // Only the statement's OWN expressions can carry a call this pass names bases for; nested
     // statement lists get their own `pre`, in their own scope, via the recursion below.
-    for (const e of stmtExprs(s)) {
+    //
+    // A LOOP's own expression is its CONDITION, which runs every iteration — but `pre` lands
+    // BEFORE the loop, which would make this a loop-invariant hoist to a point the original never
+    // had. That is the register-pressure failure basecse.ts's `inLoop` gate exists to refuse, and
+    // it would contradict this pass's own placement rule two comments down. So a loop's condition
+    // is left alone; only its body (via the recursion) is eligible.
+    const ownExprs = s.k === 'while' || s.k === 'dowhile' || s.k === 'for' ? [] : stmtExprs(s);
+    for (const e of ownExprs) {
       const scan = (x: Expr): void => {
         if (x.k === 'call') {
           const bases = distinctBases(argBases(x, globals));
@@ -155,7 +130,7 @@ export function materializeArgBases(sfn: SFn): SFn | null {
                 continue;
               }
               const ptrType = T.ptr(scalarTypeForAccess(b.width, b.signed));
-              const nm = freshName(taken);
+              const nm = fresh();
               localFor.set(key, nm);
               newLocals.push({ name: nm, type: ptrType });
               pre.push({ k: 'assign', name: nm, value: { k: 'cast', to: ptrType, e: b.base } });

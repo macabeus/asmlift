@@ -194,3 +194,47 @@ describe('statement placement — the rewrite must not MOVE or DUPLICATE stateme
     expect(materializeArgBases(fn)!.locals.map((l) => l.name)).not.toContain('p0');
   });
 });
+
+describe('a LOOP condition is left alone — `pre` before the loop would be a loop-invariant hoist', () => {
+  test('a call in a `while` condition does not name its bases outside the loop', () => {
+    // `pre` lands BEFORE the statement, so naming a loop-condition's bases would hoist them out
+    // of the loop entirely — a live range the original never had, which is the register-pressure
+    // failure basecse.ts's `inLoop` gate exists to refuse, and a contradiction of this pass's own
+    // placement rule.
+    const CALL: Expr = {
+      k: 'call',
+      fn: 'callee',
+      args: [deref({ k: 'const', value: 0x4000006 }, 0), deref({ k: 'addr', name: 'g' }, 8)],
+    };
+    const fn: SFn = {
+      name: 'f',
+      params: [],
+      locals: [],
+      retType: T.void(),
+      body: [{ k: 'while', cond: CALL, body: [{ k: 'assign', name: 'x', value: { k: 'const', value: 1 } }] }],
+    };
+    expect(materializeArgBases(fn)).toBeNull();
+  });
+
+  test('a call in a loop BODY still fires — only the condition is excluded', () => {
+    const CALL: Expr = {
+      k: 'call',
+      fn: 'callee',
+      args: [deref({ k: 'const', value: 0x4000006 }, 0), deref({ k: 'addr', name: 'g' }, 8)],
+    };
+    const fn: SFn = {
+      name: 'f',
+      params: [],
+      locals: [],
+      retType: T.void(),
+      body: [{ k: 'while', cond: { k: 'var', name: 'c' }, body: [{ k: 'assign', name: 'x', value: CALL }] }],
+    };
+    const out = materializeArgBases(fn)!;
+    expect(out.body).toHaveLength(1); // nothing hoisted OUT of the loop
+    expect((out.body[0] as Extract<Stmt, { k: 'while' }>).body.map((s) => (s as { name?: string }).name)).toEqual([
+      'p0',
+      'p1',
+      'x',
+    ]);
+  });
+});

@@ -54,13 +54,31 @@ const SCALAR_TYPES: Record<string, { size: number; signed: boolean; volatile?: t
  *  wraps: these headers spell a register base as a `void *` and add a byte offset to it, which is
  *  GCC's byte-arithmetic extension, so the cast contributes nothing to the address.
  *
- *  BYTE-SIZED TARGETS ONLY, and that restriction is load-bearing rather than tidy. C pointer
+ *  BYTE-SIZED POINTEES ONLY, and that restriction is load-bearing rather than tidy. C pointer
  *  arithmetic SCALES by the pointee: `(vu16 *)0x4000000 + 5` is 0x400000A, not 0x4000005. Stripping
  *  a wider cast would fold the wrong address AND then republish it in a synthesized body that
  *  agrees with itself — so the candidate still byte-matches the numeric pool word it was looked up
  *  by, while naming a different register. A wrong name that survives the differ is the one failure
- *  this module cannot let through, so a scaling cast makes the expression unevaluable instead. */
-const PTR_CAST = /\(\s*(?:void|[us]8|v[us]8)\s*\*\s*\)/g;
+ *  this module cannot let through.
+ *
+ *  A wider pointee is REFUSED EXPLICITLY below, not left to fall out of the token grammar further
+ *  down — the enforcing line belongs next to the rule it enforces. The cost is named rather than
+ *  hidden: a wider cast with NO arithmetic after it would fold correctly and is refused anyway,
+ *  because the hazard is cast-THEN-add and this cannot tell which it is looking at. */
+const PTR_CAST_ANY = /\(\s*(\w+)\s*\*\s*\)/g;
+const BYTE_POINTEE = new Set(['void', 'u8', 's8', 'vu8', 'vs8']);
+
+/** `src` with byte-sized pointer casts removed, or null if any cast SCALES. */
+function stripPointerCasts(src: string): string | null {
+  let scaling = false;
+  const out = src.replace(PTR_CAST_ANY, (_m, pointee: string) => {
+    if (!BYTE_POINTEE.has(pointee)) {
+      scaling = true;
+    }
+    return ' ';
+  });
+  return scaling ? null : out;
+}
 
 /** An object-like `#define NAME body`, for the expansion table the address evaluator resolves
  *  identifiers against. Function-like macros (`NAME(x)`) are deliberately excluded: an address
@@ -92,7 +110,10 @@ function evalAddressExpr(
   if (seen.size > 12) {
     return null; // pathological nesting — refuse rather than walk further
   }
-  const stripped = src.replace(PTR_CAST, ' ');
+  const stripped = stripPointerCasts(src);
+  if (stripped === null) {
+    return null; // a scaling pointer cast — see PTR_CAST_ANY
+  }
   const tokens = stripped.match(/[A-Za-z_]\w*|0[xX][0-9A-Fa-f]+|\d+|[()+-]/g);
   // every character must belong to a token — anything else (`*`, `<<`, a comma) is out of language
   if (!tokens || tokens.join('') !== stripped.replace(/\s+/g, '')) {
@@ -105,10 +126,17 @@ function evalAddressExpr(
       if (body === undefined || seen.has(tok)) {
         return null; // undefined name, or a cycle
       }
-      // Memoized per NAME. The depth cap alone bounds nesting but not BRANCHING — a define
-      // mentioning k others re-evaluates the whole subtree k times, which at depth 10 is millions
-      // of evaluations. A name's value cannot depend on the path that reached it, so one result
-      // per name is sound as well as fast.
+      // Memoized per NAME. The depth cap bounds nesting but not BRANCHING — a define mentioning k
+      // others re-evaluates the whole subtree k times, so a deep, wide table costs exponentially.
+      //
+      // A name's result CAN depend on the path that reached it: both refusals below are
+      // path-sensitive (already in `seen`; depth cap hit), so a cached `null` may be pessimistic
+      // for a shorter path. Safe in ONE direction only — path-dependence can make this refuse
+      // more, never fold a wrong address, which is the direction this module may be wrong in.
+      //
+      // The memo being PER TOP-LEVEL MACRO (the default parameter, fresh at each entry) is
+      // load-bearing rather than incidental: hoisting it across macros to "go faster" would let
+      // one deep macro poison a name for every macro after it, silently dropping recognized cells.
       let inner: number | null;
       if (memo.has(tok)) {
         inner = memo.get(tok)!;

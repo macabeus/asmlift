@@ -202,7 +202,8 @@ function propagatePointers(fn: Fn): void {
   }
 }
 
-/** The recovered return type = the type of the value returned by the first `ret`. */
+/** The recovered return type: `void` when EVERY `ret` is operand-less, otherwise the type of the
+ *  first value any `ret` carries. */
 export function returnType(fn: Fn): IrType {
   // VOID needs EVERY exit to agree. A function can have several `ret`s, and a frontend decides
   // per block whether the return register holds anything — so an operand-less FIRST `ret` beside a
