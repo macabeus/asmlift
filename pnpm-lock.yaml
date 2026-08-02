@@ -142,8 +142,8 @@ importers:
         specifier: workspace:^
         version: link:../core
       '@gba-kit/debug-info':
-        specifier: ^0.4.0
-        version: 0.4.0
+        specifier: ^0.5.0
+        version: 0.5.0
       objdiff-wasm:
         specifier: 3.7.3
         version: 3.7.3
@@ -626,8 +626,8 @@ packages:
     resolution: {integrity: sha512-+CNAzxglkrpNf/kKywqQfk74QjtceuOE7Qm+AF8miRvPF/wmmK5+OJOgVh3AVTT3RP2mH3+FOaxlE5v72owk0A==}
     engines: {node: ^20.19.0 || ^22.13.0 || >=24}
 
-  '@gba-kit/debug-info@0.4.0':
-    resolution: {integrity: sha512-iM2gkcbf02RXNRq3DpSleHNY4O5kCxLeOiiaQ8WiOwT58+dHorQD13gq1Ct2Qiz1jyxQWMH2f3uIQ2wlLNGD9w==}
+  '@gba-kit/debug-info@0.5.0':
+    resolution: {integrity: sha512-VxSCtktC5+AEEPtZsKCXx+gXkPtjvVJhV74ZTsN+KdiChs5Ys+8xc+LB7eAHIhdD4dIqCHRseA6OIplcAjs5EQ==}
 
   '@humanfs/core@0.19.2':
     resolution: {integrity: sha512-UhXNm+CFMWcbChXywFwkmhqjs3PRCmcSa/hfBgLIb7oQ5HNb1wS0icWsGtSAUNgefHeI+eBrA8I1fxmbHsGdvA==}
@@ -2329,7 +2329,7 @@ snapshots:
       '@eslint/core': 1.2.1
       levn: 0.4.1
 
-  '@gba-kit/debug-info@0.4.0': {}
+  '@gba-kit/debug-info@0.5.0': {}
 
   '@humanfs/core@0.19.2':
     dependencies:
