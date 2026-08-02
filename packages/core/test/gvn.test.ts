@@ -139,7 +139,7 @@ describe('the refusal found by the adversarial round', () => {
     const asm =
       'f:\n\tpush\t{lr}\n\tldr\tr0, .L1\n\tldr\tr0, [r0]\n\tb\t.L3\n.L2:\n\tldr\tr1, .L1\n' +
       '\tldr\tr1, [r1]\n\tadd\tr0, r0, r1\n.L3:\n\tpop\t{r1}\n\tbx\tr1\n.L1:\n\t.word\tgSeed\n';
-    const res = decompile('f', asm, ARMV4T_AGBCC, {}, 'annotate');
+    const res = decompile('f', asm, ARMV4T_AGBCC, { onGap: 'annotate' });
     expect(res.source).toContain('gSeed');
     expect(res.source).not.toContain('ASMLIFT_ERROR');
   });
