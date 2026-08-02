@@ -117,10 +117,12 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
     expect(src).not.toContain('func');
   });
 
-  // rlwinm right-shift extract `(x>>n)&m` (ME=31) — modelled as shift + mask.
+  // rlwinm right-shift extract `(x>>n)&m` (ME=31) — modelled as shift + mask. The rotate makes
+  // the shift LOGICAL, which is what the lift records (`shr_u`); over the `s32`-declared `a0` a
+  // bare `>>` would be C's arithmetic one, so the operand is spelled unsigned.
   test('rlwinm right-shift extract decodes to a shift + mask', () => {
     expect(dis('ext', '0:\trlwinm  r3,r3,27,24,31\n4:\tblr\n')).toBe(
-      's32 ext(s32 a0) {\n    return a0 >> 5 & 255;\n}\n',
+      's32 ext(s32 a0) {\n    return (u32)a0 >> 5 & 255;\n}\n',
     );
   });
 

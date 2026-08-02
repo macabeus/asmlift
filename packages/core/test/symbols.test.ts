@@ -820,3 +820,50 @@ describe('the numeric-pool veto exempts MACRO names — the veto is about reloca
     expect(run('f', MIXED, symbols)).not.toContain('gExtern');
   });
 });
+
+describe('shift-direction fidelity — `shr_u` must not recompile as `asr`', () => {
+  // C spells the logical and the arithmetic right shift the SAME (`>>`) and chooses from the left
+  // operand's type. engine.ts's zext fold fixes the byte/half case by folding the whole shift PAIR
+  // to a cast, which it can only do for widths C can name; every other extract width — every
+  // bitfield read — reached the backend as a raw `x << k >> k` over a signed-promoted operand.
+  // That is `asr` where the target has `lsr`, and a different VALUE: a 2-bit field holding 2
+  // evaluates to -1.
+  const extract = (lo: number) =>
+    // ldrb r0,[r1]; lsl r0,#lo; lsr r0,#lo  — the agbcc bitfield read
+    `\tldr\tr1, .L1\n\tldrb\tr0, [r1]\n\tlsl\tr0, r0, #${lo}\n\tlsr\tr0, r0, #${lo}\n\tbx\tlr\n.L1:\n\t.word\t0x03005220\n`;
+
+  test('a BITFIELD-width extract spells its operand unsigned', () => {
+    const src = run('f', extract(30));
+    expect(src).toMatch(/\(u32\)/);
+    expect(src).toContain('>> 30');
+    // the failure this pins: a bare `<< 30 >> 30` over an int-promoted u8 is the arithmetic shift
+    expect(src).not.toMatch(/\)\s*<< 30 >> 30/);
+  });
+
+  test('a BYTE-width extract still folds to the cast — the fold owns that width, not this rule', () => {
+    // width 8 (shift 24) is engine.ts's zext8: it must keep producing `(u8)x`, not grow a `(u32)`
+    const src = run('f', extract(24));
+    expect(src).toContain('(u8)');
+    expect(src).not.toContain('>> 24');
+  });
+
+  test('an ARITHMETIC shift over a signed operand gains NO cast — the rule is not a blanket wrap', () => {
+    // `asr r0,r0,#4` on a word-loaded (s32-rendered) value: `>>` is already the shift the asm did
+    const src = run('f', '\tldr\tr1, .L1\n\tldr\tr0, [r1]\n\tasr\tr0, r0, #0x4\n\tbx\tlr\n.L1:\n\t.word\t0x03005220\n');
+    expect(src).toContain('>> 4');
+    expect(src).not.toContain('(s32)');
+    expect(src).not.toContain('(u32)');
+  });
+
+  test('a narrow operand is NOT treated as unsigned just because it was loaded unsigned', () => {
+    // `*(u8 *)p >> 4` — C promotes the u8 to `int`, so the bare `>>` is the ARITHMETIC shift and
+    // the asm's `lsr` needs the operand spelled unsigned. Promotion is the whole reason this
+    // cannot be read off the load width.
+    const src = run(
+      'f',
+      '\tldr\tr1, .L1\n\tldrb\tr0, [r1]\n\tlsr\tr0, r0, #0x4\n\tbx\tlr\n.L1:\n\t.word\t0x03005220\n',
+    );
+    expect(src).toContain('(u32)');
+    expect(src).toContain('>> 4');
+  });
+});

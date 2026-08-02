@@ -39,7 +39,7 @@
 import { Block, Fn, Op, Value, defOpMap, successorsOf } from '../ir/core';
 import { type IrType, T, scalarTypeForAccess, typeEquals } from '../ir/types';
 import { BinOp, Expr, SFn, Stmt, SwitchCase, exprChildren, mapExprChildren } from '../l3/ast';
-import { exprCType, ptrElemBytes } from '../l3/typing';
+import { exprCType, ptrElemBytes, renderedIntSignedness } from '../l3/typing';
 import { returnType } from '../raise/recover';
 import { collectStructs } from '../raise/structs';
 import {
@@ -107,6 +107,13 @@ function globalOf(e: Expr, width: number): { name: string; idx: Expr } | null {
     }
   }
   return null;
+}
+
+// Re-spell `e` as `t`. An existing 32-bit integer cast is REPLACED rather than wrapped — `(u32)x`
+// and `(u32)(s32)x` are the same bytes, and the single cast is the spelling a person would write.
+function retype32(e: Expr, t: IrType): Expr {
+  const inner = e.k === 'cast' && e.to.kind === 'int' && e.to.width === 32 ? e.e : e;
+  return { k: 'cast', to: t, e: inner };
 }
 
 // THE one gate on the BARE-NAME array-global spelling (`gSym[i]` rather than `((T *)&gSym)[i]`),
@@ -924,6 +931,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
   // The C static type of a rendered expression, over the declared variable types — what decides
   // whether a memory access's base may be dereferenced as spelled (memAccess/arrayAccess).
   const ctype = (e0: Expr): IrType | undefined => exprCType(e0, (n) => varType.get(n));
+  // The C SIGNEDNESS of a rendered expression, over the same declarations — what decides whether
+  // a `>>` spells the logical or the arithmetic shift (the shift-direction rule below).
+  const signednessOf = (e0: Expr): boolean | undefined => renderedIntSignedness(e0, (n) => varType.get(n));
   let fresh = 0;
   // Materialized defs are named FIRST: the temp is the register the compiler held the
   // value in, so downstream coalescing (loop inits, merge params) may adopt it — subject to the
@@ -1259,6 +1269,28 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
         // (`&&`/`||` take a pointer operand legally — a truth test, no arithmetic.)
         l = isPtrGlobal(l) ? intifyPtrGlobal(l) : l;
         r = isPtrGlobal(r) ? intifyPtrGlobal(r) : r;
+      }
+      // SHIFT-DIRECTION FIDELITY. `shr_u` and `shr_s` are DIFFERENT operations, but C spells both
+      // `>>` and picks between them from the LEFT OPERAND'S TYPE — logical on unsigned, arithmetic
+      // on signed. So an `shr_u` over anything that renders signed recompiles to `asr` where the
+      // target has `lsr`, and computes a different VALUE: `*(u8 *)&g << 30 >> 30` promotes to
+      // `int`, and for a 2-bit field holding 2 it evaluates to -1, not 2.
+      //
+      // engine.ts's zext fold already fixes the byte/half case by folding the whole shift PAIR to
+      // a cast op; it can only do that for widths C can name, so every OTHER extract width — which
+      // is to say every bitfield read — was left with the miscompile. This closes the general case
+      // at the point where the operand's C type is actually decided.
+      //
+      // The operand type is settled by CONSTRUCTION rather than inspection: exprCType is
+      // pointer-ness-accurate and reports every integer as `s32` by contract, so it cannot be
+      // asked this question. The cast is therefore added unless the operand is a node kind whose
+      // C type exprCType DERIVES rather than defaults (a declared var, an explicit cast, an
+      // access) and that type is already the 32-bit integer of the right signedness. A redundant
+      // cast over an operand that already has that type is codegen-identical, so the conservative
+      // direction is free; being wrong in the other direction is a miscompile.
+      if (op === '>>') {
+        const wantSigned = d.opcode === 'shr_s';
+        l = signednessOf(l) === wantSigned ? l : retype32(l, T.int(32, wantSigned));
       }
       // SCOPE: this and intifyAddr cover the ARITHMETIC escapes. A pointer global under a
       // COMPARISON (`gPtr < K` — C compares unsigned whatever the asm's icmp_s* said) is the same

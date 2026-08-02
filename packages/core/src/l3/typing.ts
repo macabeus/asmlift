@@ -64,6 +64,66 @@ export function derefStrideOk(rt: IrType | undefined, width: number): boolean {
   return false;
 }
 
+/**
+ * The C SIGNEDNESS a rendered integer expression actually has — `true`/`false`, or `undefined`
+ * when it is not determinable here. The deliberate complement to {@link exprCType}, which is
+ * pointer-ness-accurate and reports every integer as `s32` by contract; this models the two C
+ * rules that contract omits, integer PROMOTION and the usual arithmetic CONVERSIONS.
+ *
+ * It exists for one question, and the question is byte-load-bearing: C spells both the logical
+ * and the arithmetic right-shift `>>` and chooses between them from the left operand's type. An
+ * `shr_u` rendered over a signed expression recompiles to `asr` where the target has `lsr`, and
+ * evaluates to a different value. The structurer casts the operand whenever this returns anything
+ * but the signedness the opcode requires, so `undefined` is the safe answer in every case the
+ * model does not cover — a redundant cast is codegen-identical, a missing one is a miscompile.
+ *
+ * Anything narrower than 32 bits promotes to `int` and is therefore SIGNED, whatever it was
+ * declared. Pointers, calls, markers and 64-bit values are `undefined`.
+ */
+export function renderedIntSignedness(e: Expr, varType: VarTypes): boolean | undefined {
+  const rec = (x: Expr): boolean | undefined => renderedIntSignedness(x, varType);
+  // an lvalue-ish leaf: its C type is a declaration / an explicit cast / a carried access width
+  const promoted = (t: IrType | undefined): boolean | undefined =>
+    t?.kind !== 'int' ? undefined : t.width < 32 ? true : t.width === 32 ? t.signed : undefined;
+  switch (e.k) {
+    case 'var':
+    case 'cast':
+    case 'index':
+    case 'field':
+      return promoted(exprCType(e, varType));
+    // A decimal literal is `int` when it fits in one; C89 gives a larger one an unsigned type,
+    // which is not the same operand — so it is left undetermined rather than assumed.
+    case 'const':
+      return e.value >= -2147483648 && e.value <= 2147483647 ? true : undefined;
+    // `-x` / `~x` carry the PROMOTED type of the operand; `!x` is `int`.
+    case 'un':
+      return e.op === '!' ? true : rec(e.e);
+    case 'bin': {
+      // Shifts take the type of the LEFT operand alone — the right is promoted independently.
+      if (e.op === '<<' || e.op === '>>') {
+        return rec(e.l);
+      }
+      // Comparisons and the logical connectives yield `int`.
+      if (['<', '<=', '>', '>=', '==', '!=', '&&', '||'].includes(e.op)) {
+        return true;
+      }
+      // Usual arithmetic conversions over the remaining binary operators: at equal rank, unsigned
+      // wins. Either side unknown leaves the result unknown — EXCEPT when the known side is
+      // unsigned, which already decides it.
+      const l = rec(e.l);
+      const r = rec(e.r);
+      if (l === false || r === false) {
+        return false;
+      }
+      return l === true && r === true ? true : undefined;
+    }
+    case 'call':
+    case 'marker':
+    case 'addr':
+      return undefined;
+  }
+}
+
 export function exprCType(e: Expr, varType: (name: string) => IrType | undefined): IrType | undefined {
   const rec = (x: Expr): IrType | undefined => exprCType(x, varType);
   switch (e.k) {
