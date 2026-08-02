@@ -9,8 +9,9 @@ import { describe, expect, test } from 'vitest';
 
 import { parse } from '../src/ir/parse';
 import { print } from '../src/ir/print';
+import { simplifyTrivialPhis } from '../src/ir/simplify';
 import { verify } from '../src/ir/verify';
-import { dropRedundantParams, numberPureValues } from '../src/raise/gvn';
+import { numberPureValues } from '../src/raise/gvn';
 
 const TWO_ARMS = `fn f {
 ^bb0(%0: s32):
@@ -64,11 +65,15 @@ describe('value numbering', () => {
   });
 });
 
-describe('redundant params', () => {
+// The trivial-phi remover lives in `ir/simplify.ts`, shared with the frontend's SSA construction —
+// it was a near-verbatim second copy of Braun's `tryRemoveTrivialPhi` and the two had already
+// diverged (only this one guarded the entry block). Kept under this file because the numbering pass
+// is useless without it.
+describe('trivial phis (ir/simplify.ts)', () => {
   test('a param whose every edge carries one value is retired', () => {
     const fn = parse(TWO_ARMS);
     numberPureValues(fn);
-    expect(dropRedundantParams(fn)).toBe(1);
+    expect(simplifyTrivialPhis(fn)).toBe(1);
     expect(fn.blocks.find((b) => b.params.length > 0 && b !== fn.blocks[0])).toBeUndefined();
     verify(fn);
   });
@@ -89,7 +94,7 @@ describe('redundant params', () => {
   ret %5
 }
 `);
-    expect(dropRedundantParams(fn)).toBe(0);
+    expect(simplifyTrivialPhis(fn)).toBe(0);
     verify(fn);
   });
 
@@ -107,7 +112,7 @@ describe('redundant params', () => {
   ret %3
 }
 `);
-    expect(dropRedundantParams(fn)).toBe(1);
+    expect(simplifyTrivialPhis(fn)).toBe(1);
     verify(fn);
   });
 
@@ -117,7 +122,7 @@ describe('redundant params', () => {
   ret %0
 }
 `);
-    expect(dropRedundantParams(fn)).toBe(0);
+    expect(simplifyTrivialPhis(fn)).toBe(0);
     expect(fn.blocks[0].params).toHaveLength(1);
   });
 });

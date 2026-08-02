@@ -9,18 +9,31 @@
 //     ^bb9(%45: u16*):  … %45[594] …
 //
 // Nothing downstream can see that `%29` and `%43` are equal, so `%45` is a real phi: the structurer
-// destroys it into a local (`v5 = (u16 *)&gBgTilemapBufs;` in every arm) and every later access
-// reads that local. The source it came from had no such variable — it just named the global at each
-// use, and let the compiler decide where to put the address. The invented local is the difference.
+// destroys it into a local and every later access reads it. The source it came from had no such
+// variable — it just named the global at each use, and let the compiler decide where to put the
+// address. In emitted C, that is the whole difference:
+//
+//     before:  v5 = (u16 *)&gBgTilemapBufs;   …   v5[594] = v5[659];
+//     after:   gBgTilemapBufs[0][594] = gBgTilemapBufs[0][659];
+//
+// RUNS FIRST in PRE_RECOVERY_PASSES: collapsing addresses removes block params every later
+// recognizer would otherwise have to reason around, and it can only shrink the value graph.
 //
 // SOUNDNESS. `gaddr` takes no operands and reads no memory: its result is a function of its `attrs`
 // alone, so two with equal attrs are equal in every execution, on every path, always. Replacing all
-// of them with ONE definition is exact — this is the narrowest possible value numbering, and it is
-// why the pass is restricted to operand-free ops rather than generalized to pure arithmetic (which
-// would need a real congruence closure and dominance reasoning about its operands).
+// of them with ONE definition is exact.
 //
-// PLACEMENT. The single survivor is moved to the ENTRY block, which dominates everything, so no use
-// can precede its definition. That is safe here precisely because the op is free: `gaddr` lowers to
+// THE ADMISSION RULE IS `gaddr`, NOT "operand-free and pure" — and the difference is the whole
+// safety argument, so do not relax it to the general-sounding version. `const` is ALSO operand-free
+// and pure, and numbering consts function-wide would be actively harmful: structure/analysis.ts
+// materializes a multi-use `const` that is live across a call into a named local, and its own
+// comment records that this exact widening ("the small-constant regression") already cost matches
+// once. The gate is a MATCHING policy, not a property of the opcode — which is why it is not a flag
+// on the opcode table, where `const` would satisfy it.
+//
+// PLACEMENT. One fresh definition per class is created in the ENTRY block, which dominates
+// everything, so no use can precede it (the originals are deleted rather than moved — a fresh Value
+// keeps the rewrite uniform, including for a duplicate that was already in the entry block). That is safe here precisely because the op is free: `gaddr` lowers to
 // nothing on its own — the structurer inlines a pure non-`const` value at each use site (see
 // analysis.ts, whose materialize-into-a-local rule covers `const`, `call` and the memory reads, NOT
 // address ops), so the address is re-spelled at each access exactly as the original source did.
@@ -29,6 +42,15 @@
 // SCOPE, deliberately narrow: `code: true` symbols (a promoted function pointer, spelled `(u32)Name`
 // rather than `&Name`) are numbered separately from data ones, because the attr is part of what the
 // value renders as.
+//
+// THE WIN IS CONTINGENT ON THE SYMBOL MAP, which is worth knowing before relying on it. With a map
+// supplying an array's rank the accesses render as `gSym[0][i]`, a `var` base that
+// `l3/basecse.ts`'s `isHoistableBase` cannot see, so nothing re-creates the local this pass
+// deleted. WITHOUT a map (verified by running the row map-less) the same accesses spell as
+// `addr`, basecse sees the reuse, and it hoists a function-top `p0 = (u16 *)&gBgTilemapBufs` —
+// the same local, one level up. Three modules now answer "is this
+// address a local?" with independent policies (here: never; basecse: when reused 2+ times;
+// l3/scopebase.ts: at the innermost scope), and reconciling them is recorded debt.
 import { Fn, Op, Value, mkOp, replaceAllUsesWith } from '../ir/core';
 
 /** Ops whose result depends on `attrs` alone — no operands, no memory, no control flow. */
@@ -90,62 +112,4 @@ export function numberPureValues(fn: Fn): number {
   }
   entry.ops.unshift(...hoisted);
   return removed;
-}
-
-/**
- * Drop block params whose every incoming edge carries the SAME value — the phi is then a pure alias
- * of it and exists only because the frontend built one per merge.
- *
- * The natural partner of the numbering above, and useless without it: two `gaddr`s of one symbol
- * only become "the same value" once they ARE one value. Left in place, such a param is a real phi to
- * the structurer, which destroys it into a local and assigns it in every arm — inventing the
- * variable the original source did not have.
- *
- * DOMINANCE is free: if every predecessor's edge passes `v`, then `v` is defined before each of
- * those terminators, and every path into the block goes through one of them — so `v` dominates the
- * block and every use the param had.
- *
- * A back-edge arg that is the PARAM ITSELF is ignored when deciding, the standard self-referential
- * case: `p = phi(v, p)` is still just `v`. Iterated to a fixpoint, because removing one param can
- * make the next redundant.
- */
-export function dropRedundantParams(fn: Fn): number {
-  let dropped = 0;
-  for (;;) {
-    let changed = false;
-    for (const b of fn.blocks) {
-      if (b === fn.blocks[0] || b.params.length === 0) {
-        continue; // entry params are the function's own parameters, not a merge
-      }
-      for (let i = b.params.length - 1; i >= 0; i--) {
-        const p = b.params[i];
-        const incoming: Value[] = [];
-        for (const pr of fn.blocks) {
-          for (const s of pr.ops[pr.ops.length - 1]?.successors ?? []) {
-            if (s.block === b) {
-              incoming.push(s.args[i]);
-            }
-          }
-        }
-        const distinct = [...new Set(incoming.filter((v) => v !== p))];
-        if (incoming.length === 0 || distinct.length !== 1) {
-          continue;
-        }
-        replaceAllUsesWith(fn, p, distinct[0]);
-        b.params.splice(i, 1);
-        for (const pr of fn.blocks) {
-          for (const s of pr.ops[pr.ops.length - 1]?.successors ?? []) {
-            if (s.block === b) {
-              s.args.splice(i, 1);
-            }
-          }
-        }
-        dropped++;
-        changed = true;
-      }
-    }
-    if (!changed) {
-      return dropped;
-    }
-  }
 }

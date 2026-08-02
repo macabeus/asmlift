@@ -7,7 +7,8 @@
 // computation via read/writeVar, push its terminator op last (successors referencing
 // `irBlocks`, args left empty — phi wiring appends them), then call `markFilled(b)`. When all
 // blocks are filled, call `finish()` to remove trivial phis.
-import { Block, Fn, Successor, Value, mkValue, replaceAllUsesWith } from '../ir/core';
+import { Block, Fn, Value, mkValue } from '../ir/core';
+import { simplifyTrivialPhis } from '../ir/simplify';
 import { T } from '../ir/types';
 
 export interface SsaBuilder {
@@ -128,7 +129,7 @@ export function makeSsaBuilder(name: string, blockCount: number, preds: number[]
       filled[b] = true;
       sealReadyBlocks();
     },
-    finish: () => simplifyTrivialPhis(fn, phiBlock),
+    finish: () => simplifyTrivialPhis(fn, (p) => phiBlock.delete(p)),
   };
 }
 
@@ -166,49 +167,4 @@ export function abiSortEntryParams(
     return;
   }
   entry.params.sort((x, y) => rank(x) - rank(y));
-}
-
-// Remove block-parameters that are really trivial phis: those whose incoming operands (across
-// every predecessor edge, ignoring self-references from a back-edge) are all the same single
-// value. Such a parameter carries no join information — a loop-invariant register or a value
-// defined before the join — so it is replaced by that value and the corresponding argument
-// dropped from each predecessor's terminator. Iterated to fixpoint because removing one phi
-// can make another trivial.
-function simplifyTrivialPhis(fn: Fn, phiBlock: Map<Value, number>): void {
-  const edgesTo = (b: Block): Successor[] => {
-    const out: Successor[] = [];
-    for (const pb of fn.blocks) {
-      for (const op of pb.ops) {
-        for (const s of op.successors) {
-          if (s.block === b) {
-            out.push(s);
-          }
-        }
-      }
-    }
-    return out;
-  };
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const b of fn.blocks) {
-      const incoming = edgesTo(b);
-      for (let i = b.params.length - 1; i >= 0; i--) {
-        const param = b.params[i];
-        const operands = incoming.map((s) => s.args[i]);
-        const distinct = [...new Set(operands.filter((v) => v !== param))];
-        if (distinct.length !== 1) {
-          continue;
-        } // a genuine join (or unreachable) — keep it
-        const v = distinct[0];
-        replaceAllUsesWith(fn, param, v);
-        b.params.splice(i, 1);
-        for (const s of incoming) {
-          s.args.splice(i, 1);
-        }
-        phiBlock.delete(param);
-        changed = true;
-      }
-    }
-  }
 }
