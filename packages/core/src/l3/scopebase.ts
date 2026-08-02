@@ -8,10 +8,11 @@
 //   everything before that arm — a live range the original never had, which is the register-pressure
 //   failure basecse's own loop gate exists for. Measured on kleod:UpdateHUDCounterDisplay by
 //   hand-editing the REFERENCE source: naming the `gBgTilemapBufs` store base inside the arm that
-//   uses it is byte-exact, and moving that same declaration to the function top costs 24. What THIS
-//   lever does to that row is smaller — 81 to 70, still a nonmatch — because the row needs several
-//   other capabilities too; the placement figure is the reason the lever is scope-aware, not a claim
-//   about what it achieves alone. basecse's header already names the gap — "a loop-body base is left
+//   uses it is byte-exact, and moving that same declaration to the function top costs 24. That is
+//   the reason the lever is scope-aware; it is NOT a claim about what the lever achieves. On that
+//   row it now declines outright (a later pass retired the phi it keyed on, so the base's uses span
+//   the function body — see `commonScope`); the row it actually wins is sa3:sa2__sub_8083504,
+//   85 to 82. basecse's header already names the gap — "a loop-body base is left
 //   inline for a future scope-aware hoist" — and this is that hoist.
 //
 //   ELIGIBILITY. With a symbol map that states an array's RANK, the access renders as the bare
@@ -47,9 +48,9 @@ import { nameAllocator } from './hoist';
 
 /** A base this lever may name: a leaf whose value is a fixed address.
  *
- *  `var` is included ONLY for a name in `SFn.globals`. That list is populated by ONE call site —
- *  the structurer's `noteGlobal`, reached only on the `bareArrayLead` path, which requires
- *  `shape === 'array'` — so a `var` base here is always an ARRAY-declared global and `(T *)&gSym`
+ *  `var` is included ONLY for a name in `SFn.globals`. That list is populated by `noteGlobal` alone
+ *  (two call sites in structure.ts, both on the `bareArrayLead` path, which requires
+ *  `shape === 'array'`) — so a `var` base here is always an ARRAY-declared global and `(T *)&gSym`
  *  is its start address under any declaration. The invariant is worth stating because it is what
  *  keeps a POINTER-shaped global out: for one of those, `(T *)&gPtr` names the pointer CELL rather
  *  than the object it points at, which would be silently the wrong address. A local `var` is
@@ -92,6 +93,12 @@ const keyOf = (n: Extract<Expr, { k: 'index' }>): string => `${baseId(n.base as 
 interface Site {
   path: Stmt[][];
   loop: boolean[];
+  /** `idx[i]` is the index, within `path[i]`, of the statement this use sits under. Used to place
+   *  the hoist immediately before the FIRST statement that needs it rather than at the list head:
+   *  a call between the assignment and the first use is exactly what forces the pointer into a
+   *  CALLEE-SAVED register and adds the prologue push/pop the original avoided — the same failure,
+   *  one level smaller, that this module exists to fix. argbase.ts places by the same rule. */
+  idx: number[];
   /** the use runs EVERY ITERATION of a loop whose body is not on `path` — a loop's own condition,
    *  or a `for`'s increment. No scope reachable from `path` runs at that cadence, so a key with any
    *  such use is refused outright rather than hoisted to a point that runs once. */
@@ -105,13 +112,15 @@ function collect(
   out: Map<string, { uses: Site[]; sample: Extract<Expr, { k: 'index' }>; constOff: Map<number, number> }>,
   path: Stmt[][],
   loop: boolean[],
+  idxPath: number[],
 ): void {
+  let at = 0;
   const visit = (e: Expr, perIteration: boolean): void => {
     const ix = eligible(e, globals);
     if (ix) {
       const k = keyOf(ix);
       const rec = out.get(k) ?? { uses: [], sample: ix, constOff: new Map<number, number>() };
-      rec.uses.push({ path, loop, perIteration });
+      rec.uses.push({ path, loop, perIteration, idx: [...idxPath, at] });
       if (ix.idx.k === 'const') {
         rec.constOff.set(ix.idx.value, (rec.constOff.get(ix.idx.value) ?? 0) + 1);
       }
@@ -122,12 +131,15 @@ function collect(
       return c;
     });
   };
-  for (const s of body) {
+  for (const [i, s] of body.entries()) {
+    at = i;
     const isLoop = s.k === 'while' || s.k === 'dowhile' || s.k === 'for';
     // A loop's OWN condition runs every iteration — a base there is loop-invariant exactly as a
-    // body use is, and it lives at THIS list, which does not. basecse.ts and argbase.ts both make
-    // the same call; this pass used to attribute it to the enclosing list with loop=false and would
-    // hoist above the loop, contradicting its own stated invariant.
+    // body use is, and it lives at THIS list, which does not. basecse.ts and argbase.ts treat the
+    // CONDITION the same way. They do NOT agree about a `for`'s `init`: basecse counts it in-loop
+    // (its `stmtChildren('for')` is `[init, inc, …body]`, recursed with `nested`), this pass counts
+    // it at the enclosing cadence, which is the truthful reading — it runs once. Recorded because
+    // the divergence is real and an extraction has to pick one.
     stmtExprs(s).forEach((e) => visit(e, isLoop));
     if (s.k === 'for') {
       // `init` and `inc` are STATEMENTS, so their expressions are reached by neither `stmtExprs`
@@ -139,7 +151,7 @@ function collect(
       stmtExprs(s.inc).forEach((e) => visit(e, true));
     }
     for (const child of childLists(s)) {
-      collect(child, globals, out, [...path, child], [...loop, isLoop]);
+      collect(child, globals, out, [...path, child], [...loop, isLoop], [...idxPath, i]);
     }
   }
 }
@@ -174,8 +186,11 @@ function childLists(s: Stmt): Stmt[][] {
 
 /** The innermost statement list common to every use, or null when they span the function body.
  *
- *  Null is not a failure to fix — it is precisely the case `basecse.ts` already hoists at the
- *  function top, so emitting it here would only duplicate the primary spelling. */
+ *  Null means DECLINE. For an `addr`/`const` base that is right: basecse already hoists those at
+ *  the function top, so firing here would only duplicate the primary spelling. For a `var` base it
+ *  is a HOLE — basecse cannot see a `var` base at all, so nothing hoists it and no candidate offers
+ *  the named spelling. That gap is real and currently unclosed; closing it means giving basecse the
+ *  wider eligibility, or parameterizing one pass by placement, not widening this decline. */
 function commonScope(uses: Site[]): { scope: Stmt[]; depth: number } | null {
   const first = uses[0].path;
   let depth = 0;
@@ -205,21 +220,24 @@ export function hoistScopedBases(sfn: SFn): SFn | null {
     string,
     { uses: Site[]; sample: Extract<Expr, { k: 'index' }>; constOff: Map<number, number> }
   >();
-  collect(sfn.body, globals, found, [], []);
+  collect(sfn.body, globals, found, [], [], []);
 
   const fresh = nameAllocator(sfn);
   const newLocals: { name: string; type: IrType }[] = [];
   // key → (scope list identity, local name)
-  const plan: { scope: Stmt[]; key: string; name: string; type: IrType; base: LeafBase }[] = [];
+  const plan: { scope: Stmt[]; key: string; name: string; type: IrType; base: LeafBase; before: number }[] = [];
   for (const [key, rec] of found) {
     if (rec.uses.length < 2) {
       continue; // one access re-materializes as cheaply as a named local
     }
     // A constant offset touched 2+ times is a SCALAR re-access at one fixed location (an MMIO
     // read-modify-write, a repeated `*p`), which the compiler re-materializes rather than
-    // register-holds. basecse.ts learned this by LOSING the ProcessHBlankWait match to it; the gate
-    // is inherited here rather than re-lost, and it governs a large share of this lever's reachable
-    // input because basecse runs first and refuses these bases, leaving them to be seen here.
+    // register-holds. basecse.ts learned this by LOSING the ProcessHBlankWait match to it. Inherited
+    // here rather than re-lost — but honestly: the evidence is a `const` MMIO address, and it
+    // applies cleanly only to the `addr`/`const` half of this pass's input, which is exactly what
+    // basecse refused and left behind. For the `var` (array-global) half basecse never ran, so this
+    // is an EXTRAPOLATION, not an inheritance. Conservative direction, so the cost is a missed
+    // hoist rather than a wrong one.
     if ([...rec.constOff.values()].some((n) => n >= 2)) {
       continue;
     }
@@ -228,7 +246,11 @@ export function hoistScopedBases(sfn: SFn): SFn | null {
       continue;
     }
     const type = T.ptr(scalarTypeForAccess(rec.sample.width, rec.sample.signed));
-    plan.push({ scope: at.scope, key, name: fresh(), type, base: rec.sample.base as LeafBase });
+    // the earliest statement of the scope list that (transitively) holds a use
+    // `path` starts EMPTY, so `idx` carries one entry more than `path`: idx[j+1] is the index
+    // within path[j]. The scope is path[depth-1], so its index is idx[depth].
+    const before = Math.min(...rec.uses.map((u) => u.idx[at.depth]));
+    plan.push({ scope: at.scope, key, name: fresh(), type, base: rec.sample.base as LeafBase, before });
   }
   if (plan.length === 0) {
     return null;
@@ -254,17 +276,23 @@ export function hoistScopedBases(sfn: SFn): SFn | null {
   // fresh tree in one pass — a two-pass version would compare rebuilt lists that no longer match.
   const rewriteList = (list: Stmt[]): Stmt[] => {
     const here = plan.filter((p) => p.scope === list);
-    const pre: Stmt[] = here.map((p) => ({
-      k: 'assign',
-      name: p.name,
-      // The always-valid form: `(T *)&gSym` is byte-identical under ANY declaration of gSym, which
-      // is why it is also what `bareArrayLead` falls back to. A `const` base keeps its literal.
-      value: { k: 'cast', to: p.type, e: p.base.k === 'const' ? p.base : { k: 'addr', name: p.base.name } },
-    }));
     for (const p of here) {
       newLocals.push({ name: p.name, type: p.type });
     }
-    return [...pre, ...list.map(rewriteStmt)];
+    const rewritten = list.map(rewriteStmt);
+    // Insert each hoist immediately before the first statement that uses it. Descending by index so
+    // earlier insertions do not shift the positions later ones were computed against; ties keep
+    // `plan` order, which is first-appearance order, so emission stays deterministic.
+    for (const p of [...here].sort((a, b) => b.before - a.before)) {
+      rewritten.splice(p.before, 0, {
+        k: 'assign',
+        name: p.name,
+        // The always-valid form: `(T *)&gSym` is byte-identical under ANY declaration of gSym, which
+        // is why it is also what `bareArrayLead` falls back to. A `const` base keeps its literal.
+        value: { k: 'cast', to: p.type, e: p.base.k === 'const' ? p.base : { k: 'addr', name: p.base.name } },
+      });
+    }
+    return rewritten;
   };
   const rewriteStmt = (s: Stmt): Stmt => {
     switch (s.k) {

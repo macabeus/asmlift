@@ -39,7 +39,7 @@ const fn = (body: Stmt[], globals = G): SFn => ({
   body,
 });
 
-/** The hoist assignments introduced at the head of a statement list. */
+/** The hoist assignments introduced into a statement list, in order. */
 const hoists = (list: Stmt[]): string[] =>
   list
     .filter((s): s is Extract<Stmt, { k: 'assign' }> => s.k === 'assign' && s.name.startsWith('p'))
@@ -56,8 +56,10 @@ describe('scope choice', () => {
     expect(thenArm[0]).toMatchObject({ k: 'assign', name: 'p0' });
   });
 
-  test('uses spanning the FUNCTION BODY decline — that is basecse’s hoist, not this one', () => {
-    // Emitting it here would duplicate the primary spelling rather than add a distinct candidate.
+  test('uses spanning the FUNCTION BODY decline', () => {
+    // For an addr/const base that is right — basecse already hoists those at the top, so firing
+    // here would only duplicate the primary. For a `var` base it is a HOLE: basecse cannot see one,
+    // so nothing hoists it. Pinned as current behaviour, not as a claim that it is covered.
     expect(
       hoistScopedBases(
         fn([
@@ -240,5 +242,27 @@ describe('the refusals found by the adversarial round', () => {
     // basecse.ts learned this by losing the ProcessHBlankWait match; inherited rather than re-lost.
     const arm: Stmt[] = [store(ix(7), ix(7)), store(ix(7), ix(7))];
     expect(hoistScopedBases(fn([{ k: 'if', cond: { k: 'const', value: 1 }, then: arm, else: [] }]))).toBeNull();
+  });
+});
+
+describe('placement within the scope', () => {
+  test('the hoist goes immediately before the FIRST use, not at the list head', () => {
+    // A call between the assignment and the first use is what forces the pointer into a
+    // callee-saved register and adds the prologue push/pop the original avoided — the same failure
+    // this module exists to fix, one level smaller. argbase.ts places by the same rule.
+    const call: Stmt = { k: 'exprstmt', value: { k: 'call', fn: 'side', args: [] } };
+    const arm: Stmt[] = [call, call, store(ix(1), ix(2))];
+    const out = hoistScopedBases(fn([{ k: 'if', cond: { k: 'const', value: 1 }, then: arm, else: [] }]));
+    expect(out).not.toBeNull();
+    const then = (out!.body[0] as Extract<Stmt, { k: 'if' }>).then;
+    expect(then.map((s) => s.k)).toEqual(['exprstmt', 'exprstmt', 'assign', 'store']);
+    expect(then[2]).toMatchObject({ k: 'assign', name: 'p0' });
+  });
+
+  test('two hoists in one scope keep first-appearance order', () => {
+    const arm: Stmt[] = [store(ix(1), ix(2)), store(ix(3, { width: 1 }), ix(4, { width: 1 }))];
+    const out = hoistScopedBases(fn([{ k: 'if', cond: { k: 'const', value: 1 }, then: arm, else: [] }]));
+    const then = (out!.body[0] as Extract<Stmt, { k: 'if' }>).then;
+    expect(hoists(then)).toEqual(['p0', 'p1']);
   });
 });
