@@ -15,6 +15,7 @@ import { dce } from '../pattern/engine';
 import type { TargetDescription } from '../target';
 import { recognizeArrays } from './arrays';
 import { recognizeConsts } from './const';
+import { dropRedundantParams, numberPureValues } from './gvn';
 import { recognizeMagicDivision } from './magicdiv';
 import { recognizeBranchShortCircuit, recognizeShortCircuit } from './shortcircuit';
 import { recognizeSoftDiv } from './softdiv';
@@ -36,6 +37,9 @@ export interface PreRecoveryPass {
  *  const-materialize → magic-division → soft-division → array-legalize → struct-array →
  *  struct-pointer → short-circuit. See each recognizer's file for the rationale. */
 export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
+  // FIRST: collapsing duplicate address definitions removes block params every later recognizer
+  // would otherwise have to reason around, and it can only shrink the value graph.
+  { id: 'gvn', run: (fn) => numberPureValues(fn) + dropRedundantParams(fn), dce: false },
   { id: 'const', run: recognizeConsts, dce: true },
   { id: 'magicdiv', run: recognizeMagicDivision, dce: true },
   { id: 'softdiv', run: (fn) => recognizeSoftDiv(fn), dce: false, gate: (t) => !t.capabilities.hwDivide },
