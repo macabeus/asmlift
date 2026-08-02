@@ -3,6 +3,7 @@
 // replaces the adapter default.
 import type { CandidateCompiler } from '@asmlift/cli/compile-command';
 import type { Prototypes } from '@asmlift/core/proto';
+import type { SymbolMap } from '@asmlift/core/symbols';
 
 import type { Scorer } from '../eval/asmlift';
 import type { BuiltTarget, Toolchain } from '../toolchains';
@@ -19,6 +20,8 @@ export interface Case {
   sourceUrl?: string; // real tier: GitHub permalink to the reference source
   ctx?: string; // m2c --context (full text — inline authored, or sanitized vendored)
   ctxRef?: string; // repo-relative vendored-context path, published on the row instead of ctx
+  /** the project's vendored symbol map — threaded into asmlift only (m2c has its ctx) */
+  symbols?: SymbolMap;
   proto?: Prototypes; // asmlift prototypes
   note?: string;
   toolchain: Toolchain;

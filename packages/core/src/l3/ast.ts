@@ -43,7 +43,7 @@ export type Expr =
   // pointer, so the byte offset resolves to a named field instead of a scaled array index).
   // Unlike `index`, this carries the field NAME (which encodes the byte offset, `field_<off>`),
   // not a width-scaled number — the byte-offset-carrying member access cpp.ts's sub-word guard needs.
-  | { k: 'field'; base: Expr; name: string }
+  | { k: 'field'; base: Expr; name: string; dot?: true }
   // A GAP MARKER — the annotate-mode (`onGap: "annotate"`) spelling of a value asmlift could not
   // faithfully lift (an unmodelled instruction's `opaque` result, an unlowered transient op, a
   // dropped def). Every backend spells it as a call to the UNDEFINED symbol `ASMLIFT_ERROR("reason",
@@ -111,6 +111,10 @@ export interface SFn {
   name: string;
   params: { name: string; type: IrType }[];
   locals: { name: string; type: IrType }[]; // recovered locals, declared at function top
+  /** project globals referenced with a known declaration shape (symbol map) — typed for the
+   *  legalization env (exprCType) but NEVER declared by a backend: the project's own headers
+   *  declare them, exactly like every other global name asmlift emits. */
+  globals?: { name: string; type: IrType }[];
   retType: IrType;
   body: Stmt[];
   /** Struct types this function's fields reference, declared above it by the backend. Empty
@@ -148,7 +152,9 @@ export function dotBase(f: Extract<Expr, { k: 'field' }>): Extract<Expr, { k: 'i
 
 /** Boolean projection of `dotBase` for conditions that need no narrowing. */
 export function fieldSpellsDot(f: Extract<Expr, { k: 'field' }>): boolean {
-  return dotBase(f) !== undefined;
+  // dot also spells a STRUCT-VALUE global's field (`gSym.field`, the symbol-map layout path) —
+  // marked explicitly by the structurer via `dot: true` since the base is a `var`, not an index.
+  return dotBase(f) !== undefined || f.dot === true;
 }
 
 /** Structural equality of two expression trees. THE one copy of Expr deep-equal (like

@@ -109,8 +109,21 @@ function DecompilerColumn({
 
 // The reproduction scripts open with placeholder checkout paths (M2C_PATH='/path/to/m2c' …).
 // A visitor types their real paths once — persisted per browser — and every script renders
-// copy-paste runnable, both on screen and through the Copy button.
-const PATH_STORAGE_KEYS = { m2c: 'bench:m2c-path', asmlift: 'bench:asmlift-path' } as const;
+// copy-paste runnable, both on screen and through the Copy button. Symbol-fed rows add a
+// PROJECT_PATH placeholder (the decomp-project checkout the script loads the symbol map
+// from) — that input only appears when the script carries the placeholder, and persists
+// PER PROJECT (each project is its own checkout).
+const PATH_STORAGE_KEYS = {
+  m2c: 'bench:m2c-path',
+  asmlift: 'bench:asmlift-path',
+  project: 'bench:project-path',
+} as const;
+
+/** The script's PROJECT_PATH placeholder assignment (e.g. `PROJECT_PATH='/path/to/pokeemerald'`),
+ *  or null for rows without one. */
+function projectPlaceholder(script: string): string | null {
+  return /PROJECT_PATH='\/path\/to\/[^']*'/.exec(script)?.[0] ?? null;
+}
 
 function usePersistedPath(key: string): [string, (v: string) => void] {
   const [value, setValue] = useState(() => {
@@ -138,13 +151,17 @@ function usePersistedPath(key: string): [string, (v: string) => void] {
 const shellQuote = (s: string) => `'${s.replaceAll("'", `'\\''`)}'`;
 
 /** Rewrite a script's placeholder path assignments with the visitor's checkouts. */
-function fillScriptPaths(script: string, m2cPath: string, asmliftPath: string): string {
+function fillScriptPaths(script: string, m2cPath: string, asmliftPath: string, projectPath = ''): string {
   let out = script;
   if (m2cPath.trim()) {
     out = out.replace(`M2C_PATH='/path/to/m2c'`, `M2C_PATH=${shellQuote(m2cPath.trim())}`);
   }
   if (asmliftPath.trim()) {
     out = out.replace(`ASMLIFT_PATH='/path/to/asmlift'`, `ASMLIFT_PATH=${shellQuote(asmliftPath.trim())}`);
+  }
+  const placeholder = projectPlaceholder(out);
+  if (projectPath.trim() && placeholder) {
+    out = out.replace(placeholder, `PROJECT_PATH=${shellQuote(projectPath.trim())}`);
   }
   return out;
 }
@@ -221,6 +238,129 @@ function CollapsibleCode({
   );
 }
 
+/** One labeled block inside the Provenance accordion. */
+function ProvenanceRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{label}</div>
+      <div className="mt-1">{children}</div>
+    </div>
+  );
+}
+
+/** Compact spelling of one prototype hint (arity or typed params, plus void-ness). */
+function protoHintLabel(hint: { params?: number | string[]; returnsVoid?: boolean }): string {
+  const parts: string[] = [];
+  if (Array.isArray(hint.params)) {
+    parts.push(`(${hint.params.join(', ')})`);
+  } else if (typeof hint.params === 'number') {
+    parts.push(`(${hint.params} arg${hint.params === 1 ? '' : 's'})`);
+  }
+  if (hint.returnsVoid !== undefined) {
+    parts.push(hint.returnsVoid ? '→ void' : '→ non-void');
+  }
+  return parts.join(' ');
+}
+
+/** ALL input provenance for the row, consolidated in one collapsed accordion: the prototype
+ *  hints asmlift received, the context m2c received, and the symbol map's state (used /
+ *  present-but-unused / none) with the map symbols the winning candidate references
+ *  and the candidate spelling that won. Every field is optional — old data carries none.
+ *  `symbolsUsed` exists exactly when the row was SCORED with a map: a declined/failed map row
+ *  has no winning spelling, so it makes no usage claim at all (the "none" state) — never the
+ *  false "present, unused" (which asserts a winner that named nothing). */
+function Provenance({ fn }: { fn: FunctionResult }) {
+  const [open, setOpen] = useState(false);
+  const r = fn.asmlift; // the symbol-map fields are asmlift-only (m2c rows never carry them)
+  const scored = r.symbolsUsed !== undefined; // present ⇔ a winning spelling exists (scored row)
+  const symbols = r.symbolsUsed ?? [];
+  const protoEntries = Object.entries(fn.proto ?? {});
+
+  // Summary digest: `Provenance — 3 symbols · winner unsigned/raw-globals`.
+  const digest: string[] = [];
+  if (r.symbolMap && scored) {
+    digest.push(symbols.length > 0 ? `${symbols.length} symbol${symbols.length === 1 ? '' : 's'}` : 'symbols unused');
+  }
+  if (r.candidateLabel) {
+    digest.push(`winner ${r.candidateLabel}`);
+  }
+
+  return (
+    <div className="rounded-lg border border-slate-800 bg-slate-900/40 p-3">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-2 text-sm font-semibold text-slate-300 hover:text-white"
+      >
+        <span className="text-slate-500">{open ? '▾' : '▸'}</span>
+        Provenance
+        {digest.length > 0 && <span className="font-normal text-slate-500">— {digest.join(' · ')}</span>}
+      </button>
+      {open && (
+        <div className="mt-3 space-y-3 text-xs">
+          <ProvenanceRow label="Prototype hints">
+            {protoEntries.length > 0 ? (
+              <div className="flex flex-wrap gap-x-4 gap-y-1 font-mono text-slate-300">
+                {protoEntries.map(([name, hint]) => (
+                  <span key={name}>
+                    {name} <span className="text-slate-500">{protoHintLabel(hint)}</span>
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <span className="text-slate-500">none</span>
+            )}
+          </ProvenanceRow>
+          <ProvenanceRow label="Context">
+            {fn.ctxRef ? (
+              <span className="font-mono text-slate-300">
+                {fn.ctxRef} <span className="font-sans text-slate-500">(vendored project headers, via --context)</span>
+              </span>
+            ) : fn.ctx ? (
+              <span className="text-slate-400">
+                inline context header ({fn.ctx.split('\n').length} lines, via --context)
+              </span>
+            ) : (
+              <span className="text-slate-500">signature only</span>
+            )}
+          </ProvenanceRow>
+          <ProvenanceRow label="Symbol map">
+            {r.symbolMap && scored ? (
+              symbols.length > 0 ? (
+                <span className="text-teal-300">
+                  used — the winning candidate references {symbols.length} map symbol{symbols.length === 1 ? '' : 's'}
+                </span>
+              ) : (
+                <span className="text-slate-400">present, unused — the winning spelling named none of its symbols</span>
+              )
+            ) : (
+              // no map, OR a declined/failed map row (no winner exists → no usage claim)
+              <span className="text-slate-500">none</span>
+            )}
+            {symbols.length > 0 && (
+              <div className="mt-1.5 flex flex-wrap gap-1">
+                {symbols.map((s) => (
+                  <Chip key={s.name}>
+                    {s.name}
+                    {s.shape && <span className="ml-1 text-slate-500">{s.shape}</span>}
+                  </Chip>
+                ))}
+              </div>
+            )}
+            {r.candidateLabel && (
+              <div
+                className="mt-1.5 font-mono text-slate-500"
+                title="the candidate spelling that won the differ ranking"
+              >
+                winner: {r.candidateLabel}
+              </div>
+            )}
+          </ProvenanceRow>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Right-hand detail drawer for a selected function. */
 export function FunctionDetail({
   fn,
@@ -234,6 +374,9 @@ export function FunctionDetail({
   const share = useMemo(() => playgroundShare(fn), [fn]);
   const [m2cPath, setM2cPath] = usePersistedPath(PATH_STORAGE_KEYS.m2c);
   const [asmliftPath, setAsmliftPath] = usePersistedPath(PATH_STORAGE_KEYS.asmlift);
+  // symbol-fed rows only: the decomp-project checkout, persisted per project
+  const [projectPath, setProjectPath] = usePersistedPath(`${PATH_STORAGE_KEYS.project}:${fn.project}`);
+  const projectDefault = fn.scripts ? projectPlaceholder(fn.scripts.asmlift) : null;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -359,21 +502,34 @@ export function FunctionDetail({
                   onChange={setAsmliftPath}
                   placeholder="/path/to/asmlift"
                 />
+                {projectDefault && (
+                  // only symbol-fed rows carry the placeholder: the BUILT decomp-project
+                  // checkout the asmlift script loads the symbol map from
+                  <PathInput
+                    label="PROJECT_PATH"
+                    value={projectPath}
+                    onChange={setProjectPath}
+                    placeholder={projectDefault.slice("PROJECT_PATH='".length, -1)}
+                  />
+                )}
               </div>
               <CollapsibleCode
                 title="m2c script"
-                text={fillScriptPaths(fn.scripts.m2c, m2cPath, asmliftPath)}
+                text={fillScriptPaths(fn.scripts.m2c, m2cPath, asmliftPath, projectPath)}
                 language="bash"
                 copy
               />
               <CollapsibleCode
                 title="asmlift script"
-                text={fillScriptPaths(fn.scripts.asmlift, m2cPath, asmliftPath)}
+                text={fillScriptPaths(fn.scripts.asmlift, m2cPath, asmliftPath, projectPath)}
                 language="bash"
                 copy
               />
             </>
           )}
+
+          {/* Everything the decompilers were given as input, in one collapsed place. */}
+          <Provenance fn={fn} />
         </div>
       </div>
     </div>

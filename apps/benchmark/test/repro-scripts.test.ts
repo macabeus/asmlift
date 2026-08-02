@@ -137,11 +137,80 @@ describe('asmliftScript (pinned)', () => {
     }
   });
 
-  test('real rows carry the context-scoring caveat; synthetic rows do not', () => {
-    const real = rows.find((r) => r.tier === 'real');
-    if (real) {
-      expect(asmliftScript(real)).toContain('real tier:');
+  test('real rows state the ctx-world scoring (step 1 materializes the vendored context)', () => {
+    const real = rows.filter((r) => r.tier === 'real');
+    expect(real.length).toBeGreaterThan(0);
+    for (const fn of real) {
+      const s = asmliftScript(fn);
+      expect(s, fn.id).toContain('real tier:');
+      expect(s, fn.id).toContain('ctx.i'); // the materialized scoring context is named
+      // the old "may grade differently" caveat is gone — scoring now happens IN the ctx world
+      expect(s, fn.id).not.toContain('may grade');
     }
-    expect(asmliftScript(row('synthetic:add:ido7.1'))).not.toContain('real tier:');
+    const synth = asmliftScript(row('synthetic:add:ido7.1'));
+    expect(synth).not.toContain('real tier:');
+    expect(synth).not.toContain('ctx.i');
+  });
+
+  test('real rows state the pinned-checkout recipe with real commands (comments only)', () => {
+    const real = rows.filter((r) => r.tier === 'real');
+    expect(real.length).toBeGreaterThan(0);
+    for (const fn of real) {
+      const s = asmliftScript(fn);
+      expect(s, fn.id).toMatch(/#\s+git clone --branch asmlift-benchmark https:\/\/github\.com\/[\w.-]+\/[\w.-]+\.git/);
+      expect(s, fn.id).toMatch(/#\s+make -C /);
+      // the recipe must be COMMENTS — the script itself stays checkout-free
+      expect(s, fn.id).not.toMatch(/^git clone/m);
+    }
+    // sidecar projects additionally derive the symbols ELF
+    const sidecar = real.find((r) => r.project === 'marioparty3');
+    if (sidecar) {
+      expect(asmliftScript(sidecar)).toContain('make -C marioparty3 asmlift-elf');
+    }
+    expect(asmliftScript(row('synthetic:add:ido7.1'))).not.toContain('git clone --branch');
+  });
+
+  test('symbol-fed rows carry the vendored-map provenance; map-free rows state none is needed', () => {
+    const withMap = rows.filter((r) => r.asmlift.symbolMap);
+    expect(withMap.length).toBeGreaterThan(0); // the dataset does carry symbol-fed rows
+    for (const fn of withMap) {
+      const s = asmliftScript(fn);
+      expect(s, fn.id).toContain(`apps/benchmark/dataset/real/tu/${fn.project}/symbols.json.gz`);
+      expect(s, fn.id).toMatch(/sha256 of the decompressed map JSON: [0-9a-f]{64}/);
+      expect(s, fn.id).toContain('decomp.yaml (tools.asmlift.elf)');
+    }
+    const noMap = rows.find((r) => r.tier === 'real' && !r.asmlift.symbolMap);
+    if (noMap) {
+      const s = asmliftScript(noMap);
+      expect(s).toContain('no symbols needed');
+      expect(s).not.toContain('sha256 of the decompressed map JSON');
+    }
+    expect(asmliftScript(row('synthetic:add:ido7.1'))).not.toContain('SYMBOLS:');
+  });
+
+  test('symbol-fed rows LOAD the map: PROJECT_PATH placeholder + --project-root on the pre-step', () => {
+    const withMap = rows.filter((r) => r.asmlift.symbolMap);
+    expect(withMap.length).toBeGreaterThan(0);
+    for (const fn of withMap) {
+      const s = asmliftScript(fn);
+      // the placeholder names the same checkout dir the clone recipe creates
+      const dir = /^#\s+git clone --branch \S+ \S+\.git (\S+)$/m.exec(s)?.[1];
+      expect(dir, fn.id).toBeTruthy();
+      expect(s, fn.id).toContain(`PROJECT_PATH='/path/to/${dir}'`);
+      expect(s, fn.id).toContain(`bench target ${fn.id} --out "$PWD" --project-root "$PROJECT_PATH" 1>&2`);
+      // the old "standalone run does NOT load it" caveat is gone — the script loads the map now
+      expect(s, fn.id).not.toContain('does NOT load');
+    }
+    // kleod's repoDir differs from its GitHub repo name — the placeholder must use repoDir
+    const kleod = withMap.find((r) => r.project === 'kleod');
+    if (kleod) {
+      expect(asmliftScript(kleod)).toContain("PROJECT_PATH='/path/to/klonoa-empire-of-dreams'");
+    }
+    // map-free rows keep the plain pre-step and no placeholder
+    for (const fn of rows.filter((r) => !r.asmlift.symbolMap)) {
+      const s = asmliftScript(fn);
+      expect(s, fn.id).not.toContain('PROJECT_PATH');
+      expect(s, fn.id).not.toContain('--project-root');
+    }
   });
 });

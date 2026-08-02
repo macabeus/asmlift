@@ -19,6 +19,7 @@ import { Pipeline } from './Pipeline';
 import { RankBadge } from './RankPanel';
 import { deriveSpec, parseSpec } from './cpp-spec';
 import { EXAMPLES } from './examples';
+import { parseSymbolsJson } from './symbols-json';
 import { useRanking } from './useRanking';
 
 const TARGETS: Record<string, { desc: TargetDescription; label: string; format: string }> = {
@@ -39,6 +40,10 @@ const SPEC_PLACEHOLDER = `optional — auto-derived from the mangled symbol when
 {"method":"dot","cls":"Vec","retType":{"base":"int","ptr":0},
  "params":[{"name":"o","type":{"base":"Vec","ptr":1}}],
  "classes":{"Vec":{"fields":[{"name":"x","type":{"base":"int","ptr":0}},{"name":"y","type":{"base":"int","ptr":0}}]}}}`;
+
+const SYMBOLS_PLACEHOLDER = `optional — the project's address→symbol map (hex address → SymbolInfo[]), e.g.
+{"0x03001234": [{"name": "gCounter", "kind": "data"}],
+ "0x08012344": [{"name": "DoThing", "kind": "code"}]}`;
 
 type Tab = 'source' | 'pipeline';
 const TABS: { id: Tab; label: string }[] = [
@@ -72,16 +77,19 @@ export function Playground({
   const [asm, setAsm] = useState(initial?.asm ?? EXAMPLES[0].asm);
   const [nameOverride, setNameOverride] = useState(initial?.name ?? '');
   const [specText, setSpecText] = useState(initial?.spec ?? '');
-  const [debounced, setDebounced] = useState({ asm, targetId, backendId, nameOverride, specText });
+  const [symbolsText, setSymbolsText] = useState(initial?.symbols ?? '');
+  // The Symbols pane is collapsed by default when empty; a share/preset that carries a map opens it.
+  const [symbolsOpen, setSymbolsOpen] = useState(!!initial?.symbols);
+  const [debounced, setDebounced] = useState({ asm, targetId, backendId, nameOverride, specText, symbolsText });
   const [tab, setTab] = useState<Tab>('source');
   const [copied, setCopied] = useState<'idle' | 'copied' | 'huge' | 'failed'>('idle');
   // The last ?s= WE wrote, encoded — tells external changes apart from our own writes echoing back.
   const lastWritten = useRef<string | null>(initial ? encodeShare(initial) : null);
 
   useEffect(() => {
-    const t = setTimeout(() => setDebounced({ asm, targetId, backendId, nameOverride, specText }), 250);
+    const t = setTimeout(() => setDebounced({ asm, targetId, backendId, nameOverride, specText, symbolsText }), 250);
     return () => clearTimeout(t);
-  }, [asm, targetId, backendId, nameOverride, specText]);
+  }, [asm, targetId, backendId, nameOverride, specText, symbolsText]);
 
   // An EXTERNAL ?s= change (Back/Forward, the Benchmark's "Open in playground") loads into the
   // editor. Own writes are skipped via lastWritten, so a debounced (250ms-old) echo can never
@@ -101,6 +109,8 @@ export function Playground({
     setAsm(s.asm);
     setNameOverride(s.name ?? '');
     setSpecText(s.spec ?? '');
+    setSymbolsText(s.symbols ?? '');
+    setSymbolsOpen(!!s.symbols);
     setTab('source');
     // Seed the debounced snapshot too, so an incoming share decompiles at once — no transient
     // where the write effect re-encodes the previous content over the new share.
@@ -110,6 +120,7 @@ export function Playground({
       backendId: s.backend,
       nameOverride: s.name ?? '',
       specText: s.spec ?? '',
+      symbolsText: s.symbols ?? '',
     });
   }, [urlShare]);
 
@@ -126,10 +137,18 @@ export function Playground({
       asm: debounced.asm,
       ...(debounced.nameOverride.trim() ? { name: debounced.nameOverride.trim() } : {}),
       ...(debounced.backendId === 'cpp' && debounced.specText.trim() ? { spec: debounced.specText } : {}),
+      ...(debounced.symbolsText.trim() ? { symbols: debounced.symbolsText } : {}),
     };
     lastWritten.current = encodeShare(state);
     void setUrlShare(state);
   }, [debounced, active, setUrlShare]);
+
+  // The Symbols pane's map, parsed on the same debounce as the decompile. A parse error is loud
+  // in the pane but INERT to the run: the decompile proceeds WITHOUT the map — degrade, never
+  // block (core's own optionality contract for `symbols`).
+  const symbolsParse = useMemo(() => parseSymbolsJson(debounced.symbolsText), [debounced.symbolsText]);
+  const symbolMap = symbolsParse && 'map' in symbolsParse ? symbolsParse.map : undefined;
+  const symbolsError = symbolsParse && 'error' in symbolsParse ? symbolsParse.error : null;
 
   const detected = useMemo(() => detectName(debounced.asm), [debounced.asm]);
   const override = debounced.nameOverride.trim();
@@ -149,12 +168,18 @@ export function Playground({
       const target = TARGETS[debounced.targetId].desc;
       const spec = debounced.specText.trim()
         ? parseSpec(debounced.specText)
-        : deriveSpec(fnName, decompile(fnName, debounced.asm, target, { onGap: 'annotate' }).sfn);
+        : deriveSpec(
+            fnName,
+            decompile(fnName, debounced.asm, target, {
+              onGap: 'annotate',
+              ...(symbolMap ? { symbols: symbolMap } : {}),
+            }).sfn,
+          );
       return { backend: cppBackend(spec) };
     } catch (e) {
       return { error: e instanceof Error ? e.message : String(e) };
     }
-  }, [debounced, fnName]);
+  }, [debounced, fnName, symbolMap]);
 
   const result: DecompileResult | { error: string } | null = useMemo(() => {
     if (!debounced.asm.trim()) {
@@ -176,11 +201,12 @@ export function Playground({
       return decompile(fnName, debounced.asm, TARGETS[debounced.targetId].desc, {
         backend: langBackend.backend,
         onGap: 'annotate',
+        ...(symbolMap ? { symbols: symbolMap } : {}),
       });
     } catch (e) {
       return { error: e instanceof Error ? e.message : String(e) };
     }
-  }, [debounced, fnName, nameInvalid, langBackend]);
+  }, [debounced, fnName, nameInvalid, langBackend, symbolMap]);
 
   // The Pipeline tab's trace — computed only while that tab is open (a second tower run).
   // A thrown trace is an ERROR result (rendered as such), never a silently blank panel.
@@ -200,12 +226,13 @@ export function Playground({
         report: decompileTraced(fnName, debounced.asm, TARGETS[debounced.targetId].desc, {
           backend: langBackend.backend,
           onGap: 'annotate',
+          ...(symbolMap ? { symbols: symbolMap } : {}),
         }).report,
       };
     } catch (e) {
       return { error: e instanceof Error ? e.message : String(e) };
     }
-  }, [debounced, fnName, nameInvalid, langBackend, tab]);
+  }, [debounced, fnName, nameInvalid, langBackend, tab, symbolMap]);
 
   const ok = result !== null && !('error' in result);
   const diagnostics = ok ? result.diagnostics : [];
@@ -221,12 +248,18 @@ export function Playground({
     !!fnName &&
     !nameInvalid &&
     !!debounced.asm.trim();
+  // Symbol-mapped runs rank too: the worker enumerates the named spellings alongside
+  // '/raw-globals' and compiles each self-declared — core's declaration synthesis
+  // (@asmlift/core/declare, the same renderer the cli scorer prepends), so a map-named
+  // candidate scores instead of silently losing to its raw sibling. A parse-errored Symbols
+  // pane leaves symbolMap undefined — ranked raw, matching the decompile it sits beside.
   const ranking = useRanking({
     eligible: rankEligible,
     asm: debounced.asm,
     name: fnName,
     targetId: debounced.targetId,
     target: rankTarget,
+    ...(symbolMap ? { symbols: symbolMap } : {}),
   });
   // The Source view shows the RANKED-BEST C when scoring has resolved for the current input;
   // otherwise the deterministic decompile (instant, and the fallback if ranking is off/loading/
@@ -253,6 +286,8 @@ export function Playground({
     setTargetId(ex.target);
     setBackendId(ex.backend ?? 'c');
     setSpecText(ex.spec ?? '');
+    setSymbolsText(ex.symbols ?? '');
+    setSymbolsOpen(!!ex.symbols);
     setAsm(ex.asm);
     setNameOverride('');
     setTab('source');
@@ -368,6 +403,40 @@ export function Playground({
               extensions={asmExtensions}
               basicSetup={{ foldGutter: false }}
             />
+          </div>
+          <div className="rounded-lg border border-slate-800">
+            <button
+              type="button"
+              onClick={() => setSymbolsOpen((o) => !o)}
+              className="flex w-full items-center gap-2 px-3 py-2 text-xs"
+            >
+              <span className="text-slate-500">{symbolsOpen ? '▾' : '▸'}</span>
+              <span className="font-semibold text-slate-300">Symbols (optional)</span>
+              <span className={`ml-auto font-mono text-[11px] ${symbolsError ? 'text-amber-400' : 'text-slate-500'}`}>
+                {symbolsError
+                  ? 'invalid — decompiling without the map'
+                  : symbolMap
+                    ? 'map active'
+                    : 'address → name/shape JSON'}
+              </span>
+            </button>
+            {symbolsOpen && (
+              <div className="flex flex-col gap-1.5 border-t border-slate-800 p-2">
+                <textarea
+                  value={symbolsText}
+                  onChange={(e) => setSymbolsText(e.target.value)}
+                  rows={8}
+                  placeholder={SYMBOLS_PLACEHOLDER}
+                  spellCheck={false}
+                  className="scroll-slim rounded-md border border-slate-700 bg-slate-900 px-2 py-1.5 font-mono text-xs placeholder:text-slate-600"
+                />
+                {symbolsError && (
+                  <p className="rounded-md border border-amber-900/60 bg-amber-950/30 p-2 text-xs leading-relaxed text-amber-300">
+                    symbol map ignored — {symbolsError}. The decompile above ran without it.
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         </section>
 

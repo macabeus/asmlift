@@ -37,11 +37,19 @@
 // whose exit copies would clobber, switch fall-through, and mixed-entry self-loops (a guarded
 // header also entered by a plain br).
 import { Block, Fn, Op, Value, defOpMap, successorsOf } from '../ir/core';
-import { type IrType, T } from '../ir/types';
+import { type IrType, T, scalarTypeForAccess, typeEquals } from '../ir/types';
 import { BinOp, Expr, SFn, Stmt, SwitchCase, exprChildren, mapExprChildren } from '../l3/ast';
 import { exprCType, ptrElemBytes } from '../l3/typing';
 import { returnType } from '../raise/recover';
 import { collectStructs } from '../raise/structs';
+import {
+  type DeclaredField,
+  type SymbolInfo,
+  type SymbolStructField,
+  declaredFields,
+  isArrayField,
+  pointeeFields,
+} from '../symbols';
 import { analyze } from './analysis';
 import { makeLoopHazards, updateWriteSet } from './hazards';
 import { analyzeLoops, dominators } from './loops';
@@ -59,44 +67,267 @@ import { makeSwitchRecovery } from './switch-recover';
 // TODAY — carrying the struct name (resolved against SFn.structs) is the same move as width and
 // the named follow-up; until then no backend pays a tax for the tree cast (Pascal loud-fails
 // `field` regardless, C++ falls through its leaf hook to the shared C spelling).
+// `&gSym`, possibly wearing the value-context integer cast the additive lowering adds
+// (`(u32)&gSym` — see lowerDef's addr-intify): both spell the same link-time constant, so the
+// fold rules match through the cast and every access that CAN spell a named element still does.
+// WIDTH 32 ONLY — a NARROWING cast (`(u8)&gSym`, from a zext/sext lowering) is a different
+// VALUE (`addr & 0xFF`), and folding through it would read the named global at a wrong address
+// (the adversarial round's probe: `*(u8*)(u8)&gSym` must keep its truncation, never become
+// `*(u8*)&gSym` — let alone a confidently-named `gSym.field`).
+function addrIn(e: Expr): Extract<Expr, { k: 'addr' }> | null {
+  if (e.k === 'addr') {
+    return e;
+  }
+  if (e.k === 'cast' && e.to.kind === 'int' && e.to.width === 32 && e.e.k === 'addr') {
+    return e.e;
+  }
+  return null;
+}
+
 // If `e` is a global address `&gSym` (optionally `+ index`), return the global name and the
 // element index (byte residual divided by the access width). `&gSym` alone → idx const 0;
 // `&gSym + i` → idx `i / width` (exact division only — a non-multiple residual is a mid-element
 // access this whole-global spelling can't express, so it declines to null and the caller casts).
 function globalOf(e: Expr, width: number): { name: string; idx: Expr } | null {
-  if (e.k === 'addr') {
-    return { name: e.name, idx: { k: 'const', value: 0 } };
+  const top = addrIn(e);
+  if (top) {
+    return { name: top.name, idx: { k: 'const', value: 0 } };
   }
   if (e.k === 'bin' && e.op === '+') {
-    for (const [addrSide, other] of [
+    for (const [side, other] of [
       [e.l, e.r],
       [e.r, e.l],
     ] as const) {
-      if (addrSide.k === 'addr') {
-        // width 1 → the byte residual IS the index; width>1 → a constant residual divides, a
-        // non-constant residual must already be element-scaled (`i * width`) to divide exactly.
-        if (width === 1) {
-          return { name: addrSide.name, idx: other };
-        }
-        if (other.k === 'const') {
-          return other.value % width === 0
-            ? { name: addrSide.name, idx: { k: 'const', value: other.value / width } }
-            : null;
-        }
-        if (other.k === 'bin' && (other.op === '*' || other.op === '<<')) {
-          const factor =
-            other.op === '<<'
-              ? other.r.k === 'const'
-                ? 1 << other.r.value
-                : 0
-              : other.r.k === 'const'
-                ? other.r.value
-                : 0;
-          if (factor === width) {
-            return { name: addrSide.name, idx: other.l };
-          }
-        }
-        return null; // a non-element-aligned residual — decline the global-array spelling
+      const addrSide = addrIn(side);
+      if (addrSide) {
+        const idx = elementIndex(other, width);
+        return idx ? { name: addrSide.name, idx } : null;
+      }
+    }
+  }
+  return null;
+}
+
+// A BYTE residual read as an ELEMENT index of `elemSize`-wide elements, or null when it is not one
+// — the residual then addresses mid-element and no whole-element spelling can express it, so the
+// caller falls through to the honest cast forms. THE one copy of the rule, indexing the
+// `&gSym`-based array spelling: width 1 → the byte residual IS the index; wider → a constant
+// residual must divide exactly, and a non-constant one must already be element-scaled
+// (`i * elemSize` / `i << log2(elemSize)`), which is exactly what the asm's own index scaling
+// produced.
+function elementIndex(residual: Expr, elemSize: number): Expr | null {
+  if (elemSize === 1) {
+    return residual;
+  }
+  if (residual.k === 'const') {
+    return residual.value % elemSize === 0 ? { k: 'const', value: residual.value / elemSize } : null;
+  }
+  if (residual.k === 'bin' && (residual.op === '*' || residual.op === '<<')) {
+    const factor =
+      residual.op === '<<'
+        ? residual.r.k === 'const'
+          ? 1 << residual.r.value
+          : 0
+        : residual.r.k === 'const'
+          ? residual.r.value
+          : 0;
+    if (factor === elemSize) {
+      return residual.l;
+    }
+  }
+  return null;
+}
+
+/** The symbol-map rendering context threaded into memAccess/arrayAccess: shape facts per
+ *  global name, plus a callback registering a global's env type (so the bare `gSym[i]` spelling,
+ *  which must pass the stride check uncast, does). Absent ⇒ today's spellings. */
+interface SymRenderCtx {
+  info(name: string): SymbolInfo | undefined;
+  noteGlobal(name: string, type: IrType): void;
+}
+
+// ── interior spelling through a POINTER-shaped global ────────────────────────────────────────
+// A pointer global's VALUE is the address of the object the project's header says it points at.
+// With that pointee's layout in the map, an access at a known offset is a NAMED member of it —
+// `gPtr->member` — which is the source spelling; without it the access is byte arithmetic on the
+// loaded cell (`((u8 *)gPtr + i)[16]`), honest but opaque. The address computed is IDENTICAL
+// either way: `->member` adds the member's DWARF offset, which is the same constant the arithmetic
+// added, and an index into an array member scales by the member's own element size, which the
+// rules below require to equal the access width. Everything not provably that — a partial overlap,
+// a width mismatch, an unnamed offset, a member whose declared signedness differs from the
+// access's (an s8 read is ldrb+lsl+asr where u8 is ldrb alone), a missing layout — falls THROUGH
+// to the cast forms. A member is never guessed.
+
+/** The global named by a pointer global's VALUE as the additive lowering spells it: the bare
+ *  `gPtr`, or that value wearing the byte-pointer / u32 cast that lowering adds (cast-then-add,
+ *  see the `needsIntSpelling` / pointer-global arithmetic rules below). Both denote the same
+ *  address and add BYTES to it, so both fold here; a cast to any other pointer type is NOT looked
+ *  through — a `(u16 *)` base would re-scale everything added after it. */
+function ptrGlobalValueName(x: Expr): string | null {
+  if (x.k === 'var') {
+    return x.name;
+  }
+  if (x.k === 'cast' && x.e.k === 'var') {
+    const t = x.to;
+    const bytePtr = t.kind === 'ptr' && t.to.kind === 'int' && t.to.width === 8;
+    return bytePtr || (t.kind === 'int' && t.width === 32) ? x.e.name : null;
+  }
+  return null;
+}
+
+/** A pointer global's value, the constant bytes added to it, and the at-most-one variable term. */
+interface PtrGlobalBase {
+  name: string;
+  byte: number;
+  idx: Expr | null;
+}
+
+/** Decompose an access base into "the VALUE of a map-declared POINTER global + a constant byte
+ *  offset + at most ONE variable term": `gPtr`, `gPtr + K`, `(u8 *)gPtr + i`, `(u8 *)gPtr + (i <<
+ *  2) + K`. Null for anything else — two variable terms, no such global, a non-`+` operator —
+ *  because only a single residual can be read as one member's index. */
+function ptrGlobalBase(e: Expr, isPtrGlobal: (n: string) => boolean): PtrGlobalBase | null {
+  let name: string | null = null;
+  let byte = 0;
+  let idx: Expr | null = null;
+  let ok = true;
+  const visit = (x: Expr): void => {
+    if (!ok) {
+      return;
+    }
+    if (x.k === 'bin' && x.op === '+') {
+      visit(x.l);
+      visit(x.r);
+      return;
+    }
+    const global = ptrGlobalValueName(x);
+    if (global !== null && name === null && isPtrGlobal(global)) {
+      name = global;
+      return;
+    }
+    if (x.k === 'const') {
+      byte += x.value;
+      return;
+    }
+    if (idx !== null) {
+      ok = false;
+      return;
+    }
+    idx = x;
+  };
+  visit(e);
+  return ok && name !== null ? { name, byte, idx } : null;
+}
+
+/** Does a member declared at signedness `declared` read as EXACTLY the type the cast spelling this
+ *  replaces would have produced — `scalarTypeForAccess(width, signed)`? That is the whole
+ *  byte-exactness argument for naming a member instead of casting: same address, same read width,
+ *  same C type, so every operator downstream compiles identically. A 4-byte access renders s32
+ *  whatever the load said (the ISA has one word load), so only a SIGNED member may take its place;
+ *  narrower accesses carry their own signedness and must match it. An undeclared signedness (the
+ *  member is not a base type — a nested struct, an enum, a pointer) is never assumed to match.
+ *  Compared against THE one copy of that rule (ir/types.ts) rather than restating it. */
+function spellsAccessType(declared: boolean | undefined, width: number, signed: boolean): boolean {
+  if (declared === undefined) {
+    return false;
+  }
+  return typeEquals(T.int(width * 8, declared), scalarTypeForAccess(width, signed));
+}
+
+/** May a member be NAMED by an access of this direction, given the qualifiers on its declaration?
+ *  The named spelling REPLACES a cast through `(u8 *)`, which carries no qualifier at all, so a
+ *  qualifier the name reintroduces changes what the compiler emits:
+ *    • `volatile` makes the access observable — the load may no longer be folded or reordered,
+ *      which is a different instruction sequence (measured: 6 insns where the cast form was 5);
+ *    • `const` under a STORE is a hard error, where the cast form merely cast the qualifier away.
+ *  Either way the honest spelling is the cast form, so the member simply is not nameable here. */
+function memberQualsAllow(f: SymbolStructField, containerConst: boolean | undefined, isStore: boolean): boolean {
+  if (f.volatile) {
+    return false;
+  }
+  return !(isStore && (f.const || containerConst));
+}
+
+// WHY THERE IS NO INDEXED `gPtr->arr[i]` SPELLING.
+//
+// Naming a member is only allowed where it is byte-identical to the cast form it replaces, and
+// for the INDEXED form that was measured to be false. Against agbcc, `gPtr->arr[i]` and
+// `((u8 *)gPtr + i)[K]` differ at EVERY nonzero K and for every width and direction — agbcc does
+// not reassociate `(base + K) + i` into `(base + i) + K`, so it materialises the offset instead of
+// folding it into the load (`adds r1, #16`; +2 code bytes at width 1, +4 at widths 2 and 4). At
+// K = 0 the two still differ for widths 2 and 4, where the commutative `adds` picks a different
+// destination register. The single agbcc case that did measure identical — width 1 at K = 0 —
+// survives only a BARE index in a function with ONE such access: `i & 255`, `i + 1`, `i >> 2` and
+// a second access that lets the cast side CSE its base all break it. A spelling rule decides one
+// expression at a time and cannot see the neighbouring access that changes the answer, so there is
+// no local gate that makes this form safe. (Both MIPS targets accept it freely, but core is
+// target-agnostic — it cannot condition on the compiler it is emitting for.)
+//
+// The CONSTANT-offset form below is the opposite case, and is emitted unconditionally: measured
+// identical on all three targets for widths 1/2/4, loads and stores, at every offset tested up to
+// 4096 — including offsets past Thumb's immediate range, and under multi-member, across-a-call
+// and in-a-loop shapes. It is one load whose member offset becomes the same immediate the cast
+// form used, and unlike the indexed form it composes.
+
+/** The pointee a global's value may be spelled through: the members the declaration synthesis
+ *  DECLARES. Null when nothing may be named through it — THE shared gate (symbols.ts
+ *  pointeeFields), so core never names a member that synthesis would not declare, and never sees a
+ *  member synthesis drops (a union alias behind the first view at that offset). A VOLATILE pointee
+ *  declines outright: every named access through it would be a volatile access where the cast form
+ *  it replaces was plain. */
+function spellablePointee(
+  name: string,
+  sym: SymRenderCtx,
+): { fields: DeclaredField[]; const: boolean | undefined } | null {
+  const pointee = sym.info(name)?.pointee;
+  const fields = pointeeFields(pointee);
+  if (fields === null || pointee!.volatile) {
+    return null;
+  }
+  return { fields, const: pointee!.const };
+}
+
+/** `gPtr->member` for an access through a pointer global's value, or null when the offset is not
+ *  provably ONE member's (see the block comment above). A VARIABLE index declines whatever it
+ *  lands on — the indexed form is not byte-neutral and has no spelling here. */
+function pointeeAccess(
+  pg: PtrGlobalBase,
+  off: number,
+  width: number,
+  signed: boolean,
+  isStore: boolean,
+  sym: SymRenderCtx,
+): Expr | null {
+  if (pg.idx !== null) {
+    return null;
+  }
+  const total = pg.byte + off;
+  // Constant offset: the member must match EXACTLY — offset, read width, and the SPELLED type
+  // (spellsAccessType). An ARRAY member is excluded whatever its size: `u8 x[1]` would match a
+  // byte access by (offset, size) and spell `->x`, which is not an lvalue of that width at all.
+  const p = spellablePointee(pg.name, sym);
+  const f = p?.fields.find((m) => m.offset === total && m.size === width && !isArrayField(m));
+  return p && f && spellsAccessType(f.signed, width, signed) && memberQualsAllow(f, p.const, isStore)
+    ? { k: 'field', base: { k: 'var', name: pg.name }, name: f.name }
+    : null;
+}
+
+// The (name, byte offset) of a global access with a CONSTANT total offset — `&gSym` → off,
+// `&gSym + K` → K + off. The exact byte is what a struct-layout field lookup needs; a variable
+// residual returns null (no field spelling — falls through to the index/cast forms).
+function globalConstByte(baseExpr: Expr, off: number): { name: string; byte: number } | null {
+  const top = addrIn(baseExpr);
+  if (top) {
+    return { name: top.name, byte: off };
+  }
+  if (baseExpr.k === 'bin' && baseExpr.op === '+') {
+    for (const [a, b] of [
+      [baseExpr.l, baseExpr.r],
+      [baseExpr.r, baseExpr.l],
+    ] as const) {
+      const a2 = addrIn(a);
+      if (a2 && b.k === 'const') {
+        return { name: a2.name, byte: b.value + off };
       }
     }
   }
@@ -111,6 +342,8 @@ function memAccess(
   signed: boolean,
   ctype: (e: Expr) => IrType | undefined,
   scalarGlobals: Set<string>,
+  sym?: SymRenderCtx,
+  isStore = false,
 ): Expr {
   // A deref of a global's address collapses to the bare global: `*(&gSym)` at off 0 is `gSym`;
   // at off N the global is an array — `gSym[N/width]` (a C global name decays to a pointer, so
@@ -118,6 +351,35 @@ function memAccess(
   // `*(&gSym + i)` → `gSym[i + off/width]` (byte offset `i` peeled from the tree; for a u8 global
   // the residual IS the index). This is what makes an agbcc `.word gSym` pool access a named
   // global read/element rather than a phantom-pointer deref.
+  // Declaration-shape spellings (symbol map): a STRUCT global's constant-offset access is the
+  // named field (`gSym.field` — the source spelling a folded literal can never match); an ARRAY
+  // global indexes its BARE name (`gSym[i]`, see below). Exact field match only (offset AND
+  // width) — anything else falls through to the honest cast forms, never a guessed field.
+  if (sym) {
+    const gb = globalConstByte(baseExpr, off);
+    const si = gb ? sym.info(gb.name) : undefined;
+    if (gb && si?.shape === 'struct') {
+      // THE shared spellability predicate (symbols.ts), the same call declare.ts gates its struct
+      // declaration on: a layout it declines whole is a layout with no nameable members, and a
+      // union alias it drops for the first view at that offset is a name no declaration carries.
+      // An ARRAY member is excluded for the same reason as in pointeeAccess: `u8 x[1]` would match
+      // a byte access by (offset, size) and spell `.x`, which is not an lvalue of that width.
+      const fld = declaredFields(si.layout)?.find((f) => f.offset === gb.byte && f.size === width && !isArrayField(f));
+      if (fld && memberQualsAllow(fld, si.const, isStore)) {
+        return { k: 'field', base: { k: 'var', name: gb.name }, name: fld.name, dot: true };
+      }
+    }
+    // …and the same idea one indirection down: an access at a CONSTANT offset through a POINTER
+    // global's VALUE is a named member of what it points at (`gPtr->member`) when the map knows
+    // the pointee's layout — see pointeeAccess for the guards.
+    const pg = ptrGlobalBase(baseExpr, (n) => sym.info(n)?.shape === 'pointer');
+    if (pg) {
+      const spelled = pointeeAccess(pg, off, width, signed, isStore, sym);
+      if (spelled) {
+        return spelled;
+      }
+    }
+  }
   const g = globalOf(baseExpr, width);
   if (g) {
     const idxVal = g.idx;
@@ -136,6 +398,14 @@ function memAccess(
         : idxVal.k === 'const'
           ? { k: 'const', value: idxVal.value + off / width }
           : { k: 'bin', op: '+', l: idxVal, r: { k: 'const', value: off / width } };
+    // ARRAY-declared global (symbol map): index the bare name — `gSym[i]`, the spelling the
+    // dogfood proved agbcc needs for ROM tables — with the element type registered in the env
+    // so the stride check passes and no cast is added. Element-width match only.
+    const siArr = sym?.info(g.name);
+    if (siArr?.shape === 'array' && siArr.elemSize === width) {
+      sym!.noteGlobal(g.name, T.ptr(T.int(width * 8, siArr.elemSigned ?? false)));
+      return { k: 'index', base: { k: 'var', name: g.name }, idx, width, signed };
+    }
     return { k: 'index', base: { k: 'addr', name: g.name }, idx, width, signed };
   }
   const bt = base.type;
@@ -169,11 +439,18 @@ function arrayAccess(
   elemSize: number,
   signed: boolean,
   ctype: (e: Expr) => IrType | undefined,
+  sym?: SymRenderCtx,
 ): Expr {
   // A variable-index access off a global's address indexes the ADDRESS `&gSym` (the cast form
   // `((T *)&gSym)[i]` — valid for a struct global too, unlike casting the bare value). A
   // struct-array-of-globals (fieldOff) through `&gSym` is out of scope — fall through.
   if (baseExpr.k === 'addr' && fieldOff === undefined) {
+    // ARRAY-declared global (symbol map): the bare-name spelling, same rule as memAccess.
+    const si = sym?.info(baseExpr.name);
+    if (si?.shape === 'array' && si.elemSize === elemSize) {
+      sym!.noteGlobal(baseExpr.name, T.ptr(T.int(elemSize * 8, si.elemSigned ?? false)));
+      return { k: 'index', base: { k: 'var', name: baseExpr.name }, idx: idxExpr, width: elemSize, signed };
+    }
     return { k: 'index', base: baseExpr, idx: idxExpr, width: elemSize, signed };
   }
   const bt = base.type;
@@ -306,6 +583,11 @@ export interface StructureOptions {
   //   "annotate" — a `marker` node that spells as the undefined ASMLIFT_ERROR(...) symbol (loud in
   //              the ARTIFACT: the function emits complete, but cannot compile un-acknowledged).
   onGap?: 'strict' | 'annotate';
+  /** NAME-keyed project symbol facts (symbols.ts `symbolsByName`) — drives the byte-sensitive
+   *  declaration-shape spellings: `shape:'array'` forces the aggregate classification and the
+   *  bare `gSym[i]` form; `shape:'struct'`+layout spells interiors as `gSym.field`. Absent (or
+   *  a symbol not in the map) ⇒ today's usage-inferred behavior, byte-identical. */
+  symbols?: Map<string, SymbolInfo>;
 }
 
 export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
@@ -316,6 +598,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     orderArgCopiesByComputation = true,
     switchAllowsNeqCase = true,
     onGap = 'strict',
+    symbols,
   } = opts;
   const defs = defOpMap(fn);
   const preds = predecessorBlocks(fn);
@@ -347,14 +630,16 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
           if (s) {
             (offsets.get(s) ?? offsets.set(s, new Set()).get(s)!).add(op.attrs.off as number);
           }
-          // a `+`-tree base holding a gaddr (global array element) is aggregate
-          const d = defs.get(op.operands[0]);
-          if (d?.opcode === 'add') {
-            for (const o of d.operands) {
-              const s2 = gaddrSym(o);
-              if (s2) {
-                bumpAgg(s2);
-              }
+        } else if (op.opcode === 'add' || op.opcode === 'sub') {
+          // ANY arithmetic on the symbol's address is interior addressing ⇒ aggregate — even when
+          // the sum only reaches memory through a copy/phi (a pointer-walk loop `p = &g + 2;
+          // do { *p++ … }` never makes the add a DIRECT load/store base, which is all the old
+          // check saw; the symbol then classified scalar and emitted the bare `g = 0` spelling,
+          // which a project declaring `extern u16 g[]` rejects as an incomplete-type assignment).
+          for (const o of op.operands) {
+            const s2 = gaddrSym(o);
+            if (s2) {
+              bumpAgg(s2);
             }
           }
         } else if (op.opcode === 'aload' || op.opcode === 'astore') {
@@ -370,7 +655,37 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
         scalarGlobals.add(sym);
       }
     }
+    // Declaration-shape OVERRIDE (symbol map): a project-declared array/struct global is an
+    // AGGREGATE whatever the usage inference saw — a lone off-0 access to `extern u16 tbl[]`
+    // must still spell through the aggregate/array forms, never the bare scalar `tbl`.
+    if (symbols) {
+      for (const [n, si] of symbols) {
+        if (si.shape === 'array' || si.shape === 'struct') {
+          scalarGlobals.delete(n);
+        }
+      }
+    }
   }
+
+  // Symbol-map rendering context (memAccess/arrayAccess): shape lookups + the env registry for
+  // array-shaped globals actually referenced (they surface as SFn.globals — typed, undeclared).
+  const shapedGlobalTypes = new Map<string, IrType>();
+  const symCtx: SymRenderCtx | undefined = symbols
+    ? { info: (n) => symbols.get(n), noteGlobal: (n, t) => shapedGlobalTypes.set(n, t) }
+    : undefined;
+
+  /** A bare `gSym` naming a map-declared POINTER global — the VALUE of a pointer cell. Load,
+   *  store and compare of that 4-byte cell are identical for any object-pointer type, so the
+   *  declared pointee never matters to THEM; arithmetic on the loaded value is the opposite case,
+   *  where the pointee's size scales what is added and every stride must therefore be made
+   *  explicit (`(u8 *)gPtr + K`). `ctype` cannot see any of this: it types only params/locals, so
+   *  a pointer global renders `undefined` there. */
+  const isPtrGlobal = (x: Expr): boolean => x.k === 'var' && symCtx?.info(x.name)?.shape === 'pointer';
+
+  /** Operands `-`/`~` cannot take as spelled: a rendered pointer, a bare `&gSym`, a pointer
+   *  global's value. All three are ill-formed C under a unary arithmetic operator — the asm did
+   *  32-bit integer math on the address, so that is what gets spelled. */
+  const needsIntSpelling = (x: Expr): boolean => ctype(x)?.kind === 'ptr' || x.k === 'addr' || isPtrGlobal(x);
 
   // --- loop discovery (loops.ts): natural loops via dominator back-edges + the nesting forest ---
   const forest = analyzeLoops(fn, dom);
@@ -786,11 +1101,20 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     }
   }
 
-  // An unresolvable value: strict mode keeps the `"?"` sentinel (assertResolved trips at the
-  // boundary — loud in the PROCESS); annotate mode emits a marker (the undefined ASMLIFT_ERROR
-  // symbol — loud in the ARTIFACT, function still complete).
-  const mkGap = (reason: string, args: Expr[]): Expr =>
-    onGap === 'annotate' ? { k: 'marker', reason, args } : { k: 'var', name: '?' };
+  // An unresolvable value: strict mode keeps the `"?"` sentinel AND records the reason — the
+  // decline thrown below names the actual gaps ("unmodelled instruction 'adde'"), the same
+  // reasons annotate mode's markers carry, instead of the anonymous `?` that assertResolved
+  // would report at the boundary (assertResolved stays as the backstop for any other producer).
+  // Annotate mode emits a marker (the undefined ASMLIFT_ERROR symbol — loud in the ARTIFACT,
+  // function still complete).
+  const strictGaps: string[] = [];
+  const mkGap = (reason: string, args: Expr[]): Expr => {
+    if (onGap === 'annotate') {
+      return { k: 'marker', reason, args };
+    }
+    strictGaps.push(reason);
+    return { k: 'var', name: '?' };
+  };
 
   // Lower ONE def's operation to an Expr, rendering operands through `e`. Shared between the
   // inline-at-use path (exprWith) and the materialized-temp path (sideEffects), so both spell a
@@ -800,7 +1124,30 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
       return { k: 'const', value: d.attrs.value as number };
     }
     if (CMP_TO_BIN[d.opcode]) {
-      return { k: 'bin', op: CMP_TO_BIN[d.opcode], l: e(d.operands[0]), r: e(d.operands[1]) };
+      // A bare global address `&gSym` as a COMPARISON operand is the same unspelled escape as the
+      // arithmetic case below (see intifyAddr): its C type comes from the PROJECT's own
+      // declaration, unknowable here. Worse, the compare's SIGNEDNESS lives in the operand types
+      // (CMP_TO_BIN maps icmp_ult and icmp_slt to the same '<'), so leaving `&gSym` untyped lets
+      // the project's declaration pick the compare the compiler emits — silently byte-inexact
+      // whenever it disagrees with the asm. The honest spelling is integer math on the address
+      // with the cast AGREEING with the opcode's signedness: unsigned compares (and the
+      // sign-agnostic ==/!=) spell `(u32)&gSym`, signed compares `(s32)&gSym` — exactly the
+      // compare the asm did. The deref folds never see a compare operand, so no named spelling is
+      // lost; a NARROWING cast (`(u8)&gSym`) is not a bare `addr` and keeps its truncation.
+      // SCOPE (adversarial review): this closes the hole for BARE addr operands only. An
+      // addr-carrying arithmetic tree (`(u32)&gSym + 4`, spelled by intifyAddr below) under an
+      // icmp_s* still compares unsigned in C (u32 wins the usual-arithmetic-conversions) — the
+      // same pre-existing wrongness the old ptr-vs-int spelling had, surfacing as a scoring
+      // nonmatch, never a silent regression of a formerly-correct compare. Rare shape; an outer
+      // signed cast on addr-carrying trees is the follow-up if it ever costs a row.
+      const t = /^icmp_s/.test(d.opcode) ? T.s(32) : T.u(32);
+      const intifyAddrCmp = (x: Expr): Expr => (x.k === 'addr' ? { k: 'cast', to: t, e: x } : x);
+      return {
+        k: 'bin',
+        op: CMP_TO_BIN[d.opcode],
+        l: intifyAddrCmp(e(d.operands[0])),
+        r: intifyAddrCmp(e(d.operands[1])),
+      };
     }
     if (ARITH_TO_BIN[d.opcode]) {
       let l = e(d.operands[0]);
@@ -844,6 +1191,50 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
       } else if (op === '-' && ctype(l)?.kind !== 'ptr' && ctype(r)?.kind === 'ptr') {
         r = intify(r); // int - ptr is not C
       }
+      // A bare global address `&gSym` under ANY of these operators is never emitted as-is: its C
+      // type comes from the PROJECT's own declaration (unknowable here — exprCType types `addr`
+      // undefined, so the ptr-keyed intify above never fires on it), which makes `&gSym + K`
+      // byte-INEXACT (C scales K by sizeof(gSym)) and `&gSym & K` ill-formed. The honest spelling
+      // is integer math on the address — `(u32)&gSym + K`, exactly the arithmetic the asm did.
+      // The deref folds (globalOf / globalConstByte, via addrIn) look through this cast, so every
+      // access that CAN spell a named element/field still does; only a genuine value-context
+      // escape (a call argument, a stored address, a compare) keeps it — previously such an
+      // escape tripped assertDerefsTyped's interior-pointer rule and declined the whole function.
+      const intifyAddr = (x: Expr): Expr => (x.k === 'addr' ? { k: 'cast', to: T.u(32), e: x } : x);
+      l = intifyAddr(l);
+      r = intifyAddr(r);
+      // The SAME hazard one level down, for a POINTER-shaped global's VALUE (`gPtr`, isPtrGlobal):
+      // C scales `gPtr + K` by sizeof(*gPtr) — 1 under the map's synthesized `void *`, but
+      // whatever the PROJECT's header declares (a 0x5C-byte struct, say) in the world a user
+      // actually recompiles in. The asm added BYTES, so the honest spelling makes the stride
+      // explicit: CAST-THEN-ADD, `(u8 *)gPtr + K`, the same address in EVERY world. Add-then-cast
+      // (`(u8 *)(gPtr + K)`, what the backend's deref legalization would otherwise produce) is
+      // byte-correct in exactly one of them — a silent wrongness, the class this project refuses.
+      // NOT foldable into the deref index either: `((u8 *)gPtr)[K + off]` re-scales K by the
+      // ACCESS width, a different address whenever that width is not 1.
+      // Under the non-additive operators C rejects a pointer outright, so there the honest
+      // spelling is integer math on the cell — exactly intifyAddr's `(u32)&gSym` rule.
+      const bytePtr = (x: Expr): Expr => ({ k: 'cast', to: T.ptr(T.u(8)), e: x });
+      const intifyPtrGlobal = (x: Expr): Expr => ({ k: 'cast', to: T.u(32), e: x });
+      if (op === '+' || op === '-') {
+        // `ptr ± int` and `ptr - ptr` are byte arithmetic once both sides are byte pointers;
+        // `ptr + ptr` and `int - ptr` are not C at all, so the second pointer goes integer.
+        const bothPtr = isPtrGlobal(l) && isPtrGlobal(r);
+        if (isPtrGlobal(l)) {
+          l = bytePtr(l);
+        }
+        if (isPtrGlobal(r)) {
+          r = bothPtr && op === '-' ? bytePtr(r) : op === '+' && !bothPtr ? bytePtr(r) : intifyPtrGlobal(r);
+        }
+      } else if (op !== '&&' && op !== '||') {
+        // (`&&`/`||` take a pointer operand legally — a truth test, no arithmetic.)
+        l = isPtrGlobal(l) ? intifyPtrGlobal(l) : l;
+        r = isPtrGlobal(r) ? intifyPtrGlobal(r) : r;
+      }
+      // SCOPE: this and intifyAddr cover the ARITHMETIC escapes. A pointer global under a
+      // COMPARISON (`gPtr < K` — C compares unsigned whatever the asm's icmp_s* said) is the same
+      // class as intifyAddrCmp's `addr` rule and is deliberately left alone here: it is valid C
+      // today, so closing it would churn spellings for a signedness case no row exercises.
       return { k: 'bin', op, l, r };
     }
     // `-`/`~` on a pointer rendering is equally not C — same honest integer cast as above.
@@ -879,11 +1270,11 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     }
     if (d.opcode === 'neg') {
       const x = e(d.operands[0]);
-      return { k: 'un', op: '-', e: ctype(x)?.kind === 'ptr' ? { k: 'cast', to: T.s(32), e: x } : x };
+      return { k: 'un', op: '-', e: needsIntSpelling(x) ? { k: 'cast', to: T.s(32), e: x } : x };
     }
     if (d.opcode === 'not') {
       const x = e(d.operands[0]);
-      return { k: 'un', op: '~', e: ctype(x)?.kind === 'ptr' ? { k: 'cast', to: T.s(32), e: x } : x };
+      return { k: 'un', op: '~', e: needsIntSpelling(x) ? { k: 'cast', to: T.s(32), e: x } : x };
     }
     // Width-narrowing casts: `zext`/`sext` widen a `width`-bit value back to 32 → C `(u8)e`/`(s8)e`.
     if (d.opcode === 'zext') {
@@ -896,6 +1287,12 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
       return { k: 'call', fn: d.attrs.target as string, args: d.operands.map(e) };
     }
     if (d.opcode === 'gaddr') {
+      // A promoted CODE symbol (frontend `code: true`) is a function pointer stored as an
+      // integer: spelled `(u32)Name` — the source idiom — never `&Name` (defect G of the
+      // dogfood report; the & form compiles but is a different, non-matching spelling).
+      if (d.attrs.code === true) {
+        return { k: 'cast', to: T.int(32, false), e: { k: 'var', name: d.attrs.sym as string } };
+      }
       return { k: 'addr', name: d.attrs.sym as string };
     }
     if (d.opcode === 'load') {
@@ -907,6 +1304,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
         (d.attrs.signed as boolean) ?? false,
         ctype,
         scalarGlobals,
+        symCtx,
       );
     }
     // aload carries a runtime index operand (variable-index array access) — `base[index]`, or
@@ -920,6 +1318,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
         d.attrs.elemSize as number,
         (d.attrs.signed as boolean) ?? false,
         ctype,
+        symCtx,
       );
     }
     return d.opcode === 'opaque'
@@ -1035,6 +1434,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
           width === 4,
           ctype,
           scalarGlobals,
+          symCtx,
+          true, // an lvalue: a member whose declaration is const cannot be NAMED as the target
         );
         if (lval0.k === 'var') {
           globalNames.add(lval0.name);
@@ -1056,6 +1457,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
             elemSize,
             elemSize === 4,
             ctype,
+            symCtx,
           ),
           value: expr(op.operands[2]),
         });
@@ -1471,6 +1873,14 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
   };
 
   const body = recognizeForLoops(structureRegion(entry, null));
+  // Strict-mode gaps decline HERE, naming the reasons — the same text annotate's markers
+  // carry, so the two mode surfaces report the same decline (the reproduction scripts run
+  // strict; the benchmark rows store annotate markers — fidelity holds them against each
+  // other). Without this, the `?` sentinels reach assertResolved and decline anonymously.
+  if (strictGaps.length > 0) {
+    const reasons = [...new Set(strictGaps)].join('; ');
+    throw new StructureError(`${strictGaps.length} unresolvable value(s) in '${fn.name}' — ${reasons}`);
+  }
   // v* = coalesced/materialized locals; t* = sequentialize's swap-cycle temps (varType-only —
   // they have no Value, so they are collected from varType, not varName).
   const localNames = [...new Set([...varName.values(), ...[...varType.keys()].filter((n) => /^t\d+$/.test(n))])].filter(
@@ -1481,6 +1891,13 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     name: fn.name,
     params: entry.params.map((p, i) => ({ name: `a${i}`, type: p.type })),
     locals: localNames.map((n) => ({ name: n, type: varType.get(n)! })),
+    ...(shapedGlobalTypes.size
+      ? {
+          globals: [...shapedGlobalTypes]
+            .map(([name, type]) => ({ name, type }))
+            .sort((a, b) => a.name.localeCompare(b.name)),
+        }
+      : {}),
     retType: returnsVoid ? T.void() : returnType(fn),
     body,
     ...(structs.length ? { structs } : {}),

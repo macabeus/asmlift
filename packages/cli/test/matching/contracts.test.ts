@@ -4,9 +4,10 @@
 // checked to run them in production without false positives.
 import { ContractError, assertResolved, assertTypesRecovered } from '@asmlift/core/contracts';
 import { parse } from '@asmlift/core/ir/parse';
+import type { SFn } from '@asmlift/core/l3/ast';
 import { decompile } from '@asmlift/core/pipeline';
 import { recoverTypes } from '@asmlift/core/raise/recover';
-import { structure } from '@asmlift/core/structure/structure';
+import { StructureError, structure } from '@asmlift/core/structure/structure';
 import { MIPS_IDO } from '@asmlift/core/target';
 import { compileMipsTarget } from '@asmlift/toolchains';
 import { describe, expect, test } from 'vitest';
@@ -27,11 +28,22 @@ describe('recovery boundary — assertTypesRecovered', () => {
 });
 
 describe('structuring boundary — assertResolved', () => {
-  test("trips on a real structurer output that couldn't lower an op (→ '?')", () => {
-    // `opaque` has no expr lowering, so its returned result structures to the '?' sentinel —
-    // exactly the dropped-def / unlowered-opcode class this contract exists to catch.
+  test("an op the structurer can't lower declines LOUD at structure(), naming the gap", () => {
+    // `opaque` has no expr lowering: strict-mode structure() now records the gap reason and
+    // throws itself — the decline names the unmodelled instruction (the same text annotate's
+    // markers carry), instead of leaking an anonymous '?' to the boundary contract.
     const fn = parse(`fn f {\n^bb0(%0: s32):\n  %1: s32 = opaque %0\n  ret %1\n}\n`);
-    const sfn = structure(fn);
+    expect(() => structure(fn)).toThrow(StructureError);
+    expect(() => structure(fn)).toThrow('unmodelled instruction');
+  });
+  test("assertResolved stays the backstop for any OTHER '?' producer", () => {
+    const sfn: SFn = {
+      name: 'f',
+      params: [],
+      locals: [],
+      retType: { kind: 'int', width: 32, signed: true },
+      body: [{ k: 'return', value: { k: 'var', name: '?' } }],
+    };
     expect(() => assertResolved(sfn)).toThrow(ContractError);
   });
   test('passes on a well-lowered function', () => {

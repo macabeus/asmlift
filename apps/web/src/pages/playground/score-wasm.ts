@@ -12,7 +12,9 @@
 // would mask an alignment bug as a perpetual "closest"). FAIL-CLOSED: nothing here is caught; any
 // engine failure throws, and a row that cannot be displayed can never count as matched.
 import { cBackend } from '@asmlift/core/backend/c';
-import { type RankedResult, type Scored, enumerateCandidates } from '@asmlift/core/rank';
+import { renderDeclarations } from '@asmlift/core/declare';
+import { type DroppedCandidate, type RankedResult, type Scored, enumerateCandidates } from '@asmlift/core/rank';
+import type { SymbolMap } from '@asmlift/core/symbols';
 import { C_TYPEDEFS, type TargetDescription } from '@asmlift/core/target';
 import { assemble, compileToObject } from 'agbcc';
 import type * as ObjdiffWasm from 'objdiff-wasm';
@@ -27,6 +29,9 @@ export interface RankRequest {
   name: string;
   asm: string;
   target: TargetDescription;
+  /** the Symbols pane's parsed address→symbol map — structured-clones fine (a Map of plain
+   *  objects); absent ⇒ the plain raw-globals-only enumeration */
+  symbols?: SymbolMap;
 }
 export type RankResponse =
   { reqId: number; ok: true; result: RankedResult<MatchScore> } | { reqId: number; ok: false; error: string };
@@ -153,7 +158,13 @@ export async function scoreObjectBytes(
   return { symbol, rows, matching, score: differences, match: differences === 0, breakdown };
 }
 
-const firstLine = (s: string) => (s || '').split('\n').find((l) => l.trim() !== '') ?? '';
+/** The one line of a tool's stderr worth showing. GNU as prefixes everything with an
+ *  "in.s: Assembler messages:" banner and puts the real diagnostics after it — preferring the
+ *  first `Error:` line over the first non-empty one is what keeps the banner out of the UI. */
+const firstLine = (s: string) => {
+  const lines = (s || '').split('\n');
+  return lines.find((l) => l.includes('Error:')) ?? lines.find((l) => l.trim() !== '') ?? '';
+};
 
 /** The async analog of the cli's `decompileRanked`, agbcc-only: enumerate the distinct candidate
  *  spellings (shared @asmlift/core enumeration), assemble the pasted `.s` ONCE as the target, then
@@ -161,39 +172,53 @@ const firstLine = (s: string) => (s || '').split('\n').find((l) => l.trim() !== 
  *  `@asmlift/core/rank`'s `rankBy` semantics — a candidate whose compile/score throws is skipped so
  *  it cannot sink a matching sibling; only if EVERY candidate fails is the failure surfaced.
  *
+ *  SELF-DECLARING CANDIDATES: with a symbol map, a candidate that names map symbols carries
+ *  their refs (Candidate.symbolRefs) — its synthesized declaration block (the SAME core
+ *  renderer the cli scorer uses) is prepended after the typedefs, exactly the cli's
+ *  self-declared world (rank.ts). agbcc-wasm compiles bare candidates (no project headers),
+ *  so the probe arbitration is unnecessary here: this scorer is ALWAYS the self-declared world.
+ *
  *  Ranking always uses `cBackend` regardless of the UI backend selector — choosing cpp/pascal
  *  turns ranking off (it is gated to the agbcc target + C backend in Playground.tsx). */
 export async function rankCandidatesInBrowser(
   name: string,
   asm: string,
   target: TargetDescription,
+  symbols?: SymbolMap,
 ): Promise<RankedResult<MatchScore>> {
-  const candidates = enumerateCandidates(name, asm, target, { backend: cBackend });
+  const candidates = enumerateCandidates(name, asm, target, { backend: cBackend, ...(symbols ? { symbols } : {}) });
 
   const t = await assemble(asm);
   if (!t.ok) {
     throw new Error(`could not assemble the target asm: ${firstLine(t.stderr)}`);
   }
 
-  const results: Scored<MatchScore>[] = [];
+  // Mirrors core's `rankBy` (which this cannot reuse — the wasm scorer is async): a candidate
+  // that fails to build is DROPPED rather than allowed to sink a sibling that compiles, and each
+  // drop is RECORDED so a failed spelling is never invisible. Enumeration order breaks a score
+  // tie, exactly as `rankBy` spells it — the named spelling is enumerated before its
+  // `/raw-globals` sibling, so equal bytes show the reader the named one.
+  const results: (Scored<MatchScore> & { order: number })[] = [];
+  const dropped: DroppedCandidate[] = [];
   let lastErr: unknown = null;
-  for (const c of candidates) {
+  for (const [order, c] of candidates.entries()) {
     try {
-      const cc = await compileToObject(c.source, { context: C_TYPEDEFS });
+      const decls = c.symbolRefs?.length ? renderDeclarations(c.symbolRefs) : '';
+      const cc = await compileToObject(c.source, { context: C_TYPEDEFS + decls });
       if (!cc.ok) {
-        lastErr = new Error(`agbcc could not compile candidate '${c.label}': ${firstLine(cc.stderr)}`);
-        continue;
+        throw new Error(`agbcc could not compile candidate '${c.label}': ${firstLine(cc.stderr)}`);
       }
       const score = await scoreObjectBytes(t.obj, cc.obj, name);
-      results.push({ ...c, score });
+      results.push({ ...c, order, score });
     } catch (e) {
       lastErr = e;
+      dropped.push({ label: c.label, error: e instanceof Error ? firstLine(e.message) : String(e) });
     }
   }
   if (results.length === 0) {
     const why = lastErr instanceof Error ? lastErr.message.split('\n')[0] : String(lastErr ?? 'no candidate produced');
     throw new Error(`no scorable candidate for '${name}': ${why}`, { cause: lastErr });
   }
-  results.sort((a, b) => a.score.score - b.score.score);
-  return { best: results[0], candidates: results };
+  results.sort((a, b) => a.score.score - b.score.score || a.order - b.order);
+  return { best: results[0], candidates: results.map(({ order: _order, ...c }) => c), dropped };
 }

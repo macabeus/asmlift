@@ -3,6 +3,8 @@
 // score with progressively richer context up to the function's own vendored context
 // (makeRealScorer), so an output referencing project globals/structs is never noncompile merely
 // for missing context.
+import { asIfUndecompiled } from '@asmlift/core/symbols';
+
 import { buildRealTarget, makeRealCompile, makeRealScorer } from '../compile/real';
 import { sanitizeM2cContext } from '../eval/m2c-normalizer';
 import { TOOLCHAINS } from '../toolchains';
@@ -37,6 +39,12 @@ export function realCases(filter: RealFilter = {}): Case[] {
         ctx: f.m2cCtx ? m2cRealCtx(man, f) : f.ctx,
         ctxRef: f.m2cCtx ? man.ctxPath(f.sym) : undefined,
         proto: f.proto,
+        // LEAKAGE-FREE by construction: every row here is a function someone already decompiled,
+        // so the project ELF knows things about it that a user mid-decomp cannot. Score against
+        // the map as it would look with this function still `INCLUDE_ASM` (core's
+        // asIfUndecompiled) — otherwise any future signature/local/location feature scores on
+        // facts it could never have in the flow the dogfood reproduces.
+        symbols: man.symbols && asIfUndecompiled(man.symbols, f.sym),
         note: f.note,
         toolchain: tc,
         build: () => buildRealTarget(man.toolchain, man.vendored(f.sym).tuI),

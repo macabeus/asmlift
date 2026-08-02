@@ -14,8 +14,8 @@
 import { describe, expect, test } from 'vitest';
 
 import { pascalBackend } from '../src/backend/pascal';
-import { ContractError } from '../src/contracts';
 import { decompile } from '../src/pipeline';
+import { StructureError } from '../src/structure/structure';
 import { ARMV4T_AGBCC, MIPS_IDO } from '../src/target';
 
 // Probe shapes borrowed from contract-invariant.test.ts (the pinned live/dead opaque corpus).
@@ -33,8 +33,11 @@ describe('annotate mode — localizable gap → inline marker', () => {
     expect(res.diagnostics).toEqual([{ stage: 'structure', reason: "unmodelled instruction 'clz'" }]);
   });
 
-  test('strict mode (the default) still fails loud on the same input', () => {
-    expect(() => decompile('clzlive', THUMB_LIVE_CLZ, ARMV4T_AGBCC)).toThrow(ContractError);
+  test('strict mode (the default) still fails loud on the same input, NAMING the gap', () => {
+    // the strict decline carries the same reason text the annotate marker does — the two mode
+    // surfaces report one decline (fidelity holds repro-script stderr against stored markers)
+    expect(() => decompile('clzlive', THUMB_LIVE_CLZ, ARMV4T_AGBCC)).toThrow(StructureError);
+    expect(() => decompile('clzlive', THUMB_LIVE_CLZ, ARMV4T_AGBCC)).toThrow("unmodelled instruction 'clz'");
   });
 
   test('a DEAD opaque stays harmless: no marker, no diagnostic, same clean source as strict', () => {

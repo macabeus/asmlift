@@ -25,6 +25,9 @@ describe('committed real-tier manifests', () => {
       expect(raw).not.toMatch(/\/Users\/|\/home\/|\/opt\/|\/var\/|\/private\/|[A-Z]:\\\\/);
       // repoDir is a bare directory name, not a path
       expect(man.repoDir).not.toMatch(/^[/.]/);
+      // every real project pins its benchmark fork + integration branch (bench setup clones it)
+      expect(man.repo, `${f}: repo must be owner/name`).toMatch(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/);
+      expect(man.branch, `${f}: pinned branch`).toBe('asmlift-benchmark');
       // include flags must be project-relative, never absolute
       for (const flag of man.cppIncludes) {
         expect(flag, `absolute include flag in ${f}`).not.toMatch(/^\/|-I\//);

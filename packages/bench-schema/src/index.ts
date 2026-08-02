@@ -52,6 +52,24 @@ export interface DecompilerResult {
   /** declined: decline-marker names (m2c) or `<stage>: <reason>` diagnostics (asmlift);
    *  noncompile: compiler diagnostic lines; failed: a first-line summary. */
   errorMarkers?: string[];
+  /** asmlift only: this row ran WITH the project's vendored symbol map (names + declaration
+   *  shapes derived from its ELF — the analogue of m2c's context input). Absent ⇒ no map was
+   *  available; the report must not read mixed tables as apples-to-apples. */
+  symbolMap?: true;
+  /** asmlift only, scored map rows: EVERY map symbol the WINNING candidate's output references
+   *  (value references — call targets are excluded upstream), each with its declaration shape
+   *  pre-formatted for display ("struct Unk_03004C20 (24 B)", "u16[]", "scalar u8", "code";
+   *  absent for name-only symbols). Sorted by name, uncapped. Present exactly when a scored
+   *  row ran with the map; EMPTY ⇒ the winning spelling (e.g. '/raw-globals') named none. */
+  symbolsUsed?: { name: string; shape?: string }[];
+  /** asmlift only, scored rows: the label of the candidate spelling that won the differ
+   *  ranking (e.g. "unsigned/raw-globals") — which lever combination produced `source`. */
+  candidateLabel?: string;
+  /** asmlift only, scored rows: candidate spellings that FAILED TO BUILD and were dropped from
+   *  the ranking, each with the compiler's first diagnostic line. A dropped sibling is a defect
+   *  (in the emitter, or in the facts it was handed), and without this the row publishes a clean
+   *  win with no trace that another spelling was refused. Absent ⇒ every candidate built. */
+  droppedCandidates?: { label: string; error: string }[];
 }
 
 /** MEASURED size of the remaining gap (merge-time): the best compiling candidate's absolute

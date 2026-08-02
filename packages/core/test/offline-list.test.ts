@@ -2,7 +2,8 @@
 // `test:offline` script, which lists two DIRECTORIES: `packages/core/test` and
 // `packages/cli/test/offline`. This meta-test enforces the rule that makes those directories
 // meaningful — a suite needs a toolchain iff it imports @asmlift/toolchains (the pinned
-// compile/score implementations that spawn agbcc/IDO/KMC/mwcc) or `docker-gate` — so drift is
+// compile/score implementations that spawn agbcc/IDO/KMC/mwcc), `docker-gate`, or
+// `checkout-gate` (bench-owned project checkout + native binutils) — so drift is
 // a CI failure instead of a comment. (cli's `src/score` is a toolchain-FREE seam: the registry
 // + objdiff, offline-safe by design.)
 //   • every @asmlift/core suite must be toolchain-free (core has no score.ts to import);
@@ -22,7 +23,7 @@ const pkg = JSON.parse(readFileSync(join(coreTestDir, '../../..', 'package.json'
 // spellings count too — an evasion here would run a toolchain suite on a hosted runner (loud
 // later, but the derivation should not be foolable).
 const TOOLCHAIN_IMPORT =
-  /from\s+["'](?:@asmlift\/toolchains(?:\/[^"']+)?|[^"']*\/toolchains\/src\/[^"']+|(?:\.\/|(?:\.\.\/)+)docker-gate|[^"']*\/cli\/test\/matching\/docker-gate)(?:\.ts)?["']/;
+  /from\s+["'](?:@asmlift\/toolchains(?:\/[^"']+)?|[^"']*\/toolchains\/src\/[^"']+|(?:\.\/|(?:\.\.\/)+)(?:docker|checkout)-gate|[^"']*\/cli\/test\/matching\/(?:docker|checkout)-gate)(?:\.ts)?["']/;
 
 const suites = (dir: string) =>
   readdirSync(dir)

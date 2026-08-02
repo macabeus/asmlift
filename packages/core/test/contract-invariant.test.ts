@@ -44,6 +44,7 @@ import { FrontendUnsupportedError } from '../src/frontend/errors';
 import { frontendFor, registeredFrontendIds } from '../src/frontend/registry';
 import { print } from '../src/ir/print';
 import { decompile } from '../src/pipeline';
+import { StructureError } from '../src/structure/structure';
 import { ARMV4T_AGBCC, MIPS_IDO, PPC_MWCC, type TargetDescription } from '../src/target';
 
 // The DESIGNED loud-failure classes. A degradation must be ONE of these — not an incidental crash
@@ -51,15 +52,18 @@ import { ARMV4T_AGBCC, MIPS_IDO, PPC_MWCC, type TargetDescription } from '../src
 // the contract on purpose. `expectLoud` fails the test on any other error, so a parse/indexing bug
 // can never masquerade as "it threw, so the contract holds." Checked by `instanceof` (not name
 // strings), so a frontend that subclasses FrontendUnsupportedError — as PpcUnsupportedError does —
-// is loud by construction rather than by remembering to extend a whitelist.
-const isDesignedLoud = (e: unknown) => e instanceof FrontendUnsupportedError || e instanceof ContractError;
+// is loud by construction rather than by remembering to extend a whitelist. StructureError is the
+// strict-mode gap decline (structure() now names the unmodelled instruction instead of letting the
+// anonymous `?` reach assertResolved — same designed decline, better message).
+const isDesignedLoud = (e: unknown) =>
+  e instanceof FrontendUnsupportedError || e instanceof ContractError || e instanceof StructureError;
 function expectLoud(fn: () => unknown): void {
   try {
     fn();
   } catch (e) {
     if (!isDesignedLoud(e)) {
       throw new Error(
-        `expected a designed loud failure (FrontendUnsupportedError/ContractError), got ${(e as Error)?.name}: ${(e as Error)?.message}`,
+        `expected a designed loud failure (FrontendUnsupportedError/ContractError/StructureError), got ${(e as Error)?.name}: ${(e as Error)?.message}`,
       );
     }
     return;

@@ -126,9 +126,5 @@
   "GiveBerryPowder": {
     "tu": "GiveBerryPowder.i.gz",
     "ctx": "ctx-264361caa05e.i.gz"
-  },
-  "GetGameStat": {
-    "tu": "GetGameStat.i.gz",
-    "ctx": "ctx-b98da8e28d15.i.gz"
   }
 }

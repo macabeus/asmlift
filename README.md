@@ -68,6 +68,12 @@ tools:
     # Possible values: agbcc, ido7.1, gcc2.7.2kmc, mwcc_242_81
     target: agbcc
 
+    # Optional. The project's built ELF. asmlift reads its symbol table and debug info to
+    # name the globals and struct fields the assembly only addresses, recover callee
+    # signatures, and adopt the project's address-cast macro names. How to produce a good
+    # one is covered in the CLI documentation linked below.
+    elf: rom.elf
+
     # Optional. Used only for the `--score-against`
     compiler: |
       arm-none-eabi-cpp -nostdinc -I tools/agbcc/include {{inputPath}} -o {{outputPath}}.i

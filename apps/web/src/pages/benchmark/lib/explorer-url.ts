@@ -30,6 +30,8 @@ export const FILTER_PARSERS = {
   verdict: parseAsStringLiteral(VERDICTS).withDefault(''),
   feature: parseAsString.withDefault(''),
   decline: parseAsString.withDefault(''),
+  // 'with' = only rows asmlift ran WITH the project's symbol map (asmlift.symbolMap provenance)
+  symbols: parseAsStringLiteral(['', 'with'] as const).withDefault(''),
   search: parseAsString.withDefault(''),
 };
 
@@ -44,6 +46,7 @@ export const FILTER_URL_KEYS = {
   verdict: 'vs',
   feature: 'feature',
   decline: 'decline',
+  symbols: 'symbols',
   search: 'q',
 } as const;
 
@@ -61,5 +64,6 @@ export const FILTERS_RESET: { [K in keyof Filters]: null } = {
   verdict: null,
   feature: null,
   decline: null,
+  symbols: null,
   search: null,
 };

@@ -52,6 +52,22 @@ test('trace: a firing pre-recovery pass traces its registered stage entry', () =
   expect(report.trace.find((s) => s.id === 'stage:legalize')!.title).toContain('scaled access');
 });
 
+test('trace: the symbols knob has decompile() parity — named lift dump, named source', () => {
+  // The TraceOptions contract: every decompile() knob exists here with the same default. A
+  // symbol map must name the pool word in the LIFT dump (gaddr op, not a constant) and keep
+  // the headline source byte-identical to decompile() with the same map.
+  const asm = 'f:\n\tldr\tr0, .L1\n\tldr\tr0, [r0]\n\tbx\tlr\n.L1:\n\t.word\t0x03001234\n';
+  const symbols = new Map([[0x03001234, [{ name: 'gCounter', kind: 'data' as const }]]]);
+  const { source, report } = decompileTraced('f', asm, ARMV4T_AGBCC, { symbols });
+  expect(source).toBe(decompile('f', asm, ARMV4T_AGBCC, { symbols }).source);
+  expect(source).toContain('gCounter');
+  const lift = report.trace.find((s) => s.id === 'stage:lift')!;
+  expect(lift.irDump).toContain('gCounter');
+  // and WITHOUT the map the traced tower stays inert — raw constant in dump and source alike
+  const bare = decompileTraced('f', asm, ARMV4T_AGBCC);
+  expect(bare.source).not.toContain('gCounter');
+});
+
 test('trace: annotate mode degrades a hard failure to the stub, never a throw', () => {
   const { source, report } = decompileTraced('mystery', 'not assembly at all\n', ARMV4T_AGBCC, { onGap: 'annotate' });
   expect(report.trace).toEqual([]);

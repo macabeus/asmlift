@@ -2,6 +2,9 @@
   "project": "snowboardkids2",
   "toolchain": "gcc2.7.2kmc",
   "repoDir": "snowboardkids2-decomp",
+  "repo": "macabeus/snowboardkids2-decomp",
+  "branch": "asmlift-benchmark",
+  "elfMake": "asmlift-elf",
   "cppIncludes": [
     "-nostdinc",
     "-Iinclude",
@@ -35,7 +38,7 @@
       "note": "src/1DCF60.c: reads a count field via base-relative offset; pure leaf",
       "prependC": "typedef struct {\n    s32 entriesOffset;\n    s32 countOffset;\n} TableHeader;",
       "funcC": "s32 func_800B0DC0_1DCF60(TableHeader *table) {\n    return *(s32 *)(table->countOffset + (s32)table);\n}",
-      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/1DCF60.c#L14-L16"
+      "sourceUrl": "https://github.com/macabeus/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/1DCF60.c#L14-L16"
     },
     {
       "sym": "getTableEntryByU16Index",
@@ -53,7 +56,7 @@
           "returnsVoid": true
         }
       },
-      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/19E80.c#L3-L17"
+      "sourceUrl": "https://github.com/macabeus/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/19E80.c#L3-L17"
     },
     {
       "sym": "func_80038000_38C00",
@@ -66,7 +69,7 @@
       "note": "src/38BE0.c: settings getter with if-chain over a global struct; leaf",
       "prependC": "#include \"EepromSaveData_type.h\"",
       "funcC": "u8 func_80038000_38C00(u8 arg0) {\n    arg0 &= 0xFF;\n    if (arg0 < 6) {\n        return 1;\n    }\n    if (arg0 == 6) {\n        return EepromSaveData->setting_4E;\n    }\n    if (arg0 == 7) {\n        return EepromSaveData->setting_4F;\n    }\n    return EepromSaveData->setting_50;\n}",
-      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/38BE0.c#L8-L20"
+      "sourceUrl": "https://github.com/macabeus/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/38BE0.c#L8-L20"
     },
     {
       "sym": "func_80037FE0_38BE0",
@@ -78,7 +81,7 @@
       "note": "src/38BE0.c: save-slot-in-use predicate; leaf",
       "prependC": "#include \"EepromSaveData_type.h\"",
       "funcC": "s32 func_80037FE0_38BE0(u8 arg0) {\n    return EepromSaveData->save_slot_status[arg0] == 1;\n}",
-      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/38BE0.c#L4-L6"
+      "sourceUrl": "https://github.com/macabeus/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/38BE0.c#L4-L6"
     },
     {
       "sym": "func_80018DC0_199C0",
@@ -97,7 +100,7 @@
         }
       },
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/199C0.c#L16-L29"
+      "sourceUrl": "https://github.com/macabeus/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/199C0.c#L16-L29"
     },
     {
       "sym": "func_80021C00_22800",
@@ -115,7 +118,7 @@
         }
       },
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/227D0.c#L18-L26"
+      "sourceUrl": "https://github.com/macabeus/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/227D0.c#L18-L26"
     },
     {
       "sym": "func_80021D88_22988",
@@ -133,7 +136,7 @@
         }
       },
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/22920.c#L35-L46"
+      "sourceUrl": "https://github.com/macabeus/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/22920.c#L35-L46"
     },
     {
       "sym": "initSteppedMatrixController",
@@ -152,7 +155,7 @@
         }
       },
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/76B0.c#L30-L36"
+      "sourceUrl": "https://github.com/macabeus/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/76B0.c#L30-L36"
     },
     {
       "sym": "GenericTriggerInit",
@@ -171,7 +174,7 @@
         }
       },
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/198B0.c#L10-L18"
+      "sourceUrl": "https://github.com/macabeus/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/198B0.c#L10-L18"
     },
     {
       "sym": "func_80035F80_36B80",
@@ -185,7 +188,7 @@
       "prependC": "extern u32 *_3F6950_ROM_START;\nextern u32 *_3F6950_ROM_END;\nextern u32 *_459E00_ROM_START;\nextern u32 *_459E00_ROM_END;\nvoid *loadCompressedData(void *, void *, s32);",
       "funcC": "void *func_80035F80_36B80(s32 arg0) {\n    if ((u8)arg0 != 1) {\n        return loadCompressedData(&_3F6950_ROM_START, &_3F6950_ROM_END, 0x508);\n    } else {\n        return loadCompressedData(&_459E00_ROM_START, &_459E00_ROM_END, 0x22E8);\n    }\n}",
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/36B80.c#L8-L14"
+      "sourceUrl": "https://github.com/macabeus/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/36B80.c#L8-L14"
     },
     {
       "sym": "func_80014440_15040",
@@ -202,7 +205,7 @@
           "returnsVoid": true
         }
       },
-      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/10AD0.c#L32-L39"
+      "sourceUrl": "https://github.com/macabeus/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/10AD0.c#L32-L39"
     },
     {
       "sym": "func_8002ADB4_2B9B4",
@@ -214,7 +217,7 @@
       ],
       "note": "src/2AF90.c: angle interpolation with wrap handling; pure leaf, uses ABS macro",
       "funcC": "s16 func_8002ADB4_2B9B4(s16 arg0, s16 arg1) {\n    s16 target;\n    s16 current;\n    s32 diff;\n    s16 absDiff;\n    s16 direction;\n\n    target = arg0;\n    current = arg1;\n\n    if (arg0 == arg1) {\n        goto done;\n    }\n\n    diff = arg0 - arg1;\n    diff = ABS(diff);\n\n    if ((s16)diff >= 0x1001) {\n        if (arg1 < arg0) {\n            current = arg1 + 0x2000;\n        } else {\n            target = arg0 + 0x2000;\n        }\n    }\n\n    arg0 = target;\n    arg1 = current;\n\n    diff = arg0 - arg1;\n    absDiff = ABS(diff);\n\n    if (absDiff >= 0xAAB) {\n        current += 0x1000;\n        goto done;\n    }\n\n    if (arg1 < arg0) {\n        direction = 1;\n    } else {\n        direction = -1;\n    }\n\n    if (absDiff >= 0x80) {\n        current += direction << 7;\n        goto done;\n    }\n\n    current = (current + absDiff * direction) & 0x1FFF;\n\ndone:\n    return current;\n}",
-      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/2AF90.c#L103-L162"
+      "sourceUrl": "https://github.com/macabeus/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/2AF90.c#L103-L162"
     },
     {
       "sym": "func_8002B4B8_2C0B8",
@@ -225,7 +228,7 @@
       ],
       "note": "src/2AF90.c: signed angle difference in 13-bit angle space; pure leaf",
       "funcC": "s16 func_8002B4B8_2C0B8(u16 arg0, u16 arg1) {\n    s16 diff;\n\n    arg0 &= 0x1FFF;\n    arg1 &= 0x1FFF;\n    diff = (arg1 - arg0) & 0x1FFF;\n\n    if (diff >= 0x1001) {\n        diff |= 0xE000;\n    }\n\n    return diff;\n}",
-      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/2AF90.c#L168-L180"
+      "sourceUrl": "https://github.com/macabeus/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/2AF90.c#L168-L180"
     },
     {
       "sym": "func_8001BD74_1C974",
@@ -241,7 +244,7 @@
           "returnsVoid": true
         }
       },
-      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/1BBA0.c#L108-L117"
+      "sourceUrl": "https://github.com/macabeus/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/1BBA0.c#L108-L117"
     },
     {
       "sym": "func_8001BCDC_1C8DC",
@@ -260,7 +263,7 @@
           "returnsVoid": true
         }
       },
-      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/1BBA0.c#L87-L106"
+      "sourceUrl": "https://github.com/macabeus/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/1BBA0.c#L87-L106"
     },
     {
       "sym": "func_8002BE94_2CA94",
@@ -278,7 +281,7 @@
           "returnsVoid": true
         }
       },
-      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/2C8F0.c#L47-L53"
+      "sourceUrl": "https://github.com/macabeus/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/2C8F0.c#L47-L53"
     },
     {
       "sym": "loadAssetGroupResources",
@@ -298,7 +301,7 @@
         }
       },
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/3B80.c#L80-L101"
+      "sourceUrl": "https://github.com/macabeus/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/3B80.c#L80-L101"
     },
     {
       "sym": "func_800167B0_173B0",
@@ -317,7 +320,7 @@
         }
       },
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/16FA0.c#L132-L147"
+      "sourceUrl": "https://github.com/macabeus/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/16FA0.c#L132-L147"
     },
     {
       "sym": "func_8002ACFC_2B8FC",
@@ -330,7 +333,7 @@
       "note": "src/2AF90.c: proximity/heading test against the player position; fixed-point distance check",
       "prependC": "#include \"gamestate.h\"\n#include \"geometry.h\"\n#include \"task_scheduler.h\"",
       "funcC": "s32 func_8002ACFC_2B8FC(s32 arg0, s32 arg1, s16 arg2) {\n    GameState *state;\n    s16 angle;\n\n    state = getCurrentAllocation();\n    angle = func_8006D21C_6DE1C(state->unk3EC, state->unk3F0, arg0, arg1);\n\n    if (arg2 - 0x238 < angle && angle < arg2 + 0x238) {\n        if (distance_2d(state->unk3EC - arg0, state->unk3F0 - arg1) <= 0x280000) {\n            return 1;\n        }\n    }\n    return 0;\n}",
-      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/2AF90.c#L88-L101"
+      "sourceUrl": "https://github.com/macabeus/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/2AF90.c#L88-L101"
     },
     {
       "sym": "func_8002A390_2AF90",
@@ -344,7 +347,7 @@
       "note": "src/2AF90.c: state-machine step with fall-through switch cases over a mode byte",
       "prependC": "#include \"gamestate.h\"\n#include \"geometry.h\"\n#include \"task_scheduler.h\"\n\ntypedef struct {\n    void *model;\n    Transform3D matrix;\n    u8 pad24[0xA];\n    s16 unk2E;\n    u8 pad30[0x7];\n    u8 unk37;\n    u8 pad38[0x14];\n    u16 *unk4C;\n    u16 unk50;\n    u8 pad52[0x2];\n    u16 unk54;\n    u8 pad56[0x6];\n    u8 unk5C;\n    u8 unk5D;\n    u8 unk5E;\n    u8 pad5F[0x2];\n    u8 unk61;\n} Func8002A390Arg;\n\nextern s32 func_8002A4AC_2B0AC(void *, u8);\nextern s32 func_8002A7CC_2B3CC(void *);\ns32 func_8002ACFC_2B8FC(s32, s32, s16);",
       "funcC": "s32 func_8002A390_2AF90(Func8002A390Arg *arg0) {\n    GameState *state;\n    s32 stateVal;\n\n    state = getCurrentAllocation();\n    stateVal = arg0->unk5E;\n\n    switch (stateVal) {\n        case 0:\n            if (func_8002A4AC_2B0AC(&arg0->matrix, arg0->unk5D) != 0) {\n                return 1;\n            }\n            if (state->unk421 != 0) {\n                return 0;\n            }\n            if (func_8002ACFC_2B8FC(arg0->matrix.translation.x, arg0->matrix.translation.z, arg0->unk2E) == 0) {\n                return 0;\n            }\n            arg0->unk54 = arg0->unk50;\n            if (arg0->unk5D == 5) {\n                arg0->unk50 = 0x21;\n            } else {\n                arg0->unk50 = 0;\n            }\n            arg0->unk61 = arg0->unk5E;\n            arg0->unk5E = 0x44;\n            break;\n        case 1:\n        case 2:\n        case 3:\n        case 4:\n            if (func_8002A7CC_2B3CC(arg0) == 0) {\n                return 0;\n            }\n            arg0->unk61 = arg0->unk5E;\n            arg0->unk5E = 0;\n            break;\n        case 0x44:\n            if (func_8002A7CC_2B3CC(arg0) == 0) {\n                return 0;\n            }\n            arg0->unk61 = arg0->unk5E;\n            arg0->unk5E = 0;\n            arg0->unk50 = arg0->unk54;\n            break;\n    }\n\n    return 0;\n}",
-      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/2AF90.c#L34-L82"
+      "sourceUrl": "https://github.com/macabeus/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/2AF90.c#L34-L82"
     },
     {
       "sym": "func_800154A8_160A8",
@@ -354,7 +357,7 @@
         "call"
       ],
       "funcC": "void func_800154A8_160A8(s8 *arg0, u16 arg1) {\n    s32 end;\n    s32 ptr;\n\n    if (arg1 == 0) {\n        return;\n    }\n\n    ptr = (s32)arg0;\n    end = arg1 + ptr;\n    do {\n        *(s8 *)ptr = 0;\n        ptr++;\n    } while (ptr < end);\n}",
-      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/15690.c#L304-L318"
+      "sourceUrl": "https://github.com/macabeus/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/15690.c#L304-L318"
     },
     {
       "sym": "func_800B4B30_1E1BE0",
@@ -364,7 +367,7 @@
       ],
       "prependC": "#include \"1DFAA0.h\"\n#include \"20F0.h\"\n#include \"3E160.h\"\n#include \"common.h\"\n#include \"displaylist.h\"\n#include \"geometry.h\"\n#include \"graphics.h\"\n#include \"overlay.h\"\n#include \"task_scheduler.h\"",
       "funcC": "void func_800B4B30_1E1BE0(s16 arg0, s16 arg1, s16 arg2, s16 arg3) {\n    s16 temp;\n\n    if (arg3 <= 0) {\n        temp = func_800B4AFC_1E1BAC(arg0);\n        func_80058360_58F60(temp, arg1, arg2 + 0x80, 0);\n    } else {\n        temp = func_800B4AFC_1E1BAC(arg0);\n        func_80057DF0_589F0(temp, arg1, arg2 + 0x80, 0, arg3);\n    }\n}",
-      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/1E1BA0.c#L40-L50",
+      "sourceUrl": "https://github.com/macabeus/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/1E1BA0.c#L40-L50",
       "m2cCtx": true
     },
     {
@@ -374,7 +377,7 @@
       ],
       "prependC": "#include \"1E2BE0.h\"",
       "funcC": "void func_800B5B7C_1E2C2C(func_800B5E64_1E2F14_arg0 *arg0, u16 arg1) {\n    arg0->unk20 = 0;\n    arg0->unk22 = 0;\n    arg0->unk24 = 0;\n    arg0->unk26 = 0;\n    arg0->unk28 = 0;\n    arg0->unk2A = 0;\n    arg0->unk2C = 0;\n    arg0->unk2E = 0;\n    arg0->unk30 = 0;\n    arg0->unk32 = 0;\n    arg0->unk34 = 0;\n    arg0->unk38 = 0;\n    arg0->unk3C = 0;\n    arg0->unk40 = 0;\n    arg0->unk44 = 0;\n    arg0->unk48 = 0;\n    arg0->unk4C = 0;\n    arg0->unk50 = 0;\n    arg0->unk54 = 0;\n    arg0->unk58 = 0;\n    arg0->unk5A = 0;\n    arg0->unk5C = 0;\n    arg0->unk5E = 0;\n    arg0->unk60 = 0;\n    arg0->unk62 = 0;\n    arg0->unk64 = 0;\n    arg0->unk68 = 0;\n    arg0->unk6C = 0;\n    arg0->unk6E = arg1;\n    arg0->unk70 = 0;\n    arg0->unk71 = 0;\n}",
-      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/1E2BE0.c#L21-L53"
+      "sourceUrl": "https://github.com/macabeus/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/1E2BE0.c#L21-L53"
     },
     {
       "sym": "func_800B68F4_1E39A4",
@@ -383,7 +386,7 @@
       ],
       "prependC": "#include \"1E36C0.h\"",
       "funcC": "void func_800B68F4_1E39A4(unk_func_800B68F4_1E39A4 *arg0, s32 arg1, s32 arg2, s32 arg3) {\n    arg0->unk60 = arg1;\n    arg0->unk54 = arg1;\n    arg0->unk64 = arg2;\n    arg0->unk58 = arg2;\n    arg0->unk68 = arg3;\n    arg0->unk5C = arg3;\n}",
-      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/1E36C0.c#L134-L141"
+      "sourceUrl": "https://github.com/macabeus/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/1E36C0.c#L134-L141"
     },
     {
       "sym": "func_800B93F0_1E64A0",
@@ -393,7 +396,7 @@
       ],
       "prependC": "#include \"1E64A0.h\"",
       "funcC": "s32 func_800B93F0_1E64A0(s32 arg0) {\n    s32 result;\n\n    if (arg0 == 0) {\n        arg0 = 1;\n    }\n\n    result = 0x4000000 / arg0;\n\n    if (result >= 0x4000) {\n        result = 0x4000;\n    }\n\n    return result;\n}",
-      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/1E64A0.c#L16-L30"
+      "sourceUrl": "https://github.com/macabeus/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/1E64A0.c#L16-L30"
     },
     {
       "sym": "func_80028BB0_297B0",
@@ -404,7 +407,7 @@
       ],
       "prependC": "#include \"297B0.h\"\n#include \"20F0.h\"\n#include \"3E160.h\"\n#include \"B040.h\"\n#include \"common.h\"\n#include \"geometry.h\"\n#include \"graphics.h\"\n#include \"rand.h\"\n#include \"task_scheduler.h\"",
       "funcC": "void func_80028BB0_297B0(Func297D8Arg *arg0) {\n    arg0->unk5E = 0;\n    arg0->unk61 = 0;\n    arg0->unk62 = 0;\n    arg0->unk5A = randB() & 0xF;\n    createYRotationMatrix(&arg0->matrix, arg0->rotation);\n    func_8002A290_2AE90(arg0);\n    setCallback(func_80028C08_29808);\n}",
-      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/297B0.c#L42-L50",
+      "sourceUrl": "https://github.com/macabeus/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/297B0.c#L42-L50",
       "m2cCtx": true
     },
     {
@@ -416,7 +419,7 @@
       ],
       "prependC": "#include \"297B0.h\"\n#include \"20F0.h\"\n#include \"3E160.h\"\n#include \"B040.h\"\n#include \"common.h\"\n#include \"geometry.h\"\n#include \"graphics.h\"\n#include \"rand.h\"\n#include \"task_scheduler.h\"",
       "funcC": "void func_80028D90_29990(Func297D8Arg *arg0) {\n    arg0->unk5E = 0;\n    arg0->unk61 = 0;\n    arg0->unk62 = 0;\n    arg0->unk5A = arg0->unk5A + (randB() & 0xF);\n    createYRotationMatrix(&arg0->matrix, arg0->rotation);\n    func_8002A290_2AE90(arg0);\n    setCallback(func_80028DF0_299F0);\n}",
-      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/297B0.c#L123-L131",
+      "sourceUrl": "https://github.com/macabeus/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/297B0.c#L123-L131",
       "m2cCtx": true
     },
     {
@@ -429,7 +432,7 @@
       ],
       "prependC": "#include \"1E36C0.h\"",
       "funcC": "void func_800B7620_1E46D0(CutsceneSlotData *arg0, s32 arg1, s16 arg2, s16 arg3) {\n    s32 temp_a0;\n    s32 temp_v0;\n    s32 temp_v1;\n    s32 var_v0;\n    s32 var_v1;\n\n    arg0->unk0.Two = 6;\n    arg0->unk94 = arg1;\n    arg0->unk92 = arg3;\n    arg0->unk84 = arg2;\n    arg0->unk86 = arg2;\n    temp_a0 = ((s16)atan2Fixed(arg0->unk20_u.unk20_s32, arg0->unk2C) + 0x1000) & 0x1FFF;\n    arg0->unk9C_u.unk9C_s32 = temp_a0;\n    temp_v1 = approximateCos(temp_a0) << 2;\n    if (temp_v1 == 0) {\n        var_v1 = (arg0->unk20_u.unk20_s32 << 8) / ((approximateSin(arg0->unk9C_u.s.unk9E) << 2) >> 8);\n        var_v1 = (var_v1 > 0) ? var_v1 : -var_v1;\n        arg0->unk98 = var_v1;\n    } else {\n        var_v0 = (arg0->unk2C << 8) / (temp_v1 >> 8);\n        var_v0 = (var_v0 > 0) ? var_v0 : -var_v0;\n        arg0->unk98 = var_v0;\n    }\n    temp_v0 = arg0->unk94;\n    if (temp_v0 > 0) {\n        arg0->unk7A = (arg0->unk9C_u.unk9C_s32 + 0x800) & 0x1FFF;\n    } else if (temp_v0 < 0) {\n        arg0->unk7A = (arg0->unk9C_u.unk9C_s32 - 0x800) & 0x1FFF;\n    }\n}",
-      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/1E36C0.c#L576-L606"
+      "sourceUrl": "https://github.com/macabeus/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/1E36C0.c#L576-L606"
     },
     {
       "sym": "func_800B7760_1E4810",
@@ -440,7 +443,7 @@
       ],
       "prependC": "#include \"1E36C0.h\"",
       "funcC": "void func_800B7760_1E4810(CutsceneSlotData *arg0, s32 arg1, s16 arg2) {\n    s32 diff;\n    s32 delta;\n\n    if (arg2 > 0) {\n        diff = arg1 - arg0->unk54;\n        delta = diff / arg2;\n        arg0->unk60 = arg1;\n        arg0->unk6C = delta;\n    } else {\n        arg0->unk54 = arg1;\n        arg0->unk60 = arg1;\n        arg0->unk6C = 0;\n    }\n}",
-      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/1E36C0.c#L608-L622"
+      "sourceUrl": "https://github.com/macabeus/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/1E36C0.c#L608-L622"
     },
     {
       "sym": "func_800B9C20_1E6CD0",
@@ -450,7 +453,7 @@
       ],
       "prependC": "#include \"1E64A0.h\"",
       "funcC": "void func_800B9C20_1E6CD0(cutsceneSys2Wait_exec_asset *arg0) {\n    arg0->unkA0 = freeNodeMemory(arg0->unkA0);\n    arg0->unk8 = freeNodeMemory(arg0->unk8);\n    arg0->unkC = freeNodeMemory(arg0->unkC);\n}",
-      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/1E64A0.c#L201-L205"
+      "sourceUrl": "https://github.com/macabeus/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/1E64A0.c#L201-L205"
     },
     {
       "sym": "func_8002A2D0_2AED0",
@@ -462,7 +465,7 @@
       ],
       "prependC": "#include \"297B0.h\"\n#include \"20F0.h\"\n#include \"3E160.h\"\n#include \"B040.h\"\n#include \"common.h\"\n#include \"geometry.h\"\n#include \"graphics.h\"\n#include \"rand.h\"\n#include \"task_scheduler.h\"",
       "funcC": "void func_8002A2D0_2AED0(Func297D8Arg *arg0) {\n    s32 result;\n\n    getCurrentAllocation();\n    applyTransformToModel(arg0->model, &arg0->matrix);\n\n    if (arg0->unk50 != arg0->unk52) {\n        arg0->unk52 = arg0->unk50;\n        setModelAnimation(arg0->model, arg0->unk50);\n        arg0->unk62 = 0;\n    }\n\n    if (arg0->unk62 != -1) {\n        result = clearModelRotation(arg0->model);\n    } else {\n        result = 0;\n    }\n\n    if (result != 0) {\n        arg0->unk37 = 1;\n        arg0->unk62 = (arg0->unk62 & 0x7F) + 1;\n        if (arg0->unk50 == 0x98) {\n            if (arg0->unk5E == 2) {\n                arg0->unk50 = 0x90;\n            } else {\n                arg0->unk50 = arg0->unk58;\n            }\n        }\n    }\n\n    updateModelGeometry(arg0->model);\n}",
-      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/297B0.c#L862-L893",
+      "sourceUrl": "https://github.com/macabeus/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/297B0.c#L862-L893",
       "m2cCtx": true
     },
     {
@@ -474,7 +477,7 @@
       ],
       "prependC": "#include \"52880.h\"",
       "funcC": "void func_80051C80_52880(s32 *arg0, s32 arg1) {\n    s32 dist;\n\n    dist = distance_2d(arg0[0], arg0[2]);\n\n    if (!(dist >= 0x20000)) {\n        if (dist != 0) {\n            arg0[0] = (s64)((s64)arg0[0] * 0x20000) / dist;\n            arg0[2] = (s64)((s64)arg0[2] * 0x20000) / dist;\n        } else {\n            arg0[2] = 0x20000;\n        }\n    }\n\n    dist = distance_3d(arg0[0], arg0[1], arg0[2]);\n\n    if (dist != 0) {\n        arg0[0] = (s64)((s64)arg0[0] * arg1) / dist;\n        arg0[1] = (s64)((s64)arg0[1] * arg1) / dist;\n        arg0[2] = (s64)((s64)arg0[2] * arg1) / dist;\n    }\n}",
-      "sourceUrl": "https://github.com/cdlewis/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/52880.c#L137-L158"
+      "sourceUrl": "https://github.com/macabeus/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/52880.c#L137-L158"
     }
   ]
 }

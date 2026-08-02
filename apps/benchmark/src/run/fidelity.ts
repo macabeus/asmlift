@@ -7,17 +7,22 @@
 //   fail — the script itself broke (bash/usage/timeout/pre-step), the m2c output diverged from
 //          the row (its inputs are fully published, byte-equality is the contract), or an
 //          asmlift SYNTHETIC run landed on a different outcome/source than the row.
-//   warn — an asmlift divergence in a class the scripts themselves document as approximate:
-//          real-tier scoring context, and prototype hints the CLI cannot carry. Warns are
-//          listed one-per-row — visible, never silent — but do not block publish.
+//   warn — an asmlift divergence on a real-tier row. The scripts reproduce the benchmark's
+//          scoring context by construction (`bench target` materializes the row's vendored
+//          ctx into the compile command), so drift here means environment skew, not a
+//          documented approximation. Warns are listed one-per-row — visible, never silent —
+//          but do not block publish.
 import type { FunctionResult } from '@asmlift/bench-schema';
-import { spawn } from 'node:child_process';
+import { execSync, spawn } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { enforceCheckoutPin } from '../cases/checkout';
+import { loadManifestsForVendor, resolveProjectRoot } from '../cases/manifests';
 import { M2C_DIR, REPO_ROOT, RESULTS_DIR } from '../config';
 import { asmliftScript, m2cScript } from '../report/repro-scripts';
+import { checkSymbolMapDrift, vendoredMapPath } from './symbol-drift';
 
 interface Verdict {
   id: string;
@@ -52,11 +57,26 @@ function runScript(script: string): Promise<{ code: number; stdout: string; stde
   });
 }
 
-/** Fill the user placeholders with this machine's real paths — the ONLY edit a user makes. */
-function materialize(script: string): string {
-  return script
+/** Fill the user placeholders with this machine's real paths — the ONLY edit a user makes.
+ *  `projectRoot` (symbol-fed rows) replaces the script's PROJECT_PATH checkout placeholder,
+ *  whatever repoDir it names. Exported for the substitution unit test. */
+export function materialize(script: string, projectRoot?: string): string {
+  let s = script
     .replace("M2C_PATH='/path/to/m2c'", `M2C_PATH='${M2C_DIR}'`)
     .replace("ASMLIFT_PATH='/path/to/asmlift'", `ASMLIFT_PATH='${REPO_ROOT}'`);
+  if (projectRoot !== undefined) {
+    s = s.replace(/PROJECT_PATH='\/path\/to\/[^']*'/, `PROJECT_PATH='${projectRoot}'`);
+  }
+  return s;
+}
+
+// The row's checkout, resolved exactly as vendor does (env override > bench-owned > sibling
+// workspace). Missing checkouts still substitute — `bench target` then warns loudly and the
+// script runs map-less, the same visible degradation a user without the checkout gets.
+let rootCache: Map<string, string> | null = null;
+function projectRootFor(project: string): string | undefined {
+  rootCache ??= new Map(loadManifestsForVendor().map((m) => [m.project, resolveProjectRoot(m)]));
+  return rootCache.get(project);
 }
 
 async function checkM2c(r: FunctionResult): Promise<Verdict> {
@@ -73,7 +93,8 @@ async function checkM2c(r: FunctionResult): Promise<Verdict> {
 }
 
 async function checkAsmlift(r: FunctionResult): Promise<Verdict> {
-  const { code, stdout, stderr } = await runScript(materialize(asmliftScript(r)));
+  const root = r.tier === 'real' ? projectRootFor(r.project) : undefined;
+  const { code, stdout, stderr } = await runScript(materialize(asmliftScript(r), root));
   if (code >= 2) {
     return { id: r.id, tool: 'asmlift', status: 'fail', reason: `script exited ${code}: ${stderr.slice(0, 200)}` };
   }
@@ -101,6 +122,22 @@ async function checkAsmlift(r: FunctionResult): Promise<Verdict> {
       reason: `declined row: exit ${code}, stderr lacks [declined]`,
     };
   }
+  if (r.asmlift.outcome === 'noncompile') {
+    // the row's `source` is the ANNOTATE-mode emission (marker-free, but it does not compile);
+    // the scoring-mode CLI the script runs never gets a scorable object, so it exits 1 with an
+    // EMPTY stdout. Comparing stdout to the row's source would therefore always "diverge" —
+    // what must reproduce is the FAILURE, so assert the exit + the no-candidate signature and
+    // leave stdout alone.
+    if (code === 1 && stderr.includes(`no scorable candidate for '${r.sym}'`)) {
+      return { id: r.id, tool: 'asmlift', status: 'ok' };
+    }
+    return {
+      id: r.id,
+      tool: 'asmlift',
+      status: r.tier === 'real' ? 'warn' : 'fail',
+      reason: `noncompile row: exit ${code}, stderr lacks "no scorable candidate for '${r.sym}'"`,
+    };
+  }
   const wantExit = r.asmlift.outcome === 'match' ? 0 : 1;
   const sameExit = code === wantExit;
   const sameSource = stdout.trim() === r.asmlift.source.trim();
@@ -110,15 +147,49 @@ async function checkAsmlift(r: FunctionResult): Promise<Verdict> {
   const reason = `${sameExit ? '' : `exit ${code} (row: ${r.asmlift.outcome})`}${sameExit || sameSource ? '' : '; '}${
     sameSource ? '' : 'source diverged'
   }`;
-  // real tier scores outside the project context; prototype hints are not expressible via the
-  // CLI — both documented in the scripts themselves. Divergence there is a WARN, not a fail.
+  // real tier: the script scores inside the row's vendored context (`bench target`
+  // materializes it), so a divergence here is environment skew — kept a visible WARN rather
+  // than a hard fail so one machine quirk cannot block publish silently or loudly wrongly.
   return { id: r.id, tool: 'asmlift', status: r.tier === 'real' ? 'warn' : 'fail', reason };
 }
 
-export async function fidelity(jobs: number): Promise<void> {
+export interface FidelityFilter {
+  project?: string;
+  only?: string; // substring match on the symbol (spot-checks)
+}
+
+export async function fidelity(jobs: number, filter: FidelityFilter = {}): Promise<void> {
   const { assertM2cPinned } = await import('../eval/m2c');
   assertM2cPinned();
-  const rows = loadRows();
+  // The asmlift scripts invoke the checkout's own bin — packages/cli/dist/asmlift.mjs, a
+  // GITIGNORED esbuild bundle. Rebuild it first: certifying the published scripts against a
+  // stale (or absent) bundle silently tests old code — the exact drift this gate exists to
+  // catch. Loud on failure; ~20ms when up to date.
+  execSync('pnpm --dir packages/cli build', { cwd: REPO_ROOT, stdio: 'pipe' });
+  let rows = loadRows();
+  if (filter.project) {
+    rows = rows.filter((r) => r.project === filter.project);
+  }
+  const only = filter.only;
+  if (only) {
+    rows = rows.filter((r) => r.sym.includes(only));
+  }
+  // Checkout-pin pre-step: the published rows claim provenance from each project's pinned
+  // benchmark branch; a drifted LOCAL checkout can't invalidate the vendored dataset the
+  // scripts run against, but it CAN mean the published pin no longer describes reality — so
+  // verify before certifying the scripts. Missing checkouts warn (CI runs checkout-free).
+  const realProjects = new Set(rows.filter((r) => r.tier === 'real').map((r) => r.project));
+  for (const man of loadManifestsForVendor().filter((m) => realProjects.has(m.project))) {
+    const st = enforceCheckoutPin(man, 'fidelity', { onMissing: 'warn' });
+    // Map-drift: symbol-fed rows are only trustworthy if the vendored map still IS what the
+    // checkout's ELF derives. Requires the checkout; without one the pin warning above already
+    // fired — restate that the map specifically went unverified.
+    if (st.present && st.head) {
+      await checkSymbolMapDrift(man);
+    } else if (vendoredMapPath(man.project)) {
+      console.warn(`WARN fidelity: ${man.project}: no checkout — vendored symbol map NOT verified`);
+    }
+  }
   const work = rows.flatMap((r) => [() => checkM2c(r), () => checkAsmlift(r)]);
   const verdicts: Verdict[] = [];
   let next = 0;
