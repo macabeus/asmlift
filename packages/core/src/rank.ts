@@ -123,6 +123,17 @@ export interface EnumerateOptions {
 export interface Candidate {
   label: string;
   source: string;
+  /** Which PREFERENCE GROUP this spelling belongs to — the symbol-variant index (0 = the map's own
+   *  named spellings, 1 = their `/raw-globals` siblings). Enumeration emits the groups in
+   *  preference order, and a lower group WINS a score tie: when both compile to the same bytes the
+   *  reader should get `gCounter.field`, not a byte offset off a hoisted `(u8 *)` base.
+   *
+   *  Carried structurally rather than left to enumeration order because the readability tie-break
+   *  (compareScored) must compare only spellings that are genuinely alternatives of the same
+   *  thing. Ranking a named spelling against a raw-address one on cast count is not a readability
+   *  comparison at all — the raw form's `(u8 *)` base is not counted, so it would win by
+   *  construction, trading named struct fields for anonymous byte offsets. */
+  group: number;
   /** the map-derived VALUE references this candidate's tree contains — what the scoring
    *  layer's declaration synthesis renders. DERIVED, never carried: computed once from the
    *  exact tree this candidate's source was emitted from, at the moment the candidate is
@@ -211,7 +222,7 @@ export function enumerateCandidates(
         { suffix: '/raw-globals', symbols: undefined },
       ]
     : [{ suffix: '' }];
-  for (const sv of symbolVariants) {
+  for (const [svIndex, sv] of symbolVariants.entries()) {
     const svOpts = sv.symbols ? baseOpts : { ...baseOpts, symbols: undefined };
     for (const cand of SIGN_CANDS) {
       const fn = frontend.lift(name, asm, target, prototypes, opts.asmData, sv.symbols);
@@ -298,6 +309,7 @@ export function enumerateCandidates(
           out.push({
             label: `${cand.label}${s.suffix}${sp.suffix}${sv.suffix}`,
             source,
+            group: svIndex,
             ...(sp.symbolRefs ? { symbolRefs: sp.symbolRefs } : {}),
           });
         }
@@ -332,37 +344,57 @@ export function rankBy<S extends { score: number }>(
   if (results.length === 0) {
     throw new Error(`no scorable candidate for '${symbol}': ${firstLine(lastScoreErr)}`, { cause: lastScoreErr });
   }
-  // Score first. Then CAST COUNT, then ENUMERATION ORDER.
-  //
-  // A tie means the axis that separates these two candidates did not change the bytes, so the
-  // differ has nothing left to say and the tie-break should pick the more readable spelling.
-  // Casts are the right proxy because a WRONG signedness pin is what manufactures them: the C
-  // backend has to cast a shift operand back to the signedness the machine op needs, so pinning
-  // `u32` on a genuinely-signed parameter buys `s32 f(u32 a0) { return (s32)a0 >> a1; }` for the
-  // same bytes as `s32 f(s32 a0) { return a0 >> a1; }`. Before the backend synthesized that cast
-  // the wrong pin simply lost on score; now it ties, and without this the enumeration order alone
-  // would silently install the noisier spelling on every such row.
-  //
-  // Enumeration order still breaks a remaining tie, and that order is meaningful rather than
-  // incidental: enumerateCandidates emits the symbol-map spellings before their `/raw-globals`
-  // siblings, so when both compile to the same bytes the named one wins and the reader gets
-  // `gCounter` rather than a bare address. Spelled as an explicit comparator throughout, because
-  // relying on Array#sort's stability would make each preference an accident.
-  results.sort(
-    (a, b) => a.score.score - b.score.score || castCount(a.source) - castCount(b.source) || a.order - b.order,
-  );
+  results.sort(compareScored);
   return { best: results[0], candidates: results.map(({ order: _order, ...c }) => c), dropped };
+}
+
+/** THE candidate ordering — score, then preference group, then readability, then enumeration
+ *  order. Exported because there are TWO drivers over the same enumeration (this module's sync
+ *  `rankBy` for the Node/objdiff scorer, and the webapp's async await-loop for the wasm one), and
+ *  a per-driver copy would let the same input produce two different winners.
+ *
+ *  SCORE dominates absolutely: the differ is the fitness function, and a tie means the axis that
+ *  separates these two spellings did not change the bytes — so everything below only chooses what
+ *  the READER sees, and can never cost a match.
+ *
+ *  GROUP next: a named symbol-map spelling beats its `/raw-globals` sibling at equal bytes.
+ *
+ *  CAST COUNT next, and only WITHIN a group. A wrong signedness pin is what manufactures casts —
+ *  the C backend has to cast a shift operand back to the signedness the machine op needs, so
+ *  pinning `u32` on a genuinely-signed parameter buys `s32 f(u32 a0) { return (s32)a0 >> a1; }`
+ *  for the same bytes as `s32 f(s32 a0) { return a0 >> a1; }`. Before the backend synthesized that
+ *  cast the wrong pin simply lost on score; now it ties, and enumeration order alone would
+ *  silently install the noisier spelling.
+ *
+ *  ENUMERATION ORDER last, which makes this a strict total order (indices are unique) and the
+ *  result deterministic. Spelled explicitly rather than leaning on Array#sort's stability, which
+ *  would make each preference an accident of two unrelated decisions. */
+export function compareScored<S extends { score: number }>(
+  a: Candidate & { score: S; order: number },
+  b: Candidate & { score: S; order: number },
+): number {
+  return (
+    a.score.score - b.score.score || a.group - b.group || castCount(a.source) - castCount(b.source) || a.order - b.order
+  );
 }
 
 /** Scalar casts in a candidate's rendered source — the readability tie-break above.
  *
- *  Deliberately a TEXT count over the emitted string rather than a tree walk: the tie-break
- *  compares two candidates that are separate decompilations with no shared tree, and what a reader
- *  experiences is the text. It counts the decomp typedef vocabulary only, so a pointer cast
- *  (`(u8 *)p`) or a struct cast is not read as noise — those are structural spellings a candidate
- *  does not choose. Deterministic, and total on any string. */
+ *  A TEXT count over the emitted string, matching how the benchmark's own readability metric
+ *  measures the same thing (apps/benchmark/src/eval/quality.ts) — the two must agree about what
+ *  "cast noise" means, or ranking optimizes for something the report then scores differently.
+ *
+ *  It counts the decomp typedef vocabulary only, so a pointer or struct cast is not read as noise
+ *  — those are structural spellings a candidate does not choose. And it carries `quality.ts`'s
+ *  ADDRESS-CAST exemption: `(u32)&gSym` / `(s32)&gSym` is the CORRECT source spelling of integer
+ *  arithmetic on a link-time address, which decomp projects write themselves. Counting it would
+ *  penalize precisely the named spelling this ranking is supposed to prefer.
+ *
+ *  Deterministic, and total on any string. */
 function castCount(source: string): number {
-  return source.match(/\((?:u|s)(?:8|16|32)\)/g)?.length ?? 0;
+  const all = source.match(/\((?:u|s)(?:8|16|32)\)/g)?.length ?? 0;
+  const addr = source.match(/\((?:u|s)32\)\s*&/g)?.length ?? 0;
+  return all - addr;
 }
 
 /** First line of whatever the scorer threw — the compiler's own diagnostic, not a stack. */

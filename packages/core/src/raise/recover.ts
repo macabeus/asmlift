@@ -40,8 +40,11 @@ export function recoverTypes(fn: Fn): void {
         op.operands.forEach((o) => setInt(o, false));
         op.results.forEach((r) => setInt(r, false));
       }
-      // A rotate is a bitwise permutation: its value operand and result are unsigned (the C
-      // idiom's `>>` must be the LOGICAL shift or the spelling stops round-tripping). The
+      // A rotate is a bitwise permutation, so its value operand and result are unsigned. This is
+      // now a TYPE fact only: the C idiom's logical shift is stated on the node (structure.ts
+      // spells the idiom with `>>>`, and the C backend supplies whatever cast that needs), so the
+      // spelling no longer depends on this seeding to round-trip. Kept because it is true, and
+      // because it keeps the rotated value from rendering as a signed operand elsewhere. The
       // rotate AMOUNT (operand 1, register form) keeps its own signedness.
       if (op.opcode === 'rotr' || op.opcode === 'rotl') {
         setInt(op.operands[0], false);

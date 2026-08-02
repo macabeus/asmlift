@@ -59,13 +59,25 @@ export type Expr =
   // default) never produces this node; it keeps the `"?"` sentinel → ContractError behavior.
   | { k: 'marker'; reason: string; args: Expr[] };
 
-// `>>` is the ARITHMETIC right shift and `>>>` the LOGICAL one — two different operations, kept
-// apart here because the machine keeps them apart (`asr` vs `lsr`, `sra` vs `srl`) and because
-// which one a language spells with which token is a BACKEND fact, not a tower fact. C spells both
-// `>>` and picks from the left operand's type, so the C backend synthesizes the cast that pins the
-// choice — exactly as it already synthesizes scalar deref casts from an `index` node's width. A
-// backend with no spelling for one of them (IDO Pascal) declines LOUDLY on the operation itself,
-// rather than on whatever artifact another language's spelling happened to leave in the tree.
+// `>>` is the ARITHMETIC right shift and `>>>` the LOGICAL one. C spells both `>>` and picks from
+// the left operand's type, so the C backend synthesizes the cast that pins the choice — exactly as
+// it already synthesizes scalar deref casts from an `index` node's width. A backend with no
+// spelling for one of them (IDO Pascal) declines LOUDLY on the operation itself, rather than on
+// whatever artifact another language's spelling happened to leave in the tree.
+//
+// WHY THIS ONE SPLIT AND NOT THE OTHERS. "The machine distinguishes them" is NOT the rule — the
+// machine distinguishes `divu`/`div` and `sltu`/`slt` too, and ARITH_TO_BIN deliberately collapses
+// `udiv`→`/`, `umod`→`%`, `icmp_u*`→`<` etc., noting that "unsignedness is in the operand types".
+// Taking the machine as the rule would license four more splits with no inhabitant, which is what
+// "earn the level" forbids. The rule is the repo's own: the shift split because a real,
+// byte-load-bearing divergence HAD inhabitants (~20 rows, 5 projects, 4 compilers) and no other
+// channel could carry it — the operand type could not, since a promoted narrow value is signed
+// whatever it was loaded as.
+//
+// The collapsed operators lean on exactly that channel, so they carry the same latent hazard:
+// `*(u16 *)p / 3` renders as a signed division of a promoted `int` where the asm did `divu`. It is
+// tolerated because no row has produced such a divergence. When one does, the fix is this same
+// split — not a per-site patch.
 export type BinOp =
   | '+'
   | '-'

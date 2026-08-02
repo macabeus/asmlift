@@ -13,7 +13,13 @@
 // engine failure throws, and a row that cannot be displayed can never count as matched.
 import { cBackend } from '@asmlift/core/backend/c';
 import { renderDeclarations } from '@asmlift/core/declare';
-import { type DroppedCandidate, type RankedResult, type Scored, enumerateCandidates } from '@asmlift/core/rank';
+import {
+  type DroppedCandidate,
+  type RankedResult,
+  type Scored,
+  compareScored,
+  enumerateCandidates,
+} from '@asmlift/core/rank';
 import type { SymbolMap } from '@asmlift/core/symbols';
 import { C_TYPEDEFS, type TargetDescription } from '@asmlift/core/target';
 import { assemble, compileToObject } from 'agbcc';
@@ -195,9 +201,11 @@ export async function rankCandidatesInBrowser(
 
   // Mirrors core's `rankBy` (which this cannot reuse — the wasm scorer is async): a candidate
   // that fails to build is DROPPED rather than allowed to sink a sibling that compiles, and each
-  // drop is RECORDED so a failed spelling is never invisible. Enumeration order breaks a score
-  // tie, exactly as `rankBy` spells it — the named spelling is enumerated before its
-  // `/raw-globals` sibling, so equal bytes show the reader the named one.
+  // drop is RECORDED so a failed spelling is never invisible.
+  //
+  // The ORDERING is not re-spelled here, it is IMPORTED — `compareScored` is core's one copy. Two
+  // drivers over the same enumeration with two hand-written comparators is how the playground and
+  // the CLI come to disagree about which spelling of the same function is best.
   const results: (Scored<MatchScore> & { order: number })[] = [];
   const dropped: DroppedCandidate[] = [];
   let lastErr: unknown = null;
@@ -219,6 +227,6 @@ export async function rankCandidatesInBrowser(
     const why = lastErr instanceof Error ? lastErr.message.split('\n')[0] : String(lastErr ?? 'no candidate produced');
     throw new Error(`no scorable candidate for '${name}': ${why}`, { cause: lastErr });
   }
-  results.sort((a, b) => a.score.score - b.score.score || a.order - b.order);
+  results.sort(compareScored);
   return { best: results[0], candidates: results.map(({ order: _order, ...c }) => c), dropped };
 }
