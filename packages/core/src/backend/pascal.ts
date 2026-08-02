@@ -35,6 +35,10 @@ const BIT_FN: Partial<Record<BinOp, string>> = {
   '|': 'bitor',
   '^': 'bitxor',
   '<<': 'lshift',
+  // `rshift` over this backend's signed `Integer` reproduces IDO's `sra` — verified byte-exact
+  // against upas (pascal-ido.test.ts `asr2`). `>>>`, the LOGICAL shift, has no verified spelling
+  // here and is therefore absent: it reaches the loud decline below rather than borrowing this
+  // one, which would emit an arithmetic shift where the machine did a logical one.
   '>>': 'rshift',
 };
 

@@ -39,7 +39,7 @@
 import { Block, Fn, Op, Value, defOpMap, successorsOf } from '../ir/core';
 import { type IrType, T, scalarTypeForAccess, typeEquals } from '../ir/types';
 import { BinOp, Expr, SFn, Stmt, SwitchCase, exprChildren, mapExprChildren } from '../l3/ast';
-import { exprCType, ptrElemBytes, renderedIntSignedness } from '../l3/typing';
+import { exprCType, ptrElemBytes } from '../l3/typing';
 import { returnType } from '../raise/recover';
 import { collectStructs } from '../raise/structs';
 import {
@@ -109,13 +109,6 @@ function globalOf(e: Expr, width: number): { name: string; idx: Expr } | null {
   return null;
 }
 
-// Re-spell `e` as `t`. An existing 32-bit integer cast is REPLACED rather than wrapped — `(u32)x`
-// and `(u32)(s32)x` are the same bytes, and the single cast is the spelling a person would write.
-function retype32(e: Expr, t: IrType): Expr {
-  const inner = e.k === 'cast' && e.to.kind === 'int' && e.to.width === 32 ? e.e : e;
-  return { k: 'cast', to: t, e: inner };
-}
-
 // THE one gate on the BARE-NAME array-global spelling (`gSym[i]` rather than `((T *)&gSym)[i]`),
 // shared by the constant-offset and variable-index access paths so the two cannot disagree.
 // Returns the `index` node's `lead` fragment when the bare form is spellable, or null to fall
@@ -128,9 +121,9 @@ function retype32(e: Expr, t: IrType): Expr {
 // then addresses a different object than the asm did — silently.
 //
 // A rank > 1 pins the leading dimensions at 0 and puts the whole flat element index in the last
-// subscript (`g[0][i]`) — the same address arithmetic, and the spelling a decomp author writes
-// when the split is not observable in the asm either (the reference source for
-// kleod:CopyBGScrollTiles spells exactly this). A rank the map states but cannot spell (an unknown
+// subscript (`g[0][i]`) — the same address arithmetic, and the idiom decomp sources themselves use
+// when the split is not observable in the asm either (`gBgTilemapBufs[0][…]` in kleod,
+// `gNatureStatTable[nature][…]` in pokeemerald). A rank the map states but cannot spell (an unknown
 // inner extent) gets no bare form at all; `((T *)&gSym)[i]` is byte-identical and valid under ANY
 // declaration, which is why it is the safe fallback. See symbols.ts arrayInnerExtents for why an
 // ABSENT rank is read as 1 rather than as unknown.
@@ -556,7 +549,7 @@ const ARITH_TO_BIN: Record<string, BinOp> = {
   and: '&',
   xor: '^',
   shl: '<<',
-  shr_u: '>>',
+  shr_u: '>>>', // the LOGICAL right shift; the C backend spells it `>>` over an unsigned operand
   shr_s: '>>',
   logic_and: '&&',
   logic_or: '||', // short-circuit connectives (raise/shortcircuit.ts)
@@ -931,9 +924,6 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
   // The C static type of a rendered expression, over the declared variable types — what decides
   // whether a memory access's base may be dereferenced as spelled (memAccess/arrayAccess).
   const ctype = (e0: Expr): IrType | undefined => exprCType(e0, (n) => varType.get(n));
-  // The C SIGNEDNESS of a rendered expression, over the same declarations — what decides whether
-  // a `>>` spells the logical or the arithmetic shift (the shift-direction rule below).
-  const signednessOf = (e0: Expr): boolean | undefined => renderedIntSignedness(e0, (n) => varType.get(n));
   let fresh = 0;
   // Materialized defs are named FIRST: the temp is the register the compiler held the
   // value in, so downstream coalescing (loop inits, merge params) may adopt it — subject to the
@@ -1270,28 +1260,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
         l = isPtrGlobal(l) ? intifyPtrGlobal(l) : l;
         r = isPtrGlobal(r) ? intifyPtrGlobal(r) : r;
       }
-      // SHIFT-DIRECTION FIDELITY. `shr_u` and `shr_s` are DIFFERENT operations, but C spells both
-      // `>>` and picks between them from the LEFT OPERAND'S TYPE — logical on unsigned, arithmetic
-      // on signed. So an `shr_u` over anything that renders signed recompiles to `asr` where the
-      // target has `lsr`, and computes a different VALUE: `*(u8 *)&g << 30 >> 30` promotes to
-      // `int`, and for a 2-bit field holding 2 it evaluates to -1, not 2.
-      //
-      // engine.ts's zext fold already fixes the byte/half case by folding the whole shift PAIR to
-      // a cast op; it can only do that for widths C can name, so every OTHER extract width — which
-      // is to say every bitfield read — was left with the miscompile. This closes the general case
-      // at the point where the operand's C type is actually decided.
-      //
-      // The operand type is settled by CONSTRUCTION rather than inspection: exprCType is
-      // pointer-ness-accurate and reports every integer as `s32` by contract, so it cannot be
-      // asked this question. The cast is therefore added unless the operand is a node kind whose
-      // C type exprCType DERIVES rather than defaults (a declared var, an explicit cast, an
-      // access) and that type is already the 32-bit integer of the right signedness. A redundant
-      // cast over an operand that already has that type is codegen-identical, so the conservative
-      // direction is free; being wrong in the other direction is a miscompile.
-      if (op === '>>') {
-        const wantSigned = d.opcode === 'shr_s';
-        l = signednessOf(l) === wantSigned ? l : retype32(l, T.int(32, wantSigned));
-      }
+      // (The two right shifts stay DISTINCT ops here — `>>>` logical, `>>` arithmetic. Which token
+      // a language spells each with, and what cast pins the choice, is a BACKEND decision; see
+      // l3/ast.ts BinOp and backend/cfamily.ts's shift rule.)
       // SCOPE: this and intifyAddr cover the ARITHMETIC escapes. A pointer global under a
       // COMPARISON (`gPtr < K` — C compares unsigned whatever the asm's icmp_s* said) is the same
       // class as intifyAddrCmp's `addr` rule and is deliberately left alone here: it is valid C
@@ -1303,8 +1274,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
       // The C rotate idiom — `x >> n | x << (32 - n)` (mirrored for rotl). Byte-exact round-trip
       // on agbcc (thumb ror) and mwcc (rotlw/rotlwi), verified against both toolchains before the
       // ops landed. `x` and `n` render twice — both pure by construction (SSA values; the rotate's
-      // operands are register reads), and recovery seeds the rotated value unsigned so `>>`
-      // spells the logical shift the idiom requires.
+      // operands are register reads). The right half is the LOGICAL shift `>>>` — the idiom is
+      // wrong with an arithmetic one — stated on the node rather than left to the rotated value's
+      // recovered unsignedness, which is a property of recovery rather than of the idiom.
       //
       // (The PPC mirror fold — `rotl(x, 32 - m)` ⇒ rotr(x, m) — lives in the PATTERN layer,
       // engine.ts ROTL_MIRROR: it is a compiler-spelling idiom, mwcc-gated there, not a
@@ -1321,7 +1293,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
         n.k === 'const'
           ? { k: 'const', value: 32 - n.value }
           : { k: 'bin', op: '-', l: { k: 'const', value: 32 }, r: n };
-      const [near, far] = dir === 'rotr' ? (['>>', '<<'] as const) : (['<<', '>>'] as const);
+      const [near, far] = dir === 'rotr' ? (['>>>', '<<'] as const) : (['<<', '>>>'] as const);
       return {
         k: 'bin',
         op: '|',

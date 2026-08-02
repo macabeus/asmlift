@@ -153,7 +153,10 @@ export function deriveSpec(name: string, sfn: SFn): CppFnSpec {
 
   const maxIdx = new Map<string, number>([...recv.values()].map((c) => [c, -1]));
   const visitE = (e: Expr): void => {
-    if (e.k === 'index' && e.base.k === 'var' && e.idx.k === 'const') {
+    // `!e.lead?.length` mirrors core's cpp.ts leaf hook: a multidimensional array global's access
+    // is not a receiver access, and its `[0]` prefix is not a member index. Kept in step with that
+    // copy — the two predicates must not drift.
+    if (e.k === 'index' && e.base.k === 'var' && e.idx.k === 'const' && !e.lead?.length) {
       const cls = recv.get(e.base.name);
       if (cls !== undefined) {
         maxIdx.set(cls, Math.max(maxIdx.get(cls) ?? -1, e.idx.value));

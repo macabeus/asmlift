@@ -332,13 +332,37 @@ export function rankBy<S extends { score: number }>(
   if (results.length === 0) {
     throw new Error(`no scorable candidate for '${symbol}': ${firstLine(lastScoreErr)}`, { cause: lastScoreErr });
   }
-  // Score first; ENUMERATION ORDER breaks a tie. That order is meaningful, not incidental:
-  // enumerateCandidates emits the symbol-map spellings before their `/raw-globals` siblings, so
-  // when both compile to the same bytes the named one wins and the reader gets `gCounter` rather
-  // than a bare address. Spelled as an explicit comparator because relying on Array#sort's
-  // stability would make the preference an accident of two unrelated decisions.
-  results.sort((a, b) => a.score.score - b.score.score || a.order - b.order);
+  // Score first. Then CAST COUNT, then ENUMERATION ORDER.
+  //
+  // A tie means the axis that separates these two candidates did not change the bytes, so the
+  // differ has nothing left to say and the tie-break should pick the more readable spelling.
+  // Casts are the right proxy because a WRONG signedness pin is what manufactures them: the C
+  // backend has to cast a shift operand back to the signedness the machine op needs, so pinning
+  // `u32` on a genuinely-signed parameter buys `s32 f(u32 a0) { return (s32)a0 >> a1; }` for the
+  // same bytes as `s32 f(s32 a0) { return a0 >> a1; }`. Before the backend synthesized that cast
+  // the wrong pin simply lost on score; now it ties, and without this the enumeration order alone
+  // would silently install the noisier spelling on every such row.
+  //
+  // Enumeration order still breaks a remaining tie, and that order is meaningful rather than
+  // incidental: enumerateCandidates emits the symbol-map spellings before their `/raw-globals`
+  // siblings, so when both compile to the same bytes the named one wins and the reader gets
+  // `gCounter` rather than a bare address. Spelled as an explicit comparator throughout, because
+  // relying on Array#sort's stability would make each preference an accident.
+  results.sort(
+    (a, b) => a.score.score - b.score.score || castCount(a.source) - castCount(b.source) || a.order - b.order,
+  );
   return { best: results[0], candidates: results.map(({ order: _order, ...c }) => c), dropped };
+}
+
+/** Scalar casts in a candidate's rendered source — the readability tie-break above.
+ *
+ *  Deliberately a TEXT count over the emitted string rather than a tree walk: the tie-break
+ *  compares two candidates that are separate decompilations with no shared tree, and what a reader
+ *  experiences is the text. It counts the decomp typedef vocabulary only, so a pointer cast
+ *  (`(u8 *)p`) or a struct cast is not read as noise — those are structural spellings a candidate
+ *  does not choose. Deterministic, and total on any string. */
+function castCount(source: string): number {
+  return source.match(/\((?:u|s)(?:8|16|32)\)/g)?.length ?? 0;
 }
 
 /** First line of whatever the scorer threw — the compiler's own diagnostic, not a stack. */

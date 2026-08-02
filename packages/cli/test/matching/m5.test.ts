@@ -36,7 +36,7 @@ test('M5: report captures stages, a scored pattern event, candidates, and the sc
   const ev = report.patternEvents[0];
   expect(ev.hits).toBe(1);
   expect(ev.scoreAfter).toBe(0);
-  expect(ev.scoreDelta).toBe(ev.scoreAfter - ev.scoreBefore);
+  expect(ev.scoreDelta).toBe(ev.scoreAfter! - ev.scoreBefore!);
   expect(ev.scoreDelta).toBeLessThanOrEqual(0); // a fold must never cost bytes
 
   // ranked candidates + a byte-exact final score

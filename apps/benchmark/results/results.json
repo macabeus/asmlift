@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generatedAt": "2026-08-02T14:45:02.384Z",
+    "generatedAt": "2026-08-02T15:10:30.640Z",
     "toolchains": [
       "ido7.1",
       "agbcc",
@@ -14,8 +14,8 @@
       "real": 192
     },
     "asmlift": {
-      "commit": "ff80308103da26b0a684c0eabeecf06034e25a68",
-      "dirty": false
+      "commit": "b0da01be804af24a7e2502723ef2a57e52712596",
+      "dirty": true
     },
     "m2c": {
       "commit": "94098d4de68c2fcc13fb8cf1096a1520eb171abe"
@@ -305,10 +305,10 @@
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "candidateLabel": "unsigned",
+        "candidateLabel": "signed",
         "symbolsUsed": [],
         "outcome": "nonmatch",
-        "source": "void adds(s16 * a0, u32 a1, u32 a2, u32 a3) {\n    s32 v0;\n    v0 = *a0;\n    if ((s32)(a3 << 16) >> 16 < (((s32)(a1 << 16) >> 16) - v0 << 16 >> 16) / ((s32)(a2 << 16) >> 16) << 16 >> 16) {\n        *a0 = v0 + ((s32)(a3 << 16) >> 16);\n        return;\n    } else {\n        if ((((s32)(a1 << 16) >> 16) - v0 << 16 >> 16) / ((s32)(a2 << 16) >> 16) << 16 >> 16 < -((s32)(a3 << 16) >> 16)) {\n            *a0 = v0 - ((s32)(a3 << 16) >> 16);\n            return;\n        } else {\n            *a0 = v0 + ((((s32)(a1 << 16) >> 16) - v0 << 16 >> 16) / ((s32)(a2 << 16) >> 16) << 16 >> 16);\n            return;\n        }\n    }\n}\n",
+        "source": "void adds(s16 * a0, s32 a1, s32 a2, s32 a3) {\n    s32 v0;\n    v0 = *a0;\n    if (a3 << 16 >> 16 < ((a1 << 16 >> 16) - v0 << 16 >> 16) / (a2 << 16 >> 16) << 16 >> 16) {\n        *a0 = v0 + (a3 << 16 >> 16);\n        return;\n    } else {\n        if (((a1 << 16 >> 16) - v0 << 16 >> 16) / (a2 << 16 >> 16) << 16 >> 16 < -(a3 << 16 >> 16)) {\n            *a0 = v0 - (a3 << 16 >> 16);\n            return;\n        } else {\n            *a0 = v0 + (((a1 << 16 >> 16) - v0 << 16 >> 16) / (a2 << 16 >> 16) << 16 >> 16);\n            return;\n        }\n    }\n}\n",
         "score": 32,
         "maxScore": 44,
         "compileErrors": null,
@@ -320,10 +320,10 @@
           "argMismatch": 23
         },
         "quality": {
-          "score": 88,
+          "score": 100,
           "lines": 16,
           "gotos": 0,
-          "casts": 10,
+          "casts": 0,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -722,10 +722,10 @@
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "candidateLabel": "unsigned",
+        "candidateLabel": "signed",
         "symbolsUsed": [],
         "outcome": "nonmatch",
-        "source": "s32 chase_s2(s16 * a0, u32 a1, u32 a2) {\n    s32 v0;\n    v0 = *a0;\n    *a0 = v0 + ((s32)(a2 << 16) >> 16);\n    if ((*a0 - ((s32)(a1 << 16) >> 16)) * ((v0 << 16 >> 16) - ((s32)(a1 << 16) >> 16)) <= 0) {\n        *a0 = (s32)(a1 << 16) >> 16;\n        return 1;\n    } else {\n        return 0;\n    }\n}\n",
+        "source": "s32 chase_s2(s16 * a0, s32 a1, s32 a2) {\n    s32 v0;\n    v0 = *a0;\n    *a0 = v0 + (a2 << 16 >> 16);\n    if ((*a0 - (a1 << 16 >> 16)) * ((v0 << 16 >> 16) - (a1 << 16 >> 16)) <= 0) {\n        *a0 = a1 << 16 >> 16;\n        return 1;\n    } else {\n        return 0;\n    }\n}\n",
         "score": 18,
         "maxScore": 24,
         "compileErrors": null,
@@ -737,10 +737,10 @@
           "argMismatch": 14
         },
         "quality": {
-          "score": 96,
+          "score": 100,
           "lines": 11,
           "gotos": 0,
-          "casts": 4,
+          "casts": 0,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -2719,7 +2719,7 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-ZaiYCk/c.c:1078: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-xJce6J/c.c:1078: invalid operands to binary <<"
           }
         ],
         "symbolsUsed": [
@@ -3078,10 +3078,10 @@
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "candidateLabel": "unsigned",
+        "candidateLabel": "signed",
         "symbolsUsed": [],
         "outcome": "match",
-        "source": "s32 DivideQ4(u32 a0, u32 a1) {\n    return (s16)(((s32)(a0 << 16) >> 12) / (s16)a1);\n}\n",
+        "source": "s32 DivideQ4(s32 a0, s32 a1) {\n    return (s16)((a0 << 16 >> 12) / (s16)a1);\n}\n",
         "score": 0,
         "maxScore": 10,
         "compileErrors": null,
@@ -3093,10 +3093,10 @@
           "argMismatch": 0
         },
         "quality": {
-          "score": 98,
+          "score": 100,
           "lines": 3,
           "gotos": 0,
-          "casts": 3,
+          "casts": 2,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -3153,10 +3153,10 @@
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "candidateLabel": "unsigned",
+        "candidateLabel": "signed",
         "symbolsUsed": [],
         "outcome": "match",
-        "source": "s32 DivideQ8(u32 a0, u32 a1) {\n    return (s16)(((s32)(a0 << 16) >> 8) / (s16)a1);\n}\n",
+        "source": "s32 DivideQ8(s32 a0, s32 a1) {\n    return (s16)((a0 << 16 >> 8) / (s16)a1);\n}\n",
         "score": 0,
         "maxScore": 10,
         "compileErrors": null,
@@ -3168,10 +3168,10 @@
           "argMismatch": 0
         },
         "quality": {
-          "score": 98,
+          "score": 100,
           "lines": 3,
           "gotos": 0,
-          "casts": 3,
+          "casts": 2,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -3338,7 +3338,7 @@
         "droppedCandidates": [
           {
             "label": "unsigned",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-ONtP95/c.c:1076: `gBgDataPtrs' undeclared (first use in this function)"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-W6ZnMd/c.c:1076: `gBgDataPtrs' undeclared (first use in this function)"
           }
         ],
         "symbolsUsed": [],
@@ -4312,7 +4312,7 @@
         "droppedCandidates": [
           {
             "label": "unsigned",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-eNr8t3/c.c:1077: too many arguments to function `thunk_sub_080002A0'"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-lak9dx/c.c:1077: too many arguments to function `thunk_sub_080002A0'"
           }
         ],
         "symbolsUsed": [],
@@ -4917,11 +4917,11 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-NNa6wG/c.c:1088: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-WA6KED/c.c:1088: incompatible types in assignment"
           },
           {
             "label": "signed/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-WFFKsm/c.c:1088: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-udOGvj/c.c:1088: incompatible types in assignment"
           }
         ],
         "symbolsUsed": [
@@ -5550,7 +5550,7 @@
           "returnsVoid": true
         }
       },
-      "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /host-tmp/bench-real-gcc272-6e75782630e57f66/u.i\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t0000000c func_8000F088_FC88\n00000000         *UND*\t00000000 gUCodeAddresses\n\n\nRELOCATION RECORDS FOR [.text]:\nOFFSET   TYPE              VALUE\n00000000 R_MIPS_HI16       gUCodeAddresses\n00000008 R_MIPS_LO16       gUCodeAddresses\n\n\nContents of section .text:\n 0000 3c010000 03e00008 ac240000 00000000  <........$......\nContents of section .reginfo:\n 0000 80000012 00000000 00000000 00000000  ................\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.              \n",
+      "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /work/u.i\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t0000000c func_8000F088_FC88\n00000000         *UND*\t00000000 gUCodeAddresses\n\n\nRELOCATION RECORDS FOR [.text]:\nOFFSET   TYPE              VALUE\n00000000 R_MIPS_HI16       gUCodeAddresses\n00000008 R_MIPS_LO16       gUCodeAddresses\n\n\nContents of section .text:\n 0000 3c010000 03e00008 ac240000 00000000  <........$......\nContents of section .reginfo:\n 0000 80000012 00000000 00000000 00000000  ................\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.              \n",
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
@@ -5609,7 +5609,7 @@
       "gapSize": null,
       "scripts": {
         "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `func_8000F088_FC88` — benchmark function marioparty3:func_8000F088_FC88:gcc2.7.2.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit 94098d4:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout 94098d4de68c2fcc13fb8cf1096a1520eb171abe\nM2C_PATH='/path/to/m2c'\n# asmlift checkout — this function's context is the project's own vendored headers, stored in\n# the repo (referenced, not embedded — it is ~10–260 KB):\nASMLIFT_PATH='/path/to/asmlift'\n\n# The benchmark's objdump→GNU-as normalization of this function's disassembly (m2c cannot\n# read raw objdump), including the jump-table/const data sections recovered from the target\n# object — the exact text the benchmark fed m2c.\ncat > in.s <<'ASM_INPUT'\nglabel func_8000F088_FC88\n    lui\t$at, %hi(gUCodeAddresses)\n    jr\t$ra\n    sw\t$a0, %lo(gUCodeAddresses)($at)\n    nop\nASM_INPUT\n\n# The project context the benchmark passed via --context, exactly as its real workflow would —\n# GCC attributes stripped (m2c's C parser cannot read them; same expression the harness uses),\n# plus the function's own prototype (the TU-derived context never forward-declares it).\ngunzip -kc \"$ASMLIFT_PATH/apps/benchmark/dataset/real/tu/marioparty3/ctx-c25019c2fe69.i.gz\" | perl -pe 's/__attribute__\\s*\\(\\((?:[^()]|\\((?:[^()]|\\([^()]*\\))*\\))*\\)\\)//g' > ctx.h\ncat >> ctx.h <<'CTX_PROTO'\nvoid func_8000F088_FC88(s32 *uCodeAdresses);\nCTX_PROTO\n\nargs=(\n  --target mips-gcc-c     # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function func_8000F088_FC88 # the symbol to decompile from in.s\n  --context ctx.h         # the C context header above (typedefs + prototypes)\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
-        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `func_8000F088_FC88` — benchmark function marioparty3:func_8000F088_FC88:gcc2.7.2.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# This function's decomp project — the PINNED benchmark branch (provenance base + one\n# integration commit). Not needed to run this script (inputs are embedded/vendored); to\n# rebuild the project itself:\n#   git clone --branch asmlift-benchmark https://github.com/macabeus/marioparty3.git marioparty3\n#   make -C marioparty3\n#   make -C marioparty3 asmlift-elf   # derive the symbols ELF (DWARF types-sidecar)\n# SYMBOLS: this row ran WITH the project's symbol map (names + declaration shapes derived\n# from the ELF its decomp.yaml names), vendored at apps/benchmark/dataset/real/tu/marioparty3/symbols.json.gz\n#   sha256 of the decompressed map JSON: e249a038f016048d9e33be700c6bdb39406578cdee1a84bb4cef6fd98d39da20\n# Set PROJECT_PATH to your BUILT checkout of the project above (clone recipe in the comments);\n# step 1 then points the scoring config at the checkout's decomp.yaml (tools.asmlift.elf) —\n# the CLI loads the same map, so this run reproduces the row's named spellings. A missing\n# checkout/ELF warns and runs map-less (output may then differ from the row).\nPROJECT_PATH='/path/to/marioparty3'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# --project-root grafts the checkout's tools.asmlift.elf (the symbol map) into that decomp.yaml.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target marioparty3:func_8000F088_FC88:gcc2.7.2 --out \"$PWD\" --project-root \"$PROJECT_PATH\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact `objdump -d --no-show-raw-insn` text.\ncat > in.asm <<'ASM_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <func_8000F088_FC88>:\n   0:\tlui\tat,0x0\n   4:\tjr\tra\n   8:\tsw\ta0,0(at)\n   c:\tnop\nASM_INPUT\n\n# The target object's objdump -s -r -t dump — the data sections (jump tables, anonymous\n# constants) the text-only disassembly lacks; the benchmark recovered them from the object.\ncat > dump.txt <<'DUMP_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /host-tmp/bench-real-gcc272-6e75782630e57f66/u.i\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t0000000c func_8000F088_FC88\n00000000         *UND*\t00000000 gUCodeAddresses\n\n\nRELOCATION RECORDS FOR [.text]:\nOFFSET   TYPE              VALUE\n00000000 R_MIPS_HI16       gUCodeAddresses\n00000008 R_MIPS_LO16       gUCodeAddresses\n\n\nContents of section .text:\n 0000 3c010000 03e00008 ac240000 00000000  <........$......\nContents of section .reginfo:\n 0000 80000012 00000000 00000000 00000000  ................\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.\nDUMP_INPUT\n\n# The prototype hints the benchmark fed asmlift (callee arities / void-ness).\ncat > proto.json <<'PROTO_INPUT'\n{\n  \"func_8000F088_FC88\": {\n    \"returnsVoid\": true\n  }\n}\nPROTO_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\n# (real tier: candidates are scored INSIDE the project's own context — step 1 materializes the\n# row's vendored context next to target.o as ctx.i, and the generated decomp.yaml concatenates\n# it ahead of every candidate, so this scores in the same world the benchmark did)\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target gcc2.7.2       # frontend + target description (ISA, calling convention, compiler idioms)\n  --name func_8000F088_FC88 # the symbol to decompile (multi-function input selects by name)\n  --asm-data dump.txt     # the data sections above (jump-table/const recovery)\n  --proto proto.json      # the prototype hints above (callee arities / void-ness)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `func_8000F088_FC88` — benchmark function marioparty3:func_8000F088_FC88:gcc2.7.2.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# This function's decomp project — the PINNED benchmark branch (provenance base + one\n# integration commit). Not needed to run this script (inputs are embedded/vendored); to\n# rebuild the project itself:\n#   git clone --branch asmlift-benchmark https://github.com/macabeus/marioparty3.git marioparty3\n#   make -C marioparty3\n#   make -C marioparty3 asmlift-elf   # derive the symbols ELF (DWARF types-sidecar)\n# SYMBOLS: this row ran WITH the project's symbol map (names + declaration shapes derived\n# from the ELF its decomp.yaml names), vendored at apps/benchmark/dataset/real/tu/marioparty3/symbols.json.gz\n#   sha256 of the decompressed map JSON: e249a038f016048d9e33be700c6bdb39406578cdee1a84bb4cef6fd98d39da20\n# Set PROJECT_PATH to your BUILT checkout of the project above (clone recipe in the comments);\n# step 1 then points the scoring config at the checkout's decomp.yaml (tools.asmlift.elf) —\n# the CLI loads the same map, so this run reproduces the row's named spellings. A missing\n# checkout/ELF warns and runs map-less (output may then differ from the row).\nPROJECT_PATH='/path/to/marioparty3'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# --project-root grafts the checkout's tools.asmlift.elf (the symbol map) into that decomp.yaml.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target marioparty3:func_8000F088_FC88:gcc2.7.2 --out \"$PWD\" --project-root \"$PROJECT_PATH\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact `objdump -d --no-show-raw-insn` text.\ncat > in.asm <<'ASM_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <func_8000F088_FC88>:\n   0:\tlui\tat,0x0\n   4:\tjr\tra\n   8:\tsw\ta0,0(at)\n   c:\tnop\nASM_INPUT\n\n# The target object's objdump -s -r -t dump — the data sections (jump tables, anonymous\n# constants) the text-only disassembly lacks; the benchmark recovered them from the object.\ncat > dump.txt <<'DUMP_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /work/u.i\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t0000000c func_8000F088_FC88\n00000000         *UND*\t00000000 gUCodeAddresses\n\n\nRELOCATION RECORDS FOR [.text]:\nOFFSET   TYPE              VALUE\n00000000 R_MIPS_HI16       gUCodeAddresses\n00000008 R_MIPS_LO16       gUCodeAddresses\n\n\nContents of section .text:\n 0000 3c010000 03e00008 ac240000 00000000  <........$......\nContents of section .reginfo:\n 0000 80000012 00000000 00000000 00000000  ................\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.\nDUMP_INPUT\n\n# The prototype hints the benchmark fed asmlift (callee arities / void-ness).\ncat > proto.json <<'PROTO_INPUT'\n{\n  \"func_8000F088_FC88\": {\n    \"returnsVoid\": true\n  }\n}\nPROTO_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\n# (real tier: candidates are scored INSIDE the project's own context — step 1 materializes the\n# row's vendored context next to target.o as ctx.i, and the generated decomp.yaml concatenates\n# it ahead of every candidate, so this scores in the same world the benchmark did)\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target gcc2.7.2       # frontend + target description (ISA, calling convention, compiler idioms)\n  --name func_8000F088_FC88 # the symbol to decompile (multi-function input selects by name)\n  --asm-data dump.txt     # the data sections above (jump-table/const recovery)\n  --proto proto.json      # the prototype hints above (callee arities / void-ness)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
       }
     },
     {
@@ -5716,7 +5716,7 @@
           "returnsVoid": true
         }
       },
-      "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /host-tmp/bench-real-gcc272-05c12408f5e201a5/u.i\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t00000014 func_800123F4_12FF4\n00000000         *UND*\t00000000 D_800D2008_D2C08\n00000000         *UND*\t00000000 D_800D418E_D4D8E\n\n\nRELOCATION RECORDS FOR [.text]:\nOFFSET   TYPE              VALUE\n00000000 R_MIPS_HI16       D_800D2008_D2C08\n00000004 R_MIPS_LO16       D_800D2008_D2C08\n00000008 R_MIPS_HI16       D_800D418E_D4D8E\n00000010 R_MIPS_LO16       D_800D418E_D4D8E\n\n\nContents of section .text:\n 0000 3c020000 90420000 3c010000 03e00008  <....B..<.......\n 0010 a4220000 00000000 00000000 00000000  .\"..............\nContents of section .reginfo:\n 0000 80000006 00000000 00000000 00000000  ................\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.              \n",
+      "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /work/u.i\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t00000014 func_800123F4_12FF4\n00000000         *UND*\t00000000 D_800D2008_D2C08\n00000000         *UND*\t00000000 D_800D418E_D4D8E\n\n\nRELOCATION RECORDS FOR [.text]:\nOFFSET   TYPE              VALUE\n00000000 R_MIPS_HI16       D_800D2008_D2C08\n00000004 R_MIPS_LO16       D_800D2008_D2C08\n00000008 R_MIPS_HI16       D_800D418E_D4D8E\n00000010 R_MIPS_LO16       D_800D418E_D4D8E\n\n\nContents of section .text:\n 0000 3c020000 90420000 3c010000 03e00008  <....B..<.......\n 0010 a4220000 00000000 00000000 00000000  .\"..............\nContents of section .reginfo:\n 0000 80000006 00000000 00000000 00000000  ................\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.              \n",
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
@@ -5778,7 +5778,7 @@
       "gapSize": null,
       "scripts": {
         "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `func_800123F4_12FF4` — benchmark function marioparty3:func_800123F4_12FF4:gcc2.7.2.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit 94098d4:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout 94098d4de68c2fcc13fb8cf1096a1520eb171abe\nM2C_PATH='/path/to/m2c'\n# asmlift checkout — this function's context is the project's own vendored headers, stored in\n# the repo (referenced, not embedded — it is ~10–260 KB):\nASMLIFT_PATH='/path/to/asmlift'\n\n# The benchmark's objdump→GNU-as normalization of this function's disassembly (m2c cannot\n# read raw objdump), including the jump-table/const data sections recovered from the target\n# object — the exact text the benchmark fed m2c.\ncat > in.s <<'ASM_INPUT'\nglabel func_800123F4_12FF4\n    lui\t$v0, %hi(D_800D2008_D2C08)\n    lbu\t$v0, %lo(D_800D2008_D2C08)($v0)\n    lui\t$at, %hi(D_800D418E_D4D8E)\n    jr\t$ra\n    sh\t$v0, %lo(D_800D418E_D4D8E)($at)\nASM_INPUT\n\n# The project context the benchmark passed via --context, exactly as its real workflow would —\n# GCC attributes stripped (m2c's C parser cannot read them; same expression the harness uses),\n# plus the function's own prototype (the TU-derived context never forward-declares it).\ngunzip -kc \"$ASMLIFT_PATH/apps/benchmark/dataset/real/tu/marioparty3/ctx-888e856682f4.i.gz\" | perl -pe 's/__attribute__\\s*\\(\\((?:[^()]|\\((?:[^()]|\\([^()]*\\))*\\))*\\)\\)//g' > ctx.h\ncat >> ctx.h <<'CTX_PROTO'\nvoid func_800123F4_12FF4(void);\nCTX_PROTO\n\nargs=(\n  --target mips-gcc-c     # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function func_800123F4_12FF4 # the symbol to decompile from in.s\n  --context ctx.h         # the C context header above (typedefs + prototypes)\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
-        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `func_800123F4_12FF4` — benchmark function marioparty3:func_800123F4_12FF4:gcc2.7.2.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# This function's decomp project — the PINNED benchmark branch (provenance base + one\n# integration commit). Not needed to run this script (inputs are embedded/vendored); to\n# rebuild the project itself:\n#   git clone --branch asmlift-benchmark https://github.com/macabeus/marioparty3.git marioparty3\n#   make -C marioparty3\n#   make -C marioparty3 asmlift-elf   # derive the symbols ELF (DWARF types-sidecar)\n# SYMBOLS: this row ran WITH the project's symbol map (names + declaration shapes derived\n# from the ELF its decomp.yaml names), vendored at apps/benchmark/dataset/real/tu/marioparty3/symbols.json.gz\n#   sha256 of the decompressed map JSON: e249a038f016048d9e33be700c6bdb39406578cdee1a84bb4cef6fd98d39da20\n# Set PROJECT_PATH to your BUILT checkout of the project above (clone recipe in the comments);\n# step 1 then points the scoring config at the checkout's decomp.yaml (tools.asmlift.elf) —\n# the CLI loads the same map, so this run reproduces the row's named spellings. A missing\n# checkout/ELF warns and runs map-less (output may then differ from the row).\nPROJECT_PATH='/path/to/marioparty3'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# --project-root grafts the checkout's tools.asmlift.elf (the symbol map) into that decomp.yaml.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target marioparty3:func_800123F4_12FF4:gcc2.7.2 --out \"$PWD\" --project-root \"$PROJECT_PATH\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact `objdump -d --no-show-raw-insn` text.\ncat > in.asm <<'ASM_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <func_800123F4_12FF4>:\n   0:\tlui\tv0,0x0\n   4:\tlbu\tv0,0(v0)\n   8:\tlui\tat,0x0\n   c:\tjr\tra\n  10:\tsh\tv0,0(at)\n\t...\nASM_INPUT\n\n# The target object's objdump -s -r -t dump — the data sections (jump tables, anonymous\n# constants) the text-only disassembly lacks; the benchmark recovered them from the object.\ncat > dump.txt <<'DUMP_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /host-tmp/bench-real-gcc272-05c12408f5e201a5/u.i\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t00000014 func_800123F4_12FF4\n00000000         *UND*\t00000000 D_800D2008_D2C08\n00000000         *UND*\t00000000 D_800D418E_D4D8E\n\n\nRELOCATION RECORDS FOR [.text]:\nOFFSET   TYPE              VALUE\n00000000 R_MIPS_HI16       D_800D2008_D2C08\n00000004 R_MIPS_LO16       D_800D2008_D2C08\n00000008 R_MIPS_HI16       D_800D418E_D4D8E\n00000010 R_MIPS_LO16       D_800D418E_D4D8E\n\n\nContents of section .text:\n 0000 3c020000 90420000 3c010000 03e00008  <....B..<.......\n 0010 a4220000 00000000 00000000 00000000  .\"..............\nContents of section .reginfo:\n 0000 80000006 00000000 00000000 00000000  ................\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.\nDUMP_INPUT\n\n# The prototype hints the benchmark fed asmlift (callee arities / void-ness).\ncat > proto.json <<'PROTO_INPUT'\n{\n  \"func_800123F4_12FF4\": {\n    \"returnsVoid\": true\n  }\n}\nPROTO_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\n# (real tier: candidates are scored INSIDE the project's own context — step 1 materializes the\n# row's vendored context next to target.o as ctx.i, and the generated decomp.yaml concatenates\n# it ahead of every candidate, so this scores in the same world the benchmark did)\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target gcc2.7.2       # frontend + target description (ISA, calling convention, compiler idioms)\n  --name func_800123F4_12FF4 # the symbol to decompile (multi-function input selects by name)\n  --asm-data dump.txt     # the data sections above (jump-table/const recovery)\n  --proto proto.json      # the prototype hints above (callee arities / void-ness)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `func_800123F4_12FF4` — benchmark function marioparty3:func_800123F4_12FF4:gcc2.7.2.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# This function's decomp project — the PINNED benchmark branch (provenance base + one\n# integration commit). Not needed to run this script (inputs are embedded/vendored); to\n# rebuild the project itself:\n#   git clone --branch asmlift-benchmark https://github.com/macabeus/marioparty3.git marioparty3\n#   make -C marioparty3\n#   make -C marioparty3 asmlift-elf   # derive the symbols ELF (DWARF types-sidecar)\n# SYMBOLS: this row ran WITH the project's symbol map (names + declaration shapes derived\n# from the ELF its decomp.yaml names), vendored at apps/benchmark/dataset/real/tu/marioparty3/symbols.json.gz\n#   sha256 of the decompressed map JSON: e249a038f016048d9e33be700c6bdb39406578cdee1a84bb4cef6fd98d39da20\n# Set PROJECT_PATH to your BUILT checkout of the project above (clone recipe in the comments);\n# step 1 then points the scoring config at the checkout's decomp.yaml (tools.asmlift.elf) —\n# the CLI loads the same map, so this run reproduces the row's named spellings. A missing\n# checkout/ELF warns and runs map-less (output may then differ from the row).\nPROJECT_PATH='/path/to/marioparty3'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# --project-root grafts the checkout's tools.asmlift.elf (the symbol map) into that decomp.yaml.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target marioparty3:func_800123F4_12FF4:gcc2.7.2 --out \"$PWD\" --project-root \"$PROJECT_PATH\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact `objdump -d --no-show-raw-insn` text.\ncat > in.asm <<'ASM_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <func_800123F4_12FF4>:\n   0:\tlui\tv0,0x0\n   4:\tlbu\tv0,0(v0)\n   8:\tlui\tat,0x0\n   c:\tjr\tra\n  10:\tsh\tv0,0(at)\n\t...\nASM_INPUT\n\n# The target object's objdump -s -r -t dump — the data sections (jump tables, anonymous\n# constants) the text-only disassembly lacks; the benchmark recovered them from the object.\ncat > dump.txt <<'DUMP_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /work/u.i\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t00000014 func_800123F4_12FF4\n00000000         *UND*\t00000000 D_800D2008_D2C08\n00000000         *UND*\t00000000 D_800D418E_D4D8E\n\n\nRELOCATION RECORDS FOR [.text]:\nOFFSET   TYPE              VALUE\n00000000 R_MIPS_HI16       D_800D2008_D2C08\n00000004 R_MIPS_LO16       D_800D2008_D2C08\n00000008 R_MIPS_HI16       D_800D418E_D4D8E\n00000010 R_MIPS_LO16       D_800D418E_D4D8E\n\n\nContents of section .text:\n 0000 3c020000 90420000 3c010000 03e00008  <....B..<.......\n 0010 a4220000 00000000 00000000 00000000  .\"..............\nContents of section .reginfo:\n 0000 80000006 00000000 00000000 00000000  ................\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.\nDUMP_INPUT\n\n# The prototype hints the benchmark fed asmlift (callee arities / void-ness).\ncat > proto.json <<'PROTO_INPUT'\n{\n  \"func_800123F4_12FF4\": {\n    \"returnsVoid\": true\n  }\n}\nPROTO_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\n# (real tier: candidates are scored INSIDE the project's own context — step 1 materializes the\n# row's vendored context next to target.o as ctx.i, and the generated decomp.yaml concatenates\n# it ahead of every candidate, so this scores in the same world the benchmark did)\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target gcc2.7.2       # frontend + target description (ISA, calling convention, compiler idioms)\n  --name func_800123F4_12FF4 # the symbol to decompile (multi-function input selects by name)\n  --asm-data dump.txt     # the data sections above (jump-table/const recovery)\n  --proto proto.json      # the prototype hints above (callee arities / void-ness)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
       }
     },
     {
@@ -5890,11 +5890,11 @@
           "returnsVoid": true
         }
       },
-      "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /host-tmp/bench-real-gcc272-6ecb67d8ea63f745/u.i\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t00000040 func_8001FBBC_207BC\n00000000         *UND*\t00000000 HmfModelData\n\n\nRELOCATION RECORDS FOR [.text]:\nOFFSET   TYPE              VALUE\n00000008 R_MIPS_HI16       HmfModelData\n0000000c R_MIPS_LO16       HmfModelData\n\n\nContents of section .text:\n 0000 00042400 00042403 3c030000 8c630000  ..$...$.<....c..\n 0010 00041040 00441021 00021180 00431021  ...@.D.!.....C.!\n 0020 8c4200b4 10400004 00000000 a0450000  .B...@.......E..\n 0030 a0460001 a0470002 03e00008 00000000  .F...G..........\nContents of section .reginfo:\n 0000 800000fc 00000000 00000000 00000000  ................\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.              \n",
+      "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /work/u.i\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t00000040 func_8001FBBC_207BC\n00000000         *UND*\t00000000 HmfModelData\n\n\nRELOCATION RECORDS FOR [.text]:\nOFFSET   TYPE              VALUE\n00000008 R_MIPS_HI16       HmfModelData\n0000000c R_MIPS_LO16       HmfModelData\n\n\nContents of section .text:\n 0000 00042400 00042403 3c030000 8c630000  ..$...$.<....c..\n 0010 00041040 00441021 00021180 00431021  ...@.D.!.....C.!\n 0020 8c4200b4 10400004 00000000 a0450000  .B...@.......E..\n 0030 a0460001 a0470002 03e00008 00000000  .F...G..........\nContents of section .reginfo:\n 0000 800000fc 00000000 00000000 00000000  ................\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.              \n",
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "candidateLabel": "unsigned",
+        "candidateLabel": "signed",
         "symbolsUsed": [
           {
             "name": "HmfModelData",
@@ -5902,7 +5902,7 @@
           }
         ],
         "outcome": "match",
-        "source": "struct Elem0 { u8 _pad0[180]; s32 field_180; u8 _pad1[8]; };\nvoid func_8001FBBC_207BC(u32 a0, u32 a1, u32 a2, u32 a3) {\n    u8 * v0;\n    v0 = (u8 *)((struct Elem0 *)HmfModelData)[(s32)(a0 << 16) >> 16].field_180;\n    if (v0 != 0) {\n        *v0 = a1;\n        v0[1] = a2;\n        v0[2] = a3;\n    }\n    return;\n}\n",
+        "source": "struct Elem0 { u8 _pad0[180]; s32 field_180; u8 _pad1[8]; };\nvoid func_8001FBBC_207BC(s32 a0, s32 a1, s32 a2, s32 a3) {\n    u8 * v0;\n    v0 = (u8 *)((struct Elem0 *)HmfModelData)[a0 << 16 >> 16].field_180;\n    if (v0 != 0) {\n        *v0 = a1;\n        v0[1] = a2;\n        v0[2] = a3;\n    }\n    return;\n}\n",
         "score": 0,
         "maxScore": 16,
         "compileErrors": null,
@@ -5917,7 +5917,7 @@
           "score": 100,
           "lines": 11,
           "gotos": 0,
-          "casts": 2,
+          "casts": 1,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -5950,7 +5950,7 @@
       "gapSize": null,
       "scripts": {
         "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `func_8001FBBC_207BC` — benchmark function marioparty3:func_8001FBBC_207BC:gcc2.7.2.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit 94098d4:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout 94098d4de68c2fcc13fb8cf1096a1520eb171abe\nM2C_PATH='/path/to/m2c'\n# asmlift checkout — this function's context is the project's own vendored headers, stored in\n# the repo (referenced, not embedded — it is ~10–260 KB):\nASMLIFT_PATH='/path/to/asmlift'\n\n# The benchmark's objdump→GNU-as normalization of this function's disassembly (m2c cannot\n# read raw objdump), including the jump-table/const data sections recovered from the target\n# object — the exact text the benchmark fed m2c.\ncat > in.s <<'ASM_INPUT'\nglabel func_8001FBBC_207BC\n    sll\t$a0, $a0, 0x10\n    sra\t$a0, $a0, 0x10\n    lui\t$v1, %hi(HmfModelData)\n    lw\t$v1, %lo(HmfModelData)($v1)\n    sll\t$v0, $a0, 0x1\n    addu\t$v0, $v0, $a0\n    sll\t$v0, $v0, 0x6\n    addu\t$v0, $v0, $v1\n    lw\t$v0, 180($v0)\n    beqz\t$v0, .L38\n    nop\n    sb\t$a1, 0($v0)\n    sb\t$a2, 1($v0)\n    sb\t$a3, 2($v0)\n.L38:\n    jr\t$ra\n    nop\nASM_INPUT\n\n# The project context the benchmark passed via --context, exactly as its real workflow would —\n# GCC attributes stripped (m2c's C parser cannot read them; same expression the harness uses),\n# plus the function's own prototype (the TU-derived context never forward-declares it).\ngunzip -kc \"$ASMLIFT_PATH/apps/benchmark/dataset/real/tu/marioparty3/ctx-0eb9f921480c.i.gz\" | perl -pe 's/__attribute__\\s*\\(\\((?:[^()]|\\((?:[^()]|\\([^()]*\\))*\\))*\\)\\)//g' > ctx.h\ncat >> ctx.h <<'CTX_PROTO'\nvoid func_8001FBBC_207BC(s16 arg0, s8 arg1, s8 arg2, s8 arg3);\nCTX_PROTO\n\nargs=(\n  --target mips-gcc-c     # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function func_8001FBBC_207BC # the symbol to decompile from in.s\n  --context ctx.h         # the C context header above (typedefs + prototypes)\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
-        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `func_8001FBBC_207BC` — benchmark function marioparty3:func_8001FBBC_207BC:gcc2.7.2.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# This function's decomp project — the PINNED benchmark branch (provenance base + one\n# integration commit). Not needed to run this script (inputs are embedded/vendored); to\n# rebuild the project itself:\n#   git clone --branch asmlift-benchmark https://github.com/macabeus/marioparty3.git marioparty3\n#   make -C marioparty3\n#   make -C marioparty3 asmlift-elf   # derive the symbols ELF (DWARF types-sidecar)\n# SYMBOLS: this row ran WITH the project's symbol map (names + declaration shapes derived\n# from the ELF its decomp.yaml names), vendored at apps/benchmark/dataset/real/tu/marioparty3/symbols.json.gz\n#   sha256 of the decompressed map JSON: e249a038f016048d9e33be700c6bdb39406578cdee1a84bb4cef6fd98d39da20\n# Set PROJECT_PATH to your BUILT checkout of the project above (clone recipe in the comments);\n# step 1 then points the scoring config at the checkout's decomp.yaml (tools.asmlift.elf) —\n# the CLI loads the same map, so this run reproduces the row's named spellings. A missing\n# checkout/ELF warns and runs map-less (output may then differ from the row).\nPROJECT_PATH='/path/to/marioparty3'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# --project-root grafts the checkout's tools.asmlift.elf (the symbol map) into that decomp.yaml.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target marioparty3:func_8001FBBC_207BC:gcc2.7.2 --out \"$PWD\" --project-root \"$PROJECT_PATH\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact `objdump -d --no-show-raw-insn` text.\ncat > in.asm <<'ASM_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <func_8001FBBC_207BC>:\n   0:\tsll\ta0,a0,0x10\n   4:\tsra\ta0,a0,0x10\n   8:\tlui\tv1,0x0\n   c:\tlw\tv1,0(v1)\n  10:\tsll\tv0,a0,0x1\n  14:\taddu\tv0,v0,a0\n  18:\tsll\tv0,v0,0x6\n  1c:\taddu\tv0,v0,v1\n  20:\tlw\tv0,180(v0)\n  24:\tbeqz\tv0,38 <func_8001FBBC_207BC+0x38>\n  28:\tnop\n  2c:\tsb\ta1,0(v0)\n  30:\tsb\ta2,1(v0)\n  34:\tsb\ta3,2(v0)\n  38:\tjr\tra\n  3c:\tnop\nASM_INPUT\n\n# The target object's objdump -s -r -t dump — the data sections (jump tables, anonymous\n# constants) the text-only disassembly lacks; the benchmark recovered them from the object.\ncat > dump.txt <<'DUMP_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /host-tmp/bench-real-gcc272-6ecb67d8ea63f745/u.i\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t00000040 func_8001FBBC_207BC\n00000000         *UND*\t00000000 HmfModelData\n\n\nRELOCATION RECORDS FOR [.text]:\nOFFSET   TYPE              VALUE\n00000008 R_MIPS_HI16       HmfModelData\n0000000c R_MIPS_LO16       HmfModelData\n\n\nContents of section .text:\n 0000 00042400 00042403 3c030000 8c630000  ..$...$.<....c..\n 0010 00041040 00441021 00021180 00431021  ...@.D.!.....C.!\n 0020 8c4200b4 10400004 00000000 a0450000  .B...@.......E..\n 0030 a0460001 a0470002 03e00008 00000000  .F...G..........\nContents of section .reginfo:\n 0000 800000fc 00000000 00000000 00000000  ................\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.\nDUMP_INPUT\n\n# The prototype hints the benchmark fed asmlift (callee arities / void-ness).\ncat > proto.json <<'PROTO_INPUT'\n{\n  \"func_8001FBBC_207BC\": {\n    \"returnsVoid\": true\n  }\n}\nPROTO_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\n# (real tier: candidates are scored INSIDE the project's own context — step 1 materializes the\n# row's vendored context next to target.o as ctx.i, and the generated decomp.yaml concatenates\n# it ahead of every candidate, so this scores in the same world the benchmark did)\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target gcc2.7.2       # frontend + target description (ISA, calling convention, compiler idioms)\n  --name func_8001FBBC_207BC # the symbol to decompile (multi-function input selects by name)\n  --asm-data dump.txt     # the data sections above (jump-table/const recovery)\n  --proto proto.json      # the prototype hints above (callee arities / void-ness)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `func_8001FBBC_207BC` — benchmark function marioparty3:func_8001FBBC_207BC:gcc2.7.2.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# This function's decomp project — the PINNED benchmark branch (provenance base + one\n# integration commit). Not needed to run this script (inputs are embedded/vendored); to\n# rebuild the project itself:\n#   git clone --branch asmlift-benchmark https://github.com/macabeus/marioparty3.git marioparty3\n#   make -C marioparty3\n#   make -C marioparty3 asmlift-elf   # derive the symbols ELF (DWARF types-sidecar)\n# SYMBOLS: this row ran WITH the project's symbol map (names + declaration shapes derived\n# from the ELF its decomp.yaml names), vendored at apps/benchmark/dataset/real/tu/marioparty3/symbols.json.gz\n#   sha256 of the decompressed map JSON: e249a038f016048d9e33be700c6bdb39406578cdee1a84bb4cef6fd98d39da20\n# Set PROJECT_PATH to your BUILT checkout of the project above (clone recipe in the comments);\n# step 1 then points the scoring config at the checkout's decomp.yaml (tools.asmlift.elf) —\n# the CLI loads the same map, so this run reproduces the row's named spellings. A missing\n# checkout/ELF warns and runs map-less (output may then differ from the row).\nPROJECT_PATH='/path/to/marioparty3'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# --project-root grafts the checkout's tools.asmlift.elf (the symbol map) into that decomp.yaml.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target marioparty3:func_8001FBBC_207BC:gcc2.7.2 --out \"$PWD\" --project-root \"$PROJECT_PATH\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact `objdump -d --no-show-raw-insn` text.\ncat > in.asm <<'ASM_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <func_8001FBBC_207BC>:\n   0:\tsll\ta0,a0,0x10\n   4:\tsra\ta0,a0,0x10\n   8:\tlui\tv1,0x0\n   c:\tlw\tv1,0(v1)\n  10:\tsll\tv0,a0,0x1\n  14:\taddu\tv0,v0,a0\n  18:\tsll\tv0,v0,0x6\n  1c:\taddu\tv0,v0,v1\n  20:\tlw\tv0,180(v0)\n  24:\tbeqz\tv0,38 <func_8001FBBC_207BC+0x38>\n  28:\tnop\n  2c:\tsb\ta1,0(v0)\n  30:\tsb\ta2,1(v0)\n  34:\tsb\ta3,2(v0)\n  38:\tjr\tra\n  3c:\tnop\nASM_INPUT\n\n# The target object's objdump -s -r -t dump — the data sections (jump tables, anonymous\n# constants) the text-only disassembly lacks; the benchmark recovered them from the object.\ncat > dump.txt <<'DUMP_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /work/u.i\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t00000040 func_8001FBBC_207BC\n00000000         *UND*\t00000000 HmfModelData\n\n\nRELOCATION RECORDS FOR [.text]:\nOFFSET   TYPE              VALUE\n00000008 R_MIPS_HI16       HmfModelData\n0000000c R_MIPS_LO16       HmfModelData\n\n\nContents of section .text:\n 0000 00042400 00042403 3c030000 8c630000  ..$...$.<....c..\n 0010 00041040 00441021 00021180 00431021  ...@.D.!.....C.!\n 0020 8c4200b4 10400004 00000000 a0450000  .B...@.......E..\n 0030 a0460001 a0470002 03e00008 00000000  .F...G..........\nContents of section .reginfo:\n 0000 800000fc 00000000 00000000 00000000  ................\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.\nDUMP_INPUT\n\n# The prototype hints the benchmark fed asmlift (callee arities / void-ness).\ncat > proto.json <<'PROTO_INPUT'\n{\n  \"func_8001FBBC_207BC\": {\n    \"returnsVoid\": true\n  }\n}\nPROTO_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\n# (real tier: candidates are scored INSIDE the project's own context — step 1 materializes the\n# row's vendored context next to target.o as ctx.i, and the generated decomp.yaml concatenates\n# it ahead of every candidate, so this scores in the same world the benchmark did)\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target gcc2.7.2       # frontend + target description (ISA, calling convention, compiler idioms)\n  --name func_8001FBBC_207BC # the symbol to decompile (multi-function input selects by name)\n  --asm-data dump.txt     # the data sections above (jump-table/const recovery)\n  --proto proto.json      # the prototype hints above (callee arities / void-ness)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
       }
     },
     {
@@ -6153,7 +6153,7 @@
           "returnsVoid": true
         }
       },
-      "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /host-tmp/bench-real-gcc272-42758b8683c841eb/u.i\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t0000006c func_80045350_45F50\n00000000         *UND*\t00000000 GwSystem\n00000000         *UND*\t00000000 D_800A6D44_A7944\n00000000         *UND*\t00000000 GwPlayer\n\n\nRELOCATION RECORDS FOR [.text]:\nOFFSET   TYPE              VALUE\n00000000 R_MIPS_HI16       GwSystem\n00000004 R_MIPS_LO16       GwSystem\n00000018 R_MIPS_HI16       D_800A6D44_A7944\n00000020 R_MIPS_LO16       D_800A6D44_A7944\n00000034 R_MIPS_HI16       GwPlayer\n00000038 R_MIPS_LO16       GwPlayer\n\n\nContents of section .text:\n 0000 3c030000 80630010 2463ffff 00031080  <....c..$c......\n 0010 00431021 00021080 3c030000 00621821  .C.!....<....b.!\n 0020 90630000 24020006 1062000e 00000000  .c..$....b......\n 0030 00001821 3c040000 24840000 000310c0  ...!<...$.......\n 0040 00431023 000210c0 00441021 a4400006  .C.#.....D.!.@..\n 0050 a4400008 24630001 28620004 1440fff8  .@..$c..(b...@..\n 0060 000310c0 03e00008 00000000 00000000  ................\nContents of section .reginfo:\n 0000 8000001c 00000000 00000000 00000000  ................\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.              \n",
+      "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /work/u.i\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t0000006c func_80045350_45F50\n00000000         *UND*\t00000000 GwSystem\n00000000         *UND*\t00000000 D_800A6D44_A7944\n00000000         *UND*\t00000000 GwPlayer\n\n\nRELOCATION RECORDS FOR [.text]:\nOFFSET   TYPE              VALUE\n00000000 R_MIPS_HI16       GwSystem\n00000004 R_MIPS_LO16       GwSystem\n00000018 R_MIPS_HI16       D_800A6D44_A7944\n00000020 R_MIPS_LO16       D_800A6D44_A7944\n00000034 R_MIPS_HI16       GwPlayer\n00000038 R_MIPS_LO16       GwPlayer\n\n\nContents of section .text:\n 0000 3c030000 80630010 2463ffff 00031080  <....c..$c......\n 0010 00431021 00021080 3c030000 00621821  .C.!....<....b.!\n 0020 90630000 24020006 1062000e 00000000  .c..$....b......\n 0030 00001821 3c040000 24840000 000310c0  ...!<...$.......\n 0040 00431023 000210c0 00441021 a4400006  .C.#.....D.!.@..\n 0050 a4400008 24630001 28620004 1440fff8  .@..$c..(b...@..\n 0060 000310c0 03e00008 00000000 00000000  ................\nContents of section .reginfo:\n 0000 8000001c 00000000 00000000 00000000  ................\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.              \n",
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
@@ -6201,7 +6201,7 @@
       "gapSize": null,
       "scripts": {
         "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `func_80045350_45F50` — benchmark function marioparty3:func_80045350_45F50:gcc2.7.2.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit 94098d4:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout 94098d4de68c2fcc13fb8cf1096a1520eb171abe\nM2C_PATH='/path/to/m2c'\n# asmlift checkout — this function's context is the project's own vendored headers, stored in\n# the repo (referenced, not embedded — it is ~10–260 KB):\nASMLIFT_PATH='/path/to/asmlift'\n\n# The benchmark's objdump→GNU-as normalization of this function's disassembly (m2c cannot\n# read raw objdump), including the jump-table/const data sections recovered from the target\n# object — the exact text the benchmark fed m2c.\ncat > in.s <<'ASM_INPUT'\nglabel func_80045350_45F50\n    lui\t$v1, %hi(GwSystem)\n    lb\t$v1, %lo(GwSystem)($v1)\n    addiu\t$v1, $v1, -1\n    sll\t$v0, $v1, 0x2\n    addu\t$v0, $v0, $v1\n    sll\t$v0, $v0, 0x2\n    lui\t$v1, %hi(D_800A6D44_A7944)\n    addu\t$v1, $v1, $v0\n    lbu\t$v1, %lo(D_800A6D44_A7944)($v1)\n    li\t$v0, 6\n    beq\t$v1, $v0, .L64\n    nop\n    move\t$v1, $zero\n    lui\t$a0, %hi(GwPlayer)\n    addiu\t$a0, $a0, %lo(GwPlayer)\n    sll\t$v0, $v1, 0x3\n.L40:\n    subu\t$v0, $v0, $v1\n    sll\t$v0, $v0, 0x3\n    addu\t$v0, $v0, $a0\n    sh\t$zero, 6($v0)\n    sh\t$zero, 8($v0)\n    addiu\t$v1, $v1, 1\n    slti\t$v0, $v1, 4\n    bnez\t$v0, .L40\n    sll\t$v0, $v1, 0x3\n.L64:\n    jr\t$ra\n    nop\n    nop\nASM_INPUT\n\n# The project context the benchmark passed via --context, exactly as its real workflow would —\n# GCC attributes stripped (m2c's C parser cannot read them; same expression the harness uses),\n# plus the function's own prototype (the TU-derived context never forward-declares it).\ngunzip -kc \"$ASMLIFT_PATH/apps/benchmark/dataset/real/tu/marioparty3/ctx-a3d2d0baeda1.i.gz\" | perl -pe 's/__attribute__\\s*\\(\\((?:[^()]|\\((?:[^()]|\\([^()]*\\))*\\))*\\)\\)//g' > ctx.h\ncat >> ctx.h <<'CTX_PROTO'\nvoid func_80045350_45F50(void);\nCTX_PROTO\n\nargs=(\n  --target mips-gcc-c     # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function func_80045350_45F50 # the symbol to decompile from in.s\n  --context ctx.h         # the C context header above (typedefs + prototypes)\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
-        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `func_80045350_45F50` — benchmark function marioparty3:func_80045350_45F50:gcc2.7.2.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# This function's decomp project — the PINNED benchmark branch (provenance base + one\n# integration commit). Not needed to run this script (inputs are embedded/vendored); to\n# rebuild the project itself:\n#   git clone --branch asmlift-benchmark https://github.com/macabeus/marioparty3.git marioparty3\n#   make -C marioparty3\n#   make -C marioparty3 asmlift-elf   # derive the symbols ELF (DWARF types-sidecar)\n# SYMBOLS: this row ran WITH the project's symbol map (names + declaration shapes derived\n# from the ELF its decomp.yaml names), vendored at apps/benchmark/dataset/real/tu/marioparty3/symbols.json.gz\n#   sha256 of the decompressed map JSON: e249a038f016048d9e33be700c6bdb39406578cdee1a84bb4cef6fd98d39da20\n# Set PROJECT_PATH to your BUILT checkout of the project above (clone recipe in the comments);\n# step 1 then points the scoring config at the checkout's decomp.yaml (tools.asmlift.elf) —\n# the CLI loads the same map, so this run reproduces the row's named spellings. A missing\n# checkout/ELF warns and runs map-less (output may then differ from the row).\nPROJECT_PATH='/path/to/marioparty3'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# --project-root grafts the checkout's tools.asmlift.elf (the symbol map) into that decomp.yaml.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target marioparty3:func_80045350_45F50:gcc2.7.2 --out \"$PWD\" --project-root \"$PROJECT_PATH\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact `objdump -d --no-show-raw-insn` text.\ncat > in.asm <<'ASM_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <func_80045350_45F50>:\n   0:\tlui\tv1,0x0\n   4:\tlb\tv1,16(v1)\n   8:\taddiu\tv1,v1,-1\n   c:\tsll\tv0,v1,0x2\n  10:\taddu\tv0,v0,v1\n  14:\tsll\tv0,v0,0x2\n  18:\tlui\tv1,0x0\n  1c:\taddu\tv1,v1,v0\n  20:\tlbu\tv1,0(v1)\n  24:\tli\tv0,6\n  28:\tbeq\tv1,v0,64 <func_80045350_45F50+0x64>\n  2c:\tnop\n  30:\tmove\tv1,zero\n  34:\tlui\ta0,0x0\n  38:\taddiu\ta0,a0,0\n  3c:\tsll\tv0,v1,0x3\n  40:\tsubu\tv0,v0,v1\n  44:\tsll\tv0,v0,0x3\n  48:\taddu\tv0,v0,a0\n  4c:\tsh\tzero,6(v0)\n  50:\tsh\tzero,8(v0)\n  54:\taddiu\tv1,v1,1\n  58:\tslti\tv0,v1,4\n  5c:\tbnez\tv0,40 <func_80045350_45F50+0x40>\n  60:\tsll\tv0,v1,0x3\n  64:\tjr\tra\n  68:\tnop\n  6c:\tnop\nASM_INPUT\n\n# The target object's objdump -s -r -t dump — the data sections (jump tables, anonymous\n# constants) the text-only disassembly lacks; the benchmark recovered them from the object.\ncat > dump.txt <<'DUMP_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /host-tmp/bench-real-gcc272-42758b8683c841eb/u.i\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t0000006c func_80045350_45F50\n00000000         *UND*\t00000000 GwSystem\n00000000         *UND*\t00000000 D_800A6D44_A7944\n00000000         *UND*\t00000000 GwPlayer\n\n\nRELOCATION RECORDS FOR [.text]:\nOFFSET   TYPE              VALUE\n00000000 R_MIPS_HI16       GwSystem\n00000004 R_MIPS_LO16       GwSystem\n00000018 R_MIPS_HI16       D_800A6D44_A7944\n00000020 R_MIPS_LO16       D_800A6D44_A7944\n00000034 R_MIPS_HI16       GwPlayer\n00000038 R_MIPS_LO16       GwPlayer\n\n\nContents of section .text:\n 0000 3c030000 80630010 2463ffff 00031080  <....c..$c......\n 0010 00431021 00021080 3c030000 00621821  .C.!....<....b.!\n 0020 90630000 24020006 1062000e 00000000  .c..$....b......\n 0030 00001821 3c040000 24840000 000310c0  ...!<...$.......\n 0040 00431023 000210c0 00441021 a4400006  .C.#.....D.!.@..\n 0050 a4400008 24630001 28620004 1440fff8  .@..$c..(b...@..\n 0060 000310c0 03e00008 00000000 00000000  ................\nContents of section .reginfo:\n 0000 8000001c 00000000 00000000 00000000  ................\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.\nDUMP_INPUT\n\n# The prototype hints the benchmark fed asmlift (callee arities / void-ness).\ncat > proto.json <<'PROTO_INPUT'\n{\n  \"func_80045350_45F50\": {\n    \"returnsVoid\": true\n  }\n}\nPROTO_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\n# (real tier: candidates are scored INSIDE the project's own context — step 1 materializes the\n# row's vendored context next to target.o as ctx.i, and the generated decomp.yaml concatenates\n# it ahead of every candidate, so this scores in the same world the benchmark did)\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target gcc2.7.2       # frontend + target description (ISA, calling convention, compiler idioms)\n  --name func_80045350_45F50 # the symbol to decompile (multi-function input selects by name)\n  --asm-data dump.txt     # the data sections above (jump-table/const recovery)\n  --proto proto.json      # the prototype hints above (callee arities / void-ness)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `func_80045350_45F50` — benchmark function marioparty3:func_80045350_45F50:gcc2.7.2.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# This function's decomp project — the PINNED benchmark branch (provenance base + one\n# integration commit). Not needed to run this script (inputs are embedded/vendored); to\n# rebuild the project itself:\n#   git clone --branch asmlift-benchmark https://github.com/macabeus/marioparty3.git marioparty3\n#   make -C marioparty3\n#   make -C marioparty3 asmlift-elf   # derive the symbols ELF (DWARF types-sidecar)\n# SYMBOLS: this row ran WITH the project's symbol map (names + declaration shapes derived\n# from the ELF its decomp.yaml names), vendored at apps/benchmark/dataset/real/tu/marioparty3/symbols.json.gz\n#   sha256 of the decompressed map JSON: e249a038f016048d9e33be700c6bdb39406578cdee1a84bb4cef6fd98d39da20\n# Set PROJECT_PATH to your BUILT checkout of the project above (clone recipe in the comments);\n# step 1 then points the scoring config at the checkout's decomp.yaml (tools.asmlift.elf) —\n# the CLI loads the same map, so this run reproduces the row's named spellings. A missing\n# checkout/ELF warns and runs map-less (output may then differ from the row).\nPROJECT_PATH='/path/to/marioparty3'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# --project-root grafts the checkout's tools.asmlift.elf (the symbol map) into that decomp.yaml.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target marioparty3:func_80045350_45F50:gcc2.7.2 --out \"$PWD\" --project-root \"$PROJECT_PATH\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact `objdump -d --no-show-raw-insn` text.\ncat > in.asm <<'ASM_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <func_80045350_45F50>:\n   0:\tlui\tv1,0x0\n   4:\tlb\tv1,16(v1)\n   8:\taddiu\tv1,v1,-1\n   c:\tsll\tv0,v1,0x2\n  10:\taddu\tv0,v0,v1\n  14:\tsll\tv0,v0,0x2\n  18:\tlui\tv1,0x0\n  1c:\taddu\tv1,v1,v0\n  20:\tlbu\tv1,0(v1)\n  24:\tli\tv0,6\n  28:\tbeq\tv1,v0,64 <func_80045350_45F50+0x64>\n  2c:\tnop\n  30:\tmove\tv1,zero\n  34:\tlui\ta0,0x0\n  38:\taddiu\ta0,a0,0\n  3c:\tsll\tv0,v1,0x3\n  40:\tsubu\tv0,v0,v1\n  44:\tsll\tv0,v0,0x3\n  48:\taddu\tv0,v0,a0\n  4c:\tsh\tzero,6(v0)\n  50:\tsh\tzero,8(v0)\n  54:\taddiu\tv1,v1,1\n  58:\tslti\tv0,v1,4\n  5c:\tbnez\tv0,40 <func_80045350_45F50+0x40>\n  60:\tsll\tv0,v1,0x3\n  64:\tjr\tra\n  68:\tnop\n  6c:\tnop\nASM_INPUT\n\n# The target object's objdump -s -r -t dump — the data sections (jump tables, anonymous\n# constants) the text-only disassembly lacks; the benchmark recovered them from the object.\ncat > dump.txt <<'DUMP_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /work/u.i\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t0000006c func_80045350_45F50\n00000000         *UND*\t00000000 GwSystem\n00000000         *UND*\t00000000 D_800A6D44_A7944\n00000000         *UND*\t00000000 GwPlayer\n\n\nRELOCATION RECORDS FOR [.text]:\nOFFSET   TYPE              VALUE\n00000000 R_MIPS_HI16       GwSystem\n00000004 R_MIPS_LO16       GwSystem\n00000018 R_MIPS_HI16       D_800A6D44_A7944\n00000020 R_MIPS_LO16       D_800A6D44_A7944\n00000034 R_MIPS_HI16       GwPlayer\n00000038 R_MIPS_LO16       GwPlayer\n\n\nContents of section .text:\n 0000 3c030000 80630010 2463ffff 00031080  <....c..$c......\n 0010 00431021 00021080 3c030000 00621821  .C.!....<....b.!\n 0020 90630000 24020006 1062000e 00000000  .c..$....b......\n 0030 00001821 3c040000 24840000 000310c0  ...!<...$.......\n 0040 00431023 000210c0 00441021 a4400006  .C.#.....D.!.@..\n 0050 a4400008 24630001 28620004 1440fff8  .@..$c..(b...@..\n 0060 000310c0 03e00008 00000000 00000000  ................\nContents of section .reginfo:\n 0000 8000001c 00000000 00000000 00000000  ................\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.\nDUMP_INPUT\n\n# The prototype hints the benchmark fed asmlift (callee arities / void-ness).\ncat > proto.json <<'PROTO_INPUT'\n{\n  \"func_80045350_45F50\": {\n    \"returnsVoid\": true\n  }\n}\nPROTO_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\n# (real tier: candidates are scored INSIDE the project's own context — step 1 materializes the\n# row's vendored context next to target.o as ctx.i, and the generated decomp.yaml concatenates\n# it ahead of every candidate, so this scores in the same world the benchmark did)\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target gcc2.7.2       # frontend + target description (ISA, calling convention, compiler idioms)\n  --name func_80045350_45F50 # the symbol to decompile (multi-function input selects by name)\n  --asm-data dump.txt     # the data sections above (jump-table/const recovery)\n  --proto proto.json      # the prototype hints above (callee arities / void-ness)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
       }
     },
     {
@@ -7041,7 +7041,7 @@
           "returnsVoid": true
         }
       },
-      "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /host-tmp/bench-real-gcc272-c7814ced67c9c843/u.i\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t00000084 func_800570A8_57CA8\n00000000         *UND*\t00000000 HuSprGrpData\n00000000         *UND*\t00000000 D_800D0A50_D1650\n\n\nRELOCATION RECORDS FOR [.text]:\nOFFSET   TYPE              VALUE\n00000008 R_MIPS_HI16       HuSprGrpData\n00000010 R_MIPS_LO16       HuSprGrpData\n0000002c R_MIPS_HI16       D_800D0A50_D1650\n00000034 R_MIPS_LO16       D_800D0A50_D1650\n\n\nContents of section .text:\n 0000 00042400 00042383 3c020000 00441021  ..$...#.<....D.!\n 0010 8c420000 00052c00 00052b83 00a22821  .B....,...+...(!\n 0020 8ca40010 00063400 00063383 3c020000  ......4...3.<...\n 0030 00461021 8c420000 ac820098 3c013f80  .F.!.B......<.?.\n 0040 44810000 00000000 e48000fc 00001821  D..............!\n 0050 3405ffff 00031040 00441021 a445009c  4......@.D.!.E..\n 0060 00031080 00441021 ac4000bc 24630001  .....D.!.@..$c..\n 0070 28620010 5440fff8 00031040 03e00008  (b..T@.....@....\n 0080 ac800104 00000000 00000000 00000000  ................\nContents of section .reginfo:\n 0000 8000007e 00000000 00000001 00000000  ...~............\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.              \n",
+      "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /work/u.i\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t00000084 func_800570A8_57CA8\n00000000         *UND*\t00000000 HuSprGrpData\n00000000         *UND*\t00000000 D_800D0A50_D1650\n\n\nRELOCATION RECORDS FOR [.text]:\nOFFSET   TYPE              VALUE\n00000008 R_MIPS_HI16       HuSprGrpData\n00000010 R_MIPS_LO16       HuSprGrpData\n0000002c R_MIPS_HI16       D_800D0A50_D1650\n00000034 R_MIPS_LO16       D_800D0A50_D1650\n\n\nContents of section .text:\n 0000 00042400 00042383 3c020000 00441021  ..$...#.<....D.!\n 0010 8c420000 00052c00 00052b83 00a22821  .B....,...+...(!\n 0020 8ca40010 00063400 00063383 3c020000  ......4...3.<...\n 0030 00461021 8c420000 ac820098 3c013f80  .F.!.B......<.?.\n 0040 44810000 00000000 e48000fc 00001821  D..............!\n 0050 3405ffff 00031040 00441021 a445009c  4......@.D.!.E..\n 0060 00031080 00441021 ac4000bc 24630001  .....D.!.@..$c..\n 0070 28620010 5440fff8 00031040 03e00008  (b..T@.....@....\n 0080 ac800104 00000000 00000000 00000000  ................\nContents of section .reginfo:\n 0000 8000007e 00000000 00000001 00000000  ...~............\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.              \n",
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
@@ -7090,7 +7090,7 @@
       "gapSize": null,
       "scripts": {
         "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `func_800570A8_57CA8` — benchmark function marioparty3:func_800570A8_57CA8:gcc2.7.2.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit 94098d4:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout 94098d4de68c2fcc13fb8cf1096a1520eb171abe\nM2C_PATH='/path/to/m2c'\n# asmlift checkout — this function's context is the project's own vendored headers, stored in\n# the repo (referenced, not embedded — it is ~10–260 KB):\nASMLIFT_PATH='/path/to/asmlift'\n\n# The benchmark's objdump→GNU-as normalization of this function's disassembly (m2c cannot\n# read raw objdump), including the jump-table/const data sections recovered from the target\n# object — the exact text the benchmark fed m2c.\ncat > in.s <<'ASM_INPUT'\nglabel func_800570A8_57CA8\n    sll\t$a0, $a0, 0x10\n    sra\t$a0, $a0, 0xe\n    lui\t$v0, %hi(HuSprGrpData)\n    addu\t$v0, $v0, $a0\n    lw\t$v0, %lo(HuSprGrpData)($v0)\n    sll\t$a1, $a1, 0x10\n    sra\t$a1, $a1, 0xe\n    addu\t$a1, $a1, $v0\n    lw\t$a0, 16($a1)\n    sll\t$a2, $a2, 0x10\n    sra\t$a2, $a2, 0xe\n    lui\t$v0, %hi(D_800D0A50_D1650)\n    addu\t$v0, $v0, $a2\n    lw\t$v0, %lo(D_800D0A50_D1650)($v0)\n    sw\t$v0, 152($a0)\n    lui\t$at, 0x3f80\n    mtc1\t$at, $f0\n    nop\n    swc1\t$f0, 252($a0)\n    move\t$v1, $zero\n    li\t$a1, 0xffff\n    sll\t$v0, $v1, 0x1\n.L58:\n    addu\t$v0, $v0, $a0\n    sh\t$a1, 156($v0)\n    sll\t$v0, $v1, 0x2\n    addu\t$v0, $v0, $a0\n    sw\t$zero, 188($v0)\n    addiu\t$v1, $v1, 1\n    slti\t$v0, $v1, 16\n    bnezl\t$v0, .L58\n    sll\t$v0, $v1, 0x1\n    jr\t$ra\n    sw\t$zero, 260($a0)\nASM_INPUT\n\n# The project context the benchmark passed via --context, exactly as its real workflow would —\n# GCC attributes stripped (m2c's C parser cannot read them; same expression the harness uses),\n# plus the function's own prototype (the TU-derived context never forward-declares it).\ngunzip -kc \"$ASMLIFT_PATH/apps/benchmark/dataset/real/tu/marioparty3/ctx-b2e749e20c8f.i.gz\" | perl -pe 's/__attribute__\\s*\\(\\((?:[^()]|\\((?:[^()]|\\([^()]*\\))*\\))*\\)\\)//g' > ctx.h\ncat >> ctx.h <<'CTX_PROTO'\nvoid func_800570A8_57CA8(s16 group, s16 member, s16 arg2);\nCTX_PROTO\n\nargs=(\n  --target mips-gcc-c     # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function func_800570A8_57CA8 # the symbol to decompile from in.s\n  --context ctx.h         # the C context header above (typedefs + prototypes)\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
-        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `func_800570A8_57CA8` — benchmark function marioparty3:func_800570A8_57CA8:gcc2.7.2.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# This function's decomp project — the PINNED benchmark branch (provenance base + one\n# integration commit). Not needed to run this script (inputs are embedded/vendored); to\n# rebuild the project itself:\n#   git clone --branch asmlift-benchmark https://github.com/macabeus/marioparty3.git marioparty3\n#   make -C marioparty3\n#   make -C marioparty3 asmlift-elf   # derive the symbols ELF (DWARF types-sidecar)\n# SYMBOLS: this row ran WITH the project's symbol map (names + declaration shapes derived\n# from the ELF its decomp.yaml names), vendored at apps/benchmark/dataset/real/tu/marioparty3/symbols.json.gz\n#   sha256 of the decompressed map JSON: e249a038f016048d9e33be700c6bdb39406578cdee1a84bb4cef6fd98d39da20\n# Set PROJECT_PATH to your BUILT checkout of the project above (clone recipe in the comments);\n# step 1 then points the scoring config at the checkout's decomp.yaml (tools.asmlift.elf) —\n# the CLI loads the same map, so this run reproduces the row's named spellings. A missing\n# checkout/ELF warns and runs map-less (output may then differ from the row).\nPROJECT_PATH='/path/to/marioparty3'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# --project-root grafts the checkout's tools.asmlift.elf (the symbol map) into that decomp.yaml.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target marioparty3:func_800570A8_57CA8:gcc2.7.2 --out \"$PWD\" --project-root \"$PROJECT_PATH\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact `objdump -d --no-show-raw-insn` text.\ncat > in.asm <<'ASM_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <func_800570A8_57CA8>:\n   0:\tsll\ta0,a0,0x10\n   4:\tsra\ta0,a0,0xe\n   8:\tlui\tv0,0x0\n   c:\taddu\tv0,v0,a0\n  10:\tlw\tv0,0(v0)\n  14:\tsll\ta1,a1,0x10\n  18:\tsra\ta1,a1,0xe\n  1c:\taddu\ta1,a1,v0\n  20:\tlw\ta0,16(a1)\n  24:\tsll\ta2,a2,0x10\n  28:\tsra\ta2,a2,0xe\n  2c:\tlui\tv0,0x0\n  30:\taddu\tv0,v0,a2\n  34:\tlw\tv0,0(v0)\n  38:\tsw\tv0,152(a0)\n  3c:\tlui\tat,0x3f80\n  40:\tmtc1\tat,$f0\n  44:\tnop\n  48:\tswc1\t$f0,252(a0)\n  4c:\tmove\tv1,zero\n  50:\tli\ta1,0xffff\n  54:\tsll\tv0,v1,0x1\n  58:\taddu\tv0,v0,a0\n  5c:\tsh\ta1,156(v0)\n  60:\tsll\tv0,v1,0x2\n  64:\taddu\tv0,v0,a0\n  68:\tsw\tzero,188(v0)\n  6c:\taddiu\tv1,v1,1\n  70:\tslti\tv0,v1,16\n  74:\tbnezl\tv0,58 <func_800570A8_57CA8+0x58>\n  78:\tsll\tv0,v1,0x1\n  7c:\tjr\tra\n  80:\tsw\tzero,260(a0)\n\t...\nASM_INPUT\n\n# The target object's objdump -s -r -t dump — the data sections (jump tables, anonymous\n# constants) the text-only disassembly lacks; the benchmark recovered them from the object.\ncat > dump.txt <<'DUMP_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /host-tmp/bench-real-gcc272-c7814ced67c9c843/u.i\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t00000084 func_800570A8_57CA8\n00000000         *UND*\t00000000 HuSprGrpData\n00000000         *UND*\t00000000 D_800D0A50_D1650\n\n\nRELOCATION RECORDS FOR [.text]:\nOFFSET   TYPE              VALUE\n00000008 R_MIPS_HI16       HuSprGrpData\n00000010 R_MIPS_LO16       HuSprGrpData\n0000002c R_MIPS_HI16       D_800D0A50_D1650\n00000034 R_MIPS_LO16       D_800D0A50_D1650\n\n\nContents of section .text:\n 0000 00042400 00042383 3c020000 00441021  ..$...#.<....D.!\n 0010 8c420000 00052c00 00052b83 00a22821  .B....,...+...(!\n 0020 8ca40010 00063400 00063383 3c020000  ......4...3.<...\n 0030 00461021 8c420000 ac820098 3c013f80  .F.!.B......<.?.\n 0040 44810000 00000000 e48000fc 00001821  D..............!\n 0050 3405ffff 00031040 00441021 a445009c  4......@.D.!.E..\n 0060 00031080 00441021 ac4000bc 24630001  .....D.!.@..$c..\n 0070 28620010 5440fff8 00031040 03e00008  (b..T@.....@....\n 0080 ac800104 00000000 00000000 00000000  ................\nContents of section .reginfo:\n 0000 8000007e 00000000 00000001 00000000  ...~............\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.\nDUMP_INPUT\n\n# The prototype hints the benchmark fed asmlift (callee arities / void-ness).\ncat > proto.json <<'PROTO_INPUT'\n{\n  \"func_800570A8_57CA8\": {\n    \"returnsVoid\": true\n  }\n}\nPROTO_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\n# (real tier: candidates are scored INSIDE the project's own context — step 1 materializes the\n# row's vendored context next to target.o as ctx.i, and the generated decomp.yaml concatenates\n# it ahead of every candidate, so this scores in the same world the benchmark did)\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target gcc2.7.2       # frontend + target description (ISA, calling convention, compiler idioms)\n  --name func_800570A8_57CA8 # the symbol to decompile (multi-function input selects by name)\n  --asm-data dump.txt     # the data sections above (jump-table/const recovery)\n  --proto proto.json      # the prototype hints above (callee arities / void-ness)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `func_800570A8_57CA8` — benchmark function marioparty3:func_800570A8_57CA8:gcc2.7.2.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# This function's decomp project — the PINNED benchmark branch (provenance base + one\n# integration commit). Not needed to run this script (inputs are embedded/vendored); to\n# rebuild the project itself:\n#   git clone --branch asmlift-benchmark https://github.com/macabeus/marioparty3.git marioparty3\n#   make -C marioparty3\n#   make -C marioparty3 asmlift-elf   # derive the symbols ELF (DWARF types-sidecar)\n# SYMBOLS: this row ran WITH the project's symbol map (names + declaration shapes derived\n# from the ELF its decomp.yaml names), vendored at apps/benchmark/dataset/real/tu/marioparty3/symbols.json.gz\n#   sha256 of the decompressed map JSON: e249a038f016048d9e33be700c6bdb39406578cdee1a84bb4cef6fd98d39da20\n# Set PROJECT_PATH to your BUILT checkout of the project above (clone recipe in the comments);\n# step 1 then points the scoring config at the checkout's decomp.yaml (tools.asmlift.elf) —\n# the CLI loads the same map, so this run reproduces the row's named spellings. A missing\n# checkout/ELF warns and runs map-less (output may then differ from the row).\nPROJECT_PATH='/path/to/marioparty3'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# --project-root grafts the checkout's tools.asmlift.elf (the symbol map) into that decomp.yaml.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target marioparty3:func_800570A8_57CA8:gcc2.7.2 --out \"$PWD\" --project-root \"$PROJECT_PATH\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact `objdump -d --no-show-raw-insn` text.\ncat > in.asm <<'ASM_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <func_800570A8_57CA8>:\n   0:\tsll\ta0,a0,0x10\n   4:\tsra\ta0,a0,0xe\n   8:\tlui\tv0,0x0\n   c:\taddu\tv0,v0,a0\n  10:\tlw\tv0,0(v0)\n  14:\tsll\ta1,a1,0x10\n  18:\tsra\ta1,a1,0xe\n  1c:\taddu\ta1,a1,v0\n  20:\tlw\ta0,16(a1)\n  24:\tsll\ta2,a2,0x10\n  28:\tsra\ta2,a2,0xe\n  2c:\tlui\tv0,0x0\n  30:\taddu\tv0,v0,a2\n  34:\tlw\tv0,0(v0)\n  38:\tsw\tv0,152(a0)\n  3c:\tlui\tat,0x3f80\n  40:\tmtc1\tat,$f0\n  44:\tnop\n  48:\tswc1\t$f0,252(a0)\n  4c:\tmove\tv1,zero\n  50:\tli\ta1,0xffff\n  54:\tsll\tv0,v1,0x1\n  58:\taddu\tv0,v0,a0\n  5c:\tsh\ta1,156(v0)\n  60:\tsll\tv0,v1,0x2\n  64:\taddu\tv0,v0,a0\n  68:\tsw\tzero,188(v0)\n  6c:\taddiu\tv1,v1,1\n  70:\tslti\tv0,v1,16\n  74:\tbnezl\tv0,58 <func_800570A8_57CA8+0x58>\n  78:\tsll\tv0,v1,0x1\n  7c:\tjr\tra\n  80:\tsw\tzero,260(a0)\n\t...\nASM_INPUT\n\n# The target object's objdump -s -r -t dump — the data sections (jump tables, anonymous\n# constants) the text-only disassembly lacks; the benchmark recovered them from the object.\ncat > dump.txt <<'DUMP_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /work/u.i\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t00000084 func_800570A8_57CA8\n00000000         *UND*\t00000000 HuSprGrpData\n00000000         *UND*\t00000000 D_800D0A50_D1650\n\n\nRELOCATION RECORDS FOR [.text]:\nOFFSET   TYPE              VALUE\n00000008 R_MIPS_HI16       HuSprGrpData\n00000010 R_MIPS_LO16       HuSprGrpData\n0000002c R_MIPS_HI16       D_800D0A50_D1650\n00000034 R_MIPS_LO16       D_800D0A50_D1650\n\n\nContents of section .text:\n 0000 00042400 00042383 3c020000 00441021  ..$...#.<....D.!\n 0010 8c420000 00052c00 00052b83 00a22821  .B....,...+...(!\n 0020 8ca40010 00063400 00063383 3c020000  ......4...3.<...\n 0030 00461021 8c420000 ac820098 3c013f80  .F.!.B......<.?.\n 0040 44810000 00000000 e48000fc 00001821  D..............!\n 0050 3405ffff 00031040 00441021 a445009c  4......@.D.!.E..\n 0060 00031080 00441021 ac4000bc 24630001  .....D.!.@..$c..\n 0070 28620010 5440fff8 00031040 03e00008  (b..T@.....@....\n 0080 ac800104 00000000 00000000 00000000  ................\nContents of section .reginfo:\n 0000 8000007e 00000000 00000001 00000000  ...~............\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.\nDUMP_INPUT\n\n# The prototype hints the benchmark fed asmlift (callee arities / void-ness).\ncat > proto.json <<'PROTO_INPUT'\n{\n  \"func_800570A8_57CA8\": {\n    \"returnsVoid\": true\n  }\n}\nPROTO_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\n# (real tier: candidates are scored INSIDE the project's own context — step 1 materializes the\n# row's vendored context next to target.o as ctx.i, and the generated decomp.yaml concatenates\n# it ahead of every candidate, so this scores in the same world the benchmark did)\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target gcc2.7.2       # frontend + target description (ISA, calling convention, compiler idioms)\n  --name func_800570A8_57CA8 # the symbol to decompile (multi-function input selects by name)\n  --asm-data dump.txt     # the data sections above (jump-table/const recovery)\n  --proto proto.json      # the prototype hints above (callee arities / void-ness)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
       }
     },
     {
@@ -7191,11 +7191,11 @@
           "returnsVoid": true
         }
       },
-      "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /host-tmp/bench-real-gcc272-ebcbb216a187e6c6/u.i\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t0000004c func_800600C0_60CC0\n00000000         *UND*\t00000000 D_800CC69C_CD29C\n\n\nRELOCATION RECORDS FOR [.text]:\nOFFSET   TYPE              VALUE\n0000001c R_MIPS_HI16       D_800CC69C_CD29C\n00000020 R_MIPS_LO16       D_800CC69C_CD29C\n00000030 R_MIPS_26         .text\n\n\nContents of section .text:\n 0000 00042400 00042403 00041080 00441021  ..$...$......D.!\n 0010 00021140 00441023 00021080 3c030000  ...@.D.#....<...\n 0020 8c630000 10a00004 00432021 8c820038  .c.......C !...8\n 0030 08000011 34420010 8c820038 2403ffef  ....4B.....8$...\n 0040 00431024 03e00008 ac820038 00000000  .C.$.......8....\nContents of section .reginfo:\n 0000 8000003c 00000000 00000000 00000000  ...<............\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.              \n",
+      "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /work/u.i\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t0000004c func_800600C0_60CC0\n00000000         *UND*\t00000000 D_800CC69C_CD29C\n\n\nRELOCATION RECORDS FOR [.text]:\nOFFSET   TYPE              VALUE\n0000001c R_MIPS_HI16       D_800CC69C_CD29C\n00000020 R_MIPS_LO16       D_800CC69C_CD29C\n00000030 R_MIPS_26         .text\n\n\nContents of section .text:\n 0000 00042400 00042403 00041080 00441021  ..$...$......D.!\n 0010 00021140 00441023 00021080 3c030000  ...@.D.#....<...\n 0020 8c630000 10a00004 00432021 8c820038  .c.......C !...8\n 0030 08000011 34420010 8c820038 2403ffef  ....4B.....8$...\n 0040 00431024 03e00008 ac820038 00000000  .C.$.......8....\nContents of section .reginfo:\n 0000 8000003c 00000000 00000000 00000000  ...<............\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.              \n",
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "candidateLabel": "unsigned",
+        "candidateLabel": "signed",
         "symbolsUsed": [
           {
             "name": "D_800CC69C_CD29C",
@@ -7203,7 +7203,7 @@
           }
         ],
         "outcome": "nonmatch",
-        "source": "void func_800600C0_60CC0(u32 a0, u32 a1) {\n    s32 v0;\n    s32 v1;\n    v0 = D_800CC69C_CD29C;\n    if (a1 == 0) {\n        v1 = ((s32 *)((((s32)(a0 << 16) >> 16) * 160 - ((s32)(a0 << 16) >> 16) << 2) + v0))[14] & -17;\n    } else {\n        v1 = ((s32 *)((((s32)(a0 << 16) >> 16) * 160 - ((s32)(a0 << 16) >> 16) << 2) + v0))[14] | 16;\n    }\n    ((s32 *)((((s32)(a0 << 16) >> 16) * 160 - ((s32)(a0 << 16) >> 16) << 2) + v0))[14] = v1;\n    return;\n}\n",
+        "source": "void func_800600C0_60CC0(s32 a0, s32 a1) {\n    s32 v0;\n    s32 v1;\n    v0 = D_800CC69C_CD29C;\n    if (a1 == 0) {\n        v1 = ((s32 *)(((a0 << 16 >> 16) * 160 - (a0 << 16 >> 16) << 2) + v0))[14] & -17;\n    } else {\n        v1 = ((s32 *)(((a0 << 16 >> 16) * 160 - (a0 << 16 >> 16) << 2) + v0))[14] | 16;\n    }\n    ((s32 *)(((a0 << 16 >> 16) * 160 - (a0 << 16 >> 16) << 2) + v0))[14] = v1;\n    return;\n}\n",
         "score": 41,
         "maxScore": 42,
         "compileErrors": null,
@@ -7215,10 +7215,10 @@
           "argMismatch": 7
         },
         "quality": {
-          "score": 88,
+          "score": 98,
           "lines": 12,
           "gotos": 0,
-          "casts": 9,
+          "casts": 3,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -7263,7 +7263,7 @@
       },
       "scripts": {
         "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `func_800600C0_60CC0` — benchmark function marioparty3:func_800600C0_60CC0:gcc2.7.2.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit 94098d4:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout 94098d4de68c2fcc13fb8cf1096a1520eb171abe\nM2C_PATH='/path/to/m2c'\n# asmlift checkout — this function's context is the project's own vendored headers, stored in\n# the repo (referenced, not embedded — it is ~10–260 KB):\nASMLIFT_PATH='/path/to/asmlift'\n\n# The benchmark's objdump→GNU-as normalization of this function's disassembly (m2c cannot\n# read raw objdump), including the jump-table/const data sections recovered from the target\n# object — the exact text the benchmark fed m2c.\ncat > in.s <<'ASM_INPUT'\nglabel func_800600C0_60CC0\n    sll\t$a0, $a0, 0x10\n    sra\t$a0, $a0, 0x10\n    sll\t$v0, $a0, 0x2\n    addu\t$v0, $v0, $a0\n    sll\t$v0, $v0, 0x5\n    subu\t$v0, $v0, $a0\n    sll\t$v0, $v0, 0x2\n    lui\t$v1, %hi(D_800CC69C_CD29C)\n    lw\t$v1, %lo(D_800CC69C_CD29C)($v1)\n    beqz\t$a1, .L38\n    addu\t$a0, $v0, $v1\n    lw\t$v0, 56($a0)\n    j\t.L44\n    ori\t$v0, $v0, 0x10\n.L38:\n    lw\t$v0, 56($a0)\n    li\t$v1, -17\n    and\t$v0, $v0, $v1\n.L44:\n    jr\t$ra\n    sw\t$v0, 56($a0)\n    nop\nASM_INPUT\n\n# The project context the benchmark passed via --context, exactly as its real workflow would —\n# GCC attributes stripped (m2c's C parser cannot read them; same expression the harness uses),\n# plus the function's own prototype (the TU-derived context never forward-declares it).\ngunzip -kc \"$ASMLIFT_PATH/apps/benchmark/dataset/real/tu/marioparty3/ctx-634bc95b6a8b.i.gz\" | perl -pe 's/__attribute__\\s*\\(\\((?:[^()]|\\((?:[^()]|\\([^()]*\\))*\\))*\\)\\)//g' > ctx.h\ncat >> ctx.h <<'CTX_PROTO'\nvoid func_800600C0_60CC0(s16 winId, s32 arg1);\nCTX_PROTO\n\nargs=(\n  --target mips-gcc-c     # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function func_800600C0_60CC0 # the symbol to decompile from in.s\n  --context ctx.h         # the C context header above (typedefs + prototypes)\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
-        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `func_800600C0_60CC0` — benchmark function marioparty3:func_800600C0_60CC0:gcc2.7.2.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# This function's decomp project — the PINNED benchmark branch (provenance base + one\n# integration commit). Not needed to run this script (inputs are embedded/vendored); to\n# rebuild the project itself:\n#   git clone --branch asmlift-benchmark https://github.com/macabeus/marioparty3.git marioparty3\n#   make -C marioparty3\n#   make -C marioparty3 asmlift-elf   # derive the symbols ELF (DWARF types-sidecar)\n# SYMBOLS: this row ran WITH the project's symbol map (names + declaration shapes derived\n# from the ELF its decomp.yaml names), vendored at apps/benchmark/dataset/real/tu/marioparty3/symbols.json.gz\n#   sha256 of the decompressed map JSON: e249a038f016048d9e33be700c6bdb39406578cdee1a84bb4cef6fd98d39da20\n# Set PROJECT_PATH to your BUILT checkout of the project above (clone recipe in the comments);\n# step 1 then points the scoring config at the checkout's decomp.yaml (tools.asmlift.elf) —\n# the CLI loads the same map, so this run reproduces the row's named spellings. A missing\n# checkout/ELF warns and runs map-less (output may then differ from the row).\nPROJECT_PATH='/path/to/marioparty3'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# --project-root grafts the checkout's tools.asmlift.elf (the symbol map) into that decomp.yaml.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target marioparty3:func_800600C0_60CC0:gcc2.7.2 --out \"$PWD\" --project-root \"$PROJECT_PATH\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact `objdump -d --no-show-raw-insn` text.\ncat > in.asm <<'ASM_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <func_800600C0_60CC0>:\n   0:\tsll\ta0,a0,0x10\n   4:\tsra\ta0,a0,0x10\n   8:\tsll\tv0,a0,0x2\n   c:\taddu\tv0,v0,a0\n  10:\tsll\tv0,v0,0x5\n  14:\tsubu\tv0,v0,a0\n  18:\tsll\tv0,v0,0x2\n  1c:\tlui\tv1,0x0\n  20:\tlw\tv1,0(v1)\n  24:\tbeqz\ta1,38 <func_800600C0_60CC0+0x38>\n  28:\taddu\ta0,v0,v1\n  2c:\tlw\tv0,56(a0)\n  30:\tj\t44 <func_800600C0_60CC0+0x44>\n  34:\tori\tv0,v0,0x10\n  38:\tlw\tv0,56(a0)\n  3c:\tli\tv1,-17\n  40:\tand\tv0,v0,v1\n  44:\tjr\tra\n  48:\tsw\tv0,56(a0)\n  4c:\tnop\nASM_INPUT\n\n# The target object's objdump -s -r -t dump — the data sections (jump tables, anonymous\n# constants) the text-only disassembly lacks; the benchmark recovered them from the object.\ncat > dump.txt <<'DUMP_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /host-tmp/bench-real-gcc272-ebcbb216a187e6c6/u.i\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t0000004c func_800600C0_60CC0\n00000000         *UND*\t00000000 D_800CC69C_CD29C\n\n\nRELOCATION RECORDS FOR [.text]:\nOFFSET   TYPE              VALUE\n0000001c R_MIPS_HI16       D_800CC69C_CD29C\n00000020 R_MIPS_LO16       D_800CC69C_CD29C\n00000030 R_MIPS_26         .text\n\n\nContents of section .text:\n 0000 00042400 00042403 00041080 00441021  ..$...$......D.!\n 0010 00021140 00441023 00021080 3c030000  ...@.D.#....<...\n 0020 8c630000 10a00004 00432021 8c820038  .c.......C !...8\n 0030 08000011 34420010 8c820038 2403ffef  ....4B.....8$...\n 0040 00431024 03e00008 ac820038 00000000  .C.$.......8....\nContents of section .reginfo:\n 0000 8000003c 00000000 00000000 00000000  ...<............\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.\nDUMP_INPUT\n\n# The prototype hints the benchmark fed asmlift (callee arities / void-ness).\ncat > proto.json <<'PROTO_INPUT'\n{\n  \"func_800600C0_60CC0\": {\n    \"returnsVoid\": true\n  }\n}\nPROTO_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\n# (real tier: candidates are scored INSIDE the project's own context — step 1 materializes the\n# row's vendored context next to target.o as ctx.i, and the generated decomp.yaml concatenates\n# it ahead of every candidate, so this scores in the same world the benchmark did)\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target gcc2.7.2       # frontend + target description (ISA, calling convention, compiler idioms)\n  --name func_800600C0_60CC0 # the symbol to decompile (multi-function input selects by name)\n  --asm-data dump.txt     # the data sections above (jump-table/const recovery)\n  --proto proto.json      # the prototype hints above (callee arities / void-ness)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `func_800600C0_60CC0` — benchmark function marioparty3:func_800600C0_60CC0:gcc2.7.2.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# This function's decomp project — the PINNED benchmark branch (provenance base + one\n# integration commit). Not needed to run this script (inputs are embedded/vendored); to\n# rebuild the project itself:\n#   git clone --branch asmlift-benchmark https://github.com/macabeus/marioparty3.git marioparty3\n#   make -C marioparty3\n#   make -C marioparty3 asmlift-elf   # derive the symbols ELF (DWARF types-sidecar)\n# SYMBOLS: this row ran WITH the project's symbol map (names + declaration shapes derived\n# from the ELF its decomp.yaml names), vendored at apps/benchmark/dataset/real/tu/marioparty3/symbols.json.gz\n#   sha256 of the decompressed map JSON: e249a038f016048d9e33be700c6bdb39406578cdee1a84bb4cef6fd98d39da20\n# Set PROJECT_PATH to your BUILT checkout of the project above (clone recipe in the comments);\n# step 1 then points the scoring config at the checkout's decomp.yaml (tools.asmlift.elf) —\n# the CLI loads the same map, so this run reproduces the row's named spellings. A missing\n# checkout/ELF warns and runs map-less (output may then differ from the row).\nPROJECT_PATH='/path/to/marioparty3'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# --project-root grafts the checkout's tools.asmlift.elf (the symbol map) into that decomp.yaml.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target marioparty3:func_800600C0_60CC0:gcc2.7.2 --out \"$PWD\" --project-root \"$PROJECT_PATH\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact `objdump -d --no-show-raw-insn` text.\ncat > in.asm <<'ASM_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <func_800600C0_60CC0>:\n   0:\tsll\ta0,a0,0x10\n   4:\tsra\ta0,a0,0x10\n   8:\tsll\tv0,a0,0x2\n   c:\taddu\tv0,v0,a0\n  10:\tsll\tv0,v0,0x5\n  14:\tsubu\tv0,v0,a0\n  18:\tsll\tv0,v0,0x2\n  1c:\tlui\tv1,0x0\n  20:\tlw\tv1,0(v1)\n  24:\tbeqz\ta1,38 <func_800600C0_60CC0+0x38>\n  28:\taddu\ta0,v0,v1\n  2c:\tlw\tv0,56(a0)\n  30:\tj\t44 <func_800600C0_60CC0+0x44>\n  34:\tori\tv0,v0,0x10\n  38:\tlw\tv0,56(a0)\n  3c:\tli\tv1,-17\n  40:\tand\tv0,v0,v1\n  44:\tjr\tra\n  48:\tsw\tv0,56(a0)\n  4c:\tnop\nASM_INPUT\n\n# The target object's objdump -s -r -t dump — the data sections (jump tables, anonymous\n# constants) the text-only disassembly lacks; the benchmark recovered them from the object.\ncat > dump.txt <<'DUMP_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /work/u.i\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t0000004c func_800600C0_60CC0\n00000000         *UND*\t00000000 D_800CC69C_CD29C\n\n\nRELOCATION RECORDS FOR [.text]:\nOFFSET   TYPE              VALUE\n0000001c R_MIPS_HI16       D_800CC69C_CD29C\n00000020 R_MIPS_LO16       D_800CC69C_CD29C\n00000030 R_MIPS_26         .text\n\n\nContents of section .text:\n 0000 00042400 00042403 00041080 00441021  ..$...$......D.!\n 0010 00021140 00441023 00021080 3c030000  ...@.D.#....<...\n 0020 8c630000 10a00004 00432021 8c820038  .c.......C !...8\n 0030 08000011 34420010 8c820038 2403ffef  ....4B.....8$...\n 0040 00431024 03e00008 ac820038 00000000  .C.$.......8....\nContents of section .reginfo:\n 0000 8000003c 00000000 00000000 00000000  ...<............\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.\nDUMP_INPUT\n\n# The prototype hints the benchmark fed asmlift (callee arities / void-ness).\ncat > proto.json <<'PROTO_INPUT'\n{\n  \"func_800600C0_60CC0\": {\n    \"returnsVoid\": true\n  }\n}\nPROTO_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\n# (real tier: candidates are scored INSIDE the project's own context — step 1 materializes the\n# row's vendored context next to target.o as ctx.i, and the generated decomp.yaml concatenates\n# it ahead of every candidate, so this scores in the same world the benchmark did)\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target gcc2.7.2       # frontend + target description (ISA, calling convention, compiler idioms)\n  --name func_800600C0_60CC0 # the symbol to decompile (multi-function input selects by name)\n  --asm-data dump.txt     # the data sections above (jump-table/const recovery)\n  --proto proto.json      # the prototype hints above (callee arities / void-ness)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
       }
     },
     {
@@ -7532,7 +7532,7 @@
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "candidateLabel": "signed",
+        "candidateLabel": "signed/raw-globals",
         "symbolsUsed": [
           {
             "name": "GwCommon",
@@ -7544,7 +7544,7 @@
           }
         ],
         "outcome": "nonmatch",
-        "source": "s32 GWBoardRecordGet(s32 a0) {\n    s32 v0;\n    s32 v1;\n    if (a0 << 16 < 0) a0 = (s32)(GwSystem.current_board_index << 24) >> 24;\n    if ((GwSystem.playMode & 1) != 0) {\n        v0 = (a0 << 16 >> 16) * 9;\n        v1 = (u32)&GwCommon + 31;\n    } else {\n        v0 = (a0 << 16 >> 16) * 9;\n        v1 = (u32)&GwCommon + 85;\n    }\n    return v0 + v1;\n}\n",
+        "source": "s32 GWBoardRecordGet(s32 a0) {\n    s32 v0;\n    s32 v1;\n    u8 * p0;\n    p0 = (u8 *)&GwSystem;\n    if (a0 << 16 < 0) a0 = p0[1] << 24 >> 24;\n    if ((*p0 & 1) != 0) {\n        v0 = (a0 << 16 >> 16) * 9;\n        v1 = (u32)&GwCommon + 31;\n    } else {\n        v0 = (a0 << 16 >> 16) * 9;\n        v1 = (u32)&GwCommon + 85;\n    }\n    return v0 + v1;\n}\n",
         "score": 20,
         "maxScore": 26,
         "compileErrors": null,
@@ -7557,7 +7557,7 @@
         },
         "quality": {
           "score": 100,
-          "lines": 13,
+          "lines": 15,
           "gotos": 0,
           "casts": 1,
           "unkGlue": 0,
@@ -7786,7 +7786,7 @@
       "sourceUrl": "https://github.com/macabeus/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/malloc.c#L139-L153",
       "targetAsm": "\ntarget.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <HuMemUsedMemorySizeGet>:\n   0:\tmove\tv1,a0\n   4:\tmove\ta1,zero\n   8:\tli\ta2,1\n   c:\tlbu\tv0,5(v1)\n  10:\tbne\tv0,a2,20 <HuMemUsedMemorySizeGet+0x20>\n  14:\tnop\n  18:\tlw\tv0,0(v1)\n  1c:\taddu\ta1,a1,v0\n  20:\tlw\tv1,12(v1)\n  24:\tbne\tv1,a0,c <HuMemUsedMemorySizeGet+0xc>\n  28:\tnop\n  2c:\tjr\tra\n  30:\tmove\tv0,a1\n\t...\n",
       "ctxRef": "apps/benchmark/dataset/real/tu/marioparty3/ctx-0eb9f921480c.i.gz",
-      "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /host-tmp/bench-real-gcc272-73de7a10111e47ad/u.i\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t00000034 HuMemUsedMemorySizeGet\n\n\nContents of section .text:\n 0000 00801821 00002821 24060001 90620005  ...!..(!$....b..\n 0010 14460003 00000000 8c620000 00a22821  .F.......b....(!\n 0020 8c63000c 1464fff9 00000000 03e00008  .c...d..........\n 0030 00a01021 00000000 00000000 00000000  ...!............\nContents of section .reginfo:\n 0000 8000007c 00000000 00000000 00000000  ...|............\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.              \n",
+      "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /work/u.i\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t00000034 HuMemUsedMemorySizeGet\n\n\nContents of section .text:\n 0000 00801821 00002821 24060001 90620005  ...!..(!$....b..\n 0010 14460003 00000000 8c620000 00a22821  .F.......b....(!\n 0020 8c63000c 1464fff9 00000000 03e00008  .c...d..........\n 0030 00a01021 00000000 00000000 00000000  ...!............\nContents of section .reginfo:\n 0000 8000007c 00000000 00000000 00000000  ...|............\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.              \n",
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
@@ -7841,7 +7841,7 @@
       "gapSize": null,
       "scripts": {
         "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `HuMemUsedMemorySizeGet` — benchmark function marioparty3:HuMemUsedMemorySizeGet:gcc2.7.2.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit 94098d4:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout 94098d4de68c2fcc13fb8cf1096a1520eb171abe\nM2C_PATH='/path/to/m2c'\n# asmlift checkout — this function's context is the project's own vendored headers, stored in\n# the repo (referenced, not embedded — it is ~10–260 KB):\nASMLIFT_PATH='/path/to/asmlift'\n\n# The benchmark's objdump→GNU-as normalization of this function's disassembly (m2c cannot\n# read raw objdump), including the jump-table/const data sections recovered from the target\n# object — the exact text the benchmark fed m2c.\ncat > in.s <<'ASM_INPUT'\nglabel HuMemUsedMemorySizeGet\n    move\t$v1, $a0\n    move\t$a1, $zero\n    li\t$a2, 1\n.Lc:\n    lbu\t$v0, 5($v1)\n    bne\t$v0, $a2, .L20\n    nop\n    lw\t$v0, 0($v1)\n    addu\t$a1, $a1, $v0\n.L20:\n    lw\t$v1, 12($v1)\n    bne\t$v1, $a0, .Lc\n    nop\n    jr\t$ra\n    move\t$v0, $a1\nASM_INPUT\n\n# The project context the benchmark passed via --context, exactly as its real workflow would —\n# GCC attributes stripped (m2c's C parser cannot read them; same expression the harness uses),\n# plus the function's own prototype (the TU-derived context never forward-declares it).\ngunzip -kc \"$ASMLIFT_PATH/apps/benchmark/dataset/real/tu/marioparty3/ctx-0eb9f921480c.i.gz\" | perl -pe 's/__attribute__\\s*\\(\\((?:[^()]|\\((?:[^()]|\\([^()]*\\))*\\))*\\)\\)//g' > ctx.h\ncat >> ctx.h <<'CTX_PROTO'\nu32 HuMemUsedMemorySizeGet(HeapNode *heap);\nCTX_PROTO\n\nargs=(\n  --target mips-gcc-c     # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function HuMemUsedMemorySizeGet # the symbol to decompile from in.s\n  --context ctx.h         # the C context header above (typedefs + prototypes)\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
-        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `HuMemUsedMemorySizeGet` — benchmark function marioparty3:HuMemUsedMemorySizeGet:gcc2.7.2.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# This function's decomp project — the PINNED benchmark branch (provenance base + one\n# integration commit). Not needed to run this script (inputs are embedded/vendored); to\n# rebuild the project itself:\n#   git clone --branch asmlift-benchmark https://github.com/macabeus/marioparty3.git marioparty3\n#   make -C marioparty3\n#   make -C marioparty3 asmlift-elf   # derive the symbols ELF (DWARF types-sidecar)\n# SYMBOLS: this row ran WITH the project's symbol map (names + declaration shapes derived\n# from the ELF its decomp.yaml names), vendored at apps/benchmark/dataset/real/tu/marioparty3/symbols.json.gz\n#   sha256 of the decompressed map JSON: e249a038f016048d9e33be700c6bdb39406578cdee1a84bb4cef6fd98d39da20\n# Set PROJECT_PATH to your BUILT checkout of the project above (clone recipe in the comments);\n# step 1 then points the scoring config at the checkout's decomp.yaml (tools.asmlift.elf) —\n# the CLI loads the same map, so this run reproduces the row's named spellings. A missing\n# checkout/ELF warns and runs map-less (output may then differ from the row).\nPROJECT_PATH='/path/to/marioparty3'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# --project-root grafts the checkout's tools.asmlift.elf (the symbol map) into that decomp.yaml.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target marioparty3:HuMemUsedMemorySizeGet:gcc2.7.2 --out \"$PWD\" --project-root \"$PROJECT_PATH\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact `objdump -d --no-show-raw-insn` text.\ncat > in.asm <<'ASM_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <HuMemUsedMemorySizeGet>:\n   0:\tmove\tv1,a0\n   4:\tmove\ta1,zero\n   8:\tli\ta2,1\n   c:\tlbu\tv0,5(v1)\n  10:\tbne\tv0,a2,20 <HuMemUsedMemorySizeGet+0x20>\n  14:\tnop\n  18:\tlw\tv0,0(v1)\n  1c:\taddu\ta1,a1,v0\n  20:\tlw\tv1,12(v1)\n  24:\tbne\tv1,a0,c <HuMemUsedMemorySizeGet+0xc>\n  28:\tnop\n  2c:\tjr\tra\n  30:\tmove\tv0,a1\n\t...\nASM_INPUT\n\n# The target object's objdump -s -r -t dump — the data sections (jump tables, anonymous\n# constants) the text-only disassembly lacks; the benchmark recovered them from the object.\ncat > dump.txt <<'DUMP_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /host-tmp/bench-real-gcc272-73de7a10111e47ad/u.i\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t00000034 HuMemUsedMemorySizeGet\n\n\nContents of section .text:\n 0000 00801821 00002821 24060001 90620005  ...!..(!$....b..\n 0010 14460003 00000000 8c620000 00a22821  .F.......b....(!\n 0020 8c63000c 1464fff9 00000000 03e00008  .c...d..........\n 0030 00a01021 00000000 00000000 00000000  ...!............\nContents of section .reginfo:\n 0000 8000007c 00000000 00000000 00000000  ...|............\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.\nDUMP_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\n# (real tier: candidates are scored INSIDE the project's own context — step 1 materializes the\n# row's vendored context next to target.o as ctx.i, and the generated decomp.yaml concatenates\n# it ahead of every candidate, so this scores in the same world the benchmark did)\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target gcc2.7.2       # frontend + target description (ISA, calling convention, compiler idioms)\n  --name HuMemUsedMemorySizeGet # the symbol to decompile (multi-function input selects by name)\n  --asm-data dump.txt     # the data sections above (jump-table/const recovery)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `HuMemUsedMemorySizeGet` — benchmark function marioparty3:HuMemUsedMemorySizeGet:gcc2.7.2.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# This function's decomp project — the PINNED benchmark branch (provenance base + one\n# integration commit). Not needed to run this script (inputs are embedded/vendored); to\n# rebuild the project itself:\n#   git clone --branch asmlift-benchmark https://github.com/macabeus/marioparty3.git marioparty3\n#   make -C marioparty3\n#   make -C marioparty3 asmlift-elf   # derive the symbols ELF (DWARF types-sidecar)\n# SYMBOLS: this row ran WITH the project's symbol map (names + declaration shapes derived\n# from the ELF its decomp.yaml names), vendored at apps/benchmark/dataset/real/tu/marioparty3/symbols.json.gz\n#   sha256 of the decompressed map JSON: e249a038f016048d9e33be700c6bdb39406578cdee1a84bb4cef6fd98d39da20\n# Set PROJECT_PATH to your BUILT checkout of the project above (clone recipe in the comments);\n# step 1 then points the scoring config at the checkout's decomp.yaml (tools.asmlift.elf) —\n# the CLI loads the same map, so this run reproduces the row's named spellings. A missing\n# checkout/ELF warns and runs map-less (output may then differ from the row).\nPROJECT_PATH='/path/to/marioparty3'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# --project-root grafts the checkout's tools.asmlift.elf (the symbol map) into that decomp.yaml.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target marioparty3:HuMemUsedMemorySizeGet:gcc2.7.2 --out \"$PWD\" --project-root \"$PROJECT_PATH\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact `objdump -d --no-show-raw-insn` text.\ncat > in.asm <<'ASM_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <HuMemUsedMemorySizeGet>:\n   0:\tmove\tv1,a0\n   4:\tmove\ta1,zero\n   8:\tli\ta2,1\n   c:\tlbu\tv0,5(v1)\n  10:\tbne\tv0,a2,20 <HuMemUsedMemorySizeGet+0x20>\n  14:\tnop\n  18:\tlw\tv0,0(v1)\n  1c:\taddu\ta1,a1,v0\n  20:\tlw\tv1,12(v1)\n  24:\tbne\tv1,a0,c <HuMemUsedMemorySizeGet+0xc>\n  28:\tnop\n  2c:\tjr\tra\n  30:\tmove\tv0,a1\n\t...\nASM_INPUT\n\n# The target object's objdump -s -r -t dump — the data sections (jump tables, anonymous\n# constants) the text-only disassembly lacks; the benchmark recovered them from the object.\ncat > dump.txt <<'DUMP_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /work/u.i\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t00000034 HuMemUsedMemorySizeGet\n\n\nContents of section .text:\n 0000 00801821 00002821 24060001 90620005  ...!..(!$....b..\n 0010 14460003 00000000 8c620000 00a22821  .F.......b....(!\n 0020 8c63000c 1464fff9 00000000 03e00008  .c...d..........\n 0030 00a01021 00000000 00000000 00000000  ...!............\nContents of section .reginfo:\n 0000 8000007c 00000000 00000000 00000000  ...|............\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.\nDUMP_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\n# (real tier: candidates are scored INSIDE the project's own context — step 1 materializes the\n# row's vendored context next to target.o as ctx.i, and the generated decomp.yaml concatenates\n# it ahead of every candidate, so this scores in the same world the benchmark did)\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target gcc2.7.2       # frontend + target description (ISA, calling convention, compiler idioms)\n  --name HuMemUsedMemorySizeGet # the symbol to decompile (multi-function input selects by name)\n  --asm-data dump.txt     # the data sections above (jump-table/const recovery)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
       }
     },
     {
@@ -8192,7 +8192,7 @@
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "candidateLabel": "unsigned/raw-globals",
+        "candidateLabel": "signed/raw-globals",
         "symbolsUsed": [
           {
             "name": "gBattleMoves",
@@ -8204,7 +8204,7 @@
           }
         ],
         "outcome": "nonmatch",
-        "source": "struct Elem0 { u8 _pad0[4]; u8 field_4; u8 _pad1[7]; };\ns32 CalculatePPWithBonus(u32 a0, u32 a1, u32 a2) {\n    return (u8)(((struct Elem0 *)&gBattleMoves)[(u16)a0].field_4 + ((s32)(((u8 *)&gPPUpGetMask)[(u8)a2] & a1) >> ((u8)a2 << 1)) * 20 * ((struct Elem0 *)&gBattleMoves)[(u16)a0].field_4 / 100);\n}\n",
+        "source": "struct Elem0 { u8 _pad0[4]; u8 field_4; u8 _pad1[7]; };\ns32 CalculatePPWithBonus(s32 a0, s32 a1, s32 a2) {\n    return (u8)(((struct Elem0 *)&gBattleMoves)[(u16)a0].field_4 + ((((u8 *)&gPPUpGetMask)[(u8)a2] & a1) >> ((u8)a2 << 1)) * 20 * ((struct Elem0 *)&gBattleMoves)[(u16)a0].field_4 / 100);\n}\n",
         "score": 17,
         "maxScore": 36,
         "compileErrors": null,
@@ -8216,10 +8216,10 @@
           "argMismatch": 7
         },
         "quality": {
-          "score": 90,
+          "score": 92,
           "lines": 4,
           "gotos": 0,
-          "casts": 7,
+          "casts": 6,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -12135,10 +12135,10 @@
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "candidateLabel": "unsigned",
+        "candidateLabel": "signed",
         "symbolsUsed": [],
         "outcome": "nonmatch",
-        "source": "s32 sa2__sub_80855C0(u32 a0, u32 a1, u32 a2, u32 a3, u32 a4) {\n    return a0 - __ashrdi3(__muldi3(a2, (s32)a2 >> 31, a0 - a1, (s32)(a0 - a1) >> 31), (s32)a2 >> 31, (u8)a3, (s32)(a0 - a1) >> 31);\n}\n",
+        "source": "s32 sa2__sub_80855C0(s32 a0, s32 a1, s32 a2, s32 a3, s32 a4) {\n    return a0 - __ashrdi3(__muldi3(a2, a2 >> 31, a0 - a1, a0 - a1 >> 31), a2 >> 31, (u8)a3, a0 - a1 >> 31);\n}\n",
         "score": 31,
         "maxScore": 38,
         "compileErrors": null,
@@ -12150,10 +12150,10 @@
           "argMismatch": 10
         },
         "quality": {
-          "score": 94,
+          "score": 100,
           "lines": 3,
           "gotos": 0,
-          "casts": 5,
+          "casts": 1,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -12451,10 +12451,10 @@
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "candidateLabel": "unsigned",
+        "candidateLabel": "signed",
         "symbolsUsed": [],
         "outcome": "match",
-        "source": "s32 sa2__sub_8085714(u32 a0, u32 a1, u32 a2) {\n    return (s32)(a0 + (a1 << 3) - a2) >> 3;\n}\n",
+        "source": "s32 sa2__sub_8085714(s32 a0, s32 a1, s32 a2) {\n    return a0 + (a1 << 3) - a2 >> 3;\n}\n",
         "score": 0,
         "maxScore": 5,
         "compileErrors": null,
@@ -12469,7 +12469,7 @@
           "score": 100,
           "lines": 3,
           "gotos": 0,
-          "casts": 1,
+          "casts": 0,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -12525,10 +12525,10 @@
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "candidateLabel": "unsigned",
+        "candidateLabel": "signed",
         "symbolsUsed": [],
         "outcome": "match",
-        "source": "s32 sa2__sub_8085720(u32 a0, u32 a1, u32 a2) {\n    return (s32)((a1 << 3) - a0 + a2) >> 3;\n}\n",
+        "source": "s32 sa2__sub_8085720(s32 a0, s32 a1, s32 a2) {\n    return (a1 << 3) - a0 + a2 >> 3;\n}\n",
         "score": 0,
         "maxScore": 6,
         "compileErrors": null,
@@ -12543,7 +12543,7 @@
           "score": 100,
           "lines": 3,
           "gotos": 0,
-          "casts": 1,
+          "casts": 0,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -12672,10 +12672,10 @@
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "candidateLabel": "unsigned",
+        "candidateLabel": "signed",
         "symbolsUsed": [],
         "outcome": "match",
-        "source": "s32 sa2__sub_8085798(u32 a0, u32 a1, u32 a2) {\n    return a2 - a0 + ((s32)(a2 - a0) >> 1) - ((s32)a1 >> 1);\n}\n",
+        "source": "s32 sa2__sub_8085798(s32 a0, s32 a1, s32 a2) {\n    return a2 - a0 + (a2 - a0 >> 1) - (a1 >> 1);\n}\n",
         "score": 0,
         "maxScore": 6,
         "compileErrors": null,
@@ -12690,7 +12690,7 @@
           "score": 100,
           "lines": 3,
           "gotos": 0,
-          "casts": 2,
+          "casts": 0,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -12746,10 +12746,10 @@
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "candidateLabel": "unsigned",
+        "candidateLabel": "signed",
         "symbolsUsed": [],
         "outcome": "match",
-        "source": "s32 sa2__sub_808595C(u32 a0, u32 a1, u32 a2) {\n    return a1 - a0 + ((s32)(a2 - a1 - (a1 - a0)) >> 1);\n}\n",
+        "source": "s32 sa2__sub_808595C(s32 a0, s32 a1, s32 a2) {\n    return a1 - a0 + (a2 - a1 - (a1 - a0) >> 1);\n}\n",
         "score": 0,
         "maxScore": 6,
         "compileErrors": null,
@@ -12764,7 +12764,7 @@
           "score": 100,
           "lines": 3,
           "gotos": 0,
-          "casts": 1,
+          "casts": 0,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -16260,9 +16260,9 @@
       "asmDump": "\ntarget.o:     file format elf32-powerpc\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 ref.c\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .mwcats.text\t00000000 .mwcats.text\n00000000 g     F .text\t00000010 absi\n\n\nRELOCATION RECORDS FOR [.mwcats.text]:\nOFFSET   TYPE              VALUE\n00000004 R_PPC_ADDR32      absi\n\n\nContents of section .text:\n 0000 7c64fe70 7c801a78 7c640050 4e800020  |d.p|..x|d.PN.. \nContents of section .mwcats.text:\n 0000 02000010 00000000                    ........        \nContents of section .comment:\n 0000 436f6465 57617272 696f720a 02040201  CodeWarrior.....\n 0010 01020016 2c000000 00000000 00000000  ....,...........\n 0020 00000000 00000000 00000000 00000000  ................\n 0030 00000000 00000001 00000000 00000004  ................\n 0040 00000000 00000004 00000000 00000004  ................\n 0050 00000000                             ....            \n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned",
+        "candidateLabel": "signed",
         "outcome": "match",
-        "source": "s32 absi(u32 a0) {\n    return ((s32)a0 >> 31 ^ a0) - ((s32)a0 >> 31);\n}\n",
+        "source": "s32 absi(s32 a0) {\n    return (a0 >> 31 ^ a0) - (a0 >> 31);\n}\n",
         "score": 0,
         "maxScore": 4,
         "compileErrors": null,
@@ -16277,7 +16277,7 @@
           "score": 100,
           "lines": 3,
           "gotos": 0,
-          "casts": 2,
+          "casts": 0,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -18417,9 +18417,9 @@
       "targetAsm": "@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tbittest\n\t.type\t bittest,function\n\t.thumb_func\nbittest:\n\tadd\tr2, r0, #0\n\tasr\tr2, r2, r1\n\tmov\tr0, #0x1\n\tand\tr0, r0, r2\n\tbx\tlr\n.Lfe1:\n\t.size\t bittest,.Lfe1-bittest\n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned",
+        "candidateLabel": "signed",
         "outcome": "match",
-        "source": "s32 bittest(u32 a0, u32 a1) {\n    return 1 & (s32)a0 >> a1;\n}\n",
+        "source": "s32 bittest(s32 a0, s32 a1) {\n    return 1 & a0 >> a1;\n}\n",
         "score": 0,
         "maxScore": 5,
         "compileErrors": null,
@@ -18434,7 +18434,7 @@
           "score": 100,
           "lines": 3,
           "gotos": 0,
-          "casts": 1,
+          "casts": 0,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -18490,9 +18490,9 @@
       "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /host-tmp/asmlift-mgcc-ref-2d92365ec0ecd7e5/ref.c\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t0000000c bittest\n\n\nContents of section .text:\n 0000 00a41007 03e00008 30420001 00000000  ........0B......\nContents of section .reginfo:\n 0000 80000034 00000000 00000000 00000000  ...4............\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.              \n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned",
+        "candidateLabel": "signed",
         "outcome": "match",
-        "source": "s32 bittest(u32 a0, u32 a1) {\n    return (s32)a0 >> a1 & 1;\n}\n",
+        "source": "s32 bittest(s32 a0, s32 a1) {\n    return a0 >> a1 & 1;\n}\n",
         "score": 0,
         "maxScore": 3,
         "compileErrors": null,
@@ -18507,7 +18507,7 @@
           "score": 100,
           "lines": 3,
           "gotos": 0,
-          "casts": 1,
+          "casts": 0,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -18563,9 +18563,9 @@
       "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    d  .text\t00000010 .text\n00000000 g     F .text\t0000000c bittest\n\n\nContents of section .text:\n 0000 00a41007 03e00008 30420001 00000000  ........0B......\nContents of section .options:\n 0000 01200000 00000000 80000034 00000000  . .........4....\n 0010 00000000 00000000 00000000 00007ff0  ................\n 0020 07100000 00000000 00000000 00000000  ................\n 0030 08100000 00000000 00000000 00000000  ................\nContents of section .reginfo:\n 0000 80000034 00000000 00000000 00000000  ...4............\n 0010 00000000 00007ff0                    ........        \nContents of section .mdebug:\n 0000 7009070a 00000003 00000004 00000178  p..............x\n 0010 00000005 000002bc 00000001 0000017c  ...............|\n 0020 00000004 000001b0 00000000 00000000  ................\n 0030 00000011 000001e0 00000038 00000224  ...........8...$\n 0040 00000008 0000025c 00000001 00000264  .......\\.......d\n 0050 00000000 00000000 00000001 000002ac  ................\n 0060 02000000 00000000 00000001 00000000  ................\n 0070 00000000 00000000 ffffffff 00000000  ................\n 0080 00000000 00000000 001d001f 00000002  ................\n 0090 00000002 00000000 00000001 00000000  ................\n 00a0 2c200004 0000002e 00000000 1820000f  , ........... ..\n 00b0 0000002e 0000000c 20200001 00000001  ........  ......\n 00c0 00000000 20200000 02000000 03000000  ....  ..........\n 00d0 04000000 05000000 06000000 07000000  ................\n 00e0 08000000 09000000 20000000 21000000  ........ ...!...\n 00f0 0a000000 0b000000 0b000000 1a000000  ................\n 0100 00000000 00000003 06000000 002f746d  ............./tm\n 0110 702f6173 6d6c6966 742d6d69 70732d72  p/asmlift-mips-r\n 0120 65662d32 64393233 36356563 30656364  ef-2d92365ec0ecd\n 0130 3765352f 7265662e 63006269 74746573  7e5/ref.c.bittes\n 0140 74000000 62697474 65737400 00000000  t...bittest.....\n 0150 00000001 00000000 00000036 00000000  ...........6....\n 0160 00000004 00000000 00000003 00000000  ................\n 0170 00000000 00000001 00000000 00000011  ................\n 0180 00000000 00000000 01800000 00000000  ................\n 0190 00000001 00000000 00000000 00000000  ................\n 01a0 18200001 00000000 00000000 00000000  . ..............\n 01b0 00000000 00000000 00000000 7fffffff  ................\n 01c0 00000000 00000000 00000002           ............    \n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned",
+        "candidateLabel": "signed",
         "outcome": "match",
-        "source": "s32 bittest(u32 a0, u32 a1) {\n    return (s32)a0 >> a1 & 1;\n}\n",
+        "source": "s32 bittest(s32 a0, s32 a1) {\n    return a0 >> a1 & 1;\n}\n",
         "score": 0,
         "maxScore": 3,
         "compileErrors": null,
@@ -18580,7 +18580,7 @@
           "score": 100,
           "lines": 3,
           "gotos": 0,
-          "casts": 1,
+          "casts": 0,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -18636,9 +18636,9 @@
       "asmDump": "\ntarget.o:     file format elf32-powerpc\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 ref.c\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .mwcats.text\t00000000 .mwcats.text\n00000000 g     F .text\t0000000c bittest\n\n\nRELOCATION RECORDS FOR [.mwcats.text]:\nOFFSET   TYPE              VALUE\n00000004 R_PPC_ADDR32      bittest\n\n\nContents of section .text:\n 0000 7c602630 540307fe 4e800020           |`&0T...N..     \nContents of section .mwcats.text:\n 0000 0200000c 00000000                    ........        \nContents of section .comment:\n 0000 436f6465 57617272 696f720a 02040201  CodeWarrior.....\n 0010 01020016 2c000000 00000000 00000000  ....,...........\n 0020 00000000 00000000 00000000 00000000  ................\n 0030 00000000 00000001 00000000 00000004  ................\n 0040 00000000 00000004 00000000 00000004  ................\n 0050 00000000                             ....            \n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned",
+        "candidateLabel": "signed",
         "outcome": "match",
-        "source": "s32 bittest(u32 a0, u32 a1) {\n    return (s32)a0 >> a1 & 1;\n}\n",
+        "source": "s32 bittest(s32 a0, s32 a1) {\n    return a0 >> a1 & 1;\n}\n",
         "score": 0,
         "maxScore": 3,
         "compileErrors": null,
@@ -18653,7 +18653,7 @@
           "score": 100,
           "lines": 3,
           "gotos": 0,
-          "casts": 1,
+          "casts": 0,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -20695,9 +20695,9 @@
       "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /host-tmp/asmlift-mgcc-ref-31f15d35e4cb0535/ref.c\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t00000010 clamp0\n\n\nContents of section .text:\n 0000 00041027 000217c3 03e00008 00821024  ...'...........$\nContents of section .reginfo:\n 0000 80000014 00000000 00000000 00000000  ................\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.              \n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned",
+        "candidateLabel": "signed",
         "outcome": "match",
-        "source": "s32 clamp0(u32 a0) {\n    return a0 & (s32)~a0 >> 31;\n}\n",
+        "source": "s32 clamp0(s32 a0) {\n    return a0 & ~a0 >> 31;\n}\n",
         "score": 0,
         "maxScore": 4,
         "compileErrors": null,
@@ -20712,7 +20712,7 @@
           "score": 100,
           "lines": 3,
           "gotos": 0,
-          "casts": 1,
+          "casts": 0,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -20839,9 +20839,9 @@
       "asmDump": "\ntarget.o:     file format elf32-powerpc\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 ref.c\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .mwcats.text\t00000000 .mwcats.text\n00000000 g     F .text\t0000000c clamp0\n\n\nRELOCATION RECORDS FOR [.mwcats.text]:\nOFFSET   TYPE              VALUE\n00000004 R_PPC_ADDR32      clamp0\n\n\nContents of section .text:\n 0000 7c60fe70 7c630078 4e800020           |`.p|c.xN..     \nContents of section .mwcats.text:\n 0000 0200000c 00000000                    ........        \nContents of section .comment:\n 0000 436f6465 57617272 696f720a 02040201  CodeWarrior.....\n 0010 01020016 2c000000 00000000 00000000  ....,...........\n 0020 00000000 00000000 00000000 00000000  ................\n 0030 00000000 00000001 00000000 00000004  ................\n 0040 00000000 00000004 00000000 00000004  ................\n 0050 00000000                             ....            \n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned",
+        "candidateLabel": "signed",
         "outcome": "match",
-        "source": "s32 clamp0(u32 a0) {\n    return a0 & ~((s32)a0 >> 31);\n}\n",
+        "source": "s32 clamp0(s32 a0) {\n    return a0 & ~(a0 >> 31);\n}\n",
         "score": 0,
         "maxScore": 3,
         "compileErrors": null,
@@ -20856,7 +20856,7 @@
           "score": 100,
           "lines": 3,
           "gotos": 0,
-          "casts": 1,
+          "casts": 0,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -29902,9 +29902,9 @@
       "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /host-tmp/asmlift-mgcc-ref-98282641ffdcb40b/ref.c\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t00000010 i2ll\n\n\nContents of section .text:\n 0000 00801021 00401821 03e00008 000217c3  ...!.@.!........\nContents of section .reginfo:\n 0000 8000001c 00000000 00000000 00000000  ................\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.              \n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned",
+        "candidateLabel": "signed",
         "outcome": "nonmatch",
-        "source": "s32 i2ll(u32 a0) {\n    return (s32)a0 >> 31;\n}\n",
+        "source": "s32 i2ll(s32 a0) {\n    return a0 >> 31;\n}\n",
         "score": 3,
         "maxScore": 4,
         "compileErrors": null,
@@ -29919,7 +29919,7 @@
           "score": 100,
           "lines": 3,
           "gotos": 0,
-          "casts": 1,
+          "casts": 0,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -29987,9 +29987,9 @@
       "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    d  .text\t00000010 .text\n00000000 g     F .text\t0000000c i2ll\n\n\nContents of section .text:\n 0000 00801825 03e00008 000417c3 00000000  ...%............\nContents of section .options:\n 0000 01200000 00000000 8000001c 00000000  . ..............\n 0010 00000000 00000000 00000000 00007ff0  ................\n 0020 07100000 00000000 00000000 00000000  ................\n 0030 08100000 00000000 00000000 00000000  ................\nContents of section .reginfo:\n 0000 8000001c 00000000 00000000 00000000  ................\n 0010 00000000 00007ff0                    ........        \nContents of section .mdebug:\n 0000 7009070a 00000003 00000004 00000178  p..............x\n 0010 00000005 000002b8 00000001 0000017c  ...............|\n 0020 00000004 000001b0 00000000 00000000  ................\n 0030 00000011 000001e0 00000034 00000224  ...........4...$\n 0040 00000008 00000258 00000001 00000260  .......X.......`\n 0050 00000000 00000000 00000001 000002a8  ................\n 0060 02000000 00000000 00000001 00000000  ................\n 0070 00000000 00000000 ffffffff 00000000  ................\n 0080 00000000 00000000 001d001f 00000002  ................\n 0090 00000002 00000000 00000001 00000000  ................\n 00a0 2c200004 0000002e 00000000 1820000f  , ........... ..\n 00b0 0000002e 0000000c 20200001 00000001  ........  ......\n 00c0 00000000 20200000 02000000 03000000  ....  ..........\n 00d0 04000000 05000000 06000000 07000000  ................\n 00e0 08000000 09000000 20000000 21000000  ........ ...!...\n 00f0 0a000000 0b000000 0b000000 1a000000  ................\n 0100 00000000 00000003 06000000 002f746d  ............./tm\n 0110 702f6173 6d6c6966 742d6d69 70732d72  p/asmlift-mips-r\n 0120 65662d39 38323832 36343166 66646362  ef-98282641ffdcb\n 0130 3430622f 7265662e 63006932 6c6c0000  40b/ref.c.i2ll..\n 0140 69326c6c 00000000 00000000 00000001  i2ll............\n 0150 00000000 00000033 00000000 00000004  .......3........\n 0160 00000000 00000003 00000000 00000000  ................\n 0170 00000001 00000000 00000011 00000000  ................\n 0180 00000000 01800000 00000000 00000001  ................\n 0190 00000000 00000000 00000000 18200001  ............. ..\n 01a0 00000000 00000000 00000000 00000000  ................\n 01b0 00000000 00000000 7fffffff 00000000  ................\n 01c0 00000000 00000002                    ........        \n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned",
+        "candidateLabel": "signed",
         "outcome": "nonmatch",
-        "source": "s32 i2ll(u32 a0) {\n    return (s32)a0 >> 31;\n}\n",
+        "source": "s32 i2ll(s32 a0) {\n    return a0 >> 31;\n}\n",
         "score": 1,
         "maxScore": 3,
         "compileErrors": null,
@@ -30004,7 +30004,7 @@
           "score": 100,
           "lines": 3,
           "gotos": 0,
-          "casts": 1,
+          "casts": 0,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -30072,9 +30072,9 @@
       "asmDump": "\ntarget.o:     file format elf32-powerpc\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 ref.c\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .mwcats.text\t00000000 .mwcats.text\n00000000 g     F .text\t0000000c i2ll\n\n\nRELOCATION RECORDS FOR [.mwcats.text]:\nOFFSET   TYPE              VALUE\n00000004 R_PPC_ADDR32      i2ll\n\n\nContents of section .text:\n 0000 7c641b78 7c63fe70 4e800020           |d.x|c.pN..     \nContents of section .mwcats.text:\n 0000 0200000c 00000000                    ........        \nContents of section .comment:\n 0000 436f6465 57617272 696f720a 02040201  CodeWarrior.....\n 0010 01020016 2c000000 00000000 00000000  ....,...........\n 0020 00000000 00000000 00000000 00000000  ................\n 0030 00000000 00000001 00000000 00000004  ................\n 0040 00000000 00000004 00000000 00000004  ................\n 0050 00000000                             ....            \n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned",
+        "candidateLabel": "signed",
         "outcome": "nonmatch",
-        "source": "s32 i2ll(u32 a0) {\n    return (s32)a0 >> 31;\n}\n",
+        "source": "s32 i2ll(s32 a0) {\n    return a0 >> 31;\n}\n",
         "score": 1,
         "maxScore": 3,
         "compileErrors": null,
@@ -30089,7 +30089,7 @@
           "score": 100,
           "lines": 3,
           "gotos": 0,
-          "casts": 1,
+          "casts": 0,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -39654,9 +39654,9 @@
       "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /host-tmp/asmlift-mgcc-ref-5086c31083528287/ref.c\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t00000018 promsh\n\n\nContents of section .text:\n 0000 00042400 00042403 00051400 00021403  ..$...$.........\n 0010 03e00008 00821021 00000000 00000000  .......!........\nContents of section .reginfo:\n 0000 80000034 00000000 00000000 00000000  ...4............\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.              \n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned",
+        "candidateLabel": "signed",
         "outcome": "match",
-        "source": "s32 promsh(u32 a0, u32 a1) {\n    return ((s32)(a0 << 16) >> 16) + ((s32)(a1 << 16) >> 16);\n}\n",
+        "source": "s32 promsh(s32 a0, s32 a1) {\n    return (a0 << 16 >> 16) + (a1 << 16 >> 16);\n}\n",
         "score": 0,
         "maxScore": 6,
         "compileErrors": null,
@@ -39671,7 +39671,7 @@
           "score": 100,
           "lines": 3,
           "gotos": 0,
-          "casts": 2,
+          "casts": 0,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -39727,9 +39727,9 @@
       "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    d  .text\t00000020 .text\n00000000 g     F .text\t00000020 promsh\n\n\nContents of section .text:\n 0000 afa40000 afa50004 00052c00 00042400  ..........,...$.\n 0010 00042403 00052c03 03e00008 00851021  ..$...,........!\nContents of section .options:\n 0000 01200000 00000000 a0000034 00000000  . .........4....\n 0010 00000000 00000000 00000000 00007ff0  ................\n 0020 07100000 00000000 00000000 00000000  ................\n 0030 08100000 00000000 00000000 00000000  ................\nContents of section .reginfo:\n 0000 a0000034 00000000 00000000 00000000  ...4............\n 0010 00000000 00007ff0                    ........        \nContents of section .mdebug:\n 0000 7009070a 00000008 00000004 00000188  p...............\n 0010 00000005 000002cc 00000001 0000018c  ................\n 0020 00000004 000001c0 00000000 00000000  ................\n 0030 00000011 000001f0 00000038 00000234  ...........8...4\n 0040 00000008 0000026c 00000001 00000274  .......l.......t\n 0050 00000000 00000000 00000001 000002bc  ................\n 0060 07000000 00000000 00000001 00000000  ................\n 0070 00000000 00000000 ffffffff 00000000  ................\n 0080 00000000 00000000 001d001f 00000002  ................\n 0090 00000002 00000000 00000001 00000000  ................\n 00a0 2c200004 0000002e 00000000 1820000f  , ........... ..\n 00b0 0000002e 00000020 20200001 00000001  .......   ......\n 00c0 00000000 20200000 02000000 03000000  ....  ..........\n 00d0 04000000 05000000 06000000 07000000  ................\n 00e0 08000000 09000000 20000000 21000000  ........ ...!...\n 00f0 0a000000 0b000000 0b000000 1a000000  ................\n 0100 00000000 00000003 06000000 002f746d  ............./tm\n 0110 702f6173 6d6c6966 742d6d69 70732d72  p/asmlift-mips-r\n 0120 65662d35 30383663 33313038 33353238  ef-5086c31083528\n 0130 3238372f 7265662e 63007072 6f6d7368  287/ref.c.promsh\n 0140 00000000 70726f6d 73680000 00000000  ....promsh......\n 0150 00000001 00000000 00000035 00000000  ...........5....\n 0160 00000004 00000000 00000008 00000000  ................\n 0170 00000000 00000001 00000000 00000011  ................\n 0180 00000000 00000000 01800000 00000000  ................\n 0190 00000001 00000000 00000000 00000000  ................\n 01a0 18200001 00000000 00000000 00000000  . ..............\n 01b0 00000000 00000000 00000000 7fffffff  ................\n 01c0 00000000 00000000 00000002           ............    \n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned",
+        "candidateLabel": "signed",
         "outcome": "nonmatch",
-        "source": "s32 promsh(u32 a0, u32 a1) {\n    return ((s32)(a0 << 16) >> 16) + ((s32)(a1 << 16) >> 16);\n}\n",
+        "source": "s32 promsh(s32 a0, s32 a1) {\n    return (a0 << 16 >> 16) + (a1 << 16 >> 16);\n}\n",
         "score": 7,
         "maxScore": 8,
         "compileErrors": null,
@@ -39744,7 +39744,7 @@
           "score": 100,
           "lines": 3,
           "gotos": 0,
-          "casts": 2,
+          "casts": 0,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -42077,9 +42077,9 @@
       "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /host-tmp/asmlift-mgcc-ref-4332b5d6e0776f93/ref.c\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t0000000c sextb\n\n\nContents of section .text:\n 0000 00041600 03e00008 00021603 00000000  ................\nContents of section .reginfo:\n 0000 80000014 00000000 00000000 00000000  ................\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.              \n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned",
+        "candidateLabel": "signed",
         "outcome": "match",
-        "source": "s32 sextb(u32 a0) {\n    return (s32)(a0 << 24) >> 24;\n}\n",
+        "source": "s32 sextb(s32 a0) {\n    return a0 << 24 >> 24;\n}\n",
         "score": 0,
         "maxScore": 3,
         "compileErrors": null,
@@ -42094,7 +42094,7 @@
           "score": 100,
           "lines": 3,
           "gotos": 0,
-          "casts": 1,
+          "casts": 0,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -42149,9 +42149,9 @@
       "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    d  .text\t00000010 .text\n00000000 g     F .text\t00000010 sextb\n\n\nContents of section .text:\n 0000 afa40000 00042600 03e00008 00041603  ......&.........\nContents of section .options:\n 0000 01200000 00000000 a0000014 00000000  . ..............\n 0010 00000000 00000000 00000000 00007ff0  ................\n 0020 07100000 00000000 00000000 00000000  ................\n 0030 08100000 00000000 00000000 00000000  ................\nContents of section .reginfo:\n 0000 a0000014 00000000 00000000 00000000  ................\n 0010 00000000 00007ff0                    ........        \nContents of section .mdebug:\n 0000 7009070a 00000004 00000004 00000178  p..............x\n 0010 00000005 000002b8 00000001 0000017c  ...............|\n 0020 00000004 000001b0 00000000 00000000  ................\n 0030 00000011 000001e0 00000034 00000224  ...........4...$\n 0040 00000008 00000258 00000001 00000260  .......X.......`\n 0050 00000000 00000000 00000001 000002a8  ................\n 0060 03000000 00000000 00000001 00000000  ................\n 0070 00000000 00000000 ffffffff 00000000  ................\n 0080 00000000 00000000 001d001f 00000002  ................\n 0090 00000002 00000000 00000001 00000000  ................\n 00a0 2c200004 0000002e 00000000 1820000f  , ........... ..\n 00b0 0000002e 00000010 20200001 00000001  ........  ......\n 00c0 00000000 20200000 02000000 03000000  ....  ..........\n 00d0 04000000 05000000 06000000 07000000  ................\n 00e0 08000000 09000000 20000000 21000000  ........ ...!...\n 00f0 0a000000 0b000000 0b000000 1a000000  ................\n 0100 00000000 00000003 06000000 002f746d  ............./tm\n 0110 702f6173 6d6c6966 742d6d69 70732d72  p/asmlift-mips-r\n 0120 65662d34 33333262 35643665 30373736  ef-4332b5d6e0776\n 0130 6639332f 7265662e 63007365 78746200  f93/ref.c.sextb.\n 0140 73657874 62000000 00000000 00000001  sextb...........\n 0150 00000000 00000034 00000000 00000004  .......4........\n 0160 00000000 00000004 00000000 00000000  ................\n 0170 00000001 00000000 00000011 00000000  ................\n 0180 00000000 01800000 00000000 00000001  ................\n 0190 00000000 00000000 00000000 18200001  ............. ..\n 01a0 00000000 00000000 00000000 00000000  ................\n 01b0 00000000 00000000 7fffffff 00000000  ................\n 01c0 00000000 00000002                    ........        \n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned",
+        "candidateLabel": "signed",
         "outcome": "nonmatch",
-        "source": "s32 sextb(u32 a0) {\n    return (s32)(a0 << 24) >> 24;\n}\n",
+        "source": "s32 sextb(s32 a0) {\n    return a0 << 24 >> 24;\n}\n",
         "score": 3,
         "maxScore": 4,
         "compileErrors": null,
@@ -42166,7 +42166,7 @@
           "score": 100,
           "lines": 3,
           "gotos": 0,
-          "casts": 1,
+          "casts": 0,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -42853,9 +42853,9 @@
       "targetAsm": "@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tshrs\n\t.type\t shrs,function\n\t.thumb_func\nshrs:\n\tasr\tr0, r0, r1\n\tbx\tlr\n.Lfe1:\n\t.size\t shrs,.Lfe1-shrs\n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned",
+        "candidateLabel": "signed",
         "outcome": "match",
-        "source": "s32 shrs(u32 a0, u32 a1) {\n    return (s32)a0 >> a1;\n}\n",
+        "source": "s32 shrs(s32 a0, s32 a1) {\n    return a0 >> a1;\n}\n",
         "score": 0,
         "maxScore": 2,
         "compileErrors": null,
@@ -42870,7 +42870,7 @@
           "score": 100,
           "lines": 3,
           "gotos": 0,
-          "casts": 1,
+          "casts": 0,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -42926,9 +42926,9 @@
       "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /host-tmp/asmlift-mgcc-ref-1e7087ba08828cba/ref.c\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t00000008 shrs\n\n\nContents of section .text:\n 0000 03e00008 00a41007 00000000 00000000  ................\nContents of section .reginfo:\n 0000 80000034 00000000 00000000 00000000  ...4............\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.              \n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned",
+        "candidateLabel": "signed",
         "outcome": "match",
-        "source": "s32 shrs(u32 a0, u32 a1) {\n    return (s32)a0 >> a1;\n}\n",
+        "source": "s32 shrs(s32 a0, s32 a1) {\n    return a0 >> a1;\n}\n",
         "score": 0,
         "maxScore": 2,
         "compileErrors": null,
@@ -42943,7 +42943,7 @@
           "score": 100,
           "lines": 3,
           "gotos": 0,
-          "casts": 1,
+          "casts": 0,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -42999,9 +42999,9 @@
       "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    d  .text\t00000010 .text\n00000000 g     F .text\t00000008 shrs\n\n\nContents of section .text:\n 0000 03e00008 00a41007 00000000 00000000  ................\nContents of section .options:\n 0000 01200000 00000000 80000034 00000000  . .........4....\n 0010 00000000 00000000 00000000 00007ff0  ................\n 0020 07100000 00000000 00000000 00000000  ................\n 0030 08100000 00000000 00000000 00000000  ................\nContents of section .reginfo:\n 0000 80000034 00000000 00000000 00000000  ...4............\n 0010 00000000 00007ff0                    ........        \nContents of section .mdebug:\n 0000 7009070a 00000002 00000004 00000178  p..............x\n 0010 00000005 000002b8 00000001 0000017c  ...............|\n 0020 00000004 000001b0 00000000 00000000  ................\n 0030 00000011 000001e0 00000034 00000224  ...........4...$\n 0040 00000008 00000258 00000001 00000260  .......X.......`\n 0050 00000000 00000000 00000001 000002a8  ................\n 0060 01000000 00000000 00000001 00000000  ................\n 0070 00000000 00000000 ffffffff 00000000  ................\n 0080 00000000 00000000 001d001f 00000002  ................\n 0090 00000002 00000000 00000001 00000000  ................\n 00a0 2c200004 0000002e 00000000 1820000f  , ........... ..\n 00b0 0000002e 00000008 20200001 00000001  ........  ......\n 00c0 00000000 20200000 02000000 03000000  ....  ..........\n 00d0 04000000 05000000 06000000 07000000  ................\n 00e0 08000000 09000000 20000000 21000000  ........ ...!...\n 00f0 0a000000 0b000000 0b000000 1a000000  ................\n 0100 00000000 00000003 06000000 002f746d  ............./tm\n 0110 702f6173 6d6c6966 742d6d69 70732d72  p/asmlift-mips-r\n 0120 65662d31 65373038 37626130 38383238  ef-1e7087ba08828\n 0130 6362612f 7265662e 63007368 72730000  cba/ref.c.shrs..\n 0140 73687273 00000000 00000000 00000001  shrs............\n 0150 00000000 00000033 00000000 00000004  .......3........\n 0160 00000000 00000002 00000000 00000000  ................\n 0170 00000001 00000000 00000011 00000000  ................\n 0180 00000000 01800000 00000000 00000001  ................\n 0190 00000000 00000000 00000000 18200001  ............. ..\n 01a0 00000000 00000000 00000000 00000000  ................\n 01b0 00000000 00000000 7fffffff 00000000  ................\n 01c0 00000000 00000002                    ........        \n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned",
+        "candidateLabel": "signed",
         "outcome": "match",
-        "source": "s32 shrs(u32 a0, u32 a1) {\n    return (s32)a0 >> a1;\n}\n",
+        "source": "s32 shrs(s32 a0, s32 a1) {\n    return a0 >> a1;\n}\n",
         "score": 0,
         "maxScore": 2,
         "compileErrors": null,
@@ -43016,7 +43016,7 @@
           "score": 100,
           "lines": 3,
           "gotos": 0,
-          "casts": 1,
+          "casts": 0,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -43072,9 +43072,9 @@
       "asmDump": "\ntarget.o:     file format elf32-powerpc\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 ref.c\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .mwcats.text\t00000000 .mwcats.text\n00000000 g     F .text\t00000008 shrs\n\n\nRELOCATION RECORDS FOR [.mwcats.text]:\nOFFSET   TYPE              VALUE\n00000004 R_PPC_ADDR32      shrs\n\n\nContents of section .text:\n 0000 7c632630 4e800020                    |c&0N..         \nContents of section .mwcats.text:\n 0000 02000008 00000000                    ........        \nContents of section .comment:\n 0000 436f6465 57617272 696f720a 02040201  CodeWarrior.....\n 0010 01020016 2c000000 00000000 00000000  ....,...........\n 0020 00000000 00000000 00000000 00000000  ................\n 0030 00000000 00000001 00000000 00000004  ................\n 0040 00000000 00000004 00000000 00000004  ................\n 0050 00000000                             ....            \n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned",
+        "candidateLabel": "signed",
         "outcome": "match",
-        "source": "s32 shrs(u32 a0, u32 a1) {\n    return (s32)a0 >> a1;\n}\n",
+        "source": "s32 shrs(s32 a0, s32 a1) {\n    return a0 >> a1;\n}\n",
         "score": 0,
         "maxScore": 2,
         "compileErrors": null,
@@ -43089,7 +43089,7 @@
           "score": 100,
           "lines": 3,
           "gotos": 0,
-          "casts": 1,
+          "casts": 0,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -48883,9 +48883,9 @@
       "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /host-tmp/asmlift-mgcc-ref-07dea59d72245370/ref.c\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t0000000c tos8\n\n\nContents of section .text:\n 0000 00041600 03e00008 00021603 00000000  ................\nContents of section .reginfo:\n 0000 80000014 00000000 00000000 00000000  ................\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.              \n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned",
+        "candidateLabel": "signed",
         "outcome": "match",
-        "source": "s32 tos8(u32 a0) {\n    return (s32)(a0 << 24) >> 24;\n}\n",
+        "source": "s32 tos8(s32 a0) {\n    return a0 << 24 >> 24;\n}\n",
         "score": 0,
         "maxScore": 3,
         "compileErrors": null,
@@ -48900,7 +48900,7 @@
           "score": 100,
           "lines": 3,
           "gotos": 0,
-          "casts": 1,
+          "casts": 0,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -48956,9 +48956,9 @@
       "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    d  .text\t00000010 .text\n00000000 g     F .text\t0000000c tos8\n\n\nContents of section .text:\n 0000 00041600 03e00008 00021603 00000000  ................\nContents of section .options:\n 0000 01200000 00000000 80000014 00000000  . ..............\n 0010 00000000 00000000 00000000 00007ff0  ................\n 0020 07100000 00000000 00000000 00000000  ................\n 0030 08100000 00000000 00000000 00000000  ................\nContents of section .reginfo:\n 0000 80000014 00000000 00000000 00000000  ................\n 0010 00000000 00007ff0                    ........        \nContents of section .mdebug:\n 0000 7009070a 00000003 00000004 00000178  p..............x\n 0010 00000005 000002b8 00000001 0000017c  ...............|\n 0020 00000004 000001b0 00000000 00000000  ................\n 0030 00000011 000001e0 00000034 00000224  ...........4...$\n 0040 00000008 00000258 00000001 00000260  .......X.......`\n 0050 00000000 00000000 00000001 000002a8  ................\n 0060 02000000 00000000 00000001 00000000  ................\n 0070 00000000 00000000 ffffffff 00000000  ................\n 0080 00000000 00000000 001d001f 00000002  ................\n 0090 00000002 00000000 00000001 00000000  ................\n 00a0 2c200004 0000002e 00000000 1820000f  , ........... ..\n 00b0 0000002e 0000000c 20200001 00000001  ........  ......\n 00c0 00000000 20200000 02000000 03000000  ....  ..........\n 00d0 04000000 05000000 06000000 07000000  ................\n 00e0 08000000 09000000 20000000 21000000  ........ ...!...\n 00f0 0a000000 0b000000 0b000000 1a000000  ................\n 0100 00000000 00000003 06000000 002f746d  ............./tm\n 0110 702f6173 6d6c6966 742d6d69 70732d72  p/asmlift-mips-r\n 0120 65662d30 37646561 35396437 32323435  ef-07dea59d72245\n 0130 3337302f 7265662e 6300746f 73380000  370/ref.c.tos8..\n 0140 746f7338 00000000 00000000 00000001  tos8............\n 0150 00000000 00000033 00000000 00000004  .......3........\n 0160 00000000 00000003 00000000 00000000  ................\n 0170 00000001 00000000 00000011 00000000  ................\n 0180 00000000 01800000 00000000 00000001  ................\n 0190 00000000 00000000 00000000 18200001  ............. ..\n 01a0 00000000 00000000 00000000 00000000  ................\n 01b0 00000000 00000000 7fffffff 00000000  ................\n 01c0 00000000 00000002                    ........        \n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned",
+        "candidateLabel": "signed",
         "outcome": "match",
-        "source": "s32 tos8(u32 a0) {\n    return (s32)(a0 << 24) >> 24;\n}\n",
+        "source": "s32 tos8(s32 a0) {\n    return a0 << 24 >> 24;\n}\n",
         "score": 0,
         "maxScore": 3,
         "compileErrors": null,
@@ -48973,7 +48973,7 @@
           "score": 100,
           "lines": 3,
           "gotos": 0,
-          "casts": 1,
+          "casts": 0,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -49748,9 +49748,9 @@
       "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /host-tmp/asmlift-mgcc-ref-5e885505a19e4205/ref.c\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t0000001c truncmul\n\n\nContents of section .text:\n 0000 00000000 00850018 00001012 00021400  ................\n 0010 00000000 03e00008 00021403 00000000  ................\nContents of section .reginfo:\n 0000 80000034 00000000 00000000 00000000  ...4............\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.              \n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned",
+        "candidateLabel": "signed",
         "outcome": "match",
-        "source": "s32 truncmul(u32 a0, u32 a1) {\n    return (s32)(a0 * a1 << 16) >> 16;\n}\n",
+        "source": "s32 truncmul(s32 a0, s32 a1) {\n    return a0 * a1 << 16 >> 16;\n}\n",
         "score": 0,
         "maxScore": 7,
         "compileErrors": null,
@@ -49765,7 +49765,7 @@
           "score": 100,
           "lines": 3,
           "gotos": 0,
-          "casts": 1,
+          "casts": 0,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -49821,9 +49821,9 @@
       "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    d  .text\t00000030 .text\n00000000 g     F .text\t0000002c truncmul\n\n\nContents of section .text:\n 0000 afa40000 afa50004 00052c00 00042400  ..........,...$.\n 0010 00042403 00052c03 00850019 00001012  ..$...,.........\n 0020 00021400 03e00008 00021403 00000000  ................\nContents of section .options:\n 0000 01200000 00000000 a0000034 00000000  . .........4....\n 0010 00000000 00000000 00000000 00007ff0  ................\n 0020 07100000 00000000 00000000 00000000  ................\n 0030 08100000 00000000 00000000 00000000  ................\nContents of section .reginfo:\n 0000 a0000034 00000000 00000000 00000000  ...4............\n 0010 00000000 00007ff0                    ........        \nContents of section .mdebug:\n 0000 7009070a 0000000b 00000004 00000198  p...............\n 0010 00000005 000002e0 00000001 0000019c  ................\n 0020 00000004 000001d0 00000000 00000000  ................\n 0030 00000011 00000200 00000038 00000244  ...........8...D\n 0040 0000000c 0000027c 00000001 00000288  .......|........\n 0050 00000000 00000000 00000001 000002d0  ................\n 0060 08010000 00000000 00000001 00000000  ................\n 0070 00000000 00000000 ffffffff 00000000  ................\n 0080 00000000 00000000 001d001f 00000002  ................\n 0090 00000002 00000000 00000001 00000000  ................\n 00a0 2c200004 0000002e 00000000 1820000f  , ........... ..\n 00b0 0000002e 0000002c 20200001 00000001  .......,  ......\n 00c0 00000000 20200000 02000000 03000000  ....  ..........\n 00d0 04000000 05000000 06000000 07000000  ................\n 00e0 08000000 09000000 20000000 21000000  ........ ...!...\n 00f0 0a000000 0b000000 0b000000 1a000000  ................\n 0100 00000000 00000003 06000000 002f746d  ............./tm\n 0110 702f6173 6d6c6966 742d6d69 70732d72  p/asmlift-mips-r\n 0120 65662d35 65383835 35303561 31396534  ef-5e885505a19e4\n 0130 3230352f 7265662e 63007472 756e636d  205/ref.c.truncm\n 0140 756c0000 7472756e 636d756c 00000000  ul..truncmul....\n 0150 00000000 00000001 00000000 00000037  ...............7\n 0160 00000000 00000004 00000000 0000000b  ................\n 0170 00000000 00000000 00000001 00000000  ................\n 0180 00000011 00000000 00000000 01800000  ................\n 0190 00000000 00000002 00000000 00000000  ................\n 01a0 00000000 18200001 00000000 00000000  ..... ..........\n 01b0 00000000 00000000 00000000 00000000  ................\n 01c0 7fffffff 00000000 00000000 00000002  ................\n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned",
+        "candidateLabel": "signed",
         "outcome": "nonmatch",
-        "source": "s32 truncmul(u32 a0, u32 a1) {\n    return ((s32)(a0 << 16) >> 16) * ((s32)(a1 << 16) >> 16) << 16 >> 16;\n}\n",
+        "source": "s32 truncmul(s32 a0, s32 a1) {\n    return (a0 << 16 >> 16) * (a1 << 16 >> 16) << 16 >> 16;\n}\n",
         "score": 7,
         "maxScore": 11,
         "compileErrors": null,
@@ -49838,7 +49838,7 @@
           "score": 100,
           "lines": 3,
           "gotos": 0,
-          "casts": 2,
+          "casts": 0,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0

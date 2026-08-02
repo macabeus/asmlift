@@ -7,7 +7,7 @@
 // consume exactly the exported seam: `emitCFamily` + `cType` + `LeafHook`.
 import { IrType, T, scalarTypeForAccess, typeToString } from '../ir/types';
 import { BinOp, Expr, SFn, Stmt, dotBase } from '../l3/ast';
-import { type VarTypes, declaredTypes, derefStrideOk, exprCType } from '../l3/typing';
+import { type VarTypes, declaredTypes, derefStrideOk, exprCType, renderedIntSignedness } from '../l3/typing';
 
 // C operator precedence (lower binds tighter). Used to emit MINIMAL parentheses. Shared: C++ has
 // the same precedence for these operators.
@@ -19,6 +19,7 @@ const PREC: Record<BinOp, number> = {
   '-': 4,
   '<<': 5,
   '>>': 5,
+  '>>>': 5, // spells as C's `>>` (see printExpr's shift rule) — same precedence
   '<': 6,
   '<=': 6,
   '>': 6,
@@ -103,6 +104,28 @@ function printExpr(e: Expr, parentPrec: number, vt: VarTypes, leaf?: LeafHook): 
     derefStrideOk(exprCType(ix.base, vt), ix.width)
       ? ix.base
       : { k: 'cast', to: T.ptr(scalarTypeForAccess(ix.width, ix.signed)), e: ix.base };
+  // C-FAMILY SHIFT LEGALIZATION, the same discipline one operator over. The tower keeps the two
+  // right shifts apart (`>>>` logical, `>>` arithmetic); C spells BOTH `>>` and picks between them
+  // from the LEFT OPERAND'S TYPE. So the operand must be made to carry the choice, or an `shr_u`
+  // recompiles to `asr` where the target has `lsr` AND evaluates differently —
+  // `*(u8 *)&g << 30 >> 30` promotes to `int`, so a 2-bit field holding 2 comes out -1.
+  //
+  // (engine.ts's zext fold covers the same hazard for widths C can NAME, by folding the whole
+  // shift pair to a cast op. Every other extract width — every bitfield read — lands here.)
+  //
+  // The cast is added unless the operand PROVABLY renders with the signedness the op needs:
+  // renderedIntSignedness answers `undefined` wherever its model does not reach, and a redundant
+  // cast is codegen-identical while a missing one is a miscompile. An existing 32-bit integer cast
+  // is REPLACED rather than wrapped — `(u32)(s32)&g` and `(u32)&g` are the same bytes, and the
+  // arithmetic rules upstream do emit that inner cast (intifyAddr).
+  const shiftOperand = (e0: Extract<Expr, { k: 'bin' }>): Expr => {
+    const wantSigned = e0.op === '>>';
+    if (renderedIntSignedness(e0.l, vt) === wantSigned) {
+      return e0.l;
+    }
+    const inner = e0.l.k === 'cast' && e0.l.to.kind === 'int' && e0.l.to.width === 32 ? e0.l.e : e0.l;
+    return { k: 'cast', to: T.int(32, wantSigned), e: inner };
+  };
   switch (e.k) {
     case 'var':
       return e.name;
@@ -125,7 +148,17 @@ function printExpr(e: Expr, parentPrec: number, vt: VarTypes, leaf?: LeafHook): 
       const base = legalized(e);
       // Leading constant subscripts (a multidimensional array global's bare spelling) keep the
       // postfix form whatever `idx` is: `g[0][0]` is the element, `*g[0]` would be its ROW.
+      //
+      // `lead` implies the base already strides the access width — its only producer registers a
+      // matching element type for the global (structure.ts bareArrayLead + noteGlobal). Nothing
+      // else enforced that, and the failure would be quiet-ish: legalization would wrap the base,
+      // spelling `((u16 *)g)[0][i]`, which subscripts a `u16` twice. Check it rather than assume.
       if (e.lead && e.lead.length > 0) {
+        if (base !== e.base) {
+          throw new Error(
+            `c backend: a multidimensional array access needs a base that strides ${e.width} bytes as spelled`,
+          );
+        }
         return `${rec(base, 1)}${e.lead.map((l) => `[${l}]`).join('')}[${rec(e.idx, 99)}]`;
       }
       if (e.idx.k === 'const' && e.idx.value === 0) {
@@ -146,6 +179,13 @@ function printExpr(e: Expr, parentPrec: number, vt: VarTypes, leaf?: LeafHook): 
       // first (the C++ member-access rewrite).
       const ix = dotBase(e);
       if (ix) {
+        // This path spells the index node from parts, so a `lead` would be DROPPED — an element
+        // access silently becoming a row's. Unreachable today (arrayAccess's lead branch requires
+        // `fieldOff === undefined`, which is exclusive with the dot form), but this is a
+        // text-returning path with no other guard, so it refuses rather than assumes.
+        if (ix.lead && ix.lead.length > 0) {
+          throw new Error(`c backend: a multidimensional array element has no struct-field spelling yet`);
+        }
         const hooked = leaf?.(ix, rec);
         const baseTxt = hooked ?? `${rec(ix.base, 1)}[${rec(ix.idx, 99)}]`;
         return `${baseTxt}.${e.name}`;
@@ -178,7 +218,9 @@ function printExpr(e: Expr, parentPrec: number, vt: VarTypes, leaf?: LeafHook): 
     }
     case 'bin': {
       const p = PREC[e.op];
-      const s = `${rec(e.l, p)} ${e.op} ${rec(e.r, p - 1)}`;
+      // Both right shifts spell C's `>>`; `shiftOperand` supplies the operand cast that says which.
+      const shift = e.op === '>>' || e.op === '>>>';
+      const s = `${rec(shift ? shiftOperand(e) : e.l, p)} ${shift ? '>>' : e.op} ${rec(e.r, p - 1)}`;
       return p > parentPrec ? `(${s})` : s;
     }
   }

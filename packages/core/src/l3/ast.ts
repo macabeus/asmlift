@@ -59,8 +59,33 @@ export type Expr =
   // default) never produces this node; it keeps the `"?"` sentinel → ContractError behavior.
   | { k: 'marker'; reason: string; args: Expr[] };
 
+// `>>` is the ARITHMETIC right shift and `>>>` the LOGICAL one — two different operations, kept
+// apart here because the machine keeps them apart (`asr` vs `lsr`, `sra` vs `srl`) and because
+// which one a language spells with which token is a BACKEND fact, not a tower fact. C spells both
+// `>>` and picks from the left operand's type, so the C backend synthesizes the cast that pins the
+// choice — exactly as it already synthesizes scalar deref casts from an `index` node's width. A
+// backend with no spelling for one of them (IDO Pascal) declines LOUDLY on the operation itself,
+// rather than on whatever artifact another language's spelling happened to leave in the tree.
 export type BinOp =
-  '+' | '-' | '*' | '/' | '%' | '<' | '<=' | '>' | '>=' | '==' | '!=' | '&' | '|' | '^' | '<<' | '>>' | '&&' | '||';
+  | '+'
+  | '-'
+  | '*'
+  | '/'
+  | '%'
+  | '<'
+  | '<='
+  | '>'
+  | '>='
+  | '=='
+  | '!='
+  | '&'
+  | '|'
+  | '^'
+  | '<<'
+  | '>>'
+  | '>>>'
+  | '&&'
+  | '||';
 
 export type Stmt =
   | { k: 'assign'; name: string; value: Expr }
