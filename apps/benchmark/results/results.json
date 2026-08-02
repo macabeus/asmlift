@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generatedAt": "2026-08-02T19:41:30.117Z",
+    "generatedAt": "2026-08-02T20:14:33.659Z",
     "toolchains": [
       "ido7.1",
       "agbcc",
@@ -14,8 +14,8 @@
       "real": 192
     },
     "asmlift": {
-      "commit": "5817585fa57bf3c7567ead8988303023b8e8b219",
-      "dirty": true
+      "commit": "a778d8a19aafe8a946b5d35dc09df1761a1afb02",
+      "dirty": false
     },
     "m2c": {
       "commit": "94098d4de68c2fcc13fb8cf1096a1520eb171abe"
@@ -2719,7 +2719,7 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-uxJmmu/c.c:1077: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-2MRq7I/c.c:1077: invalid operands to binary <<"
           }
         ],
         "symbolsUsed": [
@@ -3347,7 +3347,7 @@
         "droppedCandidates": [
           {
             "label": "unsigned",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-1R1JPh/c.c:1076: `gBgDataPtrs' undeclared (first use in this function)"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-BvX7oR/c.c:1076: `gBgDataPtrs' undeclared (first use in this function)"
           }
         ],
         "symbolsUsed": [],
@@ -4333,7 +4333,7 @@
         "droppedCandidates": [
           {
             "label": "unsigned",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-XYmJeD/c.c:1077: too many arguments to function `thunk_sub_080002A0'"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-FbcJbK/c.c:1077: too many arguments to function `thunk_sub_080002A0'"
           }
         ],
         "symbolsUsed": [],
@@ -4918,11 +4918,11 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-OKPlir/c.c:1086: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-TCiexY/c.c:1086: incompatible types in assignment"
           },
           {
             "label": "signed/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-4gz1RE/c.c:1086: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-7qlLSa/c.c:1086: incompatible types in assignment"
           }
         ],
         "symbolsUsed": [
@@ -8720,23 +8720,23 @@
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "candidateLabel": "unsigned",
+        "candidateLabel": "signed",
         "symbolsUsed": [],
         "outcome": "nonmatch",
-        "source": "s32 IsStringLengthAtLeast(u32 a0, u32 a1) {\n    s32 v0;\n    if (0 < a1) {\n        v0 = 0;\n        while (*(u8 *)(a0 + v0) == 0 || *(u8 *)(a0 + v0) == 255) {\n            v0 = (u8)(v0 + 1);\n            if (v0 >= a1) return 0;\n        }\n        return 1;\n    } else {\n        return 0;\n    }\n}\n",
-        "score": 20,
-        "maxScore": 27,
+        "source": "s32 IsStringLengthAtLeast(s32 a0, s32 a1) {\n    s32 v0;\n    if (0 < a1) {\n        v0 = 0;\n        do {\n            if (*(u8 *)(a0 + v0) != 0) {\n                if (*(u8 *)(a0 + v0) != 255) return 1;\n            }\n            v0 = (u8)(v0 + 1);\n        } while (v0 < a1);\n        return 0;\n    } else {\n        return 0;\n    }\n}\n",
+        "score": 10,
+        "maxScore": 23,
         "compileErrors": null,
         "breakdown": {
-          "insert": 8,
-          "delete": 6,
-          "replace": 1,
+          "insert": 4,
+          "delete": 3,
+          "replace": 0,
           "opMismatch": 2,
-          "argMismatch": 3
+          "argMismatch": 1
         },
         "quality": {
           "score": 90,
-          "lines": 13,
+          "lines": 15,
           "gotos": 0,
           "casts": 3,
           "unkGlue": 0,
@@ -8766,15 +8766,15 @@
       },
       "gapSize": {
         "decompiler": "asmlift",
-        "score": 20,
-        "maxScore": 27,
-        "ratio": 0.7407407407407407,
+        "score": 10,
+        "maxScore": 23,
+        "ratio": 0.43478260869565216,
         "kinds": {
-          "insert": 8,
-          "delete": 6,
-          "replace": 1,
+          "insert": 4,
+          "delete": 3,
+          "replace": 0,
           "opMismatch": 2,
-          "argMismatch": 3
+          "argMismatch": 1
         }
       },
       "scripts": {
