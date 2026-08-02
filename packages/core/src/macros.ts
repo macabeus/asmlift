@@ -212,15 +212,19 @@ export function addressCastMacrosFrom(defineLines: readonly string[]): Map<numbe
     if (address === null) {
       continue; // an address expression this module cannot be sure of — refuse
     }
-    // The body must be SELF-CONTAINED, because it is republished verbatim as the definition a
-    // reproduction compiles against (macroDefinesUsedBy) — a body naming `REG_ADDR_VCOUNT` would
-    // need that macro, and its two helpers, carried along with it. A literal address keeps the
-    // project's own spelling; anything else is re-spelled at the address it evaluated to, which
-    // is the same cell and the same type. `volatile T` rather than the project's `vT` alias: the
-    // typedef prelude a candidate compiles against declares u8/u16/u32 and no volatile aliases.
-    const body = HEX_LITERAL.test(addrText)
-      ? rawBody
-      : `(*(${type.volatile ? 'volatile ' : ''}${type.signed ? 's' : 'u'}${type.size * 8} *)0x${address.toString(16).toUpperCase()})`;
+    // The body must be SELF-CONTAINED and COMPILABLE, because it is republished verbatim as the
+    // definition a reproduction compiles against (macroDefinesUsedBy) — a body naming
+    // `REG_ADDR_VCOUNT` would need that macro, and its two helpers, carried along with it. An
+    // unqualified literal address keeps the project's own spelling; anything else is re-spelled at
+    // the address it evaluated to, which is the same cell and the same type.
+    // A VOLATILE body is re-spelled even when its address is already a literal: the alias it uses
+    // (`vu8`) is a PROJECT typedef, and the prelude a candidate compiles against declares only
+    // u8/u16/u32 + s8/s16/s32. Keeping such a body verbatim republishes a `#define` that does not
+    // compile — latent, because it only bites in the self-declared world.
+    const body =
+      HEX_LITERAL.test(addrText) && !type.volatile
+        ? rawBody
+        : `(*(${type.volatile ? 'volatile ' : ''}${type.signed ? 's' : 'u'}${type.size * 8} *)0x${address.toString(16).toUpperCase()})`;
     const priorAddr = seenNames.get(name);
     if (priorAddr !== undefined && priorAddr !== address) {
       collided.add(priorAddr);

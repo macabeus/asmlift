@@ -8,7 +8,7 @@ import { describe, expect, test } from 'vitest';
 
 import { T } from '../src/ir/types';
 import { materializeArgBases } from '../src/l3/argbase';
-import type { Expr, SFn } from '../src/l3/ast';
+import type { Expr, SFn, Stmt } from '../src/l3/ast';
 
 const deref = (base: Expr, idx: number, width = 1): Expr => ({
   k: 'index',
@@ -83,5 +83,114 @@ describe('semantics preservation — only a base that cannot change under us is 
       fnWith([deref({ k: 'const', value: 0x4000006 }, 0, 2), deref({ k: 'addr', name: 'g' }, 8, 2)]),
     )!;
     expect(out.locals.find((l) => l.name === 'p0')!.type).toEqual(T.ptr(T.u(16)));
+  });
+});
+
+describe('statement placement — the rewrite must not MOVE or DUPLICATE statements', () => {
+  // Both of these compiled and looked plausible; neither boundary contract checks placement.
+  // They came from rebuilding a statement out of a flattened `stmtChildren` list, which cannot
+  // work: inserting the naming statements shifts the boundary a rebuild would have to split at,
+  // and `stmtChildren('for')` is `[init, inc, ...body]` — not a body.
+  const CALL: Expr = {
+    k: 'call',
+    fn: 'callee',
+    args: [deref({ k: 'const', value: 0x4000006 }, 0), deref({ k: 'addr', name: 'g' }, 8)],
+  };
+
+  test('a call in the THEN branch stays in the THEN branch', () => {
+    const fn: SFn = {
+      name: 'f',
+      params: [],
+      locals: [],
+      retType: T.void(),
+      body: [
+        {
+          k: 'if',
+          cond: { k: 'var', name: 'c' },
+          then: [
+            { k: 'assign', name: 'hit', value: CALL },
+            { k: 'assign', name: 'alsoThen', value: { k: 'const', value: 1 } },
+          ],
+          else: [{ k: 'assign', name: 'onlyElse', value: { k: 'const', value: 2 } }],
+        },
+      ],
+    };
+    const s = materializeArgBases(fn)!.body[0] as Extract<Stmt, { k: 'if' }>;
+    // naming first, then the call, then the rest of the branch — and the else untouched
+    expect(s.then.map((x) => (x as { name?: string }).name)).toEqual(['p0', 'p1', 'hit', 'alsoThen']);
+    expect(s.else.map((x) => (x as { name?: string }).name)).toEqual(['onlyElse']);
+  });
+
+  test('a `for` keeps its init and inc, and does not copy them into the body', () => {
+    const fn: SFn = {
+      name: 'f',
+      params: [],
+      locals: [],
+      retType: T.void(),
+      body: [
+        {
+          k: 'for',
+          init: { k: 'assign', name: 'i', value: { k: 'const', value: 0 } },
+          cond: { k: 'var', name: 'c' },
+          inc: { k: 'assign', name: 'i', value: { k: 'const', value: 1 } },
+          body: [{ k: 'assign', name: 'hit', value: CALL }],
+        },
+      ],
+    };
+    const s = materializeArgBases(fn)!.body[0] as Extract<Stmt, { k: 'for' }>;
+    expect(s.init).toMatchObject({ k: 'assign', name: 'i' });
+    expect(s.inc).toMatchObject({ k: 'assign', name: 'i' });
+    expect(s.body.map((x) => (x as { name?: string }).name)).toEqual(['p0', 'p1', 'hit']);
+  });
+
+  test('EVERY use of one base points at the same local, not just the first', () => {
+    const g: Expr = { k: 'addr', name: 'g' };
+    const fn: SFn = {
+      name: 'f',
+      params: [],
+      locals: [],
+      retType: T.void(),
+      body: [
+        {
+          k: 'exprstmt',
+          value: {
+            k: 'call',
+            fn: 'callee',
+            args: [deref(g, 0), deref(g, 4), deref({ k: 'const', value: 0x4000006 }, 0)],
+          },
+        },
+      ],
+    };
+    const out = materializeArgBases(fn)!;
+    const args = (out.body[out.body.length - 1] as Extract<Stmt, { k: 'exprstmt' }>).value as Extract<
+      Expr,
+      { k: 'call' }
+    >;
+    expect(args.args.map((a) => ((a as Extract<Expr, { k: 'index' }>).base as { name: string }).name)).toEqual([
+      'p0',
+      'p0',
+      'p1',
+    ]);
+  });
+
+  test('a hoist local never shadows a CALLED function name', () => {
+    // basecse.ts added this guard in its own audit; re-implementing the name collector lost it.
+    const fn: SFn = {
+      name: 'f',
+      params: [],
+      locals: [],
+      retType: T.void(),
+      body: [
+        {
+          k: 'exprstmt',
+          value: {
+            k: 'call',
+            fn: 'p0',
+            args: [deref({ k: 'const', value: 0x4000006 }, 0), deref({ k: 'addr', name: 'g' }, 8)],
+          },
+        },
+      ],
+    };
+    expect(materializeArgBases(fn)!.locals.map((l) => l.name)).not.toContain('p0');
   });
 });

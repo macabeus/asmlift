@@ -26,10 +26,11 @@
 // evaluating it earlier can be neither observable nor faulting. A local variable is excluded: it
 // may be assigned between the hoist point and the call, which would change what is dereferenced.
 //
-// GATE: at least TWO arguments of the same call must qualify, with DISTINCT bases. One base alone
-// does not reproduce the reordering (measured: hoisting only the first argument's base on
-// kleod:UpdateFadeEffect leaves the diff unchanged at 2, both together take it to 0), so a
-// single-base hoist would be churn with no evidence behind it.
+// GATE: at least TWO arguments of the same call must qualify, with DISTINCT bases. The reordering
+// this reproduces only exists when two addresses compete for registers during argument setup — with
+// ONE base there is nothing to interleave, so the compiler emits the same sequence either way and
+// naming it is pure churn. (Evidence: on kleod:UpdateFadeEffect, hoisting only the first base
+// leaves the diff at 2; both together take it to 0.)
 import { type IrType, T, scalarTypeForAccess } from '../ir/types';
 import type { Expr, SFn, Stmt } from './ast';
 import { exprEquals, mapExprChildren, stmtChildren, stmtExprs } from './ast';
@@ -78,15 +79,29 @@ function collectNames(stmts: Stmt[], into: Set<string>): void {
     if (e.k === 'var' || e.k === 'addr') {
       into.add(e.name);
     }
+    if (e.k === 'call') {
+      into.add(e.fn); // a hoist local must not shadow a called function symbol
+    }
     mapExprChildren(e, (c) => {
       visit(c);
       return c;
     });
   };
   for (const s of stmts) {
+    if (s.k === 'assign') {
+      into.add(s.name);
+    }
     stmtExprs(s).forEach(visit);
     collectNames(stmtChildren(s), into);
   }
+}
+
+/** The (base, width, signedness) key an `index` shares with every other access through the same
+ *  base — so ALL of a base's uses in one call rewrite to the same local, not just the first. */
+function baseKey(n: Extract<Expr, { k: 'index' }>): string {
+  const b = n.base;
+  const id = b.k === 'addr' ? `a:${b.name}` : b.k === 'const' ? `c:${b.value}` : `v:${(b as { name: string }).name}`;
+  return `${id} ${n.width} ${n.signed}`;
 }
 
 /**
@@ -100,76 +115,107 @@ export function materializeArgBases(sfn: SFn): SFn | null {
   const newLocals: { name: string; type: IrType }[] = [];
   let fired = false;
 
-  // Rewrite ONE statement: every qualifying call in it gets its argument bases named first, and the
-  // naming statements are inserted immediately BEFORE it — not at the function top. The compiler
-  // loads these addresses right where it needs them, and hoisting further would extend live ranges
-  // the original never had (the register-pressure failure basecse.ts's loop gate exists for).
-  const rewriteStmt = (s: Stmt): Stmt[] => {
+  // Rewrite ONE statement into the list that replaces it: the naming assignments, then the
+  // statement with its qualifying bases pointed at them. The naming goes immediately BEFORE the
+  // statement holding the call, not at the function top — the compiler loads these addresses where
+  // it needs them, and hoisting further extends live ranges the original never had (the
+  // register-pressure failure basecse.ts's loop gate exists for).
+  //
+  // NOTE the shape: recursion happens per FIELD, through an exhaustive switch, and the `pre`
+  // insertion happens INSIDE it. Rebuilding a statement from a flattened `stmtChildren` list cannot
+  // work — inserting statements shifts the boundary the rebuild would have to split at, and
+  // `stmtChildren('for')` is `[init, inc, ...body]`, which is not a body. Both mistakes produce
+  // COMPILING but wrong C (a call migrating across an if/else boundary; a `for` init duplicated
+  // into its body), which no boundary contract checks: they check resolution and spellability, not
+  // statement placement.
+  const rewrite = (s: Stmt): Stmt[] => {
     const pre: Stmt[] = [];
-    const localFor: { node: Extract<Expr, { k: 'index' }>; name: string }[] = [];
-    const scan = (e: Expr): void => {
-      if (e.k === 'call') {
-        const bases = distinctBases(argBases(e, globals));
-        if (bases.length >= 2) {
-          for (const b of bases) {
-            const ptrType = T.ptr(scalarTypeForAccess(b.width, b.signed));
-            const nm = freshName(taken);
-            localFor.push({ node: b, name: nm });
-            newLocals.push({ name: nm, type: ptrType });
-            pre.push({ k: 'assign', name: nm, value: { k: 'cast', to: ptrType, e: b.base } });
+    const localFor = new Map<string, string>();
+    // Only the statement's OWN expressions can carry a call this pass names bases for; nested
+    // statement lists get their own `pre`, in their own scope, via the recursion below.
+    for (const e of stmtExprs(s)) {
+      const scan = (x: Expr): void => {
+        if (x.k === 'call') {
+          const bases = distinctBases(argBases(x, globals));
+          if (bases.length >= 2) {
+            for (const b of bases) {
+              const key = baseKey(b);
+              if (localFor.has(key)) {
+                continue;
+              }
+              const ptrType = T.ptr(scalarTypeForAccess(b.width, b.signed));
+              const nm = freshName(taken);
+              localFor.set(key, nm);
+              newLocals.push({ name: nm, type: ptrType });
+              pre.push({ k: 'assign', name: nm, value: { k: 'cast', to: ptrType, e: b.base } });
+            }
+            fired = true;
           }
-          fired = true;
         }
-      }
-      mapExprChildren(e, (c) => {
-        scan(c);
-        return c;
-      });
-    };
-    stmtExprs(s).forEach(scan);
-    if (localFor.length === 0) {
-      // no call in THIS statement qualified; recurse into nested statements (an if/loop body)
-      const kids = stmtChildren(s);
-      return kids.length ? [rebuild(s, kids.flatMap(rewriteStmt))] : [s];
+        mapExprChildren(x, (c) => {
+          scan(c);
+          return c;
+        });
+      };
+      scan(e);
     }
     const point = (e: Expr): Expr => {
-      const hit = localFor.find((l) => l.node === e);
-      return hit
-        ? { ...(e as Extract<Expr, { k: 'index' }>), base: { k: 'var', name: hit.name } }
-        : mapExprChildren(e, point);
+      if (e.k === 'index' && eligibleBase(e.base, globals)) {
+        const nm = localFor.get(baseKey(e));
+        if (nm) {
+          return { ...e, base: { k: 'var', name: nm }, idx: point(e.idx) };
+        }
+      }
+      return mapExprChildren(e, point);
     };
-    return [...pre, mapStmtExprs(s, point)];
+    const kids = (list: Stmt[]): Stmt[] => list.flatMap(rewrite);
+    let out: Stmt;
+    switch (s.k) {
+      case 'assign':
+        out = { ...s, value: point(s.value) };
+        break;
+      case 'store':
+        out = { ...s, lval: point(s.lval), value: point(s.value) };
+        break;
+      case 'exprstmt':
+        out = { ...s, value: point(s.value) };
+        break;
+      case 'return':
+        out = s.value === undefined ? s : { ...s, value: point(s.value) };
+        break;
+      case 'if':
+        out = { ...s, cond: point(s.cond), then: kids(s.then), else: kids(s.else) };
+        break;
+      case 'while':
+      case 'dowhile':
+        out = { ...s, cond: point(s.cond), body: kids(s.body) };
+        break;
+      case 'for': {
+        // `init`/`inc` are single statements. A `pre` produced inside either has nowhere legal to
+        // go (before the loop changes when it runs; inside the body repeats it), so this pass
+        // declines to fire there and leaves them alone.
+        out = { ...s, cond: point(s.cond), body: kids(s.body) };
+        break;
+      }
+      case 'switch':
+        out = {
+          ...s,
+          scrutinee: point(s.scrutinee),
+          cases: s.cases.map((c) => ({ ...c, body: kids(c.body) })),
+          ...(s.default ? { default: kids(s.default) } : {}),
+        };
+        break;
+      case 'break':
+      case 'continue':
+        out = s;
+        break;
+    }
+    if (pre.length === 0) {
+      return [out];
+    }
+    return [...pre, out];
   };
 
-  const body = sfn.body.flatMap(rewriteStmt);
+  const body = sfn.body.flatMap(rewrite);
   return fired ? { ...sfn, body, locals: [...sfn.locals, ...newLocals] } : null;
-}
-
-/** Replace a statement's direct expressions, keeping its children. */
-function mapStmtExprs(s: Stmt, f: (e: Expr) => Expr): Stmt {
-  switch (s.k) {
-    case 'assign':
-      return { ...s, value: f(s.value) };
-    case 'store':
-      return { ...s, lval: f(s.lval), value: f(s.value) };
-    case 'exprstmt':
-      return { ...s, value: f(s.value) };
-    case 'return':
-      return s.value === undefined ? s : { ...s, value: f(s.value) };
-    default:
-      return s; // control-flow statements are handled by the child recursion above
-  }
-}
-
-/** Rebuild a control-flow statement around rewritten children. Only the shapes whose bodies are a
- *  flat statement list are supported; anything else is returned unchanged, which simply means this
- *  lever declines to fire inside it. */
-function rebuild(s: Stmt, kids: Stmt[]): Stmt {
-  if (s.k === 'if') {
-    return { ...s, then: kids.slice(0, s.then.length), else: s.else ? kids.slice(s.then.length) : s.else };
-  }
-  if (s.k === 'while' || s.k === 'dowhile' || s.k === 'for') {
-    return { ...s, body: kids };
-  }
-  return s;
 }

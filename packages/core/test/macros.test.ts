@@ -26,7 +26,17 @@ describe('addressCastMacros', () => {
     // project has, since those are exactly the cells one declares volatile. It is now met by
     // carrying the fact instead, which is the same guarantee at none of the cost.
     expect(one('#define gPauseFlag (*(vu8 *)0x030034E4)')).toEqual([
-      { name: 'gPauseFlag', address: 0x030034e4, body: '(*(vu8 *)0x030034E4)', size: 1, signed: false, volatile: true },
+      // the body is re-spelled even though the address was already a literal: `vu8` is a PROJECT
+      // typedef and the prelude a candidate compiles against has none, so keeping it verbatim
+      // republishes a `#define` that does not compile
+      {
+        name: 'gPauseFlag',
+        address: 0x030034e4,
+        body: '(*(volatile u8 *)0x30034E4)',
+        size: 1,
+        signed: false,
+        volatile: true,
+      },
     ]);
   });
 
