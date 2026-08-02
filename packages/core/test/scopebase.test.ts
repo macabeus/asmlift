@@ -266,3 +266,41 @@ describe('placement within the scope', () => {
     expect(hoists(then)).toEqual(['p0', 'p1']);
   });
 });
+
+describe('the refusals found by the second adversarial round', () => {
+  test('a COMPOUND `for` init/inc makes the pass decline outright', () => {
+    // `init`/`inc` are typed as the full Stmt union, so a nested list there is type-legal. collect
+    // reaches only their own expressions while rewriteStmt descends fully — the round-1 asymmetry
+    // one node kind deeper, reproduced by fuzz. No producer emits this today; refusing beats
+    // half-collecting it.
+    const compoundInit: Stmt = {
+      k: 'if',
+      cond: { k: 'const', value: 1 },
+      then: [store(ix(3), { k: 'const', value: 0 })],
+      else: [],
+    };
+    const arm: Stmt[] = [
+      store(ix(1), ix(2)),
+      {
+        k: 'for',
+        init: compoundInit,
+        cond: { k: 'const', value: 1 },
+        inc: { k: 'assign', name: 'i', value: { k: 'const', value: 0 } },
+        body: [],
+      },
+    ];
+    expect(hoistScopedBases(fn([{ k: 'if', cond: { k: 'const', value: 1 }, then: arm, else: [] }]))).toBeNull();
+  });
+
+  test('a global SHADOWED by a local is not eligible — `&g` would name the local', () => {
+    const arm: Stmt[] = [store(ix(1), ix(2))];
+    const base = fn([{ k: 'if', cond: { k: 'const', value: 1 }, then: arm, else: [] }]);
+    expect(hoistScopedBases({ ...base, locals: [{ name: 'g', type: T.s(32) }] })).toBeNull();
+  });
+
+  test('one local is declared per hoist, however the tree is walked', () => {
+    const arm: Stmt[] = [store(ix(1), ix(2))];
+    const out = hoistScopedBases(fn([{ k: 'if', cond: { k: 'const', value: 1 }, then: arm, else: [] }]));
+    expect(out!.locals.filter((l) => l.name === 'p0')).toHaveLength(1);
+  });
+});

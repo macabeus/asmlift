@@ -105,6 +105,10 @@ interface Site {
   perIteration: boolean;
 }
 
+/** Set when the tree holds a shape `collect` and `rewriteStmt` would disagree about — see the
+ *  `for`-part note below. The pass then declines outright. */
+let compound = false;
+
 /** Walk every expression in the tree, recording each eligible access's key and its scope path. */
 function collect(
   body: Stmt[],
@@ -142,6 +146,17 @@ function collect(
     // the divergence is real and an extraction has to pick one.
     stmtExprs(s).forEach((e) => visit(e, isLoop));
     if (s.k === 'for') {
+      // `init`/`inc` are typed as the full Stmt union, so a COMPOUND one is type-legal. `stmtExprs`
+      // reaches only its own expressions while `rewriteStmt` descends into any nested list — the
+      // round-1 walker asymmetry, one node kind deeper, and the fuzz reproduces it (a use inside
+      // `for (if (1) i = g[3]; …)` gets repointed at a local the `if` arm may never have assigned).
+      // No producer emits a compound part today (structure.ts and reindex.ts both emit `assign`), so
+      // rather than grow a second recursion this REFUSES the whole function — loud decline over a
+      // silently unreachable definition. Delete this when `stmtLists` makes collect/rewrite share
+      // one traversal.
+      if (childLists(s.init).length > 0 || childLists(s.inc).length > 0) {
+        compound = true;
+      }
       // `init` and `inc` are STATEMENTS, so their expressions are reached by neither `stmtExprs`
       // nor `childLists` — yet `rewriteStmt` rewrites them. Collect and rewrite MUST see the same
       // tree: an access the planner never counted would still be repointed, at a local whose
@@ -202,7 +217,11 @@ function commonScope(uses: Site[]): { scope: Stmt[]; depth: number } | null {
 
 /** Does any use sit inside a LOOP nested below the chosen scope?
  *
- *  Then the hoist would be loop-invariant code motion to a point the original never had — the
+ *  OVER-REFUSES in two shapes, deliberately: a `do { … } while (g[1]) ;` body head and a
+ *  `for (…; …; i = g[5])` body head both DO run at the flagged cadence, so a hoist there would be
+ *  legal. Refusing them costs a missed spelling and nothing else (bench: 0 lost, 0 gained), and the
+ *  precise rule needs the loop-DEPTH model an extraction would bring. Otherwise:
+ *  the hoist would be loop-invariant code motion to a point the original never had — the
  *  register-pressure failure `basecse.ts`'s own `inLoop` gate refuses, and the reason that gate
  *  exists. When EVERY use is inside the loop, the common scope IS the loop body: the assignment
  *  then runs per iteration exactly as the inline spelling did, and there is nothing to refuse. */
@@ -215,15 +234,21 @@ function underNestedLoop(uses: Site[], depth: number): boolean {
  * rather than a duplicate of the primary).
  */
 export function hoistScopedBases(sfn: SFn): SFn | null {
-  const globals = new Set((sfn.globals ?? []).map((g) => g.name));
+  compound = false;
+  // A name that is BOTH a declared global and a local/param is not safely a global here: `&g` would
+  // take the address of the LOCAL, silently a different object. Excluded rather than assumed apart.
+  const shadowed = new Set([...sfn.locals.map((l) => l.name), ...sfn.params.map((p) => p.name)]);
+  const globals = new Set((sfn.globals ?? []).map((g) => g.name).filter((n) => !shadowed.has(n)));
   const found = new Map<
     string,
     { uses: Site[]; sample: Extract<Expr, { k: 'index' }>; constOff: Map<number, number> }
   >();
   collect(sfn.body, globals, found, [], [], []);
+  if (compound) {
+    return null;
+  }
 
   const fresh = nameAllocator(sfn);
-  const newLocals: { name: string; type: IrType }[] = [];
   // key → (scope list identity, local name)
   const plan: { scope: Stmt[]; key: string; name: string; type: IrType; base: LeafBase; before: number }[] = [];
   for (const [key, rec] of found) {
@@ -237,7 +262,10 @@ export function hoistScopedBases(sfn: SFn): SFn | null {
     // applies cleanly only to the `addr`/`const` half of this pass's input, which is exactly what
     // basecse refused and left behind. For the `var` (array-global) half basecse never ran, so this
     // is an EXTRAPOLATION, not an inheritance. Conservative direction, so the cost is a missed
-    // hoist rather than a wrong one.
+    // hoist rather than a wrong one. It also SLIPS on a fixed offset not spelled as a literal —
+    // two identical `g[i]` accesses are not tallied — which basecse acknowledges in its own comment
+    // and which this pass is MORE exposed to, since it deliberately admits loop-body uses, exactly
+    // the input basecse's `inLoop` gate kept away from that hole.
     if ([...rec.constOff.values()].some((n) => n >= 2)) {
       continue;
     }
@@ -276,9 +304,6 @@ export function hoistScopedBases(sfn: SFn): SFn | null {
   // fresh tree in one pass — a two-pass version would compare rebuilt lists that no longer match.
   const rewriteList = (list: Stmt[]): Stmt[] => {
     const here = plan.filter((p) => p.scope === list);
-    for (const p of here) {
-      newLocals.push({ name: p.name, type: p.type });
-    }
     const rewritten = list.map(rewriteStmt);
     // Insert each hoist immediately before the first statement that uses it. Descending by index so
     // earlier insertions do not shift the positions later ones were computed against; ties keep
@@ -331,5 +356,8 @@ export function hoistScopedBases(sfn: SFn): SFn | null {
   };
 
   const body = rewriteList(sfn.body);
-  return { ...sfn, body, locals: [...sfn.locals, ...newLocals] };
+  // Declared from `plan`, one per hoist — NOT accumulated inside `rewriteList`, which would emit a
+  // duplicate declaration (non-compiling C) if a `Stmt[]` were ever structurally shared by two tree
+  // positions.
+  return { ...sfn, body, locals: [...sfn.locals, ...plan.map((p) => ({ name: p.name, type: p.type }))] };
 }
