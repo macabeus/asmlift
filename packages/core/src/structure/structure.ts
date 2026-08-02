@@ -2088,6 +2088,31 @@ function negate(e: Expr): Expr {
   if (e.k === 'bin' && NEGATE[e.op]) {
     return { ...e, op: NEGATE[e.op] };
   }
+  // DE MORGAN. A negated short-circuit pushes the negation into the operands rather than wrapping:
+  // `!(a && b)` → `!a || !b`. Sound in C including EVALUATION ORDER — `a && b` evaluates `b` only
+  // when `a` holds, and `!a || !b` evaluates `!b` only when `!a` is false, i.e. when `a` holds — so
+  // the same operands run on the same inputs, which is what makes this safe over a `b` that loads.
+  //
+  // It matters because the connective's polarity is not recoverable from the asm. A source `&&`
+  // and its dual `||` compile to the SAME branch graph, and the recognizers in raise/shortcircuit.ts
+  // must pick whichever one the asm's branch senses spell. `!(…)` on top of that is a spelling no
+  // author writes; distributing recovers the other one, so the `/flip-branch` candidate reaches BOTH
+  // duals on a divergent `if` and the differ picks between them.
+  //
+  // SCOPE, measured: this does NOT reach a connective that ended up as a LOOP test —
+  // `preserveDivergentBranchSense` re-spells divergent ifs only, so a rotated
+  // `while (!a || !b) …` has no dual candidate (pokeemerald:IsStringLengthAtLeast stays at 20).
+  // Widening the branch-sense lever to loop tests is a separate change.
+  if (e.k === 'bin' && (e.op === '&&' || e.op === '||')) {
+    return { ...e, op: e.op === '&&' ? '||' : '&&', l: negate(e.l), r: negate(e.r) };
+  }
+  // `!!x` collapses to `x`. Only valid because EVERY caller of `negate` is a condition — an `if`,
+  // a loop test, or an operand of one of the connectives above — where `x` and `!!x` are the same
+  // truth value. It is not a general identity (`!!5` is 1, `5` is 5), so it must not migrate out of
+  // this function. Reachable only from a double flip, which De Morgan above now produces.
+  if (e.k === 'un' && e.op === '!') {
+    return e.e;
+  }
   return { k: 'un', op: '!', e };
 }
 

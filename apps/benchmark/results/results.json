@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generatedAt": "2026-08-02T19:25:03.460Z",
+    "generatedAt": "2026-08-02T19:29:18.618Z",
     "toolchains": [
       "ido7.1",
       "agbcc",
@@ -14,7 +14,7 @@
       "real": 192
     },
     "asmlift": {
-      "commit": "affe2373c5cc793a76f538029b0825b8671dcce9",
+      "commit": "5c3318b4f8a3a74a11abcb000a850c21d751119d",
       "dirty": true
     },
     "m2c": {
@@ -2719,7 +2719,7 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-OsPy1e/c.c:1077: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-QVv3p5/c.c:1077: invalid operands to binary <<"
           }
         ],
         "symbolsUsed": [
@@ -3347,7 +3347,7 @@
         "droppedCandidates": [
           {
             "label": "unsigned",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-03Ab0Q/c.c:1076: `gBgDataPtrs' undeclared (first use in this function)"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-K2rCNi/c.c:1076: `gBgDataPtrs' undeclared (first use in this function)"
           }
         ],
         "symbolsUsed": [],
@@ -4333,7 +4333,7 @@
         "droppedCandidates": [
           {
             "label": "unsigned",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-WiNqbv/c.c:1077: too many arguments to function `thunk_sub_080002A0'"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-cUCGgy/c.c:1077: too many arguments to function `thunk_sub_080002A0'"
           }
         ],
         "symbolsUsed": [],
@@ -4918,11 +4918,11 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-8DZpOq/c.c:1086: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-PzIilm/c.c:1086: incompatible types in assignment"
           },
           {
             "label": "signed/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-NvwW8i/c.c:1086: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Ddrsvc/c.c:1086: incompatible types in assignment"
           }
         ],
         "symbolsUsed": [
@@ -19278,7 +19278,7 @@
         "decompiler": "asmlift",
         "candidateLabel": "signed",
         "outcome": "match",
-        "source": "s32 breakloop(s32 * a0, s32 a1) {\n    s32 v0;\n    s32 * v1;\n    v1 = a0;\n    for (v0 = 0; !(v0 >= a1 || *v1 < 0); v0 = v0 + 1) {\n        v1 = v1 + 1;\n    }\n    return v0;\n}\n",
+        "source": "s32 breakloop(s32 * a0, s32 a1) {\n    s32 v0;\n    s32 * v1;\n    v1 = a0;\n    for (v0 = 0; v0 < a1 && *v1 >= 0; v0 = v0 + 1) {\n        v1 = v1 + 1;\n    }\n    return v0;\n}\n",
         "score": 0,
         "maxScore": 12,
         "compileErrors": null,
@@ -31693,7 +31693,7 @@
         "decompiler": "asmlift",
         "candidateLabel": "unsigned",
         "outcome": "nonmatch",
-        "source": "s32 llcmp(u32 a0, u32 a1, u32 a2, u32 a3) {\n    s32 v0;\n    if (a3 <= a1) {\n        if (!(a3 != a1 || a2 <= a0)) {\n            return 1;\n        } else {\n            v0 = 0;\n            return v0;\n        }\n    } else {\n        return 1;\n    }\n}\n",
+        "source": "s32 llcmp(u32 a0, u32 a1, u32 a2, u32 a3) {\n    s32 v0;\n    if (a3 <= a1) {\n        if (a3 == a1 && a2 > a0) {\n            return 1;\n        } else {\n            v0 = 0;\n            return v0;\n        }\n    } else {\n        return 1;\n    }\n}\n",
         "score": 11,
         "maxScore": 14,
         "compileErrors": null,
@@ -33725,7 +33725,7 @@
         "decompiler": "asmlift",
         "candidateLabel": "signed",
         "outcome": "nonmatch",
-        "source": "s32 lor(s32 a0, s32 a1) {\n    if (!(a0 != 0 || a1 != 0)) {\n        return 0;\n    } else {\n        return 1;\n    }\n}\n",
+        "source": "s32 lor(s32 a0, s32 a1) {\n    if (a0 == 0 && a1 == 0) {\n        return 0;\n    } else {\n        return 1;\n    }\n}\n",
         "score": 4,
         "maxScore": 9,
         "compileErrors": null,
@@ -44946,7 +44946,7 @@
         "decompiler": "asmlift",
         "candidateLabel": "unsigned",
         "outcome": "match",
-        "source": "s32 strcmp1(u8 * a0, u8 * a1) {\n    u8 * v0;\n    u8 * v1;\n    v0 = a0;\n    for (v1 = a1; !(*v0 == 0 || *v0 != *v1); v1 = v1 + 1) {\n        v0 = v0 + 1;\n    }\n    return *v0 - *v1;\n}\n",
+        "source": "s32 strcmp1(u8 * a0, u8 * a1) {\n    u8 * v0;\n    u8 * v1;\n    v0 = a0;\n    for (v1 = a1; *v0 != 0 && *v0 == *v1; v1 = v1 + 1) {\n        v0 = v0 + 1;\n    }\n    return *v0 - *v1;\n}\n",
         "score": 0,
         "maxScore": 13,
         "compileErrors": null,
@@ -45154,7 +45154,7 @@
         "decompiler": "asmlift",
         "candidateLabel": "unsigned",
         "outcome": "nonmatch",
-        "source": "s32 strcmp1(u8 * a0, u8 * a1) {\n    u8 * v0;\n    u8 * v1;\n    v0 = a0;\n    for (v1 = a1; !((s8)*v0 == 0 || (s8)*v0 != (s8)*v1); v1 = v1 + 1) {\n        v0 = v0 + 1;\n    }\n    return (s8)*v0 - (s8)*v1;\n}\n",
+        "source": "s32 strcmp1(u8 * a0, u8 * a1) {\n    u8 * v0;\n    u8 * v1;\n    v0 = a0;\n    for (v1 = a1; (s8)*v0 != 0 && (s8)*v0 == (s8)*v1; v1 = v1 + 1) {\n        v0 = v0 + 1;\n    }\n    return (s8)*v0 - (s8)*v1;\n}\n",
         "score": 8,
         "maxScore": 16,
         "compileErrors": null,
