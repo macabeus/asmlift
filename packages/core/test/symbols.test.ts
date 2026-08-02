@@ -31,6 +31,10 @@ const mapOf = (entries: [number, Parameters<typeof Object.assign>[1]][]): Symbol
 // ldr rN, =0x03001234; load/store through it — the numeric-pool shape the promotion targets
 const LOADW = '\tldr\tr0, .L1\n\tldr\tr0, [r0]\n\tbx\tlr\n.L1:\n\t.word\t0x03001234\n';
 
+// a u16 table indexed by a0*2: ldr r1,=tbl; lsls r0,#1; adds r0,r1,r0; ldrh r0,[r0]
+const ARRAY_U16_BODY =
+  '\tldr\tr1, .L1\n\tlsls\tr0, r0, #0x1\n\tadds\tr0, r1, r0\n\tldrh\tr0, [r0]\n\tbx\tlr\n.L1:\n\t.word\t0x08057B4C\n';
+
 describe('inertness (the optionality contract)', () => {
   test('no map ⇒ byte-identical raw-literal output', () => {
     const base = run('f', LOADW);
@@ -127,10 +131,55 @@ describe('declaration shapes (P2)', () => {
     expect(src).toContain('gState'); // still named (interior/index spelling), just not a field
   });
 
+  // ── ARRAY RANK ────────────────────────────────────────────────────────────────────────────
+  // `dims` is the rank the flat element count multiplies away. One subscript reaches an element
+  // only on a rank-1 array; on `u16 g[4][0x400]`, `g[i]` is a ROW, so an element access has to
+  // pin the leading dimensions. Skipping that is not merely unreadable — against the project's
+  // own header it is a type error, or, where the row address flows into an integer context, a
+  // warning and a silently different address.
+  test('a MULTIDIMENSIONAL array global pins the leading dimensions — gSym[0][i]', () => {
+    // exactly kleod's `extern u16 gBgTilemapBufs[4][0x400]` shape
+    const map = mapOf([
+      [
+        0x03000900,
+        { name: 'gBgTilemapBufs', kind: 'data', shape: 'array', elemSize: 2, elemSigned: false, dims: [4, 1024] },
+      ],
+    ]);
+    const src = run('f', ARRAY_U16_BODY.replace('0x08057B4C', '0x03000900'), map);
+    expect(src).toContain('gBgTilemapBufs[0][');
+    expect(src).not.toMatch(/gBgTilemapBufs\[[^0]/); // never the one-subscript row access
+    expect(src).not.toContain('&gBgTilemapBufs'); // still the bare form, not the cast fallback
+  });
+
+  test('a rank-3 array global pins BOTH leading dimensions', () => {
+    const map = mapOf([
+      [0x08057b4c, { name: 'gGrid', kind: 'data', shape: 'array', elemSize: 2, elemSigned: false, dims: [6, 9, 3] }],
+    ]);
+    expect(run('f', ARRAY_U16_BODY, map)).toContain('gGrid[0][0][');
+  });
+
+  test('a rank-1 `dims` is the same bare spelling as no dims at all', () => {
+    const map = mapOf([
+      [0x08057b4c, { name: 'gTbl', kind: 'data', shape: 'array', elemSize: 2, elemSigned: false, dims: [64] }],
+    ]);
+    const src = run('f', ARRAY_U16_BODY, map);
+    expect(src).toContain('gTbl[');
+    expect(src).not.toContain('gTbl[0]['); // rank 1 takes exactly one subscript
+  });
+
+  test('a stated rank with an UNKNOWN inner extent declines the bare form, never guesses rank 1', () => {
+    // `dims: [2, null]` cannot be spelled as either `g[i]` or `g[0][i]`: the fallback cast form is
+    // the only reading that is byte-identical under whatever the header actually declares.
+    const map = mapOf([
+      [0x08057b4c, { name: 'gRagged', kind: 'data', shape: 'array', elemSize: 2, elemSigned: false, dims: [2, null] }],
+    ]);
+    const src = run('f', ARRAY_U16_BODY, map);
+    expect(src).toContain('&gRagged'); // the honest cast form
+    expect(src).not.toMatch(/[^&]gRagged\[/); // no bare subscript of any arity
+  });
+
   test('an array global spells the BARE gSym[i], uncast', () => {
-    // u16 table indexed by a0*2: ldr r1,=tbl; lsls r0,#1; adds r0,r1,r0; ldrh r0,[r0]
-    const body =
-      '\tldr\tr1, .L1\n\tlsls\tr0, r0, #0x1\n\tadds\tr0, r1, r0\n\tldrh\tr0, [r0]\n\tbx\tlr\n.L1:\n\t.word\t0x08057B4C\n';
+    const body = ARRAY_U16_BODY;
     const map = mapOf([
       [0x08057b4c, { name: 'gBlendModeTable', kind: 'data', shape: 'array', elemSize: 2, elemSigned: false }],
     ]);
@@ -769,5 +818,52 @@ describe('the numeric-pool veto exempts MACRO names — the veto is about reloca
   test('an EXTERN name at the same address is still vetoed', () => {
     const symbols = mapOf([[0x03001234, { name: 'gExtern', kind: 'data', shape: 'scalar', size: 4, signed: false }]]);
     expect(run('f', MIXED, symbols)).not.toContain('gExtern');
+  });
+});
+
+describe('shift-direction fidelity — `shr_u` must not recompile as `asr`', () => {
+  // C spells the logical and the arithmetic right shift the SAME (`>>`) and chooses from the left
+  // operand's type. engine.ts's zext fold fixes the byte/half case by folding the whole shift PAIR
+  // to a cast, which it can only do for widths C can name; every other extract width — every
+  // bitfield read — reached the backend as a raw `x << k >> k` over a signed-promoted operand.
+  // That is `asr` where the target has `lsr`, and a different VALUE: a 2-bit field holding 2
+  // evaluates to -1.
+  const extract = (lo: number) =>
+    // ldrb r0,[r1]; lsl r0,#lo; lsr r0,#lo  — the agbcc bitfield read
+    `\tldr\tr1, .L1\n\tldrb\tr0, [r1]\n\tlsl\tr0, r0, #${lo}\n\tlsr\tr0, r0, #${lo}\n\tbx\tlr\n.L1:\n\t.word\t0x03005220\n`;
+
+  test('a BITFIELD-width extract spells its operand unsigned', () => {
+    const src = run('f', extract(30));
+    expect(src).toMatch(/\(u32\)/);
+    expect(src).toContain('>> 30');
+    // the failure this pins: a bare `<< 30 >> 30` over an int-promoted u8 is the arithmetic shift
+    expect(src).not.toMatch(/\)\s*<< 30 >> 30/);
+  });
+
+  test('a BYTE-width extract still folds to the cast — the fold owns that width, not this rule', () => {
+    // width 8 (shift 24) is engine.ts's zext8: it must keep producing `(u8)x`, not grow a `(u32)`
+    const src = run('f', extract(24));
+    expect(src).toContain('(u8)');
+    expect(src).not.toContain('>> 24');
+  });
+
+  test('an ARITHMETIC shift over a signed operand gains NO cast — the rule is not a blanket wrap', () => {
+    // `asr r0,r0,#4` on a word-loaded (s32-rendered) value: `>>` is already the shift the asm did
+    const src = run('f', '\tldr\tr1, .L1\n\tldr\tr0, [r1]\n\tasr\tr0, r0, #0x4\n\tbx\tlr\n.L1:\n\t.word\t0x03005220\n');
+    expect(src).toContain('>> 4');
+    expect(src).not.toContain('(s32)');
+    expect(src).not.toContain('(u32)');
+  });
+
+  test('a narrow operand is NOT treated as unsigned just because it was loaded unsigned', () => {
+    // `*(u8 *)p >> 4` — C promotes the u8 to `int`, so the bare `>>` is the ARITHMETIC shift and
+    // the asm's `lsr` needs the operand spelled unsigned. Promotion is the whole reason this
+    // cannot be read off the load width.
+    const src = run(
+      'f',
+      '\tldr\tr1, .L1\n\tldrb\tr0, [r1]\n\tlsr\tr0, r0, #0x4\n\tbx\tlr\n.L1:\n\t.word\t0x03005220\n',
+    );
+    expect(src).toContain('(u32)');
+    expect(src).toContain('>> 4');
   });
 });

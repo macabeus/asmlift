@@ -207,8 +207,11 @@ test('P2 recovers a merged-return loop with an in-body early `return` (return-tr
   expect(src).toContain('if (v1 > 31) {'); // the bound exit becomes an in-body early return
   expect(src).toContain('return v1;'); // both exits return (the else-arm value merge)
   expect(src).not.toContain('break;'); // it is a RETURN trampoline, not a break
-  // update lands before the bound test: shift then increment, then the conditional return
-  expect(src).toContain('v0 = v0 >> 1;');
+  // update lands before the bound test: shift then increment, then the conditional return.
+  // The `(u32)` is load-bearing, not decoration: the op is `shr_u` and `v0` is declared `s32`, so
+  // the bare `v0 >> 1` is C's ARITHMETIC shift — `asr` where the asm had `lsr`, and a different
+  // value for a negative `v0`.
+  expect(src).toContain('v0 = (u32)v0 >> 1;');
   expect(src).toContain('v1 = (u8)(v1 + 1);');
 });
 

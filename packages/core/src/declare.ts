@@ -37,6 +37,7 @@ import {
   ENUM_IS_SIGNED,
   type SymbolInfo,
   type SymbolStructField,
+  arrayInnerExtents,
   declaredFields,
   pointeeFields,
   symbolFieldType,
@@ -139,7 +140,14 @@ export function renderDeclarations(refs: SymbolRef[]): string {
         // A non-1/2/4 element width is never bare-indexed by core (only &gSym cast forms), so
         // an unsized u8[] decl is codegen-identical for every spelling core emits.
         const elem = info.elemSize !== undefined ? intType(info.elemSize, info.elemSigned ?? false) : null;
-        lines.push(`extern ${quals(info)}${elem ?? 'u8'} ${name}[];`);
+        // The RANK must be reproduced, or the declaration disagrees with the access core spells:
+        // a `gSym[0][i]` needs a 2-D declaration to be an element rather than a type error. The
+        // OUTERMOST extent is always left unsized — it is the one C lets a declaration omit, and
+        // omitting it keeps this decl compatible with the project's real one whatever its size
+        // (the same reason the rank-1 form has always been `[]`). Inner extents are load-bearing:
+        // they are what scales each leading subscript, so they are spelled exactly.
+        const rank = (arrayInnerExtents(info) ?? []).map((d) => `[${d}]`).join('');
+        lines.push(`extern ${quals(info)}${elem ?? 'u8'} ${name}[]${rank};`);
         break;
       }
       case 'struct': {

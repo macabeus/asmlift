@@ -38,7 +38,13 @@ export type Expr =
   // Variable-index `a[i]` is recovered at the IR level (`aload`/`astore` carry elemSize;
   // raise/arrays.ts) but still LOWERS to this one C-shaped `index` node, so it stays C-only
   // (a Pascal array-access spelling is future work). Treat `index` with idx ≠ 0 as C-shaped.
-  | { k: 'index'; base: Expr; idx: Expr; width: number; signed: boolean }
+  // `lead` prefixes CONSTANT subscripts before `idx` — `g[0][i]` rather than `g[i]`. It exists for
+  // exactly one inhabitant: the bare-name spelling of a MULTIDIMENSIONAL array global, where one
+  // subscript reaches a row and the element needs the leading dimensions pinned first. The node
+  // still denotes ONE `width`-byte element, so its type, its legalization and its stride contract
+  // are unchanged — this is a spelling of the same address, not a new kind of access. Absent for
+  // every rank-1 access, which is why it is optional rather than an empty array.
+  | { k: 'index'; base: Expr; idx: Expr; width: number; signed: boolean; lead?: number[] }
   // A named struct-field access `base->name` (raise/structs.ts recovered `base` as a struct
   // pointer, so the byte offset resolves to a named field instead of a scaled array index).
   // Unlike `index`, this carries the field NAME (which encodes the byte offset, `field_<off>`),
@@ -53,8 +59,45 @@ export type Expr =
   // default) never produces this node; it keeps the `"?"` sentinel → ContractError behavior.
   | { k: 'marker'; reason: string; args: Expr[] };
 
+// `>>` is the ARITHMETIC right shift and `>>>` the LOGICAL one. C spells both `>>` and picks from
+// the left operand's type, so the C backend synthesizes the cast that pins the choice — exactly as
+// it already synthesizes scalar deref casts from an `index` node's width. A backend with no
+// spelling for one of them (IDO Pascal) declines LOUDLY on the operation itself, rather than on
+// whatever artifact another language's spelling happened to leave in the tree.
+//
+// WHY THIS ONE SPLIT AND NOT THE OTHERS. "The machine distinguishes them" is NOT the rule — the
+// machine distinguishes `divu`/`div` and `sltu`/`slt` too, and ARITH_TO_BIN deliberately collapses
+// `udiv`→`/`, `umod`→`%`, `icmp_u*`→`<` etc., noting that "unsignedness is in the operand types".
+// Taking the machine as the rule would license four more splits with no inhabitant, which is what
+// "earn the level" forbids. The rule is the repo's own: the shift split because a real,
+// byte-load-bearing divergence HAD inhabitants (~20 rows, 5 projects, 4 compilers) and no other
+// channel could carry it — the operand type could not, since a promoted narrow value is signed
+// whatever it was loaded as.
+//
+// The collapsed operators lean on exactly that channel, so they carry the same latent hazard:
+// `*(u16 *)p / 3` renders as a signed division of a promoted `int` where the asm did `divu`. It is
+// tolerated because no row has produced such a divergence. When one does, the fix is this same
+// split — not a per-site patch.
 export type BinOp =
-  '+' | '-' | '*' | '/' | '%' | '<' | '<=' | '>' | '>=' | '==' | '!=' | '&' | '|' | '^' | '<<' | '>>' | '&&' | '||';
+  | '+'
+  | '-'
+  | '*'
+  | '/'
+  | '%'
+  | '<'
+  | '<='
+  | '>'
+  | '>='
+  | '=='
+  | '!='
+  | '&'
+  | '|'
+  | '^'
+  | '<<'
+  | '>>'
+  | '>>>'
+  | '&&'
+  | '||';
 
 export type Stmt =
   | { k: 'assign'; name: string; value: Expr }
@@ -189,7 +232,18 @@ export function exprEquals(a: Expr, b: Expr): boolean {
     }
     case 'index': {
       const bb = b as typeof a;
-      return a.width === bb.width && a.signed === bb.signed && exprEquals(a.base, bb.base) && exprEquals(a.idx, bb.idx);
+      // `lead` is part of the ADDRESS (`g[0][i]` and `g[1][i]` are different elements), so it
+      // must be compared — an omission here would let CSE/dedup collapse two distinct accesses.
+      const lead = a.lead ?? [];
+      const bLead = bb.lead ?? [];
+      return (
+        a.width === bb.width &&
+        a.signed === bb.signed &&
+        lead.length === bLead.length &&
+        lead.every((v, i) => v === bLead[i]) &&
+        exprEquals(a.base, bb.base) &&
+        exprEquals(a.idx, bb.idx)
+      );
     }
     case 'field': {
       const bb = b as typeof a;

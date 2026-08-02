@@ -9,6 +9,78 @@ import { IrType, T, scalarTypeForAccess, typeToString } from '../ir/types';
 import { BinOp, Expr, SFn, Stmt, dotBase } from '../l3/ast';
 import { type VarTypes, declaredTypes, derefStrideOk, exprCType } from '../l3/typing';
 
+/**
+ * The C SIGNEDNESS a rendered integer expression actually has — `true`/`false`, or `undefined`
+ * when it is not determinable here. The deliberate complement to l3/typing's `exprCType`, which is
+ * pointer-ness-accurate and reports every integer as `s32` by contract; this models the two C
+ * rules that contract omits, integer PROMOTION and the usual arithmetic CONVERSIONS.
+ *
+ * It lives HERE, in the C-family backend, because it is a model of C's own rules with no meaning
+ * for another language — the same reason the cast it feeds is synthesized here rather than in the
+ * tower. `exprCType` stays in l3/ because Pascal consults it too.
+ *
+ * It exists for one question, and the question is byte-load-bearing: C spells both `>>>` and `>>`
+ * as `>>` and chooses between them from the left operand's type. A logical shift rendered over a
+ * signed expression recompiles to `asr` where the target has `lsr`, and evaluates to a different
+ * value. The C-family backend casts the operand whenever this returns anything but the signedness
+ * the operator needs, so `undefined` is the safe answer in every case the model does not cover — a
+ * redundant cast is codegen-identical, a missing one is a miscompile.
+ *
+ * Anything narrower than 32 bits promotes to `int` and is therefore SIGNED, whatever it was
+ * declared. Pointers, calls and markers are `undefined`.
+ */
+function renderedIntSignedness(e: Expr, varType: VarTypes): boolean | undefined {
+  const rec = (x: Expr): boolean | undefined => renderedIntSignedness(x, varType);
+  // an lvalue-ish leaf: its C type is a declaration / an explicit cast / a carried access width
+  const promoted = (t: IrType | undefined): boolean | undefined =>
+    t?.kind !== 'int' ? undefined : t.width < 32 ? true : t.width === 32 ? t.signed : undefined;
+  switch (e.k) {
+    case 'var':
+    case 'cast':
+    case 'index':
+    case 'field':
+      return promoted(exprCType(e, varType));
+    // A decimal literal is `int` when it fits in one; C89 gives a larger one an unsigned type,
+    // which is not the same operand — so it is left undetermined rather than assumed. INT_MIN is
+    // in that larger class despite fitting: the backend prints it as `-2147483648`, which C lexes
+    // as unary minus applied to `2147483648` — a constant too big for `int`, hence unsigned long.
+    case 'const':
+      return e.value > -2147483648 && e.value <= 2147483647 ? true : undefined;
+    // `-x` / `~x` carry the PROMOTED type of the operand; `!x` is `int`.
+    case 'un':
+      return e.op === '!' ? true : rec(e.e);
+    case 'bin': {
+      // Shifts take the type of the LEFT operand alone — the right is promoted independently.
+      if (e.op === '<<' || e.op === '>>' || e.op === '>>>') {
+        return rec(e.l);
+      }
+      // Comparisons and the logical connectives yield `int`.
+      if (['<', '<=', '>', '>=', '==', '!=', '&&', '||'].includes(e.op)) {
+        return true;
+      }
+      // Usual arithmetic conversions over the remaining binary operators: at equal rank, unsigned
+      // wins. Either side unknown leaves the result unknown — EXCEPT when the known side is
+      // unsigned, which already decides it.
+      //
+      // That exception is the one place this returns a DEFINITE answer from an unknown operand,
+      // and it is sound only because every integer here is rank `int`: at UNEQUAL rank C converts
+      // to the wider type first, so `unsigned int & long long` is SIGNED. Core has no 64-bit
+      // integer type at all (the decomp typedef vocabulary stops at 32 — see contracts.ts
+      // SCALAR_WIDTHS), so the unequal-rank case cannot arise. Adding one would invalidate this.
+      const l = rec(e.l);
+      const r = rec(e.r);
+      if (l === false || r === false) {
+        return false;
+      }
+      return l === true && r === true ? true : undefined;
+    }
+    case 'call':
+    case 'marker':
+    case 'addr':
+      return undefined;
+  }
+}
+
 // C operator precedence (lower binds tighter). Used to emit MINIMAL parentheses. Shared: C++ has
 // the same precedence for these operators.
 const PREC: Record<BinOp, number> = {
@@ -19,6 +91,7 @@ const PREC: Record<BinOp, number> = {
   '-': 4,
   '<<': 5,
   '>>': 5,
+  '>>>': 5, // spells as C's `>>` (see printExpr's shift rule) — same precedence
   '<': 6,
   '<=': 6,
   '>': 6,
@@ -103,6 +176,28 @@ function printExpr(e: Expr, parentPrec: number, vt: VarTypes, leaf?: LeafHook): 
     derefStrideOk(exprCType(ix.base, vt), ix.width)
       ? ix.base
       : { k: 'cast', to: T.ptr(scalarTypeForAccess(ix.width, ix.signed)), e: ix.base };
+  // C-FAMILY SHIFT LEGALIZATION, the same discipline one operator over. The tower keeps the two
+  // right shifts apart (`>>>` logical, `>>` arithmetic); C spells BOTH `>>` and picks between them
+  // from the LEFT OPERAND'S TYPE. So the operand must be made to carry the choice, or an `shr_u`
+  // recompiles to `asr` where the target has `lsr` AND evaluates differently —
+  // `*(u8 *)&g << 30 >> 30` promotes to `int`, so a 2-bit field holding 2 comes out -1.
+  //
+  // (engine.ts's zext fold covers the same hazard for widths C can NAME, by folding the whole
+  // shift pair to a cast op. Every other extract width — every bitfield read — lands here.)
+  //
+  // The cast is added unless the operand PROVABLY renders with the signedness the op needs:
+  // renderedIntSignedness answers `undefined` wherever its model does not reach, and a redundant
+  // cast is codegen-identical while a missing one is a miscompile. An existing 32-bit integer cast
+  // is REPLACED rather than wrapped — `(u32)(s32)&g` and `(u32)&g` are the same bytes, and the
+  // arithmetic rules upstream do emit that inner cast (intifyAddr).
+  const shiftOperand = (e0: Extract<Expr, { k: 'bin' }>): Expr => {
+    const wantSigned = e0.op === '>>';
+    if (renderedIntSignedness(e0.l, vt) === wantSigned) {
+      return e0.l;
+    }
+    const inner = e0.l.k === 'cast' && e0.l.to.kind === 'int' && e0.l.to.width === 32 ? e0.l.e : e0.l;
+    return { k: 'cast', to: T.int(32, wantSigned), e: inner };
+  };
   switch (e.k) {
     case 'var':
       return e.name;
@@ -123,6 +218,21 @@ function printExpr(e: Expr, parentPrec: number, vt: VarTypes, leaf?: LeafHook): 
       // binds tighter than any prefix operator, so a cast/unary/deref base is printed at prec 1
       // and parenthesizes itself: `((u8 *)p)[1]`). The postfix form needs no outer parentheses.
       const base = legalized(e);
+      // Leading constant subscripts (a multidimensional array global's bare spelling) keep the
+      // postfix form whatever `idx` is: `g[0][0]` is the element, `*g[0]` would be its ROW.
+      //
+      // `lead` implies the base already strides the access width — its only producer registers a
+      // matching element type for the global (structure.ts bareArrayLead + noteGlobal). Nothing
+      // else enforced that, and the failure would be quiet-ish: legalization would wrap the base,
+      // spelling `((u16 *)g)[0][i]`, which subscripts a `u16` twice. Check it rather than assume.
+      if (e.lead && e.lead.length > 0) {
+        if (base !== e.base) {
+          throw new Error(
+            `c backend: a multidimensional array access needs a base that strides ${e.width} bytes as spelled`,
+          );
+        }
+        return `${rec(base, 1)}${e.lead.map((l) => `[${l}]`).join('')}[${rec(e.idx, 99)}]`;
+      }
       if (e.idx.k === 'const' && e.idx.value === 0) {
         const s = `*${rec(base, 2)}`;
         return parentPrec < 2 ? `(${s})` : s;
@@ -141,6 +251,13 @@ function printExpr(e: Expr, parentPrec: number, vt: VarTypes, leaf?: LeafHook): 
       // first (the C++ member-access rewrite).
       const ix = dotBase(e);
       if (ix) {
+        // This path spells the index node from parts, so a `lead` would be DROPPED — an element
+        // access silently becoming a row's. Unreachable today (arrayAccess's lead branch requires
+        // `fieldOff === undefined`, which is exclusive with the dot form), but this is a
+        // text-returning path with no other guard, so it refuses rather than assumes.
+        if (ix.lead && ix.lead.length > 0) {
+          throw new Error(`c backend: a multidimensional array element has no struct-field spelling yet`);
+        }
         const hooked = leaf?.(ix, rec);
         const baseTxt = hooked ?? `${rec(ix.base, 1)}[${rec(ix.idx, 99)}]`;
         return `${baseTxt}.${e.name}`;
@@ -173,7 +290,9 @@ function printExpr(e: Expr, parentPrec: number, vt: VarTypes, leaf?: LeafHook): 
     }
     case 'bin': {
       const p = PREC[e.op];
-      const s = `${rec(e.l, p)} ${e.op} ${rec(e.r, p - 1)}`;
+      // Both right shifts spell C's `>>`; `shiftOperand` supplies the operand cast that says which.
+      const shift = e.op === '>>' || e.op === '>>>';
+      const s = `${rec(shift ? shiftOperand(e) : e.l, p)} ${shift ? '>>' : e.op} ${rec(e.r, p - 1)}`;
       return p > parentPrec ? `(${s})` : s;
     }
   }

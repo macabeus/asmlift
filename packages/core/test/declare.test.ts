@@ -59,6 +59,34 @@ test('a volatile scalar (MMIO) keeps volatile; a const array keeps const + eleme
   ).toBe('extern const s16 gTable[];\n');
 });
 
+test('a MULTIDIMENSIONAL array declares its inner extents — the rank core spells against', () => {
+  // core emits `gBgTilemapBufs[0][i]` for a rank-2 array; a flat `u16 g[]` decl would make that a
+  // type error, and the inner extent is what scales the leading subscript. The OUTERMOST is left
+  // unsized for the same reason the rank-1 form always has been: C lets a declaration omit it, so
+  // this stays compatible with the project's real declaration whatever its size.
+  expect(
+    renderDeclarations([
+      ref('gBgTilemapBufs', { kind: 'data', shape: 'array', elemSize: 2, elemSigned: false, dims: [4, 1024] }),
+    ]),
+  ).toBe('extern u16 gBgTilemapBufs[][1024];\n');
+  expect(
+    renderDeclarations([
+      ref('gGrid', { kind: 'data', shape: 'array', elemSize: 1, elemSigned: false, dims: [2, 3, 4] }),
+    ]),
+  ).toBe('extern u8 gGrid[][3][4];\n');
+});
+
+test('an UNSPELLABLE rank falls back to the flat decl — matching the cast form core then emits', () => {
+  // `dims: [2, null]` — neither `g[i]` nor `g[0][i]` is spellable, so core uses `((u16 *)&g)[i]`
+  // and the declaration must be the one that form compiles against. The pair is decided in ONE
+  // place (symbols.ts arrayInnerExtents) so the two sides cannot drift.
+  expect(
+    renderDeclarations([
+      ref('gRagged', { kind: 'data', shape: 'array', elemSize: 2, elemSigned: false, dims: [2, null] }),
+    ]),
+  ).toBe('extern u16 gRagged[];\n');
+});
+
 test('a value-referenced code symbol gets a void prototype', () => {
   expect(renderDeclarations([ref('DoThing', { kind: 'code' })])).toBe('void DoThing(void);\n');
 });

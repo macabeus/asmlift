@@ -21,7 +21,8 @@
 // its own capability, so `UPGRADE` names the required version in ONE place, as remediation advice
 // rather than as the test. `assertPointeeFactPresent` and `assertPointeeCapabilityWitnessed` are
 // the same gate one release later, for the facts an INTERIOR spelling through a pointer global
-// needs (what it points at, and which of a layout's members are arrays).
+// needs (what it points at, and which of a layout's members are arrays); `assertArrayDimsPresent`
+// is the release after that, for an array's RANK.
 import { addressCastMacrosFrom } from '@asmlift/core/macros';
 import type { SymbolInfo, SymbolMap, SymbolStructField } from '@asmlift/core/symbols';
 import { readFileSync } from 'node:fs';
@@ -48,6 +49,10 @@ type DwarfShape =
       elemSize: number | null;
       elemSigned: boolean | null;
       length: number | null;
+      /** the per-dimension extents (the RANK). OPTIONAL at this boundary only because the type
+       *  must also describe a package that predates the fact; its runtime AVAILABILITY is
+       *  asserted separately (assertArrayDimsPresent). */
+      dims?: (number | null)[] | null;
       volatile?: boolean;
       const?: boolean;
     }
@@ -86,7 +91,7 @@ interface DwarfMember {
  *  declares; emitting one produces non-compiling output, so they never win the canonical pick. */
 export const PLACEHOLDER = /^(?:sub_|_)[0-9A-Fa-f]{6,8}$/;
 
-const UPGRADE = 'upgrade @gba-kit/debug-info to >= 0.4.0 (or drop tools.asmlift.elf to run without a map)';
+const UPGRADE = 'upgrade @gba-kit/debug-info to >= 0.5.0 (or drop tools.asmlift.elf to run without a map)';
 
 /** The cv-qualifier facts, probed on the first shaped variable. A 0.3-era package returns the
  *  same object KINDS from `variableShape` but never sets `volatile`/`const`, so a
@@ -112,6 +117,25 @@ function assertMemberFactsPresent(m: object, elfPath: string): void {
       `cannot build a symbol map from ${elfPath}: the installed @gba-kit/debug-info reports no ` +
         `struct-member signedness (member has no 'signed' key), so synthesized struct fields ` +
         `would be declared at a guessed signedness — ${UPGRADE}`,
+    );
+  }
+}
+
+/** The same probe for the ARRAY arm's RANK. A package that reports only the flattened element
+ *  count leaves core reading every array as rank 1, so `gBgTilemapBufs[i]` gets emitted for a
+ *  `u16[4][0x400]`. Against the project's own header that is usually a type error — but where the
+ *  row address flows into an integer context it is only a warning, and then the emitted C
+ *  addresses a DIFFERENT object than the asm did. That is the plausible-but-wrong class, so the
+ *  fact is required rather than defaulted. Key presence, not value: `dims` is legitimately null
+ *  for an array whose DWARF carries no subranges, and an unreleased build reports the fact while
+ *  still carrying its previous version number. Witnessed on the first array shape — any array
+ *  exercises it, and an ELF with none can spell no array access to get wrong. */
+export function assertArrayDimsPresent(sh: DwarfShape, elfPath: string): void {
+  if (sh.kind === 'array' && !('dims' in sh)) {
+    throw new Error(
+      `cannot build a symbol map from ${elfPath}: the installed @gba-kit/debug-info reports no ` +
+        `array rank (an array variableShape() result has no 'dims' key), so a multidimensional ` +
+        `global would be indexed with one subscript — ${UPGRADE}`,
     );
   }
 }
@@ -239,6 +263,7 @@ export async function loadSymbolMap(elfPath: string): Promise<SymbolMap> {
       const sh = shapeOf(s.name);
       if (sh) {
         assertShapeFactsPresent(sh, elfPath);
+        assertArrayDimsPresent(sh, elfPath);
         assertPointeeFactPresent(sh, elfPath);
         if (sh.kind === 'pointer') {
           pointeeWitnessed = true; // the probe above ran and passed on a real pointer shape
@@ -262,6 +287,12 @@ export async function loadSymbolMap(elfPath: string): Promise<SymbolMap> {
           }
           if (sh.elemSize !== null && sh.length !== null) {
             info.size = sh.elemSize * sh.length;
+          }
+          // The RANK. `length` above is the PRODUCT of the dimensions, so it cannot say how many
+          // subscripts reach an element — see SymbolInfo.dims. Absent when the DWARF gave the
+          // array no subranges; core then attempts no bare-name spelling for it.
+          if (sh.dims !== null && sh.dims !== undefined) {
+            info.dims = sh.dims;
           }
         } else if (sh.kind === 'struct') {
           info.shape = 'struct';

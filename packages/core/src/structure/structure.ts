@@ -46,6 +46,7 @@ import {
   type DeclaredField,
   type SymbolInfo,
   type SymbolStructField,
+  arrayInnerExtents,
   declaredFields,
   isArrayField,
   pointeeFields,
@@ -106,6 +107,32 @@ function globalOf(e: Expr, width: number): { name: string; idx: Expr } | null {
     }
   }
   return null;
+}
+
+// THE one gate on the BARE-NAME array-global spelling (`gSym[i]` rather than `((T *)&gSym)[i]`),
+// shared by the constant-offset and variable-index access paths so the two cannot disagree.
+// Returns the `index` node's `lead` fragment when the bare form is spellable, or null to fall
+// through to the always-valid `&gSym` cast form.
+//
+// Two facts are required, not one. The element WIDTH must match, as it always has. And the RANK
+// must be SPELLABLE, because one subscript reaches an element only on a rank-1 array: on `u16
+// g[4][0x400]`, `g[i]` is a ROW. Against the project's own header that is usually a type error,
+// but where the row address flows into an integer context it is merely a warning and the emitted C
+// then addresses a different object than the asm did — silently.
+//
+// A rank > 1 pins the leading dimensions at 0 and puts the whole flat element index in the last
+// subscript (`g[0][i]`) — the same address arithmetic, and the idiom decomp sources themselves use
+// when the split is not observable in the asm either (`gBgTilemapBufs[0][…]` in kleod,
+// `gNatureStatTable[nature][…]` in pokeemerald). A rank the map states but cannot spell (an unknown
+// inner extent) gets no bare form at all; `((T *)&gSym)[i]` is byte-identical and valid under ANY
+// declaration, which is why it is the safe fallback. See symbols.ts arrayInnerExtents for why an
+// ABSENT rank is read as 1 rather than as unknown.
+function bareArrayLead(si: SymbolInfo, width: number): { lead?: number[] } | null {
+  if (si.shape !== 'array' || si.elemSize !== width) {
+    return null;
+  }
+  const inner = arrayInnerExtents(si);
+  return inner === null ? null : inner.length === 0 ? {} : { lead: new Array<number>(inner.length).fill(0) };
 }
 
 // A BYTE residual read as an ELEMENT index of `elemSize`-wide elements, or null when it is not one
@@ -402,9 +429,10 @@ function memAccess(
     // dogfood proved agbcc needs for ROM tables — with the element type registered in the env
     // so the stride check passes and no cast is added. Element-width match only.
     const siArr = sym?.info(g.name);
-    if (siArr?.shape === 'array' && siArr.elemSize === width) {
-      sym!.noteGlobal(g.name, T.ptr(T.int(width * 8, siArr.elemSigned ?? false)));
-      return { k: 'index', base: { k: 'var', name: g.name }, idx, width, signed };
+    const lead = siArr === undefined ? null : bareArrayLead(siArr, width);
+    if (lead !== null) {
+      sym!.noteGlobal(g.name, T.ptr(T.int(width * 8, siArr!.elemSigned ?? false)));
+      return { k: 'index', base: { k: 'var', name: g.name }, idx, width, signed, ...lead };
     }
     return { k: 'index', base: { k: 'addr', name: g.name }, idx, width, signed };
   }
@@ -447,9 +475,10 @@ function arrayAccess(
   if (baseExpr.k === 'addr' && fieldOff === undefined) {
     // ARRAY-declared global (symbol map): the bare-name spelling, same rule as memAccess.
     const si = sym?.info(baseExpr.name);
-    if (si?.shape === 'array' && si.elemSize === elemSize) {
-      sym!.noteGlobal(baseExpr.name, T.ptr(T.int(elemSize * 8, si.elemSigned ?? false)));
-      return { k: 'index', base: { k: 'var', name: baseExpr.name }, idx: idxExpr, width: elemSize, signed };
+    const lead = si === undefined ? null : bareArrayLead(si, elemSize);
+    if (lead !== null) {
+      sym!.noteGlobal(baseExpr.name, T.ptr(T.int(elemSize * 8, si!.elemSigned ?? false)));
+      return { k: 'index', base: { k: 'var', name: baseExpr.name }, idx: idxExpr, width: elemSize, signed, ...lead };
     }
     return { k: 'index', base: baseExpr, idx: idxExpr, width: elemSize, signed };
   }
@@ -520,7 +549,7 @@ const ARITH_TO_BIN: Record<string, BinOp> = {
   and: '&',
   xor: '^',
   shl: '<<',
-  shr_u: '>>',
+  shr_u: '>>>', // the LOGICAL right shift; the C backend spells it `>>` over an unsigned operand
   shr_s: '>>',
   logic_and: '&&',
   logic_or: '||', // short-circuit connectives (raise/shortcircuit.ts)
@@ -1231,6 +1260,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
         l = isPtrGlobal(l) ? intifyPtrGlobal(l) : l;
         r = isPtrGlobal(r) ? intifyPtrGlobal(r) : r;
       }
+      // (The two right shifts stay DISTINCT ops here — `>>>` logical, `>>` arithmetic. Which token
+      // a language spells each with, and what cast pins the choice, is a BACKEND decision; see
+      // l3/ast.ts BinOp and backend/cfamily.ts's shift rule.)
       // SCOPE: this and intifyAddr cover the ARITHMETIC escapes. A pointer global under a
       // COMPARISON (`gPtr < K` — C compares unsigned whatever the asm's icmp_s* said) is the same
       // class as intifyAddrCmp's `addr` rule and is deliberately left alone here: it is valid C
@@ -1242,8 +1274,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
       // The C rotate idiom — `x >> n | x << (32 - n)` (mirrored for rotl). Byte-exact round-trip
       // on agbcc (thumb ror) and mwcc (rotlw/rotlwi), verified against both toolchains before the
       // ops landed. `x` and `n` render twice — both pure by construction (SSA values; the rotate's
-      // operands are register reads), and recovery seeds the rotated value unsigned so `>>`
-      // spells the logical shift the idiom requires.
+      // operands are register reads). The right half is the LOGICAL shift `>>>` — the idiom is
+      // wrong with an arithmetic one — stated on the node rather than left to the rotated value's
+      // recovered unsignedness, which is a property of recovery rather than of the idiom.
       //
       // (The PPC mirror fold — `rotl(x, 32 - m)` ⇒ rotr(x, m) — lives in the PATTERN layer,
       // engine.ts ROTL_MIRROR: it is a compiler-spelling idiom, mwcc-gated there, not a
@@ -1260,7 +1293,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
         n.k === 'const'
           ? { k: 'const', value: 32 - n.value }
           : { k: 'bin', op: '-', l: { k: 'const', value: 32 }, r: n };
-      const [near, far] = dir === 'rotr' ? (['>>', '<<'] as const) : (['<<', '>>'] as const);
+      const [near, far] = dir === 'rotr' ? (['>>>', '<<'] as const) : (['<<', '>>>'] as const);
       return {
         k: 'bin',
         op: '|',

@@ -1,11 +1,16 @@
-// M2 — a SERIALIZABLE idiom pattern that MOVES A REAL objdiff score on a function
-// the naive lift gets wrong.
+// M2 — a SERIALIZABLE idiom pattern that folds a real idiom to the source spelling.
 //
-// `half` = agbcc's signed x/2, lowered (no hw-divide) to `lsr #31; add; asr #1`. Without
-// the pattern, asmlift emits the raw shifts — which agbcc recompiles with an `asr` where
-// the target has `lsr` (the sign-bit shift), so it does NOT match. With the pattern (a
-// pure data object) the idiom folds to `x / 2` and recompiles byte-exact. The score
-// delta is measured by real objdiff, not asserted.
+// `half` = agbcc's signed x/2, lowered (no hw-divide) to `lsr #31; add; asr #1`. With the
+// pattern (a pure data object) the idiom folds to `x / 2` and recompiles byte-exact.
+//
+// HISTORICAL NOTE — this test used to assert the pattern MOVED the score, because the raw
+// lowering did not match: asmlift spelled the sign-bit shift as a bare `x >> 31`, C's ARITHMETIC
+// shift, where the target has `lsr`. That was the shift-direction miscompile, not a fact about
+// the pattern, and it is fixed at the rendering layer — the raw lowering now spells
+// `(s32)(a0 + ((u32)a0 >> 31)) >> 1` and matches on its own. So the pattern's payoff is
+// READABILITY, and the claim under test is that folding it stays byte-exact rather than that it
+// rescues a broken lift. The signedness lever is still pinned on a shape no spelling can hide
+// (m3.test.ts, division).
 import { SDIV_POW2_2 } from '@asmlift/core/pattern/engine';
 import { decompile } from '@asmlift/core/pipeline';
 import { ARMV4T_AGBCC } from '@asmlift/core/target';
@@ -29,10 +34,11 @@ test('M2: the sdiv-pow2 pattern moves the objdiff score to 0', () => {
   console.log('without pattern:', without.source.trim(), '→ score', sWithout.score);
   console.log('with pattern:   ', withPat.source.trim(), '→ score', sWith.score);
 
-  // the pattern fired, folded the idiom, and moved the score strictly toward 0
+  // the pattern fired, folded the idiom, and the folded spelling is byte-exact
   expect(withPat.patternHits).toBe(1);
   expect(without.patternHits).toBe(0);
-  expect(sWith.score).toBeLessThan(sWithout.score); // the score MOVED
-  expect(sWith.match).toBe(true); // …all the way to byte-exact
+  expect(sWith.score).toBeLessThanOrEqual(sWithout.score); // folding never COSTS bytes
+  expect(sWith.match).toBe(true); // …and lands byte-exact
   expect(withPat.source).toContain('/ 2');
+  expect(without.source).not.toContain('/ 2'); // the baseline really is the unfolded shift tree
 });

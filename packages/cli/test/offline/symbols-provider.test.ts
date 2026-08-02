@@ -12,7 +12,13 @@
 import type { SymbolInfo } from '@asmlift/core/symbols';
 import { describe, expect, test } from 'vitest';
 
-import { PLACEHOLDER, assertPointeeCapabilityWitnessed, canonicalOrder, layoutOf } from '../../src/symbols-provider';
+import {
+  PLACEHOLDER,
+  assertArrayDimsPresent,
+  assertPointeeCapabilityWitnessed,
+  canonicalOrder,
+  layoutOf,
+} from '../../src/symbols-provider';
 
 const sym = (name: string, declared?: true): SymbolInfo => ({
   name,
@@ -145,5 +151,29 @@ describe('PLACEHOLDER — the rename-leftover shape', () => {
     for (const n of ['gPlayerState', 'sub_routine', 'sub_08001234x', '_start', 'gUnk_030034D8', 'Sub_08001234']) {
       expect(PLACEHOLDER.test(n), n).toBe(false);
     }
+  });
+});
+
+describe('assertArrayDimsPresent — the array-RANK capability gate', () => {
+  const arr = (extra: object) =>
+    ({ kind: 'array', elemSize: 2, elemSigned: false, length: 4096, volatile: false, const: false, ...extra }) as never;
+
+  test('an array shape carrying `dims` passes — including the legitimately null value', () => {
+    expect(() => assertArrayDimsPresent(arr({ dims: [4, 1024] }), '/tmp/x.elf')).not.toThrow();
+    expect(() => assertArrayDimsPresent(arr({ dims: null }), '/tmp/x.elf')).not.toThrow();
+  });
+
+  test('REFUSES an array shape with no `dims` KEY at all', () => {
+    // the silent failure this stops: without rank, `u16 g[4][0x400]` is indexed `g[i]`, which is
+    // a ROW — a type error against the project's header, or, where the row address reaches an
+    // integer context, a warning and a different address than the asm computed. Probed by key
+    // presence because `null` is a real answer and a version string is not a capability witness.
+    expect(() => assertArrayDimsPresent(arr({}), '/tmp/x.elf')).toThrow(/array rank/);
+  });
+
+  test('is inert on every non-array shape — they have no rank to lose', () => {
+    expect(() =>
+      assertArrayDimsPresent({ kind: 'scalar', size: 4, signed: true, volatile: false, const: false }, '/tmp/x.elf'),
+    ).not.toThrow();
   });
 });

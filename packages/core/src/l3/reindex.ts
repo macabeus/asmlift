@@ -163,10 +163,17 @@ function reindexExpr(e: Expr, walk: WalkLoop, iv: string): Expr | null {
     if (mentionsVar(e.idx, walk.p)) {
       return null; // a p-dependent element offset — beyond the v1 shape
     }
+    if (e.lead && e.lead.length > 0) {
+      return null; // leading subscripts (a multidim array global) — the rebuild below would drop
+      // them, turning an element access into a row's. Decline rather than reindex.
+    }
     const idx: Expr =
       e.idx.k === 'const' && e.idx.value === 0
         ? { k: 'var', name: iv }
         : { k: 'bin', op: '+', l: { k: 'var', name: iv }, r: e.idx };
+    // NOTE: this rebuilds the node from parts, so any field not named here is DROPPED. `lead` is
+    // declined above (the deref side); it cannot arrive on the base side either, since `walk.base`
+    // is a local pointer and structuring only ever puts `lead` on an array GLOBAL's own name.
     return { k: 'index', base: { k: 'var', name: walk.base }, idx, width: e.width, signed: e.signed };
   }
   let failed = false;

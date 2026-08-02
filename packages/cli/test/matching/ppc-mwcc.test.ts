@@ -213,12 +213,16 @@ const WIDEN_CASES: { sym: string; c: string; proto?: Prototypes; expect: string 
   {
     sym: 'extract',
     c: 'int extract(int x){ return (x >> 5) & 0xff; }',
-    expect: 's32 extract(s32 a0) {\n    return a0 >> 5 & 255;\n}\n',
+    // the rotate makes rlwinm's shift LOGICAL (the lift records `shr_u`), so the operand is
+    // spelled unsigned — a bare `>>` over the `s32`-declared a0 is C's arithmetic shift
+    expect: 's32 extract(s32 a0) {\n    return (u32)a0 >> 5 & 255;\n}\n',
   },
   {
     sym: 'shr_and',
     c: 'unsigned shr_and(unsigned x){ return (x >> 8) & 0xf; }',
-    expect: 's32 shr_and(s32 a0) {\n    return a0 >> 8 & 15;\n}\n',
+    // source shifts an `unsigned`; the old spelling was the arithmetic shift and matched only
+    // because `& 15` masks the difference away
+    expect: 's32 shr_and(s32 a0) {\n    return (u32)a0 >> 8 & 15;\n}\n',
   },
 ];
 

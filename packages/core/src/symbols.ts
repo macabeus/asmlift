@@ -118,6 +118,15 @@ export interface SymbolInfo {
   elemSize?: number;
   /** element signedness for `shape:'array'` (default unsigned) — types the env entry */
   elemSigned?: boolean;
+  /** ARRAY RANK for `shape:'array'` — the per-dimension extents, outermost first (`u16
+   *  g[4][0x400]` → `[4, 1024]`), `null` for an unbounded one. It is NOT `size`/`elemSize`
+   *  restated: those size the object, this says how many subscripts reach an ELEMENT. `gSym[i]`
+   *  on a rank-2 array is a ROW — against the project's own header that is a type error, or,
+   *  where the row address flows into an integer context, silently the wrong address. So the
+   *  bare spelling needs the leading subscripts (`gSym[0][i]`), and its ABSENCE is what forbids
+   *  the bare spelling from being attempted at all (see the provider's dims capability gate:
+   *  a package that cannot report rank must not be read as "rank 1"). */
+  dims?: (number | null)[];
   /** the real struct tag for `shape:'struct'` — names the synthesized struct declaration
    *  (absent ⇒ synthesis mints a placeholder tag; the tag is codegen-arbitrary) */
   structName?: string;
@@ -143,6 +152,33 @@ export interface SymbolInfo {
    *  DECLARATION differs — `#define name body` instead of `extern T name;` — which is why the
    *  body is carried rather than reconstructed. */
   macroBody?: string;
+}
+
+/** THE one reading of {@link SymbolInfo.dims} for spelling C, shared by the access side
+ *  (structure.ts's bare-name gate) and the declaration side (declare.ts) so the two cannot
+ *  disagree about an array's shape.
+ *
+ *  Returns the INNER extents — every dimension but the outermost. The outermost is excluded
+ *  because C lets a declaration omit it, and the inner ones are exactly what scales a leading
+ *  subscript. `[]` is the rank-1 answer: one subscript, `extern T gSym[];`, the spelling this has
+ *  always had.
+ *
+ *  An ABSENT `dims` also reads as rank 1, because that is what the author of such a map said: the
+ *  ELF provider's capability gate refuses a @gba-kit/debug-info that cannot report rank, so
+ *  absence here can only come from a hand-written map whose `shape:'array'` states a plain array.
+ *  Absence never means "the package could not say" — that case fails loudly at load.
+ *
+ *  Null means NO consistent pair is available (a stated rank with an unknown inner extent, which
+ *  neither a declaration nor a subscript can spell). Both sides honour it the same way: the access
+ *  falls back to `((T *)&gSym)[i]`, the declaration to the flat `extern T gSym[];` — valid
+ *  together under whatever the project's own header says. */
+export function arrayInnerExtents(info: SymbolInfo): number[] | null {
+  const dims = info.shape === 'array' ? info.dims : undefined;
+  if (dims === undefined || dims.length <= 1) {
+    return [];
+  }
+  const inner = dims.slice(1);
+  return inner.every((d) => typeof d === 'number' && d > 0) ? (inner as number[]) : null;
 }
 
 /** address → symbols at that address; `[0]` is the provider's canonical pick. */

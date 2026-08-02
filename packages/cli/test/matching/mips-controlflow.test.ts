@@ -111,7 +111,11 @@ describe('MIPS (IDO) ranked candidates — scoring dispatches to the right compi
     const ranked = decompileRanked('ushr', asm, MIPS_IDO, obj);
     expect(ranked.best.label).toBe('unsigned'); // srl ⇒ unsigned wins; agbcc-scoring couldn't tell
     expect(ranked.best.score.match).toBe(true); // byte-exact via the IDO scorer, not agbcc
-    const signed = ranked.candidates.find((c) => c.label === 'signed')!;
-    expect(signed.score.score).toBeGreaterThan(0); // the wrong candidate is genuinely worse
+    // What this pins is the DISPATCH: an agbcc-scored MIPS candidate would be compiled by the
+    // wrong compiler and could not score 0 at all. It no longer pins signedness discrimination —
+    // since the shift-direction fix the signed candidate spells `(u32)a0 >> 1`, the same bytes.
+    // The signedness lever itself is pinned on a shape that cannot be spelled away (m3.test.ts,
+    // division: `__udivsi3` vs `__divsi3` is a different relocation).
+    expect(ranked.candidates.every((c) => c.score.match)).toBe(true);
   });
 });

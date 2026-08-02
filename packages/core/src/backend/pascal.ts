@@ -35,6 +35,10 @@ const BIT_FN: Partial<Record<BinOp, string>> = {
   '|': 'bitor',
   '^': 'bitxor',
   '<<': 'lshift',
+  // `rshift` over this backend's signed `Integer` reproduces IDO's `sra` — verified byte-exact
+  // against upas (pascal-ido.test.ts `asr2`). `>>>`, the LOGICAL shift, has no verified spelling
+  // here and is therefore absent: it reaches the loud decline below rather than borrowing this
+  // one, which would emit an arithmetic shift where the machine did a logical one.
   '>>': 'rshift',
 };
 
@@ -83,6 +87,13 @@ function makePrinter(vt: VarTypes) {
         // any plausible `^Integer`-shaped callee agrees with the machine width; a sub-word access
         // through an unknowable base would DISCARD the node's width (upas checks types, not
         // machine widths), so it declines like a definite mismatch.
+        // Leading constant subscripts (a multidimensional array global) have no IDO Pascal
+        // spelling yet, and dropping them would read a ROW's address as an element — decline
+        // LOUD, like the address-of case above. Unreachable today (the symbol map is agbcc-only),
+        // but silence here would be the wrong kind of unreachable.
+        if (e.lead && e.lead.length > 0) {
+          throw new Error(`pascal backend: a multidimensional array access has no IDO Pascal spelling yet`);
+        }
         const bt = exprCType(e.base, vt);
         if ((bt !== undefined && !derefStrideOk(bt, e.width)) || (bt === undefined && e.width !== 4)) {
           throw new Error(

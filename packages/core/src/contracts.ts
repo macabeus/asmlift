@@ -5,7 +5,7 @@
 // wrong C.
 import type { Fn, Value } from './ir/core';
 import { type IrType, typeToString } from './ir/types';
-import type { Expr, SFn, Stmt } from './l3/ast';
+import type { BinOp, Expr, SFn, Stmt } from './l3/ast';
 import { exprChildren, fieldSpellsDot, stmtChildren, stmtExprs } from './l3/ast';
 import { declaredTypes, exprCType } from './l3/typing';
 
@@ -72,7 +72,7 @@ export function assertDerefsTyped(sfn: SFn): void {
   const ctype = (e: Expr): IrType | undefined => exprCType(e, vt);
   const bad: string[] = [];
   // Ops C rejects outright on a pointer operand (the additive ops and &&/|| are legal C).
-  const NO_PTR_OPS = new Set(['&', '|', '^', '<<', '>>', '*', '/', '%']);
+  const NO_PTR_OPS = new Set<BinOp>(['&', '|', '^', '<<', '>>', '>>>', '*', '/', '%']);
   // The comparison operators — where a bare `&SYM` operand is SIGN-ambiguous, not ill-formed.
   const CMP_OPS = new Set(['<', '<=', '>', '>=', '==', '!=']);
   // 1/2/4 only: the decomp typedef vocabulary (C_TYPEDEFS) has no 64-bit scalar, so a width-8

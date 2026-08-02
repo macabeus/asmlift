@@ -27,13 +27,17 @@ test('M5: report captures stages, a scored pattern event, candidates, and the sc
   expect(ids).toEqual(['stage:lift', 'stage:idiom', 'stage:recover', 'stage:structure', 'stage:emit']);
   expect(report.trace.every((t) => t.verified)).toBe(true);
 
-  // the idiom pattern fired and its objdiff score delta is recorded (moved toward match)
+  // the idiom pattern fired and its objdiff score delta is RECORDED — what this pins is that the
+  // report carries a real, measured before/after, not that this particular fold improves it. The
+  // sdiv-pow2 baseline used to score 1 because the raw lowering spelled the sign-bit shift as C's
+  // arithmetic `>>`; since the shift-direction fix it matches unfolded, so the delta is 0 and the
+  // fold's payoff is readability (see m2.test.ts).
   expect(report.patternEvents).toHaveLength(1);
   const ev = report.patternEvents[0];
   expect(ev.hits).toBe(1);
-  expect(ev.scoreBefore).toBe(1);
   expect(ev.scoreAfter).toBe(0);
-  expect(ev.scoreDelta).toBe(-1);
+  expect(ev.scoreDelta).toBe(ev.scoreAfter! - ev.scoreBefore!);
+  expect(ev.scoreDelta).toBeLessThanOrEqual(0); // a fold must never cost bytes
 
   // ranked candidates + a byte-exact final score
   expect(report.candidates?.length).toBe(2);
