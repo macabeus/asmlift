@@ -1477,7 +1477,20 @@ export function lift(
       irb.ops.push(mkOp('br', { successors: [succ(fallLabel(bi))] }));
     } else if (kind === 'return') {
       // bx lr / pop {…,pc} / mov pc,lr
-      irb.ops.push(mkOp('ret', { operands: [readVar(target.returnReg, bi)] }));
+      //
+      // A `bx rN` BRANCHES THROUGH rN, so at that instruction rN holds the RETURN ADDRESS. When rN
+      // is the return-VALUE register the two uses collide, and the address wins by definition —
+      // whatever value was in r0 is gone, so the function cannot be returning one. agbcc spells an
+      // interworking return that way (`push {lr}` … `pop {r0}; bx r0`), and reading r0 as a value
+      // there invents a return the machine provably cannot make: a phantom `return`, a non-`void`
+      // signature that would contradict the project's own prototype, and a live range that keeps
+      // otherwise-dead computation alive.
+      //
+      // The other return forms are untouched, because none of them writes the return register:
+      // `bx lr` and `bx r1`/`bx r2` branch through a different one, and `pop {…,pc}` / `mov pc,lr`
+      // load PC directly. Only the register actually branched through is disqualified.
+      const viaReturnReg = last.mnemonic === 'bx' && last.ops[0] === target.returnReg;
+      irb.ops.push(mkOp('ret', { operands: viaReturnReg ? [] : [readVar(target.returnReg, bi)] }));
     } else if (kind === 'uncond') {
       irb.ops.push(mkOp('br', { successors: [succ(last.ops[0])] }));
     } else if (kind === 'cond') {

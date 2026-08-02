@@ -146,3 +146,18 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
     expect(() => dis('glob', '0:\tstw     r0,0(0)\n4:\tblr\n')).toThrow(/SDA\/global-relative access not supported/);
   });
 });
+
+describe('an operand-less `ret` is VOID, not an untyped s32', () => {
+  // Every frontend already says "this function produces no return value" the same way — an
+  // operand-less `ret`. PPC/MIPS emit one when the return register has no reaching definition;
+  // Thumb when the epilogue branches THROUGH that register (`bx r0`). Typing it `s32` produced a
+  // non-void signature over a body with no `return` value — C's implicit-int function that falls
+  // off its end — so the fix is in the shared return-type derivation, not per ISA.
+  test('a function that never writes the return register types void', () => {
+    expect(dis('nothing', '0:\tblr\n')).toBe('void nothing(void) {\n    return;\n}\n');
+  });
+
+  test('control: a function that DOES write it keeps its value and its type', () => {
+    expect(dis('five', '0:\tli      r3,5\n4:\tblr\n')).toBe('s32 five(void) {\n    return 5;\n}\n');
+  });
+});

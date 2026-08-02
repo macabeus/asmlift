@@ -207,8 +207,15 @@ export function returnType(fn: Fn): IrType {
   for (const b of fn.blocks) {
     const term = b.ops[b.ops.length - 1];
     if (term?.opcode === 'ret') {
+      // NO operand is not "unknown type", it is NO VALUE — the function returns void. Every
+      // frontend already says this the same way: MIPS/PPC emit an operand-less `ret` when the
+      // return register has no reaching definition, and Thumb when the epilogue branches THROUGH
+      // that register (`bx r0`, where r0 is the return address and so cannot also be a value).
+      // Defaulting to `s32` here produced a non-void signature over a body with no `return` value
+      // — C's implicit-int function that falls off its end — which contradicts the project's own
+      // prototype and keeps otherwise-dead computation alive to feed a return that never happens.
       if (term.operands.length === 0) {
-        return T.s(32);
+        return T.void();
       }
       const v = term.operands[0];
       return v.type.kind === 'unknown' ? T.s(32) : v.type;

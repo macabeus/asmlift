@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generatedAt": "2026-08-02T15:34:03.457Z",
+    "generatedAt": "2026-08-02T17:47:12.129Z",
     "toolchains": [
       "ido7.1",
       "agbcc",
@@ -14,8 +14,8 @@
       "real": 192
     },
     "asmlift": {
-      "commit": "005cccf2660e8bd7aa845c3eddffcfac7d6f21a7",
-      "dirty": false
+      "commit": "55b4ee3e8df9fd308e5d864cc10b151e8ce6a88a",
+      "dirty": true
     },
     "m2c": {
       "commit": "94098d4de68c2fcc13fb8cf1096a1520eb171abe"
@@ -2719,7 +2719,7 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-GigbUY/c.c:1078: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-TQrmPb/c.c:1077: invalid operands to binary <<"
           }
         ],
         "symbolsUsed": [
@@ -2733,20 +2733,20 @@
           }
         ],
         "outcome": "nonmatch",
-        "source": "s32 CopyBGScrollTiles(void) {\n    s32 v0;\n    u32 v1;\n    s32 v2;\n    v1 = 0;\n    do {\n        if (v1 >= (u32)(*(u8 *)&gUnk_03005220 << 30) >> 30) {\n            v2 = 2;\n        } else {\n            v2 = 0;\n        }\n        gBgTilemapBufs[0][(v1 << 1) + 577] = gBgTilemapBufs[0][(v1 << 1) + (v2 + 20 << 5)];\n        gBgTilemapBufs[0][(v1 << 1) + 578] = gBgTilemapBufs[0][(v1 << 1) + ((v2 + 20 << 5) + 1)];\n        gBgTilemapBufs[0][(v1 << 1) + 609] = gBgTilemapBufs[0][(v1 << 1) + (v2 + 21 << 5)];\n        v0 = gBgTilemapBufs[0][(v1 << 1) + ((v2 + 21 << 5) + 1)];\n        gBgTilemapBufs[0][(v1 << 1) + 610] = v0;\n        v1 = v1 + 1;\n    } while (v1 <= 2);\n    return v0;\n}\n",
-        "score": 32,
-        "maxScore": 74,
+        "source": "void CopyBGScrollTiles(void) {\n    u32 v0;\n    s32 v1;\n    v0 = 0;\n    do {\n        if (v0 >= (u32)(*(u8 *)&gUnk_03005220 << 30) >> 30) {\n            v1 = 2;\n        } else {\n            v1 = 0;\n        }\n        gBgTilemapBufs[0][(v0 << 1) + 577] = gBgTilemapBufs[0][(v0 << 1) + (v1 + 20 << 5)];\n        gBgTilemapBufs[0][(v0 << 1) + 578] = gBgTilemapBufs[0][(v0 << 1) + ((v1 + 20 << 5) + 1)];\n        gBgTilemapBufs[0][(v0 << 1) + 609] = gBgTilemapBufs[0][(v0 << 1) + (v1 + 21 << 5)];\n        gBgTilemapBufs[0][(v0 << 1) + 610] = gBgTilemapBufs[0][(v0 << 1) + ((v1 + 21 << 5) + 1)];\n        v0 = v0 + 1;\n    } while (v0 <= 2);\n    return;\n}\n",
+        "score": 30,
+        "maxScore": 72,
         "compileErrors": null,
         "breakdown": {
-          "insert": 6,
-          "delete": 4,
-          "replace": 1,
+          "insert": 4,
+          "delete": 2,
+          "replace": 3,
           "opMismatch": 1,
           "argMismatch": 20
         },
         "quality": {
           "score": 98,
-          "lines": 20,
+          "lines": 18,
           "gotos": 0,
           "casts": 3,
           "unkGlue": 0,
@@ -2776,13 +2776,13 @@
       },
       "gapSize": {
         "decompiler": "asmlift",
-        "score": 32,
-        "maxScore": 74,
-        "ratio": 0.43243243243243246,
+        "score": 30,
+        "maxScore": 72,
+        "ratio": 0.4166666666666667,
         "kinds": {
-          "insert": 6,
-          "delete": 4,
-          "replace": 1,
+          "insert": 4,
+          "delete": 2,
+          "replace": 3,
           "opMismatch": 1,
           "argMismatch": 20
         }
@@ -2824,7 +2824,7 @@
         "candidateLabel": "unsigned",
         "symbolsUsed": [],
         "outcome": "nonmatch",
-        "source": "void Decompress(u32 a0, s32 * a1) {\n    s32 v0;\n    s32 v1;\n    if (*a1 >= 0) {\n        v1 = LZ77UnCompWram(a1 + 1, a0);\n    } else {\n        v0 = thunk_HeapAlloc((u32)a1[1] >> 8, 0);\n        HuffUnComp(a1 + 1, v0);\n        LZ77UnCompWram(v0, a0);\n        v1 = thunk_HeapFree(v0, a0);\n    }\n    return;\n}\n",
+        "source": "void Decompress(u32 a0, s32 * a1) {\n    s32 v0;\n    if (*a1 >= 0) {\n        LZ77UnCompWram(a1 + 1, a0);\n    } else {\n        v0 = thunk_HeapAlloc((u32)a1[1] >> 8, 0);\n        HuffUnComp(a1 + 1, v0);\n        LZ77UnCompWram(v0, a0);\n        thunk_HeapFree(v0, a0);\n    }\n    return;\n}\n",
         "score": 9,
         "maxScore": 30,
         "compileErrors": null,
@@ -2837,7 +2837,7 @@
         },
         "quality": {
           "score": 100,
-          "lines": 13,
+          "lines": 12,
           "gotos": 0,
           "casts": 1,
           "unkGlue": 0,
@@ -3338,7 +3338,7 @@
         "droppedCandidates": [
           {
             "label": "unsigned",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-X3ad9I/c.c:1076: `gBgDataPtrs' undeclared (first use in this function)"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Fx4lJJ/c.c:1076: `gBgDataPtrs' undeclared (first use in this function)"
           }
         ],
         "symbolsUsed": [],
@@ -3860,8 +3860,8 @@
           }
         ],
         "outcome": "nonmatch",
-        "source": "void ReadKeyInput(void) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    u16 * v3;\n    v0 = *(u16 *)67109168;\n    v1 = gKeysPrevious;\n    gKeysPressed = (1023 ^ v0) & ~v1;\n    gKeysPrevious = 1023 ^ v0;\n    if (((1023 ^ v0) & 15) == 15) SoftResetRom(255, (1023 ^ v0) & 15, v1, &gKeysPressed);\n    v2 = gKeysPrevious;\n    if ((1 & v2) == 0) {\n        gAButtonHold = 1 & v2;\n    } else {\n        v3 = gAButtonHold;\n        gAButtonHold = v3 + 1;\n    }\n    return;\n}\n",
-        "score": 43,
+        "source": "void ReadKeyInput(void) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    v0 = *(u16 *)67109168;\n    v1 = gKeysPrevious;\n    gKeysPressed = (1023 ^ v0) & ~v1;\n    gKeysPrevious = 1023 ^ v0;\n    if (((1023 ^ v0) & 15) == 15) SoftResetRom(255, (1023 ^ v0) & 15, v1, &gKeysPressed);\n    v2 = gKeysPrevious;\n    if ((1 & v2) == 0) {\n        gAButtonHold = 1 & v2;\n    } else {\n        gAButtonHold = gAButtonHold + 1;\n    }\n    return;\n}\n",
+        "score": 42,
         "maxScore": 58,
         "compileErrors": null,
         "breakdown": {
@@ -3869,11 +3869,11 @@
           "delete": 11,
           "replace": 3,
           "opMismatch": 1,
-          "argMismatch": 11
+          "argMismatch": 10
         },
         "quality": {
           "score": 100,
-          "lines": 19,
+          "lines": 17,
           "gotos": 0,
           "casts": 2,
           "unkGlue": 0,
@@ -4312,7 +4312,7 @@
         "droppedCandidates": [
           {
             "label": "unsigned",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-pkBp3G/c.c:1077: too many arguments to function `thunk_sub_080002A0'"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-AdqYYk/c.c:1077: too many arguments to function `thunk_sub_080002A0'"
           }
         ],
         "symbolsUsed": [],
@@ -4496,9 +4496,9 @@
         "symbolMap": true,
         "candidateLabel": "unsigned/raw-globals",
         "symbolsUsed": [],
-        "outcome": "nonmatch",
-        "source": "struct Elem0 { u8 _pad0[8]; u16 field_8; u16 field_10; u8 _pad1[16]; };\ns32 StreamCmd_SetBGScroll(void) {\n    s32 * v0;\n    s32 v1;\n    struct Elem0 * v2;\n    u8 * v3;\n    s32 v4;\n    u8 * v5;\n    v0 = (s32 *)50351492;\n    v1 = ReadUnalignedU16(*v0 + 3);\n    v2 = (struct Elem0 *)50345008;\n    v3 = (u8 *)*v0;\n    v2[v3[2]].field_8 = v1 << 4;\n    v4 = ReadUnalignedU16(v3 + 5);\n    v5 = (u8 *)*v0;\n    v2[v5[2]].field_10 = v4 << 4;\n    *v0 = v5 + 7;\n    return v4 << 4;\n}\n",
-        "score": 2,
+        "outcome": "match",
+        "source": "struct Elem0 { u8 _pad0[8]; u16 field_8; u16 field_10; u8 _pad1[16]; };\nvoid StreamCmd_SetBGScroll(void) {\n    s32 * v0;\n    s32 v1;\n    struct Elem0 * v2;\n    u8 * v3;\n    s32 v4;\n    u8 * v5;\n    v0 = (s32 *)50351492;\n    v1 = ReadUnalignedU16(*v0 + 3);\n    v2 = (struct Elem0 *)50345008;\n    v3 = (u8 *)*v0;\n    v2[v3[2]].field_8 = v1 << 4;\n    v4 = ReadUnalignedU16(v3 + 5);\n    v5 = (u8 *)*v0;\n    v2[v5[2]].field_10 = v4 << 4;\n    *v0 = v5 + 7;\n    return;\n}\n",
+        "score": 0,
         "maxScore": 32,
         "compileErrors": null,
         "breakdown": {
@@ -4506,7 +4506,7 @@
           "delete": 0,
           "replace": 0,
           "opMismatch": 0,
-          "argMismatch": 2
+          "argMismatch": 0
         },
         "quality": {
           "score": 96,
@@ -4541,19 +4541,7 @@
           "<tmp>/c.c:1081: request for member `unk2' in something not a structure or union"
         ]
       },
-      "gapSize": {
-        "decompiler": "asmlift",
-        "score": 2,
-        "maxScore": 32,
-        "ratio": 0.0625,
-        "kinds": {
-          "insert": 0,
-          "delete": 0,
-          "replace": 0,
-          "opMismatch": 0,
-          "argMismatch": 2
-        }
-      },
+      "gapSize": null,
       "scripts": {
         "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `StreamCmd_SetBGScroll` — benchmark function kleod:StreamCmd_SetBGScroll:agbcc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit 94098d4:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout 94098d4de68c2fcc13fb8cf1096a1520eb171abe\nM2C_PATH='/path/to/m2c'\n\n# The exact agbcc `.s` text the benchmark fed m2c, verbatim.\ncat > in.s <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tStreamCmd_SetBGScroll\n\t.type\t StreamCmd_SetBGScroll,function\n\t.thumb_func\nStreamCmd_SetBGScroll:\n\tpush\t{r4, r5, lr}\n\tldr\tr4, .L3\n\tldr\tr0, [r4]\n\tadd\tr0, r0, #0x3\n\tbl\tReadUnalignedU16\n\tadd\tr3, r0, #0\n\tldr\tr5, .L3+0x4\n\tldr\tr0, [r4]\n\tldrb\tr2, [r0, #0x2]\n\tlsl\tr1, r2, #0x3\n\tsub\tr1, r1, r2\n\tlsl\tr1, r1, #0x2\n\tadd\tr1, r1, r5\n\tlsl\tr3, r3, #0x4\n\tstrh\tr3, [r1, #0x8]\n\tadd\tr0, r0, #0x5\n\tbl\tReadUnalignedU16\n\tldr\tr3, [r4]\n\tldrb\tr2, [r3, #0x2]\n\tlsl\tr1, r2, #0x3\n\tsub\tr1, r1, r2\n\tlsl\tr1, r1, #0x2\n\tadd\tr1, r1, r5\n\tlsl\tr0, r0, #0x4\n\tstrh\tr0, [r1, #0xa]\n\tadd\tr3, r3, #0x7\n\tstr\tr3, [r4]\n\tpop\t{r4, r5}\n\tpop\t{r0}\n\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\t0x3004d84\n\t.word\t0x3003430\n.Lfe1:\n\t.size\t StreamCmd_SetBGScroll,.Lfe1-StreamCmd_SetBGScroll\n\n.text\n\t.align\t2, 0\nASM_INPUT\n\n# (This function ran with NO context header — the benchmark fed m2c the assembly alone.)\n\nargs=(\n  --target gba            # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function StreamCmd_SetBGScroll # the symbol to decompile from in.s\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
         "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `StreamCmd_SetBGScroll` — benchmark function kleod:StreamCmd_SetBGScroll:agbcc.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# This function's decomp project — the PINNED benchmark branch (provenance base + one\n# integration commit). Not needed to run this script (inputs are embedded/vendored); to\n# rebuild the project itself:\n#   git clone --branch asmlift-benchmark https://github.com/Dream-Atelier/kl-eod-decomp.git klonoa-empire-of-dreams\n#   make -C klonoa-empire-of-dreams\n# SYMBOLS: this row ran WITH the project's symbol map (names + declaration shapes derived\n# from the ELF its decomp.yaml names), vendored at apps/benchmark/dataset/real/tu/kleod/symbols.json.gz\n#   sha256 of the decompressed map JSON: e01bf79c83f6fffa960d9dd1fc84233cc074b385a825136f5ac3f159416eed70\n# Set PROJECT_PATH to your BUILT checkout of the project above (clone recipe in the comments);\n# step 1 then points the scoring config at the checkout's decomp.yaml (tools.asmlift.elf) —\n# the CLI loads the same map, so this run reproduces the row's named spellings. A missing\n# checkout/ELF warns and runs map-less (output may then differ from the row).\nPROJECT_PATH='/path/to/klonoa-empire-of-dreams'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# --project-root grafts the checkout's tools.asmlift.elf (the symbol map) into that decomp.yaml.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target kleod:StreamCmd_SetBGScroll:agbcc --out \"$PWD\" --project-root \"$PROJECT_PATH\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact agbcc `.s` text.\ncat > in.asm <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tStreamCmd_SetBGScroll\n\t.type\t StreamCmd_SetBGScroll,function\n\t.thumb_func\nStreamCmd_SetBGScroll:\n\tpush\t{r4, r5, lr}\n\tldr\tr4, .L3\n\tldr\tr0, [r4]\n\tadd\tr0, r0, #0x3\n\tbl\tReadUnalignedU16\n\tadd\tr3, r0, #0\n\tldr\tr5, .L3+0x4\n\tldr\tr0, [r4]\n\tldrb\tr2, [r0, #0x2]\n\tlsl\tr1, r2, #0x3\n\tsub\tr1, r1, r2\n\tlsl\tr1, r1, #0x2\n\tadd\tr1, r1, r5\n\tlsl\tr3, r3, #0x4\n\tstrh\tr3, [r1, #0x8]\n\tadd\tr0, r0, #0x5\n\tbl\tReadUnalignedU16\n\tldr\tr3, [r4]\n\tldrb\tr2, [r3, #0x2]\n\tlsl\tr1, r2, #0x3\n\tsub\tr1, r1, r2\n\tlsl\tr1, r1, #0x2\n\tadd\tr1, r1, r5\n\tlsl\tr0, r0, #0x4\n\tstrh\tr0, [r1, #0xa]\n\tadd\tr3, r3, #0x7\n\tstr\tr3, [r4]\n\tpop\t{r4, r5}\n\tpop\t{r0}\n\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\t0x3004d84\n\t.word\t0x3003430\n.Lfe1:\n\t.size\t StreamCmd_SetBGScroll,.Lfe1-StreamCmd_SetBGScroll\n\n.text\n\t.align\t2, 0\nASM_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\n# (real tier: candidates are scored INSIDE the project's own context — step 1 materializes the\n# row's vendored context next to target.o as ctx.i, and the generated decomp.yaml concatenates\n# it ahead of every candidate, so this scores in the same world the benchmark did)\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target agbcc          # frontend + target description (ISA, calling convention, compiler idioms)\n  --name StreamCmd_SetBGScroll # the symbol to decompile (multi-function input selects by name)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
@@ -4831,8 +4819,8 @@
           }
         ],
         "outcome": "nonmatch",
-        "source": "s32 UpdateFadeEffect(void) {\n    s32 v0;\n    s32 v1;\n    v0 = sub_08051A0C(*(u8 *)67108870, gEntityArray[8]);\n    if ((u8)v0 > 16) {\n        v1 = v0 << 24;\n    } else {\n        *(u16 *)67108946 = (u8)v0 << 8 | (u8)v0;\n        v1 = (u8)v0 << 8 | (u8)v0;\n    }\n    return v1;\n}\n",
-        "score": 4,
+        "source": "void UpdateFadeEffect(void) {\n    s32 v0;\n    v0 = sub_08051A0C(*(u8 *)67108870, gEntityArray[8]);\n    if ((u8)v0 <= 16) *(u16 *)67108946 = (u8)v0 << 8 | (u8)v0;\n    return;\n}\n",
+        "score": 2,
         "maxScore": 21,
         "compileErrors": null,
         "breakdown": {
@@ -4840,13 +4828,13 @@
           "delete": 1,
           "replace": 0,
           "opMismatch": 0,
-          "argMismatch": 2
+          "argMismatch": 0
         },
         "quality": {
-          "score": 88,
-          "lines": 12,
+          "score": 92,
+          "lines": 6,
           "gotos": 0,
-          "casts": 8,
+          "casts": 6,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -4874,15 +4862,15 @@
       },
       "gapSize": {
         "decompiler": "asmlift",
-        "score": 4,
+        "score": 2,
         "maxScore": 21,
-        "ratio": 0.19047619047619047,
+        "ratio": 0.09523809523809523,
         "kinds": {
           "insert": 1,
           "delete": 1,
           "replace": 0,
           "opMismatch": 0,
-          "argMismatch": 2
+          "argMismatch": 0
         }
       },
       "scripts": {
@@ -4917,11 +4905,11 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-CcKKJi/c.c:1088: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-GgWx4P/c.c:1088: incompatible types in assignment"
           },
           {
             "label": "signed/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-yO9fF2/c.c:1088: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-mz2RE8/c.c:1088: incompatible types in assignment"
           }
         ],
         "symbolsUsed": [
@@ -14976,7 +14964,7 @@
         "candidateLabel": "unsigned",
         "symbolsUsed": [],
         "outcome": "match",
-        "source": "struct Struct0 { u8 _pad0[32]; u16 field_32; u16 field_34; u16 field_36; u16 field_38; u16 field_40; u16 field_42; u16 field_44; u16 field_46; u16 field_48; u16 field_50; s32 field_52; s32 field_56; s32 field_60; s32 field_64; s32 field_68; s32 field_72; s32 field_76; s32 field_80; s32 field_84; u16 field_88; u16 field_90; u16 field_92; u16 field_94; u16 field_96; u16 field_98; s32 field_100; s32 field_104; u16 field_108; u16 field_110; u8 field_112; u8 field_113; };\ns32 func_800B5B7C_1E2C2C(struct Struct0 * a0, u32 a1) {\n    a0->field_32 = 0;\n    a0->field_34 = 0;\n    a0->field_36 = 0;\n    a0->field_38 = 0;\n    a0->field_40 = 0;\n    a0->field_42 = 0;\n    a0->field_44 = 0;\n    a0->field_46 = 0;\n    a0->field_48 = 0;\n    a0->field_50 = 0;\n    a0->field_52 = 0;\n    a0->field_56 = 0;\n    a0->field_60 = 0;\n    a0->field_64 = 0;\n    a0->field_68 = 0;\n    a0->field_72 = 0;\n    a0->field_76 = 0;\n    a0->field_80 = 0;\n    a0->field_84 = 0;\n    a0->field_88 = 0;\n    a0->field_90 = 0;\n    a0->field_92 = 0;\n    a0->field_94 = 0;\n    a0->field_96 = 0;\n    a0->field_98 = 0;\n    a0->field_100 = 0;\n    a0->field_104 = 0;\n    a0->field_108 = 0;\n    a0->field_110 = a1;\n    a0->field_112 = 0;\n    a0->field_113 = 0;\n    return;\n}\n",
+        "source": "struct Struct0 { u8 _pad0[32]; u16 field_32; u16 field_34; u16 field_36; u16 field_38; u16 field_40; u16 field_42; u16 field_44; u16 field_46; u16 field_48; u16 field_50; s32 field_52; s32 field_56; s32 field_60; s32 field_64; s32 field_68; s32 field_72; s32 field_76; s32 field_80; s32 field_84; u16 field_88; u16 field_90; u16 field_92; u16 field_94; u16 field_96; u16 field_98; s32 field_100; s32 field_104; u16 field_108; u16 field_110; u8 field_112; u8 field_113; };\nvoid func_800B5B7C_1E2C2C(struct Struct0 * a0, u32 a1) {\n    a0->field_32 = 0;\n    a0->field_34 = 0;\n    a0->field_36 = 0;\n    a0->field_38 = 0;\n    a0->field_40 = 0;\n    a0->field_42 = 0;\n    a0->field_44 = 0;\n    a0->field_46 = 0;\n    a0->field_48 = 0;\n    a0->field_50 = 0;\n    a0->field_52 = 0;\n    a0->field_56 = 0;\n    a0->field_60 = 0;\n    a0->field_64 = 0;\n    a0->field_68 = 0;\n    a0->field_72 = 0;\n    a0->field_76 = 0;\n    a0->field_80 = 0;\n    a0->field_84 = 0;\n    a0->field_88 = 0;\n    a0->field_90 = 0;\n    a0->field_92 = 0;\n    a0->field_94 = 0;\n    a0->field_96 = 0;\n    a0->field_98 = 0;\n    a0->field_100 = 0;\n    a0->field_104 = 0;\n    a0->field_108 = 0;\n    a0->field_110 = a1;\n    a0->field_112 = 0;\n    a0->field_113 = 0;\n    return;\n}\n",
         "score": 0,
         "maxScore": 32,
         "compileErrors": null,
@@ -15050,7 +15038,7 @@
         "candidateLabel": "unsigned",
         "symbolsUsed": [],
         "outcome": "match",
-        "source": "s32 func_800B68F4_1E39A4(s32 * a0, u32 a1, u32 a2, u32 a3) {\n    a0[24] = a1;\n    a0[21] = a1;\n    a0[25] = a2;\n    a0[22] = a2;\n    a0[26] = a3;\n    a0[23] = a3;\n    return;\n}\n",
+        "source": "void func_800B68F4_1E39A4(s32 * a0, u32 a1, u32 a2, u32 a3) {\n    a0[24] = a1;\n    a0[21] = a1;\n    a0[25] = a2;\n    a0[22] = a2;\n    a0[26] = a3;\n    a0[23] = a3;\n    return;\n}\n",
         "score": 0,
         "maxScore": 7,
         "compileErrors": null,
@@ -35012,23 +35000,28 @@
       },
       "asmlift": {
         "decompiler": "asmlift",
-        "outcome": "declined",
-        "source": "/* asmlift could not decompile 'memcpy1' — structure: cannot structure 'memcpy1': loop condition or a post-loop value reads a pre-update loop variable */\n/* original assembly: */\n/*   @ Generated by gcc 2.9-arm-000512 for Thumb/elf */\n/*   \t.code\t16 */\n/*   .gcc2_compiled.: */\n/*   .text */\n/*   \t.align\t2, 0 */\n/*   \t.globl\tmemcpy1 */\n/*   \t.type\t memcpy1,function */\n/*   \t.thumb_func */\n/*   memcpy1: */\n/*   \tpush\t{r4, r5, lr} */\n/*   \tadd\tr5, r0, #0 */\n/*   \tadd\tr4, r1, #0 */\n/*   \tmov\tr3, #0x0 */\n/*   \tcmp\tr3, r2 */\n/*   \tbge\t.L4\t@cond_branch */\n/*   .L6: */\n/*   \tadd\tr0, r5, r3 */\n/*   \tadd\tr1, r4, r3 */\n/*   \tldrb\tr1, [r1] */\n/*   \tstrb\tr1, [r0] */\n/*   \tadd\tr3, r3, #0x1 */\n/*   \tcmp\tr3, r2 */\n/*   \tblt\t.L6\t@cond_branch */\n/*   .L4: */\n/*   \tpop\t{r4, r5} */\n/*   \tpop\t{r0} */\n/*   \tbx\tr0 */\n/*   .Lfe1: */\n/*   \t.size\t memcpy1,.Lfe1-memcpy1 */\nvoid memcpy1(void) {\n    ASMLIFT_ERROR(\"could not decompile (structure): cannot structure 'memcpy1': loop condition or a post-loop value reads a pre-update loop variable\");\n}\n",
-        "score": null,
-        "maxScore": null,
+        "candidateLabel": "signed",
+        "outcome": "match",
+        "source": "void memcpy1(s32 a0, s32 a1, s32 a2) {\n    s32 v0;\n    for (v0 = 0; v0 < a2; v0 = v0 + 1) {\n        *(u8 *)(a0 + v0) = *(u8 *)(a1 + v0);\n    }\n    return;\n}\n",
+        "score": 0,
+        "maxScore": 16,
         "compileErrors": null,
-        "quality": {
-          "score": 88,
-          "lines": 34,
-          "gotos": 0,
-          "casts": 1,
-          "unkGlue": 1,
-          "rawMem": 0,
-          "addrDeref": 0
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 0
         },
-        "errorMarkers": [
-          "structure: cannot structure 'memcpy1': loop condition or a post-loop value reads a pre-update loop variable"
-        ]
+        "quality": {
+          "score": 92,
+          "lines": 7,
+          "gotos": 0,
+          "casts": 2,
+          "unkGlue": 0,
+          "rawMem": 2,
+          "addrDeref": 0
+        }
       },
       "m2c": {
         "decompiler": "m2c",
@@ -35054,19 +35047,7 @@
           "addrDeref": 0
         }
       },
-      "gapSize": {
-        "decompiler": "m2c",
-        "score": 2,
-        "maxScore": 16,
-        "ratio": 0.125,
-        "kinds": {
-          "insert": 0,
-          "delete": 0,
-          "replace": 0,
-          "opMismatch": 1,
-          "argMismatch": 1
-        }
-      },
+      "gapSize": null,
       "scripts": {
         "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `memcpy1` — benchmark function synthetic:memcpy1:agbcc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit 94098d4:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout 94098d4de68c2fcc13fb8cf1096a1520eb171abe\nM2C_PATH='/path/to/m2c'\n\n# The exact agbcc `.s` text the benchmark fed m2c, verbatim.\ncat > in.s <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tmemcpy1\n\t.type\t memcpy1,function\n\t.thumb_func\nmemcpy1:\n\tpush\t{r4, r5, lr}\n\tadd\tr5, r0, #0\n\tadd\tr4, r1, #0\n\tmov\tr3, #0x0\n\tcmp\tr3, r2\n\tbge\t.L4\t@cond_branch\n.L6:\n\tadd\tr0, r5, r3\n\tadd\tr1, r4, r3\n\tldrb\tr1, [r1]\n\tstrb\tr1, [r0]\n\tadd\tr3, r3, #0x1\n\tcmp\tr3, r2\n\tblt\t.L6\t@cond_branch\n.L4:\n\tpop\t{r4, r5}\n\tpop\t{r0}\n\tbx\tr0\n.Lfe1:\n\t.size\t memcpy1,.Lfe1-memcpy1\nASM_INPUT\n\n# The exact context header the benchmark passed via --context — prototypes only\n# (no struct/global layouts: the benchmark measures cold recovery).\ncat > ctx.h <<'CTX_INPUT'\nvoid memcpy1(u8*,u8*,int);\nCTX_INPUT\n\nargs=(\n  --target gba            # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function memcpy1      # the symbol to decompile from in.s\n  --context ctx.h         # the C context header above (typedefs + prototypes)\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
         "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `memcpy1` — benchmark function synthetic:memcpy1:agbcc.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:memcpy1:agbcc --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact agbcc `.s` text.\ncat > in.asm <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tmemcpy1\n\t.type\t memcpy1,function\n\t.thumb_func\nmemcpy1:\n\tpush\t{r4, r5, lr}\n\tadd\tr5, r0, #0\n\tadd\tr4, r1, #0\n\tmov\tr3, #0x0\n\tcmp\tr3, r2\n\tbge\t.L4\t@cond_branch\n.L6:\n\tadd\tr0, r5, r3\n\tadd\tr1, r4, r3\n\tldrb\tr1, [r1]\n\tstrb\tr1, [r0]\n\tadd\tr3, r3, #0x1\n\tcmp\tr3, r2\n\tblt\t.L6\t@cond_branch\n.L4:\n\tpop\t{r4, r5}\n\tpop\t{r0}\n\tbx\tr0\n.Lfe1:\n\t.size\t memcpy1,.Lfe1-memcpy1\nASM_INPUT\n\n# The prototype hints the benchmark fed asmlift (callee arities / void-ness).\ncat > proto.json <<'PROTO_INPUT'\n{\n  \"memcpy1\": {\n    \"returnsVoid\": true\n  }\n}\nPROTO_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target agbcc          # frontend + target description (ISA, calling convention, compiler idioms)\n  --name memcpy1          # the symbol to decompile (multi-function input selects by name)\n  --proto proto.json      # the prototype hints above (callee arities / void-ness)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
@@ -35355,23 +35336,28 @@
       },
       "asmlift": {
         "decompiler": "asmlift",
-        "outcome": "declined",
-        "source": "/* asmlift could not decompile 'memset1' — structure: cannot structure 'memset1': loop condition or a post-loop value reads a pre-update loop variable */\n/* original assembly: */\n/*   @ Generated by gcc 2.9-arm-000512 for Thumb/elf */\n/*   \t.code\t16 */\n/*   .gcc2_compiled.: */\n/*   .text */\n/*   \t.align\t2, 0 */\n/*   \t.globl\tmemset1 */\n/*   \t.type\t memset1,function */\n/*   \t.thumb_func */\n/*   memset1: */\n/*   \tpush\t{r4, lr} */\n/*   \tadd\tr4, r0, #0 */\n/*   \tlsl\tr2, r2, #0x18 */\n/*   \tlsr\tr2, r2, #0x18 */\n/*   \tmov\tr3, #0x0 */\n/*   \tcmp\tr3, r1 */\n/*   \tbge\t.L4\t@cond_branch */\n/*   .L6: */\n/*   \tadd\tr0, r4, r3 */\n/*   \tstrb\tr2, [r0] */\n/*   \tadd\tr3, r3, #0x1 */\n/*   \tcmp\tr3, r1 */\n/*   \tblt\t.L6\t@cond_branch */\n/*   .L4: */\n/*   \tpop\t{r4} */\n/*   \tpop\t{r0} */\n/*   \tbx\tr0 */\n/*   .Lfe1: */\n/*   \t.size\t memset1,.Lfe1-memset1 */\nvoid memset1(void) {\n    ASMLIFT_ERROR(\"could not decompile (structure): cannot structure 'memset1': loop condition or a post-loop value reads a pre-update loop variable\");\n}\n",
-        "score": null,
-        "maxScore": null,
+        "candidateLabel": "signed",
+        "outcome": "nonmatch",
+        "source": "void memset1(s32 a0, s32 a1, s32 a2) {\n    s32 v0;\n    for (v0 = 0; v0 < a1; v0 = v0 + 1) {\n        *(u8 *)(a0 + v0) = (u8)a2;\n    }\n    return;\n}\n",
+        "score": 2,
+        "maxScore": 15,
         "compileErrors": null,
-        "quality": {
-          "score": 88,
-          "lines": 33,
-          "gotos": 0,
-          "casts": 1,
-          "unkGlue": 1,
-          "rawMem": 0,
-          "addrDeref": 0
+        "breakdown": {
+          "insert": 0,
+          "delete": 2,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 0
         },
-        "errorMarkers": [
-          "structure: cannot structure 'memset1': loop condition or a post-loop value reads a pre-update loop variable"
-        ]
+        "quality": {
+          "score": 96,
+          "lines": 7,
+          "gotos": 0,
+          "casts": 2,
+          "unkGlue": 0,
+          "rawMem": 1,
+          "addrDeref": 0
+        }
       },
       "m2c": {
         "decompiler": "m2c",
@@ -35398,16 +35384,16 @@
         }
       },
       "gapSize": {
-        "decompiler": "m2c",
+        "decompiler": "asmlift",
         "score": 2,
         "maxScore": 15,
         "ratio": 0.13333333333333333,
         "kinds": {
           "insert": 0,
-          "delete": 0,
+          "delete": 2,
           "replace": 0,
-          "opMismatch": 1,
-          "argMismatch": 1
+          "opMismatch": 0,
+          "argMismatch": 0
         }
       },
       "scripts": {
@@ -40167,7 +40153,7 @@
         "decompiler": "asmlift",
         "candidateLabel": "unsigned",
         "outcome": "nonmatch",
-        "source": "void revarr(s32 * a0, u32 a1) {\n    s32 v0;\n    s32 * v1;\n    s32 * v2;\n    s32 * v3;\n    s32 v4;\n    s32 v5;\n    if (0 < a1 - 1) {\n        v2 = a0;\n        v4 = 0;\n        v5 = a1 - 1;\n        v3 = (a1 - 1 << 2) + a0;\n        do {\n            v0 = *v2;\n            v1 = (s32 *)*v3;\n            *v2 = v1;\n            *v3 = v0;\n            v2 = v2 + 1;\n            v4 = v4 + 1;\n            v3 = v3 - 1;\n            v5 = v5 - 1;\n        } while (v4 < v5);\n        a0 = v1;\n    }\n    return;\n}\n",
+        "source": "void revarr(s32 * a0, u32 a1) {\n    s32 v0;\n    s32 * v1;\n    s32 * v2;\n    s32 v3;\n    s32 v4;\n    if (0 < a1 - 1) {\n        v1 = a0;\n        v3 = 0;\n        v4 = a1 - 1;\n        v2 = (a1 - 1 << 2) + a0;\n        do {\n            v0 = *v1;\n            *v1 = *v2;\n            *v2 = v0;\n            v1 = v1 + 1;\n            v3 = v3 + 1;\n            v2 = v2 - 1;\n            v4 = v4 - 1;\n        } while (v3 < v4);\n    }\n    return;\n}\n",
         "score": 6,
         "maxScore": 22,
         "compileErrors": null,
@@ -40180,9 +40166,9 @@
         },
         "quality": {
           "score": 100,
-          "lines": 26,
+          "lines": 23,
           "gotos": 0,
-          "casts": 1,
+          "casts": 0,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0

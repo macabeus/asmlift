@@ -55,3 +55,34 @@ describe('Thumb frontend robustness (CONTRACT-AS-INVARIANT)', () => {
     expect(src).not.toContain('ASMLIFT_ERROR'); // no decline / use-before-def
   });
 });
+
+describe('the return register cannot be both the return ADDRESS and the return value', () => {
+  // `bx rN` branches THROUGH rN, so at that instruction rN holds the return address. When rN is
+  // also the return-VALUE register the two uses collide and the address wins by definition —
+  // whatever was in r0 is gone. agbcc's interworking epilogue is exactly that shape
+  // (`push {lr}` … `pop {r0}; bx r0`), and reading r0 as a value there invents a return the
+  // machine provably cannot make.
+  test('a `bx r0` epilogue returns VOID, with no phantom value', () => {
+    const src = dc('viaR0', '\tpush\t{lr}\n\tmov\tr0, #0x5\n\tpop\t{r0}\n\tbx\tr0\n').source;
+    expect(src).toContain('void viaR0(void)');
+    expect(src).not.toMatch(/return\s+\w/); // no value returned — there is none to return
+  });
+
+  test('the dead computation feeding that phantom return goes with it', () => {
+    // `mov r0,#5` is dead once r0 is not a return value; keeping the phantom kept it alive.
+    expect(dc('viaR0', '\tpush\t{lr}\n\tmov\tr0, #0x5\n\tpop\t{r0}\n\tbx\tr0\n').source).not.toContain('5');
+  });
+
+  test('control: `bx lr` keeps the value — lr is not the return register', () => {
+    const src = dc('viaLr', '\tmov\tr0, #0x5\n\tbx\tlr\n').source;
+    expect(src).toContain('return 5;');
+    expect(src).toContain('s32 viaLr(void)');
+  });
+
+  test('control: `bx r1` keeps the value — only the register BRANCHED THROUGH is disqualified', () => {
+    // agbcc also spells the interworking return through r1/r2; those leave r0 untouched, so a
+    // value there is real. A blanket "any register epilogue means void" would lose it.
+    const src = dc('viaR1', '\tpush\t{lr}\n\tmov\tr0, #0x5\n\tpop\t{r1}\n\tbx\tr1\n').source;
+    expect(src).toContain('return 5;');
+  });
+});
