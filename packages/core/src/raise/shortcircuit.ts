@@ -244,8 +244,25 @@ export function recognizeShortCircuit(fn: Fn): boolean {
 //
 // REFUSALS (each one a real way this could be wrong, not a hypothetical):
 //
+//   - ^g is the ENTRY block. `predecessors()` walks successor edges only — it does not model the
+//     implicit edge into `fn.blocks[0]` — so an entry block that is ALSO a loop header (its one
+//     real predecessor being its own latch) passes the sole-predecessor test below while the whole
+//     soundness argument fails for it: on the first iteration ^g runs BEFORE ^h, so hoisting ^g's
+//     body into ^h reorders it, and deleting ^g moves the entry to another block entirely. That
+//     turns an entry-guarded `while` into a `do…while` whose body runs once unconditionally —
+//     silent wrong code, caught by no contract (verify, assertResolved and assertDerefsTyped all
+//     pass). MIPS and PPC reach this: only thumb.ts inserts a synthetic preheader that would give
+//     the header a second predecessor. `retsink.ts` guards the same way (`fn.blocks[0] !== m`).
 //   - ^g has a predecessor other than ^h — folding would delete a block still reachable elsewhere.
 //   - ^g has block params — ^h's edge binds them, and dropping the edge drops the binding.
+//   - ^h and ^g both test the SAME value against CONSTANTS — that is a comparison-tree `switch`,
+//     not a hand-written `||`. switch-recover.ts requires every test's `cond_br` operand to be an
+//     `icmp` (its `isCmpOpcode` gate), and a `logic_or` is not one, so folding first PERMANENTLY
+//     disqualifies the recovery and a clean `switch (x) { case 1: case 2: … }` degrades to a chain
+//     of nested `if`s. The switch is the better recovery and it is the more specific one, so it
+//     wins the shape. Cost: a genuine source-level `x == 1 || x == 2` that is NOT part of a wider
+//     tree also declines — the same conservative trade loops.ts makes when it refuses to infer a
+//     header from `cond_br` shape.
 //   - ^g holds a side effect — its ops move into ^h, which runs UNCONDITIONALLY. A store in `b`
 //     would then execute even when `a` already decided the branch. (`a || (*p = 1)`.)
 //   - a value defined in ^g is used outside ^g, or used more than once. Then the structurer
@@ -284,6 +301,12 @@ export function recognizeBranchShortCircuit(fn: Fn): boolean {
         if (g === h || g === sharedFromH.block || g.params.length > 0) {
           continue;
         }
+        // The ENTRY block is never ^g — see the REFUSALS note. `predecessors()` cannot see the
+        // implicit entry edge, so this is the only thing standing between an entry-block loop
+        // header and a silently reordered function body.
+        if (g === fn.blocks[0]) {
+          continue;
+        }
         if ((preds.get(g) ?? []).length !== 1) {
           continue;
         }
@@ -295,11 +318,15 @@ export function recognizeBranchShortCircuit(fn: Fn): boolean {
         if (gTaken.block === gFall.block) {
           continue;
         }
+        // A comparison TREE over one scrutinee belongs to switch recovery, not to this fold.
+        if (sameScrutineeConstTests(defs, ht.operands[0], gt.operands[0])) {
+          continue;
+        }
         // ^g's body must be pure, and every value it defines must be consumed only by ^g itself —
         // see the REFUSALS note: an escaping or reused value becomes a statement hoisted out of the
         // short circuit.
         const body = g.ops.slice(0, -1);
-        if (body.some((op) => SIDE_EFFECT.has(op.opcode))) {
+        if (body.some((op) => HOIST_UNSAFE.has(op.opcode))) {
           continue;
         }
         if (!definedValuesStayLocal(fn, g)) {
@@ -358,7 +385,44 @@ export function recognizeBranchShortCircuit(fn: Fn): boolean {
   return changed;
 }
 
-/** True when every value `g` defines is read at most once, and any read is inside `g`. */
+// What may NOT move out of a conditional arm into the unconditionally-executed head.
+//
+// `EFFECTFUL_OPS` is the declared-effects table, and it does not include `opaque` — but
+// analysis.ts puts `opaque` in its memory-write set and treats it as a render barrier, so the two
+// effect models disagree. This fold takes the STRICTER of the two: an `opaque` is an instruction
+// asmlift could not model, and hoisting one out of the arm that guards it is exactly the reordering
+// this gate exists to refuse. (Not exploitable today — a live `opaque` declines at
+// `assertResolved` either way — so this is closing the model gap, not fixing an observed bug.)
+const HOIST_UNSAFE: ReadonlySet<string> = new Set([...SIDE_EFFECT, 'opaque']);
+
+/** Do `c1` and `c2` compare the SAME value against CONSTANTS? That is the signature of a
+ *  comparison-tree `switch`, which switch-recover.ts owns — see the REFUSALS note. Equality tests
+ *  only: a switch tree dispatches on `==`/`!=`, while a RELATIONAL pair (`x >= lo && x <= hi`, the
+ *  range check) is a genuine connective this fold should still take. */
+function sameScrutineeConstTests(defs: Map<Value, Op>, c1: Value, c2: Value): boolean {
+  const eqTest = (v: Value): { scrutinee: Value } | null => {
+    const d = defs.get(v);
+    if (!d || (d.opcode !== 'icmp_eq' && d.opcode !== 'icmp_ne')) {
+      return null;
+    }
+    const [x, y] = d.operands;
+    const xc = defs.get(x)?.opcode === 'const';
+    const yc = defs.get(y)?.opcode === 'const';
+    // exactly one side constant — `x == y` between two variables is no switch test
+    return xc === yc ? null : { scrutinee: xc ? y : x };
+  };
+  const a = eqTest(c1);
+  const b = eqTest(c2);
+  return a !== null && b !== null && a.scrutinee === b.scrutinee;
+}
+
+/** True when every value `g` defines is read at most once, and any read is inside `g`.
+ *
+ *  The VALUE form above needs no such check, and the asymmetry is deliberate rather than drift: its
+ *  feeder block ends in `br M` where `M` has 2+ predecessors, so the feeder dominates nothing but
+ *  itself and no value it defines can be read anywhere else. Here ^g ends in `cond_br`, and the
+ *  `other` successor IS dominated by ^g — so a ^g-defined value genuinely can escape, and only this
+ *  check stops it. Do not "unify" the two guards. */
 function definedValuesStayLocal(fn: Fn, g: Block): boolean {
   const defined = new Set<Value>(g.ops.flatMap((op) => op.results));
   if (defined.size === 0) {

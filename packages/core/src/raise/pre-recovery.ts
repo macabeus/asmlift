@@ -46,9 +46,10 @@ export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
   { id: 'struct-arrays', run: recognizeStructArrays, dce: true },
   { id: 'structs', run: recognizeStructs, dce: false },
   { id: 'shortcircuit', run: recognizeShortCircuit, dce: true },
-  // The control-flow sibling, AFTER the value form: the value form's diamond is the more specific
-  // shape (its second block ends in `br`, not `cond_br`, so the two never compete for the same
-  // input), and folding a value diamond first can leave a plain `cond_br` chain this one then eats.
+  // The control-flow sibling. Their inputs are DISJOINT — the value form's second block ends in
+  // `br` carrying a phi argument, this one's ends in `cond_br` — so the order between them is not
+  // load-bearing and neither can consume the other's shape. Listed second because the value form is
+  // the more specific pattern.
   { id: 'branch-shortcircuit', run: recognizeBranchShortCircuit, dce: true },
 ];
 

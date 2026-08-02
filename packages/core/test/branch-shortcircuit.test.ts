@@ -283,3 +283,134 @@ describe('chains', () => {
     verify(fn);
   });
 });
+
+describe('the refusals found by the adversarial round', () => {
+  test('the ENTRY block is never folded away — `predecessors()` cannot see the entry edge', () => {
+    // The shape from the reproduced MIPS miscompile: the entry block is ALSO the loop header, so
+    // its only REAL predecessor is the latch and it passes the sole-predecessor test — while the
+    // soundness argument fails, because on the first iteration it runs BEFORE the head. Folding
+    // hoists its guard past the body and moves `fn.blocks[0]` elsewhere, turning an entry-guarded
+    // `while` into a `do…while` whose body runs once unconditionally. No contract catches it.
+    //
+    // Built so the ONLY candidate fold is `g === entry`: the body ends in `br` (never a second
+    // condition) and the exit is a `ret`, so the latch is the sole possible head.
+    const exit = blk([mkOp('ret', { operands: [] })]);
+    const guard = mkValue(T.unk(32));
+    const entry = blk(cmp(guard));
+    const body = blk([
+      mkOp('store', { operands: [mkValue(T.ptr(T.u(8))), mkValue(T.unk(32))], attrs: { off: 0, width: 1 } }),
+    ]);
+    const back = mkValue(T.unk(32));
+    const latch = blk(cmp(back));
+    entry.ops.push({
+      ...mkOp('cond_br', { operands: [guard] }),
+      successors: [
+        { block: exit, args: [] },
+        { block: body, args: [] },
+      ],
+    });
+    body.ops.push({ ...mkOp('br'), successors: [{ block: latch, args: [] }] });
+    latch.ops.push({
+      ...mkOp('cond_br', { operands: [back] }),
+      successors: [
+        { block: exit, args: [] },
+        { block: entry, args: [] },
+      ],
+    });
+    const fn: Fn = { name: 'f', blocks: [entry, body, latch, exit] };
+    expect(recognizeBranchShortCircuit(fn)).toBe(false);
+    expect(fn.blocks[0]).toBe(entry);
+  });
+
+  test('a comparison TREE over one scrutinee is left for switch recovery', () => {
+    // `switch (x) { case 1: case 2: … }` compiles to exactly this fold's input shape. Taking it
+    // would replace the `cond_br`'s icmp with a `logic_or`, which switch-recover.ts's isCmpOpcode
+    // gate rejects — permanently degrading a clean `switch` into nested ifs.
+    const shared = blk([mkOp('ret', { operands: [] })]);
+    const other = blk([mkOp('ret', { operands: [] })]);
+    const x = mkValue(T.unk(32)); // ONE scrutinee, compared against two constants
+    const mkTest = (v: number, out: Value): Op[] => {
+      const k = mkValue(T.unk(32));
+      return [
+        mkOp('const', { results: [k], attrs: { value: v } }),
+        mkOp('icmp_eq', { operands: [x, k], results: [out] }),
+      ];
+    };
+    const c2 = mkValue(T.unk(32));
+    const g = blk([
+      ...mkTest(2, c2),
+      {
+        ...mkOp('cond_br', { operands: [c2] }),
+        successors: [
+          { block: shared, args: [] },
+          { block: other, args: [] },
+        ],
+      },
+    ]);
+    const c1 = mkValue(T.unk(32));
+    const head = blk([
+      mkOp('load', { operands: [mkValue(T.ptr(T.u(32)))], results: [x], attrs: { off: 0, signed: false, width: 4 } }),
+      ...mkTest(1, c1),
+      {
+        ...mkOp('cond_br', { operands: [c1] }),
+        successors: [
+          { block: shared, args: [] },
+          { block: g, args: [] },
+        ],
+      },
+    ]);
+    const fn: Fn = { name: 'f', blocks: [head, g, shared, other] };
+    expect(recognizeBranchShortCircuit(fn)).toBe(false);
+  });
+
+  test('a RELATIONAL pair on one value still folds — a range check is a real connective', () => {
+    // The switch gate keys on EQUALITY tests: `x >= lo && x <= hi` shares a scrutinee but is not a
+    // dispatch tree, and refusing it would lose a genuine `&&`.
+    const shared = blk([mkOp('ret', { operands: [] })]);
+    const other = blk([mkOp('ret', { operands: [] })]);
+    const x = mkValue(T.unk(32));
+    const rel = (op: 'icmp_sge' | 'icmp_sle', v: number, out: Value): Op[] => {
+      const k = mkValue(T.unk(32));
+      return [mkOp('const', { results: [k], attrs: { value: v } }), mkOp(op, { operands: [x, k], results: [out] })];
+    };
+    const c2 = mkValue(T.unk(32));
+    const g = blk([
+      ...rel('icmp_sle', 10, c2),
+      {
+        ...mkOp('cond_br', { operands: [c2] }),
+        successors: [
+          { block: shared, args: [] },
+          { block: other, args: [] },
+        ],
+      },
+    ]);
+    const c1 = mkValue(T.unk(32));
+    const head = blk([
+      mkOp('load', { operands: [mkValue(T.ptr(T.u(32)))], results: [x], attrs: { off: 0, signed: false, width: 4 } }),
+      ...rel('icmp_sge', 1, c1),
+      {
+        ...mkOp('cond_br', { operands: [c1] }),
+        successors: [
+          { block: shared, args: [] },
+          { block: g, args: [] },
+        ],
+      },
+    ]);
+    const fn: Fn = { name: 'f', blocks: [head, g, shared, other] };
+    expect(recognizeBranchShortCircuit(fn)).toBe(true);
+  });
+
+  test('an `opaque` in the second condition is not hoisted out of the arm it guards', () => {
+    // EFFECTFUL_OPS omits `opaque`, but analysis.ts treats it as a memory writer and a barrier.
+    // This fold takes the stricter model: an unmodelled instruction must not become unconditional.
+    const fn = chain({
+      gOnTaken: false,
+      sharedOnGTaken: true,
+      gBody: (out) => [
+        mkOp('opaque', { operands: [], results: [mkValue(T.unk(32))], attrs: { text: '???' } }),
+        ...cmp(out),
+      ],
+    });
+    expect(recognizeBranchShortCircuit(fn)).toBe(false);
+  });
+});
