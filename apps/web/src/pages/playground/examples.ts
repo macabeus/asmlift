@@ -64,6 +64,10 @@ half:
 // scalar (gCounter), a struct interior via layout (gState.timer), a bare array element
 // (gBlendModeTable[i]), and a Thumb code pointer ((u32)DoThing). Without the map the same asm
 // decompiles to raw literals — the map only ever ADDS names, it never blocks a run.
+//
+// Spelled in agbcc's own DIVIDED syntax (`add`/`lsl`, flag-setting implicit under `.code 16`) —
+// the ranking pane assembles this text with real GNU as, which rejects the unified `adds`/`lsls`
+// spellings in divided mode. `.align` keeps the literal pool PC-relative-safe.
 export const SYMBOL_MAP_ASM = `\t.code\t16
 \t.globl\tUpdateTimer
 \t.thumb_func
@@ -72,16 +76,17 @@ UpdateTimer:
 \tldr\tr1, [r1]
 \tldr\tr2, .L5
 \tldr\tr2, [r2]
-\tadds\tr1, r1, r2
+\tadd\tr1, r1, r2
 \tldr\tr3, .L6
-\tlsls\tr0, r0, #0x1
-\tadds\tr0, r3, r0
+\tlsl\tr0, r0, #0x1
+\tadd\tr0, r3, r0
 \tldrh\tr0, [r0]
-\tadds\tr0, r0, r1
+\tadd\tr0, r0, r1
 \tldr\tr1, .L5
 \tstr\tr0, [r1]
 \tldr\tr0, .L7
 \tbx\tlr
+\t.align\t2, 0
 .L4:
 \t.word\t0x03001234
 .L5:

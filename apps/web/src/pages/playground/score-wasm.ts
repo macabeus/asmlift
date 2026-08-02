@@ -158,7 +158,13 @@ export async function scoreObjectBytes(
   return { symbol, rows, matching, score: differences, match: differences === 0, breakdown };
 }
 
-const firstLine = (s: string) => (s || '').split('\n').find((l) => l.trim() !== '') ?? '';
+/** The one line of a tool's stderr worth showing. GNU as prefixes everything with an
+ *  "in.s: Assembler messages:" banner and puts the real diagnostics after it — preferring the
+ *  first `Error:` line over the first non-empty one is what keeps the banner out of the UI. */
+const firstLine = (s: string) => {
+  const lines = (s || '').split('\n');
+  return lines.find((l) => l.includes('Error:')) ?? lines.find((l) => l.trim() !== '') ?? '';
+};
 
 /** The async analog of the cli's `decompileRanked`, agbcc-only: enumerate the distinct candidate
  *  spellings (shared @asmlift/core enumeration), assemble the pasted `.s` ONCE as the target, then
