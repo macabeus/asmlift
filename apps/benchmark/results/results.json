@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generatedAt": "2026-08-02T20:14:33.659Z",
+    "generatedAt": "2026-08-02T20:36:04.705Z",
     "toolchains": [
       "ido7.1",
       "agbcc",
@@ -14,7 +14,7 @@
       "real": 192
     },
     "asmlift": {
-      "commit": "a778d8a19aafe8a946b5d35dc09df1761a1afb02",
+      "commit": "13766e36852bfde1c0eb4e5a72c3c23d393611fb",
       "dirty": false
     },
     "m2c": {
@@ -2719,7 +2719,7 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-2MRq7I/c.c:1077: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-wPxQ9g/c.c:1077: invalid operands to binary <<"
           }
         ],
         "symbolsUsed": [
@@ -3347,7 +3347,7 @@
         "droppedCandidates": [
           {
             "label": "unsigned",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-BvX7oR/c.c:1076: `gBgDataPtrs' undeclared (first use in this function)"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-ol0sHy/c.c:1076: `gBgDataPtrs' undeclared (first use in this function)"
           }
         ],
         "symbolsUsed": [],
@@ -4333,7 +4333,7 @@
         "droppedCandidates": [
           {
             "label": "unsigned",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-FbcJbK/c.c:1077: too many arguments to function `thunk_sub_080002A0'"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-3td65j/c.c:1077: too many arguments to function `thunk_sub_080002A0'"
           }
         ],
         "symbolsUsed": [],
@@ -4918,11 +4918,11 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-TCiexY/c.c:1086: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-ArDQpV/c.c:1086: incompatible types in assignment"
           },
           {
             "label": "signed/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-7qlLSa/c.c:1086: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-zia2HW/c.c:1086: incompatible types in assignment"
           }
         ],
         "symbolsUsed": [
