@@ -26,6 +26,12 @@
 // evaluating it earlier can be neither observable nor faulting. A local variable is excluded: it
 // may be assigned between the hoist point and the call, which would change what is dereferenced.
 //
+// KNOWN LIMITATION: the hoisted local is a plain `T *` — `IrType` models no cv-qualifier at all,
+// so naming a VOLATILE cell through it drops the qualifier that macros.ts goes out of its way to
+// carry. Pre-existing and not introduced here (every pointer local in the tower has it), but the
+// two features meet on exactly the MMIO shape this lever targets, so it is written down rather
+// than left to be rediscovered.
+//
 // GATE: at least TWO arguments of the same call must qualify, with DISTINCT bases. The reordering
 // this reproduces only exists when two addresses compete for registers during argument setup — with
 // ONE base there is nothing to interleave, so the compiler emits the same sequence either way and
@@ -53,11 +59,16 @@ function argBases(call: Extract<Expr, { k: 'call' }>, globals: ReadonlySet<strin
   return out;
 }
 
-/** Distinct bases, in first-appearance order — the compiler loads each address once. */
+/** Distinct bases, in first-appearance order — the compiler loads each ADDRESS once.
+ *
+ *  Keyed on the base alone, deliberately, even though the naming below keys on width too: the gate
+ *  counts how many addresses compete for registers during argument setup, and two accesses of the
+ *  same address at different widths are still ONE address. Counting them separately would pass the
+ *  gate on `callee(*(u8 *)&g, *(u16 *)&g)`, where nothing reorders and there is nothing to fix. */
 function distinctBases(nodes: Extract<Expr, { k: 'index' }>[]): Extract<Expr, { k: 'index' }>[] {
   const out: Extract<Expr, { k: 'index' }>[] = [];
   for (const n of nodes) {
-    if (!out.some((o) => exprEquals(o.base, n.base) && o.width === n.width && o.signed === n.signed)) {
+    if (!out.some((o) => exprEquals(o.base, n.base))) {
       out.push(n);
     }
   }

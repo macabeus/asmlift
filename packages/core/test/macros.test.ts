@@ -111,6 +111,20 @@ describe('addressCastMacros', () => {
     expect(one('#define MAX(a,b) 1\n#define g (*(u16 *)MAX(1,2))')).toEqual([]);
   });
 
+  test('REFUSES a SCALING pointer cast — stripping one names the WRONG cell', () => {
+    // C pointer arithmetic scales by the pointee: `(vu16 *)0x4000000 + 5` is 0x400000A, not
+    // 0x4000005. Folding it wrong would be undetectable downstream — the synthesized body
+    // republishes the same wrong address, so the candidate still byte-matches the numeric pool
+    // word it was looked up by while naming a different register.
+    expect(one('#define S (*(vu16 *)((vu16 *)0x4000000 + 5))')).toEqual([]);
+    expect(one('#define S (*(u32 *)((u32 *)0x4000000 + 1))')).toEqual([]);
+  });
+
+  test('a BYTE-sized pointer cast is still stripped — that one does not scale', () => {
+    expect(one('#define S (*(vu16 *)((void *)0x4000000 + 5))')[0].address).toBe(0x04000005);
+    expect(one('#define S (*(u8 *)((u8 *)0x4000000 + 5))')[0].address).toBe(0x04000005);
+  });
+
   test('REFUSES a NEGATIVE result rather than wrapping it into an address', () => {
     expect(one('#define LO 0x10\n#define g (*(u16 *)(LO - 0x20))')).toEqual([]);
   });

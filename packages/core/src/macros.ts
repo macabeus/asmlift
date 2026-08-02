@@ -52,10 +52,15 @@ const SCALAR_TYPES: Record<string, { size: number; signed: boolean; volatile?: t
 
 /** A pointer cast inside an address expression (`(void *)0x4000000`). The VALUE is the integer it
  *  wraps: these headers spell a register base as a `void *` and add a byte offset to it, which is
- *  GCC's byte-arithmetic extension, so the cast contributes nothing to the address. Only the
- *  scalar spellings this module already knows are accepted — an unrecognized cast makes the whole
- *  expression unevaluable rather than silently ignored. */
-const PTR_CAST = /\(\s*(?:void|[us](?:8|16|32)|v[us](?:8|16|32))\s*\*\s*\)/g;
+ *  GCC's byte-arithmetic extension, so the cast contributes nothing to the address.
+ *
+ *  BYTE-SIZED TARGETS ONLY, and that restriction is load-bearing rather than tidy. C pointer
+ *  arithmetic SCALES by the pointee: `(vu16 *)0x4000000 + 5` is 0x400000A, not 0x4000005. Stripping
+ *  a wider cast would fold the wrong address AND then republish it in a synthesized body that
+ *  agrees with itself — so the candidate still byte-matches the numeric pool word it was looked up
+ *  by, while naming a different register. A wrong name that survives the differ is the one failure
+ *  this module cannot let through, so a scaling cast makes the expression unevaluable instead. */
+const PTR_CAST = /\(\s*(?:void|[us]8|v[us]8)\s*\*\s*\)/g;
 
 /** An object-like `#define NAME body`, for the expansion table the address evaluator resolves
  *  identifiers against. Function-like macros (`NAME(x)`) are deliberately excluded: an address
@@ -78,7 +83,12 @@ const OBJECT_DEFINE = /^\s*#define\s+([A-Za-z_]\w*)\s+(\S.*?)\s*$/;
  * the whole expression. Folding is done on the EXPANDED integer text, so an operand only ever
  * evaluates to a number every step of which this module recognized.
  */
-function evalAddressExpr(src: string, defines: ReadonlyMap<string, string>, seen: ReadonlySet<string>): number | null {
+function evalAddressExpr(
+  src: string,
+  defines: ReadonlyMap<string, string>,
+  seen: ReadonlySet<string>,
+  memo: Map<string, number | null> = new Map(),
+): number | null {
   if (seen.size > 12) {
     return null; // pathological nesting — refuse rather than walk further
   }
@@ -95,7 +105,17 @@ function evalAddressExpr(src: string, defines: ReadonlyMap<string, string>, seen
       if (body === undefined || seen.has(tok)) {
         return null; // undefined name, or a cycle
       }
-      const inner = evalAddressExpr(body, defines, new Set([...seen, tok]));
+      // Memoized per NAME. The depth cap alone bounds nesting but not BRANCHING — a define
+      // mentioning k others re-evaluates the whole subtree k times, which at depth 10 is millions
+      // of evaluations. A name's value cannot depend on the path that reached it, so one result
+      // per name is sound as well as fast.
+      let inner: number | null;
+      if (memo.has(tok)) {
+        inner = memo.get(tok)!;
+      } else {
+        inner = evalAddressExpr(body, defines, new Set([...seen, tok]), memo);
+        memo.set(tok, inner);
+      }
       if (inner === null) {
         return null;
       }
@@ -188,6 +208,11 @@ export function addressCastMacrosFrom(defineLines: readonly string[]): Map<numbe
   // Pass 1: every object-like define, so an address expression can resolve the names it mentions.
   // A macro's address is frequently spelled in terms of others (`REG_BASE + REG_OFFSET_X`), and
   // those helpers are not themselves address casts — they exist only to be expanded.
+  //
+  // LAST DEFINITION WINS, and `#undef` is not modelled: the record is a flat list with no scope, so
+  // a name redefined differently across translation units resolves to whichever came last. Sound
+  // for a project whose headers agree (the Klonoa ELF redefines no name with a differing body);
+  // a project where they disagree would need per-CU scoping, which the record does not carry.
   const defines = new Map<string, string>();
   for (const line of defineLines) {
     const d = OBJECT_DEFINE.exec(line);

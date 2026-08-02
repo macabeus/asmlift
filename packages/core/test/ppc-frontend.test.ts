@@ -160,4 +160,14 @@ describe('an operand-less `ret` is VOID, not an untyped s32', () => {
   test('control: a function that DOES write it keeps its value and its type', () => {
     expect(dis('five', '0:\tli      r3,5\n4:\tblr\n')).toBe('s32 five(void) {\n    return 5;\n}\n');
   });
+
+  test('EVERY exit must agree — one valued `ret` keeps the function non-void', () => {
+    // A frontend decides per BLOCK whether the return register holds anything, so an operand-less
+    // `ret` beside a valued one is a real shape. Answering void off the first would declare void
+    // over a body the structurer still emits `return expr;` in — ill-formed C, and a signature
+    // that contradicts its own body.
+    const src = dis('mixed', '0:\tcmpwi   r3,0\n4:\tbeq     10 <mixed+0x10>\n8:\tli      r3,5\nc:\tblr\n10:\tblr\n');
+    expect(src).not.toContain('void mixed');
+    expect(src).toContain('return 5;');
+  });
 });

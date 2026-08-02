@@ -290,9 +290,16 @@ export function enumerateCandidates(
         // `/argbase` — name a call's argument bases before the call (l3/argbase.ts). A lever on the
         // same footing as the others: the primary inline spelling stays in the list, so the differ
         // referees and this can never cost a match.
-        const argbased = materializeArgBases(sfn);
-        if (argbased) {
-          respell('/argbase', argbased);
+        // Inside the try: `respell` catches a failure of the RE-SPELLING, but a throw from the
+        // pass itself would escape and abort the whole enumeration — every candidate for the row,
+        // primary included. A lever must never be able to do that.
+        try {
+          const argbased = materializeArgBases(sfn);
+          if (argbased) {
+            respell('/argbase', argbased);
+          }
+        } catch {
+          // the lever declined by throwing: keep every other spelling
         }
         const indexed = reindexWalks(sfn);
         if (indexed) {
