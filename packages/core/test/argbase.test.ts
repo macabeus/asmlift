@@ -238,3 +238,61 @@ describe('a LOOP condition is left alone — `pre` before the loop would be a lo
     ]);
   });
 });
+
+describe("a multidimensional array global's access is not nameable through a plain `T *`", () => {
+  test('an `index` carrying `lead` is refused', () => {
+    // `gGrid[0][i]` is an `index` with `lead: [0]` on a `var` base, which eligibleBase admits.
+    // Naming it produces `p0 = (u8 *)gGrid; p0[0][i]` — `p0[0]` is a `u8`, so subscripting it is
+    // a C error. Neither boundary contract catches it (the base strides 1, so cfamily's guard
+    // does not fire) and the candidate dies at the compiler. reindex.ts and cfamily.ts each
+    // carry an explicit refusal for this shape; this is the third.
+    const leadIdx: Expr = {
+      k: 'index',
+      base: { k: 'var', name: 'gGrid' },
+      idx: { k: 'const', value: 3 },
+      width: 1,
+      signed: false,
+      lead: [0],
+    };
+    const fn: SFn = {
+      name: 'f',
+      params: [],
+      locals: [],
+      globals: [{ name: 'gGrid', type: T.ptr(T.u(8)) }],
+      retType: T.void(),
+      body: [
+        {
+          k: 'exprstmt',
+          value: { k: 'call', fn: 'callee', args: [leadIdx, deref({ k: 'const', value: 0x4000006 }, 0)] },
+        },
+      ],
+    };
+    expect(materializeArgBases(fn)).toBeNull();
+  });
+});
+
+describe('one address, two spellings, one local', () => {
+  test('`&g` and a bare `g` are the SAME address for the gate', () => {
+    // A global reaches this pass as `addr g` or, when the map types it as an array of the access
+    // width, as a bare `var g`. Counting them as two addresses would pass the gate on a shape
+    // where nothing reorders — the churn the gate exists to reject, by another route.
+    const fn: SFn = {
+      name: 'f',
+      params: [],
+      locals: [],
+      globals: [{ name: 'gA', type: T.ptr(T.u(8)) }],
+      retType: T.void(),
+      body: [
+        {
+          k: 'exprstmt',
+          value: {
+            k: 'call',
+            fn: 'callee',
+            args: [deref({ k: 'addr', name: 'gA' }, 0), deref({ k: 'var', name: 'gA' }, 4)],
+          },
+        },
+      ],
+    };
+    expect(materializeArgBases(fn)).toBeNull();
+  });
+});

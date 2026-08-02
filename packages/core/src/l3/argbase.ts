@@ -39,12 +39,23 @@
 // leaves the diff at 2; both together take it to 0.)
 import { type IrType, T, scalarTypeForAccess } from '../ir/types';
 import type { Expr, SFn, Stmt } from './ast';
-import { exprEquals, mapExprChildren, stmtExprs } from './ast';
+import { mapExprChildren, stmtExprs } from './ast';
 import { nameAllocator } from './hoist';
 
 /** A base this pass may evaluate early: pure, and not something a store can change under us. */
 function eligibleBase(base: Expr, globals: ReadonlySet<string>): boolean {
   return base.k === 'addr' || base.k === 'const' || (base.k === 'var' && globals.has(base.name));
+}
+
+/** THE identity of an eligible base — what makes two accesses "the same address".
+ *
+ *  A global reaches this pass under TWO spellings: `addr g` (its address) and, when the symbol map
+ *  types it as an array of the access width, the bare `var g`. They denote the same cell, so a
+ *  structural comparison would count them as two addresses and defeat the gate on
+ *  `f(*(u8 *)&g, g[4])` — the exact churn the gate exists to reject, reached by a different route.
+ *  Named bases therefore key on the NAME alone, whichever node kind carries it. */
+function baseIdentity(base: Expr): string {
+  return base.k === 'const' ? `c:${base.value}` : `n:${(base as Extract<Expr, { k: 'var' | 'addr' }>).name}`;
 }
 
 /** The `index` nodes directly under a call's arguments whose base is eligible — the candidates for
@@ -53,7 +64,7 @@ function eligibleBase(base: Expr, globals: ReadonlySet<string>): boolean {
 function argBases(call: Extract<Expr, { k: 'call' }>, globals: ReadonlySet<string>): Extract<Expr, { k: 'index' }>[] {
   const out: Extract<Expr, { k: 'index' }>[] = [];
   for (const a of call.args) {
-    if (a.k === 'index' && eligibleBase(a.base, globals)) {
+    if (a.k === 'index' && !a.lead?.length && eligibleBase(a.base, globals)) {
       out.push(a);
     }
   }
@@ -69,7 +80,7 @@ function argBases(call: Extract<Expr, { k: 'call' }>, globals: ReadonlySet<strin
 function distinctBases(nodes: Extract<Expr, { k: 'index' }>[]): Extract<Expr, { k: 'index' }>[] {
   const out: Extract<Expr, { k: 'index' }>[] = [];
   for (const n of nodes) {
-    if (!out.some((o) => exprEquals(o.base, n.base))) {
+    if (!out.some((o) => baseIdentity(o.base) === baseIdentity(n.base))) {
       out.push(n);
     }
   }
@@ -79,9 +90,7 @@ function distinctBases(nodes: Extract<Expr, { k: 'index' }>[]): Extract<Expr, { 
 /** The (base, width, signedness) key an `index` shares with every other access through the same
  *  base — so ALL of a base's uses in one call rewrite to the same local, not just the first. */
 function baseKey(n: Extract<Expr, { k: 'index' }>): string {
-  const b = n.base;
-  const id = b.k === 'addr' ? `a:${b.name}` : b.k === 'const' ? `c:${b.value}` : `v:${(b as { name: string }).name}`;
-  return `${id} ${n.width} ${n.signed}`;
+  return `${baseIdentity(n.base)} ${n.width} ${n.signed}`;
 }
 
 /**
@@ -146,7 +155,7 @@ export function materializeArgBases(sfn: SFn): SFn | null {
       scan(e);
     }
     const point = (e: Expr): Expr => {
-      if (e.k === 'index' && eligibleBase(e.base, globals)) {
+      if (e.k === 'index' && !e.lead?.length && eligibleBase(e.base, globals)) {
         const nm = localFor.get(baseKey(e));
         if (nm) {
           return { ...e, base: { k: 'var', name: nm }, idx: point(e.idx) };

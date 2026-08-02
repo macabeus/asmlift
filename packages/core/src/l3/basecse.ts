@@ -136,8 +136,6 @@ function rewriteStmt(s: Stmt, localFor: Map<string, string>): Stmt {
   }
 }
 
-/** A name not already used by a param/local/global in `sfn`, of the form `p<n>`. */
-
 export function hoistReusedGlobalBases(sfn: SFn): SFn {
   const c: Collected = { count: new Map(), order: [], meta: new Map(), inLoop: new Set(), constOffCount: new Map() };
   collect(sfn.body, c, false);
@@ -181,6 +179,3 @@ export function hoistReusedGlobalBases(sfn: SFn): SFn {
   const body = [...hoistStmts, ...sfn.body.map((s) => rewriteStmt(s, localFor))];
   return { ...sfn, body, locals: [...sfn.locals, ...newLocals] };
 }
-
-/** Every `var`/`addr`/called-function name mentioned anywhere in `stmts` (so a hoist name collides
- *  with none — a global via `addr`, a local via `var`, OR a callee via `call.fn`). */

@@ -166,7 +166,16 @@ describe('an operand-less `ret` is VOID, not an untyped s32', () => {
     // `ret` beside a valued one is a real shape. Answering void off the first would declare void
     // over a body the structurer still emits `return expr;` in — ill-formed C, and a signature
     // that contradicts its own body.
-    const src = dis('mixed', '0:\tcmpwi   r3,0\n4:\tbeq     10 <mixed+0x10>\n8:\tli      r3,5\nc:\tblr\n10:\tblr\n');
+    // The return register must NOT be a parameter: a parameter always has a reaching definition,
+    // so both exits would carry a value and this would pass with the rule reverted. Branching on
+    // r4 leaves r3 genuinely unwritten on one path.
+    // Two conditions, both load-bearing: the return register must NOT be a parameter (a parameter
+    // always has a reaching definition, so both exits would carry a value), and the value-LESS
+    // exit must come FIRST in block order — that is the ordering the old first-ret rule read.
+    const src = dis(
+      'mixed',
+      '0:\tcmpwi   r4,0\n4:\tbeq     10 <mixed+0x10>\n8:\tblr\nc:\tnop\n10:\tli      r3,5\n14:\tblr\n',
+    );
     expect(src).not.toContain('void mixed');
     expect(src).toContain('return 5;');
   });
