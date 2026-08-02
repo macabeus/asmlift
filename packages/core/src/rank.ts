@@ -19,6 +19,7 @@ import { materializeArgBases } from './l3/argbase';
 import type { LanguageBackend, SFn } from './l3/ast';
 import { registerishSpellings } from './l3/regspell';
 import { reindexWalks } from './l3/reindex';
+import { hoistScopedBases } from './l3/scopebase';
 import { type SymbolRef, collectSymbolRefs } from './l3/symbol-refs';
 import { RewritePattern } from './pattern/engine';
 import { applyIdiomPatterns, raiseRecovered, structureChecked } from './pipeline';
@@ -299,6 +300,11 @@ export function enumerateCandidates(
         // same footing as the others: the primary inline spelling stays in the list, so the differ
         // referees and this can never cost a match.
         respell('/argbase', () => materializeArgBases(sfn));
+        // `/scopebase` — name a reused global base at the INNERMOST scope holding its uses
+        // (l3/scopebase.ts). Distinct from basecse's function-top hoist, which the primary already
+        // carries: this one fires exactly where that placement would extend a live range the
+        // original never had.
+        respell('/scopebase', () => hoistScopedBases(sfn));
         respell('/indexed', () => reindexWalks(sfn));
         // the register-copy spelling (l3/regspell.ts): 0–3 variants (base; tail assign-back reusing
         // the dead value var; tail assign-back into a fresh var — the tail choice is allocator-

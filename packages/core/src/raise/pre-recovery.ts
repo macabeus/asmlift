@@ -11,10 +11,12 @@
 // pass that changed the IR is INTRINSIC to the pass (it declares whether it leaves dead ops) and lives
 // in the driver.
 import { Fn } from '../ir/core';
+import { simplifyTrivialPhis } from '../ir/simplify';
 import { dce } from '../pattern/engine';
 import type { TargetDescription } from '../target';
 import { recognizeArrays } from './arrays';
 import { recognizeConsts } from './const';
+import { numberPureValues } from './gvn';
 import { recognizeMagicDivision } from './magicdiv';
 import { recognizeBranchShortCircuit, recognizeShortCircuit } from './shortcircuit';
 import { recognizeSoftDiv } from './softdiv';
@@ -33,9 +35,25 @@ export interface PreRecoveryPass {
 }
 
 /** THE ordered pre-recovery pass list — the single source of truth shared by pipeline / rank / report.
- *  const-materialize → magic-division → soft-division → array-legalize → struct-array →
- *  struct-pointer → short-circuit. See each recognizer's file for the rationale. */
+ *  address-numbering → const-materialize → magic-division → soft-division → array-legalize →
+ *  struct-array → struct-pointer → short-circuit → branch-short-circuit. See each recognizer's file
+ *  for the rationale. */
 export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
+  // FIRST: collapsing duplicate address definitions removes block params every later recognizer
+  // would otherwise have to reason around, and it can only shrink the value graph.
+  {
+    id: 'addrnum',
+    // Numbering alone is not enough and not safe to ship alone: collapsing the duplicates leaves a
+    // block param whose edges now all carry one value, and the structurer still destroys THAT into
+    // a local (it only reuses a name a carrier already has, and an inlined `gaddr` has none).
+    // Measured: numbering without the phi cleanup made kleod:UpdateHUDCounterDisplay WORSE. So the
+    // pair is the atomic unit, expressed as a body rather than a sum of two unrelated counts.
+    run: (fn) => {
+      const n = numberPureValues(fn);
+      return n + simplifyTrivialPhis(fn);
+    },
+    dce: false,
+  },
   { id: 'const', run: recognizeConsts, dce: true },
   { id: 'magicdiv', run: recognizeMagicDivision, dce: true },
   { id: 'softdiv', run: (fn) => recognizeSoftDiv(fn), dce: false, gate: (t) => !t.capabilities.hwDivide },

@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generatedAt": "2026-08-02T20:49:12.233Z",
+    "generatedAt": "2026-08-02T22:33:22.408Z",
     "toolchains": [
       "ido7.1",
       "agbcc",
@@ -14,7 +14,7 @@
       "real": 192
     },
     "asmlift": {
-      "commit": "6dacb3863779405c56ce45c89555c2f8703a401b",
+      "commit": "2716c392e5fcaf4171e2aa6caf3ef8c1939f9377",
       "dirty": false
     },
     "m2c": {
@@ -2719,7 +2719,11 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-x4EflR/c.c:1077: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-oVaj7h/c.c:1077: invalid operands to binary <<"
+          },
+          {
+            "label": "unsigned/scopebase/raw-globals",
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-iGhmun/c.c:1078: invalid operands to binary <<"
           }
         ],
         "symbolsUsed": [
@@ -3347,7 +3351,7 @@
         "droppedCandidates": [
           {
             "label": "unsigned",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-FZmeqv/c.c:1076: `gBgDataPtrs' undeclared (first use in this function)"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-21DgJj/c.c:1076: `gBgDataPtrs' undeclared (first use in this function)"
           }
         ],
         "symbolsUsed": [],
@@ -4333,7 +4337,7 @@
         "droppedCandidates": [
           {
             "label": "unsigned",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-7Z4NzU/c.c:1077: too many arguments to function `thunk_sub_080002A0'"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-FEuOIT/c.c:1077: too many arguments to function `thunk_sub_080002A0'"
           }
         ],
         "symbolsUsed": [],
@@ -4918,11 +4922,11 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-wRGHqQ/c.c:1086: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-PAa2js/c.c:1085: incompatible types in assignment"
           },
           {
             "label": "signed/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-jJ25Pl/c.c:1086: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-KCEBna/c.c:1085: incompatible types in assignment"
           }
         ],
         "symbolsUsed": [
@@ -4940,22 +4944,22 @@
           }
         ],
         "outcome": "nonmatch",
-        "source": "s32 UpdateHUDCounterDisplay(u32 a0, u32 a1) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    u16 * v5;\n    if (gUnk_03004C20.unkA == 1 || gUnk_03004C20.level == 6) {\n        v2 = 100;\n    } else {\n        v2 = 30;\n    }\n    v0 = *(u16 *)&gUnk_03005220;\n    if (v2 != (u32)(v0 << 20) >> 25) {\n        v3 = 0;\n    } else {\n        v3 = 1;\n    }\n    if (gUnk_03004C20.unkA == 1 || gUnk_03004C20.level == 6) {\n        if ((u32)(v0 << 20) >> 25 <= 99) {\n            v4 = 1;\n            v5 = (u16 *)&gBgTilemapBufs;\n        } else {\n            gBgTilemapBufs[0][594] = gBgTilemapBufs[0][659];\n            gBgTilemapBufs[0][626] = gBgTilemapBufs[0][691];\n            v4 = 1;\n            v5 = (u16 *)&gBgTilemapBufs;\n        }\n    } else {\n        v4 = 0;\n        v5 = (u16 *)&gBgTilemapBufs;\n    }\n    v1 = *(u16 *)&gUnk_03005220;\n    if ((u32)(v1 << 20) >> 25 > 9) {\n        v5[(149 << 2) - v4] = v5[((u32)(v1 << 20) >> 25) / 10 + 658];\n        v5[(157 << 2) - v4] = v5[((u32)(*(u16 *)&gUnk_03005220 << 20) >> 25) / 10 + 690];\n    }\n    v5[597 - v4] = v5[((u32)(*(u16 *)&gUnk_03005220 << 20) >> 25) % 10 + 658];\n    v5[629 - v4] = v5[((u32)(*(u16 *)&gUnk_03005220 << 20) >> 25) % 10 + 690];\n    return v3;\n}\n",
-        "score": 81,
-        "maxScore": 155,
+        "source": "s32 UpdateHUDCounterDisplay(u32 a0, u32 a1) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    if (gUnk_03004C20.unkA == 1 || gUnk_03004C20.level == 6) {\n        v2 = 100;\n    } else {\n        v2 = 30;\n    }\n    v0 = *(u16 *)&gUnk_03005220;\n    if (v2 != (u32)(v0 << 20) >> 25) {\n        v3 = 0;\n    } else {\n        v3 = 1;\n    }\n    if (gUnk_03004C20.unkA == 1 || gUnk_03004C20.level == 6) {\n        if ((u32)(v0 << 20) >> 25 <= 99) {\n            v4 = 1;\n        } else {\n            gBgTilemapBufs[0][594] = gBgTilemapBufs[0][659];\n            gBgTilemapBufs[0][626] = gBgTilemapBufs[0][691];\n            v4 = 1;\n        }\n    } else {\n        v4 = 0;\n    }\n    v1 = *(u16 *)&gUnk_03005220;\n    if ((u32)(v1 << 20) >> 25 > 9) {\n        gBgTilemapBufs[0][(149 << 2) - v4] = gBgTilemapBufs[0][((u32)(v1 << 20) >> 25) / 10 + 658];\n        gBgTilemapBufs[0][(157 << 2) - v4] = gBgTilemapBufs[0][((u32)(*(u16 *)&gUnk_03005220 << 20) >> 25) / 10 + 690];\n    }\n    gBgTilemapBufs[0][597 - v4] = gBgTilemapBufs[0][((u32)(*(u16 *)&gUnk_03005220 << 20) >> 25) % 10 + 658];\n    gBgTilemapBufs[0][629 - v4] = gBgTilemapBufs[0][((u32)(*(u16 *)&gUnk_03005220 << 20) >> 25) % 10 + 690];\n    return v3;\n}\n",
+        "score": 60,
+        "maxScore": 147,
         "compileErrors": null,
         "breakdown": {
-          "insert": 19,
-          "delete": 16,
+          "insert": 11,
+          "delete": 8,
           "replace": 0,
           "opMismatch": 3,
-          "argMismatch": 43
+          "argMismatch": 38
         },
         "quality": {
           "score": 88,
-          "lines": 41,
+          "lines": 37,
           "gotos": 0,
-          "casts": 15,
+          "casts": 12,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -4987,15 +4991,15 @@
       },
       "gapSize": {
         "decompiler": "asmlift",
-        "score": 81,
-        "maxScore": 155,
-        "ratio": 0.5225806451612903,
+        "score": 60,
+        "maxScore": 147,
+        "ratio": 0.40816326530612246,
         "kinds": {
-          "insert": 19,
-          "delete": 16,
+          "insert": 11,
+          "delete": 8,
           "replace": 0,
           "opMismatch": 3,
-          "argMismatch": 43
+          "argMismatch": 38
         }
       },
       "scripts": {
@@ -11770,7 +11774,7 @@
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "candidateLabel": "unsigned/raw-globals",
+        "candidateLabel": "unsigned/scopebase",
         "symbolsUsed": [
           {
             "name": "gSineTable",
@@ -11778,16 +11782,16 @@
           }
         ],
         "outcome": "nonmatch",
-        "source": "struct Struct0 { u16 field_0; u8 _pad0[6]; s32 field_8; s32 field_12; };\nstruct Struct1 { u16 field_0; u16 field_2; u16 field_4; s32 field_8; s32 field_12; };\nstruct Struct2 { u16 field_0; u8 _pad0[6]; s32 field_8; s32 field_12; };\nvoid sa2__sub_8083504(struct Struct0 * a0, struct Struct2 * a1, struct Struct1 * a2, u32 a3) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    s32 v5;\n    s32 v6;\n    u16 * p0;\n    p0 = (u16 *)&gSineTable;\n    v0 = *(s16 *)(a1 + 2);\n    if (v0 == 128 << 3) {\n        v4 = a0->field_8;\n    } else {\n        v1 = a0->field_8;\n        a2->field_2 = (s32)(*(s16 *)(a0 + 2) * v0) >> 10;\n        v4 = v1 * v0 >> 10;\n    }\n    v2 = *(s16 *)(a1 + 4);\n    if (v2 == 128 << 3) {\n        v5 = a0->field_12;\n    } else {\n        v3 = a0->field_12;\n        a2->field_4 = (s32)(*(s16 *)(a0 + 4) * v2) >> 10;\n        v5 = v3 * v2 >> 10;\n    }\n    if (a1->field_0 == 0) {\n        a2->field_8 = a1->field_8 + v4;\n        v6 = a1->field_12 + v5;\n    } else {\n        a2->field_8 = a1->field_8 + ((v4 * (p0[a1->field_0 + (128 << 1)] << 16 >> 22) >> 8) - ((p0[a1->field_0] << 16 >> 22) * v5 >> 8));\n        v6 = a1->field_12 + ((v4 * (p0[a1->field_0] << 16 >> 22) >> 8) + ((p0[a1->field_0 + (128 << 1)] << 16 >> 22) * v5 >> 8));\n    }\n    a2->field_12 = v6;\n    a2->field_0 = a1->field_0 + a0->field_0 & 1023;\n    return;\n}\n",
-        "score": 85,
-        "maxScore": 125,
+        "source": "struct Struct0 { u16 field_0; u8 _pad0[6]; s32 field_8; s32 field_12; };\nstruct Struct1 { u16 field_0; u16 field_2; u16 field_4; s32 field_8; s32 field_12; };\nstruct Struct2 { u16 field_0; u8 _pad0[6]; s32 field_8; s32 field_12; };\nvoid sa2__sub_8083504(struct Struct0 * a0, struct Struct2 * a1, struct Struct1 * a2, u32 a3) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    s32 v5;\n    s32 v6;\n    u16 * p0;\n    v0 = *(s16 *)(a1 + 2);\n    if (v0 == 128 << 3) {\n        v4 = a0->field_8;\n    } else {\n        v1 = a0->field_8;\n        a2->field_2 = (s32)(*(s16 *)(a0 + 2) * v0) >> 10;\n        v4 = v1 * v0 >> 10;\n    }\n    v2 = *(s16 *)(a1 + 4);\n    if (v2 == 128 << 3) {\n        v5 = a0->field_12;\n    } else {\n        v3 = a0->field_12;\n        a2->field_4 = (s32)(*(s16 *)(a0 + 4) * v2) >> 10;\n        v5 = v3 * v2 >> 10;\n    }\n    if (a1->field_0 == 0) {\n        a2->field_8 = a1->field_8 + v4;\n        v6 = a1->field_12 + v5;\n    } else {\n        p0 = (u16 *)&gSineTable;\n        a2->field_8 = a1->field_8 + ((v4 * (p0[a1->field_0 + (128 << 1)] << 16 >> 22) >> 8) - ((p0[a1->field_0] << 16 >> 22) * v5 >> 8));\n        v6 = a1->field_12 + ((v4 * (p0[a1->field_0] << 16 >> 22) >> 8) + ((p0[a1->field_0 + (128 << 1)] << 16 >> 22) * v5 >> 8));\n    }\n    a2->field_12 = v6;\n    a2->field_0 = a1->field_0 + a0->field_0 & 1023;\n    return;\n}\n",
+        "score": 82,
+        "maxScore": 129,
         "compileErrors": null,
         "breakdown": {
-          "insert": 17,
-          "delete": 15,
-          "replace": 11,
+          "insert": 21,
+          "delete": 19,
+          "replace": 6,
           "opMismatch": 3,
-          "argMismatch": 39
+          "argMismatch": 33
         },
         "quality": {
           "score": 74,
@@ -11825,15 +11829,15 @@
       },
       "gapSize": {
         "decompiler": "asmlift",
-        "score": 85,
-        "maxScore": 125,
-        "ratio": 0.68,
+        "score": 82,
+        "maxScore": 129,
+        "ratio": 0.6356589147286822,
         "kinds": {
-          "insert": 17,
-          "delete": 15,
-          "replace": 11,
+          "insert": 21,
+          "delete": 19,
+          "replace": 6,
           "opMismatch": 3,
-          "argMismatch": 39
+          "argMismatch": 33
         }
       },
       "scripts": {

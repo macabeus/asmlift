@@ -72,12 +72,21 @@ export interface TraceOptions {
 // (not in pre-recovery.ts) because these strings are a trace concern — the driver itself is
 // trace-agnostic. `title` is a function so `arrays` can fold its scaled-access count in.
 const PRE_RECOVERY_TRACE: Record<string, { stage: string; title: (result: number | boolean) => string }> = {
+  addrnum: {
+    stage: 'stage:addrnum',
+    title: (r) => `Address numbering (${r} duplicate address def(s) / trivial phi(s) collapsed)`,
+  },
   const: { stage: 'stage:const', title: () => 'Const materialize (lui;ori → one 32-bit const)' },
   magicdiv: { stage: 'stage:magicdiv', title: () => 'Magic-number division recovery (mulh/mulhu → sdiv/udiv)' },
   softdiv: { stage: 'stage:softdiv', title: () => 'Soft-division lower (bl __divsi3 → division op)' },
   arrays: { stage: 'stage:legalize', title: (r) => `Array legalize (${r} scaled access(es) → aload/astore)` },
   structs: { stage: 'stage:structs', title: () => 'Struct-pointer recovery (access-pattern evidence)' },
   shortcircuit: { stage: 'stage:shortcircuit', title: () => 'Short-circuit recovery (boolean && / ||)' },
+  'branch-shortcircuit': {
+    stage: 'stage:branch-shortcircuit',
+    title: () => 'Short-circuit recovery (control-flow && / ||)',
+  },
+  'struct-arrays': { stage: 'stage:struct-arrays', title: () => 'Struct-array recovery (element stride evidence)' },
 };
 
 /** Run the tower while recording a TraceReport. Strict mode throws on any gap (like decompile);
