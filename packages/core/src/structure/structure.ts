@@ -924,6 +924,30 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
   // The C static type of a rendered expression, over the declared variable types — what decides
   // whether a memory access's base may be dereferenced as spelled (memAccess/arrayAccess).
   const ctype = (e0: Expr): IrType | undefined => exprCType(e0, (n) => varType.get(n));
+
+  /** `&gSym` assigned to a `T *` local: the address of an AGGREGATE is not a pointer to its
+   *  element. `&gArr` is `T (*)[n]`, `&gStruct` is `struct S *`, and neither is assignable to
+   *  `T *` — yet the IR's `gaddr` value legitimately has type `T *`, because that is what the asm
+   *  loaded. The bare spelling therefore states a type the project's own header contradicts.
+   *
+   *  It survived because agbcc only WARNS ("assignment from incompatible pointer type") and
+   *  computes the right address anyway. That leniency is not something to rely on: the Klonoa
+   *  project's own build template treats these as fatal, so the row's emitted C does not build
+   *  where its author would put it. The cast is the always-valid spelling — the same fallback
+   *  `bareArrayLead` documents for the indexed form — and it is byte-identical (measured on
+   *  kleod:UpdateHUDCounterDisplay: 81 with and without).
+   *
+   *  Gated on the map SAYING the symbol is an aggregate. Without a map asmlift synthesizes its own
+   *  `extern T gSym;`, under which `&gSym` really is `T *` and a cast would be noise. */
+  const castAggregateAddr = (name: string, value: Expr): Expr => {
+    const t = varType.get(name);
+    if (t?.kind !== 'ptr' || value.k !== 'addr') {
+      return value;
+    }
+    const shape = symCtx?.info(value.name)?.shape;
+    return shape === 'array' || shape === 'struct' ? { k: 'cast', to: t, e: value } : value;
+  };
+
   let fresh = 0;
   // Materialized defs are named FIRST: the temp is the register the compiler held the
   // value in, so downstream coalescing (loop inits, merge params) may adopt it — subject to the
@@ -1421,7 +1445,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
       if ((sub?.get(arg) ?? varName.get(arg)) === name) {
         return;
       } // identity copy — coalesced away
-      copies.push({ name, value: argExpr(arg), arg });
+      copies.push({ name, value: castAggregateAddr(name, argExpr(arg)), arg });
     });
     // Emit in the order the args are COMPUTED in `pred` — a compiler that lays the defining ops
     // (and thus the copies that read them) out in that order matches with no spurious arg-swap.
@@ -1497,7 +1521,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
       } else if (op.opcode === 'call' && op.results.length && !useSitesOf.has(op.results[0])) {
         out.push({ k: 'exprstmt', value: expr(op.results[0]) });
       } else if (materialize.has(op)) {
-        out.push({ k: 'assign', name: varName.get(op.results[0])!, value: lowerDef(op, expr) });
+        const nm = varName.get(op.results[0])!;
+        out.push({ k: 'assign', name: nm, value: castAggregateAddr(nm, lowerDef(op, expr)) });
       }
     }
     return out;

@@ -426,3 +426,56 @@ describe('C-family pointer-write legalization (the assign-side sibling, F6)', ()
     expect(src).toMatch(/until \(not \(/);
   });
 });
+
+// ── the address of an AGGREGATE assigned to an element pointer ───────────────────────────────────
+//
+// The same rendered-vs-value type split as the derefs above, on the other side of an assignment.
+// A `gaddr` value legitimately has type `T *` — that is what the asm loaded — but `&gArr` renders
+// as `T (*)[n]` and `&gStruct` as `struct S *`, neither of which is assignable to `T *`. agbcc only
+// WARNS and computes the right address anyway, which is how this survived; the Klonoa project's own
+// template makes it fatal, so the emitted C does not build where its author would put it.
+describe('assigning &gSym to a pointer local', () => {
+  // A merge whose phi is a pointer fed by `gaddr` from both arms — the shape that materializes the
+  // address into a local (kleod:UpdateHUDCounterDisplay's `gBgTilemapBufs` base register).
+  const PHI_OF_GADDR = `fn f {
+^bb0(%0: s32):
+  %1: s32 = const {value=0}
+  %2: u32 = icmp_ne %0, %1
+  cond_br %2, ^bb1(), ^bb2()
+^bb1():
+  %3: u16* = gaddr {sym="gArr"}
+  br ^bb3(%3)
+^bb2():
+  %4: u16* = gaddr {sym="gArr"}
+  %5: s32 = const {value=7}
+  store %4, %5 {off=2, width=2}
+  br ^bb3(%4)
+^bb3(%6: u16*):
+  %7: s32 = load %6 {off=0, signed=false, width=2}
+  ret %7
+}
+`;
+
+  const emitWithShape = (shape: 'array' | 'scalar' | 'struct'): string => {
+    const fn = parse(PHI_OF_GADDR);
+    verify(fn);
+    recoverTypes(fn);
+    const symbols = new Map([['gArr', { name: 'gArr', kind: 'data', shape, elemSize: 2, dims: [4, 8] }]]);
+    return cBackend.emit(structure(fn, { symbols: symbols as never }));
+  };
+
+  test('an ARRAY-shaped global gets the cast — `&gArr` is `T (*)[n]`, not `T *`', () => {
+    const out = emitWithShape('array');
+    expect(out).toContain('v0 = (u16 *)&gArr;');
+    expect(out).not.toMatch(/v0 = &gArr;/);
+  });
+
+  test('a STRUCT-shaped global gets it too — `&gStruct` is `struct S *`', () => {
+    expect(emitWithShape('struct')).toContain('v0 = (u16 *)&gArr;');
+  });
+
+  test('a SCALAR-shaped global does NOT — `&gScalar` really is `T *`, so a cast is noise', () => {
+    const out = emitWithShape('scalar');
+    expect(out).toContain('v0 = &gArr;');
+  });
+});

@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generatedAt": "2026-08-02T19:29:18.618Z",
+    "generatedAt": "2026-08-02T19:41:30.117Z",
     "toolchains": [
       "ido7.1",
       "agbcc",
@@ -14,7 +14,7 @@
       "real": 192
     },
     "asmlift": {
-      "commit": "5c3318b4f8a3a74a11abcb000a850c21d751119d",
+      "commit": "5817585fa57bf3c7567ead8988303023b8e8b219",
       "dirty": true
     },
     "m2c": {
@@ -2719,7 +2719,7 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-QVv3p5/c.c:1077: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-uxJmmu/c.c:1077: invalid operands to binary <<"
           }
         ],
         "symbolsUsed": [
@@ -3347,7 +3347,7 @@
         "droppedCandidates": [
           {
             "label": "unsigned",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-K2rCNi/c.c:1076: `gBgDataPtrs' undeclared (first use in this function)"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-1R1JPh/c.c:1076: `gBgDataPtrs' undeclared (first use in this function)"
           }
         ],
         "symbolsUsed": [],
@@ -4333,7 +4333,7 @@
         "droppedCandidates": [
           {
             "label": "unsigned",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-cUCGgy/c.c:1077: too many arguments to function `thunk_sub_080002A0'"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-XYmJeD/c.c:1077: too many arguments to function `thunk_sub_080002A0'"
           }
         ],
         "symbolsUsed": [],
@@ -4918,11 +4918,11 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-PzIilm/c.c:1086: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-OKPlir/c.c:1086: incompatible types in assignment"
           },
           {
             "label": "signed/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Ddrsvc/c.c:1086: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-4gz1RE/c.c:1086: incompatible types in assignment"
           }
         ],
         "symbolsUsed": [
@@ -4940,7 +4940,7 @@
           }
         ],
         "outcome": "nonmatch",
-        "source": "s32 UpdateHUDCounterDisplay(u32 a0, u32 a1) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    u16 * v5;\n    if (gUnk_03004C20.unkA == 1 || gUnk_03004C20.level == 6) {\n        v2 = 100;\n    } else {\n        v2 = 30;\n    }\n    v0 = *(u16 *)&gUnk_03005220;\n    if (v2 != (u32)(v0 << 20) >> 25) {\n        v3 = 0;\n    } else {\n        v3 = 1;\n    }\n    if (gUnk_03004C20.unkA == 1 || gUnk_03004C20.level == 6) {\n        if ((u32)(v0 << 20) >> 25 <= 99) {\n            v4 = 1;\n            v5 = &gBgTilemapBufs;\n        } else {\n            gBgTilemapBufs[0][594] = gBgTilemapBufs[0][659];\n            gBgTilemapBufs[0][626] = gBgTilemapBufs[0][691];\n            v4 = 1;\n            v5 = &gBgTilemapBufs;\n        }\n    } else {\n        v4 = 0;\n        v5 = &gBgTilemapBufs;\n    }\n    v1 = *(u16 *)&gUnk_03005220;\n    if ((u32)(v1 << 20) >> 25 > 9) {\n        v5[(149 << 2) - v4] = v5[((u32)(v1 << 20) >> 25) / 10 + 658];\n        v5[(157 << 2) - v4] = v5[((u32)(*(u16 *)&gUnk_03005220 << 20) >> 25) / 10 + 690];\n    }\n    v5[597 - v4] = v5[((u32)(*(u16 *)&gUnk_03005220 << 20) >> 25) % 10 + 658];\n    v5[629 - v4] = v5[((u32)(*(u16 *)&gUnk_03005220 << 20) >> 25) % 10 + 690];\n    return v3;\n}\n",
+        "source": "s32 UpdateHUDCounterDisplay(u32 a0, u32 a1) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    u16 * v5;\n    if (gUnk_03004C20.unkA == 1 || gUnk_03004C20.level == 6) {\n        v2 = 100;\n    } else {\n        v2 = 30;\n    }\n    v0 = *(u16 *)&gUnk_03005220;\n    if (v2 != (u32)(v0 << 20) >> 25) {\n        v3 = 0;\n    } else {\n        v3 = 1;\n    }\n    if (gUnk_03004C20.unkA == 1 || gUnk_03004C20.level == 6) {\n        if ((u32)(v0 << 20) >> 25 <= 99) {\n            v4 = 1;\n            v5 = (u16 *)&gBgTilemapBufs;\n        } else {\n            gBgTilemapBufs[0][594] = gBgTilemapBufs[0][659];\n            gBgTilemapBufs[0][626] = gBgTilemapBufs[0][691];\n            v4 = 1;\n            v5 = (u16 *)&gBgTilemapBufs;\n        }\n    } else {\n        v4 = 0;\n        v5 = (u16 *)&gBgTilemapBufs;\n    }\n    v1 = *(u16 *)&gUnk_03005220;\n    if ((u32)(v1 << 20) >> 25 > 9) {\n        v5[(149 << 2) - v4] = v5[((u32)(v1 << 20) >> 25) / 10 + 658];\n        v5[(157 << 2) - v4] = v5[((u32)(*(u16 *)&gUnk_03005220 << 20) >> 25) / 10 + 690];\n    }\n    v5[597 - v4] = v5[((u32)(*(u16 *)&gUnk_03005220 << 20) >> 25) % 10 + 658];\n    v5[629 - v4] = v5[((u32)(*(u16 *)&gUnk_03005220 << 20) >> 25) % 10 + 690];\n    return v3;\n}\n",
         "score": 81,
         "maxScore": 155,
         "compileErrors": null,
@@ -4955,7 +4955,7 @@
           "score": 88,
           "lines": 41,
           "gotos": 0,
-          "casts": 12,
+          "casts": 15,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
