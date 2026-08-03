@@ -12,6 +12,7 @@ import { VerifyError, verify } from './ir/verify';
 import { Expr, LanguageBackend, SFn, Stmt, exprChildren, stmtChildren, stmtExprs } from './l3/ast';
 import { hoistReusedGlobalBases } from './l3/basecse';
 import { eliminateDeadStores } from './l3/dce';
+import { mergeCommonTails } from './l3/tailmerge';
 import { DEFAULT_IDIOM_PATTERNS, RewritePattern, applyPattern, dce, patternApplies } from './pattern/engine';
 import { type Prototypes, prototypesFromSymbols } from './proto';
 import { RaiseUnsupportedError } from './raise/errors';
@@ -198,10 +199,12 @@ export function structureChecked(fn: Fn, opts: Parameters<typeof structure>[1]):
   // removes statements/flips branches over an already-validated tree.
   assertResolved(raw);
   assertDerefsTyped(raw);
-  // Then the readability/quality rewrites: drop dead stores, then hoist a reused aggregate-global
+  // Then the readability/quality rewrites: merge a statement common to every arm of an if,
+  // drop dead stores (whose empty-then peephole flips the arm the merge empties), then hoist a
+  // reused aggregate-global
   // base into a typed local pointer. The hoist moves the deref cast from each `index` node onto the
   // local's initializer, so re-validate deref typing on the rewritten tree.
-  const sfn = hoistReusedGlobalBases(eliminateDeadStores(raw));
+  const sfn = hoistReusedGlobalBases(eliminateDeadStores(mergeCommonTails(raw)));
   assertDerefsTyped(sfn);
   return sfn;
 }
