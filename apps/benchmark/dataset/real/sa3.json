@@ -447,6 +447,143 @@
       "prependC": "#include \"core.h\"\n#include \"flags.h\"",
       "funcC": "void sa2__sub_80078D4(u8 bg, int_vcount minY, int_vcount maxY, u16 offsetEven, u16 offsetOdd)\n{\n    s32 fillVal;\n\n    gFlags |= FLAGS_EXECUTE_HBLANK_COPY;\n\n    gHBlankCopyTarget = (void *)&((u8 *)&REG_BG0HOFS)[bg * 4];\n    gHBlankCopySize = 4;\n\n    if (minY < maxY) {\n        fillVal = (offsetEven %= 512u) | ((offsetOdd % 512u) << 16);\n\n        DmaFill32(3, fillVal, &((u16 *)gBgOffsetsHBlankPrimary)[minY * 2], (maxY - minY) * 4);\n    }\n}",
       "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/bg_triangles.c#L850-L864"
+    },
+    {
+      "sym": "PackSaveSector",
+      "features": [
+        "switch",
+        "array",
+        "loop",
+        "shift",
+        "bitwise",
+        "memory"
+      ],
+      "funcC": "void PackSaveSector(SaveSectorData *sector, SaveGame *save)\n{\n    s16 i;\n    s16 j;\n    s16 k;\n\n    sector->header.magicNumber = 0x47544E4C;\n    sector->header.sectorId += 1;\n    sector->playerId = save->playerId;\n\n    for (i = 0; i < 6; i++) {\n        sector->playerName[i] = save->playerName[i];\n    }\n\n    sector->unk18 = 0;\n    sector->unlockedCharacters = save->unlockedCharacters;\n    sector->unlockedZones = save->unlockedZones;\n    sector->continueZone = save->continueZone;\n    sector->unk1C = 0;\n\n    for (i = 0; i < 7; i++) {\n        sector->chaoCount[i] = save->chaoCount[i];\n    }\n\n    for (i = 0; i < 7; i++) {\n        sector->specialKeys[i] = save->specialKeys[i];\n    }\n\n    for (i = 0; i < 9; i++) {\n        sector->unlockedStages[i] = save->unlockedStages[i];\n    }\n\n    for (i = 0; i < 9; i++) {\n        for (j = 0; j < 4; j++) {\n            sector->collectedMedals[i][j] = save->collectedMedals[i][j];\n        }\n    }\n\n    sector->collectedEmeralds = save->collectedEmeralds;\n    sector->unk62 = save->unk34;\n    sector->unlockFlags = save->unlockFlags;\n    sector->vsWins = save->vsWins;\n    sector->vsDraws = save->vsDraws;\n    sector->vsLosses = save->vsLosses;\n    sector->unk67 = 0;\n\n    for (i = 0; i < 10; i++) {\n        sector->vsRecords[i].slotFilled = save->vsRecords[i].slotFilled;\n        sector->vsRecords[i].wins = save->vsRecords[i].wins;\n        sector->vsRecords[i].draws = save->vsRecords[i].draws;\n        sector->vsRecords[i].losses = save->vsRecords[i].losses;\n\n        sector->vsRecords[i].playerId = save->vsRecords[i].playerId;\n\n        for (j = 0; j < 6; j++) {\n            sector->vsRecords[i].playerName[j] = save->vsRecords[i].playerName[j];\n        }\n    }\n\n#define Zone i\n#define Act  j\n#define Rank k\n    for (Zone = 0; Zone < (s32)ARRAY_COUNT(save->timeRecords.table); Zone++) {\n        for (Act = 0; Act < (s32)ARRAY_COUNT(save->timeRecords.table[0]); Act++) {\n            for (Rank = 0; Rank < (s32)ARRAY_COUNT(save->timeRecords.table[0][0]); Rank++) {\n                sector->timeRecords.table[Zone][Act][Rank].character1 = save->timeRecords.table[Zone][Act][Rank].character1;\n                sector->timeRecords.table[Zone][Act][Rank].character2 = save->timeRecords.table[Zone][Act][Rank].character2;\n                sector->timeRecords.table[Zone][Act][Rank].time = save->timeRecords.table[Zone][Act][Rank].time;\n            }\n        }\n    }\n#undef Rank\n#undef Act\n#undef Zone\n\n    switch (save->buttonConfig.jump) {\n        case A_BUTTON:\n            sector->buttonConfig.jump = 1;\n            break;\n        case B_BUTTON:\n            sector->buttonConfig.attack = 1;\n            break;\n        case R_BUTTON:\n            sector->buttonConfig.trick = 1;\n            break;\n    }\n\n    switch (save->buttonConfig.attack) {\n        case A_BUTTON:\n            sector->buttonConfig.jump = 2;\n            break;\n        case B_BUTTON:\n            sector->buttonConfig.attack = 2;\n            break;\n        case R_BUTTON:\n            sector->buttonConfig.trick = 2;\n            break;\n    }\n\n    switch (save->buttonConfig.trick) {\n        case A_BUTTON:\n            sector->buttonConfig.jump = 4;\n            break;\n        case B_BUTTON:\n            sector->buttonConfig.attack = 4;\n            break;\n        case R_BUTTON:\n            sector->buttonConfig.trick = 4;\n            break;\n    }\n\n    sector->difficulty = save->difficulty;\n    sector->disableTimeLimit = save->disableTimeLimit;\n    sector->language = save->language;\n    sector->unk367 = 0;\n    sector->checksum = GetSaveSectorChecksum(sector);\n}",
+      "prependC": "#include \"global.h\"\n#include \"core.h\"\n#include \"flags.h\"\n#include \"lib/m4a/m4a.h\"\n#include \"lib/agb_flash/agb_flash.h\"\n#include \"lib/agb_flash/flash_internal.h\"\n#include \"malloc_ewram.h\"\n#include \"malloc_vram.h\"\n#include \"game/save.h\"\n#include \"game/stage.h\"\n#include \"gba/defines.h\"\n#include \"constants/characters.h\"\n#include \"constants/zones.h\"",
+      "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/code_0_0.c#L440-L556",
+      "proto": {
+        "PackSaveSector": {
+          "returnsVoid": true
+        }
+      }
+    },
+    {
+      "sym": "sub_804DC38",
+      "features": [
+        "switch",
+        "soft-div",
+        "shift",
+        "struct",
+        "field"
+      ],
+      "funcC": "u16 sub_804DC38(u8 kind, s32 worldX, s32 worldY, MapEntity *me)\n{\n    s32 r0;\n    s32 r1;\n    s32 r2_32;\n    s16 r2;\n    bool32 r6;\n    u16 i;\n\n    // TODO(Jace): This was likely not written this way, and might actually be a bug?\n    //             I don't think MapEntity structs are always aligned in memory.\n    u32 data = *((u32 *)&me->d.uData[1]);\n    if (data & 0x00FFFF00) {\n        if (me->d.uData[3] < me->d.uData[2]) {\n            r2_32 = (me->d.uData[2] * (TILE_WIDTH / 2));\n            r1 = worldX;\n            r0 = worldX + (me->d.sData[0] * TILE_WIDTH);\n            r6 = FALSE;\n        } else {\n            r2_32 = (me->d.uData[3] * (TILE_WIDTH / 2));\n            r1 = worldY;\n            r0 = worldY + (me->d.sData[1] * TILE_WIDTH);\n            r6 = TRUE;\n        }\n\n        r2 = ((r1 - (r0 + r2_32)) << 14) / r2_32;\n        if (r2 >= 0) {\n            for (i = 0; (i < Q(1)) && (r2 > SIN(i));) {\n                i += 4;\n            }\n\n            switch (kind) {\n                case 0: {\n                    return Q(2) - i;\n                } break;\n\n                case 1: {\n                    if (r6) {\n                        return i;\n                    } else {\n                        return Q(2) - i;\n                    }\n                } break;\n\n                case 2: {\n                    if (!r6) {\n                        return i;\n                    } else {\n                        return Q(2) - i;\n                    }\n                } break;\n\n                default: {\n                    return i;\n                }\n            }\n\n        } else {\n            for (i = Q(2); (i < Q(3)) && (r2 < SIN(i));) {\n                i += 4;\n            }\n\n            switch (kind) {\n                case 0: {\n                    return i;\n                } break;\n\n                case 1: {\n                    if (!r6) {\n                        return i;\n                    } else {\n                        return Q(6) - i;\n                    }\n                } break;\n\n                case 2: {\n                    if (r6) {\n                        return i;\n                    } else {\n                        return Q(6) - i;\n                    }\n                } break;\n\n                case 3: {\n                    return Q(6) - i;\n                } break;\n            }\n        }\n    }\n\n    return 0;\n}",
+      "prependC": "#include \"global.h\"\n#include \"trig.h\"\n#include \"game/interactables/platform_shared.h\"\n#include \"game/camera.h\"\n#include \"game/entity.h\"\n#include \"game/stage.h\"",
+      "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/interactables/platform_shared.c#L8-L99",
+      "m2cCtx": true
+    },
+    {
+      "sym": "Sio32MultiLoadMain",
+      "features": [
+        "switch",
+        "soft-div",
+        "shift",
+        "mmio",
+        "global"
+      ],
+      "funcC": "u32 Sio32MultiLoadMain(u32 *progressCounterp)\n{\n    s32 dataCounter, dataCounterBak;\n    UNUSED s32 i, ii; // declared in SDK\n\n    switch (gSio32MultiLoadArea.state) {\n        case 0:\n            if (gSio32MultiLoadArea.type || gSio32MultiLoadArea.frameCounter) // Slave SIO Mode switch delay wait\n                gSio32MultiLoadArea.state = 1;\n            break;\n        case 1:\n            if (gSio32MultiLoadArea.type == SIO_SCK_IN) {\n                if (gSio32MultiLoadArea.frameCounter < SIO32ML_MODE_WAIT_FRAMES) // Master wait\n                    break;\n            } else // Slave\n                REG_SIOCNT = SIO_32BIT_MODE; // Switches to SIO mode\n            REG_SIODATA32 = 0; // Clears data registery\n            REG_IF = INTR_FLAG_SERIAL | SIO32ML_TIMER_INTR_FLAG; // Resets IF\n            if (gSio32MultiLoadArea.type == SIO_SCK_IN) { // Sets Master\n                REG_SIOCNT |= SIO_ENABLE; // Starts communication\n                REG_SIO32ML_TIMER = SIO32ML_TIMER_COUNT | ((TIMER_1CLK | TIMER_INTR_ENABLE | TIMER_ENABLE) << 16); // Starts timer\n                REG_IME = 0;\n                REG_IE |= SIO32ML_TIMER_INTR_FLAG; // Enables timer interrupt\n                REG_IME = 1;\n            } else { // Sets Slave\n                REG_SIOCNT |= SIO_INTR_ENABLE | SIO_ENABLE; // Starts communication\n                REG_IME = 0;\n                REG_IE |= INTR_FLAG_SERIAL; // Enables SIO interrupt\n                REG_IME = 1;\n            }\n            gSio32MultiLoadArea.frameCounter = 0;\n            gSio32MultiLoadArea.state = 2;\n            break;\n        case 2:\n            dataCounter = gSio32MultiLoadArea.dataCounter;\n            dataCounterBak = dataCounter;\n            if (dataCounter > SIO32ML_BLOCK_SIZE / 4)\n                dataCounter = SIO32ML_BLOCK_SIZE / 4;\n            else if (dataCounter < 0)\n                dataCounter = 0;\n            if (progressCounterp)\n                *progressCounterp = dataCounter; // Set progress counter\n            if (gSio32MultiLoadArea.type != SIO_SCK_IN) { // Slave\n                while (gSio32MultiLoadArea.checkSumCounter < dataCounter) // Receiving data sum check\n                    gSio32MultiLoadArea.checkSumTmp += ((s32 *)gSio32MultiLoadArea.datap)[gSio32MultiLoadArea.checkSumCounter++];\n                if (dataCounterBak > SIO32ML_BLOCK_SIZE / 4)\n                    if ((gSio32MultiLoadArea.checkSum += gSio32MultiLoadArea.checkSumTmp) == -1)\n                        gSio32MultiLoadArea.downloadSuccessFlag = 1; // Succeeds download\n            }\n            if (dataCounterBak > SIO32ML_BLOCK_SIZE / 4 // Complete communication\n                || gSio32MultiLoadArea.frameCounter == 0x8C) // SIO32ML_LD_TIMEOUT_FRAMES in SDK doesn't match\n                gSio32MultiLoadArea.state = 3; // Load time out\n            break;\n        case 3:\n            REG_IME = 0;\n            REG_IE &= ~(INTR_FLAG_SERIAL | SIO32ML_TIMER_INTR_FLAG); // Disables SIO and timer interrupt\n            REG_IME = 1;\n            REG_SIOCNT = SIO_32BIT_MODE; // Stops SIO32\n            *(vu32 *)REG_ADDR_SIOCNT = SIO_MULTI_MODE; // Switches to SIO mode\n            *(vu32 *)REG_ADDR_SIOCNT = SIO_MULTI_MODE | MULTI_SIO_BAUD_RATE_NO;\n            *(vu64 *)REG_ADDR_SIODATA32 = 0; // Clears data register\n            if (gSio32MultiLoadArea.type) // Master\n                REG_SIO32ML_TIMER = 0; // Resets timer\n            REG_IF = INTR_FLAG_SERIAL | SIO32ML_TIMER_INTR_FLAG; // Resets IF\n            if (!gSio32MultiLoadArea.type)\n                return 1; // Slave comes back first\n            gSio32MultiLoadArea.frameCounter = 0;\n            gSio32MultiLoadArea.state = 4;\n            break;\n        case 4:\n            if (gSio32MultiLoadArea.frameCounter >= 3) // Master comes back later\n                return 1;\n            break;\n    }\n    ++gSio32MultiLoadArea.frameCounter;\n    return 0;\n}",
+      "prependC": "#include \"sio32_multi_load.h\"\n#include \"global.h\"",
+      "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/sio32_multi_load.c#L15-L91"
+    },
+    {
+      "sym": "sub_802DFC8",
+      "features": [
+        "bitfield",
+        "struct",
+        "field",
+        "branch"
+      ],
+      "funcC": "void sub_802DFC8(s16 direction, Sprite *s)\n{\n    s32 mask = 0;\n    s32 variant;\n\n    if (direction & 0x8) {\n        variant = 6;\n\n        mask = (direction & 1) ? SPRITE_FLAG(X_FLIP, 1) : 0;\n    } else if (direction & 0x4) {\n        variant = 4;\n\n        if (direction & 0x2) {\n            mask = SPRITE_FLAG(X_FLIP, 1);\n        }\n\n        if (direction & 0x1) {\n            mask |= SPRITE_FLAG(Y_FLIP, 1);\n        }\n    } else if (direction & 0x2) {\n        variant = 2;\n\n        if (direction & 0x1) {\n            mask = SPRITE_FLAG(X_FLIP, 1);\n        }\n    } else {\n        variant = 0;\n\n        if (direction & 0x1) {\n            mask = SPRITE_FLAG(Y_FLIP, 1);\n        }\n    }\n\n    if (gStageData.gameMode != GAME_MODE_MP_SINGLE_PACK) {\n        if ((gStageData.act >= ACT_1) && (gStageData.act <= ACT_BONUS_CAPSULE)) {\n            if (gStageData.zone == ZONE_6) {\n                s->tiles = ALLOC_TILES(ANIM_SPRING_6);\n                s->anim = ANIM_SPRING_6;\n            } else if (gStageData.zone == ZONE_4) {\n                s->tiles = ALLOC_TILES(ANIM_SPRING_4);\n                s->anim = ANIM_SPRING_4;\n            } else {\n                s->tiles = ALLOC_TILES(ANIM_SPRING);\n                s->anim = ANIM_SPRING;\n            }\n        } else {\n            s->tiles = ALLOC_TILES(ANIM_SPRING);\n            s->anim = ANIM_SPRING;\n        }\n    } else {\n        s->tiles = ALLOC_TILES(ANIM_SPRING);\n        s->anim = ANIM_SPRING;\n        mask |= SPRITE_FLAG_MASK_MOSAIC;\n    }\n\n    s->variant = variant;\n    s->oamFlags = SPRITE_OAM_ORDER(24);\n    s->animCursor = 0;\n    s->qAnimDelay = Q(0);\n    s->prevVariant = -1;\n    s->animSpeed = SPRITE_ANIM_SPEED(1.0);\n    s->palId = 0;\n    s->hitboxes[0].index = HITBOX_STATE_INACTIVE;\n    s->frameFlags = mask | SPRITE_FLAG(PRIORITY, 1);\n}",
+      "prependC": "#include \"global.h\"\n#include \"module_unclear.h\"\n#include \"core.h\"\n#include \"sprite.h\"\n#include \"trig.h\"\n#include \"malloc_vram.h\"\n#include \"game/camera.h\"\n#include \"game/entity.h\"\n#include \"game/player.h\"\n#include \"game/player_callbacks.h\"\n#include \"game/stage.h\"\n#include \"constants/animations.h\"\n#include \"constants/anim_sizes.h\"\n#include \"constants/move_states.h\"\n#include \"constants/songs.h\"\n#include \"constants/zones.h\"",
+      "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/interactables/spring.c#L174-L238",
+      "proto": {
+        "sub_802DFC8": {
+          "returnsVoid": true
+        }
+      },
+      "m2cCtx": true
+    },
+    {
+      "sym": "sub_806132C",
+      "features": [
+        "struct",
+        "field",
+        "branch",
+        "global",
+        "call"
+      ],
+      "funcC": "void sub_806132C(Hariisen *enemy)\n{\n    u8 *vram = VramMalloc(18);\n    Sprite2 *s = &enemy->s;\n\n    s->tiles = vram;\n    vram += (gUnknown_080D2044[0].numTiles * TILE_SIZE_4BPP);\n    s->anim = gUnknown_080D2044[0].anim;\n    s->variant = gUnknown_080D2044[0].variant;\n    s->prevVariant = -1;\n    s->x = TO_WORLD_POS_RAW(I(enemy->qPos.x), enemy->region[0]) - gCamera.x;\n    s->y = TO_WORLD_POS_RAW(I(enemy->qPos.y), enemy->region[1]) - gCamera.y;\n    s->oamFlags = 0x480;\n    s->animCursor = 0;\n    s->qAnimDelay = 0;\n    s->animSpeed = 0x10;\n    s->palId = 0;\n    s->frameFlags = 0x1000;\n    s->hitboxes[0].index = -1;\n    UpdateSpriteAnimation((Sprite *)s);\n\n    s = &enemy->s2;\n    s->tiles = vram;\n    vram += (gUnknown_080D2044[3].numTiles * TILE_SIZE_4BPP);\n    s->anim = gUnknown_080D2044[3].anim;\n    s->variant = gUnknown_080D2044[3].variant;\n    s->prevVariant = -1;\n    s->x = TO_WORLD_POS_RAW(I(enemy->qPos.x), enemy->region[0]) - gCamera.x;\n    s->y = TO_WORLD_POS_RAW(I(enemy->qPos.y), enemy->region[1]) - gCamera.y;\n    s->oamFlags = 0x4C0;\n    s->animCursor = 0;\n    s->qAnimDelay = 0;\n    s->animSpeed = 0x10;\n    s->palId = 0;\n    s->frameFlags = 0x1000;\n    s->hitboxes[0].index = -1;\n    UpdateSpriteAnimation((Sprite *)s);\n\n    s = &enemy->s3;\n    s->tiles = vram;\n    s->anim = gUnknown_080D2044[4].anim;\n    s->variant = gUnknown_080D2044[4].variant;\n    s->prevVariant = -1;\n    s->x = TO_WORLD_POS_RAW(I(enemy->qPos.x), enemy->region[0]) - gCamera.x;\n    s->y = TO_WORLD_POS_RAW(I(enemy->qPos.y), enemy->region[1]) - gCamera.y;\n    s->oamFlags = 0x4C0;\n    s->animCursor = 0;\n    s->qAnimDelay = 0;\n    s->animSpeed = 0x10;\n    s->palId = 0;\n    s->frameFlags = 0x1000;\n    s->hitboxes[0].index = -1;\n    UpdateSpriteAnimation((Sprite *)s);\n}",
+      "prependC": "#include \"global.h\"\n#include \"core.h\"\n#include \"flags.h\"\n#include \"trig.h\"\n#include \"malloc_vram.h\"\n#include \"code_z_1.h\"\n#include \"game/camera.h\"\n#include \"game/enemies/hariisen.h\"\n#include \"game/enemy_unknown.h\"\n#include \"game/entity.h\"\n#include \"game/stage.h\"\n#include \"module_unclear.h\"",
+      "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/enemies/hariisen.c#L55-L108",
+      "proto": {
+        "sub_806132C": {
+          "returnsVoid": true
+        }
+      },
+      "m2cCtx": true
+    },
+    {
+      "sym": "sub_804D360",
+      "features": [
+        "switch",
+        "struct",
+        "field",
+        "branch"
+      ],
+      "funcC": "void sub_804D360(Sprite *s, s16 i, s16 param2)\n{\n    u32 flags = 0;\n\n    switch (i) {\n        case 0: {\n            flags |= SPRITE_FLAG(X_FLIP, 1);\n            if (param2 == 2) {\n                flags |= SPRITE_FLAG(Y_FLIP, 1);\n            }\n        } break;\n\n        case 1: {\n            if (param2 == 2) {\n                flags |= SPRITE_FLAG(Y_FLIP, 1);\n            }\n        } break;\n\n        case 2: {\n            flags |= SPRITE_FLAG(Y_FLIP, 1);\n\n            if (param2 == 0) {\n                flags |= SPRITE_FLAG(X_FLIP, 1);\n            }\n        } break;\n\n        case 3: {\n            if (param2 == 0) {\n                flags |= SPRITE_FLAG(X_FLIP, 1);\n            }\n        } break;\n    }\n\n    s->tiles = ALLOC_TILES_VARIANT(ANIM_MAZE, 6);\n    s->anim = ANIM_MAZE;\n    s->variant = 6;\n    s->oamFlags = SPRITE_OAM_ORDER(24);\n    s->animCursor = 0;\n    s->qAnimDelay = 0;\n    s->qAnimDelay = 0;\n    s->prevVariant = -1;\n    s->animSpeed = SPRITE_ANIM_SPEED(1.0);\n    s->palId = 0;\n    s->hitboxes[0].index = -1;\n    s->frameFlags = flags | SPRITE_FLAG(PRIORITY, 1);\n    UpdateSpriteAnimation(s);\n}",
+      "prependC": "#include \"global.h\"\n#include \"module_unclear.h\"\n#include \"malloc_vram.h\"\n#include \"game/camera.h\"\n#include \"game/entity.h\"\n#include \"game/player.h\"\n#include \"game/player_callbacks.h\"\n#include \"game/stage.h\"\n#include \"constants/animations.h\"\n#include \"constants/anim_sizes.h\"\n#include \"constants/move_states.h\"",
+      "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/interactables/maze.c#L344-L390",
+      "proto": {
+        "sub_804D360": {
+          "returnsVoid": true
+        }
+      },
+      "m2cCtx": true
+    },
+    {
+      "sym": "Sio32MultiLoadIntr",
+      "features": [
+        "soft-div",
+        "mmio",
+        "global",
+        "branch"
+      ],
+      "funcC": "void Sio32MultiLoadIntr(void)\n{\n    // Saves received data\n    u32 recvTmp = REG_SIODATA32;\n    // Slave prepares to receive\n    if (gSio32MultiLoadArea.type != SIO_SCK_IN)\n        REG_SIOCNT |= SIO_ENABLE;\n    if (gSio32MultiLoadArea.type == SIO_SCK_IN) {\n        REG_SIO32ML_TIMER_H = 0; // Stops timer\n        // Process sending data\n        if (gSio32MultiLoadArea.dataCounter < 0) // Sets synchronous data\n            REG_SIODATA32 = SIO32ML_SYNC_DATA;\n        else if (gSio32MultiLoadArea.dataCounter < SIO32ML_BLOCK_SIZE / 4) // Sets sending\n                                                                           // data\n            REG_SIODATA32 = gSio32MultiLoadArea.datap[gSio32MultiLoadArea.dataCounter];\n        else\n            REG_SIODATA32 = gSio32MultiLoadArea.checkSum; // Sets check sum\n    } else {\n        // Process receiving data\n        if (gSio32MultiLoadArea.dataCounter < 0) { // Checks synchronous data\n            if (recvTmp != SIO32ML_SYNC_DATA)\n                --gSio32MultiLoadArea.dataCounter;\n        } else if (gSio32MultiLoadArea.dataCounter < SIO32ML_BLOCK_SIZE / 4) // Saves\n                                                                             // receiving\n                                                                             // data\n            gSio32MultiLoadArea.datap[gSio32MultiLoadArea.dataCounter] = recvTmp;\n        else\n            gSio32MultiLoadArea.checkSum = recvTmp; // Saves check sum\n    }\n    if (gSio32MultiLoadArea.dataCounter < SIO32ML_BLOCK_SIZE / 4 + 3) {\n        ++gSio32MultiLoadArea.dataCounter;\n        // Master starts to sending\n        if (gSio32MultiLoadArea.type == SIO_SCK_IN) {\n            REG_SIOCNT |= SIO_ENABLE; // Restarts sending\n            REG_SIO32ML_TIMER_H = TIMER_1CLK | TIMER_INTR_ENABLE | TIMER_ENABLE; // Restarts timer\n        }\n    }\n}",
+      "prependC": "#include \"sio32_multi_load.h\"\n#include \"global.h\"",
+      "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/sio32_multi_load.c#L97-L134",
+      "proto": {
+        "Sio32MultiLoadIntr": {
+          "returnsVoid": true
+        }
+      },
+      "m2cCtx": true
+    },
+    {
+      "sym": "sub_803213C",
+      "features": [
+        "bitfield",
+        "struct",
+        "field",
+        "branch"
+      ],
+      "funcC": "void sub_803213C(u8 unk38, u8 unk39, Sprite *s)\n{\n    u32 mask = (unk39 & 0x1) ? SPRITE_FLAG(X_FLIP, 1) : 0;\n\n    if (gStageData.gameMode != GAME_MODE_MP_SINGLE_PACK) {\n        if (unk38 != 0) {\n            s->tiles = ALLOC_TILES(ANIM_RAMP);\n            s->anim = ANIM_RAMP;\n            s->variant = 0;\n        } else {\n            s->tiles = ALLOC_TILES_VARIANT(ANIM_RAMP, 1);\n            s->anim = ANIM_RAMP;\n            s->variant = 1;\n        }\n    } else {\n        s->tiles = ALLOC_TILES_VARIANT(ANIM_RAMP, 1);\n        s->anim = ANIM_RAMP;\n        s->variant = 1;\n        mask |= SPRITE_FLAG(MOSAIC, 1);\n    }\n\n    s->oamFlags = SPRITE_OAM_ORDER(24);\n    s->animCursor = 0;\n    s->qAnimDelay = Q(0);\n    s->prevVariant = -1;\n    s->animSpeed = SPRITE_ANIM_SPEED(1.0);\n    s->palId = 0;\n    s->hitboxes[0].index = HITBOX_STATE_INACTIVE;\n    s->frameFlags = SPRITE_FLAG(PRIORITY, 1) | mask;\n}",
+      "prependC": "#include \"global.h\"\n#include \"module_unclear.h\"\n#include \"core.h\"\n#include \"sprite.h\"\n#include \"trig.h\"\n#include \"malloc_vram.h\"\n#include \"lib/m4a/m4a.h\"\n#include \"game/camera.h\"\n#include \"game/entity.h\"\n#include \"game/player.h\"\n#include \"game/interactables/ramp.h\"\n#include \"game/player_callbacks.h\"\n#include \"game/stage.h\"\n#include \"constants/animations.h\"\n#include \"constants/anim_sizes.h\"\n#include \"constants/move_states.h\"\n#include \"constants/songs.h\"\n#include \"constants/zones.h\"",
+      "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/interactables/ramp.c#L340-L369",
+      "proto": {
+        "sub_803213C": {
+          "returnsVoid": true
+        }
+      },
+      "m2cCtx": true
     }
   ]
 }

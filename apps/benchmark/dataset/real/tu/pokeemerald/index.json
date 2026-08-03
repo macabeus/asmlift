@@ -126,5 +126,37 @@
   "GiveBerryPowder": {
     "tu": "GiveBerryPowder.i.gz",
     "ctx": "ctx-264361caa05e.i.gz"
+  },
+  "TrySetCantSelectMoveBattleScript": {
+    "tu": "TrySetCantSelectMoveBattleScript.i.gz",
+    "ctx": "ctx-78a6659be413.i.gz"
+  },
+  "SetMauvilleOldManLanguage": {
+    "tu": "SetMauvilleOldManLanguage.i.gz",
+    "ctx": "ctx-625d4a302eb2.i.gz"
+  },
+  "AcroBikeHandleInputTurning": {
+    "tu": "AcroBikeHandleInputTurning.i.gz",
+    "ctx": "ctx-8b8b024a2653.i.gz"
+  },
+  "DoForcedMovement": {
+    "tu": "DoForcedMovement.i.gz",
+    "ctx": "ctx-8b0dad249cd1.i.gz"
+  },
+  "GetMoveTarget": {
+    "tu": "GetMoveTarget.i.gz",
+    "ctx": "ctx-78a6659be413.i.gz"
+  },
+  "Cmd_tryconversiontypechange": {
+    "tu": "Cmd_tryconversiontypechange.i.gz",
+    "ctx": "ctx-49ee5beb3f01.i.gz"
+  },
+  "AnimTask_FlashHealthboxOnLevelUp_Step": {
+    "tu": "AnimTask_FlashHealthboxOnLevelUp_Step.i.gz",
+    "ctx": "ctx-f77ea1056385.i.gz"
+  },
+  "UpdateShoalTideFlag": {
+    "tu": "UpdateShoalTideFlag.i.gz",
+    "ctx": "ctx-4f862b3e7af0.i.gz"
   }
 }
