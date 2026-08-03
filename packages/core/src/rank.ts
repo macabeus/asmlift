@@ -119,6 +119,11 @@ export interface EnumerateOptions {
   asmData?: AsmData;
   /** address→symbol map (symbols.ts) — same contract as DecompileOptions.symbols */
   symbols?: SymbolMap;
+  /** Called when a re-spelling lever THROWS or fails a boundary contract, so the failure is visible
+   *  instead of the candidate silently not existing. Enumeration continues either way — the primary
+   *  spelling is unaffected — but a lever that never fires because it always throws is a defect, and
+   *  without this it looks identical to a lever that correctly declined. */
+  onLeverError?: (label: string, error: string) => void;
 }
 
 /** One distinct candidate spelling (a signedness × branch-sense lever combination), emitted to source. */
@@ -292,8 +297,13 @@ export function enumerateCandidates(
             assertResolved(alt);
             assertDerefsTyped(alt);
             spellings.push({ suffix, source: backend.emit(alt), ...refsOf(alt) });
-          } catch {
-            // a throwing lever, a contract failure, or an unspellable re-spelling: keep the primary
+          } catch (e) {
+            // A throwing lever, a contract failure, or an unspellable re-spelling: keep the primary.
+            // REPORTED, not swallowed. `dropped` (below) records only spellings the SCORER refused,
+            // so without this a lever that fails here vanishes with no trace — indistinguishable
+            // from one that correctly declined, which is exactly the hidden failure
+            // DroppedCandidate exists to surface.
+            opts.onLeverError?.(name + suffix, e instanceof Error ? e.message.split('\n')[0] : String(e));
           }
         };
         // `/argbase` — name a call's argument bases before the call (l3/argbase.ts). A lever on the
