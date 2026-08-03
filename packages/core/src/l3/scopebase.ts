@@ -11,8 +11,8 @@
 //   uses it is byte-exact, and moving that same declaration to the function top costs 24. That is
 //   the reason the lever is scope-aware; it is NOT a claim about what the lever achieves. On that
 //   row it now declines outright (a later pass retired the phi it keyed on, so the base's uses span
-//   the function body — see `commonScope`); the row it actually wins is sa3:sa2__sub_8083504,
-//   85 to 82. basecse's header already names the gap — "a loop-body base is left
+//   the function body), and the cluster fallback below is what recovers it.
+//   basecse's header already names the gap — "a loop-body base is left
 //   inline for a future scope-aware hoist" — and this is that hoist.
 //
 //   ELIGIBILITY. With a symbol map that states an array's RANK, the access renders as the bare
@@ -201,11 +201,10 @@ function childLists(s: Stmt): Stmt[][] {
 
 /** The innermost statement list common to every use, or null when they span the function body.
  *
- *  Null means DECLINE. For an `addr`/`const` base that is right: basecse already hoists those at
- *  the function top, so firing here would only duplicate the primary spelling. For a `var` base it
- *  is a HOLE — basecse cannot see a `var` base at all, so nothing hoists it and no candidate offers
- *  the named spelling. That gap is real and currently unclosed; closing it means giving basecse the
- *  wider eligibility, or parameterizing one pass by placement, not widening this decline. */
+ *  Null is NOT a decline any more: the caller falls through to `deepestCluster`. Kept as a distinct
+ *  answer because "one scope holds everything" is the better shape when it exists — every use is
+ *  named, not just a cluster. The consolidation this file still owes would make both of these one
+ *  selector parameter over a single collected index. */
 function commonScope(uses: Site[]): { scope: Stmt[]; depth: number } | null {
   const first = uses[0].path;
   let depth = 0;
@@ -213,6 +212,31 @@ function commonScope(uses: Site[]): { scope: Stmt[]; depth: number } | null {
     depth++;
   }
   return depth === 0 ? null : { scope: first[depth - 1], depth };
+}
+
+/** The DEEPEST statement list holding 2+ uses, with just those uses — the fallback when no single
+ *  scope holds them all.
+ *
+ *  Ties are broken by first appearance, so emission stays deterministic. Returning a SUBSET is the
+ *  whole point: the uses outside the cluster keep their original spelling, which is exactly the
+ *  mixed form the compiler produces when it materializes an address in one arm and re-derives it
+ *  elsewhere. */
+function deepestCluster(all: Site[]): { scope: Stmt[]; depth: number; uses: Site[] } | null {
+  const byList = new Map<Stmt[], { depth: number; uses: Site[] }>();
+  for (const u of all) {
+    u.path.forEach((list, i) => {
+      const e = byList.get(list) ?? { depth: i + 1, uses: [] };
+      e.uses.push(u);
+      byList.set(list, e);
+    });
+  }
+  let best: { scope: Stmt[]; depth: number; uses: Site[] } | null = null;
+  for (const [scope, e] of byList) {
+    if (e.uses.length >= 2 && (best === null || e.depth > best.depth)) {
+      best = { scope, depth: e.depth, uses: e.uses };
+    }
+  }
+  return best;
 }
 
 /** Does any use sit inside a LOOP nested below the chosen scope?
@@ -269,26 +293,57 @@ export function hoistScopedBases(sfn: SFn): SFn | null {
     if ([...rec.constOff.values()].some((n) => n >= 2)) {
       continue;
     }
-    const at = commonScope(rec.uses);
-    if (!at || underNestedLoop(rec.uses, at.depth)) {
+    let at = commonScope(rec.uses);
+    let uses = rec.uses;
+    if (!at) {
+      // The uses span the FUNCTION BODY, so no single scope holds them. Rather than decline, take a
+      // scope that holds two or more and name the base for THOSE only, leaving the rest as they
+      // were.
+      //
+      // The selection rule is DEEPEST, with no size term, and that is a real limitation rather than
+      // a model of the compiler: a scope with four uses enclosing a nested scope with two will name
+      // the TWO and leave the four re-deriving the address. Only ONE cluster is ever served, and
+      // when two siblings tie on depth the first-appearing wins — arbitrary, not principled.
+      // Largest-cluster-with-deepest-as-tie-break is the better rule; it is a behaviour change and
+      // belongs with the placement-selector consolidation, not bolted on here.
+      //
+      // NOTE this fires for an `addr`/`const` base too — nothing here tests the base kind. That is
+      // not a duplicate of basecse's hoist: basecse runs FIRST (see the ordering note in the file
+      // header), so any `addr`/`const` base reaching this pass is one basecse already REFUSED.
+      const cluster = deepestCluster(rec.uses);
+      if (!cluster) {
+        continue;
+      }
+      at = { scope: cluster.scope, depth: cluster.depth };
+      uses = cluster.uses;
+    }
+    if (underNestedLoop(uses, at.depth)) {
       continue;
     }
     const type = T.ptr(scalarTypeForAccess(rec.sample.width, rec.sample.signed));
     // the earliest statement of the scope list that (transitively) holds a use
     // `path` starts EMPTY, so `idx` carries one entry more than `path`: idx[j+1] is the index
     // within path[j]. The scope is path[depth-1], so its index is idx[depth].
-    const before = Math.min(...rec.uses.map((u) => u.idx[at.depth]));
+    const before = Math.min(...uses.map((u) => u.idx[at.depth]));
     plan.push({ scope: at.scope, key, name: fresh(), type, base: rec.sample.base as LeafBase, before });
   }
   if (plan.length === 0) {
     return null;
   }
 
-  const nameFor = new Map<string, string>(plan.map((p) => [p.key, p.name]));
+  // A plan entry may own only a SUBSET of its key's uses (see deepestCluster), so repointing is
+  // scoped: a key becomes active when the rewrite enters its scope and inactive on the way out.
+  // Repointing by key alone would rewrite uses the hoist does not dominate.
+  // SAFE ONLY because `plan` holds at most one entry per key, so `delete` on the way out cannot
+  // discard an outer binding. Serving a second cluster for one key — the obvious next step — makes
+  // that false, and an inner delete would silently unbind the outer one for the rest of its scope:
+  // a use of an unassigned pointer, the defect class this module has already shipped twice. Switch
+  // to save/restore (or pass the bindings as an argument) before serving more than one cluster.
+  const active = new Map<string, string>();
   const point = (e: Expr): Expr => {
     const ix = eligible(e, globals);
     if (ix) {
-      const nm = nameFor.get(keyOf(ix));
+      const nm = active.get(keyOf(ix));
       if (nm) {
         // `lead` is DROPPED — the local already points at the object start, and `eligible` has
         // established every leading subscript is 0.
@@ -304,10 +359,28 @@ export function hoistScopedBases(sfn: SFn): SFn | null {
   // fresh tree in one pass — a two-pass version would compare rebuilt lists that no longer match.
   const rewriteList = (list: Stmt[]): Stmt[] => {
     const here = plan.filter((p) => p.scope === list);
+    // SAVE/RESTORE, not set/delete. A plain delete on the way out is correct only while `plan`
+    // holds one entry per key; the moment a second cluster for one key is served, an inner exit
+    // would unbind an OUTER hoist for the rest of its scope — under-repointing silently. Restoring
+    // makes the nesting correct by construction instead of by an unguarded invariant.
+    const saved = here.map((p) => [p.key, active.get(p.key)] as const);
+    for (const p of here) {
+      active.set(p.key, p.name);
+    }
     const rewritten = list.map(rewriteStmt);
+    for (const [key, prev] of saved) {
+      if (prev === undefined) {
+        active.delete(key);
+      } else {
+        active.set(key, prev);
+      }
+    }
     // Insert each hoist immediately before the first statement that uses it. Descending by index so
-    // earlier insertions do not shift the positions later ones were computed against; ties keep
-    // `plan` order, which is first-appearance order, so emission stays deterministic.
+    // earlier insertions do not shift the positions later ones were computed against. NOTE that two
+    // hoists sharing a `before` come out REVERSED relative to `plan` order — the sort is stable and
+    // descending, so both splice at the same index and the later one ends up first. Deterministic
+    // and semantically irrelevant, but it is not first-appearance order, which this comment used to
+    // claim.
     for (const p of [...here].sort((a, b) => b.before - a.before)) {
       rewritten.splice(p.before, 0, {
         k: 'assign',

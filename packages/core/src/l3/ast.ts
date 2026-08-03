@@ -247,7 +247,12 @@ export function exprEquals(a: Expr, b: Expr): boolean {
     }
     case 'field': {
       const bb = b as typeof a;
-      return a.name === bb.name && exprEquals(a.base, bb.base);
+      // `dot` is part of the SPELLING, and for the same reason `lead` is compared above: a CSE or
+      // dedup that treats these as equal keeps one node and discards the other, silently respelling
+      // `p->field_4` as `p.field_4` (or the reverse). Both compile only for the base type each
+      // belongs to, so collapsing them is how a valid access becomes an invalid one — or worse, a
+      // valid one against a different object.
+      return a.name === bb.name && (a.dot ?? false) === (bb.dot ?? false) && exprEquals(a.base, bb.base);
     }
     case 'marker': {
       const bb = b as typeof a;

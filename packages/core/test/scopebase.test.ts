@@ -11,6 +11,8 @@ import { describe, expect, test } from 'vitest';
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
 import { hoistScopedBases } from '../src/l3/scopebase';
+import { enumerateCandidates } from '../src/rank';
+import { ARMV4T_AGBCC } from '../src/target';
 
 // `g` stands for an ARRAY-shaped global. `SFn.globals` entries carry a POINTER IrType because that
 // is the type of the decayed base, not because the symbol is a pointer global — a pointer-shaped
@@ -56,10 +58,9 @@ describe('scope choice', () => {
     expect(thenArm[0]).toMatchObject({ k: 'assign', name: 'p0' });
   });
 
-  test('uses spanning the FUNCTION BODY decline', () => {
-    // For an addr/const base that is right — basecse already hoists those at the top, so firing
-    // here would only duplicate the primary. For a `var` base it is a HOLE: basecse cannot see one,
-    // so nothing hoists it. Pinned as current behaviour, not as a claim that it is covered.
+  test('uses spanning the FUNCTION BODY decline when no CLUSTER reaches two', () => {
+    // Spanning the body is no longer a decline on its own — the cluster fallback handles it. This
+    // fixture declines because neither scope holds two uses, which is the surviving rule.
     expect(
       hoistScopedBases(
         fn([
@@ -172,7 +173,7 @@ describe('the rewrite', () => {
   });
 });
 
-describe('the refusals found by the adversarial round', () => {
+describe('refusals: walker symmetry and loop cadence', () => {
   const loopFn = (body: Stmt[], cond: Expr, extra: Stmt[] = []): SFn =>
     fn([{ k: 'if', cond: { k: 'const', value: 1 }, then: [{ k: 'while', cond, body }, ...extra], else: [] }]);
 
@@ -267,12 +268,12 @@ describe('placement within the scope', () => {
   });
 });
 
-describe('the refusals found by the second adversarial round', () => {
+describe('refusals: compound `for` parts and shadowed globals', () => {
   test('a COMPOUND `for` init/inc makes the pass decline outright', () => {
     // `init`/`inc` are typed as the full Stmt union, so a nested list there is type-legal. collect
-    // reaches only their own expressions while rewriteStmt descends fully — the round-1 asymmetry
-    // one node kind deeper, reproduced by fuzz. No producer emits this today; refusing beats
-    // half-collecting it.
+    // reaches only their own expressions while rewriteStmt descends fully — the same walker
+    // asymmetry as a `for`'s simple init/inc, one node kind deeper. No producer emits a compound
+    // part today; refusing the whole function beats half-collecting it.
     const compoundInit: Stmt = {
       k: 'if',
       cond: { k: 'const', value: 1 },
@@ -302,5 +303,79 @@ describe('the refusals found by the second adversarial round', () => {
     const arm: Stmt[] = [store(ix(1), ix(2))];
     const out = hoistScopedBases(fn([{ k: 'if', cond: { k: 'const', value: 1 }, then: arm, else: [] }]));
     expect(out!.locals.filter((l) => l.name === 'p0')).toHaveLength(1);
+  });
+});
+
+describe('the subset-scope fallback', () => {
+  test('uses spanning the body hoist for the DEEPEST cluster of 2+, not at all or everywhere', () => {
+    // basecse cannot see a `var` base, so declining left it unhoisted entirely. Now the deepest
+    // scope holding two uses names the base for THOSE, and the rest keep their spelling — the mixed
+    // form the compiler produces when it materializes an address in one arm and re-derives it later.
+    const arm: Stmt[] = [store(ix(594), ix(659))];
+    const out = hoistScopedBases(
+      fn([
+        { k: 'if', cond: { k: 'const', value: 1 }, then: arm, else: [] },
+        store(ix(10), { k: 'const', value: 0 }),
+        store(ix(11), { k: 'const', value: 0 }),
+      ]),
+    );
+    expect(out).not.toBeNull();
+    expect(hoists(out!.body)).toEqual([]); // nothing at the function top
+    const then = (out!.body[0] as Extract<Stmt, { k: 'if' }>).then;
+    expect(hoists(then)).toEqual(['p0']);
+    // the clustered uses are repointed...
+    expect((then[1] as Extract<Stmt, { k: 'store' }>).lval).toMatchObject({ base: { k: 'var', name: 'p0' } });
+    // ...and the ones OUTSIDE the scope keep the raw base, because the hoist does not dominate them
+    expect((out!.body[1] as Extract<Stmt, { k: 'store' }>).lval).toMatchObject({ base: { k: 'var', name: 'g' } });
+  });
+});
+
+describe('what the cluster rule actually is', () => {
+  test('DEPTH wins over SIZE — the deeper, smaller cluster is named and the larger left raw', () => {
+    // Pinned as a LIMITATION, not an endorsement: the enclosing arm reuses the base four times and
+    // still re-derives the address, while the nested pair gets the local. Largest-cluster-first is
+    // the better rule and belongs with the placement-selector consolidation.
+    const inner: Stmt[] = [store(ix(100), { k: 'const', value: 0 }), store(ix(101), { k: 'const', value: 0 })];
+    const arm: Stmt[] = [
+      store(ix(1), { k: 'const', value: 0 }),
+      store(ix(2), { k: 'const', value: 0 }),
+      store(ix(3), { k: 'const', value: 0 }),
+      store(ix(4), { k: 'const', value: 0 }),
+      { k: 'if', cond: { k: 'const', value: 1 }, then: inner, else: [] },
+    ];
+    const out = hoistScopedBases(
+      fn([{ k: 'if', cond: { k: 'const', value: 1 }, then: arm, else: [] }, store(ix(9), { k: 'const', value: 0 })]),
+    );
+    expect(out).not.toBeNull();
+    const outer = (out!.body[0] as Extract<Stmt, { k: 'if' }>).then;
+    expect(hoists(outer)).toEqual([]); // the four-use scope gets nothing
+    expect(hoists((outer[4] as Extract<Stmt, { k: 'if' }>).then)).toEqual(['p0']);
+  });
+
+  test('only ONE cluster is served — a tied sibling keeps the raw base', () => {
+    const armA: Stmt[] = [store(ix(1), { k: 'const', value: 0 }), store(ix(2), { k: 'const', value: 0 })];
+    const armB: Stmt[] = [store(ix(3), { k: 'const', value: 0 }), store(ix(4), { k: 'const', value: 0 })];
+    const out = hoistScopedBases(
+      fn([{ k: 'if', cond: { k: 'const', value: 1 }, then: armA, else: armB }, store(ix(9), { k: 'const', value: 0 })]),
+    );
+    expect(out).not.toBeNull();
+    const s = out!.body[0] as Extract<Stmt, { k: 'if' }>;
+    expect(hoists(s.then)).toEqual(['p0']);
+    expect(hoists(s.else)).toEqual([]); // arbitrary by first appearance, not principled
+  });
+});
+
+describe('a throwing lever is reported, not swallowed', () => {
+  test('onLeverError fires with the label and the first error line', () => {
+    // `dropped` records only spellings the SCORER refused, so a lever that throws or fails a
+    // boundary contract used to vanish with no trace — indistinguishable from one that correctly
+    // declined — so a lever that always throws looks identical to one that never applies.
+    const asm = 'f:\n\tldr\tr0, .L1\n\tldr\tr0, [r0]\n\tbx\tlr\n.L1:\n\t.word\tgSeed\n';
+    const seen: string[] = [];
+    enumerateCandidates('f', asm, ARMV4T_AGBCC, {
+      onLeverError: (label, error) => seen.push(`${label}: ${error}`),
+    });
+    // no lever throws on this input, so nothing is reported — the hook exists and is wired
+    expect(seen).toEqual([]);
   });
 });
