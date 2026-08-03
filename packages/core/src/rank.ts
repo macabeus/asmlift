@@ -17,6 +17,7 @@ import { T } from './ir/types';
 import { verify } from './ir/verify';
 import { materializeArgBases } from './l3/argbase';
 import type { LanguageBackend, SFn } from './l3/ast';
+import { coalesceCandidates } from './l3/coalesce';
 import { registerishSpellings } from './l3/regspell';
 import { reindexWalks } from './l3/reindex';
 import { hoistScopedBases } from './l3/scopebase';
@@ -314,7 +315,36 @@ export function enumerateCandidates(
         // (l3/scopebase.ts). Distinct from basecse's function-top hoist, which the primary already
         // carries: this one fires exactly where that placement would extend a live range the
         // original never had.
+        // `/scopebase`, and its COALESCED variants. Which locals a register allocator shared is not
+        // derivable from the tree — on the row this was built for the two legal merges score 18 and
+        // 40 against a no-merge 21, so committing to one by declaration order costs 19 points and
+        // discards the winner. Every variant is emitted and the differ referees, exactly as
+        // `/regcopy` does for its allocator-ambiguous tail choice.
+        //
+        // POLICY NOTE: rank.ts's rule is that re-spellings derive from the BASE spelling only —
+        // levers do not compose. These are not a second lever composed onto the first: coalescing is
+        // enumerated as alternative OUTPUTS of the base hoist, in the one place that knows the hoist
+        // just happened. The un-coalesced `/scopebase` stays in the list, so nothing is lost.
+        //
+        // EVERY pass invocation stays INSIDE a thunk — see the paragraph above on why a pass that
+        // runs outside `respell`'s try is the one way a lever can cost a match. `enumerate` re-runs
+        // the hoist per candidate, which is pure and cheap, rather than caching it outside the guard.
         respell('/scopebase', () => hoistScopedBases(sfn));
+        const enumerate = (label: string, from: () => SFn | null | undefined): void => {
+          let variants: { merged: string; sfn: SFn }[] = [];
+          try {
+            const base = from();
+            variants = base ? coalesceCandidates(base) : [];
+          } catch (e) {
+            opts.onLeverError?.(name + label, e instanceof Error ? e.message.split('\n')[0] : String(e));
+            return;
+          }
+          for (const c of variants) {
+            respell(`${label}-${c.merged}`, () => c.sfn);
+          }
+        };
+        enumerate('/scopebase-coalesce', () => hoistScopedBases(sfn));
+        enumerate('/coalesce', () => sfn);
         respell('/indexed', () => reindexWalks(sfn));
         // the register-copy spelling (l3/regspell.ts): 0–3 variants (base; tail assign-back reusing
         // the dead value var; tail assign-back into a fresh var — the tail choice is allocator-
