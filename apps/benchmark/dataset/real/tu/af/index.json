@@ -126,5 +126,37 @@
   "spolar2world": {
     "tu": "spolar2world.i.gz",
     "ctx": "ctx-47b0471beb06.i.gz"
+  },
+  "Skin_Matrix_MulMatrix": {
+    "tu": "Skin_Matrix_MulMatrix.i.gz",
+    "ctx": "ctx-704e9fc8c667.i.gz"
+  },
+  "_MtxF_to_Mtx": {
+    "tu": "_MtxF_to_Mtx.i.gz",
+    "ctx": "ctx-704e9fc8c667.i.gz"
+  },
+  "suMtxMakeSRT": {
+    "tu": "suMtxMakeSRT.i.gz",
+    "ctx": "ctx-704e9fc8c667.i.gz"
+  },
+  "sAdo_Get_KokeruLabel": {
+    "tu": "sAdo_Get_KokeruLabel.i.gz",
+    "ctx": "ctx-704e9fc8c667.i.gz"
+  },
+  "add_calc_a": {
+    "tu": "add_calc_a.i.gz",
+    "ctx": "ctx-704e9fc8c667.i.gz"
+  },
+  "get_percent_forAccelBrake": {
+    "tu": "get_percent_forAccelBrake.i.gz",
+    "ctx": "ctx-704e9fc8c667.i.gz"
+  },
+  "Skin_Matrix_SetQuaternion": {
+    "tu": "Skin_Matrix_SetQuaternion.i.gz",
+    "ctx": "ctx-704e9fc8c667.i.gz"
+  },
+  "atans_table": {
+    "tu": "atans_table.i.gz",
+    "ctx": "ctx-704e9fc8c667.i.gz"
   }
 }

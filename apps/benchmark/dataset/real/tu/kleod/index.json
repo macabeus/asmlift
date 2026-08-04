@@ -126,5 +126,37 @@
   "StreamCmd_SetBGScroll": {
     "tu": "StreamCmd_SetBGScroll.i.gz",
     "ctx": "ctx-b4ae03db0859.i.gz"
+  },
+  "ProcessInputAndUpdateEntities": {
+    "tu": "ProcessInputAndUpdateEntities.i.gz",
+    "ctx": "ctx-dd37d37455e4.i.gz"
+  },
+  "ConfigureEntityBehavior": {
+    "tu": "ConfigureEntityBehavior.i.gz",
+    "ctx": "ctx-8f3949f8ca4f.i.gz"
+  },
+  "UpdateCameraScroll": {
+    "tu": "UpdateCameraScroll.i.gz",
+    "ctx": "ctx-c68b94e46656.i.gz"
+  },
+  "CountCollectedGems": {
+    "tu": "CountCollectedGems.i.gz",
+    "ctx": "ctx-8f3949f8ca4f.i.gz"
+  },
+  "UpdateWorldMapNodeAnim": {
+    "tu": "UpdateWorldMapNodeAnim.i.gz",
+    "ctx": "ctx-dd37d37455e4.i.gz"
+  },
+  "EntityItemDrop": {
+    "tu": "EntityItemDrop.i.gz",
+    "ctx": "ctx-d4ba501e6cbc.i.gz"
+  },
+  "SetupBG3WindowOverlay": {
+    "tu": "SetupBG3WindowOverlay.i.gz",
+    "ctx": "ctx-13fbdb507b65.i.gz"
+  },
+  "EntityDeathAnimation": {
+    "tu": "EntityDeathAnimation.i.gz",
+    "ctx": "ctx-49c9e7abc382.i.gz"
   }
 }
