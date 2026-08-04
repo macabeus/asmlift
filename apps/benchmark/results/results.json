@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generatedAt": "2026-08-04T00:32:43.308Z",
+    "generatedAt": "2026-08-04T09:18:01.267Z",
     "toolchains": [
       "ido7.1",
       "agbcc",
@@ -14,7 +14,7 @@
       "real": 240
     },
     "asmlift": {
-      "commit": "1fb460f727ab743ff6f0490cf24c2bb76ff979de",
+      "commit": "1725fba5bed69e229364501ec91f7b75b1c414d2",
       "dirty": false
     },
     "m2c": {
@@ -3419,11 +3419,11 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-TDuWcs/c.c:1077: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-v2NiYn/c.c:1077: invalid operands to binary <<"
           },
           {
             "label": "unsigned/scopebase/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-6n19Wp/c.c:1078: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Po8hGO/c.c:1078: invalid operands to binary <<"
           }
         ],
         "symbolsUsed": [
@@ -4178,6 +4178,7 @@
       "language": "c",
       "features": [
         "switch",
+        "bitfield",
         "array",
         "shift",
         "struct",
@@ -4311,7 +4312,7 @@
         "droppedCandidates": [
           {
             "label": "unsigned",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-MipKEz/c.c:1076: `gBgDataPtrs' undeclared (first use in this function)"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-7uY4bs/c.c:1076: `gBgDataPtrs' undeclared (first use in this function)"
           }
         ],
         "symbolsUsed": [],
@@ -5370,7 +5371,7 @@
         "droppedCandidates": [
           {
             "label": "unsigned",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-UuBf6g/c.c:1077: too many arguments to function `thunk_sub_080002A0'"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Z0PX1H/c.c:1077: too many arguments to function `thunk_sub_080002A0'"
           }
         ],
         "symbolsUsed": [],
@@ -6101,27 +6102,27 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-YOGSd5/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-yxxpfT/c.c:1085: incompatible types in assignment"
           },
           {
             "label": "unsigned/coalesce-v2-v3/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-whxmnF/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-fG0ICD/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "unsigned/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-O15aKg/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-F3Bh0z/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "signed/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-fLRuTF/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-xBC3IO/c.c:1085: incompatible types in assignment"
           },
           {
             "label": "signed/coalesce-v2-v3/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-ztXroi/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-GX9TnR/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "signed/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-fbBjZX/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-RXJjgd/c.c:1084: incompatible types in assignment"
           }
         ],
         "symbolsUsed": [
@@ -9936,9 +9937,10 @@
       "language": "c",
       "features": [
         "switch",
-        "bitfield",
+        "ternary",
         "struct",
-        "field"
+        "field",
+        "array"
       ],
       "loc": 36,
       "refSource": "static void AnimTask_FlashHealthboxOnLevelUp_Step(u8 taskId)\n{\n    u8 paletteNum;\n    u32 paletteOffset, colorOffset;\n\n    gTasks[taskId].data[0]++;\n    if (gTasks[taskId].data[0]++ >= gTasks[taskId].data[11])\n    {\n        gTasks[taskId].data[0] = 0;\n        paletteNum = IndexOfSpritePaletteTag(TAG_HEALTHBOX_PALS_1);\n        colorOffset = gTasks[taskId].data[10] == 0 ? 6 : 2;\n        switch (gTasks[taskId].data[1])\n        {\n        case 0:\n            gTasks[taskId].data[2] += 2;\n            if (gTasks[taskId].data[2] > 16)\n                gTasks[taskId].data[2] = 16;\n\n            paletteOffset = OBJ_PLTT_ID(paletteNum);\n            BlendPalette(paletteOffset + colorOffset, 1, gTasks[taskId].data[2], RGB(20, 27, 31));\n            if (gTasks[taskId].data[2] == 16)\n                gTasks[taskId].data[1]++;\n            break;\n        case 1:\n            gTasks[taskId].data[2] -= 2;\n            if (gTasks[taskId].data[2] < 0)\n                gTasks[taskId].data[2] = 0;\n\n            paletteOffset = OBJ_PLTT_ID(paletteNum);\n            BlendPalette(paletteOffset + colorOffset, 1, gTasks[taskId].data[2], RGB(20, 27, 31));\n            if (gTasks[taskId].data[2] == 0)\n                DestroyAnimVisualTask(taskId);\n            break;\n        }\n    }\n}",
@@ -15770,10 +15772,11 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "bitfield",
+        "bitwise",
+        "shift",
+        "ternary",
         "struct",
-        "field",
-        "branch"
+        "field"
       ],
       "loc": 65,
       "refSource": "void sub_802DFC8(s16 direction, Sprite *s)\n{\n    s32 mask = 0;\n    s32 variant;\n\n    if (direction & 0x8) {\n        variant = 6;\n\n        mask = (direction & 1) ? SPRITE_FLAG(X_FLIP, 1) : 0;\n    } else if (direction & 0x4) {\n        variant = 4;\n\n        if (direction & 0x2) {\n            mask = SPRITE_FLAG(X_FLIP, 1);\n        }\n\n        if (direction & 0x1) {\n            mask |= SPRITE_FLAG(Y_FLIP, 1);\n        }\n    } else if (direction & 0x2) {\n        variant = 2;\n\n        if (direction & 0x1) {\n            mask = SPRITE_FLAG(X_FLIP, 1);\n        }\n    } else {\n        variant = 0;\n\n        if (direction & 0x1) {\n            mask = SPRITE_FLAG(Y_FLIP, 1);\n        }\n    }\n\n    if (gStageData.gameMode != GAME_MODE_MP_SINGLE_PACK) {\n        if ((gStageData.act >= ACT_1) && (gStageData.act <= ACT_BONUS_CAPSULE)) {\n            if (gStageData.zone == ZONE_6) {\n                s->tiles = ALLOC_TILES(ANIM_SPRING_6);\n                s->anim = ANIM_SPRING_6;\n            } else if (gStageData.zone == ZONE_4) {\n                s->tiles = ALLOC_TILES(ANIM_SPRING_4);\n                s->anim = ANIM_SPRING_4;\n            } else {\n                s->tiles = ALLOC_TILES(ANIM_SPRING);\n                s->anim = ANIM_SPRING;\n            }\n        } else {\n            s->tiles = ALLOC_TILES(ANIM_SPRING);\n            s->anim = ANIM_SPRING;\n        }\n    } else {\n        s->tiles = ALLOC_TILES(ANIM_SPRING);\n        s->anim = ANIM_SPRING;\n        mask |= SPRITE_FLAG_MASK_MOSAIC;\n    }\n\n    s->variant = variant;\n    s->oamFlags = SPRITE_OAM_ORDER(24);\n    s->animCursor = 0;\n    s->qAnimDelay = Q(0);\n    s->prevVariant = -1;\n    s->animSpeed = SPRITE_ANIM_SPEED(1.0);\n    s->palId = 0;\n    s->hitboxes[0].index = HITBOX_STATE_INACTIVE;\n    s->frameFlags = mask | SPRITE_FLAG(PRIORITY, 1);\n}",
@@ -15846,10 +15849,11 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "bitfield",
+        "bitwise",
+        "shift",
+        "ternary",
         "struct",
-        "field",
-        "branch"
+        "field"
       ],
       "loc": 30,
       "refSource": "void sub_803213C(u8 unk38, u8 unk39, Sprite *s)\n{\n    u32 mask = (unk39 & 0x1) ? SPRITE_FLAG(X_FLIP, 1) : 0;\n\n    if (gStageData.gameMode != GAME_MODE_MP_SINGLE_PACK) {\n        if (unk38 != 0) {\n            s->tiles = ALLOC_TILES(ANIM_RAMP);\n            s->anim = ANIM_RAMP;\n            s->variant = 0;\n        } else {\n            s->tiles = ALLOC_TILES_VARIANT(ANIM_RAMP, 1);\n            s->anim = ANIM_RAMP;\n            s->variant = 1;\n        }\n    } else {\n        s->tiles = ALLOC_TILES_VARIANT(ANIM_RAMP, 1);\n        s->anim = ANIM_RAMP;\n        s->variant = 1;\n        mask |= SPRITE_FLAG(MOSAIC, 1);\n    }\n\n    s->oamFlags = SPRITE_OAM_ORDER(24);\n    s->animCursor = 0;\n    s->qAnimDelay = Q(0);\n    s->prevVariant = -1;\n    s->animSpeed = SPRITE_ANIM_SPEED(1.0);\n    s->palId = 0;\n    s->hitboxes[0].index = HITBOX_STATE_INACTIVE;\n    s->frameFlags = SPRITE_FLAG(PRIORITY, 1) | mask;\n}",
