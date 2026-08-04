@@ -49,6 +49,7 @@ import {
   arrayInnerExtents,
   declaredFields,
   isArrayField,
+  isBitfieldField,
   isScalarCellSize,
   pointeeFields,
   scalarCellType,
@@ -334,8 +335,10 @@ function pointeeAccess(
   // Constant offset: the member must match EXACTLY — offset, read width, and the SPELLED type
   // (spellsAccessType). An ARRAY member is excluded whatever its size: `u8 x[1]` would match a
   // byte access by (offset, size) and spell `->x`, which is not an lvalue of that width at all.
+  // A BITFIELD member likewise: its `size` is the byte span its bits touch, so a 7-bit field
+  // would match a plain u16 read and spell a 7-bit lvalue for a 16-bit access.
   const p = spellablePointee(pg.name, sym);
-  const f = p?.fields.find((m) => m.offset === total && m.size === width && !isArrayField(m));
+  const f = p?.fields.find((m) => m.offset === total && m.size === width && !isArrayField(m) && !isBitfieldField(m));
   return p && f && spellsAccessType(f.signed, width, signed) && memberQualsAllow(f, p.const, isStore)
     ? { k: 'field', base: { k: 'var', name: pg.name }, name: f.name }
     : null;
@@ -392,8 +395,12 @@ function memAccess(
       // declaration on: a layout it declines whole is a layout with no nameable members, and a
       // union alias it drops for the first view at that offset is a name no declaration carries.
       // An ARRAY member is excluded for the same reason as in pointeeAccess: `u8 x[1]` would match
-      // a byte access by (offset, size) and spell `.x`, which is not an lvalue of that width.
-      const fld = declaredFields(si.layout)?.find((f) => f.offset === gb.byte && f.size === width && !isArrayField(f));
+      // a byte access by (offset, size) and spell `.x`, which is not an lvalue of that width. A
+      // BITFIELD member likewise — a plain read of its bytes is not a read of its bits (the named
+      // bitfield spelling has its own recognizer, on the extract shape: see lowerDef).
+      const fld = declaredFields(si.layout)?.find(
+        (f) => f.offset === gb.byte && f.size === width && !isArrayField(f) && !isBitfieldField(f),
+      );
       if (fld && memberQualsAllow(fld, si.const, isStore)) {
         return { k: 'field', base: { k: 'var', name: gb.name }, name: fld.name, dot: true };
       }
@@ -1292,6 +1299,100 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     }
   }
 
+  // ── BITFIELD member reads (symbol map) ──────────────────────────────────────────────────────
+  // The `(x << a) >> b` extract of a struct global's loaded bytes IS a bitfield access when the
+  // map declares a bitfield at exactly those bits: spelled `gSym.field`, the source form, whose
+  // declared `u32 field : n` then makes C's own integer promotion reproduce the signedness every
+  // downstream operator compiled with (a 7-bit unsigned field promotes to signed int — sdiv
+  // renders `/` and recompiles to __divsi3, where the raw-shift spelling stays u32).
+  //
+  // Semantically EXACT, never approximate: the window must lie inside the loaded bytes (so the
+  // load's extension bits cannot reach it), the field's position, width and signedness must all
+  // match the extract (a logical shift is an unsigned read, an arithmetic one a signed read —
+  // a signless field never matches), and the member must be nameable at all (memberQualsAllow;
+  // the map only carries bitfield facts for little-endian ELFs — see SymbolStructField). Any
+  // mismatch keeps the honest shift spelling.
+  //
+  // Precomputed over the ops (not folded during rendering) for the load's sake: a load whose
+  // EVERY use is a spelled extract chain must not also emit its materialized `v = *(u16 *)&g;`
+  // temp — the compiler CSEs the repeated member reads back to one load, but the leftover temp
+  // would be a second one. A VOLATILE container refuses the whole fold: N member reads are N
+  // volatile accesses where the asm did one load.
+  const bitfieldSpelling = new Map<Op, { global: string; field: string }>();
+  const absorbedLoads = new Set<Op>();
+  if (symCtx) {
+    // the (name, byte) of a load's address when it resolves through defs alone — `gaddr` or
+    // `add(gaddr, const)`; anything else (a materialized base, a variable index) declines
+    const loadTargets = new Map<Op, { name: string; byte: number }>();
+    const addrOf = (v: Value, off: number): { name: string; byte: number } | null => {
+      const d0 = defs.get(v);
+      if (d0?.opcode === 'gaddr') {
+        return { name: d0.attrs.sym as string, byte: off };
+      }
+      if (d0?.opcode === 'add' && d0.operands.length === 2) {
+        for (const [x, y] of [
+          [d0.operands[0], d0.operands[1]],
+          [d0.operands[1], d0.operands[0]],
+        ] as const) {
+          const g0 = defs.get(x);
+          const c0 = defs.get(y);
+          if (g0?.opcode === 'gaddr' && c0?.opcode === 'const') {
+            return { name: g0.attrs.sym as string, byte: (c0.attrs.value as number) + off };
+          }
+        }
+      }
+      return null;
+    };
+    for (const blk of fn.blocks) {
+      for (const op of blk.ops) {
+        if ((op.opcode !== 'shr_u' && op.opcode !== 'shr_s') || op.operands.length !== 1) {
+          continue;
+        }
+        const b = op.attrs.imm as number | undefined;
+        const inner = defs.get(op.operands[0]);
+        if (typeof b !== 'number' || b <= 0 || b >= 32 || inner?.opcode !== 'shl' || inner.operands.length !== 1) {
+          continue;
+        }
+        const a = inner.attrs.imm as number | undefined;
+        if (typeof a !== 'number' || a < 0 || b < a) {
+          continue;
+        }
+        const w = 32 - b; // extract width
+        const lo = b - a; // low bit within the loaded value
+        const load = defs.get(inner.operands[0]);
+        if (load?.opcode !== 'load' || lo + w > (load.attrs.width as number) * 8) {
+          continue;
+        }
+        const gb = addrOf(load.operands[0], load.attrs.off as number);
+        const si = gb ? symCtx.info(gb.name) : undefined;
+        if (!gb || si?.shape !== 'struct' || si.volatile) {
+          continue;
+        }
+        const signedRead = op.opcode === 'shr_s';
+        const fld = declaredFields(si.layout)?.find(
+          (f) => f.bitWidth === w && f.offset * 8 + f.bitOffset! === gb.byte * 8 + lo && f.signed === signedRead,
+        );
+        if (fld && memberQualsAllow(fld, si.const, false)) {
+          bitfieldSpelling.set(op, { global: gb.name, field: fld.name });
+          loadTargets.set(load, gb);
+        }
+      }
+    }
+    // a load is ABSORBED when every use is an shl whose every use is a spelled extract
+    for (const load of loadTargets.keys()) {
+      const shls = useSitesOf.get(load.results[0]) ?? [];
+      const absorbed =
+        shls.length > 0 &&
+        shls.every(
+          (u) =>
+            u.op.opcode === 'shl' && (useSitesOf.get(u.op.results[0]) ?? []).every((v) => bitfieldSpelling.has(v.op)),
+        );
+      if (absorbed) {
+        absorbedLoads.add(load);
+      }
+    }
+  }
+
   // An unresolvable value: strict mode keeps the `"?"` sentinel AND records the reason — the
   // decline thrown below names the actual gaps ("unmodelled instruction 'adde'"), the same
   // reasons annotate mode's markers carry, instead of the anonymous `?` that assertResolved
@@ -1313,6 +1414,12 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
   const lowerDef = (d: Op, e: (v: Value) => Expr): Expr => {
     if (d.opcode === 'const') {
       return { k: 'const', value: d.attrs.value as number };
+    }
+    // a bitfield extract recognized over the ops (see the precompute above): the member read,
+    // not the shift pair
+    const bf = bitfieldSpelling.get(d);
+    if (bf) {
+      return { k: 'field', base: { k: 'var', name: bf.global }, name: bf.field, dot: true };
     }
     if (CMP_TO_BIN[d.opcode]) {
       // A bare global address `&gSym` as a COMPARISON operand is the same unspelled escape as the
@@ -1662,7 +1769,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
         });
       } else if (op.opcode === 'call' && op.results.length && !useSitesOf.has(op.results[0])) {
         out.push({ k: 'exprstmt', value: expr(op.results[0]) });
-      } else if (materialize.has(op)) {
+      } else if (materialize.has(op) && !absorbedLoads.has(op)) {
+        // (an absorbed load's every consumer spells a named bitfield read — emitting its temp
+        // here would recompile to a second load the asm does not have)
         const nm = varName.get(op.results[0])!;
         out.push({ k: 'assign', name: nm, value: castAggregateAddr(nm, lowerDef(op, expr)) });
       }

@@ -84,8 +84,7 @@ describe('layoutOf — the package facts a layout is allowed to carry', () => {
     ]);
   });
 
-  test('drops BITFIELD members — no read width ever equals their size', () => {
-    // a bitfield must fall through to the honest cast spelling, never to a wrong field name
+  test('keeps BITFIELD members — with both bit facts — on a little-endian ELF', () => {
     const out = layoutOf(
       di([
         { name: 'bits', offset: 0, size: 1, signed: false, bitWidth: 3, bitOffset: 0 },
@@ -94,7 +93,29 @@ describe('layoutOf — the package facts a layout is allowed to carry', () => {
       'S',
       '/tmp/x.elf',
     );
+    expect(out).toEqual([
+      { name: 'bits', offset: 0, size: 1, signed: false, bitWidth: 3, bitOffset: 0 },
+      { name: 'plain', offset: 4, size: 4, signed: true },
+    ]);
+  });
+
+  test('drops BITFIELD members on a big-endian ELF — the extract equation and the layout model are LE', () => {
+    const out = layoutOf(
+      di([
+        { name: 'bits', offset: 0, size: 1, signed: false, bitWidth: 3, bitOffset: 0 },
+        { name: 'plain', offset: 4, size: 4, signed: true },
+      ]),
+      'S',
+      '/tmp/x.elf',
+      false,
+    );
     expect(out?.map((m) => m.name)).toEqual(['plain']);
+  });
+
+  test('REFUSES LOUDLY when a bitfield member reports no bitOffset — the field cannot be seated', () => {
+    expect(() =>
+      layoutOf(di([{ name: 'bits', offset: 0, size: 1, signed: false, bitWidth: 3 }]), 'S', '/tmp/x.elf'),
+    ).toThrow(/bitOffset/);
   });
 
   test('an unnamed type, or one the sidecar has no layout for, yields null — never a guess', () => {
