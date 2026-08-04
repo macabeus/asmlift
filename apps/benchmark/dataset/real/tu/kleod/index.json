@@ -137,7 +137,7 @@
   },
   "UpdateCameraScroll": {
     "tu": "UpdateCameraScroll.i.gz",
-    "ctx": "ctx-3206bb6d1a8a.i.gz"
+    "ctx": "ctx-c68b94e46656.i.gz"
   },
   "CountCollectedGems": {
     "tu": "CountCollectedGems.i.gz",
@@ -157,6 +157,6 @@
   },
   "EntityDeathAnimation": {
     "tu": "EntityDeathAnimation.i.gz",
-    "ctx": "ctx-2dda49ae72b3.i.gz"
+    "ctx": "ctx-49c9e7abc382.i.gz"
   }
 }
