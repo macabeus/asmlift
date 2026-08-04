@@ -497,10 +497,11 @@
     {
       "sym": "sub_802DFC8",
       "features": [
-        "bitfield",
+        "bitwise",
+        "shift",
+        "ternary",
         "struct",
-        "field",
-        "branch"
+        "field"
       ],
       "funcC": "void sub_802DFC8(s16 direction, Sprite *s)\n{\n    s32 mask = 0;\n    s32 variant;\n\n    if (direction & 0x8) {\n        variant = 6;\n\n        mask = (direction & 1) ? SPRITE_FLAG(X_FLIP, 1) : 0;\n    } else if (direction & 0x4) {\n        variant = 4;\n\n        if (direction & 0x2) {\n            mask = SPRITE_FLAG(X_FLIP, 1);\n        }\n\n        if (direction & 0x1) {\n            mask |= SPRITE_FLAG(Y_FLIP, 1);\n        }\n    } else if (direction & 0x2) {\n        variant = 2;\n\n        if (direction & 0x1) {\n            mask = SPRITE_FLAG(X_FLIP, 1);\n        }\n    } else {\n        variant = 0;\n\n        if (direction & 0x1) {\n            mask = SPRITE_FLAG(Y_FLIP, 1);\n        }\n    }\n\n    if (gStageData.gameMode != GAME_MODE_MP_SINGLE_PACK) {\n        if ((gStageData.act >= ACT_1) && (gStageData.act <= ACT_BONUS_CAPSULE)) {\n            if (gStageData.zone == ZONE_6) {\n                s->tiles = ALLOC_TILES(ANIM_SPRING_6);\n                s->anim = ANIM_SPRING_6;\n            } else if (gStageData.zone == ZONE_4) {\n                s->tiles = ALLOC_TILES(ANIM_SPRING_4);\n                s->anim = ANIM_SPRING_4;\n            } else {\n                s->tiles = ALLOC_TILES(ANIM_SPRING);\n                s->anim = ANIM_SPRING;\n            }\n        } else {\n            s->tiles = ALLOC_TILES(ANIM_SPRING);\n            s->anim = ANIM_SPRING;\n        }\n    } else {\n        s->tiles = ALLOC_TILES(ANIM_SPRING);\n        s->anim = ANIM_SPRING;\n        mask |= SPRITE_FLAG_MASK_MOSAIC;\n    }\n\n    s->variant = variant;\n    s->oamFlags = SPRITE_OAM_ORDER(24);\n    s->animCursor = 0;\n    s->qAnimDelay = Q(0);\n    s->prevVariant = -1;\n    s->animSpeed = SPRITE_ANIM_SPEED(1.0);\n    s->palId = 0;\n    s->hitboxes[0].index = HITBOX_STATE_INACTIVE;\n    s->frameFlags = mask | SPRITE_FLAG(PRIORITY, 1);\n}",
       "prependC": "#include \"global.h\"\n#include \"module_unclear.h\"\n#include \"core.h\"\n#include \"sprite.h\"\n#include \"trig.h\"\n#include \"malloc_vram.h\"\n#include \"game/camera.h\"\n#include \"game/entity.h\"\n#include \"game/player.h\"\n#include \"game/player_callbacks.h\"\n#include \"game/stage.h\"\n#include \"constants/animations.h\"\n#include \"constants/anim_sizes.h\"\n#include \"constants/move_states.h\"\n#include \"constants/songs.h\"\n#include \"constants/zones.h\"",
@@ -570,10 +571,11 @@
     {
       "sym": "sub_803213C",
       "features": [
-        "bitfield",
+        "bitwise",
+        "shift",
+        "ternary",
         "struct",
-        "field",
-        "branch"
+        "field"
       ],
       "funcC": "void sub_803213C(u8 unk38, u8 unk39, Sprite *s)\n{\n    u32 mask = (unk39 & 0x1) ? SPRITE_FLAG(X_FLIP, 1) : 0;\n\n    if (gStageData.gameMode != GAME_MODE_MP_SINGLE_PACK) {\n        if (unk38 != 0) {\n            s->tiles = ALLOC_TILES(ANIM_RAMP);\n            s->anim = ANIM_RAMP;\n            s->variant = 0;\n        } else {\n            s->tiles = ALLOC_TILES_VARIANT(ANIM_RAMP, 1);\n            s->anim = ANIM_RAMP;\n            s->variant = 1;\n        }\n    } else {\n        s->tiles = ALLOC_TILES_VARIANT(ANIM_RAMP, 1);\n        s->anim = ANIM_RAMP;\n        s->variant = 1;\n        mask |= SPRITE_FLAG(MOSAIC, 1);\n    }\n\n    s->oamFlags = SPRITE_OAM_ORDER(24);\n    s->animCursor = 0;\n    s->qAnimDelay = Q(0);\n    s->prevVariant = -1;\n    s->animSpeed = SPRITE_ANIM_SPEED(1.0);\n    s->palId = 0;\n    s->hitboxes[0].index = HITBOX_STATE_INACTIVE;\n    s->frameFlags = SPRITE_FLAG(PRIORITY, 1) | mask;\n}",
       "prependC": "#include \"global.h\"\n#include \"module_unclear.h\"\n#include \"core.h\"\n#include \"sprite.h\"\n#include \"trig.h\"\n#include \"malloc_vram.h\"\n#include \"lib/m4a/m4a.h\"\n#include \"game/camera.h\"\n#include \"game/entity.h\"\n#include \"game/player.h\"\n#include \"game/interactables/ramp.h\"\n#include \"game/player_callbacks.h\"\n#include \"game/stage.h\"\n#include \"constants/animations.h\"\n#include \"constants/anim_sizes.h\"\n#include \"constants/move_states.h\"\n#include \"constants/songs.h\"\n#include \"constants/zones.h\"",

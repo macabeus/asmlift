@@ -543,6 +543,7 @@
       "sym": "EntityItemDrop",
       "features": [
         "switch",
+        "bitfield",
         "array",
         "shift",
         "struct",

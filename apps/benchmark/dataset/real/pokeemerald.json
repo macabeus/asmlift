@@ -515,9 +515,10 @@
       "sym": "AnimTask_FlashHealthboxOnLevelUp_Step",
       "features": [
         "switch",
-        "bitfield",
+        "ternary",
         "struct",
-        "field"
+        "field",
+        "array"
       ],
       "funcC": "static void AnimTask_FlashHealthboxOnLevelUp_Step(u8 taskId)\n{\n    u8 paletteNum;\n    u32 paletteOffset, colorOffset;\n\n    gTasks[taskId].data[0]++;\n    if (gTasks[taskId].data[0]++ >= gTasks[taskId].data[11])\n    {\n        gTasks[taskId].data[0] = 0;\n        paletteNum = IndexOfSpritePaletteTag(TAG_HEALTHBOX_PALS_1);\n        colorOffset = gTasks[taskId].data[10] == 0 ? 6 : 2;\n        switch (gTasks[taskId].data[1])\n        {\n        case 0:\n            gTasks[taskId].data[2] += 2;\n            if (gTasks[taskId].data[2] > 16)\n                gTasks[taskId].data[2] = 16;\n\n            paletteOffset = OBJ_PLTT_ID(paletteNum);\n            BlendPalette(paletteOffset + colorOffset, 1, gTasks[taskId].data[2], RGB(20, 27, 31));\n            if (gTasks[taskId].data[2] == 16)\n                gTasks[taskId].data[1]++;\n            break;\n        case 1:\n            gTasks[taskId].data[2] -= 2;\n            if (gTasks[taskId].data[2] < 0)\n                gTasks[taskId].data[2] = 0;\n\n            paletteOffset = OBJ_PLTT_ID(paletteNum);\n            BlendPalette(paletteOffset + colorOffset, 1, gTasks[taskId].data[2], RGB(20, 27, 31));\n            if (gTasks[taskId].data[2] == 0)\n                DestroyAnimVisualTask(taskId);\n            break;\n        }\n    }\n}",
       "prependC": "#include \"global.h\"\n#include \"battle.h\"\n#include \"battle_anim.h\"\n#include \"battle_controllers.h\"\n#include \"battle_interface.h\"\n#include \"decompress.h\"\n#include \"dma3.h\"\n#include \"gpu_regs.h\"\n#include \"graphics.h\"\n#include \"m4a.h\"\n#include \"main.h\"\n#include \"palette.h\"\n#include \"pokeball.h\"\n#include \"sound.h\"\n#include \"sprite.h\"\n#include \"task.h\"\n#include \"trig.h\"\n#include \"util.h\"\n#include \"data.h\"\n#include \"constants/items.h\"\n#include \"constants/moves.h\"\n#include \"constants/songs.h\"\n#include \"constants/rgb.h\"",
