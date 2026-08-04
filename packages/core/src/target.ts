@@ -34,7 +34,7 @@ export interface TargetDescription {
   returnReg: string;
   // HARDWARE / ISA facts — independent of the compiler.
   capabilities: {
-    endianness: 'little' | 'big'; // RESERVED — no pass reads it yet (byte-addressing will)
+    endianness: 'little' | 'big'; // consumed by structureOptionsFor (bitfield extract recognition is LSB-first)
     hwDivide: boolean; // consumed by patternApplies (idiom gating)
     hwFloat: boolean; // consumed by patternApplies (idiom gating)
     flags: boolean; // RESERVED — no pass reads it yet (PPC condition regs will)
@@ -132,7 +132,9 @@ export const PPC_MWCC: TargetDescription = {
  *  target's compiler behaviors flow into the target-agnostic structurer — a new behavior lever
  *  is a field in `compilerBehaviors`, consumed automatically. */
 export function structureOptionsFor(t: TargetDescription, returnsVoid: boolean): StructureOptions {
-  return { returnsVoid, ...t.compilerBehaviors };
+  // `littleEndian` is the one HARDWARE capability the structurer consumes (bitfield extract
+  // recognition is LSB-first); everything else is a compiler behavior.
+  return { returnsVoid, littleEndian: t.capabilities.endianness === 'little', ...t.compilerBehaviors };
 }
 
 export const C_TYPEDEFS =

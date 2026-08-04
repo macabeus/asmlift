@@ -127,7 +127,9 @@ export interface EnumerateOptions {
   onLeverError?: (label: string, error: string) => void;
 }
 
-/** One distinct candidate spelling (a signedness × branch-sense lever combination), emitted to source. */
+/** One distinct candidate spelling — a point in the axis cross (signedness × branch sense ×
+ *  def-site anchoring × bitfield spelling × symbol-map variant, plus the L3 re-spellings) —
+ *  emitted to source. */
 export interface Candidate {
   label: string;
   source: string;
@@ -204,12 +206,26 @@ export function enumerateCandidates(
   // ambiguous, so both placements are emitted and the differ referees. Crossed with branch sense
   // (an anchored copy empties an arm, which is exactly what changes which sense wins); the dedup
   // below collapses every variant the anchoring left unchanged.
-  const senseCands = [
-    { suffix: '', sense: defSense, anchor: false },
-    { suffix: '/flip-branch', sense: !defSense, anchor: false },
-    { suffix: '/defsite', sense: defSense, anchor: true },
-    { suffix: '/flip-branch/defsite', sense: !defSense, anchor: true },
+  const baseSense = [
+    { suffix: '', sense: defSense, anchor: false, bitfields: true },
+    { suffix: '/flip-branch', sense: !defSense, anchor: false, bitfields: true },
+    { suffix: '/defsite', sense: defSense, anchor: true, bitfields: true },
+    { suffix: '/flip-branch/defsite', sense: !defSense, anchor: true, bitfields: true },
   ];
+  // `/no-bitfield` — keep the honest shift spelling where the map would name a bitfield member.
+  // The named read recompiles at the DECLARATION's access width; where that diverges from the
+  // asm's load width, the shifts are the spelling that matches — so both are emitted and the
+  // differ referees. Enumerated only when the map carries any bitfield member at all (checked
+  // below), so the 2× cross is paid exactly by the functions it can help; the dedup collapses
+  // every variant where no fold fired.
+  const mapHasBitfields =
+    opts.symbols !== undefined &&
+    [...opts.symbols.values()].some((infos) =>
+      infos.some((i) => [...(i.layout ?? []), ...(i.pointee?.layout ?? [])].some((f) => f.bitWidth !== undefined)),
+    );
+  const senseCands = mapHasBitfields
+    ? [...baseSense, ...baseSense.map((s) => ({ ...s, suffix: `${s.suffix}/no-bitfield`, bitfields: false }))]
+    : baseSense;
   // Probe: recover ONCE with no signedness pin, to learn which entry params are pointers/aggregates
   // so they are excluded from the signedness axis (see NO_PIN_KINDS). One extra lift+recover, no
   // compile. (The probe deliberately stops after recoverTypes — it only reads the param KINDS, so
@@ -252,9 +268,14 @@ export function enumerateCandidates(
         // senses structure the same recovered function without re-lifting.
         let sfn: SFn;
         try {
-          sfn = structureChecked(fn, { ...svOpts, preserveDivergentBranchSense: s.sense, anchorConstCopies: s.anchor });
+          sfn = structureChecked(fn, {
+            ...svOpts,
+            preserveDivergentBranchSense: s.sense,
+            anchorConstCopies: s.anchor,
+            spellBitfieldMembers: s.bitfields,
+          });
         } catch (e) {
-          if (!s.anchor) {
+          if (!s.anchor && s.bitfields) {
             throw e; // the base axes keep their behavior: a structuring failure aborts the row
           }
           // an anchored variant that fails structuring or its contracts is a dropped lever, never

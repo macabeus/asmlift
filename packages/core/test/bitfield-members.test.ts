@@ -82,6 +82,39 @@ describe('refusals — any mismatch keeps the honest shift spelling', () => {
     expect(src).not.toContain('dreamStones');
   });
 
+  test('a STORE to the folded global between load and extract refuses — the read must not move past it', () => {
+    // adversarial round, CRITICAL 1: `g.field` re-reads memory at the render position, but the
+    // asm captured the bits BEFORE the store; the honest capture-in-a-temp spelling stays
+    const asm =
+      'f:\n\tldr\tr1, .L1\n\tldrh\tr0, [r1]\n\tmovs\tr2, #0\n\tstrh\tr2, [r1]\n' +
+      '\tlsl\tr0, r0, #20\n\tlsr\tr0, r0, #25\n\tbx\tlr\n.L1:\n\t.word\t0x03005220\n';
+    const src = run(asm);
+    expect(src).not.toContain('dreamStones');
+    expect(src).toContain('>> 25');
+  });
+
+  test('a CALL between load and extract refuses — the callee may write the global', () => {
+    const asm =
+      'f:\n\tpush\t{r4, lr}\n\tldr\tr4, .L1\n\tldrh\tr4, [r4]\n\tbl\tg\n' +
+      '\tlsl\tr0, r4, #20\n\tlsr\tr0, r0, #25\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n.L1:\n\t.word\t0x03005220\n';
+    const src = run(asm);
+    expect(src).not.toContain('dreamStones');
+    expect(src).toContain('>> 25');
+  });
+
+  test('a width-8 bit-0 extract is CAST_PATTERNS territory — folded to (u8), never a member name', () => {
+    // engine.ts folds equal-immediate shift pairs (widths 8/16) at the idiom stage, before the
+    // recognizer ever sees them — the documented shadowing: honest cast output at those widths
+    const layout: SymbolStructField[] = [
+      { name: 'octet', offset: 0, size: 1, signed: false, bitWidth: 8, bitOffset: 0 },
+    ];
+    const asm =
+      'f:\n\tldr\tr1, .L1\n\tldrh\tr0, [r1]\n\tlsl\tr0, r0, #24\n\tlsr\tr0, r0, #24\n\tbx\tlr\n.L1:\n\t.word\t0x03005220\n';
+    const src = run(asm, stateInfo({ layout }));
+    expect(src).not.toContain('octet');
+    expect(src).toContain('(u8)');
+  });
+
   test('a PLAIN u16 read of the bitfield bytes never names a bitfield', () => {
     // exact (offset,size) would match dreamStones (size 2 at offset 0) — a 7-bit lvalue for a
     // 16-bit access

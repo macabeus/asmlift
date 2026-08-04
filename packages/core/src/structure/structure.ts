@@ -619,6 +619,16 @@ export interface StructureOptions {
   // the `if`, not as its else-arm. A differ-refereed candidate axis (rank.ts `/defsite`), never a
   // default — see the refusal conditions where it is computed.
   anchorConstCopies?: boolean;
+  // HARDWARE fact from TargetDescription.capabilities.endianness, threaded by structureOptionsFor:
+  // the bitfield extract recognizer solves an LSB-first equation, so it only runs on little-endian
+  // data. The provider already refuses to EMIT bitfield facts for a big-endian ELF; this is the
+  // same boundary enforced on core's side, against a hand-built map that never went through it.
+  littleEndian?: boolean;
+  // Spell `(x << a) >> b` extracts of a struct global as the map's named bitfield member. On by
+  // default; rank.ts enumerates the OFF spelling as the `/no-bitfield` axis, because the named
+  // read recompiles at the DECLARATION's access width — where that diverges from the asm's load
+  // width the honest shift spelling is the one that matches, and the differ referees.
+  spellBitfieldMembers?: boolean;
   // How an unresolvable VALUE degrades (a live `opaque`, an unlowered transient op, a dropped def):
   //   "strict"   (default) — the `"?"` sentinel, tripping assertResolved at the boundary (loud in
   //              the PROCESS);
@@ -640,6 +650,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     orderArgCopiesByComputation = true,
     switchAllowsNeqCase = true,
     anchorConstCopies = false,
+    littleEndian = true,
+    spellBitfieldMembers = true,
     onGap = 'strict',
     symbols,
   } = opts;
@@ -1317,10 +1329,22 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
   // EVERY use is a spelled extract chain must not also emit its materialized `v = *(u16 *)&g;`
   // temp — the compiler CSEs the repeated member reads back to one load, but the leftover temp
   // would be a second one. A VOLATILE container refuses the whole fold: N member reads are N
-  // volatile accesses where the asm did one load.
+  // volatile accesses where the asm did one load. (Byte-level residual, differ-refereed: a load
+  // only PARTIALLY absorbed — one extract spelled, another use kept — emits both the temp and
+  // the named reads, one load more than the asm; semantics hold, the score decides.)
+  //
+  // ORDERING GATE (adversarial round, CRITICAL 1): the named spelling replaces a REGISTER value
+  // — the bits captured at the load's program position — with a fresh memory read at each render
+  // position. Every other memory read in this file goes through the materialization model
+  // (analysis.ts) for exactly that hazard, so the fold must clear the same bar: it refuses
+  // whenever a call, or a store that may alias the folded global, lies between the load and any
+  // position the member read renders at (the extract's own position when materialized, each of
+  // its use sites when inline). Linear program position over-approximates path order — the same
+  // conservative idiom as analysis.ts liveAcrossCall — so a barrier on a disjoint path refuses
+  // harmlessly: the honest shift spelling stays.
   const bitfieldSpelling = new Map<Op, { global: string; field: string }>();
   const absorbedLoads = new Set<Op>();
-  if (symCtx) {
+  if (symCtx && littleEndian && spellBitfieldMembers) {
     // the (name, byte) of a load's address when it resolves through defs alone — `gaddr` or
     // `add(gaddr, const)`; anything else (a materialized base, a variable index) declines
     const loadTargets = new Map<Op, { name: string; byte: number }>();
@@ -1343,6 +1367,28 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
       }
       return null;
     };
+    const blockPos = new Map<Block, number>();
+    fn.blocks.forEach((blk, i) => blockPos.set(blk, i));
+    const linPos = (o: Op): number => blockPos.get(opBlock.get(o)!)! * 1e6 + opIndex.get(o)!;
+    // every op that may WRITE memory, with the global it provably writes (null = could be any)
+    const memBarriers: { pos: number; sym: string | null }[] = [];
+    for (const blk of fn.blocks) {
+      for (const op of blk.ops) {
+        if (op.opcode === 'call') {
+          memBarriers.push({ pos: linPos(op), sym: null });
+        } else if (op.opcode === 'store' || op.opcode === 'astore') {
+          memBarriers.push({ pos: linPos(op), sym: addrOf(op.operands[0], 0)?.name ?? null });
+        }
+      }
+    }
+    const noBarrierBetween = (from: Op, to: Op, sym: string): boolean => {
+      const lo0 = linPos(from);
+      const hi = linPos(to);
+      if (hi < lo0) {
+        return false; // a render linearly BEFORE the load (a back-edge shape) — refuse, not reason
+      }
+      return !memBarriers.some((bar) => bar.pos > lo0 && bar.pos < hi && (bar.sym === null || bar.sym === sym));
+    };
     for (const blk of fn.blocks) {
       for (const op of blk.ops) {
         if ((op.opcode !== 'shr_u' && op.opcode !== 'shr_s') || op.operands.length !== 1) {
@@ -1363,9 +1409,20 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
         if (load?.opcode !== 'load' || lo + w > (load.attrs.width as number) * 8) {
           continue;
         }
+        // a materialized shl would still emit its `v = x << a` temp reading the load — the fold
+        // would then ADD member reads on top of it; rare, refuse
+        if (materialize.has(inner)) {
+          continue;
+        }
         const gb = addrOf(load.operands[0], load.attrs.off as number);
         const si = gb ? symCtx.info(gb.name) : undefined;
         if (!gb || si?.shape !== 'struct' || si.volatile) {
+          continue;
+        }
+        // where does the member read RENDER? at the extract's own position when materialized,
+        // else at each site that consumes it inline
+        const renders = materialize.has(op) ? [op] : (useSitesOf.get(op.results[0]) ?? []).map((s) => s.op);
+        if (!renders.every((r) => noBarrierBetween(load, r, gb.name))) {
           continue;
         }
         const signedRead = op.opcode === 'shr_s';
@@ -1837,6 +1894,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     isNamed: (v) => varName.has(v),
     isCmpOpcode: (opcode) => !!CMP_TO_BIN[opcode],
     switchAllowsNeqCase,
+    emitsAnchoredWrite: (blk) => blk.ops.some((o) => anchoredAt.has(o)),
     expr: (v) => expr(v),
     structureRegion: (b, stop) => structureRegion(b, stop),
   });

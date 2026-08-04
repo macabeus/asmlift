@@ -142,3 +142,51 @@ const IN_LOOP = `fn loopy {
 test('an in-loop merge declines anchoring entirely', () => {
   expect(emit(IN_LOOP, true)).toBe(emit(IN_LOOP, false));
 });
+
+// SWITCH REFUSAL (adversarial round, CRITICAL 2): an eq-chain whose NON-ROOT test block carries
+// an anchored write — `%3` feeds both ^bb1's compare and (via the ^bb4 case body) the merge arg,
+// so it anchors at ^bb1, and collapsing the chain to a `switch` would DISCARD ^bb1's body while
+// the edge copy stays suppressed: s(1) would return 0. The anchored spelling must fall back to
+// the if-chain, which emits every block's statements.
+const EQ_CHAIN = `fn swanchor {
+^bb0(%0: s32):
+  %1: s32 = const {value=0}
+  %2: u32 = icmp_eq %0, %1
+  cond_br %2, ^bb3(), ^bb1()
+^bb1():
+  %3: s32 = const {value=1}
+  %4: u32 = icmp_eq %0, %3
+  cond_br %4, ^bb4(), ^bb2()
+^bb2():
+  %5: s32 = const {value=2}
+  %6: u32 = icmp_eq %0, %5
+  cond_br %6, ^bb5(), ^bb6()
+^bb3():
+  br ^bb7(%1)
+^bb4():
+  br ^bb7(%3)
+^bb5():
+  %7: s32 = const {value=9}
+  br ^bb7(%7)
+^bb6():
+  %8: s32 = const {value=7}
+  br ^bb7(%8)
+^bb7(%9: s32):
+  ret %9
+}
+`;
+
+test('a test block carrying an anchored write is never consumed as a discarded test — the write survives', () => {
+  const off = emit(EQ_CHAIN, false);
+  expect(off).toContain('switch ('); // the shape IS a switch without anchoring
+  // With anchoring, ^bb1 may not be swallowed as a pure test block; it becomes the ROOT of a
+  // smaller switch instead — roots emit their statements (including the anchored write) before
+  // the switch, so the write survives, ORDERED before the dispatch.
+  const on = emit(EQ_CHAIN, true);
+  const write = on.indexOf('v0 = 1;');
+  expect(write).toBeGreaterThan(-1);
+  const dispatch = on.indexOf('switch (');
+  if (dispatch !== -1) {
+    expect(write).toBeLessThan(dispatch);
+  }
+});

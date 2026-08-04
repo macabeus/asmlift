@@ -219,7 +219,14 @@ const sextPat = (w: number, k: number): RewritePattern => ({
 
 /** Byte/half zero- and sign-extension casts. Byte = shift by 24, half = shift by 16. The
  *  zero-extend forms fix a miscompile; the sign-extend forms already byte-matched as raw shifts and
- *  fold here for readability + `(s8)`/`(s16)` parity, staying byte-exact (`(s8)x` → `lsl;asr`). */
+ *  fold here for readability + `(s8)`/`(s16)` parity, staying byte-exact (`(s8)x` → `lsl;asr`).
+ *
+ *  SHADOWING NOTE: these run at the idiom stage, BEFORE structuring — so a symbol-map BITFIELD of
+ *  width exactly 8 or 16 whose bits start at bit 0 of its load is folded to `(u8)x`/`(u16)x` here
+ *  and never reaches the bitfield member recognizer (structure.ts, which matches the raw
+ *  `shr(shl(load))` shape only). Honest output, not a miscompile — the field just keeps the cast
+ *  spelling at those widths. Teaching the recognizer a zext/sext arm is the coverage extension if
+ *  a row ever needs it. */
 export const CAST_PATTERNS: RewritePattern[] = [zextPat(8, 24), zextPat(16, 16), sextPat(8, 24), sextPat(16, 16)];
 
 // The DEFAULT idiom bundle `decompile()` applies when the caller passes no `patterns`. It is
