@@ -607,6 +607,11 @@ export interface StructureOptions {
   // body). GCC freely uses `!=`; IDO prefers `==`/`<`. A per-compiler DATA lever, not an `arch ==`
   // branch — default true (permissive; the decline path keeps it sound either way).
   switchAllowsNeqCase?: boolean;
+  // Anchor a constant merge copy at its const op's ORIGINAL position instead of at the CFG edge:
+  // `movs r9, #0` at entry ahead of a single-armed overwrite emits as a pre-initialization above
+  // the `if`, not as its else-arm. A differ-refereed candidate axis (rank.ts `/defsite`), never a
+  // default — see the refusal conditions where it is computed.
+  anchorConstCopies?: boolean;
   // How an unresolvable VALUE degrades (a live `opaque`, an unlowered transient op, a dropped def):
   //   "strict"   (default) — the `"?"` sentinel, tripping assertResolved at the boundary (loud in
   //              the PROCESS);
@@ -627,6 +632,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     preserveDivergentBranchSense = true,
     orderArgCopiesByComputation = true,
     switchAllowsNeqCase = true,
+    anchorConstCopies = false,
     onGap = 'strict',
     symbols,
   } = opts;
@@ -1175,6 +1181,117 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     }
   }
 
+  // ── def-site anchoring of constant merge copies (anchorConstCopies) ──────────────────────────
+  // An edge copy `v = K` places the constant where the EDGE is, but the asm often materialized K
+  // earlier: `movs r9, #0` at entry ahead of a single-armed overwrite, `movs r5, #1` at the top
+  // of an arm ahead of a nested if. Anchoring the copy at the const op's own program position
+  // reproduces that placement — the write is emitted as a statement there (sideEffects reads
+  // `anchoredAt`) and the edge copies it replaces are suppressed (argAssignsFor reads
+  // `suppressedArgs`). Where the surviving arm then empties, mkIf's empty-then peephole yields
+  // the single-armed positive `if` the source wrote.
+  //
+  // REFUSAL CONDITIONS — each keeps the edge placement, never producing a different write:
+  //   - the arg is not an UNNAMED `const` op (only a rematerializable constant carries
+  //     unambiguous placement evidence; a named value's position is its materialized def's);
+  //   - the merge is a loop header (loop copies have their own placement discipline);
+  //   - the const's block does not dominate every edge source passing it (the anchored write
+  //     must precede the edge on every path);
+  //   - the const's block or any edge source sits inside ANY loop. Block-level dominance does
+  //     not give per-ITERATION precedence — a path may pass the def in iteration 1 and take the
+  //     suppressed edge in iteration 2 with the variable overwritten in between, the /preinit
+  //     sticky-arm failure class (PR #13) — so in-loop shapes are declined outright;
+  //   - the merge variable names any OTHER SSA value (a shared name has readers and writers
+  //     between the def site and the edge that edge placement respects and anchoring would not);
+  //   - another anchored const of the same variable lies on a path from this one to this one's
+  //     edge (the later write would clobber this arg's value; both stay at their edges instead).
+  const anchoredAt = new Map<Op, { name: string; arg: Value }[]>();
+  const suppressedArgs = new Map<object, Set<number>>();
+  if (anchorConstCopies) {
+    const nameCount = new Map<string, number>();
+    for (const n of varName.values()) {
+      nameCount.set(n, (nameCount.get(n) ?? 0) + 1);
+    }
+    const inLoop = (b: Block): boolean => {
+      for (const nl of forest.byHeader.values()) {
+        if (nl.body.has(b)) {
+          return true;
+        }
+      }
+      return false;
+    };
+    // conservative "a write in `a` may execute between one in `b` and `b`'s terminator": same
+    // block counts (op order refined by the caller where it matters), else CFG reachability
+    const mayFollow = (a: Block, b: Block): boolean => a === b || reachFrom(a).has(b);
+    for (const M of fn.blocks) {
+      if (M === entry || M.params.length === 0 || forest.byHeader.has(M)) {
+        continue;
+      }
+      M.params.forEach((p, i) => {
+        const name = varName.get(p)!;
+        if (nameCount.get(name) !== 1) {
+          return;
+        }
+        // every in-edge record into M, grouped by the SSA value it passes for param i
+        const groups = new Map<Value, { rec: { block: Block; args: Value[] }; src: Block }[]>();
+        for (const pr of new Set(preds.get(M) ?? [])) {
+          for (const s of pr.ops[pr.ops.length - 1].successors) {
+            if (s.block === M) {
+              const g = groups.get(s.args[i]);
+              if (g) {
+                g.push({ rec: s, src: pr });
+              } else {
+                groups.set(s.args[i], [{ rec: s, src: pr }]);
+              }
+            }
+          }
+        }
+        const candidates: { arg: Value; def: Op; defBlock: Block; edges: { rec: object; src: Block }[] }[] = [];
+        for (const [arg, edges] of groups) {
+          const def = defs.get(arg);
+          if (!def || def.opcode !== 'const' || varName.has(arg)) {
+            continue;
+          }
+          const defBlock = opBlock.get(def)!;
+          if (inLoop(defBlock) || edges.some(({ src }) => inLoop(src))) {
+            continue;
+          }
+          if (edges.some(({ src }) => !dom.get(src)!.has(defBlock))) {
+            continue;
+          }
+          candidates.push({ arg, def, defBlock, edges });
+        }
+        // pairwise clobber check: candidate `c` is unsafe when another candidate's write can lie
+        // between c's def and one of c's edges (def_c → def_o → edge_c); both then keep their edges
+        const safe = candidates.filter((c) =>
+          candidates.every((o) => {
+            if (o === c) {
+              return true;
+            }
+            const oAfterC =
+              c.defBlock === o.defBlock ? opIndex.get(o.def)! > opIndex.get(c.def)! : mayFollow(c.defBlock, o.defBlock);
+            return !(oAfterC && c.edges.some(({ src }) => mayFollow(o.defBlock, src)));
+          }),
+        );
+        for (const c of safe) {
+          const at = anchoredAt.get(c.def);
+          if (at) {
+            at.push({ name, arg: c.arg });
+          } else {
+            anchoredAt.set(c.def, [{ name, arg: c.arg }]);
+          }
+          for (const { rec } of c.edges) {
+            const sup = suppressedArgs.get(rec);
+            if (sup) {
+              sup.add(i);
+            } else {
+              suppressedArgs.set(rec, new Set([i]));
+            }
+          }
+        }
+      });
+    }
+  }
+
   // An unresolvable value: strict mode keeps the `"?"` sentinel AND records the reason — the
   // decline thrown below names the actual gaps ("unmodelled instruction 'adde'"), the same
   // reasons annotate mode's markers carry, instead of the anonymous `?` that assertResolved
@@ -1460,7 +1577,11 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     const target = succ.block;
     const argExpr = sub ? exprWith(sub) : expr;
     const copies: { name: string; value: Expr; arg: Value }[] = [];
+    const suppressed = suppressedArgs.get(succ);
     target.params.forEach((p, i) => {
+      if (suppressed?.has(i)) {
+        return;
+      } // anchored at its const's def site — the write already ran before this edge
       const name = varName.get(p)!;
       const arg = succ.args[i];
       if ((sub?.get(arg) ?? varName.get(arg)) === name) {
@@ -1544,6 +1665,10 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
       } else if (materialize.has(op)) {
         const nm = varName.get(op.results[0])!;
         out.push({ k: 'assign', name: nm, value: castAggregateAddr(nm, lowerDef(op, expr)) });
+      }
+      // a merge copy anchored at this const's original position (anchorConstCopies, above)
+      for (const a of anchoredAt.get(op) ?? []) {
+        out.push({ k: 'assign', name: a.name, value: expr(a.arg) });
       }
     }
     return out;

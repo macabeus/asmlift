@@ -198,9 +198,17 @@ export function enumerateCandidates(
   // and let the differ referee. The default sense is always among them, so this never scores
   // worse; it only wins where the flip matches.
   const defSense = baseOpts.preserveDivergentBranchSense ?? true;
+  // `/defsite` — def-site-anchored constant merge copies (structure.ts anchorConstCopies) — is a
+  // structuring axis on the same footing as branch sense: where the asm materialized a merge
+  // constant is placement evidence, but whether the SOURCE spelled it there is genuinely
+  // ambiguous, so both placements are emitted and the differ referees. Crossed with branch sense
+  // (an anchored copy empties an arm, which is exactly what changes which sense wins); the dedup
+  // below collapses every variant the anchoring left unchanged.
   const senseCands = [
-    { suffix: '', sense: defSense },
-    { suffix: '/flip-branch', sense: !defSense },
+    { suffix: '', sense: defSense, anchor: false },
+    { suffix: '/flip-branch', sense: !defSense, anchor: false },
+    { suffix: '/defsite', sense: defSense, anchor: true },
+    { suffix: '/flip-branch/defsite', sense: !defSense, anchor: true },
   ];
   // Probe: recover ONCE with no signedness pin, to learn which entry params are pointers/aggregates
   // so they are excluded from the signedness axis (see NO_PIN_KINDS). One extra lift+recover, no
@@ -242,7 +250,18 @@ export function enumerateCandidates(
       for (const s of senseCands) {
         // structure() reads `fn` and produces a fresh SFn (it does not mutate `fn`), so both branch
         // senses structure the same recovered function without re-lifting.
-        const sfn = structureChecked(fn, { ...svOpts, preserveDivergentBranchSense: s.sense });
+        let sfn: SFn;
+        try {
+          sfn = structureChecked(fn, { ...svOpts, preserveDivergentBranchSense: s.sense, anchorConstCopies: s.anchor });
+        } catch (e) {
+          if (!s.anchor) {
+            throw e; // the base axes keep their behavior: a structuring failure aborts the row
+          }
+          // an anchored variant that fails structuring or its contracts is a dropped lever, never
+          // an aborted enumeration — same rule as respell below
+          opts.onLeverError?.(name + s.suffix, e instanceof Error ? e.message.split('\n')[0] : String(e));
+          continue;
+        }
         // The walk→index re-spelling (l3/reindex.ts) is a THIRD lever on the same footing as
         // signedness and branch sense: whether the source spelled `*p; p++` or `arr[i]` is
         // genuinely ambiguous from asm (compilers strength-reduce the latter into the former), so
