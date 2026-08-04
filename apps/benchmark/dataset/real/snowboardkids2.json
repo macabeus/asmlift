@@ -64,7 +64,8 @@
         "branch",
         "global",
         "struct",
-        "field"
+        "field",
+        "bitwise"
       ],
       "note": "src/38BE0.c: settings getter with if-chain over a global struct; leaf",
       "prependC": "#include \"EepromSaveData_type.h\"",
@@ -124,8 +125,7 @@
       "sym": "func_80021D88_22988",
       "features": [
         "call",
-        "branch",
-        "local"
+        "branch"
       ],
       "note": "src/22920.c: game-state dispatch",
       "prependC": "void *getCurrentAllocation(void);\ns16 func_80069810_6A410(void);\nvoid setGameStateHandler(void (*)(void));\nvoid terminateSchedulerWithCallback(void (*)(void));\nvoid func_80021DE8_229E8(void);\nvoid func_80022108_22D08(void);",
@@ -181,8 +181,7 @@
       "features": [
         "branch",
         "call",
-        "cast",
-        "return"
+        "cast"
       ],
       "note": "src/36B80.c: selects one of two compressed assets to load",
       "prependC": "extern u32 *_3F6950_ROM_START;\nextern u32 *_3F6950_ROM_END;\nextern u32 *_459E00_ROM_START;\nextern u32 *_459E00_ROM_END;\nvoid *loadCompressedData(void *, void *, s32);",
@@ -210,10 +209,12 @@
     {
       "sym": "func_8002ADB4_2B9B4",
       "features": [
-        "fixedpoint",
+        "fixed-point",
         "bitwise",
         "branch",
-        "compare"
+        "compare",
+        "goto",
+        "shift"
       ],
       "note": "src/2AF90.c: angle interpolation with wrap handling; pure leaf, uses ABS macro",
       "funcC": "s16 func_8002ADB4_2B9B4(s16 arg0, s16 arg1) {\n    s16 target;\n    s16 current;\n    s32 diff;\n    s16 absDiff;\n    s16 direction;\n\n    target = arg0;\n    current = arg1;\n\n    if (arg0 == arg1) {\n        goto done;\n    }\n\n    diff = arg0 - arg1;\n    diff = ABS(diff);\n\n    if ((s16)diff >= 0x1001) {\n        if (arg1 < arg0) {\n            current = arg1 + 0x2000;\n        } else {\n            target = arg0 + 0x2000;\n        }\n    }\n\n    arg0 = target;\n    arg1 = current;\n\n    diff = arg0 - arg1;\n    absDiff = ABS(diff);\n\n    if (absDiff >= 0xAAB) {\n        current += 0x1000;\n        goto done;\n    }\n\n    if (arg1 < arg0) {\n        direction = 1;\n    } else {\n        direction = -1;\n    }\n\n    if (absDiff >= 0x80) {\n        current += direction << 7;\n        goto done;\n    }\n\n    current = (current + absDiff * direction) & 0x1FFF;\n\ndone:\n    return current;\n}",
@@ -224,7 +225,7 @@
       "features": [
         "bitwise",
         "branch",
-        "fixedpoint"
+        "fixed-point"
       ],
       "note": "src/2AF90.c: signed angle difference in 13-bit angle space; pure leaf",
       "funcC": "s16 func_8002B4B8_2C0B8(u16 arg0, u16 arg1) {\n    s16 diff;\n\n    arg0 &= 0x1FFF;\n    arg1 &= 0x1FFF;\n    diff = (arg1 - arg0) & 0x1FFF;\n\n    if (diff >= 0x1001) {\n        diff |= 0xE000;\n    }\n\n    return diff;\n}",
@@ -253,7 +254,9 @@
         "struct",
         "field",
         "global",
-        "branch"
+        "branch",
+        "nested-loop",
+        "call"
       ],
       "note": "src/1BBA0.c: nested loop counting active players, clears a flag row when none remain",
       "prependC": "#include \"gamestate.h\"\n#include \"D_800AFE8C_A71FC_type.h\"\n#include \"task_scheduler.h\"",
@@ -326,7 +329,7 @@
       "sym": "func_8002ACFC_2B8FC",
       "features": [
         "call",
-        "fixedpoint",
+        "fixed-point",
         "branch",
         "global"
       ],
@@ -354,7 +357,7 @@
       "features": [
         "loop",
         "branch",
-        "call"
+        "do-while"
       ],
       "funcC": "void func_800154A8_160A8(s8 *arg0, u16 arg1) {\n    s32 end;\n    s32 ptr;\n\n    if (arg1 == 0) {\n        return;\n    }\n\n    ptr = (s32)arg0;\n    end = arg1 + ptr;\n    do {\n        *(s8 *)ptr = 0;\n        ptr++;\n    } while (ptr < end);\n}",
       "sourceUrl": "https://github.com/macabeus/snowboardkids2-decomp/blob/66e9f600be2b82dc08c87ccf0d2c6ed14509e489/src/15690.c#L304-L318"
@@ -391,8 +394,7 @@
     {
       "sym": "func_800B93F0_1E64A0",
       "features": [
-        "branch",
-        "call"
+        "branch"
       ],
       "prependC": "#include \"1E64A0.h\"",
       "funcC": "s32 func_800B93F0_1E64A0(s32 arg0) {\n    s32 result;\n\n    if (arg0 == 0) {\n        arg0 = 1;\n    }\n\n    result = 0x4000000 / arg0;\n\n    if (result >= 0x4000) {\n        result = 0x4000;\n    }\n\n    return result;\n}",
@@ -428,7 +430,9 @@
         "struct",
         "bitwise",
         "branch",
-        "call"
+        "call",
+        "ternary",
+        "shift"
       ],
       "prependC": "#include \"1E36C0.h\"",
       "funcC": "void func_800B7620_1E46D0(CutsceneSlotData *arg0, s32 arg1, s16 arg2, s16 arg3) {\n    s32 temp_a0;\n    s32 temp_v0;\n    s32 temp_v1;\n    s32 var_v0;\n    s32 var_v1;\n\n    arg0->unk0.Two = 6;\n    arg0->unk94 = arg1;\n    arg0->unk92 = arg3;\n    arg0->unk84 = arg2;\n    arg0->unk86 = arg2;\n    temp_a0 = ((s16)atan2Fixed(arg0->unk20_u.unk20_s32, arg0->unk2C) + 0x1000) & 0x1FFF;\n    arg0->unk9C_u.unk9C_s32 = temp_a0;\n    temp_v1 = approximateCos(temp_a0) << 2;\n    if (temp_v1 == 0) {\n        var_v1 = (arg0->unk20_u.unk20_s32 << 8) / ((approximateSin(arg0->unk9C_u.s.unk9E) << 2) >> 8);\n        var_v1 = (var_v1 > 0) ? var_v1 : -var_v1;\n        arg0->unk98 = var_v1;\n    } else {\n        var_v0 = (arg0->unk2C << 8) / (temp_v1 >> 8);\n        var_v0 = (var_v0 > 0) ? var_v0 : -var_v0;\n        arg0->unk98 = var_v0;\n    }\n    temp_v0 = arg0->unk94;\n    if (temp_v0 > 0) {\n        arg0->unk7A = (arg0->unk9C_u.unk9C_s32 + 0x800) & 0x1FFF;\n    } else if (temp_v0 < 0) {\n        arg0->unk7A = (arg0->unk9C_u.unk9C_s32 - 0x800) & 0x1FFF;\n    }\n}",
@@ -438,8 +442,7 @@
       "sym": "func_800B7760_1E4810",
       "features": [
         "struct",
-        "branch",
-        "call"
+        "branch"
       ],
       "prependC": "#include \"1E36C0.h\"",
       "funcC": "void func_800B7760_1E4810(CutsceneSlotData *arg0, s32 arg1, s16 arg2) {\n    s32 diff;\n    s32 delta;\n\n    if (arg2 > 0) {\n        diff = arg1 - arg0->unk54;\n        delta = diff / arg2;\n        arg0->unk60 = arg1;\n        arg0->unk6C = delta;\n    } else {\n        arg0->unk54 = arg1;\n        arg0->unk60 = arg1;\n        arg0->unk6C = 0;\n    }\n}",
@@ -483,7 +486,6 @@
       "sym": "func_8005DF10_5EB10",
       "features": [
         "shift",
-        "loop",
         "struct",
         "pointer",
         "call"
@@ -517,7 +519,10 @@
         "int64",
         "goto",
         "memory",
-        "struct"
+        "struct",
+        "loop",
+        "bitwise",
+        "call"
       ],
       "funcC": "void func_8005AE8C_5BA8C(Player *player) {\n    Vec3i deltaPos;\n    u8 pad[0x8];\n    void *collisionBoxPtr;\n    s32 unused1;\n    s32 unused2;\n    s32 combinedRadius;\n    s32 negRadius;\n    s32 dist;\n    s32 boxIndex;\n    Player *targetPlayer;\n    Player *players;\n\n    players = ((GameState *)getCurrentAllocation())->players;\n    targetPlayer = players + 1;\n\n    /* Skip collision if players are on the same team */\n    if (player->unkBB8 == targetPlayer->unkBB8) {\n        return;\n    }\n    /* Skip if either player has collision disabled (flag 0x10) */\n    if (player->unkB88 & 0x10) {\n        return;\n    }\n    if (targetPlayer->unkB88 & 0x10) {\n        return;\n    }\n\n    if ((s8)targetPlayer->unkBB4 > 0) {\n        boxIndex = 0;\n        collisionBoxPtr = targetPlayer;\n        do {\n            /* Copy target's collision box local position (offset 0xAE4 is unkAE4 array) */\n            memcpy(&deltaPos, (u8 *)collisionBoxPtr + 0xAE4, 0xC);\n\n            /* Convert to world space */\n            deltaPos.x += targetPlayer->worldPos.x;\n            deltaPos.y += targetPlayer->worldPos.y;\n            deltaPos.z += targetPlayer->worldPos.z;\n\n            /* Calculate relative position to player's collision box */\n            deltaPos.x -= player->worldPos.x + player->unkAD4[0];\n            deltaPos.y -= player->worldPos.y + player->unkAD4[1];\n            deltaPos.z -= player->worldPos.z + player->unkAD4[2];\n\n            /* Sum of both collision box radii */\n            combinedRadius = (&targetPlayer->unkB2C)[boxIndex] + player->unkAE0;\n            negRadius = -combinedRadius;\n\n            /* Quick AABB check before expensive distance calculation */\n            if (negRadius < deltaPos.x && deltaPos.x < combinedRadius && negRadius < deltaPos.y &&\n                deltaPos.y < combinedRadius && negRadius < deltaPos.z && deltaPos.z < combinedRadius) {\n\n                dist =\n                    isqrt64((s64)deltaPos.x * deltaPos.x + (s64)deltaPos.y * deltaPos.y + (s64)deltaPos.z * deltaPos.z);\n\n                if (dist < combinedRadius) {\n                    /* Check for special knockback on collision boxes 4-5 when target is in state 1 */\n                    if (targetPlayer->unkBD9 == 1) {\n                        if ((targetPlayer->unkB84 & 0x40000) && (u32)(boxIndex - 4) < 2U) {\n                            func_80058B30_59730(player);\n                            goto next;\n                        }\n                    }\n                    /* Check for special knockback on collision boxes 1-2 when target is in state 3 */\n                    if (targetPlayer->unkBD9 == 3 && (targetPlayer->unkB84 & 0x40000) && (u32)(boxIndex - 1) < 2U) {\n                        func_80058B30_59730(player);\n                        goto next;\n                    }\n\n                    /* Avoid divide by zero */\n                    if (dist == 0) {\n                        dist = 1;\n                    }\n\n                    /* Calculate push vector to separate the players */\n                    deltaPos.x = ((s64)deltaPos.x * combinedRadius / dist) - deltaPos.x;\n                    deltaPos.y = ((s64)deltaPos.y * combinedRadius / dist) - deltaPos.y;\n                    deltaPos.z = ((s64)deltaPos.z * combinedRadius / dist) - deltaPos.z;\n\n                    /* Push player out of collision */\n                    player->worldPos.x -= deltaPos.x;\n                    player->worldPos.y -= deltaPos.y;\n                    player->worldPos.z -= deltaPos.z;\n\n                    /* Apply knockback if target is in state 2 and colliding with main collision box */\n                    if ((targetPlayer->unkBD9 == 2) & (boxIndex == 0)) {\n                        dist = isqrt64((s64)deltaPos.x * deltaPos.x + (s64)deltaPos.z * deltaPos.z);\n                        if (dist > 0x30000) {\n                            func_80058950_59550(\n                                player,\n                                func_8006D21C_6DE1C(\n                                    targetPlayer->worldPos.x,\n                                    targetPlayer->worldPos.z,\n                                    player->worldPos.x,\n                                    player->worldPos.z\n                                ),\n                                dist\n                            );\n                        }\n                    }\n                }\n            }\n        next:\n            boxIndex++;\n            collisionBoxPtr = (u8 *)collisionBoxPtr + 0xC;\n        } while (boxIndex < (s8)targetPlayer->unkBB4);\n    }\n}",
       "prependC": "#include \"5AA90.h\"\n#include \"3E160.h\"\n#include \"56910.h\"\n#include \"594E0.h\"\n#include \"5DBC0.h\"\n#include \"common.h\"\n#include \"displaylist.h\"\n#include \"gamestate.h\"\n#include \"geometry.h\"\n#include \"task_scheduler.h\"",
@@ -535,7 +540,9 @@
         "goto",
         "struct",
         "pointer",
-        "branch"
+        "branch",
+        "bitwise",
+        "call"
       ],
       "funcC": "s32 func_800B2C18_A2AC8(Player *arg0) {\n    GameState *state;\n    s32 flags;\n    u8 stateUnk7A;\n    s16 var_a0;\n    s16 var_v1;\n    s32 temp_v0;\n\n    state = getCurrentAllocation();\n    flags = arg0->unkB84;\n\n    if (flags & 1) {\n        return 0;\n    }\n\n    if (flags & 0x1000) {\n        func_800B46BC_A456C(arg0);\n        return 1;\n    }\n\n    if (flags & 0x80000) {\n        goto skip_to_end;\n    }\n\n    stateUnk7A = state->unk7A;\n    if (stateUnk7A != 0 && stateUnk7A != 8) {\n        if (!(stateUnk7A == 9 || stateUnk7A == 10)) {\n            arg0->unkBAC = 0;\n        }\n    }\n\n    if (arg0->unkBAC != 0) {\n        func_80059A48_5A648(arg0, arg0->unkBAC);\n        if (arg0->unkBC7 == 0) {\n            func_8004D890_4E490(arg0->unkBB8, arg0->unkBAC);\n\n            var_v1 = arg0->unkBAC;\n            if (var_v1 < 0x96) {\n                var_a0 = 0x11C;\n            } else {\n                var_a0 = 0x11D;\n            }\n\n            if (var_v1 >= 0x12C) {\n                var_a0 = 0x11E;\n            }\n            if (var_v1 >= 0x190) {\n                var_a0 = 0x11F;\n            }\n            if (var_v1 >= 0x1F4) {\n                var_a0 = 0x120;\n            }\n            if (var_v1 >= 0xBB8) {\n                var_a0 = 0x121;\n            }\n\n            func_80058530_59130(var_a0, 6);\n        }\n    }\n\n    if (state->unk7A == 6) {\n        if (arg0->unkBAA != 0) {\n            func_8004FCF0_508F0(arg0->unkBAA);\n            func_80059A88_5A688(arg0, arg0->unkBAA);\n\n            var_v1 = arg0->unkBAA;\n            if (var_v1 < 0xF) {\n                var_a0 = 0x11C;\n            } else {\n                var_a0 = 0x11D;\n            }\n\n            if (var_v1 >= 0x1E) {\n                var_a0 = 0x11E;\n            }\n            if (var_v1 >= 0x37) {\n                var_a0 = 0x11F;\n            }\n            if (var_v1 >= 0x5F) {\n                var_a0 = 0x120;\n            }\n            if (var_v1 >= 0x3E7) {\n                var_a0 = 0x121;\n            }\n\n            func_80058530_59130(var_a0, 6);\n        }\n    }\n\nskip_to_end:\n    if (arg0->unkBAE != 0) {\n        func_80059BD4_5A7D4(arg0);\n        func_8005D804_5E404(arg0, 1, 0xF);\n    }\n\n    func_800B00D4_9FF84(arg0, 3);\n    return 1;\n}",
       "prependC": "#include \"9FF70.h\"\n#include \"3E160.h\"\n#include \"42170.h\"\n#include \"46080.h\"\n#include \"4CD70.h\"\n#include \"51060.h\"\n#include \"56910.h\"\n#include \"594E0.h\"\n#include \"5AA90.h\"\n#include \"5DBC0.h\"\n#include \"5E590.h\"\n#include \"6E840.h\"\n#include \"A9A40.h\"\n#include \"common.h\"\n#include \"gamestate.h\"\n#include \"geometry.h\"\n#include \"graphics.h\"\n#include \"levels/starlight_highway.h\"\n#include \"rand.h\"\n#include \"task_scheduler.h\"",
@@ -548,7 +555,10 @@
         "int64",
         "memory",
         "struct",
-        "arithmetic"
+        "arithmetic",
+        "loop",
+        "bitwise",
+        "call"
       ],
       "funcC": "void func_8005AB58_5B758(Player *player) {\n    Vec3i deltaPos;\n    GameState *allocation;\n    s32 unused1;\n    s32 combinedRadius;\n    s32 playerIndex;\n    Player *targetPlayer;\n    s32 numPlayers;\n\n    allocation = (GameState *)getCurrentAllocation();\n    numPlayers = allocation->numPlayers;\n\n    for (playerIndex = 0; playerIndex < allocation->numPlayers; playerIndex++) {\n        targetPlayer = &allocation->players[playerIndex];\n\n        /* Skip collision if players are on the same team */\n        if (player->unkBB8 == targetPlayer->unkBB8) {\n            continue;\n        }\n\n        /* Skip if either player has collision disabled (flag 0x10) */\n        if (player->unkB88 & 0x10) {\n            continue;\n        }\n        if (targetPlayer->unkB88 & 0x10) {\n            continue;\n        }\n\n        /* Copy target's collision box local position */\n        memcpy(&deltaPos, &targetPlayer->unkAD4, 0xC);\n\n        /* Convert to world space */\n        deltaPos.x += targetPlayer->worldPos.x;\n        deltaPos.y += targetPlayer->worldPos.y;\n        deltaPos.z += targetPlayer->worldPos.z;\n\n        /* Calculate relative position to player's collision box */\n        deltaPos.x -= player->worldPos.x + player->unkAD4[0];\n        deltaPos.y -= player->worldPos.y + player->unkAD4[1];\n        deltaPos.z -= player->worldPos.z + player->unkAD4[2];\n\n        /* Sum of both collision box radii */\n        combinedRadius = targetPlayer->unkAE0 + player->unkAE0;\n\n        /* Quick AABB check before expensive distance calculation */\n        if (-combinedRadius < deltaPos.x && deltaPos.x < combinedRadius && -combinedRadius < deltaPos.y &&\n            deltaPos.y < combinedRadius && -combinedRadius < deltaPos.z && deltaPos.z < combinedRadius) {\n            s32 dist;\n\n            dist = isqrt64((s64)deltaPos.x * deltaPos.x + (s64)deltaPos.y * deltaPos.y + (s64)deltaPos.z * deltaPos.z);\n\n            if (dist < combinedRadius) {\n                /* Avoid divide by zero */\n                if (dist == 0) {\n                    dist = 1;\n                }\n\n                /* Calculate push vector to separate the players */\n                deltaPos.x = ((s64)deltaPos.x * combinedRadius / dist) - deltaPos.x;\n                deltaPos.y = ((s64)deltaPos.y * combinedRadius / dist) - deltaPos.y;\n                deltaPos.z = ((s64)deltaPos.z * combinedRadius / dist) - deltaPos.z;\n\n                /* Skip push if player has flag 0x80 */\n                if (player->unkB84 & 0x80) {\n                    continue;\n                }\n\n                /* If target has flag 0x80, do full push */\n                if (targetPlayer->unkB84 & 0x80) {\n                    player->worldPos.x -= deltaPos.x;\n                    player->worldPos.y -= deltaPos.y;\n                    player->worldPos.z -= deltaPos.z;\n                } else {\n                    /* Half push */\n                    player->worldPos.x -= deltaPos.x / 2;\n                    player->worldPos.y -= deltaPos.y / 2;\n                    player->worldPos.z -= deltaPos.z / 2;\n                }\n            }\n        }\n    }\n}",
       "prependC": "#include \"5AA90.h\"\n#include \"3E160.h\"\n#include \"56910.h\"\n#include \"594E0.h\"\n#include \"5DBC0.h\"\n#include \"common.h\"\n#include \"displaylist.h\"\n#include \"gamestate.h\"\n#include \"geometry.h\"\n#include \"task_scheduler.h\"",
@@ -566,7 +576,9 @@
         "switch",
         "struct",
         "pointer",
-        "branch"
+        "branch",
+        "bitwise",
+        "call"
       ],
       "funcC": "s32 func_800B3F2C_A3DDC(Player *arg0) {\n    u32 temp_v0;\n    s32 temp_v1;\n    s32 temp_v0_2;\n    u8 state;\n    s32 temp;\n\n    temp_v0 = arg0->unkB84;\n    temp_v1 = arg0->unk450;\n\n    arg0->unk44C = 0;\n    arg0->unk454 = 0;\n\n    temp_v0 |= 0x60;\n    temp_v1 += -0x6000;\n\n    arg0->unkB84 = temp_v0;\n    arg0->unk450 = temp_v1;\n\n    func_800B40D4_A3F84(arg0);\n    func_800B02AC_A015C(arg0);\n\n    temp = arg0->unkAE0;\n    if (!(0xDFFFF < temp)) {\n        arg0->unkAE0 = temp + 0x8000;\n    }\n\n    state = arg0->unkBC0;\n\n    switch (state) {\n        case 0:\n            if (func_8005D308_5DF08(arg0, 0x1E)) {\n                temp_v0_2 = arg0->unkBC0;\n                temp_v0_2++;\n                arg0->unkBC0 = temp_v0_2;\n            }\n            break;\n\n        case 1:\n            if (func_8005D308_5DF08(arg0, 0x20)) {\n                temp_v1 = 0x14;\n                temp_v0_2 = arg0->unkBC0;\n                arg0->unkB8C = temp_v1;\n                temp_v0_2++;\n                arg0->unkBC0 = temp_v0_2;\n            }\n            break;\n\n        case 2:\n            temp_v0_2 = arg0->unkB8C;\n            if (temp_v0_2 != 0) {\n                temp_v0_2--;\n                arg0->unkB8C = temp_v0_2;\n            } else {\n                temp_v0_2 = arg0->unkBC0;\n                temp_v0_2++;\n                arg0->unkBC0 = temp_v0_2;\n            }\n            break;\n\n        case 3:\n            if (func_8005D308_5DF08(arg0, 0x1F)) {\n                temp_v0_2 = arg0->unkBC0;\n                temp_v0_2++;\n                arg0->unkBC0 = temp_v0_2;\n            }\n            break;\n\n        case 4:\n            if (func_8005D308_5DF08(arg0, 0x20)) {\n                arg0->unkBC0 = 2;\n                arg0->unkB8C = 0x14;\n            }\n            break;\n    }\n\n    func_8005D804_5E404(arg0, 4, 0);\n\n    return 0;\n}",
       "prependC": "#include \"9FF70.h\"\n#include \"3E160.h\"\n#include \"42170.h\"\n#include \"46080.h\"\n#include \"4CD70.h\"\n#include \"51060.h\"\n#include \"56910.h\"\n#include \"594E0.h\"\n#include \"5AA90.h\"\n#include \"5DBC0.h\"\n#include \"5E590.h\"\n#include \"6E840.h\"\n#include \"A9A40.h\"\n#include \"common.h\"\n#include \"gamestate.h\"\n#include \"geometry.h\"\n#include \"graphics.h\"\n#include \"levels/starlight_highway.h\"\n#include \"rand.h\"\n#include \"task_scheduler.h\"",
@@ -579,7 +591,9 @@
         "switch",
         "struct",
         "pointer",
-        "branch"
+        "branch",
+        "bitwise",
+        "call"
       ],
       "funcC": "void func_800B3784_A3634(Player *arg0) {\n    s32 result;\n    u8 temp;\n\n    switch (arg0->unkBD5) {\n        default:\n            break;\n\n        case 0:\n            arg0->unkBD5++;\n            arg0->unkBD6 = 4;\n        case 1:\n            result = func_800B36F0_A35A0(arg0);\n            if (result != 0) {\n                arg0->unkBD6 = result;\n                arg0->unkBD7 = 0;\n                arg0->unkBD5 = arg0->unkBD5 + 1;\n                arg0->unkB84 |= 0x8000;\n            }\n            func_8005D308_5DF08(arg0, arg0->unkBD6);\n            break;\n\n        case 2:\n            result = func_8005D308_5DF08(arg0, arg0->unkBD6);\n            if (result != 0) {\n                if (arg0->unkBD6 == 0x17) {\n                    func_800B2950_A2800(arg0, 0);\n                }\n\n                if (arg0->unkBD6 == 0x19) {\n                    func_800B2950_A2800(arg0, 1);\n                }\n\n                if (arg0->unkBD6 == 0x15) {\n                    func_800B2950_A2800(arg0, 2);\n                }\n\n                if (arg0->unkBD6 == 0x13) {\n                    func_800B2950_A2800(arg0, 3);\n                }\n\n                arg0->unkBD5++;\n                arg0->unkBD6++;\n            }\n\n            result = func_800B36F0_A35A0(arg0);\n            if (result != 0) {\n                arg0->unkBD7 = result;\n            }\n\n            break;\n\n        case 3:\n            result = func_8005D308_5DF08(arg0, arg0->unkBD6);\n            if (result != 0) {\n                if (arg0->unkBD7 != 0) {\n                    arg0->unkBD5 = 2;\n                    arg0->unkBD6 = arg0->unkBD7;\n                    arg0->unkBD7 = 0;\n                    break;\n                } else {\n                    arg0->unkB84 &= 0xFFFF7FFF;\n                    arg0->unkBD5 = 1;\n                }\n            }\n\n            result = func_800B36F0_A35A0(arg0);\n            if (result != 0) {\n                arg0->unkBD7 = result;\n            }\n            break;\n    }\n\n    if (arg0->unkB84 & 0xC000) {\n        arg0->unkB84 |= 0x1000;\n    } else {\n        arg0->unkB84 &= ~0x1000;\n    }\n}",
       "prependC": "#include \"9FF70.h\"\n#include \"3E160.h\"\n#include \"42170.h\"\n#include \"46080.h\"\n#include \"4CD70.h\"\n#include \"51060.h\"\n#include \"56910.h\"\n#include \"594E0.h\"\n#include \"5AA90.h\"\n#include \"5DBC0.h\"\n#include \"5E590.h\"\n#include \"6E840.h\"\n#include \"A9A40.h\"\n#include \"common.h\"\n#include \"gamestate.h\"\n#include \"geometry.h\"\n#include \"graphics.h\"\n#include \"levels/starlight_highway.h\"\n#include \"rand.h\"\n#include \"task_scheduler.h\"",
@@ -596,8 +610,8 @@
       "features": [
         "struct",
         "pointer",
-        "loop",
-        "call"
+        "call",
+        "bitwise"
       ],
       "funcC": "void func_80038090_38C90(s16 arg0) {\n    u8 temp;\n\n    temp = D_800AFE8C_A71FC->saveSlotIndex;\n    if (temp == 0xB) {\n        EepromSaveData->setting_4E = 1;\n        func_800383D8_38FD8(0xF);\n    }\n\n    temp = D_800AFE8C_A71FC->saveSlotIndex;\n    if (temp == 0xE) {\n        EepromSaveData->setting_4F = 1;\n        func_800383D8_38FD8(0xD);\n    }\n\n    temp = D_800AFE8C_A71FC->saveSlotIndex;\n    if (temp == 0xD) {\n        if (arg0 == 7) {\n            EepromSaveData->setting_50 = 1;\n            func_800383D8_38FD8(0xE);\n        }\n    }\n\n    if (D_800AFE8C_A71FC->unk24 != 0) {\n        if (D_800AFE8C_A71FC->saveSlotIndex == 1) {\n            if (func_80038388_38F88(0xA) & 0xFF) {\n                D_800AFE8C_A71FC->errorFlag = 2;\n            }\n        }\n\n        if (D_800AFE8C_A71FC->saveSlotIndex == 3) {\n            if (func_80038388_38F88(0xB) & 0xFF) {\n                D_800AFE8C_A71FC->errorFlag = 3;\n            }\n        }\n\n        if (D_800AFE8C_A71FC->saveSlotIndex == 9) {\n            if (func_80038388_38F88(0xC) & 0xFF) {\n                D_800AFE8C_A71FC->errorFlag = 4;\n            }\n        }\n\n        if (D_800AFE8C_A71FC->saveSlotIndex == 5) {\n            if (func_80038388_38F88(0xE) & 0xFF) {\n                D_800AFE8C_A71FC->errorFlag = 6;\n            }\n        }\n\n        if (D_800AFE8C_A71FC->saveSlotIndex == 8) {\n            if (func_80038388_38F88(0xF) & 0xFF) {\n                D_800AFE8C_A71FC->errorFlag = 7;\n            }\n        }\n\n        if (D_800AFE8C_A71FC->saveSlotIndex == 0xB) {\n            if (func_80038388_38F88(0x10) & 0xFF) {\n                D_800AFE8C_A71FC->errorFlag = 8;\n            }\n        }\n\n        if (D_800AFE8C_A71FC->saveSlotIndex == 0) {\n            if (func_80038388_38F88(0xD) & 0xFF) {\n                D_800AFE8C_A71FC->errorFlag = 5;\n            }\n        }\n\n        if (D_800AFE8C_A71FC->saveSlotIndex == 4) {\n            if (func_80038388_38F88(9) & 0xFF) {\n                D_800AFE8C_A71FC->errorFlag = 1;\n            }\n        }\n\n        if (D_800AFE8C_A71FC->saveSlotIndex == 7) {\n            if (func_80038388_38F88(0x11) & 0xFF) {\n                D_800AFE8C_A71FC->errorFlag = 9;\n            }\n        }\n    }\n}",
       "prependC": "#include \"D_800AFE8C_A71FC_type.h\"\n#include \"EepromSaveData_type.h\"\n#include \"common.h\"",
