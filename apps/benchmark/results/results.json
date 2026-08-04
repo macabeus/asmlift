@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generatedAt": "2026-08-04T13:32:00.367Z",
+    "generatedAt": "2026-08-04T13:43:46.450Z",
     "toolchains": [
       "ido7.1",
       "agbcc",
@@ -14,7 +14,7 @@
       "real": 240
     },
     "asmlift": {
-      "commit": "6137ab420485cd832286ec7448a01cb996da47ac",
+      "commit": "207c07b95e7a90124a9ffa58b20b6f15869d9f02",
       "dirty": false
     },
     "m2c": {
@@ -447,7 +447,8 @@
       "features": [
         "arithmetic",
         "branch",
-        "pointer"
+        "pointer",
+        "hw-div"
       ],
       "loc": 16,
       "refSource": "void adds(s16* pValue, s16 target, s16 scale, s16 maxStep) {\n    s16 diff = target - *pValue;\n    diff /= scale;\n\n    if (diff > maxStep) {\n        *pValue += maxStep;\n        return;\n    }\n\n    if (diff < -maxStep) {\n        *pValue -= maxStep;\n        return;\n    }\n\n    *pValue += diff;\n}",
@@ -2367,8 +2368,9 @@
       "language": "c",
       "features": [
         "switch",
+        "branch",
         "call",
-        "branch"
+        "jump-table"
       ],
       "loc": 43,
       "refSource": "s32 sAdo_Get_KokeruLabel(s32 type) {\n    u16 label = sAdo_Get_WalkLabel(type);\n    s32 ret;\n\n    switch (label) {\n        case 0x201:\n            ret = 0xe;\n            break;\n\n        case 0x206:\n            ret = 0x13;\n            break;\n\n        case 0x202:\n            ret = 0xf;\n            break;\n\n        case 0x203:\n            ret = 0x10;\n            break;\n\n        case 0x204:\n            ret = 0x11;\n            break;\n\n        case 0x205:\n            ret = 0x12;\n            break;\n\n        case 0x208:\n            ret = 0x156;\n            break;\n\n        case 0x209:\n            ret = 0x157;\n            break;\n\n        default:\n            ret = 15;\n            break;\n    }\n    return ret;\n}",
@@ -2753,9 +2755,9 @@
         "float",
         "array",
         "shift",
-        "call",
         "matrix",
-        "bitwise"
+        "bitwise",
+        "call"
       ],
       "loc": 67,
       "refSource": "void suMtxMakeSRT(Mtx* mtx, f32 scaleX, f32 scaleY, f32 scaleZ, s16 rotX, s16 rotY, s16 rotZ, f32 translateX,\n                  f32 translateY, f32 translateZ) {\n    struct {\n        s16 intPart[4][4];\n        u16 fracPart[4][4];\n    }* mu = (void*)mtx;\n    s32 fp;\n    f32 sinX = sin_s(rotX);\n    f32 sinY = sin_s(rotY);\n    f32 sinZ = sin_s(rotZ);\n    f32 cosX = cos_s(rotX);\n    f32 cosY = cos_s(rotY);\n    f32 cosZ = cos_s(rotZ);\n\n    fp = cosY * cosZ * scaleX * 0x10000;\n    mu->intPart[0][0] = ((u32)fp >> 0x10) & 0xFFFF;\n    mu->fracPart[0][0] = fp & 0xFFFF;\n\n    fp = cosY * sinZ * scaleX * 0x10000;\n    mu->intPart[0][1] = ((u32)fp >> 0x10) & 0xFFFF;\n    mu->fracPart[0][1] = fp & 0xFFFF;\n\n    fp = -sinY * scaleX * 0x10000;\n    mu->intPart[0][2] = ((u32)fp >> 0x10) & 0xFFFF;\n    mu->fracPart[0][2] = fp & 0xFFFF;\n\n    fp = ((sinX * sinY * cosZ) - (cosX * sinZ)) * scaleY * 0x10000;\n    mu->intPart[1][0] = ((u32)fp >> 0x10) & 0xFFFF;\n    mu->fracPart[1][0] = fp & 0xFFFF;\n\n    fp = ((sinX * sinY * sinZ) + (cosX * cosZ)) * scaleY * 0x10000;\n    mu->intPart[1][1] = ((u32)fp >> 0x10) & 0xFFFF;\n    mu->fracPart[1][1] = fp & 0xFFFF;\n\n    fp = sinX * cosY * scaleY * 0x10000;\n    mu->intPart[1][2] = ((u32)fp >> 0x10) & 0xFFFF;\n    mu->fracPart[1][2] = fp & 0xFFFF;\n\n    fp = ((cosX * sinY * cosZ) + (sinX * sinZ)) * scaleZ * 0x10000;\n    mu->intPart[2][0] = ((u32)fp >> 0x10) & 0xFFFF;\n    mu->fracPart[2][0] = fp & 0xFFFF;\n\n    fp = ((cosX * sinY * sinZ) - (sinX * cosZ)) * scaleZ * 0x10000;\n    mu->intPart[2][1] = ((u32)fp >> 0x10) & 0xFFFF;\n    mu->fracPart[2][1] = fp & 0xFFFF;\n\n    fp = cosX * cosY * scaleZ * 0x10000;\n    mu->intPart[2][2] = ((u32)fp >> 0x10) & 0xFFFF;\n    mu->fracPart[2][2] = fp & 0xFFFF;\n\n    fp = translateX * 0x10000;\n    mu->intPart[3][0] = ((u32)fp >> 0x10) & 0xFFFF;\n    mu->fracPart[3][0] = fp & 0xFFFF;\n\n    fp = translateY * 0x10000;\n    mu->intPart[3][1] = ((u32)fp >> 0x10) & 0xFFFF;\n    mu->fracPart[3][1] = fp & 0xFFFF;\n\n    fp = translateZ * 0x10000;\n    mu->intPart[3][2] = ((u32)fp >> 0x10) & 0xFFFF;\n    mu->fracPart[3][2] = fp & 0xFFFF;\n\n    mu->intPart[0][3] = mu->intPart[1][3] = mu->intPart[2][3] = 0;\n    mu->fracPart[0][3] = mu->fracPart[1][3] = mu->fracPart[2][3] = 0;\n    mu->intPart[3][3] = 1;\n    mu->fracPart[3][3] = 0;\n}",
@@ -3339,7 +3341,8 @@
         "loop",
         "global",
         "mmio",
-        "dma"
+        "dma",
+        "jump-table"
       ],
       "loc": 94,
       "refSource": "void ConfigureEntityBehavior(u8 arg0, u8 arg1, u8 arg2) {\n    void *var_r3;\n    void *var_r5;\n    void *var_r6;\n    u32 var_sb;\n    u8 var_r1;\n\n    if (arg2 != 0) {\n        gEntityInfo[0x23].unkF = 0x19;\n        gEntityInfo[0x22].unkF = 0x19;\n        gEntityInfo[0x21].unkF = 0x19;\n        gEntityInfo[0x20].unkF = 0x19;\n    }\n\n    switch (arg1) {\n        case 0:\n            var_sb = 0xD;\n            var_r6 = &gUnk_03003D16[arg0];\n            var_r5 = &gBgDataPtrs.pBufBg2Tilemap[6 + (arg0 * 8) + (gBgInfo[2].hLength * 0x1B)];\n            var_r3 = gBgDataPtrs.pBufBg2Tilemap + 0x3C;\n            break;\n\n        case 1:\n            var_sb = 4;\n            var_r6 = &gUnk_03003F56[arg0];\n            var_r5 = &gBgDataPtrs.pBufBg2Tilemap[6 + (arg0 * 8) + (gBgInfo[2].hLength * 0x24)];\n            var_r3 = gBgDataPtrs.pBufBg2Tilemap + 0x3C + (gBgInfo[2].hLength * 0x13);\n            break;\n\n        case 2:\n            var_sb = 6;\n            var_r6 = &gUnk_03003E96[arg0];\n            var_r5 = &gBgDataPtrs.pBufBg2Tilemap[6 + (arg0 * 8) + (gBgInfo[2].hLength * 0x21)];\n            var_r3 = gBgDataPtrs.pBufBg2Tilemap + 0x3C + (gBgInfo[2].hLength * 0x13);\n            break;\n\n        case 3:\n            var_sb = 6;\n            var_r6 = &gUnk_03003DD6[arg0];\n            var_r5 = &gBgDataPtrs.pBufBg2Tilemap[6 + (arg0 * 8) + (gBgInfo[2].hLength * 0x1E)];\n            var_r3 = gBgDataPtrs.pBufBg2Tilemap + 0x3C + (gBgInfo[2].hLength * 0x13);\n            break;\n\n        case 4:\n            var_sb = 6;\n            var_r6 = &gUnk_03003D16[arg0];\n            var_r5 = &gBgDataPtrs.pBufBg2Tilemap[6 + (arg0 * 8) + (gBgInfo[2].hLength * 0x1B)];\n            var_r3 = gBgDataPtrs.pBufBg2Tilemap + 0x3C + (gBgInfo[2].hLength * 0xD);\n            break;\n\n        case 5:\n            var_sb = 6;\n            var_r6 = &gUnk_03003D16[arg0];\n            var_r5 = &gBgDataPtrs.pBufBg2Tilemap[6 + (arg0 * 8) + (gBgInfo[2].hLength * 0x1B)];\n            var_r3 = gBgDataPtrs.pBufBg2Tilemap + 0x3C + (gBgInfo[2].hLength * 0x16);\n            break;\n\n        case 6:\n            var_sb = 4;\n            var_r6 = &gUnk_03003F56[arg0];\n            var_r5 = &gBgDataPtrs.pBufBg2Tilemap[6 + (arg0 * 8) + (gBgInfo[2].hLength * 0x24)];\n            var_r3 = gBgDataPtrs.pBufBg2Tilemap + 0x3C;\n            break;\n\n        case 7:\n            var_sb = 7;\n            var_r6 = &gUnk_03003E96[arg0];\n            var_r5 = &gBgDataPtrs.pBufBg2Tilemap[6 + (arg0 * 8) + (gBgInfo[2].hLength * 0x21)];\n            var_r3 = gBgDataPtrs.pBufBg2Tilemap + 0x3C;\n            break;\n\n        case 8:\n            var_sb = 0xA;\n            var_r6 = &gUnk_03003DD6[arg0];\n            var_r5 = &gBgDataPtrs.pBufBg2Tilemap[6 + (arg0 * 8) + (gBgInfo[2].hLength * 0x1E)];\n            var_r3 = gBgDataPtrs.pBufBg2Tilemap + 0x3C;\n            break;\n\n        case 9:\n            var_sb = 0xD;\n            var_r6 = &gUnk_03003D16[arg0];\n            var_r5 = &gBgDataPtrs.pBufBg2Tilemap[6 + (arg0 * 8) + (gBgInfo[2].hLength * 0x1B)];\n            var_r3 = gBgDataPtrs.pBufBg2Tilemap + 0x3C;\n            break;\n    }\n\n    for (var_r1 = 0; var_r1 < var_sb; var_r1++) {\n        DmaCopy16Wait(3, var_r3, var_r6, 0x8);\n        DmaCopy16Wait(3, var_r3, var_r5, 0x8);\n        var_r6 += 0x40;\n        var_r5 += gBgInfo[2].hLength;\n        var_r3 += gBgInfo[2].hLength;\n    }\n}",
@@ -3411,7 +3414,8 @@
         "array",
         "loop",
         "branch",
-        "shift"
+        "shift",
+        "strength-reduce"
       ],
       "loc": 16,
       "refSource": "void CopyBGScrollTiles(void) {\n    u32 var_r5;\n    u32 var_r6;\n\n    for (var_r6 = 0; var_r6 < 3; var_r6++) {\n        if (var_r6 < gUnk_03005220.hearts) {\n            var_r5 = 0;\n        } else {\n            var_r5 = 2;\n        }\n        gBgTilemapBufs[0][(var_r6 * 2) + 0x241] = gBgTilemapBufs[0][(var_r6 * 2) + ((var_r5 + 0x14) << 5)];\n        gBgTilemapBufs[0][(var_r6 * 2) + 0x242] = gBgTilemapBufs[0][(var_r6 * 2 + 1) + ((var_r5 + 0x14) << 5)];\n        gBgTilemapBufs[0][(var_r6 * 2) + 0x261] = gBgTilemapBufs[0][(var_r6 * 2) + ((var_r5 + 0x15) << 5)];\n        gBgTilemapBufs[0][(var_r6 * 2) + 0x262] = gBgTilemapBufs[0][(var_r6 * 2 + 1) + ((var_r5 + 0x15) << 5)];\n    }\n}",
@@ -3425,11 +3429,11 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-A2toup/c.c:1077: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-73xWAU/c.c:1077: invalid operands to binary <<"
           },
           {
             "label": "unsigned/scopebase/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-L30mtp/c.c:1078: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-UGam9h/c.c:1078: invalid operands to binary <<"
           }
         ],
         "symbolsUsed": [
@@ -3593,9 +3597,9 @@
         "branch",
         "bitwise",
         "cast",
-        "call",
         "memory",
-        "shift"
+        "shift",
+        "call"
       ],
       "loc": 12,
       "refSource": "void Decompress(void *dest, void *src) {\n    void *heapPtr;\n\n    if (((u32 *)src)[0] & 0x80000000) {\n        heapPtr = thunk_HeapAlloc(((u32 *)src)[1] >> 8, 0);\n        HuffUnComp((u8 *)src + 4, heapPtr);\n        LZ77UnCompWram(heapPtr, dest);\n        thunk_HeapFree(heapPtr);\n    } else {\n        LZ77UnCompWram((u8 *)src + 4, dest);\n    }\n}",
@@ -3686,11 +3690,11 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "call",
         "cast",
         "bitwise",
         "memory",
-        "pointer"
+        "pointer",
+        "call"
       ],
       "loc": 7,
       "refSource": "void *DecompressAlloc(void *src) {\n    void *heapPtr;\n\n    heapPtr = thunk_HeapAlloc(((u32 *)src)[0] & 0x7FFFFFFF, 0);\n    Decompress(heapPtr, src);\n    return heapPtr;\n}",
@@ -3761,12 +3765,12 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "call",
         "bitwise",
         "cast",
         "memory",
-        "dma",
-        "mmio"
+        "call",
+        "mmio",
+        "dma"
       ],
       "loc": 8,
       "refSource": "void DecompressDma(void *src, void *dest, u16 size) {\n    void *heapPtr;\n\n    heapPtr = thunk_HeapAlloc(((u32 *)src)[0] & 0x7FFFFFFF, 0);\n    Decompress(heapPtr, src);\n    DmaCopy16Wait(3, (u8 *)heapPtr + 4, dest, size);\n    thunk_HeapFree(heapPtr);\n}",
@@ -3863,8 +3867,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "soft-div",
         "shift",
+        "soft-div",
         "call"
       ],
       "loc": 3,
@@ -3939,8 +3943,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "soft-div",
         "shift",
+        "soft-div",
         "call"
       ],
       "loc": 3,
@@ -4015,12 +4019,12 @@
       "language": "c",
       "features": [
         "pointer",
-        "mmio",
-        "dma",
         "cast",
         "memory",
         "shift",
-        "bitwise"
+        "bitwise",
+        "mmio",
+        "dma"
       ],
       "loc": 12,
       "refSource": "void DmaSpriteToObjVram(u32 entryIdx, u32 frameIdx) {\n    vu32 *dma3 = &REG_DMA3SAD;\n    u32 base = *(vu32 *)&gGfxStreamBuffer;\n    u8 *entry = (u8 *)(entryIdx * 8 + base);\n    u16 tileCount = *(u16 *)(entry + 6);\n    dma3[0] = *(u32 *)entry + tileCount * (frameIdx << 5);\n\n    dma3[1] = (u32) * (u16 *)(entry + 4) * 32 + OBJ_VRAM;\n\n    dma3[2] = (*(u16 *)(entry + 6) << 4) | (0x80 << 24);\n    dma3[2];\n}",
@@ -4200,7 +4204,8 @@
         "array",
         "shift",
         "struct",
-        "global"
+        "global",
+        "comparison-tree"
       ],
       "loc": 64,
       "refSource": "void EntityItemDrop(u8 arg0) {\n    u8 itemType = arg0 + 0xE4;\n\n    if (gGameFlagsPtr[0x0A] == 1) {\n        gEntity.base[arg0].unk_F = 0x1C;\n        gEntity.base[arg0].unk_10 = 0;\n        return;\n    }\n\n    switch (gEntity.base[arg0].unk_F) {\n        case 3: {\n            gEntity.base[arg0].unk_F = 0;\n            gEntity.base[arg0].unk_14 = 0;\n            gEntity.base[arg0].unk_10 = 1;\n            gEntity.base[arg0].unk_C_0 = 0;\n\n            if (gEntity.unk_204_2 == 0) {\n                gEntity.base[arg0].unk_0 = gEntity.unk_1F8 + 0x10;\n            } else {\n                gEntity.base[arg0].unk_0 = gEntity.unk_1F8 - 0x10;\n            }\n\n            gEntity.base[arg0].unk_2 = gEntity.unk_1FA;\n            gEntity.base[arg0].unk_8 = gItemDropParamTable.unk_0[itemType][0];\n            gEntity.base[arg0].unk_9 = gItemDropParamTable.unk_0[itemType][1];\n            gEntity.base[arg0].unk_16 = 4;\n            break;\n        }\n\n        case 4: {\n            gEntity.base[arg0].unk_F = 0;\n            gEntity.base[arg0].unk_14 = 0;\n            gEntity.base[arg0].unk_10 = 1;\n            gEntity.base[arg0].unk_C_0 = 0;\n\n            if (gEntity.unk_204_2 == 0) {\n                gEntity.base[arg0].unk_0 = gEntity.unk_1F8 + 0x10;\n            } else {\n                gEntity.base[arg0].unk_0 = gEntity.unk_1F8 - 0x10;\n            }\n\n            gEntity.base[arg0].unk_2 = gEntity.unk_1FA;\n            gEntity.base[arg0].unk_8 = gItemDropParamTable.unk_A[itemType][0];\n            gEntity.base[arg0].unk_9 = gItemDropParamTable.unk_A[itemType][1];\n            gEntity.base[arg0].unk_16 = 2;\n            break;\n        }\n\n        case 0: {\n            gEntity.base[arg0].unk_2 = 0x10C - ((gEntity.base[arg0].unk_9 * gSineTable[gEntity.base[arg0].unk_14]) >> 8);\n            gEntity.base[arg0].unk_0 += gEntity.base[arg0].unk_8;\n\n            gEntity.base[arg0].unk_14 += gEntity.base[arg0].unk_16;\n            if (gEntity.base[arg0].unk_14 == 0x88) {\n                gEntity.base[arg0].unk_F = 0x1C;\n                gEntity.base[arg0].unk_10 = 0;\n            }\n            break;\n        }\n\n        default:\n            break;\n    }\n}",
@@ -4309,9 +4314,9 @@
       "language": "c",
       "features": [
         "global",
-        "call",
         "pointer",
-        "branch"
+        "branch",
+        "call"
       ],
       "loc": 20,
       "refSource": "void FreeAllDecompBuffers(void) {\n    u32 *decompBuffers = (u32 *)gDecompBufferCtrl;\n\n    thunk_HeapFree(decompBuffers[1] - 4);\n    thunk_HeapFree(decompBuffers[0] - 4);\n    thunk_HeapFree(decompBuffers[3] - 4);\n    thunk_HeapFree(decompBuffers[2] - 4);\n    thunk_HeapFree(decompBuffers[5] - 4);\n    thunk_HeapFree(decompBuffers[4] - 4);\n\n    if (gCollisionMapPtr != 0) {\n        thunk_HeapFree(gCollisionMapPtr - 4);\n        gCollisionMapPtr = 0;\n    }\n\n    m4aSongNumStart(0x8D);\n    m4aSongNumStart(0x8E);\n    m4aSongNumStart(0x8F);\n    m4aSongNumStart(0x90);\n}",
@@ -4330,7 +4335,7 @@
         "droppedCandidates": [
           {
             "label": "unsigned",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-FnFM72/c.c:1076: `gBgDataPtrs' undeclared (first use in this function)"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-h8P9Fv/c.c:1076: `gBgDataPtrs' undeclared (first use in this function)"
           }
         ],
         "symbolsUsed": [],
@@ -4486,7 +4491,8 @@
         "pointer",
         "cast",
         "global",
-        "memory"
+        "memory",
+        "strength-reduce"
       ],
       "loc": 7,
       "refSource": "void GetEntityLookupData(u8 idx) {\n    u8 *flags = gGameFlagsPtr;\n    const u8 *table = gEntityDataTable;\n    const u8 *entry = &table[(u32)idx * 8];\n    flags[0x11] = entry[5];\n    flags[0x12] = entry[6];\n}",
@@ -4738,12 +4744,13 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "mmio",
         "branch",
         "memory",
         "pointer",
         "shift",
-        "bitwise"
+        "bitwise",
+        "mmio",
+        "strength-reduce"
       ],
       "loc": 31,
       "refSource": "u32 ProcessHBlankWait(u32 idx) {\n    volatile u16 *ie;\n    volatile u16 *dispstat;\n    u8 *buf;\n    u32 off;\n    u8 *entry;\n    u32 timer;\n\n    ie = &REG_IE;\n    *ie |= 2;\n    dispstat = &REG_DISPSTAT;\n    *dispstat |= 0x10;\n\n    buf = gBuffer_52A4;\n    off = idx * 9;\n    off <<= 2;\n    off += (u32)buf;\n    entry = (u8 *)off;\n\n    if (entry[3] >> 7) {\n        return 1;\n    }\n    timer = *(u16 *)(entry + 0x14) - 1;\n    *(u16 *)(entry + 0x14) = timer;\n    if ((s32)(timer << 16) < 0) {\n        *ie &= 0xFFFD;\n        *dispstat &= 0xFFEF;\n        return 0;\n    }\n    return 1;\n}",
@@ -4833,12 +4840,14 @@
         "nested-loop",
         "branch",
         "global",
-        "call",
         "loop",
         "shift",
         "bitwise",
+        "call",
         "mmio",
-        "dma"
+        "dma",
+        "jump-table",
+        "strength-reduce"
       ],
       "loc": 136,
       "refSource": "void ProcessInputAndUpdateEntities(void) {\n    u8 sp4;\n    u32 var_r1;\n    u8 var_r4;\n    u8 var_r5;\n\n    sp4 = (gNewKeys & (START_BUTTON | B_BUTTON)) != 0;\n    if (gNewKeys & A_BUTTON) {\n        sp4 = gUnk_03004658[0xC] + 1;\n    }\n\n    if (gNewKeys & (DPAD_DOWN | DPAD_UP)) {\n        for (var_r5 = 0; var_r5 < 2; var_r5++) {\n            DmaFill16(3, 0, &gBgTilemapBufs[gUnk_030034BC][((var_r5 + (gUnk_03004658[0xC] * 3)) << 5) + 0xA5], 0x4);\n            DmaFill16(3, 0, &gBgTilemapBufs[gUnk_030034BC][((var_r5 + (gUnk_03004658[0xC] * 3)) << 5) + 0xB7], 0x4);\n        }\n\n        if ((gUnk_030034C0 == 0) || (gUnk_030034C0 == 2)) {\n            if (gNewKeys & DPAD_DOWN) {\n                m4aSongNumStart(0x51);\n                gUnk_03004658[0xC] += 1;\n                if (gUnk_03004658[0xC] > 3) {\n                    gUnk_03004658[0xC] = 0;\n                }\n            }\n\n            if (gNewKeys & DPAD_UP) {\n                m4aSongNumStart(0x51);\n                gUnk_03004658[0xC] -= 1;\n                if (gUnk_03004658[0xC] & 0x80) {\n                    gUnk_03004658[0xC] = 3;\n                }\n            }\n        } else {\n            if (gNewKeys & DPAD_DOWN) {\n                m4aSongNumStart(0x51);\n                gUnk_03004658[0xC] += 1;\n                if (gUnk_03004658[0xC] > 2) {\n                    gUnk_03004658[0xC] = 0;\n                }\n            }\n\n            if (gNewKeys & DPAD_UP) {\n                m4aSongNumStart(0x51);\n                gUnk_03004658[0xC] -= 1;\n                if (gUnk_03004658[0xC] & 0x80) {\n                    gUnk_03004658[0xC] = 2;\n                }\n            }\n        }\n\n        for (var_r5 = 0; var_r5 < 2; var_r5++) {\n            for (var_r4 = 0; var_r4 < 2; var_r4++) {\n                if (gUnk_030034BC == 0) {\n                    gBgTilemapBufs[gUnk_030034BC][((var_r5 + (gUnk_03004658[0xC] * 3)) << 5) + 0xA5 + var_r4]\n                        = gBgDataPtrs.pBufBg3Tilemap[(var_r5 * 0x1E) + 0x9D + var_r4] + gUnk_03000800;\n                    gBgTilemapBufs[gUnk_030034BC][((var_r5 + (gUnk_03004658[0xC] * 3)) << 5) + 0xB7 + var_r4]\n                        = gBgDataPtrs.pBufBg3Tilemap[(var_r5 * 0x1E) + 0xAF + var_r4] + gUnk_03000800;\n                } else {\n                    gBgTilemapBufs[gUnk_030034BC][((var_r5 + (gUnk_03004658[0xC] * 3)) << 5) + 0xA5 + var_r4]\n                        = gBgDataPtrs.pBufBg3Tilemap[(var_r5 * 0x1E) + 0x9D + var_r4];\n                    gBgTilemapBufs[gUnk_030034BC][((var_r5 + (gUnk_03004658[0xC] * 3)) << 5) + 0xB7 + var_r4]\n                        = gBgDataPtrs.pBufBg3Tilemap[(var_r5 * 0x1E) + 0xAF + var_r4];\n                }\n            }\n        }\n    }\n\n    if (sp4 > 0) {\n        sp4 = gUnk_081166F8[gUnk_030034C0][sp4 - 1];\n    }\n\n    switch (sp4 - 1) {\n        case 0:\n            gCallbackQueue.next[0] = ReadKeyInput;\n            for (var_r1 = 0; var_r1 < 10; var_r1++) {\n                gCallbackQueue.next[var_r1] = gCallbackQueue.previous[var_r1];\n            }\n            gCallbackQueue.current[gCallbackQueue.currentCount - 1] = NULL;\n            gCallbackQueue.nextCount = gCallbackQueue.previousCount;\n\n            UpdateOamSortOrder();\n            m4aSoundVSyncOn();\n            m4aMPlayAllContinue();\n            break;\n\n        case 1:\n            UpdateOamSortOrder();\n            gCallbackQueue.current[1] = TransitionFadeOutFull;\n            gUnk_03005220.unk4 = gUnk_03005284->unk18;\n            gUnk_03005220.lives = gUnk_03005284->unk0;\n            gUnk_03005220.hearts = gUnk_03005284->unk8_0;\n            REG_BLDCNT = 0;\n            gBlendValue = 0;\n            break;\n\n        case 2:\n            gUnk_03005284->unk0 = gUnk_03005220.lives = gUnk_03005284->unk1E;\n            UpdateOamSortOrder();\n            gBlendValue = 0;\n            if (gUnk_03004C20.world == 6 && gUnk_03004C20.level == 8) {\n                gUnk_03004C20.world = 5;\n            }\n            gUnk_030034B0.unk6_4 = gUnk_03004C20.level;\n            gUnk_03004C20.level = 0;\n            gCallbackQueue.current[1] = TransitionGameOver;\n            break;\n\n        case 3:\n            gCallbackQueue.current[1] = SetupBG3WindowOverlay;\n            thunk_HeapFree(gBgDataPtrs.pBufBg3Tilemap);\n            thunk_HeapFree(gBgDataPtrs.pBufBg3Tiles);\n            break;\n\n        case 4:\n            if (gUnk_03004C20.level != 0) {\n                gUnk_03005284->unk0 = gUnk_03005220.lives = gUnk_03005284->unk1E;\n            }\n            UpdateOamSortOrder();\n            REG_BLDCNT = 0;\n            gBlendValue = 0;\n            FreeAllDecompBuffers();\n            gCallbackQueue.current[1] = TransitionToGameplayScreen;\n            break;\n\n        case 5:\n            gBlendValue = 0;\n            gUnk_03004C20.level = 9;\n            gUnk_03004D9C = 0;\n            InitOamEntries();\n            gCallbackQueue.current[1] = TransitionSoftReset;\n            thunk_HeapFree(gBgDataPtrs.pBufBg3Tilemap);\n            thunk_HeapFree(gBgDataPtrs.pBufBg3Tiles);\n            break;\n    }\n}",
@@ -4906,11 +4915,11 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "mmio",
         "global",
         "bitwise",
         "branch",
-        "call"
+        "call",
+        "mmio"
       ],
       "loc": 14,
       "refSource": "void ReadKeyInput(void) {\n    u16 pressed = REG_KEYINPUT ^ 0x3FF;\n\n    gKeysPressed = pressed & ~gKeysPrevious;\n    gKeysPrevious = pressed;\n    if ((pressed & 0x0F) == 0x0F) {\n        SoftResetRom(0xFF);\n    }\n    if (gKeysPrevious & 1) {\n        gAButtonHold++;\n    } else {\n        gAButtonHold = 0;\n    }\n}",
@@ -5380,9 +5389,9 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "call",
         "global",
-        "bitwise"
+        "bitwise",
+        "call"
       ],
       "loc": 10,
       "refSource": "void RollRandomLevelVariant(void) {\n    u8 *state = gGameFlags;\n    u8 difficulty = state[0x0C];\n    u32 difficultyIndex = (u8)(difficulty - 1);\n    u32 rng = thunk_sub_080002A0();\n    u8 *levelState = gControlBlock;\n    u32 parity = difficultyIndex & 1;\n    u32 variant = sub_0805193C((u8)rng, 5 - difficultyIndex);\n    levelState[0x0E] = parity + variant + 1;\n}",
@@ -5400,7 +5409,7 @@
         "droppedCandidates": [
           {
             "label": "unsigned",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-ZcPXQK/c.c:1077: too many arguments to function `thunk_sub_080002A0'"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-8Tlob3/c.c:1077: too many arguments to function `thunk_sub_080002A0'"
           }
         ],
         "symbolsUsed": [],
@@ -5652,8 +5661,8 @@
         "global",
         "struct",
         "pointer",
-        "call",
-        "shift"
+        "shift",
+        "call"
       ],
       "loc": 12,
       "refSource": "void StreamCmd_SetBGScroll(void) {\n    u16 scrollX = ReadUnalignedU16(gStreamPtr + 3);\n    struct BGLayerState *tbl = gBGLayerState;\n    u8 *p = gStreamPtr;\n    u16 scrollY;\n    u8 *p2;\n    tbl[p[2]].scrollX = scrollX << 4;\n    scrollY = ReadUnalignedU16(p + 5);\n    p2 = gStreamPtr;\n    tbl[p2[2]].scrollY = scrollY << 4;\n    gStreamPtr = p2 + 7;\n}",
@@ -5725,11 +5734,11 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "mmio",
         "pointer",
         "bitwise",
         "global",
-        "shift"
+        "shift",
+        "mmio"
       ],
       "loc": 10,
       "refSource": "void StreamCmd_SetWindowRegs(void) {\n    vu16 *reg = &REG_WININ;\n    u8 **streamPtrAddr = &gStreamPtr;\n    u8 *stream = *streamPtrAddr;\n\n    *reg = stream[2] | (stream[3] << 8);\n    reg++;\n    *reg = stream[4] | (stream[5] << 8);\n    *streamPtrAddr = stream + 6;\n}",
@@ -5825,7 +5834,8 @@
         "switch",
         "arithmetic",
         "shift",
-        "bitwise"
+        "bitwise",
+        "jump-table"
       ],
       "loc": 58,
       "refSource": "void TransformSingleEntityToScreen(u8 arg0, s8 arg1, s8 arg2) {\n    s32 temp_r0;\n    s32 temp_r0_2;\n    s16 temp_r1;\n    s16 temp_r2;\n    s32 var_r2;\n    s32 var_r4;\n    struct Unk_0300466C_4 *var_r0;\n\n    arg1++, arg1--; /* fake */\n    gUnk_03002920[arg0].xPosScreen = gUnk_03002920[arg0].xPosBg2 - arg1 - gUnk_03003430.bg2HOfs;\n    gUnk_03002920[arg0].yPosScreen = gUnk_03002920[arg0].yPosBg2 - arg2 - gUnk_03003430.bg2VOfs;\n\n    temp_r1 = gUnk_03003430.bg2HOfs - gUnk_03002920[arg0].xPosScreen;\n    temp_r2 = gUnk_03003430.bg2VOfs - gUnk_03002920[arg0].yPosScreen;\n\n    temp_r0 = temp_r1 * gBg2XMag;\n    if (temp_r0 < 0) {\n        temp_r0 += 0xFF;\n    }\n    var_r4 = temp_r0 >> 8;\n\n    temp_r0_2 = temp_r2 * gBg2YMag;\n    if (temp_r0_2 < 0) {\n        temp_r0_2 += 0xFF;\n    }\n    var_r2 = temp_r0_2 >> 8;\n\n    var_r4 = gUnk_03003430.bg2HOfs - var_r4;\n    if (arg0 > 0xC) {\n        var_r0 = (void *)gUnk_030051DC[arg0 - 0xD].unk4;\n    } else {\n        var_r0 = gUnk_08078FC8[arg0].unk4;\n    }\n\n    switch (var_r0->shape_size & 0xF) {\n        case 3:\n        case 11:\n            var_r2 = gUnk_03003430.bg2VOfs - var_r2 + ((0x100 - gBg2YMag) >> 3);\n            break;\n        case 1:\n        case 6:\n        case 8:\n            var_r2 = gUnk_03003430.bg2VOfs - var_r2 + ((0x100 - gBg2YMag) >> 5);\n            break;\n        case 0:\n        case 4:\n        case 5:\n            var_r2 = gUnk_03003430.bg2VOfs - var_r2 + ((0x100 - gBg2YMag) >> 6);\n            break;\n        default:\n            var_r2 = gUnk_03003430.bg2VOfs - var_r2 + ((0x100 - gBg2YMag) >> 4);\n            break;\n    }\n\n    gUnk_03002920[arg0].xPosScreen = var_r4;\n    gUnk_03002920[arg0].yPosScreen = var_r2;\n}",
@@ -5892,8 +5902,8 @@
         "shift",
         "branch",
         "global",
-        "call",
-        "bitwise"
+        "bitwise",
+        "call"
       ],
       "loc": 99,
       "refSource": "void UpdateCameraScroll(void) {\n    s32 temp_r2;\n    s32 temp_r3_2;\n    u16 var_r8;\n    struct ScrollBGLayer_Args var_r6;\n    u8 var_r7;\n\n    var_r8 = 0;\n    var_r7 = 0;\n    var_r6.unk2 = var_r6.unk0 = 0;\n\n    if (!(gUnk_030051B8 & 0x30)) {\n        if ((s16)gUnk_03002920[0].xPosBg2 > (s16)(gUnk_03003430.bg2HOfs + DISPLAY_WIDTH_CENTER)) {\n            var_r7 = 0x10;\n            if ((gUnk_03002920[0].xPosBg2 - (gUnk_03003430.bg2HOfs + DISPLAY_WIDTH_CENTER)) > 5) {\n                var_r6.unk0 = 2;\n            } else {\n                var_r6.unk0 = 1;\n            }\n            if (gHeldKeys & DPAD_LEFT) {\n                var_r7 = 0;\n                var_r6.unk0 = 0;\n            }\n        } else if ((s16)gUnk_03002920[0].xPosBg2 < (s16)(gUnk_03003430.bg2HOfs + DISPLAY_WIDTH_CENTER)) {\n            var_r7 = 0x20;\n            if (((gUnk_03003430.bg2HOfs + DISPLAY_WIDTH_CENTER) - gUnk_03002920[0].xPosBg2) > 5) {\n                var_r6.unk0 = -2;\n            } else {\n                var_r6.unk0 = -1;\n            }\n            if (gHeldKeys & DPAD_RIGHT) {\n                var_r7 = 0;\n                var_r6.unk0 = 0;\n            }\n        }\n    }\n    if (!(gUnk_030051B8 & 0xC0)) {\n        if (gUnk_03002920[0].yPosScreen > 0xA0) {\n            var_r8 = 0x44;\n        }\n        if ((u16)(var_r8 + gUnk_03002920[0].yPosScreen) > 0x63) {\n            var_r7 |= 0x80;\n            if ((u16)((var_r8 + gUnk_03002920[0].yPosScreen) - 0x64) > 0x1E) {\n                var_r6.unk2 = 3;\n            } else {\n                var_r6.unk2 = 1;\n            }\n        } else if ((u16)(var_r8 + gUnk_03002920[0].yPosScreen) <= 0x46) {\n            var_r7 |= 0x40;\n            if ((u16)(var_r8 - (gUnk_03002920[0].yPosScreen - 0x46)) > 0x19U) {\n                var_r6.unk2 = -3;\n            } else {\n                var_r6.unk2 = -1;\n            }\n        }\n    }\n\n    var_r7 |= gUnk_030051B8;\n    temp_r3_2 = gUnk_03005480 + gUnk_030034E8.unk0;\n    temp_r2 = gUnk_030007C0 + gUnk_030034E8.unk4;\n    var_r6.unk0 += (temp_r3_2 >> 0x10);\n    var_r6.unk2 += (temp_r2 >> 0x10);\n    gUnk_03005480 = temp_r3_2 & 0xFFFF;\n    gUnk_030007C0 = temp_r2 & 0xFFFF;\n\n    if (gUnk_03005220.deathSequenceTimer != 0) {\n        var_r7 &= 0x30;\n        var_r6.unk2 = var_r6.unk0 = 0;\n    }\n\n    if (var_r7 != 0) {\n        ScrollBGLayer(var_r7, var_r6);\n    }\n\n    gUnk_03003430.bg1HOfs = (gUnk_03003430.bg2HOfs >> 1);\n    if (!(gUnk_03004C20.globalFrameCounter & 3) && (gUnk_03004660 == 0)) {\n        if (gUnk_03003430.bg2VOfs >= gPrevBg2VOfs) {\n            gUnk_03003430.bg1VOfs += ((gUnk_03003430.bg2VOfs - gPrevBg2VOfs) & 1);\n        } else {\n            gUnk_03003430.bg1VOfs -= ((gPrevBg2VOfs - gUnk_03003430.bg2VOfs) & 1);\n        }\n\n        if (gUnk_03003430.bg1VOfs & 0x8000) {\n            gUnk_03003430.bg1VOfs = 0;\n        } else if (gUnk_03003430.bg1VOfs > 0x50) {\n            gUnk_03003430.bg1VOfs = 0x50;\n        }\n    }\n\n    gPrevBg2VOfs = gUnk_03003430.bg2VOfs;\n    gBg2PA = MultiplyQ8(COS(gBg2Alpha), ReciprocalQ8(gBg2XMag));\n    gBg2PB = MultiplyQ8(SIN(gBg2Alpha), ReciprocalQ8(gBg2XMag));\n    gBg2PC = MultiplyQ8(-SIN(gBg2Alpha), ReciprocalQ8(gBg2YMag));\n    gBg2PD = MultiplyQ8(COS(gBg2Alpha), ReciprocalQ8(gBg2YMag));\n    gBg2X\n        = (((gUnk_03003430.bg2HOfs + DISPLAY_WIDTH_CENTER) << 8) - (gBg2PA * DISPLAY_WIDTH_CENTER)) - (gBg2PB * DISPLAY_HEIGHT_CENTER);\n    gBg2Y = (((gUnk_03003430.bg2VOfs + DISPLAY_HEIGHT_CENTER) << 8) - (gBg2PC * DISPLAY_WIDTH_CENTER))\n        - (gBg2PD * DISPLAY_HEIGHT_CENTER);\n}",
@@ -5964,8 +5974,8 @@
       "features": [
         "loop",
         "branch",
-        "call",
-        "cast"
+        "cast",
+        "call"
       ],
       "loc": 9,
       "refSource": "void UpdateEntities(void) {\n    u8 i;\n    for (i = 0; i <= 6; i++) {\n        if ((u8)CheckWorldCompletion(i)) {\n            CopyWorldMapTiles(i);\n            UpdateWorldMapNodeTile(i);\n        }\n    }\n}",
@@ -6044,11 +6054,11 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "mmio",
         "global",
-        "call",
         "shift",
-        "bitwise"
+        "bitwise",
+        "call",
+        "mmio"
       ],
       "loc": 9,
       "refSource": "void UpdateFadeEffect(void) {\n    vu8 *vcount_reg = &REG_VCOUNT_L;\n    u8 *entity = gEntityArray;\n    u8 fade = sub_08051A0C(*vcount_reg, entity[0x08]);\n\n    if (fade <= 16) {\n        REG_BLDALPHA = ((u32)fade << 8) | fade;\n    }\n}",
@@ -6145,27 +6155,27 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-NJoUYl/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-WgLSIV/c.c:1085: incompatible types in assignment"
           },
           {
             "label": "unsigned/coalesce-v2-v3/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-JLIPC0/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-QKNbw7/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "unsigned/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-cm7q4h/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-RA1ODO/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "signed/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-2AXd6l/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-A1MeAj/c.c:1085: incompatible types in assignment"
           },
           {
             "label": "signed/coalesce-v2-v3/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-nPRwNZ/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-TGKKXc/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "signed/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Il1jsP/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-X003C9/c.c:1084: incompatible types in assignment"
           }
         ],
         "symbolsUsed": [
@@ -6257,13 +6267,14 @@
       "language": "c",
       "features": [
         "switch",
-        "soft-div",
         "shift",
         "array",
         "global",
+        "soft-div",
         "call",
         "mmio",
-        "dma"
+        "dma",
+        "jump-table"
       ],
       "loc": 76,
       "refSource": "void UpdateWorldMapNodeAnim(void) {\n    s32 var_r7;\n    s32 temp_r6;\n\n    if (gUnk_03004C08.unk0_0 < 4) {\n        var_r7 = 0;\n        temp_r6 = gUnk_08116880[gUnk_03004C08.unk0_0];\n    } else {\n        var_r7 = 4;\n        temp_r6 = gUnk_08116880[gUnk_03004C08.unk0_0];\n    }\n\n    switch ((gUnk_03004C08.unk2 / 30) - 1) {\n        case 0:\n            if ((gUnk_03004C08.unk2 % 30) == 0) {\n                m4aSongNumStart(0x89);\n            }\n            gBgTilemapBufs[1][gUnk_08116748[gUnk_03004C08.unk0_0][0] + (gUnk_08116748[gUnk_03004C08.unk0_0][1] << 5)]\n                = gBgTilemapBufs[1][0 + var_r7 + ((temp_r6 + 0x1C) << 5)];\n            break;\n\n        case 1:\n            if ((gUnk_03004C08.unk2 % 30) == 0) {\n                m4aSongNumStart(0x89);\n            }\n            gBgTilemapBufs[1][gUnk_08116748[gUnk_03004C08.unk0_0][2] + (gUnk_08116748[gUnk_03004C08.unk0_0][3] << 5)]\n                = gBgTilemapBufs[1][1 + var_r7 + ((temp_r6 + 0x1C) << 5)];\n            break;\n\n        case 2:\n            if (gUnk_03004C08.unk0_0 == 6) {\n                gUnk_03004C08.unk2 = 0x95;\n            } else {\n                if ((gUnk_03004C08.unk2 % 30) == 0) {\n                    m4aSongNumStart(0x89);\n                }\n                gBgTilemapBufs[1][gUnk_08116748[gUnk_03004C08.unk0_0][4] + (gUnk_08116748[gUnk_03004C08.unk0_0][5] << 5)]\n                    = gBgTilemapBufs[1][2 + var_r7 + ((temp_r6 + 0x1C) << 5)];\n            }\n            break;\n\n        case 3:\n            if ((gUnk_03004C08.unk0_0 != 4) && (gUnk_03004C08.unk0_0 != 6)) {\n                if ((gUnk_03004C08.unk2 % 30) == 0) {\n                    m4aSongNumStart(0x89);\n                }\n                gBgTilemapBufs[1][gUnk_08116748[gUnk_03004C08.unk0_0][6] + (gUnk_08116748[gUnk_03004C08.unk0_0][7] << 5)]\n                    = gBgTilemapBufs[1][3 + var_r7 + ((temp_r6 + 0x1C) << 5)];\n            }\n            break;\n\n        case 4:\n            if ((gUnk_03004C08.unk2 % 30) == 0) {\n                m4aSongNumStart(0x8A);\n            }\n            /* fallthrough */\n        case 5:\n        case 6:\n            if (gUnk_03004C08.unk0_0 < 4) {\n                if ((gUnk_03004C20.sceneFrameCounter % 4) == 0) {\n                    DmaCopy16(3, &gUnk_08116780[thunk_sub_080002A0() % 8], BG_PLTT + 0x160, 0x20);\n                    SetWorldMapTilePalette(gUnk_03004C08.unk0_0, 0xB);\n                }\n            } else {\n                CopyWorldMapTiles(gUnk_03004C08.unk0_0);\n            }\n            break;\n\n        case 7:\n            CopyWorldMapTiles(gUnk_03004C08.unk0_0);\n            gCallbackQueue.current[1] = CountCollectedGems;\n            break;\n    }\n\n    gUnk_03004C08.unk2 += 1;\n}",
@@ -6335,7 +6346,8 @@
         "array",
         "branch",
         "table",
-        "shift"
+        "shift",
+        "strength-reduce"
       ],
       "loc": 22,
       "refSource": "void UpdateWorldMapNodeTile(u8 arg0) {\n    vu32 a; // Required to match\n    if (arg0 < 4) {\n        gBgTilemapBufs[1][gUnk_08116748[arg0][0] + (gUnk_08116748[arg0][1] << 5)]\n            = gBgTilemapBufs[1][((gUnk_08116880[arg0] + 0x1C) * 0x20) + 0];\n        gBgTilemapBufs[1][gUnk_08116748[arg0][2] + (gUnk_08116748[arg0][3] << 5)]\n            = gBgTilemapBufs[1][((gUnk_08116880[arg0] + 0x1C) * 0x20) + 1];\n        gBgTilemapBufs[1][gUnk_08116748[arg0][4] + (gUnk_08116748[arg0][5] << 5)]\n            = gBgTilemapBufs[1][((gUnk_08116880[arg0] + 0x1C) * 0x20) + 2];\n        gBgTilemapBufs[1][gUnk_08116748[arg0][6] + (gUnk_08116748[arg0][7] << 5)]\n            = gBgTilemapBufs[1][((gUnk_08116880[arg0] + 0x1C) * 0x20) + 3];\n    } else {\n        gBgTilemapBufs[1][gUnk_08116748[arg0][0] + (gUnk_08116748[arg0][1] << 5)]\n            = gBgTilemapBufs[1][((gUnk_08116880[arg0] + 0x1C) * 0x20) + 4];\n        gBgTilemapBufs[1][gUnk_08116748[arg0][2] + (gUnk_08116748[arg0][3] << 5)]\n            = gBgTilemapBufs[1][((gUnk_08116880[arg0] + 0x1C) * 0x20) + 5];\n        gBgTilemapBufs[1][gUnk_08116748[arg0][4] + (gUnk_08116748[arg0][5] << 5)]\n            = gBgTilemapBufs[1][((gUnk_08116880[arg0] + 0x1C) * 0x20) + 6];\n        gBgTilemapBufs[1][gUnk_08116748[arg0][6] + (gUnk_08116748[arg0][7] << 5)]\n            = gBgTilemapBufs[1][((gUnk_08116880[arg0] + 0x1C) * 0x20) + 7];\n    }\n}",
@@ -6500,10 +6512,11 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "call",
         "global",
         "pointer",
-        "memory"
+        "memory",
+        "call",
+        "strength-reduce"
       ],
       "loc": 7,
       "refSource": "void WritePaletteColor(void) {\n    u8 **gp = &gStreamPtr;\n    u16 color = ReadUnalignedU16(*gp + 3);\n    u8 *ptr = *gp;\n    *(u16 *)(BG_PAL_RAM + ptr[2] * 2) = color;\n    *gp = ptr + 5;\n}",
@@ -6753,7 +6766,8 @@
         "table",
         "pointer",
         "branch",
-        "call"
+        "call",
+        "jump-table"
       ],
       "loc": 34,
       "refSource": "void DecodeData(void *src, void *dest, s32 len, EDecodeType decodeType) {\n    DecodeStruct decodeStruct;\n    DecodeStruct *decodePtr = &decodeStruct;\n    decodeStruct.src = (u8 *)src;\n    decodeStruct.dest = (u8 *)dest;\n    decodeStruct.len = len;\n    decodeStruct.chunkLen = 1024;\n\n    switch (decodeType) {\n        case DECODE_NONE:\n            HuDecodeNone(decodePtr);\n            break;\n\n        case DECODE_LZ:\n            HuDecodeLZ(decodePtr);\n            break;\n\n        case DECODE_SLIDE:\n            HuDecodeSlide(decodePtr);\n            break;\n\n        case DECODE_FSLIDE:\n        case DECODE_FSLIDE_2:\n            HuDecodeFslide(decodePtr);\n            break;\n\n        case DECODE_RLE:\n            HuDecodeRLE(decodePtr);\n            break;\n\n        default:\n            break;\n    }\n}",
@@ -6844,7 +6858,8 @@
         "struct",
         "pointer",
         "ternary",
-        "bitwise"
+        "bitwise",
+        "comparison-tree"
       ],
       "loc": 25,
       "refSource": "void FileSeek(HuFileInfoD *info, s32 arg1, s32 arg2) {\n    switch (arg2) {\n        case 0:\n            arg2 = (u32)(info->bytes + arg1);\n            break;\n        case 1:\n            arg2 = (u32)(info->bytesCopy + info->unkE + arg1);\n            break;\n        case 2:\n            arg2 = (u32)(info->bytes + info->size + arg1);\n            break;\n        default:\n            return;\n    }\n    arg2 = ((u32)arg2 < (u32)info->bytes) ? (u32)info->bytes : (u32)arg2;\n    arg2 = ((u32)arg2 >= (u32)(info->bytes + info->size)) ? (u32)(info->bytes + info->size - 1) : (u32)arg2;\n\n    if (((u32)arg2 < (u32)info->bytesCopy) || ((u32)arg2 >= (u32)(info->bytesCopy + 0x400))) {\n        info->unkC = 1;\n        info->unkE = arg2 & 1;\n        info->bytesCopy = (u8 *)(arg2 - info->unkE);\n    } else {\n        info->unkE = arg2 - (u32)info->bytesCopy;\n    }\n}",
@@ -7371,8 +7386,8 @@
         "float",
         "array",
         "arithmetic",
-        "call",
-        "struct"
+        "struct",
+        "call"
       ],
       "loc": 41,
       "refSource": "void func_80012B14_13714(s16 camIndex, Vec *worldPos, Vec *outPos) {\n    f32 x;\n    f32 y;\n    f32 z;\n    f32 projectedX;\n    f32 projectedY;\n    f32 projectedZ;\n    HuCamera *camera;\n    HuMtx4F viewMtx;\n    f32 f2;\n    f32 f4;\n\n    camera = &gCameraList[camIndex];\n    guLookAtF(\n        viewMtx,\n        camera->pos.x,\n        camera->pos.y,\n        camera->pos.z,\n        camera->at.x,\n        camera->at.y,\n        camera->at.z,\n        camera->up.x,\n        camera->up.y,\n        camera->up.z);\n\n    x = worldPos->x;\n    y = worldPos->y;\n    z = worldPos->z;\n    x -= camera->pos.x;\n    y -= camera->pos.y;\n    z -= camera->pos.z;\n    projectedX = ((x * viewMtx[0][0]) + (y * viewMtx[1][0])) + (z * viewMtx[2][0]);\n    projectedY = ((x * viewMtx[0][1]) + (y * viewMtx[1][1])) + (z * viewMtx[2][1]);\n    projectedZ = ((x * viewMtx[0][2]) + (y * viewMtx[1][2])) + (z * viewMtx[2][2]);\n    x = HuMathSin(camera->fov[0] / 2.0f) / HuMathCos(camera->fov[0] / 2.0f) * projectedZ * (camera->screenScale.x / camera->screenScale.y);\n    y = (HuMathSin(camera->fov[0] / 2.0f) / HuMathCos(camera->fov[0] / 2.0f)) * projectedZ;\n    f2 = camera->screenPos.x / 4.0f;\n    outPos->x = (projectedX * (f2 / (-x))) + f2;\n    f4 = camera->screenPos.y / 4.0f;\n    outPos->y = ((projectedY * (f4 / y)) + f4);\n}",
@@ -7780,7 +7795,8 @@
       "features": [
         "branch",
         "arithmetic",
-        "switch"
+        "switch",
+        "comparison-tree"
       ],
       "loc": 10,
       "refSource": "s32 func_80045314_45F14(void) {\n    switch (omovl) {\n        case 2:\n            return 20;\n        case 3:\n            return -20;\n        default:\n            return 0;\n    }\n}",
@@ -8846,7 +8862,8 @@
         "branch",
         "global",
         "arithmetic",
-        "nested-loop"
+        "nested-loop",
+        "strength-reduce"
       ],
       "loc": 17,
       "refSource": "u8 func_8005FA90_60690(u8 *arg0) {\n    s16 i, j;\n\n    for (i = 0; i < 10; i += 2) {\n        if (D_800A232C_A2F2C[i] == arg0[0] && D_800A232C_A2F2C[i + 1] == arg0[1]) {\n            return i / 2;\n        }\n    }\n    for (i = 0; i < 16; i++) {\n        for (j = 0; j < 32; j += 2) {\n            if (D_800A2344_A2F44[i][j] == arg0[0] && D_800A2344_A2F44[i][j + 1] == arg0[1]) {\n                return i * 16 + j / 2;\n            }\n        }\n    }\n    return 16;\n}",
@@ -9263,7 +9280,8 @@
         "pointer",
         "branch",
         "arithmetic",
-        "bitwise"
+        "bitwise",
+        "strength-reduce"
       ],
       "loc": 12,
       "refSource": "u8 *GWBoardRecordGet(s16 arg0) {\n    s16 idx = arg0;\n\n    if (arg0 < 0) {\n        idx = GwSystem.current_board_index;\n    }\n\n    if (GwSystem.playMode & 1) {\n        return (u8 *)&GwCommon.unk_1D[2] + idx * 9;\n    }\n    return (u8 *)&GwCommon.unk_1D[0x38] + idx * 9;\n}",
@@ -9441,8 +9459,8 @@
         "float",
         "array",
         "arithmetic",
-        "call",
-        "struct"
+        "struct",
+        "call"
       ],
       "loc": 37,
       "refSource": "void Hu3DCam3DToScreen(s16 camIndex, Vec *worldPos, Vec *outPos) {\n    f32 x;\n    f32 y;\n    f32 z;\n    f32 projectedX;\n    f32 projectedY;\n    f32 projectedZ;\n    HuCamera *camera;\n    HuMtx4F viewMtx;\n\n    camera = &gCameraList[camIndex];\n    guLookAtF(\n        viewMtx,\n        camera->pos.x,\n        camera->pos.y,\n        camera->pos.z,\n        camera->at.x,\n        camera->at.y,\n        camera->at.z,\n        camera->up.x,\n        camera->up.y,\n        camera->up.z);\n\n    x = worldPos->x;\n    y = worldPos->y;\n    z = worldPos->z;\n    x -= camera->pos.x;\n    y -= camera->pos.y;\n    z -= camera->pos.z;\n    projectedX = ((x * viewMtx[0][0]) + (y * viewMtx[1][0])) + (z * viewMtx[2][0]);\n    projectedY = ((x * viewMtx[0][1]) + (y * viewMtx[1][1])) + (z * viewMtx[2][1]);\n    projectedZ = ((x * viewMtx[0][2]) + (y * viewMtx[1][2])) + (z * viewMtx[2][2]);\n    x = HuMathSin(camera->fov[0] / 2.0f) / HuMathCos(camera->fov[0] / 2.0f) * projectedZ * ASPECT_RATIO;\n    y = (HuMathSin(camera->fov[0] / 2.0f) / HuMathCos(camera->fov[0] / 2.0f)) * projectedZ;\n    outPos->x = (projectedX * (SCREEN_WIDTH_CENTER / (-x))) + SCREEN_WIDTH_CENTER;\n    outPos->y = ((projectedY * (SCREEN_HEIGHT_CENTER / y)) + SCREEN_HEIGHT_CENTER);\n}",
@@ -9517,10 +9535,10 @@
       "language": "c",
       "features": [
         "sizeof",
-        "call",
         "pointer",
         "struct",
-        "bitwise"
+        "bitwise",
+        "call"
       ],
       "loc": 24,
       "refSource": "void *HuMemAllocTag(s32 size, s16 tag) {\n    s32 alignedSize;\n    void *data;\n    HuMallocHeader *firstBlk;\n    HuMallocHeader *newBlk;\n\n    alignedSize = (size + 7) & ~7;\n    data = gMallocFunc(alignedSize + sizeof(HuMallocHeader));\n    newBlk = (HuMallocHeader *)((s32)data + alignedSize);\n\n    firstBlk = gFirstMallocBlock;\n\n    newBlk->prev = firstBlk;\n    newBlk->next = firstBlk->next;\n    firstBlk->next->prev = newBlk;\n    firstBlk->next = newBlk;\n\n    newBlk->tag = tag;\n    newBlk->size = alignedSize;\n    newBlk->data = data;\n    newBlk->creationFrame = D_800D20AC_D2CAC;\n\n    return newBlk->data;\n}",
@@ -9757,8 +9775,8 @@
         "struct",
         "pointer",
         "loop",
-        "call",
-        "global"
+        "global",
+        "call"
       ],
       "loc": 35,
       "refSource": "s16 HuSprGrpCreate(u16 arg0, u16 arg1) {\n    HuSprGrp *temp_v0_2;\n    HuSprite **var_s2;\n    HuSprite *temp_v0_3;\n    s16 var_s4;\n    s16 i;\n\n    for (i = 0; i < HUSPR_GRP_MAX; i++) {\n        if (HuSprGrpData[i] == NULL) {\n            break;\n        }\n    }\n    if (i == HUSPR_GRP_MAX) {\n        return -1;\n    }\n    var_s4 = i;\n    temp_v0_2 = func_80052468_53068(arg0, arg1);\n    if (temp_v0_2 == NULL) {\n        return -1;\n    }\n    HuSprGrpData[var_s4] = temp_v0_2;\n    temp_v0_2->unk_0A = 0;\n    temp_v0_2->unk_0C = 1;\n    var_s2 = temp_v0_2->members;\n    for (i = 0; i < arg0; i++) {\n        *(var_s2++) = temp_v0_3 = HuMemAlloc(0x210);\n        if (temp_v0_3 == NULL) {\n            HuSprGrpKill(var_s4);\n            return -1;\n        }\n        temp_v0_2->unk_0A++;\n    }\n    func_80052E68_53A68(temp_v0_2, arg0);\n    return var_s4;\n}",
@@ -10005,7 +10023,8 @@
         "struct",
         "field",
         "array",
-        "call"
+        "call",
+        "comparison-tree"
       ],
       "loc": 36,
       "refSource": "static void AnimTask_FlashHealthboxOnLevelUp_Step(u8 taskId)\n{\n    u8 paletteNum;\n    u32 paletteOffset, colorOffset;\n\n    gTasks[taskId].data[0]++;\n    if (gTasks[taskId].data[0]++ >= gTasks[taskId].data[11])\n    {\n        gTasks[taskId].data[0] = 0;\n        paletteNum = IndexOfSpritePaletteTag(TAG_HEALTHBOX_PALS_1);\n        colorOffset = gTasks[taskId].data[10] == 0 ? 6 : 2;\n        switch (gTasks[taskId].data[1])\n        {\n        case 0:\n            gTasks[taskId].data[2] += 2;\n            if (gTasks[taskId].data[2] > 16)\n                gTasks[taskId].data[2] = 16;\n\n            paletteOffset = OBJ_PLTT_ID(paletteNum);\n            BlendPalette(paletteOffset + colorOffset, 1, gTasks[taskId].data[2], RGB(20, 27, 31));\n            if (gTasks[taskId].data[2] == 16)\n                gTasks[taskId].data[1]++;\n            break;\n        case 1:\n            gTasks[taskId].data[2] -= 2;\n            if (gTasks[taskId].data[2] < 0)\n                gTasks[taskId].data[2] = 0;\n\n            paletteOffset = OBJ_PLTT_ID(paletteNum);\n            BlendPalette(paletteOffset + colorOffset, 1, gTasks[taskId].data[2], RGB(20, 27, 31));\n            if (gTasks[taskId].data[2] == 0)\n                DestroyAnimVisualTask(taskId);\n            break;\n        }\n    }\n}",
@@ -10320,9 +10339,9 @@
         "arithmetic",
         "shift",
         "bitwise",
-        "soft-div",
         "global",
         "table",
+        "soft-div",
         "call"
       ],
       "loc": 5,
@@ -10661,8 +10680,8 @@
         "fnptr",
         "table",
         "branch",
-        "call",
-        "bitwise"
+        "bitwise",
+        "call"
       ],
       "loc": 29,
       "refSource": "static bool8 DoForcedMovement(u8 direction, void (*moveFunc)(u8))\n{\n    struct PlayerAvatar *playerAvatar = &gPlayerAvatar;\n    u8 collision = CheckForPlayerAvatarCollision(direction);\n\n    playerAvatar->flags |= PLAYER_AVATAR_FLAG_FORCED_MOVE;\n    if (collision)\n    {\n        ForcedMovement_None();\n        if (collision < COLLISION_STOP_SURFING)\n        {\n            return FALSE;\n        }\n        else\n        {\n            if (collision == COLLISION_LEDGE_JUMP)\n                PlayerJumpLedge(direction);\n            playerAvatar->flags |= PLAYER_AVATAR_FLAG_FORCED_MOVE;\n            playerAvatar->runningState = MOVING;\n            return TRUE;\n        }\n    }\n    else\n    {\n        playerAvatar->runningState = MOVING;\n        moveFunc(direction);\n        return TRUE;\n    }\n}",
@@ -10833,7 +10852,8 @@
         "branch",
         "global",
         "struct",
-        "bitwise"
+        "bitwise",
+        "comparison-tree"
       ],
       "loc": 15,
       "refSource": "u8 GetGenderFromSpeciesAndPersonality(u16 species, u32 personality)\n{\n    switch (gSpeciesInfo[species].genderRatio)\n    {\n    case MON_MALE:\n    case MON_FEMALE:\n    case MON_GENDERLESS:\n        return gSpeciesInfo[species].genderRatio;\n    }\n\n    if (gSpeciesInfo[species].genderRatio > (personality & 0xFF))\n        return MON_FEMALE;\n    else\n        return MON_MALE;\n}",
@@ -10931,7 +10951,8 @@
         "loop",
         "bitwise",
         "soft-div",
-        "call"
+        "call",
+        "jump-table"
       ],
       "loc": 84,
       "refSource": "u8 GetMoveTarget(u16 move, u8 setTarget)\n{\n    u8 targetBattler = 0;\n    u8 moveTarget;\n    u8 side;\n\n    if (setTarget != NO_TARGET_OVERRIDE)\n        moveTarget = setTarget - 1;\n    else\n        moveTarget = gBattleMoves[move].target;\n\n    switch (moveTarget)\n    {\n    case MOVE_TARGET_SELECTED:\n        side = BATTLE_OPPOSITE(GetBattlerSide(gBattlerAttacker));\n        if (gSideTimers[side].followmeTimer && gBattleMons[gSideTimers[side].followmeTarget].hp)\n        {\n            targetBattler = gSideTimers[side].followmeTarget;\n        }\n        else\n        {\n            side = GetBattlerSide(gBattlerAttacker);\n            do\n            {\n                targetBattler = Random() % gBattlersCount;\n            } while (targetBattler == gBattlerAttacker || side == GetBattlerSide(targetBattler) || gAbsentBattlerFlags & gBitTable[targetBattler]);\n            if (gBattleMoves[move].type == TYPE_ELECTRIC\n                && AbilityBattleEffects(ABILITYEFFECT_COUNT_OTHER_SIDE, gBattlerAttacker, ABILITY_LIGHTNING_ROD, 0, 0)\n                && gBattleMons[targetBattler].ability != ABILITY_LIGHTNING_ROD)\n            {\n                targetBattler ^= BIT_FLANK;\n                RecordAbilityBattle(targetBattler, gBattleMons[targetBattler].ability);\n                gSpecialStatuses[targetBattler].lightningRodRedirected = 1;\n            }\n        }\n        break;\n    case MOVE_TARGET_DEPENDS:\n    case MOVE_TARGET_BOTH:\n    case MOVE_TARGET_FOES_AND_ALLY:\n    case MOVE_TARGET_OPPONENTS_FIELD:\n        targetBattler = GetBattlerAtPosition(BATTLE_OPPOSITE(GET_BATTLER_SIDE(gBattlerAttacker)));\n        if (gAbsentBattlerFlags & gBitTable[targetBattler])\n            targetBattler ^= BIT_FLANK;\n        break;\n    case MOVE_TARGET_RANDOM:\n        side = BATTLE_OPPOSITE(GetBattlerSide(gBattlerAttacker));\n        if (gSideTimers[side].followmeTimer && gBattleMons[gSideTimers[side].followmeTarget].hp)\n        {\n            targetBattler = gSideTimers[side].followmeTarget;\n        }\n        else if (gBattleTypeFlags & BATTLE_TYPE_DOUBLE && moveTarget & MOVE_TARGET_RANDOM)\n        {\n            if (GetBattlerSide(gBattlerAttacker) == B_SIDE_PLAYER)\n            {\n                if (Random() & 1)\n                    targetBattler = GetBattlerAtPosition(B_POSITION_OPPONENT_LEFT);\n                else\n                    targetBattler = GetBattlerAtPosition(B_POSITION_OPPONENT_RIGHT);\n            }\n            else\n            {\n                if (Random() & 1)\n                    targetBattler = GetBattlerAtPosition(B_POSITION_PLAYER_LEFT);\n                else\n                    targetBattler = GetBattlerAtPosition(B_POSITION_PLAYER_RIGHT);\n            }\n            if (gAbsentBattlerFlags & gBitTable[targetBattler])\n                targetBattler ^= BIT_FLANK;\n        }\n        else\n        {\n            targetBattler = GetBattlerAtPosition(BATTLE_OPPOSITE(GET_BATTLER_SIDE(gBattlerAttacker)));\n        }\n        break;\n    case MOVE_TARGET_USER_OR_SELECTED:\n    case MOVE_TARGET_USER:\n        targetBattler = gBattlerAttacker;\n        break;\n    }\n\n    *(gBattleStruct->moveTarget + gBattlerAttacker) = targetBattler;\n\n    return targetBattler;\n}",
@@ -10995,9 +11016,9 @@
       "language": "c",
       "features": [
         "branch",
-        "call",
         "memory",
-        "global"
+        "global",
+        "call"
       ],
       "loc": 15,
       "refSource": "bool8 GiveBerryPowder(u32 amountToAdd)\n{\n    u32 *powder = &gSaveBlock2Ptr->berryCrush.berryPowderAmount;\n    u32 amount = DecryptBerryPowder(powder) + amountToAdd;\n    if (amount > MAX_BERRY_POWDER)\n    {\n        SetBerryPowder(powder, MAX_BERRY_POWDER);\n        return FALSE;\n    }\n    else\n    {\n        SetBerryPowder(powder, amount);\n        return TRUE;\n    }\n}",
@@ -11265,9 +11286,9 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "soft-div",
         "branch",
         "shift",
+        "soft-div",
         "call"
       ],
       "loc": 8,
@@ -11354,9 +11375,9 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "soft-div",
         "branch",
         "shift",
+        "soft-div",
         "call"
       ],
       "loc": 8,
@@ -11593,8 +11614,8 @@
       "features": [
         "arithmetic",
         "fixed-point",
-        "soft-div",
         "shift",
+        "soft-div",
         "call"
       ],
       "loc": 9,
@@ -11749,9 +11770,10 @@
         "switch",
         "branch",
         "arithmetic",
-        "soft-div",
         "global",
-        "call"
+        "soft-div",
+        "call",
+        "comparison-tree"
       ],
       "loc": 25,
       "refSource": "u16 ModifyStatByNature(u8 nature, u16 stat, u8 statIndex)\n{\n    u16 retVal;\n\n    // Don't modify HP, Accuracy, or Evasion by nature\n    if (statIndex <= STAT_HP || statIndex > NUM_NATURE_STATS)\n        return stat;\n\n    switch (gNatureStatTable[nature][statIndex - 1])\n    {\n    case 1:\n        retVal = stat * 110;\n        retVal /= 100;\n        break;\n    case -1:\n        retVal = stat * 90;\n        retVal /= 100;\n        break;\n    default:\n        retVal = stat;\n        break;\n    }\n\n    return retVal;\n}",
@@ -11844,8 +11866,8 @@
       "features": [
         "pointer",
         "struct",
-        "call",
-        "sizeof"
+        "sizeof",
+        "call"
       ],
       "loc": 4,
       "refSource": "void PutFirstMemBlockHeader(void *block, u32 size)\n{\n    PutMemBlockHeader(block, (struct MemBlock *)block, (struct MemBlock *)block, size - sizeof(struct MemBlock));\n}",
@@ -12094,7 +12116,8 @@
         "memory",
         "global",
         "loop",
-        "call"
+        "call",
+        "jump-table"
       ],
       "loc": 64,
       "refSource": "static void UNUSED SetMauvilleOldManLanguage(union OldMan *oldMan, u32 language1, u32 language2, u32 language3)\n{\n    s32 i;\n\n    switch (oldMan->common.id)\n    {\n    case MAUVILLE_MAN_TRADER:\n    {\n        struct MauvilleOldManTrader *trader = &oldMan->trader;\n\n        for (i = 0; i < NUM_TRADER_ITEMS; i++)\n        {\n            if (IsStringJapanese(trader->playerNames[i]))\n                trader->language[i] = language1;\n            else\n                trader->language[i] = language2;\n        }\n    }\n    break;\n    case MAUVILLE_MAN_STORYTELLER:\n    {\n        struct MauvilleManStoryteller *storyteller = &oldMan->storyteller;\n\n        for (i = 0; i < NUM_STORYTELLER_TALES; i++)\n        {\n            if (IsStringJapanese(storyteller->trainerNames[i]))\n                storyteller->language[i] = language1;\n            else\n                storyteller->language[i] = language2;\n        }\n    }\n    break;\n    case MAUVILLE_MAN_BARD:\n    {\n        struct MauvilleManBard *bard = &oldMan->bard;\n\n        if (language3 == LANGUAGE_JAPANESE)\n            bard->language = language1;\n        else\n            bard->language = language2;\n    }\n    break;\n    case MAUVILLE_MAN_HIPSTER:\n    {\n        struct MauvilleManHipster *hipster = &oldMan->hipster;\n\n        if (language3 == LANGUAGE_JAPANESE)\n            hipster->language = language1;\n        else\n            hipster->language = language2;\n    }\n    break;\n    case MAUVILLE_MAN_GIDDY:\n    {\n        struct MauvilleManGiddy *giddy = &oldMan->giddy;\n\n        if (language3 == LANGUAGE_JAPANESE)\n            giddy->language = language1;\n        else\n            giddy->language = language2;\n    }\n    break;\n    }\n}",
@@ -12259,10 +12282,10 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "soft-div",
         "bitwise",
         "branch",
         "table",
+        "soft-div",
         "call"
       ],
       "loc": 11,
@@ -12516,8 +12539,8 @@
       "features": [
         "loop",
         "pointer",
-        "call",
-        "branch"
+        "branch",
+        "call"
       ],
       "loc": 7,
       "refSource": "u8 *StringAppend(u8 *dest, const u8 *src)\n{\n    while (*dest != EOS)\n        dest++;\n\n    return StringCopy(dest, src);\n}",
@@ -13071,8 +13094,8 @@
         "branch",
         "global",
         "struct",
-        "call",
-        "bitwise"
+        "bitwise",
+        "call"
       ],
       "loc": 105,
       "refSource": "u8 TrySetCantSelectMoveBattleScript(void)\n{\n    u8 limitations = 0;\n    u16 move = gBattleMons[gActiveBattler].moves[gBattleBufferB[gActiveBattler][2]];\n    u8 holdEffect;\n    u16 *choicedMove = &gBattleStruct->choicedMove[gActiveBattler];\n\n    if (gDisableStructs[gActiveBattler].disabledMove == move && move != MOVE_NONE)\n    {\n        gBattleScripting.battler = gActiveBattler;\n        gCurrentMove = move;\n        if (gBattleTypeFlags & BATTLE_TYPE_PALACE)\n        {\n            gPalaceSelectionBattleScripts[gActiveBattler] = BattleScript_SelectingDisabledMoveInPalace;\n            gProtectStructs[gActiveBattler].palaceUnableToUseMove = TRUE;\n        }\n        else\n        {\n            gSelectionBattleScripts[gActiveBattler] = BattleScript_SelectingDisabledMove;\n            limitations = 1;\n        }\n    }\n\n    if (move == gLastMoves[gActiveBattler] && move != MOVE_STRUGGLE && (gBattleMons[gActiveBattler].status2 & STATUS2_TORMENT))\n    {\n        CancelMultiTurnMoves(gActiveBattler);\n        if (gBattleTypeFlags & BATTLE_TYPE_PALACE)\n        {\n            gPalaceSelectionBattleScripts[gActiveBattler] = BattleScript_SelectingTormentedMoveInPalace;\n            gProtectStructs[gActiveBattler].palaceUnableToUseMove = TRUE;\n        }\n        else\n        {\n            gSelectionBattleScripts[gActiveBattler] = BattleScript_SelectingTormentedMove;\n            limitations++;\n        }\n    }\n\n    if (gDisableStructs[gActiveBattler].tauntTimer != 0 && gBattleMoves[move].power == 0)\n    {\n        gCurrentMove = move;\n        if (gBattleTypeFlags & BATTLE_TYPE_PALACE)\n        {\n            gPalaceSelectionBattleScripts[gActiveBattler] = BattleScript_SelectingNotAllowedMoveTauntInPalace;\n            gProtectStructs[gActiveBattler].palaceUnableToUseMove = TRUE;\n        }\n        else\n        {\n            gSelectionBattleScripts[gActiveBattler] = BattleScript_SelectingNotAllowedMoveTaunt;\n            limitations++;\n        }\n    }\n\n    if (GetImprisonedMovesCount(gActiveBattler, move))\n    {\n        gCurrentMove = move;\n        if (gBattleTypeFlags & BATTLE_TYPE_PALACE)\n        {\n            gPalaceSelectionBattleScripts[gActiveBattler] = BattleScript_SelectingImprisonedMoveInPalace;\n            gProtectStructs[gActiveBattler].palaceUnableToUseMove = TRUE;\n        }\n        else\n        {\n            gSelectionBattleScripts[gActiveBattler] = BattleScript_SelectingImprisonedMove;\n            limitations++;\n        }\n    }\n\n    if (gBattleMons[gActiveBattler].item == ITEM_ENIGMA_BERRY)\n        holdEffect = gEnigmaBerries[gActiveBattler].holdEffect;\n    else\n        holdEffect = GetItemHoldEffect(gBattleMons[gActiveBattler].item);\n\n    gPotentialItemEffectBattler = gActiveBattler;\n\n    if (holdEffect == HOLD_EFFECT_CHOICE_BAND && *choicedMove != MOVE_NONE && *choicedMove != MOVE_UNAVAILABLE && *choicedMove != move)\n    {\n        gCurrentMove = *choicedMove;\n        gLastUsedItem = gBattleMons[gActiveBattler].item;\n        if (gBattleTypeFlags & BATTLE_TYPE_PALACE)\n        {\n            gProtectStructs[gActiveBattler].palaceUnableToUseMove = TRUE;\n        }\n        else\n        {\n            gSelectionBattleScripts[gActiveBattler] = BattleScript_SelectingNotAllowedMoveChoiceItem;\n            limitations++;\n        }\n    }\n\n    if (gBattleMons[gActiveBattler].pp[gBattleBufferB[gActiveBattler][2]] == 0)\n    {\n        if (gBattleTypeFlags & BATTLE_TYPE_PALACE)\n        {\n            gProtectStructs[gActiveBattler].palaceUnableToUseMove = TRUE;\n        }\n        else\n        {\n            gSelectionBattleScripts[gActiveBattler] = BattleScript_SelectingMoveWithNoPP;\n            limitations++;\n        }\n    }\n\n    return limitations;\n}",
@@ -13374,7 +13397,8 @@
         "loop",
         "bitwise",
         "shift",
-        "call"
+        "call",
+        "strength-reduce"
       ],
       "loc": 19,
       "refSource": "u32 Base10DigitsToHexNibbles(u16 num)\n{\n    u8 i;\n    u16 result;\n    u8 lowDigit;\n    u16 remainder = num;\n\n    result = 0;\n    for (i = 0; i < 4; i++) {\n        s32 divisor = Div(remainder, 10);\n        lowDigit = remainder - (divisor * 10);\n        remainder = divisor;\n\n        result |= lowDigit << (i * 4);\n    }\n\n    return result;\n}\n",
@@ -13628,7 +13652,8 @@
         "field",
         "pointer",
         "branch",
-        "sizeof"
+        "sizeof",
+        "strength-reduce"
       ],
       "loc": 37,
       "refSource": "void *EwramMalloc(u32 req)\n{\n    struct EwramNode *node;\n    s32 requestedSpace = req;\n\n    requestedSpace = (req + 3) / 4;\n    if (requestedSpace != 0) {\n        requestedSpace = requestedSpace * 4 + sizeof(struct EwramNode);\n        node = (struct EwramNode *)gEwramHeap;\n        while (1) {\n            if (requestedSpace <= (u32)node->state) {\n                if (requestedSpace == node->state) {\n                    node->state = -requestedSpace;\n                    return node->space;\n                }\n\n                if (requestedSpace + (s32)sizeof(struct EwramNode) <= node->state) {\n                    struct EwramNode *addr = (void *)node + requestedSpace;\n\n                    addr->next = node->next;\n                    ++node;\n                    --node;\n                    addr->state = node->state - requestedSpace;\n                    node->next = addr;\n                    node->state = -requestedSpace;\n                    return node->space;\n                }\n            }\n            ++requestedSpace;\n            --requestedSpace;\n            if (!node->next)\n                return ewram_end;\n            node = node->next;\n        }\n    }\n    return ewram_end;\n}",
@@ -14040,7 +14065,8 @@
         "loop",
         "memory",
         "nested-loop",
-        "call"
+        "call",
+        "comparison-tree"
       ],
       "loc": 117,
       "refSource": "void PackSaveSector(SaveSectorData *sector, SaveGame *save)\n{\n    s16 i;\n    s16 j;\n    s16 k;\n\n    sector->header.magicNumber = 0x47544E4C;\n    sector->header.sectorId += 1;\n    sector->playerId = save->playerId;\n\n    for (i = 0; i < 6; i++) {\n        sector->playerName[i] = save->playerName[i];\n    }\n\n    sector->unk18 = 0;\n    sector->unlockedCharacters = save->unlockedCharacters;\n    sector->unlockedZones = save->unlockedZones;\n    sector->continueZone = save->continueZone;\n    sector->unk1C = 0;\n\n    for (i = 0; i < 7; i++) {\n        sector->chaoCount[i] = save->chaoCount[i];\n    }\n\n    for (i = 0; i < 7; i++) {\n        sector->specialKeys[i] = save->specialKeys[i];\n    }\n\n    for (i = 0; i < 9; i++) {\n        sector->unlockedStages[i] = save->unlockedStages[i];\n    }\n\n    for (i = 0; i < 9; i++) {\n        for (j = 0; j < 4; j++) {\n            sector->collectedMedals[i][j] = save->collectedMedals[i][j];\n        }\n    }\n\n    sector->collectedEmeralds = save->collectedEmeralds;\n    sector->unk62 = save->unk34;\n    sector->unlockFlags = save->unlockFlags;\n    sector->vsWins = save->vsWins;\n    sector->vsDraws = save->vsDraws;\n    sector->vsLosses = save->vsLosses;\n    sector->unk67 = 0;\n\n    for (i = 0; i < 10; i++) {\n        sector->vsRecords[i].slotFilled = save->vsRecords[i].slotFilled;\n        sector->vsRecords[i].wins = save->vsRecords[i].wins;\n        sector->vsRecords[i].draws = save->vsRecords[i].draws;\n        sector->vsRecords[i].losses = save->vsRecords[i].losses;\n\n        sector->vsRecords[i].playerId = save->vsRecords[i].playerId;\n\n        for (j = 0; j < 6; j++) {\n            sector->vsRecords[i].playerName[j] = save->vsRecords[i].playerName[j];\n        }\n    }\n\n#define Zone i\n#define Act  j\n#define Rank k\n    for (Zone = 0; Zone < (s32)ARRAY_COUNT(save->timeRecords.table); Zone++) {\n        for (Act = 0; Act < (s32)ARRAY_COUNT(save->timeRecords.table[0]); Act++) {\n            for (Rank = 0; Rank < (s32)ARRAY_COUNT(save->timeRecords.table[0][0]); Rank++) {\n                sector->timeRecords.table[Zone][Act][Rank].character1 = save->timeRecords.table[Zone][Act][Rank].character1;\n                sector->timeRecords.table[Zone][Act][Rank].character2 = save->timeRecords.table[Zone][Act][Rank].character2;\n                sector->timeRecords.table[Zone][Act][Rank].time = save->timeRecords.table[Zone][Act][Rank].time;\n            }\n        }\n    }\n#undef Rank\n#undef Act\n#undef Zone\n\n    switch (save->buttonConfig.jump) {\n        case A_BUTTON:\n            sector->buttonConfig.jump = 1;\n            break;\n        case B_BUTTON:\n            sector->buttonConfig.attack = 1;\n            break;\n        case R_BUTTON:\n            sector->buttonConfig.trick = 1;\n            break;\n    }\n\n    switch (save->buttonConfig.attack) {\n        case A_BUTTON:\n            sector->buttonConfig.jump = 2;\n            break;\n        case B_BUTTON:\n            sector->buttonConfig.attack = 2;\n            break;\n        case R_BUTTON:\n            sector->buttonConfig.trick = 2;\n            break;\n    }\n\n    switch (save->buttonConfig.trick) {\n        case A_BUTTON:\n            sector->buttonConfig.jump = 4;\n            break;\n        case B_BUTTON:\n            sector->buttonConfig.attack = 4;\n            break;\n        case R_BUTTON:\n            sector->buttonConfig.trick = 4;\n            break;\n    }\n\n    sector->difficulty = save->difficulty;\n    sector->disableTimeLimit = save->disableTimeLimit;\n    sector->language = save->language;\n    sector->unk367 = 0;\n    sector->checksum = GetSaveSectorChecksum(sector);\n}",
@@ -14115,12 +14141,12 @@
         "global",
         "struct",
         "loop",
-        "dma",
-        "call",
         "nested-loop",
         "sizeof",
         "bitwise",
-        "mmio"
+        "call",
+        "mmio",
+        "dma"
       ],
       "loc": 71,
       "refSource": "void ProcessOamBuffers(void)\n{\n    OamData *dstOam = &gOamBuffer[0];\n    u8 i = 0;\n    s32 r3;\n\n    for (r3 = 0; r3 < 32; r3++) {\n        s8 index = gOamMallocOrders_StartIndex[r3];\n\n        while (index != -1) {\n            u8 newI;\n            u8 *byteArray = gOamMallocCopiedOrder;\n            DmaCopy16(3, &gOamMallocBuffer[index], dstOam, sizeof(OamDataShort));\n            dstOam++;\n\n            byteArray += index;\n            newI = i++;\n            *byteArray = newI;\n            index = gOamMallocBuffer[index].split.fractional;\n        };\n    }\n\n    if (gFlags & FLAGS_800) {\n        r3 = gOamFreeIndex;\n        dstOam = &gOamBuffer[r3];\n\n        while (r3 < gOamFirstPausedIndex) {\n            DmaFill16(3, 0x200, dstOam, sizeof(OamDataShort));\n            dstOam++;\n            r3++;\n        }\n    } else if (gFlags & FLAGS_PAUSE_GAME) {\n        /* Push all active OAM entries to te end of OAM temporarily while\n         * the game is paused */\n        s32 k, l;\n        r3 = gOamFreeIndex - 1;\n        dstOam = &gOamBuffer[r3];\n\n        for (k = l = 0; r3 >= 0;) {\n            s32 size = sizeof(OamDataShort);\n            DmaCopy16(3, dstOam - k, &gOamBuffer[OAM_ENTRY_COUNT - 1 - l], size);\n            k++, r3--, l++;\n        }\n\n        // _08005A5E\n\n        gOamFirstPausedIndex = OAM_ENTRY_COUNT - gOamFreeIndex;\n\n        for (r3 = 0; r3 < gOamFirstPausedIndex; r3++) {\n            DmaFill16(3, 0x200, &gOamBuffer[r3], sizeof(OamDataShort));\n#ifndef NON_MATCHING\n            // unlike when using --, using ++ changes the condition to something entirely\n            // different unless we tell the compiler that we want to use r3's values\n            // (without actually doing so)\n            asm(\"\" ::\"r\"(r3));\n#endif\n        }\n\n    } else {\n        gOamFirstPausedIndex = 0;\n    }\n\n    gOamFreeIndex = 0;\n    if (gFlags & FLAGS_4000) {\n        CpuFill32(-1, gOamMallocOrders_StartIndex, sizeof(gOamMallocOrders_StartIndex));\n        CpuFill32(-1, gOamMallocOrders_EndIndex, sizeof(gOamMallocOrders_EndIndex));\n    } else {\n        DmaFill32(3, -1, gOamMallocOrders_StartIndex, sizeof(gOamMallocOrders_StartIndex));\n        DmaFill32(3, -1, gOamMallocOrders_EndIndex, sizeof(gOamMallocOrders_EndIndex));\n    }\n}",
@@ -14337,7 +14363,8 @@
         "global",
         "bitwise",
         "cast",
-        "mmio"
+        "mmio",
+        "strength-reduce"
       ],
       "loc": 23,
       "refSource": "void sa2__sub_8007858(u8 param0, int_vcount minY, int_vcount maxY, u16 param3, u16 param4)\n{\n    u16 *cursor;\n\n    gFlags |= FLAGS_EXECUTE_HBLANK_COPY;\n\n    gHBlankCopyTarget = (void *)&((u8 *)&REG_BG0HOFS)[param0 * 4];\n    gHBlankCopySize = 4;\n\n    cursor = &((u16 *)gBgOffsetsHBlankPrimary)[minY * 2];\n\n    param4 = (param4 - minY) & 0x1FF;\n    param3 &= 0x1FF;\n\n    while (minY < maxY) {\n        *cursor = param3;\n        cursor++;\n        *cursor = param4--;\n        cursor++;\n\n        minY++;\n    }\n}",
@@ -14409,11 +14436,12 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "mmio",
         "global",
-        "dma",
         "bitwise",
-        "shift"
+        "shift",
+        "mmio",
+        "dma",
+        "strength-reduce"
       ],
       "loc": 15,
       "refSource": "void sa2__sub_80078D4(u8 bg, int_vcount minY, int_vcount maxY, u16 offsetEven, u16 offsetOdd)\n{\n    s32 fillVal;\n\n    gFlags |= FLAGS_EXECUTE_HBLANK_COPY;\n\n    gHBlankCopyTarget = (void *)&((u8 *)&REG_BG0HOFS)[bg * 4];\n    gHBlankCopySize = 4;\n\n    if (minY < maxY) {\n        fillVal = (offsetEven %= 512u) | ((offsetOdd % 512u) << 16);\n\n        DmaFill32(3, fillVal, &((u16 *)gBgOffsetsHBlankPrimary)[minY * 2], (maxY - minY) * 4);\n    }\n}",
@@ -14485,7 +14513,8 @@
         "global",
         "bitwise",
         "arithmetic",
-        "mmio"
+        "mmio",
+        "strength-reduce"
       ],
       "loc": 24,
       "refSource": "void sa2__sub_8007958(u8 bg, int_vcount minY, int_vcount maxY, s16 param3, s8 param4, u16 param5, u16 param6)\n{\n    u16 *cursor;\n\n    gFlags |= FLAGS_EXECUTE_HBLANK_COPY;\n\n    gHBlankCopyTarget = (void *)&((u8 *)&REG_BG0HOFS)[bg * 4];\n    gHBlankCopySize = 4;\n\n    cursor = &((u16 *)gBgOffsetsHBlankPrimary)[minY * 2];\n\n    while (minY < maxY) {\n        *cursor = (param3 + param5) & 0x1FF;\n        cursor++;\n        *cursor = param6;\n        cursor++;\n\n        param3 = -(param3 + param4);\n        param4 = -param4;\n\n        minY++;\n    }\n}\n",
@@ -15106,7 +15135,8 @@
       "features": [
         "arithmetic",
         "soft-div",
-        "call"
+        "call",
+        "strength-reduce"
       ],
       "loc": 1,
       "refSource": "s32 SA2_LABEL(sub_80856DC)(s32 a, s32 b, s32 c) { return (a * 7 + b * 6 - c) / 12; }",
@@ -15181,7 +15211,8 @@
       "features": [
         "arithmetic",
         "soft-div",
-        "call"
+        "call",
+        "strength-reduce"
       ],
       "loc": 1,
       "refSource": "s32 SA2_LABEL(sub_80856F8)(s32 a, s32 b, s32 c) { return ((b * 6 - a) + c * 7) / 12; }",
@@ -15255,7 +15286,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "shift"
+        "shift",
+        "strength-reduce"
       ],
       "loc": 1,
       "refSource": "s32 SA2_LABEL(sub_8085714)(s32 a, s32 b, s32 c) { return ((a + b * 8) - c) >> 3; }",
@@ -15329,7 +15361,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "shift"
+        "shift",
+        "strength-reduce"
       ],
       "loc": 1,
       "refSource": "s32 SA2_LABEL(sub_8085720)(s32 a, s32 b, s32 c) { return ((b * 8 - a) + c) >> 3; }",
@@ -15711,10 +15744,10 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "mmio",
         "global",
         "branch",
-        "bitwise"
+        "bitwise",
+        "mmio"
       ],
       "loc": 38,
       "refSource": "void Sio32MultiLoadIntr(void)\n{\n    // Saves received data\n    u32 recvTmp = REG_SIODATA32;\n    // Slave prepares to receive\n    if (gSio32MultiLoadArea.type != SIO_SCK_IN)\n        REG_SIOCNT |= SIO_ENABLE;\n    if (gSio32MultiLoadArea.type == SIO_SCK_IN) {\n        REG_SIO32ML_TIMER_H = 0; // Stops timer\n        // Process sending data\n        if (gSio32MultiLoadArea.dataCounter < 0) // Sets synchronous data\n            REG_SIODATA32 = SIO32ML_SYNC_DATA;\n        else if (gSio32MultiLoadArea.dataCounter < SIO32ML_BLOCK_SIZE / 4) // Sets sending\n                                                                           // data\n            REG_SIODATA32 = gSio32MultiLoadArea.datap[gSio32MultiLoadArea.dataCounter];\n        else\n            REG_SIODATA32 = gSio32MultiLoadArea.checkSum; // Sets check sum\n    } else {\n        // Process receiving data\n        if (gSio32MultiLoadArea.dataCounter < 0) { // Checks synchronous data\n            if (recvTmp != SIO32ML_SYNC_DATA)\n                --gSio32MultiLoadArea.dataCounter;\n        } else if (gSio32MultiLoadArea.dataCounter < SIO32ML_BLOCK_SIZE / 4) // Saves\n                                                                             // receiving\n                                                                             // data\n            gSio32MultiLoadArea.datap[gSio32MultiLoadArea.dataCounter] = recvTmp;\n        else\n            gSio32MultiLoadArea.checkSum = recvTmp; // Saves check sum\n    }\n    if (gSio32MultiLoadArea.dataCounter < SIO32ML_BLOCK_SIZE / 4 + 3) {\n        ++gSio32MultiLoadArea.dataCounter;\n        // Master starts to sending\n        if (gSio32MultiLoadArea.type == SIO_SCK_IN) {\n            REG_SIOCNT |= SIO_ENABLE; // Restarts sending\n            REG_SIO32ML_TIMER_H = TIMER_1CLK | TIMER_INTR_ENABLE | TIMER_ENABLE; // Restarts timer\n        }\n    }\n}",
@@ -15815,10 +15848,11 @@
       "features": [
         "switch",
         "shift",
-        "mmio",
         "global",
         "loop",
-        "bitwise"
+        "bitwise",
+        "mmio",
+        "jump-table"
       ],
       "loc": 77,
       "refSource": "u32 Sio32MultiLoadMain(u32 *progressCounterp)\n{\n    s32 dataCounter, dataCounterBak;\n    UNUSED s32 i, ii; // declared in SDK\n\n    switch (gSio32MultiLoadArea.state) {\n        case 0:\n            if (gSio32MultiLoadArea.type || gSio32MultiLoadArea.frameCounter) // Slave SIO Mode switch delay wait\n                gSio32MultiLoadArea.state = 1;\n            break;\n        case 1:\n            if (gSio32MultiLoadArea.type == SIO_SCK_IN) {\n                if (gSio32MultiLoadArea.frameCounter < SIO32ML_MODE_WAIT_FRAMES) // Master wait\n                    break;\n            } else // Slave\n                REG_SIOCNT = SIO_32BIT_MODE; // Switches to SIO mode\n            REG_SIODATA32 = 0; // Clears data registery\n            REG_IF = INTR_FLAG_SERIAL | SIO32ML_TIMER_INTR_FLAG; // Resets IF\n            if (gSio32MultiLoadArea.type == SIO_SCK_IN) { // Sets Master\n                REG_SIOCNT |= SIO_ENABLE; // Starts communication\n                REG_SIO32ML_TIMER = SIO32ML_TIMER_COUNT | ((TIMER_1CLK | TIMER_INTR_ENABLE | TIMER_ENABLE) << 16); // Starts timer\n                REG_IME = 0;\n                REG_IE |= SIO32ML_TIMER_INTR_FLAG; // Enables timer interrupt\n                REG_IME = 1;\n            } else { // Sets Slave\n                REG_SIOCNT |= SIO_INTR_ENABLE | SIO_ENABLE; // Starts communication\n                REG_IME = 0;\n                REG_IE |= INTR_FLAG_SERIAL; // Enables SIO interrupt\n                REG_IME = 1;\n            }\n            gSio32MultiLoadArea.frameCounter = 0;\n            gSio32MultiLoadArea.state = 2;\n            break;\n        case 2:\n            dataCounter = gSio32MultiLoadArea.dataCounter;\n            dataCounterBak = dataCounter;\n            if (dataCounter > SIO32ML_BLOCK_SIZE / 4)\n                dataCounter = SIO32ML_BLOCK_SIZE / 4;\n            else if (dataCounter < 0)\n                dataCounter = 0;\n            if (progressCounterp)\n                *progressCounterp = dataCounter; // Set progress counter\n            if (gSio32MultiLoadArea.type != SIO_SCK_IN) { // Slave\n                while (gSio32MultiLoadArea.checkSumCounter < dataCounter) // Receiving data sum check\n                    gSio32MultiLoadArea.checkSumTmp += ((s32 *)gSio32MultiLoadArea.datap)[gSio32MultiLoadArea.checkSumCounter++];\n                if (dataCounterBak > SIO32ML_BLOCK_SIZE / 4)\n                    if ((gSio32MultiLoadArea.checkSum += gSio32MultiLoadArea.checkSumTmp) == -1)\n                        gSio32MultiLoadArea.downloadSuccessFlag = 1; // Succeeds download\n            }\n            if (dataCounterBak > SIO32ML_BLOCK_SIZE / 4 // Complete communication\n                || gSio32MultiLoadArea.frameCounter == 0x8C) // SIO32ML_LD_TIMEOUT_FRAMES in SDK doesn't match\n                gSio32MultiLoadArea.state = 3; // Load time out\n            break;\n        case 3:\n            REG_IME = 0;\n            REG_IE &= ~(INTR_FLAG_SERIAL | SIO32ML_TIMER_INTR_FLAG); // Disables SIO and timer interrupt\n            REG_IME = 1;\n            REG_SIOCNT = SIO_32BIT_MODE; // Stops SIO32\n            *(vu32 *)REG_ADDR_SIOCNT = SIO_MULTI_MODE; // Switches to SIO mode\n            *(vu32 *)REG_ADDR_SIOCNT = SIO_MULTI_MODE | MULTI_SIO_BAUD_RATE_NO;\n            *(vu64 *)REG_ADDR_SIODATA32 = 0; // Clears data register\n            if (gSio32MultiLoadArea.type) // Master\n                REG_SIO32ML_TIMER = 0; // Resets timer\n            REG_IF = INTR_FLAG_SERIAL | SIO32ML_TIMER_INTR_FLAG; // Resets IF\n            if (!gSio32MultiLoadArea.type)\n                return 1; // Slave comes back first\n            gSio32MultiLoadArea.frameCounter = 0;\n            gSio32MultiLoadArea.state = 4;\n            break;\n        case 4:\n            if (gSio32MultiLoadArea.frameCounter >= 3) // Master comes back later\n                return 1;\n            break;\n    }\n    ++gSio32MultiLoadArea.frameCounter;\n    return 0;\n}",
@@ -16040,7 +16074,8 @@
         "field",
         "branch",
         "bitwise",
-        "call"
+        "call",
+        "comparison-tree"
       ],
       "loc": 47,
       "refSource": "void sub_804D360(Sprite *s, s16 i, s16 param2)\n{\n    u32 flags = 0;\n\n    switch (i) {\n        case 0: {\n            flags |= SPRITE_FLAG(X_FLIP, 1);\n            if (param2 == 2) {\n                flags |= SPRITE_FLAG(Y_FLIP, 1);\n            }\n        } break;\n\n        case 1: {\n            if (param2 == 2) {\n                flags |= SPRITE_FLAG(Y_FLIP, 1);\n            }\n        } break;\n\n        case 2: {\n            flags |= SPRITE_FLAG(Y_FLIP, 1);\n\n            if (param2 == 0) {\n                flags |= SPRITE_FLAG(X_FLIP, 1);\n            }\n        } break;\n\n        case 3: {\n            if (param2 == 0) {\n                flags |= SPRITE_FLAG(X_FLIP, 1);\n            }\n        } break;\n    }\n\n    s->tiles = ALLOC_TILES_VARIANT(ANIM_MAZE, 6);\n    s->anim = ANIM_MAZE;\n    s->variant = 6;\n    s->oamFlags = SPRITE_OAM_ORDER(24);\n    s->animCursor = 0;\n    s->qAnimDelay = 0;\n    s->qAnimDelay = 0;\n    s->prevVariant = -1;\n    s->animSpeed = SPRITE_ANIM_SPEED(1.0);\n    s->palId = 0;\n    s->hitboxes[0].index = -1;\n    s->frameFlags = flags | SPRITE_FLAG(PRIORITY, 1);\n    UpdateSpriteAnimation(s);\n}",
@@ -16132,13 +16167,14 @@
       "language": "c",
       "features": [
         "switch",
-        "soft-div",
         "shift",
         "struct",
         "field",
         "loop",
         "bitwise",
-        "call"
+        "soft-div",
+        "call",
+        "comparison-tree"
       ],
       "loc": 92,
       "refSource": "u16 sub_804DC38(u8 kind, s32 worldX, s32 worldY, MapEntity *me)\n{\n    s32 r0;\n    s32 r1;\n    s32 r2_32;\n    s16 r2;\n    bool32 r6;\n    u16 i;\n\n    // TODO(Jace): This was likely not written this way, and might actually be a bug?\n    //             I don't think MapEntity structs are always aligned in memory.\n    u32 data = *((u32 *)&me->d.uData[1]);\n    if (data & 0x00FFFF00) {\n        if (me->d.uData[3] < me->d.uData[2]) {\n            r2_32 = (me->d.uData[2] * (TILE_WIDTH / 2));\n            r1 = worldX;\n            r0 = worldX + (me->d.sData[0] * TILE_WIDTH);\n            r6 = FALSE;\n        } else {\n            r2_32 = (me->d.uData[3] * (TILE_WIDTH / 2));\n            r1 = worldY;\n            r0 = worldY + (me->d.sData[1] * TILE_WIDTH);\n            r6 = TRUE;\n        }\n\n        r2 = ((r1 - (r0 + r2_32)) << 14) / r2_32;\n        if (r2 >= 0) {\n            for (i = 0; (i < Q(1)) && (r2 > SIN(i));) {\n                i += 4;\n            }\n\n            switch (kind) {\n                case 0: {\n                    return Q(2) - i;\n                } break;\n\n                case 1: {\n                    if (r6) {\n                        return i;\n                    } else {\n                        return Q(2) - i;\n                    }\n                } break;\n\n                case 2: {\n                    if (!r6) {\n                        return i;\n                    } else {\n                        return Q(2) - i;\n                    }\n                } break;\n\n                default: {\n                    return i;\n                }\n            }\n\n        } else {\n            for (i = Q(2); (i < Q(3)) && (r2 < SIN(i));) {\n                i += 4;\n            }\n\n            switch (kind) {\n                case 0: {\n                    return i;\n                } break;\n\n                case 1: {\n                    if (!r6) {\n                        return i;\n                    } else {\n                        return Q(6) - i;\n                    }\n                } break;\n\n                case 2: {\n                    if (r6) {\n                        return i;\n                    } else {\n                        return Q(6) - i;\n                    }\n                } break;\n\n                case 3: {\n                    return Q(6) - i;\n                } break;\n            }\n        }\n    }\n\n    return 0;\n}",
@@ -16838,9 +16874,9 @@
       "language": "c",
       "features": [
         "struct",
-        "call",
         "global",
-        "branch"
+        "branch",
+        "call"
       ],
       "loc": 14,
       "refSource": "void func_80018DC0_199C0(void) {\n    task_mem_199C0 *mem;\n\n    mem = (task_mem_199C0 *)allocateTaskMemory(4);\n    mem->unk2 = 0;\n    mem->unk0 = 0;\n\n    if (D_800A8CC8_A0038 != 4) {\n        func_800574A0_580A0(2);\n    }\n\n    createTaskQueue(D_8008D78C_8E38C[D_800A8CC8_A0038], 0x5A);\n    setGameStateHandler(func_80018E2C_19A2C);\n}",
@@ -17084,7 +17120,8 @@
         "pointer",
         "loop",
         "branch",
-        "global"
+        "global",
+        "strength-reduce"
       ],
       "loc": 114,
       "refSource": "s32 func_8001E104_1ED04(EepromSaveData_type *arg0) {\n    s32 temp_a1;\n    s32 changed;\n    s32 i;\n    u8 temp;\n\n    temp_a1 = *(s32 *)arg0->unknown_0C;\n    changed = 0;\n    if (temp_a1 > 0x98967F) {\n        *(s32 *)arg0->unknown_0C = 0x98967F;\n        changed = 1;\n        i = 0;\n    } else {\n        i = 0;\n        if (temp_a1 < 0) {\n            *(s32 *)arg0->unknown_0C = 0;\n            changed = 1;\n            i = 0;\n        }\n    }\n\n    for (i = 0; i < 0x10; i++) {\n        temp = arg0->save_slot_status[i];\n        if (temp >= 6) {\n            arg0->save_slot_status[i] = 0;\n            changed = 1;\n        }\n        temp = arg0->save_slot_data[i];\n        if (temp >= 6) {\n            arg0->save_slot_data[i] = 0;\n            changed = 1;\n        }\n    }\n\n    if (arg0->save_slot_status[0] == 0) {\n        arg0->save_slot_status[0] = 5;\n        changed = 1;\n    }\n\n    for (i = 0; i < 3; i++) {\n        temp = arg0->save_slot_data[i];\n        if (temp == 0) {\n            arg0->save_slot_data[i] = 5;\n            changed = 1;\n        }\n        temp = arg0->save_slot_data[i + 4];\n        if (temp == 0) {\n            arg0->save_slot_data[i + 4] = 5;\n            changed = 1;\n        }\n    }\n\n    for (i = 0; i < 0x12; i++) {\n        temp = arg0->character_or_settings[i];\n        if (temp >= 0x1A) {\n            arg0->character_or_settings[i] = 0;\n            changed = 1;\n        }\n    }\n\n    for (i = 0; i < 3; i++) {\n        temp = arg0->character_or_settings[i * 3];\n        if (temp == 0) {\n            arg0->character_or_settings[i * 3] = i + 1;\n            changed = 1;\n        }\n    }\n\n    for (i = 0; i < 0x12; i++) {\n        temp = arg0->character_or_settings[i];\n        if (temp >= 0x1A) {\n            arg0->character_or_settings[i] = 1;\n            changed = 1;\n        }\n    }\n\n    for (i = 0; i < 9; i++) {\n        temp = arg0->u.setting_42[i];\n        if (temp >= 0x12) {\n            arg0->u.setting_42[i] = 0x11;\n            changed = 1;\n        }\n    }\n\n    for (i = 0; i < 3; i++) {\n        temp = arg0->setting_4B[i];\n        if (temp >= 0x10) {\n            arg0->setting_4B[i] = 0xF;\n            changed = 1;\n        }\n    }\n\n    if (arg0->setting_4E >= 2) {\n        arg0->setting_4E = 0;\n        changed = 1;\n    }\n\n    if (arg0->setting_4F >= 2) {\n        arg0->setting_4F = 0;\n        changed = 1;\n    }\n\n    if (arg0->setting_50 >= 2) {\n        arg0->setting_50 = 0;\n        changed = 1;\n    }\n\n    if (arg0->unk51 >= 2) {\n        arg0->unk51 = 0;\n        changed = 1;\n    }\n\n    return changed;\n}",
@@ -17152,9 +17189,9 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "call",
         "branch",
-        "compare"
+        "compare",
+        "call"
       ],
       "loc": 9,
       "refSource": "void func_80021C00_22800(void) {\n    s16 result = func_80069810_6A410();\n\n    if (result == 0xFF) {\n        terminateSchedulerWithCallback(&func_80021D00_22900);\n    } else if (result == 1) {\n        setGameStateHandler(&func_80021C58_22858);\n    }\n}",
@@ -17241,8 +17278,8 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "call",
-        "branch"
+        "branch",
+        "call"
       ],
       "loc": 12,
       "refSource": "void func_80021D88_22988(void) {\n    s16 result;\n\n    getCurrentAllocation();\n    result = func_80069810_6A410();\n\n    if (result == 1) {\n        setGameStateHandler(func_80021DE8_229E8);\n    } else if (result == 0xFF) {\n        terminateSchedulerWithCallback(func_80022108_22D08);\n    }\n}",
@@ -17557,9 +17594,10 @@
       "features": [
         "switch",
         "struct",
-        "call",
         "branch",
-        "global"
+        "global",
+        "call",
+        "comparison-tree"
       ],
       "loc": 49,
       "refSource": "s32 func_8002A390_2AF90(Func8002A390Arg *arg0) {\n    GameState *state;\n    s32 stateVal;\n\n    state = getCurrentAllocation();\n    stateVal = arg0->unk5E;\n\n    switch (stateVal) {\n        case 0:\n            if (func_8002A4AC_2B0AC(&arg0->matrix, arg0->unk5D) != 0) {\n                return 1;\n            }\n            if (state->unk421 != 0) {\n                return 0;\n            }\n            if (func_8002ACFC_2B8FC(arg0->matrix.translation.x, arg0->matrix.translation.z, arg0->unk2E) == 0) {\n                return 0;\n            }\n            arg0->unk54 = arg0->unk50;\n            if (arg0->unk5D == 5) {\n                arg0->unk50 = 0x21;\n            } else {\n                arg0->unk50 = 0;\n            }\n            arg0->unk61 = arg0->unk5E;\n            arg0->unk5E = 0x44;\n            break;\n        case 1:\n        case 2:\n        case 3:\n        case 4:\n            if (func_8002A7CC_2B3CC(arg0) == 0) {\n                return 0;\n            }\n            arg0->unk61 = arg0->unk5E;\n            arg0->unk5E = 0;\n            break;\n        case 0x44:\n            if (func_8002A7CC_2B3CC(arg0) == 0) {\n                return 0;\n            }\n            arg0->unk61 = arg0->unk5E;\n            arg0->unk5E = 0;\n            arg0->unk50 = arg0->unk54;\n            break;\n    }\n\n    return 0;\n}",
@@ -17628,10 +17666,10 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "call",
         "fixed-point",
         "branch",
-        "global"
+        "global",
+        "call"
       ],
       "loc": 14,
       "refSource": "s32 func_8002ACFC_2B8FC(s32 arg0, s32 arg1, s16 arg2) {\n    GameState *state;\n    s16 angle;\n\n    state = getCurrentAllocation();\n    angle = func_8006D21C_6DE1C(state->unk3EC, state->unk3F0, arg0, arg1);\n\n    if (arg2 - 0x238 < angle && angle < arg2 + 0x238) {\n        if (distance_2d(state->unk3EC - arg0, state->unk3F0 - arg1) <= 0x280000) {\n            return 1;\n        }\n    }\n    return 0;\n}",
@@ -17951,8 +17989,8 @@
       "language": "c",
       "features": [
         "branch",
-        "call",
-        "cast"
+        "cast",
+        "call"
       ],
       "loc": 7,
       "refSource": "void *func_80035F80_36B80(s32 arg0) {\n    if ((u8)arg0 != 1) {\n        return loadCompressedData(&_3F6950_ROM_START, &_3F6950_ROM_END, 0x508);\n    } else {\n        return loadCompressedData(&_459E00_ROM_START, &_459E00_ROM_END, 0x22E8);\n    }\n}",
@@ -18024,7 +18062,8 @@
       "features": [
         "array",
         "global",
-        "compare"
+        "compare",
+        "branchless"
       ],
       "loc": 3,
       "refSource": "s32 func_80037FE0_38BE0(u8 arg0) {\n    return EepromSaveData->save_slot_status[arg0] == 1;\n}",
@@ -18200,8 +18239,8 @@
       "features": [
         "struct",
         "pointer",
-        "call",
-        "bitwise"
+        "bitwise",
+        "call"
       ],
       "loc": 79,
       "refSource": "void func_80038090_38C90(s16 arg0) {\n    u8 temp;\n\n    temp = D_800AFE8C_A71FC->saveSlotIndex;\n    if (temp == 0xB) {\n        EepromSaveData->setting_4E = 1;\n        func_800383D8_38FD8(0xF);\n    }\n\n    temp = D_800AFE8C_A71FC->saveSlotIndex;\n    if (temp == 0xE) {\n        EepromSaveData->setting_4F = 1;\n        func_800383D8_38FD8(0xD);\n    }\n\n    temp = D_800AFE8C_A71FC->saveSlotIndex;\n    if (temp == 0xD) {\n        if (arg0 == 7) {\n            EepromSaveData->setting_50 = 1;\n            func_800383D8_38FD8(0xE);\n        }\n    }\n\n    if (D_800AFE8C_A71FC->unk24 != 0) {\n        if (D_800AFE8C_A71FC->saveSlotIndex == 1) {\n            if (func_80038388_38F88(0xA) & 0xFF) {\n                D_800AFE8C_A71FC->errorFlag = 2;\n            }\n        }\n\n        if (D_800AFE8C_A71FC->saveSlotIndex == 3) {\n            if (func_80038388_38F88(0xB) & 0xFF) {\n                D_800AFE8C_A71FC->errorFlag = 3;\n            }\n        }\n\n        if (D_800AFE8C_A71FC->saveSlotIndex == 9) {\n            if (func_80038388_38F88(0xC) & 0xFF) {\n                D_800AFE8C_A71FC->errorFlag = 4;\n            }\n        }\n\n        if (D_800AFE8C_A71FC->saveSlotIndex == 5) {\n            if (func_80038388_38F88(0xE) & 0xFF) {\n                D_800AFE8C_A71FC->errorFlag = 6;\n            }\n        }\n\n        if (D_800AFE8C_A71FC->saveSlotIndex == 8) {\n            if (func_80038388_38F88(0xF) & 0xFF) {\n                D_800AFE8C_A71FC->errorFlag = 7;\n            }\n        }\n\n        if (D_800AFE8C_A71FC->saveSlotIndex == 0xB) {\n            if (func_80038388_38F88(0x10) & 0xFF) {\n                D_800AFE8C_A71FC->errorFlag = 8;\n            }\n        }\n\n        if (D_800AFE8C_A71FC->saveSlotIndex == 0) {\n            if (func_80038388_38F88(0xD) & 0xFF) {\n                D_800AFE8C_A71FC->errorFlag = 5;\n            }\n        }\n\n        if (D_800AFE8C_A71FC->saveSlotIndex == 4) {\n            if (func_80038388_38F88(9) & 0xFF) {\n                D_800AFE8C_A71FC->errorFlag = 1;\n            }\n        }\n\n        if (D_800AFE8C_A71FC->saveSlotIndex == 7) {\n            if (func_80038388_38F88(0x11) & 0xFF) {\n                D_800AFE8C_A71FC->errorFlag = 9;\n            }\n        }\n    }\n}",
@@ -18272,8 +18311,9 @@
       "language": "c",
       "features": [
         "branch",
+        "array",
         "call",
-        "array"
+        "magic-div"
       ],
       "loc": 22,
       "refSource": "void func_80051C80_52880(s32 *arg0, s32 arg1) {\n    s32 dist;\n\n    dist = distance_2d(arg0[0], arg0[2]);\n\n    if (!(dist >= 0x20000)) {\n        if (dist != 0) {\n            arg0[0] = (s64)((s64)arg0[0] * 0x20000) / dist;\n            arg0[2] = (s64)((s64)arg0[2] * 0x20000) / dist;\n        } else {\n            arg0[2] = 0x20000;\n        }\n    }\n\n    dist = distance_3d(arg0[0], arg0[1], arg0[2]);\n\n    if (dist != 0) {\n        arg0[0] = (s64)((s64)arg0[0] * arg1) / dist;\n        arg0[1] = (s64)((s64)arg0[1] * arg1) / dist;\n        arg0[2] = (s64)((s64)arg0[2] * arg1) / dist;\n    }\n}",
@@ -18347,7 +18387,8 @@
         "arithmetic",
         "loop",
         "bitwise",
-        "call"
+        "call",
+        "magic-div"
       ],
       "loc": 82,
       "refSource": "void func_8005AB58_5B758(Player *player) {\n    Vec3i deltaPos;\n    GameState *allocation;\n    s32 unused1;\n    s32 combinedRadius;\n    s32 playerIndex;\n    Player *targetPlayer;\n    s32 numPlayers;\n\n    allocation = (GameState *)getCurrentAllocation();\n    numPlayers = allocation->numPlayers;\n\n    for (playerIndex = 0; playerIndex < allocation->numPlayers; playerIndex++) {\n        targetPlayer = &allocation->players[playerIndex];\n\n        /* Skip collision if players are on the same team */\n        if (player->unkBB8 == targetPlayer->unkBB8) {\n            continue;\n        }\n\n        /* Skip if either player has collision disabled (flag 0x10) */\n        if (player->unkB88 & 0x10) {\n            continue;\n        }\n        if (targetPlayer->unkB88 & 0x10) {\n            continue;\n        }\n\n        /* Copy target's collision box local position */\n        memcpy(&deltaPos, &targetPlayer->unkAD4, 0xC);\n\n        /* Convert to world space */\n        deltaPos.x += targetPlayer->worldPos.x;\n        deltaPos.y += targetPlayer->worldPos.y;\n        deltaPos.z += targetPlayer->worldPos.z;\n\n        /* Calculate relative position to player's collision box */\n        deltaPos.x -= player->worldPos.x + player->unkAD4[0];\n        deltaPos.y -= player->worldPos.y + player->unkAD4[1];\n        deltaPos.z -= player->worldPos.z + player->unkAD4[2];\n\n        /* Sum of both collision box radii */\n        combinedRadius = targetPlayer->unkAE0 + player->unkAE0;\n\n        /* Quick AABB check before expensive distance calculation */\n        if (-combinedRadius < deltaPos.x && deltaPos.x < combinedRadius && -combinedRadius < deltaPos.y &&\n            deltaPos.y < combinedRadius && -combinedRadius < deltaPos.z && deltaPos.z < combinedRadius) {\n            s32 dist;\n\n            dist = isqrt64((s64)deltaPos.x * deltaPos.x + (s64)deltaPos.y * deltaPos.y + (s64)deltaPos.z * deltaPos.z);\n\n            if (dist < combinedRadius) {\n                /* Avoid divide by zero */\n                if (dist == 0) {\n                    dist = 1;\n                }\n\n                /* Calculate push vector to separate the players */\n                deltaPos.x = ((s64)deltaPos.x * combinedRadius / dist) - deltaPos.x;\n                deltaPos.y = ((s64)deltaPos.y * combinedRadius / dist) - deltaPos.y;\n                deltaPos.z = ((s64)deltaPos.z * combinedRadius / dist) - deltaPos.z;\n\n                /* Skip push if player has flag 0x80 */\n                if (player->unkB84 & 0x80) {\n                    continue;\n                }\n\n                /* If target has flag 0x80, do full push */\n                if (targetPlayer->unkB84 & 0x80) {\n                    player->worldPos.x -= deltaPos.x;\n                    player->worldPos.y -= deltaPos.y;\n                    player->worldPos.z -= deltaPos.z;\n                } else {\n                    /* Half push */\n                    player->worldPos.x -= deltaPos.x / 2;\n                    player->worldPos.y -= deltaPos.y / 2;\n                    player->worldPos.z -= deltaPos.z / 2;\n                }\n            }\n        }\n    }\n}",
@@ -18428,7 +18469,8 @@
         "struct",
         "loop",
         "bitwise",
-        "call"
+        "call",
+        "magic-div"
       ],
       "loc": 109,
       "refSource": "void func_8005AE8C_5BA8C(Player *player) {\n    Vec3i deltaPos;\n    u8 pad[0x8];\n    void *collisionBoxPtr;\n    s32 unused1;\n    s32 unused2;\n    s32 combinedRadius;\n    s32 negRadius;\n    s32 dist;\n    s32 boxIndex;\n    Player *targetPlayer;\n    Player *players;\n\n    players = ((GameState *)getCurrentAllocation())->players;\n    targetPlayer = players + 1;\n\n    /* Skip collision if players are on the same team */\n    if (player->unkBB8 == targetPlayer->unkBB8) {\n        return;\n    }\n    /* Skip if either player has collision disabled (flag 0x10) */\n    if (player->unkB88 & 0x10) {\n        return;\n    }\n    if (targetPlayer->unkB88 & 0x10) {\n        return;\n    }\n\n    if ((s8)targetPlayer->unkBB4 > 0) {\n        boxIndex = 0;\n        collisionBoxPtr = targetPlayer;\n        do {\n            /* Copy target's collision box local position (offset 0xAE4 is unkAE4 array) */\n            memcpy(&deltaPos, (u8 *)collisionBoxPtr + 0xAE4, 0xC);\n\n            /* Convert to world space */\n            deltaPos.x += targetPlayer->worldPos.x;\n            deltaPos.y += targetPlayer->worldPos.y;\n            deltaPos.z += targetPlayer->worldPos.z;\n\n            /* Calculate relative position to player's collision box */\n            deltaPos.x -= player->worldPos.x + player->unkAD4[0];\n            deltaPos.y -= player->worldPos.y + player->unkAD4[1];\n            deltaPos.z -= player->worldPos.z + player->unkAD4[2];\n\n            /* Sum of both collision box radii */\n            combinedRadius = (&targetPlayer->unkB2C)[boxIndex] + player->unkAE0;\n            negRadius = -combinedRadius;\n\n            /* Quick AABB check before expensive distance calculation */\n            if (negRadius < deltaPos.x && deltaPos.x < combinedRadius && negRadius < deltaPos.y &&\n                deltaPos.y < combinedRadius && negRadius < deltaPos.z && deltaPos.z < combinedRadius) {\n\n                dist =\n                    isqrt64((s64)deltaPos.x * deltaPos.x + (s64)deltaPos.y * deltaPos.y + (s64)deltaPos.z * deltaPos.z);\n\n                if (dist < combinedRadius) {\n                    /* Check for special knockback on collision boxes 4-5 when target is in state 1 */\n                    if (targetPlayer->unkBD9 == 1) {\n                        if ((targetPlayer->unkB84 & 0x40000) && (u32)(boxIndex - 4) < 2U) {\n                            func_80058B30_59730(player);\n                            goto next;\n                        }\n                    }\n                    /* Check for special knockback on collision boxes 1-2 when target is in state 3 */\n                    if (targetPlayer->unkBD9 == 3 && (targetPlayer->unkB84 & 0x40000) && (u32)(boxIndex - 1) < 2U) {\n                        func_80058B30_59730(player);\n                        goto next;\n                    }\n\n                    /* Avoid divide by zero */\n                    if (dist == 0) {\n                        dist = 1;\n                    }\n\n                    /* Calculate push vector to separate the players */\n                    deltaPos.x = ((s64)deltaPos.x * combinedRadius / dist) - deltaPos.x;\n                    deltaPos.y = ((s64)deltaPos.y * combinedRadius / dist) - deltaPos.y;\n                    deltaPos.z = ((s64)deltaPos.z * combinedRadius / dist) - deltaPos.z;\n\n                    /* Push player out of collision */\n                    player->worldPos.x -= deltaPos.x;\n                    player->worldPos.y -= deltaPos.y;\n                    player->worldPos.z -= deltaPos.z;\n\n                    /* Apply knockback if target is in state 2 and colliding with main collision box */\n                    if ((targetPlayer->unkBD9 == 2) & (boxIndex == 0)) {\n                        dist = isqrt64((s64)deltaPos.x * deltaPos.x + (s64)deltaPos.z * deltaPos.z);\n                        if (dist > 0x30000) {\n                            func_80058950_59550(\n                                player,\n                                func_8006D21C_6DE1C(\n                                    targetPlayer->worldPos.x,\n                                    targetPlayer->worldPos.z,\n                                    player->worldPos.x,\n                                    player->worldPos.z\n                                ),\n                                dist\n                            );\n                        }\n                    }\n                }\n            }\n        next:\n            boxIndex++;\n            collisionBoxPtr = (u8 *)collisionBoxPtr + 0xC;\n        } while (boxIndex < (s8)targetPlayer->unkBB4);\n    }\n}",
@@ -18735,7 +18777,8 @@
         "pointer",
         "branch",
         "bitwise",
-        "call"
+        "call",
+        "comparison-tree"
       ],
       "loc": 79,
       "refSource": "void func_800B3784_A3634(Player *arg0) {\n    s32 result;\n    u8 temp;\n\n    switch (arg0->unkBD5) {\n        default:\n            break;\n\n        case 0:\n            arg0->unkBD5++;\n            arg0->unkBD6 = 4;\n        case 1:\n            result = func_800B36F0_A35A0(arg0);\n            if (result != 0) {\n                arg0->unkBD6 = result;\n                arg0->unkBD7 = 0;\n                arg0->unkBD5 = arg0->unkBD5 + 1;\n                arg0->unkB84 |= 0x8000;\n            }\n            func_8005D308_5DF08(arg0, arg0->unkBD6);\n            break;\n\n        case 2:\n            result = func_8005D308_5DF08(arg0, arg0->unkBD6);\n            if (result != 0) {\n                if (arg0->unkBD6 == 0x17) {\n                    func_800B2950_A2800(arg0, 0);\n                }\n\n                if (arg0->unkBD6 == 0x19) {\n                    func_800B2950_A2800(arg0, 1);\n                }\n\n                if (arg0->unkBD6 == 0x15) {\n                    func_800B2950_A2800(arg0, 2);\n                }\n\n                if (arg0->unkBD6 == 0x13) {\n                    func_800B2950_A2800(arg0, 3);\n                }\n\n                arg0->unkBD5++;\n                arg0->unkBD6++;\n            }\n\n            result = func_800B36F0_A35A0(arg0);\n            if (result != 0) {\n                arg0->unkBD7 = result;\n            }\n\n            break;\n\n        case 3:\n            result = func_8005D308_5DF08(arg0, arg0->unkBD6);\n            if (result != 0) {\n                if (arg0->unkBD7 != 0) {\n                    arg0->unkBD5 = 2;\n                    arg0->unkBD6 = arg0->unkBD7;\n                    arg0->unkBD7 = 0;\n                    break;\n                } else {\n                    arg0->unkB84 &= 0xFFFF7FFF;\n                    arg0->unkBD5 = 1;\n                }\n            }\n\n            result = func_800B36F0_A35A0(arg0);\n            if (result != 0) {\n                arg0->unkBD7 = result;\n            }\n            break;\n    }\n\n    if (arg0->unkB84 & 0xC000) {\n        arg0->unkB84 |= 0x1000;\n    } else {\n        arg0->unkB84 &= ~0x1000;\n    }\n}",
@@ -18810,7 +18853,8 @@
         "pointer",
         "branch",
         "bitwise",
-        "call"
+        "call",
+        "jump-table"
       ],
       "loc": 80,
       "refSource": "s32 func_800B3F2C_A3DDC(Player *arg0) {\n    u32 temp_v0;\n    s32 temp_v1;\n    s32 temp_v0_2;\n    u8 state;\n    s32 temp;\n\n    temp_v0 = arg0->unkB84;\n    temp_v1 = arg0->unk450;\n\n    arg0->unk44C = 0;\n    arg0->unk454 = 0;\n\n    temp_v0 |= 0x60;\n    temp_v1 += -0x6000;\n\n    arg0->unkB84 = temp_v0;\n    arg0->unk450 = temp_v1;\n\n    func_800B40D4_A3F84(arg0);\n    func_800B02AC_A015C(arg0);\n\n    temp = arg0->unkAE0;\n    if (!(0xDFFFF < temp)) {\n        arg0->unkAE0 = temp + 0x8000;\n    }\n\n    state = arg0->unkBC0;\n\n    switch (state) {\n        case 0:\n            if (func_8005D308_5DF08(arg0, 0x1E)) {\n                temp_v0_2 = arg0->unkBC0;\n                temp_v0_2++;\n                arg0->unkBC0 = temp_v0_2;\n            }\n            break;\n\n        case 1:\n            if (func_8005D308_5DF08(arg0, 0x20)) {\n                temp_v1 = 0x14;\n                temp_v0_2 = arg0->unkBC0;\n                arg0->unkB8C = temp_v1;\n                temp_v0_2++;\n                arg0->unkBC0 = temp_v0_2;\n            }\n            break;\n\n        case 2:\n            temp_v0_2 = arg0->unkB8C;\n            if (temp_v0_2 != 0) {\n                temp_v0_2--;\n                arg0->unkB8C = temp_v0_2;\n            } else {\n                temp_v0_2 = arg0->unkBC0;\n                temp_v0_2++;\n                arg0->unkBC0 = temp_v0_2;\n            }\n            break;\n\n        case 3:\n            if (func_8005D308_5DF08(arg0, 0x1F)) {\n                temp_v0_2 = arg0->unkBC0;\n                temp_v0_2++;\n                arg0->unkBC0 = temp_v0_2;\n            }\n            break;\n\n        case 4:\n            if (func_8005D308_5DF08(arg0, 0x20)) {\n                arg0->unkBC0 = 2;\n                arg0->unkB8C = 0x14;\n            }\n            break;\n    }\n\n    func_8005D804_5E404(arg0, 4, 0);\n\n    return 0;\n}",
@@ -19108,9 +19152,10 @@
         "struct",
         "bitwise",
         "branch",
-        "call",
         "ternary",
-        "shift"
+        "shift",
+        "call",
+        "hw-div"
       ],
       "loc": 31,
       "refSource": "void func_800B7620_1E46D0(CutsceneSlotData *arg0, s32 arg1, s16 arg2, s16 arg3) {\n    s32 temp_a0;\n    s32 temp_v0;\n    s32 temp_v1;\n    s32 var_v0;\n    s32 var_v1;\n\n    arg0->unk0.Two = 6;\n    arg0->unk94 = arg1;\n    arg0->unk92 = arg3;\n    arg0->unk84 = arg2;\n    arg0->unk86 = arg2;\n    temp_a0 = ((s16)atan2Fixed(arg0->unk20_u.unk20_s32, arg0->unk2C) + 0x1000) & 0x1FFF;\n    arg0->unk9C_u.unk9C_s32 = temp_a0;\n    temp_v1 = approximateCos(temp_a0) << 2;\n    if (temp_v1 == 0) {\n        var_v1 = (arg0->unk20_u.unk20_s32 << 8) / ((approximateSin(arg0->unk9C_u.s.unk9E) << 2) >> 8);\n        var_v1 = (var_v1 > 0) ? var_v1 : -var_v1;\n        arg0->unk98 = var_v1;\n    } else {\n        var_v0 = (arg0->unk2C << 8) / (temp_v1 >> 8);\n        var_v0 = (var_v0 > 0) ? var_v0 : -var_v0;\n        arg0->unk98 = var_v0;\n    }\n    temp_v0 = arg0->unk94;\n    if (temp_v0 > 0) {\n        arg0->unk7A = (arg0->unk9C_u.unk9C_s32 + 0x800) & 0x1FFF;\n    } else if (temp_v0 < 0) {\n        arg0->unk7A = (arg0->unk9C_u.unk9C_s32 - 0x800) & 0x1FFF;\n    }\n}",
@@ -19179,7 +19224,8 @@
       "language": "c",
       "features": [
         "struct",
-        "branch"
+        "branch",
+        "hw-div"
       ],
       "loc": 15,
       "refSource": "void func_800B7760_1E4810(CutsceneSlotData *arg0, s32 arg1, s16 arg2) {\n    s32 diff;\n    s32 delta;\n\n    if (arg2 > 0) {\n        diff = arg1 - arg0->unk54;\n        delta = diff / arg2;\n        arg0->unk60 = arg1;\n        arg0->unk6C = delta;\n    } else {\n        arg0->unk54 = arg1;\n        arg0->unk60 = arg1;\n        arg0->unk6C = 0;\n    }\n}",
@@ -19247,7 +19293,8 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "branch"
+        "branch",
+        "hw-div"
       ],
       "loc": 15,
       "refSource": "s32 func_800B93F0_1E64A0(s32 arg0) {\n    s32 result;\n\n    if (arg0 == 0) {\n        arg0 = 1;\n    }\n\n    result = 0x4000000 / arg0;\n\n    if (result >= 0x4000) {\n        result = 0x4000;\n    }\n\n    return result;\n}",
@@ -19384,8 +19431,9 @@
       "features": [
         "struct",
         "field",
+        "global",
         "call",
-        "global"
+        "strength-reduce"
       ],
       "loc": 9,
       "refSource": "void GenericTriggerInit(EventTrigger *arg0) {\n    u8 eventId = arg0->eventId;\n    arg0->unk1 = 0;\n    arg0->unk4 = 0;\n    arg0->unk6 = -0x68;\n    arg0->unk8 = 0;\n    arg0->unkC = &D_8008D714_8E314[eventId * 20];\n    setCallback(GenericTriggerCheck);\n}",
@@ -19463,7 +19511,8 @@
         "struct",
         "array",
         "field",
-        "pointer"
+        "pointer",
+        "strength-reduce"
       ],
       "loc": 15,
       "refSource": "void getTableEntryByU16Index(DataTable_19E80 *arg0, u16 arg1, OutputStruct_19E80 *arg2) {\n    u16 index_offset;\n    TableEntry_19E80 *entry_ptr;\n    TableEntry_19E80 *index_table;\n    TableEntry_19E80 *entry;\n\n    entry_ptr = arg0->entries;\n    index_table = &entry_ptr[arg0->index_table_offset];\n    entry_ptr = &entry_ptr[arg1];\n\n    arg2->data_ptr = &arg0->header[entry_ptr->data_offset];\n    arg2->index_ptr = &index_table[entry_ptr->index_offset * 2];\n    arg2->field1 = entry_ptr->field1;\n    arg2->field2 = entry_ptr->field2;\n}",
@@ -19556,9 +19605,9 @@
       "language": "c",
       "features": [
         "struct",
-        "call",
         "memory",
-        "global"
+        "global",
+        "call"
       ],
       "loc": 7,
       "refSource": "void initSteppedMatrixController(SteppedMatrixState *state) {\n    memcpy(&state->matrix, identityMatrix, 0x20);\n    state->frameDelay = 0;\n    state->stepIndex = 0;\n    setCleanupCallback(cleanupSteppedMatrixController);\n    setCallback(updateSteppedMatrixController);\n}",
@@ -19636,8 +19685,9 @@
         "loop",
         "struct",
         "array",
+        "cast",
         "call",
-        "cast"
+        "strength-reduce"
       ],
       "loc": 22,
       "refSource": "void loadAssetGroupResources(AssetGroupTaskData *taskData) {\n    AssetGroupTableEntry *entry;\n    AssetEntry *assetList;\n    s32 i;\n\n    entry = &assetGroupTable[taskData->groupIndex];\n    assetList = entry->assetList;\n\n    setCleanupCallback(freeAssetGroupResources);\n    i = 0;\n\n    taskData->unk10 = NULL;\n    taskData->unkC = NULL;\n\n    taskData->loadedAssets = allocateNodeMemory(entry->assetCount * 4);\n\n    for (i = 0; i < entry->assetCount; i++) {\n        taskData->loadedAssets[i] = loadCompressedData(assetList[i].unk0, assetList[i].unk4, assetList[i].unk8);\n    }\n\n    setCallback(func_80003184_3D84);\n}",
@@ -20246,7 +20296,8 @@
       "language": "c",
       "features": [
         "compare",
-        "ternary"
+        "ternary",
+        "branchless"
       ],
       "loc": 1,
       "refSource": "int absi(int x){ return x<0?-x:x; }",
@@ -24374,8 +24425,8 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "call",
-        "multi-arg"
+        "multi-arg",
+        "call"
       ],
       "loc": 2,
       "refSource": "int add3(int,int,int);\nint call2(int a,int b){ return add3(a,b,a+b); }",
@@ -24451,8 +24502,8 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "call",
-        "multi-arg"
+        "multi-arg",
+        "call"
       ],
       "loc": 2,
       "refSource": "int add3(int,int,int);\nint call2(int a,int b){ return add3(a,b,a+b); }",
@@ -24524,8 +24575,8 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "call",
-        "multi-arg"
+        "multi-arg",
+        "call"
       ],
       "loc": 2,
       "refSource": "int add3(int,int,int);\nint call2(int a,int b){ return add3(a,b,a+b); }",
@@ -24674,7 +24725,8 @@
       "language": "c",
       "features": [
         "compare",
-        "branch"
+        "branch",
+        "branchless"
       ],
       "loc": 1,
       "refSource": "int clamp0(int x){ if(x<0) return 0; return x; }",
@@ -24818,7 +24870,8 @@
       "language": "c",
       "features": [
         "compare",
-        "branch"
+        "branch",
+        "branchless"
       ],
       "loc": 1,
       "refSource": "int clamp0(int x){ if(x<0) return 0; return x; }",
@@ -26792,7 +26845,8 @@
       "features": [
         "float",
         "double",
-        "arithmetic"
+        "arithmetic",
+        "call"
       ],
       "loc": 1,
       "refSource": "double dadd(double a,double b){ return a+b; }",
@@ -27661,7 +27715,9 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "signed-div-const"
+        "signed-div-const",
+        "soft-div",
+        "call"
       ],
       "loc": 1,
       "refSource": "int divc(int a){ return a/7; }",
@@ -27732,7 +27788,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "signed-div-const"
+        "signed-div-const",
+        "magic-div"
       ],
       "loc": 1,
       "refSource": "int divc(int a){ return a/7; }",
@@ -27804,7 +27861,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "signed-div-const"
+        "signed-div-const",
+        "hw-div"
       ],
       "loc": 1,
       "refSource": "int divc(int a){ return a/7; }",
@@ -27876,7 +27934,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "signed-div-const"
+        "signed-div-const",
+        "magic-div"
       ],
       "loc": 1,
       "refSource": "int divc(int a){ return a/7; }",
@@ -27949,7 +28008,8 @@
       "features": [
         "arithmetic",
         "signed-div-const",
-        "magic-div"
+        "soft-div",
+        "call"
       ],
       "loc": 1,
       "refSource": "int divc10(int a){ return a/10; }",
@@ -28094,7 +28154,7 @@
       "features": [
         "arithmetic",
         "signed-div-const",
-        "magic-div"
+        "hw-div"
       ],
       "loc": 1,
       "refSource": "int divc10(int a){ return a/10; }",
@@ -28240,7 +28300,8 @@
       "features": [
         "arithmetic",
         "signed-div-const",
-        "magic-div"
+        "soft-div",
+        "call"
       ],
       "loc": 1,
       "refSource": "int divc100(int a){ return a/100; }",
@@ -28385,7 +28446,7 @@
       "features": [
         "arithmetic",
         "signed-div-const",
-        "magic-div"
+        "hw-div"
       ],
       "loc": 1,
       "refSource": "int divc100(int a){ return a/100; }",
@@ -28531,7 +28592,9 @@
       "features": [
         "arithmetic",
         "div-reg",
-        "signed"
+        "signed",
+        "soft-div",
+        "call"
       ],
       "loc": 1,
       "refSource": "int divv(int a,int b){ return a/b; }",
@@ -28603,7 +28666,8 @@
       "features": [
         "arithmetic",
         "div-reg",
-        "signed"
+        "signed",
+        "hw-div"
       ],
       "loc": 1,
       "refSource": "int divv(int a,int b){ return a/b; }",
@@ -28676,7 +28740,8 @@
       "features": [
         "arithmetic",
         "div-reg",
-        "signed"
+        "signed",
+        "hw-div"
       ],
       "loc": 1,
       "refSource": "int divv(int a,int b){ return a/b; }",
@@ -28749,7 +28814,8 @@
       "features": [
         "arithmetic",
         "div-reg",
-        "signed"
+        "signed",
+        "hw-div"
       ],
       "loc": 1,
       "refSource": "int divv(int a,int b){ return a/b; }",
@@ -29062,7 +29128,8 @@
       "features": [
         "loop",
         "memory",
-        "arithmetic"
+        "arithmetic",
+        "call"
       ],
       "loc": 1,
       "refSource": "int dotprod(int *a,int *b,int n){ int s=0,i; for(i=0;i<n;i++)s+=a[i]*b[i]; return s; }",
@@ -30018,7 +30085,8 @@
       "features": [
         "float",
         "cast",
-        "float-to-int"
+        "float-to-int",
+        "call"
       ],
       "loc": 1,
       "refSource": "int f2i(float x){ return (int)x; }",
@@ -30297,7 +30365,8 @@
       "language": "c",
       "features": [
         "float",
-        "arithmetic"
+        "arithmetic",
+        "call"
       ],
       "loc": 1,
       "refSource": "float fadd(float a,float b){ return a+b; }",
@@ -30569,7 +30638,8 @@
       "language": "c",
       "features": [
         "float",
-        "compare"
+        "compare",
+        "call"
       ],
       "loc": 1,
       "refSource": "int fcmp(float a,float b){ return a>b; }",
@@ -30786,7 +30856,8 @@
       "language": "c",
       "features": [
         "float",
-        "compare"
+        "compare",
+        "branchless"
       ],
       "loc": 1,
       "refSource": "int fcmp(float a,float b){ return a>b; }",
@@ -30849,7 +30920,8 @@
       "language": "c",
       "features": [
         "float",
-        "arithmetic"
+        "arithmetic",
+        "call"
       ],
       "loc": 1,
       "refSource": "float fdiv(float a,float b){ return a/b; }",
@@ -31768,7 +31840,8 @@
       "features": [
         "float",
         "arithmetic",
-        "expr"
+        "expr",
+        "call"
       ],
       "loc": 1,
       "refSource": "float fma1(float a,float b,float c){ return a*b+c; }",
@@ -32055,7 +32128,8 @@
       "language": "c",
       "features": [
         "float",
-        "arithmetic"
+        "arithmetic",
+        "call"
       ],
       "loc": 1,
       "refSource": "float fmul(float a,float b){ return a*b; }",
@@ -32327,7 +32401,8 @@
       "language": "c",
       "features": [
         "float",
-        "arithmetic"
+        "arithmetic",
+        "call"
       ],
       "loc": 1,
       "refSource": "float fsub(float a,float b){ return a-b; }",
@@ -32600,7 +32675,9 @@
       "features": [
         "loop",
         "while",
-        "mod-reg"
+        "mod-reg",
+        "soft-div",
+        "call"
       ],
       "loc": 1,
       "refSource": "int gcd(int a,int b){ while(b){int t=b;b=a%b;a=t;} return a; }",
@@ -32672,7 +32749,8 @@
       "features": [
         "loop",
         "while",
-        "mod-reg"
+        "mod-reg",
+        "hw-div"
       ],
       "loc": 1,
       "refSource": "int gcd(int a,int b){ while(b){int t=b;b=a%b;a=t;} return a; }",
@@ -32745,7 +32823,8 @@
       "features": [
         "loop",
         "while",
-        "mod-reg"
+        "mod-reg",
+        "hw-div"
       ],
       "loc": 1,
       "refSource": "int gcd(int a,int b){ while(b){int t=b;b=a%b;a=t;} return a; }",
@@ -32830,7 +32909,8 @@
       "features": [
         "loop",
         "while",
-        "mod-reg"
+        "mod-reg",
+        "hw-div"
       ],
       "loc": 1,
       "refSource": "int gcd(int a,int b){ while(b){int t=b;b=a%b;a=t;} return a; }",
@@ -33521,7 +33601,8 @@
       "features": [
         "float",
         "cast",
-        "int-to-float"
+        "int-to-float",
+        "call"
       ],
       "loc": 1,
       "refSource": "float i2f(int x){ return (float)x; }",
@@ -34208,7 +34289,8 @@
       "features": [
         "compare",
         "logical-and",
-        "range"
+        "range",
+        "branchless"
       ],
       "loc": 1,
       "refSource": "int inrange(int x,int lo,int hi){ return x>=lo && x<=hi; }",
@@ -34509,7 +34591,8 @@
       "language": "c",
       "features": [
         "compare",
-        "bool"
+        "bool",
+        "branchless"
       ],
       "loc": 1,
       "refSource": "int iszero(int x){ return x==0; }",
@@ -34581,7 +34664,8 @@
       "language": "c",
       "features": [
         "compare",
-        "bool"
+        "bool",
+        "branchless"
       ],
       "loc": 1,
       "refSource": "int iszero(int x){ return x==0; }",
@@ -34653,7 +34737,8 @@
       "language": "c",
       "features": [
         "compare",
-        "bool"
+        "bool",
+        "branchless"
       ],
       "loc": 1,
       "refSource": "int iszero(int x){ return x==0; }",
@@ -35916,7 +36001,8 @@
       "language": "c",
       "features": [
         "s64",
-        "compare"
+        "compare",
+        "branchless"
       ],
       "loc": 1,
       "refSource": "int llcmp(long long a,long long b){ return a<b; }",
@@ -35981,7 +36067,8 @@
       "language": "c",
       "features": [
         "s64",
-        "shift"
+        "shift",
+        "call"
       ],
       "loc": 1,
       "refSource": "long long llshl(long long a,int b){ return a<<b; }",
@@ -36144,7 +36231,8 @@
       "language": "c",
       "features": [
         "s64",
-        "shift"
+        "shift",
+        "call"
       ],
       "loc": 1,
       "refSource": "long long llshl(long long a,int b){ return a<<b; }",
@@ -36207,7 +36295,8 @@
       "language": "c",
       "features": [
         "s64",
-        "shift"
+        "shift",
+        "call"
       ],
       "loc": 1,
       "refSource": "long long llshl(long long a,int b){ return a<<b; }",
@@ -36276,7 +36365,8 @@
       "features": [
         "s64",
         "shift",
-        "signed"
+        "signed",
+        "call"
       ],
       "loc": 1,
       "refSource": "long long llshr(long long a,int b){ return a>>b; }",
@@ -36441,7 +36531,8 @@
       "features": [
         "s64",
         "shift",
-        "signed"
+        "signed",
+        "call"
       ],
       "loc": 1,
       "refSource": "long long llshr(long long a,int b){ return a>>b; }",
@@ -36505,7 +36596,8 @@
       "features": [
         "s64",
         "shift",
-        "signed"
+        "signed",
+        "call"
       ],
       "loc": 1,
       "refSource": "long long llshr(long long a,int b){ return a>>b; }",
@@ -40265,7 +40357,9 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "signed-mod-const"
+        "signed-mod-const",
+        "soft-div",
+        "call"
       ],
       "loc": 1,
       "refSource": "int modc(int a){ return a%10; }",
@@ -40336,7 +40430,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "signed-mod-const"
+        "signed-mod-const",
+        "magic-div"
       ],
       "loc": 1,
       "refSource": "int modc(int a){ return a%10; }",
@@ -40408,7 +40503,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "signed-mod-const"
+        "signed-mod-const",
+        "hw-div"
       ],
       "loc": 1,
       "refSource": "int modc(int a){ return a%10; }",
@@ -40480,7 +40576,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "signed-mod-const"
+        "signed-mod-const",
+        "magic-div"
       ],
       "loc": 1,
       "refSource": "int modc(int a){ return a%10; }",
@@ -40852,7 +40949,9 @@
       "features": [
         "arithmetic",
         "mod-reg",
-        "signed"
+        "signed",
+        "soft-div",
+        "call"
       ],
       "loc": 1,
       "refSource": "int modv(int a,int b){ return a%b; }",
@@ -40924,7 +41023,8 @@
       "features": [
         "arithmetic",
         "mod-reg",
-        "signed"
+        "signed",
+        "hw-div"
       ],
       "loc": 1,
       "refSource": "int modv(int a,int b){ return a%b; }",
@@ -40997,7 +41097,8 @@
       "features": [
         "arithmetic",
         "mod-reg",
-        "signed"
+        "signed",
+        "hw-div"
       ],
       "loc": 1,
       "refSource": "int modv(int a,int b){ return a%b; }",
@@ -41070,7 +41171,8 @@
       "features": [
         "arithmetic",
         "mod-reg",
-        "signed"
+        "signed",
+        "hw-div"
       ],
       "loc": 1,
       "refSource": "int modv(int a,int b){ return a%b; }",
@@ -41639,8 +41741,7 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "arithmetic",
-        "strength-reduce"
+        "arithmetic"
       ],
       "loc": 1,
       "refSource": "int mulc(int a){ return a*10; }",
@@ -47722,8 +47823,7 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "compare",
-        "branchless"
+        "compare"
       ],
       "loc": 1,
       "refSource": "int signum(int x){ return (x>0)-(x<0); }",
@@ -50429,7 +50529,8 @@
       "language": "c",
       "features": [
         "switch",
-        "fallthrough"
+        "fallthrough",
+        "comparison-tree"
       ],
       "loc": 1,
       "refSource": "int sw_fall(int x){ int r=0; switch(x){case 3:r++;case 2:r++;case 1:r++;} return r; }",
@@ -50500,7 +50601,8 @@
       "language": "c",
       "features": [
         "switch",
-        "fallthrough"
+        "fallthrough",
+        "comparison-tree"
       ],
       "loc": 1,
       "refSource": "int sw_fall(int x){ int r=0; switch(x){case 3:r++;case 2:r++;case 1:r++;} return r; }",
@@ -50567,7 +50669,8 @@
       "language": "c",
       "features": [
         "switch",
-        "fallthrough"
+        "fallthrough",
+        "comparison-tree"
       ],
       "loc": 1,
       "refSource": "int sw_fall(int x){ int r=0; switch(x){case 3:r++;case 2:r++;case 1:r++;} return r; }",
@@ -50639,7 +50742,8 @@
       "language": "c",
       "features": [
         "switch",
-        "fallthrough"
+        "fallthrough",
+        "comparison-tree"
       ],
       "loc": 1,
       "refSource": "int sw_fall(int x){ int r=0; switch(x){case 3:r++;case 2:r++;case 1:r++;} return r; }",
@@ -50706,8 +50810,8 @@
       "language": "c",
       "features": [
         "switch",
-        "jump-table",
-        "dense"
+        "dense",
+        "jump-table"
       ],
       "loc": 1,
       "refSource": "int sw_jt(int x){ switch(x){case 0:return 3;case 1:return 5;case 2:return 7;case 3:return 9;case 4:return 11;case 5:return 13;case 6:return 15;case 7:return 17;default:return -1;} }",
@@ -50778,8 +50882,8 @@
       "language": "c",
       "features": [
         "switch",
-        "jump-table",
-        "dense"
+        "dense",
+        "jump-table"
       ],
       "loc": 1,
       "refSource": "int sw_jt(int x){ switch(x){case 0:return 3;case 1:return 5;case 2:return 7;case 3:return 9;case 4:return 11;case 5:return 13;case 6:return 15;case 7:return 17;default:return -1;} }",
@@ -50851,8 +50955,8 @@
       "language": "c",
       "features": [
         "switch",
-        "jump-table",
-        "dense"
+        "dense",
+        "jump-table"
       ],
       "loc": 1,
       "refSource": "int sw_jt(int x){ switch(x){case 0:return 3;case 1:return 5;case 2:return 7;case 3:return 9;case 4:return 11;case 5:return 13;case 6:return 15;case 7:return 17;default:return -1;} }",
@@ -50924,8 +51028,8 @@
       "language": "c",
       "features": [
         "switch",
-        "jump-table",
-        "dense"
+        "dense",
+        "jump-table"
       ],
       "loc": 1,
       "refSource": "int sw_jt(int x){ switch(x){case 0:return 3;case 1:return 5;case 2:return 7;case 3:return 9;case 4:return 11;case 5:return 13;case 6:return 15;case 7:return 17;default:return -1;} }",
@@ -50997,8 +51101,8 @@
       "language": "c",
       "features": [
         "switch",
-        "comparison-tree",
-        "arithmetic"
+        "arithmetic",
+        "comparison-tree"
       ],
       "loc": 1,
       "refSource": "int sw_op(int op,int a,int b){ switch(op){case 0:return a+b;case 1:return a-b;case 2:return a*b;case 3:return a&b;default:return 0;} }",
@@ -51069,8 +51173,8 @@
       "language": "c",
       "features": [
         "switch",
-        "comparison-tree",
-        "arithmetic"
+        "arithmetic",
+        "comparison-tree"
       ],
       "loc": 1,
       "refSource": "int sw_op(int op,int a,int b){ switch(op){case 0:return a+b;case 1:return a-b;case 2:return a*b;case 3:return a&b;default:return 0;} }",
@@ -51149,8 +51253,8 @@
       "language": "c",
       "features": [
         "switch",
-        "comparison-tree",
-        "arithmetic"
+        "arithmetic",
+        "comparison-tree"
       ],
       "loc": 1,
       "refSource": "int sw_op(int op,int a,int b){ switch(op){case 0:return a+b;case 1:return a-b;case 2:return a*b;case 3:return a&b;default:return 0;} }",
@@ -51222,8 +51326,8 @@
       "language": "c",
       "features": [
         "switch",
-        "comparison-tree",
-        "arithmetic"
+        "arithmetic",
+        "comparison-tree"
       ],
       "loc": 1,
       "refSource": "int sw_op(int op,int a,int b){ switch(op){case 0:return a+b;case 1:return a-b;case 2:return a*b;case 3:return a&b;default:return 0;} }",
@@ -51579,7 +51683,8 @@
       "language": "c",
       "features": [
         "switch",
-        "sparse"
+        "sparse",
+        "comparison-tree"
       ],
       "loc": 1,
       "refSource": "int sw_sparse(int x){ switch(x){case 1:return 1;case 10:return 2;case 100:return 3;case 1000:return 4;default:return 0;} }",
@@ -51650,7 +51755,8 @@
       "language": "c",
       "features": [
         "switch",
-        "sparse"
+        "sparse",
+        "comparison-tree"
       ],
       "loc": 1,
       "refSource": "int sw_sparse(int x){ switch(x){case 1:return 1;case 10:return 2;case 100:return 3;case 1000:return 4;default:return 0;} }",
@@ -51734,7 +51840,8 @@
       "language": "c",
       "features": [
         "switch",
-        "sparse"
+        "sparse",
+        "comparison-tree"
       ],
       "loc": 1,
       "refSource": "int sw_sparse(int x){ switch(x){case 1:return 1;case 10:return 2;case 100:return 3;case 1000:return 4;default:return 0;} }",
@@ -51806,7 +51913,8 @@
       "language": "c",
       "features": [
         "switch",
-        "sparse"
+        "sparse",
+        "comparison-tree"
       ],
       "loc": 1,
       "refSource": "int sw_sparse(int x){ switch(x){case 1:return 1;case 10:return 2;case 100:return 3;case 1000:return 4;default:return 0;} }",
@@ -51874,7 +51982,8 @@
       "features": [
         "switch",
         "void",
-        "memory"
+        "memory",
+        "comparison-tree"
       ],
       "loc": 1,
       "refSource": "void sw_void(int x,int *p){ switch(x){case 0:*p=1;break;case 1:*p=2;break;default:*p=0;} }",
@@ -51952,7 +52061,8 @@
       "features": [
         "switch",
         "void",
-        "memory"
+        "memory",
+        "comparison-tree"
       ],
       "loc": 1,
       "refSource": "void sw_void(int x,int *p){ switch(x){case 0:*p=1;break;case 1:*p=2;break;default:*p=0;} }",
@@ -52031,7 +52141,8 @@
       "features": [
         "switch",
         "void",
-        "memory"
+        "memory",
+        "comparison-tree"
       ],
       "loc": 1,
       "refSource": "void sw_void(int x,int *p){ switch(x){case 0:*p=1;break;case 1:*p=2;break;default:*p=0;} }",
@@ -52110,7 +52221,8 @@
       "features": [
         "switch",
         "void",
-        "memory"
+        "memory",
+        "comparison-tree"
       ],
       "loc": 1,
       "refSource": "void sw_void(int x,int *p){ switch(x){case 0:*p=1;break;case 1:*p=2;break;default:*p=0;} }",
@@ -53941,7 +54053,9 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "unsigned-div-const"
+        "unsigned-div-const",
+        "soft-div",
+        "call"
       ],
       "loc": 1,
       "refSource": "unsigned udivc(unsigned a){ return a/7; }",
@@ -54012,7 +54126,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "unsigned-div-const"
+        "unsigned-div-const",
+        "magic-div"
       ],
       "loc": 1,
       "refSource": "unsigned udivc(unsigned a){ return a/7; }",
@@ -54084,7 +54199,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "unsigned-div-const"
+        "unsigned-div-const",
+        "hw-div"
       ],
       "loc": 1,
       "refSource": "unsigned udivc(unsigned a){ return a/7; }",
@@ -54156,7 +54272,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "unsigned-div-const"
+        "unsigned-div-const",
+        "magic-div"
       ],
       "loc": 1,
       "refSource": "unsigned udivc(unsigned a){ return a/7; }",
@@ -54229,7 +54346,8 @@
       "features": [
         "arithmetic",
         "unsigned-div-const",
-        "magic-div"
+        "soft-div",
+        "call"
       ],
       "loc": 1,
       "refSource": "unsigned udivc10(unsigned a){ return a/10; }",
@@ -54374,7 +54492,7 @@
       "features": [
         "arithmetic",
         "unsigned-div-const",
-        "magic-div"
+        "hw-div"
       ],
       "loc": 1,
       "refSource": "unsigned udivc10(unsigned a){ return a/10; }",
@@ -54520,7 +54638,9 @@
       "features": [
         "arithmetic",
         "div-reg",
-        "unsigned"
+        "unsigned",
+        "soft-div",
+        "call"
       ],
       "loc": 1,
       "refSource": "unsigned udivv(unsigned a,unsigned b){ return a/b; }",
@@ -54592,7 +54712,8 @@
       "features": [
         "arithmetic",
         "div-reg",
-        "unsigned"
+        "unsigned",
+        "hw-div"
       ],
       "loc": 1,
       "refSource": "unsigned udivv(unsigned a,unsigned b){ return a/b; }",
@@ -54665,7 +54786,8 @@
       "features": [
         "arithmetic",
         "div-reg",
-        "unsigned"
+        "unsigned",
+        "hw-div"
       ],
       "loc": 1,
       "refSource": "unsigned udivv(unsigned a,unsigned b){ return a/b; }",
@@ -54738,7 +54860,8 @@
       "features": [
         "arithmetic",
         "div-reg",
-        "unsigned"
+        "unsigned",
+        "hw-div"
       ],
       "loc": 1,
       "refSource": "unsigned udivv(unsigned a,unsigned b){ return a/b; }",
@@ -54811,7 +54934,8 @@
       "features": [
         "arithmetic",
         "unsigned-mod-const",
-        "magic-div"
+        "soft-div",
+        "call"
       ],
       "loc": 1,
       "refSource": "unsigned umod10(unsigned a){ return a%10; }",
@@ -54956,7 +55080,7 @@
       "features": [
         "arithmetic",
         "unsigned-mod-const",
-        "magic-div"
+        "hw-div"
       ],
       "loc": 1,
       "refSource": "unsigned umod10(unsigned a){ return a%10; }",
@@ -55171,8 +55295,8 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "call",
-        "void"
+        "void",
+        "call"
       ],
       "loc": 2,
       "refSource": "void sink(int);\nvoid voidcall(int x){ sink(x); }",
@@ -55252,8 +55376,8 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "call",
-        "void"
+        "void",
+        "call"
       ],
       "loc": 2,
       "refSource": "void sink(int);\nvoid voidcall(int x){ sink(x); }",
@@ -55329,8 +55453,8 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "call",
-        "void"
+        "void",
+        "call"
       ],
       "loc": 2,
       "refSource": "void sink(int);\nvoid voidcall(int x){ sink(x); }",
