@@ -7,7 +7,7 @@ import type { Prototypes } from '@asmlift/core/proto';
 import type { SymbolMap } from '@asmlift/core/symbols';
 
 import { cachedAsmDumpText, cachedM2cResult } from '../cache';
-import { codegenEvidence } from '../cases/features';
+import { rowFeatures } from '../cases/features';
 import type { Toolchain } from '../toolchains';
 import { type Scorer, runAsmlift } from './asmlift';
 import { countCompileErrors } from './asmlift';
@@ -159,9 +159,10 @@ export function evaluate(
     isa: tc.isa,
     compiler: tc.compiler,
     language: spec.language,
-    // Codegen tags are DERIVED per row, never authored: what the compiler did with a constant
-    // divide or a switch differs per toolchain, and a synthetic spec feeds four of them.
-    features: [...new Set([...spec.features, ...codegenEvidence(spec.refSource ?? '', asm)])],
+    // Source and codegen tags are DERIVED per row; the dataset carries judgement tags only. Codegen
+    // because what the compiler did with a constant divide differs per toolchain and one synthetic
+    // spec feeds four of them.
+    features: rowFeatures(spec.features, spec.refSource ?? '', asm),
     loc: spec.loc,
     refSource: spec.refSource,
     sourceUrl: spec.sourceUrl,

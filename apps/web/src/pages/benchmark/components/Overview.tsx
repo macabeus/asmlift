@@ -1,4 +1,4 @@
-import type { FunctionResult } from '@asmlift/bench-schema';
+import { FEATURE_BY_ID, type FunctionResult } from '@asmlift/bench-schema';
 
 import { featureStats, headToHead, headToHeadBy, headline, matchRate, matchRateBy } from '../lib/stats';
 import { LOC_BUCKETS, locBucketOf, readabilityStats } from '../lib/stats';
@@ -145,7 +145,7 @@ export function Overview({
 
       <Panel
         title="Match rate by feature"
-        subtitle="Top 15 feature tags by frequency. A function counts toward every tag it carries."
+        subtitle="Top 15 feature tags by frequency. A function counts toward every tag it carries; hover a bar for what the tag means."
       >
         <MatchRateBars
           data={topFeatures.map((f) => ({
@@ -154,11 +154,11 @@ export function Overview({
             asmlift: f.asmlift,
             m2c: f.m2c,
           }))}
-          labelOf={(k) => k}
+          labelOf={(k) => FEATURE_BY_ID.get(k)?.label ?? k}
           horizontal
           showCount
           height={Math.max(360, topFeatures.length * 26)}
-          onBarClick={(k) => onExplore({ feature: k })}
+          onBarClick={(k) => onExplore({ feature: [k] })}
         />
       </Panel>
 

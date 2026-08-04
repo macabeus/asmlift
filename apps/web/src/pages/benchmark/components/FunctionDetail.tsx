@@ -1,12 +1,13 @@
 import type { DecompilerId, DecompilerResult, FunctionResult } from '@asmlift/bench-schema';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 
 import { CodeBlock, type CodeLanguage } from '../../../shared/components/CodeBlock';
+import { useOverlay } from '../../../shared/utils/overlay';
 import type { ShareState } from '../../../shared/utils/permalink';
 import { formatC } from '../lib/format-c';
 import { playgroundShare } from '../lib/playground';
 import { DECOMPILER_COLOR, TOOLCHAIN_LABEL } from '../theme';
-import { Chip, GapBadge, OutcomeBadge } from './ui/Badge';
+import { Chip, FeatureChip, GapBadge, OutcomeBadge } from './ui/Badge';
 
 // The Benchmark's code-block chrome (the shared CodeBlock only fixes scroll/whitespace/mono).
 const CODE_PRE = 'max-h-[46vh] rounded-md bg-slate-950/70 p-3 text-[12px] leading-relaxed text-slate-200';
@@ -366,10 +367,13 @@ export function FunctionDetail({
   fn,
   onClose,
   onOpenInPlayground,
+  onOpenFeature,
 }: {
   fn: FunctionResult;
   onClose: () => void;
   onOpenInPlayground: (s: ShareState) => void;
+  /** open a tag's definition — stacks the feature drawer over this one (see shared/utils/overlay) */
+  onOpenFeature: (id: string) => void;
 }) {
   const share = useMemo(() => playgroundShare(fn), [fn]);
   const [m2cPath, setM2cPath] = usePersistedPath(PATH_STORAGE_KEYS.m2c);
@@ -378,19 +382,7 @@ export function FunctionDetail({
   const [projectPath, setProjectPath] = usePersistedPath(`${PATH_STORAGE_KEYS.project}:${fn.project}`);
   const projectDefault = fn.scripts ? projectPlaceholder(fn.scripts.asmlift) : null;
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    document.body.style.overflow = 'hidden';
-    return () => {
-      window.removeEventListener('keydown', onKey);
-      document.body.style.overflow = '';
-    };
-  }, [onClose]);
+  useOverlay(onClose);
 
   return (
     <div className="fixed inset-0 z-40 flex">
@@ -412,7 +404,7 @@ export function FunctionDetail({
             </div>
             <div className="mt-2 flex flex-wrap gap-1">
               {fn.features.map((f) => (
-                <Chip key={f}>{f}</Chip>
+                <FeatureChip key={f} id={f} onClick={onOpenFeature} />
               ))}
             </div>
           </div>

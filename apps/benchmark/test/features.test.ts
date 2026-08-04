@@ -1,19 +1,16 @@
-// The `features` vocabulary is only worth something if it can be falsified. These tests do that
-// for the machine-checkable half (see src/cases/features.ts): a tag must have evidence, and
-// evidence must have a tag. The judgement half is deliberately not asserted — it is defined in
-// prose there and reviewed by humans.
-//
-// Why this exists: an audit found ~20% of the real tier carrying a tag its function does not
-// support — `bitfield` invented by a regex that matched ternaries, `soft-div` on a `/` that
-// compiles to a shift, `call` on leaf functions, `loop` on straight-line bodies.
+// The `features` vocabulary is only worth something if it can be falsified. The vocabulary lives in
+// @asmlift/bench-schema and the detectors in src/cases/features.ts; these assert that they and the
+// dataset agree — published tags are defined, definitions are used and well-formed, derived tags
+// match their evidence in both directions, and authored tags stay above their floor.
+import { FEATURES, FEATURE_BY_ID, GROUP_ORDER, KNOWN_FEATURES, featuresByEvidence } from '@asmlift/bench-schema';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
+import { SYNTHETIC } from '../dataset/synthetic';
 import {
   CODEGEN_DERIVED,
   JUDGEMENT_FLOOR,
-  KNOWN_FEATURES,
   SOURCE_CHECKED,
   codegenEvidence,
   sourceEvidence,
@@ -42,61 +39,124 @@ const rows = (
     targetAsm: string;
   }[]
 ).filter((r) => r.targetAsm);
-const asmOf = new Map(rows.map((r) => [`${r.project}:${r.sym}`, r.targetAsm]));
 
-const every = manifests.flatMap((m) => m.functions.map((fn) => ({ project: m.project, fn })));
+/** Everything the dataset AUTHORS, real tier and synthetic tier alike. */
+const authored = [
+  ...manifests.flatMap((m) =>
+    m.functions.map((fn) => ({ where: `${m.project}:${fn.sym}`, tags: fn.features, src: fn.funcC })),
+  ),
+  ...SYNTHETIC.map((s) => ({ where: `synthetic:${s.sym}`, tags: s.features, src: s.src })),
+];
 
-describe('feature tags', () => {
-  it('uses only the closed vocabulary (a typo must fail, not silently split an aggregate)', () => {
-    const unknown = every
-      .flatMap(({ project, fn }) =>
-        fn.features.filter((t) => !KNOWN_FEATURES.has(t)).map((t) => `${project}:${fn.sym} ${t}`),
-      )
-      .sort();
-    expect(unknown).toEqual([]);
+describe('the vocabulary is closed over the published data', () => {
+  it('every published tag has a definition', () => {
+    const undefined_ = new Set<string>();
+    for (const r of rows) {
+      for (const t of r.features) {
+        if (!KNOWN_FEATURES.has(t)) undefined_.add(`${t} (e.g. ${r.id})`);
+      }
+    }
+    expect([...undefined_].sort()).toEqual([]);
   });
 
-  it('never tags a source-level feature the function does not contain', () => {
-    const checked = new Set(Object.keys(SOURCE_CHECKED));
-    const bad = every
-      .flatMap(({ project, fn }) => {
-        const ev = sourceEvidence(fn.funcC);
-        return fn.features.filter((t) => checked.has(t) && !ev.has(t)).map((t) => `${project}:${fn.sym} claims ${t}`);
-      })
+  it('every definition is carried by at least one row', () => {
+    const published = new Set(rows.flatMap((r) => r.features));
+    const unused = FEATURES.filter((f) => !f.deprecated && !published.has(f.id)).map((f) => f.id);
+    expect(unused.sort()).toEqual([]);
+  });
+
+  it('every AUTHORED tag has a definition', () => {
+    const bad = authored
+      .flatMap(({ where, tags }) => tags.filter((t) => !KNOWN_FEATURES.has(t)).map((t) => `${where} ${t}`))
       .sort();
     expect(bad).toEqual([]);
   });
 
-  it('never omits a source-level feature the function does contain', () => {
-    const bad = every
-      .flatMap(({ project, fn }) => {
-        const have = new Set(fn.features);
-        return [...sourceEvidence(fn.funcC)]
-          .filter((t) => !have.has(t))
-          .map((t) => `${project}:${fn.sym} missing ${t}`);
-      })
+  it('gives every row at least one tag', () => {
+    expect(rows.filter((r) => r.features.length === 0).map((r) => r.id)).toEqual([]);
+  });
+});
+
+describe('the definitions are well-formed', () => {
+  it('ids are unique and kebab-case', () => {
+    expect(FEATURES.length).toBe(KNOWN_FEATURES.size);
+    expect(FEATURES.map((f) => f.id).filter((id) => !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(id))).toEqual([]);
+  });
+
+  it('every definition carries a label, a group and a non-empty summary', () => {
+    const bad = FEATURES.filter((f) => !f.label.trim() || !f.summary.trim() || !GROUP_ORDER.includes(f.group)).map(
+      (f) => f.id,
+    );
+    expect(bad).toEqual([]);
+  });
+
+  it('every seeAlso resolves to a real id', () => {
+    const bad = FEATURES.flatMap((f) =>
+      (f.seeAlso ?? []).filter((s) => !FEATURE_BY_ID.has(s)).map((s) => `${f.id} → ${s}`),
+    );
+    expect(bad.sort()).toEqual([]);
+  });
+
+  it('a codegen tag never claims to be checkable from the source, and vice versa', () => {
+    // the detectors are keyed off `evidence`, so a mislabelled entry would silently stop being
+    // checked rather than fail
+    expect([...SOURCE_CHECKED].sort()).toEqual([
+      'bitwise',
+      'do-while',
+      'goto',
+      'loop',
+      'nested-loop',
+      'shift',
+      'sizeof',
+      'switch',
+      'ternary',
+    ]);
+    expect([...CODEGEN_DERIVED].sort()).toEqual([
+      'branchless',
+      'call',
+      'comparison-tree',
+      'dma',
+      'hw-div',
+      'jump-table',
+      'magic-div',
+      'mmio',
+      'soft-div',
+      'strength-reduce',
+    ]);
+  });
+});
+
+describe('tags match their evidence', () => {
+  it('authored data carries JUDGEMENT tags only (source and codegen are derived per row)', () => {
+    const derived = new Set([...SOURCE_CHECKED, ...CODEGEN_DERIVED]);
+    const bad = authored
+      .flatMap(({ where, tags }) => tags.filter((t) => derived.has(t)).map((t) => `${where} authors ${t}`))
       .sort();
     expect(bad).toEqual([]);
   });
 
-  it('never AUTHORS a codegen tag — those are derived per row', () => {
-    const derived = new Set(Object.keys(CODEGEN_DERIVED));
-    const bad = every
-      .flatMap(({ project, fn }) =>
-        fn.features.filter((t) => derived.has(t)).map((t) => `${project}:${fn.sym} authors ${t}`),
-      )
-      .sort();
-    expect(bad).toEqual([]);
+  it("publishes exactly the source tags each function's own C supports", () => {
+    const srcOf = new Map(authored.map((a) => [a.where, a.src]));
+    const bad: string[] = [];
+    for (const r of rows) {
+      const src = srcOf.get(`${r.project}:${r.sym}`);
+      if (src === undefined) continue;
+      const want = sourceEvidence(src);
+      const got = new Set(r.features.filter((t) => SOURCE_CHECKED.has(t)));
+      for (const t of want) if (!got.has(t)) bad.push(`${r.id} missing ${t}`);
+      for (const t of got) if (!want.has(t)) bad.push(`${r.id} claims ${t}`);
+    }
+    expect(bad.sort()).toEqual([]);
   });
 
   it("publishes exactly the codegen tags each row's own assembly supports", () => {
-    const bySym = new Map(every.map(({ project, fn }) => [`${project}:${fn.sym}`, fn]));
+    const srcOf = new Map(authored.map((a) => [a.where, a.src]));
     const bad: string[] = [];
     for (const r of rows) {
-      const fn = bySym.get(`${r.project}:${r.sym}`);
-      if (!fn) continue;
-      const want = codegenEvidence(fn.funcC, r.targetAsm);
-      const got = new Set(r.features.filter((t) => t in CODEGEN_DERIVED));
+      const src = srcOf.get(`${r.project}:${r.sym}`);
+      if (src === undefined) continue;
+      const want = codegenEvidence(src, r.targetAsm);
+      const got = new Set(r.features.filter((t) => CODEGEN_DERIVED.has(t)));
       for (const t of want) if (!got.has(t)) bad.push(`${r.id} missing ${t}`);
       for (const t of got) if (!want.has(t)) bad.push(`${r.id} claims ${t}`);
     }
@@ -104,22 +164,33 @@ describe('feature tags', () => {
   });
 
   it('keeps every judgement tag above its floor', () => {
-    const asmOf = new Map(rows.map((r) => [`${r.project}:${r.sym}`, r.targetAsm]));
-    const bad = every
-      .flatMap(({ project, fn }) => {
-        const stripped = stripLiterals(fn.funcC);
+    // EVERY toolchain's assembly for the symbol: a tag defensible on the row that branches must
+    // not be failed by the row the compiler made branchless.
+    const asmOf = new Map<string, string>();
+    for (const r of rows) {
+      const k = `${r.project}:${r.sym}`;
+      asmOf.set(k, (asmOf.get(k) ?? '') + '\n' + r.targetAsm);
+    }
+    const bad = authored
+      .flatMap(({ where, tags, src }) => {
+        const stripped = stripLiterals(src);
         const body = stripped.slice(stripped.indexOf('{'));
-        const asm = asmOf.get(`${project}:${fn.sym}`) ?? '';
-        return fn.features
-          .filter((t) => JUDGEMENT_FLOOR[t] && !JUDGEMENT_FLOOR[t](body, asm))
-          .map((t) => `${project}:${fn.sym} claims ${t}`);
+        const asm = asmOf.get(where) ?? '';
+        return tags
+          .filter((t) => JUDGEMENT_FLOOR[t] && !JUDGEMENT_FLOOR[t](body, asm, stripped))
+          .map((t) => `${where} claims ${t}`);
       })
       .sort();
     expect(bad).toEqual([]);
   });
 
-  it('gives every function at least one tag', () => {
-    expect(every.filter(({ fn }) => fn.features.length === 0).map(({ fn }) => fn.sym)).toEqual([]);
+  it('every judgement tag with a floor is actually a judgement tag', () => {
+    const judgement = new Set(featuresByEvidence('judgement').map((f) => f.id));
+    expect(
+      Object.keys(JUDGEMENT_FLOOR)
+        .filter((k) => !judgement.has(k))
+        .sort(),
+    ).toEqual([]);
   });
 });
 
@@ -186,7 +257,7 @@ describe('the detectors themselves', () => {
   });
 
   it('holds judgement tags to a floor without pretending to decide them', () => {
-    // the floor rejects the fabrications the audit found …
+    // rejects the fabrications …
     expect(JUDGEMENT_FLOOR.arithmetic('{ GwSystem.minigame_index = arg0; }', '')).toBe(false);
     expect(JUDGEMENT_FLOOR.array('{ return gPlayerAvatar.flags; }', '')).toBe(false);
     expect(JUDGEMENT_FLOOR.table('{ return gEntityInfo[0x23].unkF; }', '')).toBe(false);

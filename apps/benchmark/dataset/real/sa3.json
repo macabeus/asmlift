@@ -55,8 +55,7 @@
       "features": [
         "global",
         "pointer",
-        "arithmetic",
-        "bitwise"
+        "arithmetic"
       ],
       "prependC": "u32 gRngPrevValue;\nu32 gRngValue;\n#define RAND_CONST 0x37119371",
       "funcC": "u16 Random(void)\n{\n    u32 new;\n    u32 *pPrev = &gRngPrevValue;\n    u32 *pCurrent = &gRngValue;\n\n    u32 prev = *pPrev;\n    gRngPrevValue = *pCurrent;\n\n    new = prev + RAND_CONST;\n    new += *pCurrent;\n\n    gRngValue = new;\n\n    return ((u16 *)&gRngValue)[1];\n}",
@@ -67,9 +66,7 @@
       "sym": "sa2__sub_808558C",
       "features": [
         "arithmetic",
-        "bitwise",
-        "branch",
-        "shift"
+        "branch"
       ],
       "funcC": "s16 SA2_LABEL(sub_808558C)(u16 angleA, u16 angleB, u8 numDecimalBits)\n{\n    u32 c1 = (1 << numDecimalBits);\n    u16 c2 = c1 - 1;\n\n    angleB -= angleA;\n    angleB &= c2;\n\n    if (angleB <= (c1 / 2)) {\n        return angleB;\n    } else {\n        return (angleB - c1);\n    }\n}",
       "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L469-L482"
@@ -77,11 +74,8 @@
     {
       "sym": "sa2__sub_8085654",
       "features": [
-        "loop",
         "arithmetic",
-        "int64",
-        "shift",
-        "do-while"
+        "int64"
       ],
       "funcC": "s32 SA2_LABEL(sub_8085654)(s32 a, s32 b, s32 c, u8 d, u8 e)\n{\n    do {\n        a -= (((s64)c * (s64)(a - b))) >> d;\n        e -= 1;\n    } while (e != 0xFF);\n\n    return a;\n}",
       "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L509-L517"
@@ -90,8 +84,7 @@
       "sym": "sa2__sub_80855C0",
       "features": [
         "arithmetic",
-        "int64",
-        "shift"
+        "int64"
       ],
       "funcC": "u32 SA2_LABEL(sub_80855C0)(s32 a, s32 b, s32 c, u8 d)\n{\n    s64 e = (s64)c * (a - b);\n\n    return a - (e >> d);\n}",
       "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L484-L489"
@@ -107,8 +100,7 @@
     {
       "sym": "sa2__sub_8085714",
       "features": [
-        "arithmetic",
-        "shift"
+        "arithmetic"
       ],
       "funcC": "s32 SA2_LABEL(sub_8085714)(s32 a, s32 b, s32 c) { return ((a + b * 8) - c) >> 3; }",
       "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L533-L533"
@@ -127,9 +119,7 @@
         "struct",
         "field",
         "global",
-        "pointer",
-        "sizeof",
-        "bitwise"
+        "pointer"
       ],
       "funcC": "void EwramInitHeap(void)\n{\n    struct EwramNode *root = (struct EwramNode *)&gEwramHeap[0];\n    root->next = NULL;\n    root->state = sizeof(gEwramHeap);\n}",
       "proto": {
@@ -143,12 +133,10 @@
     {
       "sym": "EwramMalloc",
       "features": [
-        "loop",
         "struct",
         "field",
         "pointer",
-        "branch",
-        "sizeof"
+        "branch"
       ],
       "funcC": "void *EwramMalloc(u32 req)\n{\n    struct EwramNode *node;\n    s32 requestedSpace = req;\n\n    requestedSpace = (req + 3) / 4;\n    if (requestedSpace != 0) {\n        requestedSpace = requestedSpace * 4 + sizeof(struct EwramNode);\n        node = (struct EwramNode *)gEwramHeap;\n        while (1) {\n            if (requestedSpace <= (u32)node->state) {\n                if (requestedSpace == node->state) {\n                    node->state = -requestedSpace;\n                    return node->space;\n                }\n\n                if (requestedSpace + (s32)sizeof(struct EwramNode) <= node->state) {\n                    struct EwramNode *addr = (void *)node + requestedSpace;\n\n                    addr->next = node->next;\n                    ++node;\n                    --node;\n                    addr->state = node->state - requestedSpace;\n                    node->next = addr;\n                    node->state = -requestedSpace;\n                    return node->space;\n                }\n            }\n            ++requestedSpace;\n            --requestedSpace;\n            if (!node->next)\n                return ewram_end;\n            node = node->next;\n        }\n    }\n    return ewram_end;\n}",
       "m2cCtx": true,
@@ -160,7 +148,6 @@
         "struct",
         "field",
         "pointer",
-        "loop",
         "branch"
       ],
       "funcC": "void EwramFree(void *p)\n{\n    struct EwramNode *node, *slow, *fast, *tmp;\n\n    if (p && ewram_end != p) {\n        node = p - offsetof(struct EwramNode, space);\n\n        for (fast = slow = (struct EwramNode *)gEwramHeap; node != fast; fast = fast->next)\n            slow = fast;\n\n        if (node->state < 0)\n            node->state = -node->state;\n\n        if ((void *)slow + slow->state == node && slow->state > 0) {\n            slow->next = fast->next;\n            slow->state += node->state;\n            node = slow;\n        }\n\n        tmp = (void *)node + node->state;\n        if (tmp == node->next && tmp->state > 0) {\n            node->state += tmp->state;\n            node->next = tmp->next;\n        }\n    }\n}",
@@ -175,11 +162,8 @@
     {
       "sym": "numToASCII",
       "features": [
-        "loop",
         "array",
-        "bitwise",
-        "branch",
-        "shift"
+        "branch"
       ],
       "funcC": "void numToASCII(u8 digits[5], u16 number)\n{\n    u8 i;\n\n    for (i = 0; i < 4; number <<= 4, i++) {\n        u16 value = ((number & 0xF000) >> 12);\n        if (value > 9) {\n            digits[i] = value + 87;\n        } else {\n            digits[i] = value + '0';\n        }\n    }\n\n    digits[i] = 0;\n}",
       "proto": {
@@ -191,11 +175,7 @@
     },
     {
       "sym": "Base10DigitsToHexNibbles",
-      "features": [
-        "loop",
-        "bitwise",
-        "shift"
-      ],
+      "features": [],
       "funcC": "u32 Base10DigitsToHexNibbles(u16 num)\n{\n    u8 i;\n    u16 result;\n    u8 lowDigit;\n    u16 remainder = num;\n\n    result = 0;\n    for (i = 0; i < 4; i++) {\n        s32 divisor = Div(remainder, 10);\n        lowDigit = remainder - (divisor * 10);\n        remainder = divisor;\n\n        result |= lowDigit << (i * 4);\n    }\n\n    return result;\n}\n",
       "note": "Div() resolves to an inline macro (int division) — soft-div idiom.",
       "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/sprite.c#L147-L164"
@@ -203,7 +183,6 @@
     {
       "sym": "VerifyFlashSector_Core",
       "features": [
-        "loop",
         "pointer",
         "cast",
         "branch"
@@ -218,10 +197,7 @@
         "cast",
         "fixed-point",
         "array",
-        "memory",
-        "sizeof",
-        "shift",
-        "bitwise"
+        "memory"
       ],
       "prependC": "#include <string.h>\nstatic const u8 unkFractions[8] = { I(Q(0.5 * 2)), I(Q(0.0 * 2)), I(Q(1.0 * 2)), I(Q(1.5 * 2)), I(Q(3.0 * 2)), I(Q(3.5 * 2)), I(Q(2.5 * 2)), I(Q(2.0 * 2)) };",
       "funcC": "s16 sa2__sub_8004418(s16 x, s16 y)\n{\n    s16 fraction;\n    s32 result;\n    u8 index = 0;\n    u8 array[8];\n    memcpy(array, unkFractions, sizeof(array));\n\n    if ((x | y) == 0) {\n        result = -1;\n    } else {\n        if (x <= 0) {\n            x = -x;\n            index = 4;\n        }\n        if (y <= 0) {\n            y = -y;\n            index += 2;\n        }\n        if (x >= y) {\n            // fraction = y*0.5 / x\n            y *= Q(0.5);\n\n            if (x == 0) {\n                fraction = y;\n            } else {\n                fraction = y / x;\n            }\n        } else {\n            index += 1;\n\n            x *= Q(0.5);\n\n            if (y == 0) {\n                fraction = x;\n            } else {\n                fraction = x / y;\n            }\n        }\n\n        if (array[index] & 0x01) {\n            fraction = Q(0.5) - fraction;\n        }\n\n        {\n            s32 val = array[index] * Q(0.5);\n            fraction += val;\n            result = ((u32)(fraction << 22) >> 22);\n        }\n    }\n\n    return result;\n}",
@@ -231,10 +207,8 @@
     {
       "sym": "GetSaveSectorChecksum",
       "features": [
-        "loop",
         "pointer",
         "cast",
-        "sizeof",
         "struct"
       ],
       "prependC": "#include \"game/save.h\"",
@@ -244,12 +218,10 @@
     {
       "sym": "VramMalloc",
       "features": [
-        "loop",
         "global",
         "array",
         "branch",
-        "pointer",
-        "nested-loop"
+        "pointer"
       ],
       "prependC": "#include \"core.h\"\n#include \"malloc_vram.h\"",
       "funcC": "void *VramMalloc(u32 numTiles)\n{\n    u16 i, j;\n    u32 count = numTiles;\n    count = (count + (VRAM_TILE_SLOTS_PER_SEGMENT - 1)) / VRAM_TILE_SLOTS_PER_SEGMENT; // round up\n\n    for (i = 0; i < gVramHeapMaxTileSlots / VRAM_TILE_SLOTS_PER_SEGMENT; i++) {\n        if (gVramHeapState[i] == 0) {\n            for (j = 0; j < count; j++) {\n                if (i + j >= (gVramHeapMaxTileSlots / VRAM_TILE_SLOTS_PER_SEGMENT)) {\n                    return ewram_end;\n                }\n                if (gVramHeapState[i + j] != 0) {\n                    break;\n                }\n            }\n\n            if (j == count) {\n                gVramHeapState[i] = count;\n                return (void *)(gVramHeapStartAddr + i * VRAM_HEAP_SEGMENT_SIZE);\n            }\n        } else {\n            i = (gVramHeapState[i] - 1) + i; // next slot to check, -1 because of ++i\n        }\n    }\n    return ewram_end;\n}",
@@ -259,7 +231,6 @@
     {
       "sym": "VramGetTotalAllocatedTiles",
       "features": [
-        "loop",
         "global",
         "array",
         "branch"
@@ -272,12 +243,9 @@
     {
       "sym": "GetInput",
       "features": [
-        "loop",
-        "bitwise",
         "array",
         "branch",
-        "global",
-        "shift"
+        "global"
       ],
       "prependC": "#include \"core.h\"\n#include \"input_recorder.h\"",
       "funcC": "void GetInput(void)\n{\n    s8 i;\n    u8 *repeatKeyCounters = gRepeatedKeysTestCounter, *firstIntervals = gKeysFirstRepeatIntervals,\n       *continuedHoldIntervals = gKeysContinuedRepeatIntervals;\n\n    gInput = (~REG_KEYINPUT & KEYS_MASK);\n\n    // My guess is that whilst the input recorder\n    // is running we still want to know the actual\n    // input. For example; to be able to know when\n    // to exit the demo\n    gPhysicalInput = gInput;\n\n#ifndef COLLECT_RINGS_ROM\n    if (gInputRecorder.mode == RECORDER_RECORD) {\n        InputRecorderWrite(gInput);\n    } else if (gInputRecorder.mode == RECORDER_PLAYBACK) {\n        gInput = InputRecorderRead();\n    }\n#endif\n\n    gPressedKeys = (gInput ^ gPrevInput) & gInput;\n    gReleasedKeys = (gInput ^ gPrevInput) & gPrevInput;\n    gPrevInput = gInput;\n\n    // Repeated keys will be the currently pressed keys\n    gRepeatedKeys = gPressedKeys;\n\n    // Calculate the next repeated state for every key\n    for (i = 0; i < 10; i++) {\n        if (!GetBit(gInput, i)) {\n            // If a key is not pressed, reset its counter\n            // to the settings for that key's\n            // first repeat interval\n            repeatKeyCounters[i] = firstIntervals[i];\n        } else if (repeatKeyCounters[i] > 0) {\n            // If the key is not yet ready to be repeated\n            // continue to wait\n            repeatKeyCounters[i]--;\n        } else {\n            // If the key is ready to be repeated,\n            // add the key to the repeated keys\n            gRepeatedKeys |= 1 << i;\n            // And reset its counter to the settings\n            // for continued hold interval\n            repeatKeyCounters[i] = continuedHoldIntervals[i];\n        }\n    }\n}",
@@ -292,10 +260,8 @@
     {
       "sym": "sa2__sub_8007858",
       "features": [
-        "loop",
         "pointer",
         "global",
-        "bitwise",
         "cast"
       ],
       "prependC": "#include \"core.h\"\n#include \"flags.h\"",
@@ -310,10 +276,8 @@
     {
       "sym": "sa2__sub_8007958",
       "features": [
-        "loop",
         "pointer",
         "global",
-        "bitwise",
         "arithmetic"
       ],
       "prependC": "#include \"core.h\"\n#include \"flags.h\"",
@@ -336,8 +300,7 @@
     {
       "sym": "sa2__sub_8085720",
       "features": [
-        "arithmetic",
-        "shift"
+        "arithmetic"
       ],
       "funcC": "s32 SA2_LABEL(sub_8085720)(s32 a, s32 b, s32 c) { return ((b * 8 - a) + c) >> 3; }",
       "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L535-L535"
@@ -345,8 +308,7 @@
     {
       "sym": "sa2__sub_8085798",
       "features": [
-        "arithmetic",
-        "shift"
+        "arithmetic"
       ],
       "funcC": "s32 SA2_LABEL(sub_8085798)(s32 a, s32 b, s32 c) { return ((c - a) + ((c - a) >> 1)) - (b >> 1); }",
       "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L549-L549"
@@ -354,8 +316,7 @@
     {
       "sym": "sa2__sub_808595C",
       "features": [
-        "arithmetic",
-        "shift"
+        "arithmetic"
       ],
       "funcC": "s32 SA2_LABEL(sub_808595C)(s32 a, s32 b, s32 c)\n{\n    s32 e = (b - a);\n    s32 f = (c - b);\n    f -= e;\n    f >>= 1;\n    return e + f;\n}",
       "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L580-L587"
@@ -365,8 +326,7 @@
       "features": [
         "struct",
         "field",
-        "arithmetic",
-        "shift"
+        "arithmetic"
       ],
       "prependC": "typedef struct {\n    s16 unk0;\n    s16 unk2;\n    s16 unk4;\n    s16 unk6;\n    u16 unk8;\n    u16 unkA;\n    u16 unkC;\n    u16 unkE;\n    u16 unk10;\n    u16 unk12;\n    u32 unk14;\n    u32 unk18;\n    u32 unk1C;\n} UNK_8085D14;",
       "proto": {
@@ -382,8 +342,7 @@
       "features": [
         "struct",
         "field",
-        "arithmetic",
-        "shift"
+        "arithmetic"
       ],
       "prependC": "typedef struct {\n    s16 unk0;\n    s16 unk2;\n    s16 unk4;\n    s16 unk6;\n    u16 unk8;\n    u16 unkA;\n    u16 unkC;\n    u16 unkE;\n    u16 unk10;\n    u16 unk12;\n    u32 unk14;\n    u32 unk18;\n    u32 unk1C;\n} UNK_8085D14;",
       "proto": {
@@ -416,9 +375,7 @@
         "struct",
         "field",
         "branch",
-        "fixed-point",
-        "shift",
-        "bitwise"
+        "fixed-point"
       ],
       "prependC": "typedef struct {\n    u16 unk0;\n    s16 unk2;\n    s16 unk4;\n    s16 unk6;\n    s32 unk8;\n    s32 unkC;\n    u16 unk10;\n    u16 unk12;\n    u32 unk14;\n    u32 unk18;\n    u32 unk1C;\n} UNK_8085D14_2;\n#include \"trig.h\"",
       "proto": {
@@ -435,10 +392,6 @@
       "features": [
         "global",
         "struct",
-        "loop",
-        "nested-loop",
-        "sizeof",
-        "bitwise",
         "union",
         "bitfield",
         "field"
@@ -451,9 +404,7 @@
     {
       "sym": "sa2__sub_80078D4",
       "features": [
-        "global",
-        "bitwise",
-        "shift"
+        "global"
       ],
       "prependC": "#include \"core.h\"\n#include \"flags.h\"",
       "funcC": "void sa2__sub_80078D4(u8 bg, int_vcount minY, int_vcount maxY, u16 offsetEven, u16 offsetOdd)\n{\n    s32 fillVal;\n\n    gFlags |= FLAGS_EXECUTE_HBLANK_COPY;\n\n    gHBlankCopyTarget = (void *)&((u8 *)&REG_BG0HOFS)[bg * 4];\n    gHBlankCopySize = 4;\n\n    if (minY < maxY) {\n        fillVal = (offsetEven %= 512u) | ((offsetOdd % 512u) << 16);\n\n        DmaFill32(3, fillVal, &((u16 *)gBgOffsetsHBlankPrimary)[minY * 2], (maxY - minY) * 4);\n    }\n}",
@@ -462,11 +413,8 @@
     {
       "sym": "PackSaveSector",
       "features": [
-        "switch",
         "array",
-        "loop",
-        "memory",
-        "nested-loop"
+        "memory"
       ],
       "funcC": "void PackSaveSector(SaveSectorData *sector, SaveGame *save)\n{\n    s16 i;\n    s16 j;\n    s16 k;\n\n    sector->header.magicNumber = 0x47544E4C;\n    sector->header.sectorId += 1;\n    sector->playerId = save->playerId;\n\n    for (i = 0; i < 6; i++) {\n        sector->playerName[i] = save->playerName[i];\n    }\n\n    sector->unk18 = 0;\n    sector->unlockedCharacters = save->unlockedCharacters;\n    sector->unlockedZones = save->unlockedZones;\n    sector->continueZone = save->continueZone;\n    sector->unk1C = 0;\n\n    for (i = 0; i < 7; i++) {\n        sector->chaoCount[i] = save->chaoCount[i];\n    }\n\n    for (i = 0; i < 7; i++) {\n        sector->specialKeys[i] = save->specialKeys[i];\n    }\n\n    for (i = 0; i < 9; i++) {\n        sector->unlockedStages[i] = save->unlockedStages[i];\n    }\n\n    for (i = 0; i < 9; i++) {\n        for (j = 0; j < 4; j++) {\n            sector->collectedMedals[i][j] = save->collectedMedals[i][j];\n        }\n    }\n\n    sector->collectedEmeralds = save->collectedEmeralds;\n    sector->unk62 = save->unk34;\n    sector->unlockFlags = save->unlockFlags;\n    sector->vsWins = save->vsWins;\n    sector->vsDraws = save->vsDraws;\n    sector->vsLosses = save->vsLosses;\n    sector->unk67 = 0;\n\n    for (i = 0; i < 10; i++) {\n        sector->vsRecords[i].slotFilled = save->vsRecords[i].slotFilled;\n        sector->vsRecords[i].wins = save->vsRecords[i].wins;\n        sector->vsRecords[i].draws = save->vsRecords[i].draws;\n        sector->vsRecords[i].losses = save->vsRecords[i].losses;\n\n        sector->vsRecords[i].playerId = save->vsRecords[i].playerId;\n\n        for (j = 0; j < 6; j++) {\n            sector->vsRecords[i].playerName[j] = save->vsRecords[i].playerName[j];\n        }\n    }\n\n#define Zone i\n#define Act  j\n#define Rank k\n    for (Zone = 0; Zone < (s32)ARRAY_COUNT(save->timeRecords.table); Zone++) {\n        for (Act = 0; Act < (s32)ARRAY_COUNT(save->timeRecords.table[0]); Act++) {\n            for (Rank = 0; Rank < (s32)ARRAY_COUNT(save->timeRecords.table[0][0]); Rank++) {\n                sector->timeRecords.table[Zone][Act][Rank].character1 = save->timeRecords.table[Zone][Act][Rank].character1;\n                sector->timeRecords.table[Zone][Act][Rank].character2 = save->timeRecords.table[Zone][Act][Rank].character2;\n                sector->timeRecords.table[Zone][Act][Rank].time = save->timeRecords.table[Zone][Act][Rank].time;\n            }\n        }\n    }\n#undef Rank\n#undef Act\n#undef Zone\n\n    switch (save->buttonConfig.jump) {\n        case A_BUTTON:\n            sector->buttonConfig.jump = 1;\n            break;\n        case B_BUTTON:\n            sector->buttonConfig.attack = 1;\n            break;\n        case R_BUTTON:\n            sector->buttonConfig.trick = 1;\n            break;\n    }\n\n    switch (save->buttonConfig.attack) {\n        case A_BUTTON:\n            sector->buttonConfig.jump = 2;\n            break;\n        case B_BUTTON:\n            sector->buttonConfig.attack = 2;\n            break;\n        case R_BUTTON:\n            sector->buttonConfig.trick = 2;\n            break;\n    }\n\n    switch (save->buttonConfig.trick) {\n        case A_BUTTON:\n            sector->buttonConfig.jump = 4;\n            break;\n        case B_BUTTON:\n            sector->buttonConfig.attack = 4;\n            break;\n        case R_BUTTON:\n            sector->buttonConfig.trick = 4;\n            break;\n    }\n\n    sector->difficulty = save->difficulty;\n    sector->disableTimeLimit = save->disableTimeLimit;\n    sector->language = save->language;\n    sector->unk367 = 0;\n    sector->checksum = GetSaveSectorChecksum(sector);\n}",
       "prependC": "#include \"global.h\"\n#include \"core.h\"\n#include \"flags.h\"\n#include \"lib/m4a/m4a.h\"\n#include \"lib/agb_flash/agb_flash.h\"\n#include \"lib/agb_flash/flash_internal.h\"\n#include \"malloc_ewram.h\"\n#include \"malloc_vram.h\"\n#include \"game/save.h\"\n#include \"game/stage.h\"\n#include \"gba/defines.h\"\n#include \"constants/characters.h\"\n#include \"constants/zones.h\"",
@@ -480,12 +428,8 @@
     {
       "sym": "sub_804DC38",
       "features": [
-        "switch",
-        "shift",
         "struct",
-        "field",
-        "loop",
-        "bitwise"
+        "field"
       ],
       "funcC": "u16 sub_804DC38(u8 kind, s32 worldX, s32 worldY, MapEntity *me)\n{\n    s32 r0;\n    s32 r1;\n    s32 r2_32;\n    s16 r2;\n    bool32 r6;\n    u16 i;\n\n    // TODO(Jace): This was likely not written this way, and might actually be a bug?\n    //             I don't think MapEntity structs are always aligned in memory.\n    u32 data = *((u32 *)&me->d.uData[1]);\n    if (data & 0x00FFFF00) {\n        if (me->d.uData[3] < me->d.uData[2]) {\n            r2_32 = (me->d.uData[2] * (TILE_WIDTH / 2));\n            r1 = worldX;\n            r0 = worldX + (me->d.sData[0] * TILE_WIDTH);\n            r6 = FALSE;\n        } else {\n            r2_32 = (me->d.uData[3] * (TILE_WIDTH / 2));\n            r1 = worldY;\n            r0 = worldY + (me->d.sData[1] * TILE_WIDTH);\n            r6 = TRUE;\n        }\n\n        r2 = ((r1 - (r0 + r2_32)) << 14) / r2_32;\n        if (r2 >= 0) {\n            for (i = 0; (i < Q(1)) && (r2 > SIN(i));) {\n                i += 4;\n            }\n\n            switch (kind) {\n                case 0: {\n                    return Q(2) - i;\n                } break;\n\n                case 1: {\n                    if (r6) {\n                        return i;\n                    } else {\n                        return Q(2) - i;\n                    }\n                } break;\n\n                case 2: {\n                    if (!r6) {\n                        return i;\n                    } else {\n                        return Q(2) - i;\n                    }\n                } break;\n\n                default: {\n                    return i;\n                }\n            }\n\n        } else {\n            for (i = Q(2); (i < Q(3)) && (r2 < SIN(i));) {\n                i += 4;\n            }\n\n            switch (kind) {\n                case 0: {\n                    return i;\n                } break;\n\n                case 1: {\n                    if (!r6) {\n                        return i;\n                    } else {\n                        return Q(6) - i;\n                    }\n                } break;\n\n                case 2: {\n                    if (r6) {\n                        return i;\n                    } else {\n                        return Q(6) - i;\n                    }\n                } break;\n\n                case 3: {\n                    return Q(6) - i;\n                } break;\n            }\n        }\n    }\n\n    return 0;\n}",
       "prependC": "#include \"global.h\"\n#include \"trig.h\"\n#include \"game/interactables/platform_shared.h\"\n#include \"game/camera.h\"\n#include \"game/entity.h\"\n#include \"game/stage.h\"",
@@ -495,11 +439,7 @@
     {
       "sym": "Sio32MultiLoadMain",
       "features": [
-        "switch",
-        "shift",
-        "global",
-        "loop",
-        "bitwise"
+        "global"
       ],
       "funcC": "u32 Sio32MultiLoadMain(u32 *progressCounterp)\n{\n    s32 dataCounter, dataCounterBak;\n    UNUSED s32 i, ii; // declared in SDK\n\n    switch (gSio32MultiLoadArea.state) {\n        case 0:\n            if (gSio32MultiLoadArea.type || gSio32MultiLoadArea.frameCounter) // Slave SIO Mode switch delay wait\n                gSio32MultiLoadArea.state = 1;\n            break;\n        case 1:\n            if (gSio32MultiLoadArea.type == SIO_SCK_IN) {\n                if (gSio32MultiLoadArea.frameCounter < SIO32ML_MODE_WAIT_FRAMES) // Master wait\n                    break;\n            } else // Slave\n                REG_SIOCNT = SIO_32BIT_MODE; // Switches to SIO mode\n            REG_SIODATA32 = 0; // Clears data registery\n            REG_IF = INTR_FLAG_SERIAL | SIO32ML_TIMER_INTR_FLAG; // Resets IF\n            if (gSio32MultiLoadArea.type == SIO_SCK_IN) { // Sets Master\n                REG_SIOCNT |= SIO_ENABLE; // Starts communication\n                REG_SIO32ML_TIMER = SIO32ML_TIMER_COUNT | ((TIMER_1CLK | TIMER_INTR_ENABLE | TIMER_ENABLE) << 16); // Starts timer\n                REG_IME = 0;\n                REG_IE |= SIO32ML_TIMER_INTR_FLAG; // Enables timer interrupt\n                REG_IME = 1;\n            } else { // Sets Slave\n                REG_SIOCNT |= SIO_INTR_ENABLE | SIO_ENABLE; // Starts communication\n                REG_IME = 0;\n                REG_IE |= INTR_FLAG_SERIAL; // Enables SIO interrupt\n                REG_IME = 1;\n            }\n            gSio32MultiLoadArea.frameCounter = 0;\n            gSio32MultiLoadArea.state = 2;\n            break;\n        case 2:\n            dataCounter = gSio32MultiLoadArea.dataCounter;\n            dataCounterBak = dataCounter;\n            if (dataCounter > SIO32ML_BLOCK_SIZE / 4)\n                dataCounter = SIO32ML_BLOCK_SIZE / 4;\n            else if (dataCounter < 0)\n                dataCounter = 0;\n            if (progressCounterp)\n                *progressCounterp = dataCounter; // Set progress counter\n            if (gSio32MultiLoadArea.type != SIO_SCK_IN) { // Slave\n                while (gSio32MultiLoadArea.checkSumCounter < dataCounter) // Receiving data sum check\n                    gSio32MultiLoadArea.checkSumTmp += ((s32 *)gSio32MultiLoadArea.datap)[gSio32MultiLoadArea.checkSumCounter++];\n                if (dataCounterBak > SIO32ML_BLOCK_SIZE / 4)\n                    if ((gSio32MultiLoadArea.checkSum += gSio32MultiLoadArea.checkSumTmp) == -1)\n                        gSio32MultiLoadArea.downloadSuccessFlag = 1; // Succeeds download\n            }\n            if (dataCounterBak > SIO32ML_BLOCK_SIZE / 4 // Complete communication\n                || gSio32MultiLoadArea.frameCounter == 0x8C) // SIO32ML_LD_TIMEOUT_FRAMES in SDK doesn't match\n                gSio32MultiLoadArea.state = 3; // Load time out\n            break;\n        case 3:\n            REG_IME = 0;\n            REG_IE &= ~(INTR_FLAG_SERIAL | SIO32ML_TIMER_INTR_FLAG); // Disables SIO and timer interrupt\n            REG_IME = 1;\n            REG_SIOCNT = SIO_32BIT_MODE; // Stops SIO32\n            *(vu32 *)REG_ADDR_SIOCNT = SIO_MULTI_MODE; // Switches to SIO mode\n            *(vu32 *)REG_ADDR_SIOCNT = SIO_MULTI_MODE | MULTI_SIO_BAUD_RATE_NO;\n            *(vu64 *)REG_ADDR_SIODATA32 = 0; // Clears data register\n            if (gSio32MultiLoadArea.type) // Master\n                REG_SIO32ML_TIMER = 0; // Resets timer\n            REG_IF = INTR_FLAG_SERIAL | SIO32ML_TIMER_INTR_FLAG; // Resets IF\n            if (!gSio32MultiLoadArea.type)\n                return 1; // Slave comes back first\n            gSio32MultiLoadArea.frameCounter = 0;\n            gSio32MultiLoadArea.state = 4;\n            break;\n        case 4:\n            if (gSio32MultiLoadArea.frameCounter >= 3) // Master comes back later\n                return 1;\n            break;\n    }\n    ++gSio32MultiLoadArea.frameCounter;\n    return 0;\n}",
       "prependC": "#include \"sio32_multi_load.h\"\n#include \"global.h\"",
@@ -508,8 +448,6 @@
     {
       "sym": "sub_802DFC8",
       "features": [
-        "bitwise",
-        "ternary",
         "struct",
         "field"
       ],
@@ -543,11 +481,9 @@
     {
       "sym": "sub_804D360",
       "features": [
-        "switch",
         "struct",
         "field",
-        "branch",
-        "bitwise"
+        "branch"
       ],
       "funcC": "void sub_804D360(Sprite *s, s16 i, s16 param2)\n{\n    u32 flags = 0;\n\n    switch (i) {\n        case 0: {\n            flags |= SPRITE_FLAG(X_FLIP, 1);\n            if (param2 == 2) {\n                flags |= SPRITE_FLAG(Y_FLIP, 1);\n            }\n        } break;\n\n        case 1: {\n            if (param2 == 2) {\n                flags |= SPRITE_FLAG(Y_FLIP, 1);\n            }\n        } break;\n\n        case 2: {\n            flags |= SPRITE_FLAG(Y_FLIP, 1);\n\n            if (param2 == 0) {\n                flags |= SPRITE_FLAG(X_FLIP, 1);\n            }\n        } break;\n\n        case 3: {\n            if (param2 == 0) {\n                flags |= SPRITE_FLAG(X_FLIP, 1);\n            }\n        } break;\n    }\n\n    s->tiles = ALLOC_TILES_VARIANT(ANIM_MAZE, 6);\n    s->anim = ANIM_MAZE;\n    s->variant = 6;\n    s->oamFlags = SPRITE_OAM_ORDER(24);\n    s->animCursor = 0;\n    s->qAnimDelay = 0;\n    s->qAnimDelay = 0;\n    s->prevVariant = -1;\n    s->animSpeed = SPRITE_ANIM_SPEED(1.0);\n    s->palId = 0;\n    s->hitboxes[0].index = -1;\n    s->frameFlags = flags | SPRITE_FLAG(PRIORITY, 1);\n    UpdateSpriteAnimation(s);\n}",
       "prependC": "#include \"global.h\"\n#include \"module_unclear.h\"\n#include \"malloc_vram.h\"\n#include \"game/camera.h\"\n#include \"game/entity.h\"\n#include \"game/player.h\"\n#include \"game/player_callbacks.h\"\n#include \"game/stage.h\"\n#include \"constants/animations.h\"\n#include \"constants/anim_sizes.h\"\n#include \"constants/move_states.h\"",
@@ -563,8 +499,7 @@
       "sym": "Sio32MultiLoadIntr",
       "features": [
         "global",
-        "branch",
-        "bitwise"
+        "branch"
       ],
       "funcC": "void Sio32MultiLoadIntr(void)\n{\n    // Saves received data\n    u32 recvTmp = REG_SIODATA32;\n    // Slave prepares to receive\n    if (gSio32MultiLoadArea.type != SIO_SCK_IN)\n        REG_SIOCNT |= SIO_ENABLE;\n    if (gSio32MultiLoadArea.type == SIO_SCK_IN) {\n        REG_SIO32ML_TIMER_H = 0; // Stops timer\n        // Process sending data\n        if (gSio32MultiLoadArea.dataCounter < 0) // Sets synchronous data\n            REG_SIODATA32 = SIO32ML_SYNC_DATA;\n        else if (gSio32MultiLoadArea.dataCounter < SIO32ML_BLOCK_SIZE / 4) // Sets sending\n                                                                           // data\n            REG_SIODATA32 = gSio32MultiLoadArea.datap[gSio32MultiLoadArea.dataCounter];\n        else\n            REG_SIODATA32 = gSio32MultiLoadArea.checkSum; // Sets check sum\n    } else {\n        // Process receiving data\n        if (gSio32MultiLoadArea.dataCounter < 0) { // Checks synchronous data\n            if (recvTmp != SIO32ML_SYNC_DATA)\n                --gSio32MultiLoadArea.dataCounter;\n        } else if (gSio32MultiLoadArea.dataCounter < SIO32ML_BLOCK_SIZE / 4) // Saves\n                                                                             // receiving\n                                                                             // data\n            gSio32MultiLoadArea.datap[gSio32MultiLoadArea.dataCounter] = recvTmp;\n        else\n            gSio32MultiLoadArea.checkSum = recvTmp; // Saves check sum\n    }\n    if (gSio32MultiLoadArea.dataCounter < SIO32ML_BLOCK_SIZE / 4 + 3) {\n        ++gSio32MultiLoadArea.dataCounter;\n        // Master starts to sending\n        if (gSio32MultiLoadArea.type == SIO_SCK_IN) {\n            REG_SIOCNT |= SIO_ENABLE; // Restarts sending\n            REG_SIO32ML_TIMER_H = TIMER_1CLK | TIMER_INTR_ENABLE | TIMER_ENABLE; // Restarts timer\n        }\n    }\n}",
       "prependC": "#include \"sio32_multi_load.h\"\n#include \"global.h\"",
@@ -579,8 +514,6 @@
     {
       "sym": "sub_803213C",
       "features": [
-        "bitwise",
-        "ternary",
         "struct",
         "field"
       ],

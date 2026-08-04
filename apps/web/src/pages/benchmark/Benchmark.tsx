@@ -11,11 +11,20 @@ import summary from '../../data/summary.json';
 import type { ShareState } from '../../shared/utils/permalink';
 import { Disclaimer } from './components/Disclaimer';
 import { Explorer, type ExplorerPreset } from './components/Explorer';
+import { FeatureDetail } from './components/FeatureDetail';
 import { GapAnalysis } from './components/GapAnalysis';
 import { Methodology } from './components/Methodology';
 import { Overview } from './components/Overview';
 import { meta, results } from './lib/data';
-import { FILTERS_RESET, FILTER_PARSERS, FILTER_URL_KEYS, type TabId, tabParser } from './lib/explorer-url';
+import {
+  FEATURE_TERM_KEY,
+  FEATURE_TERM_PARSER,
+  FILTERS_RESET,
+  FILTER_PARSERS,
+  FILTER_URL_KEYS,
+  type TabId,
+  tabParser,
+} from './lib/explorer-url';
 import { DECOMPILER_COLOR } from './theme';
 
 const TABS: { id: TabId; label: string }[] = [
@@ -30,6 +39,7 @@ export default function Benchmark({ onOpenInPlayground }: { onOpenInPlayground: 
   const [tab, setTab] = useQueryState('tab', tabParser.withOptions({ history: 'push' }));
   const [, setFilters] = useQueryStates(FILTER_PARSERS, { urlKeys: FILTER_URL_KEYS });
   const [, setSelectedId] = useQueryState('fn', parseAsString);
+  const [aboutFeature, setAboutFeature] = useQueryState(FEATURE_TERM_KEY, FEATURE_TERM_PARSER);
   // An aggregate's preset replaces the WHOLE filter set and closes any open detail; all three
   // writes land as one pushed history entry, so Back returns to the aggregate that was clicked.
   const openExplorer = useCallback(
@@ -40,6 +50,10 @@ export default function Benchmark({ onOpenInPlayground }: { onOpenInPlayground: 
     },
     [setFilters, setSelectedId, setTab],
   );
+
+  // Pushed, so Back closes the drawer and returns to the filter that was open — as the row drawer
+  // does.
+  const openFeature = useCallback((id: string) => void setAboutFeature(id, { history: 'push' }), [setAboutFeature]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -92,10 +106,24 @@ export default function Benchmark({ onOpenInPlayground }: { onOpenInPlayground: 
 
       <main>
         {tab === 'overview' && <Overview rows={results} onExplore={openExplorer} />}
-        {tab === 'explorer' && <Explorer rows={results} onOpenInPlayground={onOpenInPlayground} />}
+        {tab === 'explorer' && (
+          <Explorer rows={results} onOpenInPlayground={onOpenInPlayground} onOpenFeature={openFeature} />
+        )}
         {tab === 'gap' && <GapAnalysis rows={results} onExplore={openExplorer} />}
         {tab === 'methodology' && <Methodology rows={results} />}
       </main>
+
+      {/* Above every tab, not inside one: a tag can be asked about from the table, the picker or a
+          chart, and the answer should not depend on which. */}
+      {aboutFeature && (
+        <FeatureDetail
+          id={aboutFeature}
+          rows={results}
+          onClose={() => void setAboutFeature(null, { history: 'replace' })}
+          onOpenFeature={openFeature}
+          onExplore={openExplorer}
+        />
+      )}
     </div>
   );
 }

@@ -1,6 +1,8 @@
-// The benchmark result schema: ONE definition imported by both the producer (apps/benchmark)
-// and the consumer (apps/web). Types only, zero deps, zero runtime code — browser-safe by
-// construction.
+// The benchmark contract: ONE definition imported by both the producer (apps/benchmark) and the
+// consumer (apps/web) — the result/manifest types here, plus the closed feature vocabulary they
+// range over in ./features. Zero dependencies, no I/O, browser-safe by construction.
+
+export * from './features';
 
 export type ToolchainId = 'agbcc' | 'ido7.1' | 'gcc2.7.2kmc' | 'gcc2.7.2' | 'mwcc_242_81';
 

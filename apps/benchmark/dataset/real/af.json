@@ -36,7 +36,6 @@
     {
       "sym": "mem_copy",
       "features": [
-        "loop",
         "pointer",
         "memory"
       ],
@@ -52,7 +51,6 @@
     {
       "sym": "mem_clear",
       "features": [
-        "loop",
         "pointer",
         "memory"
       ],
@@ -68,7 +66,6 @@
     {
       "sym": "mem_cmp",
       "features": [
-        "loop",
         "pointer",
         "branch"
       ],
@@ -297,8 +294,7 @@
       "features": [
         "array",
         "arithmetic",
-        "branch",
-        "shift"
+        "branch"
       ],
       "prependC": "typedef unsigned char u8;\ntypedef unsigned short u16;\ntypedef int s32;\n#define UNUSED\nextern u8 mRmTp_ftr_size[];",
       "funcC": "s32 mRmTp_ItemNo2FtrSize(u16 name) {\n    if (name >= 0x1000 && name < 0x1ECD) {\n        UNUSED s32 scoped;\n        return mRmTp_ftr_size[(name - 0x1000) >> 2];\n    }\n    return 0;\n}",
@@ -330,8 +326,7 @@
       "sym": "chase_f3",
       "features": [
         "float",
-        "branch",
-        "ternary"
+        "branch"
       ],
       "prependC": "typedef int s32;\ntypedef float f32;",
       "funcC": "s32 chase_f3(f32* pValue, f32 target, f32 incrStep, f32 decrStep) {\n    f32 step = (target >= *pValue) ? incrStep : decrStep;\n\n    if (step != 0.0f) {\n        if (target < *pValue) {\n            step = -step;\n        }\n\n        *pValue += step;\n\n        if (((*pValue - target) * step) >= 0) {\n            *pValue = target;\n            return 1;\n        }\n    } else if (target == *pValue) {\n        return 1;\n    }\n\n    return 0;\n}",
@@ -417,11 +412,9 @@
       "features": [
         "union",
         "array",
-        "shift",
         "cast",
         "pointer",
-        "float",
-        "bitwise"
+        "float"
       ],
       "funcC": "Mtx* _MtxF_to_Mtx(MtxF* src, Mtx* dest) {\n    s32 fp;\n    u16* intPart = (u16*)&dest->m[0][0];\n    u16* fracPart = (u16*)&dest->m[2][0];\n\n    fp = src->xx * 0x10000;\n    intPart[0] = (fp >> 0x10);\n    fracPart[0] = fp & 0xFFFF;\n\n    fp = src->yx * 0x10000;\n    intPart[1] = (fp >> 0x10);\n    fracPart[1] = fp & 0xFFFF;\n\n    fp = src->zx * 0x10000;\n    intPart[2] = (fp >> 0x10);\n    fracPart[2] = fp & 0xFFFF;\n\n    fp = src->wx * 0x10000;\n    intPart[3] = (fp >> 0x10);\n    fracPart[3] = fp & 0xFFFF;\n\n    fp = src->xy * 0x10000;\n    intPart[4] = (fp >> 0x10);\n    fracPart[4] = fp & 0xFFFF;\n\n    fp = src->yy * 0x10000;\n    intPart[5] = (fp >> 0x10);\n    fracPart[5] = fp & 0xFFFF;\n\n    // Ideally these three would use fracPart instead of intPart, but it's required to match.\n    fp = src->zy * 0x10000;\n    intPart[6] = (fp >> 0x10);\n    intPart[22] = fp & 0xFFFF;\n\n    fp = src->wy * 0x10000;\n    intPart[7] = (fp >> 0x10);\n    intPart[23] = fp & 0xFFFF;\n\n    fp = src->xz * 0x10000;\n    intPart[8] = (fp >> 0x10);\n    intPart[24] = fp & 0xFFFF;\n\n    fp = src->yz * 0x10000;\n    intPart[9] = (fp >> 0x10);\n    fracPart[9] = fp & 0xFFFF;\n\n    fp = src->zz * 0x10000;\n    intPart[10] = (fp >> 0x10);\n    fracPart[10] = fp & 0xFFFF;\n\n    fp = src->wz * 0x10000;\n    intPart[11] = (fp >> 0x10);\n    fracPart[11] = fp & 0xFFFF;\n\n    fp = src->xw * 0x10000;\n    intPart[12] = (fp >> 0x10);\n    fracPart[12] = fp & 0xFFFF;\n\n    fp = src->yw * 0x10000;\n    intPart[13] = (fp >> 0x10);\n    fracPart[13] = fp & 0xFFFF;\n\n    fp = src->zw * 0x10000;\n    intPart[14] = (fp >> 0x10);\n    fracPart[14] = fp & 0xFFFF;\n\n    fp = src->ww * 0x10000;\n    intPart[15] = (fp >> 0x10);\n    fracPart[15] = fp & 0xFFFF;\n    return dest;\n}",
       "prependC": "typedef unsigned char       u8;     /* unsigned  8-bit */\ntypedef unsigned short      u16;    /* unsigned 16-bit */\ntypedef unsigned long       u32;    /* unsigned 32-bit */\ntypedef unsigned long long  u64;    /* unsigned 64-bit */\ntypedef signed char         s8;     /* signed  8-bit */\ntypedef short               s16;    /* signed 16-bit */\ntypedef long                s32;    /* signed 32-bit */\ntypedef long long           s64;    /* signed 64-bit */\ntypedef float   f32;    /* single prec floating point */\ntypedef double  f64;    /* double prec floating point */\ntypedef struct xyz_t {\n    /* 0x0 */ f32 x;\n    /* 0x4 */ f32 y;\n    /* 0x8 */ f32 z;\n} xyz_t; // size = 0xC\n\ntypedef float MtxF_t[4][4];\ntypedef union {\n    MtxF_t mf;\n    struct {\n        float xx, yx, zx, wx, xy, yy, zy, wy, xz, yz, zz, wz, xw, yw, zw, ww;\n    };\n} MtxF; // size = 0x40\ntypedef long\tMtx_t[4][4];\n\ntypedef union {\n    Mtx_t\t\tm;\n    long long int\tforce_structure_alignment;\n} Mtx;",
@@ -432,9 +425,7 @@
       "features": [
         "float",
         "array",
-        "shift",
-        "matrix",
-        "bitwise"
+        "matrix"
       ],
       "funcC": "void suMtxMakeSRT(Mtx* mtx, f32 scaleX, f32 scaleY, f32 scaleZ, s16 rotX, s16 rotY, s16 rotZ, f32 translateX,\n                  f32 translateY, f32 translateZ) {\n    struct {\n        s16 intPart[4][4];\n        u16 fracPart[4][4];\n    }* mu = (void*)mtx;\n    s32 fp;\n    f32 sinX = sin_s(rotX);\n    f32 sinY = sin_s(rotY);\n    f32 sinZ = sin_s(rotZ);\n    f32 cosX = cos_s(rotX);\n    f32 cosY = cos_s(rotY);\n    f32 cosZ = cos_s(rotZ);\n\n    fp = cosY * cosZ * scaleX * 0x10000;\n    mu->intPart[0][0] = ((u32)fp >> 0x10) & 0xFFFF;\n    mu->fracPart[0][0] = fp & 0xFFFF;\n\n    fp = cosY * sinZ * scaleX * 0x10000;\n    mu->intPart[0][1] = ((u32)fp >> 0x10) & 0xFFFF;\n    mu->fracPart[0][1] = fp & 0xFFFF;\n\n    fp = -sinY * scaleX * 0x10000;\n    mu->intPart[0][2] = ((u32)fp >> 0x10) & 0xFFFF;\n    mu->fracPart[0][2] = fp & 0xFFFF;\n\n    fp = ((sinX * sinY * cosZ) - (cosX * sinZ)) * scaleY * 0x10000;\n    mu->intPart[1][0] = ((u32)fp >> 0x10) & 0xFFFF;\n    mu->fracPart[1][0] = fp & 0xFFFF;\n\n    fp = ((sinX * sinY * sinZ) + (cosX * cosZ)) * scaleY * 0x10000;\n    mu->intPart[1][1] = ((u32)fp >> 0x10) & 0xFFFF;\n    mu->fracPart[1][1] = fp & 0xFFFF;\n\n    fp = sinX * cosY * scaleY * 0x10000;\n    mu->intPart[1][2] = ((u32)fp >> 0x10) & 0xFFFF;\n    mu->fracPart[1][2] = fp & 0xFFFF;\n\n    fp = ((cosX * sinY * cosZ) + (sinX * sinZ)) * scaleZ * 0x10000;\n    mu->intPart[2][0] = ((u32)fp >> 0x10) & 0xFFFF;\n    mu->fracPart[2][0] = fp & 0xFFFF;\n\n    fp = ((cosX * sinY * sinZ) - (sinX * cosZ)) * scaleZ * 0x10000;\n    mu->intPart[2][1] = ((u32)fp >> 0x10) & 0xFFFF;\n    mu->fracPart[2][1] = fp & 0xFFFF;\n\n    fp = cosX * cosY * scaleZ * 0x10000;\n    mu->intPart[2][2] = ((u32)fp >> 0x10) & 0xFFFF;\n    mu->fracPart[2][2] = fp & 0xFFFF;\n\n    fp = translateX * 0x10000;\n    mu->intPart[3][0] = ((u32)fp >> 0x10) & 0xFFFF;\n    mu->fracPart[3][0] = fp & 0xFFFF;\n\n    fp = translateY * 0x10000;\n    mu->intPart[3][1] = ((u32)fp >> 0x10) & 0xFFFF;\n    mu->fracPart[3][1] = fp & 0xFFFF;\n\n    fp = translateZ * 0x10000;\n    mu->intPart[3][2] = ((u32)fp >> 0x10) & 0xFFFF;\n    mu->fracPart[3][2] = fp & 0xFFFF;\n\n    mu->intPart[0][3] = mu->intPart[1][3] = mu->intPart[2][3] = 0;\n    mu->fracPart[0][3] = mu->fracPart[1][3] = mu->fracPart[2][3] = 0;\n    mu->intPart[3][3] = 1;\n    mu->fracPart[3][3] = 0;\n}",
       "prependC": "typedef unsigned char       u8;     /* unsigned  8-bit */\ntypedef unsigned short      u16;    /* unsigned 16-bit */\ntypedef unsigned long       u32;    /* unsigned 32-bit */\ntypedef unsigned long long  u64;    /* unsigned 64-bit */\ntypedef signed char         s8;     /* signed  8-bit */\ntypedef short               s16;    /* signed 16-bit */\ntypedef long                s32;    /* signed 32-bit */\ntypedef long long           s64;    /* signed 64-bit */\ntypedef float   f32;    /* single prec floating point */\ntypedef double  f64;    /* double prec floating point */\ntypedef struct xyz_t {\n    /* 0x0 */ f32 x;\n    /* 0x4 */ f32 y;\n    /* 0x8 */ f32 z;\n} xyz_t; // size = 0xC\n\ntypedef float MtxF_t[4][4];\ntypedef union {\n    MtxF_t mf;\n    struct {\n        float xx, yx, zx, wx, xy, yy, zy, wy, xz, yz, zz, wz, xw, yw, zw, ww;\n    };\n} MtxF; // size = 0x40\ntypedef long\tMtx_t[4][4];\n\ntypedef union {\n    Mtx_t\t\tm;\n    long long int\tforce_structure_alignment;\n} Mtx;",
@@ -448,7 +439,6 @@
     {
       "sym": "sAdo_Get_KokeruLabel",
       "features": [
-        "switch",
         "branch"
       ],
       "funcC": "s32 sAdo_Get_KokeruLabel(s32 type) {\n    u16 label = sAdo_Get_WalkLabel(type);\n    s32 ret;\n\n    switch (label) {\n        case 0x201:\n            ret = 0xe;\n            break;\n\n        case 0x206:\n            ret = 0x13;\n            break;\n\n        case 0x202:\n            ret = 0xf;\n            break;\n\n        case 0x203:\n            ret = 0x10;\n            break;\n\n        case 0x204:\n            ret = 0x11;\n            break;\n\n        case 0x205:\n            ret = 0x12;\n            break;\n\n        case 0x208:\n            ret = 0x156;\n            break;\n\n        case 0x209:\n            ret = 0x157;\n            break;\n\n        default:\n            ret = 15;\n            break;\n    }\n    return ret;\n}",

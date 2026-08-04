@@ -175,9 +175,10 @@ Host prerequisites (macOS; verified empirically):
 | `decomp-config.ts` | candidate compilation through the real `decomp.yaml` user path                                                                                                                  |
 | `cache.ts`         | content-keyed result cache (tmp-then-rename; m2c dirty-checkout fail-closed; versioned key)                                                                                     |
 
-The result schema is `@asmlift/bench-schema` (types-only workspace package) — the ONE definition
-this harness produces and the web Benchmark view consumes. The harness's own toolchain-free tests
-live in `test/` and run in CI.
+The result schema is [`@asmlift/bench-schema`](../../packages/bench-schema/README.md) — the ONE
+definition this harness produces and the web Benchmark view consumes, including the closed feature
+vocabulary every row's `features` is drawn from. The harness's own toolchain-free tests live in
+`test/` and run in CI.
 
 ## Extending
 
@@ -188,6 +189,9 @@ live in `test/` and run in CI.
   until they compile; then `pnpm bench run` + `pnpm bench:merge`.
 - **Add a toolchain**: an adapter in `toolchains.ts` + a `compile/<name>.ts` module for the real
   tier (or a typed `null` while unwired — see `compile/mwcc.ts`).
+- **Tag a function**: list only judgement tags (`memory`, `struct`, …) — the source- and
+  codegen-evidenced ones are derived per row. See
+  [`@asmlift/bench-schema`](../../packages/bench-schema/README.md).
 - Re-run and re-merge; the Benchmark view re-renders from the committed `results.json`.
 
 ## Committed artifacts

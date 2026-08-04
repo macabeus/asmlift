@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generatedAt": "2026-08-04T13:55:47.449Z",
+    "generatedAt": "2026-08-04T22:00:44.208Z",
     "toolchains": [
       "ido7.1",
       "agbcc",
@@ -14,7 +14,7 @@
       "real": 240
     },
     "asmlift": {
-      "commit": "e808060a480873fb34a52b5b88bae38815967046",
+      "commit": "50aa12e80bee71fe6f7f69b9b5f6e84bdef087bc",
       "dirty": false
     },
     "m2c": {
@@ -34,10 +34,10 @@
       "features": [
         "union",
         "array",
-        "shift",
         "cast",
         "pointer",
         "float",
+        "shift",
         "bitwise"
       ],
       "loc": 71,
@@ -1896,9 +1896,9 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "loop",
         "pointer",
-        "memory"
+        "memory",
+        "loop"
       ],
       "loc": 5,
       "refSource": "void mem_clear(u8* ptr, size_t len, u8 value) {\n    size_t i;\n\n    for (i = 0; i < len; i++) {*ptr++ = value;}\n}",
@@ -1971,9 +1971,9 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "loop",
         "pointer",
-        "branch"
+        "branch",
+        "loop"
       ],
       "loc": 11,
       "refSource": "s32 mem_cmp(u8* ptr1, u8* ptr2, size_t len) {\n    while (len != 0) {\n        if (*ptr1 != *ptr2) {\n            return 0;\n        }\n        ptr1++;\n        ptr2++;\n        len--;\n    }\n    return 1;\n}",
@@ -2041,9 +2041,9 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "loop",
         "pointer",
-        "memory"
+        "memory",
+        "loop"
       ],
       "loc": 8,
       "refSource": "void mem_copy(u8* dest, u8* src, size_t len) {\n    while (len != 0) {\n        *dest = *src;\n        src++;\n        dest++;\n        len--;\n    }\n}",
@@ -2362,8 +2362,8 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "switch",
         "branch",
+        "switch",
         "call",
         "jump-table"
       ],
@@ -2747,8 +2747,8 @@
       "features": [
         "float",
         "array",
-        "shift",
         "matrix",
+        "shift",
         "bitwise",
         "call"
       ],
@@ -3184,12 +3184,12 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "loop",
         "struct",
         "branch",
         "pointer",
         "memory",
-        "goto"
+        "goto",
+        "loop"
       ],
       "loc": 20,
       "refSource": "struct Unk_08014184 *CheckTileCollisionVertical(struct Unk_08014184 *arg0, u16 arg1, u16 arg2, u8 arg3) {\n    u32 var_r3;\n    struct Unk_08014184 var_r4;\n\n    for (var_r3 = gUnk_03004D80->unk2; var_r3 < gUnk_03004D80->unk0; var_r3++) {\n        if ((arg2 >= gUnk_03004D80->unk4[var_r3].unk2) && (gUnk_03004D80->unk4[var_r3].unk6 >= (arg2 - arg3))\n            && (arg1 < (gUnk_03004D80->unk4[var_r3].unk0 + 3)) && ((gUnk_03004D80->unk4[var_r3].unk0 - 3) < arg1)) {\n            var_r4.unk0 = gUnk_03004D80->unk4[var_r3].unk0 - 3;\n            var_r4.unk2 = gUnk_03004D80->unk4[var_r3].unk8;\n            *arg0 = var_r4;\n            goto exit;\n            return arg0;\n        }\n    }\n\n    var_r4.unk0 = -1;\n    *arg0 = var_r4;\nexit:\n    return arg0;\n}",
@@ -3258,10 +3258,10 @@
       "features": [
         "global",
         "struct",
-        "nested-loop",
-        "bitwise",
         "branch",
-        "loop"
+        "loop",
+        "nested-loop",
+        "bitwise"
       ],
       "loc": 40,
       "refSource": "u8 CheckWorldCompletion(u8 arg0) {\n    u32 var_r0;\n    u32 var_r2;\n    u8 var_sl;\n    u8 var_ip;\n    u8 var_r6;\n    u8 var_r8;\n    u8 v50;\n    if (arg0 < 4) {\n        if (((gUnk_03004670->unk8[arg0][7] & 0x80) != 0) && ((gUnk_03004670->unk8[arg0 + 1][0] & 0x7F) != 0x7F))\n            return 1;\n    } else if ((gUnk_03004670->unk8[5][7] & 0x80) != 0) {\n        var_r8 = 0;\n        var_ip = 0;\n        var_r6 = 0;\n        var_sl = 0;\n        for (var_r0 = 0; var_r0 < 5; var_r0++) {\n            for (var_r2 = 0; var_r2 < 7; var_r2++) {\n                if ((var_r2 == 3 || var_r2 == 5) && (gUnk_03004670->unk8[var_r0][var_r2] & 0x7F) == 0x64)\n                    var_r8 += 1;\n                else if ((var_r2 != 7) && ((gUnk_03004670->unk8[var_r0][var_r2] & 0x7F) == 0x1E))\n                    var_ip += 1;\n                if (gUnk_03004670->unk8[var_r0][var_r2] & 0x80)\n                    var_r6 += 1;\n            }\n        }\n        v50 = gUnk_03004670->unk8[5][0] & 0x7F;\n        if (v50 == 0x1E)\n            var_sl += 1;\n        if ((gUnk_03004670->unk8[5][1] & 0x7F) == 0x1E)\n            var_sl += 1;\n        if ((arg0 == 4) && (v50 != 0x7F) && (var_r6 == 0x23))\n            return 1;\n        if ((arg0 == 5) && ((gUnk_03004670->unk8[5][1] & 0x7F) != 0x7F) && ((var_ip + var_r8) > 0x18))\n            return 1;\n        if ((arg0 == 6) && ((gUnk_03004670->unk8[5][2] & 0x7F) != 0x7F) && ((var_ip + var_r8 + var_sl) == 0x25))\n            return 1;\n    }\n    return 0;\n}",
@@ -3328,11 +3328,11 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "switch",
         "table",
         "pointer",
-        "loop",
         "global",
+        "switch",
+        "loop",
         "mmio",
         "dma",
         "jump-table"
@@ -3405,8 +3405,8 @@
       "features": [
         "global",
         "array",
-        "loop",
         "branch",
+        "loop",
         "shift",
         "strength-reduce"
       ],
@@ -3422,11 +3422,11 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-KQmADS/c.c:1077: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-dxJPhn/c.c:1077: invalid operands to binary <<"
           },
           {
             "label": "unsigned/scopebase/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-3TOGIq/c.c:1078: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-LnHuti/c.c:1078: invalid operands to binary <<"
           }
         ],
         "symbolsUsed": [
@@ -3510,10 +3510,10 @@
       "language": "c",
       "features": [
         "array",
-        "nested-loop",
         "branch",
         "global",
         "loop",
+        "nested-loop",
         "bitwise"
       ],
       "loc": 85,
@@ -3588,10 +3588,10 @@
       "language": "c",
       "features": [
         "branch",
-        "bitwise",
         "cast",
         "memory",
         "shift",
+        "bitwise",
         "call"
       ],
       "loc": 12,
@@ -3684,9 +3684,9 @@
       "language": "c",
       "features": [
         "cast",
-        "bitwise",
         "memory",
         "pointer",
+        "bitwise",
         "call"
       ],
       "loc": 7,
@@ -3758,9 +3758,9 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "bitwise",
         "cast",
         "memory",
+        "bitwise",
         "call",
         "mmio",
         "dma"
@@ -4192,12 +4192,12 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "switch",
         "bitfield",
         "array",
-        "shift",
         "struct",
         "global",
+        "switch",
+        "shift",
         "comparison-tree"
       ],
       "loc": 64,
@@ -4328,7 +4328,7 @@
         "droppedCandidates": [
           {
             "label": "unsigned",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-hrp86d/c.c:1076: `gBgDataPtrs' undeclared (first use in this function)"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-rfcrue/c.c:1076: `gBgDataPtrs' undeclared (first use in this function)"
           }
         ],
         "symbolsUsed": [],
@@ -4828,12 +4828,12 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "switch",
         "array",
-        "nested-loop",
         "branch",
         "global",
+        "switch",
         "loop",
+        "nested-loop",
         "shift",
         "bitwise",
         "call",
@@ -4909,8 +4909,8 @@
       "language": "c",
       "features": [
         "global",
-        "bitwise",
         "branch",
+        "bitwise",
         "call",
         "mmio"
       ],
@@ -5008,10 +5008,10 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "bitwise",
         "pointer",
         "memory",
-        "shift"
+        "shift",
+        "bitwise"
       ],
       "loc": 3,
       "refSource": "u32 ReadUnalignedU16(u8 *ptr) {\n    return ptr[0] | (ptr[1] << 8);\n}",
@@ -5401,7 +5401,7 @@
         "droppedCandidates": [
           {
             "label": "unsigned",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-HpAE7O/c.c:1077: too many arguments to function `thunk_sub_080002A0'"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-DvXC55/c.c:1077: too many arguments to function `thunk_sub_080002A0'"
           }
         ],
         "symbolsUsed": [],
@@ -5480,10 +5480,10 @@
       "language": "c",
       "features": [
         "array",
-        "shift",
-        "loop",
         "global",
         "memory",
+        "loop",
+        "shift",
         "bitwise",
         "soft-div",
         "call",
@@ -5558,9 +5558,9 @@
       "language": "c",
       "features": [
         "memory",
-        "loop",
         "pointer",
-        "do-while"
+        "do-while",
+        "loop"
       ],
       "loc": 10,
       "refSource": "void StrCpy(u8 *dst, u8 *src) {\n    u32 c;\n    do {\n        c = *src;\n        *dst = c;\n        c = *src;\n        dst++;\n        src++;\n    } while (c != 0);\n}",
@@ -5727,9 +5727,9 @@
       "language": "c",
       "features": [
         "pointer",
-        "bitwise",
         "global",
         "shift",
+        "bitwise",
         "mmio"
       ],
       "loc": 10,
@@ -5823,8 +5823,8 @@
         "global",
         "struct",
         "array",
-        "switch",
         "arithmetic",
+        "switch",
         "shift",
         "bitwise",
         "jump-table"
@@ -5891,9 +5891,9 @@
       "language": "c",
       "features": [
         "struct",
-        "shift",
         "branch",
         "global",
+        "shift",
         "bitwise",
         "call"
       ],
@@ -5964,9 +5964,9 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "loop",
         "branch",
         "cast",
+        "loop",
         "call"
       ],
       "loc": 9,
@@ -6147,27 +6147,27 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-iPnum3/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-WzAeiY/c.c:1085: incompatible types in assignment"
           },
           {
             "label": "unsigned/coalesce-v2-v3/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Tz3k3Y/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-ZLfL26/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "unsigned/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-mrOzxb/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-QlyPhx/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "signed/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-dzUZTb/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-wlSArv/c.c:1085: incompatible types in assignment"
           },
           {
             "label": "signed/coalesce-v2-v3/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-mWM1fQ/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-L3WkvW/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "signed/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-cXnMvY/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-t6GV2d/c.c:1084: incompatible types in assignment"
           }
         ],
         "symbolsUsed": [
@@ -6258,10 +6258,10 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "switch",
-        "shift",
         "array",
         "global",
+        "switch",
+        "shift",
         "soft-div",
         "call",
         "mmio",
@@ -6663,11 +6663,11 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "shift",
-        "loop",
         "array",
         "global",
         "branch",
+        "loop",
+        "shift",
         "bitwise"
       ],
       "loc": 50,
@@ -6754,9 +6754,9 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "switch",
         "pointer",
         "branch",
+        "switch",
         "call",
         "jump-table"
       ],
@@ -6844,10 +6844,10 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "switch",
         "branch",
         "struct",
         "pointer",
+        "switch",
         "ternary",
         "bitwise",
         "comparison-tree"
@@ -7206,8 +7206,8 @@
       "language": "c",
       "features": [
         "pointer",
-        "loop",
-        "arithmetic"
+        "arithmetic",
+        "loop"
       ],
       "loc": 13,
       "refSource": "s16 func_80011460_12060(u8 *arg0) {\n    s32 sum = 0;\n    s16 i = 1;\n    u8 c = arg0[0];\n\n    while (c != 0 && i < 28) {\n        sum += i * c;\n        arg0++;\n        i++;\n        c = arg0[0];\n    }\n    return sum;\n}",
@@ -7878,10 +7878,10 @@
       "features": [
         "struct",
         "pointer",
-        "loop",
         "branch",
         "global",
-        "arithmetic"
+        "arithmetic",
+        "loop"
       ],
       "loc": 13,
       "refSource": "void func_80045350_45F50(void) {\n    s32 var_v1;\n\n    if (D_800A6D44_A7944[GwSystem.minigame_index - 1].minigameType == 6) {\n        return;\n    }\n    for (var_v1 = 0; var_v1 < 4; var_v1++) {\n        GW_PLAYER *temp_v0 = &GwPlayer[var_v1];\n\n        temp_v0->gameCoin = 0;\n        temp_v0->bonusCoin = 0;\n    }\n}",
@@ -7954,10 +7954,10 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "loop",
         "branch",
         "global",
         "arithmetic",
+        "loop",
         "bitwise"
       ],
       "loc": 14,
@@ -8767,11 +8767,11 @@
       "features": [
         "struct",
         "pointer",
-        "loop",
         "global",
         "arithmetic",
         "union",
-        "float"
+        "float",
+        "loop"
       ],
       "loc": 12,
       "refSource": "void func_800570A8_57CA8(s16 group, s16 member, s16 arg2) {\n    HuSprite *sprite = HuSprGrpData[group]->members[member];\n    s32 i;\n\n    sprite->unk_98 = D_800D0A50_D1650[arg2];\n    sprite->unk_FC.f = 1.0f;\n    for (i = 0; i < 0x10; i++) {\n        sprite->unk_9C[i] = 0xFFFF;\n        sprite->unk_BC[i] = 0;\n    }\n    sprite->unk_104 = 0;\n}",
@@ -8846,10 +8846,10 @@
       "language": "c",
       "features": [
         "pointer",
-        "loop",
         "branch",
         "global",
         "arithmetic",
+        "loop",
         "nested-loop",
         "strength-reduce"
       ],
@@ -9525,12 +9525,12 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "sizeof",
         "pointer",
         "struct",
-        "bitwise",
         "fnptr",
         "global",
+        "sizeof",
+        "bitwise",
         "call"
       ],
       "loc": 24,
@@ -9606,9 +9606,9 @@
       "features": [
         "struct",
         "pointer",
-        "loop",
         "arithmetic",
         "do-while",
+        "loop",
         "ternary",
         "bitwise"
       ],
@@ -9687,10 +9687,10 @@
       "features": [
         "struct",
         "pointer",
-        "loop",
         "branch",
         "arithmetic",
-        "do-while"
+        "do-while",
+        "loop"
       ],
       "loc": 15,
       "refSource": "u32 HuMemUsedMemorySizeGet(HeapNode *heap) {\n    HeapNode *cur_heap;\n    u32 total_size;\n\n    cur_heap = heap;\n    total_size = 0;\n    do {\n        if (cur_heap->active == TRUE) {\n            total_size += cur_heap->size;\n        }\n        cur_heap = cur_heap->next;\n    } while (cur_heap != heap);\n\n    return total_size;\n}",
@@ -9767,8 +9767,8 @@
       "features": [
         "struct",
         "pointer",
-        "loop",
         "global",
+        "loop",
         "call"
       ],
       "loc": 35,
@@ -10013,11 +10013,11 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "switch",
-        "ternary",
         "struct",
         "field",
         "array",
+        "switch",
+        "ternary",
         "call",
         "comparison-tree"
       ],
@@ -10090,9 +10090,9 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "loop",
         "pointer",
-        "array"
+        "array",
+        "loop"
       ],
       "loc": 7,
       "refSource": "u32 CalcByteArraySum(const u8 *data, u32 length)\n{\n    u32 sum, i;\n    for (sum = 0, i = 0; i < length; i++)\n        sum += data[i];\n    return sum;\n}",
@@ -10161,11 +10161,11 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "bitwise",
-        "loop",
         "branch",
+        "loop",
         "nested-loop",
-        "shift"
+        "shift",
+        "bitwise"
       ],
       "loc": 18,
       "refSource": "u16 CalcCRC16(const u8 *data, s32 length)\n{\n    u16 i, j;\n    u16 crc = 0x1121;\n\n    for (i = 0; i < length; i++)\n    {\n        crc ^= data[i];\n        for (j = 0; j < 8; j++)\n        {\n            if (crc & 1)\n                crc = (crc >> 1) ^ 0x8408;\n            else\n                crc >>= 1;\n        }\n    }\n    return ~crc;\n}",
@@ -10246,12 +10246,12 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "loop",
         "array",
-        "bitwise",
         "cast",
         "table",
-        "shift"
+        "loop",
+        "shift",
+        "bitwise"
       ],
       "loc": 14,
       "refSource": "u16 CalcCRC16WithTable(const u8 *data, u32 length)\n{\n    u16 i;\n    u16 crc = 0x1121;\n    u8 byte;\n\n    for (i = 0; i < length; i++)\n    {\n        byte = crc >> 8;\n        crc ^= data[i];\n        crc = byte ^ sCrc16Table[(u8)crc];\n    }\n    return ~crc;\n}",
@@ -10332,10 +10332,10 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "shift",
-        "bitwise",
         "global",
         "table",
+        "shift",
+        "bitwise",
         "soft-div",
         "call"
       ],
@@ -10432,10 +10432,10 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "do-while",
-        "loop",
         "array",
         "struct",
+        "do-while",
+        "loop",
         "nested-loop",
         "call"
       ],
@@ -10584,10 +10584,10 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "bitwise",
-        "loop",
         "branch",
-        "shift"
+        "loop",
+        "shift",
+        "bitwise"
       ],
       "loc": 13,
       "refSource": "int CountTrailingZeroBits(u32 value)\n{\n    u8 i;\n\n    for (i = 0; i < 32; i++)\n    {\n        if ((value & 1) == 0)\n            value >>= 1;\n        else\n            return i;\n    }\n    return 0;\n}",
@@ -10674,8 +10674,8 @@
       "features": [
         "fnptr",
         "branch",
-        "bitwise",
         "global",
+        "bitwise",
         "call"
       ],
       "loc": 29,
@@ -10763,9 +10763,9 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "shift",
         "global",
-        "macro"
+        "macro",
+        "shift"
       ],
       "loc": 5,
       "refSource": "static u16 FeebasRandom(void)\n{\n    sFeebasRngValue = ISO_RANDOMIZE2(sFeebasRngValue);\n    return sFeebasRngValue >> 16;\n}",
@@ -10843,10 +10843,10 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "switch",
         "branch",
         "global",
         "struct",
+        "switch",
         "bitwise",
         "comparison-tree"
       ],
@@ -10939,10 +10939,10 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "switch",
-        "do-while",
         "array",
         "global",
+        "switch",
+        "do-while",
         "loop",
         "bitwise",
         "soft-div",
@@ -11104,10 +11104,10 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "loop",
         "branch",
         "pointer",
-        "array"
+        "array",
+        "loop"
       ],
       "loc": 10,
       "refSource": "bool8 IsStringLengthAtLeast(const u8 *str, s32 n)\n{\n    u8 i;\n\n    for (i = 0; i < n; i++)\n        if (str[i] && str[i] != EOS)\n            return TRUE;\n\n    return FALSE;\n}",
@@ -11191,8 +11191,8 @@
         "memory",
         "pointer",
         "array",
-        "bitwise",
-        "shift"
+        "shift",
+        "bitwise"
       ],
       "loc": 4,
       "refSource": "void LoadWordFromTwoHalfwords(u16 *h, u32 *w)\n{\n    *w = h[0] | (s16)h[1] << 16;\n}",
@@ -11762,10 +11762,10 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "switch",
         "branch",
         "arithmetic",
         "global",
+        "switch",
         "soft-div",
         "call",
         "comparison-tree"
@@ -12105,10 +12105,10 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "switch",
         "union",
         "struct",
         "memory",
+        "switch",
         "loop",
         "call",
         "jump-table"
@@ -12276,9 +12276,9 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "bitwise",
         "branch",
         "table",
+        "bitwise",
         "soft-div",
         "call"
       ],
@@ -12530,9 +12530,9 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "loop",
         "pointer",
         "branch",
+        "loop",
         "call"
       ],
       "loc": 7,
@@ -12607,10 +12607,10 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "loop",
         "branch",
         "pointer",
-        "arithmetic"
+        "arithmetic",
+        "loop"
       ],
       "loc": 12,
       "refSource": "s32 StringCompare(const u8 *str1, const u8 *str2)\n{\n    while (*str1 == *str2)\n    {\n        if (*str1 == EOS)\n            return 0;\n        str1++;\n        str2++;\n    }\n\n    return *str1 - *str2;\n}",
@@ -12689,10 +12689,10 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "loop",
         "branch",
         "pointer",
-        "arithmetic"
+        "arithmetic",
+        "loop"
       ],
       "loc": 14,
       "refSource": "s32 StringCompareN(const u8 *str1, const u8 *str2, u32 n)\n{\n    while (*str1 == *str2)\n    {\n        if (*str1 == EOS)\n            return 0;\n        str1++;\n        str2++;\n        if (--n == 0)\n            return 0;\n    }\n\n    return *str1 - *str2;\n}",
@@ -12765,9 +12765,9 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "loop",
         "pointer",
-        "branch"
+        "branch",
+        "loop"
       ],
       "loc": 12,
       "refSource": "u8 *StringCopy(u8 *dest, const u8 *src)\n{\n    while (*src != EOS)\n    {\n        *dest = *src;\n        dest++;\n        src++;\n    }\n\n    *dest = EOS;\n    return dest;\n}",
@@ -12840,9 +12840,9 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "loop",
         "pointer",
         "array",
+        "loop",
         "bitwise"
       ],
       "loc": 9,
@@ -12924,10 +12924,10 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "loop",
         "pointer",
         "array",
-        "branch"
+        "branch",
+        "loop"
       ],
       "loc": 9,
       "refSource": "u16 StringLength(const u8 *str)\n{\n    u16 length = 0;\n\n    while (str[length] != EOS)\n        length++;\n\n    return length;\n}",
@@ -13000,11 +13000,11 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "loop",
         "branch",
         "array",
         "struct",
-        "table"
+        "table",
+        "loop"
       ],
       "loc": 11,
       "refSource": "static u8 TranslateBigMonSizeTableIndex(u16 a)\n{\n    u8 i;\n\n    for (i = 1; i < 15; i++)\n    {\n        if (a < sBigMonSizeTable[i].unk4)\n            return i - 1;\n    }\n    return i;\n}",
@@ -13087,8 +13087,8 @@
         "branch",
         "global",
         "struct",
-        "bitwise",
         "bitfield",
+        "bitwise",
         "call"
       ],
       "loc": 105,
@@ -13389,8 +13389,8 @@
       "language": "c",
       "features": [
         "loop",
-        "bitwise",
         "shift",
+        "bitwise",
         "call",
         "strength-reduce"
       ],
@@ -13481,8 +13481,8 @@
         "struct",
         "field",
         "pointer",
-        "loop",
-        "branch"
+        "branch",
+        "loop"
       ],
       "loc": 26,
       "refSource": "void EwramFree(void *p)\n{\n    struct EwramNode *node, *slow, *fast, *tmp;\n\n    if (p && ewram_end != p) {\n        node = p - offsetof(struct EwramNode, space);\n\n        for (fast = slow = (struct EwramNode *)gEwramHeap; node != fast; fast = fast->next)\n            slow = fast;\n\n        if (node->state < 0)\n            node->state = -node->state;\n\n        if ((void *)slow + slow->state == node && slow->state > 0) {\n            slow->next = fast->next;\n            slow->state += node->state;\n            node = slow;\n        }\n\n        tmp = (void *)node + node->state;\n        if (tmp == node->next && tmp->state > 0) {\n            node->state += tmp->state;\n            node->next = tmp->next;\n        }\n    }\n}",
@@ -13641,11 +13641,11 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "loop",
         "struct",
         "field",
         "pointer",
         "branch",
+        "loop",
         "sizeof",
         "strength-reduce"
       ],
@@ -13715,12 +13715,12 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "loop",
-        "bitwise",
         "array",
         "branch",
         "global",
+        "loop",
         "shift",
+        "bitwise",
         "call",
         "mmio"
       ],
@@ -13807,11 +13807,11 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "loop",
         "pointer",
         "cast",
-        "sizeof",
-        "struct"
+        "struct",
+        "loop",
+        "sizeof"
       ],
       "loc": 15,
       "refSource": "u32 GetSaveSectorChecksum(SaveSectorData *sector)\n{\n    u8 *ptr = (u8 *)sector;\n\n    u32 checkSum = 0;\n    u32 i = 0;\n\n    u32 size = (sizeof(SaveSectorData) - sizeof(sector->checksum));\n\n    for (; i < size; i += sizeof(u32)) {\n        checkSum += *((u32 *)(ptr + i));\n    }\n\n    return checkSum;\n}",
@@ -13892,11 +13892,11 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "loop",
         "array",
-        "bitwise",
         "branch",
-        "shift"
+        "loop",
+        "shift",
+        "bitwise"
       ],
       "loc": 15,
       "refSource": "void numToASCII(u8 digits[5], u16 number)\n{\n    u8 i;\n\n    for (i = 0; i < 4; number <<= 4, i++) {\n        u16 value = ((number & 0xF000) >> 12);\n        if (value > 9) {\n            digits[i] = value + 87;\n        } else {\n            digits[i] = value + '0';\n        }\n    }\n\n    digits[i] = 0;\n}",
@@ -14056,10 +14056,10 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "switch",
         "array",
-        "loop",
         "memory",
+        "switch",
+        "loop",
         "nested-loop",
         "call",
         "comparison-tree"
@@ -14136,13 +14136,13 @@
       "features": [
         "global",
         "struct",
+        "union",
+        "bitfield",
+        "field",
         "loop",
         "nested-loop",
         "sizeof",
         "bitwise",
-        "union",
-        "bitfield",
-        "field",
         "call",
         "mmio",
         "dma"
@@ -14357,11 +14357,11 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "loop",
         "pointer",
         "global",
-        "bitwise",
         "cast",
+        "loop",
+        "bitwise",
         "mmio",
         "strength-reduce"
       ],
@@ -14436,8 +14436,8 @@
       "language": "c",
       "features": [
         "global",
-        "bitwise",
         "shift",
+        "bitwise",
         "mmio",
         "dma",
         "strength-reduce"
@@ -14507,11 +14507,11 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "loop",
         "pointer",
         "global",
-        "bitwise",
         "arithmetic",
+        "loop",
+        "bitwise",
         "mmio",
         "strength-reduce"
       ],
@@ -14873,9 +14873,9 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "bitwise",
         "branch",
-        "shift"
+        "shift",
+        "bitwise"
       ],
       "loc": 14,
       "refSource": "s16 SA2_LABEL(sub_808558C)(u16 angleA, u16 angleB, u8 numDecimalBits)\n{\n    u32 c1 = (1 << numDecimalBits);\n    u16 c2 = c1 - 1;\n\n    angleB -= angleA;\n    angleB &= c2;\n\n    if (angleB <= (c1 / 2)) {\n        return angleB;\n    } else {\n        return (angleB - c1);\n    }\n}",
@@ -15048,11 +15048,11 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "loop",
         "arithmetic",
         "int64",
-        "shift",
         "do-while",
+        "loop",
+        "shift",
         "call"
       ],
       "loc": 9,
@@ -15845,10 +15845,10 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "switch",
-        "shift",
         "global",
+        "switch",
         "loop",
+        "shift",
         "bitwise",
         "mmio",
         "jump-table"
@@ -15914,10 +15914,10 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "bitwise",
-        "ternary",
         "struct",
         "field",
+        "ternary",
+        "bitwise",
         "call"
       ],
       "loc": 65,
@@ -15991,10 +15991,10 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "bitwise",
-        "ternary",
         "struct",
         "field",
+        "ternary",
+        "bitwise",
         "call"
       ],
       "loc": 30,
@@ -16068,10 +16068,10 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "switch",
         "struct",
         "field",
         "branch",
+        "switch",
         "bitwise",
         "call",
         "comparison-tree"
@@ -16165,11 +16165,11 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "switch",
-        "shift",
         "struct",
         "field",
+        "switch",
         "loop",
+        "shift",
         "bitwise",
         "soft-div",
         "call",
@@ -16329,10 +16329,10 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "loop",
         "pointer",
         "cast",
-        "branch"
+        "branch",
+        "loop"
       ],
       "loc": 9,
       "refSource": "u32 VerifyFlashSector_Core(u8 *src, u8 *tgt, u32 size)\n{\n    while (size-- != 0) {\n        if (*tgt++ != *src++)\n            return (uintptr_t)(tgt - 1);\n    }\n\n    return 0;\n}",
@@ -16417,10 +16417,10 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "loop",
         "global",
         "array",
-        "branch"
+        "branch",
+        "loop"
       ],
       "loc": 14,
       "refSource": "u16 VramGetTotalAllocatedTiles(void)\n{\n    u16 i;\n    u16 count = 0;\n\n    for (i = 0; i < gVramHeapMaxTileSlots / VRAM_TILE_SLOTS_PER_SEGMENT; ++i) {\n        if (gVramHeapState[i]) {\n            count += gVramHeapState[i];\n            i = gVramHeapState[i] - 1 + i; // next slot to check, -1 because of ++i\n        }\n    }\n    return count * VRAM_TILE_SLOTS_PER_SEGMENT;\n}\n",
@@ -16515,11 +16515,11 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "loop",
         "global",
         "array",
         "branch",
         "pointer",
+        "loop",
         "nested-loop"
       ],
       "loc": 27,
@@ -16600,9 +16600,9 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "loop",
         "global",
-        "array"
+        "array",
+        "loop"
       ],
       "loc": 8,
       "refSource": "void func_80014440_15040(void) {\n    s32 i;\n\n    gDefaultFontPalette[0] = 0;\n    for (i = 1; i < 256; i++) {\n        gDefaultFontPalette[i] = 0xFFFF;\n    }\n}",
@@ -16698,9 +16698,9 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "loop",
         "branch",
-        "do-while"
+        "do-while",
+        "loop"
       ],
       "loc": 15,
       "refSource": "void func_800154A8_160A8(s8 *arg0, u16 arg1) {\n    s32 end;\n    s32 ptr;\n\n    if (arg1 == 0) {\n        return;\n    }\n\n    ptr = (s32)arg0;\n    end = arg1 + ptr;\n    do {\n        *(s8 *)ptr = 0;\n        ptr++;\n    } while (ptr < end);\n}",
@@ -16780,9 +16780,9 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "bitwise",
         "struct",
         "field",
+        "bitwise",
         "call"
       ],
       "loc": 16,
@@ -16945,11 +16945,11 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "loop",
         "struct",
         "field",
         "global",
         "branch",
+        "loop",
         "nested-loop",
         "call"
       ],
@@ -17115,9 +17115,9 @@
       "features": [
         "struct",
         "pointer",
-        "loop",
         "branch",
         "union",
+        "loop",
         "strength-reduce"
       ],
       "loc": 114,
@@ -17506,8 +17506,8 @@
       "language": "c",
       "features": [
         "struct",
-        "bitwise",
         "branch",
+        "bitwise",
         "call"
       ],
       "loc": 32,
@@ -17589,9 +17589,9 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "switch",
         "struct",
         "branch",
+        "switch",
         "call",
         "comparison-tree"
       ],
@@ -17733,11 +17733,11 @@
       "language": "c",
       "features": [
         "fixed-point",
-        "bitwise",
         "branch",
         "compare",
         "goto",
-        "shift"
+        "shift",
+        "bitwise"
       ],
       "loc": 52,
       "refSource": "s16 func_8002ADB4_2B9B4(s16 arg0, s16 arg1) {\n    s16 target;\n    s16 current;\n    s32 diff;\n    s16 absDiff;\n    s16 direction;\n\n    target = arg0;\n    current = arg1;\n\n    if (arg0 == arg1) {\n        goto done;\n    }\n\n    diff = arg0 - arg1;\n    diff = ABS(diff);\n\n    if ((s16)diff >= 0x1001) {\n        if (arg1 < arg0) {\n            current = arg1 + 0x2000;\n        } else {\n            target = arg0 + 0x2000;\n        }\n    }\n\n    arg0 = target;\n    arg1 = current;\n\n    diff = arg0 - arg1;\n    absDiff = ABS(diff);\n\n    if (absDiff >= 0xAAB) {\n        current += 0x1000;\n        goto done;\n    }\n\n    if (arg1 < arg0) {\n        direction = 1;\n    } else {\n        direction = -1;\n    }\n\n    if (absDiff >= 0x80) {\n        current += direction << 7;\n        goto done;\n    }\n\n    current = (current + absDiff * direction) & 0x1FFF;\n\ndone:\n    return current;\n}",
@@ -17818,9 +17818,9 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "bitwise",
         "branch",
-        "fixed-point"
+        "fixed-point",
+        "bitwise"
       ],
       "loc": 13,
       "refSource": "s16 func_8002B4B8_2C0B8(u16 arg0, u16 arg1) {\n    s16 diff;\n\n    arg0 &= 0x1FFF;\n    arg1 &= 0x1FFF;\n    diff = (arg1 - arg0) & 0x1FFF;\n\n    if (diff >= 0x1001) {\n        diff |= 0xE000;\n    }\n\n    return diff;\n}",
@@ -17907,9 +17907,9 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "loop",
         "struct",
         "array",
+        "loop",
         "call"
       ],
       "loc": 7,
@@ -18457,11 +18457,11 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "do-while",
         "int64",
-        "goto",
         "memory",
         "struct",
+        "goto",
+        "do-while",
         "loop",
         "bitwise",
         "call",
@@ -18535,9 +18535,9 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "shift",
         "pointer",
         "array",
+        "shift",
         "call"
       ],
       "loc": 125,
@@ -18697,10 +18697,10 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "goto",
         "struct",
         "pointer",
         "branch",
+        "goto",
         "bitwise",
         "call"
       ],
@@ -18767,10 +18767,10 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "switch",
         "struct",
         "pointer",
         "branch",
+        "switch",
         "bitwise",
         "call",
         "comparison-tree"
@@ -18843,10 +18843,10 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "switch",
         "struct",
         "pointer",
         "branch",
+        "switch",
         "bitwise",
         "call",
         "jump-table"
@@ -19145,11 +19145,11 @@
       "language": "c",
       "features": [
         "struct",
-        "bitwise",
         "branch",
+        "union",
         "ternary",
         "shift",
-        "union",
+        "bitwise",
         "call",
         "hw-div"
       ],
@@ -19678,9 +19678,9 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "loop",
         "struct",
         "array",
+        "loop",
         "call",
         "strength-reduce"
       ],
@@ -20646,7 +20646,6 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "cast",
         "narrow",
         "arithmetic"
       ],
@@ -20718,7 +20717,6 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "cast",
         "narrow",
         "arithmetic"
       ],
@@ -20791,7 +20789,6 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "cast",
         "narrow",
         "arithmetic"
       ],
@@ -20876,7 +20873,6 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "cast",
         "narrow",
         "arithmetic"
       ],
@@ -21225,10 +21221,9 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "loop",
-        "for",
         "memory",
-        "array"
+        "array",
+        "loop"
       ],
       "loc": 1,
       "refSource": "int arraysum(int *a,int n){ int s=0,i; for(i=0;i<n;i++)s+=a[i]; return s; }",
@@ -21310,10 +21305,9 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "loop",
-        "for",
         "memory",
-        "array"
+        "array",
+        "loop"
       ],
       "loc": 1,
       "refSource": "int arraysum(int *a,int n){ int s=0,i; for(i=0;i<n;i++)s+=a[i]; return s; }",
@@ -21396,10 +21390,9 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "loop",
-        "for",
         "memory",
-        "array"
+        "array",
+        "loop"
       ],
       "loc": 1,
       "refSource": "int arraysum(int *a,int n){ int s=0,i; for(i=0;i<n;i++)s+=a[i]; return s; }",
@@ -21465,10 +21458,9 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "loop",
-        "for",
         "memory",
-        "array"
+        "array",
+        "loop"
       ],
       "loc": 1,
       "refSource": "int arraysum(int *a,int n){ int s=0,i; for(i=0;i<n;i++)s+=a[i]; return s; }",
@@ -21867,7 +21859,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "signed-div-pow2"
+        "div-pow2",
+        "signed"
       ],
       "loc": 1,
       "refSource": "int avg2(int a,int b){ return (a+b)/2; }",
@@ -21938,7 +21931,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "signed-div-pow2"
+        "div-pow2",
+        "signed"
       ],
       "loc": 1,
       "refSource": "int avg2(int a,int b){ return (a+b)/2; }",
@@ -22010,7 +22004,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "signed-div-pow2"
+        "div-pow2",
+        "signed"
       ],
       "loc": 1,
       "refSource": "int avg2(int a,int b){ return (a+b)/2; }",
@@ -22082,7 +22077,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "signed-div-pow2"
+        "div-pow2",
+        "signed"
       ],
       "loc": 1,
       "refSource": "int avg2(int a,int b){ return (a+b)/2; }",
@@ -22448,9 +22444,9 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "bitwise",
+        "mask",
         "shift",
-        "mask"
+        "bitwise"
       ],
       "loc": 1,
       "refSource": "int bittest(int x,int n){ return (x>>n)&1; }",
@@ -22520,9 +22516,9 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "bitwise",
+        "mask",
         "shift",
-        "mask"
+        "bitwise"
       ],
       "loc": 1,
       "refSource": "int bittest(int x,int n){ return (x>>n)&1; }",
@@ -22593,9 +22589,9 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "bitwise",
+        "mask",
         "shift",
-        "mask"
+        "bitwise"
       ],
       "loc": 1,
       "refSource": "int bittest(int x,int n){ return (x>>n)&1; }",
@@ -22666,9 +22662,9 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "bitwise",
+        "mask",
         "shift",
-        "mask"
+        "bitwise"
       ],
       "loc": 1,
       "refSource": "int bittest(int x,int n){ return (x>>n)&1; }",
@@ -23305,10 +23301,9 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "loop",
-        "for",
         "break",
-        "memory"
+        "memory",
+        "loop"
       ],
       "loc": 1,
       "refSource": "int breakloop(int *a,int n){ int i; for(i=0;i<n;i++)if(a[i]<0)break; return i; }",
@@ -23378,10 +23373,9 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "loop",
-        "for",
         "break",
-        "memory"
+        "memory",
+        "loop"
       ],
       "loc": 1,
       "refSource": "int breakloop(int *a,int n){ int i; for(i=0;i<n;i++)if(a[i]<0)break; return i; }",
@@ -23464,10 +23458,9 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "loop",
-        "for",
         "break",
-        "memory"
+        "memory",
+        "loop"
       ],
       "loc": 1,
       "refSource": "int breakloop(int *a,int n){ int i; for(i=0;i<n;i++)if(a[i]<0)break; return i; }",
@@ -23550,10 +23543,9 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "loop",
-        "for",
         "break",
-        "memory"
+        "memory",
+        "loop"
       ],
       "loc": 1,
       "refSource": "int breakloop(int *a,int n){ int i; for(i=0;i<n;i++)if(a[i]<0)break; return i; }",
@@ -23920,8 +23912,7 @@
       "language": "c",
       "features": [
         "memory",
-        "array",
-        "byte"
+        "array"
       ],
       "loc": 1,
       "refSource": "u8 byteidx(u8 *p,int i){ return p[i]; }",
@@ -23988,8 +23979,7 @@
       "language": "c",
       "features": [
         "memory",
-        "array",
-        "byte"
+        "array"
       ],
       "loc": 1,
       "refSource": "u8 byteidx(u8 *p,int i){ return p[i]; }",
@@ -24057,8 +24047,7 @@
       "language": "c",
       "features": [
         "memory",
-        "array",
-        "byte"
+        "array"
       ],
       "loc": 1,
       "refSource": "u8 byteidx(u8 *p,int i){ return p[i]; }",
@@ -24126,8 +24115,7 @@
       "language": "c",
       "features": [
         "memory",
-        "array",
-        "byte"
+        "array"
       ],
       "loc": 1,
       "refSource": "u8 byteidx(u8 *p,int i){ return p[i]; }",
@@ -24938,8 +24926,7 @@
       "language": "c",
       "features": [
         "compare",
-        "branch",
-        "multi-if"
+        "branch"
       ],
       "loc": 1,
       "refSource": "int clampr(int x,int lo,int hi){ if(x<lo)x=lo; if(x>hi)x=hi; return x; }",
@@ -25010,8 +24997,7 @@
       "language": "c",
       "features": [
         "compare",
-        "branch",
-        "multi-if"
+        "branch"
       ],
       "loc": 1,
       "refSource": "int clampr(int x,int lo,int hi){ if(x<lo)x=lo; if(x>hi)x=hi; return x; }",
@@ -25078,8 +25064,7 @@
       "language": "c",
       "features": [
         "compare",
-        "branch",
-        "multi-if"
+        "branch"
       ],
       "loc": 1,
       "refSource": "int clampr(int x,int lo,int hi){ if(x<lo)x=lo; if(x>hi)x=hi; return x; }",
@@ -25158,8 +25143,7 @@
       "language": "c",
       "features": [
         "compare",
-        "branch",
-        "multi-if"
+        "branch"
       ],
       "loc": 1,
       "refSource": "int clampr(int x,int lo,int hi){ if(x<lo)x=lo; if(x>hi)x=hi; return x; }",
@@ -25231,8 +25215,7 @@
       "language": "c",
       "features": [
         "compare",
-        "branch",
-        "multi-if"
+        "branch"
       ],
       "loc": 1,
       "refSource": "int clampu8(int x){ if(x<0)return 0; if(x>255)return 255; return x; }",
@@ -25303,8 +25286,7 @@
       "language": "c",
       "features": [
         "compare",
-        "branch",
-        "multi-if"
+        "branch"
       ],
       "loc": 1,
       "refSource": "int clampu8(int x){ if(x<0)return 0; if(x>255)return 255; return x; }",
@@ -25388,8 +25370,7 @@
       "language": "c",
       "features": [
         "compare",
-        "branch",
-        "multi-if"
+        "branch"
       ],
       "loc": 1,
       "refSource": "int clampu8(int x){ if(x<0)return 0; if(x>255)return 255; return x; }",
@@ -25461,8 +25442,7 @@
       "language": "c",
       "features": [
         "compare",
-        "branch",
-        "multi-if"
+        "branch"
       ],
       "loc": 1,
       "refSource": "int clampu8(int x){ if(x<0)return 0; if(x>255)return 255; return x; }",
@@ -25533,8 +25513,8 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "bitwise",
-        "shift"
+        "shift",
+        "bitwise"
       ],
       "loc": 1,
       "refSource": "int clearbit(int x,int n){ return x & ~(1<<n); }",
@@ -25604,8 +25584,8 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "bitwise",
-        "shift"
+        "shift",
+        "bitwise"
       ],
       "loc": 1,
       "refSource": "int clearbit(int x,int n){ return x & ~(1<<n); }",
@@ -25676,8 +25656,8 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "bitwise",
-        "shift"
+        "shift",
+        "bitwise"
       ],
       "loc": 1,
       "refSource": "int clearbit(int x,int n){ return x & ~(1<<n); }",
@@ -25748,8 +25728,8 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "bitwise",
-        "shift"
+        "shift",
+        "bitwise"
       ],
       "loc": 1,
       "refSource": "int clearbit(int x,int n){ return x & ~(1<<n); }",
@@ -25820,10 +25800,9 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "loop",
-        "for",
         "continue",
-        "memory"
+        "memory",
+        "loop"
       ],
       "loc": 1,
       "refSource": "int continueloop(int *a,int n){ int s=0,i; for(i=0;i<n;i++){if(a[i]<0)continue;s+=a[i];} return s; }",
@@ -25905,10 +25884,9 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "loop",
-        "for",
         "continue",
-        "memory"
+        "memory",
+        "loop"
       ],
       "loc": 1,
       "refSource": "int continueloop(int *a,int n){ int s=0,i; for(i=0;i<n;i++){if(a[i]<0)continue;s+=a[i];} return s; }",
@@ -25986,10 +25964,9 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "loop",
-        "for",
         "continue",
-        "memory"
+        "memory",
+        "loop"
       ],
       "loc": 1,
       "refSource": "int continueloop(int *a,int n){ int s=0,i; for(i=0;i<n;i++){if(a[i]<0)continue;s+=a[i];} return s; }",
@@ -26055,10 +26032,9 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "loop",
-        "for",
         "continue",
-        "memory"
+        "memory",
+        "loop"
       ],
       "loc": 1,
       "refSource": "int continueloop(int *a,int n){ int s=0,i; for(i=0;i<n;i++){if(a[i]<0)continue;s+=a[i];} return s; }",
@@ -26141,8 +26117,7 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "loop",
-        "while"
+        "loop"
       ],
       "loc": 1,
       "refSource": "int countdown(int n){ int c=0; while(n>0){c++;n--;} return c; }",
@@ -26212,8 +26187,7 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "loop",
-        "while"
+        "loop"
       ],
       "loc": 1,
       "refSource": "int countdown(int n){ int c=0; while(n>0){c++;n--;} return c; }",
@@ -26284,8 +26258,7 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "loop",
-        "while"
+        "loop"
       ],
       "loc": 1,
       "refSource": "int countdown(int n){ int c=0; while(n>0){c++;n--;} return c; }",
@@ -26356,8 +26329,7 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "loop",
-        "while"
+        "loop"
       ],
       "loc": 1,
       "refSource": "int countdown(int n){ int c=0; while(n>0){c++;n--;} return c; }",
@@ -26440,9 +26412,7 @@
       "compiler": "mwcc",
       "language": "c++",
       "features": [
-        "c++",
-        "method",
-        "mutate"
+        "method"
       ],
       "loc": 2,
       "refSource": "struct Counter{int n;void inc(){ n++; }};\nextern \"C\" void Counter__inc(Counter*c){ c->inc(); }",
@@ -26516,9 +26486,9 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "loop",
         "memory",
-        "branch"
+        "branch",
+        "loop"
       ],
       "loc": 1,
       "refSource": "int countpos(int *a,int n){ int c=0,i; for(i=0;i<n;i++)if(a[i]>0)c++; return c; }",
@@ -26600,9 +26570,9 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "loop",
         "memory",
-        "branch"
+        "branch",
+        "loop"
       ],
       "loc": 1,
       "refSource": "int countpos(int *a,int n){ int c=0,i; for(i=0;i<n;i++)if(a[i]>0)c++; return c; }",
@@ -26685,9 +26655,9 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "loop",
         "memory",
-        "branch"
+        "branch",
+        "loop"
       ],
       "loc": 1,
       "refSource": "int countpos(int *a,int n){ int c=0,i; for(i=0;i<n;i++)if(a[i]>0)c++; return c; }",
@@ -26753,9 +26723,9 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "loop",
         "memory",
-        "branch"
+        "branch",
+        "loop"
       ],
       "loc": 1,
       "refSource": "int countpos(int *a,int n){ int c=0,i; for(i=0;i<n;i++)if(a[i]>0)c++; return c; }",
@@ -27411,7 +27381,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "signed-div-pow2"
+        "div-pow2",
+        "signed"
       ],
       "loc": 1,
       "refSource": "int div2(int a){ return a/2; }",
@@ -27482,7 +27453,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "signed-div-pow2"
+        "div-pow2",
+        "signed"
       ],
       "loc": 1,
       "refSource": "int div2(int a){ return a/2; }",
@@ -27554,7 +27526,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "signed-div-pow2"
+        "div-pow2",
+        "signed"
       ],
       "loc": 1,
       "refSource": "int div2(int a){ return a/2; }",
@@ -27626,7 +27599,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "signed-div-pow2"
+        "div-pow2",
+        "signed"
       ],
       "loc": 1,
       "refSource": "int div2(int a){ return a/2; }",
@@ -27710,7 +27684,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "signed-div-const",
+        "div-const",
+        "signed",
         "soft-div",
         "call"
       ],
@@ -27783,7 +27758,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "signed-div-const",
+        "div-const",
+        "signed",
         "magic-div"
       ],
       "loc": 1,
@@ -27856,7 +27832,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "signed-div-const",
+        "div-const",
+        "signed",
         "hw-div"
       ],
       "loc": 1,
@@ -27929,7 +27906,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "signed-div-const",
+        "div-const",
+        "signed",
         "magic-div"
       ],
       "loc": 1,
@@ -28002,7 +27980,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "signed-div-const",
+        "div-const",
+        "signed",
         "soft-div",
         "call"
       ],
@@ -28075,7 +28054,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "signed-div-const",
+        "div-const",
+        "signed",
         "magic-div"
       ],
       "loc": 1,
@@ -28148,7 +28128,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "signed-div-const",
+        "div-const",
+        "signed",
         "hw-div"
       ],
       "loc": 1,
@@ -28221,7 +28202,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "signed-div-const",
+        "div-const",
+        "signed",
         "magic-div"
       ],
       "loc": 1,
@@ -28294,7 +28276,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "signed-div-const",
+        "div-const",
+        "signed",
         "soft-div",
         "call"
       ],
@@ -28367,7 +28350,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "signed-div-const",
+        "div-const",
+        "signed",
         "magic-div"
       ],
       "loc": 1,
@@ -28440,7 +28424,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "signed-div-const",
+        "div-const",
+        "signed",
         "hw-div"
       ],
       "loc": 1,
@@ -28513,7 +28498,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "signed-div-const",
+        "div-const",
+        "signed",
         "magic-div"
       ],
       "loc": 1,
@@ -28881,9 +28867,9 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "loop",
         "memory",
-        "arithmetic"
+        "arithmetic",
+        "loop"
       ],
       "loc": 1,
       "refSource": "int dotprod(int *a,int *b,int n){ int s=0,i; for(i=0;i<n;i++)s+=a[i]*b[i]; return s; }",
@@ -28966,9 +28952,9 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "loop",
         "memory",
-        "arithmetic"
+        "arithmetic",
+        "loop"
       ],
       "loc": 1,
       "refSource": "int dotprod(int *a,int *b,int n){ int s=0,i; for(i=0;i<n;i++)s+=a[i]*b[i]; return s; }",
@@ -29052,9 +29038,9 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "loop",
         "memory",
-        "arithmetic"
+        "arithmetic",
+        "loop"
       ],
       "loc": 1,
       "refSource": "int dotprod(int *a,int *b,int n){ int s=0,i; for(i=0;i<n;i++)s+=a[i]*b[i]; return s; }",
@@ -29121,9 +29107,9 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "loop",
         "memory",
         "arithmetic",
+        "loop",
         "call"
       ],
       "loc": 1,
@@ -29187,8 +29173,8 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "loop",
-        "do-while"
+        "do-while",
+        "loop"
       ],
       "loc": 1,
       "refSource": "int dowhile(int n){ int s=0; do{s+=n;n--;}while(n>0); return s; }",
@@ -29258,8 +29244,8 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "loop",
-        "do-while"
+        "do-while",
+        "loop"
       ],
       "loc": 1,
       "refSource": "int dowhile(int n){ int s=0; do{s+=n;n--;}while(n>0); return s; }",
@@ -29337,8 +29323,8 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "loop",
-        "do-while"
+        "do-while",
+        "loop"
       ],
       "loc": 1,
       "refSource": "int dowhile(int n){ int s=0; do{s+=n;n--;}while(n>0); return s; }",
@@ -29416,8 +29402,8 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "loop",
-        "do-while"
+        "do-while",
+        "loop"
       ],
       "loc": 1,
       "refSource": "int dowhile(int n){ int s=0; do{s+=n;n--;}while(n>0); return s; }",
@@ -29488,8 +29474,7 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "arithmetic",
-        "expr"
+        "arithmetic"
       ],
       "loc": 1,
       "refSource": "int expr1(int a,int b,int c){ return a*b + c - 3; }",
@@ -29559,8 +29544,7 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "arithmetic",
-        "expr"
+        "arithmetic"
       ],
       "loc": 1,
       "refSource": "int expr1(int a,int b,int c){ return a*b + c - 3; }",
@@ -29631,8 +29615,7 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "arithmetic",
-        "expr"
+        "arithmetic"
       ],
       "loc": 1,
       "refSource": "int expr1(int a,int b,int c){ return a*b + c - 3; }",
@@ -29703,8 +29686,7 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "arithmetic",
-        "expr"
+        "arithmetic"
       ],
       "loc": 1,
       "refSource": "int expr1(int a,int b,int c){ return a*b + c - 3; }",
@@ -29787,9 +29769,9 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "bitwise",
+        "mask",
         "shift",
-        "mask"
+        "bitwise"
       ],
       "loc": 1,
       "refSource": "unsigned extractbits(unsigned x){ return (x>>4)&0xF; }",
@@ -29859,9 +29841,9 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "bitwise",
+        "mask",
         "shift",
-        "mask"
+        "bitwise"
       ],
       "loc": 1,
       "refSource": "unsigned extractbits(unsigned x){ return (x>>4)&0xF; }",
@@ -29932,9 +29914,9 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "bitwise",
+        "mask",
         "shift",
-        "mask"
+        "bitwise"
       ],
       "loc": 1,
       "refSource": "unsigned extractbits(unsigned x){ return (x>>4)&0xF; }",
@@ -30005,9 +29987,9 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "bitwise",
+        "mask",
         "shift",
-        "mask"
+        "bitwise"
       ],
       "loc": 1,
       "refSource": "unsigned extractbits(unsigned x){ return (x>>4)&0xF; }",
@@ -31187,8 +31169,7 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "loop",
-        "for"
+        "loop"
       ],
       "loc": 1,
       "refSource": "int fib(int n){ int a=0,b=1,i; for(i=0;i<n;i++){int t=a+b;a=b;b=t;} return a; }",
@@ -31270,8 +31251,7 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "loop",
-        "for"
+        "loop"
       ],
       "loc": 1,
       "refSource": "int fib(int n){ int a=0,b=1,i; for(i=0;i<n;i++){int t=a+b;a=b;b=t;} return a; }",
@@ -31349,8 +31329,7 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "loop",
-        "for"
+        "loop"
       ],
       "loc": 1,
       "refSource": "int fib(int n){ int a=0,b=1,i; for(i=0;i<n;i++){int t=a+b;a=b;b=t;} return a; }",
@@ -31428,8 +31407,7 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "loop",
-        "for"
+        "loop"
       ],
       "loc": 1,
       "refSource": "int fib(int n){ int a=0,b=1,i; for(i=0;i<n;i++){int t=a+b;a=b;b=t;} return a; }",
@@ -31512,10 +31490,9 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "loop",
-        "for",
         "branch",
-        "memory"
+        "memory",
+        "loop"
       ],
       "loc": 1,
       "refSource": "int findfirst(int *a,int n,int t){ int i; for(i=0;i<n;i++) if(a[i]==t) return i; return -1; }",
@@ -31597,10 +31574,9 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "loop",
-        "for",
         "branch",
-        "memory"
+        "memory",
+        "loop"
       ],
       "loc": 1,
       "refSource": "int findfirst(int *a,int n,int t){ int i; for(i=0;i<n;i++) if(a[i]==t) return i; return -1; }",
@@ -31678,10 +31654,9 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "loop",
-        "for",
         "branch",
-        "memory"
+        "memory",
+        "loop"
       ],
       "loc": 1,
       "refSource": "int findfirst(int *a,int n,int t){ int i; for(i=0;i<n;i++) if(a[i]==t) return i; return -1; }",
@@ -31747,10 +31722,9 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "loop",
-        "for",
         "branch",
-        "memory"
+        "memory",
+        "loop"
       ],
       "loc": 1,
       "refSource": "int findfirst(int *a,int n,int t){ int i; for(i=0;i<n;i++) if(a[i]==t) return i; return -1; }",
@@ -31835,7 +31809,6 @@
       "features": [
         "float",
         "arithmetic",
-        "expr",
         "call"
       ],
       "loc": 1,
@@ -31916,8 +31889,7 @@
       "language": "c",
       "features": [
         "float",
-        "arithmetic",
-        "expr"
+        "arithmetic"
       ],
       "loc": 1,
       "refSource": "float fma1(float a,float b,float c){ return a*b+c; }",
@@ -31985,8 +31957,7 @@
       "language": "c",
       "features": [
         "float",
-        "arithmetic",
-        "expr"
+        "arithmetic"
       ],
       "loc": 1,
       "refSource": "float fma1(float a,float b,float c){ return a*b+c; }",
@@ -32054,8 +32025,7 @@
       "language": "c",
       "features": [
         "float",
-        "arithmetic",
-        "expr"
+        "arithmetic"
       ],
       "loc": 1,
       "refSource": "float fma1(float a,float b,float c){ return a*b+c; }",
@@ -32668,9 +32638,8 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "loop",
-        "while",
         "mod-reg",
+        "loop",
         "soft-div",
         "call"
       ],
@@ -32742,9 +32711,8 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "loop",
-        "while",
         "mod-reg",
+        "loop",
         "hw-div"
       ],
       "loc": 1,
@@ -32816,9 +32784,8 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "loop",
-        "while",
         "mod-reg",
+        "loop",
         "hw-div"
       ],
       "loc": 1,
@@ -32902,9 +32869,8 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "loop",
-        "while",
         "mod-reg",
+        "loop",
         "hw-div"
       ],
       "loc": 1,
@@ -32988,7 +32954,6 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "bitwise",
         "shift"
       ],
       "loc": 1,
@@ -33059,7 +33024,6 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "bitwise",
         "shift"
       ],
       "loc": 1,
@@ -33131,7 +33095,6 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "bitwise",
         "shift"
       ],
       "loc": 1,
@@ -33203,7 +33166,6 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "bitwise",
         "shift"
       ],
       "loc": 1,
@@ -33871,8 +33833,7 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "s64",
-        "cast",
+        "int64",
         "sign-extend"
       ],
       "loc": 1,
@@ -33955,8 +33916,7 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "s64",
-        "cast",
+        "int64",
         "sign-extend"
       ],
       "loc": 1,
@@ -34040,8 +34000,7 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "s64",
-        "cast",
+        "int64",
         "sign-extend"
       ],
       "loc": 1,
@@ -34125,8 +34084,7 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "s64",
-        "cast",
+        "int64",
         "sign-extend"
       ],
       "loc": 1,
@@ -34211,8 +34169,7 @@
       "language": "c",
       "features": [
         "compare",
-        "logical-and",
-        "range"
+        "branch"
       ],
       "loc": 1,
       "refSource": "int inrange(int x,int lo,int hi){ return x>=lo && x<=hi; }",
@@ -34283,8 +34240,7 @@
       "language": "c",
       "features": [
         "compare",
-        "logical-and",
-        "range",
+        "branch",
         "branchless"
       ],
       "loc": 1,
@@ -34357,8 +34313,7 @@
       "language": "c",
       "features": [
         "compare",
-        "logical-and",
-        "range"
+        "branch"
       ],
       "loc": 1,
       "refSource": "int inrange(int x,int lo,int hi){ return x>=lo && x<=hi; }",
@@ -34442,8 +34397,7 @@
       "language": "c",
       "features": [
         "compare",
-        "logical-and",
-        "range"
+        "branch"
       ],
       "loc": 1,
       "refSource": "int inrange(int x,int lo,int hi){ return x>=lo && x<=hi; }",
@@ -34805,7 +34759,7 @@
       "language": "c",
       "features": [
         "compare",
-        "logical-and"
+        "branch"
       ],
       "loc": 1,
       "refSource": "int land(int a,int b){ return a && b; }",
@@ -34876,7 +34830,7 @@
       "language": "c",
       "features": [
         "compare",
-        "logical-and"
+        "branch"
       ],
       "loc": 1,
       "refSource": "int land(int a,int b){ return a && b; }",
@@ -34948,7 +34902,7 @@
       "language": "c",
       "features": [
         "compare",
-        "logical-and"
+        "branch"
       ],
       "loc": 1,
       "refSource": "int land(int a,int b){ return a && b; }",
@@ -35032,7 +34986,7 @@
       "language": "c",
       "features": [
         "compare",
-        "logical-and"
+        "branch"
       ],
       "loc": 1,
       "refSource": "int land(int a,int b){ return a && b; }",
@@ -35115,7 +35069,7 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "s64",
+        "int64",
         "cast",
         "narrow"
       ],
@@ -35187,7 +35141,7 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "s64",
+        "int64",
         "cast",
         "narrow"
       ],
@@ -35272,7 +35226,7 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "s64",
+        "int64",
         "cast",
         "narrow"
       ],
@@ -35357,7 +35311,7 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "s64",
+        "int64",
         "cast",
         "narrow"
       ],
@@ -35442,7 +35396,7 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "s64",
+        "int64",
         "arithmetic"
       ],
       "loc": 1,
@@ -35525,7 +35479,7 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "s64",
+        "int64",
         "arithmetic"
       ],
       "loc": 1,
@@ -35609,7 +35563,7 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "s64",
+        "int64",
         "arithmetic"
       ],
       "loc": 1,
@@ -35693,7 +35647,7 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "s64",
+        "int64",
         "arithmetic"
       ],
       "loc": 1,
@@ -35756,7 +35710,7 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "s64",
+        "int64",
         "compare"
       ],
       "loc": 1,
@@ -35827,7 +35781,7 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "s64",
+        "int64",
         "compare"
       ],
       "loc": 1,
@@ -35911,7 +35865,7 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "s64",
+        "int64",
         "compare"
       ],
       "loc": 1,
@@ -35995,7 +35949,7 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "s64",
+        "int64",
         "compare",
         "branchless"
       ],
@@ -36061,7 +36015,7 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "s64",
+        "int64",
         "shift",
         "call"
       ],
@@ -36141,7 +36095,7 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "s64",
+        "int64",
         "shift"
       ],
       "loc": 1,
@@ -36225,7 +36179,7 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "s64",
+        "int64",
         "shift",
         "call"
       ],
@@ -36289,7 +36243,7 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "s64",
+        "int64",
         "shift",
         "call"
       ],
@@ -36358,9 +36312,9 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "s64",
-        "shift",
+        "int64",
         "signed",
+        "shift",
         "call"
       ],
       "loc": 1,
@@ -36439,9 +36393,9 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "s64",
-        "shift",
-        "signed"
+        "int64",
+        "signed",
+        "shift"
       ],
       "loc": 1,
       "refSource": "long long llshr(long long a,int b){ return a>>b; }",
@@ -36524,9 +36478,9 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "s64",
-        "shift",
+        "int64",
         "signed",
+        "shift",
         "call"
       ],
       "loc": 1,
@@ -36589,9 +36543,9 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "s64",
-        "shift",
+        "int64",
         "signed",
+        "shift",
         "call"
       ],
       "loc": 1,
@@ -36659,7 +36613,7 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "s64",
+        "int64",
         "arithmetic"
       ],
       "loc": 1,
@@ -36742,7 +36696,7 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "s64",
+        "int64",
         "arithmetic"
       ],
       "loc": 1,
@@ -36826,7 +36780,7 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "s64",
+        "int64",
         "arithmetic"
       ],
       "loc": 1,
@@ -36910,7 +36864,7 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "s64",
+        "int64",
         "arithmetic"
       ],
       "loc": 1,
@@ -36974,8 +36928,7 @@
       "language": "c",
       "features": [
         "memory",
-        "load",
-        "offset"
+        "load"
       ],
       "loc": 1,
       "refSource": "int loadoff(int *p){ return p[2]; }",
@@ -37043,8 +36996,7 @@
       "language": "c",
       "features": [
         "memory",
-        "load",
-        "offset"
+        "load"
       ],
       "loc": 1,
       "refSource": "int loadoff(int *p){ return p[2]; }",
@@ -37112,8 +37064,7 @@
       "language": "c",
       "features": [
         "memory",
-        "load",
-        "offset"
+        "load"
       ],
       "loc": 1,
       "refSource": "int loadoff(int *p){ return p[2]; }",
@@ -37181,8 +37132,7 @@
       "language": "c",
       "features": [
         "memory",
-        "load",
-        "offset"
+        "load"
       ],
       "loc": 1,
       "refSource": "int loadoff(int *p){ return p[2]; }",
@@ -37250,9 +37200,9 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "loop",
         "branch",
-        "memory"
+        "memory",
+        "loop"
       ],
       "loc": 1,
       "refSource": "int loopif(int *a,int n){ int s=0,i; for(i=0;i<n;i++){ if(a[i]>0) s+=a[i]; } return s; }",
@@ -37334,9 +37284,9 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "loop",
         "branch",
-        "memory"
+        "memory",
+        "loop"
       ],
       "loc": 1,
       "refSource": "int loopif(int *a,int n){ int s=0,i; for(i=0;i<n;i++){ if(a[i]>0) s+=a[i]; } return s; }",
@@ -37414,9 +37364,9 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "loop",
         "branch",
-        "memory"
+        "memory",
+        "loop"
       ],
       "loc": 1,
       "refSource": "int loopif(int *a,int n){ int s=0,i; for(i=0;i<n;i++){ if(a[i]>0) s+=a[i]; } return s; }",
@@ -37482,9 +37432,9 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "loop",
         "branch",
-        "memory"
+        "memory",
+        "loop"
       ],
       "loc": 1,
       "refSource": "int loopif(int *a,int n){ int s=0,i; for(i=0;i<n;i++){ if(a[i]>0) s+=a[i]; } return s; }",
@@ -37568,7 +37518,7 @@
       "language": "c",
       "features": [
         "compare",
-        "logical-or"
+        "branch"
       ],
       "loc": 1,
       "refSource": "int lor(int a,int b){ return a || b; }",
@@ -37639,7 +37589,7 @@
       "language": "c",
       "features": [
         "compare",
-        "logical-or"
+        "branch"
       ],
       "loc": 1,
       "refSource": "int lor(int a,int b){ return a || b; }",
@@ -37711,7 +37661,7 @@
       "language": "c",
       "features": [
         "compare",
-        "logical-or"
+        "branch"
       ],
       "loc": 1,
       "refSource": "int lor(int a,int b){ return a || b; }",
@@ -37795,7 +37745,7 @@
       "language": "c",
       "features": [
         "compare",
-        "logical-or"
+        "branch"
       ],
       "loc": 1,
       "refSource": "int lor(int a,int b){ return a || b; }",
@@ -37878,8 +37828,8 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "bitwise",
-        "mask"
+        "mask",
+        "bitwise"
       ],
       "loc": 1,
       "refSource": "unsigned mask8(unsigned x){ return x & 0xff; }",
@@ -37949,8 +37899,8 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "bitwise",
-        "mask"
+        "mask",
+        "bitwise"
       ],
       "loc": 1,
       "refSource": "unsigned mask8(unsigned x){ return x & 0xff; }",
@@ -38021,8 +37971,8 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "bitwise",
-        "mask"
+        "mask",
+        "bitwise"
       ],
       "loc": 1,
       "refSource": "unsigned mask8(unsigned x){ return x & 0xff; }",
@@ -38093,8 +38043,8 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "bitwise",
-        "mask"
+        "mask",
+        "bitwise"
       ],
       "loc": 1,
       "refSource": "unsigned mask8(unsigned x){ return x & 0xff; }",
@@ -38459,9 +38409,9 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "loop",
         "memory",
-        "branch"
+        "branch",
+        "loop"
       ],
       "loc": 1,
       "refSource": "int maxarr(int *a,int n){ int m=a[0],i; for(i=1;i<n;i++)if(a[i]>m)m=a[i]; return m; }",
@@ -38543,9 +38493,9 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "loop",
         "memory",
-        "branch"
+        "branch",
+        "loop"
       ],
       "loc": 1,
       "refSource": "int maxarr(int *a,int n){ int m=a[0],i; for(i=1;i<n;i++)if(a[i]>m)m=a[i]; return m; }",
@@ -38623,9 +38573,9 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "loop",
         "memory",
-        "branch"
+        "branch",
+        "loop"
       ],
       "loc": 1,
       "refSource": "int maxarr(int *a,int n){ int m=a[0],i; for(i=1;i<n;i++)if(a[i]>m)m=a[i]; return m; }",
@@ -38691,9 +38641,9 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "loop",
         "memory",
-        "branch"
+        "branch",
+        "loop"
       ],
       "loc": 1,
       "refSource": "int maxarr(int *a,int n){ int m=a[0],i; for(i=1;i<n;i++)if(a[i]>m)m=a[i]; return m; }",
@@ -39070,10 +39020,10 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "loop",
         "memory",
         "store",
-        "load"
+        "load",
+        "loop"
       ],
       "loc": 1,
       "refSource": "void memcpy1(u8 *d,u8 *s,int n){ int i; for(i=0;i<n;i++)d[i]=s[i]; }",
@@ -39149,10 +39099,10 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "loop",
         "memory",
         "store",
-        "load"
+        "load",
+        "loop"
       ],
       "loc": 1,
       "refSource": "void memcpy1(u8 *d,u8 *s,int n){ int i; for(i=0;i<n;i++)d[i]=s[i]; }",
@@ -39241,10 +39191,10 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "loop",
         "memory",
         "store",
-        "load"
+        "load",
+        "loop"
       ],
       "loc": 1,
       "refSource": "void memcpy1(u8 *d,u8 *s,int n){ int i; for(i=0;i<n;i++)d[i]=s[i]; }",
@@ -39316,10 +39266,10 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "loop",
         "memory",
         "store",
-        "load"
+        "load",
+        "loop"
       ],
       "loc": 1,
       "refSource": "void memcpy1(u8 *d,u8 *s,int n){ int i; for(i=0;i<n;i++)d[i]=s[i]; }",
@@ -39406,10 +39356,9 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "loop",
-        "for",
         "memory",
-        "store"
+        "store",
+        "loop"
       ],
       "loc": 1,
       "refSource": "void memset1(u8 *p,int n,u8 v){ int i; for(i=0;i<n;i++)p[i]=v; }",
@@ -39497,10 +39446,9 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "loop",
-        "for",
         "memory",
-        "store"
+        "store",
+        "loop"
       ],
       "loc": 1,
       "refSource": "void memset1(u8 *p,int n,u8 v){ int i; for(i=0;i<n;i++)p[i]=v; }",
@@ -39584,10 +39532,9 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "loop",
-        "for",
         "memory",
-        "store"
+        "store",
+        "loop"
       ],
       "loc": 1,
       "refSource": "void memset1(u8 *p,int n,u8 v){ int i; for(i=0;i<n;i++)p[i]=v; }",
@@ -39658,10 +39605,9 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "loop",
-        "for",
         "memory",
-        "store"
+        "store",
+        "loop"
       ],
       "loc": 1,
       "refSource": "void memset1(u8 *p,int n,u8 v){ int i; for(i=0;i<n;i++)p[i]=v; }",
@@ -39747,9 +39693,9 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "bitwise",
         "mask",
-        "shift"
+        "shift",
+        "bitwise"
       ],
       "loc": 1,
       "refSource": "unsigned mergebits(unsigned a,unsigned b){ return (a&0xFFFF)|(b<<16); }",
@@ -39831,9 +39777,9 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "bitwise",
         "mask",
-        "shift"
+        "shift",
+        "bitwise"
       ],
       "loc": 1,
       "refSource": "unsigned mergebits(unsigned a,unsigned b){ return (a&0xFFFF)|(b<<16); }",
@@ -39904,9 +39850,9 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "bitwise",
         "mask",
-        "shift"
+        "shift",
+        "bitwise"
       ],
       "loc": 1,
       "refSource": "unsigned mergebits(unsigned a,unsigned b){ return (a&0xFFFF)|(b<<16); }",
@@ -39977,9 +39923,9 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "bitwise",
         "mask",
-        "shift"
+        "shift",
+        "bitwise"
       ],
       "loc": 1,
       "refSource": "unsigned mergebits(unsigned a,unsigned b){ return (a&0xFFFF)|(b<<16); }",
@@ -40352,7 +40298,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "signed-mod-const",
+        "mod-const",
+        "signed",
         "soft-div",
         "call"
       ],
@@ -40425,7 +40372,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "signed-mod-const",
+        "mod-const",
+        "signed",
         "magic-div"
       ],
       "loc": 1,
@@ -40498,7 +40446,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "signed-mod-const",
+        "mod-const",
+        "signed",
         "hw-div"
       ],
       "loc": 1,
@@ -40571,7 +40520,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "signed-mod-const",
+        "mod-const",
+        "signed",
         "magic-div"
       ],
       "loc": 1,
@@ -40644,7 +40594,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "signed-mod-pow2"
+        "mod-pow2",
+        "signed"
       ],
       "loc": 1,
       "refSource": "int modpow2(int a){ return a%16; }",
@@ -40715,7 +40666,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "signed-mod-pow2"
+        "mod-pow2",
+        "signed"
       ],
       "loc": 1,
       "refSource": "int modpow2(int a){ return a%16; }",
@@ -40787,7 +40739,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "signed-mod-pow2"
+        "mod-pow2",
+        "signed"
       ],
       "loc": 1,
       "refSource": "int modpow2(int a){ return a%16; }",
@@ -40859,7 +40812,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "signed-mod-pow2"
+        "mod-pow2",
+        "signed"
       ],
       "loc": 1,
       "refSource": "int modpow2(int a){ return a%16; }",
@@ -42409,8 +42363,7 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "branch",
-        "nested-if"
+        "branch"
       ],
       "loc": 1,
       "refSource": "int nestedif(int a,int b){ if(a>0){ if(b>0) return a+b; return a; } return 0; }",
@@ -42480,8 +42433,7 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "branch",
-        "nested-if"
+        "branch"
       ],
       "loc": 1,
       "refSource": "int nestedif(int a,int b){ if(a>0){ if(b>0) return a+b; return a; } return 0; }",
@@ -42559,8 +42511,7 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "branch",
-        "nested-if"
+        "branch"
       ],
       "loc": 1,
       "refSource": "int nestedif(int a,int b){ if(a>0){ if(b>0) return a+b; return a; } return 0; }",
@@ -42631,8 +42582,7 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "branch",
-        "nested-if"
+        "branch"
       ],
       "loc": 1,
       "refSource": "int nestedif(int a,int b){ if(a>0){ if(b>0) return a+b; return a; } return 0; }",
@@ -42703,9 +42653,8 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "loop",
-        "nested-loop",
-        "arithmetic"
+        "arithmetic",
+        "loop"
       ],
       "loc": 1,
       "refSource": "int nestedloop(int n){ int s=0,i,j; for(i=0;i<n;i++)for(j=0;j<n;j++)s+=i*j; return s; }",
@@ -42787,9 +42736,8 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "loop",
-        "nested-loop",
-        "arithmetic"
+        "arithmetic",
+        "loop"
       ],
       "loc": 1,
       "refSource": "int nestedloop(int n){ int s=0,i,j; for(i=0;i<n;i++)for(j=0;j<n;j++)s+=i*j; return s; }",
@@ -42872,9 +42820,8 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "loop",
-        "nested-loop",
-        "arithmetic"
+        "arithmetic",
+        "loop"
       ],
       "loc": 1,
       "refSource": "int nestedloop(int n){ int s=0,i,j; for(i=0;i<n;i++)for(j=0;j<n;j++)s+=i*j; return s; }",
@@ -42952,9 +42899,8 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "loop",
-        "nested-loop",
-        "arithmetic"
+        "arithmetic",
+        "loop"
       ],
       "loc": 1,
       "refSource": "int nestedloop(int n){ int s=0,i,j; for(i=0;i<n;i++)for(j=0;j<n;j++)s+=i*j; return s; }",
@@ -43324,9 +43270,8 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "loop",
-        "for",
-        "arithmetic"
+        "arithmetic",
+        "loop"
       ],
       "loc": 1,
       "refSource": "int powi(int base,int e){ int r=1,i; for(i=0;i<e;i++)r*=base; return r; }",
@@ -43408,9 +43353,8 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "loop",
-        "for",
-        "arithmetic"
+        "arithmetic",
+        "loop"
       ],
       "loc": 1,
       "refSource": "int powi(int base,int e){ int r=1,i; for(i=0;i<e;i++)r*=base; return r; }",
@@ -43488,9 +43432,8 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "loop",
-        "for",
-        "arithmetic"
+        "arithmetic",
+        "loop"
       ],
       "loc": 1,
       "refSource": "int powi(int base,int e){ int r=1,i; for(i=0;i<e;i++)r*=base; return r; }",
@@ -43568,9 +43511,8 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "loop",
-        "for",
-        "arithmetic"
+        "arithmetic",
+        "loop"
       ],
       "loc": 1,
       "refSource": "int powi(int base,int e){ int r=1,i; for(i=0;i<e;i++)r*=base; return r; }",
@@ -43653,7 +43595,6 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "cast",
         "promotion",
         "arithmetic"
       ],
@@ -43725,7 +43666,6 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "cast",
         "promotion",
         "arithmetic"
       ],
@@ -43798,7 +43738,6 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "cast",
         "promotion",
         "arithmetic"
       ],
@@ -43871,7 +43810,6 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "cast",
         "promotion",
         "arithmetic"
       ],
@@ -43945,7 +43883,7 @@
       "language": "c",
       "features": [
         "memory",
-        "pointer-arith"
+        "pointer"
       ],
       "loc": 1,
       "refSource": "int *ptradd(int *p,int n){ return p+n; }",
@@ -44016,7 +43954,7 @@
       "language": "c",
       "features": [
         "memory",
-        "pointer-arith"
+        "pointer"
       ],
       "loc": 1,
       "refSource": "int *ptradd(int *p,int n){ return p+n; }",
@@ -44088,7 +44026,7 @@
       "language": "c",
       "features": [
         "memory",
-        "pointer-arith"
+        "pointer"
       ],
       "loc": 1,
       "refSource": "int *ptradd(int *p,int n){ return p+n; }",
@@ -44160,7 +44098,7 @@
       "language": "c",
       "features": [
         "memory",
-        "pointer-arith"
+        "pointer"
       ],
       "loc": 1,
       "refSource": "int *ptradd(int *p,int n){ return p+n; }",
@@ -44231,9 +44169,9 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "loop",
         "memory",
-        "store"
+        "store",
+        "loop"
       ],
       "loc": 1,
       "refSource": "void revarr(int *a,int n){ int i,j,t; for(i=0,j=n-1;i<j;i++,j--){t=a[i];a[i]=a[j];a[j]=t;} }",
@@ -44321,9 +44259,9 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "loop",
         "memory",
-        "store"
+        "store",
+        "loop"
       ],
       "loc": 1,
       "refSource": "void revarr(int *a,int n){ int i,j,t; for(i=0,j=n-1;i<j;i++,j--){t=a[i];a[i]=a[j];a[j]=t;} }",
@@ -44412,9 +44350,9 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "loop",
         "memory",
-        "store"
+        "store",
+        "loop"
       ],
       "loc": 1,
       "refSource": "void revarr(int *a,int n){ int i,j,t; for(i=0,j=n-1;i<j;i++,j--){t=a[i];a[i]=a[j];a[j]=t;} }",
@@ -44499,9 +44437,9 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "loop",
         "memory",
-        "store"
+        "store",
+        "loop"
       ],
       "loc": 1,
       "refSource": "void revarr(int *a,int n){ int i,j,t; for(i=0,j=n-1;i<j;i++,j--){t=a[i];a[i]=a[j];a[j]=t;} }",
@@ -44590,9 +44528,9 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "bitwise",
         "rotate",
-        "shift"
+        "shift",
+        "bitwise"
       ],
       "loc": 1,
       "refSource": "unsigned rotl(unsigned x,int n){ return (x<<n)|(x>>(32-n)); }",
@@ -44662,9 +44600,9 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "bitwise",
         "rotate",
-        "shift"
+        "shift",
+        "bitwise"
       ],
       "loc": 1,
       "refSource": "unsigned rotl(unsigned x,int n){ return (x<<n)|(x>>(32-n)); }",
@@ -44735,9 +44673,9 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "bitwise",
         "rotate",
-        "shift"
+        "shift",
+        "bitwise"
       ],
       "loc": 1,
       "refSource": "unsigned rotl(unsigned x,int n){ return (x<<n)|(x>>(32-n)); }",
@@ -44808,9 +44746,9 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "bitwise",
         "rotate",
-        "shift"
+        "shift",
+        "bitwise"
       ],
       "loc": 1,
       "refSource": "unsigned rotl(unsigned x,int n){ return (x<<n)|(x>>(32-n)); }",
@@ -44877,9 +44815,9 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "bitwise",
         "rotate",
-        "shift"
+        "shift",
+        "bitwise"
       ],
       "loc": 1,
       "refSource": "unsigned rotr(unsigned x,int n){ return (x>>n)|(x<<(32-n)); }",
@@ -44962,9 +44900,9 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "bitwise",
         "rotate",
-        "shift"
+        "shift",
+        "bitwise"
       ],
       "loc": 1,
       "refSource": "unsigned rotr(unsigned x,int n){ return (x>>n)|(x<<(32-n)); }",
@@ -45036,9 +44974,9 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "bitwise",
         "rotate",
-        "shift"
+        "shift",
+        "bitwise"
       ],
       "loc": 1,
       "refSource": "unsigned rotr(unsigned x,int n){ return (x>>n)|(x<<(32-n)); }",
@@ -45110,9 +45048,9 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "bitwise",
         "rotate",
-        "shift"
+        "shift",
+        "bitwise"
       ],
       "loc": 1,
       "refSource": "unsigned rotr(unsigned x,int n){ return (x>>n)|(x<<(32-n)); }",
@@ -45181,8 +45119,7 @@
       "language": "c",
       "features": [
         "compare",
-        "ternary",
-        "select"
+        "ternary"
       ],
       "loc": 1,
       "refSource": "int selnz(int c,int a,int b){ return c?a:b; }",
@@ -45253,8 +45190,7 @@
       "language": "c",
       "features": [
         "compare",
-        "ternary",
-        "select"
+        "ternary"
       ],
       "loc": 1,
       "refSource": "int selnz(int c,int a,int b){ return c?a:b; }",
@@ -45326,8 +45262,7 @@
       "language": "c",
       "features": [
         "compare",
-        "ternary",
-        "select"
+        "ternary"
       ],
       "loc": 1,
       "refSource": "int selnz(int c,int a,int b){ return c?a:b; }",
@@ -45411,8 +45346,7 @@
       "language": "c",
       "features": [
         "compare",
-        "ternary",
-        "select"
+        "ternary"
       ],
       "loc": 1,
       "refSource": "int selnz(int c,int a,int b){ return c?a:b; }",
@@ -45483,8 +45417,8 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "bitwise",
-        "shift"
+        "shift",
+        "bitwise"
       ],
       "loc": 1,
       "refSource": "int setbit(int x,int n){ return x | (1<<n); }",
@@ -45554,8 +45488,8 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "bitwise",
-        "shift"
+        "shift",
+        "bitwise"
       ],
       "loc": 1,
       "refSource": "int setbit(int x,int n){ return x | (1<<n); }",
@@ -45626,8 +45560,8 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "bitwise",
-        "shift"
+        "shift",
+        "bitwise"
       ],
       "loc": 1,
       "refSource": "int setbit(int x,int n){ return x | (1<<n); }",
@@ -45698,8 +45632,8 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "bitwise",
-        "shift"
+        "shift",
+        "bitwise"
       ],
       "loc": 1,
       "refSource": "int setbit(int x,int n){ return x | (1<<n); }",
@@ -46078,7 +46012,6 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "cast",
         "sign-extend"
       ],
       "loc": 1,
@@ -46149,7 +46082,6 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "cast",
         "sign-extend"
       ],
       "loc": 1,
@@ -46221,7 +46153,6 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "cast",
         "sign-extend"
       ],
       "loc": 1,
@@ -46293,7 +46224,6 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "cast",
         "sign-extend"
       ],
       "loc": 1,
@@ -46638,7 +46568,6 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "bitwise",
         "shift"
       ],
       "loc": 1,
@@ -46709,7 +46638,6 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "bitwise",
         "shift"
       ],
       "loc": 1,
@@ -46781,7 +46709,6 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "bitwise",
         "shift"
       ],
       "loc": 1,
@@ -46853,7 +46780,6 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "bitwise",
         "shift"
       ],
       "loc": 1,
@@ -46925,9 +46851,8 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "bitwise",
-        "shift",
-        "signed"
+        "signed",
+        "shift"
       ],
       "loc": 1,
       "refSource": "int shrs(int a,int b){ return a>>b; }",
@@ -46997,9 +46922,8 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "bitwise",
-        "shift",
-        "signed"
+        "signed",
+        "shift"
       ],
       "loc": 1,
       "refSource": "int shrs(int a,int b){ return a>>b; }",
@@ -47070,9 +46994,8 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "bitwise",
-        "shift",
-        "signed"
+        "signed",
+        "shift"
       ],
       "loc": 1,
       "refSource": "int shrs(int a,int b){ return a>>b; }",
@@ -47143,9 +47066,8 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "bitwise",
-        "shift",
-        "signed"
+        "signed",
+        "shift"
       ],
       "loc": 1,
       "refSource": "int shrs(int a,int b){ return a>>b; }",
@@ -47216,7 +47138,6 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "bitwise",
         "shift"
       ],
       "loc": 1,
@@ -47287,7 +47208,6 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "bitwise",
         "shift"
       ],
       "loc": 1,
@@ -47359,7 +47279,6 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "bitwise",
         "shift"
       ],
       "loc": 1,
@@ -47431,7 +47350,6 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "bitwise",
         "shift"
       ],
       "loc": 1,
@@ -47504,8 +47422,7 @@
       "language": "c",
       "features": [
         "compare",
-        "branch",
-        "multi-if"
+        "branch"
       ],
       "loc": 1,
       "refSource": "int sign(int x){ if(x>0)return 1; if(x<0)return -1; return 0; }",
@@ -47588,8 +47505,7 @@
       "language": "c",
       "features": [
         "compare",
-        "branch",
-        "multi-if"
+        "branch"
       ],
       "loc": 1,
       "refSource": "int sign(int x){ if(x>0)return 1; if(x<0)return -1; return 0; }",
@@ -47661,8 +47577,7 @@
       "language": "c",
       "features": [
         "compare",
-        "branch",
-        "multi-if"
+        "branch"
       ],
       "loc": 1,
       "refSource": "int sign(int x){ if(x>0)return 1; if(x<0)return -1; return 0; }",
@@ -47734,8 +47649,7 @@
       "language": "c",
       "features": [
         "compare",
-        "branch",
-        "multi-if"
+        "branch"
       ],
       "loc": 1,
       "refSource": "int sign(int x){ if(x>0)return 1; if(x<0)return -1; return 0; }",
@@ -49022,10 +48936,10 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "loop",
         "memory",
         "pointer",
-        "compare"
+        "compare",
+        "loop"
       ],
       "loc": 1,
       "refSource": "int strcmp1(char *a,char *b){ while(*a && *a==*b){a++;b++;} return *a-*b; }",
@@ -49095,10 +49009,10 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "loop",
         "memory",
         "pointer",
-        "compare"
+        "compare",
+        "loop"
       ],
       "loc": 1,
       "refSource": "int strcmp1(char *a,char *b){ while(*a && *a==*b){a++;b++;} return *a-*b; }",
@@ -49164,10 +49078,10 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "loop",
         "memory",
         "pointer",
-        "compare"
+        "compare",
+        "loop"
       ],
       "loc": 1,
       "refSource": "int strcmp1(char *a,char *b){ while(*a && *a==*b){a++;b++;} return *a-*b; }",
@@ -49229,10 +49143,10 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "loop",
         "memory",
         "pointer",
-        "compare"
+        "compare",
+        "loop"
       ],
       "loc": 1,
       "refSource": "int strcmp1(char *a,char *b){ while(*a && *a==*b){a++;b++;} return *a-*b; }",
@@ -49315,10 +49229,9 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "loop",
-        "while",
         "memory",
-        "pointer"
+        "pointer",
+        "loop"
       ],
       "loc": 1,
       "refSource": "int strlen1(char *s){ int n=0; while(*s){n++;s++;} return n; }",
@@ -49388,10 +49301,9 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "loop",
-        "while",
         "memory",
-        "pointer"
+        "pointer",
+        "loop"
       ],
       "loc": 1,
       "refSource": "int strlen1(char *s){ int n=0; while(*s){n++;s++;} return n; }",
@@ -49462,10 +49374,9 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "loop",
-        "while",
         "memory",
-        "pointer"
+        "pointer",
+        "loop"
       ],
       "loc": 1,
       "refSource": "int strlen1(char *s){ int n=0; while(*s){n++;s++;} return n; }",
@@ -49527,10 +49438,9 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "loop",
-        "while",
         "memory",
-        "pointer"
+        "pointer",
+        "loop"
       ],
       "loc": 1,
       "refSource": "int strlen1(char *s){ int n=0; while(*s){n++;s++;} return n; }",
@@ -49601,10 +49511,10 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "loop",
         "struct",
         "memory",
-        "array"
+        "array",
+        "loop"
       ],
       "loc": 2,
       "refSource": "struct P{int x;int y;};\nint structarr(struct P *a,int n){ int s=0,i; for(i=0;i<n;i++)s+=a[i].x; return s; }",
@@ -49686,10 +49596,10 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "loop",
         "struct",
         "memory",
-        "array"
+        "array",
+        "loop"
       ],
       "loc": 2,
       "refSource": "struct P{int x;int y;};\nint structarr(struct P *a,int n){ int s=0,i; for(i=0;i<n;i++)s+=a[i].x; return s; }",
@@ -49772,10 +49682,10 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "loop",
         "struct",
         "memory",
-        "array"
+        "array",
+        "loop"
       ],
       "loc": 2,
       "refSource": "struct P{int x;int y;};\nint structarr(struct P *a,int n){ int s=0,i; for(i=0;i<n;i++)s+=a[i].x; return s; }",
@@ -49841,10 +49751,10 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "loop",
         "struct",
         "memory",
-        "array"
+        "array",
+        "loop"
       ],
       "loc": 2,
       "refSource": "struct P{int x;int y;};\nint structarr(struct P *a,int n){ int s=0,i; for(i=0;i<n;i++)s+=a[i].x; return s; }",
@@ -50210,8 +50120,7 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "loop",
-        "for"
+        "loop"
       ],
       "loc": 1,
       "refSource": "int sumto(int n){ int s=0,i; for(i=0;i<n;i++)s+=i; return s; }",
@@ -50281,8 +50190,7 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "loop",
-        "for"
+        "loop"
       ],
       "loc": 1,
       "refSource": "int sumto(int n){ int s=0,i; for(i=0;i<n;i++)s+=i; return s; }",
@@ -50360,8 +50268,7 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "loop",
-        "for"
+        "loop"
       ],
       "loc": 1,
       "refSource": "int sumto(int n){ int s=0,i; for(i=0;i<n;i++)s+=i; return s; }",
@@ -50439,8 +50346,7 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "loop",
-        "for"
+        "loop"
       ],
       "loc": 1,
       "refSource": "int sumto(int n){ int s=0,i; for(i=0;i<n;i++)s+=i; return s; }",
@@ -50523,8 +50429,8 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "switch",
         "fallthrough",
+        "switch",
         "comparison-tree"
       ],
       "loc": 1,
@@ -50595,8 +50501,8 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "switch",
         "fallthrough",
+        "switch",
         "comparison-tree"
       ],
       "loc": 1,
@@ -50663,8 +50569,8 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "switch",
         "fallthrough",
+        "switch",
         "comparison-tree"
       ],
       "loc": 1,
@@ -50736,8 +50642,8 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "switch",
         "fallthrough",
+        "switch",
         "comparison-tree"
       ],
       "loc": 1,
@@ -50804,8 +50710,8 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "switch",
         "dense",
+        "switch",
         "jump-table"
       ],
       "loc": 1,
@@ -50876,8 +50782,8 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "switch",
         "dense",
+        "switch",
         "jump-table"
       ],
       "loc": 1,
@@ -50949,8 +50855,8 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "switch",
         "dense",
+        "switch",
         "jump-table"
       ],
       "loc": 1,
@@ -51022,8 +50928,8 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "switch",
         "dense",
+        "switch",
         "jump-table"
       ],
       "loc": 1,
@@ -51095,8 +51001,9 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "switch",
         "arithmetic",
+        "switch",
+        "bitwise",
         "comparison-tree"
       ],
       "loc": 1,
@@ -51167,8 +51074,9 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "switch",
         "arithmetic",
+        "switch",
+        "bitwise",
         "comparison-tree"
       ],
       "loc": 1,
@@ -51247,8 +51155,9 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "switch",
         "arithmetic",
+        "switch",
+        "bitwise",
         "comparison-tree"
       ],
       "loc": 1,
@@ -51320,8 +51229,9 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "switch",
         "arithmetic",
+        "switch",
+        "bitwise",
         "comparison-tree"
       ],
       "loc": 1,
@@ -51677,8 +51587,8 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "switch",
         "sparse",
+        "switch",
         "comparison-tree"
       ],
       "loc": 1,
@@ -51749,8 +51659,8 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "switch",
         "sparse",
+        "switch",
         "comparison-tree"
       ],
       "loc": 1,
@@ -51834,8 +51744,8 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "switch",
         "sparse",
+        "switch",
         "comparison-tree"
       ],
       "loc": 1,
@@ -51907,8 +51817,8 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "switch",
         "sparse",
+        "switch",
         "comparison-tree"
       ],
       "loc": 1,
@@ -51975,9 +51885,8 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "switch",
-        "void",
         "memory",
+        "switch",
         "comparison-tree"
       ],
       "loc": 1,
@@ -52054,9 +51963,8 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "switch",
-        "void",
         "memory",
+        "switch",
         "comparison-tree"
       ],
       "loc": 1,
@@ -52134,9 +52042,8 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "switch",
-        "void",
         "memory",
+        "switch",
         "comparison-tree"
       ],
       "loc": 1,
@@ -52214,9 +52121,8 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "switch",
-        "void",
         "memory",
+        "switch",
         "comparison-tree"
       ],
       "loc": 1,
@@ -52604,8 +52510,8 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "bitwise",
-        "shift"
+        "shift",
+        "bitwise"
       ],
       "loc": 1,
       "refSource": "int togglebit(int x,int n){ return x ^ (1<<n); }",
@@ -52675,8 +52581,8 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "bitwise",
-        "shift"
+        "shift",
+        "bitwise"
       ],
       "loc": 1,
       "refSource": "int togglebit(int x,int n){ return x ^ (1<<n); }",
@@ -52747,8 +52653,8 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "bitwise",
-        "shift"
+        "shift",
+        "bitwise"
       ],
       "loc": 1,
       "refSource": "int togglebit(int x,int n){ return x ^ (1<<n); }",
@@ -52819,8 +52725,8 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "bitwise",
-        "shift"
+        "shift",
+        "bitwise"
       ],
       "loc": 1,
       "refSource": "int togglebit(int x,int n){ return x ^ (1<<n); }",
@@ -53756,7 +53662,6 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "cast",
         "narrow",
         "arithmetic"
       ],
@@ -53828,7 +53733,6 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "cast",
         "narrow",
         "arithmetic"
       ],
@@ -53901,7 +53805,6 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "cast",
         "narrow",
         "arithmetic"
       ],
@@ -53974,7 +53877,6 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "cast",
         "narrow",
         "arithmetic"
       ],
@@ -54395,7 +54297,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "unsigned-div-const",
+        "div-const",
+        "unsigned",
         "soft-div",
         "call"
       ],
@@ -54468,7 +54371,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "unsigned-div-const",
+        "div-const",
+        "unsigned",
         "magic-div"
       ],
       "loc": 1,
@@ -54541,7 +54445,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "unsigned-div-const",
+        "div-const",
+        "unsigned",
         "hw-div"
       ],
       "loc": 1,
@@ -54614,7 +54519,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "unsigned-div-const",
+        "div-const",
+        "unsigned",
         "magic-div"
       ],
       "loc": 1,
@@ -54687,7 +54593,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "unsigned-div-const",
+        "div-const",
+        "unsigned",
         "soft-div",
         "call"
       ],
@@ -54760,7 +54667,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "unsigned-div-const",
+        "div-const",
+        "unsigned",
         "magic-div"
       ],
       "loc": 1,
@@ -54833,7 +54741,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "unsigned-div-const",
+        "div-const",
+        "unsigned",
         "hw-div"
       ],
       "loc": 1,
@@ -54906,7 +54815,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "unsigned-div-const",
+        "div-const",
+        "unsigned",
         "magic-div"
       ],
       "loc": 1,
@@ -55543,7 +55453,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "unsigned-mod-const",
+        "mod-const",
+        "unsigned",
         "soft-div",
         "call"
       ],
@@ -55616,7 +55527,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "unsigned-mod-const",
+        "mod-const",
+        "unsigned",
         "magic-div"
       ],
       "loc": 1,
@@ -55689,7 +55601,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "unsigned-mod-const",
+        "mod-const",
+        "unsigned",
         "hw-div"
       ],
       "loc": 1,
@@ -55762,7 +55675,8 @@
       "language": "c",
       "features": [
         "arithmetic",
-        "unsigned-mod-const",
+        "mod-const",
+        "unsigned",
         "magic-div"
       ],
       "loc": 1,
@@ -55836,8 +55750,7 @@
       "features": [
         "union",
         "field",
-        "float",
-        "type-pun"
+        "float"
       ],
       "loc": 2,
       "refSource": "union F{float f;u32 u;};\nu32 upun(float x){ union F t; t.f=x; return t.u; }",
@@ -55906,8 +55819,7 @@
       "features": [
         "union",
         "field",
-        "float",
-        "type-pun"
+        "float"
       ],
       "loc": 2,
       "refSource": "union F{float f;u32 u;};\nu32 upun(float x){ union F t; t.f=x; return t.u; }",
@@ -55972,8 +55884,7 @@
       "features": [
         "union",
         "field",
-        "float",
-        "type-pun"
+        "float"
       ],
       "loc": 2,
       "refSource": "union F{float f;u32 u;};\nu32 upun(float x){ union F t; t.f=x; return t.u; }",
@@ -56038,8 +55949,7 @@
       "features": [
         "union",
         "field",
-        "float",
-        "type-pun"
+        "float"
       ],
       "loc": 2,
       "refSource": "union F{float f;u32 u;};\nu32 upun(float x){ union F t; t.f=x; return t.u; }",
@@ -56429,8 +56339,8 @@
         "union",
         "struct",
         "field",
-        "switch",
         "mixed-width",
+        "switch",
         "comparison-tree"
       ],
       "loc": 2,
@@ -56499,8 +56409,8 @@
         "union",
         "struct",
         "field",
-        "switch",
         "mixed-width",
+        "switch",
         "comparison-tree"
       ],
       "loc": 2,
@@ -56569,8 +56479,8 @@
         "union",
         "struct",
         "field",
-        "switch",
         "mixed-width",
+        "switch",
         "comparison-tree"
       ],
       "loc": 2,
@@ -56639,8 +56549,8 @@
         "union",
         "struct",
         "field",
-        "switch",
         "mixed-width",
+        "switch",
         "comparison-tree"
       ],
       "loc": 2,
@@ -56707,9 +56617,7 @@
       "compiler": "mwcc",
       "language": "c++",
       "features": [
-        "c++",
-        "method",
-        "this-ptr"
+        "method"
       ],
       "loc": 2,
       "refSource": "struct Vec{int x;int y;int len2(){ return x*x+y*y; }};\nextern \"C\" int Vec__len2(Vec*v){ return v->len2(); }",
@@ -56778,7 +56686,6 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "void",
         "call"
       ],
       "loc": 2,
@@ -56859,7 +56766,6 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "void",
         "call"
       ],
       "loc": 2,
@@ -56936,7 +56842,6 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "void",
         "call"
       ],
       "loc": 2,
@@ -57018,7 +56923,6 @@
       "compiler": "agbcc",
       "language": "c",
       "features": [
-        "cast",
         "zero-extend"
       ],
       "loc": 1,
@@ -57089,7 +56993,6 @@
       "compiler": "gcc",
       "language": "c",
       "features": [
-        "cast",
         "zero-extend"
       ],
       "loc": 1,
@@ -57161,7 +57064,6 @@
       "compiler": "ido",
       "language": "c",
       "features": [
-        "cast",
         "zero-extend"
       ],
       "loc": 1,
@@ -57245,7 +57147,6 @@
       "compiler": "mwcc",
       "language": "c",
       "features": [
-        "cast",
         "zero-extend"
       ],
       "loc": 1,

@@ -99,14 +99,14 @@ asmlift: [score] unsigned: 0 (match)
 
 ## Layout (pnpm workspace monorepo)
 
-| Package / app                                                                                               | What it is                                                               |
-| ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| [`packages/core`](packages/core/README.md) ([`@asmlift/core`](https://www.npmjs.com/package/@asmlift/core)) | The decompile pipeline                                                   |
-| [`packages/cli`](packages/cli/README.md) ([`@asmlift/cli`](https://www.npmjs.com/package/@asmlift/cli))     | The user-facing CLI package                                              |
-| [`packages/toolchains`](packages/toolchains/README.md)                                                      | The pinned calibration toolchains. Used only for the tests and benchmark |
-| `packages/bench-schema`                                                                                     | The shared benchmark result/manifest schema types                        |
-| [`apps/web`](apps/web/README.md)                                                                            | The webapp including the **Playground** and the **Benchmark**            |
-| [`apps/benchmark`](apps/benchmark/README.md)                                                                | The asmlift and m2c harness                                              |
+| Package / app                                                                                               | What it is                                                                |
+| ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| [`packages/core`](packages/core/README.md) ([`@asmlift/core`](https://www.npmjs.com/package/@asmlift/core)) | The decompile pipeline                                                    |
+| [`packages/cli`](packages/cli/README.md) ([`@asmlift/cli`](https://www.npmjs.com/package/@asmlift/cli))     | The user-facing CLI package                                               |
+| [`packages/toolchains`](packages/toolchains/README.md)                                                      | The pinned calibration toolchains. Used only for the tests and benchmark  |
+| [`packages/bench-schema`](packages/bench-schema/README.md)                                                  | The shared benchmark contract: result/manifest types + feature vocabulary |
+| [`apps/web`](apps/web/README.md)                                                                            | The webapp including the **Playground** and the **Benchmark**             |
+| [`apps/benchmark`](apps/benchmark/README.md)                                                                | The asmlift and m2c harness                                               |
 
 ## License
 

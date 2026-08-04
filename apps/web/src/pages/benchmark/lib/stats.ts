@@ -111,6 +111,17 @@ export function distinctFeatures(rows: FunctionResult[]): string[] {
   return featureStats(rows).map((f) => f.feature);
 }
 
+/** How many of these rows carry each key — the per-option counts a multi-select facet needs. */
+export function tally(rows: FunctionResult[], keysOf: (r: FunctionResult) => string[]): Map<string, number> {
+  const acc = new Map<string, number>();
+  for (const r of rows) {
+    for (const k of keysOf(r)) {
+      acc.set(k, (acc.get(k) ?? 0) + 1);
+    }
+  }
+  return acc;
+}
+
 export interface H2HRow<K extends string> {
   key: K;
   total: number;
