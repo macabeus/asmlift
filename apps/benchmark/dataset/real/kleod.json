@@ -131,7 +131,6 @@
       "sym": "ReadUnalignedU32",
       "features": [
         "pointer",
-        "cast",
         "memory",
         "shift"
       ],

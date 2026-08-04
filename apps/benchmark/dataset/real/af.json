@@ -101,8 +101,7 @@
     {
       "sym": "lbRk_IsLeapMonth",
       "features": [
-        "branch",
-        "arithmetic"
+        "branch"
       ],
       "prependC": "typedef int s32;\n#define lbRk_KYUU_LEAP_MONTH 13",
       "funcC": "s32 lbRk_IsLeapMonth(s32 month) {\n    if (month == lbRk_KYUU_LEAP_MONTH) {\n        return 1;\n    }\n\n    return 0;\n}",
@@ -137,8 +136,7 @@
       "features": [
         "branch",
         "arithmetic",
-        "pointer",
-        "nested"
+        "pointer"
       ],
       "prependC": "typedef short s16;\ntypedef int s32;\n#define TRUE 1\n#define FALSE 0",
       "funcC": "s32 chase_s3(s16* pValue, s16 target, s16 step) {\n    if (step) {\n        s32 diff = target - *pValue;\n\n        if (diff < 0) {\n            step = -step;\n        }\n\n        if (diff >= 0x8000) {\n            step = -step;\n            diff = -0xFFFF - -diff;\n        } else if (diff <= -0x8000) {\n            step = -step;\n            diff += 0xFFFF;\n        }\n\n        *pValue += step;\n\n        if ((diff * step) <= 0) {\n            *pValue = target;\n            return TRUE;\n        }\n\n    } else if (target == *pValue) {\n        return TRUE;\n    }\n    return FALSE;\n}",
@@ -159,8 +157,7 @@
       "sym": "check_percent_abs",
       "features": [
         "float",
-        "branch",
-        "nested"
+        "branch"
       ],
       "prependC": "typedef int s32;\ntypedef float f32;",
       "funcC": "f32 check_percent_abs(f32 x, f32 min, f32 max, f32 scale, s32 shiftMin) {\n    if ((-min <= x) && (x <= min)) {\n        return 0.0f;\n    }\n    if (x >= max) {\n        return 1.0f;\n    }\n    if (x <= -max) {\n        return -1.0f;\n    }\n    if (shiftMin) {\n        if (x > 0.0f) {\n            return (x - min) * scale;\n        } else {\n            return (x + min) * scale;\n        }\n    } else {\n        return x * scale;\n    }\n}",
@@ -404,8 +401,6 @@
       "features": [
         "float",
         "matrix",
-        "array",
-        "nested",
         "arithmetic"
       ],
       "funcC": "void Skin_Matrix_MulMatrix(MtxF* mfA, MtxF* mfB, MtxF* dest) {\n    f32 cx;\n    f32 cy;\n    f32 cz;\n    f32 cw;\n\n    f32 rx = mfA->xx;\n    f32 ry = mfA->xy;\n    f32 rz = mfA->xz;\n    f32 rw = mfA->xw;\n\n    cx = mfB->xx;\n    cy = mfB->yx;\n    cz = mfB->zx;\n    cw = mfB->wx;\n    dest->xx = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    cx = mfB->xy;\n    cy = mfB->yy;\n    cz = mfB->zy;\n    cw = mfB->wy;\n    dest->xy = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    cx = mfB->xz;\n    cy = mfB->yz;\n    cz = mfB->zz;\n    cw = mfB->wz;\n    dest->xz = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    cx = mfB->xw;\n    cy = mfB->yw;\n    cz = mfB->zw;\n    cw = mfB->ww;\n    dest->xw = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    rx = mfA->yx;\n    ry = mfA->yy;\n    rz = mfA->yz;\n    rw = mfA->yw;\n\n    cx = mfB->xx;\n    cy = mfB->yx;\n    cz = mfB->zx;\n    cw = mfB->wx;\n    dest->yx = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    cx = mfB->xy;\n    cy = mfB->yy;\n    cz = mfB->zy;\n    cw = mfB->wy;\n    dest->yy = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    cx = mfB->xz;\n    cy = mfB->yz;\n    cz = mfB->zz;\n    cw = mfB->wz;\n    dest->yz = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    cx = mfB->xw;\n    cy = mfB->yw;\n    cz = mfB->zw;\n    cw = mfB->ww;\n    dest->yw = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    rx = mfA->zx;\n    ry = mfA->zy;\n    rz = mfA->zz;\n    rw = mfA->zw;\n\n    cx = mfB->xx;\n    cy = mfB->yx;\n    cz = mfB->zx;\n    cw = mfB->wx;\n    dest->zx = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    cx = mfB->xy;\n    cy = mfB->yy;\n    cz = mfB->zy;\n    cw = mfB->wy;\n    dest->zy = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    cx = mfB->xz;\n    cy = mfB->yz;\n    cz = mfB->zz;\n    cw = mfB->wz;\n    dest->zz = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    cx = mfB->xw;\n    cy = mfB->yw;\n    cz = mfB->zw;\n    cw = mfB->ww;\n    dest->zw = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    rx = mfA->wx;\n    ry = mfA->wy;\n    rz = mfA->wz;\n    rw = mfA->ww;\n\n    cx = mfB->xx;\n    cy = mfB->yx;\n    cz = mfB->zx;\n    cw = mfB->wx;\n    dest->wx = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    cx = mfB->xy;\n    cy = mfB->yy;\n    cz = mfB->zy;\n    cw = mfB->wy;\n    dest->wy = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    cx = mfB->xz;\n    cy = mfB->yz;\n    cz = mfB->zz;\n    cw = mfB->wz;\n    dest->wz = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    cx = mfB->xw;\n    cy = mfB->yw;\n    cz = mfB->zw;\n    cw = mfB->ww;\n    dest->ww = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n}",
@@ -503,9 +498,7 @@
       "sym": "atans_table",
       "features": [
         "float",
-        "branch",
-        "table",
-        "global"
+        "branch"
       ],
       "funcC": "s16 atans_table(f32 x, f32 y) {\n    s32 tbl;\n\n    if (y >= 0.0f) {\n        if (x >= 0.0f) {\n            if (y <= x) {\n                if (y != 0.0f) {\n                    tbl = U_GetAtanTable(y, x);\n                } else {\n                    tbl = 0;\n                }\n            } else {\n                tbl = 0x4000 - U_GetAtanTable(x, y);\n            }\n        } else {\n            if (-x < y) {\n                tbl = U_GetAtanTable(-x, y) + 0x4000;\n            } else {\n                tbl = 0x8000 - U_GetAtanTable(y, -x);\n            }\n        }\n    } else if (x < 0.0f) {\n        if (-y <= -x) {\n            tbl = U_GetAtanTable(-y, -x) + 0x8000;\n        } else {\n            tbl = 0xC000 - U_GetAtanTable(-x, -y);\n        }\n    } else {\n        if (x < -y) {\n            tbl = U_GetAtanTable(x, -y) + 0xC000;\n        } else {\n            tbl = -U_GetAtanTable(-y, x);\n        }\n    }\n    return tbl;\n}",
       "prependC": "typedef unsigned char       u8;     /* unsigned  8-bit */\ntypedef unsigned short      u16;    /* unsigned 16-bit */\ntypedef unsigned long       u32;    /* unsigned 32-bit */\ntypedef unsigned long long  u64;    /* unsigned 64-bit */\ntypedef signed char         s8;     /* signed  8-bit */\ntypedef short               s16;    /* signed 16-bit */\ntypedef long                s32;    /* signed 32-bit */\ntypedef long long           s64;    /* signed 64-bit */\ntypedef float   f32;    /* single prec floating point */\ntypedef double  f64;    /* double prec floating point */\ntypedef struct xyz_t {\n    /* 0x0 */ f32 x;\n    /* 0x4 */ f32 y;\n    /* 0x8 */ f32 z;\n} xyz_t; // size = 0xC\n\ntypedef float MtxF_t[4][4];\ntypedef union {\n    MtxF_t mf;\n    struct {\n        float xx, yx, zx, wx, xy, yy, zy, wy, xz, yz, zz, wz, xw, yw, zw, ww;\n    };\n} MtxF; // size = 0x40\ntypedef long\tMtx_t[4][4];\n\ntypedef union {\n    Mtx_t\t\tm;\n    long long int\tforce_structure_alignment;\n} Mtx;",

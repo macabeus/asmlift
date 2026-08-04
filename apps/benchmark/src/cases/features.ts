@@ -57,7 +57,6 @@ export const JUDGEMENT = {
   bitfield: 'a declared C bitfield (`u32 x : 2`) is read or written',
   field: 'a named struct/union member is accessed',
   array: 'an array is indexed',
-  nested: 'nested aggregate access (`a[i][j]`, or a struct within a struct)',
   pointer: 'pointer arithmetic or dereference beyond plain member access',
   cast: 'an explicit cast that changes the value or its width',
   memory: 'bulk memory movement (copy/clear/compress), not any single load or store',
@@ -74,6 +73,36 @@ export const JUDGEMENT = {
   abs: 'absolute value is computed',
   baseline: 'a trivial function carrying no other feature',
 } as const;
+
+/** A NECESSARY condition for a JUDGEMENT tag: failing it makes the tag indefensible.
+ *
+ *  These tags are a human call — "is this *bulk* memory movement?" cannot be decided by a regex —
+ *  so the sufficient condition stays with the reviewer. But most of them have a floor that CAN be
+ *  decided, and the audit found tags sitting below it: `arithmetic` on a function whose whole
+ *  compiled form is `lui/jr/sb/nop`, `array` on a body containing no `[`, `table` on a body with no
+ *  array at all, `branch` on two straight-line assignments. Checking the floor catches the
+ *  fabrications without pretending the judgement is mechanical.
+ *
+ *  `global`, `memory`, `union`, `bitfield`, `pointer` and the type-ish tags have NO reliable floor and are
+ *  absent here on purpose: kleod spells several globals as address macros
+ *  (`#define gStreamPtr (*(u8**)0x03004D84)`), which emit a raw `.word 0x3004d84` rather than a
+ *  symbol, and `union`/`bitfield` need the project's headers to resolve. */
+export const JUDGEMENT_FLOOR: Record<string, (body: string, asm: string) => boolean> = {
+  arithmetic: (b) => /[+%]|(?<!-)-(?!>)|(?<!\/)\/(?![/*])|\*/.test(b),
+  array: (b) => /\[/.test(b),
+  table: (b) => /\w+\s*\[\s*[^\]\d\s]/.test(b), // indexed by something that is not a literal
+  cast: (b) =>
+    /\(\s*\w+\s*\*+\s*\)/.test(b) ||
+    /\(\s*(?:struct|union|enum|const|unsigned|signed|void|int|char|short|long|float|double|[us]\d+|f\d+|\w+_t|[A-Z]\w*)[\w\s]*\**\s*\)/.test(
+      b,
+    ),
+  struct: (b) => /\bstruct\b|\bunion\b|->|\.\s*[A-Za-z_]/.test(b),
+  field: (b) => /->|\.\s*[A-Za-z_]/.test(b),
+  fnptr: (_b, asm) => /\bjalr\b|\bblx\b|_call_via_r/.test(asm),
+  branch: (b, asm) =>
+    /\bif\b|\bswitch\b|\?|\bfor\b|\bwhile\b/.test(b) ||
+    /\bb(eq|ne|ge|gt|le|lt|hi|ls|cs|cc)\b|beqz|bnez|blez|bgtz|bltz|bgez/.test(asm),
+};
 
 export const KNOWN_FEATURES = new Set<string>([
   ...Object.keys(SOURCE_CHECKED),
