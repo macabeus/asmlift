@@ -546,7 +546,6 @@
         "float",
         "array",
         "arithmetic",
-        "call",
         "struct"
       ],
       "funcC": "void func_80012B14_13714(s16 camIndex, Vec *worldPos, Vec *outPos) {\n    f32 x;\n    f32 y;\n    f32 z;\n    f32 projectedX;\n    f32 projectedY;\n    f32 projectedZ;\n    HuCamera *camera;\n    HuMtx4F viewMtx;\n    f32 f2;\n    f32 f4;\n\n    camera = &gCameraList[camIndex];\n    guLookAtF(\n        viewMtx,\n        camera->pos.x,\n        camera->pos.y,\n        camera->pos.z,\n        camera->at.x,\n        camera->at.y,\n        camera->at.z,\n        camera->up.x,\n        camera->up.y,\n        camera->up.z);\n\n    x = worldPos->x;\n    y = worldPos->y;\n    z = worldPos->z;\n    x -= camera->pos.x;\n    y -= camera->pos.y;\n    z -= camera->pos.z;\n    projectedX = ((x * viewMtx[0][0]) + (y * viewMtx[1][0])) + (z * viewMtx[2][0]);\n    projectedY = ((x * viewMtx[0][1]) + (y * viewMtx[1][1])) + (z * viewMtx[2][1]);\n    projectedZ = ((x * viewMtx[0][2]) + (y * viewMtx[1][2])) + (z * viewMtx[2][2]);\n    x = HuMathSin(camera->fov[0] / 2.0f) / HuMathCos(camera->fov[0] / 2.0f) * projectedZ * (camera->screenScale.x / camera->screenScale.y);\n    y = (HuMathSin(camera->fov[0] / 2.0f) / HuMathCos(camera->fov[0] / 2.0f)) * projectedZ;\n    f2 = camera->screenPos.x / 4.0f;\n    outPos->x = (projectedX * (f2 / (-x))) + f2;\n    f4 = camera->screenPos.y / 4.0f;\n    outPos->y = ((projectedY * (f4 / y)) + f4);\n}",
@@ -565,7 +564,6 @@
         "float",
         "array",
         "arithmetic",
-        "call",
         "struct"
       ],
       "funcC": "void Hu3DCam3DToScreen(s16 camIndex, Vec *worldPos, Vec *outPos) {\n    f32 x;\n    f32 y;\n    f32 z;\n    f32 projectedX;\n    f32 projectedY;\n    f32 projectedZ;\n    HuCamera *camera;\n    HuMtx4F viewMtx;\n\n    camera = &gCameraList[camIndex];\n    guLookAtF(\n        viewMtx,\n        camera->pos.x,\n        camera->pos.y,\n        camera->pos.z,\n        camera->at.x,\n        camera->at.y,\n        camera->at.z,\n        camera->up.x,\n        camera->up.y,\n        camera->up.z);\n\n    x = worldPos->x;\n    y = worldPos->y;\n    z = worldPos->z;\n    x -= camera->pos.x;\n    y -= camera->pos.y;\n    z -= camera->pos.z;\n    projectedX = ((x * viewMtx[0][0]) + (y * viewMtx[1][0])) + (z * viewMtx[2][0]);\n    projectedY = ((x * viewMtx[0][1]) + (y * viewMtx[1][1])) + (z * viewMtx[2][1]);\n    projectedZ = ((x * viewMtx[0][2]) + (y * viewMtx[1][2])) + (z * viewMtx[2][2]);\n    x = HuMathSin(camera->fov[0] / 2.0f) / HuMathCos(camera->fov[0] / 2.0f) * projectedZ * ASPECT_RATIO;\n    y = (HuMathSin(camera->fov[0] / 2.0f) / HuMathCos(camera->fov[0] / 2.0f)) * projectedZ;\n    outPos->x = (projectedX * (SCREEN_WIDTH_CENTER / (-x))) + SCREEN_WIDTH_CENTER;\n    outPos->y = ((projectedY * (SCREEN_HEIGHT_CENTER / y)) + SCREEN_HEIGHT_CENTER);\n}",
@@ -584,8 +582,7 @@
         "switch",
         "table",
         "pointer",
-        "branch",
-        "call"
+        "branch"
       ],
       "funcC": "void DecodeData(void *src, void *dest, s32 len, EDecodeType decodeType) {\n    DecodeStruct decodeStruct;\n    DecodeStruct *decodePtr = &decodeStruct;\n    decodeStruct.src = (u8 *)src;\n    decodeStruct.dest = (u8 *)dest;\n    decodeStruct.len = len;\n    decodeStruct.chunkLen = 1024;\n\n    switch (decodeType) {\n        case DECODE_NONE:\n            HuDecodeNone(decodePtr);\n            break;\n\n        case DECODE_LZ:\n            HuDecodeLZ(decodePtr);\n            break;\n\n        case DECODE_SLIDE:\n            HuDecodeSlide(decodePtr);\n            break;\n\n        case DECODE_FSLIDE:\n        case DECODE_FSLIDE_2:\n            HuDecodeFslide(decodePtr);\n            break;\n\n        case DECODE_RLE:\n            HuDecodeRLE(decodePtr);\n            break;\n\n        default:\n            break;\n    }\n}",
       "prependC": "#include \"common.h\"\n#include \"decode.h\"\n#include \"rom.h\"",
@@ -604,8 +601,7 @@
         "pointer",
         "branch",
         "loop",
-        "nested-loop",
-        "call"
+        "nested-loop"
       ],
       "funcC": "void func_800230F8_23CF8(HmfData *arg0) {\n    s16 textureIndex;\n    s16 i, j;\n\n    textureIndex = 4; // TODO: why does this start at 4?\n\n    for (i = 0; i < arg0->unk12; i++) {\n        /* Skip entries marked as 0xFF */\n        if (arg0->unk84[i].unk9 == 0xFF) {\n            continue;\n        }\n\n        /* Find first entry with different unkC value */\n        for (j = 0; j < i; j++) {\n            if (arg0->unk84[i].unkC == arg0->unk84[j].unkC) {\n                break;\n            }\n        }\n\n        /* Copy or assign texture indices */\n        if (j != i) {\n            arg0->unk84[i].unk3 = arg0->unk84[j].unk3;\n            arg0->unk84[i].unk4 = arg0->unk84[j].unk4;\n        } else {\n            arg0->unk84[i].unk3 = textureIndex++;\n            if (arg0->unk84[i].unkC->unk_30 != NULL) {\n                arg0->unk84[i].unk4 = textureIndex++;\n            }\n\n            if (textureIndex > 16) {\n                osSyncPrintf(\"Texture Anime Over\\n\");\n                return;\n            }\n        }\n    }\n}",
       "prependC": "#include \"common.h\"\n#include \"mallocblock.h\"",
@@ -623,7 +619,6 @@
         "struct",
         "pointer",
         "loop",
-        "call",
         "global"
       ],
       "funcC": "s16 HuSprGrpCreate(u16 arg0, u16 arg1) {\n    HuSprGrp *temp_v0_2;\n    HuSprite **var_s2;\n    HuSprite *temp_v0_3;\n    s16 var_s4;\n    s16 i;\n\n    for (i = 0; i < HUSPR_GRP_MAX; i++) {\n        if (HuSprGrpData[i] == NULL) {\n            break;\n        }\n    }\n    if (i == HUSPR_GRP_MAX) {\n        return -1;\n    }\n    var_s4 = i;\n    temp_v0_2 = func_80052468_53068(arg0, arg1);\n    if (temp_v0_2 == NULL) {\n        return -1;\n    }\n    HuSprGrpData[var_s4] = temp_v0_2;\n    temp_v0_2->unk_0A = 0;\n    temp_v0_2->unk_0C = 1;\n    var_s2 = temp_v0_2->members;\n    for (i = 0; i < arg0; i++) {\n        *(var_s2++) = temp_v0_3 = HuMemAlloc(0x210);\n        if (temp_v0_3 == NULL) {\n            HuSprGrpKill(var_s4);\n            return -1;\n        }\n        temp_v0_2->unk_0A++;\n    }\n    func_80052E68_53A68(temp_v0_2, arg0);\n    return var_s4;\n}",
@@ -654,7 +649,6 @@
       "sym": "HuMemAllocTag",
       "features": [
         "sizeof",
-        "call",
         "pointer",
         "struct",
         "bitwise"

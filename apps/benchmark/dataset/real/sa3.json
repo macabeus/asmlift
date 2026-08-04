@@ -81,8 +81,7 @@
         "arithmetic",
         "int64",
         "shift",
-        "do-while",
-        "call"
+        "do-while"
       ],
       "funcC": "s32 SA2_LABEL(sub_8085654)(s32 a, s32 b, s32 c, u8 d, u8 e)\n{\n    do {\n        a -= (((s64)c * (s64)(a - b))) >> d;\n        e -= 1;\n    } while (e != 0xFF);\n\n    return a;\n}",
       "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L509-L517"
@@ -92,8 +91,7 @@
       "features": [
         "arithmetic",
         "int64",
-        "shift",
-        "call"
+        "shift"
       ],
       "funcC": "u32 SA2_LABEL(sub_80855C0)(s32 a, s32 b, s32 c, u8 d)\n{\n    s64 e = (s64)c * (a - b);\n\n    return a - (e >> d);\n}",
       "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L484-L489"
@@ -101,9 +99,7 @@
     {
       "sym": "sa2__sub_80856DC",
       "features": [
-        "arithmetic",
-        "soft-div",
-        "call"
+        "arithmetic"
       ],
       "funcC": "s32 SA2_LABEL(sub_80856DC)(s32 a, s32 b, s32 c) { return (a * 7 + b * 6 - c) / 12; }",
       "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L529-L529"
@@ -198,8 +194,7 @@
       "features": [
         "loop",
         "bitwise",
-        "shift",
-        "call"
+        "shift"
       ],
       "funcC": "u32 Base10DigitsToHexNibbles(u16 num)\n{\n    u8 i;\n    u16 result;\n    u8 lowDigit;\n    u16 remainder = num;\n\n    result = 0;\n    for (i = 0; i < 4; i++) {\n        s32 divisor = Div(remainder, 10);\n        lowDigit = remainder - (divisor * 10);\n        remainder = divisor;\n\n        result |= lowDigit << (i * 4);\n    }\n\n    return result;\n}\n",
       "note": "Div() resolves to an inline macro (int division) — soft-div idiom.",
@@ -226,9 +221,7 @@
         "memory",
         "sizeof",
         "shift",
-        "bitwise",
-        "soft-div",
-        "call"
+        "bitwise"
       ],
       "prependC": "#include <string.h>\nstatic const u8 unkFractions[8] = { I(Q(0.5 * 2)), I(Q(0.0 * 2)), I(Q(1.0 * 2)), I(Q(1.5 * 2)), I(Q(3.0 * 2)), I(Q(3.5 * 2)), I(Q(2.5 * 2)), I(Q(2.0 * 2)) };",
       "funcC": "s16 sa2__sub_8004418(s16 x, s16 y)\n{\n    s16 fraction;\n    s32 result;\n    u8 index = 0;\n    u8 array[8];\n    memcpy(array, unkFractions, sizeof(array));\n\n    if ((x | y) == 0) {\n        result = -1;\n    } else {\n        if (x <= 0) {\n            x = -x;\n            index = 4;\n        }\n        if (y <= 0) {\n            y = -y;\n            index += 2;\n        }\n        if (x >= y) {\n            // fraction = y*0.5 / x\n            y *= Q(0.5);\n\n            if (x == 0) {\n                fraction = y;\n            } else {\n                fraction = y / x;\n            }\n        } else {\n            index += 1;\n\n            x *= Q(0.5);\n\n            if (y == 0) {\n                fraction = x;\n            } else {\n                fraction = x / y;\n            }\n        }\n\n        if (array[index] & 0x01) {\n            fraction = Q(0.5) - fraction;\n        }\n\n        {\n            s32 val = array[index] * Q(0.5);\n            fraction += val;\n            result = ((u32)(fraction << 22) >> 22);\n        }\n    }\n\n    return result;\n}",
@@ -285,9 +278,7 @@
         "array",
         "branch",
         "global",
-        "shift",
-        "call",
-        "mmio"
+        "shift"
       ],
       "prependC": "#include \"core.h\"\n#include \"input_recorder.h\"",
       "funcC": "void GetInput(void)\n{\n    s8 i;\n    u8 *repeatKeyCounters = gRepeatedKeysTestCounter, *firstIntervals = gKeysFirstRepeatIntervals,\n       *continuedHoldIntervals = gKeysContinuedRepeatIntervals;\n\n    gInput = (~REG_KEYINPUT & KEYS_MASK);\n\n    // My guess is that whilst the input recorder\n    // is running we still want to know the actual\n    // input. For example; to be able to know when\n    // to exit the demo\n    gPhysicalInput = gInput;\n\n#ifndef COLLECT_RINGS_ROM\n    if (gInputRecorder.mode == RECORDER_RECORD) {\n        InputRecorderWrite(gInput);\n    } else if (gInputRecorder.mode == RECORDER_PLAYBACK) {\n        gInput = InputRecorderRead();\n    }\n#endif\n\n    gPressedKeys = (gInput ^ gPrevInput) & gInput;\n    gReleasedKeys = (gInput ^ gPrevInput) & gPrevInput;\n    gPrevInput = gInput;\n\n    // Repeated keys will be the currently pressed keys\n    gRepeatedKeys = gPressedKeys;\n\n    // Calculate the next repeated state for every key\n    for (i = 0; i < 10; i++) {\n        if (!GetBit(gInput, i)) {\n            // If a key is not pressed, reset its counter\n            // to the settings for that key's\n            // first repeat interval\n            repeatKeyCounters[i] = firstIntervals[i];\n        } else if (repeatKeyCounters[i] > 0) {\n            // If the key is not yet ready to be repeated\n            // continue to wait\n            repeatKeyCounters[i]--;\n        } else {\n            // If the key is ready to be repeated,\n            // add the key to the repeated keys\n            gRepeatedKeys |= 1 << i;\n            // And reset its counter to the settings\n            // for continued hold interval\n            repeatKeyCounters[i] = continuedHoldIntervals[i];\n        }\n    }\n}",
@@ -306,8 +297,7 @@
         "pointer",
         "global",
         "bitwise",
-        "cast",
-        "mmio"
+        "cast"
       ],
       "prependC": "#include \"core.h\"\n#include \"flags.h\"",
       "funcC": "void sa2__sub_8007858(u8 param0, int_vcount minY, int_vcount maxY, u16 param3, u16 param4)\n{\n    u16 *cursor;\n\n    gFlags |= FLAGS_EXECUTE_HBLANK_COPY;\n\n    gHBlankCopyTarget = (void *)&((u8 *)&REG_BG0HOFS)[param0 * 4];\n    gHBlankCopySize = 4;\n\n    cursor = &((u16 *)gBgOffsetsHBlankPrimary)[minY * 2];\n\n    param4 = (param4 - minY) & 0x1FF;\n    param3 &= 0x1FF;\n\n    while (minY < maxY) {\n        *cursor = param3;\n        cursor++;\n        *cursor = param4--;\n        cursor++;\n\n        minY++;\n    }\n}",
@@ -325,8 +315,7 @@
         "pointer",
         "global",
         "bitwise",
-        "arithmetic",
-        "mmio"
+        "arithmetic"
       ],
       "prependC": "#include \"core.h\"\n#include \"flags.h\"",
       "funcC": "void sa2__sub_8007958(u8 bg, int_vcount minY, int_vcount maxY, s16 param3, s8 param4, u16 param5, u16 param6)\n{\n    u16 *cursor;\n\n    gFlags |= FLAGS_EXECUTE_HBLANK_COPY;\n\n    gHBlankCopyTarget = (void *)&((u8 *)&REG_BG0HOFS)[bg * 4];\n    gHBlankCopySize = 4;\n\n    cursor = &((u16 *)gBgOffsetsHBlankPrimary)[minY * 2];\n\n    while (minY < maxY) {\n        *cursor = (param3 + param5) & 0x1FF;\n        cursor++;\n        *cursor = param6;\n        cursor++;\n\n        param3 = -(param3 + param4);\n        param4 = -param4;\n\n        minY++;\n    }\n}\n",
@@ -340,9 +329,7 @@
     {
       "sym": "sa2__sub_80856F8",
       "features": [
-        "arithmetic",
-        "soft-div",
-        "call"
+        "arithmetic"
       ],
       "funcC": "s32 SA2_LABEL(sub_80856F8)(s32 a, s32 b, s32 c) { return ((b * 6 - a) + c * 7) / 12; }",
       "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L531-L531"
@@ -448,12 +435,9 @@
         "global",
         "struct",
         "loop",
-        "dma",
-        "call",
         "nested-loop",
         "sizeof",
-        "bitwise",
-        "mmio"
+        "bitwise"
       ],
       "prependC": "#include \"core.h\"\n#include \"flags.h\"\n#include \"sprite.h\"",
       "funcC": "void ProcessOamBuffers(void)\n{\n    OamData *dstOam = &gOamBuffer[0];\n    u8 i = 0;\n    s32 r3;\n\n    for (r3 = 0; r3 < 32; r3++) {\n        s8 index = gOamMallocOrders_StartIndex[r3];\n\n        while (index != -1) {\n            u8 newI;\n            u8 *byteArray = gOamMallocCopiedOrder;\n            DmaCopy16(3, &gOamMallocBuffer[index], dstOam, sizeof(OamDataShort));\n            dstOam++;\n\n            byteArray += index;\n            newI = i++;\n            *byteArray = newI;\n            index = gOamMallocBuffer[index].split.fractional;\n        };\n    }\n\n    if (gFlags & FLAGS_800) {\n        r3 = gOamFreeIndex;\n        dstOam = &gOamBuffer[r3];\n\n        while (r3 < gOamFirstPausedIndex) {\n            DmaFill16(3, 0x200, dstOam, sizeof(OamDataShort));\n            dstOam++;\n            r3++;\n        }\n    } else if (gFlags & FLAGS_PAUSE_GAME) {\n        /* Push all active OAM entries to te end of OAM temporarily while\n         * the game is paused */\n        s32 k, l;\n        r3 = gOamFreeIndex - 1;\n        dstOam = &gOamBuffer[r3];\n\n        for (k = l = 0; r3 >= 0;) {\n            s32 size = sizeof(OamDataShort);\n            DmaCopy16(3, dstOam - k, &gOamBuffer[OAM_ENTRY_COUNT - 1 - l], size);\n            k++, r3--, l++;\n        }\n\n        // _08005A5E\n\n        gOamFirstPausedIndex = OAM_ENTRY_COUNT - gOamFreeIndex;\n\n        for (r3 = 0; r3 < gOamFirstPausedIndex; r3++) {\n            DmaFill16(3, 0x200, &gOamBuffer[r3], sizeof(OamDataShort));\n#ifndef NON_MATCHING\n            // unlike when using --, using ++ changes the condition to something entirely\n            // different unless we tell the compiler that we want to use r3's values\n            // (without actually doing so)\n            asm(\"\" ::\"r\"(r3));\n#endif\n        }\n\n    } else {\n        gOamFirstPausedIndex = 0;\n    }\n\n    gOamFreeIndex = 0;\n    if (gFlags & FLAGS_4000) {\n        CpuFill32(-1, gOamMallocOrders_StartIndex, sizeof(gOamMallocOrders_StartIndex));\n        CpuFill32(-1, gOamMallocOrders_EndIndex, sizeof(gOamMallocOrders_EndIndex));\n    } else {\n        DmaFill32(3, -1, gOamMallocOrders_StartIndex, sizeof(gOamMallocOrders_StartIndex));\n        DmaFill32(3, -1, gOamMallocOrders_EndIndex, sizeof(gOamMallocOrders_EndIndex));\n    }\n}",
@@ -463,9 +447,7 @@
     {
       "sym": "sa2__sub_80078D4",
       "features": [
-        "mmio",
         "global",
-        "dma",
         "bitwise",
         "shift"
       ],
@@ -480,8 +462,7 @@
         "array",
         "loop",
         "memory",
-        "nested-loop",
-        "call"
+        "nested-loop"
       ],
       "funcC": "void PackSaveSector(SaveSectorData *sector, SaveGame *save)\n{\n    s16 i;\n    s16 j;\n    s16 k;\n\n    sector->header.magicNumber = 0x47544E4C;\n    sector->header.sectorId += 1;\n    sector->playerId = save->playerId;\n\n    for (i = 0; i < 6; i++) {\n        sector->playerName[i] = save->playerName[i];\n    }\n\n    sector->unk18 = 0;\n    sector->unlockedCharacters = save->unlockedCharacters;\n    sector->unlockedZones = save->unlockedZones;\n    sector->continueZone = save->continueZone;\n    sector->unk1C = 0;\n\n    for (i = 0; i < 7; i++) {\n        sector->chaoCount[i] = save->chaoCount[i];\n    }\n\n    for (i = 0; i < 7; i++) {\n        sector->specialKeys[i] = save->specialKeys[i];\n    }\n\n    for (i = 0; i < 9; i++) {\n        sector->unlockedStages[i] = save->unlockedStages[i];\n    }\n\n    for (i = 0; i < 9; i++) {\n        for (j = 0; j < 4; j++) {\n            sector->collectedMedals[i][j] = save->collectedMedals[i][j];\n        }\n    }\n\n    sector->collectedEmeralds = save->collectedEmeralds;\n    sector->unk62 = save->unk34;\n    sector->unlockFlags = save->unlockFlags;\n    sector->vsWins = save->vsWins;\n    sector->vsDraws = save->vsDraws;\n    sector->vsLosses = save->vsLosses;\n    sector->unk67 = 0;\n\n    for (i = 0; i < 10; i++) {\n        sector->vsRecords[i].slotFilled = save->vsRecords[i].slotFilled;\n        sector->vsRecords[i].wins = save->vsRecords[i].wins;\n        sector->vsRecords[i].draws = save->vsRecords[i].draws;\n        sector->vsRecords[i].losses = save->vsRecords[i].losses;\n\n        sector->vsRecords[i].playerId = save->vsRecords[i].playerId;\n\n        for (j = 0; j < 6; j++) {\n            sector->vsRecords[i].playerName[j] = save->vsRecords[i].playerName[j];\n        }\n    }\n\n#define Zone i\n#define Act  j\n#define Rank k\n    for (Zone = 0; Zone < (s32)ARRAY_COUNT(save->timeRecords.table); Zone++) {\n        for (Act = 0; Act < (s32)ARRAY_COUNT(save->timeRecords.table[0]); Act++) {\n            for (Rank = 0; Rank < (s32)ARRAY_COUNT(save->timeRecords.table[0][0]); Rank++) {\n                sector->timeRecords.table[Zone][Act][Rank].character1 = save->timeRecords.table[Zone][Act][Rank].character1;\n                sector->timeRecords.table[Zone][Act][Rank].character2 = save->timeRecords.table[Zone][Act][Rank].character2;\n                sector->timeRecords.table[Zone][Act][Rank].time = save->timeRecords.table[Zone][Act][Rank].time;\n            }\n        }\n    }\n#undef Rank\n#undef Act\n#undef Zone\n\n    switch (save->buttonConfig.jump) {\n        case A_BUTTON:\n            sector->buttonConfig.jump = 1;\n            break;\n        case B_BUTTON:\n            sector->buttonConfig.attack = 1;\n            break;\n        case R_BUTTON:\n            sector->buttonConfig.trick = 1;\n            break;\n    }\n\n    switch (save->buttonConfig.attack) {\n        case A_BUTTON:\n            sector->buttonConfig.jump = 2;\n            break;\n        case B_BUTTON:\n            sector->buttonConfig.attack = 2;\n            break;\n        case R_BUTTON:\n            sector->buttonConfig.trick = 2;\n            break;\n    }\n\n    switch (save->buttonConfig.trick) {\n        case A_BUTTON:\n            sector->buttonConfig.jump = 4;\n            break;\n        case B_BUTTON:\n            sector->buttonConfig.attack = 4;\n            break;\n        case R_BUTTON:\n            sector->buttonConfig.trick = 4;\n            break;\n    }\n\n    sector->difficulty = save->difficulty;\n    sector->disableTimeLimit = save->disableTimeLimit;\n    sector->language = save->language;\n    sector->unk367 = 0;\n    sector->checksum = GetSaveSectorChecksum(sector);\n}",
       "prependC": "#include \"global.h\"\n#include \"core.h\"\n#include \"flags.h\"\n#include \"lib/m4a/m4a.h\"\n#include \"lib/agb_flash/agb_flash.h\"\n#include \"lib/agb_flash/flash_internal.h\"\n#include \"malloc_ewram.h\"\n#include \"malloc_vram.h\"\n#include \"game/save.h\"\n#include \"game/stage.h\"\n#include \"gba/defines.h\"\n#include \"constants/characters.h\"\n#include \"constants/zones.h\"",
@@ -496,13 +477,11 @@
       "sym": "sub_804DC38",
       "features": [
         "switch",
-        "soft-div",
         "shift",
         "struct",
         "field",
         "loop",
-        "bitwise",
-        "call"
+        "bitwise"
       ],
       "funcC": "u16 sub_804DC38(u8 kind, s32 worldX, s32 worldY, MapEntity *me)\n{\n    s32 r0;\n    s32 r1;\n    s32 r2_32;\n    s16 r2;\n    bool32 r6;\n    u16 i;\n\n    // TODO(Jace): This was likely not written this way, and might actually be a bug?\n    //             I don't think MapEntity structs are always aligned in memory.\n    u32 data = *((u32 *)&me->d.uData[1]);\n    if (data & 0x00FFFF00) {\n        if (me->d.uData[3] < me->d.uData[2]) {\n            r2_32 = (me->d.uData[2] * (TILE_WIDTH / 2));\n            r1 = worldX;\n            r0 = worldX + (me->d.sData[0] * TILE_WIDTH);\n            r6 = FALSE;\n        } else {\n            r2_32 = (me->d.uData[3] * (TILE_WIDTH / 2));\n            r1 = worldY;\n            r0 = worldY + (me->d.sData[1] * TILE_WIDTH);\n            r6 = TRUE;\n        }\n\n        r2 = ((r1 - (r0 + r2_32)) << 14) / r2_32;\n        if (r2 >= 0) {\n            for (i = 0; (i < Q(1)) && (r2 > SIN(i));) {\n                i += 4;\n            }\n\n            switch (kind) {\n                case 0: {\n                    return Q(2) - i;\n                } break;\n\n                case 1: {\n                    if (r6) {\n                        return i;\n                    } else {\n                        return Q(2) - i;\n                    }\n                } break;\n\n                case 2: {\n                    if (!r6) {\n                        return i;\n                    } else {\n                        return Q(2) - i;\n                    }\n                } break;\n\n                default: {\n                    return i;\n                }\n            }\n\n        } else {\n            for (i = Q(2); (i < Q(3)) && (r2 < SIN(i));) {\n                i += 4;\n            }\n\n            switch (kind) {\n                case 0: {\n                    return i;\n                } break;\n\n                case 1: {\n                    if (!r6) {\n                        return i;\n                    } else {\n                        return Q(6) - i;\n                    }\n                } break;\n\n                case 2: {\n                    if (r6) {\n                        return i;\n                    } else {\n                        return Q(6) - i;\n                    }\n                } break;\n\n                case 3: {\n                    return Q(6) - i;\n                } break;\n            }\n        }\n    }\n\n    return 0;\n}",
       "prependC": "#include \"global.h\"\n#include \"trig.h\"\n#include \"game/interactables/platform_shared.h\"\n#include \"game/camera.h\"\n#include \"game/entity.h\"\n#include \"game/stage.h\"",
@@ -514,7 +493,6 @@
       "features": [
         "switch",
         "shift",
-        "mmio",
         "global",
         "loop",
         "bitwise"
@@ -529,8 +507,7 @@
         "bitwise",
         "ternary",
         "struct",
-        "field",
-        "call"
+        "field"
       ],
       "funcC": "void sub_802DFC8(s16 direction, Sprite *s)\n{\n    s32 mask = 0;\n    s32 variant;\n\n    if (direction & 0x8) {\n        variant = 6;\n\n        mask = (direction & 1) ? SPRITE_FLAG(X_FLIP, 1) : 0;\n    } else if (direction & 0x4) {\n        variant = 4;\n\n        if (direction & 0x2) {\n            mask = SPRITE_FLAG(X_FLIP, 1);\n        }\n\n        if (direction & 0x1) {\n            mask |= SPRITE_FLAG(Y_FLIP, 1);\n        }\n    } else if (direction & 0x2) {\n        variant = 2;\n\n        if (direction & 0x1) {\n            mask = SPRITE_FLAG(X_FLIP, 1);\n        }\n    } else {\n        variant = 0;\n\n        if (direction & 0x1) {\n            mask = SPRITE_FLAG(Y_FLIP, 1);\n        }\n    }\n\n    if (gStageData.gameMode != GAME_MODE_MP_SINGLE_PACK) {\n        if ((gStageData.act >= ACT_1) && (gStageData.act <= ACT_BONUS_CAPSULE)) {\n            if (gStageData.zone == ZONE_6) {\n                s->tiles = ALLOC_TILES(ANIM_SPRING_6);\n                s->anim = ANIM_SPRING_6;\n            } else if (gStageData.zone == ZONE_4) {\n                s->tiles = ALLOC_TILES(ANIM_SPRING_4);\n                s->anim = ANIM_SPRING_4;\n            } else {\n                s->tiles = ALLOC_TILES(ANIM_SPRING);\n                s->anim = ANIM_SPRING;\n            }\n        } else {\n            s->tiles = ALLOC_TILES(ANIM_SPRING);\n            s->anim = ANIM_SPRING;\n        }\n    } else {\n        s->tiles = ALLOC_TILES(ANIM_SPRING);\n        s->anim = ANIM_SPRING;\n        mask |= SPRITE_FLAG_MASK_MOSAIC;\n    }\n\n    s->variant = variant;\n    s->oamFlags = SPRITE_OAM_ORDER(24);\n    s->animCursor = 0;\n    s->qAnimDelay = Q(0);\n    s->prevVariant = -1;\n    s->animSpeed = SPRITE_ANIM_SPEED(1.0);\n    s->palId = 0;\n    s->hitboxes[0].index = HITBOX_STATE_INACTIVE;\n    s->frameFlags = mask | SPRITE_FLAG(PRIORITY, 1);\n}",
       "prependC": "#include \"global.h\"\n#include \"module_unclear.h\"\n#include \"core.h\"\n#include \"sprite.h\"\n#include \"trig.h\"\n#include \"malloc_vram.h\"\n#include \"game/camera.h\"\n#include \"game/entity.h\"\n#include \"game/player.h\"\n#include \"game/player_callbacks.h\"\n#include \"game/stage.h\"\n#include \"constants/animations.h\"\n#include \"constants/anim_sizes.h\"\n#include \"constants/move_states.h\"\n#include \"constants/songs.h\"\n#include \"constants/zones.h\"",
@@ -548,8 +525,7 @@
         "struct",
         "field",
         "branch",
-        "global",
-        "call"
+        "global"
       ],
       "funcC": "void sub_806132C(Hariisen *enemy)\n{\n    u8 *vram = VramMalloc(18);\n    Sprite2 *s = &enemy->s;\n\n    s->tiles = vram;\n    vram += (gUnknown_080D2044[0].numTiles * TILE_SIZE_4BPP);\n    s->anim = gUnknown_080D2044[0].anim;\n    s->variant = gUnknown_080D2044[0].variant;\n    s->prevVariant = -1;\n    s->x = TO_WORLD_POS_RAW(I(enemy->qPos.x), enemy->region[0]) - gCamera.x;\n    s->y = TO_WORLD_POS_RAW(I(enemy->qPos.y), enemy->region[1]) - gCamera.y;\n    s->oamFlags = 0x480;\n    s->animCursor = 0;\n    s->qAnimDelay = 0;\n    s->animSpeed = 0x10;\n    s->palId = 0;\n    s->frameFlags = 0x1000;\n    s->hitboxes[0].index = -1;\n    UpdateSpriteAnimation((Sprite *)s);\n\n    s = &enemy->s2;\n    s->tiles = vram;\n    vram += (gUnknown_080D2044[3].numTiles * TILE_SIZE_4BPP);\n    s->anim = gUnknown_080D2044[3].anim;\n    s->variant = gUnknown_080D2044[3].variant;\n    s->prevVariant = -1;\n    s->x = TO_WORLD_POS_RAW(I(enemy->qPos.x), enemy->region[0]) - gCamera.x;\n    s->y = TO_WORLD_POS_RAW(I(enemy->qPos.y), enemy->region[1]) - gCamera.y;\n    s->oamFlags = 0x4C0;\n    s->animCursor = 0;\n    s->qAnimDelay = 0;\n    s->animSpeed = 0x10;\n    s->palId = 0;\n    s->frameFlags = 0x1000;\n    s->hitboxes[0].index = -1;\n    UpdateSpriteAnimation((Sprite *)s);\n\n    s = &enemy->s3;\n    s->tiles = vram;\n    s->anim = gUnknown_080D2044[4].anim;\n    s->variant = gUnknown_080D2044[4].variant;\n    s->prevVariant = -1;\n    s->x = TO_WORLD_POS_RAW(I(enemy->qPos.x), enemy->region[0]) - gCamera.x;\n    s->y = TO_WORLD_POS_RAW(I(enemy->qPos.y), enemy->region[1]) - gCamera.y;\n    s->oamFlags = 0x4C0;\n    s->animCursor = 0;\n    s->qAnimDelay = 0;\n    s->animSpeed = 0x10;\n    s->palId = 0;\n    s->frameFlags = 0x1000;\n    s->hitboxes[0].index = -1;\n    UpdateSpriteAnimation((Sprite *)s);\n}",
       "prependC": "#include \"global.h\"\n#include \"core.h\"\n#include \"flags.h\"\n#include \"trig.h\"\n#include \"malloc_vram.h\"\n#include \"code_z_1.h\"\n#include \"game/camera.h\"\n#include \"game/enemies/hariisen.h\"\n#include \"game/enemy_unknown.h\"\n#include \"game/entity.h\"\n#include \"game/stage.h\"\n#include \"module_unclear.h\"",
@@ -568,8 +544,7 @@
         "struct",
         "field",
         "branch",
-        "bitwise",
-        "call"
+        "bitwise"
       ],
       "funcC": "void sub_804D360(Sprite *s, s16 i, s16 param2)\n{\n    u32 flags = 0;\n\n    switch (i) {\n        case 0: {\n            flags |= SPRITE_FLAG(X_FLIP, 1);\n            if (param2 == 2) {\n                flags |= SPRITE_FLAG(Y_FLIP, 1);\n            }\n        } break;\n\n        case 1: {\n            if (param2 == 2) {\n                flags |= SPRITE_FLAG(Y_FLIP, 1);\n            }\n        } break;\n\n        case 2: {\n            flags |= SPRITE_FLAG(Y_FLIP, 1);\n\n            if (param2 == 0) {\n                flags |= SPRITE_FLAG(X_FLIP, 1);\n            }\n        } break;\n\n        case 3: {\n            if (param2 == 0) {\n                flags |= SPRITE_FLAG(X_FLIP, 1);\n            }\n        } break;\n    }\n\n    s->tiles = ALLOC_TILES_VARIANT(ANIM_MAZE, 6);\n    s->anim = ANIM_MAZE;\n    s->variant = 6;\n    s->oamFlags = SPRITE_OAM_ORDER(24);\n    s->animCursor = 0;\n    s->qAnimDelay = 0;\n    s->qAnimDelay = 0;\n    s->prevVariant = -1;\n    s->animSpeed = SPRITE_ANIM_SPEED(1.0);\n    s->palId = 0;\n    s->hitboxes[0].index = -1;\n    s->frameFlags = flags | SPRITE_FLAG(PRIORITY, 1);\n    UpdateSpriteAnimation(s);\n}",
       "prependC": "#include \"global.h\"\n#include \"module_unclear.h\"\n#include \"malloc_vram.h\"\n#include \"game/camera.h\"\n#include \"game/entity.h\"\n#include \"game/player.h\"\n#include \"game/player_callbacks.h\"\n#include \"game/stage.h\"\n#include \"constants/animations.h\"\n#include \"constants/anim_sizes.h\"\n#include \"constants/move_states.h\"",
@@ -584,7 +559,6 @@
     {
       "sym": "Sio32MultiLoadIntr",
       "features": [
-        "mmio",
         "global",
         "branch",
         "bitwise"
@@ -605,8 +579,7 @@
         "bitwise",
         "ternary",
         "struct",
-        "field",
-        "call"
+        "field"
       ],
       "funcC": "void sub_803213C(u8 unk38, u8 unk39, Sprite *s)\n{\n    u32 mask = (unk39 & 0x1) ? SPRITE_FLAG(X_FLIP, 1) : 0;\n\n    if (gStageData.gameMode != GAME_MODE_MP_SINGLE_PACK) {\n        if (unk38 != 0) {\n            s->tiles = ALLOC_TILES(ANIM_RAMP);\n            s->anim = ANIM_RAMP;\n            s->variant = 0;\n        } else {\n            s->tiles = ALLOC_TILES_VARIANT(ANIM_RAMP, 1);\n            s->anim = ANIM_RAMP;\n            s->variant = 1;\n        }\n    } else {\n        s->tiles = ALLOC_TILES_VARIANT(ANIM_RAMP, 1);\n        s->anim = ANIM_RAMP;\n        s->variant = 1;\n        mask |= SPRITE_FLAG(MOSAIC, 1);\n    }\n\n    s->oamFlags = SPRITE_OAM_ORDER(24);\n    s->animCursor = 0;\n    s->qAnimDelay = Q(0);\n    s->prevVariant = -1;\n    s->animSpeed = SPRITE_ANIM_SPEED(1.0);\n    s->palId = 0;\n    s->hitboxes[0].index = HITBOX_STATE_INACTIVE;\n    s->frameFlags = SPRITE_FLAG(PRIORITY, 1) | mask;\n}",
       "prependC": "#include \"global.h\"\n#include \"module_unclear.h\"\n#include \"core.h\"\n#include \"sprite.h\"\n#include \"trig.h\"\n#include \"malloc_vram.h\"\n#include \"lib/m4a/m4a.h\"\n#include \"game/camera.h\"\n#include \"game/entity.h\"\n#include \"game/player.h\"\n#include \"game/interactables/ramp.h\"\n#include \"game/player_callbacks.h\"\n#include \"game/stage.h\"\n#include \"constants/animations.h\"\n#include \"constants/anim_sizes.h\"\n#include \"constants/move_states.h\"\n#include \"constants/songs.h\"\n#include \"constants/zones.h\"",

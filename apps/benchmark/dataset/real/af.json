@@ -373,8 +373,7 @@
       "sym": "search_position_angleY",
       "features": [
         "struct",
-        "float",
-        "call"
+        "float"
       ],
       "prependC": "typedef short s16;\ntypedef float f32;\ntypedef struct xyz_t { f32 x; f32 y; f32 z; } xyz_t;\n#define SQ(x) ((x) * (x))\ns16 atans_table(f32 x, f32 y);",
       "funcC": "s16 search_position_angleY(xyz_t* subtrahend, xyz_t* minuend) {\n    f32 diffX = minuend->x - subtrahend->x;\n    f32 diffZ = minuend->z - subtrahend->z;\n\n    return atans_table(diffZ, diffX);\n}",
@@ -394,8 +393,7 @@
       "sym": "spolar2world",
       "features": [
         "struct",
-        "float",
-        "call"
+        "float"
       ],
       "prependC": "typedef short s16;\ntypedef float f32;\ntypedef struct xyz_t { f32 x; f32 y; f32 z; } xyz_t;\ntypedef struct { f32 r; s16 pitch; s16 yaw; } VecSphGeo;\ntypedef VecSphGeo VecSph;\nf32 cos_s(s16 angle);\nf32 sin_s(s16 angle);",
       "funcC": "xyz_t spolar2world(VecSph* sph) {\n    xyz_t v;\n    f32 sinPitch;\n    f32 cosPitch = cos_s(sph->pitch);\n    f32 sinYaw;\n    f32 cosYaw = cos_s(sph->yaw);\n\n    sinPitch = sin_s(sph->pitch);\n    sinYaw = sin_s(sph->yaw);\n\n    v.x = sph->r * sinPitch * sinYaw;\n    v.y = sph->r * cosPitch;\n    v.z = sph->r * sinPitch * cosYaw;\n\n    return v;\n}",
@@ -440,7 +438,6 @@
         "float",
         "array",
         "shift",
-        "call",
         "matrix",
         "bitwise"
       ],
@@ -457,7 +454,6 @@
       "sym": "sAdo_Get_KokeruLabel",
       "features": [
         "switch",
-        "call",
         "branch"
       ],
       "funcC": "s32 sAdo_Get_KokeruLabel(s32 type) {\n    u16 label = sAdo_Get_WalkLabel(type);\n    s32 ret;\n\n    switch (label) {\n        case 0x201:\n            ret = 0xe;\n            break;\n\n        case 0x206:\n            ret = 0x13;\n            break;\n\n        case 0x202:\n            ret = 0xf;\n            break;\n\n        case 0x203:\n            ret = 0x10;\n            break;\n\n        case 0x204:\n            ret = 0x11;\n            break;\n\n        case 0x205:\n            ret = 0x12;\n            break;\n\n        case 0x208:\n            ret = 0x156;\n            break;\n\n        case 0x209:\n            ret = 0x157;\n            break;\n\n        default:\n            ret = 15;\n            break;\n    }\n    return ret;\n}",
@@ -509,8 +505,7 @@
         "float",
         "branch",
         "table",
-        "global",
-        "call"
+        "global"
       ],
       "funcC": "s16 atans_table(f32 x, f32 y) {\n    s32 tbl;\n\n    if (y >= 0.0f) {\n        if (x >= 0.0f) {\n            if (y <= x) {\n                if (y != 0.0f) {\n                    tbl = U_GetAtanTable(y, x);\n                } else {\n                    tbl = 0;\n                }\n            } else {\n                tbl = 0x4000 - U_GetAtanTable(x, y);\n            }\n        } else {\n            if (-x < y) {\n                tbl = U_GetAtanTable(-x, y) + 0x4000;\n            } else {\n                tbl = 0x8000 - U_GetAtanTable(y, -x);\n            }\n        }\n    } else if (x < 0.0f) {\n        if (-y <= -x) {\n            tbl = U_GetAtanTable(-y, -x) + 0x8000;\n        } else {\n            tbl = 0xC000 - U_GetAtanTable(-x, -y);\n        }\n    } else {\n        if (x < -y) {\n            tbl = U_GetAtanTable(x, -y) + 0xC000;\n        } else {\n            tbl = -U_GetAtanTable(-y, x);\n        }\n    }\n    return tbl;\n}",
       "prependC": "typedef unsigned char       u8;     /* unsigned  8-bit */\ntypedef unsigned short      u16;    /* unsigned 16-bit */\ntypedef unsigned long       u32;    /* unsigned 32-bit */\ntypedef unsigned long long  u64;    /* unsigned 64-bit */\ntypedef signed char         s8;     /* signed  8-bit */\ntypedef short               s16;    /* signed 16-bit */\ntypedef long                s32;    /* signed 32-bit */\ntypedef long long           s64;    /* signed 64-bit */\ntypedef float   f32;    /* single prec floating point */\ntypedef double  f64;    /* double prec floating point */\ntypedef struct xyz_t {\n    /* 0x0 */ f32 x;\n    /* 0x4 */ f32 y;\n    /* 0x8 */ f32 z;\n} xyz_t; // size = 0xC\n\ntypedef float MtxF_t[4][4];\ntypedef union {\n    MtxF_t mf;\n    struct {\n        float xx, yx, zx, wx, xy, yy, zy, wy, xz, yz, zz, wz, xw, yw, zw, ww;\n    };\n} MtxF; // size = 0x40\ntypedef long\tMtx_t[4][4];\n\ntypedef union {\n    Mtx_t\t\tm;\n    long long int\tforce_structure_alignment;\n} Mtx;",

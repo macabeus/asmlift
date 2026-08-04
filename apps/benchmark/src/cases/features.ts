@@ -183,3 +183,72 @@ export function asmEvidence(targetAsm: string, _sym: string): Set<string> {
   if (addrs.some((a) => a >= 0x040000b0 && a <= 0x040000df)) out.add('dma');
   return out;
 }
+
+// ── codegen tags: derived PER ROW, never authored ───────────────────────────────────────────
+//
+// What a compiler does with a constant divisor, a switch, or a multiply is a property of
+// (function × toolchain), not of the source. A synthetic spec runs on four toolchains from ONE
+// `features` array, so authoring these guaranteed a wrong answer: `divc10` was tagged `magic-div`
+// while agbcc emits `bl __divsi3` and IDO emits a hardware `div` — true for two of its four rows,
+// and simultaneously missing from `divc`/`modc`, which magic-multiply on exactly the same targets.
+//
+// So these are computed from the row's own `targetAsm` (plus the source, where the tag is a claim
+// about a TRANSFORMATION — "the multiply became shifts" needs to know there was a multiply).
+// `evaluate.ts` unions them into every row; a manifest or spec that authors one fails the test.
+
+export const CODEGEN_DERIVED = {
+  'soft-div': 'calls a soft-division helper (__divsi3 and friends)',
+  'hw-div': 'uses a hardware divide instruction (MIPS `div`/`divu`, PPC `divw`)',
+  'magic-div': 'a constant divide became a multiply-high by a magic reciprocal',
+  'jump-table': 'a computed jump through a table (`mov pc`, `jr` on a non-link register, `bctr`)',
+  'comparison-tree': 'a source switch became compare-and-branch rather than a jump table',
+  branchless: 'a source conditional produced no conditional branch',
+  'strength-reduce': 'a constant multiply became shifts/adds rather than a multiply instruction',
+  call: 'contains a call instruction',
+  mmio: 'references a hardware I/O register (0x04000000-0x040003FF)',
+  dma: 'programs the DMA registers (0x040000B0-0x040000DF)',
+} as const;
+
+const MUL_HIGH = /\b(mulhw|mulhwu|mulhi)\b|\b(mult|multu)\b[\s\S]{0,120}?\bmf(hi|lo)\b/;
+const HW_DIV = /\b(div|divu|divw|divwu)\b\s+[^\n]*,/;
+const ANY_MUL = /\b(mul|muls|mult|multu|mullw|mulli|mulhw|mulhwu|smull|umull)\b/;
+/** A conditional branch on any of the four ISAs. `b`/`j`/`jr ra`/`bx lr`/`blr` are unconditional. */
+const COND_BRANCH =
+  /\b(b(eq|ne|lt|le|gt|ge|hi|ls|cc|cs|lo|hs|mi|pl|vs|vc)|b(eq|ne)z l?|beqz|bnez|blez|bgtz|bltz|bgez|bc1[tf]|b(dnz|so|ns))\w*\b/;
+
+/** Computed jump: ARM `mov pc, rN`, MIPS `jr` on a register other than `ra`, PPC `bctr`. */
+function hasComputedJump(asm: string): boolean {
+  return /\bmov\s+pc\s*,\s*r\d/.test(asm) || /\bjr\s+(?!ra\b)\w+/.test(asm) || /\bbctr\b/.test(asm);
+}
+
+/** Codegen tags for one row. `funcC` is the source the row was built from. */
+export function codegenEvidence(funcC: string, targetAsm: string): Set<string> {
+  const out = asmEvidence(targetAsm, '');
+  const body = neutralizeDoWhileZero(stripLiterals(funcC));
+  const src = body.slice(body.indexOf('{'));
+
+  const soft = out.has('soft-div');
+  const hw = HW_DIV.test(targetAsm);
+  if (hw) out.add('hw-div');
+  // a magic reciprocal is a multiply-high stapled to a shift, in code that does NOT divide
+  if (!soft && !hw && MUL_HIGH.test(targetAsm) && /[/%]/.test(src)) out.add('magic-div');
+
+  const computed = hasComputedJump(targetAsm);
+  if (computed) out.add('jump-table');
+  else if (/\bswitch\s*\(/.test(src)) out.add('comparison-tree');
+
+  // a relational operator counts even without an `if`: `(a>0) - (a<0)` is a conditional the
+  // compiler may or may not branch on, and whether it does is the whole point of the tag
+  // a relational operator counts even without an `if`: `(a>0) - (a<0)` is a conditional the
+  // compiler may or may not branch on, and whether it does is the whole point of the tag. `->`
+  // and the shift operators must go first or every struct access reads as a comparison.
+  const rel = src.replace(/->/g, ' ').replace(/<<|>>/g, ' ');
+  const conditional = /\bif\s*\(|\?[^;{}]*:|\bswitch\s*\(|\bfor\s*\(|\bwhile\s*\(|[<>]=?|[=!]=/.test(rel);
+  // a computed jump is not "branchless" in the useful sense — the conditional became an indirect
+  // jump, not straight-line code
+  if (conditional && !computed && !COND_BRANCH.test(targetAsm)) out.add('branchless');
+
+  // `a * 10` with no multiply instruction anywhere ⇒ the compiler reduced it
+  if (/\*\s*\d/.test(src) && !ANY_MUL.test(targetAsm)) out.add('strength-reduce');
+  return out;
+}
