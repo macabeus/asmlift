@@ -30,7 +30,7 @@ export const SYNTHETIC: SynthSpec[] = [
   { sym: 'add', src: 'int add(int a,int b){ return a+b; }', features: ['arithmetic'], toolchains: ALL },
   { sym: 'sub', src: 'int sub(int a,int b){ return a-b; }', features: ['arithmetic'], toolchains: ALL },
   { sym: 'mul', src: 'int mul(int a,int b){ return a*b; }', features: ['arithmetic'], toolchains: ALL },
-  { sym: 'mulc', src: 'int mulc(int a){ return a*10; }', features: ['arithmetic', 'strength-reduce'], toolchains: ALL },
+  { sym: 'mulc', src: 'int mulc(int a){ return a*10; }', features: ['arithmetic'], toolchains: ALL },
   { sym: 'divc', src: 'int divc(int a){ return a/7; }', features: ['arithmetic', 'signed-div-const'], toolchains: ALL },
   { sym: 'div2', src: 'int div2(int a){ return a/2; }', features: ['arithmetic', 'signed-div-pow2'], toolchains: ALL },
   {
@@ -271,7 +271,7 @@ export const SYNTHETIC: SynthSpec[] = [
   {
     sym: 'call2',
     src: 'int add3(int,int,int);\nint call2(int a,int b){ return add3(a,b,a+b); }',
-    features: ['call', 'multi-arg'],
+    features: ['multi-arg'],
     toolchains: CALL,
     ctx: 'int add3(int,int,int);',
     proto: { add3: { params: 3 } },
@@ -279,7 +279,7 @@ export const SYNTHETIC: SynthSpec[] = [
   {
     sym: 'voidcall',
     src: 'void sink(int);\nvoid voidcall(int x){ sink(x); }',
-    features: ['call', 'void'],
+    features: ['void'],
     toolchains: CALL,
     ctx: 'void sink(int); void voidcall(int);',
     proto: { sink: { params: 1, returnsVoid: true }, voidcall: { returnsVoid: true } },
@@ -305,13 +305,13 @@ export const SYNTHETIC: SynthSpec[] = [
   {
     sym: 'sw_ret',
     src: 'int sw_ret(int x){ switch(x){case 0:return 10;case 1:return 20;case 2:return 30;case 3:return 40;default:return -1;} }',
-    features: ['switch', 'comparison-tree'],
+    features: ['switch'],
     toolchains: ALL,
   },
   {
     sym: 'sw_op',
     src: 'int sw_op(int op,int a,int b){ switch(op){case 0:return a+b;case 1:return a-b;case 2:return a*b;case 3:return a&b;default:return 0;} }',
-    features: ['switch', 'comparison-tree', 'arithmetic'],
+    features: ['switch', 'arithmetic'],
     toolchains: ALL,
   },
   {
@@ -339,7 +339,7 @@ export const SYNTHETIC: SynthSpec[] = [
   {
     sym: 'sw_jt',
     src: 'int sw_jt(int x){ switch(x){case 0:return 3;case 1:return 5;case 2:return 7;case 3:return 9;case 4:return 11;case 5:return 13;case 6:return 15;case 7:return 17;default:return -1;} }',
-    features: ['switch', 'jump-table', 'dense'],
+    features: ['switch', 'dense'],
     toolchains: ALL,
   },
 
@@ -439,25 +439,25 @@ export const SYNTHETIC: SynthSpec[] = [
   {
     sym: 'divc10',
     src: 'int divc10(int a){ return a/10; }',
-    features: ['arithmetic', 'signed-div-const', 'magic-div'],
+    features: ['arithmetic', 'signed-div-const'],
     toolchains: ALL,
   },
   {
     sym: 'divc100',
     src: 'int divc100(int a){ return a/100; }',
-    features: ['arithmetic', 'signed-div-const', 'magic-div'],
+    features: ['arithmetic', 'signed-div-const'],
     toolchains: ALL,
   },
   {
     sym: 'udivc10',
     src: 'unsigned udivc10(unsigned a){ return a/10; }',
-    features: ['arithmetic', 'unsigned-div-const', 'magic-div'],
+    features: ['arithmetic', 'unsigned-div-const'],
     toolchains: ALL,
   },
   {
     sym: 'umod10',
     src: 'unsigned umod10(unsigned a){ return a%10; }',
-    features: ['arithmetic', 'unsigned-mod-const', 'magic-div'],
+    features: ['arithmetic', 'unsigned-mod-const'],
     toolchains: ALL,
   },
   {
@@ -515,7 +515,7 @@ export const SYNTHETIC: SynthSpec[] = [
   {
     sym: 'signum',
     src: 'int signum(int x){ return (x>0)-(x<0); }',
-    features: ['compare', 'branchless'],
+    features: ['compare'],
     toolchains: ALL,
   },
 

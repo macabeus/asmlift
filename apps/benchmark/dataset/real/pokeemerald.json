@@ -27,8 +27,7 @@
       "sym": "MathUtil_Mul16",
       "features": [
         "arithmetic",
-        "fixed-point",
-        "soft-div"
+        "fixed-point"
       ],
       "funcC": "s16 MathUtil_Mul16(s16 x, s16 y)\n{\n    s32 result;\n\n    result = x;\n    result *= y;\n    result /= 256;\n    return result;\n}",
       "sourceUrl": "https://github.com/macabeus/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/math_util.c#L3-L11"
@@ -38,7 +37,6 @@
       "features": [
         "arithmetic",
         "fixed-point",
-        "soft-div",
         "shift"
       ],
       "funcC": "s16 MathUtil_Mul16Shift(u8 s, s16 x, s16 y)\n{\n    s32 result;\n\n    result = x;\n    result *= y;\n    result /= (1 << s);\n    return result;\n}",
@@ -49,8 +47,7 @@
       "features": [
         "arithmetic",
         "fixed-point",
-        "long-long",
-        "soft-div"
+        "int64"
       ],
       "funcC": "s32 MathUtil_Mul32(s32 x, s32 y)\n{\n    s64 result;\n\n    result = x;\n    result *= y;\n    result /= 256;\n    return result;\n}",
       "sourceUrl": "https://github.com/macabeus/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/math_util.c#L23-L31"
@@ -59,7 +56,6 @@
       "sym": "MathUtil_Div16",
       "features": [
         "arithmetic",
-        "soft-div",
         "branch",
         "shift"
       ],
@@ -70,7 +66,6 @@
       "sym": "MathUtil_Div16Shift",
       "features": [
         "arithmetic",
-        "soft-div",
         "branch",
         "shift"
       ],
@@ -80,8 +75,7 @@
     {
       "sym": "MathUtil_Inv16",
       "features": [
-        "arithmetic",
-        "soft-div"
+        "arithmetic"
       ],
       "funcC": "s16 MathUtil_Inv16(s16 y)\n{\n    s32 x;\n\n    x = 0x10000;\n    return x / y;\n}",
       "sourceUrl": "https://github.com/macabeus/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/math_util.c#L64-L70"
@@ -147,7 +141,8 @@
         "bitwise",
         "loop",
         "branch",
-        "nested-loop"
+        "nested-loop",
+        "shift"
       ],
       "funcC": "u16 CalcCRC16(const u8 *data, s32 length)\n{\n    u16 i, j;\n    u16 crc = 0x1121;\n\n    for (i = 0; i < length; i++)\n    {\n        crc ^= data[i];\n        for (j = 0; j < 8; j++)\n        {\n            if (crc & 1)\n                crc = (crc >> 1) ^ 0x8408;\n            else\n                crc >>= 1;\n        }\n    }\n    return ~crc;\n}",
       "sourceUrl": "https://github.com/macabeus/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/util.c#L222-L239"
@@ -157,8 +152,7 @@
       "features": [
         "global",
         "arithmetic",
-        "shift",
-        "call"
+        "shift"
       ],
       "funcC": "u16 Random(void)\n{\n    gRngValue = ISO_RANDOMIZE1(gRngValue);\n    sRandCount++;\n    return gRngValue >> 16;\n}",
       "prependC": "#include \"random.h\"\nstatic u32 sRandCount;",
@@ -216,7 +210,6 @@
       "features": [
         "loop",
         "pointer",
-        "call",
         "branch"
       ],
       "funcC": "u8 *StringAppend(u8 *dest, const u8 *src)\n{\n    while (*dest != EOS)\n        dest++;\n\n    return StringCopy(dest, src);\n}",
@@ -241,7 +234,8 @@
       "features": [
         "loop",
         "pointer",
-        "array"
+        "array",
+        "bitwise"
       ],
       "funcC": "u8 *StringCopyN(u8 *dest, const u8 *src, u8 n)\n{\n    u16 i;\n\n    for (i = 0; i < n; i++)\n        dest[i] = src[i];\n\n    return &dest[n];\n}",
       "sourceUrl": "https://github.com/macabeus/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/string_util.c#L96-L104"
@@ -253,7 +247,8 @@
         "array",
         "bitwise",
         "cast",
-        "table"
+        "table",
+        "shift"
       ],
       "funcC": "u16 CalcCRC16WithTable(const u8 *data, u32 length)\n{\n    u16 i;\n    u16 crc = 0x1121;\n    u8 byte;\n\n    for (i = 0; i < length; i++)\n    {\n        byte = crc >> 8;\n        crc ^= data[i];\n        crc = byte ^ sCrc16Table[(u8)crc];\n    }\n    return ~crc;\n}",
       "prependC": "static const u16 sCrc16Table[] = {0x0000,0x1189,0x2312,0x329B,0x4624,0x57AD,0x6536,0x74BF,0x8C48,0x9DC1,0xAF5A,0xBED3,0xCA6C,0xDBE5,0xE97E,0xF8F7,0x1081,0x0108,0x3393,0x221A,0x56A5,0x472C,0x75B7,0x643E,0x9CC9,0x8D40,0xBFDB,0xAE52,0xDAED,0xCB64,0xF9FF,0xE876,0x2102,0x308B,0x0210,0x1399,0x6726,0x76AF,0x4434,0x55BD,0xAD4A,0xBCC3,0x8E58,0x9FD1,0xEB6E,0xFAE7,0xC87C,0xD9F5,0x3183,0x200A,0x1291,0x0318,0x77A7,0x662E,0x54B5,0x453C,0xBDCB,0xAC42,0x9ED9,0x8F50,0xFBEF,0xEA66,0xD8FD,0xC974,0x4204,0x538D,0x6116,0x709F,0x0420,0x15A9,0x2732,0x36BB,0xCE4C,0xDFC5,0xED5E,0xFCD7,0x8868,0x99E1,0xAB7A,0xBAF3,0x5285,0x430C,0x7197,0x601E,0x14A1,0x0528,0x37B3,0x263A,0xDECD,0xCF44,0xFDDF,0xEC56,0x98E9,0x8960,0xBBFB,0xAA72,0x6306,0x728F,0x4014,0x519D,0x2522,0x34AB,0x0630,0x17B9,0xEF4E,0xFEC7,0xCC5C,0xDDD5,0xA96A,0xB8E3,0x8A78,0x9BF1,0x7387,0x620E,0x5095,0x411C,0x35A3,0x242A,0x16B1,0x0738,0xFFCF,0xEE46,0xDCDD,0xCD54,0xB9EB,0xA862,0x9AF9,0x8B70,0x8408,0x9581,0xA71A,0xB693,0xC22C,0xD3A5,0xE13E,0xF0B7,0x0840,0x19C9,0x2B52,0x3ADB,0x4E64,0x5FED,0x6D76,0x7CFF,0x9489,0x8500,0xB79B,0xA612,0xD2AD,0xC324,0xF1BF,0xE036,0x18C1,0x0948,0x3BD3,0x2A5A,0x5EE5,0x4F6C,0x7DF7,0x6C7E,0xA50A,0xB483,0x8618,0x9791,0xE32E,0xF2A7,0xC03C,0xD1B5,0x2942,0x38CB,0x0A50,0x1BD9,0x6F66,0x7EEF,0x4C74,0x5DFD,0xB58B,0xA402,0x9699,0x8710,0xF3AF,0xE226,0xD0BD,0xC134,0x39C3,0x284A,0x1AD1,0x0B58,0x7FE7,0x6E6E,0x5CF5,0x4D7C,0xC60C,0xD785,0xE51E,0xF497,0x8028,0x91A1,0xA33A,0xB2B3,0x4A44,0x5BCD,0x6956,0x78DF,0x0C60,0x1DE9,0x2F72,0x3EFB,0xD68D,0xC704,0xF59F,0xE416,0x90A9,0x8120,0xB3BB,0xA232,0x5AC5,0x4B4C,0x79D7,0x685E,0x1CE1,0x0D68,0x3FF3,0x2E7A,0xE70E,0xF687,0xC41C,0xD595,0xA12A,0xB0A3,0x8238,0x93B1,0x6B46,0x7ACF,0x4854,0x59DD,0x2D62,0x3CEB,0x0E70,0x1FF9,0xF78F,0xE606,0xD49D,0xC514,0xB1AB,0xA022,0x92B9,0x8330,0x7BC7,0x6A4E,0x58D5,0x495C,0x3DE3,0x2C6A,0x1EF1,0x0F78};",
@@ -266,7 +261,6 @@
         "switch",
         "branch",
         "arithmetic",
-        "soft-div",
         "global"
       ],
       "funcC": "u16 ModifyStatByNature(u8 nature, u16 stat, u8 statIndex)\n{\n    u16 retVal;\n\n    // Don't modify HP, Accuracy, or Evasion by nature\n    if (statIndex <= STAT_HP || statIndex > NUM_NATURE_STATS)\n        return stat;\n\n    switch (gNatureStatTable[nature][statIndex - 1])\n    {\n    case 1:\n        retVal = stat * 110;\n        retVal /= 100;\n        break;\n    case -1:\n        retVal = stat * 90;\n        retVal /= 100;\n        break;\n    default:\n        retVal = stat;\n        break;\n    }\n\n    return retVal;\n}",
@@ -279,7 +273,8 @@
         "switch",
         "branch",
         "global",
-        "struct"
+        "struct",
+        "bitwise"
       ],
       "funcC": "u8 GetGenderFromSpeciesAndPersonality(u16 species, u32 personality)\n{\n    switch (gSpeciesInfo[species].genderRatio)\n    {\n    case MON_MALE:\n    case MON_FEMALE:\n    case MON_GENDERLESS:\n        return gSpeciesInfo[species].genderRatio;\n    }\n\n    if (gSpeciesInfo[species].genderRatio > (personality & 0xFF))\n        return MON_FEMALE;\n    else\n        return MON_MALE;\n}",
       "m2cCtx": true,
@@ -289,7 +284,6 @@
       "sym": "Sin2",
       "features": [
         "arithmetic",
-        "soft-div",
         "bitwise",
         "branch",
         "table"
@@ -302,8 +296,7 @@
     {
       "sym": "Cos2",
       "features": [
-        "arithmetic",
-        "call"
+        "arithmetic"
       ],
       "funcC": "s16 Cos2(u16 angle)\n{\n    return Sin2(angle + 90);\n}",
       "prependC": "s16 Sin2(u16 angle);",
@@ -330,7 +323,7 @@
       "features": [
         "pointer",
         "struct",
-        "call"
+        "sizeof"
       ],
       "funcC": "void PutFirstMemBlockHeader(void *block, u32 size)\n{\n    PutMemBlockHeader(block, (struct MemBlock *)block, (struct MemBlock *)block, size - sizeof(struct MemBlock));\n}",
       "prependC": "#define MALLOC_SYSTEM_ID 0xA3A3\nstruct MemBlock {\n    bool16 flag;\n    u16 magic;\n    u32 size;\n    struct MemBlock *prev;\n    struct MemBlock *next;\n    u8 data[0];\n};\nvoid PutMemBlockHeader(void *block, struct MemBlock *prev, struct MemBlock *next, u32 size);",
@@ -400,7 +393,6 @@
         "arithmetic",
         "shift",
         "bitwise",
-        "soft-div",
         "global",
         "table"
       ],
@@ -413,7 +405,6 @@
       "sym": "GiveBerryPowder",
       "features": [
         "branch",
-        "call",
         "memory",
         "global"
       ],
@@ -429,8 +420,7 @@
         "branch",
         "global",
         "struct",
-        "shift",
-        "call"
+        "bitwise"
       ],
       "funcC": "u8 TrySetCantSelectMoveBattleScript(void)\n{\n    u8 limitations = 0;\n    u16 move = gBattleMons[gActiveBattler].moves[gBattleBufferB[gActiveBattler][2]];\n    u8 holdEffect;\n    u16 *choicedMove = &gBattleStruct->choicedMove[gActiveBattler];\n\n    if (gDisableStructs[gActiveBattler].disabledMove == move && move != MOVE_NONE)\n    {\n        gBattleScripting.battler = gActiveBattler;\n        gCurrentMove = move;\n        if (gBattleTypeFlags & BATTLE_TYPE_PALACE)\n        {\n            gPalaceSelectionBattleScripts[gActiveBattler] = BattleScript_SelectingDisabledMoveInPalace;\n            gProtectStructs[gActiveBattler].palaceUnableToUseMove = TRUE;\n        }\n        else\n        {\n            gSelectionBattleScripts[gActiveBattler] = BattleScript_SelectingDisabledMove;\n            limitations = 1;\n        }\n    }\n\n    if (move == gLastMoves[gActiveBattler] && move != MOVE_STRUGGLE && (gBattleMons[gActiveBattler].status2 & STATUS2_TORMENT))\n    {\n        CancelMultiTurnMoves(gActiveBattler);\n        if (gBattleTypeFlags & BATTLE_TYPE_PALACE)\n        {\n            gPalaceSelectionBattleScripts[gActiveBattler] = BattleScript_SelectingTormentedMoveInPalace;\n            gProtectStructs[gActiveBattler].palaceUnableToUseMove = TRUE;\n        }\n        else\n        {\n            gSelectionBattleScripts[gActiveBattler] = BattleScript_SelectingTormentedMove;\n            limitations++;\n        }\n    }\n\n    if (gDisableStructs[gActiveBattler].tauntTimer != 0 && gBattleMoves[move].power == 0)\n    {\n        gCurrentMove = move;\n        if (gBattleTypeFlags & BATTLE_TYPE_PALACE)\n        {\n            gPalaceSelectionBattleScripts[gActiveBattler] = BattleScript_SelectingNotAllowedMoveTauntInPalace;\n            gProtectStructs[gActiveBattler].palaceUnableToUseMove = TRUE;\n        }\n        else\n        {\n            gSelectionBattleScripts[gActiveBattler] = BattleScript_SelectingNotAllowedMoveTaunt;\n            limitations++;\n        }\n    }\n\n    if (GetImprisonedMovesCount(gActiveBattler, move))\n    {\n        gCurrentMove = move;\n        if (gBattleTypeFlags & BATTLE_TYPE_PALACE)\n        {\n            gPalaceSelectionBattleScripts[gActiveBattler] = BattleScript_SelectingImprisonedMoveInPalace;\n            gProtectStructs[gActiveBattler].palaceUnableToUseMove = TRUE;\n        }\n        else\n        {\n            gSelectionBattleScripts[gActiveBattler] = BattleScript_SelectingImprisonedMove;\n            limitations++;\n        }\n    }\n\n    if (gBattleMons[gActiveBattler].item == ITEM_ENIGMA_BERRY)\n        holdEffect = gEnigmaBerries[gActiveBattler].holdEffect;\n    else\n        holdEffect = GetItemHoldEffect(gBattleMons[gActiveBattler].item);\n\n    gPotentialItemEffectBattler = gActiveBattler;\n\n    if (holdEffect == HOLD_EFFECT_CHOICE_BAND && *choicedMove != MOVE_NONE && *choicedMove != MOVE_UNAVAILABLE && *choicedMove != move)\n    {\n        gCurrentMove = *choicedMove;\n        gLastUsedItem = gBattleMons[gActiveBattler].item;\n        if (gBattleTypeFlags & BATTLE_TYPE_PALACE)\n        {\n            gProtectStructs[gActiveBattler].palaceUnableToUseMove = TRUE;\n        }\n        else\n        {\n            gSelectionBattleScripts[gActiveBattler] = BattleScript_SelectingNotAllowedMoveChoiceItem;\n            limitations++;\n        }\n    }\n\n    if (gBattleMons[gActiveBattler].pp[gBattleBufferB[gActiveBattler][2]] == 0)\n    {\n        if (gBattleTypeFlags & BATTLE_TYPE_PALACE)\n        {\n            gProtectStructs[gActiveBattler].palaceUnableToUseMove = TRUE;\n        }\n        else\n        {\n            gSelectionBattleScripts[gActiveBattler] = BattleScript_SelectingMoveWithNoPP;\n            limitations++;\n        }\n    }\n\n    return limitations;\n}",
       "prependC": "#include \"global.h\"\n#include \"battle.h\"\n#include \"battle_anim.h\"\n#include \"battle_arena.h\"\n#include \"battle_pyramid.h\"\n#include \"battle_util.h\"\n#include \"pokemon.h\"\n#include \"international_string_util.h\"\n#include \"item.h\"\n#include \"util.h\"\n#include \"battle_scripts.h\"\n#include \"random.h\"\n#include \"text.h\"\n#include \"safari_zone.h\"\n#include \"sound.h\"\n#include \"sprite.h\"\n#include \"string_util.h\"\n#include \"task.h\"\n#include \"trig.h\"\n#include \"window.h\"\n#include \"battle_message.h\"\n#include \"battle_ai_script_commands.h\"\n#include \"battle_controllers.h\"\n#include \"event_data.h\"\n#include \"link.h\"\n#include \"field_weather.h\"\n#include \"constants/abilities.h\"\n#include \"constants/battle_anim.h\"\n#include \"constants/battle_move_effects.h\"\n#include \"constants/battle_script_commands.h\"\n#include \"constants/battle_string_ids.h\"\n#include \"constants/hold_effects.h\"\n#include \"constants/items.h\"\n#include \"constants/moves.h\"\n#include \"constants/songs.h\"\n#include \"constants/species.h\"\n#include \"constants/weather.h\"",
@@ -444,7 +434,8 @@
         "union",
         "struct",
         "memory",
-        "global"
+        "global",
+        "loop"
       ],
       "funcC": "static void UNUSED SetMauvilleOldManLanguage(union OldMan *oldMan, u32 language1, u32 language2, u32 language3)\n{\n    s32 i;\n\n    switch (oldMan->common.id)\n    {\n    case MAUVILLE_MAN_TRADER:\n    {\n        struct MauvilleOldManTrader *trader = &oldMan->trader;\n\n        for (i = 0; i < NUM_TRADER_ITEMS; i++)\n        {\n            if (IsStringJapanese(trader->playerNames[i]))\n                trader->language[i] = language1;\n            else\n                trader->language[i] = language2;\n        }\n    }\n    break;\n    case MAUVILLE_MAN_STORYTELLER:\n    {\n        struct MauvilleManStoryteller *storyteller = &oldMan->storyteller;\n\n        for (i = 0; i < NUM_STORYTELLER_TALES; i++)\n        {\n            if (IsStringJapanese(storyteller->trainerNames[i]))\n                storyteller->language[i] = language1;\n            else\n                storyteller->language[i] = language2;\n        }\n    }\n    break;\n    case MAUVILLE_MAN_BARD:\n    {\n        struct MauvilleManBard *bard = &oldMan->bard;\n\n        if (language3 == LANGUAGE_JAPANESE)\n            bard->language = language1;\n        else\n            bard->language = language2;\n    }\n    break;\n    case MAUVILLE_MAN_HIPSTER:\n    {\n        struct MauvilleManHipster *hipster = &oldMan->hipster;\n\n        if (language3 == LANGUAGE_JAPANESE)\n            hipster->language = language1;\n        else\n            hipster->language = language2;\n    }\n    break;\n    case MAUVILLE_MAN_GIDDY:\n    {\n        struct MauvilleManGiddy *giddy = &oldMan->giddy;\n\n        if (language3 == LANGUAGE_JAPANESE)\n            giddy->language = language1;\n        else\n            giddy->language = language2;\n    }\n    break;\n    }\n}",
       "prependC": "#include \"global.h\"\n#include \"main.h\"\n#include \"constants/songs.h\"\n#include \"constants/event_objects.h\"\n#include \"mauville_old_man.h\"\n#include \"event_data.h\"\n#include \"string_util.h\"\n#include \"text.h\"\n#include \"easy_chat.h\"\n#include \"script.h\"\n#include \"random.h\"\n#include \"event_scripts.h\"\n#include \"task.h\"\n#include \"menu.h\"\n#include \"m4a.h\"\n#include \"bard_music.h\"\n#include \"sound.h\"\n#include \"strings.h\"\n#include \"overworld.h\"\n#include \"field_message_box.h\"\n#include \"script_menu.h\"\n#include \"trader.h\"\n#include \"m4a.h\"\n#include \"constants/mauville_old_man.h\"",
@@ -460,8 +451,7 @@
       "features": [
         "array",
         "branch",
-        "global",
-        "call"
+        "global"
       ],
       "funcC": "static u8 AcroBikeHandleInputTurning(u8 *newDirection, u16 newKeys, u16 heldKeys)\n{\n    u8 direction;\n\n    *newDirection = gPlayerAvatar.newDirBackup;\n    gPlayerAvatar.bikeFrameCounter++;\n\n    // Wait 6 frames before actually changing direction\n    if (gPlayerAvatar.bikeFrameCounter > 6) // ... because it takes 6 frames to advance 1 tile.\n    {\n        gPlayerAvatar.runningState = TURN_DIRECTION;\n        gPlayerAvatar.acroBikeState = ACRO_STATE_NORMAL;\n        Bike_SetBikeStill();\n        return ACRO_TRANS_TURN_DIRECTION;\n    }\n    direction = GetPlayerMovementDirection();\n    if (*newDirection == AcroBike_GetJumpDirection())\n    {\n        Bike_SetBikeStill(); // Bike_SetBikeStill sets speed to standing, but the next line immediately overrides it. could have just reset acroBikeState to 0 here instead of wasting a jump.\n        gPlayerAvatar.bikeSpeed = PLAYER_SPEED_NORMAL;\n        if (*newDirection == GetOppositeDirection(direction))\n        {\n            // do a turn jump.\n            // no need to update runningState, didnt move.\n            gPlayerAvatar.acroBikeState = ACRO_STATE_TURN_JUMP;\n            return ACRO_TRANS_TURN_JUMP;\n        }\n        else\n        {\n            // do a sideways jump.\n            gPlayerAvatar.runningState = MOVING; // we need to move, set state to moving.\n            gPlayerAvatar.acroBikeState = ACRO_STATE_SIDE_JUMP;\n            return ACRO_TRANS_SIDE_JUMP;\n        }\n    }\n    *newDirection = direction;\n    return ACRO_TRANS_FACE_DIRECTION;\n}",
       "prependC": "#include \"global.h\"\n#include \"bike.h\"\n#include \"event_object_movement.h\"\n#include \"field_player_avatar.h\"\n#include \"fieldmap.h\"\n#include \"field_specials.h\"\n#include \"metatile_behavior.h\"\n#include \"overworld.h\"\n#include \"sound.h\"\n#include \"constants/map_types.h\"\n#include \"constants/songs.h\"\nstatic void MovePlayerOnMachBike(u8, u16, u16);\nstatic u8 GetMachBikeTransition(u8 *);\nstatic void MachBikeTransition_FaceDirection(u8);\nstatic void MachBikeTransition_TurnDirection(u8);\nstatic void MachBikeTransition_TrySpeedUp(u8);\nstatic void MachBikeTransition_TrySlowDown(u8);\nstatic void MovePlayerOnAcroBike(u8, u16, u16);\nstatic u8 CheckMovementInputAcroBike(u8 *, u16, u16);\nstatic u8 AcroBikeHandleInputNormal(u8 *, u16, u16);\nstatic u8 AcroBikeHandleInputTurning(u8 *, u16, u16);\nstatic u8 AcroBikeHandleInputWheelieStanding(u8 *, u16, u16);\nstatic u8 AcroBikeHandleInputBunnyHop(u8 *, u16, u16);\nstatic u8 AcroBikeHandleInputWheelieMoving(u8 *, u16, u16);\nstatic u8 AcroBikeHandleInputSidewaysJump(u8 *, u16, u16);\nstatic u8 AcroBikeHandleInputTurnJump(u8 *, u16, u16);\nstatic void AcroBikeTransition_FaceDirection(u8);\nstatic void AcroBikeTransition_TurnDirection(u8);\nstatic void AcroBikeTransition_Moving(u8);\nstatic void AcroBikeTransition_NormalToWheelie(u8);\nstatic void AcroBikeTransition_WheelieToNormal(u8);\nstatic void AcroBikeTransition_WheelieIdle(u8);\nstatic void AcroBikeTransition_WheelieHoppingStanding(u8);\nstatic void AcroBikeTransition_WheelieHoppingMoving(u8);\nstatic void AcroBikeTransition_SideJump(u8);\nstatic void AcroBikeTransition_TurnJump(u8);\nstatic void AcroBikeTransition_WheelieMoving(u8);\nstatic void AcroBikeTransition_WheelieRisingMoving(u8);\nstatic void AcroBikeTransition_WheelieLoweringMoving(u8);\nstatic void AcroBike_TryHistoryUpdate(u16, u16);\nstatic u8 AcroBike_GetJumpDirection(void);\nstatic void Bike_UpdateDirTimerHistory(u8);\nstatic void Bike_UpdateABStartSelectHistory(u8);\nstatic u8 Bike_DPadToDirection(u16);\nstatic u8 GetBikeCollision(u8);\nstatic u8 GetBikeCollisionAt(struct ObjectEvent *, s16, s16, u8, u8);\nstatic bool8 IsRunningDisallowedByMetatile(u8);\nstatic void Bike_TryAdvanceCyclingRoadCollisions();\nstatic u8 CanBikeFaceDirOnMetatile(u8, u8);\nstatic bool8 WillPlayerCollideWithCollision(u8, u8);\nstatic void Bike_SetBikeStill(void);",
@@ -474,7 +464,7 @@
         "fnptr",
         "table",
         "branch",
-        "call"
+        "bitwise"
       ],
       "funcC": "static bool8 DoForcedMovement(u8 direction, void (*moveFunc)(u8))\n{\n    struct PlayerAvatar *playerAvatar = &gPlayerAvatar;\n    u8 collision = CheckForPlayerAvatarCollision(direction);\n\n    playerAvatar->flags |= PLAYER_AVATAR_FLAG_FORCED_MOVE;\n    if (collision)\n    {\n        ForcedMovement_None();\n        if (collision < COLLISION_STOP_SURFING)\n        {\n            return FALSE;\n        }\n        else\n        {\n            if (collision == COLLISION_LEDGE_JUMP)\n                PlayerJumpLedge(direction);\n            playerAvatar->flags |= PLAYER_AVATAR_FLAG_FORCED_MOVE;\n            playerAvatar->runningState = MOVING;\n            return TRUE;\n        }\n    }\n    else\n    {\n        playerAvatar->runningState = MOVING;\n        moveFunc(direction);\n        return TRUE;\n    }\n}",
       "prependC": "#include \"global.h\"\n#include \"main.h\"\n#include \"bike.h\"\n#include \"event_data.h\"\n#include \"event_object_movement.h\"\n#include \"field_camera.h\"\n#include \"field_effect.h\"\n#include \"field_effect_helpers.h\"\n#include \"field_player_avatar.h\"\n#include \"fieldmap.h\"\n#include \"menu.h\"\n#include \"metatile_behavior.h\"\n#include \"overworld.h\"\n#include \"party_menu.h\"\n#include \"random.h\"\n#include \"rotating_gate.h\"\n#include \"script.h\"\n#include \"sound.h\"\n#include \"sprite.h\"\n#include \"strings.h\"\n#include \"task.h\"\n#include \"tv.h\"\n#include \"wild_encounter.h\"\n#include \"constants/abilities.h\"\n#include \"constants/event_objects.h\"\n#include \"constants/event_object_movement.h\"\n#include \"constants/field_effects.h\"\n#include \"constants/items.h\"\n#include \"constants/moves.h\"\n#include \"constants/songs.h\"\n#include \"constants/trainer_types.h\"",
@@ -487,7 +477,9 @@
         "switch",
         "do-while",
         "array",
-        "global"
+        "global",
+        "loop",
+        "bitwise"
       ],
       "funcC": "u8 GetMoveTarget(u16 move, u8 setTarget)\n{\n    u8 targetBattler = 0;\n    u8 moveTarget;\n    u8 side;\n\n    if (setTarget != NO_TARGET_OVERRIDE)\n        moveTarget = setTarget - 1;\n    else\n        moveTarget = gBattleMoves[move].target;\n\n    switch (moveTarget)\n    {\n    case MOVE_TARGET_SELECTED:\n        side = BATTLE_OPPOSITE(GetBattlerSide(gBattlerAttacker));\n        if (gSideTimers[side].followmeTimer && gBattleMons[gSideTimers[side].followmeTarget].hp)\n        {\n            targetBattler = gSideTimers[side].followmeTarget;\n        }\n        else\n        {\n            side = GetBattlerSide(gBattlerAttacker);\n            do\n            {\n                targetBattler = Random() % gBattlersCount;\n            } while (targetBattler == gBattlerAttacker || side == GetBattlerSide(targetBattler) || gAbsentBattlerFlags & gBitTable[targetBattler]);\n            if (gBattleMoves[move].type == TYPE_ELECTRIC\n                && AbilityBattleEffects(ABILITYEFFECT_COUNT_OTHER_SIDE, gBattlerAttacker, ABILITY_LIGHTNING_ROD, 0, 0)\n                && gBattleMons[targetBattler].ability != ABILITY_LIGHTNING_ROD)\n            {\n                targetBattler ^= BIT_FLANK;\n                RecordAbilityBattle(targetBattler, gBattleMons[targetBattler].ability);\n                gSpecialStatuses[targetBattler].lightningRodRedirected = 1;\n            }\n        }\n        break;\n    case MOVE_TARGET_DEPENDS:\n    case MOVE_TARGET_BOTH:\n    case MOVE_TARGET_FOES_AND_ALLY:\n    case MOVE_TARGET_OPPONENTS_FIELD:\n        targetBattler = GetBattlerAtPosition(BATTLE_OPPOSITE(GET_BATTLER_SIDE(gBattlerAttacker)));\n        if (gAbsentBattlerFlags & gBitTable[targetBattler])\n            targetBattler ^= BIT_FLANK;\n        break;\n    case MOVE_TARGET_RANDOM:\n        side = BATTLE_OPPOSITE(GetBattlerSide(gBattlerAttacker));\n        if (gSideTimers[side].followmeTimer && gBattleMons[gSideTimers[side].followmeTarget].hp)\n        {\n            targetBattler = gSideTimers[side].followmeTarget;\n        }\n        else if (gBattleTypeFlags & BATTLE_TYPE_DOUBLE && moveTarget & MOVE_TARGET_RANDOM)\n        {\n            if (GetBattlerSide(gBattlerAttacker) == B_SIDE_PLAYER)\n            {\n                if (Random() & 1)\n                    targetBattler = GetBattlerAtPosition(B_POSITION_OPPONENT_LEFT);\n                else\n                    targetBattler = GetBattlerAtPosition(B_POSITION_OPPONENT_RIGHT);\n            }\n            else\n            {\n                if (Random() & 1)\n                    targetBattler = GetBattlerAtPosition(B_POSITION_PLAYER_LEFT);\n                else\n                    targetBattler = GetBattlerAtPosition(B_POSITION_PLAYER_RIGHT);\n            }\n            if (gAbsentBattlerFlags & gBitTable[targetBattler])\n                targetBattler ^= BIT_FLANK;\n        }\n        else\n        {\n            targetBattler = GetBattlerAtPosition(BATTLE_OPPOSITE(GET_BATTLER_SIDE(gBattlerAttacker)));\n        }\n        break;\n    case MOVE_TARGET_USER_OR_SELECTED:\n    case MOVE_TARGET_USER:\n        targetBattler = gBattlerAttacker;\n        break;\n    }\n\n    *(gBattleStruct->moveTarget + gBattlerAttacker) = targetBattler;\n\n    return targetBattler;\n}",
       "prependC": "#include \"global.h\"\n#include \"battle.h\"\n#include \"battle_anim.h\"\n#include \"battle_arena.h\"\n#include \"battle_pyramid.h\"\n#include \"battle_util.h\"\n#include \"pokemon.h\"\n#include \"international_string_util.h\"\n#include \"item.h\"\n#include \"util.h\"\n#include \"battle_scripts.h\"\n#include \"random.h\"\n#include \"text.h\"\n#include \"safari_zone.h\"\n#include \"sound.h\"\n#include \"sprite.h\"\n#include \"string_util.h\"\n#include \"task.h\"\n#include \"trig.h\"\n#include \"window.h\"\n#include \"battle_message.h\"\n#include \"battle_ai_script_commands.h\"\n#include \"battle_controllers.h\"\n#include \"event_data.h\"\n#include \"link.h\"\n#include \"field_weather.h\"\n#include \"constants/abilities.h\"\n#include \"constants/battle_anim.h\"\n#include \"constants/battle_move_effects.h\"\n#include \"constants/battle_script_commands.h\"\n#include \"constants/battle_string_ids.h\"\n#include \"constants/hold_effects.h\"\n#include \"constants/items.h\"\n#include \"constants/moves.h\"\n#include \"constants/songs.h\"\n#include \"constants/species.h\"\n#include \"constants/weather.h\"",
@@ -499,7 +491,8 @@
         "do-while",
         "loop",
         "array",
-        "struct"
+        "struct",
+        "nested-loop"
       ],
       "funcC": "static void Cmd_tryconversiontypechange(void)\n{\n    u8 validMoves = 0;\n    u8 moveChecked;\n    u8 moveType;\n\n    while (validMoves < MAX_MON_MOVES)\n    {\n        if (gBattleMons[gBattlerAttacker].moves[validMoves] == MOVE_NONE)\n            break;\n\n        validMoves++;\n    }\n\n    for (moveChecked = 0; moveChecked < validMoves; moveChecked++)\n    {\n        moveType = gBattleMoves[gBattleMons[gBattlerAttacker].moves[moveChecked]].type;\n\n        if (moveType == TYPE_MYSTERY)\n        {\n            if (IS_BATTLER_OF_TYPE(gBattlerAttacker, TYPE_GHOST))\n                moveType = TYPE_GHOST;\n            else\n                moveType = TYPE_NORMAL;\n        }\n        if (moveType != gBattleMons[gBattlerAttacker].types[0]\n            && moveType != gBattleMons[gBattlerAttacker].types[1])\n        {\n            break;\n        }\n    }\n\n    if (moveChecked == validMoves)\n    {\n        gBattlescriptCurrInstr = T1_READ_PTR(gBattlescriptCurrInstr + 1);\n    }\n    else\n    {\n        do\n        {\n            while ((moveChecked = MOD(Random(), MAX_MON_MOVES)) >= validMoves);\n\n            moveType = gBattleMoves[gBattleMons[gBattlerAttacker].moves[moveChecked]].type;\n\n            if (moveType == TYPE_MYSTERY)\n            {\n                if (IS_BATTLER_OF_TYPE(gBattlerAttacker, TYPE_GHOST))\n                    moveType = TYPE_GHOST;\n                else\n                    moveType = TYPE_NORMAL;\n            }\n        }\n        while (moveType == gBattleMons[gBattlerAttacker].types[0] || moveType == gBattleMons[gBattlerAttacker].types[1]);\n\n        SET_BATTLER_TYPE(gBattlerAttacker, moveType);\n        PREPARE_TYPE_BUFFER(gBattleTextBuff1, moveType);\n\n        gBattlescriptCurrInstr += 5;\n    }\n}",
       "prependC": "#include \"global.h\"\n#include \"battle.h\"\n#include \"battle_message.h\"\n#include \"battle_anim.h\"\n#include \"battle_ai_script_commands.h\"\n#include \"battle_scripts.h\"\n#include \"item.h\"\n#include \"util.h\"\n#include \"pokemon.h\"\n#include \"random.h\"\n#include \"battle_controllers.h\"\n#include \"battle_interface.h\"\n#include \"text.h\"\n#include \"sound.h\"\n#include \"pokedex.h\"\n#include \"recorded_battle.h\"\n#include \"window.h\"\n#include \"reshow_battle_screen.h\"\n#include \"main.h\"\n#include \"palette.h\"\n#include \"money.h\"\n#include \"bg.h\"\n#include \"string_util.h\"\n#include \"pokemon_icon.h\"\n#include \"m4a.h\"\n#include \"mail.h\"\n#include \"event_data.h\"\n#include \"pokemon_storage_system.h\"\n#include \"task.h\"\n#include \"naming_screen.h\"\n#include \"battle_setup.h\"\n#include \"overworld.h\"\n#include \"party_menu.h\"\n#include \"battle_arena.h\"\n#include \"battle_pike.h\"\n#include \"battle_pyramid.h\"\n#include \"field_specials.h\"\n#include \"pokemon_summary_screen.h\"\n#include \"pokenav.h\"\n#include \"menu_specialized.h\"\n#include \"data.h\"\n#include \"constants/abilities.h\"\n#include \"constants/battle_anim.h\"\n#include \"constants/battle_move_effects.h\"\n#include \"constants/battle_string_ids.h\"\n#include \"constants/hold_effects.h\"\n#include \"constants/items.h\"\n#include \"constants/map_types.h\"\n#include \"constants/moves.h\"\n#include \"constants/party_menu.h\"\n#include \"constants/rgb.h\"\n#include \"constants/songs.h\"\n#include \"constants/trainers.h\"",
@@ -534,7 +527,6 @@
       "sym": "UpdateShoalTideFlag",
       "features": [
         "table",
-        "static-local",
         "array",
         "branch",
         "global"

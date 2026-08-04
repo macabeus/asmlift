@@ -37,7 +37,8 @@
         "pointer",
         "branch",
         "global",
-        "arithmetic"
+        "arithmetic",
+        "bitwise"
       ],
       "funcC": "void func_800600C0_60CC0(s16 winId, s32 arg1) {\n    TextWindow *window;\n\n    window = &D_800CC69C_CD29C[winId];\n    if (arg1 != 0) {\n        window->unk_38 |= 0x10;\n    } else {\n        window->unk_38 &= ~0x10;\n    }\n}",
       "sourceUrl": "https://github.com/macabeus/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/window.c#L325-L334",
@@ -108,7 +109,8 @@
         "pointer",
         "loop",
         "branch",
-        "arithmetic"
+        "arithmetic",
+        "do-while"
       ],
       "funcC": "u32 HuMemUsedMemorySizeGet(HeapNode *heap) {\n    HeapNode *cur_heap;\n    u32 total_size;\n\n    cur_heap = heap;\n    total_size = 0;\n    do {\n        if (cur_heap->active == TRUE) {\n            total_size += cur_heap->size;\n        }\n        cur_heap = cur_heap->next;\n    } while (cur_heap != heap);\n\n    return total_size;\n}",
       "sourceUrl": "https://github.com/macabeus/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/malloc.c#L139-L153",
@@ -171,7 +173,10 @@
         "struct",
         "pointer",
         "loop",
-        "arithmetic"
+        "arithmetic",
+        "do-while",
+        "ternary",
+        "bitwise"
       ],
       "funcC": "u32 HuMemUsedMemoryBlockGet(HeapNode *heap) {\n    HeapNode *cur_heap;\n    u32 count_free;\n\n    cur_heap = heap;\n    count_free = 0;\n    do {\n        count_free += (cur_heap->active ^ TRUE) == FALSE ? 1 : 0;\n        cur_heap = cur_heap->next;\n    } while (cur_heap != heap);\n\n    return count_free;\n}",
       "sourceUrl": "https://github.com/macabeus/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/malloc.c#L158-L170",
@@ -183,7 +188,8 @@
         "loop",
         "branch",
         "global",
-        "arithmetic"
+        "arithmetic",
+        "bitwise"
       ],
       "funcC": "s32 func_80045BF0_467F0(s32 arg0) {\n    u32 var_v0;\n    u32 var_v1;\n\n    for (var_v1 = 0; var_v1 < 9; var_v1++) {\n        if ((arg0 & 0xFF) == D_800A1590_A2190[var_v1]) {\n            break;\n        }\n    }\n    if (var_v1 >= 9) {\n        var_v1 = -1;\n    }\n    return var_v1;\n}",
       "sourceUrl": "https://github.com/macabeus/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/pause.c#L217-L230",
@@ -239,7 +245,8 @@
         "loop",
         "branch",
         "global",
-        "arithmetic"
+        "arithmetic",
+        "nested-loop"
       ],
       "funcC": "u8 func_8005FA90_60690(u8 *arg0) {\n    s16 i, j;\n\n    for (i = 0; i < 10; i += 2) {\n        if (D_800A232C_A2F2C[i] == arg0[0] && D_800A232C_A2F2C[i + 1] == arg0[1]) {\n            return i / 2;\n        }\n    }\n    for (i = 0; i < 16; i++) {\n        for (j = 0; j < 32; j += 2) {\n            if (D_800A2344_A2F44[i][j] == arg0[0] && D_800A2344_A2F44[i][j + 1] == arg0[1]) {\n                return i * 16 + j / 2;\n            }\n        }\n    }\n    return 16;\n}",
       "sourceUrl": "https://github.com/macabeus/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/window.c#L297-L313",
@@ -251,7 +258,8 @@
       "features": [
         "struct",
         "pointer",
-        "arithmetic"
+        "arithmetic",
+        "bitwise"
       ],
       "funcC": "void func_80047E90_48A90(omObjData *obj, s32 arg1) {\n    obj->unk10 |= arg1;\n}",
       "sourceUrl": "https://github.com/macabeus/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/objmain.c#L516-L518",
@@ -284,7 +292,8 @@
         "struct",
         "pointer",
         "global",
-        "arithmetic"
+        "arithmetic",
+        "bitwise"
       ],
       "funcC": "HuSprite_Unk84_Unk00_Struct *func_800560D8_56CD8(s16 arg0, u16 arg1) {\n    return &D_800C9530_CA130[arg0]->unk00[arg1];\n}",
       "sourceUrl": "https://github.com/macabeus/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/sprman.c#L636-L638",
@@ -440,7 +449,8 @@
       "sym": "func_80045314_45F14",
       "features": [
         "branch",
-        "arithmetic"
+        "arithmetic",
+        "switch"
       ],
       "funcC": "s32 func_80045314_45F14(void) {\n    switch (omovl) {\n        case 2:\n            return 20;\n        case 3:\n            return -20;\n        default:\n            return 0;\n    }\n}",
       "sourceUrl": "https://github.com/macabeus/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/gamemes.c#L743-L752",
@@ -450,7 +460,8 @@
       "sym": "func_80056C98_57898",
       "features": [
         "pointer",
-        "arithmetic"
+        "arithmetic",
+        "shift"
       ],
       "funcC": "u32 func_80056C98_57898(u8 **arg0) {\n    u8 *p = *arg0;\n    u32 val = (p[0] << 24) + (p[1] << 16) + (p[2] << 8) + p[3];\n\n    *arg0 = p + 4;\n    return val;\n}",
       "sourceUrl": "https://github.com/macabeus/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/sprman.c#L777-L783"
@@ -503,7 +514,8 @@
       "features": [
         "pointer",
         "branch",
-        "arithmetic"
+        "arithmetic",
+        "bitwise"
       ],
       "funcC": "u8 *GWBoardRecordGet(s16 arg0) {\n    s16 idx = arg0;\n\n    if (arg0 < 0) {\n        idx = GwSystem.current_board_index;\n    }\n\n    if (GwSystem.playMode & 1) {\n        return (u8 *)&GwCommon.unk_1D[2] + idx * 9;\n    }\n    return (u8 *)&GwCommon.unk_1D[0x38] + idx * 9;\n}",
       "sourceUrl": "https://github.com/macabeus/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/save.c#L80-L91"
@@ -515,7 +527,8 @@
         "loop",
         "array",
         "global",
-        "branch"
+        "branch",
+        "bitwise"
       ],
       "funcC": "void ContDataUpdate(void) {\n    s16 i;\n    s32 temp_v0_3;\n    s32 temp_v0_5;\n    u16 var_a2;\n    s8 temp_v0_2;\n    s8 temp_v0_4;\n\n    for (i = 0; i < MAXCONTROLLERS; ++i) {\n        D_800D1350_D1F50[i] = D_800D5546_D6146[i];\n        var_a2 = D_800CDA7C_CE67C[i];\n        temp_v0_2 = D_800CBB6E_CC76E[i];\n        temp_v0_3 = ((temp_v0_2 >> 7) | 1);\n\n        if (((temp_v0_2 * temp_v0_3) - 0x1E) > 0) {\n            if (temp_v0_3 > 0) {\n                var_a2 = (var_a2 & 0xFDFF) | 0x100;\n            } else {\n                var_a2 = (var_a2 & 0xFEFF) | 0x200;\n            }\n        }\n\n        temp_v0_4 = D_800D20A1_D2CA1[i];\n        temp_v0_5 = ((temp_v0_4 >> 7) | 1);\n\n        if (((temp_v0_4 * temp_v0_5) - 0x1E) > 0) {\n            if (temp_v0_5 > 0) {\n                var_a2 = (var_a2 & 0xFBFF) | 0x800;\n            } else {\n                var_a2 = (var_a2 & 0xF7FF) | 0x400;\n            }\n        }\n\n        D_800D5546_D6146[i] = var_a2;\n        D_800C9520_CA120[i] = var_a2 & (var_a2 ^ D_800D1350_D1F50[i]);\n\n        if ((var_a2 & 0xFFFF) != D_800D1350_D1F50[i]) {\n            D_800D10F8_D1CF8[i] = 0xA;\n            D_800D0590_D1190[i] = D_800C9520_CA120[i];\n        } else {\n            if (D_800D10F8_D1CF8[i] > 0) {\n                D_800D10F8_D1CF8[i] = D_800D10F8_D1CF8[i] - 1;\n                D_800D0590_D1190[i] = D_800C9520_CA120[i];\n            } else {\n                D_800D10F8_D1CF8[i] = 1;\n                D_800D0590_D1190[i] = var_a2;\n            }\n        }\n    }\n}",
       "prependC": "#include \"common.h\"\n#include \"input.h\"",
@@ -533,7 +546,6 @@
         "float",
         "array",
         "arithmetic",
-        "call",
         "struct"
       ],
       "funcC": "void func_80012B14_13714(s16 camIndex, Vec *worldPos, Vec *outPos) {\n    f32 x;\n    f32 y;\n    f32 z;\n    f32 projectedX;\n    f32 projectedY;\n    f32 projectedZ;\n    HuCamera *camera;\n    HuMtx4F viewMtx;\n    f32 f2;\n    f32 f4;\n\n    camera = &gCameraList[camIndex];\n    guLookAtF(\n        viewMtx,\n        camera->pos.x,\n        camera->pos.y,\n        camera->pos.z,\n        camera->at.x,\n        camera->at.y,\n        camera->at.z,\n        camera->up.x,\n        camera->up.y,\n        camera->up.z);\n\n    x = worldPos->x;\n    y = worldPos->y;\n    z = worldPos->z;\n    x -= camera->pos.x;\n    y -= camera->pos.y;\n    z -= camera->pos.z;\n    projectedX = ((x * viewMtx[0][0]) + (y * viewMtx[1][0])) + (z * viewMtx[2][0]);\n    projectedY = ((x * viewMtx[0][1]) + (y * viewMtx[1][1])) + (z * viewMtx[2][1]);\n    projectedZ = ((x * viewMtx[0][2]) + (y * viewMtx[1][2])) + (z * viewMtx[2][2]);\n    x = HuMathSin(camera->fov[0] / 2.0f) / HuMathCos(camera->fov[0] / 2.0f) * projectedZ * (camera->screenScale.x / camera->screenScale.y);\n    y = (HuMathSin(camera->fov[0] / 2.0f) / HuMathCos(camera->fov[0] / 2.0f)) * projectedZ;\n    f2 = camera->screenPos.x / 4.0f;\n    outPos->x = (projectedX * (f2 / (-x))) + f2;\n    f4 = camera->screenPos.y / 4.0f;\n    outPos->y = ((projectedY * (f4 / y)) + f4);\n}",
@@ -552,7 +564,6 @@
         "float",
         "array",
         "arithmetic",
-        "call",
         "struct"
       ],
       "funcC": "void Hu3DCam3DToScreen(s16 camIndex, Vec *worldPos, Vec *outPos) {\n    f32 x;\n    f32 y;\n    f32 z;\n    f32 projectedX;\n    f32 projectedY;\n    f32 projectedZ;\n    HuCamera *camera;\n    HuMtx4F viewMtx;\n\n    camera = &gCameraList[camIndex];\n    guLookAtF(\n        viewMtx,\n        camera->pos.x,\n        camera->pos.y,\n        camera->pos.z,\n        camera->at.x,\n        camera->at.y,\n        camera->at.z,\n        camera->up.x,\n        camera->up.y,\n        camera->up.z);\n\n    x = worldPos->x;\n    y = worldPos->y;\n    z = worldPos->z;\n    x -= camera->pos.x;\n    y -= camera->pos.y;\n    z -= camera->pos.z;\n    projectedX = ((x * viewMtx[0][0]) + (y * viewMtx[1][0])) + (z * viewMtx[2][0]);\n    projectedY = ((x * viewMtx[0][1]) + (y * viewMtx[1][1])) + (z * viewMtx[2][1]);\n    projectedZ = ((x * viewMtx[0][2]) + (y * viewMtx[1][2])) + (z * viewMtx[2][2]);\n    x = HuMathSin(camera->fov[0] / 2.0f) / HuMathCos(camera->fov[0] / 2.0f) * projectedZ * ASPECT_RATIO;\n    y = (HuMathSin(camera->fov[0] / 2.0f) / HuMathCos(camera->fov[0] / 2.0f)) * projectedZ;\n    outPos->x = (projectedX * (SCREEN_WIDTH_CENTER / (-x))) + SCREEN_WIDTH_CENTER;\n    outPos->y = ((projectedY * (SCREEN_HEIGHT_CENTER / y)) + SCREEN_HEIGHT_CENTER);\n}",
@@ -589,7 +600,8 @@
         "struct",
         "pointer",
         "branch",
-        "loop"
+        "loop",
+        "nested-loop"
       ],
       "funcC": "void func_800230F8_23CF8(HmfData *arg0) {\n    s16 textureIndex;\n    s16 i, j;\n\n    textureIndex = 4; // TODO: why does this start at 4?\n\n    for (i = 0; i < arg0->unk12; i++) {\n        /* Skip entries marked as 0xFF */\n        if (arg0->unk84[i].unk9 == 0xFF) {\n            continue;\n        }\n\n        /* Find first entry with different unkC value */\n        for (j = 0; j < i; j++) {\n            if (arg0->unk84[i].unkC == arg0->unk84[j].unkC) {\n                break;\n            }\n        }\n\n        /* Copy or assign texture indices */\n        if (j != i) {\n            arg0->unk84[i].unk3 = arg0->unk84[j].unk3;\n            arg0->unk84[i].unk4 = arg0->unk84[j].unk4;\n        } else {\n            arg0->unk84[i].unk3 = textureIndex++;\n            if (arg0->unk84[i].unkC->unk_30 != NULL) {\n                arg0->unk84[i].unk4 = textureIndex++;\n            }\n\n            if (textureIndex > 16) {\n                osSyncPrintf(\"Texture Anime Over\\n\");\n                return;\n            }\n        }\n    }\n}",
       "prependC": "#include \"common.h\"\n#include \"mallocblock.h\"",
@@ -607,7 +619,6 @@
         "struct",
         "pointer",
         "loop",
-        "call",
         "global"
       ],
       "funcC": "s16 HuSprGrpCreate(u16 arg0, u16 arg1) {\n    HuSprGrp *temp_v0_2;\n    HuSprite **var_s2;\n    HuSprite *temp_v0_3;\n    s16 var_s4;\n    s16 i;\n\n    for (i = 0; i < HUSPR_GRP_MAX; i++) {\n        if (HuSprGrpData[i] == NULL) {\n            break;\n        }\n    }\n    if (i == HUSPR_GRP_MAX) {\n        return -1;\n    }\n    var_s4 = i;\n    temp_v0_2 = func_80052468_53068(arg0, arg1);\n    if (temp_v0_2 == NULL) {\n        return -1;\n    }\n    HuSprGrpData[var_s4] = temp_v0_2;\n    temp_v0_2->unk_0A = 0;\n    temp_v0_2->unk_0C = 1;\n    var_s2 = temp_v0_2->members;\n    for (i = 0; i < arg0; i++) {\n        *(var_s2++) = temp_v0_3 = HuMemAlloc(0x210);\n        if (temp_v0_3 == NULL) {\n            HuSprGrpKill(var_s4);\n            return -1;\n        }\n        temp_v0_2->unk_0A++;\n    }\n    func_80052E68_53A68(temp_v0_2, arg0);\n    return var_s4;\n}",
@@ -621,7 +632,9 @@
         "switch",
         "branch",
         "struct",
-        "pointer"
+        "pointer",
+        "ternary",
+        "bitwise"
       ],
       "funcC": "void FileSeek(HuFileInfoD *info, s32 arg1, s32 arg2) {\n    switch (arg2) {\n        case 0:\n            arg2 = (u32)(info->bytes + arg1);\n            break;\n        case 1:\n            arg2 = (u32)(info->bytesCopy + info->unkE + arg1);\n            break;\n        case 2:\n            arg2 = (u32)(info->bytes + info->size + arg1);\n            break;\n        default:\n            return;\n    }\n    arg2 = ((u32)arg2 < (u32)info->bytes) ? (u32)info->bytes : (u32)arg2;\n    arg2 = ((u32)arg2 >= (u32)(info->bytes + info->size)) ? (u32)(info->bytes + info->size - 1) : (u32)arg2;\n\n    if (((u32)arg2 < (u32)info->bytesCopy) || ((u32)arg2 >= (u32)(info->bytesCopy + 0x400))) {\n        info->unkC = 1;\n        info->unkE = arg2 & 1;\n        info->bytesCopy = (u8 *)(arg2 - info->unkE);\n    } else {\n        info->unkE = arg2 - (u32)info->bytesCopy;\n    }\n}",
       "prependC": "#include \"common.h\"\n#include \"game/data.h\"\n#include \"rom.h\"\n#include \"malloc.h\"\n#include \"mallocblock.h\"\n#include \"decode.h\"",
@@ -636,9 +649,9 @@
       "sym": "HuMemAllocTag",
       "features": [
         "sizeof",
-        "call",
         "pointer",
-        "struct"
+        "struct",
+        "bitwise"
       ],
       "funcC": "void *HuMemAllocTag(s32 size, s16 tag) {\n    s32 alignedSize;\n    void *data;\n    HuMallocHeader *firstBlk;\n    HuMallocHeader *newBlk;\n\n    alignedSize = (size + 7) & ~7;\n    data = gMallocFunc(alignedSize + sizeof(HuMallocHeader));\n    newBlk = (HuMallocHeader *)((s32)data + alignedSize);\n\n    firstBlk = gFirstMallocBlock;\n\n    newBlk->prev = firstBlk;\n    newBlk->next = firstBlk->next;\n    firstBlk->next->prev = newBlk;\n    firstBlk->next = newBlk;\n\n    newBlk->tag = tag;\n    newBlk->size = alignedSize;\n    newBlk->data = data;\n    newBlk->creationFrame = D_800D20AC_D2CAC;\n\n    return newBlk->data;\n}",
       "prependC": "#include \"common.h\"\n#include \"mallocblock.h\"",
