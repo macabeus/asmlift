@@ -219,6 +219,50 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ALL,
   },
 
+  // ── unions (the same storage read at two widths / in two type domains) ──────────────────
+  // A union is only measurable when the SAME bytes are reached through members of different width
+  // or domain: that is what a decompiler has to reconstruct, and what asmlift currently declines on
+  // ("overlapping fields at offset N — unions not modelled"). A union whose members are never
+  // aliased compiles identically to a struct, so it would be unscorable — see `sfield`.
+  //
+  // The aliasing probes take the union through a POINTER on purpose. As a local it lands in a stack
+  // slot on the register-poor targets, and asmlift declines on the stack-frame gap BEFORE it ever
+  // sees the overlap — the probe would then measure frames, not unions. `upun` is the exception:
+  // punning a float through memory is the whole construct, so its FP store/load is the point.
+  {
+    sym: 'uhalf',
+    src: 'union W{u32 w;u16 h[2];};\nu32 uhalf(union W*u,u32 v){ u->w=v; return u->h[0]+u->h[1]; }',
+    features: ['union', 'field', 'array', 'mixed-width'],
+    toolchains: ALL,
+  },
+  {
+    sym: 'ubyte',
+    src: 'union B{u32 w;u8 b[4];};\nu32 ubyte(union B*u,u32 v,int i){ u->w=v; return u->b[i]; }',
+    features: ['union', 'field', 'array', 'variable-index', 'mixed-width'],
+    toolchains: ALL,
+  },
+  {
+    sym: 'upun',
+    src: 'union F{float f;u32 u;};\nu32 upun(float x){ union F t; t.f=x; return t.u; }',
+    features: ['union', 'field', 'float', 'type-pun'],
+    toolchains: ALL,
+    ctx: 'u32 upun(float);',
+  },
+  {
+    sym: 'utag',
+    src: 'struct T{int kind;union{int i;u16 h;u8 b;}v;};\nint utag(struct T*t){ switch(t->kind){case 0:return t->v.i;case 1:return t->v.h;default:return t->v.b;} }',
+    features: ['union', 'struct', 'field', 'switch', 'mixed-width'],
+    toolchains: ALL,
+  },
+  {
+    sym: 'ustore',
+    src: 'union E{s32 a;u16 b[2];};\nvoid ustore(union E*e,int i,s32 v){ e[i].a=v; e[i].b[0]=0; }',
+    features: ['union', 'field', 'array', 'store', 'mixed-width'],
+    toolchains: ALL,
+    ctx: 'union E; void ustore(union E*,int,s32);',
+    proto: { ustore: { returnsVoid: true } },
+  },
+
   // ── loops ──────────────────────────────────────────────────────────────────────────────
   {
     sym: 'sumto',
