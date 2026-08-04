@@ -411,7 +411,7 @@ packages/cli/             @asmlift/cli — the user-facing asmlift interface
   test/matching/          the byte-exactness suite (needs real toolchains)
   test/offline/           Node-side suites that run on hosted CI (no toolchains needed)
 packages/toolchains/      @asmlift/toolchains — pinned calibration toolchains (tests + benchmark only)
-packages/bench-schema/    @asmlift/bench-schema — the shared benchmark result/manifest types
+packages/bench-schema/    @asmlift/bench-schema — the benchmark contract (types + feature vocabulary)
 apps/web/                 the webapp: Playground + Benchmark view
 apps/benchmark/           the m2c-vs-asmlift harness; the Benchmark view renders its results
 ```

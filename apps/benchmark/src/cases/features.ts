@@ -1,96 +1,44 @@
-// The `features` vocabulary — what each tag means and, where possible, how it is CHECKED.
+// Feature-tag DETECTORS. The vocabulary itself lives in @asmlift/bench-schema, because apps/web
+// renders it too and cannot import this app; here we only decide, per row, which tags the evidence
+// supports.
 //
-// Tags were authored per extraction session with no shared definition (`features: string[]` and
-// nothing else), and a four-way audit found roughly a fifth of the real tier carrying at least one
-// tag its function does not support: `bitfield` produced by a regex that matched ternaries,
-// `soft-div` applied to `/` by a constant that compiles to a shift, `call` on leaf functions that
-// emit no call instruction, `loop` on straight-line bodies, `arithmetic` on a function whose entire
-// compiled form is `lui/jr/sb/nop`. A tag nobody can falsify drifts into a comment.
+// Three evidence kinds, and only the third is authored:
 //
-// So the vocabulary is split in two:
-//
-//   MACHINE-CHECKED — decidable from evidence the dataset already carries (the function's own
-//   source, or the compiled `targetAsm`). `features.test.ts` asserts BOTH directions for these:
-//   tagged ⇒ evidence exists, and evidence exists ⇒ tagged. They cannot rot.
-//
-//   JUDGEMENT — a human call (is this "bulk" memory movement? is this arithmetic "interesting"?).
-//   Defined here so the call is at least made against a written standard, but not asserted.
-//
-// A tag outside both lists fails validation: the vocabulary is closed, so a typo (`fixedpoint` for
-// `fixed-point`) is an error rather than a silently-new category that splits every aggregate.
+//   source    — from the function's own C. Derived into every row by eval/evaluate.ts, so a dataset
+//               cannot disagree with its own source.
+//   codegen   — from the row's compiled `targetAsm`. Also per row: what a compiler does with a
+//               constant divide or a switch is a property of (function × toolchain), and one
+//               synthetic spec runs on four.
+//   judgement — a human call. Authored in the dataset, and held to the floor below.
+import { type FeatureDef, KNOWN_FEATURES, featuresByEvidence } from '@asmlift/bench-schema';
+
+const idsOf = (kind: Parameters<typeof featuresByEvidence>[0]): Set<string> =>
+  new Set(featuresByEvidence(kind).map((f: FeatureDef) => f.id));
 
 /** Tags decided from the function's own C source. */
-export const SOURCE_CHECKED = {
-  switch: 'a `switch` statement appears in the body',
-  goto: 'a `goto` appears in the body',
-  /** A REAL do-while loop. `do { … } while (0)` is a macro idiom with no back edge — not a loop. */
-  'do-while': 'a `do { … } while (cond)` loop, where cond is not the literal 0',
-  loop: 'a `for`, `while`, or real do-while loop appears in the body',
-  'nested-loop': 'a loop lexically inside another loop',
-  ternary: 'a `?:` conditional expression appears in the body',
-  sizeof: 'the `sizeof` operator appears in the body',
-  shift: '`<<` or `>>` appears in the body',
-  bitwise: '`&`, `|`, `^`, or `~` appears in the body (as an operator, not `&&`/`||`/address-of)',
-} as const;
+export const SOURCE_CHECKED = idsOf('source');
+/** Tags decided from the row's compiled reference assembly. */
+export const CODEGEN_DERIVED = idsOf('codegen');
+/** Tags that are a human call: defined in the vocabulary, held to a floor here, never asserted. */
+export const JUDGEMENT = idsOf('judgement');
 
-/** Tags decided from the compiled reference assembly (`targetAsm`). */
-export const ASM_CHECKED = {
-  /** The COMPILED code calls a soft-division helper. `/` by a constant that becomes a shift is not
-   *  soft-div, and neither is a hardware `div` (MIPS) or a BIOS division syscall (GBA `svc #6`). */
-  'soft-div': 'the compiled code calls __divsi3/__udivsi3/__modsi3/__umodsi3',
-  /** ANY call instruction. The callee's NAME is deliberately not used: these are unlinked objects,
-   *  so an external MIPS `jal` renders as `jal 0 <enclosing symbol>` — the callee lives in a
-   *  relocation the harness's objdump flags do not emit. Filtering by name would discard every
-   *  real call on MIPS and keep none. */
-  call: 'the compiled code contains a call instruction',
-  mmio: 'the compiled code references a hardware I/O register address (0x04000000-0x040003FF)',
-  dma: 'the compiled code programs the DMA registers (0x040000B0-0x040000DF)',
-} as const;
-
-/** Tags that are a human call. Defined, not asserted. */
-export const JUDGEMENT = {
-  arithmetic: 'integer arithmetic is a POINT of the function, not merely an index computation',
-  branch: 'conditional control flow is a point of the function',
-  compare: 'the function is essentially a comparison',
-  struct: 'a struct type is used',
-  union: 'a union type is accessed (including through a project typedef)',
-  bitfield: 'a declared C bitfield (`u32 x : 2`) is read or written',
-  field: 'a named struct/union member is accessed',
-  array: 'an array is indexed',
-  pointer: 'pointer arithmetic or dereference beyond plain member access',
-  cast: 'an explicit cast that changes the value or its width',
-  memory: 'bulk memory movement (copy/clear/compress), not any single load or store',
-  store: 'a store is the point of the function',
-  global: 'a file-scope or extern variable is referenced',
-  table: 'a constant lookup table is read with a computed index',
-  float: 'floating-point types are used',
-  'fixed-point': 'Q-format integer math',
-  int64: '64-bit integer arithmetic',
-  matrix: 'matrix math',
-  fnptr: 'a call through a function pointer',
-  recursion: 'the function calls itself',
-  macro: 'a project macro is load-bearing for the shape',
-  abs: 'absolute value is computed',
-  baseline: 'a trivial function carrying no other feature',
-} as const;
+export { KNOWN_FEATURES };
 
 /** A NECESSARY condition for a JUDGEMENT tag: failing it makes the tag indefensible.
  *
- *  These tags are a human call — "is this *bulk* memory movement?" cannot be decided by a regex —
- *  so the sufficient condition stays with the reviewer. But most of them have a floor that CAN be
- *  decided, and the audit found tags sitting below it: `arithmetic` on a function whose whole
- *  compiled form is `lui/jr/sb/nop`, `array` on a body containing no `[`, `table` on a body with no
- *  array at all, `branch` on two straight-line assignments. Checking the floor catches the
+ *  "Is this *bulk* memory movement?" cannot be decided by a regex, so the sufficient condition
+ *  stays with the reviewer — but most tags have a floor that can be, and checking it catches
  *  fabrications without pretending the judgement is mechanical.
  *
- *  `global`, `memory`, `union`, `bitfield`, `pointer` and the type-ish tags have NO reliable floor and are
- *  absent here on purpose: kleod spells several globals as address macros
- *  (`#define gStreamPtr (*(u8**)0x03004D84)`), which emit a raw `.word 0x3004d84` rather than a
- *  symbol, and `union`/`bitfield` need the project's headers to resolve. */
-export const JUDGEMENT_FLOOR: Record<string, (body: string, asm: string) => boolean> = {
+ *  `global`, `memory`, `union`, `bitfield`, `pointer` and the type-ish tags have NO reliable floor
+ *  and are absent on purpose: kleod spells several globals as address macros
+ *  (`#define gStreamPtr (*(u8**)0x03004D84)`), which emit a raw `.word` rather than a symbol, and
+ *  `union`/`bitfield` need the project's headers to resolve. */
+export const JUDGEMENT_FLOOR: Record<string, (body: string, asm: string, whole: string) => boolean> = {
   arithmetic: (b) => /[+%]|(?<!-)-(?!>)|(?<!\/)\/(?![/*])|\*/.test(b),
   array: (b) => /\[/.test(b),
   table: (b) => /\w+\s*\[\s*[^\]\d\s]/.test(b), // indexed by something that is not a literal
+  'variable-index': (b) => /\w+\s*\[\s*[^\]\d\s]/.test(b),
   cast: (b) =>
     /\(\s*\w+\s*\*+\s*\)/.test(b) ||
     /\(\s*(?:struct|union|enum|const|unsigned|signed|void|int|char|short|long|float|double|[us]\d+|f\d+|\w+_t|[A-Z]\w*)[\w\s]*\**\s*\)/.test(
@@ -99,16 +47,27 @@ export const JUDGEMENT_FLOOR: Record<string, (body: string, asm: string) => bool
   struct: (b) => /\bstruct\b|\bunion\b|->|\.\s*[A-Za-z_]/.test(b),
   field: (b) => /->|\.\s*[A-Za-z_]/.test(b),
   fnptr: (_b, asm) => /\bjalr\b|\bblx\b|_call_via_r/.test(asm),
+  // `&&`/`||` count: a short-circuit is conditional control flow, and the compiler branches on it
   branch: (b, asm) =>
-    /\bif\b|\bswitch\b|\?|\bfor\b|\bwhile\b/.test(b) ||
+    /\bif\b|\bswitch\b|\?|\bfor\b|\bwhile\b|&&|\|\|/.test(b) ||
     /\bb(eq|ne|ge|gt|le|lt|hi|ls|cs|cc)\b|beqz|bnez|blez|bgtz|bltz|bgez/.test(asm),
+  break: (b) => /\bbreak\b/.test(b),
+  continue: (b) => /\bcontinue\b/.test(b),
+  // a TYPE tag: the evidence is in the signature, not the body
+  double: (_b, _asm, whole) => /\bdouble\b/.test(whole),
+  dense: (b) => /\bswitch\s*\(/.test(b),
+  sparse: (b) => /\bswitch\s*\(/.test(b),
+  fallthrough: (b) => /\bswitch\s*\(/.test(b),
+  // C has no rotate operator; it is spelled as a shift pair
+  rotate: (b) => /<<|>>/.test(b),
+  mask: (b) => /&/.test(b),
+  'div-const': (b) => /\//.test(b),
+  'div-pow2': (b) => /\//.test(b),
+  'div-reg': (b) => /\//.test(b),
+  'mod-const': (b) => /%/.test(b),
+  'mod-pow2': (b) => /%/.test(b),
+  'mod-reg': (b) => /%/.test(b),
 };
-
-export const KNOWN_FEATURES = new Set<string>([
-  ...Object.keys(SOURCE_CHECKED),
-  ...Object.keys(ASM_CHECKED),
-  ...Object.keys(JUDGEMENT),
-]);
 
 /** Strip comments and string/char literals so operator scans cannot match inside them. */
 export function stripLiterals(c: string): string {
@@ -178,7 +137,7 @@ function hasNestedLoop(body: string): boolean {
   return nested;
 }
 
-/** Which SOURCE_CHECKED tags the function's own C supports. */
+/** Which `source` tags the function's own C supports. */
 export function sourceEvidence(funcC: string): Set<string> {
   const b = stripLiterals(funcC);
   const body = neutralizeDoWhileZero(b.slice(b.indexOf('{')));
@@ -201,8 +160,8 @@ export function sourceEvidence(funcC: string): Set<string> {
 
 const DIV_HELPERS = /__(u?divsi3|u?modsi3|divdi3|moddi3)/;
 
-/** Which ASM_CHECKED tags the compiled reference supports. `sym` is the function's own name. */
-export function asmEvidence(targetAsm: string, _sym: string): Set<string> {
+/** The `codegen` tags decidable from the assembly ALONE (no source needed). */
+function asmEvidence(targetAsm: string): Set<string> {
   const out = new Set<string>();
   if (DIV_HELPERS.test(targetAsm)) out.add('soft-div');
   // direct (`bl`/`jal`) and indirect (`jalr`/`blx`, agbcc's `_call_via_rN` thunk) alike
@@ -212,31 +171,6 @@ export function asmEvidence(targetAsm: string, _sym: string): Set<string> {
   if (addrs.some((a) => a >= 0x040000b0 && a <= 0x040000df)) out.add('dma');
   return out;
 }
-
-// ── codegen tags: derived PER ROW, never authored ───────────────────────────────────────────
-//
-// What a compiler does with a constant divisor, a switch, or a multiply is a property of
-// (function × toolchain), not of the source. A synthetic spec runs on four toolchains from ONE
-// `features` array, so authoring these guaranteed a wrong answer: `divc10` was tagged `magic-div`
-// while agbcc emits `bl __divsi3` and IDO emits a hardware `div` — true for two of its four rows,
-// and simultaneously missing from `divc`/`modc`, which magic-multiply on exactly the same targets.
-//
-// So these are computed from the row's own `targetAsm` (plus the source, where the tag is a claim
-// about a TRANSFORMATION — "the multiply became shifts" needs to know there was a multiply).
-// `evaluate.ts` unions them into every row; a manifest or spec that authors one fails the test.
-
-export const CODEGEN_DERIVED = {
-  'soft-div': 'calls a soft-division helper (__divsi3 and friends)',
-  'hw-div': 'uses a hardware divide instruction (MIPS `div`/`divu`, PPC `divw`)',
-  'magic-div': 'a constant divide became a multiply-high by a magic reciprocal',
-  'jump-table': 'a computed jump through a table (`mov pc`, `jr` on a non-link register, `bctr`)',
-  'comparison-tree': 'a source switch became compare-and-branch rather than a jump table',
-  branchless: 'a source conditional produced no conditional branch',
-  'strength-reduce': 'a constant multiply became shifts/adds rather than a multiply instruction',
-  call: 'contains a call instruction',
-  mmio: 'references a hardware I/O register (0x04000000-0x040003FF)',
-  dma: 'programs the DMA registers (0x040000B0-0x040000DF)',
-} as const;
 
 const MUL_HIGH = /\b(mulhw|mulhwu|mulhi)\b|\b(mult|multu)\b[\s\S]{0,120}?\bmf(hi|lo)\b/;
 const HW_DIV = /\b(div|divu|divw|divwu)\b\s+[^\n]*,/;
@@ -250,9 +184,11 @@ function hasComputedJump(asm: string): boolean {
   return /\bmov\s+pc\s*,\s*r\d/.test(asm) || /\bjr\s+(?!ra\b)\w+/.test(asm) || /\bbctr\b/.test(asm);
 }
 
-/** Codegen tags for one row. `funcC` is the source the row was built from. */
+/** Codegen tags for one row. `funcC` is the source the row was built from — three of these tags are
+ *  claims about a TRANSFORMATION ("the multiply became shifts"), so they need to know there was a
+ *  multiply. */
 export function codegenEvidence(funcC: string, targetAsm: string): Set<string> {
-  const out = asmEvidence(targetAsm, '');
+  const out = asmEvidence(targetAsm);
   const body = neutralizeDoWhileZero(stripLiterals(funcC));
   const src = body.slice(body.indexOf('{'));
 
@@ -266,18 +202,21 @@ export function codegenEvidence(funcC: string, targetAsm: string): Set<string> {
   if (computed) out.add('jump-table');
   else if (/\bswitch\s*\(/.test(src)) out.add('comparison-tree');
 
-  // a relational operator counts even without an `if`: `(a>0) - (a<0)` is a conditional the
-  // compiler may or may not branch on, and whether it does is the whole point of the tag
-  // a relational operator counts even without an `if`: `(a>0) - (a<0)` is a conditional the
-  // compiler may or may not branch on, and whether it does is the whole point of the tag. `->`
-  // and the shift operators must go first or every struct access reads as a comparison.
+  // A relational operator counts without an `if`: `(a>0) - (a<0)` is a conditional the compiler
+  // may or may not branch on, which is the point of the tag. `->` and the shifts must go first or
+  // every struct access reads as a comparison.
   const rel = src.replace(/->/g, ' ').replace(/<<|>>/g, ' ');
   const conditional = /\bif\s*\(|\?[^;{}]*:|\bswitch\s*\(|\bfor\s*\(|\bwhile\s*\(|[<>]=?|[=!]=/.test(rel);
-  // a computed jump is not "branchless" in the useful sense — the conditional became an indirect
-  // jump, not straight-line code
+  // a computed jump is not branchless: the conditional became an indirect jump, not straight-line
   if (conditional && !computed && !COND_BRANCH.test(targetAsm)) out.add('branchless');
 
   // `a * 10` with no multiply instruction anywhere ⇒ the compiler reduced it
   if (/\*\s*\d/.test(src) && !ANY_MUL.test(targetAsm)) out.add('strength-reduce');
   return out;
+}
+
+/** Every tag one row publishes: the judgement tags its dataset authored, plus whatever its own
+ *  source and assembly support. Authored data therefore carries judgement tags ONLY. */
+export function rowFeatures(authored: readonly string[], funcC: string, targetAsm: string): string[] {
+  return [...new Set([...authored, ...sourceEvidence(funcC), ...codegenEvidence(funcC, targetAsm)])];
 }
