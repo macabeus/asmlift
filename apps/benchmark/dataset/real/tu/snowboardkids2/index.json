@@ -126,5 +126,37 @@
   "func_80051C80_52880": {
     "tu": "func_80051C80_52880.i.gz",
     "ctx": "ctx-976642cfe6fd.i.gz"
+  },
+  "func_8005DF10_5EB10": {
+    "tu": "func_8005DF10_5EB10.i.gz",
+    "ctx": "ctx-d52dfa1981b2.i.gz"
+  },
+  "func_8001E104_1ED04": {
+    "tu": "func_8001E104_1ED04.i.gz",
+    "ctx": "ctx-cd1f6e77e884.i.gz"
+  },
+  "func_8005AE8C_5BA8C": {
+    "tu": "func_8005AE8C_5BA8C.i.gz",
+    "ctx": "ctx-3c0ef0b3e2c0.i.gz"
+  },
+  "func_800B2C18_A2AC8": {
+    "tu": "func_800B2C18_A2AC8.i.gz",
+    "ctx": "ctx-a07318e5a62e.i.gz"
+  },
+  "func_8005AB58_5B758": {
+    "tu": "func_8005AB58_5B758.i.gz",
+    "ctx": "ctx-3c0ef0b3e2c0.i.gz"
+  },
+  "func_800B3F2C_A3DDC": {
+    "tu": "func_800B3F2C_A3DDC.i.gz",
+    "ctx": "ctx-a07318e5a62e.i.gz"
+  },
+  "func_800B3784_A3634": {
+    "tu": "func_800B3784_A3634.i.gz",
+    "ctx": "ctx-a07318e5a62e.i.gz"
+  },
+  "func_80038090_38C90": {
+    "tu": "func_80038090_38C90.i.gz",
+    "ctx": "ctx-61ff2cd29f43.i.gz"
   }
 }

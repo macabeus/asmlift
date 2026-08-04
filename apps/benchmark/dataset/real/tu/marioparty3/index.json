@@ -126,5 +126,37 @@
   "GWBoardRecordGet": {
     "tu": "GWBoardRecordGet.i.gz",
     "ctx": "ctx-0eb9f921480c.i.gz"
+  },
+  "ContDataUpdate": {
+    "tu": "ContDataUpdate.i.gz",
+    "ctx": "ctx-0eb9f921480c.i.gz"
+  },
+  "func_80012B14_13714": {
+    "tu": "func_80012B14_13714.i.gz",
+    "ctx": "ctx-ac475e3b0255.i.gz"
+  },
+  "Hu3DCam3DToScreen": {
+    "tu": "Hu3DCam3DToScreen.i.gz",
+    "ctx": "ctx-ac475e3b0255.i.gz"
+  },
+  "DecodeData": {
+    "tu": "DecodeData.i.gz",
+    "ctx": "ctx-0d7b2b9d8c52.i.gz"
+  },
+  "func_800230F8_23CF8": {
+    "tu": "func_800230F8_23CF8.i.gz",
+    "ctx": "ctx-ac475e3b0255.i.gz"
+  },
+  "HuSprGrpCreate": {
+    "tu": "HuSprGrpCreate.i.gz",
+    "ctx": "ctx-ac475e3b0255.i.gz"
+  },
+  "FileSeek": {
+    "tu": "FileSeek.i.gz",
+    "ctx": "ctx-dd34ad18d6de.i.gz"
+  },
+  "HuMemAllocTag": {
+    "tu": "HuMemAllocTag.i.gz",
+    "ctx": "ctx-ac475e3b0255.i.gz"
   }
 }

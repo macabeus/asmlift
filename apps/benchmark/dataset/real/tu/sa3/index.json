@@ -126,5 +126,37 @@
   "sa2__sub_80078D4": {
     "tu": "sa2__sub_80078D4.i.gz",
     "ctx": "ctx-0fac75cf4324.i.gz"
+  },
+  "PackSaveSector": {
+    "tu": "PackSaveSector.i.gz",
+    "ctx": "ctx-821a493af5a3.i.gz"
+  },
+  "sub_804DC38": {
+    "tu": "sub_804DC38.i.gz",
+    "ctx": "ctx-dde16f46c6da.i.gz"
+  },
+  "Sio32MultiLoadMain": {
+    "tu": "Sio32MultiLoadMain.i.gz",
+    "ctx": "ctx-d92540a45b92.i.gz"
+  },
+  "sub_802DFC8": {
+    "tu": "sub_802DFC8.i.gz",
+    "ctx": "ctx-0735218e8a5b.i.gz"
+  },
+  "sub_806132C": {
+    "tu": "sub_806132C.i.gz",
+    "ctx": "ctx-8415744e08a9.i.gz"
+  },
+  "sub_804D360": {
+    "tu": "sub_804D360.i.gz",
+    "ctx": "ctx-753afb45dfc7.i.gz"
+  },
+  "Sio32MultiLoadIntr": {
+    "tu": "Sio32MultiLoadIntr.i.gz",
+    "ctx": "ctx-d92540a45b92.i.gz"
+  },
+  "sub_803213C": {
+    "tu": "sub_803213C.i.gz",
+    "ctx": "ctx-c4f423915ef9.i.gz"
   }
 }
