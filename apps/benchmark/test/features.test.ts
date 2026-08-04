@@ -12,10 +12,12 @@ import { describe, expect, it } from 'vitest';
 
 import {
   CODEGEN_DERIVED,
+  JUDGEMENT_FLOOR,
   KNOWN_FEATURES,
   SOURCE_CHECKED,
   codegenEvidence,
   sourceEvidence,
+  stripLiterals,
 } from '../src/cases/features';
 
 const REAL_DIR = join(import.meta.dirname, '..', 'dataset', 'real');
@@ -101,6 +103,21 @@ describe('feature tags', () => {
     expect(bad.sort()).toEqual([]);
   });
 
+  it('keeps every judgement tag above its floor', () => {
+    const asmOf = new Map(rows.map((r) => [`${r.project}:${r.sym}`, r.targetAsm]));
+    const bad = every
+      .flatMap(({ project, fn }) => {
+        const stripped = stripLiterals(fn.funcC);
+        const body = stripped.slice(stripped.indexOf('{'));
+        const asm = asmOf.get(`${project}:${fn.sym}`) ?? '';
+        return fn.features
+          .filter((t) => JUDGEMENT_FLOOR[t] && !JUDGEMENT_FLOOR[t](body, asm))
+          .map((t) => `${project}:${fn.sym} claims ${t}`);
+      })
+      .sort();
+    expect(bad).toEqual([]);
+  });
+
   it('gives every function at least one tag', () => {
     expect(every.filter(({ fn }) => fn.features.length === 0).map(({ fn }) => fn.sym)).toEqual([]);
   });
@@ -166,6 +183,19 @@ describe('the detectors themselves', () => {
     const src = 'int f(int a){ return a*10; }';
     expect(cg(src, '\tlsl\tr0, r1, #0x2\n\tadd\tr0, r0, r1')).toEqual(['strength-reduce']);
     expect(cg(src, '  0:\tmulli   r3,r3,10')).toEqual([]);
+  });
+
+  it('holds judgement tags to a floor without pretending to decide them', () => {
+    // the floor rejects the fabrications the audit found …
+    expect(JUDGEMENT_FLOOR.arithmetic('{ GwSystem.minigame_index = arg0; }', '')).toBe(false);
+    expect(JUDGEMENT_FLOOR.array('{ return gPlayerAvatar.flags; }', '')).toBe(false);
+    expect(JUDGEMENT_FLOOR.table('{ return gEntityInfo[0x23].unkF; }', '')).toBe(false);
+    expect(JUDGEMENT_FLOOR.branch('{ s->a = 0; s->b = 0; }', '\tmov\tr0, #0')).toBe(false);
+    // … and accepts the real thing
+    expect(JUDGEMENT_FLOOR.arithmetic('{ return a * 10 + b; }', '')).toBe(true);
+    expect(JUDGEMENT_FLOOR.table('{ return gSineDegreeTable[angleMod]; }', '')).toBe(true);
+    expect(JUDGEMENT_FLOOR.cast('{ return (uintptr_t)(tgt - 1); }', '')).toBe(true);
+    expect(JUDGEMENT_FLOOR.fnptr('{ f(); }', '  28:\tjalr\tv0')).toBe(true);
   });
 
   it('separates I/O registers from other hardware address ranges', () => {

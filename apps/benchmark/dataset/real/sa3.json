@@ -245,7 +245,6 @@
       "sym": "VramMalloc",
       "features": [
         "loop",
-        "nested",
         "global",
         "array",
         "branch",
@@ -402,7 +401,9 @@
         "global",
         "array",
         "struct",
-        "field"
+        "field",
+        "union",
+        "bitfield"
       ],
       "prependC": "#include \"core.h\"\n#include \"sprite.h\"",
       "funcC": "OamData *OamMalloc(u8 order)\n{\n    OamData *result;\n\n    if (order > 31) {\n        order = 31;\n    }\n\n    if (gOamFreeIndex > OAM_ENTRY_COUNT - 1) {\n        result = (OamData *)iwram_end;\n    } else {\n        if (gOamMallocOrders_StartIndex[order] == 0xFF) {\n            gOamMallocBuffer[gOamFreeIndex].split.fractional = 0xFF;\n            gOamMallocOrders_StartIndex[order] = gOamFreeIndex;\n            gOamMallocOrders_EndIndex[order] = gOamFreeIndex;\n        } else {\n            gOamMallocBuffer[gOamFreeIndex].split.fractional = 0xFF;\n            gOamMallocBuffer[gOamMallocOrders_EndIndex[order]].split.fractional = gOamFreeIndex;\n            gOamMallocOrders_EndIndex[order] = gOamFreeIndex;\n        }\n\n        gOamFreeIndex++;\n        result = &gOamMallocBuffer[gOamFreeIndex - 1];\n    }\n\n    return result;\n}",
@@ -437,7 +438,10 @@
         "loop",
         "nested-loop",
         "sizeof",
-        "bitwise"
+        "bitwise",
+        "union",
+        "bitfield",
+        "field"
       ],
       "prependC": "#include \"core.h\"\n#include \"flags.h\"\n#include \"sprite.h\"",
       "funcC": "void ProcessOamBuffers(void)\n{\n    OamData *dstOam = &gOamBuffer[0];\n    u8 i = 0;\n    s32 r3;\n\n    for (r3 = 0; r3 < 32; r3++) {\n        s8 index = gOamMallocOrders_StartIndex[r3];\n\n        while (index != -1) {\n            u8 newI;\n            u8 *byteArray = gOamMallocCopiedOrder;\n            DmaCopy16(3, &gOamMallocBuffer[index], dstOam, sizeof(OamDataShort));\n            dstOam++;\n\n            byteArray += index;\n            newI = i++;\n            *byteArray = newI;\n            index = gOamMallocBuffer[index].split.fractional;\n        };\n    }\n\n    if (gFlags & FLAGS_800) {\n        r3 = gOamFreeIndex;\n        dstOam = &gOamBuffer[r3];\n\n        while (r3 < gOamFirstPausedIndex) {\n            DmaFill16(3, 0x200, dstOam, sizeof(OamDataShort));\n            dstOam++;\n            r3++;\n        }\n    } else if (gFlags & FLAGS_PAUSE_GAME) {\n        /* Push all active OAM entries to te end of OAM temporarily while\n         * the game is paused */\n        s32 k, l;\n        r3 = gOamFreeIndex - 1;\n        dstOam = &gOamBuffer[r3];\n\n        for (k = l = 0; r3 >= 0;) {\n            s32 size = sizeof(OamDataShort);\n            DmaCopy16(3, dstOam - k, &gOamBuffer[OAM_ENTRY_COUNT - 1 - l], size);\n            k++, r3--, l++;\n        }\n\n        // _08005A5E\n\n        gOamFirstPausedIndex = OAM_ENTRY_COUNT - gOamFreeIndex;\n\n        for (r3 = 0; r3 < gOamFirstPausedIndex; r3++) {\n            DmaFill16(3, 0x200, &gOamBuffer[r3], sizeof(OamDataShort));\n#ifndef NON_MATCHING\n            // unlike when using --, using ++ changes the condition to something entirely\n            // different unless we tell the compiler that we want to use r3's values\n            // (without actually doing so)\n            asm(\"\" ::\"r\"(r3));\n#endif\n        }\n\n    } else {\n        gOamFirstPausedIndex = 0;\n    }\n\n    gOamFreeIndex = 0;\n    if (gFlags & FLAGS_4000) {\n        CpuFill32(-1, gOamMallocOrders_StartIndex, sizeof(gOamMallocOrders_StartIndex));\n        CpuFill32(-1, gOamMallocOrders_EndIndex, sizeof(gOamMallocOrders_EndIndex));\n    } else {\n        DmaFill32(3, -1, gOamMallocOrders_StartIndex, sizeof(gOamMallocOrders_StartIndex));\n        DmaFill32(3, -1, gOamMallocOrders_EndIndex, sizeof(gOamMallocOrders_EndIndex));\n    }\n}",
@@ -524,7 +528,6 @@
       "features": [
         "struct",
         "field",
-        "branch",
         "global"
       ],
       "funcC": "void sub_806132C(Hariisen *enemy)\n{\n    u8 *vram = VramMalloc(18);\n    Sprite2 *s = &enemy->s;\n\n    s->tiles = vram;\n    vram += (gUnknown_080D2044[0].numTiles * TILE_SIZE_4BPP);\n    s->anim = gUnknown_080D2044[0].anim;\n    s->variant = gUnknown_080D2044[0].variant;\n    s->prevVariant = -1;\n    s->x = TO_WORLD_POS_RAW(I(enemy->qPos.x), enemy->region[0]) - gCamera.x;\n    s->y = TO_WORLD_POS_RAW(I(enemy->qPos.y), enemy->region[1]) - gCamera.y;\n    s->oamFlags = 0x480;\n    s->animCursor = 0;\n    s->qAnimDelay = 0;\n    s->animSpeed = 0x10;\n    s->palId = 0;\n    s->frameFlags = 0x1000;\n    s->hitboxes[0].index = -1;\n    UpdateSpriteAnimation((Sprite *)s);\n\n    s = &enemy->s2;\n    s->tiles = vram;\n    vram += (gUnknown_080D2044[3].numTiles * TILE_SIZE_4BPP);\n    s->anim = gUnknown_080D2044[3].anim;\n    s->variant = gUnknown_080D2044[3].variant;\n    s->prevVariant = -1;\n    s->x = TO_WORLD_POS_RAW(I(enemy->qPos.x), enemy->region[0]) - gCamera.x;\n    s->y = TO_WORLD_POS_RAW(I(enemy->qPos.y), enemy->region[1]) - gCamera.y;\n    s->oamFlags = 0x4C0;\n    s->animCursor = 0;\n    s->qAnimDelay = 0;\n    s->animSpeed = 0x10;\n    s->palId = 0;\n    s->frameFlags = 0x1000;\n    s->hitboxes[0].index = -1;\n    UpdateSpriteAnimation((Sprite *)s);\n\n    s = &enemy->s3;\n    s->tiles = vram;\n    s->anim = gUnknown_080D2044[4].anim;\n    s->variant = gUnknown_080D2044[4].variant;\n    s->prevVariant = -1;\n    s->x = TO_WORLD_POS_RAW(I(enemy->qPos.x), enemy->region[0]) - gCamera.x;\n    s->y = TO_WORLD_POS_RAW(I(enemy->qPos.y), enemy->region[1]) - gCamera.y;\n    s->oamFlags = 0x4C0;\n    s->animCursor = 0;\n    s->qAnimDelay = 0;\n    s->animSpeed = 0x10;\n    s->palId = 0;\n    s->frameFlags = 0x1000;\n    s->hitboxes[0].index = -1;\n    UpdateSpriteAnimation((Sprite *)s);\n}",

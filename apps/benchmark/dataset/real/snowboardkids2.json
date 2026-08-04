@@ -283,8 +283,7 @@
       "features": [
         "loop",
         "struct",
-        "array",
-        "cast"
+        "array"
       ],
       "note": "src/3B80.c: loads each compressed asset in a group into a freshly allocated pointer array",
       "prependC": "#include \"task_scheduler.h\"\n\ntypedef struct {\n    void *unk0;\n    void *unk4;\n    s32 unk8;\n} AssetEntry;\n\ntypedef struct {\n    AssetEntry *assetList;\n    u8 _pad4[0x4];\n    u8 assetCount;\n    u8 _pad9[0x3];\n} AssetGroupTableEntry;\n\ntypedef struct {\n    void *context;\n    void **loadedAssets;\n    s32 param;\n    void *unkC;\n    void *unk10;\n    u8 _pad14[0xB0];\n    u8 groupIndex;\n    u8 unkC5;\n} AssetGroupTaskData;\n\nextern AssetGroupTableEntry assetGroupTable[];\nextern void func_80003184_3D84(void *);\nvoid freeAssetGroupResources(AssetGroupTaskData *taskData);",
@@ -319,8 +318,7 @@
       "sym": "func_8002ACFC_2B8FC",
       "features": [
         "fixed-point",
-        "branch",
-        "global"
+        "branch"
       ],
       "note": "src/2AF90.c: proximity/heading test against the player position; fixed-point distance check",
       "prependC": "#include \"gamestate.h\"\n#include \"geometry.h\"\n#include \"task_scheduler.h\"",
@@ -332,8 +330,7 @@
       "features": [
         "switch",
         "struct",
-        "branch",
-        "global"
+        "branch"
       ],
       "note": "src/2AF90.c: state-machine step with fall-through switch cases over a mode byte",
       "prependC": "#include \"gamestate.h\"\n#include \"geometry.h\"\n#include \"task_scheduler.h\"\n\ntypedef struct {\n    void *model;\n    Transform3D matrix;\n    u8 pad24[0xA];\n    s16 unk2E;\n    u8 pad30[0x7];\n    u8 unk37;\n    u8 pad38[0x14];\n    u16 *unk4C;\n    u16 unk50;\n    u8 pad52[0x2];\n    u16 unk54;\n    u8 pad56[0x6];\n    u8 unk5C;\n    u8 unk5D;\n    u8 unk5E;\n    u8 pad5F[0x2];\n    u8 unk61;\n} Func8002A390Arg;\n\nextern s32 func_8002A4AC_2B0AC(void *, u8);\nextern s32 func_8002A7CC_2B3CC(void *);\ns32 func_8002ACFC_2B8FC(s32, s32, s16);",
@@ -416,7 +413,8 @@
         "bitwise",
         "branch",
         "ternary",
-        "shift"
+        "shift",
+        "union"
       ],
       "prependC": "#include \"1E36C0.h\"",
       "funcC": "void func_800B7620_1E46D0(CutsceneSlotData *arg0, s32 arg1, s16 arg2, s16 arg3) {\n    s32 temp_a0;\n    s32 temp_v0;\n    s32 temp_v1;\n    s32 var_v0;\n    s32 var_v1;\n\n    arg0->unk0.Two = 6;\n    arg0->unk94 = arg1;\n    arg0->unk92 = arg3;\n    arg0->unk84 = arg2;\n    arg0->unk86 = arg2;\n    temp_a0 = ((s16)atan2Fixed(arg0->unk20_u.unk20_s32, arg0->unk2C) + 0x1000) & 0x1FFF;\n    arg0->unk9C_u.unk9C_s32 = temp_a0;\n    temp_v1 = approximateCos(temp_a0) << 2;\n    if (temp_v1 == 0) {\n        var_v1 = (arg0->unk20_u.unk20_s32 << 8) / ((approximateSin(arg0->unk9C_u.s.unk9E) << 2) >> 8);\n        var_v1 = (var_v1 > 0) ? var_v1 : -var_v1;\n        arg0->unk98 = var_v1;\n    } else {\n        var_v0 = (arg0->unk2C << 8) / (temp_v1 >> 8);\n        var_v0 = (var_v0 > 0) ? var_v0 : -var_v0;\n        arg0->unk98 = var_v0;\n    }\n    temp_v0 = arg0->unk94;\n    if (temp_v0 > 0) {\n        arg0->unk7A = (arg0->unk9C_u.unk9C_s32 + 0x800) & 0x1FFF;\n    } else if (temp_v0 < 0) {\n        arg0->unk7A = (arg0->unk9C_u.unk9C_s32 - 0x800) & 0x1FFF;\n    }\n}",
@@ -467,8 +465,8 @@
       "sym": "func_8005DF10_5EB10",
       "features": [
         "shift",
-        "struct",
-        "pointer"
+        "pointer",
+        "array"
       ],
       "funcC": "void func_8005DF10_5EB10(s16 arg0, s16 arg1, s16 arg2, s16 *arg3) {\n    s32 spVars[3];\n    s16 temp_s0;\n    s16 temp_s1;\n    s32 temp_a0;\n    s32 temp_a1;\n    s32 temp_a2;\n    s32 temp_a3;\n    s32 temp_s0_2;\n    s32 temp_s1_2;\n    s32 temp_s2;\n    s32 temp_s4;\n    s32 temp_s5;\n    s32 temp_t0;\n    s32 temp_t1;\n    s32 temp_t2;\n    s32 temp_v1;\n    s32 temp_v1_2;\n    s32 temp_v1_3;\n    s32 var_a0;\n    s32 var_v0;\n    s32 var_v1;\n\n    temp_s0 = arg1;\n    temp_s1 = -arg0;\n    temp_s5 = approximateSin(temp_s1);\n    temp_s0 = -temp_s0;\n    temp_s1_2 = approximateSin(temp_s0);\n    temp_s0_2 = approximateCos(temp_s1);\n    temp_s4 = approximateCos(temp_s0);\n    temp_s2 = approximateSin(arg2);\n    temp_a3 = approximateCos(arg2);\n    var_v1 = temp_s5 * temp_s1_2;\n    if (var_v1 < 0) {\n        var_v1 += 0x1FFF;\n    }\n    var_v0 = temp_s5 * temp_s4;\n    temp_a2 = var_v1 >> 0xD;\n    spVars[0] = temp_a2;\n    spVars[1] = temp_s0_2;\n    if (var_v0 < 0) {\n        var_v0 += 0x1FFF;\n    }\n    var_v1 = temp_a2 * temp_s0_2;\n    temp_a0 = var_v0 >> 0xD;\n    spVars[2] = temp_a0;\n    temp_a1 = 0x2000 - temp_a3;\n    if (var_v1 < 0) {\n        var_v1 += 0x1FFF;\n    }\n    var_v0 = (var_v1 >> 0xD) * temp_a1;\n    if (var_v0 < 0) {\n        var_v0 += 0x1FFF;\n    }\n    var_v1 = temp_s0_2 * temp_a0;\n    temp_t2 = var_v0 >> 0xD;\n    if (var_v1 < 0) {\n        var_v1 += 0x1FFF;\n    }\n    var_v0 = (var_v1 >> 0xD) * temp_a1;\n    if (var_v0 < 0) {\n        var_v0 += 0x1FFF;\n    }\n    var_v1 = temp_a0 * temp_a2;\n    temp_t0 = var_v0 >> 0xD;\n    if (var_v1 < 0) {\n        var_v1 += 0x1FFF;\n    }\n    var_v0 = (var_v1 >> 0xD) * temp_a1;\n    if (var_v0 < 0) {\n        var_v0 += 0x1FFF;\n    }\n    var_v1 = temp_a2 * temp_a2;\n    temp_t1 = var_v0 >> 0xD;\n    if (var_v1 < 0) {\n        var_v1 += 0x1FFF;\n    }\n    var_a0 = temp_a2 * temp_s2;\n    temp_a1 = var_v1 >> 0xD;\n    if (var_a0 < 0) {\n        var_a0 += 0x1FFF;\n    }\n    var_v0 = temp_a3 * (0x2000 - temp_a1);\n    temp_v1 = var_a0 >> 0xD;\n    if (var_v0 < 0) {\n        var_v0 += 0x1FFF;\n    }\n    arg3[0] = temp_a1 + (var_v0 >> 0xD);\n    arg3[7] = (s16)(temp_t0 - temp_v1);\n    arg3[5] = (s16)(temp_t0 + temp_v1);\n    var_v0 = spVars[1] * spVars[1];\n    if (var_v0 < 0) {\n        var_v0 += 0x1FFF;\n    }\n    var_v1 = spVars[1] * temp_s2;\n    temp_a1 = var_v0 >> 0xD;\n    if (var_v1 < 0) {\n        var_v1 += 0x1FFF;\n    }\n    var_v0 = temp_a3 * (0x2000 - temp_a1);\n    temp_v1_2 = var_v1 >> 0xD;\n    if (var_v0 < 0) {\n        var_v0 += 0x1FFF;\n    }\n    arg3[4] = (s16)(temp_a1 + (var_v0 >> 0xD));\n    arg3[6] = (s16)(temp_t1 + temp_v1_2);\n    arg3[2] = (s16)(temp_t1 - temp_v1_2);\n    var_v0 = spVars[2] * spVars[2];\n    if (var_v0 < 0) {\n        var_v0 += 0x1FFF;\n    }\n    var_v1 = spVars[2] * temp_s2;\n    temp_a1 = var_v0 >> 0xD;\n    if (var_v1 < 0) {\n        var_v1 += 0x1FFF;\n    }\n    var_v0 = temp_a3 * (0x2000 - temp_a1);\n    temp_v1_3 = var_v1 >> 0xD;\n    if (var_v0 < 0) {\n        var_v0 += 0x1FFF;\n    }\n    arg3[8] = (s16)(temp_a1 + (var_v0 >> 0xD));\n    arg3[3] = (s16)(temp_t2 - temp_v1_3);\n    arg3[1] = (s16)(temp_t2 + temp_v1_3);\n}",
       "prependC": "#include \"5EA60.h\"\n#include \"common.h\"\n#include \"geometry.h\"",
@@ -486,7 +484,7 @@
         "pointer",
         "loop",
         "branch",
-        "global"
+        "union"
       ],
       "funcC": "s32 func_8001E104_1ED04(EepromSaveData_type *arg0) {\n    s32 temp_a1;\n    s32 changed;\n    s32 i;\n    u8 temp;\n\n    temp_a1 = *(s32 *)arg0->unknown_0C;\n    changed = 0;\n    if (temp_a1 > 0x98967F) {\n        *(s32 *)arg0->unknown_0C = 0x98967F;\n        changed = 1;\n        i = 0;\n    } else {\n        i = 0;\n        if (temp_a1 < 0) {\n            *(s32 *)arg0->unknown_0C = 0;\n            changed = 1;\n            i = 0;\n        }\n    }\n\n    for (i = 0; i < 0x10; i++) {\n        temp = arg0->save_slot_status[i];\n        if (temp >= 6) {\n            arg0->save_slot_status[i] = 0;\n            changed = 1;\n        }\n        temp = arg0->save_slot_data[i];\n        if (temp >= 6) {\n            arg0->save_slot_data[i] = 0;\n            changed = 1;\n        }\n    }\n\n    if (arg0->save_slot_status[0] == 0) {\n        arg0->save_slot_status[0] = 5;\n        changed = 1;\n    }\n\n    for (i = 0; i < 3; i++) {\n        temp = arg0->save_slot_data[i];\n        if (temp == 0) {\n            arg0->save_slot_data[i] = 5;\n            changed = 1;\n        }\n        temp = arg0->save_slot_data[i + 4];\n        if (temp == 0) {\n            arg0->save_slot_data[i + 4] = 5;\n            changed = 1;\n        }\n    }\n\n    for (i = 0; i < 0x12; i++) {\n        temp = arg0->character_or_settings[i];\n        if (temp >= 0x1A) {\n            arg0->character_or_settings[i] = 0;\n            changed = 1;\n        }\n    }\n\n    for (i = 0; i < 3; i++) {\n        temp = arg0->character_or_settings[i * 3];\n        if (temp == 0) {\n            arg0->character_or_settings[i * 3] = i + 1;\n            changed = 1;\n        }\n    }\n\n    for (i = 0; i < 0x12; i++) {\n        temp = arg0->character_or_settings[i];\n        if (temp >= 0x1A) {\n            arg0->character_or_settings[i] = 1;\n            changed = 1;\n        }\n    }\n\n    for (i = 0; i < 9; i++) {\n        temp = arg0->u.setting_42[i];\n        if (temp >= 0x12) {\n            arg0->u.setting_42[i] = 0x11;\n            changed = 1;\n        }\n    }\n\n    for (i = 0; i < 3; i++) {\n        temp = arg0->setting_4B[i];\n        if (temp >= 0x10) {\n            arg0->setting_4B[i] = 0xF;\n            changed = 1;\n        }\n    }\n\n    if (arg0->setting_4E >= 2) {\n        arg0->setting_4E = 0;\n        changed = 1;\n    }\n\n    if (arg0->setting_4F >= 2) {\n        arg0->setting_4F = 0;\n        changed = 1;\n    }\n\n    if (arg0->setting_50 >= 2) {\n        arg0->setting_50 = 0;\n        changed = 1;\n    }\n\n    if (arg0->unk51 >= 2) {\n        arg0->unk51 = 0;\n        changed = 1;\n    }\n\n    return changed;\n}",
       "prependC": "#include \"3E160.h\"\n#include \"6E840.h\"\n#include \"D_800AFE8C_A71FC_type.h\"\n#include \"EepromSaveData_type.h\"\n#include \"common.h\"\n#include \"task_scheduler.h\"",
