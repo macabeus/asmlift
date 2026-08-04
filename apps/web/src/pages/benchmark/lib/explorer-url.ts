@@ -1,7 +1,7 @@
 // The Benchmark view's URL state, shared between Benchmark.tsx (sub-tab, preset deep links) and
 // Explorer.tsx (filters, sort, selected row): every explorer view — including an open
 // FunctionDetail — is a shareable link. Defaults are cleared from the URL (nuqs clearOnDefault).
-import { type inferParserType, parseAsString, parseAsStringLiteral } from 'nuqs';
+import { type inferParserType, parseAsArrayOf, parseAsString, parseAsStringLiteral } from 'nuqs';
 
 export const TAB_IDS = ['overview', 'explorer', 'gap', 'methodology'] as const;
 export type TabId = (typeof TAB_IDS)[number];
@@ -28,8 +28,10 @@ export const FILTER_PARSERS = {
   outcomeDecompiler: parseAsStringLiteral(['any', 'asmlift', 'm2c'] as const).withDefault('any'),
   outcome: parseAsString.withDefault(''),
   verdict: parseAsStringLiteral(VERDICTS).withDefault(''),
-  feature: parseAsString.withDefault(''),
-  decline: parseAsString.withDefault(''),
+  // Multi-select, AND-ed: a row must carry EVERY selected tag / exhibit every selected class.
+  // Comma-separated, so a single-value link still parses as a one-element list.
+  feature: parseAsArrayOf(parseAsString).withDefault([]),
+  decline: parseAsArrayOf(parseAsString).withDefault([]),
   // 'with' = only rows asmlift ran WITH the project's symbol map (asmlift.symbolMap provenance)
   symbols: parseAsStringLiteral(['', 'with'] as const).withDefault(''),
   search: parseAsString.withDefault(''),
@@ -52,6 +54,18 @@ export const FILTER_URL_KEYS = {
 
 export type Filters = inferParserType<typeof FILTER_PARSERS>;
 export type ExplorerPreset = Partial<Filters>;
+
+/** The definition drawer's subject — the same URL-state shape as `fn`, the row drawer. */
+export const FEATURE_TERM_PARSER = parseAsString.withDefault('');
+export const FEATURE_TERM_KEY = 'about';
+
+/** Link that opens the definition drawer for `id`. A real `href`, so middle-click and copy-link
+ *  work; built from the CURRENT query, so opening one never discards the filters already set. */
+export function featureHref(id: string, search = typeof window === 'undefined' ? '' : window.location.search): string {
+  const params = new URLSearchParams(search);
+  params.set(FEATURE_TERM_KEY, id);
+  return `?${params.toString()}`;
+}
 
 /** A preset deep-link REPLACES the whole filter set: spread this under it to reset the rest. */
 export const FILTERS_RESET: { [K in keyof Filters]: null } = {

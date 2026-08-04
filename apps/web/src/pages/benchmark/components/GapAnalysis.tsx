@@ -22,7 +22,7 @@ export function GapAnalysis({
       >
         <DeclinePareto
           data={pareto}
-          onBarClick={(key) => onExplore({ outcomeDecompiler: 'asmlift', outcome: 'declined', decline: key })}
+          onBarClick={(key) => onExplore({ outcomeDecompiler: 'asmlift', outcome: 'declined', decline: [key] })}
         />
       </Panel>
     </div>

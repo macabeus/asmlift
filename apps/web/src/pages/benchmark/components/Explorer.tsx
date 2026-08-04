@@ -3,13 +3,14 @@ import { parseAsString, useQueryState, useQueryStates } from 'nuqs';
 import { useMemo } from 'react';
 
 import type { ShareState } from '../../../shared/utils/permalink';
-import { DECLINE_CLASSES, OTHER_CLASS, declineClassesOf } from '../lib/declines';
+import { declineClassesOf } from '../lib/declines';
 import { FILTER_PARSERS, FILTER_URL_KEYS, SORT_PARSERS, type SortKey, type Verdict } from '../lib/explorer-url';
 import { canOpenInPlayground, playgroundShare } from '../lib/playground';
-import { distinct, distinctFeatures } from '../lib/stats';
+import { distinct, tally } from '../lib/stats';
 import { DECOMPILER_COLOR, ISA_LABEL, OUTCOME_LABEL, OUTCOME_ORDER, TOOLCHAIN_LABEL } from '../theme';
+import { DeclinePicker, FeaturePicker } from './FeaturePicker';
 import { FunctionDetail } from './FunctionDetail';
-import { Chip, GapBadge, OutcomeBadge } from './ui/Badge';
+import { FeatureChip, GapBadge, OutcomeBadge } from './ui/Badge';
 
 // Re-exported so the aggregates (Overview, Gap Analysis) keep their preset-type import here.
 export type { ExplorerPreset, Filters } from '../lib/explorer-url';
@@ -64,10 +65,13 @@ function ScoreCell({ result }: { result: FunctionResult['asmlift'] }) {
 export function Explorer({
   rows,
   onOpenInPlayground,
+  onOpenFeature,
 }: {
   rows: FunctionResult[];
   /** hand a row's input to the playground view (the shell switches views + seeds the editor) */
   onOpenInPlayground: (s: ShareState) => void;
+  /** open a feature's definition drawer (the "read more →" in the picker, or a tag chip) */
+  onOpenFeature: (id: string) => void;
 }) {
   // All URL state: filters replace history (no spam while narrowing), the selected row pushes
   // (Back closes the detail). Benchmark.tsx writes the same keys for the preset deep links.
@@ -79,7 +83,6 @@ export function Explorer({
   const projects = useMemo(() => distinct(rows, (r) => r.project), [rows]);
   const isas = useMemo(() => distinct(rows, (r) => r.isa), [rows]);
   const toolchains = useMemo(() => distinct(rows, (r) => r.toolchain), [rows]);
-  const features = useMemo(() => distinctFeatures(rows), [rows]);
 
   const set = (patch: Partial<typeof filters>) => void setFilters(patch);
 
@@ -98,11 +101,15 @@ export function Explorer({
       if (filters.tier && r.tier !== filters.tier) {
         return false;
       }
-      if (filters.feature && !r.features.includes(filters.feature)) {
+      // AND: the row must carry EVERY selected tag / exhibit EVERY selected decline class
+      if (!filters.feature.every((f) => r.features.includes(f))) {
         return false;
       }
-      if (filters.decline && !declineClassesOf(r).includes(filters.decline)) {
-        return false;
+      if (filters.decline.length) {
+        const classes = declineClassesOf(r);
+        if (!filters.decline.every((d) => classes.includes(d))) {
+          return false;
+        }
       }
       if (filters.symbols === 'with' && !r.asmlift.symbolMap) {
         return false;
@@ -161,6 +168,11 @@ export function Explorer({
     });
     return out;
   }, [rows, filters, sortKey, sortDir]);
+
+  // Over the ALREADY-FILTERED rows, so an unselected option reads as "how many rows survive if I
+  // AND this in too" — a selection that would empty the table says so before it is clicked.
+  const featureCounts = useMemo(() => tally(filtered, (r) => r.features), [filtered]);
+  const declineCounts = useMemo(() => tally(filtered, declineClassesOf), [filtered]);
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -248,21 +260,12 @@ export function Explorer({
             { value: 'disagree', label: 'outcomes differ' },
           ]}
         />
-        <Select
-          label="asmlift decline"
-          value={filters.decline}
-          onChange={(v) => set({ decline: v })}
-          options={[
-            { value: '', label: 'All' },
-            ...DECLINE_CLASSES.map((c) => ({ value: c.key, label: c.label })),
-            { value: OTHER_CLASS.key, label: OTHER_CLASS.label },
-          ]}
-        />
-        <Select
-          label="Feature"
+        <DeclinePicker value={filters.decline} onChange={(v) => set({ decline: v })} counts={declineCounts} />
+        <FeaturePicker
           value={filters.feature}
           onChange={(v) => set({ feature: v })}
-          options={[{ value: '', label: 'All' }, ...features.map((f) => ({ value: f, label: f }))]}
+          counts={featureCounts}
+          onOpenFeature={onOpenFeature}
         />
         <button
           onClick={() => set({ symbols: filters.symbols === 'with' ? '' : 'with' })}
@@ -322,7 +325,7 @@ export function Explorer({
                 <td className="px-3 py-2">
                   <div className="flex max-w-[220px] flex-wrap gap-1">
                     {r.features.slice(0, 4).map((f) => (
-                      <Chip key={f}>{f}</Chip>
+                      <FeatureChip key={f} id={f} onClick={onOpenFeature} />
                     ))}
                     {r.features.length > 4 && (
                       <span className="text-[11px] text-slate-500">+{r.features.length - 4}</span>
@@ -377,6 +380,7 @@ export function Explorer({
           // Replace, not push: Back after closing must not reopen the detail.
           onClose={() => void setSelectedId(null, { history: 'replace' })}
           onOpenInPlayground={onOpenInPlayground}
+          onOpenFeature={onOpenFeature}
         />
       )}
     </div>
