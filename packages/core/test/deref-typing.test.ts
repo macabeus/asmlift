@@ -23,7 +23,7 @@ import { exprCType } from '../src/l3/typing';
 import { decompile } from '../src/pipeline';
 import { recoverTypes } from '../src/raise/recover';
 import { structure } from '../src/structure/structure';
-import { ARMV4T_AGBCC } from '../src/target';
+import { ARMV4T_AGBCC, MIPS_IDO } from '../src/target';
 
 /** IR text → C, the structure-guard.test.ts idiom (verify + recoverTypes + structure + emit). */
 function emitIr(ir: string): string {
@@ -524,4 +524,20 @@ describe('assigning &gSym to a pointer local', () => {
     // cast (memAccess), which is correct and predates this rule
     expect(out).not.toContain('v0 = (u16 *)&gArr;');
   });
+});
+
+// A NEGATIVE constant offset stays exact pointer arithmetic — it never becomes a struct member at a
+// negative offset, which is the shape m2c's `7e607d6` guards against (its `deref` used to fold any
+// literal addend into the running offset when that offset was 0). asmlift needs no such guard: the
+// offset rides on the access as a signed scaled index and the emitted C says exactly what the
+// machine does. Pinned because "it stays exact" is a property a future folding pass could break.
+test('a negative access offset stays exact — no struct member at a negative offset', () => {
+  const neg = decompile(
+    'f',
+    '00000000 <f>:\n   0:\tlw\tv0,-8(a0)\n   4:\tlw\tv1,4(a0)\n   8:\taddu\tv0,v0,v1\n   c:\tjr\tra\n  10:\tnop\n',
+    MIPS_IDO,
+  ).source;
+  expect(neg).toContain('a0[-2]');
+  expect(neg).toContain('a0[1]');
+  expect(neg).not.toContain('struct'); // no layout is synthesized across a negative offset
 });

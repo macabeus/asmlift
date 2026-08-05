@@ -80,3 +80,25 @@ test('commutative: base and scaled index in either add-operand order', () => {
   verify(fn);
   expect(print(fn)).toContain('aload %0, %1 {elemSize=4, signed=true}');
 });
+
+// ── negative and constant address arithmetic stays EXACT ──────────────────────────────────────
+// m2c added two guards against implausible address folding (upstream `7e607d6`): don't fold a
+// NEGATIVE literal addend into a deref offset, and refuse array-access recovery when the index is a
+// bare literal. Neither is a hazard here, and these pin why — the reason is structural, so it is
+// worth a test rather than a note that ages.
+//
+// m2c's index arrives as a BYTE offset it must divide by the element size, so a literal there is
+// ambiguous — `p + 0x10` could be `p[4]` or a struct field, and guessing wrong changes the address.
+// This pass never guesses: it matches only when the shift amount and the access width AGREE
+// (`1 << k === width`), which is what makes the shifted operand the index by construction. A
+// constant index is then just as well-defined as a variable one.
+test('a CONSTANT index is still an array access — the scale relation says so', () => {
+  const fn = parse(
+    `fn f {\n^bb0(%0: unk32):\n  %1: unk32 = const {value=3}\n  %2: unk32 = shl %1 {imm=2}\n` +
+      `  %3: unk32 = add %0, %2\n  %4: unk32 = load %3 {off=0, signed=true, width=4}\n  ret %4\n}\n`,
+  );
+  expect(recognizeArrays(fn)).toBe(1);
+  dce(fn);
+  expect(print(fn)).toContain('aload');
+  verify(fn);
+});
