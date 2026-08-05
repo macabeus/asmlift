@@ -19,7 +19,7 @@
 // compares (`sltu`/`sltiu`) lower to `icmp_ult`; recover types their operands u32 so the backend
 // re-emits `sltu` (the operator is the same `<` — the signedness lives in the operand types).
 import { Fn, Op, Successor, Value, mkOp, mkValue } from '../ir/core';
-import type { Opcode } from '../ir/opcodes';
+import { NEGATED_ICMP, type Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
 import type { Prototypes } from '../proto';
 import type { TargetDescription } from '../target';
@@ -47,19 +47,6 @@ const COND_Z: Record<string, Opcode> = {
   bgez: 'icmp_sge',
 };
 const COND_RR: Record<string, Opcode> = { beq: 'icmp_eq', bne: 'icmp_ne' };
-// Negated icmp opcode (for the `slt …; beqz` "branch when false" fold).
-const NEG_ICMP: Record<string, Opcode> = {
-  icmp_slt: 'icmp_sge',
-  icmp_sge: 'icmp_slt',
-  icmp_sgt: 'icmp_sle',
-  icmp_sle: 'icmp_sgt',
-  icmp_ult: 'icmp_uge',
-  icmp_uge: 'icmp_ult',
-  icmp_ugt: 'icmp_ule',
-  icmp_ule: 'icmp_ugt',
-  icmp_eq: 'icmp_ne',
-  icmp_ne: 'icmp_eq',
-};
 
 const isZero = (r: string) => r === 'zero' || r === '$0';
 // The stack pointer (`$29`). A `sw/lw` through it is not a store/load through a data pointer — it
@@ -604,6 +591,18 @@ export function lift(
       }
       return readVar(r, bi);
     };
+    // `slt`-family results, so a following `beqz`/`bnez` can fold into one compare.
+    //
+    // Keyed by the SSA VALUE the compare produced, never by its register. Keying by register is the
+    // bug: `slt v0,a0,a1; xori v0,v0,1; beqz v0,L` (a materialised `a0 >= a1` that a branch then
+    // tests — IDO's spelling, and a live benchmark row) redefines v0, and a register-keyed record
+    // folds the branch against the DEAD `slt`, silently emitting the INVERTED condition. A value
+    // cannot go stale that way: `condValue` resolves the branch's register to whatever value reaches
+    // it and looks THAT up, so a redefinition simply misses and the honest `icmp_eq(rX, 0)` is
+    // emitted. It also needs no invalidation discipline to be maintained by every future writer —
+    // which matters, because `write` is NOT the only path that redefines a register (`lui
+    // rD,%hi(SYM)` deliberately reassigns rD's meaning without it).
+    const cmpDef = new Map<Value, { opcode: string; lhs: Value; rhs: Value }>();
     const write = (r: string, v: Value) => {
       // Writing a register clears any pending `%hi` it held — the high-half address is gone once the
       // register is reassigned (e.g. `lw rHi, %lo(SYM)(rHi)` reuses the base as the load dest). A
@@ -626,13 +625,11 @@ export function lift(
     // DELIBERATELY (unlike divState): a cross-block `mult`/`mflo` pair has no observed inhabitant,
     // and the miss degrades to a LOUD opaque, never silence.
     let mulState: { rs: Value; rt: Value; signed: boolean } | null = null;
-    // `slt`-family results, so a following `beqz`/`bnez` can fold into one compare.
-    const cmpDef = new Map<string, { value: Value; opcode: string; lhs: Value; rhs: Value }>();
     const emitCmp = (opc: Opcode, d: string, lhs: Value, rhs: Value) => {
       const v = mkValue(T.unk(32));
       ops.push(mkOp(opc, { operands: [lhs, rhs], results: [v] }));
       write(d, v);
-      cmpDef.set(d, { value: v, opcode: opc, lhs, rhs });
+      cmpDef.set(v, { opcode: opc, lhs, rhs });
     };
 
     const decode = (ins: Instr) => {
@@ -1053,7 +1050,7 @@ function condValue(
   ops: Op[],
   read: (r: string) => Value,
   constVal: (n: number) => Value,
-  cmpDef: Map<string, { value: Value; opcode: string; lhs: Value; rhs: Value }>,
+  cmpDef: Map<Value, { opcode: string; lhs: Value; rhs: Value }>,
 ): Value {
   const mk = (opc: Opcode, l: Value, r: Value): Value => {
     const v = mkValue(T.unk(32));
@@ -1064,15 +1061,19 @@ function condValue(
     return mk(COND_RR[br.mnemonic], read(br.ops[0]), read(br.ops[1]));
   }
   // *z forms compare a register against zero — except beqz/bnez may fold a preceding `slt`.
-  const rs = br.ops[0];
-  const folded = cmpDef.get(rs);
+  // Resolve the register to its reaching VALUE first: that is the fold's key (so a redefinition
+  // between the compare and the branch misses instead of folding stale), and it is also what
+  // routes the operand through `read`'s loud guards (sp / `%hi` / `gp` used as data) on every
+  // path — the fold used to bypass them by never reading the register at all.
+  const rsv = read(br.ops[0]);
+  const folded = cmpDef.get(rsv);
   if (folded && br.mnemonic === 'bnez') {
-    return folded.value;
+    return rsv;
   } // branch when slt is true
   if (folded && br.mnemonic === 'beqz') {
-    return mk(NEG_ICMP[folded.opcode], folded.lhs, folded.rhs);
+    return mk(NEGATED_ICMP[folded.opcode], folded.lhs, folded.rhs);
   } // …when false
-  return mk(COND_Z[br.mnemonic], read(rs), constVal(0));
+  return mk(COND_Z[br.mnemonic], rsv, constVal(0));
 }
 
 /** The MIPS-II / IDO frontend, registered for the `mips` target. */
