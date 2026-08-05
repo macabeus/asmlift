@@ -16,6 +16,26 @@ describe('Thumb frontend robustness (CONTRACT-AS-INVARIANT)', () => {
     expect(() => dc('splitcmp', body)).toThrow(/no reaching compare/);
   });
 
+  test('a flag-setting instruction between a cmp and its branch declines loud', () => {
+    // On Thumb-1 nearly every data-processing instruction on LOW registers writes the condition
+    // flags, `s`-suffix or not (agbcc spells `adds r0,r0,r3` as `add r0,r0,r3` and the assembler
+    // picks the flag-setting encoding). So the `add` below REPLACES the flags `beq` tests: folding
+    // the earlier `cmp` in emitted `if (a0 != a1)` where the hardware branches on `r0 + 1 == 0`.
+    // Silent wrong C — now the same loud decline the label-split case above gets.
+    const clobbered =
+      '\tcmp\tr0, r1\n\tadd\tr2, r0, #1\n\tbeq\t.Lt\n\tmov\tr0, #0\n\tbx\tlr\n.Lt:\n\tmov\tr0, #1\n\tbx\tlr\n';
+    expect(() => dc('flagclobber', clobbered)).toThrow(/no reaching compare/);
+
+    // …and the three shapes that must NOT trip it, or the guard would cost real matches: an
+    // adjacent pair, a LOAD between them (loads leave the flags alone), and a HIGH-register move
+    // (the high-register forms do not set flags — this is agbcc's callee-saved shuffling).
+    const folds = (mid: string) =>
+      dc('ok', `\tcmp\tr0, r1\n${mid}\tbeq\t.Lt\n\tmov\tr0, #0\n\tbx\tlr\n.Lt:\n\tmov\tr0, #1\n\tbx\tlr\n`).source;
+    expect(folds('')).toContain('if (a0 != a1)');
+    expect(folds('\tldr\tr2, [r3]\n')).toContain('if (a0 != a1)');
+    expect(folds('\tmov\tr8, r2\n')).toContain('if (a0 != a1)');
+  });
+
   test('an unmodelled op that reaches the output FAILS LOUD (no silent wrong C)', () => {
     // `clz` (count-leading-zeros) is not modelled. If dropped, the function would return a
     // stale/absent r0; instead it emits an opaque the boundary contract rejects — loud.
