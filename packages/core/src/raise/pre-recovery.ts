@@ -16,6 +16,7 @@ import { dce } from '../pattern/engine';
 import type { TargetDescription } from '../target';
 import { recognizeArrays } from './arrays';
 import { recognizeConsts } from './const';
+import { recognizeDivPow2 } from './divpow2';
 import { numberPureValues } from './gvn';
 import { recognizeMagicDivision } from './magicdiv';
 import { recognizeBranchShortCircuit, recognizeShortCircuit } from './shortcircuit';
@@ -35,7 +36,7 @@ export interface PreRecoveryPass {
 }
 
 /** THE ordered pre-recovery pass list — the single source of truth shared by pipeline / rank / report.
- *  address-numbering → const-materialize → magic-division → soft-division → array-legalize →
+ *  address-numbering → const-materialize → magic-division → pow2-division → soft-division → array-legalize →
  *  struct-array → struct-pointer → short-circuit → branch-short-circuit. See each recognizer's file
  *  for the rationale. */
 export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
@@ -56,6 +57,12 @@ export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
   },
   { id: 'const', run: recognizeConsts, dce: true },
   { id: 'magicdiv', run: recognizeMagicDivision, dce: true },
+  // Position is NOT load-bearing, unlike its neighbours above and below, and saying so is the point:
+  // no other pass can see this shape. magicdiv matches a `mulh` DAG; both short-circuit folds require
+  // a boolean const arm or a `cond_br`-terminated second block, and this diamond has an `add` arm
+  // ending in `br`. Verified by running it before and after each of them — same result. It sits
+  // beside magicdiv so that a reader looking for division recovery finds both together.
+  { id: 'divpow2', run: recognizeDivPow2, dce: true },
   { id: 'softdiv', run: (fn) => recognizeSoftDiv(fn), dce: false, gate: (t) => !t.capabilities.hwDivide },
   { id: 'arrays', run: recognizeArrays, dce: true },
   // struct-arrays AFTER arrays (scalar stride==width shapes are claimed first — see the

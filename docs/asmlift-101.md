@@ -233,7 +233,8 @@ enormously for retro consoles:
   helper like `__divsi3`. Recognizers rewrite those calls back to operators
   ([`raise/softdiv.ts`](../packages/core/src/raise/softdiv.ts)).
 
-Simpler idioms (power-of-two division via shifts — the `half` example in Part III — multiply
+Simpler idioms (the branchless power-of-two division in the `half` example in Part III — its
+BRANCHING sibling is a CFG diamond and lives in a raise pass instead — multiply
 strength-reduction, width casts) are expressed as **rewrite patterns as data**
 ([`pattern/engine.ts`](../packages/core/src/pattern/engine.ts)): serializable objects saying
 "this DAG (directed-acyclic-graph) shape of operations becomes this op", most of them gated to
