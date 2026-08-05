@@ -24,6 +24,12 @@ export interface StructureAnalysis {
   materialize: Set<Op>;
   /** cached forward reachability (successors-transitive, excluding the start block itself) */
   reachFrom: (b: Block) => Set<Block>;
+  /** where a value's expression ultimately renders — the anchored consumer it inlines into,
+   *  transitively; null = several places / unresolvable (callers treat conservatively) */
+  emitPos: (op: Op) => { blk: Block; idx: number } | null;
+  /** may an op `isWrite` accepts execute between `def` and a statement at `render`, on any
+   *  def-avoiding path — the fold-ordering gate (see the closure's comment) */
+  memWriteBetween: (def: Op, render: { blk: Block; idx: number }, isWrite: (x: Op) => boolean) => boolean;
 }
 
 export function analyze(fn: Fn, returnsVoid: boolean): StructureAnalysis {
@@ -406,5 +412,40 @@ export function analyze(fn: Fn, returnsVoid: boolean): StructureAnalysis {
       }
     }
   }
-  return { useSitesOf, opIndex, opBlock, liveIn, materialize, reachFrom };
+  // The def→render path discipline, exported for the bitfield fold's ordering gate
+  // (structure.ts): may an op `isWrite` accepts execute between `def` and a statement at
+  // `render`, on any def-avoiding path? Same cycle-aware rules as the materialize decisions
+  // above — the def block's tail, the render block's head, and every between-block on a path;
+  // a path re-crossing the def is the next dynamic instance and does not count.
+  const memWriteBetween = (def: Op, render: { blk: Block; idx: number }, isWrite: (x: Op) => boolean): boolean => {
+    const b = opBlock.get(def)!;
+    const oi = opIndex.get(def)!;
+    const wDirty = (list: Op[], from: number, to: number): boolean => {
+      for (let k = from; k < to; k++) {
+        if (isWrite(list[k])) {
+          return true;
+        }
+      }
+      return false;
+    };
+    if (render.blk === b && oi < render.idx) {
+      return wDirty(b.ops, oi + 1, render.idx);
+    }
+    if (wDirty(b.ops, oi + 1, b.ops.length) || wDirty(render.blk.ops, 0, render.idx)) {
+      return true;
+    }
+    for (const x of reachAvoiding(b, b)) {
+      if (x === render.blk && !reachAvoiding(render.blk, b).has(render.blk)) {
+        continue; // acyclic render block: head checked
+      }
+      if (x !== render.blk && !reachAvoiding(x, b).has(render.blk)) {
+        continue; // not on a def→render path
+      }
+      if (wDirty(x.ops, 0, x.ops.length)) {
+        return true;
+      }
+    }
+    return false;
+  };
+  return { useSitesOf, opIndex, opBlock, liveIn, materialize, reachFrom, emitPos, memWriteBetween };
 }

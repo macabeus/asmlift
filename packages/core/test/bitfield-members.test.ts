@@ -93,6 +93,19 @@ describe('refusals — any mismatch keeps the honest shift spelling', () => {
     expect(src).toContain('>> 25');
   });
 
+  test('a store on the PATH but laid out AFTER the render still refuses — block order is not path order', () => {
+    // second audit pass: .Lstore sits at a higher address than .Ljoin (where the extract renders)
+    // but executes between the ldrh and the render on the taken path; a linear-position scan
+    // missed it, the path-based gate must not
+    const asm =
+      'f:\n\tldr\tr3, .L9\n\tldrh\tr2, [r3]\n\tlsl\tr0, r2, #20\n\tlsr\tr0, r0, #25\n' +
+      '\tcmp\tr1, #0\n\tbeq\t.Lstore\n.Ljoin:\n\tbx\tlr\n.Lstore:\n\tmovs\tr2, #0\n' +
+      '\tstrh\tr2, [r3]\n\tb\t.Ljoin\n.L9:\n\t.word\t0x03005220\n';
+    const src = run(asm);
+    expect(src).not.toContain('dreamStones');
+    expect(src).toContain('>> 25');
+  });
+
   test('a CALL between load and extract refuses — the callee may write the global', () => {
     const asm =
       'f:\n\tpush\t{r4, lr}\n\tldr\tr4, .L1\n\tldrh\tr4, [r4]\n\tbl\tg\n' +

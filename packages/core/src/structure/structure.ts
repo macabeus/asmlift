@@ -661,7 +661,10 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
   const dom = dominators(fn);
 
   // ── analysis phase (structure/analysis.ts): use registry, liveness, materialization ──
-  const { useSitesOf, opIndex, opBlock, liveIn, materialize, reachFrom } = analyze(fn, returnsVoid);
+  const { useSitesOf, opIndex, opBlock, liveIn, materialize, reachFrom, emitPos, memWriteBetween } = analyze(
+    fn,
+    returnsVoid,
+  );
 
   // SCALAR-vs-AGGREGATE globals: a `gaddr` symbol accessed EXCLUSIVELY at offset 0 is a scalar
   // global → the bare name `gSym` (byte-exact, matches the source). A symbol accessed at any
@@ -1333,15 +1336,17 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
   // only PARTIALLY absorbed — one extract spelled, another use kept — emits both the temp and
   // the named reads, one load more than the asm; semantics hold, the score decides.)
   //
-  // ORDERING GATE (adversarial round, CRITICAL 1): the named spelling replaces a REGISTER value
-  // — the bits captured at the load's program position — with a fresh memory read at each render
-  // position. Every other memory read in this file goes through the materialization model
-  // (analysis.ts) for exactly that hazard, so the fold must clear the same bar: it refuses
-  // whenever a call, or a store that may alias the folded global, lies between the load and any
-  // position the member read renders at (the extract's own position when materialized, each of
-  // its use sites when inline). Linear program position over-approximates path order — the same
-  // conservative idiom as analysis.ts liveAcrossCall — so a barrier on a disjoint path refuses
-  // harmlessly: the honest shift spelling stays.
+  // ORDERING GATE (adversarial round, CRITICAL 1 — twice): the named spelling replaces a
+  // REGISTER value — the bits captured at the load's program position — with a fresh memory
+  // read at each render position. Every other memory read in this file goes through the
+  // materialization model (analysis.ts) for exactly that hazard, so the fold clears the SAME
+  // bar with the SAME machinery: `emitPos` resolves where each extract actually renders
+  // (transitively through its inlining consumers — an unresolvable position refuses), and
+  // `memWriteBetween` walks every def-avoiding load→render path for a call, an opaque, or a
+  // store not provably to a DIFFERENT named global. Path-based on purpose: the second audit
+  // pass broke the first fix's linear-position scan with a block laid out AFTER the render in
+  // address order but executing between load and render on the taken path — fn.blocks order is
+  // address order, not topological order.
   const bitfieldSpelling = new Map<Op, { global: string; field: string }>();
   const absorbedLoads = new Set<Op>();
   if (symCtx && littleEndian && spellBitfieldMembers) {
@@ -1367,28 +1372,22 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
       }
       return null;
     };
-    const blockPos = new Map<Block, number>();
-    fn.blocks.forEach((blk, i) => blockPos.set(blk, i));
-    const linPos = (o: Op): number => blockPos.get(opBlock.get(o)!)! * 1e6 + opIndex.get(o)!;
-    // every op that may WRITE memory, with the global it provably writes (null = could be any)
-    const memBarriers: { pos: number; sym: string | null }[] = [];
-    for (const blk of fn.blocks) {
-      for (const op of blk.ops) {
-        if (op.opcode === 'call') {
-          memBarriers.push({ pos: linPos(op), sym: null });
-        } else if (op.opcode === 'store' || op.opcode === 'astore') {
-          memBarriers.push({ pos: linPos(op), sym: addrOf(op.operands[0], 0)?.name ?? null });
+    // A write for the fold's purposes: calls and opaques always; a store/astore unless its base
+    // resolves to a global PROVABLY different from the folded one. (Name comparison suffices:
+    // the pool promotion picks one canonical name per address, so one cell cannot appear under
+    // two names within a function.)
+    const mayWrite =
+      (sym: string) =>
+      (x: Op): boolean => {
+        if (x.opcode === 'call' || x.opcode === 'opaque') {
+          return true;
         }
-      }
-    }
-    const noBarrierBetween = (from: Op, to: Op, sym: string): boolean => {
-      const lo0 = linPos(from);
-      const hi = linPos(to);
-      if (hi < lo0) {
-        return false; // a render linearly BEFORE the load (a back-edge shape) — refuse, not reason
-      }
-      return !memBarriers.some((bar) => bar.pos > lo0 && bar.pos < hi && (bar.sym === null || bar.sym === sym));
-    };
+        if (x.opcode !== 'store' && x.opcode !== 'astore') {
+          return false;
+        }
+        const t = addrOf(x.operands[0], 0);
+        return !(t && t.name !== sym);
+      };
     for (const blk of fn.blocks) {
       for (const op of blk.ops) {
         if ((op.opcode !== 'shr_u' && op.opcode !== 'shr_s') || op.operands.length !== 1) {
@@ -1420,9 +1419,13 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
           continue;
         }
         // where does the member read RENDER? at the extract's own position when materialized,
-        // else at each site that consumes it inline
-        const renders = materialize.has(op) ? [op] : (useSitesOf.get(op.results[0]) ?? []).map((s) => s.op);
-        if (!renders.every((r) => noBarrierBetween(load, r, gb.name))) {
+        // else wherever each of its consumers ultimately renders (emitPos, transitively —
+        // unresolvable refuses); every load→render path must be write-free
+        const renders = materialize.has(op)
+          ? [{ blk: opBlock.get(op)!, idx: opIndex.get(op)! }]
+          : [...new Set((useSitesOf.get(op.results[0]) ?? []).map((s) => s.op))].map((c) => emitPos(c));
+        const writes = mayWrite(gb.name);
+        if (renders.some((r) => r === null) || renders.some((r) => memWriteBetween(load, r!, writes))) {
           continue;
         }
         const signedRead = op.opcode === 'shr_s';
