@@ -6,7 +6,7 @@
 // Crucially, rewrites go through replaceAllUsesWith + DCE — never in-place opcode
 // mutation of a live value.
 import { Fn, Op, Value, defOpMap, mkOp, mkValue, replaceAllUsesWith } from '../ir/core';
-import { type Opcode, isDceSafe } from '../ir/opcodes';
+import { NEGATED_ICMP, type Opcode, isDceSafe } from '../ir/opcodes';
 import type { IrType } from '../ir/types';
 import { T } from '../ir/types';
 
@@ -229,15 +229,97 @@ const sextPat = (w: number, k: number): RewritePattern => ({
  *  a row ever needs it. */
 export const CAST_PATTERNS: RewritePattern[] = [zextPat(8, 24), zextPat(16, 16), sextPat(8, 24), sextPat(16, 16)];
 
+// ── boolean-negation idiom ───────────────────────────────────────────────────────────────────
+// `cmp ^ 1` IS `!cmp`: an `icmp_*` result is 0 or 1 by construction (ir/opcodes.ts), so xoring the
+// low bit flips exactly the boolean. A compiler with no set-on-greater-equal spells a MATERIALISED
+// `a >= b` as its opposite plus that flip — MIPS `slt v0,a0,a1; xori v0,v0,1`, the shape IDO and
+// both GCCs emit and the only one asmlift has measured (m2c `40cbae3` reports ARM `eor #1` too;
+// no agbcc row in the corpus carries it, agbcc materializing the same boolean via branches).
+// The naive lift prints that as the double-negative `a < b ^ 1`, and hides the comparison from
+// every consumer that reasons about booleans: the short-circuit recognizer's `&&`/`||` fold matches
+// an `icmp` feeder, not an `xor` of one. (It does not by itself unblock that fold — measured on
+// this idiom's one benchmark inhabitant, the diamond still declines because raise/shortcircuit.ts
+// additionally wants a 0/1 CONST arm and both arms here are comparisons. It removes one of the two
+// blockers, and the spelling win stands on its own.)
+//
+// UNGATED, unlike the compiler-pinned folds above. Two independent reasons, and the second is the
+// load-bearing one:
+//   • it is a semantic IDENTITY on asmlift's own IR, not a spelling trade — `xor(icmp, 1)` cannot
+//     mean anything but the negated compare on any target;
+//   • THE SHAPE IS ITS OWN GATE. The pattern can only fire where the compiler itself emitted the
+//     flip, and wherever it did, "the negated comparison" is precisely what it was spelling. A
+//     compiler with a set-on-greater-equal never produces the shape and so can never be harmed.
+// Byte evidence is narrower than the reasoning: synthetic:inrange stays MATCH under gcc2.7.2kmc
+// with the folded spelling, which proves the round-trip there; elsewhere it is unmeasured.
+//
+// The negation comes from THE shared table (ir/opcodes.ts NEGATED_ICMP), so this fold, the MIPS
+// `slt …; beqz` branch fold and the short-circuit diamond negation cannot disagree about what the
+// opposite of a compare is. One pattern per comparison — a data-driven fold needs a fixed
+// replacement opcode, so the table is unrolled into ten patterns rather than expressed as a
+// (nonexistent) computed-opcode replacement.
+const notCmpPat = (cmp: string): RewritePattern => ({
+  id: `not-${cmp}`,
+  applies: {},
+  match: {
+    op: 'xor',
+    args: [
+      { op: cmp, args: [{ bind: 'A' }, { bind: 'B' }] },
+      { op: 'const', attrEquals: { value: 1 }, args: [] },
+    ],
+  },
+  // Pinned u32, matching CNTLZW_EQ0 — the other pattern in this file that produces a comparison.
+  // It is what raise/recover.ts stamps on every icmp result unconditionally anyway, so inheriting
+  // the `xor`'s type would reach the same place; saying it here keeps the two icmp-producing
+  // patterns on one discipline instead of leaving a reader to infer which is canonical.
+  replaceWith: { op: NEGATED_ICMP[cmp], args: ['A', 'B'], resultType: T.u(32) },
+});
+
+// The BRANCH-form siblings. Testing a boolean against zero is the same negation by another
+// spelling, and it is what a compare-and-branch ISA actually emits: MIPS `slt v0,…; xori v0,v0,1;
+// beqz v0,L` lifts to `icmp_eq(icmp_sge(…), 0)` once the `xori` has folded, because the branch is a
+// genuine test of the materialised boolean (the frontend's own `slt …; beqz` fusion cannot fire —
+// its pending compare was invalidated by the `xori` that redefined the register). Without these the
+// `^ 1` fold just trades one double negative for another: `a0 >= a1 == 0`.
+//   icmp_eq(cmp, 0) → !cmp     `(a >= b) == 0`  is  `a < b`
+//   icmp_ne(cmp, 0) →  cmp     `(a >= b) != 0`  is  `a >= b`
+// Same soundness argument as the `^ 1` fold (an icmp result is 0/1, so `== 0` is exactly negation)
+// and the same shape-is-its-own-gate reason to leave them ungated.
+const cmpZeroPat = (cmp: string, test: 'icmp_eq' | 'icmp_ne'): RewritePattern => ({
+  id: `${test === 'icmp_eq' ? 'not' : 'is'}-zerotest-${cmp}`,
+  applies: {},
+  match: {
+    op: test,
+    args: [
+      { op: cmp, args: [{ bind: 'A' }, { bind: 'B' }] },
+      { op: 'const', attrEquals: { value: 0 }, args: [] },
+    ],
+  },
+  replaceWith: { op: test === 'icmp_eq' ? NEGATED_ICMP[cmp] : cmp, args: ['A', 'B'], resultType: T.u(32) },
+});
+
+/** `cmp ^ 1` and the zero-test forms `cmp == 0` / `cmp != 0` → the (negated) comparison. Every
+ *  entry is one comparison of `NEGATED_ICMP`; the bundle is what the boolean-reasoning consumers
+ *  downstream (short-circuit recovery, the structurer's condition spelling) actually match on. */
+export const NOT_CMP_PATTERNS: RewritePattern[] = [
+  ...Object.keys(NEGATED_ICMP).map(notCmpPat),
+  ...Object.keys(NEGATED_ICMP).flatMap((cmp) => [cmpZeroPat(cmp, 'icmp_eq'), cmpZeroPat(cmp, 'icmp_ne')]),
+];
+
 // The DEFAULT idiom bundle `decompile()` applies when the caller passes no `patterns`. It is
-// EVERY idiom asmlift owns; each is `{compilers}`-gated (patternApplies), so this one global list
-// self-selects per target — agbcc/gcc get sdiv-pow2, agbcc/ido/gcc get the mul-const folds, and a
-// target whose compiler matches none (mwcc) applies nothing. Ordered like the sub-bundles: the
+// EVERY idiom asmlift owns; the list self-selects per target through patternApplies — agbcc/gcc get
+// sdiv-pow2, agbcc/ido/gcc get the mul-const folds, mwcc gets cntlzw-eq0 + rotl-mirror, and agbcc
+// gets the casts. MOST patterns are `{compilers}`-gated because they trade one spelling for another
+// and are only byte-safe where measured; the boolean-negation folds are deliberately UNGATED (see
+// their comment — the shape is its own gate), so "gated per compiler" is the common case, not the
+// invariant. Ordered like the sub-bundles: the
 // division idiom, then the multiplies (base folds before the composite tail). Passing an explicit
 // `patterns` (including `[]`) overrides this — `[]` runs the naive lift with no idiom folding.
 export const DEFAULT_IDIOM_PATTERNS: RewritePattern[] = [
   SDIV_POW2_2,
   CNTLZW_EQ0,
+  // AFTER cntlzw-eq0, which is what turns mwcc's `clz(x) >> 5` into the `icmp_eq` this fold then
+  // negates — `!(x == 0)` composes only in that order (each pattern runs to fixpoint in turn).
+  ...NOT_CMP_PATTERNS,
   ROTL_MIRROR,
   ...MUL_CONST_PATTERNS,
   ...CAST_PATTERNS,
@@ -245,7 +327,11 @@ export const DEFAULT_IDIOM_PATTERNS: RewritePattern[] = [
 
 // Ops whose operands a compiler may emit in either order — so an idiom's match must try both
 // (agbcc emits `add(X, shr_u(X,31))`; KMC GCC emits `add(shr_u(X,31), X)` for the SAME `x/2`).
-const COMMUTATIVE = new Set(['add', 'mul', 'and', 'or', 'xor']);
+// `icmp_eq`/`icmp_ne` are here for the same reason, not as arithmetic: `x == 0` and `0 == x` are the
+// same test, and which one a frontend builds is an accident of how the branch was decoded — the
+// zero-test folds must match either. The ORDERED comparisons are deliberately absent: swapping the
+// operands of `a < b` is `b > a`, a different opcode, which this mechanism cannot express.
+const COMMUTATIVE = new Set(['add', 'mul', 'and', 'or', 'xor', 'icmp_eq', 'icmp_ne']);
 
 interface Binds {
   values: Map<string, Value>;
