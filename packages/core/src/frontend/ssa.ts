@@ -3,6 +3,14 @@
 // CFG (predecessors per block) and, per block, emits ops through `readVar`/`writeVar`; this
 // module materialises block-argument phis at joins and back-edges.
 //
+// `preds` is an EDGE list, not a block list: it carries one entry per CFG edge, so a `switch_br`
+// with several case values reaching one block appears there several times. Both readings are
+// needed and they are not interchangeable — phi wiring wants the distinct predecessor BLOCKS (one
+// value each), while the args it appends belong to the EDGES (every one of them). `distinctPreds`
+// names the first; `appendSuccessorArg` walks the second. (ir/core.ts `predecessors` and
+// structure.ts `predecessorBlocks` have the same duality, and structure.ts already dedups ad hoc
+// at its two join sites.)
+//
 // Protocol: create the builder, then fill blocks in index order. For each block, emit its
 // computation via read/writeVar, push its terminator op last (successors referencing
 // `irBlocks`, args left empty — phi wiring appends them), then call `markFilled(b)`. When all
@@ -28,6 +36,7 @@ export interface SsaBuilder {
   finish(): void;
 }
 
+/** `preds` is per-EDGE (see the module header): one entry per CFG edge into each block. */
 export function makeSsaBuilder(name: string, blockCount: number, preds: number[][]): SsaBuilder {
   const irBlocks: Block[] = Array.from({ length: blockCount }, () => ({ params: [] as Value[], ops: [] }));
   const fn: Fn = { name, blocks: irBlocks };
@@ -38,6 +47,9 @@ export function makeSsaBuilder(name: string, blockCount: number, preds: number[]
   const incompletePhis: Array<Map<string, Value>> = irBlocks.map(() => new Map());
   const phiBlock = new Map<Value, number>();
   const paramReg = new Map<Value, string>();
+
+  // `preds` lists an entry per CFG EDGE; these are the distinct predecessor BLOCKS.
+  const distinctPreds = (b: number): number[] => [...new Set(preds[b])];
 
   const writeVar = (reg: string, b: number, v: Value) => defs[b].set(reg, v);
   const readVar = (reg: string, b: number): Value => defs[b].get(reg) ?? readRecursive(reg, b);
@@ -56,7 +68,10 @@ export function makeSsaBuilder(name: string, blockCount: number, preds: number[]
       incompletePhis[b].set(reg, phi);
       return phi;
     }
-    const ps = preds[b];
+    // DISTINCT predecessor blocks: a switch_br reaching this block on several case values is one
+    // predecessor with several edges, and it supplies ONE value — counting the edges instead would
+    // manufacture a join (and a phi) where there is none.
+    const ps = distinctPreds(b);
     if (ps.length === 0) {
       // live-in with no predecessor: an incoming argument register → function parameter.
       const p = mkValue(T.unk(32));
@@ -76,16 +91,24 @@ export function makeSsaBuilder(name: string, blockCount: number, preds: number[]
     return phi;
   };
   const addPhiOperands = (reg: string, b: number) => {
-    for (const p of preds[b]) {
+    for (const p of distinctPreds(b)) {
       appendSuccessorArg(p, b, readVar(reg, p));
     }
   };
-  // Append `arg` to predecessor p's terminator successor that targets block b.
+  // Append `arg` to EVERY successor edge of predecessor p that targets block b.
+  //
+  // A predecessor normally has one edge to a given successor, but a `switch_br` has as many as it
+  // has case values, and two cases sharing a body (`case 1: case 2:`) is ordinary C. Block args
+  // belong to the EDGE, so each of those edges needs its own copy: appending to just the first (a
+  // `find`) left the others short, while `preds` listing the block once per edge made the loop run
+  // k times and pile k copies onto that same first edge. Both halves of that — every edge, once per
+  // predecessor BLOCK — have to hold together, which is why they are fixed in one place.
   const appendSuccessorArg = (p: number, b: number, arg: Value) => {
     const term = irBlocks[p].ops[irBlocks[p].ops.length - 1];
-    const s = term.successors.find((su) => su.block === irBlocks[b]);
-    if (s) {
-      s.args.push(arg);
+    for (const s of term.successors) {
+      if (s.block === irBlocks[b]) {
+        s.args.push(arg);
+      }
     }
   };
   const sealBlock = (b: number) => {
