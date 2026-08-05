@@ -104,7 +104,9 @@ Recovered today: straight-line, if/else diamonds, natural loops (`while` / `do-w
 properly nested, in-body `break`/early-`return`), comparison-tree and jump-table switches,
 direct calls, constant-offset and variable-index memory (`*p`, `p[n]`, `a[i]`, struct fields),
 magic-number and soft division, short-circuit booleans, width casts. Still DECLINED (loud, never
-wrong code): **local stack frames** (address-taken locals / sp-as-data / live spills),
+wrong code): **local stack frames** (address-taken locals / sp-as-data; MIPS models word `sp`
+slots and PPC elides callee-saved save slots, so a spill/reload pair is modelled on those two —
+anything the narrow models cannot honour declines),
 **cross-block condition flags** on PPC (a `cmpw` whose branch lands in another block — the
 capability gap behind the mwcc switch stubs), computed tail calls, PIC/`gp`/SDA global access,
 switch fall-through, multi-latch/irreducible loops, floats, and 64-bit memory ops. Prototypes
