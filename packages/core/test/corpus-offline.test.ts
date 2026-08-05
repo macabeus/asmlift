@@ -114,6 +114,27 @@ const CASES: OfflineCase[] = [
       's32 maxab(s32 a0, s32 a1) {\n    if (a0 < a1) {\n        return a1;\n    } else {\n        return a0;\n    }\n}\n',
   },
 
+  // ── The sibling NEGATIVE of maxab: a compare whose register is REDEFINED before the branch ─
+  // `inrange` is `x >= lo && x <= hi`. IDO materialises `a0 >= a1` the only way a compare-into-GPR
+  // ISA can — `slt` then `xori …,1` — and only then branches on it. That `xori` redefines v0, so a
+  // pending-compare record keyed by REGISTER folds the branch against the dead `slt` and emits the
+  // exactly inverted condition: `inrange(5,1,0)` returned 1 where the function returns 0. Silent
+  // wrong C, scored as a near-miss (nonmatch 9/10) — indistinguishable from an honest near-match,
+  // which is what makes this class worth a fixture rather than a comment.
+  //
+  // Two independent mechanisms have to hold for the expectation below, which is why it is pinned as
+  // whole text: the frontend keys its fold by the SSA VALUE (so the redefinition simply misses), and
+  // the idiom layer folds `cmp ^ 1` and the `cmp == 0` the branch then produces. Break either and
+  // this reads `a0 < a1 ^ 1` or `a0 >= a1 == 0` instead.
+  {
+    file: 'ido-inrange.asm',
+    sym: 'inrange',
+    target: MIPS_IDO,
+    note: 'materialised negated compare, then branched on — the stale-fold inversion',
+    expect:
+      's32 inrange(s32 a0, s32 a1, s32 a2) {\n    s32 v0;\n    if (a0 < a1) {\n        v0 = a0 >= a1;\n    } else {\n        v0 = a2 >= a0;\n    }\n    return v0;\n}\n',
+  },
+
   // ── PowerPC / CodeWarrior (GameCube) — the third ISA, its objdump captured verbatim ──────
   {
     file: 'ppc-deref.asm',

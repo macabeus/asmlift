@@ -39,23 +39,10 @@
 // Guards stay conservative: the CONST is exactly 0/1, Vb is a bool op or 0/1 const, the head condition is a
 // negatable icmp, and any deviation falls through untouched (a miss, never a miscompile).
 import { Block, Fn, Op, Value, defOpMap, mkOp, mkValue, predecessors, replaceAllUsesWith } from '../ir/core';
-import type { Opcode } from '../ir/opcodes';
-import { HOIST_UNSAFE_OPS } from '../ir/opcodes';
+import { HOIST_UNSAFE_OPS, NEGATED_ICMP } from '../ir/opcodes';
 import { T } from '../ir/types';
 
-const NEGATE_ICMP: Record<string, Opcode> = {
-  icmp_eq: 'icmp_ne',
-  icmp_ne: 'icmp_eq',
-  icmp_slt: 'icmp_sge',
-  icmp_sge: 'icmp_slt',
-  icmp_sgt: 'icmp_sle',
-  icmp_sle: 'icmp_sgt',
-  icmp_ult: 'icmp_uge',
-  icmp_uge: 'icmp_ult',
-  icmp_ugt: 'icmp_ule',
-  icmp_ule: 'icmp_ugt',
-};
-const BOOL_OPS = new Set([...Object.keys(NEGATE_ICMP), 'logic_and', 'logic_or']);
+const BOOL_OPS = new Set([...Object.keys(NEGATED_ICMP), 'logic_and', 'logic_or']);
 
 /** Fold `(-x | x) >> 31` (logical shift) → `x != 0`, in place. agbcc's branchless is-nonzero idiom. */
 // NOT exported: it must run before the diamond fold, an ordering only recognizeShortCircuit's
@@ -176,7 +163,7 @@ export function recognizeShortCircuit(fn: Fn): boolean {
         }
         const cond = ht.operands[0];
         const condDef = defs.get(cond);
-        if (!condDef || !NEGATE_ICMP[condDef.opcode]) {
+        if (!condDef || !NEGATED_ICMP[condDef.opcode]) {
           continue;
         } // head condition must be a negatable icmp
 
@@ -197,7 +184,7 @@ export function recognizeShortCircuit(fn: Fn): boolean {
         let condSide = cond;
         if (wantNeg) {
           condSide = mkValue(T.unk(32));
-          before(mkOp(NEGATE_ICMP[condDef.opcode], { operands: [...condDef.operands], results: [condSide] }));
+          before(mkOp(NEGATED_ICMP[condDef.opcode], { operands: [...condDef.operands], results: [condSide] }));
         }
         // Vb const → the phi reduces to the (possibly negated) condition; Vb bool → a && / || connective.
         let res = condSide;
@@ -362,11 +349,11 @@ export function recognizeBranchShortCircuit(fn: Fn): boolean {
         let second = c2;
         const negated: Op[] = [];
         if (wantEdge !== gTaken) {
-          if (!c2Def || !NEGATE_ICMP[c2Def.opcode]) {
+          if (!c2Def || !NEGATED_ICMP[c2Def.opcode]) {
             continue;
           }
           second = mkValue(T.unk(32));
-          negated.push(mkOp(NEGATE_ICMP[c2Def.opcode], { operands: [...c2Def.operands], results: [second] }));
+          negated.push(mkOp(NEGATED_ICMP[c2Def.opcode], { operands: [...c2Def.operands], results: [second] }));
         }
         const res = mkValue(T.unk(32));
         const connective = mkOp(gIsFall ? 'logic_or' : 'logic_and', {

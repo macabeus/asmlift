@@ -398,8 +398,8 @@ export const FIXTURES: DecompFixture[] = [
 
   // ── Default idiom bundle (no `patterns` key = the benchmark path) ─────────────────────
   // These pin that the DEFAULT bundle fires: `decompile()` with no opts.patterns applies
-  // DEFAULT_IDIOM_PATTERNS, each `{compilers}`-gated so one global bundle self-selects per
-  // target. A revert to default-off breaks the `expectPatternHits` here. (The `patterns: []`
+  // DEFAULT_IDIOM_PATTERNS, mostly `{compilers}`-gated so one global bundle self-selects per
+  // target (the boolean-negation folds are ungated — their shape is its own gate). A revert to default-off breaks the `expectPatternHits` here. (The `patterns: []`
   // opt-out baseline is pinned by matching/m2.test.ts.)
   {
     // agbcc has no hardware divide → `x/2` lowers to `lsr#31;add;asr#1`; without the fold the

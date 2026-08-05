@@ -133,6 +133,18 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
     // `addi r3,r1,8` = `&local` — reading the stack pointer as data (silently `return a0 + 8;` otherwise).
     expect(() => dis('addrtaken', '0:\taddi    r3,r1,8\n4:\tblr\n')).toThrow(/stack pointer r1 used as data/);
   });
+  test('REGISTER-INDEXED frame access (`lwzx rD,r1,rB`) fails loud — r1 in either operand', () => {
+    // PPC is asmlift's only frontend with a register-indexed addressing mode, so this is the exact
+    // structural analogue of the case that broke m2c's stack-frame model (`ldr rX, [sp, rY]`,
+    // upstream ef34aff): an sp-relative access whose addend is a REGISTER, not a literal. It
+    // declines here for a reason worth pinning — `addrX` routes BOTH operands through `read`, so
+    // the guard above covers it rather than there being a second check. A refactor of `addrX` to
+    // `readVar` would silently reopen exactly that hole, and mwcc emits `lwzx` for every
+    // variable-index array access, so the shape is not exotic.
+    expect(() => dis('lwzxframe', '0:\tlwzx    r3,r1,r4\n4:\tblr\n')).toThrow(/stack pointer r1 used as data/);
+    expect(() => dis('stwxframe', '0:\tstwx    r3,r1,r4\n4:\tblr\n')).toThrow(/stack pointer r1 used as data/);
+    expect(() => dis('lwzxindex', '0:\tlwzx    r3,r4,r1\n4:\tblr\n')).toThrow(/stack pointer r1 used as data/);
+  });
   test('spill of a LIVE (computed) value to the stack FAILS LOUD, not a dropped spill', () => {
     // `addi r0,r3,1` computes a value; `stw r0,8(r1)` spills it. A callee-saved SAVE stores an
     // unchanged entry value (no reaching def) and stays transparent — this stores a live value.

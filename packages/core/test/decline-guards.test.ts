@@ -93,6 +93,60 @@ test('the annotate stub carries a machine-readable declineReason', () => {
   expect(report.declineReason).toBeTruthy();
 });
 
+// ── sp-as-data: the WHOLE class declines, not one spelling at a time ──────────────────────
+// asmlift's own silent-miscompile hazard, and the reason this belongs in this file: `sp` is never
+// WRITTEN, so a frontend that let it be read as data would have Braun SSA materialize it as a
+// fabricated PHANTOM PARAMETER — a function of the wrong arity returning the wrong argument
+// (thumb.ts's readData and mips.ts's never-stored-slot check each say so at their guard). Every
+// frontend therefore refuses the whole class up front rather than the shapes it happens to know.
+//
+// The sweep exists because "the whole class" is only worth anything if it stays true for every
+// spelling: the register-indexed load and its store dual, a plain `[sp, #N]` slot, `&local`. It was
+// prompted by m2c hitting the register-indexed case (`ldr rX, [sp, rY]` tripped an
+// `assert isinstance(addend, AsmLiteral)` in its stack-frame model, upstream ef34aff) — a case
+// asmlift refuses not by knowing about it but by never having entered the class.
+//
+// asmlift has no GENERAL stack-frame model, but two deliberately narrow partial ones, and both are
+// covered below. MIPS models word `sp` SLOTS (a spill/reload pair is one SSA variable), so its
+// contract is narrower: every access the word-slot model cannot honour must decline. PPC elides
+// callee-saved save/restore slots, and is the one frontend with a register-indexed addressing mode
+// (`lwzx`/`stwx`) — the exact structural analogue of m2c's case, and covered in ppc-frontend.test.ts
+// beside its sibling r1 guards (its decline message names the register, so it does not share the
+// regex below).
+test('every sp-as-data spelling declines loud — including the register-indexed load', () => {
+  const thumb = (body: string) => () =>
+    decompile('f', `\t.code\t16\n\t.globl\tf\n\t.thumb_func\nf:\n${body}\tbx\tlr\n`, ARMV4T_AGBCC);
+  const spAsData = /stack pointer used as data/;
+  expect(thumb('\tldr\tr0, [sp, r1]\n')).toThrow(spAsData); // m2c's crash case
+  expect(thumb('\tstr\tr0, [sp, r1]\n')).toThrow(spAsData); // its store dual
+  expect(thumb('\tldr\tr0, [sp, #4]\n')).toThrow(spAsData); // the literal slot m2c handles
+  expect(thumb('\tadd\tr0, sp, #8\n')).toThrow(spAsData); // &local
+  // annotate mode degrades to a stub carrying the same reason — never a fabricated stack local
+  const annotated = decompile(
+    'f',
+    '\t.code\t16\n\t.globl\tf\n\t.thumb_func\nf:\n\tldr\tr0, [sp, r1]\n\tbx\tlr\n',
+    ARMV4T_AGBCC,
+    { onGap: 'annotate' },
+  );
+  expect(annotated.diagnostics.some((d) => spAsData.test(d.reason))).toBe(true);
+});
+
+test('MIPS: sp accesses outside the word-slot model decline, never a bogus slot', () => {
+  const mips = (body: string) => () => decompile('f', `00000000 <f>:\n${body}   8:\tjr\tra\n   c:\tnop\n`, MIPS_IDO);
+  // the model's own shape still works: a store then reload of the same word slot is one SSA value
+  expect(
+    decompile('f', '00000000 <f>:\n   0:\tsw\ta0,4(sp)\n   4:\tlw\tv0,4(sp)\n   8:\tjr\tra\n   c:\tnop\n', MIPS_IDO)
+      .source,
+  ).toBe('s32 f(s32 a0) {\n    return a0;\n}\n');
+  expect(mips('   0:\tlb\tv0,4(sp)\n')).toThrow(/stack pointer used as data/); // sub-word: slot model unsafe
+  // …and the ALIASING case the whole-function sub-word scan exists for: a word store routed to an
+  // SSA slot while a sub-word reload of the SAME offset stays on the memory path would drop the
+  // store outright. One sub-word sp access disables slot modelling for the entire function.
+  expect(mips('   0:\tsw\ta0,4(sp)\n   4:\tlbu\tv0,4(sp)\n')).toThrow(/stack pointer used as data/);
+  expect(mips('   0:\taddu\tv0,sp,a0\n')).toThrow(/stack pointer used as data/); // &local
+  expect(mips('   0:\tlw\tv0,16(sp)\n')).toThrow(/never stored/); // a slot no store defined
+});
+
 // ── Input-format boundary (frontend/format.ts) ────────────────────────────────────────────
 // Each frontend reads ONE text format; a positive mismatch declines AT THE BOUNDARY with a
 // message naming both formats. Unclassifiable text still flows to the frontend (headerless

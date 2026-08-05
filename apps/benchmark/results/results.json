@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generatedAt": "2026-08-05T00:35:23.409Z",
+    "generatedAt": "2026-08-05T14:19:19.617Z",
     "toolchains": [
       "ido7.1",
       "agbcc",
@@ -14,8 +14,8 @@
       "real": 240
     },
     "asmlift": {
-      "commit": "3c0f76118ae3adaebd6993e88810a83664def346",
-      "dirty": true
+      "commit": "92b4d4019ffc6e30c7f5accaa0740669631bdf74",
+      "dirty": false
     },
     "m2c": {
       "commit": "ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0"
@@ -3423,11 +3423,11 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-CztkBl/c.c:1077: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-NkXTmJ/c.c:1077: invalid operands to binary <<"
           },
           {
             "label": "unsigned/scopebase/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-9kTYnQ/c.c:1078: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-hAz9gH/c.c:1078: invalid operands to binary <<"
           }
         ],
         "symbolsUsed": [
@@ -4329,7 +4329,7 @@
         "droppedCandidates": [
           {
             "label": "unsigned",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-GYLwTt/c.c:1076: `gBgDataPtrs' undeclared (first use in this function)"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-MUXcew/c.c:1076: `gBgDataPtrs' undeclared (first use in this function)"
           }
         ],
         "symbolsUsed": [],
@@ -5402,7 +5402,7 @@
         "droppedCandidates": [
           {
             "label": "unsigned",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-0ySZ7J/c.c:1077: too many arguments to function `thunk_sub_080002A0'"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-iHbWd3/c.c:1077: too many arguments to function `thunk_sub_080002A0'"
           }
         ],
         "symbolsUsed": [],
@@ -6148,43 +6148,43 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-q08N9S/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-2duYZD/c.c:1085: incompatible types in assignment"
           },
           {
             "label": "unsigned/coalesce-v2-v3/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-kVtPjs/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-IaZKL3/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "unsigned/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-xZOlxN/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-duAGNb/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "unsigned/defsite/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-26kOPm/c.c:1086: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-RWHHSI/c.c:1086: incompatible types in assignment"
           },
           {
             "label": "unsigned/defsite/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-f2VLeO/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-tMRk9i/c.c:1085: incompatible types in assignment"
           },
           {
             "label": "signed/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-WF9nHM/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-PczVje/c.c:1085: incompatible types in assignment"
           },
           {
             "label": "signed/coalesce-v2-v3/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-mDzvDo/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-LRGxNi/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "signed/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-PK7L0x/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-kkGrTr/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "signed/defsite/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-yiEeM7/c.c:1086: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-qYty7P/c.c:1086: incompatible types in assignment"
           },
           {
             "label": "signed/defsite/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-kiF7nl/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Fl5PVX/c.c:1085: incompatible types in assignment"
           }
         ],
         "symbolsUsed": [
@@ -25301,7 +25301,7 @@
         "decompiler": "asmlift",
         "candidateLabel": "unsigned",
         "outcome": "nonmatch",
-        "source": "s32 clampu8(u32 a0) {\n    if (a0 >= 0) {\n        if (a0 < 256 == 0) a0 = 255;\n    } else {\n        a0 = 0;\n    }\n    return a0;\n}\n",
+        "source": "s32 clampu8(u32 a0) {\n    if (a0 >= 0) {\n        if (a0 >= 256) a0 = 255;\n    } else {\n        a0 = 0;\n    }\n    return a0;\n}\n",
         "score": 8,
         "maxScore": 9,
         "compileErrors": null,
@@ -25384,9 +25384,9 @@
       "asmlift": {
         "decompiler": "asmlift",
         "candidateLabel": "signed",
-        "outcome": "nonmatch",
-        "source": "s32 clampu8(s32 a0) {\n    if (a0 < 0) {\n        return 0;\n    } else {\n        if (a0 < 256 == 0) {\n            return 255;\n        } else {\n            return a0;\n        }\n    }\n}\n",
-        "score": 2,
+        "outcome": "match",
+        "source": "s32 clampu8(s32 a0) {\n    if (a0 < 0) {\n        return 0;\n    } else {\n        if (a0 >= 256) {\n            return 255;\n        } else {\n            return a0;\n        }\n    }\n}\n",
+        "score": 0,
         "maxScore": 10,
         "compileErrors": null,
         "breakdown": {
@@ -25394,7 +25394,7 @@
           "delete": 0,
           "replace": 0,
           "opMismatch": 0,
-          "argMismatch": 2
+          "argMismatch": 0
         },
         "quality": {
           "score": 100,
@@ -34256,7 +34256,7 @@
         "decompiler": "asmlift",
         "candidateLabel": "signed",
         "outcome": "match",
-        "source": "s32 inrange(s32 a0, s32 a1, s32 a2) {\n    return (a0 < a1 ^ 1) & (a2 < a0 ^ 1);\n}\n",
+        "source": "s32 inrange(s32 a0, s32 a1, s32 a2) {\n    return a0 >= a1 & a2 >= a0;\n}\n",
         "score": 0,
         "maxScore": 6,
         "compileErrors": null,
@@ -34326,18 +34326,18 @@
       "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    d  .text\t00000020 .text\n00000000 g     F .text\t00000020 inrange\n\n\nContents of section .text:\n 0000 0085102a 38420001 10400003 00000000  ...*8B...@......\n 0010 00c4102a 38420001 03e00008 00000000  ...*8B..........\nContents of section .options:\n 0000 01200000 00000000 80000074 00000000  . .........t....\n 0010 00000000 00000000 00000000 00007ff0  ................\n 0020 07100000 00000000 00000000 00000000  ................\n 0030 08100000 00000000 00000000 00000000  ................\nContents of section .reginfo:\n 0000 80000074 00000000 00000000 00000000  ...t............\n 0010 00000000 00007ff0                    ........        \nContents of section .mdebug:\n 0000 7009070a 00000008 00000004 00000188  p...............\n 0010 00000005 000002cc 00000001 0000018c  ................\n 0020 00000004 000001c0 00000000 00000000  ................\n 0030 00000011 000001f0 00000038 00000234  ...........8...4\n 0040 00000008 0000026c 00000001 00000274  .......l.......t\n 0050 00000000 00000000 00000001 000002bc  ................\n 0060 07000000 00000000 00000001 00000000  ................\n 0070 00000000 00000000 ffffffff 00000000  ................\n 0080 00000000 00000000 001d001f 00000002  ................\n 0090 00000002 00000000 00000001 00000000  ................\n 00a0 2c200004 0000002e 00000000 1820000f  , ........... ..\n 00b0 0000002e 00000020 20200001 00000001  .......   ......\n 00c0 00000000 20200000 02000000 03000000  ....  ..........\n 00d0 04000000 05000000 06000000 07000000  ................\n 00e0 08000000 09000000 20000000 21000000  ........ ...!...\n 00f0 0a000000 0b000000 0b000000 1a000000  ................\n 0100 00000000 00000003 06000000 002f746d  ............./tm\n 0110 702f6173 6d6c6966 742d6d69 70732d72  p/asmlift-mips-r\n 0120 65662d62 35353766 63646530 30376665  ef-b557fcde007fe\n 0130 3937632f 7265662e 6300696e 72616e67  97c/ref.c.inrang\n 0140 65000000 696e7261 6e676500 00000000  e...inrange.....\n 0150 00000001 00000000 00000036 00000000  ...........6....\n 0160 00000004 00000000 00000008 00000000  ................\n 0170 00000000 00000001 00000000 00000011  ................\n 0180 00000000 00000000 01800000 00000000  ................\n 0190 00000001 00000000 00000000 00000000  ................\n 01a0 18200001 00000000 00000000 00000000  . ..............\n 01b0 00000000 00000000 00000000 7fffffff  ................\n 01c0 00000000 00000000 00000002           ............    \n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "signed",
+        "candidateLabel": "unsigned",
         "outcome": "nonmatch",
-        "source": "s32 inrange(s32 a0, s32 a1, s32 a2) {\n    s32 v0;\n    if (a0 >= a1) {\n        v0 = a0 < a1 ^ 1;\n    } else {\n        v0 = a2 < a0 ^ 1;\n    }\n    return v0;\n}\n",
+        "source": "s32 inrange(u32 a0, u32 a1, u32 a2) {\n    s32 v0;\n    if (a0 < a1) {\n        v0 = a0 >= a1;\n    } else {\n        v0 = a2 >= a0;\n    }\n    return v0;\n}\n",
         "score": 9,
         "maxScore": 10,
         "compileErrors": null,
         "breakdown": {
           "insert": 2,
           "delete": 1,
-          "replace": 3,
+          "replace": 4,
           "opMismatch": 0,
-          "argMismatch": 3
+          "argMismatch": 2
         },
         "quality": {
           "score": 100,
@@ -51676,7 +51676,7 @@
         "decompiler": "asmlift",
         "candidateLabel": "unsigned",
         "outcome": "nonmatch",
-        "source": "s32 sw_sparse(u32 a0) {\n    s32 v0;\n    if (a0 == 10) {\n        v0 = 2;\n    } else {\n        if (a0 < 11 == 0) {\n            if (a0 == 100) {\n                v0 = 3;\n            } else {\n                if (a0 == 1000) {\n                    v0 = 4;\n                } else {\n                    v0 = 0;\n                }\n            }\n        } else {\n            v0 = a0 == 1;\n        }\n    }\n    return v0;\n}\n",
+        "source": "s32 sw_sparse(u32 a0) {\n    s32 v0;\n    if (a0 == 10) {\n        v0 = 2;\n    } else {\n        if (a0 >= 11) {\n            if (a0 == 100) {\n                v0 = 3;\n            } else {\n                if (a0 == 1000) {\n                    v0 = 4;\n                } else {\n                    v0 = 0;\n                }\n            }\n        } else {\n            v0 = a0 == 1;\n        }\n    }\n    return v0;\n}\n",
         "score": 19,
         "maxScore": 24,
         "compileErrors": null,

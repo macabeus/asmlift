@@ -119,6 +119,48 @@ const imm = (s: string) => parseInt(s.replace(/^#/, ''), s.includes('0x') ? 16 :
 // detection sees them, and any consumer that needs the exact list rejects the leftover `-` token
 // loudly rather than treating the fused range as one phantom register.
 const REG_NUM: Record<string, number> = { sp: 13, lr: 14, pc: 15 };
+
+// Thumb-1 data-processing mnemonics that write the condition flags when their destination is a LOW
+// register — which is all of them on this ISA, `s`-suffix or not (the assembler picks the encoding).
+// Used to invalidate a pending compare: see the decode loop. `cmp`/`cmn`/`tst` are absent on purpose
+// — they set flags but define no register, and `cmp` is the very instruction that seeds the pending
+// compare. Loads, stores, push/pop, `bl` and the high-register forms leave the flags alone.
+const FLAG_SETTING = new Set([
+  'mov',
+  'movs',
+  'add',
+  'adds',
+  'sub',
+  'subs',
+  'lsl',
+  'lsls',
+  'lsr',
+  'lsrs',
+  'asr',
+  'asrs',
+  'neg',
+  'negs',
+  'rsb',
+  'rsbs',
+  'mvn',
+  'mvns',
+  'bic',
+  'bics',
+  'ror',
+  'rors',
+  'mul',
+  'muls',
+  'and',
+  'ands',
+  'orr',
+  'orrs',
+  'eor',
+  'eors',
+  'adc',
+  'adcs',
+  'sbc',
+  'sbcs',
+]);
 const regNum = (r: string) => (r[0] === 'r' ? Number(r.slice(1)) : REG_NUM[r]);
 function expandRegList(tokens: string[]): string[] {
   const out: string[] = [];
@@ -1075,6 +1117,22 @@ export function lift(
       // phantom `pc` register (a silent drop of the return). `cmp` is not a transfer, so it still runs.
       if (classifyXfer(ins)) {
         continue;
+      }
+      // A Thumb-1 data-processing instruction on LOW registers writes the condition flags whether or
+      // not the mnemonic carries the `s` (agbcc spells `adds r0,r0,r3` as `add r0,r0,r3`, and the
+      // assembler picks the flag-setting encoding) — so an instruction between a `cmp` and its branch
+      // REPLACES the flags the branch will test. Folding the earlier `cmp` in anyway would emit a
+      // condition on the wrong operands: silently wrong C with no marker. Drop the pending compare
+      // and let the terminator's existing "no reaching compare in its block" decline fire — the loud
+      // answer, since modelling arithmetic flags is a capability asmlift does not have.
+      //
+      // The HIGH-register forms (`mov rD,rH`, `add rD,rH`) do NOT set flags and stay transparent,
+      // which is what keeps agbcc's callee-saved shuffling from tripping this. Measured free: across
+      // every agbcc row in the benchmark, no conditional-branch block has ANY instruction between its
+      // compare and the branch — compilers keep the pair adjacent. The inhabitant this guards is
+      // hand-written asm in the playground, where there is no oracle to catch a lie.
+      if (FLAG_SETTING.has(ins.mnemonic) && /^r[0-7]$/.test(reg(ins.ops[0] ?? ''))) {
+        pendingCmp = null;
       }
       const [a, b, c] = ins.ops;
       switch (ins.mnemonic) {

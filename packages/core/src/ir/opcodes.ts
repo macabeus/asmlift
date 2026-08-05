@@ -130,6 +130,38 @@ export function opSig(opcode: string): OpSig | undefined {
   return (OPCODES as Record<string, OpSig | undefined>)[opcode];
 }
 
+/** The comparison whose result is the logical NEGATION of each `icmp_*` — `!(a < b)` is `a >= b`.
+ *
+ *  Unlike EFFECTFUL_OPS/HOIST_UNSAFE_OPS below, this is AUTHORED data seated beside the registry,
+ *  not a view derived from it: nothing in `OPCODES` states which comparison opposes which. What is
+ *  derived is its SYMMETRY — the five involutive pairs are expanded both ways, so `neg(neg(c)) === c`
+ *  holds by construction (a hand-written map is one typo away from breaking it, and the symptom is a
+ *  plainly inverted condition in the emitted C). Completeness against the icmp family is the part
+ *  construction cannot give, so a test asserts it (test/pattern.test.ts) — an eleventh comparison
+ *  added to `OPCODES` would otherwise degrade three consumers three different ways.
+ *
+ *  It lives here for the reason HOIST_UNSAFE_OPS does: every consumer that has to say "the opposite
+ *  of this compare" reads THIS one — the MIPS frontend's `slt …; beqz` branch-when-false fold, the
+ *  short-circuit recognizer's diamond negation, and the idiom layer's `cmp ^ 1` fold — so they
+ *  cannot drift apart the way inline copies did. Two adjacent facts worth knowing: raise/
+ *  shortcircuit.ts derives its `BOOL_OPS` from these keys (asserting negatable-icmp == boolean-op,
+ *  true today), and l3/ast.ts `NEGATE_REL` is the SAME relation over the neutral L3 operator
+ *  vocabulary — deliberately separate, because signedness lives in the operand types there, so the
+ *  two tables are not candidates for further consolidation. */
+const ICMP_NEGATION_PAIRS: readonly (readonly [Opcode, Opcode])[] = [
+  ['icmp_eq', 'icmp_ne'],
+  ['icmp_slt', 'icmp_sge'],
+  ['icmp_sgt', 'icmp_sle'],
+  ['icmp_ult', 'icmp_uge'],
+  ['icmp_ugt', 'icmp_ule'],
+];
+export const NEGATED_ICMP: Readonly<Record<string, Opcode>> = Object.fromEntries(
+  ICMP_NEGATION_PAIRS.flatMap(([a, b]) => [
+    [a, b],
+    [b, a],
+  ]),
+);
+
 /** Ops with an observable side effect — the derived view raise/shortcircuit.ts consumes. */
 export const EFFECTFUL_OPS: ReadonlySet<string> = new Set(
   (Object.keys(OPCODES) as Opcode[]).filter((k) => (OPCODES[k] as OpSig).effects),

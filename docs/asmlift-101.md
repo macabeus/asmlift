@@ -236,8 +236,9 @@ enormously for retro consoles:
 Simpler idioms (power-of-two division via shifts — the `half` example in Part III — multiply
 strength-reduction, width casts) are expressed as **rewrite patterns as data**
 ([`pattern/engine.ts`](../packages/core/src/pattern/engine.ts)): serializable objects saying
-"this DAG (directed-acyclic-graph) shape of operations becomes this op", each gated to the
-compilers that emit it. Data, not code, so
+"this DAG (directed-acyclic-graph) shape of operations becomes this op", most of them gated to
+the compilers that emit them (a few, like `cmp ^ 1` → `!cmp`, are identities that hold
+everywhere). Data, not code, so
 that an automated loop can eventually _propose_ new patterns and have the oracle validate them.
 
 ### 2.6 Types as ranked candidates, judged by the differ
