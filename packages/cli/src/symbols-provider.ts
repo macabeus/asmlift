@@ -82,6 +82,7 @@ interface DwarfMember {
   volatile?: true;
   const?: true;
   bitWidth?: number;
+  bitOffset?: number;
   elemSize?: number;
   elemSigned?: boolean;
   length?: number;
@@ -117,6 +118,19 @@ function assertMemberFactsPresent(m: object, elfPath: string): void {
       `cannot build a symbol map from ${elfPath}: the installed @gba-kit/debug-info reports no ` +
         `struct-member signedness (member has no 'signed' key), so synthesized struct fields ` +
         `would be declared at a guessed signedness — ${UPGRADE}`,
+    );
+  }
+}
+
+/** The same probe for a BITFIELD member's position: a package that reports `bitWidth` without
+ *  `bitOffset` leaves the field unseatable — dropping it silently would make the extract
+ *  un-nameable with no explanation, so the provider refuses loudly instead. Key presence, never
+ *  a version string, same as every other gate here. */
+function assertBitfieldFactsPresent(m: object, elfPath: string): void {
+  if (!('bitOffset' in m)) {
+    throw new Error(
+      `cannot build a symbol map from ${elfPath}: the installed @gba-kit/debug-info reports a ` +
+        `bitfield member with no 'bitOffset' key, so the field cannot be seated in its layout — ${UPGRADE}`,
     );
   }
 }
@@ -179,8 +193,13 @@ export function assertPointeeCapabilityWitnessed(witnessed: boolean, layoutsSeen
 /** A named type's sidecar layout, mapped to the core `SymbolStructField[]` — the ONE copy, shared
  *  by a struct global's own layout and by a pointer global's pointee.
  *
- *  Bitfield members are excluded: their read width never equals a field size, so they must fall
- *  through to the honest cast spelling, never a wrong field name. `signed` must be REPORTED by the
+ *  Bitfield members are kept — with both bit facts — only when `littleEndian`: core's extract
+ *  recognizer solves an LSB-first equation and its declaration synthesis lays `u32 name : n` by
+ *  the LE-GCC unit model, neither of which describes a big-endian ELF, so a BE map carries no
+ *  bitfield members at all (each falls through to the honest cast spelling as before). A member
+ *  reporting `bitWidth` without `bitOffset` is the capability gate one release earlier
+ *  (assertBitfieldFactsPresent): dropping it silently would leave the extract un-nameable with no
+ *  explanation, so the provider refuses loudly instead. `signed` must be REPORTED by the
  *  package (assertMemberFactsPresent); a reported null value is a genuine "DWARF didn't say" and
  *  stays absent rather than guessed. `pointer`/`volatile` and the array element facts are kept
  *  only when the package states them, same rule — an absent `elemSize` means "not an array", which
@@ -189,15 +208,19 @@ export function layoutOf(
   di: { struct(name: string): { members: DwarfMember[] } | null },
   name: string | null,
   elfPath: string,
+  littleEndian = true,
 ): SymbolStructField[] | null {
   const layout = name ? di.struct(name) : null;
   if (!layout) {
     return null;
   }
   return layout.members
-    .filter((m) => m.bitWidth === undefined)
+    .filter((m) => m.bitWidth === undefined || littleEndian)
     .map((m) => {
       assertMemberFactsPresent(m, elfPath);
+      if (m.bitWidth !== undefined) {
+        assertBitfieldFactsPresent(m, elfPath);
+      }
       return {
         name: m.name,
         offset: m.offset,
@@ -213,6 +236,8 @@ export function layoutOf(
         ...(m.const === true ? { const: true } : {}),
         ...(typeof m.elemSize === 'number' ? { elemSize: m.elemSize } : {}),
         ...(typeof m.elemSigned === 'boolean' ? { elemSigned: m.elemSigned } : {}),
+        ...(typeof m.bitWidth === 'number' ? { bitWidth: m.bitWidth } : {}),
+        ...(typeof m.bitOffset === 'number' ? { bitOffset: m.bitOffset } : {}),
         ...(typeof m.length === 'number' ? { length: m.length } : {}),
       };
     });
@@ -220,7 +245,10 @@ export function layoutOf(
 
 export async function loadSymbolMap(elfPath: string): Promise<SymbolMap> {
   const { DebugInfo, STT_FUNC } = await import('@gba-kit/debug-info');
-  const di = DebugInfo.fromElf(readFileSync(elfPath));
+  const bytes = readFileSync(elfPath);
+  // EI_DATA (ELF header byte 5): 1 = little-endian. Gates the bitfield facts — see layoutOf.
+  const littleEndian = bytes[5] === 1;
+  const di = DebugInfo.fromElf(bytes);
   const types = di.types as unknown as ShapeCapable;
   const shapeOf =
     di.hasTypeInfo && typeof types.variableShape === 'function'
@@ -302,7 +330,7 @@ export async function loadSymbolMap(elfPath: string): Promise<SymbolMap> {
           if (sh.structName !== null) {
             info.structName = sh.structName; // the real tag, for a readable synthesized decl
           }
-          const layout = layoutOf(di, sh.structName, elfPath);
+          const layout = layoutOf(di, sh.structName, elfPath, littleEndian);
           if (layout) {
             info.layout = layout;
             layoutsSeen++;
@@ -316,7 +344,7 @@ export async function loadSymbolMap(elfPath: string): Promise<SymbolMap> {
           // no field and falls through to the honest cast forms.
           const pointee = sh.pointee ?? null;
           if (pointee) {
-            const layout = layoutOf(di, pointee.structName, elfPath);
+            const layout = layoutOf(di, pointee.structName, elfPath, littleEndian);
             if (layout) {
               layoutsSeen++;
             }

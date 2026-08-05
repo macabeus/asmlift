@@ -76,23 +76,41 @@ function structDecl(tag: string, layout: SymbolStructField[] | undefined, size: 
     return null;
   }
   const fields: StructFieldDecl[] = [];
-  let cursor = 0;
+  // The cursor is in BITS (declaredFields' own discipline) so bitfield members seat exactly.
+  // Gaps pad as the u8 arrays they always were when both ends are byte-aligned, and as named
+  // `u32 asmlift_pad_N : k` bitfields otherwise — split at 32-bit unit boundaries, matching the
+  // no-straddle allocation rule declaredFields verified each kept member against. For a
+  // bitfield-free layout every gap is byte-aligned, so the emitted text is unchanged.
+  let bitCursor = 0;
   let pad = 0;
-  for (const m of members) {
-    if (m.offset > cursor) {
+  const padTo = (lo: number): void => {
+    while (bitCursor < lo) {
       // asmlift_-prefixed so a REAL member named pad_N (a decomp-header idiom) never collides
-      fields.push({ name: `asmlift_pad_${pad++}`, type: T.array(T.u(8), m.offset - cursor) });
+      const name = `asmlift_pad_${pad++}`;
+      if (bitCursor % 8 === 0 && lo % 8 === 0) {
+        fields.push({ name, type: T.array(T.u(8), (lo - bitCursor) / 8) });
+        bitCursor = lo;
+      } else {
+        const k = Math.min(lo - bitCursor, 32 - (bitCursor % 32));
+        fields.push({ name, type: T.u(32), bits: k });
+        bitCursor += k;
+      }
     }
+  };
+  for (const m of members) {
+    const bits = m.bitWidth !== undefined;
+    const lo = m.offset * 8 + (bits ? m.bitOffset! : 0);
+    padTo(lo);
     fields.push({
       name: m.name,
       type: fieldType(m),
       ...(m.volatile ? { volatile: true } : {}),
+      ...(bits ? { bits: m.bitWidth } : {}),
     });
-    cursor = m.offset + m.size;
+    bitCursor = bits ? lo + m.bitWidth! : (m.offset + m.size) * 8;
   }
-  if (size !== undefined && size > cursor) {
-    // tail padding to the declared size
-    fields.push({ name: `asmlift_pad_${pad}`, type: T.array(T.u(8), size - cursor) });
+  if (size !== undefined) {
+    padTo(size * 8); // tail padding to the declared size
   }
   return renderStructDecl(tag, fields);
 }

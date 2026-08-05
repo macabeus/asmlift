@@ -18,6 +18,12 @@ export interface SwitchRecoverDeps {
   /** is this opcode an integer comparison? */
   isCmpOpcode: (opcode: string) => boolean;
   switchAllowsNeqCase: boolean;
+  /** does emitting this block's ops carry a statement beyond the ops themselves? A def-site
+   *  ANCHORED merge copy (structure.ts anchorConstCopies) is attached to a const op and emitted
+   *  with the block's side effects — a test block carrying one is not pure however pure its
+   *  opcodes look, because collapsing it into a `switch` discards the write while the edge copy
+   *  it replaced stays suppressed. */
+  emitsAnchoredWrite: (blk: Block) => boolean;
   expr: (v: Value) => Expr;
   structureRegion: (b: Block, stop: Block | null) => Stmt[];
 }
@@ -29,7 +35,19 @@ export interface SwitchRecovery {
 }
 
 export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
-  const { fn, defs, dom, ipdom, opBlock, isNamed, isCmpOpcode, switchAllowsNeqCase, expr, structureRegion } = deps;
+  const {
+    fn,
+    defs,
+    dom,
+    ipdom,
+    opBlock,
+    isNamed,
+    isCmpOpcode,
+    switchAllowsNeqCase,
+    emitsAnchoredWrite,
+    expr,
+    structureRegion,
+  } = deps;
 
   // --- Regime A: comparison-tree switch recovery ----------------------------------------------------
   // Every ambiguity declines. Four preconditions are enforced below, annotated PRE1..PRE4:
@@ -128,9 +146,9 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     if (!cmp || !isCmpOpcode(cmp.opcode)) {
       return null;
     }
-    if (!isRoot && blk.ops.some((op) => SIDE_EFFECTFUL.has(op.opcode))) {
+    if (!isRoot && (blk.ops.some((op) => SIDE_EFFECTFUL.has(op.opcode)) || emitsAnchoredWrite(blk))) {
       return null;
-    } // PRE4
+    } // PRE4 — anchored writes included: discarded with the block, while their edge copies stay suppressed
     // Which operand is the scrutinee, which is the constant?
     const [lo, ro] = cmp.operands;
     const lc = evalConst(lo),

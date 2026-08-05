@@ -1,0 +1,188 @@
+// BITFIELD members from the symbol map: `(x << a) >> b` over a struct global's loaded bytes
+// spells the declared field (`gState.dreamStones`), whose `u32 f : n` declaration then makes C's
+// own promotion reproduce the signedness downstream operators compiled with. Built for
+// kleod:UpdateHUDCounterDisplay (the __udivsi3-for-__divsi3 family); the refusal conditions are
+// what keep it exact rather than approximate, so they are what these tests pin hardest.
+import { describe, expect, test } from 'vitest';
+
+import { renderDeclarations } from '../src/declare';
+import { decompile } from '../src/pipeline';
+import { type SymbolInfo, type SymbolMap, type SymbolStructField, declaredFields } from '../src/symbols';
+import { ARMV4T_AGBCC } from '../src/target';
+
+// gState's first u16 packs three unsigned bitfields (the kleod Unk_03005220 shape): hearts
+// bits 0-1, stars bits 2-4, dreamStones bits 5-11; a plain u32 follows at byte 4.
+const LAYOUT: SymbolStructField[] = [
+  { name: 'hearts', offset: 0, size: 1, signed: false, bitWidth: 2, bitOffset: 0 },
+  { name: 'stars', offset: 0, size: 1, signed: false, bitWidth: 3, bitOffset: 2 },
+  { name: 'dreamStones', offset: 0, size: 2, signed: false, bitWidth: 7, bitOffset: 5 },
+  { name: 'unk4', offset: 4, size: 4, signed: false },
+];
+const stateInfo = (over: Partial<SymbolInfo> = {}): SymbolInfo => ({
+  name: 'gState',
+  kind: 'data',
+  declared: true,
+  shape: 'struct',
+  structName: 'State',
+  size: 8,
+  layout: LAYOUT,
+  ...over,
+});
+const mapWith = (info: SymbolInfo): SymbolMap => new Map([[0x03005220, [info]]]);
+
+// ldrh gState; lsl #20; lsr #25 — the unsigned extract of bits [11:5] = dreamStones
+const EXTRACT = (shr: 'lsr' | 'asr') =>
+  `f:\n\tldr\tr1, .L1\n\tldrh\tr0, [r1]\n\tlsl\tr0, r0, #20\n\t${shr}\tr0, r0, #25\n\tbx\tlr\n.L1:\n\t.word\t0x03005220\n`;
+
+const run = (asm: string, info: SymbolInfo = stateInfo()) =>
+  decompile('f', asm, ARMV4T_AGBCC, { symbols: mapWith(info) }).source;
+
+describe('the extract spells the member', () => {
+  test('an unsigned extract at the field bits reads gState.dreamStones', () => {
+    const src = run(EXTRACT('lsr'));
+    expect(src).toContain('return gState.dreamStones;');
+    expect(src).not.toContain('<< 20');
+  });
+
+  test('every extract of a multi-read load spells the member, and the load temp is ABSORBED', () => {
+    // one ldrh feeding two extracts: both spell members, and no `*(u16 *)&gState` temp remains —
+    // the compiler CSEs the member reads back to one load; a leftover temp would be a second one
+    const asm =
+      'f:\n\tldr\tr2, .L1\n\tldrh\tr1, [r2]\n\tlsl\tr0, r1, #20\n\tlsr\tr0, r0, #25\n' +
+      '\tlsl\tr1, r1, #30\n\tlsr\tr1, r1, #30\n\tadd\tr0, r0, r1\n\tbx\tlr\n.L1:\n\t.word\t0x03005220\n';
+    const src = run(asm);
+    expect(src).toContain('gState.dreamStones');
+    expect(src).toContain('gState.hearts');
+    expect(src).not.toContain('(u16 *)');
+  });
+});
+
+describe('refusals — any mismatch keeps the honest shift spelling', () => {
+  test('an ARITHMETIC extract does not match an unsigned field', () => {
+    const src = run(EXTRACT('asr'));
+    expect(src).not.toContain('dreamStones');
+    expect(src).toContain('>> 25');
+  });
+
+  test('a width mismatch does not match', () => {
+    const asm = EXTRACT('lsr').replace('#25', '#26'); // width 6 — no 6-bit field at those bits
+    const src = run(asm);
+    expect(src).not.toContain('dreamStones');
+    expect(src).toContain('>> 26');
+  });
+
+  test('a signless field never matches', () => {
+    const layout = LAYOUT.map((f) => (f.name === 'dreamStones' ? { ...f, signed: undefined } : f));
+    const src = run(EXTRACT('lsr'), stateInfo({ layout: layout as SymbolStructField[] }));
+    expect(src).not.toContain('dreamStones');
+  });
+
+  test('a VOLATILE container refuses the whole fold — N member reads are not one load', () => {
+    const src = run(EXTRACT('lsr'), stateInfo({ volatile: true }));
+    expect(src).not.toContain('dreamStones');
+  });
+
+  test('a STORE to the folded global between load and extract refuses — the read must not move past it', () => {
+    // adversarial round, CRITICAL 1: `g.field` re-reads memory at the render position, but the
+    // asm captured the bits BEFORE the store; the honest capture-in-a-temp spelling stays
+    const asm =
+      'f:\n\tldr\tr1, .L1\n\tldrh\tr0, [r1]\n\tmovs\tr2, #0\n\tstrh\tr2, [r1]\n' +
+      '\tlsl\tr0, r0, #20\n\tlsr\tr0, r0, #25\n\tbx\tlr\n.L1:\n\t.word\t0x03005220\n';
+    const src = run(asm);
+    expect(src).not.toContain('dreamStones');
+    expect(src).toContain('>> 25');
+  });
+
+  test('a store on the PATH but laid out AFTER the render still refuses — block order is not path order', () => {
+    // second audit pass: .Lstore sits at a higher address than .Ljoin (where the extract renders)
+    // but executes between the ldrh and the render on the taken path; a linear-position scan
+    // missed it, the path-based gate must not
+    const asm =
+      'f:\n\tldr\tr3, .L9\n\tldrh\tr2, [r3]\n\tlsl\tr0, r2, #20\n\tlsr\tr0, r0, #25\n' +
+      '\tcmp\tr1, #0\n\tbeq\t.Lstore\n.Ljoin:\n\tbx\tlr\n.Lstore:\n\tmovs\tr2, #0\n' +
+      '\tstrh\tr2, [r3]\n\tb\t.Ljoin\n.L9:\n\t.word\t0x03005220\n';
+    const src = run(asm);
+    expect(src).not.toContain('dreamStones');
+    expect(src).toContain('>> 25');
+  });
+
+  test('a CALL between load and extract refuses — the callee may write the global', () => {
+    const asm =
+      'f:\n\tpush\t{r4, lr}\n\tldr\tr4, .L1\n\tldrh\tr4, [r4]\n\tbl\tg\n' +
+      '\tlsl\tr0, r4, #20\n\tlsr\tr0, r0, #25\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n.L1:\n\t.word\t0x03005220\n';
+    const src = run(asm);
+    expect(src).not.toContain('dreamStones');
+    expect(src).toContain('>> 25');
+  });
+
+  test('a width-8 bit-0 extract is CAST_PATTERNS territory — folded to (u8), never a member name', () => {
+    // engine.ts folds equal-immediate shift pairs (widths 8/16) at the idiom stage, before the
+    // recognizer ever sees them — the documented shadowing: honest cast output at those widths
+    const layout: SymbolStructField[] = [
+      { name: 'octet', offset: 0, size: 1, signed: false, bitWidth: 8, bitOffset: 0 },
+    ];
+    const asm =
+      'f:\n\tldr\tr1, .L1\n\tldrh\tr0, [r1]\n\tlsl\tr0, r0, #24\n\tlsr\tr0, r0, #24\n\tbx\tlr\n.L1:\n\t.word\t0x03005220\n';
+    const src = run(asm, stateInfo({ layout }));
+    expect(src).not.toContain('octet');
+    expect(src).toContain('(u8)');
+  });
+
+  test('a PLAIN u16 read of the bitfield bytes never names a bitfield', () => {
+    // exact (offset,size) would match dreamStones (size 2 at offset 0) — a 7-bit lvalue for a
+    // 16-bit access
+    const asm = 'f:\n\tldr\tr1, .L1\n\tldrh\tr0, [r1]\n\tbx\tlr\n.L1:\n\t.word\t0x03005220\n';
+    const src = run(asm);
+    expect(src).not.toContain('dreamStones');
+    expect(src).not.toContain('hearts');
+  });
+});
+
+describe('declaredFields — bitfields seat by BIT cursor', () => {
+  test('co-located bitfields are all declared, not union aliases', () => {
+    expect(declaredFields(LAYOUT)?.map((f) => f.name)).toEqual(['hearts', 'stars', 'dreamStones', 'unk4']);
+  });
+
+  test('a bitfield STRADDLING a 32-bit unit is not declared (its bits pad), later members keep seating', () => {
+    const layout: SymbolStructField[] = [
+      { name: 'a', offset: 3, size: 1, signed: false, bitWidth: 4, bitOffset: 0 }, // bits 24-27
+      { name: 'straddle', offset: 3, size: 2, signed: false, bitWidth: 8, bitOffset: 4 }, // bits 28-35
+      { name: 'after', offset: 8, size: 4, signed: false },
+    ];
+    expect(declaredFields(layout)?.map((f) => f.name)).toEqual(['a', 'after']);
+  });
+
+  test('a bitfield with malformed facts declines the whole layout', () => {
+    const bad = [{ name: 'x', offset: 0, size: 1, signed: false, bitWidth: 12, bitOffset: 0 }]; // 12 bits in 1 byte
+    expect(declaredFields(bad as SymbolStructField[])).toBeNull();
+  });
+
+  test('a plain member tied with bitfields at one offset stays the first view — the pre-bitfield behavior', () => {
+    // the union-of-raw-and-bitfields idiom: before bitfields were carried at all, the plain view
+    // was the one declared, so it keeps winning the tie and the bitfields are the aliases
+    const layout: SymbolStructField[] = [
+      { name: 'lo', offset: 0, size: 1, signed: false, bitWidth: 6, bitOffset: 0 },
+      { name: 'raw', offset: 0, size: 2, signed: false },
+    ];
+    expect(declaredFields(layout)?.map((f) => f.name)).toEqual(['raw']);
+  });
+});
+
+describe('declaration synthesis', () => {
+  test('bitfields render `u32 f : n` with bit padding to the next seated member', () => {
+    const refs = [{ name: 'gState', info: stateInfo() }];
+    const decl = renderDeclarations(refs);
+    expect(decl).toContain(
+      'struct State { u32 hearts : 2; u32 stars : 3; u32 dreamStones : 7; u32 asmlift_pad_0 : 20; u32 unk4; };',
+    );
+    expect(decl).toContain('extern struct State gState;');
+  });
+
+  test('a signed bitfield declares s32', () => {
+    const layout: SymbolStructField[] = [
+      { name: 'delta', offset: 0, size: 1, signed: true, bitWidth: 5, bitOffset: 0 },
+    ];
+    const decl = renderDeclarations([{ name: 'gS', info: stateInfo({ structName: 'S2', layout, size: 4 }) }]);
+    expect(decl).toContain('struct S2 { s32 delta : 5; u32 asmlift_pad_0 : 27; };');
+  });
+});

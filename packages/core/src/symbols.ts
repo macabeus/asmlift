@@ -52,6 +52,17 @@ export interface SymbolStructField {
   /** ARRAY field only: the element count (absent for a flexible array member, which declares a
    *  stride but no bound) — types the synthesized `T name[n];` field decl */
   length?: number;
+  /** BITFIELD field only: the field's width in BITS. Its PRESENCE is what marks a field a
+   *  bitfield — `size` above stays the byte span its bits touch (the read width the compiler
+   *  uses), which is why the exact (offset,size) scalar-field rules must exclude it. The
+   *  provider only emits these for LITTLE-ENDIAN ELFs: both the extract equation the access
+   *  recognizer solves and the `u32 name : n` layout model the synthesis verifies are LE-GCC
+   *  semantics, so a big-endian map carries no bitfield members at all (today's behavior). */
+  bitWidth?: number;
+  /** BITFIELD field only: the bit position of the field's LOW bit within the byte at `offset`
+   *  (LSB-first) — the field's absolute low bit is `offset*8 + bitOffset`. Required alongside
+   *  `bitWidth`; a bitfield missing it is malformed and declines the whole layout. */
+  bitOffset?: number;
 }
 
 /** What a `shape:'pointer'` global POINTS AT, when the sidecar says its target is a struct/union.
@@ -191,6 +202,13 @@ export function isArrayField(f: SymbolStructField): boolean {
   return f.elemSize !== undefined;
 }
 
+/** THE one test for "is this field a bitfield" — the PRESENCE of `bitWidth` (see the field doc).
+ *  The exact (offset,size) scalar-field rules must exclude these: a 7-bit field whose bits span
+ *  2 bytes carries `size: 2` and would otherwise match a plain u16 read at its offset. */
+export function isBitfieldField(f: SymbolStructField): boolean {
+  return f.bitWidth !== undefined;
+}
+
 /** A layout member that {@link declaredFields} passed: sizable, and seated at an offset no
  *  earlier member already covers. */
 export type DeclaredField = SymbolStructField & { size: number };
@@ -202,12 +220,30 @@ function wellFormedField(f: unknown): f is SymbolStructField {
     return false;
   }
   const m = f as Partial<SymbolStructField>;
-  return (
-    typeof m.name === 'string' &&
-    typeof m.offset === 'number' &&
-    Number.isFinite(m.offset) &&
-    (m.size === null || (typeof m.size === 'number' && Number.isFinite(m.size) && m.size >= 0))
-  );
+  if (
+    typeof m.name !== 'string' ||
+    typeof m.offset !== 'number' ||
+    !Number.isFinite(m.offset) ||
+    !(m.size === null || (typeof m.size === 'number' && Number.isFinite(m.size) && m.size >= 0))
+  ) {
+    return false;
+  }
+  // A bitfield's two facts must be present TOGETHER and internally consistent — a bitWidth with
+  // no bitOffset (or bits outside the byte span `size` claims) leaves the field unseatable, so
+  // the member is malformed and the layout declines whole like any other malformed member.
+  if (m.bitWidth !== undefined) {
+    return (
+      typeof m.bitWidth === 'number' &&
+      Number.isInteger(m.bitWidth) &&
+      m.bitWidth > 0 &&
+      typeof m.bitOffset === 'number' &&
+      Number.isInteger(m.bitOffset) &&
+      m.bitOffset >= 0 &&
+      typeof m.size === 'number' &&
+      m.bitOffset + m.bitWidth <= m.size * 8
+    );
+  }
+  return true;
 }
 
 /**
@@ -238,15 +274,33 @@ export function declaredFields(layout: SymbolStructField[] | undefined): Declare
       return null;
     }
   }
-  const members = (layout as DeclaredField[]).slice().sort((a, b) => a.offset - b.offset);
+  // The cursor is in BITS so co-located bitfields seat correctly: `u32 a:2; u32 b:3;` are two
+  // members at byte offset 0, not a union alias. For plain members the arithmetic is the old
+  // byte cursor times 8 — behavior-identical for every bitfield-free layout.
+  const lowBitOf = (m: DeclaredField): number => m.offset * 8 + (m.bitWidth !== undefined ? m.bitOffset! : 0);
+  const members = (layout as DeclaredField[])
+    .slice()
+    .sort((a, b) => lowBitOf(a) - lowBitOf(b) || (a.bitWidth ?? -1) - (b.bitWidth ?? -1));
   const out: DeclaredField[] = [];
-  let cursor = 0;
+  let bitCursor = 0;
   for (const m of members) {
-    if (m.offset < cursor) {
+    const lo = lowBitOf(m);
+    if (lo < bitCursor) {
       continue; // an overlapping (union) member: the first view is declared, the alias is not
     }
-    out.push(m);
-    cursor = m.offset + m.size;
+    if (m.bitWidth !== undefined) {
+      // The synthesis lays bitfields as LE-GCC `u32 name : n`, whose allocation never straddles
+      // a 32-bit unit — a field that would cannot be reproduced, so it is not declared (its bits
+      // pad instead) and no access may name it. The cursor does NOT advance: the bits stay a hole.
+      if (Math.floor(lo / 32) !== Math.floor((lo + m.bitWidth - 1) / 32)) {
+        continue;
+      }
+      out.push(m);
+      bitCursor = lo + m.bitWidth;
+    } else {
+      out.push(m);
+      bitCursor = (m.offset + m.size) * 8;
+    }
   }
   return out;
 }
@@ -282,6 +336,13 @@ export function symbolFieldType(f: DeclaredField): IrType {
     // for any object pointer and never derefs.
     const scalarPointee = f.pointeeSize === 1 || f.pointeeSize === 2 || f.pointeeSize === 4;
     return T.ptr(scalarPointee ? T.int(f.pointeeSize! * 8, f.pointeeSigned ?? false) : T.void());
+  }
+  if (isBitfieldField(f)) {
+    // The BASE type of the synthesized `u32 name : n` — the `: n` itself is the declaration
+    // renderer's job (StructFieldDecl.bits). 32-bit base always: that is the LE-GCC unit model
+    // declaredFields verified the layout against. A signless bitfield declares unsigned — the
+    // extract recognizer refuses to NAME one anyway, so the choice only types padding.
+    return T.int(32, f.signed ?? false);
   }
   if (isScalarCellSize(f.size)) {
     return scalarCellType(f.size, f.signed);

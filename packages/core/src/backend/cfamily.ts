@@ -142,6 +142,8 @@ export interface StructFieldDecl {
   name: string;
   type: IrType;
   volatile?: boolean;
+  /** bitfield width — spells `u32 name : n;` (the map-layout synthesis is the only producer) */
+  bits?: number;
 }
 
 /** THE struct-declaration spelling — every `struct N { ... };` asmlift prints comes from here,
@@ -149,7 +151,9 @@ export interface StructFieldDecl {
  *  drift apart. One line, fields in caller order (the type is self-describing: padding is the
  *  caller's discipline, already present as real fields). */
 export function renderStructDecl(name: string, fields: StructFieldDecl[]): string {
-  return `struct ${name} { ${fields.map((f) => `${f.volatile ? 'volatile ' : ''}${cDeclare(f.type, f.name)};`).join(' ')} };`;
+  const one = (f: StructFieldDecl) =>
+    `${f.volatile ? 'volatile ' : ''}${cDeclare(f.type, f.name)}${f.bits !== undefined ? ` : ${f.bits}` : ''};`;
+  return `struct ${name} { ${fields.map(one).join(' ')} };`;
 }
 
 // A LEAF hook lets a C-family backend override how a `var` or `index` node spells WITHOUT

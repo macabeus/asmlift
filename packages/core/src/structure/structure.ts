@@ -49,6 +49,7 @@ import {
   arrayInnerExtents,
   declaredFields,
   isArrayField,
+  isBitfieldField,
   isScalarCellSize,
   pointeeFields,
   scalarCellType,
@@ -334,8 +335,10 @@ function pointeeAccess(
   // Constant offset: the member must match EXACTLY — offset, read width, and the SPELLED type
   // (spellsAccessType). An ARRAY member is excluded whatever its size: `u8 x[1]` would match a
   // byte access by (offset, size) and spell `->x`, which is not an lvalue of that width at all.
+  // A BITFIELD member likewise: its `size` is the byte span its bits touch, so a 7-bit field
+  // would match a plain u16 read and spell a 7-bit lvalue for a 16-bit access.
   const p = spellablePointee(pg.name, sym);
-  const f = p?.fields.find((m) => m.offset === total && m.size === width && !isArrayField(m));
+  const f = p?.fields.find((m) => m.offset === total && m.size === width && !isArrayField(m) && !isBitfieldField(m));
   return p && f && spellsAccessType(f.signed, width, signed) && memberQualsAllow(f, p.const, isStore)
     ? { k: 'field', base: { k: 'var', name: pg.name }, name: f.name }
     : null;
@@ -392,8 +395,12 @@ function memAccess(
       // declaration on: a layout it declines whole is a layout with no nameable members, and a
       // union alias it drops for the first view at that offset is a name no declaration carries.
       // An ARRAY member is excluded for the same reason as in pointeeAccess: `u8 x[1]` would match
-      // a byte access by (offset, size) and spell `.x`, which is not an lvalue of that width.
-      const fld = declaredFields(si.layout)?.find((f) => f.offset === gb.byte && f.size === width && !isArrayField(f));
+      // a byte access by (offset, size) and spell `.x`, which is not an lvalue of that width. A
+      // BITFIELD member likewise — a plain read of its bytes is not a read of its bits (the named
+      // bitfield spelling has its own recognizer, on the extract shape: see lowerDef).
+      const fld = declaredFields(si.layout)?.find(
+        (f) => f.offset === gb.byte && f.size === width && !isArrayField(f) && !isBitfieldField(f),
+      );
       if (fld && memberQualsAllow(fld, si.const, isStore)) {
         return { k: 'field', base: { k: 'var', name: gb.name }, name: fld.name, dot: true };
       }
@@ -607,6 +614,21 @@ export interface StructureOptions {
   // body). GCC freely uses `!=`; IDO prefers `==`/`<`. A per-compiler DATA lever, not an `arch ==`
   // branch — default true (permissive; the decline path keeps it sound either way).
   switchAllowsNeqCase?: boolean;
+  // Anchor a constant merge copy at its const op's ORIGINAL position instead of at the CFG edge:
+  // `movs r9, #0` at entry ahead of a single-armed overwrite emits as a pre-initialization above
+  // the `if`, not as its else-arm. A differ-refereed candidate axis (rank.ts `/defsite`), never a
+  // default — see the refusal conditions where it is computed.
+  anchorConstCopies?: boolean;
+  // HARDWARE fact from TargetDescription.capabilities.endianness, threaded by structureOptionsFor:
+  // the bitfield extract recognizer solves an LSB-first equation, so it only runs on little-endian
+  // data. The provider already refuses to EMIT bitfield facts for a big-endian ELF; this is the
+  // same boundary enforced on core's side, against a hand-built map that never went through it.
+  littleEndian?: boolean;
+  // Spell `(x << a) >> b` extracts of a struct global as the map's named bitfield member. On by
+  // default; rank.ts enumerates the OFF spelling as the `/no-bitfield` axis, because the named
+  // read recompiles at the DECLARATION's access width — where that diverges from the asm's load
+  // width the honest shift spelling is the one that matches, and the differ referees.
+  spellBitfieldMembers?: boolean;
   // How an unresolvable VALUE degrades (a live `opaque`, an unlowered transient op, a dropped def):
   //   "strict"   (default) — the `"?"` sentinel, tripping assertResolved at the boundary (loud in
   //              the PROCESS);
@@ -627,6 +649,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     preserveDivergentBranchSense = true,
     orderArgCopiesByComputation = true,
     switchAllowsNeqCase = true,
+    anchorConstCopies = false,
+    littleEndian = true,
+    spellBitfieldMembers = true,
     onGap = 'strict',
     symbols,
   } = opts;
@@ -636,7 +661,10 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
   const dom = dominators(fn);
 
   // ── analysis phase (structure/analysis.ts): use registry, liveness, materialization ──
-  const { useSitesOf, opIndex, opBlock, liveIn, materialize, reachFrom } = analyze(fn, returnsVoid);
+  const { useSitesOf, opIndex, opBlock, liveIn, materialize, reachFrom, emitPos, memWriteBetween } = analyze(
+    fn,
+    returnsVoid,
+  );
 
   // SCALAR-vs-AGGREGATE globals: a `gaddr` symbol accessed EXCLUSIVELY at offset 0 is a scalar
   // global → the bare name `gSym` (byte-exact, matches the source). A symbol accessed at any
@@ -1175,6 +1203,256 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     }
   }
 
+  // ── def-site anchoring of constant merge copies (anchorConstCopies) ──────────────────────────
+  // An edge copy `v = K` places the constant where the EDGE is, but the asm often materialized K
+  // earlier: `movs r9, #0` at entry ahead of a single-armed overwrite, `movs r5, #1` at the top
+  // of an arm ahead of a nested if. Anchoring the copy at the const op's own program position
+  // reproduces that placement — the write is emitted as a statement there (sideEffects reads
+  // `anchoredAt`) and the edge copies it replaces are suppressed (argAssignsFor reads
+  // `suppressedArgs`). Where the surviving arm then empties, mkIf's empty-then peephole yields
+  // the single-armed positive `if` the source wrote.
+  //
+  // REFUSAL CONDITIONS — each keeps the edge placement, never producing a different write:
+  //   - the arg is not an UNNAMED `const` op (only a rematerializable constant carries
+  //     unambiguous placement evidence; a named value's position is its materialized def's);
+  //   - the merge is a loop header (loop copies have their own placement discipline);
+  //   - the const's block does not dominate every edge source passing it (the anchored write
+  //     must precede the edge on every path);
+  //   - the const's block or any edge source sits inside ANY loop. Block-level dominance does
+  //     not give per-ITERATION precedence — a path may pass the def in iteration 1 and take the
+  //     suppressed edge in iteration 2 with the variable overwritten in between, the /preinit
+  //     sticky-arm failure class (PR #13) — so in-loop shapes are declined outright;
+  //   - the merge variable names any OTHER SSA value (a shared name has readers and writers
+  //     between the def site and the edge that edge placement respects and anchoring would not);
+  //   - another anchored const of the same variable lies on a path from this one to this one's
+  //     edge (the later write would clobber this arg's value; both stay at their edges instead).
+  const anchoredAt = new Map<Op, { name: string; arg: Value }[]>();
+  const suppressedArgs = new Map<object, Set<number>>();
+  if (anchorConstCopies) {
+    const nameCount = new Map<string, number>();
+    for (const n of varName.values()) {
+      nameCount.set(n, (nameCount.get(n) ?? 0) + 1);
+    }
+    const inLoop = (b: Block): boolean => {
+      for (const nl of forest.byHeader.values()) {
+        if (nl.body.has(b)) {
+          return true;
+        }
+      }
+      return false;
+    };
+    // conservative "a write in `a` may execute between one in `b` and `b`'s terminator": same
+    // block counts (op order refined by the caller where it matters), else CFG reachability
+    const mayFollow = (a: Block, b: Block): boolean => a === b || reachFrom(a).has(b);
+    for (const M of fn.blocks) {
+      if (M === entry || M.params.length === 0 || forest.byHeader.has(M)) {
+        continue;
+      }
+      M.params.forEach((p, i) => {
+        const name = varName.get(p)!;
+        if (nameCount.get(name) !== 1) {
+          return;
+        }
+        // every in-edge record into M, grouped by the SSA value it passes for param i
+        const groups = new Map<Value, { rec: { block: Block; args: Value[] }; src: Block }[]>();
+        for (const pr of new Set(preds.get(M) ?? [])) {
+          for (const s of pr.ops[pr.ops.length - 1].successors) {
+            if (s.block === M) {
+              const g = groups.get(s.args[i]);
+              if (g) {
+                g.push({ rec: s, src: pr });
+              } else {
+                groups.set(s.args[i], [{ rec: s, src: pr }]);
+              }
+            }
+          }
+        }
+        const candidates: { arg: Value; def: Op; defBlock: Block; edges: { rec: object; src: Block }[] }[] = [];
+        for (const [arg, edges] of groups) {
+          const def = defs.get(arg);
+          if (!def || def.opcode !== 'const' || varName.has(arg)) {
+            continue;
+          }
+          const defBlock = opBlock.get(def)!;
+          if (inLoop(defBlock) || edges.some(({ src }) => inLoop(src))) {
+            continue;
+          }
+          if (edges.some(({ src }) => !dom.get(src)!.has(defBlock))) {
+            continue;
+          }
+          candidates.push({ arg, def, defBlock, edges });
+        }
+        // pairwise clobber check: candidate `c` is unsafe when another candidate's write can lie
+        // between c's def and one of c's edges (def_c → def_o → edge_c); both then keep their edges
+        const safe = candidates.filter((c) =>
+          candidates.every((o) => {
+            if (o === c) {
+              return true;
+            }
+            const oAfterC =
+              c.defBlock === o.defBlock ? opIndex.get(o.def)! > opIndex.get(c.def)! : mayFollow(c.defBlock, o.defBlock);
+            return !(oAfterC && c.edges.some(({ src }) => mayFollow(o.defBlock, src)));
+          }),
+        );
+        for (const c of safe) {
+          const at = anchoredAt.get(c.def);
+          if (at) {
+            at.push({ name, arg: c.arg });
+          } else {
+            anchoredAt.set(c.def, [{ name, arg: c.arg }]);
+          }
+          for (const { rec } of c.edges) {
+            const sup = suppressedArgs.get(rec);
+            if (sup) {
+              sup.add(i);
+            } else {
+              suppressedArgs.set(rec, new Set([i]));
+            }
+          }
+        }
+      });
+    }
+  }
+
+  // ── BITFIELD member reads (symbol map) ──────────────────────────────────────────────────────
+  // The `(x << a) >> b` extract of a struct global's loaded bytes IS a bitfield access when the
+  // map declares a bitfield at exactly those bits: spelled `gSym.field`, the source form, whose
+  // declared `u32 field : n` then makes C's own integer promotion reproduce the signedness every
+  // downstream operator compiled with (a 7-bit unsigned field promotes to signed int — sdiv
+  // renders `/` and recompiles to __divsi3, where the raw-shift spelling stays u32).
+  //
+  // Semantically EXACT, never approximate: the window must lie inside the loaded bytes (so the
+  // load's extension bits cannot reach it), the field's position, width and signedness must all
+  // match the extract (a logical shift is an unsigned read, an arithmetic one a signed read —
+  // a signless field never matches), and the member must be nameable at all (memberQualsAllow;
+  // the map only carries bitfield facts for little-endian ELFs — see SymbolStructField). Any
+  // mismatch keeps the honest shift spelling.
+  //
+  // Precomputed over the ops (not folded during rendering) for the load's sake: a load whose
+  // EVERY use is a spelled extract chain must not also emit its materialized `v = *(u16 *)&g;`
+  // temp — the compiler CSEs the repeated member reads back to one load, but the leftover temp
+  // would be a second one. A VOLATILE container refuses the whole fold: N member reads are N
+  // volatile accesses where the asm did one load. (Byte-level residual, differ-refereed: a load
+  // only PARTIALLY absorbed — one extract spelled, another use kept — emits both the temp and
+  // the named reads, one load more than the asm; semantics hold, the score decides.)
+  //
+  // ORDERING GATE (adversarial round, CRITICAL 1 — twice): the named spelling replaces a
+  // REGISTER value — the bits captured at the load's program position — with a fresh memory
+  // read at each render position. Every other memory read in this file goes through the
+  // materialization model (analysis.ts) for exactly that hazard, so the fold clears the SAME
+  // bar with the SAME machinery: `emitPos` resolves where each extract actually renders
+  // (transitively through its inlining consumers — an unresolvable position refuses), and
+  // `memWriteBetween` walks every def-avoiding load→render path for a call, an opaque, or a
+  // store not provably to a DIFFERENT named global. Path-based on purpose: the second audit
+  // pass broke the first fix's linear-position scan with a block laid out AFTER the render in
+  // address order but executing between load and render on the taken path — fn.blocks order is
+  // address order, not topological order.
+  const bitfieldSpelling = new Map<Op, { global: string; field: string }>();
+  const absorbedLoads = new Set<Op>();
+  if (symCtx && littleEndian && spellBitfieldMembers) {
+    // the (name, byte) of a load's address when it resolves through defs alone — `gaddr` or
+    // `add(gaddr, const)`; anything else (a materialized base, a variable index) declines
+    const loadTargets = new Map<Op, { name: string; byte: number }>();
+    const addrOf = (v: Value, off: number): { name: string; byte: number } | null => {
+      const d0 = defs.get(v);
+      if (d0?.opcode === 'gaddr') {
+        return { name: d0.attrs.sym as string, byte: off };
+      }
+      if (d0?.opcode === 'add' && d0.operands.length === 2) {
+        for (const [x, y] of [
+          [d0.operands[0], d0.operands[1]],
+          [d0.operands[1], d0.operands[0]],
+        ] as const) {
+          const g0 = defs.get(x);
+          const c0 = defs.get(y);
+          if (g0?.opcode === 'gaddr' && c0?.opcode === 'const') {
+            return { name: g0.attrs.sym as string, byte: (c0.attrs.value as number) + off };
+          }
+        }
+      }
+      return null;
+    };
+    // A write for the fold's purposes: calls and opaques always; a store/astore unless its base
+    // resolves to a global PROVABLY different from the folded one. (Name comparison suffices:
+    // the pool promotion picks one canonical name per address, so one cell cannot appear under
+    // two names within a function.)
+    const mayWrite =
+      (sym: string) =>
+      (x: Op): boolean => {
+        if (x.opcode === 'call' || x.opcode === 'opaque') {
+          return true;
+        }
+        if (x.opcode !== 'store' && x.opcode !== 'astore') {
+          return false;
+        }
+        const t = addrOf(x.operands[0], 0);
+        return !(t && t.name !== sym);
+      };
+    for (const blk of fn.blocks) {
+      for (const op of blk.ops) {
+        if ((op.opcode !== 'shr_u' && op.opcode !== 'shr_s') || op.operands.length !== 1) {
+          continue;
+        }
+        const b = op.attrs.imm as number | undefined;
+        const inner = defs.get(op.operands[0]);
+        if (typeof b !== 'number' || b <= 0 || b >= 32 || inner?.opcode !== 'shl' || inner.operands.length !== 1) {
+          continue;
+        }
+        const a = inner.attrs.imm as number | undefined;
+        if (typeof a !== 'number' || a < 0 || b < a) {
+          continue;
+        }
+        const w = 32 - b; // extract width
+        const lo = b - a; // low bit within the loaded value
+        const load = defs.get(inner.operands[0]);
+        if (load?.opcode !== 'load' || lo + w > (load.attrs.width as number) * 8) {
+          continue;
+        }
+        // a materialized shl would still emit its `v = x << a` temp reading the load — the fold
+        // would then ADD member reads on top of it; rare, refuse
+        if (materialize.has(inner)) {
+          continue;
+        }
+        const gb = addrOf(load.operands[0], load.attrs.off as number);
+        const si = gb ? symCtx.info(gb.name) : undefined;
+        if (!gb || si?.shape !== 'struct' || si.volatile) {
+          continue;
+        }
+        // where does the member read RENDER? at the extract's own position when materialized,
+        // else wherever each of its consumers ultimately renders (emitPos, transitively —
+        // unresolvable refuses); every load→render path must be write-free
+        const renders = materialize.has(op)
+          ? [{ blk: opBlock.get(op)!, idx: opIndex.get(op)! }]
+          : [...new Set((useSitesOf.get(op.results[0]) ?? []).map((s) => s.op))].map((c) => emitPos(c));
+        const writes = mayWrite(gb.name);
+        if (renders.some((r) => r === null) || renders.some((r) => memWriteBetween(load, r!, writes))) {
+          continue;
+        }
+        const signedRead = op.opcode === 'shr_s';
+        const fld = declaredFields(si.layout)?.find(
+          (f) => f.bitWidth === w && f.offset * 8 + f.bitOffset! === gb.byte * 8 + lo && f.signed === signedRead,
+        );
+        if (fld && memberQualsAllow(fld, si.const, false)) {
+          bitfieldSpelling.set(op, { global: gb.name, field: fld.name });
+          loadTargets.set(load, gb);
+        }
+      }
+    }
+    // a load is ABSORBED when every use is an shl whose every use is a spelled extract
+    for (const load of loadTargets.keys()) {
+      const shls = useSitesOf.get(load.results[0]) ?? [];
+      const absorbed =
+        shls.length > 0 &&
+        shls.every(
+          (u) =>
+            u.op.opcode === 'shl' && (useSitesOf.get(u.op.results[0]) ?? []).every((v) => bitfieldSpelling.has(v.op)),
+        );
+      if (absorbed) {
+        absorbedLoads.add(load);
+      }
+    }
+  }
+
   // An unresolvable value: strict mode keeps the `"?"` sentinel AND records the reason — the
   // decline thrown below names the actual gaps ("unmodelled instruction 'adde'"), the same
   // reasons annotate mode's markers carry, instead of the anonymous `?` that assertResolved
@@ -1196,6 +1474,12 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
   const lowerDef = (d: Op, e: (v: Value) => Expr): Expr => {
     if (d.opcode === 'const') {
       return { k: 'const', value: d.attrs.value as number };
+    }
+    // a bitfield extract recognized over the ops (see the precompute above): the member read,
+    // not the shift pair
+    const bf = bitfieldSpelling.get(d);
+    if (bf) {
+      return { k: 'field', base: { k: 'var', name: bf.global }, name: bf.field, dot: true };
     }
     if (CMP_TO_BIN[d.opcode]) {
       // A bare global address `&gSym` as a COMPARISON operand is the same unspelled escape as the
@@ -1460,7 +1744,11 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     const target = succ.block;
     const argExpr = sub ? exprWith(sub) : expr;
     const copies: { name: string; value: Expr; arg: Value }[] = [];
+    const suppressed = suppressedArgs.get(succ);
     target.params.forEach((p, i) => {
+      if (suppressed?.has(i)) {
+        return;
+      } // anchored at its const's def site — the write already ran before this edge
       const name = varName.get(p)!;
       const arg = succ.args[i];
       if ((sub?.get(arg) ?? varName.get(arg)) === name) {
@@ -1541,9 +1829,15 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
         });
       } else if (op.opcode === 'call' && op.results.length && !useSitesOf.has(op.results[0])) {
         out.push({ k: 'exprstmt', value: expr(op.results[0]) });
-      } else if (materialize.has(op)) {
+      } else if (materialize.has(op) && !absorbedLoads.has(op)) {
+        // (an absorbed load's every consumer spells a named bitfield read — emitting its temp
+        // here would recompile to a second load the asm does not have)
         const nm = varName.get(op.results[0])!;
         out.push({ k: 'assign', name: nm, value: castAggregateAddr(nm, lowerDef(op, expr)) });
+      }
+      // a merge copy anchored at this const's original position (anchorConstCopies, above)
+      for (const a of anchoredAt.get(op) ?? []) {
+        out.push({ k: 'assign', name: a.name, value: expr(a.arg) });
       }
     }
     return out;
@@ -1603,6 +1897,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     isNamed: (v) => varName.has(v),
     isCmpOpcode: (opcode) => !!CMP_TO_BIN[opcode],
     switchAllowsNeqCase,
+    emitsAnchoredWrite: (blk) => blk.ops.some((o) => anchoredAt.has(o)),
     expr: (v) => expr(v),
     structureRegion: (b, stop) => structureRegion(b, stop),
   });
