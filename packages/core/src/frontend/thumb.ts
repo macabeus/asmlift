@@ -650,6 +650,41 @@ function decode(name: string, asm: string): { blocks: AsmBlock[]; dataWords: Map
         `cannot lift '${name}': block '${mixed.label}' interleaves raw data (.${subwordData.get(mixed.label)}) with instructions`,
       );
     }
+    // Two labels on the same instruction (`.LCB80:` immediately followed by `.L7:`) make the first
+    // an ALIAS of the second, not a block of its own — agbcc emits exactly that when a long-jump
+    // helper label lands on an existing one. The empty block is dropped just below, so a branch
+    // naming the alias would afterwards resolve to nothing and decline as a dangling target. Point
+    // those branches at the block the label actually names, before anything reads the CFG.
+    // A label naming DATA is emphatically NOT an alias, and this is the guard the whole pass turns
+    // on. Decode pushes an empty block for a literal-pool / jump-table label too, so aliasing them
+    // blindly would silently retarget `beq .Lpool` at whatever code happens to follow the pool —
+    // marker-free, plausible, wrong C where the frontend used to decline. Every agbcc pool is a
+    // label on data, so that is the common case, not an exotic one. A data label therefore neither
+    // aliases nor is aliased THROUGH: scanning past one for a later code block would silently jump
+    // over the data.
+    const isDataLabel = (l: string) => dataWords.has(l) || subwordData.has(l);
+    const aliasOf = new Map<string, string>();
+    for (let i = 0; i < blocks.length; i++) {
+      if (blocks[i].instrs.length > 0 || isDataLabel(blocks[i].label)) {
+        continue;
+      }
+      let j = i + 1;
+      while (j < blocks.length && blocks[j].instrs.length === 0 && !isDataLabel(blocks[j].label)) {
+        j++;
+      }
+      const next = blocks[j];
+      if (next && next.instrs.length > 0) {
+        aliasOf.set(blocks[i].label, next.label);
+      } // otherwise a trailing or data-fronted label: left dangling so a branch to it still declines
+    }
+    for (const b of aliasOf.size ? blocks : []) {
+      for (const ins of b.instrs) {
+        const k = ins.ops.length - 1;
+        if ((ins.mnemonic === 'b' || COND_OPCODE[ins.mnemonic]) && k >= 0) {
+          ins.ops[k] = aliasOf.get(ins.ops[k]) ?? ins.ops[k];
+        }
+      }
+    }
     let live = blocks.filter((b) => b.instrs.length > 0);
     // Alignment-pad NOPs a splitter emits around returns and literal pools: `lsls r0, r0, #0`
     // is the 0x0000 halfword, `mov r8, r8` is 0x46C0, plus a literal `nop`. A block made ONLY
@@ -826,13 +861,37 @@ function recoverJumpTable(
   disp: AsmBlock,
   dataWords: Map<string, string[]>,
   blockLabels: Set<string>,
+  longDefault?: string,
 ): JumpTable | null {
-  // bounds: last two instrs must be `cmp rX,#M` then `bhi DEF` (unsigned upper-bound guard).
+  // bounds: last two instrs are `cmp rX,#M` then the out-of-range guard, in one of two spellings.
+  //
+  //   direct    cmp rX,#M ; bhi DEF                 → fall through to the dispatch
+  //   long jump cmp rX,#M ; bls DISP ; b DEF        → branch TO the dispatch, long-branch the default
+  //
+  // The second is what agbcc emits whenever the default is out of a conditional branch's reach —
+  // Thumb-1 `B<cond>` carries a signed 8-bit HALFWORD offset, so ±256 BYTES, about 128
+  // instructions — which on a real switch it usually is: five of the six benchmark
+  // functions with a table use it, and only the sixth uses the direct form. `longDefault` is the
+  // target of that trailing `b`, read by the caller from the block after `bounds`.
   const bi = bounds.instrs;
-  const bhi = bi[bi.length - 1],
+  const guard = bi[bi.length - 1],
     cmp = bi[bi.length - 2];
-  if (!bhi || !cmp || bhi.mnemonic !== 'bhi' || cmp.mnemonic !== 'cmp') {
+  if (!guard || !cmp || cmp.mnemonic !== 'cmp') {
     return null;
+  }
+  let defaultLabel: string;
+  if (longDefault === undefined) {
+    if (guard.mnemonic !== 'bhi') {
+      return null;
+    }
+    defaultLabel = guard.ops[0];
+  } else {
+    // The `bls` must name THIS dispatch block, or the guard belongs to some other branch and the
+    // `b` we picked up is not its default.
+    if (guard.mnemonic !== 'bls' || guard.ops[0] !== disp.label) {
+      return null;
+    }
+    defaultLabel = longDefault;
   }
   const scrutReg = cmp.ops[0];
   const m = cmp.ops[1];
@@ -840,7 +899,9 @@ function recoverJumpTable(
     return null;
   }
   const n = imm(m) + 1; // cases 0..M  → N = M+1
-  const defaultLabel = bhi.ops[0];
+  if (n < 1) {
+    return null; // a bound that admits no case at all is not a dispatch — fail closed
+  }
 
   // disp: exactly the 5-op idiom, threading a single index register from `lsl rY,rX,#2`.
   const d = disp.instrs;
@@ -877,11 +938,28 @@ function recoverJumpTable(
   }
 
   // Read the table: the ldr loads a POINTER word (PTR: .word TABLE); the table is TABLE: .word C0…
-  const ptrWords = dataWords.get(ptrLabel);
-  if (!ptrWords || ptrWords.length !== 1) {
+  // Note the case labels are matched against `blockLabels` as WRITTEN: the adjacent-label aliasing in
+  // `decode` rewrites branch operands, not `.word` entries, so a table naming an aliased label would
+  // decline here rather than dispatch anywhere. Loud, and no corpus instance — left as a known edge
+  // rather than fixed speculatively.
+  //
+  // The pointer word is addressed the same way every other pool load in this frontend is —
+  // `LABEL[+N]`, selecting word N/4 — because a literal pool is a POOL: agbcc packs the dispatch
+  // pointer in beside whatever else the function needed, and which slot it lands in is an artifact
+  // of emission order. Reading only a bare label whose pool held exactly ONE word declined six real
+  // benchmark functions whose table pointer merely sat later in the pool. Same fix m2c made in
+  // `a7c5c2d`, and the same shared POOL_LABEL grammar the const/gaddr resolvers use, so the three
+  // cannot disagree about what `.L21+0x4` addresses.
+  const pm = ptrLabel.match(POOL_LABEL);
+  const ptrWords = pm ? dataWords.get(pm[1]) : undefined;
+  if (!pm || !ptrWords) {
     return null;
   }
-  const caseLabels = dataWords.get(ptrWords[0]);
+  const ptrOff = pm[2] ? Number(pm[2]) : 0;
+  if (ptrOff % 4 !== 0 || ptrOff / 4 >= ptrWords.length) {
+    return null; // misaligned or past the end of the pool — not a word this pool holds
+  }
+  const caseLabels = dataWords.get(ptrWords[ptrOff / 4].trim());
   if (!caseLabels || caseLabels.length !== n) {
     return null;
   } // table length must equal the bound
@@ -917,26 +995,49 @@ export function lift(
   const poolNamesSymbols = poolNamesASymbol(dataWords, blockLabels);
   // Any label referenced as a branch target (so we can tell if an elided dispatch block has a SECOND
   // predecessor — a `b disp` from elsewhere — which would dangle after elision; decline if so).
-  const branchTargets = new Set<string>();
+  // How many branches name each label — not just whether any does, because the long-jump bounds
+  // form legitimately branches to its own dispatch block exactly once.
+  const branchRefs = new Map<string, number>();
   for (const b of rawBlocks) {
     for (const ins of b.instrs) {
       if ((ins.mnemonic === 'b' || COND_OPCODE[ins.mnemonic]) && ins.ops.length) {
-        branchTargets.add(ins.ops[ins.ops.length - 1]);
+        const t = ins.ops[ins.ops.length - 1];
+        branchRefs.set(t, (branchRefs.get(t) ?? 0) + 1);
       }
     }
   }
   const tables = new Map<AsmBlock, JumpTable>(); // bounds block → recovered table
-  const elided = new Set<AsmBlock>(); // dispatch blocks removed from the CFG
+  const elided = new Set<AsmBlock>(); // dispatch (and long-jump default) blocks removed from the CFG
   rawBlocks.forEach((d, i) => {
     const last = d.instrs[d.instrs.length - 1];
-    if (last && last.mnemonic === 'mov' && last.ops[0] === 'pc' && last.ops[1] !== 'lr') {
-      const bounds = rawBlocks[i - 1];
-      // The dispatch block must be reached ONLY by falling through from its bounds predecessor — a
-      // `b disp` target elsewhere would leave a dangling edge after elision, so decline (→ loud-fail).
-      const jt = bounds && !branchTargets.has(d.label) ? recoverJumpTable(bounds, d, dataWords, blockLabels) : null;
+    if (!last || last.mnemonic !== 'mov' || last.ops[0] !== 'pc' || last.ops[1] === 'lr') {
+      return;
+    }
+    const refs = branchRefs.get(d.label) ?? 0;
+    const prev = rawBlocks[i - 1];
+    // Direct form: the dispatch is reached ONLY by falling through from its bounds predecessor. A
+    // `b disp` from anywhere else would leave a dangling edge after elision, so decline (→ loud-fail).
+    if (prev && refs === 0) {
+      const jt = recoverJumpTable(prev, d, dataWords, blockLabels);
       if (jt) {
-        tables.set(bounds, jt);
+        tables.set(prev, jt);
         elided.add(d);
+        return;
+      }
+    }
+    // Long-jump form: `bounds` (cmp; bls DISP), then a lone `b DEF` block, then the dispatch. The
+    // dispatch is entered by exactly that one `bls` and nothing else, and the `b DEF` block —
+    // synthetically labelled, so unnameable and unreachable once the bounds block dispatches — is
+    // elided WITH it. Leaving it would make it a parameterless predecessor of the default block,
+    // and wiring a phi through it fabricates an entry parameter (the phantom-param miscompile).
+    const boundsB = rawBlocks[i - 2];
+    const prevNamed = prev ? (branchRefs.get(prev.label) ?? 0) > 0 : false;
+    if (refs === 1 && prev && boundsB && !prevNamed && prev.instrs.length === 1 && prev.instrs[0].mnemonic === 'b') {
+      const jt = recoverJumpTable(boundsB, d, dataWords, blockLabels, prev.instrs[0].ops[0]);
+      if (jt) {
+        tables.set(boundsB, jt);
+        elided.add(d);
+        elided.add(prev);
       }
     }
   });
