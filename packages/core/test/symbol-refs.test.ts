@@ -18,10 +18,25 @@ const enumerate = (sym: string, body: string, symbols?: SymbolMap) =>
 // ldr rN, =0x03001234; load a halfword through it — promotes to the mapped name
 const LOADH = '\tldr\tr0, .L1\n\tldrh\tr0, [r0]\n\tbx\tlr\n.L1:\n\t.word\t0x03001234\n';
 const COUNTER = { name: 'gCounter', kind: 'data', shape: 'scalar', size: 2, signed: false } as const;
+// a second mapped symbol this function never touches — a real project map is mostly these
+const ELSEWHERE = { name: 'gElsewhere', kind: 'data', shape: 'scalar', size: 4, signed: true } as const;
 
 describe('value references are recorded with their SymbolInfo', () => {
-  test('a named data global carries its map facts; /raw-globals carries none', () => {
-    const cands = enumerate('f', LOADH, new Map([[0x03001234, [{ ...COUNTER }]]]));
+  test('a named data global carries its map facts; an untouched mapped symbol carries none', () => {
+    // The map holds two symbols and the function names ONE. The exact-equality assertion below is
+    // what pins that the reference set is the TREE's, not the map's: refs are derived from each
+    // candidate's final tree at the consumption point (l3/symbol-refs.ts) rather than accumulated
+    // as symbols are encountered, so an unreferenced symbol is never a declaration. (m2c reached
+    // the same end differently — its symbols WERE accumulated, and declaration emission was later
+    // wired into its existing `Expression.use()` protocol, upstream 7e8e106.)
+    const cands = enumerate(
+      'f',
+      LOADH,
+      new Map([
+        [0x03001234, [{ ...COUNTER }]],
+        [0x03005678, [{ ...ELSEWHERE }]],
+      ]),
+    );
     const named = cands.filter((c) => !c.label.endsWith('/raw-globals'));
     const raw = cands.filter((c) => c.label.endsWith('/raw-globals'));
     expect(named.length).toBeGreaterThan(0);
@@ -31,6 +46,27 @@ describe('value references are recorded with their SymbolInfo', () => {
     }
     for (const c of raw) {
       expect(c.symbolRefs).toBeUndefined(); // names nothing ⇒ declares nothing
+    }
+  });
+
+  test('the WRITE-only and address-only arms record too — the ones no other test covers', () => {
+    // The collector has three arms and only the `var`-leaf one is exercised elsewhere. Both of these
+    // are load-bearing and silent when broken: the candidate simply loses a declaration it needs and
+    // fails to compile. The `assign` arm is the likeliest to be lost in a refactor — it is the one
+    // place the collector hand-rolls a name lookup instead of going through the shared expression
+    // vocabulary, because an assignment carries its target as a NAME, not an Expr.
+    const SEED = { name: 'gSeed', kind: 'data', shape: 'scalar', size: 4, signed: true } as const;
+    const write = '\tldr\tr1, .L1\n\tstr\tr0, [r1]\n\tbx\tlr\n.L1:\n\t.word\tgSeed\n';
+    for (const c of enumerate('f', write, new Map([[0x02000000, [{ ...SEED }]]]))) {
+      expect(c.source).toContain('gSeed = a0;'); // a WRITE is the only mention of the symbol
+      expect(c.symbolRefs).toEqual([{ name: 'gSeed', info: SEED }]);
+    }
+    // `&gThing` as a call argument: the symbol is named by an `addr` leaf and never read
+    const THING = { name: 'gThing', kind: 'data', shape: 'struct', size: 4, structName: 'Thing' } as const;
+    const addr = '\tpush\t{lr}\n\tldr\tr0, .L1\n\tbl\tUse\n\tpop\t{r1}\n\tbx\tr1\n.L1:\n\t.word\tgThing\n';
+    for (const c of enumerate('f', addr, new Map([[0x02000010, [{ ...THING }]]]))) {
+      expect(c.source).toContain('Use(&gThing)');
+      expect((c.symbolRefs ?? []).map((r) => r.name)).toEqual(['gThing']);
     }
   });
 

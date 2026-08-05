@@ -196,8 +196,18 @@ export function recognizeStructs(fn: Fn): number {
   return count;
 }
 
-/** The distinct struct types this function references (unwrapping struct pointers on every value),
- *  deduped by name and sorted, for the backend to declare above the function. */
+/** The distinct struct types this function's L2 GRAPH mentions (unwrapping struct pointers on every
+ *  value), deduped by name and sorted, for the backend to declare above the function.
+ *
+ *  "Mentions", not "references": this walks `fn.blocks` at the moment structuring runs, and the
+ *  result is CACHED on the SFn (`structure.ts`) and carried by every later `{...sfn}` pass, so a
+ *  struct whose last use a subsequent L3 pass removed would still be declared. Sibling `locals` is
+ *  reference-pruned after dead-store elimination (`l3/dce.ts`) for exactly that reason; this list is
+ *  not. No pass drops such a use today — the IR-level DCE runs long before recognition, and l3/dce's
+ *  `mustKeep` never drops a `field`/`index` — so the staleness is LATENT, not live, which is why it
+ *  is recorded here rather than fixed speculatively. The fix, if a pass ever makes it reachable, is
+ *  the one l3/symbol-refs.ts already applies to symbol references: derive at the consumption point
+ *  (`backend/cfamily.ts` structDecls) instead of caching. */
 export function collectStructs(fn: Fn): StructType[] {
   const seen = new Map<string, StructType>();
   const consider = (t: IrType) => {
