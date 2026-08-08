@@ -44,16 +44,28 @@ interface AsmBlock {
   instrs: Instr[];
 }
 
-// Pre-UAL mnemonic spellings, normalised at the single point where an instruction enters the IR.
+// Alternative mnemonic spellings, normalised at the single point where an instruction enters the
+// IR. Each maps to a name the decode switch below already handles.
 //
-// These are not "similar" instructions — each pair is the SAME instruction with two accepted
-// spellings, and GNU `as` assembles either to identical bytes (verified across 14 operand shapes:
-// with and without `!`, base in the register list, multi-register lists).
+// These are not "similar" instructions — each pair is ONE instruction with two accepted spellings.
+// The ARM7TDMI Technical Reference Manual (ARM DDI 0029G) gives a single encoding for each:
+// Figure 1-6 "Thumb instruction set formats" lists Format 08 "Load and store sign-extended byte and
+// halfword" (0101 H S 1 Ro Rb Rd) and Format 15 "Multiple load and store" (1100 L Rb Rlist), and
+// Table 1-7 "Thumb instruction set summary" spells them `LDRSH Rd, [Rb, Ro]`, `LDRSB Rd, [Rb, Ro]`,
+// `LDMIA Rb!, <reglist>` and `STMIA Rb!, <reglist>`. Older ARM7TDMI documentation used LDSH/LDSB,
+// which is where the short spellings come from; the stack-suffix forms (FD, EA) are the same
+// instructions named after the stack discipline they implement.
+//
+// Confirmed with this project's own toolchain — same encoding, and gba-kit executes them with the
+// same architectural effect (sign extension, transfers, base writeback):
+//
+//     ldsh  / ldrsh        885e / 885e        ldm   / ldmia / ldmfd   01c9 / 01c9 / 01c9
+//     ldsb  / ldrsb        8856 / 8856        stm   / stmia / stmea   01c1 / 01c1 / 01c1
 //
 // Measured on the Klonoa: Empire of Dreams disassembly (luvdis, 469 .s files): `ldsh` 292 and
 // `ldsb` 180 against `ldrsh` 0 and `ldrsb` 12 — the same tool emits both spellings for the signed
 // byte load — and `ldm` 12 / `stm` 34 against `ldmia` 0 / `stmia` 0. The UAL names this frontend
-// cases for the multiple forms never appear in that corpus at all.
+// cased for the multiple forms never appear in that corpus at all.
 //
 // WHY A TABLE HERE, rather than alias arms on each decode `case` (which is how mips.ts and ppc.ts
 // handle their extended mnemonics): the mnemonic is read by more consumers than the decode switch.
@@ -61,12 +73,15 @@ interface AsmBlock {
 // decide whether an unmodelled op may be skipped, and the instruction-size walk tests it for `bl`.
 // An alias arm fixes exactly one of those. The PPC/MIPS idiom is right where the two spellings need
 // DIFFERENT lowering because their operand grammars differ (`slwi rD,rS,n` vs `rlwinm rD,rS,n,mb,me`);
-// these four take identical operands, so the table is the cheaper shape.
+// these take identical operands, so the table is the cheaper shape.
 //
-// `ldmfd` is included because leaving it out is not a decline but a SILENT one: `ldmfd rN, {rD}`
-// (no writeback) reaches opaqueDest, which takes ops[0] — the BASE — as the destination, so the
-// opaque is dead, DCE removes it, and the load simply vanishes. Measured: `ldmfd r1, {r0}; bx lr`
-// lifted to `return a0;` where the correct answer is `return *a0;`.
+// The LOAD aliases matter more than the store ones, and the asymmetry is worth knowing: an
+// unrecognised `stm*` matches `opaquePolicy.storeClass` and fails LOUD, but an unrecognised `ldm*`
+// does not — it reaches opaqueDest, which takes ops[0] (the BASE) as the destination, so the opaque
+// is dead, DCE removes it, and the load silently vanishes. Measured: `ldmfd r1, {r0}; bx lr` lifted
+// to `return a0;` where the answer is `return *a0;`. Every load spelling ARMv4T Thumb accepts is
+// therefore listed. (`ldmed`/`ldmea` are NOT: they mean IB/DB, which Thumb-1 does not have, and
+// `as` rejects them — so they cannot appear.)
 //
 // `stmfd` is deliberately absent, and the asymmetry is real rather than an oversight: `stmfd` is
 // `stmdb`, and ARMv4T Thumb has neither — `as` rejects both with "selected processor does not
@@ -80,6 +95,7 @@ const LEGACY_MNEMONICS: Readonly<Record<string, string>> = Object.assign(Object.
   ldm: 'ldmia',
   ldmfd: 'ldmia',
   stm: 'stmia',
+  stmea: 'stmia',
 });
 
 function canonicalMnemonic(mn: string): string {
@@ -1430,14 +1446,18 @@ export function lift(
           // rejoin below also tolerates a split list defensively. Thumb-1 LDMIA skips the
           // writeback when rN is itself in the list (the loaded value wins) — modelled; any
           // malformed shape degrades to the loud opaque.
-          // There is NO no-writeback form in Thumb-1. `ldmia rN, {…}` without the `!` assembles
-          // to the SAME halfword as with it (`ldm r1,{r0}` and `ldm r1!,{r0}` are both 0xc901) and
-          // GNU as warns "this instruction will write back the base register"; gba-kit executes
-          // both with the base advanced. GBATEK: "Both STM and LDM are incrementing the Base
-          // Register." An earlier version of this comment called the `!`-less spelling "the valid
+          // There is NO no-writeback form in Thumb-1, so the `!` is decoration and must not drive
+          // the model. Four sources agree:
+          //   * ARM DDI 0029G Table 1-7 gives the canonical syntax as `LDMIA Rb!, <reglist>` and
+          //     `STMIA Rb!, <reglist>` — the `!` is part of the mnemonic, not an option, and
+          //     Figure 1-6 Format 15 has no bit that could encode its absence;
+          //   * GNU as assembles `ldm r1,{r0}` and `ldm r1!,{r0}` to the same halfword, 0xc901,
+          //     and warns "this instruction will write back the base register";
+          //   * gba-kit executes both with the base advanced by 4;
+          //   * GBATEK, THUMB.15: "Both STM and LDM are incrementing the Base Register".
+          // An earlier version of this comment called the `!`-less spelling "the valid
           // no-writeback form — same transfers, base unchanged", which is false, and the code
-          // below acted on it. Writeback is now driven by the architecture, not by the syntax.
-          // A missing register list is malformed → loud opaque.
+          // below acted on it. A missing register list is malformed → loud opaque.
           const baseTok = a;
           const writeback = !!baseTok?.endsWith('!');
           if (baseTok === undefined || b === undefined || !b.startsWith('{')) {
