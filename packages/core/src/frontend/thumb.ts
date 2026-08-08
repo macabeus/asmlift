@@ -38,6 +38,36 @@ interface AsmBlock {
   instrs: Instr[];
 }
 
+// Pre-UAL mnemonic spellings, normalised at the single point where an instruction enters the IR.
+//
+// These are not "similar" instructions — each pair is the SAME instruction with two accepted
+// spellings, and GNU `as` assembles either to identical bytes. The decode switch below, `isReturn`,
+// and the flag-setting tables are all written against the UAL name, so a disassembler that emits
+// the legacy one produces a decline rather than a lift.
+//
+// Normalising here rather than adding alias arms to each `case` is deliberate: `isReturn` reads the
+// mnemonic too, and it lists `ldmia`/`ldmfd` but not bare `ldm` — so a per-case fix would have left
+// `ldm rN!, {…, pc}` undetected as a return. One table, every consumer.
+//
+// Measured on the Klonoa: Empire of Dreams disassembly (luvdis, 469 .s files): `ldsh` 292 and
+// `ldsb` 180 against `ldrsh` 0 and `ldrsb` 12 — the same tool emits both spellings for the signed
+// byte load — and `ldm` 12 / `stm` 34 against `ldmia` 0 / `stmia` 0. The UAL names this frontend
+// cases for the multiple forms never appear in that corpus at all.
+//
+// Deliberately NOT included: `ldmfd`/`stmfd`. `ldmfd` is indeed `ldmia`, but `stmfd` is `stmdb`,
+// which Thumb-1 does not have (it is spelled `push`) — so the pair is not symmetric, and neither
+// occurs in any corpus measured here. Adding them would be an untested guess.
+const LEGACY_MNEMONICS: Readonly<Record<string, string>> = {
+  ldsh: 'ldrsh',
+  ldsb: 'ldrsb',
+  ldm: 'ldmia',
+  stm: 'stmia',
+};
+
+function canonicalMnemonic(mn: string): string {
+  return LEGACY_MNEMONICS[mn] ?? mn;
+}
+
 // Map a Thumb conditional-branch mnemonic to the icmp opcode for "branch taken". The signed forms
 // (`blt`/`ble`/`bgt`/`bge`) follow a signed `cmp`; the UNSIGNED forms carry the carry/borrow sense:
 // `bhi` = unsigned > (higher), `bls` = unsigned <= (lower-or-same), `bcc`/`blo` = unsigned <
@@ -347,7 +377,7 @@ function decode(name: string, asm: string): { blocks: AsmBlock[]; dataWords: Map
       continue;
     }
     dataLabel = null; // a real instruction ends a data run
-    flat.push({ instr: { mnemonic: m[1], ops: m[2] ? splitOperands(m[2]) : [] } });
+    flat.push({ instr: { mnemonic: canonicalMnemonic(m[1]), ops: m[2] ? splitOperands(m[2]) : [] } });
   }
   if (
     armLabels.has(name) ||
