@@ -1465,13 +1465,22 @@ export function lift(
             break;
           }
           // An STM whose base is in its own list, but is not the LOWEST entry, stores a value this
-          // frontend must not guess. ARM calls it UNPREDICTABLE ("the stored value cannot be
-          // relied upon"); GNU as warns "value stored for r4 is UNKNOWN"; and GBATEK records that
-          // the answer is architecture-version specific — "Store OLD base if Rb is FIRST entry in
-          // Rlist, otherwise store NEW base (STM/ARMv4), always store OLD base (STM/ARMv5)".
-          // This frontend targets ARMv4T, and it was storing the OLD base — the ARMv5 rule, i.e.
-          // silently wrong for its own target. Declining is the contract: unmodelled ⇒ loud.
-          // (One site in the Klonoa corpus, in unreachable code after a `pop`/`bx`.)
+          // frontend must not guess — because the available references DISAGREE about what it is.
+          //
+          //   ARM:      UNPREDICTABLE, "the stored value cannot be relied upon".
+          //   GNU as:   warns "value stored for rN is UNKNOWN".
+          //   GBATEK:   version-specific — "Store OLD base if Rb is FIRST entry in Rlist,
+          //             otherwise store NEW base (STM/ARMv4), always store OLD base (STM/ARMv5)".
+          //   mGBA:     stores the OLD base unconditionally, on an ARMv4T core — its STM_LOOP
+          //             reads gprs[i] during the loop and the writeback runs after it.
+          //
+          // So GBATEK's ARMv4 rule and the reference emulator's behaviour do not agree, and no
+          // hardware test result was found either way. This frontend used to emit the old base,
+          // i.e. it silently picked one side of that disagreement. Declining is the contract:
+          // where the architecture declines to define a value, so do we.
+          //
+          // (One site in the Klonoa corpus, in unreachable code after a `pop`/`bx`, and it already
+          // declines for an unrelated pc-relative-pool reason — so this costs nothing today.)
           if (ins.mnemonic === 'stmia' && list.some((r) => reg(r) === baseReg) && reg(list[0]) !== baseReg) {
             throw new FrontendUnsupportedError(
               `cannot lift '${name}': stm with the base register in its own list, not as the lowest ` +
