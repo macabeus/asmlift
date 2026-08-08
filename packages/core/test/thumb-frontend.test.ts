@@ -122,10 +122,10 @@ describe('pre-UAL mnemonic spellings', () => {
     ['ldsb', '\tldsb\tr0, [r0, r1]\n\tbx\tlr\n', '\tldrsb\tr0, [r0, r1]\n\tbx\tlr\n'],
     ['ldm', '\tldm\tr1!, {r0}\n\tbx\tlr\n', '\tldmia\tr1!, {r0}\n\tbx\tlr\n'],
     ['ldm multi', '\tldm\tr0!, {r5, r6, r7}\n\tbx\tlr\n', '\tldmia\tr0!, {r5, r6, r7}\n\tbx\tlr\n'],
-    ['ldm no-writeback', '\tldm\tr1, {r0}\n\tbx\tlr\n', '\tldmia\tr1, {r0}\n\tbx\tlr\n'],
+    ['ldm no-!', '\tldm\tr1, {r0}\n\tbx\tlr\n', '\tldmia\tr1, {r0}\n\tbx\tlr\n'],
     ['ldmfd', '\tldmfd\tr1!, {r0}\n\tbx\tlr\n', '\tldmia\tr1!, {r0}\n\tbx\tlr\n'],
     ['stm', '\tstm\tr1!, {r0}\n\tbx\tlr\n', '\tstmia\tr1!, {r0}\n\tbx\tlr\n'],
-    ['stm base-in-list', '\tstm\tr4!, {r0, r2, r4}\n\tbx\tlr\n', '\tstmia\tr4!, {r0, r2, r4}\n\tbx\tlr\n'],
+    ['stm base lowest', '\tstm\tr0!, {r0, r1}\n\tbx\tlr\n', '\tstmia\tr0!, {r0, r1}\n\tbx\tlr\n'],
   ];
 
   test.each(pairs)('%s lifts, and identically to its UAL spelling', (_mn, legacyAsm, ualAsm) => {
@@ -137,6 +137,29 @@ describe('pre-UAL mnemonic spellings', () => {
     // the BASE — as the destination; the opaque is then dead, DCE removes it, and the load simply
     // vanishes. That is a SILENT wrong answer, not a decline: it lifted to `return a0;`.
     expect(dc('f', '\tldmfd\tr1, {r0}\n\tbx\tlr\n').source).toContain('*a0');
+  });
+
+  test('Thumb-1 has no no-writeback LDM: the `!`-less spelling still advances the base', () => {
+    // `ldm r1,{r0}` and `ldm r1!,{r0}` assemble to the SAME halfword (0xc901); GNU as warns "this
+    // instruction will write back the base register", gba-kit executes both with the base
+    // advanced, and GBATEK says "Both STM and LDM are incrementing the Base Register". The
+    // frontend used to drive writeback off the `!`, which is syntax, not architecture.
+    expect(dc('f', '\tldm\tr1, {r0}\n\tbx\tlr\n').source).toBe(dc('f', '\tldm\tr1!, {r0}\n\tbx\tlr\n').source);
+  });
+
+  test('an LDM whose base is in its own list does NOT write back', () => {
+    // GBATEK, THUMB.15: "no writeback (LDM/ARMv4/ARMv5; at this point, THUMB opcodes work
+    // different than ARM opcodes)". The loaded value wins.
+    expect(dc('f', '\tldm\tr1, {r1, r2}\n\tbx\tlr\n').source).toContain('return a0;');
+  });
+
+  test('an STM storing its own base, not lowest, DECLINES rather than guessing', () => {
+    // ARM calls the stored value UNPREDICTABLE and GNU as warns "value stored for r4 is UNKNOWN";
+    // GBATEK records that it is version-specific — new base on ARMv4, old base on ARMv5. This
+    // frontend targets ARMv4T and used to emit the ARMv5 answer silently.
+    expect(() => dc('f', '\tstm\tr4!, {r0, r2, r4}\n\tbx\tlr\n')).toThrow(/UNPREDICTABLE/);
+    // …but the LOWEST-entry case is defined (old base) and must still lift.
+    expect(dc('f', '\tstm\tr0!, {r0, r1}\n\tbx\tlr\n').source).toContain('*a0 = a0;');
   });
 
   test('a decline names the spelling the INPUT used, not the canonical one', () => {

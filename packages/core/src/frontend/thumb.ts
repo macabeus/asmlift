@@ -1430,9 +1430,14 @@ export function lift(
           // rejoin below also tolerates a split list defensively. Thumb-1 LDMIA skips the
           // writeback when rN is itself in the list (the loaded value wins) — modelled; any
           // malformed shape degrades to the loud opaque.
-          // `!` = writeback (`ldmia rN!, {…}`); its absence is the valid no-writeback form
-          // (`ldmia rN, {…}` — same transfers, base unchanged). A missing register list is
-          // malformed → loud opaque.
+          // There is NO no-writeback form in Thumb-1. `ldmia rN, {…}` without the `!` assembles
+          // to the SAME halfword as with it (`ldm r1,{r0}` and `ldm r1!,{r0}` are both 0xc901) and
+          // GNU as warns "this instruction will write back the base register"; gba-kit executes
+          // both with the base advanced. GBATEK: "Both STM and LDM are incrementing the Base
+          // Register." An earlier version of this comment called the `!`-less spelling "the valid
+          // no-writeback form — same transfers, base unchanged", which is false, and the code
+          // below acted on it. Writeback is now driven by the architecture, not by the syntax.
+          // A missing register list is malformed → loud opaque.
           const baseTok = a;
           const writeback = !!baseTok?.endsWith('!');
           if (baseTok === undefined || b === undefined || !b.startsWith('{')) {
@@ -1459,6 +1464,21 @@ export function lift(
             emitOpaqueDest(ins);
             break;
           }
+          // An STM whose base is in its own list, but is not the LOWEST entry, stores a value this
+          // frontend must not guess. ARM calls it UNPREDICTABLE ("the stored value cannot be
+          // relied upon"); GNU as warns "value stored for r4 is UNKNOWN"; and GBATEK records that
+          // the answer is architecture-version specific — "Store OLD base if Rb is FIRST entry in
+          // Rlist, otherwise store NEW base (STM/ARMv4), always store OLD base (STM/ARMv5)".
+          // This frontend targets ARMv4T, and it was storing the OLD base — the ARMv5 rule, i.e.
+          // silently wrong for its own target. Declining is the contract: unmodelled ⇒ loud.
+          // (One site in the Klonoa corpus, in unreachable code after a `pop`/`bx`.)
+          if (ins.mnemonic === 'stmia' && list.some((r) => reg(r) === baseReg) && reg(list[0]) !== baseReg) {
+            throw new FrontendUnsupportedError(
+              `cannot lift '${name}': stm with the base register in its own list, not as the lowest ` +
+                `entry — the value stored for that register is UNPREDICTABLE and differs between ` +
+                `ARMv4 (new base) and ARMv5 (old base)`,
+            );
+          }
           // SNAPSHOT the base ONCE: hardware performs every transfer from the ORIGINAL base, but
           // a base-in-list ldmia overwrites that register mid-list — re-reading it per iteration
           // loaded the siblings from the freshly-loaded value instead (silent wrong addresses,
@@ -1475,10 +1495,12 @@ export function lift(
               irb.ops.push(mkOp('store', { operands: [base0, readData(reg(r), bi)], attrs: { off: 4 * i, width: 4 } }));
             }
           });
-          // Writeback advances the base by 4×count — SUPPRESSED when there is no `!`, or (ldmia)
-          // when the base is itself in the list (the loaded value wins, ARMv4T).
+          // Writeback advances the base by 4×count. It is suppressed ONLY for an ldmia whose base
+          // is in its own list — the loaded value wins. GBATEK, THUMB.15: "no writeback
+          // (LDM/ARMv4/ARMv5; at this point, THUMB opcodes work different than ARM opcodes)".
+          // The `!` is NOT what decides it: see above, there is no encoding without writeback.
           const wroteBase = ins.mnemonic === 'ldmia' && list.some((r) => reg(r) === baseReg);
-          if (writeback && !wroteBase) {
+          if (!wroteBase) {
             const adv = mkValue(T.unk(32));
             irb.ops.push(mkOp('add', { operands: [base0, constVal(4 * list.length, bi)], results: [adv] }));
             writeVar(baseReg, bi, adv);
