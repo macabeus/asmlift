@@ -27,6 +27,11 @@ export interface OpaquePolicy {
   storeClass?: RegExp;
   /** attribution for thrown declines: the function being lifted (optionally "+ site"). */
   context?: string;
+  /** How to SPELL the mnemonic in messages, when that differs from the name used to classify it.
+   *  A frontend that normalises legacy spellings (Thumb `ldsh` -> `ldrsh`) classifies on the
+   *  canonical name but must report the one the input file actually contains — otherwise a decline
+   *  names an instruction the reader cannot find in their own .s. Defaults to `mnemonic`. */
+  display?: string;
   /** Mnemonics PROVABLY effect-free — or deliberately transparent (Thumb push/pop frame ops) —
    *  in this ISA: the ONLY unmodelled no-destination instructions that may be skipped. Any other
    *  no-destination unmodelled instruction THROWS: a side-effect-only instruction (swi, syscall,
@@ -54,13 +59,14 @@ export interface OpaqueDest {
  *  reaches structuring as the sentinel `?` and trips `assertResolved` — the loud failure the
  *  contract requires, instead of a stale/absent value surfacing as confidently-wrong source. */
 export function opaqueDest(mnemonic: string, ops: string[], policy: OpaquePolicy): OpaqueDest | null {
+  const shown = policy.display ?? mnemonic;
   if (policy.storeClass?.test(mnemonic)) {
     // `context` names the function (and, where the ISA has addresses, the site) — this message
     // lands verbatim in annotate-mode stub headers, where an un-attributed decline is
     // unactionable in a multi-function run.
     const where = policy.context ? `cannot lift '${policy.context}': ` : '';
     throw new FrontendUnsupportedError(
-      `${where}unmodelled store-class instruction '${mnemonic}' — a memory write cannot be skipped or degraded to a register opaque`,
+      `${where}unmodelled store-class instruction '${shown}' — a memory write cannot be skipped or degraded to a register opaque`,
     );
   }
   const norm = policy.normalize ?? ((s) => s);
@@ -71,7 +77,7 @@ export function opaqueDest(mnemonic: string, ops: string[], policy: OpaquePolicy
     } // explicitly transparent for this ISA
     const where = policy.context ? `cannot lift '${policy.context}': ` : '';
     throw new FrontendUnsupportedError(
-      `${where}unmodelled effect instruction '${mnemonic}' — no register destination to degrade, and skipping it would silently delete its effect`,
+      `${where}unmodelled effect instruction '${shown}' — no register destination to degrade, and skipping it would silently delete its effect`,
     );
   }
   if (policy.isZero?.(dst)) {

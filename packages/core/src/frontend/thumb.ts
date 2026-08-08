@@ -30,8 +30,14 @@ import { opaqueDest } from './opaque';
 import { abiSortEntryParams, fallbackArgc, makeSsaBuilder } from './ssa';
 
 interface Instr {
+  /** the CANONICAL spelling — legacy names are normalised (see LEGACY_MNEMONICS) so that every
+   *  consumer matches one name. */
   mnemonic: string;
   ops: string[];
+  /** the spelling the input file actually used, present only when normalisation changed it.
+   *  Messages must use this: a decline naming `ldrsh` for a file containing `ldsh` sends the
+   *  reader looking for an instruction that is not there. */
+  asWritten?: string;
 }
 interface AsmBlock {
   label: string;
@@ -41,28 +47,40 @@ interface AsmBlock {
 // Pre-UAL mnemonic spellings, normalised at the single point where an instruction enters the IR.
 //
 // These are not "similar" instructions — each pair is the SAME instruction with two accepted
-// spellings, and GNU `as` assembles either to identical bytes. The decode switch below, `isReturn`,
-// and the flag-setting tables are all written against the UAL name, so a disassembler that emits
-// the legacy one produces a decline rather than a lift.
-//
-// Normalising here rather than adding alias arms to each `case` is deliberate: `isReturn` reads the
-// mnemonic too, and it lists `ldmia`/`ldmfd` but not bare `ldm` — so a per-case fix would have left
-// `ldm rN!, {…, pc}` undetected as a return. One table, every consumer.
+// spellings, and GNU `as` assembles either to identical bytes (verified across 14 operand shapes:
+// with and without `!`, base in the register list, multi-register lists).
 //
 // Measured on the Klonoa: Empire of Dreams disassembly (luvdis, 469 .s files): `ldsh` 292 and
 // `ldsb` 180 against `ldrsh` 0 and `ldrsb` 12 — the same tool emits both spellings for the signed
 // byte load — and `ldm` 12 / `stm` 34 against `ldmia` 0 / `stmia` 0. The UAL names this frontend
 // cases for the multiple forms never appear in that corpus at all.
 //
-// Deliberately NOT included: `ldmfd`/`stmfd`. `ldmfd` is indeed `ldmia`, but `stmfd` is `stmdb`,
-// which Thumb-1 does not have (it is spelled `push`) — so the pair is not symmetric, and neither
-// occurs in any corpus measured here. Adding them would be an untested guess.
-const LEGACY_MNEMONICS: Readonly<Record<string, string>> = {
+// WHY A TABLE HERE, rather than alias arms on each decode `case` (which is how mips.ts and ppc.ts
+// handle their extended mnemonics): the mnemonic is read by more consumers than the decode switch.
+// `classifyXfer` matches it to decide return-vs-indirect, `opaquePolicy.storeClass` matches it to
+// decide whether an unmodelled op may be skipped, and the instruction-size walk tests it for `bl`.
+// An alias arm fixes exactly one of those. The PPC/MIPS idiom is right where the two spellings need
+// DIFFERENT lowering because their operand grammars differ (`slwi rD,rS,n` vs `rlwinm rD,rS,n,mb,me`);
+// these four take identical operands, so the table is the cheaper shape.
+//
+// `ldmfd` is included because leaving it out is not a decline but a SILENT one: `ldmfd rN, {rD}`
+// (no writeback) reaches opaqueDest, which takes ops[0] — the BASE — as the destination, so the
+// opaque is dead, DCE removes it, and the load simply vanishes. Measured: `ldmfd r1, {r0}; bx lr`
+// lifted to `return a0;` where the correct answer is `return *a0;`.
+//
+// `stmfd` is deliberately absent, and the asymmetry is real rather than an oversight: `stmfd` is
+// `stmdb`, and ARMv4T Thumb has neither — `as` rejects both with "selected processor does not
+// support ... in Thumb mode". There is nothing to normalise it TO.
+//
+// Null-prototype so that an inherited key (`constructor`, `toString`) cannot be mistaken for an
+// entry. Unreachable from real assembly, but the lookup should not depend on that.
+const LEGACY_MNEMONICS: Readonly<Record<string, string>> = Object.assign(Object.create(null), {
   ldsh: 'ldrsh',
   ldsb: 'ldrsb',
   ldm: 'ldmia',
+  ldmfd: 'ldmia',
   stm: 'stmia',
-};
+});
 
 function canonicalMnemonic(mn: string): string {
   return LEGACY_MNEMONICS[mn] ?? mn;
@@ -377,7 +395,14 @@ function decode(name: string, asm: string): { blocks: AsmBlock[]; dataWords: Map
       continue;
     }
     dataLabel = null; // a real instruction ends a data run
-    flat.push({ instr: { mnemonic: canonicalMnemonic(m[1]), ops: m[2] ? splitOperands(m[2]) : [] } });
+    const canon = canonicalMnemonic(m[1]);
+    flat.push({
+      instr: {
+        mnemonic: canon,
+        ops: m[2] ? splitOperands(m[2]) : [],
+        ...(canon === m[1] ? {} : { asWritten: m[1] }),
+      },
+    });
   }
   if (
     armLabels.has(name) ||
@@ -1201,7 +1226,7 @@ export function lift(
     // adjustments have no low-register data destination, so they fall through harmlessly;
     // terminators are handled in the terminator section below.
     const isThumbReg = (s: string | undefined): s is string => /^r\d+$/.test(s ?? '');
-    const emitOpaqueDest = (ins: { mnemonic: string; ops: string[] }) => {
+    const emitOpaqueDest = (ins: { mnemonic: string; ops: string[]; asWritten?: string }) => {
       // storeClass: unmodelled Thumb stores are str*/stm* — `stmia rN!, {…}`'s dest token `r0!`
       // fails isReg, so without this it would be skipped as "no reg dest", silently deleting the
       // memory writes AND the base writeback. push/pop stay transparent frame ops (they don't match).
@@ -1213,6 +1238,7 @@ export function lift(
         storeClass: /^(str|stm)/,
         skipSafe: /^(push|pop|nop)$/,
         context: name,
+        display: ins.asWritten,
       });
       if (!od) {
         return;
@@ -1220,7 +1246,7 @@ export function lift(
       const operands = od.srcRegs.map((r) => readVar(r, bi));
       const res = mkValue(T.unk(32));
       // carry the mnemonic so annotate mode can name the gap (`ASMLIFT_ERROR("unmodelled 'rsb'")`)
-      irb.ops.push(mkOp('opaque', { operands, results: [res], attrs: { mnemonic: ins.mnemonic } }));
+      irb.ops.push(mkOp('opaque', { operands, results: [res], attrs: { mnemonic: ins.asWritten ?? ins.mnemonic } }));
       writeVar(od.dst, bi, res);
     };
     // 2-operand ALU form `op rD, op2` (rD = rD ⟨op⟩ op2). `op2` is an immediate (`#N`) or a
