@@ -106,3 +106,83 @@ describe('the return register cannot be both the return ADDRESS and the return v
     expect(src).toContain('return 5;');
   });
 });
+
+describe('pre-UAL mnemonic spellings', () => {
+  // Each pair below is ONE instruction with two accepted spellings, not two instructions: GNU `as`
+  // assembles either to identical bytes (checked across 14 operand shapes). A disassembler is free
+  // to emit whichever it likes, and luvdis emits the legacy one 472 times against 12 UAL in one
+  // real ROM. Before normalisation `ldsh` fell through the decode switch to the loud `opaque` and
+  // the function declined with "unmodelled instruction 'ldsh'" — a lift refused over a spelling.
+  //
+  // Pinned as EQUIVALENCE (legacy output === UAL output) rather than against expected source, so
+  // the test cannot rot into asserting whatever the frontend happens to emit. Both corpus operand
+  // shapes are covered: multi-register lists and a base that appears in its own list.
+  const pairs: ReadonlyArray<[string, string, string]> = [
+    ['ldsh', '\tldsh\tr0, [r0, r1]\n\tbx\tlr\n', '\tldrsh\tr0, [r0, r1]\n\tbx\tlr\n'],
+    ['ldsb', '\tldsb\tr0, [r0, r1]\n\tbx\tlr\n', '\tldrsb\tr0, [r0, r1]\n\tbx\tlr\n'],
+    ['ldm', '\tldm\tr1!, {r0}\n\tbx\tlr\n', '\tldmia\tr1!, {r0}\n\tbx\tlr\n'],
+    ['ldm multi', '\tldm\tr0!, {r5, r6, r7}\n\tbx\tlr\n', '\tldmia\tr0!, {r5, r6, r7}\n\tbx\tlr\n'],
+    ['ldm no-!', '\tldm\tr1, {r0}\n\tbx\tlr\n', '\tldmia\tr1, {r0}\n\tbx\tlr\n'],
+    ['ldmfd', '\tldmfd\tr1!, {r0}\n\tbx\tlr\n', '\tldmia\tr1!, {r0}\n\tbx\tlr\n'],
+    ['stm', '\tstm\tr1!, {r0}\n\tbx\tlr\n', '\tstmia\tr1!, {r0}\n\tbx\tlr\n'],
+    ['stm base lowest', '\tstm\tr0!, {r0, r1}\n\tbx\tlr\n', '\tstmia\tr0!, {r0, r1}\n\tbx\tlr\n'],
+    ['stmea', '\tstmea\tr1!, {r0}\n\tbx\tlr\n', '\tstmia\tr1!, {r0}\n\tbx\tlr\n'],
+  ];
+
+  test.each(pairs)('%s lifts, and identically to its UAL spelling', (_mn, legacyAsm, ualAsm) => {
+    expect(dc('f', legacyAsm).source).toBe(dc('f', ualAsm).source);
+  });
+
+  test('`ldmfd rN, {rD}` loads — it used to be deleted outright', () => {
+    // The reason ldmfd is in the table. Without it the op reaches opaqueDest, which takes ops[0] —
+    // the BASE — as the destination; the opaque is then dead, DCE removes it, and the load simply
+    // vanishes. That is a SILENT wrong answer, not a decline: it lifted to `return a0;`.
+    expect(dc('f', '\tldmfd\tr1, {r0}\n\tbx\tlr\n').source).toContain('*a0');
+  });
+
+  test('Thumb-1 has no no-writeback LDM: the `!`-less spelling still advances the base', () => {
+    // `ldm r1,{r0}` and `ldm r1!,{r0}` assemble to the SAME halfword (0xc901); GNU as warns "this
+    // instruction will write back the base register", gba-kit executes both with the base
+    // advanced, and GBATEK says "Both STM and LDM are incrementing the Base Register". The
+    // frontend used to drive writeback off the `!`, which is syntax, not architecture.
+    expect(dc('f', '\tldm\tr1, {r0}\n\tbx\tlr\n').source).toBe(dc('f', '\tldm\tr1!, {r0}\n\tbx\tlr\n').source);
+  });
+
+  test('an LDM whose base is in its own list does NOT write back', () => {
+    // GBATEK, THUMB.15: "no writeback (LDM/ARMv4/ARMv5; at this point, THUMB opcodes work
+    // different than ARM opcodes)". The loaded value wins.
+    expect(dc('f', '\tldm\tr1, {r1, r2}\n\tbx\tlr\n').source).toContain('return a0;');
+  });
+
+  test('an STM storing its own base, not lowest, DECLINES rather than guessing', () => {
+    // ARM calls the stored value UNPREDICTABLE and GNU as warns "value stored for r4 is UNKNOWN";
+    // GBATEK records that it is version-specific — new base on ARMv4, old base on ARMv5. This
+    // frontend targets ARMv4T and used to emit the ARMv5 answer silently.
+    expect(() => dc('f', '\tstm\tr4!, {r0, r2, r4}\n\tbx\tlr\n')).toThrow(/UNPREDICTABLE/);
+    // …but the LOWEST-entry case is defined (old base) and must still lift.
+    expect(dc('f', '\tstm\tr0!, {r0, r1}\n\tbx\tlr\n').source).toContain('*a0 = a0;');
+  });
+
+  test('a decline names the spelling the INPUT used, not the canonical one', () => {
+    // Normalising must not send a reader looking for an instruction their .s does not contain.
+    // `ldsh r0` is malformed (one operand), so it degrades to the loud opaque and is reported.
+    expect(() => dc('f', '\tldsh\tr0\n\tbx\tlr\n')).toThrow(/'ldsh'/);
+    expect(() => dc('f', '\tldsh\tr0\n\tbx\tlr\n')).not.toThrow(/'ldrsh'/);
+  });
+
+  test('a mnemonic that merely STARTS with a legacy name is untouched', () => {
+    // The table is keyed on the whole mnemonic, so no prefix of a longer name is rewritten.
+    // A prefix-keyed table would make this lift instead of declining.
+    expect(() => dc('f', '\tldmxyz\tr1!, {r0}\n\tbx\tlr\n')).toThrow(/ldmxyz/);
+  });
+
+  test('an inherited Object key is not treated as an entry', () => {
+    // The table is null-prototype. With a plain object literal, `LEGACY_MNEMONICS['constructor']`
+    // resolves to Object's own constructor and the mnemonic becomes the string
+    // "function Object() { [native code] }". Unreachable from real assembly — no assembler emits
+    // `constructor` — so the property to pin is the absence of that leak, not which error fires.
+    const run = () => dc('f', '\tconstructor\tr0, r1\n\tbx\tlr\n');
+    expect(run).toThrow();
+    expect(run).not.toThrow(/native code|function Object/);
+  });
+});

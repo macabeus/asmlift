@@ -30,12 +30,72 @@ import { opaqueDest } from './opaque';
 import { abiSortEntryParams, fallbackArgc, makeSsaBuilder } from './ssa';
 
 interface Instr {
+  /** the CANONICAL spelling — legacy names are normalised (see LEGACY_MNEMONICS) so that every
+   *  consumer matches one name. */
   mnemonic: string;
   ops: string[];
+  /** the spelling the input file actually used, present only when normalisation changed it.
+   *  Messages must use this: a decline naming `ldrsh` for a file containing `ldsh` sends the
+   *  reader looking for an instruction that is not there. */
+  asWritten?: string;
 }
 interface AsmBlock {
   label: string;
   instrs: Instr[];
+}
+
+// Alternative mnemonic spellings, normalised at the single point where an instruction enters the
+// IR. Each maps to a name the decode switch below already handles.
+//
+// These are not "similar" instructions — each pair is ONE instruction with two accepted spellings.
+// The ARM7TDMI Technical Reference Manual (ARM DDI 0029G) gives a single encoding for each:
+// Figure 1-6 "Thumb instruction set formats" lists Format 08 "Load and store sign-extended byte and
+// halfword" (0101 H S 1 Ro Rb Rd) and Format 15 "Multiple load and store" (1100 L Rb Rlist), and
+// Table 1-7 "Thumb instruction set summary" spells them `LDRSH Rd, [Rb, Ro]`, `LDRSB Rd, [Rb, Ro]`,
+// `LDMIA Rb!, <reglist>` and `STMIA Rb!, <reglist>`. Older ARM7TDMI documentation used LDSH/LDSB,
+// which is where the short spellings come from; the stack-suffix forms (FD, EA) are the same
+// instructions named after the stack discipline they implement.
+//
+// Confirmed with this project's own toolchain — same encoding, and gba-kit executes them with the
+// same architectural effect (sign extension, transfers, base writeback):
+//
+//     ldsh  / ldrsh        885e / 885e        ldm   / ldmia / ldmfd   01c9 / 01c9 / 01c9
+//     ldsb  / ldrsb        8856 / 8856        stm   / stmia / stmea   01c1 / 01c1 / 01c1
+//
+// Measured on the Klonoa: Empire of Dreams disassembly (luvdis, 469 .s files): `ldsh` 292 and
+// `ldsb` 180 against `ldrsh` 0 and `ldrsb` 12 — the same tool emits both spellings for the signed
+// byte load — and `ldm` 12 / `stm` 34 against `ldmia` 0 / `stmia` 0. The UAL names this frontend
+// cased for the multiple forms never appear in that corpus at all.
+//
+// These are PURE SYNONYMS — identical operands — which is why they belong in a table here rather
+// than in decode arms like MIPS's `move` or PPC's `slwi`. That distinction, and why there is no
+// shared alias helper across the three frontends, is written up once in ./opaque.ts.
+//
+// The LOAD aliases matter more than the store ones, and the asymmetry is worth knowing: an
+// unrecognised `stm*` matches `opaquePolicy.storeClass` and fails LOUD, but an unrecognised `ldm*`
+// does not — it reaches opaqueDest, which takes ops[0] (the BASE) as the destination, so the opaque
+// is dead, DCE removes it, and the load silently vanishes. Measured: `ldmfd r1, {r0}; bx lr` lifted
+// to `return a0;` where the answer is `return *a0;`. Every load spelling ARMv4T Thumb accepts is
+// therefore listed. (`ldmed`/`ldmea` are NOT: they mean IB/DB, which Thumb-1 does not have, and
+// `as` rejects them — so they cannot appear.)
+//
+// `stmfd` is deliberately absent, and the asymmetry is real rather than an oversight: `stmfd` is
+// `stmdb`, and ARMv4T Thumb has neither — `as` rejects both with "selected processor does not
+// support ... in Thumb mode". There is nothing to normalise it TO.
+//
+// Null-prototype so that an inherited key (`constructor`, `toString`) cannot be mistaken for an
+// entry. Unreachable from real assembly, but the lookup should not depend on that.
+const LEGACY_MNEMONICS: Readonly<Record<string, string>> = Object.assign(Object.create(null), {
+  ldsh: 'ldrsh',
+  ldsb: 'ldrsb',
+  ldm: 'ldmia',
+  ldmfd: 'ldmia',
+  stm: 'stmia',
+  stmea: 'stmia',
+});
+
+function canonicalMnemonic(mn: string): string {
+  return LEGACY_MNEMONICS[mn] ?? mn;
 }
 
 // Map a Thumb conditional-branch mnemonic to the icmp opcode for "branch taken". The signed forms
@@ -347,7 +407,14 @@ function decode(name: string, asm: string): { blocks: AsmBlock[]; dataWords: Map
       continue;
     }
     dataLabel = null; // a real instruction ends a data run
-    flat.push({ instr: { mnemonic: m[1], ops: m[2] ? splitOperands(m[2]) : [] } });
+    const canon = canonicalMnemonic(m[1]);
+    flat.push({
+      instr: {
+        mnemonic: canon,
+        ops: m[2] ? splitOperands(m[2]) : [],
+        ...(canon === m[1] ? {} : { asWritten: m[1] }),
+      },
+    });
   }
   if (
     armLabels.has(name) ||
@@ -1171,7 +1238,7 @@ export function lift(
     // adjustments have no low-register data destination, so they fall through harmlessly;
     // terminators are handled in the terminator section below.
     const isThumbReg = (s: string | undefined): s is string => /^r\d+$/.test(s ?? '');
-    const emitOpaqueDest = (ins: { mnemonic: string; ops: string[] }) => {
+    const emitOpaqueDest = (ins: { mnemonic: string; ops: string[]; asWritten?: string }) => {
       // storeClass: unmodelled Thumb stores are str*/stm* — `stmia rN!, {…}`'s dest token `r0!`
       // fails isReg, so without this it would be skipped as "no reg dest", silently deleting the
       // memory writes AND the base writeback. push/pop stay transparent frame ops (they don't match).
@@ -1183,6 +1250,7 @@ export function lift(
         storeClass: /^(str|stm)/,
         skipSafe: /^(push|pop|nop)$/,
         context: name,
+        display: ins.asWritten,
       });
       if (!od) {
         return;
@@ -1190,7 +1258,7 @@ export function lift(
       const operands = od.srcRegs.map((r) => readVar(r, bi));
       const res = mkValue(T.unk(32));
       // carry the mnemonic so annotate mode can name the gap (`ASMLIFT_ERROR("unmodelled 'rsb'")`)
-      irb.ops.push(mkOp('opaque', { operands, results: [res], attrs: { mnemonic: ins.mnemonic } }));
+      irb.ops.push(mkOp('opaque', { operands, results: [res], attrs: { mnemonic: ins.asWritten ?? ins.mnemonic } }));
       writeVar(od.dst, bi, res);
     };
     // 2-operand ALU form `op rD, op2` (rD = rD ⟨op⟩ op2). `op2` is an immediate (`#N`) or a
@@ -1374,9 +1442,18 @@ export function lift(
           // rejoin below also tolerates a split list defensively. Thumb-1 LDMIA skips the
           // writeback when rN is itself in the list (the loaded value wins) — modelled; any
           // malformed shape degrades to the loud opaque.
-          // `!` = writeback (`ldmia rN!, {…}`); its absence is the valid no-writeback form
-          // (`ldmia rN, {…}` — same transfers, base unchanged). A missing register list is
-          // malformed → loud opaque.
+          // There is NO no-writeback form in Thumb-1, so the `!` is decoration and must not drive
+          // the model. Four sources agree:
+          //   * ARM DDI 0029G Table 1-7 gives the canonical syntax as `LDMIA Rb!, <reglist>` and
+          //     `STMIA Rb!, <reglist>` — the `!` is part of the mnemonic, not an option, and
+          //     Figure 1-6 Format 15 has no bit that could encode its absence;
+          //   * GNU as assembles `ldm r1,{r0}` and `ldm r1!,{r0}` to the same halfword, 0xc901,
+          //     and warns "this instruction will write back the base register";
+          //   * gba-kit executes both with the base advanced by 4;
+          //   * GBATEK, THUMB.15: "Both STM and LDM are incrementing the Base Register".
+          // An earlier version of this comment called the `!`-less spelling "the valid
+          // no-writeback form — same transfers, base unchanged", which is false, and the code
+          // below acted on it. A missing register list is malformed → loud opaque.
           const baseTok = a;
           const writeback = !!baseTok?.endsWith('!');
           if (baseTok === undefined || b === undefined || !b.startsWith('{')) {
@@ -1403,6 +1480,30 @@ export function lift(
             emitOpaqueDest(ins);
             break;
           }
+          // An STM whose base is in its own list, but is not the LOWEST entry, stores a value this
+          // frontend must not guess — because the available references DISAGREE about what it is.
+          //
+          //   ARM:      UNPREDICTABLE, "the stored value cannot be relied upon".
+          //   GNU as:   warns "value stored for rN is UNKNOWN".
+          //   GBATEK:   version-specific — "Store OLD base if Rb is FIRST entry in Rlist,
+          //             otherwise store NEW base (STM/ARMv4), always store OLD base (STM/ARMv5)".
+          //   mGBA:     stores the OLD base unconditionally, on an ARMv4T core — its STM_LOOP
+          //             reads gprs[i] during the loop and the writeback runs after it.
+          //
+          // So GBATEK's ARMv4 rule and the reference emulator's behaviour do not agree, and no
+          // hardware test result was found either way. This frontend used to emit the old base,
+          // i.e. it silently picked one side of that disagreement. Declining is the contract:
+          // where the architecture declines to define a value, so do we.
+          //
+          // (One site in the Klonoa corpus, in unreachable code after a `pop`/`bx`, and it already
+          // declines for an unrelated pc-relative-pool reason — so this costs nothing today.)
+          if (ins.mnemonic === 'stmia' && list.some((r) => reg(r) === baseReg) && reg(list[0]) !== baseReg) {
+            throw new FrontendUnsupportedError(
+              `cannot lift '${name}': stm with the base register in its own list, not as the lowest ` +
+                `entry — the value stored for that register is UNPREDICTABLE and differs between ` +
+                `ARMv4 (new base) and ARMv5 (old base)`,
+            );
+          }
           // SNAPSHOT the base ONCE: hardware performs every transfer from the ORIGINAL base, but
           // a base-in-list ldmia overwrites that register mid-list — re-reading it per iteration
           // loaded the siblings from the freshly-loaded value instead (silent wrong addresses,
@@ -1419,10 +1520,12 @@ export function lift(
               irb.ops.push(mkOp('store', { operands: [base0, readData(reg(r), bi)], attrs: { off: 4 * i, width: 4 } }));
             }
           });
-          // Writeback advances the base by 4×count — SUPPRESSED when there is no `!`, or (ldmia)
-          // when the base is itself in the list (the loaded value wins, ARMv4T).
+          // Writeback advances the base by 4×count. It is suppressed ONLY for an ldmia whose base
+          // is in its own list — the loaded value wins. GBATEK, THUMB.15: "no writeback
+          // (LDM/ARMv4/ARMv5; at this point, THUMB opcodes work different than ARM opcodes)".
+          // The `!` is NOT what decides it: see above, there is no encoding without writeback.
           const wroteBase = ins.mnemonic === 'ldmia' && list.some((r) => reg(r) === baseReg);
-          if (writeback && !wroteBase) {
+          if (!wroteBase) {
             const adv = mkValue(T.unk(32));
             irb.ops.push(mkOp('add', { operands: [base0, constVal(4 * list.length, bi)], results: [adv] }));
             writeVar(baseReg, bi, adv);
