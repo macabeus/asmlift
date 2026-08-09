@@ -67,13 +67,9 @@ interface AsmBlock {
 // byte load — and `ldm` 12 / `stm` 34 against `ldmia` 0 / `stmia` 0. The UAL names this frontend
 // cased for the multiple forms never appear in that corpus at all.
 //
-// WHY A TABLE HERE, rather than alias arms on each decode `case` (which is how mips.ts and ppc.ts
-// handle their extended mnemonics): the mnemonic is read by more consumers than the decode switch.
-// `classifyXfer` matches it to decide return-vs-indirect, `opaquePolicy.storeClass` matches it to
-// decide whether an unmodelled op may be skipped, and the instruction-size walk tests it for `bl`.
-// An alias arm fixes exactly one of those. The PPC/MIPS idiom is right where the two spellings need
-// DIFFERENT lowering because their operand grammars differ (`slwi rD,rS,n` vs `rlwinm rD,rS,n,mb,me`);
-// these take identical operands, so the table is the cheaper shape.
+// These are PURE SYNONYMS — identical operands — which is why they belong in a table here rather
+// than in decode arms like MIPS's `move` or PPC's `slwi`. That distinction, and why there is no
+// shared alias helper across the three frontends, is written up once in ./opaque.ts.
 //
 // The LOAD aliases matter more than the store ones, and the asymmetry is worth knowing: an
 // unrecognised `stm*` matches `opaquePolicy.storeClass` and fails LOUD, but an unrecognised `ldm*`

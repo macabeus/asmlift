@@ -7,6 +7,37 @@
 // This module owns only the POLICY (which token is the destination, which are register sources).
 // The frontend still owns the SSA plumbing (how to `read` a source and `write`/emit the result),
 // because that is block-local state the policy must not touch.
+//
+// ─── A NOTE ON ALTERNATIVE MNEMONIC SPELLINGS ──────────────────────────────────────────────────
+//
+// Every ISA here accepts more than one spelling for some instructions, and the frontends handle
+// that in two DIFFERENT ways on purpose. Which one is right is decided by the operands, not by
+// taste:
+//
+//   * PURE SYNONYM — same operands, same semantics, different name. Normalise it in a name→name
+//     table at the parse site, so every consumer of the mnemonic sees one name. Thumb does this
+//     for `ldsh`/`ldrsh`, `ldsb`/`ldrsb`, `ldm`/`ldmfd`/`ldmia`, `stm`/`stmea`/`stmia`, which
+//     ARM DDI 0029G Figure 1-6 gives a single encoding apiece.
+//
+//     The table is the right shape THERE because the mnemonic is read by more than the decode
+//     switch — Thumb's `classifyXfer` matches it to tell a return from an indirect jump, the
+//     `storeClass` below matches it to decide whether an unmodelled op may be skipped, and the
+//     instruction-size walk tests it for `bl`. An alias arm on one `case` fixes one of those.
+//
+//   * EXTENDED MNEMONIC / PSEUDO-INSTRUCTION — different operand GRAMMAR, so no rename can
+//     express it. Give it its own decode arm. MIPS `move rD,rS` (2 operands) is `addu rD,rS,zero`
+//     (3); PPC `mr rD,rS` is `or rD,rS,rS`; PPC `slwi rD,rS,n` (3) is `rlwinm rD,rS,n,mb,me` (5,
+//     with mask fields computed from n). Routing these through a table would be a category error.
+//
+// There is deliberately NO shared alias helper. As of writing, MIPS and PPC have no pure-synonym
+// gap at all — every `unmodelled instruction` decline they produce across the whole benchmark is
+// a genuinely unmodelled opcode (`lwc1`, `fmuls`, `fctiwz`, `subfe`, …), not a spelling — so such
+// a helper would have exactly one caller. The bar for extracting one is the bar this module itself
+// met: several frontends hand-copying the same policy AND observed drift between the copies.
+//
+// One thing that IS shared, and should stay shared: `display` below. A frontend that normalises
+// spellings must still REPORT the one its input actually used, or a decline sends the reader
+// looking for an instruction their disassembly does not contain.
 import { FrontendUnsupportedError } from './errors';
 
 export interface OpaquePolicy {
