@@ -108,6 +108,11 @@ asmlift: [score] unsigned: 0 (match)
 | [`apps/web`](apps/web/README.md)                                                                            | The webapp including the **Playground** and the **Benchmark**             |
 | [`apps/benchmark`](apps/benchmark/README.md)                                                                | The asmlift and m2c harness                                               |
 
+## Releasing
+
+`@asmlift/core` and `@asmlift/cli` are the two public packages — see [`docs/releasing.md`](docs/releasing.md)
+for the gates (including the two that hosted CI cannot run) and the publish order.
+
 ## License
 
 **MIT** ([`LICENSE`](LICENSE)) for the whole monorepo, with two carve-outs:
