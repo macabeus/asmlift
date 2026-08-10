@@ -21,15 +21,20 @@
 //
 // This does NOT recover the boolean-VALUE form `return a && b` — that is shortcircuit.ts's job
 // (the `logic_and`/`logic_or` connective plus agbcc's `(-b|b)>>31` = `b!=0` normalisation).
-import { Block, Fn, mkOp, predecessors } from '../ir/core';
+import { Block, Fn, defOpMap, mkOp, predecessors } from '../ir/core';
+
+/** The fused short-circuit connectives (raise/shortcircuit.ts). A `cond_br` on one of these is the
+ *  post-fusion record of the ≥2 conditions that used to reach a shared arm. */
+const CONNECTIVES = new Set(['logic_and', 'logic_or']);
 
 /** Tail-duplicate a return-only merge block into its unconditional-branch predecessors, but ONLY in the
- *  short-circuit shape (some branch-pred is shared). Returns whether anything changed. A "return-only"
- *  block is exactly one `ret` whose operands are all its own block-params, so each predecessor already
- *  carries the returned value as a successor arg. */
+ *  short-circuit shape (some branch-pred is shared, or the arms are selected by a fused connective).
+ *  Returns whether anything changed. A "return-only" block is exactly one `ret` whose operands are all
+ *  its own block-params, so each predecessor already carries the returned value as a successor arg. */
 export function sinkReturns(fn: Fn): boolean {
   let changed = false;
   const preds = predecessors(fn);
+  const defs = defOpMap(fn);
   const isBrTo = (p: Block, m: Block) => {
     const t = p.ops[p.ops.length - 1];
     return t.opcode === 'br' && t.successors.length === 1 && t.successors[0].block === m;
@@ -52,9 +57,33 @@ export function sinkReturns(fn: Fn): boolean {
     if (brPreds.length === 0) {
       continue;
     }
-    // SHORT-CIRCUIT GATE: at least one branch-pred must be a shared block (≥2 preds of its own). A simple
-    // single-condition select has only single-pred arms and is left as a merge variable (which matches).
-    if (!brPreds.some((p) => (preds.get(p)?.length ?? 0) >= 2)) {
+    // SHORT-CIRCUIT GATE, in two shapes — the chain must be visible in the CFG or in the value domain.
+    //
+    //   (a) UNFUSED: at least one branch-pred is a shared block (≥2 preds of its own) — the common
+    //       early-exit reached from every condition of the chain.
+    //   (b) FUSED: `branch-shortcircuit` (raise/shortcircuit.ts) rewrites the head's condition into a
+    //       `logic_and`/`logic_or` and collapses the second condition block into it. That leaves both
+    //       arms single-pred, so (a) cannot see the chain any more — but the CONNECTIVE is now the
+    //       record of the ≥2 conditions the shared arm used to be. That pass runs in pre-recovery,
+    //       i.e. BEFORE this one, so on `ifand`/`and3` shape (b) is the only one that ever fires.
+    //
+    //       The connective ALONE is not enough, and the extra requirement is BOTH arms being real
+    //       blocks (≥2 `br` preds). `return a || b` (synthetic:lor) also ends up as a `cond_br` on a
+    //       `logic_or`, but it is a value-merge: one edge runs from the head STRAIGHT into the merge,
+    //       so the merge has a single `br` pred. Sinking it replaces the merge variable that
+    //       byte-matches — measured, it cost that row its match. A two-armed diamond is what
+    //       distinguishes `if (a && b) return X; return Y;` from every value-merge.
+    //
+    // A simple single-condition select is excluded by both arms of the gate for the same reason:
+    // `clamp0`/`sel` reach their merge on the `cond_br` edge itself, so they too have exactly one
+    // `br` pred, and their condition is a bare icmp rather than a connective.
+    const selectedByConnective = (p: Block) =>
+      (preds.get(p) ?? []).some((q) => {
+        const t = q.ops[q.ops.length - 1];
+        return t.opcode === 'cond_br' && CONNECTIVES.has(defs.get(t.operands[0])?.opcode ?? '');
+      });
+    const fusedDiamond = brPreds.length >= 2 && brPreds.some(selectedByConnective);
+    if (!brPreds.some((p) => (preds.get(p)?.length ?? 0) >= 2) && !fusedDiamond) {
       continue;
     }
     for (const p of brPreds) {
