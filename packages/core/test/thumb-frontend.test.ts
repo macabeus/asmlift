@@ -477,33 +477,45 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     expect(() => decompile('f', below, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
   });
 
-  test('a call only disables the slot model when it could be RECEIVING a stack argument', () => {
-    // The first cut refused the model for any function containing a call, because agbcc puts
-    // outgoing arguments 5+ at the bottom of the frame and modelling them as locals deletes them.
-    // That is far broader than the hazard: a function whose every slot is read back before any call
-    // has no outgoing area at all. Two conditions replace the blanket refusal — see slotModelSafe.
-    //
-    // Reloaded before the call, so the slot is a local and the model applies:
-    const localAcrossCall =
-      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tldr\tr4, [sp]\n\tbl\tg\n' +
+  test('the outgoing area is PROVEN from callee arity when the convention can answer', () => {
+    // `4 * max(0, arity - 4)` per call, largest over all calls, is entailed by AAPCS. With every
+    // callee's arity known there is nothing to guess: an empty outgoing area means every slot in
+    // the frame is private, calls or not; a non-empty one still declines, because consuming those
+    // stores as call operands is the dual capability and is not built.
+    const body =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tbl\tg\n\tldr\tr4, [sp]\n' +
       '\tadd\tr0, r4, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
-    // (the call's arity is fallbackArgc's guess and not this test's subject — what matters is that
-    // the function LIFTS, where the blanket refusal declined it)
-    expect(decompile('f', localAcrossCall, ARMV4T_AGBCC).source).toBe(
-      's32 f(s32 a0) {\n    g(a0);\n    return a0 + 1;\n}\n',
+    // g takes 4 -> outgoing area empty -> the slot is a local, even though it is live across a call
+    expect(decompile('f', body, ARMV4T_AGBCC, { prototypes: { g: { params: 4 } } }).source).toContain('g(');
+    // g takes 5 -> the frame HAS an outgoing area -> refuse
+    expect(() => decompile('f', body, ARMV4T_AGBCC, { prototypes: { g: { params: 5 } } })).toThrow(
+      /stack pointer used as data/,
     );
-    // (a) stored and never read back anywhere — the signature of an outgoing argument, including
-    // one set up in a different block from its call
+  });
+
+  test('with no arity to prove it, a slot store may not reach a call unread', () => {
+    // The fallback for a caller with no prototypes at all. It is calibration, not proof, so it is
+    // deliberately conservative: a store reaching a call unread refuses whether or not a label
+    // happens to sit in between. Making the scan block-local instead admitted the cross-block case,
+    // where the accept/refuse boundary was a LABEL rather than anything semantic.
+    const sameBlock =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tbl\tg\n\tldr\tr4, [sp]\n' +
+      '\tadd\tr0, r4, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    const crossBlock =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tcmp\tr0, #0\n\tbeq\t.L2\n.L2:\n\tbl\tg\n' +
+      '\tldr\tr4, [sp]\n\tadd\tr0, r4, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(() => decompile('f', sameBlock, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+    expect(() => decompile('f', crossBlock, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+    // …and a store never read back at all is the plainest signature of an argument
     const neverRead =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tb\t.L2\n.L2:\n\tbl\tg\n' +
       '\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
     expect(() => decompile('f', neverRead, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
-    // (b) reloaded LATER, so (a) passes — but the store still reaches a call unread, which is
-    // exactly where agbcc puts argument setup
-    const readsAfterCall =
-      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tbl\tg\n\tldr\tr4, [sp]\n' +
+    // control: a slot read back BEFORE the call is a local, and lifts
+    const readFirst =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tldr\tr4, [sp]\n\tbl\tg\n' +
       '\tadd\tr0, r4, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
-    expect(() => decompile('f', readsAfterCall, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+    expect(decompile('f', readFirst, ARMV4T_AGBCC).source).toContain('g(');
   });
 
   test('a gap in the slots read still yields ABI-correct offsets', () => {

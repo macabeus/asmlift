@@ -19,7 +19,7 @@ import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
 import { type Prototypes, protoArity } from '../proto';
 import { RUNTIME_HELPERS } from '../raise/softdiv';
-import { type SymbolMap, lookupInterior, lookupSymbol } from '../symbols';
+import { type SymbolMap, lookupInterior, lookupSymbol, symbolsByName } from '../symbols';
 import type { TargetDescription } from '../target';
 import type { AsmData } from './asmdata';
 import { pushSwitchBr } from './emit';
@@ -1554,59 +1554,91 @@ export function lift(
     // offsets are inside the frame and nothing this function does ever reloads them, so modelling
     // them as locals makes them dead defs and DCE deletes them — the arguments vanish from the call
     // with no diagnostic. Ground truth: sa3's CreateEntity_Platform_0_0 (platform.c:734) forwards
-    // SIX arguments and came out as `CreateEntity_Platform(0, 0, a0, (u16)a1)`.
+    // SIX arguments and came out as `CreateEntity_Platform(0, 0, a0, (u16)a1)`. "Inside my frame"
+    // does not mean "private": the outgoing area belongs to the callee, which may even assign to a
+    // stack parameter.
     //
-    // "Inside my frame" therefore does not mean "private": the outgoing area belongs to the callee,
-    // which may even assign to a stack parameter. Consuming those stores as call arguments is the
-    // dual of the incoming-argument capability and is not built — so what this can do is prove that
-    // a function HAS no outgoing area, and refuse otherwise. Two conditions, and they cover
-    // different escapes:
+    // How big is that area? The CALLING CONVENTION answers exactly — `4 * max(0, arity - 4)` per
+    // call, and the largest over all calls. When every callee's arity is known this is a proof, and
+    // the region below it is simply not a local. Arity comes from a supplied prototype, from a known
+    // runtime helper, or from the project's own DWARF via the symbol map (only CALLEE signatures
+    // transfer — see symbols.ts).
     //
-    //   (a) every slot store must be reloaded somewhere in this function. An outgoing argument is
-    //       read by the CALLEE, never by the caller, so a store this function never reads back is
-    //       the signature of one. This is what catches an argument set up in a different block from
-    //       its call.
-    //   (b) no block may hold a slot store followed by a `bl` with no reload of that offset in
-    //       between. This catches the store that IS reloaded later for an unrelated purpose and so
-    //       slips past (a) — and it is where agbcc actually puts argument setup, immediately before
-    //       the call.
-    //
-    // (b) is calibration, not proof: it assumes argument setup is not hoisted out of the calling
-    // block, which is true of every agbcc function in the corpus but is not a theorem. (a) is the
-    // one that holds unconditionally, and the two are kept together for that reason. A call-free
-    // function is unaffected by either — with no call there is no outgoing area, and a never-reloaded
-    // store there is an ordinary dead local.
-    const calls = asmBlocks.some((ab) => ab.instrs.some((i) => i.mnemonic === 'bl' || i.mnemonic === 'blx'));
-    if (calls) {
-      const slotAcc = (ins: Instr) => {
-        const a = spMemAccess(ins);
-        return a && !a.regOff && a.width === 4 && a.off >= 0 && a.off < localArea ? a.off : null;
-      };
-      const isStore = (ins: Instr) => /^str/.test(ins.mnemonic);
-      const reloaded = new Set<number>();
-      for (const ab of asmBlocks) {
-        for (const ins of ab.instrs) {
-          const off = slotAcc(ins);
-          if (off !== null && !isStore(ins)) {
-            reloaded.add(off);
-          }
+    // The fallback below is NOT a proof and is labelled as one place, not spread through the file.
+    // It exists because a caller may have no prototypes at all (the playground), and refusing every
+    // calling function there costs the whole capability.
+    const callees: string[] = [];
+    for (const ab of asmBlocks) {
+      for (const ins of ab.instrs) {
+        if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') {
+          callees.push(ins.ops[0] ?? '');
         }
       }
-      for (const ab of asmBlocks) {
-        const pending = new Set<number>();
-        for (const ins of ab.instrs) {
-          const off = slotAcc(ins);
-          if (off !== null) {
-            if (isStore(ins)) {
-              if (!reloaded.has(off)) {
-                return false; // (a) stored and never read back — an argument, or unrepresentable
-              }
-              pending.add(off);
-            } else {
-              pending.delete(off);
+    }
+    if (callees.length > 0) {
+      const byName = symbols ? symbolsByName(symbols) : null;
+      let proven = 0;
+      let allKnown = true;
+      for (const c of callees) {
+        const n =
+          protoArity(prototypes[c]) ?? protoArity(RUNTIME_HELPERS[c]) ?? byName?.get(c)?.signature?.params.length;
+        if (n === undefined) {
+          allKnown = false;
+          break;
+        }
+        proven = Math.max(proven, 4 * Math.max(0, n - target.argRegs.length));
+      }
+      if (allKnown) {
+        // PROVEN. A frame whose outgoing area is non-empty still declines: consuming those stores as
+        // call operands is the dual capability and is not built. An empty one means every slot in
+        // this frame is genuinely private, calls or not.
+        if (proven > 0) {
+          return false;
+        }
+      } else {
+        // UNPROVEN — a callee whose arity nothing declares. Two conditions stand in, and they cover
+        // different escapes:
+        //   (a) every slot store must be reloaded somewhere in this function. An outgoing argument
+        //       is read by the CALLEE, never by the caller, so a store never read back is the
+        //       signature of one — including one set up in a different block from its call.
+        //   (b) no block may hold a slot store followed by a `bl` with no reload of that offset in
+        //       between; that is where agbcc puts argument setup.
+        // Neither is sound on its own and the pair is not either: (b) is block-local, so a store in
+        // one block reaching a call in the next passes it, and the accept/refuse boundary there is a
+        // LABEL rather than anything semantic. Measured on 2686 sa3+klonoa functions this admits 15
+        // functions and loses none, and no newly-admitted function has a store reaching a call
+        // unread even scanning across labels — but that is calibration against one compiler's
+        // scheduling, which is why it is confined to the case where the convention cannot answer.
+        const slotAcc = (ins: Instr) => {
+          const a = spMemAccess(ins);
+          return a && !a.regOff && a.width === 4 && a.off % 4 === 0 && a.off >= 0 && a.off < localArea ? a.off : null;
+        };
+        const isStore = (ins: Instr) => /^str/.test(ins.mnemonic);
+        const reloaded = new Set<number>();
+        for (const ab of asmBlocks) {
+          for (const ins of ab.instrs) {
+            const off = slotAcc(ins);
+            if (off !== null && !isStore(ins)) {
+              reloaded.add(off);
             }
-          } else if ((ins.mnemonic === 'bl' || ins.mnemonic === 'blx') && pending.size > 0) {
-            return false; // (b) a store reaches a call unread
+          }
+        }
+        const pending = new Set<number>();
+        for (const ab of asmBlocks) {
+          for (const ins of ab.instrs) {
+            const off = slotAcc(ins);
+            if (off !== null) {
+              if (isStore(ins)) {
+                if (!reloaded.has(off)) {
+                  return false; // (a)
+                }
+                pending.add(off);
+              } else {
+                pending.delete(off);
+              }
+            } else if ((ins.mnemonic === 'bl' || ins.mnemonic === 'blx') && pending.size > 0) {
+              return false; // (b)
+            }
           }
         }
       }
