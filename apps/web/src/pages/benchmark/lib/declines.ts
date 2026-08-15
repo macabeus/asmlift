@@ -21,7 +21,7 @@ export const DECLINE_CLASSES: DeclineClass[] = [
   {
     key: 'address-taken-local',
     label: 'Address-taken stack locals (&local escapes)',
-    pattern: /address of a stack local is taken|address-taken locals are not modelled/,
+    pattern: /address-taken stack local|address of a stack local is (taken|computed)/,
   },
   {
     key: 'outgoing-stack-args',

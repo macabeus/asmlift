@@ -153,7 +153,7 @@ export interface SwitchCase {
 export interface SFn {
   name: string;
   params: { name: string; type: IrType }[];
-  locals: { name: string; type: IrType }[]; // recovered locals, declared at function top
+  locals: { name: string; type: IrType; volatile?: true }[]; // recovered locals, declared at function top
   /** project globals referenced with a known declaration shape (symbol map) — typed for the
    *  legalization env (exprCType) but NEVER declared by a backend: the project's own headers
    *  declare them, exactly like every other global name asmlift emits. */

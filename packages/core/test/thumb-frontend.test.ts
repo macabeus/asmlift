@@ -624,8 +624,11 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tmov\tr4, sp\n\tmov\tr0, #0\n\tstrh\tr0, [r4]\n' +
       '\tldr\tr2, .L1\n\tmov\tr1, sp\n\tstr\tr1, [r2]\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n' +
       '.L1:\n\t.word\t0x40000D4\n';
+    // `volatile` because the address ESCAPES: gcc-2.9 deletes a store to a non-volatile local
+    // nothing in-function reads (measured — the recompiled loop loaded and never stored), and the
+    // reference idiom's own spelling is `vu16 tmp` for exactly that reason.
     expect(decompile('f', dmaFill, ARMV4T_AGBCC).source).toBe(
-      's32 f(void) {\n    u16 sp0;\n    sp0 = 0;\n    *(s32 *)67109076 = &sp0;\n    return 0;\n}\n',
+      's32 f(void) {\n    volatile u16 sp0;\n    sp0 = 0;\n    *(s32 *)67109076 = &sp0;\n    return 0;\n}\n',
     );
     // …and the object co-exists with SSA slots at higher offsets, each model owning its own bytes
     const mixed =
@@ -633,7 +636,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       '\tldr\tr2, .L1\n\tstr\tr4, [r2]\n\tldr\tr0, [sp, #0x4]\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n' +
       '.L1:\n\t.word\t0x40000D4\n';
     const src = decompile('f', mixed, ARMV4T_AGBCC).source;
-    expect(src).toContain('u16 sp0;');
+    expect(src).toContain('volatile u16 sp0;');
     expect(src).toContain('&sp0');
     expect(src).toContain('return a0;'); // the [sp,#4] slot is still a transparent SSA value
   });

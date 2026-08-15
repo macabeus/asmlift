@@ -2590,6 +2590,13 @@ export function lift(
       // Taint = values that may hold the object's address, closed over phis: a tainted edge arg
       // taints the receiving block param. (A phi mixing the address with a non-address would taint
       // the param and then fail the use judgement below — mixing is not vouched for.)
+      for (const op of laddrs) {
+        if ((op.attrs.off as number) !== 0) {
+          // the audit's offset arithmetic, overlap window and naming all assume the frame base;
+          // if a computed capture ever mints off!==0, this line is what keeps it loud
+          fail(`a capture at frame offset ${op.attrs.off} — only the frame base is modelled`);
+        }
+      }
       const taint = new Set<Value>(laddrs.flatMap((o) => o.results));
       for (let changed = true; changed;) {
         changed = false;
@@ -2609,6 +2616,7 @@ export function lift(
       }
       // Judge every use of a tainted value.
       const accesses: { width: number; signed: boolean }[] = [];
+      let escapes = false;
       for (const blk of irBlocks) {
         for (const op of blk.ops) {
           op.operands.forEach((v, idx) => {
@@ -2634,7 +2642,8 @@ export function lift(
               return;
             }
             if ((op.opcode === 'store' && idx === 1) || op.opcode === 'call') {
-              return; // the address ESCAPES as a value — the point of the capability
+              escapes = true; // the address ESCAPES as a value — the point of the capability
+              return;
             }
             fail(`the captured address flows into \`${op.opcode}\` — not an access, an escape, or a phi`);
           });
@@ -2659,9 +2668,17 @@ export function lift(
           fail(`the object at [0,${width}) overlaps the SSA slot at [sp,#${off}] — one byte, two models`);
         }
       }
-      // Proven. Stamp what the structurer needs: the declaration and the rendering name.
+      // Proven. Stamp the MACHINE FACTS the audit established — width and signedness are what the
+      // accesses used, so the declaration downstream is a fact, not a guess. The C-level NAME is
+      // deliberately NOT chosen here: identifiers live in the structurer's namespace (params,
+      // locals, globals, the symbol map), which the frontend cannot see — a frontend-chosen `sp0`
+      // silently shadowed a project global of the same name.
+      // `volatile` iff the address escapes: gcc-2.9 DELETES a store to a non-volatile local nothing
+      // in-function reads — measured, the recompiled loop loaded the value and never stored it —
+      // and the reference idiom's own spelling is `vu16 tmp` for exactly that reason. An object
+      // whose address never leaves the function needs no volatile and must not pay its codegen.
       for (const op of laddrs) {
-        op.attrs = { ...op.attrs, name: 'sp0', width, signed };
+        op.attrs = { ...op.attrs, width, signed, ...(escapes ? { volatile: true } : {}) };
       }
     }
   }

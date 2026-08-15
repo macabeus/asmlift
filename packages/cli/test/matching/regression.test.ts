@@ -62,7 +62,7 @@ function runFixture(fx: DecompFixture) {
     expect(r.source).toBe(fx.expectSource);
   }
 
-  const s = runner.score(r.source, fx.symbol, obj);
+  const s = runner.score((fx.candidatePrelude ?? '') + r.source, fx.symbol, obj);
   if (s.match !== (fx.expectMatch ?? true)) {
     console.log(`emitted C for ${fx.symbol}:\n${r.source}`);
     console.log('objdiff:', JSON.stringify(s));

@@ -676,6 +676,47 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
   // widths is a union/type-pun, which the downstream struct-layout recovery rejects LOUD
   // ("overlapping fields ... unions not modelled") before this classification is consumed — so a
   // width collision at off-0 declines honestly rather than reaching a wrong bare-`gSym` emission.
+  // FRAME-LOCAL OBJECT NAMES (laddr). Minted HERE, not in the frontend, because identifiers live
+  // in this layer's namespace: params, locals, every gaddr symbol, and the project's symbol map —
+  // none of which the frontend can see. A frontend-chosen `sp0` silently shadowed a project global
+  // of the same name. `sp<off>` uniquified with underscores until free; one name per offset.
+  const laddrName = (() => {
+    const taken = new Set<string>();
+    if (symbols) {
+      for (const [n] of symbols) {
+        taken.add(n);
+      }
+    }
+    for (const b of fn.blocks) {
+      for (const op of b.ops) {
+        if (op.opcode === 'gaddr') {
+          taken.add(op.attrs.sym as string);
+        }
+      }
+    }
+    const byOff = new Map<number, string>();
+    const names = new Map<Op, string>();
+    for (const b of fn.blocks) {
+      for (const op of b.ops) {
+        if (op.opcode !== 'laddr') {
+          continue;
+        }
+        const off = op.attrs.off as number;
+        let n = byOff.get(off);
+        if (n === undefined) {
+          n = `sp${off}`;
+          while (taken.has(n)) {
+            n += '_';
+          }
+          taken.add(n);
+          byOff.set(off, n);
+        }
+        names.set(op, n);
+      }
+    }
+    return names;
+  })();
+
   const scalarGlobals = new Set<string>();
   {
     const offsets = new Map<string, Set<number>>();
@@ -685,11 +726,12 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
         const gaddrSym = (v: Value) => {
           const dv = defs.get(v);
           // laddr participates identically: `sp0` is scalar-spelled at off 0 and cast-spelled
-          // anywhere else, exactly as a global of its shape would be
+          // anywhere else, exactly as a global of its shape would be — by its MINTED name
+          // (laddrName): the op carries no name attr, that namespace is this layer's
           return dv?.opcode === 'gaddr'
             ? (dv.attrs.sym as string)
             : dv?.opcode === 'laddr'
-              ? (dv.attrs.name as string)
+              ? (laddrName.get(dv) ?? null)
               : null;
         };
         if (op.opcode === 'load' || op.opcode === 'store') {
@@ -1658,9 +1700,10 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
       return { k: 'call', fn: d.attrs.target as string, args: d.operands.map(e) };
     }
     if (d.opcode === 'laddr') {
-      // gaddr's local twin: the address of the frame-local object the Thumb frontend proved and
-      // named (frame-object audit). Renders `&sp0`; the object itself is declared in `locals`.
-      return { k: 'addr', name: d.attrs.name as string };
+      // gaddr's local twin: the address of the frame-local object the Thumb frontend PROVED
+      // (frame-object audit — width/signed are stamped machine facts). The NAME is this layer's:
+      // see laddrName. Renders `&sp0`; the object itself is declared in `locals`.
+      return { k: 'addr', name: laddrName.get(d)! };
     }
     if (d.opcode === 'gaddr') {
       // A promoted CODE symbol (frontend `code: true`) is a function pointer stored as an
@@ -2288,10 +2331,13 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
             .flatMap((b) => b.ops)
             .filter((op) => op.opcode === 'laddr')
             .map((op) => [
-              op.attrs.name as string,
+              laddrName.get(op)!,
               {
-                name: op.attrs.name as string,
+                name: laddrName.get(op)!,
                 type: T.int(((op.attrs.width as number) ?? 4) * 8, (op.attrs.signed as boolean) ?? false),
+                // an ESCAPED address makes every store observable (the DMA hardware reads it);
+                // without volatile, gcc-2.9 deletes a store to a local nothing in-function reads
+                ...(op.attrs.volatile === true ? { volatile: true as const } : {}),
               },
             ]),
         ).values(),
