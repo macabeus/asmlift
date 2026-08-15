@@ -1289,7 +1289,13 @@ export function lift(
   // exact and needs no CFG reasoning. Every case that would need more declines.
   //
   // `push {a,b,c}` deepens by 4 per register; `sub sp, #N` and `add sp, sp, #-N` deepen by N.
-  const spDelta = (ins: { mnemonic: string; ops: string[] }): number => {
+  //
+  // Returns null when the depth CANNOT be computed exactly. The whole capability rests on the depth
+  // being exact, so an approximation is never acceptable: understate the frame and a local sits
+  // above the computed top and is minted as a parameter reading uninitialised stack. A null
+  // poisons the depth for the rest of the block (spDepthKnown), which disables argument recovery
+  // and leaves every `[sp,#N]` to decline as before.
+  const spDelta = (ins: { mnemonic: string; ops: string[] }): number | null => {
     const m = ins.mnemonic;
     if (m === 'push' || m === 'pop') {
       // expandRegList, NOT a comma count: `push {r4-r7, lr}` is FIVE registers, and counting it as
@@ -1297,15 +1303,23 @@ export function lift(
       // parameter reading uninitialised stack. Caught by a probe, not by the corpus: agbcc emits no
       // range pushes and 0 of the 743 benchmark rows contain one, but GNU as accepts them and the
       // disassembly path can produce them.
-      const n = expandRegList(
+      const list = expandRegList(
         ins.ops
           .join(',')
           .replace(/[{}]/g, '')
           .split(',')
           .map((r) => r.trim())
           .filter(Boolean),
-      ).filter((s) => !Number.isNaN(regNum(s))).length;
-      return (m === 'push' ? 1 : -1) * 4 * n;
+      );
+      // Every token must be a DEFINITE register. expandRegList deliberately leaves an
+      // alias-endpoint range (`{r4-lr}`) unexpanded, surfacing `lo, hi, rawToken` so a consumer
+      // sees the leftover `-` and refuses — the ldm/stm arm does exactly that. Counting the two
+      // endpoints instead would undercount `{r4-lr}` as two registers; an unknown alias would slip
+      // through a NaN test too, since regNum returns undefined and Number.isNaN(undefined) is false.
+      if (!list.every((s) => /^r\d+$/.test(s) || s in REG_NUM)) {
+        return null;
+      }
+      return (m === 'push' ? 1 : -1) * 4 * list.length;
     }
     if ((m === 'add' || m === 'sub') && isSpReg(ins.ops[0])) {
       const off = ins.ops[2] ?? ins.ops[1];
@@ -1353,6 +1367,7 @@ export function lift(
     // Bytes the frame has grown since function entry, tracked only through this block's linear
     // instruction order. Meaningful for the entry block; elsewhere a `[sp,#N]` access declines.
     let spDepth = 0;
+    let spDepthKnown = true;
 
     // TRUSTWORTHINESS GUARD (mirrors the MIPS/PPC frontends): an unmodelled instruction must not
     // silently drop its destination register — emit an honest `opaque`: dead ⇒ it vanishes; live ⇒
@@ -1441,7 +1456,12 @@ export function lift(
       if (FLAG_SETTING.has(ins.mnemonic) && /^r[0-7]$/.test(reg(ins.ops[0] ?? ''))) {
         pendingCmp = null;
       }
-      spDepth += spDelta(ins);
+      const delta = spDelta(ins);
+      if (delta === null) {
+        spDepthKnown = false;
+      } else {
+        spDepth += delta;
+      }
       const [a, b, c] = ins.ops;
       switch (ins.mnemonic) {
         case 'mov':
@@ -1830,10 +1850,27 @@ export function lift(
           //     headerless FRAGMENT whose prologue was sliced off is byte-identical to that, and
           //     there its slots are locals. Minting a parameter from one would be exactly the
           //     silent-wrong-answer trade this frontend refuses, so an unestablished frame declines.
-          if (isSpReg(base) && regOff === undefined && bi === 0 && preds[0].length === 0 && spDepth > 0) {
+          if (
+            isSpReg(base) &&
+            regOff === undefined &&
+            bi === 0 &&
+            preds[0].length === 0 &&
+            spDepthKnown &&
+            spDepth > 0
+          ) {
             const rel = off - spDepth;
             const index = target.argRegs.length + rel / 4;
             if (width === 4 && rel >= 0 && rel % 4 === 0 && index < MAX_STACK_ARG_INDEX) {
+              // Mint every slot from the first stack argument up to this one, not just this one.
+              // Downstream naming is POSITIONAL (structure.ts), so a function that reads argument 6
+              // and never touches argument 5 would otherwise emit a signature whose single stack
+              // parameter sits at argument 5's offset — a silently wrong signature, not a
+              // conservative one. Reading slot k proves the caller pushed 4..k, because the
+              // argument area is contiguous and slot 4 is at the lowest offset, so minting the
+              // intervening keys is sound rather than a guess.
+              for (let j = target.argRegs.length; j < index; j++) {
+                readVar(stackArgKey(j), bi);
+              }
               writeData(reg(a), bi, readVar(stackArgKey(index), bi));
               break;
             }

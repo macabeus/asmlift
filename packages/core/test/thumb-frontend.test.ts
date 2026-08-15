@@ -231,6 +231,23 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     expect(() => decompile('f', local, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
   });
 
+  test('a range the expander cannot expand poisons the depth instead of guessing it', () => {
+    // expandRegList leaves an alias-endpoint range (`{r4-lr}`) unexpanded on purpose, surfacing
+    // `lo, hi, rawToken` so a consumer refuses. Counting the two endpoints would call this frame 8
+    // bytes and mint the local at [sp,#8] as a parameter. The depth must be EXACT or unknown.
+    expect(() => decompile('f', 'f:\n\tpush\t{r4-lr}\n\tldr\tr0, [sp, #0x8]\n\tbx\tlr\n', ARMV4T_AGBCC)).toThrow(
+      /stack pointer used as data/,
+    );
+  });
+
+  test('a gap in the slots read still yields ABI-correct offsets', () => {
+    // frame 8, so [sp,#0xc] is argument 6 (index 5) and argument 5 is never read. Naming downstream
+    // is POSITIONAL, so minting only the slot that was read would put the parameter at argument 5's
+    // offset — silently the wrong signature. Reading slot k proves the caller pushed 4..k.
+    const gap = 'f:\n\tpush\t{r4, lr}\n\tldr\tr0, [sp, #0xc]\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(decompile('f', gap, ARMV4T_AGBCC).source).toBe('s32 f(s32 a0, s32 a1) {\n    return a1;\n}\n');
+  });
+
   // Each of these is a refusal, and each keeps a LOCAL from being minted as a parameter.
   test('everything the frame walk cannot vouch for still declines', () => {
     const spAsData = /stack pointer used as data/;
