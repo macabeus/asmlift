@@ -28,8 +28,22 @@ export interface SsaBuilder {
   writeVar(reg: string, b: number, v: Value): void;
   /** Mark block `b` fully emitted (terminator pushed); seals any now-ready successors. */
   markFilled(b: number): void;
-  /** Live-in parameter value → the ABI register it arrived on (for calling-convention order). */
+  /** Live-in parameter value → the key it arrived on (for calling-convention order). Usually an
+   *  ABI register name, but a frontend's virtual key (see the module header) ranks here too. */
   paramReg: Map<Value, string>;
+  /** Assert that block `b` takes a parameter for `key`, whether or not anything reads it.
+   *
+   *  `readVar` cannot express this. It asks "what value does `key` hold here?", so a key the block
+   *  DEFINES before any read answers with that local definition and no parameter is created — to it
+   *  "never read" and "written before first read" are the same thing. When a calling convention
+   *  proves an argument exists, that is an obligation on the SIGNATURE, independent of whether the
+   *  body happens to use it, so it needs its own verb.
+   *
+   *  Never touches the block's definitions: the parameter is added and left unused, so any local
+   *  value already flowing keeps flowing. Only meaningful on a block with no predecessors —
+   *  elsewhere a parameter is a phi whose position is aligned with its predecessors' terminator
+   *  args, and appending an unpaired one would corrupt that. */
+  ensureParam(key: string, b: number): void;
   /** Whether `reg` has a definition reaching block `b` (best-effort call-arity heuristic). */
   hasReachingDef(reg: string, b: number, seen?: Set<number>): boolean;
   /** Remove trivial phis; call once every block is filled. */
@@ -37,6 +51,12 @@ export interface SsaBuilder {
 }
 
 /** `preds` is per-EDGE (see the module header): one entry per CFG edge into each block. */
+// VARIABLE NAMES ARE NOT ALWAYS MACHINE REGISTERS. `readVar`/`writeVar` key on an arbitrary string,
+// and frontends mint VIRTUAL keys for storage the ISA has no register for — MIPS `sp@<off>` for a
+// stack slot (frontend/mips.ts), Thumb `@sarg<k>` for an incoming stack argument (frontend/thumb.ts).
+// A virtual key must be outside its ISA's register grammar so it cannot collide with a real one, and
+// a key read with no reaching def becomes a function PARAMETER by the live-in path below — which is
+// how both of those capabilities get their parameters without a new opcode or pass.
 export function makeSsaBuilder(name: string, blockCount: number, preds: number[][]): SsaBuilder {
   const irBlocks: Block[] = Array.from({ length: blockCount }, () => ({ params: [] as Value[], ops: [] }));
   const fn: Fn = { name, blocks: irBlocks };
@@ -47,6 +67,14 @@ export function makeSsaBuilder(name: string, blockCount: number, preds: number[]
   const incompletePhis: Array<Map<string, Value>> = irBlocks.map(() => new Map());
   const phiBlock = new Map<Value, number>();
   const paramReg = new Map<Value, string>();
+  // Parameters created by ensureParam that nothing has read yet. They are deliberately NOT in
+  // `defs`: a parameter asserted because a calling convention proves it exists is not evidence that
+  // a VALUE reaches anything, and writing one into `defs` would say it does. That distinction is
+  // load-bearing — `hasReachingDef` feeds `fallbackArgc`, so a def here silently raises the guessed
+  // arity of every prototype-less call in the function, making it pass registers the calling block
+  // never set up (`unknown(1)` became `unknown(1, a1, a2, a3)`). The first read adopts the value
+  // from here instead of minting a second parameter for the same key.
+  const obligedParams: Array<Map<string, Value>> = irBlocks.map(() => new Map());
 
   // `preds` lists an entry per CFG EDGE; these are the distinct predecessor BLOCKS.
   const distinctPreds = (b: number): number[] => [...new Set(preds[b])];
@@ -74,6 +102,14 @@ export function makeSsaBuilder(name: string, blockCount: number, preds: number[]
     const ps = distinctPreds(b);
     if (ps.length === 0) {
       // live-in with no predecessor: an incoming argument register → function parameter.
+      // If one was already asserted for this key (ensureParam), adopt it — minting a second
+      // parameter for the same key would put the key in the signature twice.
+      const obliged = obligedParams[b].get(reg);
+      if (obliged !== undefined) {
+        obligedParams[b].delete(reg);
+        defs[b].set(reg, obliged);
+        return obliged;
+      }
       const p = mkValue(T.unk(32));
       irBlocks[b].params.push(p);
       defs[b].set(reg, p);
@@ -130,6 +166,25 @@ export function makeSsaBuilder(name: string, blockCount: number, preds: number[]
   };
   sealReadyBlocks(); // seals the entry (no predecessors) up front
 
+  // See the interface docs. Two cases, and the split is the whole point: when nothing defines the
+  // key, the ordinary live-in path already does exactly the right thing; when something does, a
+  // parameter still has to exist for the signature, and it must be added WITHOUT redirecting the
+  // dataflow to it.
+  const ensureParam = (key: string, b: number): void => {
+    if (preds[b].length > 0) {
+      return; // a parameter here is a phi; see the precondition on the interface
+    }
+    for (const p of irBlocks[b].params) {
+      if (paramReg.get(p) === key) {
+        return; // already a parameter, however it got there
+      }
+    }
+    const p = mkValue(T.unk(32));
+    irBlocks[b].params.push(p);
+    paramReg.set(p, key); // ranked by the ABI sort like any other parameter
+    obligedParams[b].set(key, p);
+  };
+
   const hasReachingDef = (reg: string, b: number, seen = new Set<number>()): boolean => {
     if (defs[b].has(reg)) {
       return true;
@@ -147,6 +202,7 @@ export function makeSsaBuilder(name: string, blockCount: number, preds: number[]
     readVar,
     writeVar,
     paramReg,
+    ensureParam,
     hasReachingDef,
     markFilled: (b: number) => {
       filled[b] = true;

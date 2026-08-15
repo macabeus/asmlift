@@ -94,6 +94,15 @@ const LEGACY_MNEMONICS: Readonly<Record<string, string>> = Object.assign(Object.
   stmea: 'stmia',
 });
 
+// An offset far above the frame cannot be an argument — agbcc passes at most a handful on the
+// stack, and an absurd index would mint a signature with hundreds of parameters from one bad
+// offset. 16 is well past any real agbcc call and still refuses nonsense loudly.
+//
+// It bounds TOTAL arity, register arguments included (12 stack slots on a 4-register ABI), because
+// that is the unit the index it is compared against is counted in. A refusal bound, not an ABI
+// fact: nothing may read it as a statement about how many arguments the convention allows.
+const MAX_RECOVERED_ARITY = 16;
+
 function canonicalMnemonic(mn: string): string {
   return LEGACY_MNEMONICS[mn] ?? mn;
 }
@@ -178,7 +187,11 @@ const imm = (s: string) => parseInt(s.replace(/^#/, ''), s.includes('0x') ? 16 :
 // ambiguous and left UNEXPANDED — but its endpoints ARE surfaced as separate tokens so pc/lr
 // detection sees them, and any consumer that needs the exact list rejects the leftover `-` token
 // loudly rather than treating the fused range as one phantom register.
-const REG_NUM: Record<string, number> = { sp: 13, lr: 14, pc: 15 };
+// Null-prototype for the same reason LEGACY_MNEMONICS has one: this table is consulted with `in`
+// to decide whether a reglist token is a DEFINITE register, and an inherited key (`constructor`,
+// `toString`) answering true would let a junk token pass that test instead of poisoning the frame
+// depth. Unreachable from real assembly; the guarantee should not depend on that.
+const REG_NUM: Record<string, number> = Object.assign(Object.create(null), { sp: 13, lr: 14, pc: 15 });
 
 // Thumb-1 data-processing mnemonics that write the condition flags when their destination is a LOW
 // register — which is all of them on this ISA, `s`-suffix or not (the assembler picks the encoding).
@@ -245,6 +258,29 @@ function expandRegList(tokens: string[]): string[] {
     }
   }
   return out;
+}
+
+// Expand a register list and vouch that every entry is a DEFINITE register, or return null.
+//
+// The two consumers tokenize differently (the ldm/stm arm has a base register to slice off, the
+// frame walk does not), so each keeps its own tokenizing — but the VALIDATION has to be one
+// function, because the two hand-rolled versions had drifted to unequal strength. The frame walk
+// required every token to be a real register; the ldm/stm arm only rejected a leftover `-`, so
+// `ldmia r1!, {foo}` lifted and emitted `s32 f(s32 a0, s32 a1) { return a0; }` — a parameter
+// fabricated from a token that names no register, which is the phantom this frontend's guards
+// exist to prevent.
+//
+// An unexpandable range leaves its raw `-` token (see expandRegList) and fails here; so does an
+// unknown alias, which a `Number.isNaN(regNum(t))` test would MISS, since regNum returns undefined
+// for one and `Number.isNaN(undefined)` is false. An empty list is a malformed list, not an empty
+// transfer. Lowercase-only is deliberate and free: an uppercase mnemonic declines as unmodelled
+// long before either consumer runs.
+function definiteRegList(tokens: string[]): string[] | null {
+  const list = expandRegList(tokens);
+  if (list.length === 0) {
+    return null;
+  }
+  return list.every((s) => /^r\d+$/.test(s) || s in REG_NUM) ? list : null;
 }
 
 // Split an operand list on commas that are NOT inside brackets, so a memory operand like
@@ -1275,6 +1311,154 @@ export function lift(
     return readVar(r, b);
   };
 
+  // A virtual register key per incoming stack argument. Reading it goes through the ordinary Braun
+  // live-in path (frontend/ssa.ts), which turns a read with no reaching def into a function
+  // parameter — so this needs NO new representation, opcode or pass. The `@` cannot appear in a
+  // real register token, so the key cannot collide with one.
+  const stackArgKey = (index: number) => `@sarg${index}`;
+  // Defined beside its mint site on purpose: the format string and its parser drifted 650 lines
+  // apart in the first version, with the convention explained only at one end.
+  const stackArgIndex = (key: string): number | null => {
+    const m = /^@sarg(\d+)$/.exec(key);
+    return m ? +m[1] : null;
+  };
+
+  // INCOMING STACK ARGUMENTS (AAPCS). Args 1-4 arrive in r0-r3; args 5+ are pushed by the CALLER,
+  // so the callee reads them at `[sp, #N]` where N is at or above its own frame. Those are
+  // PARAMETERS, not locals — declining them as "sp used as data" refuses a calling convention.
+  //
+  // The frame depth is tracked by a linear walk of the ENTRY BLOCK only, which is
+  // why the gate is what it is: within one straight-line block the depth at each instruction is
+  // exact and needs no CFG reasoning. Every case that would need more declines.
+  //
+  // `push {a,b,c}` deepens by 4 per register; `sub sp, #N` and `add sp, sp, #-N` deepen by N.
+  //
+  // The walk, its two invariants and the predicate that reads them are ONE object on purpose. They
+  // were three loose pieces — a delta function, a pair of `let`s updated in the instruction loop,
+  // and a seven-parameter predicate taking the pair by value — and both bugs the second review pass
+  // found lived in the seams: an invariant the predicate's proof needed but only the loop could
+  // enforce, and a `0` returned for an unrecognised shape that only a guard in a third place made
+  // safe. Anything that changes how sp moves now has one place to change, and the proof it has to
+  // preserve is written next to the state it is about.
+  const makeFrameWalk = () => {
+    // Bytes the frame has grown since function entry, along this block's linear order only.
+    let depth = 0;
+    let depthKnown = true;
+
+    // Returns null whenever the depth cannot be computed exactly — including for any write to sp
+    // this does not model. The capability rests on the depth being EXACT, so an approximation is
+    // never acceptable: understate the frame and a local sits above the computed top and gets
+    // minted as a parameter reading uninitialised stack. A null poisons the depth for the rest of
+    // the block, which disables argument recovery and leaves every `[sp,#N]` to decline as before.
+    // Nothing here may return a NUMBER for a shape it merely failed to recognise.
+    const delta = (ins: { mnemonic: string; ops: string[] }): number | null => {
+      const m = ins.mnemonic;
+      if (m === 'push' || m === 'pop') {
+        // expandRegList, NOT a comma count: `push {r4-r7, lr}` is FIVE registers, and counting it as
+        // two makes the frame 12 bytes too shallow — which turns a genuine LOCAL into a fabricated
+        // parameter reading uninitialised stack. Caught by a probe, not by the corpus: agbcc emits no
+        // range pushes and 0 of the 743 benchmark rows contain one, but GNU as accepts them and the
+        // disassembly path can produce them.
+        // Counting comma tokens instead would undercount `{r4-lr}` as two registers, and an
+        // unexpandable range must poison the depth rather than be guessed at — definiteRegList owns
+        // both rules, and owns them for the ldm/stm arm too.
+        const list = definiteRegList(
+          ins.ops
+            .join(',')
+            .replace(/[{}]/g, '')
+            .split(',')
+            .map((r) => r.trim())
+            .filter(Boolean),
+        );
+        if (list === null) {
+          return null;
+        }
+        return (m === 'push' ? 1 : -1) * 4 * list.length;
+      }
+      if ((m === 'add' || m === 'sub') && isSpReg(ins.ops[0])) {
+        const off = ins.ops[2] ?? ins.ops[1];
+        if (off?.startsWith('#')) {
+          const v = imm(off);
+          return m === 'sub' ? v : -v;
+        }
+      }
+      // Any OTHER write to sp poisons the depth. This used to fall through to 0 — "no change" — for
+      // shapes it does not model (`add sp, r4`, `mov sp, rN`, `add sp, r0, #4`), which was safe only
+      // because writeData declines every one of them elsewhere. That is the same
+      // enumeration-of-arms mistake writeData itself exists to end, exported one function away: a
+      // number meaning "no change" is the wrong answer to "I do not understand this". Now the walk is
+      // self-sufficient — unknown ⇒ depth poisoned ⇒ decline — and writeData's refusal is an
+      // independent second guarantee instead of a load-bearing one.
+      if (isSpReg(ins.ops[0])) {
+        return null;
+      }
+      return 0;
+    };
+
+    return {
+      // Advance the walk over one instruction. Call for EVERY instruction, in order.
+      step(ins: { mnemonic: string; ops: string[] }): void {
+        const d = delta(ins);
+        if (d === null) {
+          depthKnown = false;
+        } else {
+          depth += d;
+        }
+        // sp ABOVE the incoming sp poisons the walk for the rest of the block, permanently — the
+        // premise argIndex's proof rests on. See the proof there for what it costs to omit.
+        if (depth < 0) {
+          depthKnown = false;
+        }
+      },
+
+      // Is `[sp, #off]` an incoming stack argument, and which one? `null` means NO — and every null is
+      // a DECLINE, because the caller falls through to readData's sp guard.
+      //
+      // Why a slot at or above the frame top cannot have been written by this function, which is the
+      // whole soundness argument: every sp-relative STORE declines (readData, via the str arm), and a
+      // `push` only ever writes strictly BELOW the current top. An argument slot is at or above the
+      // incoming sp, so no instruction here can have defined it — the value can only be the caller's.
+      //
+      // That second step needs sp to have stayed at or below where it came in — `depth >= 0` at every
+      // point of the walk — or a `push` reaches back up over the argument area and the conclusion is
+      // false:
+      //
+      //     add sp, sp, #8      ; sp = S+8
+      //     push {r4, r5, r6}   ; sp = S-4, and this WROTE r5 to S+0
+      //     ldr  r0, [sp, #4]   ; = S+0 — r5's slot, not the caller's argument
+      //
+      // The depth is back to a plausible +4 by the load, so nothing downstream can tell: it emitted
+      // `s32 f(s32 a0, …, s32 a4) { return a4; }`, the function's own incoming r5 handed back as
+      // argument 5. `pop {r4}; push {r4,r5}` gets there without an `add sp` at all, and a sliced
+      // fragment whose prologue was cut off is exactly this shape — which is the corpus this frontend
+      // reads. `step` enforces it, and never un-poisons: once sp has been above the line, a push during
+      // the excursion may have written the later slots too. This is a PREMISE, not a detail — leaving
+      // it unstated is what let the first version hand back a callee-saved register as an argument.
+      argIndex(addr: { base: string; off: number; regOff?: string }, width: number, bi: number): number | null {
+        const { base, off, regOff } = addr;
+        if (!isSpReg(base) || regOff !== undefined) {
+          return null; // not sp, or `[sp, rX]` — not a fixed argument slot
+        }
+        if (bi !== 0 || preds[0].length > 0) {
+          return null; // depth is exact only along the ENTRY block's linear order, and only when its
+          // params are parameters rather than phis
+        }
+        if (!depthKnown || depth <= 0) {
+          return null; // an unmeasurable frame, or none established: a headerless FRAGMENT whose
+          // prologue was sliced off looks identical to a frameless function, and there the slots are
+          // locals — minting one would be the silent-wrong trade this frontend refuses
+        }
+        if (width !== 4 || off < depth || (off - depth) % 4 !== 0) {
+          return null; // the argument area is word-granular; BELOW the top is a local, which is the
+          // separate slot-promotion capability
+        }
+        const index = target.argRegs.length + (off - depth) / 4;
+        return index < MAX_RECOVERED_ARITY ? index : null; // a wild offset must not mint a
+        // 400-parameter signature
+      },
+    };
+  };
+
   // The WRITE dual of readData, and the reason it exists is a lesson rather than a symmetry: the
   // first version of this guard checked sp in three decode arms (mov/add/sub) and its commit message
   // claimed "every write to sp declines". It did not — `lsl sp, r4, #2`, `neg sp, r4`, `mvn sp, r4`,
@@ -1302,6 +1486,9 @@ export function lift(
   const fillBlock = (ab: AsmBlock, bi: number) => {
     const irb = irBlocks[bi];
     let pendingCmp: { lhs: Value; rhs: Value } | null = null;
+    // Tracks the frame through this block's linear instruction order. Meaningful for the entry
+    // block; elsewhere a `[sp,#N]` access declines.
+    const frame = makeFrameWalk();
 
     // TRUSTWORTHINESS GUARD (mirrors the MIPS/PPC frontends): an unmodelled instruction must not
     // silently drop its destination register — emit an honest `opaque`: dead ⇒ it vanishes; live ⇒
@@ -1390,6 +1577,7 @@ export function lift(
       if (FLAG_SETTING.has(ins.mnemonic) && /^r[0-7]$/.test(reg(ins.ops[0] ?? ''))) {
         pendingCmp = null;
       }
+      frame.step(ins);
       const [a, b, c] = ins.ops;
       switch (ins.mnemonic) {
         case 'mov':
@@ -1559,7 +1747,11 @@ export function lift(
             break;
           }
           const baseReg = reg(writeback ? baseTok.slice(0, -1) : baseTok);
-          const list = expandRegList(
+          // Anything but a list of definite registers — an unexpandable range (alias endpoint,
+          // e.g. `r4-lr`), a token naming no register, an empty list — leaves the transfer set
+          // ambiguous, so degrade to the loud opaque rather than guess. Checking only for the
+          // leftover `-` let `{foo}` through and fabricated a parameter out of it.
+          const list = definiteRegList(
             ins.ops
               .slice(1)
               .join(',')
@@ -1568,13 +1760,7 @@ export function lift(
               .map((r) => r.trim())
               .filter(Boolean),
           );
-          // An unexpandable range (alias endpoint, e.g. `r4-lr`) leaves a raw `-` token — the
-          // exact transfer set is ambiguous, so degrade to the loud opaque rather than guess.
-          if (list.some((r) => r.includes('-'))) {
-            emitOpaqueDest(ins);
-            break;
-          }
-          if (list.length === 0) {
+          if (list === null) {
             emitOpaqueDest(ins);
             break;
           }
@@ -1764,6 +1950,44 @@ export function lift(
           // the same address arithmetic the encoding performs. (parseAddr used to silently
           // read `[rB]`, dropping the index — a silent miscompile; ldrsh exists ONLY in this
           // form in Thumb-1, so every ldrsh went through here.)
+          // An incoming stack argument, read before its base becomes an sp decline. Every
+          // condition below is a refusal that keeps a LOCAL from being mistaken for a parameter:
+          //   • entry block only        — the depth is exact only along this block's linear order
+          //   • entry has no preds      — otherwise its params are phis, not parameters
+          //   • no register offset      — `[sp, rX]` is not a fixed argument slot
+          //   • word width, word-aligned — the argument area is word-granular
+          //   • off >= the frame depth — BELOW the frame top is a local/spill: still declines,
+          //                               that is the separate slot-promotion capability
+          //   • a sane arity bound      — a wild offset must not mint a 400-parameter signature
+          {
+            const index = frame.argIndex({ base, off, regOff }, width, bi);
+            if (index !== null) {
+              // Mint EVERY argument below this one — the register half included. Downstream naming
+              // is POSITIONAL (structure.ts), so any hole binds every later parameter to the wrong
+              // ABI slot, silently: `push {r4,r5,lr}; add r4,r3,#0; ldr r0,[sp,#0xc]` emitted a
+              // 2-parameter signature where the ABI proves 5, with both of them bound wrong.
+              //
+              // Reading slot k proves the caller passed arguments 0..k: the register arguments are
+              // filled before any stack argument exists, and the stack area is contiguous with slot
+              // 4 at the lowest offset. So this is entailed by the calling convention, not guessed —
+              // which is what separates it from inventing parameters a function might not have.
+              // (It assumes one word per argument, which is what this frontend assumes everywhere —
+              // it types every parameter s32. An 8-byte argument, which AAPCS may align into r1 or
+              // straddle across r3 and the stack, would break the index↔slot correspondence; no
+              // agbcc row in the corpus has one, and recovering them is its own capability.)
+              //
+              // ensureParam, NOT readVar: a register the entry block DEFINES before this point
+              // (`bl g` then a read of the frame, the commonest shape there is) answers readVar with
+              // that local definition and no parameter appears — reopening the very hole this loop
+              // closes. It emitted `s32 f(s32 a0, s32 a1, s32 a2, s32 a3) { return g() + a3; }`:
+              // arity 4 where the ABI proves 5, with the stack argument bound to r3's slot.
+              for (let j = 0; j < index; j++) {
+                ssa.ensureParam(j < target.argRegs.length ? target.argRegs[j] : stackArgKey(j), bi);
+              }
+              writeData(reg(a), bi, readVar(stackArgKey(index), bi));
+              break;
+            }
+          }
           let baseVal = readData(base, bi);
           if (regOff !== undefined) {
             const sum = mkValue(T.unk(32));
@@ -1894,9 +2118,27 @@ export function lift(
   // is index-aligned with predecessor terminator args and must not be reordered.
   const entry = irBlocks[0];
   // non-ABI live-in ranks LAST (99) — deliberate Thumb tie-break; MIPS/PPC's is -1/first
+  //
+  // "Non-ABI" means NOT AN ARGUMENT REGISTER, and it has to be tested that way rather than by the
+  // shape of the name. A `/^r(\d+)$/` test ranked `r8` at 8 and `r4` at 4 while sending only `sl`
+  // and `sb` to 99 — harmless while nothing else occupied ranks >= 4, and a positional miscompile
+  // the moment incoming stack arguments started ranking there. `sa3:sub_80B6B3C` takes 10 arguments
+  // (its caller stores six words at [sp,#0]..[sp,#0x14] plus r0-r3) and saves r8 in its prologue;
+  // the `r8` live-in and `@sarg8` tied at 8, the sort is stable, the prologue reads r8 first — so
+  // ABI argument 8 was emitted as `a9` and every parameter after it was off by one.
+  //
+  // A callee-saved register read before it is written is not an argument in any case: it is a
+  // fragment artifact or an unmodelled effect, and the honest place for it is after everything the
+  // convention actually describes.
   abiSortEntryParams(entry, preds[0].length > 0, (v) => {
-    const m = /^r(\d+)$/.exec(paramReg.get(v) ?? '');
-    return m ? +m[1] : 99;
+    const key = paramReg.get(v) ?? '';
+    // an incoming STACK argument ranks by its ABI index, after every register argument
+    const s = stackArgIndex(key);
+    if (s !== null) {
+      return s;
+    }
+    const i = target.argRegs.indexOf(key);
+    return i >= 0 ? i : 99;
   });
   return fn;
 }
