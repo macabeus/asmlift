@@ -1411,14 +1411,6 @@ export function lift(
         }
       },
 
-      // The frame depth after everything stepped so far, or null if the walk could not measure it.
-      // The local-slot model uses this to size the frame from the prologue; `argIndex` reads the
-      // same state directly. Exposed rather than re-deriving the deltas elsewhere, so there is
-      // exactly one implementation of "what does this instruction do to sp".
-      measured(): number | null {
-        return depthKnown ? depth : null;
-      },
-
       // Is `[sp, #off]` an incoming stack argument, and which one? `null` means NO — and every null is
       // a DECLINE, because the caller falls through to readData's sp guard.
       //
@@ -1557,21 +1549,76 @@ export function lift(
         }
       }
     }
+    // OUTGOING ARGUMENTS. agbcc reserves the BOTTOM of the frame for arguments 5+ of the calls this
+    // function makes: `add sp,sp,#-8` … `str r2,[sp]` / `str r3,[sp,#4]` … `bl callee`. Those
+    // offsets are inside the frame and nothing ever reloads them, so modelling them as locals makes
+    // them dead defs and DCE deletes them — the arguments vanish from the call with no diagnostic.
+    // Ground truth: sa3's CreateEntity_Platform_0_0 (platform.c:734) forwards SIX arguments and
+    // came out as `CreateEntity_Platform(0, 0, a0, (u16)a1)`. 420 of the 515 functions this model
+    // newly lifted have that shape, so it is the common case, not a corner.
+    //
+    // "Inside my frame" therefore does NOT mean "private": the outgoing area belongs to the callee,
+    // which may even assign to a stack parameter. Recovering it is the dual of the incoming-argument
+    // capability and is not built, so a function that calls gets no slot model at all. Blunt on
+    // purpose — the alternative is guessing which reserved bytes are arguments.
+    if (asmBlocks.some((ab) => ab.instrs.some((ins) => ins.mnemonic === 'bl' || ins.mnemonic === 'blx'))) {
+      return false;
+    }
+    // A `pop`/`ldm` off sp READS frame memory, and push/pop are transparent to dataflow, so a pop
+    // taken while the local area is still reserved reads a slot this model has retargeted into SSA
+    // — the load simply disagrees with the store. A real epilogue releases the locals first
+    // (`add sp,#N; pop {…}`), which is what this requires; `pop {r1}` mid-frame does not.
+    for (const ab of asmBlocks) {
+      let released = 0;
+      for (const ins of ab.instrs) {
+        if ((ins.mnemonic === 'pop' || ins.mnemonic === 'ldmia') && released < localArea) {
+          const base = ins.mnemonic === 'pop' ? 'sp' : (ins.ops[0] ?? '').replace(/!$/, '');
+          if (isSpReg(base)) {
+            return false;
+          }
+        }
+        if ((ins.mnemonic === 'add' || ins.mnemonic === 'sub') && isSpReg(ins.ops[0])) {
+          const d = spAdjust(ins);
+          if (d !== null && d > 0) {
+            released += d;
+          }
+        }
+      }
+    }
     return true;
   };
   // The frame the body sees: the entry block's PROLOGUE, i.e. everything up to the first
   // instruction that touches the frame (or the whole block if it never does). Stepped through the
   // same walk `argIndex` uses, so "what does this do to sp" has one implementation. A frame the
-  // walk cannot measure yields 0, which disables every slot (`off < frameDepth` is then false).
-  const frameDepth = ((): number => {
-    const ins = asmBlocks[0].instrs;
-    const firstMem = ins.findIndex((x) => spMemAccess(x) !== null);
-    const prologue = makeFrameWalk();
-    for (const x of ins.slice(0, firstMem === -1 ? ins.length : firstMem)) {
-      prologue.step(x);
+  // walk cannot measure yields 0, which disables every slot (`off < localArea` is then false).
+  // How much sp moves for `add/sub sp, #imm`, positive = sp RISES (frame shrinks). null if not that
+  // shape. Only used to recognise a release; the authoritative depth arithmetic is makeFrameWalk's.
+  const spAdjust = (ins: Instr): number | null => {
+    if (!/^(add|sub)$/.test(ins.mnemonic) || !isSpReg(ins.ops[0])) {
+      return null;
     }
-    return prologue.measured() ?? 0;
+    const o = ins.ops[2] ?? ins.ops[1];
+    if (o === undefined || !o.startsWith('#')) {
+      return null;
+    }
+    const v = imm(o);
+    return ins.mnemonic === 'sub' ? -v : v;
+  };
+  // The EXPLICITLY reserved local area — the prologue's `add sp,sp,#-N`. A slot must live strictly
+  // inside this, not merely inside the whole frame: the rest of the frame is the callee-saved block
+  // the entry `push` wrote, which belongs to the epilogue's `pop`, so a `str` there is retargeted
+  // away from the memory the pop will read.
+  const localArea = ((): number => {
+    let n = 0;
+    for (const ins of asmBlocks[0].instrs) {
+      const d = spAdjust(ins);
+      if (d !== null && d < 0) {
+        n += -d;
+      }
+    }
+    return n;
   })();
+
   const slotsOk = slotModelSafe();
 
   // The WRITE dual of readData, and the reason it exists is a lesson rather than a symmetry: the
@@ -2117,7 +2164,8 @@ export function lift(
             isSpReg(base) &&
             regOff === undefined &&
             width === 4 &&
-            off < frameDepth &&
+            off % 4 === 0 &&
+            off < localArea &&
             ssa.hasReachingDef(slotKey(off), bi)
           ) {
             writeData(reg(a), bi, readVar(slotKey(off), bi));
@@ -2146,11 +2194,13 @@ export function lift(
           const { base, off, regOff } = parseAddr(b);
           // A word spill into this function's own frame: record the slot's value in SSA rather than
           // emitting a store through sp. `slotsOk` has already proven the frame is private and does
-          // not move; `off < frameDepth` keeps this strictly inside the frame, so it can never
+          // not move; `off < localArea` keeps this strictly inside the EXPLICITLY reserved local
+          // area — not merely inside the frame, whose upper part is the callee-saved block the
+          // epilogue pops — so it can never
           // collide with the incoming-argument area above it (which the load path recovers as
           // parameters, and where a STORE is still a decline — writing a caller's slot is a
           // different capability). A spill that is never reloaded becomes a dead def and drops.
-          if (slotsOk && isSpReg(base) && regOff === undefined && width === 4 && off < frameDepth) {
+          if (slotsOk && isSpReg(base) && regOff === undefined && width === 4 && off % 4 === 0 && off < localArea) {
             writeVar(slotKey(off), bi, readData(reg(a), bi));
             break;
           }
