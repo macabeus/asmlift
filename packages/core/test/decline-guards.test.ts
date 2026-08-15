@@ -214,6 +214,25 @@ test('MIPS: sp accesses outside the word-slot model decline, never a bogus slot'
     '',
   ].join('\n');
   expect(() => decompile('f', diamond, MIPS_IDO)).toThrow(/stack slot sp@16 is read on a path that never stores it/);
+  // …and the same fabrication when the entry block is ITSELF the loop header, where the slot
+  // arrives as a PHI rather than a live-in. `paramReg` only covers live-ins, so the escape check
+  // was blind to it and the phantom parameter survived — on MIPS, which has no preheader to make
+  // the entry predecessor-free. The check reads phi keys too.
+  const entryLoop = [
+    '00000000 <f>:',
+    '   0:\taddiu\tsp,sp,-24',
+    '   4:\tbeqz\ta0,10 <f+0x10>',
+    '   8:\tnop',
+    '   c:\tsw\ta0,16(sp)',
+    '  10:\tlw\tv0,16(sp)',
+    '  14:\taddiu\ta0,a0,-1',
+    '  18:\tbnez\ta0,0 <f>',
+    '  1c:\tnop',
+    '  20:\tjr\tra',
+    '  24:\tnop',
+    '',
+  ].join('\n');
+  expect(() => decompile('f', entryLoop, MIPS_IDO)).toThrow(/stack slot sp@16 is read on a path that never stores it/);
 });
 
 // ── Input-format boundary (frontend/format.ts) ────────────────────────────────────────────

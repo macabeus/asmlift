@@ -18,6 +18,7 @@
 import { Block, Fn, Value, mkValue } from '../ir/core';
 import { simplifyTrivialPhis } from '../ir/simplify';
 import { T } from '../ir/types';
+import { FrontendUnsupportedError } from './errors';
 
 export interface SsaBuilder {
   fn: Fn;
@@ -46,7 +47,8 @@ export interface SsaBuilder {
   ensureParam(key: string, b: number): void;
   /** Whether `reg` has a definition reaching block `b` (best-effort call-arity heuristic). */
   hasReachingDef(reg: string, b: number, seen?: Set<number>): boolean;
-  /** Remove trivial phis; call once every block is filled. */
+  /** Remove trivial phis and enforce the frontend's postconditions; call once every block is
+   *  filled. Throws FrontendUnsupportedError if a stack slot escaped as an entry parameter. */
   finish(): void;
 }
 
@@ -66,6 +68,10 @@ export function makeSsaBuilder(name: string, blockCount: number, preds: number[]
   const filled: boolean[] = irBlocks.map(() => false);
   const incompletePhis: Array<Map<string, Value>> = irBlocks.map(() => new Map());
   const phiBlock = new Map<Value, number>();
+  // The key each phi stands for. `paramReg` covers live-ins only, so without this a slot that
+  // arrives as a PHI — which is what happens when the entry block is itself a loop header — is
+  // invisible to the escape check below. Braun's construction gives no other way to tell.
+  const phiKey = new Map<Value, string>();
   const paramReg = new Map<Value, string>();
   // Parameters created by ensureParam that nothing has read yet. They are deliberately NOT in
   // `defs`: a parameter asserted because a calling convention proves it exists is not evidence that
@@ -86,6 +92,7 @@ export function makeSsaBuilder(name: string, blockCount: number, preds: number[]
     const phi = mkValue(T.unk(32));
     irBlocks[b].params.push(phi);
     phiBlock.set(phi, b);
+    phiKey.set(phi, reg);
     defs[b].set(reg, phi); // set before wiring operands to break cycles
     return phi;
   };
@@ -208,7 +215,41 @@ export function makeSsaBuilder(name: string, blockCount: number, preds: number[]
       filled[b] = true;
       sealReadyBlocks();
     },
-    finish: () => simplifyTrivialPhis(fn, (p) => phiBlock.delete(p)),
+    finish: () => {
+      simplifyTrivialPhis(fn, (p) => {
+        phiBlock.delete(p);
+        phiKey.delete(p);
+      });
+      // A STACK SLOT MAY NEVER LEAVE AS AN ENTRY PARAMETER. A slot is memory the function itself
+      // allocated, so its value can only come from a store the function made; arriving as a live-in
+      // instead means it was read on a path that never stored it, and the signature has grown an
+      // argument the function does not take, standing in for uninitialised stack.
+      //
+      // Checked here, of the FINISHED function, rather than as a precondition at each read. The
+      // per-read test available during construction (`hasReachingDef`) asks whether a store reaches
+      // on SOME path, which a diamond defeats; strengthening it to "every path" is not answerable
+      // mid-fill, because a loop's back-edge predecessor is not filled yet and the query would
+      // report "unassigned" for a slot initialised before the loop — the commonest real shape.
+      // Asking about the symptom instead costs one pass and cannot be defeated by fill order.
+      //
+      // It is total because in Braun's construction a value undefined on some path can surface only
+      // as a live-in of a block with no predecessors — and BOTH spellings of that are checked:
+      // `paramReg` for the live-in path, `phiKey` for the case where the entry block is itself a
+      // loop header and the fabricated value arrives as a phi instead. Missing the second is what
+      // let this survive on MIPS.
+      //
+      // In `finish()` and not a helper each frontend remembers to call: this is the frontend's only
+      // semantic postcondition, and a postcondition enforced by convention is not enforced.
+      for (const p of irBlocks[0].params) {
+        const key = paramReg.get(p) ?? phiKey.get(p);
+        if (key?.startsWith(SLOT_PREFIX)) {
+          throw new FrontendUnsupportedError(
+            `cannot lift '${name}': stack slot ${key} is read on a path that never stores it ` +
+              `(partially-initialised local) — not modelled`,
+          );
+        }
+      }
+    },
   };
 }
 
@@ -233,36 +274,8 @@ export function fallbackArgc(
 /** The stack-slot key both the MIPS and Thumb frontends use for a word-sized local in the
  *  function's own frame. Shared so the two spell it identically and `assertNoSlotEscaped` can
  *  recognise either frontend's slots. See the virtual-key note in the module header. */
-export const stackSlotKey = (off: number): string => `sp@${off}`;
-
-/** A stack slot must never leave the frontend as a PARAMETER.
- *
- *  Call after `finish()`, before the ABI sort. A slot is memory this function allocated, so its
- *  value can only come from a store this function made; if one arrives as a live-in instead, the
- *  slot was read on some path that never stored it and the model has fabricated a value the machine
- *  never had — the signature grows an argument the function does not take, and it stands in for
- *  uninitialised stack.
- *
- *  This is deliberately a TOTAL check at the boundary rather than another precondition at the read.
- *  The per-read guard (`hasReachingDef`) asks whether a store reaches on SOME path, which a diamond
- *  defeats — stored on one arm, reloaded at the join. Strengthening that query to "every path" is
- *  not available while blocks are still filling: a loop's back-edge predecessor is not filled yet,
- *  so a definite-assignment question asked mid-fill reports "unassigned" for a slot initialised
- *  before the loop, and declines the commonest real shape there is. Asking the question here — of
- *  the finished function, about the symptom rather than the cause — costs one pass over the entry
- *  parameters and catches every route into the failure, including the ones nobody enumerated. */
-export function assertNoSlotEscaped(
-  entry: { params: Value[] },
-  paramReg: Map<Value, string>,
-  fail: (slot: string) => never,
-): void {
-  for (const p of entry.params) {
-    const key = paramReg.get(p);
-    if (key !== undefined && key.startsWith('sp@')) {
-      fail(key);
-    }
-  }
-}
+const SLOT_PREFIX = 'sp@';
+export const stackSlotKey = (off: number): string => `${SLOT_PREFIX}${off}`;
 
 /** Order the TRUE entry block's parameters by ABI argument register, so downstream naming
  *  (`a0`, `a1`, …) matches the calling convention, not first-read order (a callee-saved copy can

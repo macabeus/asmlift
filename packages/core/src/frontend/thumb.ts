@@ -27,7 +27,7 @@ import { FrontendUnsupportedError } from './errors';
 import { assertInputFormat } from './format';
 import type { Frontend } from './frontend';
 import { opaqueDest } from './opaque';
-import { abiSortEntryParams, assertNoSlotEscaped, fallbackArgc, makeSsaBuilder, stackSlotKey } from './ssa';
+import { abiSortEntryParams, fallbackArgc, makeSsaBuilder, stackSlotKey } from './ssa';
 
 interface Instr {
   /** the CANONICAL spelling — legacy names are normalised (see LEGACY_MNEMONICS) so that every
@@ -1609,9 +1609,16 @@ export function lift(
   // the entry `push` wrote, which belongs to the epilogue's `pop`, so a `str` there is retargeted
   // away from the memory the pop will read.
   const localArea = ((): number => {
+    // The PROLOGUE only — everything before the entry block first touches the frame. Summing the
+    // whole block instead let a store made BEFORE the reservation fall inside `off < localArea`,
+    // so `str r0,[sp]; add sp,sp,#-4; …` claimed a write to the CALLER's frame as a private local
+    // and deleted it: `s32 f(s32 a0) { return 7; }`. Same class as the `off < frameDepth` bug,
+    // arriving from the other end.
+    const ins = asmBlocks[0].instrs;
+    const firstMem = ins.findIndex((x) => spMemAccess(x) !== null);
     let n = 0;
-    for (const ins of asmBlocks[0].instrs) {
-      const d = spAdjust(ins);
+    for (const x of ins.slice(0, firstMem === -1 ? ins.length : firstMem)) {
+      const d = spAdjust(x);
       if (d !== null && d < 0) {
         n += -d;
       }
@@ -2306,16 +2313,6 @@ export function lift(
   });
 
   ssa.finish();
-
-  // A slot is memory THIS function allocated, so a slot arriving as a live-in means it was read on
-  // a path that never stored it — see assertNoSlotEscaped for why the check lives here and not at
-  // the read. Loud, and total.
-  assertNoSlotEscaped(irBlocks[0], paramReg, (slot) => {
-    throw new FrontendUnsupportedError(
-      `cannot lift '${name}': stack slot ${slot} is read on a path that never stores it ` +
-        `(partially-initialised local) — not modelled`,
-    );
-  });
 
   // Order the entry block's parameters by ABI register (r0, r1, r2, …) so downstream
   // naming (`a0`, `a1`, …) matches the calling convention, not the read order. Safe only

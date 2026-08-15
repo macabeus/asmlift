@@ -448,6 +448,14 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     expect(() => decompile('f', unaligned, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
   });
 
+  test('a store made BEFORE the frame is reserved is the caller`s, not a local', () => {
+    // `localArea` is the PROLOGUE's reservation. Summing the whole entry block instead let a store
+    // that precedes the reservation fall inside `off < localArea`, so a write to the CALLER's frame
+    // was claimed as a private local and deleted: this emitted `s32 f(s32 a0) { return 7; }`.
+    const early = 'f:\n\tstr\tr0, [sp]\n\tadd\tsp, sp, #-0x4\n\tmov\tr0, #7\n\tadd\tsp, sp, #0x4\n\tbx\tlr\n';
+    expect(() => decompile('f', early, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+  });
+
   test('a gap in the slots read still yields ABI-correct offsets', () => {
     // frame 8, so [sp,#0xc] is argument 6 (index 5) and argument 5 is never read. Naming downstream
     // is POSITIONAL, so minting only the slot that was read would put the parameter at argument 5's

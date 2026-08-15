@@ -31,7 +31,7 @@ import { assertInputFormat } from './format';
 import type { Frontend } from './frontend';
 import { opaqueDest } from './opaque';
 import { isSplatMips, parseSplatMips } from './splat';
-import { abiSortEntryParams, assertNoSlotEscaped, stackSlotKey } from './ssa';
+import { abiSortEntryParams, stackSlotKey } from './ssa';
 import { makeSsaBuilder } from './ssa';
 
 type Instr = DisasmInstr;
@@ -1041,17 +1041,6 @@ export function lift(
     ssa.markFilled(bi);
   });
   ssa.finish();
-
-  // Same total guard as the Thumb frontend (frontend/ssa.ts). The per-read `hasReachingDef` test
-  // below asks "stored on SOME path", which a diamond defeats — stored on one arm of a branch,
-  // reloaded at the join — and the slot then arrives as a fabricated parameter standing in for
-  // uninitialised stack. Pre-dates the Thumb slot model; fixed with it, because it is one rule.
-  assertNoSlotEscaped(irBlocks[0], paramReg, (slot) => {
-    throw new FrontendUnsupportedError(
-      `cannot lift '${name}': stack slot ${slot} is read on a path that never stores it ` +
-        `(partially-initialised local) — not modelled`,
-    );
-  });
 
   // ABI-ordered entry parameters (a0, a1, …) — a callee-saved copy can read a later argument
   // register first. Only the true entry (no predecessors) is sorted; a loop header's phis are
