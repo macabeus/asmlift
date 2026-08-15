@@ -3,7 +3,7 @@
 // decompileRanked / decompileWithReport).
 // A pass that regresses fails AT its boundary with a diagnostic, not three stages later as
 // wrong C.
-import type { Fn, Value } from './ir/core';
+import { type Block, type Fn, type Value, successorsOf } from './ir/core';
 import { type IrType, typeToString } from './ir/types';
 import type { BinOp, Expr, SFn, Stmt } from './l3/ast';
 import { exprChildren, fieldSpellsDot, stmtChildren, stmtExprs } from './l3/ast';
@@ -55,6 +55,134 @@ export function assertResolved(sfn: SFn): void {
     throw new ContractError(
       `structuring left an unresolved value ('?') in '${sfn.name}' — a dropped def or unlowered opcode`,
     );
+  }
+}
+
+// ── effects: executed once, never dropped ──────────────────────────────────────────────────
+//
+// The three contracts around this one are about TYPING and SPELLABILITY. Nothing checked the
+// property the structurer's materialization model exists to preserve: a call in the asm must run
+// exactly as often in the emitted source. Its two failure modes are the two that hurt most —
+// asmlift's first rule is that a loud failure beats a silently wrong answer, and both of these are
+// silent:
+//
+//   • DROPPED — a call the asm makes has no counterpart in the tree at all;
+//   • RE-RUN  — inlining a call's value at more than one render position (or a structuring copy
+//     that duplicates a region onto a single path) makes one call execute twice. The round that
+//     recovered switch fall-through hit exactly this shape, and only an adversarial reviewer
+//     caught it.
+//
+// Deliberately narrow, so it never declines a function that is fine:
+//
+//   • CALLS only. Loads legitimately re-render (that is the whole point of the inline-at-use
+//     model, and the alias gate governs it); stores are checked by neither direction here because
+//     the readability DCE pass is allowed to drop a provably dead one.
+//   • PER PATH, not per tree. Structuring may legitimately emit one block twice — two exclusive
+//     switch arms sharing a body, a duplicated return merge — and each path still executes it
+//     once. So the duplication rule compares the maximum over syntactic root-to-leaf paths (a
+//     branch takes the max of its arms, a loop body counts once, a fall-through arm chains into
+//     the next) against the IR's static count.
+//   • Names the IR does not have are ignored, and only calls carrying a target symbol are counted
+//     (every frontend that emits `call` today stamps one).
+type CallCounts = Map<string, number>;
+
+/** per-key combine of two count maps (`sum` for sequence, `max` for exclusive alternatives) */
+function combine(a: CallCounts, b: CallCounts, f: (x: number, y: number) => number): CallCounts {
+  const out = new Map(a);
+  for (const [k, v] of b) {
+    out.set(k, f(out.get(k) ?? 0, v));
+  }
+  return out;
+}
+
+/** every `call` expression under `e`, counted by target name */
+function callsInExpr(e: Expr, into: CallCounts): void {
+  if (e.k === 'call') {
+    into.set(e.fn, (into.get(e.fn) ?? 0) + 1);
+  }
+  exprChildren(e).forEach((c) => callsInExpr(c, into));
+}
+
+/** `total` = every occurrence in the tree; `path` = the most any single syntactic path executes */
+function countCalls(stmts: Stmt[]): { total: CallCounts; path: CallCounts } {
+  let total: CallCounts = new Map();
+  let path: CallCounts = new Map();
+  const add = (r: { total: CallCounts; path: CallCounts }, pathF: (x: number, y: number) => number) => {
+    total = combine(total, r.total, (x, y) => x + y);
+    path = combine(path, r.path, pathF);
+  };
+  for (const s of stmts) {
+    const own: CallCounts = new Map();
+    stmtExprs(s).forEach((e) => callsInExpr(e, own));
+    add({ total: own, path: own }, (x, y) => x + y);
+    if (s.k === 'if') {
+      const t = countCalls(s.then);
+      const e = countCalls(s.else);
+      // exclusive arms: the path count is whichever arm runs, the total counts both
+      add({ total: combine(t.total, e.total, (x, y) => x + y), path: combine(t.path, e.path, Math.max) }, (x, y) => x + y);
+    } else if (s.k === 'switch') {
+      const arms = s.cases.map((c) => countCalls(c.body));
+      const dflt = countCalls(s.default ?? []);
+      // A fall-through arm continues into the NEXT one emitted (the last into `default`), so a
+      // path through arm i runs the chain starting at i — the shape the fall-through round's
+      // CRITICAL took. Built from the end; `chain[i]` is that arm's per-path count.
+      const chain: CallCounts[] = new Array(arms.length);
+      for (let i = arms.length - 1; i >= 0; i--) {
+        const next = i + 1 < arms.length ? chain[i + 1] : dflt.path;
+        chain[i] = s.cases[i].fallsThrough ? combine(arms[i].path, next, (x, y) => x + y) : arms[i].path;
+      }
+      const armTotal = arms.reduce((acc, a) => combine(acc, a.total, (x, y) => x + y), dflt.total);
+      const armPath = chain.reduce((acc, c) => combine(acc, c, Math.max), dflt.path);
+      add({ total: armTotal, path: armPath }, (x, y) => x + y);
+    } else {
+      // Sequenced children (a loop body, a `for`'s init/inc): counted ONCE — a loop's dynamic trip
+      // count is not a syntactic occurrence, and the IR side is static too.
+      for (const c of stmtChildren(s)) {
+        add(countCalls([c]), (x, y) => x + y);
+      }
+    }
+  }
+  return { total, path };
+}
+
+/**
+ * Post structuring: every call the asm makes is emitted, and none is emitted more times than the
+ * asm makes it on any one path. See the note above for what this deliberately does not cover.
+ */
+export function assertEffectsPreserved(fn: Fn, sfn: SFn): void {
+  // Reachable blocks only: an unreachable block's call is legitimately never emitted.
+  const seen = new Set<Block>([fn.blocks[0]]);
+  for (const stack = [fn.blocks[0]]; stack.length; ) {
+    for (const s of successorsOf(stack.pop()!)) {
+      if (!seen.has(s)) {
+        seen.add(s);
+        stack.push(s);
+      }
+    }
+  }
+  const irCalls: CallCounts = new Map();
+  for (const b of seen) {
+    for (const op of b.ops) {
+      if (op.opcode === 'call' && typeof op.attrs.target === 'string') {
+        const t = op.attrs.target;
+        irCalls.set(t, (irCalls.get(t) ?? 0) + 1);
+      }
+    }
+  }
+  if (!irCalls.size) {
+    return;
+  }
+  const { total, path } = countCalls(sfn.body);
+  for (const [name, n] of irCalls) {
+    if (!(total.get(name) ?? 0)) {
+      throw new ContractError(`structuring dropped the call to '${name}' in '${sfn.name}' — its effect is lost`);
+    }
+    const p = path.get(name) ?? 0;
+    if (p > n) {
+      throw new ContractError(
+        `structuring emitted ${p} calls to '${name}' on one path in '${sfn.name}', where the asm makes ${n}`,
+      );
+    }
   }
 }
 

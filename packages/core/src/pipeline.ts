@@ -1,7 +1,13 @@
 // asmlift — the library entry point. `decompile(name, asm, target)` runs the raising tower and
 // returns structured results: the source, the per-level IR dumps, and diagnostics.
 import { cBackend } from './backend/c';
-import { ContractError, assertDerefsTyped, assertResolved, assertTypesRecovered } from './contracts';
+import {
+  ContractError,
+  assertDerefsTyped,
+  assertEffectsPreserved,
+  assertResolved,
+  assertTypesRecovered,
+} from './contracts';
 import type { AsmData } from './frontend/asmdata';
 import { FrontendUnsupportedError } from './frontend/errors';
 import { frontendFor } from './frontend/registry';
@@ -199,6 +205,7 @@ export function structureChecked(fn: Fn, opts: Parameters<typeof structure>[1]):
   // removes statements/flips branches over an already-validated tree.
   assertResolved(raw);
   assertDerefsTyped(raw);
+  assertEffectsPreserved(fn, raw);
   // Then the readability/quality rewrites: merge a statement common to every arm of an if,
   // drop dead stores (whose empty-then peephole flips the arm the merge empties), then hoist a
   // reused aggregate-global
@@ -206,6 +213,9 @@ export function structureChecked(fn: Fn, opts: Parameters<typeof structure>[1]):
   // local's initializer, so re-validate deref typing on the rewritten tree.
   const sfn = hoistReusedGlobalBases(eliminateDeadStores(mergeCommonTails(raw)));
   assertDerefsTyped(sfn);
+  // Re-checked after the readability rewrites for the same reason deref typing is: a pass that
+  // merges arms or drops statements must not be able to lose or duplicate a call.
+  assertEffectsPreserved(fn, sfn);
   return sfn;
 }
 
