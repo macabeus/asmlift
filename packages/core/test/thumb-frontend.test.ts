@@ -240,12 +240,23 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     );
   });
 
+  test('an unread REGISTER argument is still a parameter once a stack slot proves it exists', () => {
+    // r3 is read, r1 and r2 are not, and a stack argument at index 4 proves the caller passed at
+    // least five. Naming is positional, so omitting r1/r2 binds every later parameter to the wrong
+    // ABI slot — this emitted a 2-parameter signature where the convention proves 5.
+    const b = 'rs:\n\tpush\t{r4, r5, lr}\n\tadd\tr4, r3, #0\n\tldr\tr0, [sp, #0xc]\n\tbx\tlr\n';
+    expect(decompile('rs', b, ARMV4T_AGBCC).source).toContain('rs(s32 a0, s32 a1, s32 a2, s32 a3, s32 a4)');
+  });
+
   test('a gap in the slots read still yields ABI-correct offsets', () => {
     // frame 8, so [sp,#0xc] is argument 6 (index 5) and argument 5 is never read. Naming downstream
     // is POSITIONAL, so minting only the slot that was read would put the parameter at argument 5's
     // offset — silently the wrong signature. Reading slot k proves the caller pushed 4..k.
     const gap = 'f:\n\tpush\t{r4, lr}\n\tldr\tr0, [sp, #0xc]\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
-    expect(decompile('f', gap, ARMV4T_AGBCC).source).toBe('s32 f(s32 a0, s32 a1) {\n    return a1;\n}\n');
+    // six parameters: r0-r3 and both stack slots, with the one actually read last and in place
+    expect(decompile('f', gap, ARMV4T_AGBCC).source).toBe(
+      's32 f(s32 a0, s32 a1, s32 a2, s32 a3, s32 a4, s32 a5) {\n    return a5;\n}\n',
+    );
   });
 
   // Each of these is a refusal, and each keeps a LOCAL from being minted as a parameter.

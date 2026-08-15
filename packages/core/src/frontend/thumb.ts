@@ -183,7 +183,11 @@ const imm = (s: string) => parseInt(s.replace(/^#/, ''), s.includes('0x') ? 16 :
 // ambiguous and left UNEXPANDED — but its endpoints ARE surfaced as separate tokens so pc/lr
 // detection sees them, and any consumer that needs the exact list rejects the leftover `-` token
 // loudly rather than treating the fused range as one phantom register.
-const REG_NUM: Record<string, number> = { sp: 13, lr: 14, pc: 15 };
+// Null-prototype for the same reason LEGACY_MNEMONICS has one: this table is consulted with `in`
+// to decide whether a reglist token is a DEFINITE register, and an inherited key (`constructor`,
+// `toString`) answering true would let a junk token pass that test instead of poisoning the frame
+// depth. Unreachable from real assembly; the guarantee should not depend on that.
+const REG_NUM: Record<string, number> = Object.assign(Object.create(null), { sp: 13, lr: 14, pc: 15 });
 
 // Thumb-1 data-processing mnemonics that write the condition flags when their destination is a LOW
 // register — which is all of them on this ISA, `s`-suffix or not (the assembler picks the encoding).
@@ -1290,7 +1294,13 @@ export function lift(
   //
   // `push {a,b,c}` deepens by 4 per register; `sub sp, #N` and `add sp, sp, #-N` deepen by N.
   //
-  // Returns null when the depth CANNOT be computed exactly. The whole capability rests on the depth
+  // Returns null when the depth cannot be computed exactly FROM A RECOGNISED FRAME OPERATION.
+  // It does NOT return null for an sp write it does not model at all — `add sp, r4`, `mov sp, rN`
+  // and friends yield 0 here and would leave a stale depth. That is safe only because writeData
+  // declines every one of them before the depth is ever used, so the function never reaches an
+  // argument read with a depth this returned 0 for. If a future change ever makes a register-sized
+  // frame adjust transparent, this becomes a silent local-as-parameter and this comment is the
+  // warning: that change must teach spDelta about it in the same commit. The whole capability rests on the depth
   // being exact, so an approximation is never acceptable: understate the frame and a local sits
   // above the computed top and is minted as a parameter reading uninitialised stack. A null
   // poisons the depth for the rest of the block (spDepthKnown), which disables argument recovery
@@ -1891,15 +1901,17 @@ export function lift(
           {
             const index = incomingArgIndex(base, off, width, regOff, bi, spDepth, spDepthKnown);
             if (index !== null) {
-              // Mint every slot from the first stack argument up to this one, not just this one.
-              // Downstream naming is POSITIONAL (structure.ts), so a function that reads argument 6
-              // and never touches argument 5 would otherwise emit a signature whose single stack
-              // parameter sits at argument 5's offset — a silently wrong signature, not a
-              // conservative one. Reading slot k proves the caller pushed 4..k, because the
-              // argument area is contiguous and slot 4 is at the lowest offset, so minting the
-              // intervening keys is sound rather than a guess.
-              for (let j = target.argRegs.length; j < index; j++) {
-                readVar(stackArgKey(j), bi);
+              // Mint EVERY argument below this one — the register half included. Downstream naming
+              // is POSITIONAL (structure.ts), so any hole binds every later parameter to the wrong
+              // ABI slot, silently: `push {r4,r5,lr}; add r4,r3,#0; ldr r0,[sp,#0xc]` emitted a
+              // 2-parameter signature where the ABI proves 5, with both of them bound wrong.
+              //
+              // Reading slot k proves the caller passed arguments 0..k: the register arguments are
+              // filled before any stack argument exists, and the stack area is contiguous with slot
+              // 4 at the lowest offset. So this is entailed by the calling convention, not guessed —
+              // which is what separates it from inventing parameters a function might not have.
+              for (let j = 0; j < index; j++) {
+                readVar(j < target.argRegs.length ? target.argRegs[j] : stackArgKey(j), bi);
               }
               writeData(reg(a), bi, readVar(stackArgKey(index), bi));
               break;
