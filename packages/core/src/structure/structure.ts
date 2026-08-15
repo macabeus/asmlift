@@ -36,6 +36,7 @@
 // code): multi-latch headers, irreducible/overlapping loops, conditional `continue`, a `break`
 // whose exit copies would clobber, switch fall-through, and mixed-entry self-loops (a guarded
 // header also entered by a plain br).
+import { type GlobalCell, globalCellOf, mayWriteGlobal } from '../ir/alias';
 import { Block, Fn, Op, Value, defOpMap, successorsOf } from '../ir/core';
 import { type IrType, T, scalarTypeForAccess, typeEquals } from '../ir/types';
 import { BinOp, Expr, SFn, Stmt, SwitchCase, exprChildren, mapExprChildren, negateCond } from '../l3/ast';
@@ -1413,43 +1414,14 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
   const absorbedLoads = new Set<Op>();
   if (symCtx && littleEndian && spellBitfieldMembers) {
     // the (name, byte) of a load's address when it resolves through defs alone — `gaddr` or
-    // `add(gaddr, const)`; anything else (a materialized base, a variable index) declines
-    const loadTargets = new Map<Op, { name: string; byte: number }>();
-    const addrOf = (v: Value, off: number): { name: string; byte: number } | null => {
-      const d0 = defs.get(v);
-      if (d0?.opcode === 'gaddr') {
-        return { name: d0.attrs.sym as string, byte: off };
-      }
-      if (d0?.opcode === 'add' && d0.operands.length === 2) {
-        for (const [x, y] of [
-          [d0.operands[0], d0.operands[1]],
-          [d0.operands[1], d0.operands[0]],
-        ] as const) {
-          const g0 = defs.get(x);
-          const c0 = defs.get(y);
-          if (g0?.opcode === 'gaddr' && c0?.opcode === 'const') {
-            return { name: g0.attrs.sym as string, byte: (c0.attrs.value as number) + off };
-          }
-        }
-      }
-      return null;
-    };
+    // `add(gaddr, const)`; anything else (a materialized base, a variable index) declines. THE
+    // shared L2 disjointness query (ir/alias.ts), which the materialization model consults with
+    // the same rule, so the fold and the model cannot disagree about what a store can reach.
+    const loadTargets = new Map<Op, GlobalCell>();
+    const addrOf = (v: Value, off: number): GlobalCell | null => globalCellOf(defs, v, off);
     // A write for the fold's purposes: calls and opaques always; a store/astore unless its base
-    // resolves to a global PROVABLY different from the folded one. (Name comparison suffices:
-    // the pool promotion picks one canonical name per address, so one cell cannot appear under
-    // two names within a function.)
-    const mayWrite =
-      (sym: string) =>
-      (x: Op): boolean => {
-        if (x.opcode === 'call' || x.opcode === 'opaque') {
-          return true;
-        }
-        if (x.opcode !== 'store' && x.opcode !== 'astore') {
-          return false;
-        }
-        const t = addrOf(x.operands[0], 0);
-        return !(t && t.name !== sym);
-      };
+    // resolves to a global PROVABLY different from the folded one.
+    const mayWrite = (sym: string) => mayWriteGlobal(defs, sym);
     for (const blk of fn.blocks) {
       for (const op of blk.ops) {
         if ((op.opcode !== 'shr_u' && op.opcode !== 'shr_s') || op.operands.length !== 1) {
