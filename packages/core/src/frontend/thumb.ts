@@ -1238,6 +1238,25 @@ export function lift(
     // adjustments have no low-register data destination, so they fall through harmlessly;
     // terminators are handled in the terminator section below.
     const isThumbReg = (s: string | undefined): s is string => /^r\d+$/.test(s ?? '');
+    // A 3-operand frame adjustment: `add sp, sp, #N` / `sub sp, sp, #N`. The 2-operand spelling of
+    // the SAME instruction (`add sp, #N`) is already transparent to dataflow — see emit2op, whose
+    // comment states the policy — and agbcc emits both. Treating one as bookkeeping and the other
+    // as a data read of sp is an inconsistency, not a decision: it declined
+    // `kleod:UpdateWorldMapNodeTile` outright, a function that allocates four bytes of frame and
+    // then never touches them.
+    //
+    // Deliberately narrow, because the surrounding guard is what keeps this frontend honest about
+    // stack frames. It fires ONLY when sp is both the destination and the base and the offset is an
+    // immediate, so every genuine use of sp as data still declines loudly at readData:
+    // `ldr r0,[sp,#N]`, `ldr r0,[sp,r1]`, `mov r0,sp` and `add r0,sp,#N` are all untouched (they
+    // write a low register), and a computed `add sp, r0, #N` is untouched too (the base is not sp).
+    // `pc` is excluded by construction — `add pc, pc, #N` is a computed jump, not bookkeeping.
+    const isSpReg = (s: string | undefined): boolean => {
+      const r = reg(s ?? '');
+      return r === 'sp' || r === 'r13';
+    };
+    const isFrameAdjust = (d: string | undefined, base: string | undefined, off: string | undefined): boolean =>
+      isSpReg(d) && isSpReg(base) && (off?.startsWith('#') ?? false);
     const emitOpaqueDest = (ins: { mnemonic: string; ops: string[]; asWritten?: string }) => {
       // storeClass: unmodelled Thumb stores are str*/stm* — `stmia rN!, {…}`'s dest token `r0!`
       // fails isReg, so without this it would be skipped as "no reg dest", silently deleting the
@@ -1328,6 +1347,9 @@ export function lift(
             emit2op('add', a, b, bi);
             break;
           }
+          if (isFrameAdjust(a, b, c)) {
+            break;
+          } // `add sp, sp, #N`: frame bookkeeping, transparent
           const rhs = c?.startsWith('#') ? constVal(imm(c), bi) : readData(reg(c), bi);
           const res = mkValue(T.unk(32));
           irb.ops.push(mkOp('add', { operands: [readData(reg(b), bi), rhs], results: [res] }));
@@ -1340,6 +1362,9 @@ export function lift(
             emit2op('sub', a, b, bi);
             break;
           } // `sub rD, op2` → rD = rD - op2
+          if (isFrameAdjust(a, b, c)) {
+            break;
+          } // `sub sp, sp, #N`: frame bookkeeping, transparent
           const rhs = c?.startsWith('#') ? constVal(imm(c), bi) : readData(reg(c), bi);
           const res = mkValue(T.unk(32));
           irb.ops.push(mkOp('sub', { operands: [readData(reg(b), bi), rhs], results: [res] }));

@@ -121,6 +121,19 @@ test('every sp-as-data spelling declines loud — including the register-indexed
   expect(thumb('\tstr\tr0, [sp, r1]\n')).toThrow(spAsData); // its store dual
   expect(thumb('\tldr\tr0, [sp, #4]\n')).toThrow(spAsData); // the literal slot m2c handles
   expect(thumb('\tadd\tr0, sp, #8\n')).toThrow(spAsData); // &local
+  // …and the ONE sp shape that is not a data use: a frame adjustment. agbcc writes it both ways
+  // (`add sp, #N` and `add sp, sp, #N`) and both are push/pop-based bookkeeping carrying no
+  // dataflow, so both lift. The narrowness is the point — every line above still declines.
+  expect(thumb('\tadd\tsp, sp, #-0x4\n\tmov\tr0, #1\n\tadd\tsp, sp, #0x4\n')).not.toThrow();
+  expect(thumb('\tsub\tsp, sp, #0x8\n\tmov\tr0, #1\n\tadd\tsp, sp, #0x8\n')).not.toThrow();
+  expect(thumb('\tadd\tsp, #-0x4\n\tmov\tr0, #1\n\tadd\tsp, #0x4\n')).not.toThrow();
+  // a frame that is ADJUSTED and then USED still declines: the adjustment is transparent, the
+  // access is not. This is the line that keeps the guard from becoming "ignore sp".
+  expect(thumb('\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tadd\tsp, sp, #0x4\n')).toThrow(spAsData);
+  expect(thumb('\tadd\tsp, sp, #-0x4\n\tmov\tr0, sp\n\tadd\tsp, sp, #0x4\n')).toThrow(spAsData);
+  // a COMPUTED stack pointer is not bookkeeping either — the base is not sp
+  expect(thumb('\tadd\tsp, r0, #0x4\n')).not.toThrow(); // (pre-existing behaviour, unchanged)
+
   // annotate mode degrades to a stub carrying the same reason — never a fabricated stack local
   const annotated = decompile(
     'f',
