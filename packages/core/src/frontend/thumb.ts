@@ -877,7 +877,10 @@ function decode(name: string, asm: string): { blocks: AsmBlock[]; dataWords: Map
 // (they did — the drift fabricated phantom pointer params on symbol-pool loads).
 const POOL_LABEL = /^([A-Za-z_.$][\w.$]*)(?:\s*\+\s*(0x[0-9a-fA-F]+|\d+))?$/;
 
-type PoolRef = { kind: 'const'; value: number } | { kind: 'gaddr'; sym: string } | { kind: 'unmodelled'; why: string };
+type PoolRef =
+  | { kind: 'const'; value: number }
+  | { kind: 'gaddr'; sym: string; addend: number }
+  | { kind: 'unmodelled'; why: string };
 
 /** Classify a word-load operand `LABEL[+N]` against the captured literal pools. Returns null when
  *  the operand does NOT name a pool (a real register/memory base → the normal load path). When it
@@ -903,12 +906,21 @@ function poolRef(operand: string, dataWords: Map<string, string[]>): PoolRef | n
     const val = w.startsWith('-') ? -Number(w.slice(1)) : Number(w);
     return Number.isFinite(val) ? { kind: 'const', value: val } : { kind: 'unmodelled', why: `unparsable word '${w}'` };
   }
-  // A bare C identifier that is NOT a `.L` code label → the address of a named global. A `sym+N`
-  // offset, or a `.L` label (jump table / code address surviving to here), is unmodelled.
-  if (/^[A-Za-z_]\w*$/.test(w) && !w.startsWith('.L')) {
-    return { kind: 'gaddr', sym: w };
+  // A C identifier that is NOT a `.L` code label → the address of a named global, optionally with
+  // a byte ADDEND folded into the pool word (`gBgTilemapBufs+0x14a` — agbcc pre-computes a fixed
+  // element's address into the pool rather than emitting an add). The addend stays in VALUE space:
+  // the consumer emits `gaddr` then an explicit `add`, the exact spelling the register-materialised
+  // `ldr rN,=gSym; add rN,#k` shape already lowers to — so it renders through the same audited
+  // cast-based path (`((u8 *)&gSym) + k`), never through a typed-pointer scale that a
+  // rendered-vs-value addend could silently multiply (the DEREF-TYPING class).
+  const sm = w.match(/^([A-Za-z_]\w*)\s*(?:([+-])\s*(0x[0-9a-fA-F]+|\d+))?$/);
+  if (sm && !sm[1].startsWith('.L')) {
+    const mag = sm[3] ? Number(sm[3]) : 0;
+    if (Number.isFinite(mag)) {
+      return { kind: 'gaddr', sym: sm[1], addend: sm[2] === '-' ? -mag : mag };
+    }
   }
-  return { kind: 'unmodelled', why: `pool word '${w}' is a symbol offset or code label` };
+  return { kind: 'unmodelled', why: `pool word '${w}' is not a symbol, symbol±offset, or number` };
 }
 
 /** Does this function's literal pool name at least one EXTERNAL symbol?
@@ -931,10 +943,13 @@ function poolNamesASymbol(dataWords: Map<string, string[]>, blockLabels: Set<str
   for (const [, words] of dataWords) {
     for (const raw of words) {
       const w = raw.trim();
-      if (!/^[A-Za-z_]\w*$/.test(w) || w.startsWith('.L')) {
+      // `gSym+0x14a` names a symbol as surely as `gSym` does — the witness must count both, or an
+      // asm whose pools carry only addend words would wrongly permit numeric promotion.
+      const sym = w.match(/^([A-Za-z_]\w*)\s*(?:[+-]\s*(?:0x[0-9a-fA-F]+|\d+))?$/)?.[1];
+      if (sym === undefined || sym.startsWith('.L')) {
         continue;
       }
-      if (!dataWords.has(w) && !blockLabels.has(w)) {
+      if (!dataWords.has(sym) && !blockLabels.has(sym)) {
         return true;
       }
     }
@@ -2293,6 +2308,16 @@ export function lift(
             if (pr?.kind === 'gaddr') {
               const res = mkValue(T.unk(32));
               irb.ops.push(mkOp('gaddr', { results: [res], attrs: { sym: pr.sym } }));
+              if (pr.addend !== 0) {
+                // `.word gSym+N` = the machine loads gSym's address plus N. Emitted as an explicit
+                // add so the addend is a VALUE, not an attribute a renderer could re-scale.
+                const k = mkValue(T.unk(32));
+                irb.ops.push(mkOp('const', { results: [k], attrs: { value: pr.addend } }));
+                const sum = mkValue(T.unk(32));
+                irb.ops.push(mkOp('add', { operands: [res, k], results: [sum] }));
+                writeData(reg(a), bi, sum);
+                break;
+              }
               writeData(reg(a), bi, res);
               break;
             }

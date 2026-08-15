@@ -228,9 +228,21 @@ describe('audit regressions: pool symbols, register ranges, layout, crashes', ()
     const asm = '	thumb_func_start gl\ngl:\n	ldr r1, _r\n	ldr r0, [r1]\n	bx lr\n_r: .4byte gGlobal\n';
     expect(d('gl', asm).source).toBe('s32 gl(void) {\n    return gGlobal;\n}\n');
   });
-  test('a `sym+N` pool word (unmodelled) declines loud, never fabricates a param', () => {
+  test('a `sym+N` pool word lowers to explicit address arithmetic, never a phantom param', () => {
+    // This pinned a loud decline until the addend was modelled. What the pin protects is unchanged:
+    // the pool label must never fall through to the load path and fabricate a pointer PARAMETER.
+    // The addend is emitted as a VALUE (`gaddr` + `add`), so it renders through the same cast-based
+    // path the register-materialised `ldr rN,=gSym; add rN,#k` shape always used — never a typed
+    // attribute a renderer could re-scale (the DEREF-TYPING class).
     const asm = '	thumb_func_start po\npo:\n	ldr r0, _p\n	ldr r0, [r0]\n	bx lr\n_p: .4byte gData+4\n';
-    expect(() => d('po', asm)).toThrow(/literal-pool load of pool word 'gData\+4'/);
+    expect(d('po', asm).source).toBe('s32 po(void) {\n    return ((s32 *)&gData)[1];\n}\n');
+    // …and the two spellings of the same address are the same C: the addend folded into the pool
+    // word versus added in a register must not diverge
+    const reg = '	thumb_func_start po\npo:\n	ldr r0, _p\n	adds r0, #4\n	ldr r0, [r0]\n	bx lr\n_p: .4byte gData\n';
+    expect(d('po', reg).source).toBe(d('po', asm).source);
+    // a NEGATIVE addend stays honest too
+    const neg = '	thumb_func_start pn\npn:\n	ldr r0, _p\n	ldr r0, [r0]\n	bx lr\n_p: .4byte gData-4\n';
+    expect(d('pn', neg).source).toContain('&gData');
   });
 
   // A fused register-range in a pop/ldmia must be expanded — an unexpanded `{r4-pc}` silently
