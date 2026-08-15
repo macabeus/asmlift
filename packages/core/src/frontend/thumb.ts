@@ -94,6 +94,11 @@ const LEGACY_MNEMONICS: Readonly<Record<string, string>> = Object.assign(Object.
   stmea: 'stmia',
 });
 
+// An offset far above the frame cannot be an argument — agbcc passes at most a handful on the
+// stack, and an absurd index would mint a signature with hundreds of parameters from one bad
+// offset. 16 is well past any real agbcc call and still refuses nonsense loudly.
+const MAX_STACK_ARG_INDEX = 16;
+
 function canonicalMnemonic(mn: string): string {
   return LEGACY_MNEMONICS[mn] ?? mn;
 }
@@ -1275,6 +1280,40 @@ export function lift(
     return readVar(r, b);
   };
 
+  // INCOMING STACK ARGUMENTS (AAPCS). Args 1-4 arrive in r0-r3; args 5+ are pushed by the CALLER,
+  // so the callee reads them at `[sp, #N]` where N is at or above its own frame. Those are
+  // PARAMETERS, not locals — declining them as "sp used as data" refuses a calling convention.
+  //
+  // The frame depth is tracked by a linear walk of the ENTRY BLOCK only (spDepth below), which is
+  // why the gate is what it is: within one straight-line block the depth at each instruction is
+  // exact and needs no CFG reasoning. Every case that would need more declines.
+  //
+  // `push {a,b,c}` deepens by 4 per register; `sub sp, #N` and `add sp, sp, #-N` deepen by N.
+  const spDelta = (ins: { mnemonic: string; ops: string[] }): number => {
+    const m = ins.mnemonic;
+    if (m === 'push' || m === 'pop') {
+      const n = ins.ops
+        .join(',')
+        .split(',')
+        .filter((s) => /r\d+|lr|pc/.test(s)).length;
+      return (m === 'push' ? 1 : -1) * 4 * n;
+    }
+    if ((m === 'add' || m === 'sub') && isSpReg(ins.ops[0])) {
+      const off = ins.ops[2] ?? ins.ops[1];
+      if (off?.startsWith('#')) {
+        const v = imm(off);
+        return m === 'sub' ? v : -v;
+      }
+    }
+    return 0;
+  };
+
+  // A virtual register key per incoming stack argument. Reading it goes through the ordinary Braun
+  // live-in path (frontend/ssa.ts), which turns a read with no reaching def into a function
+  // parameter — so this needs NO new representation, opcode or pass. The `@` cannot appear in a
+  // real register token, so the key cannot collide with one.
+  const stackArgKey = (index: number) => `@sarg${index}`;
+
   // The WRITE dual of readData, and the reason it exists is a lesson rather than a symmetry: the
   // first version of this guard checked sp in three decode arms (mov/add/sub) and its commit message
   // claimed "every write to sp declines". It did not — `lsl sp, r4, #2`, `neg sp, r4`, `mvn sp, r4`,
@@ -1302,6 +1341,9 @@ export function lift(
   const fillBlock = (ab: AsmBlock, bi: number) => {
     const irb = irBlocks[bi];
     let pendingCmp: { lhs: Value; rhs: Value } | null = null;
+    // Bytes the frame has grown since function entry, tracked only through this block's linear
+    // instruction order. Meaningful for the entry block; elsewhere a `[sp,#N]` access declines.
+    let spDepth = 0;
 
     // TRUSTWORTHINESS GUARD (mirrors the MIPS/PPC frontends): an unmodelled instruction must not
     // silently drop its destination register — emit an honest `opaque`: dead ⇒ it vanishes; live ⇒
@@ -1390,6 +1432,7 @@ export function lift(
       if (FLAG_SETTING.has(ins.mnemonic) && /^r[0-7]$/.test(reg(ins.ops[0] ?? ''))) {
         pendingCmp = null;
       }
+      spDepth += spDelta(ins);
       const [a, b, c] = ins.ops;
       switch (ins.mnemonic) {
         case 'mov':
@@ -1764,6 +1807,28 @@ export function lift(
           // the same address arithmetic the encoding performs. (parseAddr used to silently
           // read `[rB]`, dropping the index — a silent miscompile; ldrsh exists ONLY in this
           // form in Thumb-1, so every ldrsh went through here.)
+          // An incoming stack argument, read before its base becomes an sp decline. Every
+          // condition below is a refusal that keeps a LOCAL from being mistaken for a parameter:
+          //   • entry block only        — spDepth is exact only along this block's linear order
+          //   • entry has no preds      — otherwise its params are phis, not parameters
+          //   • no register offset      — `[sp, rX]` is not a fixed argument slot
+          //   • word width, word-aligned — the argument area is word-granular
+          //   • off >= spDepth          — BELOW the frame top is a local/spill: still declines,
+          //                               that is the separate slot-promotion capability
+          //   • a sane arity bound      — a wild offset must not mint a 400-parameter signature
+          //   • spDepth > 0             — the function must have DEMONSTRABLY established a frame.
+          //     With no prologue, depth 0 makes every `[sp,#N]` look like a caller argument — but a
+          //     headerless FRAGMENT whose prologue was sliced off is byte-identical to that, and
+          //     there its slots are locals. Minting a parameter from one would be exactly the
+          //     silent-wrong-answer trade this frontend refuses, so an unestablished frame declines.
+          if (isSpReg(base) && regOff === undefined && bi === 0 && preds[0].length === 0 && spDepth > 0) {
+            const rel = off - spDepth;
+            const index = target.argRegs.length + rel / 4;
+            if (width === 4 && rel >= 0 && rel % 4 === 0 && index < MAX_STACK_ARG_INDEX) {
+              writeData(reg(a), bi, readVar(stackArgKey(index), bi));
+              break;
+            }
+          }
           let baseVal = readData(base, bi);
           if (regOff !== undefined) {
             const sum = mkValue(T.unk(32));
@@ -1895,7 +1960,13 @@ export function lift(
   const entry = irBlocks[0];
   // non-ABI live-in ranks LAST (99) — deliberate Thumb tie-break; MIPS/PPC's is -1/first
   abiSortEntryParams(entry, preds[0].length > 0, (v) => {
-    const m = /^r(\d+)$/.exec(paramReg.get(v) ?? '');
+    const key = paramReg.get(v) ?? '';
+    // an incoming STACK argument ranks by its ABI index, after every register argument
+    const s = /^@sarg(\d+)$/.exec(key);
+    if (s) {
+      return +s[1];
+    }
+    const m = /^r(\d+)$/.exec(key);
     return m ? +m[1] : 99;
   });
   return fn;

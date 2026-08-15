@@ -186,3 +186,57 @@ describe('pre-UAL mnemonic spellings', () => {
     expect(run).not.toThrow(/native code|function Object/);
   });
 });
+
+// AAPCS puts arguments 1-4 in r0-r3 and pushes the rest, so the callee reads argument 5+ at
+// `[sp, #N]` with N at or above its own frame. Those are PARAMETERS. Declining them as "sp used as
+// data" refuses a calling convention — and it is separable from stack LOCALS, which still decline
+// because they live BELOW the frame top.
+describe('incoming stack arguments (AAPCS args 5+)', () => {
+  // asmlift derives arity from the registers actually READ, so a body that never touches r0-r3
+  // legitimately has none of them in its signature. These bodies read all four, which is what makes
+  // the ABI ORDERING claim testable at all.
+  const readsR0R3 = '\tadd\tr0, r0, r1\n\tadd\tr0, r0, r2\n\tadd\tr0, r0, r3\n';
+
+  test('a read at the frame top is argument 5, not a local', () => {
+    // frame = push {r4, lr} = 8 bytes; [sp, #8] is the first pushed argument => a4
+    const body = `\tpush\t{r4, lr}\n${readsR0R3}\tldr\tr4, [sp, #8]\n\tadd\tr0, r0, r4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n`;
+    expect(dc('f', body).source).toContain('s32 f(s32 a0, s32 a1, s32 a2, s32 a3, s32 a4)');
+  });
+
+  test('further slots are the following arguments, in ABI order', () => {
+    // frame = 8; [sp,#8] -> a4, [sp,#0xc] -> a5, [sp,#0x10] -> a6. Read OUT of order on purpose:
+    // the signature must follow the ABI, not the order the body happens to touch them.
+    const body =
+      `\tpush\t{r4, lr}\n${readsR0R3}` +
+      '\tldr\tr4, [sp, #0x10]\n\tadd\tr0, r0, r4\n\tldr\tr4, [sp, #8]\n\tadd\tr0, r0, r4\n' +
+      '\tldr\tr4, [sp, #0xc]\n\tadd\tr0, r0, r4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(dc('f', body).source).toContain('s32 f(s32 a0, s32 a1, s32 a2, s32 a3, s32 a4, s32 a5, s32 a6)');
+  });
+
+  test('an sp adjustment deepens the frame, so the same slot is a different argument', () => {
+    // frame = 8 + 4 = 12; now [sp,#0xc] is the FIRST pushed argument, and [sp,#8] is a LOCAL
+    const body = `\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n${readsR0R3}\tldr\tr4, [sp, #0xc]\n\tadd\tr0, r0, r4\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n`;
+    expect(dc('f', body).source).toContain('s32 f(s32 a0, s32 a1, s32 a2, s32 a3, s32 a4)');
+    expect(() => dc('f', body.replace('#0xc]', '#8]'))).toThrow(/stack pointer used as data/);
+  });
+
+  // Each of these is a refusal, and each keeps a LOCAL from being minted as a parameter.
+  test('everything the frame walk cannot vouch for still declines', () => {
+    const spAsData = /stack pointer used as data/;
+    // below the frame top: a spill slot / local, NOT an argument (the separate slot capability)
+    expect(() => dc('f', '\tpush\t{r4, lr}\n\tldr\tr0, [sp, #4]\n\tbx\tlr\n')).toThrow(spAsData);
+    // sub-word: the argument area is word-granular, so a byte/halfword read is not a whole slot
+    expect(() => dc('f', '\tpush\t{r4, lr}\n\tldrb\tr0, [sp, #8]\n\tbx\tlr\n')).toThrow(spAsData);
+    expect(() => dc('f', '\tpush\t{r4, lr}\n\tldrh\tr0, [sp, #8]\n\tbx\tlr\n')).toThrow(spAsData);
+    // unaligned: not a slot boundary
+    expect(() => dc('f', '\tpush\t{r4, lr}\n\tldr\tr0, [sp, #0xa]\n\tbx\tlr\n')).toThrow(spAsData);
+    // register offset: not a fixed slot
+    expect(() => dc('f', '\tpush\t{r4, lr}\n\tldr\tr0, [sp, r1]\n\tbx\tlr\n')).toThrow(spAsData);
+    // a WRITE to the argument area is not a parameter read
+    expect(() => dc('f', '\tpush\t{r4, lr}\n\tstr\tr0, [sp, #8]\n\tbx\tlr\n')).toThrow(spAsData);
+    // outside the entry block the depth is not established by a linear walk, so it declines
+    const later =
+      '\tpush\t{r4, lr}\n\tcmp\tr0, #0\n\tbeq\t.L1\n\tmov\tr0, #1\n\tbx\tlr\n.L1:\n\tldr\tr0, [sp, #8]\n\tbx\tlr\n';
+    expect(() => dc('f', later)).toThrow(spAsData);
+  });
+});
