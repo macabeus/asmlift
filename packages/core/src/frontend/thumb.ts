@@ -1645,40 +1645,91 @@ export function lift(
           }
         }
       }
-      // (b): `pendingIn[b]` = offsets stored and not yet reloaded on SOME path into b.
+      // CONTIGUITY. AAPCS lays the outgoing stack arguments at [sp,#0] upward, one word each, so an
+      // argument block is CONTIGUOUS FROM ZERO: a store at [sp,#4] can be argument 6 of a call only
+      // if argument 5 at [sp,#0] is also supplied on a path to that same call. A pending store
+      // whose lower slots are nowhere supplied is therefore provably not an argument block, and
+      // refusing it is a false alarm — the exact false alarm that blocked the commonest real shape,
+      // a value spilled at [sp,#4] and kept live across calls (kleod's ProcessInputAndUpdateEntities
+      // stores its `sp4` local and calls m4aSongNumStart 80 lines later, with offset 0 never stored
+      // in the whole function).
+      //
+      // The calibration in this: a conforming caller stores EVERY argument slot of a call it makes,
+      // so "slot 0 unsupplied" rules out "slot 4 is an argument". Hand-written asm could skip
+      // storing an argument the callee never reads; agbcc cannot (no interprocedural dead-argument
+      // elimination). That is the same producer assumption the reload conditions above already
+      // make, stated once here.
+      const prefixStored = (k: number, st: Set<number>): boolean => {
+        for (let j = 0; j < k; j += 4) {
+          if (!st.has(j)) {
+            return false;
+          }
+        }
+        return true;
+      };
+      // (a), contiguity-filtered: a store never reloaded ANYWHERE is an argument's signature only
+      // if its lower slots are supplied somewhere too; otherwise it is an ordinary dead local.
+      const storedAnywhere = new Set<number>();
+      for (const b of live) {
+        for (const ins of asmBlocks[b].instrs) {
+          const off = slotAcc(ins);
+          if (off !== null && isStore(ins)) {
+            storedAnywhere.add(off);
+          }
+        }
+      }
+      for (const off of storedAnywhere) {
+        if (!reloaded.has(off) && prefixStored(off, storedAnywhere)) {
+          return false; // (a)
+        }
+      }
+      // (b): `pendingOut[b]` = offsets stored and not yet reloaded on SOME path through b;
+      // `storedOut[b]` = offsets stored on SOME path through b (a reload does not remove the value
+      // from memory, so it does not remove the offset from this set — the callee would still read
+      // what the store put there).
       const pendingOut: Array<Set<number>> = asmBlocks.map(() => new Set<number>());
+      const storedOut: Array<Set<number>> = asmBlocks.map(() => new Set<number>());
       for (let changed = true; changed;) {
         changed = false;
         for (let b = 0; b < asmBlocks.length; b++) {
           if (!live.has(b)) {
             continue;
           }
-          const inSet = new Set<number>();
+          const pend = new Set<number>();
+          const st = new Set<number>();
           for (const q of preds[b]) {
             for (const off of pendingOut[q]) {
-              inSet.add(off);
+              pend.add(off);
+            }
+            for (const off of storedOut[q]) {
+              st.add(off);
             }
           }
-          const cur = new Set(inSet);
           for (const ins of asmBlocks[b].instrs) {
             const off = slotAcc(ins);
             if (off !== null) {
               if (isStore(ins)) {
-                if (!reloaded.has(off)) {
-                  return false; // (a)
-                }
-                cur.add(off);
+                pend.add(off);
+                st.add(off);
               } else {
-                cur.delete(off);
+                pend.delete(off);
               }
-            } else if ((ins.mnemonic === 'bl' || ins.mnemonic === 'blx') && cur.size > 0) {
-              return false; // (b) — a store reaches this call unread along some path
+            } else if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') {
+              for (const k of pend) {
+                if (prefixStored(k, st)) {
+                  return false; // (b) — a plausible argument block reaches this call unread
+                }
+              }
             }
           }
-          if (cur.size !== pendingOut[b].size || [...cur].some((o) => !pendingOut[b].has(o))) {
-            pendingOut[b] = cur;
-            changed = true;
-          }
+          const grow = (out: Array<Set<number>>, cur: Set<number>): void => {
+            if (cur.size !== out[b].size || [...cur].some((o) => !out[b].has(o))) {
+              out[b] = cur;
+              changed = true;
+            }
+          };
+          grow(pendingOut, pend);
+          grow(storedOut, st);
         }
       }
     }

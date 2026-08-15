@@ -504,6 +504,29 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     }
   });
 
+  test('an argument block is contiguous from [sp,#0] — a lone higher slot is a spill, not an argument', () => {
+    // AAPCS lays outgoing stack arguments at [sp,#0] upward, so a store at [sp,#4] can be argument
+    // 6 only if argument 5 at [sp,#0] is supplied on a path to the same call. With offset 0 never
+    // stored in the whole function, a pending [sp,#4] at a call is provably not an argument block —
+    // this is kleod's ProcessInputAndUpdateEntities shape: `sp4` spilled early, m4aSongNumStart
+    // called 80 lines later, sp4 read at the end. Refusing it was a false alarm.
+    const spill4 =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tstr\tr0, [sp, #0x4]\n\tbl\tg\n\tldr\tr4, [sp, #0x4]\n' +
+      '\tadd\tr0, r4, #1\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(decompile('f', spill4, ARMV4T_AGBCC).source).toContain('g(');
+    // …but store [sp,#0] anywhere on a path to that call and the same shape refuses: the pending
+    // higher slot now has its argument-block prefix, and the pair could be arguments 5 and 6
+    const withBase =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tstr\tr1, [sp]\n\tstr\tr0, [sp, #0x4]\n\tbl\tg\n' +
+      '\tldr\tr4, [sp, #0x4]\n\tadd\tr0, r4, #1\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(() => decompile('f', withBase, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+    // …and a pending [sp,#0] alone always refuses — the prefix condition is vacuous at zero
+    const base0 =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tbl\tg\n\tldr\tr4, [sp]\n' +
+      '\tadd\tr0, r4, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(() => decompile('f', base0, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+  });
+
   test('a slot store reaching a call unread is judged by PATH, not by listing order', () => {
     // The store reaches `bl g` through one arm; the other arm's reload must not excuse it. Scanning
     // per block let a LABEL decide the verdict; scanning the flat listing let BLOCK ORDER decide,
