@@ -55,6 +55,70 @@ test('two case values sharing one body lift cleanly (the switch_br block-arg inv
   const out = src(DIRECT, '.Lp', `.Lp:\n\t.word\t.Ltab\n${shared}`);
   expect(out).toContain('switch (a0)');
   expect(out).not.toContain('ASMLIFT_ERROR');
+  // ONE arm carrying both labels — not the body emitted twice.
+  expect(out).toMatch(/case 0:\s*\n\s*case 1:/);
+  expect(out.match(/return 10;/g)).toHaveLength(1);
+});
+
+// ── arms that are not disjoint: shared bodies, fall-through, and the shapes C cannot spell ────────
+// A jump table's arms may overlap in ways an if-tree never does, and `SwitchCase` has always been
+// able to say so (`values` stacks labels, `fallsThrough` drops the `break`). These pin WHICH
+// overlaps are recovered and which still decline — the boundary is "spellable in C without a goto".
+
+// A switch whose arms converge on a common tail rather than returning: the default target IS that
+// tail (agbcc's ordinary "the default just leaves the switch"), so the tail is BOTH the merge and
+// the default block. `arms` are the case bodies in table order, `tail` the shared exit.
+const conv = (arms: string[], tail = '.Lend:\n\tbx\tlr\n') =>
+  `f:\n\tcmp\tr1, #0x${(arms.length - 1).toString(16)}\n\tbhi\t.Lend\n` +
+  `\tlsl\tr0, r1, #0x2\n\tldr\tr1, .Lp\n\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n` +
+  `.Lp:\n\t.word\t.Ltab\n.Ltab:\n${arms.map((_, i) => `\t.word\t.Lc${i}\n`).join('')}` +
+  arms.map((a, i) => `.Lc${i}:\n${a}`).join('') +
+  tail;
+const convSrc = (arms: string[]) => decompile('f', conv(arms), ARMV4T_AGBCC).source;
+const CALL_A = '\tbl\tsideA\n', // an arm body with a visible side effect
+  LEAVE = '\tb\t.Lend\n';
+
+test('a switch whose default is just the end of the switch is not a fall-through', () => {
+  // The default target and the merge are the SAME block here. Reading "an arm reaches the default
+  // block" as fall-through would decline every ordinary agbcc switch that simply leaves.
+  const out = convSrc([CALL_A + LEAVE, '\tbl\tsideB\n' + LEAVE]);
+  expect(out).not.toContain('ASMLIFT_ERROR');
+  expect(out).toContain('switch (');
+  expect(out).toContain('sideA();');
+  expect(out).toContain('sideB();');
+});
+
+test('an arm that runs into the NEXT arm is recovered as C fall-through', () => {
+  // .Lc0 has no terminator of its own: control drops into .Lc1. That is `case 0:` with no `break;`,
+  // and it is the only shape of overlap C spells natively.
+  const out = convSrc([CALL_A, '\tbl\tsideB\n' + LEAVE]);
+  expect(out).not.toContain('ASMLIFT_ERROR');
+  // case 0 runs sideA and does NOT break before case 1
+  expect(out).toMatch(/case 0:\s*\n\s*a0 = sideA\(\);\s*\n\s*case 1:/);
+  // …and the body it falls into is emitted ONCE, under case 1.
+  expect(out.match(/sideB\(/g)).toHaveLength(1);
+});
+
+test('overlaps C cannot spell DECLINE instead of being silently closed or duplicated', () => {
+  // Emitting these as ordinary `break` arms would drop a real control-flow edge — the output would
+  // look entirely normal and run the wrong code, which is the whole hazard of a recovered table.
+  // The shared tail CALLS here: a bare `bx lr` tail is duplicated into the arms as a `return`, which
+  // legitimately removes the second exit — these fixtures need the exit to survive as an edge.
+  const tail = '.Lend:\n\tbl\tsideZ\n\tbx\tlr\n';
+  const sw = (arms: string[]) => () => decompile('f', conv(arms, tail), ARMV4T_AGBCC);
+  const fallsTo = (n: number) => `\tb\t.Lc${n}\n`;
+  const armB = '\tbl\tsideB\n' + LEAVE,
+    armC = '\tbl\tsideC\n' + LEAVE;
+  // (a) falls into a case that is not the next one emitted: C fall-through can only reach the
+  // following case, and reordering the arms would change which values reach which body.
+  expect(sw([CALL_A + fallsTo(2), armB, armC])).toThrow(/falls through into a case that is not the next one/);
+  // (b) reaches a sibling on one path and leaves the switch on another — that is a goto, not a
+  // fall-through: only SOME executions of case 0 continue into case 1.
+  expect(sw(['\tcmp\tr2, #0\n\tbeq\t.Lc1\n' + CALL_A + LEAVE, armB])).toThrow(
+    /reaches sibling case .* on one path and leaves the switch on another/,
+  );
+  // (c) reaches two different siblings.
+  expect(sw(['\tcmp\tr2, #0\n\tbeq\t.Lc1\n' + fallsTo(2), armB, armC])).toThrow(/reaches several sibling cases/);
 });
 
 test('near-miss dispatches DECLINE — a mis-recovered table runs the wrong block', () => {

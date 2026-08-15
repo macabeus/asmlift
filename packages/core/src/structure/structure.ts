@@ -1949,7 +1949,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
 
   // ── Regime-A switch recovery (structure/switch-recover.ts): the recognizer's case bodies call
   // back into structureRegion, and Regime B (switch_br, below) shares its fall-through predicate.
-  const { recognizeSwitch, caseRegionReachesSibling } = makeSwitchRecovery({
+  const { recognizeSwitch, analyzeArmExit } = makeSwitchRecovery({
     fn,
     defs,
     dom,
@@ -1987,23 +1987,18 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     }
     // Regime B: a `switch_br` (jump-table dispatch) lowers directly to the `switch` node — scrutinee,
     // per-successor case value, last successor = default. Case bodies delegate to structureRegion (as in
-    // Regime A). Fall-through between jump-table cases is not yet handled: if a case body reaches another
-    // case/default block inside the region, fail LOUD rather than duplicate it.
+    // Regime A). Two table slots naming ONE block are one arm carrying both `case` labels; an arm whose
+    // region flows into the NEXT arm is C fall-through (no `break`). Any other shape needs a `goto` and
+    // fails LOUD rather than being duplicated or silently closed.
     if (term.opcode === 'switch_br') {
       const merge = ipdom.get(b) ?? stop;
       const succ = term.successors;
       const caseVals = term.attrs.cases as number[];
-      const targets = new Set<Block>(succ.map((s) => s.block));
-      if (caseRegionReachesSibling(targets, b, merge)) {
-        throw new StructureError(
-          `cannot structure '${fn.name}': fall-through between jump-table cases is not yet supported`,
-        );
-      }
       // Switch edges CARRY phi args (frontend/ssa.ts appends them terminator-generically) — each
       // case/default body must open with its edge's copies, exactly as cond_br edges do; dropping
       // them leaves the target's params uninitialized on the switch path. Two case values sharing
       // a target must agree on their args (else the copies are ambiguous → loud decline); the
-      // shared body is then structured per case entry.
+      // shared body is then emitted ONCE under both labels.
       const argsSeen = new Map<Block, Value[]>();
       for (const s of succ) {
         const prev = argsSeen.get(s.block);
@@ -2014,16 +2009,61 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
         }
         argsSeen.set(s.block, s.args as Value[]);
       }
-      const outCases: SwitchCase[] = succ.slice(0, -1).map((s, i) => ({
-        values: [caseVals[i]],
-        body: [...argAssignsFor(b, s), ...structureRegion(s.block, merge)],
-        fallsThrough: false,
-      }));
+      // Group the case slots by target block, in TABLE order — `case 5: case 6:` is one arm with two
+      // labels, not two copies of one body. Emission order is the array order (load-bearing: see the
+      // l3/ast.ts fall-through note), so the adjacency check below is against this same order.
+      const defEdge = succ[succ.length - 1];
+      const arms: { entry: Block; edge: (typeof succ)[number]; values: number[] }[] = [];
+      const armOf = new Map<Block, (typeof arms)[number]>();
+      succ.slice(0, -1).forEach((s, i) => {
+        let a = armOf.get(s.block);
+        if (!a) {
+          a = { entry: s.block, edge: s, values: [] };
+          armOf.set(s.block, a);
+          arms.push(a);
+        }
+        a.values.push(caseVals[i]);
+      });
+      // The blocks an arm could fall INTO. The default block counts only when it is a block of its
+      // own: when it IS the merge, "the default" is just where the switch ends, and an arm reaching
+      // it is a plain `break`.
+      const siblings = new Set<Block>(arms.map((a) => a.entry));
+      if (defEdge.block !== merge) {
+        siblings.add(defEdge.block);
+      }
+      const outCases: SwitchCase[] = arms.map((a, i) => {
+        const exit = analyzeArmExit(a.entry, b, merge, siblings);
+        if (exit.kind === 'unstructurable') {
+          throw new StructureError(`cannot structure '${fn.name}': ${exit.why}`);
+        }
+        const ft = exit.kind === 'fallthrough';
+        if (ft && arms[i + 1]?.entry !== exit.to) {
+          throw new StructureError(
+            `cannot structure '${fn.name}': case ${a.values.join('/')} falls through into a case that is not ` +
+              `the next one emitted — C fall-through only reaches the following case`,
+          );
+        }
+        return {
+          values: a.values,
+          // A falling-through arm stops AT its successor arm, which then emits that body once under
+          // its own labels; a closed arm runs to the merge as before.
+          body: [...argAssignsFor(b, a.edge), ...structureRegion(a.entry, ft ? exit.to : merge)],
+          fallsThrough: ft,
+        };
+      });
+      // The default arm has nothing after it to fall into, so it must be closed.
+      const defExit = analyzeArmExit(defEdge.block, b, merge, siblings);
+      if (defExit.kind !== 'break') {
+        throw new StructureError(
+          `cannot structure '${fn.name}': the jump-table default flows into a case body — ` +
+            `C emits the default arm last, so it has no case to fall into`,
+        );
+      }
       const sw: Stmt = {
         k: 'switch',
         scrutinee: expr(term.operands[0]),
         cases: outCases,
-        default: [...argAssignsFor(b, succ[succ.length - 1]), ...structureRegion(succ[succ.length - 1].block, merge)],
+        default: [...argAssignsFor(b, defEdge), ...structureRegion(defEdge.block, merge)],
       };
       out.push(sw);
       if (merge && merge !== stop) {
