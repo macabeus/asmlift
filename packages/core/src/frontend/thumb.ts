@@ -1558,15 +1558,48 @@ export function lift(
     // does not mean "private": the outgoing area belongs to the callee, which may even assign to a
     // stack parameter.
     //
-    // How big is that area? The CALLING CONVENTION answers exactly — `4 * max(0, arity - 4)` per
-    // call, and the largest over all calls. When every callee's arity is known this is a proof, and
-    // the region below it is simply not a local. Arity comes from a supplied prototype, from a known
-    // runtime helper, or from the project's own DWARF via the symbol map (only CALLEE signatures
-    // transfer — see symbols.ts).
+    // How big is that area? The calling convention answers it — `4 * max(0, words - 4)` per call,
+    // largest over all calls — but ONLY given two side conditions, and getting those wrong makes
+    // this worse than the guess it replaces rather than better:
     //
-    // The fallback below is NOT a proof and is labelled as one place, not spread through the file.
-    // It exists because a caller may have no prototypes at all (the playground), and refusing every
-    // calling function there costs the whole capability.
+    //   * every parameter occupies exactly one word. An 8-byte parameter (`double`, `long long`)
+    //     takes two, and under APCS may straddle r3 and the stack. Counting parameters instead of
+    //     WORDS then reports an empty outgoing area for a call that has one.
+    //   * the parameter list is complete. A variadic callee's declared list is a prefix — `sprintf`
+    //     truthfully declares two parameters and is routinely handed six.
+    //
+    // Both were unchecked in the first cut, and the result was that supplying a TRUE fact made the
+    // output silently wrong where supplying nothing declined correctly: `{ sprintf: { params: 2 } }`
+    // turned a decline into `return sprintf(a0, a1)` with both stack arguments deleted. A fact must
+    // never license an acceptance the facts do not entail — it may move a function toward refusal,
+    // or toward a PROVEN acceptance, and nowhere else.
+    //
+    // So a bare arity count proves nothing: it carries no widths, and it cannot rule out a variadic
+    // callee. Only a list of parameters this can individually size to one word does — which is a
+    // real narrowing, and the honest one. Everything else falls to the calibration below, whose
+    // conservatism is the safe direction.
+    const byName = symbols ? symbolsByName(symbols) : null;
+    const WORD = target.argRegs.length; // registers before the stack area begins
+    const oneWord = (spelling: string): boolean =>
+      /^(u8|s8|u16|s16|u32|s32|int|unsigned|char|short|long|float)$/.test(spelling.trim()) ||
+      spelling.trim().endsWith('*');
+    const provenWords = (c: string): number | undefined => {
+      const proto = prototypes[c] ?? RUNTIME_HELPERS[c];
+      if (proto?.params !== undefined) {
+        // a typed list, every entry provably one word — a bare count cannot prove anything
+        return Array.isArray(proto.params) && proto.params.every(oneWord) ? proto.params.length : undefined;
+      }
+      const sig = byName?.get(c)?.signature;
+      if (sig === undefined) {
+        return undefined;
+      }
+      // DWARF facts: a pointer is one word, anything sized over a word is not, an unsized type
+      // cannot be judged. SymbolSignature carries no variadic flag, so a list that sizes cleanly is
+      // still only as good as that omission — noted at the type, not papered over here.
+      return sig.params.every((f) => f.pointer === true || (f.size !== null && f.size <= 4))
+        ? sig.params.length
+        : undefined;
+    };
     const callees: string[] = [];
     for (const ab of asmBlocks) {
       for (const ins of ab.instrs) {
@@ -1576,17 +1609,15 @@ export function lift(
       }
     }
     if (callees.length > 0) {
-      const byName = symbols ? symbolsByName(symbols) : null;
       let proven = 0;
       let allKnown = true;
       for (const c of callees) {
-        const n =
-          protoArity(prototypes[c]) ?? protoArity(RUNTIME_HELPERS[c]) ?? byName?.get(c)?.signature?.params.length;
-        if (n === undefined) {
+        const words = provenWords(c);
+        if (words === undefined) {
           allKnown = false;
           break;
         }
-        proven = Math.max(proven, 4 * Math.max(0, n - target.argRegs.length));
+        proven = Math.max(proven, 4 * Math.max(0, words - WORD));
       }
       if (allKnown) {
         // PROVEN. A frame whose outgoing area is non-empty still declines: consuming those stores as
