@@ -1610,20 +1610,33 @@ export function lift(
   // away from the memory the pop will read.
   const localArea = ((): number => {
     // The PROLOGUE only — everything before the entry block first touches the frame. Summing the
-    // whole block instead let a store made BEFORE the reservation fall inside `off < localArea`,
-    // so `str r0,[sp]; add sp,sp,#-4; …` claimed a write to the CALLER's frame as a private local
-    // and deleted it: `s32 f(s32 a0) { return 7; }`. Same class as the `off < frameDepth` bug,
-    // arriving from the other end.
+    // whole block instead let a store made BEFORE the reservation fall inside `off < localArea`, so
+    // `str r0,[sp]; add sp,sp,#-4; …` claimed a write to the CALLER's frame as a private local and
+    // deleted it.
+    //
+    // NET, not the sum of the negatives. Counting only reservations and discarding releases leaves
+    // localArea larger than the region that is actually below the callee-saved block, and `off <
+    // localArea` then claims the SAVED REGISTERS as private locals — which the epilogue's `pop`
+    // reads back. `push {lr}; add sp,#-8; add sp,#8; str r0,[sp]; pop {r1}; bx r1` deleted the
+    // store and rendered a computed `bx` as an ordinary return, and it fooled the pop gate too
+    // (`released` is compared against this number). Not corpus-reachable — 0 of 2805 Thumb
+    // functions adjust sp upward before their first frame access — which is exactly why only a
+    // probe finds it.
+    //
+    // An sp write this cannot read poisons the whole thing to 0, disabling every slot, rather than
+    // being skipped as if it were no movement: the same rule spDelta follows.
     const ins = asmBlocks[0].instrs;
     const firstMem = ins.findIndex((x) => spMemAccess(x) !== null);
-    let n = 0;
+    let reserved = 0;
     for (const x of ins.slice(0, firstMem === -1 ? ins.length : firstMem)) {
       const d = spAdjust(x);
-      if (d !== null && d < 0) {
-        n += -d;
+      if (d !== null) {
+        reserved -= d; // d > 0 = sp rises = the frame shrinks
+      } else if (x.mnemonic !== 'push' && x.mnemonic !== 'pop' && isSpReg((x.ops[0] ?? '').replace(/!$/, ''))) {
+        return 0; // an sp write of a shape this does not model
       }
     }
-    return n;
+    return Math.max(0, reserved);
   })();
 
   const slotsOk = slotModelSafe();
@@ -2172,6 +2185,7 @@ export function lift(
             regOff === undefined &&
             width === 4 &&
             off % 4 === 0 &&
+            off >= 0 &&
             off < localArea &&
             ssa.hasReachingDef(slotKey(off), bi)
           ) {
@@ -2207,7 +2221,15 @@ export function lift(
           // collide with the incoming-argument area above it (which the load path recovers as
           // parameters, and where a STORE is still a decline — writing a caller's slot is a
           // different capability). A spill that is never reloaded becomes a dead def and drops.
-          if (slotsOk && isSpReg(base) && regOff === undefined && width === 4 && off % 4 === 0 && off < localArea) {
+          if (
+            slotsOk &&
+            isSpReg(base) &&
+            regOff === undefined &&
+            width === 4 &&
+            off % 4 === 0 &&
+            off >= 0 &&
+            off < localArea
+          ) {
             writeVar(slotKey(off), bi, readData(reg(a), bi));
             break;
           }

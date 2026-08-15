@@ -456,6 +456,27 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     expect(() => decompile('f', early, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
   });
 
+  test('the reserved area is a NET quantity, and a slot cannot sit below sp', () => {
+    // Counting only reservations and discarding releases left `localArea` larger than the region
+    // actually below the callee-saved block, so `off < localArea` claimed the SAVED REGISTERS —
+    // which the epilogue's pop reads back. This deleted the store and rendered a computed `bx` as
+    // an ordinary return, and it fooled the pop gate too, since `released` is compared against the
+    // same inflated number. No agbcc function adjusts sp upward before its first frame access, so
+    // only a probe reaches it.
+    const inflated =
+      'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tsp, sp, #0x8\n\tstr\tr0, [sp]\n\tmov\tr0, #7\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(() => decompile('f', inflated, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+    const popGate =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tsp, sp, #0x4\n\tstr\tr0, [sp, #0x4]\n\tldr\tr1, [sp, #0x4]\n' +
+      '\tadd\tr0, r1, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r2}\n\tbx\tr2\n';
+    expect(() => decompile('f', popGate, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+    // …and the other end: a NEGATIVE offset is below sp, outside any frame this reasons about
+    const below =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp, #-0x4]\n\tldr\tr1, [sp, #-0x4]\n\tadd\tr0, r1, #1\n' +
+      '\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r2}\n\tbx\tr2\n';
+    expect(() => decompile('f', below, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+  });
+
   test('a gap in the slots read still yields ABI-correct offsets', () => {
     // frame 8, so [sp,#0xc] is argument 6 (index 5) and argument 5 is never read. Naming downstream
     // is POSITIONAL, so minting only the slot that was read would put the parameter at argument 5's
