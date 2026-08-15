@@ -682,7 +682,16 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     const bumpAgg = (sym: string) => offsets.set(sym, new Set([-1])); // -1 marks "variable index"
     for (const b of fn.blocks) {
       for (const op of b.ops) {
-        const gaddrSym = (v: Value) => (defs.get(v)?.opcode === 'gaddr' ? (defs.get(v)!.attrs.sym as string) : null);
+        const gaddrSym = (v: Value) => {
+          const dv = defs.get(v);
+          // laddr participates identically: `sp0` is scalar-spelled at off 0 and cast-spelled
+          // anywhere else, exactly as a global of its shape would be
+          return dv?.opcode === 'gaddr'
+            ? (dv.attrs.sym as string)
+            : dv?.opcode === 'laddr'
+              ? (dv.attrs.name as string)
+              : null;
+        };
         if (op.opcode === 'load' || op.opcode === 'store') {
           const s = gaddrSym(op.operands[0]);
           if (s) {
@@ -1648,6 +1657,11 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     if (d.opcode === 'call') {
       return { k: 'call', fn: d.attrs.target as string, args: d.operands.map(e) };
     }
+    if (d.opcode === 'laddr') {
+      // gaddr's local twin: the address of the frame-local object the Thumb frontend proved and
+      // named (frame-object audit). Renders `&sp0`; the object itself is declared in `locals`.
+      return { k: 'addr', name: d.attrs.name as string };
+    }
     if (d.opcode === 'gaddr') {
       // A promoted CODE symbol (frontend `code: true`) is a function pointer stored as an
       // integer: spelled `(u32)Name` — the source idiom — never `&Name` (defect G of the
@@ -2264,7 +2278,25 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
   return {
     name: fn.name,
     params: entry.params.map((p, i) => ({ name: `a${i}`, type: p.type })),
-    locals: localNames.map((n) => ({ name: n, type: varType.get(n)! })),
+    locals: [
+      ...localNames.map((n) => ({ name: n, type: varType.get(n)! })),
+      // frame-local objects (laddr): declared with EXACTLY the access type the machine used —
+      // the frontend's frame-object audit proved all accesses agree, so this is a fact, not a guess
+      ...[
+        ...new Map(
+          fn.blocks
+            .flatMap((b) => b.ops)
+            .filter((op) => op.opcode === 'laddr')
+            .map((op) => [
+              op.attrs.name as string,
+              {
+                name: op.attrs.name as string,
+                type: T.int(((op.attrs.width as number) ?? 4) * 8, (op.attrs.signed as boolean) ?? false),
+              },
+            ]),
+        ).values(),
+      ],
+    ],
     ...(shapedGlobalTypes.size
       ? {
           globals: [...shapedGlobalTypes]

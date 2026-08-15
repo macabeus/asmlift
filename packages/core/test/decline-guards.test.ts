@@ -139,7 +139,10 @@ test('every sp-as-data spelling declines loud — including the register-indexed
   // The carve-out is the word-slot model and nothing more — every spelling it cannot vouch for is
   // still on this list.
   expect(thumb('\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tadd\tsp, sp, #0x4\n')).not.toThrow();
-  expect(thumb('\tadd\tsp, sp, #-0x4\n\tmov\tr0, sp\n\tadd\tsp, sp, #0x4\n')).toThrow(spAsData);
+  // `mov r0, sp` is now the address-taken-local CAPTURE (laddr); with nothing ever dereferencing
+  // or escaping the address usefully, the frame-object audit still declines — loud, with the
+  // attributed reason, because a guessed object type is the plausible-but-wrong class.
+  expect(thumb('\tadd\tsp, sp, #-0x4\n\tmov\tr0, sp\n\tadd\tsp, sp, #0x4\n')).toThrow(/address-taken stack local/);
   // a slot OUTSIDE the frame is not a local — above the top is the caller's, and a store there is
   // still a decline (recovering it is a separate capability from reading an incoming argument)
   expect(thumb('\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp, #0x8]\n\tadd\tsp, sp, #0x4\n')).toThrow(spAsData);

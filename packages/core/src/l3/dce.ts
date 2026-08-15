@@ -15,8 +15,11 @@
 // read as live throughout), so a removal only happens when the local is provably dead. Only
 // names in `locals` are eligible — globals (side effects, referenced by name from headers) and
 // params are never touched — and a value carrying a side effect / gap signal / memory load is
-// never dropped (see `mustKeep`). Locals are never address-taken in L3 (`addr` names a global),
-// so `var` reads are a COMPLETE account of a local's uses.
+// never dropped (see `mustKeep`). An `addr` node can now name a LOCAL as well as a global (the
+// frame-local object a Thumb `laddr` declares — structure.ts), and an address-taken local's stores
+// are observable through the escaped pointer whether or not any `var` read follows — so an `addr`
+// name counts as a READ below, which pins the local and every store to it. For globals that is a
+// no-op (they were never eligible), so the single rule covers both.
 //
 // Ordering: structureChecked runs `assertResolved` BEFORE this pass, so in strict mode an
 // unresolved `?` value trips the contract first and never reaches DCE; `mustKeep` treating `?` as
@@ -25,9 +28,10 @@ import type { Expr, SFn, Stmt } from './ast';
 import { exprChildren, negateCond, stmtChildren, stmtExprs } from './ast';
 
 /** Accumulate every LOCAL-eligible `var` name read anywhere in `e` (recurses all sub-exprs). An
- *  `addr` node names a global, not a local, so it is not a local read. */
+ *  `addr` name counts too: taking a local's address makes every store to it observable through the
+ *  escaped pointer, so an address-taken local is never dead here. */
 function readsInto(e: Expr, out: Set<string>): void {
-  if (e.k === 'var') {
+  if (e.k === 'var' || e.k === 'addr') {
     out.add(e.name);
   }
   for (const c of exprChildren(e)) {

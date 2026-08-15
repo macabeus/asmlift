@@ -595,9 +595,11 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     // The gap histogram is the improvement loop's work-list; "local stack frames not supported" was
     // a false attribution that sent the loop to build a thing that already works. Each blocker now
     // names itself. The generic message survives only for sp uses no sub-family claims.
-    const addrTaken =
-      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tmov\tr4, sp\n\tstr\tr0, [r4]\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
-    expect(() => decompile('f', addrTaken, ARMV4T_AGBCC)).toThrow(/address of a stack local is taken/);
+    // (the plain `mov rD, sp` capture is now the laddr capability — its refusals carry their own
+    // attributed messages, tested with the capability below; the COMPUTED capture still refuses)
+    const addrComputed =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr4, sp, #0x4\n\tstr\tr0, [r4]\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(() => decompile('f', addrComputed, ARMV4T_AGBCC)).toThrow(/address of a stack local is computed/);
     const outgoing =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tbl\tg\n\tldr\tr4, [sp]\n' +
       '\tadd\tr0, r4, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
@@ -607,8 +609,70 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     expect(() => decompile('f', arity, ARMV4T_AGBCC, { prototypes: { g: { params: 5 } } })).toThrow(
       /declared with 5 arguments/,
     );
-    // every attributed message keeps the class prefix, so nothing keyed on it breaks
-    expect(() => decompile('f', addrTaken, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+    // every attributed sp message keeps the class prefix, so nothing keyed on it breaks
+    expect(() => decompile('f', addrComputed, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+  });
+
+  test('an address-taken frame local becomes a declared object whose address is a value', () => {
+    // The DMA-fill idiom: `DmaFill16` expands to `vu16 tmp = v; DmaSet(…, &tmp, …)`, so agbcc
+    // stores a halfword through a captured sp and hands the ADDRESS to the DMA source register.
+    // `mov rD, sp` lifts to `laddr` — gaddr's local twin — the frame-object audit proves every use,
+    // the structurer declares the object with exactly the access type the machine used, and the
+    // escaped address is an ordinary value. L3 DCE must NOT reap the store: an address-taken
+    // local's stores are observable through the escaped pointer (the hardware reads them).
+    const dmaFill =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tmov\tr4, sp\n\tmov\tr0, #0\n\tstrh\tr0, [r4]\n' +
+      '\tldr\tr2, .L1\n\tmov\tr1, sp\n\tstr\tr1, [r2]\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n' +
+      '.L1:\n\t.word\t0x40000D4\n';
+    expect(decompile('f', dmaFill, ARMV4T_AGBCC).source).toBe(
+      's32 f(void) {\n    u16 sp0;\n    sp0 = 0;\n    *(s32 *)67109076 = &sp0;\n    return 0;\n}\n',
+    );
+    // …and the object co-exists with SSA slots at higher offsets, each model owning its own bytes
+    const mixed =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tstr\tr0, [sp, #0x4]\n\tmov\tr4, sp\n\tstrh\tr1, [r4]\n' +
+      '\tldr\tr2, .L1\n\tstr\tr4, [r2]\n\tldr\tr0, [sp, #0x4]\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n' +
+      '.L1:\n\t.word\t0x40000D4\n';
+    const src = decompile('f', mixed, ARMV4T_AGBCC).source;
+    expect(src).toContain('u16 sp0;');
+    expect(src).toContain('&sp0');
+    expect(src).toContain('return a0;'); // the [sp,#4] slot is still a transparent SSA value
+  });
+
+  test('the frame-object audit refuses every use it cannot vouch for, loudly and by name', () => {
+    const laddr = /address-taken stack local/;
+    const wrap = (body: string) =>
+      `f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n${body}\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n`;
+    // never dereferenced: nothing pins the object's type, and a guessed declaration is the
+    // plausible-but-wrong class (here the address escapes into the return value)
+    expect(() =>
+      decompile(
+        'f',
+        'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tmov\tr0, sp\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n',
+        ARMV4T_AGBCC,
+      ),
+    ).toThrow(laddr);
+    // accesses disagreeing on width: no single declared type reproduces both
+    expect(() => decompile('f', wrap('\tmov\tr4, sp\n\tstrh\tr0, [r4]\n\tstr\tr1, [r4]\n'), ARMV4T_AGBCC)).toThrow(
+      laddr,
+    );
+    // address arithmetic on the capture: the object's extent stops being one scalar
+    expect(() => decompile('f', wrap('\tmov\tr4, sp\n\tadd\tr4, r4, #0x4\n\tstr\tr0, [r4]\n'), ARMV4T_AGBCC)).toThrow(
+      laddr,
+    );
+    // an access at a nonzero offset through the capture
+    expect(() => decompile('f', wrap('\tmov\tr4, sp\n\tstr\tr0, [r4, #0x4]\n'), ARMV4T_AGBCC)).toThrow(laddr);
+    // overlap with an SSA slot: one byte, two models
+    expect(() =>
+      decompile(
+        'f',
+        wrap('\tmov\tr4, sp\n\tstr\tr0, [r4]\n\tstr\tr1, [sp]\n\tldr\tr2, [sp]\n\tadd\tr0, r2, #0\n'),
+        ARMV4T_AGBCC,
+      ),
+    ).toThrow(laddr);
+    // a COMPUTED capture is not the modelled shape at all
+    expect(() => decompile('f', wrap('\tadd\tr4, sp, #0x4\n\tstr\tr0, [r4]\n'), ARMV4T_AGBCC)).toThrow(
+      /address of a stack local is computed/,
+    );
   });
 
   test('a gap in the slots read still yields ABI-correct offsets', () => {

@@ -55,7 +55,7 @@
 import { Block, Fn, Op, Value, mkOp, replaceAllUsesWith } from '../ir/core';
 
 /** Ops whose result depends on `attrs` alone — no operands, no memory, no control flow. */
-const NUMBERABLE = new Set(['gaddr']);
+const NUMBERABLE = new Set(['gaddr', 'laddr']); // laddr: same argument — operand-free, pure, attr-keyed
 
 /** The value-number key: the opcode plus every attribute, in a stable order. */
 function keyOf(op: Op): string {
