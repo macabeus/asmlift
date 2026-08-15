@@ -458,11 +458,14 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
       body: structureRegion(blk, merge),
       fallsThrough: false,
     }));
+    // An empty default arm is not a default (see the Regime-B note in structure.ts): the label
+    // would carry no statement, which says nothing and is not valid C89.
+    const defBody = defaultBlk ? structureRegion(defaultBlk, merge) : [];
     const sw: Stmt = {
       k: 'switch',
       scrutinee: scrutExpr,
       cases: outCases,
-      ...(defaultBlk ? { default: structureRegion(defaultBlk, merge) } : {}),
+      ...(defBody.length ? { default: defBody } : {}),
     };
     const out: Stmt[] = [sw];
     if (merge && merge !== stop) {

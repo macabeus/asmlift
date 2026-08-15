@@ -2059,11 +2059,15 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
             `C emits the default arm last, so it has no case to fall into`,
         );
       }
+      // An EMPTY default arm is not a default at all: it is where the switch ends, which is where
+      // an unmatched scrutinee goes anyway. Emitting the label with nothing under it says nothing
+      // and is not even valid C89 (a label needs a statement).
+      const defBody = [...argAssignsFor(b, defEdge), ...structureRegion(defEdge.block, merge)];
       const sw: Stmt = {
         k: 'switch',
         scrutinee: expr(term.operands[0]),
         cases: outCases,
-        default: [...argAssignsFor(b, defEdge), ...structureRegion(defEdge.block, merge)],
+        ...(defBody.length ? { default: defBody } : {}),
       };
       out.push(sw);
       if (merge && merge !== stop) {

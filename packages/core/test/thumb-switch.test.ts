@@ -86,6 +86,11 @@ test('a switch whose default is just the end of the switch is not a fall-through
   expect(out).toContain('switch (');
   expect(out).toContain('sideA();');
   expect(out).toContain('sideB();');
+  // …and its default arm is not emitted at all: an unmatched scrutinee already leaves the switch,
+  // so the label would carry no statement — which C89 does not allow.
+  expect(out).not.toContain('default:');
+  // control: a default with a body of its own still gets its label (the DIRECT fixture above).
+  expect(src(DIRECT, '.Lp', `.Lp:\n\t.word\t.Ltab\n${TABLE}`)).toContain('default:');
 });
 
 test('an arm that runs into the NEXT arm is recovered as C fall-through', () => {
