@@ -37,6 +37,12 @@ export interface SsaBuilder {
 }
 
 /** `preds` is per-EDGE (see the module header): one entry per CFG edge into each block. */
+// VARIABLE NAMES ARE NOT ALWAYS MACHINE REGISTERS. `readVar`/`writeVar` key on an arbitrary string,
+// and frontends mint VIRTUAL keys for storage the ISA has no register for — MIPS `sp@<off>` for a
+// stack slot (frontend/mips.ts), Thumb `@sarg<k>` for an incoming stack argument (frontend/thumb.ts).
+// A virtual key must be outside its ISA's register grammar so it cannot collide with a real one, and
+// a key read with no reaching def becomes a function PARAMETER by the live-in path below — which is
+// how both of those capabilities get their parameters without a new opcode or pass.
 export function makeSsaBuilder(name: string, blockCount: number, preds: number[][]): SsaBuilder {
   const irBlocks: Block[] = Array.from({ length: blockCount }, () => ({ params: [] as Value[], ops: [] }));
   const fn: Fn = { name, blocks: irBlocks };

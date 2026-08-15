@@ -1336,6 +1336,49 @@ export function lift(
   // parameter — so this needs NO new representation, opcode or pass. The `@` cannot appear in a
   // real register token, so the key cannot collide with one.
   const stackArgKey = (index: number) => `@sarg${index}`;
+  // Defined beside its mint site on purpose: the format string and its parser drifted 650 lines
+  // apart in the first version, with the convention explained only at one end.
+  const stackArgIndex = (key: string): number | null => {
+    const m = /^@sarg(\d+)$/.exec(key);
+    return m ? +m[1] : null;
+  };
+
+  // Is `[sp, #off]` an incoming stack argument, and which one? `null` means NO — and every null is
+  // a DECLINE, because the caller falls through to readData's sp guard.
+  //
+  // Why a slot at or above the frame top cannot have been written by this function, which is the
+  // whole soundness argument: every sp-relative STORE declines (readData, via the str arm), and a
+  // `push` only ever writes strictly BELOW the current top. An argument slot is at or above the
+  // incoming sp, so no instruction here can have defined it — the value can only be the caller's.
+  const incomingArgIndex = (
+    base: string,
+    off: number,
+    width: number,
+    regOff: string | undefined,
+    bi: number,
+    depth: number,
+    depthKnown: boolean,
+  ): number | null => {
+    if (!isSpReg(base) || regOff !== undefined) {
+      return null; // not sp, or `[sp, rX]` — not a fixed argument slot
+    }
+    if (bi !== 0 || preds[0].length > 0) {
+      return null; // depth is exact only along the ENTRY block's linear order, and only when its
+      // params are parameters rather than phis
+    }
+    if (!depthKnown || depth <= 0) {
+      return null; // an unmeasurable frame, or none established: a headerless FRAGMENT whose
+      // prologue was sliced off looks identical to a frameless function, and there the slots are
+      // locals — minting one would be the silent-wrong trade this frontend refuses
+    }
+    if (width !== 4 || off < depth || (off - depth) % 4 !== 0) {
+      return null; // the argument area is word-granular; BELOW the top is a local, which is the
+      // separate slot-promotion capability
+    }
+    const index = target.argRegs.length + (off - depth) / 4;
+    return index < MAX_STACK_ARG_INDEX ? index : null; // a wild offset must not mint a
+    // 400-parameter signature
+  };
 
   // The WRITE dual of readData, and the reason it exists is a lesson rather than a symmetry: the
   // first version of this guard checked sp in three decode arms (mov/add/sub) and its commit message
@@ -1845,22 +1888,9 @@ export function lift(
           //   • off >= spDepth          — BELOW the frame top is a local/spill: still declines,
           //                               that is the separate slot-promotion capability
           //   • a sane arity bound      — a wild offset must not mint a 400-parameter signature
-          //   • spDepth > 0             — the function must have DEMONSTRABLY established a frame.
-          //     With no prologue, depth 0 makes every `[sp,#N]` look like a caller argument — but a
-          //     headerless FRAGMENT whose prologue was sliced off is byte-identical to that, and
-          //     there its slots are locals. Minting a parameter from one would be exactly the
-          //     silent-wrong-answer trade this frontend refuses, so an unestablished frame declines.
-          if (
-            isSpReg(base) &&
-            regOff === undefined &&
-            bi === 0 &&
-            preds[0].length === 0 &&
-            spDepthKnown &&
-            spDepth > 0
-          ) {
-            const rel = off - spDepth;
-            const index = target.argRegs.length + rel / 4;
-            if (width === 4 && rel >= 0 && rel % 4 === 0 && index < MAX_STACK_ARG_INDEX) {
+          {
+            const index = incomingArgIndex(base, off, width, regOff, bi, spDepth, spDepthKnown);
+            if (index !== null) {
               // Mint every slot from the first stack argument up to this one, not just this one.
               // Downstream naming is POSITIONAL (structure.ts), so a function that reads argument 6
               // and never touches argument 5 would otherwise emit a signature whose single stack
@@ -2008,9 +2038,9 @@ export function lift(
   abiSortEntryParams(entry, preds[0].length > 0, (v) => {
     const key = paramReg.get(v) ?? '';
     // an incoming STACK argument ranks by its ABI index, after every register argument
-    const s = /^@sarg(\d+)$/.exec(key);
-    if (s) {
-      return +s[1];
+    const s = stackArgIndex(key);
+    if (s !== null) {
+      return s;
     }
     const m = /^r(\d+)$/.exec(key);
     return m ? +m[1] : 99;
