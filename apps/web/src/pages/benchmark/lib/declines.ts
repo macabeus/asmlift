@@ -15,9 +15,22 @@ export interface DeclineClass {
 }
 
 export const DECLINE_CLASSES: DeclineClass[] = [
+  // The Thumb frontend attributes its sp declines (frontend/thumb.ts slotModelBlocker), so what
+  // was one "local stack frames" bucket splits into the capabilities actually missing. Specific
+  // classes first — the classifier is first-match.
+  {
+    key: 'address-taken-local',
+    label: 'Address-taken stack locals (&local escapes)',
+    pattern: /address-taken stack local|address of a stack local is (taken|computed)/,
+  },
+  {
+    key: 'outgoing-stack-args',
+    label: 'Outgoing stack arguments (callee args 5+)',
+    pattern: /outgoing stack[- ]argument/,
+  },
   {
     key: 'stack-frames',
-    label: 'Local stack frames (address-taken locals / spills)',
+    label: 'Local stack frames (other sp uses)',
     pattern:
       /stack pointer .* used as data|local stack frames not supported|spill of a live value|reload of a stack local|sub-word stack-frame|stack-passed|never stored/,
   },

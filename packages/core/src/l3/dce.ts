@@ -15,8 +15,11 @@
 // read as live throughout), so a removal only happens when the local is provably dead. Only
 // names in `locals` are eligible — globals (side effects, referenced by name from headers) and
 // params are never touched — and a value carrying a side effect / gap signal / memory load is
-// never dropped (see `mustKeep`). Locals are never address-taken in L3 (`addr` names a global),
-// so `var` reads are a COMPLETE account of a local's uses.
+// never dropped (see `mustKeep`). An `addr` node can now name a LOCAL as well as a global (the
+// frame-local object a Thumb `laddr` declares — structure.ts), and an address-taken local's stores
+// are observable through the escaped pointer whether or not any `var` read follows — so an `addr`
+// name counts as a READ below, which pins the local and every store to it. For globals that is a
+// no-op (they were never eligible), so the single rule covers both.
 //
 // Ordering: structureChecked runs `assertResolved` BEFORE this pass, so in strict mode an
 // unresolved `?` value trips the contract first and never reaches DCE; `mustKeep` treating `?` as
@@ -25,9 +28,10 @@ import type { Expr, SFn, Stmt } from './ast';
 import { exprChildren, negateCond, stmtChildren, stmtExprs } from './ast';
 
 /** Accumulate every LOCAL-eligible `var` name read anywhere in `e` (recurses all sub-exprs). An
- *  `addr` node names a global, not a local, so it is not a local read. */
+ *  `addr` name counts too: taking a local's address makes every store to it observable through the
+ *  escaped pointer, so an address-taken local is never dead here. */
 function readsInto(e: Expr, out: Set<string>): void {
-  if (e.k === 'var') {
+  if (e.k === 'var' || e.k === 'addr') {
     out.add(e.name);
   }
   for (const c of exprChildren(e)) {
@@ -48,15 +52,17 @@ function reads(e: Expr): Set<string> {
  *     value asmlift could NOT lift slip past `assertResolved`, silently downgrading a loud gap;
  *   - a memory load (`index`/`field`) — asmlift models no `volatile`, so a possibly-effectful read
  *     is never deleted (this pass never removes a memory access).
+ *   - a read of a VOLATILE local (the frame object whose address escaped) — a volatile read is an
+ *     observable access the machine performed; deleting the dead assignment would delete the read.
  *  A dead assignment whose value contains any of these is kept. */
-function mustKeep(e: Expr): boolean {
+function mustKeep(e: Expr, volatiles: ReadonlySet<string> = new Set()): boolean {
   if (e.k === 'call' || e.k === 'marker' || e.k === 'index' || e.k === 'field') {
     return true;
   }
-  if (e.k === 'var' && e.name === '?') {
+  if (e.k === 'var' && (e.name === '?' || volatiles.has(e.name))) {
     return true;
   }
-  return exprChildren(e).some(mustKeep);
+  return exprChildren(e).some((c) => mustKeep(c, volatiles));
 }
 
 /** Every local read anywhere within these statements (exprs + nested statements). Used to give
@@ -76,6 +82,7 @@ function dceBlock(
   stmts: Stmt[],
   liveOut: ReadonlySet<string>,
   locals: ReadonlySet<string>,
+  volatiles: ReadonlySet<string> = new Set(),
 ): { out: Stmt[]; liveIn: Set<string> } {
   const live = new Set(liveOut);
   const rev: Stmt[] = [];
@@ -89,7 +96,7 @@ function dceBlock(
     const s = stmts[i];
     switch (s.k) {
       case 'assign': {
-        if (locals.has(s.name) && !live.has(s.name) && !mustKeep(s.value)) {
+        if (locals.has(s.name) && !live.has(s.name) && !mustKeep(s.value, volatiles)) {
           continue; // dead local store — drop it; liveness is unchanged (it was a no-op)
         }
         live.delete(s.name); // the write kills the name for statements before it …
@@ -131,8 +138,8 @@ function dceBlock(
         break;
       }
       case 'if': {
-        const t = dceBlock(s.then, live, locals);
-        const e = dceBlock(s.else, live, locals);
+        const t = dceBlock(s.then, live, locals, volatiles);
+        const e = dceBlock(s.else, live, locals, volatiles);
         const nlive = new Set<string>();
         for (const r of reads(s.cond)) {
           nlive.add(r);
@@ -146,7 +153,7 @@ function dceBlock(
         setLive(nlive);
         if (t.out.length === 0 && e.out.length === 0) {
           // both arms empty: keep only if the condition itself has a side effect
-          if (mustKeep(s.cond)) {
+          if (mustKeep(s.cond, volatiles)) {
             rev.push({ k: 'exprstmt', value: s.cond });
           }
         } else if (t.out.length === 0) {
@@ -162,7 +169,7 @@ function dceBlock(
         // loop-carried store is never cut. Body DCE removes only what is dead on EVERY path.
         const loopLive = new Set(live);
         allReadsInto([s], loopLive);
-        const b = dceBlock(s.body, loopLive, locals);
+        const b = dceBlock(s.body, loopLive, locals, volatiles);
         const nlive = new Set(loopLive);
         for (const r of b.liveIn) {
           nlive.add(r);
@@ -174,7 +181,7 @@ function dceBlock(
       case 'for': {
         const loopLive = new Set(live);
         allReadsInto([s], loopLive);
-        const b = dceBlock(s.body, loopLive, locals);
+        const b = dceBlock(s.body, loopLive, locals, volatiles);
         const nlive = new Set(loopLive);
         for (const r of b.liveIn) {
           nlive.add(r);
@@ -188,8 +195,8 @@ function dceBlock(
         // read anywhere in the switch as live throughout — no case-body store is ever cut.
         const swLive = new Set(live);
         allReadsInto([s], swLive);
-        const cases = s.cases.map((c) => ({ ...c, body: dceBlock(c.body, swLive, locals).out }));
-        const def = s.default ? dceBlock(s.default, swLive, locals).out : s.default;
+        const cases = s.cases.map((c) => ({ ...c, body: dceBlock(c.body, swLive, locals, volatiles).out }));
+        const def = s.default ? dceBlock(s.default, swLive, locals, volatiles).out : s.default;
         const nlive = new Set(swLive);
         for (const r of reads(s.scrutinee)) {
           nlive.add(r);
@@ -227,9 +234,15 @@ function referencedNames(stmts: Stmt[], out: Set<string>): void {
 /** Remove dead local stores and simplify the branches they empty out, then drop any local
  *  declaration left unreferenced. Returns a new SFn; the input is not mutated. */
 export function eliminateDeadStores(sfn: SFn): SFn {
-  const locals = new Set(sfn.locals.map((l) => l.name));
-  const body = dceBlock(sfn.body, new Set<string>(), locals).out;
+  // A VOLATILE local is never eligible: its stores are observable through the escaped address (the
+  // DMA hardware reads them) wherever they sit. The `addr`-as-read pin alone only protected stores
+  // UPSTREAM of an `&sp0` occurrence in this backward walk — the legal publish-address-then-fill
+  // ordering (`*dmaReg = &sp0;` THEN `sp0 = v;`) had its store deleted by this very pass, defeating
+  // the volatile the frontend added precisely so the RECOMPILER would not delete it.
+  const volatiles = new Set(sfn.locals.filter((l) => l.volatile).map((l) => l.name));
+  const locals = new Set(sfn.locals.filter((l) => !l.volatile).map((l) => l.name));
+  const body = dceBlock(sfn.body, new Set<string>(), locals, volatiles).out;
   const used = new Set<string>();
   referencedNames(body, used);
-  return { ...sfn, body, locals: sfn.locals.filter((l) => used.has(l.name)) };
+  return { ...sfn, body, locals: sfn.locals.filter((l) => used.has(l.name) || l.volatile) };
 }

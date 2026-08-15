@@ -14,7 +14,7 @@
 // modelling is needed; they simply fall through the decode/fill switch. Because agbcc may
 // copy a callee-saved argument (e.g. into r4) before touching r0, entry parameters are
 // ordered by ABI register (r0, r1, …), not by the order they were first read.
-import { Fn, Successor, Value, mkOp, mkValue } from '../ir/core';
+import { Fn, Op, Successor, Value, mkOp, mkValue } from '../ir/core';
 import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
 import { type Prototypes, protoArity } from '../proto';
@@ -877,7 +877,10 @@ function decode(name: string, asm: string): { blocks: AsmBlock[]; dataWords: Map
 // (they did — the drift fabricated phantom pointer params on symbol-pool loads).
 const POOL_LABEL = /^([A-Za-z_.$][\w.$]*)(?:\s*\+\s*(0x[0-9a-fA-F]+|\d+))?$/;
 
-type PoolRef = { kind: 'const'; value: number } | { kind: 'gaddr'; sym: string } | { kind: 'unmodelled'; why: string };
+type PoolRef =
+  | { kind: 'const'; value: number }
+  | { kind: 'gaddr'; sym: string; addend: number }
+  | { kind: 'unmodelled'; why: string };
 
 /** Classify a word-load operand `LABEL[+N]` against the captured literal pools. Returns null when
  *  the operand does NOT name a pool (a real register/memory base → the normal load path). When it
@@ -903,12 +906,21 @@ function poolRef(operand: string, dataWords: Map<string, string[]>): PoolRef | n
     const val = w.startsWith('-') ? -Number(w.slice(1)) : Number(w);
     return Number.isFinite(val) ? { kind: 'const', value: val } : { kind: 'unmodelled', why: `unparsable word '${w}'` };
   }
-  // A bare C identifier that is NOT a `.L` code label → the address of a named global. A `sym+N`
-  // offset, or a `.L` label (jump table / code address surviving to here), is unmodelled.
-  if (/^[A-Za-z_]\w*$/.test(w) && !w.startsWith('.L')) {
-    return { kind: 'gaddr', sym: w };
+  // A C identifier that is NOT a `.L` code label → the address of a named global, optionally with
+  // a byte ADDEND folded into the pool word (`gBgTilemapBufs+0x14a` — agbcc pre-computes a fixed
+  // element's address into the pool rather than emitting an add). The addend stays in VALUE space:
+  // the consumer emits `gaddr` then an explicit `add`, the exact spelling the register-materialised
+  // `ldr rN,=gSym; add rN,#k` shape already lowers to — so it renders through the same audited
+  // cast-based path (`((u8 *)&gSym) + k`), never through a typed-pointer scale that a
+  // rendered-vs-value addend could silently multiply (the DEREF-TYPING class).
+  const sm = w.match(/^([A-Za-z_]\w*)\s*(?:([+-])\s*(0x[0-9a-fA-F]+|\d+))?$/);
+  if (sm && !sm[1].startsWith('.L')) {
+    const mag = sm[3] ? Number(sm[3]) : 0;
+    if (Number.isFinite(mag)) {
+      return { kind: 'gaddr', sym: sm[1], addend: sm[2] === '-' ? -mag : mag };
+    }
   }
-  return { kind: 'unmodelled', why: `pool word '${w}' is a symbol offset or code label` };
+  return { kind: 'unmodelled', why: `pool word '${w}' is not a symbol, symbol±offset, or number` };
 }
 
 /** Does this function's literal pool name at least one EXTERNAL symbol?
@@ -931,10 +943,13 @@ function poolNamesASymbol(dataWords: Map<string, string[]>, blockLabels: Set<str
   for (const [, words] of dataWords) {
     for (const raw of words) {
       const w = raw.trim();
-      if (!/^[A-Za-z_]\w*$/.test(w) || w.startsWith('.L')) {
+      // `gSym+0x14a` names a symbol as surely as `gSym` does — the witness must count both, or an
+      // asm whose pools carry only addend words would wrongly permit numeric promotion.
+      const sym = w.match(/^([A-Za-z_]\w*)\s*(?:[+-]\s*(?:0x[0-9a-fA-F]+|\d+))?$/)?.[1];
+      if (sym === undefined || sym.startsWith('.L')) {
         continue;
       }
-      if (!dataWords.has(w) && !blockLabels.has(w)) {
+      if (!dataWords.has(sym) && !blockLabels.has(sym)) {
         return true;
       }
     }
@@ -1266,9 +1281,15 @@ export function lift(
   // does not set flags, so a flag-setting one can only come from hand-written asm, where dropping
   // it would leave a stale compare for a following conditional branch to fold. There are 0 in the
   // benchmark corpus and 0 across the klonoa and sa3 checkouts, so excluding them costs nothing.
+  // The decline names WHY the slot model is off when it is (slotsOffReason, assigned below —
+  // referenced through the closure, so this reads the final value at throw time). The gap
+  // histogram is the improvement loop's work-list, and "local stack frames not supported" was a
+  // false attribution for a function whose frame IS modelled but whose blocker is, say, an
+  // address-taken local or an outgoing stack argument — it sent the loop to build the wrong thing.
   const spAsDataError = () =>
     new FrontendUnsupportedError(
-      `cannot lift '${name}': stack pointer used as data (address-taken local / sp-relative slot / frame arithmetic) — local stack frames not supported`,
+      `cannot lift '${name}': stack pointer used as data — ` +
+        (slotsOffReason ?? 'not a modelled slot (address-taken local / frame arithmetic / above the local area)'),
     );
 
   const isFrameAdjust = (
@@ -1473,6 +1494,12 @@ export function lift(
   // positive costs a decline, every false negative costs a wrong slot — so it errs loudly.
   const modifiesSp = (ins: Instr): boolean =>
     ins.mnemonic === 'push' || ins.mnemonic === 'pop' || isSpReg((ins.ops[0] ?? '').replace(/!$/, ''));
+  // A `mov rD, sp` CAPTURES the frame address; the captured value means "the frame base" only if
+  // sp still holds that base wherever the value is used — so a capture participates in the
+  // constancy proof exactly like a literal [sp,#k] access, and ends the prologue for localArea.
+  const capturesSp = (ins: Instr): boolean =>
+    /^movs?$/.test(ins.mnemonic) && !isSpReg(ins.ops[0] ?? '') && isSpReg(ins.ops[1] ?? '');
+  const touchesFrame = (ins: Instr): boolean => spMemAccess(ins) !== null || capturesSp(ins);
   const spMemAccess = (ins: Instr): { off: number; width: number; regOff: boolean } | null => {
     if (!/^(ldr|ldrb|ldrh|ldrsb|ldrsh|str|strb|strh)$/.test(ins.mnemonic)) {
       return null;
@@ -1488,7 +1515,11 @@ export function lift(
   };
   // Is the word-slot model safe for THIS function? Every disqualifier below leaves every `[sp,#k]`
   // access on the old path, which declines — so the answer to "not sure" is the loud one.
-  const slotModelSafe = (): boolean => {
+  // Returns null when the word-slot model is SAFE for this function, else the reason it is off —
+  // which the sp declines append, so a refused function names the capability actually missing
+  // instead of the generic "local stack frames". The gap histogram is the improvement loop's
+  // work-list; a misattributed refusal sends that loop to build the wrong thing.
+  const slotModelBlocker = (): string | null => {
     for (const ab of asmBlocks) {
       for (const ins of ab.instrs) {
         const acc = spMemAccess(ins);
@@ -1497,18 +1528,17 @@ export function lift(
         // store and reads uninitialised memory. One anywhere disables the model for the whole
         // function. A register offset can alias any slot, so it disqualifies the same way.
         if (acc && (acc.width !== 4 || acc.regOff)) {
-          return false;
+          return acc.regOff
+            ? 'a register-offset sp access can alias any slot'
+            : 'a sub-word sp access aliases the word-slot model';
         }
-        // sp escaping into a register means the frame can be written through a pointer, and then a
-        // slot is not private to this function. (Such a function declines at the escape anyway;
-        // the check is here so the model's precondition is stated where the model is, not inferred
-        // from a guard three hundred lines away.)
-        if (
-          /^(mov|add)$/.test(ins.mnemonic) &&
-          !isSpReg(ins.ops[0] ?? '') &&
-          ins.ops.slice(1).some((o) => isSpReg(o))
-        ) {
-          return false;
+        // sp escaping into a register: a computed form (`add rD, sp, #k`) is still a refusal, but a
+        // plain COPY (`mov rD, sp`) is now the address-taken-local capability — the mov arm emits a
+        // `laddr` for it and the post-lift frame-object audit proves every use, so the model's
+        // remaining precondition is that the frame has a reserved local area for the object to
+        // live in. A frameless function taking sp's address has nothing to model and refuses.
+        if (ins.mnemonic === 'add' && !isSpReg(ins.ops[0] ?? '') && ins.ops.slice(1).some((o) => isSpReg(o))) {
+          return `the address of a stack local is computed (\`${ins.mnemonic} ${ins.ops.join(', ')}\`) — only a plain \`mov rD, sp\` capture is modelled`;
         }
       }
     }
@@ -1521,7 +1551,7 @@ export function lift(
     // prologue established.
     for (let bi = 0; bi < asmBlocks.length; bi++) {
       const ins = asmBlocks[bi].instrs;
-      const mems = ins.map((x, i) => (spMemAccess(x) ? i : -1)).filter((i) => i >= 0);
+      const mems = ins.map((x, i) => (touchesFrame(x) ? i : -1)).filter((i) => i >= 0);
       const mods = ins.map((x, i) => (modifiesSp(x) ? i : -1)).filter((i) => i >= 0);
       if (mods.length === 0) {
         continue;
@@ -1531,38 +1561,208 @@ export function lift(
       if (mems.length === 0) {
         // moves sp and never keys a slot itself: safe only if nothing downstream can key one
         if (!returns && bi !== 0) {
-          return false;
+          return 'sp moves in a block that neither returns nor is the entry';
         }
         continue;
       }
       for (const m of mods) {
         if (m < mems[0]) {
           if (bi !== 0) {
-            return false; // a non-entry block at its own depth
+            return 'a non-entry block establishes its own frame depth'; // not the prologue's
           }
         } else if (m > mems[mems.length - 1]) {
           if (!returns) {
-            return false; // unwinds, then keeps going
+            return 'sp unwinds mid-function and execution continues';
           }
         } else {
-          return false; // the frame moves under a slot this block already keyed
+          return 'the frame moves between two accesses that keyed slots against it';
         }
       }
     }
     // OUTGOING ARGUMENTS. agbcc reserves the BOTTOM of the frame for arguments 5+ of the calls this
     // function makes: `add sp,sp,#-8` … `str r2,[sp]` / `str r3,[sp,#4]` … `bl callee`. Those
-    // offsets are inside the frame and nothing ever reloads them, so modelling them as locals makes
-    // them dead defs and DCE deletes them — the arguments vanish from the call with no diagnostic.
-    // Ground truth: sa3's CreateEntity_Platform_0_0 (platform.c:734) forwards SIX arguments and
-    // came out as `CreateEntity_Platform(0, 0, a0, (u16)a1)`. 420 of the 515 functions this model
-    // newly lifted have that shape, so it is the common case, not a corner.
+    // offsets are inside the frame and nothing this function does ever reloads them, so modelling
+    // them as locals makes them dead defs and DCE deletes them — the arguments vanish from the call
+    // with no diagnostic. Ground truth: sa3's CreateEntity_Platform_0_0 (platform.c:734) forwards
+    // SIX arguments and came out as `CreateEntity_Platform(0, 0, a0, (u16)a1)`. "Inside my frame"
+    // does not mean "private": the outgoing area belongs to the callee, which may even assign to a
+    // stack parameter.
     //
-    // "Inside my frame" therefore does NOT mean "private": the outgoing area belongs to the callee,
-    // which may even assign to a stack parameter. Recovering it is the dual of the incoming-argument
-    // capability and is not built, so a function that calls gets no slot model at all. Blunt on
-    // purpose — the alternative is guessing which reserved bytes are arguments.
-    if (asmBlocks.some((ab) => ab.instrs.some((ins) => ins.mnemonic === 'bl' || ins.mnemonic === 'blx'))) {
-      return false;
+    // How big is that area? A declared arity bounds it from BELOW — `4 * max(0, arity - 4)` — and
+    // that is all the facts available here can support. It is used in exactly one direction: to
+    // REFUSE. A callee declared with five parameters proves this frame has an outgoing area, and
+    // consuming those stores as call operands is the dual capability, unbuilt, so the model
+    // declines. A callee declared with four proves NOTHING, because a declaration is a lower bound
+    // on the words a call actually pushes:
+    //
+    //   * a parameter may occupy more than one word (`double`, `long long`, a struct by value),
+    //   * a variadic callee's list is a prefix — `sprintf` truthfully declares two and is handed six,
+    //   * a large struct return adds a hidden pointer argument that appears in no parameter list.
+    //
+    // None of those is recorded by `FnProto` or `SymbolSignature`, so no arity here can license an
+    // ACCEPTANCE. An earlier cut treated `arity <= 4` as proof of an empty area and had all three
+    // holes: supplying a TRUE fact (`{ sprintf: { params: 2 } }`) turned a correct decline into
+    // `return sprintf(a0, a1)` with both stack arguments deleted, where supplying nothing declined.
+    // A fact must only ever move a function toward refusal — never toward an acceptance the facts
+    // do not entail. Refusing on a lower bound is monotone in exactly that way: a true arity larger
+    // than declared can only make the area bigger, and the answer is already "decline".
+    //
+    // Measured, this costs nothing it was buying: forcing the old acceptance path off changed 0
+    // lift/decline verdicts across 2686 corpus functions (sa3's vendored map carries no signatures
+    // at all), so the path that carried those holes was never load-bearing.
+    for (const ab of asmBlocks) {
+      for (const ins of ab.instrs) {
+        if (ins.mnemonic !== 'bl' && ins.mnemonic !== 'blx') {
+          continue;
+        }
+        const c = ins.ops[0] ?? '';
+        const arity = protoArity(prototypes[c]) ?? protoArity(RUNTIME_HELPERS[c]);
+        if (arity !== undefined && arity > target.argRegs.length) {
+          return `callee \`${c}\` is declared with ${arity} arguments, so this frame has an outgoing stack-argument area — consuming stack call arguments is not implemented`;
+        }
+      }
+    }
+    // Nothing above could prove the area empty, so fall back to reading the CODE. Two conditions,
+    // covering different escapes:
+    //   (a) every slot store must be reloaded somewhere reachable. An outgoing argument is read by
+    //       the CALLEE, never by the caller, so a store never read back is the signature of one.
+    //   (b) no slot store may reach a `bl` unread ALONG A PATH.
+    //
+    // Neither is sound alone and the pair is not either, so keep two things straight. (a)'s real
+    // theorem is not "the callee reads it, the caller does not" — it is that agbcc's
+    // ACCUMULATE_OUTGOING_ARGS puts the outgoing area at the BOTTOM of localArea, disjoint from the
+    // locals, so no local load can land on an argument offset. That disjointness is what a
+    // tail-merged call site breaks, and agbcc DOES tail-merge: `Task_BonusFlower_Spawn` (sa3
+    // bonus_game_enemies) stores argument 5 in both predecessors with the `bl` in the join.
+    //
+    // (b) is a forward may-analysis over the CFG, and it has been wrong twice in the other
+    // direction. Scanning per block let a LABEL decide accept versus refuse; scanning the flat
+    // listing let BLOCK ORDER decide, because a load in one arm of a branch cleared a store that
+    // reaches the call through the other arm — swap the arms in the listing, same CFG and same
+    // semantics, and the verdict flipped. Only the path-sensitive form is stable under layout.
+    //
+    // Only for a function that CALLS. With no call there is no outgoing area to mistake a local
+    // for, and a never-reloaded store there is an ordinary dead local — which PR #30 modelled and
+    // which must keep working.
+    if (asmBlocks.some((ab) => ab.instrs.some((i) => i.mnemonic === 'bl' || i.mnemonic === 'blx'))) {
+      const slotAcc = (ins: Instr) => {
+        const a = spMemAccess(ins);
+        return a && !a.regOff && a.width === 4 && a.off % 4 === 0 && a.off >= 0 && a.off < localArea ? a.off : null;
+      };
+      const isStore = (ins: Instr) => /^str/.test(ins.mnemonic);
+      // Entry-REACHABLE blocks only: a reload in dead code is not evidence that live code reads the
+      // slot back, and counting it lets an argument store satisfy (a) on the strength of an
+      // instruction that never executes.
+      const live = new Set<number>([0]);
+      for (let changed = true; changed;) {
+        changed = false;
+        for (let b = 0; b < asmBlocks.length; b++) {
+          if (live.has(b)) {
+            continue;
+          }
+          if (preds[b].some((q) => live.has(q))) {
+            live.add(b);
+            changed = true;
+          }
+        }
+      }
+      const reloaded = new Set<number>();
+      for (const b of live) {
+        for (const ins of asmBlocks[b].instrs) {
+          const off = slotAcc(ins);
+          if (off !== null && !isStore(ins)) {
+            reloaded.add(off);
+          }
+        }
+      }
+      // CONTIGUITY. AAPCS lays the outgoing stack arguments at [sp,#0] upward, one word each, so an
+      // argument block is CONTIGUOUS FROM ZERO: a store at [sp,#4] can be argument 6 of a call only
+      // if argument 5 at [sp,#0] is also supplied on a path to that same call. A pending store
+      // whose lower slots are nowhere supplied is therefore provably not an argument block, and
+      // refusing it is a false alarm — the exact false alarm that blocked the commonest real shape,
+      // a value spilled at [sp,#4] and kept live across calls (kleod's ProcessInputAndUpdateEntities
+      // stores its `sp4` local and calls m4aSongNumStart 80 lines later, with offset 0 never stored
+      // in the whole function).
+      //
+      // The calibration in this: a conforming caller stores EVERY argument slot of a call it makes,
+      // so "slot 0 unsupplied" rules out "slot 4 is an argument". Hand-written asm could skip
+      // storing an argument the callee never reads; agbcc cannot (no interprocedural dead-argument
+      // elimination). That is the same producer assumption the reload conditions above already
+      // make, stated once here.
+      const prefixStored = (k: number, st: Set<number>): boolean => {
+        for (let j = 0; j < k; j += 4) {
+          if (!st.has(j)) {
+            return false;
+          }
+        }
+        return true;
+      };
+      // (a), contiguity-filtered: a store never reloaded ANYWHERE is an argument's signature only
+      // if its lower slots are supplied somewhere too; otherwise it is an ordinary dead local.
+      const storedAnywhere = new Set<number>();
+      for (const b of live) {
+        for (const ins of asmBlocks[b].instrs) {
+          const off = slotAcc(ins);
+          if (off !== null && isStore(ins)) {
+            storedAnywhere.add(off);
+          }
+        }
+      }
+      for (const off of storedAnywhere) {
+        if (!reloaded.has(off) && prefixStored(off, storedAnywhere)) {
+          return `the store to [sp,#${off}] is never reloaded and its lower slots are supplied — it may be an outgoing stack argument of one of this function's calls`; // (a)
+        }
+      }
+      // (b): `pendingOut[b]` = offsets stored and not yet reloaded on SOME path through b;
+      // `storedOut[b]` = offsets stored on SOME path through b (a reload does not remove the value
+      // from memory, so it does not remove the offset from this set — the callee would still read
+      // what the store put there).
+      const pendingOut: Array<Set<number>> = asmBlocks.map(() => new Set<number>());
+      const storedOut: Array<Set<number>> = asmBlocks.map(() => new Set<number>());
+      for (let changed = true; changed;) {
+        changed = false;
+        for (let b = 0; b < asmBlocks.length; b++) {
+          if (!live.has(b)) {
+            continue;
+          }
+          const pend = new Set<number>();
+          const st = new Set<number>();
+          for (const q of preds[b]) {
+            for (const off of pendingOut[q]) {
+              pend.add(off);
+            }
+            for (const off of storedOut[q]) {
+              st.add(off);
+            }
+          }
+          for (const ins of asmBlocks[b].instrs) {
+            const off = slotAcc(ins);
+            if (off !== null) {
+              if (isStore(ins)) {
+                pend.add(off);
+                st.add(off);
+              } else {
+                pend.delete(off);
+              }
+            } else if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') {
+              for (const k of pend) {
+                if (prefixStored(k, st)) {
+                  // (b) — a plausible argument block reaches this call unread
+                  return `the store to [sp,#${k}] reaches \`bl ${ins.ops[0] ?? '?'}\` unread with its lower slots supplied — it may be that call's outgoing stack argument`;
+                }
+              }
+            }
+          }
+          const grow = (out: Array<Set<number>>, cur: Set<number>): void => {
+            if (cur.size !== out[b].size || [...cur].some((o) => !out[b].has(o))) {
+              out[b] = cur;
+              changed = true;
+            }
+          };
+          grow(pendingOut, pend);
+          grow(storedOut, st);
+        }
+      }
     }
     // A `pop`/`ldm` off sp READS frame memory, and push/pop are transparent to dataflow, so a pop
     // taken while the local area is still reserved reads a slot this model has retargeted into SSA
@@ -1574,7 +1774,7 @@ export function lift(
         if ((ins.mnemonic === 'pop' || ins.mnemonic === 'ldmia') && released < localArea) {
           const base = ins.mnemonic === 'pop' ? 'sp' : (ins.ops[0] ?? '').replace(/!$/, '');
           if (isSpReg(base)) {
-            return false;
+            return 'a pop reads the frame while the local area is still reserved';
           }
         }
         if ((ins.mnemonic === 'add' || ins.mnemonic === 'sub') && isSpReg(ins.ops[0])) {
@@ -1585,7 +1785,7 @@ export function lift(
         }
       }
     }
-    return true;
+    return null;
   };
   // The frame the body sees: the entry block's PROLOGUE, i.e. everything up to the first
   // instruction that touches the frame (or the whole block if it never does). Stepped through the
@@ -1626,7 +1826,7 @@ export function lift(
     // An sp write this cannot read poisons the whole thing to 0, disabling every slot, rather than
     // being skipped as if it were no movement: the same rule spDelta follows.
     const ins = asmBlocks[0].instrs;
-    const firstMem = ins.findIndex((x) => spMemAccess(x) !== null);
+    const firstMem = ins.findIndex((x) => touchesFrame(x));
     let reserved = 0;
     for (const x of ins.slice(0, firstMem === -1 ? ins.length : firstMem)) {
       const d = spAdjust(x);
@@ -1639,7 +1839,11 @@ export function lift(
     return Math.max(0, reserved);
   })();
 
-  const slotsOk = slotModelSafe();
+  const slotsOffReason = slotModelBlocker();
+  const slotsOk = slotsOffReason === null;
+  // Every offset the body actually keys as an SSA slot — the frame-object audit checks the
+  // address-taken object cannot overlap one (two models for one byte is a silent disagreement).
+  const usedSlotOffsets = new Set<number>();
 
   // The WRITE dual of readData, and the reason it exists is a lesson rather than a symmetry: the
   // first version of this guard checked sp in three decode arms (mov/add/sub) and its commit message
@@ -1764,6 +1968,21 @@ export function lift(
       switch (ins.mnemonic) {
         case 'mov':
         case 'movs': {
+          // `mov rD, sp` captures the address of the frame's local area — the DMA-fill idiom
+          // (`DmaFill16` expands to `vu16 tmp; DmaSet(…, &tmp, …)`) and any `&local` argument.
+          // Emitted as `laddr`, gaddr's local twin; every use is proven by the frame-object audit
+          // after the blocks are filled, and any use it cannot vouch for declines the function
+          // loudly there. Gated on the slot model (the frame must be private and immovable) and on
+          // a reserved local area for the object to live in.
+          if (!b?.startsWith('#') && isSpReg(b ?? '') && !isSpReg(a ?? '')) {
+            if (slotsOk && localArea > 0) {
+              const res = mkValue(T.unk(32));
+              irb.ops.push(mkOp('laddr', { results: [res], attrs: { off: 0 } }));
+              writeData(reg(a), bi, res);
+              break;
+            }
+            throw spAsDataError();
+          }
           const v = b?.startsWith('#') ? constVal(imm(b), bi) : readData(reg(b), bi);
           writeData(reg(a), bi, v);
           break;
@@ -2110,6 +2329,16 @@ export function lift(
             if (pr?.kind === 'gaddr') {
               const res = mkValue(T.unk(32));
               irb.ops.push(mkOp('gaddr', { results: [res], attrs: { sym: pr.sym } }));
+              if (pr.addend !== 0) {
+                // `.word gSym+N` = the machine loads gSym's address plus N. Emitted as an explicit
+                // add so the addend is a VALUE, not an attribute a renderer could re-scale.
+                const k = mkValue(T.unk(32));
+                irb.ops.push(mkOp('const', { results: [k], attrs: { value: pr.addend } }));
+                const sum = mkValue(T.unk(32));
+                irb.ops.push(mkOp('add', { operands: [res, k], results: [sum] }));
+                writeData(reg(a), bi, sum);
+                break;
+              }
               writeData(reg(a), bi, res);
               break;
             }
@@ -2189,6 +2418,7 @@ export function lift(
             off < localArea &&
             ssa.hasReachingDef(slotKey(off), bi)
           ) {
+            usedSlotOffsets.add(off);
             writeData(reg(a), bi, readVar(slotKey(off), bi));
             break;
           }
@@ -2230,6 +2460,7 @@ export function lift(
             off >= 0 &&
             off < localArea
           ) {
+            usedSlotOffsets.add(off);
             writeVar(slotKey(off), bi, readData(reg(a), bi));
             break;
           }
@@ -2335,6 +2566,122 @@ export function lift(
   });
 
   ssa.finish();
+
+  // FRAME-OBJECT AUDIT. Every `laddr` the mov arm emitted is only a CLAIM that the captured
+  // address is used as "the address of one scalar local"; this proves it, over the finished
+  // function, the same boundary-total style as the slot-escape assert in finish(). The address may
+  // flow anywhere as a VALUE — into an MMIO register (the DMA-fill idiom), a call, a phi — but
+  // every MEMORY access through it must be at offset 0 with one agreed width, and any use the
+  // audit cannot vouch for declines the whole function loudly. Nothing here guesses: the object's
+  // declared type is exactly the access type the machine used.
+  {
+    const laddrs: Op[] = [];
+    for (const blk of irBlocks) {
+      for (const op of blk.ops) {
+        if (op.opcode === 'laddr') {
+          laddrs.push(op);
+        }
+      }
+    }
+    if (laddrs.length > 0) {
+      const fail = (why: string): never => {
+        throw new FrontendUnsupportedError(`cannot lift '${name}': address-taken stack local — ${why}`);
+      };
+      // Taint = values that may hold the object's address, closed over phis: a tainted edge arg
+      // taints the receiving block param. (A phi mixing the address with a non-address would taint
+      // the param and then fail the use judgement below — mixing is not vouched for.)
+      for (const op of laddrs) {
+        if ((op.attrs.off as number) !== 0) {
+          // the audit's offset arithmetic, overlap window and naming all assume the frame base;
+          // if a computed capture ever mints off!==0, this line is what keeps it loud
+          fail(`a capture at frame offset ${op.attrs.off} — only the frame base is modelled`);
+        }
+      }
+      const taint = new Set<Value>(laddrs.flatMap((o) => o.results));
+      for (let changed = true; changed;) {
+        changed = false;
+        for (const blk of irBlocks) {
+          for (const op of blk.ops) {
+            for (const s of op.successors ?? []) {
+              s.args.forEach((arg, i) => {
+                const param = s.block.params[i];
+                if (taint.has(arg) && param !== undefined && !taint.has(param)) {
+                  taint.add(param);
+                  changed = true;
+                }
+              });
+            }
+          }
+        }
+      }
+      // Judge every use of a tainted value.
+      const accesses: { width: number; signed: boolean }[] = [];
+      let escapes = false;
+      for (const blk of irBlocks) {
+        for (const op of blk.ops) {
+          op.operands.forEach((v, idx) => {
+            if (!taint.has(v)) {
+              return;
+            }
+            if (op.opcode === 'load' && idx === 0) {
+              if ((op.attrs.off as number) !== 0) {
+                fail(
+                  `a load at [+${op.attrs.off}] through the captured address — only the scalar at offset 0 is modelled`,
+                );
+              }
+              accesses.push({ width: op.attrs.width as number, signed: (op.attrs.signed as boolean) ?? false });
+              return;
+            }
+            if (op.opcode === 'store' && idx === 0) {
+              if ((op.attrs.off as number) !== 0) {
+                fail(
+                  `a store at [+${op.attrs.off}] through the captured address — only the scalar at offset 0 is modelled`,
+                );
+              }
+              accesses.push({ width: op.attrs.width as number, signed: false });
+              return;
+            }
+            if ((op.opcode === 'store' && idx === 1) || op.opcode === 'call') {
+              escapes = true; // the address ESCAPES as a value — the point of the capability
+              return;
+            }
+            fail(`the captured address flows into \`${op.opcode}\` — not an access, an escape, or a phi`);
+          });
+        }
+      }
+      if (accesses.length === 0) {
+        // nothing in-function pins the object's type, and a guessed declaration is the
+        // plausible-but-wrong class — decline until an inhabitant needs this
+        fail('the captured address is never dereferenced in this function, so nothing pins the local object type');
+      }
+      const widths = new Set(accesses.map((a) => a.width));
+      if (widths.size > 1) {
+        fail(`the accesses through the captured address disagree on width (${[...widths].join(' vs ')})`);
+      }
+      const width = accesses[0].width;
+      const signed = accesses.some((a) => a.signed);
+      if (width > localArea) {
+        fail('the object extends past the reserved local area');
+      }
+      for (const off of usedSlotOffsets) {
+        if (off < width) {
+          fail(`the object at [0,${width}) overlaps the SSA slot at [sp,#${off}] — one byte, two models`);
+        }
+      }
+      // Proven. Stamp the MACHINE FACTS the audit established — width and signedness are what the
+      // accesses used, so the declaration downstream is a fact, not a guess. The C-level NAME is
+      // deliberately NOT chosen here: identifiers live in the structurer's namespace (params,
+      // locals, globals, the symbol map), which the frontend cannot see — a frontend-chosen `sp0`
+      // silently shadowed a project global of the same name.
+      // `volatile` iff the address escapes: gcc-2.9 DELETES a store to a non-volatile local nothing
+      // in-function reads — measured, the recompiled loop loaded the value and never stored it —
+      // and the reference idiom's own spelling is `vu16 tmp` for exactly that reason. An object
+      // whose address never leaves the function needs no volatile and must not pay its codegen.
+      for (const op of laddrs) {
+        op.attrs = { ...op.attrs, width, signed, ...(escapes ? { volatile: true } : {}) };
+      }
+    }
+  }
 
   // Order the entry block's parameters by ABI register (r0, r1, r2, …) so downstream
   // naming (`a0`, `a1`, …) matches the calling convention, not the read order. Safe only

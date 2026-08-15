@@ -477,6 +477,233 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     expect(() => decompile('f', below, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
   });
 
+  test('a declared arity may REFUSE the model, and may never accept it', () => {
+    const body =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tldr\tr4, [sp]\n\tbl\tg\n' +
+      '\tadd\tr0, r4, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    // the slot is read back before the call, so the code-reading fallback admits it
+    expect(decompile('f', body, ARMV4T_AGBCC).source).toContain('g(');
+    // …and a callee declared with five parameters PROVES this frame has an outgoing area, whatever
+    // else is unknown. Consuming those stores as call operands is the dual capability, unbuilt.
+    expect(() => decompile('f', body, ARMV4T_AGBCC, { prototypes: { g: { params: 5 } } })).toThrow(
+      /stack pointer used as data/,
+    );
+    // A declared FOUR proves nothing, so it must not change the verdict either way: a declaration
+    // is a LOWER bound on the words a call pushes. A parameter can occupy more than one word, a
+    // variadic list is a prefix, and a large struct return adds a hidden pointer argument — none of
+    // which any prototype here records. An earlier cut read `arity <= 4` as proof of an empty area,
+    // and then a TRUE fact turned a correct decline into wrong C.
+    expect(decompile('f', body, ARMV4T_AGBCC, { prototypes: { g: { params: 4 } } }).source).toContain('g(');
+    const twoStackArgs =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tstr\tr0, [sp]\n\tstr\tr1, [sp, #0x4]\n\tbl\tg\n' +
+      '\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r2}\n\tbx\tr2\n';
+    for (const proto of [undefined, { g: { params: 2 } }, { g: { params: ['s32', 's32', 's32', 'double'] } }]) {
+      expect(() => decompile('f', twoStackArgs, ARMV4T_AGBCC, proto ? { prototypes: proto } : {})).toThrow(
+        /stack pointer used as data/,
+      );
+    }
+  });
+
+  test('an argument block is contiguous from [sp,#0] — a lone higher slot is a spill, not an argument', () => {
+    // AAPCS lays outgoing stack arguments at [sp,#0] upward, so a store at [sp,#4] can be argument
+    // 6 only if argument 5 at [sp,#0] is supplied on a path to the same call. With offset 0 never
+    // stored in the whole function, a pending [sp,#4] at a call is provably not an argument block —
+    // this is kleod's ProcessInputAndUpdateEntities shape: `sp4` spilled early, m4aSongNumStart
+    // called 80 lines later, sp4 read at the end. Refusing it was a false alarm.
+    const spill4 =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tstr\tr0, [sp, #0x4]\n\tbl\tg\n\tldr\tr4, [sp, #0x4]\n' +
+      '\tadd\tr0, r4, #1\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(decompile('f', spill4, ARMV4T_AGBCC).source).toContain('g(');
+    // …but store [sp,#0] anywhere on a path to that call and the same shape refuses: the pending
+    // higher slot now has its argument-block prefix, and the pair could be arguments 5 and 6
+    const withBase =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tstr\tr1, [sp]\n\tstr\tr0, [sp, #0x4]\n\tbl\tg\n' +
+      '\tldr\tr4, [sp, #0x4]\n\tadd\tr0, r4, #1\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(() => decompile('f', withBase, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+    // …and a pending [sp,#0] alone always refuses — the prefix condition is vacuous at zero
+    const base0 =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tbl\tg\n\tldr\tr4, [sp]\n' +
+      '\tadd\tr0, r4, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(() => decompile('f', base0, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+  });
+
+  test('a slot store reaching a call unread is judged by PATH, not by listing order', () => {
+    // The store reaches `bl g` through one arm; the other arm's reload must not excuse it. Scanning
+    // per block let a LABEL decide the verdict; scanning the flat listing let BLOCK ORDER decide,
+    // because the reload in the first-listed arm cleared a store that reaches the call through the
+    // second. Same CFG and same semantics either way, so both spellings must agree.
+    const loadArmFirst =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tcmp\tr0, #0\n\tbne\t.L3\n' +
+      '.L2:\n\tldr\tr4, [sp]\n\tadd\tr0, r4, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n' +
+      '.L3:\n\tbl\tg\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    const callArmFirst =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tcmp\tr0, #0\n\tbeq\t.L2\n' +
+      '.L3:\n\tbl\tg\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n' +
+      '.L2:\n\tldr\tr4, [sp]\n\tadd\tr0, r4, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(() => decompile('f', loadArmFirst, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+    expect(() => decompile('f', callArmFirst, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+  });
+
+  test('with no arity to prove it, a slot store may not reach a call unread', () => {
+    // The fallback for a caller with no prototypes at all. It is calibration, not proof, so it is
+    // deliberately conservative: a store reaching a call unread refuses whether or not a label
+    // happens to sit in between. Making the scan block-local instead admitted the cross-block case,
+    // where the accept/refuse boundary was a LABEL rather than anything semantic.
+    const sameBlock =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tbl\tg\n\tldr\tr4, [sp]\n' +
+      '\tadd\tr0, r4, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    const crossBlock =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tcmp\tr0, #0\n\tbeq\t.L2\n.L2:\n\tbl\tg\n' +
+      '\tldr\tr4, [sp]\n\tadd\tr0, r4, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(() => decompile('f', sameBlock, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+    expect(() => decompile('f', crossBlock, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+    // …and a store never read back at all is the plainest signature of an argument
+    const neverRead =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tb\t.L2\n.L2:\n\tbl\tg\n' +
+      '\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(() => decompile('f', neverRead, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+    // control: a slot read back BEFORE the call is a local, and lifts
+    const readFirst =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tldr\tr4, [sp]\n\tbl\tg\n' +
+      '\tadd\tr0, r4, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(decompile('f', readFirst, ARMV4T_AGBCC).source).toContain('g(');
+  });
+
+  test('a tail-merged call site sets its stack argument up in BOTH predecessors', () => {
+    // agbcc really does hoist argument setup out of the calling block: sa3's Task_BonusFlower_Spawn
+    // tail-merges two call sites, so argument 5 is stored in both predecessors with the `bl` in the
+    // join. A per-block scan does not see that at all — and with a post-call reload of the same
+    // offset to satisfy the never-read test, the store became a dead local and the argument was
+    // dropped from the call. The scan runs over the whole listing for this reason.
+    const tailMerged =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tcmp\tr0, #0\n\tbeq\t.L2\n\tldr\tr2, .LP\n\tstr\tr2, [sp]\n\tb\t.L3\n' +
+      '.L2:\n\tldr\tr2, .LP\n\tstr\tr2, [sp]\n.L3:\n\tbl\tg\n\tldr\tr1, [sp]\n\tadd\tr0, r0, r1\n' +
+      '\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r2}\n\tbx\tr2\n.LP:\n\t.word\t0x08051F54\n';
+    expect(() => decompile('f', tailMerged, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+  });
+
+  test('a reload in DEAD code is not evidence that live code reads the slot back', () => {
+    // The never-read test scanned every block, so a reload that can never execute satisfied it for
+    // live code — letting an argument store pass as a local. Only entry-reachable blocks count.
+    const deadReload =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tb\t.L3\n' +
+      '.L2:\n\tldr\tr1, [sp]\n.L3:\n\tbl\tg\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r2}\n\tbx\tr2\n';
+    expect(() => decompile('f', deadReload, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+  });
+
+  test('a refused function names the capability actually missing', () => {
+    // The gap histogram is the improvement loop's work-list; "local stack frames not supported" was
+    // a false attribution that sent the loop to build a thing that already works. Each blocker now
+    // names itself. The generic message survives only for sp uses no sub-family claims.
+    // (the plain `mov rD, sp` capture is now the laddr capability — its refusals carry their own
+    // attributed messages, tested with the capability below; the COMPUTED capture still refuses)
+    const addrComputed =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr4, sp, #0x4\n\tstr\tr0, [r4]\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(() => decompile('f', addrComputed, ARMV4T_AGBCC)).toThrow(/address of a stack local is computed/);
+    const outgoing =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tbl\tg\n\tldr\tr4, [sp]\n' +
+      '\tadd\tr0, r4, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(() => decompile('f', outgoing, ARMV4T_AGBCC)).toThrow(/outgoing stack argument/);
+    const arity =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tldr\tr4, [sp]\n\tbl\tg\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(() => decompile('f', arity, ARMV4T_AGBCC, { prototypes: { g: { params: 5 } } })).toThrow(
+      /declared with 5 arguments/,
+    );
+    // every attributed sp message keeps the class prefix, so nothing keyed on it breaks
+    expect(() => decompile('f', addrComputed, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+  });
+
+  test('an address-taken frame local becomes a declared object whose address is a value', () => {
+    // The DMA-fill idiom: `DmaFill16` expands to `vu16 tmp = v; DmaSet(…, &tmp, …)`, so agbcc
+    // stores a halfword through a captured sp and hands the ADDRESS to the DMA source register.
+    // `mov rD, sp` lifts to `laddr` — gaddr's local twin — the frame-object audit proves every use,
+    // the structurer declares the object with exactly the access type the machine used, and the
+    // escaped address is an ordinary value. L3 DCE must NOT reap the store: an address-taken
+    // local's stores are observable through the escaped pointer (the hardware reads them).
+    const dmaFill =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tmov\tr4, sp\n\tmov\tr0, #0\n\tstrh\tr0, [r4]\n' +
+      '\tldr\tr2, .L1\n\tmov\tr1, sp\n\tstr\tr1, [r2]\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n' +
+      '.L1:\n\t.word\t0x40000D4\n';
+    // `volatile` because the address ESCAPES: gcc-2.9 deletes a store to a non-volatile local
+    // nothing in-function reads (measured — the recompiled loop loaded and never stored), and the
+    // reference idiom's own spelling is `vu16 tmp` for exactly that reason.
+    expect(decompile('f', dmaFill, ARMV4T_AGBCC).source).toBe(
+      's32 f(void) {\n    volatile u16 sp0;\n    sp0 = 0;\n    *(s32 *)67109076 = &sp0;\n    return 0;\n}\n',
+    );
+    // …and the object co-exists with SSA slots at higher offsets, each model owning its own bytes
+    const mixed =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tstr\tr0, [sp, #0x4]\n\tmov\tr4, sp\n\tstrh\tr1, [r4]\n' +
+      '\tldr\tr2, .L1\n\tstr\tr4, [r2]\n\tldr\tr0, [sp, #0x4]\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n' +
+      '.L1:\n\t.word\t0x40000D4\n';
+    const src = decompile('f', mixed, ARMV4T_AGBCC).source;
+    expect(src).toContain('volatile u16 sp0;');
+    expect(src).toContain('&sp0');
+    expect(src).toContain('return a0;'); // the [sp,#4] slot is still a transparent SSA value
+  });
+
+  test('publish-the-address-then-fill: the store after the last &sp0 still survives DCE', () => {
+    // The addr-as-read pin only protected stores UPSTREAM of an `&sp0` occurrence in the backward
+    // liveness walk, so this legal DMA ordering — publish the address, then fill the object — had
+    // its store deleted by asmlift's OWN L3 DCE, defeating the volatile the frontend added
+    // precisely so the RECOMPILER would not delete it. A volatile local is never store-eligible.
+    const publishThenFill =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tmov\tr4, sp\n\tldr\tr2, .L1\n\tmov\tr1, sp\n\tstr\tr1, [r2]\n' +
+      '\tmov\tr0, #0\n\tstrh\tr0, [r4]\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n.L1:\n\t.word\t0x40000D4\n';
+    expect(decompile('f', publishThenFill, ARMV4T_AGBCC).source).toBe(
+      's32 f(void) {\n    volatile u16 sp0;\n    *(s32 *)67109076 = &sp0;\n    sp0 = 0;\n    return 0;\n}\n',
+    );
+  });
+
+  test('a callee named sp0 keeps its name — the minted local yields', () => {
+    // Call targets are part of the namespace the structurer mints into: a local shadowing a
+    // function named sp0 makes `sp0()` a call through a u16 object — a compile error. The minted
+    // name steps aside (`sp0_`) exactly as it does for a same-named global or map symbol.
+    const callsSp0 =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tmov\tr4, sp\n\tstrh\tr0, [r4]\n\tldr\tr2, .L1\n\tstr\tr4, [r2]\n' +
+      '\tbl\tsp0\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n.L1:\n\t.word\t0x40000D4\n';
+    const src = decompile('f', callsSp0, ARMV4T_AGBCC).source;
+    expect(src).toContain('volatile u16 sp0_;');
+    expect(src).toContain('&sp0_');
+    expect(src).toContain('sp0(');
+  });
+
+  test('the frame-object audit refuses every use it cannot vouch for, loudly and by name', () => {
+    const laddr = /address-taken stack local/;
+    const wrap = (body: string) =>
+      `f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n${body}\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n`;
+    // never dereferenced: nothing pins the object's type, and a guessed declaration is the
+    // plausible-but-wrong class (here the address escapes into the return value)
+    expect(() =>
+      decompile(
+        'f',
+        'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tmov\tr0, sp\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n',
+        ARMV4T_AGBCC,
+      ),
+    ).toThrow(laddr);
+    // accesses disagreeing on width: no single declared type reproduces both
+    expect(() => decompile('f', wrap('\tmov\tr4, sp\n\tstrh\tr0, [r4]\n\tstr\tr1, [r4]\n'), ARMV4T_AGBCC)).toThrow(
+      laddr,
+    );
+    // address arithmetic on the capture: the object's extent stops being one scalar
+    expect(() => decompile('f', wrap('\tmov\tr4, sp\n\tadd\tr4, r4, #0x4\n\tstr\tr0, [r4]\n'), ARMV4T_AGBCC)).toThrow(
+      laddr,
+    );
+    // an access at a nonzero offset through the capture
+    expect(() => decompile('f', wrap('\tmov\tr4, sp\n\tstr\tr0, [r4, #0x4]\n'), ARMV4T_AGBCC)).toThrow(laddr);
+    // overlap with an SSA slot: one byte, two models
+    expect(() =>
+      decompile(
+        'f',
+        wrap('\tmov\tr4, sp\n\tstr\tr0, [r4]\n\tstr\tr1, [sp]\n\tldr\tr2, [sp]\n\tadd\tr0, r2, #0\n'),
+        ARMV4T_AGBCC,
+      ),
+    ).toThrow(laddr);
+    // a COMPUTED capture is not the modelled shape at all
+    expect(() => decompile('f', wrap('\tadd\tr4, sp, #0x4\n\tstr\tr0, [r4]\n'), ARMV4T_AGBCC)).toThrow(
+      /address of a stack local is computed/,
+    );
+  });
+
   test('a gap in the slots read still yields ABI-correct offsets', () => {
     // frame 8, so [sp,#0xc] is argument 6 (index 5) and argument 5 is never read. Naming downstream
     // is POSITIONAL, so minting only the slot that was read would put the parameter at argument 5's

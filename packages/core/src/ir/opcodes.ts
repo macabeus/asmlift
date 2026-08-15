@@ -108,6 +108,16 @@ export const OPCODES = {
   //   - an indexed or non-zero-offset AGGREGATE access → the address-cast `((T *)&gSym)[i]`;
   //   - any other use (e.g. `&gSym` passed to a call) → the `{k:'addr'}` L3 node, printed `&gSym`.
   gaddr: { operands: 0, results: 1, requiredAttrs: ['sym'] },
+  // The address of a FRAME-LOCAL object — gaddr's local twin, for the address-taken stack local
+  // (`mov rD, sp` feeding a DMA register or a callee). `off` is the byte offset inside the frame's
+  // reserved local area; the Thumb frontend's post-lift audit stamps `name`/`width`/`signed` after
+  // proving every access agrees, and the structurer declares the local and renders `&name` exactly
+  // as it renders a gaddr's `&sym`. Operand-free and pure, so GVN numbers it like gaddr and a dead
+  // one is reaped.
+  // `width`/`signed` are stamped by the frontend's frame-object AUDIT — requiring them makes
+  // "the audit ran" a verifier-checkable fact instead of a convention: a frontend that emits a
+  // laddr and skips the audit fails verify loudly instead of rendering `&undefined`.
+  laddr: { operands: 0, results: 1, requiredAttrs: ['off', 'width', 'signed'] },
   // --- black-box escape hatch (keeps lifting total) ---
   opaque: { operands: 'variadic', results: 1 },
   // --- terminators ---

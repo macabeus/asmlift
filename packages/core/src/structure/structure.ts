@@ -676,13 +676,68 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
   // widths is a union/type-pun, which the downstream struct-layout recovery rejects LOUD
   // ("overlapping fields ... unions not modelled") before this classification is consumed — so a
   // width collision at off-0 declines honestly rather than reaching a wrong bare-`gSym` emission.
+  // FRAME-LOCAL OBJECT NAMES (laddr). Minted HERE, not in the frontend, because identifiers live
+  // in this layer's namespace: params, locals, every gaddr symbol, and the project's symbol map —
+  // none of which the frontend can see. A frontend-chosen `sp0` silently shadowed a project global
+  // of the same name. `sp<off>` uniquified with underscores until free; one name per offset.
+  const laddrName = (() => {
+    const taken = new Set<string>();
+    if (symbols) {
+      for (const [n] of symbols) {
+        taken.add(n);
+      }
+    }
+    for (const b of fn.blocks) {
+      for (const op of b.ops) {
+        if (op.opcode === 'gaddr') {
+          taken.add(op.attrs.sym as string);
+        } else if (op.opcode === 'call') {
+          // a CALLEE's name is in this namespace too: a function really named sp0 would be
+          // shadowed by the minted local, and `sp0()` on a u16 object is a compile error
+          taken.add(op.attrs.target as string);
+        }
+      }
+    }
+    const byOff = new Map<number, string>();
+    const names = new Map<Op, string>();
+    for (const b of fn.blocks) {
+      for (const op of b.ops) {
+        if (op.opcode !== 'laddr') {
+          continue;
+        }
+        const off = op.attrs.off as number;
+        let n = byOff.get(off);
+        if (n === undefined) {
+          n = `sp${off}`;
+          while (taken.has(n)) {
+            n += '_';
+          }
+          taken.add(n);
+          byOff.set(off, n);
+        }
+        names.set(op, n);
+      }
+    }
+    return names;
+  })();
+
   const scalarGlobals = new Set<string>();
   {
     const offsets = new Map<string, Set<number>>();
     const bumpAgg = (sym: string) => offsets.set(sym, new Set([-1])); // -1 marks "variable index"
     for (const b of fn.blocks) {
       for (const op of b.ops) {
-        const gaddrSym = (v: Value) => (defs.get(v)?.opcode === 'gaddr' ? (defs.get(v)!.attrs.sym as string) : null);
+        const gaddrSym = (v: Value) => {
+          const dv = defs.get(v);
+          // laddr participates identically: `sp0` is scalar-spelled at off 0 and cast-spelled
+          // anywhere else, exactly as a global of its shape would be — by its MINTED name
+          // (laddrName): the op carries no name attr, that namespace is this layer's
+          return dv?.opcode === 'gaddr'
+            ? (dv.attrs.sym as string)
+            : dv?.opcode === 'laddr'
+              ? (laddrName.get(dv) ?? null)
+              : null;
+        };
         if (op.opcode === 'load' || op.opcode === 'store') {
           const s = gaddrSym(op.operands[0]);
           if (s) {
@@ -1648,6 +1703,12 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     if (d.opcode === 'call') {
       return { k: 'call', fn: d.attrs.target as string, args: d.operands.map(e) };
     }
+    if (d.opcode === 'laddr') {
+      // gaddr's local twin: the address of the frame-local object the Thumb frontend PROVED
+      // (frame-object audit — width/signed are stamped machine facts). The NAME is this layer's:
+      // see laddrName. Renders `&sp0`; the object itself is declared in `locals`.
+      return { k: 'addr', name: laddrName.get(d)! };
+    }
     if (d.opcode === 'gaddr') {
       // A promoted CODE symbol (frontend `code: true`) is a function pointer stored as an
       // integer: spelled `(u32)Name` — the source idiom — never `&Name` (defect G of the
@@ -2264,7 +2325,28 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
   return {
     name: fn.name,
     params: entry.params.map((p, i) => ({ name: `a${i}`, type: p.type })),
-    locals: localNames.map((n) => ({ name: n, type: varType.get(n)! })),
+    locals: [
+      ...localNames.map((n) => ({ name: n, type: varType.get(n)! })),
+      // frame-local objects (laddr): declared with EXACTLY the access type the machine used —
+      // the frontend's frame-object audit proved all accesses agree, so this is a fact, not a guess
+      ...[
+        ...new Map(
+          fn.blocks
+            .flatMap((b) => b.ops)
+            .filter((op) => op.opcode === 'laddr')
+            .map((op) => [
+              laddrName.get(op)!,
+              {
+                name: laddrName.get(op)!,
+                type: T.int((op.attrs.width as number) * 8, op.attrs.signed as boolean),
+                // an ESCAPED address makes every store observable (the DMA hardware reads it);
+                // without volatile, gcc-2.9 deletes a store to a local nothing in-function reads
+                ...(op.attrs.volatile === true ? { volatile: true as const } : {}),
+              },
+            ]),
+        ).values(),
+      ],
+    ],
     ...(shapedGlobalTypes.size
       ? {
           globals: [...shapedGlobalTypes]

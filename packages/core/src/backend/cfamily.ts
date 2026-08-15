@@ -470,7 +470,7 @@ function cFamilyBody(fn0: SFn, leaf?: LeafHook): string[] {
   const vt: VarTypes = declaredTypes(fn);
   const lines: string[] = [];
   for (const l of fn.locals) {
-    lines.push(`    ${cType(l.type)} ${l.name};`);
+    lines.push(`    ${l.volatile ? 'volatile ' : ''}${cType(l.type)} ${l.name};`);
   }
   for (const s of fn.body) {
     lines.push(...printStmt(s, '    ', vt, leaf));

@@ -178,6 +178,17 @@ export function recognizeStructs(fn: Fn): number {
     }
   }
 
+  // Which values are the address of a NAMED global (`gaddr`)? Consulted only when synthesis
+  // DECLINES: see the catch below.
+  const namedGlobal = new Set<Value>();
+  for (const b of fn.blocks) {
+    for (const op of b.ops as Op[]) {
+      if (op.opcode === 'gaddr') {
+        namedGlobal.add(op.results[0]);
+      }
+    }
+  }
+
   let count = 0;
   for (const base of order) {
     if (arrayBases.has(base)) {
@@ -186,11 +197,28 @@ export function recognizeStructs(fn: Fn): number {
     if (base.type.kind !== 'unknown') {
       continue;
     } // already typed (not a bare recovery target)
+
     const accesses = accessesOf.get(base)!;
     if (isArray(accesses)) {
       continue;
     } // uniform stride / single aligned access → array
-    base.type = T.ptr(buildStruct(`Struct${count}`, accesses));
+    try {
+      base.type = T.ptr(buildStruct(`Struct${count}`, accesses));
+    } catch (e) {
+      // A NAMED global whose accesses synthesis cannot reconcile is not a reason to decline the
+      // function: its declaration belongs to the project's own headers, and its constant-offset
+      // accesses render at L3 through the symbol context (member spelling when the map knows the
+      // layout, the honest cast spelling when it does not). The inhabitant is agbcc FUSING two
+      // adjacent u8 compares into one ldrh — `s.level == 8 && s.world == 6` reads offset 12 at
+      // widths 1 AND 2, which is not a union, just two spellings of declared bytes. An ANONYMOUS
+      // base (a loaded pointer, a parameter) has no other source of truth, so for it the decline
+      // stands exactly as before — this catch narrows nothing for the shapes that already worked,
+      // because a base synthesis succeeds on takes the same path it always took.
+      if (e instanceof RaiseUnsupportedError && namedGlobal.has(base)) {
+        continue;
+      }
+      throw e;
+    }
     count++;
   }
   return count;

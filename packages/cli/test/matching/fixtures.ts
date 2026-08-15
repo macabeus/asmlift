@@ -29,6 +29,10 @@ export interface DecompFixture {
   /** function prototypes keyed by symbol (as a project's headers would provide): a callee's
    *  `params` drives `bl` arg recovery; the fixture's own entry carries its `returnsVoid`. */
   prototypes?: Prototypes;
+  /** declarations prepended to the CANDIDATE before compiling — the standalone analogue of the
+   *  project context a benchmark row's ctx.i provides (a fixture whose reference defines a global
+   *  needs the candidate to see the same declaration). */
+  candidatePrelude?: string;
   /** golden emitted C — asserted byte-for-byte when present */
   expectSource?: string;
   /** expected objdiff score (0 = byte-exact). Default 0. */
@@ -592,5 +596,50 @@ export const FIXTURES: DecompFixture[] = [
     toolchain: 'mwcc',
     expectSource: 's32 pbigand(s32 a0) {\n    return a0 & 305419896;\n}\n',
     note: 'const-materialise — lis;ori under & (PPC)',
+  },
+  {
+    symbol: 'dmafill',
+    // The DMA-fill idiom's essential shape: a volatile stack temporary whose ADDRESS escapes into
+    // a global (the hardware reads it), stored THROUGH the captured register — agbcc hoists the
+    // capture out of the loop (`mov r3, sp` … `strh r0, [r3]` … `mov r0, sp`), which is exactly the
+    // laddr capability (frontend/thumb.ts frame-object audit). This is the level-tower "differ-
+    // proven payoff" leg for the laddr opcode: real agbcc recompiles the emitted `u16 sp0; …
+    // &sp0` byte-exact against its own codegen for the vu16 original.
+    referenceC:
+      'volatile unsigned int gDmaSrc;\n' +
+      'void dmafill(unsigned short *src, int n) {\n' +
+      '    int i;\n' +
+      '    for (i = 0; i < n; i++) {\n' +
+      '        volatile unsigned short tmp = src[i];\n' +
+      '        gDmaSrc = (unsigned int)&tmp;\n' +
+      '    }\n' +
+      '}\n',
+    prototypes: { dmafill: { returnsVoid: true } },
+    candidatePrelude: 'extern volatile unsigned int gDmaSrc;\n',
+    expectSource:
+      'void dmafill(u16 * a0, s32 a1) {\n' +
+      '    u16 * v0;\n' +
+      '    s32 v1;\n' +
+      '    volatile u16 sp0;\n' +
+      '    if (a1 > 0) {\n' +
+      '        v0 = a0;\n' +
+      '        v1 = a1;\n' +
+      '        do {\n' +
+      '            sp0 = *v0;\n' +
+      '            gDmaSrc = &sp0;\n' +
+      '            v0 = v0 + 1;\n' +
+      '            v1 = v1 - 1;\n' +
+      '        } while (v1 != 0);\n' +
+      '    }\n' +
+      '    return;\n' +
+      '}\n',
+    // NOT yet byte-exact, and the pin says exactly how close: the recompile differs only in the
+    // SCHEDULE of the two loop-invariant setups (`mov r3, sp; ldr r4, =gDmaSrc` land one slot later
+    // behind the do-while's entry copies). What the pin PROVES is the load-bearing part: the store
+    // to the object SURVIVES the recompile — without the audit-driven `volatile`, gcc-2.9 deletes a
+    // store to a local nothing in-function reads and the score is 20 with the store gone.
+    expectScore: 4,
+    expectMatch: false,
+    note: 'address-taken frame local (laddr): capture hoisted, store through it, address escapes',
   },
 ];
