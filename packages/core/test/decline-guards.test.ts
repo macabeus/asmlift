@@ -194,6 +194,26 @@ test('MIPS: sp accesses outside the word-slot model decline, never a bogus slot'
   expect(mips('   0:\tsw\ta0,4(sp)\n   4:\tlbu\tv0,4(sp)\n')).toThrow(/stack pointer used as data/);
   expect(mips('   0:\taddu\tv0,sp,a0\n')).toThrow(/stack pointer used as data/); // &local
   expect(mips('   0:\tlw\tv0,16(sp)\n')).toThrow(/never stored/); // a slot no store defined
+  // …and the case that guard MISSES, found while porting the model to Thumb: `hasReachingDef` asks
+  // whether a store reaches on SOME path, so a slot stored on one arm of a diamond and reloaded at
+  // the join passes it. readVar then recurses into the unstored predecessor and mints an entry
+  // parameter FOR THE SLOT — this one-argument function came out as `s32 f(s32 a0, s32 a1)` with
+  // `a1` standing in for uninitialised stack. Both frontends now assert the symptom at the same
+  // boundary (frontend/ssa.ts assertNoSlotEscaped), which is total where a per-read test cannot be.
+  const diamond = [
+    '00000000 <f>:',
+    '   0:\taddiu\tsp,sp,-24',
+    '   4:\tbeqz\ta0,14 <f+0x14>',
+    '   8:\tnop',
+    '   c:\tsw\ta0,16(sp)',
+    '  10:\tnop',
+    '  14:\tlw\tv0,16(sp)',
+    '  18:\taddiu\tv0,v0,1',
+    '  1c:\tjr\tra',
+    '  20:\taddiu\tsp,sp,24',
+    '',
+  ].join('\n');
+  expect(() => decompile('f', diamond, MIPS_IDO)).toThrow(/stack slot sp@16 is read on a path that never stores it/);
 });
 
 // ── Input-format boundary (frontend/format.ts) ────────────────────────────────────────────

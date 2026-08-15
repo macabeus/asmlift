@@ -27,7 +27,7 @@ import { FrontendUnsupportedError } from './errors';
 import { assertInputFormat } from './format';
 import type { Frontend } from './frontend';
 import { opaqueDest } from './opaque';
-import { abiSortEntryParams, fallbackArgc, makeSsaBuilder } from './ssa';
+import { abiSortEntryParams, assertNoSlotEscaped, fallbackArgc, makeSsaBuilder, stackSlotKey } from './ssa';
 
 interface Instr {
   /** the CANONICAL spelling — legacy names are normalised (see LEGACY_MNEMONICS) so that every
@@ -1476,7 +1476,7 @@ export function lift(
   // What Thumb does NOT inherit from MIPS: keying by the RAW sp offset is only sound while sp holds
   // the same value at every access, and MIPS gets that for free (IDO establishes sp with one
   // `addiu` and never moves it). Thumb's `push` moves sp, so constancy has to be PROVEN here.
-  const slotKey = (off: number) => `sp@${off}`;
+  const slotKey = stackSlotKey; // shared spelling: frontend/ssa.ts
   // Deliberately OVER-inclusive: a `cmp sp, rN` only reads sp but counts here too. Every false
   // positive costs a decline, every false negative costs a wrong slot — so it errs loudly.
   const modifiesSp = (ins: Instr): boolean =>
@@ -2256,6 +2256,16 @@ export function lift(
   });
 
   ssa.finish();
+
+  // A slot is memory THIS function allocated, so a slot arriving as a live-in means it was read on
+  // a path that never stored it — see assertNoSlotEscaped for why the check lives here and not at
+  // the read. Loud, and total.
+  assertNoSlotEscaped(irBlocks[0], paramReg, (slot) => {
+    throw new FrontendUnsupportedError(
+      `cannot lift '${name}': stack slot ${slot} is read on a path that never stores it ` +
+        `(partially-initialised local) — not modelled`,
+    );
+  });
 
   // Order the entry block's parameters by ABI register (r0, r1, r2, …) so downstream
   // naming (`a0`, `a1`, …) matches the calling convention, not the read order. Safe only

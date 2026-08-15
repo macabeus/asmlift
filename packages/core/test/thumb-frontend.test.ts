@@ -388,6 +388,26 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     expect(() => decompile('f', shifts, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
   });
 
+  test('a slot stored on only ONE arm of a branch declines, it does not invent a parameter', () => {
+    // The per-read guard asks whether a store reaches on SOME path, and a diamond defeats it:
+    // stored on one arm, reloaded at the join. readVar then recurses into the unstored predecessor
+    // and Braun's live-in path mints an entry parameter for the SLOT — so a one-argument function
+    // came out as `s32 f(s32 a0, s32 a1) { if (a0 != 0) a1 = a0; return a1 + 1; }`, where `a1`
+    // stands in for uninitialised stack. Caught at the boundary instead: a slot may never leave the
+    // frontend as a parameter (frontend/ssa.ts assertNoSlotEscaped).
+    const diamond =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tcmp\tr0, #0\n\tbeq\t.L2\n\tstr\tr0, [sp]\n' +
+      '.L2:\n\tldr\tr1, [sp]\n\tadd\tr0, r1, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r2}\n\tbx\tr2\n';
+    expect(() => decompile('f', diamond, ARMV4T_AGBCC)).toThrow(
+      /stack slot sp@0 is read on a path that never stores it/,
+    );
+    // control: store it on BOTH arms and the same shape lifts, with no phantom parameter
+    const both =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tcmp\tr0, #0\n\tbeq\t.L2\n\tstr\tr0, [sp]\n' +
+      '.L2:\n\tldr\tr1, [sp]\n\tadd\tr0, r1, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r2}\n\tbx\tr2\n';
+    expect(decompile('f', both, ARMV4T_AGBCC).source).toBe('s32 f(s32 a0) {\n    return a0 + 1;\n}\n');
+  });
+
   test('a gap in the slots read still yields ABI-correct offsets', () => {
     // frame 8, so [sp,#0xc] is argument 6 (index 5) and argument 5 is never read. Naming downstream
     // is POSITIONAL, so minting only the slot that was read would put the parameter at argument 5's

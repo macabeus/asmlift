@@ -31,7 +31,7 @@ import { assertInputFormat } from './format';
 import type { Frontend } from './frontend';
 import { opaqueDest } from './opaque';
 import { isSplatMips, parseSplatMips } from './splat';
-import { abiSortEntryParams } from './ssa';
+import { abiSortEntryParams, assertNoSlotEscaped, stackSlotKey } from './ssa';
 import { makeSsaBuilder } from './ssa';
 
 type Instr = DisasmInstr;
@@ -54,7 +54,7 @@ const isZero = (r: string) => r === 'zero' || r === '$0';
 const isStackPtr = (r: string) => r === 'sp' || r === '$sp' || r === '$29';
 // SSA-variable name for the stack slot at a constant `sp`-offset. Distinct namespace from the
 // register names (which are alphabetic / `$N`), so it never collides with a real register var.
-const stackSlot = (off: number) => `sp@${off}`;
+const stackSlot = stackSlotKey; // shared spelling: frontend/ssa.ts
 // Sub-word memory mnemonics (widths 1 and 2). Used by the `spSlotSafe` guard in `lift`: a sub-word
 // `sp`-relative access means the word stack-slot model is unsafe for that function.
 const SUBWORD_MEM = new Set(['lb', 'lbu', 'lh', 'lhu', 'sb', 'sh']);
@@ -1041,6 +1041,17 @@ export function lift(
     ssa.markFilled(bi);
   });
   ssa.finish();
+
+  // Same total guard as the Thumb frontend (frontend/ssa.ts). The per-read `hasReachingDef` test
+  // below asks "stored on SOME path", which a diamond defeats — stored on one arm of a branch,
+  // reloaded at the join — and the slot then arrives as a fabricated parameter standing in for
+  // uninitialised stack. Pre-dates the Thumb slot model; fixed with it, because it is one rule.
+  assertNoSlotEscaped(irBlocks[0], paramReg, (slot) => {
+    throw new FrontendUnsupportedError(
+      `cannot lift '${name}': stack slot ${slot} is read on a path that never stores it ` +
+        `(partially-initialised local) — not modelled`,
+    );
+  });
 
   // ABI-ordered entry parameters (a0, a1, …) — a callee-saved copy can read a later argument
   // register first. Only the true entry (no predecessors) is sorted; a loop header's phis are

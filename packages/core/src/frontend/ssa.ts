@@ -230,6 +230,40 @@ export function fallbackArgc(
   return n;
 }
 
+/** The stack-slot key both the MIPS and Thumb frontends use for a word-sized local in the
+ *  function's own frame. Shared so the two spell it identically and `assertNoSlotEscaped` can
+ *  recognise either frontend's slots. See the virtual-key note in the module header. */
+export const stackSlotKey = (off: number): string => `sp@${off}`;
+
+/** A stack slot must never leave the frontend as a PARAMETER.
+ *
+ *  Call after `finish()`, before the ABI sort. A slot is memory this function allocated, so its
+ *  value can only come from a store this function made; if one arrives as a live-in instead, the
+ *  slot was read on some path that never stored it and the model has fabricated a value the machine
+ *  never had — the signature grows an argument the function does not take, and it stands in for
+ *  uninitialised stack.
+ *
+ *  This is deliberately a TOTAL check at the boundary rather than another precondition at the read.
+ *  The per-read guard (`hasReachingDef`) asks whether a store reaches on SOME path, which a diamond
+ *  defeats — stored on one arm, reloaded at the join. Strengthening that query to "every path" is
+ *  not available while blocks are still filling: a loop's back-edge predecessor is not filled yet,
+ *  so a definite-assignment question asked mid-fill reports "unassigned" for a slot initialised
+ *  before the loop, and declines the commonest real shape there is. Asking the question here — of
+ *  the finished function, about the symptom rather than the cause — costs one pass over the entry
+ *  parameters and catches every route into the failure, including the ones nobody enumerated. */
+export function assertNoSlotEscaped(
+  entry: { params: Value[] },
+  paramReg: Map<Value, string>,
+  fail: (slot: string) => never,
+): void {
+  for (const p of entry.params) {
+    const key = paramReg.get(p);
+    if (key !== undefined && key.startsWith('sp@')) {
+      fail(key);
+    }
+  }
+}
+
 /** Order the TRUE entry block's parameters by ABI argument register, so downstream naming
  *  (`a0`, `a1`, …) matches the calling convention, not first-read order (a callee-saved copy can
  *  read a later argument register first). No-op when the entry has predecessors — a loop
