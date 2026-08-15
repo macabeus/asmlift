@@ -121,6 +121,46 @@ test('every sp-as-data spelling declines loud — including the register-indexed
   expect(thumb('\tstr\tr0, [sp, r1]\n')).toThrow(spAsData); // its store dual
   expect(thumb('\tldr\tr0, [sp, #4]\n')).toThrow(spAsData); // the literal slot m2c handles
   expect(thumb('\tadd\tr0, sp, #8\n')).toThrow(spAsData); // &local
+  // …and the ONE sp shape that is not a data use: `sp = sp ± IMMEDIATE`. Two producers spell it two
+  // ways and asmlift reads both — disassemblers emit `add sp, #N` (klonoa's asm/: 203 of them, 0
+  // three-operand), agbcc emits `add sp, sp, #N` (its own build/src/*.s: 98, 0 two-operand). Both
+  // are push/pop-based bookkeeping carrying no dataflow, so both lift.
+  expect(thumb('\tadd\tsp, sp, #-0x4\n\tmov\tr0, #1\n\tadd\tsp, sp, #0x4\n')).not.toThrow();
+  expect(thumb('\tsub\tsp, sp, #0x8\n\tmov\tr0, #1\n\tadd\tsp, sp, #0x8\n')).not.toThrow();
+  expect(thumb('\tadd\tsp, #-0x4\n\tmov\tr0, #1\n\tadd\tsp, #0x4\n')).not.toThrow();
+  expect(thumb('\tadd\tsp, sp, #0\n')).not.toThrow(); // N=0: must not fall into the copy idiom
+  expect(thumb('\tadd\tr13, r13, #-0x4\n\tadd\tr13, r13, #0x4\n')).not.toThrow(); // r13 spelling
+  // a frame that is ADJUSTED and then USED still declines: the adjustment is transparent, the
+  // access is not. This is the line that keeps the guard from becoming "ignore sp".
+  expect(thumb('\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tadd\tsp, sp, #0x4\n')).toThrow(spAsData);
+  expect(thumb('\tadd\tsp, sp, #-0x4\n\tmov\tr0, sp\n\tadd\tsp, sp, #0x4\n')).toThrow(spAsData);
+  // EVERY other write to sp declines. Each of these used to vanish silently, taking a real frame
+  // change with it while the function still compiled:
+  expect(thumb('\tadd\tsp, r4\n')).toThrow(spAsData); // register-sized adjust (4 real sites in sa3)
+  expect(thumb('\tsub\tsp, r4\n')).toThrow(spAsData);
+  expect(thumb('\tadd\tsp, sp, r0\n')).toThrow(spAsData); // its 3-operand twin (VLA-shaped)
+  expect(thumb('\tadd\tsp, r0, #0x4\n')).toThrow(spAsData); // computed sp: the base is not sp
+  expect(thumb('\tmov\tsp, r3\n')).toThrow(spAsData); // wholesale frame switch (1 real site in sa3)
+  // a FLAG-SETTING spelling is not bookkeeping: ARMv4T's sp-adjust encoding sets no flags, so one
+  // can only come from hand-written asm, where dropping it would leave a stale compare for a
+  // following conditional branch to fold into a silently wrong direction.
+  expect(thumb('\tadds\tsp, sp, #0x4\n')).toThrow(spAsData);
+  // GNU as accepts uppercase register names; a case-sensitive sp test would let `&local` through
+  // as confident arithmetic on a fabricated parameter.
+  expect(thumb('\tadd\tr0, SP, #0x8\n')).toThrow(spAsData);
+  // …and the shapes that made the guard belong on the WRITE rather than in a list of decode arms.
+  // An enumeration of arms covers only the arms someone thought of: each of these wrote sp through
+  // an arm nobody had enumerated, and lifted with the write silently dropped.
+  expect(thumb('\tlsl\tsp, r4, #2\n')).toThrow(spAsData);
+  expect(thumb('\tneg\tsp, r4\n')).toThrow(spAsData);
+  expect(thumb('\tmvn\tsp, r4\n')).toThrow(spAsData);
+  expect(thumb('\tldr\tsp, [r0, #4]\n')).toThrow(spAsData);
+  expect(thumb('\tldmia\tr0!, {sp}\n')).toThrow(spAsData);
+  // the low-register copy idiom must still fire — it is load-bearing for callee-saved liveness
+  expect(
+    decompile('f', '\t.code\t16\n\t.globl\tf\n\t.thumb_func\nf:\n\tadd\tr0, r1, #0\n\tbx\tlr\n', ARMV4T_AGBCC).source,
+  ).toBe('s32 f(s32 a0) {\n    return a0;\n}\n');
+
   // annotate mode degrades to a stub carrying the same reason — never a fabricated stack local
   const annotated = decompile(
     'f',

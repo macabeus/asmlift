@@ -1198,16 +1198,67 @@ export function lift(
   };
   const reg = (s: string) => s.replace(/[[\]]/g, '');
 
+  // THE one test for "is this token the stack pointer". Case-insensitive because GNU as accepts
+  // uppercase register names, and a case-sensitive test here is a silent-wrong-answer hole rather
+  // than a cosmetic one: `add r0, SP, #4` is `&local`, and missing it fabricates a phantom
+  // parameter and emits confident arithmetic on it.
+  const isSpReg = (s: string | undefined): boolean => {
+    const r = reg(s ?? '').toLowerCase();
+    return r === 'sp' || r === 'r13';
+  };
+
+  // Writing sp is transparent frame bookkeeping ONLY in the one shape that cannot change anything
+  // observable: `sp = sp ± immediate`. Two producers feed this frontend and each emits exactly ONE
+  // spelling, which is why both must work and why handling only one silently halved the input:
+  //
+  //     producer                                    `add sp, #N`   `add sp, sp, #N`
+  //     agbcc's own .s (checkouts/*/build/src)            0                98
+  //     disassembly (klonoa asm/ · sa3 asm/)           203 · 1250           0
+  //
+  // So this is not "one tool with two spellings" — it is the compiler's convention against the
+  // disassembler's, and asmlift reads both kinds of file. (An earlier commit message on this branch
+  // claimed agbcc emitted both; it does not, and the counts above are the check that settles it.)
+  //
+  // Everything else that writes sp is a
+  // frame change this frontend cannot model: a register-sized adjustment (`add sp, r4`, agbcc's
+  // way of spelling a frame too large for the 7-bit immediate), a computed stack pointer
+  // (`add sp, r0, #4`), or `mov sp, rN`. Those must DECLINE, not vanish — dropping them deletes a
+  // frame change with no diagnostic, which is the exact
+  // loud-becomes-silent trade this frontend's guards exist to prevent.
+  //
+  // Flag-setting spellings (`adds`/`subs`) are excluded deliberately: ARMv4T's SP-adjust encoding
+  // does not set flags, so a flag-setting one can only come from hand-written asm, where dropping
+  // it would leave a stale compare for a following conditional branch to fold. There are 0 in the
+  // benchmark corpus and 0 across the klonoa and sa3 checkouts, so excluding them costs nothing.
+  const spAsDataError = () =>
+    new FrontendUnsupportedError(
+      `cannot lift '${name}': stack pointer used as data (address-taken local / sp-relative slot / frame arithmetic) — local stack frames not supported`,
+    );
+
+  const isFrameAdjust = (
+    mnemonic: string,
+    dest: string | undefined,
+    base: string | undefined,
+    off: string | undefined,
+  ): boolean =>
+    (mnemonic === 'add' || mnemonic === 'sub') &&
+    isSpReg(dest) &&
+    (base === undefined || isSpReg(base)) &&
+    (off?.startsWith('#') ?? false);
+
   // Reading sp as a DATA operand means an address-taken local (`add rD, sp, #N` = `&local`),
   // an sp-relative spill slot (`ldr/str …, [sp, #N]`), or frame-pointer arithmetic — none
-  // modellable without a stack abstraction. sp is never WRITTEN (sp-dest ops are transparent
-  // frame bookkeeping), so Braun SSA would materialize it as a fabricated PHANTOM parameter that
-  // scrambles the signature. Fail LOUD instead, mirroring MIPS (`isStackPtr`) and PPC (`r1`).
+  // modellable without a stack abstraction. Without this guard Braun SSA would materialize sp as a
+  // fabricated PHANTOM parameter that scrambles the signature. Fail LOUD instead, mirroring MIPS
+  // (`isStackPtr`) and PPC (`r1`).
+  //
+  // sp is never WRITTEN either — but by `writeData` declining, NOT because sp-dest ops are inert.
+  // That was this file's premise until the frame-adjust whitelist landed, and it was wrong: five
+  // decode arms wrote sp and dropped it silently. The single transparent shape is `sp = sp ± imm`,
+  // whitelisted in the add/sub arms. Read and write are now guarded symmetrically.
   const readData = (r: string, b: number): Value => {
-    if (r === 'sp' || r === 'r13') {
-      throw new FrontendUnsupportedError(
-        `cannot lift '${name}': stack pointer used as data (address-taken local / sp-relative slot / frame arithmetic) — local stack frames not supported`,
-      );
+    if (isSpReg(r)) {
+      throw spAsDataError();
     }
     if (r === 'pc' || r === 'r15') {
       // A pc-relative literal load is rewritten to a pool label before reaching here (decode's
@@ -1222,6 +1273,26 @@ export function lift(
       throw new FrontendUnsupportedError(`cannot lift '${name}': data label '${r}' used as a register — not modelled`);
     }
     return readVar(r, b);
+  };
+
+  // The WRITE dual of readData, and the reason it exists is a lesson rather than a symmetry: the
+  // first version of this guard checked sp in three decode arms (mov/add/sub) and its commit message
+  // claimed "every write to sp declines". It did not — `lsl sp, r4, #2`, `neg sp, r4`, `mvn sp, r4`,
+  // `ldr sp, [r0,#4]` and `ldmia r0!, {sp}` all still lifted, dropping the sp write silently, because
+  // an enumeration of arms can only cover the arms someone thought of. Guarding the write ITSELF
+  // cannot be incomplete.
+  //
+  // sp is writable in exactly one shape — the frame adjust the add/sub arms `break` on before
+  // reaching here (see isFrameAdjust). Anything else that writes sp is a frame change this frontend
+  // cannot model, and dropping it silently deletes that change while the function keeps compiling.
+  //
+  // Known residual, zero inhabitants: `pop {sp}` never reaches here (push/pop are skipSafe in the
+  // opaque policy), so it stays silently transparent. ARMv4T Thumb cannot encode sp in a pop reglist.
+  const writeData = (r: string, b: number, v: Value): void => {
+    if (isSpReg(r)) {
+      throw spAsDataError();
+    }
+    writeVar(r, b, v);
   };
 
   // Best-effort call arity via the shared helper (frontend/ssa.ts).
@@ -1259,7 +1330,7 @@ export function lift(
       const res = mkValue(T.unk(32));
       // carry the mnemonic so annotate mode can name the gap (`ASMLIFT_ERROR("unmodelled 'rsb'")`)
       irb.ops.push(mkOp('opaque', { operands, results: [res], attrs: { mnemonic: ins.asWritten ?? ins.mnemonic } }));
-      writeVar(od.dst, bi, res);
+      writeData(od.dst, bi, res);
     };
     // 2-operand ALU form `op rD, op2` (rD = rD ⟨op⟩ op2). `op2` is an immediate (`#N`) or a
     // register. A destination that is NOT a low data register (`add sp, #8` / `sub sp, #N` frame
@@ -1267,9 +1338,25 @@ export function lift(
     // harmlessly, matching the documented sp handling. A malformed operand (missing / non-register
     // non-immediate) degrades to a loud opaque rather than a crash or a silent data-dest drop.
     const emit2op = (opc: Opcode, dReg: string, op2: string | undefined, bi: number) => {
+      // The one sp guard writeData CANNOT supply: this path returns without ever producing a value
+      // to write, so a bad sp destination would never reach the write. It is only reachable from the
+      // add/sub arms, which have already let the whitelisted frame adjust `break` out — so an sp
+      // destination here is by construction NOT that shape (`add sp, r4`: a register-sized frame
+      // adjustment, how agbcc spells a frame too large for the 7-bit immediate).
+      //
+      // Honesty about what this is worth: the 4 real `add sp, rN` sites in the sa3 checkout all sit
+      // in functions that ALSO do `mov rN, sp` 70+ times, so they declined before this guard and
+      // decline after it. No wrong C was ever emitted by this shape. The guard is defence in depth
+      // for the day a stack capability makes those functions liftable — not a miscompile fixed.
+      //
+      // This looked dead during review and is not: it becomes reachable the moment the arm-local
+      // guards are removed, which is exactly what the test at 'add sp, r4' pins.
+      if (isSpReg(dReg)) {
+        throw spAsDataError();
+      }
       if (!isThumbReg(reg(dReg))) {
         return;
-      } // sp/pc frame adjustment: transparent
+      } // pc: claimed by classifyXfer first
       if (op2 === undefined) {
         emitOpaqueDest({ mnemonic: opc, ops: [dReg] });
         return;
@@ -1277,7 +1364,7 @@ export function lift(
       const rhs = op2.startsWith('#') ? constVal(imm(op2), bi) : readData(reg(op2), bi);
       const res = mkValue(T.unk(32));
       irb.ops.push(mkOp(opc, { operands: [readData(reg(dReg), bi), rhs], results: [res] }));
-      writeVar(reg(dReg), bi, res);
+      writeData(reg(dReg), bi, res);
     };
 
     for (const ins of ab.instrs) {
@@ -1308,18 +1395,24 @@ export function lift(
         case 'mov':
         case 'movs': {
           const v = b?.startsWith('#') ? constVal(imm(b), bi) : readData(reg(b), bi);
-          writeVar(reg(a), bi, v);
+          writeData(reg(a), bi, v);
           break;
         }
         case 'add':
         case 'adds': {
+          // Frame bookkeeping first: it must outrank the `#0` copy idiom below, or `add sp, sp, #0`
+          // takes the copy path and declines while `add sp, #0` is transparent — the same
+          // two-spellings inconsistency one N lower down.
+          if (isFrameAdjust(ins.mnemonic, a, c === undefined ? undefined : b, c ?? b)) {
+            break;
+          }
           // `add rD, rS, #0` is agbcc's low-register copy idiom (Thumb `mov rD, rS` between
           // low regs isn't always available). Model it as a pure copy — same SSA value — not
           // an `x + 0` add. This keeps output clean and, crucially, makes a value copied to a
           // callee-saved register before a call read as still-live *after* the call, which is
           // how call-argument liveness tells a passed argument from a preserved one.
           if (c === '#0') {
-            writeVar(reg(a), bi, readData(reg(b), bi));
+            writeData(reg(a), bi, readData(reg(b), bi));
             break;
           }
           // 2-operand form `add rD, op2` (rD = rD + op2): op2 in `b`, no third operand.
@@ -1328,22 +1421,27 @@ export function lift(
             emit2op('add', a, b, bi);
             break;
           }
+
           const rhs = c?.startsWith('#') ? constVal(imm(c), bi) : readData(reg(c), bi);
           const res = mkValue(T.unk(32));
           irb.ops.push(mkOp('add', { operands: [readData(reg(b), bi), rhs], results: [res] }));
-          writeVar(reg(a), bi, res);
+          writeData(reg(a), bi, res);
           break;
         }
         case 'sub':
         case 'subs': {
+          if (isFrameAdjust(ins.mnemonic, a, c === undefined ? undefined : b, c ?? b)) {
+            break;
+          }
           if (c === undefined) {
             emit2op('sub', a, b, bi);
             break;
           } // `sub rD, op2` → rD = rD - op2
+
           const rhs = c?.startsWith('#') ? constVal(imm(c), bi) : readData(reg(c), bi);
           const res = mkValue(T.unk(32));
           irb.ops.push(mkOp('sub', { operands: [readData(reg(b), bi), rhs], results: [res] }));
-          writeVar(reg(a), bi, res);
+          writeData(reg(a), bi, res);
           break;
         }
         case 'lsr':
@@ -1370,7 +1468,7 @@ export function lift(
             // register form `lsl rD, rS, rN` → rD = rS << rN
             irb.ops.push(mkOp(opc, { operands: [readData(reg(b), bi), readData(reg(c), bi)], results: [res] }));
           }
-          writeVar(reg(a), bi, res);
+          writeData(reg(a), bi, res);
           break;
         }
         case 'neg':
@@ -1378,7 +1476,7 @@ export function lift(
           // `neg rD, rS` (and `rsb rD, rS, #0`) = arithmetic negation → -x
           const res = mkValue(T.unk(32));
           irb.ops.push(mkOp('neg', { operands: [readData(reg(b), bi)], results: [res] }));
-          writeVar(reg(a), bi, res);
+          writeData(reg(a), bi, res);
           break;
         }
         case 'rsb':
@@ -1389,7 +1487,7 @@ export function lift(
           if (c === '#0') {
             const res = mkValue(T.unk(32));
             irb.ops.push(mkOp('neg', { operands: [readData(reg(b), bi)], results: [res] }));
-            writeVar(reg(a), bi, res);
+            writeData(reg(a), bi, res);
           } else {
             emitOpaqueDest(ins);
           }
@@ -1400,7 +1498,7 @@ export function lift(
           // `mvn rD, rS` = bitwise NOT → ~x
           const res = mkValue(T.unk(32));
           irb.ops.push(mkOp('not', { operands: [readData(reg(b), bi)], results: [res] }));
-          writeVar(reg(a), bi, res);
+          writeData(reg(a), bi, res);
           break;
         }
         case 'bic':
@@ -1417,7 +1515,7 @@ export function lift(
           irb.ops.push(mkOp('not', { operands: [readData(mr, bi)], results: [inv] }));
           const res = mkValue(T.unk(32));
           irb.ops.push(mkOp('and', { operands: [readData(xr, bi), inv], results: [res] }));
-          writeVar(reg(a), bi, res);
+          writeData(reg(a), bi, res);
           break;
         }
         case 'ror':
@@ -1431,7 +1529,7 @@ export function lift(
           const [xr, nr] = c !== undefined ? [reg(b), reg(c)] : [reg(a), reg(b)];
           const res = mkValue(T.unk(32));
           irb.ops.push(mkOp('rotr', { operands: [readData(xr, bi), readData(nr, bi)], results: [res] }));
-          writeVar(reg(a), bi, res);
+          writeData(reg(a), bi, res);
           break;
         }
         case 'ldmia':
@@ -1515,7 +1613,7 @@ export function lift(
               irb.ops.push(
                 mkOp('load', { operands: [base0], results: [res], attrs: { off: 4 * i, signed: true, width: 4 } }),
               );
-              writeVar(reg(r), bi, res);
+              writeData(reg(r), bi, res);
             } else {
               irb.ops.push(mkOp('store', { operands: [base0, readData(reg(r), bi)], attrs: { off: 4 * i, width: 4 } }));
             }
@@ -1528,7 +1626,7 @@ export function lift(
           if (!wroteBase) {
             const adv = mkValue(T.unk(32));
             irb.ops.push(mkOp('add', { operands: [base0, constVal(4 * list.length, bi)], results: [adv] }));
-            writeVar(baseReg, bi, adv);
+            writeData(baseReg, bi, adv);
           }
           break;
         }
@@ -1564,7 +1662,7 @@ export function lift(
               : [readData(reg(a), bi), readData(reg(b), bi)];
           const res = mkValue(T.unk(32));
           irb.ops.push(mkOp(opc, { operands: [x, y], results: [res] }));
-          writeVar(reg(a), bi, res);
+          writeData(reg(a), bi, res);
           break;
         }
         case 'cmp': {
@@ -1616,7 +1714,7 @@ export function lift(
                     attrs: { sym: si.name, ...(si.kind === 'code' ? { code: true } : {}) },
                   }),
                 );
-                writeVar(reg(a), bi, res);
+                writeData(reg(a), bi, res);
                 break;
               }
               // INTERIOR attribution: a value strictly inside a sized data symbol becomes
@@ -1633,18 +1731,18 @@ export function lift(
                 irb.ops.push(mkOp('gaddr', { results: [g], attrs: { sym: interior.info.name } }));
                 irb.ops.push(mkOp('const', { results: [k], attrs: { value: interior.offset } }));
                 irb.ops.push(mkOp('add', { operands: [g, k], results: [res] }));
-                writeVar(reg(a), bi, res);
+                writeData(reg(a), bi, res);
                 break;
               }
               const res = mkValue(T.unk(32));
               irb.ops.push(mkOp('const', { results: [res], attrs: { value: pr.value } }));
-              writeVar(reg(a), bi, res);
+              writeData(reg(a), bi, res);
               break;
             }
             if (pr?.kind === 'gaddr') {
               const res = mkValue(T.unk(32));
               irb.ops.push(mkOp('gaddr', { results: [res], attrs: { sym: pr.sym } }));
-              writeVar(reg(a), bi, res);
+              writeData(reg(a), bi, res);
               break;
             }
             if (pr?.kind === 'unmodelled') {
@@ -1674,7 +1772,7 @@ export function lift(
           }
           const res = mkValue(T.unk(32));
           irb.ops.push(mkOp('load', { operands: [baseVal], results: [res], attrs: { off, width, signed } }));
-          writeVar(reg(a), bi, res);
+          writeData(reg(a), bi, res);
           break;
         }
         case 'str':
@@ -1713,7 +1811,7 @@ export function lift(
           }
           const res = mkValue(T.unk(32));
           irb.ops.push(mkOp('call', { operands: args, results: [res], attrs: { target: targetSym } }));
-          writeVar('r0', bi, res);
+          writeData('r0', bi, res);
           break;
         }
         default:
