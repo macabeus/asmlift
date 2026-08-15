@@ -12,6 +12,7 @@ import { cBackend } from './backend/c';
 import { assertDerefsTyped, assertResolved } from './contracts';
 import type { AsmData } from './frontend/asmdata';
 import { frontendFor } from './frontend/registry';
+import { globalCellOf } from './ir/alias';
 import { Fn, type Value, defOpMap } from './ir/core';
 import { T } from './ir/types';
 import { verify } from './ir/verify';
@@ -223,7 +224,7 @@ export function enumerateCandidates(
     [...opts.symbols.values()].some((infos) =>
       infos.some((i) => [...(i.layout ?? []), ...(i.pointee?.layout ?? [])].some((f) => f.bitWidth !== undefined)),
     );
-  const senseCands = mapHasBitfields
+  const bitfieldCands = mapHasBitfields
     ? [...baseSense, ...baseSense.map((s) => ({ ...s, suffix: `${s.suffix}/no-bitfield`, bitfields: false }))]
     : baseSense;
   // Probe: recover ONCE with no signedness pin, to learn which entry params are pointers/aggregates
@@ -239,6 +240,28 @@ export function enumerateCandidates(
   // Access facts for name-only symbol declarations (see bareGlobalAccessFacts) — derived once
   // from the probe: widths/offsets are lift-time facts, identical across every candidate.
   const accessFacts = opts.symbols ? bareGlobalAccessFacts(probe) : new Map<string, never>();
+  // `/reread-globals` — the VALUE-HOME axis (structure/analysis.ts AnalyzeOptions). Whether the
+  // source read a global once into a variable or re-read it at each use is not derivable from asm:
+  // the compiler CSEs the second spelling back into one load, and the round-5 dogfood watched agbcc
+  // land on both sides inside a single function (its highest-cost defect, 25 of 27 points on one
+  // klonoa function and 35/50 both ways on another). So both spellings are emitted and the differ
+  // referees — the same footing as signedness and branch sense, and never a default: the cached
+  // spelling stays the primary, so this can only ever ADD a winner.
+  //
+  // Gated on the function having a load that resolves to a named global at all — the only thing the
+  // axis can change. The dedup below collapses the pair wherever it changed nothing.
+  const probeDefs = defOpMap(probe);
+  const readsANamedGlobal = probe.blocks.some((b) =>
+    b.ops.some(
+      (op) => op.opcode === 'load' && globalCellOf(probeDefs, op.operands[0], op.attrs.off as number) !== null,
+    ),
+  );
+  const senseCands = readsANamedGlobal
+    ? [
+        ...bitfieldCands.map((s) => ({ ...s, reread: false })),
+        ...bitfieldCands.map((s) => ({ ...s, suffix: `${s.suffix}/reread-globals`, reread: true })),
+      ]
+    : bitfieldCands.map((s) => ({ ...s, reread: false }));
 
   const seen = new Set<string>();
   const out: Candidate[] = [];
@@ -273,9 +296,10 @@ export function enumerateCandidates(
             preserveDivergentBranchSense: s.sense,
             anchorConstCopies: s.anchor,
             spellBitfieldMembers: s.bitfields,
+            rereadGlobals: s.reread,
           });
         } catch (e) {
-          if (!s.anchor && s.bitfields) {
+          if (!s.anchor && s.bitfields && !s.reread) {
             throw e; // the base axes keep their behavior: a structuring failure aborts the row
           }
           // an anchored variant that fails structuring or its contracts is a dropped lever, never

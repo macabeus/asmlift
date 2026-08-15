@@ -637,6 +637,11 @@ export interface StructureOptions {
   // read recompiles at the DECLARATION's access width — where that diverges from the asm's load
   // width the honest shift spelling is the one that matches, and the differ referees.
   spellBitfieldMembers?: boolean;
+  // Let a read of a named global render at its use across writes that PROVABLY cannot reach it
+  // (a store to a different named global), instead of caching it in a local. Off by default;
+  // rank.ts enumerates the ON spelling as the `/reread-globals` axis — see analysis.ts
+  // AnalyzeOptions for why this is a differ-refereed lever and not a fix.
+  rereadGlobals?: boolean;
   // How an unresolvable VALUE degrades (a live `opaque`, an unlowered transient op, a dropped def):
   //   "strict"   (default) — the `"?"` sentinel, tripping assertResolved at the boundary (loud in
   //              the PROCESS);
@@ -660,6 +665,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     anchorConstCopies = false,
     littleEndian = true,
     spellBitfieldMembers = true,
+    rereadGlobals = false,
     onGap = 'strict',
     symbols,
   } = opts;
@@ -672,6 +678,15 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
   const { useSitesOf, opIndex, opBlock, liveIn, materialize, reachFrom, emitPos, memWriteBetween } = analyze(
     fn,
     returnsVoid,
+    {
+      defs,
+      rereadGlobals,
+      // the map's own declaration truth: a volatile object's read may not be duplicated or moved
+      volatileGlobal: (n) => {
+        const si = symbols?.get(n);
+        return si?.volatile === true || (si?.layout ?? []).some((f) => f.volatile === true);
+      },
+    },
   );
 
   // SCALAR-vs-AGGREGATE globals: a `gaddr` symbol accessed EXCLUSIVELY at offset 0 is a scalar
