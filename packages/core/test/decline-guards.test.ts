@@ -148,6 +148,18 @@ test('every sp-as-data spelling declines loud — including the register-indexed
   // GNU as accepts uppercase register names; a case-sensitive sp test would let `&local` through
   // as confident arithmetic on a fabricated parameter.
   expect(thumb('\tadd\tr0, SP, #0x8\n')).toThrow(spAsData);
+  // …and the shapes that made the guard belong on the WRITE rather than in a list of decode arms.
+  // An enumeration of arms covers only the arms someone thought of: each of these wrote sp through
+  // an arm nobody had enumerated, and lifted with the write silently dropped.
+  expect(thumb('\tlsl\tsp, r4, #2\n')).toThrow(spAsData);
+  expect(thumb('\tneg\tsp, r4\n')).toThrow(spAsData);
+  expect(thumb('\tmvn\tsp, r4\n')).toThrow(spAsData);
+  expect(thumb('\tldr\tsp, [r0, #4]\n')).toThrow(spAsData);
+  expect(thumb('\tldmia\tr0!, {sp}\n')).toThrow(spAsData);
+  // the low-register copy idiom must still fire — it is load-bearing for callee-saved liveness
+  expect(
+    decompile('f', '\t.code\t16\n\t.globl\tf\n\t.thumb_func\nf:\n\tadd\tr0, r1, #0\n\tbx\tlr\n', ARMV4T_AGBCC).source,
+  ).toBe('s32 f(s32 a0) {\n    return a0;\n}\n');
 
   // annotate mode degrades to a stub carrying the same reason — never a fabricated stack local
   const annotated = decompile(
