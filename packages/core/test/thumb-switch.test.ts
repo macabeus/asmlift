@@ -104,6 +104,21 @@ test('an arm that runs into the NEXT arm is recovered as C fall-through', () => 
   expect(out.match(/sideB\(/g)).toHaveLength(1);
 });
 
+test('a fall-through that would carry an effect out of a loop DECLINES', () => {
+  // The exit copies of a do-while render AFTER it, while the analysis decided where their values
+  // may inline as if they sat on the latch's terminator — inside the loop. An arm ending in a loop
+  // whose result is only read by the next arm therefore came out as `do { i = i - 1; } while (…);
+  // a0 = sideA();` — the call once instead of once per iteration, in C that looks entirely
+  // ordinary. Loud beats plausible.
+  const loop = '\tmov\tr4, #3\n.Llp:\n\tbl\tsideA\n\tsub\tr4, #1\n\tcmp\tr4, #0\n\tbne\t.Llp\n';
+  expect(() => decompile('f', conv([loop, '\tbl\tsideB\n' + LEAVE]), ARMV4T_AGBCC)).toThrow(
+    /inlines a 'call' from inside the loop/,
+  );
+  // control: the SAME loop in a closed arm keeps the call inside the loop and recovers.
+  const closed = convSrc([loop + LEAVE, '\tbl\tsideB\n' + LEAVE]);
+  expect(closed).toMatch(/do \{\s*\n\s*v0 = sideA\(\);/);
+});
+
 test('overlaps C cannot spell DECLINE instead of being silently closed or duplicated', () => {
   // Emitting these as ordinary `break` arms would drop a real control-flow edge — the output would
   // look entirely normal and run the wrong code, which is the whole hazard of a recovered table.

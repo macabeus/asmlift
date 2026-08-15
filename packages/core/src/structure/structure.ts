@@ -585,6 +585,11 @@ interface WhileLoopInfo {
   body: Set<Block>; // the pure natural-loop body (for in-body vs exit classification)
 }
 
+// Opcodes whose RENDER POSITION is their execution: moving one across a statement boundary changes
+// what the program does (a call runs elsewhere, a load reads at a different time). Used where a
+// value's render position is decided somewhere other than the analysis assumed.
+const MOVABLE_EFFECT = new Set(['call', 'load', 'aload', 'opaque']);
+
 // A bottom-tested `do { body } while(cond)`. The header is the body entry (entered before any
 // test); the LATCH holds the loop condition and the single exit. Body = header..latch structured, then
 // the latch's own ops + the loop-update; the latch test is the do-while condition. The condition is
@@ -2321,6 +2326,26 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     if (loopUpdateHazard(lterm.operands[0], exitArgs, dw.body, sub, updateWrites, null, new Set(dw.header.params))) {
       throw new StructureError(
         `cannot structure '${fn.name}': do-while condition or a post-loop value reads a pre-update loop variable`,
+      );
+    }
+    // The exit copies render AFTER the `dowhile` statement, but the analysis judged where each
+    // value they carry may inline as if the copies sat on the latch's terminator — INSIDE the loop.
+    // For a pure def that is only a naming question (the pre-update guard above covers the rest);
+    // for an EFFECTFUL one it moves the effect out of the loop: a call that ran once per iteration
+    // would render once, after it. Nothing can re-place it here — `materialize` was decided before
+    // emission — so decline LOUD rather than emit a plausible loop that calls the wrong number of
+    // times.
+    const movedEffect = exitArgs.find((v) => {
+      const d = defs.get(v);
+      return (
+        d && MOVABLE_EFFECT.has(d.opcode) && dw.body.has(opBlock.get(d)!) && !materialize.has(d) && !varName.has(v)
+      );
+    });
+    if (movedEffect) {
+      const d = defs.get(movedEffect)!;
+      throw new StructureError(
+        `cannot structure '${fn.name}': a post-loop value inlines a '${d.opcode}' from inside the loop, ` +
+          `which would move that effect out of it`,
       );
     }
     dwActive.add(dw.header);
