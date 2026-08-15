@@ -2103,6 +2103,26 @@ export function lift(
               break;
             }
           }
+          // A word reload from this function's own frame — the dual of the spill in the str arm.
+          //
+          // The reaching-def test is the whole soundness of it, and it mirrors the MIPS guard
+          // exactly: a slot that was never STORED holds nothing this function put there, so
+          // `readVar` would mint a phantom entry parameter for it and hand back a value the machine
+          // never had. Above the frame that reading is right and is the incoming-argument path
+          // above; INSIDE the frame it is an uninitialised local (or one whose address escaped
+          // through a path the model missed), and the honest answer is the decline this falls
+          // through to.
+          if (
+            slotsOk &&
+            isSpReg(base) &&
+            regOff === undefined &&
+            width === 4 &&
+            off < frameDepth &&
+            ssa.hasReachingDef(slotKey(off), bi)
+          ) {
+            writeData(reg(a), bi, readVar(slotKey(off), bi));
+            break;
+          }
           let baseVal = readData(base, bi);
           if (regOff !== undefined) {
             const sum = mkValue(T.unk(32));

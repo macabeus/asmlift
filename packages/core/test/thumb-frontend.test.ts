@@ -338,6 +338,56 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     expect(src).toBe('s32 f(s32 a0) {\n    return a0 + 1;\n}\n');
   });
 
+  test('a slot survives a round trip, and a loop, as one variable', () => {
+    // store then reload is a value move, not memory traffic: the reload must produce the STORED
+    // value, and a slot read-modify-written across a loop must become one variable with a phi —
+    // which is why keying it as an SSA variable is the whole implementation.
+    const trip =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tldr\tr1, [sp]\n\tadd\tr0, r1, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(decompile('f', trip, ARMV4T_AGBCC).source).toBe('s32 f(s32 a0) {\n    return a0 + 1;\n}\n');
+    // accumulate into the slot across a back-edge: one variable, no load/store left
+    const loop =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tmov\tr2, #0\n\tstr\tr2, [sp]\n' +
+      '.L1:\n\tldr\tr2, [sp]\n\tadd\tr2, r2, r0\n\tstr\tr2, [sp]\n\tsub\tr0, r0, #1\n\tcmp\tr0, #0\n\tbne\t.L1\n' +
+      '\tldr\tr0, [sp]\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    const src = decompile('f', loop, ARMV4T_AGBCC).source;
+    expect(src).not.toContain('*'); // no pointer, no load through sp
+    expect(src).toContain('do {');
+  });
+
+  test('a reload from a slot that was never stored still declines', () => {
+    // The guard that keeps the model from fabricating: an unstored slot holds nothing this function
+    // put there, so routing it through readVar would mint a phantom parameter and hand back a value
+    // the machine never had. Above the frame that read IS an argument (the path above); inside the
+    // frame it is an uninitialised local, and the decline is the honest answer.
+    const unstored =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tldr\tr0, [sp]\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(() => decompile('f', unstored, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+  });
+
+  test('a sub-word access anywhere disables the model for the whole function', () => {
+    // The MIPS lesson (round 5's B2-F1), ported with the capability: routing the WORD store to an
+    // SSA slot while a byte reload of the same slot stays on the memory path would drop the store
+    // and read uninitialised memory — a silent miscompile. One sub-word sp access anywhere puts
+    // every sp access back on the path that declines.
+    const alias =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tldrb\tr1, [sp]\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(() => decompile('f', alias, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+    // …and it is FUNCTION-wide: the byte access is nowhere near the word slot it protects
+    const far =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tstr\tr0, [sp]\n\tldr\tr1, [sp]\n\tstrb\tr1, [sp, #4]\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(() => decompile('f', far, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+  });
+
+  test('a frame that moves under a keyed slot disables the model', () => {
+    // The key IS the raw offset, so it only denotes one place while sp holds still. A prologue
+    // before the accesses and an epilogue after them are fine; a shift BETWEEN two accesses moves
+    // the frame under a slot already keyed, and [sp,#0] stops meaning what it meant.
+    const shifts =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tstr\tr0, [sp]\n\tadd\tsp, sp, #0x4\n\tldr\tr1, [sp]\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(() => decompile('f', shifts, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+  });
+
   test('a gap in the slots read still yields ABI-correct offsets', () => {
     // frame 8, so [sp,#0xc] is argument 6 (index 5) and argument 5 is never read. Naming downstream
     // is POSITIONAL, so minting only the slot that was read would put the parameter at argument 5's
