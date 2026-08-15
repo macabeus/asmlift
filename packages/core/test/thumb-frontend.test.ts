@@ -311,6 +311,35 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     expect(decompile('f', lo, ARMV4T_AGBCC).source).toContain('return a4 + (a5 + 1);');
   });
 
+  // A guessed arity reads the argument REGISTERS, so it must respect what a call does to them.
+  // r0..r3 are caller-saved: a value the call sits between cannot be an argument the caller set up,
+  // and counting it invents arguments — which C89's implicit declarations accept silently.
+  describe('a guessed call arity respects the caller-saved clobber', () => {
+    const P = { f: { returnsVoid: true } };
+    const dc = (body: string) =>
+      decompile('f', `f:\n\tpush\t{lr}\n${body}\tpop\t{r0}\n\tbx\tlr\n`, ARMV4T_AGBCC, { prototypes: P }).source;
+
+    test('a register set up BEFORE an intervening call is not an argument to the later one', () => {
+      expect(dc('\tmov\tr1, #7\n\tbl\tfoo\n\tmov\tr0, #1\n\tbl\tbar\n')).toContain('bar(1);');
+    });
+
+    test('…and one set up after it still is', () => {
+      expect(dc('\tbl\tfoo\n\tmov\tr0, #1\n\tmov\tr1, #2\n\tbl\tbar\n')).toContain('bar(1, 2);');
+      // the call's own result is the freshest r0 there is
+      expect(dc('\tbl\tfoo\n\tbl\tbar\n')).toContain('bar(foo());');
+      // …and with no call in between, nothing is clobbered
+      expect(dc('\tmov\tr1, #7\n\tmov\tr0, #1\n\tbl\tbar\n')).toContain('bar(1, 7);');
+    });
+
+    test('a clobber on ONE path is enough — the analysis is a must', () => {
+      // r1 survives the fall-through path and dies on the other; an argument has to be set up on
+      // every path, so `bar` gets one argument, not two.
+      expect(dc('\tmov\tr1, #7\n\tcmp\tr0, #0\n\tbeq\t.L1\n\tbl\tfoo\n.L1:\n\tmov\tr0, #1\n\tbl\tbar\n')).toContain(
+        'bar(1);',
+      );
+    });
+  });
+
   test('asserting a parameter does not invent a value reaching anything', () => {
     // ensureParam must not write into `defs`: a parameter the convention PROVES exists is not
     // evidence that a value reaches a call site. hasReachingDef feeds fallbackArgc, so a def here

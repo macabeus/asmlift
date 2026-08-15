@@ -271,6 +271,95 @@ export function fallbackArgc(
   return n;
 }
 
+/** One call site whose arity was GUESSED by {@link fallbackArgc}, with what the lifting scan saw
+ *  of its own block up to that instruction. */
+export interface GuessedCallSite {
+  block: number;
+  /** the `call` op — its operands are the guessed arguments, in argument-register order */
+  op: { operands: Value[] };
+  /** argument registers written between the last call in this block (or the block's start) and here */
+  freshBefore: Set<string>;
+  /** did this block already make a call before this one? */
+  afterCallInBlock: boolean;
+}
+
+export interface CallArgTrim {
+  argRegs: string[];
+  /** one entry per CFG edge, as passed to {@link makeSsaBuilder} */
+  preds: number[][];
+  blockCount: number;
+  /** per block: argument registers written since its LAST call (since its start if it makes none) */
+  freshAtEnd: Map<number, Set<string>>;
+  /** blocks that make at least one call */
+  callsIn: Set<number>;
+  sites: GuessedCallSite[];
+}
+
+/** Cut a GUESSED call arity down by the ABI's caller-saved clobber.
+ *
+ *  `fallbackArgc` counts argument registers that merely have a reaching definition. A call clobbers
+ *  r0..r3, so a definition the call sits between cannot be an argument the caller set up — correct
+ *  compiled code would have re-materialized it. Counting it anyway INVENTS arguments
+ *  (`m4aSongNumStart(0x89, 30, x, &g)` for a one-argument callee), and under C89's implicit
+ *  declarations that compiles silently: a wrong-code class, not a cosmetic one.
+ *
+ *  A must-analysis: a register is FRESH at a point iff on EVERY path reaching it, it was written
+ *  after the last call. The entry block starts all-fresh (those are the caller's own arguments).
+ *  The result only ever SHRINKS an arity — a register the analysis cannot prove clobbered stays an
+ *  argument — so no real argument can be dropped by it.
+ *
+ *  Frontend-agnostic: the caller supplies what its own lifting scan observed, so nothing here
+ *  re-derives which instruction writes which register. */
+export function trimClobberedCallArgs(inp: CallArgTrim): void {
+  const { argRegs, preds, blockCount, freshAtEnd, callsIn, sites } = inp;
+  const all = () => new Set(argRegs);
+  const localEnd = (b: number) => freshAtEnd.get(b) ?? new Set<string>();
+  // freshOut[b]: registers fresh where b ends. A block that calls forgets everything before its
+  // last call; one that does not passes its input through, plus what it wrote.
+  const freshOut: Set<string>[] = Array.from({ length: blockCount }, () => all());
+  const freshIn: Set<string>[] = Array.from({ length: blockCount }, () => all());
+  const inOf = (b: number): Set<string> => {
+    if (b === 0) {
+      return all(); // the entry's incoming argument registers ARE set up, by the caller
+    }
+    const ps = [...new Set(preds[b] ?? [])];
+    if (ps.length === 0) {
+      return all(); // unreachable block — nothing to intersect, and nothing reads it either
+    }
+    const acc = new Set(freshOut[ps[0]]);
+    for (const p of ps.slice(1)) {
+      for (const r of [...acc]) {
+        if (!freshOut[p].has(r)) {
+          acc.delete(r);
+        }
+      }
+    }
+    return acc;
+  };
+  for (let changed = true; changed;) {
+    changed = false;
+    for (let b = 0; b < blockCount; b++) {
+      const fin = inOf(b);
+      const fout = callsIn.has(b) ? localEnd(b) : new Set([...fin, ...localEnd(b)]);
+      if (fout.size !== freshOut[b].size || [...fout].some((r) => !freshOut[b].has(r))) {
+        changed = true;
+      }
+      freshIn[b] = fin;
+      freshOut[b] = fout;
+    }
+  }
+  for (const s of sites) {
+    const fresh = s.afterCallInBlock ? s.freshBefore : new Set([...freshIn[s.block], ...s.freshBefore]);
+    let n = 0;
+    while (n < argRegs.length && fresh.has(argRegs[n])) {
+      n++;
+    }
+    if (n < s.op.operands.length) {
+      s.op.operands.length = n;
+    }
+  }
+}
+
 /** The stack-slot key both the MIPS and Thumb frontends use for a word-sized local in the
  *  function's own frame. Shared so the two spell it identically and `assertNoSlotEscaped` can
  *  recognise either frontend's slots. See the virtual-key note in the module header. */
