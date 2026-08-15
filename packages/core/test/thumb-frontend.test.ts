@@ -220,6 +220,17 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     expect(() => dc('f', body.replace('#0xc]', '#8]'))).toThrow(/stack pointer used as data/);
   });
 
+  test('a register RANGE in the prologue counts every register it names', () => {
+    // `push {r4-r7, lr}` is FIVE registers = 20 bytes. Counting the comma-separated tokens instead
+    // gives two, a frame 12 bytes too shallow — and then a genuine LOCAL at [sp,#8] is minted as a
+    // parameter reading uninitialised stack. agbcc emits no range pushes and none of the 743
+    // benchmark rows contains one, so only a probe catches this.
+    const frameTop = 'f:\n\tpush\t{r4-r7, lr}\n\tldr\tr0, [sp, #0x14]\n\tbx\tlr\n';
+    expect(decompile('f', frameTop, ARMV4T_AGBCC).source).toContain('a0');
+    const local = 'f:\n\tpush\t{r4-r7, lr}\n\tldr\tr0, [sp, #0x8]\n\tbx\tlr\n';
+    expect(() => decompile('f', local, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+  });
+
   // Each of these is a refusal, and each keeps a LOCAL from being minted as a parameter.
   test('everything the frame walk cannot vouch for still declines', () => {
     const spAsData = /stack pointer used as data/;

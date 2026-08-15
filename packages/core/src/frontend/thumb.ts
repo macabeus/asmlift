@@ -1292,10 +1292,19 @@ export function lift(
   const spDelta = (ins: { mnemonic: string; ops: string[] }): number => {
     const m = ins.mnemonic;
     if (m === 'push' || m === 'pop') {
-      const n = ins.ops
-        .join(',')
-        .split(',')
-        .filter((s) => /r\d+|lr|pc/.test(s)).length;
+      // expandRegList, NOT a comma count: `push {r4-r7, lr}` is FIVE registers, and counting it as
+      // two makes the frame 12 bytes too shallow — which turns a genuine LOCAL into a fabricated
+      // parameter reading uninitialised stack. Caught by a probe, not by the corpus: agbcc emits no
+      // range pushes and 0 of the 743 benchmark rows contain one, but GNU as accepts them and the
+      // disassembly path can produce them.
+      const n = expandRegList(
+        ins.ops
+          .join(',')
+          .replace(/[{}]/g, '')
+          .split(',')
+          .map((r) => r.trim())
+          .filter(Boolean),
+      ).filter((s) => !Number.isNaN(regNum(s))).length;
       return (m === 'push' ? 1 : -1) * 4 * n;
     }
     if ((m === 'add' || m === 'sub') && isSpReg(ins.ops[0])) {
