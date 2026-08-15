@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generatedAt": "2026-08-05T21:05:13.170Z",
+    "generatedAt": "2026-08-15T01:37:36.877Z",
     "toolchains": [
       "ido7.1",
       "agbcc",
@@ -14,8 +14,8 @@
       "real": 240
     },
     "asmlift": {
-      "commit": "5d2f723fc7820cb3b3bd03539466811a529812ba",
-      "dirty": false
+      "commit": "1e6e3eeb049119e77aa576842b0864a1f46f2066",
+      "dirty": true
     },
     "m2c": {
       "commit": "ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0"
@@ -3446,11 +3446,11 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-POpO9q/c.c:1077: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-PmlSXj/c.c:1077: invalid operands to binary <<"
           },
           {
             "label": "unsigned/scopebase/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-DFiac5/c.c:1078: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-UWjxmC/c.c:1078: invalid operands to binary <<"
           }
         ],
         "symbolsUsed": [
@@ -4352,7 +4352,7 @@
         "droppedCandidates": [
           {
             "label": "unsigned",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-WxagJo/c.c:1076: `gBgDataPtrs' undeclared (first use in this function)"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-n9TI6A/c.c:1076: `gBgDataPtrs' undeclared (first use in this function)"
           }
         ],
         "symbolsUsed": [],
@@ -5425,7 +5425,7 @@
         "droppedCandidates": [
           {
             "label": "unsigned",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-e9pWDz/c.c:1077: too many arguments to function `thunk_sub_080002A0'"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-io6XPU/c.c:1077: too many arguments to function `thunk_sub_080002A0'"
           }
         ],
         "symbolsUsed": [],
@@ -6214,43 +6214,43 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-uvtpo1/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-uuJIUo/c.c:1085: incompatible types in assignment"
           },
           {
             "label": "unsigned/coalesce-v2-v3/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-2Zei6g/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-qgqwMh/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "unsigned/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-jcvK7V/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-KU7QxW/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "unsigned/defsite/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-5fD7TB/c.c:1086: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-kKoWar/c.c:1086: incompatible types in assignment"
           },
           {
             "label": "unsigned/defsite/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Q3vjQ9/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-P6giOn/c.c:1085: incompatible types in assignment"
           },
           {
             "label": "signed/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-k51v6Q/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-YSshnD/c.c:1085: incompatible types in assignment"
           },
           {
             "label": "signed/coalesce-v2-v3/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-6ijgg4/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-PXFbfV/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "signed/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-5kz48m/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-8H6pgv/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "signed/defsite/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-i3wydJ/c.c:1086: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-LXsYiZ/c.c:1086: incompatible types in assignment"
           },
           {
             "label": "signed/defsite/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-RFuzT3/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-51ytq2/c.c:1085: incompatible types in assignment"
           }
         ],
         "symbolsUsed": [
@@ -6420,23 +6420,42 @@
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "outcome": "declined",
-        "source": "/* asmlift could not decompile 'UpdateWorldMapNodeTile' — lift: cannot lift 'UpdateWorldMapNodeTile': stack pointer used as data (address-taken local / sp-relative slot / frame arithmetic) — local stack frames not supported */\n/* original assembly: */\n/*   @ Generated by gcc 2.9-arm-000512 for Thumb/elf */\n/*   \t.code\t16 */\n/*   .gcc2_compiled.: */\n/*   .text */\n/*   \t.align\t2, 0 */\n/*   \t.globl\tUpdateWorldMapNodeTile */\n/*   \t.type\t UpdateWorldMapNodeTile,function */\n/*   \t.thumb_func */\n/*   UpdateWorldMapNodeTile: */\n/*   \tpush\t{r4, r5, r6, lr} */\n/*   \tadd\tsp, sp, #-0x4 */\n/*   \tlsl\tr0, r0, #0x18 */\n/*   \tlsr\tr3, r0, #0x18 */\n/*   \tcmp\tr3, #0x3 */\n/*   \tbhi\t.L3\t@cond_branch */\n/*   \tldr\tr6, .L6 */\n/*   \tldr\tr4, .L6+0x4 */\n/*   \tlsl\tr5, r3, #0x3 */\n/*   \tadd\tr2, r5, r4 */\n/*   \tadd\tr0, r4, #0x1 */\n/*   \tadd\tr0, r5, r0 */\n/*   \tldrb\tr1, [r0] */\n/*   \tlsl\tr1, r1, #0x5 */\n/*   \tldrb\tr2, [r2] */\n/*   \tadd\tr1, r1, r2 */\n/*   \tlsl\tr1, r1, #0x1 */\n/*   \tmov\tr0, #0x80 */\n/*   \tlsl\tr0, r0, #0x4 */\n/*   \tadd\tr6, r6, r0 */\n/*   \tadd\tr1, r1, r6 */\n/*   \tldr\tr0, .L6+0x8 */\n/*   \tadd\tr0, r3, r0 */\n/*   \tldrb\tr3, [r0] */\n/*   \tadd\tr3, r3, #0x1c */\n/*   \tlsl\tr0, r3, #0x6 */\n/*   \tadd\tr0, r0, r6 */\n/*   \tldrh\tr0, [r0] */\n/*   \tstrh\tr0, [r1] */\n/*   \tadd\tr2, r4, #0x2 */\n/*   \tadd\tr2, r5, r2 */\n/*   \tadd\tr0, r4, #0x3 */\n/*   \tadd\tr0, r5, r0 */\n/*   \tldrb\tr1, [r0] */\n/*   \tlsl\tr1, r1, #0x5 */\n/*   \tldrb\tr2, [r2] */\n/*   \tadd\tr1, r1, r2 */\n/*   \tlsl\tr1, r1, #0x1 */\n/*   \tadd\tr1, r1, r6 */\n/*   \tlsl\tr3, r3, #0x5 */\n/*   \tadd\tr0, r3, #0x1 */\n/*   \tlsl\tr0, r0, #0x1 */\n/*   \tadd\tr0, r0, r6 */\n/*   \tldrh\tr0, [r0] */\n/*   \tstrh\tr0, [r1] */\n/*   \tadd\tr2, r4, #0x4 */\n/*   \tadd\tr2, r5, r2 */\n/*   \tadd\tr0, r4, #0x5 */\n/*   \tadd\tr0, r5, r0 */\n/*   \tldrb\tr1, [r0] */\n/*   \tlsl\tr1, r1, #0x5 */\n/*   \tldrb\tr2, [r2] */\n/*   \tadd\tr1, r1, r2 */\n/*   \tlsl\tr1, r1, #0x1 */\n/*   \tadd\tr1, r1, r6 */\n/*   \tadd\tr0, r3, #0x2 */\n/*   \tlsl\tr0, r0, #0x1 */\n/*   \tadd\tr0, r0, r6 */\n/*   \tldrh\tr0, [r0] */\n/*   \tstrh\tr0, [r1] */\n/*   \tadd\tr1, r4, #0x6 */\n/*   \tadd\tr1, r5, r1 */\n/*   \tadd\tr4, r4, #0x7 */\n/*   \tadd\tr5, r5, r4 */\n/*   \tldrb\tr0, [r5] */\n/*   \tlsl\tr0, r0, #0x5 */\n/*   \tldrb\tr1, [r1] */\n/*   \tadd\tr0, r0, r1 */\n/*   \tlsl\tr0, r0, #0x1 */\n/*   \tadd\tr0, r0, r6 */\n/*   \tadd\tr3, r3, #0x3 */\n/*   \tb\t.L5 */\n/*   .L7: */\n/*   \t.align\t2, 0 */\n/*   .L6: */\n/*   \t.word\tgBgTilemapBufs */\n/*   \t.word\tgUnk_08116748 */\n/*   \t.word\tgUnk_08116880 */\n/*   .L3: */\n/*   \tldr\tr6, .L8 */\n/*   \tldr\tr4, .L8+0x4 */\n/*   \tlsl\tr5, r3, #0x3 */\n/*   \tadd\tr2, r5, r4 */\n/*   \tadd\tr0, r4, #0x1 */\n/*   \tadd\tr0, r5, r0 */\n/*   \tldrb\tr1, [r0] */\n/*   \tlsl\tr1, r1, #0x5 */\n/*   \tldrb\tr2, [r2] */\n/*   \tadd\tr1, r1, r2 */\n/*   \tlsl\tr1, r1, #0x1 */\n/*   \tmov\tr0, #0x80 */\n/*   \tlsl\tr0, r0, #0x4 */\n/*   \tadd\tr6, r6, r0 */\n/*   \tadd\tr1, r1, r6 */\n/*   \tldr\tr0, .L8+0x8 */\n/*   \tadd\tr0, r3, r0 */\n/*   \tldrb\tr3, [r0] */\n/*   \tadd\tr3, r3, #0x1c */\n/*   \tlsl\tr3, r3, #0x5 */\n/*   \tadd\tr0, r3, #0x4 */\n/*   \tlsl\tr0, r0, #0x1 */\n/*   \tadd\tr0, r0, r6 */\n/*   \tldrh\tr0, [r0] */\n/*   \tstrh\tr0, [r1] */\n/*   \tadd\tr2, r4, #0x2 */\n/*   \tadd\tr2, r5, r2 */\n/*   \tadd\tr0, r4, #0x3 */\n/*   \tadd\tr0, r5, r0 */\n/*   \tldrb\tr1, [r0] */\n/*   \tlsl\tr1, r1, #0x5 */\n/*   \tldrb\tr2, [r2] */\n/*   \tadd\tr1, r1, r2 */\n/*   \tlsl\tr1, r1, #0x1 */\n/*   \tadd\tr1, r1, r6 */\n/*   \tadd\tr0, r3, #0x5 */\n/*   \tlsl\tr0, r0, #0x1 */\n/*   \tadd\tr0, r0, r6 */\n/*   \tldrh\tr0, [r0] */\n/*   \tstrh\tr0, [r1] */\n/*   \tadd\tr2, r4, #0x4 */\n/*   \tadd\tr2, r5, r2 */\n/*   \tadd\tr0, r4, #0x5 */\n/*   \tadd\tr0, r5, r0 */\n/*   \tldrb\tr1, [r0] */\n/*   \tlsl\tr1, r1, #0x5 */\n/*   \tldrb\tr2, [r2] */\n/*   \tadd\tr1, r1, r2 */\n/*   \tlsl\tr1, r1, #0x1 */\n/*   \tadd\tr1, r1, r6 */\n/*   \tadd\tr0, r3, #0x6 */\n/*   \tlsl\tr0, r0, #0x1 */\n/*   \tadd\tr0, r0, r6 */\n/*   \tldrh\tr0, [r0] */\n/*   \tstrh\tr0, [r1] */\n/*   \tadd\tr1, r4, #0x6 */\n/*   \tadd\tr1, r5, r1 */\n/*   \tadd\tr4, r4, #0x7 */\n/*   \tadd\tr5, r5, r4 */\n/*   \tldrb\tr0, [r5] */\n/*   \tlsl\tr0, r0, #0x5 */\n/*   \tldrb\tr1, [r1] */\n/*   \tadd\tr0, r0, r1 */\n/*   \tlsl\tr0, r0, #0x1 */\n/*   \tadd\tr0, r0, r6 */\n/*   \tadd\tr3, r3, #0x7 */\n/*   .L5: */\n/*   \tlsl\tr3, r3, #0x1 */\n/*   \tadd\tr3, r3, r6 */\n/*   \tldrh\tr1, [r3] */\n/*   \tstrh\tr1, [r0] */\n/*   \tadd\tsp, sp, #0x4 */\n/*   \tpop\t{r4, r5, r6} */\n/*   \tpop\t{r0} */\n/*   \tbx\tr0 */\n/*   .L9: */\n/*   \t.align\t2, 0 */\n/*   .L8: */\n/*   \t.word\tgBgTilemapBufs */\n/*   \t.word\tgUnk_08116748 */\n/*   \t.word\tgUnk_08116880 */\n/*   .Lfe1: */\n/*   \t.size\t UpdateWorldMapNodeTile,.Lfe1-UpdateWorldMapNodeTile */\n/*   .text */\n/*   \t.align\t2, 0 */\nvoid UpdateWorldMapNodeTile(void) {\n    ASMLIFT_ERROR(\"could not decompile (lift): cannot lift 'UpdateWorldMapNodeTile': stack pointer used as data (address-taken local / sp-relative slot / frame arithmetic) — local stack frames not supported\");\n}\n",
-        "score": null,
-        "maxScore": null,
+        "candidateLabel": "unsigned/raw-globals",
+        "symbolsUsed": [
+          {
+            "name": "gBgTilemapBufs",
+            "shape": "u16[]"
+          },
+          {
+            "name": "gUnk_08116748",
+            "shape": "u8[]"
+          },
+          {
+            "name": "gUnk_08116880",
+            "shape": "u8[]"
+          }
+        ],
+        "outcome": "nonmatch",
+        "source": "struct Elem0 { u8 field_0; u8 _pad0[7]; };\nstruct Elem1 { u8 field_0; u8 _pad0[7]; };\nstruct Elem10 { u8 field_0; u8 _pad0[7]; };\nstruct Elem11 { u8 field_0; u8 _pad0[7]; };\nstruct Elem12 { u8 field_0; u8 _pad0[7]; };\nstruct Elem13 { u8 field_0; u8 _pad0[7]; };\nstruct Elem14 { u8 field_0; u8 _pad0[7]; };\nstruct Elem2 { u8 field_0; u8 _pad0[7]; };\nstruct Elem3 { u8 field_0; u8 _pad0[7]; };\nstruct Elem4 { u8 field_0; u8 _pad0[7]; };\nstruct Elem5 { u8 field_0; u8 _pad0[7]; };\nstruct Elem6 { u8 field_0; u8 _pad0[7]; };\nstruct Elem7 { u8 field_0; u8 _pad0[7]; };\nstruct Elem8 { u8 field_0; u8 _pad0[7]; };\nstruct Elem9 { u8 field_0; u8 _pad0[7]; };\nvoid UpdateWorldMapNodeTile(u32 a0) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    u16 * v3;\n    u16 * v4;\n    u8 * p0;\n    p0 = (u8 *)&gUnk_08116880;\n    if ((u8)a0 > 3) {\n        v1 = p0[(u8)a0];\n        ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(((struct Elem8 *)((u32)&gUnk_08116748 + 1))[(u8)a0].field_0 << 5) + ((struct Elem0 *)&gUnk_08116748)[(u8)a0].field_0] = ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(v1 + 28 << 5) + 4];\n        ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(((struct Elem10 *)((u32)&gUnk_08116748 + 3))[(u8)a0].field_0 << 5) + ((struct Elem9 *)((u32)&gUnk_08116748 + 2))[(u8)a0].field_0] = ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(v1 + 28 << 5) + 5];\n        ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(((struct Elem12 *)((u32)&gUnk_08116748 + 5))[(u8)a0].field_0 << 5) + ((struct Elem11 *)((u32)&gUnk_08116748 + 4))[(u8)a0].field_0] = ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(v1 + 28 << 5) + 6];\n        v3 = (u16 *)((u32)&gBgTilemapBufs + (128 << 4));\n        v4 = (u16 *)(((((struct Elem14 *)((u32)&gUnk_08116748 + 7))[(u8)a0].field_0 << 5) + ((struct Elem13 *)((u32)&gUnk_08116748 + 6))[(u8)a0].field_0 << 1) + ((u32)&gBgTilemapBufs + (128 << 4)));\n        v2 = (v1 + 28 << 5) + 7;\n    } else {\n        v0 = p0[(u8)a0];\n        ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(((struct Elem1 *)((u32)&gUnk_08116748 + 1))[(u8)a0].field_0 << 5) + ((struct Elem0 *)&gUnk_08116748)[(u8)a0].field_0] = *(u16 *)((v0 + 28 << 6) + ((u32)&gBgTilemapBufs + (128 << 4)));\n        ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(((struct Elem3 *)((u32)&gUnk_08116748 + 3))[(u8)a0].field_0 << 5) + ((struct Elem2 *)((u32)&gUnk_08116748 + 2))[(u8)a0].field_0] = ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(v0 + 28 << 5) + 1];\n        ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(((struct Elem5 *)((u32)&gUnk_08116748 + 5))[(u8)a0].field_0 << 5) + ((struct Elem4 *)((u32)&gUnk_08116748 + 4))[(u8)a0].field_0] = ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(v0 + 28 << 5) + 2];\n        v3 = (u16 *)((u32)&gBgTilemapBufs + (128 << 4));\n        v4 = (u16 *)(((((struct Elem7 *)((u32)&gUnk_08116748 + 7))[(u8)a0].field_0 << 5) + ((struct Elem6 *)((u32)&gUnk_08116748 + 6))[(u8)a0].field_0 << 1) + ((u32)&gBgTilemapBufs + (128 << 4)));\n        v2 = (v0 + 28 << 5) + 3;\n    }\n    *v4 = v3[v2];\n    return;\n}\n",
+        "score": 144,
+        "maxScore": 171,
         "compileErrors": null,
-        "quality": {
-          "score": 88,
-          "lines": 178,
-          "gotos": 0,
-          "casts": 1,
-          "unkGlue": 1,
-          "rawMem": 0,
-          "addrDeref": 0
+        "breakdown": {
+          "insert": 19,
+          "delete": 28,
+          "replace": 21,
+          "opMismatch": 2,
+          "argMismatch": 74
         },
-        "errorMarkers": [
-          "lift: cannot lift 'UpdateWorldMapNodeTile': stack pointer used as data (address-taken local / sp-relative slot / frame arithmetic) — local stack frames not supported"
-        ]
+        "quality": {
+          "score": 84,
+          "lines": 43,
+          "gotos": 0,
+          "casts": 36,
+          "unkGlue": 0,
+          "rawMem": 1,
+          "addrDeref": 0
+        }
       },
       "m2c": {
         "decompiler": "m2c",
@@ -6463,16 +6482,16 @@
         }
       },
       "gapSize": {
-        "decompiler": "m2c",
-        "score": 151,
-        "maxScore": 170,
-        "ratio": 0.888235294117647,
+        "decompiler": "asmlift",
+        "score": 144,
+        "maxScore": 171,
+        "ratio": 0.8421052631578947,
         "kinds": {
-          "insert": 18,
-          "delete": 36,
-          "replace": 12,
+          "insert": 19,
+          "delete": 28,
+          "replace": 21,
           "opMismatch": 2,
-          "argMismatch": 83
+          "argMismatch": 74
         }
       },
       "scripts": {
