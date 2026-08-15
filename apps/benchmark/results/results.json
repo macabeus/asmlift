@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generatedAt": "2026-08-15T16:13:02.182Z",
+    "generatedAt": "2026-08-15T17:23:45.794Z",
     "toolchains": [
       "ido7.1",
       "agbcc",
@@ -14,7 +14,7 @@
       "real": 240
     },
     "asmlift": {
-      "commit": "6451d01e5c2b3c0234e78167b73f7b48cc86ca3b",
+      "commit": "83402013f0db209fa848ed7c142939ab481fc125",
       "dirty": false
     },
     "m2c": {
@@ -3271,7 +3271,7 @@
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "candidateLabel": "unsigned",
+        "candidateLabel": "unsigned/reread-globals",
         "symbolsUsed": [
           {
             "name": "gUnk_03004670",
@@ -3279,22 +3279,22 @@
           }
         ],
         "outcome": "nonmatch",
-        "source": "struct Elem0 { u8 field_0; u8 _pad0[7]; };\nstruct Elem1 { u8 field_0; u8 _pad0[7]; };\ns32 CheckWorldCompletion(u32 a0, u32 a1, u32 a2, u32 a3, u32 a4, u32 a5) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    s32 v5;\n    s32 v6;\n    s32 v7;\n    s32 v8;\n    s32 v9;\n    s32 v10;\n    s32 v11;\n    s32 v12;\n    s32 v13;\n    if ((u8)a0 <= 3) {\n        if ((128 & ((struct Elem0 *)((u8 *)gUnk_03004670 + 15))[(u8)a0].field_0) == 0) {\n            return 0;\n        } else {\n            if ((127 & ((struct Elem1 *)((u8 *)gUnk_03004670 + 8))[(u8)a0 + 1].field_0) == 127) {\n                return 0;\n            } else {\n                return 1;\n            }\n        }\n    } else {\n        if ((128 & *((u8 *)gUnk_03004670 + 55)) == 0) {\n            return 0;\n        } else {\n            v2 = 0;\n            v3 = 0;\n            v4 = 0;\n            v1 = 0;\n            do {\n                v7 = v2;\n                v8 = v3;\n                v9 = v4;\n                v5 = 0;\n                v6 = v1 << 3;\n                do {\n                    if (v5 == 3) {\n                        if ((127 & *((u8 *)gUnk_03004670 + 8 + v6)) != 100) {\n                            if (v5 == 7 || (127 & *((u8 *)gUnk_03004670 + 8 + v6)) != 30) {\n                                v10 = v7;\n                                v11 = v8;\n                            } else {\n                                v10 = v7;\n                                v11 = (u8)(v8 + 1);\n                            }\n                        } else {\n                            v11 = v8;\n                            v10 = (u8)(v7 + 1);\n                        }\n                    } else {\n                        if (v5 != 5) {\n                            if (v5 == 7 || (127 & *((u8 *)gUnk_03004670 + 8 + v6)) != 30) {\n                                v10 = v7;\n                                v11 = v8;\n                            } else {\n                                v10 = v7;\n                                v11 = (u8)(v8 + 1);\n                            }\n                        } else {\n                            if ((127 & *((u8 *)gUnk_03004670 + 8 + v6)) != 100) {\n                                if (v5 == 7 || (127 & *((u8 *)gUnk_03004670 + 8 + v6)) != 30) {\n                                    v10 = v7;\n                                    v11 = v8;\n                                } else {\n                                    v10 = v7;\n                                    v11 = (u8)(v8 + 1);\n                                }\n                            } else {\n                                v11 = v8;\n                                v10 = (u8)(v7 + 1);\n                            }\n                        }\n                    }\n                    if ((128 & *((u8 *)gUnk_03004670 + 8 + v6)) == 0) {\n                        v12 = v9;\n                    } else {\n                        v12 = (u8)(v9 + 1);\n                    }\n                    v7 = v10;\n                    v8 = v11;\n                    v9 = v12;\n                    v6 = v6 + 1;\n                    v5 = v5 + 1;\n                } while (v5 <= 6);\n                v1 = v1 + 1;\n                v2 = v10;\n                v3 = v11;\n                v4 = v12;\n            } while (v1 <= 4);\n            v0 = *((u8 *)gUnk_03004670 + 48);\n            if ((127 & v0) != 30) {\n                v13 = 0;\n            } else {\n                v13 = (u8)1;\n            }\n            if ((127 & *((u8 *)gUnk_03004670 + 49)) == 30) v13 = (u8)(v13 + 1);\n            if ((u8)a0 == 4 && (127 & v0) != 127 && v4 == 35) {\n                a1 = 127 & v0;\n                a5 = 127;\n                a4 = v1;\n                return 1;\n            } else {\n                if ((u8)a0 == 5 && (127 & *((u8 *)gUnk_03004670 + 49)) != 127 && v3 + v2 > 24) {\n                    a1 = 127 & v0;\n                    a5 = 127;\n                    a4 = v1;\n                    return 1;\n                } else {\n                    if ((u8)a0 == 6 && (127 & *((u8 *)gUnk_03004670 + 50)) != 127 && v3 + v2 + v13 == 37) {\n                        a1 = 127 & v0;\n                        a5 = 127;\n                        a4 = v1;\n                        return 1;\n                    } else {\n                        a1 = 127 & v0;\n                        a5 = 127;\n                        a4 = v1;\n                        return 0;\n                    }\n                }\n            }\n        }\n    }\n}\n",
-        "score": 155,
-        "maxScore": 229,
+        "source": "struct Elem0 { u8 field_0; u8 _pad0[7]; };\nstruct Elem1 { u8 field_0; u8 _pad0[7]; };\ns32 CheckWorldCompletion(u32 a0, u32 a1, u32 a2, u32 a3, u32 a4, u32 a5) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    s32 v5;\n    s32 v6;\n    s32 v7;\n    s32 v8;\n    s32 v9;\n    s32 v10;\n    s32 v11;\n    s32 v12;\n    if ((u8)a0 <= 3) {\n        if ((128 & ((struct Elem0 *)((u8 *)gUnk_03004670 + 15))[(u8)a0].field_0) == 0) {\n            return 0;\n        } else {\n            if ((127 & ((struct Elem1 *)((u8 *)gUnk_03004670 + 8))[(u8)a0 + 1].field_0) == 127) {\n                return 0;\n            } else {\n                return 1;\n            }\n        }\n    } else {\n        if ((128 & *((u8 *)gUnk_03004670 + 55)) == 0) {\n            return 0;\n        } else {\n            v1 = 0;\n            v2 = 0;\n            v3 = 0;\n            v0 = 0;\n            do {\n                v6 = v1;\n                v7 = v2;\n                v8 = v3;\n                v4 = 0;\n                v5 = v0 << 3;\n                do {\n                    if (v4 == 3) {\n                        if ((127 & *((u8 *)gUnk_03004670 + 8 + v5)) != 100) {\n                            if (v4 == 7 || (127 & *((u8 *)gUnk_03004670 + 8 + v5)) != 30) {\n                                v9 = v6;\n                                v10 = v7;\n                            } else {\n                                v9 = v6;\n                                v10 = (u8)(v7 + 1);\n                            }\n                        } else {\n                            v10 = v7;\n                            v9 = (u8)(v6 + 1);\n                        }\n                    } else {\n                        if (v4 != 5) {\n                            if (v4 == 7 || (127 & *((u8 *)gUnk_03004670 + 8 + v5)) != 30) {\n                                v9 = v6;\n                                v10 = v7;\n                            } else {\n                                v9 = v6;\n                                v10 = (u8)(v7 + 1);\n                            }\n                        } else {\n                            if ((127 & *((u8 *)gUnk_03004670 + 8 + v5)) != 100) {\n                                if (v4 == 7 || (127 & *((u8 *)gUnk_03004670 + 8 + v5)) != 30) {\n                                    v9 = v6;\n                                    v10 = v7;\n                                } else {\n                                    v9 = v6;\n                                    v10 = (u8)(v7 + 1);\n                                }\n                            } else {\n                                v10 = v7;\n                                v9 = (u8)(v6 + 1);\n                            }\n                        }\n                    }\n                    if ((128 & *((u8 *)gUnk_03004670 + 8 + v5)) == 0) {\n                        v11 = v8;\n                    } else {\n                        v11 = (u8)(v8 + 1);\n                    }\n                    v6 = v9;\n                    v7 = v10;\n                    v8 = v11;\n                    v5 = v5 + 1;\n                    v4 = v4 + 1;\n                } while (v4 <= 6);\n                v0 = v0 + 1;\n                v1 = v9;\n                v2 = v10;\n                v3 = v11;\n            } while (v0 <= 4);\n            if ((127 & *((u8 *)gUnk_03004670 + 48)) != 30) {\n                v12 = 0;\n            } else {\n                v12 = (u8)1;\n            }\n            if ((127 & *((u8 *)gUnk_03004670 + 49)) == 30) v12 = (u8)(v12 + 1);\n            if ((u8)a0 == 4 && (127 & *((u8 *)gUnk_03004670 + 48)) != 127 && v3 == 35) {\n                a1 = 127 & *((u8 *)gUnk_03004670 + 48);\n                a5 = 127;\n                a4 = v0;\n                return 1;\n            } else {\n                if ((u8)a0 == 5 && (127 & *((u8 *)gUnk_03004670 + 49)) != 127 && v2 + v1 > 24) {\n                    a1 = 127 & *((u8 *)gUnk_03004670 + 48);\n                    a5 = 127;\n                    a4 = v0;\n                    return 1;\n                } else {\n                    if ((u8)a0 == 6 && (127 & *((u8 *)gUnk_03004670 + 50)) != 127 && v2 + v1 + v12 == 37) {\n                        a1 = 127 & *((u8 *)gUnk_03004670 + 48);\n                        a5 = 127;\n                        a4 = v0;\n                        return 1;\n                    } else {\n                        a1 = 127 & *((u8 *)gUnk_03004670 + 48);\n                        a5 = 127;\n                        a4 = v0;\n                        return 0;\n                    }\n                }\n            }\n        }\n    }\n}\n",
+        "score": 150,
+        "maxScore": 228,
         "compileErrors": null,
         "breakdown": {
-          "insert": 42,
-          "delete": 27,
+          "insert": 41,
+          "delete": 26,
           "replace": 25,
           "opMismatch": 8,
-          "argMismatch": 53
+          "argMismatch": 50
         },
         "quality": {
           "score": 88,
-          "lines": 130,
+          "lines": 128,
           "gotos": 0,
-          "casts": 27,
+          "casts": 32,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -3326,15 +3326,15 @@
       },
       "gapSize": {
         "decompiler": "asmlift",
-        "score": 155,
-        "maxScore": 229,
-        "ratio": 0.6768558951965066,
+        "score": 150,
+        "maxScore": 228,
+        "ratio": 0.6578947368421053,
         "kinds": {
-          "insert": 42,
-          "delete": 27,
+          "insert": 41,
+          "delete": 26,
           "replace": 25,
           "opMismatch": 8,
-          "argMismatch": 53
+          "argMismatch": 50
         }
       },
       "scripts": {
@@ -3497,11 +3497,11 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-0hekCu/c.c:1077: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-aOJZWC/c.c:1077: invalid operands to binary <<"
           },
           {
             "label": "unsigned/scopebase/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-79aVp2/c.c:1078: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-8dtUf0/c.c:1078: invalid operands to binary <<"
           }
         ],
         "symbolsUsed": [
@@ -4442,7 +4442,7 @@
         "droppedCandidates": [
           {
             "label": "unsigned",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-rfYTKr/c.c:1076: `gBgDataPtrs' undeclared (first use in this function)"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-iLFrtx/c.c:1076: `gBgDataPtrs' undeclared (first use in this function)"
           }
         ],
         "symbolsUsed": [],
@@ -5041,7 +5041,7 @@
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "candidateLabel": "unsigned",
+        "candidateLabel": "unsigned/reread-globals",
         "symbolsUsed": [
           {
             "name": "gAButtonHold",
@@ -5061,20 +5061,20 @@
           }
         ],
         "outcome": "nonmatch",
-        "source": "void ReadKeyInput(void) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    v0 = REG_KEYINPUT;\n    v1 = gKeysPrevious;\n    gKeysPressed = (1023 ^ v0) & ~v1;\n    gKeysPrevious = 1023 ^ v0;\n    if (((1023 ^ v0) & 15) == 15) SoftResetRom(255, (1023 ^ v0) & 15, v1, &gKeysPressed);\n    v2 = gKeysPrevious;\n    if ((1 & v2) == 0) {\n        gAButtonHold = 1 & v2;\n    } else {\n        gAButtonHold = gAButtonHold + 1;\n    }\n    return;\n}\n",
-        "score": 42,
-        "maxScore": 58,
+        "source": "void ReadKeyInput(void) {\n    s32 v0;\n    s32 v1;\n    v0 = REG_KEYINPUT;\n    v1 = gKeysPrevious;\n    gKeysPressed = (1023 ^ v0) & ~v1;\n    gKeysPrevious = 1023 ^ v0;\n    if (((1023 ^ v0) & 15) == 15) SoftResetRom(255, (1023 ^ v0) & 15, v1, &gKeysPressed);\n    if ((1 & gKeysPrevious) == 0) {\n        gAButtonHold = 1 & gKeysPrevious;\n    } else {\n        gAButtonHold = gAButtonHold + 1;\n    }\n    return;\n}\n",
+        "score": 37,
+        "maxScore": 56,
         "compileErrors": null,
         "breakdown": {
-          "insert": 17,
+          "insert": 15,
           "delete": 11,
           "replace": 3,
           "opMismatch": 1,
-          "argMismatch": 10
+          "argMismatch": 7
         },
         "quality": {
           "score": 100,
-          "lines": 17,
+          "lines": 15,
           "gotos": 0,
           "casts": 1,
           "unkGlue": 0,
@@ -5515,7 +5515,11 @@
         "droppedCandidates": [
           {
             "label": "unsigned",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-OPn7hv/c.c:1077: too many arguments to function `thunk_sub_080002A0'"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-PYKmzF/c.c:1077: too many arguments to function `thunk_sub_080002A0'"
+          },
+          {
+            "label": "unsigned/reread-globals",
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-o7kJ6K/c.c:1075: too many arguments to function `thunk_sub_080002A0'"
           }
         ],
         "symbolsUsed": [],
@@ -5950,7 +5954,7 @@
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "candidateLabel": "unsigned",
+        "candidateLabel": "unsigned/reread-globals",
         "symbolsUsed": [
           {
             "name": "gBg2XMag",
@@ -5978,20 +5982,20 @@
           }
         ],
         "outcome": "nonmatch",
-        "source": "struct Elem0 { u16 field_0; u16 field_2; u16 field_4; u16 field_6; u8 _pad0[20]; };\nstruct Elem1 { s32 field_0; u8 _pad0[4]; };\nvoid TransformSingleEntityToScreen(u32 a0, u32 a1, u32 a2, u32 a3, u32 a4) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    s32 v5;\n    u8 * v6;\n    s32 v7;\n    s32 v8;\n    v0 = ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_0;\n    v1 = gUnk_03003430.bg2HOfs;\n    ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_4 = v0 - (s8)a1 - v1;\n    v2 = ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_2;\n    v3 = gUnk_03003430.bg2VOfs;\n    ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_6 = v2 - (s8)a2 - v3;\n    v4 = gUnk_03003430.bg2VOfs;\n    v5 = gBg2YMag;\n    if ((u8)a0 <= 12) {\n        v6 = (u8 *)((struct Elem1 *)((u32)&gUnk_08078FC8 + 4))[(u8)a0].field_0;\n    } else {\n        v6 = (u8 *)((s32 *)(((u8)a0 << 3) + (u8 *)gUnk_030051DC - 104))[1];\n    }\n    switch (15 & v6[5]) {\n        case 0:\n        case 4:\n        case 5:\n            v8 = gUnk_03003430.bg2VOfs - (s16)(u16)(v4 - (v2 - (s8)a2 - v3)) * v5 / 256;\n            v7 = (s32)((128 << 1) - gBg2YMag) >> 6;\n            break;\n        case 1:\n        case 6:\n        case 8:\n            v8 = gUnk_03003430.bg2VOfs - (s16)(u16)(v4 - (v2 - (s8)a2 - v3)) * v5 / 256;\n            v7 = (s32)((128 << 1) - gBg2YMag) >> 5;\n            break;\n        case 2:\n        case 7:\n        case 9:\n        case 10:\n            v8 = gUnk_03003430.bg2VOfs - (s16)(u16)(v4 - (v2 - (s8)a2 - v3)) * v5 / 256;\n            v7 = (s32)((128 << 1) - gBg2YMag) >> 4;\n            break;\n        case 3:\n        case 11:\n            v8 = gUnk_03003430.bg2VOfs - (s16)(u16)(v4 - (v2 - (s8)a2 - v3)) * v5 / 256;\n            v7 = (s32)((128 << 1) - gBg2YMag) >> 3;\n            break;\n        default:\n            v8 = gUnk_03003430.bg2VOfs - (s16)(u16)(v4 - (v2 - (s8)a2 - v3)) * v5 / 256;\n            v7 = (s32)((128 << 1) - gBg2YMag) >> 4;\n    }\n    ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_4 = gUnk_03003430.bg2HOfs - gBg2XMag * (s16)(gUnk_03003430.bg2HOfs - (v0 - (s8)a1 - v1)) / 256;\n    ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_6 = v8 + v7;\n    return;\n}\n",
-        "score": 245,
-        "maxScore": 275,
+        "source": "struct Elem0 { u16 field_0; u16 field_2; u16 field_4; u16 field_6; u8 _pad0[20]; };\nstruct Elem1 { s32 field_0; u8 _pad0[4]; };\nvoid TransformSingleEntityToScreen(u32 a0, u32 a1, u32 a2, u32 a3, u32 a4) {\n    s32 v0;\n    s32 v1;\n    u8 * v2;\n    s32 v3;\n    s32 v4;\n    v0 = ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_0;\n    ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_4 = v0 - (s8)a1 - gUnk_03003430.bg2HOfs;\n    v1 = ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_2;\n    ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_6 = v1 - (s8)a2 - gUnk_03003430.bg2VOfs;\n    if ((u8)a0 <= 12) {\n        v2 = (u8 *)((struct Elem1 *)((u32)&gUnk_08078FC8 + 4))[(u8)a0].field_0;\n    } else {\n        v2 = (u8 *)((s32 *)(((u8)a0 << 3) + (u8 *)gUnk_030051DC - 104))[1];\n    }\n    switch (15 & v2[5]) {\n        case 0:\n        case 4:\n        case 5:\n            v4 = gUnk_03003430.bg2VOfs - (s16)(u16)(gUnk_03003430.bg2VOfs - (v1 - (s8)a2 - gUnk_03003430.bg2VOfs)) * gBg2YMag / 256;\n            v3 = (s32)((128 << 1) - gBg2YMag) >> 6;\n            break;\n        case 1:\n        case 6:\n        case 8:\n            v4 = gUnk_03003430.bg2VOfs - (s16)(u16)(gUnk_03003430.bg2VOfs - (v1 - (s8)a2 - gUnk_03003430.bg2VOfs)) * gBg2YMag / 256;\n            v3 = (s32)((128 << 1) - gBg2YMag) >> 5;\n            break;\n        case 2:\n        case 7:\n        case 9:\n        case 10:\n            v4 = gUnk_03003430.bg2VOfs - (s16)(u16)(gUnk_03003430.bg2VOfs - (v1 - (s8)a2 - gUnk_03003430.bg2VOfs)) * gBg2YMag / 256;\n            v3 = (s32)((128 << 1) - gBg2YMag) >> 4;\n            break;\n        case 3:\n        case 11:\n            v4 = gUnk_03003430.bg2VOfs - (s16)(u16)(gUnk_03003430.bg2VOfs - (v1 - (s8)a2 - gUnk_03003430.bg2VOfs)) * gBg2YMag / 256;\n            v3 = (s32)((128 << 1) - gBg2YMag) >> 3;\n            break;\n        default:\n            v4 = gUnk_03003430.bg2VOfs - (s16)(u16)(gUnk_03003430.bg2VOfs - (v1 - (s8)a2 - gUnk_03003430.bg2VOfs)) * gBg2YMag / 256;\n            v3 = (s32)((128 << 1) - gBg2YMag) >> 4;\n    }\n    ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_4 = gUnk_03003430.bg2HOfs - gBg2XMag * (s16)(gUnk_03003430.bg2HOfs - (v0 - (s8)a1 - gUnk_03003430.bg2HOfs)) / 256;\n    ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_6 = v4 + v3;\n    return;\n}\n",
+        "score": 217,
+        "maxScore": 247,
         "compileErrors": null,
         "breakdown": {
-          "insert": 117,
-          "delete": 31,
-          "replace": 21,
+          "insert": 89,
+          "delete": 35,
+          "replace": 24,
           "opMismatch": 2,
-          "argMismatch": 74
+          "argMismatch": 67
         },
         "quality": {
           "score": 84,
-          "lines": 58,
+          "lines": 50,
           "gotos": 0,
           "casts": 37,
           "unkGlue": 0,
@@ -6021,15 +6025,15 @@
       },
       "gapSize": {
         "decompiler": "asmlift",
-        "score": 245,
-        "maxScore": 275,
-        "ratio": 0.8909090909090909,
+        "score": 217,
+        "maxScore": 247,
+        "ratio": 0.8785425101214575,
         "kinds": {
-          "insert": 117,
-          "delete": 31,
-          "replace": 21,
+          "insert": 89,
+          "delete": 35,
+          "replace": 24,
           "opMismatch": 2,
-          "argMismatch": 74
+          "argMismatch": 67
         }
       },
       "scripts": {
@@ -6082,7 +6086,7 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "no scorable candidate for 'UpdateCameraScroll': agbcc failed: <tmp>/c.c:1213: incompatible type for argument 2 of `ScrollBGLayer'"
+          "no scorable candidate for 'UpdateCameraScroll': agbcc failed: <tmp>/c.c:1201: incompatible type for argument 2 of `ScrollBGLayer'"
         ]
       },
       "m2c": {
@@ -6304,43 +6308,83 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-01EeVT/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-mgEoDF/c.c:1085: incompatible types in assignment"
           },
           {
             "label": "unsigned/coalesce-v2-v3/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-RTVCeu/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-sNaaip/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "unsigned/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-w531Mp/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-hfezLX/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "unsigned/defsite/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-SQ5DRD/c.c:1086: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Au9hVf/c.c:1086: incompatible types in assignment"
           },
           {
             "label": "unsigned/defsite/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-097JC8/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-66dmZl/c.c:1085: incompatible types in assignment"
+          },
+          {
+            "label": "unsigned/reread-globals/raw-globals",
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-NUqV29/c.c:1083: invalid operands to binary <<"
+          },
+          {
+            "label": "unsigned/reread-globals/coalesce-v0-v1/raw-globals",
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-zPK1Mb/c.c:1082: invalid operands to binary <<"
+          },
+          {
+            "label": "unsigned/reread-globals/coalesce-v0-v2/raw-globals",
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-88Un8D/c.c:1082: invalid operands to binary <<"
+          },
+          {
+            "label": "unsigned/defsite/reread-globals/raw-globals",
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-86ZObg/c.c:1084: invalid operands to binary <<"
+          },
+          {
+            "label": "unsigned/defsite/reread-globals/coalesce-v0-v2/raw-globals",
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-26uVaN/c.c:1083: invalid operands to binary <<"
           },
           {
             "label": "signed/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-dluX85/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-RfWC9f/c.c:1085: incompatible types in assignment"
           },
           {
             "label": "signed/coalesce-v2-v3/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-vlb3qt/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-w4AZDg/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "signed/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-zs8a6I/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-s8TPrN/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "signed/defsite/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-dn2idY/c.c:1086: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-jTa3Md/c.c:1086: incompatible types in assignment"
           },
           {
             "label": "signed/defsite/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-TWDHNX/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-R1ocXE/c.c:1085: incompatible types in assignment"
+          },
+          {
+            "label": "signed/reread-globals/raw-globals",
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-iVmZ6Z/c.c:1083: invalid operands to binary <<"
+          },
+          {
+            "label": "signed/reread-globals/coalesce-v0-v1/raw-globals",
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-MKMOyE/c.c:1082: invalid operands to binary <<"
+          },
+          {
+            "label": "signed/reread-globals/coalesce-v0-v2/raw-globals",
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-xlDdST/c.c:1082: invalid operands to binary <<"
+          },
+          {
+            "label": "signed/defsite/reread-globals/raw-globals",
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-bOqWyy/c.c:1084: invalid operands to binary <<"
+          },
+          {
+            "label": "signed/defsite/reread-globals/coalesce-v0-v2/raw-globals",
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-ZlWGx7/c.c:1083: invalid operands to binary <<"
           }
         ],
         "symbolsUsed": [
@@ -6441,11 +6485,15 @@
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "candidateLabel": "unsigned",
+        "candidateLabel": "unsigned/reread-globals",
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-wP4KqC/c.c:1501: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-go5psj/c.c:1501: incompatible types in assignment"
+          },
+          {
+            "label": "unsigned/reread-globals/raw-globals",
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-PHZiHW/c.c:1489: incompatible types in assignment"
           }
         ],
         "symbolsUsed": [
@@ -6487,22 +6535,22 @@
           }
         ],
         "outcome": "nonmatch",
-        "source": "void UpdateWorldMapNodeAnim(void) {\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    s32 v5;\n    s32 v6;\n    s32 v8;\n    s32 v9;\n    s32 v10;\n    s32 v11;\n    u16 * v12;\n    u16 * v13;\n    s32 * p0;\n    p0 = (s32 *)&REG_DMA3SAD;\n    if (gUnk_03004C08.unk0_0 > 3) {\n        v9 = 4;\n    } else {\n        v9 = 0;\n    }\n    v1 = gUnk_08116880[gUnk_03004C08.unk0_0];\n    switch ((u8)(gUnk_03004C08.unk2 / 30) - 1) {\n        case 0:\n            if (gUnk_03004C08.unk2 % 30 << 24 == 0) m4aSongNumStart(137);\n            v2 = *(s32 *)&gUnk_03004C08;\n            v12 = (u16 *)(((*(u8 *)(((u32)(v2 << 28) >> 25) + ((u32)&gUnk_08116748 + 1)) << 5) + gUnk_08116748[0][(u32)(v2 << 28) >> 25] << 1) + ((u32)&gBgTilemapBufs + (128 << 4)));\n            v13 = (u16 *)((v9 + (v1 + 28 << 5) << 1) + ((u32)&gBgTilemapBufs + (128 << 4)));\n            *v12 = *v13;\n            break;\n        case 1:\n            if (gUnk_03004C08.unk2 % 30 << 24 == 0) m4aSongNumStart(137);\n            v3 = *(s32 *)&gUnk_03004C08;\n            v11 = (u32)&gBgTilemapBufs + (128 << 4);\n            v12 = (u16 *)(((*(u8 *)(((u32)(v3 << 28) >> 25) + ((u32)&gUnk_08116748 + 3)) << 5) + *(u8 *)(((u32)(v3 << 28) >> 25) + ((u32)&gUnk_08116748 + 2)) << 1) + ((u32)&gBgTilemapBufs + (128 << 4)));\n            v10 = (v1 + 28 << 5) + 1;\n            v13 = (u16 *)((v9 + v10 << 1) + v11);\n            *v12 = *v13;\n            break;\n        case 2:\n            if ((15 & *(u8 *)&gUnk_03004C08) != 6) {\n                if (gUnk_03004C08.unk2 % 30 << 24 == 0) m4aSongNumStart(137);\n                v4 = *(s32 *)&gUnk_03004C08;\n                v11 = (u32)&gBgTilemapBufs + (128 << 4);\n                v12 = (u16 *)(((*(u8 *)(((u32)(v4 << 28) >> 25) + ((u32)&gUnk_08116748 + 5)) << 5) + *(u8 *)(((u32)(v4 << 28) >> 25) + ((u32)&gUnk_08116748 + 4)) << 1) + ((u32)&gBgTilemapBufs + (128 << 4)));\n                v10 = (v1 + 28 << 5) + 2;\n                v13 = (u16 *)((v9 + v10 << 1) + v11);\n                *v12 = *v13;\n            } else {\n                gUnk_03004C08.unk2 = 149;\n            }\n            break;\n        case 3:\n            v5 = *(u8 *)&gUnk_03004C08;\n            if ((15 & v5) != 4) {\n                if ((15 & v5) != 6) {\n                    if (gUnk_03004C08.unk2 % 30 << 24 == 0) m4aSongNumStart(137);\n                    v6 = *(s32 *)&gUnk_03004C08;\n                    v11 = (u32)&gBgTilemapBufs + (128 << 4);\n                    v12 = (u16 *)(((*(u8 *)(((u32)(v6 << 28) >> 25) + ((u32)&gUnk_08116748 + 7)) << 5) + *(u8 *)(((u32)(v6 << 28) >> 25) + ((u32)&gUnk_08116748 + 6)) << 1) + ((u32)&gBgTilemapBufs + (128 << 4)));\n                    v10 = (v1 + 28 << 5) + 3;\n                    v13 = (u16 *)((v9 + v10 << 1) + v11);\n                    *v12 = *v13;\n                }\n            }\n            break;\n        case 4:\n            if (gUnk_03004C08.unk2 % 30 << 24 == 0) m4aSongNumStart(138);\n        case 5:\n        case 6:\n            if (gUnk_03004C08.unk0_0 > 3) {\n                CopyWorldMapTiles(gUnk_03004C08.unk0_0);\n            } else {\n                v8 = gUnk_03004C20.sceneFrameCounter;\n                if ((v8 & 3) == 0) {\n                    *p0 = ((u32)(224 << 19 & thunk_sub_080002A0(v8 & 3, 3) << 24) >> 19) + (u32)&gUnk_08116780;\n                    p0[1] = 83886432;\n                    p0[2] = -2147483632;\n                    SetWorldMapTilePalette(gUnk_03004C08.unk0_0, 11);\n                }\n            }\n            break;\n        case 7:\n            CopyWorldMapTiles(gUnk_03004C08.unk0_0);\n            ((s32 *)&gCallbackQueue)[1] = &CountCollectedGems;\n            break;\n    }\n    gUnk_03004C08.unk2 = gUnk_03004C08.unk2 + 1;\n    return;\n}\n",
-        "score": 183,
+        "source": "void UpdateWorldMapNodeAnim(void) {\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    s32 v5;\n    u16 * v6;\n    u16 * v7;\n    s32 * p0;\n    p0 = (s32 *)&REG_DMA3SAD;\n    if (gUnk_03004C08.unk0_0 > 3) {\n        v3 = 4;\n    } else {\n        v3 = 0;\n    }\n    v1 = gUnk_08116880[gUnk_03004C08.unk0_0];\n    switch ((u8)(gUnk_03004C08.unk2 / 30) - 1) {\n        case 0:\n            if (gUnk_03004C08.unk2 % 30 << 24 == 0) m4aSongNumStart(137);\n            v6 = (u16 *)(((*(u8 *)(((u32)(*(s32 *)&gUnk_03004C08 << 28) >> 25) + ((u32)&gUnk_08116748 + 1)) << 5) + gUnk_08116748[0][(u32)(*(s32 *)&gUnk_03004C08 << 28) >> 25] << 1) + ((u32)&gBgTilemapBufs + (128 << 4)));\n            v7 = (u16 *)((v3 + (v1 + 28 << 5) << 1) + ((u32)&gBgTilemapBufs + (128 << 4)));\n            *v6 = *v7;\n            break;\n        case 1:\n            if (gUnk_03004C08.unk2 % 30 << 24 == 0) m4aSongNumStart(137);\n            v5 = (u32)&gBgTilemapBufs + (128 << 4);\n            v6 = (u16 *)(((*(u8 *)(((u32)(*(s32 *)&gUnk_03004C08 << 28) >> 25) + ((u32)&gUnk_08116748 + 3)) << 5) + *(u8 *)(((u32)(*(s32 *)&gUnk_03004C08 << 28) >> 25) + ((u32)&gUnk_08116748 + 2)) << 1) + ((u32)&gBgTilemapBufs + (128 << 4)));\n            v4 = (v1 + 28 << 5) + 1;\n            v7 = (u16 *)((v3 + v4 << 1) + v5);\n            *v6 = *v7;\n            break;\n        case 2:\n            if ((15 & *(u8 *)&gUnk_03004C08) != 6) {\n                if (gUnk_03004C08.unk2 % 30 << 24 == 0) m4aSongNumStart(137);\n                v5 = (u32)&gBgTilemapBufs + (128 << 4);\n                v6 = (u16 *)(((*(u8 *)(((u32)(*(s32 *)&gUnk_03004C08 << 28) >> 25) + ((u32)&gUnk_08116748 + 5)) << 5) + *(u8 *)(((u32)(*(s32 *)&gUnk_03004C08 << 28) >> 25) + ((u32)&gUnk_08116748 + 4)) << 1) + ((u32)&gBgTilemapBufs + (128 << 4)));\n                v4 = (v1 + 28 << 5) + 2;\n                v7 = (u16 *)((v3 + v4 << 1) + v5);\n                *v6 = *v7;\n            } else {\n                gUnk_03004C08.unk2 = 149;\n            }\n            break;\n        case 3:\n            if ((15 & *(u8 *)&gUnk_03004C08) != 4) {\n                if ((15 & *(u8 *)&gUnk_03004C08) != 6) {\n                    if (gUnk_03004C08.unk2 % 30 << 24 == 0) m4aSongNumStart(137);\n                    v5 = (u32)&gBgTilemapBufs + (128 << 4);\n                    v6 = (u16 *)(((*(u8 *)(((u32)(*(s32 *)&gUnk_03004C08 << 28) >> 25) + ((u32)&gUnk_08116748 + 7)) << 5) + *(u8 *)(((u32)(*(s32 *)&gUnk_03004C08 << 28) >> 25) + ((u32)&gUnk_08116748 + 6)) << 1) + ((u32)&gBgTilemapBufs + (128 << 4)));\n                    v4 = (v1 + 28 << 5) + 3;\n                    v7 = (u16 *)((v3 + v4 << 1) + v5);\n                    *v6 = *v7;\n                }\n            }\n            break;\n        case 4:\n            if (gUnk_03004C08.unk2 % 30 << 24 == 0) m4aSongNumStart(138);\n        case 5:\n        case 6:\n            if (gUnk_03004C08.unk0_0 > 3) {\n                CopyWorldMapTiles(gUnk_03004C08.unk0_0);\n            } else {\n                v2 = gUnk_03004C20.sceneFrameCounter;\n                if ((v2 & 3) == 0) {\n                    *p0 = ((u32)(224 << 19 & thunk_sub_080002A0(v2 & 3, 3) << 24) >> 19) + (u32)&gUnk_08116780;\n                    p0[1] = 83886432;\n                    p0[2] = -2147483632;\n                    SetWorldMapTilePalette(gUnk_03004C08.unk0_0, 11);\n                }\n            }\n            break;\n        case 7:\n            CopyWorldMapTiles(gUnk_03004C08.unk0_0);\n            ((s32 *)&gCallbackQueue)[1] = &CountCollectedGems;\n            break;\n    }\n    gUnk_03004C08.unk2 = gUnk_03004C08.unk2 + 1;\n    return;\n}\n",
+        "score": 182,
         "maxScore": 300,
         "compileErrors": null,
         "breakdown": {
           "insert": 23,
           "delete": 45,
-          "replace": 21,
+          "replace": 17,
           "opMismatch": 6,
-          "argMismatch": 88
+          "argMismatch": 91
         },
         "quality": {
           "score": 68,
-          "lines": 89,
+          "lines": 79,
           "gotos": 0,
-          "casts": 34,
+          "casts": 39,
           "unkGlue": 0,
           "rawMem": 7,
           "addrDeref": 0
@@ -6530,15 +6578,15 @@
       },
       "gapSize": {
         "decompiler": "asmlift",
-        "score": 183,
+        "score": 182,
         "maxScore": 300,
-        "ratio": 0.61,
+        "ratio": 0.6066666666666667,
         "kinds": {
           "insert": 23,
           "delete": 45,
-          "replace": 21,
+          "replace": 17,
           "opMismatch": 6,
-          "argMismatch": 88
+          "argMismatch": 91
         }
       },
       "scripts": {
@@ -9181,7 +9229,7 @@
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "candidateLabel": "signed",
+        "candidateLabel": "signed/reread-globals",
         "symbolsUsed": [
           {
             "name": "D_800CC69C_CD29C",
@@ -9189,22 +9237,22 @@
           }
         ],
         "outcome": "nonmatch",
-        "source": "void func_800600C0_60CC0(s32 a0, s32 a1) {\n    s32 v0;\n    s32 v1;\n    v0 = D_800CC69C_CD29C;\n    if (a1 == 0) {\n        v1 = ((s32 *)(((a0 << 16 >> 16) * 160 - (a0 << 16 >> 16) << 2) + v0))[14] & -17;\n    } else {\n        v1 = ((s32 *)(((a0 << 16 >> 16) * 160 - (a0 << 16 >> 16) << 2) + v0))[14] | 16;\n    }\n    ((s32 *)(((a0 << 16 >> 16) * 160 - (a0 << 16 >> 16) << 2) + v0))[14] = v1;\n    return;\n}\n",
-        "score": 41,
+        "source": "void func_800600C0_60CC0(s32 a0, s32 a1) {\n    s32 v0;\n    if (a1 == 0) {\n        v0 = ((s32 *)(((a0 << 16 >> 16) * 160 - (a0 << 16 >> 16) << 2) + (u8 *)D_800CC69C_CD29C))[14] & -17;\n    } else {\n        v0 = ((s32 *)(((a0 << 16 >> 16) * 160 - (a0 << 16 >> 16) << 2) + (u8 *)D_800CC69C_CD29C))[14] | 16;\n    }\n    ((s32 *)(((a0 << 16 >> 16) * 160 - (a0 << 16 >> 16) << 2) + (u8 *)D_800CC69C_CD29C))[14] = v0;\n    return;\n}\n",
+        "score": 37,
         "maxScore": 42,
         "compileErrors": null,
         "breakdown": {
           "insert": 23,
-          "delete": 7,
-          "replace": 4,
+          "delete": 4,
+          "replace": 0,
           "opMismatch": 0,
-          "argMismatch": 7
+          "argMismatch": 10
         },
         "quality": {
-          "score": 98,
-          "lines": 12,
+          "score": 92,
+          "lines": 10,
           "gotos": 0,
-          "casts": 3,
+          "casts": 6,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0

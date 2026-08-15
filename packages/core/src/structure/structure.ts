@@ -36,6 +36,7 @@
 // code): multi-latch headers, irreducible/overlapping loops, conditional `continue`, a `break`
 // whose exit copies would clobber, switch fall-through, and mixed-entry self-loops (a guarded
 // header also entered by a plain br).
+import { type GlobalCell, globalCellOf, mayWriteGlobal } from '../ir/alias';
 import { Block, Fn, Op, Value, defOpMap, successorsOf } from '../ir/core';
 import { type IrType, T, scalarTypeForAccess, typeEquals } from '../ir/types';
 import { BinOp, Expr, SFn, Stmt, SwitchCase, exprChildren, mapExprChildren, negateCond } from '../l3/ast';
@@ -636,6 +637,11 @@ export interface StructureOptions {
   // read recompiles at the DECLARATION's access width — where that diverges from the asm's load
   // width the honest shift spelling is the one that matches, and the differ referees.
   spellBitfieldMembers?: boolean;
+  // Let a read of a named global render at its use across writes that PROVABLY cannot reach it
+  // (a store to a different named global), instead of caching it in a local. Off by default;
+  // rank.ts enumerates the ON spelling as the `/reread-globals` axis — see analysis.ts
+  // AnalyzeOptions for why this is a differ-refereed lever and not a fix.
+  rereadGlobals?: boolean;
   // How an unresolvable VALUE degrades (a live `opaque`, an unlowered transient op, a dropped def):
   //   "strict"   (default) — the `"?"` sentinel, tripping assertResolved at the boundary (loud in
   //              the PROCESS);
@@ -659,6 +665,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     anchorConstCopies = false,
     littleEndian = true,
     spellBitfieldMembers = true,
+    rereadGlobals = false,
     onGap = 'strict',
     symbols,
   } = opts;
@@ -671,6 +678,15 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
   const { useSitesOf, opIndex, opBlock, liveIn, materialize, reachFrom, emitPos, memWriteBetween } = analyze(
     fn,
     returnsVoid,
+    {
+      defs,
+      rereadGlobals,
+      // the map's own declaration truth: a volatile object's read may not be duplicated or moved
+      volatileGlobal: (n) => {
+        const si = symbols?.get(n);
+        return si?.volatile === true || (si?.layout ?? []).some((f) => f.volatile === true);
+      },
+    },
   );
 
   // SCALAR-vs-AGGREGATE globals: a `gaddr` symbol accessed EXCLUSIVELY at offset 0 is a scalar
@@ -1413,43 +1429,14 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
   const absorbedLoads = new Set<Op>();
   if (symCtx && littleEndian && spellBitfieldMembers) {
     // the (name, byte) of a load's address when it resolves through defs alone — `gaddr` or
-    // `add(gaddr, const)`; anything else (a materialized base, a variable index) declines
-    const loadTargets = new Map<Op, { name: string; byte: number }>();
-    const addrOf = (v: Value, off: number): { name: string; byte: number } | null => {
-      const d0 = defs.get(v);
-      if (d0?.opcode === 'gaddr') {
-        return { name: d0.attrs.sym as string, byte: off };
-      }
-      if (d0?.opcode === 'add' && d0.operands.length === 2) {
-        for (const [x, y] of [
-          [d0.operands[0], d0.operands[1]],
-          [d0.operands[1], d0.operands[0]],
-        ] as const) {
-          const g0 = defs.get(x);
-          const c0 = defs.get(y);
-          if (g0?.opcode === 'gaddr' && c0?.opcode === 'const') {
-            return { name: g0.attrs.sym as string, byte: (c0.attrs.value as number) + off };
-          }
-        }
-      }
-      return null;
-    };
+    // `add(gaddr, const)`; anything else (a materialized base, a variable index) declines. THE
+    // shared L2 disjointness query (ir/alias.ts), which the materialization model consults with
+    // the same rule, so the fold and the model cannot disagree about what a store can reach.
+    const loadTargets = new Map<Op, GlobalCell>();
+    const addrOf = (v: Value, off: number): GlobalCell | null => globalCellOf(defs, v, off);
     // A write for the fold's purposes: calls and opaques always; a store/astore unless its base
-    // resolves to a global PROVABLY different from the folded one. (Name comparison suffices:
-    // the pool promotion picks one canonical name per address, so one cell cannot appear under
-    // two names within a function.)
-    const mayWrite =
-      (sym: string) =>
-      (x: Op): boolean => {
-        if (x.opcode === 'call' || x.opcode === 'opaque') {
-          return true;
-        }
-        if (x.opcode !== 'store' && x.opcode !== 'astore') {
-          return false;
-        }
-        const t = addrOf(x.operands[0], 0);
-        return !(t && t.name !== sym);
-      };
+    // resolves to a global PROVABLY different from the folded one.
+    const mayWrite = (sym: string) => mayWriteGlobal(defs, sym);
     for (const blk of fn.blocks) {
       for (const op of blk.ops) {
         if ((op.opcode !== 'shr_u' && op.opcode !== 'shr_s') || op.operands.length !== 1) {

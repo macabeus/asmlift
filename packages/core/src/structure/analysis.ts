@@ -5,6 +5,7 @@
 //     interference check in structure.ts;
 //   • the effect-ordering model — which call/load defs must MATERIALIZE as named temps at
 //     their own program position instead of inlining at their use.
+import { globalCellOf, mayWriteGlobal } from '../ir/alias';
 import { Block, Fn, Op, Value, successorsOf } from '../ir/core';
 
 export interface UseSite {
@@ -32,7 +33,34 @@ export interface StructureAnalysis {
   memWriteBetween: (def: Op, render: { blk: Block; idx: number }, isWrite: (x: Op) => boolean) => boolean;
 }
 
-export function analyze(fn: Fn, returnsVoid: boolean): StructureAnalysis {
+export interface AnalyzeOptions {
+  /** the fn's def map (`defOpMap`) — the structurer already holds one, so it is passed rather than
+   *  rebuilt. Absent ⇒ the global-aware alias rule below cannot resolve anything and every write
+   *  bars, exactly as before it existed. */
+  defs?: Map<Value, Op>;
+  /** THE value-home axis (rank.ts `/reread-globals`). A read of a named global is barred from
+   *  rendering at its use by any write in between — even a store to an unrelated global, which
+   *  cannot possibly change what it sees. That over-conservatism is what invents the locals the
+   *  round-5 dogfood measured as its highest-cost defect ("hoists what agbcc re-reads"):
+   *
+   *      gA = v; gB = v;   with `s32 v = gValue;`   where the source said `gA = gValue; gB = gValue;`
+   *
+   *  With this on, the barrier scan for a load whose address resolves to a named global uses THE
+   *  shared disjointness query (ir/alias.ts) instead of "any write at all". Materializing is always
+   *  sound, so today's spelling is never wrong — only sometimes not the one the compiler was given.
+   *  Which side matches is genuinely per-function (the same dogfood watched agbcc go both ways
+   *  inside ONE function), so this is a differ-refereed candidate axis, never a default. */
+  rereadGlobals?: boolean;
+  /** "does the project declare this global volatile?" — a read of a volatile object may NOT be
+   *  duplicated or moved, so the axis above refuses on one. Answers false for a symbol the map
+   *  does not carry (and for no map at all), which is the same posture the multi-render rule has
+   *  always had: without a declaration nothing here can know, and the differ referees the extra
+   *  load. Where the map DOES know, the axis is silent about it rather than wrong. */
+  volatileGlobal?: (name: string) => boolean;
+}
+
+export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {}): StructureAnalysis {
+  const { defs, rereadGlobals = false, volatileGlobal } = opts;
   // ── use registry ────────────────────────────────────────────────────────────────────────
   // Every use of a value, POSITIONED: the consuming op and its block/index. Successor args are
   // uses AT the terminator (they render in argAssigns at block end). A void function's `ret`
@@ -204,28 +232,115 @@ export function analyze(fn: Fn, returnsVoid: boolean): StructureAnalysis {
   // terminator, materialized def) it inlines into, transitively through single-use pure ops.
   // null = renders in several places / unresolvable (treated conservatively by the caller).
   const emitPosCache = new Map<Op, { blk: Block; idx: number } | null>();
+  /** an op that renders AT ITS OWN position: a statement, a terminator, a materialized or dead def */
+  const anchored = (op: Op): boolean =>
+    op.successors.length > 0 ||
+    op.opcode === 'ret' ||
+    op.opcode === 'store' ||
+    op.opcode === 'astore' ||
+    materialize.has(op) ||
+    !op.results.length ||
+    !useSitesOf.has(op.results[0]);
+  const consumersOf = (op: Op): Op[] => [...new Set((useSitesOf.get(op.results[0]) ?? []).map((s) => s.op))];
   const emitPos = (op: Op): { blk: Block; idx: number } | null => {
     if (emitPosCache.has(op)) {
       return emitPosCache.get(op)!;
     }
-    const own = { blk: opBlock.get(op)!, idx: opIndex.get(op)! };
     let res: { blk: Block; idx: number } | null;
-    if (
-      op.successors.length ||
-      op.opcode === 'ret' ||
-      op.opcode === 'store' ||
-      op.opcode === 'astore' ||
-      materialize.has(op) ||
-      !op.results.length ||
-      !useSitesOf.has(op.results[0])
-    ) {
-      res = own; // statements, terminators, materialized/dead defs
+    if (anchored(op)) {
+      res = { blk: opBlock.get(op)!, idx: opIndex.get(op)! };
     } else {
-      const consumers = [...new Set((useSitesOf.get(op.results[0]) ?? []).map((s) => s.op))];
+      const consumers = consumersOf(op);
       res = consumers.length === 1 ? emitPos(consumers[0]) : null;
     }
     emitPosCache.set(op, res);
     return res;
+  };
+  // EVERY position a value's expression renders at — `emitPos` generalized to the whole set (it
+  // answers one place or gives up), by following ALL consumers transitively. That matters for
+  // the value-home axis: a pure expression with two consumers (`gOut = e; return e;`) has no single
+  // emit position, so `emitPos` answers null and every memory read feeding it is forced into a
+  // local — even when re-reading at both places is provably equivalent. Null only for a genuine
+  // cycle (defensive: SSA use-def is acyclic through ops), which the caller treats as unresolvable.
+  //
+  // NEVER for a call: two render positions mean two executions, so a call whose consumer renders in
+  // several places must keep answering null and materialize.
+  const emitPosSetCache = new Map<Op, { blk: Block; idx: number }[] | null>();
+  const emitPositions = (op: Op, visiting: Set<Op> = new Set()): { blk: Block; idx: number }[] | null => {
+    const hit = emitPosSetCache.get(op);
+    if (hit !== undefined) {
+      return hit;
+    }
+    if (visiting.has(op)) {
+      return null;
+    }
+    let res: { blk: Block; idx: number }[] | null;
+    if (anchored(op)) {
+      res = [{ blk: opBlock.get(op)!, idx: opIndex.get(op)! }];
+    } else {
+      visiting.add(op);
+      const seenPos = new Set<string>();
+      const acc: { blk: Block; idx: number }[] = [];
+      res = acc;
+      for (const c of consumersOf(op)) {
+        const sub = emitPositions(c, visiting);
+        if (!sub) {
+          res = null;
+          break;
+        }
+        for (const p of sub) {
+          const key = `${blockPos.get(p.blk)}:${p.idx}`;
+          if (!seenPos.has(key)) {
+            seenPos.add(key);
+            acc.push(p);
+          }
+        }
+      }
+      visiting.delete(op);
+    }
+    emitPosSetCache.set(op, res);
+    return res;
+  };
+  // THE def→render path discipline — one implementation, three callers (the two materialization
+  // rules below and structure.ts's bitfield fold, which imports it). May an op `isWrite` accepts
+  // execute between `def` and a statement at `render`, on any def-avoiding path? The def block's
+  // tail, the render block's head, and every between-block on a path; a path re-crossing the def
+  // is the NEXT dynamic instance and does not count. Path-based on purpose: `fn.blocks` is ADDRESS
+  // order, so a linear-position scan misses a block laid out after the render that executes
+  // between def and render on the taken path (an audit round broke exactly that way).
+  const memWriteBetween = (def: Op, render: { blk: Block; idx: number }, isWrite: (x: Op) => boolean): boolean => {
+    const b = opBlock.get(def)!;
+    const oi = opIndex.get(def)!;
+    const wDirty = (list: Op[], from: number, to: number): boolean => {
+      for (let k = from; k < to; k++) {
+        if (isWrite(list[k])) {
+          return true;
+        }
+      }
+      return false;
+    };
+    // Same block: the only def-avoiding path is the straight line between the two indices
+    // (leaving and re-entering the block re-crosses the def). A render BEFORE the def cannot
+    // happen — within a block, uses follow defs — and falls through to the path walk, whose
+    // answer is the conservative one.
+    if (render.blk === b && oi < render.idx) {
+      return wDirty(b.ops, oi + 1, render.idx);
+    }
+    if (wDirty(b.ops, oi + 1, b.ops.length) || wDirty(render.blk.ops, 0, render.idx)) {
+      return true;
+    }
+    for (const x of reachAvoiding(b, b)) {
+      if (x === render.blk && !reachAvoiding(render.blk, b).has(render.blk)) {
+        continue; // acyclic render block: head checked
+      }
+      if (x !== render.blk && !reachAvoiding(x, b).has(render.blk)) {
+        continue; // not on a def→render path
+      }
+      if (wDirty(x.ops, 0, x.ops.length)) {
+        return true;
+      }
+    }
+    return false;
   };
   // Decide in REVERSE program order so a consumer's own materialization is settled before any
   // producer asks for its emit position (SSA: uses follow defs in dominance/layout order) — and
@@ -235,6 +350,7 @@ export function analyze(fn: Fn, returnsVoid: boolean): StructureAnalysis {
   for (let sizeBefore = -1; sizeBefore !== materialize.size;) {
     sizeBefore = materialize.size;
     emitPosCache.clear();
+    emitPosSetCache.clear(); // both render-position caches read `materialize`, which just grew
     for (let bi = fn.blocks.length - 1; bi >= 0; bi--) {
       const b = fn.blocks[bi];
       for (let oi = b.ops.length - 1; oi >= 0; oi--) {
@@ -274,6 +390,14 @@ export function analyze(fn: Fn, returnsVoid: boolean): StructureAnalysis {
         if (!r || !useSitesOf.has(r)) {
           continue;
         } // dead call → exprstmt (unchanged)
+        // Under the value-home axis: which named global cell this op reads, if any. A constant-
+        // offset `load` only — an `aload`'s runtime index names no single cell, and a call reads
+        // everything. Null ⇒ every write bars, exactly as before.
+        const cell =
+          rereadGlobals && defs && op.opcode === 'load'
+            ? globalCellOf(defs, op.operands[0], op.attrs.off as number)
+            : null;
+        const barsThisRead = cell && defs && !volatileGlobal?.(cell.name) ? mayWriteGlobal(defs, cell.name) : null;
         const sites = useSitesOf.get(r)!;
         const consumers = [...new Set(sites.map((s) => s.op))];
         const isCall = op.opcode === 'call';
@@ -286,50 +410,32 @@ export function analyze(fn: Fn, returnsVoid: boolean): StructureAnalysis {
         // per-use source spelling did (`while (*s != EOS) *d = *s;` reads *s twice per iteration),
         // so it is sound iff every render still sees the def-time memory: NO write anywhere
         // between the def and ANY render (cycle-aware, conservative write set). Otherwise a temp.
-        if (!isCall && consumers.length > 1) {
+        //
+        // WHERE it renders. Without the axis: one position per consumer, and a consumer with no
+        // single position (its own value renders in several places) refuses. With the axis a load
+        // resolves the whole SET instead — the second half of the value-home defect, where the
+        // local is invented not by a barrier but because the pure expression downstream is itself
+        // duplicated (`gOut = (gValue << 1) + gValue; return (gValue << 1) + gValue;`). Never for a
+        // call: several positions there mean several executions.
+        const poss =
+          rereadGlobals && !isCall
+            ? emitPositions(op)
+            : consumers.length > 1
+              ? consumers.map((c) => emitPos(c))
+              : [emitPos(consumers[0])];
+        if (!poss || poss.some((p) => p === null)) {
+          materialize.add(op);
+          continue;
+        }
+        if (poss.length > 1) {
           const MW = new Set(['store', 'astore', 'call', 'opaque']);
-          const wDirty = (list: Op[], from: number, to: number) => {
-            for (let k = from; k < to; k++) {
-              if (MW.has(list[k].opcode)) {
-                return true;
-              }
-            }
-            return false;
-          };
-          const defToRenderDirty = (q: { blk: Block; idx: number }): boolean => {
-            // Same block: the only def-avoiding path is the straight line between the two indices
-            // (leaving and re-entering the block re-crosses the def).
-            if (q.blk === b && oi < q.idx) {
-              return wDirty(b.ops, oi + 1, q.idx);
-            }
-            if (wDirty(b.ops, oi + 1, b.ops.length) || wDirty(q.blk.ops, 0, q.idx)) {
-              return true;
-            }
-            const between = reachAvoiding(b, b);
-            for (const x of between) {
-              if (x === q.blk && !reachAvoiding(q.blk, b).has(q.blk)) {
-                continue;
-              } // acyclic render blk: head checked
-              if (x !== q.blk && !reachAvoiding(x, b).has(q.blk)) {
-                continue;
-              } // not on a def→render path
-              if (wDirty(x.ops, 0, x.ops.length)) {
-                return true;
-              }
-            }
-            return false;
-          };
-          const poss = consumers.map((c) => emitPos(c));
-          if (poss.some((p) => p === null) || poss.some((p) => defToRenderDirty(p!))) {
+          const isWrite = barsThisRead ?? ((x: Op) => MW.has(x.opcode));
+          if (poss.some((p) => memWriteBetween(op, p!, isWrite))) {
             materialize.add(op);
           }
           continue;
         }
-        const pos = emitPos(consumers[0]);
-        if (!pos) {
-          materialize.add(op);
-          continue;
-        }
+        const pos = poss[0]!;
         // A between-op is a BARRIER when it renders as a sequenced statement the def would cross:
         // stores/opaque always; a call/load that is dead (statement), materialized (statement), or
         // inlined into a DIFFERENT statement. A sibling effect inlined into the SAME statement is
@@ -337,6 +443,11 @@ export function analyze(fn: Fn, returnsVoid: boolean): StructureAnalysis {
         // exactly as it originally chose to. Loads never bar a load (reads don't conflict).
         const samePos = (q: { blk: Block; idx: number } | null) => q !== null && q.blk === pos.blk && q.idx === pos.idx;
         const isBarrier = (x: Op): boolean => {
+          // Value-home axis: a store/astore this read is PROVABLY disjoint from (a different named
+          // global) does not sequence against it, so the read may still render at its use.
+          if (barsThisRead && (x.opcode === 'store' || x.opcode === 'astore') && !barsThisRead(x)) {
+            return false;
+          }
           if (x.opcode === 'store') {
             // A store to a PROVABLY-DISJOINT slot of the same base never aliases the load: same
             // base SSA value, both constant offset+width, ranges non-overlapping (the everyday
@@ -368,84 +479,18 @@ export function analyze(fn: Fn, returnsVoid: boolean): StructureAnalysis {
           }
           return false;
         };
-        const gapDirty = (list: Op[], from: number, to: number) => {
-          for (let k = from; k < to; k++) {
-            if (isBarrier(list[k])) {
-              return true;
-            }
-          }
-          return false;
-        };
-        if (pos.blk === b) {
-          if (gapDirty(b.ops, oi + 1, pos.idx)) {
-            materialize.add(op);
-          }
-          continue;
-        }
-        // Cross-block: a call's execution would become path-dependent — always materialize. A
-        // load may inline only if NO write exists on any DEF-AVOIDING def→render path (a path
-        // re-crossing the def is the next dynamic instance): the def block's tail, the render
-        // block's head, and every block between; a render block cyclic WITHOUT passing the def
-        // (an inner loop around the render) is checked in full.
-        if (isCall) {
+        // A CROSS-BLOCK call's execution would become path-dependent — always materialize. Within
+        // its own block a call is judged like everything else, by the barrier scan below.
+        if (isCall && pos.blk !== b) {
           materialize.add(op);
           continue;
         }
-        let dirty = gapDirty(b.ops, oi + 1, b.ops.length) || gapDirty(pos.blk.ops, 0, pos.idx);
-        if (!dirty) {
-          for (const x of reachAvoiding(b, b)) {
-            if (x === pos.blk && !reachAvoiding(pos.blk, b).has(pos.blk)) {
-              continue;
-            } // acyclic render block: head checked
-            if (x !== pos.blk && !reachAvoiding(x, b).has(pos.blk)) {
-              continue;
-            } // not on a def→render path
-            if (gapDirty(x.ops, 0, x.ops.length)) {
-              dirty = true;
-              break;
-            }
-          }
-        }
-        if (dirty) {
+        // Otherwise: inline only if no barrier stands on any def-avoiding def→render path.
+        if (memWriteBetween(op, pos, isBarrier)) {
           materialize.add(op);
         }
       }
     }
   }
-  // The def→render path discipline, exported for the bitfield fold's ordering gate
-  // (structure.ts): may an op `isWrite` accepts execute between `def` and a statement at
-  // `render`, on any def-avoiding path? Same cycle-aware rules as the materialize decisions
-  // above — the def block's tail, the render block's head, and every between-block on a path;
-  // a path re-crossing the def is the next dynamic instance and does not count.
-  const memWriteBetween = (def: Op, render: { blk: Block; idx: number }, isWrite: (x: Op) => boolean): boolean => {
-    const b = opBlock.get(def)!;
-    const oi = opIndex.get(def)!;
-    const wDirty = (list: Op[], from: number, to: number): boolean => {
-      for (let k = from; k < to; k++) {
-        if (isWrite(list[k])) {
-          return true;
-        }
-      }
-      return false;
-    };
-    if (render.blk === b && oi < render.idx) {
-      return wDirty(b.ops, oi + 1, render.idx);
-    }
-    if (wDirty(b.ops, oi + 1, b.ops.length) || wDirty(render.blk.ops, 0, render.idx)) {
-      return true;
-    }
-    for (const x of reachAvoiding(b, b)) {
-      if (x === render.blk && !reachAvoiding(render.blk, b).has(render.blk)) {
-        continue; // acyclic render block: head checked
-      }
-      if (x !== render.blk && !reachAvoiding(x, b).has(render.blk)) {
-        continue; // not on a def→render path
-      }
-      if (wDirty(x.ops, 0, x.ops.length)) {
-        return true;
-      }
-    }
-    return false;
-  };
   return { useSitesOf, opIndex, opBlock, liveIn, materialize, reachFrom, emitPos, memWriteBetween };
 }
