@@ -591,6 +591,26 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     expect(() => decompile('f', deadReload, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
   });
 
+  test('a refused function names the capability actually missing', () => {
+    // The gap histogram is the improvement loop's work-list; "local stack frames not supported" was
+    // a false attribution that sent the loop to build a thing that already works. Each blocker now
+    // names itself. The generic message survives only for sp uses no sub-family claims.
+    const addrTaken =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tmov\tr4, sp\n\tstr\tr0, [r4]\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(() => decompile('f', addrTaken, ARMV4T_AGBCC)).toThrow(/address of a stack local is taken/);
+    const outgoing =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tbl\tg\n\tldr\tr4, [sp]\n' +
+      '\tadd\tr0, r4, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(() => decompile('f', outgoing, ARMV4T_AGBCC)).toThrow(/outgoing stack argument/);
+    const arity =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tldr\tr4, [sp]\n\tbl\tg\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(() => decompile('f', arity, ARMV4T_AGBCC, { prototypes: { g: { params: 5 } } })).toThrow(
+      /declared with 5 arguments/,
+    );
+    // every attributed message keeps the class prefix, so nothing keyed on it breaks
+    expect(() => decompile('f', addrTaken, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+  });
+
   test('a gap in the slots read still yields ABI-correct offsets', () => {
     // frame 8, so [sp,#0xc] is argument 6 (index 5) and argument 5 is never read. Naming downstream
     // is POSITIONAL, so minting only the slot that was read would put the parameter at argument 5's

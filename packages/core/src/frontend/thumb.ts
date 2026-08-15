@@ -1266,9 +1266,15 @@ export function lift(
   // does not set flags, so a flag-setting one can only come from hand-written asm, where dropping
   // it would leave a stale compare for a following conditional branch to fold. There are 0 in the
   // benchmark corpus and 0 across the klonoa and sa3 checkouts, so excluding them costs nothing.
+  // The decline names WHY the slot model is off when it is (slotsOffReason, assigned below —
+  // referenced through the closure, so this reads the final value at throw time). The gap
+  // histogram is the improvement loop's work-list, and "local stack frames not supported" was a
+  // false attribution for a function whose frame IS modelled but whose blocker is, say, an
+  // address-taken local or an outgoing stack argument — it sent the loop to build the wrong thing.
   const spAsDataError = () =>
     new FrontendUnsupportedError(
-      `cannot lift '${name}': stack pointer used as data (address-taken local / sp-relative slot / frame arithmetic) — local stack frames not supported`,
+      `cannot lift '${name}': stack pointer used as data — ` +
+        (slotsOffReason ?? 'not a modelled slot (address-taken local / frame arithmetic / above the local area)'),
     );
 
   const isFrameAdjust = (
@@ -1488,7 +1494,11 @@ export function lift(
   };
   // Is the word-slot model safe for THIS function? Every disqualifier below leaves every `[sp,#k]`
   // access on the old path, which declines — so the answer to "not sure" is the loud one.
-  const slotModelSafe = (): boolean => {
+  // Returns null when the word-slot model is SAFE for this function, else the reason it is off —
+  // which the sp declines append, so a refused function names the capability actually missing
+  // instead of the generic "local stack frames". The gap histogram is the improvement loop's
+  // work-list; a misattributed refusal sends that loop to build the wrong thing.
+  const slotModelBlocker = (): string | null => {
     for (const ab of asmBlocks) {
       for (const ins of ab.instrs) {
         const acc = spMemAccess(ins);
@@ -1497,7 +1507,9 @@ export function lift(
         // store and reads uninitialised memory. One anywhere disables the model for the whole
         // function. A register offset can alias any slot, so it disqualifies the same way.
         if (acc && (acc.width !== 4 || acc.regOff)) {
-          return false;
+          return acc.regOff
+            ? 'a register-offset sp access can alias any slot'
+            : 'a sub-word sp access aliases the word-slot model';
         }
         // sp escaping into a register means the frame can be written through a pointer, and then a
         // slot is not private to this function. (Such a function declines at the escape anyway;
@@ -1508,7 +1520,7 @@ export function lift(
           !isSpReg(ins.ops[0] ?? '') &&
           ins.ops.slice(1).some((o) => isSpReg(o))
         ) {
-          return false;
+          return `the address of a stack local is taken (\`${ins.mnemonic} ${ins.ops.join(', ')}\`) — address-taken locals are not modelled`;
         }
       }
     }
@@ -1531,21 +1543,21 @@ export function lift(
       if (mems.length === 0) {
         // moves sp and never keys a slot itself: safe only if nothing downstream can key one
         if (!returns && bi !== 0) {
-          return false;
+          return 'sp moves in a block that neither returns nor is the entry';
         }
         continue;
       }
       for (const m of mods) {
         if (m < mems[0]) {
           if (bi !== 0) {
-            return false; // a non-entry block at its own depth
+            return 'a non-entry block establishes its own frame depth'; // not the prologue's
           }
         } else if (m > mems[mems.length - 1]) {
           if (!returns) {
-            return false; // unwinds, then keeps going
+            return 'sp unwinds mid-function and execution continues';
           }
         } else {
-          return false; // the frame moves under a slot this block already keyed
+          return 'the frame moves between two accesses that keyed slots against it';
         }
       }
     }
@@ -1588,7 +1600,7 @@ export function lift(
         const c = ins.ops[0] ?? '';
         const arity = protoArity(prototypes[c]) ?? protoArity(RUNTIME_HELPERS[c]);
         if (arity !== undefined && arity > target.argRegs.length) {
-          return false; // this frame has an outgoing area, whatever else is unknown about it
+          return `callee \`${c}\` is declared with ${arity} arguments, so this frame has an outgoing stack-argument area — consuming stack call arguments is not implemented`;
         }
       }
     }
@@ -1680,7 +1692,7 @@ export function lift(
       }
       for (const off of storedAnywhere) {
         if (!reloaded.has(off) && prefixStored(off, storedAnywhere)) {
-          return false; // (a)
+          return `the store to [sp,#${off}] is never reloaded and its lower slots are supplied — it may be an outgoing stack argument of one of this function's calls`; // (a)
         }
       }
       // (b): `pendingOut[b]` = offsets stored and not yet reloaded on SOME path through b;
@@ -1717,7 +1729,8 @@ export function lift(
             } else if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') {
               for (const k of pend) {
                 if (prefixStored(k, st)) {
-                  return false; // (b) — a plausible argument block reaches this call unread
+                  // (b) — a plausible argument block reaches this call unread
+                  return `the store to [sp,#${k}] reaches \`bl ${ins.ops[0] ?? '?'}\` unread with its lower slots supplied — it may be that call's outgoing stack argument`;
                 }
               }
             }
@@ -1743,7 +1756,7 @@ export function lift(
         if ((ins.mnemonic === 'pop' || ins.mnemonic === 'ldmia') && released < localArea) {
           const base = ins.mnemonic === 'pop' ? 'sp' : (ins.ops[0] ?? '').replace(/!$/, '');
           if (isSpReg(base)) {
-            return false;
+            return 'a pop reads the frame while the local area is still reserved';
           }
         }
         if ((ins.mnemonic === 'add' || ins.mnemonic === 'sub') && isSpReg(ins.ops[0])) {
@@ -1754,7 +1767,7 @@ export function lift(
         }
       }
     }
-    return true;
+    return null;
   };
   // The frame the body sees: the entry block's PROLOGUE, i.e. everything up to the first
   // instruction that touches the frame (or the whole block if it never does). Stepped through the
@@ -1808,7 +1821,8 @@ export function lift(
     return Math.max(0, reserved);
   })();
 
-  const slotsOk = slotModelSafe();
+  const slotsOffReason = slotModelBlocker();
+  const slotsOk = slotsOffReason === null;
 
   // The WRITE dual of readData, and the reason it exists is a lesson rather than a symmetry: the
   // first version of this guard checked sp in three decode arms (mov/add/sub) and its commit message
