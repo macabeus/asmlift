@@ -585,10 +585,12 @@ interface WhileLoopInfo {
   body: Set<Block>; // the pure natural-loop body (for in-body vs exit classification)
 }
 
-// Opcodes whose RENDER POSITION is their execution: moving one across a statement boundary changes
-// what the program does (a call runs elsewhere, a load reads at a different time). Used where a
-// value's render position is decided somewhere other than the analysis assumed.
-const MOVABLE_EFFECT = new Set(['call', 'load', 'aload', 'opaque']);
+// Opcodes whose NUMBER OF EXECUTIONS is observable. Moving one of these out of a loop changes what
+// the program does — a call that ran per iteration would run once. A `load`/`aload` is deliberately
+// NOT here: it is a pure read, so running it once instead of per-iteration is unobservable as long
+// as it reads the same memory, which is exactly what the existing def→render barrier scan
+// (structure/analysis.ts) already proves before it lets one inline at all.
+const REPEATED_EFFECT = new Set(['call', 'opaque']);
 
 // A bottom-tested `do { body } while(cond)`. The header is the body entry (entered before any
 // test); the LATCH holds the loop condition and the single exit. Body = header..latch structured, then
@@ -2036,38 +2038,52 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
       if (defEdge.block !== merge) {
         siblings.add(defEdge.block);
       }
-      const outCases: SwitchCase[] = arms.map((a, i) => {
+      // ONE emission order for the whole statement: the case arms in table order, then the default —
+      // which is exactly where C puts it. Adjacency is read off this array, so "falls into the next
+      // arm" needs no separate rule for a case that falls into the default (it is the arm after the
+      // last case, and legal C).
+      const emitOrder = [...arms, { entry: defEdge.block, edge: defEdge, values: null as number[] | null }];
+      // Each arm's switch-edge copies, computed ONCE and in emission order: `argAssignsFor` mints
+      // swap-cycle temp names, so calling it twice for one edge burns a temp number and changes the
+      // output (the same reason emitDoWhile reuses its `updates`).
+      const edgeCopies = emitOrder.map((a) => argAssignsFor(b, a.edge));
+      const bodies = emitOrder.map((a, i) => {
         const exit = analyzeArmExit(a.entry, b, merge, siblings);
         if (exit.kind === 'unstructurable') {
           throw new StructureError(`cannot structure '${fn.name}': ${exit.why}`);
         }
         const ft = exit.kind === 'fallthrough';
-        if (ft && arms[i + 1]?.entry !== exit.to) {
+        const next = emitOrder[i + 1];
+        if (ft && next?.entry !== exit.to) {
           throw new StructureError(
-            `cannot structure '${fn.name}': case ${a.values.join('/')} falls through into a case that is not ` +
-              `the next one emitted — C fall-through only reaches the following case`,
+            `cannot structure '${fn.name}': ${a.values ? `case ${a.values.join('/')}` : 'the default arm'} falls ` +
+              `through into an arm that is not the next one emitted — C fall-through only reaches the arm below`,
+          );
+        }
+        // The arm fallen INTO opens with its own switch-edge copies, which are how the dispatch hands
+        // it its block parameters. On the fall-through path those copies would RE-RUN and overwrite
+        // what the falling arm just computed (`case 0: v=7; case 1: v=5;` — the case-0 path calling
+        // with 5). They cannot simply be dropped either: entering that arm by its own case value
+        // needs them. Hoisting them above the switch is possible but not always safe (another arm may
+        // read the same name first), so this shape declines LOUD; recovering it is future work.
+        if (ft && edgeCopies[i + 1].length) {
+          throw new StructureError(
+            `cannot structure '${fn.name}': the case fallen into takes a value from the switch edge, ` +
+              `which the fall-through path would re-run`,
           );
         }
         return {
-          values: a.values,
           // A falling-through arm stops AT its successor arm, which then emits that body once under
           // its own labels; a closed arm runs to the merge as before.
-          body: [...argAssignsFor(b, a.edge), ...structureRegion(a.entry, ft ? exit.to : merge)],
+          body: [...edgeCopies[i], ...structureRegion(a.entry, ft ? exit.to : merge)],
           fallsThrough: ft,
         };
       });
-      // The default arm has nothing after it to fall into, so it must be closed.
-      const defExit = analyzeArmExit(defEdge.block, b, merge, siblings);
-      if (defExit.kind !== 'break') {
-        throw new StructureError(
-          `cannot structure '${fn.name}': the jump-table default flows into a case body — ` +
-            `C emits the default arm last, so it has no case to fall into`,
-        );
-      }
+      const outCases: SwitchCase[] = arms.map((a, i) => ({ values: a.values, ...bodies[i] }));
       // An EMPTY default arm is not a default at all: it is where the switch ends, which is where
       // an unmatched scrutinee goes anyway. Emitting the label with nothing under it says nothing
       // and is not even valid C89 (a label needs a statement).
-      const defBody = [...argAssignsFor(b, defEdge), ...structureRegion(defEdge.block, merge)];
+      const defBody = bodies[bodies.length - 1].body;
       const sw: Stmt = {
         k: 'switch',
         scrutinee: expr(term.operands[0]),
@@ -2338,7 +2354,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     const movedEffect = exitArgs.find((v) => {
       const d = defs.get(v);
       return (
-        d && MOVABLE_EFFECT.has(d.opcode) && dw.body.has(opBlock.get(d)!) && !materialize.has(d) && !varName.has(v)
+        d && REPEATED_EFFECT.has(d.opcode) && dw.body.has(opBlock.get(d)!) && !materialize.has(d) && !varName.has(v)
       );
     });
     if (movedEffect) {

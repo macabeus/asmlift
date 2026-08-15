@@ -104,6 +104,36 @@ test('an arm that runs into the NEXT arm is recovered as C fall-through', () => 
   expect(out.match(/sideB\(/g)).toHaveLength(1);
 });
 
+test('falling into an arm that takes a value from the switch edge DECLINES', () => {
+  // The arm fallen into opens with the copies that hand it its block parameters from the DISPATCH.
+  // On the fall-through path those would re-run and overwrite what the falling arm just computed:
+  // `case 0: v = 7; case 1: v = 5; sideB(v);` calls sideB(5) where the asm calls sideB(7) — ordinary
+  // looking C running the wrong value. Dropping the copies is equally wrong (entering by case 1's
+  // own value needs them), so this shape is refused rather than guessed.
+  const asm =
+    'f:\n\tmov\tr2, #0x5\n\tcmp\tr1, #0x1\n\tbhi\t.Lend\n\tlsl\tr0, r1, #0x2\n\tldr\tr3, .Lp\n\tadd\tr0, r0, r3\n' +
+    '\tldr\tr0, [r0]\n\tmov\tpc, r0\n.Lp:\n\t.word\t.Ltab\n.Ltab:\n\t.word\t.Lc0\n\t.word\t.Lc1\n' +
+    '.Lc0:\n\tmov\tr2, #0x7\n.Lc1:\n\tmov\tr0, r2\n\tbl\tsideB\n\tb\t.Lend\n.Lend:\n\tbx\tlr\n';
+  expect(() => decompile('f', asm, ARMV4T_AGBCC)).toThrow(/takes a value from the switch edge/);
+});
+
+test('the LAST case may fall into a default that has a body — C emits the default last', () => {
+  // `default:` is the arm below the last case, so falling into it is ordinary C, not a goto.
+  const withDefault = (arms: string[], def: string) =>
+    `f:\n\tcmp\tr1, #0x${(arms.length - 1).toString(16)}\n\tbhi\t.Ldef\n` +
+    `\tlsl\tr0, r1, #0x2\n\tldr\tr1, .Lp\n\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n` +
+    `.Lp:\n\t.word\t.Ltab\n.Ltab:\n${arms.map((_, i) => `\t.word\t.Lc${i}\n`).join('')}` +
+    arms.map((a, i) => `.Lc${i}:\n${a}`).join('') +
+    `.Ldef:\n${def}.Lend:\n\tbl\tsideZ\n\tbx\tlr\n`;
+  const out = decompile(
+    'f',
+    withDefault([CALL_A + LEAVE, '\tbl\tsideB\n'], '\tbl\tsideD\n' + LEAVE),
+    ARMV4T_AGBCC,
+  ).source;
+  expect(out).not.toContain('ASMLIFT_ERROR');
+  expect(out).toMatch(/case 1:\s*\n\s*a0 = sideB\(\);\s*\n\s*default:/);
+});
+
 test('a fall-through that would carry an effect out of a loop DECLINES', () => {
   // The exit copies of a do-while render AFTER it, while the analysis decided where their values
   // may inline as if they sat on the latch's terminator — inside the loop. An arm ending in a loop
@@ -131,11 +161,12 @@ test('overlaps C cannot spell DECLINE instead of being silently closed or duplic
     armC = '\tbl\tsideC\n' + LEAVE;
   // (a) falls into a case that is not the next one emitted: C fall-through can only reach the
   // following case, and reordering the arms would change which values reach which body.
-  expect(sw([CALL_A + fallsTo(2), armB, armC])).toThrow(/falls through into a case that is not the next one/);
-  // (b) reaches a sibling on one path and leaves the switch on another — that is a goto, not a
-  // fall-through: only SOME executions of case 0 continue into case 1.
+  expect(sw([CALL_A + fallsTo(2), armB, armC])).toThrow(/falls through into an arm that is not the next one emitted/);
+  // (b) reaches a sibling on one path and the switch's end on another. C CAN spell this — with a
+  // switch-scoped `break` in the case body — so the decline names asmlift's own missing piece
+  // rather than blaming C.
   expect(sw(['\tcmp\tr2, #0\n\tbeq\t.Lc1\n' + CALL_A + LEAVE, armB])).toThrow(
-    /reaches sibling case .* on one path and leaves the switch on another/,
+    /a switch-scoped `break` inside a case body is not emitted yet/,
   );
   // (c) reaches two different siblings.
   expect(sw(['\tcmp\tr2, #0\n\tbeq\t.Lc1\n' + fallsTo(2), armB, armC])).toThrow(/reaches several sibling cases/);
@@ -175,4 +206,24 @@ test('two labels on ONE instruction are aliases — a branch to either reaches t
   const control = decompile('f', body('.L7', '.L7:\n'), ARMV4T_AGBCC).source;
   expect(decompile('f', body('.LCB80', '.LCB80:\n.L7:\n'), ARMV4T_AGBCC).source).toBe(control);
   expect(control).toContain('return 2;'); // the branch target's body is reached, not skipped
+});
+
+// ── Regime A (comparison trees) ───────────────────────────────────────────────────────────────────
+test('a comparison tree whose default is the merge recovers as a switch, not an if-chain', () => {
+  // Regime A shares the arm analysis. Before it, the merge counted as a fall-through target, so the
+  // most ordinary shape of all — every arm just leaving the switch, no default body — was refused
+  // and fell back to if-recovery (`if (a0 == 1) … else { if (a0 == 2) … }`). Behaviourally identical,
+  // but it is not what the source said.
+  const asm =
+    'f:\n\tpush\t{lr}\n\tcmp\tr0, #0x1\n\tbeq\t.La\n\tcmp\tr0, #0x2\n\tbeq\t.Lb\n\tcmp\tr0, #0x3\n\tbeq\t.Lc\n' +
+    '\tb\t.Lend\n.La:\n\tbl\tsideA\n\tb\t.Lend\n.Lb:\n\tbl\tsideB\n\tb\t.Lend\n.Lc:\n\tbl\tsideC\n' +
+    '.Lend:\n\tbl\tsideZ\n\tpop\t{r1}\n\tbx\tr1\n';
+  const zero = { params: 0 };
+  const out = decompile('f', asm, ARMV4T_AGBCC, {
+    prototypes: { f: { returnsVoid: true }, sideA: zero, sideB: zero, sideC: zero, sideZ: zero },
+  }).source;
+  expect(out).toContain('switch (a0)');
+  expect(out).toMatch(/case 1:\s*\n\s*sideA\(\);\s*\n\s*break;/);
+  expect(out).not.toContain('else');
+  expect(out).not.toContain('default:'); // the default IS the merge — no arm of its own
 });
