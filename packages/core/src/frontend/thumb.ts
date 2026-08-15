@@ -1551,18 +1551,65 @@ export function lift(
     }
     // OUTGOING ARGUMENTS. agbcc reserves the BOTTOM of the frame for arguments 5+ of the calls this
     // function makes: `add sp,sp,#-8` … `str r2,[sp]` / `str r3,[sp,#4]` … `bl callee`. Those
-    // offsets are inside the frame and nothing ever reloads them, so modelling them as locals makes
-    // them dead defs and DCE deletes them — the arguments vanish from the call with no diagnostic.
-    // Ground truth: sa3's CreateEntity_Platform_0_0 (platform.c:734) forwards SIX arguments and
-    // came out as `CreateEntity_Platform(0, 0, a0, (u16)a1)`. 420 of the 515 functions this model
-    // newly lifted have that shape, so it is the common case, not a corner.
+    // offsets are inside the frame and nothing this function does ever reloads them, so modelling
+    // them as locals makes them dead defs and DCE deletes them — the arguments vanish from the call
+    // with no diagnostic. Ground truth: sa3's CreateEntity_Platform_0_0 (platform.c:734) forwards
+    // SIX arguments and came out as `CreateEntity_Platform(0, 0, a0, (u16)a1)`.
     //
-    // "Inside my frame" therefore does NOT mean "private": the outgoing area belongs to the callee,
-    // which may even assign to a stack parameter. Recovering it is the dual of the incoming-argument
-    // capability and is not built, so a function that calls gets no slot model at all. Blunt on
-    // purpose — the alternative is guessing which reserved bytes are arguments.
-    if (asmBlocks.some((ab) => ab.instrs.some((ins) => ins.mnemonic === 'bl' || ins.mnemonic === 'blx'))) {
-      return false;
+    // "Inside my frame" therefore does not mean "private": the outgoing area belongs to the callee,
+    // which may even assign to a stack parameter. Consuming those stores as call arguments is the
+    // dual of the incoming-argument capability and is not built — so what this can do is prove that
+    // a function HAS no outgoing area, and refuse otherwise. Two conditions, and they cover
+    // different escapes:
+    //
+    //   (a) every slot store must be reloaded somewhere in this function. An outgoing argument is
+    //       read by the CALLEE, never by the caller, so a store this function never reads back is
+    //       the signature of one. This is what catches an argument set up in a different block from
+    //       its call.
+    //   (b) no block may hold a slot store followed by a `bl` with no reload of that offset in
+    //       between. This catches the store that IS reloaded later for an unrelated purpose and so
+    //       slips past (a) — and it is where agbcc actually puts argument setup, immediately before
+    //       the call.
+    //
+    // (b) is calibration, not proof: it assumes argument setup is not hoisted out of the calling
+    // block, which is true of every agbcc function in the corpus but is not a theorem. (a) is the
+    // one that holds unconditionally, and the two are kept together for that reason. A call-free
+    // function is unaffected by either — with no call there is no outgoing area, and a never-reloaded
+    // store there is an ordinary dead local.
+    const calls = asmBlocks.some((ab) => ab.instrs.some((i) => i.mnemonic === 'bl' || i.mnemonic === 'blx'));
+    if (calls) {
+      const slotAcc = (ins: Instr) => {
+        const a = spMemAccess(ins);
+        return a && !a.regOff && a.width === 4 && a.off >= 0 && a.off < localArea ? a.off : null;
+      };
+      const isStore = (ins: Instr) => /^str/.test(ins.mnemonic);
+      const reloaded = new Set<number>();
+      for (const ab of asmBlocks) {
+        for (const ins of ab.instrs) {
+          const off = slotAcc(ins);
+          if (off !== null && !isStore(ins)) {
+            reloaded.add(off);
+          }
+        }
+      }
+      for (const ab of asmBlocks) {
+        const pending = new Set<number>();
+        for (const ins of ab.instrs) {
+          const off = slotAcc(ins);
+          if (off !== null) {
+            if (isStore(ins)) {
+              if (!reloaded.has(off)) {
+                return false; // (a) stored and never read back — an argument, or unrepresentable
+              }
+              pending.add(off);
+            } else {
+              pending.delete(off);
+            }
+          } else if ((ins.mnemonic === 'bl' || ins.mnemonic === 'blx') && pending.size > 0) {
+            return false; // (b) a store reaches a call unread
+          }
+        }
+      }
     }
     // A `pop`/`ldm` off sp READS frame memory, and push/pop are transparent to dataflow, so a pop
     // taken while the local area is still reserved reads a slot this model has retargeted into SSA

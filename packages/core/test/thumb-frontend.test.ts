@@ -477,6 +477,35 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     expect(() => decompile('f', below, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
   });
 
+  test('a call only disables the slot model when it could be RECEIVING a stack argument', () => {
+    // The first cut refused the model for any function containing a call, because agbcc puts
+    // outgoing arguments 5+ at the bottom of the frame and modelling them as locals deletes them.
+    // That is far broader than the hazard: a function whose every slot is read back before any call
+    // has no outgoing area at all. Two conditions replace the blanket refusal — see slotModelSafe.
+    //
+    // Reloaded before the call, so the slot is a local and the model applies:
+    const localAcrossCall =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tldr\tr4, [sp]\n\tbl\tg\n' +
+      '\tadd\tr0, r4, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    // (the call's arity is fallbackArgc's guess and not this test's subject — what matters is that
+    // the function LIFTS, where the blanket refusal declined it)
+    expect(decompile('f', localAcrossCall, ARMV4T_AGBCC).source).toBe(
+      's32 f(s32 a0) {\n    g(a0);\n    return a0 + 1;\n}\n',
+    );
+    // (a) stored and never read back anywhere — the signature of an outgoing argument, including
+    // one set up in a different block from its call
+    const neverRead =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tb\t.L2\n.L2:\n\tbl\tg\n' +
+      '\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(() => decompile('f', neverRead, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+    // (b) reloaded LATER, so (a) passes — but the store still reaches a call unread, which is
+    // exactly where agbcc puts argument setup
+    const readsAfterCall =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tbl\tg\n\tldr\tr4, [sp]\n' +
+      '\tadd\tr0, r4, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(() => decompile('f', readsAfterCall, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+  });
+
   test('a gap in the slots read still yields ABI-correct offsets', () => {
     // frame 8, so [sp,#0xc] is argument 6 (index 5) and argument 5 is never read. Naming downstream
     // is POSITIONAL, so minting only the slot that was read would put the parameter at argument 5's
