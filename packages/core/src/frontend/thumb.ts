@@ -27,14 +27,7 @@ import { FrontendUnsupportedError } from './errors';
 import { assertInputFormat } from './format';
 import type { Frontend } from './frontend';
 import { opaqueDest } from './opaque';
-import {
-  type GuessedCallSite,
-  abiSortEntryParams,
-  fallbackArgc,
-  makeSsaBuilder,
-  stackSlotKey,
-  trimClobberedCallArgs,
-} from './ssa';
+import { abiSortEntryParams, fallbackArgc, makeSsaBuilder, stackSlotKey } from './ssa';
 
 interface Instr {
   /** the CANONICAL spelling — legacy names are normalised (see LEGACY_MNEMONICS) so that every
@@ -1865,29 +1858,10 @@ export function lift(
   //
   // Known residual, zero inhabitants: `pop {sp}` never reaches here (push/pop are skipSafe in the
   // opaque policy), so it stays silently transparent. ARMv4T Thumb cannot encode sp in a pop reglist.
-  // What the scan sees of the caller-saved clobber, for GUESSED call arities only (frontend/ssa.ts
-  // trimClobberedCallArgs). Recorded here rather than re-derived from the instructions, so nothing
-  // has to duplicate "which register does this mnemonic write" — a missed write would UNDER-count
-  // an arity, which drops a real argument silently.
-  const argRegSet = new Set(target.argRegs);
-  const freshAtEnd = new Map<number, Set<string>>(); // argRegs written since the block's last call
-  const callsIn = new Set<number>(); // blocks that call
-  const guessedCalls: GuessedCallSite[] = [];
-  const markWrite = (r: string, b: number) => {
-    if (argRegSet.has(r)) {
-      let s = freshAtEnd.get(b);
-      if (!s) {
-        freshAtEnd.set(b, (s = new Set()));
-      }
-      s.add(r);
-    }
-  };
-
   const writeData = (r: string, b: number, v: Value): void => {
     if (isSpReg(r)) {
       throw spAsDataError();
     }
-    markWrite(r, b);
     writeVar(r, b, v);
   };
 
@@ -2517,20 +2491,14 @@ export function lift(
           const res = mkValue(T.unk(32));
           const callOp = mkOp('call', { operands: args, results: [res], attrs: { target: targetSym } });
           irb.ops.push(callOp);
-          // A GUESSED arity is revisited once the whole function is lifted: only then is it known
-          // whether every path to here passes through another call, which would have clobbered the
-          // argument registers this guess just read.
+          // A GUESSED arity is revisited in `finish()`: only once the whole function is lifted is it
+          // known whether every path to here passes through another call, which would have clobbered
+          // the argument registers this guess just read.
           if (declared === undefined) {
-            guessedCalls.push({
-              block: bi,
-              op: callOp,
-              freshBefore: new Set(freshAtEnd.get(bi) ?? []),
-              afterCallInBlock: callsIn.has(bi), // `callsIn` gains bi just below, so this is "an EARLIER call"
-            });
+            ssa.recordGuessedCall(callOp, bi, target.argRegs);
           }
-          callsIn.add(bi);
-          freshAtEnd.set(bi, new Set()); // the callee clobbers r0..r3
-          writeData('r0', bi, res); // …and then defines r0, which IS fresh for the next call
+          ssa.noteCall(bi); // the callee clobbers r0..r3 …
+          writeData('r0', bi, res); // … and then defines r0, which IS fresh for the next call
           break;
         }
         default:
@@ -2603,17 +2571,6 @@ export function lift(
   asmBlocks.forEach((ab, bi) => {
     fillBlock(ab, bi);
     ssa.markFilled(bi);
-  });
-
-  // A guessed arity counted argument registers by reaching definition alone; now that every block's
-  // calls are known, drop the ones an intervening call had already clobbered.
-  trimClobberedCallArgs({
-    argRegs: target.argRegs,
-    preds,
-    blockCount: asmBlocks.length,
-    freshAtEnd,
-    callsIn,
-    sites: guessedCalls,
   });
 
   ssa.finish();
