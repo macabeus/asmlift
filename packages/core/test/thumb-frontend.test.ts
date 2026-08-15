@@ -477,46 +477,48 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     expect(() => decompile('f', below, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
   });
 
-  test('the outgoing area is proven from callee WORDS, and only when they are provable', () => {
+  test('a declared arity may REFUSE the model, and may never accept it', () => {
     const body =
-      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tbl\tg\n\tldr\tr4, [sp]\n' +
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tldr\tr4, [sp]\n\tbl\tg\n' +
       '\tadd\tr0, r4, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
-    // four one-word parameters: the outgoing area is empty, so the slot is a private local even
-    // though it is live across a call
-    expect(
-      decompile('f', body, ARMV4T_AGBCC, { prototypes: { g: { params: ['s32', 's32', 's32', 's32'] } } }).source,
-    ).toContain('g(');
-    // a fifth: the frame HAS an outgoing area, and consuming those stores as call operands is the
-    // dual capability, unbuilt — so refuse
-    expect(() =>
-      decompile('f', body, ARMV4T_AGBCC, { prototypes: { g: { params: ['s32', 's32', 's32', 's32', 's32'] } } }),
-    ).toThrow(/stack pointer used as data/);
-    // pointers are one word
-    expect(decompile('f', body, ARMV4T_AGBCC, { prototypes: { g: { params: ['void *', 'u8 *'] } } }).source).toContain(
-      'g(',
+    // the slot is read back before the call, so the code-reading fallback admits it
+    expect(decompile('f', body, ARMV4T_AGBCC).source).toContain('g(');
+    // …and a callee declared with five parameters PROVES this frame has an outgoing area, whatever
+    // else is unknown. Consuming those stores as call operands is the dual capability, unbuilt.
+    expect(() => decompile('f', body, ARMV4T_AGBCC, { prototypes: { g: { params: 5 } } })).toThrow(
+      /stack pointer used as data/,
     );
-  });
-
-  test('a TRUE fact may never license an acceptance the facts do not entail', () => {
-    // `4 * max(0, params - 4)` is the outgoing area only if every parameter is one word and the
-    // list is complete. Neither holds in general, and the first cut checked neither — so supplying
-    // a TRUTHFUL prototype turned a correct decline into silently wrong C, which is the trade this
-    // frontend refuses, arriving through the door marked "proof".
+    // A declared FOUR proves nothing, so it must not change the verdict either way: a declaration
+    // is a LOWER bound on the words a call pushes. A parameter can occupy more than one word, a
+    // variadic list is a prefix, and a large struct return adds a hidden pointer argument — none of
+    // which any prototype here records. An earlier cut read `arity <= 4` as proof of an empty area,
+    // and then a TRUE fact turned a correct decline into wrong C.
+    expect(decompile('f', body, ARMV4T_AGBCC, { prototypes: { g: { params: 4 } } }).source).toContain('g(');
     const twoStackArgs =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tstr\tr0, [sp]\n\tstr\tr1, [sp, #0x4]\n\tbl\tg\n' +
       '\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r2}\n\tbx\tr2\n';
-    // VARIADIC: `sprintf` truthfully declares two parameters and is routinely handed six. A bare
-    // count cannot rule that out, so a bare count proves nothing.
-    expect(() => decompile('f', twoStackArgs, ARMV4T_AGBCC, { prototypes: { g: { params: 2 } } })).toThrow(
-      /stack pointer used as data/,
-    );
-    // MULTI-WORD: an 8-byte parameter takes two words, so four parameters can still push onto the
-    // stack. `double` is not one word, so the list does not prove an empty area.
-    expect(() =>
-      decompile('f', twoStackArgs, ARMV4T_AGBCC, { prototypes: { g: { params: ['s32', 's32', 's32', 'double'] } } }),
-    ).toThrow(/stack pointer used as data/);
-    // …and with no fact at all it declines too, which is the point: the fact must not make it worse
-    expect(() => decompile('f', twoStackArgs, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+    for (const proto of [undefined, { g: { params: 2 } }, { g: { params: ['s32', 's32', 's32', 'double'] } }]) {
+      expect(() => decompile('f', twoStackArgs, ARMV4T_AGBCC, proto ? { prototypes: proto } : {})).toThrow(
+        /stack pointer used as data/,
+      );
+    }
+  });
+
+  test('a slot store reaching a call unread is judged by PATH, not by listing order', () => {
+    // The store reaches `bl g` through one arm; the other arm's reload must not excuse it. Scanning
+    // per block let a LABEL decide the verdict; scanning the flat listing let BLOCK ORDER decide,
+    // because the reload in the first-listed arm cleared a store that reaches the call through the
+    // second. Same CFG and same semantics either way, so both spellings must agree.
+    const loadArmFirst =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tcmp\tr0, #0\n\tbne\t.L3\n' +
+      '.L2:\n\tldr\tr4, [sp]\n\tadd\tr0, r4, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n' +
+      '.L3:\n\tbl\tg\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    const callArmFirst =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tcmp\tr0, #0\n\tbeq\t.L2\n' +
+      '.L3:\n\tbl\tg\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n' +
+      '.L2:\n\tldr\tr4, [sp]\n\tadd\tr0, r4, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(() => decompile('f', loadArmFirst, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+    expect(() => decompile('f', callArmFirst, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
   });
 
   test('with no arity to prove it, a slot store may not reach a call unread', () => {

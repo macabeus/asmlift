@@ -19,7 +19,7 @@ import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
 import { type Prototypes, protoArity } from '../proto';
 import { RUNTIME_HELPERS } from '../raise/softdiv';
-import { type SymbolMap, lookupInterior, lookupSymbol, symbolsByName } from '../symbols';
+import { type SymbolMap, lookupInterior, lookupSymbol } from '../symbols';
 import type { TargetDescription } from '../target';
 import type { AsmData } from './asmdata';
 import { pushSwitchBr } from './emit';
@@ -1558,147 +1558,126 @@ export function lift(
     // does not mean "private": the outgoing area belongs to the callee, which may even assign to a
     // stack parameter.
     //
-    // How big is that area? The calling convention answers it — `4 * max(0, words - 4)` per call,
-    // largest over all calls — but ONLY given two side conditions, and getting those wrong makes
-    // this worse than the guess it replaces rather than better:
+    // How big is that area? A declared arity bounds it from BELOW — `4 * max(0, arity - 4)` — and
+    // that is all the facts available here can support. It is used in exactly one direction: to
+    // REFUSE. A callee declared with five parameters proves this frame has an outgoing area, and
+    // consuming those stores as call operands is the dual capability, unbuilt, so the model
+    // declines. A callee declared with four proves NOTHING, because a declaration is a lower bound
+    // on the words a call actually pushes:
     //
-    //   * every parameter occupies exactly one word. An 8-byte parameter (`double`, `long long`)
-    //     takes two, and under APCS may straddle r3 and the stack. Counting parameters instead of
-    //     WORDS then reports an empty outgoing area for a call that has one.
-    //   * the parameter list is complete. A variadic callee's declared list is a prefix — `sprintf`
-    //     truthfully declares two parameters and is routinely handed six.
+    //   * a parameter may occupy more than one word (`double`, `long long`, a struct by value),
+    //   * a variadic callee's list is a prefix — `sprintf` truthfully declares two and is handed six,
+    //   * a large struct return adds a hidden pointer argument that appears in no parameter list.
     //
-    // Both were unchecked in the first cut, and the result was that supplying a TRUE fact made the
-    // output silently wrong where supplying nothing declined correctly: `{ sprintf: { params: 2 } }`
-    // turned a decline into `return sprintf(a0, a1)` with both stack arguments deleted. A fact must
-    // never license an acceptance the facts do not entail — it may move a function toward refusal,
-    // or toward a PROVEN acceptance, and nowhere else.
+    // None of those is recorded by `FnProto` or `SymbolSignature`, so no arity here can license an
+    // ACCEPTANCE. An earlier cut treated `arity <= 4` as proof of an empty area and had all three
+    // holes: supplying a TRUE fact (`{ sprintf: { params: 2 } }`) turned a correct decline into
+    // `return sprintf(a0, a1)` with both stack arguments deleted, where supplying nothing declined.
+    // A fact must only ever move a function toward refusal — never toward an acceptance the facts
+    // do not entail. Refusing on a lower bound is monotone in exactly that way: a true arity larger
+    // than declared can only make the area bigger, and the answer is already "decline".
     //
-    // So a bare arity count proves nothing: it carries no widths, and it cannot rule out a variadic
-    // callee. Only a list of parameters this can individually size to one word does — which is a
-    // real narrowing, and the honest one. Everything else falls to the calibration below, whose
-    // conservatism is the safe direction.
-    const byName = symbols ? symbolsByName(symbols) : null;
-    const WORD = target.argRegs.length; // registers before the stack area begins
-    const oneWord = (spelling: string): boolean =>
-      /^(u8|s8|u16|s16|u32|s32|int|unsigned|char|short|long|float)$/.test(spelling.trim()) ||
-      spelling.trim().endsWith('*');
-    const provenWords = (c: string): number | undefined => {
-      const proto = prototypes[c] ?? RUNTIME_HELPERS[c];
-      if (proto?.params !== undefined) {
-        // a typed list, every entry provably one word — a bare count cannot prove anything
-        return Array.isArray(proto.params) && proto.params.every(oneWord) ? proto.params.length : undefined;
-      }
-      const sig = byName?.get(c)?.signature;
-      if (sig === undefined) {
-        return undefined;
-      }
-      // DWARF facts: a pointer is one word, anything sized over a word is not, an unsized type
-      // cannot be judged. SymbolSignature carries no variadic flag, so a list that sizes cleanly is
-      // still only as good as that omission — noted at the type, not papered over here.
-      return sig.params.every((f) => f.pointer === true || (f.size !== null && f.size <= 4))
-        ? sig.params.length
-        : undefined;
-    };
-    const callees: string[] = [];
+    // Measured, this costs nothing it was buying: forcing the old acceptance path off changed 0
+    // lift/decline verdicts across 2686 corpus functions (sa3's vendored map carries no signatures
+    // at all), so the path that carried those holes was never load-bearing.
     for (const ab of asmBlocks) {
       for (const ins of ab.instrs) {
-        if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') {
-          callees.push(ins.ops[0] ?? '');
+        if (ins.mnemonic !== 'bl' && ins.mnemonic !== 'blx') {
+          continue;
+        }
+        const c = ins.ops[0] ?? '';
+        const arity = protoArity(prototypes[c]) ?? protoArity(RUNTIME_HELPERS[c]);
+        if (arity !== undefined && arity > target.argRegs.length) {
+          return false; // this frame has an outgoing area, whatever else is unknown about it
         }
       }
     }
-    if (callees.length > 0) {
-      let proven = 0;
-      let allKnown = true;
-      for (const c of callees) {
-        const words = provenWords(c);
-        if (words === undefined) {
-          allKnown = false;
-          break;
-        }
-        proven = Math.max(proven, 4 * Math.max(0, words - WORD));
-      }
-      if (allKnown) {
-        // PROVEN. A frame whose outgoing area is non-empty still declines: consuming those stores as
-        // call operands is the dual capability and is not built. An empty one means every slot in
-        // this frame is genuinely private, calls or not.
-        if (proven > 0) {
-          return false;
-        }
-      } else {
-        // UNPROVEN — a callee whose arity nothing declares. Two conditions stand in, and they cover
-        // different escapes:
-        //   (a) every slot store must be reloaded somewhere in this function. An outgoing argument
-        //       is read by the CALLEE, never by the caller, so a store never read back is the
-        //       signature of one — including one set up in a different block from its call.
-        //   (b) no block may hold a slot store followed by a `bl` with no reload of that offset in
-        //       between; that is where agbcc puts argument setup.
-        // Neither is sound alone and the pair is not either, so keep two things straight about them.
-        //
-        // (b) is the one doing the work: measured over the corpus's call-containing functions, 87
-        // are held by (b) alone and 3 by (a) alone. Calling (a) "the unconditional one" was
-        // backwards. (a)'s real theorem is not "the callee reads it, the caller doesn't" — it is
-        // that agbcc's ACCUMULATE_OUTGOING_ARGS puts the outgoing area at the BOTTOM of localArea,
-        // disjoint from the locals, so no local load can ever land on an argument offset. State it
-        // that way, because the disjointness is what a tail-merged call site breaks.
-        //
-        // agbcc DOES hoist argument setup out of the calling block — `Task_BonusFlower_Spawn` (sa3
-        // bonus_game_enemies) tail-merges two call sites, storing argument 5 in both predecessors
-        // with the `bl` in the join, and three more corpus functions do the same. An earlier version
-        // of this scan was per-block and admitted exactly that, with a LABEL deciding accept versus
-        // refuse. It runs over the whole listing now, which is why those decline.
-        const slotAcc = (ins: Instr) => {
-          const a = spMemAccess(ins);
-          return a && !a.regOff && a.width === 4 && a.off % 4 === 0 && a.off >= 0 && a.off < localArea ? a.off : null;
-        };
-        const isStore = (ins: Instr) => /^str/.test(ins.mnemonic);
-        // Entry-REACHABLE blocks only. A reload in dead code is not evidence that live code reads
-        // the slot back, and counting it lets an argument store satisfy (a) on the strength of an
-        // instruction that never executes.
-        const live = new Set<number>([0]);
-        for (let changed = true; changed;) {
-          changed = false;
-          for (let b = 0; b < asmBlocks.length; b++) {
-            if (!live.has(b)) {
-              continue;
-            }
-            for (let s = 0; s < asmBlocks.length; s++) {
-              if (preds[s].includes(b) && !live.has(s)) {
-                live.add(s);
-                changed = true;
-              }
-            }
+    // Nothing above could prove the area empty, so fall back to reading the CODE. Two conditions,
+    // covering different escapes:
+    //   (a) every slot store must be reloaded somewhere reachable. An outgoing argument is read by
+    //       the CALLEE, never by the caller, so a store never read back is the signature of one.
+    //   (b) no slot store may reach a `bl` unread ALONG A PATH.
+    //
+    // Neither is sound alone and the pair is not either, so keep two things straight. (a)'s real
+    // theorem is not "the callee reads it, the caller does not" — it is that agbcc's
+    // ACCUMULATE_OUTGOING_ARGS puts the outgoing area at the BOTTOM of localArea, disjoint from the
+    // locals, so no local load can land on an argument offset. That disjointness is what a
+    // tail-merged call site breaks, and agbcc DOES tail-merge: `Task_BonusFlower_Spawn` (sa3
+    // bonus_game_enemies) stores argument 5 in both predecessors with the `bl` in the join.
+    //
+    // (b) is a forward may-analysis over the CFG, and it has been wrong twice in the other
+    // direction. Scanning per block let a LABEL decide accept versus refuse; scanning the flat
+    // listing let BLOCK ORDER decide, because a load in one arm of a branch cleared a store that
+    // reaches the call through the other arm — swap the arms in the listing, same CFG and same
+    // semantics, and the verdict flipped. Only the path-sensitive form is stable under layout.
+    //
+    // Only for a function that CALLS. With no call there is no outgoing area to mistake a local
+    // for, and a never-reloaded store there is an ordinary dead local — which PR #30 modelled and
+    // which must keep working.
+    if (asmBlocks.some((ab) => ab.instrs.some((i) => i.mnemonic === 'bl' || i.mnemonic === 'blx'))) {
+      const slotAcc = (ins: Instr) => {
+        const a = spMemAccess(ins);
+        return a && !a.regOff && a.width === 4 && a.off % 4 === 0 && a.off >= 0 && a.off < localArea ? a.off : null;
+      };
+      const isStore = (ins: Instr) => /^str/.test(ins.mnemonic);
+      // Entry-REACHABLE blocks only: a reload in dead code is not evidence that live code reads the
+      // slot back, and counting it lets an argument store satisfy (a) on the strength of an
+      // instruction that never executes.
+      const live = new Set<number>([0]);
+      for (let changed = true; changed;) {
+        changed = false;
+        for (let b = 0; b < asmBlocks.length; b++) {
+          if (live.has(b)) {
+            continue;
+          }
+          if (preds[b].some((q) => live.has(q))) {
+            live.add(b);
+            changed = true;
           }
         }
-        const reloaded = new Set<number>();
+      }
+      const reloaded = new Set<number>();
+      for (const b of live) {
+        for (const ins of asmBlocks[b].instrs) {
+          const off = slotAcc(ins);
+          if (off !== null && !isStore(ins)) {
+            reloaded.add(off);
+          }
+        }
+      }
+      // (b): `pendingIn[b]` = offsets stored and not yet reloaded on SOME path into b.
+      const pendingOut: Array<Set<number>> = asmBlocks.map(() => new Set<number>());
+      for (let changed = true; changed;) {
+        changed = false;
         for (let b = 0; b < asmBlocks.length; b++) {
           if (!live.has(b)) {
             continue;
           }
-          for (const ins of asmBlocks[b].instrs) {
-            const off = slotAcc(ins);
-            if (off !== null && !isStore(ins)) {
-              reloaded.add(off);
+          const inSet = new Set<number>();
+          for (const q of preds[b]) {
+            for (const off of pendingOut[q]) {
+              inSet.add(off);
             }
           }
-        }
-        const pending = new Set<number>();
-        for (const ab of asmBlocks) {
-          for (const ins of ab.instrs) {
+          const cur = new Set(inSet);
+          for (const ins of asmBlocks[b].instrs) {
             const off = slotAcc(ins);
             if (off !== null) {
               if (isStore(ins)) {
                 if (!reloaded.has(off)) {
                   return false; // (a)
                 }
-                pending.add(off);
+                cur.add(off);
               } else {
-                pending.delete(off);
+                cur.delete(off);
               }
-            } else if ((ins.mnemonic === 'bl' || ins.mnemonic === 'blx') && pending.size > 0) {
-              return false; // (b)
+            } else if ((ins.mnemonic === 'bl' || ins.mnemonic === 'blx') && cur.size > 0) {
+              return false; // (b) — a store reaches this call unread along some path
             }
+          }
+          if (cur.size !== pendingOut[b].size || [...cur].some((o) => !pendingOut[b].has(o))) {
+            pendingOut[b] = cur;
+            changed = true;
           }
         }
       }
