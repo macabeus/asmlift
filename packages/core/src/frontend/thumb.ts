@@ -1217,11 +1217,13 @@ export function lift(
   //
   // So this is not "one tool with two spellings" — it is the compiler's convention against the
   // disassembler's, and asmlift reads both kinds of file. (An earlier commit message on this branch
-  // claimed agbcc emitted both; it does not, and the counts above are the check that settles it.) Everything else that writes sp is a
+  // claimed agbcc emitted both; it does not, and the counts above are the check that settles it.)
+  //
+  // Everything else that writes sp is a
   // frame change this frontend cannot model: a register-sized adjustment (`add sp, r4`, agbcc's
   // way of spelling a frame too large for the 7-bit immediate), a computed stack pointer
-  // (`add sp, r0, #4`), or `mov sp, rN`. Those must DECLINE, not vanish — dropping them silently
-  // deletes the frame change while the function keeps compiling, which is the exact
+  // (`add sp, r0, #4`), or `mov sp, rN`. Those must DECLINE, not vanish — dropping them deletes a
+  // frame change with no diagnostic, which is the exact
   // loud-becomes-silent trade this frontend's guards exist to prevent.
   //
   // Flag-setting spellings (`adds`/`subs`) are excluded deliberately: ARMv4T's SP-adjust encoding
@@ -1246,14 +1248,17 @@ export function lift(
 
   // Reading sp as a DATA operand means an address-taken local (`add rD, sp, #N` = `&local`),
   // an sp-relative spill slot (`ldr/str …, [sp, #N]`), or frame-pointer arithmetic — none
-  // modellable without a stack abstraction. sp is never WRITTEN (sp-dest ops are transparent
-  // frame bookkeeping), so Braun SSA would materialize it as a fabricated PHANTOM parameter that
-  // scrambles the signature. Fail LOUD instead, mirroring MIPS (`isStackPtr`) and PPC (`r1`).
+  // modellable without a stack abstraction. Without this guard Braun SSA would materialize sp as a
+  // fabricated PHANTOM parameter that scrambles the signature. Fail LOUD instead, mirroring MIPS
+  // (`isStackPtr`) and PPC (`r1`).
+  //
+  // sp is never WRITTEN either — but by `writeData` declining, NOT because sp-dest ops are inert.
+  // That was this file's premise until the frame-adjust whitelist landed, and it was wrong: five
+  // decode arms wrote sp and dropped it silently. The single transparent shape is `sp = sp ± imm`,
+  // whitelisted in the add/sub arms. Read and write are now guarded symmetrically.
   const readData = (r: string, b: number): Value => {
     if (isSpReg(r)) {
-      throw new FrontendUnsupportedError(
-        `cannot lift '${name}': stack pointer used as data (address-taken local / sp-relative slot / frame arithmetic) — local stack frames not supported`,
-      );
+      throw spAsDataError();
     }
     if (r === 'pc' || r === 'r15') {
       // A pc-relative literal load is rewritten to a pool label before reaching here (decode's
@@ -1337,7 +1342,12 @@ export function lift(
       // to write, so a bad sp destination would never reach the write. It is only reachable from the
       // add/sub arms, which have already let the whitelisted frame adjust `break` out — so an sp
       // destination here is by construction NOT that shape (`add sp, r4`: a register-sized frame
-      // adjustment, 4 real sites in the sa3 checkout, previously dropped in silence).
+      // adjustment, how agbcc spells a frame too large for the 7-bit immediate).
+      //
+      // Honesty about what this is worth: the 4 real `add sp, rN` sites in the sa3 checkout all sit
+      // in functions that ALSO do `mov rN, sp` 70+ times, so they declined before this guard and
+      // decline after it. No wrong C was ever emitted by this shape. The guard is defence in depth
+      // for the day a stack capability makes those functions liftable — not a miscompile fixed.
       //
       // This looked dead during review and is not: it becomes reachable the moment the arm-local
       // guards are removed, which is exactly what the test at 'add sp, r4' pins.
