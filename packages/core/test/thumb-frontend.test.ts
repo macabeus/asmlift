@@ -294,6 +294,39 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     expect(() => decompile('f', later, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
   });
 
+  test('a callee-saved live-in never takes an ARGUMENT slot from a stack argument', () => {
+    // A `/^r(\d+)$/` rank sent `sl`/`sb` to 99 but ranked `r8` at 8 and `r4` at 4 — invisible while
+    // nothing else occupied ranks >= 4, a positional miscompile once stack arguments ranked there.
+    // sa3's sub_80B6B3C is the live one: 10 arguments, `mov r7, r8` in its prologue, so the r8
+    // live-in and @sarg8 tied at 8 and the stable sort gave the slot to whichever was read first —
+    // the prologue. ABI argument 8 came out as `a9`, and everything after it shifted.
+    const hi =
+      'f:\n\tpush\t{r4, r5, r6, r7, lr}\n\tmov\tr7, r8\n\tpush\t{r7}\n\tldr\tr0, [sp, #0x28]\n\tadd\tr0, r0, r7\n\tbx\tlr\n';
+    const src = decompile('f', hi, ARMV4T_AGBCC).source;
+    // ten parameters, and the STACK argument holds slot 8 — the r8 artifact ranks after them all
+    expect(src).toContain('s32 f(s32 a0, s32 a1, s32 a2, s32 a3, s32 a4, s32 a5, s32 a6, s32 a7, s32 a8, s32 a9)');
+    expect(src).toContain('return a8 + a9;');
+    // the same tie at the low end, where a phantom `r4` would otherwise outrank argument 5
+    const lo = 'f:\n\tpush\t{r5, lr}\n\tadd\tr5, r4, #1\n\tldr\tr0, [sp, #0x8]\n\tadd\tr0, r0, r5\n\tbx\tlr\n';
+    expect(decompile('f', lo, ARMV4T_AGBCC).source).toContain('return a4 + (a5 + 1);');
+  });
+
+  test('asserting a parameter does not invent a value reaching anything', () => {
+    // ensureParam must not write into `defs`: a parameter the convention PROVES exists is not
+    // evidence that a value reaches a call site. hasReachingDef feeds fallbackArgc, so a def here
+    // silently raised the guessed arity of every prototype-less call in the function — the callee
+    // below took four arguments purely because its CALLER has a fifth, three of them registers the
+    // calling block never set up.
+    const withStackArg = 'f:\n\tpush\t{r4, lr}\n\tldr\tr4, [sp, #8]\n\tbl\tunknown\n\tbx\tlr\n';
+    const src = decompile('f', withStackArg, ARMV4T_AGBCC).source;
+    expect(src).toContain('s32 f(s32 a0, s32 a1, s32 a2, s32 a3, s32 a4)');
+    expect(src).toContain('return unknown();'); // the arity the same call gets without the stack arg
+    // control: the identical call in a function with no stack argument
+    expect(decompile('f', 'f:\n\tpush\t{r4, lr}\n\tbl\tunknown\n\tbx\tlr\n', ARMV4T_AGBCC).source).toContain(
+      'return unknown();',
+    );
+  });
+
   test('a gap in the slots read still yields ABI-correct offsets', () => {
     // frame 8, so [sp,#0xc] is argument 6 (index 5) and argument 5 is never read. Naming downstream
     // is POSITIONAL, so minting only the slot that was read would put the parameter at argument 5's

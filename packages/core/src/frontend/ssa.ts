@@ -67,6 +67,14 @@ export function makeSsaBuilder(name: string, blockCount: number, preds: number[]
   const incompletePhis: Array<Map<string, Value>> = irBlocks.map(() => new Map());
   const phiBlock = new Map<Value, number>();
   const paramReg = new Map<Value, string>();
+  // Parameters created by ensureParam that nothing has read yet. They are deliberately NOT in
+  // `defs`: a parameter asserted because a calling convention proves it exists is not evidence that
+  // a VALUE reaches anything, and writing one into `defs` would say it does. That distinction is
+  // load-bearing — `hasReachingDef` feeds `fallbackArgc`, so a def here silently raises the guessed
+  // arity of every prototype-less call in the function, making it pass registers the calling block
+  // never set up (`unknown(1)` became `unknown(1, a1, a2, a3)`). The first read adopts the value
+  // from here instead of minting a second parameter for the same key.
+  const obligedParams: Array<Map<string, Value>> = irBlocks.map(() => new Map());
 
   // `preds` lists an entry per CFG EDGE; these are the distinct predecessor BLOCKS.
   const distinctPreds = (b: number): number[] => [...new Set(preds[b])];
@@ -94,6 +102,14 @@ export function makeSsaBuilder(name: string, blockCount: number, preds: number[]
     const ps = distinctPreds(b);
     if (ps.length === 0) {
       // live-in with no predecessor: an incoming argument register → function parameter.
+      // If one was already asserted for this key (ensureParam), adopt it — minting a second
+      // parameter for the same key would put the key in the signature twice.
+      const obliged = obligedParams[b].get(reg);
+      if (obliged !== undefined) {
+        obligedParams[b].delete(reg);
+        defs[b].set(reg, obliged);
+        return obliged;
+      }
       const p = mkValue(T.unk(32));
       irBlocks[b].params.push(p);
       defs[b].set(reg, p);
@@ -160,19 +176,16 @@ export function makeSsaBuilder(name: string, blockCount: number, preds: number[]
     }
     for (const p of irBlocks[b].params) {
       if (paramReg.get(p) === key) {
-        return;
+        return; // already a parameter, however it got there
       }
-    }
-    if (!defs[b].has(key)) {
-      readVar(key, b);
-      return;
     }
     const p = mkValue(T.unk(32));
     irBlocks[b].params.push(p);
-    paramReg.set(p, key); // ranked by the ABI sort like any other parameter; deliberately no defs entry
+    paramReg.set(p, key); // ranked by the ABI sort like any other parameter
+    obligedParams[b].set(key, p);
   };
 
-  const hasReachingDef =(reg: string, b: number, seen = new Set<number>()): boolean => {
+  const hasReachingDef = (reg: string, b: number, seen = new Set<number>()): boolean => {
     if (defs[b].has(reg)) {
       return true;
     }
