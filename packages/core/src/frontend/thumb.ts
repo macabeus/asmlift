@@ -97,7 +97,11 @@ const LEGACY_MNEMONICS: Readonly<Record<string, string>> = Object.assign(Object.
 // An offset far above the frame cannot be an argument — agbcc passes at most a handful on the
 // stack, and an absurd index would mint a signature with hundreds of parameters from one bad
 // offset. 16 is well past any real agbcc call and still refuses nonsense loudly.
-const MAX_STACK_ARG_INDEX = 16;
+//
+// It bounds TOTAL arity, register arguments included (12 stack slots on a 4-register ABI), because
+// that is the unit the index it is compared against is counted in. A refusal bound, not an ABI
+// fact: nothing may read it as a statement about how many arguments the convention allows.
+const MAX_RECOVERED_ARITY = 16;
 
 function canonicalMnemonic(mn: string): string {
   return LEGACY_MNEMONICS[mn] ?? mn;
@@ -254,6 +258,29 @@ function expandRegList(tokens: string[]): string[] {
     }
   }
   return out;
+}
+
+// Expand a register list and vouch that every entry is a DEFINITE register, or return null.
+//
+// The two consumers tokenize differently (the ldm/stm arm has a base register to slice off, the
+// frame walk does not), so each keeps its own tokenizing — but the VALIDATION has to be one
+// function, because the two hand-rolled versions had drifted to unequal strength. The frame walk
+// required every token to be a real register; the ldm/stm arm only rejected a leftover `-`, so
+// `ldmia r1!, {foo}` lifted and emitted `s32 f(s32 a0, s32 a1) { return a0; }` — a parameter
+// fabricated from a token that names no register, which is the phantom this frontend's guards
+// exist to prevent.
+//
+// An unexpandable range leaves its raw `-` token (see expandRegList) and fails here; so does an
+// unknown alias, which a `Number.isNaN(regNum(t))` test would MISS, since regNum returns undefined
+// for one and `Number.isNaN(undefined)` is false. An empty list is a malformed list, not an empty
+// transfer. Lowercase-only is deliberate and free: an uppercase mnemonic declines as unmodelled
+// long before either consumer runs.
+function definiteRegList(tokens: string[]): string[] | null {
+  const list = expandRegList(tokens);
+  if (list.length === 0) {
+    return null;
+  }
+  return list.every((s) => /^r\d+$/.test(s) || s in REG_NUM) ? list : null;
 }
 
 // Split an operand list on commas that are NOT inside brackets, so a memory operand like
@@ -1294,14 +1321,12 @@ export function lift(
   //
   // `push {a,b,c}` deepens by 4 per register; `sub sp, #N` and `add sp, sp, #-N` deepen by N.
   //
-  // Returns null when the depth cannot be computed exactly FROM A RECOGNISED FRAME OPERATION.
-  // It does NOT return null for an sp write it does not model at all — `add sp, r4`, `mov sp, rN`
-  // and friends yield 0 here and would leave a stale depth. That is safe only because writeData
-  // declines every one of them before the depth is ever used. The whole capability rests on the
-  // depth being exact, so an approximation is never acceptable: understate the frame and a local
-  // sits above the computed top and is minted as a parameter reading uninitialised stack. A null
-  // poisons the depth for the rest of the block (spDepthKnown), which disables argument recovery
-  // and leaves every `[sp,#N]` to decline as before.
+  // Returns null whenever the depth cannot be computed exactly — including for any write to sp this
+  // does not model. The whole capability rests on the depth being exact, so an approximation is
+  // never acceptable: understate the frame and a local sits above the computed top and gets minted
+  // as a parameter reading uninitialised stack. A null poisons the depth for the rest of the block
+  // (spDepthKnown), which disables argument recovery and leaves every `[sp,#N]` to decline as
+  // before. Nothing here may return a NUMBER for a shape it merely failed to recognise.
   const spDelta = (ins: { mnemonic: string; ops: string[] }): number | null => {
     const m = ins.mnemonic;
     if (m === 'push' || m === 'pop') {
@@ -1310,7 +1335,10 @@ export function lift(
       // parameter reading uninitialised stack. Caught by a probe, not by the corpus: agbcc emits no
       // range pushes and 0 of the 743 benchmark rows contain one, but GNU as accepts them and the
       // disassembly path can produce them.
-      const list = expandRegList(
+      // Counting comma tokens instead would undercount `{r4-lr}` as two registers, and an
+      // unexpandable range must poison the depth rather than be guessed at — definiteRegList owns
+      // both rules, and owns them for the ldm/stm arm too.
+      const list = definiteRegList(
         ins.ops
           .join(',')
           .replace(/[{}]/g, '')
@@ -1318,12 +1346,7 @@ export function lift(
           .map((r) => r.trim())
           .filter(Boolean),
       );
-      // Every token must be a DEFINITE register. expandRegList deliberately leaves an
-      // alias-endpoint range (`{r4-lr}`) unexpanded, surfacing `lo, hi, rawToken` so a consumer
-      // sees the leftover `-` and refuses — the ldm/stm arm does exactly that. Counting the two
-      // endpoints instead would undercount `{r4-lr}` as two registers; an unknown alias would slip
-      // through a NaN test too, since regNum returns undefined and Number.isNaN(undefined) is false.
-      if (!list.every((s) => /^r\d+$/.test(s) || s in REG_NUM)) {
+      if (list === null) {
         return null;
       }
       return (m === 'push' ? 1 : -1) * 4 * list.length;
@@ -1334,6 +1357,16 @@ export function lift(
         const v = imm(off);
         return m === 'sub' ? v : -v;
       }
+    }
+    // Any OTHER write to sp poisons the depth. This used to fall through to 0 — "no change" — for
+    // shapes it does not model (`add sp, r4`, `mov sp, rN`, `add sp, r0, #4`), which was safe only
+    // because writeData declines every one of them elsewhere. That is the same
+    // enumeration-of-arms mistake writeData itself exists to end, exported one function away: a
+    // number meaning "no change" is the wrong answer to "I do not understand this". Now the walk is
+    // self-sufficient — unknown ⇒ depth poisoned ⇒ decline — and writeData's refusal is an
+    // independent second guarantee instead of a load-bearing one.
+    if (isSpReg(ins.ops[0])) {
+      return null;
     }
     return 0;
   };
@@ -1389,7 +1422,7 @@ export function lift(
       // separate slot-promotion capability
     }
     const index = target.argRegs.length + (off - depth) / 4;
-    return index < MAX_STACK_ARG_INDEX ? index : null; // a wild offset must not mint a
+    return index < MAX_RECOVERED_ARITY ? index : null; // a wild offset must not mint a
     // 400-parameter signature
   };
 
@@ -1705,7 +1738,11 @@ export function lift(
             break;
           }
           const baseReg = reg(writeback ? baseTok.slice(0, -1) : baseTok);
-          const list = expandRegList(
+          // Anything but a list of definite registers — an unexpandable range (alias endpoint,
+          // e.g. `r4-lr`), a token naming no register, an empty list — leaves the transfer set
+          // ambiguous, so degrade to the loud opaque rather than guess. Checking only for the
+          // leftover `-` let `{foo}` through and fabricated a parameter out of it.
+          const list = definiteRegList(
             ins.ops
               .slice(1)
               .join(',')
@@ -1714,13 +1751,7 @@ export function lift(
               .map((r) => r.trim())
               .filter(Boolean),
           );
-          // An unexpandable range (alias endpoint, e.g. `r4-lr`) leaves a raw `-` token — the
-          // exact transfer set is ambiguous, so degrade to the loud opaque rather than guess.
-          if (list.some((r) => r.includes('-'))) {
-            emitOpaqueDest(ins);
-            break;
-          }
-          if (list.length === 0) {
+          if (list === null) {
             emitOpaqueDest(ins);
             break;
           }

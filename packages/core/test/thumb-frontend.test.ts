@@ -140,6 +140,19 @@ describe('pre-UAL mnemonic spellings', () => {
     expect(dc('f', '\tldmfd\tr1, {r0}\n\tbx\tlr\n').source).toContain('*a0');
   });
 
+  test('a register list naming no register degrades loud, it does not invent one', () => {
+    // The ldm/stm arm used to reject only a leftover `-` from an unexpandable range, so a token
+    // naming nothing at all passed as if it were a register: `ldmia r1!, {foo}` emitted
+    // `s32 f(s32 a0, s32 a1) { return a0; }` — a fabricated parameter, from a list it could not
+    // read. Both this arm and the frame walk now share one definite-register predicate.
+    // It declines outright rather than degrading to an opaque: with no readable list there is no
+    // register destination to hang one on, which is the loudest of the available answers.
+    expect(() => dc('f', '\tldmia\tr1!, {foo}\n\tbx\tlr\n')).toThrow(/unmodelled effect instruction/);
+    expect(() => dc('f', '\tldmia\tr1!, {ip}\n\tbx\tlr\n')).toThrow(/unmodelled effect instruction/);
+    // the well-formed spelling still lifts, so the guard is not simply refusing everything
+    expect(dc('f', '\tldmia\tr1!, {r0}\n\tbx\tlr\n').source).toContain('*a0');
+  });
+
   test('Thumb-1 has no no-writeback LDM: the `!`-less spelling still advances the base', () => {
     // `ldm r1,{r0}` and `ldm r1!,{r0}` assemble to the SAME halfword (0xc901); GNU as warns "this
     // instruction will write back the base register", gba-kit executes both with the base

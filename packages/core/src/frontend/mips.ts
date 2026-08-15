@@ -938,6 +938,13 @@ export function lift(
         // incoming STACK-PASSED argument (5th+ param, O32) or an uninitialised local — neither modelled.
         // Without this, readVar would FABRICATE a phantom entry parameter for the slot, silently emitting a
         // function of wrong arity that returns the wrong argument. Loud-fail instead of miscompiling.
+        //
+        // Those two cases are SEPARABLE, and the Thumb frontend now separates them (frontend/thumb.ts,
+        // incomingArgIndex): a slot at or above the callee's own frame cannot have been written by this
+        // function, so it is an incoming argument; below the frame top it is a local. Doing the same here
+        // needs O32's own frame rule — the 16-byte home area means a stack argument is NOT simply "above
+        // the frame", so the Thumb arithmetic does not carry over — plus ssa.ensureParam for the register
+        // half. Until then this stays one loud decline for both.
         if (!ssa.hasReachingDef(stackSlot(off), bi)) {
           throw new FrontendUnsupportedError(
             `cannot lift '${name}': load from stack slot sp@${off} that was never stored ` +
