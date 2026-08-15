@@ -103,6 +103,16 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
       ),
     ).toThrow(/CTR loop body contains 'bl'.*clobbers CTR/);
   });
+  // A guessed call arity reads the ARGUMENT REGISTERS, and r3.. are volatile under the EABI: a value
+  // the first `bl` sits between cannot be an argument to the second one. Counting it invents an
+  // argument — `func(1, 7)` for a call the caller set up with one — which is a wrong-code class, not
+  // a formatting one. Same trim as the Thumb frontend (frontend/ssa.ts trimClobberedCallArgs).
+  test('a guessed call arity drops the argument registers an earlier call clobbered', () => {
+    const src = dis('f', '0:\tli      r4,7\n4:\tbl      40 <foo>\n8:\tli      r3,1\nc:\tbl      50 <bar>\n10:\tblr\n');
+    expect(src).toContain('func(1)');
+    expect(src).not.toContain('func(1, 7)');
+  });
+
   test('an indirect branch (bctr) FAILS LOUD too', () => {
     expect(() => dis('jumptab', '0:\tbctr\n')).toThrow(/unmodelled control transfer 'bctr'/);
   });
