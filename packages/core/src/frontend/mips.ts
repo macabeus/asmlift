@@ -31,7 +31,7 @@ import { assertInputFormat } from './format';
 import type { Frontend } from './frontend';
 import { opaqueDest } from './opaque';
 import { isSplatMips, parseSplatMips } from './splat';
-import { abiSortEntryParams } from './ssa';
+import { abiSortEntryParams, stackSlotKey } from './ssa';
 import { makeSsaBuilder } from './ssa';
 
 type Instr = DisasmInstr;
@@ -54,7 +54,7 @@ const isZero = (r: string) => r === 'zero' || r === '$0';
 const isStackPtr = (r: string) => r === 'sp' || r === '$sp' || r === '$29';
 // SSA-variable name for the stack slot at a constant `sp`-offset. Distinct namespace from the
 // register names (which are alphabetic / `$N`), so it never collides with a real register var.
-const stackSlot = (off: number) => `sp@${off}`;
+const stackSlot = stackSlotKey; // shared spelling: frontend/ssa.ts
 // Sub-word memory mnemonics (widths 1 and 2). Used by the `spSlotSafe` guard in `lift`: a sub-word
 // `sp`-relative access means the word stack-slot model is unsafe for that function.
 const SUBWORD_MEM = new Set(['lb', 'lbu', 'lh', 'lhu', 'sb', 'sh']);

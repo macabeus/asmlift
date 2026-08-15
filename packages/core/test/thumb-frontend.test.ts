@@ -327,6 +327,156 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     );
   });
 
+  test('a dead spill into the frame is a local slot, not a store through sp', () => {
+    // `str rX,[sp,#k]` wholly inside this function's own frame is a spill: it moves a value, it
+    // does not touch memory anyone else can see. Modelled as an SSA variable keyed by the offset
+    // (`sp@<off>`, the spelling the MIPS frontend already uses), a spill nothing reloads becomes a
+    // dead def and drops — where before the whole function declined as "sp used as data".
+    const spill =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tadd\tr0, r0, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    const src = decompile('f', spill, ARMV4T_AGBCC).source;
+    expect(src).toBe('s32 f(s32 a0) {\n    return a0 + 1;\n}\n');
+  });
+
+  test('a slot survives a round trip, and a loop, as one variable', () => {
+    // store then reload is a value move, not memory traffic: the reload must produce the STORED
+    // value, and a slot read-modify-written across a loop must become one variable with a phi —
+    // which is why keying it as an SSA variable is the whole implementation.
+    const trip =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tldr\tr1, [sp]\n\tadd\tr0, r1, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(decompile('f', trip, ARMV4T_AGBCC).source).toBe('s32 f(s32 a0) {\n    return a0 + 1;\n}\n');
+    // accumulate into the slot across a back-edge: one variable, no load/store left
+    const loop =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tmov\tr2, #0\n\tstr\tr2, [sp]\n' +
+      '.L1:\n\tldr\tr2, [sp]\n\tadd\tr2, r2, r0\n\tstr\tr2, [sp]\n\tsub\tr0, r0, #1\n\tcmp\tr0, #0\n\tbne\t.L1\n' +
+      '\tldr\tr0, [sp]\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    const src = decompile('f', loop, ARMV4T_AGBCC).source;
+    expect(src).not.toContain('*'); // no pointer, no load through sp
+    expect(src).toContain('do {');
+  });
+
+  test('a reload from a slot that was never stored still declines', () => {
+    // The guard that keeps the model from fabricating: an unstored slot holds nothing this function
+    // put there, so routing it through readVar would mint a phantom parameter and hand back a value
+    // the machine never had. Above the frame that read IS an argument (the path above); inside the
+    // frame it is an uninitialised local, and the decline is the honest answer.
+    const unstored =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tldr\tr0, [sp]\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(() => decompile('f', unstored, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+  });
+
+  test('a sub-word access anywhere disables the model for the whole function', () => {
+    // The MIPS lesson (round 5's B2-F1), ported with the capability: routing the WORD store to an
+    // SSA slot while a byte reload of the same slot stays on the memory path would drop the store
+    // and read uninitialised memory — a silent miscompile. One sub-word sp access anywhere puts
+    // every sp access back on the path that declines.
+    const alias =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tldrb\tr1, [sp]\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(() => decompile('f', alias, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+    // …and it is FUNCTION-wide: the byte access is nowhere near the word slot it protects
+    const far =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tstr\tr0, [sp]\n\tldr\tr1, [sp]\n\tstrb\tr1, [sp, #4]\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(() => decompile('f', far, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+  });
+
+  test('a frame that moves under a keyed slot disables the model', () => {
+    // The key IS the raw offset, so it only denotes one place while sp holds still. A prologue
+    // before the accesses and an epilogue after them are fine; a shift BETWEEN two accesses moves
+    // the frame under a slot already keyed, and [sp,#0] stops meaning what it meant.
+    const shifts =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tstr\tr0, [sp]\n\tadd\tsp, sp, #0x4\n\tldr\tr1, [sp]\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(() => decompile('f', shifts, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+  });
+
+  test('a slot stored on only ONE arm of a branch declines, it does not invent a parameter', () => {
+    // The per-read guard asks whether a store reaches on SOME path, and a diamond defeats it:
+    // stored on one arm, reloaded at the join. readVar then recurses into the unstored predecessor
+    // and Braun's live-in path mints an entry parameter for the SLOT — so a one-argument function
+    // came out as `s32 f(s32 a0, s32 a1) { if (a0 != 0) a1 = a0; return a1 + 1; }`, where `a1`
+    // stands in for uninitialised stack. Caught at the boundary instead: a slot may never leave the
+    // frontend as a parameter (frontend/ssa.ts assertNoSlotEscaped).
+    const diamond =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tcmp\tr0, #0\n\tbeq\t.L2\n\tstr\tr0, [sp]\n' +
+      '.L2:\n\tldr\tr1, [sp]\n\tadd\tr0, r1, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r2}\n\tbx\tr2\n';
+    expect(() => decompile('f', diamond, ARMV4T_AGBCC)).toThrow(
+      /stack slot sp@0 is read on a path that never stores it/,
+    );
+    // control: store it on BOTH arms and the same shape lifts, with no phantom parameter
+    const both =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tcmp\tr0, #0\n\tbeq\t.L2\n\tstr\tr0, [sp]\n' +
+      '.L2:\n\tldr\tr1, [sp]\n\tadd\tr0, r1, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r2}\n\tbx\tr2\n';
+    expect(decompile('f', both, ARMV4T_AGBCC).source).toBe('s32 f(s32 a0) {\n    return a0 + 1;\n}\n');
+  });
+
+  test('the OUTGOING argument area is not a local, however far inside the frame it sits', () => {
+    // agbcc reserves the bottom of the frame for arguments 5+ of the calls this function makes:
+    // `add sp,#-8` … `str r2,[sp]` / `str r3,[sp,#4]` … `bl`. Nothing reloads them, so modelling
+    // them as locals made them dead defs and DCE deleted them — the arguments vanished from the
+    // call with no diagnostic. sa3's CreateEntity_Platform_0_0 (platform.c:734) forwards SIX and
+    // came out as `CreateEntity_Platform(0, 0, a0, (u16)a1)`. "Inside my frame" is not "private":
+    // the outgoing area belongs to the callee. A function that CALLS gets no slot model.
+    const outgoing =
+      'f:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0x8\n\tstr\tr2, [sp]\n\tstr\tr3, [sp, #0x4]\n' +
+      '\tmov\tr0, #0\n\tbl\tcallee\n\tadd\tsp, sp, #0x8\n\tpop\t{r4, r5}\n\tpop\t{r0}\n\tbx\tr0\n';
+    expect(() => decompile('f', outgoing, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+  });
+
+  test('a pop taken while the locals are still reserved is a frame READ, not bookkeeping', () => {
+    // push/pop are transparent to dataflow, so a pop taken before the local area is released reads
+    // a slot this model has retargeted into SSA — the load simply disagrees with the store, and
+    // `f(a0)` returned a1. A real epilogue releases first (`add sp,#N; pop {…}`).
+    const midFrame =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tpop\t{r1}\n\tadd\tr0, r1, #0\n\tpop\t{r4, pc}\n';
+    expect(() => decompile('f', midFrame, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+    // …including from a block that has no slot access of its own to give it away
+    const elsewhere =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tb\t.L2\n.L2:\n\tpop\t{r1}\n\tadd\tsp, sp, #0x4\n\tpop\t{r4, pc}\n';
+    expect(() => decompile('f', elsewhere, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+    // control: release, then pop — agbcc's actual shape, which must keep working
+    const proper =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tldr\tr1, [sp]\n\tadd\tr0, r1, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(decompile('f', proper, ARMV4T_AGBCC).source).toBe('s32 f(s32 a0) {\n    return a0 + 1;\n}\n');
+  });
+
+  test('a slot offset must be word-ALIGNED, not merely word-wide', () => {
+    // The key is the raw byte offset, so two overlapping words at unaligned offsets become two
+    // independent variables and the overlap is lost: `str r0,[sp]; str r1,[sp,#2]; ldr r0,[sp]`
+    // returned a0 as though slot 0's upper half had not been overwritten. GNU as rejects the
+    // encoding, so this is hand-written input — which is exactly where there is no oracle.
+    const unaligned =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tstr\tr0, [sp]\n\tstr\tr1, [sp, #2]\n\tldr\tr0, [sp]\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(() => decompile('f', unaligned, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+  });
+
+  test('a store made BEFORE the frame is reserved is the caller`s, not a local', () => {
+    // `localArea` is the PROLOGUE's reservation. Summing the whole entry block instead let a store
+    // that precedes the reservation fall inside `off < localArea`, so a write to the CALLER's frame
+    // was claimed as a private local and deleted: this emitted `s32 f(s32 a0) { return 7; }`.
+    const early = 'f:\n\tstr\tr0, [sp]\n\tadd\tsp, sp, #-0x4\n\tmov\tr0, #7\n\tadd\tsp, sp, #0x4\n\tbx\tlr\n';
+    expect(() => decompile('f', early, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+  });
+
+  test('the reserved area is a NET quantity, and a slot cannot sit below sp', () => {
+    // Counting only reservations and discarding releases left `localArea` larger than the region
+    // actually below the callee-saved block, so `off < localArea` claimed the SAVED REGISTERS —
+    // which the epilogue's pop reads back. This deleted the store and rendered a computed `bx` as
+    // an ordinary return, and it fooled the pop gate too, since `released` is compared against the
+    // same inflated number. No agbcc function adjusts sp upward before its first frame access, so
+    // only a probe reaches it.
+    const inflated =
+      'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tsp, sp, #0x8\n\tstr\tr0, [sp]\n\tmov\tr0, #7\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(() => decompile('f', inflated, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+    const popGate =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tsp, sp, #0x4\n\tstr\tr0, [sp, #0x4]\n\tldr\tr1, [sp, #0x4]\n' +
+      '\tadd\tr0, r1, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r2}\n\tbx\tr2\n';
+    expect(() => decompile('f', popGate, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+    // …and the other end: a NEGATIVE offset is below sp, outside any frame this reasons about
+    const below =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp, #-0x4]\n\tldr\tr1, [sp, #-0x4]\n\tadd\tr0, r1, #1\n' +
+      '\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r2}\n\tbx\tr2\n';
+    expect(() => decompile('f', below, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+  });
+
   test('a gap in the slots read still yields ABI-correct offsets', () => {
     // frame 8, so [sp,#0xc] is argument 6 (index 5) and argument 5 is never read. Naming downstream
     // is POSITIONAL, so minting only the slot that was read would put the parameter at argument 5's

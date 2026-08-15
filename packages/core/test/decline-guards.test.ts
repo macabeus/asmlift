@@ -132,8 +132,17 @@ test('every sp-as-data spelling declines loud — including the register-indexed
   expect(thumb('\tadd\tr13, r13, #-0x4\n\tadd\tr13, r13, #0x4\n')).not.toThrow(); // r13 spelling
   // a frame that is ADJUSTED and then USED still declines: the adjustment is transparent, the
   // access is not. This is the line that keeps the guard from becoming "ignore sp".
-  expect(thumb('\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tadd\tsp, sp, #0x4\n')).toThrow(spAsData);
+  //
+  // …with ONE case carved out since: a WORD access wholly inside the function's own frame, when
+  // that frame is provably private and does not move, is a local slot and is modelled in SSA
+  // (`sp@<off>`, as on MIPS). The store below is a spill nothing reloads, so it is dead and drops.
+  // The carve-out is the word-slot model and nothing more — every spelling it cannot vouch for is
+  // still on this list.
+  expect(thumb('\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tadd\tsp, sp, #0x4\n')).not.toThrow();
   expect(thumb('\tadd\tsp, sp, #-0x4\n\tmov\tr0, sp\n\tadd\tsp, sp, #0x4\n')).toThrow(spAsData);
+  // a slot OUTSIDE the frame is not a local — above the top is the caller's, and a store there is
+  // still a decline (recovering it is a separate capability from reading an incoming argument)
+  expect(thumb('\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp, #0x8]\n\tadd\tsp, sp, #0x4\n')).toThrow(spAsData);
   // EVERY other write to sp declines. Each of these used to vanish silently, taking a real frame
   // change with it while the function still compiled:
   expect(thumb('\tadd\tsp, r4\n')).toThrow(spAsData); // register-sized adjust (4 real sites in sa3)
@@ -185,6 +194,45 @@ test('MIPS: sp accesses outside the word-slot model decline, never a bogus slot'
   expect(mips('   0:\tsw\ta0,4(sp)\n   4:\tlbu\tv0,4(sp)\n')).toThrow(/stack pointer used as data/);
   expect(mips('   0:\taddu\tv0,sp,a0\n')).toThrow(/stack pointer used as data/); // &local
   expect(mips('   0:\tlw\tv0,16(sp)\n')).toThrow(/never stored/); // a slot no store defined
+  // …and the case that guard MISSES, found while porting the model to Thumb: `hasReachingDef` asks
+  // whether a store reaches on SOME path, so a slot stored on one arm of a diamond and reloaded at
+  // the join passes it. readVar then recurses into the unstored predecessor and mints an entry
+  // parameter FOR THE SLOT — this one-argument function came out as `s32 f(s32 a0, s32 a1)` with
+  // `a1` standing in for uninitialised stack. Both frontends now assert the symptom at the same
+  // boundary (frontend/ssa.ts assertNoSlotEscaped), which is total where a per-read test cannot be.
+  const diamond = [
+    '00000000 <f>:',
+    '   0:\taddiu\tsp,sp,-24',
+    '   4:\tbeqz\ta0,14 <f+0x14>',
+    '   8:\tnop',
+    '   c:\tsw\ta0,16(sp)',
+    '  10:\tnop',
+    '  14:\tlw\tv0,16(sp)',
+    '  18:\taddiu\tv0,v0,1',
+    '  1c:\tjr\tra',
+    '  20:\taddiu\tsp,sp,24',
+    '',
+  ].join('\n');
+  expect(() => decompile('f', diamond, MIPS_IDO)).toThrow(/stack slot sp@16 is read on a path that never stores it/);
+  // …and the same fabrication when the entry block is ITSELF the loop header, where the slot
+  // arrives as a PHI rather than a live-in. `paramReg` only covers live-ins, so the escape check
+  // was blind to it and the phantom parameter survived — on MIPS, which has no preheader to make
+  // the entry predecessor-free. The check reads phi keys too.
+  const entryLoop = [
+    '00000000 <f>:',
+    '   0:\taddiu\tsp,sp,-24',
+    '   4:\tbeqz\ta0,10 <f+0x10>',
+    '   8:\tnop',
+    '   c:\tsw\ta0,16(sp)',
+    '  10:\tlw\tv0,16(sp)',
+    '  14:\taddiu\ta0,a0,-1',
+    '  18:\tbnez\ta0,0 <f>',
+    '  1c:\tnop',
+    '  20:\tjr\tra',
+    '  24:\tnop',
+    '',
+  ].join('\n');
+  expect(() => decompile('f', entryLoop, MIPS_IDO)).toThrow(/stack slot sp@16 is read on a path that never stores it/);
 });
 
 // ── Input-format boundary (frontend/format.ts) ────────────────────────────────────────────
