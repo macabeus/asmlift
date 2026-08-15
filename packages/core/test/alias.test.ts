@@ -4,8 +4,8 @@
 // the fold) and by the structurer's own tests.
 import { describe, expect, test } from 'vitest';
 
-import { type Op, type Value, mkOp, mkValue } from '../src/ir/core';
 import { globalCellOf, mayWriteGlobal } from '../src/ir/alias';
+import { type Op, type Value, mkOp, mkValue } from '../src/ir/core';
 import { T } from '../src/ir/types';
 
 const v = (): Value => mkValue(T.s(32));

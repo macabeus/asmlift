@@ -17,10 +17,7 @@ import type { Expr, SFn, Stmt } from '../src/l3/ast';
 const irWith = (calls: string[], unreachable: string[] = []): Fn => {
   const entry: Block = {
     params: [],
-    ops: [
-      ...calls.map((t) => mkOp('call', { results: [mkValue(T.s(32))], attrs: { target: t } })),
-      mkOp('ret', {}),
-    ],
+    ops: [...calls.map((t) => mkOp('call', { results: [mkValue(T.s(32))], attrs: { target: t } })), mkOp('ret', {})],
   };
   const dead: Block = {
     params: [],

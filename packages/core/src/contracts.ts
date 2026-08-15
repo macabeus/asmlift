@@ -119,7 +119,10 @@ function countCalls(stmts: Stmt[]): { total: CallCounts; path: CallCounts } {
       const t = countCalls(s.then);
       const e = countCalls(s.else);
       // exclusive arms: the path count is whichever arm runs, the total counts both
-      add({ total: combine(t.total, e.total, (x, y) => x + y), path: combine(t.path, e.path, Math.max) }, (x, y) => x + y);
+      add(
+        { total: combine(t.total, e.total, (x, y) => x + y), path: combine(t.path, e.path, Math.max) },
+        (x, y) => x + y,
+      );
     } else if (s.k === 'switch') {
       const arms = s.cases.map((c) => countCalls(c.body));
       const dflt = countCalls(s.default ?? []);
@@ -152,7 +155,7 @@ function countCalls(stmts: Stmt[]): { total: CallCounts; path: CallCounts } {
 export function assertEffectsPreserved(fn: Fn, sfn: SFn): void {
   // Reachable blocks only: an unreachable block's call is legitimately never emitted.
   const seen = new Set<Block>([fn.blocks[0]]);
-  for (const stack = [fn.blocks[0]]; stack.length; ) {
+  for (const stack = [fn.blocks[0]]; stack.length;) {
     for (const s of successorsOf(stack.pop()!)) {
       if (!seen.has(s)) {
         seen.add(s);
