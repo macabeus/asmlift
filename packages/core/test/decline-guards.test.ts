@@ -132,8 +132,17 @@ test('every sp-as-data spelling declines loud — including the register-indexed
   expect(thumb('\tadd\tr13, r13, #-0x4\n\tadd\tr13, r13, #0x4\n')).not.toThrow(); // r13 spelling
   // a frame that is ADJUSTED and then USED still declines: the adjustment is transparent, the
   // access is not. This is the line that keeps the guard from becoming "ignore sp".
-  expect(thumb('\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tadd\tsp, sp, #0x4\n')).toThrow(spAsData);
+  //
+  // …with ONE case carved out since: a WORD access wholly inside the function's own frame, when
+  // that frame is provably private and does not move, is a local slot and is modelled in SSA
+  // (`sp@<off>`, as on MIPS). The store below is a spill nothing reloads, so it is dead and drops.
+  // The carve-out is the word-slot model and nothing more — every spelling it cannot vouch for is
+  // still on this list.
+  expect(thumb('\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tadd\tsp, sp, #0x4\n')).not.toThrow();
   expect(thumb('\tadd\tsp, sp, #-0x4\n\tmov\tr0, sp\n\tadd\tsp, sp, #0x4\n')).toThrow(spAsData);
+  // a slot OUTSIDE the frame is not a local — above the top is the caller's, and a store there is
+  // still a decline (recovering it is a separate capability from reading an incoming argument)
+  expect(thumb('\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp, #0x8]\n\tadd\tsp, sp, #0x4\n')).toThrow(spAsData);
   // EVERY other write to sp declines. Each of these used to vanish silently, taking a real frame
   // change with it while the function still compiled:
   expect(thumb('\tadd\tsp, r4\n')).toThrow(spAsData); // register-sized adjust (4 real sites in sa3)

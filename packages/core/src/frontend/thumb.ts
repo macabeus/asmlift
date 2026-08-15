@@ -1411,6 +1411,14 @@ export function lift(
         }
       },
 
+      // The frame depth after everything stepped so far, or null if the walk could not measure it.
+      // The local-slot model uses this to size the frame from the prologue; `argIndex` reads the
+      // same state directly. Exposed rather than re-deriving the deltas elsewhere, so there is
+      // exactly one implementation of "what does this instruction do to sp".
+      measured(): number | null {
+        return depthKnown ? depth : null;
+      },
+
       // Is `[sp, #off]` an incoming stack argument, and which one? `null` means NO — and every null is
       // a DECLINE, because the caller falls through to readData's sp guard.
       //
@@ -1458,6 +1466,113 @@ export function lift(
       },
     };
   };
+
+  // LOCAL STACK SLOTS. A spill or a local that never has its address taken is transparent to
+  // dataflow: `str rX,[sp,#k]` … `ldr rY,[sp,#k]` moves a value, it does not touch memory anyone
+  // else can see. Modelling it as an SSA variable keyed by the offset (the same `sp@<off>` spelling
+  // the MIPS frontend uses) makes it exactly that, and Braun's phi construction handles a slot that
+  // is read-modify-written across a loop with no extra machinery.
+  //
+  // What Thumb does NOT inherit from MIPS: keying by the RAW sp offset is only sound while sp holds
+  // the same value at every access, and MIPS gets that for free (IDO establishes sp with one
+  // `addiu` and never moves it). Thumb's `push` moves sp, so constancy has to be PROVEN here.
+  const slotKey = (off: number) => `sp@${off}`;
+  // Deliberately OVER-inclusive: a `cmp sp, rN` only reads sp but counts here too. Every false
+  // positive costs a decline, every false negative costs a wrong slot — so it errs loudly.
+  const modifiesSp = (ins: Instr): boolean =>
+    ins.mnemonic === 'push' || ins.mnemonic === 'pop' || isSpReg((ins.ops[0] ?? '').replace(/!$/, ''));
+  const spMemAccess = (ins: Instr): { off: number; width: number; regOff: boolean } | null => {
+    if (!/^(ldr|ldrb|ldrh|ldrsb|ldrsh|str|strb|strh)$/.test(ins.mnemonic)) {
+      return null;
+    }
+    const mem = ins.ops[1];
+    if (mem === undefined) {
+      return null;
+    }
+    const { base, off, regOff } = parseAddr(mem);
+    return isSpReg(base)
+      ? { off, width: /b$/.test(ins.mnemonic) ? 1 : /h$/.test(ins.mnemonic) ? 2 : 4, regOff: regOff !== undefined }
+      : null;
+  };
+  // Is the word-slot model safe for THIS function? Every disqualifier below leaves every `[sp,#k]`
+  // access on the old path, which declines — so the answer to "not sure" is the loud one.
+  const slotModelSafe = (): boolean => {
+    for (const ab of asmBlocks) {
+      for (const ins of ab.instrs) {
+        const acc = spMemAccess(ins);
+        // A SUB-WORD access aliasing a word slot is the hazard MIPS paid for the hard way: routing
+        // the word store to an SSA slot while the byte reload stays on the memory path drops the
+        // store and reads uninitialised memory. One anywhere disables the model for the whole
+        // function. A register offset can alias any slot, so it disqualifies the same way.
+        if (acc && (acc.width !== 4 || acc.regOff)) {
+          return false;
+        }
+        // sp escaping into a register means the frame can be written through a pointer, and then a
+        // slot is not private to this function. (Such a function declines at the escape anyway;
+        // the check is here so the model's precondition is stated where the model is, not inferred
+        // from a guard three hundred lines away.)
+        if (
+          /^(mov|add)$/.test(ins.mnemonic) &&
+          !isSpReg(ins.ops[0] ?? '') &&
+          ins.ops.slice(1).some((o) => isSpReg(o))
+        ) {
+          return false;
+        }
+      }
+    }
+    // sp must be CONSTANT wherever a slot is keyed, because the key IS the raw offset. Two shapes
+    // are legitimate and everything else refuses: a PROLOGUE (sp moves before the block touches the
+    // frame) and an EPILOGUE (sp moves after it has finished touching it, and the block returns, so
+    // nothing downstream can key a slot against the changed sp). A modification BETWEEN two
+    // accesses moves the frame under a slot already keyed, and only the entry block may deepen —
+    // elsewhere a pre-access modification would put the block at a different depth from the one the
+    // prologue established.
+    for (let bi = 0; bi < asmBlocks.length; bi++) {
+      const ins = asmBlocks[bi].instrs;
+      const mems = ins.map((x, i) => (spMemAccess(x) ? i : -1)).filter((i) => i >= 0);
+      const mods = ins.map((x, i) => (modifiesSp(x) ? i : -1)).filter((i) => i >= 0);
+      if (mods.length === 0) {
+        continue;
+      }
+      const last = ins[ins.length - 1];
+      const returns = last !== undefined && classifyXfer(last) === 'return';
+      if (mems.length === 0) {
+        // moves sp and never keys a slot itself: safe only if nothing downstream can key one
+        if (!returns && bi !== 0) {
+          return false;
+        }
+        continue;
+      }
+      for (const m of mods) {
+        if (m < mems[0]) {
+          if (bi !== 0) {
+            return false; // a non-entry block at its own depth
+          }
+        } else if (m > mems[mems.length - 1]) {
+          if (!returns) {
+            return false; // unwinds, then keeps going
+          }
+        } else {
+          return false; // the frame moves under a slot this block already keyed
+        }
+      }
+    }
+    return true;
+  };
+  // The frame the body sees: the entry block's PROLOGUE, i.e. everything up to the first
+  // instruction that touches the frame (or the whole block if it never does). Stepped through the
+  // same walk `argIndex` uses, so "what does this do to sp" has one implementation. A frame the
+  // walk cannot measure yields 0, which disables every slot (`off < frameDepth` is then false).
+  const frameDepth = ((): number => {
+    const ins = asmBlocks[0].instrs;
+    const firstMem = ins.findIndex((x) => spMemAccess(x) !== null);
+    const prologue = makeFrameWalk();
+    for (const x of ins.slice(0, firstMem === -1 ? ins.length : firstMem)) {
+      prologue.step(x);
+    }
+    return prologue.measured() ?? 0;
+  })();
+  const slotsOk = slotModelSafe();
 
   // The WRITE dual of readData, and the reason it exists is a lesson rather than a symmetry: the
   // first version of this guard checked sp in three decode arms (mov/add/sub) and its commit message
@@ -2009,6 +2124,16 @@ export function lift(
           }
           const width = /b/.test(ins.mnemonic) ? 1 : /h/.test(ins.mnemonic) ? 2 : 4;
           const { base, off, regOff } = parseAddr(b);
+          // A word spill into this function's own frame: record the slot's value in SSA rather than
+          // emitting a store through sp. `slotsOk` has already proven the frame is private and does
+          // not move; `off < frameDepth` keeps this strictly inside the frame, so it can never
+          // collide with the incoming-argument area above it (which the load path recovers as
+          // parameters, and where a STORE is still a decline — writing a caller's slot is a
+          // different capability). A spill that is never reloaded becomes a dead def and drops.
+          if (slotsOk && isSpReg(base) && regOff === undefined && width === 4 && off < frameDepth) {
+            writeVar(slotKey(off), bi, readData(reg(a), bi));
+            break;
+          }
           let storeBase = readData(base, bi);
           if (regOff !== undefined) {
             // register-offset store: same exact `rB + rX` lowering as the load path above

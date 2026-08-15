@@ -327,6 +327,17 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     );
   });
 
+  test('a dead spill into the frame is a local slot, not a store through sp', () => {
+    // `str rX,[sp,#k]` wholly inside this function's own frame is a spill: it moves a value, it
+    // does not touch memory anyone else can see. Modelled as an SSA variable keyed by the offset
+    // (`sp@<off>`, the spelling the MIPS frontend already uses), a spill nothing reloads becomes a
+    // dead def and drops — where before the whole function declined as "sp used as data".
+    const spill =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tadd\tr0, r0, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    const src = decompile('f', spill, ARMV4T_AGBCC).source;
+    expect(src).toBe('s32 f(s32 a0) {\n    return a0 + 1;\n}\n');
+  });
+
   test('a gap in the slots read still yields ABI-correct offsets', () => {
     // frame 8, so [sp,#0xc] is argument 6 (index 5) and argument 5 is never read. Naming downstream
     // is POSITIONAL, so minting only the slot that was read would put the parameter at argument 5's
