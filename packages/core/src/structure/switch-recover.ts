@@ -221,6 +221,12 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
   // this switch's region and is not walked. It IS recorded as an escape, because an arm that can
   // leave sideways does not fall into the next case — but only the fall-through verdict consults
   // that, so no arm that used to be accepted as closed becomes a decline.
+  //
+  // A CONSEQUENCE, not a hole: a sibling reachable only THROUGH such a block is never seen, so the
+  // arm reads as closed and `structureRegion` walks into the sibling's blocks and emits them again
+  // under this arm. That is duplication, not a wrong dispatch — the same duplication the structurer
+  // already does for any tail two arms share, and how the case bodies agbcc tail-merged are put
+  // back. Costly for matching, correct to run.
   const analyzeArmExit = (entry: Block, b: Block, merge: Block | null, siblings: Set<Block>): ArmExit => {
     if (entry === merge) {
       return { kind: 'break' }; // an empty arm (a table slot pointing straight at the switch's end)
@@ -250,17 +256,31 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     if (into.size === 0) {
       return { kind: 'break' };
     }
-    const names = [...into].map((x) => `#${fn.blocks.indexOf(x)}`).join(', ');
-    if (into.size > 1) {
-      return { kind: 'unstructurable', why: `a case body reaches several sibling cases (${names}) — C needs a goto` };
+    if (into.size === 1 && !toMerge && !escapes) {
+      return { kind: 'fallthrough', to: [...into][0] };
     }
-    if (toMerge || escapes) {
+    // Name what is actually missing. These three are different facts, and only the first is a shape
+    // C has no spelling for — the other two are asmlift's own limits, so say so rather than blame C.
+    const names = () => [...into].map((x) => `#${fn.blocks.indexOf(x)}`).join(', ');
+    if (into.size > 1) {
       return {
         kind: 'unstructurable',
-        why: `a case body reaches sibling case ${names} on one path and leaves the switch on another — C needs a goto`,
+        why: `a case body reaches several sibling cases (${names()}) — C fall-through reaches only one, so this needs a goto`,
       };
     }
-    return { kind: 'fallthrough', to: [...into][0] };
+    if (escapes) {
+      return {
+        kind: 'unstructurable',
+        why: `a case body reaches sibling case ${names()} on one path and, on another, a block the switch does not dominate`,
+      };
+    }
+    return {
+      kind: 'unstructurable',
+      // `case 0: if (c) { …; break; } /* fall through */ case 1:` is the C for this, and the reason
+      // asmlift cannot write it is its own: `{k:'break'}` is emitted only for the innermost LOOP
+      // (l3/ast.ts), never switch-scoped. That is the capability this shape is waiting on.
+      why: `a case body reaches sibling case ${names()} on one path and the end of the switch on another — a switch-scoped \`break\` inside a case body is not emitted yet`,
+    };
   };
 
   /** Every arm closed (`break`)? The precondition Regime A needs — it has a behaviourally identical
