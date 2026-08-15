@@ -128,9 +128,7 @@ describe('the render position', () => {
 });
 
 describe('volatile', () => {
-  const volatileMap = new Map<string, SymbolInfo>([
-    ['gValue', { name: 'gValue', kind: 'data', volatile: true }],
-  ]);
+  const volatileMap = new Map<string, SymbolInfo>([['gValue', { name: 'gValue', kind: 'data', volatile: true }]]);
 
   test('a read the map declares VOLATILE keeps its local — the access may not be duplicated', () => {
     expect(emit(STORE_BETWEEN, true, volatileMap)).toContain('v0 = gValue;');
