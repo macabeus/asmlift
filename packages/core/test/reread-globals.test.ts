@@ -129,7 +129,7 @@ describe('the render position', () => {
 
 describe('volatile', () => {
   const volatileMap = new Map<string, SymbolInfo>([
-    ['gValue', { name: 'gValue', addr: 0x2000000, kind: 'data', volatile: true }],
+    ['gValue', { name: 'gValue', kind: 'data', volatile: true }],
   ]);
 
   test('a read the map declares VOLATILE keeps its local — the access may not be duplicated', () => {
@@ -137,7 +137,7 @@ describe('volatile', () => {
   });
 
   test('the same map without the volatile qualifier re-reads', () => {
-    const plain = new Map<string, SymbolInfo>([['gValue', { name: 'gValue', addr: 0x2000000, kind: 'data' }]]);
+    const plain = new Map<string, SymbolInfo>([['gValue', { name: 'gValue', kind: 'data' }]]);
     expect(emit(STORE_BETWEEN, true, plain)).toContain('gOut = gValue;');
   });
 });
