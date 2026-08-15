@@ -641,6 +641,32 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     expect(src).toContain('return a0;'); // the [sp,#4] slot is still a transparent SSA value
   });
 
+  test('publish-the-address-then-fill: the store after the last &sp0 still survives DCE', () => {
+    // The addr-as-read pin only protected stores UPSTREAM of an `&sp0` occurrence in the backward
+    // liveness walk, so this legal DMA ordering — publish the address, then fill the object — had
+    // its store deleted by asmlift's OWN L3 DCE, defeating the volatile the frontend added
+    // precisely so the RECOMPILER would not delete it. A volatile local is never store-eligible.
+    const publishThenFill =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tmov\tr4, sp\n\tldr\tr2, .L1\n\tmov\tr1, sp\n\tstr\tr1, [r2]\n' +
+      '\tmov\tr0, #0\n\tstrh\tr0, [r4]\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n.L1:\n\t.word\t0x40000D4\n';
+    expect(decompile('f', publishThenFill, ARMV4T_AGBCC).source).toBe(
+      's32 f(void) {\n    volatile u16 sp0;\n    *(s32 *)67109076 = &sp0;\n    sp0 = 0;\n    return 0;\n}\n',
+    );
+  });
+
+  test('a callee named sp0 keeps its name — the minted local yields', () => {
+    // Call targets are part of the namespace the structurer mints into: a local shadowing a
+    // function named sp0 makes `sp0()` a call through a u16 object — a compile error. The minted
+    // name steps aside (`sp0_`) exactly as it does for a same-named global or map symbol.
+    const callsSp0 =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tmov\tr4, sp\n\tstrh\tr0, [r4]\n\tldr\tr2, .L1\n\tstr\tr4, [r2]\n' +
+      '\tbl\tsp0\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n.L1:\n\t.word\t0x40000D4\n';
+    const src = decompile('f', callsSp0, ARMV4T_AGBCC).source;
+    expect(src).toContain('volatile u16 sp0_;');
+    expect(src).toContain('&sp0_');
+    expect(src).toContain('sp0(');
+  });
+
   test('the frame-object audit refuses every use it cannot vouch for, loudly and by name', () => {
     const laddr = /address-taken stack local/;
     const wrap = (body: string) =>

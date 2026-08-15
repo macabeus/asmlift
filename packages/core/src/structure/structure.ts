@@ -691,6 +691,10 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
       for (const op of b.ops) {
         if (op.opcode === 'gaddr') {
           taken.add(op.attrs.sym as string);
+        } else if (op.opcode === 'call') {
+          // a CALLEE's name is in this namespace too: a function really named sp0 would be
+          // shadowed by the minted local, and `sp0()` on a u16 object is a compile error
+          taken.add(op.attrs.target as string);
         }
       }
     }
@@ -2334,7 +2338,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
               laddrName.get(op)!,
               {
                 name: laddrName.get(op)!,
-                type: T.int(((op.attrs.width as number) ?? 4) * 8, (op.attrs.signed as boolean) ?? false),
+                type: T.int((op.attrs.width as number) * 8, op.attrs.signed as boolean),
                 // an ESCAPED address makes every store observable (the DMA hardware reads it);
                 // without volatile, gcc-2.9 deletes a store to a local nothing in-function reads
                 ...(op.attrs.volatile === true ? { volatile: true as const } : {}),
