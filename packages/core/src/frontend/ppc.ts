@@ -567,12 +567,23 @@ export function lift(
         // (anything live across the call has already been moved to a callee-saved register).
         case 'bl': {
           const sym = ins.sym ?? 'func';
-          const argc = protoArity(prototypes[sym]) ?? fallbackArgc(bi);
+          const declared = protoArity(prototypes[sym]);
+          const argc = declared ?? fallbackArgc(bi);
           const args: Value[] = [];
           for (let k = 0; k < argc; k++) {
             args.push(read(ARG_REGS[k]));
           }
-          emit('call', RET, args, { target: sym });
+          // Pushed with `tmp` rather than `emit` so the result register is written AFTER the clobber
+          // is recorded — the order matters: r3.. are volatile under the EABI, so a GUESSED arity
+          // that counted a register set up before an intervening call passes an argument the caller
+          // never set up (`finish()` cuts those back — frontend/ssa.ts), while the call's OWN result
+          // must stay fresh for the next call (`bar(foo())`).
+          const res = kit.tmp('call', args, { target: sym });
+          if (declared === undefined) {
+            ssa.recordGuessedCall(ops[ops.length - 1], bi, ARG_REGS);
+          }
+          ssa.noteCall(bi);
+          write(RET, res);
           break;
         }
         // Stack-frame + link-register bookkeeping. `stwu r1,-N(r1)` / `addi r1,r1,N` adjust the frame

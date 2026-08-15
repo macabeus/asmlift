@@ -15,7 +15,7 @@
 // computation via read/writeVar, push its terminator op last (successors referencing
 // `irBlocks`, args left empty — phi wiring appends them), then call `markFilled(b)`. When all
 // blocks are filled, call `finish()` to remove trivial phis.
-import { Block, Fn, Value, mkValue } from '../ir/core';
+import { Block, Fn, Op, Value, mkValue } from '../ir/core';
 import { simplifyTrivialPhis } from '../ir/simplify';
 import { T } from '../ir/types';
 import { FrontendUnsupportedError } from './errors';
@@ -47,6 +47,14 @@ export interface SsaBuilder {
   ensureParam(key: string, b: number): void;
   /** Whether `reg` has a definition reaching block `b` (best-effort call-arity heuristic). */
   hasReachingDef(reg: string, b: number, seen?: Set<number>): boolean;
+  /** Record that block `b` makes a call HERE: the ABI's caller-saved registers stop being ones the
+   *  caller set up. Call it AFTER `recordGuessedCall` for the same instruction, and before writing
+   *  the call's own result. */
+  noteCall(b: number): void;
+  /** Register a `call` op whose arity was GUESSED (no prototype), so `finish` can cut it back to the
+   *  argument registers that were actually set up on every path (see {@link trimClobberedCallArgs}).
+   *  `argRegs` is the target's argument-register order. */
+  recordGuessedCall(op: Op, b: number, argRegs: string[]): void;
   /** Remove trivial phis and enforce the frontend's postconditions; call once every block is
    *  filled. Throws FrontendUnsupportedError if a stack slot escaped as an entry parameter. */
   finish(): void;
@@ -85,7 +93,19 @@ export function makeSsaBuilder(name: string, blockCount: number, preds: number[]
   // `preds` lists an entry per CFG EDGE; these are the distinct predecessor BLOCKS.
   const distinctPreds = (b: number): number[] => [...new Set(preds[b])];
 
-  const writeVar = (reg: string, b: number, v: Value) => defs[b].set(reg, v);
+  // CALLER-SAVED CLOBBER, for guessed call arities (see trimClobberedCallArgs). Tracked HERE
+  // because every register write in every frontend already goes through `writeVar`: a frontend
+  // that gathered this itself would be sound only while it remembered to route each write past a
+  // wrapper, and a MISSED write under-counts an arity — which drops a real argument silently.
+  const writtenSinceCall: Array<Set<string>> = irBlocks.map(() => new Set());
+  const callsIn = new Set<number>();
+  const guessedCalls: GuessedCallSite[] = [];
+  let argRegsSeen: string[] = [];
+
+  const writeVar = (reg: string, b: number, v: Value) => {
+    writtenSinceCall[b].add(reg);
+    defs[b].set(reg, v);
+  };
   const readVar = (reg: string, b: number): Value => defs[b].get(reg) ?? readRecursive(reg, b);
 
   const newPhi = (reg: string, b: number): Value => {
@@ -211,11 +231,35 @@ export function makeSsaBuilder(name: string, blockCount: number, preds: number[]
     paramReg,
     ensureParam,
     hasReachingDef,
+    noteCall: (b: number) => {
+      callsIn.add(b);
+      writtenSinceCall[b] = new Set(); // the callee clobbers the caller-saved registers
+    },
+    recordGuessedCall: (op: Op, b: number, argRegs: string[]) => {
+      argRegsSeen = argRegs;
+      guessedCalls.push({
+        block: b,
+        op,
+        freshBefore: new Set(writtenSinceCall[b]),
+        afterCallInBlock: callsIn.has(b), // `noteCall` runs after this, so this means an EARLIER call
+      });
+    },
     markFilled: (b: number) => {
       filled[b] = true;
       sealReadyBlocks();
     },
     finish: () => {
+      // Guessed arities counted argument registers by reaching definition alone; now that every
+      // block's calls are known, drop the ones an intervening call had already clobbered.
+      if (guessedCalls.length) {
+        trimClobberedCallArgs({
+          argRegs: argRegsSeen,
+          preds,
+          freshAtEnd: writtenSinceCall,
+          callsIn,
+          sites: guessedCalls,
+        });
+      }
       simplifyTrivialPhis(fn, (p) => {
         phiBlock.delete(p);
         phiKey.delete(p);
@@ -269,6 +313,103 @@ export function fallbackArgc(
     n++;
   }
   return n;
+}
+
+/** One call site whose arity was GUESSED by {@link fallbackArgc}, with what the lifting scan saw
+ *  of its own block up to that instruction. */
+export interface GuessedCallSite {
+  block: number;
+  /** the `call` op — its operands are the guessed arguments, in argument-register order */
+  op: Op;
+  /** argument registers written between the last call in this block (or the block's start) and here */
+  freshBefore: Set<string>;
+  /** did this block already make a call before this one? */
+  afterCallInBlock: boolean;
+}
+
+export interface CallArgTrim {
+  argRegs: string[];
+  /** one entry per CFG edge, as passed to {@link makeSsaBuilder} */
+  preds: number[][];
+  /** per block: the keys written since its LAST call (since its start if it makes none). Indexed by
+   *  block, and it holds every key the builder saw, not only argument registers. */
+  freshAtEnd: Array<Set<string>>;
+  /** blocks that make at least one call */
+  callsIn: Set<number>;
+  sites: GuessedCallSite[];
+}
+
+/** Cut a GUESSED call arity down by the ABI's caller-saved clobber.
+ *
+ *  `fallbackArgc` counts argument registers that merely have a reaching definition. A call clobbers
+ *  r0..r3, so a definition the call sits between cannot be an argument the caller set up — correct
+ *  compiled code would have re-materialized it. Counting it anyway INVENTS arguments
+ *  (`m4aSongNumStart(0x89, 30, x, &g)` for a one-argument callee) — a hard compile error where the
+ *  project's own header is in scope, and silently wrong code where C89's implicit declaration
+ *  covers for it.
+ *
+ *  SCOPE: this closes the arguments an intervening CALL disproves, which is the common case in real
+ *  code. It does not close the rest — a dead value the compiler happened to leave in the next
+ *  argument register with no call in between still reads as an argument, and nothing about the
+ *  register file can say otherwise. Only a declared prototype closes those.
+ *
+ *  A must-analysis: a register is FRESH at a point iff on EVERY path reaching it, it was written
+ *  after the last call. The entry block starts all-fresh (those are the caller's own arguments).
+ *  The result only ever SHRINKS an arity — a register the analysis cannot prove clobbered stays an
+ *  argument — so no real argument can be dropped by it.
+ *
+ *  Frontend-agnostic: the caller supplies what its own lifting scan observed, so nothing here
+ *  re-derives which instruction writes which register. */
+export function trimClobberedCallArgs(inp: CallArgTrim): void {
+  const { argRegs, preds, freshAtEnd, callsIn, sites } = inp;
+  const blockCount = freshAtEnd.length;
+  const all = () => new Set(argRegs);
+  const localEnd = (b: number) => freshAtEnd[b] ?? new Set<string>();
+  // freshOut[b]: registers fresh where b ends. A block that calls forgets everything before its
+  // last call; one that does not passes its input through, plus what it wrote.
+  const freshOut: Set<string>[] = Array.from({ length: blockCount }, () => all());
+  const freshIn: Set<string>[] = Array.from({ length: blockCount }, () => all());
+  const inOf = (b: number): Set<string> => {
+    // A block with NO predecessors is the function entry (or unreachable): its argument registers
+    // are the ones the caller set up. An entry that DOES have predecessors — an entry that is also
+    // a loop header — gets the ordinary intersection instead, because on the back edge the caller's
+    // setup is long gone and an intervening call may have clobbered it.
+    const ps = [...new Set(preds[b] ?? [])];
+    if (ps.length === 0) {
+      return all();
+    }
+    const acc = new Set(freshOut[ps[0]]);
+    for (const p of ps.slice(1)) {
+      for (const r of [...acc]) {
+        if (!freshOut[p].has(r)) {
+          acc.delete(r);
+        }
+      }
+    }
+    return acc;
+  };
+  for (let changed = true; changed;) {
+    changed = false;
+    for (let b = 0; b < blockCount; b++) {
+      const fin = inOf(b);
+      const fout = callsIn.has(b) ? localEnd(b) : new Set([...fin, ...localEnd(b)]);
+      if (fout.size !== freshOut[b].size || [...fout].some((r) => !freshOut[b].has(r))) {
+        changed = true;
+      }
+      freshIn[b] = fin;
+      freshOut[b] = fout;
+    }
+  }
+  for (const s of sites) {
+    const fresh = s.afterCallInBlock ? s.freshBefore : new Set([...freshIn[s.block], ...s.freshBefore]);
+    let n = 0;
+    while (n < argRegs.length && fresh.has(argRegs[n])) {
+      n++;
+    }
+    if (n < s.op.operands.length) {
+      s.op.operands.length = n;
+    }
+  }
 }
 
 /** The stack-slot key both the MIPS and Thumb frontends use for a word-sized local in the

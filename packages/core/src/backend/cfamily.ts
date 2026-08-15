@@ -388,7 +388,10 @@ function printStmt(s: Stmt, indent: string, vt: VarTypes, leaf?: LeafHook): stri
           out.push(`${bi}break;`);
         }
       }
-      if (s.default) {
+      // `?.length`, not just presence: a label with no statement under it is not valid C89, and an
+      // L3 pass (dce, reindex) may empty a default that arrived with statements — the structurer's
+      // own "don't attach an empty default" rule cannot see that.
+      if (s.default?.length) {
         out.push(`${ci}default:`);
         for (const t of s.default) {
           out.push(...printStmt(t, bi, vt, leaf));

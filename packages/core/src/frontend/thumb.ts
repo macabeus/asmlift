@@ -2482,15 +2482,23 @@ export function lift(
           const targetSym = a;
           // Caller-supplied prototype wins; otherwise a known runtime helper (`__divsi3` &c.)
           // supplies its arity so its arguments are recovered; only then fall back to guessing.
-          const argc =
-            protoArity(prototypes[targetSym]) ?? protoArity(RUNTIME_HELPERS[targetSym]) ?? fallbackArgcHere(bi);
+          const declared = protoArity(prototypes[targetSym]) ?? protoArity(RUNTIME_HELPERS[targetSym]);
+          const argc = declared ?? fallbackArgcHere(bi);
           const args: Value[] = [];
           for (let k = 0; k < argc; k++) {
             args.push(readVar(`r${k}`, bi));
           }
           const res = mkValue(T.unk(32));
-          irb.ops.push(mkOp('call', { operands: args, results: [res], attrs: { target: targetSym } }));
-          writeData('r0', bi, res);
+          const callOp = mkOp('call', { operands: args, results: [res], attrs: { target: targetSym } });
+          irb.ops.push(callOp);
+          // A GUESSED arity is revisited in `finish()`: only once the whole function is lifted is it
+          // known whether every path to here passes through another call, which would have clobbered
+          // the argument registers this guess just read.
+          if (declared === undefined) {
+            ssa.recordGuessedCall(callOp, bi, target.argRegs);
+          }
+          ssa.noteCall(bi); // the callee clobbers r0..r3 …
+          writeData('r0', bi, res); // … and then defines r0, which IS fresh for the next call
           break;
         }
         default:

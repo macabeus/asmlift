@@ -28,10 +28,23 @@ export interface SwitchRecoverDeps {
   structureRegion: (b: Block, stop: Block | null) => Stmt[];
 }
 
+/** Where ONE switch arm's region leaves it — the fact that decides whether the arm can be spelled
+ *  as C at all, and with or without a `break`.
+ *
+ *   - `break`        every path out of the arm reaches the switch's merge (or returns / loops
+ *                    inside the arm). The ordinary closed arm.
+ *   - `fallthrough`  every path out leaves into exactly ONE sibling arm's entry: C's fall-through.
+ *                    Only spellable when that sibling is the arm emitted NEXT (the caller checks
+ *                    emission adjacency — see the l3/ast.ts non-neutrality note).
+ *   - `unstructurable`  anything else: two different siblings, or a mix of "into a sibling" and
+ *                    "out to the merge". C needs a `goto` for those, so callers decline LOUD. */
+export type ArmExit = { kind: 'break' } | { kind: 'fallthrough'; to: Block } | { kind: 'unstructurable'; why: string };
+
 export interface SwitchRecovery {
   recognizeSwitch: (b: Block, stop: Block | null) => Stmt[] | null;
-  /** shared with the Regime-B (`switch_br`) path in structure.ts, which throws where A declines */
-  caseRegionReachesSibling: (targets: Set<Block>, b: Block, merge: Block | null) => boolean;
+  /** shared with the Regime-B (`switch_br`) path in structure.ts, which recovers the fall-through
+   *  this returns; Regime A only accepts `break` arms and otherwise declines to if-recovery. */
+  analyzeArmExit: (entry: Block, b: Block, merge: Block | null, siblings: Set<Block>) => ArmExit;
 }
 
 export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
@@ -198,31 +211,83 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     }
   };
 
-  // Can any case/default entry's region reach a SIBLING entry (switch fall-through)? Region =
-  // blocks strictly dominated by `b`, short of `merge`. Shared by Regime A (declines to
-  // if-recovery) and Regime B (throws — a jump-table has no fallback).
-  const caseRegionReachesSibling = (targets: Set<Block>, b: Block, merge: Block | null): boolean => {
-    const inRegion = (blk: Block) => blk !== merge && dom.get(blk)!.has(b);
-    for (const entry of targets) {
-      const rseen = new Set<Block>([entry]);
-      const q = [entry];
-      while (q.length) {
-        const cur = q.pop()!;
-        for (const s of successorsOf(cur)) {
-          if (s === entry) {
+  // Where does one arm's region LEAVE? Walk it from `entry`, never stepping THROUGH the merge or a
+  // sibling arm's entry, and classify what it steps INTO. `siblings` is every OTHER arm entry the
+  // caller can emit a `case`/`default` label for — the merge is deliberately not among them, so a
+  // switch whose default block IS the merge (agbcc's usual "the default just leaves") reads as an
+  // ordinary `break`, not as falling into the default.
+  //
+  // Region membership is `dom(blk) ∋ b` as before: a block NOT dominated by the switch is outside
+  // this switch's region and is not walked. It IS recorded as an escape, because an arm that can
+  // leave sideways does not fall into the next case — but only the fall-through verdict consults
+  // that, so no arm that used to be accepted as closed becomes a decline.
+  //
+  // A CONSEQUENCE, not a hole: a sibling reachable only THROUGH such a block is never seen, so the
+  // arm reads as closed and `structureRegion` walks into the sibling's blocks and emits them again
+  // under this arm. That is duplication, not a wrong dispatch — the same duplication the structurer
+  // already does for any tail two arms share, and how the case bodies agbcc tail-merged are put
+  // back. Costly for matching, correct to run.
+  const analyzeArmExit = (entry: Block, b: Block, merge: Block | null, siblings: Set<Block>): ArmExit => {
+    if (entry === merge) {
+      return { kind: 'break' }; // an empty arm (a table slot pointing straight at the switch's end)
+    }
+    const into = new Set<Block>(); // sibling entries this arm flows into
+    let toMerge = false,
+      escapes = false;
+    const seen = new Set<Block>([entry]);
+    const q = [entry];
+    while (q.length) {
+      const cur = q.pop()!;
+      for (const s of successorsOf(cur)) {
+        if (s === merge) {
+          toMerge = true;
+        } else if (s !== entry && siblings.has(s)) {
+          into.add(s);
+        } else if (s !== entry && !seen.has(s)) {
+          if (!dom.get(s)!.has(b)) {
+            escapes = true;
             continue;
           }
-          if (targets.has(s)) {
-            return true;
-          }
-          if (inRegion(s) && !rseen.has(s)) {
-            rseen.add(s);
-            q.push(s);
-          }
+          seen.add(s);
+          q.push(s);
         }
       }
     }
-    return false;
+    if (into.size === 0) {
+      return { kind: 'break' };
+    }
+    if (into.size === 1 && !toMerge && !escapes) {
+      return { kind: 'fallthrough', to: [...into][0] };
+    }
+    // Name what is actually missing. These three are different facts, and only the first is a shape
+    // C has no spelling for — the other two are asmlift's own limits, so say so rather than blame C.
+    const names = () => [...into].map((x) => `#${fn.blocks.indexOf(x)}`).join(', ');
+    if (into.size > 1) {
+      return {
+        kind: 'unstructurable',
+        why: `a case body reaches several sibling cases (${names()}) — C fall-through reaches only one, so this needs a goto`,
+      };
+    }
+    if (escapes) {
+      return {
+        kind: 'unstructurable',
+        why: `a case body reaches sibling case ${names()} on one path and, on another, a block the switch does not dominate`,
+      };
+    }
+    return {
+      kind: 'unstructurable',
+      // `case 0: if (c) { …; break; } /* fall through */ case 1:` is the C for this, and the reason
+      // asmlift cannot write it is its own: `{k:'break'}` is emitted only for the innermost LOOP
+      // (l3/ast.ts), never switch-scoped. That is the capability this shape is waiting on.
+      why: `a case body reaches sibling case ${names()} on one path and the end of the switch on another — a switch-scoped \`break\` inside a case body is not emitted yet`,
+    };
+  };
+
+  /** Every arm closed (`break`)? The precondition Regime A needs — it has a behaviourally identical
+   *  fallback (if-recovery), so it declines on anything else instead of recovering fall-through. */
+  const allArmsClosed = (targets: Set<Block>, b: Block, merge: Block | null): boolean => {
+    const siblings = new Set([...targets].filter((t) => t !== merge));
+    return [...siblings].every((t) => analyzeArmExit(t, b, merge, siblings).kind === 'break');
   };
 
   const recognizeSwitch = (b: Block, stop: Block | null): Stmt[] | null => {
@@ -385,11 +450,12 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     }
 
     // PRE2 (fall-through): only NON-fall-through switches are handled — decline if any case body
-    // can reach ANOTHER case body (or the default) while staying inside the region. (The SAME
-    // predicate serves the Regime-B path, which throws instead.)
+    // can reach ANOTHER case body (or a default that has its own block) while staying inside the
+    // region. (The SAME analysis serves the Regime-B path, which RECOVERS the adjacent-sibling
+    // case as C fall-through instead of declining; A has if-recovery to fall back on, B does not.)
     const merge = ipdom.get(b) ?? stop;
     const targets = new Set<Block>([...caseBlocks, ...(defaultBlk ? [defaultBlk] : [])]);
-    if (caseRegionReachesSibling(targets, b, merge)) {
+    if (!allArmsClosed(targets, b, merge)) {
       return null;
     }
 
@@ -412,11 +478,14 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
       body: structureRegion(blk, merge),
       fallsThrough: false,
     }));
+    // An empty default arm is not a default (see the Regime-B note in structure.ts): the label
+    // would carry no statement, which says nothing and is not valid C89.
+    const defBody = defaultBlk ? structureRegion(defaultBlk, merge) : [];
     const sw: Stmt = {
       k: 'switch',
       scrutinee: scrutExpr,
       cases: outCases,
-      ...(defaultBlk ? { default: structureRegion(defaultBlk, merge) } : {}),
+      ...(defBody.length ? { default: defBody } : {}),
     };
     const out: Stmt[] = [sw];
     if (merge && merge !== stop) {
@@ -424,5 +493,5 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     }
     return out;
   };
-  return { recognizeSwitch, caseRegionReachesSibling };
+  return { recognizeSwitch, analyzeArmExit };
 }

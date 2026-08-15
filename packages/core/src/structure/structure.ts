@@ -585,6 +585,13 @@ interface WhileLoopInfo {
   body: Set<Block>; // the pure natural-loop body (for in-body vs exit classification)
 }
 
+// Opcodes whose NUMBER OF EXECUTIONS is observable. Moving one of these out of a loop changes what
+// the program does — a call that ran per iteration would run once. A `load`/`aload` is deliberately
+// NOT here: it is a pure read, so running it once instead of per-iteration is unobservable as long
+// as it reads the same memory, which is exactly what the existing def→render barrier scan
+// (structure/analysis.ts) already proves before it lets one inline at all.
+const REPEATED_EFFECT = new Set(['call', 'opaque']);
+
 // A bottom-tested `do { body } while(cond)`. The header is the body entry (entered before any
 // test); the LATCH holds the loop condition and the single exit. Body = header..latch structured, then
 // the latch's own ops + the loop-update; the latch test is the do-while condition. The condition is
@@ -1949,7 +1956,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
 
   // ── Regime-A switch recovery (structure/switch-recover.ts): the recognizer's case bodies call
   // back into structureRegion, and Regime B (switch_br, below) shares its fall-through predicate.
-  const { recognizeSwitch, caseRegionReachesSibling } = makeSwitchRecovery({
+  const { recognizeSwitch, analyzeArmExit } = makeSwitchRecovery({
     fn,
     defs,
     dom,
@@ -1987,23 +1994,18 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     }
     // Regime B: a `switch_br` (jump-table dispatch) lowers directly to the `switch` node — scrutinee,
     // per-successor case value, last successor = default. Case bodies delegate to structureRegion (as in
-    // Regime A). Fall-through between jump-table cases is not yet handled: if a case body reaches another
-    // case/default block inside the region, fail LOUD rather than duplicate it.
+    // Regime A). Two table slots naming ONE block are one arm carrying both `case` labels; an arm whose
+    // region flows into the NEXT arm is C fall-through (no `break`). Any other shape needs a `goto` and
+    // fails LOUD rather than being duplicated or silently closed.
     if (term.opcode === 'switch_br') {
       const merge = ipdom.get(b) ?? stop;
       const succ = term.successors;
       const caseVals = term.attrs.cases as number[];
-      const targets = new Set<Block>(succ.map((s) => s.block));
-      if (caseRegionReachesSibling(targets, b, merge)) {
-        throw new StructureError(
-          `cannot structure '${fn.name}': fall-through between jump-table cases is not yet supported`,
-        );
-      }
       // Switch edges CARRY phi args (frontend/ssa.ts appends them terminator-generically) — each
       // case/default body must open with its edge's copies, exactly as cond_br edges do; dropping
       // them leaves the target's params uninitialized on the switch path. Two case values sharing
       // a target must agree on their args (else the copies are ambiguous → loud decline); the
-      // shared body is then structured per case entry.
+      // shared body is then emitted ONCE under both labels.
       const argsSeen = new Map<Block, Value[]>();
       for (const s of succ) {
         const prev = argsSeen.get(s.block);
@@ -2014,16 +2016,79 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
         }
         argsSeen.set(s.block, s.args as Value[]);
       }
-      const outCases: SwitchCase[] = succ.slice(0, -1).map((s, i) => ({
-        values: [caseVals[i]],
-        body: [...argAssignsFor(b, s), ...structureRegion(s.block, merge)],
-        fallsThrough: false,
-      }));
+      // Group the case slots by target block, in TABLE order — `case 5: case 6:` is one arm with two
+      // labels, not two copies of one body. Emission order is the array order (load-bearing: see the
+      // l3/ast.ts fall-through note), so the adjacency check below is against this same order.
+      const defEdge = succ[succ.length - 1];
+      const arms: { entry: Block; edge: (typeof succ)[number]; values: number[] }[] = [];
+      const armOf = new Map<Block, (typeof arms)[number]>();
+      succ.slice(0, -1).forEach((s, i) => {
+        let a = armOf.get(s.block);
+        if (!a) {
+          a = { entry: s.block, edge: s, values: [] };
+          armOf.set(s.block, a);
+          arms.push(a);
+        }
+        a.values.push(caseVals[i]);
+      });
+      // The blocks an arm could fall INTO. The default block counts only when it is a block of its
+      // own: when it IS the merge, "the default" is just where the switch ends, and an arm reaching
+      // it is a plain `break`.
+      const siblings = new Set<Block>(arms.map((a) => a.entry));
+      if (defEdge.block !== merge) {
+        siblings.add(defEdge.block);
+      }
+      // ONE emission order for the whole statement: the case arms in table order, then the default —
+      // which is exactly where C puts it. Adjacency is read off this array, so "falls into the next
+      // arm" needs no separate rule for a case that falls into the default (it is the arm after the
+      // last case, and legal C).
+      const emitOrder = [...arms, { entry: defEdge.block, edge: defEdge, values: null as number[] | null }];
+      // Each arm's switch-edge copies, computed ONCE and in emission order: `argAssignsFor` mints
+      // swap-cycle temp names, so calling it twice for one edge burns a temp number and changes the
+      // output (the same reason emitDoWhile reuses its `updates`).
+      const edgeCopies = emitOrder.map((a) => argAssignsFor(b, a.edge));
+      const bodies = emitOrder.map((a, i) => {
+        const exit = analyzeArmExit(a.entry, b, merge, siblings);
+        if (exit.kind === 'unstructurable') {
+          throw new StructureError(`cannot structure '${fn.name}': ${exit.why}`);
+        }
+        const ft = exit.kind === 'fallthrough';
+        const next = emitOrder[i + 1];
+        if (ft && next?.entry !== exit.to) {
+          throw new StructureError(
+            `cannot structure '${fn.name}': ${a.values ? `case ${a.values.join('/')}` : 'the default arm'} falls ` +
+              `through into an arm that is not the next one emitted — C fall-through only reaches the arm below`,
+          );
+        }
+        // The arm fallen INTO opens with its own switch-edge copies, which are how the dispatch hands
+        // it its block parameters. On the fall-through path those copies would RE-RUN and overwrite
+        // what the falling arm just computed (`case 0: v=7; case 1: v=5;` — the case-0 path calling
+        // with 5). They cannot simply be dropped either: entering that arm by its own case value
+        // needs them. Hoisting them above the switch is possible but not always safe (another arm may
+        // read the same name first), so this shape declines LOUD; recovering it is future work.
+        if (ft && edgeCopies[i + 1].length) {
+          throw new StructureError(
+            `cannot structure '${fn.name}': the case fallen into takes a value from the switch edge, ` +
+              `which the fall-through path would re-run`,
+          );
+        }
+        return {
+          // A falling-through arm stops AT its successor arm, which then emits that body once under
+          // its own labels; a closed arm runs to the merge as before.
+          body: [...edgeCopies[i], ...structureRegion(a.entry, ft ? exit.to : merge)],
+          fallsThrough: ft,
+        };
+      });
+      const outCases: SwitchCase[] = arms.map((a, i) => ({ values: a.values, ...bodies[i] }));
+      // An EMPTY default arm is not a default at all: it is where the switch ends, which is where
+      // an unmatched scrutinee goes anyway. Emitting the label with nothing under it says nothing
+      // and is not even valid C89 (a label needs a statement).
+      const defBody = bodies[bodies.length - 1].body;
       const sw: Stmt = {
         k: 'switch',
         scrutinee: expr(term.operands[0]),
         cases: outCases,
-        default: [...argAssignsFor(b, succ[succ.length - 1]), ...structureRegion(succ[succ.length - 1].block, merge)],
+        ...(defBody.length ? { default: defBody } : {}),
       };
       out.push(sw);
       if (merge && merge !== stop) {
@@ -2277,6 +2342,26 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     if (loopUpdateHazard(lterm.operands[0], exitArgs, dw.body, sub, updateWrites, null, new Set(dw.header.params))) {
       throw new StructureError(
         `cannot structure '${fn.name}': do-while condition or a post-loop value reads a pre-update loop variable`,
+      );
+    }
+    // The exit copies render AFTER the `dowhile` statement, but the analysis judged where each
+    // value they carry may inline as if the copies sat on the latch's terminator — INSIDE the loop.
+    // For a pure def that is only a naming question (the pre-update guard above covers the rest);
+    // for an EFFECTFUL one it moves the effect out of the loop: a call that ran once per iteration
+    // would render once, after it. Nothing can re-place it here — `materialize` was decided before
+    // emission — so decline LOUD rather than emit a plausible loop that calls the wrong number of
+    // times.
+    const movedEffect = exitArgs.find((v) => {
+      const d = defs.get(v);
+      return (
+        d && REPEATED_EFFECT.has(d.opcode) && dw.body.has(opBlock.get(d)!) && !materialize.has(d) && !varName.has(v)
+      );
+    });
+    if (movedEffect) {
+      const d = defs.get(movedEffect)!;
+      throw new StructureError(
+        `cannot structure '${fn.name}': a post-loop value inlines a '${d.opcode}' from inside the loop, ` +
+          `which would move that effect out of it`,
       );
     }
     dwActive.add(dw.header);
