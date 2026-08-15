@@ -1198,13 +1198,46 @@ export function lift(
   };
   const reg = (s: string) => s.replace(/[[\]]/g, '');
 
+  // THE one test for "is this token the stack pointer". Case-insensitive because GNU as accepts
+  // uppercase register names, and a case-sensitive test here is a silent-wrong-answer hole rather
+  // than a cosmetic one: `add r0, SP, #4` is `&local`, and missing it fabricates a phantom
+  // parameter and emits confident arithmetic on it.
+  const isSpReg = (s: string | undefined): boolean => {
+    const r = reg(s ?? '').toLowerCase();
+    return r === 'sp' || r === 'r13';
+  };
+
+  // Writing sp is transparent frame bookkeeping ONLY in the one shape that cannot change anything
+  // observable: `sp = sp ± immediate`, spelled either `add sp, #N` (what disassemblers emit) or
+  // `add sp, sp, #N` (what agbcc emits — see the decode arm). Everything else that writes sp is a
+  // frame change this frontend cannot model: a register-sized adjustment (`add sp, r4`, agbcc's
+  // way of spelling a frame too large for the 7-bit immediate), a computed stack pointer
+  // (`add sp, r0, #4`), or `mov sp, rN`. Those must DECLINE, not vanish — dropping them silently
+  // deletes the frame change while the function keeps compiling, which is the exact
+  // loud-becomes-silent trade this frontend's guards exist to prevent.
+  //
+  // Flag-setting spellings (`adds`/`subs`) are excluded deliberately: ARMv4T's SP-adjust encoding
+  // does not set flags, so a flag-setting one can only come from hand-written asm, where dropping
+  // it would leave a stale compare for a following conditional branch to fold. There are 0 in the
+  // benchmark corpus and 0 across the klonoa and sa3 checkouts, so excluding them costs nothing.
+  const spAsDataError = () =>
+    new FrontendUnsupportedError(
+      `cannot lift '${name}': stack pointer used as data (address-taken local / sp-relative slot / frame arithmetic) — local stack frames not supported`,
+    );
+
+  const isFrameAdjust = (mnemonic: string, dest: string | undefined, base: string | undefined, off: string | undefined): boolean =>
+    (mnemonic === 'add' || mnemonic === 'sub') &&
+    isSpReg(dest) &&
+    (base === undefined || isSpReg(base)) &&
+    (off?.startsWith('#') ?? false);
+
   // Reading sp as a DATA operand means an address-taken local (`add rD, sp, #N` = `&local`),
   // an sp-relative spill slot (`ldr/str …, [sp, #N]`), or frame-pointer arithmetic — none
   // modellable without a stack abstraction. sp is never WRITTEN (sp-dest ops are transparent
   // frame bookkeeping), so Braun SSA would materialize it as a fabricated PHANTOM parameter that
   // scrambles the signature. Fail LOUD instead, mirroring MIPS (`isStackPtr`) and PPC (`r1`).
   const readData = (r: string, b: number): Value => {
-    if (r === 'sp' || r === 'r13') {
+    if (isSpReg(r)) {
       throw new FrontendUnsupportedError(
         `cannot lift '${name}': stack pointer used as data (address-taken local / sp-relative slot / frame arithmetic) — local stack frames not supported`,
       );
@@ -1238,25 +1271,6 @@ export function lift(
     // adjustments have no low-register data destination, so they fall through harmlessly;
     // terminators are handled in the terminator section below.
     const isThumbReg = (s: string | undefined): s is string => /^r\d+$/.test(s ?? '');
-    // A 3-operand frame adjustment: `add sp, sp, #N` / `sub sp, sp, #N`. The 2-operand spelling of
-    // the SAME instruction (`add sp, #N`) is already transparent to dataflow — see emit2op, whose
-    // comment states the policy — and agbcc emits both. Treating one as bookkeeping and the other
-    // as a data read of sp is an inconsistency, not a decision: it declined
-    // `kleod:UpdateWorldMapNodeTile` outright, a function that allocates four bytes of frame and
-    // then never touches them.
-    //
-    // Deliberately narrow, because the surrounding guard is what keeps this frontend honest about
-    // stack frames. It fires ONLY when sp is both the destination and the base and the offset is an
-    // immediate, so every genuine use of sp as data still declines loudly at readData:
-    // `ldr r0,[sp,#N]`, `ldr r0,[sp,r1]`, `mov r0,sp` and `add r0,sp,#N` are all untouched (they
-    // write a low register), and a computed `add sp, r0, #N` is untouched too (the base is not sp).
-    // `pc` is excluded by construction — `add pc, pc, #N` is a computed jump, not bookkeeping.
-    const isSpReg = (s: string | undefined): boolean => {
-      const r = reg(s ?? '');
-      return r === 'sp' || r === 'r13';
-    };
-    const isFrameAdjust = (d: string | undefined, base: string | undefined, off: string | undefined): boolean =>
-      isSpReg(d) && isSpReg(base) && (off?.startsWith('#') ?? false);
     const emitOpaqueDest = (ins: { mnemonic: string; ops: string[]; asWritten?: string }) => {
       // storeClass: unmodelled Thumb stores are str*/stm* — `stmia rN!, {…}`'s dest token `r0!`
       // fails isReg, so without this it would be skipped as "no reg dest", silently deleting the
@@ -1287,8 +1301,16 @@ export function lift(
     // non-immediate) degrades to a loud opaque rather than a crash or a silent data-dest drop.
     const emit2op = (opc: Opcode, dReg: string, op2: string | undefined, bi: number) => {
       if (!isThumbReg(reg(dReg))) {
+        // The callers have already let `sp = sp ± immediate` through (isFrameAdjust). Reaching here
+        // with an sp destination therefore means a register-sized frame adjustment — `add sp, r4`,
+        // which is how agbcc spells a frame too large for the 7-bit immediate (4 real sites in the
+        // sa3 checkout). Returning silently deletes that frame change and lets the function compile
+        // anyway. Decline instead, with the same message as every other unmodellable sp use.
+        if (isSpReg(dReg)) {
+          throw spAsDataError();
+        }
         return;
-      } // sp/pc frame adjustment: transparent
+      } // pc: claimed by classifyXfer before reaching here
       if (op2 === undefined) {
         emitOpaqueDest({ mnemonic: opc, ops: [dReg] });
         return;
@@ -1326,12 +1348,27 @@ export function lift(
       switch (ins.mnemonic) {
         case 'mov':
         case 'movs': {
+          // `mov sp, rN` replaces the stack pointer wholesale — a frame change, not bookkeeping.
+          // Without this it would writeVar('sp') and vanish (nothing reads sp, because readData
+          // declines on it), silently dropping the frame switch. One real site in the sa3 checkout.
+          if (isSpReg(a)) {
+            throw spAsDataError();
+          }
           const v = b?.startsWith('#') ? constVal(imm(b), bi) : readData(reg(b), bi);
           writeVar(reg(a), bi, v);
           break;
         }
         case 'add':
         case 'adds': {
+          // Frame bookkeeping first: it must outrank the `#0` copy idiom below, or `add sp, sp, #0`
+          // takes the copy path and declines while `add sp, #0` is transparent — the same
+          // two-spellings inconsistency one N lower down.
+          if (isSpReg(a)) {
+            if (isFrameAdjust(ins.mnemonic, a, c === undefined ? undefined : b, c ?? b)) {
+              break;
+            }
+            throw spAsDataError();
+          }
           // `add rD, rS, #0` is agbcc's low-register copy idiom (Thumb `mov rD, rS` between
           // low regs isn't always available). Model it as a pure copy — same SSA value — not
           // an `x + 0` add. This keeps output clean and, crucially, makes a value copied to a
@@ -1347,9 +1384,7 @@ export function lift(
             emit2op('add', a, b, bi);
             break;
           }
-          if (isFrameAdjust(a, b, c)) {
-            break;
-          } // `add sp, sp, #N`: frame bookkeeping, transparent
+
           const rhs = c?.startsWith('#') ? constVal(imm(c), bi) : readData(reg(c), bi);
           const res = mkValue(T.unk(32));
           irb.ops.push(mkOp('add', { operands: [readData(reg(b), bi), rhs], results: [res] }));
@@ -1358,13 +1393,17 @@ export function lift(
         }
         case 'sub':
         case 'subs': {
+          if (isSpReg(a)) {
+            if (isFrameAdjust(ins.mnemonic, a, c === undefined ? undefined : b, c ?? b)) {
+              break;
+            }
+            throw spAsDataError();
+          }
           if (c === undefined) {
             emit2op('sub', a, b, bi);
             break;
           } // `sub rD, op2` → rD = rD - op2
-          if (isFrameAdjust(a, b, c)) {
-            break;
-          } // `sub sp, sp, #N`: frame bookkeeping, transparent
+
           const rhs = c?.startsWith('#') ? constVal(imm(c), bi) : readData(reg(c), bi);
           const res = mkValue(T.unk(32));
           irb.ops.push(mkOp('sub', { operands: [readData(reg(b), bi), rhs], results: [res] }));
