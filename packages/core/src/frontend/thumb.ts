@@ -1208,8 +1208,16 @@ export function lift(
   };
 
   // Writing sp is transparent frame bookkeeping ONLY in the one shape that cannot change anything
-  // observable: `sp = sp ± immediate`, spelled either `add sp, #N` (what disassemblers emit) or
-  // `add sp, sp, #N` (what agbcc emits — see the decode arm). Everything else that writes sp is a
+  // observable: `sp = sp ± immediate`. Two producers feed this frontend and each emits exactly ONE
+  // spelling, which is why both must work and why handling only one silently halved the input:
+  //
+  //     producer                                    `add sp, #N`   `add sp, sp, #N`
+  //     agbcc's own .s (checkouts/*/build/src)            0                98
+  //     disassembly (klonoa asm/ · sa3 asm/)           203 · 1250           0
+  //
+  // So this is not "one tool with two spellings" — it is the compiler's convention against the
+  // disassembler's, and asmlift reads both kinds of file. (An earlier commit message on this branch
+  // claimed agbcc emitted both; it does not, and the counts above are the check that settles it.) Everything else that writes sp is a
   // frame change this frontend cannot model: a register-sized adjustment (`add sp, r4`, agbcc's
   // way of spelling a frame too large for the 7-bit immediate), a computed stack pointer
   // (`add sp, r0, #4`), or `mov sp, rN`. Those must DECLINE, not vanish — dropping them silently
