@@ -227,6 +227,47 @@ export function analyze(fn: Fn, returnsVoid: boolean): StructureAnalysis {
     emitPosCache.set(op, res);
     return res;
   };
+  // THE def→render path discipline — one implementation, three callers (the two materialization
+  // rules below and structure.ts's bitfield fold, which imports it). May an op `isWrite` accepts
+  // execute between `def` and a statement at `render`, on any def-avoiding path? The def block's
+  // tail, the render block's head, and every between-block on a path; a path re-crossing the def
+  // is the NEXT dynamic instance and does not count. Path-based on purpose: `fn.blocks` is ADDRESS
+  // order, so a linear-position scan misses a block laid out after the render that executes
+  // between def and render on the taken path (an audit round broke exactly that way).
+  const memWriteBetween = (def: Op, render: { blk: Block; idx: number }, isWrite: (x: Op) => boolean): boolean => {
+    const b = opBlock.get(def)!;
+    const oi = opIndex.get(def)!;
+    const wDirty = (list: Op[], from: number, to: number): boolean => {
+      for (let k = from; k < to; k++) {
+        if (isWrite(list[k])) {
+          return true;
+        }
+      }
+      return false;
+    };
+    // Same block: the only def-avoiding path is the straight line between the two indices
+    // (leaving and re-entering the block re-crosses the def). A render BEFORE the def cannot
+    // happen — within a block, uses follow defs — and falls through to the path walk, whose
+    // answer is the conservative one.
+    if (render.blk === b && oi < render.idx) {
+      return wDirty(b.ops, oi + 1, render.idx);
+    }
+    if (wDirty(b.ops, oi + 1, b.ops.length) || wDirty(render.blk.ops, 0, render.idx)) {
+      return true;
+    }
+    for (const x of reachAvoiding(b, b)) {
+      if (x === render.blk && !reachAvoiding(render.blk, b).has(render.blk)) {
+        continue; // acyclic render block: head checked
+      }
+      if (x !== render.blk && !reachAvoiding(x, b).has(render.blk)) {
+        continue; // not on a def→render path
+      }
+      if (wDirty(x.ops, 0, x.ops.length)) {
+        return true;
+      }
+    }
+    return false;
+  };
   // Decide in REVERSE program order so a consumer's own materialization is settled before any
   // producer asks for its emit position (SSA: uses follow defs in dominance/layout order) — and
   // iterate to a fixpoint for IR whose block layout does not follow dominance (hand-built IR):
@@ -288,39 +329,8 @@ export function analyze(fn: Fn, returnsVoid: boolean): StructureAnalysis {
         // between the def and ANY render (cycle-aware, conservative write set). Otherwise a temp.
         if (!isCall && consumers.length > 1) {
           const MW = new Set(['store', 'astore', 'call', 'opaque']);
-          const wDirty = (list: Op[], from: number, to: number) => {
-            for (let k = from; k < to; k++) {
-              if (MW.has(list[k].opcode)) {
-                return true;
-              }
-            }
-            return false;
-          };
-          const defToRenderDirty = (q: { blk: Block; idx: number }): boolean => {
-            // Same block: the only def-avoiding path is the straight line between the two indices
-            // (leaving and re-entering the block re-crosses the def).
-            if (q.blk === b && oi < q.idx) {
-              return wDirty(b.ops, oi + 1, q.idx);
-            }
-            if (wDirty(b.ops, oi + 1, b.ops.length) || wDirty(q.blk.ops, 0, q.idx)) {
-              return true;
-            }
-            const between = reachAvoiding(b, b);
-            for (const x of between) {
-              if (x === q.blk && !reachAvoiding(q.blk, b).has(q.blk)) {
-                continue;
-              } // acyclic render blk: head checked
-              if (x !== q.blk && !reachAvoiding(x, b).has(q.blk)) {
-                continue;
-              } // not on a def→render path
-              if (wDirty(x.ops, 0, x.ops.length)) {
-                return true;
-              }
-            }
-            return false;
-          };
           const poss = consumers.map((c) => emitPos(c));
-          if (poss.some((p) => p === null) || poss.some((p) => defToRenderDirty(p!))) {
+          if (poss.some((p) => p === null) || poss.some((p) => memWriteBetween(op, p!, (x) => MW.has(x.opcode)))) {
             materialize.add(op);
           }
           continue;
@@ -368,84 +378,18 @@ export function analyze(fn: Fn, returnsVoid: boolean): StructureAnalysis {
           }
           return false;
         };
-        const gapDirty = (list: Op[], from: number, to: number) => {
-          for (let k = from; k < to; k++) {
-            if (isBarrier(list[k])) {
-              return true;
-            }
-          }
-          return false;
-        };
-        if (pos.blk === b) {
-          if (gapDirty(b.ops, oi + 1, pos.idx)) {
-            materialize.add(op);
-          }
-          continue;
-        }
-        // Cross-block: a call's execution would become path-dependent — always materialize. A
-        // load may inline only if NO write exists on any DEF-AVOIDING def→render path (a path
-        // re-crossing the def is the next dynamic instance): the def block's tail, the render
-        // block's head, and every block between; a render block cyclic WITHOUT passing the def
-        // (an inner loop around the render) is checked in full.
-        if (isCall) {
+        // A CROSS-BLOCK call's execution would become path-dependent — always materialize. Within
+        // its own block a call is judged like everything else, by the barrier scan below.
+        if (isCall && pos.blk !== b) {
           materialize.add(op);
           continue;
         }
-        let dirty = gapDirty(b.ops, oi + 1, b.ops.length) || gapDirty(pos.blk.ops, 0, pos.idx);
-        if (!dirty) {
-          for (const x of reachAvoiding(b, b)) {
-            if (x === pos.blk && !reachAvoiding(pos.blk, b).has(pos.blk)) {
-              continue;
-            } // acyclic render block: head checked
-            if (x !== pos.blk && !reachAvoiding(x, b).has(pos.blk)) {
-              continue;
-            } // not on a def→render path
-            if (gapDirty(x.ops, 0, x.ops.length)) {
-              dirty = true;
-              break;
-            }
-          }
-        }
-        if (dirty) {
+        // Otherwise: inline only if no barrier stands on any def-avoiding def→render path.
+        if (memWriteBetween(op, pos, isBarrier)) {
           materialize.add(op);
         }
       }
     }
   }
-  // The def→render path discipline, exported for the bitfield fold's ordering gate
-  // (structure.ts): may an op `isWrite` accepts execute between `def` and a statement at
-  // `render`, on any def-avoiding path? Same cycle-aware rules as the materialize decisions
-  // above — the def block's tail, the render block's head, and every between-block on a path;
-  // a path re-crossing the def is the next dynamic instance and does not count.
-  const memWriteBetween = (def: Op, render: { blk: Block; idx: number }, isWrite: (x: Op) => boolean): boolean => {
-    const b = opBlock.get(def)!;
-    const oi = opIndex.get(def)!;
-    const wDirty = (list: Op[], from: number, to: number): boolean => {
-      for (let k = from; k < to; k++) {
-        if (isWrite(list[k])) {
-          return true;
-        }
-      }
-      return false;
-    };
-    if (render.blk === b && oi < render.idx) {
-      return wDirty(b.ops, oi + 1, render.idx);
-    }
-    if (wDirty(b.ops, oi + 1, b.ops.length) || wDirty(render.blk.ops, 0, render.idx)) {
-      return true;
-    }
-    for (const x of reachAvoiding(b, b)) {
-      if (x === render.blk && !reachAvoiding(render.blk, b).has(render.blk)) {
-        continue; // acyclic render block: head checked
-      }
-      if (x !== render.blk && !reachAvoiding(x, b).has(render.blk)) {
-        continue; // not on a def→render path
-      }
-      if (wDirty(x.ops, 0, x.ops.length)) {
-        return true;
-      }
-    }
-    return false;
-  };
   return { useSitesOf, opIndex, opBlock, liveIn, materialize, reachFrom, emitPos, memWriteBetween };
 }
