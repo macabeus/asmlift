@@ -1297,12 +1297,9 @@ export function lift(
   // Returns null when the depth cannot be computed exactly FROM A RECOGNISED FRAME OPERATION.
   // It does NOT return null for an sp write it does not model at all — `add sp, r4`, `mov sp, rN`
   // and friends yield 0 here and would leave a stale depth. That is safe only because writeData
-  // declines every one of them before the depth is ever used, so the function never reaches an
-  // argument read with a depth this returned 0 for. If a future change ever makes a register-sized
-  // frame adjust transparent, this becomes a silent local-as-parameter and this comment is the
-  // warning: that change must teach spDelta about it in the same commit. The whole capability rests on the depth
-  // being exact, so an approximation is never acceptable: understate the frame and a local sits
-  // above the computed top and is minted as a parameter reading uninitialised stack. A null
+  // declines every one of them before the depth is ever used. The whole capability rests on the
+  // depth being exact, so an approximation is never acceptable: understate the frame and a local
+  // sits above the computed top and is minted as a parameter reading uninitialised stack. A null
   // poisons the depth for the rest of the block (spDepthKnown), which disables argument recovery
   // and leaves every `[sp,#N]` to decline as before.
   const spDelta = (ins: { mnemonic: string; ops: string[] }): number | null => {
@@ -1360,6 +1357,12 @@ export function lift(
   // whole soundness argument: every sp-relative STORE declines (readData, via the str arm), and a
   // `push` only ever writes strictly BELOW the current top. An argument slot is at or above the
   // incoming sp, so no instruction here can have defined it — the value can only be the caller's.
+  //
+  // That second step needs sp to have stayed at or below where it came in, i.e. `depth >= 0` at
+  // every point of the walk, or a `push` reaches back up over the argument area and the conclusion
+  // is false. The walk enforces it (it poisons `depthKnown` the moment the depth goes negative, see
+  // fillBlock) — this is a PREMISE, not a detail: leaving it unstated is what let the first version
+  // hand back a pushed callee-saved register as argument 5.
   const incomingArgIndex = (
     base: string,
     off: number,
@@ -1514,6 +1517,24 @@ export function lift(
         spDepthKnown = false;
       } else {
         spDepth += delta;
+      }
+      // sp ABOVE the incoming sp poisons the walk for the rest of the block, permanently. This is
+      // the premise the whole soundness argument rests on: an argument slot is safe to read only
+      // because no instruction in this function can have written it, and the reason a `push` cannot
+      // is that it writes strictly below the CURRENT top — which is at or below the INCOMING top.
+      // Let sp rise above where it came in and that stops being true:
+      //
+      //     add sp, sp, #8      ; sp = S+8
+      //     push {r4, r5, r6}   ; sp = S-4, and this WROTE r5 to S+0
+      //     ldr  r0, [sp, #4]   ; = S+0 — r5's slot, not the caller's argument
+      //
+      // The depth is back to a plausible +4 by then, so nothing downstream can tell. It emitted
+      // `s32 f(s32 a0, …, s32 a4) { return a4; }`: the function's own incoming r5, presented as an
+      // argument. A sliced fragment whose prologue was cut off is exactly this shape, and that is
+      // the corpus this frontend reads. Once sp has been above the line, later slots cannot be
+      // vouched for either, so this never recovers.
+      if (spDepth < 0) {
+        spDepthKnown = false;
       }
       const [a, b, c] = ins.ops;
       switch (ins.mnemonic) {
@@ -1910,8 +1931,18 @@ export function lift(
               // filled before any stack argument exists, and the stack area is contiguous with slot
               // 4 at the lowest offset. So this is entailed by the calling convention, not guessed —
               // which is what separates it from inventing parameters a function might not have.
+              // (It assumes one word per argument, which is what this frontend assumes everywhere —
+              // it types every parameter s32. An 8-byte argument, which AAPCS may align into r1 or
+              // straddle across r3 and the stack, would break the index↔slot correspondence; no
+              // agbcc row in the corpus has one, and recovering them is its own capability.)
+              //
+              // ensureParam, NOT readVar: a register the entry block DEFINES before this point
+              // (`bl g` then a read of the frame, the commonest shape there is) answers readVar with
+              // that local definition and no parameter appears — reopening the very hole this loop
+              // closes. It emitted `s32 f(s32 a0, s32 a1, s32 a2, s32 a3) { return g() + a3; }`:
+              // arity 4 where the ABI proves 5, with the stack argument bound to r3's slot.
               for (let j = 0; j < index; j++) {
-                readVar(j < target.argRegs.length ? target.argRegs[j] : stackArgKey(j), bi);
+                ssa.ensureParam(j < target.argRegs.length ? target.argRegs[j] : stackArgKey(j), bi);
               }
               writeData(reg(a), bi, readVar(stackArgKey(index), bi));
               break;

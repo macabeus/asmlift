@@ -248,6 +248,39 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     expect(decompile('rs', b, ARMV4T_AGBCC).source).toContain('rs(s32 a0, s32 a1, s32 a2, s32 a3, s32 a4)');
   });
 
+  test('a register OVERWRITTEN before the read is still a parameter', () => {
+    // The sibling of the test above, and a different mechanism: r0-r2 here are not merely unread,
+    // they are DEFINED before the frame is read. `readVar` answers such a key with its local
+    // definition and mints nothing, so asserting the obligation needs `ensureParam` — this emitted
+    // `f(a0, a1, a2, a3) { return g() + a3; }`, arity 4 where the ABI proves 5, with the stack
+    // argument bound to r3's slot. `bl` then a frame read is the commonest shape of it.
+    const call = 'f:\n\tpush\t{r4, lr}\n\tbl\tg\n\tldr\tr1, [sp, #8]\n\tadd\tr0, r0, r1\n\tbx\tlr\n';
+    expect(decompile('f', call, ARMV4T_AGBCC).source).toBe(
+      's32 f(s32 a0, s32 a1, s32 a2, s32 a3, s32 a4) {\n    return g() + a4;\n}\n',
+    );
+    // …and the parameter stays UNUSED: the local value that was already flowing keeps flowing.
+    const mov = 'f:\n\tpush\t{r4, lr}\n\tmov\tr0, #0\n\tldr\tr1, [sp, #8]\n\tbx\tlr\n';
+    expect(decompile('f', mov, ARMV4T_AGBCC).source).toBe(
+      's32 f(s32 a0, s32 a1, s32 a2, s32 a3, s32 a4) {\n    return 0;\n}\n',
+    );
+  });
+
+  test('sp above the incoming sp poisons the walk, permanently', () => {
+    // `add sp,sp,#8` then `push {r4,r5,r6}` leaves the depth at a plausible +4, but the push wrote
+    // r5 to the slot at the incoming sp: [sp,#4] reads the function's OWN callee-saved register.
+    // The proof that an argument slot is unwritten holds only while sp stays at or below where it
+    // came in. This emitted `f(a0, …, a4) { return a4; }` — r5, presented as argument 5.
+    const above = 'f:\n\tadd\tsp, sp, #0x8\n\tpush\t{r4, r5, r6}\n\tldr\tr0, [sp, #4]\n\tbx\tlr\n';
+    expect(() => decompile('f', above, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+    // a `pop` gets there too — the depth need never be written as a literal
+    const popped = 'f:\n\tpop\t{r4}\n\tpush\t{r4, r5}\n\tldr\tr0, [sp, #4]\n\tbx\tlr\n';
+    expect(() => decompile('f', popped, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+    // and it does not recover: a legitimate-looking frame read AFTER the excursion still declines,
+    // because a push during the excursion may have written that slot too
+    const later = 'f:\n\tadd\tsp, sp, #0x8\n\tsub\tsp, sp, #0x8\n\tpush\t{r4, lr}\n\tldr\tr0, [sp, #8]\n\tbx\tlr\n';
+    expect(() => decompile('f', later, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+  });
+
   test('a gap in the slots read still yields ABI-correct offsets', () => {
     // frame 8, so [sp,#0xc] is argument 6 (index 5) and argument 5 is never read. Naming downstream
     // is POSITIONAL, so minting only the slot that was read would put the parameter at argument 5's

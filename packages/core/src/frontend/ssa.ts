@@ -28,8 +28,22 @@ export interface SsaBuilder {
   writeVar(reg: string, b: number, v: Value): void;
   /** Mark block `b` fully emitted (terminator pushed); seals any now-ready successors. */
   markFilled(b: number): void;
-  /** Live-in parameter value → the ABI register it arrived on (for calling-convention order). */
+  /** Live-in parameter value → the key it arrived on (for calling-convention order). Usually an
+   *  ABI register name, but a frontend's virtual key (see the module header) ranks here too. */
   paramReg: Map<Value, string>;
+  /** Assert that block `b` takes a parameter for `key`, whether or not anything reads it.
+   *
+   *  `readVar` cannot express this. It asks "what value does `key` hold here?", so a key the block
+   *  DEFINES before any read answers with that local definition and no parameter is created — to it
+   *  "never read" and "written before first read" are the same thing. When a calling convention
+   *  proves an argument exists, that is an obligation on the SIGNATURE, independent of whether the
+   *  body happens to use it, so it needs its own verb.
+   *
+   *  Never touches the block's definitions: the parameter is added and left unused, so any local
+   *  value already flowing keeps flowing. Only meaningful on a block with no predecessors —
+   *  elsewhere a parameter is a phi whose position is aligned with its predecessors' terminator
+   *  args, and appending an unpaired one would corrupt that. */
+  ensureParam(key: string, b: number): void;
   /** Whether `reg` has a definition reaching block `b` (best-effort call-arity heuristic). */
   hasReachingDef(reg: string, b: number, seen?: Set<number>): boolean;
   /** Remove trivial phis; call once every block is filled. */
@@ -136,7 +150,29 @@ export function makeSsaBuilder(name: string, blockCount: number, preds: number[]
   };
   sealReadyBlocks(); // seals the entry (no predecessors) up front
 
-  const hasReachingDef = (reg: string, b: number, seen = new Set<number>()): boolean => {
+  // See the interface docs. Two cases, and the split is the whole point: when nothing defines the
+  // key, the ordinary live-in path already does exactly the right thing; when something does, a
+  // parameter still has to exist for the signature, and it must be added WITHOUT redirecting the
+  // dataflow to it.
+  const ensureParam = (key: string, b: number): void => {
+    if (preds[b].length > 0) {
+      return; // a parameter here is a phi; see the precondition on the interface
+    }
+    for (const p of irBlocks[b].params) {
+      if (paramReg.get(p) === key) {
+        return;
+      }
+    }
+    if (!defs[b].has(key)) {
+      readVar(key, b);
+      return;
+    }
+    const p = mkValue(T.unk(32));
+    irBlocks[b].params.push(p);
+    paramReg.set(p, key); // ranked by the ABI sort like any other parameter; deliberately no defs entry
+  };
+
+  const hasReachingDef =(reg: string, b: number, seen = new Set<number>()): boolean => {
     if (defs[b].has(reg)) {
       return true;
     }
@@ -153,6 +189,7 @@ export function makeSsaBuilder(name: string, blockCount: number, preds: number[]
     readVar,
     writeVar,
     paramReg,
+    ensureParam,
     hasReachingDef,
     markFilled: (b: number) => {
       filled[b] = true;
