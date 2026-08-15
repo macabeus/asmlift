@@ -518,6 +518,28 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     expect(decompile('f', readFirst, ARMV4T_AGBCC).source).toContain('g(');
   });
 
+  test('a tail-merged call site sets its stack argument up in BOTH predecessors', () => {
+    // agbcc really does hoist argument setup out of the calling block: sa3's Task_BonusFlower_Spawn
+    // tail-merges two call sites, so argument 5 is stored in both predecessors with the `bl` in the
+    // join. A per-block scan does not see that at all — and with a post-call reload of the same
+    // offset to satisfy the never-read test, the store became a dead local and the argument was
+    // dropped from the call. The scan runs over the whole listing for this reason.
+    const tailMerged =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tcmp\tr0, #0\n\tbeq\t.L2\n\tldr\tr2, .LP\n\tstr\tr2, [sp]\n\tb\t.L3\n' +
+      '.L2:\n\tldr\tr2, .LP\n\tstr\tr2, [sp]\n.L3:\n\tbl\tg\n\tldr\tr1, [sp]\n\tadd\tr0, r0, r1\n' +
+      '\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r2}\n\tbx\tr2\n.LP:\n\t.word\t0x08051F54\n';
+    expect(() => decompile('f', tailMerged, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+  });
+
+  test('a reload in DEAD code is not evidence that live code reads the slot back', () => {
+    // The never-read test scanned every block, so a reload that can never execute satisfied it for
+    // live code — letting an argument store pass as a local. Only entry-reachable blocks count.
+    const deadReload =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tb\t.L3\n' +
+      '.L2:\n\tldr\tr1, [sp]\n.L3:\n\tbl\tg\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r2}\n\tbx\tr2\n';
+    expect(() => decompile('f', deadReload, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+  });
+
   test('a gap in the slots read still yields ABI-correct offsets', () => {
     // frame 8, so [sp,#0xc] is argument 6 (index 5) and argument 5 is never read. Naming downstream
     // is POSITIONAL, so minting only the slot that was read would put the parameter at argument 5's

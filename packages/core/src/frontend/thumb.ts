@@ -1603,20 +1603,49 @@ export function lift(
         //       signature of one — including one set up in a different block from its call.
         //   (b) no block may hold a slot store followed by a `bl` with no reload of that offset in
         //       between; that is where agbcc puts argument setup.
-        // Neither is sound on its own and the pair is not either: (b) is block-local, so a store in
-        // one block reaching a call in the next passes it, and the accept/refuse boundary there is a
-        // LABEL rather than anything semantic. Measured on 2686 sa3+klonoa functions this admits 15
-        // functions and loses none, and no newly-admitted function has a store reaching a call
-        // unread even scanning across labels — but that is calibration against one compiler's
-        // scheduling, which is why it is confined to the case where the convention cannot answer.
+        // Neither is sound alone and the pair is not either, so keep two things straight about them.
+        //
+        // (b) is the one doing the work: measured over the corpus's call-containing functions, 87
+        // are held by (b) alone and 3 by (a) alone. Calling (a) "the unconditional one" was
+        // backwards. (a)'s real theorem is not "the callee reads it, the caller doesn't" — it is
+        // that agbcc's ACCUMULATE_OUTGOING_ARGS puts the outgoing area at the BOTTOM of localArea,
+        // disjoint from the locals, so no local load can ever land on an argument offset. State it
+        // that way, because the disjointness is what a tail-merged call site breaks.
+        //
+        // agbcc DOES hoist argument setup out of the calling block — `Task_BonusFlower_Spawn` (sa3
+        // bonus_game_enemies) tail-merges two call sites, storing argument 5 in both predecessors
+        // with the `bl` in the join, and three more corpus functions do the same. An earlier version
+        // of this scan was per-block and admitted exactly that, with a LABEL deciding accept versus
+        // refuse. It runs over the whole listing now, which is why those decline.
         const slotAcc = (ins: Instr) => {
           const a = spMemAccess(ins);
           return a && !a.regOff && a.width === 4 && a.off % 4 === 0 && a.off >= 0 && a.off < localArea ? a.off : null;
         };
         const isStore = (ins: Instr) => /^str/.test(ins.mnemonic);
+        // Entry-REACHABLE blocks only. A reload in dead code is not evidence that live code reads
+        // the slot back, and counting it lets an argument store satisfy (a) on the strength of an
+        // instruction that never executes.
+        const live = new Set<number>([0]);
+        for (let changed = true; changed;) {
+          changed = false;
+          for (let b = 0; b < asmBlocks.length; b++) {
+            if (!live.has(b)) {
+              continue;
+            }
+            for (let s = 0; s < asmBlocks.length; s++) {
+              if (preds[s].includes(b) && !live.has(s)) {
+                live.add(s);
+                changed = true;
+              }
+            }
+          }
+        }
         const reloaded = new Set<number>();
-        for (const ab of asmBlocks) {
-          for (const ins of ab.instrs) {
+        for (let b = 0; b < asmBlocks.length; b++) {
+          if (!live.has(b)) {
+            continue;
+          }
+          for (const ins of asmBlocks[b].instrs) {
             const off = slotAcc(ins);
             if (off !== null && !isStore(ins)) {
               reloaded.add(off);
