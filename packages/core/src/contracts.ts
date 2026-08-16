@@ -6,7 +6,7 @@
 import { type Block, type Fn, type Value, successorsOf } from './ir/core';
 import { type IrType, typeToString } from './ir/types';
 import type { BinOp, Expr, SFn, Stmt } from './l3/ast';
-import { exprChildren, fieldSpellsDot, stmtChildren, stmtExprs } from './l3/ast';
+import { exprChildren, fieldSpellsDot, gapReasonFor, stmtChildren, stmtExprs } from './l3/ast';
 import { declaredTypes, exprCType } from './l3/typing';
 
 export class ContractError extends Error {
@@ -164,11 +164,47 @@ export function assertEffectsPreserved(fn: Fn, sfn: SFn): void {
     }
   }
   const irCalls: CallCounts = new Map();
+  // Unmodelled instructions, by the mnemonic the frontend stamped. Same "never dropped" property as
+  // a call, and it needs its own tally because an `opaque` carries no `target`.
+  const irOpaques = new Set<string>();
   for (const b of seen) {
     for (const op of b.ops) {
       if (op.opcode === 'call' && typeof op.attrs.target === 'string') {
         const t = op.attrs.target;
         irCalls.set(t, (irCalls.get(t) ?? 0) + 1);
+      } else if (op.opcode === 'opaque') {
+        irOpaques.add(gapReasonFor(op.attrs.mnemonic));
+      }
+    }
+  }
+  // DROPPED only, and deliberately not the RE-RUN half: a gap rendered twice is a diagnostic
+  // printed twice, which costs nothing because nothing recompiles it — whereas a call run twice is
+  // an extra execution. Structuring legitimately duplicates a shared arm, so a per-path count here
+  // would fire on correct output.
+  //
+  // Under `onGap: 'strict'` the gap is the `?` sentinel and structure() has already thrown, so this
+  // only ever bites in ANNOTATE mode — which is exactly where it is needed, because that is the CLI
+  // and benchmark default and the mode with no other backstop. Without it, a future structuring
+  // path that drops a block carrying a dead opaque emits a clean, marker-free, silently wrong
+  // function and the benchmark scores it as a nonmatch rather than a decline.
+  if (irOpaques.size) {
+    const emitted = new Set<string>();
+    const we = (e: Expr): void => {
+      if (e.k === 'marker') {
+        emitted.add(e.reason);
+      }
+      exprChildren(e).forEach(we);
+    };
+    const ws = (s: Stmt): void => {
+      stmtExprs(s).forEach(we);
+      stmtChildren(s).forEach(ws);
+    };
+    sfn.body.forEach(ws);
+    for (const reason of irOpaques) {
+      if (!emitted.has(reason)) {
+        throw new ContractError(
+          `structuring dropped the ${reason} in '${sfn.name}' — an instruction asmlift could not model left no trace`,
+        );
       }
     }
   }

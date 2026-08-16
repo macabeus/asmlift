@@ -889,8 +889,8 @@ export function lift(
       const od = opaqueDest(ins.mnemonic, ins.ops, {
         isReg: isMipsReg,
         isZero,
-        storeClass: /^(sb|sh|sw|swl|swr|sc|sd|sdl|sdr|swc1|sdc1)$/,
-        skipSafe: /^(nop|ssnop|break)$/,
+        storeClass: /^(sb|sh|sw|swl|swr|sc|sd|sdl|sdr|swc1|sdc1)$/i,
+        skipSafe: /^(nop|ssnop|break)$/i,
         context: `${name} @0x${ins.addr.toString(16)}`,
       });
       if (!od) {

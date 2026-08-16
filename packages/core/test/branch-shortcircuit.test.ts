@@ -401,7 +401,7 @@ describe('the refusals found by the adversarial round', () => {
   });
 
   test('an `opaque` in the second condition is not hoisted out of the arm it guards', () => {
-    // EFFECTFUL_OPS omits `opaque`, but analysis.ts treats it as a memory writer and a barrier.
+    // EFFECTFUL_OPS now includes `opaque`, and analysis.ts treats it as a memory writer and a barrier.
     // This fold takes the stricter model: an unmodelled instruction must not become unconditional.
     const fn = chain({
       gOnTaken: false,

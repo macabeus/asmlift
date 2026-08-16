@@ -86,9 +86,11 @@ interface AsmBlock {
 // value, just not the kind that can be traded away by accident. Every load spelling ARMv4T Thumb
 // accepts is still listed, because declining a whole function over a synonym is a poor trade.
 //
-// `stmfd` is deliberately absent, and the asymmetry is real rather than an oversight: `stmfd` is
-// `stmdb`, and ARMv4T Thumb has neither — `as` rejects both with "selected processor does not
-// support ... in Thumb mode". There is nothing to normalise it TO.
+// `stmfd` is deliberately absent, and the asymmetry is real rather than an oversight: `stmfd` IS
+// `stmdb` (decrement-before), and ARMv4T Thumb has no decrement-before store — so there is nothing
+// to normalise it TO. That is the whole reason, and it is a fact about the instruction set rather
+// than about any assembler; `as` also rejects both, but per the paragraph above that observation
+// cannot carry an argument here. An `stmfd` in the input therefore declines, correctly.
 //
 // Null-prototype so that an inherited key (`constructor`, `toString`) cannot be mistaken for an
 // entry. Unreachable from real assembly, but the lookup should not depend on that.
@@ -1989,8 +1991,8 @@ export function lift(
       const od = opaqueDest(ins.mnemonic, ins.ops, {
         isReg: isThumbReg,
         normalize: reg,
-        storeClass: /^(str|stm)/,
-        skipSafe: /^(push|pop|nop)$/,
+        storeClass: /^(str|stm)/i,
+        skipSafe: /^(push|pop|nop)$/i,
         context: name,
         display: ins.asWritten,
       });

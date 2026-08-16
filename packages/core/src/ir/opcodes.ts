@@ -176,7 +176,9 @@ export const NEGATED_ICMP: Readonly<Record<string, Opcode>> = Object.fromEntries
   ]),
 );
 
-/** Ops with an observable side effect — the derived view raise/shortcircuit.ts consumes. */
+/** Ops with an observable side effect: the flag on the signature, derived rather than re-listed.
+ *  Consumed by `isDceSafe`, by `HOIST_UNSAFE_OPS` below, and by structure.ts's `sideEffects` walk
+ *  (an effectful op whose result nobody reads is still an execution). */
 export const EFFECTFUL_OPS: ReadonlySet<string> = new Set(
   (Object.keys(OPCODES) as Opcode[]).filter((k) => (OPCODES[k] as OpSig).effects),
 );

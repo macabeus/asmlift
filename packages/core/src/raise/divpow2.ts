@@ -103,7 +103,9 @@ export function recognizeDivPow2(fn: Fn): boolean {
       for (const bias of preds.get(m)!) {
         // The BIAS arm: sole predecessor is the head, and it does nothing but bias (and possibly
         // shift). The whole block is DELETED, not hoisted, so anything else in it would be silently
-        // dropped — a store, a call or a live opaque there would simply stop happening.
+        // dropped — a store, a call or an opaque there would simply stop happening. (Not "a LIVE
+        // opaque": whether its result is read says nothing about what the instruction did, which is
+        // why `opaque` is effectful. The gate already covered both; only the wording was wrong.)
         const bt = term(bias);
         if (bt.opcode !== 'br' || bt.successors[0]?.block !== m || bias === fn.blocks[0]) {
           continue;

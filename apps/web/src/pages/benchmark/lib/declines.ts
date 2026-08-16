@@ -59,6 +59,17 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     label: 'Unmodelled store-class instructions',
     pattern: /unmodelled store-class/,
   },
+  // ABOVE the shape classes, deliberately. An `opaque` makes its block impure, and a shape
+  // recognizer that requires a pure block then refuses — loop recovery declines a header holding
+  // one with "unrecovered back-edge …". Both sentences are in the message (pipeline.ts
+  // `attributeOpaques` appends the instruction), and the missing INSTRUCTION MODEL is the cause
+  // while the loop shape is the symptom. First-match, so this ordering is what decides which
+  // capability the Pareto tells the next round to build.
+  {
+    key: 'opaque-ops',
+    label: 'Other unmodelled instructions (opaque)',
+    pattern: /unmodelled instruction|no lowering for op/,
+  },
   {
     key: 'loop-shapes',
     label: 'Loop shapes declined (multi-latch / irreducible / hazards)',
@@ -79,11 +90,6 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     label: 'Floating point',
     pattern:
       /unmodelled instruction '(mfc1|mtc1|ctc1|cfc1|lwc1|ldc1|swc1|sdc1|cvt[.\w]*|add\.|sub\.|mul\.|div\.|mov\.|neg\.|abs\.|c\.|trunc[.\w]*|fadd|fsub|fmul|fdiv|fmr|fcmp\w*|frsp|fct\w*|lfs|lfd|stfs|stfd)'/,
-  },
-  {
-    key: 'opaque-ops',
-    label: 'Other unmodelled instructions (opaque)',
-    pattern: /unmodelled instruction|no lowering for op/,
   },
   {
     key: 'control-flow',

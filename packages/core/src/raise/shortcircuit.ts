@@ -319,11 +319,12 @@ export function recognizeBranchShortCircuit(fn: Fn): boolean {
         // ^g's body must be pure, and every value it defines must be consumed only by ^g itself —
         // see the REFUSALS note: an escaping or reused value becomes a statement hoisted out of the
         // short circuit.
-        // HOIST_UNSAFE_OPS, not EFFECTFUL_OPS: a live `opaque` is an instruction asmlift could not
-        // model, and moving it out of the arm that guards it is the reordering this refuses. Loud
-        // either way today (a decline under `onGap: 'strict'`, an ASMLIFT_ERROR marker under
-        // `annotate`, the CLI and benchmark default), so this closes a model gap rather than fixing
-        // an observed bug.
+        // HOIST_UNSAFE_OPS includes `opaque`: an instruction asmlift could not model, and moving it
+        // out of the arm that guards it is the reordering this refuses. (This used to read
+        // "HOIST_UNSAFE_OPS, not EFFECTFUL_OPS", on a distinction that no longer exists — `opaque`
+        // is now effectful, and the two sets are equal. The gate is unchanged either way.) Loud
+        // regardless today: a decline under `onGap: 'strict'`, an ASMLIFT_ERROR marker under
+        // `annotate`, the CLI and benchmark default.
         const body = g.ops.slice(0, -1);
         if (body.some((op) => HOIST_UNSAFE_OPS.has(op.opcode))) {
           continue;

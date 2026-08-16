@@ -11,7 +11,7 @@ import {
 import type { AsmData } from './frontend/asmdata';
 import { FrontendUnsupportedError } from './frontend/errors';
 import { frontendFor } from './frontend/registry';
-import type { Fn } from './ir/core';
+import { type Block, type Fn, successorsOf } from './ir/core';
 import { print } from './ir/print';
 import { T } from './ir/types';
 import { VerifyError, verify } from './ir/verify';
@@ -195,9 +195,58 @@ export function raiseRecovered(fn: Fn, target: TargetDescription, hooks: RaiseHo
   }
 }
 
+/** Run `body`, and if it declines, say so in terms of the unmodelled instructions the function
+ *  carries — when it carries any.
+ *
+ *  An `opaque` does not only degrade its own value; it also makes its block impure, and several
+ *  shape recognizers refuse an impure block. Loop recovery is the one that bites: `headerPure`
+ *  rejects a header holding an `opaque`, so the loop declines with "unrecovered back-edge …
+ *  loop-recovery declined this shape: multi-latch, irreducible …". True, and useless — the shape is
+ *  fine, an instruction is missing. Worse, the benchmark's decline classifier keys on that text
+ *  (apps/web .../declines.ts, `loop-shapes`), so the round gets filed as a loop-capability gap and
+ *  the improvement loop is sent to build the wrong thing. That loop is the entire justification for
+ *  preferring a loud decline, so a decline pointing at the wrong capability is a real cost.
+ *
+ *  Only ADDS attribution; it never converts a decline into a success, and never fires when the
+ *  function has no unmodelled instruction. Reachable blocks only, matching the effects contract —
+ *  an opaque in dead code did not cause the refusal. */
+function attributeOpaques<T>(fn: Fn, body: () => T): T {
+  try {
+    return body();
+  } catch (e) {
+    if (!(e instanceof StructureError)) {
+      throw e;
+    }
+    const seen = new Set<Block>([fn.blocks[0]]);
+    for (const stack = [fn.blocks[0]]; stack.length; ) {
+      for (const s of successorsOf(stack.pop()!)) {
+        if (!seen.has(s)) {
+          seen.add(s);
+          stack.push(s);
+        }
+      }
+    }
+    const names = new Set<string>();
+    for (const b of seen) {
+      for (const op of b.ops) {
+        if (op.opcode === 'opaque') {
+          names.add(typeof op.attrs.mnemonic === 'string' ? op.attrs.mnemonic : '?');
+        }
+      }
+    }
+    if (!names.size || /unmodelled instruction/.test(e.message)) {
+      throw e;
+    }
+    const list = [...names].sort().map((m) => `'${m}'`).join(', ');
+    throw new StructureError(
+      `${e.message} — and the function carries unmodelled instruction(s) ${list}, which is the more likely cause`,
+    );
+  }
+}
+
 /** Stage 4 — structure + its boundary contracts, always as a pair. */
 export function structureChecked(fn: Fn, opts: Parameters<typeof structure>[1]): SFn {
-  const raw = structure(fn, opts);
+  const raw = attributeOpaques(fn, () => structure(fn, opts));
   // BOTH boundary contracts run on the pre-DCE tree: the readability pass must never be able to
   // hide a structuring defect by dropping the dead statement that carries it. assertResolved
   // catches an unresolved `?` value; assertDerefsTyped catches an ill-typed deref (e.g. a pointer

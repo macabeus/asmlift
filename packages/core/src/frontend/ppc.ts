@@ -487,8 +487,8 @@ export function lift(
       // must throw, never skip (its first token is the SOURCE register).
       const od = opaqueDest(ins.mnemonic, ins.ops, {
         isReg,
-        storeClass: /^st/,
-        skipSafe: /^nop$/,
+        storeClass: /^st/i,
+        skipSafe: /^nop$/i,
         context: `${name} @0x${ins.addr.toString(16)}`,
       });
       if (!od) {

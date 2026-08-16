@@ -92,15 +92,21 @@ export interface OpaqueDest {
  *
  *  That last clause is the whole contract, and it used to be false. A dead opaque was reaped by DCE
  *  and skipped by structuring, so an unmodelled instruction whose destination nobody happened to
- *  read vanished silently. It cost two benchmark rows a correct answer while they scored 1:
- *  `long long a+b` lifted to `return a0 + a2;` — `adc`, the carry, dropped without a word. `opaque`
- *  now carries `effects: true` (ir/opcodes.ts) for the same reason `call` does.
+ *  read vanished silently — `void sqrtf(s32 a0) { return; }` for thirteen float instructions, and
+ *  the `__osSetSR`/`__osSetCause` family down to `return;`. `opaque` now carries `effects: true`
+ *  (ir/opcodes.ts) for the same reason `call` does.
  *
- *  So `skipSafe` is the ONLY way an unmodelled instruction leaves no trace, which is the point of
- *  it being a short explicit list per ISA. `storeClass` is no longer load-bearing for SOUNDNESS —
- *  a missed store degrades loudly now like anything else — but it stays, because it throws with a
- *  message about the memory write instead of an unresolvable value, and because it catches the
- *  shape where `ops[0]` is a SOURCE (MIPS `swl rt, off(base)`) before a bogus `dst` is fabricated. */
+ *  `skipSafe` is now the ONLY way an unmodelled instruction leaves no trace — which is the point of
+ *  it being a short explicit list per ISA, reviewed as such. (It was NOT the only way when that
+ *  sentence was first written: the hardwired-zero branch below was a second one, closed in the same
+ *  round the claim was made. The claim is worth re-checking rather than inheriting.)
+ *
+ *  `storeClass` is no longer load-bearing for SOUNDNESS — a missed store degrades loudly now like
+ *  anything else — but it stays, because it throws with a message about the memory write instead of
+ *  an unresolvable value, and because it names the shape where `ops[0]` is a SOURCE (MIPS
+ *  `swl rt, off(base)`) rather than fabricating a `dst` from it. Both it and `skipSafe` are matched
+ *  case-INSENSITIVELY: mnemonic case is a property of the disassembler, not of the instruction, and
+ *  GNU `as` assembles `STR`/`LDMIA` to the same encodings as the lowercase spellings. */
 export function opaqueDest(mnemonic: string, ops: string[], policy: OpaquePolicy): OpaqueDest | null {
   const shown = policy.display ?? mnemonic;
   if (policy.storeClass?.test(mnemonic)) {
@@ -114,7 +120,15 @@ export function opaqueDest(mnemonic: string, ops: string[], policy: OpaquePolicy
   }
   const norm = policy.normalize ?? ((s) => s);
   const dst = norm(ops[0] ?? '');
-  if (!policy.isReg(dst)) {
+  // No DEGRADABLE destination: `ops[0]` is not a register at all, or it is the hardwired zero.
+  // These were two branches with two answers — the second returned `null` on the reasoning "writes
+  // hardwired zero ⇒ a genuine no-op", which is the same reasoning this module now rejects for a
+  // dead register: an inert DESTINATION says nothing about what an unmodelled instruction did to
+  // memory or to system state. MIPS `teq zero, zero` is a conditional TRAP and was vanishing with
+  // no diagnostic; so was `mtc0 zero, $12`, a CP0 write, and so was plain garbage `zzz zero, a0`.
+  // A hardwired-zero destination is a genuine no-op only for a MODELLED instruction, and by
+  // construction nothing modelled reaches here. So both cases give the same answer.
+  if (!policy.isReg(dst) || policy.isZero?.(dst)) {
     if (policy.skipSafe?.test(mnemonic)) {
       return null;
     } // explicitly transparent for this ISA
@@ -123,9 +137,6 @@ export function opaqueDest(mnemonic: string, ops: string[], policy: OpaquePolicy
       `${where}unmodelled effect instruction '${shown}' — no register destination to degrade, and skipping it would silently delete its effect`,
     );
   }
-  if (policy.isZero?.(dst)) {
-    return null;
-  } // writes hardwired zero → a genuine no-op
   const srcRegs = ops.slice(1).map(norm).filter(policy.isReg);
   return { dst, srcRegs };
 }
