@@ -21,6 +21,7 @@
 import { type IrType, T, scalarTypeForAccess } from '../ir/types';
 import type { Expr, SFn, Stmt } from './ast';
 import { mapExprChildren, stmtChildren, stmtExprs } from './ast';
+import { type Gate, firstRejection } from './gates';
 import { nameAllocator } from './hoist';
 
 // A HOISTABLE base is a bare `addr` (a global address) or a bare `const` (a numeric pointer
@@ -43,12 +44,11 @@ interface Collected {
   meta: Map<string, { base: HoistableBase; width: number; signed: boolean }>;
   /** keys with ANY use inside a loop — disqualified (see the loop note in `hoistReusedGlobalBases`). */
   inLoop: Set<string>;
-  /** per key, how many times each CONSTANT offset was accessed. A constant offset touched 2+ times
-   *  is a SCALAR access at one fixed location (a `*(T*)C |= x` MMIO read-modify-write, or repeated
-   *  `*p`), which the compiler re-materializes rather than register-holds — hoisting it MISMATCHES
-   *  (it broke the ProcessHBlankWait match). A key with ANY repeated constant offset is therefore
-   *  disqualified, even if it ALSO has distinct-offset uses (a mixed scalar+array base). A genuine
-   *  reused array base touches each constant offset once, or uses a variable index (not tallied). */
+  /** per key, how many times each CONSTANT offset was accessed — the input to the
+   *  `repeated-const-offset` gate, which losing the ProcessHBlankWait match is what bought. A
+   *  genuine reused array base touches each constant offset once, or indexes by a variable (not
+   *  tallied); a repeat means a scalar re-access, and ONE is enough to disqualify the base even
+   *  when it also has distinct-offset uses. */
   constOffCount: Map<string, Map<number, number>>;
 }
 
@@ -139,27 +139,57 @@ function rewriteStmt(s: Stmt, localFor: Map<string, string>): Stmt {
   }
 }
 
+/** One base under consideration, keyed as `(base, width, signedness)`. */
+export interface BaseKey {
+  key: string;
+  uses: number;
+  inLoop: boolean;
+  /** some CONSTANT offset through this base is touched 2+ times */
+  repeatedConstOffset: boolean;
+}
+
+/** The admission rules. NONE is sound, and that is a property of the pass rather than an oversight:
+ *  a wrong hoist emits the same address held in a different place, so it costs bytes and a match,
+ *  never meaning. The zero-lost benchmark gate is what referees them.
+ *
+ *  The `loop` rule is the subtle one. A loop-body base is loop-invariant, so the compiler keeps it
+ *  in a register across the loop too — but hoisting to the FUNCTION TOP forces a callee-saved
+ *  register, which can add the prologue push/pop the original avoided. `l3/scopebase.ts` is the
+ *  scope-aware hoist that serves those instead. */
+export const BASECSE_GATES: readonly Gate<BaseKey>[] = [
+  {
+    id: 'single-use',
+    why: 'one access re-materializes as cheaply as a named local',
+    sound: false,
+    rejects: (c) => c.uses < 2,
+  },
+  {
+    id: 'loop',
+    why: 'a function-top hoist of a loop base forces a callee-saved register the original avoided',
+    sound: false,
+    rejects: (c) => c.inLoop,
+  },
+  {
+    id: 'repeated-const-offset',
+    why: 'a fixed offset touched twice is a scalar RMW, which the compiler re-materializes',
+    sound: false,
+    rejects: (c) => c.repeatedConstOffset,
+  },
+];
+
 export function hoistReusedGlobalBases(sfn: SFn): SFn {
   const c: Collected = { count: new Map(), order: [], meta: new Map(), inLoop: new Set(), constOffCount: new Map() };
   collect(sfn.body, c, false);
-  // A repeated CONSTANT offset means a scalar re-access at a fixed location (MMIO RMW / repeated
-  // `*p`) the compiler re-materializes — disqualify the whole base, even mixed with array uses.
-  const hasRepeatedConstOffset = (k: string): boolean => {
-    for (const n of c.constOffCount.get(k)?.values() ?? []) {
-      if (n >= 2) {
-        return true;
-      }
-    }
-    return false;
-  };
-
-  // Reuse 2+ and NOT used inside a loop. A loop-body base is loop-invariant, so the compiler ALSO
-  // keeps it in a register across the loop — but hoisting it to the function top forces a
-  // callee-saved register that can add prologue push/pop the original avoided, worsening the match
-  // (register-pressure matching, not a correctness issue). Straight-line / branch reuse is the safe
-  // win; a loop-body base is left inline for a future scope-aware hoist.
   const { count, order, meta } = c;
-  const hoisted = order.filter((k) => (count.get(k) ?? 0) >= 2 && !c.inLoop.has(k) && !hasRepeatedConstOffset(k));
+  const hoisted = order.filter(
+    (k) =>
+      firstRejection(BASECSE_GATES, {
+        key: k,
+        uses: count.get(k) ?? 0,
+        inLoop: c.inLoop.has(k),
+        repeatedConstOffset: [...(c.constOffCount.get(k)?.values() ?? [])].some((n) => n >= 2),
+      }) === null,
+  );
   if (hoisted.length === 0) {
     return sfn;
   }
