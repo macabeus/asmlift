@@ -15,10 +15,15 @@
 //
 //     if (c) { } else { g[594] = g[659]; } v4 = 1;   →   if (!c) { g[594] = g[659]; } v4 = 1;
 //
-// Measured on kleod:UpdateHUDCounterDisplay: 60 → 33 (visible in the committed results.json). The
-// placement is not a matter of taste — peeling the same statements to ABOVE the `if` instead scores
-// 48 — but note that above-the-`if` is a THIRD option, unsound for its own reason (it crosses the
-// condition as well as both arms); the soundness argument here covers only below-vs-in-arms.
+// UNGUARDED BY THE BENCHMARK (2026-08-16 ablation). Returning `sfn` unchanged from
+// `mergeCommonTails` and running `pnpm bench run` moves NO row. The pass does fire — on
+// kleod:UpdateHUDCounterDisplay and sa3:sub_803213C — but changes the score of neither, so a
+// regression here surfaces in this module's unit tests or nowhere. Do not read the two inhabitants
+// as coverage: they are why the ablation is not vacuous, not evidence the merge is right.
+//
+// Placement is still not a matter of taste: peeling the same statements ABOVE the `if` is a THIRD
+// option, unsound for its own reason (it crosses the condition as well as both arms). The soundness
+// argument above covers only below-vs-in-arms.
 //
 // KNOWN INTERACTIONS, both byte-level rather than soundness. This pass is unconditional like
 // `dce.ts` and `basecse.ts` rather than a differ-refereed lever, and the argument those files each

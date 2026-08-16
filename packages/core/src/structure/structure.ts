@@ -1042,8 +1042,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
    *  computes the right address anyway. That leniency is not something to rely on: the Klonoa
    *  project's own build template treats these as fatal, so the row's emitted C does not build
    *  where its author would put it. The cast is the always-valid spelling — the same fallback
-   *  `bareArrayLead` documents for the indexed form — and it is byte-identical (measured on
-   *  kleod:UpdateHUDCounterDisplay: 81 with and without).
+   *  `bareArrayLead` documents for the indexed form — and it is byte-identical: returning `value`
+   *  unchanged from `castAggregateAddr` moves no row of the benchmark (2026-08-16 ablation), and it
+   *  fires on three functions there, so that result is not vacuous.
    *
    *  The test is whether `&gSym`'s rendered type PROVABLY equals the destination's, not whether the
    *  symbol looks like an aggregate. A shape enumeration got this wrong three ways, each a real

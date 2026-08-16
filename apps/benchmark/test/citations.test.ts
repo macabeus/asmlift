@@ -46,7 +46,11 @@ function tsFiles(dir: string, out: string[] = []): string[] {
 /** The comment text of one file, line by line, with code stripped.
  *
  *  Comments only, because `{ synthetic: x }` is a perfectly good object literal and a citation
- *  checker that fails on one would be a checker people delete. */
+ *  checker that fails on one would be a checker people delete.
+ *
+ *  NOT string-aware: a `//` inside a string literal opens a comment here. That costs nothing in
+ *  practice — the rest of such a line would have to also spell `project:sym` to matter — and a real
+ *  lexer is a lot of machinery to buy a case with no inhabitant. */
 export function commentLines(src: string): { line: number; text: string }[] {
   const out: { line: number; text: string }[] = [];
   let inBlock = false;
@@ -114,7 +118,7 @@ describe('every cited benchmark row exists', () => {
         `    pnpm bench run --tier real --only ${cited.split(':')[1]}\n` +
         `  If the symbol was renamed, update the citation. If it is NOT a benchmark row (a function\n` +
         `  in a project checkout, a dogfooding find), write it in prose and say where to look —\n` +
-        "  e.g. \"`sub_80B6B3C` in sa3's `asm/code_x.s`\" — so the spelling stops promising a row.",
+        '  e.g. "`sub_80B6B3C` in sa3\'s `asm/code_x.s`" — so the spelling stops promising a row.',
     ).toBe(true);
   });
 });
@@ -122,7 +126,7 @@ describe('every cited benchmark row exists', () => {
 describe('the checker itself', () => {
   it('reads citations out of both comment styles, and ignores code', () => {
     const src = [
-      "const m = { synthetic: countpos };  // not a citation: it is code",
+      'const m = { synthetic: countpos };  // not a citation: it is code',
       '// measured on kleod:UpdateHUDCounterDisplay',
       '/** and on af:_MtxF_to_Mtx:ido7.1 */',
     ].join('\n');
@@ -137,8 +141,11 @@ describe('the checker itself', () => {
     expect(citationsIn(src, PROJECTS).map((c) => c.cited)).toEqual(['kleod:UpdateFadeEffect']);
   });
 
-  it('does not read a citation out of a string that merely looks like one', () => {
+  it('does not read a citation out of a row id used as code', () => {
+    // The case that actually occurs: a row id in a string or an object key. A `//` inside a string
+    // still opens a comment here — see commentLines.
     expect(citationsIn('const id = "kleod:UpdateFadeEffect";', PROJECTS)).toEqual([]);
+    expect(citationsIn('const m = { synthetic: countpos };', PROJECTS)).toEqual([]);
   });
 
   it('rejects a symbol no row carries — the truncation this test exists for', () => {
