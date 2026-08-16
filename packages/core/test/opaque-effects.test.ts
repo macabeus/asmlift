@@ -123,7 +123,7 @@ describe('a decline caused by an unmodelled instruction says so', () => {
 
   test('a loop-shape decline names the unmodelled instruction in the header', () => {
     expect(() => dc('f', whileWithHeaderInsn('clz\tr2, r0'))).toThrow(/unrecovered back-edge/);
-    expect(() => dc('f', whileWithHeaderInsn('clz\tr2, r0'))).toThrow(/unmodelled instruction\(s\) 'clz'/);
+    expect(() => dc('f', whileWithHeaderInsn('clz\tr2, r0'))).toThrow(/carries unmodelled instruction 'clz'/);
   });
 
   test('the same loop with a MODELLED instruction still recovers', () => {

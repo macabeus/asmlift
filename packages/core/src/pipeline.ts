@@ -15,7 +15,7 @@ import { type Block, type Fn, successorsOf } from './ir/core';
 import { print } from './ir/print';
 import { T } from './ir/types';
 import { VerifyError, verify } from './ir/verify';
-import { Expr, LanguageBackend, SFn, Stmt, exprChildren, stmtChildren, stmtExprs } from './l3/ast';
+import { Expr, LanguageBackend, SFn, Stmt, exprChildren, gapReasonFor, stmtChildren, stmtExprs } from './l3/ast';
 import { hoistReusedGlobalBases } from './l3/basecse';
 import { eliminateDeadStores } from './l3/dce';
 import { mergeCommonTails } from './l3/tailmerge';
@@ -214,7 +214,11 @@ function attributeOpaques<T>(fn: Fn, body: () => T): T {
   try {
     return body();
   } catch (e) {
-    if (!(e instanceof StructureError)) {
+    // Only a StructureError, and only with an entry block to walk from. Attribution is a nicety;
+    // a crash inside it would replace a DESIGNED loud failure with an incidental one, which
+    // contract-invariant.test.ts rejects by name (`isDesignedLoud`) — so it must not be able to
+    // throw on any input that reached here.
+    if (!(e instanceof StructureError) || !fn.blocks[0]) {
       throw e;
     }
     const seen = new Set<Block>([fn.blocks[0]]);
@@ -237,10 +241,12 @@ function attributeOpaques<T>(fn: Fn, body: () => T): T {
     if (!names.size || /unmodelled instruction/.test(e.message)) {
       throw e;
     }
-    const list = [...names].sort().map((m) => `'${m}'`).join(', ');
-    throw new StructureError(
-      `${e.message} — and the function carries unmodelled instruction(s) ${list}, which is the more likely cause`,
-    );
+    // Spelled through `gapReasonFor`, the SAME helper the marker and the effects contract use, so
+    // the benchmark's decline classifier sees its canonical text. A hand-written variant here
+    // ("unmodelled instruction(s) 'mtc1'") does not match the float class's mnemonic-anchored
+    // pattern, and every attributed float decline silently lands in the generic bucket instead.
+    const list = [...names].sort().map(gapReasonFor).join(', ');
+    throw new StructureError(`${e.message} — and the function carries ${list}, which is the more likely cause`);
   }
 }
 
