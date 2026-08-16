@@ -227,3 +227,102 @@ test('a comparison tree whose default is the merge recovers as a switch, not an 
   expect(out).not.toContain('else');
   expect(out).not.toContain('default:'); // the default IS the merge — no arm of its own
 });
+
+// ── mnemonic and immediate SPELLING ─────────────────────────────────────────────────────────────
+// The dispatch idiom was matched by comparing operand TEXT: `lsl` but not `lsls`, `add` but not
+// `adds`, and `#2`/`#0x2` but not `#0x02`. Those are spellings of the same instruction and the same
+// shift, and a disassembler picks whichever it likes — luvdis writes the UAL forms, and on the
+// Klonoa: Empire of Dreams corpus all 13 dispatch sites across 11 jump-table functions spell them
+// `lsls`/`adds`, so the comparison alone declined every one of them on perfectly well-formed input.
+//
+// The property asserted is INDIFFERENCE to the spelling, against the pre-UAL output as the control,
+// rather than against a fixed string — the same shape the alias test above uses.
+const dispatch = (shift: string, sh: string, plus: string) =>
+  `f:\n${DIRECT}` +
+  `\t${shift}\tr0, r1, ${sh}\n\tldr\tr1, .Lp\n\t${plus}\tr0, r0, r1\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n` +
+  `.Lc0:\n\tmov\tr0, #10\n\tbx\tlr\n.Lc1:\n\tmov\tr0, #11\n\tbx\tlr\n.Ldef:\n\tmov\tr0, #99\n\tbx\tlr\n` +
+  `.Lp:\n\t.word\t.Ltab\n${TABLE}`;
+const spelled = (shift: string, sh: string, plus: string) =>
+  decompile('f', dispatch(shift, sh, plus), ARMV4T_AGBCC).source;
+
+test('the UAL spelling (`lsls`/`adds`/`#0x02`) recovers the same switch as the pre-UAL one', () => {
+  const control = spelled('lsl', '#0x2', 'add');
+  expect(control).toContain('switch (a0)');
+  // the whole klonoa spelling at once, then each difference on its own
+  expect(spelled('lsls', '#0x02', 'adds')).toBe(control);
+  expect(spelled('lsls', '#0x2', 'add')).toBe(control);
+  expect(spelled('lsl', '#0x2', 'adds')).toBe(control);
+  expect(spelled('lsl', '#0x02', 'add')).toBe(control);
+  expect(spelled('lsl', '#2', 'add')).toBe(control);
+});
+
+test('a shift that is not by two still DECLINES, whatever it is spelled like', () => {
+  // The immediate is now compared as a NUMBER, so the guard must reject the same values it always
+  // did — the index has to be scaled by exactly 4, or the table is indexed wrong and the switch
+  // dispatches to the wrong block.
+  const jump = /indirect\/computed jump/;
+  expect(() => spelled('lsl', '#0x3', 'add')).toThrow(jump);
+  expect(() => spelled('lsls', '#0x03', 'adds')).toThrow(jump);
+  expect(() => spelled('lsl', '#3', 'add')).toThrow(jump);
+  expect(() => spelled('lsl', '#0x1', 'add')).toThrow(jump);
+  // a register-operand shift has no immediate at all
+  expect(() => spelled('lsl', 'r2', 'add')).toThrow(jump);
+  // An EXPRESSION whose leading token is 2. gas accepts these and assembles `#2*2` to a shift by
+  // FOUR, so reading them as two recovers a switch whose stride is wrong by a factor of four and
+  // dispatches to the wrong block, silently. The first cut of this guard used `parseInt`, which
+  // stops at the first character it cannot consume, and accepted every one of them; the earlier
+  // version of THIS test sampled only the values above and passed while the property was false.
+  expect(() => spelled('lsl', '#2*2', 'add')).toThrow(jump);
+  expect(() => spelled('lsl', '#2<<1', 'add')).toThrow(jump);
+  expect(() => spelled('lsl', '#2+1', 'add')).toThrow(jump);
+  expect(() => spelled('lsl', '#2-1', 'add')).toThrow(jump);
+  expect(() => spelled('lsl', '#2junk', 'add')).toThrow(jump);
+  expect(() => spelled('lsl', '#2.0', 'add')).toThrow(jump);
+});
+
+test('the indexed load must address the scaled index EXACTLY — no displacement, no register', () => {
+  // `ldr rV, [rA, #4]` loads table[i+1]: the recovered switch would say `case 0` while the
+  // hardware reaches case 1's block, and the last case would read a word past the table.
+  // `ldr rV, [rA, r2]` adds an unrelated register to the address. Both used to recover an
+  // ordinary-looking switch. Pre-existing; found by an adversarial probe, and refused despite the
+  // function's header having claimed all along that an "extra offset" declines.
+  const jump = /indirect\/computed jump/;
+  const withLoad = (ld: string, bounds = DIRECT) =>
+    `f:\n${bounds}\tlsl\tr0, r1, #0x2\n\tldr\tr1, .Lp\n\tadd\tr0, r0, r1\n\t${ld}\n\tmov\tpc, r0\n` +
+    `.Lc0:\n\tmov\tr0, #10\n\tbx\tlr\n.Lc1:\n\tmov\tr0, #11\n\tbx\tlr\n.Ldef:\n\tmov\tr0, #99\n\tbx\tlr\n` +
+    `.Lp:\n\t.word\t.Ltab\n${TABLE}`;
+  expect(() => decompile('f', withLoad('ldr\tr0, [r0, #0x4]'), ARMV4T_AGBCC)).toThrow(jump);
+  expect(() => decompile('f', withLoad('ldr\tr0, [r0, r2]'), ARMV4T_AGBCC)).toThrow(jump);
+  // the long-jump bounds form is the same recogniser and must refuse it too
+  expect(() => decompile('f', withLoad('ldr\tr0, [r0, #0x4]', LONGJMP), ARMV4T_AGBCC)).toThrow(jump);
+  // ...and `#0`, which is how the corpus spells it, still recovers
+  expect(decompile('f', withLoad('ldr\tr0, [r0, #0x00]'), ARMV4T_AGBCC).source).toContain('switch (a0)');
+});
+
+test('the two address operands must be DISTINCT registers, not one listed twice', () => {
+  // If the pointer load targets the index register, the index is destroyed before it is added:
+  // the address is 2*table_base and the scrutinee is dead. Membership alone accepts it, because
+  // one register satisfies both tests. Pre-existing; found by an adversarial probe.
+  const selfAdd =
+    `f:\n${DIRECT}\tlsl\tr0, r1, #0x2\n\tldr\tr0, .Lp\n\tadd\tr0, r0, r0\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n` +
+    `.Lc0:\n\tmov\tr0, #10\n\tbx\tlr\n.Lc1:\n\tmov\tr0, #11\n\tbx\tlr\n.Ldef:\n\tmov\tr0, #99\n\tbx\tlr\n` +
+    `.Lp:\n\t.word\t.Ltab\n${TABLE}`;
+  expect(() => decompile('f', selfAdd, ARMV4T_AGBCC)).toThrow(/indirect\/computed jump/);
+});
+
+test('the relaxation covers the two dispatch ops only — `movs pc` still declines', () => {
+  // Pinning current behaviour, and labelling it honestly: this is a FALSE decline, not a semantic
+  // distinction. `movs pc, r0` assembles to 4687 under `.syntax divided`, byte-identical to
+  // `mov pc, r0` (checked with arm-none-eabi-as); `.syntax unified` rejects it outright. So it is
+  // the same instruction, and the recogniser refuses it only because it matches that slot by exact
+  // name. Tolerated because the refusal is LOUD and the shape has no inhabitant — unified rejects
+  // it and every disassembler prints `mov pc` — but `classifyXfer` does accept `movs pc`, so the
+  // frontend is internally inconsistent about it. Worth resolving with the follow-up, not by
+  // widening a jump-table guard on a shape nothing emits.
+  const jump = /indirect\/computed jump/;
+  const movs =
+    `f:\n${DIRECT}\tlsls\tr0, r1, #0x02\n\tldr\tr1, .Lp\n\tadds\tr0, r0, r1\n\tldr\tr0, [r0]\n\tmovs\tpc, r0\n` +
+    `.Lc0:\n\tmov\tr0, #10\n\tbx\tlr\n.Lc1:\n\tmov\tr0, #11\n\tbx\tlr\n.Ldef:\n\tmov\tr0, #99\n\tbx\tlr\n` +
+    `.Lp:\n\t.word\t.Ltab\n${TABLE}`;
+  expect(() => decompile('f', movs, ARMV4T_AGBCC)).toThrow(jump);
+});

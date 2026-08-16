@@ -974,6 +974,76 @@ interface JumpTable {
   caseLabels: string[];
   defaultLabel: string;
 }
+
+// Accept a data-processing mnemonic in either the pre-UAL (`lsl`, `add`) or UAL (`lsls`, `adds`)
+// spelling, WITHIN THE DISPATCH BLOCK ONLY.
+//
+// In Thumb-1 the trailing `s` is a DIALECT MARKER, not a modifier: `.syntax divided` spells the
+// flag-setting data-processing instructions without it, `.syntax unified` with it. For a LOW-register
+// destination each pair is one halfword — measured with this project's own assembler, one instruction
+// per file, both dialects, encoding read back with objdump:
+//
+//     add/adds 1888   sub/subs 1a88   lsl/lsls 0088   lsr/lsrs 0888   asr/asrs 1088   neg/negs 4248
+//
+// This is the dominant dialect of the input format asmlift advertises: every pret-style split wraps
+// its `INCLUDE_ASM` bodies in `.syntax unified`, where the non-suffixed spelling is a syntax ERROR,
+// and the split `.s` files carry no `.syntax` directive of their own — so this frontend cannot tell
+// from its input which dialect it is reading, and must accept both. Counted under
+// `asm/nonmatchings` of the Klonoa: Empire of Dreams tree: `lsls` 5795 against `lsl` 0, and `adds`
+// 8883 against `add` 600 — where **every one** of those 600 is an `sp`/high-register/pc form and not
+// one is the three-operand low-register `add rD, rN, rM` this idiom uses. Comparing the text alone
+// therefore declined every jump table in that corpus, on input that is not malformed in any way.
+// (agbcc's own output is the other dialect — 2957 `lsl` in this project's `build-gdwarf/src/*.s` —
+// which is why the benchmark, built from compiler `.s`, never exercised this.)
+//
+// Why LOCAL rather than an entry in LEGACY_MNEMONICS, which is where synonyms belong: normalising
+// the suffix away is safe for every input an ASSEMBLER ACCEPTS — the operands that distinguish `add`
+// from `adds` (the SP adjust `add sp, sp, #4` = b001, the high-register `add r8, r0` = 4480) have no
+// S-form at all, so `adds sp` and `adds r8, r0` are rejected in both dialects and cannot appear in
+// any assemblable file. But this frontend REFUSES those spellings loudly today, and a flat
+// `adds: 'add'` entry silently turns `adds sp` into ordinary frame bookkeeping instead: the entry
+// was written, and `decline-guards.test.ts` failed on exactly that case. So the reason to keep it
+// local is input VALIDATION, not semantics — a name-keyed table cannot say "only when the
+// destination is a low register", and giving up the refusal buys nothing, since no assembler emits
+// what it refuses.
+//
+// Known false declines, all loud, none with a corpus instance: a parenthesised immediate (`#(2)`,
+// which gas assembles), a two-operand `adds rA, rP` (the same add, but `addSrcs` has one source),
+// and `movs pc, rV` (which IS `mov pc, rV` — 4687 — under divided syntax, and which `classifyXfer`
+// accepts, so the frontend is internally inconsistent about it).
+//
+// Inside the dispatch block the distinction is additionally UNOBSERVABLE: the block computes
+// `table_base + index*4`, loads the target and writes `pc`. Nothing between the `lsl` and the
+// `mov pc` reads NZCV, no path leaves the block by falling through, and on a successful recovery the
+// block is ELIDED from the CFG entirely — the bounds test that does feed a conditional branch lives
+// in `bounds`, whose `cmp`/`bhi`/`bls` this function matches by exact name. Doubly moot in fact,
+// since `lsl rD, rS, #imm` is low-register-only, so the add here is always the low-register form.
+const isDataOp = (mn: string, base: 'lsl' | 'add'): boolean => mn === base || mn === `${base}s`;
+
+// A shift amount is a NUMBER, not a spelling. `#2`, `#0x2` and `#0x02` are the same shift; the
+// recogniser used to compare the operand text and so rejected the third.
+//
+// The operand must be a plain integer LITERAL, and that shape check is the whole point of this
+// helper rather than an incidental guard. `imm()` is `parseInt`, which stops at the first character
+// it cannot consume, so it reads `#2*2` as 2 — and `#2*2` is not malformed, it is an expression gas
+// accepts and assembles to `lsls r0, r1, #4`. Matching it as a shift by two would recover a switch
+// whose stride is wrong by a factor of four: the emitted C is entirely ordinary and dispatches to
+// the wrong BLOCK, with no marker. `#2+1`, `#2-1` and `#2<<1` are the same trap. An adversarial
+// probe found this after the first cut of this helper shipped with exactly that hole, and the test
+// that claimed to pin the property sampled only `#3`/`#0x3`/`#0x1`/`r2` and so passed anyway.
+//
+// Anything that is not a bare decimal or hex literal therefore DECLINES, which is the safe
+// direction: a real dispatch spells its shift as a literal. Known false declines, all loud and none
+// observed in any corpus: a binary literal (`#0b10`) and a signed one (`#+2`).
+//
+// One divergence is knowingly left in, and it is inert AT THE ONLY VALUE THIS IS USED WITH.
+// A leading zero means octal to gas and decimal to `Number`, so `#010` is 8 there and 10 here —
+// but both readings are compared against 2, both fail, and the dispatch declines either way; `#02`
+// is 2 under both. **If this helper is ever reused for a `want` other than 2, that has to be
+// revisited**, because for e.g. `want === 8` the two readings disagree about `#010`.
+const IMM_LITERAL = /^#\s*(?:0[xX][0-9a-fA-F]+|[0-9]+)$/;
+const immEq = (op: string | undefined, want: number): boolean =>
+  op !== undefined && IMM_LITERAL.test(op) && Number(op.slice(1).trim()) === want;
 function recoverJumpTable(
   bounds: AsmBlock,
   disp: AsmBlock,
@@ -1027,7 +1097,7 @@ function recoverJumpTable(
     return null;
   }
   const [lsl, ldrP, add, ldrV, movpc] = d;
-  if (lsl.mnemonic !== 'lsl' || lsl.ops[1] !== scrutReg || (lsl.ops[2] !== '#0x2' && lsl.ops[2] !== '#2')) {
+  if (!isDataOp(lsl.mnemonic, 'lsl') || lsl.ops[1] !== scrutReg || !immEq(lsl.ops[2], 2)) {
     return null;
   }
   const idxReg = lsl.ops[0]; // rY = rX << 2  (index*4, identity guard)
@@ -1036,19 +1106,40 @@ function recoverJumpTable(
   }
   const ptrReg = ldrP.ops[0],
     ptrLabel = ldrP.ops[1]; // rP = *(PTR literal)
-  if (add.mnemonic !== 'add' || add.ops[0] !== idxReg) {
+  if (!isDataOp(add.mnemonic, 'add') || add.ops[0] !== idxReg) {
     return null;
   }
   // add rY, rY, rP  (either operand order) — the address = table_base + index*4, nothing else.
+  //
+  // The two sources must be DISTINCT registers. Membership alone is satisfied by one register
+  // listed twice, and that is not a hypothetical shape: if the pointer load targets the index
+  // register (`lsl r0,r1,#2 ; ldr r0,=PTR ; add r0,r0,r0`) the index is overwritten before it is
+  // ever added, `idxReg === ptrReg`, and both `includes` tests pass on `r0`. The address formed is
+  // `2 * table_base` and the scrutinee is dead — yet the recogniser would emit `switch (a0)` and
+  // dispatch on a value the hardware never uses. Wrong block, no marker. Found by an adversarial
+  // probe; it predates the spelling fix this guard sits next to, and is fixed here because it is
+  // the same identity-or-decline rule.
   const addSrcs = [add.ops[1], add.ops[2]];
-  if (!(addSrcs.includes(idxReg) && addSrcs.includes(ptrReg))) {
+  if (idxReg === ptrReg || !(addSrcs.includes(idxReg) && addSrcs.includes(ptrReg))) {
     return null;
   }
   if (ldrV.mnemonic !== 'ldr') {
     return null;
   }
-  const { base } = parseAddr(ldrV.ops[1]); // rV = *(rY)
-  if (base !== idxReg || ldrV.ops[0] !== movpc.ops[1]) {
+  // rV = *(rY), and the address must be EXACTLY rY: no displacement, no register index.
+  //
+  // `parseAddr` surfaces `off` and `regOff` for precisely this reason — its own comment says
+  // "surfaced to the caller so load/store DECLINE loud: silently reading `[rB]` dropped the index
+  // — a silent miscompile" — and this caller used to destructure `base` alone and throw both away.
+  // `ldr rV, [rA, #4]` loads table[i+1]: the recovered switch says `case 0` while the hardware
+  // reaches case 1's block, and the last case reads a word past the table. `ldr rV, [rA, r2]` adds
+  // an unrelated register. Both used to recover an ordinary-looking `switch` — a wrong BLOCK, with
+  // no marker. The header of this function already claimed to refuse an "extra offset"; now it does.
+  //
+  // `#0` is the spelling the corpus actually uses (`ldr r0, [r0, #0x00]`), so the check is on the
+  // VALUE, not on the operand's absence.
+  const { base, off, regOff } = parseAddr(ldrV.ops[1]);
+  if (base !== idxReg || off !== 0 || regOff !== undefined || ldrV.ops[0] !== movpc.ops[1]) {
     return null;
   }
   if (movpc.mnemonic !== 'mov' || movpc.ops[0] !== 'pc') {
