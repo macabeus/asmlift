@@ -866,8 +866,8 @@ export function lift(
       }
     };
     // TRUSTWORTHINESS GUARD (mirrors the PPC frontend): an unmodelled instruction must not silently
-    // drop its destination register — emit an honest `opaque`: dead ⇒ it vanishes; live ⇒
-    // assertResolved fails LOUD (see frontend/opaque.ts for the policy).
+    // drop its destination register — emit an honest `opaque`, which fails LOUD at assertResolved
+    // whether or not anything reads that register (see frontend/opaque.ts for the policy).
     const emitOpaqueDest = (ins: Instr) => {
       // A `%hi`/`%lo` operand on an instruction NOT modelled as a global consumer — an FP load/store
       // (`lwc1`/`ldc1`), or any unmodelled op — reaches here (the modelled consumers handle their own

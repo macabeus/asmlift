@@ -24,7 +24,7 @@
 //    the result against 0; that implicit compare is wired so a following `beq`/`bne` fuses.
 //
 // TRUSTWORTHINESS: an unmodelled instruction with a register destination emits an `opaque` value
-// (dead ⇒ vanishes, live ⇒ fails LOUD downstream); an unmodelled CONTROL TRANSFER throws
+// that fails LOUD downstream read or not; an unmodelled CONTROL TRANSFER throws
 // PpcUnsupportedError in `lift`. Never plausible-but-wrong C.
 //
 // Scope: straight-line + `if`/diamond integer functions (incl. the conditional-return idiom),
@@ -480,8 +480,8 @@ export function lift(
     const constVal = kit.cnst;
     const emit = kit.emit;
     // TRUSTWORTHINESS GUARD: an unmodelled instruction must not silently drop its destination —
-    // emit an honest `opaque` instead: dead ⇒ DCE'd; live ⇒ assertResolved fails LOUD (see
-    // frontend/opaque.ts for the policy).
+    // emit an honest `opaque` instead, which fails LOUD at assertResolved whether or not anything
+    // reads that register (see frontend/opaque.ts for the policy).
     const emitOpaqueDest = (ins: Instr) => {
       // storeClass: every PPC store mnemonic is st* — an unmodelled one (`stwbrx`, `sthbrx`, …)
       // must throw, never skip (its first token is the SOURCE register).

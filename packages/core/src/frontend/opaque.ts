@@ -86,9 +86,21 @@ export interface OpaqueDest {
  *  sentinel, skipping would silently delete a side effect (swi/syscall/sync/cache).
  *
  *  When non-null, the caller MUST emit an `opaque` op that writes `dst` and consumes `srcRegs`
- *  (read through the frontend's own SSA): a DEAD opaque is DCE'd away harmlessly, while a LIVE one
- *  reaches structuring as the sentinel `?` and trips `assertResolved` — the loud failure the
- *  contract requires, instead of a stale/absent value surfacing as confidently-wrong source. */
+ *  (read through the frontend's own SSA). It then reaches structuring as the sentinel `?` and trips
+ *  `assertResolved` — the loud failure the contract requires, instead of a stale/absent value
+ *  surfacing as confidently-wrong source — WHETHER OR NOT anything reads `dst`.
+ *
+ *  That last clause is the whole contract, and it used to be false. A dead opaque was reaped by DCE
+ *  and skipped by structuring, so an unmodelled instruction whose destination nobody happened to
+ *  read vanished silently. It cost two benchmark rows a correct answer while they scored 1:
+ *  `long long a+b` lifted to `return a0 + a2;` — `adc`, the carry, dropped without a word. `opaque`
+ *  now carries `effects: true` (ir/opcodes.ts) for the same reason `call` does.
+ *
+ *  So `skipSafe` is the ONLY way an unmodelled instruction leaves no trace, which is the point of
+ *  it being a short explicit list per ISA. `storeClass` is no longer load-bearing for SOUNDNESS —
+ *  a missed store degrades loudly now like anything else — but it stays, because it throws with a
+ *  message about the memory write instead of an unresolvable value, and because it catches the
+ *  shape where `ops[0]` is a SOURCE (MIPS `swl rt, off(base)`) before a bogus `dst` is fabricated. */
 export function opaqueDest(mnemonic: string, ops: string[], policy: OpaquePolicy): OpaqueDest | null {
   const shown = policy.display ?? mnemonic;
   if (policy.storeClass?.test(mnemonic)) {

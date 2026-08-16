@@ -71,13 +71,20 @@ interface AsmBlock {
 // than in decode arms like MIPS's `move` or PPC's `slwi`. That distinction, and why there is no
 // shared alias helper across the three frontends, is written up once in ./opaque.ts.
 //
-// The LOAD aliases matter more than the store ones, and the asymmetry is worth knowing: an
-// unrecognised `stm*` matches `opaquePolicy.storeClass` and fails LOUD, but an unrecognised `ldm*`
-// does not — it reaches opaqueDest, which takes ops[0] (the BASE) as the destination, so the opaque
-// is dead, DCE removes it, and the load silently vanishes. Measured: `ldmfd r1, {r0}; bx lr` lifted
-// to `return a0;` where the answer is `return *a0;`. Every load spelling ARMv4T Thumb accepts is
-// therefore listed. (`ldmed`/`ldmea` are NOT: they mean IB/DB, which Thumb-1 does not have, and
-// `as` rejects them — so they cannot appear.)
+// This table is about COVERAGE, not soundness, and it is worth being clear about that because it
+// used to be the other way round. A missing load spelling was once a silent miscompile: an
+// unrecognised `stm*` matched `opaquePolicy.storeClass` and failed loud, while an unrecognised
+// `ldm*` reached opaqueDest, which takes ops[0] — the BASE — as the destination, so the opaque was
+// dead, DCE removed it, and the load vanished (`ldmfd r1, {r0}; bx lr` lifted to `return a0;` where
+// the answer is `return *a0;`). The comment here then defended the table's omissions with "`as`
+// rejects them — so they cannot appear", which is not an argument this frontend may make: it parses
+// TEXT, from luvdis/objdump/IDA/Ghidra and from hand-written .s, and invalid input must decline
+// rather than produce confident wrong C.
+//
+// `opaque` now carries `effects: true`, so a spelling missing from this table declines loudly like
+// any other unmodelled instruction. What listing one buys is that the function LIFTS instead — real
+// value, just not the kind that can be traded away by accident. Every load spelling ARMv4T Thumb
+// accepts is still listed, because declining a whole function over a synonym is a poor trade.
 //
 // `stmfd` is deliberately absent, and the asymmetry is real rather than an oversight: `stmfd` is
 // `stmdb`, and ARMv4T Thumb has neither — `as` rejects both with "selected processor does not
@@ -1968,8 +1975,8 @@ export function lift(
     const frame = makeFrameWalk();
 
     // TRUSTWORTHINESS GUARD (mirrors the MIPS/PPC frontends): an unmodelled instruction must not
-    // silently drop its destination register — emit an honest `opaque`: dead ⇒ it vanishes; live ⇒
-    // assertResolved fails LOUD (see frontend/opaque.ts for the policy). Push/pop and sp
+    // silently drop its destination register — emit an honest `opaque`, which fails LOUD at
+    // assertResolved whether or not anything reads that register (see frontend/opaque.ts). Push/pop and sp
     // adjustments have no low-register data destination, so they fall through harmlessly;
     // terminators are handled in the terminator section below.
     const isThumbReg = (s: string | undefined): s is string => /^r\d+$/.test(s ?? '');
