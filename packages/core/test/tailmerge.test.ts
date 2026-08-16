@@ -194,26 +194,22 @@ describe('edge shapes', () => {
   });
 });
 
-describe('the pass is WIRED, on a real function that exercises it', () => {
+describe('the pass is WIRED', () => {
   // Every test above calls `mergeCommonTails` directly, so all of them stay green if the pipeline
-  // stops calling it. That gap is not covered elsewhere: the pass changes no benchmark score — it
-  // fires on two of 743 rows and both match either way — so unwiring it is invisible there too.
-  //
-  // `corpus/agbcc-tailmerge.s` is sa3:sub_803213C, one of those two, as real agbcc output so no
-  // toolchain is needed. It has an `if` nested in the else-arm of another, and both arms of the
-  // INNER one end with the same `v1 = …` computation; the pass moves it below that inner `if`.
+  // stops calling it — and the benchmark cannot see that either, since the pass moves no score.
+  // `corpus/agbcc-tailmerge.s` is sa3:sub_803213C (real agbcc output, so no toolchain): an `if`
+  // nested in the else-arm of another, both inner arms ending with the same `v1 = …`.
   const source = decompile('sub_803213C', read('agbcc-tailmerge.s'), ARMV4T_AGBCC, { onGap: 'annotate' }).source;
   const depth = (l: string) => l.length - l.trimStart().length;
-  const writes = source
-    .split('\n')
-    .filter((l) => /^\s*v1 = /.test(l))
-    .map(depth);
 
   test("the inner arms' common tail is emitted once, below their `if`", () => {
-    // Indentation is the structural signal, and it carries the count too. Both writes sit at
-    // outer-ARM depth: one is the outer then-arm's own, the other is the merged inner tail.
-    // Ablate `mergeCommonTails` to the identity and this reads [8, 12, 12] — the inner write back
-    // inside each arm, one level deeper and twice over.
-    expect(writes).toEqual([8, 8]);
+    // Indentation carries both placement and count: [8, 8] is the outer then-arm's own write plus
+    // the merged tail. Unwire the pass and it reads [8, 12, 12].
+    expect(
+      source
+        .split('\n')
+        .filter((l) => /^\s*v1 = /.test(l))
+        .map(depth),
+    ).toEqual([8, 8]);
   });
 });
