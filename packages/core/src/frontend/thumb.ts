@@ -998,10 +998,29 @@ interface JumpTable {
 const isDataOp = (mn: string, base: 'lsl' | 'add'): boolean => mn === base || mn === `${base}s`;
 
 // A shift amount is a NUMBER, not a spelling. `#2`, `#0x2` and `#0x02` are the same shift; the
-// recogniser used to compare the operand text and so rejected the third. Guarded on the `#`
-// prefix because a register-operand shift (`lsl rD, rS`) has no immediate at all and must decline.
+// recogniser used to compare the operand text and so rejected the third.
+//
+// The operand must be a plain integer LITERAL, and that shape check is the whole point of this
+// helper rather than an incidental guard. `imm()` is `parseInt`, which stops at the first character
+// it cannot consume, so it reads `#2*2` as 2 — and `#2*2` is not malformed, it is an expression gas
+// accepts and assembles to `lsls r0, r1, #4`. Matching it as a shift by two would recover a switch
+// whose stride is wrong by a factor of four: the emitted C is entirely ordinary and dispatches to
+// the wrong BLOCK, with no marker. `#2+1`, `#2-1` and `#2<<1` are the same trap. An adversarial
+// probe found this after the first cut of this helper shipped with exactly that hole, and the test
+// that claimed to pin the property sampled only `#3`/`#0x3`/`#0x1`/`r2` and so passed anyway.
+//
+// Anything that is not a bare decimal or hex literal therefore DECLINES, which is the safe
+// direction: a real dispatch spells its shift as a literal. Known false declines, all loud and none
+// observed in any corpus: a binary literal (`#0b10`) and a signed one (`#+2`).
+//
+// One divergence is knowingly left in, and it is inert AT THE ONLY VALUE THIS IS USED WITH.
+// A leading zero means octal to gas and decimal to `Number`, so `#010` is 8 there and 10 here —
+// but both readings are compared against 2, both fail, and the dispatch declines either way; `#02`
+// is 2 under both. **If this helper is ever reused for a `want` other than 2, that has to be
+// revisited**, because for e.g. `want === 8` the two readings disagree about `#010`.
+const IMM_LITERAL = /^#\s*(?:0[xX][0-9a-fA-F]+|[0-9]+)$/;
 const immEq = (op: string | undefined, want: number): boolean =>
-  op !== undefined && op.startsWith('#') && imm(op) === want;
+  op !== undefined && IMM_LITERAL.test(op) && Number(op.slice(1).trim()) === want;
 function recoverJumpTable(
   bounds: AsmBlock,
   disp: AsmBlock,
@@ -1068,8 +1087,17 @@ function recoverJumpTable(
     return null;
   }
   // add rY, rY, rP  (either operand order) — the address = table_base + index*4, nothing else.
+  //
+  // The two sources must be DISTINCT registers. Membership alone is satisfied by one register
+  // listed twice, and that is not a hypothetical shape: if the pointer load targets the index
+  // register (`lsl r0,r1,#2 ; ldr r0,=PTR ; add r0,r0,r0`) the index is overwritten before it is
+  // ever added, `idxReg === ptrReg`, and both `includes` tests pass on `r0`. The address formed is
+  // `2 * table_base` and the scrutinee is dead — yet the recogniser would emit `switch (a0)` and
+  // dispatch on a value the hardware never uses. Wrong block, no marker. Found by an adversarial
+  // probe; it predates the spelling fix this guard sits next to, and is fixed here because it is
+  // the same identity-or-decline rule.
   const addSrcs = [add.ops[1], add.ops[2]];
-  if (!(addSrcs.includes(idxReg) && addSrcs.includes(ptrReg))) {
+  if (idxReg === ptrReg || !(addSrcs.includes(idxReg) && addSrcs.includes(ptrReg))) {
     return null;
   }
   if (ldrV.mnemonic !== 'ldr') {

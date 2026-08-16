@@ -267,6 +267,28 @@ test('a shift that is not by two still DECLINES, whatever it is spelled like', (
   expect(() => spelled('lsl', '#0x1', 'add')).toThrow(jump);
   // a register-operand shift has no immediate at all
   expect(() => spelled('lsl', 'r2', 'add')).toThrow(jump);
+  // An EXPRESSION whose leading token is 2. gas accepts these and assembles `#2*2` to a shift by
+  // FOUR, so reading them as two recovers a switch whose stride is wrong by a factor of four and
+  // dispatches to the wrong block, silently. The first cut of this guard used `parseInt`, which
+  // stops at the first character it cannot consume, and accepted every one of them; the earlier
+  // version of THIS test sampled only the values above and passed while the property was false.
+  expect(() => spelled('lsl', '#2*2', 'add')).toThrow(jump);
+  expect(() => spelled('lsl', '#2<<1', 'add')).toThrow(jump);
+  expect(() => spelled('lsl', '#2+1', 'add')).toThrow(jump);
+  expect(() => spelled('lsl', '#2-1', 'add')).toThrow(jump);
+  expect(() => spelled('lsl', '#2junk', 'add')).toThrow(jump);
+  expect(() => spelled('lsl', '#2.0', 'add')).toThrow(jump);
+});
+
+test('the two address operands must be DISTINCT registers, not one listed twice', () => {
+  // If the pointer load targets the index register, the index is destroyed before it is added:
+  // the address is 2*table_base and the scrutinee is dead. Membership alone accepts it, because
+  // one register satisfies both tests. Pre-existing; found by an adversarial probe.
+  const selfAdd =
+    `f:\n${DIRECT}\tlsl\tr0, r1, #0x2\n\tldr\tr0, .Lp\n\tadd\tr0, r0, r0\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n` +
+    `.Lc0:\n\tmov\tr0, #10\n\tbx\tlr\n.Lc1:\n\tmov\tr0, #11\n\tbx\tlr\n.Ldef:\n\tmov\tr0, #99\n\tbx\tlr\n` +
+    `.Lp:\n\t.word\t.Ltab\n${TABLE}`;
+  expect(() => decompile('f', selfAdd, ARMV4T_AGBCC)).toThrow(/indirect\/computed jump/);
 });
 
 test('the S-suffix is accepted for the dispatch ops only, not as a global rename', () => {
