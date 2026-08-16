@@ -978,23 +978,36 @@ interface JumpTable {
 // Accept a data-processing mnemonic in either the pre-UAL (`lsl`, `add`) or UAL (`lsls`, `adds`)
 // spelling, WITHIN THE DISPATCH BLOCK ONLY.
 //
-// This is deliberately not an entry in LEGACY_MNEMONICS. That table is for PURE SYNONYMS — one
-// encoding, two names, identical operands — and these are not: Thumb-1 `ADD (register)` on low
-// registers sets the flags, while the high-register form (ARM DDI 0029G Format 05, `ADD Rd, Hs`)
-// does not, so `add`/`adds` are two encodings that a global rewrite would conflate. Normalising
-// them everywhere would also quietly change what a later flag-reading consumer sees.
+// In Thumb-1 the trailing `s` is a DIALECT MARKER, not a modifier: `.syntax divided` spells the
+// flag-setting data-processing instructions without it, `.syntax unified` with it. For a LOW-register
+// destination each pair is one halfword — verified with this project's own assembler, one instruction
+// per file, both dialects, encoding read back with objdump:
 //
-// Inside the dispatch block the distinction is UNOBSERVABLE, which is what makes accepting both
-// safe here and only here: the block computes `table_base + index*4`, loads the target and writes
-// `pc`. Nothing between the `lsl` and the `mov pc` reads NZCV, no path leaves the block by
-// falling through, and on a successful recovery the block is ELIDED from the CFG entirely — the
-// bounds test that does feed a conditional branch lives in `bounds`, whose `cmp`/`bhi`/`bls` this
-// function matches by exact name. So the S-suffix here carries no information any consumer can use.
+//     add/adds 1888   sub/subs 1a88   lsl/lsls 0088   lsr/lsrs 0888   asr/asrs 1088   neg/negs 4248
 //
-// Why it matters: agbcc's own output writes the pre-UAL spelling, but a disassembler is free to
-// write either, and luvdis writes UAL. Measured on the Klonoa: Empire of Dreams disassembly, every
-// one of the 13 dispatch sites across its 11 jump-table functions spells these `lsls` and `adds` —
-// so this comparison alone declined the whole family, on input that is not malformed in any way.
+// Why it matters: this is the dominant dialect of the input format asmlift advertises. Every
+// pret-style split wraps its `INCLUDE_ASM` bodies in `.syntax unified`, where the non-suffixed
+// spelling is a syntax ERROR — in the Klonoa: Empire of Dreams tree the pre-UAL spelling does not
+// occur at all (`lsls` 5795 against `lsl` 0, `adds` 8883 against `add` 0). Comparing the text alone
+// therefore declined every jump table in that corpus, on input that is not malformed in any way.
+//
+// So why LOCAL, and not an entry in LEGACY_MNEMONICS? Because the equivalence is decided by the
+// OPERANDS and that table is keyed by NAME alone. `add` also names two encodings that have no
+// S-form at all — the SP adjust (`add sp, sp, #4` = b001) and the high-register form (`add r8, r0`
+// = 4480) — and `adds sp, sp, #4` / `adds r8, r0` are rejected by the assembler in BOTH dialects.
+// A flat `adds: 'add'` entry would therefore erase a distinction this frontend depends on: it
+// declines `adds sp` LOUDLY, precisely because the SP-adjust encoding sets no flags, so such an
+// instruction can only be hand-written and treating it as ordinary frame bookkeeping would drop a
+// real frame change. That is not hypothetical — the table entry was written, and
+// `decline-guards.test.ts` failed on exactly that case. A name-keyed table cannot express
+// "equivalent when the destination is a low register"; a match that has the operands in hand can.
+//
+// Inside the dispatch block the distinction is additionally UNOBSERVABLE: the block computes
+// `table_base + index*4`, loads the target and writes `pc`. Nothing between the `lsl` and the
+// `mov pc` reads NZCV, no path leaves the block by falling through, and on a successful recovery the
+// block is ELIDED from the CFG entirely — the bounds test that does feed a conditional branch lives
+// in `bounds`, whose `cmp`/`bhi`/`bls` this function matches by exact name. Doubly moot in fact,
+// since `lsl rD, rS, #imm` is low-register-only, so the add here is always the low-register form.
 const isDataOp = (mn: string, base: 'lsl' | 'add'): boolean => mn === base || mn === `${base}s`;
 
 // A shift amount is a NUMBER, not a spelling. `#2`, `#0x2` and `#0x02` are the same shift; the

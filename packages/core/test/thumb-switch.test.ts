@@ -291,9 +291,15 @@ test('the two address operands must be DISTINCT registers, not one listed twice'
   expect(() => decompile('f', selfAdd, ARMV4T_AGBCC)).toThrow(/indirect\/computed jump/);
 });
 
-test('the S-suffix is accepted for the dispatch ops only, not as a global rename', () => {
-  // `subs`/`movs` are NOT part of the idiom and must not be admitted by the same relaxation: the
-  // recogniser names `mov pc` and the bounds `cmp` exactly.
+test('the relaxation covers the two dispatch ops only — `movs pc` still declines', () => {
+  // Pinning current behaviour, and labelling it honestly: this is a FALSE decline, not a semantic
+  // distinction. `movs pc, r0` assembles to 4687 under `.syntax divided`, byte-identical to
+  // `mov pc, r0` (checked with arm-none-eabi-as); `.syntax unified` rejects it outright. So it is
+  // the same instruction, and the recogniser refuses it only because it matches that slot by exact
+  // name. Tolerated because the refusal is LOUD and the shape has no inhabitant — unified rejects
+  // it and every disassembler prints `mov pc` — but `classifyXfer` does accept `movs pc`, so the
+  // frontend is internally inconsistent about it. Worth resolving with the follow-up, not by
+  // widening a jump-table guard on a shape nothing emits.
   const jump = /indirect\/computed jump/;
   const movs =
     `f:\n${DIRECT}\tlsls\tr0, r1, #0x02\n\tldr\tr1, .Lp\n\tadds\tr0, r0, r1\n\tldr\tr0, [r0]\n\tmovs\tpc, r0\n` +
