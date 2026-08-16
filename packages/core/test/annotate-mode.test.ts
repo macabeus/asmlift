@@ -40,10 +40,16 @@ describe('annotate mode — localizable gap → inline marker', () => {
     expect(() => decompile('clzlive', THUMB_LIVE_CLZ, ARMV4T_AGBCC)).toThrow("unmodelled instruction 'clz'");
   });
 
-  test('a DEAD opaque stays harmless: no marker, no diagnostic, same clean source as strict', () => {
+  test('a DEAD opaque gets a marker of its own — the gap is a STATEMENT, not a value', () => {
+    // The interesting half of the mode for this shape: with no use site to carry the marker, the
+    // gap has to land somewhere, and it lands where the instruction was. Same reason text as the
+    // live case, so the two report as one decline.
     const res = decompile('clzdead', THUMB_DEAD_CLZ, ARMV4T_AGBCC, { onGap: 'annotate' });
-    expect(res.diagnostics).toEqual([]);
-    expect(res.source).toBe('s32 clzdead(s32 a0) {\n    return a0 + 1;\n}\n');
+    expect(res.diagnostics).toEqual([{ stage: 'structure', reason: "unmodelled instruction 'clz'" }]);
+    expect(res.source).toContain('ASMLIFT_ERROR');
+    // …and the rest of the function is still recovered around it, rather than the whole body
+    // degrading to a stub.
+    expect(res.source).toContain('return a0 + 1;');
   });
 });
 

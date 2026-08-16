@@ -42,11 +42,12 @@ describe('Thumb frontend robustness (CONTRACT-AS-INVARIANT)', () => {
     expect(() => dc('clzret', '\tclz\tr0, r0\n\tbx\tlr\n').source).toThrow();
   });
 
-  test('a DEAD unmodelled op is harmless (does not fail loud)', () => {
-    // `clz` writes r1, which is never read; the opaque is dead and DCE removes it, so the real
-    // return (`a0 + 1`) is unaffected.
-    expect(dc('clzdead', '\tclz\tr1, r0\n\tadd\tr0, r0, #1\n\tbx\tlr\n').source).toBe(
-      's32 clzdead(s32 a0) {\n    return a0 + 1;\n}\n',
+  test('a DEAD unmodelled op fails loud too — a dead DESTINATION is not a dead INSTRUCTION', () => {
+    // `clz` writes r1, which is never read. That says nothing about what the instruction did to
+    // memory or to system state, because `clz` here stands for "a mnemonic this frontend does not
+    // model" — and the mnemonics that reach this path include real stores (see opaque-effects.test.ts).
+    expect(() => dc('clzdead', '\tclz\tr1, r0\n\tadd\tr0, r0, #1\n\tbx\tlr\n').source).toThrow(
+      /unmodelled instruction 'clz'/,
     );
   });
 

@@ -1884,6 +1884,24 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
         });
       } else if (op.opcode === 'call' && op.results.length && !useSitesOf.has(op.results[0])) {
         out.push({ k: 'exprstmt', value: expr(op.results[0]) });
+      } else if (op.opcode === 'opaque' && op.results.length && !useSitesOf.has(op.results[0])) {
+        // An unmodelled instruction whose RESULT nobody reads still RAN, and asmlift does not know
+        // what else it did. Emitting nothing here was the last of the two places it could disappear
+        // silently (the other was DCE, closed by `opaque`'s `effects` flag), and the pair produced
+        // the worst failure this project has: `STR r0, [r1]` — a store the frontend happened not to
+        // recognise — lifted to a function with no store in it and no diagnostic anywhere.
+        //
+        // Statement, not expression: `expr` on the result routes through `lowerDef`, which is where
+        // `opaque` already becomes the gap. So this reuses the SAME degradation a live opaque gets —
+        // the `?` sentinel that trips assertResolved under `onGap: 'strict'`, an ASMLIFT_ERROR
+        // marker under `annotate` — rather than inventing a second way to be loud. Dead and live
+        // now differ only in where the gap lands, which is the point: liveness of the result is not
+        // evidence about the instruction.
+        //
+        // Exactly the `call` arm above, and for the same reason — a call whose value is unused is
+        // still a call. `opaque` only needed its own arm because it reaches here through a
+        // different path (no `target` attr, so contracts.ts's effects invariant cannot count it).
+        out.push({ k: 'exprstmt', value: expr(op.results[0]) });
       } else if (materialize.has(op) && !absorbedLoads.has(op)) {
         // (an absorbed load's every consumer spells a named bitfield read — emitting its temp
         // here would recompile to a second load the asm does not have)
