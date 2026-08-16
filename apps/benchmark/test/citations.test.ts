@@ -21,9 +21,19 @@ import { describe, expect, it } from 'vitest';
 const ROOT = join(import.meta.dirname, '..', '..', '..');
 const RESULTS = join(import.meta.dirname, '..', 'results', 'results.json');
 
-/** Source trees whose comments may cite rows. The benchmark's own sources are excluded: they
- *  MANIPULATE row ids as data, so a bare `project:sym` there is code, not a citation. */
-const SCANNED = ['packages/core/src', 'packages/core/test', 'packages/cli/src'];
+/** Trees whose prose may cite rows. The benchmark's own sources are excluded: they MANIPULATE row
+ *  ids as data, so a bare `project:sym` there is code, not a citation.
+ *
+ *  Everything else that could carry a citation is in — a tree left out is a tree where a citation
+ *  rots unwatched, which is the defect this file exists for, and `packages/cli/test` had one. */
+const SCANNED = [
+  'packages/core/src',
+  'packages/core/test',
+  'packages/cli/src',
+  'packages/cli/test',
+  'apps/web/src',
+  'docs',
+];
 
 const rows = JSON.parse(readFileSync(RESULTS, 'utf8')).results as { id: string; project: string; sym: string }[];
 
@@ -31,12 +41,14 @@ const rows = JSON.parse(readFileSync(RESULTS, 'utf8')).results as { id: string; 
 const CITABLE = new Set(rows.flatMap((r) => [`${r.project}:${r.sym}`, r.id]));
 const PROJECTS = [...new Set(rows.map((r) => r.project))].sort();
 
-function tsFiles(dir: string, out: string[] = []): string[] {
+/** Every source and doc file under `dir`. Markdown counts: `docs/` argues for the architecture and
+ *  can cite a row exactly as a comment does. A `.md` file is all prose, so it is scanned whole. */
+function sourceFiles(dir: string, out: string[] = []): string[] {
   for (const e of readdirSync(dir, { withFileTypes: true })) {
     const p = join(dir, e.name);
     if (e.isDirectory()) {
-      tsFiles(p, out);
-    } else if (p.endsWith('.ts')) {
+      sourceFiles(p, out);
+    } else if (/\.(ts|tsx|md)$/.test(p)) {
       out.push(p);
     }
   }
@@ -89,18 +101,38 @@ export function commentLines(src: string): { line: number; text: string }[] {
   return out;
 }
 
-/** Every `project:sym[:toolchain]` citation in a comment, for the known benchmark projects. */
-export function citationsIn(src: string, projects: string[]): { line: number; cited: string }[] {
+/** Every `project:sym[:toolchain]` citation in already-extracted prose. */
+function citationsInProse(lines: { line: number; text: string }[], projects: string[]): Citation[] {
   const re = new RegExp(`\\b(${projects.join('|')}):([A-Za-z_]\\w*)(?::([\\w.]+))?`, 'g');
-  return commentLines(src).flatMap(({ line, text }) =>
+  return lines.flatMap(({ line, text }) =>
     [...text.matchAll(re)].map((m) => ({ line, cited: m[3] ? `${m[1]}:${m[2]}:${m[3]}` : `${m[1]}:${m[2]}` })),
   );
 }
 
+interface Citation {
+  line: number;
+  cited: string;
+}
+
+/** Citations in a TypeScript source — comments only. */
+export function citationsIn(src: string, projects: string[]): Citation[] {
+  return citationsInProse(commentLines(src), projects);
+}
+
+/** Citations in a Markdown source — the whole file is prose. */
+export function citationsInMarkdown(src: string, projects: string[]): Citation[] {
+  return citationsInProse(
+    src.split('\n').map((text, i) => ({ line: i + 1, text })),
+    projects,
+  );
+}
+
 const found = SCANNED.flatMap((dir) =>
-  tsFiles(join(ROOT, dir)).flatMap((file) =>
-    citationsIn(readFileSync(file, 'utf8'), PROJECTS).map((c) => ({ ...c, file: file.slice(ROOT.length + 1) })),
-  ),
+  sourceFiles(join(ROOT, dir)).flatMap((file) => {
+    const src = readFileSync(file, 'utf8');
+    const cited = file.endsWith('.md') ? citationsInMarkdown(src, PROJECTS) : citationsIn(src, PROJECTS);
+    return cited.map((c) => ({ ...c, file: file.slice(ROOT.length + 1) }));
+  }),
 );
 
 describe('every cited benchmark row exists', () => {
@@ -152,6 +184,14 @@ describe('the checker itself', () => {
     // `pokeemerald:GetGender` was the real defect: the row is GetGenderFromSpeciesAndPersonality.
     expect(CITABLE.has('pokeemerald:GetGender')).toBe(false);
     expect(CITABLE.has('pokeemerald:GetGenderFromSpeciesAndPersonality')).toBe(true);
+  });
+
+  it('reads a citation out of markdown prose, where there are no comment markers', () => {
+    expect(citationsInMarkdown('See kleod:UpdateFadeEffect for the shape.', PROJECTS).map((c) => c.cited)).toEqual([
+      'kleod:UpdateFadeEffect',
+    ]);
+    // and the TS scanner must NOT, or every string in the repo becomes prose
+    expect(citationsIn('See kleod:UpdateFadeEffect for the shape.', PROJECTS)).toEqual([]);
   });
 
   it('derives its project list from the results, not a hardcoded copy', () => {
