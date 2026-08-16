@@ -15,10 +15,14 @@
 //
 //     if (c) { } else { g[594] = g[659]; } v4 = 1;   →   if (!c) { g[594] = g[659]; } v4 = 1;
 //
-// Measured on kleod:UpdateHUDCounterDisplay: 60 → 33 (visible in the committed results.json). The
-// placement is not a matter of taste — peeling the same statements to ABOVE the `if` instead scores
-// 48 — but note that above-the-`if` is a THIRD option, unsound for its own reason (it crosses the
-// condition as well as both arms); the soundness argument here covers only below-vs-in-arms.
+// THE BENCHMARK DOES NOT GUARD THIS PASS. It fires on two of its 743 rows and both match with the
+// merge and without it, so no score moves if this file breaks — and none moves if the pipeline
+// simply stops calling it. `test/tailmerge.test.ts` covers that gap explicitly, end to end, on one
+// of those two functions; the rest of that file calls this pass directly and cannot see an unwiring.
+//
+// Placement is not a matter of taste: peeling the same statements ABOVE the `if` is a THIRD option,
+// unsound for its own reason (it crosses the condition as well as both arms). The soundness argument
+// above covers only below-vs-in-arms.
 //
 // KNOWN INTERACTIONS, both byte-level rather than soundness. This pass is unconditional like
 // `dce.ts` and `basecse.ts` rather than a differ-refereed lever, and the argument those files each

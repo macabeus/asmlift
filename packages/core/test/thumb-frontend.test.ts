@@ -298,7 +298,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
   test('a callee-saved live-in never takes an ARGUMENT slot from a stack argument', () => {
     // A `/^r(\d+)$/` rank sent `sl`/`sb` to 99 but ranked `r8` at 8 and `r4` at 4 — invisible while
     // nothing else occupied ranks >= 4, a positional miscompile once stack arguments ranked there.
-    // sa3's sub_80B6B3C is the live one: 10 arguments, `mov r7, r8` in its prologue, so the r8
+    // sa3's sub_80B6B3C is the live one: 10 arguments, `mov r5, r8` in its prologue, so the r8
     // live-in and @sarg8 tied at 8 and the stable sort gave the slot to whichever was read first —
     // the prologue. ABI argument 8 came out as `a9`, and everything after it shifted.
     const hi =

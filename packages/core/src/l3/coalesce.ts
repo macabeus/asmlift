@@ -81,10 +81,12 @@ function rename(body: Stmt[], from: string, to: string): Stmt[] {
 /** Every legal single merge, each as its own tree — NOT one committed choice.
  *
  *  Which pair a register allocator coalesced is not derivable from the L3 tree, and first-fit gets
- *  it wrong: on kleod:UpdateHUDCounterDisplay the two legal merges score 18 and 40 against a
- *  no-merge baseline of 21, and declaration order picks the 40. `rank.ts` already has the idiom for
- *  exactly this — `/regcopy`'s "the tail choice is allocator-ambiguous, so both are ranked" — so
- *  every candidate is emitted and the differ referees.
+ *  it wrong. Run kleod:UpdateHUDCounterDisplay's published repro script (results.json carries it)
+ *  and read the candidate table: of its two legal merges, one scores WORSE than not merging at all
+ *  and declaration order is the one that picks it. Emitting no merges at all costs that row its
+ *  match, which is what guards this file. `rank.ts` already has the idiom for exactly this —
+ *  `/regcopy`'s "the tail choice is allocator-ambiguous, so both are ranked" — so every candidate is
+ *  emitted and the differ referees.
  *
  *  GATES:
  *   - a local mentioned inside a loop BODY is excluded. SOUND-critical: it is what makes preorder

@@ -1,17 +1,20 @@
 // L3 re-spelling lever: hoist a reused global base into a pointer local at the INNERMOST scope
 // that contains all of its uses.
 //
+// The lever earns its place: returning `null` from `hoistScopedBases` costs
+// kleod:UpdateHUDCounterDisplay its match, so the benchmark's zero-lost gate guards this file.
+//
 // `l3/basecse.ts` already hoists a reused leaf base — but always to the FUNCTION TOP, and only for
 // an `addr`/`const` base. Both limits are load-bearing here, and each costs a real row:
 //
 //   PLACEMENT. A base used only inside one `if` arm, hoisted to the function top, is live across
 //   everything before that arm — a live range the original never had, which is the register-pressure
-//   failure basecse's own loop gate exists for. Measured on kleod:UpdateHUDCounterDisplay by
-//   hand-editing the REFERENCE source: naming the `gBgTilemapBufs` store base inside the arm that
-//   uses it is byte-exact, and moving that same declaration to the function top costs 24. That is
-//   the reason the lever is scope-aware; it is NOT a claim about what the lever achieves. On that
-//   row it now declines outright (a later pass retired the phi it keyed on, so the base's uses span
-//   the function body), and the cluster fallback below is what recovers it.
+//   failure basecse's own loop gate exists for. That argument is why the lever is scope-aware; it is
+//   NOT a claim about what the lever achieves, and no committed measurement separates the two
+//   placements (the one that did edited a reference source by hand and cannot be re-run). On
+//   kleod:UpdateHUDCounterDisplay the primary path declines outright (a later pass retired the phi
+//   it keyed on, so the base's uses span the function body), and the cluster fallback below is what
+//   recovers it.
 //   basecse's header already names the gap — "a loop-body base is left
 //   inline for a future scope-aware hoist" — and this is that hoist.
 //
