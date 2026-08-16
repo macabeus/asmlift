@@ -67,8 +67,8 @@ it, while `L3` is a genuinely different structure (`SFn`, the neutral AST). The 
 `decompile()` runs them ([`packages/core/src/pipeline.ts`](../packages/core/src/pipeline.ts)):
 
 ```
-asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ emit
-        (L1)     (patterns)      (L1→L2)         (L2→L3)    (backend → string)
+asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L3 rewrites ─▶ emit
+        (L1)     (patterns)      (L1→L2)         (L2→L3)     (in L3)      (backend → string)
 ```
 
 - **L1 — machine-shaped SSA.** What the frontend emits. Values are `unk32` (32 bits, type
@@ -85,6 +85,28 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ e
   ([`l3/ast.ts`](../packages/core/src/l3/ast.ts)): `if`/`while`/`switch`/expressions, no
   registers, no `goto`. Structuring ([`structure/`](../packages/core/src/structure)) recovers it
   from the L2 CFG and destroys SSA (assigning merge values back to named variables).
+- **The L3 rewrites** ([`l3/`](../packages/core/src/l3)) then improve that tree _within_ the
+  level — no lowering, so this is a stage rather than a fourth level. They come in two
+  populations, and the difference is architectural, not incidental:
+  - **Committed**, inside `structureChecked`: tail-merge → dead-store elimination → base-CSE.
+    Every path gets these, which is why the boundary contracts run on both sides of them (below).
+  - **Ranked re-spellings**, in [`rank.ts`](../packages/core/src/rank.ts) and so on the
+    `decompileRanked` path only: `/argbase`, `/scopebase`, `/coalesce`, `/indexed`, `/regcopy`.
+    Each emits an _alternative candidate_ rather than replacing the primary, and the differ
+    referees — the
+    [ranked-candidate idea](asmlift-101.md#26-types-as-ranked-candidates-judged-by-the-differ)
+    applied to spelling instead of types.
+
+  Which population a pass belongs to decides how much its opinions cost. Four passes currently
+  answer "is this address a local?" differently — `raise/gvn.ts` (never), `l3/basecse.ts`
+  (function top), `l3/scopebase.ts` (innermost scope), `l3/argbase.ts` (immediately before the
+  call). The last two are candidate generators, so their disagreement costs a candidate. The first
+  two are committed, so theirs would cost a **match**, and the constraint that keeps them
+  compatible lives in neither file: `gvn`'s entry-block hoist is free only because
+  `structure/analysis.ts` re-materializes address ops at each use instead of binding them to a
+  local. That is a promise between modules, with no natural home in any one of their unit tests,
+  so it is pinned in
+  [`test/addr-placement.test.ts`](../packages/core/test/addr-placement.test.ts).
 
 The **backends** ([`backend/`](../packages/core/src/backend)) then print L3 as concrete source —
 C, Pascal, and a scoped C++ — one neutral tree, three spellings. Every language-specific decision
@@ -111,12 +133,64 @@ localized _there_ instead of surfacing three stages later as mysterious wrong C.
   C operator that rejects pointers, and every scalar access width is a real C scalar (1/2/4). A
   regressing pass that produced, say, a width-8 access would otherwise print the nonexistent
   `(s64 *)` typedef and fail at candidate-compile three stages downstream.
+- **`assertEffectsPreserved`** (also after structuring): every call the asm makes is emitted, and
+  none is emitted more times than the asm makes it on any one path — same for the `opaque` ops
+  standing in for unmodelled instructions. It is the odd one out and worth the attention: the
+  other three check L3 against _itself_, so they catch a tree that is ill-formed. This one checks
+  L3 against the L2 graph it came from, which is the only way to catch a pass that **loses**
+  something well-formedly — a dropped call, or an unmodelled instruction quietly vanishing
+  because its destination register was dead.
+
+**Where they run matters as much as what they say.** The three post-structuring contracts fire
+_before_ the committed L3 rewrites, so a readability pass cannot hide a structuring defect by
+deleting the statement that carries it; deref-typing and effect-preservation then fire _again_
+after, so those passes cannot introduce one either. And each ranked re-spelling gets its own
+`assertResolved` + `assertDerefsTyped` inside `respell`'s guard ([`rank.ts`](../packages/core/src/rank.ts)),
+where a failure costs that one candidate and is reported through `onLeverError` — never silently
+dropped, which would be indistinguishable from a lever that correctly declined.
 
 This is the concrete meaning of "build the tower for real." It needs no per-op level tag and no
 level enum (asmlift deliberately has neither) — the contracts are plain functions on `Fn` / `SFn`
 that make the boundaries honest. They are also what makes the whole thing improvable in an
 automated score loop: when a match fails, the contracts and the per-stage IR dumps let the
 failure be attributed to a _stage_, which is the unit an agent can then change in isolation.
+
+### One level down: a pass's own gates
+
+A contract guards a stage boundary. But most of what keeps asmlift honest is finer-grained than
+that: the conditions under which an individual pass **refuses** to fire. Those refusals are the
+[cardinal rule](asmlift-101.md#28-the-cardinal-rule-loud-decline--silent-miscompile) at its
+smallest scale, and they are where the real bugs have been
+— a gate that turns out to be decoration is a silent miscompile waiting for the right input, and a
+comment claiming a gate is load-bearing is not evidence that it is.
+
+So a pass whose refusals carry weight declares them as **data** rather than as `if`s and prose
+([`l3/gates.ts`](../packages/core/src/l3/gates.ts)):
+
+```ts
+interface Gate<Ctx> {
+  readonly id: string; // stable, kebab-case
+  readonly why: string; // one line: the reason the rule exists
+  readonly sound: boolean; // remove it and some candidate is WRONG, not merely worse
+  readonly guardedBy?: string; // required when `sound` — the test that fails without it
+  readonly rejects: (c: Ctx) => boolean; // true ⇒ REJECT
+}
+```
+
+The point is not tidiness. Because the table is a **value**, a test can drop one entry and re-run
+the pass — the real predicate on real input, with no test-only branch in the shipped path — so
+"this gate is load-bearing" becomes an executable claim instead of a comment. That makes
+`sound: true` _cost_ something to declare: a shared contract test
+([`test/gate-contract.test.ts`](../packages/core/test/gate-contract.test.ts)) rejects a sound gate
+that names no guard, and checks the named guard against the suite's actual test titles, so the
+field cannot decay into a reference to a test deleted two refactors ago. Returning _which_ gate
+refused each candidate makes the dual question checkable too: a rule nothing ever reaches is a
+rule no test can be failing on purpose.
+
+Adopt this when a pass's refusals are load-bearing — not for every `if` in the codebase. The same
+"earn it" discipline applies: `l3/basecse.ts` declares a table in which **no** gate is sound,
+because a wrong hoist there costs bytes and a match, never meaning, and saying so plainly is worth
+more than three gates pretending to a soundness they do not have.
 
 ## How the architecture came to be: earning L2
 
@@ -158,6 +232,11 @@ followed the second inhabitant, never preceded it.
 
 - Add a **contract** whenever a stage boundary has a postcondition that a bad edit could violate
   silently — this is cheap and almost always worth it.
+- Convert a pass's refusals to a **gate table** when they are load-bearing — the other cheap move.
+  It costs a few lines and buys the ablation ("drop this rule and something breaks") as a test
+  rather than a claim. A pass whose gates only trade bytes can say so in the table and skip the
+  guards; one that declares a gate sound now owes a differential test, and the contract enforces
+  the debt.
 - Add a **new op / representation** only when a capability genuinely cannot be expressed in the
   current one _and_ the differ can prove the result matches. Constant-offset access did not clear
   that bar; variable indexing did. If the corpus stays leaf/arithmetic-heavy, the tower may never
@@ -175,7 +254,7 @@ a label it wears — and asmlift only makes the promise once it has something to
   2021 — [arXiv](https://arxiv.org/abs/2002.11054) · [mlir.llvm.org](https://mlir.llvm.org/)
 - The [LLVM](https://llvm.org/) reference manual on its IR / SelectionDAG / MachineInstr / MCInst
   representations.
-- [m2c](https://github.com/matt-kempster/m2c) — the predecessor asmlift succeeds; its
+- [m2c](https://github.com/matt-kempster/m2c) — the decompiler asmlift is an alternative to; its
   human-in-the-loop design is what asmlift's automated-loop priorities are contrasted against.
 - In this repo: [`asmlift-101.md`](asmlift-101.md) (the from-zero tour),
   [`packages/core/README.md`](../packages/core/README.md#architecture) (the module map),
