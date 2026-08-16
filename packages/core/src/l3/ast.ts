@@ -271,6 +271,14 @@ export function exprEquals(a: Expr, b: Expr): boolean {
 // recognizeForLoops) rightly keep their own switches.
 
 /** The direct sub-expressions of `e`, in syntactic order. */
+/** THE spelling of an unmodelled instruction's gap reason, in one place: `structure.ts` writes it
+ *  into the marker, `contracts.ts` matches on it to prove the gap was not dropped, and the benchmark
+ *  classifies declines by it. Two spellings make that contract silently vacuous — enforced-looking
+ *  and never firing. `?` when a frontend stamps no mnemonic. */
+export function gapReasonFor(mnemonic: unknown): string {
+  return `unmodelled instruction '${typeof mnemonic === 'string' ? mnemonic : '?'}'`;
+}
+
 export function exprChildren(e: Expr): Expr[] {
   switch (e.k) {
     case 'var':

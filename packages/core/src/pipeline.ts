@@ -11,11 +11,11 @@ import {
 import type { AsmData } from './frontend/asmdata';
 import { FrontendUnsupportedError } from './frontend/errors';
 import { frontendFor } from './frontend/registry';
-import type { Fn } from './ir/core';
+import { type Block, type Fn, successorsOf } from './ir/core';
 import { print } from './ir/print';
 import { T } from './ir/types';
 import { VerifyError, verify } from './ir/verify';
-import { Expr, LanguageBackend, SFn, Stmt, exprChildren, stmtChildren, stmtExprs } from './l3/ast';
+import { Expr, LanguageBackend, SFn, Stmt, exprChildren, gapReasonFor, stmtChildren, stmtExprs } from './l3/ast';
 import { hoistReusedGlobalBases } from './l3/basecse';
 import { eliminateDeadStores } from './l3/dce';
 import { mergeCommonTails } from './l3/tailmerge';
@@ -195,9 +195,55 @@ export function raiseRecovered(fn: Fn, target: TargetDescription, hooks: RaiseHo
   }
 }
 
+/** Run `body`; if it declines, name the unmodelled instructions the function carries.
+ *
+ *  An `opaque` degrades its own value AND makes its block impure, so a shape recognizer refuses:
+ *  `headerPure` rejects a header holding one, and the loop declines with "unrecovered back-edge …".
+ *  True and useless — the shape is fine, an instruction is missing — and the benchmark classifies
+ *  declines by that text, so the round is filed as a loop-capability gap and the improvement loop
+ *  builds the wrong thing.
+ *
+ *  Only ADDS attribution: never converts a decline into a success, never fires without an
+ *  unmodelled instruction, reachable blocks only (one in dead code did not cause the refusal). */
+function attributeOpaques<T>(fn: Fn, body: () => T): T {
+  try {
+    return body();
+  } catch (e) {
+    // Attribution is a nicety, so it must not be able to throw: a crash here would replace a
+    // DESIGNED loud failure with an incidental one, which contract-invariant.test.ts rejects by name.
+    if (!(e instanceof StructureError) || !fn.blocks[0]) {
+      throw e;
+    }
+    const seen = new Set<Block>([fn.blocks[0]]);
+    for (const stack = [fn.blocks[0]]; stack.length;) {
+      for (const s of successorsOf(stack.pop()!)) {
+        if (!seen.has(s)) {
+          seen.add(s);
+          stack.push(s);
+        }
+      }
+    }
+    const names = new Set<string>();
+    for (const b of seen) {
+      for (const op of b.ops) {
+        if (op.opcode === 'opaque') {
+          names.add(typeof op.attrs.mnemonic === 'string' ? op.attrs.mnemonic : '?');
+        }
+      }
+    }
+    if (!names.size || /unmodelled instruction/.test(e.message)) {
+      throw e;
+    }
+    // Through `gapReasonFor`, so the classifier sees its canonical text — a hand-written variant
+    // misses the mnemonic-anchored classes and every attributed decline lands in the generic bucket.
+    const list = [...names].sort().map(gapReasonFor).join(', ');
+    throw new StructureError(`${e.message} — and the function carries ${list}, which is the more likely cause`);
+  }
+}
+
 /** Stage 4 — structure + its boundary contracts, always as a pair. */
 export function structureChecked(fn: Fn, opts: Parameters<typeof structure>[1]): SFn {
-  const raw = structure(fn, opts);
+  const raw = attributeOpaques(fn, () => structure(fn, opts));
   // BOTH boundary contracts run on the pre-DCE tree: the readability pass must never be able to
   // hide a structuring defect by dropping the dead statement that carries it. assertResolved
   // catches an unresolved `?` value; assertDerefsTyped catches an ill-typed deref (e.g. a pointer

@@ -119,7 +119,10 @@ export const OPCODES = {
   // laddr and skips the audit fails verify loudly instead of rendering `&undefined`.
   laddr: { operands: 0, results: 1, requiredAttrs: ['off', 'width', 'signed'] },
   // --- black-box escape hatch (keeps lifting total) ---
-  opaque: { operands: 'variadic', results: 1 },
+  // `effects: true`: an instruction asmlift could not model may do anything — write memory, trap,
+  // touch a system register — and `results[0]` is only the part we can name. So a dead `opaque` is
+  // no more reapable than a dead `call`.
+  opaque: { operands: 'variadic', results: 1, effects: true },
   // --- terminators ---
   ret: { operands: 'variadic', results: 0, terminator: true, successors: 0 },
   br: { operands: 0, results: 0, terminator: true, successors: 1 },
@@ -172,25 +175,22 @@ export const NEGATED_ICMP: Readonly<Record<string, Opcode>> = Object.fromEntries
   ]),
 );
 
-/** Ops with an observable side effect — the derived view raise/shortcircuit.ts consumes. */
+/** Ops with an observable side effect: the flag on the signature, derived rather than re-listed.
+ *  Consumed by `isDceSafe`, by `HOIST_UNSAFE_OPS` below, and by structure.ts's `sideEffects` walk
+ *  (an effectful op whose result nobody reads is still an execution). */
 export const EFFECTFUL_OPS: ReadonlySet<string> = new Set(
   (Object.keys(OPCODES) as Opcode[]).filter((k) => (OPCODES[k] as OpSig).effects),
 );
 
-/** Ops that may not be REORDERED across other code — `EFFECTFUL_OPS` plus `opaque`.
- *
- *  `effects` is overloaded on two axes, and `opaque` is exactly the op that separates them: a dead
- *  `opaque` MUST stay deletable (`isDceSafe` below says so deliberately — giving it `effects: true`
- *  would strand dead opaques after every pattern rewrite, and they would surface as ASMLIFT_ERROR
- *  gaps in functions that emit cleanly today), while a LIVE one is an instruction asmlift could not
- *  model and must not be moved past anything. So "deletable when dead" and "movable when live" are
- *  different questions and get different views, both derived here rather than re-spelled per
- *  consumer — structure/analysis.ts and structure/structure.ts each carry their own inline copy of
- *  this membership, which is how the two models drifted apart in the first place. */
-export const HOIST_UNSAFE_OPS: ReadonlySet<string> = new Set([...EFFECTFUL_OPS, 'opaque']);
+/** Ops that may not be REORDERED across other code. Identical to `EFFECTFUL_OPS` — one flag answers
+ *  both "deletable when dead" and "movable when live" — and kept as its own name because the call
+ *  sites ask the reordering question. Derived here rather than re-spelled per consumer:
+ *  structure/analysis.ts and structure/structure.ts each carry their own inline copy of this
+ *  membership, which is how the two models drifted apart in the first place. */
+export const HOIST_UNSAFE_OPS: ReadonlySet<string> = EFFECTFUL_OPS;
 
 /** May a dead result of this opcode be deleted? Registered, no observable effects, not control
- *  flow. Deliberately includes `opaque` — a dead opaque vanishing is designed behavior. */
+ *  flow. `opaque` is excluded via its `effects` flag — see the note on its signature. */
 export function isDceSafe(opcode: string): boolean {
   const sig = opSig(opcode);
   return !!sig && !sig.effects && !sig.terminator;

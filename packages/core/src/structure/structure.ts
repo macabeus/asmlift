@@ -38,8 +38,9 @@
 // header also entered by a plain br).
 import { type GlobalCell, globalCellOf, mayWriteGlobal } from '../ir/alias';
 import { Block, Fn, Op, Value, defOpMap, successorsOf } from '../ir/core';
+import { EFFECTFUL_OPS } from '../ir/opcodes';
 import { type IrType, T, scalarTypeForAccess, typeEquals } from '../ir/types';
-import { BinOp, Expr, SFn, Stmt, SwitchCase, exprChildren, mapExprChildren, negateCond } from '../l3/ast';
+import { BinOp, Expr, SFn, Stmt, SwitchCase, exprChildren, gapReasonFor, mapExprChildren, negateCond } from '../l3/ast';
 import { exprCType, ptrElemBytes } from '../l3/typing';
 import { returnType } from '../raise/recover';
 import { collectStructs } from '../raise/structs';
@@ -1739,7 +1740,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
       );
     }
     return d.opcode === 'opaque'
-      ? mkGap(`unmodelled instruction '${(d.attrs.mnemonic as string) ?? '?'}'`, d.operands.map(e))
+      ? mkGap(gapReasonFor(d.attrs.mnemonic), d.operands.map(e))
       : mkGap(`no lowering for op '${d.opcode}'`, d.operands.map(e));
   };
 
@@ -1836,10 +1837,10 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     return succ ? argAssignsFor(pred, succ, sub) : [];
   };
 
-  // Side-effecting ops of a block, emitted as statements in program order: memory stores,
-  // calls whose return value nothing consumes (a void/discarded call), and MATERIALIZED defs
-  // — a call/load whose value cannot soundly render at its use is assigned to its named
-  // temp here, at its own program position.
+  // Side-effecting ops of a block, emitted as statements in program order: memory stores; any
+  // EFFECTFUL op whose result nothing consumes (a void/discarded call, and an `opaque` standing for
+  // an instruction asmlift could not model); and MATERIALIZED defs — a call/load whose value cannot
+  // soundly render at its use is assigned to its named temp here, at its own program position.
   const sideEffects = (b: Block): Stmt[] => {
     const out: Stmt[] = [];
     for (const op of b.ops) {
@@ -1882,7 +1883,17 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
           ),
           value: expr(op.operands[2]),
         });
-      } else if (op.opcode === 'call' && op.results.length && !useSitesOf.has(op.results[0])) {
+      } else if (EFFECTFUL_OPS.has(op.opcode) && op.results.length && !useSitesOf.has(op.results[0])) {
+        // An effectful op whose result nobody reads is still an execution. `store`/`astore` have no
+        // result and were handled above, so what reaches here is `call` and `opaque` — and an
+        // `opaque` missing from this walk is an instruction the frontend could not model
+        // disappearing with no diagnostic, which is the one thing this project refuses to do.
+        //
+        // Keyed on EFFECTFUL_OPS rather than the two opcode names: the deciding property is "has an
+        // effect the result does not account for", which is what the flag already means, so the next
+        // op to acquire it needs no edit here. Statement, not expression — `expr` on the result
+        // routes through `lowerDef`, already where `opaque` becomes the gap, so this reuses the SAME
+        // degradation a live opaque gets rather than inventing a second way to be loud.
         out.push({ k: 'exprstmt', value: expr(op.results[0]) });
       } else if (materialize.has(op) && !absorbedLoads.has(op)) {
         // (an absorbed load's every consumer spells a named bitfield read — emitting its temp

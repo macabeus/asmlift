@@ -71,17 +71,16 @@ interface AsmBlock {
 // than in decode arms like MIPS's `move` or PPC's `slwi`. That distinction, and why there is no
 // shared alias helper across the three frontends, is written up once in ./opaque.ts.
 //
-// The LOAD aliases matter more than the store ones, and the asymmetry is worth knowing: an
-// unrecognised `stm*` matches `opaquePolicy.storeClass` and fails LOUD, but an unrecognised `ldm*`
-// does not — it reaches opaqueDest, which takes ops[0] (the BASE) as the destination, so the opaque
-// is dead, DCE removes it, and the load silently vanishes. Measured: `ldmfd r1, {r0}; bx lr` lifted
-// to `return a0;` where the answer is `return *a0;`. Every load spelling ARMv4T Thumb accepts is
-// therefore listed. (`ldmed`/`ldmea` are NOT: they mean IB/DB, which Thumb-1 does not have, and
-// `as` rejects them — so they cannot appear.)
+// This table is about COVERAGE, not soundness: a spelling missing from it declines loudly like any
+// other unmodelled instruction, and listing one buys that the function LIFTS instead. Every load
+// spelling ARMv4T Thumb accepts is listed, because declining a whole function over a synonym is a
+// poor trade. Note what may NOT justify an omission: "`as` rejects it, so it cannot appear". This
+// frontend parses TEXT — from luvdis/objdump/IDA/Ghidra and hand-written .s — so what some
+// assembler accepts says nothing about what it will be handed.
 //
-// `stmfd` is deliberately absent, and the asymmetry is real rather than an oversight: `stmfd` is
-// `stmdb`, and ARMv4T Thumb has neither — `as` rejects both with "selected processor does not
-// support ... in Thumb mode". There is nothing to normalise it TO.
+// `stmfd` is deliberately absent, and the asymmetry is real rather than an oversight: `stmfd` IS
+// `stmdb` (decrement-before), and ARMv4T Thumb has no decrement-before store — so there is nothing
+// to normalise it TO. A fact about the instruction set, not about an assembler. It declines.
 //
 // Null-prototype so that an inherited key (`constructor`, `toString`) cannot be mistaken for an
 // entry. Unreachable from real assembly, but the lookup should not depend on that.
@@ -1968,8 +1967,8 @@ export function lift(
     const frame = makeFrameWalk();
 
     // TRUSTWORTHINESS GUARD (mirrors the MIPS/PPC frontends): an unmodelled instruction must not
-    // silently drop its destination register — emit an honest `opaque`: dead ⇒ it vanishes; live ⇒
-    // assertResolved fails LOUD (see frontend/opaque.ts for the policy). Push/pop and sp
+    // silently drop its destination register — emit an honest `opaque`, which fails LOUD at
+    // assertResolved whether or not anything reads that register (see frontend/opaque.ts). Push/pop and sp
     // adjustments have no low-register data destination, so they fall through harmlessly;
     // terminators are handled in the terminator section below.
     const isThumbReg = (s: string | undefined): s is string => /^r\d+$/.test(s ?? '');
@@ -1982,8 +1981,8 @@ export function lift(
       const od = opaqueDest(ins.mnemonic, ins.ops, {
         isReg: isThumbReg,
         normalize: reg,
-        storeClass: /^(str|stm)/,
-        skipSafe: /^(push|pop|nop)$/,
+        storeClass: /^(str|stm)/i,
+        skipSafe: /^(push|pop|nop)$/i,
         context: name,
         display: ins.asWritten,
       });

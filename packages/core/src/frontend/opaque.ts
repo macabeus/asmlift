@@ -46,8 +46,9 @@ export interface OpaquePolicy {
   /** token cleanup before classification — e.g. Thumb strips `[`/`]` off a memory operand.
    *  Default: identity. */
   normalize?: (s: string) => string;
-  /** true iff the register is hardwired-zero (MIPS `$zero`/`$0`): writing it is a no-op, so it is
-   *  NOT a real destination and the instruction is safe to skip. Default: nothing is zero. */
+  /** true iff the register is hardwired-zero (MIPS `$zero`/`$0`). It is then not a real
+   *  destination — so there is nothing to degrade and the instruction is REFUSED, not skipped
+   *  (`teq zero, zero` is a trap). Default: nothing is zero. */
   isZero?: (r: string) => boolean;
   /** Mnemonics that WRITE MEMORY in this ISA: the "no register destination ⇒ safe to fall
    *  through" premise is FALSE for stores — skipping one silently deletes the write (Thumb
@@ -63,10 +64,10 @@ export interface OpaquePolicy {
    *  canonical name but must report the one the input file actually contains — otherwise a decline
    *  names an instruction the reader cannot find in their own .s. Defaults to `mnemonic`. */
   display?: string;
-  /** Mnemonics PROVABLY effect-free — or deliberately transparent (Thumb push/pop frame ops) —
-   *  in this ISA: the ONLY unmodelled no-destination instructions that may be skipped. Any other
-   *  no-destination unmodelled instruction THROWS: a side-effect-only instruction (swi, syscall,
-   *  sync, cache…) skipped silently is a deleted effect — a silent miscompile. Default: none. */
+  /** Mnemonics PROVABLY effect-free — or deliberately transparent (Thumb push/pop frame ops) — in
+   *  this ISA: the only unmodelled instructions that may be skipped at all. Anything else with no
+   *  degradable destination THROWS, because a side-effect-only instruction (swi, syscall, sync,
+   *  cache…) skipped silently is a deleted effect. Default: none. */
   skipSafe?: RegExp;
 }
 
@@ -79,16 +80,28 @@ export interface OpaqueDest {
 
 /** Decide the opaque destination + register source operands for an unmodelled instruction
  *  `mnemonic` with operand list `ops` (operands in objdump order — destination first). Returns
- *  `null` only when the instruction is provably skippable: a write to a hardwired-zero register,
- *  or a policy.skipSafe mnemonic. An unmodelled STORE-CLASS instruction (policy.storeClass)
- *  throws loud (a skipped memory write is a silent miscompile) — and so does any OTHER
- *  no-destination instruction not in skipSafe: with no register to degrade to a live-`?`
- *  sentinel, skipping would silently delete a side effect (swi/syscall/sync/cache).
+ *  `null` only for a policy.skipSafe mnemonic. An unmodelled STORE-CLASS instruction
+ *  (policy.storeClass) throws loud (a skipped memory write is a silent miscompile), and so does any
+ *  instruction with no degradable destination: with no register to carry the live-`?` sentinel,
+ *  skipping would silently delete a side effect (swi/syscall/sync/cache).
  *
  *  When non-null, the caller MUST emit an `opaque` op that writes `dst` and consumes `srcRegs`
- *  (read through the frontend's own SSA): a DEAD opaque is DCE'd away harmlessly, while a LIVE one
- *  reaches structuring as the sentinel `?` and trips `assertResolved` — the loud failure the
- *  contract requires, instead of a stale/absent value surfacing as confidently-wrong source. */
+ *  (read through the frontend's own SSA). It reaches structuring as the sentinel `?` and trips
+ *  `assertResolved` — the loud failure the contract requires — WHETHER OR NOT anything reads `dst`;
+ *  `opaque` carries `effects: true` (ir/opcodes.ts) for the same reason `call` does.
+ *
+ *  Two properties of `ops[0]` read as permission to skip and are not. Both describe the
+ *  DESTINATION, while the risk is everything else the instruction does:
+ *    - nobody reads it — a dead register says nothing about a memory or system effect;
+ *    - it is hardwired zero — MIPS `teq zero, zero` is a conditional TRAP.
+ *  So `skipSafe`, a short per-ISA list of provably transparent mnemonics, is the only way an
+ *  unmodelled instruction leaves no trace.
+ *
+ *  `storeClass` is not load-bearing for soundness — a missed store degrades loudly like anything
+ *  else — but it throws naming the memory write instead of an unresolvable value, and it catches
+ *  the shape where `ops[0]` is a SOURCE (MIPS `swl rt, off(base)`) before a `dst` is fabricated
+ *  from it. It and `skipSafe` match case-INSENSITIVELY: mnemonic case is a property of the
+ *  disassembler, not of the instruction. */
 export function opaqueDest(mnemonic: string, ops: string[], policy: OpaquePolicy): OpaqueDest | null {
   const shown = policy.display ?? mnemonic;
   if (policy.storeClass?.test(mnemonic)) {
@@ -102,7 +115,10 @@ export function opaqueDest(mnemonic: string, ops: string[], policy: OpaquePolicy
   }
   const norm = policy.normalize ?? ((s) => s);
   const dst = norm(ops[0] ?? '');
-  if (!policy.isReg(dst)) {
+  // No DEGRADABLE destination: `ops[0]` is not a register, or it is the hardwired zero. Same answer
+  // for both — a zero write is a genuine no-op only for a MODELLED instruction, and by construction
+  // nothing modelled reaches here.
+  if (!policy.isReg(dst) || policy.isZero?.(dst)) {
     if (policy.skipSafe?.test(mnemonic)) {
       return null;
     } // explicitly transparent for this ISA
@@ -111,9 +127,6 @@ export function opaqueDest(mnemonic: string, ops: string[], policy: OpaquePolicy
       `${where}unmodelled effect instruction '${shown}' — no register destination to degrade, and skipping it would silently delete its effect`,
     );
   }
-  if (policy.isZero?.(dst)) {
-    return null;
-  } // writes hardwired zero → a genuine no-op
   const srcRegs = ops.slice(1).map(norm).filter(policy.isReg);
   return { dst, srcRegs };
 }

@@ -6,7 +6,7 @@
 import { type Block, type Fn, type Value, successorsOf } from './ir/core';
 import { type IrType, typeToString } from './ir/types';
 import type { BinOp, Expr, SFn, Stmt } from './l3/ast';
-import { exprChildren, fieldSpellsDot, stmtChildren, stmtExprs } from './l3/ast';
+import { exprChildren, fieldSpellsDot, gapReasonFor, stmtChildren, stmtExprs } from './l3/ast';
 import { declaredTypes, exprCType } from './l3/typing';
 
 export class ContractError extends Error {
@@ -164,11 +164,44 @@ export function assertEffectsPreserved(fn: Fn, sfn: SFn): void {
     }
   }
   const irCalls: CallCounts = new Map();
+  // Unmodelled instructions, by the mnemonic the frontend stamped. Same "never dropped" property as
+  // a call, and it needs its own tally because an `opaque` carries no `target`.
+  const irOpaques = new Set<string>();
   for (const b of seen) {
     for (const op of b.ops) {
       if (op.opcode === 'call' && typeof op.attrs.target === 'string') {
         const t = op.attrs.target;
         irCalls.set(t, (irCalls.get(t) ?? 0) + 1);
+      } else if (op.opcode === 'opaque') {
+        irOpaques.add(gapReasonFor(op.attrs.mnemonic));
+      }
+    }
+  }
+  // DROPPED only, not the RE-RUN half: a gap rendered twice is a diagnostic printed twice, which
+  // costs nothing because nothing recompiles it, and structuring legitimately duplicates a shared
+  // arm — so a per-path count here would fire on correct output.
+  //
+  // Bites only in ANNOTATE mode (under `strict` the gap is the `?` sentinel and structure() has
+  // already thrown), which is where it is needed: that is the CLI and benchmark default, and the
+  // only mode with no other backstop against a silently dropped opaque.
+  if (irOpaques.size) {
+    const emitted = new Set<string>();
+    const we = (e: Expr): void => {
+      if (e.k === 'marker') {
+        emitted.add(e.reason);
+      }
+      exprChildren(e).forEach(we);
+    };
+    const ws = (s: Stmt): void => {
+      stmtExprs(s).forEach(we);
+      stmtChildren(s).forEach(ws);
+    };
+    sfn.body.forEach(ws);
+    for (const reason of irOpaques) {
+      if (!emitted.has(reason)) {
+        throw new ContractError(
+          `structuring dropped the ${reason} in '${sfn.name}' — an instruction asmlift could not model left no trace`,
+        );
       }
     }
   }

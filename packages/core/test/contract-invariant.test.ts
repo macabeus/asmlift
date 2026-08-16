@@ -9,8 +9,9 @@
 // future frontend becomes a build failure.
 //
 // It is oracle-free (no reference compiler): it never asserts the output is *correct*, only that an
-// unmodelled construct fails loud, and that a DEAD unmodelled op is harmless (so the guard is
-// precise, not a blunt "throw on anything unfamiliar"). Fully offline.
+// unmodelled construct fails loud — whether or not its destination is read — and that the same
+// function WITHOUT that instruction lifts clean, so the guard is precise rather than a blunt
+// "throw on anything unfamiliar". Fully offline.
 //
 // SCOPE — read this before trusting the name. This test makes the DEFAULT/unmodelled-mnemonic path
 // structural: a bare silent drop in ANY frontend's decode default becomes a build failure (Layers
@@ -28,7 +29,8 @@
 //   1. Registry completeness — every registered frontend MUST have a probe whose target routes to
 //      THAT frontend, so adding an ISA without proving it fails loud breaks the build.
 //   2. Per-frontend live/dead behavioral probes — the canonical shape of the contract, with a raw-IR
-//      check that the DEAD case genuinely emitted an opaque (present-then-DCE'd, not never-emitted).
+//      check that the DEAD case genuinely emitted an opaque (emitted-then-declined, not
+//      never-emitted), plus a control proving the decline is caused by that instruction alone.
 //   3. Negative-space corpus — real, plausible, UNMODELLED opcodes per ISA (the near-miss class the
 //      audits actually found), each with a live destination, all must fail loud.
 //   4. Seeded garbage fuzz — `zz`-prefixed random mnemonics (guaranteed unmodelled in every ISA).
@@ -82,8 +84,12 @@ interface Probe {
   live: (m: string) => string;
   /** a DEAD case: `m` writes a throwaway reg; the return is an ordinary modelled value. */
   dead: string;
-  /** the exact source the DEAD case must still produce (proving the opaque was harmless). */
-  deadSource: string;
+  /** `dead` with the unmodelled instruction DELETED, and the exact source it must produce. Together
+   *  they keep the "guard is precise" claim testable now that the dead case declines too: the same
+   *  function minus that one instruction lifts perfectly, so the decline is attributable to the
+   *  unmodelled instruction and to nothing else about the shape. */
+  deadWithoutOp: string;
+  deadWithoutOpSource: string;
   /** real, plausible, UNMODELLED opcodes in this ISA, each with a register destination. */
   negativeSpace: string[];
   /** ISA-specific constructs OUTSIDE the shared default path (calls, indirect jumps, bad operand
@@ -99,7 +105,8 @@ const PROBES: Record<string, Probe> = {
     wrap: (sym, body) => `${sym}:\n${body}`,
     live: (m) => `\t${m}\tr0, r0\n\tbx\tlr\n`,
     dead: `\tclz\tr1, r0\n\tadd\tr0, r0, #1\n\tbx\tlr\n`,
-    deadSource: 's32 clzdead(s32 a0) {\n    return a0 + 1;\n}\n',
+    deadWithoutOp: `\tadd\tr0, r0, #1\n\tbx\tlr\n`,
+    deadWithoutOpSource: 's32 clzdead(s32 a0) {\n    return a0 + 1;\n}\n',
     negativeSpace: ['clz', 'rev', 'rev16', 'revsh', 'sxtb', 'sxth', 'uxtb', 'uxth', 'adc', 'sbc'],
     // A modelled `rsb` with a non-#0 immediate must not silently leave rD unwritten.
     mustFailLoud: [
@@ -116,7 +123,8 @@ const PROBES: Record<string, Probe> = {
     wrap: (_sym, body) => body,
     live: (m) => `0:\t${m}\tv0,a0\n4:\tjr\tra\n8:\tnop\n`,
     dead: `0:\tclz\tt0,a0\n4:\tjr\tra\n8:\taddiu\tv0,a0,1\n`,
-    deadSource: 's32 clzdead(s32 a0) {\n    return a0 + 1;\n}\n',
+    deadWithoutOp: `0:\tjr\tra\n4:\taddiu\tv0,a0,1\n`,
+    deadWithoutOpSource: 's32 clzdead(s32 a0) {\n    return a0 + 1;\n}\n',
     negativeSpace: ['clz', 'clo', 'seb', 'seh', 'rotr', 'wsbh'],
     // A call's return register is an IMPLICIT destination the operand guard cannot see; an
     // indirect `jr` is not a plain return. All must fail loud, not vanish.
@@ -136,7 +144,8 @@ const PROBES: Record<string, Probe> = {
     // LIVE one lifts to `mulh`/`mulhu`, which have no C spelling → still loud-fails at the
     // structurer boundary.
     dead: `0:\trlwnm\tr5,r3,r4,0,31\n4:\tadd\tr3,r3,r4\n8:\tblr\n`,
-    deadSource: 's32 clzdead(s32 a0, s32 a1) {\n    return a0 + a1;\n}\n',
+    deadWithoutOp: `0:\tadd\tr3,r3,r4\n4:\tblr\n`,
+    deadWithoutOpSource: 's32 clzdead(s32 a0, s32 a1) {\n    return a0 + a1;\n}\n',
     // `divw`/`divwu` are MODELLED (→ sdiv/udiv), so they are not in this corpus.
     negativeSpace: ['mulhw', 'mulhwu', 'rlwnm'],
     // Shapes the operand guard cannot see: an indirect/CTR branch (no data dest) and an
@@ -178,14 +187,25 @@ describe('CONTRACT-AS-INVARIANT: live unmodelled op fails loud, dead one is harm
       expectLoud(() => decodes(p, 'liveprobe', p.live('clz')).source);
     });
 
-    test(`${id}: a DEAD unmodelled op does NOT fail loud (guard is precise)`, () => {
+    test(`${id}: a DEAD unmodelled op ALSO fails loud (liveness is not evidence)`, () => {
       // The raw IR must actually CONTAIN an `opaque` — proving the frontend emitted the honest
-      // "unknown" and it was then DCE'd, NOT that it silently dropped the op (a blunt dropper would
-      // produce the same clean source, so the source alone can't distinguish the two).
+      // "unknown" rather than silently dropping the instruction at decode. Both bugs end in a
+      // missing instruction, and only this distinguishes them.
       const raw = print(frontendFor(p.target).lift('clzdead', p.wrap('clzdead', p.dead), p.target, {}));
       expect(raw).toContain('opaque');
-      // And the final source is still the correct, clean result (the opaque was harmless).
-      expect(decodes(p, 'clzdead', p.dead).source).toBe(p.deadSource);
+      // This USED to assert the opposite — that the dead case lifts clean — on the theory that an
+      // unmodelled instruction whose destination nobody reads did nothing. It reads only its own
+      // register destination out of an instruction asmlift by definition does not understand, and
+      // `STR r0, [r1]` (a store, unrecognised because the frontend matches lowercase only) is the
+      // counterexample that was live on main: dead destination, memory write, silently discarded.
+      expectLoud(() => decodes(p, 'clzdead', p.dead).source);
+    });
+
+    test(`${id}: the SAME function without that instruction lifts clean (the decline is precise)`, () => {
+      // The other half of the old assertion, and the half worth keeping: the decline must be
+      // attributable to the unmodelled instruction, not to anything else about the shape. Without
+      // this, "throw on everything" would pass the test above.
+      expect(decodes(p, 'clzdead', p.deadWithoutOp).source).toBe(p.deadWithoutOpSource);
     });
   }
 });

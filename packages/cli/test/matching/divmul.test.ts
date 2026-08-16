@@ -141,16 +141,36 @@ describe('IDIOM-ENVELOPE widening mechanism', () => {
 });
 
 // The hwDivide capability is genuinely load-bearing (not dormant scaffolding): a `div` decoded
-// against a target that declares NO hardware divider degrades to a loud `opaque` and the boundary
-// contract fires, rather than silently modelling a divide the hardware cannot do. This exercises
-// the gate's false branch — the real consumer that earns `capabilities.hwDivide`.
-test('hwDivide gate: a hardware `div` on a no-hw-divide target fails LOUD (opaque), not silent', () => {
+// against a target that declares NO hardware divider fails LOUD rather than silently modelling a
+// divide the hardware cannot do. This exercises the gate's false branch — the real consumer that
+// earns `capabilities.hwDivide`.
+//
+// WHERE it fails moved, and the reason is worth recording. IDO spells the divide `div zero,a0,v0` —
+// objdump's trap-checking form, where `zero` is a PLACEHOLDER and the real destinations are the
+// unmodelled `hi`/`lo`. `opaqueDest` used to read that `zero` as "writes hardwired zero ⇒ a genuine
+// no-op" and skip the instruction; the lift then succeeded and the following `mflo` supplied the
+// `opaque` this test used to observe. So the divide itself was being dropped, and the test passed
+// on its neighbour. A hardwired-zero destination is a no-op only for a MODELLED instruction, and
+// nothing modelled reaches `opaqueDest` — so it now refuses at LIFT.
+//
+// Cost of that, stated: a frontend throw degrades the whole function to a stub in annotate mode,
+// where an inline marker would have kept the rest of the recovery. Nothing in the corpus pays it
+// (measured: 0 of 743 benchmark rows change outcome, score, or emitted source), because no real
+// target combines a `div` mnemonic with hwDivide:false — this capability flip is synthetic. The
+// general repair is a zero-result `opaque` ("an unmodelled effect happened here"), which would let
+// every instruction with no modellable destination mark in place instead of stubbing; it has real
+// inhabitants (`swi`, `syscall`, `sync`, `cache`, `teq`, `mtc0`) and is its own change.
+test('hwDivide gate: a hardware `div` on a no-hw-divide target fails LOUD, not silent', () => {
   const { asm } = compileMipsTarget('int div3(int a){ return a / 3; }', 'div3');
   const noHwDiv = { ...MIPS_IDO, capabilities: { ...MIPS_IDO.capabilities, hwDivide: false } };
-  const raw = print(mipsFrontend.lift('div3', asm, noHwDiv, {})); // the lift succeeds…
-  expect(raw).toContain('opaque'); // …but the divide is an honest opaque…
-  expect(raw).not.toContain('sdiv');
-  expect(() => decompile('div3', asm, noHwDiv)).toThrow(); // …and reaching output trips assertResolved.
+  // The divide is refused by name, at the frontend…
+  expect(() => mipsFrontend.lift('div3', asm, noHwDiv, {})).toThrow(/unmodelled effect instruction 'div'/);
+  // …so nothing downstream can model it, and the whole decompile declines.
+  expect(() => decompile('div3', asm, noHwDiv)).toThrow();
+  // The gate's TRUE branch is what the byte-exact div3/div7/udiv3/smod3 cases above cover: with
+  // hwDivide on, the same input recovers and recompiles byte-exact. Without that pair, "fails loud"
+  // could be satisfied by a frontend that refuses the divide unconditionally.
+  expect(print(mipsFrontend.lift('div3', asm, MIPS_IDO, {}))).not.toContain('opaque');
 });
 
 // `sdiv` was widened to variadic (to carry BOTH the 1-operand+imm fold form and the 2-operand
