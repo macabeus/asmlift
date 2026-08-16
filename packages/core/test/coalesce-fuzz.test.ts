@@ -1,30 +1,16 @@
-// The differential fuzz behind coalesce.ts's loop gate — the one gate in that file whose
-// justification is SOUNDNESS rather than codegen quality, and which until now rested on a harness
-// that was run once and never committed.
+// The differential fuzz for coalesce.ts's loop gate — see that file for what the gate claims.
 //
-// The claim: excluding a local mentioned inside a loop is what makes preorder statement order a
-// sufficient approximation of liveness, so `x.last < y.first` really does mean the ranges are
-// disjoint. Two arms check it, and BOTH are needed — the second is what stops the first from being
-// a test that passes because nothing happens.
-//
-//   A. every candidate the pass emits preserves every defined read (no clobber);
-//   B. the same programs with the loop flag suppressed DO clobber, so the generator reaches the
-//      shapes the gate exists for.
-//
-// Arm B suppresses the flag by INPUT rather than by a test-only switch in the pass, so the real
-// predicate and the real rename run in both arms — see the rewrite below.
+// Arm A: no candidate the pass emits changes a defined read. Arm B: the same programs with the loop
+// flag suppressed DO — without which arm A is also what "emitted nothing" looks like.
 import { describe, expect, test } from 'vitest';
 
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
 import { coalesceCandidates } from '../src/l3/coalesce';
 
-// ── the schedule ───────────────────────────────────────────────────────────────────────────────
-// Control flow comes from a pre-drawn list, not from the values: each `if` takes its arm and each
-// loop its trip count from the next draw. Conditions are still EVALUATED (their reads are observed)
-// and their value discarded. That makes the two trees run the same path by construction — so the
-// traces align index for index and every difference is a value difference — and it makes the
-// comparison quantify over schedules the values might never produce, including zero-trip loops.
+// Control flow comes from a pre-drawn list, not from the values, so both trees take the same path by
+// construction: traces align index for index and every difference is a value difference. Conditions
+// are still evaluated — their reads are observed — and their value discarded.
 type Schedule = () => number;
 const schedule = (draws: number[]): Schedule => {
   let at = 0;
@@ -41,11 +27,8 @@ function run(sfn: SFn, sched: Schedule): Val[] {
   const env = new Map<string, Val>();
   const reads: Val[] = [];
 
-  // UNDEF POISONS. An expression over an uninitialized local is as indeterminate as the local
-  // itself, so it must not re-enter the defined world as a concrete number — that is what makes the
-  // carve-out below match the documented case instead of over-reporting. It is not hypothetical:
-  // modelling `b = b + 1` on an undefined `b` as a defined value made this harness call one legal
-  // merge a clobber.
+  // UNDEF POISONS: an expression over an uninitialized local is as indeterminate as the local, so it
+  // must not re-enter the defined world as a number. Without this the harness over-reports.
   const evalExpr = (e: Expr): Val => {
     switch (e.k) {
       case 'var': {
@@ -124,10 +107,9 @@ function compare(orig: SFn, cand: SFn, draws: number[]): 'same' | 'undefined-onl
   return a.some((v, i) => v !== b[i]) ? 'undefined-only' : 'same';
 }
 
-// ── the generator ──────────────────────────────────────────────────────────────────────────────
-// Small on purpose. It emits only what the gate reasons about: constant-fed locals (so merges are
-// legal at all), reads, and the three positions where a later-indexed statement can run before an
-// earlier one — a loop body, and a `for`'s init and inc.
+// The generator emits only what the gate reasons about: constant-fed locals, reads, and the three
+// positions where a later-indexed statement can run before an earlier one — a loop body, and a
+// `for`'s init and inc.
 const LOCALS = ['a', 'b', 'c'];
 
 function mulberry32(seed: number): () => number {
@@ -143,16 +125,15 @@ function mulberry32(seed: number): () => number {
 function generate(seed: number): SFn {
   const rnd = mulberry32(seed);
   const pick = <X>(xs: X[]): X => xs[Math.floor(rnd() * xs.length)];
-  // A local is chosen with a DRIFT towards the end of the program, so ranges are often disjoint.
-  // Uniform choice makes almost every pair overlap in preorder, so the pass emits almost nothing and
-  // the sweep runs thousands of programs to test a handful of merges.
+  // Locals are chosen with a DRIFT towards the end of the program, so ranges are often disjoint.
+  // Under uniform choice almost every pair overlaps in preorder and the sweep runs thousands of
+  // programs to test a handful of merges.
   let emitted = 0;
   const local = (): string =>
     rnd() < 0.8 ? LOCALS[Math.min(LOCALS.length - 1, Math.floor(emitted / 5))] : pick(LOCALS);
   const read = (n: string): Expr => ({ k: 'var', name: n });
   const obs = (): Stmt => ({ k: 'exprstmt', value: { k: 'call', fn: 'obs', args: [read(local())] } });
-  // mostly constant-fed, since `constFed` would otherwise reject the pair before the loop gate is
-  // ever consulted and the whole fuzz would go vacuous
+  // mostly constant-fed, or `constFed` rejects the pair before the loop gate is ever consulted
   const value = (): Expr =>
     rnd() < 0.85
       ? { k: 'const', value: Math.floor(rnd() * 100) }
@@ -189,10 +170,9 @@ function generate(seed: number): SFn {
   };
 }
 
-// ── arm B's ablation, as an input rewrite ──────────────────────────────────────────────────────
-// A loop becomes an `if` carrying the same condition, body and child order, tagged so it can be
-// turned back after the pass has run. `stmtChildren` and `stmtExprs` then agree node for node with
-// the loop's, so `spans` produces an identical map except for `inLoop` — the gate ablated, and
+// Arm B's ablation, as an input rewrite: a loop becomes an `if` over the same children, tagged so it
+// can be turned back after the pass has run. `stmtChildren`/`stmtExprs` then agree node for node with
+// the loop's, so `spans` produces an identical map except for `inLoop` — that gate ablated and
 // nothing else. `for`'s children are `[init, inc, ...body]`, so the `if` lists them in that order.
 const MARK = { while: '__was_while__', for: '__was_for__' } as const;
 const tag = (fn: string, cond: Expr): Expr => ({ k: 'call', fn, args: [cond] });
@@ -266,9 +246,7 @@ describe('the loop gate, differentially', () => {
   const ablated = sweep(withoutLoopGate);
 
   test('the sweep reaches mergeable programs at all', () => {
-    // Without this, "no clobbers" would also be the result of emitting nothing. 2000 programs
-    // currently offer 176 merges; the floor is well under that so ordinary generator tuning does
-    // not have to move it.
+    // A floor well under what the generator currently offers, so tuning it does not have to move.
     expect(kept.candidates).toBeGreaterThan(80);
   });
 
@@ -277,17 +255,13 @@ describe('the loop gate, differentially', () => {
   });
 
   test('suppressing the loop flag DOES clobber — the gate is load-bearing', () => {
-    // The gate's whole justification, and the only thing that stops the test above from passing
-    // for the wrong reason. If this goes green, either the generator stopped reaching loops or the
-    // pass stopped consulting `inLoop`.
+    // Green here means the generator stopped reaching loops, or the pass stopped consulting `inLoop`.
     expect(ablated.clobbered.length).toBeGreaterThan(0);
   });
 
   test('the accepted-not-fixed case is real, and is what the carve-out covers', () => {
-    // A survivor written on only SOME paths absorbs the other's value where the original read an
-    // uninitialized local. coalesce.ts documents this as accepted; the count says it is not
-    // hypothetical (8 of 176 today), so the carve-out above is load-bearing rather than an unused
-    // escape hatch that a later reader could delete as dead.
+    // coalesce.ts accepts this class; asserting it stays reachable stops the carve-out that excuses
+    // it from quietly becoming dead code.
     expect(kept.undefinedOnly).toBeGreaterThan(0);
   });
 });

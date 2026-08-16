@@ -97,29 +97,24 @@ function rename(body: Stmt[], from: string, to: string): Stmt[] {
  *     statement's own index with the ENCLOSING loop flag. That is safe only because a condition
  *     cannot WRITE, so it can extend a read range but never reorder a definition — an earlier
  *     version of this comment claimed the gate covered conditions too, which it does not.
- *     `test/coalesce-fuzz.test.ts` is the differential check, and it runs BOTH arms: over its
- *     generated programs no candidate this pass emits changes a defined read, and the same programs
- *     with the loop flag suppressed DO — so the first arm is not green because nothing happened.
- *   - both must be CONSTANT-fed. A codegen heuristic, not soundness, and that is now measured
- *     rather than asserted: deleting this gate and re-running that fuzz stays clobber-free while
- *     offering about a third more merges. A load-fed local is one the compiler had a reason to keep
- *     where it was, and taking it anyway scored worse. The gate is also what currently BOUNDS
- *     candidate growth: merges are `L(L-1)/2` in the local count, each a distinct source and so a
- *     distinct compile, and nothing else caps that. Corpus-wide today: 2 rows, 13 kept sources.
+ *     `test/coalesce-fuzz.test.ts` is the differential check; delete this gate and it fails.
+ *   - both must be CONSTANT-fed. A codegen heuristic, not soundness: deleting it stays clobber-free
+ *     under that fuzz and simply scored worse, because a load-fed local is one the compiler had a
+ *     reason to keep where it was. It is also what currently BOUNDS candidate growth: merges are
+ *     `L(L-1)/2` in the local count, each a distinct source and so a distinct compile, and nothing
+ *     else caps that. Corpus-wide today: 2 rows, 13 kept sources.
  *   - the survivor's first mention must be an ASSIGN THAT DOES NOT ALSO READ IT. `b = g(b)` is a
  *     write and a read in one statement; counting it as a pure write let `g` receive the absorbed
- *     value. The two gates are NOT independent — `constFed` also rejects a self-reading assign, so
- *     it masks this one — and deleting both is what isolates this one's job. Doing that produces no
- *     clobber at all: a survivor whose first mention is a READ was uninitialized there in the
- *     ORIGINAL too, so what this gate governs is the size of the accepted class below, which grows
- *     16 → 187 candidates over the fuzz's sweep. A discipline, not a soundness gate — and only
- *     because this file treats an uninitialized read as ill-defined rather than wrong.
+ *     value. NOT a soundness gate, though it reads like one, and `constFed` masks it so only
+ *     deleting both shows why: a survivor whose first mention is a READ was uninitialized there in
+ *     the ORIGINAL too, so no clobber appears — what this gate bounds is the size of the accepted
+ *     class below, which it holds down by an order of magnitude.
  *
  *  ACCEPTED, NOT FIXED: a survivor assigned only on SOME paths still absorbs the other's value on
  *  the paths that skip it. The original read an uninitialized local there, so both spellings are
  *  ill-defined rather than one being wrong — but this is a real difference and the differ, not this
- *  gate, is what keeps it from faking a match. The fuzz reaches it (8 of its 176 candidates) and
- *  asserts it stays reachable, so the carve-out that excuses it cannot quietly become dead. */
+ *  gate, is what keeps it from faking a match. The fuzz asserts it stays reachable, so the carve-out
+ *  that excuses it cannot quietly become dead. */
 export function coalesceCandidates(sfn: SFn): { merged: string; sfn: SFn }[] {
   if (sfn.locals.length < 2) {
     return [];
