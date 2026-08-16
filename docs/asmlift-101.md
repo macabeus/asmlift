@@ -402,11 +402,16 @@ packages/core/            @asmlift/core — the pipeline
   src/frontend/           ISA frontends: thumb.ts, mips.ts, ppc.ts + shared disasm/ssa/opaque
   src/ir/                 the IR substrate: types, ops, printer/parser, verifier
   src/pattern/            rewrite-patterns-as-data + the greedy driver
-  src/raise/              L1→L2: recognizers (magicdiv, softdiv, arrays, structs, shortcircuit)
-                          + type recovery (recover.ts)
+  src/raise/              L1→L2: recognizers (magicdiv, divpow2, softdiv, arrays, struct-arrays,
+                          structs, shortcircuit, retsink, gvn) + type recovery (recover.ts)
   src/structure/          L2→L3: loop discovery, switch recovery, SSA destruction, emission
-  src/l3/ + src/backend/  the neutral AST + its readability passes, and the C / C++ / Pascal printers
+                          + hazards.ts — pure checks that decline a loop form instead of
+                          emitting one whose reads would see a clobbered value
+  src/l3/ + src/backend/  the neutral AST + its rewrites (gates.ts holds the admission rules as
+                          data), and the C / C++ / Pascal printers
+  src/contracts.ts        the boundary contracts — the checks that make the levels real
   src/pipeline.ts         decompile() — the one shared stage spine
+  src/rank.ts             candidate enumeration: the type and re-spelling levers the differ judges
   src/trace.ts            decompileTraced() — the same spine, recorded per stage
   test/                   offline suites + corpus/ (real committed disassembly)
 packages/cli/             @asmlift/cli — the user-facing asmlift interface
