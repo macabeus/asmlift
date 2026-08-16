@@ -26,7 +26,10 @@ import { nameAllocator } from './hoist';
 // A HOISTABLE base is a bare `addr` (a global address) or a bare `const` (a numeric pointer
 // address). Both are relocation-invariant leaves whose value the compiler keeps in one register
 // when it indexes them at 2+ sites. Anything else (a local var, a struct-element `p[a0]`, arbitrary
-// arithmetic) is NOT — agbcc may re-derive it.
+// arithmetic) is NOT — agbcc may re-derive it. Admitting the bare `var` that scopebase.ts and
+// argbase.ts take is the obvious consolidation and it is wrong twice over: this pass has no `lead`
+// handling, so a rank-aware `g[0][i]` comes out as `p[0][i]` through a scalar pointer, and it
+// undoes raise/gvn.ts's hoist on exactly the rows a symbol map serves (test/addr-placement.test.ts).
 type HoistableBase = Extract<Expr, { k: 'addr' } | { k: 'const' }>;
 const isHoistableBase = (e: Expr): e is HoistableBase => e.k === 'addr' || e.k === 'const';
 const baseId = (b: HoistableBase): string => (b.k === 'addr' ? `a:${b.name}` : `c:${b.value}`);

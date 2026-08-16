@@ -39,6 +39,9 @@
 // analysis.ts, whose materialize-into-a-local rule covers `const`, `call` and the memory reads, NOT
 // address ops), so the address is re-spelled at each access exactly as the original source did.
 // Hoisting therefore does not create the long live range that hoisting a LOADED value would.
+// That is a promise ANOTHER module keeps, so `test/addr-placement.test.ts` holds it to it: let
+// analysis.ts materialize an address op and the entry hoist becomes a function-top local — the one
+// this pass exists to delete, reintroduced one level up.
 //
 // SCOPE, deliberately narrow: `code: true` symbols (a promoted function pointer, spelled `(u32)Name`
 // rather than `&Name`) are numbered separately from data ones, because the attr is part of what the
@@ -47,11 +50,18 @@
 // THE WIN IS CONTINGENT ON THE SYMBOL MAP, which is worth knowing before relying on it. With a map
 // supplying an array's rank the accesses render as `gSym[0][i]`, a `var` base that
 // `l3/basecse.ts`'s `isHoistableBase` cannot see, so nothing re-creates the local this pass
-// deleted. WITHOUT a map (verified by running the row map-less) the same accesses spell as
-// `addr`, basecse sees the reuse, and it hoists a function-top `p0 = (u16 *)&gBgTilemapBufs` —
-// the same local, one level up. Three modules now answer "is this
-// address a local?" with independent policies (here: never; basecse: when reused 2+ times;
-// l3/scopebase.ts: at the innermost scope), and reconciling them is recorded debt.
+// deleted. WITHOUT one the same accesses spell as `addr`, basecse sees the reuse, and it hoists a
+// function-top `p0 = (u16 *)&gBgTilemapBufs` — the same local, one level up. Both arms are pinned
+// in `test/addr-placement.test.ts`; before that they rested on a run nobody could repeat.
+//
+// FOUR modules now answer "is this address a local?" with independent policies — here: never;
+// basecse: at the function top, when reused 2+ times; l3/scopebase.ts: at the innermost scope
+// holding the uses; l3/argbase.ts: immediately before a call whose arguments share it. Reconciling
+// them is recorded debt, and the same test pins the two places they actively disagree, because a
+// consolidation has to PICK rather than discover them: a `for`'s init (basecse reads it at loop
+// cadence and refuses, scopebase at the enclosing one and hoists) and a global name shadowed by a
+// local (scopebase must refuse — it re-spells the base as `&g` — while argbase may fire, because it
+// keeps the base expression verbatim).
 import { Block, Fn, Op, Value, mkOp, replaceAllUsesWith } from '../ir/core';
 
 /** Ops whose result depends on `attrs` alone — no operands, no memory, no control flow. */
