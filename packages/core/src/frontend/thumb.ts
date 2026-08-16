@@ -2791,8 +2791,9 @@ export function lift(
   // "Non-ABI" means NOT AN ARGUMENT REGISTER, and it has to be tested that way rather than by the
   // shape of the name. A `/^r(\d+)$/` test ranked `r8` at 8 and `r4` at 4 while sending only `sl`
   // and `sb` to 99 — harmless while nothing else occupied ranks >= 4, and a positional miscompile
-  // the moment incoming stack arguments started ranking there. `sa3:sub_80B6B3C` takes 10 arguments
-  // (its caller stores six words at [sp,#0]..[sp,#0x14] plus r0-r3) and saves r8 in its prologue;
+  // the moment incoming stack arguments started ranking there. `sub_80B6B3C` in sa3's
+  // `asm/code_x.s` — still undecompiled, so not a benchmark row — takes 10 arguments (its caller
+  // stores six words at [sp,#0]..[sp,#0x14] plus r0-r3) and saves r8 in its prologue;
   // the `r8` live-in and `@sarg8` tied at 8, the sort is stable, the prologue reads r8 first — so
   // ABI argument 8 was emitted as `a9` and every parameter after it was off by one.
   //

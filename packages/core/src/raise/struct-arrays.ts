@@ -87,7 +87,8 @@ function withPadding(dataFields: StructField[], stride: number): StructField[] {
  *  rematerializes the same element address (several `add(base, i*stride)` ops for one logical
  *  array), and recovering them one-by-one would let the first claim the base and force its
  *  twins to decline — a mixed spelling that is worse than either pure form (found live on
- *  pokeemerald:GetGender, whose address is materialized twice). A base whose element pointers
+ *  pokeemerald:GetGenderFromSpeciesAndPersonality, whose address is materialized twice). A base
+ *  whose element pointers
  *  disagree on stride declines entirely: two strides over one base is a reinterpreted view or
  *  a 2D layout, genuinely ambiguous — decline over guess. */
 export function recognizeStructArrays(fn: Fn): number {
