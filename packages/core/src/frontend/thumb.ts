@@ -980,27 +980,37 @@ interface JumpTable {
 //
 // In Thumb-1 the trailing `s` is a DIALECT MARKER, not a modifier: `.syntax divided` spells the
 // flag-setting data-processing instructions without it, `.syntax unified` with it. For a LOW-register
-// destination each pair is one halfword — verified with this project's own assembler, one instruction
+// destination each pair is one halfword — measured with this project's own assembler, one instruction
 // per file, both dialects, encoding read back with objdump:
 //
 //     add/adds 1888   sub/subs 1a88   lsl/lsls 0088   lsr/lsrs 0888   asr/asrs 1088   neg/negs 4248
 //
-// Why it matters: this is the dominant dialect of the input format asmlift advertises. Every
-// pret-style split wraps its `INCLUDE_ASM` bodies in `.syntax unified`, where the non-suffixed
-// spelling is a syntax ERROR — in the Klonoa: Empire of Dreams tree the pre-UAL spelling does not
-// occur at all (`lsls` 5795 against `lsl` 0, `adds` 8883 against `add` 0). Comparing the text alone
+// This is the dominant dialect of the input format asmlift advertises: every pret-style split wraps
+// its `INCLUDE_ASM` bodies in `.syntax unified`, where the non-suffixed spelling is a syntax ERROR,
+// and the split `.s` files carry no `.syntax` directive of their own — so this frontend cannot tell
+// from its input which dialect it is reading, and must accept both. Counted under
+// `asm/nonmatchings` of the Klonoa: Empire of Dreams tree: `lsls` 5795 against `lsl` 0, and `adds`
+// 8883 against `add` 600 — where **every one** of those 600 is an `sp`/high-register/pc form and not
+// one is the three-operand low-register `add rD, rN, rM` this idiom uses. Comparing the text alone
 // therefore declined every jump table in that corpus, on input that is not malformed in any way.
+// (agbcc's own output is the other dialect — 2957 `lsl` in this project's `build-gdwarf/src/*.s` —
+// which is why the benchmark, built from compiler `.s`, never exercised this.)
 //
-// So why LOCAL, and not an entry in LEGACY_MNEMONICS? Because the equivalence is decided by the
-// OPERANDS and that table is keyed by NAME alone. `add` also names two encodings that have no
-// S-form at all — the SP adjust (`add sp, sp, #4` = b001) and the high-register form (`add r8, r0`
-// = 4480) — and `adds sp, sp, #4` / `adds r8, r0` are rejected by the assembler in BOTH dialects.
-// A flat `adds: 'add'` entry would therefore erase a distinction this frontend depends on: it
-// declines `adds sp` LOUDLY, precisely because the SP-adjust encoding sets no flags, so such an
-// instruction can only be hand-written and treating it as ordinary frame bookkeeping would drop a
-// real frame change. That is not hypothetical — the table entry was written, and
-// `decline-guards.test.ts` failed on exactly that case. A name-keyed table cannot express
-// "equivalent when the destination is a low register"; a match that has the operands in hand can.
+// Why LOCAL rather than an entry in LEGACY_MNEMONICS, which is where synonyms belong: normalising
+// the suffix away is safe for every input an ASSEMBLER ACCEPTS — the operands that distinguish `add`
+// from `adds` (the SP adjust `add sp, sp, #4` = b001, the high-register `add r8, r0` = 4480) have no
+// S-form at all, so `adds sp` and `adds r8, r0` are rejected in both dialects and cannot appear in
+// any assemblable file. But this frontend REFUSES those spellings loudly today, and a flat
+// `adds: 'add'` entry silently turns `adds sp` into ordinary frame bookkeeping instead: the entry
+// was written, and `decline-guards.test.ts` failed on exactly that case. So the reason to keep it
+// local is input VALIDATION, not semantics — a name-keyed table cannot say "only when the
+// destination is a low register", and giving up the refusal buys nothing, since no assembler emits
+// what it refuses.
+//
+// Known false declines, all loud, none with a corpus instance: a parenthesised immediate (`#(2)`,
+// which gas assembles), a two-operand `adds rA, rP` (the same add, but `addSrcs` has one source),
+// and `movs pc, rV` (which IS `mov pc, rV` — 4687 — under divided syntax, and which `classifyXfer`
+// accepts, so the frontend is internally inconsistent about it).
 //
 // Inside the dispatch block the distinction is additionally UNOBSERVABLE: the block computes
 // `table_base + index*4`, loads the target and writes `pc`. Nothing between the `lsl` and the
@@ -1116,8 +1126,20 @@ function recoverJumpTable(
   if (ldrV.mnemonic !== 'ldr') {
     return null;
   }
-  const { base } = parseAddr(ldrV.ops[1]); // rV = *(rY)
-  if (base !== idxReg || ldrV.ops[0] !== movpc.ops[1]) {
+  // rV = *(rY), and the address must be EXACTLY rY: no displacement, no register index.
+  //
+  // `parseAddr` surfaces `off` and `regOff` for precisely this reason — its own comment says
+  // "surfaced to the caller so load/store DECLINE loud: silently reading `[rB]` dropped the index
+  // — a silent miscompile" — and this caller used to destructure `base` alone and throw both away.
+  // `ldr rV, [rA, #4]` loads table[i+1]: the recovered switch says `case 0` while the hardware
+  // reaches case 1's block, and the last case reads a word past the table. `ldr rV, [rA, r2]` adds
+  // an unrelated register. Both used to recover an ordinary-looking `switch` — a wrong BLOCK, with
+  // no marker. The header of this function already claimed to refuse an "extra offset"; now it does.
+  //
+  // `#0` is the spelling the corpus actually uses (`ldr r0, [r0, #0x00]`), so the check is on the
+  // VALUE, not on the operand's absence.
+  const { base, off, regOff } = parseAddr(ldrV.ops[1]);
+  if (base !== idxReg || off !== 0 || regOff !== undefined || ldrV.ops[0] !== movpc.ops[1]) {
     return null;
   }
   if (movpc.mnemonic !== 'mov' || movpc.ops[0] !== 'pc') {

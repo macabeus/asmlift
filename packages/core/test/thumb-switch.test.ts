@@ -280,6 +280,25 @@ test('a shift that is not by two still DECLINES, whatever it is spelled like', (
   expect(() => spelled('lsl', '#2.0', 'add')).toThrow(jump);
 });
 
+test('the indexed load must address the scaled index EXACTLY — no displacement, no register', () => {
+  // `ldr rV, [rA, #4]` loads table[i+1]: the recovered switch would say `case 0` while the
+  // hardware reaches case 1's block, and the last case would read a word past the table.
+  // `ldr rV, [rA, r2]` adds an unrelated register to the address. Both used to recover an
+  // ordinary-looking switch. Pre-existing; found by an adversarial probe, and refused despite the
+  // function's header having claimed all along that an "extra offset" declines.
+  const jump = /indirect\/computed jump/;
+  const withLoad = (ld: string, bounds = DIRECT) =>
+    `f:\n${bounds}\tlsl\tr0, r1, #0x2\n\tldr\tr1, .Lp\n\tadd\tr0, r0, r1\n\t${ld}\n\tmov\tpc, r0\n` +
+    `.Lc0:\n\tmov\tr0, #10\n\tbx\tlr\n.Lc1:\n\tmov\tr0, #11\n\tbx\tlr\n.Ldef:\n\tmov\tr0, #99\n\tbx\tlr\n` +
+    `.Lp:\n\t.word\t.Ltab\n${TABLE}`;
+  expect(() => decompile('f', withLoad('ldr\tr0, [r0, #0x4]'), ARMV4T_AGBCC)).toThrow(jump);
+  expect(() => decompile('f', withLoad('ldr\tr0, [r0, r2]'), ARMV4T_AGBCC)).toThrow(jump);
+  // the long-jump bounds form is the same recogniser and must refuse it too
+  expect(() => decompile('f', withLoad('ldr\tr0, [r0, #0x4]', LONGJMP), ARMV4T_AGBCC)).toThrow(jump);
+  // ...and `#0`, which is how the corpus spells it, still recovers
+  expect(decompile('f', withLoad('ldr\tr0, [r0, #0x00]'), ARMV4T_AGBCC).source).toContain('switch (a0)');
+});
+
 test('the two address operands must be DISTINCT registers, not one listed twice', () => {
   // If the pointer load targets the index register, the index is destroyed before it is added:
   // the address is 2*table_base and the scrutinee is dead. Membership alone accepts it, because
