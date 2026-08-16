@@ -15,15 +15,14 @@
 //
 //     if (c) { } else { g[594] = g[659]; } v4 = 1;   →   if (!c) { g[594] = g[659]; } v4 = 1;
 //
-// UNGUARDED BY THE BENCHMARK (2026-08-16 ablation). Returning `sfn` unchanged from
-// `mergeCommonTails` and running `pnpm bench run` moves NO row. The pass does fire — on
-// kleod:UpdateHUDCounterDisplay and sa3:sub_803213C — but changes the score of neither, so a
-// regression here surfaces in this module's unit tests or nowhere. Do not read the two inhabitants
-// as coverage: they are why the ablation is not vacuous, not evidence the merge is right.
+// THE BENCHMARK DOES NOT GUARD THIS PASS. It fires on two of its 743 rows and both match with the
+// merge and without it, so no score moves if this file breaks — and none moves if the pipeline
+// simply stops calling it. `test/tailmerge.test.ts` covers that gap explicitly, end to end, on one
+// of those two functions; the rest of that file calls this pass directly and cannot see an unwiring.
 //
-// Placement is still not a matter of taste: peeling the same statements ABOVE the `if` is a THIRD
-// option, unsound for its own reason (it crosses the condition as well as both arms). The soundness
-// argument above covers only below-vs-in-arms.
+// Placement is not a matter of taste: peeling the same statements ABOVE the `if` is a THIRD option,
+// unsound for its own reason (it crosses the condition as well as both arms). The soundness argument
+// above covers only below-vs-in-arms.
 //
 // KNOWN INTERACTIONS, both byte-level rather than soundness. This pass is unconditional like
 // `dce.ts` and `basecse.ts` rather than a differ-refereed lever, and the argument those files each

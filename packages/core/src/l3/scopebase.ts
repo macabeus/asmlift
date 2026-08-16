@@ -1,9 +1,8 @@
 // L3 re-spelling lever: hoist a reused global base into a pointer local at the INNERMOST scope
 // that contains all of its uses.
 //
-// The lever earns its place: `return null` from `hoistScopedBases` costs
-// kleod:UpdateHUDCounterDisplay its match (→ nonmatch/14) and moves sa3:sa2__sub_8083504 82→85
-// (2026-08-16 ablation).
+// The lever earns its place: returning `null` from `hoistScopedBases` costs
+// kleod:UpdateHUDCounterDisplay its match, so the benchmark's zero-lost gate guards this file.
 //
 // `l3/basecse.ts` already hoists a reused leaf base — but always to the FUNCTION TOP, and only for
 // an `addr`/`const` base. Both limits are load-bearing here, and each costs a real row:

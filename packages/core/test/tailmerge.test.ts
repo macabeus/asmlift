@@ -4,12 +4,18 @@
 // Both arms execute it LAST on their own path, so moving it below the `if` needs no liveness or
 // dominance analysis — which is why the BELOW direction is the one that is unconditionally sound,
 // and (measured) also the one that matches.
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
 import { eliminateDeadStores } from '../src/l3/dce';
 import { mergeCommonTails } from '../src/l3/tailmerge';
+import { decompile } from '../src/pipeline';
+import { ARMV4T_AGBCC } from '../src/target';
+
+const read = (f: string) => readFileSync(join(import.meta.dirname, 'corpus', f), 'utf8');
 
 const asg = (name: string, v: number): Stmt => ({ k: 'assign', name, value: { k: 'const', value: v } });
 const call = (fn: string): Stmt => ({ k: 'exprstmt', value: { k: 'call', fn, args: [] } });
@@ -185,5 +191,29 @@ describe('edge shapes', () => {
     const s = out.body[0] as Extract<Stmt, { k: 'switch' }>;
     expect(kinds(s.cases[0].body)).toEqual(['if', 'assign:v']);
     expect(kinds(s.default!)).toEqual(['if', 'assign:w']);
+  });
+});
+
+describe('the pass is WIRED, on a real function that exercises it', () => {
+  // Every test above calls `mergeCommonTails` directly, so all of them stay green if the pipeline
+  // stops calling it. That gap is not covered elsewhere: the pass changes no benchmark score — it
+  // fires on two of 743 rows and both match either way — so unwiring it is invisible there too.
+  //
+  // `corpus/agbcc-tailmerge.s` is sa3:sub_803213C, one of those two, as real agbcc output so no
+  // toolchain is needed. It has an `if` nested in the else-arm of another, and both arms of the
+  // INNER one end with the same `v1 = …` computation; the pass moves it below that inner `if`.
+  const source = decompile('sub_803213C', read('agbcc-tailmerge.s'), ARMV4T_AGBCC, { onGap: 'annotate' }).source;
+  const depth = (l: string) => l.length - l.trimStart().length;
+  const writes = source
+    .split('\n')
+    .filter((l) => /^\s*v1 = /.test(l))
+    .map(depth);
+
+  test("the inner arms' common tail is emitted once, below their `if`", () => {
+    // Indentation is the structural signal, and it carries the count too. Both writes sit at
+    // outer-ARM depth: one is the outer then-arm's own, the other is the merged inner tail.
+    // Ablate `mergeCommonTails` to the identity and this reads [8, 12, 12] — the inner write back
+    // inside each arm, one level deeper and twice over.
+    expect(writes).toEqual([8, 8]);
   });
 });

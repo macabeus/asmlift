@@ -82,10 +82,9 @@ function rename(body: Stmt[], from: string, to: string): Stmt[] {
  *
  *  Which pair a register allocator coalesced is not derivable from the L3 tree, and first-fit gets
  *  it wrong. Run kleod:UpdateHUDCounterDisplay's published repro script (results.json carries it)
- *  and read the candidate table: in the `signed` family the two legal merges score 53 and 25
- *  against a no-merge baseline of 28 — one merge is worse than not merging at all — and declaration
- *  order picks the 53. Emitting merges at all is what decides that row: `signed/defsite/scopebase`
- *  scores 29 and its merged form matches. `rank.ts` already has the idiom for exactly this —
+ *  and read the candidate table: of its two legal merges, one scores WORSE than not merging at all
+ *  and declaration order is the one that picks it. Emitting no merges at all costs that row its
+ *  match, which is what guards this file. `rank.ts` already has the idiom for exactly this —
  *  `/regcopy`'s "the tail choice is allocator-ambiguous, so both are ranked" — so every candidate is
  *  emitted and the differ referees.
  *

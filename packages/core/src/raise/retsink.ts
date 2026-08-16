@@ -71,8 +71,8 @@ export function sinkReturns(fn: Fn): boolean {
     //       blocks (≥2 `br` preds). `return a || b` (synthetic:lor:agbcc) also ends up as a
     //       `cond_br` on a `logic_or`, but it is a value-merge: one edge runs from the head STRAIGHT
     //       into the merge, so the merge has a single `br` pred. Sinking it replaces the merge
-    //       variable that byte-matches: dropping the `brPreds.length >= 2` half of this gate takes
-    //       that row from MATCH to nonmatch/4 (2026-08-16 ablation). A two-armed diamond is what
+    //       variable that byte-matches: dropping the `brPreds.length >= 2` half of this gate costs
+    //       that row its match. A two-armed diamond is what
     //       distinguishes `if (a && b) return X; return Y;` from every value-merge.
     //
     // A simple single-condition select is excluded by both arms of the gate for the same reason:

@@ -1,19 +1,18 @@
-// Comments in `@asmlift/core` justify mechanisms by citing a benchmark row — "measured on
-// kleod:UpdateHUDCounterDisplay". The citation is the reader's only route from a claim back to the
-// evidence, and nothing checked that the route still led anywhere: one cited symbol had been
-// truncated to a name no row carries, and another named a function that is not a row at all.
+// Comments in `@asmlift/core` state which benchmark row guards a mechanism — "removing this gate
+// costs kleod:UpdateFadeEffect its match". Since `benchmark.yml` runs `bench regression`, that is an
+// operational claim and not a note: the named row is what makes CI fail if the mechanism breaks. Its
+// precondition is that the row still exists, and a row's symbol changes whenever a manifest does.
+// This asserts the precondition.
 //
-// THE RULE this enforces: the `project:sym` spelling is reserved for BENCHMARK ROWS. A row can be
-// re-run (`pnpm bench run --tier real --only <sym>`), so the spelling is a promise that the reader
-// can reach the evidence by a documented command. Anything else — a function in a project checkout,
-// a symbol from a dogfooding round — is real evidence too, but it is NOT reachable that way, so it
-// is written in prose ("`sub_80B6B3C` in sa3's `asm/code_x.s`") and names where to look instead.
+// THE RULE: the `project:sym` spelling is reserved for BENCHMARK ROWS, because it promises the
+// reader can reach the evidence with `pnpm bench run --tier real --only <sym>`. A function in a
+// project checkout or a dogfooding find is real evidence too but is NOT reachable that way, so it is
+// written in prose naming where to look — "`sub_80B6B3C` in sa3's `asm/code_x.s`".
 //
-// What this CANNOT check is the number attached to the citation: results.json records each row's
-// final outcome, not what it scored under an ablation. That gap is real — it is how
-// `l3/tailmerge.ts` came to cite "60 → 33 (visible in the committed results.json)" for a row that
-// had since reached MATCH. Existence is the part a test can hold, and it is the part that rots
-// first, because a row's symbol changes when a manifest does.
+// What this CANNOT check is whether the row still EXERCISES the mechanism: results.json records a
+// row's final outcome, not what it would score with the mechanism disabled. A row can keep matching
+// while ceasing to depend on the code that cites it. Ablation is the only way to see that, and it is
+// too slow to gate per-PR.
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -180,8 +179,9 @@ describe('the checker itself', () => {
     expect(citationsIn('const m = { synthetic: countpos };', PROJECTS)).toEqual([]);
   });
 
-  it('rejects a symbol no row carries — the truncation this test exists for', () => {
-    // `pokeemerald:GetGender` was the real defect: the row is GetGenderFromSpeciesAndPersonality.
+  it('rejects a truncated symbol, not just an unknown one', () => {
+    // A prefix of a real row's symbol is the near-miss worth pinning: `bench run --only` takes a
+    // SUBSTRING, so a truncated citation still runs something and reads as though it resolved.
     expect(CITABLE.has('pokeemerald:GetGender')).toBe(false);
     expect(CITABLE.has('pokeemerald:GetGenderFromSpeciesAndPersonality')).toBe(true);
   });

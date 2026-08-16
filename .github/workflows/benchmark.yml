@@ -131,6 +131,12 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # The byte-level regression gate. It needs the same toolchains the benchmark does, which is
+      # why it runs here and not in ci.yml — and why it must run BEFORE the benchmark: a lost match
+      # should fail the workflow rather than be published as a moved number.
+      - name: Matching suite (byte-exact guards)
+        run: pnpm test:matching
+
       - name: Run the benchmark (synthetic + real tiers)
         run: pnpm bench run
 
@@ -139,6 +145,13 @@ jobs:
 
       - name: Merge tier results + publish into apps/web
         run: pnpm bench merge
+
+      # A lost match must FAIL rather than be published as the new number. `stale-check` below only
+      # refuses on shrunken coverage or dirty provenance, so without this a match→non-match flip is
+      # committed as a routine refresh. Runs after `merge`, which is what it compares against — run
+      # before it, and it compares the committed results.json with itself and always passes.
+      - name: Zero-lost-match gate
+        run: pnpm bench regression
 
       - name: Check whether results changed (fails if coverage shrank)
         id: stale
