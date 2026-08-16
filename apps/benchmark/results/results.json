@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generatedAt": "2026-08-16T01:33:49.302Z",
+    "generatedAt": "2026-08-16T12:12:57.324Z",
     "toolchains": [
       "ido7.1",
       "agbcc",
@@ -14,7 +14,7 @@
       "real": 240
     },
     "asmlift": {
-      "commit": "8c3d37f0e706c4e20538780250ef0c091abd3b2f",
+      "commit": "c4a357a16e8fa7a4854f876dae8fed8a057b1b25",
       "dirty": false
     },
     "m2c": {
@@ -3497,11 +3497,11 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-MJV6N9/c.c:1077: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-6qfmHR/c.c:1077: invalid operands to binary <<"
           },
           {
             "label": "unsigned/scopebase/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-9MhTwW/c.c:1078: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-0JWPTW/c.c:1078: invalid operands to binary <<"
           }
         ],
         "symbolsUsed": [
@@ -4442,7 +4442,7 @@
         "droppedCandidates": [
           {
             "label": "unsigned",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-aXeuwh/c.c:1076: `gBgDataPtrs' undeclared (first use in this function)"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-d6fAwe/c.c:1076: `gBgDataPtrs' undeclared (first use in this function)"
           }
         ],
         "symbolsUsed": [],
@@ -5515,11 +5515,11 @@
         "droppedCandidates": [
           {
             "label": "unsigned",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-AmjsXx/c.c:1077: too many arguments to function `thunk_sub_080002A0'"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-RWUcLY/c.c:1077: too many arguments to function `thunk_sub_080002A0'"
           },
           {
             "label": "unsigned/reread-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-odrS0A/c.c:1075: too many arguments to function `thunk_sub_080002A0'"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-SmRph2/c.c:1075: too many arguments to function `thunk_sub_080002A0'"
           }
         ],
         "symbolsUsed": [],
@@ -6308,83 +6308,83 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Vwkz2u/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-IvBRLF/c.c:1085: incompatible types in assignment"
           },
           {
             "label": "unsigned/coalesce-v2-v3/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Jlnl6u/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-3aLlS8/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "unsigned/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-zqN4Zf/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-qNb3tL/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "unsigned/defsite/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-CN9LGM/c.c:1086: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-RXSI7R/c.c:1086: incompatible types in assignment"
           },
           {
             "label": "unsigned/defsite/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-qMGIXY/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-zNwSUc/c.c:1085: incompatible types in assignment"
           },
           {
             "label": "unsigned/reread-globals/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-a7kOf7/c.c:1083: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-0djc86/c.c:1083: invalid operands to binary <<"
           },
           {
             "label": "unsigned/reread-globals/coalesce-v0-v1/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-mxSOj2/c.c:1082: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-sllu68/c.c:1082: invalid operands to binary <<"
           },
           {
             "label": "unsigned/reread-globals/coalesce-v0-v2/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-OcelTn/c.c:1082: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-zNuJMM/c.c:1082: invalid operands to binary <<"
           },
           {
             "label": "unsigned/defsite/reread-globals/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-MfDPjD/c.c:1084: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-F42RfZ/c.c:1084: invalid operands to binary <<"
           },
           {
             "label": "unsigned/defsite/reread-globals/coalesce-v0-v2/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-oAtmWp/c.c:1083: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-SnvN0E/c.c:1083: invalid operands to binary <<"
           },
           {
             "label": "signed/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-tzwI06/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-kZGXce/c.c:1085: incompatible types in assignment"
           },
           {
             "label": "signed/coalesce-v2-v3/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-4kGQaj/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-pFTx3S/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "signed/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-RcLSTO/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-nKMeeO/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "signed/defsite/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-SFDu2i/c.c:1086: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-lEBDrX/c.c:1086: incompatible types in assignment"
           },
           {
             "label": "signed/defsite/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-DBPWCg/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-qf6eGN/c.c:1085: incompatible types in assignment"
           },
           {
             "label": "signed/reread-globals/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-ulqsRv/c.c:1083: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-filgU8/c.c:1083: invalid operands to binary <<"
           },
           {
             "label": "signed/reread-globals/coalesce-v0-v1/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-R2eXsX/c.c:1082: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-PefXsX/c.c:1082: invalid operands to binary <<"
           },
           {
             "label": "signed/reread-globals/coalesce-v0-v2/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-PTPqmw/c.c:1082: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-FBDDSM/c.c:1082: invalid operands to binary <<"
           },
           {
             "label": "signed/defsite/reread-globals/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-oLE2S2/c.c:1084: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-SbAsQ4/c.c:1084: invalid operands to binary <<"
           },
           {
             "label": "signed/defsite/reread-globals/coalesce-v0-v2/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-bPhwZM/c.c:1083: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-WYZmWy/c.c:1083: invalid operands to binary <<"
           }
         ],
         "symbolsUsed": [
@@ -6489,11 +6489,11 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-XGBLGt/c.c:1501: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-knnXy5/c.c:1501: incompatible types in assignment"
           },
           {
             "label": "unsigned/reread-globals/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Y8vuqR/c.c:1489: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-KrJ0Jp/c.c:1489: incompatible types in assignment"
           }
         ],
         "symbolsUsed": [
@@ -35804,28 +35804,23 @@
       "targetAsm": "@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tlladd\n\t.type\t lladd,function\n\t.thumb_func\nlladd:\n\tadd\tr0, r0, r2\n\tadc\tr1, r1, r3\n\tbx\tlr\n.Lfe1:\n\t.size\t lladd,.Lfe1-lladd\n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned",
-        "outcome": "nonmatch",
-        "source": "s32 lladd(u32 a0, u32 a1, u32 a2, u32 a3) {\n    return a0 + a2;\n}\n",
-        "score": 1,
-        "maxScore": 3,
+        "outcome": "declined",
+        "source": "s32 lladd(s32 a0, s32 a1, s32 a2, s32 a3) {\n    ASMLIFT_ERROR(\"unmodelled instruction 'adc'\", a1, a3);\n    return a0 + a2;\n}\n",
+        "score": null,
+        "maxScore": null,
         "compileErrors": null,
-        "breakdown": {
-          "insert": 0,
-          "delete": 1,
-          "replace": 0,
-          "opMismatch": 0,
-          "argMismatch": 0
-        },
         "quality": {
-          "score": 100,
-          "lines": 3,
+          "score": 88,
+          "lines": 4,
           "gotos": 0,
           "casts": 0,
-          "unkGlue": 0,
+          "unkGlue": 1,
           "rawMem": 0,
           "addrDeref": 0
-        }
+        },
+        "errorMarkers": [
+          "structure: unmodelled instruction 'adc'"
+        ]
       },
       "m2c": {
         "decompiler": "m2c",
@@ -35852,7 +35847,7 @@
         }
       },
       "gapSize": {
-        "decompiler": "asmlift",
+        "decompiler": "m2c",
         "score": 1,
         "maxScore": 3,
         "ratio": 0.3333333333333333,
@@ -36057,20 +36052,21 @@
       "asmlift": {
         "decompiler": "asmlift",
         "outcome": "declined",
-        "source": "s32 lladd(s32 a0, s32 a1, s32 a2, s32 a3) {\n    return ASMLIFT_ERROR(\"unmodelled instruction 'adde'\", a0, a2);\n}\n",
+        "source": "s32 lladd(s32 a0, s32 a1, s32 a2, s32 a3) {\n    ASMLIFT_ERROR(\"unmodelled instruction 'addc'\", a1, a3);\n    return ASMLIFT_ERROR(\"unmodelled instruction 'adde'\", a0, a2);\n}\n",
         "score": null,
         "maxScore": null,
         "compileErrors": null,
         "quality": {
-          "score": 88,
-          "lines": 3,
+          "score": 76,
+          "lines": 4,
           "gotos": 0,
           "casts": 0,
-          "unkGlue": 1,
+          "unkGlue": 2,
           "rawMem": 0,
           "addrDeref": 0
         },
         "errorMarkers": [
+          "structure: unmodelled instruction 'addc'",
           "structure: unmodelled instruction 'adde'"
         ]
       },
@@ -36360,20 +36356,23 @@
       "asmlift": {
         "decompiler": "asmlift",
         "outcome": "declined",
-        "source": "s32 llcmp(s32 a0, s32 a1, s32 a2, s32 a3) {\n    return -ASMLIFT_ERROR(\"unmodelled instruction 'subfe'\", ASMLIFT_ERROR(\"unmodelled instruction 'xoris'\", a0), ASMLIFT_ERROR(\"unmodelled instruction 'xoris'\", a0));\n}\n",
+        "source": "s32 llcmp(s32 a0, s32 a1, s32 a2, s32 a3) {\n    ASMLIFT_ERROR(\"unmodelled instruction 'subfe'\", ASMLIFT_ERROR(\"unmodelled instruction 'xoris'\", a2), ASMLIFT_ERROR(\"unmodelled instruction 'xoris'\", a0));\n    return -ASMLIFT_ERROR(\"unmodelled instruction 'subfe'\", ASMLIFT_ERROR(\"unmodelled instruction 'xoris'\", a0), ASMLIFT_ERROR(\"unmodelled instruction 'xoris'\", a0));\n}\n",
         "score": null,
         "maxScore": null,
         "compileErrors": null,
         "quality": {
-          "score": 64,
-          "lines": 3,
+          "score": 50,
+          "lines": 4,
           "gotos": 0,
           "casts": 0,
-          "unkGlue": 3,
+          "unkGlue": 6,
           "rawMem": 0,
           "addrDeref": 0
         },
         "errorMarkers": [
+          "structure: unmodelled instruction 'subfe'",
+          "structure: unmodelled instruction 'xoris'",
+          "structure: unmodelled instruction 'xoris'",
           "structure: unmodelled instruction 'subfe'",
           "structure: unmodelled instruction 'xoris'",
           "structure: unmodelled instruction 'xoris'"
@@ -37021,28 +37020,23 @@
       "targetAsm": "@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tllsub\n\t.type\t llsub,function\n\t.thumb_func\nllsub:\n\tsub\tr0, r0, r2\n\tsbc\tr1, r1, r3\n\tbx\tlr\n.Lfe1:\n\t.size\t llsub,.Lfe1-llsub\n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned",
-        "outcome": "nonmatch",
-        "source": "s32 llsub(u32 a0, u32 a1, u32 a2, u32 a3) {\n    return a0 - a2;\n}\n",
-        "score": 1,
-        "maxScore": 3,
+        "outcome": "declined",
+        "source": "s32 llsub(s32 a0, s32 a1, s32 a2, s32 a3) {\n    ASMLIFT_ERROR(\"unmodelled instruction 'sbc'\", a1, a3);\n    return a0 - a2;\n}\n",
+        "score": null,
+        "maxScore": null,
         "compileErrors": null,
-        "breakdown": {
-          "insert": 0,
-          "delete": 1,
-          "replace": 0,
-          "opMismatch": 0,
-          "argMismatch": 0
-        },
         "quality": {
-          "score": 100,
-          "lines": 3,
+          "score": 88,
+          "lines": 4,
           "gotos": 0,
           "casts": 0,
-          "unkGlue": 0,
+          "unkGlue": 1,
           "rawMem": 0,
           "addrDeref": 0
-        }
+        },
+        "errorMarkers": [
+          "structure: unmodelled instruction 'sbc'"
+        ]
       },
       "m2c": {
         "decompiler": "m2c",
@@ -37069,7 +37063,7 @@
         }
       },
       "gapSize": {
-        "decompiler": "asmlift",
+        "decompiler": "m2c",
         "score": 1,
         "maxScore": 3,
         "ratio": 0.3333333333333333,
