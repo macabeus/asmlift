@@ -62,37 +62,23 @@ export const DECLINE_CLASSES: DeclineClass[] = [
   {
     key: 'float',
     label: 'Floating point',
-    // The DOTTED MIPS FPU forms are spelled `<op>.<fmt>` and the alternation is anchored by the
-    // closing quote, so `add\.` required the literal `add.'` and matched nothing — `add.s`,
-    // `mul.d`, `c.lt.s` and `sqrt.s` were all falling through to the generic opaque bucket. A
-    // pre-existing defect, surfaced by declines.test.ts rather than by anyone reading the regex:
-    // every class still existed and the counts were simply in the wrong bucket. `[\w.]+` after the
-    // dot covers one-part (`add.s`) and two-part (`c.lt.s`, `cvt.s.w`) formats alike.
+    // The alternation is anchored by the closing quote, so a bare `add\.` would require the literal
+    // `add.'` and match nothing. `[\w.]+` after the dot covers the one-part (`add.s`) and two-part
+    // (`c.lt.s`, `cvt.s.w`) MIPS FPU formats alike.
     pattern:
       /unmodelled (?:effect )?instruction '(mfc1|mtc1|ctc1|cfc1|lwc1|ldc1|swc1|sdc1|(?:add|sub|mul|div|mov|neg|abs|c|cvt|trunc|round|ceil|floor|sqrt)\.[\w.]+|fadd|fsub|fmul|fdiv|fmr|fcmp\w*|frsp|fct\w*|lfs|lfd|stfs|stfd)'/,
   },
-  // BELOW `float`, ABOVE the shape classes — and this is a THREE-way ordering, not a two-way one.
-  //
-  // Below float: this pattern is `unmodelled instruction` with no mnemonic filter, so it subsumes
-  // float's entire list. Placing it first collapses the largest MIPS decline family into the
-  // generic bucket — which this file did briefly, because nothing tested the order.
-  //
-  // Above the shape classes: an `opaque` makes its block impure, and a shape recognizer that
-  // requires a pure block then refuses — loop recovery declines a header holding one with
-  // "unrecovered back-edge …". Both sentences are in the message (pipeline.ts `attributeOpaques`
-  // appends the instruction), and the missing INSTRUCTION MODEL is the cause while the loop shape
-  // is the symptom.
-  //
-  // First-match, so this ordering is what decides which capability the Pareto tells the next round
-  // to build. `declines.test.ts` pins it.
+  // BELOW `float`, ABOVE the shape classes, and both halves matter. This pattern has no mnemonic
+  // filter, so it subsumes float's whole list and would swallow the largest MIPS family. And an
+  // `opaque` makes its block impure, so a shape recognizer refuses and the message names the SHAPE
+  // (pipeline.ts `attributeOpaques` appends the instruction) — the missing instruction model is the
+  // cause, the loop shape the symptom. First-match; `declines.test.ts` pins it.
   {
     key: 'opaque-ops',
     label: 'Other unmodelled instructions (opaque)',
-    // THREE message spellings reach here and all mean the same capability gap: `unmodelled
-    // instruction` (the structurer's gap), and `unmodelled effect instruction` (opaqueDest refusing
-    // one with no degradable destination — a `$zero` write, a `swi`, a trap). `unmodelled
-    // store-class instruction` keeps its own class above. Missing the middle spelling sent every
-    // no-destination refusal to "other".
+    // Two spellings mean this same gap: `unmodelled instruction` (the structurer's) and `unmodelled
+    // effect instruction` (opaqueDest refusing one with no degradable destination — a `$zero` write,
+    // a `swi`, a trap). `unmodelled store-class instruction` keeps its own class above.
     pattern: /unmodelled (?:effect )?instruction|no lowering for op/,
   },
   {

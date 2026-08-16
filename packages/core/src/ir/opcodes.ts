@@ -119,10 +119,9 @@ export const OPCODES = {
   // laddr and skips the audit fails verify loudly instead of rendering `&undefined`.
   laddr: { operands: 0, results: 1, requiredAttrs: ['off', 'width', 'signed'] },
   // --- black-box escape hatch (keeps lifting total) ---
-  // `effects: true` because an instruction asmlift could not model may do ANYTHING — write memory,
-  // trap, touch a system register. Its one modelled effect (a value into `results[0]`) is the part
-  // we can name, not the extent of what it does. So a dead `opaque` is no more reapable than a dead
-  // `call`, and for the same reason: the result being unused says nothing about the rest.
+  // `effects: true`: an instruction asmlift could not model may do anything — write memory, trap,
+  // touch a system register — and `results[0]` is only the part we can name. So a dead `opaque` is
+  // no more reapable than a dead `call`.
   opaque: { operands: 'variadic', results: 1, effects: true },
   // --- terminators ---
   ret: { operands: 'variadic', results: 0, terminator: true, successors: 0 },
@@ -183,15 +182,11 @@ export const EFFECTFUL_OPS: ReadonlySet<string> = new Set(
   (Object.keys(OPCODES) as Opcode[]).filter((k) => (OPCODES[k] as OpSig).effects),
 );
 
-/** Ops that may not be REORDERED across other code. Identical to `EFFECTFUL_OPS`, and kept as its
- *  own name because the call sites ask the reordering question, not the effect question.
- *
- *  It used to be `EFFECTFUL_OPS` plus `opaque`, on the theory that `effects` was overloaded on two
- *  axes — "deletable when dead" and "movable when live" — with `opaque` the one op that separated
- *  them. That split is gone: an unmodelled instruction is unmovable AND unreapable, so one flag
- *  answers both. Derived here rather than re-spelled per consumer, because structure/analysis.ts
- *  and structure/structure.ts each carry their own inline copy of this membership, which is how the
- *  two models drifted apart in the first place. */
+/** Ops that may not be REORDERED across other code. Identical to `EFFECTFUL_OPS` — one flag answers
+ *  both "deletable when dead" and "movable when live" — and kept as its own name because the call
+ *  sites ask the reordering question. Derived here rather than re-spelled per consumer:
+ *  structure/analysis.ts and structure/structure.ts each carry their own inline copy of this
+ *  membership, which is how the two models drifted apart in the first place. */
 export const HOIST_UNSAFE_OPS: ReadonlySet<string> = EFFECTFUL_OPS;
 
 /** May a dead result of this opcode be deleted? Registered, no observable effects, not control

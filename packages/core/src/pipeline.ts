@@ -195,34 +195,27 @@ export function raiseRecovered(fn: Fn, target: TargetDescription, hooks: RaiseHo
   }
 }
 
-/** Run `body`, and if it declines, say so in terms of the unmodelled instructions the function
- *  carries — when it carries any.
+/** Run `body`; if it declines, name the unmodelled instructions the function carries.
  *
- *  An `opaque` does not only degrade its own value; it also makes its block impure, and several
- *  shape recognizers refuse an impure block. Loop recovery is the one that bites: `headerPure`
- *  rejects a header holding an `opaque`, so the loop declines with "unrecovered back-edge …
- *  loop-recovery declined this shape: multi-latch, irreducible …". True, and useless — the shape is
- *  fine, an instruction is missing. Worse, the benchmark's decline classifier keys on that text
- *  (apps/web .../declines.ts, `loop-shapes`), so the round gets filed as a loop-capability gap and
- *  the improvement loop is sent to build the wrong thing. That loop is the entire justification for
- *  preferring a loud decline, so a decline pointing at the wrong capability is a real cost.
+ *  An `opaque` degrades its own value AND makes its block impure, so a shape recognizer refuses:
+ *  `headerPure` rejects a header holding one, and the loop declines with "unrecovered back-edge …".
+ *  True and useless — the shape is fine, an instruction is missing — and the benchmark classifies
+ *  declines by that text, so the round is filed as a loop-capability gap and the improvement loop
+ *  builds the wrong thing.
  *
- *  Only ADDS attribution; it never converts a decline into a success, and never fires when the
- *  function has no unmodelled instruction. Reachable blocks only, matching the effects contract —
- *  an opaque in dead code did not cause the refusal. */
+ *  Only ADDS attribution: never converts a decline into a success, never fires without an
+ *  unmodelled instruction, reachable blocks only (one in dead code did not cause the refusal). */
 function attributeOpaques<T>(fn: Fn, body: () => T): T {
   try {
     return body();
   } catch (e) {
-    // Only a StructureError, and only with an entry block to walk from. Attribution is a nicety;
-    // a crash inside it would replace a DESIGNED loud failure with an incidental one, which
-    // contract-invariant.test.ts rejects by name (`isDesignedLoud`) — so it must not be able to
-    // throw on any input that reached here.
+    // Attribution is a nicety, so it must not be able to throw: a crash here would replace a
+    // DESIGNED loud failure with an incidental one, which contract-invariant.test.ts rejects by name.
     if (!(e instanceof StructureError) || !fn.blocks[0]) {
       throw e;
     }
     const seen = new Set<Block>([fn.blocks[0]]);
-    for (const stack = [fn.blocks[0]]; stack.length; ) {
+    for (const stack = [fn.blocks[0]]; stack.length;) {
       for (const s of successorsOf(stack.pop()!)) {
         if (!seen.has(s)) {
           seen.add(s);
@@ -241,10 +234,8 @@ function attributeOpaques<T>(fn: Fn, body: () => T): T {
     if (!names.size || /unmodelled instruction/.test(e.message)) {
       throw e;
     }
-    // Spelled through `gapReasonFor`, the SAME helper the marker and the effects contract use, so
-    // the benchmark's decline classifier sees its canonical text. A hand-written variant here
-    // ("unmodelled instruction(s) 'mtc1'") does not match the float class's mnemonic-anchored
-    // pattern, and every attributed float decline silently lands in the generic bucket instead.
+    // Through `gapReasonFor`, so the classifier sees its canonical text — a hand-written variant
+    // misses the mnemonic-anchored classes and every attributed decline lands in the generic bucket.
     const list = [...names].sort().map(gapReasonFor).join(', ');
     throw new StructureError(`${e.message} — and the function carries ${list}, which is the more likely cause`);
   }

@@ -1885,23 +1885,15 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
         });
       } else if (EFFECTFUL_OPS.has(op.opcode) && op.results.length && !useSitesOf.has(op.results[0])) {
         // An effectful op whose result nobody reads is still an execution. `store`/`astore` have no
-        // result and were handled above, so what reaches here is `call` and `opaque`.
+        // result and were handled above, so what reaches here is `call` and `opaque` — and an
+        // `opaque` missing from this walk is an instruction the frontend could not model
+        // disappearing with no diagnostic, which is the one thing this project refuses to do.
         //
-        // `opaque` — an instruction the frontend could not model — used to be missing from this
-        // walk, and that was one of the two places it could disappear silently (the other was DCE,
-        // closed by its `effects` flag in ir/opcodes.ts). Measured cost, on real input rather than
-        // a constructed one: two benchmark rows lifted a 64-bit `a + b` to `return a0 + a2;` with
-        // the `adc` carry dropped, scoring 1; and a sweep of 11,109 corpus functions found ten more
-        // emptied outright — `void sqrtf(s32 a0) { return; }` for thirteen float instructions, and
-        // the `__osSetSR`/`__osSetCause` family down to `return;`.
-        //
-        // Keying on EFFECTFUL_OPS rather than naming the two opcodes: the property that decides
-        // this is "has an effect the result does not account for", which is what the flag already
-        // means, and the next op to acquire it needs no edit here. Statement, not expression —
-        // `expr` on the result routes through `lowerDef`, which is already where `opaque` becomes
-        // the gap, so this reuses the SAME degradation a live opaque gets (the `?` sentinel under
-        // `onGap: 'strict'`, an ASMLIFT_ERROR marker under `annotate`) instead of inventing a
-        // second way to be loud.
+        // Keyed on EFFECTFUL_OPS rather than the two opcode names: the deciding property is "has an
+        // effect the result does not account for", which is what the flag already means, so the next
+        // op to acquire it needs no edit here. Statement, not expression — `expr` on the result
+        // routes through `lowerDef`, already where `opaque` becomes the gap, so this reuses the SAME
+        // degradation a live opaque gets rather than inventing a second way to be loud.
         out.push({ k: 'exprstmt', value: expr(op.results[0]) });
       } else if (materialize.has(op) && !absorbedLoads.has(op)) {
         // (an absorbed load's every consumer spells a named bitfield read — emitting its temp

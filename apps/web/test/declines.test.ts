@@ -3,10 +3,10 @@
 // tested it, and reordering one entry silently collapsed the largest MIPS family into the generic
 // bucket — the classes still all existed, the counts just moved. These pin the orderings that
 // actually overlap.
+import type { FunctionResult } from '@asmlift/bench-schema';
 import { describe, expect, test } from 'vitest';
 
 import { DECLINE_CLASSES, declineClassesOf } from '../src/pages/benchmark/lib/declines';
-import type { FunctionResult } from '@asmlift/bench-schema';
 
 /** a declined row carrying exactly these markers */
 const row = (...errorMarkers: string[]) =>
@@ -42,7 +42,7 @@ describe('the instruction cause beats the shape symptom', () => {
     expect(
       classOf(
         "structure: cannot structure 'f': unrecovered back-edge into block #1 (loop-recovery declined " +
-          "this shape: multi-latch, irreducible/overlapping loops, a conditional continue, or an unsafe " +
+          'this shape: multi-latch, irreducible/overlapping loops, a conditional continue, or an unsafe ' +
           "break) — and the function carries unmodelled instruction 'clz', which is the more likely cause",
       ),
     ).toBe('opaque-ops');

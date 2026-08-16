@@ -177,16 +177,13 @@ export function assertEffectsPreserved(fn: Fn, sfn: SFn): void {
       }
     }
   }
-  // DROPPED only, and deliberately not the RE-RUN half: a gap rendered twice is a diagnostic
-  // printed twice, which costs nothing because nothing recompiles it — whereas a call run twice is
-  // an extra execution. Structuring legitimately duplicates a shared arm, so a per-path count here
-  // would fire on correct output.
+  // DROPPED only, not the RE-RUN half: a gap rendered twice is a diagnostic printed twice, which
+  // costs nothing because nothing recompiles it, and structuring legitimately duplicates a shared
+  // arm — so a per-path count here would fire on correct output.
   //
-  // Under `onGap: 'strict'` the gap is the `?` sentinel and structure() has already thrown, so this
-  // only ever bites in ANNOTATE mode — which is exactly where it is needed, because that is the CLI
-  // and benchmark default and the mode with no other backstop. Without it, a future structuring
-  // path that drops a block carrying a dead opaque emits a clean, marker-free, silently wrong
-  // function and the benchmark scores it as a nonmatch rather than a decline.
+  // Bites only in ANNOTATE mode (under `strict` the gap is the `?` sentinel and structure() has
+  // already thrown), which is where it is needed: that is the CLI and benchmark default, and the
+  // only mode with no other backstop against a silently dropped opaque.
   if (irOpaques.size) {
     const emitted = new Set<string>();
     const we = (e: Expr): void => {

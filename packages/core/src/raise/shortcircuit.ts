@@ -320,11 +320,8 @@ export function recognizeBranchShortCircuit(fn: Fn): boolean {
         // see the REFUSALS note: an escaping or reused value becomes a statement hoisted out of the
         // short circuit.
         // HOIST_UNSAFE_OPS includes `opaque`: an instruction asmlift could not model, and moving it
-        // out of the arm that guards it is the reordering this refuses. (This used to read
-        // "HOIST_UNSAFE_OPS, not EFFECTFUL_OPS", on a distinction that no longer exists — `opaque`
-        // is now effectful, and the two sets are equal. The gate is unchanged either way.) Loud
-        // regardless today: a decline under `onGap: 'strict'`, an ASMLIFT_ERROR marker under
-        // `annotate`, the CLI and benchmark default.
+        // out of the arm that guards it is the reordering this refuses. Loud either way today — a
+        // decline under `onGap: 'strict'`, an ASMLIFT_ERROR marker under `annotate`.
         const body = g.ops.slice(0, -1);
         if (body.some((op) => HOIST_UNSAFE_OPS.has(op.opcode))) {
           continue;

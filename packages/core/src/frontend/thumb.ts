@@ -71,26 +71,16 @@ interface AsmBlock {
 // than in decode arms like MIPS's `move` or PPC's `slwi`. That distinction, and why there is no
 // shared alias helper across the three frontends, is written up once in ./opaque.ts.
 //
-// This table is about COVERAGE, not soundness, and it is worth being clear about that because it
-// used to be the other way round. A missing load spelling was once a silent miscompile: an
-// unrecognised `stm*` matched `opaquePolicy.storeClass` and failed loud, while an unrecognised
-// `ldm*` reached opaqueDest, which takes ops[0] — the BASE — as the destination, so the opaque was
-// dead, DCE removed it, and the load vanished (`ldmfd r1, {r0}; bx lr` lifted to `return a0;` where
-// the answer is `return *a0;`). The comment here then defended the table's omissions with "`as`
-// rejects them — so they cannot appear", which is not an argument this frontend may make: it parses
-// TEXT, from luvdis/objdump/IDA/Ghidra and from hand-written .s, and invalid input must decline
-// rather than produce confident wrong C.
-//
-// `opaque` now carries `effects: true`, so a spelling missing from this table declines loudly like
-// any other unmodelled instruction. What listing one buys is that the function LIFTS instead — real
-// value, just not the kind that can be traded away by accident. Every load spelling ARMv4T Thumb
-// accepts is still listed, because declining a whole function over a synonym is a poor trade.
+// This table is about COVERAGE, not soundness: a spelling missing from it declines loudly like any
+// other unmodelled instruction, and listing one buys that the function LIFTS instead. Every load
+// spelling ARMv4T Thumb accepts is listed, because declining a whole function over a synonym is a
+// poor trade. Note what may NOT justify an omission: "`as` rejects it, so it cannot appear". This
+// frontend parses TEXT — from luvdis/objdump/IDA/Ghidra and hand-written .s — so what some
+// assembler accepts says nothing about what it will be handed.
 //
 // `stmfd` is deliberately absent, and the asymmetry is real rather than an oversight: `stmfd` IS
 // `stmdb` (decrement-before), and ARMv4T Thumb has no decrement-before store — so there is nothing
-// to normalise it TO. That is the whole reason, and it is a fact about the instruction set rather
-// than about any assembler; `as` also rejects both, but per the paragraph above that observation
-// cannot carry an argument here. An `stmfd` in the input therefore declines, correctly.
+// to normalise it TO. A fact about the instruction set, not about an assembler. It declines.
 //
 // Null-prototype so that an inherited key (`constructor`, `toString`) cannot be mistaken for an
 // entry. Unreachable from real assembly, but the lookup should not depend on that.
