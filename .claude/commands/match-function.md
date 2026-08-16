@@ -1,0 +1,135 @@
+---
+description: Match a benchmark function by building the missing asmlift capability, then adversarially verify it
+argument-hint: <FunctionName>
+---
+
+Target function: **$1**
+
+If `$1` is empty, ask which function before doing anything else. Do not guess.
+
+Your job is **not** "make this one row match". It is: find the *general capability* asmlift is
+missing, build it soundly, and let this row fall out as evidence. A change that only works because
+you looked at this function's diff is a failure, even if the row flips to MATCH.
+
+---
+
+## Phase 0 — Resolve and baseline (never skip)
+
+1. Resolve the row: `pnpm bench run --tier real --only $1` (`--only` is a substring match on the
+   symbol; row ids are `project:sym:toolchain`). If it hits more than one row, list them and pick
+   the one the user meant — say which you picked.
+2. Record the **baseline** verbatim: asmlift outcome (`MATCH` / `diff:N` / `noncompile(k)` /
+   `declined(k gap(s))` / `failed`) and m2c's for the same row. Every later claim of improvement is
+   measured against this exact number, produced by this exact command.
+3. Read the asm and the current asmlift output side by side. Get the target `.o` and a working dir
+   with `pnpm bench target <row-id> --out <dir>` so you can iterate without the full harness.
+4. State the baseline in your first user-facing message. Never report progress without a
+   before/after pair of real command output.
+
+## Phase 1 — Diagnose the gap honestly
+
+Classify the gap before writing any code. The four outcomes are not equally likely and three of
+them are not "add a feature":
+
+- **Missing capability** — asmlift cannot *represent* or *recover* something (an idiom, a type, a
+  control-flow shape). This is the case the rest of this prompt is written for.
+- **Missing lever** — asmlift can represent it, but never chooses that spelling. A lever is a
+  candidate-generation change, and levers regress other rows far more often than they help; it
+  needs a gate (see Hard Rules).
+- **Unmatchable source quirk** — the original C used a construct no honest recovery would produce
+  (register-allocation intermediates, a hand-written temporary, an unusual build flag). Real
+  precedent in this repo: `StrCpy`. Say so, prove it, and stop — do not invent machinery to imitate
+  a quirk.
+- **Harness / fidelity problem** — the row is built with a toolchain or flags the real project did
+  not use (the `old_agbcc` class of bug). Then the fix is in the manifest/toolchain, not the
+  decompiler, and it may *remove* the row rather than match it.
+
+Write the classification down with the evidence that decided it. If it is one of the last two, go
+straight to Phase 6 and report — that is a successful outcome of this command, not a failure.
+
+## Phase 2 — Break it down
+
+Split the capability into the smallest sequence of changes where **each one is independently
+defensible and independently testable**. For each, write one line: what it does, where it lives in
+the tower (`docs/level-tower.md`), what test proves it, and what it is expected to do to the diff
+number. Show the user this list before implementing.
+
+If a step's only justification is "the next step needs it", that is fine — say so explicitly. If a
+step's only justification is "$1 needs it", split differently.
+
+## Phase 3 — Implement, one atomic commit per capability
+
+Branch first: `git checkout -b match/<function-name>`. Never commit to `main`.
+
+Per commit:
+
+- Place the change where the architecture says it goes. `docs/level-tower.md` is binding — in
+  particular **"earn the level"**: do not add a representation, opcode, or pass boundary that has no
+  inhabitant. Prefer patterns-as-data over new imperative special cases. Respect the `L1 → L2 → L3`
+  stage contracts (`packages/core/src/contracts.ts`) and keep `@asmlift/core` browser-pure.
+- Add unit tests in `packages/core/test/` next to the sibling capability's tests. A capability with
+  no test that fails before the change is not done.
+- Gate: `pnpm test:offline` + `pnpm typecheck` + `pnpm lint`, and re-run `pnpm bench run --tier real
+  --only $1` plus the rows you predicted are affected. Report the diff number movement.
+- Commit only when green. Message says what capability was added and what it moved, e.g.
+  `feat(raise): recover X from Y idiom (Foo 41→18)`.
+- If a step moves the number the wrong way, keep it only if it is a prerequisite, and say so in the
+  commit body.
+
+## Phase 4 — Full-bench zero-flip gate
+
+Before declaring the branch done: `pnpm bench run` (all tiers) and `pnpm bench regression`. **Any
+lost match blocks the branch.** If a match is lost, either tighten the gate on your lever or drop
+the lever — do not rationalize a trade unless the user explicitly approves it. Report the totals
+(asmlift vs m2c) before and after.
+
+## Phase 5 — Adversarial round
+
+Launch **both** subagents in parallel, in one message. Give each the branch name, the commit list,
+the diff numbers, and the classification from Phase 1.
+
+**Agent A — sustainability / breaker.** Brief: "Do not evaluate whether $1 matches. Evaluate the
+new capability against *every other function that could hit this code path*. Hunt: unguarded
+assumptions, inputs where the new path fires but shouldn't, ordering/interaction with existing
+passes, determinism, and above all **loud→silent conversions** — any case where asmlift used to fail
+visibly and now emits confidently wrong C. Find real inputs, not hypotheticals. Report each finding
+as file:line + a concrete triggering input + why it is wrong."
+
+**Agent B — architectural soundness.** Brief: "Judge whether this is a general mechanism or an
+ad-hoc patch shaped like this one function. Read `docs/level-tower.md` and
+`docs/asmlift-101.md` first. Check: is the change at the right level; does it earn any new
+structure it introduced; is it data where it should be data; does it duplicate an existing pass;
+would a reviewer who has never seen $1 understand why it exists? Name the redesign if there is one."
+
+Then: **remediate every confirmed finding as new commits**, and **re-run both agents on the fixes**.
+Precedent from this repo's history: a remediation itself introduced a silent-wrong-address bug that
+only the second pass caught. One round is not enough.
+
+## Phase 6 — Report and write back
+
+- Summary: baseline → final for $1, full-bench totals before/after, one line per commit.
+- What you did **not** do and why (blocked capability, unmatchable quirk, rejected lever).
+- Update the relevant memory file under
+  `~/.claude/projects/-Users-macabeus-ApenasMeu-decompiler-asmlift/memory/` (usually
+  `asmlift-adversarial-validation.md`) with the round's outcome and any gate that turned out to be
+  load-bearing.
+- Push the branch (this project's convention is commit + push on a finished goal).
+
+---
+
+## Hard rules
+
+1. **Never trade a loud failure for a silent wrong answer.** `declined` / an `ASMLIFT_ERROR` marker
+   beats plausible-but-wrong C. Every new transform must state the condition under which it refuses.
+2. **Every lever needs a gate**, and the gate must be justified by a row it protects. Ungated levers
+   have regressed matches here repeatedly (multi-use const → `sum_to`; base-CSE without the
+   loop-gate; const-MMIO RMW without the scalar-fixed-offset gate).
+3. **Never edit the benchmark to make a row look better** — no manifest tweaks, no results.json
+   edits, no adding context that a real user of the published repro script would not have. If the
+   harness is genuinely wrong, fix it as its own clearly-labelled commit and say the numbers moved
+   for harness reasons.
+4. **Stop rule.** If the capability is bigger than this session, or the row turns out unmatchable:
+   keep and ship the commits that genuinely reduced the diff, and report what is blocked and what
+   the next step would be. Do not force an ad-hoc hack to close the last few bytes.
+5. **Numbers come from commands.** Never state a diff number, a match, or a regression you did not
+   just observe in tool output that you show or quote.

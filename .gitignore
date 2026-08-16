@@ -31,6 +31,6 @@ apps/benchmark/.cache/
 _site/
 
 # local Claude Code state
-.claude/
+.claude/worktrees
 research/
 packages/cli/dist/
