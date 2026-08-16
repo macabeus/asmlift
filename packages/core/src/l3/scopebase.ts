@@ -146,7 +146,8 @@ function collect(
     // CONDITION the same way. They do NOT agree about a `for`'s `init`: basecse counts it in-loop
     // (its `stmtChildren('for')` is `[init, inc, …body]`, recursed with `nested`), this pass counts
     // it at the enclosing cadence, which is the truthful reading — it runs once. Recorded because
-    // the divergence is real and an extraction has to pick one.
+    // the divergence is real and an extraction has to pick one; both readings are pinned in
+    // test/addr-placement.test.ts so the pick is deliberate rather than whichever survives.
     stmtExprs(s).forEach((e) => visit(e, isLoop));
     if (s.k === 'for') {
       // `init`/`inc` are typed as the full Stmt union, so a COMPOUND one is type-legal. `stmtExprs`

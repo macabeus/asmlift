@@ -42,7 +42,12 @@ import type { Expr, SFn, Stmt } from './ast';
 import { mapExprChildren, stmtExprs } from './ast';
 import { nameAllocator } from './hoist';
 
-/** A base this pass may evaluate early: pure, and not something a store can change under us. */
+/** A base this pass may evaluate early: pure, and not something a store can change under us.
+ *
+ *  NO shadowing filter, unlike scopebase.ts's `isLeaf`, and the asymmetry is deliberate: that pass
+ *  re-spells the base as `&g`, which under a shadowing local names a different object, while this
+ *  one keeps the base expression verbatim and places the assignment immediately before the same
+ *  statement. Adding the filter here only loses hoists (test/addr-placement.test.ts). */
 function eligibleBase(base: Expr, globals: ReadonlySet<string>): boolean {
   return base.k === 'addr' || base.k === 'const' || (base.k === 'var' && globals.has(base.name));
 }

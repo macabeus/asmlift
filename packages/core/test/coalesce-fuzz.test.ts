@@ -1,12 +1,15 @@
-// The differential fuzz for coalesce.ts's loop gate — see that file for what the gate claims.
+// The differential fuzz behind COALESCE_GATES — see coalesce.ts for what the gates claim.
 //
-// Arm A: no candidate the pass emits changes a defined read. Arm B: the same programs with the loop
-// flag suppressed DO — without which arm A is also what "emitted nothing" looks like.
+// Arm A: no candidate the pass emits changes a defined read. Arm B drops each gate the table calls
+// SOUND and requires that it DOES — without which arm A is also what "emitted nothing" looks like.
+// Arm B is written over the table, not over a named gate, so a rule added later is held to the same
+// bar without anyone remembering to.
 import { describe, expect, test } from 'vitest';
 
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
-import { coalesceCandidates } from '../src/l3/coalesce';
+import { COALESCE_GATES, type MergePair, coalesceCandidates, coalesceUnder } from '../src/l3/coalesce';
+import { type Gate, gateTableDefects, without } from '../src/l3/gates';
 
 // Control flow comes from a pre-drawn list, not from the values, so both trees take the same path by
 // construction: traces align index for index and every difference is a value difference. Conditions
@@ -170,50 +173,6 @@ function generate(seed: number): SFn {
   };
 }
 
-// Arm B's ablation, as an input rewrite: a loop becomes an `if` over the same children, tagged so it
-// can be turned back after the pass has run. `stmtChildren`/`stmtExprs` then agree node for node with
-// the loop's, so `spans` produces an identical map except for `inLoop` — that gate ablated and
-// nothing else. `for`'s children are `[init, inc, ...body]`, so the `if` lists them in that order.
-const MARK = { while: '__was_while__', for: '__was_for__' } as const;
-const tag = (fn: string, cond: Expr): Expr => ({ k: 'call', fn, args: [cond] });
-
-function loopsAsIfs(body: Stmt[]): Stmt[] {
-  return body.map((s): Stmt => {
-    switch (s.k) {
-      case 'while':
-        return { k: 'if', cond: tag(MARK.while, s.cond), then: loopsAsIfs(s.body), else: [] };
-      case 'for':
-        return { k: 'if', cond: tag(MARK.for, s.cond), then: loopsAsIfs([s.init, s.inc, ...s.body]), else: [] };
-      case 'if':
-        return { ...s, then: loopsAsIfs(s.then), else: loopsAsIfs(s.else) };
-      default:
-        return s;
-    }
-  });
-}
-
-function ifsAsLoops(body: Stmt[]): Stmt[] {
-  return body.map((s): Stmt => {
-    if (s.k !== 'if') {
-      return s;
-    }
-    const then = ifsAsLoops(s.then);
-    if (s.cond.k === 'call' && s.cond.fn === MARK.while) {
-      return { k: 'while', cond: s.cond.args[0], body: then };
-    }
-    if (s.cond.k === 'call' && s.cond.fn === MARK.for) {
-      return { k: 'for', init: then[0], cond: s.cond.args[0], inc: then[1], body: then.slice(2) };
-    }
-    return { ...s, then, else: ifsAsLoops(s.else) };
-  });
-}
-
-const withoutLoopGate = (sfn: SFn): { merged: string; sfn: SFn }[] =>
-  coalesceCandidates({ ...sfn, body: loopsAsIfs(sfn.body) }).map((c) => ({
-    ...c,
-    sfn: { ...c.sfn, body: ifsAsLoops(c.sfn.body) },
-  }));
-
 // ── the two arms ───────────────────────────────────────────────────────────────────────────────
 const PROGRAMS = 2000;
 const SCHEDULES = [
@@ -241,9 +200,10 @@ function sweep(candidatesOf: (sfn: SFn) => { merged: string; sfn: SFn }[]) {
   return { candidates, clobbered, undefinedOnly };
 }
 
-describe('the loop gate, differentially', () => {
+const under = (gates: readonly Gate<MergePair>[]) => (sfn: SFn) => coalesceUnder(gates, sfn).candidates;
+
+describe('the gates, differentially', () => {
   const kept = sweep(coalesceCandidates);
-  const ablated = sweep(withoutLoopGate);
 
   test('the sweep reaches mergeable programs at all', () => {
     // A floor well under what the generator currently offers, so tuning it does not have to move.
@@ -254,14 +214,44 @@ describe('the loop gate, differentially', () => {
     expect(kept.clobbered).toEqual([]);
   });
 
-  test('suppressing the loop flag DOES clobber — the gate is load-bearing', () => {
-    // Green here means the generator stopped reaching loops, or the pass stopped consulting `inLoop`.
-    expect(ablated.clobbered.length).toBeGreaterThan(0);
-  });
-
   test('the accepted-not-fixed case is real, and is what the carve-out covers', () => {
     // coalesce.ts accepts this class; asserting it stays reachable stops the carve-out that excuses
     // it from quietly becoming dead code.
     expect(kept.undefinedOnly).toBeGreaterThan(0);
+  });
+});
+
+// THE GATE CONTRACT. Every rule the table calls SOUND has to earn the word, and the acceptance
+// criterion is the one four audit rounds applied by hand: drop the gate and something must break.
+// Written against the TABLE rather than against a named gate, so a rule added later is held to it
+// without anyone remembering to — which is the whole reason the gates became data.
+describe('COALESCE_GATES', () => {
+  test('the table is well-formed, and nothing calls itself sound without naming a guard', () => {
+    expect(gateTableDefects(COALESCE_GATES)).toEqual([]);
+  });
+
+  test.each(COALESCE_GATES.filter((g) => g.sound).map((g) => [g.id] as const))(
+    'the SOUND gate `%s` is load-bearing — dropping it clobbers a defined read',
+    (id) => {
+      // The ablation is a VALUE: the real predicate runs on the real input, with no test-only branch
+      // in the shipped path and no input rewritten to dodge it. `without` throws on an unknown id,
+      // so a typo here fails loudly instead of silently testing the unablated pass.
+      expect(sweep(under(without(COALESCE_GATES, id))).clobbered.length).toBeGreaterThan(0);
+    },
+  );
+
+  test('every gate actually refuses something — a rule nothing reaches guards nothing', () => {
+    // Reachability, not correctness: a gate the corpus never exercises is one no test could be
+    // failing on purpose, which is how a dead rule outlives the reason it was written.
+    const reached = new Set<string>();
+    for (let seed = 1; seed <= 400; seed++) {
+      for (const id of coalesceUnder(COALESCE_GATES, generate(seed)).refusals.keys()) {
+        reached.add(id);
+      }
+    }
+    // `param` and `type` need shapes the generator does not emit (it declares three same-typed
+    // locals and no params); coalesce.test.ts pins both directly.
+    const byUnitTest = new Set(['param', 'type']);
+    expect(COALESCE_GATES.filter((g) => !reached.has(g.id) && !byUnitTest.has(g.id)).map((g) => g.id)).toEqual([]);
   });
 });

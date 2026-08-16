@@ -1,6 +1,7 @@
 import { typeToString } from '../ir/types';
 import type { Expr, SFn, Stmt } from './ast';
 import { exprChildren, mapExprChildren, stmtChildren, stmtExprs } from './ast';
+import { type Gate, firstRejection } from './gates';
 
 function namesIn(e: Expr, out: Set<string>): void {
   // `addr` names a GLOBAL, never a local — collected anyway. A name reaching BOTH forms would
@@ -17,7 +18,7 @@ function mentions(e: Expr, n: string): boolean {
   namesIn(e, seen);
   return seen.has(n);
 }
-interface Span {
+export interface Span {
   first: number;
   last: number;
   inLoop: boolean;
@@ -78,6 +79,71 @@ function rename(body: Stmt[], from: string, to: string): Stmt[] {
   };
   return body.map(inStmt);
 }
+/** One candidate merge under consideration: absorb `a` into `b`. */
+export interface MergePair {
+  a: string;
+  b: string;
+  /** `a`'s span */
+  x: Span;
+  /** `b`'s span — the SURVIVOR's, which is why the asymmetric gates read `y` */
+  y: Span;
+  sameType: boolean;
+  eitherIsParam: boolean;
+}
+
+/** The admission rules, in evaluation order. Two arguments the `why` fields have no room for:
+ *
+ *  WHAT `loop` BUYS is the right to read preorder statement order as liveness. Preorder is a
+ *  topological order of the CFG except where a later-indexed statement can run before an earlier
+ *  one, and every position that does that — a `for`'s `init`/`inc`, any loop body — is inside a
+ *  loop. A loop's own CONDITION is not covered: it is visited at the loop statement's own index with
+ *  the ENCLOSING flag, which is safe only because a condition cannot WRITE.
+ *
+ *  ABLATE `first-is-write` ALONE AND NOTHING HAPPENS — `const-fed` masks it, so a survivor first
+ *  mentioned by a read was uninitialized there in the original too. Drop both to see what it does,
+ *  which is to bound the accepted class below by an order of magnitude. `const-fed` likewise bounds
+ *  candidate growth: merges go as `L(L-1)/2` in the local count, each a distinct compile. */
+export const COALESCE_GATES: readonly Gate<MergePair>[] = [
+  {
+    id: 'param',
+    why: 'a param is the function’s own signature, not a recovered local',
+    sound: false,
+    rejects: (c) => c.eitherIsParam,
+  },
+  {
+    id: 'type',
+    why: 'the survivor keeps its own declared type, so the two must agree',
+    sound: false,
+    rejects: (c) => !c.sameType,
+  },
+  {
+    id: 'loop',
+    why: 'a back edge can run a later statement first, so preorder stops implying disjoint liveness',
+    sound: true,
+    guardedBy: 'coalesce-fuzz.test.ts: dropping it clobbers a defined read',
+    rejects: (c) => c.x.inLoop || c.y.inLoop,
+  },
+  {
+    id: 'const-fed',
+    why: 'a load-fed local is one the compiler had a reason to keep where it was',
+    sound: false,
+    rejects: (c) => !c.x.constFed || !c.y.constFed,
+  },
+  {
+    id: 'overlap',
+    why: 'the ranges must not overlap — the survivor would absorb a value still live',
+    sound: true,
+    guardedBy: 'coalesce.test.ts: OVERLAPPING ranges never merge',
+    rejects: (c) => c.x.last >= c.y.first,
+  },
+  {
+    id: 'first-is-write',
+    why: 'a survivor first MENTIONED by a read would see the absorbed value there',
+    sound: false,
+    rejects: (c) => !c.y.firstIsWrite,
+  },
+];
+
 /** Every legal single merge, each as its own tree — NOT one committed choice.
  *
  *  Which pair a register allocator coalesced is not derivable from the L3 tree, and first-fit gets
@@ -88,62 +154,62 @@ function rename(body: Stmt[], from: string, to: string): Stmt[] {
  *  `/regcopy`'s "the tail choice is allocator-ambiguous, so both are ranked" — so every candidate is
  *  emitted and the differ referees.
  *
- *  GATES:
- *   - a local mentioned inside a loop BODY is excluded. SOUND-critical: it is what makes preorder
- *     statement order a sufficient approximation of liveness. Preorder is a topological order of the
- *     CFG except where a later-indexed statement can run before an earlier one, and the positions
- *     that do that — a `for`'s `init`/`inc`, and everything in any loop body — are inside a loop, so
- *     the gate covers them. A loop's own CONDITION is NOT covered: it is visited at the loop
- *     statement's own index with the ENCLOSING loop flag. That is safe only because a condition
- *     cannot WRITE, so it can extend a read range but never reorder a definition — an earlier
- *     version of this comment claimed the gate covered conditions too, which it does not.
- *     `test/coalesce-fuzz.test.ts` is the differential check; delete this gate and it fails.
- *   - both must be CONSTANT-fed. A codegen heuristic, not soundness: deleting it stays clobber-free
- *     under that fuzz and simply scored worse, because a load-fed local is one the compiler had a
- *     reason to keep where it was. It is also what currently BOUNDS candidate growth: merges are
- *     `L(L-1)/2` in the local count, each a distinct source and so a distinct compile, and nothing
- *     else caps that. Corpus-wide today: 2 rows, 13 kept sources.
- *   - the survivor's first mention must be an ASSIGN THAT DOES NOT ALSO READ IT. `b = g(b)` is a
- *     write and a read in one statement; counting it as a pure write let `g` receive the absorbed
- *     value. NOT a soundness gate, though it reads like one, and `constFed` masks it so only
- *     deleting both shows why: a survivor whose first mention is a READ was uninitialized there in
- *     the ORIGINAL too, so no clobber appears — what this gate bounds is the size of the accepted
- *     class below, which it holds down by an order of magnitude.
- *
  *  ACCEPTED, NOT FIXED: a survivor assigned only on SOME paths still absorbs the other's value on
  *  the paths that skip it. The original read an uninitialized local there, so both spellings are
- *  ill-defined rather than one being wrong — but this is a real difference and the differ, not this
+ *  ill-defined rather than one being wrong — but this is a real difference and the differ, not any
  *  gate, is what keeps it from faking a match. The fuzz asserts it stays reachable, so the carve-out
  *  that excuses it cannot quietly become dead. */
 export function coalesceCandidates(sfn: SFn): { merged: string; sfn: SFn }[] {
+  return coalesceUnder(COALESCE_GATES, sfn).candidates;
+}
+
+/** `coalesceCandidates` with the gate table supplied, plus which gate refused each pair.
+ *
+ *  The parameter exists so a test can run the pass with one gate DROPPED — the ablation as a value,
+ *  rather than as a flag compiled into the shipped path or an input rewritten to dodge a predicate.
+ *  `refusals` is what makes a gate's reachability checkable: a rule nothing ever reaches is a rule
+ *  no test can be failing on purpose. */
+export function coalesceUnder(
+  gates: readonly Gate<MergePair>[],
+  sfn: SFn,
+): { candidates: { merged: string; sfn: SFn }[]; refusals: Map<string, number> } {
+  const refusals = new Map<string, number>();
   if (sfn.locals.length < 2) {
-    return [];
+    return { candidates: [], refusals };
   }
   const params = new Set(sfn.params.map((p) => p.name));
   const typeOf = new Map(sfn.locals.map((l) => [l.name, typeToString(l.type)]));
   const sp = spans(sfn.body);
-  const out: { merged: string; sfn: SFn }[] = [];
+  const candidates: { merged: string; sfn: SFn }[] = [];
   for (const a of sfn.locals.map((l) => l.name)) {
     for (const b of sfn.locals.map((l) => l.name)) {
       const x = sp.get(a);
       const y = sp.get(b);
-      if (a === b || !x || !y || params.has(a) || params.has(b)) {
+      // Not a gate: this is what makes the pair a pair at all. A name with no span is one the body
+      // never mentions, so there is no range to reason about.
+      if (a === b || !x || !y) {
         continue;
       }
-      if (typeOf.get(a) !== typeOf.get(b) || x.inLoop || y.inLoop || !x.constFed || !y.constFed) {
-        continue;
-      }
-      if (x.last >= y.first || !y.firstIsWrite) {
+      const refused = firstRejection(gates, {
+        a,
+        b,
+        x,
+        y,
+        sameType: typeOf.get(a) === typeOf.get(b),
+        eitherIsParam: params.has(a) || params.has(b),
+      });
+      if (refused !== null) {
+        refusals.set(refused, (refusals.get(refused) ?? 0) + 1);
         continue;
       }
       // Labelled by the PAIR, not by an index into enumeration order: an index silently re-points
       // at a different merge if `sfn.locals` ordering ever changes, leaving a recorded provenance
       // that is wrong but plausible.
-      out.push({
+      candidates.push({
         merged: `${a}-${b}`,
         sfn: { ...sfn, body: rename(sfn.body, a, b), locals: sfn.locals.filter((l) => l.name !== a) },
       });
     }
   }
-  return out;
+  return { candidates, refusals };
 }
