@@ -52,7 +52,8 @@ describe('gates', () => {
 
   test('a mention inside a LOOP blocks it — the sound-critical gate', () => {
     // Without this, preorder order stops implying disjoint liveness: a back edge can run a later
-    // statement before an earlier one. A fuzz with the gate removed finds clobbers immediately.
+    // statement before an earlier one. One shape, pinned; `coalesce-fuzz.test.ts` is what quantifies
+    // over shapes, and it also checks that suppressing the gate really does clobber.
     const body: Stmt[] = [
       asg('a', 1),
       { k: 'while', cond: { k: 'const', value: 1 }, body: [use('a'), asg('b', 2), use('b')] },
