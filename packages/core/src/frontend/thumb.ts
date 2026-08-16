@@ -974,6 +974,34 @@ interface JumpTable {
   caseLabels: string[];
   defaultLabel: string;
 }
+
+// Accept a data-processing mnemonic in either the pre-UAL (`lsl`, `add`) or UAL (`lsls`, `adds`)
+// spelling, WITHIN THE DISPATCH BLOCK ONLY.
+//
+// This is deliberately not an entry in LEGACY_MNEMONICS. That table is for PURE SYNONYMS — one
+// encoding, two names, identical operands — and these are not: Thumb-1 `ADD (register)` on low
+// registers sets the flags, while the high-register form (ARM DDI 0029G Format 05, `ADD Rd, Hs`)
+// does not, so `add`/`adds` are two encodings that a global rewrite would conflate. Normalising
+// them everywhere would also quietly change what a later flag-reading consumer sees.
+//
+// Inside the dispatch block the distinction is UNOBSERVABLE, which is what makes accepting both
+// safe here and only here: the block computes `table_base + index*4`, loads the target and writes
+// `pc`. Nothing between the `lsl` and the `mov pc` reads NZCV, no path leaves the block by
+// falling through, and on a successful recovery the block is ELIDED from the CFG entirely — the
+// bounds test that does feed a conditional branch lives in `bounds`, whose `cmp`/`bhi`/`bls` this
+// function matches by exact name. So the S-suffix here carries no information any consumer can use.
+//
+// Why it matters: agbcc's own output writes the pre-UAL spelling, but a disassembler is free to
+// write either, and luvdis writes UAL. Measured on the Klonoa: Empire of Dreams disassembly, every
+// one of the 13 dispatch sites across its 11 jump-table functions spells these `lsls` and `adds` —
+// so this comparison alone declined the whole family, on input that is not malformed in any way.
+const isDataOp = (mn: string, base: 'lsl' | 'add'): boolean => mn === base || mn === `${base}s`;
+
+// A shift amount is a NUMBER, not a spelling. `#2`, `#0x2` and `#0x02` are the same shift; the
+// recogniser used to compare the operand text and so rejected the third. Guarded on the `#`
+// prefix because a register-operand shift (`lsl rD, rS`) has no immediate at all and must decline.
+const immEq = (op: string | undefined, want: number): boolean =>
+  op !== undefined && op.startsWith('#') && imm(op) === want;
 function recoverJumpTable(
   bounds: AsmBlock,
   disp: AsmBlock,
@@ -1027,7 +1055,7 @@ function recoverJumpTable(
     return null;
   }
   const [lsl, ldrP, add, ldrV, movpc] = d;
-  if (lsl.mnemonic !== 'lsl' || lsl.ops[1] !== scrutReg || (lsl.ops[2] !== '#0x2' && lsl.ops[2] !== '#2')) {
+  if (!isDataOp(lsl.mnemonic, 'lsl') || lsl.ops[1] !== scrutReg || !immEq(lsl.ops[2], 2)) {
     return null;
   }
   const idxReg = lsl.ops[0]; // rY = rX << 2  (index*4, identity guard)
@@ -1036,7 +1064,7 @@ function recoverJumpTable(
   }
   const ptrReg = ldrP.ops[0],
     ptrLabel = ldrP.ops[1]; // rP = *(PTR literal)
-  if (add.mnemonic !== 'add' || add.ops[0] !== idxReg) {
+  if (!isDataOp(add.mnemonic, 'add') || add.ops[0] !== idxReg) {
     return null;
   }
   // add rY, rY, rP  (either operand order) — the address = table_base + index*4, nothing else.

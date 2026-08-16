@@ -227,3 +227,55 @@ test('a comparison tree whose default is the merge recovers as a switch, not an 
   expect(out).not.toContain('else');
   expect(out).not.toContain('default:'); // the default IS the merge — no arm of its own
 });
+
+// ── mnemonic and immediate SPELLING ─────────────────────────────────────────────────────────────
+// The dispatch idiom was matched by comparing operand TEXT: `lsl` but not `lsls`, `add` but not
+// `adds`, and `#2`/`#0x2` but not `#0x02`. Those are spellings of the same instruction and the same
+// shift, and a disassembler picks whichever it likes — luvdis writes the UAL forms, and on the
+// Klonoa: Empire of Dreams corpus all 13 dispatch sites across 11 jump-table functions spell them
+// `lsls`/`adds`, so the comparison alone declined every one of them on perfectly well-formed input.
+//
+// The property asserted is INDIFFERENCE to the spelling, against the pre-UAL output as the control,
+// rather than against a fixed string — the same shape the alias test above uses.
+const dispatch = (shift: string, sh: string, plus: string) =>
+  `f:\n${DIRECT}` +
+  `\t${shift}\tr0, r1, ${sh}\n\tldr\tr1, .Lp\n\t${plus}\tr0, r0, r1\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n` +
+  `.Lc0:\n\tmov\tr0, #10\n\tbx\tlr\n.Lc1:\n\tmov\tr0, #11\n\tbx\tlr\n.Ldef:\n\tmov\tr0, #99\n\tbx\tlr\n` +
+  `.Lp:\n\t.word\t.Ltab\n${TABLE}`;
+const spelled = (shift: string, sh: string, plus: string) =>
+  decompile('f', dispatch(shift, sh, plus), ARMV4T_AGBCC).source;
+
+test('the UAL spelling (`lsls`/`adds`/`#0x02`) recovers the same switch as the pre-UAL one', () => {
+  const control = spelled('lsl', '#0x2', 'add');
+  expect(control).toContain('switch (a0)');
+  // the whole klonoa spelling at once, then each difference on its own
+  expect(spelled('lsls', '#0x02', 'adds')).toBe(control);
+  expect(spelled('lsls', '#0x2', 'add')).toBe(control);
+  expect(spelled('lsl', '#0x2', 'adds')).toBe(control);
+  expect(spelled('lsl', '#0x02', 'add')).toBe(control);
+  expect(spelled('lsl', '#2', 'add')).toBe(control);
+});
+
+test('a shift that is not by two still DECLINES, whatever it is spelled like', () => {
+  // The immediate is now compared as a NUMBER, so the guard must reject the same values it always
+  // did — the index has to be scaled by exactly 4, or the table is indexed wrong and the switch
+  // dispatches to the wrong block.
+  const jump = /indirect\/computed jump/;
+  expect(() => spelled('lsl', '#0x3', 'add')).toThrow(jump);
+  expect(() => spelled('lsls', '#0x03', 'adds')).toThrow(jump);
+  expect(() => spelled('lsl', '#3', 'add')).toThrow(jump);
+  expect(() => spelled('lsl', '#0x1', 'add')).toThrow(jump);
+  // a register-operand shift has no immediate at all
+  expect(() => spelled('lsl', 'r2', 'add')).toThrow(jump);
+});
+
+test('the S-suffix is accepted for the dispatch ops only, not as a global rename', () => {
+  // `subs`/`movs` are NOT part of the idiom and must not be admitted by the same relaxation: the
+  // recogniser names `mov pc` and the bounds `cmp` exactly.
+  const jump = /indirect\/computed jump/;
+  const movs =
+    `f:\n${DIRECT}\tlsls\tr0, r1, #0x02\n\tldr\tr1, .Lp\n\tadds\tr0, r0, r1\n\tldr\tr0, [r0]\n\tmovs\tpc, r0\n` +
+    `.Lc0:\n\tmov\tr0, #10\n\tbx\tlr\n.Lc1:\n\tmov\tr0, #11\n\tbx\tlr\n.Ldef:\n\tmov\tr0, #99\n\tbx\tlr\n` +
+    `.Lp:\n\t.word\t.Ltab\n${TABLE}`;
+  expect(() => decompile('f', movs, ARMV4T_AGBCC)).toThrow(jump);
+});
