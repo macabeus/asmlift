@@ -1,14 +1,14 @@
 // The trailing loop variable: a merge param that receives a loop variable's value from ONE
 // ITERATION BACK. `for (fast = slow = head; node != fast; fast = fast->next) slow = fast;` —
 // after the loop `slow` holds what `fast` held at the top of the last iteration, which no
-// un-rotated `while` can say once its update has run. asmlift declined this whole family; it now
-// emits the copy inside the body, ahead of the update, which is where the source wrote it.
+// un-rotated `while` can say once its update has run. The copy is emitted inside the body ahead
+// of the update instead, which is where the source wrote it.
 //
 // Both loop emitters that place the update at the bottom of the body are covered — the
 // guard-fused `while` (which must also SEED the copy for the zero-trip path it fuses away) and
-// the `do-while` (which needs no seed: its body always runs). Each refusal case is a one-fact
-// edit of an accepted fixture and asserts it differs, so a decline for the wrong reason cannot
-// read as a pass.
+// the `do-while` (which needs no seed: its body always runs). Every refusal case runs the
+// accepted fixture as a positive control first, so a decline for the wrong reason cannot read as
+// a pass.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';

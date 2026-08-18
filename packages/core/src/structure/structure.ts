@@ -1289,7 +1289,6 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
         }
         // EVERY in-edge record, not successorTo (which returns only the FIRST record to `b` — a
         // terminator with two edges to the same block would hide the second edge's args here).
-        // The predecessor travels with the arg: `carriesPreUpdate` needs the edge, not just the value.
         const incoming: { v: Value; pr: Block }[] = [];
         for (const pr of new Set(preds.get(b) ?? [])) {
           for (const s of pr.ops[pr.ops.length - 1].successors) {
@@ -2223,20 +2222,18 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
         // loop the source skipped. Structural equality is a sufficient proof, never a necessary
         // one: `str[0]` and `str[i]` at `i = 0`, or a signed `e <= 0` beside an unsigned `e != 0`,
         // are the same test spelled differently, and normalising those needs a canonical form this
-        // pass does not have. So an unproven guard is not by itself a refusal — refusing every one
-        // of them costs rows whose fusion is sound, measurably. It refuses only the SINK below,
-        // which is what makes the fused zero-trip path load-bearing.
-        // KNOWN GAP, pre-dating the sink: a loop with no repairable exit copy still fuses on shape
-        // alone, and an `if` about something else is silently dropped.
+        // pass does not have. Refusing every unproven guard costs rows whose fusion is sound, so it
+        // refuses only the SINK below, which is what makes the fused zero-trip path load-bearing.
+        // KNOWN GAP: a loop with no repairable exit copy still fuses on shape alone, so an `if`
+        // about something else is silently dropped.
         const enterIsTaken = takenB === h;
         const contIsTaken = hterm.successors[0].block === li.header;
         const guardProven = sameAtEntry(hterm.operands[0], term.operands[0], entryVals, enterIsTaken !== contIsTaken);
         // A pre-update exit copy is repairable rather than fatal: emitted at the TOP of the body it
         // captures the value one iteration before the update, which is what the exit edge carries.
         // Its post-loop copy is then dropped, so the ZERO-TRIP path needs the guard→exit edge as a
-        // seed — the only edge holding the never-entered value. Which is why the sink demands the
-        // proof: it makes the zero-trip path load-bearing for a family that used to decline here,
-        // and `isGuardShapedPred` alone cannot tell this guard from an `if` about something else.
+        // seed — the only edge holding the never-entered value. That is why the sink demands the
+        // proof above: it makes the fused zero-trip path load-bearing.
         const sunk = guardProven
           ? sinkablePreUpdateSlots(li.header, li.exit, hexitArgs, new Set([li.header]), sub, updateWrites)
           : new Set<number>();
@@ -2253,8 +2250,6 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
               `copies do not reproduce on a zero-trip run`,
           );
         }
-        // Named rather than inlined: the two edges want OPPOSITE halves of the same set, fourteen
-        // lines apart, and getting them the wrong way round is a silent wrong value.
         const sunkSlot = (j: number) => sunk.has(j);
         const keptSlot = (j: number) => !sunk.has(j);
         if (

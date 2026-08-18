@@ -95,9 +95,8 @@ export const PREUPDATE_SINK_GATES: readonly Gate<SinkCandidate>[] = [
     rejects: (c) => !c.argIsLoopVariable,
   },
   {
-    // ONE gate, not two: the update assigns exactly the loop variables' names, so a separate
-    // `updateWrites` gate could never be shown load-bearing on its own. It is spelled here as
-    // both tests because either one alone would be an accident of that overlap.
+    // The update assigns exactly the loop variables' names, so these two tests are one set today;
+    // both are spelled so the rule does not rest on that coincidence.
     id: 'dest-not-loop-variable',
     why: 'a copy into a name the loop itself assigns is overwritten by the update, or is a self-assignment',
     sound: true,
@@ -235,8 +234,8 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     // Does any value OTHER than `self` under `name` live inside the loop? A value defined outside
     // it and read anywhere in the body must be live-in at the header, the loop's only entry, so
     // that check plus the body's own defs and params covers every way the name is still in use.
-    // The loop's OWN variables are excluded and left to `dest-not-loop-variable`: a header param
-    // is also a body param, so counting them here would make that gate unablatable.
+    // The loop's OWN variables are left to `dest-not-loop-variable` — a header param is also a
+    // body param, so the two gates partition the names instead of overlapping.
     const busyInLoop = (name: string, self: Value): boolean => {
       for (const [v, n] of varName) {
         if (n !== name || v === self || header.params.includes(v)) {
@@ -280,8 +279,7 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
 
   // `x + 0` / `x - 0` / `x | 0` are `x`. Substituting a loop variable by its init constant turns
   // ordinary index arithmetic into exactly these, and a guard that spells the same value without
-  // the arithmetic would otherwise compare unequal. One step is enough: the folded operand is
-  // itself folded on the next recursion.
+  // the arithmetic would otherwise compare unequal.
   const fold = (v: Value): Value => {
     const d = defs.get(v);
     if (!d || d.operands.length !== 2 || !['add', 'sub', 'or'].includes(d.opcode)) {
@@ -299,10 +297,8 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
   //
   // Structural, not semantic: distinct ops with the same opcode, attributes and operands compare
   // equal (two `const 0`s do), anything else does not. A false negative costs a loud decline, which
-  // is the direction to be wrong in. Memoised like `readsClobbered`'s `seen`, so a value its own
-  // consumer reads twice is compared once rather than doubling the work per level — a bound on this
-  // walk alone, not on the pass: rendering that same shared tree inlines it, and THAT is what
-  // actually limits how deep a def chain asmlift can carry.
+  // is the direction to be wrong in. Memoised like `readsClobbered`'s `seen`: a value its own
+  // consumer reads twice would otherwise double the work at every level.
   const sameAtEntry = (a: Value, b: Value, entry: Map<Value, Value>, negated = false): boolean => {
     const memo = new Map<Value, Map<Value, boolean>>();
     const sameOp = (da: Op, db: Op, opcodeOk: boolean): boolean =>

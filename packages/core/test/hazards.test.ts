@@ -135,8 +135,9 @@ describe('loopEscapeHazard', () => {
 describe('sinkablePreUpdateSlots', () => {
   // A self-loop carrying one variable (`p`, named v0, updated every iteration) whose exit edge
   // ALSO hands its pre-update value to a merge param (`q`, named v1) — the trailing-variable
-  // shape. Each test ABLATES one gate from the real table and re-runs the real predicate, so a
-  // gate that has stopped doing anything cannot go unnoticed.
+  // shape. The per-candidate refusals ABLATE one gate from the real table and re-run the real
+  // predicate, so a gate that has stopped doing anything cannot go unnoticed; the two edge-level
+  // rules are not in the table and are exercised directly.
   const scaffold = () => {
     const p = v();
     const q = v();
