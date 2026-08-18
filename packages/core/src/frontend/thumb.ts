@@ -27,7 +27,7 @@ import { FrontendUnsupportedError } from './errors';
 import { assertInputFormat } from './format';
 import type { Frontend } from './frontend';
 import { opaqueDest } from './opaque';
-import { abiSortEntryParams, fallbackArgc, makeSsaBuilder, stackSlotKey } from './ssa';
+import { abiSortEntryParams, fallbackArgc, isStackSlotKey, makeSsaBuilder, stackSlotKey } from './ssa';
 
 interface Instr {
   /** the CANONICAL spelling — legacy names are normalised (see LEGACY_MNEMONICS) so that every
@@ -1329,7 +1329,14 @@ export function lift(
   }
 
   // --- ISA-neutral SSA construction (shared Braun builder) ---
-  const ssa = makeSsaBuilder(name, asmBlocks.length, preds);
+  // A def-less read of a slot is an UNINITIALISED LOCAL here, and this frontend is the one that can
+  // say so: `slotOff` admits an offset only while `off < localArea` (the explicitly reserved local
+  // area, measured by the prologue walk), and an incoming stack argument is keyed `@sarg<k>` rather
+  // than `sp@<off>` precisely because it sits at or above this frame. So nothing incoming can reach
+  // a `sp@` key. MIPS deliberately does NOT pass this — its slot path has no frame bound, so its
+  // `sp@` reaches O32's caller-owned argument home area and the honest answer there is still the
+  // decline (frontend/ssa.ts, LiveInKind).
+  const ssa = makeSsaBuilder(name, asmBlocks.length, preds, (key) => (isStackSlotKey(key) ? 'undef' : 'param'));
   const { fn, irBlocks, readVar, writeVar, paramReg } = ssa;
 
   const constVal = (n: number, b: number): Value => {

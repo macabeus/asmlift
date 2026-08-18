@@ -747,9 +747,12 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
           }
           names.set(op, n);
         } else if (op.opcode === 'undef') {
-          // one name per undef OP, not per key: the frontend already mints exactly one undef per
-          // (storage, block), and two would mean two distinct uninitialised locals
-          undefNames.set(op, mint(`uninit${undefNames.size}`));
+          // NAMED FROM THE KEY, like laddr's `sp<off>`, for the same two reasons. It is traceable —
+          // `uninit_sp8` says which frame slot the reader should look at in the assembly — and it is
+          // STABLE, where a running counter numbered by op order would renumber every local when an
+          // unrelated edit changed the order ops are minted in. It is also the only consumer of the
+          // opcode's `key` attribute, which is what keeps that attribute honest.
+          undefNames.set(op, mint(`uninit_${String(op.attrs.key).replace('@', '')}`));
         }
       }
     }

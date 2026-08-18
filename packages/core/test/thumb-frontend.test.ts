@@ -433,7 +433,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       '.L2:\n\tldr\tr1, [sp]\n\tadd\tr0, r1, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r2}\n\tbx\tr2\n';
     // ONE parameter — the arity is the assertion. `uninit0` is declared and never assigned.
     expect(decompile('f', diamond, ARMV4T_AGBCC).source).toBe(
-      's32 f(s32 a0) {\n    s32 uninit0;\n    if (a0 == 0) a0 = uninit0;\n    return a0 + 1;\n}\n',
+      's32 f(s32 a0) {\n    s32 uninit_sp0;\n    if (a0 == 0) a0 = uninit_sp0;\n    return a0 + 1;\n}\n',
     );
     // control: store it on BOTH arms and there is nothing undefined to declare
     const both =
@@ -449,19 +449,22 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
   });
 
   test('two unstored slots are two DISTINCT uninitialised locals, never merged', () => {
-    // The property that keeps `undef` honest as a representation. Every undef has the same
-    // "value" — none — so the tempting move is to collapse them, and raise/gvn.ts would do exactly
-    // that if `undef` were added to its NUMBERABLE set (operand-free and pure, which is the whole
-    // test that set applies). It must NOT be: two uninitialised locals in the source are two
-    // variables, the compiler allocated them separately, and merging them would re-spell the
-    // function as one the compiler never saw. Distinctness is per undef OP, and the frontend mints
-    // one per storage location.
+    // The property that keeps `undef` honest as a representation: two uninitialised locals in the
+    // source are two variables, the compiler allocated them separately, and emitting one would
+    // re-spell the function as one the compiler never saw.
+    //
+    // This pins the STRUCTURER, and says so because the obvious stronger claim would be false. It
+    // is tempting to read it as pinning `undef` out of raise/gvn.ts's NUMBERABLE set — it does not,
+    // and cannot: adding `undef` there leaves this green, because that pass numbers by attribute
+    // equality and these two undefs carry different keys. Numbering `undef` is a no-op, not a
+    // hazard, so no test can hold the line by failing.
     const two =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tcmp\tr0, #0\n\tbeq\t.L2\n\tstr\tr0, [sp]\n\tstr\tr0, [sp, #4]\n' +
       '.L2:\n\tldr\tr1, [sp]\n\tldr\tr2, [sp, #4]\n\tadd\tr0, r1, r2\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r3}\n\tbx\tr3\n';
+    // …and the names come from the KEYS, so each one points at the frame slot it stands for
     expect(decompile('f', two, ARMV4T_AGBCC).source).toBe(
-      's32 f(s32 a0) {\n    s32 v0;\n    s32 uninit0;\n    s32 uninit1;\n' +
-        '    if (a0 == 0) {\n        v0 = uninit0;\n        a0 = uninit1;\n    } else {\n        v0 = a0;\n    }\n' +
+      's32 f(s32 a0) {\n    s32 v0;\n    s32 uninit_sp4;\n    s32 uninit_sp0;\n' +
+        '    if (a0 == 0) {\n        v0 = uninit_sp4;\n        a0 = uninit_sp0;\n    } else {\n        v0 = a0;\n    }\n' +
         '    return a0 + v0;\n}\n',
     );
   });

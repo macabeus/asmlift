@@ -67,7 +67,19 @@ export interface SsaBuilder {
 // A virtual key must be outside its ISA's register grammar so it cannot collide with a real one, and
 // a key read with no reaching def becomes a function PARAMETER by the live-in path below — which is
 // how both of those capabilities get their parameters without a new opcode or pass.
-export function makeSsaBuilder(name: string, blockCount: number, preds: number[][]): SsaBuilder {
+/** What a def-less live-in of `key` MEANS. Only the frontend can say: the answer depends on the
+ *  frame model, and the frame model is per-ISA. `'undef'` asserts the key names storage this
+ *  function owns, so nothing incoming can be arriving there; `'param'` leaves the old reading, and
+ *  a stack slot that takes it still trips `finish`'s postcondition. Defaulting to `'param'` keeps a
+ *  frontend that has not made the argument declining exactly as it did before. */
+export type LiveInKind = 'param' | 'undef';
+
+export function makeSsaBuilder(
+  name: string,
+  blockCount: number,
+  preds: number[][],
+  liveInKind: (key: string) => LiveInKind = () => 'param',
+): SsaBuilder {
   const irBlocks: Block[] = Array.from({ length: blockCount }, () => ({ params: [] as Value[], ops: [] }));
   const fn: Fn = { name, blocks: irBlocks };
 
@@ -132,12 +144,15 @@ export function makeSsaBuilder(name: string, blockCount: number, preds: number[]
       // means an incoming argument (below); for storage the function ALLOCATED it means nobody wrote
       // it on this path — an uninitialised local, which is a value we can now name.
       //
-      // The split is decided by whether the key COULD have been an incoming argument, and for a
-      // frame slot the answer is no by construction: the Thumb frontend keys incoming stack
-      // arguments as `@sarg<k>` precisely because they sit at or above the callee's own frame, so a
-      // `sp@<off>` key is always storage below it. That is the same fact `finish`'s postcondition
-      // was asserting; it is enforced here now, at the one site that could break it.
-      if (reg.startsWith(SLOT_PREFIX)) {
+      // WHICH ONE IT IS, IS NOT DECIDABLE HERE. The key spelling does not carry it: `sp@<off>` means
+      // "storage this function owns" only if the frontend BOUNDED it that way, and only one does.
+      // Thumb keys incoming stack arguments separately (`@sarg<k>`) and admits a slot only while
+      // `off < localArea`, so its `sp@` really is below the frame. MIPS applies no frame bound at
+      // all — its `sp@` spans O32's caller-owned argument home area, where a def-less read is a
+      // FIFTH ARGUMENT — so it must keep declining. Asking the frontend is the whole point: deciding
+      // this here by prefix turned that decline into a signature with three parameters missing and
+      // the caller's argument replaced by an uninitialised local, which compiles and is wrong.
+      if (liveInKind(reg) === 'undef') {
         const op = mkOp('undef', { results: [mkValue(T.unk(32))], attrs: { key: reg } });
         irBlocks[b].ops.unshift(op); // ahead of everything in a block that nothing precedes
         defs[b].set(reg, op.results[0]);
@@ -432,6 +447,10 @@ export function trimClobberedCallArgs(inp: CallArgTrim): void {
  *  recognise either frontend's slots. See the virtual-key note in the module header. */
 const SLOT_PREFIX = 'sp@';
 export const stackSlotKey = (off: number): string => `${SLOT_PREFIX}${off}`;
+/** Does `key` name a stack slot? For a frontend spelling its {@link LiveInKind} policy, so the key
+ *  grammar stays owned by this module. Answering true is NOT itself a licence to return `'undef'` —
+ *  see the mint site: that needs the frontend's own proof that the slot lies below its frame. */
+export const isStackSlotKey = (key: string): boolean => key.startsWith(SLOT_PREFIX);
 
 /** Order the TRUE entry block's parameters by ABI argument register, so downstream naming
  *  (`a0`, `a1`, …) matches the calling convention, not first-read order (a callee-saved copy can

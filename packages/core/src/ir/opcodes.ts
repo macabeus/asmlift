@@ -130,10 +130,16 @@ export const OPCODES = {
   // here" the frontend could only refuse, so this is the representation that refusal was standing in
   // for. `frontend/ssa.ts` mints it exactly where it used to throw.
   //
-  // Operand-free and pure, like `laddr`. Deliberately NOT in raise/gvn.ts's NUMBERABLE set: two
-  // undefs are two DISTINCT uninitialised locals, and collapsing them by key would merge variables
-  // the source kept apart. `key` names the storage (`sp@0`, `r4`) so the IR dump stays traceable
-  // back to the assembly; the structurer declares one local per undef and emits NO assignment.
+  // Operand-free and pure, like `laddr`, but NOT in raise/gvn.ts's NUMBERABLE opt-in set — and the
+  // accurate reason is that numbering it would be VACUOUS, not that it would be harmful. Two undefs
+  // in one function always carry different keys (the builder mints one per storage location, and
+  // only the entry block can reach the mint site), so a key-equality numbering would never find a
+  // pair to collapse. What it would assert — "same key, therefore same value" — is empty for a
+  // value that has none, so the op stays out rather than resting on a premise it cannot support.
+  //
+  // `key` names the storage (`sp@0`) and is read by the structurer to name the local (`uninit_sp0`),
+  // which keeps the emitted C traceable back to the frame slot in the assembly. The structurer
+  // declares one local per undef and emits NO assignment — that absence is the recovery.
   undef: { operands: 0, results: 1, requiredAttrs: ['key'] },
   // --- black-box escape hatch (keeps lifting total) ---
   // `effects: true`: an instruction asmlift could not model may do anything — write memory, trap,
