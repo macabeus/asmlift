@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generatedAt": "2026-08-16T15:24:36.106Z",
+    "generatedAt": "2026-08-18T16:32:21.717Z",
     "toolchains": [
       "ido7.1",
       "agbcc",
@@ -9,12 +9,12 @@
       "mwcc_242_81"
     ],
     "counts": {
-      "total": 743,
-      "synthetic": 503,
+      "total": 755,
+      "synthetic": 515,
       "real": 240
     },
     "asmlift": {
-      "commit": "a9938bd23821040c2b0004abceed5197675af15d",
+      "commit": "2952cb2b39528b9c7ce34a65c839acea8382c3d1",
       "dirty": false
     },
     "m2c": {
@@ -3497,11 +3497,11 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-cNALSM/c.c:1077: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-94l5Qw/c.c:1077: invalid operands to binary <<"
           },
           {
             "label": "unsigned/scopebase/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-wOdd6U/c.c:1078: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-1TudUk/c.c:1078: invalid operands to binary <<"
           }
         ],
         "symbolsUsed": [
@@ -4442,7 +4442,7 @@
         "droppedCandidates": [
           {
             "label": "unsigned",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-9m8A3Y/c.c:1076: `gBgDataPtrs' undeclared (first use in this function)"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-RTbFZa/c.c:1076: `gBgDataPtrs' undeclared (first use in this function)"
           }
         ],
         "symbolsUsed": [],
@@ -5515,11 +5515,11 @@
         "droppedCandidates": [
           {
             "label": "unsigned",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-v0AQj5/c.c:1077: too many arguments to function `thunk_sub_080002A0'"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-JxhqUL/c.c:1077: too many arguments to function `thunk_sub_080002A0'"
           },
           {
             "label": "unsigned/reread-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-ZQFWd6/c.c:1075: too many arguments to function `thunk_sub_080002A0'"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-lQ5pj7/c.c:1075: too many arguments to function `thunk_sub_080002A0'"
           }
         ],
         "symbolsUsed": [],
@@ -6308,83 +6308,83 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Wsspvn/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-hEPlUL/c.c:1085: incompatible types in assignment"
           },
           {
             "label": "unsigned/coalesce-v2-v3/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-XkXpJW/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-RktCxr/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "unsigned/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-NgkpCo/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-AXcz33/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "unsigned/defsite/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-0eSa7d/c.c:1086: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-eOGqaV/c.c:1086: incompatible types in assignment"
           },
           {
             "label": "unsigned/defsite/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-nuUy4m/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Wu3ZPZ/c.c:1085: incompatible types in assignment"
           },
           {
             "label": "unsigned/reread-globals/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-ssp5ze/c.c:1083: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-nHCz4F/c.c:1083: invalid operands to binary <<"
           },
           {
             "label": "unsigned/reread-globals/coalesce-v0-v1/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-I2Plau/c.c:1082: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-6mUbPy/c.c:1082: invalid operands to binary <<"
           },
           {
             "label": "unsigned/reread-globals/coalesce-v0-v2/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-VHe7Qj/c.c:1082: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-IUXfX4/c.c:1082: invalid operands to binary <<"
           },
           {
             "label": "unsigned/defsite/reread-globals/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-qhBtgd/c.c:1084: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-xOoo1Z/c.c:1084: invalid operands to binary <<"
           },
           {
             "label": "unsigned/defsite/reread-globals/coalesce-v0-v2/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-bmdoVk/c.c:1083: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-ECRrIK/c.c:1083: invalid operands to binary <<"
           },
           {
             "label": "signed/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-DMY0nr/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-nKgUQN/c.c:1085: incompatible types in assignment"
           },
           {
             "label": "signed/coalesce-v2-v3/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-UfCfF9/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Nf5wpU/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "signed/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-sCSiq9/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-FQilFS/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "signed/defsite/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-DJ1Tbt/c.c:1086: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-BD1JW0/c.c:1086: incompatible types in assignment"
           },
           {
             "label": "signed/defsite/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-XMSLFL/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Sj7PQu/c.c:1085: incompatible types in assignment"
           },
           {
             "label": "signed/reread-globals/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Oob8Cc/c.c:1083: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-khgA09/c.c:1083: invalid operands to binary <<"
           },
           {
             "label": "signed/reread-globals/coalesce-v0-v1/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-fDKMCr/c.c:1082: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-nKxkFs/c.c:1082: invalid operands to binary <<"
           },
           {
             "label": "signed/reread-globals/coalesce-v0-v2/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-57ZvGX/c.c:1082: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Kb3nxz/c.c:1082: invalid operands to binary <<"
           },
           {
             "label": "signed/defsite/reread-globals/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-qh2wKX/c.c:1084: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-yeHHja/c.c:1084: invalid operands to binary <<"
           },
           {
             "label": "signed/defsite/reread-globals/coalesce-v0-v2/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-bsxKlK/c.c:1083: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-FZj5XZ/c.c:1083: invalid operands to binary <<"
           }
         ],
         "symbolsUsed": [
@@ -6489,11 +6489,11 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-O4FCfq/c.c:1501: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Y2tOMl/c.c:1501: incompatible types in assignment"
           },
           {
             "label": "unsigned/reread-globals/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-walLKM/c.c:1489: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-nwhPqg/c.c:1489: incompatible types in assignment"
           }
         ],
         "symbolsUsed": [
@@ -56130,6 +56130,843 @@
       "scripts": {
         "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `umod10` — benchmark function synthetic:umod10:mwcc_242_81.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The benchmark's objdump→GNU-as normalization of this function's disassembly (m2c cannot\n# read raw objdump), including the jump-table/const data sections recovered from the target\n# object — the exact text the benchmark fed m2c.\ncat > in.s <<'ASM_INPUT'\nglabel umod10\n    lis     r4,-13107\n    addi    r0,r4,-13107\n    mulhwu  r0,r0,r3\n    srwi    r0,r0,3\n    mulli   r0,r0,10\n    subf    r3,r0,r3\n    blr\nASM_INPUT\n\n# (This function ran with NO context header — the benchmark fed m2c the assembly alone.)\n\nargs=(\n  --target ppc-mwcc-c     # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function umod10       # the symbol to decompile from in.s\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
         "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `umod10` — benchmark function synthetic:umod10:mwcc_242_81.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:umod10:mwcc_242_81 --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact `objdump -d --no-show-raw-insn` text.\ncat > in.asm <<'ASM_INPUT'\n\ntarget.o:     file format elf32-powerpc\n\n\nDisassembly of section .text:\n\n00000000 <umod10>:\n   0:\tlis     r4,-13107\n   4:\taddi    r0,r4,-13107\n   8:\tmulhwu  r0,r0,r3\n   c:\tsrwi    r0,r0,3\n  10:\tmulli   r0,r0,10\n  14:\tsubf    r3,r0,r3\n  18:\tblr\nASM_INPUT\n\n# The target object's objdump -s -r -t dump — the data sections (jump tables, anonymous\n# constants) the text-only disassembly lacks; the benchmark recovered them from the object.\ncat > dump.txt <<'DUMP_INPUT'\n\ntarget.o:     file format elf32-powerpc\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 ref.c\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .mwcats.text\t00000000 .mwcats.text\n00000000 g     F .text\t0000001c umod10\n\n\nRELOCATION RECORDS FOR [.mwcats.text]:\nOFFSET   TYPE              VALUE\n00000004 R_PPC_ADDR32      umod10\n\n\nContents of section .text:\n 0000 3c80cccd 3804cccd 7c001816 5400e8fe  <...8...|...T...\n 0010 1c00000a 7c601850 4e800020           ....|`.PN..     \nContents of section .mwcats.text:\n 0000 0200001c 00000000                    ........        \nContents of section .comment:\n 0000 436f6465 57617272 696f720a 02040201  CodeWarrior.....\n 0010 01020016 2c000000 00000000 00000000  ....,...........\n 0020 00000000 00000000 00000000 00000000  ................\n 0030 00000000 00000001 00000000 00000004  ................\n 0040 00000000 00000004 00000000 00000004  ................\n 0050 00000000                             ....\nDUMP_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target mwcc_242_81    # frontend + target description (ISA, calling convention, compiler idioms)\n  --name umod10           # the symbol to decompile (multi-function input selects by name)\n  --asm-data dump.txt     # the data sections above (jump-table/const recovery)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+      }
+    },
+    {
+      "id": "synthetic:uninit_join:agbcc",
+      "sym": "uninit_join",
+      "project": "synthetic",
+      "tier": "synthetic",
+      "toolchain": "agbcc",
+      "isa": "arm",
+      "compiler": "agbcc",
+      "language": "c",
+      "features": [
+        "uninit-local",
+        "branch",
+        "strength-reduce"
+      ],
+      "loc": 1,
+      "refSource": "int uninit_join(int a){ int r; if(a>0) r=a*2; return r+1; }",
+      "targetAsm": "@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tuninit_join\n\t.type\t uninit_join,function\n\t.thumb_func\nuninit_join:\n\tcmp\tr0, #0\n\tble\t.L3\t@cond_branch\n\tlsl\tr1, r0, #0x1\n.L3:\n\tadd\tr0, r1, #0x1\n\tbx\tlr\n.Lfe1:\n\t.size\t uninit_join,.Lfe1-uninit_join\n",
+      "asmlift": {
+        "decompiler": "asmlift",
+        "candidateLabel": "signed",
+        "outcome": "match",
+        "source": "s32 uninit_join(s32 a0, s32 a1) {\n    if (a0 > 0) a1 = a0 << 1;\n    return a1 + 1;\n}\n",
+        "score": 0,
+        "maxScore": 5,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 0
+        },
+        "quality": {
+          "score": 100,
+          "lines": 4,
+          "gotos": 0,
+          "casts": 0,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        }
+      },
+      "m2c": {
+        "decompiler": "m2c",
+        "outcome": "match",
+        "source": "s32 uninit_join(s32 arg0, s32 arg1) {\n    s32 var_r1;\n\n    var_r1 = arg1;\n    if (arg0 > 0) {\n        var_r1 = arg0 * 2;\n    }\n    return var_r1 + 1;\n}\n",
+        "score": 0,
+        "maxScore": 5,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 0
+        },
+        "quality": {
+          "score": 100,
+          "lines": 8,
+          "gotos": 0,
+          "casts": 0,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        }
+      },
+      "gapSize": null,
+      "scripts": {
+        "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `uninit_join` — benchmark function synthetic:uninit_join:agbcc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The exact agbcc `.s` text the benchmark fed m2c, verbatim.\ncat > in.s <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tuninit_join\n\t.type\t uninit_join,function\n\t.thumb_func\nuninit_join:\n\tcmp\tr0, #0\n\tble\t.L3\t@cond_branch\n\tlsl\tr1, r0, #0x1\n.L3:\n\tadd\tr0, r1, #0x1\n\tbx\tlr\n.Lfe1:\n\t.size\t uninit_join,.Lfe1-uninit_join\nASM_INPUT\n\n# (This function ran with NO context header — the benchmark fed m2c the assembly alone.)\n\nargs=(\n  --target gba            # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function uninit_join  # the symbol to decompile from in.s\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `uninit_join` — benchmark function synthetic:uninit_join:agbcc.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:uninit_join:agbcc --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact agbcc `.s` text.\ncat > in.asm <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tuninit_join\n\t.type\t uninit_join,function\n\t.thumb_func\nuninit_join:\n\tcmp\tr0, #0\n\tble\t.L3\t@cond_branch\n\tlsl\tr1, r0, #0x1\n.L3:\n\tadd\tr0, r1, #0x1\n\tbx\tlr\n.Lfe1:\n\t.size\t uninit_join,.Lfe1-uninit_join\nASM_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target agbcc          # frontend + target description (ISA, calling convention, compiler idioms)\n  --name uninit_join      # the symbol to decompile (multi-function input selects by name)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+      }
+    },
+    {
+      "id": "synthetic:uninit_join:gcc2.7.2kmc",
+      "sym": "uninit_join",
+      "project": "synthetic",
+      "tier": "synthetic",
+      "toolchain": "gcc2.7.2kmc",
+      "isa": "mips",
+      "compiler": "gcc",
+      "language": "c",
+      "features": [
+        "uninit-local",
+        "branch",
+        "strength-reduce"
+      ],
+      "loc": 1,
+      "refSource": "int uninit_join(int a){ int r; if(a>0) r=a*2; return r+1; }",
+      "targetAsm": "\ntarget.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <uninit_join>:\n   0:\tbgtzl\ta0,8 <uninit_join+0x8>\n   4:\tsll\tv0,a0,0x1\n   8:\tjr\tra\n   c:\tori\tv0,v0,0x1\n",
+      "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /host-tmp/asmlift-mgcc-ref-4165d09060235bc8/ref.c\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t00000010 uninit_join\n\n\nContents of section .text:\n 0000 5c800001 00041040 03e00008 34420001  \\......@....4B..\nContents of section .reginfo:\n 0000 80000014 00000000 00000000 00000000  ................\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.              \n",
+      "asmlift": {
+        "decompiler": "asmlift",
+        "outcome": "declined",
+        "source": "/* asmlift could not decompile 'uninit_join' — lift: cannot lift 'uninit_join': unmodelled control transfer 'bgtzl' at 0x0 — branch-likely / coprocessor branch not supported */\n/* original assembly: */\n/*   target.o:     file format elf32-tradbigmips */\n/*   Disassembly of section .text: */\n/*   00000000 <uninit_join>: */\n/*      0:\tbgtzl\ta0,8 <uninit_join+0x8> */\n/*      4:\tsll\tv0,a0,0x1 */\n/*      8:\tjr\tra */\n/*      c:\tori\tv0,v0,0x1 */\nvoid uninit_join(void) {\n    ASMLIFT_ERROR(\"could not decompile (lift): cannot lift 'uninit_join': unmodelled control transfer 'bgtzl' at 0x0 — branch-likely / coprocessor branch not supported\");\n}\n",
+        "score": null,
+        "maxScore": null,
+        "compileErrors": null,
+        "quality": {
+          "score": 88,
+          "lines": 12,
+          "gotos": 0,
+          "casts": 1,
+          "unkGlue": 1,
+          "rawMem": 0,
+          "addrDeref": 0
+        },
+        "errorMarkers": [
+          "lift: cannot lift 'uninit_join': unmodelled control transfer 'bgtzl' at 0x0 — branch-likely / coprocessor branch not supported"
+        ]
+      },
+      "m2c": {
+        "decompiler": "m2c",
+        "outcome": "declined",
+        "source": "s32 uninit_join(s32 arg0) {\n    if (arg0 > 0) {\n\n    }\n    return M2C_ERROR(/* Read from unset register $v0 */) | 1;\n}\n",
+        "score": null,
+        "maxScore": null,
+        "compileErrors": null,
+        "quality": {
+          "score": 88,
+          "lines": 5,
+          "gotos": 0,
+          "casts": 0,
+          "unkGlue": 1,
+          "rawMem": 0,
+          "addrDeref": 0
+        },
+        "errorMarkers": [
+          "M2C_ERROR"
+        ]
+      },
+      "gapSize": null,
+      "scripts": {
+        "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `uninit_join` — benchmark function synthetic:uninit_join:gcc2.7.2kmc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The benchmark's objdump→GNU-as normalization of this function's disassembly (m2c cannot\n# read raw objdump), including the jump-table/const data sections recovered from the target\n# object — the exact text the benchmark fed m2c.\ncat > in.s <<'ASM_INPUT'\nglabel uninit_join\n    bgtzl\t$a0, .L8\n    sll\t$v0, $a0, 0x1\n.L8:\n    jr\t$ra\n    ori\t$v0, $v0, 0x1\nASM_INPUT\n\n# (This function ran with NO context header — the benchmark fed m2c the assembly alone.)\n\nargs=(\n  --target mips-gcc-c     # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function uninit_join  # the symbol to decompile from in.s\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `uninit_join` — benchmark function synthetic:uninit_join:gcc2.7.2kmc.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:uninit_join:gcc2.7.2kmc --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact `objdump -d --no-show-raw-insn` text.\ncat > in.asm <<'ASM_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <uninit_join>:\n   0:\tbgtzl\ta0,8 <uninit_join+0x8>\n   4:\tsll\tv0,a0,0x1\n   8:\tjr\tra\n   c:\tori\tv0,v0,0x1\nASM_INPUT\n\n# The target object's objdump -s -r -t dump — the data sections (jump tables, anonymous\n# constants) the text-only disassembly lacks; the benchmark recovered them from the object.\ncat > dump.txt <<'DUMP_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /host-tmp/asmlift-mgcc-ref-4165d09060235bc8/ref.c\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t00000010 uninit_join\n\n\nContents of section .text:\n 0000 5c800001 00041040 03e00008 34420001  \\......@....4B..\nContents of section .reginfo:\n 0000 80000014 00000000 00000000 00000000  ................\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.\nDUMP_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target gcc2.7.2kmc    # frontend + target description (ISA, calling convention, compiler idioms)\n  --name uninit_join      # the symbol to decompile (multi-function input selects by name)\n  --asm-data dump.txt     # the data sections above (jump-table/const recovery)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+      }
+    },
+    {
+      "id": "synthetic:uninit_join:ido7.1",
+      "sym": "uninit_join",
+      "project": "synthetic",
+      "tier": "synthetic",
+      "toolchain": "ido7.1",
+      "isa": "mips",
+      "compiler": "ido",
+      "language": "c",
+      "features": [
+        "uninit-local",
+        "branch",
+        "strength-reduce"
+      ],
+      "loc": 1,
+      "refSource": "int uninit_join(int a){ int r; if(a>0) r=a*2; return r+1; }",
+      "targetAsm": "\ntarget.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <uninit_join>:\n   0:\tblez\ta0,10 <uninit_join+0x10>\n   4:\taddiu\tsp,sp,-8\n   8:\tsll\tt6,a0,0x1\n   c:\tsw\tt6,4(sp)\n  10:\tlw\tv0,4(sp)\n  14:\taddiu\tsp,sp,8\n  18:\tjr\tra\n  1c:\taddiu\tv0,v0,1\n",
+      "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    d  .text\t00000020 .text\n00000000 g     F .text\t00000020 uninit_join\n\n\nContents of section .text:\n 0000 18800003 27bdfff8 00047040 afae0004  ....'.....p@....\n 0010 8fa20004 27bd0008 03e00008 24420001  ....'.......$B..\nContents of section .options:\n 0000 01200000 00000000 a0004014 00000000  . ........@.....\n 0010 00000000 00000000 00000000 00007ff0  ................\n 0020 07100000 00000000 00000000 00000000  ................\n 0030 08100000 00000000 00000000 00000000  ................\nContents of section .reginfo:\n 0000 a0004014 00000000 00000000 00000000  ..@.............\n 0010 00000000 00007ff0                    ........        \nContents of section .mdebug:\n 0000 7009070a 00000008 00000004 00000198  p...............\n 0010 00000005 000002e4 00000001 0000019c  ................\n 0020 00000004 000001d0 00000000 00000000  ................\n 0030 00000011 00000200 0000003c 00000244  ...........<...D\n 0040 0000000c 00000280 00000001 0000028c  ................\n 0050 00000000 00000000 00000001 000002d4  ................\n 0060 07000000 00000000 00000001 00000000  ................\n 0070 00000000 00000000 ffffffff 00000000  ................\n 0080 00000000 00000008 001d001f 00000002  ................\n 0090 00000002 00000000 00000001 00000000  ................\n 00a0 2c200004 0000002e 00000000 1820000f  , ........... ..\n 00b0 0000002e 00000020 20200001 00000001  .......   ......\n 00c0 00000000 20200000 02000000 03000000  ....  ..........\n 00d0 04000000 05000000 06000000 07000000  ................\n 00e0 08000000 09000000 20000000 21000000  ........ ...!...\n 00f0 0a000000 0b000000 0b000000 1a000000  ................\n 0100 00000000 00000003 06000000 002f746d  ............./tm\n 0110 702f6173 6d6c6966 742d6d69 70732d72  p/asmlift-mips-r\n 0120 65662d34 31363564 30393036 30323335  ef-4165d09060235\n 0130 6263382f 7265662e 6300756e 696e6974  bc8/ref.c.uninit\n 0140 5f6a6f69 6e000000 756e696e 69745f6a  _join...uninit_j\n 0150 6f696e00 00000000 00000001 00000000  oin.............\n 0160 0000003a 00000000 00000004 00000000  ...:............\n 0170 00000008 00000000 00000000 00000001  ................\n 0180 00000000 00000011 00000000 00000000  ................\n 0190 01800000 00000000 00000001 00000000  ................\n 01a0 00000000 00000000 18200001 00000000  ......... ......\n 01b0 00000000 00000000 00000000 00000000  ................\n 01c0 00000000 7fffffff 00000000 00000000  ................\n 01d0 00000002                             ....            \n",
+      "asmlift": {
+        "decompiler": "asmlift",
+        "outcome": "declined",
+        "source": "/* asmlift could not decompile 'uninit_join' — lift: cannot lift 'uninit_join': stack slot sp@4 is read on a path that never stores it (partially-initialised local) — not modelled */\n/* original assembly: */\n/*   target.o:     file format elf32-tradbigmips */\n/*   Disassembly of section .text: */\n/*   00000000 <uninit_join>: */\n/*      0:\tblez\ta0,10 <uninit_join+0x10> */\n/*      4:\taddiu\tsp,sp,-8 */\n/*      8:\tsll\tt6,a0,0x1 */\n/*      c:\tsw\tt6,4(sp) */\n/*     10:\tlw\tv0,4(sp) */\n/*     14:\taddiu\tsp,sp,8 */\n/*     18:\tjr\tra */\n/*     1c:\taddiu\tv0,v0,1 */\nvoid uninit_join(void) {\n    ASMLIFT_ERROR(\"could not decompile (lift): cannot lift 'uninit_join': stack slot sp@4 is read on a path that never stores it (partially-initialised local) — not modelled\");\n}\n",
+        "score": null,
+        "maxScore": null,
+        "compileErrors": null,
+        "quality": {
+          "score": 88,
+          "lines": 16,
+          "gotos": 0,
+          "casts": 1,
+          "unkGlue": 1,
+          "rawMem": 0,
+          "addrDeref": 0
+        },
+        "errorMarkers": [
+          "lift: cannot lift 'uninit_join': stack slot sp@4 is read on a path that never stores it (partially-initialised local) — not modelled"
+        ]
+      },
+      "m2c": {
+        "decompiler": "m2c",
+        "outcome": "match",
+        "source": "s32 uninit_join(s32 arg0) {\n    s32 sp4;\n\n    if (arg0 > 0) {\n        sp4 = arg0 * 2;\n    }\n    return sp4 + 1;\n}\n",
+        "score": 0,
+        "maxScore": 8,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 0
+        },
+        "quality": {
+          "score": 100,
+          "lines": 7,
+          "gotos": 0,
+          "casts": 0,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        }
+      },
+      "gapSize": null,
+      "scripts": {
+        "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `uninit_join` — benchmark function synthetic:uninit_join:ido7.1.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The benchmark's objdump→GNU-as normalization of this function's disassembly (m2c cannot\n# read raw objdump), including the jump-table/const data sections recovered from the target\n# object — the exact text the benchmark fed m2c.\ncat > in.s <<'ASM_INPUT'\nglabel uninit_join\n    blez\t$a0, .L10\n    addiu\t$sp, $sp, -8\n    sll\t$t6, $a0, 0x1\n    sw\t$t6, 4($sp)\n.L10:\n    lw\t$v0, 4($sp)\n    addiu\t$sp, $sp, 8\n    jr\t$ra\n    addiu\t$v0, $v0, 1\nASM_INPUT\n\n# (This function ran with NO context header — the benchmark fed m2c the assembly alone.)\n\nargs=(\n  --target mips-ido-c     # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function uninit_join  # the symbol to decompile from in.s\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `uninit_join` — benchmark function synthetic:uninit_join:ido7.1.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:uninit_join:ido7.1 --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact `objdump -d --no-show-raw-insn` text.\ncat > in.asm <<'ASM_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <uninit_join>:\n   0:\tblez\ta0,10 <uninit_join+0x10>\n   4:\taddiu\tsp,sp,-8\n   8:\tsll\tt6,a0,0x1\n   c:\tsw\tt6,4(sp)\n  10:\tlw\tv0,4(sp)\n  14:\taddiu\tsp,sp,8\n  18:\tjr\tra\n  1c:\taddiu\tv0,v0,1\nASM_INPUT\n\n# The target object's objdump -s -r -t dump — the data sections (jump tables, anonymous\n# constants) the text-only disassembly lacks; the benchmark recovered them from the object.\ncat > dump.txt <<'DUMP_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    d  .text\t00000020 .text\n00000000 g     F .text\t00000020 uninit_join\n\n\nContents of section .text:\n 0000 18800003 27bdfff8 00047040 afae0004  ....'.....p@....\n 0010 8fa20004 27bd0008 03e00008 24420001  ....'.......$B..\nContents of section .options:\n 0000 01200000 00000000 a0004014 00000000  . ........@.....\n 0010 00000000 00000000 00000000 00007ff0  ................\n 0020 07100000 00000000 00000000 00000000  ................\n 0030 08100000 00000000 00000000 00000000  ................\nContents of section .reginfo:\n 0000 a0004014 00000000 00000000 00000000  ..@.............\n 0010 00000000 00007ff0                    ........        \nContents of section .mdebug:\n 0000 7009070a 00000008 00000004 00000198  p...............\n 0010 00000005 000002e4 00000001 0000019c  ................\n 0020 00000004 000001d0 00000000 00000000  ................\n 0030 00000011 00000200 0000003c 00000244  ...........<...D\n 0040 0000000c 00000280 00000001 0000028c  ................\n 0050 00000000 00000000 00000001 000002d4  ................\n 0060 07000000 00000000 00000001 00000000  ................\n 0070 00000000 00000000 ffffffff 00000000  ................\n 0080 00000000 00000008 001d001f 00000002  ................\n 0090 00000002 00000000 00000001 00000000  ................\n 00a0 2c200004 0000002e 00000000 1820000f  , ........... ..\n 00b0 0000002e 00000020 20200001 00000001  .......   ......\n 00c0 00000000 20200000 02000000 03000000  ....  ..........\n 00d0 04000000 05000000 06000000 07000000  ................\n 00e0 08000000 09000000 20000000 21000000  ........ ...!...\n 00f0 0a000000 0b000000 0b000000 1a000000  ................\n 0100 00000000 00000003 06000000 002f746d  ............./tm\n 0110 702f6173 6d6c6966 742d6d69 70732d72  p/asmlift-mips-r\n 0120 65662d34 31363564 30393036 30323335  ef-4165d09060235\n 0130 6263382f 7265662e 6300756e 696e6974  bc8/ref.c.uninit\n 0140 5f6a6f69 6e000000 756e696e 69745f6a  _join...uninit_j\n 0150 6f696e00 00000000 00000001 00000000  oin.............\n 0160 0000003a 00000000 00000004 00000000  ...:............\n 0170 00000008 00000000 00000000 00000001  ................\n 0180 00000000 00000011 00000000 00000000  ................\n 0190 01800000 00000000 00000001 00000000  ................\n 01a0 00000000 00000000 18200001 00000000  ......... ......\n 01b0 00000000 00000000 00000000 00000000  ................\n 01c0 00000000 7fffffff 00000000 00000000  ................\n 01d0 00000002                             ....\nDUMP_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target ido7.1         # frontend + target description (ISA, calling convention, compiler idioms)\n  --name uninit_join      # the symbol to decompile (multi-function input selects by name)\n  --asm-data dump.txt     # the data sections above (jump-table/const recovery)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+      }
+    },
+    {
+      "id": "synthetic:uninit_join:mwcc_242_81",
+      "sym": "uninit_join",
+      "project": "synthetic",
+      "tier": "synthetic",
+      "toolchain": "mwcc_242_81",
+      "isa": "ppc",
+      "compiler": "mwcc",
+      "language": "c",
+      "features": [
+        "uninit-local",
+        "branch",
+        "strength-reduce"
+      ],
+      "loc": 1,
+      "refSource": "int uninit_join(int a){ int r; if(a>0) r=a*2; return r+1; }",
+      "targetAsm": "\ntarget.o:     file format elf32-powerpc\n\n\nDisassembly of section .text:\n\n00000000 <uninit_join>:\n   0:\tcmpwi   r3,0\n   4:\tble     c <uninit_join+0xc>\n   8:\tslwi    r3,r3,1\n   c:\taddi    r3,r3,1\n  10:\tblr\n",
+      "asmDump": "\ntarget.o:     file format elf32-powerpc\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 ref.c\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .mwcats.text\t00000000 .mwcats.text\n00000000 g     F .text\t00000014 uninit_join\n\n\nRELOCATION RECORDS FOR [.mwcats.text]:\nOFFSET   TYPE              VALUE\n00000004 R_PPC_ADDR32      uninit_join\n\n\nContents of section .text:\n 0000 2c030000 40810008 5463083c 38630001  ,...@...Tc.<8c..\n 0010 4e800020                             N..             \nContents of section .mwcats.text:\n 0000 02000014 00000000                    ........        \nContents of section .comment:\n 0000 436f6465 57617272 696f720a 02040201  CodeWarrior.....\n 0010 01020016 2c000000 00000000 00000000  ....,...........\n 0020 00000000 00000000 00000000 00000000  ................\n 0030 00000000 00000001 00000000 00000004  ................\n 0040 00000000 00000004 00000000 00000004  ................\n 0050 00000000                             ....            \n",
+      "asmlift": {
+        "decompiler": "asmlift",
+        "candidateLabel": "signed",
+        "outcome": "match",
+        "source": "s32 uninit_join(s32 a0) {\n    if (a0 > 0) a0 = a0 << 1;\n    return a0 + 1;\n}\n",
+        "score": 0,
+        "maxScore": 5,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 0
+        },
+        "quality": {
+          "score": 100,
+          "lines": 4,
+          "gotos": 0,
+          "casts": 0,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        }
+      },
+      "m2c": {
+        "decompiler": "m2c",
+        "outcome": "match",
+        "source": "s32 uninit_join(s32 arg0) {\n    s32 var_r3;\n\n    var_r3 = arg0;\n    if (var_r3 > 0) {\n        var_r3 *= 2;\n    }\n    return var_r3 + 1;\n}\n",
+        "score": 0,
+        "maxScore": 5,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 0
+        },
+        "quality": {
+          "score": 100,
+          "lines": 8,
+          "gotos": 0,
+          "casts": 0,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        }
+      },
+      "gapSize": null,
+      "scripts": {
+        "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `uninit_join` — benchmark function synthetic:uninit_join:mwcc_242_81.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The benchmark's objdump→GNU-as normalization of this function's disassembly (m2c cannot\n# read raw objdump), including the jump-table/const data sections recovered from the target\n# object — the exact text the benchmark fed m2c.\ncat > in.s <<'ASM_INPUT'\nglabel uninit_join\n    cmpwi   r3,0\n    ble      .Lc\n    slwi    r3,r3,1\n.Lc:\n    addi    r3,r3,1\n    blr\nASM_INPUT\n\n# (This function ran with NO context header — the benchmark fed m2c the assembly alone.)\n\nargs=(\n  --target ppc-mwcc-c     # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function uninit_join  # the symbol to decompile from in.s\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `uninit_join` — benchmark function synthetic:uninit_join:mwcc_242_81.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:uninit_join:mwcc_242_81 --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact `objdump -d --no-show-raw-insn` text.\ncat > in.asm <<'ASM_INPUT'\n\ntarget.o:     file format elf32-powerpc\n\n\nDisassembly of section .text:\n\n00000000 <uninit_join>:\n   0:\tcmpwi   r3,0\n   4:\tble     c <uninit_join+0xc>\n   8:\tslwi    r3,r3,1\n   c:\taddi    r3,r3,1\n  10:\tblr\nASM_INPUT\n\n# The target object's objdump -s -r -t dump — the data sections (jump tables, anonymous\n# constants) the text-only disassembly lacks; the benchmark recovered them from the object.\ncat > dump.txt <<'DUMP_INPUT'\n\ntarget.o:     file format elf32-powerpc\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 ref.c\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .mwcats.text\t00000000 .mwcats.text\n00000000 g     F .text\t00000014 uninit_join\n\n\nRELOCATION RECORDS FOR [.mwcats.text]:\nOFFSET   TYPE              VALUE\n00000004 R_PPC_ADDR32      uninit_join\n\n\nContents of section .text:\n 0000 2c030000 40810008 5463083c 38630001  ,...@...Tc.<8c..\n 0010 4e800020                             N..             \nContents of section .mwcats.text:\n 0000 02000014 00000000                    ........        \nContents of section .comment:\n 0000 436f6465 57617272 696f720a 02040201  CodeWarrior.....\n 0010 01020016 2c000000 00000000 00000000  ....,...........\n 0020 00000000 00000000 00000000 00000000  ................\n 0030 00000000 00000001 00000000 00000004  ................\n 0040 00000000 00000004 00000000 00000004  ................\n 0050 00000000                             ....\nDUMP_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target mwcc_242_81    # frontend + target description (ISA, calling convention, compiler idioms)\n  --name uninit_join      # the symbol to decompile (multi-function input selects by name)\n  --asm-data dump.txt     # the data sections above (jump-table/const recovery)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+      }
+    },
+    {
+      "id": "synthetic:uninit_spill:agbcc",
+      "sym": "uninit_spill",
+      "project": "synthetic",
+      "tier": "synthetic",
+      "toolchain": "agbcc",
+      "isa": "arm",
+      "compiler": "agbcc",
+      "language": "c",
+      "features": [
+        "uninit-local",
+        "array",
+        "switch",
+        "loop",
+        "comparison-tree"
+      ],
+      "loc": 1,
+      "refSource": "int uninit_spill(int k,int *p){ int v0,v1,v2,v3,v4,v5,v6,v7,v8,v9; int i,s=0; switch(k){ case 0: v0=p[0];v1=p[1];v2=p[2];v3=p[3];v4=p[4];v5=p[5];v6=p[6];v7=p[7];v8=p[8];v9=p[9]; break; case 1: v0=p[10];v1=p[11];v2=p[12];v3=p[13];v4=p[14];v5=p[15];v6=p[16];v7=p[17];v8=p[18];v9=p[19]; break; } for(i=0;i<8;i++) s+=p[i]*v0+v1*v2+v3*v4+v5*v6+v7*v8+v9; return s; }",
+      "targetAsm": "@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tuninit_spill\n\t.type\t uninit_spill,function\n\t.thumb_func\nuninit_spill:\n\tpush\t{r4, r5, r6, r7, lr}\n\tmov\tr7, sl\n\tmov\tr6, r9\n\tmov\tr5, r8\n\tpush\t{r5, r6, r7}\n\tadd\tsp, sp, #-0xc\n\tmov\tr6, #0x0\n\tmov\tsl, r6\n\tcmp\tr0, #0\n\tbeq\t.L4\t@cond_branch\n\tcmp\tr0, #0x1\n\tbeq\t.L5\t@cond_branch\n\tb\t.L3\n.L4:\n\tldr\tr7, [r1]\n\tmov\tip, r7\n\tldr\tr0, [r1, #0x4]\n\tstr\tr0, [sp]\n\tldr\tr6, [r1, #0x8]\n\tstr\tr6, [sp, #0x4]\n\tldr\tr7, [r1, #0xc]\n\tmov\tr9, r7\n\tldr\tr0, [r1, #0x10]\n\tstr\tr0, [sp, #0x8]\n\tldr\tr6, [r1, #0x14]\n\tmov\tr8, r6\n\tldr\tr5, [r1, #0x18]\n\tldr\tr4, [r1, #0x1c]\n\tldr\tr2, [r1, #0x20]\n\tldr\tr3, [r1, #0x24]\n\tb\t.L3\n.L5:\n\tldr\tr7, [r1, #0x28]\n\tmov\tip, r7\n\tldr\tr0, [r1, #0x2c]\n\tstr\tr0, [sp]\n\tldr\tr6, [r1, #0x30]\n\tstr\tr6, [sp, #0x4]\n\tldr\tr7, [r1, #0x34]\n\tmov\tr9, r7\n\tldr\tr0, [r1, #0x38]\n\tstr\tr0, [sp, #0x8]\n\tldr\tr6, [r1, #0x3c]\n\tmov\tr8, r6\n\tldr\tr5, [r1, #0x40]\n\tldr\tr4, [r1, #0x44]\n\tldr\tr2, [r1, #0x48]\n\tldr\tr3, [r1, #0x4c]\n.L3:\n\tldr\tr0, [sp]\n\tldr\tr6, [sp, #0x4]\n\tmov\tr7, r0\n\tmul\tr7, r7, r6\n\tstr\tr7, [sp, #0x4]\n\tldr\tr7, [sp, #0x8]\n\tmov\tr6, r9\n\tmul\tr6, r6, r7\n\tmov\tr0, r8\n\tmul\tr0, r0, r5\n\tadd\tr5, r0, #0\n\tmul\tr4, r4, r2\n\tmov\tr2, #0x7\n.L11:\n\tldmia\tr1!, {r0}\n\tmov\tr7, ip\n\tmul\tr7, r7, r0\n\tadd\tr0, r7, #0\n\tldr\tr7, [sp, #0x4]\n\tadd\tr0, r0, r7\n\tadd\tr0, r0, r6\n\tadd\tr0, r0, r5\n\tadd\tr0, r0, r4\n\tadd\tr0, r0, r3\n\tadd\tsl, sl, r0\n\tsub\tr2, r2, #0x1\n\tcmp\tr2, #0\n\tbge\t.L11\t@cond_branch\n\tmov\tr0, sl\n\tadd\tsp, sp, #0xc\n\tpop\t{r3, r4, r5}\n\tmov\tr8, r3\n\tmov\tr9, r4\n\tmov\tsl, r5\n\tpop\t{r4, r5, r6, r7}\n\tpop\t{r1}\n\tbx\tr1\n.Lfe1:\n\t.size\t uninit_spill,.Lfe1-uninit_spill\n",
+      "asmlift": {
+        "decompiler": "asmlift",
+        "outcome": "declined",
+        "source": "/* asmlift could not decompile 'uninit_spill' — lift: cannot lift 'uninit_spill': stack slot sp@0 is read on a path that never stores it (partially-initialised local) — not modelled */\n/* original assembly: */\n/*   @ Generated by gcc 2.9-arm-000512 for Thumb/elf */\n/*   \t.code\t16 */\n/*   .gcc2_compiled.: */\n/*   .text */\n/*   \t.align\t2, 0 */\n/*   \t.globl\tuninit_spill */\n/*   \t.type\t uninit_spill,function */\n/*   \t.thumb_func */\n/*   uninit_spill: */\n/*   \tpush\t{r4, r5, r6, r7, lr} */\n/*   \tmov\tr7, sl */\n/*   \tmov\tr6, r9 */\n/*   \tmov\tr5, r8 */\n/*   \tpush\t{r5, r6, r7} */\n/*   \tadd\tsp, sp, #-0xc */\n/*   \tmov\tr6, #0x0 */\n/*   \tmov\tsl, r6 */\n/*   \tcmp\tr0, #0 */\n/*   \tbeq\t.L4\t@cond_branch */\n/*   \tcmp\tr0, #0x1 */\n/*   \tbeq\t.L5\t@cond_branch */\n/*   \tb\t.L3 */\n/*   .L4: */\n/*   \tldr\tr7, [r1] */\n/*   \tmov\tip, r7 */\n/*   \tldr\tr0, [r1, #0x4] */\n/*   \tstr\tr0, [sp] */\n/*   \tldr\tr6, [r1, #0x8] */\n/*   \tstr\tr6, [sp, #0x4] */\n/*   \tldr\tr7, [r1, #0xc] */\n/*   \tmov\tr9, r7 */\n/*   \tldr\tr0, [r1, #0x10] */\n/*   \tstr\tr0, [sp, #0x8] */\n/*   \tldr\tr6, [r1, #0x14] */\n/*   \tmov\tr8, r6 */\n/*   \tldr\tr5, [r1, #0x18] */\n/*   \tldr\tr4, [r1, #0x1c] */\n/*   \tldr\tr2, [r1, #0x20] */\n/*   \tldr\tr3, [r1, #0x24] */\n/*   \tb\t.L3 */\n/*   .L5: */\n/*   \tldr\tr7, [r1, #0x28] */\n/*   \tmov\tip, r7 */\n/*   \tldr\tr0, [r1, #0x2c] */\n/*   \tstr\tr0, [sp] */\n/*   \tldr\tr6, [r1, #0x30] */\n/*   \tstr\tr6, [sp, #0x4] */\n/*   \tldr\tr7, [r1, #0x34] */\n/*   \tmov\tr9, r7 */\n/*   \tldr\tr0, [r1, #0x38] */\n/*   \tstr\tr0, [sp, #0x8] */\n/*   \tldr\tr6, [r1, #0x3c] */\n/*   \tmov\tr8, r6 */\n/*   \tldr\tr5, [r1, #0x40] */\n/*   \tldr\tr4, [r1, #0x44] */\n/*   \tldr\tr2, [r1, #0x48] */\n/*   \tldr\tr3, [r1, #0x4c] */\n/*   .L3: */\n/*   \tldr\tr0, [sp] */\n/*   \tldr\tr6, [sp, #0x4] */\n/*   \tmov\tr7, r0 */\n/*   \tmul\tr7, r7, r6 */\n/*   \tstr\tr7, [sp, #0x4] */\n/*   \tldr\tr7, [sp, #0x8] */\n/*   \tmov\tr6, r9 */\n/*   \tmul\tr6, r6, r7 */\n/*   \tmov\tr0, r8 */\n/*   \tmul\tr0, r0, r5 */\n/*   \tadd\tr5, r0, #0 */\n/*   \tmul\tr4, r4, r2 */\n/*   \tmov\tr2, #0x7 */\n/*   .L11: */\n/*   \tldmia\tr1!, {r0} */\n/*   \tmov\tr7, ip */\n/*   \tmul\tr7, r7, r0 */\n/*   \tadd\tr0, r7, #0 */\n/*   \tldr\tr7, [sp, #0x4] */\n/*   \tadd\tr0, r0, r7 */\n/*   \tadd\tr0, r0, r6 */\n/*   \tadd\tr0, r0, r5 */\n/*   \tadd\tr0, r0, r4 */\n/*   \tadd\tr0, r0, r3 */\n/*   \tadd\tsl, sl, r0 */\n/*   \tsub\tr2, r2, #0x1 */\n/*   \tcmp\tr2, #0 */\n/*   \tbge\t.L11\t@cond_branch */\n/*   \tmov\tr0, sl */\n/*   \tadd\tsp, sp, #0xc */\n/*   \tpop\t{r3, r4, r5} */\n/*   \tmov\tr8, r3 */\n/*   \tmov\tr9, r4 */\n/*   \tmov\tsl, r5 */\n/*   \tpop\t{r4, r5, r6, r7} */\n/*   \tpop\t{r1} */\n/*   \tbx\tr1 */\n/*   .Lfe1: */\n/*   \t.size\t uninit_spill,.Lfe1-uninit_spill */\nvoid uninit_spill(void) {\n    ASMLIFT_ERROR(\"could not decompile (lift): cannot lift 'uninit_spill': stack slot sp@0 is read on a path that never stores it (partially-initialised local) — not modelled\");\n}\n",
+        "score": null,
+        "maxScore": null,
+        "compileErrors": null,
+        "quality": {
+          "score": 88,
+          "lines": 102,
+          "gotos": 0,
+          "casts": 1,
+          "unkGlue": 1,
+          "rawMem": 0,
+          "addrDeref": 0
+        },
+        "errorMarkers": [
+          "lift: cannot lift 'uninit_spill': stack slot sp@0 is read on a path that never stores it (partially-initialised local) — not modelled"
+        ]
+      },
+      "m2c": {
+        "decompiler": "m2c",
+        "outcome": "declined",
+        "source": "s32 uninit_spill(s32 arg0, s32 *arg1, s32 arg2, s32 arg3) {\n    s32 *var_r1;\n    s32 temp_r0;\n    s32 var_r2;\n    s32 var_r2_2;\n    s32 var_r3;\n    s32 var_r4;\n    s32 var_r5;\n    s32 var_r8;\n    s32 var_r9;\n    s32 var_sl;\n\n    var_r4 = saved_reg_r4;\n    var_r8 = saved_reg_r8;\n    var_r9 = saved_reg_r9;\n    var_r1 = arg1;\n    var_r2 = arg2;\n    var_r3 = arg3;\n    var_r5 = saved_reg_r8;\n    var_sl = 0;\n    switch (arg0) {                                 /* irregular */\n    case 0:\n        unksp0 = var_r1->unk4;\n        unksp4 = var_r1->unk8;\n        var_r9 = var_r1->unkC;\n        unksp8 = var_r1->unk10;\n        var_r8 = var_r1->unk14;\n        var_r5 = var_r1->unk18;\n        var_r4 = var_r1->unk1C;\n        var_r2 = var_r1->unk20;\n        var_r3 = var_r1->unk24;\n        break;\n    case 1:\n        unksp0 = var_r1->unk2C;\n        unksp4 = var_r1->unk30;\n        var_r9 = var_r1->unk34;\n        unksp8 = var_r1->unk38;\n        var_r8 = var_r1->unk3C;\n        var_r5 = var_r1->unk40;\n        var_r4 = var_r1->unk44;\n        var_r2 = var_r1->unk48;\n        var_r3 = var_r1->unk4C;\n        break;\n    }\n    unksp4 *= unksp0;\n    var_r2_2 = 7;\n    do {\n        temp_r0 = *var_r1;\n        var_r1 += 4;\n        var_sl += (M2C_ERROR(/* Read from unset register $r12 */) * temp_r0) + unksp4 + (var_r9 * unksp8) + (var_r8 * var_r5) + (var_r4 * var_r2) + var_r3;\n        var_r2_2 -= 1;\n    } while (var_r2_2 >= 0);\n    return var_sl;\n}\n",
+        "score": null,
+        "maxScore": null,
+        "compileErrors": null,
+        "quality": {
+          "score": 88,
+          "lines": 53,
+          "gotos": 0,
+          "casts": 0,
+          "unkGlue": 1,
+          "rawMem": 0,
+          "addrDeref": 0
+        },
+        "errorMarkers": [
+          "M2C_ERROR"
+        ]
+      },
+      "gapSize": null,
+      "scripts": {
+        "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `uninit_spill` — benchmark function synthetic:uninit_spill:agbcc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The exact agbcc `.s` text the benchmark fed m2c, verbatim.\ncat > in.s <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tuninit_spill\n\t.type\t uninit_spill,function\n\t.thumb_func\nuninit_spill:\n\tpush\t{r4, r5, r6, r7, lr}\n\tmov\tr7, sl\n\tmov\tr6, r9\n\tmov\tr5, r8\n\tpush\t{r5, r6, r7}\n\tadd\tsp, sp, #-0xc\n\tmov\tr6, #0x0\n\tmov\tsl, r6\n\tcmp\tr0, #0\n\tbeq\t.L4\t@cond_branch\n\tcmp\tr0, #0x1\n\tbeq\t.L5\t@cond_branch\n\tb\t.L3\n.L4:\n\tldr\tr7, [r1]\n\tmov\tip, r7\n\tldr\tr0, [r1, #0x4]\n\tstr\tr0, [sp]\n\tldr\tr6, [r1, #0x8]\n\tstr\tr6, [sp, #0x4]\n\tldr\tr7, [r1, #0xc]\n\tmov\tr9, r7\n\tldr\tr0, [r1, #0x10]\n\tstr\tr0, [sp, #0x8]\n\tldr\tr6, [r1, #0x14]\n\tmov\tr8, r6\n\tldr\tr5, [r1, #0x18]\n\tldr\tr4, [r1, #0x1c]\n\tldr\tr2, [r1, #0x20]\n\tldr\tr3, [r1, #0x24]\n\tb\t.L3\n.L5:\n\tldr\tr7, [r1, #0x28]\n\tmov\tip, r7\n\tldr\tr0, [r1, #0x2c]\n\tstr\tr0, [sp]\n\tldr\tr6, [r1, #0x30]\n\tstr\tr6, [sp, #0x4]\n\tldr\tr7, [r1, #0x34]\n\tmov\tr9, r7\n\tldr\tr0, [r1, #0x38]\n\tstr\tr0, [sp, #0x8]\n\tldr\tr6, [r1, #0x3c]\n\tmov\tr8, r6\n\tldr\tr5, [r1, #0x40]\n\tldr\tr4, [r1, #0x44]\n\tldr\tr2, [r1, #0x48]\n\tldr\tr3, [r1, #0x4c]\n.L3:\n\tldr\tr0, [sp]\n\tldr\tr6, [sp, #0x4]\n\tmov\tr7, r0\n\tmul\tr7, r7, r6\n\tstr\tr7, [sp, #0x4]\n\tldr\tr7, [sp, #0x8]\n\tmov\tr6, r9\n\tmul\tr6, r6, r7\n\tmov\tr0, r8\n\tmul\tr0, r0, r5\n\tadd\tr5, r0, #0\n\tmul\tr4, r4, r2\n\tmov\tr2, #0x7\n.L11:\n\tldmia\tr1!, {r0}\n\tmov\tr7, ip\n\tmul\tr7, r7, r0\n\tadd\tr0, r7, #0\n\tldr\tr7, [sp, #0x4]\n\tadd\tr0, r0, r7\n\tadd\tr0, r0, r6\n\tadd\tr0, r0, r5\n\tadd\tr0, r0, r4\n\tadd\tr0, r0, r3\n\tadd\tsl, sl, r0\n\tsub\tr2, r2, #0x1\n\tcmp\tr2, #0\n\tbge\t.L11\t@cond_branch\n\tmov\tr0, sl\n\tadd\tsp, sp, #0xc\n\tpop\t{r3, r4, r5}\n\tmov\tr8, r3\n\tmov\tr9, r4\n\tmov\tsl, r5\n\tpop\t{r4, r5, r6, r7}\n\tpop\t{r1}\n\tbx\tr1\n.Lfe1:\n\t.size\t uninit_spill,.Lfe1-uninit_spill\nASM_INPUT\n\n# (This function ran with NO context header — the benchmark fed m2c the assembly alone.)\n\nargs=(\n  --target gba            # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function uninit_spill # the symbol to decompile from in.s\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `uninit_spill` — benchmark function synthetic:uninit_spill:agbcc.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:uninit_spill:agbcc --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact agbcc `.s` text.\ncat > in.asm <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tuninit_spill\n\t.type\t uninit_spill,function\n\t.thumb_func\nuninit_spill:\n\tpush\t{r4, r5, r6, r7, lr}\n\tmov\tr7, sl\n\tmov\tr6, r9\n\tmov\tr5, r8\n\tpush\t{r5, r6, r7}\n\tadd\tsp, sp, #-0xc\n\tmov\tr6, #0x0\n\tmov\tsl, r6\n\tcmp\tr0, #0\n\tbeq\t.L4\t@cond_branch\n\tcmp\tr0, #0x1\n\tbeq\t.L5\t@cond_branch\n\tb\t.L3\n.L4:\n\tldr\tr7, [r1]\n\tmov\tip, r7\n\tldr\tr0, [r1, #0x4]\n\tstr\tr0, [sp]\n\tldr\tr6, [r1, #0x8]\n\tstr\tr6, [sp, #0x4]\n\tldr\tr7, [r1, #0xc]\n\tmov\tr9, r7\n\tldr\tr0, [r1, #0x10]\n\tstr\tr0, [sp, #0x8]\n\tldr\tr6, [r1, #0x14]\n\tmov\tr8, r6\n\tldr\tr5, [r1, #0x18]\n\tldr\tr4, [r1, #0x1c]\n\tldr\tr2, [r1, #0x20]\n\tldr\tr3, [r1, #0x24]\n\tb\t.L3\n.L5:\n\tldr\tr7, [r1, #0x28]\n\tmov\tip, r7\n\tldr\tr0, [r1, #0x2c]\n\tstr\tr0, [sp]\n\tldr\tr6, [r1, #0x30]\n\tstr\tr6, [sp, #0x4]\n\tldr\tr7, [r1, #0x34]\n\tmov\tr9, r7\n\tldr\tr0, [r1, #0x38]\n\tstr\tr0, [sp, #0x8]\n\tldr\tr6, [r1, #0x3c]\n\tmov\tr8, r6\n\tldr\tr5, [r1, #0x40]\n\tldr\tr4, [r1, #0x44]\n\tldr\tr2, [r1, #0x48]\n\tldr\tr3, [r1, #0x4c]\n.L3:\n\tldr\tr0, [sp]\n\tldr\tr6, [sp, #0x4]\n\tmov\tr7, r0\n\tmul\tr7, r7, r6\n\tstr\tr7, [sp, #0x4]\n\tldr\tr7, [sp, #0x8]\n\tmov\tr6, r9\n\tmul\tr6, r6, r7\n\tmov\tr0, r8\n\tmul\tr0, r0, r5\n\tadd\tr5, r0, #0\n\tmul\tr4, r4, r2\n\tmov\tr2, #0x7\n.L11:\n\tldmia\tr1!, {r0}\n\tmov\tr7, ip\n\tmul\tr7, r7, r0\n\tadd\tr0, r7, #0\n\tldr\tr7, [sp, #0x4]\n\tadd\tr0, r0, r7\n\tadd\tr0, r0, r6\n\tadd\tr0, r0, r5\n\tadd\tr0, r0, r4\n\tadd\tr0, r0, r3\n\tadd\tsl, sl, r0\n\tsub\tr2, r2, #0x1\n\tcmp\tr2, #0\n\tbge\t.L11\t@cond_branch\n\tmov\tr0, sl\n\tadd\tsp, sp, #0xc\n\tpop\t{r3, r4, r5}\n\tmov\tr8, r3\n\tmov\tr9, r4\n\tmov\tsl, r5\n\tpop\t{r4, r5, r6, r7}\n\tpop\t{r1}\n\tbx\tr1\n.Lfe1:\n\t.size\t uninit_spill,.Lfe1-uninit_spill\nASM_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target agbcc          # frontend + target description (ISA, calling convention, compiler idioms)\n  --name uninit_spill     # the symbol to decompile (multi-function input selects by name)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+      }
+    },
+    {
+      "id": "synthetic:uninit_spill:gcc2.7.2kmc",
+      "sym": "uninit_spill",
+      "project": "synthetic",
+      "tier": "synthetic",
+      "toolchain": "gcc2.7.2kmc",
+      "isa": "mips",
+      "compiler": "gcc",
+      "language": "c",
+      "features": [
+        "uninit-local",
+        "array",
+        "switch",
+        "loop",
+        "comparison-tree"
+      ],
+      "loc": 1,
+      "refSource": "int uninit_spill(int k,int *p){ int v0,v1,v2,v3,v4,v5,v6,v7,v8,v9; int i,s=0; switch(k){ case 0: v0=p[0];v1=p[1];v2=p[2];v3=p[3];v4=p[4];v5=p[5];v6=p[6];v7=p[7];v8=p[8];v9=p[9]; break; case 1: v0=p[10];v1=p[11];v2=p[12];v3=p[13];v4=p[14];v5=p[15];v6=p[16];v7=p[17];v8=p[18];v9=p[19]; break; } for(i=0;i<8;i++) s+=p[i]*v0+v1*v2+v3*v4+v5*v6+v7*v8+v9; return s; }",
+      "targetAsm": "\ntarget.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <uninit_spill>:\n   0:\tbeqz\ta0,1c <uninit_spill+0x1c>\n   4:\tmove\ta3,zero\n   8:\tli\tv0,1\n   c:\tbeq\ta0,v0,48 <uninit_spill+0x48>\n  10:\tnop\n  14:\tj\t70 <uninit_spill+0x70>\n  18:\tnop\n  1c:\tlw\tt2,0(a1)\n  20:\tlw\tt7,4(a1)\n  24:\tlw\tt5,8(a1)\n  28:\tlw\tt6,12(a1)\n  2c:\tlw\tt3,16(a1)\n  30:\tlw\tt1,20(a1)\n  34:\tlw\tv1,24(a1)\n  38:\tlw\tt4,28(a1)\n  3c:\tlw\tt0,32(a1)\n  40:\tj\t70 <uninit_spill+0x70>\n  44:\tlw\ta2,36(a1)\n  48:\tlw\tt2,40(a1)\n  4c:\tlw\tt7,44(a1)\n  50:\tlw\tt5,48(a1)\n  54:\tlw\tt6,52(a1)\n  58:\tlw\tt3,56(a1)\n  5c:\tlw\tt1,60(a1)\n  60:\tlw\tv1,64(a1)\n  64:\tlw\tt4,68(a1)\n  68:\tlw\tt0,72(a1)\n  6c:\tlw\ta2,76(a1)\n  70:\tnop\n  74:\tmult\tt7,t5\n  78:\tmflo\tt5\n\t...\n  84:\tmult\tt6,t3\n  88:\tmflo\tt3\n\t...\n  94:\tmult\tt1,v1\n  98:\tmflo\tt1\n  9c:\tmove\tv1,zero\n  a0:\tnop\n  a4:\tmult\tt4,t0\n  a8:\tmflo\ta0\n  ac:\tlw\tv0,0(a1)\n  b0:\tnop\n  b4:\tmult\tv0,t2\n  b8:\tmflo\tv0\n  bc:\taddiu\tv1,v1,1\n  c0:\taddu\tv0,v0,t5\n  c4:\taddu\tv0,v0,t3\n  c8:\taddu\tv0,v0,t1\n  cc:\taddu\tv0,v0,a0\n  d0:\taddu\tv0,v0,a2\n  d4:\taddu\ta3,a3,v0\n  d8:\tslti\tv0,v1,8\n  dc:\tbnez\tv0,ac <uninit_spill+0xac>\n  e0:\taddiu\ta1,a1,4\n  e4:\tjr\tra\n  e8:\tmove\tv0,a3\n  ec:\tnop\n",
+      "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /host-tmp/asmlift-mgcc-ref-8e25d66c9f6fb54c/ref.c\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t000000ec uninit_spill\n\n\nRELOCATION RECORDS FOR [.text]:\nOFFSET   TYPE              VALUE\n00000014 R_MIPS_26         .text\n00000040 R_MIPS_26         .text\n\n\nContents of section .text:\n 0000 10800006 00003821 24020001 1082000e  ......8!$.......\n 0010 00000000 0800001c 00000000 8caa0000  ................\n 0020 8caf0004 8cad0008 8cae000c 8cab0010  ................\n 0030 8ca90014 8ca30018 8cac001c 8ca80020  ............... \n 0040 0800001c 8ca60024 8caa0028 8caf002c  .......$...(...,\n 0050 8cad0030 8cae0034 8cab0038 8ca9003c  ...0...4...8...<\n 0060 8ca30040 8cac0044 8ca80048 8ca6004c  ...@...D...H...L\n 0070 00000000 01ed0018 00006812 00000000  ..........h.....\n 0080 00000000 01cb0018 00005812 00000000  ..........X.....\n 0090 00000000 01230018 00004812 00001821  .....#....H....!\n 00a0 00000000 01880018 00002012 8ca20000  .......... .....\n 00b0 00000000 004a0018 00001012 24630001  .....J......$c..\n 00c0 004d1021 004b1021 00491021 00441021  .M.!.K.!.I.!.D.!\n 00d0 00461021 00e23821 28620008 1440fff3  .F.!..8!(b...@..\n 00e0 24a50004 03e00008 00e01021 00000000  $..........!....\nContents of section .reginfo:\n 0000 8000fffc 00000000 00000000 00000000  ................\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.              \n",
+      "asmlift": {
+        "decompiler": "asmlift",
+        "candidateLabel": "unsigned",
+        "outcome": "nonmatch",
+        "source": "s32 uninit_spill(u32 a0, u32 a1, u32 a2, u32 a3, u32 a4, u32 a5, u32 a6, u32 a7, u32 a8, u32 a9, u32 a10, s32 * a11, u32 a12) {\n    s32 v0;\n    s32 * v1;\n    s32 v2;\n    s32 v3;\n    switch (a10) {\n        case 0:\n            a9 = *a11;\n            a0 = a11[1];\n            a1 = a11[2];\n            a2 = a11[3];\n            a3 = a11[4];\n            a4 = a11[5];\n            a5 = a11[6];\n            a6 = a11[7];\n            a7 = a11[8];\n            a12 = a11[9];\n            break;\n        case 1:\n            a8 = 1;\n            a9 = a11[10];\n            a0 = a11[11];\n            a1 = a11[12];\n            a2 = a11[13];\n            a3 = a11[14];\n            a4 = a11[15];\n            a5 = a11[16];\n            a6 = a11[17];\n            a7 = a11[18];\n            a12 = a11[19];\n            break;\n        default:\n            a8 = 1;\n    }\n    v1 = a11;\n    v3 = 0;\n    v2 = 0;\n    do {\n        v0 = *v1;\n        v2 = v2 + 1;\n        v3 = v3 + (v0 * a9 + a0 * a1 + a2 * a3 + a4 * a5 + a6 * a7 + a12);\n        v1 = v1 + 1;\n    } while (v2 < 8);\n    return v3;\n}\n",
+        "score": 57,
+        "maxScore": 70,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 11,
+          "delete": 4,
+          "replace": 1,
+          "opMismatch": 0,
+          "argMismatch": 41
+        },
+        "quality": {
+          "score": 96,
+          "lines": 45,
+          "gotos": 0,
+          "casts": 0,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        }
+      },
+      "m2c": {
+        "decompiler": "m2c",
+        "outcome": "declined",
+        "source": "s32 uninit_spill(s32 arg0, s32 *arg1, s32 arg2) {\n    s32 *var_a1;\n    s32 var_a2;\n    s32 var_a3;\n    s32 var_v1;\n\n    var_a1 = arg1;\n    var_a2 = arg2;\n    var_a3 = 0;\n    switch (arg0) {                                 /* irregular */\n    case 0:\n        var_a2 = var_a1->unk24;\n        break;\n    case 1:\n        var_a2 = var_a1->unk4C;\n        break;\n    }\n    var_v1 = 0;\n    do {\n        var_v1 += 1;\n        var_a3 += (*var_a1 * M2C_ERROR(/* Read from unset register $t2 */)) + (M2C_ERROR(/* Read from unset register $t7 */) * M2C_ERROR(/* Read from unset register $t5 */)) + (M2C_ERROR(/* Read from unset register $t6 */) * M2C_ERROR(/* Read from unset register $t3 */)) + (M2C_ERROR(/* Read from unset register $t1 */) * M2C_ERROR(/* Read from unset register $v1 */)) + (M2C_ERROR(/* Read from unset register $t4 */) * M2C_ERROR(/* Read from unset register $t0 */)) + var_a2;\n        var_a1 += 4;\n    } while (var_v1 < 8);\n    return var_a3;\n}\n",
+        "score": null,
+        "maxScore": null,
+        "compileErrors": null,
+        "quality": {
+          "score": 50,
+          "lines": 24,
+          "gotos": 0,
+          "casts": 0,
+          "unkGlue": 9,
+          "rawMem": 0,
+          "addrDeref": 0
+        },
+        "errorMarkers": [
+          "M2C_ERROR"
+        ]
+      },
+      "gapSize": {
+        "decompiler": "asmlift",
+        "score": 57,
+        "maxScore": 70,
+        "ratio": 0.8142857142857143,
+        "kinds": {
+          "insert": 11,
+          "delete": 4,
+          "replace": 1,
+          "opMismatch": 0,
+          "argMismatch": 41
+        }
+      },
+      "scripts": {
+        "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `uninit_spill` — benchmark function synthetic:uninit_spill:gcc2.7.2kmc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The benchmark's objdump→GNU-as normalization of this function's disassembly (m2c cannot\n# read raw objdump), including the jump-table/const data sections recovered from the target\n# object — the exact text the benchmark fed m2c.\ncat > in.s <<'ASM_INPUT'\nglabel uninit_spill\n    beqz\t$a0, .L1c\n    move\t$a3, $zero\n    li\t$v0, 1\n    beq\t$a0, $v0, .L48\n    nop\n    j\t.L70\n    nop\n.L1c:\n    lw\t$t2, 0($a1)\n    lw\t$t7, 4($a1)\n    lw\t$t5, 8($a1)\n    lw\t$t6, 12($a1)\n    lw\t$t3, 16($a1)\n    lw\t$t1, 20($a1)\n    lw\t$v1, 24($a1)\n    lw\t$t4, 28($a1)\n    lw\t$t0, 32($a1)\n    j\t.L70\n    lw\t$a2, 36($a1)\n.L48:\n    lw\t$t2, 40($a1)\n    lw\t$t7, 44($a1)\n    lw\t$t5, 48($a1)\n    lw\t$t6, 52($a1)\n    lw\t$t3, 56($a1)\n    lw\t$t1, 60($a1)\n    lw\t$v1, 64($a1)\n    lw\t$t4, 68($a1)\n    lw\t$t0, 72($a1)\n    lw\t$a2, 76($a1)\n.L70:\n    nop\n    mult\t$t7, $t5\n    mflo\t$t5\n    mult\t$t6, $t3\n    mflo\t$t3\n    mult\t$t1, $v1\n    mflo\t$t1\n    move\t$v1, $zero\n    nop\n    mult\t$t4, $t0\n    mflo\t$a0\n.Lac:\n    lw\t$v0, 0($a1)\n    nop\n    mult\t$v0, $t2\n    mflo\t$v0\n    addiu\t$v1, $v1, 1\n    addu\t$v0, $v0, $t5\n    addu\t$v0, $v0, $t3\n    addu\t$v0, $v0, $t1\n    addu\t$v0, $v0, $a0\n    addu\t$v0, $v0, $a2\n    addu\t$a3, $a3, $v0\n    slti\t$v0, $v1, 8\n    bnez\t$v0, .Lac\n    addiu\t$a1, $a1, 4\n    jr\t$ra\n    move\t$v0, $a3\n    nop\nASM_INPUT\n\n# (This function ran with NO context header — the benchmark fed m2c the assembly alone.)\n\nargs=(\n  --target mips-gcc-c     # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function uninit_spill # the symbol to decompile from in.s\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `uninit_spill` — benchmark function synthetic:uninit_spill:gcc2.7.2kmc.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:uninit_spill:gcc2.7.2kmc --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact `objdump -d --no-show-raw-insn` text.\ncat > in.asm <<'ASM_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <uninit_spill>:\n   0:\tbeqz\ta0,1c <uninit_spill+0x1c>\n   4:\tmove\ta3,zero\n   8:\tli\tv0,1\n   c:\tbeq\ta0,v0,48 <uninit_spill+0x48>\n  10:\tnop\n  14:\tj\t70 <uninit_spill+0x70>\n  18:\tnop\n  1c:\tlw\tt2,0(a1)\n  20:\tlw\tt7,4(a1)\n  24:\tlw\tt5,8(a1)\n  28:\tlw\tt6,12(a1)\n  2c:\tlw\tt3,16(a1)\n  30:\tlw\tt1,20(a1)\n  34:\tlw\tv1,24(a1)\n  38:\tlw\tt4,28(a1)\n  3c:\tlw\tt0,32(a1)\n  40:\tj\t70 <uninit_spill+0x70>\n  44:\tlw\ta2,36(a1)\n  48:\tlw\tt2,40(a1)\n  4c:\tlw\tt7,44(a1)\n  50:\tlw\tt5,48(a1)\n  54:\tlw\tt6,52(a1)\n  58:\tlw\tt3,56(a1)\n  5c:\tlw\tt1,60(a1)\n  60:\tlw\tv1,64(a1)\n  64:\tlw\tt4,68(a1)\n  68:\tlw\tt0,72(a1)\n  6c:\tlw\ta2,76(a1)\n  70:\tnop\n  74:\tmult\tt7,t5\n  78:\tmflo\tt5\n\t...\n  84:\tmult\tt6,t3\n  88:\tmflo\tt3\n\t...\n  94:\tmult\tt1,v1\n  98:\tmflo\tt1\n  9c:\tmove\tv1,zero\n  a0:\tnop\n  a4:\tmult\tt4,t0\n  a8:\tmflo\ta0\n  ac:\tlw\tv0,0(a1)\n  b0:\tnop\n  b4:\tmult\tv0,t2\n  b8:\tmflo\tv0\n  bc:\taddiu\tv1,v1,1\n  c0:\taddu\tv0,v0,t5\n  c4:\taddu\tv0,v0,t3\n  c8:\taddu\tv0,v0,t1\n  cc:\taddu\tv0,v0,a0\n  d0:\taddu\tv0,v0,a2\n  d4:\taddu\ta3,a3,v0\n  d8:\tslti\tv0,v1,8\n  dc:\tbnez\tv0,ac <uninit_spill+0xac>\n  e0:\taddiu\ta1,a1,4\n  e4:\tjr\tra\n  e8:\tmove\tv0,a3\n  ec:\tnop\nASM_INPUT\n\n# The target object's objdump -s -r -t dump — the data sections (jump tables, anonymous\n# constants) the text-only disassembly lacks; the benchmark recovered them from the object.\ncat > dump.txt <<'DUMP_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /host-tmp/asmlift-mgcc-ref-8e25d66c9f6fb54c/ref.c\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t000000ec uninit_spill\n\n\nRELOCATION RECORDS FOR [.text]:\nOFFSET   TYPE              VALUE\n00000014 R_MIPS_26         .text\n00000040 R_MIPS_26         .text\n\n\nContents of section .text:\n 0000 10800006 00003821 24020001 1082000e  ......8!$.......\n 0010 00000000 0800001c 00000000 8caa0000  ................\n 0020 8caf0004 8cad0008 8cae000c 8cab0010  ................\n 0030 8ca90014 8ca30018 8cac001c 8ca80020  ............... \n 0040 0800001c 8ca60024 8caa0028 8caf002c  .......$...(...,\n 0050 8cad0030 8cae0034 8cab0038 8ca9003c  ...0...4...8...<\n 0060 8ca30040 8cac0044 8ca80048 8ca6004c  ...@...D...H...L\n 0070 00000000 01ed0018 00006812 00000000  ..........h.....\n 0080 00000000 01cb0018 00005812 00000000  ..........X.....\n 0090 00000000 01230018 00004812 00001821  .....#....H....!\n 00a0 00000000 01880018 00002012 8ca20000  .......... .....\n 00b0 00000000 004a0018 00001012 24630001  .....J......$c..\n 00c0 004d1021 004b1021 00491021 00441021  .M.!.K.!.I.!.D.!\n 00d0 00461021 00e23821 28620008 1440fff3  .F.!..8!(b...@..\n 00e0 24a50004 03e00008 00e01021 00000000  $..........!....\nContents of section .reginfo:\n 0000 8000fffc 00000000 00000000 00000000  ................\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.\nDUMP_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target gcc2.7.2kmc    # frontend + target description (ISA, calling convention, compiler idioms)\n  --name uninit_spill     # the symbol to decompile (multi-function input selects by name)\n  --asm-data dump.txt     # the data sections above (jump-table/const recovery)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+      }
+    },
+    {
+      "id": "synthetic:uninit_spill:ido7.1",
+      "sym": "uninit_spill",
+      "project": "synthetic",
+      "tier": "synthetic",
+      "toolchain": "ido7.1",
+      "isa": "mips",
+      "compiler": "ido",
+      "language": "c",
+      "features": [
+        "uninit-local",
+        "array",
+        "switch",
+        "loop",
+        "comparison-tree"
+      ],
+      "loc": 1,
+      "refSource": "int uninit_spill(int k,int *p){ int v0,v1,v2,v3,v4,v5,v6,v7,v8,v9; int i,s=0; switch(k){ case 0: v0=p[0];v1=p[1];v2=p[2];v3=p[3];v4=p[4];v5=p[5];v6=p[6];v7=p[7];v8=p[8];v9=p[9]; break; case 1: v0=p[10];v1=p[11];v2=p[12];v3=p[13];v4=p[14];v5=p[15];v6=p[16];v7=p[17];v8=p[18];v9=p[19]; break; } for(i=0;i<8;i++) s+=p[i]*v0+v1*v2+v3*v4+v5*v6+v7*v8+v9; return s; }",
+      "targetAsm": "\ntarget.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <uninit_spill>:\n   0:\taddiu\tsp,sp,-40\n   4:\tbeqz\ta0,20 <uninit_spill+0x20>\n   8:\tmove\tv1,zero\n   c:\tli\tat,1\n  10:\tbeq\ta0,at,6c <uninit_spill+0x6c>\n  14:\tlw\tv0,36(sp)\n  18:\tb\tb4 <uninit_spill+0xb4>\n  1c:\tlw\ta0,0(sp)\n  20:\tlw\tt6,4(a1)\n  24:\tlw\tv0,0(a1)\n  28:\tsw\tt6,32(sp)\n  2c:\tlw\tt7,8(a1)\n  30:\tsw\tt7,28(sp)\n  34:\tlw\tt8,12(a1)\n  38:\tsw\tt8,24(sp)\n  3c:\tlw\tt9,16(a1)\n  40:\tsw\tt9,20(sp)\n  44:\tlw\tt4,20(a1)\n  48:\tsw\tt4,16(sp)\n  4c:\tlw\tt5,24(a1)\n  50:\tsw\tt5,12(sp)\n  54:\tlw\tt6,28(a1)\n  58:\tsw\tt6,8(sp)\n  5c:\tlw\tt7,32(a1)\n  60:\tsw\tt7,4(sp)\n  64:\tb\tb4 <uninit_spill+0xb4>\n  68:\tlw\ta0,36(a1)\n  6c:\tlw\tt8,44(a1)\n  70:\tlw\tv0,40(a1)\n  74:\tsw\tt8,32(sp)\n  78:\tlw\tt9,48(a1)\n  7c:\tsw\tt9,28(sp)\n  80:\tlw\tt4,52(a1)\n  84:\tsw\tt4,24(sp)\n  88:\tlw\tt5,56(a1)\n  8c:\tsw\tt5,20(sp)\n  90:\tlw\tt6,60(a1)\n  94:\tsw\tt6,16(sp)\n  98:\tlw\tt7,64(a1)\n  9c:\tsw\tt7,12(sp)\n  a0:\tlw\tt8,68(a1)\n  a4:\tsw\tt8,8(sp)\n  a8:\tlw\tt9,72(a1)\n  ac:\tsw\tt9,4(sp)\n  b0:\tlw\ta0,76(a1)\n  b4:\tlw\tt4,32(sp)\n  b8:\tlw\tt5,28(sp)\n  bc:\tlw\tt6,24(sp)\n  c0:\tlw\tt7,20(sp)\n  c4:\tmultu\tt4,t5\n  c8:\tlw\tt8,16(sp)\n  cc:\tlw\tt9,12(sp)\n  d0:\tlw\tt5,4(sp)\n  d4:\tlw\tt4,8(sp)\n  d8:\tmove\ta3,a1\n  dc:\tli\ta1,8\n  e0:\tmove\ta2,zero\n  e4:\tmflo\tt0\n\t...\n  f0:\tmultu\tt6,t7\n  f4:\tmflo\tt1\n\t...\n 100:\tmultu\tt8,t9\n 104:\tmflo\tt2\n\t...\n 110:\tmultu\tt4,t5\n 114:\tmflo\tt3\n\t...\n 120:\tlw\tt6,0(a3)\n 124:\taddiu\ta2,a2,4\n 128:\taddiu\ta3,a3,16\n 12c:\tmultu\tt6,v0\n 130:\tmflo\tt7\n 134:\taddu\tt8,v1,t7\n 138:\tlw\tt7,-12(a3)\n 13c:\taddu\tt9,t8,t0\n 140:\taddu\tt4,t9,t1\n 144:\tmultu\tt7,v0\n 148:\taddu\tt5,t4,t2\n 14c:\taddu\tt6,t5,t3\n 150:\taddu\tv1,t6,a0\n 154:\tmflo\tt8\n 158:\taddu\tt9,v1,t8\n 15c:\tlw\tt8,-8(a3)\n 160:\taddu\tt4,t9,t0\n 164:\taddu\tt5,t4,t1\n 168:\tmultu\tt8,v0\n 16c:\taddu\tt6,t5,t2\n 170:\taddu\tt7,t6,t3\n 174:\taddu\tv1,t7,a0\n 178:\tmflo\tt9\n 17c:\taddu\tt4,v1,t9\n 180:\tlw\tt9,-4(a3)\n 184:\taddu\tt5,t4,t0\n 188:\taddu\tt6,t5,t1\n 18c:\tmultu\tt9,v0\n 190:\taddu\tt7,t6,t2\n 194:\taddu\tt8,t7,t3\n 198:\taddu\tv1,t8,a0\n 19c:\tmflo\tt4\n 1a0:\taddu\tt5,v1,t4\n 1a4:\taddu\tt6,t5,t0\n 1a8:\taddu\tt7,t6,t1\n 1ac:\taddu\tt8,t7,t2\n 1b0:\taddu\tt9,t8,t3\n 1b4:\tbne\ta2,a1,120 <uninit_spill+0x120>\n 1b8:\taddu\tv1,t9,a0\n 1bc:\tmove\tv0,v1\n 1c0:\tjr\tra\n 1c4:\taddiu\tsp,sp,40\n\t...\n",
+      "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    d  .text\t000001d0 .text\n00000000 g     F .text\t000001c8 uninit_spill\n\n\nContents of section .text:\n 0000 27bdffd8 10800006 00001825 24010001  '..........%$...\n 0010 10810016 8fa20024 10000026 8fa40000  .......$...&....\n 0020 8cae0004 8ca20000 afae0020 8caf0008  ........... ....\n 0030 afaf001c 8cb8000c afb80018 8cb90010  ................\n 0040 afb90014 8cac0014 afac0010 8cad0018  ................\n 0050 afad000c 8cae001c afae0008 8caf0020  ............... \n 0060 afaf0004 10000013 8ca40024 8cb8002c  ...........$...,\n 0070 8ca20028 afb80020 8cb90030 afb9001c  ...(... ...0....\n 0080 8cac0034 afac0018 8cad0038 afad0014  ...4.......8....\n 0090 8cae003c afae0010 8caf0040 afaf000c  ...<.......@....\n 00a0 8cb80044 afb80008 8cb90048 afb90004  ...D.......H....\n 00b0 8ca4004c 8fac0020 8fad001c 8fae0018  ...L... ........\n 00c0 8faf0014 018d0019 8fb80010 8fb9000c  ................\n 00d0 8fad0004 8fac0008 00a03825 24050008  ..........8%$...\n 00e0 00003025 00004012 00000000 00000000  ..0%..@.........\n 00f0 01cf0019 00004812 00000000 00000000  ......H.........\n 0100 03190019 00005012 00000000 00000000  ......P.........\n 0110 018d0019 00005812 00000000 00000000  ......X.........\n 0120 8cee0000 24c60004 24e70010 01c20019  ....$...$.......\n 0130 00007812 006fc021 8ceffff4 0308c821  ..x..o.!.......!\n 0140 03296021 01e20019 018a6821 01ab7021  .)`!......h!..p!\n 0150 01c41821 0000c012 0078c821 8cf8fff8  ...!.....x.!....\n 0160 03286021 01896821 03020019 01aa7021  .(`!..h!......p!\n 0170 01cb7821 01e41821 0000c812 00796021  ..x!...!.....y`!\n 0180 8cf9fffc 01886821 01a97021 03220019  ......h!..p!.\"..\n 0190 01ca7821 01ebc021 03041821 00006012  ..x!...!...!..`.\n 01a0 006c6821 01a87021 01c97821 01eac021  .lh!..p!..x!...!\n 01b0 030bc821 14c5ffda 03241821 00601025  ...!.....$.!.`.%\n 01c0 03e00008 27bd0028 00000000 00000000  ....'..(........\nContents of section .options:\n 0000 01200000 00000000 a300fffe 00000000  . ..............\n 0010 00000000 00000000 00000000 00007ff0  ................\n 0020 07100000 00000000 00000000 00000000  ................\n 0030 08100000 00000000 00000000 00000000  ................\nContents of section .reginfo:\n 0000 a300fffe 00000000 00000000 00000000  ................\n 0010 00000000 00007ff0                    ........        \nContents of section .mdebug:\n 0000 7009070a 00000072 00000010 00000348  p......r.......H\n 0010 00000005 000004a4 00000001 00000358  ...............X\n 0020 00000004 0000038c 00000000 00000000  ................\n 0030 00000011 000003bc 0000003c 00000400  ...........<....\n 0040 00000010 0000043c 00000001 0000044c  .......<.......L\n 0050 00000000 00000000 00000001 00000494  ................\n 0060 08080808 08080808 08080808 05000000  ................\n 0070 00000000 00000001 00000000 00000000  ................\n 0080 00000000 ffffffff 00000000 00000000  ................\n 0090 00000028 001d001f 00000002 00000002  ...(............\n 00a0 00000000 00000001 00000000 2c200004  ............, ..\n 00b0 0000002e 00000000 1820000f 0000002e  ......... ......\n 00c0 000001c8 20200001 00000001 00000000  ....  ..........\n 00d0 20200000 02000000 03000000 04000000    ..............\n 00e0 05000000 06000000 07000000 08000000  ................\n 00f0 09000000 20000000 21000000 0a000000  .... ...!.......\n 0100 0b000000 0b000000 1a000000 00000000  ................\n 0110 00000003 06000000 002f746d 702f6173  ........./tmp/as\n 0120 6d6c6966 742d6d69 70732d72 65662d38  mlift-mips-ref-8\n 0130 65323564 36366339 66366662 3534632f  e25d66c9f6fb54c/\n 0140 7265662e 6300756e 696e6974 5f737069  ref.c.uninit_spi\n 0150 6c6c0000 756e696e 69745f73 70696c6c  ll..uninit_spill\n 0160 00000000 00000000 00000001 00000000  ................\n 0170 0000003b 00000000 00000004 00000000  ...;............\n 0180 00000072 00000000 00000000 00000001  ...r............\n 0190 00000000 00000011 00000000 00000000  ................\n 01a0 01800000 00000000 0000000d 00000000  ................\n 01b0 00000000 00000000 18200001 00000000  ......... ......\n 01c0 00000000 00000000 00000000 00000000  ................\n 01d0 00000000 7fffffff 00000000 00000000  ................\n 01e0 00000002                             ....            \n",
+      "asmlift": {
+        "decompiler": "asmlift",
+        "outcome": "declined",
+        "source": "/* asmlift could not decompile 'uninit_spill' — lift: cannot lift 'uninit_spill': load from stack slot sp@36 that was never stored (stack-passed argument beyond the 4 register args, or an address-taken/uninitialised local) — not modelled */\n/* original assembly: */\n/*   target.o:     file format elf32-tradbigmips */\n/*   Disassembly of section .text: */\n/*   00000000 <uninit_spill>: */\n/*      0:\taddiu\tsp,sp,-40 */\n/*      4:\tbeqz\ta0,20 <uninit_spill+0x20> */\n/*      8:\tmove\tv1,zero */\n/*      c:\tli\tat,1 */\n/*     10:\tbeq\ta0,at,6c <uninit_spill+0x6c> */\n/*     14:\tlw\tv0,36(sp) */\n/*     18:\tb\tb4 <uninit_spill+0xb4> */\n/*     1c:\tlw\ta0,0(sp) */\n/*     20:\tlw\tt6,4(a1) */\n/*     24:\tlw\tv0,0(a1) */\n/*     28:\tsw\tt6,32(sp) */\n/*     2c:\tlw\tt7,8(a1) */\n/*     30:\tsw\tt7,28(sp) */\n/*     34:\tlw\tt8,12(a1) */\n/*     38:\tsw\tt8,24(sp) */\n/*     3c:\tlw\tt9,16(a1) */\n/*     40:\tsw\tt9,20(sp) */\n/*     44:\tlw\tt4,20(a1) */\n/*     48:\tsw\tt4,16(sp) */\n/*     4c:\tlw\tt5,24(a1) */\n/*     50:\tsw\tt5,12(sp) */\n/*     54:\tlw\tt6,28(a1) */\n/*     58:\tsw\tt6,8(sp) */\n/*     5c:\tlw\tt7,32(a1) */\n/*     60:\tsw\tt7,4(sp) */\n/*     64:\tb\tb4 <uninit_spill+0xb4> */\n/*     68:\tlw\ta0,36(a1) */\n/*     6c:\tlw\tt8,44(a1) */\n/*     70:\tlw\tv0,40(a1) */\n/*     74:\tsw\tt8,32(sp) */\n/*     78:\tlw\tt9,48(a1) */\n/*     7c:\tsw\tt9,28(sp) */\n/*     80:\tlw\tt4,52(a1) */\n/*     84:\tsw\tt4,24(sp) */\n/*     88:\tlw\tt5,56(a1) */\n/*     8c:\tsw\tt5,20(sp) */\n/*     90:\tlw\tt6,60(a1) */\n/*     94:\tsw\tt6,16(sp) */\n/*     98:\tlw\tt7,64(a1) */\n/*     9c:\tsw\tt7,12(sp) */\n/*     a0:\tlw\tt8,68(a1) */\n/*     a4:\tsw\tt8,8(sp) */\n/*     a8:\tlw\tt9,72(a1) */\n/*     ac:\tsw\tt9,4(sp) */\n/*     b0:\tlw\ta0,76(a1) */\n/*     b4:\tlw\tt4,32(sp) */\n/*     b8:\tlw\tt5,28(sp) */\n/*     bc:\tlw\tt6,24(sp) */\n/*     c0:\tlw\tt7,20(sp) */\n/*     c4:\tmultu\tt4,t5 */\n/*     c8:\tlw\tt8,16(sp) */\n/*     cc:\tlw\tt9,12(sp) */\n/*     d0:\tlw\tt5,4(sp) */\n/*     d4:\tlw\tt4,8(sp) */\n/*     d8:\tmove\ta3,a1 */\n/*     dc:\tli\ta1,8 */\n/*     e0:\tmove\ta2,zero */\n/*     e4:\tmflo\tt0 */\n/*   \t... */\n/*     f0:\tmultu\tt6,t7 */\n/*     f4:\tmflo\tt1 */\n/*   \t... */\n/*    100:\tmultu\tt8,t9 */\n/*    104:\tmflo\tt2 */\n/*   \t... */\n/*    110:\tmultu\tt4,t5 */\n/*    114:\tmflo\tt3 */\n/*   \t... */\n/*    120:\tlw\tt6,0(a3) */\n/*    124:\taddiu\ta2,a2,4 */\n/*    128:\taddiu\ta3,a3,16 */\n/*    12c:\tmultu\tt6,v0 */\n/*    130:\tmflo\tt7 */\n/*    134:\taddu\tt8,v1,t7 */\n/*    138:\tlw\tt7,-12(a3) */\n/*    13c:\taddu\tt9,t8,t0 */\n/*    140:\taddu\tt4,t9,t1 */\n/*    144:\tmultu\tt7,v0 */\n/*    148:\taddu\tt5,t4,t2 */\n/*    14c:\taddu\tt6,t5,t3 */\n/*    150:\taddu\tv1,t6,a0 */\n/*    154:\tmflo\tt8 */\n/*    158:\taddu\tt9,v1,t8 */\n/*    15c:\tlw\tt8,-8(a3) */\n/*    160:\taddu\tt4,t9,t0 */\n/*    164:\taddu\tt5,t4,t1 */\n/*    168:\tmultu\tt8,v0 */\n/*    16c:\taddu\tt6,t5,t2 */\n/*    170:\taddu\tt7,t6,t3 */\n/*    174:\taddu\tv1,t7,a0 */\n/*    178:\tmflo\tt9 */\n/*    17c:\taddu\tt4,v1,t9 */\n/*    180:\tlw\tt9,-4(a3) */\n/*    184:\taddu\tt5,t4,t0 */\n/*    188:\taddu\tt6,t5,t1 */\n/*    18c:\tmultu\tt9,v0 */\n/*    190:\taddu\tt7,t6,t2 */\n/*    194:\taddu\tt8,t7,t3 */\n/*    198:\taddu\tv1,t8,a0 */\n/*    19c:\tmflo\tt4 */\n/*    1a0:\taddu\tt5,v1,t4 */\n/*    1a4:\taddu\tt6,t5,t0 */\n/*    1a8:\taddu\tt7,t6,t1 */\n/*    1ac:\taddu\tt8,t7,t2 */\n/*    1b0:\taddu\tt9,t8,t3 */\n/*    1b4:\tbne\ta2,a1,120 <uninit_spill+0x120> */\n/*    1b8:\taddu\tv1,t9,a0 */\n/*    1bc:\tmove\tv0,v1 */\n/*    1c0:\tjr\tra */\n/*    1c4:\taddiu\tsp,sp,40 */\n/*   \t... */\nvoid uninit_spill(void) {\n    ASMLIFT_ERROR(\"could not decompile (lift): cannot lift 'uninit_spill': load from stack slot sp@36 that was never stored (stack-passed argument beyond the 4 register args, or an address-taken/uninitialised local) — not modelled\");\n}\n",
+        "score": null,
+        "maxScore": null,
+        "compileErrors": null,
+        "quality": {
+          "score": 88,
+          "lines": 119,
+          "gotos": 0,
+          "casts": 1,
+          "unkGlue": 1,
+          "rawMem": 0,
+          "addrDeref": 0
+        },
+        "errorMarkers": [
+          "lift: cannot lift 'uninit_spill': load from stack slot sp@36 that was never stored (stack-passed argument beyond the 4 register args, or an address-taken/uninitialised local) — not modelled"
+        ]
+      },
+      "m2c": {
+        "decompiler": "m2c",
+        "outcome": "noncompile",
+        "source": "s32 uninit_spill(s32 arg0, s32 *arg1) {\n    s32 sp20;\n    s32 sp1C;\n    s32 sp18;\n    s32 sp14;\n    s32 sp10;\n    s32 spC;\n    s32 sp8;\n    s32 sp4;\n    s32 *var_a3;\n    s32 temp_lo;\n    s32 temp_lo_2;\n    s32 temp_lo_3;\n    s32 temp_lo_4;\n    s32 temp_t6;\n    s32 var_a0;\n    s32 var_a2;\n    s32 var_v0;\n    s32 var_v1;\n\n    var_v1 = 0;\n    if (arg0 != 0) {\n        var_v0 = sp24;\n        if (arg0 != 1) {\n            var_a0 = sp0;\n        } else {\n            var_v0 = arg1->unk28;\n            sp20 = arg1->unk2C;\n            sp1C = arg1->unk30;\n            sp18 = arg1->unk34;\n            sp14 = arg1->unk38;\n            sp10 = arg1->unk3C;\n            spC = arg1->unk40;\n            sp8 = arg1->unk44;\n            sp4 = arg1->unk48;\n            var_a0 = arg1->unk4C;\n        }\n    } else {\n        var_v0 = arg1->unk0;\n        sp20 = arg1->unk4;\n        sp1C = arg1->unk8;\n        sp18 = arg1->unkC;\n        sp14 = arg1->unk10;\n        sp10 = arg1->unk14;\n        spC = arg1->unk18;\n        sp8 = arg1->unk1C;\n        sp4 = arg1->unk20;\n        var_a0 = arg1->unk24;\n    }\n    temp_lo = sp20 * sp1C;\n    var_a3 = arg1;\n    var_a2 = 0;\n    temp_lo_2 = sp18 * sp14;\n    temp_lo_3 = sp10 * spC;\n    temp_lo_4 = sp8 * sp4;\n    do {\n        temp_t6 = *var_a3;\n        var_a2 += 4;\n        var_a3 += 0x10;\n        var_v1 = var_v1 + (temp_t6 * var_v0) + temp_lo + temp_lo_2 + temp_lo_3 + temp_lo_4 + var_a0 + (var_a3->unk-C * var_v0) + temp_lo + temp_lo_2 + temp_lo_3 + temp_lo_4 + var_a0 + (var_a3->unk-8 * var_v0) + temp_lo + temp_lo_2 + temp_lo_3 + temp_lo_4 + var_a0 + (var_a3->unk-4 * var_v0) + temp_lo + temp_lo_2 + temp_lo_3 + temp_lo_4 + var_a0;\n    } while (var_a2 != 8);\n    return var_v1;\n}\n",
+        "score": null,
+        "maxScore": null,
+        "compileErrors": 23,
+        "quality": {
+          "score": 100,
+          "lines": 62,
+          "gotos": 0,
+          "casts": 0,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        },
+        "errorMarkers": [
+          "cfe: Error: <tmp>/cand.c, line 24: 'sp24' undefined; reoccurrences will not be reported.",
+          "cfe: Error: <tmp>/cand.c, line 26: 'sp0' undefined; reoccurrences will not be reported.",
+          "cfe: Error: <tmp>/cand.c, line 28: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <tmp>/cand.c, line 29: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: <tmp>/cand.c, line 30: Selector requires struct/union pointer as left hand side"
+        ]
+      },
+      "gapSize": null,
+      "scripts": {
+        "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `uninit_spill` — benchmark function synthetic:uninit_spill:ido7.1.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The benchmark's objdump→GNU-as normalization of this function's disassembly (m2c cannot\n# read raw objdump), including the jump-table/const data sections recovered from the target\n# object — the exact text the benchmark fed m2c.\ncat > in.s <<'ASM_INPUT'\nglabel uninit_spill\n    addiu\t$sp, $sp, -40\n    beqz\t$a0, .L20\n    move\t$v1, $zero\n    li\t$at, 1\n    beq\t$a0, $at, .L6c\n    lw\t$v0, 36($sp)\n    b\t.Lb4\n    lw\t$a0, 0($sp)\n.L20:\n    lw\t$t6, 4($a1)\n    lw\t$v0, 0($a1)\n    sw\t$t6, 32($sp)\n    lw\t$t7, 8($a1)\n    sw\t$t7, 28($sp)\n    lw\t$t8, 12($a1)\n    sw\t$t8, 24($sp)\n    lw\t$t9, 16($a1)\n    sw\t$t9, 20($sp)\n    lw\t$t4, 20($a1)\n    sw\t$t4, 16($sp)\n    lw\t$t5, 24($a1)\n    sw\t$t5, 12($sp)\n    lw\t$t6, 28($a1)\n    sw\t$t6, 8($sp)\n    lw\t$t7, 32($a1)\n    sw\t$t7, 4($sp)\n    b\t.Lb4\n    lw\t$a0, 36($a1)\n.L6c:\n    lw\t$t8, 44($a1)\n    lw\t$v0, 40($a1)\n    sw\t$t8, 32($sp)\n    lw\t$t9, 48($a1)\n    sw\t$t9, 28($sp)\n    lw\t$t4, 52($a1)\n    sw\t$t4, 24($sp)\n    lw\t$t5, 56($a1)\n    sw\t$t5, 20($sp)\n    lw\t$t6, 60($a1)\n    sw\t$t6, 16($sp)\n    lw\t$t7, 64($a1)\n    sw\t$t7, 12($sp)\n    lw\t$t8, 68($a1)\n    sw\t$t8, 8($sp)\n    lw\t$t9, 72($a1)\n    sw\t$t9, 4($sp)\n    lw\t$a0, 76($a1)\n.Lb4:\n    lw\t$t4, 32($sp)\n    lw\t$t5, 28($sp)\n    lw\t$t6, 24($sp)\n    lw\t$t7, 20($sp)\n    multu\t$t4, $t5\n    lw\t$t8, 16($sp)\n    lw\t$t9, 12($sp)\n    lw\t$t5, 4($sp)\n    lw\t$t4, 8($sp)\n    move\t$a3, $a1\n    li\t$a1, 8\n    move\t$a2, $zero\n    mflo\t$t0\n    multu\t$t6, $t7\n    mflo\t$t1\n    multu\t$t8, $t9\n    mflo\t$t2\n    multu\t$t4, $t5\n    mflo\t$t3\n.L120:\n    lw\t$t6, 0($a3)\n    addiu\t$a2, $a2, 4\n    addiu\t$a3, $a3, 16\n    multu\t$t6, $v0\n    mflo\t$t7\n    addu\t$t8, $v1, $t7\n    lw\t$t7, -12($a3)\n    addu\t$t9, $t8, $t0\n    addu\t$t4, $t9, $t1\n    multu\t$t7, $v0\n    addu\t$t5, $t4, $t2\n    addu\t$t6, $t5, $t3\n    addu\t$v1, $t6, $a0\n    mflo\t$t8\n    addu\t$t9, $v1, $t8\n    lw\t$t8, -8($a3)\n    addu\t$t4, $t9, $t0\n    addu\t$t5, $t4, $t1\n    multu\t$t8, $v0\n    addu\t$t6, $t5, $t2\n    addu\t$t7, $t6, $t3\n    addu\t$v1, $t7, $a0\n    mflo\t$t9\n    addu\t$t4, $v1, $t9\n    lw\t$t9, -4($a3)\n    addu\t$t5, $t4, $t0\n    addu\t$t6, $t5, $t1\n    multu\t$t9, $v0\n    addu\t$t7, $t6, $t2\n    addu\t$t8, $t7, $t3\n    addu\t$v1, $t8, $a0\n    mflo\t$t4\n    addu\t$t5, $v1, $t4\n    addu\t$t6, $t5, $t0\n    addu\t$t7, $t6, $t1\n    addu\t$t8, $t7, $t2\n    addu\t$t9, $t8, $t3\n    bne\t$a2, $a1, .L120\n    addu\t$v1, $t9, $a0\n    move\t$v0, $v1\n    jr\t$ra\n    addiu\t$sp, $sp, 40\nASM_INPUT\n\n# (This function ran with NO context header — the benchmark fed m2c the assembly alone.)\n\nargs=(\n  --target mips-ido-c     # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function uninit_spill # the symbol to decompile from in.s\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `uninit_spill` — benchmark function synthetic:uninit_spill:ido7.1.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:uninit_spill:ido7.1 --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact `objdump -d --no-show-raw-insn` text.\ncat > in.asm <<'ASM_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <uninit_spill>:\n   0:\taddiu\tsp,sp,-40\n   4:\tbeqz\ta0,20 <uninit_spill+0x20>\n   8:\tmove\tv1,zero\n   c:\tli\tat,1\n  10:\tbeq\ta0,at,6c <uninit_spill+0x6c>\n  14:\tlw\tv0,36(sp)\n  18:\tb\tb4 <uninit_spill+0xb4>\n  1c:\tlw\ta0,0(sp)\n  20:\tlw\tt6,4(a1)\n  24:\tlw\tv0,0(a1)\n  28:\tsw\tt6,32(sp)\n  2c:\tlw\tt7,8(a1)\n  30:\tsw\tt7,28(sp)\n  34:\tlw\tt8,12(a1)\n  38:\tsw\tt8,24(sp)\n  3c:\tlw\tt9,16(a1)\n  40:\tsw\tt9,20(sp)\n  44:\tlw\tt4,20(a1)\n  48:\tsw\tt4,16(sp)\n  4c:\tlw\tt5,24(a1)\n  50:\tsw\tt5,12(sp)\n  54:\tlw\tt6,28(a1)\n  58:\tsw\tt6,8(sp)\n  5c:\tlw\tt7,32(a1)\n  60:\tsw\tt7,4(sp)\n  64:\tb\tb4 <uninit_spill+0xb4>\n  68:\tlw\ta0,36(a1)\n  6c:\tlw\tt8,44(a1)\n  70:\tlw\tv0,40(a1)\n  74:\tsw\tt8,32(sp)\n  78:\tlw\tt9,48(a1)\n  7c:\tsw\tt9,28(sp)\n  80:\tlw\tt4,52(a1)\n  84:\tsw\tt4,24(sp)\n  88:\tlw\tt5,56(a1)\n  8c:\tsw\tt5,20(sp)\n  90:\tlw\tt6,60(a1)\n  94:\tsw\tt6,16(sp)\n  98:\tlw\tt7,64(a1)\n  9c:\tsw\tt7,12(sp)\n  a0:\tlw\tt8,68(a1)\n  a4:\tsw\tt8,8(sp)\n  a8:\tlw\tt9,72(a1)\n  ac:\tsw\tt9,4(sp)\n  b0:\tlw\ta0,76(a1)\n  b4:\tlw\tt4,32(sp)\n  b8:\tlw\tt5,28(sp)\n  bc:\tlw\tt6,24(sp)\n  c0:\tlw\tt7,20(sp)\n  c4:\tmultu\tt4,t5\n  c8:\tlw\tt8,16(sp)\n  cc:\tlw\tt9,12(sp)\n  d0:\tlw\tt5,4(sp)\n  d4:\tlw\tt4,8(sp)\n  d8:\tmove\ta3,a1\n  dc:\tli\ta1,8\n  e0:\tmove\ta2,zero\n  e4:\tmflo\tt0\n\t...\n  f0:\tmultu\tt6,t7\n  f4:\tmflo\tt1\n\t...\n 100:\tmultu\tt8,t9\n 104:\tmflo\tt2\n\t...\n 110:\tmultu\tt4,t5\n 114:\tmflo\tt3\n\t...\n 120:\tlw\tt6,0(a3)\n 124:\taddiu\ta2,a2,4\n 128:\taddiu\ta3,a3,16\n 12c:\tmultu\tt6,v0\n 130:\tmflo\tt7\n 134:\taddu\tt8,v1,t7\n 138:\tlw\tt7,-12(a3)\n 13c:\taddu\tt9,t8,t0\n 140:\taddu\tt4,t9,t1\n 144:\tmultu\tt7,v0\n 148:\taddu\tt5,t4,t2\n 14c:\taddu\tt6,t5,t3\n 150:\taddu\tv1,t6,a0\n 154:\tmflo\tt8\n 158:\taddu\tt9,v1,t8\n 15c:\tlw\tt8,-8(a3)\n 160:\taddu\tt4,t9,t0\n 164:\taddu\tt5,t4,t1\n 168:\tmultu\tt8,v0\n 16c:\taddu\tt6,t5,t2\n 170:\taddu\tt7,t6,t3\n 174:\taddu\tv1,t7,a0\n 178:\tmflo\tt9\n 17c:\taddu\tt4,v1,t9\n 180:\tlw\tt9,-4(a3)\n 184:\taddu\tt5,t4,t0\n 188:\taddu\tt6,t5,t1\n 18c:\tmultu\tt9,v0\n 190:\taddu\tt7,t6,t2\n 194:\taddu\tt8,t7,t3\n 198:\taddu\tv1,t8,a0\n 19c:\tmflo\tt4\n 1a0:\taddu\tt5,v1,t4\n 1a4:\taddu\tt6,t5,t0\n 1a8:\taddu\tt7,t6,t1\n 1ac:\taddu\tt8,t7,t2\n 1b0:\taddu\tt9,t8,t3\n 1b4:\tbne\ta2,a1,120 <uninit_spill+0x120>\n 1b8:\taddu\tv1,t9,a0\n 1bc:\tmove\tv0,v1\n 1c0:\tjr\tra\n 1c4:\taddiu\tsp,sp,40\n\t...\nASM_INPUT\n\n# The target object's objdump -s -r -t dump — the data sections (jump tables, anonymous\n# constants) the text-only disassembly lacks; the benchmark recovered them from the object.\ncat > dump.txt <<'DUMP_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    d  .text\t000001d0 .text\n00000000 g     F .text\t000001c8 uninit_spill\n\n\nContents of section .text:\n 0000 27bdffd8 10800006 00001825 24010001  '..........%$...\n 0010 10810016 8fa20024 10000026 8fa40000  .......$...&....\n 0020 8cae0004 8ca20000 afae0020 8caf0008  ........... ....\n 0030 afaf001c 8cb8000c afb80018 8cb90010  ................\n 0040 afb90014 8cac0014 afac0010 8cad0018  ................\n 0050 afad000c 8cae001c afae0008 8caf0020  ............... \n 0060 afaf0004 10000013 8ca40024 8cb8002c  ...........$...,\n 0070 8ca20028 afb80020 8cb90030 afb9001c  ...(... ...0....\n 0080 8cac0034 afac0018 8cad0038 afad0014  ...4.......8....\n 0090 8cae003c afae0010 8caf0040 afaf000c  ...<.......@....\n 00a0 8cb80044 afb80008 8cb90048 afb90004  ...D.......H....\n 00b0 8ca4004c 8fac0020 8fad001c 8fae0018  ...L... ........\n 00c0 8faf0014 018d0019 8fb80010 8fb9000c  ................\n 00d0 8fad0004 8fac0008 00a03825 24050008  ..........8%$...\n 00e0 00003025 00004012 00000000 00000000  ..0%..@.........\n 00f0 01cf0019 00004812 00000000 00000000  ......H.........\n 0100 03190019 00005012 00000000 00000000  ......P.........\n 0110 018d0019 00005812 00000000 00000000  ......X.........\n 0120 8cee0000 24c60004 24e70010 01c20019  ....$...$.......\n 0130 00007812 006fc021 8ceffff4 0308c821  ..x..o.!.......!\n 0140 03296021 01e20019 018a6821 01ab7021  .)`!......h!..p!\n 0150 01c41821 0000c012 0078c821 8cf8fff8  ...!.....x.!....\n 0160 03286021 01896821 03020019 01aa7021  .(`!..h!......p!\n 0170 01cb7821 01e41821 0000c812 00796021  ..x!...!.....y`!\n 0180 8cf9fffc 01886821 01a97021 03220019  ......h!..p!.\"..\n 0190 01ca7821 01ebc021 03041821 00006012  ..x!...!...!..`.\n 01a0 006c6821 01a87021 01c97821 01eac021  .lh!..p!..x!...!\n 01b0 030bc821 14c5ffda 03241821 00601025  ...!.....$.!.`.%\n 01c0 03e00008 27bd0028 00000000 00000000  ....'..(........\nContents of section .options:\n 0000 01200000 00000000 a300fffe 00000000  . ..............\n 0010 00000000 00000000 00000000 00007ff0  ................\n 0020 07100000 00000000 00000000 00000000  ................\n 0030 08100000 00000000 00000000 00000000  ................\nContents of section .reginfo:\n 0000 a300fffe 00000000 00000000 00000000  ................\n 0010 00000000 00007ff0                    ........        \nContents of section .mdebug:\n 0000 7009070a 00000072 00000010 00000348  p......r.......H\n 0010 00000005 000004a4 00000001 00000358  ...............X\n 0020 00000004 0000038c 00000000 00000000  ................\n 0030 00000011 000003bc 0000003c 00000400  ...........<....\n 0040 00000010 0000043c 00000001 0000044c  .......<.......L\n 0050 00000000 00000000 00000001 00000494  ................\n 0060 08080808 08080808 08080808 05000000  ................\n 0070 00000000 00000001 00000000 00000000  ................\n 0080 00000000 ffffffff 00000000 00000000  ................\n 0090 00000028 001d001f 00000002 00000002  ...(............\n 00a0 00000000 00000001 00000000 2c200004  ............, ..\n 00b0 0000002e 00000000 1820000f 0000002e  ......... ......\n 00c0 000001c8 20200001 00000001 00000000  ....  ..........\n 00d0 20200000 02000000 03000000 04000000    ..............\n 00e0 05000000 06000000 07000000 08000000  ................\n 00f0 09000000 20000000 21000000 0a000000  .... ...!.......\n 0100 0b000000 0b000000 1a000000 00000000  ................\n 0110 00000003 06000000 002f746d 702f6173  ........./tmp/as\n 0120 6d6c6966 742d6d69 70732d72 65662d38  mlift-mips-ref-8\n 0130 65323564 36366339 66366662 3534632f  e25d66c9f6fb54c/\n 0140 7265662e 6300756e 696e6974 5f737069  ref.c.uninit_spi\n 0150 6c6c0000 756e696e 69745f73 70696c6c  ll..uninit_spill\n 0160 00000000 00000000 00000001 00000000  ................\n 0170 0000003b 00000000 00000004 00000000  ...;............\n 0180 00000072 00000000 00000000 00000001  ...r............\n 0190 00000000 00000011 00000000 00000000  ................\n 01a0 01800000 00000000 0000000d 00000000  ................\n 01b0 00000000 00000000 18200001 00000000  ......... ......\n 01c0 00000000 00000000 00000000 00000000  ................\n 01d0 00000000 7fffffff 00000000 00000000  ................\n 01e0 00000002                             ....\nDUMP_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target ido7.1         # frontend + target description (ISA, calling convention, compiler idioms)\n  --name uninit_spill     # the symbol to decompile (multi-function input selects by name)\n  --asm-data dump.txt     # the data sections above (jump-table/const recovery)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+      }
+    },
+    {
+      "id": "synthetic:uninit_spill:mwcc_242_81",
+      "sym": "uninit_spill",
+      "project": "synthetic",
+      "tier": "synthetic",
+      "toolchain": "mwcc_242_81",
+      "isa": "ppc",
+      "compiler": "mwcc",
+      "language": "c",
+      "features": [
+        "uninit-local",
+        "array",
+        "switch",
+        "loop",
+        "call",
+        "comparison-tree"
+      ],
+      "loc": 1,
+      "refSource": "int uninit_spill(int k,int *p){ int v0,v1,v2,v3,v4,v5,v6,v7,v8,v9; int i,s=0; switch(k){ case 0: v0=p[0];v1=p[1];v2=p[2];v3=p[3];v4=p[4];v5=p[5];v6=p[6];v7=p[7];v8=p[8];v9=p[9]; break; case 1: v0=p[10];v1=p[11];v2=p[12];v3=p[13];v4=p[14];v5=p[15];v6=p[16];v7=p[17];v8=p[18];v9=p[19]; break; } for(i=0;i<8;i++) s+=p[i]*v0+v1*v2+v3*v4+v5*v6+v7*v8+v9; return s; }",
+      "targetAsm": "\ntarget.o:     file format elf32-powerpc\n\n\nDisassembly of section .text:\n\n00000000 <uninit_spill>:\n   0:\tstwu    r1,-32(r1)\n   4:\tmflr    r0\n   8:\tstw     r0,36(r1)\n   c:\taddi    r11,r1,32\n  10:\tbl      10 <uninit_spill+0x10>\n\t\t\t10: R_PPC_REL24\t_savegpr_26\n  14:\tcmpwi   r3,1\n  18:\tbeq     58 <uninit_spill+0x58>\n  1c:\tbge     80 <uninit_spill+0x80>\n  20:\tcmpwi   r3,0\n  24:\tbge     2c <uninit_spill+0x2c>\n  28:\tb       80 <uninit_spill+0x80>\n  2c:\tlwz     r31,0(r4)\n  30:\tlwz     r0,4(r4)\n  34:\tlwz     r3,8(r4)\n  38:\tlwz     r5,12(r4)\n  3c:\tlwz     r6,16(r4)\n  40:\tlwz     r30,20(r4)\n  44:\tlwz     r29,24(r4)\n  48:\tlwz     r28,28(r4)\n  4c:\tlwz     r27,32(r4)\n  50:\tlwz     r26,36(r4)\n  54:\tb       80 <uninit_spill+0x80>\n  58:\tlwz     r31,40(r4)\n  5c:\tlwz     r0,44(r4)\n  60:\tlwz     r3,48(r4)\n  64:\tlwz     r5,52(r4)\n  68:\tlwz     r6,56(r4)\n  6c:\tlwz     r30,60(r4)\n  70:\tlwz     r29,64(r4)\n  74:\tlwz     r28,68(r4)\n  78:\tlwz     r27,72(r4)\n  7c:\tlwz     r26,76(r4)\n  80:\tmullw   r12,r5,r6\n  84:\tlwz     r11,0(r4)\n  88:\tlwz     r10,4(r4)\n  8c:\tlwz     r9,8(r4)\n  90:\tlwz     r8,12(r4)\n  94:\tlwz     r7,16(r4)\n  98:\tmullw   r3,r0,r3\n  9c:\tlwz     r0,28(r4)\n  a0:\tlwz     r6,20(r4)\n  a4:\tlwz     r5,24(r4)\n  a8:\tadd     r3,r3,r12\n  ac:\tmullw   r4,r30,r29\n  b0:\tadd     r3,r3,r4\n  b4:\tmullw   r12,r28,r27\n  b8:\tmullw   r4,r31,r11\n  bc:\tadd     r3,r3,r12\n  c0:\tadd     r11,r3,r26\n  c4:\tadd     r3,r4,r11\n  c8:\tmullw   r4,r31,r10\n  cc:\tadd     r3,r11,r3\n  d0:\tadd     r3,r4,r3\n  d4:\tmullw   r4,r31,r9\n  d8:\tadd     r3,r11,r3\n  dc:\tadd     r3,r4,r3\n  e0:\tmullw   r4,r31,r8\n  e4:\tadd     r3,r11,r3\n  e8:\tadd     r3,r4,r3\n  ec:\tmullw   r4,r31,r7\n  f0:\tadd     r3,r11,r3\n  f4:\tadd     r3,r4,r3\n  f8:\tmullw   r4,r31,r6\n  fc:\tadd     r3,r11,r3\n 100:\tadd     r3,r4,r3\n 104:\tmullw   r4,r31,r5\n 108:\tadd     r3,r11,r3\n 10c:\tadd     r3,r4,r3\n 110:\tadd     r3,r11,r3\n 114:\taddi    r11,r1,32\n 118:\tmullw   r0,r31,r0\n 11c:\tadd     r3,r0,r3\n 120:\tbl      120 <uninit_spill+0x120>\n\t\t\t120: R_PPC_REL24\t_restgpr_26\n 124:\tlwz     r0,36(r1)\n 128:\tmtlr    r0\n 12c:\taddi    r1,r1,32\n 130:\tblr\n",
+      "asmDump": "\ntarget.o:     file format elf32-powerpc\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 ref.c\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .mwcats.text\t00000000 .mwcats.text\n00000000         *UND*\t00000000 _savegpr_26\n00000000         *UND*\t00000000 _restgpr_26\n00000000 g     F .text\t00000134 uninit_spill\n\n\nRELOCATION RECORDS FOR [.text]:\nOFFSET   TYPE              VALUE\n00000010 R_PPC_REL24       _savegpr_26\n00000120 R_PPC_REL24       _restgpr_26\n\n\nRELOCATION RECORDS FOR [.mwcats.text]:\nOFFSET   TYPE              VALUE\n00000004 R_PPC_ADDR32      uninit_spill\n\n\nContents of section .text:\n 0000 9421ffe0 7c0802a6 90010024 39610020  .!..|......$9a. \n 0010 48000001 2c030001 41820040 40800064  H...,...A..@@..d\n 0020 2c030000 40800008 48000058 83e40000  ,...@...H..X....\n 0030 80040004 80640008 80a4000c 80c40010  .....d..........\n 0040 83c40014 83a40018 8384001c 83640020  .............d. \n 0050 83440024 4800002c 83e40028 8004002c  .D.$H..,...(...,\n 0060 80640030 80a40034 80c40038 83c4003c  .d.0...4...8...<\n 0070 83a40040 83840044 83640048 8344004c  ...@...D.d.H.D.L\n 0080 7d8531d6 81640000 81440004 81240008  }.1..d...D...$..\n 0090 8104000c 80e40010 7c6019d6 8004001c  ........|`......\n 00a0 80c40014 80a40018 7c636214 7c9ee9d6  ........|cb.|...\n 00b0 7c632214 7d9cd9d6 7c9f59d6 7c636214  |c\".}...|.Y.|cb.\n 00c0 7d63d214 7c645a14 7c9f51d6 7c6b1a14  }c..|dZ.|.Q.|k..\n 00d0 7c641a14 7c9f49d6 7c6b1a14 7c641a14  |d..|.I.|k..|d..\n 00e0 7c9f41d6 7c6b1a14 7c641a14 7c9f39d6  |.A.|k..|d..|.9.\n 00f0 7c6b1a14 7c641a14 7c9f31d6 7c6b1a14  |k..|d..|.1.|k..\n 0100 7c641a14 7c9f29d6 7c6b1a14 7c641a14  |d..|.).|k..|d..\n 0110 7c6b1a14 39610020 7c1f01d6 7c601a14  |k..9a. |...|`..\n 0120 48000001 80010024 7c0803a6 38210020  H......$|...8!. \n 0130 4e800020                             N..             \nContents of section .mwcats.text:\n 0000 02000134 00000000                    ...4....        \nContents of section .comment:\n 0000 436f6465 57617272 696f720a 02040201  CodeWarrior.....\n 0010 01020016 2c000000 00000000 00000000  ....,...........\n 0020 00000000 00000000 00000000 00000000  ................\n 0030 00000000 00000001 00000000 00000004  ................\n 0040 00000000 00000004 00000000 00000000  ................\n 0050 00000000 00000000 00000000 00000004  ................\n 0060 00000000                             ....            \n",
+      "asmlift": {
+        "decompiler": "asmlift",
+        "outcome": "declined",
+        "source": "/* asmlift could not decompile 'uninit_spill' — lift: cannot lift 'uninit_spill': stack pointer r1 used as data (address-taken local / frame arithmetic) — not supported */\n/* original assembly: */\n/*   target.o:     file format elf32-powerpc */\n/*   Disassembly of section .text: */\n/*   00000000 <uninit_spill>: */\n/*      0:\tstwu    r1,-32(r1) */\n/*      4:\tmflr    r0 */\n/*      8:\tstw     r0,36(r1) */\n/*      c:\taddi    r11,r1,32 */\n/*     10:\tbl      10 <uninit_spill+0x10> */\n/*   \t\t\t10: R_PPC_REL24\t_savegpr_26 */\n/*     14:\tcmpwi   r3,1 */\n/*     18:\tbeq     58 <uninit_spill+0x58> */\n/*     1c:\tbge     80 <uninit_spill+0x80> */\n/*     20:\tcmpwi   r3,0 */\n/*     24:\tbge     2c <uninit_spill+0x2c> */\n/*     28:\tb       80 <uninit_spill+0x80> */\n/*     2c:\tlwz     r31,0(r4) */\n/*     30:\tlwz     r0,4(r4) */\n/*     34:\tlwz     r3,8(r4) */\n/*     38:\tlwz     r5,12(r4) */\n/*     3c:\tlwz     r6,16(r4) */\n/*     40:\tlwz     r30,20(r4) */\n/*     44:\tlwz     r29,24(r4) */\n/*     48:\tlwz     r28,28(r4) */\n/*     4c:\tlwz     r27,32(r4) */\n/*     50:\tlwz     r26,36(r4) */\n/*     54:\tb       80 <uninit_spill+0x80> */\n/*     58:\tlwz     r31,40(r4) */\n/*     5c:\tlwz     r0,44(r4) */\n/*     60:\tlwz     r3,48(r4) */\n/*     64:\tlwz     r5,52(r4) */\n/*     68:\tlwz     r6,56(r4) */\n/*     6c:\tlwz     r30,60(r4) */\n/*     70:\tlwz     r29,64(r4) */\n/*     74:\tlwz     r28,68(r4) */\n/*     78:\tlwz     r27,72(r4) */\n/*     7c:\tlwz     r26,76(r4) */\n/*     80:\tmullw   r12,r5,r6 */\n/*     84:\tlwz     r11,0(r4) */\n/*     88:\tlwz     r10,4(r4) */\n/*     8c:\tlwz     r9,8(r4) */\n/*     90:\tlwz     r8,12(r4) */\n/*     94:\tlwz     r7,16(r4) */\n/*     98:\tmullw   r3,r0,r3 */\n/*     9c:\tlwz     r0,28(r4) */\n/*     a0:\tlwz     r6,20(r4) */\n/*     a4:\tlwz     r5,24(r4) */\n/*     a8:\tadd     r3,r3,r12 */\n/*     ac:\tmullw   r4,r30,r29 */\n/*     b0:\tadd     r3,r3,r4 */\n/*     b4:\tmullw   r12,r28,r27 */\n/*     b8:\tmullw   r4,r31,r11 */\n/*     bc:\tadd     r3,r3,r12 */\n/*     c0:\tadd     r11,r3,r26 */\n/*     c4:\tadd     r3,r4,r11 */\n/*     c8:\tmullw   r4,r31,r10 */\n/*     cc:\tadd     r3,r11,r3 */\n/*     d0:\tadd     r3,r4,r3 */\n/*     d4:\tmullw   r4,r31,r9 */\n/*     d8:\tadd     r3,r11,r3 */\n/*     dc:\tadd     r3,r4,r3 */\n/*     e0:\tmullw   r4,r31,r8 */\n/*     e4:\tadd     r3,r11,r3 */\n/*     e8:\tadd     r3,r4,r3 */\n/*     ec:\tmullw   r4,r31,r7 */\n/*     f0:\tadd     r3,r11,r3 */\n/*     f4:\tadd     r3,r4,r3 */\n/*     f8:\tmullw   r4,r31,r6 */\n/*     fc:\tadd     r3,r11,r3 */\n/*    100:\tadd     r3,r4,r3 */\n/*    104:\tmullw   r4,r31,r5 */\n/*    108:\tadd     r3,r11,r3 */\n/*    10c:\tadd     r3,r4,r3 */\n/*    110:\tadd     r3,r11,r3 */\n/*    114:\taddi    r11,r1,32 */\n/*    118:\tmullw   r0,r31,r0 */\n/*    11c:\tadd     r3,r0,r3 */\n/*    120:\tbl      120 <uninit_spill+0x120> */\n/*   \t\t\t120: R_PPC_REL24\t_restgpr_26 */\n/*    124:\tlwz     r0,36(r1) */\n/*    128:\tmtlr    r0 */\n/*    12c:\taddi    r1,r1,32 */\n/*    130:\tblr */\nvoid uninit_spill(void) {\n    ASMLIFT_ERROR(\"could not decompile (lift): cannot lift 'uninit_spill': stack pointer r1 used as data (address-taken local / frame arithmetic) — not supported\");\n}\n",
+        "score": null,
+        "maxScore": null,
+        "compileErrors": null,
+        "quality": {
+          "score": 88,
+          "lines": 87,
+          "gotos": 0,
+          "casts": 1,
+          "unkGlue": 1,
+          "rawMem": 0,
+          "addrDeref": 0
+        },
+        "errorMarkers": [
+          "lift: cannot lift 'uninit_spill': stack pointer r1 used as data (address-taken local / frame arithmetic) — not supported"
+        ]
+      },
+      "m2c": {
+        "decompiler": "m2c",
+        "outcome": "declined",
+        "source": "s32 uninit_spill(s32 arg0, void *arg1, s32 arg2, s32 arg3, ? arg_sp0) {\n    s32 temp_r11;\n    s32 var_r0;\n    s32 var_r26;\n    s32 var_r27;\n    s32 var_r28;\n    s32 var_r29;\n    s32 var_r30;\n    s32 var_r31;\n    s32 var_r3;\n    s32 var_r5;\n    s32 var_r6;\n\n    var_r26 = saved_reg_r26;\n    var_r27 = saved_reg_r27;\n    var_r28 = saved_reg_r28;\n    var_r29 = saved_reg_r29;\n    var_r30 = saved_reg_r30;\n    var_r31 = saved_reg_r31;\n    var_r3 = arg0;\n    var_r5 = arg2;\n    var_r6 = arg3;\n    var_r0 = saved_reg_lr;\n    switch (var_r3) {                               /* irregular */\n    case 0:\n        var_r31 = arg1->unk0;\n        var_r0 = arg1->unk4;\n        var_r3 = arg1->unk8;\n        var_r5 = arg1->unkC;\n        var_r6 = arg1->unk10;\n        var_r30 = arg1->unk14;\n        var_r29 = arg1->unk18;\n        var_r28 = arg1->unk1C;\n        var_r27 = arg1->unk20;\n        var_r26 = arg1->unk24;\n        break;\n    case 1:\n        var_r31 = arg1->unk28;\n        var_r0 = arg1->unk2C;\n        var_r3 = arg1->unk30;\n        var_r5 = arg1->unk34;\n        var_r6 = arg1->unk38;\n        var_r30 = arg1->unk3C;\n        var_r29 = arg1->unk40;\n        var_r28 = arg1->unk44;\n        var_r27 = arg1->unk48;\n        var_r26 = arg1->unk4C;\n        break;\n    }\n    temp_r11 = (var_r0 * var_r3) + (var_r5 * var_r6) + (var_r30 * var_r29) + (var_r28 * var_r27) + var_r26;\n    return (var_r31 * arg1->unk1C) + (temp_r11 + ((var_r31 * arg1->unk18) + (temp_r11 + ((var_r31 * arg1->unk14) + (temp_r11 + ((var_r31 * arg1->unk10) + (temp_r11 + ((var_r31 * arg1->unkC) + (temp_r11 + ((var_r31 * arg1->unk8) + (temp_r11 + ((var_r31 * arg1->unk4) + (temp_r11 + ((var_r31 * arg1->unk0) + temp_r11))))))))))))));\n}\n",
+        "score": null,
+        "maxScore": null,
+        "compileErrors": null,
+        "quality": {
+          "score": 100,
+          "lines": 51,
+          "gotos": 0,
+          "casts": 0,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        },
+        "errorMarkers": [
+          "? placeholder"
+        ]
+      },
+      "gapSize": null,
+      "scripts": {
+        "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `uninit_spill` — benchmark function synthetic:uninit_spill:mwcc_242_81.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The benchmark's objdump→GNU-as normalization of this function's disassembly (m2c cannot\n# read raw objdump), including the jump-table/const data sections recovered from the target\n# object — the exact text the benchmark fed m2c.\ncat > in.s <<'ASM_INPUT'\nglabel uninit_spill\n    stwu    r1,-32(r1)\n    mflr    r0\n    stw     r0,36(r1)\n    addi    r11,r1,32\n    bl       _savegpr_26\n    cmpwi   r3,1\n    beq      .L58\n    bge      .L80\n    cmpwi   r3,0\n    bge      .L2c\n    b        .L80\n.L2c:\n    lwz     r31,0(r4)\n    lwz     r0,4(r4)\n    lwz     r3,8(r4)\n    lwz     r5,12(r4)\n    lwz     r6,16(r4)\n    lwz     r30,20(r4)\n    lwz     r29,24(r4)\n    lwz     r28,28(r4)\n    lwz     r27,32(r4)\n    lwz     r26,36(r4)\n    b        .L80\n.L58:\n    lwz     r31,40(r4)\n    lwz     r0,44(r4)\n    lwz     r3,48(r4)\n    lwz     r5,52(r4)\n    lwz     r6,56(r4)\n    lwz     r30,60(r4)\n    lwz     r29,64(r4)\n    lwz     r28,68(r4)\n    lwz     r27,72(r4)\n    lwz     r26,76(r4)\n.L80:\n    mullw   r12,r5,r6\n    lwz     r11,0(r4)\n    lwz     r10,4(r4)\n    lwz     r9,8(r4)\n    lwz     r8,12(r4)\n    lwz     r7,16(r4)\n    mullw   r3,r0,r3\n    lwz     r0,28(r4)\n    lwz     r6,20(r4)\n    lwz     r5,24(r4)\n    add     r3,r3,r12\n    mullw   r4,r30,r29\n    add     r3,r3,r4\n    mullw   r12,r28,r27\n    mullw   r4,r31,r11\n    add     r3,r3,r12\n    add     r11,r3,r26\n    add     r3,r4,r11\n    mullw   r4,r31,r10\n    add     r3,r11,r3\n    add     r3,r4,r3\n    mullw   r4,r31,r9\n    add     r3,r11,r3\n    add     r3,r4,r3\n    mullw   r4,r31,r8\n    add     r3,r11,r3\n    add     r3,r4,r3\n    mullw   r4,r31,r7\n    add     r3,r11,r3\n    add     r3,r4,r3\n    mullw   r4,r31,r6\n    add     r3,r11,r3\n    add     r3,r4,r3\n    mullw   r4,r31,r5\n    add     r3,r11,r3\n    add     r3,r4,r3\n    add     r3,r11,r3\n    addi    r11,r1,32\n    mullw   r0,r31,r0\n    add     r3,r0,r3\n    bl       _restgpr_26\n    lwz     r0,36(r1)\n    mtlr    r0\n    addi    r1,r1,32\n    blr\nASM_INPUT\n\n# (This function ran with NO context header — the benchmark fed m2c the assembly alone.)\n\nargs=(\n  --target ppc-mwcc-c     # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function uninit_spill # the symbol to decompile from in.s\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `uninit_spill` — benchmark function synthetic:uninit_spill:mwcc_242_81.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:uninit_spill:mwcc_242_81 --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact `objdump -d --no-show-raw-insn` text.\ncat > in.asm <<'ASM_INPUT'\n\ntarget.o:     file format elf32-powerpc\n\n\nDisassembly of section .text:\n\n00000000 <uninit_spill>:\n   0:\tstwu    r1,-32(r1)\n   4:\tmflr    r0\n   8:\tstw     r0,36(r1)\n   c:\taddi    r11,r1,32\n  10:\tbl      10 <uninit_spill+0x10>\n\t\t\t10: R_PPC_REL24\t_savegpr_26\n  14:\tcmpwi   r3,1\n  18:\tbeq     58 <uninit_spill+0x58>\n  1c:\tbge     80 <uninit_spill+0x80>\n  20:\tcmpwi   r3,0\n  24:\tbge     2c <uninit_spill+0x2c>\n  28:\tb       80 <uninit_spill+0x80>\n  2c:\tlwz     r31,0(r4)\n  30:\tlwz     r0,4(r4)\n  34:\tlwz     r3,8(r4)\n  38:\tlwz     r5,12(r4)\n  3c:\tlwz     r6,16(r4)\n  40:\tlwz     r30,20(r4)\n  44:\tlwz     r29,24(r4)\n  48:\tlwz     r28,28(r4)\n  4c:\tlwz     r27,32(r4)\n  50:\tlwz     r26,36(r4)\n  54:\tb       80 <uninit_spill+0x80>\n  58:\tlwz     r31,40(r4)\n  5c:\tlwz     r0,44(r4)\n  60:\tlwz     r3,48(r4)\n  64:\tlwz     r5,52(r4)\n  68:\tlwz     r6,56(r4)\n  6c:\tlwz     r30,60(r4)\n  70:\tlwz     r29,64(r4)\n  74:\tlwz     r28,68(r4)\n  78:\tlwz     r27,72(r4)\n  7c:\tlwz     r26,76(r4)\n  80:\tmullw   r12,r5,r6\n  84:\tlwz     r11,0(r4)\n  88:\tlwz     r10,4(r4)\n  8c:\tlwz     r9,8(r4)\n  90:\tlwz     r8,12(r4)\n  94:\tlwz     r7,16(r4)\n  98:\tmullw   r3,r0,r3\n  9c:\tlwz     r0,28(r4)\n  a0:\tlwz     r6,20(r4)\n  a4:\tlwz     r5,24(r4)\n  a8:\tadd     r3,r3,r12\n  ac:\tmullw   r4,r30,r29\n  b0:\tadd     r3,r3,r4\n  b4:\tmullw   r12,r28,r27\n  b8:\tmullw   r4,r31,r11\n  bc:\tadd     r3,r3,r12\n  c0:\tadd     r11,r3,r26\n  c4:\tadd     r3,r4,r11\n  c8:\tmullw   r4,r31,r10\n  cc:\tadd     r3,r11,r3\n  d0:\tadd     r3,r4,r3\n  d4:\tmullw   r4,r31,r9\n  d8:\tadd     r3,r11,r3\n  dc:\tadd     r3,r4,r3\n  e0:\tmullw   r4,r31,r8\n  e4:\tadd     r3,r11,r3\n  e8:\tadd     r3,r4,r3\n  ec:\tmullw   r4,r31,r7\n  f0:\tadd     r3,r11,r3\n  f4:\tadd     r3,r4,r3\n  f8:\tmullw   r4,r31,r6\n  fc:\tadd     r3,r11,r3\n 100:\tadd     r3,r4,r3\n 104:\tmullw   r4,r31,r5\n 108:\tadd     r3,r11,r3\n 10c:\tadd     r3,r4,r3\n 110:\tadd     r3,r11,r3\n 114:\taddi    r11,r1,32\n 118:\tmullw   r0,r31,r0\n 11c:\tadd     r3,r0,r3\n 120:\tbl      120 <uninit_spill+0x120>\n\t\t\t120: R_PPC_REL24\t_restgpr_26\n 124:\tlwz     r0,36(r1)\n 128:\tmtlr    r0\n 12c:\taddi    r1,r1,32\n 130:\tblr\nASM_INPUT\n\n# The target object's objdump -s -r -t dump — the data sections (jump tables, anonymous\n# constants) the text-only disassembly lacks; the benchmark recovered them from the object.\ncat > dump.txt <<'DUMP_INPUT'\n\ntarget.o:     file format elf32-powerpc\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 ref.c\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .mwcats.text\t00000000 .mwcats.text\n00000000         *UND*\t00000000 _savegpr_26\n00000000         *UND*\t00000000 _restgpr_26\n00000000 g     F .text\t00000134 uninit_spill\n\n\nRELOCATION RECORDS FOR [.text]:\nOFFSET   TYPE              VALUE\n00000010 R_PPC_REL24       _savegpr_26\n00000120 R_PPC_REL24       _restgpr_26\n\n\nRELOCATION RECORDS FOR [.mwcats.text]:\nOFFSET   TYPE              VALUE\n00000004 R_PPC_ADDR32      uninit_spill\n\n\nContents of section .text:\n 0000 9421ffe0 7c0802a6 90010024 39610020  .!..|......$9a. \n 0010 48000001 2c030001 41820040 40800064  H...,...A..@@..d\n 0020 2c030000 40800008 48000058 83e40000  ,...@...H..X....\n 0030 80040004 80640008 80a4000c 80c40010  .....d..........\n 0040 83c40014 83a40018 8384001c 83640020  .............d. \n 0050 83440024 4800002c 83e40028 8004002c  .D.$H..,...(...,\n 0060 80640030 80a40034 80c40038 83c4003c  .d.0...4...8...<\n 0070 83a40040 83840044 83640048 8344004c  ...@...D.d.H.D.L\n 0080 7d8531d6 81640000 81440004 81240008  }.1..d...D...$..\n 0090 8104000c 80e40010 7c6019d6 8004001c  ........|`......\n 00a0 80c40014 80a40018 7c636214 7c9ee9d6  ........|cb.|...\n 00b0 7c632214 7d9cd9d6 7c9f59d6 7c636214  |c\".}...|.Y.|cb.\n 00c0 7d63d214 7c645a14 7c9f51d6 7c6b1a14  }c..|dZ.|.Q.|k..\n 00d0 7c641a14 7c9f49d6 7c6b1a14 7c641a14  |d..|.I.|k..|d..\n 00e0 7c9f41d6 7c6b1a14 7c641a14 7c9f39d6  |.A.|k..|d..|.9.\n 00f0 7c6b1a14 7c641a14 7c9f31d6 7c6b1a14  |k..|d..|.1.|k..\n 0100 7c641a14 7c9f29d6 7c6b1a14 7c641a14  |d..|.).|k..|d..\n 0110 7c6b1a14 39610020 7c1f01d6 7c601a14  |k..9a. |...|`..\n 0120 48000001 80010024 7c0803a6 38210020  H......$|...8!. \n 0130 4e800020                             N..             \nContents of section .mwcats.text:\n 0000 02000134 00000000                    ...4....        \nContents of section .comment:\n 0000 436f6465 57617272 696f720a 02040201  CodeWarrior.....\n 0010 01020016 2c000000 00000000 00000000  ....,...........\n 0020 00000000 00000000 00000000 00000000  ................\n 0030 00000000 00000001 00000000 00000004  ................\n 0040 00000000 00000004 00000000 00000000  ................\n 0050 00000000 00000000 00000000 00000004  ................\n 0060 00000000                             ....\nDUMP_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target mwcc_242_81    # frontend + target description (ISA, calling convention, compiler idioms)\n  --name uninit_spill     # the symbol to decompile (multi-function input selects by name)\n  --asm-data dump.txt     # the data sections above (jump-table/const recovery)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+      }
+    },
+    {
+      "id": "synthetic:uninit_sw:agbcc",
+      "sym": "uninit_sw",
+      "project": "synthetic",
+      "tier": "synthetic",
+      "toolchain": "agbcc",
+      "isa": "arm",
+      "compiler": "agbcc",
+      "language": "c",
+      "features": [
+        "uninit-local",
+        "switch",
+        "comparison-tree",
+        "strength-reduce"
+      ],
+      "loc": 1,
+      "refSource": "int uninit_sw(int k,int a){ int r; switch(k){case 0:r=a;break;case 1:r=a*2;break;case 2:r=a*3;break;case 3:r=a*4;break;} return r+1; }",
+      "targetAsm": "@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tuninit_sw\n\t.type\t uninit_sw,function\n\t.thumb_func\nuninit_sw:\n\tcmp\tr0, #0x1\n\tbeq\t.L5\t@cond_branch\n\tcmp\tr0, #0x1\n\tbgt\t.L10\t@cond_branch\n\tcmp\tr0, #0\n\tbeq\t.L4\t@cond_branch\n\tb\t.L3\n.L10:\n\tcmp\tr0, #0x2\n\tbeq\t.L6\t@cond_branch\n\tcmp\tr0, #0x3\n\tbeq\t.L7\t@cond_branch\n\tb\t.L3\n.L4:\n\tadd\tr2, r1, #0\n\tb\t.L3\n.L5:\n\tlsl\tr2, r1, #0x1\n\tb\t.L3\n.L6:\n\tlsl\tr0, r1, #0x1\n\tadd\tr2, r0, r1\n\tb\t.L3\n.L7:\n\tlsl\tr2, r1, #0x2\n.L3:\n\tadd\tr0, r2, #0x1\n\tbx\tlr\n.Lfe1:\n\t.size\t uninit_sw,.Lfe1-uninit_sw\n",
+      "asmlift": {
+        "decompiler": "asmlift",
+        "candidateLabel": "unsigned",
+        "outcome": "nonmatch",
+        "source": "s32 uninit_sw(u32 a0, u32 a1, u32 a2) {\n    if (a0 == 1) {\n        a2 = a1 << 1;\n    } else {\n        if (a0 > 1) {\n            switch (a0) {\n                case 2:\n                    a2 = a1 * 3;\n                    break;\n                case 3:\n                    a2 = a1 << 2;\n                    break;\n            }\n        } else {\n            if (a0 == 0) a2 = a1;\n        }\n    }\n    return a2 + 1;\n}\n",
+        "score": 23,
+        "maxScore": 29,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 7,
+          "delete": 8,
+          "replace": 1,
+          "opMismatch": 4,
+          "argMismatch": 3
+        },
+        "quality": {
+          "score": 100,
+          "lines": 19,
+          "gotos": 0,
+          "casts": 0,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        }
+      },
+      "m2c": {
+        "decompiler": "m2c",
+        "outcome": "match",
+        "source": "s32 uninit_sw(s32 arg0, s32 arg1, s32 arg2) {\n    s32 var_r2;\n\n    var_r2 = arg2;\n    switch (arg0) {                                 /* irregular */\n    case 0:\n        var_r2 = arg1;\n        break;\n    case 1:\n        var_r2 = arg1 * 2;\n        break;\n    case 2:\n        var_r2 = arg1 * 3;\n        break;\n    case 3:\n        var_r2 = arg1 * 4;\n        break;\n    }\n    return var_r2 + 1;\n}\n",
+        "score": 0,
+        "maxScore": 22,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 0
+        },
+        "quality": {
+          "score": 100,
+          "lines": 19,
+          "gotos": 0,
+          "casts": 0,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        }
+      },
+      "gapSize": null,
+      "scripts": {
+        "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `uninit_sw` — benchmark function synthetic:uninit_sw:agbcc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The exact agbcc `.s` text the benchmark fed m2c, verbatim.\ncat > in.s <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tuninit_sw\n\t.type\t uninit_sw,function\n\t.thumb_func\nuninit_sw:\n\tcmp\tr0, #0x1\n\tbeq\t.L5\t@cond_branch\n\tcmp\tr0, #0x1\n\tbgt\t.L10\t@cond_branch\n\tcmp\tr0, #0\n\tbeq\t.L4\t@cond_branch\n\tb\t.L3\n.L10:\n\tcmp\tr0, #0x2\n\tbeq\t.L6\t@cond_branch\n\tcmp\tr0, #0x3\n\tbeq\t.L7\t@cond_branch\n\tb\t.L3\n.L4:\n\tadd\tr2, r1, #0\n\tb\t.L3\n.L5:\n\tlsl\tr2, r1, #0x1\n\tb\t.L3\n.L6:\n\tlsl\tr0, r1, #0x1\n\tadd\tr2, r0, r1\n\tb\t.L3\n.L7:\n\tlsl\tr2, r1, #0x2\n.L3:\n\tadd\tr0, r2, #0x1\n\tbx\tlr\n.Lfe1:\n\t.size\t uninit_sw,.Lfe1-uninit_sw\nASM_INPUT\n\n# (This function ran with NO context header — the benchmark fed m2c the assembly alone.)\n\nargs=(\n  --target gba            # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function uninit_sw    # the symbol to decompile from in.s\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `uninit_sw` — benchmark function synthetic:uninit_sw:agbcc.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:uninit_sw:agbcc --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact agbcc `.s` text.\ncat > in.asm <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tuninit_sw\n\t.type\t uninit_sw,function\n\t.thumb_func\nuninit_sw:\n\tcmp\tr0, #0x1\n\tbeq\t.L5\t@cond_branch\n\tcmp\tr0, #0x1\n\tbgt\t.L10\t@cond_branch\n\tcmp\tr0, #0\n\tbeq\t.L4\t@cond_branch\n\tb\t.L3\n.L10:\n\tcmp\tr0, #0x2\n\tbeq\t.L6\t@cond_branch\n\tcmp\tr0, #0x3\n\tbeq\t.L7\t@cond_branch\n\tb\t.L3\n.L4:\n\tadd\tr2, r1, #0\n\tb\t.L3\n.L5:\n\tlsl\tr2, r1, #0x1\n\tb\t.L3\n.L6:\n\tlsl\tr0, r1, #0x1\n\tadd\tr2, r0, r1\n\tb\t.L3\n.L7:\n\tlsl\tr2, r1, #0x2\n.L3:\n\tadd\tr0, r2, #0x1\n\tbx\tlr\n.Lfe1:\n\t.size\t uninit_sw,.Lfe1-uninit_sw\nASM_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target agbcc          # frontend + target description (ISA, calling convention, compiler idioms)\n  --name uninit_sw        # the symbol to decompile (multi-function input selects by name)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+      }
+    },
+    {
+      "id": "synthetic:uninit_sw:gcc2.7.2kmc",
+      "sym": "uninit_sw",
+      "project": "synthetic",
+      "tier": "synthetic",
+      "toolchain": "gcc2.7.2kmc",
+      "isa": "mips",
+      "compiler": "gcc",
+      "language": "c",
+      "features": [
+        "uninit-local",
+        "switch",
+        "comparison-tree",
+        "strength-reduce"
+      ],
+      "loc": 1,
+      "refSource": "int uninit_sw(int k,int a){ int r; switch(k){case 0:r=a;break;case 1:r=a*2;break;case 2:r=a*3;break;case 3:r=a*4;break;} return r+1; }",
+      "targetAsm": "\ntarget.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <uninit_sw>:\n   0:\tli\tv0,1\n   4:\tbeq\ta0,v0,3c <uninit_sw+0x3c>\n   8:\tslti\tv0,a0,2\n   c:\tbeqzl\tv0,24 <uninit_sw+0x24>\n  10:\tli\tv0,2\n  14:\tbeqzl\ta0,4c <uninit_sw+0x4c>\n  18:\tmove\tv1,a1\n  1c:\tj\t4c <uninit_sw+0x4c>\n  20:\tnop\n  24:\tbeq\ta0,v0,44 <uninit_sw+0x44>\n  28:\tli\tv0,3\n  2c:\tbeql\ta0,v0,4c <uninit_sw+0x4c>\n  30:\tsll\tv1,a1,0x2\n  34:\tj\t4c <uninit_sw+0x4c>\n  38:\tnop\n  3c:\tj\t4c <uninit_sw+0x4c>\n  40:\tsll\tv1,a1,0x1\n  44:\tsll\tv0,a1,0x1\n  48:\taddu\tv1,v0,a1\n  4c:\tjr\tra\n  50:\taddiu\tv0,v1,1\n\t...\n",
+      "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /host-tmp/asmlift-mgcc-ref-ee3c4196db5b54cc/ref.c\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t00000054 uninit_sw\n\n\nRELOCATION RECORDS FOR [.text]:\nOFFSET   TYPE              VALUE\n0000001c R_MIPS_26         .text\n00000034 R_MIPS_26         .text\n0000003c R_MIPS_26         .text\n\n\nContents of section .text:\n 0000 24020001 1082000d 28820002 50400005  $.......(...P@..\n 0010 24020002 5080000d 00a01821 08000013  $...P......!....\n 0020 00000000 10820007 24020003 50820007  ........$...P...\n 0030 00051880 08000013 00000000 08000013  ................\n 0040 00051840 00051040 00451821 03e00008  ...@...@.E.!....\n 0050 24620001 00000000 00000000 00000000  $b..............\nContents of section .reginfo:\n 0000 8000003c 00000000 00000000 00000000  ...<............\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.              \n",
+      "asmlift": {
+        "decompiler": "asmlift",
+        "outcome": "declined",
+        "source": "/* asmlift could not decompile 'uninit_sw' — lift: cannot lift 'uninit_sw': unmodelled control transfer 'beqzl' at 0xc — branch-likely / coprocessor branch not supported */\n/* original assembly: */\n/*   target.o:     file format elf32-tradbigmips */\n/*   Disassembly of section .text: */\n/*   00000000 <uninit_sw>: */\n/*      0:\tli\tv0,1 */\n/*      4:\tbeq\ta0,v0,3c <uninit_sw+0x3c> */\n/*      8:\tslti\tv0,a0,2 */\n/*      c:\tbeqzl\tv0,24 <uninit_sw+0x24> */\n/*     10:\tli\tv0,2 */\n/*     14:\tbeqzl\ta0,4c <uninit_sw+0x4c> */\n/*     18:\tmove\tv1,a1 */\n/*     1c:\tj\t4c <uninit_sw+0x4c> */\n/*     20:\tnop */\n/*     24:\tbeq\ta0,v0,44 <uninit_sw+0x44> */\n/*     28:\tli\tv0,3 */\n/*     2c:\tbeql\ta0,v0,4c <uninit_sw+0x4c> */\n/*     30:\tsll\tv1,a1,0x2 */\n/*     34:\tj\t4c <uninit_sw+0x4c> */\n/*     38:\tnop */\n/*     3c:\tj\t4c <uninit_sw+0x4c> */\n/*     40:\tsll\tv1,a1,0x1 */\n/*     44:\tsll\tv0,a1,0x1 */\n/*     48:\taddu\tv1,v0,a1 */\n/*     4c:\tjr\tra */\n/*     50:\taddiu\tv0,v1,1 */\n/*   \t... */\nvoid uninit_sw(void) {\n    ASMLIFT_ERROR(\"could not decompile (lift): cannot lift 'uninit_sw': unmodelled control transfer 'beqzl' at 0xc — branch-likely / coprocessor branch not supported\");\n}\n",
+        "score": null,
+        "maxScore": null,
+        "compileErrors": null,
+        "quality": {
+          "score": 88,
+          "lines": 30,
+          "gotos": 0,
+          "casts": 1,
+          "unkGlue": 1,
+          "rawMem": 0,
+          "addrDeref": 0
+        },
+        "errorMarkers": [
+          "lift: cannot lift 'uninit_sw': unmodelled control transfer 'beqzl' at 0xc — branch-likely / coprocessor branch not supported"
+        ]
+      },
+      "m2c": {
+        "decompiler": "m2c",
+        "outcome": "declined",
+        "source": "s32 uninit_sw(s32 arg0, s32 arg1) {\n    switch (arg0) {                                 /* irregular */\n    case 0:\n        break;\n    case 3:\n        break;\n    case 1:\n        break;\n    case 2:\n        break;\n    }\n    return M2C_ERROR(/* Read from unset register $v1 */) + 1;\n}\n",
+        "score": null,
+        "maxScore": null,
+        "compileErrors": null,
+        "quality": {
+          "score": 88,
+          "lines": 13,
+          "gotos": 0,
+          "casts": 0,
+          "unkGlue": 1,
+          "rawMem": 0,
+          "addrDeref": 0
+        },
+        "errorMarkers": [
+          "M2C_ERROR"
+        ]
+      },
+      "gapSize": null,
+      "scripts": {
+        "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `uninit_sw` — benchmark function synthetic:uninit_sw:gcc2.7.2kmc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The benchmark's objdump→GNU-as normalization of this function's disassembly (m2c cannot\n# read raw objdump), including the jump-table/const data sections recovered from the target\n# object — the exact text the benchmark fed m2c.\ncat > in.s <<'ASM_INPUT'\nglabel uninit_sw\n    li\t$v0, 1\n    beq\t$a0, $v0, .L3c\n    slti\t$v0, $a0, 2\n    beqzl\t$v0, .L24\n    li\t$v0, 2\n    beqzl\t$a0, .L4c\n    move\t$v1, $a1\n    j\t.L4c\n    nop\n.L24:\n    beq\t$a0, $v0, .L44\n    li\t$v0, 3\n    beql\t$a0, $v0, .L4c\n    sll\t$v1, $a1, 0x2\n    j\t.L4c\n    nop\n.L3c:\n    j\t.L4c\n    sll\t$v1, $a1, 0x1\n.L44:\n    sll\t$v0, $a1, 0x1\n    addu\t$v1, $v0, $a1\n.L4c:\n    jr\t$ra\n    addiu\t$v0, $v1, 1\nASM_INPUT\n\n# (This function ran with NO context header — the benchmark fed m2c the assembly alone.)\n\nargs=(\n  --target mips-gcc-c     # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function uninit_sw    # the symbol to decompile from in.s\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `uninit_sw` — benchmark function synthetic:uninit_sw:gcc2.7.2kmc.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:uninit_sw:gcc2.7.2kmc --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact `objdump -d --no-show-raw-insn` text.\ncat > in.asm <<'ASM_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <uninit_sw>:\n   0:\tli\tv0,1\n   4:\tbeq\ta0,v0,3c <uninit_sw+0x3c>\n   8:\tslti\tv0,a0,2\n   c:\tbeqzl\tv0,24 <uninit_sw+0x24>\n  10:\tli\tv0,2\n  14:\tbeqzl\ta0,4c <uninit_sw+0x4c>\n  18:\tmove\tv1,a1\n  1c:\tj\t4c <uninit_sw+0x4c>\n  20:\tnop\n  24:\tbeq\ta0,v0,44 <uninit_sw+0x44>\n  28:\tli\tv0,3\n  2c:\tbeql\ta0,v0,4c <uninit_sw+0x4c>\n  30:\tsll\tv1,a1,0x2\n  34:\tj\t4c <uninit_sw+0x4c>\n  38:\tnop\n  3c:\tj\t4c <uninit_sw+0x4c>\n  40:\tsll\tv1,a1,0x1\n  44:\tsll\tv0,a1,0x1\n  48:\taddu\tv1,v0,a1\n  4c:\tjr\tra\n  50:\taddiu\tv0,v1,1\n\t...\nASM_INPUT\n\n# The target object's objdump -s -r -t dump — the data sections (jump tables, anonymous\n# constants) the text-only disassembly lacks; the benchmark recovered them from the object.\ncat > dump.txt <<'DUMP_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /host-tmp/asmlift-mgcc-ref-ee3c4196db5b54cc/ref.c\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t00000054 uninit_sw\n\n\nRELOCATION RECORDS FOR [.text]:\nOFFSET   TYPE              VALUE\n0000001c R_MIPS_26         .text\n00000034 R_MIPS_26         .text\n0000003c R_MIPS_26         .text\n\n\nContents of section .text:\n 0000 24020001 1082000d 28820002 50400005  $.......(...P@..\n 0010 24020002 5080000d 00a01821 08000013  $...P......!....\n 0020 00000000 10820007 24020003 50820007  ........$...P...\n 0030 00051880 08000013 00000000 08000013  ................\n 0040 00051840 00051040 00451821 03e00008  ...@...@.E.!....\n 0050 24620001 00000000 00000000 00000000  $b..............\nContents of section .reginfo:\n 0000 8000003c 00000000 00000000 00000000  ...<............\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.\nDUMP_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target gcc2.7.2kmc    # frontend + target description (ISA, calling convention, compiler idioms)\n  --name uninit_sw        # the symbol to decompile (multi-function input selects by name)\n  --asm-data dump.txt     # the data sections above (jump-table/const recovery)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+      }
+    },
+    {
+      "id": "synthetic:uninit_sw:ido7.1",
+      "sym": "uninit_sw",
+      "project": "synthetic",
+      "tier": "synthetic",
+      "toolchain": "ido7.1",
+      "isa": "mips",
+      "compiler": "ido",
+      "language": "c",
+      "features": [
+        "uninit-local",
+        "switch",
+        "comparison-tree",
+        "strength-reduce"
+      ],
+      "loc": 1,
+      "refSource": "int uninit_sw(int k,int a){ int r; switch(k){case 0:r=a;break;case 1:r=a*2;break;case 2:r=a*3;break;case 3:r=a*4;break;} return r+1; }",
+      "targetAsm": "\ntarget.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <uninit_sw>:\n   0:\tbeqz\ta0,34 <uninit_sw+0x34>\n   4:\taddiu\tsp,sp,-8\n   8:\tli\tat,1\n   c:\tbeq\ta0,at,3c <uninit_sw+0x3c>\n  10:\tsll\tt6,a1,0x1\n  14:\tli\tat,2\n  18:\tbeq\ta0,at,44 <uninit_sw+0x44>\n  1c:\tsll\tt7,a1,0x2\n  20:\tli\tat,3\n  24:\tbeq\ta0,at,50 <uninit_sw+0x50>\n  28:\tsll\tt8,a1,0x2\n  2c:\tb\t58 <uninit_sw+0x58>\n  30:\tlw\tv0,4(sp)\n  34:\tb\t54 <uninit_sw+0x54>\n  38:\tsw\ta1,4(sp)\n  3c:\tb\t54 <uninit_sw+0x54>\n  40:\tsw\tt6,4(sp)\n  44:\tsubu\tt7,t7,a1\n  48:\tb\t54 <uninit_sw+0x54>\n  4c:\tsw\tt7,4(sp)\n  50:\tsw\tt8,4(sp)\n  54:\tlw\tv0,4(sp)\n  58:\taddiu\tsp,sp,8\n  5c:\tjr\tra\n  60:\taddiu\tv0,v0,1\n\t...\n",
+      "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    d  .text\t00000070 .text\n00000000 g     F .text\t00000064 uninit_sw\n\n\nContents of section .text:\n 0000 1080000c 27bdfff8 24010001 1081000b  ....'...$.......\n 0010 00057040 24010002 1081000a 00057880  ..p@$.........x.\n 0020 24010003 1081000a 0005c080 1000000a  $...............\n 0030 8fa20004 10000007 afa50004 10000005  ................\n 0040 afae0004 01e57823 10000002 afaf0004  ......x#........\n 0050 afb80004 8fa20004 27bd0008 03e00008  ........'.......\n 0060 24420001 00000000 00000000 00000000  $B..............\nContents of section .options:\n 0000 01200000 00000000 a100c036 00000000  . .........6....\n 0010 00000000 00000000 00000000 00007ff0  ................\n 0020 07100000 00000000 00000000 00000000  ................\n 0030 08100000 00000000 00000000 00000000  ................\nContents of section .reginfo:\n 0000 a100c036 00000000 00000000 00000000  ...6............\n 0010 00000000 00007ff0                    ........        \nContents of section .mdebug:\n 0000 7009070a 00000019 00000004 000001d8  p...............\n 0010 00000005 00000320 00000001 000001dc  ....... ........\n 0020 00000004 00000210 00000000 00000000  ................\n 0030 00000011 00000240 00000038 00000284  .......@...8....\n 0040 0000000c 000002bc 00000001 000002c8  ................\n 0050 00000000 00000000 00000001 00000310  ................\n 0060 08080600 00000000 00000001 00000000  ................\n 0070 00000000 00000000 ffffffff 00000000  ................\n 0080 00000000 00000008 001d001f 00000002  ................\n 0090 00000002 00000000 00000001 00000000  ................\n 00a0 2c200004 0000002e 00000000 1820000f  , ........... ..\n 00b0 0000002e 00000064 20200001 00000001  .......d  ......\n 00c0 00000000 20200000 02000000 03000000  ....  ..........\n 00d0 04000000 05000000 06000000 07000000  ................\n 00e0 08000000 09000000 20000000 21000000  ........ ...!...\n 00f0 0a000000 0b000000 0b000000 1a000000  ................\n 0100 00000000 00000003 06000000 002f746d  ............./tm\n 0110 702f6173 6d6c6966 742d6d69 70732d72  p/asmlift-mips-r\n 0120 65662d65 65336334 31393664 62356235  ef-ee3c4196db5b5\n 0130 3463632f 7265662e 6300756e 696e6974  4cc/ref.c.uninit\n 0140 5f737700 756e696e 69745f73 77000000  _sw.uninit_sw...\n 0150 00000000 00000001 00000000 00000038  ...............8\n 0160 00000000 00000004 00000000 00000019  ................\n 0170 00000000 00000000 00000001 00000000  ................\n 0180 00000011 00000000 00000000 01800000  ................\n 0190 00000000 00000003 00000000 00000000  ................\n 01a0 00000000 18200001 00000000 00000000  ..... ..........\n 01b0 00000000 00000000 00000000 00000000  ................\n 01c0 7fffffff 00000000 00000000 00000002  ................\n",
+      "asmlift": {
+        "decompiler": "asmlift",
+        "outcome": "declined",
+        "source": "/* asmlift could not decompile 'uninit_sw' — lift: cannot lift 'uninit_sw': load from stack slot sp@4 that was never stored (stack-passed argument beyond the 4 register args, or an address-taken/uninitialised local) — not modelled */\n/* original assembly: */\n/*   target.o:     file format elf32-tradbigmips */\n/*   Disassembly of section .text: */\n/*   00000000 <uninit_sw>: */\n/*      0:\tbeqz\ta0,34 <uninit_sw+0x34> */\n/*      4:\taddiu\tsp,sp,-8 */\n/*      8:\tli\tat,1 */\n/*      c:\tbeq\ta0,at,3c <uninit_sw+0x3c> */\n/*     10:\tsll\tt6,a1,0x1 */\n/*     14:\tli\tat,2 */\n/*     18:\tbeq\ta0,at,44 <uninit_sw+0x44> */\n/*     1c:\tsll\tt7,a1,0x2 */\n/*     20:\tli\tat,3 */\n/*     24:\tbeq\ta0,at,50 <uninit_sw+0x50> */\n/*     28:\tsll\tt8,a1,0x2 */\n/*     2c:\tb\t58 <uninit_sw+0x58> */\n/*     30:\tlw\tv0,4(sp) */\n/*     34:\tb\t54 <uninit_sw+0x54> */\n/*     38:\tsw\ta1,4(sp) */\n/*     3c:\tb\t54 <uninit_sw+0x54> */\n/*     40:\tsw\tt6,4(sp) */\n/*     44:\tsubu\tt7,t7,a1 */\n/*     48:\tb\t54 <uninit_sw+0x54> */\n/*     4c:\tsw\tt7,4(sp) */\n/*     50:\tsw\tt8,4(sp) */\n/*     54:\tlw\tv0,4(sp) */\n/*     58:\taddiu\tsp,sp,8 */\n/*     5c:\tjr\tra */\n/*     60:\taddiu\tv0,v0,1 */\n/*   \t... */\nvoid uninit_sw(void) {\n    ASMLIFT_ERROR(\"could not decompile (lift): cannot lift 'uninit_sw': load from stack slot sp@4 that was never stored (stack-passed argument beyond the 4 register args, or an address-taken/uninitialised local) — not modelled\");\n}\n",
+        "score": null,
+        "maxScore": null,
+        "compileErrors": null,
+        "quality": {
+          "score": 88,
+          "lines": 34,
+          "gotos": 0,
+          "casts": 1,
+          "unkGlue": 1,
+          "rawMem": 0,
+          "addrDeref": 0
+        },
+        "errorMarkers": [
+          "lift: cannot lift 'uninit_sw': load from stack slot sp@4 that was never stored (stack-passed argument beyond the 4 register args, or an address-taken/uninitialised local) — not modelled"
+        ]
+      },
+      "m2c": {
+        "decompiler": "m2c",
+        "outcome": "match",
+        "source": "s32 uninit_sw(s32 arg0, s32 arg1) {\n    s32 sp4;\n\n    switch (arg0) {                                 /* irregular */\n    case 0:\n        sp4 = arg1;\n        break;\n    case 1:\n        sp4 = arg1 * 2;\n        break;\n    case 2:\n        sp4 = arg1 * 3;\n        break;\n    case 3:\n        sp4 = arg1 * 4;\n        break;\n    }\n    return sp4 + 1;\n}\n",
+        "score": 0,
+        "maxScore": 25,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 0
+        },
+        "quality": {
+          "score": 100,
+          "lines": 18,
+          "gotos": 0,
+          "casts": 0,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        }
+      },
+      "gapSize": null,
+      "scripts": {
+        "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `uninit_sw` — benchmark function synthetic:uninit_sw:ido7.1.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The benchmark's objdump→GNU-as normalization of this function's disassembly (m2c cannot\n# read raw objdump), including the jump-table/const data sections recovered from the target\n# object — the exact text the benchmark fed m2c.\ncat > in.s <<'ASM_INPUT'\nglabel uninit_sw\n    beqz\t$a0, .L34\n    addiu\t$sp, $sp, -8\n    li\t$at, 1\n    beq\t$a0, $at, .L3c\n    sll\t$t6, $a1, 0x1\n    li\t$at, 2\n    beq\t$a0, $at, .L44\n    sll\t$t7, $a1, 0x2\n    li\t$at, 3\n    beq\t$a0, $at, .L50\n    sll\t$t8, $a1, 0x2\n    b\t.L58\n    lw\t$v0, 4($sp)\n.L34:\n    b\t.L54\n    sw\t$a1, 4($sp)\n.L3c:\n    b\t.L54\n    sw\t$t6, 4($sp)\n.L44:\n    subu\t$t7, $t7, $a1\n    b\t.L54\n    sw\t$t7, 4($sp)\n.L50:\n    sw\t$t8, 4($sp)\n.L54:\n    lw\t$v0, 4($sp)\n.L58:\n    addiu\t$sp, $sp, 8\n    jr\t$ra\n    addiu\t$v0, $v0, 1\nASM_INPUT\n\n# (This function ran with NO context header — the benchmark fed m2c the assembly alone.)\n\nargs=(\n  --target mips-ido-c     # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function uninit_sw    # the symbol to decompile from in.s\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `uninit_sw` — benchmark function synthetic:uninit_sw:ido7.1.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:uninit_sw:ido7.1 --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact `objdump -d --no-show-raw-insn` text.\ncat > in.asm <<'ASM_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <uninit_sw>:\n   0:\tbeqz\ta0,34 <uninit_sw+0x34>\n   4:\taddiu\tsp,sp,-8\n   8:\tli\tat,1\n   c:\tbeq\ta0,at,3c <uninit_sw+0x3c>\n  10:\tsll\tt6,a1,0x1\n  14:\tli\tat,2\n  18:\tbeq\ta0,at,44 <uninit_sw+0x44>\n  1c:\tsll\tt7,a1,0x2\n  20:\tli\tat,3\n  24:\tbeq\ta0,at,50 <uninit_sw+0x50>\n  28:\tsll\tt8,a1,0x2\n  2c:\tb\t58 <uninit_sw+0x58>\n  30:\tlw\tv0,4(sp)\n  34:\tb\t54 <uninit_sw+0x54>\n  38:\tsw\ta1,4(sp)\n  3c:\tb\t54 <uninit_sw+0x54>\n  40:\tsw\tt6,4(sp)\n  44:\tsubu\tt7,t7,a1\n  48:\tb\t54 <uninit_sw+0x54>\n  4c:\tsw\tt7,4(sp)\n  50:\tsw\tt8,4(sp)\n  54:\tlw\tv0,4(sp)\n  58:\taddiu\tsp,sp,8\n  5c:\tjr\tra\n  60:\taddiu\tv0,v0,1\n\t...\nASM_INPUT\n\n# The target object's objdump -s -r -t dump — the data sections (jump tables, anonymous\n# constants) the text-only disassembly lacks; the benchmark recovered them from the object.\ncat > dump.txt <<'DUMP_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    d  .text\t00000070 .text\n00000000 g     F .text\t00000064 uninit_sw\n\n\nContents of section .text:\n 0000 1080000c 27bdfff8 24010001 1081000b  ....'...$.......\n 0010 00057040 24010002 1081000a 00057880  ..p@$.........x.\n 0020 24010003 1081000a 0005c080 1000000a  $...............\n 0030 8fa20004 10000007 afa50004 10000005  ................\n 0040 afae0004 01e57823 10000002 afaf0004  ......x#........\n 0050 afb80004 8fa20004 27bd0008 03e00008  ........'.......\n 0060 24420001 00000000 00000000 00000000  $B..............\nContents of section .options:\n 0000 01200000 00000000 a100c036 00000000  . .........6....\n 0010 00000000 00000000 00000000 00007ff0  ................\n 0020 07100000 00000000 00000000 00000000  ................\n 0030 08100000 00000000 00000000 00000000  ................\nContents of section .reginfo:\n 0000 a100c036 00000000 00000000 00000000  ...6............\n 0010 00000000 00007ff0                    ........        \nContents of section .mdebug:\n 0000 7009070a 00000019 00000004 000001d8  p...............\n 0010 00000005 00000320 00000001 000001dc  ....... ........\n 0020 00000004 00000210 00000000 00000000  ................\n 0030 00000011 00000240 00000038 00000284  .......@...8....\n 0040 0000000c 000002bc 00000001 000002c8  ................\n 0050 00000000 00000000 00000001 00000310  ................\n 0060 08080600 00000000 00000001 00000000  ................\n 0070 00000000 00000000 ffffffff 00000000  ................\n 0080 00000000 00000008 001d001f 00000002  ................\n 0090 00000002 00000000 00000001 00000000  ................\n 00a0 2c200004 0000002e 00000000 1820000f  , ........... ..\n 00b0 0000002e 00000064 20200001 00000001  .......d  ......\n 00c0 00000000 20200000 02000000 03000000  ....  ..........\n 00d0 04000000 05000000 06000000 07000000  ................\n 00e0 08000000 09000000 20000000 21000000  ........ ...!...\n 00f0 0a000000 0b000000 0b000000 1a000000  ................\n 0100 00000000 00000003 06000000 002f746d  ............./tm\n 0110 702f6173 6d6c6966 742d6d69 70732d72  p/asmlift-mips-r\n 0120 65662d65 65336334 31393664 62356235  ef-ee3c4196db5b5\n 0130 3463632f 7265662e 6300756e 696e6974  4cc/ref.c.uninit\n 0140 5f737700 756e696e 69745f73 77000000  _sw.uninit_sw...\n 0150 00000000 00000001 00000000 00000038  ...............8\n 0160 00000000 00000004 00000000 00000019  ................\n 0170 00000000 00000000 00000001 00000000  ................\n 0180 00000011 00000000 00000000 01800000  ................\n 0190 00000000 00000003 00000000 00000000  ................\n 01a0 00000000 18200001 00000000 00000000  ..... ..........\n 01b0 00000000 00000000 00000000 00000000  ................\n 01c0 7fffffff 00000000 00000000 00000002  ................\nDUMP_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target ido7.1         # frontend + target description (ISA, calling convention, compiler idioms)\n  --name uninit_sw        # the symbol to decompile (multi-function input selects by name)\n  --asm-data dump.txt     # the data sections above (jump-table/const recovery)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+      }
+    },
+    {
+      "id": "synthetic:uninit_sw:mwcc_242_81",
+      "sym": "uninit_sw",
+      "project": "synthetic",
+      "tier": "synthetic",
+      "toolchain": "mwcc_242_81",
+      "isa": "ppc",
+      "compiler": "mwcc",
+      "language": "c",
+      "features": [
+        "uninit-local",
+        "switch",
+        "comparison-tree"
+      ],
+      "loc": 1,
+      "refSource": "int uninit_sw(int k,int a){ int r; switch(k){case 0:r=a;break;case 1:r=a*2;break;case 2:r=a*3;break;case 3:r=a*4;break;} return r+1; }",
+      "targetAsm": "\ntarget.o:     file format elf32-powerpc\n\n\nDisassembly of section .text:\n\n00000000 <uninit_sw>:\n   0:\tcmpwi   r3,2\n   4:\tbeq     38 <uninit_sw+0x38>\n   8:\tbge     1c <uninit_sw+0x1c>\n   c:\tcmpwi   r3,0\n  10:\tbeq     28 <uninit_sw+0x28>\n  14:\tbge     30 <uninit_sw+0x30>\n  18:\tb       44 <uninit_sw+0x44>\n  1c:\tcmpwi   r3,4\n  20:\tbge     44 <uninit_sw+0x44>\n  24:\tb       40 <uninit_sw+0x40>\n  28:\tmr      r3,r4\n  2c:\tb       44 <uninit_sw+0x44>\n  30:\tslwi    r3,r4,1\n  34:\tb       44 <uninit_sw+0x44>\n  38:\tmulli   r3,r4,3\n  3c:\tb       44 <uninit_sw+0x44>\n  40:\tslwi    r3,r4,2\n  44:\taddi    r3,r3,1\n  48:\tblr\n",
+      "asmDump": "\ntarget.o:     file format elf32-powerpc\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 ref.c\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .mwcats.text\t00000000 .mwcats.text\n00000000 g     F .text\t0000004c uninit_sw\n\n\nRELOCATION RECORDS FOR [.mwcats.text]:\nOFFSET   TYPE              VALUE\n00000004 R_PPC_ADDR32      uninit_sw\n\n\nContents of section .text:\n 0000 2c030002 41820034 40800014 2c030000  ,...A..4@...,...\n 0010 41820018 4080001c 4800002c 2c030004  A...@...H..,,...\n 0020 40800024 4800001c 7c832378 48000018  @..$H...|.#xH...\n 0030 5483083c 48000010 1c640003 48000008  T..<H....d..H...\n 0040 5483103a 38630001 4e800020           T..:8c..N..     \nContents of section .mwcats.text:\n 0000 0200004c 00000000                    ...L....        \nContents of section .comment:\n 0000 436f6465 57617272 696f720a 02040201  CodeWarrior.....\n 0010 01020016 2c000000 00000000 00000000  ....,...........\n 0020 00000000 00000000 00000000 00000000  ................\n 0030 00000000 00000001 00000000 00000004  ................\n 0040 00000000 00000004 00000000 00000004  ................\n 0050 00000000                             ....            \n",
+      "asmlift": {
+        "decompiler": "asmlift",
+        "outcome": "declined",
+        "source": "/* asmlift could not decompile 'uninit_sw' — lift: cannot lift 'uninit_sw': conditional branch 'bge' has no reaching compare (cr0) in its block */\n/* original assembly: */\n/*   target.o:     file format elf32-powerpc */\n/*   Disassembly of section .text: */\n/*   00000000 <uninit_sw>: */\n/*      0:\tcmpwi   r3,2 */\n/*      4:\tbeq     38 <uninit_sw+0x38> */\n/*      8:\tbge     1c <uninit_sw+0x1c> */\n/*      c:\tcmpwi   r3,0 */\n/*     10:\tbeq     28 <uninit_sw+0x28> */\n/*     14:\tbge     30 <uninit_sw+0x30> */\n/*     18:\tb       44 <uninit_sw+0x44> */\n/*     1c:\tcmpwi   r3,4 */\n/*     20:\tbge     44 <uninit_sw+0x44> */\n/*     24:\tb       40 <uninit_sw+0x40> */\n/*     28:\tmr      r3,r4 */\n/*     2c:\tb       44 <uninit_sw+0x44> */\n/*     30:\tslwi    r3,r4,1 */\n/*     34:\tb       44 <uninit_sw+0x44> */\n/*     38:\tmulli   r3,r4,3 */\n/*     3c:\tb       44 <uninit_sw+0x44> */\n/*     40:\tslwi    r3,r4,2 */\n/*     44:\taddi    r3,r3,1 */\n/*     48:\tblr */\nvoid uninit_sw(void) {\n    ASMLIFT_ERROR(\"could not decompile (lift): cannot lift 'uninit_sw': conditional branch 'bge' has no reaching compare (cr0) in its block\");\n}\n",
+        "score": null,
+        "maxScore": null,
+        "compileErrors": null,
+        "quality": {
+          "score": 88,
+          "lines": 27,
+          "gotos": 0,
+          "casts": 1,
+          "unkGlue": 1,
+          "rawMem": 0,
+          "addrDeref": 0
+        },
+        "errorMarkers": [
+          "lift: cannot lift 'uninit_sw': conditional branch 'bge' has no reaching compare (cr0) in its block"
+        ]
+      },
+      "m2c": {
+        "decompiler": "m2c",
+        "outcome": "match",
+        "source": "s32 uninit_sw(s32 arg0, s32 arg1) {\n    s32 var_r3;\n\n    var_r3 = arg0;\n    switch (var_r3) {                               /* irregular */\n    case 0:\n        var_r3 = arg1;\n        break;\n    case 1:\n        var_r3 = arg1 * 2;\n        break;\n    case 2:\n        var_r3 = arg1 * 3;\n        break;\n    case 3:\n        var_r3 = arg1 * 4;\n        break;\n    }\n    return var_r3 + 1;\n}\n",
+        "score": 0,
+        "maxScore": 19,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 0
+        },
+        "quality": {
+          "score": 100,
+          "lines": 19,
+          "gotos": 0,
+          "casts": 0,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        }
+      },
+      "gapSize": null,
+      "scripts": {
+        "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `uninit_sw` — benchmark function synthetic:uninit_sw:mwcc_242_81.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The benchmark's objdump→GNU-as normalization of this function's disassembly (m2c cannot\n# read raw objdump), including the jump-table/const data sections recovered from the target\n# object — the exact text the benchmark fed m2c.\ncat > in.s <<'ASM_INPUT'\nglabel uninit_sw\n    cmpwi   r3,2\n    beq      .L38\n    bge      .L1c\n    cmpwi   r3,0\n    beq      .L28\n    bge      .L30\n    b        .L44\n.L1c:\n    cmpwi   r3,4\n    bge      .L44\n    b        .L40\n.L28:\n    mr      r3,r4\n    b        .L44\n.L30:\n    slwi    r3,r4,1\n    b        .L44\n.L38:\n    mulli   r3,r4,3\n    b        .L44\n.L40:\n    slwi    r3,r4,2\n.L44:\n    addi    r3,r3,1\n    blr\nASM_INPUT\n\n# (This function ran with NO context header — the benchmark fed m2c the assembly alone.)\n\nargs=(\n  --target ppc-mwcc-c     # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function uninit_sw    # the symbol to decompile from in.s\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `uninit_sw` — benchmark function synthetic:uninit_sw:mwcc_242_81.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:uninit_sw:mwcc_242_81 --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact `objdump -d --no-show-raw-insn` text.\ncat > in.asm <<'ASM_INPUT'\n\ntarget.o:     file format elf32-powerpc\n\n\nDisassembly of section .text:\n\n00000000 <uninit_sw>:\n   0:\tcmpwi   r3,2\n   4:\tbeq     38 <uninit_sw+0x38>\n   8:\tbge     1c <uninit_sw+0x1c>\n   c:\tcmpwi   r3,0\n  10:\tbeq     28 <uninit_sw+0x28>\n  14:\tbge     30 <uninit_sw+0x30>\n  18:\tb       44 <uninit_sw+0x44>\n  1c:\tcmpwi   r3,4\n  20:\tbge     44 <uninit_sw+0x44>\n  24:\tb       40 <uninit_sw+0x40>\n  28:\tmr      r3,r4\n  2c:\tb       44 <uninit_sw+0x44>\n  30:\tslwi    r3,r4,1\n  34:\tb       44 <uninit_sw+0x44>\n  38:\tmulli   r3,r4,3\n  3c:\tb       44 <uninit_sw+0x44>\n  40:\tslwi    r3,r4,2\n  44:\taddi    r3,r3,1\n  48:\tblr\nASM_INPUT\n\n# The target object's objdump -s -r -t dump — the data sections (jump tables, anonymous\n# constants) the text-only disassembly lacks; the benchmark recovered them from the object.\ncat > dump.txt <<'DUMP_INPUT'\n\ntarget.o:     file format elf32-powerpc\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 ref.c\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .mwcats.text\t00000000 .mwcats.text\n00000000 g     F .text\t0000004c uninit_sw\n\n\nRELOCATION RECORDS FOR [.mwcats.text]:\nOFFSET   TYPE              VALUE\n00000004 R_PPC_ADDR32      uninit_sw\n\n\nContents of section .text:\n 0000 2c030002 41820034 40800014 2c030000  ,...A..4@...,...\n 0010 41820018 4080001c 4800002c 2c030004  A...@...H..,,...\n 0020 40800024 4800001c 7c832378 48000018  @..$H...|.#xH...\n 0030 5483083c 48000010 1c640003 48000008  T..<H....d..H...\n 0040 5483103a 38630001 4e800020           T..:8c..N..     \nContents of section .mwcats.text:\n 0000 0200004c 00000000                    ...L....        \nContents of section .comment:\n 0000 436f6465 57617272 696f720a 02040201  CodeWarrior.....\n 0010 01020016 2c000000 00000000 00000000  ....,...........\n 0020 00000000 00000000 00000000 00000000  ................\n 0030 00000000 00000001 00000000 00000004  ................\n 0040 00000000 00000004 00000000 00000004  ................\n 0050 00000000                             ....\nDUMP_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target mwcc_242_81    # frontend + target description (ISA, calling convention, compiler idioms)\n  --name uninit_sw        # the symbol to decompile (multi-function input selects by name)\n  --asm-data dump.txt     # the data sections above (jump-table/const recovery)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
       }
     },
     {
