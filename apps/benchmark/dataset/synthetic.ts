@@ -397,6 +397,61 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ALL,
   },
 
+  // ── uninitialised locals (a local read on a path that never assigns it) ─────────────────────
+  // Every switch above carries a `default`, so until these rows the dataset never asked what
+  // happens when one does NOT. The C compiles, and the compiler emits the unassigned path
+  // faithfully, so recovery has to be able to SAY "undefined here" — asmlift's IR has no `undef`,
+  // and Braun's construction resolves a def-less read to a live-in, which at the entry block is a
+  // PARAMETER. WHERE the local lands decides which way that goes, and the two differ sharply:
+  //   • a stack slot ⇒ loud. Two guards split it — stored on SOME path (frontend/ssa.ts `finish`)
+  //     vs stored on NO path reaching the read (frontend/mips.ts, which still conflates the
+  //     second with a 5th+ stack argument). uninit_join and uninit_sw hit one each, on ido7.1.
+  //   • a register ⇒ silent: nothing guards it and the read becomes a fabricated extra parameter.
+  //     MEASURED, and the two rows disagree, which is why both are here. On uninit_sw:agbcc the
+  //     fabrication perturbs codegen and the row is a NONMATCH (`uninit_sw(u32,u32,u32)` for a
+  //     two-argument function). On uninit_join:agbcc the invented parameter lands in the register
+  //     the local was allocated to anyway, so it byte-MATCHES with an arity the source never had —
+  //     a fidelity gap the byte score cannot see, and the reason this row is worth keeping green.
+  //
+  // WHICH of those you get is decided by register pressure, not by the C, and that is what
+  // uninit_spill is for. The first two rows are small enough that agbcc keeps the local in a
+  // register, so they reach the slot half on ido7.1 ONLY — and the shared postcondition would
+  // then have no row reaching it through the THUMB frontend, which is the path the motivating
+  // klonoa function (LoadBGTilemapData, a `switch` with no default whose arms are the only
+  // writers of three frame slots) actually takes. uninit_spill keeps ten locals live across a
+  // loop so agbcc has to spill, and it reproduces that decline verbatim. Its bulk IS the point:
+  // below roughly ten live locals agbcc has the registers to avoid the frame entirely. No calls,
+  // deliberately — a store to [sp,#0] that reaches a `bl` is ambiguous with an outgoing stack
+  // argument, and the row would decline on THAT instead.
+  // Attribution, so nothing here is credited to the wrong gap: of the twelve rows, five turn on
+  // this capability — uninit_join:ido7.1, uninit_sw:ido7.1, uninit_sw:agbcc, and both slot halves
+  // of uninit_spill (agbcc, ido7.1). The rest decline on branch-likely (gcc2.7.2kmc), a cr0
+  // reaching-compare, or r1-as-data (mwcc_242_81) — all pre-existing and unrelated.
+  // The first two rows are kept to ≤4 parameters on purpose: at 5+ the O32 reader takes its
+  // stack-argument path and would decline for a reason that has nothing to do with initialisation.
+  {
+    sym: 'uninit_join',
+    src: 'int uninit_join(int a){ int r; if(a>0) r=a*2; return r+1; }',
+    features: ['uninit-local', 'branch'],
+    toolchains: ALL,
+  },
+  {
+    sym: 'uninit_sw',
+    src: 'int uninit_sw(int k,int a){ int r; switch(k){case 0:r=a;break;case 1:r=a*2;break;case 2:r=a*3;break;case 3:r=a*4;break;} return r+1; }',
+    features: ['uninit-local'],
+    toolchains: ALL,
+  },
+  {
+    sym: 'uninit_spill',
+    src:
+      'int uninit_spill(int k,int *p){ int v0,v1,v2,v3,v4,v5,v6,v7,v8,v9; int i,s=0;' +
+      ' switch(k){ case 0: v0=p[0];v1=p[1];v2=p[2];v3=p[3];v4=p[4];v5=p[5];v6=p[6];v7=p[7];v8=p[8];v9=p[9]; break;' +
+      ' case 1: v0=p[10];v1=p[11];v2=p[12];v3=p[13];v4=p[14];v5=p[15];v6=p[16];v7=p[17];v8=p[18];v9=p[19]; break; }' +
+      ' for(i=0;i<8;i++) s+=p[i]*v0+v1*v2+v3*v4+v5*v6+v7*v8+v9; return s; }',
+    features: ['uninit-local', 'array'],
+    toolchains: ALL,
+  },
+
   // ── float (soft-float on GBA; hardware FPU elsewhere) ───────────────────────────────────────
   {
     sym: 'fadd',

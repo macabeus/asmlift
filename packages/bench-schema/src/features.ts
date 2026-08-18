@@ -678,6 +678,27 @@ export const FEATURES: readonly FeatureDef[] = [
     seeAlso: ['load', 'memory', 'global'],
   },
   {
+    id: 'uninit-local',
+    label: 'Uninitialised local',
+    group: 'memory',
+    evidence: 'judgement',
+    summary: 'a local is read on a path that never assigns it',
+    detail:
+      'A local declared with no initialiser and assigned only inside some arms of a conditional ' +
+      'or a `switch`, then read at the join — the commonest source being a `switch` with no ' +
+      '`default`. It compiles, and the compiler emits the unassigned path faithfully, so ' +
+      'recovering it means being able to say "undefined here" rather than inventing a value. ' +
+      'Where the local lives decides what a decompiler must not do: in a stack slot the danger ' +
+      'is inventing a parameter for memory the function owns, and in a register it is inventing ' +
+      'one for a callee-saved register the function never wrote.',
+    example: {
+      c: 'int r; switch (k) { case 0: r = a; break; case 1: r = a * 2; break; } return r + 1;',
+      asm: '  2c:\tb\t58\n  30:\tlw\tv0,4(sp)   # the default arm: no store reaches here',
+      toolchain: 'ido7.1',
+    },
+    seeAlso: ['switch', 'branch', 'load', 'store'],
+  },
+  {
     id: 'global',
     label: 'Global',
     group: 'memory',
