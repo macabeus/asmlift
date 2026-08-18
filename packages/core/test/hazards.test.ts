@@ -16,12 +16,16 @@ interface Fixture {
   defs?: Map<Value, Op>;
   varName?: Map<Value, string>;
   useSitesOf?: Map<Value, UseSite[]>;
+  liveIn?: Map<Block, Set<Value>>;
+  opBlock?: Map<Op, Block>;
 }
 const make = (f: Fixture = {}) =>
   makeLoopHazards({
     defs: f.defs ?? new Map(),
     varName: f.varName ?? new Map(),
     useSitesOf: f.useSitesOf ?? new Map(),
+    liveIn: f.liveIn ?? new Map(),
+    opBlock: f.opBlock ?? new Map(),
   });
 
 const use = (blk: Block): UseSite => ({ blk, idx: 0, op: mkOp('add') });
@@ -124,6 +128,88 @@ describe('loopEscapeHazard', () => {
     });
     expect(h.loopEscapeHazard(new Set([body]), new Map(), new Set(['v0']))).toBe(true);
     expect(h.loopEscapeHazard(new Set([body]), new Map(), new Set(['v0']), null, new Set([p]))).toBe(false);
+  });
+});
+
+describe('sinkablePreUpdateExits', () => {
+  // A self-loop carrying one variable (`p`, named v0, updated every iteration) whose exit edge
+  // ALSO hands its pre-update value to a merge param (`q`, named v1) — the trailing-variable
+  // shape. Each test below flips exactly one fact of this fixture.
+  const scaffold = () => {
+    const p = v();
+    const q = v();
+    const header: Block = { params: [p], ops: [] };
+    const exit: Block = { params: [q], ops: [] };
+    return { p, q, header, exit, body: new Set([header]) };
+  };
+  const names = (...pairs: [Value, string][]) => new Map(pairs);
+
+  test('an exit arg that IS a header param, into a name of its own, is sinkable', () => {
+    const { p, q, header, exit, body } = scaffold();
+    const h = make({ varName: names([p, 'v0'], [q, 'v1']), liveIn: new Map([[header, new Set<Value>()]]) });
+    expect(h.sinkablePreUpdateExits(header, exit, [p], body, new Map(), new Set(['v0']))).toEqual(new Set([0]));
+  });
+
+  test('an arg the update does NOT clobber has no hazard to repair', () => {
+    const { p, q, header, exit, body } = scaffold();
+    const h = make({ varName: names([p, 'v0'], [q, 'v1']), liveIn: new Map([[header, new Set<Value>()]]) });
+    expect(h.sinkablePreUpdateExits(header, exit, [p], body, new Map(), new Set(['v9']))).toEqual(new Set());
+  });
+
+  test('an arg that is not a header param itself is refused (an expression would be recomputed)', () => {
+    const { p, q, header, exit, body } = scaffold();
+    const e = v();
+    const op = mkOp('add', { operands: [p], results: [e] });
+    const h = make({
+      defs: new Map([[e, op]]),
+      varName: names([p, 'v0'], [q, 'v1']),
+      liveIn: new Map([[header, new Set<Value>()]]),
+    });
+    expect(h.sinkablePreUpdateExits(header, exit, [e], body, new Map(), new Set(['v0']))).toEqual(new Set());
+  });
+
+  test('a destination named after a loop variable is refused (the sunk copy would self-assign)', () => {
+    const { p, q, header, exit, body } = scaffold();
+    const h = make({ varName: names([p, 'v0'], [q, 'v0']), liveIn: new Map([[header, new Set<Value>()]]) });
+    expect(h.sinkablePreUpdateExits(header, exit, [p], body, new Map(), new Set(['v0']))).toEqual(new Set());
+  });
+
+  test('a destination name still live across the header is refused (writing it clobbers that value)', () => {
+    const { p, q, header, exit, body } = scaffold();
+    const other = v();
+    const h = make({
+      varName: names([p, 'v0'], [q, 'v1'], [other, 'v1']),
+      liveIn: new Map([[header, new Set([other])]]),
+    });
+    expect(h.sinkablePreUpdateExits(header, exit, [p], body, new Map(), new Set(['v0']))).toEqual(new Set());
+  });
+
+  test('a destination name defined INSIDE the body is refused for the same reason', () => {
+    const { p, q, header, exit, body } = scaffold();
+    const other = v();
+    const op = mkOp('add', { results: [other] });
+    header.ops.push(op);
+    const h = make({
+      defs: new Map([[other, op]]),
+      opBlock: new Map([[op, header]]),
+      varName: names([p, 'v0'], [q, 'v1'], [other, 'v1']),
+      liveIn: new Map([[header, new Set<Value>()]]),
+    });
+    expect(h.sinkablePreUpdateExits(header, exit, [p], body, new Map(), new Set(['v0']))).toEqual(new Set());
+  });
+
+  test('a slot that STAYS BEHIND reading a sunk name refuses the whole edge (one parallel copy)', () => {
+    const { p, q, header, exit, body } = scaffold();
+    const stay = v();
+    const e = v();
+    const op = mkOp('add', { operands: [q], results: [e] });
+    exit.params.push(stay);
+    const h = make({
+      defs: new Map([[e, op]]),
+      varName: names([p, 'v0'], [q, 'v1'], [stay, 'v2']),
+      liveIn: new Map([[header, new Set<Value>()]]),
+    });
+    expect(h.sinkablePreUpdateExits(header, exit, [p, e], body, new Map(), new Set(['v0']))).toEqual(new Set());
   });
 });
 

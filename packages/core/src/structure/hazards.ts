@@ -19,6 +19,10 @@ export interface LoopHazardDeps {
   varName: Map<Value, string>;
   /** every positioned use of a value (analysis.ts) */
   useSitesOf: Map<Value, UseSite[]>;
+  /** values read at-or-after each block's entry (analysis.ts) */
+  liveIn: Map<Block, Set<Value>>;
+  /** op → the block holding it (analysis.ts) */
+  opBlock: Map<Op, Block>;
 }
 
 export interface LoopHazards {
@@ -39,6 +43,14 @@ export interface LoopHazards {
     region: Set<Block> | null,
     loopParams: Set<Value>,
   ): boolean;
+  sinkablePreUpdateExits(
+    header: Block,
+    exit: Block,
+    exitArgs: readonly Value[],
+    body: Set<Block>,
+    sub: Map<Value, string>,
+    updateWrites: Set<string>,
+  ): Set<number>;
 }
 
 /** The names a loop update assigns (its non-identity copies) — the write set every loop-emission
@@ -47,7 +59,7 @@ export const updateWriteSet = (updates: Stmt[]): Set<string> =>
   new Set(updates.filter((st): st is Extract<Stmt, { k: 'assign' }> => st.k === 'assign').map((st) => st.name));
 
 export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
-  const { defs, varName, useSitesOf } = deps;
+  const { defs, varName, useSitesOf, liveIn, opBlock } = deps;
 
   // Does rendering `v` under `sub` read a variable that a pending loop update (`updateWrites`, the
   // names it assigns) overwrites, via a path OTHER than a `sub`-mapped back-edge arg? Such a read is a
@@ -138,5 +150,67 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     exitArgs.some((a) => readsClobbered(a, sub, updateWrites)) ||
     loopEscapeHazard(body, sub, updateWrites, region, loopParams);
 
-  return { readsClobbered, loopEscapeHazard, loopUpdateHazard };
+  // Which pre-update exit copies can be REPAIRED instead of declined. The exiting edge hands a
+  // loop variable's top-of-iteration value to a merge param, and post-loop that name has moved on
+  // one iteration; emitting the copy inside the body, AHEAD of the update, restores it — the
+  // trailing-pointer idiom (`for (fast = slow = head; ...; fast = fast->next) slow = fast;`).
+  // Returns the exit slots that may move; the caller emits them at the top of the body and drops
+  // them from the post-loop copies. Pure, like every check here.
+  //
+  // REFUSAL CONDITIONS — on any of these the slot stays put and the caller declines LOUD:
+  //   - the arg is not a header param itself. An EXPRESSION moved into the body is recomputed
+  //     every iteration, and an effectful one runs a different number of times;
+  //   - the destination is a loop variable's name (the sunk copy would be a self-assignment) or a
+  //     name the update writes (it would clobber the update);
+  //   - that name already means something inside the loop — a value defined in the body or live
+  //     across the header carries it — so writing it at the top of the body clobbers that value;
+  //   - a slot that STAYS BEHIND reads a sunk name, or two slots want the same name. The exit
+  //     edge is a PARALLEL copy; splitting it across two program points must not reorder a
+  //     dependency the sequentializer was relying on seeing whole.
+  const sinkablePreUpdateExits = (
+    header: Block,
+    exit: Block,
+    exitArgs: readonly Value[],
+    body: Set<Block>,
+    sub: Map<Value, string>,
+    updateWrites: Set<string>,
+  ): Set<number> => {
+    const none = new Set<number>();
+    const headerNames = new Set(header.params.map((p) => varName.get(p)));
+    const dest = new Map<number, string>();
+    exitArgs.forEach((a, j) => {
+      if (!readsClobbered(a, sub, updateWrites) || !header.params.includes(a)) {
+        return;
+      }
+      const nm = varName.get(exit.params[j]);
+      if (nm !== undefined && !headerNames.has(nm) && !updateWrites.has(nm)) {
+        dest.set(j, nm);
+      }
+    });
+    const names = new Set(dest.values());
+    if (dest.size === 0 || names.size !== dest.size) {
+      return none;
+    }
+    if (exitArgs.some((a, j) => !dest.has(j) && readsClobbered(a, sub, names))) {
+      return none;
+    }
+    const moved = new Set([...dest.keys()].map((j) => exit.params[j]));
+    for (const [v, n] of varName) {
+      if (!names.has(n) || moved.has(v)) {
+        continue;
+      }
+      const d = defs.get(v);
+      if (liveIn.get(header)!.has(v) || (d && body.has(opBlock.get(d)!))) {
+        return none;
+      }
+      for (const bb of body) {
+        if (bb.params.includes(v)) {
+          return none;
+        }
+      }
+    }
+    return new Set(dest.keys());
+  };
+
+  return { readsClobbered, loopEscapeHazard, loopUpdateHazard, sinkablePreUpdateExits };
 }

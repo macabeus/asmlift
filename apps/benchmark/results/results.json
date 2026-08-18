@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generatedAt": "2026-08-18T21:36:39.954Z",
+    "generatedAt": "2026-08-18T22:14:02.586Z",
     "toolchains": [
       "ido7.1",
       "agbcc",
@@ -14,8 +14,8 @@
       "real": 240
     },
     "asmlift": {
-      "commit": "1c6469c14d93721069603823462d2299b2e08916",
-      "dirty": false
+      "commit": "9ac8b841b93b3dc0215ccc00ad9095961c979610",
+      "dirty": true
     },
     "m2c": {
       "commit": "ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0"
@@ -3497,11 +3497,11 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-ERNh4T/c.c:1077: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Zia6Lz/c.c:1077: invalid operands to binary <<"
           },
           {
             "label": "unsigned/scopebase/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-8JfZ2d/c.c:1078: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-o5Fn4w/c.c:1078: invalid operands to binary <<"
           }
         ],
         "symbolsUsed": [
@@ -4442,7 +4442,7 @@
         "droppedCandidates": [
           {
             "label": "unsigned",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-ETFjD4/c.c:1076: `gBgDataPtrs' undeclared (first use in this function)"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-3QAMel/c.c:1076: `gBgDataPtrs' undeclared (first use in this function)"
           }
         ],
         "symbolsUsed": [],
@@ -5515,11 +5515,11 @@
         "droppedCandidates": [
           {
             "label": "unsigned",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-rv6LkE/c.c:1077: too many arguments to function `thunk_sub_080002A0'"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-NZR2yq/c.c:1077: too many arguments to function `thunk_sub_080002A0'"
           },
           {
             "label": "unsigned/reread-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-HxUymL/c.c:1075: too many arguments to function `thunk_sub_080002A0'"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-An0TgK/c.c:1075: too many arguments to function `thunk_sub_080002A0'"
           }
         ],
         "symbolsUsed": [],
@@ -6308,83 +6308,83 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-xOJUXx/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-lCfNTq/c.c:1085: incompatible types in assignment"
           },
           {
             "label": "unsigned/coalesce-v2-v3/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-hakFVj/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-LAuxcV/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "unsigned/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-MA2eGv/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-gByXmc/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "unsigned/defsite/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-h7VF8P/c.c:1086: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-J6Eu8Z/c.c:1086: incompatible types in assignment"
           },
           {
             "label": "unsigned/defsite/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-5nK4aT/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-nE3a9C/c.c:1085: incompatible types in assignment"
           },
           {
             "label": "unsigned/reread-globals/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-ZWSCr3/c.c:1083: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-sSmqG8/c.c:1083: invalid operands to binary <<"
           },
           {
             "label": "unsigned/reread-globals/coalesce-v0-v1/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-gQnv3h/c.c:1082: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-ab2PTf/c.c:1082: invalid operands to binary <<"
           },
           {
             "label": "unsigned/reread-globals/coalesce-v0-v2/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-5DWWom/c.c:1082: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-vDJJI9/c.c:1082: invalid operands to binary <<"
           },
           {
             "label": "unsigned/defsite/reread-globals/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-tTAmLG/c.c:1084: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-WnSGrt/c.c:1084: invalid operands to binary <<"
           },
           {
             "label": "unsigned/defsite/reread-globals/coalesce-v0-v2/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-EgODru/c.c:1083: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-eRiiFn/c.c:1083: invalid operands to binary <<"
           },
           {
             "label": "signed/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-98Plov/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-py241N/c.c:1085: incompatible types in assignment"
           },
           {
             "label": "signed/coalesce-v2-v3/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-FgVhBp/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-qcsoku/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "signed/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-vcgcBj/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-7zl3Fy/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "signed/defsite/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Icxjt8/c.c:1086: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-tYgZ7k/c.c:1086: incompatible types in assignment"
           },
           {
             "label": "signed/defsite/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-IKgPqy/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-XhwKtP/c.c:1085: incompatible types in assignment"
           },
           {
             "label": "signed/reread-globals/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-zJ3WVv/c.c:1083: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-x4xTz3/c.c:1083: invalid operands to binary <<"
           },
           {
             "label": "signed/reread-globals/coalesce-v0-v1/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-JNDJwF/c.c:1082: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-ay2KwY/c.c:1082: invalid operands to binary <<"
           },
           {
             "label": "signed/reread-globals/coalesce-v0-v2/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-HxEWq2/c.c:1082: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-sMrrB9/c.c:1082: invalid operands to binary <<"
           },
           {
             "label": "signed/defsite/reread-globals/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-89Xlwz/c.c:1084: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-PrzQQZ/c.c:1084: invalid operands to binary <<"
           },
           {
             "label": "signed/defsite/reread-globals/coalesce-v0-v2/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-m68mIf/c.c:1083: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-vuhz9W/c.c:1083: invalid operands to binary <<"
           }
         ],
         "symbolsUsed": [
@@ -6489,11 +6489,11 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-H7YRQK/c.c:1501: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-ieuEsP/c.c:1501: incompatible types in assignment"
           },
           {
             "label": "unsigned/reread-globals/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-y8VBsx/c.c:1489: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Zh0KGY/c.c:1489: incompatible types in assignment"
           }
         ],
         "symbolsUsed": [
@@ -13786,23 +13786,34 @@
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "outcome": "declined",
-        "source": "/* asmlift could not decompile 'EwramFree' — structure: cannot structure 'EwramFree': loop condition or a post-loop value reads a pre-update loop variable */\n/* original assembly: */\n/*   @ Generated by gcc 2.9-arm-000512 for Thumb/elf */\n/*   \t.code\t16 */\n/*   .gcc2_compiled.: */\n/*   .text */\n/*   \t.align\t2, 0 */\n/*   \t.globl\tEwramFree */\n/*   \t.type\t EwramFree,function */\n/*   \t.thumb_func */\n/*   EwramFree: */\n/*   \tpush\t{r4, lr} */\n/*   \tadd\tr1, r0, #0 */\n/*   \tcmp\tr1, #0 */\n/*   \tbeq\t.L3\t@cond_branch */\n/*   \tldr\tr0, .L12 */\n/*   \tldr\tr0, [r0] */\n/*   \tcmp\tr0, r1 */\n/*   \tbeq\t.L3\t@cond_branch */\n/*   \tsub\tr1, r1, #0x8 */\n/*   \tldr\tr3, .L12+0x4 */\n/*   \tadd\tr4, r3, #0 */\n/*   \tcmp\tr1, r3 */\n/*   \tbeq\t.L5\t@cond_branch */\n/*   .L7: */\n/*   \tadd\tr3, r4, #0 */\n/*   \tldr\tr4, [r3] */\n/*   \tcmp\tr1, r4 */\n/*   \tbne\t.L7\t@cond_branch */\n/*   .L5: */\n/*   \tldr\tr0, [r1, #0x4] */\n/*   \tcmp\tr0, #0 */\n/*   \tbge\t.L9\t@cond_branch */\n/*   \tneg\tr0, r0 */\n/*   \tstr\tr0, [r1, #0x4] */\n/*   .L9: */\n/*   \tldr\tr2, [r3, #0x4] */\n/*   \tadd\tr0, r3, r2 */\n/*   \tcmp\tr0, r1 */\n/*   \tbne\t.L10\t@cond_branch */\n/*   \tcmp\tr2, #0 */\n/*   \tble\t.L10\t@cond_branch */\n/*   \tldr\tr0, [r4] */\n/*   \tstr\tr0, [r3] */\n/*   \tldr\tr0, [r1, #0x4] */\n/*   \tadd\tr0, r2, r0 */\n/*   \tstr\tr0, [r3, #0x4] */\n/*   \tadd\tr1, r3, #0 */\n/*   .L10: */\n/*   \tldr\tr3, [r1, #0x4] */\n/*   \tadd\tr2, r1, r3 */\n/*   \tldr\tr0, [r1] */\n/*   \tcmp\tr2, r0 */\n/*   \tbne\t.L3\t@cond_branch */\n/*   \tldr\tr0, [r2, #0x4] */\n/*   \tcmp\tr0, #0 */\n/*   \tble\t.L3\t@cond_branch */\n/*   \tadd\tr0, r3, r0 */\n/*   \tstr\tr0, [r1, #0x4] */\n/*   \tldr\tr0, [r2] */\n/*   \tstr\tr0, [r1] */\n/*   .L3: */\n/*   \tpop\t{r4} */\n/*   \tpop\t{r0} */\n/*   \tbx\tr0 */\n/*   .L13: */\n/*   \t.align\t2, 0 */\n/*   .L12: */\n/*   \t.word\tewram_end */\n/*   \t.word\tgEwramHeap */\n/*   .Lfe1: */\n/*   \t.size\t EwramFree,.Lfe1-EwramFree */\n/*   .text */\n/*   \t.align\t2, 0 */\nvoid EwramFree(void) {\n    ASMLIFT_ERROR(\"could not decompile (structure): cannot structure 'EwramFree': loop condition or a post-loop value reads a pre-update loop variable\");\n}\n",
-        "score": null,
-        "maxScore": null,
+        "candidateLabel": "unsigned",
+        "symbolsUsed": [
+          {
+            "name": "gEwramHeap",
+            "shape": "u8[]"
+          }
+        ],
+        "outcome": "nonmatch",
+        "source": "void EwramFree(s32 * a0) {\n    s32 v0;\n    s32 v1;\n    s32 * v2;\n    s32 * v3;\n    if (a0 != 0 && ewram_end != a0) {\n        v3 = (s32 *)&gEwramHeap;\n        for (v2 = (s32 *)&gEwramHeap; a0 - 2 != v2; v2 = (s32 *)*v2) {\n            v3 = v2;\n        }\n        if ((a0 - 2)[1] < 0) (a0 - 2)[1] = -(a0 - 2)[1];\n        v0 = v3[1];\n        if (v3 + v0 != a0 - 2 || v0 <= 0) {\n            v3 = a0 - 2;\n        } else {\n            *v3 = *v2;\n            v3[1] = v0 + (a0 - 2)[1];\n        }\n        v1 = v3[1];\n        if (v3 + v1 == *v3) {\n            if ((v3 + v1)[1] > 0) {\n                v3[1] = v1 + (v3 + v1)[1];\n                *v3 = *(v3 + v1);\n            }\n        }\n    }\n    return;\n}\n",
+        "score": 48,
+        "maxScore": 64,
         "compileErrors": null,
+        "breakdown": {
+          "insert": 12,
+          "delete": 5,
+          "replace": 2,
+          "opMismatch": 1,
+          "argMismatch": 28
+        },
         "quality": {
-          "score": 88,
-          "lines": 77,
+          "score": 98,
+          "lines": 28,
           "gotos": 0,
-          "casts": 1,
-          "unkGlue": 1,
+          "casts": 3,
+          "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
-        },
-        "errorMarkers": [
-          "structure: cannot structure 'EwramFree': loop condition or a post-loop value reads a pre-update loop variable"
-        ]
+        }
       },
       "m2c": {
         "decompiler": "m2c",
@@ -13828,7 +13839,19 @@
           "<tmp>/c.c:332: request for member `unk0' in something not a structure or union"
         ]
       },
-      "gapSize": null,
+      "gapSize": {
+        "decompiler": "asmlift",
+        "score": 48,
+        "maxScore": 64,
+        "ratio": 0.75,
+        "kinds": {
+          "insert": 12,
+          "delete": 5,
+          "replace": 2,
+          "opMismatch": 1,
+          "argMismatch": 28
+        }
+      },
       "scripts": {
         "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `EwramFree` — benchmark function sa3:EwramFree:agbcc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n# asmlift checkout — this function's context is the project's own vendored headers, stored in\n# the repo (referenced, not embedded — it is ~10–260 KB):\nASMLIFT_PATH='/path/to/asmlift'\n\n# The exact agbcc `.s` text the benchmark fed m2c, verbatim.\ncat > in.s <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tEwramFree\n\t.type\t EwramFree,function\n\t.thumb_func\nEwramFree:\n\tpush\t{r4, lr}\n\tadd\tr1, r0, #0\n\tcmp\tr1, #0\n\tbeq\t.L3\t@cond_branch\n\tldr\tr0, .L12\n\tldr\tr0, [r0]\n\tcmp\tr0, r1\n\tbeq\t.L3\t@cond_branch\n\tsub\tr1, r1, #0x8\n\tldr\tr3, .L12+0x4\n\tadd\tr4, r3, #0\n\tcmp\tr1, r3\n\tbeq\t.L5\t@cond_branch\n.L7:\n\tadd\tr3, r4, #0\n\tldr\tr4, [r3]\n\tcmp\tr1, r4\n\tbne\t.L7\t@cond_branch\n.L5:\n\tldr\tr0, [r1, #0x4]\n\tcmp\tr0, #0\n\tbge\t.L9\t@cond_branch\n\tneg\tr0, r0\n\tstr\tr0, [r1, #0x4]\n.L9:\n\tldr\tr2, [r3, #0x4]\n\tadd\tr0, r3, r2\n\tcmp\tr0, r1\n\tbne\t.L10\t@cond_branch\n\tcmp\tr2, #0\n\tble\t.L10\t@cond_branch\n\tldr\tr0, [r4]\n\tstr\tr0, [r3]\n\tldr\tr0, [r1, #0x4]\n\tadd\tr0, r2, r0\n\tstr\tr0, [r3, #0x4]\n\tadd\tr1, r3, #0\n.L10:\n\tldr\tr3, [r1, #0x4]\n\tadd\tr2, r1, r3\n\tldr\tr0, [r1]\n\tcmp\tr2, r0\n\tbne\t.L3\t@cond_branch\n\tldr\tr0, [r2, #0x4]\n\tcmp\tr0, #0\n\tble\t.L3\t@cond_branch\n\tadd\tr0, r3, r0\n\tstr\tr0, [r1, #0x4]\n\tldr\tr0, [r2]\n\tstr\tr0, [r1]\n.L3:\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n.L13:\n\t.align\t2, 0\n.L12:\n\t.word\tewram_end\n\t.word\tgEwramHeap\n.Lfe1:\n\t.size\t EwramFree,.Lfe1-EwramFree\n\n.text\n\t.align\t2, 0\nASM_INPUT\n\n# The project context the benchmark passed via --context, exactly as its real workflow would —\n# GCC attributes stripped (m2c's C parser cannot read them; same expression the harness uses),\n# plus the function's own prototype (the TU-derived context never forward-declares it).\ngunzip -kc \"$ASMLIFT_PATH/apps/benchmark/dataset/real/tu/sa3/ctx-bef3af60bae2.i.gz\" | perl -pe 's/__attribute__\\s*\\(\\((?:[^()]|\\((?:[^()]|\\([^()]*\\))*\\))*\\)\\)//g' > ctx.h\ncat >> ctx.h <<'CTX_PROTO'\nvoid EwramFree(void *p);\nCTX_PROTO\n\nargs=(\n  --target gba            # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function EwramFree    # the symbol to decompile from in.s\n  --context ctx.h         # the C context header above (typedefs + prototypes)\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
         "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `EwramFree` — benchmark function sa3:EwramFree:agbcc.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# This function's decomp project — the PINNED benchmark branch (provenance base + one\n# integration commit). Not needed to run this script (inputs are embedded/vendored); to\n# rebuild the project itself:\n#   git clone --branch asmlift-benchmark https://github.com/macabeus/sa3.git sa3\n#   make -C sa3\n#   make -C sa3 asmlift-elf   # derive the symbols ELF (DWARF types-sidecar)\n# SYMBOLS: this row ran WITH the project's symbol map (names + declaration shapes derived\n# from the ELF its decomp.yaml names), vendored at apps/benchmark/dataset/real/tu/sa3/symbols.json.gz\n#   sha256 of the decompressed map JSON: d8c8ab5ff3898e5411323fd3dd7ef6929c86bb2560871febf0415e4b3261e74f\n# Set PROJECT_PATH to your BUILT checkout of the project above (clone recipe in the comments);\n# step 1 then points the scoring config at the checkout's decomp.yaml (tools.asmlift.elf) —\n# the CLI loads the same map, so this run reproduces the row's named spellings. A missing\n# checkout/ELF warns and runs map-less (output may then differ from the row).\nPROJECT_PATH='/path/to/sa3'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# --project-root grafts the checkout's tools.asmlift.elf (the symbol map) into that decomp.yaml.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target sa3:EwramFree:agbcc --out \"$PWD\" --project-root \"$PROJECT_PATH\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact agbcc `.s` text.\ncat > in.asm <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tEwramFree\n\t.type\t EwramFree,function\n\t.thumb_func\nEwramFree:\n\tpush\t{r4, lr}\n\tadd\tr1, r0, #0\n\tcmp\tr1, #0\n\tbeq\t.L3\t@cond_branch\n\tldr\tr0, .L12\n\tldr\tr0, [r0]\n\tcmp\tr0, r1\n\tbeq\t.L3\t@cond_branch\n\tsub\tr1, r1, #0x8\n\tldr\tr3, .L12+0x4\n\tadd\tr4, r3, #0\n\tcmp\tr1, r3\n\tbeq\t.L5\t@cond_branch\n.L7:\n\tadd\tr3, r4, #0\n\tldr\tr4, [r3]\n\tcmp\tr1, r4\n\tbne\t.L7\t@cond_branch\n.L5:\n\tldr\tr0, [r1, #0x4]\n\tcmp\tr0, #0\n\tbge\t.L9\t@cond_branch\n\tneg\tr0, r0\n\tstr\tr0, [r1, #0x4]\n.L9:\n\tldr\tr2, [r3, #0x4]\n\tadd\tr0, r3, r2\n\tcmp\tr0, r1\n\tbne\t.L10\t@cond_branch\n\tcmp\tr2, #0\n\tble\t.L10\t@cond_branch\n\tldr\tr0, [r4]\n\tstr\tr0, [r3]\n\tldr\tr0, [r1, #0x4]\n\tadd\tr0, r2, r0\n\tstr\tr0, [r3, #0x4]\n\tadd\tr1, r3, #0\n.L10:\n\tldr\tr3, [r1, #0x4]\n\tadd\tr2, r1, r3\n\tldr\tr0, [r1]\n\tcmp\tr2, r0\n\tbne\t.L3\t@cond_branch\n\tldr\tr0, [r2, #0x4]\n\tcmp\tr0, #0\n\tble\t.L3\t@cond_branch\n\tadd\tr0, r3, r0\n\tstr\tr0, [r1, #0x4]\n\tldr\tr0, [r2]\n\tstr\tr0, [r1]\n.L3:\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n.L13:\n\t.align\t2, 0\n.L12:\n\t.word\tewram_end\n\t.word\tgEwramHeap\n.Lfe1:\n\t.size\t EwramFree,.Lfe1-EwramFree\n\n.text\n\t.align\t2, 0\nASM_INPUT\n\n# The prototype hints the benchmark fed asmlift (callee arities / void-ness).\ncat > proto.json <<'PROTO_INPUT'\n{\n  \"EwramFree\": {\n    \"returnsVoid\": true\n  }\n}\nPROTO_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\n# (real tier: candidates are scored INSIDE the project's own context — step 1 materializes the\n# row's vendored context next to target.o as ctx.i, and the generated decomp.yaml concatenates\n# it ahead of every candidate, so this scores in the same world the benchmark did)\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target agbcc          # frontend + target description (ISA, calling convention, compiler idioms)\n  --name EwramFree        # the symbol to decompile (multi-function input selects by name)\n  --proto proto.json      # the prototype hints above (callee arities / void-ness)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
@@ -31659,23 +31682,28 @@
       "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /host-tmp/asmlift-mgcc-ref-a2c7f3f5c37567ff/ref.c\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t0000003c fib\n\n\nContents of section .text:\n 0000 27bdfff8 24060001 00002821 18800008  '...$.....(!....\n 0010 00001821 00661021 00c01821 00403021  ...!.f.!...!.@0!\n 0020 24a50001 00a4102a 1440fffb 00661021  $......*.@...f.!\n 0030 00601021 03e00008 27bd0008 00000000  .`.!....'.......\nContents of section .reginfo:\n 0000 a000007c 00000000 00000000 00000000  ...|............\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.              \n",
       "asmlift": {
         "decompiler": "asmlift",
-        "outcome": "declined",
-        "source": "/* asmlift could not decompile 'fib' — structure: cannot structure 'fib': do-while condition or a post-loop value reads a pre-update loop variable */\n/* original assembly: */\n/*   target.o:     file format elf32-tradbigmips */\n/*   Disassembly of section .text: */\n/*   00000000 <fib>: */\n/*      0:\taddiu\tsp,sp,-8 */\n/*      4:\tli\ta2,1 */\n/*      8:\tmove\ta1,zero */\n/*      c:\tblez\ta0,30 <fib+0x30> */\n/*     10:\tmove\tv1,zero */\n/*     14:\taddu\tv0,v1,a2 */\n/*     18:\tmove\tv1,a2 */\n/*     1c:\tmove\ta2,v0 */\n/*     20:\taddiu\ta1,a1,1 */\n/*     24:\tslt\tv0,a1,a0 */\n/*     28:\tbnez\tv0,18 <fib+0x18> */\n/*     2c:\taddu\tv0,v1,a2 */\n/*     30:\tmove\tv0,v1 */\n/*     34:\tjr\tra */\n/*     38:\taddiu\tsp,sp,8 */\n/*     3c:\tnop */\nvoid fib(void) {\n    ASMLIFT_ERROR(\"could not decompile (structure): cannot structure 'fib': do-while condition or a post-loop value reads a pre-update loop variable\");\n}\n",
-        "score": null,
-        "maxScore": null,
+        "candidateLabel": "unsigned/defsite",
+        "outcome": "nonmatch",
+        "source": "s32 fib(u32 a0) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 t0;\n    v3 = 0;\n    if (a0 > 0) {\n        v0 = 1;\n        v2 = 0;\n        v1 = 1;\n        do {\n            v3 = v0;\n            v2 = v2 + 1;\n            t0 = v0;\n            v0 = v1;\n            v1 = t0 + v1;\n        } while (v2 < a0);\n    }\n    return v3;\n}\n",
+        "score": 15,
+        "maxScore": 18,
         "compileErrors": null,
+        "breakdown": {
+          "insert": 3,
+          "delete": 5,
+          "replace": 3,
+          "opMismatch": 0,
+          "argMismatch": 4
+        },
         "quality": {
-          "score": 88,
-          "lines": 24,
+          "score": 100,
+          "lines": 21,
           "gotos": 0,
-          "casts": 1,
-          "unkGlue": 1,
+          "casts": 0,
+          "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
-        },
-        "errorMarkers": [
-          "structure: cannot structure 'fib': do-while condition or a post-loop value reads a pre-update loop variable"
-        ]
+        }
       },
       "m2c": {
         "decompiler": "m2c",
