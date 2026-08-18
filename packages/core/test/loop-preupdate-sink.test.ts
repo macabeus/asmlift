@@ -195,3 +195,35 @@ test('a trailing copy into an existing name needs no seed', () => {
       '}\n',
   );
 });
+
+// REFUSAL — the seed and the loop init are two copy groups from the same block with nothing
+// sequentialising them against each other. Here the exit block has a THIRD predecessor, so its
+// param takes its name from that edge and the seed becomes a real write to `a1` — the value the
+// init reads on the next line.
+const SEED_CLOBBERS_INIT = `fn seedclash {
+^bb0(%0: s32*, %1: s32*, %2: s32):
+  %3: s32 = const {value=0}
+  %4: u32 = icmp_eq %2, %3
+  cond_br %4, ^bb3(), ^bb4()
+^bb3():
+  br ^bb2(%1)
+^bb4():
+  %5: u32 = icmp_eq %0, %1
+  %6: s32* = gaddr {sym="head"}
+  cond_br %5, ^bb2(%6), ^bb1(%1)
+^bb1(%7: s32*):
+  %8: s32* = load %7 {off=0, signed=true, width=4}
+  %9: u32 = icmp_ne %0, %8
+  cond_br %9, ^bb1(%8), ^bb2(%7)
+^bb2(%10: s32*):
+  %12: s32 = load %10 {off=4, signed=true, width=4}
+  ret %12
+}
+`;
+
+test('a seed that would overwrite a value the loop init reads declines', () => {
+  // Control: the same sink WITHOUT the clash is accepted, so this is not a decline for some
+  // unrelated reason. Without the gate the loop starts at `&head` instead of the caller's pointer.
+  expect(() => emit(TRAILING_PTR)).not.toThrow();
+  expect(() => emit(SEED_CLOBBERS_INIT)).toThrow(/loop initialisation reads/);
+});

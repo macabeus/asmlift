@@ -1,8 +1,14 @@
-// asmlift structurer — LOOP-EMISSION HAZARD checks: may this loop's updates be emitted before
-// its condition/exit/post-loop reads, or would some read then see a clobbered (post-update)
-// value that the original IR read PRE-update? Every check here is PURE — it reads the analysis
-// maps and decides; nothing mutates — which is what lets the emission sites call it freely
-// before committing to a loop form, and decline loud instead of miscompiling.
+// asmlift structurer — the checks a loop emitter runs BEFORE it commits to a loop form, so it can
+// decline loud instead of miscompiling. Two questions live here:
+//
+//   • may this loop's updates be emitted before its condition/exit/post-loop reads, or would some
+//     read then see a clobbered (post-update) value that the original IR read PRE-update — and
+//     which of those reads can be REPAIRED by moving the copy into the body (`sinkable…`);
+//   • is a value the emitted form DROPS redundant — `sameAtEntry`, which reads an expression on
+//     the loop's entry state so a guard about to be fused away can be checked against the test
+//     that replaces it.
+//
+// Every check is PURE: it reads the analysis maps and decides, nothing mutates.
 //
 // The factory takes its dependencies EXPLICITLY (`LoopHazardDeps`), the switch-recover pattern.
 // The maps are captured as LIVE REFERENCES, deliberately: `varName` is still being populated by
@@ -293,25 +299,43 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
   //
   // Structural, not semantic: distinct ops with the same opcode, attributes and operands compare
   // equal (two `const 0`s do), anything else does not. A false negative costs a loud decline, which
-  // is the direction to be wrong in. Def chains stop at params and entry values, so this terminates.
+  // is the direction to be wrong in. Memoised like `readsClobbered`'s `seen`, so a value its own
+  // consumer reads twice is compared once rather than doubling the work per level — a bound on this
+  // walk alone, not on the pass: rendering that same shared tree inlines it, and THAT is what
+  // actually limits how deep a def chain asmlift can carry.
   const sameAtEntry = (a: Value, b: Value, entry: Map<Value, Value>, negated = false): boolean => {
-    const x = fold(entry.get(a) ?? a);
-    const y = fold(b);
-    if (!negated && x === y) {
-      return true;
+    const memo = new Map<Value, Map<Value, boolean>>();
+    const sameOp = (da: Op, db: Op, opcodeOk: boolean): boolean =>
+      opcodeOk &&
+      da.operands.length === db.operands.length &&
+      JSON.stringify(da.attrs ?? null) === JSON.stringify(db.attrs ?? null) &&
+      da.operands.every((o, i) => same(o, db.operands[i]));
+    const same = (x0: Value, y0: Value): boolean => {
+      const x = fold(entry.get(x0) ?? x0);
+      const y = fold(y0);
+      if (x === y) {
+        return true;
+      }
+      let row = memo.get(x);
+      if (!row) {
+        memo.set(x, (row = new Map()));
+      }
+      const hit = row.get(y);
+      if (hit !== undefined) {
+        return hit;
+      }
+      const da = defs.get(x);
+      const db = defs.get(y);
+      const r = !!da && !!db && sameOp(da, db, da.opcode === db.opcode);
+      row.set(y, r);
+      return r;
+    };
+    if (!negated) {
+      return same(a, b);
     }
-    const da = defs.get(x);
-    const db = defs.get(y);
-    if (!da || !db || da.operands.length !== db.operands.length) {
-      return false;
-    }
-    if (negated ? NEGATED_ICMP[da.opcode] !== db.opcode : da.opcode !== db.opcode) {
-      return false;
-    }
-    if (JSON.stringify(da.attrs ?? null) !== JSON.stringify(db.attrs ?? null)) {
-      return false;
-    }
-    return da.operands.every((o, i) => sameAtEntry(o, db.operands[i], entry));
+    const da = defs.get(fold(entry.get(a) ?? a));
+    const db = defs.get(fold(b));
+    return !!da && !!db && sameOp(da, db, NEGATED_ICMP[da.opcode] === db.opcode);
   };
 
   return { readsClobbered, loopEscapeHazard, loopUpdateHazard, sinkablePreUpdateSlots, sameAtEntry };

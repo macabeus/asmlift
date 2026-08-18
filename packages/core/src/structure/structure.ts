@@ -1815,7 +1815,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
   // pure decline-or-emit predicates, extracted to hazards.ts behind the explicit-deps factory.
   // `varName` is captured as a live reference: it is still being populated here in the naming
   // pipeline, and each check reads the names that exist when EMISSION calls it.
-  const { loopUpdateHazard, sinkablePreUpdateSlots, sameAtEntry } = makeLoopHazards({
+  const { readsClobbered, loopUpdateHazard, sinkablePreUpdateSlots, sameAtEntry } = makeLoopHazards({
     defs,
     varName,
     useSitesOf,
@@ -2208,7 +2208,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
         // else entirely has that shape too. `entryVals` maps each header param and back-edge arg to
         // the arg the guard passes into the loop, so reading through it models the first iteration:
         // the state the guard tested. Two claims are checked against it, both LOUD on failure.
-        const guardExit = successorTo(b, li.exit);
+        const guardExit = successorTo(b, li.exit)!; // the fusion condition above guarantees this edge
         const initArgs = (successorTo(b, h)?.args ?? []) as Value[];
         // Params first, BACK-EDGE ARGS SECOND: one value can be both — param `i+1` of a shifting
         // pair is also the back-edge arg of param `i` — and the emitted expression renders it
@@ -2218,12 +2218,16 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
         li.header.params.forEach(
           (_, i) => initArgs[i] !== undefined && entryVals.set(li.backArgOfParam[i], initArgs[i]),
         );
-        // (1) Is the guard PROVABLY the loop's own test? Fusion drops it and lets the `while`
-        // re-test, which is only equivalent when the two ask the same question of the entry values.
-        // Structural equality is a sufficient proof, never a necessary one: `str[0]` and `str[i]`
-        // at `i = 0`, or a signed `e <= 0` beside an unsigned `e != 0`, are the same test spelled
-        // differently, and normalising those is not something this pass can do yet. So an
-        // unproven guard is not by itself a refusal — it is only a refusal to SINK, below.
+        // (1) Is the guard PROVABLY the loop's own test? Fusion DELETES it and lets the `while`
+        // re-test, so when it tests something else the emitted C loses the `if` outright and runs a
+        // loop the source skipped. Structural equality is a sufficient proof, never a necessary
+        // one: `str[0]` and `str[i]` at `i = 0`, or a signed `e <= 0` beside an unsigned `e != 0`,
+        // are the same test spelled differently, and normalising those needs a canonical form this
+        // pass does not have. So an unproven guard is not by itself a refusal — refusing every one
+        // of them costs rows whose fusion is sound, measurably. It refuses only the SINK below,
+        // which is what makes the fused zero-trip path load-bearing.
+        // KNOWN GAP, pre-dating the sink: a loop with no repairable exit copy still fuses on shape
+        // alone, and an `if` about something else is silently dropped.
         const enterIsTaken = takenB === h;
         const contIsTaken = hterm.successors[0].block === li.header;
         const guardProven = sameAtEntry(hterm.operands[0], term.operands[0], entryVals, enterIsTaken !== contIsTaken);
@@ -2233,18 +2237,17 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
         // seed — the only edge holding the never-entered value. Which is why the sink demands the
         // proof: it makes the zero-trip path load-bearing for a family that used to decline here,
         // and `isGuardShapedPred` alone cannot tell this guard from an `if` about something else.
-        const sunk =
-          guardExit && guardProven
-            ? sinkablePreUpdateSlots(li.header, li.exit, hexitArgs, new Set([li.header]), sub, updateWrites)
-            : new Set<number>();
+        const sunk = guardProven
+          ? sinkablePreUpdateSlots(li.header, li.exit, hexitArgs, new Set([li.header]), sub, updateWrites)
+          : new Set<number>();
         // (2) Every exit copy the fused form KEEPS renders after the loop, on the zero-trip path
         // too — where the loop variables still hold their init values. It must therefore produce
         // what the guard→exit edge carries, since that edge is dropped. A sunk slot is exempt: its
         // seed and its body copy cover the two paths separately.
         const staleExit = hexitArgs.findIndex(
-          (a, j) => !sunk.has(j) && !sameAtEntry(a, (guardExit?.args[j] ?? a) as Value, entryVals),
+          (a, j) => !sunk.has(j) && !sameAtEntry(a, guardExit.args[j] as Value, entryVals),
         );
-        if (guardExit && staleExit >= 0) {
+        if (staleExit >= 0) {
           throw new StructureError(
             `cannot structure '${fn.name}': the fused guard's exit edge carries a value the post-loop ` +
               `copies do not reproduce on a zero-trip run`,
@@ -2269,7 +2272,19 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
             `cannot structure '${fn.name}': loop condition or a post-loop value reads a pre-update loop variable`,
           );
         }
-        out.push(...argAssigns(b, li.exit, null, sunkSlot)); // zero-trip seed for the sunk copies
+        // The seed and the loop init are two copy groups from the SAME block, emitted back to back,
+        // and nothing sequentializes them against each other: a seed that writes a name the init
+        // then reads hands the loop the wrong starting value. Computed once — a second
+        // `argAssigns` for one edge burns a swap-cycle temp number and changes the output.
+        const seed = argAssigns(b, li.exit, null, sunkSlot);
+        const seedWrites = new Set(seed.filter((st) => st.k === 'assign').map((st) => st.name));
+        if (initArgs.some((a) => readsClobbered(a, new Map(), seedWrites))) {
+          throw new StructureError(
+            `cannot structure '${fn.name}': seeding the zero-trip value would overwrite a value the ` +
+              `loop initialisation reads`,
+          );
+        }
+        out.push(...seed); // zero-trip value for the sunk copies
         out.push(...argAssigns(b, h)); // loop-variable initialisation
         out.push(emitWhile(li, updates, preUpdateCopies(li.exit, hexitArgs, sunk)));
         // The header→exit edge may carry non-identity phi args (the exit param merges the guard-false

@@ -209,6 +209,21 @@ describe('sinkablePreUpdateSlots', () => {
     expect(h.sinkablePreUpdateSlots(header, exit, [p], body, empty, new Set(['v0']))).toEqual(new Set());
   });
 
+  test('two slots wanting ONE name refuse the whole edge (one parallel copy)', () => {
+    // Not a per-candidate gate either: no single slot is at fault. Both would write `v1`, and the
+    // body cannot run two copies into one name and still carry both values.
+    const { p, q, header, exit, body } = scaffold();
+    const p2 = v();
+    const other = v();
+    header.params.push(p2);
+    exit.params.push(other);
+    const h = make({
+      varName: names([p, 'v0'], [p2, 'v9'], [q, 'v1'], [other, 'v1']),
+      liveIn: new Map([[header, new Set<Value>()]]),
+    });
+    expect(h.sinkablePreUpdateSlots(header, exit, [p, p2], body, empty, new Set(['v0', 'v9']))).toEqual(new Set());
+  });
+
   test('a slot that STAYS BEHIND reading a sunk name refuses the whole edge (one parallel copy)', () => {
     // Not a per-candidate gate: it is a property of the edge, so it is not in the table.
     const { p, q, header, exit, body } = scaffold();
