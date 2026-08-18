@@ -45,7 +45,7 @@ them are not "add a feature":
   decompiler, and it may *remove* the row rather than match it.
 
 Write the classification down with the evidence that decided it. If it is one of the last two, go
-straight to Phase 6 and report — that is a successful outcome of this command, not a failure.
+straight to Phase 7 and report — that is a successful outcome of this command, not a failure.
 
 ## Phase 2 — Break it down
 
@@ -105,7 +105,37 @@ Then: **remediate every confirmed finding as new commits**, and **re-run both ag
 Precedent from this repo's history: a remediation itself introduced a silent-wrong-address bug that
 only the second pass caught. One round is not enough.
 
-## Phase 6 — Report and write back
+## Phase 6 — Audit the commentary you introduced
+
+Do this AFTER the adversarial rounds, never before: remediation rewrites code, and a comment
+written for the first version is the likeliest thing in the diff to have become false.
+
+Inventory first — `git diff main HEAD`, added lines matching `^\+\s*(//|/\*|\*)`, counted per
+file. That number is the budget you are arguing about; core already runs ~31% comments.
+
+Then, over every comment you added or changed, **tests included**:
+
+- **Consistency.** Match the density and idiom of the file you are in — the refusal-condition list,
+  the `KNOWN GAP:` marker, the `/** … */` on an interface field. A comment three times longer than
+  the sibling it is modelled on is too long, whatever it says.
+- **Trim what the code says.** If a quick read of the surrounding lines answers it, delete it: a
+  destructuring the type already spells, a polarity the two names already state.
+- **Delete the history.** Anything about how the code got here rather than what it does — "used
+  to", "previously", "the last commit", "an adversarial pass found", a gate that "could never be
+  shown load-bearing", a comment arguing back at a review finding. Positional references rot the
+  same way: "fourteen lines apart" survives exactly one refactor.
+- **Hunt for the FALSE one.** This is the finding worth the whole phase, and remediation is what
+  produces it: a test-file header claiming every refusal case is a one-fact edit of an accepted
+  fixture, when three of the four became separate fixtures; a doc comment listing a loop body's
+  parts after you added one. Rewrite those — do not shrink them.
+
+Keep the refusal conditions, and any *why* not derivable from the code: a compiler behaviour, a
+shape the IR cannot represent, why an absence is deliberate.
+
+Finish with a mechanical sweep for survivors and re-run `pnpm format`. No test covers a comment, so
+this phase is the only pass they get.
+
+## Phase 7 — Report and write back
 
 - Summary: baseline → final for $1, full-bench totals before/after, one line per commit.
 - What you did **not** do and why (blocked capability, unmatchable quirk, rejected lever).
