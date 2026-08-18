@@ -440,9 +440,14 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tcmp\tr0, #0\n\tbeq\t.L2\n\tstr\tr0, [sp]\n' +
       '.L2:\n\tldr\tr1, [sp]\n\tadd\tr0, r1, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r2}\n\tbx\tr2\n';
     expect(decompile('f', both, ARMV4T_AGBCC).source).toBe('s32 f(s32 a0) {\n    return a0 + 1;\n}\n');
-    // …and the REFUSAL that has to survive: a slot no store reaches ANYWHERE is not a local this
-    // function owns — it may be frame arithmetic or an address-taken object, so the slot model
-    // itself does not apply and the honest answer is still to decline.
+    // …and the refusal that survives — labelled NOT YET, in the same words decline-guards.test.ts
+    // uses for the MIPS entry-phi case, because the tempting justification does not hold. A slot no
+    // store reaches ANYWHERE is the SAME C as the diamond above: a local nothing wrote. The reasons
+    // one reaches for — "it may be frame arithmetic, or an address-taken object" — are both already
+    // caught elsewhere (frame arithmetic trips `stack pointer used as data`; an address-taken object
+    // mints an `laddr` and is audited). What actually decides it is that the gate sits at the LOAD
+    // (`hasReachingDef` before the slot is keyed at all), which is where it sat before `undef`
+    // existed. Closing it means moving that gate, not finding a new argument.
     const unstored =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tldr\tr0, [sp]\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
     expect(() => decompile('f', unstored, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
@@ -482,9 +487,18 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       '\tldr\tr1, [r4]\n\tcmp\tr1, #0\n\tbeq\t.L2\n\tstr\tr1, [sp, #4]\n' +
       '.L2:\n\tldr\tr2, [sp, #4]\n\tadd\tr0, r1, r2\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r3}\n\tbx\tr3\n';
     expect(() => decompile('f', escaped, ARMV4T_AGBCC)).toThrow(
-      /address-taken stack local — a callee may write any frame offset/,
+      /address-taken stack local — the captured address escapes/,
     );
-    // POSITIVE CONTROL: the same undefined slot with NO address escaping still recovers, so the
+    // DISCRIMINATING CONTROL — the one that makes the title true. The same captured address,
+    // dereferenced only in-function, with NO call anywhere: nobody else can reach the frame, so
+    // the undef argument still holds and this LIFTS. The first version of the guard keyed on
+    // "a laddr exists" rather than on the escape and declined this, with a message naming a callee
+    // the input does not contain. Without this fixture the test cannot tell capture from escape.
+    const captured =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tmov\tr4, sp\n\tldr\tr1, [r4]\n\tcmp\tr1, #0\n\tbeq\t.L2\n\tstr\tr1, [sp, #4]\n' +
+      '.L2:\n\tldr\tr2, [sp, #4]\n\tadd\tr0, r1, r2\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r3}\n\tbx\tr3\n';
+    expect(decompile('f', captured, ARMV4T_AGBCC).source).toContain('uninit_sp4');
+    // POSITIVE CONTROL: the same undefined slot with no address taken at all still recovers, so the
     // guard is the escape and not something incidental about the shape.
     const noEscape =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tstr\tr0, [sp]\n\tldr\tr1, [sp]\n\tcmp\tr1, #0\n\tbeq\t.L2\n\tstr\tr1, [sp, #4]\n' +

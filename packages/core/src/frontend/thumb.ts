@@ -2692,21 +2692,6 @@ export function lift(
       const fail = (why: string): never => {
         throw new FrontendUnsupportedError(`cannot lift '${name}': address-taken stack local — ${why}`);
       };
-      // AN ESCAPED FRAME ADDRESS RETRACTS THE UNDEF ARGUMENT. `undef` rests on "no store reaches
-      // this slot, therefore nobody wrote it" — which holds only while THIS function is the only
-      // writer of its frame. Once an address into the frame reaches a callee, that stops being
-      // true: the audit below bounds what this function accesses through the object, not what the
-      // callee does, so a wider real object (`struct P p; g(&p);` where only `p.x` is read here)
-      // has its later words written by `g` and read back at a slot no store of ours reaches.
-      // Declaring those uninitialised would spell a value the callee produced as garbage.
-      //
-      // Function-wide, because an escaped address cannot be bounded to a range: the only width we
-      // have is the one the audit inferred from our own accesses, which is exactly the number that
-      // is too small in this shape. Costs nothing that used to work — before `undef` every one of
-      // these functions declined here anyway.
-      if (irBlocks.some((blk) => blk.ops.some((op) => op.opcode === 'undef'))) {
-        fail('a callee may write any frame offset, so an unstored slot is not provably uninitialised');
-      }
       // Taint = values that may hold the object's address, closed over phis: a tainted edge arg
       // taints the receiving block param. (A phi mixing the address with a non-address would taint
       // the param and then fail the use judgement below — mixing is not vouched for.)
@@ -2787,6 +2772,28 @@ export function lift(
         if (off < width) {
           fail(`the object at [0,${width}) overlaps the SSA slot at [sp,#${off}] — one byte, two models`);
         }
+      }
+      // AN ESCAPE RETRACTS THE UNDEF ARGUMENT. `undef` rests on "no store reaches this slot,
+      // therefore nobody wrote it", which holds only while this function's own stores are the ONLY
+      // writer of its frame. `escapes` is exactly when that stops being true — the address reached
+      // a callee, or was stored to memory for someone else to reach. This audit bounds what WE
+      // access through the object, not what they do, so a wider real object (`struct P p; g(&p);`
+      // where only `p.x` is read here) has its later words written by `g` and read back at a slot
+      // no store of ours reaches; declaring those uninitialised spells their value as garbage.
+      //
+      // Function-wide, because an escaped address cannot be bounded to a range: the only width
+      // available is the one inferred from our own accesses, which is exactly the number that is
+      // too small in this shape. It costs nothing that used to work — every such function declined
+      // here before `undef` existed.
+      //
+      // Gated on `escapes`, NOT on "a laddr exists": an address CAPTURED and dereferenced only
+      // in-function cannot be written by anyone else, and the overlap check above already covers
+      // its aliasing. The first version keyed on capture and declined functions containing no call
+      // at all, naming a callee the input did not have.
+      if (escapes && irBlocks.some((blk) => blk.ops.some((op) => op.opcode === 'undef'))) {
+        fail(
+          'the captured address escapes, so a callee may write any frame offset and an unstored slot is not provably uninitialised',
+        );
       }
       // Proven. Stamp the MACHINE FACTS the audit established — width and signedness are what the
       // accesses used, so the declaration downstream is a fact, not a guess. The C-level NAME is

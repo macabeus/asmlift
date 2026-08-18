@@ -224,7 +224,7 @@ test('MIPS: sp accesses outside the word-slot model decline, never a bogus slot'
     '  20:\taddiu\tsp,sp,24',
     '',
   ].join('\n');
-  expect(() => decompile('f', diamond, MIPS_IDO)).toThrow(/stack slot sp@16 is read on a path that never stores it/);
+  expect(() => decompile('f', diamond, MIPS_IDO)).toThrow(/sp@16 is read on a path that never stores it/);
   // the ARGUMENT-HOME case that makes the decline necessary rather than merely conservative: with a
   // 24-byte frame, `40(sp)` is ABOVE it — the caller's area, where a def-less read is argument 5.
   const homeSlot = [
@@ -240,7 +240,7 @@ test('MIPS: sp accesses outside the word-slot model decline, never a bogus slot'
     '  20:\taddiu\tsp,sp,24',
     '',
   ].join('\n');
-  expect(() => decompile('f', homeSlot, MIPS_IDO)).toThrow(/stack slot sp@40 is read on a path that never stores it/);
+  expect(() => decompile('f', homeSlot, MIPS_IDO)).toThrow(/sp@40 is read on a path that never stores it/);
   // …and the same fabrication when the entry block is ITSELF the loop header, where the slot
   // arrives as a PHI rather than a live-in. `paramReg` only covers live-ins, so the escape check
   // was blind to it and the phantom parameter survived — on MIPS, which has no preheader to make
@@ -270,7 +270,7 @@ test('MIPS: sp accesses outside the word-slot model decline, never a bogus slot'
     '  24:\tnop',
     '',
   ].join('\n');
-  expect(() => decompile('f', entryLoop, MIPS_IDO)).toThrow(/stack slot sp@16 is read on a path that never stores it/);
+  expect(() => decompile('f', entryLoop, MIPS_IDO)).toThrow(/sp@16 is read on a path that never stores it/);
 });
 
 // ── Input-format boundary (frontend/format.ts) ────────────────────────────────────────────

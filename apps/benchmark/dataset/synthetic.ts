@@ -427,6 +427,11 @@ export const SYNTHETIC: SynthSpec[] = [
   // this capability — uninit_join:ido7.1, uninit_sw:ido7.1, uninit_sw:agbcc, and both slot halves
   // of uninit_spill (agbcc, ido7.1). The rest decline on branch-likely (gcc2.7.2kmc), a cr0
   // reaching-compare, or r1-as-data (mwcc_242_81) — all pre-existing and unrelated.
+  //
+  // STATUS once `undef` landed: exactly ONE of those five moved — uninit_spill:agbcc,
+  // declined → nonmatch. The ido7.1 pair still declines on purpose (that frontend has no frame
+  // bound, so its slot keys reach O32's caller-owned argument home area), and uninit_sw:agbcc is
+  // the register half, which `undef` does not touch. See docs/level-tower.md.
   // The first two rows are kept to ≤4 parameters on purpose: at 5+ the O32 reader takes its
   // stack-argument path and would decline for a reason that has nothing to do with initialisation.
   {

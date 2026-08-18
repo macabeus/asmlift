@@ -118,10 +118,17 @@ export const OPCODES = {
   // "the audit ran" a verifier-checkable fact instead of a convention: a frontend that emits a
   // laddr and skips the audit fails verify loudly instead of rendering `&undefined`.
   laddr: { operands: 0, results: 1, requiredAttrs: ['off', 'width', 'signed'] },
-  // An UNDEFINED value: storage this function owns, read on a path that never wrote it. The C it
-  // came from declared a local with no initialiser and assigned it only inside some arms of a
-  // conditional or `switch` (a `switch` with no `default` is the commonest source), so the read is
-  // legal to compile and the compiler emitted the unassigned path faithfully.
+  // An UNDEFINED value: storage whose ONLY writer is this function's own stores, read on a path
+  // where none of them ran. The C it came from declared a local with no initialiser and assigned it
+  // only inside some arms of a conditional or `switch` (a `switch` with no `default` is the
+  // commonest source), so the read is legal to compile and the compiler emitted the unassigned path
+  // faithfully.
+  //
+  // "SOLE WRITER", not merely "owns the storage" — the two came apart in review and the difference
+  // is a miscompile. A frame the function owns can still be written by someone else once an address
+  // into it escapes to a callee: the callee fills a wider object than any in-function access
+  // reveals, and its value reads back at a slot no store of ours reaches. Whoever mints an `undef`
+  // owes the retraction on escape (frontend/thumb.ts, after the frame-object audit).
   //
   // WHY IT IS AN OPCODE AND NOT A LIVE-IN. Braun's construction resolves a read with no reaching
   // definition to a live-in, and a live-in of the entry block is a PARAMETER — which for a register

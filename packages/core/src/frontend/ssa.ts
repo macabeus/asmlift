@@ -68,11 +68,19 @@ export interface SsaBuilder {
 // a key read with no reaching def becomes a function PARAMETER by the live-in path below — which is
 // how both of those capabilities get their parameters without a new opcode or pass.
 /** What a def-less live-in of `key` MEANS. Only the frontend can say: the answer depends on the
- *  frame model, and the frame model is per-ISA. `'undef'` asserts the key names storage this
- *  function owns, so nothing incoming can be arriving there; `'param'` leaves the old reading, and
- *  a stack slot that takes it still trips `finish`'s postcondition. Defaulting to `'param'` keeps a
- *  frontend that has not made the argument declining exactly as it did before. */
-export type LiveInKind = 'param' | 'undef';
+ *  frame model, and the frame model is per-ISA.
+ *
+ *  `'param'` — an incoming argument; the ordinary Braun live-in.
+ *  `'undef'`  — an uninitialised local. ASSERTS SOMETHING STRONGER THAN OWNERSHIP: that this
+ *               function's own stores are the ONLY writer of that storage. Owning the frame is not
+ *               enough — if an address into it escapes to a callee, "no store reaches" stops
+ *               implying "nobody wrote it", and RETRACTING on escape is the frontend's obligation
+ *               (frontend/thumb.ts does it after the frame-object audit).
+ *  `'refuse'` — neither, and the frontend says so itself rather than leaving a postcondition to
+ *               recognise its key spelling.
+ *
+ *  Defaults to `'param'` for every key, which is Braun unmodified. */
+export type LiveInKind = 'param' | 'undef' | 'refuse';
 
 export function makeSsaBuilder(
   name: string,
@@ -152,7 +160,14 @@ export function makeSsaBuilder(
       // FIFTH ARGUMENT — so it must keep declining. Asking the frontend is the whole point: deciding
       // this here by prefix turned that decline into a signature with three parameters missing and
       // the caller's argument replaced by an uninitialised local, which compiles and is wrong.
-      if (liveInKind(reg) === 'undef') {
+      const kind = liveInKind(reg);
+      if (kind === 'refuse') {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': ${reg} is read on a path that never stores it ` +
+            `(partially-initialised local, or storage this function does not own) — not modelled`,
+        );
+      }
+      if (kind === 'undef') {
         const op = mkOp('undef', { results: [mkValue(T.unk(32))], attrs: { key: reg } });
         irBlocks[b].ops.unshift(op); // ahead of everything in a block that nothing precedes
         defs[b].set(reg, op.results[0]);
@@ -316,10 +331,14 @@ export function makeSsaBuilder(
       // semantic postcondition, and a postcondition enforced by convention is not enforced.
       for (const p of irBlocks[0].params) {
         const key = paramReg.get(p) ?? phiKey.get(p);
-        if (key?.startsWith(SLOT_PREFIX)) {
+        // The SAME predicate the mint site used, so the two can never disagree. It also means this
+        // file no longer knows that `sp@` denotes anything: the rule that a slot may not leave as a
+        // parameter is the FRONTEND's, stated by whoever owns the frame model, and asserted here
+        // over the finished function where a per-read test cannot be total.
+        if (key !== undefined && liveInKind(key) !== 'param') {
           throw new FrontendUnsupportedError(
-            `cannot lift '${name}': stack slot ${key} is read on a path that never stores it ` +
-              `(partially-initialised local) — not modelled`,
+            `cannot lift '${name}': ${key} is read on a path that never stores it ` +
+              `(partially-initialised local, or storage this function does not own) — not modelled`,
           );
         }
       }

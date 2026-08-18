@@ -256,12 +256,22 @@ reaching definition to a live-in, and a live-in of the entry block is a _paramet
 function allocated, that is a fabricated argument standing in for uninitialised stack. There was no
 third answer, so the frontend could only decline. `undef` is what that decline was standing in for.
 
-It does **not** clear "the differ can prove the result matches". The rows it lights up
-(`uninit_join`, `uninit_sw`, `uninit_spill`) move from `declined` to a nonmatch, not to a match —
-the remaining distance is a second, separate gap: the same shape in a _register_ rather than a
-slot, which cannot be classified without either prototype knowledge or prologue-save elision.
-Recorded here rather than glossed, because "declined → compilable C" is real progress and is also
-weaker than what `aload`/`astore` had to show.
+It does **not** clear "the differ can prove the result matches", and the honest size of the payoff
+is smaller than the first draft of this section claimed. Measured across all 755 rows, **exactly one
+moved**: `synthetic:uninit_spill:agbcc`, `declined → nonmatch` at score 84. Of the other rows in
+that family, `uninit_sw:agbcc` was already a nonmatch and `uninit_join:agbcc` was already a byte
+**match** — and the reason that one matches is instructive, because it is the gap `undef` does not
+close: its fabricated parameter happens to land in the register the local occupied anyway, so it
+matches with an arity the source never had. That register-half fabrication is untouched here and is
+still silent. The remaining distance is a second, separate capability — the same shape in a
+_register_ rather than a slot — which cannot be classified without either prototype knowledge or
+prologue-save elision.
+
+The envelope is narrow, and worth stating in one sentence: **on Thumb, a word-wide slot strictly
+below the measured local area, which some store reaches but not on every path, in a function where
+no frame address escapes.** The last clause is a second function-wide condition, established after
+the fact by the frame-object audit rather than at the mint site — an escaped address means a callee
+may write any frame offset, so "no store of ours reaches it" stops implying "nobody wrote it".
 
 The reusable lesson is where the decision lives, not the op. The first version decided "is this
 storage the function owns?" in the shared SSA builder by the key's spelling (`sp@…`). That is
@@ -270,7 +280,10 @@ depends on the _frame model_, which is per-frontend. Thumb had earned it (it bou
 `off < localArea` and keys incoming stack arguments separately); MIPS had not, and its `sp@` reaches
 O32's caller-owned argument home area — so the shared rule silently rewrote a fifth argument as an
 uninitialised local on a function that used to decline. The op was fine; the _predicate's owner_ was
-wrong. It is now a frontend-supplied policy, defaulting to the old refusal.
+wrong. It is now a frontend-supplied policy (`LiveInKind`), and — the part worth copying — the
+POSTCONDITION consults the same function, so the two cannot drift apart and the shared builder no
+longer knows that `sp@` denotes anything. Each frontend states its own answer: Thumb `'undef'`,
+MIPS `'refuse'` with its own reason, PPC never mints such a key at all.
 
 The through-line, from the first frontend to the latest: a level is a promise the code keeps, not
 a label it wears — and asmlift only makes the promise once it has something to put behind it.
