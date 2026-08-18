@@ -118,6 +118,28 @@ export const OPCODES = {
   // "the audit ran" a verifier-checkable fact instead of a convention: a frontend that emits a
   // laddr and skips the audit fails verify loudly instead of rendering `&undefined`.
   laddr: { operands: 0, results: 1, requiredAttrs: ['off', 'width', 'signed'] },
+  // An UNDEFINED value: storage whose ONLY writer is this function's own stores, read on a path
+  // where none of them ran. The C declared a local with no initialiser and assigned it only inside
+  // some arms of a conditional or `switch` (a `switch` with no `default` being the commonest
+  // source), so the read is legal to compile and the compiler emitted the unassigned path faithfully.
+  //
+  // SOLE WRITER, not merely "owns the storage": a frame the function owns can still be written by
+  // someone else once an address into it escapes to a callee, which fills a wider object than any
+  // in-function access reveals. Whoever mints an `undef` owes the retraction on escape
+  // (frontend/thumb.ts, after the frame-object audit).
+  //
+  // An opcode rather than a live-in because Braun's construction resolves a def-less read to a
+  // live-in, and a live-in of the entry block is a PARAMETER — right for a register, a fabricated
+  // argument for storage the function ALLOCATED. `frontend/ssa.ts` mints it where the partition
+  // says the storage is a local.
+  //
+  // Operand-free and pure like `laddr`, and out of raise/gvn.ts's NUMBERABLE set — where numbering
+  // it would be VACUOUS rather than harmful, since two undefs in one function always carry
+  // different keys. "Same key, therefore same value" is empty for a value that has none.
+  //
+  // `key` names the storage (`sp@0`); the structurer reads it to name the local (`uninit_sp0`) and
+  // emits NO assignment — that absence is the recovery.
+  undef: { operands: 0, results: 1, requiredAttrs: ['key'] },
   // --- black-box escape hatch (keeps lifting total) ---
   // `effects: true`: an instruction asmlift could not model may do anything — write memory, trap,
   // touch a system register — and `results[0]` is only the part we can name. So a dead `opaque` is

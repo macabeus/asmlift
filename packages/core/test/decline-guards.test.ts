@@ -201,8 +201,16 @@ test('MIPS: sp accesses outside the word-slot model decline, never a bogus slot'
   // whether a store reaches on SOME path, so a slot stored on one arm of a diamond and reloaded at
   // the join passes it. readVar then recurses into the unstored predecessor and mints an entry
   // parameter FOR THE SLOT — this one-argument function came out as `s32 f(s32 a0, s32 a1)` with
-  // `a1` standing in for uninitialised stack. Both frontends now assert the symptom at the same
-  // boundary (frontend/ssa.ts assertNoSlotEscaped), which is total where a per-read test cannot be.
+  // `a1` standing in for uninitialised stack. Both frontends assert the symptom at the same
+  // boundary (frontend/ssa.ts `finish`), which is total where a per-read test cannot be.
+  //
+  // THUMB NOW RECOVERS THIS SHAPE as an uninitialised local (`undef`) and MIPS DELIBERATELY DOES
+  // NOT, which is the interesting part. The recovery needs "nothing incoming can reach this key",
+  // and only Thumb has proved it: it bounds a slot by `off < localArea` and keys incoming stack
+  // arguments separately. MIPS applies no frame bound, so `sp@40` here could equally be O32's
+  // caller-owned home slot for a FIFTH ARGUMENT — recovering it would emit a signature with three
+  // parameters missing and the caller's argument replaced by an uninitialised local. Compilable,
+  // plausible, wrong. Until the O32 home-area rule exists, the decline is the honest answer.
   const diamond = [
     '00000000 <f>:',
     '   0:\taddiu\tsp,sp,-24',
@@ -216,11 +224,35 @@ test('MIPS: sp accesses outside the word-slot model decline, never a bogus slot'
     '  20:\taddiu\tsp,sp,24',
     '',
   ].join('\n');
-  expect(() => decompile('f', diamond, MIPS_IDO)).toThrow(/stack slot sp@16 is read on a path that never stores it/);
+  expect(() => decompile('f', diamond, MIPS_IDO)).toThrow(/sp@16 is read on a path that never stores it/);
+  // the ARGUMENT-HOME case that makes the decline necessary rather than merely conservative: with a
+  // 24-byte frame, `40(sp)` is ABOVE it — the caller's area, where a def-less read is argument 5.
+  const homeSlot = [
+    '00000000 <f>:',
+    '   0:\taddiu\tsp,sp,-24',
+    '   4:\tbeqz\ta0,14 <f+0x14>',
+    '   8:\tnop',
+    '   c:\tsw\ta1,40(sp)',
+    '  10:\tnop',
+    '  14:\tlw\tv0,40(sp)',
+    '  18:\taddiu\tv0,v0,1',
+    '  1c:\tjr\tra',
+    '  20:\taddiu\tsp,sp,24',
+    '',
+  ].join('\n');
+  expect(() => decompile('f', homeSlot, MIPS_IDO)).toThrow(/sp@40 is read on a path that never stores it/);
   // …and the same fabrication when the entry block is ITSELF the loop header, where the slot
   // arrives as a PHI rather than a live-in. `paramReg` only covers live-ins, so the escape check
   // was blind to it and the phantom parameter survived — on MIPS, which has no preheader to make
   // the entry predecessor-free. The check reads phi keys too.
+  //
+  // Still declines, NOT YET rather than by design: it is the same C as the diamond above, and only
+  // where the value shows up differs. `undef` is minted at the predecessor-less live-in site, and
+  // here there is none — the entry has the latch as a predecessor, so the slot arrives as a phi and
+  // only the postcondition sees it. An implementation seam, not a semantic one. Closing it means
+  // replacing that entry phi with an undef and stripping the paired arg from every predecessor
+  // edge, which `simplifyTrivialPhis` already does; it would also need a frame partition, which
+  // this fixture's MIPS does not have.
   const entryLoop = [
     '00000000 <f>:',
     '   0:\taddiu\tsp,sp,-24',
@@ -235,7 +267,7 @@ test('MIPS: sp accesses outside the word-slot model decline, never a bogus slot'
     '  24:\tnop',
     '',
   ].join('\n');
-  expect(() => decompile('f', entryLoop, MIPS_IDO)).toThrow(/stack slot sp@16 is read on a path that never stores it/);
+  expect(() => decompile('f', entryLoop, MIPS_IDO)).toThrow(/sp@16 is read on a path that never stores it/);
 });
 
 // ── Input-format boundary (frontend/format.ts) ────────────────────────────────────────────

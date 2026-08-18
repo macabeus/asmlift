@@ -418,24 +418,127 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     expect(() => decompile('f', shifts, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
   });
 
-  test('a slot stored on only ONE arm of a branch declines, it does not invent a parameter', () => {
-    // The per-read guard asks whether a store reaches on SOME path, and a diamond defeats it:
-    // stored on one arm, reloaded at the join. readVar then recurses into the unstored predecessor
-    // and Braun's live-in path mints an entry parameter for the SLOT — so a one-argument function
-    // came out as `s32 f(s32 a0, s32 a1) { if (a0 != 0) a1 = a0; return a1 + 1; }`, where `a1`
-    // stands in for uninitialised stack. Caught at the boundary instead: a slot may never leave the
-    // frontend as a parameter (frontend/ssa.ts assertNoSlotEscaped).
+  test('a slot stored on only ONE arm of a branch is an uninitialised LOCAL, not a parameter', () => {
+    // The shape: stored on one arm, reloaded at the join, so the other arm reaches the read with
+    // nothing written. Braun's live-in path used to mint an entry parameter for the SLOT — a
+    // one-argument function came out as `s32 f(s32 a0, s32 a1) { … return a1 + 1; }`, where `a1`
+    // stands in for uninitialised stack — and the frontend refused rather than emit that.
+    //
+    // It no longer has to: a `sp@` key CANNOT be an incoming argument (an incoming stack argument
+    // is keyed `@sarg<k>`, see stackArgKey — it sits at or above this frame, not below it), so the
+    // live-in is storage this function owns that nobody wrote. `undef` names exactly that, and the
+    // recovery is the bare declaration.
     const diamond =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tcmp\tr0, #0\n\tbeq\t.L2\n\tstr\tr0, [sp]\n' +
       '.L2:\n\tldr\tr1, [sp]\n\tadd\tr0, r1, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r2}\n\tbx\tr2\n';
-    expect(() => decompile('f', diamond, ARMV4T_AGBCC)).toThrow(
-      /stack slot sp@0 is read on a path that never stores it/,
+    // ONE parameter — the arity is the assertion. `uninit0` is declared and never assigned.
+    expect(decompile('f', diamond, ARMV4T_AGBCC).source).toBe(
+      's32 f(s32 a0) {\n    s32 uninit_sp0;\n    if (a0 == 0) a0 = uninit_sp0;\n    return a0 + 1;\n}\n',
     );
-    // control: store it on BOTH arms and the same shape lifts, with no phantom parameter
+    // control: store it on BOTH arms and there is nothing undefined to declare
     const both =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tcmp\tr0, #0\n\tbeq\t.L2\n\tstr\tr0, [sp]\n' +
       '.L2:\n\tldr\tr1, [sp]\n\tadd\tr0, r1, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r2}\n\tbx\tr2\n';
     expect(decompile('f', both, ARMV4T_AGBCC).source).toBe('s32 f(s32 a0) {\n    return a0 + 1;\n}\n');
+    // …and the refusal that survives, NOT YET rather than by design. A slot no store reaches
+    // ANYWHERE is the same C as the diamond above; the reasons one reaches for — frame arithmetic,
+    // an address-taken object — are both caught elsewhere (`stack pointer used as data`, and the
+    // `laddr` audit). What decides it is that the gate sits at the LOAD, before the slot is keyed
+    // at all. Closing it means moving that gate, not finding a new argument.
+    const unstored =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tldr\tr0, [sp]\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(() => decompile('f', unstored, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+  });
+
+  test('two unstored slots are two DISTINCT uninitialised locals, never merged', () => {
+    // The property that keeps `undef` honest as a representation: two uninitialised locals in the
+    // source are two variables, the compiler allocated them separately, and emitting one would
+    // re-spell the function as one the compiler never saw.
+    //
+    // Pins the STRUCTURER, not raise/gvn.ts's NUMBERABLE set: adding `undef` there leaves this
+    // green, because that pass numbers by attribute equality and these two undefs carry different
+    // keys. Numbering `undef` is a no-op, not a hazard, so no test can hold that line by failing.
+    const two =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tcmp\tr0, #0\n\tbeq\t.L2\n\tstr\tr0, [sp]\n\tstr\tr0, [sp, #4]\n' +
+      '.L2:\n\tldr\tr1, [sp]\n\tldr\tr2, [sp, #4]\n\tadd\tr0, r1, r2\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r3}\n\tbx\tr3\n';
+    // …and the names come from the KEYS, so each one points at the frame slot it stands for
+    expect(decompile('f', two, ARMV4T_AGBCC).source).toBe(
+      's32 f(s32 a0) {\n    s32 v0;\n    s32 uninit_sp4;\n    s32 uninit_sp0;\n' +
+        '    if (a0 == 0) {\n        v0 = uninit_sp4;\n        a0 = uninit_sp0;\n    } else {\n        v0 = a0;\n    }\n' +
+        '    return a0 + v0;\n}\n',
+    );
+  });
+
+  test('an ESCAPED frame address retracts the undef argument — a callee may have written the slot', () => {
+    // `undef` rests on "no store reaches this slot, therefore nobody wrote it", which holds only
+    // while this function is the sole writer of its frame. `g(&sp0)` breaks that: the frame-object
+    // audit bounds what WE access through the object (one word here), not what `g` does, so the
+    // real object can be wider — `struct P p; g(&p);` reading only `p.x` — and `g` fills the later
+    // words. Reading one back at a slot no store of ours reaches is reading the CALLEE's value, and
+    // declaring it uninitialised would spell that value as garbage.
+    const escaped =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tmov\tr4, sp\n\tmov\tr0, r4\n\tbl\tg\n' +
+      '\tldr\tr1, [r4]\n\tcmp\tr1, #0\n\tbeq\t.L2\n\tstr\tr1, [sp, #4]\n' +
+      '.L2:\n\tldr\tr2, [sp, #4]\n\tadd\tr0, r1, r2\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r3}\n\tbx\tr3\n';
+    expect(() => decompile('f', escaped, ARMV4T_AGBCC)).toThrow(
+      /address-taken stack local — the captured address escapes/,
+    );
+    // DISCRIMINATING CONTROL — the one that makes the title true. The same captured address,
+    // dereferenced only in-function, with NO call anywhere: nobody else can reach the frame, so
+    // the undef argument still holds and this LIFTS. Keyed on "a laddr exists" instead, the guard
+    // declines this and names a callee the input does not contain — which is what the fixture
+    // separates: without it the test cannot tell capture from escape.
+    const captured =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tmov\tr4, sp\n\tldr\tr1, [r4]\n\tcmp\tr1, #0\n\tbeq\t.L2\n\tstr\tr1, [sp, #4]\n' +
+      '.L2:\n\tldr\tr2, [sp, #4]\n\tadd\tr0, r1, r2\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r3}\n\tbx\tr3\n';
+    expect(decompile('f', captured, ARMV4T_AGBCC).source).toContain('uninit_sp4');
+    // POSITIVE CONTROL: the same undefined slot with no address taken at all still recovers, so the
+    // guard is the escape and not something incidental about the shape.
+    const noEscape =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tstr\tr0, [sp]\n\tldr\tr1, [sp]\n\tcmp\tr1, #0\n\tbeq\t.L2\n\tstr\tr1, [sp, #4]\n' +
+      '.L2:\n\tldr\tr2, [sp, #4]\n\tadd\tr0, r1, r2\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r3}\n\tbx\tr3\n';
+    expect(decompile('f', noEscape, ARMV4T_AGBCC).source).toContain('uninit_sp4');
+  });
+
+  test('a push AFTER the reservation slides the slot window onto the pushed words', () => {
+    // `localArea` is measured by a walk that SKIPS push/pop — right for the callee-saved block,
+    // which sits above the local area — while the depth arithmetic `argIndex` uses counts push at
+    // 4 bytes per register. A push after the reservation therefore moves sp without moving
+    // `localArea`, and `[0, localArea)` stops naming the reserved area and starts naming the
+    // PUSHED words. Those are written, by an instruction that is dataflow-transparent, so nothing
+    // downstream can tell — and with `undef` in the model that stopped being a lost slot and became
+    // a miscompile: [sp,#0] holds a0 on BOTH paths here, so the machine returns 0 when a0 == 0
+    // while the emitted C returned `0 + garbage`. Not corpus-reachable — agbcc pushes before it
+    // reserves — which is exactly why only a probe finds it.
+    const pushAfter =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tpush\t{r0}\n\tcmp\tr0, #0\n\tbeq\t.L2\n\tstr\tr0, [sp]\n' +
+      '.L2:\n\tldr\tr1, [sp]\n\tadd\tr0, r0, r1\n\tadd\tsp, sp, #0xc\n\tpop\t{r4}\n\tpop\t{r3}\n\tbx\tr3\n';
+    expect(() => decompile('f', pushAfter, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+    // POSITIVE CONTROL — the same function with the push BEFORE the reservation, which is what real
+    // agbcc emits, still models its slot. Without this the test would pass with the slot model
+    // disabled outright.
+    const pushBefore =
+      'f:\n\tpush\t{r4, lr}\n\tpush\t{r0}\n\tadd\tsp, sp, #-0x8\n\tcmp\tr0, #0\n\tbeq\t.L2\n\tstr\tr0, [sp]\n' +
+      '.L2:\n\tldr\tr1, [sp]\n\tadd\tr0, r0, r1\n\tadd\tsp, sp, #0xc\n\tpop\t{r4}\n\tpop\t{r3}\n\tbx\tr3\n';
+    expect(decompile('f', pushBefore, ARMV4T_AGBCC).source).toContain('uninit_sp0');
+  });
+
+  test('a word slot may not straddle the top of the reserved area', () => {
+    // The window test bounds the slot's END (`off + 4 <= localArea`), not its start. With a
+    // localArea that is not a multiple of 4 a word at the top spans past it, and the bytes beyond
+    // are the callee-saved block the epilogue pops back. Pre-existing and playground-only — no
+    // valid ARMv4T encoding produces a non-multiple-of-4 sp adjust — but it is the same class as
+    // the push hazard above (the window not being where the model thinks), so it is closed too.
+    const straddle =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x6\n\tcmp\tr0, #0\n\tbeq\t.L2\n\tstr\tr0, [sp, #4]\n' +
+      '.L2:\n\tldr\tr1, [sp, #4]\n\tadd\tr0, r0, r1\n\tadd\tsp, sp, #0x6\n\tpop\t{r4}\n\tpop\t{r3}\n\tbx\tr3\n';
+    expect(() => decompile('f', straddle, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+    // POSITIVE CONTROL: one more reserved byte and the same word fits, so the bound is the end of
+    // the slot and not the offset being nonzero.
+    const fits =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tcmp\tr0, #0\n\tbeq\t.L2\n\tstr\tr0, [sp, #4]\n' +
+      '.L2:\n\tldr\tr1, [sp, #4]\n\tadd\tr0, r0, r1\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r3}\n\tbx\tr3\n';
+    expect(decompile('f', fits, ARMV4T_AGBCC).source).toContain('uninit_sp4');
   });
 
   test('the OUTGOING argument area is not a local, however far inside the frame it sits', () => {

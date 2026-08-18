@@ -517,6 +517,17 @@ export function lift(
     }
   });
 
+  // NO FRAME PARTITION IS CLAIMED, so every def-less slot read refuses (frontend/ssa.ts,
+  // FrameModel). This frontend has no frame bound at all — `addiu sp,sp,±N` is transparent and
+  // every word sp-relative access becomes `sp@<rawOff>` — so its slot keys span O32's CALLER-owned
+  // register-parameter home area and the incoming stack arguments above it, where a def-less read
+  // is argument 5, not an uninitialised local.
+  //
+  // Claiming one needs the frame SIZE those offsets are measured against, which is not computed
+  // here, plus ensureParam for the register half. The ranges themselves are known: O32 reserves
+  // `[0,16)` as the caller-owned home area (in NEITHER range — caller-owned, but not an argument)
+  // with stack arguments from 16 up, which is what `mips32be.cspec`'s `<localrange>` and stack
+  // `<pentry offset="16">` encode.
   const ssa = makeSsaBuilder(name, blocks.length, preds);
   const { irBlocks, readVar, writeVar, paramReg } = ssa;
   const RET = target.returnReg;

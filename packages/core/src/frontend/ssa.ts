@@ -15,7 +15,7 @@
 // computation via read/writeVar, push its terminator op last (successors referencing
 // `irBlocks`, args left empty — phi wiring appends them), then call `markFilled(b)`. When all
 // blocks are filled, call `finish()` to remove trivial phis.
-import { Block, Fn, Op, Value, mkValue } from '../ir/core';
+import { Block, Fn, Op, Value, mkOp, mkValue } from '../ir/core';
 import { simplifyTrivialPhis } from '../ir/simplify';
 import { T } from '../ir/types';
 import { FrontendUnsupportedError } from './errors';
@@ -67,7 +67,36 @@ export interface SsaBuilder {
 // A virtual key must be outside its ISA's register grammar so it cannot collide with a real one, and
 // a key read with no reaching def becomes a function PARAMETER by the live-in path below — which is
 // how both of those capabilities get their parameters without a new opcode or pass.
-export function makeSsaBuilder(name: string, blockCount: number, preds: number[][]): SsaBuilder {
+/** How this function's frame is PARTITIONED, in slot-key coordinates. RANGES rather than a verdict,
+ *  so the classification below is checkable here: a frontend that is wrong about its own frame gets
+ *  refused instead of believed, and a range that collapses to empty (an unmeasurable frame) stops
+ *  claiming anything on its own. Ghidra carries the same partition as compiler-spec data
+ *  (`<localrange>`, stack `<pentry>`) read by architecture-neutral code. */
+export interface FrameModel {
+  /** Storage this function owns as LOCALS ⇒ a def-less read is an uninitialised local. `[from, to)`.
+   *
+   *  Asserts more than ownership: that this function's own stores are the ONLY writer. Once an
+   *  address into the frame escapes to a callee that stops holding, and retracting on escape is the
+   *  frontend's obligation (frontend/thumb.ts, after the frame-object audit). */
+  ownedLocals?: { from: number; to: number };
+  /** Storage the CALLER wrote — incoming stack arguments ⇒ a def-less read is a parameter.
+   *  `[from, to)`. O32's register-parameter home area belongs to NEITHER range: caller-owned, but
+   *  not an argument. */
+  callerParams?: { from: number; to: number };
+}
+
+export function makeSsaBuilder(
+  name: string,
+  blockCount: number,
+  preds: number[][],
+  /** A supplier because the partition is MEASURED, not declared: Thumb's local area comes from a
+   *  prologue walk that runs after this call. Evaluated once, on first use. Omitted ⇒ no partition
+   *  is claimed, so every slot refuses; register keys are unaffected. */
+  frameOf: () => FrameModel = () => ({}),
+): SsaBuilder {
+  let frameMemo: FrameModel | null = null;
+  const frame = (): FrameModel => (frameMemo ??= frameOf());
+  const inRange = (off: number, r?: { from: number; to: number }) => r !== undefined && off >= r.from && off < r.to;
   const irBlocks: Block[] = Array.from({ length: blockCount }, () => ({ params: [] as Value[], ops: [] }));
   const fn: Fn = { name, blocks: irBlocks };
 
@@ -128,7 +157,25 @@ export function makeSsaBuilder(name: string, blockCount: number, preds: number[]
     // manufacture a join (and a phi) where there is none.
     const ps = distinctPreds(b);
     if (ps.length === 0) {
-      // live-in with no predecessor: an incoming argument register → function parameter.
+      // A live-in with no predecessor is a value this function never produced: an incoming argument,
+      // or storage it allocated and never wrote. A register is the first; a slot is classified by
+      // WHERE IT IS, against the frontend's declared partition. The key spelling cannot decide it —
+      // `sp@40` is a local on one ABI and the caller's fifth argument on another — so a slot in
+      // neither range is refused rather than guessed.
+      const off = slotKeyOffset(reg);
+      if (off !== null && !inRange(off, frame().ownedLocals) && !inRange(off, frame().callerParams)) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': ${reg} is read on a path that never stores it, and lies outside ` +
+            `this function's frame partition (uninitialised local, or storage it does not own) — not modelled`,
+        );
+      }
+      if (off !== null && inRange(off, frame().ownedLocals)) {
+        const op = mkOp('undef', { results: [mkValue(T.unk(32))], attrs: { key: reg } });
+        irBlocks[b].ops.unshift(op); // ahead of everything in a block that nothing precedes
+        defs[b].set(reg, op.results[0]);
+        return op.results[0];
+      }
+      // an incoming argument register → function parameter.
       // If one was already asserted for this key (ensureParam), adopt it — minting a second
       // parameter for the same key would put the key in the signature twice.
       const obliged = obligedParams[b].get(reg);
@@ -286,10 +333,15 @@ export function makeSsaBuilder(name: string, blockCount: number, preds: number[]
       // semantic postcondition, and a postcondition enforced by convention is not enforced.
       for (const p of irBlocks[0].params) {
         const key = paramReg.get(p) ?? phiKey.get(p);
-        if (key?.startsWith(SLOT_PREFIX)) {
+        // The SAME rule the mint site used, over the same ranges, so the two cannot disagree. A
+        // slot that reached the signature is either owned storage (which should have become an
+        // `undef`) or unclassified — both are bugs, and this is where a per-read test cannot be
+        // total, so it is asserted over the finished function.
+        const koff = key === undefined ? null : slotKeyOffset(key);
+        if (koff !== null && !inRange(koff, frame().callerParams)) {
           throw new FrontendUnsupportedError(
-            `cannot lift '${name}': stack slot ${key} is read on a path that never stores it ` +
-              `(partially-initialised local) — not modelled`,
+            `cannot lift '${name}': ${key} is read on a path that never stores it ` +
+              `(partially-initialised local, or storage this function does not own) — not modelled`,
           );
         }
       }
@@ -413,10 +465,15 @@ export function trimClobberedCallArgs(inp: CallArgTrim): void {
 }
 
 /** The stack-slot key both the MIPS and Thumb frontends use for a word-sized local in the
- *  function's own frame. Shared so the two spell it identically and `assertNoSlotEscaped` can
+ *  function's own frame. Shared so the two spell it identically and the frame-partition rule can
  *  recognise either frontend's slots. See the virtual-key note in the module header. */
 const SLOT_PREFIX = 'sp@';
 export const stackSlotKey = (off: number): string => `${SLOT_PREFIX}${off}`;
+/** The byte offset a slot key names, or null if `key` is not a slot key at all (an ordinary
+ *  register). The grammar stays owned by this module — {@link FrameModel} is expressed in the same
+ *  coordinate, so the classification rule can be generic. */
+export const slotKeyOffset = (key: string): number | null =>
+  key.startsWith(SLOT_PREFIX) ? Number(key.slice(SLOT_PREFIX.length)) : null;
 
 /** Order the TRUE entry block's parameters by ABI argument register, so downstream naming
  *  (`a0`, `a1`, …) matches the calling convention, not first-read order (a callee-saved copy can
