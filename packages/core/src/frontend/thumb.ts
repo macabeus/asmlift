@@ -1329,17 +1329,11 @@ export function lift(
   }
 
   // --- ISA-neutral SSA construction (shared Braun builder) ---
-  // THE FRAME PARTITION, as ranges rather than a verdict (frontend/ssa.ts, FrameModel). `[0,
-  // localArea)` is the explicitly reserved local area measured by the prologue walk, and it is the
-  // whole of what this function owns: an incoming stack argument is keyed `@sarg<k>` rather than
-  // `sp@<off>` precisely because it sits at or above this frame, so `callerParams` is empty here.
-  //
-  // Passing the NUMBER rather than the conclusion is the point. `localArea` is 0 whenever the walk
-  // cannot measure the frame — an unmodelled sp write, or a `push` after the reservation — and an
-  // empty range then refuses every slot on its own, instead of a constant `'undef'` continuing to
-  // assert a bound that had silently stopped holding. `slotOff` already applies the same bound when
-  // it mints keys; this is the independent check, which is the arrangement this module asks for
-  // everywhere else ("a postcondition enforced by convention is not enforced").
+  // THE FRAME PARTITION (frontend/ssa.ts, FrameModel). `[0, localArea)` is the whole of what this
+  // function owns: an incoming stack argument is keyed `@sarg<k>` rather than `sp@<off>` precisely
+  // because it sits at or above this frame, so `callerParams` is empty. `localArea` is 0 whenever
+  // the prologue walk cannot measure the frame, and the empty range then refuses every slot —
+  // `slotOff` applies the same bound when minting keys, so this is the independent check.
   const ssa = makeSsaBuilder(name, asmBlocks.length, preds, () => ({ ownedLocals: { from: 0, to: localArea } }));
   const { fn, irBlocks, readVar, writeVar, paramReg } = ssa;
 
@@ -1894,11 +1888,9 @@ export function lift(
   // instruction that touches the frame (or the whole block if it never does). A frame the walk
   // cannot measure yields 0, which disables every slot (`off + 4 <= localArea` is then false).
   //
-  // NOT the same walk `argIndex` uses, and this comment used to claim it was. They disagree on
-  // exactly one instruction: `makeFrameWalk.delta` counts `push` at 4 bytes per register, this one
-  // skips it. That is deliberate — the callee-saved block sits ABOVE the local area, so the local
-  // area is measured from below it — but it means a push after the reservation moves sp without
-  // moving this number, which is the hazard the push/pop arm below now refuses.
+  // NOT the same walk `argIndex` uses: `makeFrameWalk.delta` counts `push` at 4 bytes per register,
+  // this one skips it, because the callee-saved block sits ABOVE the local area. The cost of that
+  // difference is the push/pop arm below.
   // How much sp moves for `add/sub sp, #imm`, positive = sp RISES (frame shrinks). null if not that
   // shape. Only used to recognise a release; the authoritative depth arithmetic is makeFrameWalk's.
   const spAdjust = (ins: Instr): number | null => {
@@ -1943,21 +1935,16 @@ export function lift(
         reserved -= d; // d > 0 = sp rises = the frame shrinks
         reservedYet ||= reserved > 0;
       } else if (x.mnemonic === 'push' || x.mnemonic === 'pop') {
-        // A push/pop BEFORE any reservation is the callee-saved block, and the local area is
-        // measured below it — the ordinary agbcc prologue, and why these are skipped at all.
-        // AFTER one, it slides sp under the window just measured: `localArea` does not count push
-        // bytes (this walk skips them) while the depth arithmetic `argIndex` uses DOES, so
-        // `[0, localArea)` stops naming the reserved area and starts naming the pushed words.
-        // Those words ARE written — by the push, which is dataflow-transparent — so nothing
-        // downstream can tell. With `undef` in the model that is a silent miscompile and not
-        // merely a lost slot: `push {r4,lr}; add sp,#-8; push {r0}; …; ldr r1,[sp]` reads back the
-        // pushed `r0` on every path, and the def-less-read shape rendered it as an uninitialised
-        // local — the machine returns 0 where the C returns garbage.
-        //
-        // Poisoned to 0 (every slot disabled) rather than corrected by subtracting the push bytes:
-        // the same rule the sp-write arm below follows, and a measurement this walk cannot make
-        // should not be guessed. Costs nothing on real codegen — agbcc pushes before it reserves,
-        // in all 2343 Thumb functions across the corpus.
+        // BEFORE any reservation this is the callee-saved block, measured from below — the
+        // ordinary agbcc prologue, and why push/pop are skipped at all. AFTER one it slides sp
+        // under the window just measured, so `[0, localArea)` stops naming the reserved area and
+        // starts naming the pushed words. Those words ARE written, by an instruction that is
+        // dataflow-transparent, so nothing downstream can tell:
+        // `push {r4,lr}; add sp,#-8; push {r0}; … ldr r1,[sp]` reads back the pushed `r0` on every
+        // path and the def-less shape renders it as an uninitialised local — 0 from the machine,
+        // garbage from the C. Poisoned to 0 rather than corrected by subtracting the push bytes,
+        // the same rule the sp-write arm follows. Not corpus-reachable — agbcc pushes before it
+        // reserves in all 2343 Thumb functions — which is why only a probe finds it.
         if (reservedYet) {
           return 0;
         }
@@ -2805,23 +2792,17 @@ export function lift(
           fail(`the object at [0,${width}) overlaps the SSA slot at [sp,#${off}] — one byte, two models`);
         }
       }
-      // AN ESCAPE RETRACTS THE UNDEF ARGUMENT. `undef` rests on "no store reaches this slot,
-      // therefore nobody wrote it", which holds only while this function's own stores are the ONLY
-      // writer of its frame. `escapes` is exactly when that stops being true — the address reached
-      // a callee, or was stored to memory for someone else to reach. This audit bounds what WE
-      // access through the object, not what they do, so a wider real object (`struct P p; g(&p);`
-      // where only `p.x` is read here) has its later words written by `g` and read back at a slot
-      // no store of ours reaches; declaring those uninitialised spells their value as garbage.
+      // AN ESCAPE RETRACTS THE UNDEF ARGUMENT. `undef` rests on this function's own stores being the
+      // ONLY writer of its frame, and `escapes` is exactly when that stops holding. The audit bounds
+      // what WE access through the object, not what a callee does, so a wider real object
+      // (`struct P p; g(&p);` where only `p.x` is read here) has its later words written by `g` and
+      // read back at a slot no store of ours reaches — declaring those uninitialised spells the
+      // callee's value as garbage. Function-wide, because the only width available is the one
+      // inferred from our own accesses, which is the number that is too small in this shape.
       //
-      // Function-wide, because an escaped address cannot be bounded to a range: the only width
-      // available is the one inferred from our own accesses, which is exactly the number that is
-      // too small in this shape. It costs nothing that used to work — every such function declined
-      // here before `undef` existed.
-      //
-      // Gated on `escapes`, NOT on "a laddr exists": an address CAPTURED and dereferenced only
-      // in-function cannot be written by anyone else, and the overlap check above already covers
-      // its aliasing. The first version keyed on capture and declined functions containing no call
-      // at all, naming a callee the input did not have.
+      // On `escapes` and not on "a laddr exists": an address captured and dereferenced only
+      // in-function cannot be written by anyone else, and the overlap check above covers its
+      // aliasing.
       if (escapes && irBlocks.some((blk) => blk.ops.some((op) => op.opcode === 'undef'))) {
         fail(
           'the captured address escapes, so a callee may write any frame offset and an unstored slot is not provably uninitialised',

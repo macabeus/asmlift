@@ -67,35 +67,21 @@ export interface SsaBuilder {
 // A virtual key must be outside its ISA's register grammar so it cannot collide with a real one, and
 // a key read with no reaching def becomes a function PARAMETER by the live-in path below — which is
 // how both of those capabilities get their parameters without a new opcode or pass.
-/** How this function's frame is PARTITIONED, in the frontend's own slot-key coordinate. Supplied
- *  per function, because one of the two ranges is measured rather than declared.
- *
- *  WHY NUMBERS AND NOT A VERDICT. The first version of this seam handed the builder a policy —
- *  `(key) => 'param' | 'undef' | 'refuse'` — and both frontends implemented it as a CONSTANT
- *  function of the key. What actually crossed the seam was one bit of ABI knowledge wearing a
- *  lambda, and the bit was unfalsifiable here: Thumb's answer was sound only because `slotOff`
- *  bounds keys to `off + 4 <= localArea` twelve hundred lines away, connected to the verdict by a
- *  COMMENT. This module refuses that arrangement elsewhere in as many words — "a postcondition
- *  enforced by convention is not enforced" — and the branch that introduced the policy had already
- *  shipped a bug in exactly that gap (a `push` after the reservation slid the window off the
- *  reserved area while the verdict kept saying `'undef'`). Ranges make the dependency an argument
- *  instead of a promise: the rule below is generic and shared, and a key outside every range is
- *  refused whatever the frontend believes.
- *
- *  The split follows Ghidra's compiler-spec model, where the same partition is declarative data
- *  (`<localrange>`, and stack `<pentry>` for the parameter side) consumed by architecture-neutral
- *  code — including the O32 detail that forced this design: its 16-byte register-parameter home
- *  area is caller-owned and is neither a local nor a stack parameter. */
+/** How this function's frame is PARTITIONED, in slot-key coordinates. RANGES rather than a verdict,
+ *  so the classification below is checkable here: a frontend that is wrong about its own frame gets
+ *  refused instead of believed, and a range that collapses to empty (an unmeasurable frame) stops
+ *  claiming anything on its own. Ghidra carries the same partition as compiler-spec data
+ *  (`<localrange>`, stack `<pentry>`) read by architecture-neutral code. */
 export interface FrameModel {
-  /** Storage this function owns as LOCALS, so a def-less read of one is an uninitialised local.
-   *  Half-open `[from, to)`. Asserting this asserts something STRONGER than ownership: that this
-   *  function's own stores are its only writer. Owning the frame is not enough — once an address
-   *  into it escapes to a callee, "no store reaches" stops implying "nobody wrote it", and
-   *  RETRACTING on escape stays the frontend's obligation (frontend/thumb.ts does it after the
-   *  frame-object audit). Omitted ⇒ empty, and every slot refuses. */
+  /** Storage this function owns as LOCALS ⇒ a def-less read is an uninitialised local. `[from, to)`.
+   *
+   *  Asserts more than ownership: that this function's own stores are the ONLY writer. Once an
+   *  address into the frame escapes to a callee that stops holding, and retracting on escape is the
+   *  frontend's obligation (frontend/thumb.ts, after the frame-object audit). */
   ownedLocals?: { from: number; to: number };
-  /** Storage the CALLER wrote: incoming stack arguments. A def-less read here is a parameter.
-   *  Half-open `[from, to)`. Omitted ⇒ empty. */
+  /** Storage the CALLER wrote — incoming stack arguments ⇒ a def-less read is a parameter.
+   *  `[from, to)`. O32's register-parameter home area belongs to NEITHER range: caller-owned, but
+   *  not an argument. */
   callerParams?: { from: number; to: number };
 }
 
@@ -103,12 +89,9 @@ export function makeSsaBuilder(
   name: string,
   blockCount: number,
   preds: number[][],
-  /** A SUPPLIER, not a value, because one of the ranges is MEASURED: Thumb's local area comes from
-   *  a prologue walk that runs after the builder is created, so the partition is not known yet at
-   *  this call. Evaluated once, on the first def-less live-in that needs it.
-   *
-   *  Omitted ⇒ no frame partition is claimed, so every stack slot read with no reaching definition
-   *  is refused. Register keys are unaffected and take the ordinary Braun live-in path. */
+  /** A supplier because the partition is MEASURED, not declared: Thumb's local area comes from a
+   *  prologue walk that runs after this call. Evaluated once, on first use. Omitted ⇒ no partition
+   *  is claimed, so every slot refuses; register keys are unaffected. */
   frameOf: () => FrameModel = () => ({}),
 ): SsaBuilder {
   let frameMemo: FrameModel | null = null;
@@ -174,22 +157,11 @@ export function makeSsaBuilder(
     // manufacture a join (and a phi) where there is none.
     const ps = distinctPreds(b);
     if (ps.length === 0) {
-      // A live-in with no predecessor is a value this function never produced. For a register that
-      // means an incoming argument (below); for storage the function ALLOCATED it means nobody wrote
-      // it on this path — an uninitialised local, which is a value we can now name.
-      //
-      // WHICH ONE IT IS, IS NOT DECIDABLE HERE. The key spelling does not carry it: `sp@<off>` means
-      // "storage this function owns" only if the frontend BOUNDED it that way, and only one does.
-      // Thumb keys incoming stack arguments separately (`@sarg<k>`) and admits a slot only while
-      // `off < localArea`, so its `sp@` really is below the frame. MIPS applies no frame bound at
-      // all — its `sp@` spans O32's caller-owned argument home area, where a def-less read is a
-      // FIFTH ARGUMENT — so it must keep declining. Asking the frontend is the whole point: deciding
-      // this here by prefix turned that decline into a signature with three parameters missing and
-      // the caller's argument replaced by an uninitialised local, which compiles and is wrong.
-      // ONE generic rule over the frontend's ranges. A register key is not a slot and takes the
-      // ordinary live-in path; a slot key is classified by WHERE IT IS, and a slot outside every
-      // declared range is refused — which is what makes the classification falsifiable here rather
-      // than a claim the frontend makes about itself.
+      // A live-in with no predecessor is a value this function never produced: an incoming argument,
+      // or storage it allocated and never wrote. A register is the first; a slot is classified by
+      // WHERE IT IS, against the frontend's declared partition. The key spelling cannot decide it —
+      // `sp@40` is a local on one ABI and the caller's fifth argument on another — so a slot in
+      // neither range is refused rather than guessed.
       const off = slotKeyOffset(reg);
       if (off !== null && !inRange(off, frame().ownedLocals) && !inRange(off, frame().callerParams)) {
         throw new FrontendUnsupportedError(

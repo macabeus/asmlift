@@ -254,11 +254,10 @@ and never will, but it is the loud-gap escape hatch — it exists to stop a func
 to be recovered code.) "Only writer" rather than "owns": the two
 came apart in review, and the escape clause below is the difference.
 
-It clears "cannot be expressed in the current one" — but the honest framing is narrower than the
-first draft of this section claimed, and the correction is the more useful fact. asmlift's builder
-had fused two questions, "is there a reaching definition?" and "is this a parameter?", so a def-less
-read had exactly two fates: a fabricated argument standing in for uninitialised stack, or a decline.
-That was asmlift's convention, **not** a property of the construction it cites.
+It clears "cannot be expressed in the current one", though narrowly. asmlift's builder had fused two
+questions — "is there a reaching definition?" and "is this a parameter?" — so a def-less read had
+exactly two fates: a fabricated argument standing in for uninitialised stack, or a decline. That was
+asmlift's convention, **not** a property of the construction it cites.
 
 Braun's own paper mints an undefined value at precisely this point — `tryRemoveTrivialPhi`
 (Algorithm 3) reads `if same = None: same ← new Undef()`, for the φ that is "unreachable or in the
@@ -286,10 +285,10 @@ no frame address escapes.** The last clause is a second function-wide condition,
 the fact by the frame-object audit rather than at the mint site — an escaped address means a callee
 may write any frame offset, so "no store of ours reaches it" stops implying "nobody wrote it".
 
-The reusable lesson is where the decision lives, not the op — and it took two wrong answers to find
-the right one, which is the part worth copying.
+The reusable lesson is where the decision lives, not the op, and it is easier to state as the two
+arrangements that do not work.
 
-**First wrong answer: the shared pass decided.** The builder classified a def-less read by the key's
+**The shared pass cannot decide.** The builder classified a def-less read by the key's
 spelling (`sp@…`). That is the "arch check inside a shared pass" this document warns about, one
 layer down — it reads as data rather than as a branch on target, which is exactly why it slipped
 through. The answer depends on the _frame model_, and the frame model is per-ISA: Thumb bounds a
@@ -298,15 +297,13 @@ reach a `sp@` key there; MIPS applies no frame bound at all, and its `sp@` reach
 caller-owned argument home area. The shared rule silently rewrote a fifth argument as an
 uninitialised local on a function that had been declining.
 
-**Second wrong answer: the frontend decided.** Replacing it with a frontend-supplied verdict —
-`(key) => 'param' | 'undef' | 'refuse'` — fixed the bug and left a worse shape behind. Both
-frontends implemented that callback as a CONSTANT function of the key, so what crossed the seam was
-one bit of ABI knowledge wearing a lambda. Worse, it was unfalsifiable at the point of use: Thumb's
-`'undef'` was sound only because of a bound established twelve hundred lines away, connected to the
-verdict by a comment. This module refuses that arrangement in as many words elsewhere — _a
-postcondition enforced by convention is not enforced_ — and the same branch had already shipped a
-bug in exactly that gap, where a `push` after the reservation slid the window off the reserved area
-while the verdict went on saying `'undef'`.
+**Nor can the frontend, by handing over a verdict.** A frontend-supplied
+`(key) => 'param' | 'undef' | 'refuse'` fixes the first problem and leaves a worse shape: both
+frontends implement it as a CONSTANT function of the key, so what crosses the seam is one bit of ABI
+knowledge wearing a lambda — and it is unfalsifiable at the point of use, because Thumb's `'undef'`
+is sound only by a bound established twelve hundred lines away and joined to the verdict by a
+comment. _A postcondition enforced by convention is not enforced_: a `push` after the reservation
+slides the window off the reserved area while the verdict goes on saying `'undef'`.
 
 **What it is now: the frontend supplies the PARTITION, the shared pass applies the rule.**
 `FrameModel` carries byte ranges — `ownedLocals`, `callerParams` — and one generic rule classifies
@@ -316,9 +313,8 @@ measure the frame that range collapses to empty and every slot refuses on its ow
 partition and therefore refuses, and the shape of its eventual fix is now a pair of numbers rather
 than a rewrite.
 
-That split — declarative partition, generic rule — is Ghidra's, arrived at the long way round. Its
-compiler-spec files carry the same thing as data, and `mips32be.cspec` states the very asymmetry
-that forced this design: a `<localrange>` whose own comment notes the 16-byte region is "backup
+That split — declarative partition, generic rule — is Ghidra's. Its compiler-spec files carry the
+same thing as data, and `mips32be.cspec` states the very asymmetry that forces it: a `<localrange>` whose own comment notes the 16-byte region is "backup
 storage space for register params, but we treat as locals", beside a stack `<pentry>` that starts
 incoming arguments at 16. The measurement stays code — Thumb's local area is a per-function prologue
 walk, and Ghidra likewise solves the stack pointer per function — but the _rule_ belongs in the

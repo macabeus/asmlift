@@ -119,34 +119,26 @@ export const OPCODES = {
   // laddr and skips the audit fails verify loudly instead of rendering `&undefined`.
   laddr: { operands: 0, results: 1, requiredAttrs: ['off', 'width', 'signed'] },
   // An UNDEFINED value: storage whose ONLY writer is this function's own stores, read on a path
-  // where none of them ran. The C it came from declared a local with no initialiser and assigned it
-  // only inside some arms of a conditional or `switch` (a `switch` with no `default` is the
-  // commonest source), so the read is legal to compile and the compiler emitted the unassigned path
-  // faithfully.
+  // where none of them ran. The C declared a local with no initialiser and assigned it only inside
+  // some arms of a conditional or `switch` (a `switch` with no `default` being the commonest
+  // source), so the read is legal to compile and the compiler emitted the unassigned path faithfully.
   //
-  // "SOLE WRITER", not merely "owns the storage" — the two came apart in review and the difference
-  // is a miscompile. A frame the function owns can still be written by someone else once an address
-  // into it escapes to a callee: the callee fills a wider object than any in-function access
-  // reveals, and its value reads back at a slot no store of ours reaches. Whoever mints an `undef`
-  // owes the retraction on escape (frontend/thumb.ts, after the frame-object audit).
+  // SOLE WRITER, not merely "owns the storage": a frame the function owns can still be written by
+  // someone else once an address into it escapes to a callee, which fills a wider object than any
+  // in-function access reveals. Whoever mints an `undef` owes the retraction on escape
+  // (frontend/thumb.ts, after the frame-object audit).
   //
-  // WHY IT IS AN OPCODE AND NOT A LIVE-IN. Braun's construction resolves a read with no reaching
-  // definition to a live-in, and a live-in of the entry block is a PARAMETER — which for a register
-  // is right (it really is an argument) but for storage the function ALLOCATED is a fabrication: the
-  // signature grows an argument standing in for uninitialised stack. Without a way to say "undefined
-  // here" the frontend could only refuse, so this is the representation that refusal was standing in
-  // for. `frontend/ssa.ts` mints it exactly where it used to throw.
+  // An opcode rather than a live-in because Braun's construction resolves a def-less read to a
+  // live-in, and a live-in of the entry block is a PARAMETER — right for a register, a fabricated
+  // argument for storage the function ALLOCATED. `frontend/ssa.ts` mints it where the partition
+  // says the storage is a local.
   //
-  // Operand-free and pure, like `laddr`, but NOT in raise/gvn.ts's NUMBERABLE opt-in set — and the
-  // accurate reason is that numbering it would be VACUOUS, not that it would be harmful. Two undefs
-  // in one function always carry different keys (the builder mints one per storage location, and
-  // only the entry block can reach the mint site), so a key-equality numbering would never find a
-  // pair to collapse. What it would assert — "same key, therefore same value" — is empty for a
-  // value that has none, so the op stays out rather than resting on a premise it cannot support.
+  // Operand-free and pure like `laddr`, and out of raise/gvn.ts's NUMBERABLE set — where numbering
+  // it would be VACUOUS rather than harmful, since two undefs in one function always carry
+  // different keys. "Same key, therefore same value" is empty for a value that has none.
   //
-  // `key` names the storage (`sp@0`) and is read by the structurer to name the local (`uninit_sp0`),
-  // which keeps the emitted C traceable back to the frame slot in the assembly. The structurer
-  // declares one local per undef and emits NO assignment — that absence is the recovery.
+  // `key` names the storage (`sp@0`); the structurer reads it to name the local (`uninit_sp0`) and
+  // emits NO assignment — that absence is the recovery.
   undef: { operands: 0, results: 1, requiredAttrs: ['key'] },
   // --- black-box escape hatch (keeps lifting total) ---
   // `effects: true`: an instruction asmlift could not model may do anything — write memory, trap,

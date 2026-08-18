@@ -523,13 +523,11 @@ export function lift(
   // register-parameter home area and the incoming stack arguments above it, where a def-less read
   // is argument 5, not an uninitialised local.
   //
-  // The shape of the eventual fix is now a pair of numbers rather than a rewrite: O32 reserves
-  // `[0,16)` as the caller-owned home area for the register parameters (neither a local nor a stack
-  // parameter — it belongs in NEITHER range) with incoming stack arguments from 16 up, and the
-  // locals sit below the frame pointer. Ghidra ships exactly this partition as compiler-spec data
-  // (`mips32be.cspec`'s `<localrange>` plus the stack `<pentry offset="16">`). What is still
-  // missing here is the frame SIZE those offsets have to be measured against, which this frontend
-  // does not compute — plus ensureParam for the register half.
+  // Claiming one needs the frame SIZE those offsets are measured against, which is not computed
+  // here, plus ensureParam for the register half. The ranges themselves are known: O32 reserves
+  // `[0,16)` as the caller-owned home area (in NEITHER range — caller-owned, but not an argument)
+  // with stack arguments from 16 up, which is what `mips32be.cspec`'s `<localrange>` and stack
+  // `<pentry offset="16">` encode.
   const ssa = makeSsaBuilder(name, blocks.length, preds);
   const { irBlocks, readVar, writeVar, paramReg } = ssa;
   const RET = target.returnReg;

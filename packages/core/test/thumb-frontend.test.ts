@@ -440,14 +440,11 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tcmp\tr0, #0\n\tbeq\t.L2\n\tstr\tr0, [sp]\n' +
       '.L2:\n\tldr\tr1, [sp]\n\tadd\tr0, r1, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r2}\n\tbx\tr2\n';
     expect(decompile('f', both, ARMV4T_AGBCC).source).toBe('s32 f(s32 a0) {\n    return a0 + 1;\n}\n');
-    // …and the refusal that survives — labelled NOT YET, in the same words decline-guards.test.ts
-    // uses for the MIPS entry-phi case, because the tempting justification does not hold. A slot no
-    // store reaches ANYWHERE is the SAME C as the diamond above: a local nothing wrote. The reasons
-    // one reaches for — "it may be frame arithmetic, or an address-taken object" — are both already
-    // caught elsewhere (frame arithmetic trips `stack pointer used as data`; an address-taken object
-    // mints an `laddr` and is audited). What actually decides it is that the gate sits at the LOAD
-    // (`hasReachingDef` before the slot is keyed at all), which is where it sat before `undef`
-    // existed. Closing it means moving that gate, not finding a new argument.
+    // …and the refusal that survives, NOT YET rather than by design. A slot no store reaches
+    // ANYWHERE is the same C as the diamond above; the reasons one reaches for — frame arithmetic,
+    // an address-taken object — are both caught elsewhere (`stack pointer used as data`, and the
+    // `laddr` audit). What decides it is that the gate sits at the LOAD, before the slot is keyed
+    // at all. Closing it means moving that gate, not finding a new argument.
     const unstored =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tldr\tr0, [sp]\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
     expect(() => decompile('f', unstored, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
@@ -458,11 +455,9 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     // source are two variables, the compiler allocated them separately, and emitting one would
     // re-spell the function as one the compiler never saw.
     //
-    // This pins the STRUCTURER, and says so because the obvious stronger claim would be false. It
-    // is tempting to read it as pinning `undef` out of raise/gvn.ts's NUMBERABLE set — it does not,
-    // and cannot: adding `undef` there leaves this green, because that pass numbers by attribute
-    // equality and these two undefs carry different keys. Numbering `undef` is a no-op, not a
-    // hazard, so no test can hold the line by failing.
+    // Pins the STRUCTURER, not raise/gvn.ts's NUMBERABLE set: adding `undef` there leaves this
+    // green, because that pass numbers by attribute equality and these two undefs carry different
+    // keys. Numbering `undef` is a no-op, not a hazard, so no test can hold that line by failing.
     const two =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tcmp\tr0, #0\n\tbeq\t.L2\n\tstr\tr0, [sp]\n\tstr\tr0, [sp, #4]\n' +
       '.L2:\n\tldr\tr1, [sp]\n\tldr\tr2, [sp, #4]\n\tadd\tr0, r1, r2\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r3}\n\tbx\tr3\n';
@@ -480,8 +475,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     // audit bounds what WE access through the object (one word here), not what `g` does, so the
     // real object can be wider — `struct P p; g(&p);` reading only `p.x` — and `g` fills the later
     // words. Reading one back at a slot no store of ours reaches is reading the CALLEE's value, and
-    // declaring it uninitialised would spell that value as garbage. Found by an adversarial pass on
-    // the commit that added undef, where this input lifted.
+    // declaring it uninitialised would spell that value as garbage.
     const escaped =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tmov\tr4, sp\n\tmov\tr0, r4\n\tbl\tg\n' +
       '\tldr\tr1, [r4]\n\tcmp\tr1, #0\n\tbeq\t.L2\n\tstr\tr1, [sp, #4]\n' +
@@ -491,9 +485,9 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     );
     // DISCRIMINATING CONTROL — the one that makes the title true. The same captured address,
     // dereferenced only in-function, with NO call anywhere: nobody else can reach the frame, so
-    // the undef argument still holds and this LIFTS. The first version of the guard keyed on
-    // "a laddr exists" rather than on the escape and declined this, with a message naming a callee
-    // the input does not contain. Without this fixture the test cannot tell capture from escape.
+    // the undef argument still holds and this LIFTS. Keyed on "a laddr exists" instead, the guard
+    // declines this and names a callee the input does not contain — which is what the fixture
+    // separates: without it the test cannot tell capture from escape.
     const captured =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tmov\tr4, sp\n\tldr\tr1, [r4]\n\tcmp\tr1, #0\n\tbeq\t.L2\n\tstr\tr1, [sp, #4]\n' +
       '.L2:\n\tldr\tr2, [sp, #4]\n\tadd\tr0, r1, r2\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r3}\n\tbx\tr3\n';
@@ -514,8 +508,8 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     // PUSHED words. Those are written, by an instruction that is dataflow-transparent, so nothing
     // downstream can tell — and with `undef` in the model that stopped being a lost slot and became
     // a miscompile: [sp,#0] holds a0 on BOTH paths here, so the machine returns 0 when a0 == 0
-    // while the emitted C returned `0 + garbage`. Found by an adversarial pass; zero inhabitants in
-    // the corpus (agbcc pushes before it reserves) which is exactly why only a probe finds it.
+    // while the emitted C returned `0 + garbage`. Not corpus-reachable — agbcc pushes before it
+    // reserves — which is exactly why only a probe finds it.
     const pushAfter =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tpush\t{r0}\n\tcmp\tr0, #0\n\tbeq\t.L2\n\tstr\tr0, [sp]\n' +
       '.L2:\n\tldr\tr1, [sp]\n\tadd\tr0, r0, r1\n\tadd\tsp, sp, #0xc\n\tpop\t{r4}\n\tpop\t{r3}\n\tbx\tr3\n';

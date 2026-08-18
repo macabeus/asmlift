@@ -1,12 +1,10 @@
 // The frame partition (frontend/ssa.ts, FrameModel) is the rule that decides what a def-less
 // live-in MEANS, and these exercise it directly on the builder rather than through a frontend.
 //
-// WHY AT THIS LEVEL. The rule's whole purpose is to be falsifiable INDEPENDENTLY of what a frontend
-// believes about its own frame. Driving it through Thumb could only ever confirm that Thumb and the
-// rule agree, which is the arrangement the rule replaced: the previous seam took a verdict
-// (`'undef' | 'param' | 'refuse'`) from the frontend, so a frontend whose frame bound had silently
-// stopped holding kept getting the answer it asserted. Handing the builder ranges and asking it
-// directly is the only way to see the rule refuse a frontend that is wrong.
+// AT THIS LEVEL because the rule's purpose is to be falsifiable INDEPENDENTLY of what a frontend
+// believes about its own frame. Driving it through Thumb could only confirm that Thumb and the rule
+// agree; handing the builder ranges directly is the only way to see it refuse a frontend that is
+// wrong.
 import { makeSsaBuilder, stackSlotKey } from '@asmlift/core/frontend/ssa';
 import { mkOp } from '@asmlift/core/ir/core';
 import { expect, test } from 'vitest';
@@ -42,11 +40,10 @@ test('a slot inside callerParams is a PARAMETER, not an undefined local', () => 
 });
 
 test('a slot in NEITHER range is refused — the rule does not trust the frontend that minted it', () => {
-  // THE POINT OF THE WHOLE DESIGN. A frontend can be wrong about its own frame: this branch shipped
-  // a bug where a `push` after the reservation slid Thumb's window off the reserved area while the
-  // frontend went on claiming the slot was a local. Under the old verdict-passing seam the builder
-  // had no way to disagree. Here the offset is checked against the declared partition, so a key the
-  // frontend should never have minted is refused rather than believed.
+  // THE POINT OF THE DESIGN. A frontend can be wrong about its own frame — a `push` after the
+  // reservation slides Thumb's window off the reserved area while it goes on claiming the slot is a
+  // local. Checking the offset against the declared partition refuses a key the frontend should
+  // never have minted, rather than believing it.
   expect(() => readDefLess(stackSlotKey(64), () => ({ ownedLocals: { from: 0, to: 8 } }))).toThrow(
     /sp@64 is read on a path that never stores it, and lies outside this function's frame partition/,
   );
@@ -67,9 +64,8 @@ test('claiming no partition refuses every slot, and leaves REGISTERS alone', () 
 
 test('an EMPTY ownedLocals range refuses, so an unmeasurable frame cannot assert ownership', () => {
   // Thumb passes `{ from: 0, to: localArea }`, and `localArea` is 0 whenever the prologue walk
-  // cannot measure the frame. Passing the NUMBER rather than a verdict is what makes that
-  // self-limiting: the range collapses to empty and every slot refuses, where a constant `'undef'`
-  // would have gone on asserting a bound that had stopped holding.
+  // cannot measure the frame — so an unmeasurable frame collapses the range to empty and refuses
+  // every slot, without the frontend having to notice.
   expect(() => readDefLess(stackSlotKey(0), () => ({ ownedLocals: { from: 0, to: 0 } }))).toThrow(
     /lies outside this function's frame partition/,
   );

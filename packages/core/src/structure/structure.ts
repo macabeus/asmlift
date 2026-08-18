@@ -704,9 +704,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
   // in this layer's namespace: params, locals, every gaddr symbol, and the project's symbol map —
   // none of which the frontend can see. A frontend-chosen `sp0` silently shadowed a project global
   // of the same name. `sp<off>` uniquified with underscores until free; one name per offset.
-  // `undef` locals are minted in the SAME pass off the SAME `taken` set: both name a piece of this
-  // function's own frame, so a separately-minted `uninit0` could collide with a `sp0` (or with each
-  // other) and one declaration would shadow the other.
+  // `undef` locals are minted in the same pass off the same `taken` set — they need the same
+  // protection from the symbol map, gaddr symbols and callee names that `laddr` names do.
   const { laddr: laddrName, undef: undefName } = (() => {
     const taken = new Set<string>();
     if (symbols) {
@@ -747,11 +746,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
           }
           names.set(op, n);
         } else if (op.opcode === 'undef') {
-          // NAMED FROM THE KEY, like laddr's `sp<off>`, for the same two reasons. It is traceable —
-          // `uninit_sp8` says which frame slot the reader should look at in the assembly — and it is
-          // STABLE, where a running counter numbered by op order would renumber every local when an
-          // unrelated edit changed the order ops are minted in. It is also the only consumer of the
-          // opcode's `key` attribute, which is what keeps that attribute honest.
+          // Named from the key, like laddr's `sp<off>`: `uninit_sp8` says which frame slot to look
+          // at in the assembly, and it stays put where a running counter would renumber every local
+          // when an unrelated edit changed the order ops are minted in.
           undefNames.set(op, mint(`uninit_${String(op.attrs.key).replace('@', '')}`));
         }
       }
@@ -1719,11 +1716,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
       return { k: 'addr', name: laddrName.get(d)! };
     }
     if (d.opcode === 'undef') {
-      // An uninitialised local: read the name, and NEVER emit a definition for it. That absence is
-      // the whole point — the C this came from declared the local and assigned it only on some
-      // paths, so the declaration in `locals` is the entire recovery. `sideEffects` emits nothing
-      // for an `undef` op (it is neither effectful nor materialized), which is what leaves the
-      // declaration bare.
+      // An uninitialised local. NEVER emit a definition for it: the declaration in `locals` is the
+      // entire recovery, and `sideEffects` skips an `undef` (neither effectful nor materialized),
+      // which is what leaves it bare.
       return { k: 'var', name: undefName.get(d)! };
     }
     if (d.opcode === 'gaddr') {
@@ -2451,9 +2446,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
             ]),
         ).values(),
       ],
-      // uninitialised locals (undef): declared, never assigned. The type is the one recovery
-      // settled on for the value, exactly as for any other local — an undef that stayed unknown
-      // declares the same s32 an unknown-typed local would.
+      // uninitialised locals (undef): declared, never assigned, typed by whatever recovery settled
+      // on for the value.
       ...fn.blocks
         .flatMap((b) => b.ops)
         .filter((op) => op.opcode === 'undef')
