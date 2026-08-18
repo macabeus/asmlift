@@ -32,7 +32,7 @@ import type { Frontend } from './frontend';
 import { opaqueDest } from './opaque';
 import { isSplatMips, parseSplatMips } from './splat';
 import { abiSortEntryParams, stackSlotKey } from './ssa';
-import { isStackSlotKey, makeSsaBuilder } from './ssa';
+import { makeSsaBuilder } from './ssa';
 
 type Instr = DisasmInstr;
 
@@ -517,14 +517,20 @@ export function lift(
     }
   });
 
-  // A def-less read of a slot REFUSES here, and MIPS says so itself rather than leaving it to a
-  // postcondition. This frontend has no frame bound at all — `addiu sp,sp,±N` is transparent and
-  // every word sp-relative access becomes `sp@<rawOff>` — so its slot keys reach O32's CALLER-owned
-  // argument home area, where a def-less read is argument 5, not an uninitialised local. Recovering
-  // it would emit a signature with parameters missing and the caller's value spelled as garbage.
-  // Closing this needs O32's own frame rule (the 16-byte home area means "above the frame" is the
-  // wrong test) plus ensureParam for the register half — see the notes on the slot guard below.
-  const ssa = makeSsaBuilder(name, blocks.length, preds, (key) => (isStackSlotKey(key) ? 'refuse' : 'param'));
+  // NO FRAME PARTITION IS CLAIMED, so every def-less slot read refuses (frontend/ssa.ts,
+  // FrameModel). This frontend has no frame bound at all — `addiu sp,sp,±N` is transparent and
+  // every word sp-relative access becomes `sp@<rawOff>` — so its slot keys span O32's CALLER-owned
+  // register-parameter home area and the incoming stack arguments above it, where a def-less read
+  // is argument 5, not an uninitialised local.
+  //
+  // The shape of the eventual fix is now a pair of numbers rather than a rewrite: O32 reserves
+  // `[0,16)` as the caller-owned home area for the register parameters (neither a local nor a stack
+  // parameter — it belongs in NEITHER range) with incoming stack arguments from 16 up, and the
+  // locals sit below the frame pointer. Ghidra ships exactly this partition as compiler-spec data
+  // (`mips32be.cspec`'s `<localrange>` plus the stack `<pentry offset="16">`). What is still
+  // missing here is the frame SIZE those offsets have to be measured against, which this frontend
+  // does not compute — plus ensureParam for the register half.
+  const ssa = makeSsaBuilder(name, blocks.length, preds);
   const { irBlocks, readVar, writeVar, paramReg } = ssa;
   const RET = target.returnReg;
   const ARG_REGS = target.argRegs;

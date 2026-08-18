@@ -27,7 +27,7 @@ import { FrontendUnsupportedError } from './errors';
 import { assertInputFormat } from './format';
 import type { Frontend } from './frontend';
 import { opaqueDest } from './opaque';
-import { abiSortEntryParams, fallbackArgc, isStackSlotKey, makeSsaBuilder, stackSlotKey } from './ssa';
+import { abiSortEntryParams, fallbackArgc, makeSsaBuilder, stackSlotKey } from './ssa';
 
 interface Instr {
   /** the CANONICAL spelling — legacy names are normalised (see LEGACY_MNEMONICS) so that every
@@ -1329,14 +1329,18 @@ export function lift(
   }
 
   // --- ISA-neutral SSA construction (shared Braun builder) ---
-  // A def-less read of a slot is an UNINITIALISED LOCAL here, and this frontend is the one that can
-  // say so: `slotOff` admits an offset only while `off + 4 <= localArea` (the explicitly reserved local
-  // area, measured by the prologue walk), and an incoming stack argument is keyed `@sarg<k>` rather
-  // than `sp@<off>` precisely because it sits at or above this frame. So nothing incoming can reach
-  // a `sp@` key. MIPS deliberately does NOT pass this — its slot path has no frame bound, so its
-  // `sp@` reaches O32's caller-owned argument home area and the honest answer there is still the
-  // decline (frontend/ssa.ts, LiveInKind).
-  const ssa = makeSsaBuilder(name, asmBlocks.length, preds, (key) => (isStackSlotKey(key) ? 'undef' : 'param'));
+  // THE FRAME PARTITION, as ranges rather than a verdict (frontend/ssa.ts, FrameModel). `[0,
+  // localArea)` is the explicitly reserved local area measured by the prologue walk, and it is the
+  // whole of what this function owns: an incoming stack argument is keyed `@sarg<k>` rather than
+  // `sp@<off>` precisely because it sits at or above this frame, so `callerParams` is empty here.
+  //
+  // Passing the NUMBER rather than the conclusion is the point. `localArea` is 0 whenever the walk
+  // cannot measure the frame — an unmodelled sp write, or a `push` after the reservation — and an
+  // empty range then refuses every slot on its own, instead of a constant `'undef'` continuing to
+  // assert a bound that had silently stopped holding. `slotOff` already applies the same bound when
+  // it mints keys; this is the independent check, which is the arrangement this module asks for
+  // everywhere else ("a postcondition enforced by convention is not enforced").
+  const ssa = makeSsaBuilder(name, asmBlocks.length, preds, () => ({ ownedLocals: { from: 0, to: localArea } }));
   const { fn, irBlocks, readVar, writeVar, paramReg } = ssa;
 
   const constVal = (n: number, b: number): Value => {

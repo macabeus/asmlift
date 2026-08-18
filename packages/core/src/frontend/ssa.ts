@@ -67,27 +67,53 @@ export interface SsaBuilder {
 // A virtual key must be outside its ISA's register grammar so it cannot collide with a real one, and
 // a key read with no reaching def becomes a function PARAMETER by the live-in path below — which is
 // how both of those capabilities get their parameters without a new opcode or pass.
-/** What a def-less live-in of `key` MEANS. Only the frontend can say: the answer depends on the
- *  frame model, and the frame model is per-ISA.
+/** How this function's frame is PARTITIONED, in the frontend's own slot-key coordinate. Supplied
+ *  per function, because one of the two ranges is measured rather than declared.
  *
- *  `'param'` — an incoming argument; the ordinary Braun live-in.
- *  `'undef'`  — an uninitialised local. ASSERTS SOMETHING STRONGER THAN OWNERSHIP: that this
- *               function's own stores are the ONLY writer of that storage. Owning the frame is not
- *               enough — if an address into it escapes to a callee, "no store reaches" stops
- *               implying "nobody wrote it", and RETRACTING on escape is the frontend's obligation
- *               (frontend/thumb.ts does it after the frame-object audit).
- *  `'refuse'` — neither, and the frontend says so itself rather than leaving a postcondition to
- *               recognise its key spelling.
+ *  WHY NUMBERS AND NOT A VERDICT. The first version of this seam handed the builder a policy —
+ *  `(key) => 'param' | 'undef' | 'refuse'` — and both frontends implemented it as a CONSTANT
+ *  function of the key. What actually crossed the seam was one bit of ABI knowledge wearing a
+ *  lambda, and the bit was unfalsifiable here: Thumb's answer was sound only because `slotOff`
+ *  bounds keys to `off + 4 <= localArea` twelve hundred lines away, connected to the verdict by a
+ *  COMMENT. This module refuses that arrangement elsewhere in as many words — "a postcondition
+ *  enforced by convention is not enforced" — and the branch that introduced the policy had already
+ *  shipped a bug in exactly that gap (a `push` after the reservation slid the window off the
+ *  reserved area while the verdict kept saying `'undef'`). Ranges make the dependency an argument
+ *  instead of a promise: the rule below is generic and shared, and a key outside every range is
+ *  refused whatever the frontend believes.
  *
- *  Defaults to `'param'` for every key, which is Braun unmodified. */
-export type LiveInKind = 'param' | 'undef' | 'refuse';
+ *  The split follows Ghidra's compiler-spec model, where the same partition is declarative data
+ *  (`<localrange>`, and stack `<pentry>` for the parameter side) consumed by architecture-neutral
+ *  code — including the O32 detail that forced this design: its 16-byte register-parameter home
+ *  area is caller-owned and is neither a local nor a stack parameter. */
+export interface FrameModel {
+  /** Storage this function owns as LOCALS, so a def-less read of one is an uninitialised local.
+   *  Half-open `[from, to)`. Asserting this asserts something STRONGER than ownership: that this
+   *  function's own stores are its only writer. Owning the frame is not enough — once an address
+   *  into it escapes to a callee, "no store reaches" stops implying "nobody wrote it", and
+   *  RETRACTING on escape stays the frontend's obligation (frontend/thumb.ts does it after the
+   *  frame-object audit). Omitted ⇒ empty, and every slot refuses. */
+  ownedLocals?: { from: number; to: number };
+  /** Storage the CALLER wrote: incoming stack arguments. A def-less read here is a parameter.
+   *  Half-open `[from, to)`. Omitted ⇒ empty. */
+  callerParams?: { from: number; to: number };
+}
 
 export function makeSsaBuilder(
   name: string,
   blockCount: number,
   preds: number[][],
-  liveInKind: (key: string) => LiveInKind = () => 'param',
+  /** A SUPPLIER, not a value, because one of the ranges is MEASURED: Thumb's local area comes from
+   *  a prologue walk that runs after the builder is created, so the partition is not known yet at
+   *  this call. Evaluated once, on the first def-less live-in that needs it.
+   *
+   *  Omitted ⇒ no frame partition is claimed, so every stack slot read with no reaching definition
+   *  is refused. Register keys are unaffected and take the ordinary Braun live-in path. */
+  frameOf: () => FrameModel = () => ({}),
 ): SsaBuilder {
+  let frameMemo: FrameModel | null = null;
+  const frame = (): FrameModel => (frameMemo ??= frameOf());
+  const inRange = (off: number, r?: { from: number; to: number }) => r !== undefined && off >= r.from && off < r.to;
   const irBlocks: Block[] = Array.from({ length: blockCount }, () => ({ params: [] as Value[], ops: [] }));
   const fn: Fn = { name, blocks: irBlocks };
 
@@ -160,14 +186,18 @@ export function makeSsaBuilder(
       // FIFTH ARGUMENT — so it must keep declining. Asking the frontend is the whole point: deciding
       // this here by prefix turned that decline into a signature with three parameters missing and
       // the caller's argument replaced by an uninitialised local, which compiles and is wrong.
-      const kind = liveInKind(reg);
-      if (kind === 'refuse') {
+      // ONE generic rule over the frontend's ranges. A register key is not a slot and takes the
+      // ordinary live-in path; a slot key is classified by WHERE IT IS, and a slot outside every
+      // declared range is refused — which is what makes the classification falsifiable here rather
+      // than a claim the frontend makes about itself.
+      const off = slotKeyOffset(reg);
+      if (off !== null && !inRange(off, frame().ownedLocals) && !inRange(off, frame().callerParams)) {
         throw new FrontendUnsupportedError(
-          `cannot lift '${name}': ${reg} is read on a path that never stores it ` +
-            `(partially-initialised local, or storage this function does not own) — not modelled`,
+          `cannot lift '${name}': ${reg} is read on a path that never stores it, and lies outside ` +
+            `this function's frame partition (uninitialised local, or storage it does not own) — not modelled`,
         );
       }
-      if (kind === 'undef') {
+      if (off !== null && inRange(off, frame().ownedLocals)) {
         const op = mkOp('undef', { results: [mkValue(T.unk(32))], attrs: { key: reg } });
         irBlocks[b].ops.unshift(op); // ahead of everything in a block that nothing precedes
         defs[b].set(reg, op.results[0]);
@@ -331,11 +361,12 @@ export function makeSsaBuilder(
       // semantic postcondition, and a postcondition enforced by convention is not enforced.
       for (const p of irBlocks[0].params) {
         const key = paramReg.get(p) ?? phiKey.get(p);
-        // The SAME predicate the mint site used, so the two can never disagree. It also means this
-        // file no longer knows that `sp@` denotes anything: the rule that a slot may not leave as a
-        // parameter is the FRONTEND's, stated by whoever owns the frame model, and asserted here
-        // over the finished function where a per-read test cannot be total.
-        if (key !== undefined && liveInKind(key) !== 'param') {
+        // The SAME rule the mint site used, over the same ranges, so the two cannot disagree. A
+        // slot that reached the signature is either owned storage (which should have become an
+        // `undef`) or unclassified — both are bugs, and this is where a per-read test cannot be
+        // total, so it is asserted over the finished function.
+        const koff = key === undefined ? null : slotKeyOffset(key);
+        if (koff !== null && !inRange(koff, frame().callerParams)) {
           throw new FrontendUnsupportedError(
             `cannot lift '${name}': ${key} is read on a path that never stores it ` +
               `(partially-initialised local, or storage this function does not own) — not modelled`,
@@ -462,14 +493,15 @@ export function trimClobberedCallArgs(inp: CallArgTrim): void {
 }
 
 /** The stack-slot key both the MIPS and Thumb frontends use for a word-sized local in the
- *  function's own frame. Shared so the two spell it identically and `assertNoSlotEscaped` can
+ *  function's own frame. Shared so the two spell it identically and the frame-partition rule can
  *  recognise either frontend's slots. See the virtual-key note in the module header. */
 const SLOT_PREFIX = 'sp@';
 export const stackSlotKey = (off: number): string => `${SLOT_PREFIX}${off}`;
-/** Does `key` name a stack slot? For a frontend spelling its {@link LiveInKind} policy, so the key
- *  grammar stays owned by this module. Answering true is NOT itself a licence to return `'undef'` —
- *  see the mint site: that needs the frontend's own proof that the slot lies below its frame. */
-export const isStackSlotKey = (key: string): boolean => key.startsWith(SLOT_PREFIX);
+/** The byte offset a slot key names, or null if `key` is not a slot key at all (an ordinary
+ *  register). The grammar stays owned by this module — {@link FrameModel} is expressed in the same
+ *  coordinate, so the classification rule can be generic. */
+export const slotKeyOffset = (key: string): number | null =>
+  key.startsWith(SLOT_PREFIX) ? Number(key.slice(SLOT_PREFIX.length)) : null;
 
 /** Order the TRUE entry block's parameters by ABI argument register, so downstream naming
  *  (`a0`, `a1`, …) matches the calling convention, not first-read order (a callee-saved copy can

@@ -248,14 +248,29 @@ followed the second inhabitant, never preceded it.
 ### A case where the bar was met on capability but not on the differ: `undef`
 
 `undef` (an uninitialised local — storage whose only writer is this function's own stores, read on
-a path where none of them ran) is the one op admitted without a byte match behind it, so it is worth
-being explicit about which half of the bar it cleared. "Only writer" rather than "owns": the two
+a path where none of them ran) is the only op that appears in emitted C without a byte match behind
+it, so it is worth being explicit about which half of the bar it cleared. (`opaque` also has none
+and never will, but it is the loud-gap escape hatch — it exists to stop a function compiling, not
+to be recovered code.) "Only writer" rather than "owns": the two
 came apart in review, and the escape clause below is the difference.
 
-It clears "cannot be expressed in the current one" outright. Braun's SSA resolves a read with no
-reaching definition to a live-in, and a live-in of the entry block is a _parameter_; for storage the
-function allocated, that is a fabricated argument standing in for uninitialised stack. There was no
-third answer, so the frontend could only decline. `undef` is what that decline was standing in for.
+It clears "cannot be expressed in the current one" — but the honest framing is narrower than the
+first draft of this section claimed, and the correction is the more useful fact. asmlift's builder
+had fused two questions, "is there a reaching definition?" and "is this a parameter?", so a def-less
+read had exactly two fates: a fabricated argument standing in for uninitialised stack, or a decline.
+That was asmlift's convention, **not** a property of the construction it cites.
+
+Braun's own paper mints an undefined value at precisely this point — `tryRemoveTrivialPhi`
+(Algorithm 3) reads `if same = None: same ← new Undef()`, for the φ that is "unreachable or in the
+start block". [`ir/simplify.ts`](../packages/core/src/ir/simplify.ts) is where that case lands here,
+and the port skipped it. Ghidra has kept the two questions apart for twenty years: a def-less read
+becomes an SSA **input varnode** that a later phase may or may not map to a parameter slot, and its
+decompiler names the outcomes separately — `param_N`, `in_stack_...` for an input the prototype
+model could not place, `unaff_<reg>` for a callee-saved register read before it was written, and a
+plain stack local.
+
+So `undef` is not a new idea; it is asmlift catching up to the one its own citation contains. What
+was genuinely missing was any way to SAY it, and that is what the opcode adds.
 
 It does **not** clear "the differ can prove the result matches". Measured across the whole corpus,
 **exactly one row moved** — `synthetic:uninit_spill:agbcc`, `declined → nonmatch`. The row in that
@@ -271,17 +286,43 @@ no frame address escapes.** The last clause is a second function-wide condition,
 the fact by the frame-object audit rather than at the mint site — an escaped address means a callee
 may write any frame offset, so "no store of ours reaches it" stops implying "nobody wrote it".
 
-The reusable lesson is where the decision lives, not the op. The first version decided "is this
-storage the function owns?" in the shared SSA builder by the key's spelling (`sp@…`). That is
-exactly the "arch check inside a shared pass" this document warns about, one layer down: the answer
-depends on the _frame model_, which is per-frontend. Thumb had earned it (it bounds a slot to
-`off + 4 <= localArea` and keys incoming stack arguments separately); MIPS had not, and its `sp@`
-reaches O32's caller-owned argument home area — so the shared rule silently rewrote a fifth argument
-as an uninitialised local on a function that used to decline. The op was fine; the _predicate's owner_ was
-wrong. It is now a frontend-supplied policy (`LiveInKind`), and — the part worth copying — the
-POSTCONDITION consults the same function, so the two cannot drift apart and the shared builder no
-longer knows that `sp@` denotes anything. Each frontend states its own answer: Thumb `'undef'`,
-MIPS `'refuse'` with its own reason, PPC never mints such a key at all.
+The reusable lesson is where the decision lives, not the op — and it took two wrong answers to find
+the right one, which is the part worth copying.
+
+**First wrong answer: the shared pass decided.** The builder classified a def-less read by the key's
+spelling (`sp@…`). That is the "arch check inside a shared pass" this document warns about, one
+layer down — it reads as data rather than as a branch on target, which is exactly why it slipped
+through. The answer depends on the _frame model_, and the frame model is per-ISA: Thumb bounds a
+slot to `off + 4 <= localArea` and keys incoming stack arguments separately, so nothing incoming can
+reach a `sp@` key there; MIPS applies no frame bound at all, and its `sp@` reaches O32's
+caller-owned argument home area. The shared rule silently rewrote a fifth argument as an
+uninitialised local on a function that had been declining.
+
+**Second wrong answer: the frontend decided.** Replacing it with a frontend-supplied verdict —
+`(key) => 'param' | 'undef' | 'refuse'` — fixed the bug and left a worse shape behind. Both
+frontends implemented that callback as a CONSTANT function of the key, so what crossed the seam was
+one bit of ABI knowledge wearing a lambda. Worse, it was unfalsifiable at the point of use: Thumb's
+`'undef'` was sound only because of a bound established twelve hundred lines away, connected to the
+verdict by a comment. This module refuses that arrangement in as many words elsewhere — _a
+postcondition enforced by convention is not enforced_ — and the same branch had already shipped a
+bug in exactly that gap, where a `push` after the reservation slid the window off the reserved area
+while the verdict went on saying `'undef'`.
+
+**What it is now: the frontend supplies the PARTITION, the shared pass applies the rule.**
+`FrameModel` carries byte ranges — `ownedLocals`, `callerParams` — and one generic rule classifies
+an offset against them, refusing anything that falls in neither. The dependency became an argument
+instead of a promise: Thumb passes `{ from: 0, to: localArea }`, so when the prologue walk cannot
+measure the frame that range collapses to empty and every slot refuses on its own. MIPS claims no
+partition and therefore refuses, and the shape of its eventual fix is now a pair of numbers rather
+than a rewrite.
+
+That split — declarative partition, generic rule — is Ghidra's, arrived at the long way round. Its
+compiler-spec files carry the same thing as data, and `mips32be.cspec` states the very asymmetry
+that forced this design: a `<localrange>` whose own comment notes the 16-byte region is "backup
+storage space for register params, but we treat as locals", beside a stack `<pentry>` that starts
+incoming arguments at 16. The measurement stays code — Thumb's local area is a per-function prologue
+walk, and Ghidra likewise solves the stack pointer per function — but the _rule_ belongs in the
+shared pass, and the numbers belong to whoever can measure them.
 
 The through-line, from the first frontend to the latest: a level is a promise the code keeps, not
 a label it wears — and asmlift only makes the promise once it has something to put behind it.
