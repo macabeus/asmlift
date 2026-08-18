@@ -276,8 +276,8 @@ may write any frame offset, so "no store of ours reaches it" stops implying "nob
 The reusable lesson is where the decision lives, not the op. The first version decided "is this
 storage the function owns?" in the shared SSA builder by the key's spelling (`sp@…`). That is
 exactly the "arch check inside a shared pass" this document warns about, one layer down: the answer
-depends on the _frame model_, which is per-frontend. Thumb had earned it (it bounds a slot by
-`off < localArea` and keys incoming stack arguments separately); MIPS had not, and its `sp@` reaches
+depends on the _frame model_, which is per-frontend. Thumb had earned it (it bounds a slot to
+`off + 4 <= localArea` and keys incoming stack arguments separately); MIPS had not, and its `sp@` reaches
 O32's caller-owned argument home area — so the shared rule silently rewrote a fifth argument as an
 uninitialised local on a function that used to decline. The op was fine; the _predicate's owner_ was
 wrong. It is now a frontend-supplied policy (`LiveInKind`), and — the part worth copying — the
