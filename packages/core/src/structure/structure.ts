@@ -1155,6 +1155,35 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     }
     return true;
   };
+  // Does the edge `pr -> b` hand `c` over as a loop variable's PRE-update value? True when `c` is a
+  // loop header's own param and the edge leaves the loop from a latch of an emitter that places
+  // the update at the BOTTOM of the body — the self-loop `while` and the `do-while`. `c` there
+  // means the value the variable held at the top of the exiting iteration, so a merge param
+  // sharing its name would read one iteration on, silently. Keeping the names apart is also what
+  // lets those emitters sink the copy into the body; sharing them would make it a self-assignment.
+  //
+  // Four shapes are NOT this, and must keep coalescing:
+  //   - the loop is emitted by neither of those two. A test-at-top `while` puts its exit copies in
+  //     the sibling arm of the latch's `cond_br`, AHEAD of the update, so the name is still the
+  //     top-of-iteration value there (`while (p) { if (p->key == k) return p; p = p->next; }`);
+  //   - the edge leaves from the HEADER rather than a latch — same reason;
+  //   - the back-edge arg for `c`'s own slot is `c`: that slot is never rewritten;
+  //   - `c` is itself a back-edge arg — the compiler already carries the trailing value in a
+  //     second loop variable, so the un-rotation substitution reads it under that one's name.
+  //     Same exemption `readsClobbered` makes for a `sub`-mapped value.
+  const carriesPreUpdate = (c: Value, pr: Block, b: Block): boolean => {
+    const header = paramBlock.get(c);
+    const nl = header && forest.byHeader.get(header);
+    if (!nl || nl.body.has(b) || !nl.body.has(pr)) {
+      return false;
+    }
+    if (!loops.has(header!) && doWhileLoops.get(header!)?.latch !== pr) {
+      return false;
+    }
+    const back = successorTo(pr, header!);
+    const k = header!.params.indexOf(c);
+    return !!back && k >= 0 && back.args[k] !== c && !back.args.includes(c);
+  };
   // ONE seeding routine for self-loop and structured-loop headers. On a coalesceLoopInit target,
   // keep the induction variable in its entry (forward-edge) value's register — reproducing a
   // compiler that mutates the arg register across the loop instead of copying to a fresh local,
@@ -1260,25 +1289,28 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
         }
         // EVERY in-edge record, not successorTo (which returns only the FIRST record to `b` — a
         // terminator with two edges to the same block would hide the second edge's args here).
-        const incoming: Value[] = [];
+        const incoming: { v: Value; pr: Block }[] = [];
         for (const pr of new Set(preds.get(b) ?? [])) {
           for (const s of pr.ops[pr.ops.length - 1].successors) {
             if (s.block === b) {
-              incoming.push(s.args[i]);
+              incoming.push({ v: s.args[i], pr });
             }
           }
         }
         // A redundant phi (every edge passes the SAME value) is a pure alias of it — sharing the
         // name is sound even while the value stays live (they are equal on every path). This
         // waives only the LIVENESS half of canTakeName; the sibling-param check always applies.
-        const allSame = incoming.length > 0 && incoming.every((v) => v === incoming[0]);
+        const allSame = incoming.length > 0 && incoming.every((c) => c.v === incoming[0].v);
         // prefer a carrier that already has a name; then a loop var whose update this receives —
         // but only one whose name survives the C3 interference check (else the edge copies into
         // the name would clobber a still-live value).
         let name: string | undefined;
-        for (const c of [...incoming.filter((v) => varName.has(v)), ...incoming.filter((v) => backArgName.has(v))]) {
-          const nm = varName.get(c) ?? backArgName.get(c)!;
-          if (canTakeName(p, b, nm, allSame)) {
+        for (const c of [
+          ...incoming.filter((c) => varName.has(c.v)),
+          ...incoming.filter((c) => backArgName.has(c.v)),
+        ]) {
+          const nm = varName.get(c.v) ?? backArgName.get(c.v)!;
+          if (!carriesPreUpdate(c.v, c.pr, b) && canTakeName(p, b, nm, allSame)) {
             name = nm;
             break;
           }
@@ -1782,7 +1814,13 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
   // pure decline-or-emit predicates, extracted to hazards.ts behind the explicit-deps factory.
   // `varName` is captured as a live reference: it is still being populated here in the naming
   // pipeline, and each check reads the names that exist when EMISSION calls it.
-  const { loopUpdateHazard } = makeLoopHazards({ defs, varName, useSitesOf });
+  const { readsClobbered, loopUpdateHazard, sinkablePreUpdateSlots, sameAtEntry } = makeLoopHazards({
+    defs,
+    varName,
+    useSitesOf,
+    liveIn,
+    opBlock,
+  });
 
   // A POST-LOOP substitution active while structuring a loop's exit region: a loop-carried value (a
   // latch back-edge arg) is held in its loop-variable NAME after the loop, so any post-loop use must
@@ -1813,15 +1851,16 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     pred: Block,
     succ: { block: Block; args: Value[] },
     sub: Map<Value, string> | null = null,
+    keepSlot: (i: number) => boolean = () => true,
   ): Stmt[] => {
     const target = succ.block;
     const argExpr = sub ? exprWith(sub) : expr;
     const copies: { name: string; value: Expr; arg: Value }[] = [];
     const suppressed = suppressedArgs.get(succ);
     target.params.forEach((p, i) => {
-      if (suppressed?.has(i)) {
+      if (suppressed?.has(i) || !keepSlot(i)) {
         return;
-      } // anchored at its const's def site — the write already ran before this edge
+      } // anchored at its const's def site (or emitted elsewhere) — this edge does not carry it
       const name = varName.get(p)!;
       const arg = succ.args[i];
       if ((sub?.get(arg) ?? varName.get(arg)) === name) {
@@ -1849,9 +1888,14 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
       fn.name,
     );
   };
-  const argAssigns = (pred: Block, target: Block, sub: Map<Value, string> | null = null): Stmt[] => {
+  const argAssigns = (
+    pred: Block,
+    target: Block,
+    sub: Map<Value, string> | null = null,
+    keepSlot?: (i: number) => boolean,
+  ): Stmt[] => {
     const succ = successorTo(pred, target);
-    return succ ? argAssignsFor(pred, succ, sub) : [];
+    return succ ? argAssignsFor(pred, succ, sub, keepSlot) : [];
   };
 
   // Side-effecting ops of a block, emitted as statements in program order: memory stores; any
@@ -2158,10 +2202,60 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
         const updateWrites = updateWriteSet(updates);
         const hterm = li.header.ops[li.header.ops.length - 1];
         const hexitArgs = (successorTo(li.header, li.exit)?.args ?? []) as Value[];
+        // FUSION IS ONLY SOUND WHEN EVERYTHING IT DROPS IS REDUNDANT. `isGuardShapedPred` asks about
+        // the SHAPE alone — branches to the header, branches to the exit — and an `if` on something
+        // else entirely has that shape too. `entryVals` maps each header param and back-edge arg to
+        // the arg the guard passes into the loop, so reading through it models the first iteration:
+        // the state the guard tested. Two claims are checked against it, both LOUD on failure.
+        const guardExit = successorTo(b, li.exit)!; // the fusion condition above guarantees this edge
+        const initArgs = (successorTo(b, h)?.args ?? []) as Value[];
+        // Params first, BACK-EDGE ARGS SECOND: one value can be both — param `i+1` of a shifting
+        // pair is also the back-edge arg of param `i` — and the emitted expression renders it
+        // under the un-rotation substitution, so that reading is the one that must win.
+        const entryVals = new Map<Value, Value>();
+        li.header.params.forEach((p, i) => initArgs[i] !== undefined && entryVals.set(p, initArgs[i]));
+        li.header.params.forEach(
+          (_, i) => initArgs[i] !== undefined && entryVals.set(li.backArgOfParam[i], initArgs[i]),
+        );
+        // (1) Is the guard PROVABLY the loop's own test? Fusion DELETES it and lets the `while`
+        // re-test, so when it tests something else the emitted C loses the `if` outright and runs a
+        // loop the source skipped. Structural equality is a sufficient proof, never a necessary
+        // one: `str[0]` and `str[i]` at `i = 0`, or a signed `e <= 0` beside an unsigned `e != 0`,
+        // are the same test spelled differently, and normalising those needs a canonical form this
+        // pass does not have. Refusing every unproven guard costs rows whose fusion is sound, so it
+        // refuses only the SINK below, which is what makes the fused zero-trip path load-bearing.
+        // KNOWN GAP: a loop with no repairable exit copy still fuses on shape alone, so an `if`
+        // about something else is silently dropped.
+        const enterIsTaken = takenB === h;
+        const contIsTaken = hterm.successors[0].block === li.header;
+        const guardProven = sameAtEntry(hterm.operands[0], term.operands[0], entryVals, enterIsTaken !== contIsTaken);
+        // A pre-update exit copy is repairable rather than fatal: emitted at the TOP of the body it
+        // captures the value one iteration before the update, which is what the exit edge carries.
+        // Its post-loop copy is then dropped, so the ZERO-TRIP path needs the guard→exit edge as a
+        // seed — the only edge holding the never-entered value. That is why the sink demands the
+        // proof above: it makes the fused zero-trip path load-bearing.
+        const sunk = guardProven
+          ? sinkablePreUpdateSlots(li.header, li.exit, hexitArgs, new Set([li.header]), sub, updateWrites)
+          : new Set<number>();
+        // (2) Every exit copy the fused form KEEPS renders after the loop, on the zero-trip path
+        // too — where the loop variables still hold their init values. It must therefore produce
+        // what the guard→exit edge carries, since that edge is dropped. A sunk slot is exempt: its
+        // seed and its body copy cover the two paths separately.
+        const staleExit = hexitArgs.findIndex(
+          (a, j) => !sunk.has(j) && !sameAtEntry(a, guardExit.args[j] as Value, entryVals),
+        );
+        if (staleExit >= 0) {
+          throw new StructureError(
+            `cannot structure '${fn.name}': the fused guard's exit edge carries a value the post-loop ` +
+              `copies do not reproduce on a zero-trip run`,
+          );
+        }
+        const sunkSlot = (j: number) => sunk.has(j);
+        const keptSlot = (j: number) => !sunk.has(j);
         if (
           loopUpdateHazard(
             hterm.operands[0],
-            hexitArgs,
+            hexitArgs.filter((_, j) => keptSlot(j)),
             new Set([li.header]),
             sub,
             updateWrites,
@@ -2173,14 +2267,29 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
             `cannot structure '${fn.name}': loop condition or a post-loop value reads a pre-update loop variable`,
           );
         }
+        // The seed and the loop init are two copy groups from the SAME block, emitted back to back,
+        // and nothing sequentializes them against each other: a seed that writes a name the init
+        // then reads hands the loop the wrong starting value. Computed once — a second
+        // `argAssigns` for one edge burns a swap-cycle temp number and changes the output.
+        const seed = argAssigns(b, li.exit, null, sunkSlot);
+        const seedWrites = new Set(seed.filter((st) => st.k === 'assign').map((st) => st.name));
+        if (initArgs.some((a) => readsClobbered(a, new Map(), seedWrites))) {
+          throw new StructureError(
+            `cannot structure '${fn.name}': seeding the zero-trip value would overwrite a value the ` +
+              `loop initialisation reads`,
+          );
+        }
+        out.push(...seed); // zero-trip value for the sunk copies
         out.push(...argAssigns(b, h)); // loop-variable initialisation
-        out.push(emitWhile(li, updates));
+        out.push(emitWhile(li, updates, preUpdateCopies(li.exit, hexitArgs, sunk)));
         // The header→exit edge may carry non-identity phi args (the exit param merges the guard-false
         // value with the loop's final value). Emit those copies after the loop — dropping them returns
         // a stale value. Read under the un-rotation substitution (post-loop the params hold their
         // updated values), and structure the exit region under the same substitution so a post-loop
         // use of a loop value reads its name.
-        out.push(...withSub(sub, () => [...argAssigns(li.header, li.exit, sub), ...structureRegion(li.exit, stop)]));
+        out.push(
+          ...withSub(sub, () => [...argAssigns(li.header, li.exit, sub, keptSlot), ...structureRegion(li.exit, stop)]),
+        );
         return out;
       }
     }
@@ -2294,18 +2403,31 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
   };
   const loopSub = (li: LoopInfo): Map<Value, string> => subFor(li.header.params, li.backArgOfParam);
 
+  // The sunk exit copies, as body statements. Each arg is a header param — the sink's first
+  // refusal condition — so this is a plain `dest = <loop variable>` reading the value the name
+  // still holds at the top of the body, and needs no substitution. Slot order keeps it deterministic.
+  const preUpdateCopies = (exit: Block, exitArgs: readonly Value[], sunk: Set<number>): Stmt[] =>
+    [...sunk]
+      .sort((x, y) => x - y)
+      .map((j) => ({
+        k: 'assign' as const,
+        name: varName.get(exit.params[j])!,
+        value: { k: 'var' as const, name: varName.get(exitArgs[j])! },
+      }));
+
   // Un-rotate a header's do-while latch into a `while`: the test reads the header's own
-  // params (back-edge args substituted back), and the body is the header's SIDE EFFECTS in
-  // program order followed by its parallel update. The side effects are required — a copies-only
-  // body would silently delete every store/discarded call in the header. Effect order is right by
-  // construction: statements read pre-update names, the updates land after.
-  const emitWhile = (li: LoopInfo, updates?: Stmt[]): Stmt => {
+  // params (back-edge args substituted back), and the body is any sunk trailing copies, then the
+  // header's SIDE EFFECTS in program order, then its parallel update. The side effects are
+  // required — a copies-only body would silently delete every store/discarded call in the header.
+  // Effect order is right by construction: statements read pre-update names, the updates land
+  // after, and a sunk copy reads the top-of-iteration value it is there to capture.
+  const emitWhile = (li: LoopInfo, updates?: Stmt[], sunkCopies: Stmt[] = []): Stmt => {
     const term = li.header.ops[li.header.ops.length - 1];
     let cond = exprWith(loopSub(li))(term.operands[0]);
     if (term.successors[0].block !== li.header) {
       cond = negateCond(cond);
     } // loop-continue must be `taken`
-    const body = [...sideEffects(li.header), ...(updates ?? argAssigns(li.header, li.header))];
+    const body = [...sunkCopies, ...sideEffects(li.header), ...(updates ?? argAssigns(li.header, li.header))];
     return { k: 'while', cond, body };
   };
 
@@ -2354,7 +2476,21 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     const updateWrites = updateWriteSet(updates);
     const lterm = dw.latch.ops[dw.latch.ops.length - 1];
     const exitArgs = (successorTo(dw.latch, dw.exit)?.args ?? []) as Value[];
-    if (loopUpdateHazard(lterm.operands[0], exitArgs, dw.body, sub, updateWrites, null, new Set(dw.header.params))) {
+    // A pre-update exit copy moves to the TOP of the body, where the loop variables still hold
+    // their top-of-iteration values. No zero-trip seed here: a `do-while` always runs its body, so
+    // any other predecessor of the exit is an ordinary edge some enclosing `if` already emits.
+    const sunk = sinkablePreUpdateSlots(dw.header, dw.exit, exitArgs, dw.body, sub, updateWrites);
+    if (
+      loopUpdateHazard(
+        lterm.operands[0],
+        exitArgs.filter((_, j) => !sunk.has(j)),
+        dw.body,
+        sub,
+        updateWrites,
+        null,
+        new Set(dw.header.params),
+      )
+    ) {
       throw new StructureError(
         `cannot structure '${fn.name}': do-while condition or a post-loop value reads a pre-update loop variable`,
       );
@@ -2396,14 +2532,19 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     // already holds the next value, so the latch-computed test reads `v`, not `v - 1`). `updates`
     // reuses the hazard check's computation — a second argAssigns call would burn a spurious
     // swap-cycle temp number.
-    const body = [...inner, ...sideEffects(dw.latch), ...updates];
+    const body = [...preUpdateCopies(dw.exit, exitArgs, sunk), ...inner, ...sideEffects(dw.latch), ...updates];
     let cond = exprWith(sub)(lterm.operands[0]);
     if (lterm.successors[1].block === dw.header) {
       cond = negateCond(cond);
     } // continue edge must be `taken`
     const out: Stmt[] = [{ k: 'dowhile', cond, body }];
     // The exit region reads latch back-edge values under `sub` (post-loop they live in the loop vars).
-    out.push(...withSub(sub, () => [...argAssigns(dw.latch, dw.exit, sub), ...structureRegion(dw.exit, stop)]));
+    out.push(
+      ...withSub(sub, () => [
+        ...argAssigns(dw.latch, dw.exit, sub, (j) => !sunk.has(j)),
+        ...structureRegion(dw.exit, stop),
+      ]),
+    );
     return out;
   };
 

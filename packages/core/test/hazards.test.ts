@@ -7,8 +7,9 @@ import { describe, expect, test } from 'vitest';
 
 import { Block, Op, Value, mkOp, mkValue } from '../src/ir/core';
 import { T } from '../src/ir/types';
+import { without } from '../src/l3/gates';
 import type { UseSite } from '../src/structure/analysis';
-import { makeLoopHazards, updateWriteSet } from '../src/structure/hazards';
+import { PREUPDATE_SINK_GATES, makeLoopHazards, updateWriteSet } from '../src/structure/hazards';
 
 const v = (): Value => mkValue(T.s(32));
 
@@ -16,12 +17,16 @@ interface Fixture {
   defs?: Map<Value, Op>;
   varName?: Map<Value, string>;
   useSitesOf?: Map<Value, UseSite[]>;
+  liveIn?: Map<Block, Set<Value>>;
+  opBlock?: Map<Op, Block>;
 }
 const make = (f: Fixture = {}) =>
   makeLoopHazards({
     defs: f.defs ?? new Map(),
     varName: f.varName ?? new Map(),
     useSitesOf: f.useSitesOf ?? new Map(),
+    liveIn: f.liveIn ?? new Map(),
+    opBlock: f.opBlock ?? new Map(),
   });
 
 const use = (blk: Block): UseSite => ({ blk, idx: 0, op: mkOp('add') });
@@ -124,6 +129,115 @@ describe('loopEscapeHazard', () => {
     });
     expect(h.loopEscapeHazard(new Set([body]), new Map(), new Set(['v0']))).toBe(true);
     expect(h.loopEscapeHazard(new Set([body]), new Map(), new Set(['v0']), null, new Set([p]))).toBe(false);
+  });
+});
+
+describe('sinkablePreUpdateSlots', () => {
+  // A self-loop carrying one variable (`p`, named v0, updated every iteration) whose exit edge
+  // ALSO hands its pre-update value to a merge param (`q`, named v1) — the trailing-variable
+  // shape. The per-candidate refusals ABLATE one gate from the real table and re-run the real
+  // predicate, so a gate that has stopped doing anything cannot go unnoticed; the two edge-level
+  // rules are not in the table and are exercised directly.
+  const scaffold = () => {
+    const p = v();
+    const q = v();
+    const header: Block = { params: [p], ops: [] };
+    const exit: Block = { params: [q], ops: [] };
+    return { p, q, header, exit, body: new Set([header]) };
+  };
+  const names = (...pairs: [Value, string][]) => new Map(pairs);
+  const empty = new Map<Value, string>();
+
+  test('an exit arg that IS a loop variable, into a name of its own, is sinkable', () => {
+    const { p, q, header, exit, body } = scaffold();
+    const h = make({ varName: names([p, 'v0'], [q, 'v1']), liveIn: new Map([[header, new Set<Value>()]]) });
+    expect(h.sinkablePreUpdateSlots(header, exit, [p], body, empty, new Set(['v0']))).toEqual(new Set([0]));
+  });
+
+  test('an arg the update does NOT clobber has no hazard to repair', () => {
+    const { p, q, header, exit, body } = scaffold();
+    const h = make({ varName: names([p, 'v0'], [q, 'v1']), liveIn: new Map([[header, new Set<Value>()]]) });
+    expect(h.sinkablePreUpdateSlots(header, exit, [p], body, empty, new Set(['v9']))).toEqual(new Set());
+  });
+
+  test('ablating arg-is-loop-variable admits a computed exit arg', () => {
+    const { p, q, header, exit, body } = scaffold();
+    const e = v();
+    const op = mkOp('add', { operands: [p], results: [e] });
+    const h = make({
+      defs: new Map([[e, op]]),
+      varName: names([p, 'v0'], [q, 'v1']),
+      liveIn: new Map([[header, new Set<Value>()]]),
+    });
+    const args = [e];
+    expect(h.sinkablePreUpdateSlots(header, exit, args, body, empty, new Set(['v0']))).toEqual(new Set());
+    const ablated = without(PREUPDATE_SINK_GATES, 'arg-is-loop-variable');
+    expect(h.sinkablePreUpdateSlots(header, exit, args, body, empty, new Set(['v0']), ablated)).toEqual(new Set([0]));
+  });
+
+  test('ablating dest-not-loop-variable admits a self-assignment', () => {
+    const { p, q, header, exit, body } = scaffold();
+    // `q` shares the loop variable's name, so the sunk copy would read `v0 = v0`.
+    const h = make({ varName: names([p, 'v0'], [q, 'v0']), liveIn: new Map([[header, new Set<Value>()]]) });
+    expect(h.sinkablePreUpdateSlots(header, exit, [p], body, empty, new Set(['v0']))).toEqual(new Set());
+    const ablated = without(PREUPDATE_SINK_GATES, 'dest-not-loop-variable');
+    expect(h.sinkablePreUpdateSlots(header, exit, [p], body, empty, new Set(['v0']), ablated)).toEqual(new Set([0]));
+  });
+
+  test('ablating dest-free-inside-loop admits a name the loop still reads', () => {
+    const { p, q, header, exit, body } = scaffold();
+    const other = v();
+    const h = make({
+      varName: names([p, 'v0'], [q, 'v1'], [other, 'v1']),
+      liveIn: new Map([[header, new Set([other])]]),
+    });
+    expect(h.sinkablePreUpdateSlots(header, exit, [p], body, empty, new Set(['v0']))).toEqual(new Set());
+    const ablated = without(PREUPDATE_SINK_GATES, 'dest-free-inside-loop');
+    expect(h.sinkablePreUpdateSlots(header, exit, [p], body, empty, new Set(['v0']), ablated)).toEqual(new Set([0]));
+  });
+
+  test('a value under the destination name DEFINED in the body counts as busy too', () => {
+    const { p, q, header, exit, body } = scaffold();
+    const other = v();
+    const op = mkOp('add', { results: [other] });
+    header.ops.push(op);
+    const h = make({
+      defs: new Map([[other, op]]),
+      opBlock: new Map([[op, header]]),
+      varName: names([p, 'v0'], [q, 'v1'], [other, 'v1']),
+      liveIn: new Map([[header, new Set<Value>()]]),
+    });
+    expect(h.sinkablePreUpdateSlots(header, exit, [p], body, empty, new Set(['v0']))).toEqual(new Set());
+  });
+
+  test('two slots wanting ONE name refuse the whole edge (one parallel copy)', () => {
+    // Not a per-candidate gate either: no single slot is at fault. Both would write `v1`, and the
+    // body cannot run two copies into one name and still carry both values.
+    const { p, q, header, exit, body } = scaffold();
+    const p2 = v();
+    const other = v();
+    header.params.push(p2);
+    exit.params.push(other);
+    const h = make({
+      varName: names([p, 'v0'], [p2, 'v9'], [q, 'v1'], [other, 'v1']),
+      liveIn: new Map([[header, new Set<Value>()]]),
+    });
+    expect(h.sinkablePreUpdateSlots(header, exit, [p, p2], body, empty, new Set(['v0', 'v9']))).toEqual(new Set());
+  });
+
+  test('a slot that STAYS BEHIND reading a sunk name refuses the whole edge (one parallel copy)', () => {
+    // Not a per-candidate gate: it is a property of the edge, so it is not in the table.
+    const { p, q, header, exit, body } = scaffold();
+    const stay = v();
+    const e = v();
+    const op = mkOp('add', { operands: [q], results: [e] });
+    exit.params.push(stay);
+    const h = make({
+      defs: new Map([[e, op]]),
+      varName: names([p, 'v0'], [q, 'v1'], [stay, 'v2']),
+      liveIn: new Map([[header, new Set<Value>()]]),
+    });
+    expect(h.sinkablePreUpdateSlots(header, exit, [p, e], body, empty, new Set(['v0']))).toEqual(new Set());
   });
 });
 
