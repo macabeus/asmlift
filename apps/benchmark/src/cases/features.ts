@@ -52,6 +52,14 @@ export const JUDGEMENT_FLOOR: Record<string, (body: string, asm: string, whole: 
     /\bif\b|\bswitch\b|\?|\bfor\b|\bwhile\b|&&|\|\|/.test(b) ||
     /\bb(eq|ne|ge|gt|le|lt|hi|ls|cs|cc)\b|beqz|bnez|blez|bgtz|bltz|bgez/.test(asm),
   break: (b) => /\bbreak\b/.test(b),
+  // The necessary condition is a declaration statement with NO initialiser — `int r;`, `int w,x;`.
+  // Anchored at a statement boundary so it cannot match a type name mid-expression, and the tail
+  // class excludes `=`, so a declarator list where ANYTHING is initialised (`int a,b,s=0;`) is not
+  // evidence. Which local goes uninitialised, and on which path, stays a human call.
+  'uninit-local': (b) =>
+    /(?:^|[;{}])\s*(?:(?:unsigned|signed|const|struct|union)\s+)*(?:void|int|char|short|long|float|double|[us]\d+|f\d+|\w+_t|[A-Z]\w*)\s+\**\s*[A-Za-z_][\w\s,*]*;/.test(
+      b,
+    ),
   continue: (b) => /\bcontinue\b/.test(b),
   // a TYPE tag: the evidence is in the signature, not the body
   double: (_b, _asm, whole) => /\bdouble\b/.test(whole),
