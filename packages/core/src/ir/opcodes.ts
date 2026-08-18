@@ -118,6 +118,23 @@ export const OPCODES = {
   // "the audit ran" a verifier-checkable fact instead of a convention: a frontend that emits a
   // laddr and skips the audit fails verify loudly instead of rendering `&undefined`.
   laddr: { operands: 0, results: 1, requiredAttrs: ['off', 'width', 'signed'] },
+  // An UNDEFINED value: storage this function owns, read on a path that never wrote it. The C it
+  // came from declared a local with no initialiser and assigned it only inside some arms of a
+  // conditional or `switch` (a `switch` with no `default` is the commonest source), so the read is
+  // legal to compile and the compiler emitted the unassigned path faithfully.
+  //
+  // WHY IT IS AN OPCODE AND NOT A LIVE-IN. Braun's construction resolves a read with no reaching
+  // definition to a live-in, and a live-in of the entry block is a PARAMETER — which for a register
+  // is right (it really is an argument) but for storage the function ALLOCATED is a fabrication: the
+  // signature grows an argument standing in for uninitialised stack. Without a way to say "undefined
+  // here" the frontend could only refuse, so this is the representation that refusal was standing in
+  // for. `frontend/ssa.ts` mints it exactly where it used to throw.
+  //
+  // Operand-free and pure, like `laddr`. Deliberately NOT in raise/gvn.ts's NUMBERABLE set: two
+  // undefs are two DISTINCT uninitialised locals, and collapsing them by key would merge variables
+  // the source kept apart. `key` names the storage (`sp@0`, `r4`) so the IR dump stays traceable
+  // back to the assembly; the structurer declares one local per undef and emits NO assignment.
+  undef: { operands: 0, results: 1, requiredAttrs: ['key'] },
   // --- black-box escape hatch (keeps lifting total) ---
   // `effects: true`: an instruction asmlift could not model may do anything — write memory, trap,
   // touch a system register — and `results[0]` is only the part we can name. So a dead `opaque` is

@@ -199,10 +199,11 @@ test('MIPS: sp accesses outside the word-slot model decline, never a bogus slot'
   expect(mips('   0:\tlw\tv0,16(sp)\n')).toThrow(/never stored/); // a slot no store defined
   // …and the case that guard MISSES, found while porting the model to Thumb: `hasReachingDef` asks
   // whether a store reaches on SOME path, so a slot stored on one arm of a diamond and reloaded at
-  // the join passes it. readVar then recurses into the unstored predecessor and mints an entry
-  // parameter FOR THE SLOT — this one-argument function came out as `s32 f(s32 a0, s32 a1)` with
-  // `a1` standing in for uninitialised stack. Both frontends now assert the symptom at the same
-  // boundary (frontend/ssa.ts assertNoSlotEscaped), which is total where a per-read test cannot be.
+  // the join passes it. readVar then recurses into the unstored predecessor and used to mint an
+  // entry parameter FOR THE SLOT — this one-argument function came out as `s32 f(s32 a0, s32 a1)`
+  // with `a1` standing in for uninitialised stack. That is now RECOVERED rather than refused: a
+  // `sp@` key cannot be an incoming argument, so the live-in is an uninitialised local and `undef`
+  // names it. The arity is the assertion — one parameter, and the local declared but never assigned.
   const diamond = [
     '00000000 <f>:',
     '   0:\taddiu\tsp,sp,-24',
@@ -216,11 +217,18 @@ test('MIPS: sp accesses outside the word-slot model decline, never a bogus slot'
     '  20:\taddiu\tsp,sp,24',
     '',
   ].join('\n');
-  expect(() => decompile('f', diamond, MIPS_IDO)).toThrow(/stack slot sp@16 is read on a path that never stores it/);
+  expect(decompile('f', diamond, MIPS_IDO).source).toBe(
+    's32 f(s32 a0) {\n    s32 uninit0;\n    if (a0 == 0) a0 = uninit0;\n    return a0 + 1;\n}\n',
+  );
   // …and the same fabrication when the entry block is ITSELF the loop header, where the slot
   // arrives as a PHI rather than a live-in. `paramReg` only covers live-ins, so the escape check
   // was blind to it and the phantom parameter survived — on MIPS, which has no preheader to make
   // the entry predecessor-free. The check reads phi keys too.
+  //
+  // This one is NOT covered by the undef recovery above and still declines, on purpose: the undef
+  // is minted at the predecessor-less live-in site, and here there is no such site — the entry has
+  // the latch as a predecessor. The postcondition is what catches it, so it stays a postcondition
+  // rather than becoming an assertion nothing can reach.
   const entryLoop = [
     '00000000 <f>:',
     '   0:\taddiu\tsp,sp,-24',

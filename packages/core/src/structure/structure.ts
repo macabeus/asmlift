@@ -704,7 +704,10 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
   // in this layer's namespace: params, locals, every gaddr symbol, and the project's symbol map —
   // none of which the frontend can see. A frontend-chosen `sp0` silently shadowed a project global
   // of the same name. `sp<off>` uniquified with underscores until free; one name per offset.
-  const laddrName = (() => {
+  // `undef` locals are minted in the SAME pass off the SAME `taken` set: both name a piece of this
+  // function's own frame, so a separately-minted `uninit0` could collide with a `sp0` (or with each
+  // other) and one declaration would shadow the other.
+  const { laddr: laddrName, undef: undefName } = (() => {
     const taken = new Set<string>();
     if (symbols) {
       for (const [n] of symbols) {
@@ -722,27 +725,35 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
         }
       }
     }
+    const mint = (base: string): string => {
+      let n = base;
+      while (taken.has(n)) {
+        n += '_';
+      }
+      taken.add(n);
+      return n;
+    };
     const byOff = new Map<number, string>();
     const names = new Map<Op, string>();
+    const undefNames = new Map<Op, string>();
     for (const b of fn.blocks) {
       for (const op of b.ops) {
-        if (op.opcode !== 'laddr') {
-          continue;
-        }
-        const off = op.attrs.off as number;
-        let n = byOff.get(off);
-        if (n === undefined) {
-          n = `sp${off}`;
-          while (taken.has(n)) {
-            n += '_';
+        if (op.opcode === 'laddr') {
+          const off = op.attrs.off as number;
+          let n = byOff.get(off);
+          if (n === undefined) {
+            n = mint(`sp${off}`);
+            byOff.set(off, n);
           }
-          taken.add(n);
-          byOff.set(off, n);
+          names.set(op, n);
+        } else if (op.opcode === 'undef') {
+          // one name per undef OP, not per key: the frontend already mints exactly one undef per
+          // (storage, block), and two would mean two distinct uninitialised locals
+          undefNames.set(op, mint(`uninit${undefNames.size}`));
         }
-        names.set(op, n);
       }
     }
-    return names;
+    return { laddr: names, undef: undefNames };
   })();
 
   const scalarGlobals = new Set<string>();
@@ -1704,6 +1715,14 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
       // see laddrName. Renders `&sp0`; the object itself is declared in `locals`.
       return { k: 'addr', name: laddrName.get(d)! };
     }
+    if (d.opcode === 'undef') {
+      // An uninitialised local: read the name, and NEVER emit a definition for it. That absence is
+      // the whole point — the C this came from declared the local and assigned it only on some
+      // paths, so the declaration in `locals` is the entire recovery. `sideEffects` emits nothing
+      // for an `undef` op (it is neither effectful nor materialized), which is what leaves the
+      // declaration bare.
+      return { k: 'var', name: undefName.get(d)! };
+    }
     if (d.opcode === 'gaddr') {
       // A promoted CODE symbol (frontend `code: true`) is a function pointer stored as an
       // integer: spelled `(u32)Name` — the source idiom — never `&Name` (defect G of the
@@ -2429,6 +2448,13 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
             ]),
         ).values(),
       ],
+      // uninitialised locals (undef): declared, never assigned. The type is the one recovery
+      // settled on for the value, exactly as for any other local — an undef that stayed unknown
+      // declares the same s32 an unknown-typed local would.
+      ...fn.blocks
+        .flatMap((b) => b.ops)
+        .filter((op) => op.opcode === 'undef')
+        .map((op) => ({ name: undefName.get(op)!, type: varType.get(undefName.get(op)!) ?? op.results[0].type })),
     ],
     ...(shapedGlobalTypes.size
       ? {

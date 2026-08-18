@@ -15,7 +15,7 @@
 // computation via read/writeVar, push its terminator op last (successors referencing
 // `irBlocks`, args left empty — phi wiring appends them), then call `markFilled(b)`. When all
 // blocks are filled, call `finish()` to remove trivial phis.
-import { Block, Fn, Op, Value, mkValue } from '../ir/core';
+import { Block, Fn, Op, Value, mkOp, mkValue } from '../ir/core';
 import { simplifyTrivialPhis } from '../ir/simplify';
 import { T } from '../ir/types';
 import { FrontendUnsupportedError } from './errors';
@@ -128,7 +128,22 @@ export function makeSsaBuilder(name: string, blockCount: number, preds: number[]
     // manufacture a join (and a phi) where there is none.
     const ps = distinctPreds(b);
     if (ps.length === 0) {
-      // live-in with no predecessor: an incoming argument register → function parameter.
+      // A live-in with no predecessor is a value this function never produced. For a register that
+      // means an incoming argument (below); for storage the function ALLOCATED it means nobody wrote
+      // it on this path — an uninitialised local, which is a value we can now name.
+      //
+      // The split is decided by whether the key COULD have been an incoming argument, and for a
+      // frame slot the answer is no by construction: the Thumb frontend keys incoming stack
+      // arguments as `@sarg<k>` precisely because they sit at or above the callee's own frame, so a
+      // `sp@<off>` key is always storage below it. That is the same fact `finish`'s postcondition
+      // was asserting; it is enforced here now, at the one site that could break it.
+      if (reg.startsWith(SLOT_PREFIX)) {
+        const op = mkOp('undef', { results: [mkValue(T.unk(32))], attrs: { key: reg } });
+        irBlocks[b].ops.unshift(op); // ahead of everything in a block that nothing precedes
+        defs[b].set(reg, op.results[0]);
+        return op.results[0];
+      }
+      // an incoming argument register → function parameter.
       // If one was already asserted for this key (ensureParam), adopt it — minting a second
       // parameter for the same key would put the key in the signature twice.
       const obliged = obligedParams[b].get(reg);

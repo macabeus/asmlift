@@ -418,24 +418,52 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     expect(() => decompile('f', shifts, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
   });
 
-  test('a slot stored on only ONE arm of a branch declines, it does not invent a parameter', () => {
-    // The per-read guard asks whether a store reaches on SOME path, and a diamond defeats it:
-    // stored on one arm, reloaded at the join. readVar then recurses into the unstored predecessor
-    // and Braun's live-in path mints an entry parameter for the SLOT — so a one-argument function
-    // came out as `s32 f(s32 a0, s32 a1) { if (a0 != 0) a1 = a0; return a1 + 1; }`, where `a1`
-    // stands in for uninitialised stack. Caught at the boundary instead: a slot may never leave the
-    // frontend as a parameter (frontend/ssa.ts assertNoSlotEscaped).
+  test('a slot stored on only ONE arm of a branch is an uninitialised LOCAL, not a parameter', () => {
+    // The shape: stored on one arm, reloaded at the join, so the other arm reaches the read with
+    // nothing written. Braun's live-in path used to mint an entry parameter for the SLOT — a
+    // one-argument function came out as `s32 f(s32 a0, s32 a1) { … return a1 + 1; }`, where `a1`
+    // stands in for uninitialised stack — and the frontend refused rather than emit that.
+    //
+    // It no longer has to: a `sp@` key CANNOT be an incoming argument (an incoming stack argument
+    // is keyed `@sarg<k>`, see stackArgKey — it sits at or above this frame, not below it), so the
+    // live-in is storage this function owns that nobody wrote. `undef` names exactly that, and the
+    // recovery is the bare declaration.
     const diamond =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tcmp\tr0, #0\n\tbeq\t.L2\n\tstr\tr0, [sp]\n' +
       '.L2:\n\tldr\tr1, [sp]\n\tadd\tr0, r1, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r2}\n\tbx\tr2\n';
-    expect(() => decompile('f', diamond, ARMV4T_AGBCC)).toThrow(
-      /stack slot sp@0 is read on a path that never stores it/,
+    // ONE parameter — the arity is the assertion. `uninit0` is declared and never assigned.
+    expect(decompile('f', diamond, ARMV4T_AGBCC).source).toBe(
+      's32 f(s32 a0) {\n    s32 uninit0;\n    if (a0 == 0) a0 = uninit0;\n    return a0 + 1;\n}\n',
     );
-    // control: store it on BOTH arms and the same shape lifts, with no phantom parameter
+    // control: store it on BOTH arms and there is nothing undefined to declare
     const both =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tcmp\tr0, #0\n\tbeq\t.L2\n\tstr\tr0, [sp]\n' +
       '.L2:\n\tldr\tr1, [sp]\n\tadd\tr0, r1, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r2}\n\tbx\tr2\n';
     expect(decompile('f', both, ARMV4T_AGBCC).source).toBe('s32 f(s32 a0) {\n    return a0 + 1;\n}\n');
+    // …and the REFUSAL that has to survive: a slot no store reaches ANYWHERE is not a local this
+    // function owns — it may be frame arithmetic or an address-taken object, so the slot model
+    // itself does not apply and the honest answer is still to decline.
+    const unstored =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tldr\tr0, [sp]\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(() => decompile('f', unstored, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+  });
+
+  test('two unstored slots are two DISTINCT uninitialised locals, never merged', () => {
+    // The property that keeps `undef` honest as a representation. Every undef has the same
+    // "value" — none — so the tempting move is to collapse them, and raise/gvn.ts would do exactly
+    // that if `undef` were added to its NUMBERABLE set (operand-free and pure, which is the whole
+    // test that set applies). It must NOT be: two uninitialised locals in the source are two
+    // variables, the compiler allocated them separately, and merging them would re-spell the
+    // function as one the compiler never saw. Distinctness is per undef OP, and the frontend mints
+    // one per storage location.
+    const two =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tcmp\tr0, #0\n\tbeq\t.L2\n\tstr\tr0, [sp]\n\tstr\tr0, [sp, #4]\n' +
+      '.L2:\n\tldr\tr1, [sp]\n\tldr\tr2, [sp, #4]\n\tadd\tr0, r1, r2\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r3}\n\tbx\tr3\n';
+    expect(decompile('f', two, ARMV4T_AGBCC).source).toBe(
+      's32 f(s32 a0) {\n    s32 v0;\n    s32 uninit0;\n    s32 uninit1;\n' +
+        '    if (a0 == 0) {\n        v0 = uninit0;\n        a0 = uninit1;\n    } else {\n        v0 = a0;\n    }\n' +
+        '    return a0 + v0;\n}\n',
+    );
   });
 
   test('the OUTGOING argument area is not a local, however far inside the frame it sits', () => {
