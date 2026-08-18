@@ -506,6 +506,47 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     expect(decompile('f', noEscape, ARMV4T_AGBCC).source).toContain('uninit_sp4');
   });
 
+  test('a push AFTER the reservation slides the slot window onto the pushed words', () => {
+    // `localArea` is measured by a walk that SKIPS push/pop — right for the callee-saved block,
+    // which sits above the local area — while the depth arithmetic `argIndex` uses counts push at
+    // 4 bytes per register. A push after the reservation therefore moves sp without moving
+    // `localArea`, and `[0, localArea)` stops naming the reserved area and starts naming the
+    // PUSHED words. Those are written, by an instruction that is dataflow-transparent, so nothing
+    // downstream can tell — and with `undef` in the model that stopped being a lost slot and became
+    // a miscompile: [sp,#0] holds a0 on BOTH paths here, so the machine returns 0 when a0 == 0
+    // while the emitted C returned `0 + garbage`. Found by an adversarial pass; zero inhabitants in
+    // the corpus (agbcc pushes before it reserves) which is exactly why only a probe finds it.
+    const pushAfter =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tpush\t{r0}\n\tcmp\tr0, #0\n\tbeq\t.L2\n\tstr\tr0, [sp]\n' +
+      '.L2:\n\tldr\tr1, [sp]\n\tadd\tr0, r0, r1\n\tadd\tsp, sp, #0xc\n\tpop\t{r4}\n\tpop\t{r3}\n\tbx\tr3\n';
+    expect(() => decompile('f', pushAfter, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+    // POSITIVE CONTROL — the same function with the push BEFORE the reservation, which is what real
+    // agbcc emits, still models its slot. Without this the test would pass with the slot model
+    // disabled outright.
+    const pushBefore =
+      'f:\n\tpush\t{r4, lr}\n\tpush\t{r0}\n\tadd\tsp, sp, #-0x8\n\tcmp\tr0, #0\n\tbeq\t.L2\n\tstr\tr0, [sp]\n' +
+      '.L2:\n\tldr\tr1, [sp]\n\tadd\tr0, r0, r1\n\tadd\tsp, sp, #0xc\n\tpop\t{r4}\n\tpop\t{r3}\n\tbx\tr3\n';
+    expect(decompile('f', pushBefore, ARMV4T_AGBCC).source).toContain('uninit_sp0');
+  });
+
+  test('a word slot may not straddle the top of the reserved area', () => {
+    // The window test bounds the slot's END (`off + 4 <= localArea`), not its start. With a
+    // localArea that is not a multiple of 4 a word at the top spans past it, and the bytes beyond
+    // are the callee-saved block the epilogue pops back. Pre-existing and playground-only — no
+    // valid ARMv4T encoding produces a non-multiple-of-4 sp adjust — but it is the same class as
+    // the push hazard above (the window not being where the model thinks), so it is closed too.
+    const straddle =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x6\n\tcmp\tr0, #0\n\tbeq\t.L2\n\tstr\tr0, [sp, #4]\n' +
+      '.L2:\n\tldr\tr1, [sp, #4]\n\tadd\tr0, r0, r1\n\tadd\tsp, sp, #0x6\n\tpop\t{r4}\n\tpop\t{r3}\n\tbx\tr3\n';
+    expect(() => decompile('f', straddle, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+    // POSITIVE CONTROL: one more reserved byte and the same word fits, so the bound is the end of
+    // the slot and not the offset being nonzero.
+    const fits =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tcmp\tr0, #0\n\tbeq\t.L2\n\tstr\tr0, [sp, #4]\n' +
+      '.L2:\n\tldr\tr1, [sp, #4]\n\tadd\tr0, r0, r1\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r3}\n\tbx\tr3\n';
+    expect(decompile('f', fits, ARMV4T_AGBCC).source).toContain('uninit_sp4');
+  });
+
   test('the OUTGOING argument area is not a local, however far inside the frame it sits', () => {
     // agbcc reserves the bottom of the frame for arguments 5+ of the calls this function makes:
     // `add sp,#-8` … `str r2,[sp]` / `str r3,[sp,#4]` … `bl`. Nothing reloads them, so modelling

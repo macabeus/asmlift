@@ -1330,7 +1330,7 @@ export function lift(
 
   // --- ISA-neutral SSA construction (shared Braun builder) ---
   // A def-less read of a slot is an UNINITIALISED LOCAL here, and this frontend is the one that can
-  // say so: `slotOff` admits an offset only while `off < localArea` (the explicitly reserved local
+  // say so: `slotOff` admits an offset only while `off + 4 <= localArea` (the explicitly reserved local
   // area, measured by the prologue walk), and an incoming stack argument is keyed `@sarg<k>` rather
   // than `sp@<off>` precisely because it sits at or above this frame. So nothing incoming can reach
   // a `sp@` key. MIPS deliberately does NOT pass this — its slot path has no frame bound, so its
@@ -1744,7 +1744,9 @@ export function lift(
     if (asmBlocks.some((ab) => ab.instrs.some((i) => i.mnemonic === 'bl' || i.mnemonic === 'blx'))) {
       const slotAcc = (ins: Instr) => {
         const a = spMemAccess(ins);
-        return a && !a.regOff && a.width === 4 && a.off % 4 === 0 && a.off >= 0 && a.off < localArea ? a.off : null;
+        return a && !a.regOff && a.width === 4 && a.off % 4 === 0 && a.off >= 0 && a.off + 4 <= localArea
+          ? a.off
+          : null;
       };
       const isStore = (ins: Instr) => /^str/.test(ins.mnemonic);
       // Entry-REACHABLE blocks only: a reload in dead code is not evidence that live code reads the
@@ -1885,9 +1887,14 @@ export function lift(
     return null;
   };
   // The frame the body sees: the entry block's PROLOGUE, i.e. everything up to the first
-  // instruction that touches the frame (or the whole block if it never does). Stepped through the
-  // same walk `argIndex` uses, so "what does this do to sp" has one implementation. A frame the
-  // walk cannot measure yields 0, which disables every slot (`off < localArea` is then false).
+  // instruction that touches the frame (or the whole block if it never does). A frame the walk
+  // cannot measure yields 0, which disables every slot (`off + 4 <= localArea` is then false).
+  //
+  // NOT the same walk `argIndex` uses, and this comment used to claim it was. They disagree on
+  // exactly one instruction: `makeFrameWalk.delta` counts `push` at 4 bytes per register, this one
+  // skips it. That is deliberate — the callee-saved block sits ABOVE the local area, so the local
+  // area is measured from below it — but it means a push after the reservation moves sp without
+  // moving this number, which is the hazard the push/pop arm below now refuses.
   // How much sp moves for `add/sub sp, #imm`, positive = sp RISES (frame shrinks). null if not that
   // shape. Only used to recognise a release; the authoritative depth arithmetic is makeFrameWalk's.
   const spAdjust = (ins: Instr): number | null => {
@@ -1907,7 +1914,7 @@ export function lift(
   // away from the memory the pop will read.
   const localArea = ((): number => {
     // The PROLOGUE only — everything before the entry block first touches the frame. Summing the
-    // whole block instead let a store made BEFORE the reservation fall inside `off < localArea`, so
+    // whole block instead let a store made BEFORE the reservation fall inside the window, so
     // `str r0,[sp]; add sp,sp,#-4; …` claimed a write to the CALLER's frame as a private local and
     // deleted it.
     //
@@ -1925,11 +1932,32 @@ export function lift(
     const ins = asmBlocks[0].instrs;
     const firstMem = ins.findIndex((x) => touchesFrame(x));
     let reserved = 0;
+    let reservedYet = false;
     for (const x of ins.slice(0, firstMem === -1 ? ins.length : firstMem)) {
       const d = spAdjust(x);
       if (d !== null) {
         reserved -= d; // d > 0 = sp rises = the frame shrinks
-      } else if (x.mnemonic !== 'push' && x.mnemonic !== 'pop' && isSpReg((x.ops[0] ?? '').replace(/!$/, ''))) {
+        reservedYet ||= reserved > 0;
+      } else if (x.mnemonic === 'push' || x.mnemonic === 'pop') {
+        // A push/pop BEFORE any reservation is the callee-saved block, and the local area is
+        // measured below it — the ordinary agbcc prologue, and why these are skipped at all.
+        // AFTER one, it slides sp under the window just measured: `localArea` does not count push
+        // bytes (this walk skips them) while the depth arithmetic `argIndex` uses DOES, so
+        // `[0, localArea)` stops naming the reserved area and starts naming the pushed words.
+        // Those words ARE written — by the push, which is dataflow-transparent — so nothing
+        // downstream can tell. With `undef` in the model that is a silent miscompile and not
+        // merely a lost slot: `push {r4,lr}; add sp,#-8; push {r0}; …; ldr r1,[sp]` reads back the
+        // pushed `r0` on every path, and the def-less-read shape rendered it as an uninitialised
+        // local — the machine returns 0 where the C returns garbage.
+        //
+        // Poisoned to 0 (every slot disabled) rather than corrected by subtracting the push bytes:
+        // the same rule the sp-write arm below follows, and a measurement this walk cannot make
+        // should not be guessed. Costs nothing on real codegen — agbcc pushes before it reserves,
+        // in all 2343 Thumb functions across the corpus.
+        if (reservedYet) {
+          return 0;
+        }
+      } else if (isSpReg((x.ops[0] ?? '').replace(/!$/, ''))) {
         return 0; // an sp write of a shape this does not model
       }
     }
@@ -2512,7 +2540,7 @@ export function lift(
             width === 4 &&
             off % 4 === 0 &&
             off >= 0 &&
-            off < localArea &&
+            off + 4 <= localArea &&
             ssa.hasReachingDef(slotKey(off), bi)
           ) {
             usedSlotOffsets.add(off);
@@ -2542,7 +2570,7 @@ export function lift(
           const { base, off, regOff } = parseAddr(b);
           // A word spill into this function's own frame: record the slot's value in SSA rather than
           // emitting a store through sp. `slotsOk` has already proven the frame is private and does
-          // not move; `off < localArea` keeps this strictly inside the EXPLICITLY reserved local
+          // not move; `off + 4 <= localArea` keeps this strictly inside the EXPLICITLY reserved local
           // area — not merely inside the frame, whose upper part is the callee-saved block the
           // epilogue pops — so it can never
           // collide with the incoming-argument area above it (which the load path recovers as
@@ -2555,7 +2583,7 @@ export function lift(
             width === 4 &&
             off % 4 === 0 &&
             off >= 0 &&
-            off < localArea
+            off + 4 <= localArea
           ) {
             usedSlotOffsets.add(off);
             writeVar(slotKey(off), bi, readData(reg(a), bi));
