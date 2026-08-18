@@ -247,25 +247,23 @@ followed the second inhabitant, never preceded it.
 
 ### A case where the bar was met on capability but not on the differ: `undef`
 
-`undef` (an uninitialised local — storage this function owns, read on a path that never wrote it)
-is the one op admitted without a byte match behind it, so it is worth being explicit about which
-half of the bar it cleared.
+`undef` (an uninitialised local — storage whose only writer is this function's own stores, read on
+a path where none of them ran) is the one op admitted without a byte match behind it, so it is worth
+being explicit about which half of the bar it cleared. "Only writer" rather than "owns": the two
+came apart in review, and the escape clause below is the difference.
 
 It clears "cannot be expressed in the current one" outright. Braun's SSA resolves a read with no
 reaching definition to a live-in, and a live-in of the entry block is a _parameter_; for storage the
 function allocated, that is a fabricated argument standing in for uninitialised stack. There was no
 third answer, so the frontend could only decline. `undef` is what that decline was standing in for.
 
-It does **not** clear "the differ can prove the result matches", and the honest size of the payoff
-is smaller than the first draft of this section claimed. Measured across all 755 rows, **exactly one
-moved**: `synthetic:uninit_spill:agbcc`, `declined → nonmatch` at score 84. Of the other rows in
-that family, `uninit_sw:agbcc` was already a nonmatch and `uninit_join:agbcc` was already a byte
-**match** — and the reason that one matches is instructive, because it is the gap `undef` does not
-close: its fabricated parameter happens to land in the register the local occupied anyway, so it
-matches with an arity the source never had. That register-half fabrication is untouched here and is
-still silent. The remaining distance is a second, separate capability — the same shape in a
-_register_ rather than a slot — which cannot be classified without either prototype knowledge or
-prologue-save elision.
+It does **not** clear "the differ can prove the result matches". Measured across the whole corpus,
+**exactly one row moved** — `synthetic:uninit_spill:agbcc`, `declined → nonmatch`. The row in that
+family that already matched is the more instructive one: its fabricated parameter happens to land in
+the register the local occupied anyway, so it matches with an arity the source never had. That
+register-half fabrication is untouched here and is still silent, which is the honest shape of the
+remaining distance — a second, separate capability (the same shape in a _register_ rather than a
+slot) that cannot be classified without either prototype knowledge or prologue-save elision.
 
 The envelope is narrow, and worth stating in one sentence: **on Thumb, a word-wide slot strictly
 below the measured local area, which some store reaches but not on every path, in a function where
@@ -277,9 +275,9 @@ The reusable lesson is where the decision lives, not the op. The first version d
 storage the function owns?" in the shared SSA builder by the key's spelling (`sp@…`). That is
 exactly the "arch check inside a shared pass" this document warns about, one layer down: the answer
 depends on the _frame model_, which is per-frontend. Thumb had earned it (it bounds a slot to
-`off + 4 <= localArea` and keys incoming stack arguments separately); MIPS had not, and its `sp@` reaches
-O32's caller-owned argument home area — so the shared rule silently rewrote a fifth argument as an
-uninitialised local on a function that used to decline. The op was fine; the _predicate's owner_ was
+`off + 4 <= localArea` and keys incoming stack arguments separately); MIPS had not, and its `sp@`
+reaches O32's caller-owned argument home area — so the shared rule silently rewrote a fifth argument
+as an uninitialised local on a function that used to decline. The op was fine; the _predicate's owner_ was
 wrong. It is now a frontend-supplied policy (`LiveInKind`), and — the part worth copying — the
 POSTCONDITION consults the same function, so the two cannot drift apart and the shared builder no
 longer knows that `sp@` denotes anything. Each frontend states its own answer: Thumb `'undef'`,
