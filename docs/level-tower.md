@@ -245,6 +245,33 @@ followed the second inhabitant, never preceded it.
   addressing/idiom shape; prefer a **new op** when downstream stages need to reason about the
   recovered concept as a first-class value.
 
+### A case where the bar was met on capability but not on the differ: `undef`
+
+`undef` (an uninitialised local — storage this function owns, read on a path that never wrote it)
+is the one op admitted without a byte match behind it, so it is worth being explicit about which
+half of the bar it cleared.
+
+It clears "cannot be expressed in the current one" outright. Braun's SSA resolves a read with no
+reaching definition to a live-in, and a live-in of the entry block is a _parameter_; for storage the
+function allocated, that is a fabricated argument standing in for uninitialised stack. There was no
+third answer, so the frontend could only decline. `undef` is what that decline was standing in for.
+
+It does **not** clear "the differ can prove the result matches". The rows it lights up
+(`uninit_join`, `uninit_sw`, `uninit_spill`) move from `declined` to a nonmatch, not to a match —
+the remaining distance is a second, separate gap: the same shape in a _register_ rather than a
+slot, which cannot be classified without either prototype knowledge or prologue-save elision.
+Recorded here rather than glossed, because "declined → compilable C" is real progress and is also
+weaker than what `aload`/`astore` had to show.
+
+The reusable lesson is where the decision lives, not the op. The first version decided "is this
+storage the function owns?" in the shared SSA builder by the key's spelling (`sp@…`). That is
+exactly the "arch check inside a shared pass" this document warns about, one layer down: the answer
+depends on the _frame model_, which is per-frontend. Thumb had earned it (it bounds a slot by
+`off < localArea` and keys incoming stack arguments separately); MIPS had not, and its `sp@` reaches
+O32's caller-owned argument home area — so the shared rule silently rewrote a fifth argument as an
+uninitialised local on a function that used to decline. The op was fine; the _predicate's owner_ was
+wrong. It is now a frontend-supplied policy, defaulting to the old refusal.
+
 The through-line, from the first frontend to the latest: a level is a promise the code keeps, not
 a label it wears — and asmlift only makes the promise once it has something to put behind it.
 

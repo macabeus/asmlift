@@ -246,10 +246,16 @@ test('MIPS: sp accesses outside the word-slot model decline, never a bogus slot'
   // was blind to it and the phantom parameter survived — on MIPS, which has no preheader to make
   // the entry predecessor-free. The check reads phi keys too.
   //
-  // This one is NOT covered by the undef recovery above and still declines, on purpose: the undef
-  // is minted at the predecessor-less live-in site, and here there is no such site — the entry has
-  // the latch as a predecessor. The postcondition is what catches it, so it stays a postcondition
-  // rather than becoming an assertion nothing can reach.
+  // This one still declines, and the honest label is NOT YET rather than by design. It is the same
+  // C as the diamond above; what differs is only where the value shows up. `undef` is minted at the
+  // predecessor-less live-in site, and here there is no such site — the entry has the latch as a
+  // predecessor, so the slot arrives as a phi and only the postcondition sees it. That is an
+  // implementation seam, not a semantic one, and "the postcondition would otherwise be unreachable"
+  // would be a rationalisation: keeping a check reachable is no reason to refuse a shape we can now
+  // represent. Closing it means replacing that entry phi with an undef and stripping the paired arg
+  // from every predecessor edge — machinery `simplifyTrivialPhis` already has. Left for the round
+  // that can measure it; note it would need the Thumb bound to hold there too, since this fixture
+  // is MIPS and MIPS does not have it.
   const entryLoop = [
     '00000000 <f>:',
     '   0:\taddiu\tsp,sp,-24',
