@@ -120,13 +120,43 @@ const TRAILING_PTR_EXPR = TRAILING_PTR.replace(
   '  %9: s32* = add %3, %0\n  cond_br %5, ^bb1(%4), ^bb2(%9, %4)',
 );
 
-// REFUSAL — the head is a PARAMETER, so the merge param coalesces onto its name and the seed
-// would assign `a1` before the loop init reads it. Splitting the guard edge's parallel copy is
-// only sound while the two halves are independent.
-const TRAILING_PTR_NAMED_HEAD = TRAILING_PTR.replace(
-  '^bb0(%0: s32*):\n  %1: s32* = gaddr {sym="head"}\n',
-  '^bb0(%0: s32*, %1: s32*):\n',
-);
+// REFUSAL — the guard tests something the loop does not. `isGuardShapedPred` only asks whether the
+// block branches to the header and to the exit; an `if` on an unrelated value has that shape, and
+// fusing it away deletes it, running a loop the source skipped.
+const UNRELATED_GUARD = `fn badguard {
+^bb0(%0: s32*, %1: s32):
+  %9: s32 = const {value=0}
+  %10: s32* = gaddr {sym="head"}
+  %2: u32 = icmp_eq %1, %9
+  cond_br %2, ^bb2(%10, %10), ^bb1(%10)
+^bb1(%3: s32*):
+  %4: s32* = load %3 {off=0, signed=true, width=4}
+  %5: u32 = icmp_ne %0, %4
+  cond_br %5, ^bb1(%4), ^bb2(%3, %4)
+^bb2(%6: s32*, %7: s32*):
+  %8: s32 = load %6 {off=4, signed=true, width=4}
+  ret %8
+}
+`;
+
+// REFUSAL — the guard→exit edge carries a value (const 5) that the post-loop copies do not
+// reproduce on a zero-trip run. That edge is not emitted at all once the guard is fused away, so
+// the zero-trip path would read the loop's value instead.
+const ZERO_TRIP_VALUE_LOST = `fn fusedrop {
+^bb0(%0: s32*):
+  %1: s32* = gaddr {sym="head"}
+  %2: u32 = icmp_eq %0, %1
+  %20: s32 = const {value=5}
+  cond_br %2, ^bb2(%20), ^bb1(%1)
+^bb1(%3: s32*):
+  %4: s32* = load %3 {off=0, signed=true, width=4}
+  %5: u32 = icmp_ne %0, %4
+  %6: s32 = load %1 {off=8, signed=true, width=4}
+  cond_br %5, ^bb1(%4), ^bb2(%6)
+^bb2(%7: s32):
+  ret %7
+}
+`;
 
 test('an exit arg that COMPUTES from the loop variable is not sinkable — still declines', () => {
   expect(TRAILING_PTR_EXPR).not.toBe(TRAILING_PTR); // the one-fact edit landed
@@ -134,8 +164,34 @@ test('an exit arg that COMPUTES from the loop variable is not sinkable — still
   expect(() => emit(TRAILING_PTR_EXPR)).toThrow(StructureError);
 });
 
-test('a seed that would clobber a value the loop init reads is not sinkable — still declines', () => {
-  expect(TRAILING_PTR_NAMED_HEAD).not.toBe(TRAILING_PTR);
-  expect(() => emit(TRAILING_PTR)).not.toThrow(); // control: the base shape IS accepted
-  expect(() => emit(TRAILING_PTR_NAMED_HEAD)).toThrow(StructureError);
+test('a guard not provably the loop test is not sinkable — declines instead of vanishing', () => {
+  // Same CFG as TRAILING_PTR, which IS accepted; only the guard's condition differs. Guard fusion
+  // drops the test, so sinking — which makes the zero-trip path load-bearing — must first prove
+  // the `while` re-asks the same question.
+  expect(() => emit(TRAILING_PTR)).not.toThrow();
+  expect(() => emit(UNRELATED_GUARD)).toThrow(StructureError);
+});
+
+test('a zero-trip value the post-loop copies cannot reproduce declines instead of being dropped', () => {
+  expect(() => emit(TRAILING_PTR)).not.toThrow();
+  expect(() => emit(ZERO_TRIP_VALUE_LOST)).toThrow(/zero-trip run/);
+});
+
+// The trailing variable may be the PARAMETER the list head came from: the guard→exit edge then
+// carries it unchanged, so the seed is an identity and the loop writes the parameter directly.
+test('a trailing copy into an existing name needs no seed', () => {
+  const NAMED_HEAD = TRAILING_PTR.replace(
+    '^bb0(%0: s32*):\n  %1: s32* = gaddr {sym="head"}\n',
+    '^bb0(%0: s32*, %1: s32*):\n',
+  );
+  expect(NAMED_HEAD).not.toBe(TRAILING_PTR);
+  expect(emit(NAMED_HEAD)).toBe(
+    's32 trailingptr(s32 * a0, s32 * a1) {\n' +
+      '    s32 * v0;\n' +
+      '    for (v0 = a1; a0 != v0; v0 = (s32 *)*v0) {\n' +
+      '        a1 = v0;\n' +
+      '    }\n' +
+      '    return a1[1];\n' +
+      '}\n',
+  );
 });

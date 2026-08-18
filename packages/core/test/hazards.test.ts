@@ -7,8 +7,9 @@ import { describe, expect, test } from 'vitest';
 
 import { Block, Op, Value, mkOp, mkValue } from '../src/ir/core';
 import { T } from '../src/ir/types';
+import { without } from '../src/l3/gates';
 import type { UseSite } from '../src/structure/analysis';
-import { makeLoopHazards, updateWriteSet } from '../src/structure/hazards';
+import { PREUPDATE_SINK_GATES, makeLoopHazards, updateWriteSet } from '../src/structure/hazards';
 
 const v = (): Value => mkValue(T.s(32));
 
@@ -131,10 +132,11 @@ describe('loopEscapeHazard', () => {
   });
 });
 
-describe('sinkablePreUpdateExits', () => {
+describe('sinkablePreUpdateSlots', () => {
   // A self-loop carrying one variable (`p`, named v0, updated every iteration) whose exit edge
   // ALSO hands its pre-update value to a merge param (`q`, named v1) — the trailing-variable
-  // shape. Each test below flips exactly one fact of this fixture.
+  // shape. Each test ABLATES one gate from the real table and re-runs the real predicate, so a
+  // gate that has stopped doing anything cannot go unnoticed.
   const scaffold = () => {
     const p = v();
     const q = v();
@@ -143,20 +145,21 @@ describe('sinkablePreUpdateExits', () => {
     return { p, q, header, exit, body: new Set([header]) };
   };
   const names = (...pairs: [Value, string][]) => new Map(pairs);
+  const empty = new Map<Value, string>();
 
-  test('an exit arg that IS a header param, into a name of its own, is sinkable', () => {
+  test('an exit arg that IS a loop variable, into a name of its own, is sinkable', () => {
     const { p, q, header, exit, body } = scaffold();
     const h = make({ varName: names([p, 'v0'], [q, 'v1']), liveIn: new Map([[header, new Set<Value>()]]) });
-    expect(h.sinkablePreUpdateExits(header, exit, [p], body, new Map(), new Set(['v0']))).toEqual(new Set([0]));
+    expect(h.sinkablePreUpdateSlots(header, exit, [p], body, empty, new Set(['v0']))).toEqual(new Set([0]));
   });
 
   test('an arg the update does NOT clobber has no hazard to repair', () => {
     const { p, q, header, exit, body } = scaffold();
     const h = make({ varName: names([p, 'v0'], [q, 'v1']), liveIn: new Map([[header, new Set<Value>()]]) });
-    expect(h.sinkablePreUpdateExits(header, exit, [p], body, new Map(), new Set(['v9']))).toEqual(new Set());
+    expect(h.sinkablePreUpdateSlots(header, exit, [p], body, empty, new Set(['v9']))).toEqual(new Set());
   });
 
-  test('an arg that is not a header param itself is refused (an expression would be recomputed)', () => {
+  test('ablating arg-is-loop-variable admits a computed exit arg', () => {
     const { p, q, header, exit, body } = scaffold();
     const e = v();
     const op = mkOp('add', { operands: [p], results: [e] });
@@ -165,26 +168,34 @@ describe('sinkablePreUpdateExits', () => {
       varName: names([p, 'v0'], [q, 'v1']),
       liveIn: new Map([[header, new Set<Value>()]]),
     });
-    expect(h.sinkablePreUpdateExits(header, exit, [e], body, new Map(), new Set(['v0']))).toEqual(new Set());
+    const args = [e];
+    expect(h.sinkablePreUpdateSlots(header, exit, args, body, empty, new Set(['v0']))).toEqual(new Set());
+    const ablated = without(PREUPDATE_SINK_GATES, 'arg-is-loop-variable');
+    expect(h.sinkablePreUpdateSlots(header, exit, args, body, empty, new Set(['v0']), ablated)).toEqual(new Set([0]));
   });
 
-  test('a destination named after a loop variable is refused (the sunk copy would self-assign)', () => {
+  test('ablating dest-not-loop-variable admits a self-assignment', () => {
     const { p, q, header, exit, body } = scaffold();
+    // `q` shares the loop variable's name, so the sunk copy would read `v0 = v0`.
     const h = make({ varName: names([p, 'v0'], [q, 'v0']), liveIn: new Map([[header, new Set<Value>()]]) });
-    expect(h.sinkablePreUpdateExits(header, exit, [p], body, new Map(), new Set(['v0']))).toEqual(new Set());
+    expect(h.sinkablePreUpdateSlots(header, exit, [p], body, empty, new Set(['v0']))).toEqual(new Set());
+    const ablated = without(PREUPDATE_SINK_GATES, 'dest-not-loop-variable');
+    expect(h.sinkablePreUpdateSlots(header, exit, [p], body, empty, new Set(['v0']), ablated)).toEqual(new Set([0]));
   });
 
-  test('a destination name still live across the header is refused (writing it clobbers that value)', () => {
+  test('ablating dest-free-inside-loop admits a name the loop still reads', () => {
     const { p, q, header, exit, body } = scaffold();
     const other = v();
     const h = make({
       varName: names([p, 'v0'], [q, 'v1'], [other, 'v1']),
       liveIn: new Map([[header, new Set([other])]]),
     });
-    expect(h.sinkablePreUpdateExits(header, exit, [p], body, new Map(), new Set(['v0']))).toEqual(new Set());
+    expect(h.sinkablePreUpdateSlots(header, exit, [p], body, empty, new Set(['v0']))).toEqual(new Set());
+    const ablated = without(PREUPDATE_SINK_GATES, 'dest-free-inside-loop');
+    expect(h.sinkablePreUpdateSlots(header, exit, [p], body, empty, new Set(['v0']), ablated)).toEqual(new Set([0]));
   });
 
-  test('a destination name defined INSIDE the body is refused for the same reason', () => {
+  test('a value under the destination name DEFINED in the body counts as busy too', () => {
     const { p, q, header, exit, body } = scaffold();
     const other = v();
     const op = mkOp('add', { results: [other] });
@@ -195,10 +206,11 @@ describe('sinkablePreUpdateExits', () => {
       varName: names([p, 'v0'], [q, 'v1'], [other, 'v1']),
       liveIn: new Map([[header, new Set<Value>()]]),
     });
-    expect(h.sinkablePreUpdateExits(header, exit, [p], body, new Map(), new Set(['v0']))).toEqual(new Set());
+    expect(h.sinkablePreUpdateSlots(header, exit, [p], body, empty, new Set(['v0']))).toEqual(new Set());
   });
 
   test('a slot that STAYS BEHIND reading a sunk name refuses the whole edge (one parallel copy)', () => {
+    // Not a per-candidate gate: it is a property of the edge, so it is not in the table.
     const { p, q, header, exit, body } = scaffold();
     const stay = v();
     const e = v();
@@ -209,7 +221,7 @@ describe('sinkablePreUpdateExits', () => {
       varName: names([p, 'v0'], [q, 'v1'], [stay, 'v2']),
       liveIn: new Map([[header, new Set<Value>()]]),
     });
-    expect(h.sinkablePreUpdateExits(header, exit, [p, e], body, new Map(), new Set(['v0']))).toEqual(new Set());
+    expect(h.sinkablePreUpdateSlots(header, exit, [p, e], body, empty, new Set(['v0']))).toEqual(new Set());
   });
 });
 

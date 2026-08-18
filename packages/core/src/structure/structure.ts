@@ -1156,16 +1156,17 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     return true;
   };
   // Does the edge `pr -> b` hand `c` over as a loop variable's PRE-update value? True when `c` is a
-  // loop header's own param and the edge leaves the loop FROM A LATCH — the point past which the
-  // emitted update has already run, since every emitter places the update at the BOTTOM of the
-  // body. `c` there means the value the variable held at the top of the exiting iteration, so a
-  // merge param sharing its name would read one iteration on, silently. Keeping the names apart
-  // is also what lets the loop emitters sink the copy into the body; sharing them would make the
-  // sunk copy a self-assignment.
+  // loop header's own param and the edge leaves the loop from a latch of an emitter that places
+  // the update at the BOTTOM of the body — the self-loop `while` and the `do-while`. `c` there
+  // means the value the variable held at the top of the exiting iteration, so a merge param
+  // sharing its name would read one iteration on, silently. Keeping the names apart is also what
+  // lets those emitters sink the copy into the body; sharing them would make it a self-assignment.
   //
-  // Three shapes are NOT this, and must keep coalescing:
-  //   - the edge leaves from the HEADER (a test-at-top `while`): the name still holds the
-  //     top-of-iteration value there;
+  // Four shapes are NOT this, and must keep coalescing:
+  //   - the loop is emitted by neither of those two. A test-at-top `while` puts its exit copies in
+  //     the sibling arm of the latch's `cond_br`, AHEAD of the update, so the name is still the
+  //     top-of-iteration value there (`while (p) { if (p->key == k) return p; p = p->next; }`);
+  //   - the edge leaves from the HEADER rather than a latch — same reason;
   //   - the back-edge arg for `c`'s own slot is `c`: that slot is never rewritten;
   //   - `c` is itself a back-edge arg — the compiler already carries the trailing value in a
   //     second loop variable, so the un-rotation substitution reads it under that one's name.
@@ -1174,6 +1175,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     const header = paramBlock.get(c);
     const nl = header && forest.byHeader.get(header);
     if (!nl || nl.body.has(b) || !nl.body.has(pr)) {
+      return false;
+    }
+    if (!loops.has(header!) && doWhileLoops.get(header!)?.latch !== pr) {
       return false;
     }
     const back = successorTo(pr, header!);
@@ -1811,7 +1815,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
   // pure decline-or-emit predicates, extracted to hazards.ts behind the explicit-deps factory.
   // `varName` is captured as a live reference: it is still being populated here in the naming
   // pipeline, and each check reads the names that exist when EMISSION calls it.
-  const { readsClobbered, loopUpdateHazard, sinkablePreUpdateExits } = makeLoopHazards({
+  const { loopUpdateHazard, sinkablePreUpdateSlots, sameAtEntry } = makeLoopHazards({
     defs,
     varName,
     useSitesOf,
@@ -2199,23 +2203,61 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
         const updateWrites = updateWriteSet(updates);
         const hterm = li.header.ops[li.header.ops.length - 1];
         const hexitArgs = (successorTo(li.header, li.exit)?.args ?? []) as Value[];
+        // FUSION IS ONLY SOUND WHEN EVERYTHING IT DROPS IS REDUNDANT. `isGuardShapedPred` asks about
+        // the SHAPE alone — branches to the header, branches to the exit — and an `if` on something
+        // else entirely has that shape too. `entryVals` maps each header param and back-edge arg to
+        // the arg the guard passes into the loop, so reading through it models the first iteration:
+        // the state the guard tested. Two claims are checked against it, both LOUD on failure.
+        const guardExit = successorTo(b, li.exit);
+        const initArgs = (successorTo(b, h)?.args ?? []) as Value[];
+        // Params first, BACK-EDGE ARGS SECOND: one value can be both — param `i+1` of a shifting
+        // pair is also the back-edge arg of param `i` — and the emitted expression renders it
+        // under the un-rotation substitution, so that reading is the one that must win.
+        const entryVals = new Map<Value, Value>();
+        li.header.params.forEach((p, i) => initArgs[i] !== undefined && entryVals.set(p, initArgs[i]));
+        li.header.params.forEach(
+          (_, i) => initArgs[i] !== undefined && entryVals.set(li.backArgOfParam[i], initArgs[i]),
+        );
+        // (1) Is the guard PROVABLY the loop's own test? Fusion drops it and lets the `while`
+        // re-test, which is only equivalent when the two ask the same question of the entry values.
+        // Structural equality is a sufficient proof, never a necessary one: `str[0]` and `str[i]`
+        // at `i = 0`, or a signed `e <= 0` beside an unsigned `e != 0`, are the same test spelled
+        // differently, and normalising those is not something this pass can do yet. So an
+        // unproven guard is not by itself a refusal — it is only a refusal to SINK, below.
+        const enterIsTaken = takenB === h;
+        const contIsTaken = hterm.successors[0].block === li.header;
+        const guardProven = sameAtEntry(hterm.operands[0], term.operands[0], entryVals, enterIsTaken !== contIsTaken);
         // A pre-update exit copy is repairable rather than fatal: emitted at the TOP of the body it
         // captures the value one iteration before the update, which is what the exit edge carries.
-        // Fusing the guard away means the ZERO-TRIP path runs no body, so those copies also need
-        // seeding from the guard→exit edge — the only edge holding the never-entered values. The
-        // seed is emitted BEFORE the loop init and must not clobber a name the init reads.
-        const guardExit = successorTo(b, li.exit);
-        let sunk = guardExit
-          ? sinkablePreUpdateExits(li.header, li.exit, hexitArgs, new Set([li.header]), sub, updateWrites)
-          : new Set<number>();
-        const sunkNames = new Set([...sunk].map((j) => varName.get(li.exit.params[j])!));
-        if ((successorTo(b, h)?.args ?? []).some((a) => readsClobbered(a, new Map(), sunkNames))) {
-          sunk = new Set<number>();
+        // Its post-loop copy is then dropped, so the ZERO-TRIP path needs the guard→exit edge as a
+        // seed — the only edge holding the never-entered value. Which is why the sink demands the
+        // proof: it makes the zero-trip path load-bearing for a family that used to decline here,
+        // and `isGuardShapedPred` alone cannot tell this guard from an `if` about something else.
+        const sunk =
+          guardExit && guardProven
+            ? sinkablePreUpdateSlots(li.header, li.exit, hexitArgs, new Set([li.header]), sub, updateWrites)
+            : new Set<number>();
+        // (2) Every exit copy the fused form KEEPS renders after the loop, on the zero-trip path
+        // too — where the loop variables still hold their init values. It must therefore produce
+        // what the guard→exit edge carries, since that edge is dropped. A sunk slot is exempt: its
+        // seed and its body copy cover the two paths separately.
+        const staleExit = hexitArgs.findIndex(
+          (a, j) => !sunk.has(j) && !sameAtEntry(a, (guardExit?.args[j] ?? a) as Value, entryVals),
+        );
+        if (guardExit && staleExit >= 0) {
+          throw new StructureError(
+            `cannot structure '${fn.name}': the fused guard's exit edge carries a value the post-loop ` +
+              `copies do not reproduce on a zero-trip run`,
+          );
         }
+        // Named rather than inlined: the two edges want OPPOSITE halves of the same set, fourteen
+        // lines apart, and getting them the wrong way round is a silent wrong value.
+        const sunkSlot = (j: number) => sunk.has(j);
+        const keptSlot = (j: number) => !sunk.has(j);
         if (
           loopUpdateHazard(
             hterm.operands[0],
-            hexitArgs.filter((_, j) => !sunk.has(j)),
+            hexitArgs.filter((_, j) => keptSlot(j)),
             new Set([li.header]),
             sub,
             updateWrites,
@@ -2227,7 +2269,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
             `cannot structure '${fn.name}': loop condition or a post-loop value reads a pre-update loop variable`,
           );
         }
-        out.push(...argAssigns(b, li.exit, null, (j) => sunk.has(j))); // zero-trip seed for the sunk copies
+        out.push(...argAssigns(b, li.exit, null, sunkSlot)); // zero-trip seed for the sunk copies
         out.push(...argAssigns(b, h)); // loop-variable initialisation
         out.push(emitWhile(li, updates, preUpdateCopies(li.exit, hexitArgs, sunk)));
         // The header→exit edge may carry non-identity phi args (the exit param merges the guard-false
@@ -2236,10 +2278,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
         // updated values), and structure the exit region under the same substitution so a post-loop
         // use of a loop value reads its name.
         out.push(
-          ...withSub(sub, () => [
-            ...argAssigns(li.header, li.exit, sub, (j) => !sunk.has(j)),
-            ...structureRegion(li.exit, stop),
-          ]),
+          ...withSub(sub, () => [...argAssigns(li.header, li.exit, sub, keptSlot), ...structureRegion(li.exit, stop)]),
         );
         return out;
       }
@@ -2367,17 +2406,18 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
       }));
 
   // Un-rotate a header's do-while latch into a `while`: the test reads the header's own
-  // params (back-edge args substituted back), and the body is the header's SIDE EFFECTS in
-  // program order followed by its parallel update. The side effects are required — a copies-only
-  // body would silently delete every store/discarded call in the header. Effect order is right by
-  // construction: statements read pre-update names, the updates land after.
-  const emitWhile = (li: LoopInfo, updates?: Stmt[], prelude: Stmt[] = []): Stmt => {
+  // params (back-edge args substituted back), and the body is any sunk trailing copies, then the
+  // header's SIDE EFFECTS in program order, then its parallel update. The side effects are
+  // required — a copies-only body would silently delete every store/discarded call in the header.
+  // Effect order is right by construction: statements read pre-update names, the updates land
+  // after, and a sunk copy reads the top-of-iteration value it is there to capture.
+  const emitWhile = (li: LoopInfo, updates?: Stmt[], sunkCopies: Stmt[] = []): Stmt => {
     const term = li.header.ops[li.header.ops.length - 1];
     let cond = exprWith(loopSub(li))(term.operands[0]);
     if (term.successors[0].block !== li.header) {
       cond = negateCond(cond);
     } // loop-continue must be `taken`
-    const body = [...prelude, ...sideEffects(li.header), ...(updates ?? argAssigns(li.header, li.header))];
+    const body = [...sunkCopies, ...sideEffects(li.header), ...(updates ?? argAssigns(li.header, li.header))];
     return { k: 'while', cond, body };
   };
 
@@ -2429,7 +2469,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     // A pre-update exit copy moves to the TOP of the body, where the loop variables still hold
     // their top-of-iteration values. No zero-trip seed here: a `do-while` always runs its body, so
     // any other predecessor of the exit is an ordinary edge some enclosing `if` already emits.
-    const sunk = sinkablePreUpdateExits(dw.header, dw.exit, exitArgs, dw.body, sub, updateWrites);
+    const sunk = sinkablePreUpdateSlots(dw.header, dw.exit, exitArgs, dw.body, sub, updateWrites);
     if (
       loopUpdateHazard(
         lterm.operands[0],
