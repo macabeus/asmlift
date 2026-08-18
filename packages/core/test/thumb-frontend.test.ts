@@ -469,6 +469,29 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     );
   });
 
+  test('an ESCAPED frame address retracts the undef argument — a callee may have written the slot', () => {
+    // `undef` rests on "no store reaches this slot, therefore nobody wrote it", which holds only
+    // while this function is the sole writer of its frame. `g(&sp0)` breaks that: the frame-object
+    // audit bounds what WE access through the object (one word here), not what `g` does, so the
+    // real object can be wider — `struct P p; g(&p);` reading only `p.x` — and `g` fills the later
+    // words. Reading one back at a slot no store of ours reaches is reading the CALLEE's value, and
+    // declaring it uninitialised would spell that value as garbage. Found by an adversarial pass on
+    // the commit that added undef, where this input lifted.
+    const escaped =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tmov\tr4, sp\n\tmov\tr0, r4\n\tbl\tg\n' +
+      '\tldr\tr1, [r4]\n\tcmp\tr1, #0\n\tbeq\t.L2\n\tstr\tr1, [sp, #4]\n' +
+      '.L2:\n\tldr\tr2, [sp, #4]\n\tadd\tr0, r1, r2\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r3}\n\tbx\tr3\n';
+    expect(() => decompile('f', escaped, ARMV4T_AGBCC)).toThrow(
+      /address-taken stack local — a callee may write any frame offset/,
+    );
+    // POSITIVE CONTROL: the same undefined slot with NO address escaping still recovers, so the
+    // guard is the escape and not something incidental about the shape.
+    const noEscape =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tstr\tr0, [sp]\n\tldr\tr1, [sp]\n\tcmp\tr1, #0\n\tbeq\t.L2\n\tstr\tr1, [sp, #4]\n' +
+      '.L2:\n\tldr\tr2, [sp, #4]\n\tadd\tr0, r1, r2\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r3}\n\tbx\tr3\n';
+    expect(decompile('f', noEscape, ARMV4T_AGBCC).source).toContain('uninit_sp4');
+  });
+
   test('the OUTGOING argument area is not a local, however far inside the frame it sits', () => {
     // agbcc reserves the bottom of the frame for arguments 5+ of the calls this function makes:
     // `add sp,#-8` … `str r2,[sp]` / `str r3,[sp,#4]` … `bl`. Nothing reloads them, so modelling
