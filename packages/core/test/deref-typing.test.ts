@@ -577,6 +577,47 @@ describe('byte offsets on a rendered pointer', () => {
     expect(src).not.toMatch(/=\s*\*\(\(u8 \*\)a0 \+ 1\)/); // the unsigned read
   });
 
+  // The RUNTIME offset. There is not even an inexact constant to reject here — the residual is
+  // unknown until the program runs — so cast-then-add is the only spelling, and the sum is cast
+  // BACK so the walk changes the arithmetic and nothing else.
+  const varOnWordPtr =
+    'f:\n\tpush\t{r4, lr}\n\tldr\tr2, [r0, #0x4]\n\tstr\tr2, [r0, #0x8]\n' +
+    '\tlsl\tr1, r1, #0x1\n\tadd\tr3, r0, r1\n\tldr\tr4, [r3]\n\tstr\tr4, [r0, #0xc]\n' +
+    '\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+
+  test('a RUNTIME byte offset casts the base too — C would scale it back', () => {
+    const src = decompile('f', varOnWordPtr, ARMV4T_AGBCC).source;
+    expect(src).toContain('*(s32 *)((u8 *)a0 + (a1 << 1))');
+    // the defect this refuses: `a0 + (a1 << 1)` on an `s32 *` is FOUR times the byte the asm
+    // computed, and no cast downstream can see it — the address is simply wrong.
+    expect(src).not.toMatch(/=\s*a0\[a1 << 1\]|\(u8 \*\)\(a0 \+ \(a1 << 1\)\)/);
+  });
+
+  test('the sum is cast BACK, so a walked pointer still lands in its own declared slot', () => {
+    // The byte cast is for the ADDRESS only. Left as a bare `u8 *`, the sum is a different C type
+    // from the `s32 *` variable it is assigned to — an incompatible-pointer assignment mwcc
+    // REJECTS outright (synthetic:arraysum/revarr/structarr on mwcc_242_81 all noncompile without
+    // this), and a base the deref rules then read as striding 1 byte instead of 4.
+    const walkedIntoVar =
+      'f:\n\tpush\t{r4, lr}\n\tldr\tr2, [r0, #0x4]\n\tstr\tr2, [r0, #0x8]\n' +
+      '\tlsl\tr1, r1, #0x1\n\tadd\tr3, r0, r1\n\tmov\tr4, #0x0\n' +
+      '.L1:\n\tldr\tr2, [r3]\n\tadd\tr4, r4, r2\n\tadd\tr3, r3, #0x4\n\tsub\tr1, r1, #0x1\n' +
+      '\tcmp\tr1, #0x0\n\tbne\t.L1\n\tadd\tr0, r4, #0\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    const src = decompile('f', walkedIntoVar, ARMV4T_AGBCC).source;
+    expect(src).toContain('s32 * v1;');
+    expect(src).toContain('v1 = (s32 *)((u8 *)a0 + (a1 << 1));');
+  });
+
+  test('a BYTE pointee walked by a runtime offset is left alone — the control', () => {
+    // without it the rule above reads as "always cast", which would churn every `u8 *` walk
+    const byteBase =
+      'f:\n\tpush\t{r4, lr}\n\tldrb\tr2, [r0, #0x4]\n\tstrb\tr2, [r0, #0x8]\n' +
+      '\tlsl\tr1, r1, #0x1\n\tadd\tr3, r0, r1\n\tldrb\tr4, [r3]\n\tstrb\tr4, [r0, #0xc]\n' +
+      '\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    // no cast on either side: a `u8 *` already strides bytes, so there is nothing to compensate
+    expect(decompile('f', byteBase, ARMV4T_AGBCC).source).toContain('*(a0 + (a1 << 1))');
+  });
+
   test('an offset it DOES divide still scales, and keeps the base uncast', () => {
     // the discriminating control: without it this pair reads as "always cast", which would churn
     // every element-exact walk in the corpus into byte arithmetic

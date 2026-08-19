@@ -1674,6 +1674,11 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
       // an `s32 *` addresses byte 248 and `p + 38` on a `struct S *` addresses byte 38 * sizeof(S).
       // Same answer as there — CAST THEN ADD, `(u8 *)p + 62`, the same address in every world.
       const bytePtr = (x: Expr): Expr => ({ k: 'cast', to: T.ptr(T.u(8)), e: x });
+      // Set when a byte-pointer cast was applied for the ADDRESS math alone: the sum is cast back
+      // to the pointer type it started as, so the walk changes the arithmetic and nothing else. A
+      // bare `u8 *` sum would be a different C type from the slot it lands in (`v4 = (u8 *)a0 +
+      // (v1 << 2)` into an `s32 *` — an mwcc error) and from the bases the deref rules read.
+      let reScale: IrType | undefined;
       const walk = (base: Expr, c: Extract<Expr, { k: 'const' }>): { base: Expr; off: Expr } => {
         const t = ctype(base);
         if (t?.kind !== 'ptr') {
@@ -1687,10 +1692,32 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
           ? { base, off: { k: 'const', value: c.value / es } }
           : { base: bytePtr(base), off: c };
       };
+      // A RUNTIME byte offset has no element spelling at all — not even an inexact one to reject,
+      // since the residual is unknown until the program runs. The asm added bytes, so the same
+      // answer as the inexact constant above: cast then add. Without it a `u16 *` walked by a
+      // computed offset addresses TWICE the intended byte (`sa3:muukaden.s:sub_8062CFC` reaches
+      // `CpuSet` with that destination), and nothing downstream can see the error.
+      const walkVar = (x: Expr): IrType | undefined => {
+        const t = ctype(x);
+        return t?.kind === 'ptr' && ptrElemBytes(t.to) !== 1 ? t : undefined;
+      };
       if ((d.opcode === 'add' || d.opcode === 'sub') && r.k === 'const') {
         ({ base: l, off: r } = walk(l, r));
       } else if (d.opcode === 'add' && d.operands.length === 2 && l.k === 'const') {
         ({ base: r, off: l } = walk(r, l)); // commuted `const + ptr`
+      } else if (d.opcode === 'add' || d.opcode === 'sub') {
+        // ONE side only. `ptr - ptr` is C's element difference and `ptr + ptr` is not C at all;
+        // both are the intify rules' business below, and casting both operands here would hide
+        // the shape from them.
+        const lp = ctype(l)?.kind === 'ptr';
+        const rp = d.operands.length === 2 && ctype(r)?.kind === 'ptr';
+        if (lp && !rp) {
+          reScale = walkVar(l);
+          l = reScale ? bytePtr(l) : l;
+        } else if (rp && !lp && d.opcode === 'add') {
+          reScale = walkVar(r);
+          r = reScale ? bytePtr(r) : r;
+        }
       }
       // C rejects a pointer operand outright under the non-additive operators (& | ^ << >> * / %),
       // under `ptr + ptr`, and as the subtrahend of `int - ptr` — the asm just does 32-bit integer
@@ -1753,7 +1780,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
       // COMPARISON (`gPtr < K` — C compares unsigned whatever the asm's icmp_s* said) is the same
       // class as intifyAddrCmp's `addr` rule and is deliberately left alone here: it is valid C
       // today, so closing it would churn spellings for a signedness case no row exercises.
-      return { k: 'bin', op, l, r };
+      const sum: Expr = { k: 'bin', op, l, r };
+      return reScale ? { k: 'cast', to: reScale, e: sum } : sum;
     }
     // `-`/`~` on a pointer rendering is equally not C — same honest integer cast as above.
     if (d.opcode === 'rotr' || d.opcode === 'rotl') {
