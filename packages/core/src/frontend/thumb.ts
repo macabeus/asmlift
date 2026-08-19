@@ -179,7 +179,54 @@ function classifyXfer(ins: Instr): XferKind | null {
   return null;
 }
 
-const imm = (s: string) => parseInt(s.replace(/^#/, ''), s.includes('0x') ? 16 : 10);
+// A raw immediate's VALUE, as far as this parse goes. The radix test is case-insensitive because
+// gas accepts `0X`, and getting that wrong is not a near miss: `parseInt` stops at the first
+// character it cannot consume, so `#0X1` read as radix 10 is 0 where the assembler encodes 1.
+//
+// Still LOOSE by design — a binary literal (`#0b1`) and an octal one (`#010`, 8 to gas and 10 to
+// `parseInt`) are both misread, silently. That is why `immEq` below exists instead of callers
+// comparing against this: a caller that can refuse should. The ones that cannot — the arithmetic
+// fall-throughs below, the frame walk — carry the hole, and no corpus spells either form (of 105411
+// `#` operands across the vendored checkouts, every one this misreads is absent).
+const imm = (s: string) => parseInt(s.replace(/^#/, ''), /0[xX]/.test(s) ? 16 : 10);
+
+// AN IMMEDIATE IS A NUMBER, NOT A SPELLING, and which spelling appears is the producer's choice
+// rather than the machine's. Counting the gated shapes (`add`/`rsb rD, rS, #0`) over the vendored
+// checkouts, every producer writes `#0` — sa3's split 11158, sa3's build 9837, klonoa's build 1072,
+// and `#0x0` not once between them — EXCEPT klonoa's own disassembly, which writes `#0x0` 3533
+// times against 36. So an idiom keyed on the token is off for one whole project in silence, which
+// is what this predicate exists to stop. `#2`, `#0x2` and `#0x02` are likewise one shift, and the
+// jump-table shift recogniser used to compare the operand text and so rejected the third.
+//
+// The operand must be a plain integer LITERAL, and that shape check is the whole point of this
+// helper rather than an incidental guard. `imm()` is `parseInt`, which stops at the first character
+// it cannot consume, so it reads `#2*2` as 2 — and `#2*2` is not malformed, it is an expression gas
+// accepts and assembles to `lsls r0, r1, #4`. Matching it as a shift by two would recover a switch
+// whose stride is wrong by a factor of four: the emitted C is entirely ordinary and dispatches to
+// the wrong BLOCK, with no marker. `#2+1`, `#2-1` and `#2<<1` are the same trap. An adversarial
+// probe found this after the first cut of this helper shipped with exactly that hole, and the test
+// that claimed to pin the property sampled only `#3`/`#0x3`/`#0x1`/`r2` and so passed anyway.
+//
+// Anything that is not a bare decimal or hex literal therefore fails this test — which is a
+// DECLINE only where the caller declines, and the three callers differ. The jump-table recogniser
+// returns null; the `add` and `rsb` copy/negate arms fall through to their own lowering, and for
+// `add`/`sub` that lowering is `constVal(imm(…))`, which is loose. So a non-match is a refusal at
+// two of the three sites and a possibly-wrong constant at the third; `#0b1` renders `+ 0` there.
+// The hole is `imm`'s rather than this predicate's, and a characterization test pins it.
+//
+// The refused class that DOES occur is the signed literal: 722 negative immediates across the
+// corpus (`#-0x4` ×287, `#-0x004`, …), all of them inert here because neither 0 nor 2 is negative —
+// but `imm` reads them correctly and this does not, so the two disagree on a populated class and a
+// future `want` has to know that.
+//
+// One divergence is knowingly left in, and it is inert at both values this is used with.
+// A leading zero means octal to gas and decimal to `Number`, so `#010` is 8 there and 10 here —
+// but for `want === 2` both readings fail and the dispatch declines either way, and for
+// `want === 0` every octal spelling of zero (`#0`, `#00`, `#000`) is zero under both. A `want`
+// other than those two has to revisit this, because for e.g. `want === 8` the readings disagree.
+const IMM_LITERAL = /^#\s*(?:0[xX][0-9a-fA-F]+|[0-9]+)$/;
+const immEq = (op: string | undefined, want: number): boolean =>
+  op !== undefined && IMM_LITERAL.test(op) && Number(op.slice(1).trim()) === want;
 
 // Expand fused register-range tokens (`r4-r7` → r4,r5,r6,r7) in a register list. Ranges are
 // numeric-endpoint only (`rN-rM`); a range whose endpoint is an ALIAS (`r4-pc`/`-lr`/`-sp`) is
@@ -1019,30 +1066,6 @@ interface JumpTable {
 // since `lsl rD, rS, #imm` is low-register-only, so the add here is always the low-register form.
 const isDataOp = (mn: string, base: 'lsl' | 'add'): boolean => mn === base || mn === `${base}s`;
 
-// A shift amount is a NUMBER, not a spelling. `#2`, `#0x2` and `#0x02` are the same shift; the
-// recogniser used to compare the operand text and so rejected the third.
-//
-// The operand must be a plain integer LITERAL, and that shape check is the whole point of this
-// helper rather than an incidental guard. `imm()` is `parseInt`, which stops at the first character
-// it cannot consume, so it reads `#2*2` as 2 — and `#2*2` is not malformed, it is an expression gas
-// accepts and assembles to `lsls r0, r1, #4`. Matching it as a shift by two would recover a switch
-// whose stride is wrong by a factor of four: the emitted C is entirely ordinary and dispatches to
-// the wrong BLOCK, with no marker. `#2+1`, `#2-1` and `#2<<1` are the same trap. An adversarial
-// probe found this after the first cut of this helper shipped with exactly that hole, and the test
-// that claimed to pin the property sampled only `#3`/`#0x3`/`#0x1`/`r2` and so passed anyway.
-//
-// Anything that is not a bare decimal or hex literal therefore DECLINES, which is the safe
-// direction: a real dispatch spells its shift as a literal. Known false declines, all loud and none
-// observed in any corpus: a binary literal (`#0b10`) and a signed one (`#+2`).
-//
-// One divergence is knowingly left in, and it is inert AT THE ONLY VALUE THIS IS USED WITH.
-// A leading zero means octal to gas and decimal to `Number`, so `#010` is 8 there and 10 here —
-// but both readings are compared against 2, both fail, and the dispatch declines either way; `#02`
-// is 2 under both. **If this helper is ever reused for a `want` other than 2, that has to be
-// revisited**, because for e.g. `want === 8` the two readings disagree about `#010`.
-const IMM_LITERAL = /^#\s*(?:0[xX][0-9a-fA-F]+|[0-9]+)$/;
-const immEq = (op: string | undefined, want: number): boolean =>
-  op !== undefined && IMM_LITERAL.test(op) && Number(op.slice(1).trim()) === want;
 function recoverJumpTable(
   bounds: AsmBlock,
   disp: AsmBlock,
@@ -2113,11 +2136,17 @@ export function lift(
             break;
           }
           // `add rD, rS, #0` is agbcc's low-register copy idiom (Thumb `mov rD, rS` between
-          // low regs isn't always available). Model it as a pure copy — same SSA value — not
-          // an `x + 0` add. This keeps output clean and, crucially, makes a value copied to a
-          // callee-saved register before a call read as still-live *after* the call, which is
-          // how call-argument liveness tells a passed argument from a preserved one.
-          if (c === '#0') {
+          // low regs isn't always available). Model it as a pure copy — the SAME SSA VALUE — not
+          // an `x + 0` add. Value identity is what it buys: the pattern engine matches on it
+          // (`{same:'X'}`), and the structurer's pre-update loop test compares a back-edge argument
+          // against an exit argument by identity, so an `x + 0` between them reads as a different
+          // value and declines a loop that is perfectly ordinary.
+          //
+          // NOT call-argument liveness, which this comment claimed for several releases: both arms
+          // end in `writeData(reg(a), …)`, and the arity machinery (`fallbackArgc`,
+          // `trimClobberedCallArgs`) is keyed on the register, never on the value — measured, zero
+          // arity changes across 3337 corpus functions even with this idiom ablated entirely.
+          if (immEq(c, 0)) {
             writeData(reg(a), bi, readData(reg(b), bi));
             break;
           }
@@ -2190,7 +2219,7 @@ export function lift(
           // Reverse subtract. `rsb rD, rS, #0` is the negate idiom (0 - rS) → -x. Any other form
           // (`rsb rD, rS, #N`, N≠0 — not a Thumb-1 encoding, but be safe) is NOT modelled: degrade
           // to a loud `opaque` rather than silently leaving rD unwritten (a silent miscompile).
-          if (c === '#0') {
+          if (immEq(c, 0)) {
             const res = mkValue(T.unk(32));
             irb.ops.push(mkOp('neg', { operands: [readData(reg(b), bi)], results: [res] }));
             writeData(reg(a), bi, res);
