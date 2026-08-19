@@ -455,6 +455,35 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ALL,
   },
 
+  // The DMA-fill idiom, WITH an uninitialised local — the pair no real row carries. An escaping
+  // frame address retracts every `undef` in the function, on the premise that a callee may write
+  // any frame offset; a DMA SOURCE register is the case where that premise is false, because the
+  // engine only reads through it and the register is write-only, so the address cannot come back. This row is the ACCEPTING half of that rule, and what it is worth
+  // is bounded: ablating `readOnlyAddressSinks` takes it from `nonmatch` to `declined`, so it is a
+  // real gate — but `bench regression` fails only on a LOST MATCH, and this row does not match, so
+  // a re-widening lands in the flip list rather than breaking the build. The failing guard is the
+  // frontend unit test, where the direction is pinned by ablation. Note also that asmlift lifts
+  // this and m2c declines it, so a row authored for an asmlift capability moves the declined/
+  // nonmatch columns one in asmlift's favour.
+  // agbcc only: the addresses are GBA MMIO, and on the other toolchains this is three stores to
+  // nothing in particular. Ten live locals for the same reason uninit_spill has them — below that
+  // agbcc keeps the uninitialised local in a register and the frame is never touched.
+  {
+    sym: 'dma_fill_uninit',
+    src:
+      'int dma_fill_uninit(int k,int *p,void *dest){ volatile unsigned short tmp;' +
+      ' int v0,v1,v2,v3,v4,v5,v6,v7,v8,v9; int i,s=0;' +
+      ' switch(k){ case 0: v0=p[0];v1=p[1];v2=p[2];v3=p[3];v4=p[4];v5=p[5];v6=p[6];v7=p[7];v8=p[8];v9=p[9]; break;' +
+      ' case 1: v0=p[10];v1=p[11];v2=p[12];v3=p[13];v4=p[14];v5=p[15];v6=p[16];v7=p[17];v8=p[18];v9=p[19]; break; }' +
+      ' tmp=(unsigned short)k;' +
+      ' *(volatile unsigned int *)0x040000D4=(unsigned int)&tmp;' +
+      ' *(volatile unsigned int *)0x040000D8=(unsigned int)dest;' +
+      ' *(volatile unsigned int *)0x040000DC=0x81000020;' +
+      ' for(i=0;i<8;i++) s+=p[i]*v0+v1*v2+v3*v4+v5*v6+v7*v8+v9; return s; }',
+    features: ['uninit-local', 'memory', 'array'],
+    toolchains: ['agbcc'],
+  },
+
   // ── float (soft-float on GBA; hardware FPU elsewhere) ───────────────────────────────────────
   {
     sym: 'fadd',

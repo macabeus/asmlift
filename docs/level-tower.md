@@ -281,9 +281,10 @@ slot) that cannot be classified without either prototype knowledge or prologue-s
 
 The envelope is narrow, and worth stating in one sentence: **on Thumb, a word-wide slot strictly
 below the measured local area, which some store reaches but not on every path, in a function where
-no frame address escapes.** The last clause is a second function-wide condition, established after
-the fact by the frame-object audit rather than at the mint site — an escaped address means a callee
-may write any frame offset, so "no store of ours reaches it" stops implying "nobody wrote it".
+no frame address escapes to something that could write the frame.** The last clause is a second
+function-wide condition, established after the fact by the frame-object audit rather than at the
+mint site — an escaped address usually means a callee may write any frame offset, so "no store of
+ours reaches it" stops implying "nobody wrote it". The qualifier on it is earned below.
 
 The reusable lesson is where the decision lives, not the op, and it is easier to state as the two
 arrangements that do not work.
@@ -312,6 +313,18 @@ instead of a promise: Thumb passes `{ from: 0, to: localArea }`, so when the pro
 measure the frame that range collapses to empty and every slot refuses on its own. MIPS claims no
 partition and therefore refuses, and the shape of its eventual fix is now a pair of numbers rather
 than a rewrite.
+
+The same split has a second instance on this very capability. The envelope's last clause was first
+written as plain "no frame address escapes", and the first inhabitant to reach it was a klonoa DMA
+fill where the address goes to a transfer's SOURCE register: the device reads the object, and the
+register is write-only, so nobody can read the address back out and turn it into a destination. The
+premise the guard _stated_ was false there. The fix was to ask the question the premise names — can
+anything write? — rather than the one that was easy to compute, and the addresses are target data
+(`capabilities.readOnlyAddressSinks`) so no shared pass learns a platform. The accepting half is
+pinned as `synthetic:dma_fill_uninit:agbcc`. Note what did NOT move with it: the sibling rule
+refusing a SECOND address-taken object still keys on any escape at all, because its argument is
+about frame LAYOUT, and a device reading past the object it was given is as wrong as a callee
+writing past it.
 
 That split — declarative partition, generic rule — is Ghidra's. Its compiler-spec files carry the
 same thing as data, and `mips32be.cspec` states the very asymmetry that forces it: a `<localrange>` whose own comment notes the 16-byte region is "backup

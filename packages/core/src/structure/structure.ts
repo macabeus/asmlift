@@ -2680,8 +2680,10 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
               {
                 name: laddrName.get(op)!,
                 type: T.int((op.attrs.width as number) * 8, op.attrs.signed as boolean),
-                // an ESCAPED address makes every store observable (the DMA hardware reads it);
-                // without volatile, gcc-2.9 deletes a store to a local nothing in-function reads
+                // an ESCAPED address makes every store observable (the DMA hardware reads it), and
+                // the source spells the scratch volatile for that reason — see the stamp site in
+                // frontend/thumb.ts for why it is the SPELLING that matters and not dead-store
+                // elimination, which keeps the store either way
                 ...(op.attrs.volatile === true ? { volatile: true as const } : {}),
               },
             ]),
