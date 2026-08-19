@@ -2696,8 +2696,8 @@ export function lift(
   // names is used as "the address of one scalar local"; this proves it, over the finished function,
   // the same boundary-total style as the slot-escape assert in finish(). The address may flow
   // anywhere as a VALUE — into an MMIO register (the DMA-fill idiom), a call, a phi — but every
-  // MEMORY access through it must be at offset 0 with one agreed width, its bytes must belong to
-  // nothing else in the frame, and any use the audit cannot vouch for declines the whole function
+  // MEMORY access through it must be at offset 0, with one agreed width and one agreed extension,
+  // its bytes must belong to nothing else in the frame, and any use the audit cannot vouch for declines the whole function
   // loudly. Nothing here guesses: the object's declared type is exactly the access type the machine
   // used.
   {
@@ -2724,13 +2724,16 @@ export function lift(
       // `[sp,#0x30]` the instruction set cannot spell — so what the machine named is one object at
       // frame offset 48, not a `[+48]` reach through the frame base.
       //
-      // A captured address whose every use is a fixed-offset ACCESS is that shape, and each of its
-      // accesses names its own object: re-root them onto a `laddr` at their own offset, read at 0,
-      // and the rest of this audit judges the objects. A capture with ANY other use is a real
-      // capture and keeps the frame base. Deciding it over the finished SSA rather than over the
-      // instruction text is what makes it total — an operand ROLE cannot be overlooked. `str rD,
-      // [rD, #k]` stores the frame address through itself, which is a base use AND an escape, and
-      // the escape is exactly what stops the split.
+      // A captured address whose every use is a fixed-offset sub-word ACCESS is that shape, and
+      // each of its accesses names its own object: re-root them onto a `laddr` at their own offset,
+      // read at 0, and the rest of this audit judges the objects. A capture with ANY other use is a
+      // real capture and keeps the frame base.
+      //
+      // What makes that judgement total is that the walk below enumerates every ROLE a value can
+      // appear in — every operand of every op, and every edge argument — instead of asking what an
+      // instruction looks like. One instruction can hold two roles: `str rD, [rD, #k]` stores the
+      // frame address through itself, a base use AND an escape, and the escape is what stops the
+      // split.
       // Why a capture was NOT split, when the reason is one no later message carries — the
       // `slotsOffReason` idiom: a refusal reported as the wrong capability sends the improvement
       // loop to build the wrong thing.
@@ -2743,10 +2746,9 @@ export function lift(
           for (const op of blk.ops) {
             op.operands.forEach((v, idx) => record(v, op, idx, blk));
             // An EDGE ARGUMENT is a use role too, and never an access: a capture that reaches a
-            // block parameter is live past this block, and the taint closure below is what judges
-            // it. Recorded at index -1 so it can never be counted as one — without it the split
-            // fired on a capture flowing into a phi, deleted the capture, and left the successor
-            // arg naming a value nothing defines.
+            // block parameter is live past this block, so the taint closure below is what judges
+            // it. Recorded at index -1 so it can never be counted as an access — a split there
+            // would delete a capture the successor argument still names.
             for (const succ of op.successors ?? []) {
               for (const a of succ.args) {
                 record(a, op, -1, blk);
@@ -2799,9 +2801,9 @@ export function lift(
         }
       }
       // ONE OBJECT PER FRAME OFFSET. Two `laddr` at the same offset name the same storage; two at
-      // different offsets are different objects, so width, escape and the overlap window are all
-      // decided per offset. Fusing them — one width for every capture in the function — declared a
-      // halfword spill and a word spill as the same object.
+      // different offsets are different objects, so width, signedness, escape and the overlap
+      // window are decided per offset — one width shared by every capture in the function would
+      // declare a halfword spill and a word spill as one object.
       const objects = new Map<number, Op[]>();
       for (const op of laddrs) {
         const off = op.attrs.off as number;
@@ -2809,7 +2811,10 @@ export function lift(
       }
       // Taint maps a value to the OBJECT whose address it may hold, closed over phis: a tainted
       // edge arg taints the receiving block param. A phi that merges two objects has no single
-      // answer, and picking one would put an access on the wrong storage.
+      // answer, and picking one would put an access on the wrong storage. Nothing builds one today,
+      // and the reason is worth knowing before changing the split: an object at a nonzero offset
+      // exists only where the split ran, the split refuses any capture with an edge-argument use,
+      // and every frame-base object is the same object.
       const taint = new Map<Value, number>();
       for (const [off, ops] of objects) {
         for (const op of ops) {

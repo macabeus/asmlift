@@ -5,7 +5,11 @@
 // the back-edge argument it is the `(s16)i` the source wrote.
 //
 // Both spellings are covered — the folded `zext`/`sext` pair, and the raw `shr_u`/`shr_s` pair the
-// cast idiom cannot fold because the value under the shifts is not a bare `shl`.
+// cast idiom cannot fold because the value under the shifts is not a bare `shl` — and so is the one
+// pairing that must NOT happen. The two spellings name different bits (the low half vs the high
+// half), so a fixture written in one spelling can never catch a key that fuses them; the two
+// cross-domain tests at the end are the only ones that can, and they are the file's soundness
+// tests. Every other refusal is a one-fact edit with the accepted fixture as a positive control.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';

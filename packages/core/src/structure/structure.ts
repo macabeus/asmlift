@@ -138,11 +138,13 @@ function bareArrayLead(si: SymbolInfo, width: number, signed: boolean): { lead?:
   }
   // …and the element must EXTEND the way the access does, for the same reason the width must
   // match: the bare spelling carries no cast, so the declared element type is the only thing in
-  // the emitted C that says whether a sub-word read sign- or zero-fills. Where the map states a
-  // signedness that disagrees, the map wins and the caller falls through to `((T *)&gSym)[i]`,
-  // which is byte-identical under any declaration. Where it states none, the machine's own access
-  // fills the gap (see noteGlobal) and there is nothing to disagree with.
-  if (width < 4 && si.elemSigned !== undefined && si.elemSigned !== signed) {
+  // the emitted C that says whether a sub-word read sign- or zero-fills. Against the DECLARED
+  // signedness, defaulted exactly as the element type registered for the env is (noteGlobal, just
+  // below) — a disagreement there makes the deref legalization wrap the base, and a leading
+  // subscript has no room for that wrapping.
+  //
+  // The caller then falls through to `((T *)&gSym)[i]`, byte-identical under any declaration.
+  if (width < 4 && (si.elemSigned ?? false) !== signed) {
     return null;
   }
   const inner = arrayInnerExtents(si);

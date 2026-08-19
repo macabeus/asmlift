@@ -4,13 +4,16 @@
 // what the machine named is one object at that frame offset, and the frame-object audit splits the
 // capture into the objects its accesses name.
 //
-// The split is judged over the finished SSA, not over the instruction text, and these tests are
-// mostly about why: an operand ROLE cannot be overlooked there. `str rD, [rD, #k]` is a base use
-// AND an escape; `sub rD, #4` reads rD as a value even though rD is also its destination. Both are
-// silent wrong answers under any scheme that classifies an instruction by its base operand.
+// Most of these tests are about ONE ROLE APPEARING TWICE. `str rD, [rD, #k]` is a base use and an
+// escape; `sub rD, #4` reads rD as a value even though rD is also its destination; an edge argument
+// is a use that is never an access. Each is a silent wrong answer to anything that decides what an
+// instruction does from its base operand alone, and each is why the split enumerates every operand
+// and every edge argument instead.
 //
-// Every refusal is a ONE-FACT edit of the accepted fixture and runs it first as a positive control,
-// so a decline for an unrelated reason cannot read as a pass.
+// Every refusal runs an accepted fixture first as a positive control, so a decline for an unrelated
+// reason cannot read as a pass. Where the refusal is a one-fact edit of `SPILL` it is spelled as
+// one (`edit`); four need a shape `SPILL` does not have — a join, a call taking five arguments, two
+// objects, two extensions of one byte — and carry their own fixture.
 import { describe, expect, test } from 'vitest';
 
 import { decompile } from '../src/pipeline';

@@ -52,7 +52,7 @@ export function rerootNarrowReads(fn: Fn): number {
   // what is safe. It buys a name: an argument whose own operand chain reads the parameter it feeds
   // is that parameter's next value, i.e. a loop variable, which the structurer materializes and
   // renders `(s16)i`. Anywhere else the re-root only puts `(s16)(u16)x` where `(s16)x` stood —
-  // byte-identical through agbcc, and 16 functions' worth of noise for nothing.
+  // byte-identical through agbcc, so noise for nothing.
   const defs = new Map<Value, Op>();
   for (const b of fn.blocks) {
     for (const op of b.ops) {
