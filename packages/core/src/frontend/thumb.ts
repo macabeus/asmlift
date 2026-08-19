@@ -2807,13 +2807,14 @@ export function lift(
 
   ssa.finish();
 
-  // FRAME-OBJECT AUDIT. Every `laddr` the mov arm emitted is only a CLAIM that the captured
-  // address is used as "the address of one scalar local"; this proves it, over the finished
-  // function, the same boundary-total style as the slot-escape assert in finish(). The address may
-  // flow anywhere as a VALUE — into an MMIO register (the DMA-fill idiom), a call, a phi — but
-  // every MEMORY access through it must be at offset 0 with one agreed width, and any use the
-  // audit cannot vouch for declines the whole function loudly. Nothing here guesses: the object's
-  // declared type is exactly the access type the machine used.
+  // FRAME-OBJECT AUDIT. Every `laddr` the frontend emitted is only a CLAIM that the address it
+  // names is used as "the address of one scalar local"; this proves it, over the finished function,
+  // the same boundary-total style as the slot-escape assert in finish(). The address may flow
+  // anywhere as a VALUE — into an MMIO register (the DMA-fill idiom), a call, a phi — but every
+  // MEMORY access through it must be at offset 0 with one agreed width, its bytes must belong to
+  // nothing else in the frame, and any use the audit cannot vouch for declines the whole function
+  // loudly. Nothing here guesses: the object's declared type is exactly the access type the machine
+  // used.
   {
     const laddrs: Op[] = [];
     for (const blk of irBlocks) {
@@ -2827,99 +2828,139 @@ export function lift(
       const fail = (why: string): never => {
         throw new FrontendUnsupportedError(`cannot lift '${name}': address-taken stack local — ${why}`);
       };
-      // Taint = values that may hold the object's address, closed over phis: a tainted edge arg
-      // taints the receiving block param. (A phi mixing the address with a non-address would taint
-      // the param and then fail the use judgement below — mixing is not vouched for.)
+      // ONE OBJECT PER FRAME OFFSET. Two `laddr` at the same offset name the same storage; two at
+      // different offsets are different objects, so width, escape and the overlap window are all
+      // decided per offset. Fusing them — one width for every capture in the function — declared a
+      // halfword spill and a word spill as the same object.
+      const objects = new Map<number, Op[]>();
       for (const op of laddrs) {
-        if ((op.attrs.off as number) !== 0) {
-          // the audit's offset arithmetic, overlap window and naming all assume the frame base;
-          // if a computed capture ever mints off!==0, this line is what keeps it loud
-          fail(`a capture at frame offset ${op.attrs.off} — only the frame base is modelled`);
+        const off = op.attrs.off as number;
+        (objects.get(off) ?? objects.set(off, []).get(off)!).push(op);
+      }
+      // Taint maps a value to the OBJECT whose address it may hold, closed over phis: a tainted
+      // edge arg taints the receiving block param. A phi that merges two objects has no single
+      // answer, and picking one would put an access on the wrong storage.
+      const taint = new Map<Value, number>();
+      for (const [off, ops] of objects) {
+        for (const op of ops) {
+          taint.set(op.results[0], off);
         }
       }
-      const taint = new Set<Value>(laddrs.flatMap((o) => o.results));
       for (let changed = true; changed;) {
         changed = false;
         for (const blk of irBlocks) {
           for (const op of blk.ops) {
             for (const s of op.successors ?? []) {
               s.args.forEach((arg, i) => {
+                const from = taint.get(arg);
                 const param = s.block.params[i];
-                if (taint.has(arg) && param !== undefined && !taint.has(param)) {
-                  taint.add(param);
-                  changed = true;
+                if (from === undefined || param === undefined) {
+                  return;
                 }
+                const had = taint.get(param);
+                if (had === from) {
+                  return;
+                }
+                if (had !== undefined) {
+                  fail(`a phi merges the frame objects at [sp,#${had}] and [sp,#${from}] — one value, two objects`);
+                }
+                taint.set(param, from);
+                changed = true;
               });
             }
           }
         }
       }
-      // Judge every use of a tainted value.
-      const accesses: { width: number; signed: boolean }[] = [];
-      let escapes = false;
+      // Judge every use of a tainted value, against the object it names.
+      const accesses = new Map<number, { width: number; signed: boolean }[]>();
+      const escaped = new Set<number>();
+      for (const off of objects.keys()) {
+        accesses.set(off, []);
+      }
       for (const blk of irBlocks) {
         for (const op of blk.ops) {
           op.operands.forEach((v, idx) => {
-            if (!taint.has(v)) {
+            const off = taint.get(v);
+            if (off === undefined) {
               return;
             }
-            if (op.opcode === 'load' && idx === 0) {
+            const scalar = (kind: string) => {
               if ((op.attrs.off as number) !== 0) {
                 fail(
-                  `a load at [+${op.attrs.off}] through the captured address — only the scalar at offset 0 is modelled`,
+                  `a ${kind} at [+${op.attrs.off}] through the captured address — only a scalar at the ` +
+                    `captured address is modelled`,
                 );
               }
-              accesses.push({ width: op.attrs.width as number, signed: (op.attrs.signed as boolean) ?? false });
+            };
+            if (op.opcode === 'load' && idx === 0) {
+              scalar('load');
+              accesses
+                .get(off)!
+                .push({ width: op.attrs.width as number, signed: (op.attrs.signed as boolean) ?? false });
               return;
             }
             if (op.opcode === 'store' && idx === 0) {
-              if ((op.attrs.off as number) !== 0) {
-                fail(
-                  `a store at [+${op.attrs.off}] through the captured address — only the scalar at offset 0 is modelled`,
-                );
-              }
-              accesses.push({ width: op.attrs.width as number, signed: false });
+              scalar('store');
+              accesses.get(off)!.push({ width: op.attrs.width as number, signed: false });
               return;
             }
             if ((op.opcode === 'store' && idx === 1) || op.opcode === 'call') {
-              escapes = true; // the address ESCAPES as a value — the point of the capability
+              escaped.add(off); // the address ESCAPES as a value — the point of the capability
               return;
             }
             fail(`the captured address flows into \`${op.opcode}\` — not an access, an escape, or a phi`);
           });
         }
       }
-      if (accesses.length === 0) {
-        // nothing in-function pins the object's type, and a guessed declaration is the
-        // plausible-but-wrong class — decline until an inhabitant needs this
-        fail('the captured address is never dereferenced in this function, so nothing pins the local object type');
+      // The declared type of each object, and then that its bytes belong to nothing else.
+      const extent = new Map<number, number>();
+      for (const [off, acc] of accesses) {
+        if (acc.length === 0) {
+          // nothing in-function pins the object's type, and a guessed declaration is the
+          // plausible-but-wrong class — decline until an inhabitant needs this
+          fail('the captured address is never dereferenced in this function, so nothing pins the local object type');
+        }
+        const widths = new Set(acc.map((a) => a.width));
+        if (widths.size > 1) {
+          fail(`the accesses through the captured address disagree on width (${[...widths].join(' vs ')})`);
+        }
+        extent.set(off, acc[0].width);
       }
-      const widths = new Set(accesses.map((a) => a.width));
-      if (widths.size > 1) {
-        fail(`the accesses through the captured address disagree on width (${[...widths].join(' vs ')})`);
+      // TWO MODELS FOR ONE BYTE is a silent disagreement, so each object must own its bytes
+      // outright: inside the reserved local area, clear of every SSA slot (which the slot model
+      // keeps in registers, so a store through the object would not be seen there), and clear of
+      // every other object.
+      const overlaps = (a: number, aw: number, b: number, bw: number) => a < b + bw && b < a + aw;
+      const objs = [...extent].sort((x, y) => x[0] - y[0]);
+      for (const [off, width] of objs) {
+        if (off < 0 || off + width > localArea) {
+          fail(`the object at [sp,#${off}) of width ${width} lies outside the reserved local area`);
+        }
+        for (const slot of usedSlotOffsets) {
+          if (overlaps(off, width, slot, 4)) {
+            fail(`the object at [sp,#${off}) overlaps the SSA slot at [sp,#${slot}] — one byte, two models`);
+          }
+        }
       }
-      const width = accesses[0].width;
-      const signed = accesses.some((a) => a.signed);
-      if (width > localArea) {
-        fail('the object extends past the reserved local area');
-      }
-      for (const off of usedSlotOffsets) {
-        if (off < width) {
-          fail(`the object at [0,${width}) overlaps the SSA slot at [sp,#${off}] — one byte, two models`);
+      for (let i = 1; i < objs.length; i++) {
+        const [off, width] = objs[i];
+        const [prev, prevWidth] = objs[i - 1];
+        if (overlaps(prev, prevWidth, off, width)) {
+          fail(`the objects at [sp,#${prev}) and [sp,#${off}) overlap — one byte, two models`);
         }
       }
       // AN ESCAPE RETRACTS THE UNDEF ARGUMENT. `undef` rests on this function's own stores being the
-      // ONLY writer of its frame, and `escapes` is exactly when that stops holding. The audit bounds
+      // ONLY writer of its frame, and an escape is exactly when that stops holding. The audit bounds
       // what WE access through the object, not what a callee does, so a wider real object
       // (`struct P p; g(&p);` where only `p.x` is read here) has its later words written by `g` and
       // read back at a slot no store of ours reaches — declaring those uninitialised spells the
-      // callee's value as garbage. Function-wide, because the only width available is the one
-      // inferred from our own accesses, which is the number that is too small in this shape.
+      // callee's value as garbage. Function-wide rather than per object, because the callee is
+      // handed one address and may write any offset from it, and the extents here are inferred from
+      // OUR accesses — which is the number that is too small in this shape.
       //
-      // On `escapes` and not on "a laddr exists": an address captured and dereferenced only
-      // in-function cannot be written by anyone else, and the overlap check above covers its
-      // aliasing.
-      if (escapes && irBlocks.some((blk) => blk.ops.some((op) => op.opcode === 'undef'))) {
+      // On an escape and not on "a laddr exists": an address dereferenced only in-function cannot be
+      // written by anyone else, and the overlap checks above cover its aliasing.
+      if (escaped.size > 0 && irBlocks.some((blk) => blk.ops.some((op) => op.opcode === 'undef'))) {
         fail(
           'the captured address escapes, so a callee may write any frame offset and an unstored slot is not provably uninitialised',
         );
@@ -2933,8 +2974,12 @@ export function lift(
       // in-function reads — measured, the recompiled loop loaded the value and never stored it —
       // and the reference idiom's own spelling is `vu16 tmp` for exactly that reason. An object
       // whose address never leaves the function needs no volatile and must not pay its codegen.
-      for (const op of laddrs) {
-        op.attrs = { ...op.attrs, width, signed, ...(escapes ? { volatile: true } : {}) };
+      for (const [off, ops] of objects) {
+        const width = extent.get(off)!;
+        const signed = accesses.get(off)!.some((a) => a.signed);
+        for (const op of ops) {
+          op.attrs = { ...op.attrs, width, signed, ...(escaped.has(off) ? { volatile: true } : {}) };
+        }
       }
     }
   }
