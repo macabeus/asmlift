@@ -14,21 +14,59 @@
 //
 // The arguments move soundly because the block has no params and one op: a value the latch's `br`
 // passes dominates the latch, so it dominates the end of every predecessor of the latch too.
+//
+// WHY DOMINANCE, AND NOT "the target can reach this block". The two disagree on a loop PREHEADER —
+// the same empty forwarding block seen from the other side, which dominates its header instead of
+// the reverse. Reachability alone cannot refuse one, because an INNER loop's preheader sitting
+// inside an OUTER loop is reachable from the inner header round the outer back-edge. Folding a
+// preheader hands the structurer a guard branching straight at the header, which is the guard-FUSED
+// shape — and fusion is admitted on SHAPE alone (`isGuardShapedPred`), with a documented gap for a
+// guard that tests something other than the loop: it is DROPPED, not declined. So a guard `a0 != 0`
+// in front of a `v < a0` loop simply disappears from the emitted C, and at `a0 = -5` the asm
+// returns 1 where that C returns 0. This gate is the only thing between the pass and that shape,
+// which is what makes it a SOUNDNESS gate rather than a quality one.
 import { Fn, dominators } from '../ir/core';
+import { type Gate, firstRejection } from '../l3/gates';
+
+/** What the gates below judge: one candidate block, its `br` target, and the dominator sets. */
+interface LatchCandidate {
+  block: Fn['blocks'][number];
+  target: Fn['blocks'][number];
+  dominatesBlock: boolean;
+}
+
+export const LATCH_GATES: readonly Gate<LatchCandidate>[] = [
+  {
+    id: 'latch-has-params',
+    why: "a param means the block JOINS edges, so its br args are not this one edge's copy",
+    sound: false,
+    rejects: (c) => c.block.params.length > 0,
+  },
+  {
+    id: 'latch-does-work',
+    why: "the block's ops go with the block, and a result-less store leaves no trace behind",
+    sound: true,
+    // `br` is a terminator, so a block whose FIRST op is one holds nothing but that branch.
+    guardedBy: 'a latch holding a STORE is refused — nothing downstream would notice it vanish',
+    rejects: (c) => c.block.ops[0]?.opcode !== 'br',
+  },
+  {
+    id: 'self-branch',
+    why: 'every block dominates itself, so this is an infinite loop rather than a trampoline',
+    sound: false,
+    rejects: (c) => c.target === c.block,
+  },
+  {
+    id: 'target-dominates',
+    why: 'a preheader is the same empty block from the other side; folding it drops a guard',
+    sound: true,
+    guardedBy: 'an inner PREHEADER inside an outer loop is refused — its guard would be dropped',
+    rejects: (c) => !c.dominatesBlock,
+  },
+];
 
 /** Splice out every EMPTY LATCH — a block with no params whose single op is an unconditional `br`
  *  to a block that DOMINATES it. Returns how many were removed.
- *
- *  Dominance, rather than "the target can reach this block", is what distinguishes a latch from a
- *  loop PREHEADER — the same empty forwarding block seen from the other side. A preheader dominates
- *  its header instead of the reverse, and folding one hands the structurer a guard branching
- *  straight at the header, which is the guard-FUSED shape: a different structuring decision with
- *  its own soundness proof, which then declines. Reachability is not enough to see that, because an
- *  inner loop's preheader sitting inside an OUTER loop is reachable from the inner header round the
- *  outer back-edge.
- *
- *  A block branching to ITSELF is excluded separately: every block dominates itself, so the test
- *  above admits it, and it is an infinite loop rather than a trampoline.
  *
  *  Iterated, because folding one latch can make its predecessor into one: the predecessor's
  *  SUCCESSOR changes, so an edge that was not a back-edge becomes one. (Dominator sets themselves
@@ -38,17 +76,16 @@ import { Fn, dominators } from '../ir/core';
  *  a block whose every edge continues the loop, so it has no exit and loop recovery declines — the
  *  same loud decline it gave before the fold.
  */
-export function foldEmptyLatches(fn: Fn): number {
+export function foldEmptyLatches(fn: Fn, gates: readonly Gate<LatchCandidate>[] = LATCH_GATES): number {
   let folded = 0;
   for (;;) {
     const dom = dominators(fn);
     const latch = fn.blocks.find((b) => {
-      // `br` is a terminator, so a block whose FIRST op is one holds nothing but that branch.
-      if (b.params.length > 0 || b.ops[0]?.opcode !== 'br') {
-        return false;
-      }
-      const target = b.ops[0].successors[0].block;
-      return target !== b && dom.get(b)!.has(target);
+      const target = b.ops[0]?.successors[0]?.block;
+      return (
+        target !== undefined &&
+        firstRejection(gates, { block: b, target, dominatesBlock: dom.get(b)!.has(target) }) === null
+      );
     });
     if (!latch) {
       return folded;

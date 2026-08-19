@@ -37,7 +37,7 @@
 // whose exit copies would clobber, switch fall-through, and mixed-entry self-loops (a guarded
 // header also entered by a plain br).
 import { type GlobalCell, globalCellOf, mayWriteGlobal } from '../ir/alias';
-import { Block, Fn, Op, Value, defOpMap, successorsOf } from '../ir/core';
+import { Block, Fn, Op, Value, defOpMap, dominators, successorsOf } from '../ir/core';
 import { EFFECTFUL_OPS } from '../ir/opcodes';
 import { type IrType, T, scalarTypeForAccess, typeEquals } from '../ir/types';
 import { BinOp, Expr, SFn, Stmt, SwitchCase, exprChildren, gapReasonFor, mapExprChildren, negateCond } from '../l3/ast';
@@ -58,7 +58,7 @@ import {
 } from '../symbols';
 import { analyze } from './analysis';
 import { makeLoopHazards, updateWriteSet } from './hazards';
-import { analyzeLoops, dominators } from './loops';
+import { analyzeLoops } from './loops';
 import { makeSwitchRecovery } from './switch-recover';
 
 // Lower a constant-offset memory access to its lvalue/rvalue Expr. If the base was recovered as a
@@ -1678,7 +1678,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
       // to the pointer type it started as, so the walk changes the arithmetic and nothing else. A
       // bare `u8 *` sum would be a different C type from the slot it lands in (`v4 = (u8 *)a0 +
       // (v1 << 2)` into an `s32 *` — an mwcc error) and from the bases the deref rules read.
-      let reScale: IrType | undefined;
+      let restoreTo: IrType | undefined;
       const walk = (base: Expr, c: Extract<Expr, { k: 'const' }>): { base: Expr; off: Expr } => {
         const t = ctype(base);
         if (t?.kind !== 'ptr') {
@@ -1697,6 +1697,18 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
       // answer as the inexact constant above: cast then add. Without it a `u16 *` walked by a
       // computed offset addresses TWICE the intended byte, and nothing downstream can see the
       // error — in the sa3 decomp that address is what a `CpuSet` call writes THROUGH.
+      //
+      // KNOWN GAP: `ptr ± ptr` is excluded, and the intify rules below do not make it right
+      // either — `ptr + ptr` becomes `l + (s32)r`, which C scales, and a same-pointee `ptr - ptr`
+      // is C's ELEMENT difference where the asm subtracted bytes. Both want the same cast-then-add
+      // treatment; both are byte-identical to what this emitted before, and three functions in the
+      // agbcc corpus carry one.
+      //
+      // KNOWN GAP: the inexact-CONSTANT branch above casts its base and does NOT cast the sum
+      // back, so `v1 = (u8 *)a0 + 2` still lands in an `s32 *` slot. Copying the restore up churns
+      // the common case, where the sum is consumed by a deref that supplies its own cast — the
+      // real predicate is the CONSUMER, and deciding it here at the producer is what these two
+      // branches would have to stop doing.
       const walkVar = (x: Expr): IrType | undefined => {
         const t = ctype(x);
         return t?.kind === 'ptr' && ptrElemBytes(t.to) !== 1 ? t : undefined;
@@ -1712,11 +1724,11 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
         const lp = ctype(l)?.kind === 'ptr';
         const rp = d.operands.length === 2 && ctype(r)?.kind === 'ptr';
         if (lp && !rp) {
-          reScale = walkVar(l);
-          l = reScale ? bytePtr(l) : l;
+          restoreTo = walkVar(l);
+          l = restoreTo ? bytePtr(l) : l;
         } else if (rp && !lp && d.opcode === 'add') {
-          reScale = walkVar(r);
-          r = reScale ? bytePtr(r) : r;
+          restoreTo = walkVar(r);
+          r = restoreTo ? bytePtr(r) : r;
         }
       }
       // C rejects a pointer operand outright under the non-additive operators (& | ^ << >> * / %),
@@ -1781,7 +1793,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
       // class as intifyAddrCmp's `addr` rule and is deliberately left alone here: it is valid C
       // today, so closing it would churn spellings for a signedness case no row exercises.
       const sum: Expr = { k: 'bin', op, l, r };
-      return reScale ? { k: 'cast', to: reScale, e: sum } : sum;
+      return restoreTo ? { k: 'cast', to: restoreTo, e: sum } : sum;
     }
     // `-`/`~` on a pointer rendering is equally not C — same honest integer cast as above.
     if (d.opcode === 'rotr' || d.opcode === 'rotl') {

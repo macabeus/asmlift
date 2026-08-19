@@ -5,12 +5,16 @@
 // never reachable in the first place.
 import { expect, test } from 'vitest';
 
+import { cBackend } from '../src/backend/c';
 import { dominators } from '../src/ir/core';
 import { parse } from '../src/ir/parse';
 import { print } from '../src/ir/print';
 import { verify } from '../src/ir/verify';
-import { foldEmptyLatches } from '../src/raise/latch';
+import { without } from '../src/l3/gates';
+import { decompile } from '../src/pipeline';
+import { LATCH_GATES, foldEmptyLatches } from '../src/raise/latch';
 import { structure } from '../src/structure/structure';
+import { ARMV4T_AGBCC } from '../src/target';
 
 /** `^bb2` is the empty latch: no params, one `br` back to the header `^bb1`, carrying the update. */
 const LATCH = `fn f {
@@ -57,7 +61,7 @@ test('a PREHEADER is the same empty block and is refused — it dominates the he
   expect(foldEmptyLatches(fn)).toBe(0);
 });
 
-test('an inner PREHEADER inside an outer loop is refused — reachability would not see it', () => {
+test('an inner PREHEADER inside an outer loop is refused — its guard would be dropped', () => {
   // ^bb2 is the inner loop's preheader. The inner header ^bb3 REACHES it, round the outer back-edge
   // ^bb4 → ^bb1 → ^bb2, so a reachability-gated fold eats it and hands the structurer the
   // guard-fused shape. Dominance refuses: ^bb2 dominates ^bb3, not the reverse. This is the case
@@ -175,4 +179,82 @@ test('dominators: a latch is dominated by its header, a preheader is not', () =>
   expect(dom.get(latch)!.has(header)).toBe(true);
   expect(dom.get(header)!.has(latch)).toBe(false);
   expect(dom.get(header)!.has(entry)).toBe(true);
+});
+
+// THE POSITIVE CONTROL for the dominance gate, run through the emitter rather than through a fold
+// count. `toBe(0)` on a refusal proves only that nothing happened; what makes the gate SOUND is
+// what happens when it is gone — and because the gates are a table, that ablation is a value passed
+// to the real pass, not a test-only branch inside it.
+test('ablating the dominance gate DROPS a guard from the emitted C', () => {
+  // The guard tests `a0 != 0`; the loop tests `v < a0`. They are different predicates, so a fusion
+  // admitted on shape alone deletes the guard outright.
+  const IR = `fn g {
+^bb0(%0: s32):
+  %1: s32 = const {value=0}
+  %2: u32 = icmp_ne %0, %1
+  cond_br %2, ^bb2(), ^bb3(%1)
+^bb2():
+  br ^bb1(%1)
+^bb1(%3: s32):
+  %4: s32 = const {value=1}
+  %5: s32 = add %3, %4
+  %6: u32 = icmp_slt %5, %0
+  cond_br %6, ^bb1(%5), ^bb3(%5)
+^bb3(%7: s32):
+  ret %7
+}
+`;
+  const emit = (fn: ReturnType<typeof parse>) =>
+    cBackend.emit(structure(fn, { returnsVoid: false, littleEndian: true }));
+
+  const kept = parse(IR);
+  expect(foldEmptyLatches(kept)).toBe(0);
+  expect(emit(kept)).toContain('a0 != 0'); // the guard the asm branched on
+
+  const ablated = parse(IR);
+  expect(foldEmptyLatches(ablated, without(LATCH_GATES, 'target-dominates'))).toBe(1);
+  // silently, with no decline and no marker: at a0 = -5 the asm returns 1 and this returns 0
+  expect(emit(ablated)).not.toContain('a0 != 0');
+});
+
+// THE WIRING. Every test above calls `foldEmptyLatches` directly, so deleting the call in
+// `pipeline.ts` leaves all of them green. This one goes in as Thumb asm and out as C, on the free-
+// list walk the pass was built for: `add r3, r0, #0` is the register copy SSA turns into an edge
+// argument, leaving `b .L6` alone in its block. Without the fold the whole function declines with
+// "unrecovered back-edge".
+test('the pass is WIRED: a trampoline latch structures end to end', () => {
+  const asm = [
+    'f:',
+    '\tpush\t{r4, lr}',
+    '\tadd\tr2, r1, #0',
+    '\tldr\tr3, [r0]',
+    '.L6:',
+    '\tldr\tr1, [r3, #0x4]',
+    '\tcmp\tr2, r1',
+    '\tbhi\t.L7',
+    '\tcmp\tr2, r1',
+    '\tbne\t.L8',
+    '\tadd\tr0, r3, #0',
+    '\tb\t.L13',
+    '.L8:',
+    '\tadd\tr0, r2, #0',
+    '\tadd\tr0, r0, #0x8',
+    '\tcmp\tr0, r1',
+    '\tbgt\t.L7',
+    '\tadd\tr0, r3, #0',
+    '\tb\t.L13',
+    '.L7:',
+    '\tldr\tr0, [r3]',
+    '\tcmp\tr0, #0',
+    '\tbeq\t.L3',
+    '\tadd\tr3, r0, #0',
+    '\tb\t.L6',
+    '.L3:',
+    '\tmov\tr0, #0',
+    '.L13:',
+    '\tpop\t{r4}',
+    '\tpop\t{r1}',
+    '\tbx\tr1',
+  ].join('\n');
+  expect(decompile('f', asm, ARMV4T_AGBCC).source).toContain('} while (v0 != 0);');
 });

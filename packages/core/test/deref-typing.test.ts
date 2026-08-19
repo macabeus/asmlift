@@ -596,8 +596,8 @@ describe('byte offsets on a rendered pointer', () => {
   test('the sum is cast BACK, so a walked pointer still lands in its own declared slot', () => {
     // The byte cast is for the ADDRESS only. Left as a bare `u8 *`, the sum is a different C type
     // from the `s32 *` variable it is assigned to — an incompatible-pointer assignment mwcc
-    // REJECTS outright (synthetic:arraysum/revarr/structarr on mwcc_242_81 all noncompile without
-    // this), and a base the deref rules then read as striding 1 byte instead of 4.
+    // REJECTS outright (synthetic:arraysum:mwcc_242_81, synthetic:revarr:mwcc_242_81 and
+    // synthetic:structarr:mwcc_242_81 all noncompile without this), and a base the deref rules then read as striding 1 byte instead of 4.
     const walkedIntoVar =
       'f:\n\tpush\t{r4, lr}\n\tldr\tr2, [r0, #0x4]\n\tstr\tr2, [r0, #0x8]\n' +
       '\tlsl\tr1, r1, #0x1\n\tadd\tr3, r0, r1\n\tmov\tr4, #0x0\n' +

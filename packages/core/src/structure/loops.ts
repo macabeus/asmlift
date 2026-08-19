@@ -6,11 +6,9 @@
 // owns. It has NOTHING to do with AST emission and is unit-testable on synthetic CFGs with no
 // emitter and no toolchain (test/loops.test.ts).
 //
-// Dominance itself is a substrate fact (`ir/core.ts`), re-exported here because loop discovery is
-// its primary consumer and every caller of this module wants the pair.
-import { Block, Fn, dominators, predecessors, successorsOf } from '../ir/core';
-
-export { dominators };
+// Dominance itself is a substrate fact and lives in `ir/core.ts`; `analyzeLoops` takes the map as
+// a parameter, so a caller passes `dominators(fn)` from there.
+import { Block, Fn, predecessors, successorsOf } from '../ir/core';
 
 /** One natural loop, keyed by its header. */
 export interface NaturalLoop {
