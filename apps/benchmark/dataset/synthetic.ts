@@ -461,12 +461,18 @@ export const SYNTHETIC: SynthSpec[] = [
   // the post-update name is an off-by-one-iteration miscompile, but it costs 29 functions across
   // the klonoa/sa3/newlib corpus and no other benchmark row reproduces it.
   //
-  // ONE decline message, THREE causes, which is the point of authoring three rows: the message
+  // ONE decline message, THREE causes, which is the point of authoring several rows: the message
   // groups them and the fix does not. `preupdate_cond` is the loop CONDITION reading it,
   // `preupdate_exit` is the EXITING EDGE carrying it, and `preupdate_escape` is a body value read
   // after the loop deriving from it. Only the middle one reaches the repair that already exists
   // (`sinkablePreUpdateSlots`, the trailing-pointer sink) and is turned away there by the
   // `arg-is-loop-variable` gate, which is where every real function on this link is refused.
+  //
+  // DEPTH, not just cause. Ablating that gate structures 10 of the 12 real EXIT functions outright,
+  // so for them it is the LAST link — and a row is only evidence for the fix if it flips with them.
+  // `preupdate_exit` does. `preupdate_exit_call` is the same shape carrying a CALL on the exit edge
+  // and stops one guard later ("a post-loop value inlines a 'call' from inside the loop"), which is
+  // the other two functions; it is here so that closing the gate cannot read as closing the bucket.
   //
   // agbcc only, and the reason is the whole point: the shape IS the ARM rotation. Given the same C,
   // ido/kmc/mwcc schedule the update after the test and the pre-update read never arises, so the
@@ -476,19 +482,36 @@ export const SYNTHETIC: SynthSpec[] = [
     src: 'int preupdate_cond(int i){ int b = 0; if (i == 0) return 0; while (((i >> b++) & 1) == 0) ; return b; }',
     features: ['loop-preupdate'],
     toolchains: ['agbcc'],
-    note: "the `ffs` shape: `b++` renders inside the condition's own operand, so the update cannot simply move",
+    note:
+      "a post-increment inside the loop condition's own operand (`i >> b++`), so the test reads the " +
+      'value the variable held one step before the update the compiler has already emitted',
   },
   {
     sym: 'preupdate_exit',
     src:
-      'int cb(int *p);\n' +
       'int preupdate_exit(int *p, int n, int m){ int r = m; int *q;' +
+      ' if (n > 0) { q = p + n; do { r = *q + n; q = q - 1; } while (--n); } return r; }',
+    features: ['loop-preupdate'],
+    toolchains: ['agbcc'],
+    note:
+      "the loop's exiting edge carries a value computed from the loop variables BEFORE their update " +
+      '(`*q + n`). The `q = p + n` init is load-bearing: without a preheader the entry guard fuses ' +
+      'into the loop and the function is refused for an unrelated reason',
+  },
+  {
+    sym: 'preupdate_exit_call',
+    src:
+      'int cb(int *p);\n' +
+      'int preupdate_exit_call(int *p, int n, int m){ int r = m; int *q;' +
       ' if (n > 0) { q = p + n; do { r = cb(q); q = q - 1; } while (--n); } return r; }',
     features: ['loop-preupdate'],
     toolchains: ['agbcc'],
     ctx: 'int cb(int*);',
     proto: { cb: { params: 1 } },
-    note: 'the `_wrapup_reent` shape — `q = p + n` is a preheader, without which the guard fuses and the decline is a different one',
+    note:
+      "an exiting edge carrying a CALL's result computed from the pre-update loop variable. The call " +
+      'is a SECOND refusal sitting behind the pre-update one, so this row is expected to stay ' +
+      'declined even once the pre-update read itself is recovered',
   },
   {
     sym: 'preupdate_escape',
@@ -500,7 +523,9 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc'],
     ctx: 'struct N; void preupdate_escape(struct N*,int,int**);',
     proto: { preupdate_escape: { returnsVoid: true } },
-    note: 'the trailing-pointer idiom with a DERIVED trailing value — `&f->v`, not `f` itself',
+    note:
+      'the trailing-pointer idiom where the trailing value is DERIVED from the loop variable ' +
+      '(`&f->v`) rather than being the variable itself, and is read after the loop has moved on',
   },
 
   // The DMA-fill idiom, WITH an uninitialised local — the pair no real row carries. An escaping
