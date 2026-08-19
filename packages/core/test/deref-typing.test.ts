@@ -541,3 +541,31 @@ test('a negative access offset stays exact — no struct member at a negative of
   expect(neg).toContain('a0[1]');
   expect(neg).not.toContain('struct'); // no layout is synthesized across a negative offset
 });
+
+// A BYTE OFFSET ADDED TO A WIDER POINTER. The asm adds BYTES; C pointer arithmetic is
+// element-scaled, so the constant is divided by the pointee size to keep the address. When it does
+// not divide — or the pointee's size is not knowable here — there is no scaled spelling, and the
+// raw byte count is not a fallback: C multiplies it back. The honest form is the one the
+// pointer-global rule already uses, CAST THEN ADD.
+describe('byte offsets on a rendered pointer', () => {
+  // `ldr r2,[r0,#4]` / `str r2,[r0,#8]` type a0 as `s32 *`; then two byte stores through it, one
+  // at an offset the element size divides (60) and one at an offset it does not (62).
+  const bytesOnWordPtr =
+    'f:\n\tpush\t{r4, lr}\n\tldr\tr2, [r0, #0x4]\n\tstr\tr2, [r0, #0x8]\n' +
+    '\tadd\tr3, r0, #0x3e\n\tmov\tr4, #0x7\n\tstrb\tr4, [r3]\n' +
+    '\tadd\tr3, r0, #0x3c\n\tstrb\tr4, [r3]\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+
+  test('an offset the element size does not divide casts the BASE, not the sum', () => {
+    const src = decompile('f', bytesOnWordPtr, ARMV4T_AGBCC).source;
+    // `(u8 *)a0 + 62` is byte 62 under any declaration; `(u8 *)(a0 + 62)` is byte 248 under this
+    // one, and byte 62 only if `a0` happened to render as a byte pointer.
+    expect(src).toContain('*((u8 *)a0 + 62) = 7;');
+    expect(src).not.toContain('(u8 *)(a0 + 62)');
+  });
+
+  test('an offset it DOES divide still scales, and keeps the base uncast', () => {
+    // the discriminating control: without it this pair reads as "always cast", which would churn
+    // every element-exact walk in the corpus into byte arithmetic
+    expect(decompile('f', bytesOnWordPtr, ARMV4T_AGBCC).source).toContain('*(u8 *)(a0 + 15) = 7;');
+  });
+});
