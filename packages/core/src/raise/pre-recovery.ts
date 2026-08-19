@@ -19,6 +19,7 @@ import { recognizeConsts } from './const';
 import { recognizeDivPow2 } from './divpow2';
 import { numberPureValues } from './gvn';
 import { recognizeMagicDivision } from './magicdiv';
+import { rerootNarrowReads } from './narrow';
 import { recognizeBranchShortCircuit, recognizeShortCircuit } from './shortcircuit';
 import { recognizeSoftDiv } from './softdiv';
 import { recognizeStructArrays } from './struct-arrays';
@@ -82,6 +83,7 @@ export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
   // permanently disqualify a value fold that was available. The reverse cannot happen: the value
   // form replaces its head's `cond_br` with a `br`, which this pass never matches.
   { id: 'branch-shortcircuit', run: recognizeBranchShortCircuit, dce: true },
+  { id: 'narrow', run: rerootNarrowReads, dce: false },
 ];
 
 /** Run the pre-recovery passes in order. For each pass whose gate passes and that CHANGES the IR, run
