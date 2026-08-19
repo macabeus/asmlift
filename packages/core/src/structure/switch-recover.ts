@@ -5,6 +5,7 @@
 // late-bound callbacks into the emission phase, so case bodies reuse the ordinary structuring
 // machinery (loops/ifs inside cases, the onStack guard).
 import { Block, Fn, Op, Value, successorsOf } from '../ir/core';
+import { ORDER_SENSITIVE_OPS } from '../ir/opcodes';
 import { Expr, Stmt, SwitchCase } from '../l3/ast';
 
 export interface SwitchRecoverDeps {
@@ -142,7 +143,6 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
   // switch, so a side effect there would be lost). PRE4 (purity). The root block is exempt from the
   // "only const/icmp" rule because its non-terminator ops are already emitted as sideEffects(b) before
   // the switch; a non-root test block must be strictly pure.
-  const SIDE_EFFECTFUL = new Set(['store', 'astore', 'call', 'load', 'aload', 'opaque']);
   interface TestInfo {
     x: Value;
     k: number;
@@ -159,7 +159,7 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     if (!cmp || !isCmpOpcode(cmp.opcode)) {
       return null;
     }
-    if (!isRoot && (blk.ops.some((op) => SIDE_EFFECTFUL.has(op.opcode)) || emitsAnchoredWrite(blk))) {
+    if (!isRoot && (blk.ops.some((op) => ORDER_SENSITIVE_OPS.has(op.opcode)) || emitsAnchoredWrite(blk))) {
       return null;
     } // PRE4 — anchored writes included: discarded with the block, while their edge copies stay suppressed
     // Which operand is the scrutinee, which is the constant?

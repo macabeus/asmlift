@@ -16,6 +16,10 @@ export interface OpSig {
    *  an unconditional position. THE one effect vocabulary — DCE (pattern/engine.ts) and the
    *  short-circuit hoist guard (raise/shortcircuit.ts) both derive from this flag. */
   effects?: boolean;
+  /** reads memory. Deletable when dead — nothing observes a load nobody reads — but NOT movable:
+   *  a load answers whichever stores ran before it, so crossing one changes the value it yields.
+   *  The two questions are separate flags because a load answers them differently. */
+  reads?: boolean;
 }
 
 export const OPCODES = {
@@ -90,13 +94,13 @@ export const OPCODES = {
   logic_and: { operands: 2, results: 1 },
   logic_or: { operands: 2, results: 1 },
   // --- memory ---
-  load: { operands: 1, results: 1, requiredAttrs: ['off', 'width', 'signed'] },
+  load: { operands: 1, results: 1, requiredAttrs: ['off', 'width', 'signed'], reads: true },
   store: { operands: 2, results: 0, requiredAttrs: ['off', 'width'], effects: true },
   // Typed element-scaled array access. Unlike load/store's constant `off`, these carry an
   // explicit runtime `index` operand plus the `elemSize` the index scales by, so the base is a
   // genuine `elem *` and no byte-offset arithmetic leaks into the emitted source. Produced by
   // the array-recognition legalization pass (raise/arrays.ts).
-  aload: { operands: 2, results: 1, requiredAttrs: ['elemSize', 'signed'] }, // aload base, index
+  aload: { operands: 2, results: 1, requiredAttrs: ['elemSize', 'signed'], reads: true }, // aload base, index
   astore: { operands: 3, results: 0, requiredAttrs: ['elemSize'], effects: true }, // astore base, index, value
   // --- call: operands are the argument values (r0..), result is the return value (r0),
   //     `target` attr is the callee symbol. Caller-saved clobbering is implicit. ---
@@ -204,12 +208,30 @@ export const EFFECTFUL_OPS: ReadonlySet<string> = new Set(
   (Object.keys(OPCODES) as Opcode[]).filter((k) => (OPCODES[k] as OpSig).effects),
 );
 
-/** Ops that may not be REORDERED across other code. Identical to `EFFECTFUL_OPS` — one flag answers
- *  both "deletable when dead" and "movable when live" — and kept as its own name because the call
- *  sites ask the reordering question. Derived here rather than re-spelled per consumer:
+/** Ops that may not be SPECULATED — run on a path that did not run them before. Identical to
+ *  `EFFECTFUL_OPS`, and kept as its own name because the call sites ask the speculation question
+ *  rather than the deletion one. Derived here rather than re-spelled per consumer:
  *  structure/analysis.ts and structure/structure.ts each carry their own inline copy of this
- *  membership, which is how the two models drifted apart in the first place. */
+ *  membership, which is how the two models drifted apart in the first place.
+ *
+ *  A memory read is deliberately absent, and that is the one entry worth arguing: its consumers
+ *  hoist an arm's body into the block above, and the structurer inlines an unnamed value back into
+ *  the `&&`/`||` right-hand side, where C's own short-circuit re-guards it. Adding the two reads
+ *  here costs three byte-matches (kleod:UpdateHUDCounterDisplay, synthetic:breakloop,
+ *  synthetic:strcmp1), so the argument is load-bearing rather than merely plausible. Re-EVALUATING
+ *  an op at another point is a different question with a different answer — `ORDER_SENSITIVE_OPS`. */
 export const HOIST_UNSAFE_OPS: ReadonlySet<string> = EFFECTFUL_OPS;
+
+/** Ops whose answer depends on WHERE they run, so re-evaluating one at another program point may
+ *  yield something else: an effect (its order against other effects is observable) or a memory read
+ *  (it answers whichever stores ran before it). The question a pass asks before moving a
+ *  computation, as opposed to before deleting or speculating one. */
+export const ORDER_SENSITIVE_OPS: ReadonlySet<string> = new Set(
+  (Object.keys(OPCODES) as Opcode[]).filter((k) => {
+    const sig = OPCODES[k] as OpSig;
+    return sig.effects || sig.reads;
+  }),
+);
 
 /** May a dead result of this opcode be deleted? Registered, no observable effects, not control
  *  flow. `opaque` is excluded via its `effects` flag — see the note on its signature. */

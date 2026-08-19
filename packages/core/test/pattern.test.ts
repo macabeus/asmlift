@@ -3,7 +3,14 @@
 // testable, AI-addable datum.
 import { expect, test } from 'vitest';
 
-import { NEGATED_ICMP, OPCODES } from '../src/ir/opcodes';
+import {
+  EFFECTFUL_OPS,
+  HOIST_UNSAFE_OPS,
+  NEGATED_ICMP,
+  OPCODES,
+  ORDER_SENSITIVE_OPS,
+  isDceSafe,
+} from '../src/ir/opcodes';
 import { parse } from '../src/ir/parse';
 import { print } from '../src/ir/print';
 import { verify } from '../src/ir/verify';
@@ -166,4 +173,17 @@ test('composition: mwcc `!(x == 0)` folds through cntlzw-eq0 into a single `x !=
     'fn notb {\n^bb0(%0: s32):\n  %1: s32 = const {value=0}\n  %2: u32 = icmp_ne %0, %1\n  ret %2\n}\n',
   );
   verify(fn);
+});
+
+test('the three effect views over the registry name three different questions', () => {
+  // Each set answers one question about an op, and they are derived from the signature flags rather
+  // than listed, so registering an opcode cannot leave one behind. Pinned because the memberships
+  // OVERLAP: `EFFECTFUL_OPS` and `ORDER_SENSITIVE_OPS` agree on every op but the two memory reads,
+  // and that single disagreement is the whole reason the second set exists.
+  expect([...EFFECTFUL_OPS].sort()).toEqual(['astore', 'call', 'opaque', 'store']);
+  expect([...ORDER_SENSITIVE_OPS].sort()).toEqual(['aload', 'astore', 'call', 'load', 'opaque', 'store']);
+  expect([...HOIST_UNSAFE_OPS].sort()).toEqual([...EFFECTFUL_OPS].sort());
+  // A memory read is deletable when dead but not movable — the two questions asked of one opcode.
+  expect(isDceSafe('load')).toBe(true);
+  expect(ORDER_SENSITIVE_OPS.has('load')).toBe(true);
 });
