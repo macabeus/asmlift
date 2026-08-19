@@ -615,8 +615,6 @@ interface WhileLoopInfo {
 // the stricter "is this block pure" and so counts loads too. `headerPure` also wants `call` out of a
 // re-evaluated condition for a SECOND reason — `expr()` inlines a result at every use with no CSE —
 // so removing it here on effect grounds would quietly loosen that too.
-const OBSERVABLE_EFFECT = new Set(['store', 'astore', 'call', 'opaque']);
-
 // Opcodes whose NUMBER OF EXECUTIONS is observable. Moving one of these out of a loop changes what
 // the program does — a call that ran per iteration would run once. A `load`/`aload` is deliberately
 // NOT here: it is a pure read, so running it once instead of per-iteration is unobservable as long
@@ -946,7 +944,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
       } // re-enters the loop → not an exit
       if (entryOwned && dom.get(bb)!.has(to)) {
         owned.add(bb);
-      } else if (bb.ops.some((op) => OBSERVABLE_EFFECT.has(op.opcode))) {
+      } else if (bb.ops.some((op) => EFFECTFUL_OPS.has(op.opcode))) {
         return null;
       }
       const t = bb.ops[bb.ops.length - 1];
@@ -1018,7 +1016,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     // whose result also feeds the body would be evaluated twice per iteration). A `load` is fine —
     // but NOT a materialized one: its temp assignment renders only via sideEffects(), which a
     // condition-only header never emits, so its uses would read an unassigned variable.
-    const headerPure = !h.ops.some((op) => OBSERVABLE_EFFECT.has(op.opcode) || materialize.has(op));
+    const headerPure = !h.ops.some((op) => EFFECTFUL_OPS.has(op.opcode) || materialize.has(op));
 
     let exitFrom: Block,
       exit: Block,
@@ -1924,6 +1922,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     useSitesOf,
     liveIn,
     opBlock,
+    respelledDefs: bitfieldSpelling,
   });
 
   // A POST-LOOP substitution active while structuring a loop's exit region: a loop-carried value (a
@@ -2540,8 +2539,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
   // order keeps it deterministic.
   //
   // NOT `expr`: an ambient `activeSub` is an ENCLOSING loop's post-loop naming, which the sink's
-  // walk does not model. A do-while nested in one, sinking anything but a bare loop variable, is
-  // therefore refused rather than spelled under a rule that was never checked for it.
+  // walk does not model. This is a SCOPE LIMIT, not a rule about the shape — a bare loop variable
+  // was spelled by name here before the walk existed and keeps that behaviour; only a REBUILT
+  // tree, the thing the walk vouches for, is refused where the walk was not asked.
   //
   // The destination name is read as an invariant, not checked: every block param carries one.
   // `assertResolved` is what catches a widening that breaks that.
@@ -2622,11 +2622,42 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     const updates = argAssigns(dw.latch, dw.header);
     const updateWrites = updateWriteSet(updates);
     const lterm = dw.latch.ops[dw.latch.ops.length - 1];
+    // KNOWN GAP, and the reason the sink stands down rather than repairing anything. A body
+    // block's param may adopt a loop variable's NAME (canTakeName waives the liveness half for a
+    // pure alias); where the incoming args differ, the arm's copy into it is a real write running
+    // ahead of the bottom of the body, and the update — which renders RAW — then reads a name that
+    // no longer holds the header's value. `sub` cannot see it: it EXEMPTS the back-edge args,
+    // right for the post-update question it models and wrong for this one.
+    //
+    // The emitted C is wrong whenever this fires, with or without a sink, and that is true on the
+    // commit before this one too — the shape is not this pass's to fix. What IS this pass's is not
+    // to UNLOCK such a loop: without the sink these functions decline on the pre-update hazard, so
+    // standing down keeps them loud instead of trading a decline for a silent wrong answer.
+    const bodyRebinds = new Set<string>();
+    for (const bb of dw.body) {
+      if (bb === dw.header) {
+        continue;
+      }
+      bb.params.forEach((pv, i) => {
+        const n = varName.get(pv);
+        // Only a copy that SURVIVES argAssigns' identity elision writes anything: an edge whose
+        // arg already carries this name emits nothing at all.
+        if (n !== undefined && (preds.get(bb) ?? []).some((pb) => varName.get(successorTo(pb, bb)!.args[i]) !== n)) {
+          bodyRebinds.add(n);
+        }
+      });
+    }
+    const backArgs = (successorTo(dw.latch, dw.header)?.args ?? []) as Value[];
+    const rebindHazard =
+      bodyRebinds.size > 0 &&
+      [...backArgs, lterm.operands[0]].some((a) => a !== undefined && readsClobbered(a, new Map(), bodyRebinds));
     const exitArgs = (successorTo(dw.latch, dw.exit)?.args ?? []) as Value[];
     // A pre-update exit copy moves to the TOP of the body, where the loop variables still hold
     // their top-of-iteration values. No zero-trip seed here: a `do-while` always runs its body, so
     // any other predecessor of the exit is an ordinary edge some enclosing `if` already emits.
-    const sunk = sinkablePreUpdateSlots(dw.header, dw.exit, exitArgs, dw.body, sub, updateWrites);
+    const sunk = rebindHazard
+      ? new Set<number>()
+      : sinkablePreUpdateSlots(dw.header, dw.exit, exitArgs, dw.body, sub, updateWrites);
     // The post-loop region the escaped-value check judges: everything the loop does not emit itself.
     // An early-`return` arm the loop OWNS renders inside the body, ahead of the update, so a read of
     // a loop variable there is the pre-update value it wants — counting it as post-loop would decline

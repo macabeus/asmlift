@@ -20,6 +20,9 @@ export interface OpSig {
    *  a load answers whichever stores ran before it, so crossing one changes the value it yields.
    *  The two questions are separate flags because a load answers them differently. */
   reads?: boolean;
+  /** may fault on operands the program never actually gave it — the integer divides, on a zero
+   *  divisor. Deletable and movable, but not safe to run on a path that did not run it. */
+  traps?: boolean;
 }
 
 export const OPCODES = {
@@ -70,10 +73,10 @@ export const OPCODES = {
   // are 2-operand only. `sdiv`/`udiv` = quotient, `smod`/`umod` = remainder; signedness lives in
   // the op (recovery types the operands to match), so the backend picks `/`/`%` over
   // correctly-typed operands.
-  sdiv: { operands: 'variadic', results: 1 },
-  udiv: { operands: 2, results: 1 },
-  smod: { operands: 2, results: 1 },
-  umod: { operands: 2, results: 1 },
+  sdiv: { operands: 'variadic', results: 1, traps: true },
+  udiv: { operands: 2, results: 1, traps: true },
+  smod: { operands: 2, results: 1, traps: true },
+  umod: { operands: 2, results: 1, traps: true },
   // signed/equality comparisons (result is a boolean-valued u32)
   icmp_slt: { operands: 2, results: 1 },
   icmp_sle: { operands: 2, results: 1 },
@@ -214,22 +217,27 @@ export const EFFECTFUL_OPS: ReadonlySet<string> = new Set(
  *  structure/analysis.ts and structure/structure.ts each carry their own inline copy of this
  *  membership, which is how the two models drifted apart in the first place.
  *
- *  A memory read is deliberately absent, and that is the one entry worth arguing: its consumers
+ *  A memory read is deliberately absent, and that is the one entry worth arguing: both consumers
  *  hoist an arm's body into the block above, and the structurer inlines an unnamed value back into
  *  the `&&`/`||` right-hand side, where C's own short-circuit re-guards it. Adding the two reads
  *  here costs three byte-matches (kleod:UpdateHUDCounterDisplay, synthetic:breakloop,
- *  synthetic:strcmp1), so the argument is load-bearing rather than merely plausible. Re-EVALUATING
- *  an op at another point is a different question with a different answer — `ORDER_SENSITIVE_OPS`. */
+ *  synthetic:strcmp1), so the argument is load-bearing rather than merely plausible.
+ *
+ *  KNOWN GAP: the trapping divides are absent too, and there the re-guard argument does NOT carry
+ *  — a hoisted `sdiv` that the structurer NAMES becomes an unconditional statement. Left as it is
+ *  because closing it is a separate change with its own measurement; `REEVAL_UNSAFE_OPS` does
+ *  refuse them, so the pre-update sink is not exposed to it. */
 export const HOIST_UNSAFE_OPS: ReadonlySet<string> = EFFECTFUL_OPS;
 
-/** Ops whose answer depends on WHERE they run, so re-evaluating one at another program point may
- *  yield something else: an effect (its order against other effects is observable) or a memory read
- *  (it answers whichever stores ran before it). The question a pass asks before moving a
- *  computation, as opposed to before deleting or speculating one. */
-export const ORDER_SENSITIVE_OPS: ReadonlySet<string> = new Set(
+/** Ops that may not be RE-EVALUATED at another program point — the question a pass asks before
+ *  rebuilding a computation somewhere else, as opposed to before deleting one (`EFFECTFUL_OPS`).
+ *  Three ways to fail it, one flag each: an effect (its order against other effects is
+ *  observable), a memory read (it answers whichever stores ran before it), and a trap (the new
+ *  point may be reached on a path the old one was not). */
+export const REEVAL_UNSAFE_OPS: ReadonlySet<string> = new Set(
   (Object.keys(OPCODES) as Opcode[]).filter((k) => {
     const sig = OPCODES[k] as OpSig;
-    return sig.effects || sig.reads;
+    return sig.effects || sig.reads || sig.traps;
   }),
 );
 

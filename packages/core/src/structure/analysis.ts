@@ -7,6 +7,7 @@
 //     their own program position instead of inlining at their use.
 import { globalCellOf, mayWriteGlobal } from '../ir/alias';
 import { Block, Fn, Op, Value, successorsOf } from '../ir/core';
+import { EFFECTFUL_OPS } from '../ir/opcodes';
 
 export interface UseSite {
   blk: Block;
@@ -428,8 +429,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           continue;
         }
         if (poss.length > 1) {
-          const MW = new Set(['store', 'astore', 'call', 'opaque']);
-          const isWrite = barsThisRead ?? ((x: Op) => MW.has(x.opcode));
+          const isWrite = barsThisRead ?? ((x: Op) => EFFECTFUL_OPS.has(x.opcode));
           if (poss.some((p) => memWriteBetween(op, p!, isWrite))) {
             materialize.add(op);
           }

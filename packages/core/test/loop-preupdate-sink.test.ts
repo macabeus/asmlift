@@ -245,3 +245,79 @@ test('a seed that would overwrite a value the loop init reads declines', () => {
   expect(() => emit(TRAILING_PTR)).not.toThrow();
   expect(() => emit(SEED_CLOBBERS_INIT)).toThrow(/loop initialisation reads/);
 });
+
+// REFUSAL — an early-`return` arm lets an iteration leave the loop BEFORE the latch, so a tree
+// rebuilt at the top of the body is one that iteration never evaluated. Harmless for arithmetic,
+// not for a divide: at `a0 == 0` the IR returns without dividing and the C would divide first.
+const SPECULATED_DIVIDE = `fn specarm {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=0}
+  br ^bb1(%2)
+^bb1(%3: s32):
+  %4: u32 = icmp_slt %1, %2
+  cond_br %4, ^bb2(), ^bb3()
+^bb2():
+  br ^bb5()
+^bb3():
+  %5: u32 = icmp_eq %0, %2
+  cond_br %5, ^bb6(%3), ^bb5()
+^bb5():
+  %6: s32 = const {value=1}
+  %7: s32 = add %3, %6
+  %8: u32 = icmp_slt %7, %1
+  %9: s32 = sdiv %3, %0
+  cond_br %8, ^bb1(%7), ^bb4(%9)
+^bb6(%10: s32):
+  ret %10
+^bb4(%11: s32):
+  ret %11
+}
+`;
+
+test('a trapping op in the tree is not rebuilt at the top of the body — an arm may leave first', () => {
+  // Positive control: the SAME shape with the divide replaced by a multiply does sink, so this is
+  // a refusal about the opcode and not about the arm.
+  expect(emit(SPECULATED_DIVIDE.replace('sdiv %3, %0', 'mul %3, %0'))).toContain('v1 = v0 * a0;');
+  expect(() => emit(SPECULATED_DIVIDE)).toThrow(/pre-update loop variable/);
+});
+
+// REFUSAL — a merge inside the body writes a loop variable's NAME (a body param adopts it), and
+// the update reads that name raw at the bottom. The emitted loop is wrong with or without a sunk
+// copy, and was already wrong before the sink learned to rebuild — so the sink stands down and
+// leaves the function declining, rather than unlocking a loop it cannot make right.
+const BODY_REBINDS_LOOP_VAR = `fn rebind {
+^bb0(%0: s32, %1: s32):
+  %2: s32* = gaddr {sym="gbuf"}
+  %3: s32 = const {value=0}
+  %4: s32 = const {value=1}
+  br ^bb1(%3, %3, %3)
+^bb1(%5: s32, %6: s32, %7: s32):
+  %8: s32 = mul %7, %5
+  %9: s32 = xor %7, %0
+  %10: s32 = add %5, %1
+  %11: u32 = icmp_slt %7, %9
+  cond_br %11, ^bb2(%8), ^bb3(%9)
+^bb2(%12: s32):
+  %14: s32 = const {value=0}
+  br ^bb4(%5)
+^bb3(%13: s32):
+  %15: s32 = or %13, %0
+  %16: s32 = load %2 {off=8, signed=true, width=4}
+  %17: s32 = load %2 {off=12, signed=true, width=4}
+  br ^bb4(%0)
+^bb4(%18: s32):
+  %19: s32 = mul %1, %0
+  %20: s32 = add %5, %4
+  %21: u32 = icmp_slt %20, %0
+  %22: s32 = mul %7, %6
+  cond_br %21, ^bb1(%20, %0, %9), ^bb5(%22)
+^bb5(%23: s32):
+  ret %23
+}
+`;
+
+test('the sink stands down where a body merge rewrites a loop variable name', () => {
+  // Without this the loop emits `v2 = v2 ^ a0` in an arm and then reads `v2` in the update, which
+  // for (a0, a1) = (3, -2) returns 9 where the IR returns 0.
+  expect(() => emit(BODY_REBINDS_LOOP_VAR)).toThrow(/pre-update loop variable/);
+});

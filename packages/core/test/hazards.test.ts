@@ -7,9 +7,9 @@ import { describe, expect, test } from 'vitest';
 
 import { Block, Op, Value, mkOp, mkValue } from '../src/ir/core';
 import { T } from '../src/ir/types';
-import { without } from '../src/l3/gates';
+import { type Gate, without } from '../src/l3/gates';
 import type { UseSite } from '../src/structure/analysis';
-import { PREUPDATE_SINK_GATES, makeLoopHazards, updateWriteSet } from '../src/structure/hazards';
+import { PREUPDATE_SINK_GATES, type SinkCandidate, makeLoopHazards, updateWriteSet } from '../src/structure/hazards';
 
 const v = (): Value => mkValue(T.s(32));
 
@@ -19,6 +19,7 @@ interface Fixture {
   useSitesOf?: Map<Value, UseSite[]>;
   liveIn?: Map<Block, Set<Value>>;
   opBlock?: Map<Op, Block>;
+  respelledDefs?: Map<Op, unknown>;
 }
 const make = (f: Fixture = {}) =>
   makeLoopHazards({
@@ -27,6 +28,7 @@ const make = (f: Fixture = {}) =>
     useSitesOf: f.useSitesOf ?? new Map(),
     liveIn: f.liveIn ?? new Map(),
     opBlock: f.opBlock ?? new Map(),
+    respelledDefs: f.respelledDefs ?? new Map(),
   });
 
 const use = (blk: Block): UseSite => ({ blk, idx: 0, op: mkOp('add') });
@@ -222,6 +224,62 @@ describe('sinkablePreUpdateSlots', () => {
     const args = [e];
     expect(h.sinkablePreUpdateSlots(header, exit, args, body, empty, new Set(['v0']))).toEqual(new Set());
     const ablated = without(PREUPDATE_SINK_GATES, 'arg-reads-current-names');
+    expect(h.sinkablePreUpdateSlots(header, exit, args, body, empty, new Set(['v0']), ablated)).toEqual(new Set([0]));
+  });
+
+  test('the two arg gates are a PARTITION — ablating one does not disable the other', () => {
+    // `add(mid, *p)` trips both: a body-computed name AND a memory read. With one blocker per
+    // gate and a walk that stopped at the first, ablating the name gate would have admitted the
+    // load as well — the ablation would then be measuring less than its name says.
+    const { p, q, header, exit, body } = scaffold();
+    const mid = v();
+    const rd = v();
+    const e = v();
+    const midOp = bodyOp(header, mkOp('add', { operands: [p], results: [mid] }));
+    const rdOp = bodyOp(
+      header,
+      mkOp('load', { operands: [p], results: [rd], attrs: { off: 0, width: 4, signed: true } }),
+    );
+    const op = bodyOp(header, mkOp('add', { operands: [mid, rd], results: [e] }));
+    const h = make({
+      defs: new Map([
+        [mid, midOp],
+        [rd, rdOp],
+        [e, op],
+      ]),
+      opBlock: new Map([
+        [midOp, header],
+        [rdOp, header],
+        [op, header],
+      ]),
+      varName: names([p, 'v0'], [q, 'v1'], [mid, 'v2']),
+      liveIn: new Map([[header, new Set<Value>()]]),
+    });
+    const args = [e];
+    const run = (gates?: readonly Gate<SinkCandidate>[]) =>
+      h.sinkablePreUpdateSlots(header, exit, args, body, empty, new Set(['v0']), gates);
+    expect(run()).toEqual(new Set());
+    expect(run(without(PREUPDATE_SINK_GATES, 'arg-reads-current-names'))).toEqual(new Set());
+    expect(run(without(PREUPDATE_SINK_GATES, 'arg-order-insensitive'))).toEqual(new Set());
+  });
+
+  test('a leaf with neither a name nor a definition is refused on its own gate', () => {
+    // Nothing to rebuild it from: `exprWith` would spell a gap. Filed under its own id so the
+    // contract report does not attribute it to the previous-iteration rule, which is a different
+    // fact about a different leaf.
+    const { p, q, header, exit, body } = scaffold();
+    const orphan = v();
+    const e = v();
+    const op = bodyOp(header, mkOp('add', { operands: [p, orphan], results: [e] }));
+    const h = make({
+      defs: new Map([[e, op]]),
+      opBlock: new Map([[op, header]]),
+      varName: names([p, 'v0'], [q, 'v1']),
+      liveIn: new Map([[header, new Set<Value>()]]),
+    });
+    const args = [e];
+    expect(h.sinkablePreUpdateSlots(header, exit, args, body, empty, new Set(['v0']))).toEqual(new Set());
+    const ablated = without(PREUPDATE_SINK_GATES, 'arg-has-a-definition');
     expect(h.sinkablePreUpdateSlots(header, exit, args, body, empty, new Set(['v0']), ablated)).toEqual(new Set([0]));
   });
 

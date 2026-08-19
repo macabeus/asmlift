@@ -8,7 +8,7 @@ import {
   HOIST_UNSAFE_OPS,
   NEGATED_ICMP,
   OPCODES,
-  ORDER_SENSITIVE_OPS,
+  REEVAL_UNSAFE_OPS,
   isDceSafe,
 } from '../src/ir/opcodes';
 import { parse } from '../src/ir/parse';
@@ -176,14 +176,30 @@ test('composition: mwcc `!(x == 0)` folds through cntlzw-eq0 into a single `x !=
 });
 
 test('the three effect views over the registry name three different questions', () => {
-  // Each set answers one question about an op, and they are derived from the signature flags rather
-  // than listed, so registering an opcode cannot leave one behind. Pinned because the memberships
-  // OVERLAP: `EFFECTFUL_OPS` and `ORDER_SENSITIVE_OPS` agree on every op but the two memory reads,
-  // and that single disagreement is the whole reason the second set exists.
+  // Each set answers one question about an op, and all three are derived from the signature flags
+  // rather than listed, so registering an opcode cannot leave one behind. Pinned because the
+  // memberships OVERLAP, and the disagreements are the whole reason there is more than one set.
   expect([...EFFECTFUL_OPS].sort()).toEqual(['astore', 'call', 'opaque', 'store']);
-  expect([...ORDER_SENSITIVE_OPS].sort()).toEqual(['aload', 'astore', 'call', 'load', 'opaque', 'store']);
   expect([...HOIST_UNSAFE_OPS].sort()).toEqual([...EFFECTFUL_OPS].sort());
-  // A memory read is deletable when dead but not movable — the two questions asked of one opcode.
+  expect([...REEVAL_UNSAFE_OPS].sort()).toEqual([
+    'aload',
+    'astore',
+    'call',
+    'load',
+    'opaque',
+    'sdiv',
+    'smod',
+    'store',
+    'udiv',
+    'umod',
+  ]);
+  // One opcode, three answers: a dead load is reapable, hoisting one is allowed (its consumers
+  // re-guard it), rebuilding one elsewhere is not.
   expect(isDceSafe('load')).toBe(true);
-  expect(ORDER_SENSITIVE_OPS.has('load')).toBe(true);
+  expect(HOIST_UNSAFE_OPS.has('load')).toBe(false);
+  expect(REEVAL_UNSAFE_OPS.has('load')).toBe(true);
+  // And a divide: deletable and hoistable today, never re-evaluable — it can fault on a path the
+  // original never took.
+  expect(isDceSafe('sdiv')).toBe(true);
+  expect(REEVAL_UNSAFE_OPS.has('sdiv')).toBe(true);
 });
