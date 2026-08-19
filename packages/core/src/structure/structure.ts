@@ -586,6 +586,7 @@ interface WhileLoopInfo {
   forwardPreds: Block[]; // header preds outside the loop body (the entry/init side)
   body: Set<Block>; // the pure natural-loop body (for in-body vs exit classification)
   armEntries: Set<Block>; // targets of the early-`return` exits, i.e. every non-primary exit edge
+  armOwned: Set<Block>; // the arm blocks reached ONLY through their arm — emitted inside the body
 }
 
 // Opcodes whose NUMBER OF EXECUTIONS is observable. Moving one of these out of a loop changes what
@@ -606,6 +607,7 @@ interface DoWhileInfo {
   forwardPreds: Block[];
   body: Set<Block>; // the pure natural-loop body (for in-body vs exit classification)
   armEntries: Set<Block>;
+  armOwned: Set<Block>;
 }
 
 // Structuring levers, threaded as DATA so a new one is a field here + its consumer, not a new
@@ -880,17 +882,28 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
   // (pure test-at-top) → `while`; the LATCH exits (body-first) → `do-while`. Anything that fails
   // declines to plain if-recovery, which re-enters the header and fails loud via `onStack`.
   const isRet = (blk: Block) => blk.ops[blk.ops.length - 1]?.opcode === 'ret';
-  // A pure "return trampoline" out of the loop: forward-walking from `start` WITHOUT re-entering the
-  // loop `body`, every path terminates in a `ret` and no block on the way carries an OBSERVABLE side
-  // effect (store/astore/call/opaque). agbcc/gcc merge every `return` into ONE epilogue block and each
-  // return site just sets the return register and branches there — so a second body exit that lands on
-  // such a chain is an early RETURN, not a break to a live merge. Structuring it on more than one exit
-  // path is sound precisely because it is side-effect-free (a duplicated `return v` is harmless).
-  // This lets two returns merged through a shared `bx lr` recover as a `while` with an in-body early
-  // `return` instead of declining as "multi-exit".
-  const leadsToReturnOnly = (start: Block, body: Set<Block>): boolean => {
+  // An early `return` out of the loop: forward-walking from `to` WITHOUT re-entering the loop `body`,
+  // every path terminates in a `ret`. agbcc/gcc merge every `return` into ONE epilogue block and each
+  // return site just sets the return register and branches there, so a second body exit that lands on
+  // such a chain is an early RETURN, not a break to a live merge — which is what lets two returns
+  // merged through a shared `bx lr` recover as a `while` with an in-body early `return` instead of
+  // declining as "multi-exit".
+  //
+  // The arm is structured AT the edge, so any block in it that a second path also reaches is emitted
+  // twice. A duplicated `return v` is harmless; a duplicated store or call is an effect written twice
+  // in source no compiler would have produced from this asm, and the region it drags along is
+  // unbounded. A block escapes that only when this edge is the only way into the region (`from`
+  // dominates `to`) and the block is reached only through it (`to` dominates the block) — which
+  // admits `if (found) { *out = hit; return out; }` while the shared epilogue it branches to still
+  // has to be pure.
+  //
+  // Returns the blocks the arm OWNS — its exclusive part, which the loop emits inside its body, ahead
+  // of the update — or null when this is not an early-`return` arm.
+  const earlyReturnArm = (from: Block, to: Block, body: Set<Block>): Set<Block> | null => {
+    const entryOwned = dom.get(to)!.has(from);
+    const owned = new Set<Block>();
     const seen = new Set<Block>();
-    const stack = [start];
+    const stack = [to];
     while (stack.length) {
       const bb = stack.pop()!;
       if (seen.has(bb)) {
@@ -898,14 +911,16 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
       }
       seen.add(bb);
       if (body.has(bb)) {
-        return false;
-      } // re-enters the loop → not a pure exit
-      if (
+        return null;
+      } // re-enters the loop → not an exit
+      if (entryOwned && dom.get(bb)!.has(to)) {
+        owned.add(bb);
+      } else if (
         bb.ops.some(
           (op) => op.opcode === 'store' || op.opcode === 'astore' || op.opcode === 'call' || op.opcode === 'opaque',
         )
       ) {
-        return false;
+        return null;
       }
       const t = bb.ops[bb.ops.length - 1];
       if (t.opcode === 'ret') {
@@ -917,9 +932,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
         }
         continue;
       }
-      return false; // switch_br / unknown terminator → decline
+      return null; // switch_br / unknown terminator → decline
     }
-    return true;
+    return owned;
   };
   const whileLoops = new Map<Block, WhileLoopInfo>();
   const doWhileLoops = new Map<Block, DoWhileInfo>();
@@ -1004,18 +1019,23 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
       continue; // neither a clean pre-tested nor bottom-tested single-exit shape
     }
     // Single loop exit (ret-aware): the chosen exit is the ONE real exit; every OTHER edge leaving
-    // the body must be an early `return` — a ret-terminated target OR a pure return-trampoline chain
-    // (agbcc's merged epilogue; `leadsToReturnOnly`). A second exit that lands on a LIVE non-return
-    // merge is a genuine `break`/second structured exit → decline. The trampoline targets are kept:
-    // emission needs to know which blocks outside the body the loop still reaches from inside it.
+    // the body must be an early `return` (`earlyReturnArm`) or a ret-terminated target. A second exit
+    // that lands on a LIVE non-return merge is a genuine `break`/second structured exit → decline.
+    // The arms are kept: emission needs to know which blocks outside the body the loop still reaches
+    // from inside it, and which of them it owns outright.
     const armEntries = new Set<Block>();
+    const armOwned = new Set<Block>();
     let singleExit = true;
     for (const e of nl.exitEdges) {
       if (e.from === exitFrom && e.to === exit) {
         continue;
       }
-      if (leadsToReturnOnly(e.to, nl.body)) {
+      const owned = earlyReturnArm(e.from, e.to, nl.body);
+      if (owned) {
         armEntries.add(e.to);
+        for (const bb of owned) {
+          armOwned.add(bb);
+        }
       } else if (!isRet(e.to)) {
         singleExit = false;
         break;
@@ -1034,9 +1054,18 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
         forwardPreds: nl.forwardPreds,
         body: nl.body,
         armEntries,
+        armOwned,
       });
     } else {
-      doWhileLoops.set(h, { header: h, latch, exit, forwardPreds: nl.forwardPreds, body: nl.body, armEntries });
+      doWhileLoops.set(h, {
+        header: h,
+        latch,
+        exit,
+        forwardPreds: nl.forwardPreds,
+        body: nl.body,
+        armEntries,
+        armOwned,
+      });
     }
   }
 
@@ -2357,7 +2386,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
       if (
         !hazard &&
         !loopCtx.body.has(exitB) &&
-        ((isBreak && breakSafe) || (!isBreak && leadsToReturnOnly(exitB, loopCtx.body)))
+        ((isBreak && breakSafe) || (!isBreak && earlyReturnArm(b, exitB, loopCtx.body) !== null))
       ) {
         out.push(...updateCopies); // the loop update, RAW (i++, p>>=1, …)
         let leaveCond = exprWith(sub)(term.operands[0]);
@@ -2505,6 +2534,12 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     // their top-of-iteration values. No zero-trip seed here: a `do-while` always runs its body, so
     // any other predecessor of the exit is an ordinary edge some enclosing `if` already emits.
     const sunk = sinkablePreUpdateSlots(dw.header, dw.exit, exitArgs, dw.body, sub, updateWrites);
+    // The post-loop region the escaped-value check judges: everything the loop does not emit itself.
+    // An early-`return` arm the loop OWNS renders inside the body, ahead of the update, so a read of
+    // a loop variable there is the pre-update value it wants — counting it as post-loop would decline
+    // `if (found) { *out = list[i]; return out; }` for a hazard that cannot happen. A shared block
+    // the arm merely reaches stays post-loop: the other path really does read it after the update.
+    const postLoop = new Set(fn.blocks.filter((bb) => !dw.body.has(bb) && !dw.armOwned.has(bb)));
     if (
       loopUpdateHazard(
         lterm.operands[0],
@@ -2512,7 +2547,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
         dw.body,
         sub,
         updateWrites,
-        null,
+        postLoop,
         new Set(dw.header.params),
       )
     ) {

@@ -85,3 +85,82 @@ test('an epilogue that stores is not an arm — the join stands and the loop dec
   expect(() => emit(STRCMP_EARLY_RETURN)).not.toThrow();
   expect(() => emit(SHARED_EPILOGUE_STORE)).toThrow(StructureError);
 });
+
+// A do-while scan whose arm reads a value the loop COMPUTED (`table[i]`) — the arm renders inside
+// the body, ahead of `i++`, so that read is the pre-update value it wants. ^bb3 is the arm, reached
+// only from ^bb2; ^bb5 is the epilogue both it and the post-loop path reach.
+const SCAN_RETURN_HIT = `fn findstore {
+^bb0(%0: s32*, %1: s32):
+  %2: s32 = const {value=0}
+  br ^bb1(%2)
+^bb1(%3: s32):
+  %4: s32* = gaddr {sym="table"}
+  %5: s32 = const {value=8}
+  %6: s32 = mul %3, %5
+  %7: s32* = add %4, %6
+  %8: s32 = load %7 {off=0, signed=true, width=4}
+  %9: u32 = icmp_ne %8, %1
+  cond_br %9, ^bb4(), ^bb2()
+^bb2():
+  %10: s32 = load %7 {off=4, signed=true, width=4}
+  %11: s32 = const {value=0}
+  %12: u32 = icmp_eq %10, %11
+  cond_br %12, ^bb4(), ^bb3()
+^bb3():
+  %17: s32 = load %7 {off=4, signed=true, width=4}
+  br ^bb5(%17)
+^bb4():
+  %13: s32 = const {value=1}
+  %14: s32 = add %3, %13
+  %15: s32 = const {value=10}
+  %16: u32 = icmp_slt %14, %15
+  %18: s32 = const {value=-1}
+  cond_br %16, ^bb1(%14), ^bb5(%18)
+^bb5(%19: s32):
+  ret %19
+}
+`;
+
+test('an arm reading a loop-computed value is not a post-loop read of it', () => {
+  expect(emit(SCAN_RETURN_HIT)).toBe(
+    's32 findstore(s32 * a0, s32 a1) {\n' +
+      '    s32 v0;\n' +
+      '    s32 v1;\n' +
+      '    v0 = 0;\n' +
+      '    do {\n' +
+      '        if (*(s32 *)((u32)&table + v0 * 8) == a1) {\n' +
+      '            if (((s32 *)((u32)&table + v0 * 8))[1] != 0) {\n' +
+      '                v1 = ((s32 *)((u32)&table + v0 * 8))[1];\n' +
+      '                return v1;\n' +
+      '            }\n' +
+      '        }\n' +
+      '        v0 = v0 + 1;\n' +
+      '    } while (v0 < 10);\n' +
+      '    v1 = -1;\n' +
+      '    return v1;\n' +
+      '}\n',
+  );
+});
+
+// The same scan, with the arm STORING what it found instead of returning it — the effect a loop
+// with one real exit could not carry before.
+const SCAN_STORE_HIT = SCAN_RETURN_HIT.replace('  br ^bb5(%17)', '  store %0, %17 {off=0, width=4}\n  br ^bb5(%17)');
+
+test('an arm the edge exclusively reaches may carry a store', () => {
+  expect(emit(SCAN_STORE_HIT)).toContain(
+    '                v0 = ((s32 *)((u32)&table + v1 * 8))[1];\n                *a0 = v0;\n                return v0;\n',
+  );
+});
+
+// REFUSAL — the same store in the epilogue instead. Both the arm and the post-loop path reach it,
+// so structuring it on the arm's edge writes the effect twice into source no compiler wrote.
+const SHARED_EPILOGUE_EFFECT = SCAN_RETURN_HIT.replace(
+  '^bb5(%19: s32):\n  ret %19',
+  '^bb5(%19: s32):\n  store %0, %19 {off=0, width=4}\n  ret %19',
+);
+
+test('a store in the shared epilogue is not an arm the loop may own — declines', () => {
+  expect(SHARED_EPILOGUE_EFFECT).not.toBe(SCAN_RETURN_HIT);
+  expect(() => emit(SCAN_STORE_HIT)).not.toThrow();
+  expect(() => emit(SHARED_EPILOGUE_EFFECT)).toThrow(StructureError);
+});
