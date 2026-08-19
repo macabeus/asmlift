@@ -207,6 +207,13 @@ function traceTower(
         irDump: print(fn),
         verified: true,
       }),
+    afterLatchFold: () =>
+      trace.push({
+        id: 'stage:latchfold',
+        title: 'Empty-latch folding (splice out an SSA-emptied back-edge block)',
+        irDump: print(fn),
+        verified: true,
+      }),
   });
 
   // (4) structure → neutral AST; boundary contract: no unresolved value leaked (strict) or

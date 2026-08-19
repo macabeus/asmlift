@@ -6,8 +6,8 @@
 // owns. It has NOTHING to do with AST emission and is unit-testable on synthetic CFGs with no
 // emitter and no toolchain (test/loops.test.ts).
 //
-// Dominators live here too: loop discovery is their primary consumer, and keeping the analysis
-// self-contained keeps the module independently testable.
+// Dominance itself is a substrate fact and lives in `ir/core.ts`; `analyzeLoops` takes the map as
+// a parameter, so a caller passes `dominators(fn)` from there.
 import { Block, Fn, predecessors, successorsOf } from '../ir/core';
 
 /** One natural loop, keyed by its header. */
@@ -36,41 +36,6 @@ export interface LoopForest {
   byHeader: Map<Block, NaturalLoop>;
   /** nesting parent: the header of the smallest loop strictly containing this loop (or null). */
   parent: Map<Block, Block | null>;
-}
-
-/** Forward dominators (iterative data-flow). dom(b) = {b} ∪ ⋂ dom(preds). */
-export function dominators(fn: Fn): Map<Block, Set<Block>> {
-  const preds = predecessors(fn);
-  const all = new Set(fn.blocks);
-  const dom = new Map<Block, Set<Block>>();
-  fn.blocks.forEach((b, i) => dom.set(b, i === 0 ? new Set([b]) : new Set(all)));
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const b of fn.blocks.slice(1)) {
-      const ps = preds.get(b)!;
-      let inter: Set<Block> | null = null;
-      for (const p of ps) {
-        const dp = dom.get(p)!;
-        if (inter === null) {
-          inter = new Set(dp);
-          continue;
-        }
-        for (const x of inter) {
-          if (!dp.has(x)) {
-            inter.delete(x);
-          }
-        } // intersect in place (spec-safe delete-in-iter)
-      }
-      const next = new Set<Block>(inter ?? []);
-      next.add(b);
-      if (!setEq(next, dom.get(b)!)) {
-        dom.set(b, next);
-        changed = true;
-      }
-    }
-  }
-  return dom;
 }
 
 /** Discover every natural loop and the nesting forest. Pure over the CFG + dominators. */
@@ -154,16 +119,4 @@ export function analyzeLoops(fn: Fn, dom: Map<Block, Set<Block>>): LoopForest {
   }
 
   return { byHeader, parent };
-}
-
-function setEq<X>(a: Set<X>, b: Set<X>): boolean {
-  if (a.size !== b.size) {
-    return false;
-  }
-  for (const x of a) {
-    if (!b.has(x)) {
-      return false;
-    }
-  }
-  return true;
 }

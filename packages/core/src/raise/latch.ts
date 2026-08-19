@@ -1,0 +1,107 @@
+// asmlift — empty-latch folding (F-CFG-class structural pass; successor-aware, ISA-neutral).
+//
+// A loop whose back-edge carries a register copy — `add r3, r0, #0` then `b .L6` — lifts to a block
+// holding nothing but that branch, because SSA construction turns the copy into an EDGE ARGUMENT.
+// The loop is unchanged; its latch has just become a separate empty block between the exit test and
+// the header. Loop DISCOVERY still finds the loop — `structure/loops.ts` reads the same back-edge —
+// but the do-while emitter requires the latch to end in a `cond_br`, an empty one ends in `br`, and
+// the test is at the bottom so the `while` form is unavailable too. The back-edge survives to the
+// `onStack` refusal and the whole function declines with "unrecovered back-edge".
+//
+// Splicing the block out — every predecessor edge re-pointed at the header, carrying the latch's
+// own edge arguments — restores the single-latch loop, which is a canonicalization the emitter
+// already handles rather than a new case inside it.
+//
+// The arguments move soundly because the block has no params and one op: a value the latch's `br`
+// passes dominates the latch, so it dominates the end of every predecessor of the latch too.
+//
+// WHY DOMINANCE, AND NOT "the target can reach this block". The two disagree on a loop PREHEADER —
+// the same empty forwarding block seen from the other side, which dominates its header instead of
+// the reverse. Reachability alone cannot refuse one, because an INNER loop's preheader sitting
+// inside an OUTER loop is reachable from the inner header round the outer back-edge. Folding a
+// preheader hands the structurer a guard branching straight at the header, which is the guard-FUSED
+// shape — and fusion is admitted on SHAPE alone (`isGuardShapedPred`), with a documented gap for a
+// guard that tests something other than the loop: it is DROPPED, not declined. So a guard `a0 != 0`
+// in front of a `v < a0` loop simply disappears from the emitted C, and at `a0 = -5` the asm
+// returns 1 where that C returns 0. This gate is the only thing between the pass and that shape,
+// which is what makes it a SOUNDNESS gate rather than a quality one.
+import { Fn, dominators } from '../ir/core';
+import { type Gate, firstRejection } from '../l3/gates';
+
+/** What the gates below judge: one candidate block and the block its `br` goes to. */
+interface LatchCandidate {
+  block: Fn['blocks'][number];
+  target: Fn['blocks'][number];
+  dominatesBlock: boolean;
+}
+
+export const LATCH_GATES: readonly Gate<LatchCandidate>[] = [
+  {
+    id: 'latch-has-params',
+    why: "a param means the block JOINS edges, so its br args are not this one edge's copy",
+    sound: false,
+    rejects: (c) => c.block.params.length > 0,
+  },
+  {
+    id: 'latch-does-work',
+    why: "the block's ops go with the block, and a result-less store leaves no trace behind",
+    sound: true,
+    guardedBy: 'a latch holding a STORE is refused — nothing downstream would notice it vanish',
+    // `br` is a terminator, so a block whose FIRST op is one holds nothing but that branch.
+    rejects: (c) => c.block.ops[0]?.opcode !== 'br',
+  },
+  {
+    id: 'self-branch',
+    why: 'every block dominates itself, so this is an infinite loop rather than a trampoline',
+    sound: false,
+    rejects: (c) => c.target === c.block,
+  },
+  {
+    id: 'target-dominates',
+    why: 'a preheader is the same empty block from the other side; folding it drops a guard',
+    sound: true,
+    // The refusal test alone would not do: it asserts that nothing was folded, which is what a
+    // gate that never fires looks like too. The named one ablates this entry and reads the C.
+    guardedBy: 'ablating the dominance gate DROPS a guard from the emitted C',
+    rejects: (c) => !c.dominatesBlock,
+  },
+];
+
+/** Splice out every EMPTY LATCH the gates above admit; returns how many were removed.
+ *
+ *  Iterated, because folding one latch can make its predecessor into one: the predecessor's
+ *  SUCCESSOR changes, so an edge that was not a back-edge becomes one. (Dominator sets themselves
+ *  only ever shrink — removing a block removes it from every set it was in.)
+ *
+ *  A predecessor that already branches to the target ends up with two edges into one block. That is
+ *  a block whose every edge continues the loop, so it has no exit and loop recovery declines — the
+ *  same loud decline it gave before the fold.
+ */
+export function foldEmptyLatches(fn: Fn, gates: readonly Gate<LatchCandidate>[] = LATCH_GATES): number {
+  let folded = 0;
+  for (;;) {
+    const dom = dominators(fn);
+    const latch = fn.blocks.find((b) => {
+      const target = b.ops[0]?.successors[0]?.block;
+      return (
+        target !== undefined &&
+        firstRejection(gates, { block: b, target, dominatesBlock: dom.get(b)!.has(target) }) === null
+      );
+    });
+    if (!latch) {
+      return folded;
+    }
+    const onward = latch.ops[0].successors[0];
+    for (const b of fn.blocks) {
+      for (const op of b.ops) {
+        op.successors.forEach((s, i) => {
+          if (s.block === latch) {
+            op.successors[i] = { block: onward.block, args: [...onward.args] };
+          }
+        });
+      }
+    }
+    fn.blocks = fn.blocks.filter((b) => b !== latch);
+    folded++;
+  }
+}

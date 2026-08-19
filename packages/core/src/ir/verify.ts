@@ -3,7 +3,7 @@
 //   1. every block ends in exactly one terminator (and it is the last op)
 //   2. operands well-formed: opcode registered, correct arity/attrs
 //   3. SSA: each value defined once; every use is defined; def dominates use
-import { Block, Fn, Value, predecessors } from './core';
+import { Block, Fn, Value, dominators } from './core';
 import { opSig } from './opcodes';
 
 export class VerifyError extends Error {}
@@ -133,42 +133,8 @@ export function verify(fn: Fn): void {
     );
   }
 
-  // --- dominance (iterative dominators over the CFG) ---
-  const entry = fn.blocks[0];
-  const preds = predecessors(fn);
-  const dom = new Map<Block, Set<Block>>();
-  const allBlocks = new Set(fn.blocks);
-  for (const b of fn.blocks) {
-    dom.set(b, b === entry ? new Set([entry]) : new Set(allBlocks));
-  }
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const b of fn.blocks) {
-      if (b === entry) {
-        continue;
-      }
-      let inter: Set<Block> | null = null;
-      for (const p of preds.get(b)!) {
-        const dp = dom.get(p)!;
-        if (inter === null) {
-          inter = new Set(dp);
-          continue;
-        }
-        for (const x of inter) {
-          if (!dp.has(x)) {
-            inter.delete(x);
-          }
-        } // intersect in place (spec-safe delete-in-iter)
-      }
-      const next = new Set<Block>(inter ?? []);
-      next.add(b);
-      if (!setEq(next, dom.get(b)!)) {
-        dom.set(b, next);
-        changed = true;
-      }
-    }
-  }
+  // --- dominance: def must dominate every use (ir/core.ts owns the analysis) ---
+  const dom = dominators(fn);
   const dominates = (a: Block, b: Block) => dom.get(b)!.has(a);
 
   for (const b of fn.blocks) {
@@ -206,16 +172,4 @@ function locate(body: () => void, where: () => string): void {
     }
     throw e;
   }
-}
-
-function setEq(a: Set<Block>, b: Set<Block>): boolean {
-  if (a.size !== b.size) {
-    return false;
-  }
-  for (const x of a) {
-    if (!b.has(x)) {
-      return false;
-    }
-  }
-  return true;
 }

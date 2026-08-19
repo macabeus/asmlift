@@ -111,7 +111,10 @@ function makePrinter(vt: VarTypes) {
       // Casts have no faithful IDO-Pascal spelling yet — fail LOUD rather than emit silently-wrong
       // source. Tree-level producers reaching here: the width-narrowing idiom casts (agbcc-gated,
       // so never on this path today), structure.ts's STRUCT-pointer casts (unreachable too — the
-      // `field` case above throws first), and intify's `(s32)ptr` legalization (any target).
+      // `field` case above throws first), intify's `(s32)ptr` legalization (any target), and the
+      // byte-pointer walk of a pointer offset by a runtime value (any target, and reachable with no
+      // `field` in the tree — it declines two functions that used to emit here, whose Pascal was
+      // silently walking ELEMENTS where the asm walked bytes).
       // Scalar deref casts never appear in the tree — the index case above owns that judgment.
       case 'cast':
         throw new Error(`pascal backend: cast has no IDO Pascal spelling yet`);

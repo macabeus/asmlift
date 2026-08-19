@@ -78,6 +78,44 @@ export function predecessors(fn: Fn): Map<Block, Block[]> {
   return preds;
 }
 
+/** Forward dominators (iterative data-flow). dom(b) = {b} ∪ ⋂ dom(preds).
+ *
+ *  A CFG fact, so it lives beside `predecessors` it is built on rather than with either consumer:
+ *  `verify` needs it to check def-dominates-use, `structure/loops.ts` to tell a back-edge from a
+ *  forward one, and `raise/latch.ts` to tell a latch from a preheader. */
+export function dominators(fn: Fn): Map<Block, Set<Block>> {
+  const preds = predecessors(fn);
+  const all = new Set(fn.blocks);
+  const dom = new Map<Block, Set<Block>>();
+  fn.blocks.forEach((b, i) => dom.set(b, i === 0 ? new Set([b]) : new Set(all)));
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const b of fn.blocks.slice(1)) {
+      let inter: Set<Block> | null = null;
+      for (const p of preds.get(b)!) {
+        const dp = dom.get(p)!;
+        if (inter === null) {
+          inter = new Set(dp);
+          continue;
+        }
+        for (const x of inter) {
+          if (!dp.has(x)) {
+            inter.delete(x);
+          }
+        } // intersect in place (spec-safe delete-in-iter)
+      }
+      const next = new Set<Block>(inter ?? []);
+      next.add(b);
+      const prev = dom.get(b)!;
+      if (next.size !== prev.size || [...next].some((x) => !prev.has(x))) {
+        dom.set(b, next);
+        changed = true;
+      }
+    }
+  }
+  return dom;
+}
+
 /** Every value defined by an op result → its defining op (block params excluded). */
 export function defOpMap(fn: Fn): Map<Value, Op> {
   const m = new Map<Value, Op>();

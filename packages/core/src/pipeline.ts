@@ -22,6 +22,7 @@ import { mergeCommonTails } from './l3/tailmerge';
 import { DEFAULT_IDIOM_PATTERNS, RewritePattern, applyPattern, dce, patternApplies } from './pattern/engine';
 import { type Prototypes, prototypesFromSymbols } from './proto';
 import { RaiseUnsupportedError } from './raise/errors';
+import { foldEmptyLatches } from './raise/latch';
 import { type PreRecoveryPass, runPreRecovery } from './raise/pre-recovery';
 import { recoverTypes } from './raise/recover';
 import { sinkReturns } from './raise/retsink';
@@ -173,12 +174,20 @@ export interface RaiseHooks {
   afterRecover?: () => void;
   /** after return-sinking, only when it changed the fn (fires after its verify) */
   afterRetsink?: () => void;
+  /** after empty-latch folding, only when it removed a block (fires after its verify) */
+  afterLatchFold?: () => void;
 }
 
 /** Stages 2.35–3.5 — pre-recovery recognizers (the shared ordered list in raise/pre-recovery.ts)
  *  → type recovery (boundary contract: no `unknown` survives) → return-sinking (tail-duplicate a
- *  return-only merge so short-circuits emit early returns). `verify` after every pass that
- *  changed the IR. */
+ *  return-only merge so short-circuits emit early returns) → empty-latch folding (splice out a
+ *  back-edge block SSA construction emptied). `verify` after every pass that changed the IR.
+ *
+ *  The two CFG passes look ordered and are not: running latch folding FIRST instead changes
+ *  nothing across a 3337-function agbcc corpus. Worth saying, because folding an empty block ahead
+ *  of return-sinking does take away `br` predecessors it needs — the dominance gate is what makes
+ *  that unreachable, since the blocks retsink wants are never back-edge sources. It goes last
+ *  because that is where the CFG stops moving. */
 export function raiseRecovered(fn: Fn, target: TargetDescription, hooks: RaiseHooks = {}): void {
   runPreRecovery(fn, target, (pass, result) => {
     verify(fn);
@@ -192,6 +201,10 @@ export function raiseRecovered(fn: Fn, target: TargetDescription, hooks: RaiseHo
   if (sinkReturns(fn)) {
     verify(fn);
     hooks.afterRetsink?.();
+  }
+  if (foldEmptyLatches(fn)) {
+    verify(fn);
+    hooks.afterLatchFold?.();
   }
 }
 

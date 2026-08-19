@@ -5,9 +5,9 @@
 // flag, nesting) so a discovery regression is caught here, not diffused into a decompile mismatch.
 import { expect, test } from 'vitest';
 
-import type { Block } from '../src/ir/core';
+import { type Block, dominators } from '../src/ir/core';
 import { parse } from '../src/ir/parse';
-import { analyzeLoops, dominators } from '../src/structure/loops';
+import { analyzeLoops } from '../src/structure/loops';
 
 function forestOf(ir: string) {
   const fn = parse(ir);
