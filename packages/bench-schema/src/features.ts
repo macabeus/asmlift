@@ -172,6 +172,28 @@ export const FEATURES: readonly FeatureDef[] = [
     seeAlso: ['loop'],
   },
   {
+    id: 'loop-preupdate',
+    label: 'Pre-update loop value',
+    group: 'control-flow',
+    evidence: 'judgement',
+    summary: 'a loop variable is still needed at the value it held BEFORE its own update',
+    detail:
+      "The compiler hoists an induction update above the loop's exit test, so the condition, the " +
+      'exiting edge, or a value read after the loop wants the variable one iteration back. C can ' +
+      'say it — `while (n--)`, `x >> b++`, a trailing pointer captured before the step — but only ' +
+      'if the decompiler notices that the read is deliberate rather than a hazard. Reading it as a ' +
+      'hazard is the safe answer and costs the whole function; reading it as post-update is a ' +
+      'silent off-by-one-iteration. THREE shapes share one symptom and have different causes: the ' +
+      'CONDITION reads it, the EXITING EDGE carries it, or a body value read after the loop ' +
+      'derives from it.',
+    example: {
+      c: 'int b = 0; while (((i >> b++) & 1) == 0) ; return b;',
+      asm: '\tadd\tr2, r2, #1\t@ b++ hoisted ABOVE the test that reads the old b\n\tcmp\tr1, #0',
+      toolchain: 'agbcc',
+    },
+    seeAlso: ['loop', 'do-while', 'nested-loop'],
+  },
+  {
     id: 'nested-loop',
     label: 'Nested loop',
     group: 'control-flow',
