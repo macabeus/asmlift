@@ -95,7 +95,7 @@ function makePrinter(vt: VarTypes) {
           throw new Error(`pascal backend: a multidimensional array access has no IDO Pascal spelling yet`);
         }
         const bt = exprCType(e.base, vt);
-        if ((bt !== undefined && !derefStrideOk(bt, e.width)) || (bt === undefined && e.width !== 4)) {
+        if ((bt !== undefined && !derefStrideOk(bt, e.width, e.signed)) || (bt === undefined && e.width !== 4)) {
           throw new Error(
             `pascal backend: a ${e.width}-byte access through a base of type '${bt ? typeToString(bt) : '<unknowable>'}' has no faithful spelling (no reinterpret cast)`,
           );

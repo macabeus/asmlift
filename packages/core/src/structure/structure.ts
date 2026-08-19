@@ -132,8 +132,19 @@ function globalOf(e: Expr, width: number): { name: string; idx: Expr } | null {
 // inner extent) gets no bare form at all; `((T *)&gSym)[i]` is byte-identical and valid under ANY
 // declaration, which is why it is the safe fallback. See symbols.ts arrayInnerExtents for why an
 // ABSENT rank is read as 1 rather than as unknown.
-function bareArrayLead(si: SymbolInfo, width: number): { lead?: number[] } | null {
+function bareArrayLead(si: SymbolInfo, width: number, signed: boolean): { lead?: number[] } | null {
   if (si.shape !== 'array' || si.elemSize !== width) {
+    return null;
+  }
+  // …and the element must EXTEND the way the access does, for the same reason the width must
+  // match: the bare spelling carries no cast, so the declared element type is the only thing in
+  // the emitted C that says whether a sub-word read sign- or zero-fills. Against the DECLARED
+  // signedness, defaulted exactly as the element type registered for the env is (noteGlobal, just
+  // below) — a disagreement there makes the deref legalization wrap the base, and a leading
+  // subscript has no room for that wrapping.
+  //
+  // The caller then falls through to `((T *)&gSym)[i]`, byte-identical under any declaration.
+  if (width < 4 && (si.elemSigned ?? false) !== signed) {
     return null;
   }
   const inner = arrayInnerExtents(si);
@@ -440,7 +451,7 @@ function memAccess(
     // dogfood proved agbcc needs for ROM tables — with the element type registered in the env
     // so the stride check passes and no cast is added. Element-width match only.
     const siArr = sym?.info(g.name);
-    const lead = siArr === undefined ? null : bareArrayLead(siArr, width);
+    const lead = siArr === undefined ? null : bareArrayLead(siArr, width, signed);
     if (lead !== null) {
       sym!.noteGlobal(g.name, T.ptr(T.int(width * 8, siArr!.elemSigned ?? false)));
       return { k: 'index', base: { k: 'var', name: g.name }, idx, width, signed, ...lead };
@@ -486,7 +497,7 @@ function arrayAccess(
   if (baseExpr.k === 'addr' && fieldOff === undefined) {
     // ARRAY-declared global (symbol map): the bare-name spelling, same rule as memAccess.
     const si = sym?.info(baseExpr.name);
-    const lead = si === undefined ? null : bareArrayLead(si, elemSize);
+    const lead = si === undefined ? null : bareArrayLead(si, elemSize, signed);
     if (lead !== null) {
       sym!.noteGlobal(baseExpr.name, T.ptr(T.int(elemSize * 8, si!.elemSigned ?? false)));
       return { k: 'index', base: { k: 'var', name: baseExpr.name }, idx: idxExpr, width: elemSize, signed, ...lead };
@@ -1656,14 +1667,30 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
       // unchanged). Since C `(K/es) + p == p + (K/es)`, scaling the const on whichever side it
       // sits fixes the bytes: `add` is commutative so the pointer may be either operand; `sub` is
       // not, so only operand[0] (the minuend) may be the pointer.
-      const scale = (t: IrType | undefined, c: Extract<Expr, { k: 'const' }>): Expr => {
-        const es = t?.kind === 'ptr' ? ptrElemBytes(t.to) : 0;
-        return es > 1 && c.value % es === 0 ? { k: 'const', value: c.value / es } : c;
+      // A rendered pointer that CANNOT express the byte constant as a whole number of elements —
+      // an inexact residual, or a pointee whose size is not knowable here (a struct) — has no
+      // scaled spelling at all, and leaving the raw byte count is the silent wrongness the
+      // pointer-global rule below refuses in the same words: C multiplies it back, so `p + 62` on
+      // an `s32 *` addresses byte 248 and `p + 38` on a `struct S *` addresses byte 38 * sizeof(S).
+      // Same answer as there — CAST THEN ADD, `(u8 *)p + 62`, the same address in every world.
+      const bytePtr = (x: Expr): Expr => ({ k: 'cast', to: T.ptr(T.u(8)), e: x });
+      const walk = (base: Expr, c: Extract<Expr, { k: 'const' }>): { base: Expr; off: Expr } => {
+        const t = ctype(base);
+        if (t?.kind !== 'ptr') {
+          return { base, off: c }; // an int-rendered walk: C scales nothing, the bytes are right
+        }
+        const es = ptrElemBytes(t.to);
+        if (es === 1) {
+          return { base, off: c }; // already a byte pointer
+        }
+        return es > 1 && c.value % es === 0
+          ? { base, off: { k: 'const', value: c.value / es } }
+          : { base: bytePtr(base), off: c };
       };
       if ((d.opcode === 'add' || d.opcode === 'sub') && r.k === 'const') {
-        r = scale(ctype(l), r);
+        ({ base: l, off: r } = walk(l, r));
       } else if (d.opcode === 'add' && d.operands.length === 2 && l.k === 'const') {
-        l = scale(ctype(r), l); // commuted `const + ptr`
+        ({ base: r, off: l } = walk(r, l)); // commuted `const + ptr`
       }
       // C rejects a pointer operand outright under the non-additive operators (& | ^ << >> * / %),
       // under `ptr + ptr`, and as the subtrahend of `int - ptr` — the asm just does 32-bit integer
@@ -1703,7 +1730,6 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
       // ACCESS width, a different address whenever that width is not 1.
       // Under the non-additive operators C rejects a pointer outright, so there the honest
       // spelling is integer math on the cell — exactly intifyAddr's `(u32)&gSym` rule.
-      const bytePtr = (x: Expr): Expr => ({ k: 'cast', to: T.ptr(T.u(8)), e: x });
       const intifyPtrGlobal = (x: Expr): Expr => ({ k: 'cast', to: T.u(32), e: x });
       if (op === '+' || op === '-') {
         // `ptr ± int` and `ptr - ptr` are byte arithmetic once both sides are byte pointers;

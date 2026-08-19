@@ -177,7 +177,7 @@ function printExpr(e: Expr, parentPrec: number, vt: VarTypes, leaf?: LeafHook): 
   // Materialized as a synthetic cast node so the spelling (text, precedence, parens) is exactly
   // that of a tree-level cast.
   const legalized = (ix: Extract<Expr, { k: 'index' }>): Expr =>
-    derefStrideOk(exprCType(ix.base, vt), ix.width)
+    derefStrideOk(exprCType(ix.base, vt), ix.width, ix.signed)
       ? ix.base
       : { k: 'cast', to: T.ptr(scalarTypeForAccess(ix.width, ix.signed)), e: ix.base };
   // C-FAMILY SHIFT LEGALIZATION, the same discipline one operator over. The tower keeps the two

@@ -14,7 +14,7 @@
 // modelling is needed; they simply fall through the decode/fill switch. Because agbcc may
 // copy a callee-saved argument (e.g. into r4) before touching r0, entry parameters are
 // ordered by ABI register (r0, r1, …), not by the order they were first read.
-import { Fn, Op, Successor, Value, mkOp, mkValue } from '../ir/core';
+import { Block, Fn, Op, Successor, Value, mkOp, mkValue } from '../ir/core';
 import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
 import { type Prototypes, protoArity } from '../proto';
@@ -1608,6 +1608,7 @@ export function lift(
       ? { off, width: /b$/.test(ins.mnemonic) ? 1 : /h$/.test(ins.mnemonic) ? 2 : 4, regOff: regOff !== undefined }
       : null;
   };
+
   // Is the word-slot model safe for THIS function? Every disqualifier below leaves every `[sp,#k]`
   // access on the old path, which declines — so the answer to "not sure" is the loud one.
   // Returns null when the word-slot model is SAFE for this function, else the reason it is off —
@@ -2691,15 +2692,16 @@ export function lift(
 
   ssa.finish();
 
-  // FRAME-OBJECT AUDIT. Every `laddr` the mov arm emitted is only a CLAIM that the captured
-  // address is used as "the address of one scalar local"; this proves it, over the finished
-  // function, the same boundary-total style as the slot-escape assert in finish(). The address may
-  // flow anywhere as a VALUE — into an MMIO register (the DMA-fill idiom), a call, a phi — but
-  // every MEMORY access through it must be at offset 0 with one agreed width, and any use the
-  // audit cannot vouch for declines the whole function loudly. Nothing here guesses: the object's
-  // declared type is exactly the access type the machine used.
+  // FRAME-OBJECT AUDIT. Every `laddr` the frontend emitted is only a CLAIM that the address it
+  // names is used as "the address of one scalar local"; this proves it, over the finished function,
+  // the same boundary-total style as the slot-escape assert in finish(). The address may flow
+  // anywhere as a VALUE — into an MMIO register (the DMA-fill idiom), a call, a phi — but every
+  // MEMORY access through it must be at offset 0, with one agreed width and one agreed extension,
+  // its bytes must belong to nothing else in the frame, and any use the audit cannot vouch for declines the whole function
+  // loudly. Nothing here guesses: the object's declared type is exactly the access type the machine
+  // used.
   {
-    const laddrs: Op[] = [];
+    let laddrs: Op[] = [];
     for (const blk of irBlocks) {
       for (const op of blk.ops) {
         if (op.opcode === 'laddr') {
@@ -2711,99 +2713,247 @@ export function lift(
       const fail = (why: string): never => {
         throw new FrontendUnsupportedError(`cannot lift '${name}': address-taken stack local — ${why}`);
       };
-      // Taint = values that may hold the object's address, closed over phis: a tainted edge arg
-      // taints the receiving block param. (A phi mixing the address with a non-address would taint
-      // the param and then fail the use judgement below — mixing is not vouched for.)
-      for (const op of laddrs) {
-        if ((op.attrs.off as number) !== 0) {
-          // the audit's offset arithmetic, overlap window and naming all assume the frame base;
-          // if a computed capture ever mints off!==0, this line is what keeps it loud
-          fail(`a capture at frame offset ${op.attrs.off} — only the frame base is modelled`);
+      // A FRAME BASE ADDRESSED THROUGH IS NOT A CAPTURE. Thumb-1 gives `ldr`/`str` an `[sp,#imm]`
+      // encoding and gives the sub-word forms none, so a byte or halfword spill can only be spelled
+      // by copying sp into a register and addressing through the copy:
+      //
+      //     mov  r2, sp
+      //     strh r3, [r2, #0x30]
+      //
+      // That is an ADDRESSING MODE. The copy never becomes a value, and the access is the
+      // `[sp,#0x30]` the instruction set cannot spell — so what the machine named is one object at
+      // frame offset 48, not a `[+48]` reach through the frame base.
+      //
+      // A captured address whose every use is a fixed-offset sub-word ACCESS is that shape, and
+      // each of its accesses names its own object: re-root them onto a `laddr` at their own offset,
+      // read at 0, and the rest of this audit judges the objects. A capture with ANY other use is a
+      // real capture and keeps the frame base.
+      //
+      // What makes that judgement total is that the walk below enumerates every ROLE a value can
+      // appear in — every operand of every op, and every edge argument — instead of asking what an
+      // instruction looks like. One instruction can hold two roles: `str rD, [rD, #k]` stores the
+      // frame address through itself, a base use AND an escape, and the escape is what stops the
+      // split.
+      // Why a capture was NOT split, when the reason is one no later message carries — the
+      // `slotsOffReason` idiom: a refusal reported as the wrong capability sends the improvement
+      // loop to build the wrong thing.
+      let splitRefusal: string | null = null;
+      {
+        const uses = new Map<Value, { op: Op; idx: number; blk: Block }[]>();
+        const record = (v: Value, op: Op, idx: number, blk: Block) =>
+          (uses.get(v) ?? uses.set(v, []).get(v)!).push({ op, idx, blk });
+        for (const blk of irBlocks) {
+          for (const op of blk.ops) {
+            op.operands.forEach((v, idx) => record(v, op, idx, blk));
+            // An EDGE ARGUMENT is a use role too, and never an access: a capture that reaches a
+            // block parameter is live past this block, so the taint closure below is what judges
+            // it. Recorded at index -1 so it can never be counted as an access — a split there
+            // would delete a capture the successor argument still names.
+            for (const succ of op.successors ?? []) {
+              for (const a of succ.args) {
+                record(a, op, -1, blk);
+              }
+            }
+          }
+        }
+        const minted: Op[] = [];
+        const consumed = new Set<Op>();
+        for (const capture of laddrs) {
+          const at = uses.get(capture.results[0]) ?? [];
+          const accesses = at.filter((u) => (u.op.opcode === 'load' || u.op.opcode === 'store') && u.idx === 0);
+          // SUB-WORD ONLY, because that is the whole of what the encoding gap forces: `ldr`/`str` DO
+          // have an `[sp,#imm]` form, so a WORD access through a copy is some other shape and must
+          // not be read as this one. It is also what keeps the outgoing-argument area safe — that
+          // guard reads `[sp,#k]` accesses (spMemAccess), which an access through a copy is not, and
+          // agbcc stages arguments 5+ there with `str`.
+          const subWord = accesses.every((u) => (u.op.attrs.width as number) < 4);
+          // A use that is not an access leaves the capture naming the frame base, and the judgement
+          // below reports that use itself — an escape, a phi, arithmetic — so it needs no reason
+          // here. The WIDTH does: nothing downstream mentions it, so a refused word access would be
+          // reported as "a store at [+4]" and the histogram would be asked for the wrong capability.
+          if (at.length === 0 || accesses.length !== at.length) {
+            continue;
+          }
+          if (!subWord) {
+            splitRefusal ??= 'a WORD access through the copy, and `ldr`/`str` have an `[sp,#imm]` form';
+            continue;
+          }
+          // Nothing to split when the capture already names ONE object: every access at offset 0 is
+          // the frame base itself, which is what the DMA-fill idiom captures.
+          if (accesses.every((u) => u.op.attrs.off === 0)) {
+            continue;
+          }
+          for (const u of accesses) {
+            const res = mkValue(T.unk(32));
+            const object = mkOp('laddr', { results: [res], attrs: { off: u.op.attrs.off as number } });
+            u.blk.ops.splice(u.blk.ops.indexOf(u.op), 0, object);
+            minted.push(object);
+            u.op.operands = [res, ...u.op.operands.slice(1)];
+            u.op.attrs = { ...u.op.attrs, off: 0 };
+          }
+          consumed.add(capture);
+        }
+        if (consumed.size > 0) {
+          for (const blk of irBlocks) {
+            blk.ops = blk.ops.filter((op) => !consumed.has(op));
+          }
+          laddrs = [...laddrs.filter((op) => !consumed.has(op)), ...minted];
         }
       }
-      const taint = new Set<Value>(laddrs.flatMap((o) => o.results));
+      // ONE OBJECT PER FRAME OFFSET. Two `laddr` at the same offset name the same storage; two at
+      // different offsets are different objects, so width, signedness, escape and the overlap
+      // window are decided per offset — one width shared by every capture in the function would
+      // declare a halfword spill and a word spill as one object.
+      const objects = new Map<number, Op[]>();
+      for (const op of laddrs) {
+        const off = op.attrs.off as number;
+        (objects.get(off) ?? objects.set(off, []).get(off)!).push(op);
+      }
+      // Taint maps a value to the OBJECT whose address it may hold, closed over phis: a tainted
+      // edge arg taints the receiving block param. A phi that merges two objects has no single
+      // answer, and picking one would put an access on the wrong storage. Nothing builds one today,
+      // and the reason is worth knowing before changing the split: an object at a nonzero offset
+      // exists only where the split ran, the split refuses any capture with an edge-argument use,
+      // and every frame-base object is the same object.
+      const taint = new Map<Value, number>();
+      for (const [off, ops] of objects) {
+        for (const op of ops) {
+          taint.set(op.results[0], off);
+        }
+      }
       for (let changed = true; changed;) {
         changed = false;
         for (const blk of irBlocks) {
           for (const op of blk.ops) {
             for (const s of op.successors ?? []) {
               s.args.forEach((arg, i) => {
+                const from = taint.get(arg);
                 const param = s.block.params[i];
-                if (taint.has(arg) && param !== undefined && !taint.has(param)) {
-                  taint.add(param);
-                  changed = true;
+                if (from === undefined || param === undefined) {
+                  return;
                 }
+                const had = taint.get(param);
+                if (had === from) {
+                  return;
+                }
+                if (had !== undefined) {
+                  fail(`a phi merges the frame objects at [sp,#${had}] and [sp,#${from}] — one value, two objects`);
+                }
+                taint.set(param, from);
+                changed = true;
               });
             }
           }
         }
       }
-      // Judge every use of a tainted value.
-      const accesses: { width: number; signed: boolean }[] = [];
-      let escapes = false;
+      // Judge every use of a tainted value, against the object it names.
+      const accesses = new Map<number, { width: number; signed: boolean; isLoad: boolean }[]>();
+      const escaped = new Set<number>();
+      for (const off of objects.keys()) {
+        accesses.set(off, []);
+      }
       for (const blk of irBlocks) {
         for (const op of blk.ops) {
           op.operands.forEach((v, idx) => {
-            if (!taint.has(v)) {
+            const off = taint.get(v);
+            if (off === undefined) {
               return;
             }
-            if (op.opcode === 'load' && idx === 0) {
+            const scalar = (kind: string) => {
               if ((op.attrs.off as number) !== 0) {
                 fail(
-                  `a load at [+${op.attrs.off}] through the captured address — only the scalar at offset 0 is modelled`,
+                  `a ${kind} at [+${op.attrs.off}] through the captured address — ` +
+                    (splitRefusal ?? 'only a scalar at the captured address is modelled'),
                 );
               }
-              accesses.push({ width: op.attrs.width as number, signed: (op.attrs.signed as boolean) ?? false });
+            };
+            if (op.opcode === 'load' && idx === 0) {
+              scalar('load');
+              accesses.get(off)!.push({
+                width: op.attrs.width as number,
+                signed: (op.attrs.signed as boolean) ?? false,
+                isLoad: true,
+              });
               return;
             }
             if (op.opcode === 'store' && idx === 0) {
-              if ((op.attrs.off as number) !== 0) {
-                fail(
-                  `a store at [+${op.attrs.off}] through the captured address — only the scalar at offset 0 is modelled`,
-                );
-              }
-              accesses.push({ width: op.attrs.width as number, signed: false });
+              scalar('store');
+              accesses.get(off)!.push({ width: op.attrs.width as number, signed: false, isLoad: false });
               return;
             }
             if ((op.opcode === 'store' && idx === 1) || op.opcode === 'call') {
-              escapes = true; // the address ESCAPES as a value — the point of the capability
+              escaped.add(off); // the address ESCAPES as a value — the point of the capability
               return;
             }
             fail(`the captured address flows into \`${op.opcode}\` — not an access, an escape, or a phi`);
           });
         }
       }
-      if (accesses.length === 0) {
-        // nothing in-function pins the object's type, and a guessed declaration is the
-        // plausible-but-wrong class — decline until an inhabitant needs this
-        fail('the captured address is never dereferenced in this function, so nothing pins the local object type');
+      // The declared type of each object, and then that its bytes belong to nothing else.
+      const extent = new Map<number, number>();
+      for (const [off, acc] of accesses) {
+        if (acc.length === 0) {
+          // nothing in-function pins the object's type, and a guessed declaration is the
+          // plausible-but-wrong class — decline until an inhabitant needs this
+          fail('the captured address is never dereferenced in this function, so nothing pins the local object type');
+        }
+        const widths = new Set(acc.map((a) => a.width));
+        if (widths.size > 1) {
+          fail(`the accesses through the captured address disagree on width (${[...widths].join(' vs ')})`);
+        }
+        // …and on SIGNEDNESS, over the loads, for the same reason: one declared type extends one
+        // way, so an object read by both `ldrsb` and `ldrb` has no faithful declaration —
+        // `sp4 - sp4` would fold to 0 where the machine computes sext(b) - zext(b). Loads only: a
+        // store extends nothing, and `strb` beside `ldrsb` is not a disagreement.
+        const signs = new Set(acc.filter((a) => a.isLoad).map((a) => a.signed));
+        if (signs.size > 1) {
+          fail('the loads through the captured address disagree on signedness — one declared type extends one way');
+        }
+        extent.set(off, acc[0].width);
       }
-      const widths = new Set(accesses.map((a) => a.width));
-      if (widths.size > 1) {
-        fail(`the accesses through the captured address disagree on width (${[...widths].join(' vs ')})`);
-      }
-      const width = accesses[0].width;
-      const signed = accesses.some((a) => a.signed);
-      if (width > localArea) {
-        fail('the object extends past the reserved local area');
-      }
-      for (const off of usedSlotOffsets) {
-        if (off < width) {
-          fail(`the object at [0,${width}) overlaps the SSA slot at [sp,#${off}] — one byte, two models`);
+      // TWO MODELS FOR ONE BYTE is a silent disagreement, so each object must own its bytes
+      // outright: inside the reserved local area, clear of every SSA slot (which the slot model
+      // keeps in registers, so a store through the object would not be seen there), and clear of
+      // every other object.
+      const overlaps = (a: number, aw: number, b: number, bw: number) => a < b + bw && b < a + aw;
+      const objs = [...extent].sort((x, y) => x[0] - y[0]);
+      for (const [off, width] of objs) {
+        if (off < 0 || off + width > localArea) {
+          fail(`the object at [sp,#${off}) of width ${width} lies outside the reserved local area`);
+        }
+        for (const slot of usedSlotOffsets) {
+          if (overlaps(off, width, slot, 4)) {
+            fail(`the object at [sp,#${off}) overlaps the SSA slot at [sp,#${slot}] — one byte, two models`);
+          }
         }
       }
-      // AN ESCAPE RETRACTS THE UNDEF ARGUMENT. `undef` rests on this function's own stores being the
-      // ONLY writer of its frame, and `escapes` is exactly when that stops holding. The audit bounds
-      // what WE access through the object, not what a callee does, so a wider real object
-      // (`struct P p; g(&p);` where only `p.x` is read here) has its later words written by `g` and
-      // read back at a slot no store of ours reaches — declaring those uninitialised spells the
-      // callee's value as garbage. Function-wide, because the only width available is the one
-      // inferred from our own accesses, which is the number that is too small in this shape.
+      for (let i = 1; i < objs.length; i++) {
+        const [off, width] = objs[i];
+        const [prev, prevWidth] = objs[i - 1];
+        if (overlaps(prev, prevWidth, off, width)) {
+          fail(`the objects at [sp,#${prev}) and [sp,#${off}) overlap — one byte, two models`);
+        }
+      }
+      // WHAT AN ESCAPE COSTS. The audit bounds what WE access through an object, never what a callee
+      // does with the address it was handed — and a callee may write any offset from it. So an
+      // escape retracts two claims, both of them function-wide because one address reaches the
+      // whole frame.
       //
-      // On `escapes` and not on "a laddr exists": an address captured and dereferenced only
-      // in-function cannot be written by anyone else, and the overlap check above covers its
-      // aliasing.
-      if (escapes && irBlocks.some((blk) => blk.ops.some((op) => op.opcode === 'undef'))) {
+      // The first is that the other objects are private. Two objects are two separate C locals, so
+      // a callee writing past the one it was given reaches the other on the machine and nothing at
+      // all in the emitted source: `memset(&sp0, 0, 16)` clobbers the halfword at [sp,#4].
+      if (escaped.size > 0 && objects.size > 1) {
+        fail('the captured address escapes, so a callee may write any frame offset — including another object');
+      }
+      // The second is `undef`, which rests on this function's own stores being the ONLY writer of
+      // its frame. A wider real object (`struct P p; g(&p);` where only `p.x` is read here) has its
+      // later words written by `g` and read back at a slot no store of ours reaches — declaring
+      // those uninitialised spells the callee's value as garbage. The extents here are inferred
+      // from OUR accesses, which is the number that is too small in this shape.
+      //
+      // On an escape and not on "a laddr exists": an address dereferenced only in-function cannot
+      // be written by anyone else, and the overlap checks above cover its aliasing.
+      if (escaped.size > 0 && irBlocks.some((blk) => blk.ops.some((op) => op.opcode === 'undef'))) {
         fail(
           'the captured address escapes, so a callee may write any frame offset and an unstored slot is not provably uninitialised',
         );
@@ -2817,8 +2967,12 @@ export function lift(
       // in-function reads — measured, the recompiled loop loaded the value and never stored it —
       // and the reference idiom's own spelling is `vu16 tmp` for exactly that reason. An object
       // whose address never leaves the function needs no volatile and must not pay its codegen.
-      for (const op of laddrs) {
-        op.attrs = { ...op.attrs, width, signed, ...(escapes ? { volatile: true } : {}) };
+      for (const [off, ops] of objects) {
+        const width = extent.get(off)!;
+        const signed = accesses.get(off)!.some((a) => a.signed);
+        for (const op of ops) {
+          op.attrs = { ...op.attrs, width, signed, ...(escaped.has(off) ? { volatile: true } : {}) };
+        }
       }
     }
   }

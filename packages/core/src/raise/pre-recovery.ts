@@ -19,6 +19,7 @@ import { recognizeConsts } from './const';
 import { recognizeDivPow2 } from './divpow2';
 import { numberPureValues } from './gvn';
 import { recognizeMagicDivision } from './magicdiv';
+import { rerootNarrowReads } from './narrow';
 import { recognizeBranchShortCircuit, recognizeShortCircuit } from './shortcircuit';
 import { recognizeSoftDiv } from './softdiv';
 import { recognizeStructArrays } from './struct-arrays';
@@ -37,8 +38,8 @@ export interface PreRecoveryPass {
 
 /** THE ordered pre-recovery pass list — the single source of truth shared by pipeline / rank / report.
  *  address-numbering → const-materialize → magic-division → pow2-division → soft-division → array-legalize →
- *  struct-array → struct-pointer → short-circuit → branch-short-circuit. See each recognizer's file
- *  for the rationale. */
+ *  struct-array → struct-pointer → short-circuit → branch-short-circuit → narrow-reads. See each
+ *  recognizer's file for the rationale. */
 export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
   // FIRST: collapsing duplicate address definitions removes block params every later recognizer
   // would otherwise have to reason around, and it can only shrink the value graph.
@@ -82,6 +83,10 @@ export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
   // permanently disqualify a value fold that was available. The reverse cannot happen: the value
   // form replaces its head's `cond_br` with a `br`, which this pass never matches.
   { id: 'branch-shortcircuit', run: recognizeBranchShortCircuit, dce: true },
+  // LAST, and the position IS load-bearing: this pass reads the CFG's edge arguments to find a
+  // loop variable's next value, and both short-circuit folds above rewrite the very edges it reads.
+  // `dce: false` — the rewrite orphans nothing, since the operand it drops keeps its other use.
+  { id: 'narrow', run: rerootNarrowReads, dce: false },
 ];
 
 /** Run the pre-recovery passes in order. For each pass whose gate passes and that CHANGES the IR, run
