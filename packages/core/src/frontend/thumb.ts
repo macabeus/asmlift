@@ -234,7 +234,6 @@ const FLAG_SETTING = new Set([
   'sbcs',
 ]);
 const regNum = (r: string) => (r[0] === 'r' ? Number(r.slice(1)) : REG_NUM[r]);
-const isMemAccess = (mnemonic: string): boolean => /^(ldr|ldrb|ldrh|ldrsb|ldrsh|str|strb|strh)$/.test(mnemonic);
 function expandRegList(tokens: string[]): string[] {
   const out: string[] = [];
   for (const t of tokens) {
@@ -1597,7 +1596,7 @@ export function lift(
     /^movs?$/.test(ins.mnemonic) && !isSpReg(ins.ops[0] ?? '') && isSpReg(ins.ops[1] ?? '');
   const touchesFrame = (ins: Instr): boolean => spMemAccess(ins) !== null || capturesSp(ins);
   const spMemAccess = (ins: Instr): { off: number; width: number; regOff: boolean } | null => {
-    if (!isMemAccess(ins.mnemonic)) {
+    if (!/^(ldr|ldrb|ldrh|ldrsb|ldrsh|str|strb|strh)$/.test(ins.mnemonic)) {
       return null;
     }
     const mem = ins.ops[1];
@@ -2732,13 +2731,27 @@ export function lift(
       // instruction text is what makes it total — an operand ROLE cannot be overlooked. `str rD,
       // [rD, #k]` stores the frame address through itself, which is a base use AND an escape, and
       // the escape is exactly what stops the split.
+      // Why a capture was NOT split, when the reason is one no later message carries — the
+      // `slotsOffReason` idiom: a refusal reported as the wrong capability sends the improvement
+      // loop to build the wrong thing.
+      let splitRefusal: string | null = null;
       {
         const uses = new Map<Value, { op: Op; idx: number; blk: Block }[]>();
+        const record = (v: Value, op: Op, idx: number, blk: Block) =>
+          (uses.get(v) ?? uses.set(v, []).get(v)!).push({ op, idx, blk });
         for (const blk of irBlocks) {
           for (const op of blk.ops) {
-            op.operands.forEach((v, idx) => {
-              (uses.get(v) ?? uses.set(v, []).get(v)!).push({ op, idx, blk });
-            });
+            op.operands.forEach((v, idx) => record(v, op, idx, blk));
+            // An EDGE ARGUMENT is a use role too, and never an access: a capture that reaches a
+            // block parameter is live past this block, and the taint closure below is what judges
+            // it. Recorded at index -1 so it can never be counted as one — without it the split
+            // fired on a capture flowing into a phi, deleted the capture, and left the successor
+            // arg naming a value nothing defines.
+            for (const succ of op.successors ?? []) {
+              for (const a of succ.args) {
+                record(a, op, -1, blk);
+              }
+            }
           }
         }
         const minted: Op[] = [];
@@ -2752,11 +2765,19 @@ export function lift(
           // guard reads `[sp,#k]` accesses (spMemAccess), which an access through a copy is not, and
           // agbcc stages arguments 5+ there with `str`.
           const subWord = accesses.every((u) => (u.op.attrs.width as number) < 4);
-          // Nothing to split when the capture already names ONE object: every access at offset 0 is
-          // the frame base itself, which is what the DMA-fill idiom captures.
-          if (at.length === 0 || accesses.length !== at.length || !subWord) {
+          // A use that is not an access leaves the capture naming the frame base, and the judgement
+          // below reports that use itself — an escape, a phi, arithmetic — so it needs no reason
+          // here. The WIDTH does: nothing downstream mentions it, so a refused word access would be
+          // reported as "a store at [+4]" and the histogram would be asked for the wrong capability.
+          if (at.length === 0 || accesses.length !== at.length) {
             continue;
           }
+          if (!subWord) {
+            splitRefusal ??= 'a WORD access through the copy, and `ldr`/`str` have an `[sp,#imm]` form';
+            continue;
+          }
+          // Nothing to split when the capture already names ONE object: every access at offset 0 is
+          // the frame base itself, which is what the DMA-fill idiom captures.
           if (accesses.every((u) => u.op.attrs.off === 0)) {
             continue;
           }
@@ -2821,7 +2842,7 @@ export function lift(
         }
       }
       // Judge every use of a tainted value, against the object it names.
-      const accesses = new Map<number, { width: number; signed: boolean }[]>();
+      const accesses = new Map<number, { width: number; signed: boolean; isLoad: boolean }[]>();
       const escaped = new Set<number>();
       for (const off of objects.keys()) {
         accesses.set(off, []);
@@ -2836,21 +2857,23 @@ export function lift(
             const scalar = (kind: string) => {
               if ((op.attrs.off as number) !== 0) {
                 fail(
-                  `a ${kind} at [+${op.attrs.off}] through the captured address — only a scalar at the ` +
-                    `captured address is modelled`,
+                  `a ${kind} at [+${op.attrs.off}] through the captured address — ` +
+                    (splitRefusal ?? 'only a scalar at the captured address is modelled'),
                 );
               }
             };
             if (op.opcode === 'load' && idx === 0) {
               scalar('load');
-              accesses
-                .get(off)!
-                .push({ width: op.attrs.width as number, signed: (op.attrs.signed as boolean) ?? false });
+              accesses.get(off)!.push({
+                width: op.attrs.width as number,
+                signed: (op.attrs.signed as boolean) ?? false,
+                isLoad: true,
+              });
               return;
             }
             if (op.opcode === 'store' && idx === 0) {
               scalar('store');
-              accesses.get(off)!.push({ width: op.attrs.width as number, signed: false });
+              accesses.get(off)!.push({ width: op.attrs.width as number, signed: false, isLoad: false });
               return;
             }
             if ((op.opcode === 'store' && idx === 1) || op.opcode === 'call') {
@@ -2872,6 +2895,14 @@ export function lift(
         const widths = new Set(acc.map((a) => a.width));
         if (widths.size > 1) {
           fail(`the accesses through the captured address disagree on width (${[...widths].join(' vs ')})`);
+        }
+        // …and on SIGNEDNESS, over the loads, for the same reason: one declared type extends one
+        // way, so an object read by both `ldrsb` and `ldrb` has no faithful declaration —
+        // `sp4 - sp4` would fold to 0 where the machine computes sext(b) - zext(b). Loads only: a
+        // store extends nothing, and `strb` beside `ldrsb` is not a disagreement.
+        const signs = new Set(acc.filter((a) => a.isLoad).map((a) => a.signed));
+        if (signs.size > 1) {
+          fail('the loads through the captured address disagree on signedness — one declared type extends one way');
         }
         extent.set(off, acc[0].width);
       }
@@ -2898,25 +2929,25 @@ export function lift(
           fail(`the objects at [sp,#${prev}) and [sp,#${off}) overlap — one byte, two models`);
         }
       }
-      // AN ESCAPE RETRACTS THE UNDEF ARGUMENT. `undef` rests on this function's own stores being the
-      // ONLY writer of its frame, and an escape is exactly when that stops holding. The audit bounds
-      // what WE access through the object, not what a callee does, so a wider real object
-      // (`struct P p; g(&p);` where only `p.x` is read here) has its later words written by `g` and
-      // read back at a slot no store of ours reaches — declaring those uninitialised spells the
-      // callee's value as garbage. Function-wide rather than per object, because the callee is
-      // handed one address and may write any offset from it, and the extents here are inferred from
-      // OUR accesses — which is the number that is too small in this shape.
+      // WHAT AN ESCAPE COSTS. The audit bounds what WE access through an object, never what a callee
+      // does with the address it was handed — and a callee may write any offset from it. So an
+      // escape retracts two claims, both of them function-wide because one address reaches the
+      // whole frame.
       //
-      // On an escape and not on "a laddr exists": an address dereferenced only in-function cannot be
-      // written by anyone else, and the overlap checks above cover its aliasing.
-      // AND IT INVALIDATES EVERY OTHER OBJECT. The same reasoning one paragraph down: a callee
-      // handed one frame address may write any offset from it, and the extents here bound only what
-      // WE access. Two objects are two separate C locals, so a callee that writes past the one it
-      // was given cannot reach the other in the emitted source — `memset(&sp0, 0, 16)` clobbers the
-      // halfword at [sp,#4] on the machine and nothing at all in the C.
+      // The first is that the other objects are private. Two objects are two separate C locals, so
+      // a callee writing past the one it was given reaches the other on the machine and nothing at
+      // all in the emitted source: `memset(&sp0, 0, 16)` clobbers the halfword at [sp,#4].
       if (escaped.size > 0 && objects.size > 1) {
         fail('the captured address escapes, so a callee may write any frame offset — including another object');
       }
+      // The second is `undef`, which rests on this function's own stores being the ONLY writer of
+      // its frame. A wider real object (`struct P p; g(&p);` where only `p.x` is read here) has its
+      // later words written by `g` and read back at a slot no store of ours reaches — declaring
+      // those uninitialised spells the callee's value as garbage. The extents here are inferred
+      // from OUR accesses, which is the number that is too small in this shape.
+      //
+      // On an escape and not on "a laddr exists": an address dereferenced only in-function cannot
+      // be written by anyone else, and the overlap checks above cover its aliasing.
       if (escaped.size > 0 && irBlocks.some((blk) => blk.ops.some((op) => op.opcode === 'undef'))) {
         fail(
           'the captured address escapes, so a callee may write any frame offset and an unstored slot is not provably uninitialised',

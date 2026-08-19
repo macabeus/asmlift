@@ -151,6 +151,25 @@ describe('declaration shapes (P2)', () => {
     expect(src).not.toContain('&gBgTilemapBufs'); // still the bare form, not the cast fallback
   });
 
+  // The bare spelling carries NO cast, so the declared element type is the only thing in the
+  // emitted C that says whether a sub-word read sign- or zero-fills. Where the map's signedness
+  // and the machine's access disagree, the map wins and the spelling falls back to the cast form,
+  // which is byte-identical under any declaration.
+  test('an element signedness the access contradicts falls back to the cast form', () => {
+    const arrayU8 = ARRAY_U16_BODY.replace('\tlsls\tr0, r0, #0x1\n', '').replace('ldrh', 'ldrb');
+    const asDeclared = mapOf([
+      [0x08057b4c, { name: 'gTbl', kind: 'data', shape: 'array', elemSize: 1, elemSigned: false, dims: [64] }],
+    ]);
+    // control: agreeing signedness keeps the bare, named spelling
+    expect(run('f', arrayU8, asDeclared)).toContain('gTbl[');
+    const asSigned = mapOf([
+      [0x08057b4c, { name: 'gTbl', kind: 'data', shape: 'array', elemSize: 1, elemSigned: true, dims: [64] }],
+    ]);
+    const src = run('f', arrayU8, asSigned);
+    expect(src).toContain('((u8 *)&gTbl)['); // the machine's own access width and signedness
+    expect(src).not.toMatch(/[^&]gTbl\[/);
+  });
+
   test('a rank-3 array global pins BOTH leading dimensions', () => {
     const map = mapOf([
       [0x08057b4c, { name: 'gGrid', kind: 'data', shape: 'array', elemSize: 2, elemSigned: false, dims: [6, 9, 3] }],

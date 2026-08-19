@@ -137,6 +137,49 @@ describe('a `mov rD, sp` addressed through is a frame base, not a capture', () =
     expect(() => lift(edit('\tstrh\tr2, [r3, #0x4]\n', '\tstrh\tr2, [r3, r1]\n'))).toThrow(CAPTURE);
   });
 
+  test('a capture that reaches a block PARAMETER keeps the frame base', () => {
+    // An edge argument is a use, and never an access: the capture is live past this block, so the
+    // taint closure is what judges it. Counted only as an operand it is invisible, the split fires,
+    // and the deleted capture leaves the successor argument naming nothing.
+    expect(() => lift(SPILL)).not.toThrow();
+    const carried = `f:
+\tpush\t{r4, lr}
+\tadd\tsp, sp, #-0x8
+\tmov\tr3, sp
+\tstrh\tr0, [r3, #0x4]
+\tcmp\tr1, #0
+\tbeq\t.L2
+\tmov\tr3, r1
+.L2:
+\tstr\tr3, [r0]
+\tadd\tsp, sp, #0x8
+\tpop\t{r4}
+\tpop\t{r1}
+\tbx\tr1
+`;
+    expect(() => lift(carried)).toThrow(CAPTURE);
+  });
+
+  test('loads through one object that extend differently decline', () => {
+    // One declared type extends one way, so `ldrsb` and `ldrb` of the same byte have no faithful
+    // declaration — `sp4 - sp4` folds to 0 where the machine computes sext(b) - zext(b).
+    expect(() => lift(SPILL)).not.toThrow();
+    const bothSigns = `f:
+\tpush\t{r4, lr}
+\tadd\tsp, sp, #-0x10
+\tmov\tr4, sp
+\tstrb\tr0, [r4, #0x4]
+\tldrsb\tr1, [r4, #0x4]
+\tldrb\tr2, [r4, #0x4]
+\tsub\tr0, r1, r2
+\tadd\tsp, sp, #0x10
+\tpop\t{r4}
+\tpop\t{r1}
+\tbx\tr1
+`;
+    expect(() => lift(bothSigns)).toThrow(/disagree on signedness/);
+  });
+
   test('an escape alongside a SECOND object declines', () => {
     // A callee handed one frame address may write any offset from it, and two objects are two
     // separate C locals — so a callee that writes past the one it was given reaches the other on

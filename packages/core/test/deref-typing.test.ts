@@ -563,6 +563,20 @@ describe('byte offsets on a rendered pointer', () => {
     expect(src).not.toContain('(u8 *)(a0 + 62)');
   });
 
+  test('a SIGNED sub-word access keeps its signed cast over the byte-pointer base', () => {
+    // The byte cast makes a 1-byte deref correctly STRIDED, and stride is all the legalization used
+    // to ask — so the reinterpret cast, which was the only carrier of the access's signedness,
+    // stopped being emitted. `*(u8 *)p` where the machine did `ldrsb` is not merely a different
+    // value: an `unsigned char` promotes to a non-negative `int`, so `p[9] < 0` goes dead.
+    const signedByte =
+      'f:\n\tpush\t{r4, lr}\n\tldr\tr2, [r0, #0x4]\n\tstr\tr2, [r0, #0x8]\n' +
+      '\tadd\tr3, r0, #0x1\n\tldrsb\tr1, [r3]\n\tstr\tr1, [r0, #0xc]\n' +
+      '\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    const src = decompile('f', signedByte, ARMV4T_AGBCC).source;
+    expect(src).toContain('*(s8 *)((u8 *)a0 + 1)'); // byte 1, read signed
+    expect(src).not.toMatch(/=\s*\*\(\(u8 \*\)a0 \+ 1\)/); // the unsigned read
+  });
+
   test('an offset it DOES divide still scales, and keeps the base uncast', () => {
     // the discriminating control: without it this pair reads as "always cast", which would churn
     // every element-exact walk in the corpus into byte arithmetic

@@ -132,8 +132,17 @@ function globalOf(e: Expr, width: number): { name: string; idx: Expr } | null {
 // inner extent) gets no bare form at all; `((T *)&gSym)[i]` is byte-identical and valid under ANY
 // declaration, which is why it is the safe fallback. See symbols.ts arrayInnerExtents for why an
 // ABSENT rank is read as 1 rather than as unknown.
-function bareArrayLead(si: SymbolInfo, width: number): { lead?: number[] } | null {
+function bareArrayLead(si: SymbolInfo, width: number, signed: boolean): { lead?: number[] } | null {
   if (si.shape !== 'array' || si.elemSize !== width) {
+    return null;
+  }
+  // …and the element must EXTEND the way the access does, for the same reason the width must
+  // match: the bare spelling carries no cast, so the declared element type is the only thing in
+  // the emitted C that says whether a sub-word read sign- or zero-fills. Where the map states a
+  // signedness that disagrees, the map wins and the caller falls through to `((T *)&gSym)[i]`,
+  // which is byte-identical under any declaration. Where it states none, the machine's own access
+  // fills the gap (see noteGlobal) and there is nothing to disagree with.
+  if (width < 4 && si.elemSigned !== undefined && si.elemSigned !== signed) {
     return null;
   }
   const inner = arrayInnerExtents(si);
@@ -440,7 +449,7 @@ function memAccess(
     // dogfood proved agbcc needs for ROM tables — with the element type registered in the env
     // so the stride check passes and no cast is added. Element-width match only.
     const siArr = sym?.info(g.name);
-    const lead = siArr === undefined ? null : bareArrayLead(siArr, width);
+    const lead = siArr === undefined ? null : bareArrayLead(siArr, width, signed);
     if (lead !== null) {
       sym!.noteGlobal(g.name, T.ptr(T.int(width * 8, siArr!.elemSigned ?? false)));
       return { k: 'index', base: { k: 'var', name: g.name }, idx, width, signed, ...lead };
@@ -486,7 +495,7 @@ function arrayAccess(
   if (baseExpr.k === 'addr' && fieldOff === undefined) {
     // ARRAY-declared global (symbol map): the bare-name spelling, same rule as memAccess.
     const si = sym?.info(baseExpr.name);
-    const lead = si === undefined ? null : bareArrayLead(si, elemSize);
+    const lead = si === undefined ? null : bareArrayLead(si, elemSize, signed);
     if (lead !== null) {
       sym!.noteGlobal(baseExpr.name, T.ptr(T.int(elemSize * 8, si!.elemSigned ?? false)));
       return { k: 'index', base: { k: 'var', name: baseExpr.name }, idx: idxExpr, width: elemSize, signed, ...lead };

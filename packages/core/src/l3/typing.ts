@@ -48,18 +48,26 @@ export function ptrElemBytes(to: IrType): number {
   return to.kind === 'int' ? to.width / 8 : to.kind === 'ptr' ? 4 : 0;
 }
 
-/** May a `width`-byte access dereference a base of rendered C type `rt` AS SPELLED — i.e. is `rt`
- *  a pointer/array whose element size equals the access width? THE one copy of the stride rule:
+/** May a `width`-byte access of the given signedness dereference a base of rendered C type `rt` AS
+ *  SPELLED — i.e. is `rt` a pointer/array whose element size equals the access width, and whose
+ *  element extends the way the access does? THE one copy of the stride rule:
  *  the C-family printer decides cast insertion from it, the Pascal backend decides declining from
  *  it, and exprCType types the access result from it. `false` for a non-pointer, an unknowable
  *  base (undefined), or a pointer of the WRONG stride — a wrong-stride deref would make C read
  *  the wrong width and scale the index by the wrong element size. */
-export function derefStrideOk(rt: IrType | undefined, width: number): boolean {
+export function derefStrideOk(rt: IrType | undefined, width: number, signed: boolean): boolean {
+  // SIGNEDNESS COUNTS WHEREVER THE ACCESS EXTENDS. A sub-word load fills the top bits from either
+  // the sign bit or zero, and in the emitted C the pointee type is the ONLY thing that says which —
+  // so a base of the wrong signedness has to take the reinterpret cast exactly as a base of the
+  // wrong stride does. Read `*(u8 *)p` where the machine did `ldrsb` and `p[9] < 0` is not merely a
+  // different value: an `unsigned char` promotes to a non-negative `int`, so the arm goes dead.
+  // A word access extends nothing, and a POINTER pointee is a word.
+  const extendsOk = (to: IrType) => width === 4 || (to.kind === 'int' && to.signed === signed);
   if (rt?.kind === 'ptr') {
-    return rt.to.kind !== 'struct' && ptrElemBytes(rt.to) === width;
+    return rt.to.kind !== 'struct' && ptrElemBytes(rt.to) === width && extendsOk(rt.to);
   }
   if (rt?.kind === 'array') {
-    return rt.elem.kind === 'int' && rt.elem.width === width * 8;
+    return rt.elem.kind === 'int' && rt.elem.width === width * 8 && extendsOk(rt.elem);
   }
   return false;
 }
@@ -121,10 +129,10 @@ export function exprCType(e: Expr, varType: (name: string) => IrType | undefined
       if (bt?.kind === 'ptr' && bt.to.kind === 'struct' && (bt.to.size === undefined || bt.to.size === e.width)) {
         return bt.to;
       }
-      if (bt?.kind === 'ptr' && derefStrideOk(bt, e.width)) {
+      if (bt?.kind === 'ptr' && derefStrideOk(bt, e.width, e.signed)) {
         return bt.to;
       }
-      if (bt?.kind === 'array' && derefStrideOk(bt, e.width)) {
+      if (bt?.kind === 'array' && derefStrideOk(bt, e.width, e.signed)) {
         return bt.elem;
       }
       return scalarTypeForAccess(e.width, e.signed);

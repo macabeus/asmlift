@@ -143,3 +143,23 @@ test('a shift pair that narrows to no C type is left alone', () => {
   expect(odd).not.toBe(SHIFT_PAIR);
   expect(run(odd).n).toBe(0);
 });
+
+// THE CROSS-DOMAIN REFUSAL, and the only rule in this file that is a soundness rule. The two
+// spellings live in different bit-domains: `zext {width:16}` keeps the LOW halfword, `shr_u
+// {imm:16}` keeps the HIGH one and moves it down. Pair them and `x >> 16` becomes `(s16)(u16)x` — a
+// different value, silently. Neither fixture above can catch it: each is written in ONE spelling.
+test('a zero extension is not paired with a shift of the same operand', () => {
+  // one carried `zext {16}` and one `shr_s {imm=16}` of the same value: same integer, different
+  // bits, and the low-half/high-half key is the only thing that tells them apart
+  const mixed = ZEXT_PAIR.replace('%6: s32 = sext %10 {width=16}', '%6: s32 = shr_s %10 {imm=16}');
+  expect(mixed).not.toBe(ZEXT_PAIR);
+  expect(run(ZEXT_PAIR).n).toBe(1); // control: the same-spelling pair IS rewritten
+  expect(run(mixed).n).toBe(0);
+});
+
+test('an unsigned SHIFT is not paired with a sign extension of the same operand', () => {
+  const mixed = SHIFT_PAIR.replace('%6: s32 = shr_s %10 {imm=16}', '%6: s32 = sext %10 {width=16}');
+  expect(mixed).not.toBe(SHIFT_PAIR);
+  expect(run(SHIFT_PAIR).n).toBe(1);
+  expect(run(mixed).n).toBe(0);
+});
