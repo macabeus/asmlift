@@ -182,7 +182,7 @@ describe('sinkablePreUpdateSlots', () => {
     expect(h.sinkablePreUpdateSlots(header, exit, [e], body, empty, new Set(['v0']))).toEqual(new Set([0]));
   });
 
-  test('ablating arg-order-insensitive admits an exit arg that reads memory', () => {
+  test('ablating arg-safe-to-reevaluate admits an exit arg that reads memory', () => {
     const { p, q, header, exit, body } = scaffold();
     const e = v();
     // `q = *p` on the exit edge. Rebuilt at the top of the body it would read memory ahead of every
@@ -196,7 +196,7 @@ describe('sinkablePreUpdateSlots', () => {
     });
     const args = [e];
     expect(h.sinkablePreUpdateSlots(header, exit, args, body, empty, new Set(['v0']))).toEqual(new Set());
-    const ablated = without(PREUPDATE_SINK_GATES, 'arg-order-insensitive');
+    const ablated = without(PREUPDATE_SINK_GATES, 'arg-safe-to-reevaluate');
     expect(h.sinkablePreUpdateSlots(header, exit, args, body, empty, new Set(['v0']), ablated)).toEqual(new Set([0]));
   });
 
@@ -260,7 +260,7 @@ describe('sinkablePreUpdateSlots', () => {
       h.sinkablePreUpdateSlots(header, exit, args, body, empty, new Set(['v0']), gates);
     expect(run()).toEqual(new Set());
     expect(run(without(PREUPDATE_SINK_GATES, 'arg-reads-current-names'))).toEqual(new Set());
-    expect(run(without(PREUPDATE_SINK_GATES, 'arg-order-insensitive'))).toEqual(new Set());
+    expect(run(without(PREUPDATE_SINK_GATES, 'arg-safe-to-reevaluate'))).toEqual(new Set());
   });
 
   test('a leaf with neither a name nor a definition is refused on its own gate', () => {

@@ -8,6 +8,7 @@ import {
   HOIST_UNSAFE_OPS,
   NEGATED_ICMP,
   OPCODES,
+  ORDER_SENSITIVE_OPS,
   REEVAL_UNSAFE_OPS,
   isDceSafe,
 } from '../src/ir/opcodes';
@@ -175,12 +176,13 @@ test('composition: mwcc `!(x == 0)` folds through cntlzw-eq0 into a single `x !=
   verify(fn);
 });
 
-test('the three effect views over the registry name three different questions', () => {
-  // Each set answers one question about an op, and all three are derived from the signature flags
+test('the four effect views over the registry name four different questions', () => {
+  // Each set answers one question about an op, and all four are derived from the signature flags
   // rather than listed, so registering an opcode cannot leave one behind. Pinned because the
   // memberships OVERLAP, and the disagreements are the whole reason there is more than one set.
   expect([...EFFECTFUL_OPS].sort()).toEqual(['astore', 'call', 'opaque', 'store']);
   expect([...HOIST_UNSAFE_OPS].sort()).toEqual([...EFFECTFUL_OPS].sort());
+  expect([...ORDER_SENSITIVE_OPS].sort()).toEqual(['aload', 'astore', 'call', 'load', 'opaque', 'store']);
   expect([...REEVAL_UNSAFE_OPS].sort()).toEqual([
     'aload',
     'astore',
@@ -193,13 +195,13 @@ test('the three effect views over the registry name three different questions', 
     'udiv',
     'umod',
   ]);
-  // One opcode, three answers: a dead load is reapable, hoisting one is allowed (its consumers
-  // re-guard it), rebuilding one elsewhere is not.
+  // One opcode, four answers: a dead load is reapable, hoisting one is allowed (its consumers
+  // re-guard it), moving one on the same path is not, and neither is rebuilding it elsewhere.
   expect(isDceSafe('load')).toBe(true);
   expect(HOIST_UNSAFE_OPS.has('load')).toBe(false);
-  expect(REEVAL_UNSAFE_OPS.has('load')).toBe(true);
-  // And a divide: deletable and hoistable today, never re-evaluable — it can fault on a path the
-  // original never took.
-  expect(isDceSafe('sdiv')).toBe(true);
+  expect(ORDER_SENSITIVE_OPS.has('load')).toBe(true);
+  // A divide separates the last two: reordering one on a path it already ran is fine, running it
+  // on a path that skipped it is not — which is the only difference between the two sets.
+  expect(ORDER_SENSITIVE_OPS.has('sdiv')).toBe(false);
   expect(REEVAL_UNSAFE_OPS.has('sdiv')).toBe(true);
 });

@@ -18,9 +18,12 @@
 // SPECULATION: the def dominates the latch, and the loop is single-latch at both call sites, but an
 // early-`return` arm still lets an iteration leave BEFORE the latch — so a tree the top of the body
 // evaluates is one that iteration never evaluated, and a trapping divide would fault where the
-// original returned. All three classes share ONE gate because the predicate is that derived
-// registry view; splitting them would re-spell the membership here, which is the inline copy the
-// registry exists to prevent.
+// original returned.
+//
+// One gate covers both because `REEVAL_UNSAFE_OPS` answers both, and the candidate carries no arm
+// information to tell them apart. KNOWN COST: a loop with NO early-return arm speculates nothing,
+// so a divide in its exit-arg tree is refused for a hazard it cannot have. Threading "this loop can
+// leave before its latch" into the candidate is what would recover it; no benchmark row asks yet.
 //
 // And every name the rebuilt expression reads must still denote the same value there. A loop
 // variable does: the update sits at the bottom, so at the top of the body its name holds exactly
@@ -117,17 +120,16 @@ export interface SinkCandidate {
   destBusyInLoop: boolean;
 }
 
-/** When a pre-update exit copy may move into the loop body. Every gate here is SOUND: drop one and
- *  the emitted loop computes a different answer, not merely a worse-scoring one. The set-level
+/** When a pre-update exit copy may move into the loop body. The set-level
  *  rules — two slots wanting one name, a slot that stays behind reading a sunk name — are not in
  *  the table because they are properties of the whole edge rather than of a candidate; they live in
  *  `sinkablePreUpdateSlots` with the same refusal discipline. */
 export const PREUPDATE_SINK_GATES: readonly Gate<SinkCandidate>[] = [
   {
-    id: 'arg-order-insensitive',
-    why: "a memory read answers whichever stores ran before it, and the copy lands ahead of the body's",
+    id: 'arg-safe-to-reevaluate',
+    why: 'an effect, a memory read or a trap gives a different answer where the rebuilt copy lands',
     sound: true,
-    guardedBy: 'hazards.test.ts: ablating arg-order-insensitive admits an exit arg that reads memory',
+    guardedBy: 'hazards.test.ts: ablating arg-safe-to-reevaluate admits an exit arg that reads memory',
     rejects: (c) => c.argBlockers.has('order-sensitive'),
   },
   {
@@ -139,7 +141,7 @@ export const PREUPDATE_SINK_GATES: readonly Gate<SinkCandidate>[] = [
   },
   {
     id: 'arg-has-a-definition',
-    why: 'a leaf with neither a name nor a def has nothing to rebuild it from, and renders as a gap',
+    why: 'a leaf with neither a name nor a def renders as a gap, which the contract catches loudly',
     sound: false,
     rejects: (c) => c.argBlockers.has('no-definition'),
   },

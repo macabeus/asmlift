@@ -321,3 +321,36 @@ test('the sink stands down where a body merge rewrites a loop variable name', ()
   // for (a0, a1) = (3, -2) returns 9 where the IR returns 0.
   expect(() => emit(BODY_REBINDS_LOOP_VAR)).toThrow(/pre-update loop variable/);
 });
+
+// REFUSAL — the same body-rebind shape, with NOTHING reading the rebound name at the bottom of the
+// loop: the update's own value never touches it and the test does not either. A screen over the
+// READERS misses this one; the store in the latch reads it, and so would a call argument or an
+// in-body condition. The refusal is on the name.
+const BODY_REBIND_READ_BY_A_STORE = `fn rb2 {
+^bb0(%0: s32):
+  %1: s32* = gaddr {sym="gbuf"}
+  %2: s32 = const {value=0}
+  %3: s32 = const {value=1}
+  br ^bb1(%2, %2)
+^bb1(%4: s32, %5: s32):
+  %6: s32 = mul %4, %4
+  %7: u32 = icmp_slt %4, %0
+  cond_br %7, ^bb2(%6), ^bb3()
+^bb2(%8: s32):
+  store %1, %8 {off=0, width=4}
+  br ^bb3()
+^bb3():
+  store %1, %5 {off=4, width=4}
+  %9: s32 = add %4, %3
+  %10: u32 = icmp_slt %9, %0
+  cond_br %10, ^bb1(%9, %6), ^bb4(%5)
+^bb4(%11: s32):
+  ret %11
+}
+`;
+
+test('the stand-down is on the rebound NAME, not on who reads it', () => {
+  // Sunk, this emits `gbuf[1] = v1` after an arm has overwritten v1: at a0 = 3 the IR stores
+  // 0, 0, 1 and the emitted C stored 0, 1, 4.
+  expect(() => emit(BODY_REBIND_READ_BY_A_STORE)).toThrow(/pre-update loop variable/);
+});

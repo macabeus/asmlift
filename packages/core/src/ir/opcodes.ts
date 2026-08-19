@@ -229,11 +229,23 @@ export const EFFECTFUL_OPS: ReadonlySet<string> = new Set(
  *  refuse them, so the pre-update sink is not exposed to it. */
 export const HOIST_UNSAFE_OPS: ReadonlySet<string> = EFFECTFUL_OPS;
 
-/** Ops that may not be RE-EVALUATED at another program point — the question a pass asks before
- *  rebuilding a computation somewhere else, as opposed to before deleting one (`EFFECTFUL_OPS`).
- *  Three ways to fail it, one flag each: an effect (its order against other effects is
- *  observable), a memory read (it answers whichever stores ran before it), and a trap (the new
- *  point may be reached on a path the old one was not). */
+/** Ops whose answer depends on WHERE they run: an effect (its order against other effects is
+ *  observable) or a memory read (it answers whichever stores ran before it). The question a pass
+ *  asks before moving a computation to another point on the SAME path. */
+export const ORDER_SENSITIVE_OPS: ReadonlySet<string> = new Set(
+  (Object.keys(OPCODES) as Opcode[]).filter((k) => {
+    const sig = OPCODES[k] as OpSig;
+    return sig.effects || sig.reads;
+  }),
+);
+
+/** Ops that may not be RE-EVALUATED at another program point — order-sensitive, or trapping. The
+ *  trap half is what separates this from `ORDER_SENSITIVE_OPS`: it only matters when the new point
+ *  can be reached on a path the old one was not, so a consumer that merely re-orders on one path
+ *  wants the smaller set. Both are needed because the two consumers differ on exactly the divides:
+ *  a collapsed switch re-renders a test block's ops AT THEIR USES, and every use is dominated by
+ *  the def, so it evaluates them on a SUBSET of the original paths — a narrowing, never a
+ *  speculation. */
 export const REEVAL_UNSAFE_OPS: ReadonlySet<string> = new Set(
   (Object.keys(OPCODES) as Opcode[]).filter((k) => {
     const sig = OPCODES[k] as OpSig;

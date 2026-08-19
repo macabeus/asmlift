@@ -609,12 +609,6 @@ interface WhileLoopInfo {
   arms: LoopArm[]; // the early-`return` exits out of the body (`earlyReturnArm`)
 }
 
-// Opcodes that DO something a duplicate or a reorder would be visible in. `load`/`aload` are absent
-// deliberately: a pure read is not an effect (the def→render barrier scan in structure/analysis.ts
-// already proves where one may move). Distinct from switch-recover's `SIDE_EFFECTFUL`, which asks
-// the stricter "is this block pure" and so counts loads too. `headerPure` also wants `call` out of a
-// re-evaluated condition for a SECOND reason — `expr()` inlines a result at every use with no CSE —
-// so removing it here on effect grounds would quietly loosen that too.
 // Opcodes whose NUMBER OF EXECUTIONS is observable. Moving one of these out of a loop changes what
 // the program does — a call that ran per iteration would run once. A `load`/`aload` is deliberately
 // NOT here: it is a pure read, so running it once instead of per-iteration is unobservable as long
@@ -2623,16 +2617,23 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     const updateWrites = updateWriteSet(updates);
     const lterm = dw.latch.ops[dw.latch.ops.length - 1];
     // KNOWN GAP, and the reason the sink stands down rather than repairing anything. A body
-    // block's param may adopt a loop variable's NAME (canTakeName waives the liveness half for a
-    // pure alias); where the incoming args differ, the arm's copy into it is a real write running
-    // ahead of the bottom of the body, and the update — which renders RAW — then reads a name that
-    // no longer holds the header's value. `sub` cannot see it: it EXEMPTS the back-edge args,
-    // right for the post-update question it models and wrong for this one.
+    // block's param may adopt a LOOP VARIABLE's name (canTakeName waives the liveness half for a
+    // pure alias, an argument that does not carry when the name came from `backArgName` — it is
+    // then a different value's). The arm's copy into it is a real write partway through the body,
+    // and everything rendered after it reads the name RAW: the update, the bottom test, the
+    // header's own ops, the latch's side effects.
     //
-    // The emitted C is wrong whenever this fires, with or without a sink, and that is true on the
-    // commit before this one too — the shape is not this pass's to fix. What IS this pass's is not
-    // to UNLOCK such a loop: without the sink these functions decline on the pre-update hazard, so
-    // standing down keeps them loud instead of trading a decline for a silent wrong answer.
+    // The refusal is therefore on the NAME, not on who reads it. Screening the readers is what an
+    // earlier version did, and it missed a store in the latch reading the clobbered name — the
+    // set of readers is every statement the loop emits, which is not a set worth enumerating when
+    // the name itself is the whole signal.
+    //
+    // The emitted C is wrong whenever this shape occurs, with or without a sink, and identically
+    // so on the commit before this one — it is a naming-pipeline defect, not this pass's. What IS
+    // this pass's is not to UNLOCK such a loop: without a sink these functions decline on the
+    // pre-update hazard, so standing down keeps them loud rather than trading a decline for a
+    // silent wrong answer.
+    const headerNames = new Set(dw.header.params.map((p) => varName.get(p)));
     const bodyRebinds = new Set<string>();
     for (const bb of dw.body) {
       if (bb === dw.header) {
@@ -2640,17 +2641,23 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
       }
       bb.params.forEach((pv, i) => {
         const n = varName.get(pv);
-        // Only a copy that SURVIVES argAssigns' identity elision writes anything: an edge whose
-        // arg already carries this name emits nothing at all.
-        if (n !== undefined && (preds.get(bb) ?? []).some((pb) => varName.get(successorTo(pb, bb)!.args[i]) !== n)) {
-          bodyRebinds.add(n);
+        if (n === undefined) {
+          return;
+        }
+        // EVERY in-edge record, not successorTo — a terminator with two edges to this block would
+        // hide the second edge's args, and a hidden edge is a rebind this does not see. Only a
+        // copy that SURVIVES argAssigns' identity elision writes anything, so an edge whose arg
+        // already carries the name does not count.
+        for (const pb of new Set(preds.get(bb) ?? [])) {
+          for (const sc of pb.ops[pb.ops.length - 1].successors) {
+            if (sc.block === bb && varName.get(sc.args[i]) !== n) {
+              bodyRebinds.add(n);
+            }
+          }
         }
       });
     }
-    const backArgs = (successorTo(dw.latch, dw.header)?.args ?? []) as Value[];
-    const rebindHazard =
-      bodyRebinds.size > 0 &&
-      [...backArgs, lterm.operands[0]].some((a) => a !== undefined && readsClobbered(a, new Map(), bodyRebinds));
+    const rebindHazard = [...bodyRebinds].some((n) => headerNames.has(n));
     const exitArgs = (successorTo(dw.latch, dw.exit)?.args ?? []) as Value[];
     // A pre-update exit copy moves to the TOP of the body, where the loop variables still hold
     // their top-of-iteration values. No zero-trip seed here: a `do-while` always runs its body, so
