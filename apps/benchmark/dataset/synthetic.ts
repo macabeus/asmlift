@@ -455,6 +455,54 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ALL,
   },
 
+  // A LOOP VARIABLE READ AT ITS PRE-UPDATE VALUE. agbcc hoists an induction update above the exit
+  // test, so something still wants the variable one iteration back. The structurer treats every
+  // such read as a hazard and declines the whole function — correct, because rendering it under
+  // the post-update name is an off-by-one-iteration miscompile, but it costs 29 functions across
+  // the klonoa/sa3/newlib corpus and no other benchmark row reproduces it.
+  //
+  // ONE decline message, THREE causes, which is the point of authoring three rows: the message
+  // groups them and the fix does not. `preupdate_cond` is the loop CONDITION reading it,
+  // `preupdate_exit` is the EXITING EDGE carrying it, and `preupdate_escape` is a body value read
+  // after the loop deriving from it. Only the middle one reaches the repair that already exists
+  // (`sinkablePreUpdateSlots`, the trailing-pointer sink) and is turned away there by the
+  // `arg-is-loop-variable` gate, which is where every real function on this link is refused.
+  //
+  // agbcc only, and the reason is the whole point: the shape IS the ARM rotation. Given the same C,
+  // ido/kmc/mwcc schedule the update after the test and the pre-update read never arises, so the
+  // rows would be three more ordinary loops on those toolchains rather than coverage.
+  {
+    sym: 'preupdate_cond',
+    src: 'int preupdate_cond(int i){ int b = 0; if (i == 0) return 0; while (((i >> b++) & 1) == 0) ; return b; }',
+    features: ['loop-preupdate'],
+    toolchains: ['agbcc'],
+    note: "the `ffs` shape: `b++` renders inside the condition's own operand, so the update cannot simply move",
+  },
+  {
+    sym: 'preupdate_exit',
+    src:
+      'int cb(int *p);\n' +
+      'int preupdate_exit(int *p, int n, int m){ int r = m; int *q;' +
+      ' if (n > 0) { q = p + n; do { r = cb(q); q = q - 1; } while (--n); } return r; }',
+    features: ['loop-preupdate'],
+    toolchains: ['agbcc'],
+    ctx: 'int cb(int*);',
+    proto: { cb: { params: 1 } },
+    note: 'the `_wrapup_reent` shape — `q = p + n` is a preheader, without which the guard fuses and the decline is a different one',
+  },
+  {
+    sym: 'preupdate_escape',
+    src:
+      'struct N { struct N *next; int v; };\n' +
+      'void preupdate_escape(struct N *f, int n, int **out){ int *s = 0;' +
+      ' do { s = &f->v; f = f->next; } while (--n); *out = s; }',
+    features: ['loop-preupdate'],
+    toolchains: ['agbcc'],
+    ctx: 'struct N; void preupdate_escape(struct N*,int,int**);',
+    proto: { preupdate_escape: { returnsVoid: true } },
+    note: 'the trailing-pointer idiom with a DERIVED trailing value — `&f->v`, not `f` itself',
+  },
+
   // The DMA-fill idiom, WITH an uninitialised local — the pair no real row carries. An escaping
   // frame address retracts every `undef` in the function, on the premise that a callee may write
   // any frame offset; a DMA SOURCE register is the case where that premise is false, because the
