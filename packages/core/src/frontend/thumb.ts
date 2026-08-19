@@ -14,7 +14,7 @@
 // modelling is needed; they simply fall through the decode/fill switch. Because agbcc may
 // copy a callee-saved argument (e.g. into r4) before touching r0, entry parameters are
 // ordered by ABI register (r0, r1, …), not by the order they were first read.
-import { Fn, Op, Successor, Value, mkOp, mkValue } from '../ir/core';
+import { Block, Fn, Op, Successor, Value, mkOp, mkValue } from '../ir/core';
 import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
 import { type Prototypes, protoArity } from '../proto';
@@ -235,13 +235,6 @@ const FLAG_SETTING = new Set([
 ]);
 const regNum = (r: string) => (r[0] === 'r' ? Number(r.slice(1)) : REG_NUM[r]);
 const isMemAccess = (mnemonic: string): boolean => /^(ldr|ldrb|ldrh|ldrsb|ldrsh|str|strb|strh)$/.test(mnemonic);
-// Sets no register and reads no data destination, so an instruction here can sit inside a register's
-// live range without touching it. `cmp` seeds the pending compare; none of the three has a dest.
-const NO_DEST = new Set(['cmp', 'cmn', 'tst']);
-// The register tokens of one operand. Splitting rather than a `\br2\b` match because an operand may
-// carry a SYMBOL that merely contains the spelling (`gVar2` is not `r2`, `.L82` is not `r8`), and a
-// false mention there would silently widen a register's apparent use set.
-const opTokens = (o: string): string[] => o.split(/[^A-Za-z0-9_]+/).filter((t) => t !== '');
 function expandRegList(tokens: string[]): string[] {
   const out: string[] = [];
   for (const t of tokens) {
@@ -1617,83 +1610,6 @@ export function lift(
       : null;
   };
 
-  // THE FRAME BASE IN A REGISTER. Thumb-1 gives `ldr`/`str` an `[sp,#imm]` encoding and gives the
-  // sub-word forms none, so a byte or halfword spill can only be spelled by copying sp into a low
-  // register first:
-  //
-  //     mov  r2, sp
-  //     strh r3, [r2, #0x30]
-  //
-  // That is an ADDRESSING MODE, not an address capture: the copy never becomes a value, and the
-  // access is the `[sp,#0x30]` the instruction set cannot spell. Read as a capture it mints a
-  // `laddr` at the frame base, and the frame-object audit then refuses the `[+48]` access — naming
-  // a wider frame object as the missing capability when the shape needs no object at all.
-  //
-  // A copy qualifies only when its use set is COMPLETE and every use is an access. Scanning forward
-  // from the `mov`: rD must be redefined before the block ends, which bounds the copy's live range
-  // to this block so no successor can read it, and every mention of rD in between must be a
-  // fixed-offset memory base. Anything the scan cannot classify — a call, a register list, rD as a
-  // stored value or as a register offset, an sp adjustment moving the frame under the offsets —
-  // returns null and leaves the copy on the `laddr` path, where the audit judges it.
-  const frameBaseUses = (ab: AsmBlock, mi: number): { ins: Instr; off: number }[] | null => {
-    const rD = reg(ab.instrs[mi].ops[0] ?? '');
-    // A sub-word access encodes only a LOW base register, so a high-register copy is never this
-    // form; excluding it also keeps the mention test to the plain `rN` spelling, away from the
-    // `sl`/`ip`/`fp` aliases the same physical register can also be written as.
-    if (!/^r[0-7]$/.test(rD)) {
-      return null;
-    }
-    const mentions = (ins: Instr): boolean => ins.ops.some((o) => opTokens(o).includes(rD));
-    const uses: { ins: Instr; off: number }[] = [];
-    for (let i = mi + 1; i < ab.instrs.length; i++) {
-      const ins = ab.instrs[i];
-      if (modifiesSp(ins)) {
-        return null; // the offsets below are relative to sp AT THE COPY
-      }
-      const redefines = /^ldr/.test(ins.mnemonic) && reg(ins.ops[0] ?? '') === rD;
-      if (isMemAccess(ins.mnemonic)) {
-        const { base, off, regOff } = parseAddr(ins.ops[1] ?? '');
-        if (reg(base) === rD && regOff === undefined) {
-          uses.push({ ins, off });
-        } else if (mentions(ins) && !redefines) {
-          return null;
-        }
-      } else if (FLAG_SETTING.has(ins.mnemonic)) {
-        if (ins.ops.slice(1).some((o) => opTokens(o).includes(rD))) {
-          return null; // read as a VALUE, not as a base
-        }
-        if (reg(ins.ops[0] ?? '') === rD) {
-          return uses.length > 0 ? uses : null;
-        }
-      } else if (!NO_DEST.has(ins.mnemonic) || mentions(ins)) {
-        return null;
-      }
-      if (redefines) {
-        return uses.length > 0 ? uses : null;
-      }
-    }
-    return null; // rD is still live at the block end, so its use set is not this block's
-  };
-  // Instruction identity, resolved once here and read by the decode arms: `frameBaseCopy` holds the
-  // `mov rD, sp` that emit NOTHING (the copy is an addressing mode, not a value), `frameBaseAccess`
-  // maps each access through one to the frame offset it names.
-  const frameBaseCopy = new Set<Instr>();
-  const frameBaseAccess = new Map<Instr, number>();
-  for (const ab of asmBlocks) {
-    ab.instrs.forEach((ins, mi) => {
-      if (!capturesSp(ins)) {
-        return;
-      }
-      const uses = frameBaseUses(ab, mi);
-      if (uses === null) {
-        return;
-      }
-      frameBaseCopy.add(ins);
-      for (const u of uses) {
-        frameBaseAccess.set(u.ins, u.off);
-      }
-    });
-  }
   // Is the word-slot model safe for THIS function? Every disqualifier below leaves every `[sp,#k]`
   // access on the old path, which declines — so the answer to "not sure" is the loud one.
   // Returns null when the word-slot model is SAFE for this function, else the reason it is off —
@@ -2112,20 +2028,6 @@ export function lift(
     // adjustments) is transparent to dataflow — the frame is push/pop-based — so it falls through
     // harmlessly, matching the documented sp handling. A malformed operand (missing / non-register
     // non-immediate) degrades to a loud opaque rather than a crash or a silent data-dest drop.
-    // An access through a frame-base copy addresses the frame-local object at THAT offset, so it
-    // gets its own `laddr` and reads it at 0 — the offset moves off the access and onto the object,
-    // where the frame-object audit can prove it disjoint from every other thing in the frame.
-    // Non-null only for instructions the pre-pass classified, which its `mov` has already made
-    // reachable: a frame whose slot model is off throws at that `mov`, ahead of every use.
-    const frameBaseLocal = (ins: Instr, bi: number): Value | null => {
-      const off = frameBaseAccess.get(ins);
-      if (off === undefined) {
-        return null;
-      }
-      const res = mkValue(T.unk(32));
-      irBlocks[bi].ops.push(mkOp('laddr', { results: [res], attrs: { off } }));
-      return res;
-    };
     const emit2op = (opc: Opcode, dReg: string, op2: string | undefined, bi: number) => {
       // The one sp guard writeData CANNOT supply: this path returns without ever producing a value
       // to write, so a bad sp destination would never reach the write. It is only reachable from the
@@ -2192,11 +2094,6 @@ export function lift(
           // a reserved local area for the object to live in.
           if (!b?.startsWith('#') && isSpReg(b ?? '') && !isSpReg(a ?? '')) {
             if (slotsOk && localArea > 0) {
-              if (frameBaseCopy.has(ins)) {
-                // an addressing mode, not a value: each access through it mints its own `laddr`,
-                // and the scan proved rD is redefined in this block, so nothing reads the copy
-                break;
-              }
               const res = mkValue(T.unk(32));
               irb.ops.push(mkOp('laddr', { results: [res], attrs: { off: 0 } }));
               writeData(reg(a), bi, res);
@@ -2643,20 +2540,14 @@ export function lift(
             writeData(reg(a), bi, readVar(slotKey(off), bi));
             break;
           }
-          let baseVal = frameBaseLocal(ins, bi) ?? readData(base, bi);
+          let baseVal = readData(base, bi);
           if (regOff !== undefined) {
             const sum = mkValue(T.unk(32));
             irb.ops.push(mkOp('add', { operands: [baseVal, readData(regOff, bi)], results: [sum] }));
             baseVal = sum;
           }
           const res = mkValue(T.unk(32));
-          irb.ops.push(
-            mkOp('load', {
-              operands: [baseVal],
-              results: [res],
-              attrs: { off: frameBaseAccess.has(ins) ? 0 : off, width, signed },
-            }),
-          );
+          irb.ops.push(mkOp('load', { operands: [baseVal], results: [res], attrs: { off, width, signed } }));
           writeData(reg(a), bi, res);
           break;
         }
@@ -2691,19 +2582,14 @@ export function lift(
             writeVar(slotKey(off), bi, readData(reg(a), bi));
             break;
           }
-          let storeBase = frameBaseLocal(ins, bi) ?? readData(base, bi);
+          let storeBase = readData(base, bi);
           if (regOff !== undefined) {
             // register-offset store: same exact `rB + rX` lowering as the load path above
             const sum = mkValue(T.unk(32));
             irb.ops.push(mkOp('add', { operands: [storeBase, readData(regOff, bi)], results: [sum] }));
             storeBase = sum;
           }
-          irb.ops.push(
-            mkOp('store', {
-              operands: [storeBase, readData(reg(a), bi)],
-              attrs: { off: frameBaseAccess.has(ins) ? 0 : off, width },
-            }),
-          );
+          irb.ops.push(mkOp('store', { operands: [storeBase, readData(reg(a), bi)], attrs: { off, width } }));
           break;
         }
         case 'bl':
@@ -2816,7 +2702,7 @@ export function lift(
   // loudly. Nothing here guesses: the object's declared type is exactly the access type the machine
   // used.
   {
-    const laddrs: Op[] = [];
+    let laddrs: Op[] = [];
     for (const blk of irBlocks) {
       for (const op of blk.ops) {
         if (op.opcode === 'laddr') {
@@ -2828,6 +2714,69 @@ export function lift(
       const fail = (why: string): never => {
         throw new FrontendUnsupportedError(`cannot lift '${name}': address-taken stack local — ${why}`);
       };
+      // A FRAME BASE ADDRESSED THROUGH IS NOT A CAPTURE. Thumb-1 gives `ldr`/`str` an `[sp,#imm]`
+      // encoding and gives the sub-word forms none, so a byte or halfword spill can only be spelled
+      // by copying sp into a register and addressing through the copy:
+      //
+      //     mov  r2, sp
+      //     strh r3, [r2, #0x30]
+      //
+      // That is an ADDRESSING MODE. The copy never becomes a value, and the access is the
+      // `[sp,#0x30]` the instruction set cannot spell — so what the machine named is one object at
+      // frame offset 48, not a `[+48]` reach through the frame base.
+      //
+      // A captured address whose every use is a fixed-offset ACCESS is that shape, and each of its
+      // accesses names its own object: re-root them onto a `laddr` at their own offset, read at 0,
+      // and the rest of this audit judges the objects. A capture with ANY other use is a real
+      // capture and keeps the frame base. Deciding it over the finished SSA rather than over the
+      // instruction text is what makes it total — an operand ROLE cannot be overlooked. `str rD,
+      // [rD, #k]` stores the frame address through itself, which is a base use AND an escape, and
+      // the escape is exactly what stops the split.
+      {
+        const uses = new Map<Value, { op: Op; idx: number; blk: Block }[]>();
+        for (const blk of irBlocks) {
+          for (const op of blk.ops) {
+            op.operands.forEach((v, idx) => {
+              (uses.get(v) ?? uses.set(v, []).get(v)!).push({ op, idx, blk });
+            });
+          }
+        }
+        const minted: Op[] = [];
+        const consumed = new Set<Op>();
+        for (const capture of laddrs) {
+          const at = uses.get(capture.results[0]) ?? [];
+          const accesses = at.filter((u) => (u.op.opcode === 'load' || u.op.opcode === 'store') && u.idx === 0);
+          // SUB-WORD ONLY, because that is the whole of what the encoding gap forces: `ldr`/`str` DO
+          // have an `[sp,#imm]` form, so a WORD access through a copy is some other shape and must
+          // not be read as this one. It is also what keeps the outgoing-argument area safe — that
+          // guard reads `[sp,#k]` accesses (spMemAccess), which an access through a copy is not, and
+          // agbcc stages arguments 5+ there with `str`.
+          const subWord = accesses.every((u) => (u.op.attrs.width as number) < 4);
+          // Nothing to split when the capture already names ONE object: every access at offset 0 is
+          // the frame base itself, which is what the DMA-fill idiom captures.
+          if (at.length === 0 || accesses.length !== at.length || !subWord) {
+            continue;
+          }
+          if (accesses.every((u) => u.op.attrs.off === 0)) {
+            continue;
+          }
+          for (const u of accesses) {
+            const res = mkValue(T.unk(32));
+            const object = mkOp('laddr', { results: [res], attrs: { off: u.op.attrs.off as number } });
+            u.blk.ops.splice(u.blk.ops.indexOf(u.op), 0, object);
+            minted.push(object);
+            u.op.operands = [res, ...u.op.operands.slice(1)];
+            u.op.attrs = { ...u.op.attrs, off: 0 };
+          }
+          consumed.add(capture);
+        }
+        if (consumed.size > 0) {
+          for (const blk of irBlocks) {
+            blk.ops = blk.ops.filter((op) => !consumed.has(op));
+          }
+          laddrs = [...laddrs.filter((op) => !consumed.has(op)), ...minted];
+        }
+      }
       // ONE OBJECT PER FRAME OFFSET. Two `laddr` at the same offset name the same storage; two at
       // different offsets are different objects, so width, escape and the overlap window are all
       // decided per offset. Fusing them — one width for every capture in the function — declared a
@@ -2960,6 +2909,14 @@ export function lift(
       //
       // On an escape and not on "a laddr exists": an address dereferenced only in-function cannot be
       // written by anyone else, and the overlap checks above cover its aliasing.
+      // AND IT INVALIDATES EVERY OTHER OBJECT. The same reasoning one paragraph down: a callee
+      // handed one frame address may write any offset from it, and the extents here bound only what
+      // WE access. Two objects are two separate C locals, so a callee that writes past the one it
+      // was given cannot reach the other in the emitted source — `memset(&sp0, 0, 16)` clobbers the
+      // halfword at [sp,#4] on the machine and nothing at all in the C.
+      if (escaped.size > 0 && objects.size > 1) {
+        fail('the captured address escapes, so a callee may write any frame offset — including another object');
+      }
       if (escaped.size > 0 && irBlocks.some((blk) => blk.ops.some((op) => op.opcode === 'undef'))) {
         fail(
           'the captured address escapes, so a callee may write any frame offset and an unstored slot is not provably uninitialised',

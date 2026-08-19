@@ -23,25 +23,71 @@
 // A signed and an unsigned right shift of the same value by the same amount differ only in the bits
 // the shift brings in, so `%134` is `sext(%133, 32 - 16)` — the same rewrite, and the reason this
 // pass matches the pair rather than either extension on its own.
-import { Fn, Value } from '../ir/core';
+import { Fn, Op, Value } from '../ir/core';
+import { Opcode } from '../ir/opcodes';
 
 /** Widths `zext`/`sext` carry: a C type the backend can print as a cast. */
 const CAST_WIDTHS = new Set([8, 16]);
 
+/** WHICH BITS a narrowing op keeps, as a key two ops can be compared on. The two spellings live in
+ *  different bit-domains — `zext {width:w}` keeps the LOW `w` bits, `shr_u {imm:k}` keeps bits
+ *  `[k,32)` and moves them down — so a shared integer key would pair a `zext` with a `shr_s` of the
+ *  same operand and rewrite `x >> 16` into `(s16)(u16)x`: a different value, silently. `width` is
+ *  the C cast the pair collapses to. */
+const domainOf = (op: Op, low: Opcode, high: Opcode): { key: string; width: number } | null => {
+  if (op.opcode === low && CAST_WIDTHS.has(op.attrs.width as number)) {
+    return { key: `low${op.attrs.width}`, width: op.attrs.width as number };
+  }
+  if (op.opcode === high && typeof op.attrs.imm === 'number' && CAST_WIDTHS.has(32 - (op.attrs.imm as number))) {
+    return { key: `high${op.attrs.imm}`, width: 32 - (op.attrs.imm as number) };
+  }
+  return null;
+};
+
 /** Re-root a sign extension on the co-existing zero extension of the same bits. Returns the number
  *  of rewrites. */
 export function rerootNarrowReads(fn: Fn): number {
-  // Every value passed along an edge, so the gate below can ask whether the zero extension is one.
-  // The rewrite is sound for ANY co-existing pair — it only re-associates two extensions of the
-  // same bits — but an edge argument is where a value is guaranteed to be MATERIALIZED under a
-  // name, which is what makes the result `(s16)i` rather than `(s16)(u16)x` in place of `(s16)x`.
-  const edgeArgs = new Set<Value>();
+  // LOOP-CARRIED edge arguments only. The rewrite is sound for ANY co-existing pair — it only
+  // re-associates two extensions of the same bits — so this gate is about what it BUYS, not about
+  // what is safe. It buys a name: an argument whose own operand chain reads the parameter it feeds
+  // is that parameter's next value, i.e. a loop variable, which the structurer materializes and
+  // renders `(s16)i`. Anywhere else the re-root only puts `(s16)(u16)x` where `(s16)x` stood —
+  // byte-identical through agbcc, and 16 functions' worth of noise for nothing.
+  const defs = new Map<Value, Op>();
+  for (const b of fn.blocks) {
+    for (const op of b.ops) {
+      for (const res of op.results) {
+        defs.set(res, op);
+      }
+    }
+  }
+  const feedsBack = (from: Value, param: Value): boolean => {
+    const seen = new Set<Value>();
+    for (const stack = [from]; stack.length;) {
+      const v = stack.pop()!;
+      if (v === param) {
+        return true;
+      }
+      if (seen.has(v)) {
+        continue;
+      }
+      seen.add(v);
+      for (const o of defs.get(v)?.operands ?? []) {
+        stack.push(o);
+      }
+    }
+    return false;
+  };
+  const carried = new Set<Value>();
   for (const b of fn.blocks) {
     for (const op of b.ops) {
       for (const s of op.successors ?? []) {
-        for (const a of s.args) {
-          edgeArgs.add(a);
-        }
+        s.args.forEach((a, i) => {
+          const param = s.block.params[i];
+          if (param !== undefined && feedsBack(a, param)) {
+            carried.add(a);
+          }
+        });
       }
     }
   }
@@ -50,38 +96,30 @@ export function rerootNarrowReads(fn: Fn): number {
     // Same block, zero extension FIRST: the rewrite makes the sign extension read it, so anywhere
     // else this could be a use before a def. That is the shape the idiom emits — one increment,
     // both extensions of it, in the block that computes it.
-    const unsigned = new Map<Value, Map<number, Value>>();
+    const unsigned = new Map<Value, Map<string, Value>>();
     for (const op of b.ops) {
-      const narrow =
-        op.opcode === 'zext'
-          ? (op.attrs.width as number)
-          : op.opcode === 'shr_u' && typeof op.attrs.imm === 'number'
-            ? 32 - (op.attrs.imm as number)
-            : null;
-      if (narrow !== null && CAST_WIDTHS.has(narrow) && edgeArgs.has(op.results[0])) {
-        const byKey = unsigned.get(op.operands[0]) ?? new Map();
-        byKey.set(narrow, op.results[0]);
-        unsigned.set(op.operands[0], byKey);
+      const u = domainOf(op, 'zext', 'shr_u');
+      if (u !== null && carried.has(op.results[0])) {
+        const byDomain = unsigned.get(op.operands[0]) ?? new Map<string, Value>();
+        byDomain.set(u.key, op.results[0]);
+        unsigned.set(op.operands[0], byDomain);
         continue;
       }
-      const signed =
-        op.opcode === 'sext'
-          ? (op.attrs.width as number)
-          : op.opcode === 'shr_s' && typeof op.attrs.imm === 'number'
-            ? 32 - (op.attrs.imm as number)
-            : null;
-      if (signed === null) {
+      const sgn = domainOf(op, 'sext', 'shr_s');
+      if (sgn === null) {
         continue;
       }
-      const zx = unsigned.get(op.operands[0])?.get(signed);
+      const zx = unsigned.get(op.operands[0])?.get(sgn.key);
       if (zx === undefined) {
         continue;
       }
-      // Both spellings become the one op the backend prints as a cast, so the `shr_s` form drops
-      // its `imm` with the rest of its attrs.
+      // Both spellings collapse to the one op the backend prints as a cast, so the `shr_s` form
+      // drops its `imm` with the rest of its attrs. Rewritten IN PLACE, against the engine's usual
+      // discipline (pattern/engine.ts), because the result `Value` identity has to survive: every
+      // existing use of the sign extension must keep reading it.
       op.opcode = 'sext';
       op.operands = [zx];
-      op.attrs = { width: signed };
+      op.attrs = { width: sgn.width };
       rewritten++;
     }
   }

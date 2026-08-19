@@ -1,22 +1,24 @@
 // The frame base in a register. Thumb-1 gives `ldr`/`str` an `[sp,#imm]` encoding and gives the
-// sub-word forms none, so a byte or halfword spill can only be spelled by copying sp into a low
+// sub-word forms none, so a byte or halfword spill can only be spelled by copying sp into a
 // register and addressing through the copy. That is an addressing mode, not an address capture:
-// the copy never becomes a value, and reading it as one sends the frame-object audit looking for a
-// wider frame object that the shape does not need.
+// what the machine named is one object at that frame offset, and the frame-object audit splits the
+// capture into the objects its accesses name.
 //
-// Every refusal below is a ONE-FACT edit of the accepted fixture, and each runs that fixture first
-// as a positive control — a decline for some unrelated reason must not read as a pass. The control
-// asserts the ADDRESSING-MODE message and each refusal asserts the CAPTURE message, so the two
-// paths are told apart by what the frontend says, not merely by both failing.
+// The split is judged over the finished SSA, not over the instruction text, and these tests are
+// mostly about why: an operand ROLE cannot be overlooked there. `str rD, [rD, #k]` is a base use
+// AND an escape; `sub rD, #4` reads rD as a value even though rD is also its destination. Both are
+// silent wrong answers under any scheme that classifies an instruction by its base operand.
+//
+// Every refusal is a ONE-FACT edit of the accepted fixture and runs it first as a positive control,
+// so a decline for an unrelated reason cannot read as a pass.
 import { describe, expect, test } from 'vitest';
 
 import { decompile } from '../src/pipeline';
 import { ARMV4T_AGBCC } from '../src/target';
 
 // A halfword spilled to the stack and reloaded — agbcc's shape when register pressure forces a
-// sub-word value off the registers, and the shape `sa3:PackSaveSector` is built from. Each copy is
-// redefined inside its block (`ldr r3, …`, and the reload's own destination), which is what bounds
-// its live range to that block. Both name frame offset 4, so both are the same object.
+// sub-word value off the registers, and the shape `sa3:PackSaveSector` is built from. Both copies
+// name frame offset 4, so both are the same object.
 const SPILL = `f:
 \tpush\t{r4, lr}
 \tadd\tsp, sp, #-0x8
@@ -41,9 +43,9 @@ const edit = (from: string, to: string) => {
   return out;
 };
 
-// A refusal leaves the copy on the capture path, where the object sits at the frame BASE and the
-// access it was going to serve is now at [+4] through it — so every refusal below names "the
-// captured address", and the accepted fixture names nothing at all.
+// A refusal leaves the capture naming the frame BASE, and the access it was going to serve is then
+// a reach at [+4] through it — so every refusal below names "the captured address", and the
+// accepted fixture names nothing at all.
 const CAPTURE = /the captured address/;
 
 describe('a `mov rD, sp` addressed through is a frame base, not a capture', () => {
@@ -56,56 +58,109 @@ describe('a `mov rD, sp` addressed through is a frame base, not a capture', () =
     );
   });
 
-  test('a copy that ESCAPES as a value stays a capture', () => {
+  test('accesses in different blocks name ONE object', () => {
+    // Nothing bounds a capture to the block that made it: the split reads the value's uses
+    // wherever they are, and two offsets that agree are one local.
+    const branched = `f:
+\tpush\t{r4, lr}
+\tadd\tsp, sp, #-0x8
+\tmov\tr3, sp
+\tstrh\tr0, [r3, #0x4]
+\tcmp\tr1, #0
+\tbeq\t.L2
+\tmov\tr3, sp
+\tstrh\tr1, [r3, #0x4]
+.L2:
+\tmov\tr3, sp
+\tldrh\tr0, [r3, #0x4]
+\tadd\tsp, sp, #0x8
+\tpop\t{r4}
+\tpop\t{r1}
+\tbx\tr1
+`;
+    const src = lift(branched).source;
+    expect(src).toContain('u16 sp4;');
+    expect(src).not.toContain('sp4_'); // one local, not one per capture
+  });
+
+  test('a capture STORED THROUGH ITSELF is an escape, not two base uses', () => {
+    // `str rD, [rD, #k]` writes the frame address into the frame. Classified by its base operand
+    // it reads as an ordinary access and the escape disappears — taking the volatile stamp and the
+    // undef retraction with it, and storing whatever rD held BEFORE the copy. The use walk sees
+    // both roles because it iterates operands.
     expect(() => lift(SPILL)).not.toThrow(); // control: the base shape IS accepted
+    expect(() => lift(edit('\tstrh\tr2, [r3, #0x4]\n', '\tstrh\tr3, [r3, #0x4]\n'))).toThrow(CAPTURE);
+  });
+
+  test('a capture read by a 2-operand read-modify-write is a value use', () => {
+    // Thumb-1 spells `add`/`sub`/`and`/`orr`/`eor`/`mul` as `rD = rD op rM`, so the destination is
+    // also a source. That is address arithmetic on the frame base — the shape a computed `add rD,
+    // sp, #k` is refused for — and it must not pass as a plain redefinition of rD.
+    expect(() => lift(SPILL)).not.toThrow();
+    expect(() => lift(edit('\tldr\tr3, [r0, #0x4]\n', '\tsub\tr3, #0x4\n'))).toThrow(CAPTURE);
+    expect(() => lift(edit('\tldr\tr3, [r0, #0x4]\n', '\tand\tr3, r1\n'))).toThrow(CAPTURE);
+  });
+
+  test('a WORD access through a capture is not this shape — the outgoing arguments live there', () => {
+    // `ldr`/`str` DO have an `[sp,#imm]` encoding, so a word access through a copy is some other
+    // shape. What makes it matter is the outgoing-argument area: agbcc stages arguments 5+ at the
+    // bottom of the frame with `str`, and the guard that keeps those from being modelled as locals
+    // reads `[sp,#k]` accesses — which an access through a copy is not. Read as an object, the
+    // argument becomes a dead local and the call loses it.
+    expect(() => lift(SPILL)).not.toThrow();
+    const outgoing = `f:
+\tpush\t{r4, lr}
+\tadd\tsp, sp, #-0x8
+\tmov\tr4, sp
+\tstr\tr0, [r4, #0x4]
+\tmov\tr4, r1
+\tmov\tr0, r1
+\tmov\tr1, r2
+\tbl\tg
+\tadd\tsp, sp, #0x8
+\tpop\t{r4}
+\tpop\t{r1}
+\tbx\tr1
+`;
+    expect(() => lift(outgoing)).toThrow(CAPTURE);
+  });
+
+  test('a capture that ESCAPES keeps the frame base', () => {
+    expect(() => lift(SPILL)).not.toThrow();
     expect(() => lift(edit('\tldr\tr3, [r0, #0x4]\n', '\tstr\tr3, [r0, #0x4]\n'))).toThrow(CAPTURE);
   });
 
-  test('a REGISTER-offset access through the copy stays a capture', () => {
-    // the offset is not known here, so which frame bytes the access names is not known either;
-    // the register-offset lowering makes the capture flow into an `add`, which the audit refuses
-    expect(() => lift(SPILL)).not.toThrow(); // control: the base shape IS accepted
+  test('a REGISTER-offset access through a capture keeps the frame base', () => {
+    // the offset is not known, so which frame bytes the access names is not known either; the
+    // lowering makes the capture flow into an `add`, which the audit refuses
+    expect(() => lift(SPILL)).not.toThrow();
     expect(() => lift(edit('\tstrh\tr2, [r3, #0x4]\n', '\tstrh\tr2, [r3, r1]\n'))).toThrow(CAPTURE);
   });
 
-  test('a copy still live at the end of its block stays a capture', () => {
-    // without a redefinition the use set is not this block's: a successor may read the copy
-    expect(() => lift(SPILL)).not.toThrow(); // control: the base shape IS accepted
-    expect(() => lift(edit('\tldr\tr3, [r0, #0x4]\n', '\tldr\tr1, [r0, #0x4]\n'))).toThrow(CAPTURE);
-  });
-
-  test('a call inside the copy s live range stays a capture', () => {
-    // the scan classifies each instruction it steps over; a call is not one it can classify
-    expect(() => lift(SPILL)).not.toThrow(); // control: the base shape IS accepted
-    expect(() => lift(edit('\tldr\tr3, [r0, #0x4]\n', '\tbl\th\n\tldr\tr3, [r0, #0x4]\n'))).toThrow(CAPTURE);
-  });
-
-  test('an sp adjustment inside the copy s live range stays a capture', () => {
-    // The access offsets are relative to sp AT THE COPY, so a frame that moves under them names
-    // different bytes. The epilogue is where this is reachable: sp unwinding before the last use of
-    // a copy is otherwise the slot model's own refusal, but a block that RETURNS is allowed to
-    // unwind, and there the scan is the only thing standing between the copy and the wrong address.
-    expect(() => lift(SPILL)).not.toThrow(); // control: the base shape IS accepted
-    expect(() =>
-      lift(
-        edit(
-          '\tmov\tr2, sp\n\tldrh\tr2, [r2, #0x4]\n\tadd\tr0, r2, #0\n\tadd\tsp, sp, #0x8\n',
-          '\tmov\tr2, sp\n\tadd\tsp, sp, #0x8\n\tldrh\tr2, [r2, #0x4]\n\tadd\tr0, r2, #0\n',
-        ),
-      ),
-    ).toThrow(CAPTURE);
-  });
-
-  test('a copy read as a VALUE by an ALU op stays a capture', () => {
-    expect(() => lift(SPILL)).not.toThrow(); // control: the base shape IS accepted
-    expect(() => lift(edit('\tldr\tr3, [r0, #0x4]\n', '\tadd\tr1, r3, #0\n\tldr\tr3, [r0, #0x4]\n'))).toThrow(CAPTURE);
-  });
-
-  test('a HIGH-register copy stays a capture', () => {
-    // no sub-word access encodes a high base register, so this is never the addressing form —
-    // and excluding it keeps the scan away from the `sl`/`ip`/`fp` aliases of the same register
-    expect(() => lift(SPILL)).not.toThrow(); // control: the base shape IS accepted
-    expect(() => lift(edit('\tmov\tr3, sp\n', '\tmov\tr8, sp\n').replace('[r3, #0x4]', '[r8, #0x4]'))).toThrow(CAPTURE);
+  test('an escape alongside a SECOND object declines', () => {
+    // A callee handed one frame address may write any offset from it, and two objects are two
+    // separate C locals — so a callee that writes past the one it was given reaches the other on
+    // the machine and nothing at all in the emitted source.
+    expect(() => lift(SPILL)).not.toThrow();
+    const escapes = `f:
+\tpush\t{r4, lr}
+\tadd\tsp, sp, #-0x10
+\tmov\tr3, sp
+\tstrh\tr0, [r3, #0x4]
+\tmov\tr0, sp
+\tmov\tr3, #0x0
+\tstrb\tr3, [r0]
+\tmov\tr1, #0x0
+\tmov\tr2, #0x10
+\tbl\tmemset
+\tmov\tr3, sp
+\tldrh\tr0, [r3, #0x4]
+\tadd\tsp, sp, #0x10
+\tpop\t{r4}
+\tpop\t{r1}
+\tbx\tr1
+`;
+    expect(() => lift(escapes)).toThrow(/including another object/);
   });
 });
 
