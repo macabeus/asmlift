@@ -40,20 +40,35 @@ export function assertTypesRecovered(fn: Fn): void {
   }
 }
 
-/** Post structuring: the AST must reference no unresolved value. The structurer emits the
- *  sentinel var `"?"` when it cannot resolve a value (a dropped def, or an opcode it has no
- *  lowering for) — which would print as uncompilable source. Fail at the structuring boundary
- *  instead of emitting garbage. */
+/** Post structuring: the AST must reference no unresolved name. The structurer emits the sentinel
+ *  var `"?"` when it cannot resolve a value (a dropped def, or an opcode it has no lowering for),
+ *  which would print as uncompilable source. Fail at the boundary instead of emitting garbage.
+ *
+ *  `undefined` is the same failure from the other side — not a spelling the structurer chooses
+ *  (`Expr` declares `name: string`) but a `varName.get(v)!` whose value was never adopted, printing
+ *  as the token `undefined`. Both are checked on every ROUTE a name takes into the AST, and those
+ *  are not all expressions: `var` / `addr` / `field` / `call` carry one, and so does an `assign`'s
+ *  DESTINATION — a bare string field the expression walk never reaches. */
 export function assertResolved(sfn: SFn): void {
   // Derived from the shared exprChildren/stmtExprs/stmtChildren traversal so no statement kind
   // can be missed. A gap `marker` is annotate-mode's DESIGNED spelling of an unresolved value
-  // ("resolved" by construction); only its args could still hide a stray `"?"` — and args are
+  // ("resolved" by construction); only its args could still hide a stray name — and args are
   // exactly its children.
-  const badExpr = (e: Expr): boolean => (e.k === 'var' && e.name === '?') || exprChildren(e).some(badExpr);
-  const badStmt = (s: Stmt): boolean => stmtExprs(s).some(badExpr) || stmtChildren(s).some(badStmt);
+  const badName = (n: string | undefined): boolean => n === '?' || n === undefined;
+  // Every Expr kind that CARRIES a name, not just `var` — each is read through the same
+  // `map.get(d)!` / `attrs.x as string` and prints straight into the source. `carriesName` is asked
+  // separately because an ABSENT name is the case being caught: keying off `nameOf` alone refuses nothing.
+  const carriesName = (e: Expr): boolean => e.k === 'var' || e.k === 'addr' || e.k === 'field' || e.k === 'call';
+  const nameOf = (e: Expr): string | undefined =>
+    e.k === 'call' ? e.fn : e.k === 'marker' ? undefined : (e as { name?: string }).name;
+  const badExpr = (e: Expr): boolean => (carriesName(e) && badName(nameOf(e))) || exprChildren(e).some(badExpr);
+  // An `assign`'s DESTINATION is a bare string field, so the expression walk never reaches it.
+  const badStmt = (s: Stmt): boolean =>
+    (s.k === 'assign' && badName(s.name)) || stmtExprs(s).some(badExpr) || stmtChildren(s).some(badStmt);
   if (sfn.body.some(badStmt)) {
     throw new ContractError(
-      `structuring left an unresolved value ('?') in '${sfn.name}' — a dropped def or unlowered opcode`,
+      `structuring left an unresolved name ('?' or one never adopted) in '${sfn.name}' — ` +
+        `a dropped def, an unlowered opcode, or a name the structurer assumed the naming pipeline gave it`,
     );
   }
 }

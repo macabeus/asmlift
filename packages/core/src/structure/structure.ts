@@ -2534,9 +2534,12 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
   };
   const loopSub = (li: LoopInfo): Map<Value, string> => subFor(li.header.params, li.backArgOfParam);
 
-  // The sunk exit copies, as body statements. Each arg is a header param — the sink's first
-  // refusal condition — so this is a plain `dest = <loop variable>` reading the value the name
-  // still holds at the top of the body, and needs no substitution. Slot order keeps it deterministic.
+  // The sunk exit copies, as body statements. `arg-is-loop-variable` makes each arg a header param,
+  // so this is a plain `dest = <loop variable>` reading the value the name still holds at the top of
+  // the body, and needs no substitution. Slot order keeps it deterministic.
+  //
+  // Both names are read as invariants, not checked: every block param carries one, and a header
+  // param is a block param. `assertResolved` is what catches a widening that breaks that.
   const preUpdateCopies = (exit: Block, exitArgs: readonly Value[], sunk: Set<number>): Stmt[] =>
     [...sunk]
       .sort((x, y) => x - y)

@@ -112,12 +112,19 @@ test('do-while: the trailing copy opens the body and leaves nothing behind after
   );
 });
 
-// REFUSAL — the exit arg COMPUTES from the loop variable instead of being it. Sinking that would
-// evaluate `%3 + %0` every iteration rather than once, and an effectful arg would run a different
-// number of times, so the decline stands.
+// REFUSAL — the exit arg COMPUTES from the loop variable instead of being it. The copy would land
+// at the TOP of the body, where a body-computed value still holds the PREVIOUS iteration, and the
+// copy builder has only a name path to spell it with. The `do-while` and fused-guard variants stop
+// at DIFFERENT refusals, which is what each test pins.
 const TRAILING_PTR_EXPR = TRAILING_PTR.replace(
   '  cond_br %5, ^bb1(%4), ^bb2(%3, %4)',
   '  %9: s32* = add %3, %0\n  cond_br %5, ^bb1(%4), ^bb2(%9, %4)',
+);
+
+// The same one-fact edit at the `do-while`: ^bb2's exit edge carries `%7 + 1` instead of `%7`.
+const TRAILING_DOWHILE_EXPR = TRAILING_DOWHILE.replace(
+  '  cond_br %12, ^bb2(%8, %13, %11), ^bb3(%7)',
+  '  %15: s32 = add %7, %10\n  cond_br %12, ^bb2(%8, %13, %11), ^bb3(%15)',
 );
 
 // REFUSAL — the guard tests something the loop does not. `isGuardShapedPred` only asks whether the
@@ -159,9 +166,18 @@ const ZERO_TRIP_VALUE_LOST = `fn fusedrop {
 `;
 
 test('an exit arg that COMPUTES from the loop variable is not sinkable — still declines', () => {
-  expect(TRAILING_PTR_EXPR).not.toBe(TRAILING_PTR); // the one-fact edit landed
-  expect(() => emit(TRAILING_PTR)).not.toThrow(); // control: the base shape IS accepted
-  expect(() => emit(TRAILING_PTR_EXPR)).toThrow(StructureError);
+  expect(TRAILING_DOWHILE_EXPR).not.toBe(TRAILING_DOWHILE); // the one-fact edit landed
+  expect(() => emit(TRAILING_DOWHILE)).not.toThrow(); // control: the base shape IS accepted
+  // The message, not just a throw. Neither fixture reaches the sink's own gate as its refusal —
+  // this one stops at the pre-update hazard, the fused-guard one at the zero-trip rule — so only
+  // pinning WHICH refusal keeps a widened gate from passing on someone else's.
+  expect(() => emit(TRAILING_DOWHILE_EXPR)).toThrow(/do-while condition or a post-loop value/);
+});
+
+test('the same edit under a fused guard declines too, on the zero-trip rule', () => {
+  expect(TRAILING_PTR_EXPR).not.toBe(TRAILING_PTR);
+  expect(() => emit(TRAILING_PTR)).not.toThrow();
+  expect(() => emit(TRAILING_PTR_EXPR)).toThrow(/zero-trip run/);
 });
 
 test('a guard not provably the loop test is not sinkable — declines instead of vanishing', () => {

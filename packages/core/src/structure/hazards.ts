@@ -89,7 +89,7 @@ export interface SinkCandidate {
 export const PREUPDATE_SINK_GATES: readonly Gate<SinkCandidate>[] = [
   {
     id: 'arg-is-loop-variable',
-    why: 'an expression moved into the body is recomputed, and an effectful one runs a different number of times',
+    why: 'a value computed in the body still holds the PREVIOUS iteration at the top of it, where the copy lands',
     sound: true,
     guardedBy: 'hazards.test.ts: ablating arg-is-loop-variable admits a computed exit arg',
     rejects: (c) => !c.argIsLoopVariable,
