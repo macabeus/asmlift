@@ -226,13 +226,20 @@ test("P2 recovers a conditional latch `break` to the loop's live exit", () => {
   );
 });
 
-test('P2 DECLINES a conditional-latch loop whose exit test reads the pre-update induction value', () => {
+test('P2 keeps the update BEHIND an exit test that reads the pre-update induction value', () => {
   const fn = parse(PREUPDATE_READ_HAZARD);
   verify(fn);
   recoverTypes(fn);
-  // The exit test reads `%6` (loop-top counter) but the update overwrites its name with `%6 - 1`;
-  // recovering would emit a break that fires one iteration early. Loud-fail instead of miscompiling.
-  expect(() => structure(fn)).toThrow(StructureError);
+  const src = cBackend.emit(structure(fn));
+  // The exit test reads `%6` (loop-top counter) while the update overwrites its name with `%6 - 1`,
+  // so the conditional-latch form — which hoists the update ahead of the test — is refused. What
+  // stands in for it emits the test first and the update inside the arm that continues, which is
+  // what the IR says; the decrement must NOT precede the test.
+  expect(src).toBe(
+    's32 breakoldval(s32 a0) {\n    s32 v0;\n    s32 v1;\n    v0 = a0;\n    v1 = 0;\n' +
+      '    while (v0 != 0) {\n        if (v0 <= 3) {\n            v1 = v1 + v0;\n            return v1;\n' +
+      '        } else {\n            v1 = v1 + v0;\n            v0 = v0 - 1;\n        }\n    }\n    return v1;\n}\n',
+  );
 });
 
 // Two CRITICAL dropped-phi-copy miscompiles, regression-locked.
