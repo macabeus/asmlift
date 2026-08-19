@@ -585,6 +585,7 @@ interface WhileLoopInfo {
   latch: Block; // the single block with the back-edge to header (its args = the update)
   forwardPreds: Block[]; // header preds outside the loop body (the entry/init side)
   body: Set<Block>; // the pure natural-loop body (for in-body vs exit classification)
+  armEntries: Set<Block>; // targets of the early-`return` exits, i.e. every non-primary exit edge
 }
 
 // Opcodes whose NUMBER OF EXECUTIONS is observable. Moving one of these out of a loop changes what
@@ -604,6 +605,7 @@ interface DoWhileInfo {
   exit: Block;
   forwardPreds: Block[];
   body: Set<Block>; // the pure natural-loop body (for in-body vs exit classification)
+  armEntries: Set<Block>;
 }
 
 // Structuring levers, threaded as DATA so a new one is a field here + its consumer, not a new
@@ -1004,12 +1006,22 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     // Single loop exit (ret-aware): the chosen exit is the ONE real exit; every OTHER edge leaving
     // the body must be an early `return` — a ret-terminated target OR a pure return-trampoline chain
     // (agbcc's merged epilogue; `leadsToReturnOnly`). A second exit that lands on a LIVE non-return
-    // merge is a genuine `break`/second structured exit → decline.
-    if (
-      nl.exitEdges.some(
-        (e) => !(e.from === exitFrom && e.to === exit) && !isRet(e.to) && !leadsToReturnOnly(e.to, nl.body),
-      )
-    ) {
+    // merge is a genuine `break`/second structured exit → decline. The trampoline targets are kept:
+    // emission needs to know which blocks outside the body the loop still reaches from inside it.
+    const armEntries = new Set<Block>();
+    let singleExit = true;
+    for (const e of nl.exitEdges) {
+      if (e.from === exitFrom && e.to === exit) {
+        continue;
+      }
+      if (leadsToReturnOnly(e.to, nl.body)) {
+        armEntries.add(e.to);
+      } else if (!isRet(e.to)) {
+        singleExit = false;
+        break;
+      }
+    }
+    if (!singleExit) {
       continue;
     }
 
@@ -1021,9 +1033,10 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
         latch,
         forwardPreds: nl.forwardPreds,
         body: nl.body,
+        armEntries,
       });
     } else {
-      doWhileLoops.set(h, { header: h, latch, exit, forwardPreds: nl.forwardPreds, body: nl.body });
+      doWhileLoops.set(h, { header: h, latch, exit, forwardPreds: nl.forwardPreds, body: nl.body, armEntries });
     }
   }
 
@@ -1982,7 +1995,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
   // to `header` is a conditional continue; its other edge, when it leaves the loop, is an early exit
   // (a `break` to `exit`, or an early `return` through a trampoline). Null outside any loop body —
   // the early-exit branch in structureBlock is inert there.
-  type LoopFrame = { header: Block; exit: Block; body: Set<Block> };
+  type LoopFrame = { header: Block; exit: Block; body: Set<Block>; armEntries: Set<Block> };
   let loopCtx: LoopFrame | null = null;
   const withLoop = <R>(frame: LoopFrame, run: () => R): R => {
     const prev = loopCtx;
@@ -2370,7 +2383,19 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
 
     const cond = expr(term.operands[0]);
     const ipd = ipdom.get(b) ?? null; // null ⇒ the arms diverge (both reach EXIT), no join
-    const merge = ipd ?? stop;
+    // Inside a loop body, a join OUTSIDE that body is not this `if`'s join: an arm that leaves the
+    // loop `return`s and never comes back, so the arms really reconverge at the loop's own
+    // continuation. Post-dominance cannot see that — agbcc/gcc merge every `return` into one
+    // epilogue, which the early return and the post-loop path both reach — and structuring the
+    // in-loop arm towards it walks through the latch and back into the header (a loud `onStack`
+    // decline). Only when every leaving successor is an admitted early-`return` arm; any other
+    // shape keeps the CFG join, so nothing that used to fail loud now falls out of an `if`.
+    const clampToLoop =
+      loopCtx !== null &&
+      ipd !== null &&
+      !loopCtx.body.has(ipd) &&
+      term.successors.every((sc) => loopCtx!.body.has(sc.block) || loopCtx!.armEntries.has(sc.block));
+    const merge = clampToLoop ? stop : (ipd ?? stop);
     // Per-successor records, NOT successorTo(b, block): a cond_br whose two edges reach the SAME
     // block with different args would otherwise give both arms the first edge's copies.
     const thenS = [...argAssignsFor(b, term.successors[0]), ...structureRegion(takenB, merge)];
@@ -2446,7 +2471,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     // Mirror the br/cond_br cases: argAssigns then structureRegion. Structure the body under this
     // loop's frame so an in-body conditional exit (break / early return) is recognised instead of
     // tripping the header-re-entry `onStack` guard.
-    const body = withLoop({ header: wl.header, exit: wl.exit, body: wl.body }, () => [
+    const body = withLoop({ header: wl.header, exit: wl.exit, body: wl.body, armEntries: wl.armEntries }, () => [
       ...argAssigns(wl.header, wl.bodyEntry),
       ...structureRegion(wl.bodyEntry, wl.header),
     ]);
@@ -2525,7 +2550,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     const inner =
       dw.header === dw.latch
         ? [] // single-block self-loop: the header IS the latch — its ops render via sideEffects below
-        : withLoop({ header: dw.header, exit: dw.exit, body: dw.body }, () => structureBlock(dw.header, dw.latch)); // header..latch (exclusive of latch)
+        : withLoop({ header: dw.header, exit: dw.exit, body: dw.body, armEntries: dw.armEntries }, () =>
+            structureBlock(dw.header, dw.latch),
+          ); // header..latch (exclusive of latch)
     dwActive.delete(dw.header);
     // The UPDATE is RAW (`v = v - 1`) — it IS the decrement; applying `sub` would make it look like the
     // identity `v = v` and drop it. Only the CONDITION and EXIT copies use `sub` (post-update the param
