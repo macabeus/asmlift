@@ -183,9 +183,11 @@ export interface RaiseHooks {
  *  return-only merge so short-circuits emit early returns) → empty-latch folding (splice out a
  *  back-edge block SSA construction emptied). `verify` after every pass that changed the IR.
  *
- *  The two CFG passes are ordered but not coupled: latch folding is gated on dominance, which no
- *  return-sinking rewrite can create or destroy, and running it first changes nothing across the
- *  3337-function agbcc corpus. It goes last because that is where the CFG stops moving. */
+ *  The two CFG passes look ordered and are not: running latch folding FIRST instead changes
+ *  nothing across a 3337-function agbcc corpus. Worth saying, because folding an empty block ahead
+ *  of return-sinking does take away `br` predecessors it needs — the dominance gate is what makes
+ *  that unreachable, since the blocks retsink wants are never back-edge sources. It goes last
+ *  because that is where the CFG stops moving. */
 export function raiseRecovered(fn: Fn, target: TargetDescription, hooks: RaiseHooks = {}): void {
   runPreRecovery(fn, target, (pass, result) => {
     verify(fn);

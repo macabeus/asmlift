@@ -28,7 +28,7 @@
 import { Fn, dominators } from '../ir/core';
 import { type Gate, firstRejection } from '../l3/gates';
 
-/** What the gates below judge: one candidate block, its `br` target, and the dominator sets. */
+/** What the gates below judge: one candidate block and the block its `br` goes to. */
 interface LatchCandidate {
   block: Fn['blocks'][number];
   target: Fn['blocks'][number];
@@ -46,8 +46,8 @@ export const LATCH_GATES: readonly Gate<LatchCandidate>[] = [
     id: 'latch-does-work',
     why: "the block's ops go with the block, and a result-less store leaves no trace behind",
     sound: true,
-    // `br` is a terminator, so a block whose FIRST op is one holds nothing but that branch.
     guardedBy: 'a latch holding a STORE is refused — nothing downstream would notice it vanish',
+    // `br` is a terminator, so a block whose FIRST op is one holds nothing but that branch.
     rejects: (c) => c.block.ops[0]?.opcode !== 'br',
   },
   {
@@ -60,13 +60,14 @@ export const LATCH_GATES: readonly Gate<LatchCandidate>[] = [
     id: 'target-dominates',
     why: 'a preheader is the same empty block from the other side; folding it drops a guard',
     sound: true,
-    guardedBy: 'an inner PREHEADER inside an outer loop is refused — its guard would be dropped',
+    // The refusal test alone would not do: it asserts that nothing was folded, which is what a
+    // gate that never fires looks like too. The named one ablates this entry and reads the C.
+    guardedBy: 'ablating the dominance gate DROPS a guard from the emitted C',
     rejects: (c) => !c.dominatesBlock,
   },
 ];
 
-/** Splice out every EMPTY LATCH — a block with no params whose single op is an unconditional `br`
- *  to a block that DOMINATES it. Returns how many were removed.
+/** Splice out every EMPTY LATCH the gates above admit; returns how many were removed.
  *
  *  Iterated, because folding one latch can make its predecessor into one: the predecessor's
  *  SUCCESSOR changes, so an edge that was not a back-edge becomes one. (Dominator sets themselves
