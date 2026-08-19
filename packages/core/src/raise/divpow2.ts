@@ -41,7 +41,7 @@
 // the biased arm must be the negative one — the consistency check m2c's `49b5d87` also adds),
 // because every one of those is a way for a superficially similar diamond to mean something else.
 import { Block, Fn, Op, Value, defOpMap, mkOp, mkValue, predecessors, replaceAllUsesWith } from '../ir/core';
-import { HOIST_UNSAFE_OPS } from '../ir/opcodes';
+import { EFFECTFUL_OPS } from '../ir/opcodes';
 import { T } from '../ir/types';
 
 /** `shr_s v {imm=k}` → k, else null. */
@@ -110,7 +110,7 @@ export function recognizeDivPow2(fn: Fn): boolean {
           continue;
         }
         const bp = preds.get(bias) ?? [];
-        if (bp.length !== 1 || bias.ops.some((op) => HOIST_UNSAFE_OPS.has(op.opcode))) {
+        if (bp.length !== 1 || bias.ops.some((op) => EFFECTFUL_OPS.has(op.opcode))) {
           continue;
         }
         const h = bp[0];

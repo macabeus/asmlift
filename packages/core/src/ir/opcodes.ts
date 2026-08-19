@@ -16,6 +16,13 @@ export interface OpSig {
    *  an unconditional position. THE one effect vocabulary — DCE (pattern/engine.ts) and the
    *  short-circuit hoist guard (raise/shortcircuit.ts) both derive from this flag. */
   effects?: boolean;
+  /** reads memory. Deletable when dead — nothing observes a load nobody reads — but NOT movable:
+   *  a load answers whichever stores ran before it, so crossing one changes the value it yields.
+   *  The two questions are separate flags because a load answers them differently. */
+  reads?: boolean;
+  /** may fault on operands the program never actually gave it — the integer divides, on a zero
+   *  divisor. Deletable and movable, but not safe to run on a path that did not run it. */
+  traps?: boolean;
 }
 
 export const OPCODES = {
@@ -66,10 +73,10 @@ export const OPCODES = {
   // are 2-operand only. `sdiv`/`udiv` = quotient, `smod`/`umod` = remainder; signedness lives in
   // the op (recovery types the operands to match), so the backend picks `/`/`%` over
   // correctly-typed operands.
-  sdiv: { operands: 'variadic', results: 1 },
-  udiv: { operands: 2, results: 1 },
-  smod: { operands: 2, results: 1 },
-  umod: { operands: 2, results: 1 },
+  sdiv: { operands: 'variadic', results: 1, traps: true },
+  udiv: { operands: 2, results: 1, traps: true },
+  smod: { operands: 2, results: 1, traps: true },
+  umod: { operands: 2, results: 1, traps: true },
   // signed/equality comparisons (result is a boolean-valued u32)
   icmp_slt: { operands: 2, results: 1 },
   icmp_sle: { operands: 2, results: 1 },
@@ -90,13 +97,13 @@ export const OPCODES = {
   logic_and: { operands: 2, results: 1 },
   logic_or: { operands: 2, results: 1 },
   // --- memory ---
-  load: { operands: 1, results: 1, requiredAttrs: ['off', 'width', 'signed'] },
+  load: { operands: 1, results: 1, requiredAttrs: ['off', 'width', 'signed'], reads: true },
   store: { operands: 2, results: 0, requiredAttrs: ['off', 'width'], effects: true },
   // Typed element-scaled array access. Unlike load/store's constant `off`, these carry an
   // explicit runtime `index` operand plus the `elemSize` the index scales by, so the base is a
   // genuine `elem *` and no byte-offset arithmetic leaks into the emitted source. Produced by
   // the array-recognition legalization pass (raise/arrays.ts).
-  aload: { operands: 2, results: 1, requiredAttrs: ['elemSize', 'signed'] }, // aload base, index
+  aload: { operands: 2, results: 1, requiredAttrs: ['elemSize', 'signed'], reads: true }, // aload base, index
   astore: { operands: 3, results: 0, requiredAttrs: ['elemSize'], effects: true }, // astore base, index, value
   // --- call: operands are the argument values (r0..), result is the return value (r0),
   //     `target` attr is the callee symbol. Caller-saved clobbering is implicit. ---
@@ -198,18 +205,54 @@ export const NEGATED_ICMP: Readonly<Record<string, Opcode>> = Object.fromEntries
 );
 
 /** Ops with an observable side effect: the flag on the signature, derived rather than re-listed.
- *  Consumed by `isDceSafe`, by `HOIST_UNSAFE_OPS` below, and by structure.ts's `sideEffects` walk
- *  (an effectful op whose result nobody reads is still an execution). */
+ *  Consumed by `isDceSafe`, by `HOIST_UNSAFE_OPS` below, by structure.ts's `sideEffects` walk (an
+ *  effectful op whose result nobody reads is still an execution), by analysis.ts's memory-write
+ *  barrier, and by divpow2's bias block, which is DELETED rather than moved. Those last three each
+ *  carried a hand-written copy of this membership, which is how the models drifted apart before. */
 export const EFFECTFUL_OPS: ReadonlySet<string> = new Set(
   (Object.keys(OPCODES) as Opcode[]).filter((k) => (OPCODES[k] as OpSig).effects),
 );
 
-/** Ops that may not be REORDERED across other code. Identical to `EFFECTFUL_OPS` — one flag answers
- *  both "deletable when dead" and "movable when live" — and kept as its own name because the call
- *  sites ask the reordering question. Derived here rather than re-spelled per consumer:
- *  structure/analysis.ts and structure/structure.ts each carry their own inline copy of this
- *  membership, which is how the two models drifted apart in the first place. */
+/** Ops that may not be SPECULATED — run on a path that did not run them before. Identical to
+ *  `EFFECTFUL_OPS`, and kept as its own name because its call sites ask the speculation question
+ *  rather than the deletion one.
+ *
+ *  A memory read is deliberately absent, and that is the one entry worth arguing: its only consumer
+ *  is raise/shortcircuit.ts, which hoists an arm's body into the block above, and the structurer
+ *  inlines an unnamed value back into the `&&`/`||` right-hand side, where C's own short-circuit
+ *  re-guards it. Adding the two reads
+ *  here costs three byte-matches (kleod:UpdateHUDCounterDisplay, synthetic:breakloop,
+ *  synthetic:strcmp1), so the argument is load-bearing rather than merely plausible.
+ *
+ *  KNOWN GAP: the trapping divides are absent too, and there the re-guard argument does NOT carry
+ *  — a hoisted `sdiv` that the structurer NAMES becomes an unconditional statement. Left as it is
+ *  because closing it is a separate change with its own measurement; `REEVAL_UNSAFE_OPS` does
+ *  refuse them, so the pre-update sink is not exposed to it. */
 export const HOIST_UNSAFE_OPS: ReadonlySet<string> = EFFECTFUL_OPS;
+
+/** Ops whose answer depends on WHERE they run: an effect (its order against other effects is
+ *  observable) or a memory read (it answers whichever stores ran before it). The question a pass
+ *  asks before moving a computation to another point on the SAME path. */
+export const ORDER_SENSITIVE_OPS: ReadonlySet<string> = new Set(
+  (Object.keys(OPCODES) as Opcode[]).filter((k) => {
+    const sig = OPCODES[k] as OpSig;
+    return sig.effects || sig.reads;
+  }),
+);
+
+/** Ops that may not be RE-EVALUATED at another program point — order-sensitive, or trapping. The
+ *  trap half is what separates this from `ORDER_SENSITIVE_OPS`: it only matters when the new point
+ *  can be reached on a path the old one was not, so a consumer that merely re-orders on one path
+ *  wants the smaller set. Both are needed because the two consumers differ on exactly the divides:
+ *  a collapsed switch re-renders a test block's ops AT THEIR USES, and every use is dominated by
+ *  the def, so it evaluates them on a SUBSET of the original paths — a narrowing, never a
+ *  speculation. */
+export const REEVAL_UNSAFE_OPS: ReadonlySet<string> = new Set(
+  (Object.keys(OPCODES) as Opcode[]).filter((k) => {
+    const sig = OPCODES[k] as OpSig;
+    return sig.effects || sig.reads || sig.traps;
+  }),
+);
 
 /** May a dead result of this opcode be deleted? Registered, no observable effects, not control
  *  flow. `opaque` is excluded via its `effects` flag — see the note on its signature. */

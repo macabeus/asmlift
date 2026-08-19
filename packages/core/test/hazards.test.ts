@@ -7,9 +7,9 @@ import { describe, expect, test } from 'vitest';
 
 import { Block, Op, Value, mkOp, mkValue } from '../src/ir/core';
 import { T } from '../src/ir/types';
-import { without } from '../src/l3/gates';
+import { type Gate, without } from '../src/l3/gates';
 import type { UseSite } from '../src/structure/analysis';
-import { PREUPDATE_SINK_GATES, makeLoopHazards, updateWriteSet } from '../src/structure/hazards';
+import { PREUPDATE_SINK_GATES, type SinkCandidate, makeLoopHazards, updateWriteSet } from '../src/structure/hazards';
 
 const v = (): Value => mkValue(T.s(32));
 
@@ -19,6 +19,7 @@ interface Fixture {
   useSitesOf?: Map<Value, UseSite[]>;
   liveIn?: Map<Block, Set<Value>>;
   opBlock?: Map<Op, Block>;
+  respelledDefs?: Map<Op, unknown>;
 }
 const make = (f: Fixture = {}) =>
   makeLoopHazards({
@@ -27,6 +28,7 @@ const make = (f: Fixture = {}) =>
     useSitesOf: f.useSitesOf ?? new Map(),
     liveIn: f.liveIn ?? new Map(),
     opBlock: f.opBlock ?? new Map(),
+    respelledDefs: f.respelledDefs ?? new Map(),
   });
 
 const use = (blk: Block): UseSite => ({ blk, idx: 0, op: mkOp('add') });
@@ -160,19 +162,149 @@ describe('sinkablePreUpdateSlots', () => {
     expect(h.sinkablePreUpdateSlots(header, exit, [p], body, empty, new Set(['v9']))).toEqual(new Set());
   });
 
-  test('ablating arg-is-loop-variable admits a computed exit arg', () => {
+  // The arg's def-tree, rebuilt at the top of the body. `bodyOp` registers an op the way analysis.ts
+  // does, so `definedInBody` sees it where the fixture says it is.
+  const bodyOp = (header: Block, op: Op) => {
+    header.ops.push(op);
+    return op;
+  };
+
+  test('an exit arg COMPUTED from the loop variable by pure arithmetic is sinkable', () => {
     const { p, q, header, exit, body } = scaffold();
     const e = v();
-    const op = mkOp('add', { operands: [p], results: [e] });
+    const op = bodyOp(header, mkOp('add', { operands: [p], results: [e] }));
     const h = make({
       defs: new Map([[e, op]]),
+      opBlock: new Map([[op, header]]),
+      varName: names([p, 'v0'], [q, 'v1']),
+      liveIn: new Map([[header, new Set<Value>()]]),
+    });
+    expect(h.sinkablePreUpdateSlots(header, exit, [e], body, empty, new Set(['v0']))).toEqual(new Set([0]));
+  });
+
+  test('ablating arg-safe-to-reevaluate admits an exit arg that reads memory', () => {
+    const { p, q, header, exit, body } = scaffold();
+    const e = v();
+    // `q = *p` on the exit edge. Rebuilt at the top of the body it would read memory ahead of every
+    // store the body makes, answering with whatever stood there an iteration earlier.
+    const op = bodyOp(header, mkOp('load', { operands: [p], results: [e], attrs: { off: 0, width: 4, signed: true } }));
+    const h = make({
+      defs: new Map([[e, op]]),
+      opBlock: new Map([[op, header]]),
       varName: names([p, 'v0'], [q, 'v1']),
       liveIn: new Map([[header, new Set<Value>()]]),
     });
     const args = [e];
     expect(h.sinkablePreUpdateSlots(header, exit, args, body, empty, new Set(['v0']))).toEqual(new Set());
-    const ablated = without(PREUPDATE_SINK_GATES, 'arg-is-loop-variable');
+    const ablated = without(PREUPDATE_SINK_GATES, 'arg-safe-to-reevaluate');
     expect(h.sinkablePreUpdateSlots(header, exit, args, body, empty, new Set(['v0']), ablated)).toEqual(new Set([0]));
+  });
+
+  test('ablating arg-reads-current-names admits an arg over a body-computed name', () => {
+    const { p, q, header, exit, body } = scaffold();
+    const mid = v();
+    const e = v();
+    // `mid` is NAMED and defined in the body, so the rebuilt copy would read `v2` at the top of the
+    // body — where it still holds the previous iteration's value. The loop variable is in the tree
+    // as well, which is what makes the slot a repair candidate in the first place.
+    const midOp = bodyOp(header, mkOp('add', { operands: [p], results: [mid] }));
+    const op = bodyOp(header, mkOp('add', { operands: [mid, p], results: [e] }));
+    const h = make({
+      defs: new Map([
+        [mid, midOp],
+        [e, op],
+      ]),
+      opBlock: new Map([
+        [midOp, header],
+        [op, header],
+      ]),
+      varName: names([p, 'v0'], [q, 'v1'], [mid, 'v2']),
+      liveIn: new Map([[header, new Set<Value>()]]),
+    });
+    const args = [e];
+    expect(h.sinkablePreUpdateSlots(header, exit, args, body, empty, new Set(['v0']))).toEqual(new Set());
+    const ablated = without(PREUPDATE_SINK_GATES, 'arg-reads-current-names');
+    expect(h.sinkablePreUpdateSlots(header, exit, args, body, empty, new Set(['v0']), ablated)).toEqual(new Set([0]));
+  });
+
+  test('the two arg gates are a PARTITION — ablating one does not disable the other', () => {
+    // `add(mid, *p)` trips both: a body-computed name AND a memory read. Each gate must still
+    // refuse it with the other one dropped — otherwise ablating either measures less than its
+    // name says, and a walk that reported only the first blocker it found would do exactly that.
+    const { p, q, header, exit, body } = scaffold();
+    const mid = v();
+    const rd = v();
+    const e = v();
+    const midOp = bodyOp(header, mkOp('add', { operands: [p], results: [mid] }));
+    const rdOp = bodyOp(
+      header,
+      mkOp('load', { operands: [p], results: [rd], attrs: { off: 0, width: 4, signed: true } }),
+    );
+    const op = bodyOp(header, mkOp('add', { operands: [mid, rd], results: [e] }));
+    const h = make({
+      defs: new Map([
+        [mid, midOp],
+        [rd, rdOp],
+        [e, op],
+      ]),
+      opBlock: new Map([
+        [midOp, header],
+        [rdOp, header],
+        [op, header],
+      ]),
+      varName: names([p, 'v0'], [q, 'v1'], [mid, 'v2']),
+      liveIn: new Map([[header, new Set<Value>()]]),
+    });
+    const args = [e];
+    const run = (gates?: readonly Gate<SinkCandidate>[]) =>
+      h.sinkablePreUpdateSlots(header, exit, args, body, empty, new Set(['v0']), gates);
+    expect(run()).toEqual(new Set());
+    expect(run(without(PREUPDATE_SINK_GATES, 'arg-reads-current-names'))).toEqual(new Set());
+    expect(run(without(PREUPDATE_SINK_GATES, 'arg-safe-to-reevaluate'))).toEqual(new Set());
+  });
+
+  test('a leaf with neither a name nor a definition is refused on its own gate', () => {
+    // Nothing to rebuild it from: `exprWith` would spell a gap. Filed under its own id so the
+    // contract report does not attribute it to the previous-iteration rule, which is a different
+    // fact about a different leaf.
+    const { p, q, header, exit, body } = scaffold();
+    const orphan = v();
+    const e = v();
+    const op = bodyOp(header, mkOp('add', { operands: [p, orphan], results: [e] }));
+    const h = make({
+      defs: new Map([[e, op]]),
+      opBlock: new Map([[op, header]]),
+      varName: names([p, 'v0'], [q, 'v1']),
+      liveIn: new Map([[header, new Set<Value>()]]),
+    });
+    const args = [e];
+    expect(h.sinkablePreUpdateSlots(header, exit, args, body, empty, new Set(['v0']))).toEqual(new Set());
+    const ablated = without(PREUPDATE_SINK_GATES, 'arg-has-a-definition');
+    expect(h.sinkablePreUpdateSlots(header, exit, args, body, empty, new Set(['v0']), ablated)).toEqual(new Set([0]));
+  });
+
+  test('an arg reading a name the loop itself carries under another value is refused', () => {
+    // `out` is defined OUTSIDE the loop but shares the loop variable's name, so at the top of the
+    // body that name holds this iteration's value rather than the one the edge read.
+    const { p, q, header, exit, body } = scaffold();
+    const out = v();
+    const e = v();
+    const op = bodyOp(header, mkOp('add', { operands: [out], results: [e] }));
+    const outOp = mkOp('const', { results: [out], attrs: { value: 7 } });
+    const pre: Block = { params: [], ops: [outOp] }; // outside the loop, so only the NAME refuses
+    const h = make({
+      defs: new Map([
+        [out, outOp],
+        [e, op],
+      ]),
+      opBlock: new Map([
+        [op, header],
+        [outOp, pre],
+      ]),
+      varName: names([p, 'v0'], [q, 'v1'], [out, 'v0']),
+      liveIn: new Map([[header, new Set<Value>()]]),
+    });
+    expect(h.sinkablePreUpdateSlots(header, exit, [e], body, empty, new Set(['v0']))).toEqual(new Set());
   });
 
   test('ablating dest-not-loop-variable admits a self-assignment', () => {

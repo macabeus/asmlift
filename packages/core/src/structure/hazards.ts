@@ -8,6 +8,34 @@
 //     the loop's entry state so a guard about to be fused away can be checked against the test
 //     that replaces it.
 //
+// WHAT MAKES A SUNK COPY LEGAL. The exit edge's value is not moved, it is REBUILT: the copy lands
+// at the top of the body and spells the arg's def-tree again there. Two things have to hold — the
+// tree gives the same answer there, and every name it reads still denotes the same value — and the
+// arg gates in `PREUPDATE_SINK_GATES` are those two plus the degenerate leaf that is neither.
+//
+// The tree must give the same answer at the new point. Two ways it might not, and `REEVAL_UNSAFE_OPS`
+// is the registry view that names both. ORDER: the copy opens the body, so a load in the tree would
+// move ahead of every store the body makes, and an effect would move against the others.
+// SPECULATION: the def dominates the latch, and the loop is single-latch at both call sites, but an
+// early-`return` arm still lets an iteration leave BEFORE the latch — so a tree the top of the body
+// evaluates is one that iteration never evaluated, and a trapping divide would fault where the
+// original returned.
+//
+// One gate covers both because `REEVAL_UNSAFE_OPS` answers both, and the candidate carries no arm
+// information to tell them apart. KNOWN COST: a loop with NO early-return arm speculates nothing,
+// so a divide in its exit-arg tree is refused for a hazard it cannot have. Threading "this loop can
+// leave before its latch" into the candidate is what would recover it; no benchmark row asks yet.
+//
+// And every name the rebuilt expression reads must still denote the same value there. A loop
+// variable does: the update sits at the bottom, so at the top of the body its name holds exactly
+// the value the edge read. A name the body itself defines does NOT — at the top of the body it
+// still holds the previous iteration.
+//
+// KNOWN GAP: `body` is the natural-loop body, which EXCLUDES the blocks an early-return arm owns
+// even though their statements are emitted inside the loop. A name assigned only in such an arm is
+// invisible to both predicates below. Harmless while an arm leaves the function — nothing after it
+// reads the name — and an arm that merely breaks would need it.
+//
 // Every check is PURE: it reads the analysis maps and decides, nothing mutates.
 //
 // The factory takes its dependencies EXPLICITLY (`LoopHazardDeps`), the switch-recover pattern.
@@ -15,7 +43,7 @@
 // the naming pipeline when the factory is created, and each hazard check reads whatever names
 // exist at CALL time (emission runs after naming completes). Snapshotting them would break this.
 import { Block, Op, Value } from '../ir/core';
-import { NEGATED_ICMP } from '../ir/opcodes';
+import { NEGATED_ICMP, REEVAL_UNSAFE_OPS } from '../ir/opcodes';
 import { Stmt } from '../l3/ast';
 import { type Gate, firstRejection } from '../l3/gates';
 import type { UseSite } from './analysis';
@@ -31,6 +59,11 @@ export interface LoopHazardDeps {
   liveIn: Map<Block, Set<Value>>;
   /** op → the block holding it (analysis.ts) */
   opBlock: Map<Op, Block>;
+  /** Ops whose LOWERING discards their operand tree and spells something else — today the
+   *  bitfield-extract fold, which renders a global member read in place of a shift pair. A walk
+   *  over the operands cannot see what such an op will render, so predicates that reason about
+   *  the rendered expression have to treat it as opaque. LIVE, like `varName`. */
+  respelledDefs: ReadonlyMap<Op, unknown>;
 }
 
 export interface LoopHazards {
@@ -68,10 +101,17 @@ export interface LoopHazards {
 export const updateWriteSet = (updates: Stmt[]): Set<string> =>
   new Set(updates.filter((st): st is Extract<Stmt, { k: 'assign' }> => st.k === 'assign').map((st) => st.name));
 
+/** Why an exit arg cannot be REBUILT at the top of the loop body — see the note above
+ *  `PREUPDATE_SINK_GATES`. The walk collects EVERY one it finds, not the first: with one blocker
+ *  per gate, stopping early would let ablating one gate disable another on any tree where the
+ *  other's blocker happens to be found first, and the ablation would then be measuring less than
+ *  its name says. */
+export type ArgBlocker = 'order-sensitive' | 'stale-name' | 'no-definition';
+
 /** One exit slot weighed for sinking. `destName` is the name the sunk copy would write. */
 export interface SinkCandidate {
-  /** the exit arg is one of the loop's own variables, not something computed from them */
-  argIsLoopVariable: boolean;
+  /** everything that stops the arg's def-tree from being rebuilt at the top of the body */
+  argBlockers: ReadonlySet<ArgBlocker>;
   destName: string | undefined;
   /** the names of the loop's own variables */
   headerNames: ReadonlySet<string | undefined>;
@@ -81,18 +121,30 @@ export interface SinkCandidate {
   destBusyInLoop: boolean;
 }
 
-/** When a pre-update exit copy may move into the loop body. Every gate here is SOUND: drop one and
- *  the emitted loop computes a different answer, not merely a worse-scoring one. The set-level
+/** When a pre-update exit copy may move into the loop body. The set-level
  *  rules — two slots wanting one name, a slot that stays behind reading a sunk name — are not in
  *  the table because they are properties of the whole edge rather than of a candidate; they live in
  *  `sinkablePreUpdateSlots` with the same refusal discipline. */
 export const PREUPDATE_SINK_GATES: readonly Gate<SinkCandidate>[] = [
   {
-    id: 'arg-is-loop-variable',
+    id: 'arg-safe-to-reevaluate',
+    why: 'an effect, a memory read or a trap gives a different answer where the rebuilt copy lands',
+    sound: true,
+    guardedBy: 'hazards.test.ts: ablating arg-safe-to-reevaluate admits an exit arg that reads memory',
+    rejects: (c) => c.argBlockers.has('order-sensitive'),
+  },
+  {
+    id: 'arg-reads-current-names',
     why: 'a value computed in the body still holds the PREVIOUS iteration at the top of it, where the copy lands',
     sound: true,
-    guardedBy: 'hazards.test.ts: ablating arg-is-loop-variable admits a computed exit arg',
-    rejects: (c) => !c.argIsLoopVariable,
+    guardedBy: 'hazards.test.ts: ablating arg-reads-current-names admits an arg over a body-computed name',
+    rejects: (c) => c.argBlockers.has('stale-name'),
+  },
+  {
+    id: 'arg-has-a-definition',
+    why: 'a leaf with neither a name nor a def renders as a gap, which the contract catches loudly',
+    sound: false,
+    rejects: (c) => c.argBlockers.has('no-definition'),
   },
   {
     // The update assigns exactly the loop variables' names, so these two tests are one set today;
@@ -113,7 +165,7 @@ export const PREUPDATE_SINK_GATES: readonly Gate<SinkCandidate>[] = [
 ];
 
 export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
-  const { defs, varName, useSitesOf, liveIn, opBlock } = deps;
+  const { defs, varName, useSitesOf, liveIn, opBlock, respelledDefs } = deps;
 
   // Does rendering `v` under `sub` read a variable that a pending loop update (`updateWrites`, the
   // names it assigns) overwrites, via a path OTHER than a `sub`-mapped back-edge arg? Such a read is a
@@ -220,6 +272,14 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
   // properties of the EDGE rather than of a candidate and stay here: the exit edge is a PARALLEL
   // copy, so splitting it across two program points must not let two slots claim one name, nor let
   // a slot that stays behind read a name the body now writes first.
+  //
+  // The third parallel-copy question — one sunk slot's REBUILT expression reading another sunk
+  // slot's destination — needs no rule, and the copies are emitted sequentially because of it.
+  // Every leaf such an expression could read is already refused by a per-candidate gate: a header
+  // param makes the other slot fail `dest-not-loop-variable`; a body-defined value is
+  // `stale-name`; and a value defined outside the loop but read on the exit edge is live-in at the
+  // header (analysis.ts counts a successor arg as a use at the predecessor's end), which makes the
+  // other slot fail `dest-free-inside-loop`.
   const sinkablePreUpdateSlots = (
     header: Block,
     exit: Block,
@@ -231,6 +291,16 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
   ): Set<number> => {
     const none = new Set<number>();
     const headerNames = new Set(header.params.map((p) => varName.get(p)));
+    // An op with no `opBlock` entry counts as INSIDE: the map is total over the function, and the
+    // safe direction for an absent one is the answer that refuses.
+    const definedInBody = (v: Value): boolean => {
+      const d = defs.get(v);
+      if (!d) {
+        return [...body].some((bb) => bb.params.includes(v));
+      }
+      const b = opBlock.get(d);
+      return b === undefined || body.has(b);
+    };
     // Does any value OTHER than `self` under `name` live inside the loop? A value defined outside
     // it and read anywhere in the body must be live-in at the header, the loop's only entry, so
     // that check plus the body's own defs and params covers every way the name is still in use.
@@ -241,17 +311,56 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
         if (n !== name || v === self || header.params.includes(v)) {
           continue;
         }
-        const d = defs.get(v);
-        if (liveIn.get(header)!.has(v) || (d && body.has(opBlock.get(d)!))) {
+        if (liveIn.get(header)!.has(v) || definedInBody(v)) {
           return true;
-        }
-        for (const bb of body) {
-          if (bb.params.includes(v)) {
-            return true;
-          }
         }
       }
       return false;
+    };
+    // Is `v` defined by the loop body itself — an op in one of its blocks, or a block param?
+    // Everything that stops `a` from being REBUILT at the top of the body. Walks the def-tree
+    // where `exprWith(null)` will when the copy is spelled — stopping at a NAMED value, which
+    // renders as its name, and at a value with no reaching def, which renders as a gap.
+    //
+    // The walk OVER-approximates what renders, which is the safe direction: `lowerDef` recurses
+    // only through `e(d.operands[...])`, so every value it reaches is one this visited. Two things
+    // would break that. A lowering reaching for a value OUTSIDE its op's operands — none does
+    // today, and it is the change to watch for. And a lowering that DISCARDS the operand tree and
+    // spells something else: `respelledDefs` is that case, refused outright below rather than
+    // walked, because what it renders is a memory read this walk would never have seen.
+    //
+    // `undef` and `laddr` render a name from their own side maps rather than `varName`, and both
+    // are position-independent — an `undef` is never assigned, a `laddr` is an address.
+    const blockersOf = (a: Value): ReadonlySet<ArgBlocker> => {
+      const seen = new Set<Value>();
+      const found = new Set<ArgBlocker>();
+      const walk = (x: Value): void => {
+        if (seen.has(x)) {
+          return;
+        }
+        seen.add(x);
+        if (header.params.includes(x)) {
+          return; // a loop variable: at the top of the body its name holds exactly this
+        }
+        const n = varName.get(x);
+        if (n !== undefined) {
+          if (definedInBody(x) || headerNames.has(n) || busyInLoop(n, x)) {
+            found.add('stale-name');
+          }
+          return;
+        }
+        const d = defs.get(x);
+        if (!d) {
+          found.add('no-definition');
+          return;
+        }
+        if (REEVAL_UNSAFE_OPS.has(d.opcode) || respelledDefs.has(d)) {
+          found.add('order-sensitive');
+        }
+        d.operands.forEach(walk);
+      };
+      walk(a);
+      return found;
     };
     const dest = new Map<number, string>();
     exitArgs.forEach((a, j) => {
@@ -260,7 +369,7 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
       }
       const destName = varName.get(exit.params[j]);
       const c: SinkCandidate = {
-        argIsLoopVariable: header.params.includes(a),
+        argBlockers: blockersOf(a),
         destName,
         headerNames,
         updateWrites,
