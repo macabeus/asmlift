@@ -57,6 +57,34 @@ describe('an immediate idiom is keyed on the VALUE, not the spelling', () => {
   });
 });
 
+// THE SAME QUESTION FOR A REGISTER ALIAS, and here it decides CONTROL FLOW rather than a value, so
+// missing it does not degrade: the write is not recognised as a transfer, no terminator forms, and
+// execution runs on into the next block. `readData` already treats `pc` and `r15` as one register;
+// `classifyXfer` did not.
+describe('a PC write is a control transfer under either spelling', () => {
+  const body = (dest: string, src: string) =>
+    `\tpush\t{r4, lr}\n\tcmp\tr0, #0\n\tbeq\t.L1\n\tmov\t${dest}, ${src}\n.L1:\n\tadd\tr0, r0, #1\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n`;
+  const RETURNS =
+    's32 f(s32 a0) {\n    if (a0 != 0) {\n        return a0;\n    } else {\n        return a0 + 1;\n    }\n}\n';
+
+  test.each([
+    ['pc', 'lr'],
+    ['r15', 'lr'],
+    ['pc', 'r14'],
+    ['r15', 'r14'],
+  ])('`mov %s, %s` is the return', (dest, src) => {
+    expect(dc('f', body(dest, src)).source).toBe(RETURNS);
+  });
+
+  // …and a PC write that is NOT the link register is an indirect jump, which declines. Spelled
+  // `r15` it used to be no transfer at all: the early return vanished and the leftover read minted
+  // a phantom parameter, both silently.
+  test.each(['pc', 'r15'])('`mov %s, rN` is an indirect jump, loudly', (dest) => {
+    expect(() => dc('f', body(dest, 'lr'))).not.toThrow(); // control
+    expect(() => dc('f', body(dest, 'r3'))).toThrow(/indirect\/computed jump/);
+  });
+});
+
 describe('Thumb frontend robustness (CONTRACT-AS-INVARIANT)', () => {
   test('a conditional branch split from its cmp by a label declines loud', () => {
     // The label between `cmp` and `bge` splits the block, so the branch has no reaching compare in

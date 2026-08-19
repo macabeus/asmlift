@@ -150,9 +150,16 @@ function classifyXfer(ins: Instr): XferKind | null {
   }
   // A write to PC is a control transfer. `mov pc, lr` restores the link register → return; any other
   // computed/loaded PC write (`mov pc, rN` rN≠lr, `ldr pc, …`, `add/sub pc, …`) is an indirect jump.
+  //
+  // BY REGISTER, NOT BY ALIAS. `pc` and `r15` are one register, and `readData` already says so; here
+  // the alias decides CONTROL FLOW, so missing it does not degrade — the write is not a transfer at
+  // all, the terminator never forms, and execution runs on into the next block. `mov r15, lr` mid
+  // function deleted the early return outright AND minted a phantom parameter for the `lr` read that
+  // was left behind, with no diagnostic. `lr`/`r14` is the same question one operand over, and it is
+  // the safe half: missing it reads as an indirect jump, which declines loud.
   const dest = ins.ops[0]?.replace(/[[\]]/g, '');
-  if (dest === 'pc') {
-    if ((mn === 'mov' || mn === 'movs') && ins.ops[1] === 'lr') {
+  if (dest === 'pc' || dest === 'r15') {
+    if ((mn === 'mov' || mn === 'movs') && (ins.ops[1] === 'lr' || ins.ops[1] === 'r14')) {
       return 'return';
     }
     return 'indirect';
@@ -179,15 +186,9 @@ function classifyXfer(ins: Instr): XferKind | null {
   return null;
 }
 
-// A raw immediate's VALUE, as far as this parse goes. The radix test is case-insensitive because
-// gas accepts `0X`, and getting that wrong is not a near miss: `parseInt` stops at the first
-// character it cannot consume, so `#0X1` read as radix 10 is 0 where the assembler encodes 1.
-//
-// Still LOOSE by design — a binary literal (`#0b1`) and an octal one (`#010`, 8 to gas and 10 to
-// `parseInt`) are both misread, silently. That is why `immEq` below exists instead of callers
-// comparing against this: a caller that can refuse should. The ones that cannot — the arithmetic
-// fall-throughs below, the frame walk — carry the hole, and no corpus spells either form (of 105411
-// `#` operands across the vendored checkouts, every one this misreads is absent).
+// A raw immediate's value. Case-insensitive on the radix because gas accepts `0X` and `parseInt`
+// with the wrong one reads `#0X1` as 0 — see `immEq` below for why this stays loose about binary,
+// octal and expressions, and which callers therefore have to refuse rather than ask this.
 const imm = (s: string) => parseInt(s.replace(/^#/, ''), /0[xX]/.test(s) ? 16 : 10);
 
 // AN IMMEDIATE IS A NUMBER, NOT A SPELLING, and which spelling appears is the producer's choice
@@ -200,7 +201,8 @@ const imm = (s: string) => parseInt(s.replace(/^#/, ''), /0[xX]/.test(s) ? 16 : 
 //
 // The operand must be a plain integer LITERAL, and that shape check is the whole point of this
 // helper rather than an incidental guard. `imm()` is `parseInt`, which stops at the first character
-// it cannot consume, so it reads `#2*2` as 2 — and `#2*2` is not malformed, it is an expression gas
+// it cannot consume — `#0b1` and `#0.5` read as 0, `#010` as 10 where gas means 8 — and it reads
+// `#2*2` as 2, which is not malformed but an expression gas
 // accepts and assembles to `lsls r0, r1, #4`. Matching it as a shift by two would recover a switch
 // whose stride is wrong by a factor of four: the emitted C is entirely ordinary and dispatches to
 // the wrong BLOCK, with no marker. `#2+1`, `#2-1` and `#2<<1` are the same trap. An adversarial
