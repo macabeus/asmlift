@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generatedAt": "2026-08-19T19:06:45.537Z",
+    "generatedAt": "2026-08-19T19:17:47.236Z",
     "toolchains": [
       "ido7.1",
       "agbcc",
@@ -9,12 +9,12 @@
       "mwcc_242_81"
     ],
     "counts": {
-      "total": 759,
-      "synthetic": 519,
+      "total": 760,
+      "synthetic": 520,
       "real": 240
     },
     "asmlift": {
-      "commit": "bd0ddc5416d9b4c233e7676dba9532b0641d0777",
+      "commit": "6eb294b8556b23568bb2fc0fa21a2796d053570f",
       "dirty": false
     },
     "m2c": {
@@ -3520,11 +3520,11 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-73HIuV/c.c:1077: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-T9mtBQ/c.c:1077: invalid operands to binary <<"
           },
           {
             "label": "unsigned/scopebase/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-eMj6Eq/c.c:1078: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-8K5uMc/c.c:1078: invalid operands to binary <<"
           }
         ],
         "symbolsUsed": [
@@ -4465,7 +4465,7 @@
         "droppedCandidates": [
           {
             "label": "unsigned",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-uyhprq/c.c:1076: `gBgDataPtrs' undeclared (first use in this function)"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Je7TMV/c.c:1076: `gBgDataPtrs' undeclared (first use in this function)"
           }
         ],
         "symbolsUsed": [],
@@ -5538,11 +5538,11 @@
         "droppedCandidates": [
           {
             "label": "unsigned",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-cm1xG6/c.c:1077: too many arguments to function `thunk_sub_080002A0'"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Csoap5/c.c:1077: too many arguments to function `thunk_sub_080002A0'"
           },
           {
             "label": "unsigned/reread-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-VGG10K/c.c:1075: too many arguments to function `thunk_sub_080002A0'"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-byeSd2/c.c:1075: too many arguments to function `thunk_sub_080002A0'"
           }
         ],
         "symbolsUsed": [],
@@ -6331,83 +6331,83 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-jKXZbx/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-y10mtf/c.c:1085: incompatible types in assignment"
           },
           {
             "label": "unsigned/coalesce-v2-v3/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-lbKcHp/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-JAefjv/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "unsigned/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-8rXTA8/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-mO4gzq/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "unsigned/defsite/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-PzPsDk/c.c:1086: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-MiCFhz/c.c:1086: incompatible types in assignment"
           },
           {
             "label": "unsigned/defsite/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-KJ9tWn/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-NeiPqB/c.c:1085: incompatible types in assignment"
           },
           {
             "label": "unsigned/reread-globals/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-UG2uf6/c.c:1083: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-qPh3SZ/c.c:1083: invalid operands to binary <<"
           },
           {
             "label": "unsigned/reread-globals/coalesce-v0-v1/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-OGwaTA/c.c:1082: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-WMEEUp/c.c:1082: invalid operands to binary <<"
           },
           {
             "label": "unsigned/reread-globals/coalesce-v0-v2/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-z7AFpZ/c.c:1082: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Yete1C/c.c:1082: invalid operands to binary <<"
           },
           {
             "label": "unsigned/defsite/reread-globals/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-MEJ2ip/c.c:1084: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-GINeSo/c.c:1084: invalid operands to binary <<"
           },
           {
             "label": "unsigned/defsite/reread-globals/coalesce-v0-v2/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-gGHoCE/c.c:1083: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-dBG3Wu/c.c:1083: invalid operands to binary <<"
           },
           {
             "label": "signed/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-4Bys31/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Fr8Ydg/c.c:1085: incompatible types in assignment"
           },
           {
             "label": "signed/coalesce-v2-v3/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-xdRCUh/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-RbfPVb/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "signed/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-RNZlN5/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-yhUbVB/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "signed/defsite/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Q5bwWg/c.c:1086: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-JsC99H/c.c:1086: incompatible types in assignment"
           },
           {
             "label": "signed/defsite/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-UQsdSL/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-G56RPl/c.c:1085: incompatible types in assignment"
           },
           {
             "label": "signed/reread-globals/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-EiG0Ho/c.c:1083: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-zdQWkt/c.c:1083: invalid operands to binary <<"
           },
           {
             "label": "signed/reread-globals/coalesce-v0-v1/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-k8FIRT/c.c:1082: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-sdAAFZ/c.c:1082: invalid operands to binary <<"
           },
           {
             "label": "signed/reread-globals/coalesce-v0-v2/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Qxtx1w/c.c:1082: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-sDKYOC/c.c:1082: invalid operands to binary <<"
           },
           {
             "label": "signed/defsite/reread-globals/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-q12DXY/c.c:1084: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-hUI3MD/c.c:1084: invalid operands to binary <<"
           },
           {
             "label": "signed/defsite/reread-globals/coalesce-v0-v2/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-YxPqTw/c.c:1083: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-pMGQLy/c.c:1083: invalid operands to binary <<"
           }
         ],
         "symbolsUsed": [
@@ -6512,11 +6512,11 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Ml39aa/c.c:1501: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Fp1JSb/c.c:1501: incompatible types in assignment"
           },
           {
             "label": "unsigned/reread-globals/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-jy0XaW/c.c:1489: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-aDCvVU/c.c:1489: incompatible types in assignment"
           }
         ],
         "symbolsUsed": [
@@ -44295,8 +44295,8 @@
       }
     },
     {
-      "id": "synthetic:preupdate_exit:agbcc",
-      "sym": "preupdate_exit",
+      "id": "synthetic:preupdate_exit_call:agbcc",
+      "sym": "preupdate_exit_call",
       "project": "synthetic",
       "tier": "synthetic",
       "toolchain": "agbcc",
@@ -44310,8 +44310,8 @@
         "call"
       ],
       "loc": 2,
-      "refSource": "int cb(int *p);\nint preupdate_exit(int *p, int n, int m){ int r = m; int *q; if (n > 0) { q = p + n; do { r = cb(q); q = q - 1; } while (--n); } return r; }",
-      "targetAsm": "@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tpreupdate_exit\n\t.type\t preupdate_exit,function\n\t.thumb_func\npreupdate_exit:\n\tpush\t{r4, r5, lr}\n\tadd\tr3, r0, #0\n\tadd\tr4, r1, #0\n\tadd\tr0, r2, #0\n\tcmp\tr4, #0\n\tble\t.L3\t@cond_branch\n\tlsl\tr0, r4, #0x2\n\tadd\tr5, r3, r0\n.L4:\n\tadd\tr0, r5, #0\n\tbl\tcb\n\tsub\tr5, r5, #0x4\n\tsub\tr4, r4, #0x1\n\tcmp\tr4, #0\n\tbne\t.L4\t@cond_branch\n.L3:\n\tpop\t{r4, r5}\n\tpop\t{r1}\n\tbx\tr1\n.Lfe1:\n\t.size\t preupdate_exit,.Lfe1-preupdate_exit\n",
+      "refSource": "int cb(int *p);\nint preupdate_exit_call(int *p, int n, int m){ int r = m; int *q; if (n > 0) { q = p + n; do { r = cb(q); q = q - 1; } while (--n); } return r; }",
+      "targetAsm": "@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tpreupdate_exit_call\n\t.type\t preupdate_exit_call,function\n\t.thumb_func\npreupdate_exit_call:\n\tpush\t{r4, r5, lr}\n\tadd\tr3, r0, #0\n\tadd\tr4, r1, #0\n\tadd\tr0, r2, #0\n\tcmp\tr4, #0\n\tble\t.L3\t@cond_branch\n\tlsl\tr0, r4, #0x2\n\tadd\tr5, r3, r0\n.L4:\n\tadd\tr0, r5, #0\n\tbl\tcb\n\tsub\tr5, r5, #0x4\n\tsub\tr4, r4, #0x1\n\tcmp\tr4, #0\n\tbne\t.L4\t@cond_branch\n.L3:\n\tpop\t{r4, r5}\n\tpop\t{r1}\n\tbx\tr1\n.Lfe1:\n\t.size\t preupdate_exit_call,.Lfe1-preupdate_exit_call\n",
       "ctx": "int cb(int*);",
       "proto": {
         "cb": {
@@ -44321,7 +44321,7 @@
       "asmlift": {
         "decompiler": "asmlift",
         "outcome": "declined",
-        "source": "/* asmlift could not decompile 'preupdate_exit' — structure: cannot structure 'preupdate_exit': do-while condition or a post-loop value reads a pre-update loop variable */\n/* original assembly: */\n/*   @ Generated by gcc 2.9-arm-000512 for Thumb/elf */\n/*   \t.code\t16 */\n/*   .gcc2_compiled.: */\n/*   .text */\n/*   \t.align\t2, 0 */\n/*   \t.globl\tpreupdate_exit */\n/*   \t.type\t preupdate_exit,function */\n/*   \t.thumb_func */\n/*   preupdate_exit: */\n/*   \tpush\t{r4, r5, lr} */\n/*   \tadd\tr3, r0, #0 */\n/*   \tadd\tr4, r1, #0 */\n/*   \tadd\tr0, r2, #0 */\n/*   \tcmp\tr4, #0 */\n/*   \tble\t.L3\t@cond_branch */\n/*   \tlsl\tr0, r4, #0x2 */\n/*   \tadd\tr5, r3, r0 */\n/*   .L4: */\n/*   \tadd\tr0, r5, #0 */\n/*   \tbl\tcb */\n/*   \tsub\tr5, r5, #0x4 */\n/*   \tsub\tr4, r4, #0x1 */\n/*   \tcmp\tr4, #0 */\n/*   \tbne\t.L4\t@cond_branch */\n/*   .L3: */\n/*   \tpop\t{r4, r5} */\n/*   \tpop\t{r1} */\n/*   \tbx\tr1 */\n/*   .Lfe1: */\n/*   \t.size\t preupdate_exit,.Lfe1-preupdate_exit */\nvoid preupdate_exit(void) {\n    ASMLIFT_ERROR(\"could not decompile (structure): cannot structure 'preupdate_exit': do-while condition or a post-loop value reads a pre-update loop variable\");\n}\n",
+        "source": "/* asmlift could not decompile 'preupdate_exit_call' — structure: cannot structure 'preupdate_exit_call': do-while condition or a post-loop value reads a pre-update loop variable */\n/* original assembly: */\n/*   @ Generated by gcc 2.9-arm-000512 for Thumb/elf */\n/*   \t.code\t16 */\n/*   .gcc2_compiled.: */\n/*   .text */\n/*   \t.align\t2, 0 */\n/*   \t.globl\tpreupdate_exit_call */\n/*   \t.type\t preupdate_exit_call,function */\n/*   \t.thumb_func */\n/*   preupdate_exit_call: */\n/*   \tpush\t{r4, r5, lr} */\n/*   \tadd\tr3, r0, #0 */\n/*   \tadd\tr4, r1, #0 */\n/*   \tadd\tr0, r2, #0 */\n/*   \tcmp\tr4, #0 */\n/*   \tble\t.L3\t@cond_branch */\n/*   \tlsl\tr0, r4, #0x2 */\n/*   \tadd\tr5, r3, r0 */\n/*   .L4: */\n/*   \tadd\tr0, r5, #0 */\n/*   \tbl\tcb */\n/*   \tsub\tr5, r5, #0x4 */\n/*   \tsub\tr4, r4, #0x1 */\n/*   \tcmp\tr4, #0 */\n/*   \tbne\t.L4\t@cond_branch */\n/*   .L3: */\n/*   \tpop\t{r4, r5} */\n/*   \tpop\t{r1} */\n/*   \tbx\tr1 */\n/*   .Lfe1: */\n/*   \t.size\t preupdate_exit_call,.Lfe1-preupdate_exit_call */\nvoid preupdate_exit_call(void) {\n    ASMLIFT_ERROR(\"could not decompile (structure): cannot structure 'preupdate_exit_call': do-while condition or a post-loop value reads a pre-update loop variable\");\n}\n",
         "score": null,
         "maxScore": null,
         "compileErrors": null,
@@ -44335,13 +44335,13 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "structure: cannot structure 'preupdate_exit': do-while condition or a post-loop value reads a pre-update loop variable"
+          "structure: cannot structure 'preupdate_exit_call': do-while condition or a post-loop value reads a pre-update loop variable"
         ]
       },
       "m2c": {
         "decompiler": "m2c",
         "outcome": "nonmatch",
-        "source": "s32 preupdate_exit(s32 arg0, s32 arg1, s32 arg2) {\n    s32 *var_r5;\n    s32 var_r0;\n    s32 var_r4;\n\n    var_r4 = arg1;\n    var_r0 = arg2;\n    if (var_r4 > 0) {\n        var_r5 = arg0 + (var_r4 * 4);\n        do {\n            var_r0 = cb(var_r5);\n            var_r5 -= 4;\n            var_r4 -= 1;\n        } while (var_r4 != 0);\n    }\n    return var_r0;\n}\n",
+        "source": "s32 preupdate_exit_call(s32 arg0, s32 arg1, s32 arg2) {\n    s32 *var_r5;\n    s32 var_r0;\n    s32 var_r4;\n\n    var_r4 = arg1;\n    var_r0 = arg2;\n    if (var_r4 > 0) {\n        var_r5 = arg0 + (var_r4 * 4);\n        do {\n            var_r0 = cb(var_r5);\n            var_r5 -= 4;\n            var_r4 -= 1;\n        } while (var_r4 != 0);\n    }\n    return var_r0;\n}\n",
         "score": 1,
         "maxScore": 17,
         "compileErrors": null,
@@ -44362,7 +44362,7 @@
           "addrDeref": 0
         }
       },
-      "note": "the `_wrapup_reent` shape — `q = p + n` is a preheader, without which the guard fuses and the decline is a different one",
+      "note": "the same shape with a CALL on the exit edge — a second link behind the gate, so it must NOT flip when the gate does",
       "gapSize": {
         "decompiler": "m2c",
         "score": 1,
@@ -44377,8 +44377,88 @@
         }
       },
       "scripts": {
-        "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `preupdate_exit` — benchmark function synthetic:preupdate_exit:agbcc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The exact agbcc `.s` text the benchmark fed m2c, verbatim.\ncat > in.s <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tpreupdate_exit\n\t.type\t preupdate_exit,function\n\t.thumb_func\npreupdate_exit:\n\tpush\t{r4, r5, lr}\n\tadd\tr3, r0, #0\n\tadd\tr4, r1, #0\n\tadd\tr0, r2, #0\n\tcmp\tr4, #0\n\tble\t.L3\t@cond_branch\n\tlsl\tr0, r4, #0x2\n\tadd\tr5, r3, r0\n.L4:\n\tadd\tr0, r5, #0\n\tbl\tcb\n\tsub\tr5, r5, #0x4\n\tsub\tr4, r4, #0x1\n\tcmp\tr4, #0\n\tbne\t.L4\t@cond_branch\n.L3:\n\tpop\t{r4, r5}\n\tpop\t{r1}\n\tbx\tr1\n.Lfe1:\n\t.size\t preupdate_exit,.Lfe1-preupdate_exit\nASM_INPUT\n\n# The exact context header the benchmark passed via --context — prototypes only\n# (no struct/global layouts: the benchmark measures cold recovery).\ncat > ctx.h <<'CTX_INPUT'\nint cb(int*);\nCTX_INPUT\n\nargs=(\n  --target gba            # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function preupdate_exit # the symbol to decompile from in.s\n  --context ctx.h         # the C context header above (typedefs + prototypes)\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
-        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `preupdate_exit` — benchmark function synthetic:preupdate_exit:agbcc.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:preupdate_exit:agbcc --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact agbcc `.s` text.\ncat > in.asm <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tpreupdate_exit\n\t.type\t preupdate_exit,function\n\t.thumb_func\npreupdate_exit:\n\tpush\t{r4, r5, lr}\n\tadd\tr3, r0, #0\n\tadd\tr4, r1, #0\n\tadd\tr0, r2, #0\n\tcmp\tr4, #0\n\tble\t.L3\t@cond_branch\n\tlsl\tr0, r4, #0x2\n\tadd\tr5, r3, r0\n.L4:\n\tadd\tr0, r5, #0\n\tbl\tcb\n\tsub\tr5, r5, #0x4\n\tsub\tr4, r4, #0x1\n\tcmp\tr4, #0\n\tbne\t.L4\t@cond_branch\n.L3:\n\tpop\t{r4, r5}\n\tpop\t{r1}\n\tbx\tr1\n.Lfe1:\n\t.size\t preupdate_exit,.Lfe1-preupdate_exit\nASM_INPUT\n\n# The prototype hints the benchmark fed asmlift (callee arities / void-ness).\ncat > proto.json <<'PROTO_INPUT'\n{\n  \"cb\": {\n    \"params\": 1\n  }\n}\nPROTO_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target agbcc          # frontend + target description (ISA, calling convention, compiler idioms)\n  --name preupdate_exit   # the symbol to decompile (multi-function input selects by name)\n  --proto proto.json      # the prototype hints above (callee arities / void-ness)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+        "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `preupdate_exit_call` — benchmark function synthetic:preupdate_exit_call:agbcc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The exact agbcc `.s` text the benchmark fed m2c, verbatim.\ncat > in.s <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tpreupdate_exit_call\n\t.type\t preupdate_exit_call,function\n\t.thumb_func\npreupdate_exit_call:\n\tpush\t{r4, r5, lr}\n\tadd\tr3, r0, #0\n\tadd\tr4, r1, #0\n\tadd\tr0, r2, #0\n\tcmp\tr4, #0\n\tble\t.L3\t@cond_branch\n\tlsl\tr0, r4, #0x2\n\tadd\tr5, r3, r0\n.L4:\n\tadd\tr0, r5, #0\n\tbl\tcb\n\tsub\tr5, r5, #0x4\n\tsub\tr4, r4, #0x1\n\tcmp\tr4, #0\n\tbne\t.L4\t@cond_branch\n.L3:\n\tpop\t{r4, r5}\n\tpop\t{r1}\n\tbx\tr1\n.Lfe1:\n\t.size\t preupdate_exit_call,.Lfe1-preupdate_exit_call\nASM_INPUT\n\n# The exact context header the benchmark passed via --context — prototypes only\n# (no struct/global layouts: the benchmark measures cold recovery).\ncat > ctx.h <<'CTX_INPUT'\nint cb(int*);\nCTX_INPUT\n\nargs=(\n  --target gba            # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function preupdate_exit_call # the symbol to decompile from in.s\n  --context ctx.h         # the C context header above (typedefs + prototypes)\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `preupdate_exit_call` — benchmark function synthetic:preupdate_exit_call:agbcc.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:preupdate_exit_call:agbcc --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact agbcc `.s` text.\ncat > in.asm <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tpreupdate_exit_call\n\t.type\t preupdate_exit_call,function\n\t.thumb_func\npreupdate_exit_call:\n\tpush\t{r4, r5, lr}\n\tadd\tr3, r0, #0\n\tadd\tr4, r1, #0\n\tadd\tr0, r2, #0\n\tcmp\tr4, #0\n\tble\t.L3\t@cond_branch\n\tlsl\tr0, r4, #0x2\n\tadd\tr5, r3, r0\n.L4:\n\tadd\tr0, r5, #0\n\tbl\tcb\n\tsub\tr5, r5, #0x4\n\tsub\tr4, r4, #0x1\n\tcmp\tr4, #0\n\tbne\t.L4\t@cond_branch\n.L3:\n\tpop\t{r4, r5}\n\tpop\t{r1}\n\tbx\tr1\n.Lfe1:\n\t.size\t preupdate_exit_call,.Lfe1-preupdate_exit_call\nASM_INPUT\n\n# The prototype hints the benchmark fed asmlift (callee arities / void-ness).\ncat > proto.json <<'PROTO_INPUT'\n{\n  \"cb\": {\n    \"params\": 1\n  }\n}\nPROTO_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target agbcc          # frontend + target description (ISA, calling convention, compiler idioms)\n  --name preupdate_exit_call # the symbol to decompile (multi-function input selects by name)\n  --proto proto.json      # the prototype hints above (callee arities / void-ness)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+      }
+    },
+    {
+      "id": "synthetic:preupdate_exit:agbcc",
+      "sym": "preupdate_exit",
+      "project": "synthetic",
+      "tier": "synthetic",
+      "toolchain": "agbcc",
+      "isa": "arm",
+      "compiler": "agbcc",
+      "language": "c",
+      "features": [
+        "loop-preupdate",
+        "do-while",
+        "loop"
+      ],
+      "loc": 1,
+      "refSource": "int preupdate_exit(int *p, int n, int m){ int r = m; int *q; if (n > 0) { q = p + n; do { r = *q + n; q = q - 1; } while (--n); } return r; }",
+      "targetAsm": "@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tpreupdate_exit\n\t.type\t preupdate_exit,function\n\t.thumb_func\npreupdate_exit:\n\tadd\tr3, r0, #0\n\tadd\tr0, r2, #0\n\tcmp\tr1, #0\n\tble\t.L3\t@cond_branch\n\tlsl\tr0, r1, #0x2\n\tadd\tr3, r3, r0\n.L4:\n\tldr\tr0, [r3]\n\tadd\tr0, r0, r1\n\tsub\tr3, r3, #0x4\n\tsub\tr1, r1, #0x1\n\tcmp\tr1, #0\n\tbne\t.L4\t@cond_branch\n.L3:\n\tbx\tlr\n.Lfe1:\n\t.size\t preupdate_exit,.Lfe1-preupdate_exit\n",
+      "asmlift": {
+        "decompiler": "asmlift",
+        "outcome": "declined",
+        "source": "/* asmlift could not decompile 'preupdate_exit' — structure: cannot structure 'preupdate_exit': do-while condition or a post-loop value reads a pre-update loop variable */\n/* original assembly: */\n/*   @ Generated by gcc 2.9-arm-000512 for Thumb/elf */\n/*   \t.code\t16 */\n/*   .gcc2_compiled.: */\n/*   .text */\n/*   \t.align\t2, 0 */\n/*   \t.globl\tpreupdate_exit */\n/*   \t.type\t preupdate_exit,function */\n/*   \t.thumb_func */\n/*   preupdate_exit: */\n/*   \tadd\tr3, r0, #0 */\n/*   \tadd\tr0, r2, #0 */\n/*   \tcmp\tr1, #0 */\n/*   \tble\t.L3\t@cond_branch */\n/*   \tlsl\tr0, r1, #0x2 */\n/*   \tadd\tr3, r3, r0 */\n/*   .L4: */\n/*   \tldr\tr0, [r3] */\n/*   \tadd\tr0, r0, r1 */\n/*   \tsub\tr3, r3, #0x4 */\n/*   \tsub\tr1, r1, #0x1 */\n/*   \tcmp\tr1, #0 */\n/*   \tbne\t.L4\t@cond_branch */\n/*   .L3: */\n/*   \tbx\tlr */\n/*   .Lfe1: */\n/*   \t.size\t preupdate_exit,.Lfe1-preupdate_exit */\nvoid preupdate_exit(void) {\n    ASMLIFT_ERROR(\"could not decompile (structure): cannot structure 'preupdate_exit': do-while condition or a post-loop value reads a pre-update loop variable\");\n}\n",
+        "score": null,
+        "maxScore": null,
+        "compileErrors": null,
+        "quality": {
+          "score": 88,
+          "lines": 31,
+          "gotos": 0,
+          "casts": 1,
+          "unkGlue": 1,
+          "rawMem": 0,
+          "addrDeref": 0
+        },
+        "errorMarkers": [
+          "structure: cannot structure 'preupdate_exit': do-while condition or a post-loop value reads a pre-update loop variable"
+        ]
+      },
+      "m2c": {
+        "decompiler": "m2c",
+        "outcome": "nonmatch",
+        "source": "s32 preupdate_exit(s32 arg0, s32 arg1, s32 arg2) {\n    s32 *var_r3;\n    s32 var_r0;\n    s32 var_r1;\n\n    var_r1 = arg1;\n    var_r0 = arg2;\n    if (var_r1 > 0) {\n        var_r3 = arg0 + (var_r1 * 4);\n        do {\n            var_r0 = *var_r3 + var_r1;\n            var_r3 -= 4;\n            var_r1 -= 1;\n        } while (var_r1 != 0);\n    }\n    return var_r0;\n}\n",
+        "score": 1,
+        "maxScore": 13,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 1
+        },
+        "quality": {
+          "score": 100,
+          "lines": 16,
+          "gotos": 0,
+          "casts": 0,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        }
+      },
+      "note": "`q = p + n` is a preheader, without which the guard fuses and the decline is a different one",
+      "gapSize": {
+        "decompiler": "m2c",
+        "score": 1,
+        "maxScore": 13,
+        "ratio": 0.07692307692307693,
+        "kinds": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 1
+        }
+      },
+      "scripts": {
+        "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `preupdate_exit` — benchmark function synthetic:preupdate_exit:agbcc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The exact agbcc `.s` text the benchmark fed m2c, verbatim.\ncat > in.s <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tpreupdate_exit\n\t.type\t preupdate_exit,function\n\t.thumb_func\npreupdate_exit:\n\tadd\tr3, r0, #0\n\tadd\tr0, r2, #0\n\tcmp\tr1, #0\n\tble\t.L3\t@cond_branch\n\tlsl\tr0, r1, #0x2\n\tadd\tr3, r3, r0\n.L4:\n\tldr\tr0, [r3]\n\tadd\tr0, r0, r1\n\tsub\tr3, r3, #0x4\n\tsub\tr1, r1, #0x1\n\tcmp\tr1, #0\n\tbne\t.L4\t@cond_branch\n.L3:\n\tbx\tlr\n.Lfe1:\n\t.size\t preupdate_exit,.Lfe1-preupdate_exit\nASM_INPUT\n\n# (This function ran with NO context header — the benchmark fed m2c the assembly alone.)\n\nargs=(\n  --target gba            # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function preupdate_exit # the symbol to decompile from in.s\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `preupdate_exit` — benchmark function synthetic:preupdate_exit:agbcc.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:preupdate_exit:agbcc --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact agbcc `.s` text.\ncat > in.asm <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tpreupdate_exit\n\t.type\t preupdate_exit,function\n\t.thumb_func\npreupdate_exit:\n\tadd\tr3, r0, #0\n\tadd\tr0, r2, #0\n\tcmp\tr1, #0\n\tble\t.L3\t@cond_branch\n\tlsl\tr0, r1, #0x2\n\tadd\tr3, r3, r0\n.L4:\n\tldr\tr0, [r3]\n\tadd\tr0, r0, r1\n\tsub\tr3, r3, #0x4\n\tsub\tr1, r1, #0x1\n\tcmp\tr1, #0\n\tbne\t.L4\t@cond_branch\n.L3:\n\tbx\tlr\n.Lfe1:\n\t.size\t preupdate_exit,.Lfe1-preupdate_exit\nASM_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target agbcc          # frontend + target description (ISA, calling convention, compiler idioms)\n  --name preupdate_exit   # the symbol to decompile (multi-function input selects by name)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
       }
     },
     {
