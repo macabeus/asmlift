@@ -3072,10 +3072,19 @@ export function lift(
       // deliberately NOT chosen here: identifiers live in the structurer's namespace (params,
       // locals, globals, the symbol map), which the frontend cannot see — a frontend-chosen `sp0`
       // silently shadowed a project global of the same name.
-      // `volatile` iff the address escapes: gcc-2.9 DELETES a store to a non-volatile local nothing
-      // in-function reads — measured, the recompiled loop loaded the value and never stored it —
-      // and the reference idiom's own spelling is `vu16 tmp` for exactly that reason. An object
-      // whose address never leaves the function needs no volatile and must not pay its codegen.
+      // `volatile` iff the address escapes, because that is the SOURCE'S OWN SPELLING. Every GBA
+      // project in the corpus declares the DMA scratch volatile — klonoa's `DMA_FILL` writes
+      // `vu##bit tmp` outright, sa3's does under `PLATFORM_GBA`, pokeemerald's inside
+      // `DMA_FILL_UNCHECKED` — so reproducing the source means reproducing the qualifier.
+      //
+      // NOT because gcc would otherwise delete the store. That claim was here for several releases
+      // and does not reproduce: taking `&tmp` makes the local addressable, so gcc-2.9 keeps the
+      // store with or without the qualifier, measured on store-then-escape, publish-then-fill, and
+      // a loop that stores and escapes each iteration. What the qualifier does change is register
+      // ALLOCATION — the same function compiled `vu16` and `u16` is 98 instructions either way and
+      // differs in three register assignments — which is why it still has to be right.
+      //
+      // An object whose address never leaves the function needs no volatile and must not pay it.
       for (const [off, ops] of objects) {
         const width = extent.get(off)!;
         const signed = accesses.get(off)!.some((a) => a.signed);
