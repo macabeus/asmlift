@@ -8,6 +8,83 @@ import { ARMV4T_AGBCC } from '../src/target';
 
 const dc = (sym: string, body: string) => decompile(sym, `${sym}:\n${body}`, ARMV4T_AGBCC);
 
+// THE SPELLING OF AN IMMEDIATE IS NOT ITS VALUE. Two producers feed this frontend and write the
+// same zero differently — agbcc's own `.s` emits `#0`, a pret-style disassembly emits `#0x0` — so an
+// idiom gated on the TOKEN is silently off for a whole project. Counting the two gated shapes over
+// the vendored agbcc checkouts: sa3 writes `#0` 9510 times and `#0x0` never; klonoa writes `#0` 36
+// times and `#0x0` 3533.
+//
+// The predicate is `immEq`, a LITERAL-shape test rather than a `parseInt`, and the refusal tests
+// are why: `parseInt` stops at the first character it cannot consume, so `#0b1` reads as zero — and
+// at the `rsb` site that turned a loud decline into a confident negate. The `add` site cannot make
+// the same promise, because a non-match there falls through to `imm()` rather than refusing; the
+// last test pins what that costs instead of pretending it does not exist.
+describe('an immediate idiom is keyed on the VALUE, not the spelling', () => {
+  const spellings = ['#0', '#0x0', '#0X0', '#00'];
+
+  // Not cosmetic: the copy makes both sides the SAME SSA VALUE, which is what the pattern engine
+  // (`{same:'X'}`) and the structurer's pre-update loop test compare on.
+  test.each(spellings)('`add rD, rS, %s` is a register copy', (n) => {
+    expect(dc('f', `\tpush\t{r4, lr}\n\tadd\tr0, r1, ${n}\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n`).source).toBe(
+      's32 f(s32 a0) {\n    return a0;\n}\n',
+    );
+  });
+
+  // This one degrades LOUD when unrecognised — an `rsb` the arm does not claim becomes an `opaque`,
+  // so the wrong spelling costs the whole function rather than one `+ 0`.
+  test.each(spellings)('`rsb rD, rS, %s` is a negate', (n) => {
+    expect(dc('f', `\tpush\t{r4, lr}\n\trsb\tr0, r1, ${n}\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n`).source).toBe(
+      's32 f(s32 a0) {\n    return -a0;\n}\n',
+    );
+  });
+
+  // REFUSALS at the `rsb` site, where a non-match declines. `parseInt` reads every one of these as
+  // zero; the shape test is the only thing between them and a confident negate.
+  test.each(['#0X10', '#0b1', '#0.5', '#0e5', '#0*4'])('`rsb rD, rS, %s` is not a negate', (n) => {
+    const rsb = (imm: string) => `\tpush\t{r4, lr}\n\trsb\tr0, r1, ${imm}\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n`;
+    expect(() => dc('f', rsb('#0'))).not.toThrow(); // control
+    expect(() => dc('f', rsb(n))).toThrow(/unmodelled instruction 'rsb'/);
+  });
+
+  // CHARACTERIZATION, not an assertion of correctness. A non-match at the `add` site falls through
+  // to `constVal(imm(…))`, and `imm` does not read binary — gas assembles `#0b1` as `+ 1`. Nothing
+  // in any corpus spells it (105411 `#` operands, zero of this class), so the honest move is to pin
+  // the gap where a reader will find it rather than leave the header claiming it cannot happen.
+  test('KNOWN GAP: a binary immediate reaches the `add` lowering and is misread', () => {
+    const add = (imm: string) => `\tpush\t{r4, lr}\n\tadd\tr0, r1, ${imm}\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n`;
+    expect(dc('f', add('#0X1')).source).toBe('s32 f(s32 a0) {\n    return a0 + 1;\n}\n'); // the radix fix
+    expect(dc('f', add('#0b1')).source).toBe('s32 f(s32 a0) {\n    return a0 + 0;\n}\n'); // gas: + 1
+  });
+});
+
+// THE SAME QUESTION FOR A REGISTER ALIAS, and here it decides CONTROL FLOW rather than a value, so
+// missing it does not degrade: the write is not recognised as a transfer, no terminator forms, and
+// execution runs on into the next block. `readData` already treats `pc` and `r15` as one register;
+// `classifyXfer` did not.
+describe('a PC write is a control transfer under either spelling', () => {
+  const body = (dest: string, src: string) =>
+    `\tpush\t{r4, lr}\n\tcmp\tr0, #0\n\tbeq\t.L1\n\tmov\t${dest}, ${src}\n.L1:\n\tadd\tr0, r0, #1\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n`;
+  const RETURNS =
+    's32 f(s32 a0) {\n    if (a0 != 0) {\n        return a0;\n    } else {\n        return a0 + 1;\n    }\n}\n';
+
+  test.each([
+    ['pc', 'lr'],
+    ['r15', 'lr'],
+    ['pc', 'r14'],
+    ['r15', 'r14'],
+  ])('`mov %s, %s` is the return', (dest, src) => {
+    expect(dc('f', body(dest, src)).source).toBe(RETURNS);
+  });
+
+  // …and a PC write that is NOT the link register is an indirect jump, which declines. Spelled
+  // `r15` it used to be no transfer at all: the early return vanished and the leftover read minted
+  // a phantom parameter, both silently.
+  test.each(['pc', 'r15'])('`mov %s, rN` is an indirect jump, loudly', (dest) => {
+    expect(() => dc('f', body(dest, 'lr'))).not.toThrow(); // control
+    expect(() => dc('f', body(dest, 'r3'))).toThrow(/indirect\/computed jump/);
+  });
+});
+
 describe('Thumb frontend robustness (CONTRACT-AS-INVARIANT)', () => {
   test('a conditional branch split from its cmp by a label declines loud', () => {
     // The label between `cmp` and `bge` splits the block, so the branch has no reaching compare in
