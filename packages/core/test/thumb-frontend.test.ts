@@ -546,6 +546,98 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     );
   });
 
+  // …but an escape is TWO questions, and only one of them retracts. A frame address stored into a
+  // device's SOURCE register is one the hardware READS from — the DMA-fill idiom, `vu16 tmp;
+  // DmaSet(n, &tmp, dest, … DMA_SRC_FIXED …)`, which is how every vendored project spells a fill.
+  // Nothing can write the frame back through it, so the `undef` survives; the address still LEFT
+  // the function, so the object is still `volatile`.
+  //
+  // The three fixtures differ by one hex digit — the offset from the DMA base — which is what makes
+  // this a test of the direction rather than of the address.
+  describe('an escape that the hardware only READS through keeps the undef', () => {
+    // one object at [sp,#0] escaping to DMA3<reg>, and an `undef` at [sp,#4] the switch never writes
+    const escapeTo = (regOff: string) =>
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tmov\tr4, sp\n\tldr\tr2, .L9\n' +
+      `\tstr\tr4, [r2, #${regOff}]\n` +
+      '\tldr\tr1, [r4]\n\tcmp\tr1, #0\n\tbeq\t.L2\n\tstr\tr1, [sp, #4]\n' +
+      '.L2:\n\tldr\tr3, [sp, #4]\n\tadd\tr0, r1, r3\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r5}\n\tbx\tr5\n' +
+      '.L9:\n\t.word\t0x040000D4\n';
+
+    test('DMA3SAD (+0) — the hardware reads the object, so the undef stands', () => {
+      const src = decompile('f', escapeTo('0x00'), ARMV4T_AGBCC).source;
+      expect(src).toContain('volatile s32 sp0;'); // the address still left the function
+      expect(src).toContain('uninit_sp4'); // …but nothing can write [sp,#4]
+    });
+
+    test.each([
+      ['0x04', 'DMA3DAD'],
+      ['0x08', 'DMA3CNT'],
+    ])('%s (%s) — not a source register, so the retraction stands', (regOff) => {
+      expect(() => decompile('f', escapeTo('0x00'), ARMV4T_AGBCC)).not.toThrow(); // control
+      expect(() => decompile('f', escapeTo(regOff), ARMV4T_AGBCC)).toThrow(
+        /address-taken stack local — the captured address escapes/,
+      );
+    });
+
+    // A SECOND OBJECT still refuses, and this rule is NOT narrowed with the other one. Its argument
+    // is about layout, which is symmetric: a device reading past the object it was given is as
+    // wrong as a callee writing past it. `DmaCopy` of two halfwords off `&sp0` transfers `[sp,#2]`
+    // too — and the store to that second object is DELETED, since only the escaping one is
+    // `volatile`, so the emitted source transfers whatever follows `sp0` instead.
+    test('a second object still refuses, even when the escape only reads', () => {
+      const twoObjects =
+        'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x10\n\tmov\tr4, sp\n\tstrh\tr0, [r4]\n' +
+        '\tmov\tr5, sp\n\tstrh\tr1, [r5, #0x2]\n\tldr\tr2, .L9\n\tstr\tr4, [r2, #0x0]\n' +
+        '\tstr\tr3, [r2, #0x4]\n\tmov\tr0, #0x0\n\tadd\tsp, sp, #0x10\n\tpop\t{r4}\n\tpop\t{r5}\n\tbx\tr5\n' +
+        '.L9:\n\t.word\t0x040000D4\n';
+      expect(() => decompile('f', twoObjects, ARMV4T_AGBCC)).toThrow(/including another object/);
+    });
+
+    // Half an address is not the address: `strh` to a source register hands the device something
+    // that is not this object, so the narrow answer stays the true one.
+    test('a HALFWORD store to a source register is not vouched for', () => {
+      const halfStore = escapeTo('0x00').replace('\tstr\tr4, [r2, #0x00]\n', '\tstrh\tr4, [r2, #0x00]\n');
+      expect(halfStore).not.toBe(escapeTo('0x00'));
+      expect(() => decompile('f', halfStore, ARMV4T_AGBCC)).toThrow(/address-taken stack local/);
+    });
+
+    // …and the ANSWER MUST NOT DEPEND ON `--syms`. The same pool word lifts to a `const` bare and
+    // to a `gaddr` when a symbol map names its address, so a predicate keyed on the op rather than
+    // on the address would switch this capability off for exactly the projects that supply a map.
+    test('a source register reached by NAME is the same source register', () => {
+      const symbols = new Map([
+        [0x040000d4, [{ name: 'REG_DMA3SAD', kind: 'data' as const, macroBody: '(*(vu32 *)0x040000D4)' }]],
+      ]);
+      const withMap = decompile('f', escapeTo('0x00'), ARMV4T_AGBCC, { symbols }).source;
+      expect(withMap).toContain('REG_DMA3SAD = &sp0;'); // the map really did rename it
+      expect(withMap).toContain('uninit_sp4'); // …and the undef still stands
+    });
+
+    // A LITERAL register offset folds, because the predicate resolves an ADDRESS and `[r2, r5]`
+    // with `r5 = 0` names the same one as `[r2, #0]`. An offset it cannot fold does not.
+    test('a register offset resolves when it is a literal and refuses when it is not', () => {
+      const viaZero = escapeTo('0x00').replace('\tstr\tr4, [r2, #0x00]\n', '\tmov\tr5, #0x00\n\tstr\tr4, [r2, r5]\n');
+      expect(viaZero).not.toBe(escapeTo('0x00'));
+      expect(decompile('f', viaZero, ARMV4T_AGBCC).source).toContain('uninit_sp4');
+
+      // …and a runtime offset is a base this cannot resolve, so it takes the conservative answer
+      const viaParam = escapeTo('0x00').replace('\tstr\tr4, [r2, #0x00]\n', '\tstr\tr4, [r2, r0]\n');
+      expect(() => decompile('f', viaParam, ARMV4T_AGBCC)).toThrow(/address-taken stack local/);
+    });
+
+    // A NAME IS NOT AN ADDRESS: the same name at two addresses vouches for neither, or a map could
+    // publish a frame address into ordinary RAM and still keep the `undef`.
+    test('a name the map places at two addresses vouches for neither', () => {
+      const ambiguous = new Map([
+        [0x040000d4, [{ name: 'REG_DMA3SAD', kind: 'data' as const, macroBody: '(*(vu32 *)0x040000D4)' }]],
+        [0x03001000, [{ name: 'REG_DMA3SAD', kind: 'data' as const, macroBody: '(*(vu32 *)0x03001000)' }]],
+      ]);
+      expect(() => decompile('f', escapeTo('0x00'), ARMV4T_AGBCC, { symbols: ambiguous })).toThrow(
+        /address-taken stack local/,
+      );
+    });
+  });
+
   test('an ESCAPED frame address retracts the undef argument — a callee may have written the slot', () => {
     // `undef` rests on "no store reaches this slot, therefore nobody wrote it", which holds only
     // while this function is the sole writer of its frame. `g(&sp0)` breaks that: the frame-object

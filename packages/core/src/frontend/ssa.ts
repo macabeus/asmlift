@@ -75,9 +75,9 @@ export interface SsaBuilder {
 export interface FrameModel {
   /** Storage this function owns as LOCALS ⇒ a def-less read is an uninitialised local. `[from, to)`.
    *
-   *  Asserts more than ownership: that this function's own stores are the ONLY writer. Once an
-   *  address into the frame escapes to a callee that stops holding, and retracting on escape is the
-   *  frontend's obligation (frontend/thumb.ts, after the frame-object audit). */
+   *  Asserts more than ownership: that this function's own stores are the ONLY writer. An address
+   *  into the frame that escapes to anything which could write it stops that holding, and the
+   *  retraction is the frontend's obligation (frontend/thumb.ts, after the frame-object audit). */
   ownedLocals?: { from: number; to: number };
   /** Storage the CALLER wrote — incoming stack arguments ⇒ a def-less read is a parameter.
    *  `[from, to)`. O32's register-parameter home area belongs to NEITHER range: caller-owned, but

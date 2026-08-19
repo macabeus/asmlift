@@ -2741,6 +2741,60 @@ export function lift(
       }
     }
     if (laddrs.length > 0) {
+      const readOnlySinks = new Set(target.capabilities.readOnlyAddressSinks ?? []);
+      const defOf = new Map<Value, Op>();
+      for (const blk of irBlocks) {
+        for (const op of blk.ops) {
+          for (const res of op.results) {
+            defOf.set(res, op);
+          }
+        }
+      }
+      // A NAME IS NOT AN ADDRESS. The same symbol name can sit at two addresses — a symbol map is
+      // free to carry one — and a `gaddr`'s `sym` can also come straight from the assembly text
+      // (`.word REG_DMA3SAD`), where nothing looked it up at all. So names resolve to an address
+      // here or they resolve to nothing: a name at more than one address vouches for neither.
+      const addrOfName = new Map<string, number | null>();
+      for (const [addr, infos] of symbols ?? []) {
+        for (const si of infos) {
+          addrOfName.set(si.name, addrOfName.has(si.name) ? null : addr);
+        }
+      }
+      // The literal address a value denotes, or undefined when this cannot say. `const` is the
+      // bare pool word, `gaddr` is the same word after the symbol map named it, and `add` is the
+      // base+displacement form an interior attribution produces — three spellings of one address,
+      // which is the point: the answer must not turn on which one the assembly happened to use.
+      const literalAddrOf = (v: Value, depth = 0): number | undefined => {
+        const d = defOf.get(v);
+        if (d === undefined || depth > 2) {
+          return undefined;
+        }
+        if (d.opcode === 'const') {
+          return d.attrs.value as number;
+        }
+        if (d.opcode === 'gaddr') {
+          return addrOfName.get(d.attrs.sym as string) ?? undefined;
+        }
+        if (d.opcode === 'add' && d.operands.length === 2) {
+          const base = literalAddrOf(d.operands[0], depth + 1);
+          const disp = defOf.get(d.operands[1]);
+          if (base !== undefined && disp?.opcode === 'const') {
+            return base + (disp.attrs.value as number);
+          }
+        }
+        return undefined;
+      };
+      // Does this store hand the WHOLE address to something that only reads through it? Word stores
+      // only: a `strh` to a source register hands over half an address, so the device's source is
+      // not this object. A base this cannot resolve — computed, register-offset, merged by a phi —
+      // is the conservative answer.
+      const readsThrough = (op: Op): boolean => {
+        if (readOnlySinks.size === 0 || (op.attrs.width as number) !== 4) {
+          return false;
+        }
+        const base = literalAddrOf(op.operands[0]);
+        return base !== undefined && readOnlySinks.has(base + (op.attrs.off as number));
+      };
       const fail = (why: string): never => {
         throw new FrontendUnsupportedError(`cannot lift '${name}': address-taken stack local — ${why}`);
       };
@@ -2880,6 +2934,13 @@ export function lift(
       // Judge every use of a tainted value, against the object it names.
       const accesses = new Map<number, { width: number; signed: boolean; isLoad: boolean }[]>();
       const escaped = new Set<number>();
+      // TWO QUESTIONS, not one. `escaped` asks whether the address LEFT the function, which is what
+      // decides `volatile`. `mayWrite` asks whether it reached something that could write the frame
+      // BACK, which is what the two "a callee may write any frame offset" refusals below actually
+      // rest on. A store into a device's SOURCE register answers yes to the first and no to the
+      // second: the hardware reads the object, and the DMA-fill idiom this capability was built for
+      // (`vu16 tmp; DmaSet(n, &tmp, …)`) is exactly that shape.
+      const mayWrite = new Set<number>();
       for (const off of objects.keys()) {
         accesses.set(off, []);
       }
@@ -2914,6 +2975,9 @@ export function lift(
             }
             if ((op.opcode === 'store' && idx === 1) || op.opcode === 'call') {
               escaped.add(off); // the address ESCAPES as a value — the point of the capability
+              if (!(op.opcode === 'store' && readsThrough(op))) {
+                mayWrite.add(off);
+              }
               return;
             }
             fail(`the captured address flows into \`${op.opcode}\` — not an access, an escape, or a phi`);
@@ -2970,11 +3034,25 @@ export function lift(
       // escape retracts two claims, both of them function-wide because one address reaches the
       // whole frame.
       //
-      // The first is that the other objects are private. Two objects are two separate C locals, so
-      // a callee writing past the one it was given reaches the other on the machine and nothing at
-      // all in the emitted source: `memset(&sp0, 0, 16)` clobbers the halfword at [sp,#4].
+      // The first is that the other ADDRESS-TAKEN objects are private, and it keys on ANY escape —
+      // this is the rule `mayWrite` does NOT narrow. Its argument is about LAYOUT, and layout is
+      // symmetric: two objects are two separate C locals with no guaranteed adjacency, so a device
+      // that READS past the one it was given is as wrong as a callee that writes past it. `DmaCopy`
+      // with a count of two halfwords off `&sp0` transfers `[sp,#2]` too, and the emitted source
+      // transfers whatever the recompiler put after `sp0` — with the store to the second object
+      // deleted outright, since only the escaping one is `volatile`. Marking both volatile would
+      // not repair that: the locals are still placed independently.
+      //
+      // ACCEPTED RESIDUE, so the rule is not read as wider than it is: it counts `laddr` objects,
+      // so a neighbour that is merely SPILLED to an SSA slot is over-read just the same and nothing
+      // refuses, and the audit never reads the transfer's control word, so an incrementing source
+      // is vouched for exactly as a fixed one is. Both are reads, so the `undef` argument holds
+      // either way, and both predate this rule.
       if (escaped.size > 0 && objects.size > 1) {
-        fail('the captured address escapes, so a callee may write any frame offset — including another object');
+        fail(
+          'the captured address escapes, so something outside this function reaches the whole ' +
+            'frame — including another object',
+        );
       }
       // The second is `undef`, which rests on this function's own stores being the ONLY writer of
       // its frame. A wider real object (`struct P p; g(&p);` where only `p.x` is read here) has its
@@ -2984,7 +3062,7 @@ export function lift(
       //
       // On an escape and not on "a laddr exists": an address dereferenced only in-function cannot
       // be written by anyone else, and the overlap checks above cover its aliasing.
-      if (escaped.size > 0 && irBlocks.some((blk) => blk.ops.some((op) => op.opcode === 'undef'))) {
+      if (mayWrite.size > 0 && irBlocks.some((blk) => blk.ops.some((op) => op.opcode === 'undef'))) {
         fail(
           'the captured address escapes, so a callee may write any frame offset and an unstored slot is not provably uninitialised',
         );

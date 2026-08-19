@@ -10,8 +10,11 @@
 //     pre-recovery pass, and idiom gating; a `div` on a target declaring no divider degrades to
 //     a loud opaque (exercised by packages/cli/test/matching/divmul.test.ts). `hwFloat` → idiom
 //     gating only (no float pass yet).
-//   • capabilities.endianness / flags → RESERVED hardware facts, not yet read by any pass
-//     (byte-addressing will consume endianness; PPC condition regs → flags).
+//   • capabilities.endianness → structureOptionsFor (`littleEndian`), gating LSB-first
+//     bitfield-extract recognition in the structurer.
+//   • capabilities.flags → RESERVED, not yet read by any pass (PPC condition regs will).
+//   • capabilities.readOnlyAddressSinks → the Thumb frame-object audit: a frame address stored to
+//     one of these reached a device that only reads through it, so it does not retract `undef`.
 //   • compilerBehaviors.* → all consumed by the structurer (threaded via StructureOptions).
 //
 // `capabilities` (HARDWARE facts) vs `compilerBehaviors` (COMPILER canonicalization choices) are
@@ -38,6 +41,16 @@ export interface TargetDescription {
     hwDivide: boolean; // consumed by patternApplies (idiom gating)
     hwFloat: boolean; // consumed by patternApplies (idiom gating)
     flags: boolean; // RESERVED — no pass reads it yet (PPC condition regs will)
+    // Addresses a device reads an object THROUGH. A frame address stored to one of these is handed
+    // over as a transfer SOURCE, and two facts together are what make that safe to model: the
+    // device only ever reads from it, and the register is WRITE-ONLY, so nobody can read the
+    // address back out and turn it into a destination. The only code that can name the frame is
+    // therefore this function's own, which the Thumb frame-object audit walks.
+    //
+    // Hardware, so it belongs here — `endianness` above is a board fact rather than an ISA one too
+    // (ARMv4T is bi-endian). ABSENT ⇒ every escape is assumed to write, which is the safe
+    // direction and what every other target gets.
+    readOnlyAddressSinks?: readonly number[];
   };
   // COMPILER BEHAVIORS — the specific compiler's canonicalization choices, distinct from
   // hardware `capabilities`. All consumed by the structurer (threaded through StructureOptions).
@@ -70,7 +83,24 @@ export const ARMV4T_AGBCC: TargetDescription = {
   compiler: 'agbcc',
   argRegs: ['r0', 'r1', 'r2', 'r3'],
   returnReg: 'r0',
-  capabilities: { endianness: 'little', hwDivide: false, hwFloat: false, flags: true },
+  // GBA hardware, which this target implies: agbcc is the GBA compiler and this is the only
+  // armv4t entry, so `armv4t + agbcc` is the platform. Stated because nothing else states it.
+  capabilities: {
+    endianness: 'little',
+    hwDivide: false,
+    hwFloat: false,
+    flags: true,
+    // The four DMA SOURCE registers (DMA0..3 SAD). Every vendored project spells the transfer the
+    // same way — `DmaSet(n, src, dest, control)` takes `vu32 *dmaRegs = REG_ADDR_DMA<n>SAD` and
+    // writes `dmaRegs[0] = src`, `dmaRegs[1] = dest`, `dmaRegs[2] = control` — so +0 is the address
+    // the engine reads from and the destination is 4 bytes above it. Source Address Control has
+    // three legal settings (increment, decrement, fixed) and every one of them is a read; the
+    // reload mode that could re-arm a transfer exists only on the DESTINATION side.
+    //
+    // The idiom this exists for is their `DMA_FILL`: `vu16 tmp = value;
+    // DmaSet(n, &tmp, dest, … DMA_SRC_FIXED …)`, where the frame local is the source.
+    readOnlyAddressSinks: [0x040000b0, 0x040000bc, 0x040000c8, 0x040000d4],
+  },
   compilerBehaviors: { coalesceLoopInit: false, preserveDivergentBranchSense: true, orderArgCopiesByComputation: true },
 };
 
