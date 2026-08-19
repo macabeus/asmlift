@@ -260,3 +260,84 @@ test('two in-body sides meeting below the loop bottom keep the CFG join — and 
   expect(() => emit(SCAN_RETURN_HIT)).not.toThrow();
   expect(() => emit(INNER_JOIN)).toThrow(StructureError);
 });
+
+// REFUSAL — the arm lands straight on the POST-LOOP join. `^bb5` dominates itself and `^bb2`
+// dominates `^bb5`, so ownership by dominance alone would claim it; but the loop's own exit reaches
+// it too, and emitting it on both paths writes `gOut` twice.
+const ARM_ON_POSTLOOP_JOIN = `fn sharedtail {
+^bb0(%0: s32*):
+  %1: s32 = const {value=0}
+  br ^bb1(%1)
+^bb1(%2: s32):
+  br ^bb2()
+^bb2():
+  %3: s32* = gaddr {sym="gF"}
+  %4: s32 = load %3 {off=0, signed=true, width=4}
+  %5: u32 = icmp_eq %4, %1
+  cond_br %5, ^bb5(%2), ^bb3()
+^bb3():
+  %6: s32 = const {value=1}
+  %7: s32 = add %2, %6
+  %8: s32 = const {value=10}
+  %9: u32 = icmp_slt %7, %8
+  cond_br %9, ^bb1(%7), ^bb4()
+^bb4():
+  %12: s32 = const {value=99}
+  br ^bb5(%12)
+^bb5(%10: s32):
+  %11: s32* = gaddr {sym="gOut"}
+  store %11, %10 {off=0, width=4}
+  ret %10
+}
+`;
+
+test('an arm landing on the post-loop join owns nothing — declines', () => {
+  expect(() => emit(SCAN_STORE_HIT)).not.toThrow();
+  expect(() => emit(ARM_ON_POSTLOOP_JOIN)).toThrow(StructureError);
+});
+
+// The same conditional latch with a value-only arm — the half that miscompiled on `main`, returning
+// the post-update value where the IR reads the loop variable before the update.
+const LATCH_ARM_RETURN = LATCH_ARM_STORE.replace(
+  '^bb3():\n  store %0, %2 {off=0, width=4}\n  br ^bb5(%8)',
+  '^bb3():\n  ret %2',
+);
+
+test('a conditional-latch arm returns the value the IR read, not the updated one', () => {
+  expect(LATCH_ARM_RETURN).not.toBe(LATCH_ARM_STORE);
+  expect(emit(LATCH_ARM_RETURN)).toContain(
+    '        if (gFlag != 0) {\n            v0 = v0 + 1;\n        } else {\n            return v0;\n        }\n',
+  );
+});
+
+// REFUSAL — a conditional-latch `break` whose POST-LOOP region reads the induction variable
+// directly. The break edge carries the pre-update value and the post-loop code renders after the
+// update, so `main` emitted `(i + 1) * 100`. `^bb3` is the loop's own exit, not an arm, so the
+// clamp cannot stand in for the CFG join either — the shape declines both ways out.
+const BREAK_POSTLOOP_READ = `fn brkpost {
+^bb0(%0: s32*):
+  %1: s32 = const {value=0}
+  br ^bb1(%1)
+^bb1(%2: s32):
+  %3: s32 = const {value=10}
+  %4: u32 = icmp_slt %2, %3
+  cond_br %4, ^bb2(), ^bb3()
+^bb2():
+  %5: s32* = gaddr {sym="gFlag"}
+  %6: s32 = load %5 {off=0, signed=true, width=4}
+  %7: u32 = icmp_eq %6, %1
+  %8: s32 = const {value=1}
+  %9: s32 = add %2, %8
+  cond_br %7, ^bb3(), ^bb1(%9)
+^bb3():
+  %10: s32 = const {value=100}
+  %11: s32 = mul %2, %10
+  store %0, %11 {off=0, width=4}
+  ret %11
+}
+`;
+
+test('a break whose post-loop region reads the pre-update induction value declines', () => {
+  expect(() => emit(LATCH_ARM_STORE)).not.toThrow();
+  expect(() => emit(BREAK_POSTLOOP_READ)).toThrow(StructureError);
+});

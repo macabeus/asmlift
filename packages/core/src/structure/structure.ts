@@ -575,9 +575,11 @@ interface LoopInfo {
   backArgOfParam: Value[]; // index-aligned with header.params
 }
 
-// One early-`return` exit out of a loop body: the edge that leaves, and the blocks that edge is the
-// only way to reach (`earlyReturnArm`). Kept per-EDGE, not flattened into per-loop sets — ownership
-// is a property of the edge, so a second edge into the same target is a different question.
+// One early-`return` exit out of a loop body (`earlyReturnArm`): the edge that leaves, plus the
+// blocks the loop may emit inside its body because only this edge reaches them. Per-EDGE rather than
+// flattened into per-loop sets: ownership is decided against `from`, so a second edge into the same
+// target is a separate question. `owned` has one reader, `emitDoWhile` — a `while` hoists no update,
+// so it has no pre-update reads to exempt.
 interface LoopArm {
   from: Block;
   to: Block;
@@ -600,7 +602,9 @@ interface WhileLoopInfo {
 // Opcodes that DO something a duplicate or a reorder would be visible in. `load`/`aload` are absent
 // deliberately: a pure read is not an effect (the def→render barrier scan in structure/analysis.ts
 // already proves where one may move). Distinct from switch-recover's `SIDE_EFFECTFUL`, which asks
-// the stricter "is this block pure" and so counts loads too.
+// the stricter "is this block pure" and so counts loads too. `headerPure` also wants `call` out of a
+// re-evaluated condition for a SECOND reason — `expr()` inlines a result at every use with no CSE —
+// so removing it here on effect grounds would quietly loosen that too.
 const OBSERVABLE_EFFECT = new Set(['store', 'astore', 'call', 'opaque']);
 
 // Opcodes whose NUMBER OF EXECUTIONS is observable. Moving one of these out of a loop changes what
@@ -906,16 +910,19 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
   // twice. A duplicated `return v` is harmless — both copies sit on mutually exclusive paths, so this
   // is a FIDELITY rule, not a soundness one: a store or call written twice is source no compiler
   // would have produced from this asm, and the region it drags along is unbounded. A block escapes
-  // that when `from` dominates `to` and `to` dominates the block — every path reaching it runs this
-  // edge's predecessor first and then this region, so the arm is where it belongs. That admits
-  // `if (found) { *out = hit; return out; }` while the shared epilogue it branches to still has to be
-  // pure. (Dominance alone does not make this edge the only one INTO `to`; a second edge is admitted
-  // on its own terms, and is not owned unless it dominates `to` too — which only one edge can.)
+  // that on two counts. `from` dominates `to` and `to` dominates the block, so every path reaching it
+  // runs this edge's predecessor and then this region — and only one edge into `to` can satisfy the
+  // first half, since two predecessors cannot both dominate it. And the region must not be reachable
+  // from the loop's own exit, which dominance does NOT rule out: an arm landing straight on the
+  // post-loop join dominates itself, and claiming it would emit the epilogue on both paths. Testing
+  // `to` covers the whole region — a block dominated by `to` that the exit reached would mean the
+  // exit reached `to`. What is left is `if (found) { *out = hit; return out; }`, with the shared
+  // epilogue it branches to still having to be pure.
   //
   // Returns the blocks the arm OWNS — its exclusive part, which the loop emits inside its body, ahead
   // of the update — or null when this is not an early-`return` arm.
-  const earlyReturnArm = (from: Block, to: Block, body: Set<Block>): Set<Block> | null => {
-    const entryOwned = dom.get(to)!.has(from);
+  const earlyReturnArm = (from: Block, to: Block, body: Set<Block>, exit: Block): Set<Block> | null => {
+    const entryOwned = dom.get(to)!.has(from) && to !== exit && !reachFrom(exit).has(to);
     const owned = new Set<Block>();
     const seen = new Set<Block>();
     const stack = [to];
@@ -1025,15 +1032,15 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     // Single loop exit (ret-aware): the chosen exit is the ONE real exit; every OTHER edge leaving
     // the body must be an early `return` (`earlyReturnArm`) or a ret-terminated target. A second exit
     // that lands on a LIVE non-return merge is a genuine `break`/second structured exit → decline.
-    // The arms are kept: emission needs to know which blocks outside the body the loop still reaches
-    // from inside it, and which of them it owns outright.
+    // The arms are kept: emission needs to know which edges out of the body end an iteration rather
+    // than continue it.
     const arms: LoopArm[] = [];
     let singleExit = true;
     for (const e of nl.exitEdges) {
       if (e.from === exitFrom && e.to === exit) {
         continue;
       }
-      const owned = earlyReturnArm(e.from, e.to, nl.body);
+      const owned = earlyReturnArm(e.from, e.to, nl.body, exit);
       if (owned) {
         arms.push({ from: e.from, to: e.to, owned });
       } else if (!isRet(e.to)) {
@@ -2327,6 +2334,13 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
       }
     }
 
+    // Is THIS edge one of the enclosing loop's admitted early-`return` arms? Keyed on the edge, not
+    // the target: `earlyReturnArm` decides ownership against `from`, so a second edge into the same
+    // block is a separate question. (No shape today tells the two spellings apart — a target both
+    // could reach is a pure ret-sink, which leaves the arms divergent and the clamp inert — so this
+    // holds the invariant rather than fixing an observed bug.)
+    const isArm = (t: Block) => !!loopCtx && loopCtx.arms.some((a) => a.from === b && a.to === t);
+
     // Conditional latch / in-body early exit: one edge of this cond_br is the loop back-edge (a
     // continue to `loopCtx.header`); the other LEAVES the loop. When the leaving edge lands on the
     // loop's own exit block it is a `break`; when it trampolines to a `return` it is an early `return`.
@@ -2379,11 +2393,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
         exitRegion,
         new Set(),
       );
-      if (
-        !hazard &&
-        !loopCtx.body.has(exitB) &&
-        ((isBreak && breakSafe) || (!isBreak && earlyReturnArm(b, exitB, loopCtx.body) !== null))
-      ) {
+      if (!hazard && !loopCtx.body.has(exitB) && ((isBreak && breakSafe) || (!isBreak && isArm(exitB)))) {
         out.push(...updateCopies); // the loop update, RAW (i++, p>>=1, …)
         let leaveCond = exprWith(sub)(term.operands[0]);
         if (contIsTaken) {
@@ -2416,13 +2426,12 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     // decline).
     //
     // `stop` stands in for the real join, so it has to BE the real join: one side must already end
-    // the iteration — an admitted arm (its `return` terminates that path) or the loop bottom itself.
-    // Two in-body sides meeting somewhere further down instead would each re-emit everything from
-    // there to the bottom, doubling per nesting level; those keep the CFG join and the old loud
-    // decline. Finding that inner join is what would lift the restriction (KNOWN GAP: it needs a
-    // post-dominator computed over the body alone, with the arms deleted rather than treated as
-    // exits — plain post-dominance cannot express "where the paths that did not return meet").
-    const isArm = (t: Block) => !!loopCtx?.arms.some((a) => a.from === b && a.to === t);
+    // this region — an admitted arm (its `return` terminates that path) or `stop` itself. Two sides
+    // meeting somewhere further down instead would each re-emit everything from there to the bottom,
+    // doubling per nesting level; those keep the CFG join and the old loud decline. Lifting that
+    // needs a post-dominator computed over the body alone with the arms DELETED — treating them as
+    // exits does not work, since post-dominance cannot express "where the paths that did not
+    // return meet".
     const clampToLoop =
       loopCtx !== null &&
       ipd !== null &&
@@ -2542,8 +2551,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     // The post-loop region the escaped-value check judges: everything the loop does not emit itself.
     // An early-`return` arm the loop OWNS renders inside the body, ahead of the update, so a read of
     // a loop variable there is the pre-update value it wants — counting it as post-loop would decline
-    // `if (found) { *out = list[i]; return out; }` for a hazard that cannot happen. A shared block
-    // the arm merely reaches stays post-loop: the other path really does read it after the update.
+    // `if (found) { *out = list[i]; return out; }` for a hazard that cannot happen. Blocks the arm
+    // merely reaches are excluded from `owned` and stay post-loop, where the other path reads them
+    // after the update.
     const owned = new Set(dw.arms.flatMap((a) => [...a.owned]));
     const postLoop = new Set(fn.blocks.filter((bb) => !dw.body.has(bb) && !owned.has(bb)));
     if (
