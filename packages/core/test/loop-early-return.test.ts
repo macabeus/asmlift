@@ -164,3 +164,99 @@ test('a store in the shared epilogue is not an arm the loop may own — declines
   expect(() => emit(SCAN_STORE_HIT)).not.toThrow();
   expect(() => emit(SHARED_EPILOGUE_EFFECT)).toThrow(StructureError);
 });
+
+// The OTHER arm site: a conditional latch, where one edge of the cond_br IS the back-edge. That
+// emitter puts the loop update ahead of the arm, so a value the arm reads has already moved on —
+// `store %out, %i` must render before `i++`, not after it.
+const LATCH_ARM_STORE = `fn latcharm {
+^bb0(%0: s32*):
+  %1: s32 = const {value=0}
+  br ^bb1(%1)
+^bb1(%2: s32):
+  %3: s32 = const {value=10}
+  %4: u32 = icmp_slt %2, %3
+  cond_br %4, ^bb2(), ^bb4()
+^bb2():
+  %5: s32* = gaddr {sym="gFlag"}
+  %6: s32 = load %5 {off=0, signed=true, width=4}
+  %7: u32 = icmp_eq %6, %1
+  %8: s32 = const {value=1}
+  %9: s32 = add %2, %8
+  cond_br %7, ^bb3(), ^bb1(%9)
+^bb3():
+  store %0, %2 {off=0, width=4}
+  br ^bb5(%8)
+^bb4():
+  br ^bb5(%1)
+^bb5(%10: s32):
+  ret %10
+}
+`;
+
+test('a conditional-latch arm stores the value the IR read, not the updated one', () => {
+  // The update moves into the `else`: reaching the arm means this iteration ended in a `return`, so
+  // the increment it would have run never happens.
+  expect(emit(LATCH_ARM_STORE)).toBe(
+    's32 latcharm(s32 * a0) {\n' +
+      '    s32 v0;\n' +
+      '    s32 v1;\n' +
+      '    v0 = 0;\n' +
+      '    while (v0 < 10) {\n' +
+      '        if (gFlag == 0) {\n' +
+      '            *a0 = v0;\n' +
+      '            v1 = 1;\n' +
+      '            return v1;\n' +
+      '        } else {\n' +
+      '            v0 = v0 + 1;\n' +
+      '        }\n' +
+      '    }\n' +
+      '    v1 = 0;\n' +
+      '    return v1;\n' +
+      '}\n',
+  );
+});
+
+// REFUSAL — two in-body sides that meet somewhere OTHER than the loop bottom. `stop` is not their
+// join, and using it anyway makes each side re-emit everything from the meeting point down: with the
+// guard dropped this emits `*a0 = 200` twice, correct but doubled, and doubled again per nesting
+// level. ^bb6 is where they meet; ^bb5 is the arm that pushes the CFG join out of the loop.
+const INNER_JOIN = `fn innerjoin {
+^bb0(%0: s32*):
+  %1: s32 = const {value=0}
+  br ^bb1(%1)
+^bb1(%2: s32):
+  %3: s32* = gaddr {sym="gF"}
+  %4: s32 = load %3 {off=0, signed=true, width=4}
+  %5: u32 = icmp_ne %4, %1
+  cond_br %5, ^bb3(), ^bb4()
+^bb3():
+  %6: s32 = const {value=100}
+  store %0, %6 {off=0, width=4}
+  br ^bb6()
+^bb4():
+  %7: s32* = gaddr {sym="gG"}
+  %8: s32 = load %7 {off=0, signed=true, width=4}
+  %9: u32 = icmp_ne %8, %1
+  cond_br %9, ^bb5(), ^bb6()
+^bb5():
+  %10: s32 = const {value=7}
+  br ^bb8(%10)
+^bb6():
+  %11: s32 = const {value=200}
+  store %0, %11 {off=0, width=4}
+  br ^bb7()
+^bb7():
+  %12: s32 = const {value=1}
+  %13: s32 = add %2, %12
+  %14: s32 = const {value=10}
+  %15: u32 = icmp_slt %13, %14
+  cond_br %15, ^bb1(%13), ^bb8(%1)
+^bb8(%16: s32):
+  ret %16
+}
+`;
+
+test('two in-body sides meeting below the loop bottom keep the CFG join — and decline', () => {
+  expect(() => emit(SCAN_RETURN_HIT)).not.toThrow();
+  expect(() => emit(INNER_JOIN)).toThrow(StructureError);
+});
