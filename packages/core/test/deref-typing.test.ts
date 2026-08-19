@@ -381,6 +381,64 @@ describe('C-family pointer-write legalization (the assign-side sibling, F6)', ()
     expect(src).toContain('return (s32 *)(a0 + a1);');
   });
 
+  test('a pointer value assigned into an INTEGER var gets the cast too (agbcc rejects it otherwise)', () => {
+    const src = cBackend.emit(
+      mk(
+        [
+          { k: 'assign', name: 'v0', value: { k: 'addr', name: 'sp0' } },
+          { k: 'return', value: C(0) },
+        ],
+        [
+          { name: 'v0', type: T.s(32) },
+          { name: 'sp0', type: T.u(16) },
+        ],
+      ),
+    );
+    expect(src).toContain('v0 = (s32)&sp0;');
+  });
+
+  test('a pointer STORED through an integer-element slot gets it as well', () => {
+    const src = cBackend.emit(
+      mk(
+        [
+          {
+            k: 'store',
+            lval: {
+              k: 'index',
+              base: { k: 'cast', to: T.ptr(T.s(32)), e: { k: 'addr', name: 'g' } },
+              idx: C(0),
+              width: 4,
+              signed: true,
+            },
+            value: { k: 'addr', name: 'sp0' },
+          },
+          { k: 'return', value: C(0) },
+        ],
+        [{ name: 'sp0', type: T.u(16) }],
+      ),
+    );
+    expect(src).toContain('= (s32)&sp0;');
+  });
+
+  test('same-side writes are left alone — the cast fires on the pointer/integer BOUNDARY only', () => {
+    const src = cBackend.emit(
+      mk(
+        [
+          { k: 'assign', name: 'v0', value: { k: 'bin', op: '+', l: V('a0'), r: V('a1') } },
+          { k: 'assign', name: 'p0', value: { k: 'addr', name: 'sp0' } },
+          { k: 'return', value: C(0) },
+        ],
+        [
+          { name: 'v0', type: T.s(32) },
+          { name: 'p0', type: T.ptr(T.u(16)) },
+          { name: 'sp0', type: T.u(16) },
+        ],
+      ),
+    );
+    expect(src).toContain('v0 = a0 + a1;');
+    expect(src).toContain('p0 = &sp0;');
+  });
+
   test('a call rendering is unknowable — left to prototypes, never cast', () => {
     const src = cBackend.emit(
       mk(

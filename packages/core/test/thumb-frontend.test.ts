@@ -250,8 +250,10 @@ describe('pre-UAL mnemonic spellings', () => {
     // GBATEK records that it is version-specific — new base on ARMv4, old base on ARMv5. This
     // frontend targets ARMv4T and used to emit the ARMv5 answer silently.
     expect(() => dc('f', '\tstm\tr4!, {r0, r2, r4}\n\tbx\tlr\n')).toThrow(/UNPREDICTABLE/);
-    // …but the LOWEST-entry case is defined (old base) and must still lift.
-    expect(dc('f', '\tstm\tr0!, {r0, r1}\n\tbx\tlr\n').source).toContain('*a0 = a0;');
+    // …but the LOWEST-entry case is defined (old base) and must still lift. The base arrives in the
+    // integer slot through the write legalization's cast — `*a0 = a0` is the pointer-into-integer
+    // assignment agbcc rejects.
+    expect(dc('f', '\tstm\tr0!, {r0, r1}\n\tbx\tlr\n').source).toContain('*a0 = (s32)a0;');
   });
 
   test('a decline names the spelling the INPUT used, not the canonical one', () => {
@@ -931,7 +933,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     // makes it addressable), so the qualifier is about reproducing the declaration, not about
     // surviving DCE; it still changes register allocation, so it still has to be right.
     expect(decompile('f', dmaFill, ARMV4T_AGBCC).source).toBe(
-      's32 f(void) {\n    volatile u16 sp0;\n    sp0 = 0;\n    *(s32 *)67109076 = &sp0;\n    return 0;\n}\n',
+      's32 f(void) {\n    volatile u16 sp0;\n    sp0 = 0;\n    *(s32 *)67109076 = (s32)&sp0;\n    return 0;\n}\n',
     );
     // …and the object co-exists with SSA slots at higher offsets, each model owning its own bytes
     const mixed =
@@ -953,7 +955,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tmov\tr4, sp\n\tldr\tr2, .L1\n\tmov\tr1, sp\n\tstr\tr1, [r2]\n' +
       '\tmov\tr0, #0\n\tstrh\tr0, [r4]\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n.L1:\n\t.word\t0x40000D4\n';
     expect(decompile('f', publishThenFill, ARMV4T_AGBCC).source).toBe(
-      's32 f(void) {\n    volatile u16 sp0;\n    *(s32 *)67109076 = &sp0;\n    sp0 = 0;\n    return 0;\n}\n',
+      's32 f(void) {\n    volatile u16 sp0;\n    *(s32 *)67109076 = (s32)&sp0;\n    sp0 = 0;\n    return 0;\n}\n',
     );
   });
 
