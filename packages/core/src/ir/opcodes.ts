@@ -205,21 +205,22 @@ export const NEGATED_ICMP: Readonly<Record<string, Opcode>> = Object.fromEntries
 );
 
 /** Ops with an observable side effect: the flag on the signature, derived rather than re-listed.
- *  Consumed by `isDceSafe`, by `HOIST_UNSAFE_OPS` below, and by structure.ts's `sideEffects` walk
- *  (an effectful op whose result nobody reads is still an execution). */
+ *  Consumed by `isDceSafe`, by `HOIST_UNSAFE_OPS` below, by structure.ts's `sideEffects` walk (an
+ *  effectful op whose result nobody reads is still an execution), by analysis.ts's memory-write
+ *  barrier, and by divpow2's bias block, which is DELETED rather than moved. Those last three each
+ *  carried a hand-written copy of this membership, which is how the models drifted apart before. */
 export const EFFECTFUL_OPS: ReadonlySet<string> = new Set(
   (Object.keys(OPCODES) as Opcode[]).filter((k) => (OPCODES[k] as OpSig).effects),
 );
 
 /** Ops that may not be SPECULATED — run on a path that did not run them before. Identical to
- *  `EFFECTFUL_OPS`, and kept as its own name because the call sites ask the speculation question
- *  rather than the deletion one. Derived here rather than re-spelled per consumer:
- *  structure/analysis.ts and structure/structure.ts each carry their own inline copy of this
- *  membership, which is how the two models drifted apart in the first place.
+ *  `EFFECTFUL_OPS`, and kept as its own name because its call sites ask the speculation question
+ *  rather than the deletion one.
  *
- *  A memory read is deliberately absent, and that is the one entry worth arguing: both consumers
- *  hoist an arm's body into the block above, and the structurer inlines an unnamed value back into
- *  the `&&`/`||` right-hand side, where C's own short-circuit re-guards it. Adding the two reads
+ *  A memory read is deliberately absent, and that is the one entry worth arguing: its only consumer
+ *  is raise/shortcircuit.ts, which hoists an arm's body into the block above, and the structurer
+ *  inlines an unnamed value back into the `&&`/`||` right-hand side, where C's own short-circuit
+ *  re-guards it. Adding the two reads
  *  here costs three byte-matches (kleod:UpdateHUDCounterDisplay, synthetic:breakloop,
  *  synthetic:strcmp1), so the argument is load-bearing rather than merely plausible.
  *

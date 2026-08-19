@@ -228,9 +228,9 @@ describe('sinkablePreUpdateSlots', () => {
   });
 
   test('the two arg gates are a PARTITION — ablating one does not disable the other', () => {
-    // `add(mid, *p)` trips both: a body-computed name AND a memory read. With one blocker per
-    // gate and a walk that stopped at the first, ablating the name gate would have admitted the
-    // load as well — the ablation would then be measuring less than its name says.
+    // `add(mid, *p)` trips both: a body-computed name AND a memory read. Each gate must still
+    // refuse it with the other one dropped — otherwise ablating either measures less than its
+    // name says, and a walk that reported only the first blocker it found would do exactly that.
     const { p, q, header, exit, body } = scaffold();
     const mid = v();
     const rd = v();

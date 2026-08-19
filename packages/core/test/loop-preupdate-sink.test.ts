@@ -6,9 +6,13 @@
 //
 // Both loop emitters that place the update at the bottom of the body are covered — the
 // guard-fused `while` (which must also SEED the copy for the zero-trip path it fuses away) and
-// the `do-while` (which needs no seed: its body always runs). Every refusal case runs the
-// accepted fixture as a positive control first, so a decline for the wrong reason cannot read as
-// a pass.
+// the `do-while` (which needs no seed: its body always runs).
+//
+// A refusal test that declines for the WRONG reason reads as a pass, so each one pins the message
+// and carries a positive control: either the accepted fixture emitted first, or — where the
+// refusal turns on one fact — the same IR with that fact changed. The two body-rebind fixtures are
+// the exception: the shape they refuse cannot be spelled without the rebind, so the message is all
+// they pin.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -282,9 +286,9 @@ test('a trapping op in the tree is not rebuilt at the top of the body — an arm
 });
 
 // REFUSAL — a merge inside the body writes a loop variable's NAME (a body param adopts it), and
-// the update reads that name raw at the bottom. The emitted loop is wrong with or without a sunk
-// copy, and was already wrong before the sink learned to rebuild — so the sink stands down and
-// leaves the function declining, rather than unlocking a loop it cannot make right.
+// everything the loop emits after that arm reads the name raw. The emitted loop is wrong with or
+// without a sunk copy — a naming-pipeline defect — so the sink stands down and leaves the function
+// declining, rather than unlocking a loop it cannot make right.
 const BODY_REBINDS_LOOP_VAR = `fn rebind {
 ^bb0(%0: s32, %1: s32):
   %2: s32* = gaddr {sym="gbuf"}

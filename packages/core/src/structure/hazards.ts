@@ -9,8 +9,9 @@
 //     that replaces it.
 //
 // WHAT MAKES A SUNK COPY LEGAL. The exit edge's value is not moved, it is REBUILT: the copy lands
-// at the top of the body and spells the arg's def-tree again there. Two things have to hold, and
-// `PREUPDATE_SINK_GATES` is one gate per thing.
+// at the top of the body and spells the arg's def-tree again there. Two things have to hold — the
+// tree gives the same answer there, and every name it reads still denotes the same value — and the
+// arg gates in `PREUPDATE_SINK_GATES` are those two plus the degenerate leaf that is neither.
 //
 // The tree must give the same answer at the new point. Two ways it might not, and `REEVAL_UNSAFE_OPS`
 // is the registry view that names both. ORDER: the copy opens the body, so a load in the tree would
@@ -278,8 +279,7 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
   // param makes the other slot fail `dest-not-loop-variable`; a body-defined value is
   // `stale-name`; and a value defined outside the loop but read on the exit edge is live-in at the
   // header (analysis.ts counts a successor arg as a use at the predecessor's end), which makes the
-  // other slot fail `dest-free-inside-loop`. Widening the arg from a bare variable to a whole
-  // def-tree is what made that worth writing down.
+  // other slot fail `dest-free-inside-loop`.
   const sinkablePreUpdateSlots = (
     header: Block,
     exit: Block,
@@ -320,11 +320,17 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     // Is `v` defined by the loop body itself — an op in one of its blocks, or a block param?
     // Everything that stops `a` from being REBUILT at the top of the body. Walks the def-tree
     // where `exprWith(null)` will when the copy is spelled — stopping at a NAMED value, which
-    // renders as its name, and at a value with no reaching def, which renders as a gap. The walk
-    // OVER-approximates what renders, which is the safe direction: `lowerDef` recurses only into
-    // `d.operands` (and some spellings discard a subtree outright, e.g. the bitfield fold), so
-    // every value it reaches is one this visited. A lowering that reached for a value OUTSIDE its
-    // op's operands would break that, and is the change to watch for.
+    // renders as its name, and at a value with no reaching def, which renders as a gap.
+    //
+    // The walk OVER-approximates what renders, which is the safe direction: `lowerDef` recurses
+    // only through `e(d.operands[...])`, so every value it reaches is one this visited. Two things
+    // would break that. A lowering reaching for a value OUTSIDE its op's operands — none does
+    // today, and it is the change to watch for. And a lowering that DISCARDS the operand tree and
+    // spells something else: `respelledDefs` is that case, refused outright below rather than
+    // walked, because what it renders is a memory read this walk would never have seen.
+    //
+    // `undef` and `laddr` render a name from their own side maps rather than `varName`, and both
+    // are position-independent — an `undef` is never assigned, a `laddr` is an address.
     const blockersOf = (a: Value): ReadonlySet<ArgBlocker> => {
       const seen = new Set<Value>();
       const found = new Set<ArgBlocker>();

@@ -2528,14 +2528,15 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
   const loopSub = (li: LoopInfo): Map<Value, string> => subFor(li.header.params, li.backArgOfParam);
 
   // The sunk exit copies, as body statements: `dest = <the arg, rebuilt here>`. The sink's gates
-  // are stated against exactly `exprWith(null)` — every name it stops at holds, at the top of the
-  // body, what it held where the edge read it — so the arg is spelled with no substitution. Slot
-  // order keeps it deterministic.
+  // are stated against `exprWith(null)` — every name it stops at holds, at the top of the body,
+  // what it held where the edge read it — so the arg is spelled with no substitution. Slot order
+  // keeps it deterministic.
   //
   // NOT `expr`: an ambient `activeSub` is an ENCLOSING loop's post-loop naming, which the sink's
-  // walk does not model. This is a SCOPE LIMIT, not a rule about the shape — a bare loop variable
-  // was spelled by name here before the walk existed and keeps that behaviour; only a REBUILT
-  // tree, the thing the walk vouches for, is refused where the walk was not asked.
+  // walk does not model, so a REBUILT tree here would be spelled under names that substitution has
+  // redefined. DEFENSIVE — no input reaches it: instrumenting this line across the whole suite,
+  // `activeSub` is null at every call. It stays because the failure it names is silent (a wrong
+  // value, not a gap) and the cost of keeping it is one branch.
   //
   // The destination name is read as an invariant, not checked: every block param carries one.
   // `assertResolved` is what catches a widening that breaks that.
@@ -2623,16 +2624,13 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     // and everything rendered after it reads the name RAW: the update, the bottom test, the
     // header's own ops, the latch's side effects.
     //
-    // The refusal is therefore on the NAME, not on who reads it. Screening the readers is what an
-    // earlier version did, and it missed a store in the latch reading the clobbered name — the
-    // set of readers is every statement the loop emits, which is not a set worth enumerating when
-    // the name itself is the whole signal.
+    // The refusal is on the NAME, not on who reads it: the readers are every statement the loop
+    // emits, which is not a set worth enumerating when the name alone is the whole signal.
     //
-    // The emitted C is wrong whenever this shape occurs, with or without a sink, and identically
-    // so on the commit before this one — it is a naming-pipeline defect, not this pass's. What IS
-    // this pass's is not to UNLOCK such a loop: without a sink these functions decline on the
-    // pre-update hazard, so standing down keeps them loud rather than trading a decline for a
-    // silent wrong answer.
+    // The emitted C is wrong whenever this shape occurs, sink or no sink — it is a naming-pipeline
+    // defect, not this pass's, and repairing the exit copy does not touch it. What IS this pass's
+    // is not to UNLOCK such a loop: with no sink these functions decline on the pre-update hazard,
+    // so standing down keeps them loud rather than trading a decline for a silent wrong answer.
     const headerNames = new Set(dw.header.params.map((p) => varName.get(p)));
     const bodyRebinds = new Set<string>();
     for (const bb of dw.body) {
