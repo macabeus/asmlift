@@ -461,12 +461,18 @@ export const SYNTHETIC: SynthSpec[] = [
   // the post-update name is an off-by-one-iteration miscompile, but it costs 29 functions across
   // the klonoa/sa3/newlib corpus and no other benchmark row reproduces it.
   //
-  // ONE decline message, THREE causes, which is the point of authoring three rows: the message
+  // ONE decline message, THREE causes, which is the point of authoring several rows: the message
   // groups them and the fix does not. `preupdate_cond` is the loop CONDITION reading it,
   // `preupdate_exit` is the EXITING EDGE carrying it, and `preupdate_escape` is a body value read
   // after the loop deriving from it. Only the middle one reaches the repair that already exists
   // (`sinkablePreUpdateSlots`, the trailing-pointer sink) and is turned away there by the
   // `arg-is-loop-variable` gate, which is where every real function on this link is refused.
+  //
+  // DEPTH, not just cause. Ablating that gate structures 10 of the 12 real EXIT functions outright,
+  // so for them it is the LAST link — and a row is only evidence for the fix if it flips with them.
+  // `preupdate_exit` does. `preupdate_exit_call` is the same shape carrying a CALL on the exit edge
+  // and stops one guard later ("a post-loop value inlines a 'call' from inside the loop"), which is
+  // the other two functions; it is here so that closing the gate cannot read as closing the bucket.
   //
   // agbcc only, and the reason is the whole point: the shape IS the ARM rotation. Given the same C,
   // ido/kmc/mwcc schedule the update after the test and the pre-update read never arises, so the
@@ -481,14 +487,23 @@ export const SYNTHETIC: SynthSpec[] = [
   {
     sym: 'preupdate_exit',
     src:
-      'int cb(int *p);\n' +
       'int preupdate_exit(int *p, int n, int m){ int r = m; int *q;' +
+      ' if (n > 0) { q = p + n; do { r = *q + n; q = q - 1; } while (--n); } return r; }',
+    features: ['loop-preupdate'],
+    toolchains: ['agbcc'],
+    note: '`q = p + n` is a preheader, without which the guard fuses and the decline is a different one',
+  },
+  {
+    sym: 'preupdate_exit_call',
+    src:
+      'int cb(int *p);\n' +
+      'int preupdate_exit_call(int *p, int n, int m){ int r = m; int *q;' +
       ' if (n > 0) { q = p + n; do { r = cb(q); q = q - 1; } while (--n); } return r; }',
     features: ['loop-preupdate'],
     toolchains: ['agbcc'],
     ctx: 'int cb(int*);',
     proto: { cb: { params: 1 } },
-    note: 'the `_wrapup_reent` shape — `q = p + n` is a preheader, without which the guard fuses and the decline is a different one',
+    note: 'the same shape with a CALL on the exit edge — a second link behind the gate, so it must NOT flip when the gate does',
   },
   {
     sym: 'preupdate_escape',
