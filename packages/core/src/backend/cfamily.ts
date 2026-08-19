@@ -419,22 +419,21 @@ function endsTerminated(body: Stmt[]): boolean {
  *  SIGNATURE (return type + name + params, plus any C++ scope/`this`/mangling) is the caller's —
  *  that is the language-divergent part each backend owns. */
 // C-FAMILY WRITE LEGALIZATION (the assign-side sibling of the deref legalization in printExpr):
-// a write across the pointer/integer boundary needs the reinterpret cast to the DECLARED type,
-// exactly what the machine's register move does. It runs in BOTH directions because C constrains
-// both: an integer into a pointer slot (`v2 = a1 + v0` with `v2: u8 *`; `return a0 + v0` from a
-// ptr-returning fn; `*pp = intexpr` through a pointer-element slot) is an error on mwcc and a
-// warning on gcc, and a pointer into an integer slot (`*(s32 *)&REG_DMA3SAD = &sp0` — a frame
-// address handed to the DMA engine) is agbcc's "assignment makes integer from pointer without a
-// cast", which the benchmark's compile step treats as failure.
+// a value whose rendered C type is definitely NON-pointer written into a pointer-declared slot
+// (`v2 = a1 + v0` with `v2: u8 *`; `return a0 + v0` from a ptr-returning fn; `*pp = intexpr`
+// through a pointer-element slot) is an ERROR on mwcc (gcc merely warns) — the honest spelling
+// is the reinterpret cast to the DECLARED type, exactly what the machine's register move does.
 // Unknowable renderings (calls) are left alone: their C type comes from prototypes outside this
 // function. (A rebuilding transform with per-kind semantics — its own switch, per the l3/ast.ts
 // traversal-vocabulary exemption.)
 function legalizePointerWrites(fn: SFn): SFn {
   const vt = declaredTypes(fn);
-  const isPtr = (t: IrType) => t.kind === 'ptr' || t.kind === 'array';
   const castTo = (t: IrType | undefined, e: Expr): Expr => {
-    const ct = t && exprCType(e, vt);
-    return ct && t.kind !== 'array' && isPtr(t) !== isPtr(ct) ? { k: 'cast', to: t, e } : e;
+    if (t?.kind !== 'ptr') {
+      return e;
+    }
+    const ct = exprCType(e, vt);
+    return ct && ct.kind !== 'ptr' && ct.kind !== 'array' ? { k: 'cast', to: t, e } : e;
   };
   const fix = (s: Stmt): Stmt => {
     switch (s.k) {

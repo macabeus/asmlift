@@ -148,14 +148,10 @@ export function exprCType(e: Expr, varType: (name: string) => IrType | undefined
     }
     case 'marker':
       return undefined;
-    // `&x` is a pointer to whatever `x` was DECLARED as — which this function knows for a frame
-    // local, a param, or a shape-known project global, and does not know for any other global
-    // (its type lives in the project headers). Unknowable stays undefined; callers treat that
-    // conservatively (the deref of an addr is simplified away in structure.ts before it reaches a
-    // legalization decision).
-    case 'addr': {
-      const t = varType(e.name);
-      return t && T.ptr(t);
-    }
+    // `&gSym` is a pointer, but the global's type comes from the project headers — not knowable
+    // here. Callers treat undefined conservatively (the deref of an addr is simplified away in
+    // structure.ts before it reaches a legalization decision).
+    case 'addr':
+      return undefined;
   }
 }
