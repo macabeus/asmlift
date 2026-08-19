@@ -482,7 +482,9 @@ export const SYNTHETIC: SynthSpec[] = [
     src: 'int preupdate_cond(int i){ int b = 0; if (i == 0) return 0; while (((i >> b++) & 1) == 0) ; return b; }',
     features: ['loop-preupdate'],
     toolchains: ['agbcc'],
-    note: "the `ffs` shape: `b++` renders inside the condition's own operand, so the update cannot simply move",
+    note:
+      "a post-increment inside the loop condition's own operand (`i >> b++`), so the test reads the " +
+      'value the variable held one step before the update the compiler has already emitted',
   },
   {
     sym: 'preupdate_exit',
@@ -491,7 +493,10 @@ export const SYNTHETIC: SynthSpec[] = [
       ' if (n > 0) { q = p + n; do { r = *q + n; q = q - 1; } while (--n); } return r; }',
     features: ['loop-preupdate'],
     toolchains: ['agbcc'],
-    note: '`q = p + n` is a preheader, without which the guard fuses and the decline is a different one',
+    note:
+      "the loop's exiting edge carries a value computed from the loop variables BEFORE their update " +
+      '(`*q + n`). The `q = p + n` init is load-bearing: without a preheader the entry guard fuses ' +
+      'into the loop and the function is refused for an unrelated reason',
   },
   {
     sym: 'preupdate_exit_call',
@@ -503,7 +508,10 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc'],
     ctx: 'int cb(int*);',
     proto: { cb: { params: 1 } },
-    note: 'the same shape with a CALL on the exit edge — a second link behind the gate, so it must NOT flip when the gate does',
+    note:
+      "an exiting edge carrying a CALL's result computed from the pre-update loop variable. The call " +
+      'is a SECOND refusal sitting behind the pre-update one, so this row is expected to stay ' +
+      'declined even once the pre-update read itself is recovered',
   },
   {
     sym: 'preupdate_escape',
@@ -515,7 +523,9 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc'],
     ctx: 'struct N; void preupdate_escape(struct N*,int,int**);',
     proto: { preupdate_escape: { returnsVoid: true } },
-    note: 'the trailing-pointer idiom with a DERIVED trailing value — `&f->v`, not `f` itself',
+    note:
+      'the trailing-pointer idiom where the trailing value is DERIVED from the loop variable ' +
+      '(`&f->v`) rather than being the variable itself, and is read after the loop has moved on',
   },
 
   // The DMA-fill idiom, WITH an uninitialised local — the pair no real row carries. An escaping
