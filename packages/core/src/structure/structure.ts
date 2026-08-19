@@ -575,11 +575,10 @@ interface LoopInfo {
   backArgOfParam: Value[]; // index-aligned with header.params
 }
 
-// One early-`return` exit out of a loop body (`earlyReturnArm`): the edge that leaves, plus the
-// blocks the loop may emit inside its body because only this edge reaches them. Per-EDGE rather than
-// flattened into per-loop sets: ownership is decided against `from`, so a second edge into the same
-// target is a separate question. `owned` has one reader, `emitDoWhile` — a `while` hoists no update,
-// so it has no pre-update reads to exempt.
+// One early-`return` exit out of a loop body, and the blocks of it the loop emits inside its body
+// (`earlyReturnArm` decides which). Per-EDGE rather than flattened into per-loop sets: ownership is
+// decided against `from`, so a second edge into the same target is a separate question. `owned` has
+// one reader, `emitDoWhile` — a `while` hoists no update, so it has no pre-update reads to exempt.
 interface LoopArm {
   from: Block;
   to: Block;
@@ -916,8 +915,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
   // from the loop's own exit, which dominance does NOT rule out: an arm landing straight on the
   // post-loop join dominates itself, and claiming it would emit the epilogue on both paths. Testing
   // `to` covers the whole region — a block dominated by `to` that the exit reached would mean the
-  // exit reached `to`. What is left is `if (found) { *out = hit; return out; }`, with the shared
-  // epilogue it branches to still having to be pure.
+  // exit reached `to`. The shared epilogue an arm branches to still has to be pure.
   //
   // Returns the blocks the arm OWNS — its exclusive part, which the loop emits inside its body, ahead
   // of the update — or null when this is not an early-`return` arm.
@@ -2334,11 +2332,10 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
       }
     }
 
-    // Is THIS edge one of the enclosing loop's admitted early-`return` arms? Keyed on the edge, not
-    // the target: `earlyReturnArm` decides ownership against `from`, so a second edge into the same
-    // block is a separate question. (No shape today tells the two spellings apart — a target both
-    // could reach is a pure ret-sink, which leaves the arms divergent and the clamp inert — so this
-    // holds the invariant rather than fixing an observed bug.)
+    // Is THIS edge one of the enclosing loop's admitted early-`return` arms? Keyed on the edge
+    // because ownership is: a second edge into the same block is a separate question. No shape today
+    // separates it from keying on the target alone — this holds the invariant, it does not fix an
+    // observed bug.
     const isArm = (t: Block) => !!loopCtx && loopCtx.arms.some((a) => a.from === b && a.to === t);
 
     // Conditional latch / in-body early exit: one edge of this cond_br is the loop back-edge (a
@@ -2551,9 +2548,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     // The post-loop region the escaped-value check judges: everything the loop does not emit itself.
     // An early-`return` arm the loop OWNS renders inside the body, ahead of the update, so a read of
     // a loop variable there is the pre-update value it wants — counting it as post-loop would decline
-    // `if (found) { *out = list[i]; return out; }` for a hazard that cannot happen. Blocks the arm
-    // merely reaches are excluded from `owned` and stay post-loop, where the other path reads them
-    // after the update.
+    // the loop for a hazard that cannot happen. Blocks the arm merely reaches are not `owned`, and stay
+    // post-loop where the other path really does read them after the update.
     const owned = new Set(dw.arms.flatMap((a) => [...a.owned]));
     const postLoop = new Set(fn.blocks.filter((bb) => !dw.body.has(bb) && !owned.has(bb)));
     if (
