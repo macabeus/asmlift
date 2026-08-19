@@ -468,15 +468,24 @@ export const SYNTHETIC: SynthSpec[] = [
   // (`sinkablePreUpdateSlots`, the trailing-pointer sink) and is turned away there by the
   // `arg-is-loop-variable` gate, which is where every real function on this link is refused.
   //
-  // DEPTH, not just cause. Ablating that gate structures 10 of the 12 real EXIT functions outright,
-  // so for them it is the LAST link — and a row is only evidence for the fix if it flips with them.
-  // `preupdate_exit` does. `preupdate_exit_call` is the same shape carrying a CALL on the exit edge
-  // and stops one guard later ("a post-loop value inlines a 'call' from inside the loop"), which is
-  // the other two functions; it is here so that closing the gate cannot read as closing the bucket.
+  // DEPTH, and then WHAT THE ARG IS. For 11 of the 12 real EXIT functions that gate is the LAST
+  // link, but they do not all need the same thing behind it: the copy is spelled from the arg's
+  // NAME, so a computed arg needs an expression, and what its def-tree holds decides whether one
+  // can be placed at the top of the body at all. Measured over the corpus, the tree is PURE
+  // arithmetic over a loop variable in 11 of 12 (`preupdate_exit_pure`), a memory READ in none
+  // (`preupdate_exit`), and a CALL in one (`preupdate_exit_call`, and `_wrapup_reent`, which stops
+  // one guard later still on "a post-loop value inlines a 'call' from inside the loop").
+  //
+  // So the three EXIT rows are the three tiers, not three copies: a fix for the pure tier closes
+  // the real bucket and must leave the other two declined, which is what makes them controls
+  // rather than duplicates. The pure row puts a STORE in the body AHEAD of the def, which is the
+  // harder of the two shapes the corpus has — ten of the twelve have no effect in the latch block
+  // at all, and `LoadBGTilemapData`, the function this link is being walked for, is the one that
+  // does. A pure tree may be recomputed across it; a tree that read memory could not.
   //
   // agbcc only, and the reason is the whole point: the shape IS the ARM rotation. Given the same C,
   // ido/kmc/mwcc schedule the update after the test and the pre-update read never arises, so the
-  // rows would be three more ordinary loops on those toolchains rather than coverage.
+  // rows would be four more ordinary loops on those toolchains rather than coverage.
   {
     sym: 'preupdate_cond',
     src: 'int preupdate_cond(int i){ int b = 0; if (i == 0) return 0; while (((i >> b++) & 1) == 0) ; return b; }',
@@ -497,6 +506,19 @@ export const SYNTHETIC: SynthSpec[] = [
       "the loop's exiting edge carries a value computed from the loop variables BEFORE their update " +
       '(`*q + n`). The `q = p + n` init is load-bearing: without a preheader the entry guard fuses ' +
       'into the loop and the function is refused for an unrelated reason',
+  },
+  {
+    sym: 'preupdate_exit_pure',
+    src:
+      'int preupdate_exit_pure(int *p, int n, int m){ int r = m; int *q;' +
+      ' if (n > 0) { q = p + n; do { *q = n; r = n << 3; q = q - 1; } while (--n); } return r; }',
+    features: ['loop-preupdate'],
+    toolchains: ['agbcc'],
+    note:
+      "the loop's exiting edge carries PURE arithmetic over the loop variable (`n << 3`), computed " +
+      'before the update and read after the loop. The body stores through a second loop variable ' +
+      'first, so the value the edge carries is defined behind an effect it must not be reordered ' +
+      'across — the shape every real function on this decline has',
   },
   {
     sym: 'preupdate_exit_call',
