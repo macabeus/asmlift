@@ -112,10 +112,9 @@ test('do-while: the trailing copy opens the body and leaves nothing behind after
   );
 });
 
-// REFUSAL — the exit arg COMPUTES from the loop variable instead of being it. The copy would land
-// at the TOP of the body, where a body-computed value still holds the PREVIOUS iteration, and the
-// copy builder has only a name path to spell it with. The `do-while` and fused-guard variants stop
-// at DIFFERENT refusals, which is what each test pins.
+// The exit arg COMPUTES from the loop variable instead of being it. The copy is REBUILT at the top
+// of the body, where the loop variable's name still holds the value the edge read, so the
+// arithmetic is spelled again there rather than moved.
 const TRAILING_PTR_EXPR = TRAILING_PTR.replace(
   '  cond_br %5, ^bb1(%4), ^bb2(%3, %4)',
   '  %9: s32* = add %3, %0\n  cond_br %5, ^bb1(%4), ^bb2(%9, %4)',
@@ -165,19 +164,22 @@ const ZERO_TRIP_VALUE_LOST = `fn fusedrop {
 }
 `;
 
-test('an exit arg that COMPUTES from the loop variable is not sinkable — still declines', () => {
+test('do-while: a PURE computed exit arg is rebuilt at the top of the body', () => {
   expect(TRAILING_DOWHILE_EXPR).not.toBe(TRAILING_DOWHILE); // the one-fact edit landed
-  expect(() => emit(TRAILING_DOWHILE)).not.toThrow(); // control: the base shape IS accepted
-  // The message, not just a throw. Neither fixture reaches the sink's own gate as its refusal —
-  // this one stops at the pre-update hazard, the fused-guard one at the zero-trip rule — so only
-  // pinning WHICH refusal keeps a widened gate from passing on someone else's.
-  expect(() => emit(TRAILING_DOWHILE_EXPR)).toThrow(/do-while condition or a post-loop value/);
+  // `v3 = v0 + 1` where the bare-variable fixture writes `v3 = v0`: the same slot, the same place,
+  // the arithmetic the edge carried spelled again over the name that still holds v0 there.
+  expect(emit(TRAILING_DOWHILE_EXPR)).toBe(
+    emit(TRAILING_DOWHILE).replace('            v3 = v0;\n', '            v3 = v0 + 1;\n'),
+  );
 });
 
-test('the same edit under a fused guard declines too, on the zero-trip rule', () => {
+test('the same edit under a fused guard sinks too, and the guard edge supplies the seed', () => {
   expect(TRAILING_PTR_EXPR).not.toBe(TRAILING_PTR);
-  expect(() => emit(TRAILING_PTR)).not.toThrow();
-  expect(() => emit(TRAILING_PTR_EXPR)).toThrow(/zero-trip run/);
+  // The seed is the GUARD edge's own value (`&head`), not the loop's expression: a zero-trip run
+  // never computed `v0 + a0`. Only the in-loop copy carries the arithmetic.
+  expect(emit(TRAILING_PTR_EXPR)).toBe(
+    emit(TRAILING_PTR).replace('        v1 = v0;\n', '        v1 = v0 + (s32)a0;\n'),
+  );
 });
 
 test('a guard not provably the loop test is not sinkable — declines instead of vanishing', () => {

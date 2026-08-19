@@ -8,6 +8,21 @@
 //     the loop's entry state so a guard about to be fused away can be checked against the test
 //     that replaces it.
 //
+// WHAT MAKES A SUNK COPY LEGAL. The exit edge's value is not moved, it is REBUILT: the copy lands
+// at the top of the body and spells the arg's def-tree again there. Two things have to hold, and
+// `PREUPDATE_SINK_GATES` is one gate per thing.
+//
+// The tree must give the same answer at the new point. Nothing is SPECULATED — the arg is read by
+// the latch terminator, so its def dominates the latch, and in a single-latch loop that means it
+// already ran once per iteration — so the only question is order, and the only ops whose answer
+// depends on it are effects and memory reads (`ORDER_SENSITIVE_OPS`). The copy opens the body, so
+// a load in the tree would move ahead of every store the body makes.
+//
+// And every name the rebuilt expression reads must still denote the same value there. A loop
+// variable does: the update sits at the bottom, so at the top of the body its name holds exactly
+// the value the edge read. A name the body itself defines does NOT — at the top of the body it
+// still holds the previous iteration.
+//
 // Every check is PURE: it reads the analysis maps and decides, nothing mutates.
 //
 // The factory takes its dependencies EXPLICITLY (`LoopHazardDeps`), the switch-recover pattern.
@@ -15,7 +30,7 @@
 // the naming pipeline when the factory is created, and each hazard check reads whatever names
 // exist at CALL time (emission runs after naming completes). Snapshotting them would break this.
 import { Block, Op, Value } from '../ir/core';
-import { NEGATED_ICMP } from '../ir/opcodes';
+import { NEGATED_ICMP, ORDER_SENSITIVE_OPS } from '../ir/opcodes';
 import { Stmt } from '../l3/ast';
 import { type Gate, firstRejection } from '../l3/gates';
 import type { UseSite } from './analysis';
@@ -68,10 +83,14 @@ export interface LoopHazards {
 export const updateWriteSet = (updates: Stmt[]): Set<string> =>
   new Set(updates.filter((st): st is Extract<Stmt, { k: 'assign' }> => st.k === 'assign').map((st) => st.name));
 
+/** Why an exit arg cannot be REBUILT at the top of the loop body — see the note above
+ *  `PREUPDATE_SINK_GATES`. `null` means it can. */
+export type ArgBlocker = 'order-sensitive' | 'stale-name';
+
 /** One exit slot weighed for sinking. `destName` is the name the sunk copy would write. */
 export interface SinkCandidate {
-  /** the exit arg is one of the loop's own variables, not something computed from them */
-  argIsLoopVariable: boolean;
+  /** what stops the arg's def-tree from being rebuilt at the top of the body, if anything */
+  argBlocker: ArgBlocker | null;
   destName: string | undefined;
   /** the names of the loop's own variables */
   headerNames: ReadonlySet<string | undefined>;
@@ -88,11 +107,18 @@ export interface SinkCandidate {
  *  `sinkablePreUpdateSlots` with the same refusal discipline. */
 export const PREUPDATE_SINK_GATES: readonly Gate<SinkCandidate>[] = [
   {
-    id: 'arg-is-loop-variable',
+    id: 'arg-order-insensitive',
+    why: "a memory read answers whichever stores ran before it, and the copy lands ahead of the body's",
+    sound: true,
+    guardedBy: 'hazards.test.ts: ablating arg-order-insensitive admits an exit arg that reads memory',
+    rejects: (c) => c.argBlocker === 'order-sensitive',
+  },
+  {
+    id: 'arg-reads-current-names',
     why: 'a value computed in the body still holds the PREVIOUS iteration at the top of it, where the copy lands',
     sound: true,
-    guardedBy: 'hazards.test.ts: ablating arg-is-loop-variable admits a computed exit arg',
-    rejects: (c) => !c.argIsLoopVariable,
+    guardedBy: 'hazards.test.ts: ablating arg-reads-current-names admits an arg over a body-computed name',
+    rejects: (c) => c.argBlocker === 'stale-name',
   },
   {
     // The update assigns exactly the loop variables' names, so these two tests are one set today;
@@ -253,6 +279,51 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
       }
       return false;
     };
+    // Is `v` defined by the loop body itself — an op in one of its blocks, or a block param?
+    // An op with no `opBlock` entry counts as INSIDE: the map is total over the function, and the
+    // safe direction for an absent one is the answer that refuses.
+    const definedInBody = (v: Value): boolean => {
+      const d = defs.get(v);
+      if (!d) {
+        return [...body].some((bb) => bb.params.includes(v));
+      }
+      const b = opBlock.get(d);
+      return b === undefined || body.has(b);
+    };
+    // What stops `a` from being REBUILT at the top of the body. Walks the def-tree exactly where
+    // `exprWith(null)` will when the copy is spelled — stopping at a NAMED value, which renders as
+    // its name, and at a value with no reaching def, which renders as a gap.
+    const blockerOf = (a: Value): ArgBlocker | null => {
+      const seen = new Set<Value>();
+      const walk = (x: Value): ArgBlocker | null => {
+        if (seen.has(x)) {
+          return null;
+        }
+        seen.add(x);
+        if (header.params.includes(x)) {
+          return null; // a loop variable: at the top of the body its name holds exactly this
+        }
+        const n = varName.get(x);
+        if (n !== undefined) {
+          return definedInBody(x) || headerNames.has(n) || busyInLoop(n, x) ? 'stale-name' : null;
+        }
+        const d = defs.get(x);
+        if (!d) {
+          return 'stale-name'; // no reaching def: nothing to rebuild it from
+        }
+        if (ORDER_SENSITIVE_OPS.has(d.opcode)) {
+          return 'order-sensitive';
+        }
+        for (const o of d.operands) {
+          const b = walk(o);
+          if (b !== null) {
+            return b;
+          }
+        }
+        return null;
+      };
+      return walk(a);
+    };
     const dest = new Map<number, string>();
     exitArgs.forEach((a, j) => {
       if (!readsClobbered(a, sub, updateWrites)) {
@@ -260,7 +331,7 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
       }
       const destName = varName.get(exit.params[j]);
       const c: SinkCandidate = {
-        argIsLoopVariable: header.params.includes(a),
+        argBlocker: blockerOf(a),
         destName,
         headerNames,
         updateWrites,

@@ -2534,20 +2534,33 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
   };
   const loopSub = (li: LoopInfo): Map<Value, string> => subFor(li.header.params, li.backArgOfParam);
 
-  // The sunk exit copies, as body statements. `arg-is-loop-variable` makes each arg a header param,
-  // so this is a plain `dest = <loop variable>` reading the value the name still holds at the top of
-  // the body, and needs no substitution. Slot order keeps it deterministic.
+  // The sunk exit copies, as body statements: `dest = <the arg, rebuilt here>`. The sink's gates
+  // are stated against exactly `exprWith(null)` — every name it stops at holds, at the top of the
+  // body, what it held where the edge read it — so the arg is spelled with no substitution. Slot
+  // order keeps it deterministic.
   //
-  // Both names are read as invariants, not checked: every block param carries one, and a header
-  // param is a block param. `assertResolved` is what catches a widening that breaks that.
+  // NOT `expr`: an ambient `activeSub` is an ENCLOSING loop's post-loop naming, which the sink's
+  // walk does not model. A do-while nested in one, sinking anything but a bare loop variable, is
+  // therefore refused rather than spelled under a rule that was never checked for it.
+  //
+  // The destination name is read as an invariant, not checked: every block param carries one.
+  // `assertResolved` is what catches a widening that breaks that.
   const preUpdateCopies = (exit: Block, exitArgs: readonly Value[], sunk: Set<number>): Stmt[] =>
     [...sunk]
       .sort((x, y) => x - y)
-      .map((j) => ({
-        k: 'assign' as const,
-        name: varName.get(exit.params[j])!,
-        value: { k: 'var' as const, name: varName.get(exitArgs[j])! },
-      }));
+      .map((j) => {
+        if (activeSub !== null && !varName.has(exitArgs[j])) {
+          throw new StructureError(
+            `cannot structure '${fn.name}': a pre-update exit copy would rebuild a computed value ` +
+              `inside a loop nested in another loop's post-loop naming`,
+          );
+        }
+        return {
+          k: 'assign' as const,
+          name: varName.get(exit.params[j])!,
+          value: exprWith(null)(exitArgs[j]),
+        };
+      });
 
   // Un-rotate a header's do-while latch into a `while`: the test reads the header's own
   // params (back-edge args substituted back), and the body is any sunk trailing copies, then the
