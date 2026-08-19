@@ -2,11 +2,15 @@
 //
 // A loop whose back-edge carries a register copy — `add r3, r0, #0` then `b .L6` — lifts to a block
 // holding nothing but that branch, because SSA construction turns the copy into an EDGE ARGUMENT.
-// The loop is unchanged; its latch has just become a separate empty block sitting between the exit
-// test and the header. Loop recovery reads the pair as a shape it will not structure, and the whole
-// function declines with "unrecovered back-edge" (sa3:EwramMalloc, sa3:IwramActiveNodeTotalSize and
-// kleod:Task_Interactable116 among them). Splicing the block out — every predecessor edge re-pointed
-// at the header, carrying the latch's own edge arguments — restores the single-latch loop.
+// The loop is unchanged; its latch has just become a separate empty block between the exit test and
+// the header. Loop DISCOVERY still finds the loop — `structure/loops.ts` reads the same back-edge —
+// but the do-while emitter requires the latch to end in a `cond_br`, an empty one ends in `br`, and
+// the test is at the bottom so the `while` form is unavailable too. The back-edge survives to the
+// `onStack` refusal and the whole function declines with "unrecovered back-edge".
+//
+// Splicing the block out — every predecessor edge re-pointed at the header, carrying the latch's
+// own edge arguments — restores the single-latch loop, which is a canonicalization the emitter
+// already handles rather than a new case inside it.
 //
 // The arguments move soundly because the block has no params and one op: a value the latch's `br`
 // passes dominates the latch, so it dominates the end of every predecessor of the latch too.
@@ -15,22 +19,24 @@ import { Fn, dominators } from '../ir/core';
 /** Splice out every EMPTY LATCH — a block with no params whose single op is an unconditional `br`
  *  to a block that DOMINATES it. Returns how many were removed.
  *
- *  Dominance is the whole gate, and what it buys is the distinction between a latch and a loop
- *  PREHEADER. A preheader is the same empty forwarding block, but it dominates the header rather
- *  than the reverse; folding one hands the structurer a guard branching straight at the header —
- *  the guard-FUSED shape, a different structuring decision carrying its own soundness proof, which
- *  then declines. `sa3:sub_801ECAC` and `kleod:LoadLevel_World7_Vision2` both structure today and
- *  stop if the dominance test is weakened to plain reachability.
+ *  Dominance, rather than "the target can reach this block", is what distinguishes a latch from a
+ *  loop PREHEADER — the same empty forwarding block seen from the other side. A preheader dominates
+ *  its header instead of the reverse, and folding one hands the structurer a guard branching
+ *  straight at the header, which is the guard-FUSED shape: a different structuring decision with
+ *  its own soundness proof, which then declines. Reachability is not enough to see that, because an
+ *  inner loop's preheader sitting inside an OUTER loop is reachable from the inner header round the
+ *  outer back-edge.
  *
  *  A block branching to ITSELF is excluded separately: every block dominates itself, so the test
  *  above admits it, and it is an infinite loop rather than a trampoline.
  *
- *  Iterated: folding one latch can leave its predecessor an empty latch in turn, and removing blocks
- *  only ever ADDS dominators, so a later round can admit an edge this one refused.
+ *  Iterated, because folding one latch can make its predecessor into one: the predecessor's
+ *  SUCCESSOR changes, so an edge that was not a back-edge becomes one. (Dominator sets themselves
+ *  only ever shrink — removing a block removes it from every set it was in.)
  *
  *  A predecessor that already branches to the target ends up with two edges into one block. That is
  *  a block whose every edge continues the loop, so it has no exit and loop recovery declines — the
- *  same loud decline it gave before the fold, pinned by a test rather than pre-empted by a guard.
+ *  same loud decline it gave before the fold.
  */
 export function foldEmptyLatches(fn: Fn): number {
   let folded = 0;

@@ -10,6 +10,7 @@ import { parse } from '../src/ir/parse';
 import { print } from '../src/ir/print';
 import { verify } from '../src/ir/verify';
 import { foldEmptyLatches } from '../src/raise/latch';
+import { structure } from '../src/structure/structure';
 
 /** `^bb2` is the empty latch: no params, one `br` back to the header `^bb1`, carrying the update. */
 const LATCH = `fn f {
@@ -56,6 +57,36 @@ test('a PREHEADER is the same empty block and is refused — it dominates the he
   expect(foldEmptyLatches(fn)).toBe(0);
 });
 
+test('an inner PREHEADER inside an outer loop is refused — reachability would not see it', () => {
+  // ^bb2 is the inner loop's preheader. The inner header ^bb3 REACHES it, round the outer back-edge
+  // ^bb4 → ^bb1 → ^bb2, so a reachability-gated fold eats it and hands the structurer the
+  // guard-fused shape. Dominance refuses: ^bb2 dominates ^bb3, not the reverse. This is the case
+  // that makes the gate DOMINANCE and not `reaches` — the flat preheader above is refused by both.
+  const fn = parse(`fn nest {
+^bb0(%0: s32):
+  br ^bb1(%0)
+^bb1(%1: s32):
+  %2: s32 = const {value=0}
+  %3: u32 = icmp_slt %1, %0
+  cond_br %3, ^bb2(), ^bb5(%1)
+^bb2():
+  br ^bb3(%2)
+^bb3(%4: s32):
+  %5: s32 = const {value=1}
+  %6: s32 = add %4, %5
+  %7: u32 = icmp_slt %6, %0
+  cond_br %7, ^bb3(%6), ^bb4()
+^bb4():
+  %8: s32 = const {value=1}
+  %9: s32 = add %1, %8
+  br ^bb1(%9)
+^bb5(%10: s32):
+  ret %10
+}
+`);
+  expect(foldEmptyLatches(fn)).toBe(0);
+});
+
 test('a block branching to ITSELF is refused — every block dominates itself', () => {
   const fn = parse(`fn h {
 ^bb0(%0: s32):
@@ -77,6 +108,16 @@ test('a latch with a param is refused — its args are a join, not this edge’s
 test('a latch that does WORK is refused — the ops would be lost with the block', () => {
   const fn = parse(LATCH.replace('^bb2():\n  br ^bb1(%3)', '^bb2():\n  %6: s32 = const {value=9}\n  br ^bb1(%6)'));
   expect(foldEmptyLatches(fn)).toBe(0);
+});
+
+test('a latch holding a STORE is refused — nothing downstream would notice it vanish', () => {
+  // The refusal that is genuinely SOUND rather than merely better, and the fixture has to be a
+  // side-effecting op with no result. Drop a value-producing one and `verify` catches the dangling
+  // value; drop a `store` and nothing does — `assertEffectsPreserved` tallies `call` and `opaque`
+  // only, so the write is simply gone from the emitted C.
+  const fn = parse(LATCH.replace('^bb2():\n  br ^bb1(%3)', '^bb2():\n  store %0, %3 {off=0, width=4}\n  br ^bb1(%3)'));
+  expect(foldEmptyLatches(fn)).toBe(0);
+  expect(print(fn)).toContain('store %0, %3');
 });
 
 test('chained latches fold to a fixpoint, and every removal keeps dominance sound', () => {
@@ -124,6 +165,7 @@ test('two edges into one block after a fold: loop recovery still declines, it do
   expect(foldEmptyLatches(fn)).toBe(1);
   verify(fn); // the args are still dominating defs — the fold cannot break SSA
   expect(print(fn)).toContain('cond_br %6, ^bb1(%3), ^bb1(%5)');
+  expect(() => structure(fn, { returnsVoid: true, littleEndian: true })).toThrow(/unrecovered back-edge/);
 });
 
 test('dominators: a latch is dominated by its header, a preheader is not', () => {

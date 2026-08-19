@@ -1695,8 +1695,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
       // A RUNTIME byte offset has no element spelling at all — not even an inexact one to reject,
       // since the residual is unknown until the program runs. The asm added bytes, so the same
       // answer as the inexact constant above: cast then add. Without it a `u16 *` walked by a
-      // computed offset addresses TWICE the intended byte (`sa3:muukaden.s:sub_8062CFC` reaches
-      // `CpuSet` with that destination), and nothing downstream can see the error.
+      // computed offset addresses TWICE the intended byte, and nothing downstream can see the
+      // error — in the sa3 decomp that address is what a `CpuSet` call writes THROUGH.
       const walkVar = (x: Expr): IrType | undefined => {
         const t = ctype(x);
         return t?.kind === 'ptr' && ptrElemBytes(t.to) !== 1 ? t : undefined;
