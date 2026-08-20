@@ -19,11 +19,11 @@
 // interference graph — not the order the blocks happen to sit in. `l3/coalesce.ts` is a different
 // question: two UNRELATED locals whose spans are disjoint, which is register reuse.
 //
-// WHY THIS IS A CANDIDATE AND NOT A FIX. The copies are not the cost they look like: the compiler
-// coalesces them too, and one klonoa function compiles to the same 906 instructions with 74 of
-// them and with 62. What changes is which values share a register, and over the whole benchmark
-// that wins one row by 3 points and loses none. So the merged spelling is emitted alongside the
-// un-merged one, on the same footing as the other allocator-ambiguous spellings.
+// WHY THIS IS A CANDIDATE AND NOT A FIX. The copies are not the cost they look like — the compiler
+// coalesces them too, so a function's two spellings compile to the same instruction count. What
+// changes is which values share a register, and over the whole benchmark that wins one row by 3
+// points and loses none. So the merged spelling is emitted alongside the un-merged one, on the same
+// footing as the other allocator-ambiguous spellings.
 //
 // WHEN TWO NAMES MAY BE ONE. A name denotes a set of SSA values. Merging names X and Y makes every
 // value under either read and write one variable, so it is legal exactly when no value of X is
@@ -62,6 +62,28 @@
 // emits as two. Lifting `carriesPreUpdate` itself to name classes is the work that would take those
 // 12 rows; it needs the class-level closure, since a merge can reach a loop variable's name through
 // an edge that carried no loop variable at all.
+//
+// TWO KNOWN GAPS, both on the READ side of a relocated write:
+//
+//   • `sitesOf` widens where a loop emitter may MOVE a copy, but the read side does not follow. For
+//     a block parameter `clobbers` falls to `liveIn` of the widened site, and a parameter's SSA def
+//     point is its own block's entry, not the position the emitter actually writes it at — so a
+//     header definition is not seen to clobber a value the sink copies to the top of the body. The
+//     slot that is actually sunk is unreachable (its exit arg is a header parameter, which
+//     `loop-escape` rejects); reaching it needs a second, non-loop predecessor of the exit block
+//     passing the header's definition into the same slot, and no input has been built that does.
+//   • `canTakeName` applies its own widening UNCONDITIONALLY, while `relocatable` applies it only
+//     where a loop can move the copy. One of the two is wrong: either that widening is unnecessary
+//     on the committed path, where removing it would drop copies from EVERY spelling rather than
+//     from an opt-in candidate, or `relocatable` is too narrow. Nothing has measured which.
+//
+// AND ONE ASYMMETRY THAT IS NOT A GAP. `type` is sound here, and `canTakeName` has no equivalent:
+// it declares a name from its FIRST taker and never re-checks a later adopter, a disagreement it
+// reaches ~100 times over klonoa's 69 liftable functions. That sounds like the same defect on the
+// committed path, and it was measured: adding the check there moves one row better and two worse,
+// no match flips. The mismatches it tolerates are scalar (`s32` against `u32` — same width, same
+// bytes); what makes the rule SOUND here is the pointer case, where the survivor's declared type
+// decides how its arithmetic scales.
 //
 // PURE: it reads the analysis maps and returns the renaming. Applying it is the caller's job.
 import { type Block, type Op, type Value, successorsOf } from '../ir/core';
@@ -210,15 +232,61 @@ export function coalesceNames(
     writeSites.set(v, s);
     return s;
   };
+  // WHAT READING A VALUE ACTUALLY SPELLS. A def the structurer did not bind to a local is
+  // RE-RENDERED at each use, so the names its operand tree reads are read wherever that expression
+  // lands — arbitrarily far past the point SSA liveness says those operands died. Liveness of SSA
+  // VALUES is therefore not liveness of the emitted program, and the gap is a silent clobber: the
+  // fuzz found `v0 = v0 - a1;` emitted ahead of an `f1(a0 + (v0 - a1))` that still wanted the old
+  // `v0`. Every live set below is expanded through this.
+  const renderCache = new Map<Value, Set<Value>>();
+  const renders = (v: Value): ReadonlySet<Value> => {
+    const hit = renderCache.get(v);
+    if (hit) {
+      return hit;
+    }
+    const out = new Set<Value>([v]);
+    renderCache.set(v, out); // before recursing: a def tree is acyclic, but this costs nothing
+    if (!varName.has(v)) {
+      for (const o of defs.get(v)?.operands ?? []) {
+        for (const x of renders(o)) {
+          out.add(x);
+        }
+      }
+    }
+    return out;
+  };
+  const expand = (vs: Iterable<Value>): Set<Value> => {
+    const out = new Set<Value>();
+    for (const v of vs) {
+      for (const x of renders(v)) {
+        out.add(x);
+      }
+    }
+    return out;
+  };
+  // Which values' RENDERING reads `v` — so a use of one of them is a read of `v`, wherever it sits.
+  const renderedBy = new Map<Value, Set<Value>>();
+  for (const b of blocks) {
+    for (const op of b.ops) {
+      for (const r of op.results) {
+        for (const x of renders(r)) {
+          const set = renderedBy.get(x) ?? new Set<Value>();
+          set.add(r);
+          renderedBy.set(x, set);
+        }
+      }
+    }
+  }
+  const liveInR = new Map<Block, Set<Value>>(blocks.map((b) => [b, expand(liveIn.get(b) ?? [])]));
   // Values live OUT of a block: what its successors read, plus what its terminator hands them.
   const liveOut = new Map<Block, Set<Value>>();
   for (const b of blocks) {
     const out = new Set<Value>();
     for (const sc of b.ops[b.ops.length - 1]?.successors ?? []) {
-      for (const v of liveIn.get(sc.block) ?? []) {
+      for (const v of liveInR.get(sc.block) ?? []) {
         out.add(v);
       }
-      for (const a of sc.args) {
+      for (const a of expand(sc.args)) {
         out.add(a);
       }
     }
@@ -232,11 +300,20 @@ export function coalesceNames(
   const liveAt = (v: Value, b: Block, at: number): boolean => {
     const d = defs.get(v);
     const dIdx = d !== undefined && opBlock.get(d) === b ? opIndex.get(d) : undefined;
-    const started = liveIn.get(b)!.has(v) || b.params.includes(v) || (dIdx !== undefined && dIdx < at);
+    const started = liveInR.get(b)!.has(v) || b.params.includes(v) || (dIdx !== undefined && dIdx < at);
     if (!started) {
       return false;
     }
-    return liveOut.get(b)!.has(v) || (useSitesOf.get(v) ?? []).some((u) => u.blk === b && u.idx >= at);
+    if (liveOut.get(b)!.has(v)) {
+      return true;
+    }
+    // a use of anything whose RENDERING reads `v` is a read of `v` at that position
+    for (const w of [v, ...(renderedBy.get(v) ?? [])]) {
+      if ((useSitesOf.get(w) ?? []).some((u) => u.blk === b && u.idx >= at)) {
+        return true;
+      }
+    }
+    return false;
   };
   // A block parameter's copies run before its block starts, so `liveIn` is exact for them. A
   // materialized definition writes mid-block and needs the range above.
@@ -247,7 +324,7 @@ export function coalesceNames(
     // before the block starts. Two parameters of ONE block are written by the same edge copies and
     // so are invisible here by construction — that is `sibling-params`, not this rule.
     return sitesOf(writer).some((b) =>
-      at !== undefined && opBlock.get(d!) === b ? liveAt(other, b, at) : liveIn.get(b)!.has(other),
+      at !== undefined && opBlock.get(d!) === b ? liveAt(other, b, at) : liveInR.get(b)!.has(other),
     );
   };
 

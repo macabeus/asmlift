@@ -697,6 +697,22 @@ export interface StructureHooks {
   nameCoalesceGates?: readonly Gate<NameMerge>[];
 }
 
+/** A CANDIDATE SPELLING MUST NEVER UNLOCK A FUNCTION THE PRIMARY DECLINES. `varName` is not only
+ *  how values are spelled — the loop emitters' hazard predicates read it, and several ask "does
+ *  this edge copy survive identity elision", which merging two names quietly answers `no`. A pass
+ *  that made a hazard invisible would trade a loud decline for a silent wrong answer, so the
+ *  un-merged structuring runs first and its refusal stands. That is the whole invariant, rather
+ *  than a list of individually patched guards, and it costs one extra structuring — nothing next to
+ *  the compile the candidate exists to feed.
+ *
+ *  It rests on `structure()` not mutating `fn`, which `structure-purity.test.ts` pins.
+ *
+ *  SCOPE: refusals thrown by `structure()` itself. A decline can also come from `structureChecked`'s
+ *  boundary contracts, which run OUTSIDE it — `rank.ts` closes that half, where the contracts are. */
+function assertPrimaryAccepts(fn: Fn, opts: StructureOptions, hooks: StructureHooks): void {
+  structure(fn, { ...opts, coalesceMergeNames: false }, hooks);
+}
+
 export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureHooks = {}): SFn {
   const {
     returnsVoid = false,
@@ -712,14 +728,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     onGap = 'strict',
     symbols,
   } = opts;
-  // A CANDIDATE SPELLING MUST NEVER UNLOCK A FUNCTION THE PRIMARY DECLINES. `varName` is not only
-  // how values are spelled — the loop emitters' hazard predicates read it, and several of them ask
-  // "does this edge copy survive identity elision", which merging two names quietly answers `no`.
-  // A pass that made a hazard invisible would trade a loud decline for a silent wrong answer, so
-  // the un-merged structuring runs first and its refusal stands. Cheap next to the compile the
-  // candidate exists to feed, and it is the whole invariant rather than a list of patched guards.
   if (coalesceMergeNames) {
-    structure(fn, { ...opts, coalesceMergeNames: false }, hooks);
+    assertPrimaryAccepts(fn, opts, hooks);
   }
   const defs = defOpMap(fn);
   const preds = predecessorBlocks(fn);

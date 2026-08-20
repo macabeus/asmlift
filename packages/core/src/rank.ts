@@ -305,7 +305,17 @@ export function enumerateCandidates(
       // The shared tower spine (pipeline.ts) — the candidate's ONE difference from decompile() is the
       // signedness pin, injected between pre-recovery and recoverTypes via the beforeRecover hook.
       raiseRecovered(fn, target, { beforeRecover: () => pinScalarParams(fn, cand.signed, ptrIdx) });
+      // `/merge-names` combinations whose un-merged sibling was DROPPED. `structure()` already
+      // refuses to let the axis unlock a function the primary declines, but it can only see its own
+      // refusals — a boundary contract fails out here, in `structureChecked`. Without this a
+      // `/reread-globals/merge-names` candidate could ship where plain `/reread-globals` did not,
+      // which is the same trade one level up. `senseCands` puts each `mergeNames:false` sibling
+      // first, so the entry is always recorded before its merged twin is reached.
+      const droppedPrimary = new Set<string>();
       for (const s of senseCands) {
+        if (s.mergeNames && droppedPrimary.has(s.suffix.replace('/merge-names', ''))) {
+          continue;
+        }
         // structure() reads `fn` and produces a fresh SFn (it does not mutate `fn`), so both branch
         // senses structure the same recovered function without re-lifting.
         let sfn: SFn;
@@ -321,6 +331,9 @@ export function enumerateCandidates(
         } catch (e) {
           if (!s.anchor && s.bitfields && !s.reread && !s.mergeNames) {
             throw e; // the base axes keep their behavior: a structuring failure aborts the row
+          }
+          if (!s.mergeNames) {
+            droppedPrimary.add(s.suffix);
           }
           // an anchored variant that fails structuring or its contracts is a dropped lever, never
           // an aborted enumeration — same rule as respell below

@@ -103,6 +103,64 @@ const LIVE_ACROSS = `fn interfere {
 }
 `;
 
+// Two materialized definitions in ONE block, the first live across the second's write. Nothing
+// distinguishes this from an ordinary merge at block granularity: `%1` is not in `liveIn(bb0)`,
+// because it is DEFINED there. Reverting `liveAt` to `liveIn` re-emits `v0 = b(a0)` over `a()`'s
+// result and returns it — which is what `LIVE_ACROSS` cannot catch, its writer being a block away.
+const MID_BLOCK_WRITE = `fn midblock {
+^bb0(%0: s32*):
+  %1: s32 = call %0 {target="a"}
+  %2: s32 = call %0 {target="b"}
+  store %0, %2 {off=0, width=4}
+  %3: s32 = const {value=0}
+  %4: u32 = icmp_ne %2, %3
+  cond_br %4, ^bb1(%2), ^bb2()
+^bb2():
+  %5: s32 = call %1 {target="use"}
+  br ^bb1(%1)
+^bb1(%6: s32):
+  ret %6
+}
+`;
+
+// A pure def the structurer did NOT bind to a local renders again at every use, so `v0 - a1` READS
+// `v0` wherever it lands — past the point SSA liveness says `%12` died. Found by the fuzz.
+const RENDERED_READ = `fn rendered {
+^bb0(%0: s32, %1: s32):
+  %12: s32 = call %1 {target="f1"}
+  %13: s32 = sub %12, %1
+  br ^bb1(%1, %12)
+^bb1(%2: s32, %3: s32):
+  %14: s32 = sub %0, %12
+  %15: u32 = icmp_slt %3, %2
+  cond_br %15, ^bb2(), ^bb5(%12, %13, %3)
+^bb2():
+  %16: s32 = sub %13, %12
+  %17: s32 = sub %3, %1
+  %18: s32 = add %13, %0
+  br ^bb3(%14, %17, %13)
+^bb3(%4: s32, %5: s32, %6: s32):
+  %19: s32 = sub %1, %13
+  %20: s32 = add %0, %13
+  %21: s32 = call %20 {target="f1"}
+  br ^bb4(%17, %4)
+^bb4(%7: s32, %8: s32):
+  br ^bb5(%6, %16, %5)
+^bb5(%9: s32, %10: s32, %11: s32):
+  ret %1
+}
+`;
+
+test('a value live across a MID-BLOCK write is not merged over', () => {
+  // the positive control: the copy the pass would have removed is still there
+  expect(emit(MID_BLOCK_WRITE)).toContain('v1 = v0;');
+  expect(emit(MID_BLOCK_WRITE)).toBe(uncoalesced(MID_BLOCK_WRITE));
+});
+
+test('a value only an INLINED expression still reads is not merged over', () => {
+  expect(emit(RENDERED_READ)).toBe(uncoalesced(RENDERED_READ));
+});
+
 test('ablating interference clobbers a value live across the copy', () => {
   expect(emit(LIVE_ACROSS)).toContain('return v1 + v0;');
   // one variable for both, so `b()` overwrites the `a()` result the return still needs
@@ -170,6 +228,14 @@ const UNLOCKS_A_DECLINE = `fn unlockdecline {
 
 test('a post-loop value never takes its loop variable’s name', () => {
   expect(emit(TRAILING_DOWHILE)).toBe(uncoalesced(TRAILING_DOWHILE));
+  // the positive control: with the rule dropped the merge happens, and the loop emitter's own
+  // pre-update check is what then refuses the function
+  expect(() => emit(TRAILING_DOWHILE, 'loop-escape')).toThrow(/pre-update loop variable/);
+});
+
+test('two parameters of one block never share a name', () => {
+  // dropping the rule collapses two of the loop's parameters; `sequentialize` catches THIS one loud
+  expect(() => emit(TRAILING_DOWHILE, 'sibling-params')).toThrow(/writes 'v\d+' twice/);
 });
 
 test('a candidate never unlocks a function the primary declines', () => {
@@ -263,11 +329,16 @@ const twoNames = (
   };
 };
 
-// `sibling-params` names a hazard `interference` is not built to see: two parameters of ONE block
-// are written by the SAME edge copies, so neither is live where the other is written. It is not
-// reachable from parsed IR the way the others are — zero refusals over klonoa's 69 liftable
-// functions, because every constructible pair of simultaneously-live values interferes first — so
-// like `type` it is driven at the pass's own boundary, on the shape it names.
+// `sibling-params` names a hazard `interference` CANNOT see, and the reason is structural rather
+// than empirical: for a block-parameter writer `clobbers` falls to `liveIn`, and `liveIn` excludes a
+// block's own parameters by construction, so both directions are false for a sibling pair whatever
+// the program does. It fires on zero of klonoa's 69 liftable functions — a corpus-size fact, not a
+// subsumption one: over 20 000 fuzzed functions, dropping it changes the renaming in 12% of them
+// and MISCOMPILES 72 (the other ~730 are caught loud by `sequentialize`'s own double-write check,
+// which is the backstop — not evidence that the gate is decorative).
+//
+// Both halves are asserted: the deps-level pair below shows the renaming itself is wrong, and the
+// end-to-end ablation above shows a real function reaching it.
 test('ablating sibling-params puts two parameters of one block under one name', () => {
   const { deps, join, sibling } = twoNames(T.s(32), T.s(32), { withSibling: true });
   expect([...coalesceNames(deps).renames]).toEqual([]);
