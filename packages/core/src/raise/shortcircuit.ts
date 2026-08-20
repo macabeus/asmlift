@@ -288,13 +288,20 @@ export function recognizeShortCircuit(fn: Fn): boolean {
 // of the 28 real rows carrying the `short-circuit` tag, 22 hold two or more. What this fold's
 // output needs is its own gate, on the condition BEING one of these connectives.
 //
-// A `br`-only forwarding block on the edge into the SHARED block hides it from the `sharedEdge`
-// search below, and then this fold does not fire at all. agbcc emits one per long branch, and which
-// edge gets it follows the orientation: for an `&&` the shared block is the far one, so both edges
-// reaching it are trampolines (synthetic:ifand_far:agbcc, which matches on that exemption); for a
-// `||` the shared block is the near one and the fold still fires (an `ifor_far` byte-matches).
-// Normalising those blocks away is a real improvement that costs ifand_far its match until the
-// orientation can be re-chosen.
+// WHICH slot ^g lands in is decided by the asm's branch POLARITY, and on Thumb the branch RANGE
+// decides the polarity — so the same source `&&` reaches this pass two different ways:
+//
+//   short branch   `beq shared`         ^g is ^h's FALL  → logic_or  → arms swapped (the miss)
+//   long branch    `bne ^g / b shared`  ^g is ^h's TAKEN → logic_and → source orientation
+//
+// agbcc inverts a conditional it cannot reach, so past ±256 bytes it emits the second form. The
+// trampoline it leaves on the `b` then sits on the edge into the SHARED block and hides that block
+// from the `sharedEdge` search below, so today this fold does not fire there at all
+// (synthetic:ifand_far:agbcc matches on the un-folded spelling). Normalising those blocks away is
+// therefore SAFE for this orientation and not merely tolerable: measured, the fold then fires,
+// emits `&&`, and ifand_far still matches. It is the `logic_or` half that has no dual candidate.
+//
+// Every refusal falls through untouched — a miss, never a miscompile.
 export function recognizeBranchShortCircuit(fn: Fn): boolean {
   let changed = false;
   const term = (b: Block) => b.ops[b.ops.length - 1];

@@ -629,17 +629,29 @@ export const SYNTHETIC: SynthSpec[] = [
   // whether the shape is recognised at all.
   //
   // `ifand_near` and `ifand_far` differ in ONE thing: whether the guarded arm fits inside a Thumb
-  // conditional branch's ±256-byte reach. Past it agbcc spells the branch `bne .L1 / b .L2 @long
-  // jump`, and a frontend that splits a block at every conditional branch turns that second
-  // instruction into a block whose only op is `br`. A recogniser keyed on successor identity
-  // cannot see the shared block through it, so the same source shape gets a different recovery on
-  // either side of a byte distance.
+  // conditional branch's ±256-byte reach. That one distance changes TWO things at once, and the
+  // second is easy to miss.
+  //
+  // It changes what the recogniser can SEE. Past the range agbcc spells the branch
+  // `bne .L1 / b .L2 @long jump`, and a frontend that splits a block at every conditional branch
+  // turns that second instruction into a block whose only op is `br`, sitting on the edge into the
+  // shared block. A recogniser keyed on successor identity cannot see through it, so the fold does
+  // not fire and the tail-duplicated spelling survives — which the compiler cross-jumps back
+  // together, so `ifand_far` matches without anything having recovered the shape.
+  //
+  // And it changes the branch POLARITY, which is what decides the ORIENTATION the fold would emit.
+  // A short branch is `beq shared`, putting the second test on the FALL edge; the long form
+  // inverts to `bne <second test>`, putting it on the TAKEN edge. Those are the fold's two arms —
+  // `logic_or` and `logic_and` — so the near row and the far row do not exercise one code path at
+  // two sizes, they exercise BOTH paths. MEASURED, and it is the opposite of what the distance
+  // suggests: the near row folds to the swapped `||` and misses, and once the trampolines are
+  // normalised away the far row folds to `&&`, the source's own orientation, and still matches.
   //
   // `ifor_near` is the ORIENTATION control. The same shape written the other way round matches
-  // today, so the gap is not "this shape is unrecoverable" but "only one of the two spellings is
-  // reachable" — and a row that could falsify the claim is worth more than a third that restates
-  // it. There is deliberately no `ifor_far`: measured, a `||` matches at BOTH distances, because
-  // the trampoline lands on the edge the recogniser does not key on.
+  // today, so the gap is not "this shape is unrecoverable" but "one of the fold's two arms emits
+  // the spelling the compiler did not, and nothing referees it" — and a row that could falsify the
+  // claim is worth more than a third that restates it. There is deliberately no `ifor_far`:
+  // measured, a `||` matches at BOTH distances.
   //
   // TOOLCHAINS, measured rather than assumed — and the answer differs per row.
   //
@@ -696,10 +708,11 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc'],
     ctx: 'int ifand_far(int,int,int*,int*);',
     note:
-      'MATCHES for a reason nothing recovered: the guarded arm is far enough that the shared block ' +
-      'sits behind a long-branch trampoline, which hides the shape from the fold that rewrites ' +
-      '`ifand_near`. Normalising those trampolines away is a real improvement that would turn this ' +
-      'row red — it is here to make that visible rather than silent',
+      'MATCHES without anything having recovered the shape: the guarded arm is far enough that the ' +
+      'shared block sits behind a long-branch trampoline, which hides it from the fold that ' +
+      'rewrites `ifand_near`, and the tail-duplicated spelling left behind is one the compiler ' +
+      'cross-jumps back together. The same distance also INVERTS the branch, which is what makes ' +
+      'this row the safe half of the family — see the toolchain and orientation notes above',
   },
   {
     sym: 'ifor_near',
