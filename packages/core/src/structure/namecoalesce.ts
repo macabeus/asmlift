@@ -1,0 +1,300 @@
+// asmlift structurer — copy coalescing over the interference graph, run once the naming pipeline
+// has given every merge value a name and before anything reads those names. Off by default;
+// rank.ts enumerates it as the `/merge-names` candidate and the differ referees (StructureOptions
+// `coalesceMergeNames`).
+//
+// WHAT IS LEFT TO COALESCE. Destroying SSA turns each block parameter into a variable and each
+// edge argument into a copy into it, so a name shared between a parameter and its argument is a
+// copy that disappears. `structure.ts` already shares one where it can: a parameter adopts the
+// name of an incoming argument, checked against the same liveness this file uses. But that walk
+// runs ONCE, over the blocks in address order, and only ever looks BACKWARD along an edge — so a
+// parameter whose arguments are still unnamed takes a fresh name and never revisits it, and a
+// parameter with several named arguments can adopt only ONE of them. Both leave the same residue.
+// Three switch arms that each compute the same three quantities and feed one join reach it as
+// three parameters apiece; the arm the join adopted pays nothing and every other arm pays a copy
+// per value.
+//
+// So this pass asks the question the naming walk cannot: given the FINAL names, which two of them
+// would a copy join, and may they be one variable? That is copy coalescing, and the answer is the
+// interference graph — not the order the blocks happen to sit in.
+//
+// WHY THIS IS A CANDIDATE AND NOT A FIX. The copies are not the cost they look like: the compiler
+// coalesces them too, and klonoa’s LoadBGTilemapData compiles to the same 906 instructions with 74 of
+// them and with 62. What changes is which values share a register, and the byte score splits — one
+// benchmark row improves by 7 and two others get 3 and 6 worse. So the merged spelling is emitted
+// alongside the un-merged one, on the same footing as the other allocator-ambiguous spellings.
+//
+// WHEN TWO NAMES MAY BE ONE. A name denotes a set of SSA values. Merging names X and Y makes every
+// value under either read and write one variable, so it is legal exactly when no value of X is
+// live where a value of Y is written, and vice versa. `interferes` is that sentence.
+//
+// WHERE A VALUE IS WRITTEN is the part worth stating. A materialized definition writes at its own
+// block, MID-block — so it also clobbers that block's own parameters, which `liveIn` excludes by
+// construction. A block parameter is written by the edge copies into its block, which run at the
+// end of each predecessor: the values live there are `liveIn` of the block itself, since the other
+// arguments of the same edge are what `sequentialize` orders. That is exact unless a loop emitter
+// MOVES the copy — it rotates the update to the bottom of the body and sinks an exit copy in ahead
+// of it — and where that can happen the write site widens to every block those predecessors reach
+// in one step, the superset `canTakeName` takes everywhere. Function parameters are never written,
+// so they have no write sites at all; a merge onto `a0` is still checked in the other direction.
+//
+// A LOOP VARIABLE'S NAME MEANS DIFFERENT THINGS IN DIFFERENT PLACES, and that is the one thing
+// liveness cannot answer. The update sits at the bottom of the body, so on an exiting edge the name
+// still holds the value the iteration started with — `structure.ts` refuses to let a merge outside
+// the loop adopt it for exactly that reason (`carriesPreUpdate`), and refuses to let an inner
+// loop's variable adopt an enclosing one's, which the inner loop would then mutate every iteration.
+// `loop-escape` restates both over classes: a class holding a loop header's parameter may absorb
+// only values the loop's body contains. Two loops' variables always fail it — a nested pair because
+// the outer variable's home is outside the inner body, a disjoint pair in both directions — so the
+// enclosing-loop rule needs no gate of its own.
+//
+// It is NOT marked sound, because it has not been shown to be. Dropping it over 773 benchmark rows
+// improves 12 and regresses none, and the one fixture that reaches the pre-update hazard makes the
+// loop emitter DECLINE loud rather than miscompile. Those 12 rows are what the rule currently
+// costs; taking them needs an oracle over the loop emitters' copy placement, not this measurement.
+//
+// PURE: it reads the analysis maps and returns the renaming. Applying it is the caller's job.
+import { type Block, type Op, type Value, successorsOf } from '../ir/core';
+import { type IrType, typeEquals } from '../ir/types';
+import { type Gate, firstRejection } from '../l3/gates';
+
+export interface NameCoalesceDeps {
+  /** the function's blocks, in address order — the iteration order that makes merges deterministic */
+  blocks: readonly Block[];
+  /** `blocks[0]`; its parameters are the function's own, and are never written */
+  entry: Block;
+  preds: ReadonlyMap<Block, Block[]>;
+  /** values read at-or-after each block's entry (analysis.ts) */
+  liveIn: ReadonlyMap<Block, Set<Value>>;
+  /** op → the block holding it (analysis.ts) */
+  opBlock: ReadonlyMap<Op, Block>;
+  /** value → defining op (defOpMap) */
+  defs: ReadonlyMap<Value, Op>;
+  /** the defs the structurer bound to a local instead of re-rendering at each use */
+  materialize: ReadonlySet<Op>;
+  /** value → the name the naming pipeline settled on */
+  varName: ReadonlyMap<Value, string>;
+  /** name → the type it is declared with */
+  varType: ReadonlyMap<string, IrType>;
+  /** every natural loop, as its header and the blocks its body contains (structure/loops.ts) */
+  loops: readonly { header: Block; body: ReadonlySet<Block> }[];
+}
+
+/** One candidate merge: the two name classes a would-be copy joins. */
+export interface NameMerge {
+  /** the name absorbed */
+  from: string;
+  /** the surviving name */
+  into: string;
+  /** a class holds a loop variable, and the other holds a value from outside that loop's body */
+  loopEscapes: boolean;
+  /** either class holds a parameter of the function itself */
+  functionParam: boolean;
+  /** two values of the merged class are parameters of ONE block */
+  siblingParams: boolean;
+  /** the two names are declared with the same type */
+  sameType: boolean;
+  /** some value of one class is live where some value of the other is written */
+  interferes: boolean;
+}
+
+export const NAME_COALESCE_GATES: readonly Gate<NameMerge>[] = [
+  {
+    id: 'loop-escape',
+    why: 'outside the loop a loop variable’s name holds the value from BEFORE the update',
+    sound: false,
+    rejects: (c) => c.loopEscapes,
+  },
+  {
+    id: 'sibling-params',
+    why: 'two parameters of one block share every in-edge, so one edge would write the name twice',
+    sound: true,
+    guardedBy: 'namecoalesce.test.ts: ablating sibling-params collapses two parameters of one block',
+    rejects: (c) => c.siblingParams,
+  },
+  {
+    id: 'type',
+    why: 'the survivor keeps its own declared type, so the two must agree',
+    sound: true,
+    guardedBy: 'namecoalesce.test.ts: ablating type merges two names the declarations disagree about',
+    rejects: (c) => !c.sameType,
+  },
+  {
+    id: 'param',
+    why: 'a function parameter is the signature the source wrote, not a recovered local',
+    sound: false,
+    rejects: (c) => c.functionParam,
+  },
+  {
+    id: 'interference',
+    why: 'a value live where the other is written would be clobbered by the merged variable',
+    sound: true,
+    guardedBy: 'namecoalesce.test.ts: ablating interference clobbers a value live across the copy',
+    rejects: (c) => c.interferes,
+  },
+];
+
+/** The renaming to apply to the naming maps: absorbed name → survivor. Empty when nothing merges.
+ *  `refusals` counts which gate stopped each rejected pair, so a gate nothing ever reaches shows up
+ *  as a rule no test can be failing on purpose. */
+export function coalesceNames(
+  deps: NameCoalesceDeps,
+  gates: readonly Gate<NameMerge>[] = NAME_COALESCE_GATES,
+): { renames: Map<string, string>; refusals: Map<string, number> } {
+  const { blocks, entry, preds, liveIn, opBlock, defs, materialize, varName, varType, loops } = deps;
+  const refusals = new Map<string, number>();
+
+  const valuesOf = new Map<string, Value[]>();
+  const order = new Map<string, number>();
+  for (const [v, n] of varName) {
+    if (!order.has(n)) {
+      order.set(n, order.size);
+    }
+    const vs = valuesOf.get(n) ?? [];
+    vs.push(v);
+    valuesOf.set(n, vs);
+  }
+  if (valuesOf.size < 2) {
+    return { renames: new Map(), refusals };
+  }
+
+  const paramBlock = new Map<Value, Block>();
+  for (const b of blocks) {
+    for (const p of b.params) {
+      paramBlock.set(p, b);
+    }
+  }
+  // A block whose in-edge copies a loop emitter may MOVE: it rotates the update to the bottom of
+  // the body and sinks an exit copy in ahead of it, so the write no longer sits on the edge that
+  // carries it. Where that can happen the write site widens to every block the edge's predecessors
+  // reach in one step — the superset `canTakeName` takes everywhere.
+  const loopBlocks = new Set<Block>(loops.flatMap((l) => [...l.body]));
+  const relocatable = (blk: Block): boolean =>
+    loops.some((l) => l.header === blk) || (preds.get(blk) ?? []).some((pr) => loopBlocks.has(pr));
+  // Where a write to this value's variable can land — see the file header.
+  const writeSites = new Map<Value, Block[]>();
+  const sitesOf = (v: Value): Block[] => {
+    let s = writeSites.get(v);
+    if (s) {
+      return s;
+    }
+    const blk = paramBlock.get(v);
+    if (blk && blk !== entry) {
+      s = relocatable(blk) ? [blk, ...(preds.get(blk) ?? []).flatMap((pr) => successorsOf(pr))] : [blk];
+    } else if (!blk) {
+      const d = defs.get(v);
+      s = d && materialize.has(d) ? [opBlock.get(d)!] : [];
+    } else {
+      s = [];
+    }
+    writeSites.set(v, s);
+    return s;
+  };
+  // A materialized definition writes MID-block, so it also clobbers the block's own PARAMETERS —
+  // which `liveIn` excludes by construction, and which a copy into their shared name would have
+  // written before the block began. An edge copy cannot: it runs before the block starts.
+  const clobbers = (writer: Value, other: Value): boolean =>
+    sitesOf(writer).some(
+      (b) => liveIn.get(b)!.has(other) || (paramBlock.get(writer) === undefined && b.params.includes(other)),
+    );
+
+  // Union-find over names. The survivor is the name introduced FIRST, which makes the result
+  // independent of the order the pairs happen to be visited in.
+  const parent = new Map<string, string>();
+  const find = (n: string): string => {
+    let r = n;
+    while (parent.get(r) !== undefined) {
+      r = parent.get(r)!;
+    }
+    return r;
+  };
+  const members = new Map<string, Value[]>([...valuesOf].map(([n, vs]) => [n, [...vs]]));
+
+  const mayMerge = (x: string, y: string): NameMerge => {
+    const vx = members.get(x)!;
+    const vy = members.get(y)!;
+    // A loop variable is the parameter of a header; the loops it belongs to decide what its name
+    // may absorb. `homeOf` is the block a value's variable is written in, which for these two rules
+    // is all "inside the loop" needs to mean.
+    const homeOf = (v: Value): Block | undefined => paramBlock.get(v) ?? opBlock.get(defs.get(v)!);
+    const loopsOf = (vs: readonly Value[]): typeof loops =>
+      loops.filter((l) => vs.some((v) => l.header.params.includes(v)));
+    const lx = loopsOf(vx);
+    const ly = loopsOf(vy);
+    // Two loops' variables always escape each other: a nested pair because the outer variable's
+    // home is not in the inner body, a disjoint pair in both directions. So the enclosing-loop rule
+    // needs no gate of its own.
+    const escapes = (ls: typeof loops, other: readonly Value[]): boolean =>
+      ls.some((l) => other.some((v) => !l.body.has(homeOf(v)!)));
+    const loopEscapes = escapes(lx, vy) || escapes(ly, vx);
+    const functionParam = [...vx, ...vy].some((v) => entry.params.includes(v));
+    let siblingParams = false;
+    let interferes = false;
+    for (const u of vx) {
+      for (const w of vy) {
+        if (paramBlock.get(u) !== undefined && paramBlock.get(u) === paramBlock.get(w)) {
+          siblingParams = true;
+        }
+        if (clobbers(u, w) || clobbers(w, u)) {
+          interferes = true;
+        }
+      }
+    }
+    const tx = varType.get(x);
+    const ty = varType.get(y);
+    return {
+      from: y,
+      into: x,
+      loopEscapes,
+      functionParam,
+      siblingParams,
+      sameType: tx !== undefined && ty !== undefined && typeEquals(tx, ty),
+      interferes,
+    };
+  };
+
+  // Every would-be copy, in block/slot/edge order: a parameter and the argument one edge hands it.
+  for (const b of blocks) {
+    if (b === entry) {
+      continue;
+    }
+    for (const pr of new Set(preds.get(b) ?? [])) {
+      for (const s of pr.ops[pr.ops.length - 1].successors) {
+        if (s.block !== b) {
+          continue;
+        }
+        b.params.forEach((p, i) => {
+          const np = varName.get(p);
+          const na = varName.get(s.args[i]);
+          if (np === undefined || na === undefined) {
+            return;
+          }
+          const rp = find(np);
+          const ra = find(na);
+          if (rp === ra) {
+            return;
+          }
+          // survivor first
+          const [x, y] = order.get(rp)! < order.get(ra)! ? [rp, ra] : [ra, rp];
+          const refused = firstRejection(gates, mayMerge(x, y));
+          if (refused !== null) {
+            refusals.set(refused, (refusals.get(refused) ?? 0) + 1);
+            return;
+          }
+          parent.set(y, x);
+          members.get(x)!.push(...members.get(y)!);
+          members.set(y, []);
+        });
+      }
+    }
+  }
+
+  const renames = new Map<string, string>();
+  for (const n of valuesOf.keys()) {
+    const r = find(n);
+    if (r !== n) {
+      renames.set(n, r);
+    }
+  }
+  return { renames, refusals };
+}

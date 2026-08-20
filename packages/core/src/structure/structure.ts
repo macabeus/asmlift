@@ -41,6 +41,7 @@ import { Block, Fn, Op, Value, defOpMap, dominators, successorsOf } from '../ir/
 import { EFFECTFUL_OPS } from '../ir/opcodes';
 import { type IrType, T, scalarTypeForAccess, typeEquals } from '../ir/types';
 import { BinOp, Expr, SFn, Stmt, SwitchCase, exprChildren, gapReasonFor, mapExprChildren, negateCond } from '../l3/ast';
+import type { Gate } from '../l3/gates';
 import { exprCType, ptrElemBytes } from '../l3/typing';
 import { returnType } from '../raise/recover';
 import { collectStructs } from '../raise/structs';
@@ -59,6 +60,7 @@ import {
 import { analyze } from './analysis';
 import { makeLoopHazards, updateWriteSet } from './hazards';
 import { analyzeLoops } from './loops';
+import { type NameMerge, coalesceNames } from './namecoalesce';
 import { makeSwitchRecovery } from './switch-recover';
 
 // Lower a constant-offset memory access to its lvalue/rvalue Expr. If the base was recovered as a
@@ -666,6 +668,17 @@ export interface StructureOptions {
   // rank.ts enumerates the ON spelling as the `/reread-globals` axis — see analysis.ts
   // AnalyzeOptions for why this is a differ-refereed lever and not a fix.
   rereadGlobals?: boolean;
+  // Merge two variables that a merge copy would join, when the values under them never interfere
+  // (structure/namecoalesce.ts). Off by default; rank.ts enumerates the ON spelling as the
+  // `/merge-names` axis. Which variables the compiler's own coalescer shared is not derivable from
+  // the naming — MEASURED both ways: on one benchmark row the merged spelling scores 7 points
+  // better and on two others 3 and 6 worse, and the copies themselves are free (agbcc coalesces
+  // them, so the two spellings of klonoa’s LoadBGTilemapData compile to the same 906 instructions).
+  // So the differ referees, exactly as it does for the other allocator-ambiguous spellings.
+  coalesceMergeNames?: boolean;
+  /** `coalesceMergeNames`'s admission rules, so a test can run the pass with one gate DROPPED —
+   *  the ablation as a value rather than as a flag compiled into the shipped path. */
+  nameCoalesceGates?: readonly Gate<NameMerge>[];
   // How an unresolvable VALUE degrades (a live `opaque`, an unlowered transient op, a dropped def):
   //   "strict"   (default) — the `"?"` sentinel, tripping assertResolved at the boundary (loud in
   //              the PROCESS);
@@ -690,6 +703,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     littleEndian = true,
     spellBitfieldMembers = true,
     rereadGlobals = false,
+    coalesceMergeNames = false,
+    nameCoalesceGates,
     onGap = 'strict',
     symbols,
   } = opts;
@@ -1363,6 +1378,42 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
         }
         changed = true;
       });
+    }
+  }
+
+  // ── copy coalescing over the interference graph (namecoalesce.ts) ────────────────────────────
+  // The walk above adopts a name only BACKWARD along an edge, once, in address order — so a merge
+  // parameter whose arguments were still unnamed took a fresh one and kept it. With every name now
+  // settled, `coalesceNames` asks which two of them a would-be copy joins and whether the values
+  // under them ever interfere. Applied here, before anything reads the names: `anchorConstCopies`
+  // below counts the values under a name, and emission spells them.
+  if (coalesceMergeNames) {
+    const { renames } = coalesceNames(
+      {
+        blocks: fn.blocks,
+        entry,
+        preds,
+        liveIn,
+        opBlock,
+        defs,
+        materialize,
+        varName,
+        varType,
+        loops: [...forest.byHeader.values()].map((nl) => ({ header: nl.header, body: nl.body })),
+      },
+      nameCoalesceGates,
+    );
+    for (const [v, n] of varName) {
+      const r = renames.get(n);
+      if (r !== undefined) {
+        varName.set(v, r);
+      }
+    }
+    for (const [v, n] of backArgName) {
+      const r = renames.get(n);
+      if (r !== undefined) {
+        backArgName.set(v, r);
+      }
     }
   }
 

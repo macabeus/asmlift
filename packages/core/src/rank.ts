@@ -13,7 +13,7 @@ import { assertDerefsTyped, assertResolved } from './contracts';
 import type { AsmData } from './frontend/asmdata';
 import { frontendFor } from './frontend/registry';
 import { globalCellOf } from './ir/alias';
-import { Fn, type Value, defOpMap } from './ir/core';
+import { Fn, type Value, defOpMap, successorsOf } from './ir/core';
 import { T } from './ir/types';
 import { verify } from './ir/verify';
 import { materializeArgBases } from './l3/argbase';
@@ -256,12 +256,31 @@ export function enumerateCandidates(
       (op) => op.opcode === 'load' && globalCellOf(probeDefs, op.operands[0], op.attrs.off as number) !== null,
     ),
   );
-  const senseCands = readsANamedGlobal
+  const rereadCands = readsANamedGlobal
     ? [
         ...bitfieldCands.map((s) => ({ ...s, reread: false })),
         ...bitfieldCands.map((s) => ({ ...s, suffix: `${s.suffix}/reread-globals`, reread: true })),
       ]
     : bitfieldCands.map((s) => ({ ...s, reread: false }));
+  // `/merge-names` — coalesce two variables a merge copy would join when the values under them
+  // never interfere (structure/namecoalesce.ts). Destroying SSA gives a merge and each arm feeding
+  // it their own variable unless the naming walk happens to share one, and every arm it did not
+  // share with pays a copy. Whether the source had one variable there is not derivable, and the
+  // copies are not the cost they look like — agbcc coalesces them, so both spellings of
+  // klonoa’s LoadBGTilemapData compile to the same 906 instructions, and which one scores better is
+  // per-function. So both are emitted and the differ referees.
+  //
+  // Gated on the function HAVING a merge fed by more than one edge — the only thing the axis can
+  // change. The dedup below collapses the pair wherever it changed nothing.
+  const hasMultiEdgeMerge = probe.blocks
+    .slice(1)
+    .some((b) => b.params.length > 0 && new Set(probe.blocks.filter((pr) => successorsOf(pr).includes(b))).size > 1);
+  const senseCands = hasMultiEdgeMerge
+    ? [
+        ...rereadCands.map((s) => ({ ...s, mergeNames: false })),
+        ...rereadCands.map((s) => ({ ...s, suffix: `${s.suffix}/merge-names`, mergeNames: true })),
+      ]
+    : rereadCands.map((s) => ({ ...s, mergeNames: false }));
 
   const seen = new Set<string>();
   const out: Candidate[] = [];
@@ -297,9 +316,10 @@ export function enumerateCandidates(
             anchorConstCopies: s.anchor,
             spellBitfieldMembers: s.bitfields,
             rereadGlobals: s.reread,
+            coalesceMergeNames: s.mergeNames,
           });
         } catch (e) {
-          if (!s.anchor && s.bitfields && !s.reread) {
+          if (!s.anchor && s.bitfields && !s.reread && !s.mergeNames) {
             throw e; // the base axes keep their behavior: a structuring failure aborts the row
           }
           // an anchored variant that fails structuring or its contracts is a dropped lever, never

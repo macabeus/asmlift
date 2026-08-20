@@ -14,6 +14,7 @@ import { COALESCE_GATES } from '../src/l3/coalesce';
 import { type Gate, gateTableDefects } from '../src/l3/gates';
 import { LATCH_GATES } from '../src/raise/latch';
 import { PREUPDATE_SINK_GATES } from '../src/structure/hazards';
+import { NAME_COALESCE_GATES } from '../src/structure/namecoalesce';
 
 // Every declared table. A pass that adopts gates.ts and forgets this line gets no contract, which is
 // the one hole the pattern cannot close for itself — so keep it short and obvious.
@@ -22,6 +23,7 @@ const TABLES: Record<string, readonly Gate<never>[]> = {
   BASECSE_GATES: BASECSE_GATES as readonly Gate<never>[],
   PREUPDATE_SINK_GATES: PREUPDATE_SINK_GATES as readonly Gate<never>[],
   LATCH_GATES: LATCH_GATES as readonly Gate<never>[],
+  NAME_COALESCE_GATES: NAME_COALESCE_GATES as readonly Gate<never>[],
 };
 
 /** Every `test(...)`/`describe(...)` title in the core suite, as one blob to search. */
