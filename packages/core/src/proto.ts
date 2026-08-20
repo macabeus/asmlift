@@ -43,6 +43,42 @@ export function protoArity(p: FnProto | undefined): number | undefined {
   return undefined;
 }
 
+/** Problems with a HAND-WRITTEN prototype table — empty when it is well formed.
+ *
+ *  `protoArity` above falls back to the arg-register heuristic on a `params` it cannot read, which
+ *  is right when `params` is omitted and silent when it is mistyped: `params: "2"` then decompiles
+ *  at a guessed arity, and a misspelled `returnsVoid` does nothing at all. Neither is visible in
+ *  the output, so a table that came from outside is checked before it reaches either. */
+export function validatePrototypes(value: unknown): string[] {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return ['must be an object mapping a symbol name to its prototype'];
+  }
+  const problems: string[] = [];
+  for (const [sym, proto] of Object.entries(value)) {
+    if (typeof proto !== 'object' || proto === null || Array.isArray(proto)) {
+      problems.push(`${sym}: must be an object, e.g. {"params": 2}`);
+      continue;
+    }
+    for (const key of Object.keys(proto)) {
+      if (key !== 'params' && key !== 'returnsVoid') {
+        problems.push(`${sym}: unknown key "${key}" (expected "params" or "returnsVoid")`);
+      }
+    }
+    const { params, returnsVoid } = proto as { params?: unknown; returnsVoid?: unknown };
+    if (params !== undefined) {
+      const countOk = typeof params === 'number' && Number.isInteger(params) && params >= 0;
+      const listOk = Array.isArray(params) && params.every((t) => typeof t === 'string');
+      if (!countOk && !listOk) {
+        problems.push(`${sym}: "params" must be a non-negative integer or a list of type strings`);
+      }
+    }
+    if (returnsVoid !== undefined && typeof returnsVoid !== 'boolean') {
+      problems.push(`${sym}: "returnsVoid" must be a boolean`);
+    }
+  }
+  return problems;
+}
+
 /** The C type spelling for one declared parameter/return, or null when the facts do not
  *  determine one. A pointer is `void *` — address-identical to any object pointer, and asmlift
  *  makes every stride explicit — so nothing is guessed about what it points at. */

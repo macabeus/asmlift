@@ -37,16 +37,16 @@ usage: asmlift <file.s|file.asm|file.o|-> [--target <agbcc|ido7.1|gcc2.7.2kmc|gc
                 [--asm-data <dump.txt>] [--proto <proto.json>]
 ```
 
-| Flag              | Meaning                                                                                                                                                                                                                                  |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--target`        | Which ISA+compiler pair produced the input. Optional inside a `decomp.yaml` project (resolution: flag > `tools.asmlift.target` > `platform`, traced on stderr; an ambiguous platform like `n64` asks you to choose rather than guessing) |
-| `--name`          | The function to decompile when the input holds several (default: auto-detected)                                                                                                                                                          |
-| `--backend`       | Output language: `c` (default) or `pascal`                                                                                                                                                                                               |
-| `--strict`        | Fail on any gap instead of annotating. Default: gaps become in-source `ASMLIFT_ERROR` markers plus stderr diagnostics                                                                                                                    |
-| `--config`        | Explicit `decomp.yaml` path (default: nearest ancestor of the input file)                                                                                                                                                                |
-| `--score-against` | Compile the output (and every ranked candidate) and objdiff-score it against this object. Implies strict; the per-candidate score table goes to stderr                                                                                   |
-| `--asm-data`      | For text input: an `objdump -s -r -t` dump of the object the asm came from, supplying the data sections text lacks (jump tables, anonymous constants). Object-file input extracts this itself and does not take the flag                 |
-| `--proto`         | Function prototypes as JSON (`{"sym": {"params": N \| ["u8", ...], "returnsVoid": true}, ...}`): a callee's params drives its call-argument recovery; the decompiled function's own entry supplies its void-ness                         |
+| Flag              | Meaning                                                                                                                                                                                                                                                                                                    |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--target`        | Which ISA+compiler pair produced the input. Optional inside a `decomp.yaml` project (resolution: flag > `tools.asmlift.target` > `platform`, traced on stderr; an ambiguous platform like `n64` asks you to choose rather than guessing)                                                                   |
+| `--name`          | The function to decompile when the input holds several (default: auto-detected)                                                                                                                                                                                                                            |
+| `--backend`       | Output language: `c` (default) or `pascal`                                                                                                                                                                                                                                                                 |
+| `--strict`        | Fail on any gap instead of annotating. Default: gaps become in-source `ASMLIFT_ERROR` markers plus stderr diagnostics                                                                                                                                                                                      |
+| `--config`        | Explicit `decomp.yaml` path (default: nearest ancestor of the input file)                                                                                                                                                                                                                                  |
+| `--score-against` | Compile the output (and every ranked candidate) and objdiff-score it against this object. Implies strict; the per-candidate score table goes to stderr                                                                                                                                                     |
+| `--asm-data`      | For text input: an `objdump -s -r -t` dump of the object the asm came from, supplying the data sections text lacks (jump tables, anonymous constants). Object-file input extracts this itself and does not take the flag                                                                                   |
+| `--proto`         | Function prototypes as JSON (`{"sym": {"params": N \| ["u8", ...], "returnsVoid": true}, ...}`): a callee's params drives its call-argument recovery; the decompiled function's own entry supplies its void-ness. Every entry is validated — a malformed one is refused (exit `64`), never quietly ignored |
 
 Exit codes: `0` clean (or byte-exact match when scoring) · `1` gaps, declined, or nonmatch —
 the stderr tag says which (`[declined]` = principled refusal, `[internal error]` = bug) ·
@@ -124,6 +124,25 @@ A worked example with all three channels is the Klonoa decomp's
 [`asmlift-elf` target](https://github.com/Dream-Atelier/kl-eod-decomp/blob/main/Makefile):
 agbcc `-g` for shapes and signatures, plus a macro-only sidecar graft; the project's default
 `make` sha-verifies the same link.
+
+### When there is no signature: `--proto`
+
+A callee still written in assembly was never compiled from C, so no `-g` build produces a signature
+for it. The frontend then counts the contiguous argument registers holding a value at the call — an
+intervening call disproves some of those and they are dropped, but a value the compiler merely left
+behind in the next register reads as an argument, and nothing in the register file distinguishes the
+two. The call comes out with arguments the callee never took.
+
+`--proto` is how you state the arity you know:
+
+```
+echo '{"AsmCallee": {"params": 1}}' > proto.json
+asmlift fn.s --target agbcc --proto proto.json
+```
+
+Measured on one real function, a single callee's arity is worth 53 objdiff points. A malformed
+entry is refused (exit `64`) rather than ignored — `params: "1"` would otherwise read as an omitted
+`params` and fall back to the same guess, costing those points with nothing said about it.
 
 ## Using it as a library
 

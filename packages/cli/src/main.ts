@@ -21,7 +21,7 @@ import { FrontendUnsupportedError } from '@asmlift/core/frontend/errors';
 import { VerifyError } from '@asmlift/core/ir/verify';
 import type { LanguageBackend } from '@asmlift/core/l3/ast';
 import { type OnGap, decompile } from '@asmlift/core/pipeline';
-import type { Prototypes } from '@asmlift/core/proto';
+import { type Prototypes, validatePrototypes } from '@asmlift/core/proto';
 import { RaiseUnsupportedError } from '@asmlift/core/raise/errors';
 import { StructureError } from '@asmlift/core/structure/structure';
 import { type SymbolMap, asIfUndecompiled } from '@asmlift/core/symbols';
@@ -241,12 +241,9 @@ export async function runCli(
   let prototypes: Prototypes | undefined;
   const protoFlag = flags.get('proto') as string | undefined;
   if (protoFlag !== undefined) {
+    let parsed: unknown;
     try {
-      const parsed: unknown = JSON.parse(readFileSync(resolve(protoFlag), 'utf8'));
-      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-        return usage('--proto must be a JSON object: {"sym": {"params": N | ["u8", ...], "returnsVoid": true}, ...}');
-      }
-      prototypes = parsed as Prototypes;
+      parsed = JSON.parse(readFileSync(resolve(protoFlag), 'utf8'));
     } catch (e) {
       return {
         code: 66,
@@ -254,6 +251,13 @@ export async function runCli(
         stderr: `asmlift: cannot read --proto file: ${e instanceof Error ? e.message : e}\n`,
       };
     }
+    // Every entry, not just the envelope — an unreadable `params` decompiles at a guessed arity
+    // rather than failing (see validatePrototypes).
+    const problems = validatePrototypes(parsed);
+    if (problems.length) {
+      return usage(`--proto ${protoFlag}:\n${problems.map((p) => `  ${p}`).join('\n')}`);
+    }
+    prototypes = parsed as Prototypes;
   }
 
   // tools.asmlift.elf → the project's symbol map (names + declaration shapes). Explicit
