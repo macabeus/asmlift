@@ -668,6 +668,10 @@ export interface StructureOptions {
   // rank.ts enumerates the ON spelling as the `/reread-globals` axis — see analysis.ts
   // AnalyzeOptions for why this is a differ-refereed lever and not a fix.
   rereadGlobals?: boolean;
+  // Materialize a load that feeds a `cond_br` join arg, so the naming walk can home the join in
+  // it and the identity arm elides to a one-sided in-place `if`. Off by default; rank.ts
+  // enumerates the ON spelling as the `/inplace` axis — see analysis.ts AnalyzeOptions.
+  materializeJoinFeeds?: boolean;
   // Merge two variables that a merge copy would join, when the values under them never interfere
   // (structure/namecoalesce.ts). Off by default; rank.ts enumerates the ON spelling as the
   // `/merge-names` axis. Which variables the compiler's own coalescer shared is not derivable from
@@ -711,7 +715,7 @@ export interface StructureHooks {
  *  SCOPE: refusals thrown by `structure()` itself. A decline can also come from `structureChecked`'s
  *  boundary contracts, which run OUTSIDE it — `rank.ts` closes that half, where the contracts are. */
 function assertPrimaryAccepts(fn: Fn, opts: StructureOptions, hooks: StructureHooks): void {
-  structure(fn, { ...opts, coalesceMergeNames: false }, hooks);
+  structure(fn, { ...opts, coalesceMergeNames: false, materializeJoinFeeds: false }, hooks);
 }
 
 export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureHooks = {}): SFn {
@@ -725,11 +729,14 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     littleEndian = true,
     spellBitfieldMembers = true,
     rereadGlobals = false,
+    materializeJoinFeeds = false,
     coalesceMergeNames = false,
     onGap = 'strict',
     symbols,
   } = opts;
-  if (coalesceMergeNames) {
+  // Both levers change which edge copies elide as identities, which the loop emitters' hazard
+  // predicates read — so the invariant above covers both.
+  if (coalesceMergeNames || materializeJoinFeeds) {
     assertPrimaryAccepts(fn, opts, hooks);
   }
   const defs = defOpMap(fn);
@@ -744,6 +751,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     {
       defs,
       rereadGlobals,
+      materializeJoinFeeds,
       // the map's own declaration truth: a volatile object's read may not be duplicated or moved
       volatileGlobal: (n) => {
         const si = symbols?.get(n);

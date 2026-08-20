@@ -153,7 +153,12 @@ export interface SwitchCase {
 export interface SFn {
   name: string;
   params: { name: string; type: IrType }[];
-  locals: { name: string; type: IrType; volatile?: true }[]; // recovered locals, declared at function top
+  /** Recovered locals, declared at function top. Two INDEPENDENT volatility facts, mirroring
+   *  symbols.ts's cell-vs-pointee split: `volatile` = the local OBJECT is volatile (the
+   *  address-escaped frame scratch; dce.ts treats reads of it as observable), `pointeeVolatile`
+   *  = the local is a pointer TO volatile data (the l3/volatileptr.ts lever; a declaration
+   *  spelling only — nothing about the local itself is observable). */
+  locals: { name: string; type: IrType; volatile?: true; pointeeVolatile?: true }[];
   /** project globals referenced with a known declaration shape (symbol map) — typed for the
    *  legalization env (exprCType) but NEVER declared by a backend: the project's own headers
    *  declare them, exactly like every other global name asmlift emits. */

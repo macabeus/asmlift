@@ -58,10 +58,19 @@ export interface AnalyzeOptions {
    *  always had: without a declaration nothing here can know, and the differ referees the extra
    *  load. Where the map DOES know, the axis is silent about it rather than wrong. */
   volatileGlobal?: (name: string) => boolean;
+  /** The in-place-join axis (rank.ts `/inplace`). A load whose result is a `cond_br` successor
+   *  ARG feeds a merge: rendered inline it has no name, so the merge param mints a fresh variable
+   *  and BOTH arms must assign it. Materialized, the naming walk can home the merge in the load's
+   *  own variable, the identity arm elides, and the `if` renders one-sided — `v = *p; if (v > 31)
+   *  v = 32;` — which is also what reuses the load's register when recompiled. Whether the source
+   *  spelled the temp or the overwrite is not derivable from the asm, so this is a differ-refereed
+   *  candidate axis, never a default. Plain `br` args (loop-carried values) are out of scope:
+   *  their homes are the loop-param machinery's question. */
+  materializeJoinFeeds?: boolean;
 }
 
 export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {}): StructureAnalysis {
-  const { defs, rereadGlobals = false, volatileGlobal } = opts;
+  const { defs, rereadGlobals = false, volatileGlobal, materializeJoinFeeds = false } = opts;
   // ── use registry ────────────────────────────────────────────────────────────────────────
   // Every use of a value, POSITIONED: the consuming op and its block/index. Successor args are
   // uses AT the terminator (they render in argAssigns at block end). A void function's `ret`
@@ -97,6 +106,22 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
     for (const op of b.ops) {
       if (op.opcode === 'call') {
         callPos.push(linPos(op));
+      }
+    }
+  }
+  // The `/inplace` axis reads: which values ride a `cond_br` edge as a successor ARG. Built
+  // once; plain `br` args deliberately not collected (see AnalyzeOptions).
+  const condBrArgFed = new Set<Value>();
+  if (materializeJoinFeeds) {
+    for (const b of fn.blocks) {
+      for (const op of b.ops) {
+        if (op.opcode === 'cond_br') {
+          for (const s of op.successors) {
+            for (const a of s.args) {
+              condBrArgFed.add(a);
+            }
+          }
+        }
       }
     }
   }
@@ -399,6 +424,10 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
             ? globalCellOf(defs, op.operands[0], op.attrs.off as number)
             : null;
         const barsThisRead = cell && defs && !volatileGlobal?.(cell.name) ? mayWriteGlobal(defs, cell.name) : null;
+        if (materializeJoinFeeds && op.opcode === 'load' && condBrArgFed.has(r)) {
+          materialize.add(op);
+          continue;
+        }
         const sites = useSitesOf.get(r)!;
         const consumers = [...new Set(sites.map((s) => s.op))];
         const isCall = op.opcode === 'call';

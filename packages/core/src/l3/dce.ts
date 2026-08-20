@@ -50,7 +50,7 @@ function reads(e: Expr): Set<string> {
  *   - `marker` — the annotate-mode ASMLIFT_ERROR gap signal, which must survive so the gap stays loud;
  *   - the strict-mode `?` unresolved sentinel (`{k:'var', name:'?'}`) — dropping it would let a
  *     value asmlift could NOT lift slip past `assertResolved`, silently downgrading a loud gap;
- *   - a memory load (`index`/`field`) — asmlift models no `volatile`, so a possibly-effectful read
+ *   - a memory load (`index`/`field`) — a deref's volatility is unknowable here, so a possibly-effectful read
  *     is never deleted (this pass never removes a memory access).
  *   - a read of a VOLATILE local (the frame object whose address escaped) — a volatile read is an
  *     observable access the machine performed; deleting the dead assignment would delete the read.

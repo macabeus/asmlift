@@ -23,6 +23,7 @@ import { registerishSpellings } from './l3/regspell';
 import { reindexWalks } from './l3/reindex';
 import { hoistScopedBases } from './l3/scopebase';
 import { type SymbolRef, collectSymbolRefs } from './l3/symbol-refs';
+import { volatilePtrLocals } from './l3/volatileptr';
 import { RewritePattern } from './pattern/engine';
 import { applyIdiomPatterns, raiseRecovered, structureChecked } from './pipeline';
 import { type Prototypes, prototypesFromSymbols } from './proto';
@@ -272,15 +273,39 @@ export function enumerateCandidates(
   //
   // Gated on the function HAVING a merge fed by more than one edge — the only thing the axis can
   // change. The dedup below collapses the pair wherever it changed nothing.
+  // `/inplace` — materialize a load that feeds a `cond_br` join arg (structure.ts
+  // materializeJoinFeeds), so the merge homes in the load's own variable and the identity arm
+  // elides to a one-sided in-place overwrite (`v = *p; if (v > 31) v = 32;`). Whether the source
+  // spelled the fresh temp or the overwrite is not derivable from asm, and the recompiled code
+  // differs (the two-sided form needs a second register — at the margin a callee-save push — and
+  // the emptied arm flips the branch sense), so both spellings are emitted and the differ
+  // referees.
+  //
+  // Gated on the function HAVING a load-fed cond_br arg — the only thing the axis can change.
+  const hasLoadFedJoin = probe.blocks.some((b) =>
+    b.ops.some(
+      (op) =>
+        op.opcode === 'cond_br' && op.successors.some((sx) => sx.args.some((a) => probeDefs.get(a)?.opcode === 'load')),
+    ),
+  );
+  // Order is load-bearing for the dropped-primary skip below, same as merge-names': every
+  // `inplace: false` sibling enumerates before its `/inplace` twin, so a twin's stripped-key
+  // lookup always finds a sibling that has already run (or been condemned).
+  const inplaceCands = hasLoadFedJoin
+    ? [
+        ...rereadCands.map((s) => ({ ...s, inplace: false })),
+        ...rereadCands.map((s) => ({ ...s, suffix: `${s.suffix}/inplace`, inplace: true })),
+      ]
+    : rereadCands.map((s) => ({ ...s, inplace: false }));
   const hasMultiEdgeMerge = probe.blocks
     .slice(1)
     .some((b) => b.params.length > 0 && new Set(probe.blocks.filter((pr) => successorsOf(pr).includes(b))).size > 1);
   const senseCands = hasMultiEdgeMerge
     ? [
-        ...rereadCands.map((s) => ({ ...s, mergeNames: false })),
-        ...rereadCands.map((s) => ({ ...s, suffix: `${s.suffix}/merge-names`, mergeNames: true })),
+        ...inplaceCands.map((s) => ({ ...s, mergeNames: false })),
+        ...inplaceCands.map((s) => ({ ...s, suffix: `${s.suffix}/merge-names`, mergeNames: true })),
       ]
-    : rereadCands.map((s) => ({ ...s, mergeNames: false }));
+    : inplaceCands.map((s) => ({ ...s, mergeNames: false }));
 
   const seen = new Set<string>();
   const out: Candidate[] = [];
@@ -313,7 +338,15 @@ export function enumerateCandidates(
       // first, so the entry is always recorded before its merged twin is reached.
       const droppedPrimary = new Set<string>();
       for (const s of senseCands) {
-        if (s.mergeNames && droppedPrimary.has(s.suffix.replace('/merge-names', ''))) {
+        if (
+          (s.mergeNames && droppedPrimary.has(s.suffix.replace('/merge-names', ''))) ||
+          (s.inplace && droppedPrimary.has(s.suffix.replace('/inplace', '')))
+        ) {
+          // A SKIPPED variant is recorded exactly like a dropped one, or the closure would not be
+          // transitive: with plain X dropped and X/inplace skipped-but-unrecorded,
+          // X/inplace/merge-names would find neither stripped key and run — shipping a
+          // double-lever candidate where its ancestor failed the boundary contracts.
+          droppedPrimary.add(s.suffix);
           continue;
         }
         // structure() reads `fn` and produces a fresh SFn (it does not mutate `fn`), so both branch
@@ -326,15 +359,16 @@ export function enumerateCandidates(
             anchorConstCopies: s.anchor,
             spellBitfieldMembers: s.bitfields,
             rereadGlobals: s.reread,
+            materializeJoinFeeds: s.inplace,
             coalesceMergeNames: s.mergeNames,
           });
         } catch (e) {
-          if (!s.anchor && s.bitfields && !s.reread && !s.mergeNames) {
+          if (!s.anchor && s.bitfields && !s.reread && !s.inplace && !s.mergeNames) {
             throw e; // the base axes keep their behavior: a structuring failure aborts the row
           }
-          if (!s.mergeNames) {
-            droppedPrimary.add(s.suffix);
-          }
+          // Recorded for EVERY dropped variant: a candidate with more axes on looks its siblings
+          // up by stripping one axis at a time, and the stripped key can itself carry the other.
+          droppedPrimary.add(s.suffix);
           // an anchored variant that fails structuring or its contracts is a dropped lever, never
           // an aborted enumeration — same rule as respell below
           opts.onLeverError?.(name + s.suffix, e instanceof Error ? e.message.split('\n')[0] : String(e));
@@ -376,7 +410,10 @@ export function enumerateCandidates(
         // never aborts the enumeration). A dropped re-spelling loses nothing: the primary remains.
         //
         // POLICY: re-spellings derive from the BASE spelling only — levers do not compose
-        // (an /indexed + /regcopy product is deferred until a row demands it). And a lever must
+        // (an /indexed + /regcopy product is deferred until a row demands it). ONE product is
+        // sanctioned because a row demanded it: /indexed/volatile — re-indexing keeps a numeric
+        // walk base as a pointer local (l3/reindex.ts v2), and whether THAT local pointed at
+        // volatile data is the same underdetermined question /volatile answers on the primary. And a lever must
         // PRESERVE SEMANTICS by construction: the differ referees byte-exactness (a wrong candidate
         // can never fake a score-0 match), but on a NONMATCH row the best-scoring source is shown
         // to the user — a semantically-wrong re-spelling there is plausible-but-wrong output, the
@@ -408,6 +445,12 @@ export function enumerateCandidates(
         // same footing as the others: the primary inline spelling stays in the list, so the differ
         // referees and this can never cost a match.
         respell('/argbase', () => materializeArgBases(sfn));
+        // `/volatile` — declare a pointer local holding a NUMERIC address as pointing to volatile
+        // data (l3/volatileptr.ts). A raw constant has no declaration anywhere, so the original
+        // qualifier is not derivable — and it is codegen-visible (a volatile MEM is barred from
+        // motion, which lands the allocator on different homes). Both spellings are emitted and
+        // the differ referees.
+        respell('/volatile', () => volatilePtrLocals(sfn));
         // `/scopebase` — name a reused global base at the INNERMOST scope holding its uses
         // (l3/scopebase.ts). Distinct from basecse's function-top hoist, which the primary already
         // carries: this one fires exactly where that placement would extend a live range the
@@ -443,6 +486,10 @@ export function enumerateCandidates(
         enumerate('/scopebase-coalesce', () => hoistScopedBases(sfn));
         enumerate('/coalesce', () => sfn);
         respell('/indexed', () => reindexWalks(sfn));
+        respell('/indexed/volatile', () => {
+          const r = reindexWalks(sfn);
+          return r ? volatilePtrLocals(r) : null;
+        });
         // the register-copy spelling (l3/regspell.ts): 0–3 variants (base; tail assign-back reusing
         // the dead value var; tail assign-back into a fresh var — the tail choice is allocator-
         // ambiguous, so both are ranked)
