@@ -635,17 +635,16 @@ export const SYNTHETIC: SynthSpec[] = [
   // It changes what the recogniser can SEE. Past the range agbcc spells the branch
   // `bne .L1 / b .L2 @long jump`, and a frontend that splits a block at every conditional branch
   // turns that second instruction into a block whose only op is `br`, sitting on the edge into the
-  // shared block. A recogniser keyed on successor identity cannot see through it, so the fold does
-  // not fire and the tail-duplicated spelling survives — which the compiler cross-jumps back
-  // together, so `ifand_far` matches without anything having recovered the shape.
+  // shared block. A recogniser keyed on successor identity cannot see through those, so the fold
+  // resolves the chain before comparing (raise/shortcircuit.ts `forwardingTarget`).
   //
   // And it changes the branch POLARITY, which is what decides the ORIENTATION the fold would emit.
   // A short branch is `beq shared`, putting the second test on the FALL edge; the long form
   // inverts to `bne <second test>`, putting it on the TAKEN edge. Those are the fold's two arms —
   // `logic_or` and `logic_and` — so the near row and the far row do not exercise one code path at
   // two sizes, they exercise BOTH paths. MEASURED, and it is the opposite of what the distance
-  // suggests: the near row folds to the swapped `||` and misses, and once the trampolines are
-  // normalised away the far row folds to `&&`, the source's own orientation, and still matches.
+  // suggests: the near row folds to the swapped `||` and misses, while the far row folds to `&&`,
+  // the source's own orientation, and matches.
   //
   // `ifor_near` is the ORIENTATION control. The same shape written the other way round matches
   // today, so the gap is not "this shape is unrecoverable" but "one of the fold's two arms emits
@@ -682,7 +681,9 @@ export const SYNTHETIC: SynthSpec[] = [
   //
   // WHAT THESE ROWS MOVE, so the headline is not read as progress: five rows take asmlift 372 →
   // 375 and m2c 348 → 348. All three gained matches are synthetic rows authored for an
-  // asmlift-specific gap, one of them (`ifand_far`) matching for a reason nothing recovered; and
+  // asmlift-specific gap, one of them (`ifand_far`) scoring MATCH either way — a byte score cannot
+  // see the difference between the recovered `&&` and the tail-duplicated spelling agbcc
+  // cross-jumps back together, so a test pins that orientation, not this row; and
   // every row reads `noncompile` for m2c on an unrelated pointer-spelling defect of its own, which
   // on `ifand_near` hides that its orientation is the RIGHT one. The two gates are not the same
   // either: `bench regression` fails only on a LOST match, so it holds `ifand_far` and `ifor_near`
@@ -708,11 +709,12 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc'],
     ctx: 'int ifand_far(int,int,int*,int*);',
     note:
-      'MATCHES without anything having recovered the shape: the guarded arm is far enough that the ' +
-      'shared block sits behind a long-branch trampoline, which hides it from the fold that ' +
-      'rewrites `ifand_near`, and the tail-duplicated spelling left behind is one the compiler ' +
-      'cross-jumps back together. The same distance also INVERTS the branch, which is what makes ' +
-      'this row the safe half of the family — see the toolchain and orientation notes above',
+      'the guarded arm is far enough that agbcc inverts the branch and puts the shared block behind ' +
+      'a long-branch trampoline on each edge. The fold looks through them, and this orientation ' +
+      "lands on the source's own `&&` rather than the dual `ifand_near` gets. The SCORE cannot " +
+      'police that: the un-folded spelling tail-duplicates the else arm and agbcc cross-jumps the ' +
+      'copies back together, so this row read MATCH before the shape was recovered too — what the ' +
+      'orientation is pinned by is a test, not this number',
   },
   {
     sym: 'ifor_near',

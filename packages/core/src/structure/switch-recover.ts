@@ -4,7 +4,7 @@
 // factory takes its dependencies EXPLICITLY (`SwitchRecoverDeps`); `expr`/`structureRegion` are
 // late-bound callbacks into the emission phase, so case bodies reuse the ordinary structuring
 // machinery (loops/ifs inside cases, the onStack guard).
-import { Block, Fn, Op, Value, successorsOf } from '../ir/core';
+import { Block, Fn, Op, Value, forwardingTarget, successorsOf } from '../ir/core';
 import { ORDER_SENSITIVE_OPS } from '../ir/opcodes';
 import { Expr, Stmt, SwitchCase } from '../l3/ast';
 
@@ -318,27 +318,10 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     // Walk the test tree. `cases`: value → case-entry block. `defaultCands`: leaves reached without an
     // equality pin. A test-block DAG cycle, or a `!=` case when the compiler disallows it, declines.
     const cases = new Map<number, Block>();
+    // Reached through `forwardingTarget`: agbcc's binary-search layout branches to the shared default
+    // through empty `b .Ldef` blocks, and without resolving them each becomes a DISTINCT default
+    // candidate and the whole tree declines.
     const defaultCands = new Set<Block>();
-    // Skip pure forwarding blocks — a block whose only op is an unconditional `br` (no side effects, no
-    // params). agbcc's binary-search layout branches to the shared default through such empty `b .Ldef`
-    // blocks; without skipping them each becomes a DISTINCT default candidate and the whole tree declines.
-    const skipForward = (blk: Block): Block => {
-      let cur = blk;
-      const guard = new Set<Block>();
-      // Only skip a truly empty forwarding block: a lone `br` with no params AND no successor ARGS —
-      // an edge that carries a phi arg is NOT transparent (skipping it would drop that assignment).
-      while (
-        cur.ops.length === 1 &&
-        cur.ops[0].opcode === 'br' &&
-        cur.params.length === 0 &&
-        cur.ops[0].successors[0].args.length === 0 &&
-        !guard.has(cur)
-      ) {
-        guard.add(cur);
-        cur = cur.ops[0].successors[0].block;
-      }
-      return cur;
-    };
     // Concretely SIMULATE the decision tree for a scrutinee value `xv`, returning the leaf block it
     // reaches (or null on an unexpected cycle). This is PRE3 done concretely: it lets us verify each
     // recovered case value actually routes to its recorded body in the ORIGINAL tree.
@@ -356,7 +339,7 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
         guard.add(cur);
         const term = cur.ops[cur.ops.length - 1];
         const taken = evalCmp(ti.opcode, ti.xOnLeft, xv, ti.k);
-        cur = skipForward(term.successors[taken ? 0 : 1].block);
+        cur = forwardingTarget(term.successors[taken ? 0 : 1].block);
       }
     };
     const seen = new Set<Block>();
@@ -372,8 +355,8 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
         return null;
       } // PRE1: every test is on the SAME Value
       const term = blk.ops[blk.ops.length - 1];
-      const taken = skipForward(term.successors[0].block),
-        fall = skipForward(term.successors[1].block);
+      const taken = forwardingTarget(term.successors[0].block),
+        fall = forwardingTarget(term.successors[1].block);
       const asLeafOrTest = (child: Block, role: 'case' | 'nav', k?: number) => {
         const isTest = !!testInfo(child, false) && testInfo(child, false)!.x === scrut;
         if (role === 'case') {

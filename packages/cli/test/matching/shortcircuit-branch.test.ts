@@ -39,6 +39,24 @@ describe('the emitted orientation decides the match, and only one orientation is
     expect(rk.best.score.match).toBe(true);
   });
 
+  test('a far arm recovers the source `&&` through its long-branch trampolines', () => {
+    // Past Thumb's ±256-byte reach agbcc inverts the branch and emits `bne ^g / b shared`, so the
+    // shared block arrives behind a forwarding block on EACH edge. The fold looks through them, and
+    // this orientation lands on the source's own spelling rather than the dual.
+    //
+    // The bytes cannot police this on their own: the un-folded spelling tail-duplicates the else
+    // arm, and agbcc cross-jumps the copies back together, so the row scored 0 either way. What is
+    // asserted is the `&&`.
+    const far = Array.from({ length: 32 }, (_, i) => `p[${i}] = ${i * 2 + 1}; q[${i}] = ${i * 2 + 2};`).join(' ');
+    const c = `int f(int a, int b, int *p, int *q){ if (a && b) { ${far} } else { p[0] = -1; } return p[1]; }`;
+    const { rk } = ranked(c);
+    expect(rk.best.source).toContain('&&');
+    expect(rk.best.source).not.toContain('||');
+    expect(rk.best.score.match).toBe(true);
+    // and the else arm is emitted ONCE — the tail duplication the fold exists to remove
+    expect(rk.best.source.split('-1').length - 1).toBe(1);
+  });
+
   test('divergent arms enumerate BOTH orientations; the reconverging sibling enumerates neither', () => {
     // `preserveDivergentBranchSense` is the lever, and it fires only when the arms do not
     // reconverge. Asserted on the CANDIDATE LIST, not on the winner: the default sense already
