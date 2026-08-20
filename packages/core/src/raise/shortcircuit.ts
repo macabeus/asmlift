@@ -38,7 +38,18 @@
 // form where the const-1 "true" block has TWO predecessors (`return a || b`) is not folded.
 // Guards stay conservative: the CONST is exactly 0/1, Vb is a bool op or 0/1 const, the head condition is a
 // negatable icmp, and any deviation falls through untouched (a miss, never a miscompile).
-import { Block, Fn, Op, Value, defOpMap, mkOp, mkValue, predecessors, replaceAllUsesWith } from '../ir/core';
+import {
+  Block,
+  Fn,
+  Op,
+  Value,
+  defOpMap,
+  forwardingTarget,
+  mkOp,
+  mkValue,
+  predecessors,
+  replaceAllUsesWith,
+} from '../ir/core';
 import { HOIST_UNSAFE_OPS, NEGATED_ICMP } from '../ir/opcodes';
 import { T } from '../ir/types';
 
@@ -257,6 +268,18 @@ export function recognizeShortCircuit(fn: Fn): boolean {
 //     wins the shape. Cost: a genuine source-level `x == 1 || x == 2` that is NOT part of a wider
 //     tree also declines — the same conservative trade loops.ts makes when it refuses to infer a
 //     header from `cond_br` shape.
+//   - the shared block was reached through a RELAY, and the scrutinee of either test is compared
+//     against constants more than once in the function. Same reason as the bullet above, widened
+//     because the reach is: a relay is what agbcc puts on a tree's default edge, so resolving one
+//     walks this fold straight into a dispatch chain, where the sibling that gives the tree away
+//     may be neither test in hand. Measured on sa3: without it `sub_807BD88` and `sub_808491C`
+//     each lose a `switch`. Held to the relayed case ONLY — the function-wide count also fires on
+//     `(x == 200 && y == 200) || (x == 2000 && y == x)`, a genuine chain that folds today, and
+//     widening it everywhere costs `sub_8080AD4` its whole decompilation.
+//   - BOTH of ^g's edges rejoin the shared block. Then there is no "other" arm and nothing decides
+//     which side the connective guards. Reachable on MIPS, where the divide-guard idiom leaves an
+//     emptied trap block forwarding to the same place (`af:adds:ido7.1` and the `divv`/`gcd`/`modv`
+//     rows); the folded connective would be dead in every one of them.
 //   - ^g holds a side effect — its ops move into ^h, which runs UNCONDITIONALLY. A store in `b`
 //     would then execute even when `a` already decided the branch. (`a || (*p = 1)`.)
 //   - a value defined in ^g is used outside ^g, or used more than once. Then the structurer
@@ -296,8 +319,10 @@ export function recognizeShortCircuit(fn: Fn): boolean {
 //
 // agbcc inverts a conditional it cannot reach, so past ±256 bytes it emits the second form, and the
 // trampoline it leaves on the `b` sits on the edge into the SHARED block — which `forwardingTarget`
-// below looks through. The `logic_and` half is the one that lands on the source's own orientation;
-// it is the `logic_or` half that has no dual candidate (synthetic:ifand_near:agbcc).
+// (ir/core.ts) looks through. Only that edge needs it: the INVERTED branch is the one that still
+// reaches, so `bne ^g` always arrives at ^g directly and no relay can sit between them. The
+// `logic_and` half is the one that lands on the source's own orientation; it is the `logic_or` half
+// that has no dual candidate (synthetic:ifand_near:agbcc).
 //
 // Every refusal falls through untouched — a miss, never a miscompile.
 export function recognizeBranchShortCircuit(fn: Fn): boolean {
@@ -339,10 +364,6 @@ export function recognizeBranchShortCircuit(fn: Fn): boolean {
         if (gTaken.block === gFall.block) {
           continue;
         }
-        // A comparison TREE over one scrutinee belongs to switch recovery, not to this fold.
-        if (sameScrutineeConstTests(defs, ht.operands[0], gt.operands[0])) {
-          continue;
-        }
         // ^g's body must be pure, and every value it defines must be consumed only by ^g itself —
         // see the REFUSALS note: an escaping or reused value becomes a statement hoisted out of the
         // short circuit.
@@ -367,6 +388,20 @@ export function recognizeBranchShortCircuit(fn: Fn): boolean {
         }
         const sharedEdge = takenRejoins ? gTaken : fallRejoins ? gFall : null;
         if (!sharedEdge) {
+          continue;
+        }
+        // A comparison TREE over one scrutinee belongs to switch recovery, not to this fold — and
+        // how far to look depends on whether a relay was in the way. Reaching the shared block
+        // DIRECTLY is the shape this fold has always taken, so it keeps the pairwise test it has
+        // always used. Reaching it through a relay is new reach, and a relay is exactly what agbcc
+        // puts on a tree's default edge: there the whole function is searched, because the sibling
+        // test that proves it is a tree need not be the one in hand.
+        const throughRelay = sharedEdge.block !== sharedFromH.block;
+        if (
+          throughRelay
+            ? inComparisonTree(fn, defs, ht.operands[0]) || inComparisonTree(fn, defs, gt.operands[0])
+            : sameScrutineeConstTests(defs, ht.operands[0], gt.operands[0])
+        ) {
           continue;
         }
         const otherEdge = sharedEdge === gTaken ? gFall : gTaken;
@@ -406,19 +441,23 @@ export function recognizeBranchShortCircuit(fn: Fn): boolean {
                 { block: sharedEdge.block, args: [...sharedEdge.args] },
               ],
         });
-        // ^h's old shared edge is gone. When it pointed at a DIFFERENT forwarder than the one the
-        // fold kept, that block just lost its only predecessor — and an unreachable block with an
-        // out-edge poisons the dominance of everything it still points at (verify()'s fixpoint
-        // models a block with no in-edges as dominated by nothing), so drop it here rather than
-        // leave a malformed graph for the next pass.
-        const orphan = sharedFromH.block;
         fn.blocks = fn.blocks.filter((x) => x !== g);
-        if (
-          orphan !== sharedEdge.block &&
-          orphan !== fn.blocks[0] &&
-          (predecessors(fn).get(orphan) ?? []).length === 0
-        ) {
-          fn.blocks = fn.blocks.filter((x) => x !== orphan);
+        // ^h's old shared edge is gone, so the relay it pointed at may have lost its only
+        // predecessor — and once that link goes, so may the next, all the way down the chain.
+        // `dominators` (ir/core.ts) gives a block with no in-edges only ITSELF, which empties the
+        // intersection at everything it still branches to, so a half-dropped chain is a verify
+        // failure two passes later, not a tidiness question.
+        for (let link = sharedFromH.block; ;) {
+          const dead = link;
+          if (dead === fn.blocks[0] || dead === sharedEdge.block || (predecessors(fn).get(dead) ?? []).length > 0) {
+            break;
+          }
+          const t = dead.ops.length === 1 ? dead.ops[0] : undefined;
+          fn.blocks = fn.blocks.filter((x) => x !== dead);
+          if (t?.opcode !== 'br') {
+            break;
+          }
+          link = t.successors[0].block;
         }
         changed = true;
         progress = true;
@@ -429,46 +468,54 @@ export function recognizeBranchShortCircuit(fn: Fn): boolean {
   return changed;
 }
 
-/** Where a chain of forwarding blocks ultimately lands. Two branch sites reaching one block arrive
- *  as two DISTINCT single-`br` blocks, so the successor-identity test below needs the destination,
- *  not the edge. Resolving rather than rewriting is what keeps this invisible to every other pass —
- *  switch recovery reads the same forwarders and must still see them.
- *
- *  Only an argument-less chain is followed: a forwarder that supplies block arguments carries a
- *  value, and two of those reaching one block are NOT interchangeable. */
-function forwardingTarget(b: Block): Block {
-  const seen = new Set<Block>();
-  let cur = b;
-  while (cur.params.length === 0 && cur.ops.length === 1 && !seen.has(cur)) {
-    seen.add(cur);
-    const t = cur.ops[0];
-    if (t.opcode !== 'br' || t.successors.length !== 1 || t.successors[0].args.length > 0) {
-      break;
-    }
-    cur = t.successors[0].block;
-  }
-  return cur;
+/** every `icmp_*`, derived from the negation table so the two cannot drift apart */
+const IS_ICMP = new Set<string>(Object.keys(NEGATED_ICMP));
+
+/** Do `c1` and `c2` compare the SAME value against CONSTANTS? The signature of a comparison-tree
+ *  `switch`, which switch-recover.ts owns — see the REFUSALS note. Equality tests only: a switch
+ *  dispatches on `==`/`!=`, while a RELATIONAL pair (`x >= lo && x <= hi`, the range check) is a
+ *  genuine connective this fold should still take. */
+function sameScrutineeConstTests(defs: Map<Value, Op>, c1: Value, c2: Value): boolean {
+  const s1 = constTestScrutinee(defs, c1);
+  const isEq = (v: Value): boolean => {
+    const op = defs.get(v)?.opcode;
+    return op === 'icmp_eq' || op === 'icmp_ne';
+  };
+  return s1 !== null && s1 === constTestScrutinee(defs, c2) && isEq(c1) && isEq(c2);
 }
 
-/** Do `c1` and `c2` compare the SAME value against CONSTANTS? That is the signature of a
- *  comparison-tree `switch`, which switch-recover.ts owns — see the REFUSALS note. Equality tests
- *  only: a switch tree dispatches on `==`/`!=`, while a RELATIONAL pair (`x >= lo && x <= hi`, the
- *  range check) is a genuine connective this fold should still take. */
-function sameScrutineeConstTests(defs: Map<Value, Op>, c1: Value, c2: Value): boolean {
-  const eqTest = (v: Value): { scrutinee: Value } | null => {
-    const d = defs.get(v);
-    if (!d || (d.opcode !== 'icmp_eq' && d.opcode !== 'icmp_ne')) {
-      return null;
+/** Is `c`'s scrutinee compared against constants by MORE THAN ONE `cond_br` in the function?
+ *
+ *  The function-wide question, for the case where the shared block was reached through a relay. A
+ *  tree's split node is RELATIONAL and its children are equalities (`if (x > 10) { if (x == 20) }`),
+ *  so the two tests in hand need not look alike, and the one that would give the tree away may be
+ *  neither of them. Counting every constant test on the scrutinee catches the split either way. */
+function inComparisonTree(fn: Fn, defs: Map<Value, Op>, c: Value): boolean {
+  const scrutinee = constTestScrutinee(defs, c);
+  if (scrutinee === null) {
+    return false;
+  }
+  let seen = 0;
+  for (const b of fn.blocks) {
+    const t = b.ops[b.ops.length - 1];
+    if (t?.opcode === 'cond_br' && constTestScrutinee(defs, t.operands[0]) === scrutinee && ++seen > 1) {
+      return true;
     }
-    const [x, y] = d.operands;
-    const xc = defs.get(x)?.opcode === 'const';
-    const yc = defs.get(y)?.opcode === 'const';
-    // exactly one side constant — `x == y` between two variables is no switch test
-    return xc === yc ? null : { scrutinee: xc ? y : x };
-  };
-  const a = eqTest(c1);
-  const b = eqTest(c2);
-  return a !== null && b !== null && a.scrutinee === b.scrutinee;
+  }
+  return false;
+}
+
+/** The value an `icmp_* <value>, <const>` tests, or null when `c` is not one. */
+function constTestScrutinee(defs: Map<Value, Op>, c: Value): Value | null {
+  const d = defs.get(c);
+  if (!d || !IS_ICMP.has(d.opcode)) {
+    return null;
+  }
+  const [x, y] = d.operands;
+  const xc = defs.get(x)?.opcode === 'const';
+  const yc = defs.get(y)?.opcode === 'const';
+  // exactly one side constant — `x == y` between two variables is no switch test
+  return xc === yc ? null : xc ? y : x;
 }
 
 /** True when every value `g` defines is read at most once, and any read is inside `g`.

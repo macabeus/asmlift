@@ -8,7 +8,15 @@
 // missed opportunity, and a silently-relaxed guard is exactly what these pin down.
 import { describe, expect, test } from 'vitest';
 
-import { type Block, type Fn, type Op, type Value, mkOp, mkValue } from '../src/ir/core';
+import {
+  type Block,
+  type Fn,
+  type Op,
+  type Value,
+  forwardingTarget as forwardingTargetOf,
+  mkOp,
+  mkValue,
+} from '../src/ir/core';
 import { T } from '../src/ir/types';
 import { verify } from '../src/ir/verify';
 import { recognizeBranchShortCircuit, recognizeShortCircuit } from '../src/raise/shortcircuit';
@@ -41,9 +49,10 @@ function chain(opts: {
   sharedArgsFromG?: Value[];
   sharedParams?: Value[];
   extraPredOfG?: boolean;
-  /** Put each edge into `shared` behind its OWN single-`br` block, the shape agbcc leaves when a
-   *  Thumb conditional cannot reach its target and the real branch is emitted separately. */
-  trampolines?: boolean;
+  /** Put each edge into `shared` behind its OWN chain of single-`br` blocks, the shape agbcc leaves
+   *  when a Thumb conditional cannot reach its target and the real branch is emitted separately.
+   *  `true` is one relay per edge; a number builds a chain that deep. */
+  trampolines?: boolean | number;
 }): Fn {
   const shared = blk([mkOp('ret', { operands: [] })], opts.sharedParams ?? []);
   const trampolines: Block[] = [];
@@ -52,9 +61,14 @@ function chain(opts: {
     if (!opts.trampolines) {
       return { block: shared, args };
     }
-    const t = blk([{ ...mkOp('br'), successors: [{ block: shared, args }] }]);
-    trampolines.push(t);
-    return { block: t, args: [] };
+    const depth = opts.trampolines === true ? 1 : opts.trampolines;
+    let head = { block: shared, args };
+    for (let i = 0; i < depth; i++) {
+      const t = blk([{ ...mkOp('br'), successors: [head] }]);
+      trampolines.push(t);
+      head = { block: t, args: [] };
+    }
+    return head;
   };
   const other = blk([mkOp('ret', { operands: [] })]);
   const c2 = mkValue(T.unk(32));
@@ -99,9 +113,10 @@ const connective = (fn: Fn): string | null =>
 describe('a shared block behind long-branch trampolines', () => {
   // A Thumb conditional branch reaches ±256 bytes. Past that agbcc inverts it and emits the real
   // target as a separate `b`, so two sites reaching one block arrive as two DISTINCT forwarding
-  // blocks and the fold's successor-identity test sees two unrelated targets. Following the chain
-  // answers "same destination?" without rewriting the graph, which is what keeps this invisible to
-  // every other pass — switch recovery reads the same forwarders and must still see them.
+  // blocks and the fold's successor-identity test sees two unrelated targets. `forwardingTarget`
+  // answers "same destination?" by RESOLVING rather than rewriting: normalising the blocks away
+  // instead costs pokeemerald:SetMauvilleOldManLanguage:agbcc its output, and merging identical
+  // ones costs synthetic:sw_op:agbcc its match.
   test('the fold looks through them and still picks the right connective', () => {
     const fn = chain({ gOnTaken: true, sharedOnGTaken: false, trampolines: true });
     expect(recognizeBranchShortCircuit(fn)).toBe(true);
@@ -133,18 +148,85 @@ describe('a shared block behind long-branch trampolines', () => {
     verify(fn);
   });
 
+  test('a CHAIN of relays is dropped to the end, not one link', () => {
+    // Stopping after the first link leaves the second unreachable and still branching into the
+    // shared block, which is the same dominance failure the drop exists to prevent, one hop out.
+    const fn = chain({ gOnTaken: true, sharedOnGTaken: false, trampolines: 3 });
+    expect(recognizeBranchShortCircuit(fn)).toBe(true);
+    const reachable = new Set<Block>([fn.blocks[0]]);
+    for (const b of fn.blocks) {
+      for (const succ of b.ops[b.ops.length - 1].successors ?? []) {
+        reachable.add(succ.block);
+      }
+    }
+    expect(fn.blocks.filter((b) => !reachable.has(b))).toHaveLength(0);
+    verify(fn);
+  });
+
+  test('REFUSED: a relay onto a comparison TREE — the fold would disqualify switch recovery', () => {
+    // agbcc puts a relay on a tree's default edge, so resolving one walks this fold into a dispatch
+    // chain. Rewriting a test's `cond_br` operand to a connective permanently disqualifies
+    // switch-recover.ts (its `isCmpOpcode` gate), so a scrutinee compared against constants more
+    // than once is left alone — here ^h's split node is RELATIONAL and ^g's leaf is an equality,
+    // which the pairwise test used on a direct edge would not catch.
+    const x = mkValue(T.unk(32));
+    const constTest = (out: Value, k: number, opcode: 'icmp_eq' | 'icmp_sgt'): Op[] => {
+      const c = mkValue(T.unk(32));
+      return [mkOp('const', { results: [c], attrs: { value: k } }), mkOp(opcode, { operands: [x, c], results: [out] })];
+    };
+    const fn = chain({
+      gOnTaken: true,
+      sharedOnGTaken: false,
+      trampolines: true,
+      gBody: (out) => constTest(out, 20, 'icmp_eq'),
+    });
+    const head = fn.blocks[0];
+    const c1 = head.ops[head.ops.length - 1].operands[0];
+    // `x` must not be a constant itself, or neither test reads as "value against a constant"
+    const seed = mkValue(T.unk(32));
+    head.ops.splice(
+      0,
+      head.ops.length - 1,
+      mkOp('const', { results: [seed], attrs: { value: 3 } }),
+      mkOp('add', { operands: [seed, seed], results: [x] }),
+      ...constTest(c1, 10, 'icmp_sgt'),
+    );
+    expect(recognizeBranchShortCircuit(fn)).toBe(false);
+    expect(connective(fn)).toBeNull();
+    verify(fn);
+  });
+
+  test('REFUSED: both of the second block’s edges rejoin the shared block', () => {
+    // No "other" arm is left, so nothing decides which side the connective guards. Reachable on
+    // MIPS, where the divide-guard idiom leaves an emptied trap block forwarding to the same place.
+    const fn = chain({ gOnTaken: true, sharedOnGTaken: false, trampolines: true });
+    const shared = fn.blocks.find((b) => b.ops[0].opcode === 'ret')!;
+    const g = fn.blocks[1];
+    const gt = g.ops[g.ops.length - 1];
+    const extraRelay = blk([{ ...mkOp('br'), successors: [{ block: shared, args: [] }] }]);
+    fn.blocks.splice(fn.blocks.indexOf(shared), 0, extraRelay);
+    gt.successors = gt.successors.map((sc) =>
+      forwardingTargetOf(sc.block) === shared ? sc : { block: extraRelay, args: [] },
+    );
+    expect(gt.successors.every((sc) => forwardingTargetOf(sc.block) === shared)).toBe(true);
+    expect(recognizeBranchShortCircuit(fn)).toBe(false);
+    expect(connective(fn)).toBeNull();
+    verify(fn);
+  });
+
   test('REFUSED: a forwarder carrying block arguments is not followed', () => {
-    // Two forwarders into one block are interchangeable only when neither supplies a value. An
-    // argument-passing pair reaching the same block are different edges, and folding them together
-    // would drop whichever value the discarded one carried.
-    const arg = mkValue(T.unk(32));
+    // Two relays into one block are interchangeable only when neither supplies a value. These carry
+    // DIFFERENT ones, so treating them as one destination would keep the surviving edge's value and
+    // silently drop the other — the two `const 7`/`const 8` the head defines are what tells them
+    // apart. `sameArgs` cannot catch it: the args sit on the relays' own branches, and the edges
+    // this fold compares are the empty ones INTO the relays.
     const fn = chain({
       gOnTaken: true,
       sharedOnGTaken: false,
       trampolines: true,
       sharedParams: [mkValue(T.unk(32))],
-      sharedArgsFromH: [arg],
-      sharedArgsFromG: [arg],
+      sharedArgsFromH: [mkValue(T.unk(32))],
+      sharedArgsFromG: [mkValue(T.unk(32))],
     });
     expect(recognizeBranchShortCircuit(fn)).toBe(false);
     expect(connective(fn)).toBeNull();
