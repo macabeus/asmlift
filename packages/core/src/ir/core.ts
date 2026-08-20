@@ -83,28 +83,6 @@ export function predecessors(fn: Fn): Map<Block, Block[]> {
  *  A CFG fact, so it lives beside `predecessors` it is built on rather than with either consumer:
  *  `verify` needs it to check def-dominates-use, `structure/loops.ts` to tell a back-edge from a
  *  forward one, and `raise/latch.ts` to tell a latch from a preheader. */
-/** Where a chain of TRANSPARENT forwarding blocks lands — no params, a lone `br`, no block args.
- *
- *  A compiler that cannot reach a target from a conditional branch emits the real branch separately
- *  (agbcc past Thumb's ±256-byte range; the binary-search layout of a `switch`), so two sites
- *  reaching one block arrive as two DISTINCT forwarding blocks. A recogniser keyed on successor
- *  identity needs the destination, not the edge.
- *
- *  An edge carrying block ARGUMENTS is not transparent — skipping it would drop the value it
- *  supplies — so the walk stops there. Read-only: nothing about the graph changes. */
-export function forwardingTarget(b: Block): Block {
-  const seen = new Set<Block>();
-  let cur = b;
-  while (cur.params.length === 0 && cur.ops.length === 1 && !seen.has(cur)) {
-    seen.add(cur);
-    const t = cur.ops[0];
-    if (t.opcode !== 'br' || t.successors[0].args.length > 0) {
-      break;
-    }
-    cur = t.successors[0].block;
-  }
-  return cur;
-}
 
 export function dominators(fn: Fn): Map<Block, Set<Block>> {
   const preds = predecessors(fn);
@@ -137,6 +115,32 @@ export function dominators(fn: Fn): Map<Block, Set<Block>> {
     }
   }
   return dom;
+}
+
+/** Where a chain of TRANSPARENT forwarding blocks lands — no params, a lone `br`, no block args.
+ *
+ *  A compiler that cannot reach a target from a conditional branch emits the real branch separately
+ *  (agbcc past Thumb's ±256-byte range; the binary-search layout of a `switch`), so two sites
+ *  reaching one block arrive as two DISTINCT forwarding blocks. A recogniser keyed on successor
+ *  identity needs the destination, not the edge.
+ *
+ *  An edge carrying block ARGUMENTS is not transparent — skipping it would drop the value it
+ *  supplies — so the walk stops there. Read-only: nothing about the graph changes.
+ *
+ *  raise/latch.ts's `foldEmptyLatches` tests a similar shape and is deliberately NOT a caller: it
+ *  REWRITES the edge and carries the forwarder's args onto it, which is the case this refuses. */
+export function forwardingTarget(b: Block): Block {
+  const seen = new Set<Block>();
+  let cur = b;
+  while (cur.params.length === 0 && cur.ops.length === 1 && !seen.has(cur)) {
+    seen.add(cur);
+    const t = cur.ops[0];
+    if (t.opcode !== 'br' || t.successors[0].args.length > 0) {
+      break;
+    }
+    cur = t.successors[0].block;
+  }
+  return cur;
 }
 
 /** Every value defined by an op result → its defining op (block params excluded). */

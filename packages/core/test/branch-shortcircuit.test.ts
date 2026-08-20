@@ -54,7 +54,11 @@ function chain(opts: {
    *  `true` is one relay per edge; a number builds a chain that deep. */
   trampolines?: boolean | number;
 }): Fn {
-  const shared = blk([mkOp('ret', { operands: [] })], opts.sharedParams ?? []);
+  // `shared` RETURNS a value the head defines. That is what makes a half-dropped relay chain
+  // observable: an unreachable block still branching here collapses this block's dominator set, and
+  // the use below is what `verify` then rejects. With a bare `ret` the damage is invisible.
+  const fromHead = mkValue(T.unk(32));
+  const shared = blk([mkOp('ret', { operands: [fromHead] })], opts.sharedParams ?? []);
   const trampolines: Block[] = [];
   /** the edge to write into a terminator: straight to `shared`, or through a fresh forwarder */
   const toShared = (args: Value[]): { block: Block; args: Value[] } => {
@@ -88,6 +92,7 @@ function chain(opts: {
   const c1 = mkValue(T.unk(32));
   const hEdgeShared = toShared(opts.sharedArgsFromH ?? []);
   const head = blk([
+    mkOp('const', { results: [fromHead], attrs: { value: 9 } }),
     ...(opts.sharedArgsFromH ?? []).map((v) => mkOp('const', { results: [v], attrs: { value: 7 } })),
     ...(opts.sharedArgsFromG ?? [])
       .filter((v) => !(opts.sharedArgsFromH ?? []).includes(v))
@@ -184,9 +189,10 @@ describe('a shared block behind long-branch trampolines', () => {
     const c1 = head.ops[head.ops.length - 1].operands[0];
     // `x` must not be a constant itself, or neither test reads as "value against a constant"
     const seed = mkValue(T.unk(32));
+    // keep the head's first op — the value `shared` returns — and replace only the comparison
     head.ops.splice(
-      0,
-      head.ops.length - 1,
+      1,
+      head.ops.length - 2,
       mkOp('const', { results: [seed], attrs: { value: 3 } }),
       mkOp('add', { operands: [seed, seed], results: [x] }),
       ...constTest(c1, 10, 'icmp_sgt'),
@@ -197,8 +203,9 @@ describe('a shared block behind long-branch trampolines', () => {
   });
 
   test('REFUSED: both of the second block’s edges rejoin the shared block', () => {
-    // No "other" arm is left, so nothing decides which side the connective guards. Reachable on
-    // MIPS, where the divide-guard idiom leaves an emptied trap block forwarding to the same place.
+    // No "other" arm is left, so nothing decides which side the connective guards. Only resolution
+    // can produce it — an edge that lands on the shared block directly is preferred — so BOTH of
+    // ^g's edges have to be relayed for this to be reached at all.
     const fn = chain({ gOnTaken: true, sharedOnGTaken: false, trampolines: true });
     const shared = fn.blocks.find((b) => b.ops[0].opcode === 'ret')!;
     const g = fn.blocks[1];

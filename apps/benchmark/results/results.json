@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generatedAt": "2026-08-20T13:16:55.931Z",
+    "generatedAt": "2026-08-20T13:49:51.830Z",
     "toolchains": [
       "ido7.1",
       "agbcc",
@@ -14,8 +14,8 @@
       "real": 240
     },
     "asmlift": {
-      "commit": "2955c27e8b08b9d7d358c80ca0d85a7b8df4f99d",
-      "dirty": false
+      "commit": "1b26c1d5e6cbc4c9f84ff860c3f3d17fc9b9d286",
+      "dirty": true
     },
     "m2c": {
       "commit": "ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0"
@@ -3526,11 +3526,11 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-tK2j3f/c.c:1077: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-2EB6Y4/c.c:1077: invalid operands to binary <<"
           },
           {
             "label": "unsigned/scopebase/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-3VGrsu/c.c:1078: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-lTYOR1/c.c:1078: invalid operands to binary <<"
           }
         ],
         "symbolsUsed": [
@@ -4472,7 +4472,7 @@
         "droppedCandidates": [
           {
             "label": "unsigned",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-JeYvGV/c.c:1076: `gBgDataPtrs' undeclared (first use in this function)"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Mscx7F/c.c:1076: `gBgDataPtrs' undeclared (first use in this function)"
           }
         ],
         "symbolsUsed": [],
@@ -5546,11 +5546,11 @@
         "droppedCandidates": [
           {
             "label": "unsigned",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-RC034z/c.c:1077: too many arguments to function `thunk_sub_080002A0'"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-cLtVdd/c.c:1077: too many arguments to function `thunk_sub_080002A0'"
           },
           {
             "label": "unsigned/reread-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-2nfY0T/c.c:1075: too many arguments to function `thunk_sub_080002A0'"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-XZaqyr/c.c:1075: too many arguments to function `thunk_sub_080002A0'"
           }
         ],
         "symbolsUsed": [],
@@ -6342,83 +6342,83 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-G8gW0o/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-fmQoYC/c.c:1085: incompatible types in assignment"
           },
           {
             "label": "unsigned/coalesce-v2-v3/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-WqNgoU/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-7s75jE/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "unsigned/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-2vQhTi/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-gl2r7B/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "unsigned/defsite/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-cIdWGn/c.c:1086: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-F8zsbQ/c.c:1086: incompatible types in assignment"
           },
           {
             "label": "unsigned/defsite/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-xD6HaU/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-dLw5GE/c.c:1085: incompatible types in assignment"
           },
           {
             "label": "unsigned/reread-globals/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-AWEWDe/c.c:1083: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-R0FVNG/c.c:1083: invalid operands to binary <<"
           },
           {
             "label": "unsigned/reread-globals/coalesce-v0-v1/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-o14Igb/c.c:1082: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-CicxP7/c.c:1082: invalid operands to binary <<"
           },
           {
             "label": "unsigned/reread-globals/coalesce-v0-v2/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-2kk5Ac/c.c:1082: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-4GQYu8/c.c:1082: invalid operands to binary <<"
           },
           {
             "label": "unsigned/defsite/reread-globals/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-c6poEM/c.c:1084: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-dNXj85/c.c:1084: invalid operands to binary <<"
           },
           {
             "label": "unsigned/defsite/reread-globals/coalesce-v0-v2/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Toc2mg/c.c:1083: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-kSJiaN/c.c:1083: invalid operands to binary <<"
           },
           {
             "label": "signed/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-1rjbts/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-1iBo7R/c.c:1085: incompatible types in assignment"
           },
           {
             "label": "signed/coalesce-v2-v3/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Trqgjj/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-v2I0nw/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "signed/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-mm0vFF/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-I0EbPa/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "signed/defsite/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-dJvNpZ/c.c:1086: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-cqDVFM/c.c:1086: incompatible types in assignment"
           },
           {
             "label": "signed/defsite/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-wCFvQb/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-M866YP/c.c:1085: incompatible types in assignment"
           },
           {
             "label": "signed/reread-globals/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-fWa5dV/c.c:1083: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-6XnwlU/c.c:1083: invalid operands to binary <<"
           },
           {
             "label": "signed/reread-globals/coalesce-v0-v1/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-cs99km/c.c:1082: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-oHeVL7/c.c:1082: invalid operands to binary <<"
           },
           {
             "label": "signed/reread-globals/coalesce-v0-v2/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-29snZJ/c.c:1082: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-aLBnsE/c.c:1082: invalid operands to binary <<"
           },
           {
             "label": "signed/defsite/reread-globals/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-eJAiO9/c.c:1084: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-1AeExi/c.c:1084: invalid operands to binary <<"
           },
           {
             "label": "signed/defsite/reread-globals/coalesce-v0-v2/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-DeNWto/c.c:1083: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-JNUWdc/c.c:1083: invalid operands to binary <<"
           }
         ],
         "symbolsUsed": [
@@ -6524,11 +6524,11 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-zr4UlI/c.c:1501: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-gdu1ZI/c.c:1501: incompatible types in assignment"
           },
           {
             "label": "unsigned/reread-globals/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-n40pme/c.c:1489: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-8HqEmw/c.c:1489: incompatible types in assignment"
           }
         ],
         "symbolsUsed": [
