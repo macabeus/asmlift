@@ -120,3 +120,62 @@ test('CLI: --score-against with a missing object is exit 66; bad compile templat
   expect(badTemplate.code).toBe(64);
   expect(badTemplate.stderr).toContain('{{inputPath}} and {{outputPath}}');
 });
+
+// tools.asmlift.prototypes — the channel for an arity the project's ELF cannot state. A DWARF
+// signature exists only for a function the compiler COMPILED, so a callee still in assembly has
+// none and the frontend counts argument registers instead.
+const CALLER_ASM =
+  '\t.globl\tf\n\t.thumb_func\nf:\n\tpush\t{lr}\n\tmov\tr0, #1\n\tmov\tr1, #2\n\tmov\tr2, #3\n' +
+  '\tbl\tcallee\n\tpop\t{r1}\n\tbx\tr1\n';
+
+const withConfig = (yaml: string) => {
+  const root = tmp();
+  writeFileSync(join(root, 'decomp.yaml'), yaml);
+  const file = join(root, 'f.s');
+  writeFileSync(file, CALLER_ASM);
+  return { root, file };
+};
+
+test('CLI: tools.asmlift.prototypes gives a callee its declared arity', async () => {
+  const bare = withConfig('platform: gba\n');
+  // without it the frontend guesses from the argument registers that are live
+  expect((await runCli([bare.file])).stdout).toContain('callee(1, 2, 3)');
+
+  const { file } = withConfig('platform: gba\ntools:\n  asmlift:\n    prototypes:\n      callee: { params: 1 }\n');
+  const r = await runCli([file]);
+  expect(r.code).toBe(0);
+  expect(r.stdout).toContain('callee(1)');
+});
+
+test('CLI: --proto wins per entry over the config, and the two merge', async () => {
+  const { root, file } = withConfig(
+    'platform: gba\ntools:\n  asmlift:\n    prototypes:\n      callee: { params: 3 }\n      other: { params: 1 }\n',
+  );
+  const proto = join(root, 'p.json');
+  writeFileSync(proto, JSON.stringify({ callee: { params: 1 } }));
+  const r = await runCli([file, '--proto', proto]);
+  expect(r.stdout).toContain('callee(1)'); // the flag's entry, not the config's 3
+});
+
+test('CLI: a malformed prototype table is REFUSED, naming the file and every bad entry', async () => {
+  // `protoArity` falls back to the arg-register heuristic on a bad `params`, so accepting this
+  // would decompile at a guessed arity with nothing said about it.
+  const { file } = withConfig(
+    'platform: gba\ntools:\n  asmlift:\n    prototypes:\n      callee: { params: "1" }\n      other: { returnVoid: true }\n',
+  );
+  const r = await runCli([file]);
+  expect(r.code).toBe(65);
+  expect(r.stderr).toContain('decomp.yaml');
+  expect(r.stderr).toContain('callee: "params" must be a non-negative integer');
+  expect(r.stderr).toContain('other: unknown key "returnVoid"');
+  expect(r.stdout).toBe('');
+});
+
+test('CLI: a malformed --proto file is a usage error, not a silent guess', async () => {
+  const { root, file } = withConfig('platform: gba\n');
+  const proto = join(root, 'p.json');
+  writeFileSync(proto, JSON.stringify({ callee: { params: '1' } }));
+  const r = await runCli([file, '--proto', proto]);
+  expect(r.code).toBe(64);
+  expect(r.stderr).toContain('"params" must be a non-negative integer');
+});

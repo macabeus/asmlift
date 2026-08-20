@@ -56,12 +56,13 @@ the stderr tag says which (`[declined]` = principled refusal, `[internal error]`
 
 All asmlift settings live in a spec-compliant `tools.asmlift` block:
 
-| Field      | Meaning                                                                                                                                                                                                                                                                    |
-| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `target`   | asmlift target key — needed when the `platform` maps to several compilers (`n64` → `ido7.1`, `gcc2.7.2kmc` or `gcc2.7.2`)                                                                                                                                                  |
-| `compiler` | Candidate-compile command template: source file in, relocatable object out. Runs via `sh` with the decomp.yaml's directory as cwd                                                                                                                                          |
-| `objdump`  | Host objdump binary for `.o` input (overrides the PATH/env-resolved default: `mips-linux-gnu-objdump` / `powerpc-eabi-objdump`)                                                                                                                                            |
-| `elf`      | The project's built ELF, relative to this `decomp.yaml` — the address→symbol source. Absent ⇒ no symbol map. An unreadable ELF is a loud input error (exit `66`), never a silent map-less run. What it feeds and how to produce one: [The symbol map](#the-symbol-map-elf) |
+| Field        | Meaning                                                                                                                                                                                                                                                                    |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `target`     | asmlift target key — needed when the `platform` maps to several compilers (`n64` → `ido7.1`, `gcc2.7.2kmc` or `gcc2.7.2`)                                                                                                                                                  |
+| `compiler`   | Candidate-compile command template: source file in, relocatable object out. Runs via `sh` with the decomp.yaml's directory as cwd                                                                                                                                          |
+| `objdump`    | Host objdump binary for `.o` input (overrides the PATH/env-resolved default: `mips-linux-gnu-objdump` / `powerpc-eabi-objdump`)                                                                                                                                            |
+| `elf`        | The project's built ELF, relative to this `decomp.yaml` — the address→symbol source. Absent ⇒ no symbol map. An unreadable ELF is a loud input error (exit `66`), never a silent map-less run. What it feeds and how to produce one: [The symbol map](#the-symbol-map-elf) |
+| `prototypes` | Callee prototypes the ELF cannot state — see [Prototypes](#prototypes-what-the-elf-cannot-state)                                                                                                                                                                           |
 
 Template placeholders: `{{inputPath}}` (candidate source path),
 `{{outputPath}}` (where the object must land), `{{symbol}}` (the function name). An unknown
@@ -83,6 +84,39 @@ Scoring rules, in the project's spirit of never guessing:
   template that injects the project's own headers rejects the probe (C89 duplicate typedef)
   and asmlift then drops both its typedefs and its synthesized declarations for every
   candidate; a template that accepts it keeps both. The verdict is cached per run.
+
+## Prototypes: what the ELF cannot state
+
+A DWARF signature exists only for a function the compiler **compiled**. A callee still written in
+assembly has none, so the frontend falls back to counting live argument registers and guesses the
+arity — which inflates the call and keeps otherwise-dead values alive to the exit block. On one
+measured klonoa function a single wrong callee arity is worth **63 objdiff points**.
+
+State it in the config and every run gets it, including a repro script someone else pastes:
+
+```yaml
+tools:
+  asmlift:
+    prototypes:
+      thunk_HeapFree: { params: 1 }
+      DrawSprite: { params: [u8, s32, 'void *'], returnsVoid: true }
+```
+
+`params` is either a bare arity (`1`) or the typed list a header extraction produces — asmlift reads
+its **length** for the call-site arity today, and keeping the types lets a later pass pin each
+argument's width. `returnsVoid` belongs to the function under decompilation, so a trailing `bx lr`
+does not surface a meaningless return value.
+
+Three sources, each overriding the one below it:
+
+1. `--proto <file.json>` — the same table, per invocation
+2. `tools.asmlift.prototypes`
+3. the `elf`'s own DWARF signatures
+
+Both hand-written channels are **validated and refused loudly** (exit `65` for the config, `64` for
+`--proto`), naming every bad entry. This matters more than it looks: a malformed `params` makes
+asmlift fall back to the register heuristic, so an accepted-but-wrong table would decompile at a
+guessed arity with nothing to say so. A misspelled `returnVoid` is refused for the same reason.
 
 ## The symbol map: `elf`
 

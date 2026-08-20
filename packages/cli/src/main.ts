@@ -21,7 +21,7 @@ import { FrontendUnsupportedError } from '@asmlift/core/frontend/errors';
 import { VerifyError } from '@asmlift/core/ir/verify';
 import type { LanguageBackend } from '@asmlift/core/l3/ast';
 import { type OnGap, decompile } from '@asmlift/core/pipeline';
-import type { Prototypes } from '@asmlift/core/proto';
+import { type Prototypes, validatePrototypes } from '@asmlift/core/proto';
 import { RaiseUnsupportedError } from '@asmlift/core/raise/errors';
 import { StructureError } from '@asmlift/core/structure/structure';
 import { type SymbolMap, asIfUndecompiled } from '@asmlift/core/symbols';
@@ -75,6 +75,7 @@ Gaps are annotated in-source as ASMLIFT_ERROR markers, diagnostics on stderr.
   --asm-data       for text input: objdump -s -r -t dump of the source object
                    (jump tables, anonymous constants)
   --proto          callee prototypes JSON, e.g. {"sym":{"params":2|["u8","s32"]}}
+                   (merged OVER tools.asmlift.prototypes in decomp.yaml)
 
 Exit codes: 0 clean/match · 1 gaps/declined/nonmatch · 64 usage · 66 unreadable input.
 Full reference (flags, decomp.yaml integration): the @asmlift/cli README.`;
@@ -139,6 +140,7 @@ export async function runCli(
   // tools.asmlift payload (compile command, objdump override).
   let toolCfg: AsmliftToolConfig | undefined;
   let configDir: string | undefined;
+  let configPath: string | undefined;
   let targetKey: string;
   let targetTrace = '';
   try {
@@ -146,6 +148,7 @@ export async function runCli(
     const loaded = loadDecompConfig(flags.get('config') as string | undefined, startDir);
     toolCfg = loaded?.config.tools?.asmlift;
     configDir = loaded ? dirname(loaded.path) : undefined;
+    configPath = loaded?.path;
     const res = resolveTarget(flags.get('target') as string | undefined, loaded);
     if ('error' in res) {
       return usage(res.error);
@@ -238,15 +241,27 @@ export async function runCli(
     // one combined objdump text carries all three tables (symbols, relocs, contents)
     asmData = parseAsmData(dump, dump, dump, true);
   }
+  // Two channels for the same table, and `--proto` wins per entry: the flag is what the user has
+  // in front of them, the config is what the project ships. Both are hand-written, so both are
+  // validated — `protoArity` falls back to the arg-register heuristic on a malformed `params`, and
+  // a table accepted silently would decompile at a guessed arity with nothing to say so.
   let prototypes: Prototypes | undefined;
+  if (toolCfg?.prototypes !== undefined) {
+    const problems = validatePrototypes(toolCfg.prototypes);
+    if (problems.length) {
+      return {
+        code: 65,
+        stdout: '',
+        stderr: `asmlift: tools.asmlift.prototypes in ${configPath}:\n${problems.map((p) => `  ${p}\n`).join('')}`,
+      };
+    }
+    prototypes = { ...toolCfg.prototypes };
+  }
   const protoFlag = flags.get('proto') as string | undefined;
   if (protoFlag !== undefined) {
+    let parsed: unknown;
     try {
-      const parsed: unknown = JSON.parse(readFileSync(resolve(protoFlag), 'utf8'));
-      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-        return usage('--proto must be a JSON object: {"sym": {"params": N | ["u8", ...], "returnsVoid": true}, ...}');
-      }
-      prototypes = parsed as Prototypes;
+      parsed = JSON.parse(readFileSync(resolve(protoFlag), 'utf8'));
     } catch (e) {
       return {
         code: 66,
@@ -254,6 +269,11 @@ export async function runCli(
         stderr: `asmlift: cannot read --proto file: ${e instanceof Error ? e.message : e}\n`,
       };
     }
+    const problems = validatePrototypes(parsed);
+    if (problems.length) {
+      return usage(`--proto: ${problems.join('; ')}`);
+    }
+    prototypes = { ...prototypes, ...(parsed as Prototypes) };
   }
 
   // tools.asmlift.elf → the project's symbol map (names + declaration shapes). Explicit

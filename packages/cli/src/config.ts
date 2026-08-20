@@ -7,6 +7,7 @@
 // enhancement, never required. One deliberate choice: on an ambiguous platform
 // (n64 ⇒ ido7.1, gcc2.7.2kmc or gcc2.7.2) asmlift DECLINES naming the candidates instead of falling back
 // to a generic default — per the cardinal rule, a guessed compiler mis-scores candidates.
+import type { Prototypes } from '@asmlift/core/proto';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import YAML from 'yaml';
@@ -25,6 +26,12 @@ export interface AsmliftToolConfig {
    *  names from `.symtab`, declaration shapes from the linked-in DWARF types-sidecar when
    *  present. Absent ⇒ no symbol map (today's behavior). */
   elf?: string;
+  /** callee prototypes the ELF cannot state. A DWARF signature exists only for a function the
+   *  compiler COMPILED, so a callee still written in assembly has none and the frontend falls back
+   *  to counting argument registers — worth 63 objdiff points on one measured klonoa function.
+   *  `--proto` says the same thing, but only on the command line, where no published repro script
+   *  carries it. Merged UNDER `--proto`, and over the ELF's own signatures. */
+  prototypes?: Prototypes;
 }
 
 export interface DecompVersion {
