@@ -274,6 +274,14 @@ describe('the detectors themselves', () => {
     expect(JUDGEMENT_FLOOR['merge-chain']('{ void *a; void *b; if (s) a = p; else b = p; }', '')).toBe(true);
     expect(JUDGEMENT_FLOOR['merge-chain']('{ int x, y; if (a) { x = 1; y = 2; } return x + y; }', '')).toBe(true);
     expect(JUDGEMENT_FLOOR['merge-chain']('{ int x = 0, y = 0, i; if (a) x = y; return x; }', '')).toBe(true);
+    // short-circuit wants the connective in a CONTROLLING expression — the value form is a
+    // different recovery, and an inner `)` must not end the scan early
+    expect(JUDGEMENT_FLOOR['short-circuit']('{ return a && b; }', '')).toBe(false);
+    expect(JUDGEMENT_FLOOR['short-circuit']('{ int r = a || b; if (r) g(); }', '')).toBe(false);
+    expect(JUDGEMENT_FLOOR['short-circuit']('{ if (a) { g(); } }', '')).toBe(false);
+    expect(JUDGEMENT_FLOOR['short-circuit']('{ if (a && b) { g(); } }', '')).toBe(true);
+    expect(JUDGEMENT_FLOOR['short-circuit']('{ while (f(x) && g(y)) { h(); } }', '')).toBe(true);
+    expect(JUDGEMENT_FLOOR['short-circuit']('{ if ((u8)(a) != 0 || (b & 3)) { g(); } }', '')).toBe(true);
   });
 
   it('separates I/O registers from other hardware address ranges', () => {

@@ -61,6 +61,31 @@ export const JUDGEMENT_FLOOR: Record<string, (body: string, asm: string, whole: 
       b,
     ),
   continue: (b) => /\bcontinue\b/.test(b),
+  // A short-circuit that decides a BRANCH: the connective has to sit inside a controlling
+  // expression, not merely somewhere in the body. `return a && b` is the VALUE form — a diamond
+  // with a merged boolean — and it is a different recovery, so a bare `&&` anywhere is not
+  // evidence. Scanned with real paren balancing rather than a regex: a controlling expression
+  // routinely contains its own parenthesised calls and casts, and `if\s*\([^)]*&&` stops at the
+  // first inner `)` and misses every one of them. Which connective, and whether the arms are the
+  // interesting part, stays a human call.
+  'short-circuit': (b) => {
+    for (const m of b.matchAll(/\b(?:if|while|for)\s*\(/g)) {
+      let depth = 1;
+      let i = m.index + m[0].length;
+      const from = i;
+      for (; i < b.length && depth > 0; i++) {
+        if (b[i] === '(') {
+          depth++;
+        } else if (b[i] === ')') {
+          depth--;
+        }
+      }
+      if (depth === 0 && /&&|\|\|/.test(b.slice(from, i - 1))) {
+        return true;
+      }
+    }
+    return false;
+  },
   // A merged value chain needs a branching construct AND more than one local for the arms to
   // decide. COUNTED ACROSS DECLARATION STATEMENTS, not within one: `void *a; void *b;` and
   // `void *a, *b;` declare the same two locals, and an earlier version of this rule required the

@@ -621,6 +621,60 @@ export const SYNTHETIC: SynthSpec[] = [
       '(`&f->v`) rather than being the variable itself, and is read after the loop has moved on',
   },
 
+  // A CONTROL-FLOW `&&` — a short-circuit that produces no value, only a branch. Two rows, and
+  // the ONLY difference between them is how far the guarded arm is: `ifand_near` fits inside a
+  // Thumb conditional branch's ±256-byte range, `ifand_far` does not. That one byte-distance
+  // decides which of two spellings asmlift emits, and today it decides them the wrong way round.
+  //
+  // The `if (a && b) X else Y` shape reaches the IR as two `cond_br` blocks sharing a target.
+  // `raise/shortcircuit.ts`'s `recognizeBranchShortCircuit` folds that into one `logic_or` and
+  // rewrites the terminator, which puts the SHARED block in the taken slot — so the arms come out
+  // swapped and the condition negated: `if (!a || !b) Y else X`. That is the same program, and on
+  // agbcc it is never the same bytes. MEASURED at four sizes (4/8/16/40 stores in the arm): the
+  // un-folded nested spelling the structurer produces on its own byte-MATCHES every time, and the
+  // folded one never does, at a cost that grows with the arm (20 / 36 / 68 / 182).
+  //
+  // `ifand_far` is the row that makes this hard to fix, and it is why both are here. Past ±256
+  // bytes agbcc spells the branch `bne .L1 / b .L2 @long jump`, and the frontend — which splits a
+  // block at every conditional branch — turns that second instruction into a block whose only op
+  // is `br`. The fold requires its second test's successor to BE the shared block; a forwarding
+  // block in between hides it, so the fold does not fire and the row MATCHES. It matches for the
+  // wrong reason: not because anything recognised the shape, but because an unrelated encoding
+  // limit happened to disable a transform that would have broken it.
+  //
+  // So the pair pins a lever with no gate. Threading those forwarding blocks away — the obvious
+  // repair, and the one klonoa's LoadBGTilemapData needs, where the un-folded spelling costs 354
+  // duplicated instructions — makes the fold fire on `ifand_far` too and LOSES this match. Neither
+  // spelling is right unconditionally; which one matches is a per-function fact, which is what
+  // makes it a ranked candidate axis rather than a pass. `ifand_far` is the row that will say so.
+  //
+  // agbcc only, and for the same reason the `preupdate_*` rows are: the shape IS the Thumb branch
+  // range. ido/kmc/mwcc have no such limit, so on those toolchains these would be two more
+  // ordinary `&&` rows rather than coverage. The arm is 4 stores and 56 stores of filler — its
+  // CONTENT is irrelevant and its SIZE is the whole feature, which is why the two sources are
+  // otherwise identical.
+  {
+    sym: 'ifand_near',
+    src: 'int ifand_near(int a, int b, int *p){ if (a && b) { p[0] = 1; p[1] = 2; p[2] = 3; p[3] = 4; } else { p[0] = -1; } return p[1]; }',
+    features: ['short-circuit', 'branch', 'array'],
+    toolchains: ['agbcc'],
+    ctx: 'int ifand_near(int,int,int*);',
+    note:
+      "the guarded arm is within a Thumb conditional branch's reach, so the short-circuit fold " +
+      'fires and emits the arm-swapped `||` spelling — which costs this row a byte-exact match ' +
+      'the un-folded nested spelling would have got',
+  },
+  {
+    sym: 'ifand_far',
+    src:
+      'int ifand_far(int a, int b, int *p){ if (a && b) { ' +
+      Array.from({ length: 56 }, (_, i) => `p[${i}] = ${i + 1};`).join(' ') +
+      ' } else { p[0] = -1; } return p[1]; }',
+    features: ['short-circuit', 'branch', 'array'],
+    toolchains: ['agbcc'],
+    ctx: 'int ifand_far(int,int,int*);',
+  },
+
   // The DMA-fill idiom, WITH an uninitialised local — the pair no real row carries. An escaping
   // frame address retracts every `undef` in the function, on the premise that a callee may write
   // any frame offset; a DMA SOURCE register is the case where that premise is false, because the
