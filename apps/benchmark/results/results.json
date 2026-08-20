@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generatedAt": "2026-08-20T22:35:09.058Z",
+    "generatedAt": "2026-08-20T22:56:52.957Z",
     "toolchains": [
       "ido7.1",
       "agbcc",
@@ -14,7 +14,7 @@
       "real": 240
     },
     "asmlift": {
-      "commit": "c3809a374d586c698ece1e1eefc88b0203fa3886",
+      "commit": "ac9c593d0edfbc2d922bf0dfb7cd622f9fe7b0e1",
       "dirty": false
     },
     "m2c": {
@@ -3526,15 +3526,15 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-FQjSzA/c.c:1077: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Z1MqXU/c.c:1077: invalid operands to binary <<"
           },
           {
             "label": "unsigned/scopebase/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-WWr5KR/c.c:1078: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-psi2Sz/c.c:1078: invalid operands to binary <<"
           },
           {
             "label": "unsigned/livebase/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-qLM4a1/c.c:1079: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-EEdjT3/c.c:1079: invalid operands to binary <<"
           }
         ],
         "symbolsUsed": [
@@ -4381,8 +4381,8 @@
           }
         ],
         "outcome": "nonmatch",
-        "source": "struct Elem0 { u8 field_0; u8 _pad0[1]; };\nstruct Elem1 { u8 field_0; u8 _pad0[1]; };\nstruct Elem2 { u8 field_0; u8 _pad0[1]; };\nstruct Elem3 { u8 field_0; u8 _pad0[1]; };\nstruct Struct0 { u16 field_0; u16 field_2; u8 _pad0[8]; u8 field_12; u8 _pad1[2]; u8 field_15; u8 field_16; u8 _pad2[3]; u16 field_20; u8 field_22; };\nstruct Struct1 { u8 _pad0[2]; u16 field_2; u8 _pad1[4]; u8 field_8; u8 field_9; u8 _pad2[12]; u8 field_22; };\nstruct Struct2 { u8 _pad0[2]; u16 field_2; u8 _pad1[4]; u8 field_8; u8 field_9; u8 _pad2[12]; u8 field_22; };\nvoid EntityItemDrop(u32 a0) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    u8 * p0;\n    p0 = (u8 *)&gEntity;\n    if (gGameFlagsPtr[10] != 1) {\n        if (p0[(u8)a0 * 28 + 15] == 3) {\n            p0[(u8)a0 * 28 + 15] = 0;\n            ((struct Struct0 *)((u8)a0 * 28 + (u32)&gEntity))->field_20 = 0;\n            p0[(u8)a0 * 28 + 16] = 1;\n            p0[(u8)a0 * 28 + 12] = 1 - 5 & p0[(u8)a0 * 28 + 12];\n            if ((u32)(p0[129 << 2] << 28) >> 30 != 0) {\n                v2 = ((u16 *)&gEntity)[252] - 16;\n            } else {\n                v2 = ((u16 *)&gEntity)[252] + 16;\n            }\n            ((struct Struct0 *)((u8)a0 * 28 + (u32)&gEntity))->field_0 = v2;\n            ((struct Struct1 *)((u8)a0 * 28 + (u32)&gEntity))->field_2 = ((u16 *)&gEntity)[253];\n            p0[(u8)a0 * 28 + 8] = ((struct Elem0 *)&gItemDropParamTable)[(a0 << 24) + (228 << 24) >> 24].field_0;\n            p0[(u8)a0 * 28 + 9] = ((struct Elem1 *)((u32)&gItemDropParamTable + 1))[(a0 << 24) + (228 << 24) >> 24].field_0;\n            p0[(u8)a0 * 28 + 22] = 4;\n            return;\n        } else {\n            if (p0[(u8)a0 * 28 + 15] > 3) {\n                if (p0[(u8)a0 * 28 + 15] == 4) {\n                    p0[(u8)a0 * 28 + 15] = 0;\n                    ((struct Struct0 *)((u8)a0 * 28 + (u32)&gEntity))->field_20 = 0;\n                    p0[(u8)a0 * 28 + 16] = 1;\n                    p0[(u8)a0 * 28 + 12] = 1 - 5 & p0[(u8)a0 * 28 + 12];\n                    if ((u32)(p0[129 << 2] << 28) >> 30 != 0) {\n                        v3 = ((u16 *)&gEntity)[252] - 16;\n                    } else {\n                        v3 = ((u16 *)&gEntity)[252] + 16;\n                    }\n                    ((struct Struct0 *)((u8)a0 * 28 + (u32)&gEntity))->field_0 = v3;\n                    ((struct Struct2 *)((u8)a0 * 28 + (u32)&gEntity))->field_2 = ((u16 *)&gEntity)[253];\n                    p0[(u8)a0 * 28 + 8] = ((struct Elem2 *)((u32)&gItemDropParamTable + 10))[(a0 << 24) + (228 << 24) >> 24].field_0;\n                    p0[(u8)a0 * 28 + 9] = ((struct Elem3 *)((u32)&gItemDropParamTable + 11))[(a0 << 24) + (228 << 24) >> 24].field_0;\n                    p0[(u8)a0 * 28 + 22] = 2;\n                    return;\n                } else {\n                    return;\n                }\n            } else {\n                if (p0[(u8)a0 * 28 + 15] == 0) {\n                    ((struct Struct0 *)((u8)a0 * 28 + (u32)&gEntity))->field_2 = (134 << 1) - (*(s8 *)((u8)a0 * 28 + (u32)&gEntity + 9) * *(s16 *)((((struct Struct0 *)((u8)a0 * 28 + (u32)&gEntity))->field_20 << 1) + (u32)&gSineTable + 0) >> 8);\n                    ((struct Struct0 *)((u8)a0 * 28 + (u32)&gEntity))->field_0 = *(s8 *)((u8)a0 * 28 + (u32)&gEntity + 8) + ((struct Struct0 *)((u8)a0 * 28 + (u32)&gEntity))->field_0;\n                    v0 = p0[(u8)a0 * 28 + 22];\n                    v1 = ((struct Struct0 *)((u8)a0 * 28 + (u32)&gEntity))->field_20;\n                    ((struct Struct0 *)((u8)a0 * 28 + (u32)&gEntity))->field_20 = v0 + v1;\n                    if ((u16)(v0 + v1) != 136) {\n                        return;\n                    } else {\n                        p0[(u8)a0 * 28 + 15] = 28;\n                        p0[(u8)a0 * 28 + 16] = 0;\n                        return;\n                    }\n                } else {\n                    return;\n                }\n            }\n        }\n    } else {\n        p0[(u8)a0 * 28 + 15] = 28;\n        p0[(u8)a0 * 28 + 16] = 0;\n        return;\n    }\n}\n",
-        "score": 150,
+        "source": "struct Elem0 { u8 field_0; u8 _pad0[1]; };\nstruct Elem1 { u8 field_0; u8 _pad0[1]; };\nstruct Elem2 { u8 field_0; u8 _pad0[1]; };\nstruct Elem3 { u8 field_0; u8 _pad0[1]; };\nstruct Struct0 { u16 field_0; u16 field_2; u8 _pad0[8]; u8 field_12; u8 _pad1[2]; u8 field_15; u8 field_16; u8 _pad2[3]; u16 field_20; u8 field_22; };\nstruct Struct1 { u8 _pad0[2]; u16 field_2; u8 _pad1[4]; u8 field_8; u8 field_9; u8 _pad2[12]; u8 field_22; };\nstruct Struct2 { u8 _pad0[2]; u16 field_2; u8 _pad1[4]; u8 field_8; u8 field_9; u8 _pad2[12]; u8 field_22; };\nvoid EntityItemDrop(u32 a0) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    u8 * p0;\n    p0 = (u8 *)&gEntity;\n    if (gGameFlagsPtr[10] != 1) {\n        if (p0[(u8)a0 * 28 + 15] == 3) {\n            p0[(u8)a0 * 28 + 15] = 0;\n            ((struct Struct0 *)((u8)a0 * 28 + (u32)&gEntity))->field_20 = 0;\n            p0[(u8)a0 * 28 + 16] = 1;\n            p0[(u8)a0 * 28 + 12] = 1 - 5 & p0[(u8)a0 * 28 + 12];\n            if ((u32)(p0[129 << 2] << 28) >> 30 != 0) {\n                v2 = ((u16 *)&gEntity)[252] - 16;\n            } else {\n                v2 = ((u16 *)&gEntity)[252] + 16;\n            }\n            ((struct Struct0 *)((u8)a0 * 28 + (u32)&gEntity))->field_0 = v2;\n            ((struct Struct1 *)((u8)a0 * 28 + (u32)&gEntity))->field_2 = ((u16 *)&gEntity)[253];\n            p0[(u8)a0 * 28 + 8] = ((struct Elem0 *)&gItemDropParamTable)[(a0 << 24) + (228 << 24) >> 24].field_0;\n            p0[(u8)a0 * 28 + 9] = ((struct Elem1 *)((u32)&gItemDropParamTable + 1))[(a0 << 24) + (228 << 24) >> 24].field_0;\n            p0[(u8)a0 * 28 + 22] = 4;\n            return;\n        } else {\n            if (p0[(u8)a0 * 28 + 15] > 3) {\n                if (p0[(u8)a0 * 28 + 15] == 4) {\n                    p0[(u8)a0 * 28 + 15] = 0;\n                    ((struct Struct0 *)((u8)a0 * 28 + (u32)&gEntity))->field_20 = 0;\n                    p0[(u8)a0 * 28 + 16] = 1;\n                    p0[(u8)a0 * 28 + 12] = 1 - 5 & p0[(u8)a0 * 28 + 12];\n                    if ((u32)(p0[129 << 2] << 28) >> 30 != 0) {\n                        v3 = ((u16 *)&gEntity)[252] - 16;\n                    } else {\n                        v3 = ((u16 *)&gEntity)[252] + 16;\n                    }\n                    ((struct Struct0 *)((u8)a0 * 28 + (u32)&gEntity))->field_0 = v3;\n                    ((struct Struct2 *)((u8)a0 * 28 + (u32)&gEntity))->field_2 = ((u16 *)&gEntity)[253];\n                    p0[(u8)a0 * 28 + 8] = ((struct Elem2 *)((u32)&gItemDropParamTable + 10))[(a0 << 24) + (228 << 24) >> 24].field_0;\n                    p0[(u8)a0 * 28 + 9] = ((struct Elem3 *)((u32)&gItemDropParamTable + 11))[(a0 << 24) + (228 << 24) >> 24].field_0;\n                    p0[(u8)a0 * 28 + 22] = 2;\n                    return;\n                } else {\n                    return;\n                }\n            } else {\n                if (p0[(u8)a0 * 28 + 15] == 0) {\n                    ((struct Struct0 *)((u8)a0 * 28 + (u32)&gEntity))->field_2 = (134 << 1) - (*(s8 *)((u8)a0 * 28 + (u32)&gEntity + 9) * *(s16 *)((((struct Struct0 *)((u8)a0 * 28 + (u32)&gEntity))->field_20 << 1) + (u32)&gSineTable + 0) >> 8);\n                    ((struct Struct0 *)((u8)a0 * 28 + (u32)&gEntity))->field_0 = *(s8 *)((u8)a0 * 28 + (u32)&gEntity + 8) + ((struct Struct0 *)((u8)a0 * 28 + (u32)&gEntity))->field_0;\n                    v0 = p0[(u8)a0 * 28 + 22];\n                    v1 = ((struct Struct0 *)((u8)a0 * 28 + (u32)&gEntity))->field_20;\n                    ((struct Struct0 *)((u8)a0 * 28 + (u32)&gEntity))->field_20 = v1 + v0;\n                    if ((u16)(v1 + v0) != 136) {\n                        return;\n                    } else {\n                        p0[(u8)a0 * 28 + 15] = 28;\n                        p0[(u8)a0 * 28 + 16] = 0;\n                        return;\n                    }\n                } else {\n                    return;\n                }\n            }\n        }\n    } else {\n        p0[(u8)a0 * 28 + 15] = 28;\n        p0[(u8)a0 * 28 + 16] = 0;\n        return;\n    }\n}\n",
+        "score": 148,
         "maxScore": 234,
         "compileErrors": null,
         "breakdown": {
@@ -4390,7 +4390,7 @@
           "delete": 30,
           "replace": 24,
           "opMismatch": 5,
-          "argMismatch": 39
+          "argMismatch": 37
         },
         "quality": {
           "score": 76,
@@ -4428,15 +4428,15 @@
       },
       "gapSize": {
         "decompiler": "asmlift",
-        "score": 150,
+        "score": 148,
         "maxScore": 234,
-        "ratio": 0.6410256410256411,
+        "ratio": 0.6324786324786325,
         "kinds": {
           "insert": 52,
           "delete": 30,
           "replace": 24,
           "opMismatch": 5,
-          "argMismatch": 39
+          "argMismatch": 37
         }
       },
       "scripts": {
@@ -4476,7 +4476,7 @@
         "droppedCandidates": [
           {
             "label": "unsigned",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-eKSZWa/c.c:1076: `gBgDataPtrs' undeclared (first use in this function)"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-lhcUR2/c.c:1076: `gBgDataPtrs' undeclared (first use in this function)"
           }
         ],
         "symbolsUsed": [],
@@ -5550,11 +5550,11 @@
         "droppedCandidates": [
           {
             "label": "unsigned",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-M4CdV3/c.c:1077: too many arguments to function `thunk_sub_080002A0'"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-K46a65/c.c:1077: too many arguments to function `thunk_sub_080002A0'"
           },
           {
             "label": "unsigned/reread-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-lTv4iG/c.c:1075: too many arguments to function `thunk_sub_080002A0'"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-C2SiPB/c.c:1075: too many arguments to function `thunk_sub_080002A0'"
           }
         ],
         "symbolsUsed": [],
@@ -6346,115 +6346,115 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-4Yk8Il/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-4GhYtS/c.c:1085: incompatible types in assignment"
           },
           {
             "label": "unsigned/coalesce-v2-v3/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-D2x93Z/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-L7sNye/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "unsigned/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-ra8KFS/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-QlxZ2j/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "unsigned/livebase/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-qPEHFg/c.c:1087: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-QJX1cL/c.c:1087: incompatible types in assignment"
           },
           {
             "label": "unsigned/defsite/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-LFrFvb/c.c:1086: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-M6VgiY/c.c:1086: incompatible types in assignment"
           },
           {
             "label": "unsigned/defsite/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-PT0bSz/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-sk6NPq/c.c:1085: incompatible types in assignment"
           },
           {
             "label": "unsigned/defsite/livebase/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Mrbw6t/c.c:1088: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-FLd8xg/c.c:1088: incompatible types in assignment"
           },
           {
             "label": "unsigned/reread-globals/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-eQgl9d/c.c:1083: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-lJMrB6/c.c:1083: invalid operands to binary <<"
           },
           {
             "label": "unsigned/reread-globals/coalesce-v0-v1/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-h1s2GL/c.c:1082: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-yOuF0f/c.c:1082: invalid operands to binary <<"
           },
           {
             "label": "unsigned/reread-globals/coalesce-v0-v2/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-3jZk8l/c.c:1082: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-WxWaGr/c.c:1082: invalid operands to binary <<"
           },
           {
             "label": "unsigned/reread-globals/livebase/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-hLDEdx/c.c:1085: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-gdEtgL/c.c:1085: invalid operands to binary <<"
           },
           {
             "label": "unsigned/defsite/reread-globals/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-DsCS3h/c.c:1084: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-LScAJw/c.c:1084: invalid operands to binary <<"
           },
           {
             "label": "unsigned/defsite/reread-globals/coalesce-v0-v2/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-KGbH8W/c.c:1083: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-O1Ulvc/c.c:1083: invalid operands to binary <<"
           },
           {
             "label": "unsigned/defsite/reread-globals/livebase/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-w1jVFY/c.c:1086: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-A0L0Mo/c.c:1086: invalid operands to binary <<"
           },
           {
             "label": "signed/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-HY6KIY/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-B6pUdn/c.c:1085: incompatible types in assignment"
           },
           {
             "label": "signed/coalesce-v2-v3/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-RYtrY9/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-VGnshL/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "signed/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-uMCPTj/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-eQcKxM/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "signed/livebase/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-FVQvTw/c.c:1087: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-qQvpcy/c.c:1087: incompatible types in assignment"
           },
           {
             "label": "signed/defsite/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-T8bE5K/c.c:1086: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-cQk8UK/c.c:1086: incompatible types in assignment"
           },
           {
             "label": "signed/defsite/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-BNDcHR/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Qgt1yi/c.c:1085: incompatible types in assignment"
           },
           {
             "label": "signed/defsite/livebase/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-TF9ybY/c.c:1088: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-ZlKdPW/c.c:1088: incompatible types in assignment"
           },
           {
             "label": "signed/reread-globals/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-mQykNX/c.c:1083: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-kKZH1y/c.c:1083: invalid operands to binary <<"
           },
           {
             "label": "signed/reread-globals/coalesce-v0-v1/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Ia7OPM/c.c:1082: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-nwCwhM/c.c:1082: invalid operands to binary <<"
           },
           {
             "label": "signed/reread-globals/coalesce-v0-v2/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-TCpkJu/c.c:1082: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-eq6n3i/c.c:1082: invalid operands to binary <<"
           },
           {
             "label": "signed/reread-globals/livebase/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-fekFXT/c.c:1085: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-wismLm/c.c:1085: invalid operands to binary <<"
           },
           {
             "label": "signed/defsite/reread-globals/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-yPJhlW/c.c:1084: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-ZQuMja/c.c:1084: invalid operands to binary <<"
           },
           {
             "label": "signed/defsite/reread-globals/coalesce-v0-v2/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-KBVyfS/c.c:1083: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-rvyv8S/c.c:1083: invalid operands to binary <<"
           },
           {
             "label": "signed/defsite/reread-globals/livebase/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-UzacQy/c.c:1086: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-QDgy1w/c.c:1086: invalid operands to binary <<"
           }
         ],
         "symbolsUsed": [
@@ -6560,27 +6560,27 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-MykHSt/c.c:1501: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-JHmCXO/c.c:1501: incompatible types in assignment"
           },
           {
             "label": "unsigned/volatile/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-tvdKMx/c.c:1501: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-ksrr0v/c.c:1501: incompatible types in assignment"
           },
           {
             "label": "unsigned/livebase/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-NZ6nzy/c.c:1505: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-ahpJDh/c.c:1505: incompatible types in assignment"
           },
           {
             "label": "unsigned/reread-globals/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-GfrGht/c.c:1489: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-RMgQhO/c.c:1489: incompatible types in assignment"
           },
           {
             "label": "unsigned/reread-globals/volatile/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-kRLcUg/c.c:1489: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Y4g69J/c.c:1489: incompatible types in assignment"
           },
           {
             "label": "unsigned/reread-globals/livebase/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-xqa2gq/c.c:1493: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-B3v1da/c.c:1493: incompatible types in assignment"
           }
         ],
         "symbolsUsed": [
@@ -15323,7 +15323,7 @@
         "candidateLabel": "unsigned",
         "symbolsUsed": [],
         "outcome": "nonmatch",
-        "source": "void sa2__sub_808399C(u16 * a0, s16 * a1) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    v0 = *(s16 *)(a0 + 0);\n    v1 = *(s16 *)(a0 + 1);\n    v2 = *(s16 *)(a0 + 2);\n    *a0 = *(s16 *)(a0 + 3) * *(a1 + 0) + v0 * *(a1 + 3) + v1 * *(a1 + 2) - v2 * *(a1 + 1) >> 10;\n    a0[1] = *(s16 *)(a0 + 3) * *(a1 + 1) - v0 * *(a1 + 2) + v1 * *(a1 + 3) + v2 * *(a1 + 0) >> 10;\n    a0[2] = *(s16 *)(a0 + 3) * *(a1 + 2) + v0 * *(a1 + 1) - v1 * *(a1 + 0) + v2 * *(a1 + 3) >> 10;\n    a0[3] = *(s16 *)(a0 + 3) * *(a1 + 3) - v0 * *(a1 + 0) - v1 * *(a1 + 1) - v2 * *(a1 + 2) >> 10;\n    return;\n}\n",
+        "source": "void sa2__sub_808399C(u16 * a0, s16 * a1) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    v0 = *(s16 *)(a0 + 0);\n    v1 = *(s16 *)(a0 + 1);\n    v2 = *(s16 *)(a0 + 2);\n    *a0 = *(s16 *)(a0 + 3) * *(a1 + 0) + *(a1 + 3) * v0 + *(a1 + 2) * v1 - *(a1 + 1) * v2 >> 10;\n    a0[1] = *(s16 *)(a0 + 3) * *(a1 + 1) - *(a1 + 2) * v0 + *(a1 + 3) * v1 + *(a1 + 0) * v2 >> 10;\n    a0[2] = *(s16 *)(a0 + 3) * *(a1 + 2) + *(a1 + 1) * v0 - *(a1 + 0) * v1 + *(a1 + 3) * v2 >> 10;\n    a0[3] = *(s16 *)(a0 + 3) * *(a1 + 3) - *(a1 + 0) * v0 - *(a1 + 1) * v1 - *(a1 + 2) * v2 >> 10;\n    return;\n}\n",
         "score": 28,
         "maxScore": 89,
         "compileErrors": null,
