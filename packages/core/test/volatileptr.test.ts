@@ -125,3 +125,20 @@ test('the veto propagates through local copies to a fixpoint', () => {
   );
   expect(volatilePtrLocals(s)).toBeNull();
 });
+
+test('`only` narrows the lever: a qualifying local outside the set is not marked, and an empty yield declines', () => {
+  const s = fn(
+    [
+      { name: 'p', type: T.ptr(T.u(16)) },
+      { name: 'q', type: T.ptr(T.u(16)) },
+    ],
+    [
+      { k: 'assign', name: 'p', value: { k: 'const', value: 0x4000000 } },
+      { k: 'assign', name: 'q', value: { k: 'const', value: 0x4000010 } },
+    ],
+  );
+  const out = volatilePtrLocals(s, new Set(['q']));
+  expect(out?.locals.find((l) => l.name === 'q')?.pointeeVolatile).toBe(true);
+  expect(out?.locals.find((l) => l.name === 'p')?.pointeeVolatile).toBeUndefined();
+  expect(volatilePtrLocals(s, new Set(['nosuch']))).toBeNull();
+});

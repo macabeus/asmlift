@@ -353,8 +353,12 @@ function reindexStmt(s: Stmt, walk: WalkLoop, iv: string): Stmt | null {
 
 /** Try the walk→index re-spelling on one function. Returns the transformed COPY when at least
  *  one loop re-spelled, or null (no candidate) when nothing fired — callers emit the extra
- *  candidate only on non-null. Pure: never mutates the input SFn. */
-export function reindexWalks(sfn: SFn): SFn | null {
+ *  candidate only on non-null. Pure: never mutates the input SFn. `keptWalks` collects the names
+ *  of the pointers each fired loop kept as its base — v1 the walk's base (a param lands in the
+ *  set too, inertly: the volatile lever marks only declared locals), v2 the walk pointers
+ *  themselves — the locals the /indexed/volatile
+ *  product (rank.ts) narrows the volatile lever to. */
+export function reindexWalks(sfn: SFn, keptWalks?: Set<string>): SFn | null {
   const ptrVars = new Map<string, IrType>();
   for (const v of [...sfn.params, ...sfn.locals]) {
     if (v.type.kind === 'ptr') {
@@ -419,6 +423,7 @@ export function reindexWalks(sfn: SFn): SFn | null {
               body,
             });
             fired++;
+            keptWalks?.add(walk.base);
             continue;
           }
           retireIv();
@@ -455,6 +460,7 @@ export function reindexWalks(sfn: SFn): SFn | null {
               ],
             });
             fired++;
+            keptWalks?.add(walk.base);
             continue;
           }
           retireIv();
@@ -645,6 +651,9 @@ export function reindexWalks(sfn: SFn): SFn | null {
     if (body === null) {
       retireIv();
       return null;
+    }
+    for (const p of walks) {
+      keptWalks?.add(p);
     }
     return [
       ...pre.filter((x) => x !== kInit),

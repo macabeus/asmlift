@@ -2,7 +2,8 @@ import { describe, expect, test } from 'vitest';
 
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
-import { hoistReusedGlobalBases } from '../src/l3/basecse';
+import { LIVEBASE_GATES, hoistReusedGlobalBases } from '../src/l3/basecse';
+import { volatilePtrLocals } from '../src/l3/volatileptr';
 
 const idx = (name: string, i: Expr, width = 1): Expr => ({
   k: 'index',
@@ -135,5 +136,111 @@ describe('reused-global-base hoisting', () => {
       ]),
     );
     expect(out.locals).toEqual([]);
+  });
+});
+
+describe('/livebase admission (LIVEBASE_GATES: placement heuristics ablated)', () => {
+  // The MMIO poll: three stores plus a busy-wait re-read of the same fixed offset, all through
+  // one constant base. `loop` and `repeated-const-offset` both reject it, yet the compiler holds
+  // the base in ONE register throughout — the shape the lever exists for.
+  const poll = (): SFn =>
+    fn([
+      { k: 'store', lval: cidx(0x40000d4, c(0)), value: { k: 'var', name: 'a0' } },
+      { k: 'store', lval: cidx(0x40000d4, c(1)), value: { k: 'var', name: 'a1' } },
+      { k: 'store', lval: cidx(0x40000d4, c(2)), value: { k: 'var', name: 'a2' } },
+      { k: 'dowhile', cond: { k: 'bin', op: '!=', l: cidx(0x40000d4, c(2)), r: c(0) }, body: [] },
+    ]);
+
+  test('the poll shape: default gates refuse, LIVEBASE_GATES hoists every access onto one local', () => {
+    const input = poll();
+    expect(hoistReusedGlobalBases(input)).toBe(input);
+
+    const out = hoistReusedGlobalBases(poll(), LIVEBASE_GATES);
+    expect(out.locals).toEqual([{ name: 'p0', type: T.ptr(T.s(32)) }]);
+    expect(out.body[0]).toEqual({
+      k: 'assign',
+      name: 'p0',
+      value: { k: 'cast', to: T.ptr(T.s(32)), e: { k: 'const', value: 0x40000d4 } },
+    });
+    const dw = out.body[4] as Stmt & { k: 'dowhile' };
+    expect((dw.cond as Expr & { k: 'bin' }).l).toEqual({
+      k: 'index',
+      base: { k: 'var', name: 'p0' },
+      idx: c(2),
+      width: 4,
+      signed: true,
+    });
+  });
+
+  test('the /livebase/volatile product: the hoisted numeric base qualifies for the volatile lever', () => {
+    const out = hoistReusedGlobalBases(poll(), LIVEBASE_GATES);
+    const vol = volatilePtrLocals(out);
+    expect(vol?.locals.find((l) => l.name === 'p0')?.pointeeVolatile).toBe(true);
+  });
+
+  test('single-use survives the ablation: one access is still refused, and by the SAME object', () => {
+    const input = fn([{ k: 'store', lval: cidx(0x40000d4, c(0)), value: c(0) }]);
+    expect(hoistReusedGlobalBases(input, LIVEBASE_GATES)).toBe(input);
+  });
+
+  // Mixed admitted+refused bases: the lever re-runs on a tree whose head already holds the
+  // default run's init, and pool-load order is FIRST-USE order across both — whichever base the
+  // body touches first gets its init first, not whichever pass hoisted it.
+  const admitted = (v: string): Stmt[] => [
+    { k: 'store', lval: cidx(0x3001000, c(0)), value: { k: 'var', name: v } },
+    { k: 'store', lval: cidx(0x3001000, c(1)), value: { k: 'var', name: v } },
+  ];
+  const refusedLoop: Stmt = {
+    k: 'dowhile',
+    cond: { k: 'bin', op: '!=', l: cidx(0x40000d4, c(2)), r: c(0) },
+    body: [{ k: 'store', lval: cidx(0x40000d4, c(2)), value: c(1) }],
+  };
+  const initOrder = (body: Stmt[]): (number | undefined)[] => {
+    const afterDefault = hoistReusedGlobalBases(fn(body));
+    const out = hoistReusedGlobalBases(afterDefault, LIVEBASE_GATES);
+    expect(out.locals.map((l) => l.name)).toEqual(['p0', 'p1']);
+    return out.body.slice(0, 2).map((s) => {
+      const a = s as Stmt & { k: 'assign' };
+      return (a.value as Expr & { k: 'cast' }).e.k === 'const'
+        ? ((a.value as Expr & { k: 'cast' }).e as Expr & { k: 'const' }).value
+        : undefined;
+    });
+  };
+
+  test('mixed bases, admitted base first-used first: its init stays first', () => {
+    expect(initOrder([...admitted('a0'), refusedLoop])).toEqual([0x3001000, 0x40000d4]);
+  });
+
+  test('mixed bases, refused base first-used first: the lever init moves ahead of the default one', () => {
+    expect(initOrder([refusedLoop, ...admitted('a0')])).toEqual([0x40000d4, 0x3001000]);
+  });
+
+  test('a head write to a `volatile` local ends the reorderable run: volatile write order is kept', () => {
+    const input: SFn = {
+      ...fn([
+        { k: 'assign', name: 'v1', value: { k: 'cast', to: T.ptr(T.int(8, false)), e: c(0x111) } },
+        { k: 'assign', name: 'v2', value: { k: 'cast', to: T.ptr(T.int(8, false)), e: c(0x222) } },
+        { k: 'store', lval: cidx(0x3001000, c(0)), value: { k: 'var', name: 'v2' } },
+        { k: 'store', lval: cidx(0x3001000, c(1)), value: { k: 'var', name: 'v1' } },
+      ]),
+      locals: [
+        { name: 'v1', type: T.ptr(T.int(8, false)), volatile: true },
+        { name: 'v2', type: T.ptr(T.int(8, false)), volatile: true },
+      ],
+    };
+    const out = hoistReusedGlobalBases(input);
+    // the hoist init lands above, and v1/v2 keep their order even though v2 is first-used first
+    expect(out.body.slice(0, 3).map((s) => (s as Stmt & { k: 'assign' }).name)).toEqual(['p0', 'v1', 'v2']);
+  });
+
+  test('a base the default gates already admitted leaves nothing: the lever declines', () => {
+    const hoisted = hoistReusedGlobalBases(
+      fn([
+        { k: 'store', lval: cidx(0x40000d4, c(0)), value: c(0) },
+        { k: 'store', lval: cidx(0x40000d4, c(1)), value: c(0) },
+      ]),
+    );
+    expect(hoisted.locals).toHaveLength(1);
+    expect(hoistReusedGlobalBases(hoisted, LIVEBASE_GATES)).toBe(hoisted);
   });
 });

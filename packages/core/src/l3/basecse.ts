@@ -21,7 +21,7 @@
 import { type IrType, T, scalarTypeForAccess } from '../ir/types';
 import type { Expr, SFn, Stmt } from './ast';
 import { mapExprChildren, stmtChildren, stmtExprs } from './ast';
-import { type Gate, firstRejection } from './gates';
+import { type Gate, ablateHeuristic, firstRejection } from './gates';
 import { nameAllocator } from './hoist';
 
 // A HOISTABLE base is a bare `addr` (a global address) or a bare `const` (a numeric pointer
@@ -177,13 +177,24 @@ export const BASECSE_GATES: readonly Gate<BaseKey>[] = [
   },
 ];
 
-export function hoistReusedGlobalBases(sfn: SFn): SFn {
+/** The `/livebase` lever's admission (rank.ts): the default rules with both PLACEMENT heuristics
+ *  ablated, keeping only `single-use`. `loop` and `repeated-const-offset` predict which spelling
+ *  the compiler chose, and both predictions have a counterexample — an MMIO poll (`p[2] = go;
+ *  while (p[2] & BUSY) {}`) stores and re-reads a fixed offset through ONE register the whole
+ *  time. Neither gate is `sound`, so ablating them can only change which spelling wins, never
+ *  what a candidate means; the differ referees. */
+export const LIVEBASE_GATES: readonly Gate<BaseKey>[] = ablateHeuristic(
+  ablateHeuristic(BASECSE_GATES, 'loop'),
+  'repeated-const-offset',
+);
+
+export function hoistReusedGlobalBases(sfn: SFn, gates: readonly Gate<BaseKey>[] = BASECSE_GATES): SFn {
   const c: Collected = { count: new Map(), order: [], meta: new Map(), inLoop: new Set(), constOffCount: new Map() };
   collect(sfn.body, c, false);
   const { count, order, meta } = c;
   const hoisted = order.filter(
     (k) =>
-      firstRejection(BASECSE_GATES, {
+      firstRejection(gates, {
         key: k,
         uses: count.get(k) ?? 0,
         inLoop: c.inLoop.has(k),
@@ -209,6 +220,46 @@ export function hoistReusedGlobalBases(sfn: SFn): SFn {
     hoistStmts.push({ k: 'assign', name: nm, value: { k: 'cast', to: ptrType, e: m.base } });
   }
 
-  const body = [...hoistStmts, ...sfn.body.map((s) => rewriteStmt(s, localFor))];
-  return { ...sfn, body, locals: [...sfn.locals, ...newLocals] };
+  const rewritten = sfn.body.map((s) => rewriteStmt(s, localFor));
+  // Pool-load order (see `collect`): inits emit in first-use order. When rank's /livebase re-runs
+  // this pass, the tree's head already carries the default run's inits — blindly prepending would
+  // spell the new base's load above locals the compiler loads first. So the head run of
+  // init-shaped assigns is re-ordered together with the new inits by each local's first use in
+  // the remaining body; ties keep list order, existing inits first. This deliberately reaches the
+  // single default run too (a head of user pointer inits before a firing hoist), where it repairs
+  // the same invariant. An init-shaped assign is a ptr-cast of an addr/const leaf into a declared
+  // NON-VOLATILE local — it reads nothing and writes its own plain cell, so any order among them
+  // means the same thing. The volatile check is load-bearing: two writes to `volatile` locals are
+  // observably ordered, so one at the head simply ends the reorderable run.
+  const plainLocals = new Set(sfn.locals.filter((l) => !l.volatile).map((l) => l.name));
+  const isInitShaped = (s: Stmt): s is Stmt & { k: 'assign' } =>
+    s.k === 'assign' &&
+    plainLocals.has(s.name) &&
+    s.value.k === 'cast' &&
+    s.value.to.kind === 'ptr' &&
+    isHoistableBase(s.value.e);
+  let headLen = 0;
+  while (headLen < rewritten.length && isInitShaped(rewritten[headLen])) {
+    headLen++;
+  }
+  const inits = [...rewritten.slice(0, headLen), ...hoistStmts] as (Stmt & { k: 'assign' })[];
+  const rest = rewritten.slice(headLen);
+  const firstUse = new Map<string, number>();
+  for (const s of inits) {
+    if (!firstUse.has(s.name)) {
+      const i = rest.findIndex((r) => stmtMentionsVar(r, s.name));
+      firstUse.set(s.name, i === -1 ? rest.length : i);
+    }
+  }
+  inits.sort((a, b) => firstUse.get(a.name)! - firstUse.get(b.name)!);
+  return { ...sfn, body: [...inits, ...rest], locals: [...sfn.locals, ...newLocals] };
+}
+
+/** Whether `name` occurs as a `var` anywhere in the statement, nested statements included. */
+function stmtMentionsVar(s: Stmt, name: string): boolean {
+  const inExpr = (e: Expr): boolean => (e.k === 'var' && e.name === name) || exprChildrenOf(e).some(inExpr);
+  if (s.k === 'assign' && s.name === name) {
+    return true;
+  }
+  return stmtExprs(s).some(inExpr) || stmtChildren(s).some((ch) => stmtMentionsVar(ch, name));
 }

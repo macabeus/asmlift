@@ -293,7 +293,9 @@ export function hoistScopedBases(sfn: SFn): SFn | null {
     // hoist rather than a wrong one. It also SLIPS on a fixed offset not spelled as a literal —
     // two identical `g[i]` accesses are not tallied — which basecse acknowledges in its own comment
     // and which this pass is MORE exposed to, since it deliberately admits loop-body uses, exactly
-    // the input basecse's `inLoop` gate kept away from that hole.
+    // the input basecse's `inLoop` gate kept away from that hole. rank's `/livebase` takes the
+    // OPPOSITE side — it ablates this same rule (LIVEBASE_GATES) for the poll shapes the rule
+    // mispredicts — and the differ arbitrates between the two spellings; a decision, not a drift.
     if ([...rec.constOff.values()].some((n) => n >= 2)) {
       continue;
     }

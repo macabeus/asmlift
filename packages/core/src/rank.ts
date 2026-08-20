@@ -18,6 +18,7 @@ import { T } from './ir/types';
 import { verify } from './ir/verify';
 import { materializeArgBases } from './l3/argbase';
 import type { LanguageBackend, SFn } from './l3/ast';
+import { LIVEBASE_GATES, hoistReusedGlobalBases } from './l3/basecse';
 import { coalesceCandidates } from './l3/coalesce';
 import { registerishSpellings } from './l3/regspell';
 import { reindexWalks } from './l3/reindex';
@@ -410,10 +411,14 @@ export function enumerateCandidates(
         // never aborts the enumeration). A dropped re-spelling loses nothing: the primary remains.
         //
         // POLICY: re-spellings derive from the BASE spelling only — levers do not compose
-        // (an /indexed + /regcopy product is deferred until a row demands it). ONE product is
-        // sanctioned because a row demanded it: /indexed/volatile — re-indexing keeps a numeric
-        // walk base as a pointer local (l3/reindex.ts v2), and whether THAT local pointed at
-        // volatile data is the same underdetermined question /volatile answers on the primary. And a lever must
+        // (an /indexed + /regcopy product is deferred until a row demands it). Products with
+        // /volatile are the ONE sanctioned exception, and only onto a lever whose re-spelling
+        // CENTRES ON a numeric-address pointer local — the joint spelling (the lever plus
+        // volatile on that local) is reachable from neither lever alone. Each product narrows
+        // /volatile to the lever's own locals (volatilePtrLocals' `only`): /indexed to the walk
+        // bases it kept, /livebase to the locals its hoist created — qualifying any OTHER local
+        // would be the general composition this policy forbids, since the primary's /volatile
+        // already asks the question for those. Each product needed a row to demand it. And a lever must
         // PRESERVE SEMANTICS by construction: the differ referees byte-exactness (a wrong candidate
         // can never fake a score-0 match), but on a NONMATCH row the best-scoring source is shown
         // to the user — a semantically-wrong re-spelling there is plausible-but-wrong output, the
@@ -487,8 +492,31 @@ export function enumerateCandidates(
         enumerate('/coalesce', () => sfn);
         respell('/indexed', () => reindexWalks(sfn));
         respell('/indexed/volatile', () => {
-          const r = reindexWalks(sfn);
-          return r ? volatilePtrLocals(r) : null;
+          const kept = new Set<string>();
+          const r = reindexWalks(sfn, kept);
+          return r ? volatilePtrLocals(r, kept) : null;
+        });
+        // `/livebase` — hoist a reused leaf base the default basecse pass REFUSED (l3/basecse.ts,
+        // LIVEBASE_GATES): its `loop` and `repeated-const-offset` rules predict re-materialization,
+        // and an MMIO poll (store then re-read the same fixed offset while it spins) is the shape
+        // where the prediction is wrong — the compiler holds ONE base register across stores, the
+        // loop, and the read-back. The primary already carries every base those rules admit, so a
+        // hoist-nothing result means the lever has nothing to add and declines.
+        const livebase = (): SFn | null => {
+          const r = hoistReusedGlobalBases(sfn, LIVEBASE_GATES);
+          return r === sfn ? null : r;
+        };
+        respell('/livebase', livebase);
+        respell('/livebase/volatile', () => {
+          const r = livebase();
+          if (!r) {
+            return null;
+          }
+          // Only the locals THIS lever created (a name-diff, not a positional slice, so a pass
+          // that ever reorders locals cannot silently empty the set) — see the POLICY note above.
+          const before = new Set(sfn.locals.map((l) => l.name));
+          const created = new Set(r.locals.filter((l) => !before.has(l.name)).map((l) => l.name));
+          return volatilePtrLocals(r, created);
         });
         // the register-copy spelling (l3/regspell.ts): 0–3 variants (base; tail assign-back reusing
         // the dead value var; tail assign-back into a fresh var — the tail choice is allocator-

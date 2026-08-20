@@ -55,4 +55,22 @@ export default [
       ],
     },
   },
+  {
+    // gates.ts `without` is the TEST-ONLY ablation (guardedBy differential tests must ablate sound
+    // gates); shipped code derives ablated tables through `ablateHeuristic`, which refuses them.
+    files: ['packages/core/src/**/*.ts'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: ':matches(PropertyDefinition, MethodDefinition)[accessibility="private"]',
+          message: 'Use #private instead',
+        },
+        {
+          selector: 'ImportSpecifier[imported.name="without"]',
+          message: 'gates.ts `without` is test-only — shipped ablation goes through `ablateHeuristic`',
+        },
+      ],
+    },
+  },
 ];
