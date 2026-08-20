@@ -1,6 +1,7 @@
 // CLI surface tests — offline (no toolchain: decompile-only via runCli, no compile/score).
 // The corpus fixtures live in @asmlift/core's test dir; read cross-package by path.
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from 'vitest';
 
@@ -76,4 +77,53 @@ test('gaps exit 1 with markers; strict declines are tagged, not internal', async
   expect(strict.code).toBe(1);
   expect(strict.stderr).toContain('[declined]');
   expect(strict.stderr).not.toContain('[internal error]');
+});
+
+// --proto validation. `protoArity` falls back to the arg-register heuristic on a malformed
+// `params`, which is right for an OMITTED one and silent for a mistyped one — so a table that is
+// accepted here decompiles at a guessed arity with nothing said about it. Measured on klonoa's
+// LoadBGTilemapData, the difference between a correct table and a mistyped one is 53 objdiff
+// points and no output whatsoever.
+const protoFile = (table: unknown) => {
+  const dir = mkdtempSync(join(tmpdir(), 'asmlift-proto-'));
+  const p = join(dir, 'p.json');
+  writeFileSync(p, typeof table === 'string' ? table : JSON.stringify(table));
+  return p;
+};
+
+test('--proto: a well-formed table is accepted in both param spellings', async () => {
+  for (const params of [1, ['u8']]) {
+    const r = await run('agbcc-clamp0.s', '--target', 'agbcc', '--proto', protoFile({ callee: { params } }));
+    expect(r.code).toBe(0);
+    expect(r.stderr).toBe('');
+  }
+});
+
+test('--proto: a mistyped params is REFUSED, not silently ignored', async () => {
+  const r = await run('agbcc-clamp0.s', '--target', 'agbcc', '--proto', protoFile({ callee: { params: '1' } }));
+  expect(r.code).toBe(64);
+  expect(r.stderr).toContain('callee: "params" must be a non-negative integer');
+  expect(r.stdout).toBe('');
+});
+
+test('--proto: a misspelled key is REFUSED — it would otherwise do nothing at all', async () => {
+  const r = await run('agbcc-clamp0.s', '--target', 'agbcc', '--proto', protoFile({ callee: { paramz: 1 } }));
+  expect(r.code).toBe(64);
+  expect(r.stderr).toContain('unknown key "paramz"');
+});
+
+test('--proto: every bad entry is named, and the file path is in the message', async () => {
+  const p = protoFile({ a: { params: -1 }, b: { returnsVoid: 'yes' } });
+  const r = await run('agbcc-clamp0.s', '--target', 'agbcc', '--proto', p);
+  expect(r.stderr).toContain(p);
+  expect(r.stderr).toContain('a: "params"');
+  expect(r.stderr).toContain('b: "returnsVoid"');
+});
+
+test('--proto: unreadable file and non-object JSON stay distinguishable (66 vs 64)', async () => {
+  const missing = await run('agbcc-clamp0.s', '--target', 'agbcc', '--proto', join(tmpdir(), 'nope-asmlift.json'));
+  expect(missing.code).toBe(66);
+  const scalar = await run('agbcc-clamp0.s', '--target', 'agbcc', '--proto', protoFile('42'));
+  expect(scalar.code).toBe(64);
+  expect(scalar.stderr).toContain('must be an object mapping a symbol name to its prototype');
 });

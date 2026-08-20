@@ -27,6 +27,45 @@ export interface FnProto {
 /** symbol → prototype. The function under decompilation and its callees share one table. */
 export type Prototypes = Record<string, FnProto>;
 
+/** Problems with an UNTRUSTED prototype table — empty when it is well formed.
+ *
+ *  A `Prototypes` written by hand — the CLI's `--proto` JSON — is the one case where `protoArity`'s
+ *  fallback is the wrong behaviour. Falling back to the arg-register
+ *  heuristic is right when `params` is OMITTED; on `params: "2"` it silently decompiles at a
+ *  guessed arity, and the user who wrote the table has no way to tell. Same for a misspelled
+ *  `returnVoid`, which would simply do nothing. Reporting lets the caller refuse instead.
+ *
+ *  Messages name the symbol so a table with several entries points at the broken one. */
+export function validatePrototypes(value: unknown): string[] {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return ['must be an object mapping a symbol name to its prototype'];
+  }
+  const problems: string[] = [];
+  for (const [sym, proto] of Object.entries(value)) {
+    if (typeof proto !== 'object' || proto === null || Array.isArray(proto)) {
+      problems.push(`${sym}: must be an object, e.g. {"params": 2}`);
+      continue;
+    }
+    for (const key of Object.keys(proto)) {
+      if (key !== 'params' && key !== 'returnsVoid') {
+        problems.push(`${sym}: unknown key "${key}" (expected "params" or "returnsVoid")`);
+      }
+    }
+    const { params, returnsVoid } = proto as { params?: unknown; returnsVoid?: unknown };
+    if (params !== undefined) {
+      const countOk = typeof params === 'number' && Number.isInteger(params) && params >= 0;
+      const listOk = Array.isArray(params) && params.every((t) => typeof t === 'string');
+      if (!countOk && !listOk) {
+        problems.push(`${sym}: "params" must be a non-negative integer or a list of type strings`);
+      }
+    }
+    if (returnsVoid !== undefined && typeof returnsVoid !== 'boolean') {
+      problems.push(`${sym}: "returnsVoid" must be a boolean`);
+    }
+  }
+  return problems;
+}
+
 /** The call-site arity a proto declares, normalizing the count form (`2`) and the typed-list
  *  form (`["u8", "s32"]`) to one number. `undefined` when `params` is omitted — the caller then
  *  falls back to its arg-register heuristic. Reading a typed list as its length is what lets a
