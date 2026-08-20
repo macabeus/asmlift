@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generatedAt": "2026-08-20T22:11:55.915Z",
+    "generatedAt": "2026-08-20T23:35:29.885Z",
     "toolchains": [
       "ido7.1",
       "agbcc",
@@ -14,7 +14,7 @@
       "real": 240
     },
     "asmlift": {
-      "commit": "a78320028b44a204c73f4d438092689216d2e76e",
+      "commit": "0ca1422171f4a832e618a95caa36a98b6ab3bd79",
       "dirty": false
     },
     "m2c": {
@@ -3526,15 +3526,15 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-qBQT8x/c.c:1077: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-IqbNEe/c.c:1077: invalid operands to binary <<"
           },
           {
             "label": "unsigned/scopebase/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-CM2RJJ/c.c:1078: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Lycs5B/c.c:1078: invalid operands to binary <<"
           },
           {
             "label": "unsigned/livebase/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-2ORiZp/c.c:1079: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-IgLB3K/c.c:1079: invalid operands to binary <<"
           }
         ],
         "symbolsUsed": [
@@ -4476,7 +4476,7 @@
         "droppedCandidates": [
           {
             "label": "unsigned",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-yxyAkC/c.c:1076: `gBgDataPtrs' undeclared (first use in this function)"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-LUSGpW/c.c:1076: `gBgDataPtrs' undeclared (first use in this function)"
           }
         ],
         "symbolsUsed": [],
@@ -5018,7 +5018,7 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "no scorable candidate for 'ProcessInputAndUpdateEntities': agbcc failed: <tmp>/c.c:1475: warning: assignment makes integer from pointer without a cast"
+          "no scorable candidate for 'ProcessInputAndUpdateEntities': agbcc failed: <tmp>/c.c:1461: warning: assignment makes integer from pointer without a cast"
         ]
       },
       "m2c": {
@@ -5550,11 +5550,11 @@
         "droppedCandidates": [
           {
             "label": "unsigned",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-NKtTrl/c.c:1077: too many arguments to function `thunk_sub_080002A0'"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-MZUzLb/c.c:1077: too many arguments to function `thunk_sub_080002A0'"
           },
           {
             "label": "unsigned/reread-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-3uXDZy/c.c:1075: too many arguments to function `thunk_sub_080002A0'"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-kZXYMv/c.c:1075: too many arguments to function `thunk_sub_080002A0'"
           }
         ],
         "symbolsUsed": [],
@@ -6346,115 +6346,115 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-HN86Hz/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-UPUFvK/c.c:1085: incompatible types in assignment"
           },
           {
             "label": "unsigned/coalesce-v2-v3/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-qW54Hz/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-qgwvWK/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "unsigned/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-yPMijO/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-68cF2t/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "unsigned/livebase/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-iy000Y/c.c:1087: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-b3oa1X/c.c:1087: incompatible types in assignment"
           },
           {
             "label": "unsigned/defsite/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-ZmNO4p/c.c:1086: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-egidyD/c.c:1086: incompatible types in assignment"
           },
           {
             "label": "unsigned/defsite/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-9dsCvC/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-tFslWa/c.c:1085: incompatible types in assignment"
           },
           {
             "label": "unsigned/defsite/livebase/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-DWhFVB/c.c:1088: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-AMVc0I/c.c:1088: incompatible types in assignment"
           },
           {
             "label": "unsigned/reread-globals/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-YPl0Pm/c.c:1083: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-KE10wG/c.c:1083: invalid operands to binary <<"
           },
           {
             "label": "unsigned/reread-globals/coalesce-v0-v1/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-N3ZEIZ/c.c:1082: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-rQqlOa/c.c:1082: invalid operands to binary <<"
           },
           {
             "label": "unsigned/reread-globals/coalesce-v0-v2/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-rVEK3h/c.c:1082: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-k7RAmI/c.c:1082: invalid operands to binary <<"
           },
           {
             "label": "unsigned/reread-globals/livebase/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-RTd3Xr/c.c:1085: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-zchSlw/c.c:1085: invalid operands to binary <<"
           },
           {
             "label": "unsigned/defsite/reread-globals/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-7HPE3A/c.c:1084: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-LxnC8W/c.c:1084: invalid operands to binary <<"
           },
           {
             "label": "unsigned/defsite/reread-globals/coalesce-v0-v2/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-37OJ3G/c.c:1083: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-msEgZF/c.c:1083: invalid operands to binary <<"
           },
           {
             "label": "unsigned/defsite/reread-globals/livebase/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-XTmDqB/c.c:1086: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-piwtLI/c.c:1086: invalid operands to binary <<"
           },
           {
             "label": "signed/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Q7lI22/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-cE7q5A/c.c:1085: incompatible types in assignment"
           },
           {
             "label": "signed/coalesce-v2-v3/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-ReA7xM/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-08A99e/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "signed/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-hvftLz/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-gty7bd/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "signed/livebase/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Nrirqt/c.c:1087: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-VfrA7a/c.c:1087: incompatible types in assignment"
           },
           {
             "label": "signed/defsite/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-GZnp2U/c.c:1086: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-u7b28J/c.c:1086: incompatible types in assignment"
           },
           {
             "label": "signed/defsite/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-DPX2xn/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-sCSmVC/c.c:1085: incompatible types in assignment"
           },
           {
             "label": "signed/defsite/livebase/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-a0Ge8m/c.c:1088: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-XJnxyS/c.c:1088: incompatible types in assignment"
           },
           {
             "label": "signed/reread-globals/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-bdTLR9/c.c:1083: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-sAlGFi/c.c:1083: invalid operands to binary <<"
           },
           {
             "label": "signed/reread-globals/coalesce-v0-v1/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-v5Rc90/c.c:1082: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-KBexoc/c.c:1082: invalid operands to binary <<"
           },
           {
             "label": "signed/reread-globals/coalesce-v0-v2/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-lUblcG/c.c:1082: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-h5wtyU/c.c:1082: invalid operands to binary <<"
           },
           {
             "label": "signed/reread-globals/livebase/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-3ftmuU/c.c:1085: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Vcy117/c.c:1085: invalid operands to binary <<"
           },
           {
             "label": "signed/defsite/reread-globals/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-wR7aFo/c.c:1084: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-8zoJhr/c.c:1084: invalid operands to binary <<"
           },
           {
             "label": "signed/defsite/reread-globals/coalesce-v0-v2/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Q6R4PK/c.c:1083: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-GCijgW/c.c:1083: invalid operands to binary <<"
           },
           {
             "label": "signed/defsite/reread-globals/livebase/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-i1j9Yl/c.c:1086: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-KMQo5Y/c.c:1086: invalid operands to binary <<"
           }
         ],
         "symbolsUsed": [
@@ -6560,27 +6560,27 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-xXVAnv/c.c:1501: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-EX23db/c.c:1501: incompatible types in assignment"
           },
           {
             "label": "unsigned/volatile/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-TyFXgv/c.c:1501: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-BlCFSr/c.c:1501: incompatible types in assignment"
           },
           {
             "label": "unsigned/livebase/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-uBn1K1/c.c:1505: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-yK0ZJo/c.c:1505: incompatible types in assignment"
           },
           {
             "label": "unsigned/reread-globals/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Gq0jhf/c.c:1489: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-KOFjLo/c.c:1489: incompatible types in assignment"
           },
           {
             "label": "unsigned/reread-globals/volatile/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-KfzdpC/c.c:1489: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-9sIkFy/c.c:1489: incompatible types in assignment"
           },
           {
             "label": "unsigned/reread-globals/livebase/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-ta5dfT/c.c:1493: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-keSQlx/c.c:1493: incompatible types in assignment"
           }
         ],
         "symbolsUsed": [
@@ -15241,9 +15241,9 @@
         "symbolMap": true,
         "candidateLabel": "unsigned",
         "symbolsUsed": [],
-        "outcome": "nonmatch",
-        "source": "void sa2__sub_80838CC(s16 * a0, s16 * a1, u16 * a2) {\n    *a2 = *(a1 + 0) * *(a0 + 3) + *(a1 + 3) * *(a0 + 0) + *(a1 + 2) * *(a0 + 1) - *(a1 + 1) * *(a0 + 2) >> 10;\n    a2[1] = *(a1 + 1) * *(a0 + 3) - *(a1 + 2) * *(a0 + 0) + *(a1 + 3) * *(a0 + 1) + *(a1 + 0) * *(a0 + 2) >> 10;\n    a2[2] = *(a1 + 2) * *(a0 + 3) + *(a1 + 1) * *(a0 + 0) - *(a1 + 0) * *(a0 + 1) + *(a1 + 3) * *(a0 + 2) >> 10;\n    a2[3] = *(a1 + 3) * *(a0 + 3) - *(a1 + 0) * *(a0 + 0) - *(a1 + 1) * *(a0 + 1) - *(a1 + 2) * *(a0 + 2) >> 10;\n    return;\n}\n",
-        "score": 59,
+        "outcome": "match",
+        "source": "void sa2__sub_80838CC(s16 * a0, s16 * a1, u16 * a2) {\n    *a2 = *(a0 + 3) * *(a1 + 0) + *(a0 + 0) * *(a1 + 3) + *(a0 + 1) * *(a1 + 2) - *(a0 + 2) * *(a1 + 1) >> 10;\n    a2[1] = *(a0 + 3) * *(a1 + 1) - *(a0 + 0) * *(a1 + 2) + *(a0 + 1) * *(a1 + 3) + *(a0 + 2) * *(a1 + 0) >> 10;\n    a2[2] = *(a0 + 3) * *(a1 + 2) + *(a0 + 0) * *(a1 + 1) - *(a0 + 1) * *(a1 + 0) + *(a0 + 2) * *(a1 + 3) >> 10;\n    a2[3] = *(a0 + 3) * *(a1 + 3) - *(a0 + 0) * *(a1 + 0) - *(a0 + 1) * *(a1 + 1) - *(a0 + 2) * *(a1 + 2) >> 10;\n    return;\n}\n",
+        "score": 0,
         "maxScore": 104,
         "compileErrors": null,
         "breakdown": {
@@ -15251,7 +15251,7 @@
           "delete": 0,
           "replace": 0,
           "opMismatch": 0,
-          "argMismatch": 59
+          "argMismatch": 0
         },
         "quality": {
           "score": 100,
@@ -15287,19 +15287,7 @@
           "<tmp>/c.c:323: request for member `unk2' in something not a structure or union"
         ]
       },
-      "gapSize": {
-        "decompiler": "asmlift",
-        "score": 59,
-        "maxScore": 104,
-        "ratio": 0.5673076923076923,
-        "kinds": {
-          "insert": 0,
-          "delete": 0,
-          "replace": 0,
-          "opMismatch": 0,
-          "argMismatch": 59
-        }
-      },
+      "gapSize": null,
       "scripts": {
         "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `sa2__sub_80838CC` — benchmark function sa3:sa2__sub_80838CC:agbcc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The exact agbcc `.s` text the benchmark fed m2c, verbatim.\ncat > in.s <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tsa2__sub_80838CC\n\t.type\t sa2__sub_80838CC,function\n\t.thumb_func\nsa2__sub_80838CC:\n\tpush\t{r4, r5, r6, lr}\n\tmov\tr3, #0x6\n\tldrsh\tr4, [r0, r3]\n\tmov\tr5, #0x0\n\tldrsh\tr3, [r1, r5]\n\tmul\tr3, r3, r4\n\tmov\tr6, #0x0\n\tldrsh\tr5, [r0, r6]\n\tmov\tr6, #0x6\n\tldrsh\tr4, [r1, r6]\n\tmul\tr4, r4, r5\n\tadd\tr3, r3, r4\n\tmov\tr4, #0x2\n\tldrsh\tr5, [r0, r4]\n\tmov\tr6, #0x4\n\tldrsh\tr4, [r1, r6]\n\tmul\tr4, r4, r5\n\tadd\tr3, r3, r4\n\tmov\tr4, #0x4\n\tldrsh\tr5, [r0, r4]\n\tmov\tr6, #0x2\n\tldrsh\tr4, [r1, r6]\n\tmul\tr4, r4, r5\n\tsub\tr3, r3, r4\n\tasr\tr3, r3, #0xa\n\tstrh\tr3, [r2]\n\tmov\tr3, #0x6\n\tldrsh\tr4, [r0, r3]\n\tmov\tr5, #0x2\n\tldrsh\tr3, [r1, r5]\n\tmul\tr3, r3, r4\n\tmov\tr6, #0x0\n\tldrsh\tr5, [r0, r6]\n\tmov\tr6, #0x4\n\tldrsh\tr4, [r1, r6]\n\tmul\tr4, r4, r5\n\tsub\tr3, r3, r4\n\tmov\tr4, #0x2\n\tldrsh\tr5, [r0, r4]\n\tmov\tr6, #0x6\n\tldrsh\tr4, [r1, r6]\n\tmul\tr4, r4, r5\n\tadd\tr3, r3, r4\n\tmov\tr4, #0x4\n\tldrsh\tr5, [r0, r4]\n\tmov\tr6, #0x0\n\tldrsh\tr4, [r1, r6]\n\tmul\tr4, r4, r5\n\tadd\tr3, r3, r4\n\tasr\tr3, r3, #0xa\n\tstrh\tr3, [r2, #0x2]\n\tmov\tr3, #0x6\n\tldrsh\tr4, [r0, r3]\n\tmov\tr5, #0x4\n\tldrsh\tr3, [r1, r5]\n\tmul\tr3, r3, r4\n\tmov\tr6, #0x0\n\tldrsh\tr5, [r0, r6]\n\tmov\tr6, #0x2\n\tldrsh\tr4, [r1, r6]\n\tmul\tr4, r4, r5\n\tadd\tr3, r3, r4\n\tmov\tr4, #0x2\n\tldrsh\tr5, [r0, r4]\n\tmov\tr6, #0x0\n\tldrsh\tr4, [r1, r6]\n\tmul\tr4, r4, r5\n\tsub\tr3, r3, r4\n\tmov\tr4, #0x4\n\tldrsh\tr5, [r0, r4]\n\tmov\tr6, #0x6\n\tldrsh\tr4, [r1, r6]\n\tmul\tr4, r4, r5\n\tadd\tr3, r3, r4\n\tasr\tr3, r3, #0xa\n\tstrh\tr3, [r2, #0x4]\n\tmov\tr3, #0x6\n\tldrsh\tr4, [r0, r3]\n\tmov\tr5, #0x6\n\tldrsh\tr3, [r1, r5]\n\tmul\tr3, r3, r4\n\tmov\tr6, #0x0\n\tldrsh\tr5, [r0, r6]\n\tmov\tr6, #0x0\n\tldrsh\tr4, [r1, r6]\n\tmul\tr4, r4, r5\n\tsub\tr3, r3, r4\n\tmov\tr4, #0x2\n\tldrsh\tr5, [r0, r4]\n\tmov\tr6, #0x2\n\tldrsh\tr4, [r1, r6]\n\tmul\tr4, r4, r5\n\tsub\tr3, r3, r4\n\tmov\tr5, #0x4\n\tldrsh\tr4, [r0, r5]\n\tmov\tr6, #0x4\n\tldrsh\tr0, [r1, r6]\n\tmul\tr0, r0, r4\n\tsub\tr3, r3, r0\n\tasr\tr3, r3, #0xa\n\tstrh\tr3, [r2, #0x6]\n\tpop\t{r4, r5, r6}\n\tpop\t{r0}\n\tbx\tr0\n.Lfe1:\n\t.size\t sa2__sub_80838CC,.Lfe1-sa2__sub_80838CC\n\n.text\n\t.align\t2, 0\nASM_INPUT\n\n# (This function ran with NO context header — the benchmark fed m2c the assembly alone.)\n\nargs=(\n  --target gba            # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function sa2__sub_80838CC # the symbol to decompile from in.s\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
         "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `sa2__sub_80838CC` — benchmark function sa3:sa2__sub_80838CC:agbcc.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# This function's decomp project — the PINNED benchmark branch (provenance base + one\n# integration commit). Not needed to run this script (inputs are embedded/vendored); to\n# rebuild the project itself:\n#   git clone --branch asmlift-benchmark https://github.com/macabeus/sa3.git sa3\n#   make -C sa3\n#   make -C sa3 asmlift-elf   # derive the symbols ELF (DWARF types-sidecar)\n# SYMBOLS: this row ran WITH the project's symbol map (names + declaration shapes derived\n# from the ELF its decomp.yaml names), vendored at apps/benchmark/dataset/real/tu/sa3/symbols.json.gz\n#   sha256 of the decompressed map JSON: d8c8ab5ff3898e5411323fd3dd7ef6929c86bb2560871febf0415e4b3261e74f\n# Set PROJECT_PATH to your BUILT checkout of the project above (clone recipe in the comments);\n# step 1 then points the scoring config at the checkout's decomp.yaml (tools.asmlift.elf) —\n# the CLI loads the same map, so this run reproduces the row's named spellings. A missing\n# checkout/ELF warns and runs map-less (output may then differ from the row).\nPROJECT_PATH='/path/to/sa3'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# --project-root grafts the checkout's tools.asmlift.elf (the symbol map) into that decomp.yaml.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target sa3:sa2__sub_80838CC:agbcc --out \"$PWD\" --project-root \"$PROJECT_PATH\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact agbcc `.s` text.\ncat > in.asm <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tsa2__sub_80838CC\n\t.type\t sa2__sub_80838CC,function\n\t.thumb_func\nsa2__sub_80838CC:\n\tpush\t{r4, r5, r6, lr}\n\tmov\tr3, #0x6\n\tldrsh\tr4, [r0, r3]\n\tmov\tr5, #0x0\n\tldrsh\tr3, [r1, r5]\n\tmul\tr3, r3, r4\n\tmov\tr6, #0x0\n\tldrsh\tr5, [r0, r6]\n\tmov\tr6, #0x6\n\tldrsh\tr4, [r1, r6]\n\tmul\tr4, r4, r5\n\tadd\tr3, r3, r4\n\tmov\tr4, #0x2\n\tldrsh\tr5, [r0, r4]\n\tmov\tr6, #0x4\n\tldrsh\tr4, [r1, r6]\n\tmul\tr4, r4, r5\n\tadd\tr3, r3, r4\n\tmov\tr4, #0x4\n\tldrsh\tr5, [r0, r4]\n\tmov\tr6, #0x2\n\tldrsh\tr4, [r1, r6]\n\tmul\tr4, r4, r5\n\tsub\tr3, r3, r4\n\tasr\tr3, r3, #0xa\n\tstrh\tr3, [r2]\n\tmov\tr3, #0x6\n\tldrsh\tr4, [r0, r3]\n\tmov\tr5, #0x2\n\tldrsh\tr3, [r1, r5]\n\tmul\tr3, r3, r4\n\tmov\tr6, #0x0\n\tldrsh\tr5, [r0, r6]\n\tmov\tr6, #0x4\n\tldrsh\tr4, [r1, r6]\n\tmul\tr4, r4, r5\n\tsub\tr3, r3, r4\n\tmov\tr4, #0x2\n\tldrsh\tr5, [r0, r4]\n\tmov\tr6, #0x6\n\tldrsh\tr4, [r1, r6]\n\tmul\tr4, r4, r5\n\tadd\tr3, r3, r4\n\tmov\tr4, #0x4\n\tldrsh\tr5, [r0, r4]\n\tmov\tr6, #0x0\n\tldrsh\tr4, [r1, r6]\n\tmul\tr4, r4, r5\n\tadd\tr3, r3, r4\n\tasr\tr3, r3, #0xa\n\tstrh\tr3, [r2, #0x2]\n\tmov\tr3, #0x6\n\tldrsh\tr4, [r0, r3]\n\tmov\tr5, #0x4\n\tldrsh\tr3, [r1, r5]\n\tmul\tr3, r3, r4\n\tmov\tr6, #0x0\n\tldrsh\tr5, [r0, r6]\n\tmov\tr6, #0x2\n\tldrsh\tr4, [r1, r6]\n\tmul\tr4, r4, r5\n\tadd\tr3, r3, r4\n\tmov\tr4, #0x2\n\tldrsh\tr5, [r0, r4]\n\tmov\tr6, #0x0\n\tldrsh\tr4, [r1, r6]\n\tmul\tr4, r4, r5\n\tsub\tr3, r3, r4\n\tmov\tr4, #0x4\n\tldrsh\tr5, [r0, r4]\n\tmov\tr6, #0x6\n\tldrsh\tr4, [r1, r6]\n\tmul\tr4, r4, r5\n\tadd\tr3, r3, r4\n\tasr\tr3, r3, #0xa\n\tstrh\tr3, [r2, #0x4]\n\tmov\tr3, #0x6\n\tldrsh\tr4, [r0, r3]\n\tmov\tr5, #0x6\n\tldrsh\tr3, [r1, r5]\n\tmul\tr3, r3, r4\n\tmov\tr6, #0x0\n\tldrsh\tr5, [r0, r6]\n\tmov\tr6, #0x0\n\tldrsh\tr4, [r1, r6]\n\tmul\tr4, r4, r5\n\tsub\tr3, r3, r4\n\tmov\tr4, #0x2\n\tldrsh\tr5, [r0, r4]\n\tmov\tr6, #0x2\n\tldrsh\tr4, [r1, r6]\n\tmul\tr4, r4, r5\n\tsub\tr3, r3, r4\n\tmov\tr5, #0x4\n\tldrsh\tr4, [r0, r5]\n\tmov\tr6, #0x4\n\tldrsh\tr0, [r1, r6]\n\tmul\tr0, r0, r4\n\tsub\tr3, r3, r0\n\tasr\tr3, r3, #0xa\n\tstrh\tr3, [r2, #0x6]\n\tpop\t{r4, r5, r6}\n\tpop\t{r0}\n\tbx\tr0\n.Lfe1:\n\t.size\t sa2__sub_80838CC,.Lfe1-sa2__sub_80838CC\n\n.text\n\t.align\t2, 0\nASM_INPUT\n\n# The prototype hints the benchmark fed asmlift (callee arities / void-ness).\ncat > proto.json <<'PROTO_INPUT'\n{\n  \"sa2__sub_80838CC\": {\n    \"returnsVoid\": true\n  }\n}\nPROTO_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\n# (real tier: candidates are scored INSIDE the project's own context — step 1 materializes the\n# row's vendored context next to target.o as ctx.i, and the generated decomp.yaml concatenates\n# it ahead of every candidate, so this scores in the same world the benchmark did)\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target agbcc          # frontend + target description (ISA, calling convention, compiler idioms)\n  --name sa2__sub_80838CC # the symbol to decompile (multi-function input selects by name)\n  --proto proto.json      # the prototype hints above (callee arities / void-ness)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
@@ -15335,8 +15323,8 @@
         "candidateLabel": "unsigned",
         "symbolsUsed": [],
         "outcome": "nonmatch",
-        "source": "void sa2__sub_808399C(u16 * a0, s16 * a1) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    v0 = *(s16 *)(a0 + 0);\n    v1 = *(s16 *)(a0 + 1);\n    v2 = *(s16 *)(a0 + 2);\n    *a0 = *(a1 + 0) * *(s16 *)(a0 + 3) + *(a1 + 3) * v0 + *(a1 + 2) * v1 - *(a1 + 1) * v2 >> 10;\n    a0[1] = *(a1 + 1) * *(s16 *)(a0 + 3) - *(a1 + 2) * v0 + *(a1 + 3) * v1 + *(a1 + 0) * v2 >> 10;\n    a0[2] = *(a1 + 2) * *(s16 *)(a0 + 3) + *(a1 + 1) * v0 - *(a1 + 0) * v1 + *(a1 + 3) * v2 >> 10;\n    a0[3] = *(a1 + 3) * *(s16 *)(a0 + 3) - *(a1 + 0) * v0 - *(a1 + 1) * v1 - *(a1 + 2) * v2 >> 10;\n    return;\n}\n",
-        "score": 38,
+        "source": "void sa2__sub_808399C(u16 * a0, s16 * a1) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    v0 = *(s16 *)(a0 + 0);\n    v1 = *(s16 *)(a0 + 1);\n    v2 = *(s16 *)(a0 + 2);\n    *a0 = *(s16 *)(a0 + 3) * *(a1 + 0) + *(a1 + 3) * v0 + *(a1 + 2) * v1 - *(a1 + 1) * v2 >> 10;\n    a0[1] = *(s16 *)(a0 + 3) * *(a1 + 1) - *(a1 + 2) * v0 + *(a1 + 3) * v1 + *(a1 + 0) * v2 >> 10;\n    a0[2] = *(s16 *)(a0 + 3) * *(a1 + 2) + *(a1 + 1) * v0 - *(a1 + 0) * v1 + *(a1 + 3) * v2 >> 10;\n    a0[3] = *(s16 *)(a0 + 3) * *(a1 + 3) - *(a1 + 0) * v0 - *(a1 + 1) * v1 - *(a1 + 2) * v2 >> 10;\n    return;\n}\n",
+        "score": 28,
         "maxScore": 89,
         "compileErrors": null,
         "breakdown": {
@@ -15344,7 +15332,7 @@
           "delete": 3,
           "replace": 0,
           "opMismatch": 0,
-          "argMismatch": 32
+          "argMismatch": 22
         },
         "quality": {
           "score": 70,
@@ -15382,15 +15370,15 @@
       },
       "gapSize": {
         "decompiler": "asmlift",
-        "score": 38,
+        "score": 28,
         "maxScore": 89,
-        "ratio": 0.42696629213483145,
+        "ratio": 0.3146067415730337,
         "kinds": {
           "insert": 3,
           "delete": 3,
           "replace": 0,
           "opMismatch": 0,
-          "argMismatch": 32
+          "argMismatch": 22
         }
       },
       "scripts": {
@@ -22992,9 +22980,9 @@
       "asmlift": {
         "decompiler": "asmlift",
         "candidateLabel": "unsigned",
-        "outcome": "nonmatch",
-        "source": "struct Elem0 { s32 field_0; u8 _pad0[12]; u16 field_16; u16 field_18; u8 _pad1[8]; };\ns32 bg_area(u32 a0) {\n    return ((struct Elem0 *)(128 << 18))[a0].field_18 * ((struct Elem0 *)(128 << 18))[a0].field_16 + ((struct Elem0 *)(128 << 18))[a0].field_0;\n}\n",
-        "score": 2,
+        "outcome": "match",
+        "source": "struct Elem0 { s32 field_0; u8 _pad0[12]; u16 field_16; u16 field_18; u8 _pad1[8]; };\ns32 bg_area(u32 a0) {\n    return ((struct Elem0 *)(128 << 18))[a0].field_16 * ((struct Elem0 *)(128 << 18))[a0].field_18 + ((struct Elem0 *)(128 << 18))[a0].field_0;\n}\n",
+        "score": 0,
         "maxScore": 12,
         "compileErrors": null,
         "breakdown": {
@@ -23002,7 +22990,7 @@
           "delete": 0,
           "replace": 0,
           "opMismatch": 0,
-          "argMismatch": 2
+          "argMismatch": 0
         },
         "quality": {
           "score": 100,
@@ -23038,19 +23026,7 @@
           "<tmp>/cand.c.pp.c:7: invalid type argument of `->'"
         ]
       },
-      "gapSize": {
-        "decompiler": "asmlift",
-        "score": 2,
-        "maxScore": 12,
-        "ratio": 0.16666666666666666,
-        "kinds": {
-          "insert": 0,
-          "delete": 0,
-          "replace": 0,
-          "opMismatch": 0,
-          "argMismatch": 2
-        }
-      },
+      "gapSize": null,
       "scripts": {
         "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `bg_area` — benchmark function synthetic:bg_area:agbcc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The exact agbcc `.s` text the benchmark fed m2c, verbatim.\ncat > in.s <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tbg_area\n\t.type\t bg_area,function\n\t.thumb_func\nbg_area:\n\tlsl\tr1, r0, #0x3\n\tsub\tr1, r1, r0\n\tlsl\tr1, r1, #0x2\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x12\n\tadd\tr1, r1, r0\n\tldrh\tr2, [r1, #0x10]\n\tldrh\tr0, [r1, #0x12]\n\tmul\tr0, r0, r2\n\tldr\tr1, [r1]\n\tadd\tr0, r0, r1\n\tbx\tlr\n.Lfe1:\n\t.size\t bg_area,.Lfe1-bg_area\nASM_INPUT\n\n# The exact context header the benchmark passed via --context — prototypes only\n# (no struct/global layouts: the benchmark measures cold recovery).\ncat > ctx.h <<'CTX_INPUT'\ns32 bg_area(s32 i);\nCTX_INPUT\n\nargs=(\n  --target gba            # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function bg_area      # the symbol to decompile from in.s\n  --context ctx.h         # the C context header above (typedefs + prototypes)\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
         "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `bg_area` — benchmark function synthetic:bg_area:agbcc.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:bg_area:agbcc --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact agbcc `.s` text.\ncat > in.asm <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tbg_area\n\t.type\t bg_area,function\n\t.thumb_func\nbg_area:\n\tlsl\tr1, r0, #0x3\n\tsub\tr1, r1, r0\n\tlsl\tr1, r1, #0x2\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x12\n\tadd\tr1, r1, r0\n\tldrh\tr2, [r1, #0x10]\n\tldrh\tr0, [r1, #0x12]\n\tmul\tr0, r0, r2\n\tldr\tr1, [r1]\n\tadd\tr0, r0, r1\n\tbx\tlr\n.Lfe1:\n\t.size\t bg_area,.Lfe1-bg_area\nASM_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target agbcc          # frontend + target description (ISA, calling convention, compiler idioms)\n  --name bg_area          # the symbol to decompile (multi-function input selects by name)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
@@ -23145,10 +23121,10 @@
       "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    d  .text\t00000040 .text\n00000000 g     F .text\t00000034 bg_area\n\n\nContents of section .text:\n 0000 000418c0 00641823 00031880 3c018020  .....d.#....<.. \n 0010 00611821 946e0010 946f0012 8c790000  .a.!.n...o...y..\n 0020 01cf0019 0000c012 03381021 03e00008  .........8.!....\n 0030 00000000 00000000 00000000 00000000  ................\nContents of section .options:\n 0000 01200000 00000000 8300c01e 00000000  . ..............\n 0010 00000000 00000000 00000000 00007ff0  ................\n 0020 07100000 00000000 00000000 00000000  ................\n 0030 08100000 00000000 00000000 00000000  ................\nContents of section .reginfo:\n 0000 8300c01e 00000000 00000000 00000000  ................\n 0010 00000000 00007ff0                    ........        \nContents of section .mdebug:\n 0000 7009070a 0000000d 00000004 000001a8  p...............\n 0010 00000005 000002ec 00000001 000001ac  ................\n 0020 00000004 000001e0 00000000 00000000  ................\n 0030 00000011 00000210 00000038 00000254  ...........8...T\n 0040 00000008 0000028c 00000001 00000294  ................\n 0050 00000000 00000000 00000001 000002dc  ................\n 0060 08030000 00000000 00000001 00000000  ................\n 0070 00000000 00000000 ffffffff 00000000  ................\n 0080 00000000 00000000 001d001f 00000004  ................\n 0090 00000004 00000000 00000001 00000000  ................\n 00a0 2c200004 0000002e 00000000 1820000f  , ........... ..\n 00b0 0000002e 00000034 20200001 00000001  .......4  ......\n 00c0 00000000 20200000 02000000 03000000  ....  ..........\n 00d0 04000000 05000000 06000000 07000000  ................\n 00e0 08000000 09000000 20000000 21000000  ........ ...!...\n 00f0 0a000000 0b000000 0b000000 1a000000  ................\n 0100 00000000 00000003 06000000 002f746d  ............./tm\n 0110 702f6173 6d6c6966 742d6d69 70732d72  p/asmlift-mips-r\n 0120 65662d31 32393534 65623861 32663931  ef-12954eb8a2f91\n 0130 3330632f 7265662e 63006267 5f617265  30c/ref.c.bg_are\n 0140 61000000 62675f61 72656100 00000000  a...bg_area.....\n 0150 00000001 00000000 00000036 00000000  ...........6....\n 0160 00000004 00000000 0000000d 00000000  ................\n 0170 00000000 00000001 00000000 00000011  ................\n 0180 00000000 00000000 01800000 00000000  ................\n 0190 00000002 00000000 00000000 00000000  ................\n 01a0 18200001 00000000 00000000 00000000  . ..............\n 01b0 00000000 00000000 00000000 7fffffff  ................\n 01c0 00000000 00000000 00000002           ............    \n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned",
-        "outcome": "nonmatch",
-        "source": "struct Elem0 { s32 field_0; u8 _pad0[12]; u16 field_16; u16 field_18; u8 _pad1[8]; };\ns32 bg_area(u32 a0) {\n    return ((struct Elem0 *)-2145386496)[a0].field_0 + ((struct Elem0 *)-2145386496)[a0].field_16 * ((struct Elem0 *)-2145386496)[a0].field_18;\n}\n",
-        "score": 3,
+        "candidateLabel": "unsigned/mulfirst",
+        "outcome": "match",
+        "source": "struct Elem0 { s32 field_0; u8 _pad0[12]; u16 field_16; u16 field_18; u8 _pad1[8]; };\ns32 bg_area(u32 a0) {\n    return ((struct Elem0 *)-2145386496)[a0].field_16 * ((struct Elem0 *)-2145386496)[a0].field_18 + ((struct Elem0 *)-2145386496)[a0].field_0;\n}\n",
+        "score": 0,
         "maxScore": 13,
         "compileErrors": null,
         "breakdown": {
@@ -23156,7 +23132,7 @@
           "delete": 0,
           "replace": 0,
           "opMismatch": 0,
-          "argMismatch": 3
+          "argMismatch": 0
         },
         "quality": {
           "score": 100,
@@ -23188,19 +23164,7 @@
           "cfe: Error: <tmp>/cand.c, line 8: Selector requires struct/union pointer as left hand side"
         ]
       },
-      "gapSize": {
-        "decompiler": "asmlift",
-        "score": 3,
-        "maxScore": 13,
-        "ratio": 0.23076923076923078,
-        "kinds": {
-          "insert": 0,
-          "delete": 0,
-          "replace": 0,
-          "opMismatch": 0,
-          "argMismatch": 3
-        }
-      },
+      "gapSize": null,
       "scripts": {
         "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `bg_area` — benchmark function synthetic:bg_area:ido7.1.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The benchmark's objdump→GNU-as normalization of this function's disassembly (m2c cannot\n# read raw objdump), including the jump-table/const data sections recovered from the target\n# object — the exact text the benchmark fed m2c.\ncat > in.s <<'ASM_INPUT'\nglabel bg_area\n    sll\t$v1, $a0, 0x3\n    subu\t$v1, $v1, $a0\n    sll\t$v1, $v1, 0x2\n    lui\t$at, 0x8020\n    addu\t$v1, $v1, $at\n    lhu\t$t6, 16($v1)\n    lhu\t$t7, 18($v1)\n    lw\t$t9, 0($v1)\n    multu\t$t6, $t7\n    mflo\t$t8\n    addu\t$v0, $t9, $t8\n    jr\t$ra\n    nop\nASM_INPUT\n\n# The exact context header the benchmark passed via --context — prototypes only\n# (no struct/global layouts: the benchmark measures cold recovery).\ncat > ctx.h <<'CTX_INPUT'\ns32 bg_area(s32 i);\nCTX_INPUT\n\nargs=(\n  --target mips-ido-c     # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function bg_area      # the symbol to decompile from in.s\n  --context ctx.h         # the C context header above (typedefs + prototypes)\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
         "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `bg_area` — benchmark function synthetic:bg_area:ido7.1.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:bg_area:ido7.1 --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact `objdump -d --no-show-raw-insn` text.\ncat > in.asm <<'ASM_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <bg_area>:\n   0:\tsll\tv1,a0,0x3\n   4:\tsubu\tv1,v1,a0\n   8:\tsll\tv1,v1,0x2\n   c:\tlui\tat,0x8020\n  10:\taddu\tv1,v1,at\n  14:\tlhu\tt6,16(v1)\n  18:\tlhu\tt7,18(v1)\n  1c:\tlw\tt9,0(v1)\n  20:\tmultu\tt6,t7\n  24:\tmflo\tt8\n  28:\taddu\tv0,t9,t8\n  2c:\tjr\tra\n  30:\tnop\n\t...\nASM_INPUT\n\n# The target object's objdump -s -r -t dump — the data sections (jump tables, anonymous\n# constants) the text-only disassembly lacks; the benchmark recovered them from the object.\ncat > dump.txt <<'DUMP_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    d  .text\t00000040 .text\n00000000 g     F .text\t00000034 bg_area\n\n\nContents of section .text:\n 0000 000418c0 00641823 00031880 3c018020  .....d.#....<.. \n 0010 00611821 946e0010 946f0012 8c790000  .a.!.n...o...y..\n 0020 01cf0019 0000c012 03381021 03e00008  .........8.!....\n 0030 00000000 00000000 00000000 00000000  ................\nContents of section .options:\n 0000 01200000 00000000 8300c01e 00000000  . ..............\n 0010 00000000 00000000 00000000 00007ff0  ................\n 0020 07100000 00000000 00000000 00000000  ................\n 0030 08100000 00000000 00000000 00000000  ................\nContents of section .reginfo:\n 0000 8300c01e 00000000 00000000 00000000  ................\n 0010 00000000 00007ff0                    ........        \nContents of section .mdebug:\n 0000 7009070a 0000000d 00000004 000001a8  p...............\n 0010 00000005 000002ec 00000001 000001ac  ................\n 0020 00000004 000001e0 00000000 00000000  ................\n 0030 00000011 00000210 00000038 00000254  ...........8...T\n 0040 00000008 0000028c 00000001 00000294  ................\n 0050 00000000 00000000 00000001 000002dc  ................\n 0060 08030000 00000000 00000001 00000000  ................\n 0070 00000000 00000000 ffffffff 00000000  ................\n 0080 00000000 00000000 001d001f 00000004  ................\n 0090 00000004 00000000 00000001 00000000  ................\n 00a0 2c200004 0000002e 00000000 1820000f  , ........... ..\n 00b0 0000002e 00000034 20200001 00000001  .......4  ......\n 00c0 00000000 20200000 02000000 03000000  ....  ..........\n 00d0 04000000 05000000 06000000 07000000  ................\n 00e0 08000000 09000000 20000000 21000000  ........ ...!...\n 00f0 0a000000 0b000000 0b000000 1a000000  ................\n 0100 00000000 00000003 06000000 002f746d  ............./tm\n 0110 702f6173 6d6c6966 742d6d69 70732d72  p/asmlift-mips-r\n 0120 65662d31 32393534 65623861 32663931  ef-12954eb8a2f91\n 0130 3330632f 7265662e 63006267 5f617265  30c/ref.c.bg_are\n 0140 61000000 62675f61 72656100 00000000  a...bg_area.....\n 0150 00000001 00000000 00000036 00000000  ...........6....\n 0160 00000004 00000000 0000000d 00000000  ................\n 0170 00000000 00000001 00000000 00000011  ................\n 0180 00000000 00000000 01800000 00000000  ................\n 0190 00000002 00000000 00000000 00000000  ................\n 01a0 18200001 00000000 00000000 00000000  . ..............\n 01b0 00000000 00000000 00000000 7fffffff  ................\n 01c0 00000000 00000000 00000002           ............\nDUMP_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target ido7.1         # frontend + target description (ISA, calling convention, compiler idioms)\n  --name bg_area          # the symbol to decompile (multi-function input selects by name)\n  --asm-data dump.txt     # the data sections above (jump-table/const recovery)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
@@ -23226,25 +23190,28 @@
       "asmDump": "\ntarget.o:     file format elf32-powerpc\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 ref.c\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .mwcats.text\t00000000 .mwcats.text\n00000000 g     F .text\t00000020 bg_area\n\n\nRELOCATION RECORDS FOR [.mwcats.text]:\nOFFSET   TYPE              VALUE\n00000004 R_PPC_ADDR32      bg_area\n\n\nContents of section .text:\n 0000 1c63001c 3c838020 a0640010 a0040012  .c..<.. .d......\n 0010 80840000 7c0301d6 7c640214 4e800020  ....|...|d..N.. \nContents of section .mwcats.text:\n 0000 02000020 00000000                    ... ....        \nContents of section .comment:\n 0000 436f6465 57617272 696f720a 02040201  CodeWarrior.....\n 0010 01020016 2c000000 00000000 00000000  ....,...........\n 0020 00000000 00000000 00000000 00000000  ................\n 0030 00000000 00000001 00000000 00000004  ................\n 0040 00000000 00000004 00000000 00000004  ................\n 0050 00000000                             ....            \n",
       "asmlift": {
         "decompiler": "asmlift",
-        "outcome": "declined",
-        "source": "struct Struct0 { s32 field_0; u8 _pad0[12]; u16 field_16; u16 field_18; };\ns32 bg_area(s32 a0) {\n    return ((struct Struct0 *)ASMLIFT_ERROR(\"unmodelled instruction 'addis'\", a0 * 28))->field_0 + ((struct Struct0 *)ASMLIFT_ERROR(\"unmodelled instruction 'addis'\", a0 * 28))->field_16 * ((struct Struct0 *)ASMLIFT_ERROR(\"unmodelled instruction 'addis'\", a0 * 28))->field_18;\n}\n",
-        "score": null,
-        "maxScore": null,
+        "candidateLabel": "unsigned",
+        "outcome": "match",
+        "source": "struct Elem0 { s32 field_0; u8 _pad0[12]; u16 field_16; u16 field_18; u8 _pad1[8]; };\ns32 bg_area(u32 a0) {\n    return ((struct Elem0 *)-2145386496)[a0].field_0 + ((struct Elem0 *)-2145386496)[a0].field_16 * ((struct Elem0 *)-2145386496)[a0].field_18;\n}\n",
+        "score": 0,
+        "maxScore": 8,
         "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 0
+        },
         "quality": {
-          "score": 64,
+          "score": 100,
           "lines": 4,
           "gotos": 0,
           "casts": 0,
-          "unkGlue": 3,
+          "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
-        },
-        "errorMarkers": [
-          "structure: unmodelled instruction 'addis'",
-          "structure: unmodelled instruction 'addis'",
-          "structure: unmodelled instruction 'addis'"
-        ]
+        }
       },
       "m2c": {
         "decompiler": "m2c",
@@ -23295,17 +23262,17 @@
       "asmlift": {
         "decompiler": "asmlift",
         "candidateLabel": "unsigned",
-        "outcome": "nonmatch",
-        "source": "struct Elem0 { s32 field_0; u8 _pad0[12]; u16 field_16; u8 _pad1[10]; };\nstruct Elem1 { u8 _pad0[18]; u16 field_18; u8 _pad1[262124]; };\ns32 bg_mix(u32 a0) {\n    return ((struct Elem1 *)56)[128].field_18 * ((struct Elem0 *)(128 << 18))[a0].field_16 + ((struct Elem0 *)(128 << 18))[a0].field_0;\n}\n",
-        "score": 7,
-        "maxScore": 17,
+        "outcome": "match",
+        "source": "struct Elem0 { s32 field_0; u8 _pad0[12]; u16 field_16; u8 _pad1[10]; };\nstruct Elem1 { u8 _pad0[18]; u16 field_18; u8 _pad1[262124]; };\ns32 bg_mix(u32 a0) {\n    return ((struct Elem0 *)(128 << 18))[a0].field_16 * ((struct Elem1 *)56)[128].field_18 + ((struct Elem0 *)(128 << 18))[a0].field_0;\n}\n",
+        "score": 0,
+        "maxScore": 13,
         "compileErrors": null,
         "breakdown": {
-          "insert": 4,
-          "delete": 2,
+          "insert": 0,
+          "delete": 0,
           "replace": 0,
           "opMismatch": 0,
-          "argMismatch": 1
+          "argMismatch": 0
         },
         "quality": {
           "score": 100,
@@ -23337,19 +23304,7 @@
           "<tmp>/cand.c.pp.c:5: invalid type argument of `->'"
         ]
       },
-      "gapSize": {
-        "decompiler": "asmlift",
-        "score": 7,
-        "maxScore": 17,
-        "ratio": 0.4117647058823529,
-        "kinds": {
-          "insert": 4,
-          "delete": 2,
-          "replace": 0,
-          "opMismatch": 0,
-          "argMismatch": 1
-        }
-      },
+      "gapSize": null,
       "scripts": {
         "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `bg_mix` — benchmark function synthetic:bg_mix:agbcc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The exact agbcc `.s` text the benchmark fed m2c, verbatim.\ncat > in.s <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tbg_mix\n\t.type\t bg_mix,function\n\t.thumb_func\nbg_mix:\n\tlsl\tr1, r0, #0x3\n\tsub\tr1, r1, r0\n\tlsl\tr1, r1, #0x2\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x12\n\tadd\tr1, r1, r0\n\tldrh\tr2, [r1, #0x10]\n\tadd\tr0, r0, #0x38\n\tldrh\tr0, [r0, #0x12]\n\tmul\tr0, r0, r2\n\tldr\tr1, [r1]\n\tadd\tr0, r0, r1\n\tbx\tlr\n.Lfe1:\n\t.size\t bg_mix,.Lfe1-bg_mix\nASM_INPUT\n\n# The exact context header the benchmark passed via --context — prototypes only\n# (no struct/global layouts: the benchmark measures cold recovery).\ncat > ctx.h <<'CTX_INPUT'\ns32 bg_mix(s32 i);\nCTX_INPUT\n\nargs=(\n  --target gba            # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function bg_mix       # the symbol to decompile from in.s\n  --context ctx.h         # the C context header above (typedefs + prototypes)\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
         "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `bg_mix` — benchmark function synthetic:bg_mix:agbcc.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:bg_mix:agbcc --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact agbcc `.s` text.\ncat > in.asm <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tbg_mix\n\t.type\t bg_mix,function\n\t.thumb_func\nbg_mix:\n\tlsl\tr1, r0, #0x3\n\tsub\tr1, r1, r0\n\tlsl\tr1, r1, #0x2\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x12\n\tadd\tr1, r1, r0\n\tldrh\tr2, [r1, #0x10]\n\tadd\tr0, r0, #0x38\n\tldrh\tr0, [r0, #0x12]\n\tmul\tr0, r0, r2\n\tldr\tr1, [r1]\n\tadd\tr0, r0, r1\n\tbx\tlr\n.Lfe1:\n\t.size\t bg_mix,.Lfe1-bg_mix\nASM_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target agbcc          # frontend + target description (ISA, calling convention, compiler idioms)\n  --name bg_mix           # the symbol to decompile (multi-function input selects by name)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
@@ -23446,8 +23401,8 @@
         "decompiler": "asmlift",
         "candidateLabel": "unsigned",
         "outcome": "nonmatch",
-        "source": "struct Elem0 { s32 field_0; u8 _pad0[12]; u16 field_16; u8 _pad1[10]; };\ns32 bg_mix(u32 a0) {\n    return ((struct Elem0 *)-2145386496)[a0].field_0 + ((struct Elem0 *)-2145386496)[a0].field_16 * ((u16 *)-2145386496)[37];\n}\n",
-        "score": 5,
+        "source": "struct Elem0 { s32 field_0; u8 _pad0[12]; u16 field_16; u8 _pad1[10]; };\ns32 bg_mix(u32 a0) {\n    return ((struct Elem0 *)-2145386496)[a0].field_0 + ((u16 *)-2145386496)[37] * ((struct Elem0 *)-2145386496)[a0].field_16;\n}\n",
+        "score": 1,
         "maxScore": 14,
         "compileErrors": null,
         "breakdown": {
@@ -23455,7 +23410,7 @@
           "delete": 0,
           "replace": 0,
           "opMismatch": 0,
-          "argMismatch": 5
+          "argMismatch": 1
         },
         "quality": {
           "score": 100,
@@ -23489,15 +23444,15 @@
       },
       "gapSize": {
         "decompiler": "asmlift",
-        "score": 5,
+        "score": 1,
         "maxScore": 14,
-        "ratio": 0.35714285714285715,
+        "ratio": 0.07142857142857142,
         "kinds": {
           "insert": 0,
           "delete": 0,
           "replace": 0,
           "opMismatch": 0,
-          "argMismatch": 5
+          "argMismatch": 1
         }
       },
       "scripts": {
@@ -23525,24 +23480,28 @@
       "asmDump": "\ntarget.o:     file format elf32-powerpc\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 ref.c\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .mwcats.text\t00000000 .mwcats.text\n00000000 g     F .text\t00000024 bg_mix\n\n\nRELOCATION RECORDS FOR [.mwcats.text]:\nOFFSET   TYPE              VALUE\n00000004 R_PPC_ADDR32      bg_mix\n\n\nContents of section .text:\n 0000 1c83001c 3c608020 a063004a 3c848020  ....<`. .c.J<.. \n 0010 a0040010 80840000 7c0301d6 7c640214  ........|...|d..\n 0020 4e800020                             N..             \nContents of section .mwcats.text:\n 0000 02000024 00000000                    ...$....        \nContents of section .comment:\n 0000 436f6465 57617272 696f720a 02040201  CodeWarrior.....\n 0010 01020016 2c000000 00000000 00000000  ....,...........\n 0020 00000000 00000000 00000000 00000000  ................\n 0030 00000000 00000001 00000000 00000004  ................\n 0040 00000000 00000004 00000000 00000004  ................\n 0050 00000000                             ....            \n",
       "asmlift": {
         "decompiler": "asmlift",
-        "outcome": "declined",
-        "source": "struct Struct0 { s32 field_0; u8 _pad0[12]; u16 field_16; };\ns32 bg_mix(s32 a0) {\n    s32 v0;\n    v0 = ((u16 *)-2145386496)[37];\n    return ((struct Struct0 *)ASMLIFT_ERROR(\"unmodelled instruction 'addis'\", a0 * 28))->field_0 + v0 * ((struct Struct0 *)ASMLIFT_ERROR(\"unmodelled instruction 'addis'\", a0 * 28))->field_16;\n}\n",
-        "score": null,
-        "maxScore": null,
+        "candidateLabel": "unsigned",
+        "outcome": "match",
+        "source": "struct Elem0 { s32 field_0; u8 _pad0[12]; u16 field_16; u8 _pad1[10]; };\ns32 bg_mix(u32 a0) {\n    return ((struct Elem0 *)-2145386496)[a0].field_0 + ((u16 *)-2145386496)[37] * ((struct Elem0 *)-2145386496)[a0].field_16;\n}\n",
+        "score": 0,
+        "maxScore": 9,
         "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 0
+        },
         "quality": {
-          "score": 76,
-          "lines": 6,
+          "score": 100,
+          "lines": 4,
           "gotos": 0,
           "casts": 1,
-          "unkGlue": 2,
+          "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
-        },
-        "errorMarkers": [
-          "structure: unmodelled instruction 'addis'",
-          "structure: unmodelled instruction 'addis'"
-        ]
+        }
       },
       "m2c": {
         "decompiler": "m2c",
@@ -35365,22 +35324,22 @@
       "ctx": "s32 hipress(u8 *p, s32 n);",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned/inplace",
+        "candidateLabel": "unsigned/mulfirst",
         "outcome": "nonmatch",
-        "source": "s32 hipress(u8 * a0, u32 a1, u32 a2) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    s32 v5;\n    s32 v6;\n    s32 v7;\n    s32 v8;\n    s32 v9;\n    s32 v10;\n    s32 v11;\n    s32 v12;\n    s32 v13;\n    s32 v14;\n    s32 t0;\n    s32 t1;\n    s32 t2;\n    v0 = a0[2];\n    v1 = a0[3];\n    v2 = a0[4];\n    v3 = a0[5];\n    v4 = a0[6];\n    v5 = a0[7];\n    v6 = a0[8];\n    v14 = a1;\n    v9 = v0;\n    v7 = v1;\n    v8 = v2;\n    v10 = v3;\n    v11 = v4;\n    v12 = v5;\n    v13 = v6;\n    while (v14 != 0) {\n        v14 = v14 + -1;\n        t0 = v9;\n        v9 = v9 + v7 * v8;\n        t1 = v7;\n        v7 = v7 + v10 * v11;\n        v11 = v11 + (t1 + v10 * v11);\n        t2 = v8;\n        v8 = v8 + v12 * v13;\n        v12 = v12 + (t2 + v12 * v13);\n        v13 = v13 + (v10 + (t0 + t1 * t2));\n        v10 = v10 + (t0 + t1 * t2);\n    }\n    v0 = v9;\n    v1 = v7;\n    v2 = v8;\n    v3 = v10;\n    v4 = v11;\n    v5 = v12;\n    v6 = v13;\n    return v0 + a0[1] + v1 + v2 + v3 + v4 + v5 + v6;\n}\n",
-        "score": 80,
-        "maxScore": 86,
+        "source": "s32 hipress(u8 * a0, u32 a1, u32 a2) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    s32 v5;\n    s32 v6;\n    s32 v7;\n    s32 t0;\n    s32 t1;\n    s32 t2;\n    v7 = a1;\n    v2 = a0[2];\n    v0 = a0[3];\n    v1 = a0[4];\n    v3 = a0[5];\n    v4 = a0[6];\n    v5 = a0[7];\n    v6 = a0[8];\n    while (v7 != 0) {\n        v7 = v7 + -1;\n        t0 = v2;\n        v2 = v0 * v1 + v2;\n        t1 = v0;\n        v0 = v3 * v4 + v0;\n        v4 = v4 + (v3 * v4 + t1);\n        t2 = v1;\n        v1 = v5 * v6 + v1;\n        v5 = v5 + (v5 * v6 + t2);\n        v6 = v6 + (v3 + (t1 * t2 + t0));\n        v3 = v3 + (t1 * t2 + t0);\n    }\n    return v2 + a0[1] + v0 + v1 + v3 + v4 + v5 + v6;\n}\n",
+        "score": 79,
+        "maxScore": 85,
         "compileErrors": null,
         "breakdown": {
-          "insert": 39,
+          "insert": 38,
           "delete": 14,
-          "replace": 4,
+          "replace": 3,
           "opMismatch": 1,
-          "argMismatch": 22
+          "argMismatch": 23
         },
         "quality": {
           "score": 100,
-          "lines": 56,
+          "lines": 35,
           "gotos": 0,
           "casts": 0,
           "unkGlue": 0,
@@ -35414,15 +35373,15 @@
       },
       "gapSize": {
         "decompiler": "asmlift",
-        "score": 80,
-        "maxScore": 86,
-        "ratio": 0.9302325581395349,
+        "score": 79,
+        "maxScore": 85,
+        "ratio": 0.9294117647058824,
         "kinds": {
-          "insert": 39,
+          "insert": 38,
           "delete": 14,
-          "replace": 4,
+          "replace": 3,
           "opMismatch": 1,
-          "argMismatch": 22
+          "argMismatch": 23
         }
       },
       "scripts": {
@@ -35451,10 +35410,10 @@
       "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /host-tmp/asmlift-mgcc-ref-4afa2b4e6df72815/ref.c\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t000000a4 hipress\n\n\nContents of section .text:\n 0000 27bdfff8 908a0002 90870003 90880004  '...............\n 0010 90890005 908b0006 908c0007 908d0008  ................\n 0020 908e0001 18a00016 00003021 00000000  ..........0!....\n 0030 00e80018 00001012 00000000 00000000  ................\n 0040 012b0018 00001812 00000000 00000000  .+..............\n 0050 018d0018 00002012 24c60001 01425021  ...... .$....BP!\n 0060 00e33821 01044021 012a4821 01675821  ..8!..@!.*H!.gX!\n 0070 01886021 00c5102a 1440ffec 01a96821  ..`!...*.@....h!\n 0080 01ca1021 00471021 00481021 00491021  ...!.G.!.H.!.I.!\n 0090 004b1021 004c1021 004d1021 03e00008  .K.!.L.!.M.!....\n 00a0 27bd0008 00000000 00000000 00000000  '...............\nContents of section .reginfo:\n 0000 a0007ffc 00000000 00000000 00000000  ................\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.              \n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "signed",
+        "candidateLabel": "signed/mulfirst",
         "outcome": "nonmatch",
-        "source": "s32 hipress(u8 * a0, s32 a1) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    s32 v5;\n    s32 v6;\n    s32 v7;\n    s32 t0;\n    s32 t1;\n    s32 t2;\n    v7 = a0[2];\n    v0 = a0[3];\n    v1 = a0[4];\n    v2 = a0[5];\n    v3 = a0[6];\n    v4 = a0[7];\n    v5 = a0[8];\n    v6 = 0;\n    while (v6 < a1) {\n        v6 = v6 + 1;\n        t0 = v7;\n        v7 = v7 + v0 * v1;\n        t1 = v0;\n        v0 = v0 + v2 * v3;\n        v3 = v3 + (t1 + v2 * v3);\n        t2 = v1;\n        v1 = v1 + v4 * v5;\n        v4 = v4 + (t2 + v4 * v5);\n        v5 = v5 + (v2 + (t0 + t1 * t2));\n        v2 = v2 + (t0 + t1 * t2);\n    }\n    return a0[1] + v7 + v0 + v1 + v2 + v3 + v4 + v5;\n}\n",
-        "score": 47,
+        "source": "s32 hipress(u8 * a0, s32 a1) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    s32 v5;\n    s32 v6;\n    s32 v7;\n    s32 t0;\n    s32 t1;\n    s32 t2;\n    v7 = a0[2];\n    v0 = a0[3];\n    v1 = a0[4];\n    v2 = a0[5];\n    v3 = a0[6];\n    v4 = a0[7];\n    v5 = a0[8];\n    v6 = 0;\n    while (v6 < a1) {\n        v6 = v6 + 1;\n        t0 = v7;\n        v7 = v0 * v1 + v7;\n        t1 = v0;\n        v0 = v2 * v3 + v0;\n        v3 = v3 + (v2 * v3 + t1);\n        t2 = v1;\n        v1 = v4 * v5 + v1;\n        v4 = v4 + (v4 * v5 + t2);\n        v5 = v5 + (v2 + (t1 * t2 + t0));\n        v2 = v2 + (t1 * t2 + t0);\n    }\n    return a0[1] + v7 + v0 + v1 + v2 + v3 + v4 + v5;\n}\n",
+        "score": 45,
         "maxScore": 54,
         "compileErrors": null,
         "breakdown": {
@@ -35462,7 +35421,7 @@
           "delete": 0,
           "replace": 1,
           "opMismatch": 0,
-          "argMismatch": 33
+          "argMismatch": 31
         },
         "quality": {
           "score": 100,
@@ -35500,15 +35459,15 @@
       },
       "gapSize": {
         "decompiler": "asmlift",
-        "score": 47,
+        "score": 45,
         "maxScore": 54,
-        "ratio": 0.8703703703703703,
+        "ratio": 0.8333333333333334,
         "kinds": {
           "insert": 13,
           "delete": 0,
           "replace": 1,
           "opMismatch": 0,
-          "argMismatch": 33
+          "argMismatch": 31
         }
       },
       "scripts": {
@@ -60033,18 +59992,18 @@
       "targetAsm": "@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tuninit_spill\n\t.type\t uninit_spill,function\n\t.thumb_func\nuninit_spill:\n\tpush\t{r4, r5, r6, r7, lr}\n\tmov\tr7, sl\n\tmov\tr6, r9\n\tmov\tr5, r8\n\tpush\t{r5, r6, r7}\n\tadd\tsp, sp, #-0xc\n\tmov\tr6, #0x0\n\tmov\tsl, r6\n\tcmp\tr0, #0\n\tbeq\t.L4\t@cond_branch\n\tcmp\tr0, #0x1\n\tbeq\t.L5\t@cond_branch\n\tb\t.L3\n.L4:\n\tldr\tr7, [r1]\n\tmov\tip, r7\n\tldr\tr0, [r1, #0x4]\n\tstr\tr0, [sp]\n\tldr\tr6, [r1, #0x8]\n\tstr\tr6, [sp, #0x4]\n\tldr\tr7, [r1, #0xc]\n\tmov\tr9, r7\n\tldr\tr0, [r1, #0x10]\n\tstr\tr0, [sp, #0x8]\n\tldr\tr6, [r1, #0x14]\n\tmov\tr8, r6\n\tldr\tr5, [r1, #0x18]\n\tldr\tr4, [r1, #0x1c]\n\tldr\tr2, [r1, #0x20]\n\tldr\tr3, [r1, #0x24]\n\tb\t.L3\n.L5:\n\tldr\tr7, [r1, #0x28]\n\tmov\tip, r7\n\tldr\tr0, [r1, #0x2c]\n\tstr\tr0, [sp]\n\tldr\tr6, [r1, #0x30]\n\tstr\tr6, [sp, #0x4]\n\tldr\tr7, [r1, #0x34]\n\tmov\tr9, r7\n\tldr\tr0, [r1, #0x38]\n\tstr\tr0, [sp, #0x8]\n\tldr\tr6, [r1, #0x3c]\n\tmov\tr8, r6\n\tldr\tr5, [r1, #0x40]\n\tldr\tr4, [r1, #0x44]\n\tldr\tr2, [r1, #0x48]\n\tldr\tr3, [r1, #0x4c]\n.L3:\n\tldr\tr0, [sp]\n\tldr\tr6, [sp, #0x4]\n\tmov\tr7, r0\n\tmul\tr7, r7, r6\n\tstr\tr7, [sp, #0x4]\n\tldr\tr7, [sp, #0x8]\n\tmov\tr6, r9\n\tmul\tr6, r6, r7\n\tmov\tr0, r8\n\tmul\tr0, r0, r5\n\tadd\tr5, r0, #0\n\tmul\tr4, r4, r2\n\tmov\tr2, #0x7\n.L11:\n\tldmia\tr1!, {r0}\n\tmov\tr7, ip\n\tmul\tr7, r7, r0\n\tadd\tr0, r7, #0\n\tldr\tr7, [sp, #0x4]\n\tadd\tr0, r0, r7\n\tadd\tr0, r0, r6\n\tadd\tr0, r0, r5\n\tadd\tr0, r0, r4\n\tadd\tr0, r0, r3\n\tadd\tsl, sl, r0\n\tsub\tr2, r2, #0x1\n\tcmp\tr2, #0\n\tbge\t.L11\t@cond_branch\n\tmov\tr0, sl\n\tadd\tsp, sp, #0xc\n\tpop\t{r3, r4, r5}\n\tmov\tr8, r3\n\tmov\tr9, r4\n\tmov\tsl, r5\n\tpop\t{r4, r5, r6, r7}\n\tpop\t{r1}\n\tbx\tr1\n.Lfe1:\n\t.size\t uninit_spill,.Lfe1-uninit_spill\n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned",
+        "candidateLabel": "unsigned/mulfirst",
         "outcome": "nonmatch",
-        "source": "s32 uninit_spill(u32 a0, s32 * a1, u32 a2, u32 a3, u32 a4, u32 a5, u32 a6, u32 a7, u32 a8) {\n    s32 v0;\n    s32 * v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    s32 v5;\n    s32 v6;\n    s32 v7;\n    s32 uninit_sp8;\n    s32 uninit_sp4;\n    s32 uninit_sp0;\n    switch (a0) {\n        case 0:\n            a8 = *a1;\n            v4 = a1[1];\n            v5 = a1[2];\n            a5 = a1[3];\n            v6 = a1[4];\n            a6 = a1[5];\n            v7 = a1[6];\n            a7 = a1[7];\n            a2 = a1[8];\n            a3 = a1[9];\n            break;\n        case 1:\n            a8 = a1[10];\n            v4 = a1[11];\n            v5 = a1[12];\n            a5 = a1[13];\n            v6 = a1[14];\n            a6 = a1[15];\n            v7 = a1[16];\n            a7 = a1[17];\n            a2 = a1[18];\n            a3 = a1[19];\n            break;\n        default:\n            v4 = uninit_sp0;\n            v5 = uninit_sp4;\n            v6 = uninit_sp8;\n            v7 = a6;\n    }\n    v1 = a1;\n    v2 = 0;\n    v3 = 7;\n    do {\n        v0 = *v1;\n        v1 = v1 + 1;\n        v2 = v2 + (a8 * v0 + v4 * v5 + a5 * v6 + a6 * v7 + a7 * a2 + a3);\n        v3 = v3 - 1;\n    } while (v3 >= 0);\n    return v2;\n}\n",
-        "score": 84,
-        "maxScore": 101,
+        "source": "s32 uninit_spill(u32 a0, s32 * a1, u32 a2, u32 a3, u32 a4, u32 a5, u32 a6, u32 a7, u32 a8) {\n    s32 v0;\n    s32 * v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    s32 v5;\n    s32 v6;\n    s32 v7;\n    s32 uninit_sp8;\n    s32 uninit_sp4;\n    s32 uninit_sp0;\n    switch (a0) {\n        case 0:\n            a8 = *a1;\n            v4 = a1[1];\n            v5 = a1[2];\n            a5 = a1[3];\n            v6 = a1[4];\n            a6 = a1[5];\n            v7 = a1[6];\n            a7 = a1[7];\n            a2 = a1[8];\n            a3 = a1[9];\n            break;\n        case 1:\n            a8 = a1[10];\n            v4 = a1[11];\n            v5 = a1[12];\n            a5 = a1[13];\n            v6 = a1[14];\n            a6 = a1[15];\n            v7 = a1[16];\n            a7 = a1[17];\n            a2 = a1[18];\n            a3 = a1[19];\n            break;\n        default:\n            v4 = uninit_sp0;\n            v5 = uninit_sp4;\n            v6 = uninit_sp8;\n            v7 = a6;\n    }\n    v1 = a1;\n    v2 = 0;\n    v3 = 7;\n    do {\n        v0 = *v1;\n        v1 = v1 + 1;\n        v2 = v2 + (a7 * a2 + (a6 * v7 + (a5 * v6 + (a8 * v0 + v4 * v5))) + a3);\n        v3 = v3 - 1;\n    } while (v3 >= 0);\n    return v2;\n}\n",
+        "score": 78,
+        "maxScore": 98,
         "compileErrors": null,
         "breakdown": {
-          "insert": 19,
-          "delete": 9,
-          "replace": 0,
+          "insert": 16,
+          "delete": 11,
+          "replace": 4,
           "opMismatch": 0,
-          "argMismatch": 56
+          "argMismatch": 47
         },
         "quality": {
           "score": 96,
@@ -60078,15 +60037,15 @@
       },
       "gapSize": {
         "decompiler": "asmlift",
-        "score": 84,
-        "maxScore": 101,
-        "ratio": 0.8316831683168316,
+        "score": 78,
+        "maxScore": 98,
+        "ratio": 0.7959183673469388,
         "kinds": {
-          "insert": 19,
-          "delete": 9,
-          "replace": 0,
+          "insert": 16,
+          "delete": 11,
+          "replace": 4,
           "opMismatch": 0,
-          "argMismatch": 56
+          "argMismatch": 47
         }
       },
       "scripts": {
@@ -60116,10 +60075,10 @@
       "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /host-tmp/asmlift-mgcc-ref-8e25d66c9f6fb54c/ref.c\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t000000ec uninit_spill\n\n\nRELOCATION RECORDS FOR [.text]:\nOFFSET   TYPE              VALUE\n00000014 R_MIPS_26         .text\n00000040 R_MIPS_26         .text\n\n\nContents of section .text:\n 0000 10800006 00003821 24020001 1082000e  ......8!$.......\n 0010 00000000 0800001c 00000000 8caa0000  ................\n 0020 8caf0004 8cad0008 8cae000c 8cab0010  ................\n 0030 8ca90014 8ca30018 8cac001c 8ca80020  ............... \n 0040 0800001c 8ca60024 8caa0028 8caf002c  .......$...(...,\n 0050 8cad0030 8cae0034 8cab0038 8ca9003c  ...0...4...8...<\n 0060 8ca30040 8cac0044 8ca80048 8ca6004c  ...@...D...H...L\n 0070 00000000 01ed0018 00006812 00000000  ..........h.....\n 0080 00000000 01cb0018 00005812 00000000  ..........X.....\n 0090 00000000 01230018 00004812 00001821  .....#....H....!\n 00a0 00000000 01880018 00002012 8ca20000  .......... .....\n 00b0 00000000 004a0018 00001012 24630001  .....J......$c..\n 00c0 004d1021 004b1021 00491021 00441021  .M.!.K.!.I.!.D.!\n 00d0 00461021 00e23821 28620008 1440fff3  .F.!..8!(b...@..\n 00e0 24a50004 03e00008 00e01021 00000000  $..........!....\nContents of section .reginfo:\n 0000 8000fffc 00000000 00000000 00000000  ................\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.              \n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned",
+        "candidateLabel": "unsigned/mulfirst",
         "outcome": "nonmatch",
-        "source": "s32 uninit_spill(u32 a0, u32 a1, u32 a2, u32 a3, u32 a4, u32 a5, u32 a6, u32 a7, u32 a8, u32 a9, u32 a10, s32 * a11, u32 a12) {\n    s32 v0;\n    s32 * v1;\n    s32 v2;\n    s32 v3;\n    switch (a10) {\n        case 0:\n            a9 = *a11;\n            a0 = a11[1];\n            a1 = a11[2];\n            a2 = a11[3];\n            a3 = a11[4];\n            a4 = a11[5];\n            a5 = a11[6];\n            a6 = a11[7];\n            a7 = a11[8];\n            a12 = a11[9];\n            break;\n        case 1:\n            a8 = 1;\n            a9 = a11[10];\n            a0 = a11[11];\n            a1 = a11[12];\n            a2 = a11[13];\n            a3 = a11[14];\n            a4 = a11[15];\n            a5 = a11[16];\n            a6 = a11[17];\n            a7 = a11[18];\n            a12 = a11[19];\n            break;\n        default:\n            a8 = 1;\n    }\n    v1 = a11;\n    v3 = 0;\n    v2 = 0;\n    do {\n        v0 = *v1;\n        v2 = v2 + 1;\n        v3 = v3 + (v0 * a9 + a0 * a1 + a2 * a3 + a4 * a5 + a6 * a7 + a12);\n        v1 = v1 + 1;\n    } while (v2 < 8);\n    return v3;\n}\n",
-        "score": 57,
+        "source": "s32 uninit_spill(u32 a0, u32 a1, u32 a2, u32 a3, u32 a4, u32 a5, u32 a6, u32 a7, u32 a8, u32 a9, u32 a10, s32 * a11, u32 a12) {\n    s32 v0;\n    s32 * v1;\n    s32 v2;\n    s32 v3;\n    switch (a10) {\n        case 0:\n            a9 = *a11;\n            a0 = a11[1];\n            a1 = a11[2];\n            a2 = a11[3];\n            a3 = a11[4];\n            a4 = a11[5];\n            a5 = a11[6];\n            a6 = a11[7];\n            a7 = a11[8];\n            a12 = a11[9];\n            break;\n        case 1:\n            a8 = 1;\n            a9 = a11[10];\n            a0 = a11[11];\n            a1 = a11[12];\n            a2 = a11[13];\n            a3 = a11[14];\n            a4 = a11[15];\n            a5 = a11[16];\n            a6 = a11[17];\n            a7 = a11[18];\n            a12 = a11[19];\n            break;\n        default:\n            a8 = 1;\n    }\n    v1 = a11;\n    v3 = 0;\n    v2 = 0;\n    do {\n        v0 = *v1;\n        v2 = v2 + 1;\n        v3 = v3 + (a6 * a7 + (a4 * a5 + (a2 * a3 + (v0 * a9 + a0 * a1))) + a12);\n        v1 = v1 + 1;\n    } while (v2 < 8);\n    return v3;\n}\n",
+        "score": 54,
         "maxScore": 70,
         "compileErrors": null,
         "breakdown": {
@@ -60127,7 +60086,7 @@
           "delete": 4,
           "replace": 1,
           "opMismatch": 0,
-          "argMismatch": 41
+          "argMismatch": 38
         },
         "quality": {
           "score": 96,
@@ -60161,15 +60120,15 @@
       },
       "gapSize": {
         "decompiler": "asmlift",
-        "score": 57,
+        "score": 54,
         "maxScore": 70,
-        "ratio": 0.8142857142857143,
+        "ratio": 0.7714285714285715,
         "kinds": {
           "insert": 11,
           "delete": 4,
           "replace": 1,
           "opMismatch": 0,
-          "argMismatch": 41
+          "argMismatch": 38
         }
       },
       "scripts": {

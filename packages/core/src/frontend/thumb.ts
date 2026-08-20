@@ -2346,7 +2346,15 @@ export function lift(
             if (ins.mnemonic === 'ldmia') {
               const res = mkValue(T.unk(32));
               irb.ops.push(
-                mkOp('load', { operands: [base0], results: [res], attrs: { off: 4 * i, signed: true, width: 4 } }),
+                // `listOrder: true` — this load's stream position is the LIST position, not the
+                // order the source evaluated it (structure.ts's def-order re-spelling must not
+                // trust it; the aload rebuilds in raise/arrays.ts and raise/struct-arrays.ts
+                // must carry it forward)
+                mkOp('load', {
+                  operands: [base0],
+                  results: [res],
+                  attrs: { off: 4 * i, signed: true, width: 4, listOrder: true },
+                }),
               );
               writeData(reg(r), bi, res);
             } else {

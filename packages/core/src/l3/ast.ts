@@ -354,6 +354,49 @@ export function stmtExprs(s: Stmt): Expr[] {
   }
 }
 
+/** Rebuild `s` with EVERY expression position mapped through `f` — store lvalues and loop/switch
+ *  heads included, nested statements recursively. The rewrite dual of stmtExprs/stmtChildren for
+ *  the PURE 1:1 case (basecse, mulfirst). The other levers' hand-rolled mappers have DIFFERENT
+ *  contracts, not missed migrations: reindex's is fallible (Stmt|null declines), scopebase's
+ *  recurses through its hoist-INSERTING list rewriter, regspell rewrites assign TARGETS, argbase
+ *  produces statement lists. */
+export function mapStmtExprs(s: Stmt, f: (e: Expr) => Expr): Stmt {
+  const mapS = (x: Stmt): Stmt => mapStmtExprs(x, f);
+  switch (s.k) {
+    case 'assign':
+      return { ...s, value: f(s.value) };
+    case 'store':
+      return { ...s, lval: f(s.lval), value: f(s.value) };
+    case 'exprstmt':
+      return { ...s, value: f(s.value) };
+    case 'return':
+      return s.value ? { ...s, value: f(s.value) } : s;
+    case 'if':
+      return { ...s, cond: f(s.cond), then: s.then.map(mapS), else: s.else.map(mapS) };
+    case 'while':
+    case 'dowhile':
+      return { ...s, cond: f(s.cond), body: s.body.map(mapS) };
+    case 'for':
+      return { ...s, init: mapS(s.init), cond: f(s.cond), inc: mapS(s.inc), body: s.body.map(mapS) };
+    case 'switch':
+      return {
+        ...s,
+        scrutinee: f(s.scrutinee),
+        cases: s.cases.map((c) => ({ ...c, body: c.body.map(mapS) })),
+        default: s.default?.map(mapS),
+      };
+    case 'break':
+    case 'continue':
+      return s;
+  }
+}
+
+/** Whether the tree contains a node with an EFFECT no re-ordering may move: a call, or a marker
+ *  standing in for an unmodelled instruction (annotate mode). */
+export function exprHasEffect(e: Expr): boolean {
+  return e.k === 'call' || e.k === 'marker' || exprChildren(e).some(exprHasEffect);
+}
+
 /** The statements a statement DIRECTLY contains. NOTE for document-order walks: a `for`'s
  *  init/inc are listed here while its cond is in stmtExprs — a walker visiting exprs-then-stmts
  *  sees the cond before the init. */

@@ -61,7 +61,12 @@ export function recognizeArrays(fn: Fn): number {
         b.ops[i] = mkOp('aload', {
           operands: [m.base, m.index],
           results: [res],
-          attrs: { elemSize: op.attrs.width as number, signed: op.attrs.signed as boolean },
+          // listOrder rides along: an ldmia-expanded load keeps its stream-order caveat as an aload
+          attrs: {
+            elemSize: op.attrs.width as number,
+            signed: op.attrs.signed as boolean,
+            ...(op.attrs.listOrder === true && { listOrder: true }),
+          },
         });
         replaceAllUsesWith(fn, op.results[0], res);
         count++;

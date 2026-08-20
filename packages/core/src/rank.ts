@@ -20,6 +20,7 @@ import { materializeArgBases } from './l3/argbase';
 import type { LanguageBackend, SFn } from './l3/ast';
 import { LIVEBASE_GATES, hoistReusedGlobalBases } from './l3/basecse';
 import { coalesceCandidates } from './l3/coalesce';
+import { mulFirstSums } from './l3/mulfirst';
 import { registerishSpellings } from './l3/regspell';
 import { reindexWalks } from './l3/reindex';
 import { hoistScopedBases } from './l3/scopebase';
@@ -518,6 +519,10 @@ export function enumerateCandidates(
           const created = new Set(r.locals.filter((l) => !before.has(l.name)).map((l) => l.name));
           return volatilePtrLocals(r, created);
         });
+        // `/mulfirst` — product-first commutative sums (l3/mulfirst.ts): IDO/mwcc schedule the
+        // independent operand's load above the product's mflo/mullw, so def order re-spells a
+        // product-first source as load-first. Both orders are emitted; the differ referees.
+        respell('/mulfirst', () => mulFirstSums(sfn));
         // the register-copy spelling (l3/regspell.ts): 0–3 variants (base; tail assign-back reusing
         // the dead value var; tail assign-back into a fresh var — the tail choice is allocator-
         // ambiguous, so both are ranked)

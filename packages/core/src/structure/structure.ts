@@ -40,7 +40,18 @@ import { type GlobalCell, globalCellOf, mayWriteGlobal } from '../ir/alias';
 import { Block, Fn, Op, Value, defOpMap, dominators, successorsOf } from '../ir/core';
 import { EFFECTFUL_OPS } from '../ir/opcodes';
 import { type IrType, T, scalarTypeForAccess, typeEquals } from '../ir/types';
-import { BinOp, Expr, SFn, Stmt, SwitchCase, exprChildren, gapReasonFor, mapExprChildren, negateCond } from '../l3/ast';
+import {
+  BinOp,
+  Expr,
+  SFn,
+  Stmt,
+  SwitchCase,
+  exprChildren,
+  exprHasEffect,
+  gapReasonFor,
+  mapExprChildren,
+  negateCond,
+} from '../l3/ast';
 import type { Gate } from '../l3/gates';
 import { exprCType, ptrElemBytes } from '../l3/typing';
 import { returnType } from '../raise/recover';
@@ -579,6 +590,10 @@ const ARITH_TO_BIN: Record<string, BinOp> = {
   logic_or: '||', // short-circuit connectives (raise/shortcircuit.ts)
 };
 
+// The operators whose operand order the machine does not fix — candidates for the def-order
+// re-spelling in lowerDef. `&&`/`||` are excluded: short-circuit order IS semantics.
+const COMMUTATIVE_BIN: ReadonlySet<BinOp> = new Set(['+', '*', '&', '|', '^']);
+
 // Recovered info for a self-loop header: its exit block and the per-parameter back-edge
 // arg it feeds (the value on the header→header edge). The back-edge arg is the "next"
 // value of the phi; mapping it back to the phi turns the latch test into the while test.
@@ -648,6 +663,12 @@ export interface StructureOptions {
   // body). GCC freely uses `!=`; IDO prefers `==`/`<`. A per-compiler DATA lever, not an `arch ==`
   // branch — default true (permissive; the decline path keeps it sound either way).
   switchAllowsNeqCase?: boolean;
+  // Commutative load pairs re-spell in def (evaluation) order — see the swap in lowerDef. Default
+  // true; verified byte-exact on agbcc and IDO. A per-compiler DATA lever declared in
+  // TargetDescription.compilerBehaviors: the first compiler whose scheduler is shown re-ordering
+  // independent loads flips it there, not in a code branch. A per-FUNCTION machine-order fallback
+  // candidate is deliberately deferred until a row demands it.
+  defOrderLoadPairs?: boolean;
   // Anchor a constant merge copy at its const op's ORIGINAL position instead of at the CFG edge:
   // `movs r9, #0` at entry ahead of a single-armed overwrite emits as a pre-initialization above
   // the `if`, not as its else-arm. A differ-refereed candidate axis (rank.ts `/defsite`), never a
@@ -725,6 +746,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     preserveDivergentBranchSense = true,
     orderArgCopiesByComputation = true,
     switchAllowsNeqCase = true,
+    defOrderLoadPairs = true,
     anchorConstCopies = false,
     littleEndian = true,
     spellBitfieldMembers = true,
@@ -1729,6 +1751,47 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     if (ARITH_TO_BIN[d.opcode]) {
       let l = e(d.operands[0]);
       let r = d.operands.length === 2 ? e(d.operands[1]) : ({ k: 'const', value: d.attrs.imm as number } as Expr);
+      // Commutative LOAD-PAIR operands re-spell in EVALUATION order. A commutative instruction's
+      // operand order is an allocator artifact (`mul r0, r0, r2` reads dst-first, so the lift's
+      // l/r is whichever load landed in the dst), but the order the compiler EVALUATED the
+      // operands is still visible: their defs' order in the instruction stream. gcc 2.9 and IDO
+      // both emit `w * h`'s loads w-first, so def order IS source order — verified byte-identical
+      // on both (the bg_area rows). Scope, one gate per way the signal fails: BOTH root defs must
+      // be same-block memory reads (a const already has its side; arithmetic defs get combined
+      // out of source order — an ldmia-fed add reads def-reordered; cross-block positions do not
+      // order evaluation), neither stamped `listOrder` (an ldmia-expanded load's own position is
+      // LIST order), both operand VALUES un-named (see below), no pointer side (load-bearing for
+      // the stride rules below), and no effect moves (call, marker).
+      if (COMMUTATIVE_BIN.has(ARITH_TO_BIN[d.opcode]) && d.operands.length === 2) {
+        const [da, db] = [defs.get(d.operands[0]), defs.get(d.operands[1])];
+        if (
+          defOrderLoadPairs &&
+          da &&
+          db &&
+          (da.opcode === 'load' || da.opcode === 'aload') &&
+          (db.opcode === 'load' || db.opcode === 'aload') &&
+          da.attrs.listOrder !== true &&
+          db.attrs.listOrder !== true &&
+          // NAMED values decline: a value that renders as a name here — a materialized def
+          // (varName), a loop-carried value in a post-loop region (activeSub) — was evaluated at
+          // its def statement, so re-ordering the reference re-orders nothing and only churns the
+          // spelling away from the machine order the allocator saw. An inlined def — a deref, a
+          // field, a bare scalar global (whose `var` node lowerDef itself mints) — evaluates at
+          // THIS site, wherever recovery spells it.
+          !varName.has(d.operands[0]) &&
+          !varName.has(d.operands[1]) &&
+          activeSub?.has(d.operands[0]) !== true &&
+          activeSub?.has(d.operands[1]) !== true &&
+          ctype(l)?.kind !== 'ptr' &&
+          ctype(r)?.kind !== 'ptr' &&
+          !exprHasEffect(l) &&
+          !exprHasEffect(r) &&
+          opBlock.get(da) === opBlock.get(db) &&
+          opIndex.get(da)! > opIndex.get(db)!
+        ) {
+          [l, r] = [r, l];
+        }
+      }
       // Pointer stride: C pointer arithmetic is ELEMENT-scaled, but the asm added a BYTE
       // constant — `addi p,4` on an `s32*` walks 1 element, yet C `p + 4` walks 4. Divide the byte
       // constant by the pointee size so the walk recompiles to the same address math.

@@ -242,7 +242,13 @@ export function recognizeStructArrays(fn: Fn): number {
           bb.ops[i] = mkOp('aload', {
             operands: [base, index],
             results: [op.results[0]],
-            attrs: { elemSize: stride, signed: op.attrs.signed as boolean, fieldOff: op.attrs.off as number },
+            // listOrder rides along: an ldmia-expanded load keeps its stream-order caveat as an aload
+            attrs: {
+              elemSize: stride,
+              signed: op.attrs.signed as boolean,
+              fieldOff: op.attrs.off as number,
+              ...(op.attrs.listOrder === true && { listOrder: true }),
+            },
           });
         } else if (op.opcode === 'store') {
           bb.ops[i] = mkOp('astore', {

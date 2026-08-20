@@ -353,6 +353,17 @@ export function lift(
   // it is exempted from the loud-fail below; an UNrecovered `bctr` still fails loud.
   const jts = asmData ? recoverPpcJumpTables(instrs, asmData) : new Map<number, PpcJT>();
   const recoveredBctr = new Set([...jts.values()].map((j) => j.bctrAddr));
+  // A data reloc on an immediate-forming instruction means objdump printed a LINK-TIME
+  // placeholder (`lis r4,0` + R_PPC_ADDR16_HA sym): the real value is the symbol's half, and
+  // lifting the 0 silently reads the wrong address — plausible-but-wrong C, the forbidden class.
+  // The jump-table idiom's own @tbl pair never reaches these guards: a recovered dispatch block
+  // is the bounds branch's replaced fall-through, pruned as unreachable before decode.
+  const relocPlaceholder = (ins: Instr): void => {
+    throw new PpcUnsupportedError(
+      `cannot lift '${name}': '${ins.mnemonic}' at 0x${ins.addr.toString(16)} carries a data relocation ` +
+        `('${ins.sym}') — the printed immediate is a link-time placeholder, not the value`,
+    );
+  };
   // TRUSTWORTHINESS: fail loud on an unmodelled control transfer rather than dropping it (which
   // would silently miscompile the control flow). CTR-counted loops and indirect branches land here.
   for (const ins of instrs) {
@@ -629,9 +640,16 @@ export function lift(
           write(d, read(s));
           break; // move register (or rD,rS,rS)
         case 'li':
+          // SDA21 address formation encodes rA=0, so objdump prints `li rD,0` + R_PPC_EMB_SDA21
+          if (ins.sym) {
+            relocPlaceholder(ins);
+          }
           write(d, constVal(parseImm(s)));
           break; // load immediate (addi rD,0,imm)
         case 'lis':
+          if (ins.sym) {
+            relocPlaceholder(ins);
+          }
           write(d, constVal((parseImm(s) << 16) >> 0));
           break; // load immediate shifted
         case 'add':
@@ -641,10 +659,24 @@ export function lift(
         // `addi r1,r1,N` is frame teardown (skip); any other addi is a real add-immediate.
         case 'addi':
         case 'addic':
+          // reloc first: a data reloc on a stack adjust is no known compiler's output — loud
+          if (ins.sym) {
+            relocPlaceholder(ins);
+          }
           if (d === 'r1') {
             break;
           }
           emitBin('add', d, read(s), constVal(parseImm(t)));
+          break;
+        // add immediate SHIFTED — the register-based `%ha` anchor: mwcc derives an absolute base
+        // from a scaled index (`addis r4,r3,-32736` = r3 + 0x80200000). The jump-table lis/addi
+        // pair recognizer is the only reloc-carrying consumer; an addis over a register is plain
+        // arithmetic, and a reloc-carrying one is a placeholder (guard above).
+        case 'addis':
+          if (ins.sym) {
+            relocPlaceholder(ins);
+          }
+          emitBin('add', d, read(s), constVal((parseImm(t) << 16) >> 0));
           break;
         case 'subf':
         case 'subfc':
@@ -697,6 +729,10 @@ export function lift(
           emitBin('or', d, read(s), read(t));
           break;
         case 'ori':
+          // `ori rD,rA,sym@l` is the other @l half-former — same placeholder hazard as addi
+          if (ins.sym) {
+            relocPlaceholder(ins);
+          }
           emitBin('or', d, read(s), constVal(parseImm(t)));
           break;
         case 'xor':

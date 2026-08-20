@@ -4,6 +4,7 @@
 // plausible-but-wrong C.
 import { describe, expect, test } from 'vitest';
 
+import type { AsmData } from '../src/frontend/asmdata';
 import { decompile } from '../src/pipeline';
 import { PPC_MWCC } from '../src/target';
 
@@ -201,4 +202,80 @@ describe('an operand-less `ret` is VOID, not an untyped s32', () => {
     expect(src).not.toContain('void mixed');
     expect(src).toContain('return 5;');
   });
+});
+
+test('addis over a register is a plain add of the shifted immediate', () => {
+  // `addis r4,r3,-32736` = r3 + 0x80200000 — mwcc's %ha anchor for an absolute base derived
+  // from a scaled index. Unmodelled, this declined the whole function loud.
+  const src = dis('anchor', '0:\taddis   r4,r3,-32736\n4:\tlwz     r3,0(r4)\n8:\tblr\n');
+  // recovery types the base `s32 *`, so 0x80200000 bytes renders as its ELEMENT count
+  expect(src).toContain('*(a0 + -536346624)');
+});
+
+test('a reloc-carrying addis/lis/addi is a link-time placeholder — declines loud, never `+ 0`', () => {
+  // objdump -r interleaves the data reloc; the printed immediate is 0. Lifting it as the value
+  // silently reads the wrong address (the classic `arr@ha` indexed-global shape).
+  const addis = '0:\taddis   r4,r3,0\n\t\t\t0: R_PPC_ADDR16_HA arr\n4:\tlwz     r3,0(r4)\n8:\tblr\n';
+  expect(() => dis('anchor_reloc', addis)).toThrow(/data relocation/);
+  const lis = '0:\tlis     r4,0\n\t\t\t0: R_PPC_ADDR16_HA gVal\n4:\tlwz     r3,0(r4)\n8:\tblr\n';
+  expect(() => dis('lis_reloc', lis)).toThrow(/data relocation/);
+});
+
+test('a recovered jump table still lifts to a switch — its reloc lis/addi never reach the guards', () => {
+  // The @tbl pair sits in the dispatch block, which a recovered JT prunes as unreachable before
+  // decode (the bounds branch's successors are replaced by the cases). This pins that the
+  // reloc-placeholder guards need no jump-table exemption.
+  const asmData: AsmData = {
+    sections: new Map([['.data', new Uint8Array(16)]]),
+    relocs: [0x20, 0x28, 0x30, 0x38].map((off, i) => ({
+      section: '.data',
+      offset: i * 4,
+      type: 'R_PPC_ADDR32',
+      sym: 'swf',
+      addend: off,
+    })),
+    symbols: new Map([
+      ['jtbl', { section: '.data', value: 0 }],
+      ['swf', { section: '.text', value: 0 }],
+    ]),
+    bigEndian: true,
+  };
+  const asm = [
+    '00000000 <swf>:',
+    '   0:\tcmplwi  r3,3',
+    '   4:\tbgt     40 <swf+0x40>',
+    '   8:\tlis     r4,0',
+    '\t\t\t8: R_PPC_ADDR16_HA jtbl',
+    '   c:\tslwi    r0,r3,2',
+    '  10:\taddi    r4,r4,0',
+    '\t\t\t10: R_PPC_ADDR16_LO jtbl',
+    '  14:\tlwzx    r0,r4,r0',
+    '  18:\tmtctr   r0',
+    '  1c:\tbctr',
+    '  20:\tli      r3,10',
+    '  24:\tblr',
+    '  28:\tli      r3,20',
+    '  2c:\tblr',
+    '  30:\tli      r3,30',
+    '  34:\tblr',
+    '  38:\tli      r3,40',
+    '  3c:\tblr',
+    '  40:\tli      r3,0',
+    '  44:\tblr',
+  ].join('\n');
+  expect(decompile('swf', asm, PPC_MWCC, { asmData }).source).toContain('switch (');
+});
+
+test('li and ori carrying a data reloc are placeholders too — decline loud', () => {
+  // SDA21 address formation encodes rA=0, printed as `li rD,0` + R_PPC_EMB_SDA21; `ori` is the
+  // other @l half-former.
+  const li = '0:\tli      r3,0\n\t\t\t0: R_PPC_EMB_SDA21 gSda\n4:\tblr\n';
+  expect(() => dis('sda', li)).toThrow(/data relocation/);
+  const ori = '0:\tori     r4,r4,0\n\t\t\t0: R_PPC_ADDR16_LO gVal\n4:\tlwz     r3,0(r4)\n8:\tblr\n';
+  expect(() => dis('orilo', ori)).toThrow(/data relocation/);
+});
+
+test('a reloc on a frame adjust (`addi r1`) is still loud — the teardown skip comes second', () => {
+  const asm = '0:\taddi    r1,r1,0\n\t\t\t0: R_PPC_ADDR16_LO gFrame\n4:\tli      r3,5\n8:\tblr\n';
+  expect(() => dis('fradj', asm)).toThrow(/data relocation/);
 });

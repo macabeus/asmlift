@@ -75,6 +75,10 @@ export interface TargetDescription {
     // body). GCC freely emits `!=`; IDO prefers `==`/`<`. Absent ⇒ true (permissive); the
     // decline path keeps recovery sound either way.
     switchAllowsNeqCase?: boolean;
+    // Commutative load pairs re-spell in def (evaluation) order (structure.ts lowerDef). Absent
+    // ⇒ true — verified byte-exact on agbcc and IDO; a compiler whose scheduler is shown
+    // re-ordering independent loads opts OUT here.
+    defOrderLoadPairs?: boolean;
   };
 }
 
