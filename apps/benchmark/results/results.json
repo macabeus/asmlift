@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generatedAt": "2026-08-20T12:06:50.359Z",
+    "generatedAt": "2026-08-20T12:42:31.178Z",
     "toolchains": [
       "ido7.1",
       "agbcc",
@@ -14,7 +14,7 @@
       "real": 240
     },
     "asmlift": {
-      "commit": "d2ce5c485577231003c87f70c6399338ab9a4607",
+      "commit": "2c2699360eb6fa376886f501dc05edbd42fa1f2f",
       "dirty": false
     },
     "m2c": {
@@ -3526,11 +3526,11 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Uhl3iV/c.c:1077: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-rS7fXl/c.c:1077: invalid operands to binary <<"
           },
           {
             "label": "unsigned/scopebase/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-TpztMM/c.c:1078: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Pc3O0C/c.c:1078: invalid operands to binary <<"
           }
         ],
         "symbolsUsed": [
@@ -4472,7 +4472,7 @@
         "droppedCandidates": [
           {
             "label": "unsigned",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-EeicwB/c.c:1076: `gBgDataPtrs' undeclared (first use in this function)"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-taoDvs/c.c:1076: `gBgDataPtrs' undeclared (first use in this function)"
           }
         ],
         "symbolsUsed": [],
@@ -5546,11 +5546,11 @@
         "droppedCandidates": [
           {
             "label": "unsigned",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-FTPCc1/c.c:1077: too many arguments to function `thunk_sub_080002A0'"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-i7S54J/c.c:1077: too many arguments to function `thunk_sub_080002A0'"
           },
           {
             "label": "unsigned/reread-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-UW80xg/c.c:1075: too many arguments to function `thunk_sub_080002A0'"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Xzvyn6/c.c:1075: too many arguments to function `thunk_sub_080002A0'"
           }
         ],
         "symbolsUsed": [],
@@ -6342,83 +6342,83 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-EGpVR3/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-QxflGY/c.c:1085: incompatible types in assignment"
           },
           {
             "label": "unsigned/coalesce-v2-v3/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-RIYbKF/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-MpT4VM/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "unsigned/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-cviNSg/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Tk3KSU/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "unsigned/defsite/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-HFdpvv/c.c:1086: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-sCMPv9/c.c:1086: incompatible types in assignment"
           },
           {
             "label": "unsigned/defsite/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Z2yMpM/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-wncpKW/c.c:1085: incompatible types in assignment"
           },
           {
             "label": "unsigned/reread-globals/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-yaB68j/c.c:1083: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-NOuUCz/c.c:1083: invalid operands to binary <<"
           },
           {
             "label": "unsigned/reread-globals/coalesce-v0-v1/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-rfoaLI/c.c:1082: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-9zq5Et/c.c:1082: invalid operands to binary <<"
           },
           {
             "label": "unsigned/reread-globals/coalesce-v0-v2/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-t6YX8r/c.c:1082: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Mm58cr/c.c:1082: invalid operands to binary <<"
           },
           {
             "label": "unsigned/defsite/reread-globals/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-r0D06U/c.c:1084: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-NEPu0x/c.c:1084: invalid operands to binary <<"
           },
           {
             "label": "unsigned/defsite/reread-globals/coalesce-v0-v2/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-3tRegf/c.c:1083: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-W1Kvtq/c.c:1083: invalid operands to binary <<"
           },
           {
             "label": "signed/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-7VpEGK/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-bs9Y55/c.c:1085: incompatible types in assignment"
           },
           {
             "label": "signed/coalesce-v2-v3/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-PoGp7j/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-sDr7Zu/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "signed/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-tccz4m/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-UKjf9r/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "signed/defsite/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-AGfrIX/c.c:1086: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-V0Bh4R/c.c:1086: incompatible types in assignment"
           },
           {
             "label": "signed/defsite/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-xPKfan/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-WHNAdd/c.c:1085: incompatible types in assignment"
           },
           {
             "label": "signed/reread-globals/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-qNyi5s/c.c:1083: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-bXZpaX/c.c:1083: invalid operands to binary <<"
           },
           {
             "label": "signed/reread-globals/coalesce-v0-v1/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-W9p7tZ/c.c:1082: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-dNYSlG/c.c:1082: invalid operands to binary <<"
           },
           {
             "label": "signed/reread-globals/coalesce-v0-v2/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-iNu7l1/c.c:1082: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-4RrxDr/c.c:1082: invalid operands to binary <<"
           },
           {
             "label": "signed/defsite/reread-globals/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-SY0zM9/c.c:1084: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-tG89Kx/c.c:1084: invalid operands to binary <<"
           },
           {
             "label": "signed/defsite/reread-globals/coalesce-v0-v2/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-pInEB4/c.c:1083: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-WJraCj/c.c:1083: invalid operands to binary <<"
           }
         ],
         "symbolsUsed": [
@@ -6524,11 +6524,11 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-BacpwN/c.c:1501: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-4qF88j/c.c:1501: incompatible types in assignment"
           },
           {
             "label": "unsigned/reread-globals/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-RuKaZC/c.c:1489: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-CBfL1X/c.c:1489: incompatible types in assignment"
           }
         ],
         "symbolsUsed": [
@@ -34768,7 +34768,7 @@
         "decompiler": "asmlift",
         "candidateLabel": "unsigned",
         "outcome": "match",
-        "source": "s32 ifand_far(u32 a0, u32 a1, s32 * a2, s32 * a3) {\n    if (a0 != 0) {\n        if (a1 != 0) {\n            *a2 = 1;\n            *a3 = 2;\n            a2[1] = 3;\n            a3[1] = 4;\n            a2[2] = 5;\n            a3[2] = 6;\n            a2[3] = 7;\n            a3[3] = 8;\n            a2[4] = 9;\n            a3[4] = 10;\n            a2[5] = 11;\n            a3[5] = 12;\n            a2[6] = 13;\n            a3[6] = 14;\n            a2[7] = 15;\n            a3[7] = 16;\n            a2[8] = 17;\n            a3[8] = 18;\n            a2[9] = 19;\n            a3[9] = 20;\n            a2[10] = 21;\n            a3[10] = 22;\n            a2[11] = 23;\n            a3[11] = 24;\n            a2[12] = 25;\n            a3[12] = 26;\n            a2[13] = 27;\n            a3[13] = 28;\n            a2[14] = 29;\n            a3[14] = 30;\n            a2[15] = 31;\n            a3[15] = 32;\n            a2[16] = 33;\n            a3[16] = 34;\n            a2[17] = 35;\n            a3[17] = 36;\n            a2[18] = 37;\n            a3[18] = 38;\n            a2[19] = 39;\n            a3[19] = 40;\n            a2[20] = 41;\n            a3[20] = 42;\n            a2[21] = 43;\n            a3[21] = 44;\n            a2[22] = 45;\n            a3[22] = 46;\n            a2[23] = 47;\n            a3[23] = 48;\n            a2[24] = 49;\n            a3[24] = 50;\n            a2[25] = 51;\n            a3[25] = 52;\n            a2[26] = 53;\n            a3[26] = 54;\n            a2[27] = 55;\n            a3[27] = 56;\n            a2[28] = 57;\n            a3[28] = 58;\n            a2[29] = 59;\n            a3[29] = 60;\n            a2[30] = 61;\n            a3[30] = 62;\n            a2[31] = 63;\n            a3[31] = 64;\n        } else {\n            *a2 = -1;\n        }\n    } else {\n        *a2 = -1;\n    }\n    return a2[1];\n}\n",
+        "source": "s32 ifand_far(u32 a0, u32 a1, s32 * a2, s32 * a3) {\n    if (a0 != 0 && a1 != 0) {\n        *a2 = 1;\n        *a3 = 2;\n        a2[1] = 3;\n        a3[1] = 4;\n        a2[2] = 5;\n        a3[2] = 6;\n        a2[3] = 7;\n        a3[3] = 8;\n        a2[4] = 9;\n        a3[4] = 10;\n        a2[5] = 11;\n        a3[5] = 12;\n        a2[6] = 13;\n        a3[6] = 14;\n        a2[7] = 15;\n        a3[7] = 16;\n        a2[8] = 17;\n        a3[8] = 18;\n        a2[9] = 19;\n        a3[9] = 20;\n        a2[10] = 21;\n        a3[10] = 22;\n        a2[11] = 23;\n        a3[11] = 24;\n        a2[12] = 25;\n        a3[12] = 26;\n        a2[13] = 27;\n        a3[13] = 28;\n        a2[14] = 29;\n        a3[14] = 30;\n        a2[15] = 31;\n        a3[15] = 32;\n        a2[16] = 33;\n        a3[16] = 34;\n        a2[17] = 35;\n        a3[17] = 36;\n        a2[18] = 37;\n        a3[18] = 38;\n        a2[19] = 39;\n        a3[19] = 40;\n        a2[20] = 41;\n        a3[20] = 42;\n        a2[21] = 43;\n        a3[21] = 44;\n        a2[22] = 45;\n        a3[22] = 46;\n        a2[23] = 47;\n        a3[23] = 48;\n        a2[24] = 49;\n        a3[24] = 50;\n        a2[25] = 51;\n        a3[25] = 52;\n        a2[26] = 53;\n        a3[26] = 54;\n        a2[27] = 55;\n        a3[27] = 56;\n        a2[28] = 57;\n        a3[28] = 58;\n        a2[29] = 59;\n        a3[29] = 60;\n        a2[30] = 61;\n        a3[30] = 62;\n        a2[31] = 63;\n        a3[31] = 64;\n    } else {\n        *a2 = -1;\n    }\n    return a2[1];\n}\n",
         "score": 0,
         "maxScore": 140,
         "compileErrors": null,
@@ -34781,7 +34781,7 @@
         },
         "quality": {
           "score": 100,
-          "lines": 75,
+          "lines": 71,
           "gotos": 0,
           "casts": 0,
           "unkGlue": 0,
@@ -34813,7 +34813,7 @@
           "<tmp>/cand.c.pp.c:13: request for member `unk4' in something not a structure or union"
         ]
       },
-      "note": "MATCHES for a reason nothing recovered: the guarded arm is far enough that the shared block sits behind a long-branch trampoline, which hides the shape from the fold that rewrites `ifand_near`. Normalising those trampolines away is a real improvement that would turn this row red — it is here to make that visible rather than silent",
+      "note": "the guarded arm is far enough that agbcc inverts the branch and puts the shared block behind a long-branch trampoline on each edge. The fold looks through them, and this orientation lands on the source's own `&&` rather than the dual `ifand_near` gets. The SCORE cannot police that: the un-folded spelling tail-duplicates the else arm and agbcc cross-jumps the copies back together, so this row read MATCH before the shape was recovered too — what the orientation is pinned by is a test, not this number",
       "gapSize": null,
       "scripts": {
         "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `ifand_far` — benchmark function synthetic:ifand_far:agbcc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The exact agbcc `.s` text the benchmark fed m2c, verbatim.\ncat > in.s <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tifand_far\n\t.type\t ifand_far,function\n\t.thumb_func\nifand_far:\n\tcmp\tr0, #0\n\tbne\t.LCB11\n\tb\t.L3\t@long jump\n.LCB11:\n\tcmp\tr1, #0\n\tbne\t.LCB13\n\tb\t.L3\t@long jump\n.LCB13:\n\tmov\tr0, #0x1\n\tstr\tr0, [r2]\n\tmov\tr0, #0x2\n\tstr\tr0, [r3]\n\tmov\tr0, #0x3\n\tstr\tr0, [r2, #0x4]\n\tmov\tr0, #0x4\n\tstr\tr0, [r3, #0x4]\n\tmov\tr0, #0x5\n\tstr\tr0, [r2, #0x8]\n\tmov\tr0, #0x6\n\tstr\tr0, [r3, #0x8]\n\tmov\tr0, #0x7\n\tstr\tr0, [r2, #0xc]\n\tmov\tr0, #0x8\n\tstr\tr0, [r3, #0xc]\n\tmov\tr0, #0x9\n\tstr\tr0, [r2, #0x10]\n\tmov\tr0, #0xa\n\tstr\tr0, [r3, #0x10]\n\tmov\tr0, #0xb\n\tstr\tr0, [r2, #0x14]\n\tmov\tr0, #0xc\n\tstr\tr0, [r3, #0x14]\n\tmov\tr0, #0xd\n\tstr\tr0, [r2, #0x18]\n\tmov\tr0, #0xe\n\tstr\tr0, [r3, #0x18]\n\tmov\tr0, #0xf\n\tstr\tr0, [r2, #0x1c]\n\tmov\tr0, #0x10\n\tstr\tr0, [r3, #0x1c]\n\tmov\tr0, #0x11\n\tstr\tr0, [r2, #0x20]\n\tmov\tr0, #0x12\n\tstr\tr0, [r3, #0x20]\n\tmov\tr0, #0x13\n\tstr\tr0, [r2, #0x24]\n\tmov\tr0, #0x14\n\tstr\tr0, [r3, #0x24]\n\tmov\tr0, #0x15\n\tstr\tr0, [r2, #0x28]\n\tmov\tr0, #0x16\n\tstr\tr0, [r3, #0x28]\n\tmov\tr0, #0x17\n\tstr\tr0, [r2, #0x2c]\n\tmov\tr0, #0x18\n\tstr\tr0, [r3, #0x2c]\n\tmov\tr0, #0x19\n\tstr\tr0, [r2, #0x30]\n\tmov\tr0, #0x1a\n\tstr\tr0, [r3, #0x30]\n\tmov\tr0, #0x1b\n\tstr\tr0, [r2, #0x34]\n\tmov\tr0, #0x1c\n\tstr\tr0, [r3, #0x34]\n\tmov\tr0, #0x1d\n\tstr\tr0, [r2, #0x38]\n\tmov\tr0, #0x1e\n\tstr\tr0, [r3, #0x38]\n\tmov\tr0, #0x1f\n\tstr\tr0, [r2, #0x3c]\n\tmov\tr0, #0x20\n\tstr\tr0, [r3, #0x3c]\n\tmov\tr0, #0x21\n\tstr\tr0, [r2, #0x40]\n\tmov\tr0, #0x22\n\tstr\tr0, [r3, #0x40]\n\tmov\tr0, #0x23\n\tstr\tr0, [r2, #0x44]\n\tmov\tr0, #0x24\n\tstr\tr0, [r3, #0x44]\n\tmov\tr0, #0x25\n\tstr\tr0, [r2, #0x48]\n\tmov\tr0, #0x26\n\tstr\tr0, [r3, #0x48]\n\tmov\tr0, #0x27\n\tstr\tr0, [r2, #0x4c]\n\tmov\tr0, #0x28\n\tstr\tr0, [r3, #0x4c]\n\tmov\tr0, #0x29\n\tstr\tr0, [r2, #0x50]\n\tmov\tr0, #0x2a\n\tstr\tr0, [r3, #0x50]\n\tmov\tr0, #0x2b\n\tstr\tr0, [r2, #0x54]\n\tmov\tr0, #0x2c\n\tstr\tr0, [r3, #0x54]\n\tmov\tr0, #0x2d\n\tstr\tr0, [r2, #0x58]\n\tmov\tr0, #0x2e\n\tstr\tr0, [r3, #0x58]\n\tmov\tr0, #0x2f\n\tstr\tr0, [r2, #0x5c]\n\tmov\tr0, #0x30\n\tstr\tr0, [r3, #0x5c]\n\tmov\tr0, #0x31\n\tstr\tr0, [r2, #0x60]\n\tmov\tr0, #0x32\n\tstr\tr0, [r3, #0x60]\n\tmov\tr0, #0x33\n\tstr\tr0, [r2, #0x64]\n\tmov\tr0, #0x34\n\tstr\tr0, [r3, #0x64]\n\tmov\tr0, #0x35\n\tstr\tr0, [r2, #0x68]\n\tmov\tr0, #0x36\n\tstr\tr0, [r3, #0x68]\n\tmov\tr0, #0x37\n\tstr\tr0, [r2, #0x6c]\n\tmov\tr0, #0x38\n\tstr\tr0, [r3, #0x6c]\n\tmov\tr0, #0x39\n\tstr\tr0, [r2, #0x70]\n\tmov\tr0, #0x3a\n\tstr\tr0, [r3, #0x70]\n\tmov\tr0, #0x3b\n\tstr\tr0, [r2, #0x74]\n\tmov\tr0, #0x3c\n\tstr\tr0, [r3, #0x74]\n\tmov\tr0, #0x3d\n\tstr\tr0, [r2, #0x78]\n\tmov\tr0, #0x3e\n\tstr\tr0, [r3, #0x78]\n\tmov\tr0, #0x3f\n\tstr\tr0, [r2, #0x7c]\n\tmov\tr0, #0x40\n\tstr\tr0, [r3, #0x7c]\n\tb\t.L4\n.L3:\n\tmov\tr0, #0x1\n\tneg\tr0, r0\n\tstr\tr0, [r2]\n.L4:\n\tldr\tr0, [r2, #0x4]\n\tbx\tlr\n.Lfe1:\n\t.size\t ifand_far,.Lfe1-ifand_far\nASM_INPUT\n\n# The exact context header the benchmark passed via --context — prototypes only\n# (no struct/global layouts: the benchmark measures cold recovery).\ncat > ctx.h <<'CTX_INPUT'\nint ifand_far(int,int,int*,int*);\nCTX_INPUT\n\nargs=(\n  --target gba            # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function ifand_far    # the symbol to decompile from in.s\n  --context ctx.h         # the C context header above (typedefs + prototypes)\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
