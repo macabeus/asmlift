@@ -19,11 +19,13 @@
 // interference graph — not the order the blocks happen to sit in. `l3/coalesce.ts` is a different
 // question: two UNRELATED locals whose spans are disjoint, which is register reuse.
 //
-// WHY THIS IS A CANDIDATE AND NOT A FIX. The copies are not the cost they look like — the compiler
-// coalesces them too, so a function's two spellings compile to the same instruction count. What
-// changes is which values share a register, and over the whole benchmark that wins one row by 3
-// points and loses none. So the merged spelling is emitted alongside the un-merged one, on the same
-// footing as the other allocator-ambiguous spellings.
+// WHY THIS IS A CANDIDATE AND NOT A FIX. Removing a copy is worth far less than it looks: the
+// compiler coalesces most of them itself, so a function's two spellings compile to nearly the same
+// code — the klonoa function this was built for drops 56 of its 74 copies and 6 of its 906
+// instructions. What actually moves the score is which values end up sharing a register, and that
+// splits per function: there the merged spelling wins by 13 points, on `mergeif` and `mergeloop`
+// the un-merged one does. Which of the two a compiler's own coalescer landed on is not derivable
+// from the naming, so both are emitted and the differ referees.
 //
 // WHEN TWO NAMES MAY BE ONE. A name denotes a set of SSA values. Merging names X and Y makes every
 // value under either read and write one variable, so it is legal exactly when no value of X is

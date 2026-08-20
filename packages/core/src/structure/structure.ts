@@ -671,9 +671,10 @@ export interface StructureOptions {
   // Merge two variables that a merge copy would join, when the values under them never interfere
   // (structure/namecoalesce.ts). Off by default; rank.ts enumerates the ON spelling as the
   // `/merge-names` axis. Which variables the compiler's own coalescer shared is not derivable from
-  // the naming, and the copies are not the cost they look like — the compiler coalesces them, so
-  // both spellings compile to the same instruction count. Over the whole benchmark the axis wins
-  // one row by 3 points and loses none, which is what a differ-refereed spelling looks like.
+  // the naming, and removing a copy is worth less than it looks — the compiler coalesces most of
+  // them itself. What moves the score is which values share a register, and that splits per
+  // function. Over the whole benchmark the axis wins one row by 3 points and loses none, which is
+  // what a differ-refereed spelling looks like.
   coalesceMergeNames?: boolean;
   // How an unresolvable VALUE degrades (a live `opaque`, an unlowered transient op, a dropped def):
   //   "strict"   (default) — the `"?"` sentinel, tripping assertResolved at the boundary (loud in

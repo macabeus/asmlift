@@ -266,9 +266,9 @@ export function enumerateCandidates(
   // never interfere (structure/namecoalesce.ts). Destroying SSA gives a merge and each arm feeding
   // it their own variable unless the naming walk happens to share one, and every arm it did not
   // share with pays a copy. Whether the source had one variable there is not derivable, and the
-  // copies are not the cost they look like — agbcc coalesces them, so a function's two spellings
-  // compile to the same instruction count, and which one scores better is per-function. So both are
-  // emitted and the differ referees.
+  // copies are worth less than they look — agbcc coalesces most of them itself, so the two spellings
+  // compile to nearly the same code and which one scores better is per-function. So both are emitted
+  // and the differ referees.
   //
   // Gated on the function HAVING a merge fed by more than one edge — the only thing the axis can
   // change. The dedup below collapses the pair wherever it changed nothing.
