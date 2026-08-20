@@ -20,14 +20,29 @@
 // for k 0), the bound → `i <op> N`, the step → `i = i + 1`. Everything else declines — the
 // function keeps only its walk spelling, and no candidate is emitted.
 //
-// MEASURED GAP (2026-07-17, benchmark survey): this v1 template fires on ZERO current nonmatch
-// rows — the real agbcc shape for `for(i=0;i<n;i++) a[i]` is a GUARDED COUNTDOWN do-while with
-// TWIN induction vars (`if (0 >= n) {...} else { p = a; k = n; do { ...*p...; p += 1; k -= 1 }
-// while (k != 0) }`, e.g. synthetic:countpos at diff 5). Re-deriving the counted `for` from that
-// form needs guard-branch merging + induction-variable unification — the v2 recognizer, a
-// candidate for the capability-ROI queue. The MECHANISM (candidates + boundary contracts +
-// differ referee) is what this module establishes; the recognizer set grows against measured
-// shapes.
+// v2 SCOPE — the GUARDED COUNTDOWN, the shape agbcc actually emits for `for(i=0;i<n;i++) a[i]`:
+//
+//     if (0 >= n) { C } else { C ⊎ { p = B; k = n }; do { BODY; p += 1; k -= 1 } while (k != 0) }
+//
+// re-spells as `C; p = B; for (i = 0; i < n; i++) BODY[p[c] → p[i + c]]`. The `for` tests at top,
+// so the guard disappears (it IS the for-condition at entry), and the skip arm C disappears with
+// it (its statements are the loop-preceding subset of the else arm, now unconditionally hoisted).
+// The walk pointers KEEP their init and lose their step — gcc folds a loop-invariant pointer
+// local into addressing, so `p = B; … p[i]` and `B[i]` compile identically, and keeping the
+// local is what lets the `/volatile` lever qualify a numeric B. Several walk pointers share the
+// one counter (`dotprod`'s a/b pair). A loop is re-spelled only when ALL hold —
+//   • the guard tests THE SAME var the counter is initialised from, against 0, in the sense that
+//     skips the loop; the do-while exit is exactly `k != 0`;
+//   • the body's contiguous TAIL is the steps — `p += 1` per walk pointer and `k -= 1` — and
+//     neither k nor any p is mentioned anywhere in the function outside the `if` statement;
+//   • the skip arm's statements equal, in order, the else arm's loop-preceding statements minus
+//     the induction inits — anything left over means the arms are not the same computation;
+//   • every deref of a walk pointer reads its own element size (a `*(u8 *)p` over an `s32 *`
+//     walk strides 4 as a walk but 1 re-indexed — the v1 stride rule, same reason);
+//   • BODY has no `break`/`continue` targeting this loop — the original steps sat in the body's
+//     tail, which a `continue` skips, but a `for`'s inc runs: the two shapes genuinely differ;
+//   • n is never assigned in the function (a moving bound has no single trip count).
+// Everything else declines — the function keeps its countdown spelling, no candidate emitted.
 import { IrType, T } from '../ir/types';
 import { Expr, SFn, Stmt, mapExprChildren, stmtExprs } from './ast';
 
@@ -123,6 +138,42 @@ function mentionsVar(e: Expr, name: string): boolean {
     return c;
   });
   return found;
+}
+
+/** Is `name` the target of any assignment, at any depth? */
+function stmtAssigns(s: Stmt, name: string): boolean {
+  if (s.k === 'assign' && s.name === name) {
+    return true;
+  }
+  const kids: Stmt[] =
+    s.k === 'if'
+      ? [...s.then, ...s.else]
+      : s.k === 'while' || s.k === 'dowhile'
+        ? s.body
+        : s.k === 'for'
+          ? [s.init, s.inc, ...s.body]
+          : s.k === 'switch'
+            ? [...s.cases.flatMap((c) => c.body), ...(s.default ?? [])]
+            : [];
+  return kids.some((x) => stmtAssigns(x, name));
+}
+
+/** A `break`/`continue` that would target the ENCLOSING loop: found at if/switch depth, but not
+ *  inside a nested loop (whose own exits target itself). */
+function hasLoopExit(stmts: Stmt[]): boolean {
+  return stmts.some((s) => {
+    switch (s.k) {
+      case 'break':
+      case 'continue':
+        return true;
+      case 'if':
+        return hasLoopExit(s.then) || hasLoopExit(s.else);
+      case 'switch':
+        return s.cases.some((c) => hasLoopExit(c.body)) || hasLoopExit(s.default ?? []);
+      default:
+        return false;
+    }
+  });
 }
 
 function stmtMentions(s: Stmt, name: string): boolean {
@@ -405,6 +456,16 @@ export function reindexWalks(sfn: SFn): SFn | null {
           retireIv();
         }
       }
+      // the guarded countdown (v2 — see the header): an `if` whose one arm is skip-copies C and
+      // whose other arm is C ⊎ inductions followed by the do-while
+      if (s.k === 'if') {
+        const r = respellGuardedCountdown(s);
+        if (r) {
+          out.push(...r);
+          fired++;
+          continue;
+        }
+      }
       // recurse into compound statements without re-spelling them
       out.push(recurse(s));
     }
@@ -430,6 +491,147 @@ export function reindexWalks(sfn: SFn): SFn | null {
         return s;
     }
   };
+
+  /** v2: `s` re-spelled as [C…, walk inits…, for], or null (decline). */
+  function respellGuardedCountdown(s: Stmt & { k: 'if' }): Stmt[] | null {
+    // which arm holds the loop, and does the guard skip it in the right sense?
+    const armWith = (arm: Stmt[]): { pre: Stmt[]; loop: Stmt & { k: 'dowhile' } } | null => {
+      const last = arm[arm.length - 1];
+      return last?.k === 'dowhile' ? { pre: arm.slice(0, -1), loop: last } : null;
+    };
+    const inElse = armWith(s.else);
+    const inThen = armWith(s.then);
+    const c = s.cond;
+    const guardSkips = (n: string, loopInElse: boolean): boolean => {
+      if (c.k !== 'bin') {
+        return false;
+      }
+      const zl = c.l.k === 'const' && c.l.value === 0 && c.r.k === 'var' && c.r.name === n;
+      const zr = c.r.k === 'const' && c.r.value === 0 && c.l.k === 'var' && c.l.name === n;
+      // loop in else ⇒ cond true skips: 0 >= n / n <= 0. Loop in then ⇒ cond true enters: 0 < n / n > 0.
+      return loopInElse ? (zl && c.op === '>=') || (zr && c.op === '<=') : (zl && c.op === '<') || (zr && c.op === '>');
+    };
+    const pick = inElse ?? inThen;
+    const skipArm = inElse ? s.then : s.else;
+    if (!pick || (inElse && inThen)) {
+      return null;
+    }
+    const { pre, loop } = pick;
+    // the do-while exit: exactly `k != 0`
+    const lc = loop.cond;
+    if (lc.k !== 'bin' || lc.op !== '!=' || lc.l.k !== 'var' || lc.r.k !== 'const' || lc.r.value !== 0) {
+      return null;
+    }
+    const k = lc.l.name;
+    // the counter's init `k = N`, N a var the guard tests
+    const kInit = pre.find((x): x is Stmt & { k: 'assign' } => x.k === 'assign' && x.name === k);
+    if (!kInit || kInit.value.k !== 'var') {
+      return null;
+    }
+    const n = kInit.value.name;
+    if (n === k || !guardSkips(n, pick === inElse)) {
+      return null;
+    }
+    if (sfn.body.some((x) => stmtAssigns(x, n))) {
+      return null; // a moving bound
+    }
+    // the body's contiguous tail: `k -= 1` and `p += 1` per walk pointer
+    const isDec = (x: Stmt): boolean =>
+      x.k === 'assign' &&
+      x.name === k &&
+      x.value.k === 'bin' &&
+      x.value.op === '-' &&
+      x.value.l.k === 'var' &&
+      x.value.l.name === k &&
+      x.value.r.k === 'const' &&
+      x.value.r.value === 1;
+    const walks: string[] = [];
+    let cut = loop.body.length;
+    let sawDec = false;
+    for (let i = loop.body.length - 1; i >= 0; i--) {
+      const x = loop.body[i];
+      const p = isUnitStep(x, ptrVars);
+      if (p !== null) {
+        walks.push(p);
+        cut = i;
+        continue;
+      }
+      if (!sawDec && isDec(x)) {
+        sawDec = true;
+        cut = i;
+        continue;
+      }
+      break;
+    }
+    if (!sawDec || walks.length === 0) {
+      return null;
+    }
+    const bodyCore = loop.body.slice(0, cut);
+    if (hasLoopExit(bodyCore)) {
+      return null;
+    }
+    // each walk pointer: an init `p = B` in pre (B a var or a numeric address), confined to the if
+    const inits = new Map<string, Stmt & { k: 'assign' }>();
+    for (const p of walks) {
+      const init = pre.find((x): x is Stmt & { k: 'assign' } => x.k === 'assign' && x.name === p);
+      const bOk =
+        init &&
+        (init.value.k === 'var' ||
+          (init.value.k === 'const' && init.value.value !== 0) ||
+          (init.value.k === 'cast' && init.value.e.k === 'const' && init.value.e.value !== 0));
+      if (!bOk || (init.value.k === 'var' && (init.value.name === p || init.value.name === k))) {
+        return null;
+      }
+      inits.set(p, init);
+    }
+    // k and every p live ONLY inside this `if` (the v1 rule, counted the same way)
+    for (const name of [k, ...walks]) {
+      if (countMentions(sfn.body, name) !== countMentions([s], name)) {
+        return null;
+      }
+    }
+    // every deref of p reads p's own element size — re-indexing must not change the stride
+    for (const p of walks) {
+      const pt = ptrVars.get(p);
+      const es = pt?.kind === 'ptr' ? (pt.to.kind === 'int' ? pt.to.width / 8 : pt.to.kind === 'ptr' ? 4 : 0) : 0;
+      if (es === 0 || !derefWidths([loop], p).every((w) => w === es)) {
+        return null;
+      }
+    }
+    // the skip arm must be, in order, exactly `pre` minus the induction inits
+    const inductionInits = new Set<Stmt>([kInit, ...inits.values()]);
+    const leftovers = pre.filter((x) => !inductionInits.has(x));
+    if (
+      skipArm.length !== leftovers.length ||
+      !skipArm.every((x, i) => JSON.stringify(x) === JSON.stringify(leftovers[i]))
+    ) {
+      return null;
+    }
+    // rewrite: each walk pointer is its OWN base (kept local, step dropped)
+    const iv = freshIv();
+    let body: Stmt[] | null = bodyCore;
+    for (const p of walks) {
+      body = body === null ? null : reindexStmts(body, { p, base: p }, iv);
+    }
+    if (body === null) {
+      retireIv();
+      return null;
+    }
+    return [
+      ...pre.filter((x) => x !== kInit),
+      {
+        k: 'for',
+        init: { k: 'assign', name: iv, value: { k: 'const', value: 0 } },
+        cond: { k: 'bin', op: '<', l: { k: 'var', name: iv }, r: { k: 'var', name: n } },
+        inc: {
+          k: 'assign',
+          name: iv,
+          value: { k: 'bin', op: '+', l: { k: 'var', name: iv }, r: { k: 'const', value: 1 } },
+        },
+        body,
+      },
+    ];
+  }
 
   function freshIv(): string {
     // collide-checked: pipeline naming is a*/v*/t*, but future naming (DWARF) may import

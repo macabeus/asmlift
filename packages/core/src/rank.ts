@@ -410,7 +410,10 @@ export function enumerateCandidates(
         // never aborts the enumeration). A dropped re-spelling loses nothing: the primary remains.
         //
         // POLICY: re-spellings derive from the BASE spelling only — levers do not compose
-        // (an /indexed + /regcopy product is deferred until a row demands it). And a lever must
+        // (an /indexed + /regcopy product is deferred until a row demands it). ONE product is
+        // sanctioned because a row demanded it: /indexed/volatile — re-indexing keeps a numeric
+        // walk base as a pointer local (l3/reindex.ts v2), and whether THAT local pointed at
+        // volatile data is the same underdetermined question /volatile answers on the primary. And a lever must
         // PRESERVE SEMANTICS by construction: the differ referees byte-exactness (a wrong candidate
         // can never fake a score-0 match), but on a NONMATCH row the best-scoring source is shown
         // to the user — a semantically-wrong re-spelling there is plausible-but-wrong output, the
@@ -483,6 +486,10 @@ export function enumerateCandidates(
         enumerate('/scopebase-coalesce', () => hoistScopedBases(sfn));
         enumerate('/coalesce', () => sfn);
         respell('/indexed', () => reindexWalks(sfn));
+        respell('/indexed/volatile', () => {
+          const r = reindexWalks(sfn);
+          return r ? volatilePtrLocals(r) : null;
+        });
         // the register-copy spelling (l3/regspell.ts): 0–3 variants (base; tail assign-back reusing
         // the dead value var; tail assign-back into a fresh var — the tail choice is allocator-
         // ambiguous, so both are ranked)
