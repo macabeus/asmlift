@@ -576,8 +576,8 @@ export function reindexWalks(sfn: SFn): SFn | null {
       }
       break;
     }
-    // one step per pointer, and the counter never doubles as a walk of itself (its init would
-    // be deleted twice over)
+    // one step per pointer (a pointer-typed counter never reaches this scan — declined on type
+    // above)
     if (!sawDec || walks.length === 0 || dupStep) {
       return null;
     }
