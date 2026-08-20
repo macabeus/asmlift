@@ -167,22 +167,57 @@ function hasNestedLoop(body: string): boolean {
   return nested;
 }
 
-/** Which `source` tags the function's own C supports. */
+const CONNECTIVE = /&&|\|\|/;
+
+/** Is a `&&`/`||` in `cond` the thing that DECIDES the branch, rather than an operand inside it?
+ *
+ *  Two ways it can be an operand, and the difference is not depth — it is what the parenthesis IS.
+ *  A CALL's parentheses hide their contents (`f(a && b)` computes a boolean and passes it), while a
+ *  GROUPING parenthesis is transparent (`!(a && b)` and `((a && b))` still decide the branch). So
+ *  call arguments are stripped, innermost-first and repeatedly, and everything else stays. A single
+ *  non-recursive strip of `\([^()]*\)` gets both halves wrong: it deletes a redundant group around
+ *  the whole condition, and it leaves the connective standing in `f(g(), a && b)`.
+ *
+ *  The other way is a ternary. `a && b ? x : y` computes the connective and the `if` tests the
+ *  ternary — the merged-boolean diamond, a different recovery. A `?` at depth 0 with a connective
+ *  anywhere to its left says so; `(c ? x : y) && z` keeps its `?` inside a group and is unaffected.
+ *
+ *  (A cast reads as a call here — `(u8)(a)` loses its `(a)`. Harmless: a cast's operand is not a
+ *  connective, and the direction is the safe one.) */
+const decidesTheBranch = (cond: string): boolean => {
+  let depth = 0;
+  for (let i = 0; i < cond.length; i++) {
+    if (cond[i] === '(') {
+      depth++;
+    } else if (cond[i] === ')') {
+      depth--;
+    } else if (cond[i] === '?' && depth === 0 && CONNECTIVE.test(cond.slice(0, i))) {
+      return false;
+    }
+  }
+  let stripped = cond;
+  let prev: string;
+  do {
+    prev = stripped;
+    stripped = stripped.replace(/([\w\])]\s*)\([^()]*\)/g, '$1');
+  } while (stripped !== prev);
+  return CONNECTIVE.test(stripped);
+};
+
 /** Does a `&&`/`||` decide a BRANCH here — i.e. sit in a CONTROLLING expression?
  *
- *  Scanned with real paren balancing rather than a regex: a controlling expression routinely
- *  contains its own parenthesised calls and casts, and `if\s*\([^)]*&&` stops at the first inner
- *  `)` and misses every one of them. Three things the balancing then has to get right:
+ *  Balanced by hand rather than by regex: a controlling expression routinely contains its own
+ *  parenthesised calls and casts, and `if\s*\([^)]*&&` stops at the first inner `)` and misses
+ *  every one of them. Two more things the scan has to get right, beyond what `decidesTheBranch`
+ *  owns:
  *
- *   - only DEPTH 1 counts. `if (f(a && b))` and `if ((a && b) ? x : y)` pass the connective to a
- *     call or a ternary as a VALUE — that is the merged-boolean diamond, a different recovery, and
- *     the one shape this tag exists to exclude.
- *   - a `for` header holds three clauses and only the MIDDLE one controls anything; a connective
- *     in the init or the step is an ordinary value expression.
+ *   - a `for` header holds three clauses and only the MIDDLE one controls anything; a connective in
+ *     the init or the step is an ordinary value expression.
  *   - `#if (A && B)` is a preprocessor directive, and real-tier sources are unpreprocessed.
  *
- *  Not decidable here, and deliberately: a connective hidden inside a project macro. That direction
- *  only ever under-reports. */
+ *  Not decidable here, and deliberately: a connective hidden inside a project macro
+ *  (`#define IS_OK(a) ((a) == 1 || (a) == 2)`). Real-tier `funcC` is the decomp's verbatim C, so
+ *  that direction only ever under-reports — the same limit every other `source` tag carries. */
 const hasControllingConnective = (body: string): boolean => {
   for (const m of body.matchAll(/\b(if|while|for)\s*\(/g)) {
     if (/#\s*$/.test(body.slice(0, m.index))) {
@@ -208,13 +243,14 @@ const hasControllingConnective = (body: string): boolean => {
     clauses.push(body.slice(from, i - 1));
     // `for (init; cond; step)` → the condition; everything else is one clause and IS the condition
     const cond = m[1] === 'for' ? (clauses.length === 3 ? clauses[1] : '') : clauses.join(';');
-    if (/&&|\|\|/.test(cond.replace(/\([^()]*\)/g, () => ''))) {
+    if (decidesTheBranch(cond)) {
       return true;
     }
   }
   return false;
 };
 
+/** Which `source` tags the function's own C supports. */
 export function sourceEvidence(funcC: string): Set<string> {
   const b = stripLiterals(funcC);
   const body = neutralizeDoWhileZero(b.slice(b.indexOf('{')));

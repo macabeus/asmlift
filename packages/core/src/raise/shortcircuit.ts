@@ -274,19 +274,27 @@ export function recognizeShortCircuit(fn: Fn): boolean {
 // miscompile. Applied ITERATIVELY, so `a || b || c` folds left-to-right, each round consuming one
 // more condition block.
 //
-// WHICH SPELLING, and why the fold alone does not decide it. The rewrite keeps ^h's unchanged
-// successor slot, so the connective comes out in the orientation the ASM's branch senses spell:
-// for `if (a || b) X else Y` that is the source's own (synthetic:ifor_near:agbcc byte-matches),
-// and for `if (a && b) X else Y` it is the De Morgan dual, arms exchanged. Both are the same
-// program and only one is the bytes. Reaching the other is `negateCond`'s job (l3/ast.ts
-// distributes `!(a && b)`), but the lever that calls it — `preserveDivergentBranchSense` — covers
-// DIVERGENT ifs only, so a reconverging one has no dual candidate and the fold's orientation
-// stands unrefereed: synthetic:ifand_near:agbcc, which the un-folded spelling would match.
+// WHICH SPELLING, and why the fold alone does not decide it. `if (a && b) X else Y` and its dual
+// `if (!a || !b) Y else X` are the same program and NOT the same bytes — agbcc lays the arms out in
+// source order, so which was written is recorded in the branch senses. This rewrite keeps ^h's
+// unchanged successor slot, so the connective comes out in the orientation those senses spell: the
+// source's own for a `||` (synthetic:ifor_near:agbcc byte-matches), the dual for an `&&`. Reaching
+// the other is `negateCond`'s job (l3/ast.ts distributes `!(a && b)`), but the lever that calls it —
+// `preserveDivergentBranchSense` — covers DIVERGENT ifs only, so a reconverging one has no dual
+// candidate: synthetic:ifand_near:agbcc, which the un-folded spelling would match.
 //
-// A `br`-only forwarding block between ^h and ^g hides the shared block and this fold does not
-// fire at all. agbcc emits one per long branch, so on Thumb a guarded arm past ±256 bytes is
-// silently exempt — synthetic:ifand_far:agbcc matches on that exemption, and normalising those
-// blocks away costs it that match until the sense lever reaches reconverging ifs.
+// That lever cannot simply be widened. It is a per-FUNCTION boolean defaulting to true on every
+// target, so flipping it for reconverging ifs would flip every `if` in the function at once — and
+// of the 28 real rows carrying the `short-circuit` tag, 22 hold two or more. What this fold's
+// output needs is its own gate, on the condition BEING one of these connectives.
+//
+// A `br`-only forwarding block on the edge into the SHARED block hides it from the `sharedEdge`
+// search below, and then this fold does not fire at all. agbcc emits one per long branch, and which
+// edge gets it follows the orientation: for an `&&` the shared block is the far one, so both edges
+// reaching it are trampolines (synthetic:ifand_far:agbcc, which matches on that exemption); for a
+// `||` the shared block is the near one and the fold still fires (an `ifor_far` byte-matches).
+// Normalising those blocks away is a real improvement that costs ifand_far its match until the
+// orientation can be re-chosen.
 export function recognizeBranchShortCircuit(fn: Fn): boolean {
   let changed = false;
   const term = (b: Block) => b.ops[b.ops.length - 1];

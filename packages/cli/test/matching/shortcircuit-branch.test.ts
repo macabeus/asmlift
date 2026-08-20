@@ -39,14 +39,20 @@ describe('the emitted orientation decides the match, and only one orientation is
     expect(rk.best.score.match).toBe(true);
   });
 
-  test('divergent arms already reach both orientations', () => {
+  test('divergent arms enumerate BOTH orientations; the reconverging sibling enumerates neither', () => {
     // `preserveDivergentBranchSense` is the lever, and it fires only when the arms do not
-    // reconverge — so this `&&`, unlike the one above, gets its dual enumerated and wins.
-    const asm = compileTargetAsm(
-      `int f(int a, int b, int *p){ if (a && b) { ${ARM.replace(/q/g, 'p')} return 2; } return 3; }`,
+    // reconverge. Asserted on the CANDIDATE LIST, not on the winner: the default sense already
+    // spells `&&` here, so `expect(best.source).toContain('&&')` would pass with the axis deleted.
+    const divergent = compileTargetAsm(
+      `int f(int a, int b, int *p, int *q){ if (a && b) { ${ARM} return 2; } return 3; }`,
     );
-    const rk = decompileRanked('f', asm, ARMV4T_AGBCC, assembleTarget(asm));
-    expect(rk.best.source).toContain('&&');
-    expect(rk.best.score.match).toBe(true);
+    const dv = decompileRanked('f', divergent, ARMV4T_AGBCC, assembleTarget(divergent));
+    expect(dv.candidates.some((c) => c.label.includes('flip-branch'))).toBe(true);
+    expect(dv.best.score.match).toBe(true);
+    // … and the reconverging sibling, which differs only in that its arms rejoin, gets no flip
+    // candidate at all. That one difference is the whole gap synthetic:ifand_near:agbcc publishes.
+    const reconverging = compileTargetAsm(src('&&'));
+    const rc = decompileRanked('f', reconverging, ARMV4T_AGBCC, assembleTarget(reconverging));
+    expect(rc.candidates.some((c) => c.label.includes('flip-branch'))).toBe(false);
   });
 });

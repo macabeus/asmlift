@@ -621,35 +621,44 @@ export const SYNTHETIC: SynthSpec[] = [
       '(`&f->v`) rather than being the variable itself, and is read after the loop has moved on',
   },
 
-  // A CONTROL-FLOW short-circuit: an `&&`/`||` that produces no value, only a branch. ONE branch
-  // graph, TWO source spellings — `a && b` guarding X, and its De Morgan dual `!a || !b` guarding
-  // Y with the arms exchanged, compile to the same edges. Which one was written is not in the
-  // graph, so a decompiler that can reach only one of them matches the functions that happened to
-  // spell it that way and misses the rest. The three rows are the two orientations, plus the
-  // distance that decides whether the shape is recognised at all.
+  // A CONTROL-FLOW short-circuit: an `&&`/`||` that produces no value, only a branch. `a && b`
+  // guarding X and its De Morgan dual `!a || !b` guarding Y are the same program, and agbcc lays
+  // the arms out in SOURCE order — so they are different bytes, and which one was written is
+  // recorded in the branch senses. A decompiler therefore has to choose, and choosing wrong costs
+  // the whole function. The three rows are the two orientations, plus the distance that decides
+  // whether the shape is recognised at all.
   //
   // `ifand_near` and `ifand_far` differ in ONE thing: whether the guarded arm fits inside a Thumb
   // conditional branch's ±256-byte reach. Past it agbcc spells the branch `bne .L1 / b .L2 @long
   // jump`, and a frontend that splits a block at every conditional branch turns that second
   // instruction into a block whose only op is `br`. A recogniser keyed on successor identity
-  // cannot see the shared block through it. So the same source shape gets a different recovery on
-  // either side of a byte distance — which is the pair's point: the two rows sit on opposite sides
-  // of the only automated gate, `ifand_far` regression-gated because it matches and `ifand_near`
-  // the inhabitant that has to improve.
+  // cannot see the shared block through it, so the same source shape gets a different recovery on
+  // either side of a byte distance.
   //
-  // `ifor_near` is the ORIENTATION control, and it is what keeps the pair honest: the same shape
-  // written the other way round matches today. So the gap is not "this shape is unrecoverable",
-  // it is "only one of the two spellings is reachable" — and a row that could falsify the claim is
-  // worth more than a third row that restates it.
+  // `ifor_near` is the ORIENTATION control. The same shape written the other way round matches
+  // today, so the gap is not "this shape is unrecoverable" but "only one of the two spellings is
+  // reachable" — and a row that could falsify the claim is worth more than a third that restates
+  // it. There is deliberately no `ifor_far`: measured, a `||` matches at BOTH distances, because
+  // the trampoline lands on the edge the recogniser does not key on.
   //
   // agbcc only, for the same reason the `preupdate_*` rows are: the shape IS the Thumb branch
   // range. ido/kmc/mwcc have no such limit, so there these would be three ordinary `&&` rows.
   //
   // The arm's CONTENT is filler and its SIZE is the feature, so the near arm is a literal PREFIX
-  // of the far one and both share a signature. Two pointers, deliberately: a Thumb `str Rd,[Rn,#N]`
-  // reaches offset 124, and a single array long enough to force the long branch would spill past
-  // it into a pointer walk — a second recovery idiom riding along inside what is supposed to be a
-  // one-variable control.
+  // of the far one and all three share a signature. Two pointers, deliberately: a Thumb
+  // `str Rd,[Rn,#N]` reaches offset 124, and a single array long enough to force the long branch
+  // would spill past it into a pointer walk — a second recovery idiom riding along inside what is
+  // supposed to be a one-variable control.
+  //
+  // WHAT THESE ROWS MOVE, so the headline is not read as progress: they take asmlift 372 → 374
+  // and m2c 348 → 348. Both gained matches are agbcc-only synthetic rows authored for an
+  // asmlift-specific gap, one of them (`ifand_far`) matching for a reason nothing recovered; and
+  // all three read `noncompile` for m2c on an unrelated pointer-spelling defect of its own, which
+  // on `ifand_near` hides that its orientation is the RIGHT one. The two gates are not the same
+  // either: `bench regression` fails only on a LOST match, so it holds `ifand_far` and `ifor_near`
+  // and says nothing about `ifand_near` — that one is pinned by
+  // packages/cli/test/matching/shortcircuit-branch.test.ts, which runs with the benchmark refresh
+  // rather than on every PR.
   {
     sym: 'ifand_near',
     src: 'int ifand_near(int a, int b, int *p, int *q){ if (a && b) { p[0] = 1; q[0] = 2; p[1] = 3; q[1] = 4; } else { p[0] = -1; } return p[1]; }',

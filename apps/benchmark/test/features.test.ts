@@ -234,6 +234,17 @@ describe('the detectors themselves', () => {
     expect(has('void f(void){ while (f(x) && g(y)) { h(); } }')).toBe(true);
     expect(has('void f(void){ if ((u8)(a) != 0 || (b & 3)) { g(); } }')).toBe(true);
     expect(has('void f(void){ do { g(); } while (a && b); }')).toBe(true);
+    // a GROUPING paren is transparent where a CALL's is not — the distinction is what the paren
+    // IS, not how deep it is, and a single non-recursive strip gets both halves wrong
+    expect(has('void f(void){ if (!(a || b)) g(); }')).toBe(true);
+    expect(has('void f(void){ if ((a && b)) g(); }')).toBe(true);
+    expect(has('void f(void){ if (((a && b))) g(); }')).toBe(true);
+    expect(has('void f(void){ if ((a && b) == 0) g(); }')).toBe(true);
+    expect(has('void f(void){ while (!(p && p->next)) g(); }')).toBe(true);
+    expect(has('void f(void){ if (f(g(), a && b)) h(); }')).toBe(false);
+    expect(has('void f(void){ if (h(a && b, f(x))) g(); }')).toBe(false);
+    // a ternary's own `?` stays inside its group, so it does not disqualify the outer connective
+    expect(has('void f(void){ if ((c ? x : y) && z) g(); }')).toBe(true);
   });
 
   it('ignores operators inside comments and string literals', () => {
