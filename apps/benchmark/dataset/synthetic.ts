@@ -1114,8 +1114,15 @@ export const SYNTHETIC: SynthSpec[] = [
   // addresses so the rows stay self-contained (no ELF, no extern data — a candidate could not
   // declare one).
   //
+  // The absolute base is PER-PLATFORM, so the spelled address is one the console actually has:
+  // under agbcc the GBA DMA3 register file / EWRAM / IWRAM; under ido and kmc the N64 PI
+  // register file (the osPiRawStartDma store pattern) and KSEG0 RDRAM; under mwcc the GC DI
+  // register file (the DVDLowRead store pattern) and MEM1. Same spelling, same capability —
+  // only the constant and the register offsets differ — so a sym appears in several specs with
+  // DISJOINT toolchain lists and every `synthetic:sym:toolchain` id stays unique.
+  //
   // What each row isolates, measured by compiling both spellings under agbcc -O2:
-  // `dma_burst` is the control — a plain three-store block through one pointer local, recovered
+  // `dma_burst` is the control — a plain store block through one pointer local, recovered
   // today by the base-pointer lever. `dma_wait` adds the busy-wait read-back through the SAME
   // pointer; the lever withdraws and the candidate falls back to one literal per store, which
   // costs the shared base register (gcc 2.9 folds `(vu32*)0x040000d8` to a fresh constant at
@@ -1131,17 +1138,37 @@ export const SYNTHETIC: SynthSpec[] = [
   // class allocation; hi regs cost 4 vs 2 to move but beat an 8-cost SImode reload) — the
   // candidate instead sinks the load below the loop and re-associates the accumulator chain.
   //
-  // All four toolchains: the placement question is universal (MIPS %hi/%lo anchoring, PPC
-  // @ha/@l pairs, both compilers' in-place-update patterns), and where a toolchain's own
-  // addressing rules make a shape free, the row is a control there rather than coverage.
+  // The placement question is universal (MIPS %hi/%lo anchoring, PPC @ha/@l pairs, all four
+  // compilers' in-place-update patterns), and where a toolchain's own addressing rules make a
+  // shape free, the row is a control there rather than coverage.
   {
     sym: 'dma_burst',
     src:
       'void dma_burst(u32 src,u32 dst,u32 cnt){ volatile u32 *dma = (volatile u32 *)0x040000d4;' +
       ' dma[0] = src; dma[1] = dst; dma[2] = cnt; }',
     features: ['value-home', 'pointer'],
-    toolchains: ALL,
+    toolchains: ['agbcc'],
     ctx: 'void dma_burst(u32 src, u32 dst, u32 cnt);',
+    proto: { dma_burst: { returnsVoid: true } },
+  },
+  {
+    sym: 'dma_burst',
+    src:
+      'void dma_burst(u32 dram,u32 cart,u32 len){ volatile u32 *pi = (volatile u32 *)0xa4600000;' +
+      ' pi[0] = dram; pi[1] = cart; pi[3] = len; }',
+    features: ['value-home', 'pointer'],
+    toolchains: ['ido7.1', 'gcc2.7.2kmc'],
+    ctx: 'void dma_burst(u32 dram, u32 cart, u32 len);',
+    proto: { dma_burst: { returnsVoid: true } },
+  },
+  {
+    sym: 'dma_burst',
+    src:
+      'void dma_burst(u32 mar,u32 len,u32 cr){ volatile u32 *di = (volatile u32 *)0xcc006000;' +
+      ' di[5] = mar; di[6] = len; di[7] = cr; }',
+    features: ['value-home', 'pointer'],
+    toolchains: ['mwcc_242_81'],
+    ctx: 'void dma_burst(u32 mar, u32 len, u32 cr);',
     proto: { dma_burst: { returnsVoid: true } },
   },
   {
@@ -1150,8 +1177,28 @@ export const SYNTHETIC: SynthSpec[] = [
       'void dma_wait(u32 src,u32 dst,u32 cnt){ volatile u32 *dma = (volatile u32 *)0x040000d4;' +
       ' dma[0] = src; dma[1] = dst; dma[2] = cnt | 0x80000000; while (dma[2] & 0x80000000) {} }',
     features: ['value-home', 'pointer'],
-    toolchains: ALL,
+    toolchains: ['agbcc'],
     ctx: 'void dma_wait(u32 src, u32 dst, u32 cnt);',
+    proto: { dma_wait: { returnsVoid: true } },
+  },
+  {
+    sym: 'dma_wait',
+    src:
+      'void dma_wait(u32 dram,u32 cart,u32 len){ volatile u32 *pi = (volatile u32 *)0xa4600000;' +
+      ' pi[0] = dram; pi[1] = cart; pi[3] = len; while (pi[4] & 3) {} }',
+    features: ['value-home', 'pointer'],
+    toolchains: ['ido7.1', 'gcc2.7.2kmc'],
+    ctx: 'void dma_wait(u32 dram, u32 cart, u32 len);',
+    proto: { dma_wait: { returnsVoid: true } },
+  },
+  {
+    sym: 'dma_wait',
+    src:
+      'void dma_wait(u32 mar,u32 len,u32 cr){ volatile u32 *di = (volatile u32 *)0xcc006000;' +
+      ' di[5] = mar; di[6] = len; di[7] = cr | 1; while (di[7] & 1) {} }',
+    features: ['value-home', 'pointer'],
+    toolchains: ['mwcc_242_81'],
+    ctx: 'void dma_wait(u32 mar, u32 len, u32 cr);',
     proto: { dma_wait: { returnsVoid: true } },
   },
   {
@@ -1161,7 +1208,17 @@ export const SYNTHETIC: SynthSpec[] = [
       '#define gBgs ((struct Bg *)0x02000000)\n' +
       's32 bg_area(s32 i){ return gBgs[i].w * gBgs[i].h + gBgs[i].tiles; }',
     features: ['value-home', 'struct'],
-    toolchains: ALL,
+    toolchains: ['agbcc'],
+    ctx: 's32 bg_area(s32 i);',
+  },
+  {
+    sym: 'bg_area',
+    src:
+      'struct Bg { s32 tiles; u8 pad[12]; u16 w; u16 h; u8 pad2[8]; };\n' +
+      '#define gBgs ((struct Bg *)0x80200000)\n' +
+      's32 bg_area(s32 i){ return gBgs[i].w * gBgs[i].h + gBgs[i].tiles; }',
+    features: ['value-home', 'struct'],
+    toolchains: ['ido7.1', 'gcc2.7.2kmc', 'mwcc_242_81'],
     ctx: 's32 bg_area(s32 i);',
   },
   {
@@ -1171,7 +1228,17 @@ export const SYNTHETIC: SynthSpec[] = [
       '#define gBgs ((struct Bg *)0x02000000)\n' +
       's32 bg_mix(s32 i){ return gBgs[i].w * gBgs[2].h + gBgs[i].tiles; }',
     features: ['value-home', 'struct'],
-    toolchains: ALL,
+    toolchains: ['agbcc'],
+    ctx: 's32 bg_mix(s32 i);',
+  },
+  {
+    sym: 'bg_mix',
+    src:
+      'struct Bg { s32 tiles; u8 pad[12]; u16 w; u16 h; u8 pad2[8]; };\n' +
+      '#define gBgs ((struct Bg *)0x80200000)\n' +
+      's32 bg_mix(s32 i){ return gBgs[i].w * gBgs[2].h + gBgs[i].tiles; }',
+    features: ['value-home', 'struct'],
+    toolchains: ['ido7.1', 'gcc2.7.2kmc', 'mwcc_242_81'],
     ctx: 's32 bg_mix(s32 i);',
   },
   {
@@ -1181,7 +1248,17 @@ export const SYNTHETIC: SynthSpec[] = [
       's32 clamp_inplace(s32 n){ s32 total = 0; s32 j;' +
       ' for (j = 0; j < n; j++){ s32 w = gW[j]; if (w > 31){ w = 32; } total += w; } return total; }',
     features: ['value-home'],
-    toolchains: ALL,
+    toolchains: ['agbcc'],
+    ctx: 's32 clamp_inplace(s32 n);',
+  },
+  {
+    sym: 'clamp_inplace',
+    src:
+      '#define gW ((volatile u16 *)0x80200010)\n' +
+      's32 clamp_inplace(s32 n){ s32 total = 0; s32 j;' +
+      ' for (j = 0; j < n; j++){ s32 w = gW[j]; if (w > 31){ w = 32; } total += w; } return total; }',
+    features: ['value-home'],
+    toolchains: ['ido7.1', 'gcc2.7.2kmc', 'mwcc_242_81'],
     ctx: 's32 clamp_inplace(s32 n);',
   },
   // No mwcc_242_81 on `hipress`: one of the scored candidates sends mwcc -O4's global optimizer
