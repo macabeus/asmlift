@@ -294,12 +294,10 @@ export function recognizeShortCircuit(fn: Fn): boolean {
 //   short branch   `beq shared`         ^g is ^h's FALL  → logic_or  → arms swapped (the miss)
 //   long branch    `bne ^g / b shared`  ^g is ^h's TAKEN → logic_and → source orientation
 //
-// agbcc inverts a conditional it cannot reach, so past ±256 bytes it emits the second form. The
-// trampoline it leaves on the `b` then sits on the edge into the SHARED block and hides that block
-// from the `sharedEdge` search below, so today this fold does not fire there at all
-// (synthetic:ifand_far:agbcc matches on the un-folded spelling). Normalising those blocks away is
-// therefore SAFE for this orientation and not merely tolerable: measured, the fold then fires,
-// emits `&&`, and ifand_far still matches. It is the `logic_or` half that has no dual candidate.
+// agbcc inverts a conditional it cannot reach, so past ±256 bytes it emits the second form, and the
+// trampoline it leaves on the `b` sits on the edge into the SHARED block — which `forwardingTarget`
+// below looks through. The `logic_and` half is the one that lands on the source's own orientation;
+// it is the `logic_or` half that has no dual candidate (synthetic:ifand_near:agbcc).
 //
 // Every refusal falls through untouched — a miss, never a miscompile.
 export function recognizeBranchShortCircuit(fn: Fn): boolean {
@@ -359,8 +357,15 @@ export function recognizeBranchShortCircuit(fn: Fn): boolean {
           continue;
         }
         // Which of ^g's edges rejoins ^h's other successor? That is the shared block.
-        const sharedEdge =
-          gTaken.block === sharedFromH.block ? gTaken : gFall.block === sharedFromH.block ? gFall : null;
+        const sharedTarget = forwardingTarget(sharedFromH.block);
+        const takenRejoins = forwardingTarget(gTaken.block) === sharedTarget;
+        const fallRejoins = forwardingTarget(gFall.block) === sharedTarget;
+        // Both edges rejoining leaves no "other" block to branch to, and nothing decides which arm
+        // the connective guards.
+        if (takenRejoins && fallRejoins) {
+          continue;
+        }
+        const sharedEdge = takenRejoins ? gTaken : fallRejoins ? gFall : null;
         if (!sharedEdge) {
           continue;
         }
@@ -401,7 +406,20 @@ export function recognizeBranchShortCircuit(fn: Fn): boolean {
                 { block: sharedEdge.block, args: [...sharedEdge.args] },
               ],
         });
+        // ^h's old shared edge is gone. When it pointed at a DIFFERENT forwarder than the one the
+        // fold kept, that block just lost its only predecessor — and an unreachable block with an
+        // out-edge poisons the dominance of everything it still points at (verify()'s fixpoint
+        // models a block with no in-edges as dominated by nothing), so drop it here rather than
+        // leave a malformed graph for the next pass.
+        const orphan = sharedFromH.block;
         fn.blocks = fn.blocks.filter((x) => x !== g);
+        if (
+          orphan !== sharedEdge.block &&
+          orphan !== fn.blocks[0] &&
+          (predecessors(fn).get(orphan) ?? []).length === 0
+        ) {
+          fn.blocks = fn.blocks.filter((x) => x !== orphan);
+        }
         changed = true;
         progress = true;
         break outer; // defs/preds are stale after the mutation — recompute on the next round
@@ -409,6 +427,27 @@ export function recognizeBranchShortCircuit(fn: Fn): boolean {
     }
   }
   return changed;
+}
+
+/** Where a chain of forwarding blocks ultimately lands. Two branch sites reaching one block arrive
+ *  as two DISTINCT single-`br` blocks, so the successor-identity test below needs the destination,
+ *  not the edge. Resolving rather than rewriting is what keeps this invisible to every other pass —
+ *  switch recovery reads the same forwarders and must still see them.
+ *
+ *  Only an argument-less chain is followed: a forwarder that supplies block arguments carries a
+ *  value, and two of those reaching one block are NOT interchangeable. */
+function forwardingTarget(b: Block): Block {
+  const seen = new Set<Block>();
+  let cur = b;
+  while (cur.params.length === 0 && cur.ops.length === 1 && !seen.has(cur)) {
+    seen.add(cur);
+    const t = cur.ops[0];
+    if (t.opcode !== 'br' || t.successors.length !== 1 || t.successors[0].args.length > 0) {
+      break;
+    }
+    cur = t.successors[0].block;
+  }
+  return cur;
 }
 
 /** Do `c1` and `c2` compare the SAME value against CONSTANTS? That is the signature of a

@@ -41,8 +41,21 @@ function chain(opts: {
   sharedArgsFromG?: Value[];
   sharedParams?: Value[];
   extraPredOfG?: boolean;
+  /** Put each edge into `shared` behind its OWN single-`br` block, the shape agbcc leaves when a
+   *  Thumb conditional cannot reach its target and the real branch is emitted separately. */
+  trampolines?: boolean;
 }): Fn {
   const shared = blk([mkOp('ret', { operands: [] })], opts.sharedParams ?? []);
+  const trampolines: Block[] = [];
+  /** the edge to write into a terminator: straight to `shared`, or through a fresh forwarder */
+  const toShared = (args: Value[]): { block: Block; args: Value[] } => {
+    if (!opts.trampolines) {
+      return { block: shared, args };
+    }
+    const t = blk([{ ...mkOp('br'), successors: [{ block: shared, args }] }]);
+    trampolines.push(t);
+    return { block: t, args: [] };
+  };
   const other = blk([mkOp('ret', { operands: [] })]);
   const c2 = mkValue(T.unk(32));
   const gBody = opts.gBody ? opts.gBody(c2) : cmp(c2);
@@ -52,20 +65,14 @@ function chain(opts: {
       {
         ...mkOp('cond_br', { operands: [c2] }),
         successors: opts.sharedOnGTaken
-          ? [
-              { block: shared, args: opts.sharedArgsFromG ?? [] },
-              { block: other, args: [] },
-            ]
-          : [
-              { block: other, args: [] },
-              { block: shared, args: opts.sharedArgsFromG ?? [] },
-            ],
+          ? [toShared(opts.sharedArgsFromG ?? []), { block: other, args: [] }]
+          : [{ block: other, args: [] }, toShared(opts.sharedArgsFromG ?? [])],
       },
     ],
     opts.gParams ?? [],
   );
   const c1 = mkValue(T.unk(32));
-  const hEdgeShared = { block: shared, args: opts.sharedArgsFromH ?? [] };
+  const hEdgeShared = toShared(opts.sharedArgsFromH ?? []);
   const head = blk([
     ...(opts.sharedArgsFromH ?? []).map((v) => mkOp('const', { results: [v], attrs: { value: 7 } })),
     ...(opts.sharedArgsFromG ?? [])
@@ -77,7 +84,7 @@ function chain(opts: {
       successors: opts.gOnTaken ? [{ block: g, args: [] }, hEdgeShared] : [hEdgeShared, { block: g, args: [] }],
     },
   ]);
-  const blocks = [head, g, shared, other];
+  const blocks = [head, g, ...trampolines, shared, other];
   if (opts.extraPredOfG) {
     // a second, unrelated entry into `g` — the fold would delete a block still reachable
     blocks.splice(1, 0, blk([{ ...mkOp('br'), successors: [{ block: g, args: [] }] }]));
@@ -88,6 +95,62 @@ function chain(opts: {
 /** The connective a fold produced, or null when nothing fired. */
 const connective = (fn: Fn): string | null =>
   fn.blocks.flatMap((b) => b.ops).find((o) => o.opcode === 'logic_or' || o.opcode === 'logic_and')?.opcode ?? null;
+
+describe('a shared block behind long-branch trampolines', () => {
+  // A Thumb conditional branch reaches ±256 bytes. Past that agbcc inverts it and emits the real
+  // target as a separate `b`, so two sites reaching one block arrive as two DISTINCT forwarding
+  // blocks and the fold's successor-identity test sees two unrelated targets. Following the chain
+  // answers "same destination?" without rewriting the graph, which is what keeps this invisible to
+  // every other pass — switch recovery reads the same forwarders and must still see them.
+  test('the fold looks through them and still picks the right connective', () => {
+    const fn = chain({ gOnTaken: true, sharedOnGTaken: false, trampolines: true });
+    expect(recognizeBranchShortCircuit(fn)).toBe(true);
+    expect(connective(fn)).toBe('logic_and');
+    verify(fn);
+  });
+
+  test('both orientations survive the indirection', () => {
+    const fn = chain({ gOnTaken: false, sharedOnGTaken: true, trampolines: true });
+    expect(recognizeBranchShortCircuit(fn)).toBe(true);
+    expect(connective(fn)).toBe('logic_or');
+    verify(fn);
+  });
+
+  test('the forwarder the fold stops using is dropped, not left dangling', () => {
+    // An unreachable block that still branches somewhere poisons the dominance of everything it
+    // points at, so leaving it behind turns this fold into a verify failure two passes later.
+    const fn = chain({ gOnTaken: true, sharedOnGTaken: false, trampolines: true });
+    expect(fn.blocks).toHaveLength(6); // head, g, 2 forwarders, shared, other
+    expect(recognizeBranchShortCircuit(fn)).toBe(true);
+    expect(fn.blocks).toHaveLength(4); // g and the head's forwarder are both gone
+    const reachable = new Set<Block>([fn.blocks[0]]);
+    for (const b of fn.blocks) {
+      for (const succ of b.ops[b.ops.length - 1].successors ?? []) {
+        reachable.add(succ.block);
+      }
+    }
+    expect(fn.blocks.filter((b) => !reachable.has(b))).toHaveLength(0);
+    verify(fn);
+  });
+
+  test('REFUSED: a forwarder carrying block arguments is not followed', () => {
+    // Two forwarders into one block are interchangeable only when neither supplies a value. An
+    // argument-passing pair reaching the same block are different edges, and folding them together
+    // would drop whichever value the discarded one carried.
+    const arg = mkValue(T.unk(32));
+    const fn = chain({
+      gOnTaken: true,
+      sharedOnGTaken: false,
+      trampolines: true,
+      sharedParams: [mkValue(T.unk(32))],
+      sharedArgsFromH: [arg],
+      sharedArgsFromG: [arg],
+    });
+    expect(recognizeBranchShortCircuit(fn)).toBe(false);
+    expect(connective(fn)).toBeNull();
+    verify(fn);
+  });
+});
 
 describe('the four orientations', () => {
   test('second block on the FALL edge, shared on its TAKEN → `c1 || c2`, no negation', () => {
