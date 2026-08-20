@@ -11,8 +11,9 @@
 //
 // SCOPE (decline over approximate): a `+` is flipped only when exactly ONE side is a product
 // (`bin('*')` at the root, casts looked through) — two products or none leave nothing to anchor
-// the flip on. A side containing a call never moves (evaluation order of the operands is what
-// the lever edits). Declines (null) when no `+` changes, so no duplicate candidate.
+// the flip on. A side carrying an effect (a call, a marker) never moves — evaluation order of
+// the operands is what the lever edits. Declines (null) when no `+` changes, so no duplicate
+// candidate.
 import type { Expr, SFn } from './ast';
 import { exprHasEffect, mapExprChildren, mapStmtExprs } from './ast';
 

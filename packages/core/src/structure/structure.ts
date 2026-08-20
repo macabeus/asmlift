@@ -1756,11 +1756,12 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // l/r is whichever load landed in the dst), but the order the compiler EVALUATED the
       // operands is still visible: their defs' order in the instruction stream. gcc 2.9 and IDO
       // both emit `w * h`'s loads w-first, so def order IS source order — verified byte-identical
-      // on both (the bg_area rows). Scope: BOTH root defs must be same-block memory reads (load/aload) — a load
-      // pair's stream order survives scheduling, while arithmetic defs get combined out of
-      // source order (Thumb ldmia merges loads into REGISTER order, so an add fed by one reads
-      // def-reordered); a const already has its side, a pointer operand's side is load-bearing
-      // for the stride rules below, and cross-block positions do not order evaluation.
+      // on both (the bg_area rows). Scope, one gate per way the signal fails: BOTH root defs must
+      // be same-block memory reads (a const already has its side; arithmetic defs get combined
+      // out of source order — an ldmia-fed add reads def-reordered; cross-block positions do not
+      // order evaluation), neither stamped `listOrder` (an ldmia-expanded load's own position is
+      // LIST order), both operand VALUES un-named (see below), no pointer side (load-bearing for
+      // the stride rules below), and no effect moves (call, marker).
       if (COMMUTATIVE_BIN.has(ARITH_TO_BIN[d.opcode]) && d.operands.length === 2) {
         const [da, db] = [defs.get(d.operands[0]), defs.get(d.operands[1])];
         if (
