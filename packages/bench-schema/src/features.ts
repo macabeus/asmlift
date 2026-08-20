@@ -143,6 +143,25 @@ export const FEATURES: readonly FeatureDef[] = [
     seeAlso: ['switch', 'goto'],
   },
   {
+    id: 'merge-chain',
+    label: 'Merged value chain',
+    group: 'control-flow',
+    evidence: 'judgement',
+    summary: 'several values are decided by several arms and merged at one join',
+    detail:
+      'The shape that makes destroying SSA cost something. Each arm of a conditional or switch ' +
+      'decides the same set of locals, so the join takes one merge value per local and every arm ' +
+      'hands them over on its edge. A decompiler that gives the merge and one arm the same variable ' +
+      'pays nothing; for every other arm it emits a copy the source never wrote and the compiled ' +
+      'code does not contain — which is why the tag is reserved for bodies where the arms decide ' +
+      'MORE THAN ONE value, and where those values are themselves computed rather than named ' +
+      'already.',
+    example: {
+      c: 'switch (s) { case 0: x = p[0]; y = p[1]; break; default: x = p[2]; y = p[3]; }',
+    },
+    seeAlso: ['branch', 'switch', 'uninit-local'],
+  },
+  {
     id: 'goto',
     label: 'Goto',
     group: 'control-flow',

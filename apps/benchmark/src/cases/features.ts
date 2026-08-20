@@ -61,6 +61,15 @@ export const JUDGEMENT_FLOOR: Record<string, (body: string, asm: string, whole: 
       b,
     ),
   continue: (b) => /\bcontinue\b/.test(b),
+  // A merged value chain needs a branching construct AND more than one local for the arms to
+  // decide — a declaration statement with at least two declarators, which is how the source spells
+  // them. Whether the arms all decide the SAME ones, and whether those values are computed rather
+  // than already named, stays a human call.
+  'merge-chain': (b) =>
+    /\bif\b|\bswitch\b|\?/.test(b) &&
+    /(?:^|[;{}])\s*(?:(?:unsigned|signed|const|struct|union)\s+)*(?:void|int|char|short|long|float|double|[us]\d+|f\d+|\w+_t|[A-Z]\w*)\s+[^;{}()]*,[^;{}()]*;/.test(
+      b,
+    ),
   // a TYPE tag: the evidence is in the signature, not the body
   double: (_b, _asm, whole) => /\bdouble\b/.test(whole),
   dense: (b) => /\bswitch\s*\(/.test(b),
