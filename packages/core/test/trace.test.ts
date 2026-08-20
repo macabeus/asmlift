@@ -68,6 +68,23 @@ test('trace: the symbols knob has decompile() parity — named lift dump, named 
   expect(bare.source).not.toContain('gCounter');
 });
 
+test('trace: a CALLEE signature in the symbol map reaches the lift, as it does in decompile()', () => {
+  // The map's contribution is not just NAMES. `prototypesFromSymbols` turns a code symbol's DWARF
+  // signature into a prototype, and the frontend reads that for the callee's ARITY — otherwise it
+  // falls back to counting argument registers and guesses. Both towers must merge the same table,
+  // or a trace explains a lift the real run never performed.
+  const asm =
+    'f:\n\tpush\t{lr}\n\tmov\tr0, #1\n\tmov\tr1, #2\n\tmov\tr2, #3\n' + '\tbl\tcallee\n\tpop\t{r1}\n\tbx\tr1\n';
+  const int = { size: 4, signed: true };
+  const symbols = new Map([
+    [0x08000100, [{ name: 'callee', kind: 'code' as const, signature: { returns: null, params: [int] } }]],
+  ]);
+  const traced = decompileTraced('f', asm, ARMV4T_AGBCC, { symbols });
+  expect(traced.source).toBe(decompile('f', asm, ARMV4T_AGBCC, { symbols }).source);
+  // the signature says ONE parameter, so the call takes one — not the three the arg registers hold
+  expect(traced.source).toContain('callee(1)');
+});
+
 test('trace: annotate mode degrades a hard failure to the stub, never a throw', () => {
   const { source, report } = decompileTraced('mystery', 'not assembly at all\n', ARMV4T_AGBCC, { onGap: 'annotate' });
   expect(report.trace).toEqual([]);
