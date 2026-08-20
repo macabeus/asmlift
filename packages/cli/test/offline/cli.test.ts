@@ -79,11 +79,9 @@ test('gaps exit 1 with markers; strict declines are tagged, not internal', async
   expect(strict.stderr).not.toContain('[internal error]');
 });
 
-// --proto validation. `protoArity` falls back to the arg-register heuristic on a malformed
-// `params`, which is right for an OMITTED one and silent for a mistyped one — so a table that is
-// accepted here decompiles at a guessed arity with nothing said about it. Measured on klonoa's
-// LoadBGTilemapData, the difference between a correct table and a mistyped one is 53 objdiff
-// points and no output whatsoever.
+// --proto validation, at the CLI surface: which exit code each malformed table earns, and that an
+// unreadable file stays distinguishable from an unusable one. Why the refusals exist at all is
+// validatePrototypes' own contract (core/proto.ts) and is pinned there.
 const protoFile = (table: unknown) => {
   const dir = mkdtempSync(join(tmpdir(), 'asmlift-proto-'));
   const p = join(dir, 'p.json');

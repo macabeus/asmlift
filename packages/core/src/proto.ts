@@ -27,15 +27,28 @@ export interface FnProto {
 /** symbol → prototype. The function under decompilation and its callees share one table. */
 export type Prototypes = Record<string, FnProto>;
 
-/** Problems with an UNTRUSTED prototype table — empty when it is well formed.
+/** The call-site arity a proto declares, normalizing the count form (`2`) and the typed-list
+ *  form (`["u8", "s32"]`) to one number. `undefined` when `params` is omitted — the caller then
+ *  falls back to its arg-register heuristic. Reading a typed list as its length is what lets a
+ *  header-derived proto (`params: ["u8"]`) recover its argument instead of silently dropping it. */
+export function protoArity(p: FnProto | undefined): number | undefined {
+  if (typeof p?.params === 'number') {
+    return p.params;
+  }
+  if (Array.isArray(p?.params)) {
+    return p.params.length;
+  }
+  // Omitted OR malformed (e.g. a bare `"u8"` string reaching the untyped CLI `--proto` JSON):
+  // fall back to the frontend's arg-register heuristic rather than misread a string's `.length`.
+  return undefined;
+}
+
+/** Problems with a HAND-WRITTEN prototype table — empty when it is well formed.
  *
- *  A `Prototypes` written by hand — the CLI's `--proto` JSON — is the one case where `protoArity`'s
- *  fallback is the wrong behaviour. Falling back to the arg-register
- *  heuristic is right when `params` is OMITTED; on `params: "2"` it silently decompiles at a
- *  guessed arity, and the user who wrote the table has no way to tell. Same for a misspelled
- *  `returnVoid`, which would simply do nothing. Reporting lets the caller refuse instead.
- *
- *  Messages name the symbol so a table with several entries points at the broken one. */
+ *  `protoArity` above falls back to the arg-register heuristic on a `params` it cannot read, which
+ *  is right when `params` is omitted and silent when it is mistyped: `params: "2"` then decompiles
+ *  at a guessed arity, and a misspelled `returnsVoid` does nothing at all. Neither is visible in
+ *  the output, so a table that came from outside is checked before it reaches either. */
 export function validatePrototypes(value: unknown): string[] {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return ['must be an object mapping a symbol name to its prototype'];
@@ -64,22 +77,6 @@ export function validatePrototypes(value: unknown): string[] {
     }
   }
   return problems;
-}
-
-/** The call-site arity a proto declares, normalizing the count form (`2`) and the typed-list
- *  form (`["u8", "s32"]`) to one number. `undefined` when `params` is omitted — the caller then
- *  falls back to its arg-register heuristic. Reading a typed list as its length is what lets a
- *  header-derived proto (`params: ["u8"]`) recover its argument instead of silently dropping it. */
-export function protoArity(p: FnProto | undefined): number | undefined {
-  if (typeof p?.params === 'number') {
-    return p.params;
-  }
-  if (Array.isArray(p?.params)) {
-    return p.params.length;
-  }
-  // Omitted OR malformed (e.g. a bare `"u8"` string reaching the untyped CLI `--proto` JSON):
-  // fall back to the frontend's arg-register heuristic rather than misread a string's `.length`.
-  return undefined;
 }
 
 /** The C type spelling for one declared parameter/return, or null when the facts do not

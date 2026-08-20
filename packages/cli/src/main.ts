@@ -251,8 +251,8 @@ export async function runCli(
         stderr: `asmlift: cannot read --proto file: ${e instanceof Error ? e.message : e}\n`,
       };
     }
-    // Every entry, not just the envelope: `protoArity` falls back to the arg-register heuristic on
-    // a malformed `params`, so a table accepted here decompiles at a GUESSED arity and says nothing.
+    // Every entry, not just the envelope — an unreadable `params` decompiles at a guessed arity
+    // rather than failing (see validatePrototypes).
     const problems = validatePrototypes(parsed);
     if (problems.length) {
       return usage(`--proto ${protoFlag}:\n${problems.map((p) => `  ${p}`).join('\n')}`);

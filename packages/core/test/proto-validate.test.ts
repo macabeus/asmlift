@@ -1,7 +1,6 @@
-// validatePrototypes — the guard on a HAND-WRITTEN prototype table (`--proto` JSON, the
-// `decomp.yaml` key). `protoArity` falls back to the arg-register heuristic on a malformed
-// `params`, which is right for an omitted one and silent for a mistyped one, so the table has to
-// be refused before it gets there.
+// validatePrototypes — the guard on a hand-written prototype table (the CLI's `--proto` JSON).
+// What each refusal is FOR: `protoArity` reads a malformed `params` as an omitted one and falls
+// back to the arg-register heuristic, so anything accepted here decompiles at a guessed arity.
 import { describe, expect, test } from 'vitest';
 
 import { protoArity, validatePrototypes } from '../src/proto';
@@ -22,7 +21,7 @@ describe('accepts every form the type allows', () => {
 
 describe('refuses what would otherwise decompile at a guessed arity', () => {
   test('a stringly-typed count — the case protoArity silently drops', () => {
-    expect(protoArity({ params: '2' } as never)).toBeUndefined(); // silent today
+    expect(protoArity({ params: '2' } as never)).toBeUndefined();
     expect(validatePrototypes({ f: { params: '2' } })).toEqual([
       'f: "params" must be a non-negative integer or a list of type strings',
     ]);

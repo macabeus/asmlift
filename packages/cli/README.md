@@ -101,22 +101,6 @@ compiler's codegen, so the named spelling and its raw-address sibling are both e
 `--score-against`'s byte-diff picks the winner — a tie goes to the name. Unmapped addresses
 (MMIO registers, unnamed cells) keep the honest cast spelling.
 
-### What the ELF cannot tell you
-
-A DWARF signature exists only for a function the compiler **compiled**. A callee still written in
-assembly has none, so the frontend counts live argument registers instead — and when the compiler
-happened to leave values in the next ones, it over-counts. Nothing in the register file can say
-otherwise, so `--proto` is how you state the arity you know:
-
-```
-echo '{"thunk_HeapFree": {"params": 1}}' > proto.json
-asmlift fn.s --config decomp.yaml --score-against build/x.o --proto proto.json
-```
-
-On one klonoa function that single arity is worth **53 objdiff points**. A malformed table is
-refused rather than ignored: `params: "1"` would otherwise fall back to the guessed arity, which is
-the same 53 points with nothing said about it.
-
 ### Producing the ELF
 
 asmlift only cares which sections end up in the one file `elf:` names, so mix and match:
@@ -140,6 +124,25 @@ A worked example with all three channels is the Klonoa decomp's
 [`asmlift-elf` target](https://github.com/Dream-Atelier/kl-eod-decomp/blob/main/Makefile):
 agbcc `-g` for shapes and signatures, plus a macro-only sidecar graft; the project's default
 `make` sha-verifies the same link.
+
+### When there is no signature: `--proto`
+
+A callee still written in assembly was never compiled from C, so no `-g` build produces a signature
+for it. The frontend then counts the contiguous argument registers holding a value at the call — an
+intervening call disproves some of those and they are dropped, but a value the compiler merely left
+behind in the next register reads as an argument, and nothing in the register file distinguishes the
+two. The call comes out with arguments the callee never took.
+
+`--proto` is how you state the arity you know:
+
+```
+echo '{"AsmCallee": {"params": 1}}' > proto.json
+asmlift fn.s --target agbcc --proto proto.json
+```
+
+Measured on one real function, a single callee's arity is worth 53 objdiff points. A malformed
+entry is refused (exit `64`) rather than ignored — `params: "1"` would otherwise read as an omitted
+`params` and fall back to the same guess, costing those points with nothing said about it.
 
 ## Using it as a library
 
