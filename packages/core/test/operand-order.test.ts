@@ -7,7 +7,10 @@ import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
 import { parse } from '../src/ir/parse';
+import { T } from '../src/ir/types';
 import { verify } from '../src/ir/verify';
+import type { Expr, SFn, Stmt } from '../src/l3/ast';
+import { mulFirstSums } from '../src/l3/mulfirst';
 import { decompile } from '../src/pipeline';
 import { recoverTypes } from '../src/raise/recover';
 import { structure } from '../src/structure/structure';
@@ -60,4 +63,37 @@ test('the bg_area shape end-to-end: loads re-spell w-first through the full pipe
   const src = decompile('bg_area', `bg_area:\n${asm}\n`, ARMV4T_AGBCC).source;
   expect(src).toMatch(/field_16 \* .*field_18/); // w * h, the evaluation order
   expect(src).not.toMatch(/field_18 \* .*field_16/);
+});
+
+// ---- /mulfirst (l3/mulfirst.ts) ----
+
+const V = (name: string): Expr => ({ k: 'var', name });
+const fnOf = (value: Expr): SFn => ({
+  name: 'f',
+  params: [
+    { name: 'a', type: T.s(32) },
+    { name: 'b', type: T.s(32) },
+    { name: 'c', type: T.s(32) },
+  ],
+  locals: [],
+  retType: T.s(32),
+  body: [{ k: 'return', value } as Stmt],
+});
+const mul = (l: Expr, r: Expr): Expr => ({ k: 'bin', op: '*', l, r });
+const add = (l: Expr, r: Expr): Expr => ({ k: 'bin', op: '+', l, r });
+
+test('/mulfirst flips `c + a*b` to product-first and declines when already product-first', () => {
+  const out = mulFirstSums(fnOf(add(V('c'), mul(V('a'), V('b')))));
+  expect(out).not.toBeNull();
+  expect(cBackend.emit(out!)).toContain('a * b + c');
+  expect(mulFirstSums(fnOf(add(mul(V('a'), V('b')), V('c'))))).toBeNull();
+});
+
+test('/mulfirst declines a two-product sum (nothing anchors the flip)', () => {
+  expect(mulFirstSums(fnOf(add(mul(V('a'), V('b')), mul(V('b'), V('c')))))).toBeNull();
+});
+
+test('/mulfirst never moves a side containing a call', () => {
+  const call: Expr = { k: 'call', fn: 'g', args: [] };
+  expect(mulFirstSums(fnOf(add(call, mul(V('a'), V('b')))))).toBeNull();
 });
