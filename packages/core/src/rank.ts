@@ -272,15 +272,36 @@ export function enumerateCandidates(
   //
   // Gated on the function HAVING a merge fed by more than one edge — the only thing the axis can
   // change. The dedup below collapses the pair wherever it changed nothing.
+  // `/inplace` — materialize a load that feeds a `cond_br` join arg (structure.ts
+  // materializeJoinFeeds), so the merge homes in the load's own variable and the identity arm
+  // elides to a one-sided in-place overwrite (`v = *p; if (v > 31) v = 32;`). Whether the source
+  // spelled the fresh temp or the overwrite is not derivable from asm, and the recompiled code
+  // differs (the two-sided form needs a second register — at the margin a callee-save push — and
+  // the emptied arm flips the branch sense), so both spellings are emitted and the differ
+  // referees.
+  //
+  // Gated on the function HAVING a load-fed cond_br arg — the only thing the axis can change.
+  const hasLoadFedJoin = probe.blocks.some((b) =>
+    b.ops.some(
+      (op) =>
+        op.opcode === 'cond_br' && op.successors.some((sx) => sx.args.some((a) => probeDefs.get(a)?.opcode === 'load')),
+    ),
+  );
+  const inplaceCands = hasLoadFedJoin
+    ? [
+        ...rereadCands.map((s) => ({ ...s, inplace: false })),
+        ...rereadCands.map((s) => ({ ...s, suffix: `${s.suffix}/inplace`, inplace: true })),
+      ]
+    : rereadCands.map((s) => ({ ...s, inplace: false }));
   const hasMultiEdgeMerge = probe.blocks
     .slice(1)
     .some((b) => b.params.length > 0 && new Set(probe.blocks.filter((pr) => successorsOf(pr).includes(b))).size > 1);
   const senseCands = hasMultiEdgeMerge
     ? [
-        ...rereadCands.map((s) => ({ ...s, mergeNames: false })),
-        ...rereadCands.map((s) => ({ ...s, suffix: `${s.suffix}/merge-names`, mergeNames: true })),
+        ...inplaceCands.map((s) => ({ ...s, mergeNames: false })),
+        ...inplaceCands.map((s) => ({ ...s, suffix: `${s.suffix}/merge-names`, mergeNames: true })),
       ]
-    : rereadCands.map((s) => ({ ...s, mergeNames: false }));
+    : inplaceCands.map((s) => ({ ...s, mergeNames: false }));
 
   const seen = new Set<string>();
   const out: Candidate[] = [];
@@ -313,7 +334,10 @@ export function enumerateCandidates(
       // first, so the entry is always recorded before its merged twin is reached.
       const droppedPrimary = new Set<string>();
       for (const s of senseCands) {
-        if (s.mergeNames && droppedPrimary.has(s.suffix.replace('/merge-names', ''))) {
+        if (
+          (s.mergeNames && droppedPrimary.has(s.suffix.replace('/merge-names', ''))) ||
+          (s.inplace && droppedPrimary.has(s.suffix.replace('/inplace', '')))
+        ) {
           continue;
         }
         // structure() reads `fn` and produces a fresh SFn (it does not mutate `fn`), so both branch
@@ -326,15 +350,16 @@ export function enumerateCandidates(
             anchorConstCopies: s.anchor,
             spellBitfieldMembers: s.bitfields,
             rereadGlobals: s.reread,
+            materializeJoinFeeds: s.inplace,
             coalesceMergeNames: s.mergeNames,
           });
         } catch (e) {
-          if (!s.anchor && s.bitfields && !s.reread && !s.mergeNames) {
+          if (!s.anchor && s.bitfields && !s.reread && !s.inplace && !s.mergeNames) {
             throw e; // the base axes keep their behavior: a structuring failure aborts the row
           }
-          if (!s.mergeNames) {
-            droppedPrimary.add(s.suffix);
-          }
+          // Recorded for EVERY dropped variant: a candidate with more axes on looks its siblings
+          // up by stripping one axis at a time, and the stripped key can itself carry the other.
+          droppedPrimary.add(s.suffix);
           // an anchored variant that fails structuring or its contracts is a dropped lever, never
           // an aborted enumeration — same rule as respell below
           opts.onLeverError?.(name + s.suffix, e instanceof Error ? e.message.split('\n')[0] : String(e));
