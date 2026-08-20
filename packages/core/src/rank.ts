@@ -506,7 +506,15 @@ export function enumerateCandidates(
         respell('/livebase', livebase);
         respell('/livebase/volatile', () => {
           const r = livebase();
-          return r ? volatilePtrLocals(r) : null;
+          if (!r) {
+            return null;
+          }
+          // Only the locals THIS lever created — the sanction covers the question first askable on
+          // the lever's own output; qualifying a pre-existing local here would be the general
+          // /volatile-composed-onto-/livebase product the policy forbids (the primary's /volatile
+          // already asks it for those).
+          const created = new Set(r.locals.slice(sfn.locals.length).map((l) => l.name));
+          return volatilePtrLocals(r, created);
         });
         // the register-copy spelling (l3/regspell.ts): 0–3 variants (base; tail assign-back reusing
         // the dead value var; tail assign-back into a fresh var — the tail choice is allocator-

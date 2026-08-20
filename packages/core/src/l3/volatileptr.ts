@@ -71,8 +71,10 @@ function collectAssigns(stmts: Stmt[], out: { name: string; value: Expr }[]): vo
 }
 
 /** The `/volatile` candidate, or null when no local qualifies. Read-only: returns a fresh SFn
- *  sharing the (unmodified) body. */
-export function volatilePtrLocals(sfn: SFn): SFn | null {
+ *  sharing the (unmodified) body. `only` narrows the lever to the named locals — a /volatile
+ *  PRODUCT (rank.ts) qualifies just the locals its first lever created, so the product never
+ *  degenerates into a general /volatile composition over pre-existing locals. */
+export function volatilePtrLocals(sfn: SFn, only?: ReadonlySet<string>): SFn | null {
   const assigns: { name: string; value: Expr }[] = [];
   collectAssigns(sfn.body, assigns);
   const numericFed = new Set<string>();
@@ -99,7 +101,8 @@ export function volatilePtrLocals(sfn: SFn): SFn | null {
     l.volatile === undefined &&
     l.pointeeVolatile === undefined &&
     numericFed.has(l.name) &&
-    !tainted.has(l.name);
+    !tainted.has(l.name) &&
+    (only === undefined || only.has(l.name));
   if (!sfn.locals.some(qualifies)) {
     return null;
   }

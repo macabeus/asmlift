@@ -183,6 +183,38 @@ describe('/livebase admission (LIVEBASE_GATES: placement heuristics ablated)', (
     expect(hoistReusedGlobalBases(input, LIVEBASE_GATES)).toBe(input);
   });
 
+  // Mixed admitted+refused bases: the lever re-runs on a tree whose head already holds the
+  // default run's init, and pool-load order is FIRST-USE order across both — whichever base the
+  // body touches first gets its init first, not whichever pass hoisted it.
+  const admitted = (v: string): Stmt[] => [
+    { k: 'store', lval: cidx(0x3001000, c(0)), value: { k: 'var', name: v } },
+    { k: 'store', lval: cidx(0x3001000, c(1)), value: { k: 'var', name: v } },
+  ];
+  const refusedLoop: Stmt = {
+    k: 'dowhile',
+    cond: { k: 'bin', op: '!=', l: cidx(0x40000d4, c(2)), r: c(0) },
+    body: [{ k: 'store', lval: cidx(0x40000d4, c(2)), value: c(1) }],
+  };
+  const initOrder = (body: Stmt[]): (number | undefined)[] => {
+    const afterDefault = hoistReusedGlobalBases(fn(body));
+    const out = hoistReusedGlobalBases(afterDefault, LIVEBASE_GATES);
+    expect(out.locals.map((l) => l.name)).toEqual(['p0', 'p1']);
+    return out.body.slice(0, 2).map((s) => {
+      const a = s as Stmt & { k: 'assign' };
+      return (a.value as Expr & { k: 'cast' }).e.k === 'const'
+        ? ((a.value as Expr & { k: 'cast' }).e as Expr & { k: 'const' }).value
+        : undefined;
+    });
+  };
+
+  test('mixed bases, admitted base first-used first: its init stays first', () => {
+    expect(initOrder([...admitted('a0'), refusedLoop])).toEqual([0x3001000, 0x40000d4]);
+  });
+
+  test('mixed bases, refused base first-used first: the lever init moves ahead of the default one', () => {
+    expect(initOrder([refusedLoop, ...admitted('a0')])).toEqual([0x40000d4, 0x3001000]);
+  });
+
   test('a base the default gates already admitted leaves nothing: the lever declines', () => {
     const hoisted = hoistReusedGlobalBases(
       fn([

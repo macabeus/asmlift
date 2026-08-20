@@ -9,18 +9,22 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
-import { BASECSE_GATES } from '../src/l3/basecse';
+import { BASECSE_GATES, LIVEBASE_GATES } from '../src/l3/basecse';
 import { COALESCE_GATES } from '../src/l3/coalesce';
-import { type Gate, gateTableDefects } from '../src/l3/gates';
+import { type Gate, ablateHeuristic, gateTableDefects } from '../src/l3/gates';
 import { LATCH_GATES } from '../src/raise/latch';
 import { PREUPDATE_SINK_GATES } from '../src/structure/hazards';
 import { NAME_COALESCE_GATES } from '../src/structure/namecoalesce';
 
-// Every declared table. A pass that adopts gates.ts and forgets this line gets no contract, which is
-// the one hole the pattern cannot close for itself — so keep it short and obvious.
+// Every declared table, DERIVED tables included (LIVEBASE_GATES is basecse's admission with the
+// placement heuristics ablated — well-formedness is inherited, but registering it keeps the roster
+// the one place that answers "what tables ship?"). A pass that adopts gates.ts and forgets this
+// line gets no contract, which is the one hole the pattern cannot close for itself — so keep it
+// short and obvious.
 const TABLES: Record<string, readonly Gate<never>[]> = {
   COALESCE_GATES: COALESCE_GATES as readonly Gate<never>[],
   BASECSE_GATES: BASECSE_GATES as readonly Gate<never>[],
+  LIVEBASE_GATES: LIVEBASE_GATES as readonly Gate<never>[],
   PREUPDATE_SINK_GATES: PREUPDATE_SINK_GATES as readonly Gate<never>[],
   LATCH_GATES: LATCH_GATES as readonly Gate<never>[],
   NAME_COALESCE_GATES: NAME_COALESCE_GATES as readonly Gate<never>[],
@@ -45,5 +49,24 @@ describe.each(Object.entries(TABLES))('%s', (_name, gates) => {
       .map((g) => ({ id: g.id, guard: g.guardedBy!.split(':').pop()!.trim() }))
       .filter((g) => !titles.includes(g.guard));
     expect(missing).toEqual([]);
+  });
+});
+
+describe('ablateHeuristic', () => {
+  const table: readonly Gate<{ x: number }>[] = [
+    { id: 'heuristic-rule', why: 'a codegen preference the differ referees', sound: false, rejects: () => false },
+    { id: 'sound-rule', why: 'removing it makes a candidate wrong', sound: true, guardedBy: 'x', rejects: () => false },
+  ];
+
+  test('ablates a heuristic gate', () => {
+    expect(ablateHeuristic(table, 'heuristic-rule').map((g) => g.id)).toEqual(['sound-rule']);
+  });
+
+  test('refuses to ablate a sound gate', () => {
+    expect(() => ablateHeuristic(table, 'sound-rule')).toThrow(/sound/);
+  });
+
+  test('still throws on an unknown id', () => {
+    expect(() => ablateHeuristic(table, 'no-such-gate')).toThrow(/no gate/);
   });
 });
