@@ -151,7 +151,15 @@ describe('bench setup never mutates an existing checkout', () => {
     }
   });
 
-  const snapshot = (dir: string): string => readdirSync(dir, { recursive: true }).map(String).sort().join('\n');
+  // Transient lock files (.git/objects/maintenance.lock, index.lock) come and go under git's
+  // OWN background maintenance, racing the before/after comparison — they are not evidence of
+  // a write by the code under test.
+  const snapshot = (dir: string): string =>
+    readdirSync(dir, { recursive: true })
+      .map(String)
+      .filter((f) => !f.endsWith('.lock'))
+      .sort()
+      .join('\n');
 
   test('an existing NON-git dir is reported, not cloned into', () => {
     const dir = join(scratch(), 'fakeproj');
