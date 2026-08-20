@@ -412,11 +412,13 @@ export function enumerateCandidates(
         //
         // POLICY: re-spellings derive from the BASE spelling only — levers do not compose
         // (an /indexed + /regcopy product is deferred until a row demands it). Products with
-        // /volatile are the ONE sanctioned exception, and only for a lever that CREATES a numeric-
-        // address pointer local — /indexed (l3/reindex.ts v2 keeps a walk base as one) and
-        // /livebase (the hoist introduces one): whether THAT new local pointed at volatile data is
-        // the same underdetermined question /volatile answers on the primary, first askable on the
-        // lever's own output. Each product needed a row to demand it. And a lever must
+        // /volatile are the ONE sanctioned exception, and only onto a lever whose re-spelling
+        // CENTRES ON a numeric-address pointer local — the joint spelling (the lever plus
+        // volatile on that local) is reachable from neither lever alone. Each product narrows
+        // /volatile to the lever's own locals (volatilePtrLocals' `only`): /indexed to the walk
+        // bases it kept, /livebase to the locals its hoist created — qualifying any OTHER local
+        // would be the general composition this policy forbids, since the primary's /volatile
+        // already asks the question for those. Each product needed a row to demand it. And a lever must
         // PRESERVE SEMANTICS by construction: the differ referees byte-exactness (a wrong candidate
         // can never fake a score-0 match), but on a NONMATCH row the best-scoring source is shown
         // to the user — a semantically-wrong re-spelling there is plausible-but-wrong output, the
@@ -490,8 +492,9 @@ export function enumerateCandidates(
         enumerate('/coalesce', () => sfn);
         respell('/indexed', () => reindexWalks(sfn));
         respell('/indexed/volatile', () => {
-          const r = reindexWalks(sfn);
-          return r ? volatilePtrLocals(r) : null;
+          const kept = new Set<string>();
+          const r = reindexWalks(sfn, kept);
+          return r ? volatilePtrLocals(r, kept) : null;
         });
         // `/livebase` — hoist a reused leaf base the default basecse pass REFUSED (l3/basecse.ts,
         // LIVEBASE_GATES): its `loop` and `repeated-const-offset` rules predict re-materialization,
@@ -509,11 +512,10 @@ export function enumerateCandidates(
           if (!r) {
             return null;
           }
-          // Only the locals THIS lever created — the sanction covers the question first askable on
-          // the lever's own output; qualifying a pre-existing local here would be the general
-          // /volatile-composed-onto-/livebase product the policy forbids (the primary's /volatile
-          // already asks it for those).
-          const created = new Set(r.locals.slice(sfn.locals.length).map((l) => l.name));
+          // Only the locals THIS lever created (a name-diff, not a positional slice, so a pass
+          // that ever reorders locals cannot silently empty the set) — see the POLICY note above.
+          const before = new Set(sfn.locals.map((l) => l.name));
+          const created = new Set(r.locals.filter((l) => !before.has(l.name)).map((l) => l.name));
           return volatilePtrLocals(r, created);
         });
         // the register-copy spelling (l3/regspell.ts): 0–3 variants (base; tail assign-back reusing

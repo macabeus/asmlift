@@ -215,6 +215,24 @@ describe('/livebase admission (LIVEBASE_GATES: placement heuristics ablated)', (
     expect(initOrder([refusedLoop, ...admitted('a0')])).toEqual([0x40000d4, 0x3001000]);
   });
 
+  test('a head write to a `volatile` local ends the reorderable run: volatile write order is kept', () => {
+    const input: SFn = {
+      ...fn([
+        { k: 'assign', name: 'v1', value: { k: 'cast', to: T.ptr(T.int(8, false)), e: c(0x111) } },
+        { k: 'assign', name: 'v2', value: { k: 'cast', to: T.ptr(T.int(8, false)), e: c(0x222) } },
+        { k: 'store', lval: cidx(0x3001000, c(0)), value: { k: 'var', name: 'v2' } },
+        { k: 'store', lval: cidx(0x3001000, c(1)), value: { k: 'var', name: 'v1' } },
+      ]),
+      locals: [
+        { name: 'v1', type: T.ptr(T.int(8, false)), volatile: true },
+        { name: 'v2', type: T.ptr(T.int(8, false)), volatile: true },
+      ],
+    };
+    const out = hoistReusedGlobalBases(input);
+    // the hoist init lands above, and v1/v2 keep their order even though v2 is first-used first
+    expect(out.body.slice(0, 3).map((s) => (s as Stmt & { k: 'assign' }).name)).toEqual(['p0', 'v1', 'v2']);
+  });
+
   test('a base the default gates already admitted leaves nothing: the lever declines', () => {
     const hoisted = hoistReusedGlobalBases(
       fn([

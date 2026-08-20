@@ -430,3 +430,9 @@ test('the /indexed/volatile product: the kept numeric base qualifies for the vol
   const vol = volatilePtrLocals(indexed!);
   expect(vol?.locals.find((l) => l.name === 'v0')?.pointeeVolatile).toBe(true);
 });
+
+test('keptWalks collects the walk-pointer names a fired loop kept as its base', () => {
+  const kept = new Set<string>();
+  expect(reindexWalks(guardedCountdown(), kept)).not.toBeNull();
+  expect(kept).toEqual(new Set(['v0']));
+});

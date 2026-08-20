@@ -224,9 +224,20 @@ export function hoistReusedGlobalBases(sfn: SFn, gates: readonly Gate<BaseKey>[]
   // Pool-load order (see `collect`): inits emit in first-use order. When rank's /livebase re-runs
   // this pass, the tree's head already carries the default run's inits — blindly prepending would
   // spell the new base's load above locals the compiler loads first. So the head run of
-  // init-shaped assigns (a cast of an addr/const leaf: reads nothing, writes its own local, so
-  // any order among them means the same thing) is re-ordered together with the new inits by each
-  // local's first use in the remaining body. Ties keep list order, existing inits first.
+  // init-shaped assigns is re-ordered together with the new inits by each local's first use in
+  // the remaining body; ties keep list order, existing inits first. This deliberately reaches the
+  // single default run too (a head of user pointer inits before a firing hoist), where it repairs
+  // the same invariant. An init-shaped assign is a ptr-cast of an addr/const leaf into a declared
+  // NON-VOLATILE local — it reads nothing and writes its own plain cell, so any order among them
+  // means the same thing. The volatile check is load-bearing: two writes to `volatile` locals are
+  // observably ordered, so one at the head simply ends the reorderable run.
+  const plainLocals = new Set(sfn.locals.filter((l) => !l.volatile).map((l) => l.name));
+  const isInitShaped = (s: Stmt): s is Stmt & { k: 'assign' } =>
+    s.k === 'assign' &&
+    plainLocals.has(s.name) &&
+    s.value.k === 'cast' &&
+    s.value.to.kind === 'ptr' &&
+    isHoistableBase(s.value.e);
   let headLen = 0;
   while (headLen < rewritten.length && isInitShaped(rewritten[headLen])) {
     headLen++;
@@ -243,9 +254,6 @@ export function hoistReusedGlobalBases(sfn: SFn, gates: readonly Gate<BaseKey>[]
   inits.sort((a, b) => firstUse.get(a.name)! - firstUse.get(b.name)!);
   return { ...sfn, body: [...inits, ...rest], locals: [...sfn.locals, ...newLocals] };
 }
-
-const isInitShaped = (s: Stmt): s is Stmt & { k: 'assign' } =>
-  s.k === 'assign' && s.value.k === 'cast' && isHoistableBase(s.value.e);
 
 /** Whether `name` occurs as a `var` anywhere in the statement, nested statements included. */
 function stmtMentionsVar(s: Stmt, name: string): boolean {
