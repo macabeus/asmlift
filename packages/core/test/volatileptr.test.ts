@@ -12,7 +12,7 @@ const fn = (locals: SFn['locals'], body: Stmt[]): SFn => ({
   name: 'f',
   params: [],
   locals,
-  retType: T.void_,
+  retType: T.void(),
   body,
 });
 
@@ -28,11 +28,11 @@ test('a pointer local assigned a numeric address becomes pointer-to-volatile', (
     ],
   );
   const out = volatilePtrLocals(s);
-  expect(out?.locals.find((l) => l.name === 'p')?.volatile).toBe(true);
+  expect(out?.locals.find((l) => l.name === 'p')?.pointeeVolatile).toBe(true);
   // the integer local is untouched even though it is const-assigned
-  expect(out?.locals.find((l) => l.name === 'n')?.volatile).toBeUndefined();
+  expect(out?.locals.find((l) => l.name === 'n')?.pointeeVolatile).toBeUndefined();
   // read-only: the input tree is not mutated
-  expect(s.locals.find((l) => l.name === 'p')?.volatile).toBeUndefined();
+  expect(s.locals.find((l) => l.name === 'p')?.pointeeVolatile).toBeUndefined();
 });
 
 test('an assignment nested in a loop arm still qualifies', () => {
@@ -46,7 +46,7 @@ test('an assignment nested in a loop arm still qualifies', () => {
       },
     ],
   );
-  expect(volatilePtrLocals(s)?.locals[0].volatile).toBe(true);
+  expect(volatilePtrLocals(s)?.locals[0].pointeeVolatile).toBe(true);
 });
 
 test('a symbol-fed pointer local is excluded — the map owns that declaration', () => {
@@ -59,5 +59,29 @@ test('a symbol-fed pointer local is excluded — the map owns that declaration',
 
 test('no qualifying local declines rather than duplicating the primary', () => {
   const s = fn([{ name: 'n', type: T.s(32) }], [{ k: 'assign', name: 'n', value: { k: 'const', value: 3 } }]);
+  expect(volatilePtrLocals(s)).toBeNull();
+});
+
+test('NULL and zero sentinels never qualify — 0 is not an address', () => {
+  const s = fn(
+    [{ name: 'p', type: T.ptr(T.u(16)) }],
+    [{ k: 'assign', name: 'p', value: { k: 'cast', to: T.ptr(T.u(16)), e: { k: 'const', value: 0 } } }],
+  );
+  expect(volatilePtrLocals(s)).toBeNull();
+});
+
+test('an addr assignment anywhere VETOES a local that also sees a numeric address', () => {
+  const s = fn(
+    [{ name: 'p', type: T.ptr(T.u(16)) }],
+    [
+      { k: 'assign', name: 'p', value: { k: 'const', value: 0x3000010 } },
+      {
+        k: 'if',
+        cond: { k: 'var', name: 'p' },
+        then: [{ k: 'assign', name: 'p', value: { k: 'addr', name: 'gBuf' } }],
+        else: [],
+      },
+    ],
+  );
   expect(volatilePtrLocals(s)).toBeNull();
 });

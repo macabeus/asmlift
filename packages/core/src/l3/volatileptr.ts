@@ -14,40 +14,47 @@
 // one. C89 also admits the assignment without a cast change — the qualifier is added on the
 // pointee, and assignment may add pointee qualifiers.
 //
-// GATE: only a local of pointer type assigned a bare numeric constant (or a cast of one)
-// somewhere in the body. A local fed by a global's address (`addr`) is excluded — the symbol
-// map owns that declaration's volatility, and this lever must not contradict it. No qualifying
-// local ⇒ decline (null), so the lever never emits a duplicate of the primary.
+// GATE: only a local of pointer type assigned a bare NONZERO numeric constant (or a cast of
+// one) somewhere in the body — `0` is NULL, never an address. An `addr` assignment anywhere
+// VETOES the local, qualifying assignments on other paths notwithstanding: the symbol map owns
+// that declaration's volatility, and a mixed-feed local (`p = &gSym` in one arm, a raw address
+// in another) would read the mapped global through a volatile view the map never granted. No
+// qualifying local ⇒ decline (null), so the lever never emits a duplicate of the primary.
 import { type Expr, type SFn, type Stmt } from './ast';
 
 const isNumericAddr = (e: Expr): boolean =>
-  e.k === 'const' || (e.k === 'cast' && e.to.kind === 'ptr' && isNumericAddr(e.e));
+  (e.k === 'const' && e.value !== 0) || (e.k === 'cast' && e.to.kind === 'ptr' && isNumericAddr(e.e));
 
-function collectConstAssigned(stmts: Stmt[], out: Set<string>): void {
+const feedsAddr = (e: Expr): boolean => e.k === 'addr' || (e.k === 'cast' && feedsAddr(e.e));
+
+function collectFeeds(stmts: Stmt[], numeric: Set<string>, symbol: Set<string>): void {
   for (const s of stmts) {
     switch (s.k) {
       case 'assign':
         if (isNumericAddr(s.value)) {
-          out.add(s.name);
+          numeric.add(s.name);
+        }
+        if (feedsAddr(s.value)) {
+          symbol.add(s.name);
         }
         break;
       case 'if':
-        collectConstAssigned(s.then, out);
-        collectConstAssigned(s.else, out);
+        collectFeeds(s.then, numeric, symbol);
+        collectFeeds(s.else, numeric, symbol);
         break;
       case 'while':
       case 'dowhile':
-        collectConstAssigned(s.body, out);
+        collectFeeds(s.body, numeric, symbol);
         break;
       case 'for':
-        collectConstAssigned([s.init, s.inc], out);
-        collectConstAssigned(s.body, out);
+        collectFeeds([s.init, s.inc], numeric, symbol);
+        collectFeeds(s.body, numeric, symbol);
         break;
       case 'switch':
         for (const c of s.cases) {
-          collectConstAssigned(c.body, out);
+          collectFeeds(c.body, numeric, symbol);
         }
-        collectConstAssigned(s.default ?? [], out);
+        collectFeeds(s.default ?? [], numeric, symbol);
         break;
       default:
         break;
@@ -58,12 +65,17 @@ function collectConstAssigned(stmts: Stmt[], out: Set<string>): void {
 /** The `/volatile` candidate, or null when no local qualifies. Read-only: returns a fresh SFn
  *  sharing the (unmodified) body. */
 export function volatilePtrLocals(sfn: SFn): SFn | null {
-  const constAssigned = new Set<string>();
-  collectConstAssigned(sfn.body, constAssigned);
+  const numericFed = new Set<string>();
+  const symbolFed = new Set<string>();
+  collectFeeds(sfn.body, numericFed, symbolFed);
   const qualifies = (l: SFn['locals'][number]): boolean =>
-    l.type.kind === 'ptr' && l.volatile === undefined && constAssigned.has(l.name);
+    l.type.kind === 'ptr' &&
+    l.volatile === undefined &&
+    l.pointeeVolatile === undefined &&
+    numericFed.has(l.name) &&
+    !symbolFed.has(l.name);
   if (!sfn.locals.some(qualifies)) {
     return null;
   }
-  return { ...sfn, locals: sfn.locals.map((l) => (qualifies(l) ? { ...l, volatile: true } : l)) };
+  return { ...sfn, locals: sfn.locals.map((l) => (qualifies(l) ? { ...l, pointeeVolatile: true } : l)) };
 }

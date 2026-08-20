@@ -339,6 +339,11 @@ export function enumerateCandidates(
           (s.mergeNames && droppedPrimary.has(s.suffix.replace('/merge-names', ''))) ||
           (s.inplace && droppedPrimary.has(s.suffix.replace('/inplace', '')))
         ) {
+          // A SKIPPED variant is recorded exactly like a dropped one, or the closure would not be
+          // transitive: with plain X dropped and X/inplace skipped-but-unrecorded,
+          // X/inplace/merge-names would find neither stripped key and run — shipping a
+          // double-lever candidate where its ancestor failed the boundary contracts.
+          droppedPrimary.add(s.suffix);
           continue;
         }
         // structure() reads `fn` and produces a fresh SFn (it does not mutate `fn`), so both branch
