@@ -288,6 +288,9 @@ export function enumerateCandidates(
         op.opcode === 'cond_br' && op.successors.some((sx) => sx.args.some((a) => probeDefs.get(a)?.opcode === 'load')),
     ),
   );
+  // Order is load-bearing for the dropped-primary skip below, same as merge-names': every
+  // `inplace: false` sibling enumerates before its `/inplace` twin, so a twin's stripped-key
+  // lookup always finds a sibling that has already run (or been condemned).
   const inplaceCands = hasLoadFedJoin
     ? [
         ...rereadCands.map((s) => ({ ...s, inplace: false })),

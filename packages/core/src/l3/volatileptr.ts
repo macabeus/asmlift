@@ -15,46 +15,54 @@
 // pointee, and assignment may add pointee qualifiers.
 //
 // GATE: only a local of pointer type assigned a bare NONZERO numeric constant (or a cast of
-// one) somewhere in the body — `0` is NULL, never an address. An `addr` assignment anywhere
-// VETOES the local, qualifying assignments on other paths notwithstanding: the symbol map owns
-// that declaration's volatility, and a mixed-feed local (`p = &gSym` in one arm, a raw address
-// in another) would read the mapped global through a volatile view the map never granted. No
-// qualifying local ⇒ decline (null), so the lever never emits a duplicate of the primary.
-import { type Expr, type SFn, type Stmt } from './ast';
+// one) somewhere in the body — `0` is NULL, never an address. A value CONTAINING a global's
+// address — `&gSym` at ANY depth: under a cast, inside interior-address arithmetic
+// (`(u16 *)((u32)&gSym + 8)`) — VETOES the local, qualifying assignments on other paths
+// notwithstanding, and the veto propagates through assignments to a FIXPOINT (`q` tainted,
+// `p = q` taints `p`; conservatively, `p` assigned ANY expression mentioning a tainted name).
+// The symbol map owns a declared global's volatility, and a mixed-feed local would read the
+// mapped global through a volatile view the map never granted. No qualifying local ⇒ decline
+// (null), so the lever never emits a duplicate of the primary.
+import { type Expr, type SFn, type Stmt, mapExprChildren } from './ast';
 
 const isNumericAddr = (e: Expr): boolean =>
   (e.k === 'const' && e.value !== 0) || (e.k === 'cast' && e.to.kind === 'ptr' && isNumericAddr(e.e));
 
-const feedsAddr = (e: Expr): boolean => e.k === 'addr' || (e.k === 'cast' && feedsAddr(e.e));
+const exprHas = (e: Expr, pred: (x: Expr) => boolean): boolean => {
+  if (pred(e)) {
+    return true;
+  }
+  let hit = false;
+  mapExprChildren(e, (c) => {
+    hit ||= exprHas(c, pred);
+    return c;
+  });
+  return hit;
+};
 
-function collectFeeds(stmts: Stmt[], numeric: Set<string>, symbol: Set<string>): void {
+function collectAssigns(stmts: Stmt[], out: { name: string; value: Expr }[]): void {
   for (const s of stmts) {
     switch (s.k) {
       case 'assign':
-        if (isNumericAddr(s.value)) {
-          numeric.add(s.name);
-        }
-        if (feedsAddr(s.value)) {
-          symbol.add(s.name);
-        }
+        out.push({ name: s.name, value: s.value });
         break;
       case 'if':
-        collectFeeds(s.then, numeric, symbol);
-        collectFeeds(s.else, numeric, symbol);
+        collectAssigns(s.then, out);
+        collectAssigns(s.else, out);
         break;
       case 'while':
       case 'dowhile':
-        collectFeeds(s.body, numeric, symbol);
+        collectAssigns(s.body, out);
         break;
       case 'for':
-        collectFeeds([s.init, s.inc], numeric, symbol);
-        collectFeeds(s.body, numeric, symbol);
+        collectAssigns([s.init, s.inc], out);
+        collectAssigns(s.body, out);
         break;
       case 'switch':
         for (const c of s.cases) {
-          collectFeeds(c.body, numeric, symbol);
+          collectAssigns(c.body, out);
         }
-        collectFeeds(s.default ?? [], numeric, symbol);
+        collectAssigns(s.default ?? [], out);
         break;
       default:
         break;
@@ -65,15 +73,33 @@ function collectFeeds(stmts: Stmt[], numeric: Set<string>, symbol: Set<string>):
 /** The `/volatile` candidate, or null when no local qualifies. Read-only: returns a fresh SFn
  *  sharing the (unmodified) body. */
 export function volatilePtrLocals(sfn: SFn): SFn | null {
+  const assigns: { name: string; value: Expr }[] = [];
+  collectAssigns(sfn.body, assigns);
   const numericFed = new Set<string>();
-  const symbolFed = new Set<string>();
-  collectFeeds(sfn.body, numericFed, symbolFed);
+  const tainted = new Set<string>();
+  for (const a of assigns) {
+    if (isNumericAddr(a.value)) {
+      numericFed.add(a.name);
+    }
+    if (exprHas(a.value, (x) => x.k === 'addr')) {
+      tainted.add(a.name);
+    }
+  }
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const a of assigns) {
+      if (!tainted.has(a.name) && exprHas(a.value, (x) => x.k === 'var' && tainted.has(x.name))) {
+        tainted.add(a.name);
+        grew = true;
+      }
+    }
+  }
   const qualifies = (l: SFn['locals'][number]): boolean =>
     l.type.kind === 'ptr' &&
     l.volatile === undefined &&
     l.pointeeVolatile === undefined &&
     numericFed.has(l.name) &&
-    !symbolFed.has(l.name);
+    !tainted.has(l.name);
   if (!sfn.locals.some(qualifies)) {
     return null;
   }

@@ -85,3 +85,42 @@ test('an addr assignment anywhere VETOES a local that also sees a numeric addres
   );
   expect(volatilePtrLocals(s)).toBeNull();
 });
+
+test('an interior global address — addr under arithmetic — vetoes, not only a bare addr', () => {
+  const s = fn(
+    [{ name: 'p', type: T.ptr(T.u(16)) }],
+    [
+      { k: 'assign', name: 'p', value: { k: 'const', value: 0x3000010 } },
+      {
+        k: 'assign',
+        name: 'p',
+        value: {
+          k: 'cast',
+          to: T.ptr(T.u(16)),
+          e: {
+            k: 'bin',
+            op: '+',
+            l: { k: 'cast', to: T.u(32), e: { k: 'addr', name: 'gBuf' } },
+            r: { k: 'const', value: 8 },
+          },
+        },
+      },
+    ],
+  );
+  expect(volatilePtrLocals(s)).toBeNull();
+});
+
+test('the veto propagates through local copies to a fixpoint', () => {
+  const s = fn(
+    [
+      { name: 'q', type: T.ptr(T.u(16)) },
+      { name: 'p', type: T.ptr(T.u(16)) },
+    ],
+    [
+      { k: 'assign', name: 'q', value: { k: 'addr', name: 'gBuf' } },
+      { k: 'assign', name: 'p', value: { k: 'var', name: 'q' } },
+      { k: 'assign', name: 'p', value: { k: 'const', value: 0x3000010 } },
+    ],
+  );
+  expect(volatilePtrLocals(s)).toBeNull();
+});
