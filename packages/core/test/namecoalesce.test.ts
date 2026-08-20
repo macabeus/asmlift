@@ -1,9 +1,14 @@
 // UNIT tests for the merge-copy coalescer (structure/namecoalesce.ts) — the `/merge-names` axis.
 //
-// The acceptance cases and the ablations both run the REAL pass, through `structure()` on parsed
-// IR, because what a gate protects is only visible in the emitted C: a merge the gate would have
-// refused does not throw, it prints a function that reads the wrong variable. Each ablation
-// therefore asserts BOTH sides — the gated spelling, and the wrong one the ablated table produces.
+// Most of these run the REAL pass through `structure()` on parsed IR, because what a gate protects
+// is only visible in the emitted C: a merge the gate would have refused does not throw, it prints a
+// function that reads the wrong variable. So each ablation asserts BOTH sides — the gated spelling
+// and the wrong one the ablated table produces. Two gates decide on facts a parsed function does
+// not let a test choose freely (a declared type, a sibling parameter's name), and those are driven
+// at the pass's own boundary instead; each says why where it sits.
+//
+// The whole-program check is `namecoalesce-fuzz.test.ts`. These pin named shapes; that one asks
+// whether any merge changes what a function does.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -248,10 +253,10 @@ test('a candidate never unlocks a function the primary declines', () => {
 });
 
 // ── the type rule, at the level it decides on ──────────────────────────────────────────────────
-// Two names whose DECLARATIONS disagree. The shape is not constructible in parsed IR — a
-// successor argument has its parameter's type — but it is reached 100 times over klonoa's 69
-// liftable functions, because a name is declared by the FIRST value to take it and later adopters
-// are not re-checked. So this one is driven at the pass's own boundary.
+// Two names whose DECLARATIONS disagree. A test cannot choose that freely in parsed IR — a
+// successor argument carries its parameter's type — but real code reaches it 136 times over
+// klonoa's 69 liftable functions, because a name is declared by the FIRST value to take it and
+// later adopters are not re-checked. So this one is driven at the pass's own boundary.
 const v = (): Value => mkValue(T.s(32));
 const twoNames = (
   xType: ReturnType<typeof T.s>,
@@ -332,13 +337,12 @@ const twoNames = (
 // `sibling-params` names a hazard `interference` CANNOT see, and the reason is structural rather
 // than empirical: for a block-parameter writer `clobbers` falls to `liveIn`, and `liveIn` excludes a
 // block's own parameters by construction, so both directions are false for a sibling pair whatever
-// the program does. It fires on zero of klonoa's 69 liftable functions — a corpus-size fact, not a
-// subsumption one: over 20 000 fuzzed functions, dropping it changes the renaming in 12% of them
-// and MISCOMPILES 72 (the other ~730 are caught loud by `sequentialize`'s own double-write check,
-// which is the backstop — not evidence that the gate is decorative).
+// the program does. Dropping it over 16 571 fuzzed functions changes 461 of them and MISCOMPILES
+// 54; the other ~880 are caught loud by `sequentialize`'s own double-write check, which is the
+// backstop — not evidence that the gate is decorative.
 //
-// Both halves are asserted: the deps-level pair below shows the renaming itself is wrong, and the
-// end-to-end ablation above shows a real function reaching it.
+// What the deps-level pair adds over the end-to-end ablation above: it shows the RENAMING itself is
+// wrong, rather than that something downstream noticed.
 test('ablating sibling-params puts two parameters of one block under one name', () => {
   const { deps, join, sibling } = twoNames(T.s(32), T.s(32), { withSibling: true });
   expect([...coalesceNames(deps).renames]).toEqual([]);

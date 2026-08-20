@@ -414,9 +414,11 @@ export const SYNTHETIC: SynthSpec[] = [
   // the other is live ACROSS the arm that does not write it — the shape the interference rule has
   // to see, rather than two arms that both decide everything.
   //
-  // mergeloop is the same shape with the join inside a loop, where the names carry a meaning
-  // liveness cannot see (a loop variable read on an exiting edge is the value from BEFORE its
-  // update) and coalescing declines. It is here so that refusal has a row.
+  // mergeloop is the same shape with the join inside a loop, and coalescing is INERT on it: the
+  // naming pipeline already shares every name the arms feed, so no pair is even proposed. That is
+  // worth a row precisely because it is the negative — the shape reaches a loop and the pass has
+  // nothing to do there, which is not the same claim as a rule refusing it. What `loop-escape`
+  // actually costs is visible on `nestedloop`, which this family does not inhabit.
   //
   // WHAT THESE DO NOT COVER, so nobody later reads twelve rows as twelve tests: five decline in the
   // FRONTEND for reasons with nothing to do with merges — MIPS branch-likely (`beql`/`bnezl`), a

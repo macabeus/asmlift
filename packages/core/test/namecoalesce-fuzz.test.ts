@@ -2,17 +2,17 @@
 //
 // The benchmark cannot see this pass's failure mode. A byte score rewards a MATCH, and a candidate
 // that merged two variables it should not have still compiles, still scores, and simply computes
-// something else; both defects the first adversarial round found moved zero benchmark rows. So the
-// oracle has to be the program's own behaviour: structure the same IR twice — once with the axis,
-// once without — interpret both emitted trees, and require the same observable trace.
+// something else — every defect this file has caught moved zero benchmark rows. So the oracle has
+// to be the program's own behaviour: structure the same IR twice — once with the axis, once
+// without — interpret both emitted trees, and require the same observable trace.
 //
 // Arm A: no merge the pass makes changes what the function does. Arm B drops each gate the table
 // calls SOUND and requires that one of them DOES — without which arm A is also what "merged
 // nothing" looks like. Arm B is written over the table, so a rule added later is held to the same
 // bar without anyone remembering to.
 //
-// The generator emits LOOPS by default. Both defects the first round found were loop or
-// mid-block shapes, and a fuzz that cannot reach them would be a green test for the thing it exists
+// The generator emits LOOPS by default. Every defect this has caught has been a loop or a
+// mid-block shape, and a fuzz that cannot reach them would be a green test for the thing it exists
 // to check.
 import { describe, expect, test } from 'vitest';
 

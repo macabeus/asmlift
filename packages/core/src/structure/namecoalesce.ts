@@ -79,7 +79,7 @@
 //
 // AND ONE ASYMMETRY THAT IS NOT A GAP. `type` is sound here, and `canTakeName` has no equivalent:
 // it declares a name from its FIRST taker and never re-checks a later adopter, a disagreement it
-// reaches ~100 times over klonoa's 69 liftable functions. That sounds like the same defect on the
+// reaches 136 times over klonoa's 69 liftable functions. That sounds like the same defect on the
 // committed path, and it was measured: adding the check there moves one row better and two worse,
 // no match flips. The mismatches it tolerates are scalar (`s32` against `u32` — same width, same
 // bytes); what makes the rule SOUND here is the pointer case, where the survivor's declared type
@@ -206,10 +206,7 @@ export function coalesceNames(
       paramBlock.set(p, b);
     }
   }
-  // A block whose in-edge copies a loop emitter may MOVE: it rotates the update to the bottom of
-  // the body and sinks an exit copy in ahead of it, so the write no longer sits on the edge that
-  // carries it. Where that can happen the write site widens to every block the edge's predecessors
-  // reach in one step — the superset `canTakeName` takes everywhere.
+  /** A block whose in-edge copies a loop emitter may MOVE off the edge that carries them. */
   const loopBlocks = new Set<Block>(loops.flatMap((l) => [...l.body]));
   const relocatable = (blk: Block): boolean =>
     loops.some((l) => l.header === blk) || (preds.get(blk) ?? []).some((pr) => loopBlocks.has(pr));
