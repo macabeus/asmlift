@@ -659,11 +659,12 @@ export function lift(
         // `addi r1,r1,N` is frame teardown (skip); any other addi is a real add-immediate.
         case 'addi':
         case 'addic':
-          if (d === 'r1') {
-            break;
-          }
+          // reloc first: a data reloc on a stack adjust is no known compiler's output — loud
           if (ins.sym) {
             relocPlaceholder(ins);
+          }
+          if (d === 'r1') {
+            break;
           }
           emitBin('add', d, read(s), constVal(parseImm(t)));
           break;

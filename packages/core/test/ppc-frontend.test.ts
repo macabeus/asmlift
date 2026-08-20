@@ -274,3 +274,8 @@ test('li and ori carrying a data reloc are placeholders too — decline loud', (
   const ori = '0:\tori     r4,r4,0\n\t\t\t0: R_PPC_ADDR16_LO gVal\n4:\tlwz     r3,0(r4)\n8:\tblr\n';
   expect(() => dis('orilo', ori)).toThrow(/data relocation/);
 });
+
+test('a reloc on a frame adjust (`addi r1`) is still loud — the teardown skip comes second', () => {
+  const asm = '0:\taddi    r1,r1,0\n\t\t\t0: R_PPC_ADDR16_LO gFrame\n4:\tli      r3,5\n8:\tblr\n';
+  expect(() => dis('fradj', asm)).toThrow(/data relocation/);
+});

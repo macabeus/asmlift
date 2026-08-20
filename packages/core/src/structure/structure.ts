@@ -1771,12 +1771,16 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
           (db.opcode === 'load' || db.opcode === 'aload') &&
           da.attrs.listOrder !== true &&
           db.attrs.listOrder !== true &&
-          // MATERIALIZED defs decline: their evaluation happened at their def statement, so
-          // re-ordering the reference here re-orders nothing and only churns the spelling away
-          // from the machine order the allocator saw. An inlined def — a deref, a field, a bare
-          // scalar global — evaluates at THIS site, wherever recovery spells it.
-          !materialize.has(da) &&
-          !materialize.has(db) &&
+          // NAMED values decline: a value that renders as a name here — a materialized def
+          // (varName), a loop-carried value in a post-loop region (activeSub) — was evaluated at
+          // its def statement, so re-ordering the reference re-orders nothing and only churns the
+          // spelling away from the machine order the allocator saw. An inlined def — a deref, a
+          // field, a bare scalar global (whose `var` node lowerDef itself mints) — evaluates at
+          // THIS site, wherever recovery spells it.
+          !varName.has(d.operands[0]) &&
+          !varName.has(d.operands[1]) &&
+          activeSub?.has(d.operands[0]) !== true &&
+          activeSub?.has(d.operands[1]) !== true &&
           ctype(l)?.kind !== 'ptr' &&
           ctype(r)?.kind !== 'ptr' &&
           !exprHasEffect(l) &&

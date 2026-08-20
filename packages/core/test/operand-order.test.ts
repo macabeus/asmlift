@@ -138,3 +138,34 @@ test('a bare scalar-global pair swaps too: recovery spells the read as a var, bu
   const src = decompile('sgpair', `sgpair:\n${asm}\n`, ARMV4T_AGBCC).source;
   expect(src).toContain('gA * gB');
 });
+
+test('LOOP-CARRIED operand pairs do not swap: they render as loop names, evaluated at their defs', () => {
+  // A do-while region multiplying two back-edge args: both spell as loop variables here, so the
+  // machine operand order is kept whichever way the defs sat in the loop body.
+  const desc = emit(`fn loopcarry {
+^bb0(%0: unk32, %1: s32):
+  br ^bb1(%1, %1)
+^bb1(%2: s32, %3: s32):
+  %4: s32 = load %0 {off=0, signed=false, width=4}
+  %5: s32 = load %0 {off=4, signed=false, width=4}
+  %6: s32 = icmp_slt %4, %5
+  cond_br %6, ^bb1(%5, %4), ^bb2(%5, %4)
+^bb2(%7: s32, %8: s32):
+  %9: s32 = mul %8, %7
+  ret %9
+}`);
+  const asc = emit(`fn loopcarry {
+^bb0(%0: unk32, %1: s32):
+  br ^bb1(%1, %1)
+^bb1(%2: s32, %3: s32):
+  %4: s32 = load %0 {off=0, signed=false, width=4}
+  %5: s32 = load %0 {off=4, signed=false, width=4}
+  %6: s32 = icmp_slt %4, %5
+  cond_br %6, ^bb1(%5, %4), ^bb2(%5, %4)
+^bb2(%7: s32, %8: s32):
+  %9: s32 = mul %7, %8
+  ret %9
+}`);
+  // the two machine orders keep DISTINCT spellings (no collapse to one canonical order)
+  expect(desc).not.toBe(asc);
+});
