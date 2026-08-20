@@ -72,8 +72,9 @@ function collectAssigns(stmts: Stmt[], out: { name: string; value: Expr }[]): vo
 
 /** The `/volatile` candidate, or null when no local qualifies. Read-only: returns a fresh SFn
  *  sharing the (unmodified) body. `only` narrows the lever to the named locals — a /volatile
- *  PRODUCT (rank.ts) qualifies just the locals its first lever created, so the product never
- *  degenerates into a general /volatile composition over pre-existing locals. */
+ *  PRODUCT (rank.ts) qualifies just the locals its first lever centres on (kept walk bases,
+ *  created hoists), so the product never degenerates into a general /volatile composition over
+ *  the function's other locals. */
 export function volatilePtrLocals(sfn: SFn, only?: ReadonlySet<string>): SFn | null {
   const assigns: { name: string; value: Expr }[] = [];
   collectAssigns(sfn.body, assigns);

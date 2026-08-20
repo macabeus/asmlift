@@ -45,8 +45,8 @@ export function without<Ctx>(gates: readonly Gate<Ctx>[], id: string): readonly 
 /** `without` for SHIPPED code. A test may ablate any gate — that is how `guardedBy` differential
  *  tests work — but a pass that re-runs itself with an ablated table as a ranked candidate may
  *  only drop a HEURISTIC: ablating a `sound: true` gate would ship semantically wrong candidates,
- *  and on a nonmatch row the best-scoring source is shown to the user. Throws at module load, so
- *  the mistake cannot ship. */
+ *  and on a nonmatch row the best-scoring source is shown to the user. A derived table is a
+ *  top-level const, so the throw fires at import — the mistake cannot ship. */
 export function ablateHeuristic<Ctx>(gates: readonly Gate<Ctx>[], id: string): readonly Gate<Ctx>[] {
   const g = gates.find((x) => x.id === id);
   if (g?.sound) {
