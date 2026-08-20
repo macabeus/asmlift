@@ -21,7 +21,7 @@
 import { type IrType, T, scalarTypeForAccess } from '../ir/types';
 import type { Expr, SFn, Stmt } from './ast';
 import { mapExprChildren, stmtChildren, stmtExprs } from './ast';
-import { type Gate, firstRejection } from './gates';
+import { type Gate, firstRejection, without } from './gates';
 import { nameAllocator } from './hoist';
 
 // A HOISTABLE base is a bare `addr` (a global address) or a bare `const` (a numeric pointer
@@ -177,13 +177,24 @@ export const BASECSE_GATES: readonly Gate<BaseKey>[] = [
   },
 ];
 
-export function hoistReusedGlobalBases(sfn: SFn): SFn {
+/** The `/livebase` lever's admission (rank.ts): the default rules with both PLACEMENT heuristics
+ *  ablated, keeping only `single-use`. `loop` and `repeated-const-offset` predict which spelling
+ *  the compiler chose, and both predictions have a counterexample — an MMIO poll (`p[2] = go;
+ *  while (p[2] & BUSY) {}`) stores and re-reads a fixed offset through ONE register the whole
+ *  time. Neither gate is `sound`, so ablating them can only change which spelling wins, never
+ *  what a candidate means; the differ referees. */
+export const LIVEBASE_GATES: readonly Gate<BaseKey>[] = without(
+  without(BASECSE_GATES, 'loop'),
+  'repeated-const-offset',
+);
+
+export function hoistReusedGlobalBases(sfn: SFn, gates: readonly Gate<BaseKey>[] = BASECSE_GATES): SFn {
   const c: Collected = { count: new Map(), order: [], meta: new Map(), inLoop: new Set(), constOffCount: new Map() };
   collect(sfn.body, c, false);
   const { count, order, meta } = c;
   const hoisted = order.filter(
     (k) =>
-      firstRejection(BASECSE_GATES, {
+      firstRejection(gates, {
         key: k,
         uses: count.get(k) ?? 0,
         inLoop: c.inLoop.has(k),

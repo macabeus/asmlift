@@ -2,7 +2,8 @@ import { describe, expect, test } from 'vitest';
 
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
-import { hoistReusedGlobalBases } from '../src/l3/basecse';
+import { LIVEBASE_GATES, hoistReusedGlobalBases } from '../src/l3/basecse';
+import { volatilePtrLocals } from '../src/l3/volatileptr';
 
 const idx = (name: string, i: Expr, width = 1): Expr => ({
   k: 'index',
@@ -135,5 +136,61 @@ describe('reused-global-base hoisting', () => {
       ]),
     );
     expect(out.locals).toEqual([]);
+  });
+});
+
+describe('/livebase admission (LIVEBASE_GATES: placement heuristics ablated)', () => {
+  // The MMIO poll: three stores plus a busy-wait re-read of the same fixed offset, all through
+  // one constant base. `loop` and `repeated-const-offset` both reject it, yet the compiler holds
+  // the base in ONE register throughout — the shape the lever exists for.
+  const poll = (): SFn =>
+    fn([
+      { k: 'store', lval: cidx(0x40000d4, c(0)), value: { k: 'var', name: 'a0' } },
+      { k: 'store', lval: cidx(0x40000d4, c(1)), value: { k: 'var', name: 'a1' } },
+      { k: 'store', lval: cidx(0x40000d4, c(2)), value: { k: 'var', name: 'a2' } },
+      { k: 'dowhile', cond: { k: 'bin', op: '!=', l: cidx(0x40000d4, c(2)), r: c(0) }, body: [] },
+    ]);
+
+  test('the poll shape: default gates refuse, LIVEBASE_GATES hoists every access onto one local', () => {
+    const input = poll();
+    expect(hoistReusedGlobalBases(input)).toBe(input);
+
+    const out = hoistReusedGlobalBases(poll(), LIVEBASE_GATES);
+    expect(out.locals).toEqual([{ name: 'p0', type: T.ptr(T.s(32)) }]);
+    expect(out.body[0]).toEqual({
+      k: 'assign',
+      name: 'p0',
+      value: { k: 'cast', to: T.ptr(T.s(32)), e: { k: 'const', value: 0x40000d4 } },
+    });
+    const dw = out.body[4] as Stmt & { k: 'dowhile' };
+    expect((dw.cond as Expr & { k: 'bin' }).l).toEqual({
+      k: 'index',
+      base: { k: 'var', name: 'p0' },
+      idx: c(2),
+      width: 4,
+      signed: true,
+    });
+  });
+
+  test('the /livebase/volatile product: the hoisted numeric base qualifies for the volatile lever', () => {
+    const out = hoistReusedGlobalBases(poll(), LIVEBASE_GATES);
+    const vol = volatilePtrLocals(out);
+    expect(vol?.locals.find((l) => l.name === 'p0')?.pointeeVolatile).toBe(true);
+  });
+
+  test('single-use survives the ablation: one access is still refused, and by the SAME object', () => {
+    const input = fn([{ k: 'store', lval: cidx(0x40000d4, c(0)), value: c(0) }]);
+    expect(hoistReusedGlobalBases(input, LIVEBASE_GATES)).toBe(input);
+  });
+
+  test('a base the default gates already admitted leaves nothing: the lever declines', () => {
+    const hoisted = hoistReusedGlobalBases(
+      fn([
+        { k: 'store', lval: cidx(0x40000d4, c(0)), value: c(0) },
+        { k: 'store', lval: cidx(0x40000d4, c(1)), value: c(0) },
+      ]),
+    );
+    expect(hoisted.locals).toHaveLength(1);
+    expect(hoistReusedGlobalBases(hoisted, LIVEBASE_GATES)).toBe(hoisted);
   });
 });
