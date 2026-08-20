@@ -107,6 +107,7 @@ describe('the definitions are well-formed', () => {
       'loop',
       'nested-loop',
       'shift',
+      'short-circuit',
       'sizeof',
       'switch',
       'ternary',
@@ -209,8 +210,41 @@ describe('the detectors themselves', () => {
 
   it('separates bitwise operators from address-of and short-circuits', () => {
     expect(src('void f(void){ g(&x); }')).toEqual([]);
-    expect(src('void f(void){ if (a && b) g(); }')).toEqual([]);
+    // `&&` is not a bitwise `&` — it is its own tag, and claims neither the other's evidence
+    expect(src('void f(void){ if (a && b) g(); }')).toEqual(['short-circuit']);
     expect(src('void f(void){ y = a & 0xFF; }')).toEqual(['bitwise']);
+  });
+
+  it('separates a branch-deciding short-circuit from the value-producing one', () => {
+    const has = (c: string) => src(c).includes('short-circuit');
+    // the VALUE form is a merged-boolean diamond, a different recovery
+    expect(has('int f(int a,int b){ return a && b; }')).toBe(false);
+    expect(has('void f(void){ int r = a || b; if (r) g(); }')).toBe(false);
+    expect(has('void f(void){ if (a) { g(); } }')).toBe(false);
+    // … including a connective handed to a call or a ternary as a value
+    expect(has('void f(void){ if (f(a && b)) { g(); } }')).toBe(false);
+    expect(has('void f(void){ if ((a && b) ? x : y) g(); }')).toBe(false);
+    // a `for` header holds three clauses and only the MIDDLE one controls anything
+    expect(has('void f(void){ for (i = 0; i < n; i++, j = a && b) g(); }')).toBe(false);
+    expect(has('void f(void){ for (i = 0; i < n && j > 0; i++) g(); }')).toBe(true);
+    // a preprocessor directive is not a statement — real-tier sources are unpreprocessed
+    expect(has('void f(void){ g(); }\n#if (A && B)\nint z;\n#endif')).toBe(false);
+    // … and the real thing, through parenthesised calls, casts and a do-while clause
+    expect(has('void f(void){ if (a && b) { g(); } }')).toBe(true);
+    expect(has('void f(void){ while (f(x) && g(y)) { h(); } }')).toBe(true);
+    expect(has('void f(void){ if ((u8)(a) != 0 || (b & 3)) { g(); } }')).toBe(true);
+    expect(has('void f(void){ do { g(); } while (a && b); }')).toBe(true);
+    // a GROUPING paren is transparent where a CALL's is not — the distinction is what the paren
+    // IS, not how deep it is, and a single non-recursive strip gets both halves wrong
+    expect(has('void f(void){ if (!(a || b)) g(); }')).toBe(true);
+    expect(has('void f(void){ if ((a && b)) g(); }')).toBe(true);
+    expect(has('void f(void){ if (((a && b))) g(); }')).toBe(true);
+    expect(has('void f(void){ if ((a && b) == 0) g(); }')).toBe(true);
+    expect(has('void f(void){ while (!(p && p->next)) g(); }')).toBe(true);
+    expect(has('void f(void){ if (f(g(), a && b)) h(); }')).toBe(false);
+    expect(has('void f(void){ if (h(a && b, f(x))) g(); }')).toBe(false);
+    // a ternary's own `?` stays inside its group, so it does not disqualify the outer connective
+    expect(has('void f(void){ if ((c ? x : y) && z) g(); }')).toBe(true);
   });
 
   it('ignores operators inside comments and string literals', () => {

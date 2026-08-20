@@ -229,6 +229,41 @@ export const FEATURES: readonly FeatureDef[] = [
     seeAlso: ['loop'],
   },
   {
+    id: 'short-circuit',
+    label: 'Short-circuit condition',
+    group: 'control-flow',
+    evidence: 'source',
+    summary: 'an `&&`/`||` that decides a BRANCH rather than producing a value',
+    detail:
+      'Two comparisons that share a target, with nothing between them — the second only runs when ' +
+      'the first did not already settle the question. There is no merged value anywhere to anchor ' +
+      'the recovery: the whole construct is edges, and a compiler is free to reorder the arms and ' +
+      'invert the senses that spell it. The same shape appears as a loop test, where C has no ' +
+      'spelling that avoids repeating the condition, and as a guard whose arms both leave the ' +
+      'function. Reserved for the CONTROL-FLOW form; `return a && b` is a value-producing diamond ' +
+      'with a merged boolean and is a different recovery.',
+    example: {
+      c: 'if (a && b) { p[0] = 1; q[0] = 2; p[1] = 3; q[1] = 4; } else { p[0] = -1; }',
+      asm:
+        '\tcmp\tr0, #0\n' +
+        '\tbeq\t.L3\t@cond_branch\t@ both tests branch to the SAME arm …\n' +
+        '\tcmp\tr1, #0\n' +
+        '\tbeq\t.L3\t@cond_branch\t@ … and nothing runs between them\n' +
+        '\tmov\tr0, #0x1\n' +
+        '\tstr\tr0, [r2]\n' +
+        '\tmov\tr0, #0x2\n' +
+        '\tstr\tr0, [r3]\n' +
+        '\t@ …\n' +
+        '\tb\t.L4\n' +
+        '.L3:\n' +
+        '\tmov\tr0, #0x1\n' +
+        '\tneg\tr0, r0\n' +
+        '\tstr\tr0, [r2]',
+      toolchain: 'agbcc',
+    },
+    seeAlso: ['branch', 'compare', 'bool', 'goto'],
+  },
+  {
     id: 'loop-preupdate',
     label: 'Pre-update loop value',
     group: 'control-flow',

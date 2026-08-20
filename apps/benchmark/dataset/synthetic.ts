@@ -621,6 +621,107 @@ export const SYNTHETIC: SynthSpec[] = [
       '(`&f->v`) rather than being the variable itself, and is read after the loop has moved on',
   },
 
+  // A CONTROL-FLOW short-circuit: an `&&`/`||` that produces no value, only a branch. `a && b`
+  // guarding X and its De Morgan dual `!a || !b` guarding Y are the same program, and agbcc lays
+  // the arms out in SOURCE order — so they are different bytes, and which one was written is
+  // recorded in the branch senses. A decompiler therefore has to choose, and choosing wrong costs
+  // the whole function. The three rows are the two orientations, plus the distance that decides
+  // whether the shape is recognised at all.
+  //
+  // `ifand_near` and `ifand_far` differ in ONE thing: whether the guarded arm fits inside a Thumb
+  // conditional branch's ±256-byte reach. That one distance changes TWO things at once, and the
+  // second is easy to miss.
+  //
+  // It changes what the recogniser can SEE. Past the range agbcc spells the branch
+  // `bne .L1 / b .L2 @long jump`, and a frontend that splits a block at every conditional branch
+  // turns that second instruction into a block whose only op is `br`, sitting on the edge into the
+  // shared block. A recogniser keyed on successor identity cannot see through it, so the fold does
+  // not fire and the tail-duplicated spelling survives — which the compiler cross-jumps back
+  // together, so `ifand_far` matches without anything having recovered the shape.
+  //
+  // And it changes the branch POLARITY, which is what decides the ORIENTATION the fold would emit.
+  // A short branch is `beq shared`, putting the second test on the FALL edge; the long form
+  // inverts to `bne <second test>`, putting it on the TAKEN edge. Those are the fold's two arms —
+  // `logic_or` and `logic_and` — so the near row and the far row do not exercise one code path at
+  // two sizes, they exercise BOTH paths. MEASURED, and it is the opposite of what the distance
+  // suggests: the near row folds to the swapped `||` and misses, and once the trampolines are
+  // normalised away the far row folds to `&&`, the source's own orientation, and still matches.
+  //
+  // `ifor_near` is the ORIENTATION control. The same shape written the other way round matches
+  // today, so the gap is not "this shape is unrecoverable" but "one of the fold's two arms emits
+  // the spelling the compiler did not, and nothing referees it" — and a row that could falsify the
+  // claim is worth more than a third that restates it. There is deliberately no `ifor_far`:
+  // measured, a `||` matches at BOTH distances.
+  //
+  // TOOLCHAINS, measured rather than assumed — and the answer differs per row.
+  //
+  // The two `near` rows run on agbcc AND mwcc, because the orientation defect is not an agbcc
+  // fact: on PowerPC the fold commits to the same `||` spelling, `ifand_near` misses by 18 and
+  // `ifor_near` matches, exactly as on Thumb. Two ISAs and two compilers agreeing is what says the
+  // gap is in the recogniser and the sense lever rather than in anything about ARM.
+  //
+  // The other two toolchains are excluded because on them THE CONSTRUCT IS NOT THERE, which is a
+  // stronger reason than "it would be an ordinary row":
+  //   • gcc2.7.2kmc compiles `if (a && b)` BRANCHLESSLY — `sltu; sltu; and; beqz`. One branch, no
+  //     second test, nothing for a short-circuit recogniser to recognise.
+  //   • ido7.1 fills both branch DELAY SLOTS with work hoisted out of the arms (`beqz a0,…` /
+  //     `li t0,-1`, which is the shared arm's stored value). That makes the second test's block
+  //     impure, and the fold refuses on exactly the ground it documents. The shape dissolves on a
+  //     delay-slot ISA.
+  //
+  // `ifand_far` stays agbcc-only, and here the original reason does hold: the row IS the Thumb
+  // ±256-byte branch range, and no other target has one. mwcc additionally declines it outright on
+  // `stack pointer r1 used as data` (its `_savegpr_14` prologue does `addi r11,r1,80`), which has
+  // nothing to do with short circuits.
+  //
+  // The arm's CONTENT is filler and its SIZE is the feature, so the near arm is a literal PREFIX
+  // of the far one and all three share a signature. Two pointers, deliberately: a Thumb
+  // `str Rd,[Rn,#N]` reaches offset 124, and a single array long enough to force the long branch
+  // would spill past it into a pointer walk — a second recovery idiom riding along inside what is
+  // supposed to be a one-variable control.
+  //
+  // WHAT THESE ROWS MOVE, so the headline is not read as progress: five rows take asmlift 372 →
+  // 375 and m2c 348 → 348. All three gained matches are synthetic rows authored for an
+  // asmlift-specific gap, one of them (`ifand_far`) matching for a reason nothing recovered; and
+  // every row reads `noncompile` for m2c on an unrelated pointer-spelling defect of its own, which
+  // on `ifand_near` hides that its orientation is the RIGHT one. The two gates are not the same
+  // either: `bench regression` fails only on a LOST match, so it holds `ifand_far` and `ifor_near`
+  // and says nothing about `ifand_near` — that one is pinned by
+  // packages/cli/test/matching/shortcircuit-branch.test.ts, which runs with the benchmark refresh
+  // rather than on every PR.
+  {
+    sym: 'ifand_near',
+    src: 'int ifand_near(int a, int b, int *p, int *q){ if (a && b) { p[0] = 1; q[0] = 2; p[1] = 3; q[1] = 4; } else { p[0] = -1; } return p[1]; }',
+    features: ['branch'],
+    toolchains: ['agbcc', 'mwcc_242_81'],
+    ctx: 'int ifand_near(int,int,int*,int*);',
+    note:
+      'the diff is not a near miss but the whole spelling: the arms are exchanged and the ' +
+      "condition negated. m2c prints the source's own orientation here, and its output is " +
+      'byte-exact once the `->unkN` pointer spelling it declines on is legalised — so the ' +
+      'noncompile beside this row is an unrelated defect of its own, not distance from a match',
+  },
+  {
+    sym: 'ifand_far',
+    src: 'int ifand_far(int a, int b, int *p, int *q){ if (a && b) { p[0] = 1; q[0] = 2; p[1] = 3; q[1] = 4; p[2] = 5; q[2] = 6; p[3] = 7; q[3] = 8; p[4] = 9; q[4] = 10; p[5] = 11; q[5] = 12; p[6] = 13; q[6] = 14; p[7] = 15; q[7] = 16; p[8] = 17; q[8] = 18; p[9] = 19; q[9] = 20; p[10] = 21; q[10] = 22; p[11] = 23; q[11] = 24; p[12] = 25; q[12] = 26; p[13] = 27; q[13] = 28; p[14] = 29; q[14] = 30; p[15] = 31; q[15] = 32; p[16] = 33; q[16] = 34; p[17] = 35; q[17] = 36; p[18] = 37; q[18] = 38; p[19] = 39; q[19] = 40; p[20] = 41; q[20] = 42; p[21] = 43; q[21] = 44; p[22] = 45; q[22] = 46; p[23] = 47; q[23] = 48; p[24] = 49; q[24] = 50; p[25] = 51; q[25] = 52; p[26] = 53; q[26] = 54; p[27] = 55; q[27] = 56; p[28] = 57; q[28] = 58; p[29] = 59; q[29] = 60; p[30] = 61; q[30] = 62; p[31] = 63; q[31] = 64; } else { p[0] = -1; } return p[1]; }',
+    features: ['branch'],
+    toolchains: ['agbcc'],
+    ctx: 'int ifand_far(int,int,int*,int*);',
+    note:
+      'MATCHES without anything having recovered the shape: the guarded arm is far enough that the ' +
+      'shared block sits behind a long-branch trampoline, which hides it from the fold that ' +
+      'rewrites `ifand_near`, and the tail-duplicated spelling left behind is one the compiler ' +
+      'cross-jumps back together. The same distance also INVERTS the branch, which is what makes ' +
+      'this row the safe half of the family — see the toolchain and orientation notes above',
+  },
+  {
+    sym: 'ifor_near',
+    src: 'int ifor_near(int a, int b, int *p, int *q){ if (a || b) { p[0] = 1; q[0] = 2; p[1] = 3; q[1] = 4; } else { p[0] = -1; } return p[1]; }',
+    features: ['branch'],
+    toolchains: ['agbcc', 'mwcc_242_81'],
+    ctx: 'int ifor_near(int,int,int*,int*);',
+  },
+
   // The DMA-fill idiom, WITH an uninitialised local — the pair no real row carries. An escaping
   // frame address retracts every `undef` in the function, on the premise that a callee may write
   // any frame offset; a DMA SOURCE register is the case where that premise is false, because the

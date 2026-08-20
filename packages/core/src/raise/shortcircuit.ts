@@ -273,6 +273,35 @@ export function recognizeShortCircuit(fn: Fn): boolean {
 // Every refusal falls through untouched, leaving the tail-duplicated spelling — a miss, never a
 // miscompile. Applied ITERATIVELY, so `a || b || c` folds left-to-right, each round consuming one
 // more condition block.
+//
+// WHICH SPELLING, and why the fold alone does not decide it. `if (a && b) X else Y` and its dual
+// `if (!a || !b) Y else X` are the same program and NOT the same bytes — agbcc lays the arms out in
+// source order, so which was written is recorded in the branch senses. This rewrite keeps ^h's
+// unchanged successor slot, so the connective comes out in the orientation those senses spell: the
+// source's own for a `||` (synthetic:ifor_near:agbcc byte-matches), the dual for an `&&`. Reaching
+// the other is `negateCond`'s job (l3/ast.ts distributes `!(a && b)`), but the lever that calls it —
+// `preserveDivergentBranchSense` — covers DIVERGENT ifs only, so a reconverging one has no dual
+// candidate: synthetic:ifand_near:agbcc, which the un-folded spelling would match.
+//
+// That lever cannot simply be widened. It is a per-FUNCTION boolean defaulting to true on every
+// target, so flipping it for reconverging ifs would flip every `if` in the function at once — and
+// of the 28 real rows carrying the `short-circuit` tag, 22 hold two or more. What this fold's
+// output needs is its own gate, on the condition BEING one of these connectives.
+//
+// WHICH slot ^g lands in is decided by the asm's branch POLARITY, and on Thumb the branch RANGE
+// decides the polarity — so the same source `&&` reaches this pass two different ways:
+//
+//   short branch   `beq shared`         ^g is ^h's FALL  → logic_or  → arms swapped (the miss)
+//   long branch    `bne ^g / b shared`  ^g is ^h's TAKEN → logic_and → source orientation
+//
+// agbcc inverts a conditional it cannot reach, so past ±256 bytes it emits the second form. The
+// trampoline it leaves on the `b` then sits on the edge into the SHARED block and hides that block
+// from the `sharedEdge` search below, so today this fold does not fire there at all
+// (synthetic:ifand_far:agbcc matches on the un-folded spelling). Normalising those blocks away is
+// therefore SAFE for this orientation and not merely tolerable: measured, the fold then fires,
+// emits `&&`, and ifand_far still matches. It is the `logic_or` half that has no dual candidate.
+//
+// Every refusal falls through untouched — a miss, never a miscompile.
 export function recognizeBranchShortCircuit(fn: Fn): boolean {
   let changed = false;
   const term = (b: Block) => b.ops[b.ops.length - 1];
