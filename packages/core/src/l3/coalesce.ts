@@ -1,3 +1,7 @@
+// THE OTHER COALESCER is `structure/namecoalesce.ts`, and the dividing line is worth stating: it
+// merges the SOURCE AND DESTINATION OF A COPY, which is copy coalescing; this one merges two
+// UNRELATED locals whose spans are disjoint, which is register reuse. Neither subsumes the other —
+// a copy pair overlaps by construction, so `overlap` below rejects every candidate that one takes.
 import { typeToString } from '../ir/types';
 import type { Expr, SFn, Stmt } from './ast';
 import { exprChildren, mapExprChildren, stmtChildren, stmtExprs } from './ast';

@@ -143,6 +143,63 @@ export const FEATURES: readonly FeatureDef[] = [
     seeAlso: ['switch', 'goto'],
   },
   {
+    id: 'merge-chain',
+    label: 'Merged value chain',
+    group: 'control-flow',
+    evidence: 'judgement',
+    summary: 'several values are decided by several arms and merged at one join',
+    detail:
+      'The shape that makes destroying SSA cost something. Each arm of a conditional or switch ' +
+      'decides the same set of locals, so the join takes one merge value per local and every arm ' +
+      'hands them over on its edge. A decompiler that gives the merge and one arm the same variable ' +
+      'pays nothing; for every other arm it emits a copy the source never wrote — and the compiled ' +
+      'code below shows what that copy corresponds to, which is nothing: the arms already share ' +
+      'registers, and the join reads its values where they lie. Reserved for bodies where the arms ' +
+      'decide MORE THAN ONE value, and where those values are themselves computed rather than ' +
+      'named already — one value, or a value the arm merely passes through, is coalesced by ' +
+      'walking backward along its own edge and leaves no chain behind.',
+    example: {
+      c:
+        'int x, y, z;\n' +
+        'switch (s) {\n' +
+        '  case 0: x = p[0] > 31 ? 32 : p[0]; y = p[1] > 31 ? 32 : p[1]; z = p[2] > 31 ? 32 : p[2]; break;\n' +
+        '  case 1: x = p[3] > 15 ? 16 : p[3]; y = p[4] > 15 ? 16 : p[4]; z = p[5] > 15 ? 16 : p[5]; break;\n' +
+        '  default: x = p[6] > 7 ? 8 : p[6]; y = p[7] > 7 ? 8 : p[7]; z = p[8] > 7 ? 8 : p[8]; break;\n' +
+        '}\n' +
+        'return x * 100 + y * 10 + z;',
+      // The dataset's `mergechain`, abridged at the `@ …` marks: each arm's clamp is a
+      // `cmp`/`ble`/`mov` the point does not need. What the point DOES need is the register
+      // numbers — every arm lands x in r4, y in r3, z in r2, and the join reads them where they
+      // already are. There is no instruction here for a decompiler's copies to correspond to.
+      asm:
+        '.L4:\t\t\t\t@ case 0 → x in r4, y in r3, z in r2\n' +
+        '\tldr\tr4, [r1]\n' +
+        '\t\t\t\t@ …\n' +
+        '\tldr\tr3, [r1, #0x4]\n' +
+        '\t\t\t\t@ …\n' +
+        '\tldr\tr2, [r1, #0x8]\n' +
+        '\t\t\t\t@ …\n' +
+        '\tb\t.L3\n' +
+        '.L8:\t\t\t\t@ case 1 → THE SAME THREE registers\n' +
+        '\tldr\tr4, [r1, #0xc]\n' +
+        '\t\t\t\t@ …\n' +
+        '\tldr\tr3, [r1, #0x10]\n' +
+        '\t\t\t\t@ …\n' +
+        '\tldr\tr2, [r1, #0x14]\n' +
+        '\t\t\t\t@ …\n' +
+        '.L3:\t\t\t\t@ the join READS r4/r3/r2 — not one copy anywhere\n' +
+        '\tmov\tr0, #0x64\n' +
+        '\tmul\tr0, r0, r4\n' +
+        '\tlsl\tr1, r3, #0x2\n' +
+        '\tadd\tr1, r1, r3\n' +
+        '\tlsl\tr1, r1, #0x1\n' +
+        '\tadd\tr0, r0, r1\n' +
+        '\tadd\tr0, r0, r2',
+      toolchain: 'agbcc',
+    },
+    seeAlso: ['branch', 'switch', 'uninit-local'],
+  },
+  {
     id: 'goto',
     label: 'Goto',
     group: 'control-flow',

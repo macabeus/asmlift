@@ -13,7 +13,7 @@ import { assertDerefsTyped, assertResolved } from './contracts';
 import type { AsmData } from './frontend/asmdata';
 import { frontendFor } from './frontend/registry';
 import { globalCellOf } from './ir/alias';
-import { Fn, type Value, defOpMap } from './ir/core';
+import { Fn, type Value, defOpMap, successorsOf } from './ir/core';
 import { T } from './ir/types';
 import { verify } from './ir/verify';
 import { materializeArgBases } from './l3/argbase';
@@ -256,12 +256,31 @@ export function enumerateCandidates(
       (op) => op.opcode === 'load' && globalCellOf(probeDefs, op.operands[0], op.attrs.off as number) !== null,
     ),
   );
-  const senseCands = readsANamedGlobal
+  const rereadCands = readsANamedGlobal
     ? [
         ...bitfieldCands.map((s) => ({ ...s, reread: false })),
         ...bitfieldCands.map((s) => ({ ...s, suffix: `${s.suffix}/reread-globals`, reread: true })),
       ]
     : bitfieldCands.map((s) => ({ ...s, reread: false }));
+  // `/merge-names` — coalesce two variables a merge copy would join when the values under them
+  // never interfere (structure/namecoalesce.ts). Destroying SSA gives a merge and each arm feeding
+  // it their own variable unless the naming walk happens to share one, and every arm it did not
+  // share with pays a copy. Whether the source had one variable there is not derivable, and the
+  // copies are worth less than they look — agbcc coalesces most of them itself, so the two spellings
+  // compile to nearly the same code and which one scores better is per-function. So both are emitted
+  // and the differ referees.
+  //
+  // Gated on the function HAVING a merge fed by more than one edge — the only thing the axis can
+  // change. The dedup below collapses the pair wherever it changed nothing.
+  const hasMultiEdgeMerge = probe.blocks
+    .slice(1)
+    .some((b) => b.params.length > 0 && new Set(probe.blocks.filter((pr) => successorsOf(pr).includes(b))).size > 1);
+  const senseCands = hasMultiEdgeMerge
+    ? [
+        ...rereadCands.map((s) => ({ ...s, mergeNames: false })),
+        ...rereadCands.map((s) => ({ ...s, suffix: `${s.suffix}/merge-names`, mergeNames: true })),
+      ]
+    : rereadCands.map((s) => ({ ...s, mergeNames: false }));
 
   const seen = new Set<string>();
   const out: Candidate[] = [];
@@ -286,7 +305,17 @@ export function enumerateCandidates(
       // The shared tower spine (pipeline.ts) — the candidate's ONE difference from decompile() is the
       // signedness pin, injected between pre-recovery and recoverTypes via the beforeRecover hook.
       raiseRecovered(fn, target, { beforeRecover: () => pinScalarParams(fn, cand.signed, ptrIdx) });
+      // `/merge-names` combinations whose un-merged sibling was DROPPED. `structure()` already
+      // refuses to let the axis unlock a function the primary declines, but it can only see its own
+      // refusals — a boundary contract fails out here, in `structureChecked`. Without this a
+      // `/reread-globals/merge-names` candidate could ship where plain `/reread-globals` did not,
+      // which is the same trade one level up. `senseCands` puts each `mergeNames:false` sibling
+      // first, so the entry is always recorded before its merged twin is reached.
+      const droppedPrimary = new Set<string>();
       for (const s of senseCands) {
+        if (s.mergeNames && droppedPrimary.has(s.suffix.replace('/merge-names', ''))) {
+          continue;
+        }
         // structure() reads `fn` and produces a fresh SFn (it does not mutate `fn`), so both branch
         // senses structure the same recovered function without re-lifting.
         let sfn: SFn;
@@ -297,10 +326,14 @@ export function enumerateCandidates(
             anchorConstCopies: s.anchor,
             spellBitfieldMembers: s.bitfields,
             rereadGlobals: s.reread,
+            coalesceMergeNames: s.mergeNames,
           });
         } catch (e) {
-          if (!s.anchor && s.bitfields && !s.reread) {
+          if (!s.anchor && s.bitfields && !s.reread && !s.mergeNames) {
             throw e; // the base axes keep their behavior: a structuring failure aborts the row
+          }
+          if (!s.mergeNames) {
+            droppedPrimary.add(s.suffix);
           }
           // an anchored variant that fails structuring or its contracts is a dropped lever, never
           // an aborted enumeration — same rule as respell below

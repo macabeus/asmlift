@@ -397,6 +397,77 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ALL,
   },
 
+  // ── merged value chains (several values decided by several arms, joined at one point) ───────
+  // What SSA destruction has to get right. Each arm computes the same set of values, so the join
+  // takes one block parameter per value and each arm hands them over on its edge — and a parameter
+  // and the argument feeding it are one variable only if the structurer gives them one name. It can
+  // only ever adopt ONE arm's names; every other arm's values reach the join under names of their
+  // own, and each pays a copy. The C the source wrote has none of them, and neither does the
+  // compiled code, which allocates all the arms into the same registers.
+  //
+  // Three values per arm, not one: a single value is coalesced by walking backward along its own
+  // edge, which the naming pipeline already did. It takes a chain — a value whose own definition is
+  // ANOTHER join, in an arm named after the one the outer join adopted — to leave a copy behind.
+  // Loads through a pointer parameter give that shape without a global, which no synthetic row has.
+  //
+  // mergeif is not mergechain at a smaller size: each arm decides only ONE of the two locals, so
+  // the other is live ACROSS the arm that does not write it — the shape the interference rule has
+  // to see, rather than two arms that both decide everything.
+  //
+  // mergeloop is the same shape with the join inside a loop, and coalescing is INERT on it: the
+  // naming pipeline already shares every name the arms feed, so no pair is even proposed. That is
+  // worth a row precisely because it is the negative — the shape reaches a loop and the pass has
+  // nothing to do there, which is not the same claim as a rule refusing it. What `loop-escape`
+  // actually costs is visible on `nestedloop`, which this family does not inhabit.
+  //
+  // WHAT THESE DO NOT COVER, so nobody later reads twelve rows as twelve tests: five decline in the
+  // FRONTEND for reasons with nothing to do with merges — MIPS branch-likely (`beql`/`bnezl`), a
+  // PPC branch with no reaching `cr0` compare, a branch to a non-block-boundary. Three more exist
+  // to be refused. Four rows reach the accept path.
+  {
+    sym: 'mergechain',
+    src:
+      'int mergechain(int s, const int *p) {\n' +
+      '  int x, y, z;\n' +
+      '  switch (s) {\n' +
+      '    case 0: x = p[0] > 31 ? 32 : p[0]; y = p[1] > 31 ? 32 : p[1]; z = p[2] > 31 ? 32 : p[2]; break;\n' +
+      '    case 1: x = p[3] > 15 ? 16 : p[3]; y = p[4] > 15 ? 16 : p[4]; z = p[5] > 15 ? 16 : p[5]; break;\n' +
+      '    default: x = p[6] > 7 ? 8 : p[6]; y = p[7] > 7 ? 8 : p[7]; z = p[8] > 7 ? 8 : p[8]; break;\n' +
+      '  }\n' +
+      '  return x * 100 + y * 10 + z;\n' +
+      '}',
+    features: ['merge-chain'],
+    toolchains: ALL,
+  },
+  {
+    sym: 'mergeif',
+    src:
+      'int mergeif(int s, const int *p) {\n' +
+      '  int x, y;\n' +
+      '  x = p[0] > 31 ? 32 : p[0];\n' +
+      '  y = p[1] > 31 ? 32 : p[1];\n' +
+      '  if (s & 1) { y = p[2] < 0 ? 0 : p[2]; }\n' +
+      '  else { x = p[3] < 0 ? 0 : p[3]; }\n' +
+      '  return x * 10 + y;\n' +
+      '}',
+    features: ['merge-chain'],
+    toolchains: ALL,
+  },
+  {
+    sym: 'mergeloop',
+    src:
+      'int mergeloop(int n, const int *p) {\n' +
+      '  int x = 0, y = 0, i;\n' +
+      '  for (i = 0; i < n; i++) {\n' +
+      '    if (p[i] & 1) { x = p[i] > 31 ? 32 : p[i]; y = p[i] * 2; }\n' +
+      '    else { x = p[i] < 0 ? 0 : p[i]; y = p[i] * 3; }\n' +
+      '  }\n' +
+      '  return x * 10 + y;\n' +
+      '}',
+    features: ['merge-chain'],
+    toolchains: ALL,
+  },
+
   // ── uninitialised locals (a local read on a path that never assigns it) ─────────────────────
   // Every switch above carries a `default`, so until these rows the dataset never asked what
   // happens when one does NOT. The C compiles, and the compiler emits the unassigned path

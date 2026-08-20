@@ -61,6 +61,28 @@ export const JUDGEMENT_FLOOR: Record<string, (body: string, asm: string, whole: 
       b,
     ),
   continue: (b) => /\bcontinue\b/.test(b),
+  // A merged value chain needs a branching construct AND more than one local for the arms to
+  // decide. COUNTED ACROSS DECLARATION STATEMENTS, not within one: `void *a; void *b;` and
+  // `void *a, *b;` declare the same two locals, and an earlier version of this rule required the
+  // comma — which rejected kleod's ConfigureEntityBehavior, a ten-arm switch whose every arm
+  // decides the same four locals, for spelling them one per line. Split into statements rather
+  // than swept with a /g/ regex, because a match that CONSUMES the `;` leaves the next declaration
+  // without the separator it would have anchored on, and consecutive declarations then count once.
+  // Whether the arms all decide the SAME ones, and whether those values are computed rather than
+  // already named, stays a human call.
+  'merge-chain': (b) => {
+    if (!/\bif\b|\bswitch\b|\?/.test(b)) {
+      return false;
+    }
+    const DECL =
+      /^\s*(?:(?:unsigned|signed|const|struct|union)\s+)*(?:void|int|char|short|long|float|double|[us]\d+|f\d+|\w+_t|[A-Z]\w*)\s+[^;{}()]*$/;
+    return (
+      b
+        .split(/[;{}]/)
+        .filter((stmt) => DECL.test(stmt))
+        .reduce((n, stmt) => n + stmt.split(',').length, 0) >= 2
+    );
+  },
   // a TYPE tag: the evidence is in the signature, not the body
   double: (_b, _asm, whole) => /\bdouble\b/.test(whole),
   dense: (b) => /\bswitch\s*\(/.test(b),
