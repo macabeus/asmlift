@@ -641,8 +641,26 @@ export const SYNTHETIC: SynthSpec[] = [
   // it. There is deliberately no `ifor_far`: measured, a `||` matches at BOTH distances, because
   // the trampoline lands on the edge the recogniser does not key on.
   //
-  // agbcc only, for the same reason the `preupdate_*` rows are: the shape IS the Thumb branch
-  // range. ido/kmc/mwcc have no such limit, so there these would be three ordinary `&&` rows.
+  // TOOLCHAINS, measured rather than assumed — and the answer differs per row.
+  //
+  // The two `near` rows run on agbcc AND mwcc, because the orientation defect is not an agbcc
+  // fact: on PowerPC the fold commits to the same `||` spelling, `ifand_near` misses by 18 and
+  // `ifor_near` matches, exactly as on Thumb. Two ISAs and two compilers agreeing is what says the
+  // gap is in the recogniser and the sense lever rather than in anything about ARM.
+  //
+  // The other two toolchains are excluded because on them THE CONSTRUCT IS NOT THERE, which is a
+  // stronger reason than "it would be an ordinary row":
+  //   • gcc2.7.2kmc compiles `if (a && b)` BRANCHLESSLY — `sltu; sltu; and; beqz`. One branch, no
+  //     second test, nothing for a short-circuit recogniser to recognise.
+  //   • ido7.1 fills both branch DELAY SLOTS with work hoisted out of the arms (`beqz a0,…` /
+  //     `li t0,-1`, which is the shared arm's stored value). That makes the second test's block
+  //     impure, and the fold refuses on exactly the ground it documents. The shape dissolves on a
+  //     delay-slot ISA.
+  //
+  // `ifand_far` stays agbcc-only, and here the original reason does hold: the row IS the Thumb
+  // ±256-byte branch range, and no other target has one. mwcc additionally declines it outright on
+  // `stack pointer r1 used as data` (its `_savegpr_14` prologue does `addi r11,r1,80`), which has
+  // nothing to do with short circuits.
   //
   // The arm's CONTENT is filler and its SIZE is the feature, so the near arm is a literal PREFIX
   // of the far one and all three share a signature. Two pointers, deliberately: a Thumb
@@ -650,10 +668,10 @@ export const SYNTHETIC: SynthSpec[] = [
   // would spill past it into a pointer walk — a second recovery idiom riding along inside what is
   // supposed to be a one-variable control.
   //
-  // WHAT THESE ROWS MOVE, so the headline is not read as progress: they take asmlift 372 → 374
-  // and m2c 348 → 348. Both gained matches are agbcc-only synthetic rows authored for an
+  // WHAT THESE ROWS MOVE, so the headline is not read as progress: five rows take asmlift 372 →
+  // 375 and m2c 348 → 348. All three gained matches are synthetic rows authored for an
   // asmlift-specific gap, one of them (`ifand_far`) matching for a reason nothing recovered; and
-  // all three read `noncompile` for m2c on an unrelated pointer-spelling defect of its own, which
+  // every row reads `noncompile` for m2c on an unrelated pointer-spelling defect of its own, which
   // on `ifand_near` hides that its orientation is the RIGHT one. The two gates are not the same
   // either: `bench regression` fails only on a LOST match, so it holds `ifand_far` and `ifor_near`
   // and says nothing about `ifand_near` — that one is pinned by
@@ -663,7 +681,7 @@ export const SYNTHETIC: SynthSpec[] = [
     sym: 'ifand_near',
     src: 'int ifand_near(int a, int b, int *p, int *q){ if (a && b) { p[0] = 1; q[0] = 2; p[1] = 3; q[1] = 4; } else { p[0] = -1; } return p[1]; }',
     features: ['branch'],
-    toolchains: ['agbcc'],
+    toolchains: ['agbcc', 'mwcc_242_81'],
     ctx: 'int ifand_near(int,int,int*,int*);',
     note:
       'the diff is not a near miss but the whole spelling: the arms are exchanged and the ' +
@@ -687,7 +705,7 @@ export const SYNTHETIC: SynthSpec[] = [
     sym: 'ifor_near',
     src: 'int ifor_near(int a, int b, int *p, int *q){ if (a || b) { p[0] = 1; q[0] = 2; p[1] = 3; q[1] = 4; } else { p[0] = -1; } return p[1]; }',
     features: ['branch'],
-    toolchains: ['agbcc'],
+    toolchains: ['agbcc', 'mwcc_242_81'],
     ctx: 'int ifor_near(int,int,int*,int*);',
   },
 
