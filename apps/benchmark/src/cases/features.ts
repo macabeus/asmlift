@@ -61,31 +61,6 @@ export const JUDGEMENT_FLOOR: Record<string, (body: string, asm: string, whole: 
       b,
     ),
   continue: (b) => /\bcontinue\b/.test(b),
-  // A short-circuit that decides a BRANCH: the connective has to sit inside a controlling
-  // expression, not merely somewhere in the body. `return a && b` is the VALUE form — a diamond
-  // with a merged boolean — and it is a different recovery, so a bare `&&` anywhere is not
-  // evidence. Scanned with real paren balancing rather than a regex: a controlling expression
-  // routinely contains its own parenthesised calls and casts, and `if\s*\([^)]*&&` stops at the
-  // first inner `)` and misses every one of them. Which connective, and whether the arms are the
-  // interesting part, stays a human call.
-  'short-circuit': (b) => {
-    for (const m of b.matchAll(/\b(?:if|while|for)\s*\(/g)) {
-      let depth = 1;
-      let i = m.index + m[0].length;
-      const from = i;
-      for (; i < b.length && depth > 0; i++) {
-        if (b[i] === '(') {
-          depth++;
-        } else if (b[i] === ')') {
-          depth--;
-        }
-      }
-      if (depth === 0 && /&&|\|\|/.test(b.slice(from, i - 1))) {
-        return true;
-      }
-    }
-    return false;
-  },
   // A merged value chain needs a branching construct AND more than one local for the arms to
   // decide. COUNTED ACROSS DECLARATION STATEMENTS, not within one: `void *a; void *b;` and
   // `void *a, *b;` declare the same two locals, and an earlier version of this rule required the
@@ -193,6 +168,53 @@ function hasNestedLoop(body: string): boolean {
 }
 
 /** Which `source` tags the function's own C supports. */
+/** Does a `&&`/`||` decide a BRANCH here — i.e. sit in a CONTROLLING expression?
+ *
+ *  Scanned with real paren balancing rather than a regex: a controlling expression routinely
+ *  contains its own parenthesised calls and casts, and `if\s*\([^)]*&&` stops at the first inner
+ *  `)` and misses every one of them. Three things the balancing then has to get right:
+ *
+ *   - only DEPTH 1 counts. `if (f(a && b))` and `if ((a && b) ? x : y)` pass the connective to a
+ *     call or a ternary as a VALUE — that is the merged-boolean diamond, a different recovery, and
+ *     the one shape this tag exists to exclude.
+ *   - a `for` header holds three clauses and only the MIDDLE one controls anything; a connective
+ *     in the init or the step is an ordinary value expression.
+ *   - `#if (A && B)` is a preprocessor directive, and real-tier sources are unpreprocessed.
+ *
+ *  Not decidable here, and deliberately: a connective hidden inside a project macro. That direction
+ *  only ever under-reports. */
+const hasControllingConnective = (body: string): boolean => {
+  for (const m of body.matchAll(/\b(if|while|for)\s*\(/g)) {
+    if (/#\s*$/.test(body.slice(0, m.index))) {
+      continue; // #if / #elif
+    }
+    let depth = 1;
+    let i = m.index + m[0].length;
+    const clauses: string[] = [];
+    let from = i;
+    for (; i < body.length && depth > 0; i++) {
+      if (body[i] === '(') {
+        depth++;
+      } else if (body[i] === ')') {
+        depth--;
+      } else if (body[i] === ';' && depth === 1) {
+        clauses.push(body.slice(from, i));
+        from = i + 1;
+      }
+    }
+    if (depth !== 0) {
+      continue; // truncated body — no controlling expression to read
+    }
+    clauses.push(body.slice(from, i - 1));
+    // `for (init; cond; step)` → the condition; everything else is one clause and IS the condition
+    const cond = m[1] === 'for' ? (clauses.length === 3 ? clauses[1] : '') : clauses.join(';');
+    if (/&&|\|\|/.test(cond.replace(/\([^()]*\)/g, () => ''))) {
+      return true;
+    }
+  }
+  return false;
+};
+
 export function sourceEvidence(funcC: string): Set<string> {
   const b = stripLiterals(funcC);
   const body = neutralizeDoWhileZero(b.slice(b.indexOf('{')));
@@ -204,6 +226,7 @@ export function sourceEvidence(funcC: string): Set<string> {
   if (hasNestedLoop(body)) out.add('nested-loop');
   // `?:` but not `? :` inside a label or a bitfield declarator
   if (/\?[^;{}]*:/.test(body)) out.add('ternary');
+  if (hasControllingConnective(body)) out.add('short-circuit');
   if (/\bsizeof\b/.test(body)) out.add('sizeof');
   if (/<<|>>/.test(body)) out.add('shift');
   // require a LEFT operand so `&x` (address-of) and `&&`/`||` do not count

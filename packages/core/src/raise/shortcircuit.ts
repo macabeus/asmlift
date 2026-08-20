@@ -273,6 +273,20 @@ export function recognizeShortCircuit(fn: Fn): boolean {
 // Every refusal falls through untouched, leaving the tail-duplicated spelling — a miss, never a
 // miscompile. Applied ITERATIVELY, so `a || b || c` folds left-to-right, each round consuming one
 // more condition block.
+//
+// WHICH SPELLING, and why the fold alone does not decide it. The rewrite keeps ^h's unchanged
+// successor slot, so the connective comes out in the orientation the ASM's branch senses spell:
+// for `if (a || b) X else Y` that is the source's own (synthetic:ifor_near:agbcc byte-matches),
+// and for `if (a && b) X else Y` it is the De Morgan dual, arms exchanged. Both are the same
+// program and only one is the bytes. Reaching the other is `negateCond`'s job (l3/ast.ts
+// distributes `!(a && b)`), but the lever that calls it — `preserveDivergentBranchSense` — covers
+// DIVERGENT ifs only, so a reconverging one has no dual candidate and the fold's orientation
+// stands unrefereed: synthetic:ifand_near:agbcc, which the un-folded spelling would match.
+//
+// A `br`-only forwarding block between ^h and ^g hides the shared block and this fold does not
+// fire at all. agbcc emits one per long branch, so on Thumb a guarded arm past ±256 bytes is
+// silently exempt — synthetic:ifand_far:agbcc matches on that exemption, and normalising those
+// blocks away costs it that match until the sense lever reaches reconverging ifs.
 export function recognizeBranchShortCircuit(fn: Fn): boolean {
   let changed = false;
   const term = (b: Block) => b.ops[b.ops.length - 1];

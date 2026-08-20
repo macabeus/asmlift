@@ -232,17 +232,17 @@ export const FEATURES: readonly FeatureDef[] = [
     id: 'short-circuit',
     label: 'Short-circuit condition',
     group: 'control-flow',
-    evidence: 'judgement',
+    evidence: 'source',
     summary: 'an `&&`/`||` that decides a BRANCH rather than producing a value',
     detail:
       'Two comparisons that share a target, with nothing between them — the second only runs when ' +
       'the first did not already settle the question. There is no merged value to recover, so the ' +
-      'only evidence is the shape of the edges, and a decompiler has two honest ways to spell it: ' +
-      'fold the pair into one connective, or leave the tests nested and repeat the shared arm. The ' +
-      'two are the same program and, on agbcc, never the same bytes — folding puts the shared arm ' +
-      'in the taken slot, which swaps the arms and negates the condition. Reserved for the ' +
-      'CONTROL-FLOW form; `return a && b` is a value-producing diamond with a merged boolean and ' +
-      'is a different recovery.',
+      'only evidence is the shape of the edges, and one shape has TWO source spellings: `a && b` ' +
+      'guarding X, and its De Morgan dual `!a || !b` guarding Y with the arms exchanged, compile ' +
+      'to the same branch graph. Which one was written is not recoverable from that graph, so a ' +
+      'decompiler that can reach only one of them matches the functions that happened to spell it ' +
+      'that way and misses the rest. Reserved for the CONTROL-FLOW form; `return a && b` is a ' +
+      'value-producing diamond with a merged boolean and is a different recovery.',
     example: {
       c: 'if (a && b) { p[0] = 1; p[1] = 2; p[2] = 3; p[3] = 4; } else { p[0] = -1; }',
       asm:

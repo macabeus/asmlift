@@ -621,58 +621,65 @@ export const SYNTHETIC: SynthSpec[] = [
       '(`&f->v`) rather than being the variable itself, and is read after the loop has moved on',
   },
 
-  // A CONTROL-FLOW `&&` — a short-circuit that produces no value, only a branch. Two rows, and
-  // the ONLY difference between them is how far the guarded arm is: `ifand_near` fits inside a
-  // Thumb conditional branch's ±256-byte range, `ifand_far` does not. That one byte-distance
-  // decides which of two spellings asmlift emits, and today it decides them the wrong way round.
+  // A CONTROL-FLOW short-circuit: an `&&`/`||` that produces no value, only a branch. ONE branch
+  // graph, TWO source spellings — `a && b` guarding X, and its De Morgan dual `!a || !b` guarding
+  // Y with the arms exchanged, compile to the same edges. Which one was written is not in the
+  // graph, so a decompiler that can reach only one of them matches the functions that happened to
+  // spell it that way and misses the rest. The three rows are the two orientations, plus the
+  // distance that decides whether the shape is recognised at all.
   //
-  // The `if (a && b) X else Y` shape reaches the IR as two `cond_br` blocks sharing a target.
-  // `raise/shortcircuit.ts`'s `recognizeBranchShortCircuit` folds that into one `logic_or` and
-  // rewrites the terminator, which puts the SHARED block in the taken slot — so the arms come out
-  // swapped and the condition negated: `if (!a || !b) Y else X`. That is the same program, and on
-  // agbcc it is never the same bytes. MEASURED at four sizes (4/8/16/40 stores in the arm): the
-  // un-folded nested spelling the structurer produces on its own byte-MATCHES every time, and the
-  // folded one never does, at a cost that grows with the arm (20 / 36 / 68 / 182).
+  // `ifand_near` and `ifand_far` differ in ONE thing: whether the guarded arm fits inside a Thumb
+  // conditional branch's ±256-byte reach. Past it agbcc spells the branch `bne .L1 / b .L2 @long
+  // jump`, and a frontend that splits a block at every conditional branch turns that second
+  // instruction into a block whose only op is `br`. A recogniser keyed on successor identity
+  // cannot see the shared block through it. So the same source shape gets a different recovery on
+  // either side of a byte distance — which is the pair's point: the two rows sit on opposite sides
+  // of the only automated gate, `ifand_far` regression-gated because it matches and `ifand_near`
+  // the inhabitant that has to improve.
   //
-  // `ifand_far` is the row that makes this hard to fix, and it is why both are here. Past ±256
-  // bytes agbcc spells the branch `bne .L1 / b .L2 @long jump`, and the frontend — which splits a
-  // block at every conditional branch — turns that second instruction into a block whose only op
-  // is `br`. The fold requires its second test's successor to BE the shared block; a forwarding
-  // block in between hides it, so the fold does not fire and the row MATCHES. It matches for the
-  // wrong reason: not because anything recognised the shape, but because an unrelated encoding
-  // limit happened to disable a transform that would have broken it.
+  // `ifor_near` is the ORIENTATION control, and it is what keeps the pair honest: the same shape
+  // written the other way round matches today. So the gap is not "this shape is unrecoverable",
+  // it is "only one of the two spellings is reachable" — and a row that could falsify the claim is
+  // worth more than a third row that restates it.
   //
-  // So the pair pins a lever with no gate. Threading those forwarding blocks away — the obvious
-  // repair, and the one klonoa's LoadBGTilemapData needs, where the un-folded spelling costs 354
-  // duplicated instructions — makes the fold fire on `ifand_far` too and LOSES this match. Neither
-  // spelling is right unconditionally; which one matches is a per-function fact, which is what
-  // makes it a ranked candidate axis rather than a pass. `ifand_far` is the row that will say so.
+  // agbcc only, for the same reason the `preupdate_*` rows are: the shape IS the Thumb branch
+  // range. ido/kmc/mwcc have no such limit, so there these would be three ordinary `&&` rows.
   //
-  // agbcc only, and for the same reason the `preupdate_*` rows are: the shape IS the Thumb branch
-  // range. ido/kmc/mwcc have no such limit, so on those toolchains these would be two more
-  // ordinary `&&` rows rather than coverage. The arm is 4 stores and 56 stores of filler — its
-  // CONTENT is irrelevant and its SIZE is the whole feature, which is why the two sources are
-  // otherwise identical.
+  // The arm's CONTENT is filler and its SIZE is the feature, so the near arm is a literal PREFIX
+  // of the far one and both share a signature. Two pointers, deliberately: a Thumb `str Rd,[Rn,#N]`
+  // reaches offset 124, and a single array long enough to force the long branch would spill past
+  // it into a pointer walk — a second recovery idiom riding along inside what is supposed to be a
+  // one-variable control.
   {
     sym: 'ifand_near',
-    src: 'int ifand_near(int a, int b, int *p){ if (a && b) { p[0] = 1; p[1] = 2; p[2] = 3; p[3] = 4; } else { p[0] = -1; } return p[1]; }',
-    features: ['short-circuit', 'branch', 'array'],
+    src: 'int ifand_near(int a, int b, int *p, int *q){ if (a && b) { p[0] = 1; q[0] = 2; p[1] = 3; q[1] = 4; } else { p[0] = -1; } return p[1]; }',
+    features: ['branch'],
     toolchains: ['agbcc'],
-    ctx: 'int ifand_near(int,int,int*);',
+    ctx: 'int ifand_near(int,int,int*,int*);',
     note:
-      "the guarded arm is within a Thumb conditional branch's reach, so the short-circuit fold " +
-      'fires and emits the arm-swapped `||` spelling — which costs this row a byte-exact match ' +
-      'the un-folded nested spelling would have got',
+      'the diff is not a near miss but the whole spelling: the arms are exchanged and the ' +
+      "condition negated. m2c prints the source's own orientation here, and its output is " +
+      'byte-exact once the `->unkN` pointer spelling it declines on is legalised — so the ' +
+      'noncompile beside this row is an unrelated defect of its own, not distance from a match',
   },
   {
     sym: 'ifand_far',
-    src:
-      'int ifand_far(int a, int b, int *p){ if (a && b) { ' +
-      Array.from({ length: 56 }, (_, i) => `p[${i}] = ${i + 1};`).join(' ') +
-      ' } else { p[0] = -1; } return p[1]; }',
-    features: ['short-circuit', 'branch', 'array'],
+    src: 'int ifand_far(int a, int b, int *p, int *q){ if (a && b) { p[0] = 1; q[0] = 2; p[1] = 3; q[1] = 4; p[2] = 5; q[2] = 6; p[3] = 7; q[3] = 8; p[4] = 9; q[4] = 10; p[5] = 11; q[5] = 12; p[6] = 13; q[6] = 14; p[7] = 15; q[7] = 16; p[8] = 17; q[8] = 18; p[9] = 19; q[9] = 20; p[10] = 21; q[10] = 22; p[11] = 23; q[11] = 24; p[12] = 25; q[12] = 26; p[13] = 27; q[13] = 28; p[14] = 29; q[14] = 30; p[15] = 31; q[15] = 32; p[16] = 33; q[16] = 34; p[17] = 35; q[17] = 36; p[18] = 37; q[18] = 38; p[19] = 39; q[19] = 40; p[20] = 41; q[20] = 42; p[21] = 43; q[21] = 44; p[22] = 45; q[22] = 46; p[23] = 47; q[23] = 48; p[24] = 49; q[24] = 50; p[25] = 51; q[25] = 52; p[26] = 53; q[26] = 54; p[27] = 55; q[27] = 56; p[28] = 57; q[28] = 58; p[29] = 59; q[29] = 60; p[30] = 61; q[30] = 62; p[31] = 63; q[31] = 64; } else { p[0] = -1; } return p[1]; }',
+    features: ['branch'],
     toolchains: ['agbcc'],
-    ctx: 'int ifand_far(int,int,int*);',
+    ctx: 'int ifand_far(int,int,int*,int*);',
+    note:
+      'MATCHES for a reason nothing recovered: the guarded arm is far enough that the shared block ' +
+      'sits behind a long-branch trampoline, which hides the shape from the fold that rewrites ' +
+      '`ifand_near`. Normalising those trampolines away is a real improvement that would turn this ' +
+      'row red — it is here to make that visible rather than silent',
+  },
+  {
+    sym: 'ifor_near',
+    src: 'int ifor_near(int a, int b, int *p, int *q){ if (a || b) { p[0] = 1; q[0] = 2; p[1] = 3; q[1] = 4; } else { p[0] = -1; } return p[1]; }',
+    features: ['branch'],
+    toolchains: ['agbcc'],
+    ctx: 'int ifor_near(int,int,int*,int*);',
   },
 
   // The DMA-fill idiom, WITH an uninitialised local — the pair no real row carries. An escaping
