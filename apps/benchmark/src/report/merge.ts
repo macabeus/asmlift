@@ -21,10 +21,12 @@ const load = (f: string): FunctionResult[] =>
 // Provenance: which asmlift commit produced these numbers (dirty flag included). "Dirty" means
 // the CODE differs from the commit — the benchmark's own regenerated artifacts (results,
 // report data, playground summary) are excluded, otherwise every run marks itself dirty.
-// UNTRACKED `.claude/` files are excluded too: agent-workflow docs staged for a later commit
-// cannot change what any run computes, and counting them stamps an honest run dirty.
+// UNTRACKED `.claude/commands/` files are excluded too: agent-workflow docs staged for a later
+// commit cannot change what any run computes, and counting them stamps an honest run dirty.
+// Deliberately NOT all of `.claude/` — an untracked settings file can carry env/hooks that a
+// bench invocation launched through the agent would inherit.
 const ARTIFACT_PATH = /^(apps\/benchmark\/results\/|apps\/web\/src\/pages\/benchmark\/data\/|apps\/web\/src\/data\/)/;
-const UNTRACKED_NONCODE = /^\.claude\//;
+const UNTRACKED_NONCODE = /^\.claude\/commands\//;
 function asmliftProvenance(): { commit: string; dirty: boolean } | undefined {
   const head = spawnSync('git', ['-C', REPO_ROOT, 'rev-parse', 'HEAD'], { encoding: 'utf8' });
   if (head.status !== 0) {

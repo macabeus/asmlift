@@ -355,8 +355,8 @@ function printStmt(s: Stmt, indent: string, vt: VarTypes, leaf?: LeafHook): stri
       return out;
     }
     case 'for': {
-      // `for (init; cond; inc) { body }`. PRECONDITION (guaranteed by the sole producer, structure.ts
-      // `recognizeForLoops`): init/inc are each a SINGLE-LINE `assign` statement. `clause` renders one
+      // `for (init; cond; inc) { body }`. PRECONDITION (guaranteed by both producers — structure.ts
+      // `recognizeForLoops` and l3/reindex.ts): init/inc are each a SINGLE-LINE `assign` statement. `clause` renders one
       // and strips its trailing `;` so it sits inside the header (`i = 0; c; i = i + 1`). A multi-line
       // statement (an `if`/nested loop) would render mangled — but the recognizer never builds one here.
       const clause = (st: Stmt) => printStmt(st, '', vt, leaf).join(' ').replace(/;\s*$/, '').trim();

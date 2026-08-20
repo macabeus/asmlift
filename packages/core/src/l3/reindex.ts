@@ -33,8 +33,11 @@
 // one counter (`dotprod`'s a/b pair). A loop is re-spelled only when ALL hold —
 //   • the guard tests THE SAME var the counter is initialised from, against 0, in the sense that
 //     skips the loop; the do-while exit is exactly `k != 0`;
-//   • the body's contiguous TAIL is the steps — `p += 1` per walk pointer and `k -= 1` — and
-//     neither k nor any p is mentioned anywhere in the function outside the `if` statement;
+//   • the body's contiguous TAIL is the steps — ONE `p += 1` per walk pointer and `k -= 1`;
+//   • the counter appears in EXACTLY its four roles (init write, decrement write + read, exit
+//     read) — the rewrite deletes the init and the decrement, so any other use of k, wherever
+//     it hides (a leftover, the body, a nested loop), would survive them;
+//   • every p is mentioned only inside the `if`, and never by a leftover statement;
 //   • the skip arm's statements equal, in order, the else arm's loop-preceding statements minus
 //     the induction inits — anything left over means the arms are not the same computation;
 //   • every deref of a walk pointer reads its own element size (a `*(u8 *)p` over an `s32 *`
@@ -548,10 +551,12 @@ export function reindexWalks(sfn: SFn): SFn | null {
     const walks: string[] = [];
     let cut = loop.body.length;
     let sawDec = false;
+    let dupStep = false;
     for (let i = loop.body.length - 1; i >= 0; i--) {
       const x = loop.body[i];
       const p = isUnitStep(x, ptrVars);
       if (p !== null) {
+        dupStep ||= walks.includes(p) || p === k;
         walks.push(p);
         cut = i;
         continue;
@@ -563,7 +568,9 @@ export function reindexWalks(sfn: SFn): SFn | null {
       }
       break;
     }
-    if (!sawDec || walks.length === 0) {
+    // one step per pointer, and the counter never doubles as a walk of itself (its init would
+    // be deleted twice over)
+    if (!sawDec || walks.length === 0 || dupStep) {
       return null;
     }
     const bodyCore = loop.body.slice(0, cut);
@@ -584,8 +591,17 @@ export function reindexWalks(sfn: SFn): SFn | null {
       }
       inits.set(p, init);
     }
-    // k and every p live ONLY inside this `if` (the v1 rule, counted the same way)
-    for (const name of [k, ...walks]) {
+    // The counter appears in EXACTLY its four roles — init write, decrement write + read, exit
+    // read. The rewrite deletes the init and the decrement, so ANY other use of k (a leftover's
+    // read, a second decrement, a body read like `*p = k`, a nested loop's) would survive
+    // referencing a variable that no longer exists as a counter. Counted over the whole
+    // function, which also confines k to this `if`.
+    if (countMentions(sfn.body, k) !== 4) {
+      return null;
+    }
+    // every p lives ONLY inside this `if` (the v1 rule, counted the same way) — its body uses
+    // are policed by reindexStmts (a bare `p` or a write declines; derefs rewrite)
+    for (const name of walks) {
       if (countMentions(sfn.body, name) !== countMentions([s], name)) {
         return null;
       }
@@ -601,6 +617,11 @@ export function reindexWalks(sfn: SFn): SFn | null {
     // the skip arm must be, in order, exactly `pre` minus the induction inits
     const inductionInits = new Set<Stmt>([kInit, ...inits.values()]);
     const leftovers = pre.filter((x) => !inductionInits.has(x));
+    // no leftover may mention a walk pointer: leftovers outlive the deleted step, and their
+    // skip-arm twins read a pointer the skip path never initialised
+    if (leftovers.some((x) => walks.some((w) => stmtMentions(x, w)))) {
+      return null;
+    }
     if (
       skipArm.length !== leftovers.length ||
       !skipArm.every((x, i) => JSON.stringify(x) === JSON.stringify(leftovers[i]))
