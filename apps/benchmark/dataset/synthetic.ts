@@ -1105,6 +1105,99 @@ export const SYNTHETIC: SynthSpec[] = [
     features: ['narrow', 'arithmetic'],
     toolchains: ALL,
   },
+
+  // WHERE A VALUE LIVES, NOT WHAT IT COMPUTES. In each of these rows both decompilers can
+  // recover the computation; the diff is dominated by value placement — a base address kept in
+  // one register and reused at immediate offsets, a clamp overwriting its own variable, a value
+  // parked across a high-pressure loop. The family is cut from kleod:LoadBGTilemapData:agbcc,
+  // whose residual diff is almost entirely this class, but every shape is spelled with absolute
+  // addresses so the rows stay self-contained (no ELF, no extern data — a candidate could not
+  // declare one).
+  //
+  // What each row isolates, measured by compiling both spellings under agbcc -O2:
+  // `dma_burst` is the control — a plain three-store block through one pointer local, recovered
+  // today by the base-pointer lever. `dma_wait` adds the busy-wait read-back through the SAME
+  // pointer; the lever withdraws and the candidate falls back to one literal per store, which
+  // costs the shared base register (gcc 2.9 folds `(vu32*)0x040000d8` to a fresh constant at
+  // parse time, so only a spelling that keeps ONE base expression gets `str [rN, #imm]`).
+  // `bg_area` groups three fields of one struct element — recovered, leaving only the operand
+  // order of the commutative multiply (the target loads .w then .h; the candidate the reverse).
+  // `bg_mix` adds a FIXED element of the same array: the target derives `[2].h` from the same
+  // base register (`add #0x38`); the candidate anchors a second absolute base, splitting the
+  // object in two. `clamp_inplace` is a one-sided overwrite (`if (w > 31) w = 32;`): rendering
+  // it as a two-sided assignment into a fresh temp costs a register, a callee-save push, and
+  // flips the branch polarity. `hipress` parks one byte across a loop hot enough to fill r0-r7,
+  // so the target homes it in a call-saved HI register touched only by `mov` (gcc's alternate-
+  // class allocation; hi regs cost 4 vs 2 to move but beat an 8-cost SImode reload) — the
+  // candidate instead sinks the load below the loop and re-associates the accumulator chain.
+  //
+  // All four toolchains: the placement question is universal (MIPS %hi/%lo anchoring, PPC
+  // @ha/@l pairs, both compilers' in-place-update patterns), and where a toolchain's own
+  // addressing rules make a shape free, the row is a control there rather than coverage.
+  {
+    sym: 'dma_burst',
+    src:
+      'void dma_burst(u32 src,u32 dst,u32 cnt){ volatile u32 *dma = (volatile u32 *)0x040000d4;' +
+      ' dma[0] = src; dma[1] = dst; dma[2] = cnt; }',
+    features: ['value-home', 'pointer'],
+    toolchains: ALL,
+    ctx: 'void dma_burst(u32 src, u32 dst, u32 cnt);',
+    proto: { dma_burst: { returnsVoid: true } },
+  },
+  {
+    sym: 'dma_wait',
+    src:
+      'void dma_wait(u32 src,u32 dst,u32 cnt){ volatile u32 *dma = (volatile u32 *)0x040000d4;' +
+      ' dma[0] = src; dma[1] = dst; dma[2] = cnt | 0x80000000; while (dma[2] & 0x80000000) {} }',
+    features: ['value-home', 'pointer'],
+    toolchains: ALL,
+    ctx: 'void dma_wait(u32 src, u32 dst, u32 cnt);',
+    proto: { dma_wait: { returnsVoid: true } },
+  },
+  {
+    sym: 'bg_area',
+    src:
+      'struct Bg { s32 tiles; u8 pad[12]; u16 w; u16 h; u8 pad2[8]; };\n' +
+      '#define gBgs ((struct Bg *)0x02000000)\n' +
+      's32 bg_area(s32 i){ return gBgs[i].w * gBgs[i].h + gBgs[i].tiles; }',
+    features: ['value-home', 'struct'],
+    toolchains: ALL,
+    ctx: 's32 bg_area(s32 i);',
+  },
+  {
+    sym: 'bg_mix',
+    src:
+      'struct Bg { s32 tiles; u8 pad[12]; u16 w; u16 h; u8 pad2[8]; };\n' +
+      '#define gBgs ((struct Bg *)0x02000000)\n' +
+      's32 bg_mix(s32 i){ return gBgs[i].w * gBgs[2].h + gBgs[i].tiles; }',
+    features: ['value-home', 'struct'],
+    toolchains: ALL,
+    ctx: 's32 bg_mix(s32 i);',
+  },
+  {
+    sym: 'clamp_inplace',
+    src:
+      '#define gW ((volatile u16 *)0x03000010)\n' +
+      's32 clamp_inplace(s32 n){ s32 total = 0; s32 j;' +
+      ' for (j = 0; j < n; j++){ s32 w = gW[j]; if (w > 31){ w = 32; } total += w; } return total; }',
+    features: ['value-home'],
+    toolchains: ALL,
+    ctx: 's32 clamp_inplace(s32 n);',
+  },
+  // No mwcc_242_81 on `hipress`: one of the scored candidates sends mwcc -O4's global optimizer
+  // into a non-terminating compile (>15 min CPU-bound on a single cand.c), which would stall
+  // every full run. The homes it measures (hi-reg parking, ip counter) are Thumb/MIPS facts.
+  {
+    sym: 'hipress',
+    src:
+      's32 hipress(u8 *p, s32 n){ s32 keep = p[1];' +
+      ' s32 a = p[2], b = p[3], c = p[4], d = p[5], e = p[6], f = p[7], g = p[8]; s32 i;' +
+      ' for (i = 0; i < n; i++){ a += b * c; b += d * e; c += f * g; d += a; e += b; f += c; g += d; }' +
+      ' return keep + a + b + c + d + e + f + g; }',
+    features: ['value-home', 'array'],
+    toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc'],
+    ctx: 's32 hipress(u8 *p, s32 n);',
+  },
 ];
 
 // ── C++ (mwcc `.cp` frontend, PPC only) ───────────────────────────────────────────────────

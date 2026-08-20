@@ -813,6 +813,30 @@ export const FEATURES: readonly FeatureDef[] = [
     seeAlso: ['switch', 'branch', 'load', 'store'],
   },
   {
+    id: 'value-home',
+    label: 'Value home',
+    group: 'memory',
+    evidence: 'judgement',
+    summary: 'the diff is dominated by where a value lives, not what it computes',
+    detail:
+      'Both decompilers recover the computation; the bytes differ because the original source ' +
+      'pinned a value to a home the candidate does not reproduce — a base address held in one ' +
+      'register and reused at immediate offsets, a clamp that overwrites its own variable ' +
+      'instead of assigning a fresh one, a value parked in a callee-saved register across a ' +
+      'high-pressure region. Old compilers place values by the SPELLING of the source (a ' +
+      'pointer local shares its base; a repeated absolute cast re-folds it into a fresh ' +
+      'constant), so recovering the placement means recovering that spelling. ' +
+      'Deliberately has NO machine-checked floor: the spellings that pin a home (pointer ' +
+      'locals, in-place updates, address macros) are ordinary C that no scan can tell apart ' +
+      'from incidental style.',
+    example: {
+      c: 'volatile u32 *dma = (volatile u32 *)0x040000d4; dma[0] = src; dma[1] = dst;',
+      asm: '  ldr r3, =0x040000d4\n  str r0, [r3]\n  str r1, [r3, #0x4]   @ one base, offset stores',
+      toolchain: 'agbcc',
+    },
+    seeAlso: ['pointer', 'struct', 'mmio', 'uninit-local'],
+  },
+  {
     id: 'global',
     label: 'Global',
     group: 'memory',
