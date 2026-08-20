@@ -337,6 +337,13 @@ describe('the counter is policed in EVERY role (each shape reproduced as a wrong
     });
   });
 
+  test('a pointer-typed counter declines on TYPE — its decrement strides elements, not iterations', () => {
+    // the ordinary-decrement spelling, no self-step: only the type is wrong
+    declined((_body, fn) => {
+      fn.locals[2] = { name: 'v2', type: T.ptr(T.s(32)) };
+    });
+  });
+
   test('a pointer-typed counter stepping itself is not a walk of itself', () => {
     declined((body, fn) => {
       fn.locals[2] = { name: 'v2', type: T.ptr(T.s(32)) };

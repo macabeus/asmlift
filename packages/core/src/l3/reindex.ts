@@ -34,9 +34,10 @@
 //   • the guard tests THE SAME var the counter is initialised from, against 0, in the sense that
 //     skips the loop; the do-while exit is exactly `k != 0`;
 //   • the body's contiguous TAIL is the steps — ONE `p += 1` per walk pointer and `k -= 1`;
-//   • the counter appears in EXACTLY its four roles (init write, decrement write + read, exit
-//     read) — the rewrite deletes the init and the decrement, so any other use of k, wherever
-//     it hides (a leftover, the body, a nested loop), would survive them;
+//   • the counter is INTEGER-typed (a pointer's `k - 1` strides its element size — a different
+//     trip count) and appears in EXACTLY its four roles (init write, decrement write + read,
+//     exit read) — the rewrite deletes the init and the decrement, so any other use of k,
+//     wherever it hides (a leftover, the body, a nested loop), would survive them;
 //   • every p is mentioned only inside the `if`, and never by a leftover statement;
 //   • the skip arm's statements equal, in order, the else arm's loop-preceding statements minus
 //     the induction inits — anything left over means the arms are not the same computation;
@@ -526,6 +527,13 @@ export function reindexWalks(sfn: SFn): SFn | null {
       return null;
     }
     const k = lc.l.name;
+    // an INTEGER counter only: C pointer arithmetic strides the element size, so a pointer-typed
+    // k's `k - 1` counts elements-of-k, not iterations — the rewrite's `i < n` would run a
+    // different trip count. Declining on type closes every pointer-k shape at once (a self-step,
+    // an ordinary decrement, whatever spelling).
+    if (ptrVars.has(k)) {
+      return null;
+    }
     // the counter's init `k = N`, N a var the guard tests
     const kInit = pre.find((x): x is Stmt & { k: 'assign' } => x.k === 'assign' && x.name === k);
     if (!kInit || kInit.value.k !== 'var') {
@@ -556,7 +564,7 @@ export function reindexWalks(sfn: SFn): SFn | null {
       const x = loop.body[i];
       const p = isUnitStep(x, ptrVars);
       if (p !== null) {
-        dupStep ||= walks.includes(p) || p === k;
+        dupStep ||= walks.includes(p);
         walks.push(p);
         cut = i;
         continue;
