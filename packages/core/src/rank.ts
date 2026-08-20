@@ -23,6 +23,7 @@ import { registerishSpellings } from './l3/regspell';
 import { reindexWalks } from './l3/reindex';
 import { hoistScopedBases } from './l3/scopebase';
 import { type SymbolRef, collectSymbolRefs } from './l3/symbol-refs';
+import { volatilePtrLocals } from './l3/volatileptr';
 import { RewritePattern } from './pattern/engine';
 import { applyIdiomPatterns, raiseRecovered, structureChecked } from './pipeline';
 import { type Prototypes, prototypesFromSymbols } from './proto';
@@ -433,6 +434,12 @@ export function enumerateCandidates(
         // same footing as the others: the primary inline spelling stays in the list, so the differ
         // referees and this can never cost a match.
         respell('/argbase', () => materializeArgBases(sfn));
+        // `/volatile` — declare a pointer local holding a NUMERIC address as pointing to volatile
+        // data (l3/volatileptr.ts). A raw constant has no declaration anywhere, so the original
+        // qualifier is not derivable — and it is codegen-visible (a volatile MEM is barred from
+        // motion, which lands the allocator on different homes). Both spellings are emitted and
+        // the differ referees.
+        respell('/volatile', () => volatilePtrLocals(sfn));
         // `/scopebase` — name a reused global base at the INNERMOST scope holding its uses
         // (l3/scopebase.ts). Distinct from basecse's function-top hoist, which the primary already
         // carries: this one fires exactly where that placement would extend a live range the
