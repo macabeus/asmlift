@@ -646,6 +646,12 @@ export function lift(
           }
           emitBin('add', d, read(s), constVal(parseImm(t)));
           break;
+        // add immediate SHIFTED — the register-based `%ha` anchor: mwcc derives an absolute base
+        // from a scaled index (`addis r4,r3,-32736` = r3 + 0x80200000). The lis/addi GLOBAL pair
+        // is a separate peephole above; an addis over a register is plain arithmetic.
+        case 'addis':
+          emitBin('add', d, read(s), constVal((parseImm(t) << 16) >> 0));
+          break;
         case 'subf':
         case 'subfc':
         case 'subfo':

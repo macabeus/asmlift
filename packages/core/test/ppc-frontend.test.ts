@@ -202,3 +202,11 @@ describe('an operand-less `ret` is VOID, not an untyped s32', () => {
     expect(src).toContain('return 5;');
   });
 });
+
+test('addis over a register is a plain add of the shifted immediate', () => {
+  // `addis r4,r3,-32736` = r3 + 0x80200000 — mwcc's %ha anchor for an absolute base derived
+  // from a scaled index. Unmodelled, this declined the whole function loud.
+  const src = dis('anchor', '0:\taddis   r4,r3,-32736\n4:\tlwz     r3,0(r4)\n8:\tblr\n');
+  // recovery types the base `s32 *`, so 0x80200000 bytes renders as its ELEMENT count
+  expect(src).toContain('*(a0 + -536346624)');
+});
