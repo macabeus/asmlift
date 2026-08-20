@@ -91,7 +91,11 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   - **Committed**, inside `structureChecked`: tail-merge → dead-store elimination → base-CSE.
     Every path gets these, which is why the boundary contracts run on both sides of them (below).
   - **Ranked re-spellings**, in [`rank.ts`](../packages/core/src/rank.ts) and so on the
-    `decompileRanked` path only: `/argbase`, `/scopebase`, `/coalesce`, `/indexed`, `/regcopy`.
+    `decompileRanked` path only. Two populations of them: SPELLING re-writes of one structured
+    tree (`/argbase`, `/scopebase`, `/coalesce`, `/indexed`, `/regcopy`) and STRUCTURING axes,
+    which re-run `structure()` under a different lever (`/flip-branch`, `/defsite`,
+    `/no-bitfield`, `/reread-globals`, `/merge-names`) — plus `/raw-globals` and the
+    signedness pin, which re-run the lift itself.
     Each emits an _alternative candidate_ rather than replacing the primary, and the differ
     referees — the
     [ranked-candidate idea](asmlift-101.md#26-types-as-ranked-candidates-judged-by-the-differ)

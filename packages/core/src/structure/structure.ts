@@ -671,14 +671,10 @@ export interface StructureOptions {
   // Merge two variables that a merge copy would join, when the values under them never interfere
   // (structure/namecoalesce.ts). Off by default; rank.ts enumerates the ON spelling as the
   // `/merge-names` axis. Which variables the compiler's own coalescer shared is not derivable from
-  // the naming — MEASURED both ways: on one benchmark row the merged spelling scores 7 points
-  // better and on two others 3 and 6 worse, and the copies themselves are free (agbcc coalesces
-  // them, so the two spellings of klonoa’s LoadBGTilemapData compile to the same 906 instructions).
-  // So the differ referees, exactly as it does for the other allocator-ambiguous spellings.
+  // the naming, and the copies are not the cost they look like — the compiler coalesces them, so
+  // both spellings compile to the same instruction count. Over the whole benchmark the axis wins
+  // one row by 3 points and loses none, which is what a differ-refereed spelling looks like.
   coalesceMergeNames?: boolean;
-  /** `coalesceMergeNames`'s admission rules, so a test can run the pass with one gate DROPPED —
-   *  the ablation as a value rather than as a flag compiled into the shipped path. */
-  nameCoalesceGates?: readonly Gate<NameMerge>[];
   // How an unresolvable VALUE degrades (a live `opaque`, an unlowered transient op, a dropped def):
   //   "strict"   (default) — the `"?"` sentinel, tripping assertResolved at the boundary (loud in
   //              the PROCESS);
@@ -692,7 +688,16 @@ export interface StructureOptions {
   symbols?: Map<string, SymbolInfo>;
 }
 
-export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
+/** Test-only seams. SEPARATE from `StructureOptions` on purpose: `structureOptionsFor` builds that
+ *  one by spreading a target's `compilerBehaviors`, whose fields map 1:1 onto it, so a hook living
+ *  there would be settable from a TargetDescription. */
+export interface StructureHooks {
+  /** `coalesceMergeNames`'s admission rules, so a test can run the pass with one gate DROPPED —
+   *  the ablation as a value rather than as a flag compiled into the shipped path. */
+  nameCoalesceGates?: readonly Gate<NameMerge>[];
+}
+
+export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureHooks = {}): SFn {
   const {
     returnsVoid = false,
     coalesceLoopInit = false,
@@ -704,10 +709,18 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
     spellBitfieldMembers = true,
     rereadGlobals = false,
     coalesceMergeNames = false,
-    nameCoalesceGates,
     onGap = 'strict',
     symbols,
   } = opts;
+  // A CANDIDATE SPELLING MUST NEVER UNLOCK A FUNCTION THE PRIMARY DECLINES. `varName` is not only
+  // how values are spelled — the loop emitters' hazard predicates read it, and several of them ask
+  // "does this edge copy survive identity elision", which merging two names quietly answers `no`.
+  // A pass that made a hazard invisible would trade a loud decline for a silent wrong answer, so
+  // the un-merged structuring runs first and its refusal stands. Cheap next to the compile the
+  // candidate exists to feed, and it is the whole invariant rather than a list of patched guards.
+  if (coalesceMergeNames) {
+    structure(fn, { ...opts, coalesceMergeNames: false }, hooks);
+  }
   const defs = defOpMap(fn);
   const preds = predecessorBlocks(fn);
   const ipdom = postDominators(fn);
@@ -1395,13 +1408,15 @@ export function structure(fn: Fn, opts: StructureOptions = {}): SFn {
         preds,
         liveIn,
         opBlock,
+        opIndex,
+        useSitesOf,
         defs,
         materialize,
         varName,
         varType,
         loops: [...forest.byHeader.values()].map((nl) => ({ header: nl.header, body: nl.body })),
       },
-      nameCoalesceGates,
+      hooks.nameCoalesceGates,
     );
     for (const [v, n] of varName) {
       const r = renames.get(n);

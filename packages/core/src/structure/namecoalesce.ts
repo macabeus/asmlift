@@ -16,27 +16,34 @@
 //
 // So this pass asks the question the naming walk cannot: given the FINAL names, which two of them
 // would a copy join, and may they be one variable? That is copy coalescing, and the answer is the
-// interference graph — not the order the blocks happen to sit in.
+// interference graph — not the order the blocks happen to sit in. `l3/coalesce.ts` is a different
+// question: two UNRELATED locals whose spans are disjoint, which is register reuse.
 //
 // WHY THIS IS A CANDIDATE AND NOT A FIX. The copies are not the cost they look like: the compiler
-// coalesces them too, and klonoa’s LoadBGTilemapData compiles to the same 906 instructions with 74 of
-// them and with 62. What changes is which values share a register, and the byte score splits — one
-// benchmark row improves by 7 and two others get 3 and 6 worse. So the merged spelling is emitted
-// alongside the un-merged one, on the same footing as the other allocator-ambiguous spellings.
+// coalesces them too, and one klonoa function compiles to the same 906 instructions with 74 of
+// them and with 62. What changes is which values share a register, and over the whole benchmark
+// that wins one row by 3 points and loses none. So the merged spelling is emitted alongside the
+// un-merged one, on the same footing as the other allocator-ambiguous spellings.
 //
 // WHEN TWO NAMES MAY BE ONE. A name denotes a set of SSA values. Merging names X and Y makes every
 // value under either read and write one variable, so it is legal exactly when no value of X is
 // live where a value of Y is written, and vice versa. `interferes` is that sentence.
 //
-// WHERE A VALUE IS WRITTEN is the part worth stating. A materialized definition writes at its own
-// block, MID-block — so it also clobbers that block's own parameters, which `liveIn` excludes by
-// construction. A block parameter is written by the edge copies into its block, which run at the
-// end of each predecessor: the values live there are `liveIn` of the block itself, since the other
-// arguments of the same edge are what `sequentialize` orders. That is exact unless a loop emitter
-// MOVES the copy — it rotates the update to the bottom of the body and sinks an exit copy in ahead
-// of it — and where that can happen the write site widens to every block those predecessors reach
-// in one step, the superset `canTakeName` takes everywhere. Function parameters are never written,
-// so they have no write sites at all; a merge onto `a0` is still checked in the other direction.
+// WHERE A VALUE IS WRITTEN, and OVER WHAT RANGE the other one has to be checked, are both places a
+// block-granular answer is wrong. A block parameter is written by the edge copies into its block,
+// which run at the end of each predecessor: `liveIn` of the block is exact for that, since the
+// other arguments of the same edge are what `sequentialize` orders. A materialized definition
+// writes MID-block, and there `liveIn` is not exact in either direction — it omits every value
+// DEFINED in that block, however long it lives afterwards, which is precisely the range a mid-block
+// write lands inside. `liveAt` answers that one per-op. This is the difference between this pass
+// and `canTakeName`, which may use `liveIn` because it is only ever asked about a block PARAMETER,
+// whose range starts at a block boundary; a name class holds arbitrary members.
+//
+// The exception to the edge-copy story is a loop emitter MOVING a copy — it rotates the update to
+// the bottom of the body and sinks an exit copy in ahead of it — and where that can happen the
+// write site widens to every block those predecessors reach in one step, the superset
+// `canTakeName` takes everywhere. Function parameters are never written, so they have no write
+// sites at all; a merge onto `a0` is still checked in the other direction.
 //
 // A LOOP VARIABLE'S NAME MEANS DIFFERENT THINGS IN DIFFERENT PLACES, and that is the one thing
 // liveness cannot answer. The update sits at the bottom of the body, so on an exiting edge the name
@@ -48,15 +55,19 @@
 // the outer variable's home is outside the inner body, a disjoint pair in both directions — so the
 // enclosing-loop rule needs no gate of its own.
 //
-// It is NOT marked sound, because it has not been shown to be. Dropping it over 773 benchmark rows
-// improves 12 and regresses none, and the one fixture that reaches the pre-update hazard makes the
-// loop emitter DECLINE loud rather than miscompile. Those 12 rows are what the rule currently
-// costs; taking them needs an oracle over the loop emitters' copy placement, not this measurement.
+// It is NOT marked sound, because it has not been shown to be, and it is BLUNTER than the rule it
+// restates: `carriesPreUpdate` branches on which emitter owns the latch and names four shapes that
+// are not the hazard, none of which this has. Dropping it over 773 benchmark rows improves 12 and
+// regresses none — `nestedloop` is `int s = 0; … s += i*j`, one accumulator the pass currently
+// emits as two. Lifting `carriesPreUpdate` itself to name classes is the work that would take those
+// 12 rows; it needs the class-level closure, since a merge can reach a loop variable's name through
+// an edge that carried no loop variable at all.
 //
 // PURE: it reads the analysis maps and returns the renaming. Applying it is the caller's job.
 import { type Block, type Op, type Value, successorsOf } from '../ir/core';
 import { type IrType, typeEquals } from '../ir/types';
 import { type Gate, firstRejection } from '../l3/gates';
+import type { UseSite } from './analysis';
 
 export interface NameCoalesceDeps {
   /** the function's blocks, in address order — the iteration order that makes merges deterministic */
@@ -68,6 +79,10 @@ export interface NameCoalesceDeps {
   liveIn: ReadonlyMap<Block, Set<Value>>;
   /** op → the block holding it (analysis.ts) */
   opBlock: ReadonlyMap<Op, Block>;
+  /** op → its position within its block (analysis.ts) */
+  opIndex: ReadonlyMap<Op, number>;
+  /** every positioned use of a value (analysis.ts) */
+  useSitesOf: ReadonlyMap<Value, UseSite[]>;
   /** value → defining op (defOpMap) */
   defs: ReadonlyMap<Value, Op>;
   /** the defs the structurer bound to a local instead of re-rendering at each use */
@@ -98,18 +113,23 @@ export interface NameMerge {
   interferes: boolean;
 }
 
+/** SOUND RULES FIRST. `mayMerge` computes every field eagerly, so the order costs nothing to
+ *  evaluate — what it decides is BLAME. With a heuristic first, every pair that both escapes a loop
+ *  and interferes is attributed to the heuristic, which is exactly backwards for reading what each
+ *  rule actually rejects on its own. */
 export const NAME_COALESCE_GATES: readonly Gate<NameMerge>[] = [
   {
-    id: 'loop-escape',
-    why: 'outside the loop a loop variable’s name holds the value from BEFORE the update',
-    sound: false,
-    rejects: (c) => c.loopEscapes,
+    id: 'interference',
+    why: 'a value live where the other is written would be clobbered by the merged variable',
+    sound: true,
+    guardedBy: 'namecoalesce.test.ts: ablating interference clobbers a value live across the copy',
+    rejects: (c) => c.interferes,
   },
   {
     id: 'sibling-params',
     why: 'two parameters of one block share every in-edge, so one edge would write the name twice',
     sound: true,
-    guardedBy: 'namecoalesce.test.ts: ablating sibling-params collapses two parameters of one block',
+    guardedBy: 'namecoalesce.test.ts: ablating sibling-params puts two parameters of one block under one name',
     rejects: (c) => c.siblingParams,
   },
   {
@@ -126,11 +146,10 @@ export const NAME_COALESCE_GATES: readonly Gate<NameMerge>[] = [
     rejects: (c) => c.functionParam,
   },
   {
-    id: 'interference',
-    why: 'a value live where the other is written would be clobbered by the merged variable',
-    sound: true,
-    guardedBy: 'namecoalesce.test.ts: ablating interference clobbers a value live across the copy',
-    rejects: (c) => c.interferes,
+    id: 'loop-escape',
+    why: 'outside the loop a loop variable’s name holds the value from BEFORE the update',
+    sound: false,
+    rejects: (c) => c.loopEscapes,
   },
 ];
 
@@ -141,7 +160,8 @@ export function coalesceNames(
   deps: NameCoalesceDeps,
   gates: readonly Gate<NameMerge>[] = NAME_COALESCE_GATES,
 ): { renames: Map<string, string>; refusals: Map<string, number> } {
-  const { blocks, entry, preds, liveIn, opBlock, defs, materialize, varName, varType, loops } = deps;
+  const { blocks, entry, preds, liveIn, opBlock, opIndex, useSitesOf, defs, materialize, varName, varType, loops } =
+    deps;
   const refusals = new Map<string, number>();
 
   const valuesOf = new Map<string, Value[]>();
@@ -190,13 +210,46 @@ export function coalesceNames(
     writeSites.set(v, s);
     return s;
   };
-  // A materialized definition writes MID-block, so it also clobbers the block's own PARAMETERS —
-  // which `liveIn` excludes by construction, and which a copy into their shared name would have
-  // written before the block began. An edge copy cannot: it runs before the block starts.
-  const clobbers = (writer: Value, other: Value): boolean =>
-    sitesOf(writer).some(
-      (b) => liveIn.get(b)!.has(other) || (paramBlock.get(writer) === undefined && b.params.includes(other)),
+  // Values live OUT of a block: what its successors read, plus what its terminator hands them.
+  const liveOut = new Map<Block, Set<Value>>();
+  for (const b of blocks) {
+    const out = new Set<Value>();
+    for (const sc of b.ops[b.ops.length - 1]?.successors ?? []) {
+      for (const v of liveIn.get(sc.block) ?? []) {
+        out.add(v);
+      }
+      for (const a of sc.args) {
+        out.add(a);
+      }
+    }
+    liveOut.set(b, out);
+  }
+  // Is `v` live ACROSS position `at` in `b`? `liveIn` alone cannot say: it is block-granular, so a
+  // value DEFINED in `b` is absent from it however long it lives afterwards. That is exactly the
+  // range a mid-block write lands in the middle of — and the reason `canTakeName` can use `liveIn`
+  // and this cannot. `canTakeName` is only ever asked about a block PARAMETER, whose range starts
+  // at a block boundary; a name class holds arbitrary members, materialized defs included.
+  const liveAt = (v: Value, b: Block, at: number): boolean => {
+    const d = defs.get(v);
+    const dIdx = d !== undefined && opBlock.get(d) === b ? opIndex.get(d) : undefined;
+    const started = liveIn.get(b)!.has(v) || b.params.includes(v) || (dIdx !== undefined && dIdx < at);
+    if (!started) {
+      return false;
+    }
+    return liveOut.get(b)!.has(v) || (useSitesOf.get(v) ?? []).some((u) => u.blk === b && u.idx >= at);
+  };
+  // A block parameter's copies run before its block starts, so `liveIn` is exact for them. A
+  // materialized definition writes mid-block and needs the range above.
+  const clobbers = (writer: Value, other: Value): boolean => {
+    const d = paramBlock.get(writer) === undefined ? defs.get(writer) : undefined;
+    const at = d !== undefined ? opIndex.get(d) : undefined;
+    // `liveAt` folds in the block's own parameters; an edge copy's site does not, because it runs
+    // before the block starts. Two parameters of ONE block are written by the same edge copies and
+    // so are invisible here by construction — that is `sibling-params`, not this rule.
+    return sitesOf(writer).some((b) =>
+      at !== undefined && opBlock.get(d!) === b ? liveAt(other, b, at) : liveIn.get(b)!.has(other),
     );
+  };
 
   // Union-find over names. The survivor is the name introduced FIRST, which makes the result
   // independent of the order the pairs happen to be visited in.

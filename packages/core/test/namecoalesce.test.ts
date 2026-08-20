@@ -21,10 +21,7 @@ const emit = (ir: string, gate?: string): string => {
   verify(fn);
   recoverTypes(fn);
   return cBackend.emit(
-    structure(fn, {
-      coalesceMergeNames: true,
-      ...(gate ? { nameCoalesceGates: without(NAME_COALESCE_GATES, gate) } : {}),
-    }),
+    structure(fn, { coalesceMergeNames: true }, gate ? { nameCoalesceGates: without(NAME_COALESCE_GATES, gate) } : {}),
   );
 };
 const uncoalesced = (ir: string): string => {
@@ -112,32 +109,6 @@ test('ablating interference clobbers a value live across the copy', () => {
   expect(emit(LIVE_ACROSS, 'interference')).toContain('return v0 + v0;');
 });
 
-// ^bb3's two parameters are handed `b()`'s result in different slots by different edges, so the
-// merge the second edge proposes would put both of them under one name.
-const SIBLINGS = `fn siblings {
-^bb0(%0: s32):
-  %1: s32 = call %0 {target="a"}
-  %2: s32 = call %0 {target="b"}
-  %3: s32 = const {value=0}
-  %4: u32 = icmp_ne %0, %3
-  cond_br %4, ^bb1(), ^bb2()
-^bb1():
-  br ^bb3(%1, %2)
-^bb2():
-  %5: s32 = call %0 {target="c"}
-  br ^bb3(%2, %5)
-^bb3(%6: s32, %7: s32):
-  %8: s32 = sub %6, %7
-  ret %8
-}
-`;
-
-test('ablating sibling-params collapses two parameters of one block', () => {
-  expect(emit(SIBLINGS)).toContain('return v0 - v1;');
-  // both parameters under one name: every edge writes it twice and the subtraction loses both
-  expect(emit(SIBLINGS, 'sibling-params')).toContain('return v0 - v0;');
-});
-
 // The `do-while` carries its own pre-update value out (fibonacci's `a`): ^bb3's parameter is the
 // value the last iteration STARTED with, so sharing the loop variable's name would read it one
 // iteration on. `loop-escape` is what keeps them apart.
@@ -163,10 +134,51 @@ const TRAILING_DOWHILE = `fn trailingdw {
 }
 `;
 
+// A rotated loop whose post-loop read wants a pre-update value: `structure()` declines it, and the
+// merged naming makes the guard that detects it stop firing. Found by differential fuzzing.
+const UNLOCKS_A_DECLINE = `fn unlockdecline {
+^bb0(%0: s32):
+  %11: s32 = call %0 {target="f0"}
+  %12: s32 = sub %11, %0
+  br ^bb1(%12, %11, %12)
+^bb1(%1: s32, %2: s32, %3: s32):
+  %13: s32 = sub %0, %1
+  %14: s32 = const {value=7}
+  br ^bb2(%14)
+^bb2(%4: s32):
+  %15: s32 = sub %2, %13
+  %16: s32 = sub %1, %2
+  %17: s32 = const {value=13}
+  br ^bb3(%13, %17, %2)
+^bb3(%5: s32, %6: s32, %7: s32):
+  br ^bb4()
+^bb4():
+  %18: s32 = const {value=11}
+  %19: s32 = sub %7, %12
+  %20: s32 = add %16, %11
+  br ^bb5(%16, %14)
+^bb5(%8: s32, %9: s32):
+  %21: u32 = icmp_sgt %14, %9
+  cond_br %21, ^bb1(%5, %8, %4), ^bb6(%14)
+^bb6(%10: s32):
+  %22: s32 = const {value=19}
+  %23: s32 = call %18 {target="f2"}
+  %24: s32 = call %15 {target="f0"}
+  ret %4
+}
+`;
+
 test('a post-loop value never takes its loop variable’s name', () => {
   expect(emit(TRAILING_DOWHILE)).toBe(uncoalesced(TRAILING_DOWHILE));
-  // and dropping the rule reaches the loop emitter's own pre-update check, which declines LOUD
-  expect(() => emit(TRAILING_DOWHILE, 'loop-escape')).toThrow(/pre-update loop variable/);
+});
+
+test('a candidate never unlocks a function the primary declines', () => {
+  // `varName` is an input to the loop emitters' hazard predicates, not only to spelling: merging
+  // two names turns a real edge copy into an identity one, and a guard that asks "does this edge
+  // write anything" stops seeing the hazard. Structuring without the axis first is what makes that
+  // structural rather than a list of patched guards — this function is one the fuzz found.
+  expect(() => uncoalesced(UNLOCKS_A_DECLINE)).toThrow(/pre-update loop variable/);
+  expect(() => emit(UNLOCKS_A_DECLINE)).toThrow(/pre-update loop variable/);
 });
 
 // ── the type rule, at the level it decides on ──────────────────────────────────────────────────
@@ -178,15 +190,26 @@ const v = (): Value => mkValue(T.s(32));
 const twoNames = (
   xType: ReturnType<typeof T.s>,
   yType: ReturnType<typeof T.s>,
-): { deps: NameCoalesceDeps; join: Value } => {
+  o: { withSibling?: boolean } = {},
+): { deps: NameCoalesceDeps; join: Value; sibling: Value } => {
   const join = v();
+  // A second parameter of the SAME block, already carrying the name the merge would absorb.
+  const sibling = v();
   const fromA = v();
   const fromB = v();
-  const bJ: Block = { params: [join], ops: [mkOp('ret', { operands: [join] })] };
+  const params = o.withSibling ? [join, sibling] : [join];
+  const bJ: Block = { params, ops: [mkOp('ret', { operands: [join] })] };
   const defA = mkOp('call', { results: [fromA] });
   const defB = mkOp('call', { results: [fromB] });
-  const bA: Block = { params: [], ops: [defA, mkOp('br', { successors: [{ block: bJ, args: [fromA] }] })] };
-  const bB: Block = { params: [], ops: [defB, mkOp('br', { successors: [{ block: bJ, args: [fromB] }] })] };
+  const argsOf = (a: Value, b: Value): Value[] => (o.withSibling ? [a, b] : [a]);
+  const bA: Block = {
+    params: [],
+    ops: [defA, mkOp('br', { successors: [{ block: bJ, args: argsOf(fromA, fromB) }] })],
+  };
+  const bB: Block = {
+    params: [],
+    ops: [defB, mkOp('br', { successors: [{ block: bJ, args: argsOf(fromB, fromB) }] })],
+  };
   const entry: Block = {
     params: [],
     ops: [
@@ -201,6 +224,7 @@ const twoNames = (
   const blocks = [entry, bA, bB, bJ];
   return {
     join,
+    sibling,
     deps: {
       blocks,
       entry,
@@ -214,6 +238,11 @@ const twoNames = (
         [defA, bA],
         [defB, bB],
       ]),
+      opIndex: new Map<Op, number>([
+        [defA, 0],
+        [defB, 0],
+      ]),
+      useSitesOf: new Map(),
       defs: new Map<Value, Op>([
         [fromA, defA],
         [fromB, defB],
@@ -223,6 +252,7 @@ const twoNames = (
         [fromA, 'v0'],
         [join, 'v0'],
         [fromB, 'v1'],
+        ...(o.withSibling ? ([[sibling, 'v1']] as [Value, string][]) : []),
       ]),
       varType: new Map([
         ['v0', xType],
@@ -232,6 +262,21 @@ const twoNames = (
     },
   };
 };
+
+// `sibling-params` names a hazard `interference` is not built to see: two parameters of ONE block
+// are written by the SAME edge copies, so neither is live where the other is written. It is not
+// reachable from parsed IR the way the others are — zero refusals over klonoa's 69 liftable
+// functions, because every constructible pair of simultaneously-live values interferes first — so
+// like `type` it is driven at the pass's own boundary, on the shape it names.
+test('ablating sibling-params puts two parameters of one block under one name', () => {
+  const { deps, join, sibling } = twoNames(T.s(32), T.s(32), { withSibling: true });
+  expect([...coalesceNames(deps).renames]).toEqual([]);
+  const merged = coalesceNames(deps, without(NAME_COALESCE_GATES, 'sibling-params')).renames;
+  expect([...merged]).toEqual([['v1', 'v0']]);
+  // both parameters of the join now name one variable, so its in-edge copies write it twice
+  const nameOf = (v: Value): string => merged.get(deps.varName.get(v)!) ?? deps.varName.get(v)!;
+  expect(nameOf(join)).toBe(nameOf(sibling));
+});
 
 test('ablating type merges two names the declarations disagree about', () => {
   const { deps } = twoNames(T.u(32), T.ptr(T.u(8)));

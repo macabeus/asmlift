@@ -410,9 +410,18 @@ export const SYNTHETIC: SynthSpec[] = [
   // ANOTHER join, in an arm named after the one the outer join adopted — to leave a copy behind.
   // Loads through a pointer parameter give that shape without a global, which no synthetic row has.
   //
+  // mergeif is not mergechain at a smaller size: each arm decides only ONE of the two locals, so
+  // the other is live ACROSS the arm that does not write it — the shape the interference rule has
+  // to see, rather than two arms that both decide everything.
+  //
   // mergeloop is the same shape with the join inside a loop, where the names carry a meaning
   // liveness cannot see (a loop variable read on an exiting edge is the value from BEFORE its
   // update) and coalescing declines. It is here so that refusal has a row.
+  //
+  // WHAT THESE DO NOT COVER, so nobody later reads twelve rows as twelve tests: five decline in the
+  // FRONTEND for reasons with nothing to do with merges — MIPS branch-likely (`beql`/`bnezl`), a
+  // PPC branch with no reaching `cr0` compare, a branch to a non-block-boundary. Three more exist
+  // to be refused. Four rows reach the accept path.
   {
     sym: 'mergechain',
     src:
@@ -433,8 +442,10 @@ export const SYNTHETIC: SynthSpec[] = [
     src:
       'int mergeif(int s, const int *p) {\n' +
       '  int x, y;\n' +
-      '  if (s & 1) { x = p[0] > 31 ? 32 : p[0]; y = p[1] > 31 ? 32 : p[1]; }\n' +
-      '  else { x = p[2] < 0 ? 0 : p[2]; y = p[3] < 0 ? 0 : p[3]; }\n' +
+      '  x = p[0] > 31 ? 32 : p[0];\n' +
+      '  y = p[1] > 31 ? 32 : p[1];\n' +
+      '  if (s & 1) { y = p[2] < 0 ? 0 : p[2]; }\n' +
+      '  else { x = p[3] < 0 ? 0 : p[3]; }\n' +
       '  return x * 10 + y;\n' +
       '}',
     features: ['merge-chain'],
