@@ -97,3 +97,26 @@ test('/mulfirst never moves a side containing a call', () => {
   const call: Expr = { k: 'call', fn: 'g', args: [] };
   expect(mulFirstSums(fnOf(add(call, mul(V('a'), V('b')))))).toBeNull();
 });
+
+test('a var naming a MATERIALIZED load does not swap: its evaluation is not at this site', () => {
+  // The store forces the first load into a local (memWriteBetween); the add's operands are then
+  // (inline load, var). Re-ordering the var reference re-orders no evaluation - machine order
+  // stays, even though the VAR's def is the earlier load.
+  const src = emit(`fn matvar {
+^bb0(%0: unk32, %1: s32):
+  %2: s32 = load %0 {off=4, signed=false, width=4}
+  store %0, %1 {off=4, width=4}
+  %3: s32 = load %0 {off=0, signed=false, width=4}
+  %4: s32 = add %3, %2
+  ret %4
+}`);
+  expect(src).toContain('v0 = a0[1];');
+  expect(src).toContain('return *a0 + v0;');
+});
+
+test('ldmia-expanded loads do not swap: their stream order is LIST order, not evaluation order', () => {
+  const asm = ['\tldmia\tr0!, {r1, r2}', '\tmov\tr3, r2', '\tmul\tr3, r3, r1', '\tmov\tr0, r3', '\tbx\tlr'].join('\n');
+  const src = decompile('lm2', `lm2:\n${asm}\n`, ARMV4T_AGBCC).source;
+  // machine order (r2-loaded-second first) is kept — the multi attr blocks the def-order swap
+  expect(src).toContain('a0[1] * *a0');
+});

@@ -40,7 +40,18 @@ import { type GlobalCell, globalCellOf, mayWriteGlobal } from '../ir/alias';
 import { Block, Fn, Op, Value, defOpMap, dominators, successorsOf } from '../ir/core';
 import { EFFECTFUL_OPS } from '../ir/opcodes';
 import { type IrType, T, scalarTypeForAccess, typeEquals } from '../ir/types';
-import { BinOp, Expr, SFn, Stmt, SwitchCase, exprChildren, gapReasonFor, mapExprChildren, negateCond } from '../l3/ast';
+import {
+  BinOp,
+  Expr,
+  SFn,
+  Stmt,
+  SwitchCase,
+  exprChildren,
+  exprHasEffect,
+  gapReasonFor,
+  mapExprChildren,
+  negateCond,
+} from '../l3/ast';
 import type { Gate } from '../l3/gates';
 import { exprCType, ptrElemBytes } from '../l3/typing';
 import { returnType } from '../raise/recover';
@@ -583,9 +594,12 @@ const ARITH_TO_BIN: Record<string, BinOp> = {
 // re-spelling in lowerDef. `&&`/`||` are excluded: short-circuit order IS semantics.
 const COMMUTATIVE_BIN: ReadonlySet<BinOp> = new Set(['+', '*', '&', '|', '^']);
 
-/** Whether the tree contains a call — an operand a re-order may never move across. */
-function exprHasCall(e: Expr): boolean {
-  return e.k === 'call' || exprChildren(e).some(exprHasCall);
+/** The expr IS a memory read at this site (modulo casts) — the def-order re-spelling's subject.
+ *  A `var` naming an earlier-MATERIALIZED load fails this on purpose: its evaluation happened at
+ *  its def statement, so re-ordering the reference here re-orders nothing and only churns the
+ *  spelling away from the machine order the allocator saw. */
+function rootIsRead(e: Expr): boolean {
+  return e.k === 'index' || e.k === 'field' ? true : e.k === 'cast' ? rootIsRead(e.e) : false;
 }
 
 // Recovered info for a self-loop header: its exit block and the per-parameter back-edge
@@ -657,6 +671,11 @@ export interface StructureOptions {
   // body). GCC freely uses `!=`; IDO prefers `==`/`<`. A per-compiler DATA lever, not an `arch ==`
   // branch — default true (permissive; the decline path keeps it sound either way).
   switchAllowsNeqCase?: boolean;
+  // Commutative load pairs re-spell in def (evaluation) order — see the swap in lowerDef. Default
+  // true; verified byte-exact on agbcc and IDO. A per-compiler DATA lever: the first compiler
+  // whose scheduler is shown re-ordering independent loads flips this in its compilerBehaviors
+  // entry, not in a code branch.
+  defOrderLoadPairs?: boolean;
   // Anchor a constant merge copy at its const op's ORIGINAL position instead of at the CFG edge:
   // `movs r9, #0` at entry ahead of a single-armed overwrite emits as a pre-initialization above
   // the `if`, not as its else-arm. A differ-refereed candidate axis (rank.ts `/defsite`), never a
@@ -1751,16 +1770,19 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       if (COMMUTATIVE_BIN.has(ARITH_TO_BIN[d.opcode]) && d.operands.length === 2) {
         const [da, db] = [defs.get(d.operands[0]), defs.get(d.operands[1])];
         if (
+          (opts.defOrderLoadPairs ?? true) &&
           da &&
           db &&
           (da.opcode === 'load' || da.opcode === 'aload') &&
           (db.opcode === 'load' || db.opcode === 'aload') &&
+          da.attrs.multi !== true &&
+          db.attrs.multi !== true &&
+          rootIsRead(l) &&
+          rootIsRead(r) &&
           ctype(l)?.kind !== 'ptr' &&
           ctype(r)?.kind !== 'ptr' &&
-          l.k !== 'addr' &&
-          r.k !== 'addr' &&
-          !exprHasCall(l) &&
-          !exprHasCall(r) &&
+          !exprHasEffect(l) &&
+          !exprHasEffect(r) &&
           opBlock.get(da) === opBlock.get(db) &&
           opIndex.get(da)! > opIndex.get(db)!
         ) {

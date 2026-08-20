@@ -152,6 +152,8 @@ interface PpcJT {
   caseAddrs: number[];
   defaultAddr: number;
   bctrAddr: number;
+  /** the idiom's own lis/addi @tbl reloc sites — exempt from the reloc-placeholder guards */
+  tableRelocAddrs: number[];
 }
 
 // Recover mwcc jump tables from the dispatch idiom + the AsmData side-table. Fail-closed: any
@@ -215,7 +217,13 @@ function recoverPpcJumpTables(instrs: Instr[], ad: AsmData): Map<number, PpcJT> 
     if (!caseAddrs) {
       continue;
     }
-    out.set(bounds.addr, { scrutReg, caseAddrs, defaultAddr: bounds.def, bctrAddr: instrs[i].addr });
+    out.set(bounds.addr, {
+      scrutReg,
+      caseAddrs,
+      defaultAddr: bounds.def,
+      bctrAddr: instrs[i].addr,
+      tableRelocAddrs: [lis.addr, addi.addr],
+    });
   }
   return out;
 }
@@ -353,6 +361,17 @@ export function lift(
   // it is exempted from the loud-fail below; an UNrecovered `bctr` still fails loud.
   const jts = asmData ? recoverPpcJumpTables(instrs, asmData) : new Map<number, PpcJT>();
   const recoveredBctr = new Set([...jts.values()].map((j) => j.bctrAddr));
+  const jtRelocAddrs = new Set([...jts.values()].flatMap((j) => j.tableRelocAddrs));
+  // A data reloc on an immediate-forming instruction means objdump printed a LINK-TIME
+  // placeholder (`lis r4,0` + R_PPC_ADDR16_HA sym): the real value is the symbol's half, and
+  // lifting the 0 silently reads the wrong address — plausible-but-wrong C, the forbidden class.
+  // The jump-table idiom's own @tbl pair is the one modelled consumer (exempted above).
+  const relocPlaceholder = (ins: Instr): void => {
+    throw new PpcUnsupportedError(
+      `cannot lift '${name}': '${ins.mnemonic}' at 0x${ins.addr.toString(16)} carries a data relocation ` +
+        `('${ins.sym}') — the printed immediate is a link-time placeholder, not the value`,
+    );
+  };
   // TRUSTWORTHINESS: fail loud on an unmodelled control transfer rather than dropping it (which
   // would silently miscompile the control flow). CTR-counted loops and indirect branches land here.
   for (const ins of instrs) {
@@ -632,6 +651,9 @@ export function lift(
           write(d, constVal(parseImm(s)));
           break; // load immediate (addi rD,0,imm)
         case 'lis':
+          if (ins.sym && !jtRelocAddrs.has(ins.addr)) {
+            relocPlaceholder(ins);
+          }
           write(d, constVal((parseImm(s) << 16) >> 0));
           break; // load immediate shifted
         case 'add':
@@ -644,12 +666,19 @@ export function lift(
           if (d === 'r1') {
             break;
           }
+          if (ins.sym && !jtRelocAddrs.has(ins.addr)) {
+            relocPlaceholder(ins);
+          }
           emitBin('add', d, read(s), constVal(parseImm(t)));
           break;
         // add immediate SHIFTED — the register-based `%ha` anchor: mwcc derives an absolute base
-        // from a scaled index (`addis r4,r3,-32736` = r3 + 0x80200000). The lis/addi GLOBAL pair
-        // is a separate peephole above; an addis over a register is plain arithmetic.
+        // from a scaled index (`addis r4,r3,-32736` = r3 + 0x80200000). The jump-table lis/addi
+        // pair recognizer is the only reloc-carrying consumer; an addis over a register is plain
+        // arithmetic, and a reloc-carrying one is a placeholder (guard above).
         case 'addis':
+          if (ins.sym) {
+            relocPlaceholder(ins);
+          }
           emitBin('add', d, read(s), constVal((parseImm(t) << 16) >> 0));
           break;
         case 'subf':

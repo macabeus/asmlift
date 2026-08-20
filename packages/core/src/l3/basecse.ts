@@ -20,7 +20,7 @@
 // miscompile: the address value is identical, just held in a different place.
 import { type IrType, T, scalarTypeForAccess } from '../ir/types';
 import type { Expr, SFn, Stmt } from './ast';
-import { mapExprChildren, stmtChildren, stmtExprs } from './ast';
+import { mapExprChildren, mapStmtExprs, stmtChildren, stmtExprs } from './ast';
 import { type Gate, ablateHeuristic, firstRejection } from './gates';
 import { nameAllocator } from './hoist';
 
@@ -108,37 +108,6 @@ function rewrite(e: Expr, localFor: Map<string, string>): Expr {
   return mapExprChildren(e, (c) => rewrite(c, localFor));
 }
 
-function rewriteStmt(s: Stmt, localFor: Map<string, string>): Stmt {
-  const mapS = (x: Stmt): Stmt => rewriteStmt(x, localFor);
-  switch (s.k) {
-    case 'assign':
-      return { ...s, value: rewrite(s.value, localFor) };
-    case 'store':
-      return { ...s, lval: rewrite(s.lval, localFor), value: rewrite(s.value, localFor) };
-    case 'exprstmt':
-      return { ...s, value: rewrite(s.value, localFor) };
-    case 'return':
-      return s.value ? { ...s, value: rewrite(s.value, localFor) } : s;
-    case 'if':
-      return { ...s, cond: rewrite(s.cond, localFor), then: s.then.map(mapS), else: s.else.map(mapS) };
-    case 'while':
-    case 'dowhile':
-      return { ...s, cond: rewrite(s.cond, localFor), body: s.body.map(mapS) };
-    case 'for':
-      return { ...s, init: mapS(s.init), cond: rewrite(s.cond, localFor), inc: mapS(s.inc), body: s.body.map(mapS) };
-    case 'switch':
-      return {
-        ...s,
-        scrutinee: rewrite(s.scrutinee, localFor),
-        cases: s.cases.map((c) => ({ ...c, body: c.body.map(mapS) })),
-        default: s.default?.map(mapS),
-      };
-    case 'break':
-    case 'continue':
-      return s;
-  }
-}
-
 /** One base under consideration, keyed as `(base, width, signedness)`. */
 export interface BaseKey {
   key: string;
@@ -220,7 +189,7 @@ export function hoistReusedGlobalBases(sfn: SFn, gates: readonly Gate<BaseKey>[]
     hoistStmts.push({ k: 'assign', name: nm, value: { k: 'cast', to: ptrType, e: m.base } });
   }
 
-  const rewritten = sfn.body.map((s) => rewriteStmt(s, localFor));
+  const rewritten = sfn.body.map((s) => mapStmtExprs(s, (e) => rewrite(e, localFor)));
   // Pool-load order (see `collect`): inits emit in first-use order. When rank's /livebase re-runs
   // this pass, the tree's head already carries the default run's inits — blindly prepending would
   // spell the new base's load above locals the compiler loads first. So the head run of

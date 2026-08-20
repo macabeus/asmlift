@@ -354,6 +354,47 @@ export function stmtExprs(s: Stmt): Expr[] {
   }
 }
 
+/** Rebuild `s` with EVERY expression position mapped through `f` — store lvalues and loop/switch
+ *  heads included, nested statements recursively. The rewrite dual of stmtExprs/stmtChildren, so
+ *  a lever's whole-function expression rewrite is one call instead of its own switch (basecse and
+ *  mulfirst use it; a new Stmt kind extends this ONE place). */
+export function mapStmtExprs(s: Stmt, f: (e: Expr) => Expr): Stmt {
+  const mapS = (x: Stmt): Stmt => mapStmtExprs(x, f);
+  switch (s.k) {
+    case 'assign':
+      return { ...s, value: f(s.value) };
+    case 'store':
+      return { ...s, lval: f(s.lval), value: f(s.value) };
+    case 'exprstmt':
+      return { ...s, value: f(s.value) };
+    case 'return':
+      return s.value ? { ...s, value: f(s.value) } : s;
+    case 'if':
+      return { ...s, cond: f(s.cond), then: s.then.map(mapS), else: s.else.map(mapS) };
+    case 'while':
+    case 'dowhile':
+      return { ...s, cond: f(s.cond), body: s.body.map(mapS) };
+    case 'for':
+      return { ...s, init: mapS(s.init), cond: f(s.cond), inc: mapS(s.inc), body: s.body.map(mapS) };
+    case 'switch':
+      return {
+        ...s,
+        scrutinee: f(s.scrutinee),
+        cases: s.cases.map((c) => ({ ...c, body: c.body.map(mapS) })),
+        default: s.default?.map(mapS),
+      };
+    case 'break':
+    case 'continue':
+      return s;
+  }
+}
+
+/** Whether the tree contains a node with an EFFECT no re-ordering may move: a call, or a marker
+ *  standing in for an unmodelled instruction (annotate mode). */
+export function exprHasEffect(e: Expr): boolean {
+  return e.k === 'call' || e.k === 'marker' || exprChildren(e).some(exprHasEffect);
+}
+
 /** The statements a statement DIRECTLY contains. NOTE for document-order walks: a `for`'s
  *  init/inc are listed here while its cond is in stmtExprs — a walker visiting exprs-then-stmts
  *  sees the cond before the init. */

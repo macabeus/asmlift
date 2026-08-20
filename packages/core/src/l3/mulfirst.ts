@@ -13,53 +13,29 @@
 // (`bin('*')` at the root, casts looked through) — two products or none leave nothing to anchor
 // the flip on. A side containing a call never moves (evaluation order of the operands is what
 // the lever edits). Declines (null) when no `+` changes, so no duplicate candidate.
-import type { Expr, SFn, Stmt } from './ast';
-import { exprChildren, mapExprChildren } from './ast';
+import type { Expr, SFn } from './ast';
+import { exprHasEffect, mapExprChildren, mapStmtExprs } from './ast';
 
 const isProduct = (e: Expr): boolean =>
   e.k === 'bin' && e.op === '*' ? true : e.k === 'cast' ? isProduct(e.e) : false;
-
-const hasCall = (e: Expr): boolean => e.k === 'call' || exprChildren(e).some(hasCall);
 
 export function mulFirstSums(sfn: SFn): SFn | null {
   let changed = false;
   const rewrite = (e: Expr): Expr => {
     const m = mapExprChildren(e, rewrite);
-    if (m.k === 'bin' && m.op === '+' && isProduct(m.r) && !isProduct(m.l) && !hasCall(m.l) && !hasCall(m.r)) {
+    if (
+      m.k === 'bin' &&
+      m.op === '+' &&
+      isProduct(m.r) &&
+      !isProduct(m.l) &&
+      !exprHasEffect(m.l) &&
+      !exprHasEffect(m.r)
+    ) {
       changed = true;
       return { ...m, l: m.r, r: m.l };
     }
     return m;
   };
-  const mapS = (s: Stmt): Stmt => {
-    switch (s.k) {
-      case 'assign':
-        return { ...s, value: rewrite(s.value) };
-      case 'store':
-        return { ...s, lval: rewrite(s.lval), value: rewrite(s.value) };
-      case 'exprstmt':
-        return { ...s, value: rewrite(s.value) };
-      case 'return':
-        return s.value ? { ...s, value: rewrite(s.value) } : s;
-      case 'if':
-        return { ...s, cond: rewrite(s.cond), then: s.then.map(mapS), else: s.else.map(mapS) };
-      case 'while':
-      case 'dowhile':
-        return { ...s, cond: rewrite(s.cond), body: s.body.map(mapS) };
-      case 'for':
-        return { ...s, init: mapS(s.init), cond: rewrite(s.cond), inc: mapS(s.inc), body: s.body.map(mapS) };
-      case 'switch':
-        return {
-          ...s,
-          scrutinee: rewrite(s.scrutinee),
-          cases: s.cases.map((c) => ({ ...c, body: c.body.map(mapS) })),
-          default: s.default?.map(mapS),
-        };
-      case 'break':
-      case 'continue':
-        return s;
-    }
-  };
-  const body = sfn.body.map(mapS);
+  const body = sfn.body.map((s) => mapStmtExprs(s, rewrite));
   return changed ? { ...sfn, body } : null;
 }

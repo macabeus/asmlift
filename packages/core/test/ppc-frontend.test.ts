@@ -210,3 +210,12 @@ test('addis over a register is a plain add of the shifted immediate', () => {
   // recovery types the base `s32 *`, so 0x80200000 bytes renders as its ELEMENT count
   expect(src).toContain('*(a0 + -536346624)');
 });
+
+test('a reloc-carrying addis/lis/addi is a link-time placeholder — declines loud, never `+ 0`', () => {
+  // objdump -r interleaves the data reloc; the printed immediate is 0. Lifting it as the value
+  // silently reads the wrong address (the classic `arr@ha` indexed-global shape).
+  const addis = '0:\taddis   r4,r3,0\n\t\t\t0: R_PPC_ADDR16_HA arr\n4:\tlwz     r3,0(r4)\n8:\tblr\n';
+  expect(() => dis('anchor_reloc', addis)).toThrow(/data relocation/);
+  const lis = '0:\tlis     r4,0\n\t\t\t0: R_PPC_ADDR16_HA gVal\n4:\tlwz     r3,0(r4)\n8:\tblr\n';
+  expect(() => dis('lis_reloc', lis)).toThrow(/data relocation/);
+});
