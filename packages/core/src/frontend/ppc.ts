@@ -152,8 +152,6 @@ interface PpcJT {
   caseAddrs: number[];
   defaultAddr: number;
   bctrAddr: number;
-  /** the idiom's own lis/addi @tbl reloc sites — exempt from the reloc-placeholder guards */
-  tableRelocAddrs: number[];
 }
 
 // Recover mwcc jump tables from the dispatch idiom + the AsmData side-table. Fail-closed: any
@@ -217,13 +215,7 @@ function recoverPpcJumpTables(instrs: Instr[], ad: AsmData): Map<number, PpcJT> 
     if (!caseAddrs) {
       continue;
     }
-    out.set(bounds.addr, {
-      scrutReg,
-      caseAddrs,
-      defaultAddr: bounds.def,
-      bctrAddr: instrs[i].addr,
-      tableRelocAddrs: [lis.addr, addi.addr],
-    });
+    out.set(bounds.addr, { scrutReg, caseAddrs, defaultAddr: bounds.def, bctrAddr: instrs[i].addr });
   }
   return out;
 }
@@ -361,11 +353,11 @@ export function lift(
   // it is exempted from the loud-fail below; an UNrecovered `bctr` still fails loud.
   const jts = asmData ? recoverPpcJumpTables(instrs, asmData) : new Map<number, PpcJT>();
   const recoveredBctr = new Set([...jts.values()].map((j) => j.bctrAddr));
-  const jtRelocAddrs = new Set([...jts.values()].flatMap((j) => j.tableRelocAddrs));
   // A data reloc on an immediate-forming instruction means objdump printed a LINK-TIME
   // placeholder (`lis r4,0` + R_PPC_ADDR16_HA sym): the real value is the symbol's half, and
   // lifting the 0 silently reads the wrong address — plausible-but-wrong C, the forbidden class.
-  // The jump-table idiom's own @tbl pair is the one modelled consumer (exempted above).
+  // The jump-table idiom's own @tbl pair never reaches these guards: a recovered dispatch block
+  // is the bounds branch's replaced fall-through, pruned as unreachable before decode.
   const relocPlaceholder = (ins: Instr): void => {
     throw new PpcUnsupportedError(
       `cannot lift '${name}': '${ins.mnemonic}' at 0x${ins.addr.toString(16)} carries a data relocation ` +
@@ -648,10 +640,14 @@ export function lift(
           write(d, read(s));
           break; // move register (or rD,rS,rS)
         case 'li':
+          // SDA21 address formation encodes rA=0, so objdump prints `li rD,0` + R_PPC_EMB_SDA21
+          if (ins.sym) {
+            relocPlaceholder(ins);
+          }
           write(d, constVal(parseImm(s)));
           break; // load immediate (addi rD,0,imm)
         case 'lis':
-          if (ins.sym && !jtRelocAddrs.has(ins.addr)) {
+          if (ins.sym) {
             relocPlaceholder(ins);
           }
           write(d, constVal((parseImm(s) << 16) >> 0));
@@ -666,7 +662,7 @@ export function lift(
           if (d === 'r1') {
             break;
           }
-          if (ins.sym && !jtRelocAddrs.has(ins.addr)) {
+          if (ins.sym) {
             relocPlaceholder(ins);
           }
           emitBin('add', d, read(s), constVal(parseImm(t)));
@@ -732,6 +728,10 @@ export function lift(
           emitBin('or', d, read(s), read(t));
           break;
         case 'ori':
+          // `ori rD,rA,sym@l` is the other @l half-former — same placeholder hazard as addi
+          if (ins.sym) {
+            relocPlaceholder(ins);
+          }
           emitBin('or', d, read(s), constVal(parseImm(t)));
           break;
         case 'xor':

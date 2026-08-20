@@ -355,9 +355,11 @@ export function stmtExprs(s: Stmt): Expr[] {
 }
 
 /** Rebuild `s` with EVERY expression position mapped through `f` — store lvalues and loop/switch
- *  heads included, nested statements recursively. The rewrite dual of stmtExprs/stmtChildren, so
- *  a lever's whole-function expression rewrite is one call instead of its own switch (basecse and
- *  mulfirst use it; a new Stmt kind extends this ONE place). */
+ *  heads included, nested statements recursively. The rewrite dual of stmtExprs/stmtChildren for
+ *  the PURE 1:1 case (basecse, mulfirst). The other levers' hand-rolled mappers have DIFFERENT
+ *  contracts, not missed migrations: reindex's is fallible (Stmt|null declines), scopebase's
+ *  recurses through its hoist-INSERTING list rewriter, regspell rewrites assign TARGETS, argbase
+ *  produces statement lists. */
 export function mapStmtExprs(s: Stmt, f: (e: Expr) => Expr): Stmt {
   const mapS = (x: Stmt): Stmt => mapStmtExprs(x, f);
   switch (s.k) {

@@ -120,3 +120,21 @@ test('ldmia-expanded loads do not swap: their stream order is LIST order, not ev
   // machine order (r2-loaded-second first) is kept — the multi attr blocks the def-order swap
   expect(src).toContain('a0[1] * *a0');
 });
+
+test('a bare scalar-global pair swaps too: recovery spells the read as a var, but it IS this site', () => {
+  const asm = [
+    '\tldr\tr2, .L1',
+    '\tldr\tr3, .L2',
+    '\tldr\tr2, [r2]',
+    '\tldr\tr3, [r3]',
+    '\tmul\tr3, r3, r2',
+    '\tmov\tr0, r3',
+    '\tbx\tlr',
+    '.L1:',
+    '\t.word\tgA',
+    '.L2:',
+    '\t.word\tgB',
+  ].join('\n');
+  const src = decompile('sgpair', `sgpair:\n${asm}\n`, ARMV4T_AGBCC).source;
+  expect(src).toContain('gA * gB');
+});

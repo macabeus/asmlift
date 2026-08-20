@@ -594,14 +594,6 @@ const ARITH_TO_BIN: Record<string, BinOp> = {
 // re-spelling in lowerDef. `&&`/`||` are excluded: short-circuit order IS semantics.
 const COMMUTATIVE_BIN: ReadonlySet<BinOp> = new Set(['+', '*', '&', '|', '^']);
 
-/** The expr IS a memory read at this site (modulo casts) — the def-order re-spelling's subject.
- *  A `var` naming an earlier-MATERIALIZED load fails this on purpose: its evaluation happened at
- *  its def statement, so re-ordering the reference here re-orders nothing and only churns the
- *  spelling away from the machine order the allocator saw. */
-function rootIsRead(e: Expr): boolean {
-  return e.k === 'index' || e.k === 'field' ? true : e.k === 'cast' ? rootIsRead(e.e) : false;
-}
-
 // Recovered info for a self-loop header: its exit block and the per-parameter back-edge
 // arg it feeds (the value on the header→header edge). The back-edge arg is the "next"
 // value of the phi; mapping it back to the phi turns the latch test into the while test.
@@ -672,9 +664,10 @@ export interface StructureOptions {
   // branch — default true (permissive; the decline path keeps it sound either way).
   switchAllowsNeqCase?: boolean;
   // Commutative load pairs re-spell in def (evaluation) order — see the swap in lowerDef. Default
-  // true; verified byte-exact on agbcc and IDO. A per-compiler DATA lever: the first compiler
-  // whose scheduler is shown re-ordering independent loads flips this in its compilerBehaviors
-  // entry, not in a code branch.
+  // true; verified byte-exact on agbcc and IDO. A per-compiler DATA lever declared in
+  // TargetDescription.compilerBehaviors: the first compiler whose scheduler is shown re-ordering
+  // independent loads flips it there, not in a code branch. A per-FUNCTION machine-order fallback
+  // candidate is deliberately deferred until a row demands it.
   defOrderLoadPairs?: boolean;
   // Anchor a constant merge copy at its const op's ORIGINAL position instead of at the CFG edge:
   // `movs r9, #0` at entry ahead of a single-armed overwrite emits as a pre-initialization above
@@ -753,6 +746,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     preserveDivergentBranchSense = true,
     orderArgCopiesByComputation = true,
     switchAllowsNeqCase = true,
+    defOrderLoadPairs = true,
     anchorConstCopies = false,
     littleEndian = true,
     spellBitfieldMembers = true,
@@ -1770,15 +1764,19 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       if (COMMUTATIVE_BIN.has(ARITH_TO_BIN[d.opcode]) && d.operands.length === 2) {
         const [da, db] = [defs.get(d.operands[0]), defs.get(d.operands[1])];
         if (
-          (opts.defOrderLoadPairs ?? true) &&
+          defOrderLoadPairs &&
           da &&
           db &&
           (da.opcode === 'load' || da.opcode === 'aload') &&
           (db.opcode === 'load' || db.opcode === 'aload') &&
-          da.attrs.multi !== true &&
-          db.attrs.multi !== true &&
-          rootIsRead(l) &&
-          rootIsRead(r) &&
+          da.attrs.listOrder !== true &&
+          db.attrs.listOrder !== true &&
+          // MATERIALIZED defs decline: their evaluation happened at their def statement, so
+          // re-ordering the reference here re-orders nothing and only churns the spelling away
+          // from the machine order the allocator saw. An inlined def — a deref, a field, a bare
+          // scalar global — evaluates at THIS site, wherever recovery spells it.
+          !materialize.has(da) &&
+          !materialize.has(db) &&
           ctype(l)?.kind !== 'ptr' &&
           ctype(r)?.kind !== 'ptr' &&
           !exprHasEffect(l) &&

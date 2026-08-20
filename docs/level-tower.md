@@ -92,10 +92,11 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
     Every path gets these, which is why the boundary contracts run on both sides of them (below).
   - **Ranked re-spellings**, in [`rank.ts`](../packages/core/src/rank.ts) and so on the
     `decompileRanked` path only. Two populations of them: SPELLING re-writes of one structured
-    tree (`/argbase`, `/scopebase`, `/coalesce`, `/indexed`, `/regcopy`) and STRUCTURING axes,
-    which re-run `structure()` under a different lever (`/flip-branch`, `/defsite`,
-    `/no-bitfield`, `/reread-globals`, `/merge-names`) — plus `/raw-globals` and the
-    signedness pin, which re-run the lift itself.
+    tree (e.g. `/argbase`, `/scopebase`, `/indexed`, `/livebase`, `/volatile`, `/mulfirst`,
+    `/regcopy`, `/coalesce`) and STRUCTURING axes, which re-run `structure()` under a different
+    lever (e.g. `/flip-branch`, `/defsite`, `/inplace`, `/no-bitfield`, `/reread-globals`,
+    `/merge-names`) — plus `/raw-globals` and the signedness pin, which re-run the lift itself.
+    The roster is illustrative; `rank.ts` is the source of truth.
     Each emits an _alternative candidate_ rather than replacing the primary, and the differ
     referees — the
     [ranked-candidate idea](asmlift-101.md#26-types-as-ranked-candidates-judged-by-the-differ)
