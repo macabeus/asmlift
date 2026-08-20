@@ -579,6 +579,15 @@ const ARITH_TO_BIN: Record<string, BinOp> = {
   logic_or: '||', // short-circuit connectives (raise/shortcircuit.ts)
 };
 
+// The operators whose operand order the machine does not fix — candidates for the def-order
+// re-spelling in lowerDef. `&&`/`||` are excluded: short-circuit order IS semantics.
+const COMMUTATIVE_BIN: ReadonlySet<BinOp> = new Set(['+', '*', '&', '|', '^']);
+
+/** Whether the tree contains a call — an operand a re-order may never move across. */
+function exprHasCall(e: Expr): boolean {
+  return e.k === 'call' || exprChildren(e).some(exprHasCall);
+}
+
 // Recovered info for a self-loop header: its exit block and the per-parameter back-edge
 // arg it feeds (the value on the header→header edge). The back-edge arg is the "next"
 // value of the phi; mapping it back to the phi turns the latch test into the while test.
@@ -1729,6 +1738,35 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     if (ARITH_TO_BIN[d.opcode]) {
       let l = e(d.operands[0]);
       let r = d.operands.length === 2 ? e(d.operands[1]) : ({ k: 'const', value: d.attrs.imm as number } as Expr);
+      // Commutative LOAD-PAIR operands re-spell in EVALUATION order. A commutative instruction's
+      // operand order is an allocator artifact (`mul r0, r0, r2` reads dst-first, so the lift's
+      // l/r is whichever load landed in the dst), but the order the compiler EVALUATED the
+      // operands is still visible: their defs' order in the instruction stream. gcc 2.9 and IDO
+      // both emit `w * h`'s loads w-first, so def order IS source order — verified byte-identical
+      // on both (the bg_area rows). Scope: BOTH root defs must be same-block memory reads (load/aload) — a load
+      // pair's stream order survives scheduling, while arithmetic defs get combined out of
+      // source order (Thumb ldmia merges loads into REGISTER order, so an add fed by one reads
+      // def-reordered); a const already has its side, a pointer operand's side is load-bearing
+      // for the stride rules below, and cross-block positions do not order evaluation.
+      if (COMMUTATIVE_BIN.has(ARITH_TO_BIN[d.opcode]) && d.operands.length === 2) {
+        const [da, db] = [defs.get(d.operands[0]), defs.get(d.operands[1])];
+        if (
+          da &&
+          db &&
+          (da.opcode === 'load' || da.opcode === 'aload') &&
+          (db.opcode === 'load' || db.opcode === 'aload') &&
+          ctype(l)?.kind !== 'ptr' &&
+          ctype(r)?.kind !== 'ptr' &&
+          l.k !== 'addr' &&
+          r.k !== 'addr' &&
+          !exprHasCall(l) &&
+          !exprHasCall(r) &&
+          opBlock.get(da) === opBlock.get(db) &&
+          opIndex.get(da)! > opIndex.get(db)!
+        ) {
+          [l, r] = [r, l];
+        }
+      }
       // Pointer stride: C pointer arithmetic is ELEMENT-scaled, but the asm added a BYTE
       // constant — `addi p,4` on an `s32*` walks 1 element, yet C `p + 4` walks 4. Divide the byte
       // constant by the pointee size so the walk recompiles to the same address math.
