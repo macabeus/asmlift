@@ -475,8 +475,9 @@ function cFamilyBody(fn0: SFn, leaf?: LeafHook): string[] {
   for (const l of fn.locals) {
     // Both facts render at the PREFIX position, where C's declarator grammar reads them
     // differently: on a scalar the qualifier binds to the object (`volatile u16 sp0`), on a
-    // pointer declarator to the POINTEE (`volatile u16 * p`). An object-volatile POINTER
-    // (`u16 *volatile p`) has no inhabitant — no lever or recognizer produces one.
+    // pointer declarator to the pointee — the INNERMOST one for a multi-level pointer
+    // (`volatile u16 ** p`). An object-volatile POINTER (`u16 *volatile p`) has no inhabitant —
+    // no lever or recognizer produces one.
     lines.push(`    ${l.volatile || l.pointeeVolatile ? 'volatile ' : ''}${cType(l.type)} ${l.name};`);
   }
   for (const s of fn.body) {

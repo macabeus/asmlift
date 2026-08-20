@@ -1,7 +1,8 @@
 // The `/volatile` lever (l3/volatileptr.ts): a pointer local assigned a numeric address is
-// re-declared as pointing to volatile data. The gate conditions are what these tests pin: only
-// numeric addresses (a symbol-fed pointer keeps the map's declaration truth), and no qualifying
-// local means DECLINE — never a duplicate candidate.
+// re-declared as pointing to volatile data. The gate conditions are what these tests pin:
+// nonzero numeric addresses only (0 is NULL), a symbol feed vetoes — bare `&gSym`, an interior
+// address, or a copy of a vetoed local alike — and no qualifying local means DECLINE, never a
+// duplicate candidate.
 import { expect, test } from 'vitest';
 
 import { T } from '../src/ir/types';
