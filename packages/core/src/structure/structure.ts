@@ -2422,21 +2422,15 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       return out;
     }
 
-    // guard-fused loop: this cond_br decides "enter loop header h vs its exit". Emit the
-    // inits unconditionally, then a while whose own test subsumes this guard. Never fuse when `b`
-    // is itself the header (a guard-LESS single-block do-while would emit the update once before a
+    // guarded self-loop: this cond_br decides "enter loop header h vs its exit". Emit the inits
+    // unconditionally, then either a `while` whose own test subsumes this guard (fused — only under
+    // the guard proof below), or the guard kept as its own `if` around a bottom-tested `do-while`
+    // (gcc's "guard + do-while" shape, emitted as itself). Never claim when `b` is itself the
+    // header (a guard-LESS single-block do-while would emit the update once before a
     // wrongly-`while` loop) — require a DISTINCT dominating guard block.
     for (const h of [takenB, fallB]) {
       const li = loops.get(h);
       if (li && h !== b && (takenB === li.exit || fallB === li.exit)) {
-        // A MATERIALIZED header op's temp is assigned only inside the body (sideEffects), but the
-        // un-rotated `while` condition renders BEFORE the body ever ran — reading the temp
-        // uninitialized on the first test. Mirror of the headerPure gate: decline loud.
-        if (li.header.ops.some((o) => materialize.has(o))) {
-          throw new StructureError(
-            `cannot structure '${fn.name}': loop header holds a materialized def its condition would read uninitialized`,
-          );
-        }
         // Self-loop emitter hazards: the while condition, the header→exit args, and every
         // post-loop use of a header-computed value render under the un-rotation sub — sound only
         // when their loop-variable reads go through sub-mapped back-edge args (post-update). A
@@ -2462,18 +2456,24 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         li.header.params.forEach(
           (_, i) => initArgs[i] !== undefined && entryVals.set(li.backArgOfParam[i], initArgs[i]),
         );
-        // (1) Is the guard PROVABLY the loop's own test? Fusion DELETES it and lets the `while`
-        // re-test, so when it tests something else the emitted C loses the `if` outright and runs a
-        // loop the source skipped. Structural equality is a sufficient proof, never a necessary
-        // one: `str[0]` and `str[i]` at `i = 0`, or a signed `e <= 0` beside an unsigned `e != 0`,
-        // are the same test spelled differently, and normalising those needs a canonical form this
-        // pass does not have. Refusing every unproven guard costs rows whose fusion is sound, so it
-        // refuses only the SINK below, which is what makes the fused zero-trip path load-bearing.
-        // KNOWN GAP: a loop with no repairable exit copy still fuses on shape alone, so an `if`
-        // about something else is silently dropped.
+        // (1) Is the guard PROVABLY the loop's own test? Fusing DELETES it and lets the `while`
+        // re-test, so an unproven fuse would lose the `if` outright and run a loop the source
+        // skipped. Structural equality is a sufficient proof, never a necessary one: `str[0]` and
+        // `str[i]` at `i = 0`, or a signed `e <= 0` beside an unsigned `e != 0`, are the same test
+        // spelled differently, and normalising those needs a canonical form this pass does not
+        // have. An unproven guard therefore KEEPS its `if`, with the loop as a `do-while` inside it
+        // — every test the asm performs is emitted as itself. The proof still gates the SINK below:
+        // a sunk copy runs once per iteration, and only the proof (fused form) or the kept `if`
+        // makes the zero-trip path skip it; the sink predates the kept-guard form and stays keyed
+        // on the proof until a row needs the wider key.
         const enterIsTaken = takenB === h;
         const contIsTaken = hterm.successors[0].block === li.header;
         const guardProven = sameAtEntry(hterm.operands[0], term.operands[0], entryVals, enterIsTaken !== contIsTaken);
+        // Fused `while` additionally requires a header free of MATERIALIZED defs: their temps are
+        // assigned only inside the body (sideEffects), and an un-rotated `while` condition renders
+        // BEFORE the body ever ran — reading a temp uninitialized on the first test. The kept-guard
+        // `do-while` tests after the body, so it carries no such restriction.
+        const fused = guardProven && !li.header.ops.some((o) => materialize.has(o));
         // A pre-update exit copy is repairable rather than fatal: emitted at the TOP of the body it
         // captures the value one iteration before the update, which is what the exit edge carries.
         // Its post-loop copy is then dropped, so the ZERO-TRIP path needs the guard→exit edge as a
@@ -2524,9 +2524,29 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
               `loop initialisation reads`,
           );
         }
+        const inits = argAssigns(b, h);
+        const loopStmt = emitWhile(li, updates, preUpdateCopies(li.exit, hexitArgs, sunk), fused ? 'while' : 'dowhile');
+        if (!fused) {
+          // The kept guard's condition renders AFTER the seed and the inits, but tests the state
+          // BEFORE them — sound only when no name it reads was just (non-identity) written.
+          const writes = new Set([...seedWrites, ...updateWriteSet(inits)]);
+          if (readsClobbered(term.operands[0], new Map(), writes)) {
+            throw new StructureError(
+              `cannot structure '${fn.name}': the kept guard's condition reads a name the loop initialisation overwrites`,
+            );
+          }
+        }
         out.push(...seed); // zero-trip value for the sunk copies
-        out.push(...argAssigns(b, h)); // loop-variable initialisation
-        out.push(emitWhile(li, updates, preUpdateCopies(li.exit, hexitArgs, sunk)));
+        out.push(...inits); // loop-variable initialisation
+        if (fused) {
+          out.push(loopStmt);
+        } else {
+          let gcond = expr(term.operands[0]);
+          if (!enterIsTaken) {
+            gcond = negateCond(gcond);
+          } // entering the loop must be `taken`
+          out.push(mkIf(gcond, [loopStmt], []));
+        }
         // The header→exit edge may carry non-identity phi args (the exit param merges the guard-false
         // value with the loop's final value). Emit those copies after the loop — dropping them returns
         // a stale value. Read under the un-rotation substitution (post-loop the params hold their
@@ -2705,20 +2725,30 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         };
       });
 
-  // Un-rotate a header's do-while latch into a `while`: the test reads the header's own
-  // params (back-edge args substituted back), and the body is any sunk trailing copies, then the
-  // header's SIDE EFFECTS in program order, then its parallel update. The side effects are
-  // required — a copies-only body would silently delete every store/discarded call in the header.
-  // Effect order is right by construction: statements read pre-update names, the updates land
-  // after, and a sunk copy reads the top-of-iteration value it is there to capture.
-  const emitWhile = (li: LoopInfo, updates?: Stmt[], sunkCopies: Stmt[] = []): Stmt => {
+  // A guarded self-loop's body and latch test. The test reads the header's own params (back-edge
+  // args substituted back), and the body is any sunk trailing copies, then the header's SIDE
+  // EFFECTS in program order, then its parallel update. The side effects are required — a
+  // copies-only body would silently delete every store/discarded call in the header. Effect order
+  // is right by construction: statements read pre-update names, the updates land after, and a sunk
+  // copy reads the top-of-iteration value it is there to capture.
+  //
+  // The SAME cond/body serve both forms: as a `while` (guard fused away — the un-rotation), the
+  // first test reads the just-emitted init values; as a `dowhile` (guard kept as its own `if`),
+  // every test runs after the update wrote the params' next values. Both are what that form's
+  // source spelling means.
+  const emitWhile = (
+    li: LoopInfo,
+    updates?: Stmt[],
+    sunkCopies: Stmt[] = [],
+    kind: 'while' | 'dowhile' = 'while',
+  ): Stmt => {
     const term = li.header.ops[li.header.ops.length - 1];
     let cond = exprWith(loopSub(li))(term.operands[0]);
     if (term.successors[0].block !== li.header) {
       cond = negateCond(cond);
     } // loop-continue must be `taken`
     const body = [...sunkCopies, ...sideEffects(li.header), ...(updates ?? argAssigns(li.header, li.header))];
-    return { k: 'while', cond, body };
+    return kind === 'while' ? { k: 'while', cond, body } : { k: 'dowhile', cond, body };
   };
 
   // Test-at-top `while`: the header's cond_br is the loop condition. The body is a region that stops

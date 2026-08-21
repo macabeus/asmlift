@@ -58,11 +58,14 @@ export const LATCH_GATES: readonly Gate<LatchCandidate>[] = [
   },
   {
     id: 'target-dominates',
-    why: 'a preheader is the same empty block from the other side; folding it drops a guard',
+    why: "a preheader is the same empty block from the other side; folding it re-shapes another block's branch into a loop guard",
     sound: true,
-    // The refusal test alone would not do: it asserts that nothing was folded, which is what a
-    // gate that never fires looks like too. The named one ablates this entry and reads the C.
-    guardedBy: 'ablating the dominance gate DROPS a guard from the emitted C',
+    // The named test ablates this entry and reads the C: the fold then hands the guard's cond_br
+    // to the guarded-self-loop emitter, whose own guard proof is the second layer — the guard must
+    // survive as its `if`. This gate is what keeps arbitrary forward trampolines from re-shaping
+    // branches into loop guards at all, and no argument has been made that every consumer of the
+    // re-shaped CFG is safe — hence still `sound`.
+    guardedBy: 'ablating the dominance gate hands a guard to the kept-guard loop emitter',
     rejects: (c) => !c.dominatesBlock,
   },
 ];
