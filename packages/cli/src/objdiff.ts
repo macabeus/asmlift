@@ -63,6 +63,17 @@ const DIFF_KINDS: Record<string, keyof DiffBreakdown> = {
  *  score === 0 ⇔ objdiff reports zero differing rows ⇔ byte-exact match. Throws when either
  *  object fails to parse, the symbol is missing on either side, or any row fails to display —
  *  an error is never a match. */
+// The engine's handles are component-model RESOURCES: without an explicit dispose they wait on
+// the FinalizationRegistry, which a tight synchronous scoring loop never lets run — after a few
+// hundred calls the wasm side exhausts and PANICS, and the poisoned instance then fails every
+// later call in the process (a ranked run drops every remaining candidate). Disposal is the
+// fix, not a nicety.
+const disposeAll = (...xs: unknown[]): void => {
+  for (const x of xs) {
+    (x as { [Symbol.dispose]?: () => void } | undefined)?.[Symbol.dispose]?.();
+  }
+};
+
 export function scoreObjects(targetObj: string, candidateObj: string, symbol: string): MatchScore {
   const cfg = new objdiff.diff.DiffConfig();
   const mappingConfig = { mappings: [], selectingLeft: undefined, selectingRight: undefined };
@@ -74,45 +85,49 @@ export function scoreObjects(targetObj: string, candidateObj: string, symbol: st
 
   // left = target, right = candidate (base).
   const { left, right } = objdiff.diff.runDiff(target, candidate, cfg, mappingConfig);
-  if (!left || !right) {
-    throw new Error('objdiff runDiff returned an empty side');
+  try {
+    if (!left || !right) {
+      throw new Error('objdiff runDiff returned an empty side');
+    }
+
+    const sym = (od: ObjdiffWasm.diff.ObjectDiff, side: string) => {
+      const s = od.findSymbol(symbol, undefined);
+      if (!s) {
+        throw new Error(`symbol '${symbol}' not found in ${side} object`);
+      }
+      return s;
+    };
+    const lSym = sym(left, 'target'),
+      rSym = sym(right, 'candidate');
+    const lDisp = objdiff.display.displaySymbol(left, lSym.id);
+    const rDisp = objdiff.display.displaySymbol(right, rSym.id);
+    const rows = Math.max(lDisp.rowCount, rDisp.rowCount);
+
+    const breakdown: DiffBreakdown = { insert: 0, delete: 0, replace: 0, opMismatch: 0, argMismatch: 0 };
+    let matching = 0,
+      differences = 0;
+
+    for (let row = 0; row < rows; row++) {
+      // Rows past a side's own rowCount are that side's padding for the other side's
+      // insertions — kind "none" here is a fact, not a swallowed error.
+      const kindOf = (od: ObjdiffWasm.diff.ObjectDiff, s: ObjdiffWasm.diff.SymbolInfo, disp: { rowCount: number }) =>
+        row >= disp.rowCount ? 'none' : (objdiff.display.displayInstructionRow(od, s.id, row, cfg).diffKind ?? 'none');
+      const lk = kindOf(left, lSym, lDisp);
+      const rk = kindOf(right, rSym, rDisp);
+      const kind = lk !== 'none' ? lk : rk;
+      if (kind === 'none') {
+        matching++;
+        continue;
+      }
+      differences++;
+      const bucket = DIFF_KINDS[kind];
+      if (bucket) {
+        breakdown[bucket]++;
+      }
+    }
+
+    return { symbol, rows, matching, score: differences, match: differences === 0, breakdown };
+  } finally {
+    disposeAll(left, right, candidate, target, cfg);
   }
-
-  const sym = (od: ObjdiffWasm.diff.ObjectDiff, side: string) => {
-    const s = od.findSymbol(symbol, undefined);
-    if (!s) {
-      throw new Error(`symbol '${symbol}' not found in ${side} object`);
-    }
-    return s;
-  };
-  const lSym = sym(left, 'target'),
-    rSym = sym(right, 'candidate');
-  const lDisp = objdiff.display.displaySymbol(left, lSym.id);
-  const rDisp = objdiff.display.displaySymbol(right, rSym.id);
-  const rows = Math.max(lDisp.rowCount, rDisp.rowCount);
-
-  const breakdown: DiffBreakdown = { insert: 0, delete: 0, replace: 0, opMismatch: 0, argMismatch: 0 };
-  let matching = 0,
-    differences = 0;
-
-  for (let row = 0; row < rows; row++) {
-    // Rows past a side's own rowCount are that side's padding for the other side's
-    // insertions — kind "none" here is a fact, not a swallowed error.
-    const kindOf = (od: ObjdiffWasm.diff.ObjectDiff, s: ObjdiffWasm.diff.SymbolInfo, disp: { rowCount: number }) =>
-      row >= disp.rowCount ? 'none' : (objdiff.display.displayInstructionRow(od, s.id, row, cfg).diffKind ?? 'none');
-    const lk = kindOf(left, lSym, lDisp);
-    const rk = kindOf(right, rSym, rDisp);
-    const kind = lk !== 'none' ? lk : rk;
-    if (kind === 'none') {
-      matching++;
-      continue;
-    }
-    differences++;
-    const bucket = DIFF_KINDS[kind];
-    if (bucket) {
-      breakdown[bucket]++;
-    }
-  }
-
-  return { symbol, rows, matching, score: differences, match: differences === 0, breakdown };
 }

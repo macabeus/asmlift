@@ -234,7 +234,10 @@ export const ARM_DISJOINT_GATES: readonly Gate<ArmPair>[] = [
   },
 ];
 
-function armDisjointCandidates(sfn: SFn): { merged: string; sfn: SFn }[] {
+/** The arm-disjoint merges alone — the class the livebase pairings enumerate (rank.ts): the
+ *  demanding row's shared counter is arm-disjoint, and the span-model merges already ride the
+ *  plain /coalesce label, so pairing them too would multiply candidates with no row behind it. */
+export function armDisjointCandidates(sfn: SFn): { merged: string; sfn: SFn }[] {
   return armDisjointUnder(ARM_DISJOINT_GATES, sfn).candidates;
 }
 

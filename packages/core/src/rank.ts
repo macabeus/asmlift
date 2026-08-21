@@ -19,7 +19,7 @@ import { verify } from './ir/verify';
 import { materializeArgBases } from './l3/argbase';
 import type { LanguageBackend, SFn } from './l3/ast';
 import { LIVEBASE_GATES, hoistReusedGlobalBases } from './l3/basecse';
-import { coalesceCandidates } from './l3/coalesce';
+import { armDisjointCandidates, coalesceCandidates } from './l3/coalesce';
 import { initFirstGuards } from './l3/initfirst';
 import { mulFirstSums } from './l3/mulfirst';
 import { nearBaseClusters } from './l3/nearbase';
@@ -533,11 +533,15 @@ export function enumerateCandidates(
         // runs outside `respell`'s try is the one way a lever can cost a match. `enumerate` re-runs
         // the hoist per candidate, which is pure and cheap, rather than caching it outside the guard.
         respell('/scopebase', () => hoistScopedBases(sfn));
-        const enumerate = (label: string, from: () => SFn | null | undefined): void => {
+        const enumerate = (
+          label: string,
+          from: () => SFn | null | undefined,
+          variantsOf: (s: SFn) => { merged: string; sfn: SFn }[] = coalesceCandidates,
+        ): void => {
           let variants: { merged: string; sfn: SFn }[] = [];
           try {
             const base = from();
-            variants = base ? coalesceCandidates(base) : [];
+            variants = base ? variantsOf(base) : [];
           } catch (e) {
             opts.onLeverError?.(name + label, e instanceof Error ? e.message.split('\n')[0] : String(e));
             return;
@@ -615,8 +619,11 @@ export function enumerateCandidates(
         // row-demanded one, the joint spelling reachable from neither lever alone (an MMIO base
         // worth homing and a counter shared across both arms of one if, in one function); the
         // plain sibling rides for symmetry.
-        enumerate('/livebase/coalesce', livebase);
-        enumerate('/livebase/volatile/coalesce', livebaseVolatile);
+        // ARM-DISJOINT merges only: the demanding row's shared counter is that class, and the
+        // span-model merges already ride the plain /coalesce label — pairing them too would
+        // multiply candidates with no row behind it.
+        enumerate('/livebase/coalesce', livebase, armDisjointCandidates);
+        enumerate('/livebase/volatile/coalesce', livebaseVolatile, armDisjointCandidates);
         // `/parkfirst` — incoming-argument parks lead the entry prefix (l3/parkfirst.ts): the
         // park's `mov` lifts to pure SSA aliasing, so its position is unrecoverable and the
         // default order is emission's. Both orders are emitted; the differ referees.
