@@ -63,16 +63,37 @@ test('declined: addresses beyond the 255-byte span stay independent', () => {
   ).toBeNull();
 });
 
-test('a const used in arithmetic is not an address and never rewrites', () => {
+test('a bare const VALUE inside a formed window re-spells as (s32)(base + off); outside it never does', () => {
   const r = nearBaseClusters255(
     fn([
       { k: 'exprstmt', value: deref(100, 2) },
       { k: 'exprstmt', value: deref(102, 2) },
-      { k: 'assign', name: 'y', value: { k: 'bin', op: '+', l: c(100), r: c(1) } },
+      { k: 'assign', name: 'y', value: { k: 'bin', op: '+', l: c(112), r: c(1) } },
     ]),
   );
   const y = r!.body[3] as Extract<Stmt, { k: 'assign' }>;
-  expect(y.value).toEqual({ k: 'bin', op: '+', l: c(100), r: c(1) });
+  // 112 sits in the window (100..355): the derived spelling, value-equal by construction.
+  // 1 does not: a plain integer stays a plain integer.
+  expect(y.value).toEqual({
+    k: 'bin',
+    op: '+',
+    l: {
+      k: 'cast',
+      to: { kind: 'int', width: 32, signed: true },
+      e: { k: 'bin', op: '+', l: { k: 'var', name: 'p0' }, r: c(12) },
+    },
+    r: c(1),
+  });
+});
+
+test('no cluster, no value rewrite: a lone deref plus an in-reach const still declines', () => {
+  const r = nearBaseClusters255(
+    fn([
+      { k: 'exprstmt', value: deref(100, 2) },
+      { k: 'assign', name: 'y', value: c(104) },
+    ]),
+  );
+  expect(r).toBeNull(); // membership is deref-only — a value never forms or joins a cluster
 });
 
 test('a struct-pointer cast base is never a cluster member (the dot-form stride)', () => {

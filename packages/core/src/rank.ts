@@ -587,6 +587,18 @@ export function enumerateCandidates(
         // spellings are emitted; the differ referees.
         const nearSpan = target.compilerBehaviors.nearBaseSpan;
         respell('/nearbase', () => (nearSpan !== undefined ? nearBaseClusters(sfn, nearSpan) : null));
+        // The livebase × nearbase PAIRINGS — the same admission as livebase × indexed above:
+        // row-demanded, and the joint spelling is reachable from neither lever alone (a
+        // neighbor-cell object and a multi-index MMIO block in one function — each lever's
+        // constants are invisible to the other's model).
+        respell('/livebase/nearbase', () => {
+          const r = livebase();
+          return r && nearSpan !== undefined ? nearBaseClusters(r, nearSpan) : null;
+        });
+        respell('/livebase/volatile/nearbase', () => {
+          const r = livebaseVolatile();
+          return r && nearSpan !== undefined ? nearBaseClusters(r, nearSpan) : null;
+        });
         // `/parkfirst` — incoming-argument parks lead the entry prefix (l3/parkfirst.ts): the
         // park's `mov` lifts to pure SSA aliasing, so its position is unrecoverable and the
         // default order is emission's. Both orders are emitted; the differ referees.
