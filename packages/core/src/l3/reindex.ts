@@ -391,7 +391,7 @@ function tryExprWalk(
   dw: Stmt & { k: 'dowhile' },
   ptrVars: Map<string, IrType>,
   fnBody: Stmt[],
-  localTypes: Map<string, IrType>,
+  declTypes: Map<string, IrType>,
   volatileLocals: ReadonlySet<string>,
 ): Stmt | null {
   if (prev?.k !== 'assign' || !ptrVars.has(prev.name) || volatileLocals.has(prev.name)) {
@@ -426,9 +426,15 @@ function tryExprWalk(
     return null;
   }
   const base = bare[0] as Extract<Expr, { k: 'var' }>;
-  const baseT = localTypes.get(base.name);
-  if (baseT?.kind === 'ptr' && !(baseT.to.kind === 'int' && baseT.to.width === 8)) {
-    return null; // a wider pointer base strides its element under [i]
+  // declTypes carries params, locals AND globals: a base declared nowhere has an unknowable C
+  // stride (its project declaration decides), and a wider pointer strides its element under [i]
+  // — both decline.
+  const baseT = declTypes.get(base.name);
+  if (baseT === undefined) {
+    return null;
+  }
+  if (baseT.kind === 'ptr' && !(baseT.to.kind === 'int' && baseT.to.width === 8)) {
+    return null;
   }
   const pure = (e: Expr): boolean =>
     e.k === 'var' || e.k === 'const'
@@ -472,7 +478,7 @@ function tryExprWalk(
     return null;
   }
   const pStepIdx = dw.body.length - 2 + tail.findIndex((st) => isIncOf(st, p) !== null);
-  const ivT = localTypes.get(iv);
+  const ivT = declTypes.get(iv);
   if (ivT !== undefined && ivT.kind !== 'int') {
     return null;
   }
@@ -525,10 +531,12 @@ function tryExprWalk(
  *  the /livebase pairings instead. */
 export function reindexWalks(sfn: SFn, keptWalks?: Set<string>): SFn | null {
   const ptrVars = new Map<string, IrType>();
-  const localTypes = new Map<string, IrType>();
+  const declTypes = new Map<string, IrType>();
   const volatileLocals = new Set(sfn.locals.filter((l) => l.volatile === true).map((l) => l.name));
+  for (const v of [...sfn.params, ...sfn.locals, ...(sfn.globals ?? [])]) {
+    declTypes.set(v.name, v.type);
+  }
   for (const v of [...sfn.params, ...sfn.locals]) {
-    localTypes.set(v.name, v.type);
     if (v.type.kind === 'ptr') {
       ptrVars.set(v.name, v.type);
     }
@@ -637,7 +645,7 @@ export function reindexWalks(sfn: SFn, keptWalks?: Set<string>): SFn | null {
       if (s.k === 'dowhile') {
         const prev = out[out.length - 1];
         const prev2 = out[out.length - 2];
-        const dw2 = tryExprWalk(prev2, prev, s, ptrVars, sfn.body, localTypes, volatileLocals);
+        const dw2 = tryExprWalk(prev2, prev, s, ptrVars, sfn.body, declTypes, volatileLocals);
         if (dw2) {
           out.pop(); // the walk init is subsumed by the indexed spelling
           out.push(recurse(dw2));

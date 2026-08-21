@@ -537,6 +537,19 @@ describe('v3 — expression-base byte walk', () => {
     expect(reindexWalks(mkFn(init, body))).toBeNull();
   });
 
+  test('refused: a GLOBAL wide-pointer base strides its element, and an undeclared base is unknowable', () => {
+    const gInit: Expr = {
+      k: 'cast',
+      to: u8p as never,
+      e: { k: 'bin', op: '+', l: { k: 'bin', op: '*', l: v('a2'), r: v('a1') }, r: v('gW') },
+    };
+    const wide = mkFn(gInit, walkBody());
+    wide.globals = [{ name: 'gW', type: { kind: 'ptr', to: { kind: 'int', width: 32, signed: true } } as never }];
+    expect(reindexWalks(wide)).toBeNull();
+    const undeclared = mkFn(gInit, walkBody()); // gW declared nowhere
+    expect(reindexWalks(undeclared)).toBeNull();
+  });
+
   test('refused: two bare-var addends leave the base ambiguous', () => {
     const twoVars: Expr = {
       k: 'cast',
