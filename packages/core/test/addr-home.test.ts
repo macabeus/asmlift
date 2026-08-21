@@ -4,8 +4,10 @@
 // the default re-derives the address (a pool literal per folded offset) and re-reads per use.
 // Off by default.
 //
-// The scope conditions are what these tests pin: base-slot-only consumption, 2+ distinct memory
-// accesses, no gaddr/laddr in the cone, and loads homed only through an axis-homed base.
+// The scope conditions are what these tests pin — base-slot-only consumption, 2+ distinct memory
+// accesses, no gaddr/laddr in the cone, loads homed only through an axis-homed base — plus the
+// enumeration gate's two contracts: a void `ret` phantom never disqualifies a base, and a symbol
+// map never blinds the `/raw-globals` sibling's own gate.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';

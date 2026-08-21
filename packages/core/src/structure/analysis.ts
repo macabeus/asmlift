@@ -3,8 +3,9 @@
 //   • use-site registry — every use of a value, POSITIONED (op + block + index);
 //   • per-block SSA value liveness (backward dataflow) — consumed by the coalescing
 //     interference check in structure.ts;
-//   • the effect-ordering model — which call/load defs must MATERIALIZE as named temps at
-//     their own program position instead of inlining at their use.
+//   • the effect-ordering model — which defs must MATERIALIZE as named temps at their own
+//     program position instead of inlining at their use (calls/loads for effect order, plus
+//     the pure defs the homing rules claim).
 import { globalCellOf, mayWriteGlobal } from '../ir/alias';
 import { Block, Fn, Op, Value, defOpMap, successorsOf } from '../ir/core';
 import { EFFECTFUL_OPS } from '../ir/opcodes';
@@ -21,7 +22,9 @@ const MEM_BASE_OPS = new Set(['load', 'store', 'aload', 'astore']);
 /** Any gaddr/laddr in the op's operand cone (the op included). Rendered standalone, an address
  *  computation over one loses the memAccess's inline byte-stride cast — the value changes, so
  *  every homing rule refuses the cone (the cast-aware machinery in l3/basecse.ts, scopebase.ts
- *  and nearbase.ts serves those bases instead). */
+ *  and nearbase.ts serves those bases instead). The walk deliberately crosses loads — a gaddr
+ *  reachable only through a load's address keeps its cast at that load's own deref, so
+ *  over-refusal there costs a candidate, never soundness. */
 function coneHoldsAddr(op0: Op, defOf: Map<Value, Op>): boolean {
   const seen = new Set<Value>();
   const cone = [op0];
@@ -57,8 +60,8 @@ export function hasHomeableSharedAddress(fn: Fn): boolean {
       if (op.opcode === 'ret') {
         // A `ret` operand may be a void phantom (analyze() skips it under returnsVoid, which this
         // gate cannot know) — never a disqualifier here. For a genuinely returned base the axis's
-        // own rule still refuses, costing one duplicate-collapsed candidate, the same trade as the
-        // loop-header divergence below.
+        // own rule still refuses, costing one duplicate-collapsed candidate — the same trade the
+        // gate's doc names for the loop-header divergence.
         continue;
       }
       op.operands.forEach((o, i) => {
@@ -101,7 +104,8 @@ export interface StructureAnalysis {
   opBlock: Map<Op, Block>;
   /** SSA values live at each block's entry */
   liveIn: Map<Block, Set<Value>>;
-  /** call/load defs that must emit as named temps at their own position */
+  /** defs that must emit as named temps at their own position — calls/loads for effect order,
+   *  plus the pure defs the homing rules claim */
   materialize: Set<Op>;
   /** cached forward reachability (successors-transitive, excluding the start block itself) */
   reachFrom: (b: Block) => Set<Block>;
@@ -129,8 +133,11 @@ export interface AnalyzeOptions {
    *      gA = v; gB = v;   with `s32 v = gValue;`   where the source said `gA = gValue; gB = gValue;`
    *
    *  With this on, the barrier scan for a load whose address resolves to a named global uses THE
-   *  shared disjointness query (ir/alias.ts) instead of "any write at all". Materializing is always
-   *  sound, so today's spelling is never wrong — only sometimes not the one the compiler was given.
+   *  shared disjointness query (ir/alias.ts) instead of "any write at all". Materializing a
+   *  global's READ is always sound (the deref and its cast render at the def's position — contrast
+   *  homeSharedAddresses below, where the materialized value is an address and soundness is
+   *  scoped), so today's spelling is never wrong — only sometimes not the one the compiler was
+   *  given.
    *  Which side matches is genuinely per-function (the same dogfood watched agbcc go both ways
    *  inside ONE function), so this is a differ-refereed candidate axis, never a default. */
   rereadGlobals?: boolean;
@@ -687,11 +694,10 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         // asm read once into the register the home just reproduced — home the value too, at the
         // load's own position. Only through axis-homed bases (the fixpoint's later sweep sees them
         // even though reverse order visits the load first); the general multi-render re-read stays
-        // the default rule below. axisHomedBases registers only on the sweep that materializes the
-        // base — safe because no other materialize rule can claim a base-slot-only value first
-        // (it is outside copyInterdependent's read set and never a const). axisHomedBases registers only on the sweep that materializes the
-        // base — safe because no OTHER materialize rule can claim a base first (a base-slot-only
-        // value is outside copyInterdependent's read set and is never a const).
+        // the default rule below. axisHomedBases registers on the same sweep that materializes the
+        // base — safe because no other rule can pre-empt a value the axis would home: base-slot-only
+        // means no successor-arg use (outside copyInterdependent's read set), and the axis's scope
+        // excludes consts, the const arm's only clientele.
         if (
           homeSharedAddresses &&
           op.opcode === 'load' &&

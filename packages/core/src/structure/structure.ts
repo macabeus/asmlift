@@ -744,7 +744,7 @@ export interface StructureHooks {
  *  how values are spelled — the loop emitters' hazard predicates read it, and several ask "does
  *  this edge copy survive identity elision", which merging two names quietly answers `no`. A pass
  *  that made a hazard invisible would trade a loud decline for a silent wrong answer, so the
- *  un-merged structuring runs first and its refusal stands. That is the whole invariant, rather
+ *  lever-less structuring runs first and its refusal stands. That is the whole invariant, rather
  *  than a list of individually patched guards, and it costs one extra structuring — nothing next to
  *  the compile the candidate exists to feed.
  *

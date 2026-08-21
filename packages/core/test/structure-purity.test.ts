@@ -67,6 +67,7 @@ test('structuring does not mutate the function it reads', () => {
     // the axis-on runs, then the primary again — a leaked counter or a mutated graph shows here
     for (const [label, axisOpts] of [
       ['/merge-names', { coalesceMergeNames: true }],
+      ['/inplace', { materializeJoinFeeds: true }],
       ['/addr-home', { homeSharedAddresses: true }],
     ] as const) {
       try {
