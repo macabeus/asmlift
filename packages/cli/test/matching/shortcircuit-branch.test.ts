@@ -2,9 +2,9 @@
 // the same branch graph, so the fold in raise/shortcircuit.ts can only emit whichever orientation
 // the asm's branch senses spell — and only ONE of the two is the bytes agbcc produced.
 //
-// This is the executable half of what synthetic:ifand_near:agbcc publishes. That row nonmatches,
-// and `bench regression` fails only on a LOST match, so the direction is pinned here: the un-folded
-// dual byte-matches, the emitted orientation does not, and the gap is exactly the orientation.
+// This is the executable half of what synthetic:ifand_near:agbcc publishes. Both orientations are
+// enumerated — `/flip-branch` where the arms diverge, `/flip-join` where they reconverge — so the
+// differ referees the orientation instead of the fold committing to one.
 import { ARMV4T_AGBCC } from '@asmlift/core/target';
 import { assembleTarget, compileTargetAsm, scoreC } from '@asmlift/toolchains';
 import { describe, expect, test } from 'vitest';
@@ -21,13 +21,13 @@ const ranked = (c: string) => {
 };
 
 describe('the emitted orientation decides the match, and only one orientation is reachable', () => {
-  test('a reconverging `&&` is spelled as its dual and misses', () => {
+  test('a reconverging `&&` reaches the source orientation through /flip-join and matches', () => {
     const { rk, target } = ranked(src('&&'));
-    // the fold fired: the arms came out exchanged and the condition negated
-    expect(rk.best.source).toContain('||');
-    expect(rk.best.score.match).toBe(false);
-    // and the dual — what the branch-sense lever would produce if it reached reconverging ifs — IS
-    // the bytes. So the whole diff is the orientation, not anything about the arms.
+    // the fold alone emits the dual (`||` with exchanged arms); the /flip-join axis restores the
+    // source's own orientation, and that one is the bytes
+    expect(rk.best.source).toContain('&&');
+    expect(rk.best.score.match).toBe(true);
+    // the dual spelling is byte-identical evidence of the same fact, stated directly
     const dual = `int f(int a, int b, int *p, int *q){ if (a != 0 && b != 0) { ${ARM} } else { p[0] = -1; } return p[1]; }`;
     expect(scoreC(dual, 'f', target).match).toBe(true);
   });
@@ -57,20 +57,20 @@ describe('the emitted orientation decides the match, and only one orientation is
     expect(rk.best.source.split('-1').length - 1).toBe(1);
   });
 
-  test('divergent arms enumerate BOTH orientations; the reconverging sibling enumerates neither', () => {
-    // `preserveDivergentBranchSense` is the lever, and it fires only when the arms do not
-    // reconverge. Asserted on the CANDIDATE LIST, not on the winner: the default sense already
-    // spells `&&` here, so `expect(best.source).toContain('&&')` would pass with the axis deleted.
+  test('each if class carries its own orientation axis: /flip-branch divergent, /flip-join joined', () => {
+    // Asserted on the CANDIDATE LIST, not on the winner: the default sense already spells `&&`
+    // for the divergent shape, so a winner assertion would pass with the axis deleted.
     const divergent = compileTargetAsm(
       `int f(int a, int b, int *p, int *q){ if (a && b) { ${ARM} return 2; } return 3; }`,
     );
     const dv = decompileRanked('f', divergent, ARMV4T_AGBCC, assembleTarget(divergent));
     expect(dv.candidates.some((c) => c.label.includes('flip-branch'))).toBe(true);
     expect(dv.best.score.match).toBe(true);
-    // … and the reconverging sibling, which differs only in that its arms rejoin, gets no flip
-    // candidate at all. That one difference is the whole gap synthetic:ifand_near:agbcc publishes.
+    // the reconverging sibling, which differs only in that its arms rejoin, is /flip-join's:
+    // its flipped spelling is a distinct candidate where the divergent axis never fires
     const reconverging = compileTargetAsm(src('&&'));
     const rc = decompileRanked('f', reconverging, ARMV4T_AGBCC, assembleTarget(reconverging));
     expect(rc.candidates.some((c) => c.label.includes('flip-branch'))).toBe(false);
+    expect(rc.candidates.some((c) => c.label.includes('flip-join'))).toBe(true);
   });
 });
