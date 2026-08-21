@@ -53,7 +53,7 @@ import {
   negateCond,
 } from '../l3/ast';
 import type { Gate } from '../l3/gates';
-import { exprCType, ptrElemBytes } from '../l3/typing';
+import { exprCType, promotesUnsigned, provablyNonNegative, ptrElemBytes } from '../l3/typing';
 import { returnType } from '../raise/recover';
 import { collectStructs } from '../raise/structs';
 import {
@@ -1208,7 +1208,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   const backArgName = new Map<Value, string>();
   // The C static type of a rendered expression, over the declared variable types — what decides
   // whether a memory access's base may be dereferenced as spelled (memAccess/arrayAccess).
-  const ctype = (e0: Expr): IrType | undefined => exprCType(e0, (n) => varType.get(n));
+  const vtEnv = (n: string): IrType | undefined => varType.get(n);
+  const ctype = (e0: Expr): IrType | undefined => exprCType(e0, vtEnv);
 
   /** `&gSym` assigned to a `T *` local: the address of an AGGREGATE is not a pointer to its
    *  element. `&gArr` is `T (*)[n]`, `&gStruct` is `struct S *`, and neither is assignable to
@@ -1820,12 +1821,33 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // signed cast on addr-carrying trees is the follow-up if it ever costs a row.
       const t = /^icmp_s/.test(d.opcode) ? T.s(32) : T.u(32);
       const intifyAddrCmp = (x: Expr): Expr => (x.k === 'addr' ? { k: 'cast', to: t, e: x } : x);
-      return {
-        k: 'bin',
-        op: CMP_TO_BIN[d.opcode],
-        l: intifyAddrCmp(e(d.operands[0])),
-        r: intifyAddrCmp(e(d.operands[1])),
-      };
+      let l = intifyAddrCmp(e(d.operands[0]));
+      let r = intifyAddrCmp(e(d.operands[1]));
+      // The same signedness hole for ORDINARY operands: an icmp_u* whose operands both render
+      // as signed-promoting C (an s32-declared var carrying a u32 value — declarations take the
+      // FIRST claimant's type; an inline `16 << t`, whose C type is the left operand's `int`)
+      // compiles to the SIGNED compare the machine did not do. When neither side provably
+      // promotes unsigned, one operand takes a (u32) cast — the side whose recovered VALUE type
+      // is unsigned, the honest one — and the usual arithmetic conversions make the compare
+      // unsigned exactly as the opcode says. A provably-unsigned operand leaves the spelling
+      // alone, so correctly-typed compares never churn — as does a compare whose operands both
+      // provably sit in [0, 2^31) (a `(u8)x > 4` byte test): there the signed spelling is
+      // value-faithful and the compiler already picks the unsigned branch itself. ==/!= are
+      // sign-agnostic and icmp_s* keeps its documented residual above.
+      if (
+        /^icmp_u/.test(d.opcode) &&
+        promotesUnsigned(l, vtEnv) !== true &&
+        promotesUnsigned(r, vtEnv) !== true &&
+        !(provablyNonNegative(l, vtEnv) && provablyNonNegative(r, vtEnv))
+      ) {
+        const irUnsigned = (v: Value): boolean => v.type.kind === 'int' && !v.type.signed;
+        if (!irUnsigned(d.operands[0]) && irUnsigned(d.operands[1])) {
+          r = { k: 'cast', to: T.u(32), e: r };
+        } else {
+          l = { k: 'cast', to: T.u(32), e: l };
+        }
+      }
+      return { k: 'bin', op: CMP_TO_BIN[d.opcode], l, r };
     }
     if (ARITH_TO_BIN[d.opcode]) {
       let l = e(d.operands[0]);

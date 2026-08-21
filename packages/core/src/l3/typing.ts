@@ -72,6 +72,66 @@ export function derefStrideOk(rt: IrType | undefined, width: number, signed: boo
   return false;
 }
 
+/** Does the rendered expression PROMOTE to `unsigned int` under C's usual arithmetic
+ *  conversions — the fact that decides a `<`'s compare signedness? Tri-state: true/false when
+ *  provable from the declared types, undefined when not (a call's C type lives in the project
+ *  ctx). Narrower ints promote to signed `int`, so only a full-width unsigned (or a pointer)
+ *  answers true. Shifts take the LEFT operand's promoted type; comparisons/logic yield `int`.
+ *  This is deliberately separate from `exprCType`, whose integer results are pointer-ness-only
+ *  (its contract forbids consulting it for signedness); the leaf cases delegate to it because
+ *  var/cast/index/field types ARE the declarations it judges against. */
+export function promotesUnsigned(e: Expr, varType: VarTypes): boolean | undefined {
+  const rec = (x: Expr): boolean | undefined => promotesUnsigned(x, varType);
+  switch (e.k) {
+    case 'const':
+      return false;
+    case 'un':
+      return e.op === '!' ? false : rec(e.e);
+    case 'bin': {
+      if (['<', '<=', '>', '>=', '==', '!=', '&&', '||'].includes(e.op)) {
+        return false;
+      }
+      if (e.op === '<<' || e.op === '>>' || e.op === '>>>') {
+        return rec(e.l);
+      }
+      const l = rec(e.l);
+      const r = rec(e.r);
+      return l === true || r === true ? true : l === false && r === false ? false : undefined;
+    }
+    default: {
+      const t = exprCType(e, varType);
+      if (t === undefined) {
+        return undefined;
+      }
+      if (t.kind === 'ptr' || t.kind === 'array') {
+        return true;
+      }
+      return t.kind === 'int' ? t.width === 32 && !t.signed : undefined;
+    }
+  }
+}
+
+/** Is the rendered expression provably in [0, 2^31) — the range where a signed and an unsigned
+ *  compare agree on every input (and where gcc itself emits the unsigned branch for the signed
+ *  spelling)? Narrow unsigned values are the everyday case: a `(u8)x` cast or a `u8`/`u16`
+ *  deref promotes to a non-negative `int`. Conservative false elsewhere. */
+export function provablyNonNegative(e: Expr, varType: VarTypes): boolean {
+  switch (e.k) {
+    case 'const':
+      return e.value >= 0 && e.value < 0x80000000;
+    case 'un':
+      return e.op === '!';
+    case 'bin':
+      return ['<', '<=', '>', '>=', '==', '!=', '&&', '||'].includes(e.op);
+    case 'cast':
+      return e.to.kind === 'int' && e.to.width < 32 && !e.to.signed;
+    default: {
+      const t = exprCType(e, varType);
+      return t?.kind === 'int' && t.width < 32 && !t.signed;
+    }
+  }
+}
+
 export function exprCType(e: Expr, varType: (name: string) => IrType | undefined): IrType | undefined {
   const rec = (x: Expr): IrType | undefined => exprCType(x, varType);
   switch (e.k) {

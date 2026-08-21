@@ -204,7 +204,7 @@ test('P2 recovers a merged-return loop with an in-body early `return` (return-tr
   recoverTypes(fn);
   const src = cBackend.emit(structure(fn));
   expect(src).toContain('while ((v0 & 1) == 0) {'); // header test kept as the loop condition
-  expect(src).toContain('if (v1 > 31) {'); // the bound exit becomes an in-body early return
+  expect(src).toContain('if ((u32)v1 > 31) {'); // the bound exit becomes an in-body early return — icmp_ugt compares unsigned, and v1's s32 declaration would otherwise render it signed
   expect(src).toContain('return v1;'); // both exits return (the else-arm value merge)
   expect(src).not.toContain('break;'); // it is a RETURN trampoline, not a break
   // update lands before the bound test: shift then increment, then the conditional return.
