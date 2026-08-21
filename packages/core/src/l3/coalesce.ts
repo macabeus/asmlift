@@ -185,8 +185,10 @@ export function coalesceCandidates(sfn: SFn): { merged: string; sfn: SFn }[] {
 }
 
 /** One candidate ARM-DISJOINT merge: every mention of `a` inside one arm of a single `if`, every
- *  mention of `b` inside the other. Params never reach this shape at all — pair members come from
- *  `sfn.locals` only — so there is no param gate to mirror from the span table. */
+ *  mention of `b` inside the other. There is no param gate to mirror from the span table because
+ *  the enumeration refuses params structurally: pair members come from `sfn.locals` only, and a
+ *  local that SHADOWS a param name is excluded too (see `confined`) — rename() must never touch
+ *  a param's mentions. */
 export interface ArmPair {
   a: string;
   b: string;

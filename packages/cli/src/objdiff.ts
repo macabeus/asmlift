@@ -68,24 +68,27 @@ const DIFF_KINDS: Record<string, keyof DiffBreakdown> = {
 // hundred calls the wasm side exhausts and PANICS, and the poisoned instance then fails every
 // later call in the process (a ranked run drops every remaining candidate). Disposal is the
 // fix, not a nicety.
+// the same key the engine binds (its jco output uses Symbol.dispose with a Symbol.for
+// fallback on runtimes that predate it) — using only Symbol.dispose would silently no-op there
+const DISPOSE: typeof Symbol.dispose = Symbol.dispose ?? (Symbol.for('dispose') as never);
 const disposeAll = (...xs: unknown[]): void => {
   for (const x of xs) {
-    (x as { [Symbol.dispose]?: () => void } | undefined)?.[Symbol.dispose]?.();
+    (x as { [DISPOSE]?: () => void } | undefined)?.[DISPOSE]?.();
   }
 };
 
 export function scoreObjects(targetObj: string, candidateObj: string, symbol: string): MatchScore {
   const cfg = new objdiff.diff.DiffConfig();
   const mappingConfig = { mappings: [], selectingLeft: undefined, selectingRight: undefined };
-
-  const parse = (path: string, side: ObjdiffWasm.diff.DiffSide) =>
-    objdiff.diff.Object.parse(new Uint8Array(readFileSync(path)), cfg, side);
-  const target = parse(targetObj, 'target');
-  const candidate = parse(candidateObj, 'base');
-
-  // left = target, right = candidate (base).
-  const { left, right } = objdiff.diff.runDiff(target, candidate, cfg, mappingConfig);
+  let target, candidate, left, right;
   try {
+    const parse = (path: string, side: ObjdiffWasm.diff.DiffSide) =>
+      objdiff.diff.Object.parse(new Uint8Array(readFileSync(path)), cfg, side);
+    target = parse(targetObj, 'target');
+    candidate = parse(candidateObj, 'base');
+
+    // left = target, right = candidate (base).
+    ({ left, right } = objdiff.diff.runDiff(target, candidate, cfg, mappingConfig));
     if (!left || !right) {
       throw new Error('objdiff runDiff returned an empty side');
     }
