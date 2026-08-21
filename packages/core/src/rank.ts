@@ -21,6 +21,7 @@ import type { LanguageBackend, SFn } from './l3/ast';
 import { LIVEBASE_GATES, hoistReusedGlobalBases } from './l3/basecse';
 import { coalesceCandidates } from './l3/coalesce';
 import { mulFirstSums } from './l3/mulfirst';
+import { parkParamsFirst } from './l3/parkfirst';
 import { registerishSpellings } from './l3/regspell';
 import { reindexWalks } from './l3/reindex';
 import { hoistScopedBases } from './l3/scopebase';
@@ -523,6 +524,10 @@ export function enumerateCandidates(
         // independent operand's load above the product's mflo/mullw, so def order re-spells a
         // product-first source as load-first. Both orders are emitted; the differ referees.
         respell('/mulfirst', () => mulFirstSums(sfn));
+        // `/parkfirst` — incoming-argument parks lead the entry prefix (l3/parkfirst.ts): the
+        // park's `mov` lifts to pure SSA aliasing, so its position is unrecoverable and the
+        // default order is emission's. Both orders are emitted; the differ referees.
+        respell('/parkfirst', () => parkParamsFirst(sfn));
         // the register-copy spelling (l3/regspell.ts): 0–3 variants (base; tail assign-back reusing
         // the dead value var; tail assign-back into a fresh var — the tail choice is allocator-
         // ambiguous, so both are ranked)
