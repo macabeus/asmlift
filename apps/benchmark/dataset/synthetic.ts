@@ -1399,6 +1399,75 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'void fieldbase(s32 n);',
     proto: { fieldbase: { returnsVoid: true } },
   },
+  // The TYPED-home fourth of the family: what the first three thirds hoisted, this third TYPES.
+  // On the real function the residual splits three ways, each verified by compiling the pair.
+  // `sizebound` — the repeated `16 << t` homed in a **u32** local: the type is load-bearing
+  // twice over (the home's compares against a u16 load and the shift bound come out UNSIGNED —
+  // `bcs`/`bcc` where an s32 home gives `bge`/`blt` — and the s32-home spelling of the same
+  // hoist REGRESSES the real function, so a home lever without the width/sign choice cannot
+  // close it). `ucmp` isolates the compare polarity alone, home-less: a u32 counter and a cast
+  // bound flip four branches and ripple two register picks — asmlift's signedness axis pins
+  // entry params only, and the winner spells s32 locals with signed compares even though the
+  // lifted IR carried the unsigned condition. `entrypair` — one COMPUTED address (`(a0 << 2) +
+  // (a1 << 1) + table`) held in a pointer local with its two bytes read at `[r,#1]`/`[r,#0]`:
+  // the per-site spelling recomputes the chain and anchors a pool literal per baked offset
+  // (`table`, `table+1`) where the original anchors one. /nearbase cannot see it — its clusters
+  // are CONST deref bases; this base is an expression.
+  //
+  // `sizebound` is agbcc-only like its siblings (its poll loop declines on the MIPS lanes'
+  // branch-likely link, and mwcc stays off per the `hipress` hazard policy). `ucmp` and
+  // `entrypair` have no poll. Measured decline attributions: `ucmp:ido7.1` declines on the
+  // pre-existing branch-likely lift link (`bnezl`), `ucmp:mwcc_242_81` on the guard-fusion
+  // staleExit decline (the kept-guard family's link, not this one); `entrypair:gcc2.7.2kmc`
+  // declines on the MIPS `jal` call link exactly as `call1:gcc2.7.2kmc` does. Those lanes
+  // measure their links; the family's signal lanes are agbcc (all three), `ucmp:gcc2.7.2kmc`,
+  // and `entrypair:mwcc_242_81`.
+  {
+    sym: 'sizebound',
+    src:
+      'void sizebound(s32 t, s32 n){' +
+      ' volatile s32 *dma = (volatile s32 *)0x040000d4;' +
+      ' u32 size = 16 << t; s32 i;' +
+      ' for (i = 0; i < n; i++){' +
+      ' u32 j;' +
+      ' for (j = 0; j < *(u16 *)0x03001048; j++){ *(u8 *)(j + 0x03002000) = *(u8 *)(j + 0x03003000); }' +
+      ' for (j = *(u16 *)0x03001048; j < size; j++){ *(u8 *)(j + 0x03002000) = 0; }' +
+      ' dma[0] = 0x03002000;' +
+      ' dma[1] = *(s32 *)0x03001070 + size * i;' +
+      ' dma[2] = size >> 1 | 0x80000000;' +
+      ' while (dma[2] & 0x80000000) {} } }',
+    features: ['value-home', 'unsigned'],
+    toolchains: ['agbcc'],
+    ctx: 'void sizebound(s32 t, s32 n);',
+    proto: { sizebound: { returnsVoid: true } },
+  },
+  {
+    sym: 'ucmp',
+    src:
+      'void ucmp(s32 t){' +
+      ' u32 i;' +
+      ' for (i = 0; i < *(u16 *)0x03001048; i++){ *(u8 *)(i + 0x03002000) = *(u8 *)(i + 0x03003000); }' +
+      ' for (i = *(u16 *)0x03001048; i < (u32)(16 << t); i++){ *(u8 *)(i + 0x03002000) = 0; } }',
+    features: ['unsigned'],
+    toolchains: ALL,
+    ctx: 'void ucmp(s32 t);',
+    proto: { ucmp: { returnsVoid: true } },
+  },
+  {
+    sym: 'entrypair',
+    src:
+      's32 g(s32 v);\n' +
+      's32 entrypair(u32 a0, u32 a1){' +
+      ' u8 *entry = (u8 *)((a0 << 2) + (a1 << 1) + 0x08057acc);' +
+      ' s32 type = entry[1];' +
+      ' s32 idx = entry[0];' +
+      ' if (type == 2) { return g(*(s32 *)((idx << 3) + 0x08189ccc)); }' +
+      ' return g(*(s32 *)((type - 2 << 2) + (idx << 3) + 0x08189ccc)); }',
+    features: ['value-home', 'pointer'],
+    toolchains: CALL,
+    ctx: 's32 g(s32 v); s32 entrypair(u32 a0, u32 a1);',
+    proto: { g: { params: 1 } },
+  },
 ];
 
 // ── C++ (mwcc `.cp` frontend, PPC only) ───────────────────────────────────────────────────
