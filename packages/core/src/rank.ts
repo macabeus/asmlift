@@ -228,11 +228,21 @@ export function enumerateCandidates(
   // ambiguous, so both placements are emitted and the differ referees. Crossed with branch sense
   // (an anchored copy empties an arm, which is exactly what changes which sense wins); the dedup
   // below collapses every variant the anchoring left unchanged.
-  const baseSense = [
+  const senseAnchor = [
     { suffix: '', sense: defSense, anchor: false, bitfields: true },
     { suffix: '/flip-branch', sense: !defSense, anchor: false, bitfields: true },
     { suffix: '/defsite', sense: defSense, anchor: true, bitfields: true },
     { suffix: '/flip-branch/defsite', sense: !defSense, anchor: true, bitfields: true },
+  ];
+  // `/flip-join` — the JOINED-if sibling of `/flip-branch` (structure.ts
+  // negateJoinedBranchSense): a reconverging two-armed if reads the same fall-through-is-then
+  // layout evidence the divergent case does, and which sense the source spelled is just as
+  // ambiguous — so both are emitted and the differ referees. Crossed with the pair above
+  // (divergent and joined ifs are disjoint sets, so the axes are independent); a function with
+  // no two-armed joined if emits identical source and the dedup collapses it before any compile.
+  const baseSense = [
+    ...senseAnchor.map((s) => ({ ...s, join: false })),
+    ...senseAnchor.map((s) => ({ ...s, suffix: `${s.suffix}/flip-join`, join: true })),
   ];
   // `/no-bitfield` — keep the honest shift spelling where the map would name a bitfield member.
   // The named read recompiles at the DECLARATION's access width; where that diverges from the
@@ -376,6 +386,7 @@ export function enumerateCandidates(
           sfn = structureChecked(fn, {
             ...svOpts,
             preserveDivergentBranchSense: s.sense,
+            negateJoinedBranchSense: s.join,
             anchorConstCopies: s.anchor,
             spellBitfieldMembers: s.bitfields,
             rereadGlobals: s.reread,
@@ -383,7 +394,7 @@ export function enumerateCandidates(
             coalesceMergeNames: s.mergeNames,
           });
         } catch (e) {
-          if (!s.anchor && s.bitfields && !s.reread && !s.inplace && !s.mergeNames) {
+          if (!s.anchor && !s.join && s.bitfields && !s.reread && !s.inplace && !s.mergeNames) {
             throw e; // the base axes keep their behavior: a structuring failure aborts the row
           }
           // Recorded for EVERY dropped variant: a candidate with more axes on looks its siblings
