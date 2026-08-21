@@ -230,7 +230,11 @@ describe('COALESCE_GATES', () => {
     expect(gateTableDefects(COALESCE_GATES)).toEqual([]);
   });
 
-  test.each(COALESCE_GATES.filter((g) => g.sound).map((g) => [g.id] as const))(
+  // `volatile` is sound on a dimension this oracle cannot see: volatility is about the ACCESS
+  // SEQUENCE being observable, not about which value a read returns, and the evaluator compares
+  // values. Its guard is the direct pin in coalesce.test.ts ('a volatile pair never merges').
+  const valueInvisible = new Set(['volatile']);
+  test.each(COALESCE_GATES.filter((g) => g.sound && !valueInvisible.has(g.id)).map((g) => [g.id] as const))(
     'the SOUND gate `%s` is load-bearing — dropping it clobbers a defined read',
     (id) => {
       // The ablation is a VALUE: the real predicate runs on the real input, with no test-only branch
@@ -250,8 +254,9 @@ describe('COALESCE_GATES', () => {
       }
     }
     // `param` and `type` need shapes the generator does not emit (it declares three same-typed
-    // locals and no params); coalesce.test.ts pins both directly.
-    const byUnitTest = new Set(['param', 'type']);
+    // locals and no params), and `volatile` needs a qualified local it never declares;
+    // coalesce.test.ts pins all three directly.
+    const byUnitTest = new Set(['param', 'type', 'volatile']);
     expect(COALESCE_GATES.filter((g) => !reached.has(g.id) && !byUnitTest.has(g.id)).map((g) => g.id)).toEqual([]);
   });
 });

@@ -19,8 +19,10 @@
 // neighbor-base spellings stay separate candidates. Once a cluster HAS formed, a bare const
 // VALUE inside its window re-spells too, as `(s32)(b + off)` — the address of a cell handed to
 // something (a DMA source register) is the same derived add in the original, and the two
-// spellings are value-equal by construction, so the differ referees. Declines (null) when no
-// cluster forms.
+// spellings are value-equal by construction, so the differ referees — including an integer that
+// only coincidentally lands in the window, which is the stated cost of the lever (the `s32` cast
+// assumes addresses below 2^31, true of every target that declares nearBaseSpan today). Declines
+// (null) when no cluster forms.
 import type { Expr, SFn, Stmt } from './ast';
 import { mapExprChildren, mapStmtExprs } from './ast';
 import { nameAllocator } from './hoist';
@@ -103,6 +105,9 @@ export function nearBaseClusters(sfn: SFn, span: number): SFn | null {
         return { ...e, base: derived(lo, c - lo), idx: rewrite(e.idx) };
       }
       return { ...e, base: rewrite(e.base), idx: rewrite(e.idx) };
+    }
+    if (e.k === 'cast' && e.to.kind === 'ptr' && e.to.to.kind === 'struct') {
+      return e; // the struct-arrays base keeps its spelling — same refusal as baseConst's
     }
     if (e.k === 'const') {
       const lo = coveringLo(e.value);

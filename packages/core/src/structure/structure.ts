@@ -2823,8 +2823,11 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       out.push({ k: 'if', cond: negateCond(cond), then: elseS, else: thenS });
       return out;
     }
-    if (negateJoinedBranchSense && thenS.length && elseS.length) {
-      // both arms real: the flipped spelling is a genuine sibling, not noise on a one-armed if
+    if (negateJoinedBranchSense && ipd !== null && thenS.length && elseS.length) {
+      // JOINED arms only (`ipd !== null` — a divergent if belongs to preserveDivergentBranchSense
+      // above, and without the check a /flip-branch variant would fall through here and get
+      // flipped BACK, collapsing the {divergent flipped × joined flipped} combination), and both
+      // arms real: the flipped spelling is a genuine sibling, not noise on a one-armed if
       out.push({ k: 'if', cond: negateCond(cond), then: elseS, else: thenS });
       if (merge && merge !== stop) {
         out.push(...structureRegion(merge, stop));

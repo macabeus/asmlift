@@ -169,3 +169,21 @@ describe('arm-disjoint admission', () => {
     expect(coalesceCandidates(f).map((c) => c.merged)).not.toContain('y-x');
   });
 });
+
+describe('volatile pairs (span path)', () => {
+  test('a volatile pair never merges through the span path — object or pointee qualifier alike', () => {
+    // typeToString spells neither qualifier, so without the gate the qualified local absorbs
+    // into a plain one and every access loses (or gains) its volatility.
+    const body = [asg('a', 1), use('a'), asg('b', 2), use('b')];
+    const objectVolatile = [
+      { name: 'a', type: T.s(32), volatile: true as const },
+      { name: 'b', type: T.s(32) },
+    ];
+    expect(coalesceCandidates(fn(body, objectVolatile))).toEqual([]);
+    const pointeeVolatile = [
+      { name: 'a', type: T.s(32), pointeeVolatile: true as const },
+      { name: 'b', type: T.s(32) },
+    ];
+    expect(coalesceCandidates(fn(body, pointeeVolatile))).toEqual([]);
+  });
+});

@@ -49,6 +49,31 @@ const ARGORD = `fn argord {
 }
 `;
 
+// One DIVERGENT if (arms both return) and one JOINED if (arms reconverge on the final ret) in a
+// single function, so the two sense axes can be shown independent.
+const BOTHIFS = `fn bothifs {
+^bb0(%0: s32, %1: s32*):
+  %2: s32 = const {value=0}
+  %3: u32 = icmp_slt %0, %2
+  cond_br %3, ^bb1(), ^bb2()
+^bb1():
+  %4: s32 = const {value=7}
+  ret %4
+^bb2():
+  %5: u32 = icmp_sgt %0, %2
+  cond_br %5, ^bb3(), ^bb4()
+^bb3():
+  %6: s32 = const {value=1}
+  store %1, %6 {off=0, width=4}
+  br ^bb5()
+^bb4():
+  %7: s32 = const {value=2}
+  store %1, %7 {off=0, width=4}
+  br ^bb5()
+^bb5():
+  ret %0
+}
+`;
 describe('STRUCT-HARDEN: the compiler-behavior levers are load-bearing', () => {
   test('preserveDivergentBranchSense flips branch direction on a divergent if', () => {
     // true (IDO/MIPS behavior, and the safe default): reproduce the source forward-branch by
@@ -60,6 +85,26 @@ describe('STRUCT-HARDEN: the compiler-behavior levers are load-bearing', () => {
     expect(emit(DIVERGE, { preserveDivergentBranchSense: false })).toBe(
       's32 diverge(s32 a0) {\n    if (a0 < 0) {\n        return 7;\n    } else {\n        return a0;\n    }\n}\n',
     );
+  });
+
+  test('negateJoinedBranchSense flips a JOINED if and leaves the divergent axis independent', () => {
+    // The four sense combinations are four DISTINCT spellings: each axis moves exactly its own
+    // if class. Without the ipd guard on the joined branch, flip-join re-negated a divergent if
+    // whose preserve pin was false — collapsing {divergent flipped × joined flipped} into a
+    // duplicate.
+    const four = [
+      emit(BOTHIFS, { preserveDivergentBranchSense: true, negateJoinedBranchSense: false }),
+      emit(BOTHIFS, { preserveDivergentBranchSense: true, negateJoinedBranchSense: true }),
+      emit(BOTHIFS, { preserveDivergentBranchSense: false, negateJoinedBranchSense: false }),
+      emit(BOTHIFS, { preserveDivergentBranchSense: false, negateJoinedBranchSense: true }),
+    ];
+    expect(new Set(four).size).toBe(4);
+    // flipping the JOINED axis alone never touches the divergent if's spelling
+    const divergentLine = (src: string) => src.split('\n').find((l) => l.includes('if ('));
+    expect(divergentLine(four[0])).toBe(divergentLine(four[1]));
+    expect(divergentLine(four[2])).toBe(divergentLine(four[3]));
+    // and a one-armed if never flips: the DIVERGE fixture is joined-flip-invariant
+    expect(emit(DIVERGE, { negateJoinedBranchSense: true })).toBe(emit(DIVERGE, {}));
   });
 
   test('orderArgCopiesByComputation flips the order of independent edge assignments', () => {

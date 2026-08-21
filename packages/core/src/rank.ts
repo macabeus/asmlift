@@ -599,9 +599,10 @@ export function enumerateCandidates(
         const nearSpan = target.compilerBehaviors.nearBaseSpan;
         respell('/nearbase', () => (nearSpan !== undefined ? nearBaseClusters(sfn, nearSpan) : null));
         // The livebase × nearbase PAIRINGS — the same admission as livebase × indexed above:
-        // row-demanded, and the joint spelling is reachable from neither lever alone (a
-        // neighbor-cell object and a multi-index MMIO block in one function — each lever's
-        // constants are invisible to the other's model).
+        // the volatile triple is the row-demanded one, and the joint spelling is reachable from
+        // neither lever alone (a neighbor-cell object and a multi-index MMIO block in one
+        // function — each lever's constants are invisible to the other's model); the plain
+        // sibling rides for symmetry with /livebase/indexed.
         respell('/livebase/nearbase', () => {
           const r = livebase();
           return r && nearSpan !== undefined ? nearBaseClusters(r, nearSpan) : null;
@@ -610,9 +611,10 @@ export function enumerateCandidates(
           const r = livebaseVolatile();
           return r && nearSpan !== undefined ? nearBaseClusters(r, nearSpan) : null;
         });
-        // The livebase × coalesce PAIRINGS — same admission again: row-demanded, and the joint
-        // spelling is reachable from neither lever alone (an MMIO base worth homing and a
-        // counter shared across both arms of one if, in one function).
+        // The livebase × coalesce PAIRINGS — same admission again: the volatile triple is the
+        // row-demanded one, the joint spelling reachable from neither lever alone (an MMIO base
+        // worth homing and a counter shared across both arms of one if, in one function); the
+        // plain sibling rides for symmetry.
         enumerate('/livebase/coalesce', livebase);
         enumerate('/livebase/volatile/coalesce', livebaseVolatile);
         // `/parkfirst` — incoming-argument parks lead the entry prefix (l3/parkfirst.ts): the

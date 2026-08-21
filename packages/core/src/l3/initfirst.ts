@@ -29,29 +29,16 @@
 // re-enters everything, a case can fall through), so there the variable must appear nowhere
 // outside the rewritten `if` at all. Declines (null) when nothing changes.
 import type { Expr, SFn, Stmt } from './ast';
-import { NEGATE_REL, exprChildren, stmtExprs } from './ast';
+import { NEGATE_REL, exprChildren, stmtChildren, stmtExprs } from './ast';
 
 const readsVar = (e: Expr, name: string): boolean =>
   ((e.k === 'var' || e.k === 'addr') && e.name === name) || exprChildren(e).some((c) => readsVar(c, name));
 
-const stmtTouches = (s: Stmt, name: string): boolean => {
-  if (stmtExprs(s).some((e) => readsVar(e, name))) {
-    return true;
-  }
-  switch (s.k) {
-    case 'if':
-      return [...s.then, ...s.else].some((x) => stmtTouches(x, name));
-    case 'while':
-    case 'dowhile':
-      return s.body.some((x) => stmtTouches(x, name));
-    case 'for':
-      return [s.init, s.inc, ...s.body].some((x) => stmtTouches(x, name));
-    case 'switch':
-      return [...s.cases.flatMap((c) => c.body), ...(s.default ?? [])].some((x) => stmtTouches(x, name));
-    default:
-      return false;
-  }
-};
+// READS only — a pure write in a tail is benign (it overwrites the minted value on every path,
+// and any read after it is that write's business); touchesOutside below is TOTAL because strong
+// mode must know the name is absent, presence of any kind included.
+const stmtTouches = (s: Stmt, name: string): boolean =>
+  stmtExprs(s).some((e) => readsVar(e, name)) || stmtChildren(s).some((x) => stmtTouches(x, name));
 
 const isConstAssign = (s: Stmt): s is Extract<Stmt, { k: 'assign' }> & { value: { k: 'const'; value: number } } =>
   s.k === 'assign' && s.value.k === 'const';
@@ -72,24 +59,7 @@ export function initFirstGuards(sfn: SFn): SFn | null {
   const sweep = (stmts: Stmt[]): void => {
     for (const st of stmts) {
       stmtExprs(st).forEach(dropAddressTaken);
-      switch (st.k) {
-        case 'if':
-          sweep(st.then);
-          sweep(st.else);
-          break;
-        case 'while':
-        case 'dowhile':
-          sweep(st.body);
-          break;
-        case 'for':
-          sweep([st.init, st.inc, ...st.body]);
-          break;
-        case 'switch':
-          sweep([...st.cases.flatMap((cs) => cs.body), ...(st.default ?? [])]);
-          break;
-        default:
-          break;
-      }
+      sweep(stmtChildren(st));
     }
   };
   sweep(sfn.body);
@@ -100,28 +70,17 @@ export function initFirstGuards(sfn: SFn): SFn | null {
     tails: Stmt[][];
     strong: boolean;
   }
+  // TOTAL (reads and pure writes) — see the note on stmtTouches. Runs against the pre-rewrite
+  // tree (`skip` is an original-tree statement, found by identity); the rewrites never change a
+  // name's presence in a subtree, so the verdict carries over to the rewritten one.
   const touchesOutside = (list: Stmt[], skip: Stmt, name: string): boolean =>
-    list.some((st) => {
-      if (st === skip) {
-        return false;
-      }
-      if (stmtExprs(st).some((e) => readsVar(e, name)) || (st.k === 'assign' && st.name === name)) {
-        return true;
-      }
-      switch (st.k) {
-        case 'if':
-          return touchesOutside(st.then, skip, name) || touchesOutside(st.else, skip, name);
-        case 'while':
-        case 'dowhile':
-          return touchesOutside(st.body, skip, name);
-        case 'for':
-          return touchesOutside([st.init, st.inc, ...st.body], skip, name);
-        case 'switch':
-          return touchesOutside([...st.cases.flatMap((c) => c.body), ...(st.default ?? [])], skip, name);
-        default:
-          return false;
-      }
-    });
+    list.some(
+      (st) =>
+        st !== skip &&
+        (stmtExprs(st).some((e) => readsVar(e, name)) ||
+          (st.k === 'assign' && st.name === name) ||
+          touchesOutside(stmtChildren(st), skip, name)),
+    );
   // Assigns this pass itself hoisted to an arm head's parent list. An ancestor `if` whose arm now
   // BEGINS with one would otherwise re-spell it again — rewriting its own condition's accidental
   // matching const into the variable and stealing the arrangement the inner guard needed.

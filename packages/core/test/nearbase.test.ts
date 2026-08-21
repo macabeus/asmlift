@@ -86,6 +86,23 @@ test('a bare const VALUE inside a formed window re-spells as (s32)(base + off); 
   });
 });
 
+test('a const inside a struct-pointer cast never value-rewrites — the dot-form base keeps its spelling', () => {
+  const structCast: Expr = {
+    k: 'cast',
+    to: { kind: 'ptr', to: { kind: 'struct', name: 'S' } } as never,
+    e: c(104),
+  };
+  const r = nearBaseClusters255(
+    fn([
+      { k: 'exprstmt', value: deref(100, 2) },
+      { k: 'exprstmt', value: deref(102, 2) },
+      { k: 'assign', name: 'y', value: structCast },
+    ]),
+  );
+  const y = r!.body[3] as Extract<Stmt, { k: 'assign' }>;
+  expect(y.value).toEqual(structCast);
+});
+
 test('no cluster, no value rewrite: a lone deref plus an in-reach const still declines', () => {
   const r = nearBaseClusters255(
     fn([

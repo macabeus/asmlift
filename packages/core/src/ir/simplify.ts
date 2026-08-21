@@ -79,7 +79,8 @@ export function simplifyTrivialPhis(fn: Fn, onRemoved?: (param: Value) => void):
  * "does this exit carry anything" see cargo that is not there.
  *
  * Iterated to a fixpoint: a param whose only reader was another dead param's edge arg dies on the
- * next round.
+ * next round. A mutually-dead CYCLE (two params feeding only each other across blocks) survives —
+ * each one's edge arg counts as the other's reader — which is conservative, never wrong.
  *
  * THE ENTRY BLOCK IS NEVER TOUCHED — its params are the function's signature, and an argument the
  * body ignores is still an argument (frontend/ssa.ts `ensureParam` creates exactly those on

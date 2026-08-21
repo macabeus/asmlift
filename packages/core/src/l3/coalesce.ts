@@ -93,6 +93,9 @@ export interface MergePair {
   y: Span;
   sameType: boolean;
   eitherIsParam: boolean;
+  /** either local is object-volatile or carries a pointee-volatile qualifier — typeToString
+   *  spells neither, so `sameType` alone lets a qualified local absorb into a plain one */
+  eitherIsVolatile: boolean;
 }
 
 /** The admission rules, in evaluation order. Two arguments the `why` fields have no room for:
@@ -119,6 +122,13 @@ export const COALESCE_GATES: readonly Gate<MergePair>[] = [
     why: 'the survivor keeps its own declared type, so the two must agree',
     sound: false,
     rejects: (c) => !c.sameType,
+  },
+  {
+    id: 'volatile',
+    why: 'a volatile qualifier (object or pointee) is observable and typeToString does not spell it — merging strips or adds it',
+    sound: true,
+    guardedBy: 'coalesce.test.ts: a volatile pair never merges',
+    rejects: (c) => c.eitherIsVolatile,
   },
   {
     id: 'loop',
@@ -175,15 +185,18 @@ export function coalesceCandidates(sfn: SFn): { merged: string; sfn: SFn }[] {
 }
 
 /** One candidate ARM-DISJOINT merge: every mention of `a` inside one arm of a single `if`, every
- *  mention of `b` inside the other. */
+ *  mention of `b` inside the other. Params never reach this shape at all — pair members come from
+ *  `sfn.locals` only — so there is no param gate to mirror from the span table. */
 export interface ArmPair {
   a: string;
   b: string;
   /** the confining `if` has a loop ancestor, so it can run more than once */
   ifInLoop: boolean;
   sameType: boolean;
-  eitherIsParam: boolean;
+  /** either local is object-volatile or carries a pointee-volatile qualifier (see MergePair) */
   eitherIsVolatile: boolean;
+  /** each local's FIRST preorder mention inside its arm is a pure const write */
+  bothArmConstInit: boolean;
 }
 
 /** The arm-disjoint admission — the SECOND way a pair can merge, for pairs the span model must
@@ -194,12 +207,6 @@ export interface ArmPair {
  *  can take the other arm, and a value written on one visit becomes readable on the next. */
 export const ARM_DISJOINT_GATES: readonly Gate<ArmPair>[] = [
   {
-    id: 'param',
-    why: 'a param is the function’s own signature, not a recovered local',
-    sound: false,
-    rejects: (c) => c.eitherIsParam,
-  },
-  {
     id: 'type',
     why: 'the survivor keeps its own declared type, so the two must agree',
     sound: false,
@@ -207,7 +214,7 @@ export const ARM_DISJOINT_GATES: readonly Gate<ArmPair>[] = [
   },
   {
     id: 'volatile',
-    why: 'a volatile local’s slot identity is observable — merging changes which cell the accesses hit',
+    why: 'a volatile qualifier (object or pointee) is observable — merging strips or adds it',
     sound: true,
     guardedBy: 'coalesce.test.ts: a volatile pair never merges',
     rejects: (c) => c.eitherIsVolatile,
@@ -219,11 +226,27 @@ export const ARM_DISJOINT_GATES: readonly Gate<ArmPair>[] = [
     guardedBy: 'coalesce.test.ts: an in-loop if never admits its arm pair',
     rejects: (c) => c.ifInLoop,
   },
+  {
+    id: 'arm-init',
+    why: 'a local not const-initialized at its arm’s first mention is one the compiler had a reason to keep — the growth bound const-fed gives the span table',
+    sound: false,
+    rejects: (c) => !c.bothArmConstInit,
+  },
 ];
 
 function armDisjointCandidates(sfn: SFn): { merged: string; sfn: SFn }[] {
+  return armDisjointUnder(ARM_DISJOINT_GATES, sfn).candidates;
+}
+
+/** `armDisjointCandidates` with the gate table supplied plus which gate refused each pair — the
+ *  same ablation-as-a-value seam `coalesceUnder` provides for the span table. */
+export function armDisjointUnder(
+  gates: readonly Gate<ArmPair>[],
+  sfn: SFn,
+): { candidates: { merged: string; sfn: SFn }[]; refusals: Map<string, number> } {
+  const refusals = new Map<string, number>();
   if (sfn.locals.length < 2) {
-    return [];
+    return { candidates: [], refusals };
   }
   const mentionsOf = (list: Stmt[]): Map<string, number> => {
     const out = new Map<string, number>();
@@ -240,11 +263,35 @@ function armDisjointCandidates(sfn: SFn): { merged: string; sfn: SFn }[] {
     return out;
   };
   const total = mentionsOf(sfn.body);
-  const params = new Set(sfn.params.map((p) => p.name));
   const locals = new Map(sfn.locals.map((l) => [l.name, l]));
   const typeOf = new Map(sfn.locals.map((l) => [l.name, typeToString(l.type)]));
   const out: { merged: string; sfn: SFn }[] = [];
   const declIdx = new Map(sfn.locals.map((l, i) => [l.name, i]));
+  const isVolatile = (n: string): boolean =>
+    locals.get(n)?.volatile === true || locals.get(n)?.pointeeVolatile === true;
+  // The first PREORDER mention of `n` in an arm, looked for through if statements whose own
+  // condition does not read it (an if's cond evaluates before either arm). 'const-write' is a
+  // pure `n = K`; anything else mentioning n first — a read, a computed assign, a loop — refuses.
+  const firstMention = (list: Stmt[], n: string): 'const-write' | 'other' | null => {
+    for (const st of list) {
+      const here = new Set<string>();
+      if (st.k === 'assign') here.add(st.name);
+      for (const e of stmtExprs(st)) namesIn(e, here);
+      const inChildren = mentionsOf(stmtChildren(st)).has(n);
+      if (!here.has(n) && !inChildren) {
+        continue;
+      }
+      if (st.k === 'assign' && st.name === n && st.value.k === 'const' && !mentions(st.value, n)) {
+        return 'const-write';
+      }
+      if (st.k === 'if' && !here.has(n)) {
+        const arm = mentionsOf(st.then).has(n) ? st.then : st.else;
+        return firstMention(arm, n);
+      }
+      return 'other';
+    }
+    return null;
+  };
   const visit = (stmts: Stmt[], inLoop: boolean): void => {
     for (const st of stmts) {
       if (st.k === 'if' && st.then.length && st.else.length) {
@@ -256,15 +303,20 @@ function armDisjointCandidates(sfn: SFn): { merged: string; sfn: SFn }[] {
           for (const b of confined(elseM)) {
             // the survivor is the earlier declaration, matching how a shared source local reads
             const [gone, kept] = (declIdx.get(a) ?? 0) <= (declIdx.get(b) ?? 0) ? [b, a] : [a, b];
-            const refused = firstRejection(ARM_DISJOINT_GATES, {
+            const refused = firstRejection(gates, {
               a: gone,
               b: kept,
               ifInLoop: inLoop,
               sameType: typeOf.get(a) === typeOf.get(b),
-              eitherIsParam: params.has(a) || params.has(b),
-              eitherIsVolatile: locals.get(a)?.volatile === true || locals.get(b)?.volatile === true,
+              eitherIsVolatile: isVolatile(a) || isVolatile(b),
+              bothArmConstInit:
+                firstMention(st.then, a) === 'const-write' && firstMention(st.else, b) === 'const-write',
             });
-            if (refused === null) {
+            if (refused !== null) {
+              refusals.set(refused, (refusals.get(refused) ?? 0) + 1);
+              continue;
+            }
+            {
               out.push({
                 merged: `${gone}-${kept}`,
                 sfn: { ...sfn, body: rename(sfn.body, gone, kept), locals: sfn.locals.filter((l) => l.name !== gone) },
@@ -277,7 +329,7 @@ function armDisjointCandidates(sfn: SFn): { merged: string; sfn: SFn }[] {
     }
   };
   visit(sfn.body, false);
-  return out;
+  return { candidates: out, refusals };
 }
 
 /** `coalesceCandidates` with the gate table supplied, plus which gate refused each pair.
@@ -296,6 +348,9 @@ export function coalesceUnder(
   }
   const params = new Set(sfn.params.map((p) => p.name));
   const typeOf = new Map(sfn.locals.map((l) => [l.name, typeToString(l.type)]));
+  const volatiles = new Set(
+    sfn.locals.filter((l) => l.volatile === true || l.pointeeVolatile === true).map((l) => l.name),
+  );
   const sp = spans(sfn.body);
   const candidates: { merged: string; sfn: SFn }[] = [];
   for (const a of sfn.locals.map((l) => l.name)) {
@@ -314,6 +369,7 @@ export function coalesceUnder(
         y,
         sameType: typeOf.get(a) === typeOf.get(b),
         eitherIsParam: params.has(a) || params.has(b),
+        eitherIsVolatile: volatiles.has(a) || volatiles.has(b),
       });
       if (refused !== null) {
         refusals.set(refused, (refusals.get(refused) ?? 0) + 1);
