@@ -10,6 +10,7 @@ const nearBaseClusters255 = (sfn: SFn) => nearBaseClusters(sfn, 255);
 const s32 = { kind: 'int', width: 32, signed: true } as const;
 const c = (value: number): Expr => ({ k: 'const', value });
 const deref = (addr: number, width: number): Expr => ({ k: 'index', base: c(addr), idx: c(0), width, signed: false });
+const v_ = (): Expr => ({ k: 'var', name: 'i0' });
 const fn = (body: Stmt[]): SFn => ({ name: 'f', params: [], locals: [], retType: s32, body });
 
 test('two neighbor cells and an in-span word share one base local', () => {
@@ -72,4 +73,41 @@ test('a const used in arithmetic is not an address and never rewrites', () => {
   );
   const y = r!.body[3] as Extract<Stmt, { k: 'assign' }>;
   expect(y.value).toEqual({ k: 'bin', op: '+', l: c(100), r: c(1) });
+});
+
+test('a struct-pointer cast base is never a cluster member (the dot-form stride)', () => {
+  const structDeref: Expr = {
+    k: 'index',
+    base: { k: 'cast', to: { kind: 'ptr', to: { kind: 'struct', name: 'S' } } as never, e: c(100) },
+    idx: v_(),
+    width: 4,
+    signed: false,
+  };
+  const r = nearBaseClusters255(
+    fn([
+      { k: 'exprstmt', value: structDeref },
+      { k: 'exprstmt', value: deref(102, 2) },
+    ]),
+  );
+  expect(r).toBeNull(); // one scalar member is no cluster
+});
+
+test('a field subtree is never entered: its interior deref keeps its spelling', () => {
+  const fieldExpr: Expr = { k: 'field', base: deref(100, 4), name: 'field_0', width: 4, signed: false } as never;
+  const r = nearBaseClusters255(
+    fn([
+      { k: 'exprstmt', value: fieldExpr },
+      { k: 'exprstmt', value: deref(102, 2) },
+    ]),
+  );
+  expect(r).toBeNull();
+});
+
+test('declined: a hostile span (negative or NaN) instead of a stalled cluster window', () => {
+  const body = [
+    { k: 'exprstmt' as const, value: deref(100, 2) },
+    { k: 'exprstmt' as const, value: deref(102, 2) },
+  ];
+  expect(nearBaseClusters(fn(body), -1)).toBeNull();
+  expect(nearBaseClusters(fn(body), Number.NaN)).toBeNull();
 });

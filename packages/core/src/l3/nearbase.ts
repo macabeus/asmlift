@@ -10,10 +10,14 @@
 //     *(u16 *)0x03001048   →   u8 *b = (u8 *)0x03001000;  *(u16 *)(b + 72)
 //
 // SCOPE (decline over approximate): only CONST deref bases (an integer used in arithmetic is
-// not an address and never rewrites); a cluster needs at least two DISTINCT addresses within a
-// 255-byte span of its lowest (the single-`add`-immediate derivation reach — beyond it the
-// derive costs more than the pool word it saves); every access in the cluster rewrites, so one
-// object never splits into mixed spellings. Declines (null) when no cluster forms.
+// not an address and never rewrites; a struct-pointer cast base and everything inside a
+// dot-form field subtree keep their spelling — their stride is the struct's, not a byte's); a
+// cluster needs at least two DISTINCT addresses within the target's declared derivation reach
+// of its lowest (TargetDescription nearBaseSpan — beyond it the derive costs more than the pool
+// word it saves); every access the walk visits rewrites, so a cluster splits only across the
+// field-subtree boundary. A member basecse already hoisted arrives as a `var` base and is
+// invisible here — the reused-base and neighbor-base spellings stay separate candidates.
+// Declines (null) when no cluster forms.
 import type { Expr, SFn, Stmt } from './ast';
 import { mapExprChildren, mapStmtExprs } from './ast';
 import { nameAllocator } from './hoist';
@@ -32,6 +36,9 @@ const baseConst = (e: Expr): number | null =>
  *  (TargetDescription.compilerBehaviors.nearBaseSpan) — a target that declares none never runs
  *  this lever. */
 export function nearBaseClusters(sfn: SFn, span: number): SFn | null {
+  if (!Number.isFinite(span) || span < 0) {
+    return null; // a hostile span stalls the cluster window instead of shrinking it
+  }
   // collect every DISTINCT const deref-base address
   const addrs = new Set<number>();
   const collect = (e: Expr): Expr => {

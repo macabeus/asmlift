@@ -112,3 +112,34 @@ test('refused for a global: a bare-global assign is a store other code observes'
   };
   expect(initFirstGuards(g)).toBeNull();
 });
+
+test('refused for a VOLATILE local: its store is itself observable (escaped DMA scratch)', () => {
+  const g: SFn = {
+    ...fn([
+      {
+        k: 'if',
+        cond: bin('<', c(0), v('a0')),
+        then: [assign('sp0', c(0)), dowhile(bin('<', v('sp0'), v('a0')), [])],
+        else: [],
+      },
+    ]),
+    locals: [{ name: 'sp0', type: s32, volatile: true }],
+  };
+  expect(initFirstGuards(g)).toBeNull();
+});
+
+test('refused for an address-taken local: a captured pointer reads it with no name in sight', () => {
+  const takeAddr: Stmt = { k: 'assign', name: 'p1', value: { k: 'addr', name: 'v0' } };
+  const g: SFn = {
+    ...fn([
+      takeAddr,
+      {
+        k: 'if',
+        cond: bin('<', c(0), v('a0')),
+        then: [assign('v0', c(0)), dowhile(bin('<', v('v0'), v('a0')), [])],
+        else: [],
+      },
+    ]),
+  };
+  expect(initFirstGuards(g)).toBeNull();
+});

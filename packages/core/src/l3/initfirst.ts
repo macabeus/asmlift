@@ -8,7 +8,7 @@
 //
 //     if (0 < n) { v = 0; … }   →   v = 0; if (v < n) { … }
 //
-// Two rewrites, applied per statement list at every nesting level:
+// Two rewrites (the guard re-spelling top-level-only — see SCOPE):
 //   • common-arm hoist — both arms of an `if` begin with the SAME pure-const assign
 //     (`if (c) { v = 0; } else { v = 0; … }`, gcc's inverted-guard shape): the assign moves above
 //     the `if`, and an emptied then-arm flips into its negated else form.
@@ -16,14 +16,16 @@
 //     condition carries the CONST K as a comparison operand: the assign moves above and that
 //     operand becomes `v`.
 //
-// SCOPE (decline over approximate): both rewrites touch LOCALS only — a bare-global assign
-// stores memory that other code observes, so moving one across the guard is a real store on the
-// skip path. Hoisted assigns carry pure CONST values (an effect or a memory read would reorder
-// against the condition), and the condition must not read the variable (its pre-assign value
-// dies in the move). The guard re-spelling mints a write on a previously write-free path, so it
-// fires only in the TOP-LEVEL statement list — inside a loop the skip-path write re-executes
-// where an enclosing scope can watch it — and only when the variable appears nowhere after the
-// `if` there. Declines (null) when nothing changes.
+// SCOPE (decline over approximate): both rewrites touch PRIVATE locals only — a bare-global
+// assign stores memory other code observes, a VOLATILE local's store is itself observable (the
+// escaped DMA scratch), and a local whose ADDRESS is taken anywhere can be read through the
+// pointer where no name betrays it — all three stay put. Hoisted assigns carry pure CONST
+// values (an effect or a memory read would reorder against the condition), and the condition
+// must not read the variable (its pre-assign value dies in the move). The guard re-spelling
+// mints a write on a previously write-free path, so it fires only in the TOP-LEVEL statement
+// list — nested anywhere, a loop re-executes the skip-path write and an outer list can read it
+// — and only when the variable appears nowhere after the `if` there. Declines (null) when
+// nothing changes.
 import type { Expr, SFn, Stmt } from './ast';
 import { NEGATE_REL, exprChildren, stmtExprs } from './ast';
 
@@ -54,7 +56,41 @@ const isConstAssign = (s: Stmt): s is Extract<Stmt, { k: 'assign' }> & { value: 
 
 export function initFirstGuards(sfn: SFn): SFn | null {
   let changed = false;
-  const fnLocal = new Set([...sfn.params, ...sfn.locals].map((d) => d.name));
+  const fnLocal = new Set([
+    ...sfn.params.map((d) => d.name),
+    ...sfn.locals.filter((l) => l.volatile !== true).map((l) => l.name),
+  ]);
+  // an address-taken local can be read through the captured pointer with no name in sight
+  const dropAddressTaken = (e: Expr): void => {
+    if (e.k === 'addr') {
+      fnLocal.delete(e.name);
+    }
+    exprChildren(e).forEach(dropAddressTaken);
+  };
+  const sweep = (stmts: Stmt[]): void => {
+    for (const st of stmts) {
+      stmtExprs(st).forEach(dropAddressTaken);
+      switch (st.k) {
+        case 'if':
+          sweep(st.then);
+          sweep(st.else);
+          break;
+        case 'while':
+        case 'dowhile':
+          sweep(st.body);
+          break;
+        case 'for':
+          sweep([st.init, st.inc, ...st.body]);
+          break;
+        case 'switch':
+          sweep([...st.cases.flatMap((cs) => cs.body), ...(st.default ?? [])]);
+          break;
+        default:
+          break;
+      }
+    }
+  };
+  sweep(sfn.body);
 
   const rewriteList = (list: Stmt[], topLevel: boolean): Stmt[] => {
     const out: Stmt[] = [];
