@@ -134,3 +134,37 @@ test('a materialized temp on the exit edge declines: the guarded body may never 
   expect(() => emit(ZERO_TRIP_PROVEN)).toThrow(/a post-loop read reaches a temp/);
   expect(() => emit(ZERO_TRIP_UNPROVEN)).toThrow(/a post-loop read reaches a temp/);
 });
+
+// A PURE PREHEADER between the guard and the self-loop — the compiler's loop-invariant motion
+// parks a computation there (a busy poll's mask re-materialization) and the guard's branch is
+// still the only decision. The claim requires a preheader def the LOOP BODY reads; its defs
+// render inline, and with the guard proven the poll fuses to a plain `while`.
+const PREHEADER_POLL = `fn poll {
+^bb0(%0: s32):
+  %1: s32 = load %0 {off=8, width=4, signed=1}
+  %2: s32 = const {value=128}
+  %3: s32 = add %2, %2
+  %4: s32 = and %1, %3
+  %5: s32 = const {value=0}
+  %6: u32 = icmp_ne %4, %5
+  cond_br %6, ^bb1(), ^bb2()
+^bb1():
+  %7: s32 = const {value=128}
+  %8: s32 = add %7, %7
+  br ^bb3()
+^bb3():
+  %9: s32 = load %0 {off=8, width=4, signed=1}
+  %10: s32 = and %9, %8
+  %11: u32 = icmp_ne %10, %5
+  cond_br %11, ^bb3(), ^bb2()
+^bb2():
+  ret %5
+}
+`;
+
+test('a pure preheader between guard and self-loop still fuses the proven guard to a while', () => {
+  const c = emit(PREHEADER_POLL);
+  expect(c).toContain('while (');
+  expect(c).not.toContain('do {');
+  expect(c).not.toContain('if ('); // the guard is subsumed by the while's own test
+});

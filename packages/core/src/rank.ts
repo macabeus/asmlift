@@ -20,8 +20,11 @@ import { materializeArgBases } from './l3/argbase';
 import type { LanguageBackend, SFn } from './l3/ast';
 import { LIVEBASE_GATES, hoistReusedGlobalBases } from './l3/basecse';
 import { coalesceCandidates } from './l3/coalesce';
+import { initFirstGuards } from './l3/initfirst';
 import { mulFirstSums } from './l3/mulfirst';
+import { nearBaseClusters } from './l3/nearbase';
 import { parkParamsFirst } from './l3/parkfirst';
+import { pollGuards } from './l3/pollguard';
 import { registerishSpellings } from './l3/regspell';
 import { reindexWalks } from './l3/reindex';
 import { hoistScopedBases } from './l3/scopebase';
@@ -39,6 +42,20 @@ import { type TargetDescription, structureOptionsFor } from './target';
  *
  * Struct LAYOUT is recovered structurally (raise/structs.ts), not as a scored axis here:
  * `->field_N` and `[idx]` compile identically, so the differ cannot referee between them. */
+/** The statement-shape products (rank's second sanctioned product mechanism): each entry is a
+ *  statement-order/shape re-spelling orthogonal to every representation lever, derived onto every
+ *  spelling as sanctioned in the POLICY note at the respell site. Each shape fires alone, plus
+ *  all of them together in table order — not the full subset lattice; a third entry decides
+ *  whether its pairs earn a place. */
+const SHAPE_PRODUCTS: { suffix: string; apply: (sfn: SFn) => SFn | null }[] = [
+  { suffix: '/initfirst', apply: initFirstGuards },
+  { suffix: '/pollguard', apply: pollGuards },
+];
+const SHAPE_SUBSETS: (typeof SHAPE_PRODUCTS)[number][][] = [
+  ...SHAPE_PRODUCTS.map((x) => [x]),
+  ...(SHAPE_PRODUCTS.length > 1 ? [SHAPE_PRODUCTS] : []),
+];
+
 const SIGN_CANDS = [
   { label: 'unsigned', signed: false },
   { label: 'signed', signed: true },
@@ -412,15 +429,19 @@ export function enumerateCandidates(
         // that declines by throwing — Pascal loud-fails unspellable shapes — drops the candidate,
         // never aborts the enumeration). A dropped re-spelling loses nothing: the primary remains.
         //
-        // POLICY: re-spellings derive from the BASE spelling only — levers do not compose
-        // (an /indexed + /regcopy product is deferred until a row demands it). Products with
-        // /volatile are the ONE sanctioned exception, and only onto a lever whose re-spelling
-        // CENTRES ON a numeric-address pointer local — the joint spelling (the lever plus
-        // volatile on that local) is reachable from neither lever alone. Each product narrows
-        // /volatile to the lever's own locals (volatilePtrLocals' `only`): /indexed to the walk
-        // bases it kept, /livebase to the locals its hoist created — qualifying any OTHER local
-        // would be the general composition this policy forbids, since the primary's /volatile
-        // already asks the question for those. Each product needed a row to demand it. And a lever must
+        // POLICY: re-spellings derive from the BASE spelling only — levers do not compose by
+        // default. THREE product mechanisms are sanctioned, each with its own admission bar.
+        // Products with /volatile go only onto a lever whose re-spelling CENTRES ON a
+        // numeric-address pointer local — the joint spelling is reachable from neither lever
+        // alone, each product narrows /volatile to the lever's own locals (volatilePtrLocals'
+        // `only`), and each needed a row to demand it. The SHAPE products (SHAPE_PRODUCTS) are
+        // derived onto EVERY spelling: statement order/shape is orthogonal to what any
+        // representation lever changes — the same kind of independent dimension as signedness —
+        // so they compose as an axis rather than a pairing; a third blanket product needs the
+        // same argument, not just a row. And a specific LEVER PAIRING is admitted when a row
+        // demands it AND the joint spelling is reachable from neither lever alone (the
+        // /livebase × /indexed pairings below — a hoisted MMIO base and a re-indexed walk in one
+        // function); anything else stays un-composed. And a lever must
         // PRESERVE SEMANTICS by construction: the differ referees byte-exactness (a wrong candidate
         // can never fake a score-0 match), but on a NONMATCH row the best-scoring source is shown
         // to the user — a semantically-wrong re-spelling there is plausible-but-wrong output, the
@@ -439,6 +460,25 @@ export function enumerateCandidates(
             assertResolved(alt);
             assertDerefsTyped(alt);
             spellings.push({ suffix, source: backend.emit(alt), ...refsOf(alt) });
+            // STATEMENT-SHAPE products, derived onto EVERY spelling — the second sanctioned
+            // product mechanism (the POLICY note above carries the admission argument). Each is
+            // a statement-order/shape fact orthogonal to representation; subsets compose in the
+            // fixed order below. A shape that never fires declines and costs nothing.
+            if (!SHAPE_PRODUCTS.some(({ suffix: sx }) => suffix.includes(sx))) {
+              for (const subset of SHAPE_SUBSETS) {
+                let out: SFn | null = alt;
+                let sx = '';
+                for (const sp2 of subset) {
+                  out = out === null ? null : (sp2.apply(out) ?? null);
+                  sx += sp2.suffix;
+                }
+                if (out !== null && out !== alt) {
+                  assertResolved(out);
+                  assertDerefsTyped(out);
+                  spellings.push({ suffix: `${suffix}${sx}`, source: backend.emit(out), ...refsOf(out) });
+                }
+              }
+            }
           } catch (e) {
             // A throwing lever, a contract failure, or an unspellable re-spelling: keep the primary.
             // REPORTED, not swallowed. `dropped` (below) records only spellings the SCORER refused,
@@ -451,6 +491,11 @@ export function enumerateCandidates(
         // `/argbase` — name a call's argument bases before the call (l3/argbase.ts). A lever on the
         // same footing as the others: the primary inline spelling stays in the list, so the differ
         // referees and this can never cost a match.
+        for (const subset of SHAPE_SUBSETS) {
+          respell(subset.map((x) => x.suffix).join(''), () =>
+            subset.reduce<SFn | null>((acc, x) => (acc === null ? null : (x.apply(acc) ?? null)), sfn),
+          );
+        }
         respell('/argbase', () => materializeArgBases(sfn));
         // `/volatile` — declare a pointer local holding a NUMERIC address as pointing to volatile
         // data (l3/volatileptr.ts). A raw constant has no declaration anywhere, so the original
@@ -509,7 +554,7 @@ export function enumerateCandidates(
           return r === sfn ? null : r;
         };
         respell('/livebase', livebase);
-        respell('/livebase/volatile', () => {
+        const livebaseVolatile = (): SFn | null => {
           const r = livebase();
           if (!r) {
             return null;
@@ -519,11 +564,29 @@ export function enumerateCandidates(
           const before = new Set(sfn.locals.map((l) => l.name));
           const created = new Set(r.locals.filter((l) => !before.has(l.name)).map((l) => l.name));
           return volatilePtrLocals(r, created);
+        };
+        respell('/livebase/volatile', livebaseVolatile);
+        // The livebase × indexed PAIRINGS — the third sanctioned product kind (see POLICY):
+        // row-demanded, and the joint spelling is reachable from neither lever alone (the
+        // frame-copy + DMA shape).
+        respell('/livebase/indexed', () => {
+          const r = livebase();
+          return r ? reindexWalks(r) : null;
+        });
+        respell('/livebase/volatile/indexed', () => {
+          const r = livebaseVolatile();
+          return r ? reindexWalks(r) : null;
         });
         // `/mulfirst` — product-first commutative sums (l3/mulfirst.ts): IDO/mwcc schedule the
         // independent operand's load above the product's mflo/mullw, so def order re-spells a
         // product-first source as load-first. Both orders are emitted; the differ referees.
         respell('/mulfirst', () => mulFirstSums(sfn));
+        // `/nearbase` — neighbor absolute addresses derive from one shared base local
+        // (l3/nearbase.ts): one object's cells anchored as separate pool constants re-spell as
+        // offsets off its lowest address, within the target's declared derivation reach. Both
+        // spellings are emitted; the differ referees.
+        const nearSpan = target.compilerBehaviors.nearBaseSpan;
+        respell('/nearbase', () => (nearSpan !== undefined ? nearBaseClusters(sfn, nearSpan) : null));
         // `/parkfirst` — incoming-argument parks lead the entry prefix (l3/parkfirst.ts): the
         // park's `mov` lifts to pure SSA aliasing, so its position is unrecoverable and the
         // default order is emission's. Both orders are emitted; the differ referees.

@@ -451,7 +451,7 @@ export function stmtChildren(s: Stmt): Stmt[] {
 // form, so on such a row this rule changes how the code READS and nothing else. Widening the
 // branch-sense lever to loop tests is what would make it a matching lever there, and that is a
 // separate change.
-const NEGATE_REL: Partial<Record<BinOp, BinOp>> = {
+export const NEGATE_REL: Partial<Record<BinOp, BinOp>> = {
   '<': '>=',
   '>=': '<',
   '>': '<=',

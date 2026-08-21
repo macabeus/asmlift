@@ -442,3 +442,140 @@ test('keptWalks collects the v1 while-walk base (here a param — harmless to th
   expect(reindexWalks(walkSum(), kept)).not.toBeNull();
   expect(kept).toEqual(new Set(['a0']));
 });
+
+// ── v3: the up-counting byte walk with an expression base ─────────────────────────────────────
+describe('v3 — expression-base byte walk', () => {
+  const u8p = { kind: 'ptr', to: { kind: 'int', width: 8, signed: false } } as const;
+  const s32t = { kind: 'int', width: 32, signed: true } as const;
+  const v = (name: string): Expr => ({ k: 'var', name });
+  const cn = (value: number): Expr => ({ k: 'const', value });
+  const inc = (name: string): Stmt => ({ k: 'assign', name, value: { k: 'bin', op: '+', l: v(name), r: cn(1) } });
+  const derefP: Expr = { k: 'index', base: v('p'), idx: cn(0), width: 1, signed: false };
+  const mkFn = (init: Expr, body: Stmt[], tail: Stmt[] = []): SFn => ({
+    name: 'f',
+    params: [
+      { name: 'a0', type: s32t },
+      { name: 'a1', type: s32t },
+      { name: 'a2', type: s32t },
+    ],
+    locals: [
+      { name: 'p', type: u8p as never },
+      { name: 'i', type: s32t },
+    ],
+    retType: s32t,
+    body: [
+      { k: 'assign', name: 'i', value: cn(0) },
+      { k: 'assign', name: 'p', value: init },
+      {
+        k: 'dowhile',
+        cond: { k: 'bin', op: '<', l: v('i'), r: v('a2') },
+        body,
+      },
+      ...tail,
+    ],
+  });
+  const walkBody = (): Stmt[] => [
+    { k: 'store', lval: { k: 'index', base: v('a1'), idx: v('i'), width: 1, signed: false }, value: derefP },
+    inc('p'),
+    inc('i'),
+  ];
+  const init: Expr = {
+    k: 'cast',
+    to: u8p as never,
+    e: { k: 'bin', op: '+', l: { k: 'bin', op: '*', l: v('a2'), r: v('a1') }, r: v('a0') },
+  };
+
+  test('the walk deletes into BASE[i + REST], counter first in the index sum', () => {
+    const r = reindexWalks(mkFn(init, walkBody()));
+    expect(r).not.toBeNull();
+    const src = JSON.stringify(r!.body);
+    expect(src).not.toContain('"name":"p"');
+    // idx = i + a2*a1, base = a0 — the sole bare-var addend
+    expect(src).toContain(
+      '{"k":"index","base":{"k":"var","name":"a0"},"idx":{"k":"bin","op":"+","l":{"k":"var","name":"i"},"r":{"k":"bin","op":"*","l":{"k":"var","name":"a2"},"r":{"k":"var","name":"a1"}}},"width":1,"signed":false}',
+    );
+  });
+
+  test('refused: a counter starting anywhere but 0 (the index counts completed steps)', () => {
+    const f = mkFn(init, walkBody());
+    (f.body[0] as Extract<Stmt, { k: 'assign' }>).value = cn(5);
+    expect(reindexWalks(f)).toBeNull();
+  });
+
+  test('refused: a step ahead of a deref (the *++p walk reads the NEXT element)', () => {
+    const preStep: Stmt[] = [
+      inc('p'),
+      { k: 'store', lval: { k: 'index', base: v('a1'), idx: v('i'), width: 1, signed: false }, value: derefP },
+      inc('i'),
+    ];
+    expect(reindexWalks(mkFn(init, preStep))).toBeNull();
+  });
+
+  test('refused: derefs straddling the step collapse two addresses onto one index', () => {
+    const straddle: Stmt[] = [
+      { k: 'store', lval: { k: 'index', base: v('a1'), idx: v('i'), width: 1, signed: false }, value: derefP },
+      inc('p'),
+      { k: 'store', lval: { k: 'index', base: v('a2'), idx: v('i'), width: 1, signed: false }, value: derefP },
+      inc('i'),
+    ];
+    expect(reindexWalks(mkFn(init, straddle))).toBeNull();
+  });
+
+  test('refused: a second write to the counter hiding in a nested arm', () => {
+    const reset: Stmt = {
+      k: 'if',
+      cond: { k: 'bin', op: '==', l: v('i'), r: cn(3) },
+      then: [{ k: 'assign', name: 'i', value: cn(1) }],
+      else: [],
+    };
+    const body: Stmt[] = [
+      { k: 'store', lval: { k: 'index', base: v('a1'), idx: v('i'), width: 1, signed: false }, value: derefP },
+      reset,
+      inc('p'),
+      inc('i'),
+    ];
+    expect(reindexWalks(mkFn(init, body))).toBeNull();
+  });
+
+  test('refused: a GLOBAL wide-pointer base strides its element, and an undeclared base is unknowable', () => {
+    const gInit: Expr = {
+      k: 'cast',
+      to: u8p as never,
+      e: { k: 'bin', op: '+', l: { k: 'bin', op: '*', l: v('a2'), r: v('a1') }, r: v('gW') },
+    };
+    const wide = mkFn(gInit, walkBody());
+    wide.globals = [{ name: 'gW', type: { kind: 'ptr', to: { kind: 'int', width: 32, signed: true } } as never }];
+    expect(reindexWalks(wide)).toBeNull();
+    const undeclared = mkFn(gInit, walkBody()); // gW declared nowhere
+    expect(reindexWalks(undeclared)).toBeNull();
+  });
+
+  test('refused: two bare-var addends leave the base ambiguous', () => {
+    const twoVars: Expr = {
+      k: 'cast',
+      to: u8p as never,
+      e: { k: 'bin', op: '+', l: v('a1'), r: v('a0') },
+    };
+    expect(reindexWalks(mkFn(twoVars, walkBody()))).toBeNull();
+  });
+
+  test('refused: the pointer is read after the loop', () => {
+    const r = reindexWalks(
+      mkFn(init, walkBody(), [{ k: 'return', value: { k: 'cast', to: s32t as never, e: v('p') } }]),
+    );
+    expect(r).toBeNull();
+  });
+
+  test('refused: a wider deref would stride differently', () => {
+    const wide: Stmt[] = [
+      {
+        k: 'store',
+        lval: { k: 'index', base: v('a1'), idx: v('i'), width: 1, signed: false },
+        value: { k: 'index', base: v('p'), idx: cn(0), width: 4, signed: false },
+      },
+      inc('p'),
+      inc('i'),
+    ];
+    expect(reindexWalks(mkFn(init, wide))).toBeNull();
+  });
+});
