@@ -24,6 +24,7 @@ import { initFirstGuards } from './l3/initfirst';
 import { mulFirstSums } from './l3/mulfirst';
 import { nearBaseClusters } from './l3/nearbase';
 import { parkParamsFirst } from './l3/parkfirst';
+import { pollGuards } from './l3/pollguard';
 import { registerishSpellings } from './l3/regspell';
 import { reindexWalks } from './l3/reindex';
 import { hoistScopedBases } from './l3/scopebase';
@@ -41,6 +42,19 @@ import { type TargetDescription, structureOptionsFor } from './target';
  *
  * Struct LAYOUT is recovered structurally (raise/structs.ts), not as a scored axis here:
  * `->field_N` and `[idx]` compile identically, so the differ cannot referee between them. */
+/** The statement-shape products (rank's second sanctioned product mechanism): each entry is a
+ *  statement-order/shape re-spelling orthogonal to every representation lever, derived onto every
+ *  spelling as sanctioned in the POLICY note at the respell site. Non-empty subsets compose in
+ *  table order. */
+const SHAPE_PRODUCTS: { suffix: string; apply: (sfn: SFn) => SFn | null }[] = [
+  { suffix: '/initfirst', apply: initFirstGuards },
+  { suffix: '/pollguard', apply: pollGuards },
+];
+const SHAPE_SUBSETS: (typeof SHAPE_PRODUCTS)[number][][] = [
+  ...SHAPE_PRODUCTS.map((x) => [x]),
+  ...(SHAPE_PRODUCTS.length > 1 ? [SHAPE_PRODUCTS] : []),
+];
+
 const SIGN_CANDS = [
   { label: 'unsigned', signed: false },
   { label: 'signed', signed: true },
@@ -443,16 +457,23 @@ export function enumerateCandidates(
             assertResolved(alt);
             assertDerefsTyped(alt);
             spellings.push({ suffix, source: backend.emit(alt), ...refsOf(alt) });
-            // `/initfirst` (l3/initfirst.ts) is derived onto EVERY spelling — the second
-            // sanctioned product mechanism (the POLICY note above carries the admission
-            // argument). It fires only where a guard+init shape exists; everywhere else the
-            // product declines and costs nothing.
-            if (!suffix.endsWith('/initfirst')) {
-              const fi = initFirstGuards(alt);
-              if (fi) {
-                assertResolved(fi);
-                assertDerefsTyped(fi);
-                spellings.push({ suffix: `${suffix}/initfirst`, source: backend.emit(fi), ...refsOf(fi) });
+            // STATEMENT-SHAPE products, derived onto EVERY spelling — the second sanctioned
+            // product mechanism (the POLICY note above carries the admission argument). Each is
+            // a statement-order/shape fact orthogonal to representation; subsets compose in the
+            // fixed order below. A shape that never fires declines and costs nothing.
+            if (!SHAPE_PRODUCTS.some(({ suffix: sx }) => suffix.includes(sx))) {
+              for (const subset of SHAPE_SUBSETS) {
+                let out: SFn | null = alt;
+                let sx = '';
+                for (const sp2 of subset) {
+                  out = out === null ? null : (sp2.apply(out) ?? null);
+                  sx += sp2.suffix;
+                }
+                if (out !== null && out !== alt) {
+                  assertResolved(out);
+                  assertDerefsTyped(out);
+                  spellings.push({ suffix: `${suffix}${sx}`, source: backend.emit(out), ...refsOf(out) });
+                }
               }
             }
           } catch (e) {
@@ -467,7 +488,11 @@ export function enumerateCandidates(
         // `/argbase` — name a call's argument bases before the call (l3/argbase.ts). A lever on the
         // same footing as the others: the primary inline spelling stays in the list, so the differ
         // referees and this can never cost a match.
-        respell('/initfirst', () => initFirstGuards(sfn));
+        for (const subset of SHAPE_SUBSETS) {
+          respell(subset.map((x) => x.suffix).join(''), () =>
+            subset.reduce<SFn | null>((acc, x) => (acc === null ? null : (x.apply(acc) ?? null)), sfn),
+          );
+        }
         respell('/argbase', () => materializeArgBases(sfn));
         // `/volatile` — declare a pointer local holding a NUMERIC address as pointing to volatile
         // data (l3/volatileptr.ts). A raw constant has no declaration anywhere, so the original
@@ -526,7 +551,7 @@ export function enumerateCandidates(
           return r === sfn ? null : r;
         };
         respell('/livebase', livebase);
-        respell('/livebase/volatile', () => {
+        const livebaseVolatile = (): SFn | null => {
           const r = livebase();
           if (!r) {
             return null;
@@ -536,6 +561,18 @@ export function enumerateCandidates(
           const before = new Set(sfn.locals.map((l) => l.name));
           const created = new Set(r.locals.filter((l) => !before.has(l.name)).map((l) => l.name));
           return volatilePtrLocals(r, created);
+        };
+        respell('/livebase/volatile', livebaseVolatile);
+        // The livebase × indexed PAIRINGS — the row-demanded lever products the POLICY clause
+        // anticipates: a hoisted MMIO base and a re-indexed walk live in one function (the
+        // frame-copy + DMA shape), and the joint spelling is reachable from neither lever alone.
+        respell('/livebase/indexed', () => {
+          const r = livebase();
+          return r ? reindexWalks(r) : null;
+        });
+        respell('/livebase/volatile/indexed', () => {
+          const r = livebaseVolatile();
+          return r ? reindexWalks(r) : null;
         });
         // `/mulfirst` — product-first commutative sums (l3/mulfirst.ts): IDO/mwcc schedule the
         // independent operand's load above the product's mflo/mullw, so def order re-spells a

@@ -48,7 +48,7 @@
 //   • n is never assigned in the function (a moving bound has no single trip count).
 // Everything else declines — the function keeps its countdown spelling, no candidate emitted.
 import { IrType, T } from '../ir/types';
-import { Expr, SFn, Stmt, mapExprChildren, stmtExprs } from './ast';
+import { Expr, SFn, Stmt, mapExprChildren, mapStmtExprs, stmtExprs } from './ast';
 
 interface WalkLoop {
   p: string; // the pointer induction var
@@ -358,9 +358,149 @@ function reindexStmt(s: Stmt, walk: WalkLoop, iv: string): Stmt | null {
  *  set too, inertly: the volatile lever marks only declared locals), v2 the walk pointers
  *  themselves — the locals the /indexed/volatile
  *  product (rank.ts) narrows the volatile lever to. */
+
+// ── v3: the up-counting BYTE walk with an EXPRESSION base ────────────────────────────────────
+//
+//     p = (u8 *)(EXPR); do { … *p … ; p = p + 1; i = i + 1; } while (i < n);
+//
+// The loop already carries its own integer counter, so the walk pointer is pure strength
+// reduction: deleting its init and step and spelling the deref as BASE[i + REST] — the sole
+// bare-var addend of EXPR as the index base, the counter FIRST in the index sum — is the
+// indexed source the compiler reduces back. v3 SCOPE (decline over approximate):
+//   • `p` is a `u8 *` (byte walk: the index and the byte arithmetic agree by construction —
+//     a wider element would need the REST addends rescaled from bytes to elements);
+//   • the init `p = EXPR` immediately precedes the `dowhile`; EXPR (casts stripped) flattens
+//     over `+` into exactly ONE bare-var addend (the base — itself not a non-byte pointer, or
+//     `base[i]` would stride its element) plus pure invariant addends (var/const/mul/shl trees
+//     whose vars the body never assigns);
+//   • the body's statements include exactly one `p = p + 1` and one `i = i + 1` with integer
+//     `i` read by the do-while condition; `p` is mentioned nowhere else in the function beyond
+//     its init, its step, and derefs AT OFFSET 0 inside this body, and not by the condition.
+function tryExprWalk(
+  prev: Stmt | undefined,
+  dw: Stmt & { k: 'dowhile' },
+  ptrVars: Map<string, IrType>,
+  fnBody: Stmt[],
+  localTypes: Map<string, IrType>,
+): Stmt | null {
+  if (prev?.k !== 'assign' || !ptrVars.has(prev.name)) {
+    return null;
+  }
+  const p = prev.name;
+  const pT = ptrVars.get(p)!;
+  if (pT.kind !== 'ptr' || pT.to.kind !== 'int' || pT.to.width !== 8) {
+    return null;
+  }
+  if (!derefWidths([dw], p).every((w) => w === 1)) {
+    return null;
+  }
+  // EXPR decomposition
+  let expr: Expr = prev.value;
+  while (expr.k === 'cast') {
+    expr = expr.e;
+  }
+  const addends: Expr[] = [];
+  const flatten = (e: Expr): void => {
+    if (e.k === 'bin' && e.op === '+') {
+      flatten(e.l);
+      flatten(e.r);
+    } else {
+      addends.push(e);
+    }
+  };
+  flatten(expr);
+  const bare = addends.filter((a): a is Extract<Expr, { k: 'var' }> => a.k === 'var');
+  const rest = addends.filter((a) => a.k !== 'var');
+  if (bare.length !== 1) {
+    return null;
+  }
+  const base = bare[0] as Extract<Expr, { k: 'var' }>;
+  const baseT = localTypes.get(base.name);
+  if (baseT?.kind === 'ptr' && !(baseT.to.kind === 'int' && baseT.to.width === 8)) {
+    return null; // a wider pointer base strides its element under [i]
+  }
+  const pure = (e: Expr): boolean =>
+    e.k === 'var' || e.k === 'const'
+      ? true
+      : e.k === 'bin' && (e.op === '*' || e.op === '+' || e.op === '<<')
+        ? pure(e.l) && pure(e.r)
+        : e.k === 'cast'
+          ? pure(e.e)
+          : false;
+  const assignedIn = (stmts: Stmt[], name: string): boolean => stmts.some((st) => stmtAssigns(st, name));
+  const restVars = new Set<string>();
+  const collectVars = (e: Expr): void => {
+    if (e.k === 'var') {
+      restVars.add(e.name);
+    }
+    mapExprChildren(e, (c) => {
+      collectVars(c);
+      return c;
+    });
+  };
+  rest.forEach(collectVars);
+  restVars.add(base.name);
+  if (!rest.every(pure) || [...restVars].some((n) => assignedIn(dw.body, n))) {
+    return null;
+  }
+  // the steps and the counter
+  const isIncOf = (st: Stmt, name?: string): string | null =>
+    st.k === 'assign' &&
+    st.value.k === 'bin' &&
+    st.value.op === '+' &&
+    st.value.l.k === 'var' &&
+    st.value.l.name === st.name &&
+    st.value.r.k === 'const' &&
+    st.value.r.value === 1 &&
+    (name === undefined || st.name === name)
+      ? st.name
+      : null;
+  const pStepIdx = dw.body.findIndex((st) => isIncOf(st, p) !== null);
+  if (pStepIdx < 0) {
+    return null;
+  }
+  const counters = dw.body.map((st) => isIncOf(st)).filter((n): n is string => n !== null && n !== p);
+  if (counters.length !== 1) {
+    return null;
+  }
+  const iv = counters[0];
+  const ivT = localTypes.get(iv);
+  if (ivT !== undefined && ivT.kind !== 'int') {
+    return null;
+  }
+  if (!mentionsVar(dw.cond, iv) || mentionsVar(dw.cond, p)) {
+    return null;
+  }
+  // rewrite the derefs, then verify nothing of `p` survives
+  const idxOf = (): Expr => rest.reduce<Expr>((acc, r) => ({ k: 'bin', op: '+', l: acc, r }), { k: 'var', name: iv });
+  let respelled = true;
+  const rewriteExpr = (e: Expr): Expr => {
+    const m = mapExprChildren(e, rewriteExpr);
+    if (m.k === 'index' && m.base.k === 'var' && m.base.name === p) {
+      if (m.idx.k !== 'const' || m.idx.value !== 0) {
+        respelled = false;
+        return m;
+      }
+      return { ...m, base: { k: 'var', name: base.name }, idx: idxOf() };
+    }
+    return m;
+  };
+  const body = dw.body.filter((_, k) => k !== pStepIdx).map((st) => mapStmtExprs(st, rewriteExpr));
+  const dw2: Stmt = { ...dw, body };
+  if (!respelled || countMentions(fnBody, p) !== countMentions([prev], p) + countMentions([dw], p)) {
+    return null;
+  }
+  if (countMentions([dw2], p) !== 0) {
+    return null;
+  }
+  return dw2;
+}
+
 export function reindexWalks(sfn: SFn, keptWalks?: Set<string>): SFn | null {
   const ptrVars = new Map<string, IrType>();
+  const localTypes = new Map<string, IrType>();
   for (const v of [...sfn.params, ...sfn.locals]) {
+    localTypes.set(v.name, v.type);
     if (v.type.kind === 'ptr') {
       ptrVars.set(v.name, v.type);
     }
@@ -464,6 +604,18 @@ export function reindexWalks(sfn: SFn, keptWalks?: Set<string>): SFn | null {
             continue;
           }
           retireIv();
+        }
+      }
+      // v3 — the up-counting byte walk with an expression base: `p = (u8 *)(EXPR)` immediately
+      // ahead of a counter-carried do-while (see tryExprWalk)
+      if (s.k === 'dowhile') {
+        const prev = out[out.length - 1];
+        const dw2 = tryExprWalk(prev, s, ptrVars, sfn.body, localTypes);
+        if (dw2) {
+          out.pop(); // the walk init is subsumed by the indexed spelling
+          out.push(recurse(dw2));
+          fired++;
+          continue;
         }
       }
       // the guarded countdown (v2 — see the header): an `if` whose one arm is skip-copies C and
