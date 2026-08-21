@@ -55,7 +55,7 @@ import { type TargetDescription, structureOptionsFor } from './target';
  *  materialization or merging, so it cannot unlock a function the primary declines; the
  *  exemption is stated here rather than left implicit in a missing `||` arm. */
 interface StructuringAxis {
-  flag: 'reread' | 'inplace' | 'mergeNames' | 'addrHome' | 'exprHome';
+  flag: 'reread' | 'inplace' | 'mergeNames' | 'addrHome' | 'exprHome' | 'unsCmp';
   suffix: string;
   options: (on: boolean) => Parameters<typeof structureChecked>[1];
   probeGate?: (probe: Fn, defs: Map<Value, Op>) => boolean;
@@ -136,6 +136,20 @@ const STRUCTURING_AXES: readonly StructuringAxis[] = [
     suffix: '/expr-home',
     options: (on) => ({ homeLoopExprs: on }),
     variantGate: hasLoopSharedPureValue,
+    strip: true,
+  },
+  // `/uns-cmp` — spell unsigned compares unsigned (structure.ts unsignedCompareSpelling): an
+  // icmp_u* operand takes a (u32) cast where the rendered operands do not guarantee the
+  // unsignedness, and a mixed-claimant declaration reconciles to u32 when nothing under the
+  // name needs signed. Which side the source spelled is genuinely ambiguous: a signed spelling
+  // that byte-matched was PROVED non-negative by the compiler (only then does it emit the
+  // unsigned branch from a signed compare), and emission's provable set is smaller than the
+  // compiler's. Gated on the function having an unsigned compare at all.
+  {
+    flag: 'unsCmp',
+    suffix: '/uns-cmp',
+    options: (on) => ({ unsignedCompareSpelling: on }),
+    probeGate: (probe) => probe.blocks.some((b) => b.ops.some((op) => op.opcode.startsWith('icmp_u'))),
     strip: true,
   },
 ];
@@ -406,6 +420,7 @@ export function enumerateCandidates(
     mergeNames: false,
     addrHome: false,
     exprHome: false,
+    unsCmp: false,
   }));
   for (const ax of STRUCTURING_AXES) {
     if (ax.probeGate === undefined || ax.probeGate(probe, probeDefs)) {

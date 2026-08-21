@@ -714,6 +714,13 @@ export interface StructureOptions {
   // register the compiler holds across the iterations. Off by default; rank.ts enumerates the ON
   // spelling as the `/expr-home` axis — see analysis.ts AnalyzeOptions.
   homeLoopExprs?: boolean;
+  // Spell unsigned compares unsigned: cast an icmp_u* operand where the rendered operands do not
+  // guarantee it, and reconcile a mixed-claimant declaration to u32 when nothing under the name
+  // needs signed. Off by default: a signed spelling that byte-matched was PROVED non-negative by
+  // the compiler (it emits the unsigned branch from signed compares only then), so which spelling
+  // the source used is genuinely ambiguous at emission — rank.ts enumerates the ON spelling as
+  // the `/uns-cmp` axis and the differ referees.
+  unsignedCompareSpelling?: boolean;
   // Merge two variables that a merge copy would join, when the values under them never interfere
   // (structure/namecoalesce.ts). Off by default; rank.ts enumerates the ON spelling as the
   // `/merge-names` axis. Which variables the compiler's own coalescer shared is not derivable from
@@ -786,6 +793,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     materializeJoinFeeds = false,
     homeSharedAddresses = false,
     homeLoopExprs = false,
+    unsignedCompareSpelling = false,
     coalesceMergeNames = false,
     onGap = 'strict',
     symbols,
@@ -1581,7 +1589,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // flip is byte-invariant everywhere but the compares it corrects (+/-/*/&/|/^/<< are
   // sign-blind, `>>` self-corrects via the backend's shiftOperand cast, division is evidence-
   // blocked).
-  {
+  if (unsignedCompareSpelling) {
     const SIGNED_USE = new Set(['icmp_slt', 'icmp_sle', 'icmp_sgt', 'icmp_sge', 'sdiv', 'smod', 'shr_s']);
     const signedEvidence = new Set<Value>();
     for (const b of fn.blocks) {
@@ -1893,6 +1901,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // value-faithful and the compiler already picks the unsigned branch itself. ==/!= are
       // sign-agnostic and icmp_s* keeps its documented residual above.
       if (
+        unsignedCompareSpelling &&
         /^icmp_u/.test(d.opcode) &&
         renderedIntSignedness(l, vtEnv) !== false &&
         renderedIntSignedness(r, vtEnv) !== false &&

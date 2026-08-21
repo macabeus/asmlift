@@ -1,8 +1,9 @@
-// Unsigned-compare rendering (structure.ts's CMP_TO_BIN site): an icmp_u* whose operands both
-// render as signed-promoting C compiles to a signed compare the machine never did — the u32-ness
-// dies when a local declares with its first claimant's s32 type or when the operand is an inline
-// `int`-typed tree. When neither side provably promotes unsigned, one operand takes a (u32) cast
-// (the side whose recovered value type is unsigned).
+// The /uns-cmp axis (structure.ts unsignedCompareSpelling): an icmp_u* whose operands both
+// render as signed-promoting C compiles to a signed compare — the u32-ness dies when a local
+// declares with its first claimant's s32 type or when the operand is an inline `int`-typed
+// tree. With the axis on, one operand takes a (u32) cast (the side whose recovered value type
+// is unsigned) and a mixed-claimant declaration reconciles to u32. Off by default: a signed
+// spelling that byte-matched was proved non-negative by the compiler, so the differ referees.
 //
 // The refusals are what these tests pin: a provably-unsigned operand leaves the spelling alone,
 // and so does a compare whose operands both provably sit in [0, 2^31) — `(u8)x > 4` is
@@ -16,11 +17,11 @@ import { verify } from '../src/ir/verify';
 import { recoverTypes } from '../src/raise/recover';
 import { structure } from '../src/structure/structure';
 
-const emit = (ir: string): string => {
+const emit = (ir: string, on = true): string => {
   const fn = parse(ir);
   verify(fn);
   recoverTypes(fn);
-  return cBackend.emit(structure(fn));
+  return cBackend.emit(structure(fn, { unsignedCompareSpelling: on }));
 };
 
 // A u32 counter merged through a name an s32 value claims first: the loop param's compare
@@ -157,4 +158,9 @@ const RECONS = RECON.replace('fn recon', 'fn recons').replace(
 test('signed-use evidence blocks the flip', () => {
   const src = emit(RECONS);
   expect(src).not.toMatch(/u32 v\d+;/);
+});
+
+test('off by default: the axis-off spelling keeps the uncast signed rendering', () => {
+  expect(emit(LOOPBOUND, false)).not.toContain('(u32)');
+  expect(emit(RECON, false)).not.toMatch(/u32 v\d+;/);
 });
