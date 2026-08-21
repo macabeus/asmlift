@@ -496,6 +496,47 @@ describe('v3 — expression-base byte walk', () => {
     );
   });
 
+  test('refused: a counter starting anywhere but 0 (the index counts completed steps)', () => {
+    const f = mkFn(init, walkBody());
+    (f.body[0] as Extract<Stmt, { k: 'assign' }>).value = cn(5);
+    expect(reindexWalks(f)).toBeNull();
+  });
+
+  test('refused: a step ahead of a deref (the *++p walk reads the NEXT element)', () => {
+    const preStep: Stmt[] = [
+      inc('p'),
+      { k: 'store', lval: { k: 'index', base: v('a1'), idx: v('i'), width: 1, signed: false }, value: derefP },
+      inc('i'),
+    ];
+    expect(reindexWalks(mkFn(init, preStep))).toBeNull();
+  });
+
+  test('refused: derefs straddling the step collapse two addresses onto one index', () => {
+    const straddle: Stmt[] = [
+      { k: 'store', lval: { k: 'index', base: v('a1'), idx: v('i'), width: 1, signed: false }, value: derefP },
+      inc('p'),
+      { k: 'store', lval: { k: 'index', base: v('a2'), idx: v('i'), width: 1, signed: false }, value: derefP },
+      inc('i'),
+    ];
+    expect(reindexWalks(mkFn(init, straddle))).toBeNull();
+  });
+
+  test('refused: a second write to the counter hiding in a nested arm', () => {
+    const reset: Stmt = {
+      k: 'if',
+      cond: { k: 'bin', op: '==', l: v('i'), r: cn(3) },
+      then: [{ k: 'assign', name: 'i', value: cn(1) }],
+      else: [],
+    };
+    const body: Stmt[] = [
+      { k: 'store', lval: { k: 'index', base: v('a1'), idx: v('i'), width: 1, signed: false }, value: derefP },
+      reset,
+      inc('p'),
+      inc('i'),
+    ];
+    expect(reindexWalks(mkFn(init, body))).toBeNull();
+  });
+
   test('refused: two bare-var addends leave the base ambiguous', () => {
     const twoVars: Expr = {
       k: 'cast',

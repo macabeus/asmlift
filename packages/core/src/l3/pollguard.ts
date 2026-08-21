@@ -10,11 +10,12 @@
 // form the source spelled is unrecoverable from the bytes; both are emitted and the differ
 // referees.
 //
-// SCOPE (decline over approximate): only a `dowhile` with an EMPTY body regrows a guard. For a
-// pure condition the wrap is exactly equivalent; for a volatile poll the C-abstract semantics
-// gain one read on entry — a distinction the busy-wait discards by construction (it reads until
-// a bit clears; the compiler provably emits identical bytes) and the shape real GBA sources
-// spell. Declines (null) when no empty do-while exists.
+// SCOPE (decline over approximate): only a `dowhile` with an EMPTY body regrows a guard —
+// there the two forms have IDENTICAL evaluation traces (each evaluates the condition until its
+// first falsy result; the regrown guard IS the first bottom-test, not an extra one), so
+// volatile reads, calls, any effect in the condition all count the same. A NON-empty body is
+// where the forms genuinely differ (the body runs at least once vs at least zero times), which
+// is why it never wraps. Declines (null) when no empty do-while exists.
 import type { SFn, Stmt } from './ast';
 
 export function pollGuards(sfn: SFn): SFn | null {

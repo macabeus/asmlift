@@ -47,6 +47,9 @@
 //     tail, which a `continue` skips, but a `for`'s inc runs: the two shapes genuinely differ;
 //   • n is never assigned in the function (a moving bound has no single trip count).
 // Everything else declines — the function keeps its countdown spelling, no candidate emitted.
+//
+// v3 SCOPE — the up-counting BYTE walk with an EXPRESSION base (`p = (u8 *)(EXPR)` ahead of a
+// counter-carried do-while): full rules at `tryExprWalk` below.
 import { IrType, T } from '../ir/types';
 import { Expr, SFn, Stmt, mapExprChildren, mapStmtExprs, stmtExprs } from './ast';
 
@@ -198,14 +201,28 @@ function stmtMentions(s: Stmt, name: string): boolean {
 }
 
 /** `assign(p, p + 1)` on a pointer-typed `p`? */
-function isUnitStep(s: Stmt, ptrVars: Map<string, IrType>): string | null {
-  if (s.k !== 'assign' || !ptrVars.has(s.name)) {
+/** `x = x + 1` on ANY variable — the assigned name, or null. */
+function isUnitIncrement(s: Stmt): string | null {
+  if (s.k !== 'assign') {
     return null;
   }
   const v = s.value;
   const ok =
     v.k === 'bin' && v.op === '+' && v.l.k === 'var' && v.l.name === s.name && v.r.k === 'const' && v.r.value === 1;
   return ok ? s.name : null;
+}
+
+function isUnitStep(s: Stmt, ptrVars: Map<string, IrType>): string | null {
+  const n = isUnitIncrement(s);
+  return n !== null && ptrVars.has(n) ? n : null;
+}
+
+/** ADVERSARIALLY LEARNED (reproduced as an uninitialized-read escape): the walk pointer must be
+ *  mentioned NOWHERE in the function outside its init and its loop — counted GLOBALLY, because a
+ *  suffix-only scan missed reads after an ENCLOSING construct, leaving the deleted init's var
+ *  read uninitialized. One spelling for every recognizer. */
+function confinedToWalk(fnBody: Stmt[], name: string, initMentions: number, loop: Stmt): boolean {
+  return countMentions(fnBody, name) === initMentions + countMentions([loop], name);
 }
 
 /** Rewrite every deref of `p` into an indexed access off `base`, and every OTHER mention of `p`
@@ -351,14 +368,6 @@ function reindexStmt(s: Stmt, walk: WalkLoop, iv: string): Stmt | null {
   }
 }
 
-/** Try the walk→index re-spelling on one function. Returns the transformed COPY when at least
- *  one loop re-spelled, or null (no candidate) when nothing fired — callers emit the extra
- *  candidate only on non-null. Pure: never mutates the input SFn. `keptWalks` collects the names
- *  of the pointers each fired loop kept as its base — v1 the walk's base (a param lands in the
- *  set too, inertly: the volatile lever marks only declared locals), v2 the walk pointers
- *  themselves — the locals the /indexed/volatile
- *  product (rank.ts) narrows the volatile lever to. */
-
 // ── v3: the up-counting BYTE walk with an EXPRESSION base ────────────────────────────────────
 //
 //     p = (u8 *)(EXPR); do { … *p … ; p = p + 1; i = i + 1; } while (i < n);
@@ -377,13 +386,15 @@ function reindexStmt(s: Stmt, walk: WalkLoop, iv: string): Stmt | null {
 //     `i` read by the do-while condition; `p` is mentioned nowhere else in the function beyond
 //     its init, its step, and derefs AT OFFSET 0 inside this body, and not by the condition.
 function tryExprWalk(
+  prev2: Stmt | undefined,
   prev: Stmt | undefined,
   dw: Stmt & { k: 'dowhile' },
   ptrVars: Map<string, IrType>,
   fnBody: Stmt[],
   localTypes: Map<string, IrType>,
+  volatileLocals: ReadonlySet<string>,
 ): Stmt | null {
-  if (prev?.k !== 'assign' || !ptrVars.has(prev.name)) {
+  if (prev?.k !== 'assign' || !ptrVars.has(prev.name) || volatileLocals.has(prev.name)) {
     return null;
   }
   const p = prev.name;
@@ -444,31 +455,39 @@ function tryExprWalk(
     return null;
   }
   // the steps and the counter
-  const isIncOf = (st: Stmt, name?: string): string | null =>
-    st.k === 'assign' &&
-    st.value.k === 'bin' &&
-    st.value.op === '+' &&
-    st.value.l.k === 'var' &&
-    st.value.l.name === st.name &&
-    st.value.r.k === 'const' &&
-    st.value.r.value === 1 &&
-    (name === undefined || st.name === name)
-      ? st.name
-      : null;
-  const pStepIdx = dw.body.findIndex((st) => isIncOf(st, p) !== null);
-  if (pStepIdx < 0) {
+  const isIncOf = (st: Stmt, name?: string): string | null => {
+    const n = isUnitIncrement(st);
+    return n !== null && (name === undefined || n === name) ? n : null;
+  };
+  // BOTH steps as the body's contiguous TAIL (either order): every deref then runs with `i`
+  // completed steps equal to `p`'s, which is what `BASE[i + REST]` states. A step anywhere
+  // earlier (the `*++p` walk, a deref straddling the step) reads a different address.
+  const tail = dw.body.slice(-2);
+  const tailIncs = tail.map((st) => isIncOf(st)).filter((n): n is string => n !== null);
+  if (tailIncs.length !== 2 || !tailIncs.includes(p)) {
     return null;
   }
-  const counters = dw.body.map((st) => isIncOf(st)).filter((n): n is string => n !== null && n !== p);
-  if (counters.length !== 1) {
+  const iv = tailIncs.find((n) => n !== p);
+  if (iv === undefined) {
     return null;
   }
-  const iv = counters[0];
+  const pStepIdx = dw.body.length - 2 + tail.findIndex((st) => isIncOf(st, p) !== null);
   const ivT = localTypes.get(iv);
   if (ivT !== undefined && ivT.kind !== 'int') {
     return null;
   }
   if (!mentionsVar(dw.cond, iv) || mentionsVar(dw.cond, p)) {
+    return null;
+  }
+  // The counter STARTS AT ZERO (the adjacent `i = 0` init — `BASE[i + REST]` counts completed
+  // steps from the walk's own start) and its ONLY write anywhere in the body is the tail step.
+  if (prev2?.k !== 'assign' || prev2.name !== iv || prev2.value.k !== 'const' || prev2.value.value !== 0) {
+    return null;
+  }
+  if (dw.body.slice(0, -2).some((st) => stmtAssigns(st, iv)) || tail.filter((st) => isIncOf(st, iv)).length !== 1) {
+    return null;
+  }
+  if (volatileLocals.has(iv) || [...restVars].some((n) => volatileLocals.has(n))) {
     return null;
   }
   // rewrite the derefs, then verify nothing of `p` survives
@@ -487,7 +506,7 @@ function tryExprWalk(
   };
   const body = dw.body.filter((_, k) => k !== pStepIdx).map((st) => mapStmtExprs(st, rewriteExpr));
   const dw2: Stmt = { ...dw, body };
-  if (!respelled || countMentions(fnBody, p) !== countMentions([prev], p) + countMentions([dw], p)) {
+  if (!respelled || !confinedToWalk(fnBody, p, countMentions([prev], p), dw)) {
     return null;
   }
   if (countMentions([dw2], p) !== 0) {
@@ -496,9 +515,18 @@ function tryExprWalk(
   return dw2;
 }
 
+/** Try the walk→index re-spelling on one function. Returns the transformed COPY when at least
+ *  one loop re-spelled, or null (no candidate) when nothing fired — callers emit the extra
+ *  candidate only on non-null. Pure: never mutates the input SFn. `keptWalks` collects the names
+ *  of the pointers each fired loop kept as its base — v1 the walk's base (a param lands in the
+ *  set too, inertly: the volatile lever marks only declared locals), v2 the walk pointers
+ *  themselves — the locals the /indexed/volatile product (rank.ts) narrows the volatile lever
+ *  to. A v3 loop contributes nothing: it DELETES its pointer, and its base is qualified through
+ *  the /livebase pairings instead. */
 export function reindexWalks(sfn: SFn, keptWalks?: Set<string>): SFn | null {
   const ptrVars = new Map<string, IrType>();
   const localTypes = new Map<string, IrType>();
+  const volatileLocals = new Set(sfn.locals.filter((l) => l.volatile === true).map((l) => l.name));
   for (const v of [...sfn.params, ...sfn.locals]) {
     localTypes.set(v.name, v.type);
     if (v.type.kind === 'ptr') {
@@ -519,13 +547,11 @@ export function reindexWalks(sfn: SFn, keptWalks?: Set<string>): SFn | null {
   //   • base and p must be pointers of the SAME element size, and every deref of p must read
   //     exactly that size — otherwise the walk (strides p's pointee) and the indexed form
   //     (strides base's) read different addresses;
-  //   • p must not be mentioned ANYWHERE in the function outside the init + the loop — the
-  //     suffix-only check missed reads after an ENCLOSING construct, leaving the deleted init's
-  //     var read uninitialized. Counted globally: total mentions == init + loop mentions.
+  //   • confinedToWalk — the global mention accounting, shared with v3.
   const soundWalk = (walk: WalkLoop, initMentions: number, loop: Stmt): boolean =>
     walk.p !== walk.base &&
     strideAgrees(ptrVars.get(walk.p), ptrVars.get(walk.base) ?? paramType(walk.base), derefWidths([loop], walk.p)) &&
-    countMentions(sfn.body, walk.p) === initMentions + countMentions([loop], walk.p);
+    confinedToWalk(sfn.body, walk.p, initMentions, loop);
   const paramType = (n: string): IrType | undefined => sfn.params.find((x) => x.name === n)?.type;
 
   // walk a statement LIST so the `while` shape can see its preceding init statement
@@ -610,7 +636,8 @@ export function reindexWalks(sfn: SFn, keptWalks?: Set<string>): SFn | null {
       // ahead of a counter-carried do-while (see tryExprWalk)
       if (s.k === 'dowhile') {
         const prev = out[out.length - 1];
-        const dw2 = tryExprWalk(prev, s, ptrVars, sfn.body, localTypes);
+        const prev2 = out[out.length - 2];
+        const dw2 = tryExprWalk(prev2, prev, s, ptrVars, sfn.body, localTypes, volatileLocals);
         if (dw2) {
           out.pop(); // the walk init is subsumed by the indexed spelling
           out.push(recurse(dw2));

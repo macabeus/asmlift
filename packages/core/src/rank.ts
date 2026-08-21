@@ -44,8 +44,9 @@ import { type TargetDescription, structureOptionsFor } from './target';
  * `->field_N` and `[idx]` compile identically, so the differ cannot referee between them. */
 /** The statement-shape products (rank's second sanctioned product mechanism): each entry is a
  *  statement-order/shape re-spelling orthogonal to every representation lever, derived onto every
- *  spelling as sanctioned in the POLICY note at the respell site. Non-empty subsets compose in
- *  table order. */
+ *  spelling as sanctioned in the POLICY note at the respell site. Each shape fires alone, plus
+ *  all of them together in table order — not the full subset lattice; a third entry decides
+ *  whether its pairs earn a place. */
 const SHAPE_PRODUCTS: { suffix: string; apply: (sfn: SFn) => SFn | null }[] = [
   { suffix: '/initfirst', apply: initFirstGuards },
   { suffix: '/pollguard', apply: pollGuards },
@@ -428,17 +429,19 @@ export function enumerateCandidates(
         // that declines by throwing — Pascal loud-fails unspellable shapes — drops the candidate,
         // never aborts the enumeration). A dropped re-spelling loses nothing: the primary remains.
         //
-        // POLICY: re-spellings derive from the BASE spelling only — levers do not compose
-        // (an /indexed + /regcopy product is deferred until a row demands it). TWO product
-        // mechanisms are sanctioned, each with its own admission bar. Products with /volatile
-        // go only onto a lever whose re-spelling CENTRES ON a numeric-address pointer local —
-        // the joint spelling (the lever plus volatile on that local) is reachable from neither
-        // lever alone, each product narrows /volatile to the lever's own locals
-        // (volatilePtrLocals' `only`), and each needed a row to demand it. And /initfirst is
-        // derived onto EVERY spelling (see the respell body): statement order against a guard is
-        // orthogonal to what any representation lever changes — the same kind of independent
-        // dimension as signedness — so it composes as an axis rather than a pairing; a third
-        // blanket product needs the same argument, not just a row. And a lever must
+        // POLICY: re-spellings derive from the BASE spelling only — levers do not compose by
+        // default. THREE product mechanisms are sanctioned, each with its own admission bar.
+        // Products with /volatile go only onto a lever whose re-spelling CENTRES ON a
+        // numeric-address pointer local — the joint spelling is reachable from neither lever
+        // alone, each product narrows /volatile to the lever's own locals (volatilePtrLocals'
+        // `only`), and each needed a row to demand it. The SHAPE products (SHAPE_PRODUCTS) are
+        // derived onto EVERY spelling: statement order/shape is orthogonal to what any
+        // representation lever changes — the same kind of independent dimension as signedness —
+        // so they compose as an axis rather than a pairing; a third blanket product needs the
+        // same argument, not just a row. And a specific LEVER PAIRING is admitted when a row
+        // demands it AND the joint spelling is reachable from neither lever alone (the
+        // /livebase × /indexed pairings below — a hoisted MMIO base and a re-indexed walk in one
+        // function); anything else stays un-composed. And a lever must
         // PRESERVE SEMANTICS by construction: the differ referees byte-exactness (a wrong candidate
         // can never fake a score-0 match), but on a NONMATCH row the best-scoring source is shown
         // to the user — a semantically-wrong re-spelling there is plausible-but-wrong output, the
@@ -563,9 +566,9 @@ export function enumerateCandidates(
           return volatilePtrLocals(r, created);
         };
         respell('/livebase/volatile', livebaseVolatile);
-        // The livebase × indexed PAIRINGS — the row-demanded lever products the POLICY clause
-        // anticipates: a hoisted MMIO base and a re-indexed walk live in one function (the
-        // frame-copy + DMA shape), and the joint spelling is reachable from neither lever alone.
+        // The livebase × indexed PAIRINGS — the third sanctioned product kind (see POLICY):
+        // row-demanded, and the joint spelling is reachable from neither lever alone (the
+        // frame-copy + DMA shape).
         respell('/livebase/indexed', () => {
           const r = livebase();
           return r ? reindexWalks(r) : null;
