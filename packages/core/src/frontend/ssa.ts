@@ -16,7 +16,7 @@
 // `irBlocks`, args left empty — phi wiring appends them), then call `markFilled(b)`. When all
 // blocks are filled, call `finish()` to remove trivial phis.
 import { Block, Fn, Op, Value, mkOp, mkValue } from '../ir/core';
-import { simplifyTrivialPhis } from '../ir/simplify';
+import { pruneDeadParams, simplifyTrivialPhis } from '../ir/simplify';
 import { T } from '../ir/types';
 import { FrontendUnsupportedError } from './errors';
 
@@ -308,6 +308,15 @@ export function makeSsaBuilder(
         });
       }
       simplifyTrivialPhis(fn, (p) => {
+        phiBlock.delete(p);
+        phiKey.delete(p);
+      });
+      // Then the phis nothing reads at all — a register two paths leave holding different junk
+      // (a loop counter after its last use, a scratch the epilogue overwrites) still joins as a
+      // phi, and a dead phi is not junk downstream: its edge args become post-loop copies in the
+      // emitted C and block gates keyed on "this exit carries nothing". Order matters only for
+      // economy: trivial-phi removal can orphan a phi's last reader, never the reverse.
+      pruneDeadParams(fn, (p) => {
         phiBlock.delete(p);
         phiKey.delete(p);
       });
