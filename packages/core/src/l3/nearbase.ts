@@ -7,7 +7,7 @@
 // re-spells every deref base in a cluster as an offset from a `u8 *` base local holding the
 // cluster's lowest address, and the differ referees:
 //
-//     *(u16 *)0x03001048   →   u8 *b = (u8 *)0x03001000;  *(u16 *)(b + 72)
+//     *(u16 *)0x0300104A   →   u8 *b = (u8 *)0x03001048;  *(u16 *)(b + 2)
 //
 // SCOPE (decline over approximate): only CONST deref bases (an integer used in arithmetic is
 // not an address and never rewrites; a struct-pointer cast base and everything inside a

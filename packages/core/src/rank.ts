@@ -444,11 +444,9 @@ export function enumerateCandidates(
             assertDerefsTyped(alt);
             spellings.push({ suffix, source: backend.emit(alt), ...refsOf(alt) });
             // `/initfirst` (l3/initfirst.ts) is derived onto EVERY spelling — the second
-            // sanctioned product after /volatile, on the same argument: a loop init's position
-            // against its guard is a statement-order fact orthogonal to what any representation
-            // lever changes, so the joint spelling is reachable from neither alone (sizehome's
-            // match is livebase + volatile + initfirst). It fires only where a guard+init shape
-            // exists; everywhere else the product declines and costs nothing.
+            // sanctioned product mechanism (the POLICY note above carries the admission
+            // argument). It fires only where a guard+init shape exists; everywhere else the
+            // product declines and costs nothing.
             if (!suffix.endsWith('/initfirst')) {
               const fi = initFirstGuards(alt);
               if (fi) {
