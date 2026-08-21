@@ -415,14 +415,16 @@ export function enumerateCandidates(
         // never aborts the enumeration). A dropped re-spelling loses nothing: the primary remains.
         //
         // POLICY: re-spellings derive from the BASE spelling only — levers do not compose
-        // (an /indexed + /regcopy product is deferred until a row demands it). Products with
-        // /volatile are the ONE sanctioned exception, and only onto a lever whose re-spelling
-        // CENTRES ON a numeric-address pointer local — the joint spelling (the lever plus
-        // volatile on that local) is reachable from neither lever alone. Each product narrows
-        // /volatile to the lever's own locals (volatilePtrLocals' `only`): /indexed to the walk
-        // bases it kept, /livebase to the locals its hoist created — qualifying any OTHER local
-        // would be the general composition this policy forbids, since the primary's /volatile
-        // already asks the question for those. Each product needed a row to demand it. And a lever must
+        // (an /indexed + /regcopy product is deferred until a row demands it). TWO product
+        // mechanisms are sanctioned, each with its own admission bar. Products with /volatile
+        // go only onto a lever whose re-spelling CENTRES ON a numeric-address pointer local —
+        // the joint spelling (the lever plus volatile on that local) is reachable from neither
+        // lever alone, each product narrows /volatile to the lever's own locals
+        // (volatilePtrLocals' `only`), and each needed a row to demand it. And /initfirst is
+        // derived onto EVERY spelling (see the respell body): statement order against a guard is
+        // orthogonal to what any representation lever changes — the same kind of independent
+        // dimension as signedness — so it composes as an axis rather than a pairing; a third
+        // blanket product needs the same argument, not just a row. And a lever must
         // PRESERVE SEMANTICS by construction: the differ referees byte-exactness (a wrong candidate
         // can never fake a score-0 match), but on a NONMATCH row the best-scoring source is shown
         // to the user — a semantically-wrong re-spelling there is plausible-but-wrong output, the
@@ -543,8 +545,10 @@ export function enumerateCandidates(
         respell('/mulfirst', () => mulFirstSums(sfn));
         // `/nearbase` — neighbor absolute addresses derive from one shared base local
         // (l3/nearbase.ts): one object's cells anchored as separate pool constants re-spell as
-        // offsets off its lowest address. Both spellings are emitted; the differ referees.
-        respell('/nearbase', () => nearBaseClusters(sfn));
+        // offsets off its lowest address, within the target's declared derivation reach. Both
+        // spellings are emitted; the differ referees.
+        const nearSpan = target.compilerBehaviors.nearBaseSpan;
+        respell('/nearbase', () => (nearSpan !== undefined ? nearBaseClusters(sfn, nearSpan) : null));
         // `/parkfirst` — incoming-argument parks lead the entry prefix (l3/parkfirst.ts): the
         // park's `mov` lifts to pure SSA aliasing, so its position is unrecoverable and the
         // default order is emission's. Both orders are emitted; the differ referees.

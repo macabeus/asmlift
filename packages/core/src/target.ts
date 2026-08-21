@@ -79,6 +79,10 @@ export interface TargetDescription {
     // ⇒ true — verified byte-exact on agbcc and IDO; a compiler whose scheduler is shown
     // re-ordering independent loads opts OUT here.
     defOrderLoadPairs?: boolean;
+    // The single-add-immediate derivation reach for the /nearbase lever (l3/nearbase.ts):
+    // neighbor absolute addresses within this many bytes may share one base local. Thumb's
+    // `add rd, #imm8` reaches 255. Absent ⇒ the lever stands down for this target.
+    nearBaseSpan?: number;
   };
 }
 
@@ -105,7 +109,12 @@ export const ARMV4T_AGBCC: TargetDescription = {
     // DmaSet(n, &tmp, dest, … DMA_SRC_FIXED …)`, where the frame local is the source.
     readOnlyAddressSinks: [0x040000b0, 0x040000bc, 0x040000c8, 0x040000d4],
   },
-  compilerBehaviors: { coalesceLoopInit: false, preserveDivergentBranchSense: true, orderArgCopiesByComputation: true },
+  compilerBehaviors: {
+    coalesceLoopInit: false,
+    preserveDivergentBranchSense: true,
+    orderArgCopiesByComputation: true,
+    nearBaseSpan: 255,
+  },
 };
 
 /** MIPS-II / IDO 7.1 target. IDO is the IRIX C compiler,

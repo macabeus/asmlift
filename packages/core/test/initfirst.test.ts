@@ -84,3 +84,31 @@ test('refused: a non-const init never moves across the condition', () => {
   );
   expect(r).toBeNull();
 });
+
+test('refused inside a loop: the skip-path write would re-execute where an enclosing scope watches', () => {
+  // do { if (0 < a0) { v0 = 0; … } } while (v0 != 5) — re-spelled, a guard-false iteration
+  // writes v0 = 0 and the outer condition observes it: the original terminates, that C spins.
+  const inner: Stmt = {
+    k: 'if',
+    cond: bin('<', c(0), v('a0')),
+    then: [assign('v0', c(0)), dowhile(bin('<', v('v0'), v('a0')), [])],
+    else: [],
+  };
+  const r = initFirstGuards(fn([{ k: 'dowhile', cond: bin('!=', v('v0'), c(5)), body: [inner] }]));
+  expect(r).toBeNull();
+});
+
+test('refused for a global: a bare-global assign is a store other code observes', () => {
+  const g: SFn = {
+    ...fn([
+      {
+        k: 'if',
+        cond: bin('<', c(0), v('a0')),
+        then: [assign('gState', c(0)), dowhile(bin('<', v('gState'), v('a0')), [])],
+        else: [],
+      },
+    ]),
+    locals: [],
+  };
+  expect(initFirstGuards(g)).toBeNull();
+});

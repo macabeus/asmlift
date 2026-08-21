@@ -16,23 +16,16 @@
 //     condition carries the CONST K as a comparison operand: the assign moves above and that
 //     operand becomes `v`.
 //
-// SCOPE (decline over approximate): hoisted assigns carry pure CONST values only (an effect or a
-// memory read would reorder against the condition); the condition must not read the variable
-// (its pre-assign value dies in the move); the guard re-spelling additionally requires the
-// variable to appear NOWHERE after the `if` in its list (on the skip path the variable now holds
-// K where it used to be unwritten — refusing every later appearance keeps that unobservable).
-// Declines (null) when nothing changes.
-import type { BinOp, Expr, SFn, Stmt } from './ast';
-import { exprChildren, stmtExprs } from './ast';
-
-const NEGATE: Partial<Record<BinOp, BinOp>> = {
-  '<': '>=',
-  '<=': '>',
-  '>': '<=',
-  '>=': '<',
-  '==': '!=',
-  '!=': '==',
-};
+// SCOPE (decline over approximate): both rewrites touch LOCALS only — a bare-global assign
+// stores memory that other code observes, so moving one across the guard is a real store on the
+// skip path. Hoisted assigns carry pure CONST values (an effect or a memory read would reorder
+// against the condition), and the condition must not read the variable (its pre-assign value
+// dies in the move). The guard re-spelling mints a write on a previously write-free path, so it
+// fires only in the TOP-LEVEL statement list — inside a loop the skip-path write re-executes
+// where an enclosing scope can watch it — and only when the variable appears nowhere after the
+// `if` there. Declines (null) when nothing changes.
+import type { Expr, SFn, Stmt } from './ast';
+import { NEGATE_REL, exprChildren, stmtExprs } from './ast';
 
 const readsVar = (e: Expr, name: string): boolean =>
   ((e.k === 'var' || e.k === 'addr') && e.name === name) || exprChildren(e).some((c) => readsVar(c, name));
@@ -61,8 +54,9 @@ const isConstAssign = (s: Stmt): s is Extract<Stmt, { k: 'assign' }> & { value: 
 
 export function initFirstGuards(sfn: SFn): SFn | null {
   let changed = false;
+  const fnLocal = new Set([...sfn.params, ...sfn.locals].map((d) => d.name));
 
-  const rewriteList = (list: Stmt[]): Stmt[] => {
+  const rewriteList = (list: Stmt[], topLevel: boolean): Stmt[] => {
     const out: Stmt[] = [];
     for (const s0 of list) {
       const s = recurse(s0);
@@ -81,6 +75,7 @@ export function initFirstGuards(sfn: SFn): SFn | null {
           e0 === undefined ||
           !isConstAssign(t0) ||
           !isConstAssign(e0) ||
+          !fnLocal.has(t0.name) ||
           t0.name !== e0.name ||
           t0.value.value !== e0.value.value ||
           readsVar(cond, t0.name)
@@ -94,7 +89,7 @@ export function initFirstGuards(sfn: SFn): SFn | null {
         els = els.slice(1);
       }
       if (then.length === 0 && els.length > 0) {
-        const neg = cond.k === 'bin' ? NEGATE[cond.op] : undefined;
+        const neg = cond.k === 'bin' ? NEGATE_REL[cond.op] : undefined;
         if (neg !== undefined && cond.k === 'bin') {
           cond = { ...cond, op: neg };
           [then, els] = [els, then];
@@ -104,7 +99,7 @@ export function initFirstGuards(sfn: SFn): SFn | null {
       // a COMMON-hoisted variable holds its const on both paths, so the condition's matching
       // const operand reads through it unconditionally — no tail gate needed
       for (const hv of hoisted) {
-        if (cond.k === 'bin' && NEGATE[cond.op]) {
+        if (cond.k === 'bin' && NEGATE_REL[cond.op]) {
           if (cond.l.k === 'const' && cond.l.value === hv.value) {
             cond = { ...cond, l: { k: 'var', name: hv.name } };
           } else if (cond.r.k === 'const' && cond.r.value === hv.value) {
@@ -113,7 +108,15 @@ export function initFirstGuards(sfn: SFn): SFn | null {
         }
       }
       // guard re-spelling
-      if (els.length === 0 && then.length > 0 && isConstAssign(then[0]) && cond.k === 'bin' && NEGATE[cond.op]) {
+      if (
+        topLevel &&
+        els.length === 0 &&
+        then.length > 0 &&
+        isConstAssign(then[0]) &&
+        fnLocal.has(then[0].name) &&
+        cond.k === 'bin' &&
+        NEGATE_REL[cond.op]
+      ) {
         const init = then[0];
         const rest = list.slice(list.indexOf(s0) + 1);
         const constSide =
@@ -137,23 +140,23 @@ export function initFirstGuards(sfn: SFn): SFn | null {
   const recurse = (s: Stmt): Stmt => {
     switch (s.k) {
       case 'if':
-        return { ...s, then: rewriteList(s.then), else: rewriteList(s.else) };
+        return { ...s, then: rewriteList(s.then, false), else: rewriteList(s.else, false) };
       case 'while':
       case 'dowhile':
-        return { ...s, body: rewriteList(s.body) };
+        return { ...s, body: rewriteList(s.body, false) };
       case 'for':
-        return { ...s, body: rewriteList(s.body) };
+        return { ...s, body: rewriteList(s.body, false) };
       case 'switch':
         return {
           ...s,
-          cases: s.cases.map((c) => ({ ...c, body: rewriteList(c.body) })),
-          ...(s.default ? { default: rewriteList(s.default) } : {}),
+          cases: s.cases.map((c) => ({ ...c, body: rewriteList(c.body, false) })),
+          ...(s.default ? { default: rewriteList(s.default, false) } : {}),
         };
       default:
         return s;
     }
   };
 
-  const body = rewriteList(sfn.body);
+  const body = rewriteList(sfn.body, true);
   return changed ? { ...sfn, body } : null;
 }

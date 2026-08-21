@@ -621,9 +621,9 @@ export const FIXTURES: DecompFixture[] = [
       '    u16 * v0;\n' +
       '    s32 v1;\n' +
       '    volatile u16 sp0;\n' +
-      '    if (a1 > 0) {\n' +
-      '        v0 = a0;\n' +
-      '        v1 = a1;\n' +
+      '    v0 = a0;\n' +
+      '    v1 = a1;\n' +
+      '    if (v1 > 0) {\n' +
       '        do {\n' +
       '            sp0 = *v0;\n' +
       '            gDmaSrc = &sp0;\n' +
@@ -633,12 +633,13 @@ export const FIXTURES: DecompFixture[] = [
       '    }\n' +
       '    return;\n' +
       '}\n',
-    // NOT yet byte-exact, and the pin says exactly how close: the recompile differs only in the
-    // SCHEDULE of the two loop-invariant setups (`mov r3, sp; ldr r4, =gDmaSrc` land one slot later
-    // behind the do-while's entry copies). What the pin PROVES is the load-bearing part: the store
-    // to the object SURVIVES the recompile — without the audit-driven `volatile`, gcc-2.9 deletes a
-    // store to a local nothing in-function reads and the score is 20 with the store gone.
-    expectScore: 4,
+    // NOT yet byte-exact, and the pin says exactly how close: the guarded self-loop claim emits
+    // the inits ahead of the guard (which reads the initialized counter), leaving only the
+    // schedule of the loop-invariant setups (`mov r3, sp; ldr r4, =gDmaSrc`) adrift. What the pin
+    // PROVES is the load-bearing part: the store to the object SURVIVES the recompile — without
+    // the audit-driven `volatile`, gcc-2.9 deletes a store to a local nothing in-function reads
+    // and the score is 20 with the store gone.
+    expectScore: 3,
     expectMatch: false,
     note: 'address-taken frame local (laddr): capture hoisted, store through it, address escapes',
   },

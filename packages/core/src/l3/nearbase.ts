@@ -16,16 +16,28 @@
 // object never splits into mixed spellings. Declines (null) when no cluster forms.
 import type { Expr, SFn, Stmt } from './ast';
 import { mapExprChildren, mapStmtExprs } from './ast';
+import { nameAllocator } from './hoist';
 
-const SPAN = 255;
+/** The const behind a deref base, looked at through SCALAR value casts only — a cast to a
+ *  struct pointer is the struct-arrays dot-form's base, whose stride the raw `u8 *` re-spelling
+ *  would collapse, so it is never a cluster member. */
+const baseConst = (e: Expr): number | null =>
+  e.k === 'const'
+    ? e.value
+    : e.k === 'cast' && !(e.to.kind === 'ptr' && e.to.to.kind === 'struct')
+      ? baseConst(e.e)
+      : null;
 
-/** The const behind a deref base, looked at through value casts. */
-const baseConst = (e: Expr): number | null => (e.k === 'const' ? e.value : e.k === 'cast' ? baseConst(e.e) : null);
-
-export function nearBaseClusters(sfn: SFn): SFn | null {
+/** `span` is the target's single-add-immediate derivation reach
+ *  (TargetDescription.compilerBehaviors.nearBaseSpan) — a target that declares none never runs
+ *  this lever. */
+export function nearBaseClusters(sfn: SFn, span: number): SFn | null {
   // collect every DISTINCT const deref-base address
   const addrs = new Set<number>();
   const collect = (e: Expr): Expr => {
+    if (e.k === 'field') {
+      return e; // a dot-form subtree keeps its struct base — never collected, never rewritten
+    }
     const m = mapExprChildren(e, collect);
     if (m.k === 'index') {
       const c = baseConst(m.base);
@@ -44,7 +56,7 @@ export function nearBaseClusters(sfn: SFn): SFn | null {
   for (let i = 0; i < sorted.length;) {
     const lo = sorted[i];
     let j = i;
-    while (j < sorted.length && sorted[j] - lo <= SPAN) {
+    while (j < sorted.length && sorted[j] - lo <= span) {
       j++;
     }
     if (j - i >= 2) {
@@ -58,16 +70,14 @@ export function nearBaseClusters(sfn: SFn): SFn | null {
     return null;
   }
   const baseName = new Map<number, string>();
-  const taken = new Set([...sfn.params, ...sfn.locals].map((d) => d.name));
+  const fresh = nameAllocator(sfn); // the shared minting mechanism — collides with nothing in sfn
   for (const lo of new Set(baseOf.values())) {
-    let n = 0;
-    while (taken.has(`nb${n}`)) {
-      n++;
-    }
-    taken.add(`nb${n}`);
-    baseName.set(lo, `nb${n}`);
+    baseName.set(lo, fresh());
   }
   const rewrite = (e: Expr): Expr => {
+    if (e.k === 'field') {
+      return e;
+    }
     const m = mapExprChildren(e, rewrite);
     if (m.k === 'index') {
       const c = baseConst(m.base);

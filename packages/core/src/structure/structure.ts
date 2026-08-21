@@ -970,9 +970,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // single in-edge and a plain `br` into the header, so the guard's branch is still the only
     // decision. Anything else keeps the unguarded do-while recovery.
     // The preheader claim is limited to loops whose header→exit edge carries NO args: with
-    // nothing riding the exit, the fusion site's zero-trip obligations (staleExit, the sink)
-    // are vacuous, so redirecting the loop from the do-while path can only change its SHAPE,
-    // never decline a function that structured before.
+    // nothing riding the exit, the fusion site's exit-copy obligations (staleExit, the sink) are
+    // vacuous. The condition and zero-trip hazards stay live there, so redirecting a loop from
+    // the do-while path yields the new shape or a LOUD decline — never silent wrong C.
     const exitCarriesNothing = (successorTo(b, exit)?.args ?? []).length === 0;
     const preheader =
       direct || !exitCarriesNothing
