@@ -7,7 +7,9 @@
 // same: a volatile MEM is barred from motion and combination, which reorders the loop
 // optimizer's pseudos and lands the register allocator on different homes (on the row this was
 // built for, the counter is copied out of r0 so the loaded value can have it — the target's
-// allocation). So both spellings are emitted (rank.ts `/volatile`) and the differ referees.
+// allocation). So the qualified spellings are emitted alongside the plain one — the all-locals
+// form as rank.ts `/volatile`, per-local subsets as its `-name` variants — and the differ
+// referees.
 //
 // SEMANTICS ARE PRESERVED BY CONSTRUCTION: `volatile` only RESTRICTS what a compiler may do
 // with the accesses; every execution of the qualified spelling is an execution of the plain
@@ -70,20 +72,15 @@ function collectAssigns(stmts: Stmt[], out: { name: string; value: Expr }[]): vo
   }
 }
 
-/** The locals the lever would qualify — rank.ts's input for the per-local SUBSET enumeration:
+/** The locals the lever would qualify — the per-local SUBSET enumeration's input (below):
  *  which pointers the original declared volatile is per-pointer knowledge the asm does not
  *  carry (an MMIO block and a plain RAM table can sit side by side, and qualifying the table
- *  blocks the read collapses its region wants), so each non-empty subset is its own candidate
+ *  blocks the read collapse its region wants), so each non-empty subset is its own candidate
  *  when few enough locals qualify, and the differ referees. */
 export function volatileEligibleLocals(sfn: SFn): string[] {
   return sfn.locals.filter(eligibility(sfn)).map((l) => l.name);
 }
 
-/** The `/volatile` candidate, or null when no local qualifies. Read-only: returns a fresh SFn
- *  sharing the (unmodified) body. `only` narrows the lever to the named locals — a /volatile
- *  PRODUCT (rank.ts) qualifies just the locals its first lever centres on (kept walk bases,
- *  created hoists), so the product never degenerates into a general /volatile composition over
- *  the function's other locals — and the subset enumeration re-uses the same door. */
 /** the shared eligibility predicate (the GATE in the header) for one function's locals */
 function eligibility(sfn: SFn): (l: SFn['locals'][number]) => boolean {
   const assigns: { name: string; value: Expr }[] = [];
@@ -135,6 +132,11 @@ export function volatileSubsetCandidates(sfn: SFn, within?: ReadonlySet<string>)
   return out;
 }
 
+/** The `/volatile` candidate, or null when no local qualifies. Read-only: returns a fresh SFn
+ *  sharing the (unmodified) body. `only` narrows the lever to the named locals — a /volatile
+ *  PRODUCT (rank.ts) qualifies just the locals its first lever centres on (kept walk bases,
+ *  created hoists), so the product never degenerates into a general /volatile composition over
+ *  the function's other locals — and the subset enumeration re-uses the same door. */
 export function volatilePtrLocals(sfn: SFn, only?: ReadonlySet<string>): SFn | null {
   const eligible = eligibility(sfn);
   const qualifies = (l: SFn['locals'][number]): boolean => eligible(l) && (only === undefined || only.has(l.name));

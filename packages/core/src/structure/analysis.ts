@@ -100,9 +100,12 @@ export function hasHomeableSharedAddress(fn: Fn): boolean {
 /** rank.ts's enumeration gate for the `/expr-home` axis: does the function HAVE a value the
  *  axis would home — a pure non-const def with 2+ distinct consumers inside a loop the def sits
  *  outside, cone-free? Loops here are LAYOUT ranges (a successor at an equal-or-earlier block
- *  position closes one) — the axis's own rule uses the real dominator-based model, so this
- *  over-approximates the same way hasHomeableSharedAddress does: a false positive costs one
- *  duplicate-collapsed candidate, never a wrong one. */
+ *  position closes one) where the axis's own rule uses the dominator model, and consumers here
+ *  come from op operands only (branch-arg uses are invisible) — so unlike
+ *  hasHomeableSharedAddress this diverges in BOTH directions: a false positive costs one
+ *  duplicate-collapsed candidate, and a false negative silently skips the arm on IR whose block
+ *  layout does not follow dominance. Acceptable because every frontend lays blocks out in
+ *  address order, where a natural loop's back edge always points backward. */
 export function hasLoopSharedPureValue(fn: Fn): boolean {
   const defOf = defOpMap(fn);
   const pos = new Map<Block, number>(fn.blocks.map((b, i) => [b, i]));

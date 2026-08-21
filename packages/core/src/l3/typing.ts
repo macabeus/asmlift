@@ -74,15 +74,16 @@ export function derefStrideOk(rt: IrType | undefined, width: number, signed: boo
 
 /**
  * The C SIGNEDNESS a rendered integer expression actually has — `true`/`false`, or `undefined`
- * when it is not determinable here. The deliberate complement to l3/typing's `exprCType`, which is
+ * when it is not determinable here. The deliberate complement to `exprCType` above, which is
  * pointer-ness-accurate and reports every integer as `s32` by contract; this models the two C
  * rules that contract omits, integer PROMOTION and the usual arithmetic CONVERSIONS.
  *
- * It lives HERE, in the C-family backend, because it is a model of C's own rules with no meaning
- * for another language — the same reason the cast it feeds is synthesized here rather than in the
- * tower. `exprCType` stays in l3/ because Pascal consults it too.
+ * THE one rendered-signedness judgment, and it lives beside the declarations it judges against
+ * because three consumers now share it: the C-family backend's shift-operand cast, structure.ts's
+ * unsigned-compare cast (the /uns-cmp axis), and initfirst's compare-meaning gate. Two of those
+ * models disagreeing about one expression is the drift this placement prevents.
  *
- * It exists for one question, and the question is byte-load-bearing: C spells both `>>>` and `>>`
+ * The original question is byte-load-bearing: C spells both `>>>` and `>>`
  * as `>>` and chooses between them from the left operand's type. A logical shift rendered over a
  * signed expression recompiles to `asr` where the target has `lsr`, and evaluates to a different
  * value. The C-family backend casts the operand whenever this returns anything but the signedness

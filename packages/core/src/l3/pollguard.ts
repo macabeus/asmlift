@@ -1,4 +1,7 @@
-// L3 re-spelling lever: an EMPTY bottom-tested loop regrows its own guard.
+// L3 poll-shape re-spelling levers: `pollGuards` regrows an empty bottom-tested loop's guard,
+// and `pollReads` (below) folds a materialized poll's re-read back into its while condition.
+// Both trade on the same fact: the two spellings of a busy-wait evaluate their condition — and
+// read their cell — the same number of times, so only bytes differ and the differ referees.
 //
 //     do { } while (dma[2] & 0x80000000);   →   if (dma[2] & 0x80000000) { do { } while (…); }
 //
@@ -57,19 +60,27 @@ export function pollGuards(sfn: SFn): SFn | null {
 // per-iteration re-read; the source may have spelled the read INSIDE the condition of an
 // empty-bodied `while`. The two forms have IDENTICAL evaluation traces — the old form reads once
 // before plus once per iteration, the new form reads once per condition evaluation, and both
-// count 1 + iterations — so volatile reads count the same and the rewrite is trace-preserving by
-// construction, exactly pollGuards' argument. What differs is bytes: the pre-read + temp spelling
+// count 1 + iterations — so volatile reads COUNT the same; the effect-free-condition gate below
+// is what makes the ORDER identical too (with no other effect in the condition, there is nothing
+// for the embedded read to reorder against). What differs is bytes: the pre-read + temp spelling
 // materializes an extra register and instruction the in-condition spelling does not.
 //
-// SCOPE (decline over approximate): the body must be EXACTLY the one re-read assign of the same
-// variable and the same expression; the condition must read the variable EXACTLY once (a second
-// read would double the per-iteration evaluation of X); the expression must not mention the
-// variable and must be call/marker-free (an effect's count is trace-equal too, but no row
-// demands it); and the variable must appear NOWHERE else in the function — its declaration is
-// dropped with the temp. Declines (null) when no poll matches.
+// SCOPE (decline over approximate): the temp must be the function's OWN non-volatile LOCAL —
+// a bare global's assigns are stores other code observes, and its declaration cannot be
+// dropped; the body must be EXACTLY the one re-read assign of the same variable and the same
+// expression; the condition must read the variable EXACTLY once (a second read would double the
+// per-iteration evaluation of X) and be effect-free apart from X (embedding X inside the
+// condition unsequences it against any other effect there); the expression must not mention the
+// variable and must be call/marker-free; and the variable — address-taken uses included — must
+// appear NOWHERE else in the function, since its declaration is dropped with the temp.
+// Declines (null) when no poll matches.
 export function pollReads(sfn: SFn): SFn | null {
+  const ownPlain = new Set(
+    sfn.locals.filter((l) => l.volatile !== true && l.pointeeVolatile !== true).map((l) => l.name),
+  );
   const countName = (e: Expr, n: string): number =>
-    (e.k === 'var' && e.name === n ? 1 : 0) + exprChildren(e).reduce((a, c) => a + countName(c, n), 0);
+    ((e.k === 'var' || e.k === 'addr') && e.name === n ? 1 : 0) +
+    exprChildren(e).reduce((a, c) => a + countName(c, n), 0);
   const pure = (e: Expr): boolean => e.k !== 'call' && e.k !== 'marker' && exprChildren(e).every(pure);
   const occurs = (list: Stmt[], n: string): number =>
     list.reduce(
@@ -90,6 +101,7 @@ export function pollReads(sfn: SFn): SFn | null {
       const w = list[i + 1];
       if (
         a.k === 'assign' &&
+        ownPlain.has(a.name) &&
         w !== undefined &&
         w.k === 'while' &&
         w.body.length === 1 &&
@@ -99,6 +111,7 @@ export function pollReads(sfn: SFn): SFn | null {
         countName(w.cond, a.name) === 1 &&
         countName(a.value, a.name) === 0 &&
         pure(a.value) &&
+        pure(w.cond) &&
         // the pattern owns exactly three occurrences: both assign targets and the cond read
         occurs(sfn.body, a.name) === 3
       ) {

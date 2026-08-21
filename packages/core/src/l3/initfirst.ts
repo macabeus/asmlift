@@ -28,8 +28,8 @@
 // THE COMPARE'S MEANING: the variable's declared type can differ from X's rendered type, so the
 // swap is admitted only when both sides were provably non-negative (every signedness reading
 // agrees there) or the compare's rendered signedness is unchanged — anything indeterminate
-// refuses. The condition
-// must not read the variable (its pre-assign value dies in the move). The guard re-spelling
+// refuses. The condition must not read the variable (its pre-assign value dies in the move) and
+// must be effect-free as a whole (the hoist moves X's read above it). The guard re-spelling
 // mints a write on a previously write-free path, so it needs that write to be DEAD there: the
 // variable must be untouched after the `if` in its own list and in the tail of every ancestor
 // list (a sibling arm of an ancestor `if` is not "after" — it never runs in the same entry).
@@ -76,8 +76,12 @@ export function initFirstGuards(sfn: SFn): SFn | null {
     sfn.locals.filter((l) => l.volatile === true || l.pointeeVolatile === true).map((l) => l.name),
   );
   const ownNames = new Set([...sfn.params.map((p) => p.name), ...sfn.locals.map((l) => l.name)]);
-  // a guard re-spell's X: call/marker-free, and every named leaf a non-volatile param/local of
-  // THIS function (a global or &gSym could be project-declared volatile)
+  // a guard re-spell's X: call/marker-free, every named leaf a non-volatile param/local of THIS
+  // function (a global or &gSym could be project-declared volatile), and every deref rooted at a
+  // var through casts only — a raw `*(u16 *)CONST` deref has no declaration claiming
+  // non-volatility anywhere (it is exactly the idiom `/volatile` exists for), so collapsing its
+  // adjacent reads could merge two observable MMIO reads into one.
+  const varRooted = (e: Expr): boolean => (e.k === 'var' ? true : e.k === 'cast' ? varRooted(e.e) : false);
   const hoistableRead = (e: Expr): boolean => {
     if (e.k === 'call' || e.k === 'marker' || e.k === 'addr') {
       return false;
@@ -85,11 +89,21 @@ export function initFirstGuards(sfn: SFn): SFn | null {
     if (e.k === 'var' && (!ownNames.has(e.name) || volatileLocals.has(e.name))) {
       return false;
     }
+    if ((e.k === 'index' || e.k === 'field') && !varRooted(e.base)) {
+      return false;
+    }
     return exprChildren(e).every(hoistableRead);
   };
+  // the hoist moves X's evaluation ABOVE the whole condition, so the condition's OTHER side must
+  // carry no effect it could cross (a call there could write the cell X reads)
+  const effectFree = (e: Expr): boolean => e.k !== 'call' && e.k !== 'marker' && exprChildren(e).every(effectFree);
   const env = declaredTypes(sfn);
-  // the compare-meaning gate (see SCOPE): substituting `v` for X may change the compare's
-  // rendered signedness through v's declared type
+  // The compare-meaning gate (see SCOPE): substituting `v` for X may change the compare's
+  // rendered signedness through v's declared type. Sufficiency: after the hoist, v's runtime
+  // value EQUALS X's, so (a) both original sides provably in [0, 2^31) ⇒ signed and unsigned
+  // compares agree on the actual values whatever the swap does to rendered signedness; (b)
+  // otherwise a defined, UNCHANGED rendered signedness over equal values gives the identical
+  // result. Anything indeterminate refuses.
   const meaningPreserved = (l: Expr, r: Expr, side: 'l' | 'r', v: string): boolean => {
     if (provablyNonNegative(l, env) && provablyNonNegative(r, env)) {
       return true;
@@ -209,6 +223,7 @@ export function initFirstGuards(sfn: SFn): SFn | null {
           side !== null &&
           !readsVar(cond, init.name) &&
           deadAfter &&
+          effectFree(cond) &&
           meaningPreserved(cond.l, cond.r, side, init.name)
         ) {
           out.push(init);

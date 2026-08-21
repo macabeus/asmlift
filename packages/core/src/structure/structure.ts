@@ -1585,29 +1585,47 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // sites it can see, but a later re-spell can substitute the var into a compare that needed no
   // cast at emission — the initfirst guard swap). The declaration is the honest fix: a name
   // flips to u32 when SOME value under it is u32-typed and NO value under it carries signed-use
-  // evidence (an icmp_s* / sdiv / smod / shr_s operand). Only int32 declarations reconcile; the
-  // flip is byte-invariant everywhere but the compares it corrects (+/-/*/&/|/^/<< are
-  // sign-blind, `>>` self-corrects via the backend's shiftOperand cast, division is evidence-
-  // blocked).
+  // evidence (the transitive input cone of any icmp_s* / sdiv / smod / shr_s). Only int32
+  // declarations reconcile; the flip is byte-invariant everywhere but the compares and unsigned
+  // divisions it corrects (+/-/*/&/|/^/<< are sign-blind, `>>` self-corrects via the backend's
+  // shiftOperand cast, a udiv/umod renders `/`/`%` unsigned through the flipped operand — the
+  // machine's own division — and SIGNED division is evidence-blocked).
   if (unsignedCompareSpelling) {
+    // Signed-use evidence is the TRANSITIVE INPUT CONE of every signed op — a claimant can feed
+    // an icmp_slt through an inline `sub` and the flip would still render that compare unsigned
+    // (`v - 5 >= 0`, always true in C), so direct operands are not enough. Over-tainting through
+    // impure defs only blocks flips: conservative-safe.
     const SIGNED_USE = new Set(['icmp_slt', 'icmp_sle', 'icmp_sgt', 'icmp_sge', 'sdiv', 'smod', 'shr_s']);
     const signedEvidence = new Set<Value>();
+    const work: Value[] = [];
     for (const b of fn.blocks) {
       for (const op of b.ops) {
         if (SIGNED_USE.has(op.opcode)) {
-          for (const o of op.operands) {
-            signedEvidence.add(o);
-          }
+          work.push(...op.operands);
         }
       }
     }
+    while (work.length) {
+      const v = work.pop()!;
+      if (!signedEvidence.has(v)) {
+        signedEvidence.add(v);
+        const d = defs.get(v);
+        if (d) {
+          work.push(...d.operands);
+        }
+      }
+    }
+    // Params never reconcile: their declarations come from p.type, not varType, so a flip here
+    // would only desync the cast site's view from the emitted declaration — and param signedness
+    // is the sign-pin axis's dimension.
+    const paramNames = new Set(entry.params.map((_, i) => `a${i}`));
     const claimants = new Map<string, Value[]>();
     for (const [v, n] of [...varName, ...backArgName]) {
       (claimants.get(n) ?? claimants.set(n, []).get(n)!).push(v);
     }
     for (const [n, vs] of claimants) {
       const t = varType.get(n);
-      if (t?.kind !== 'int' || t.width !== 32 || !t.signed) {
+      if (paramNames.has(n) || t?.kind !== 'int' || t.width !== 32 || !t.signed) {
         continue;
       }
       if (
@@ -1900,9 +1918,15 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // provably sit in [0, 2^31) (a `(u8)x > 4` byte test): there the signed spelling is
       // value-faithful and the compiler already picks the unsigned branch itself. ==/!= are
       // sign-agnostic and icmp_s* keeps its documented residual above.
+      const ptrSide = (x: Expr): boolean => {
+        const t2 = ctype(x);
+        return t2?.kind === 'ptr' || t2?.kind === 'array';
+      };
       if (
         unsignedCompareSpelling &&
         /^icmp_u/.test(d.opcode) &&
+        !ptrSide(l) &&
+        !ptrSide(r) &&
         renderedIntSignedness(l, vtEnv) !== false &&
         renderedIntSignedness(r, vtEnv) !== false &&
         !(provablyNonNegative(l, vtEnv) && provablyNonNegative(r, vtEnv))

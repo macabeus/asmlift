@@ -50,10 +50,11 @@ import { type TargetDescription, structureOptionsFor } from './target';
  *  own lifted fn (a map-lifted probe spells const bases as gaddr, which would blind the
  *  /raw-globals siblings — the /addr-home lesson). `strip` opts the axis into the
  *  dropped-sibling closure: an axis-ON candidate is skipped when its OFF sibling failed the
- *  boundary contracts. `/reread-globals` is EXEMPT from both the strip closure and structure()'s
- *  assertPrimaryAccepts invariant — it only relaxes inlining barriers, never adds
- *  materialization or merging, so it cannot unlock a function the primary declines; the
- *  exemption is stated here rather than left implicit in a missing `||` arm. */
+ *  boundary contracts. Two axes are EXEMPT from structure()'s assertPrimaryAccepts invariant:
+ *  `/reread-globals` only relaxes inlining barriers and `/uns-cmp` only changes spelling and
+ *  declarations — neither adds materialization or merging, so neither can unlock a function the
+ *  primary declines (reread also skips the strip closure). Both exemptions are stated here
+ *  rather than left implicit in a missing `||` arm or trigger term. */
 interface StructuringAxis {
   flag: 'reread' | 'inplace' | 'mergeNames' | 'addrHome' | 'exprHome' | 'unsCmp';
   suffix: string;
@@ -161,8 +162,10 @@ const STRUCTURING_AXES: readonly StructuringAxis[] = [
 /** The statement-shape products (rank's second sanctioned product mechanism): each entry is a
  *  statement-order/shape re-spelling orthogonal to every representation lever, derived onto every
  *  spelling as sanctioned in the POLICY note at the respell site. Each shape fires alone, plus
- *  all of them together in table order — not the full subset lattice; a third entry decides
- *  whether its pairs earn a place. */
+ *  all of them together in table order — not the full subset lattice. With three entries the
+ *  pairs question is settled by skip-on-decline (applyShapes): a pair is reachable whenever the
+ *  third member declines, and a row demanding a true exclusion pair — all three fire, the match
+ *  needs exactly two — is what would earn the lattice. */
 const SHAPE_PRODUCTS: { suffix: string; apply: (sfn: SFn) => SFn | null }[] = [
   { suffix: '/initfirst', apply: initFirstGuards },
   { suffix: '/pollguard', apply: pollGuards },
@@ -175,19 +178,24 @@ const SHAPE_SUBSETS: (typeof SHAPE_PRODUCTS)[number][][] = [
 
 /** The subset applied in table order, SKIP-ON-DECLINE: a member that declines contributes
  *  nothing rather than killing the combination — the all-shapes candidate is "everything that
- *  fires", so a pair is reachable whenever the third declines. Null when nothing fired (the
- *  suffix would mislead and the source would duplicate a smaller subset's). */
-const applyShapes = (subset: readonly (typeof SHAPE_PRODUCTS)[number][], from: SFn): SFn | null => {
+ *  fires", so a pair is reachable whenever the third declines. The label is built from the
+ *  members that actually FIRED, so a suffix never names a lever that declined; a fired-set that
+ *  duplicates a smaller subset emits identical source and the dedup collapses it. Null when
+ *  nothing fired. */
+const applyShapes = (
+  subset: readonly (typeof SHAPE_PRODUCTS)[number][],
+  from: SFn,
+): { out: SFn; suffix: string } | null => {
   let cur = from;
-  let fired = false;
+  const fired: string[] = [];
   for (const sp of subset) {
     const r = sp.apply(cur);
     if (r) {
       cur = r;
-      fired = true;
+      fired.push(sp.suffix);
     }
   }
-  return fired ? cur : null;
+  return fired.length > 0 ? { out: cur, suffix: fired.join('') } : null;
 };
 
 const SIGN_CANDS = [
@@ -535,7 +543,12 @@ export function enumerateCandidates(
         // never aborts the enumeration). A dropped re-spelling loses nothing: the primary remains.
         //
         // POLICY: re-spellings derive from the BASE spelling only — levers do not compose by
-        // default. THREE product mechanisms are sanctioned, each with its own admission bar.
+        // default. THREE product mechanisms are sanctioned, each with its own admission bar —
+        // plus ALTERNATIVE OUTPUTS: one lever whose single application has several legitimate
+        // results (which locals a coalesce merges, which pointers /volatile qualifies) emits
+        // each as its own candidate via `enumerate`, capped at the lever, with the base spelling
+        // retained; outputs may also ride an already-sanctioned product (the /livebase/volatile
+        // subsets), since they add no new lever to the composition.
         // Products with /volatile go only onto a lever whose re-spelling CENTRES ON a
         // numeric-address pointer local — the joint spelling is reachable from neither lever
         // alone, each product narrows /volatile to the lever's own locals (volatilePtrLocals'
@@ -571,12 +584,15 @@ export function enumerateCandidates(
             // fixed order below. A shape that never fires declines and costs nothing.
             if (!SHAPE_PRODUCTS.some(({ suffix: sx }) => suffix.includes(sx))) {
               for (const subset of SHAPE_SUBSETS) {
-                const out = applyShapes(subset, alt);
-                if (out !== null) {
-                  assertResolved(out);
-                  assertDerefsTyped(out);
-                  const sx = subset.map((sp2) => sp2.suffix).join('');
-                  spellings.push({ suffix: `${suffix}${sx}`, source: backend.emit(out), ...refsOf(out) });
+                const shaped = applyShapes(subset, alt);
+                if (shaped !== null) {
+                  assertResolved(shaped.out);
+                  assertDerefsTyped(shaped.out);
+                  spellings.push({
+                    suffix: `${suffix}${shaped.suffix}`,
+                    source: backend.emit(shaped.out),
+                    ...refsOf(shaped.out),
+                  });
                 }
               }
             }
@@ -593,7 +609,17 @@ export function enumerateCandidates(
         // same footing as the others: the primary inline spelling stays in the list, so the differ
         // referees and this can never cost a match.
         for (const subset of SHAPE_SUBSETS) {
-          respell(subset.map((x) => x.suffix).join(''), () => applyShapes(subset, sfn));
+          // the truthful suffix needs the pass to RUN first, so this bypasses respell's
+          // label-then-thunk shape: same try posture, label from the fired members
+          try {
+            const shaped = applyShapes(subset, sfn);
+            if (shaped !== null) {
+              respell(shaped.suffix, () => shaped.out);
+            }
+          } catch (e) {
+            const label = subset.map((x) => x.suffix).join('');
+            opts.onLeverError?.(name + label, e instanceof Error ? e.message.split('\n')[0] : String(e));
+          }
         }
         respell('/argbase', () => materializeArgBases(sfn));
         // `/volatile` — declare a pointer local holding a NUMERIC address as pointing to volatile

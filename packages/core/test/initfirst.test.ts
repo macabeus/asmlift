@@ -1,6 +1,8 @@
 // The /initfirst lever (l3/initfirst.ts): a loop init moves above its guard and the guard reads
-// the initialized variable. Both source forms lift to the same IR — a const has no position — so
-// the differ referees between them.
+// the initialized variable. Both source forms lift to the same IR — a const has no position, and
+// an adjacent pure-read pair collapses to one load either way — so the differ referees between
+// them. The read case's refusals (volatile, un-owned names, raw-address derefs, compare-meaning)
+// are pinned below alongside the const case's deadness rules.
 import { expect, test } from 'vitest';
 
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
@@ -323,4 +325,46 @@ test('under a loop ancestor the re-spell fires only when the variable appears no
     ]),
   );
   expect(shared).toBeNull();
+});
+
+test('refused: a RAW-address deref never moves (no declaration claims it non-volatile)', () => {
+  const raw: Expr = {
+    k: 'index',
+    base: { k: 'cast', to: { kind: 'ptr', to: { kind: 'int', width: 16, signed: false } }, e: c(0x4000130) },
+    idx: c(0),
+    width: 2,
+    signed: false,
+  };
+  const r = initFirstGuards(
+    fnWith(
+      [{ name: 'v0', type: s32 }],
+      [
+        {
+          k: 'if',
+          cond: bin('<', raw, v('a0')),
+          then: [assign('v0', raw), dowhile(bin('<', v('v0'), v('a0')), [])],
+          else: [],
+        },
+      ],
+    ),
+  );
+  expect(r).toBeNull();
+});
+
+test('refused: an effectful condition — the hoist would move the read across the call', () => {
+  const call: Expr = { k: 'call', fn: 'bump', args: [v('a0')] };
+  const r = initFirstGuards(
+    fnWith(
+      [{ name: 'v0', type: s32 }, ptrLocal],
+      [
+        {
+          k: 'if',
+          cond: bin('!=', call, deref(v('p0'))),
+          then: [assign('v0', deref(v('p0'))), dowhile(bin('!=', v('v0'), c(0)), [])],
+          else: [],
+        },
+      ],
+    ),
+  );
+  expect(r).toBeNull();
 });

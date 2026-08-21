@@ -1,6 +1,7 @@
-// The /pollguard shape product (l3/pollguard.ts): an EMPTY bottom-tested loop regrows its own
-// guard — the two forms compile to the same instructions, differing only in the allocation
-// ripple of the guard's extra source-level read; the differ referees.
+// The poll-shape products (l3/pollguard.ts): /pollguard regrows an EMPTY bottom-tested loop's
+// guard, and /pollread folds a materialized poll's re-read back into its while condition. Both
+// spellings of each pair evaluate their condition — and read their cell — the same number of
+// times, so only bytes differ and the differ referees.
 import { expect, test } from 'vitest';
 
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
@@ -88,4 +89,36 @@ test('refused: the body re-read differs from the pre-read', () => {
     },
   ];
   expect(pollReads(fnP(diff))).toBeNull();
+});
+
+test('refused: a name the function does not own — a global poll would delete observable stores', () => {
+  const g: Stmt[] = [
+    assign('gState', deref2(v('p1'))),
+    {
+      k: 'while',
+      cond: bin('!=', bin('&', v('gState'), c(1)), c(0)),
+      body: [assign('gState', deref2(v('p1')))],
+    },
+  ];
+  expect(pollReads(fnP(g))).toBeNull();
+});
+
+test('refused: an address-taken temp — &v4 elsewhere counts as an occurrence', () => {
+  const taken: Stmt[] = [
+    ...POLLV,
+    { k: 'exprstmt', value: { k: 'call', fn: 'DmaSet', args: [{ k: 'addr', name: 'v4' }] } },
+  ];
+  expect(pollReads(fnP(taken))).toBeNull();
+});
+
+test('refused: an effectful condition beside the polled variable', () => {
+  const eff: Stmt[] = [
+    assign('v4', deref2(v('p1'))),
+    {
+      k: 'while',
+      cond: bin('!=', { k: 'call', fn: 'f', args: [] }, v('v4')),
+      body: [assign('v4', deref2(v('p1')))],
+    },
+  ];
+  expect(pollReads(fnP(eff))).toBeNull();
 });

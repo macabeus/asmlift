@@ -164,3 +164,44 @@ test('off by default: the axis-off spelling keeps the uncast signed rendering', 
   expect(emit(LOOPBOUND, false)).not.toContain('(u32)');
   expect(emit(RECON, false)).not.toMatch(/u32 v\d+;/);
 });
+
+// A claimant feeding a SIGNED compare through an inline pure expression: the evidence is the
+// signed op's transitive input cone, so the flip must refuse — `v - 5 >= 0` rendered over a u32
+// v is always true in C where the machine's compare was signed.
+const RECOND = RECON.replace('fn recon', 'fn recond').replace(
+  `^bb2():
+  ret %9`,
+  `^bb2():
+  %11: s32 = const {value=5}
+  %12: s32 = sub %9, %11
+  %13: s32 = const {value=0}
+  %14: u32 = icmp_slt %12, %13
+  cond_br %14, ^bb3(), ^bb4()
+^bb3():
+  ret %13
+^bb4():
+  ret %9`,
+);
+
+test('signed evidence through a derived expression blocks the flip', () => {
+  expect(emit(RECOND)).not.toMatch(/u32 v\d+;/);
+});
+
+// A pointer-rendered compare side never takes the cast: `p < end` is already the unsigned
+// compare, and (u32)p would be a pointer/int constraint violation.
+const PTRCMP = `fn ptrcmp {
+^bb0(%0: u32, %1: u32):
+  %2: s32 = load %0 {off=0, signed=false, width=2}
+  %3: u32 = icmp_ult %0, %1
+  cond_br %3, ^bb1(), ^bb2()
+^bb1():
+  ret %2
+^bb2():
+  %4: s32 = const {value=0}
+  ret %4
+}
+`;
+
+test('a pointer-rendered side keeps its spelling', () => {
+  expect(emit(PTRCMP)).not.toContain('(u32)');
+});

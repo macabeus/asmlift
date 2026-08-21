@@ -1406,9 +1406,9 @@ export const SYNTHETIC: SynthSpec[] = [
   // `bcs`/`bcc` where an s32 home gives `bge`/`blt` — and the s32-home spelling of the same
   // hoist REGRESSES the real function, so a home lever without the width/sign choice cannot
   // close it). `ucmp` isolates the compare polarity alone, home-less: a u32 counter and a cast
-  // bound flip four branches and ripple two register picks — asmlift's signedness axis pins
-  // entry params only, and the winner spells s32 locals with signed compares even though the
-  // lifted IR carried the unsigned condition. `entrypair` — one COMPUTED address (`(a0 << 2) +
+  // bound flip four branches and ripple two register picks — the /uns-cmp axis now spells the
+  // compares from the lifted icmp facts, and the lane's residual is the register ripple those
+  // picks leave behind. `entrypair` — one COMPUTED address (`(a0 << 2) +
   // (a1 << 1) + table`) held in a pointer local with its two bytes read at `[r,#1]`/`[r,#0]`:
   // the per-site spelling recomputes the chain and anchors a pool literal per baked offset
   // (`table`, `table+1`) where the original anchors one. /nearbase cannot see it — its clusters
@@ -1421,7 +1421,12 @@ export const SYNTHETIC: SynthSpec[] = [
   // staleExit decline (the kept-guard family's link, not this one); `entrypair:gcc2.7.2kmc`
   // declines on the MIPS `jal` call link exactly as `call1:gcc2.7.2kmc` does. Those lanes
   // measure their links; the family's signal lanes are agbcc (all three), `ucmp:gcc2.7.2kmc`,
-  // and `entrypair:mwcc_242_81`. The mwcc lane's residual is NOT the shared-base home the agbcc
+  // and `entrypair:mwcc_242_81`. `sizebound:agbcc`'s residual after the typed home landed is
+  // three PLACEMENT classes, ladder-measured: the dma init leading the prologue, the u16
+  // pointer's init scoped inside the outer-loop guard, and one counter shared across both inner
+  // loops — each a cross-lever pairing (an init-order axis; scopebase×volatile-subset;
+  // coalesce on the homed composition) that must clear the POLICY admission bar with its own
+  // row before any lever is built. The mwcc lane's residual is NOT the shared-base home the agbcc
   // lane closed (`/addr-home`): struct-arrays recovery consumes the full element address into
   // `[a0]` indexing, so the value the PPC target holds in r3 no longer exists in the IR to
   // home — a struct-element-home class the lane keeps measuring.
