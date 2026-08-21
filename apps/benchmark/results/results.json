@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generatedAt": "2026-08-21T10:56:25.557Z",
+    "generatedAt": "2026-08-21T12:59:36.202Z",
     "toolchains": [
       "ido7.1",
       "agbcc",
@@ -9,12 +9,12 @@
       "mwcc_242_81"
     ],
     "counts": {
-      "total": 804,
-      "synthetic": 564,
+      "total": 807,
+      "synthetic": 567,
       "real": 240
     },
     "asmlift": {
-      "commit": "46a3128c5e8429f30e4dc90e9cd9d85f5db0e5fe",
+      "commit": "c93b948c66bf6ec4ec50d96e4cd89d5f717e19d3",
       "dirty": false
     },
     "m2c": {
@@ -3522,15 +3522,15 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-DxfRN9/c.c:1077: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-wki6oN/c.c:1077: invalid operands to binary <<"
           },
           {
             "label": "unsigned/scopebase/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-6Ti4W3/c.c:1078: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-NY0Xrc/c.c:1078: invalid operands to binary <<"
           },
           {
             "label": "unsigned/livebase/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-DoNzRh/c.c:1079: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Bt2G9W/c.c:1079: invalid operands to binary <<"
           }
         ],
         "symbolsUsed": [
@@ -4472,7 +4472,7 @@
         "droppedCandidates": [
           {
             "label": "unsigned",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Bc9tLg/c.c:1076: `gBgDataPtrs' undeclared (first use in this function)"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-HZfKvv/c.c:1076: `gBgDataPtrs' undeclared (first use in this function)"
           }
         ],
         "symbolsUsed": [],
@@ -5546,11 +5546,11 @@
         "droppedCandidates": [
           {
             "label": "unsigned",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-72Ava6/c.c:1077: too many arguments to function `thunk_sub_080002A0'"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-gKvpdc/c.c:1077: too many arguments to function `thunk_sub_080002A0'"
           },
           {
             "label": "unsigned/reread-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-jXTN8q/c.c:1075: too many arguments to function `thunk_sub_080002A0'"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-8y7NSf/c.c:1075: too many arguments to function `thunk_sub_080002A0'"
           }
         ],
         "symbolsUsed": [],
@@ -6342,131 +6342,131 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-RYg0Ra/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-SAFKlJ/c.c:1085: incompatible types in assignment"
           },
           {
             "label": "unsigned/coalesce-v2-v3/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-xDNw9P/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-ZvAxbV/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "unsigned/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-6Cqc3p/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-yTYEMs/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "unsigned/livebase/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Ogqi6L/c.c:1087: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-faAw3w/c.c:1087: incompatible types in assignment"
           },
           {
             "label": "unsigned/defsite/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-zfMHn0/c.c:1086: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-UVYZ0U/c.c:1086: incompatible types in assignment"
           },
           {
             "label": "unsigned/defsite/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-cEh3AL/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-awQkKs/c.c:1085: incompatible types in assignment"
           },
           {
             "label": "unsigned/defsite/livebase/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-uDNdZ2/c.c:1088: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Y8FsBn/c.c:1088: incompatible types in assignment"
           },
           {
             "label": "unsigned/defsite/parkfirst/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Z48ugS/c.c:1086: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-FVAUtg/c.c:1086: incompatible types in assignment"
           },
           {
             "label": "unsigned/reread-globals/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-WVvDBR/c.c:1083: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-92YTN1/c.c:1083: invalid operands to binary <<"
           },
           {
             "label": "unsigned/reread-globals/coalesce-v0-v1/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-bzpldh/c.c:1082: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-bZMo9u/c.c:1082: invalid operands to binary <<"
           },
           {
             "label": "unsigned/reread-globals/coalesce-v0-v2/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-jimK3u/c.c:1082: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-2umwmB/c.c:1082: invalid operands to binary <<"
           },
           {
             "label": "unsigned/reread-globals/livebase/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-EIYhdv/c.c:1085: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-CR7jKV/c.c:1085: invalid operands to binary <<"
           },
           {
             "label": "unsigned/defsite/reread-globals/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-KwZBeH/c.c:1084: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-AyOpQb/c.c:1084: invalid operands to binary <<"
           },
           {
             "label": "unsigned/defsite/reread-globals/coalesce-v0-v2/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-cd400c/c.c:1083: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-tOpjnx/c.c:1083: invalid operands to binary <<"
           },
           {
             "label": "unsigned/defsite/reread-globals/livebase/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-fxqCaz/c.c:1086: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Jc9dV9/c.c:1086: invalid operands to binary <<"
           },
           {
             "label": "unsigned/defsite/reread-globals/parkfirst/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Myjj1k/c.c:1084: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-3mOhlC/c.c:1084: invalid operands to binary <<"
           },
           {
             "label": "signed/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-PGqvTB/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-wui8v9/c.c:1085: incompatible types in assignment"
           },
           {
             "label": "signed/coalesce-v2-v3/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-Fa0Dp0/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-9LA4hr/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "signed/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-kDZ4Tq/c.c:1084: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-I5Q4nY/c.c:1084: incompatible types in assignment"
           },
           {
             "label": "signed/livebase/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-qZK3h5/c.c:1087: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-jaoObH/c.c:1087: incompatible types in assignment"
           },
           {
             "label": "signed/defsite/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-FA7jiZ/c.c:1086: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-kNwe3i/c.c:1086: incompatible types in assignment"
           },
           {
             "label": "signed/defsite/coalesce-v2-v4/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-409E0m/c.c:1085: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-wuw2ha/c.c:1085: incompatible types in assignment"
           },
           {
             "label": "signed/defsite/livebase/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-4Y1kL6/c.c:1088: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-SmM1Kg/c.c:1088: incompatible types in assignment"
           },
           {
             "label": "signed/defsite/parkfirst/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-SGoNnx/c.c:1086: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-r8jbrC/c.c:1086: incompatible types in assignment"
           },
           {
             "label": "signed/reread-globals/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-DxdnCf/c.c:1083: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-vUSHYO/c.c:1083: invalid operands to binary <<"
           },
           {
             "label": "signed/reread-globals/coalesce-v0-v1/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-n0ixoj/c.c:1082: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-1N6iAv/c.c:1082: invalid operands to binary <<"
           },
           {
             "label": "signed/reread-globals/coalesce-v0-v2/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-50pOry/c.c:1082: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-uZpWN2/c.c:1082: invalid operands to binary <<"
           },
           {
             "label": "signed/reread-globals/livebase/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-jkBkGO/c.c:1085: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-FC8Hnu/c.c:1085: invalid operands to binary <<"
           },
           {
             "label": "signed/defsite/reread-globals/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-ZbEjqC/c.c:1084: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-CyIV7P/c.c:1084: invalid operands to binary <<"
           },
           {
             "label": "signed/defsite/reread-globals/coalesce-v0-v2/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-uExDTl/c.c:1083: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-aC1nV6/c.c:1083: invalid operands to binary <<"
           },
           {
             "label": "signed/defsite/reread-globals/livebase/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-roL5Jd/c.c:1086: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-QBRLBp/c.c:1086: invalid operands to binary <<"
           },
           {
             "label": "signed/defsite/reread-globals/parkfirst/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-yV1F6n/c.c:1084: invalid operands to binary <<"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-atOWjj/c.c:1084: invalid operands to binary <<"
           }
         ],
         "symbolsUsed": [
@@ -6572,27 +6572,27 @@
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-8ai5mV/c.c:1501: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-wX7bjg/c.c:1501: incompatible types in assignment"
           },
           {
             "label": "unsigned/volatile/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-XKsHzb/c.c:1501: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-di89R6/c.c:1501: incompatible types in assignment"
           },
           {
             "label": "unsigned/livebase/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-l3qxav/c.c:1505: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-nzUMLh/c.c:1505: incompatible types in assignment"
           },
           {
             "label": "unsigned/reread-globals/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-bnWyrC/c.c:1489: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-h5JJ17/c.c:1489: incompatible types in assignment"
           },
           {
             "label": "unsigned/reread-globals/volatile/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-ZHpJW5/c.c:1489: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-3B0GLf/c.c:1489: incompatible types in assignment"
           },
           {
             "label": "unsigned/reread-globals/livebase/raw-globals",
-            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-KlfeJ9/c.c:1493: incompatible types in assignment"
+            "error": "agbcc failed: /var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-i6BNOB/c.c:1493: incompatible types in assignment"
           }
         ],
         "symbolsUsed": [
@@ -21762,6 +21762,101 @@
       }
     },
     {
+      "id": "synthetic:armhomes:agbcc",
+      "sym": "armhomes",
+      "project": "synthetic",
+      "tier": "synthetic",
+      "toolchain": "agbcc",
+      "isa": "arm",
+      "compiler": "agbcc",
+      "language": "c",
+      "features": [
+        "value-home",
+        "pointer",
+        "loop",
+        "nested-loop",
+        "shift",
+        "bitwise",
+        "mmio",
+        "dma"
+      ],
+      "loc": 1,
+      "refSource": "void armhomes(u8 *dst, s32 w, s32 n, s32 sel){ volatile s32 *dma = (volatile s32 *)0x040000d4; s32 i; if (sel) { for (i = 0; i < n; i++){ dma[0] = (s32)dst; dma[1] = 0x06000000 + (w >> 1) * i; dma[2] = (u32)w >> 1 | 0x80000000; while (dma[2] & 0x80000000) {} } } else { for (i = 0; i < n; i++){ dma[0] = (s32)(dst + w); dma[1] = 0x06008000 + (w >> 1) * i; dma[2] = (u32)w >> 1 | 0x80000000; while (dma[2] & 0x80000000) {} } } }",
+      "targetAsm": "@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tarmhomes\n\t.type\t armhomes,function\n\t.thumb_func\narmhomes:\n\tpush\t{r4, r5, r6, r7, lr}\n\tmov\tr7, r8\n\tpush\t{r7}\n\tadd\tr6, r0, #0\n\tadd\tr5, r2, #0\n\tldr\tr2, .L23\n\tcmp\tr3, #0\n\tbeq\t.L3\t@cond_branch\n\tmov\tr3, #0x0\n\tcmp\tr3, r5\n\tbge\t.L13\t@cond_branch\n\tasr\tr0, r1, #0x1\n\tmov\tip, r0\n\tmov\tr0, #0xc0\n\tlsl\tr0, r0, #0x13\n\tmov\tr8, r0\n\tlsr\tr4, r1, #0x1\n\tmov\tr7, #0x80\n\tlsl\tr7, r7, #0x18\n\torr\tr4, r4, r7\n.L7:\n\tstr\tr6, [r2]\n\tmov\tr0, ip\n\tmul\tr0, r0, r3\n\tadd\tr0, r0, r8\n\tstr\tr0, [r2, #0x4]\n\tstr\tr4, [r2, #0x8]\n\tldr\tr0, [r2, #0x8]\n\tand\tr0, r0, r7\n\tadd\tr3, r3, #0x1\n\tcmp\tr0, #0\n\tbeq\t.L6\t@cond_branch\n\tmov\tr1, #0x80\n\tlsl\tr1, r1, #0x18\n.L8:\n\tldr\tr0, [r2, #0x8]\n\tand\tr0, r0, r1\n\tcmp\tr0, #0\n\tbne\t.L8\t@cond_branch\n.L6:\n\tcmp\tr3, r5\n\tblt\t.L7\t@cond_branch\n\tb\t.L13\n.L24:\n\t.align\t2, 0\n.L23:\n\t.word\t0x40000d4\n.L3:\n\tmov\tr3, #0x0\n\tcmp\tr3, r5\n\tbge\t.L13\t@cond_branch\n\tadd\tr6, r6, r1\n\tmov\tip, r6\n\tlsr\tr4, r1, #0x1\n\tmov\tr6, #0x80\n\tlsl\tr6, r6, #0x18\n\torr\tr4, r4, r6\n\tasr\tr7, r1, #0x1\n\tldr\tr0, .L25\n\tmov\tr8, r0\n.L17:\n\tmov\tr0, ip\n\tstr\tr0, [r2]\n\tmov\tr0, r7\n\tmul\tr0, r0, r3\n\tadd\tr0, r0, r8\n\tstr\tr0, [r2, #0x4]\n\tstr\tr4, [r2, #0x8]\n\tldr\tr0, [r2, #0x8]\n\tand\tr0, r0, r6\n\tadd\tr3, r3, #0x1\n\tcmp\tr0, #0\n\tbeq\t.L16\t@cond_branch\n\tmov\tr1, #0x80\n\tlsl\tr1, r1, #0x18\n.L18:\n\tldr\tr0, [r2, #0x8]\n\tand\tr0, r0, r1\n\tcmp\tr0, #0\n\tbne\t.L18\t@cond_branch\n.L16:\n\tcmp\tr3, r5\n\tblt\t.L17\t@cond_branch\n.L13:\n\tpop\t{r3}\n\tmov\tr8, r3\n\tpop\t{r4, r5, r6, r7}\n\tpop\t{r0}\n\tbx\tr0\n.L26:\n\t.align\t2, 0\n.L25:\n\t.word\t0x6008000\n.Lfe1:\n\t.size\t armhomes,.Lfe1-armhomes\n",
+      "ctx": "void armhomes(u8 *dst, s32 w, s32 n, s32 sel);",
+      "proto": {
+        "armhomes": {
+          "returnsVoid": true
+        }
+      },
+      "asmlift": {
+        "decompiler": "asmlift",
+        "candidateLabel": "signed/livebase/volatile",
+        "outcome": "nonmatch",
+        "source": "void armhomes(s32 a0, s32 a1, s32 a2, s32 a3, s32 a4) {\n    s32 v0;\n    s32 v1;\n    volatile s32 * p0;\n    p0 = (s32 *)67109076;\n    if (a3 == 0) {\n        if (0 < a2) {\n            v1 = 0;\n            do {\n                *p0 = a0 + a1;\n                p0[1] = (a1 >> 1) * v1 + 100696064;\n                p0[2] = (u32)a1 >> 1 | 128 << 24;\n                while ((p0[2] & 128 << 24) != 0) {\n                }\n                v1 = v1 + 1;\n            } while (v1 < a2);\n        }\n    } else {\n        if (0 < a2) {\n            v0 = 0;\n            do {\n                *p0 = a0;\n                p0[1] = (a1 >> 1) * v0 + (192 << 19);\n                p0[2] = (u32)a1 >> 1 | 128 << 24;\n                while ((p0[2] & 128 << 24) != 0) {\n                }\n                v0 = v0 + 1;\n            } while (v0 < a2);\n        }\n    }\n    return;\n}\n",
+        "score": 53,
+        "maxScore": 92,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 12,
+          "delete": 11,
+          "replace": 3,
+          "opMismatch": 3,
+          "argMismatch": 24
+        },
+        "quality": {
+          "score": 98,
+          "lines": 32,
+          "gotos": 0,
+          "casts": 3,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        }
+      },
+      "m2c": {
+        "decompiler": "m2c",
+        "outcome": "noncompile",
+        "source": "void armhomes(u8 *dst, s32 w, s32 n, s32 sel) {\n    s32 var_r3;\n    s32 var_r3_2;\n\n    if (sel != 0) {\n        var_r3 = 0;\n        if (n > 0) {\n            do {\n                (void *)0x040000D4->unk0 = dst;\n                (void *)0x040000D4->unk4 = (s32) (((w >> 1) * var_r3) + 0x06000000);\n                (void *)0x040000D4->unk8 = (s32) (((u32) w >> 1) | 0x80000000);\n                var_r3 += 1;\n                if ((void *)0x040000D4->unk8 & 0x80000000) {\n                    do {\n\n                    } while ((void *)0x040000D4->unk8 & 0x80000000);\n                }\n            } while (var_r3 < n);\n        }\n    } else {\n        var_r3_2 = 0;\n        if (n > 0) {\n            do {\n                (void *)0x040000D4->unk0 = &dst[w];\n                (void *)0x040000D4->unk4 = (s32) (((w >> 1) * var_r3_2) + 0x06008000);\n                (void *)0x040000D4->unk8 = (s32) (((u32) w >> 1) | 0x80000000);\n                var_r3_2 += 1;\n                if ((void *)0x040000D4->unk8 & 0x80000000) {\n                    do {\n\n                    } while ((void *)0x040000D4->unk8 & 0x80000000);\n                }\n            } while (var_r3_2 < n);\n        }\n    }\n}\n",
+        "score": null,
+        "maxScore": null,
+        "compileErrors": 1,
+        "quality": {
+          "score": 88,
+          "lines": 33,
+          "gotos": 0,
+          "casts": 14,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        },
+        "errorMarkers": [
+          "<tmp>/cand.c.pp.c:9: invalid type argument of `->'",
+          "<tmp>/cand.c.pp.c:10: invalid type argument of `->'",
+          "<tmp>/cand.c.pp.c:11: invalid type argument of `->'",
+          "<tmp>/cand.c.pp.c:13: invalid type argument of `->'",
+          "<tmp>/cand.c.pp.c:15: invalid type argument of `->'"
+        ]
+      },
+      "gapSize": {
+        "decompiler": "asmlift",
+        "score": 53,
+        "maxScore": 92,
+        "ratio": 0.5760869565217391,
+        "kinds": {
+          "insert": 12,
+          "delete": 11,
+          "replace": 3,
+          "opMismatch": 3,
+          "argMismatch": 24
+        }
+      },
+      "scripts": {
+        "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `armhomes` — benchmark function synthetic:armhomes:agbcc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The exact agbcc `.s` text the benchmark fed m2c, verbatim.\ncat > in.s <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tarmhomes\n\t.type\t armhomes,function\n\t.thumb_func\narmhomes:\n\tpush\t{r4, r5, r6, r7, lr}\n\tmov\tr7, r8\n\tpush\t{r7}\n\tadd\tr6, r0, #0\n\tadd\tr5, r2, #0\n\tldr\tr2, .L23\n\tcmp\tr3, #0\n\tbeq\t.L3\t@cond_branch\n\tmov\tr3, #0x0\n\tcmp\tr3, r5\n\tbge\t.L13\t@cond_branch\n\tasr\tr0, r1, #0x1\n\tmov\tip, r0\n\tmov\tr0, #0xc0\n\tlsl\tr0, r0, #0x13\n\tmov\tr8, r0\n\tlsr\tr4, r1, #0x1\n\tmov\tr7, #0x80\n\tlsl\tr7, r7, #0x18\n\torr\tr4, r4, r7\n.L7:\n\tstr\tr6, [r2]\n\tmov\tr0, ip\n\tmul\tr0, r0, r3\n\tadd\tr0, r0, r8\n\tstr\tr0, [r2, #0x4]\n\tstr\tr4, [r2, #0x8]\n\tldr\tr0, [r2, #0x8]\n\tand\tr0, r0, r7\n\tadd\tr3, r3, #0x1\n\tcmp\tr0, #0\n\tbeq\t.L6\t@cond_branch\n\tmov\tr1, #0x80\n\tlsl\tr1, r1, #0x18\n.L8:\n\tldr\tr0, [r2, #0x8]\n\tand\tr0, r0, r1\n\tcmp\tr0, #0\n\tbne\t.L8\t@cond_branch\n.L6:\n\tcmp\tr3, r5\n\tblt\t.L7\t@cond_branch\n\tb\t.L13\n.L24:\n\t.align\t2, 0\n.L23:\n\t.word\t0x40000d4\n.L3:\n\tmov\tr3, #0x0\n\tcmp\tr3, r5\n\tbge\t.L13\t@cond_branch\n\tadd\tr6, r6, r1\n\tmov\tip, r6\n\tlsr\tr4, r1, #0x1\n\tmov\tr6, #0x80\n\tlsl\tr6, r6, #0x18\n\torr\tr4, r4, r6\n\tasr\tr7, r1, #0x1\n\tldr\tr0, .L25\n\tmov\tr8, r0\n.L17:\n\tmov\tr0, ip\n\tstr\tr0, [r2]\n\tmov\tr0, r7\n\tmul\tr0, r0, r3\n\tadd\tr0, r0, r8\n\tstr\tr0, [r2, #0x4]\n\tstr\tr4, [r2, #0x8]\n\tldr\tr0, [r2, #0x8]\n\tand\tr0, r0, r6\n\tadd\tr3, r3, #0x1\n\tcmp\tr0, #0\n\tbeq\t.L16\t@cond_branch\n\tmov\tr1, #0x80\n\tlsl\tr1, r1, #0x18\n.L18:\n\tldr\tr0, [r2, #0x8]\n\tand\tr0, r0, r1\n\tcmp\tr0, #0\n\tbne\t.L18\t@cond_branch\n.L16:\n\tcmp\tr3, r5\n\tblt\t.L17\t@cond_branch\n.L13:\n\tpop\t{r3}\n\tmov\tr8, r3\n\tpop\t{r4, r5, r6, r7}\n\tpop\t{r0}\n\tbx\tr0\n.L26:\n\t.align\t2, 0\n.L25:\n\t.word\t0x6008000\n.Lfe1:\n\t.size\t armhomes,.Lfe1-armhomes\nASM_INPUT\n\n# The exact context header the benchmark passed via --context — prototypes only\n# (no struct/global layouts: the benchmark measures cold recovery).\ncat > ctx.h <<'CTX_INPUT'\nvoid armhomes(u8 *dst, s32 w, s32 n, s32 sel);\nCTX_INPUT\n\nargs=(\n  --target gba            # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function armhomes     # the symbol to decompile from in.s\n  --context ctx.h         # the C context header above (typedefs + prototypes)\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `armhomes` — benchmark function synthetic:armhomes:agbcc.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:armhomes:agbcc --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact agbcc `.s` text.\ncat > in.asm <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tarmhomes\n\t.type\t armhomes,function\n\t.thumb_func\narmhomes:\n\tpush\t{r4, r5, r6, r7, lr}\n\tmov\tr7, r8\n\tpush\t{r7}\n\tadd\tr6, r0, #0\n\tadd\tr5, r2, #0\n\tldr\tr2, .L23\n\tcmp\tr3, #0\n\tbeq\t.L3\t@cond_branch\n\tmov\tr3, #0x0\n\tcmp\tr3, r5\n\tbge\t.L13\t@cond_branch\n\tasr\tr0, r1, #0x1\n\tmov\tip, r0\n\tmov\tr0, #0xc0\n\tlsl\tr0, r0, #0x13\n\tmov\tr8, r0\n\tlsr\tr4, r1, #0x1\n\tmov\tr7, #0x80\n\tlsl\tr7, r7, #0x18\n\torr\tr4, r4, r7\n.L7:\n\tstr\tr6, [r2]\n\tmov\tr0, ip\n\tmul\tr0, r0, r3\n\tadd\tr0, r0, r8\n\tstr\tr0, [r2, #0x4]\n\tstr\tr4, [r2, #0x8]\n\tldr\tr0, [r2, #0x8]\n\tand\tr0, r0, r7\n\tadd\tr3, r3, #0x1\n\tcmp\tr0, #0\n\tbeq\t.L6\t@cond_branch\n\tmov\tr1, #0x80\n\tlsl\tr1, r1, #0x18\n.L8:\n\tldr\tr0, [r2, #0x8]\n\tand\tr0, r0, r1\n\tcmp\tr0, #0\n\tbne\t.L8\t@cond_branch\n.L6:\n\tcmp\tr3, r5\n\tblt\t.L7\t@cond_branch\n\tb\t.L13\n.L24:\n\t.align\t2, 0\n.L23:\n\t.word\t0x40000d4\n.L3:\n\tmov\tr3, #0x0\n\tcmp\tr3, r5\n\tbge\t.L13\t@cond_branch\n\tadd\tr6, r6, r1\n\tmov\tip, r6\n\tlsr\tr4, r1, #0x1\n\tmov\tr6, #0x80\n\tlsl\tr6, r6, #0x18\n\torr\tr4, r4, r6\n\tasr\tr7, r1, #0x1\n\tldr\tr0, .L25\n\tmov\tr8, r0\n.L17:\n\tmov\tr0, ip\n\tstr\tr0, [r2]\n\tmov\tr0, r7\n\tmul\tr0, r0, r3\n\tadd\tr0, r0, r8\n\tstr\tr0, [r2, #0x4]\n\tstr\tr4, [r2, #0x8]\n\tldr\tr0, [r2, #0x8]\n\tand\tr0, r0, r6\n\tadd\tr3, r3, #0x1\n\tcmp\tr0, #0\n\tbeq\t.L16\t@cond_branch\n\tmov\tr1, #0x80\n\tlsl\tr1, r1, #0x18\n.L18:\n\tldr\tr0, [r2, #0x8]\n\tand\tr0, r0, r1\n\tcmp\tr0, #0\n\tbne\t.L18\t@cond_branch\n.L16:\n\tcmp\tr3, r5\n\tblt\t.L17\t@cond_branch\n.L13:\n\tpop\t{r3}\n\tmov\tr8, r3\n\tpop\t{r4, r5, r6, r7}\n\tpop\t{r0}\n\tbx\tr0\n.L26:\n\t.align\t2, 0\n.L25:\n\t.word\t0x6008000\n.Lfe1:\n\t.size\t armhomes,.Lfe1-armhomes\nASM_INPUT\n\n# The prototype hints the benchmark fed asmlift (callee arities / void-ness).\ncat > proto.json <<'PROTO_INPUT'\n{\n  \"armhomes\": {\n    \"returnsVoid\": true\n  }\n}\nPROTO_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target agbcc          # frontend + target description (ISA, calling convention, compiler idioms)\n  --name armhomes         # the symbol to decompile (multi-function input selects by name)\n  --proto proto.json      # the prototype hints above (callee arities / void-ness)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+      }
+    },
+    {
       "id": "synthetic:arraysum:agbcc",
       "sym": "arraysum",
       "project": "synthetic",
@@ -30951,6 +31046,100 @@
       "scripts": {
         "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `dma_wait` — benchmark function synthetic:dma_wait:mwcc_242_81.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The benchmark's objdump→GNU-as normalization of this function's disassembly (m2c cannot\n# read raw objdump), including the jump-table/const data sections recovered from the target\n# object — the exact text the benchmark fed m2c.\ncat > in.s <<'ASM_INPUT'\nglabel dma_wait\n    lis     r6,-13312\n    ori     r0,r5,1\n    stw     r3,24596(r6)\n    stw     r4,24600(r6)\n    stw     r0,24604(r6)\n.L14:\n    lwz     r0,24604(r6)\n    clrlwi. r0,r0,31\n    bne      .L14\n    blr\nASM_INPUT\n\n# The exact context header the benchmark passed via --context — prototypes only\n# (no struct/global layouts: the benchmark measures cold recovery).\ncat > ctx.h <<'CTX_INPUT'\nvoid dma_wait(u32 mar, u32 len, u32 cr);\nCTX_INPUT\n\nargs=(\n  --target ppc-mwcc-c     # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function dma_wait     # the symbol to decompile from in.s\n  --context ctx.h         # the C context header above (typedefs + prototypes)\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
         "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `dma_wait` — benchmark function synthetic:dma_wait:mwcc_242_81.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:dma_wait:mwcc_242_81 --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact `objdump -d --no-show-raw-insn` text.\ncat > in.asm <<'ASM_INPUT'\n\ntarget.o:     file format elf32-powerpc\n\n\nDisassembly of section .text:\n\n00000000 <dma_wait>:\n   0:\tlis     r6,-13312\n   4:\tori     r0,r5,1\n   8:\tstw     r3,24596(r6)\n   c:\tstw     r4,24600(r6)\n  10:\tstw     r0,24604(r6)\n  14:\tlwz     r0,24604(r6)\n  18:\tclrlwi. r0,r0,31\n  1c:\tbne     14 <dma_wait+0x14>\n  20:\tblr\nASM_INPUT\n\n# The target object's objdump -s -r -t dump — the data sections (jump tables, anonymous\n# constants) the text-only disassembly lacks; the benchmark recovered them from the object.\ncat > dump.txt <<'DUMP_INPUT'\n\ntarget.o:     file format elf32-powerpc\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 ref.c\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .mwcats.text\t00000000 .mwcats.text\n00000000 g     F .text\t00000024 dma_wait\n\n\nRELOCATION RECORDS FOR [.mwcats.text]:\nOFFSET   TYPE              VALUE\n00000004 R_PPC_ADDR32      dma_wait\n\n\nContents of section .text:\n 0000 3cc0cc00 60a00001 90666014 90866018  <...`....f`...`.\n 0010 9006601c 8006601c 540007ff 4082fff8  ..`...`.T...@...\n 0020 4e800020                             N..             \nContents of section .mwcats.text:\n 0000 02000024 00000000                    ...$....        \nContents of section .comment:\n 0000 436f6465 57617272 696f720a 02040201  CodeWarrior.....\n 0010 01020016 2c000000 00000000 00000000  ....,...........\n 0020 00000000 00000000 00000000 00000000  ................\n 0030 00000000 00000001 00000000 00000004  ................\n 0040 00000000 00000004 00000000 00000004  ................\n 0050 00000000                             ....\nDUMP_INPUT\n\n# The prototype hints the benchmark fed asmlift (callee arities / void-ness).\ncat > proto.json <<'PROTO_INPUT'\n{\n  \"dma_wait\": {\n    \"returnsVoid\": true\n  }\n}\nPROTO_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target mwcc_242_81    # frontend + target description (ISA, calling convention, compiler idioms)\n  --name dma_wait         # the symbol to decompile (multi-function input selects by name)\n  --asm-data dump.txt     # the data sections above (jump-table/const recovery)\n  --proto proto.json      # the prototype hints above (callee arities / void-ness)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+      }
+    },
+    {
+      "id": "synthetic:dmafield:agbcc",
+      "sym": "dmafield",
+      "project": "synthetic",
+      "tier": "synthetic",
+      "toolchain": "agbcc",
+      "isa": "arm",
+      "compiler": "agbcc",
+      "language": "c",
+      "features": [
+        "value-home",
+        "pointer",
+        "loop",
+        "nested-loop",
+        "bitwise",
+        "mmio",
+        "dma"
+      ],
+      "loc": 1,
+      "refSource": "void dmafield(s32 n){ u8 *b = (u8 *)0x03001000; volatile s32 *dma = (volatile s32 *)0x040000d4; s32 i; for (i = 0; i < n; i++){ if (i < *(u16 *)(b + 72)) { *(u16 *)(b + 74) = i; } dma[0] = (s32)(b + 112); dma[1] = *(s32 *)(b + 112); dma[2] = i | 0x80000000; while (dma[2] & 0x80000000) {} } }",
+      "targetAsm": "@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tdmafield\n\t.type\t dmafield,function\n\t.thumb_func\ndmafield:\n\tpush\t{r4, r5, r6, r7, lr}\n\tadd\tr4, r0, #0\n\tldr\tr0, .L13\n\tmov\tip, r0\n\tldr\tr3, .L13+0x4\n\tmov\tr1, #0x0\n\tcmp\tr1, r4\n\tbge\t.L4\t@cond_branch\n\tmov\tr7, ip\n\tadd\tr7, r7, #0x48\n\tmov\tr5, #0x80\n\tlsl\tr5, r5, #0x18\n\tmov\tr6, ip\n\tadd\tr6, r6, #0x4a\n.L6:\n\tldrh\tr2, [r7]\n\tcmp\tr1, r2\n\tbge\t.L7\t@cond_branch\n\tstrh\tr1, [r6]\n.L7:\n\tmov\tr0, ip\n\tadd\tr0, r0, #0x70\n\tstr\tr0, [r3]\n\tmov\tr2, ip\n\tldr\tr0, [r2, #0x70]\n\tstr\tr0, [r3, #0x4]\n\tadd\tr0, r1, #0\n\torr\tr0, r0, r5\n\tstr\tr0, [r3, #0x8]\n\tldr\tr0, [r3, #0x8]\n\tand\tr0, r0, r5\n\tadd\tr2, r1, #0x1\n\tcmp\tr0, #0\n\tbeq\t.L5\t@cond_branch\n\tmov\tr1, #0x80\n\tlsl\tr1, r1, #0x18\n.L8:\n\tldr\tr0, [r3, #0x8]\n\tand\tr0, r0, r1\n\tcmp\tr0, #0\n\tbne\t.L8\t@cond_branch\n.L5:\n\tadd\tr1, r2, #0\n\tcmp\tr1, r4\n\tblt\t.L6\t@cond_branch\n.L4:\n\tpop\t{r4, r5, r6, r7}\n\tpop\t{r0}\n\tbx\tr0\n.L14:\n\t.align\t2, 0\n.L13:\n\t.word\t0x3001000\n\t.word\t0x40000d4\n.Lfe1:\n\t.size\t dmafield,.Lfe1-dmafield\n",
+      "ctx": "void dmafield(s32 n);",
+      "proto": {
+        "dmafield": {
+          "returnsVoid": true
+        }
+      },
+      "asmlift": {
+        "decompiler": "asmlift",
+        "candidateLabel": "signed/livebase/volatile/initfirst",
+        "outcome": "nonmatch",
+        "source": "void dmafield(s32 a0) {\n    s32 v0;\n    volatile s32 * p0;\n    p0 = (s32 *)67109076;\n    v0 = 0;\n    if (v0 < a0) {\n        do {\n            if (v0 < *(u16 *)50335816) *(u16 *)50335818 = v0;\n            *p0 = 50335856;\n            p0[1] = ((s32 *)50335744)[28];\n            p0[2] = v0 | 128 << 24;\n            while ((p0[2] & 128 << 24) != 0) {\n            }\n            v0 = v0 + 1;\n        } while (v0 < a0);\n    }\n    return;\n}\n",
+        "score": 29,
+        "maxScore": 53,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 7,
+          "delete": 10,
+          "replace": 1,
+          "opMismatch": 0,
+          "argMismatch": 11
+        },
+        "quality": {
+          "score": 96,
+          "lines": 18,
+          "gotos": 0,
+          "casts": 4,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        }
+      },
+      "m2c": {
+        "decompiler": "m2c",
+        "outcome": "noncompile",
+        "source": "void dmafield(s32 n) {\n    s32 var_r1;\n\n    var_r1 = 0;\n    if (n > 0) {\n        do {\n            if (var_r1 < (s32) *(u16 *)0x03001048) {\n                *(s16 *)0x0300104A = (s16) var_r1;\n            }\n            (void *)0x040000D4->unk0 = 0x03001070;\n            (void *)0x040000D4->unk4 = (s32) (void *)0x03001000->unk70;\n            (void *)0x040000D4->unk8 = (s32) (var_r1 | 0x80000000);\n            if ((void *)0x040000D4->unk8 & 0x80000000) {\n                do {\n\n                } while ((void *)0x040000D4->unk8 & 0x80000000);\n            }\n            var_r1 += 1;\n        } while (var_r1 < n);\n    }\n}\n",
+        "score": null,
+        "maxScore": null,
+        "compileErrors": 1,
+        "quality": {
+          "score": 88,
+          "lines": 19,
+          "gotos": 0,
+          "casts": 12,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 2
+        },
+        "errorMarkers": [
+          "<tmp>/cand.c.pp.c:10: invalid type argument of `->'",
+          "<tmp>/cand.c.pp.c:11: invalid type argument of `->'",
+          "<tmp>/cand.c.pp.c:12: invalid type argument of `->'",
+          "<tmp>/cand.c.pp.c:13: invalid type argument of `->'",
+          "<tmp>/cand.c.pp.c:15: invalid type argument of `->'"
+        ]
+      },
+      "gapSize": {
+        "decompiler": "asmlift",
+        "score": 29,
+        "maxScore": 53,
+        "ratio": 0.5471698113207547,
+        "kinds": {
+          "insert": 7,
+          "delete": 10,
+          "replace": 1,
+          "opMismatch": 0,
+          "argMismatch": 11
+        }
+      },
+      "scripts": {
+        "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `dmafield` — benchmark function synthetic:dmafield:agbcc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The exact agbcc `.s` text the benchmark fed m2c, verbatim.\ncat > in.s <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tdmafield\n\t.type\t dmafield,function\n\t.thumb_func\ndmafield:\n\tpush\t{r4, r5, r6, r7, lr}\n\tadd\tr4, r0, #0\n\tldr\tr0, .L13\n\tmov\tip, r0\n\tldr\tr3, .L13+0x4\n\tmov\tr1, #0x0\n\tcmp\tr1, r4\n\tbge\t.L4\t@cond_branch\n\tmov\tr7, ip\n\tadd\tr7, r7, #0x48\n\tmov\tr5, #0x80\n\tlsl\tr5, r5, #0x18\n\tmov\tr6, ip\n\tadd\tr6, r6, #0x4a\n.L6:\n\tldrh\tr2, [r7]\n\tcmp\tr1, r2\n\tbge\t.L7\t@cond_branch\n\tstrh\tr1, [r6]\n.L7:\n\tmov\tr0, ip\n\tadd\tr0, r0, #0x70\n\tstr\tr0, [r3]\n\tmov\tr2, ip\n\tldr\tr0, [r2, #0x70]\n\tstr\tr0, [r3, #0x4]\n\tadd\tr0, r1, #0\n\torr\tr0, r0, r5\n\tstr\tr0, [r3, #0x8]\n\tldr\tr0, [r3, #0x8]\n\tand\tr0, r0, r5\n\tadd\tr2, r1, #0x1\n\tcmp\tr0, #0\n\tbeq\t.L5\t@cond_branch\n\tmov\tr1, #0x80\n\tlsl\tr1, r1, #0x18\n.L8:\n\tldr\tr0, [r3, #0x8]\n\tand\tr0, r0, r1\n\tcmp\tr0, #0\n\tbne\t.L8\t@cond_branch\n.L5:\n\tadd\tr1, r2, #0\n\tcmp\tr1, r4\n\tblt\t.L6\t@cond_branch\n.L4:\n\tpop\t{r4, r5, r6, r7}\n\tpop\t{r0}\n\tbx\tr0\n.L14:\n\t.align\t2, 0\n.L13:\n\t.word\t0x3001000\n\t.word\t0x40000d4\n.Lfe1:\n\t.size\t dmafield,.Lfe1-dmafield\nASM_INPUT\n\n# The exact context header the benchmark passed via --context — prototypes only\n# (no struct/global layouts: the benchmark measures cold recovery).\ncat > ctx.h <<'CTX_INPUT'\nvoid dmafield(s32 n);\nCTX_INPUT\n\nargs=(\n  --target gba            # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function dmafield     # the symbol to decompile from in.s\n  --context ctx.h         # the C context header above (typedefs + prototypes)\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `dmafield` — benchmark function synthetic:dmafield:agbcc.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:dmafield:agbcc --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact agbcc `.s` text.\ncat > in.asm <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tdmafield\n\t.type\t dmafield,function\n\t.thumb_func\ndmafield:\n\tpush\t{r4, r5, r6, r7, lr}\n\tadd\tr4, r0, #0\n\tldr\tr0, .L13\n\tmov\tip, r0\n\tldr\tr3, .L13+0x4\n\tmov\tr1, #0x0\n\tcmp\tr1, r4\n\tbge\t.L4\t@cond_branch\n\tmov\tr7, ip\n\tadd\tr7, r7, #0x48\n\tmov\tr5, #0x80\n\tlsl\tr5, r5, #0x18\n\tmov\tr6, ip\n\tadd\tr6, r6, #0x4a\n.L6:\n\tldrh\tr2, [r7]\n\tcmp\tr1, r2\n\tbge\t.L7\t@cond_branch\n\tstrh\tr1, [r6]\n.L7:\n\tmov\tr0, ip\n\tadd\tr0, r0, #0x70\n\tstr\tr0, [r3]\n\tmov\tr2, ip\n\tldr\tr0, [r2, #0x70]\n\tstr\tr0, [r3, #0x4]\n\tadd\tr0, r1, #0\n\torr\tr0, r0, r5\n\tstr\tr0, [r3, #0x8]\n\tldr\tr0, [r3, #0x8]\n\tand\tr0, r0, r5\n\tadd\tr2, r1, #0x1\n\tcmp\tr0, #0\n\tbeq\t.L5\t@cond_branch\n\tmov\tr1, #0x80\n\tlsl\tr1, r1, #0x18\n.L8:\n\tldr\tr0, [r3, #0x8]\n\tand\tr0, r0, r1\n\tcmp\tr0, #0\n\tbne\t.L8\t@cond_branch\n.L5:\n\tadd\tr1, r2, #0\n\tcmp\tr1, r4\n\tblt\t.L6\t@cond_branch\n.L4:\n\tpop\t{r4, r5, r6, r7}\n\tpop\t{r0}\n\tbx\tr0\n.L14:\n\t.align\t2, 0\n.L13:\n\t.word\t0x3001000\n\t.word\t0x40000d4\n.Lfe1:\n\t.size\t dmafield,.Lfe1-dmafield\nASM_INPUT\n\n# The prototype hints the benchmark fed asmlift (callee arities / void-ness).\ncat > proto.json <<'PROTO_INPUT'\n{\n  \"dmafield\": {\n    \"returnsVoid\": true\n  }\n}\nPROTO_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target agbcc          # frontend + target description (ISA, calling convention, compiler idioms)\n  --name dmafield         # the symbol to decompile (multi-function input selects by name)\n  --proto proto.json      # the prototype hints above (callee arities / void-ness)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
       }
     },
     {
@@ -46728,6 +46917,101 @@
       "scripts": {
         "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `nestedloop` — benchmark function synthetic:nestedloop:mwcc_242_81.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The benchmark's objdump→GNU-as normalization of this function's disassembly (m2c cannot\n# read raw objdump), including the jump-table/const data sections recovered from the target\n# object — the exact text the benchmark fed m2c.\ncat > in.s <<'ASM_INPUT'\nglabel nestedloop\n    stwu    r1,-16(r1)\n    li      r12,0\n    li      r11,0\n    stw     r31,12(r1)\n    li      r31,0\n    stw     r30,8(r1)\n    b        .Ldc\n.L1c:\n    cmpwi   r3,0\n    li      r30,0\n    ble      .Ld4\n    cmpwi   r3,8\n    addi    r4,r3,-8\n    ble      .Lb0\n    addi    r0,r4,7\n    li      r10,0\n    srwi    r0,r0,3\n    mtctr   r0\n    cmpwi   r4,0\n    ble      .Lb0\n.L4c:\n    addi    r0,r30,1\n    addi    r8,r30,2\n    mullw   r9,r31,r0\n    add     r12,r12,r10\n    addi    r7,r30,3\n    addi    r6,r30,4\n    addi    r5,r30,5\n    addi    r4,r30,6\n    addi    r0,r30,7\n    add     r12,r12,r9\n    mullw   r8,r31,r8\n    add     r10,r10,r11\n    addi    r30,r30,8\n    mullw   r7,r31,r7\n    add     r12,r12,r8\n    mullw   r6,r31,r6\n    add     r12,r12,r7\n    mullw   r5,r31,r5\n    add     r12,r12,r6\n    mullw   r4,r31,r4\n    add     r12,r12,r5\n    mullw   r0,r31,r0\n    add     r12,r12,r4\n    add     r12,r12,r0\n    bdnz     .L4c\n.Lb0:\n    mullw   r4,r30,r31\n    subf    r0,r30,r3\n    mtctr   r0\n    cmpw    r30,r3\n    bge      .Ld4\n.Lc4:\n    add     r12,r12,r4\n    add     r4,r4,r31\n    addi    r30,r30,1\n    bdnz     .Lc4\n.Ld4:\n    addi    r11,r11,8\n    addi    r31,r31,1\n.Ldc:\n    cmpw    r31,r3\n    blt      .L1c\n    lwz     r31,12(r1)\n    mr      r3,r12\n    lwz     r30,8(r1)\n    addi    r1,r1,16\n    blr\nASM_INPUT\n\n# (This function ran with NO context header — the benchmark fed m2c the assembly alone.)\n\nargs=(\n  --target ppc-mwcc-c     # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function nestedloop   # the symbol to decompile from in.s\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
         "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `nestedloop` — benchmark function synthetic:nestedloop:mwcc_242_81.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:nestedloop:mwcc_242_81 --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact `objdump -d --no-show-raw-insn` text.\ncat > in.asm <<'ASM_INPUT'\n\ntarget.o:     file format elf32-powerpc\n\n\nDisassembly of section .text:\n\n00000000 <nestedloop>:\n   0:\tstwu    r1,-16(r1)\n   4:\tli      r12,0\n   8:\tli      r11,0\n   c:\tstw     r31,12(r1)\n  10:\tli      r31,0\n  14:\tstw     r30,8(r1)\n  18:\tb       dc <nestedloop+0xdc>\n  1c:\tcmpwi   r3,0\n  20:\tli      r30,0\n  24:\tble     d4 <nestedloop+0xd4>\n  28:\tcmpwi   r3,8\n  2c:\taddi    r4,r3,-8\n  30:\tble     b0 <nestedloop+0xb0>\n  34:\taddi    r0,r4,7\n  38:\tli      r10,0\n  3c:\tsrwi    r0,r0,3\n  40:\tmtctr   r0\n  44:\tcmpwi   r4,0\n  48:\tble     b0 <nestedloop+0xb0>\n  4c:\taddi    r0,r30,1\n  50:\taddi    r8,r30,2\n  54:\tmullw   r9,r31,r0\n  58:\tadd     r12,r12,r10\n  5c:\taddi    r7,r30,3\n  60:\taddi    r6,r30,4\n  64:\taddi    r5,r30,5\n  68:\taddi    r4,r30,6\n  6c:\taddi    r0,r30,7\n  70:\tadd     r12,r12,r9\n  74:\tmullw   r8,r31,r8\n  78:\tadd     r10,r10,r11\n  7c:\taddi    r30,r30,8\n  80:\tmullw   r7,r31,r7\n  84:\tadd     r12,r12,r8\n  88:\tmullw   r6,r31,r6\n  8c:\tadd     r12,r12,r7\n  90:\tmullw   r5,r31,r5\n  94:\tadd     r12,r12,r6\n  98:\tmullw   r4,r31,r4\n  9c:\tadd     r12,r12,r5\n  a0:\tmullw   r0,r31,r0\n  a4:\tadd     r12,r12,r4\n  a8:\tadd     r12,r12,r0\n  ac:\tbdnz    4c <nestedloop+0x4c>\n  b0:\tmullw   r4,r30,r31\n  b4:\tsubf    r0,r30,r3\n  b8:\tmtctr   r0\n  bc:\tcmpw    r30,r3\n  c0:\tbge     d4 <nestedloop+0xd4>\n  c4:\tadd     r12,r12,r4\n  c8:\tadd     r4,r4,r31\n  cc:\taddi    r30,r30,1\n  d0:\tbdnz    c4 <nestedloop+0xc4>\n  d4:\taddi    r11,r11,8\n  d8:\taddi    r31,r31,1\n  dc:\tcmpw    r31,r3\n  e0:\tblt     1c <nestedloop+0x1c>\n  e4:\tlwz     r31,12(r1)\n  e8:\tmr      r3,r12\n  ec:\tlwz     r30,8(r1)\n  f0:\taddi    r1,r1,16\n  f4:\tblr\nASM_INPUT\n\n# The target object's objdump -s -r -t dump — the data sections (jump tables, anonymous\n# constants) the text-only disassembly lacks; the benchmark recovered them from the object.\ncat > dump.txt <<'DUMP_INPUT'\n\ntarget.o:     file format elf32-powerpc\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 ref.c\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .mwcats.text\t00000000 .mwcats.text\n00000000 g     F .text\t000000f8 nestedloop\n\n\nRELOCATION RECORDS FOR [.mwcats.text]:\nOFFSET   TYPE              VALUE\n00000004 R_PPC_ADDR32      nestedloop\n\n\nContents of section .text:\n 0000 9421fff0 39800000 39600000 93e1000c  .!..9...9`......\n 0010 3be00000 93c10008 480000c4 2c030000  ;.......H...,...\n 0020 3bc00000 408100b0 2c030008 3883fff8  ;...@...,...8...\n 0030 40810080 38040007 39400000 5400e8fe  @...8...9@..T...\n 0040 7c0903a6 2c040000 40810068 381e0001  |...,...@..h8...\n 0050 391e0002 7d3f01d6 7d8c5214 38fe0003  9...}?..}.R.8...\n 0060 38de0004 38be0005 389e0006 381e0007  8...8...8...8...\n 0070 7d8c4a14 7d1f41d6 7d4a5a14 3bde0008  }.J.}.A.}JZ.;...\n 0080 7cff39d6 7d8c4214 7cdf31d6 7d8c3a14  |.9.}.B.|.1.}.:.\n 0090 7cbf29d6 7d8c3214 7c9f21d6 7d8c2a14  |.).}.2.|.!.}.*.\n 00a0 7c1f01d6 7d8c2214 7d8c0214 4200ffa0  |...}.\".}...B...\n 00b0 7c9ef9d6 7c1e1850 7c0903a6 7c1e1800  |...|..P|...|...\n 00c0 40800014 7d8c2214 7c84fa14 3bde0001  @...}.\".|...;...\n 00d0 4200fff4 396b0008 3bff0001 7c1f1800  B...9k..;...|...\n 00e0 4180ff3c 83e1000c 7d836378 83c10008  A..<....}.cx....\n 00f0 38210010 4e800020                    8!..N..         \nContents of section .mwcats.text:\n 0000 020000f8 00000000                    ........        \nContents of section .comment:\n 0000 436f6465 57617272 696f720a 02040201  CodeWarrior.....\n 0010 01020016 2c000000 00000000 00000000  ....,...........\n 0020 00000000 00000000 00000000 00000000  ................\n 0030 00000000 00000001 00000000 00000004  ................\n 0040 00000000 00000004 00000000 00000004  ................\n 0050 00000000                             ....\nDUMP_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target mwcc_242_81    # frontend + target description (ISA, calling convention, compiler idioms)\n  --name nestedloop       # the symbol to decompile (multi-function input selects by name)\n  --asm-data dump.txt     # the data sections above (jump-table/const recovery)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+      }
+    },
+    {
+      "id": "synthetic:nestinit:agbcc",
+      "sym": "nestinit",
+      "project": "synthetic",
+      "tier": "synthetic",
+      "toolchain": "agbcc",
+      "isa": "arm",
+      "compiler": "agbcc",
+      "language": "c",
+      "features": [
+        "value-home",
+        "pointer",
+        "loop",
+        "nested-loop",
+        "shift",
+        "bitwise",
+        "mmio",
+        "dma"
+      ],
+      "loc": 1,
+      "refSource": "void nestinit(u8 *dst, s32 w, s32 n, s32 go){ volatile s32 *dma = (volatile s32 *)0x040000d4; s32 i; if (go != 0) { for (i = 0; i < n; i++){ dma[0] = (s32)dst; dma[1] = 0x06000000 + (w >> 1) * i; dma[2] = (u32)w >> 1 | 0x80000000; while (dma[2] & 0x80000000) {} } } }",
+      "targetAsm": "@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tnestinit\n\t.type\t nestinit,function\n\t.thumb_func\nnestinit:\n\tpush\t{r4, r5, r6, r7, lr}\n\tmov\tr7, r8\n\tpush\t{r7}\n\tmov\tip, r0\n\tadd\tr5, r2, #0\n\tldr\tr2, .L13\n\tcmp\tr3, #0\n\tbeq\t.L3\t@cond_branch\n\tmov\tr3, #0x0\n\tcmp\tr3, r5\n\tbge\t.L3\t@cond_branch\n\tasr\tr7, r1, #0x1\n\tmov\tr0, #0xc0\n\tlsl\tr0, r0, #0x13\n\tmov\tr8, r0\n\tlsr\tr4, r1, #0x1\n\tmov\tr6, #0x80\n\tlsl\tr6, r6, #0x18\n\torr\tr4, r4, r6\n.L7:\n\tmov\tr0, ip\n\tstr\tr0, [r2]\n\tmov\tr0, r7\n\tmul\tr0, r0, r3\n\tadd\tr0, r0, r8\n\tstr\tr0, [r2, #0x4]\n\tstr\tr4, [r2, #0x8]\n\tldr\tr0, [r2, #0x8]\n\tand\tr0, r0, r6\n\tadd\tr1, r3, #0x1\n\tcmp\tr0, #0\n\tbeq\t.L6\t@cond_branch\n\tmov\tr3, #0x80\n\tlsl\tr3, r3, #0x18\n.L8:\n\tldr\tr0, [r2, #0x8]\n\tand\tr0, r0, r3\n\tcmp\tr0, #0\n\tbne\t.L8\t@cond_branch\n.L6:\n\tadd\tr3, r1, #0\n\tcmp\tr3, r5\n\tblt\t.L7\t@cond_branch\n.L3:\n\tpop\t{r3}\n\tmov\tr8, r3\n\tpop\t{r4, r5, r6, r7}\n\tpop\t{r0}\n\tbx\tr0\n.L14:\n\t.align\t2, 0\n.L13:\n\t.word\t0x40000d4\n.Lfe1:\n\t.size\t nestinit,.Lfe1-nestinit\n",
+      "ctx": "void nestinit(u8 *dst, s32 w, s32 n, s32 go);",
+      "proto": {
+        "nestinit": {
+          "returnsVoid": true
+        }
+      },
+      "asmlift": {
+        "decompiler": "asmlift",
+        "candidateLabel": "signed/livebase/volatile",
+        "outcome": "nonmatch",
+        "source": "void nestinit(s32 a0, s32 a1, s32 a2, s32 a3, s32 a4) {\n    s32 v0;\n    volatile s32 * p0;\n    p0 = (s32 *)67109076;\n    if (a3 != 0) {\n        if (0 >= a2) {\n            a3 = 0;\n        } else {\n            v0 = 0;\n            do {\n                *p0 = a0;\n                p0[1] = (a1 >> 1) * v0 + (192 << 19);\n                p0[2] = (u32)a1 >> 1 | 128 << 24;\n                while ((p0[2] & 128 << 24) != 0) {\n                }\n                v0 = v0 + 1;\n            } while (v0 < a2);\n            a3 = v0;\n        }\n    }\n    return;\n}\n",
+        "score": 6,
+        "maxScore": 49,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 2,
+          "delete": 2,
+          "replace": 0,
+          "opMismatch": 1,
+          "argMismatch": 1
+        },
+        "quality": {
+          "score": 100,
+          "lines": 22,
+          "gotos": 0,
+          "casts": 2,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        }
+      },
+      "m2c": {
+        "decompiler": "m2c",
+        "outcome": "noncompile",
+        "source": "void nestinit(u8 *dst, s32 w, s32 n, s32 go) {\n    s32 var_r3;\n\n    if (go != 0) {\n        var_r3 = 0;\n        if (n > 0) {\n            do {\n                (void *)0x040000D4->unk0 = dst;\n                (void *)0x040000D4->unk4 = (s32) (((w >> 1) * var_r3) + 0x06000000);\n                (void *)0x040000D4->unk8 = (s32) (((u32) w >> 1) | 0x80000000);\n                if ((void *)0x040000D4->unk8 & 0x80000000) {\n                    do {\n\n                    } while ((void *)0x040000D4->unk8 & 0x80000000);\n                }\n                var_r3 += 1;\n            } while (var_r3 < n);\n        }\n    }\n}\n",
+        "score": null,
+        "maxScore": null,
+        "compileErrors": 1,
+        "quality": {
+          "score": 90,
+          "lines": 18,
+          "gotos": 0,
+          "casts": 7,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        },
+        "errorMarkers": [
+          "<tmp>/cand.c.pp.c:8: invalid type argument of `->'",
+          "<tmp>/cand.c.pp.c:9: invalid type argument of `->'",
+          "<tmp>/cand.c.pp.c:10: invalid type argument of `->'",
+          "<tmp>/cand.c.pp.c:11: invalid type argument of `->'",
+          "<tmp>/cand.c.pp.c:13: invalid type argument of `->'"
+        ]
+      },
+      "gapSize": {
+        "decompiler": "asmlift",
+        "score": 6,
+        "maxScore": 49,
+        "ratio": 0.12244897959183673,
+        "kinds": {
+          "insert": 2,
+          "delete": 2,
+          "replace": 0,
+          "opMismatch": 1,
+          "argMismatch": 1
+        }
+      },
+      "scripts": {
+        "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `nestinit` — benchmark function synthetic:nestinit:agbcc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The exact agbcc `.s` text the benchmark fed m2c, verbatim.\ncat > in.s <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tnestinit\n\t.type\t nestinit,function\n\t.thumb_func\nnestinit:\n\tpush\t{r4, r5, r6, r7, lr}\n\tmov\tr7, r8\n\tpush\t{r7}\n\tmov\tip, r0\n\tadd\tr5, r2, #0\n\tldr\tr2, .L13\n\tcmp\tr3, #0\n\tbeq\t.L3\t@cond_branch\n\tmov\tr3, #0x0\n\tcmp\tr3, r5\n\tbge\t.L3\t@cond_branch\n\tasr\tr7, r1, #0x1\n\tmov\tr0, #0xc0\n\tlsl\tr0, r0, #0x13\n\tmov\tr8, r0\n\tlsr\tr4, r1, #0x1\n\tmov\tr6, #0x80\n\tlsl\tr6, r6, #0x18\n\torr\tr4, r4, r6\n.L7:\n\tmov\tr0, ip\n\tstr\tr0, [r2]\n\tmov\tr0, r7\n\tmul\tr0, r0, r3\n\tadd\tr0, r0, r8\n\tstr\tr0, [r2, #0x4]\n\tstr\tr4, [r2, #0x8]\n\tldr\tr0, [r2, #0x8]\n\tand\tr0, r0, r6\n\tadd\tr1, r3, #0x1\n\tcmp\tr0, #0\n\tbeq\t.L6\t@cond_branch\n\tmov\tr3, #0x80\n\tlsl\tr3, r3, #0x18\n.L8:\n\tldr\tr0, [r2, #0x8]\n\tand\tr0, r0, r3\n\tcmp\tr0, #0\n\tbne\t.L8\t@cond_branch\n.L6:\n\tadd\tr3, r1, #0\n\tcmp\tr3, r5\n\tblt\t.L7\t@cond_branch\n.L3:\n\tpop\t{r3}\n\tmov\tr8, r3\n\tpop\t{r4, r5, r6, r7}\n\tpop\t{r0}\n\tbx\tr0\n.L14:\n\t.align\t2, 0\n.L13:\n\t.word\t0x40000d4\n.Lfe1:\n\t.size\t nestinit,.Lfe1-nestinit\nASM_INPUT\n\n# The exact context header the benchmark passed via --context — prototypes only\n# (no struct/global layouts: the benchmark measures cold recovery).\ncat > ctx.h <<'CTX_INPUT'\nvoid nestinit(u8 *dst, s32 w, s32 n, s32 go);\nCTX_INPUT\n\nargs=(\n  --target gba            # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function nestinit     # the symbol to decompile from in.s\n  --context ctx.h         # the C context header above (typedefs + prototypes)\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `nestinit` — benchmark function synthetic:nestinit:agbcc.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:nestinit:agbcc --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact agbcc `.s` text.\ncat > in.asm <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tnestinit\n\t.type\t nestinit,function\n\t.thumb_func\nnestinit:\n\tpush\t{r4, r5, r6, r7, lr}\n\tmov\tr7, r8\n\tpush\t{r7}\n\tmov\tip, r0\n\tadd\tr5, r2, #0\n\tldr\tr2, .L13\n\tcmp\tr3, #0\n\tbeq\t.L3\t@cond_branch\n\tmov\tr3, #0x0\n\tcmp\tr3, r5\n\tbge\t.L3\t@cond_branch\n\tasr\tr7, r1, #0x1\n\tmov\tr0, #0xc0\n\tlsl\tr0, r0, #0x13\n\tmov\tr8, r0\n\tlsr\tr4, r1, #0x1\n\tmov\tr6, #0x80\n\tlsl\tr6, r6, #0x18\n\torr\tr4, r4, r6\n.L7:\n\tmov\tr0, ip\n\tstr\tr0, [r2]\n\tmov\tr0, r7\n\tmul\tr0, r0, r3\n\tadd\tr0, r0, r8\n\tstr\tr0, [r2, #0x4]\n\tstr\tr4, [r2, #0x8]\n\tldr\tr0, [r2, #0x8]\n\tand\tr0, r0, r6\n\tadd\tr1, r3, #0x1\n\tcmp\tr0, #0\n\tbeq\t.L6\t@cond_branch\n\tmov\tr3, #0x80\n\tlsl\tr3, r3, #0x18\n.L8:\n\tldr\tr0, [r2, #0x8]\n\tand\tr0, r0, r3\n\tcmp\tr0, #0\n\tbne\t.L8\t@cond_branch\n.L6:\n\tadd\tr3, r1, #0\n\tcmp\tr3, r5\n\tblt\t.L7\t@cond_branch\n.L3:\n\tpop\t{r3}\n\tmov\tr8, r3\n\tpop\t{r4, r5, r6, r7}\n\tpop\t{r0}\n\tbx\tr0\n.L14:\n\t.align\t2, 0\n.L13:\n\t.word\t0x40000d4\n.Lfe1:\n\t.size\t nestinit,.Lfe1-nestinit\nASM_INPUT\n\n# The prototype hints the benchmark fed asmlift (callee arities / void-ness).\ncat > proto.json <<'PROTO_INPUT'\n{\n  \"nestinit\": {\n    \"returnsVoid\": true\n  }\n}\nPROTO_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target agbcc          # frontend + target description (ISA, calling convention, compiler idioms)\n  --name nestinit         # the symbol to decompile (multi-function input selects by name)\n  --proto proto.json      # the prototype hints above (callee arities / void-ness)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
       }
     },
     {
