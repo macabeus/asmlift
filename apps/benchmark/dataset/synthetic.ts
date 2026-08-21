@@ -1321,6 +1321,71 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'void maskhome(u8 *src, u8 *dst, s32 w, s32 h);',
     proto: { maskhome: { returnsVoid: true } },
   },
+  // The COMPOSITION and PLACEMENT aggravations behind the single-loop rows above, each verified
+  // against the reference compile. `dmafield` fuses fieldbase's neighbor cells with dma_wait's
+  // poll block in one function — each shape matches alone, but the levers that close them
+  // (/nearbase; /livebase + the poll spelling) live in different candidates, so the composition
+  // is reachable from neither. `armhomes` runs the SAME hot DMA loop in both arms of an `if`:
+  // the reference homes the mask and the invariants PER ARM and re-materializes the mask again
+  // for each poll (per-region homes — a whole-function home is the wrong placement, and the
+  // sibling rows' single-loop preheader home cannot express it). `nestinit` is sizehome's exact
+  // shape nested inside a guard: the init-first re-spelling is restricted to the top-level
+  // statement list by its skip-path soundness gate, so the nested guard keeps testing the bound
+  // instead of the initialized counter. sizehome/maskhome are the single-loop controls.
+  //
+  // agbcc only, as the sibling block above: the polls decline on ido/kmc branch-likely, and
+  // mwcc_242_81 stays off per the hipress hazard policy.
+  {
+    sym: 'dmafield',
+    src:
+      'void dmafield(s32 n){' +
+      ' u8 *b = (u8 *)0x03001000;' +
+      ' volatile s32 *dma = (volatile s32 *)0x040000d4; s32 i;' +
+      ' for (i = 0; i < n; i++){' +
+      ' if (i < *(u16 *)(b + 72)) { *(u16 *)(b + 74) = i; }' +
+      ' dma[0] = (s32)(b + 112); dma[1] = *(s32 *)(b + 112);' +
+      ' dma[2] = i | 0x80000000;' +
+      ' while (dma[2] & 0x80000000) {} } }',
+    features: ['value-home', 'pointer'],
+    toolchains: ['agbcc'],
+    ctx: 'void dmafield(s32 n);',
+    proto: { dmafield: { returnsVoid: true } },
+  },
+  {
+    sym: 'armhomes',
+    src:
+      'void armhomes(u8 *dst, s32 w, s32 n, s32 sel){' +
+      ' volatile s32 *dma = (volatile s32 *)0x040000d4; s32 i;' +
+      ' if (sel) {' +
+      ' for (i = 0; i < n; i++){' +
+      ' dma[0] = (s32)dst; dma[1] = 0x06000000 + (w >> 1) * i;' +
+      ' dma[2] = (u32)w >> 1 | 0x80000000;' +
+      ' while (dma[2] & 0x80000000) {} }' +
+      ' } else {' +
+      ' for (i = 0; i < n; i++){' +
+      ' dma[0] = (s32)(dst + w); dma[1] = 0x06008000 + (w >> 1) * i;' +
+      ' dma[2] = (u32)w >> 1 | 0x80000000;' +
+      ' while (dma[2] & 0x80000000) {} } } }',
+    features: ['value-home', 'pointer'],
+    toolchains: ['agbcc'],
+    ctx: 'void armhomes(u8 *dst, s32 w, s32 n, s32 sel);',
+    proto: { armhomes: { returnsVoid: true } },
+  },
+  {
+    sym: 'nestinit',
+    src:
+      'void nestinit(u8 *dst, s32 w, s32 n, s32 go){' +
+      ' volatile s32 *dma = (volatile s32 *)0x040000d4; s32 i;' +
+      ' if (go != 0) {' +
+      ' for (i = 0; i < n; i++){' +
+      ' dma[0] = (s32)dst; dma[1] = 0x06000000 + (w >> 1) * i;' +
+      ' dma[2] = (u32)w >> 1 | 0x80000000;' +
+      ' while (dma[2] & 0x80000000) {} } } }',
+    features: ['value-home', 'pointer'],
+    toolchains: ['agbcc'],
+    ctx: 'void nestinit(u8 *dst, s32 w, s32 n, s32 go);',
+    proto: { nestinit: { returnsVoid: true } },
+  },
   {
     sym: 'fieldbase',
     src:
