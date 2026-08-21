@@ -15,6 +15,73 @@ export interface UseSite {
   op: Op;
 }
 
+/** the ops whose operands[0] is a memory-access BASE — the address-home axis's slot model */
+const MEM_BASE_OPS = new Set(['load', 'store', 'aload', 'astore']);
+
+/** rank.ts's enumeration gate for the `/addr-home` axis: does the function HAVE a value the axis
+ *  would home — a non-const pure def consumed only as the base of 2+ memory accesses, with no
+ *  gaddr/laddr in its cone? Mirrors the axis's scope rule in `analyze`, minus the loop-header
+ *  seat refusal (that needs the loop model; a false positive costs one duplicate-collapsed
+ *  candidate, never a wrong one). */
+export function hasHomeableSharedAddress(fn: Fn): boolean {
+  const defOf = defOpMap(fn);
+  const baseUses = new Map<Value, Set<Op>>();
+  const otherUse = new Set<Value>();
+  for (const b of fn.blocks) {
+    for (const op of b.ops) {
+      op.operands.forEach((o, i) => {
+        if (i === 0 && MEM_BASE_OPS.has(op.opcode)) {
+          (baseUses.get(o) ?? baseUses.set(o, new Set()).get(o)!).add(op);
+        } else {
+          otherUse.add(o);
+        }
+      });
+      for (const s of op.successors) {
+        for (const a of s.args) {
+          otherUse.add(a);
+        }
+      }
+    }
+  }
+  const coneHasAddr = (op0: Op): boolean => {
+    const seen = new Set<Value>();
+    const cone = [op0];
+    while (cone.length) {
+      const d = cone.pop()!;
+      if (d.opcode === 'gaddr' || d.opcode === 'laddr') {
+        return true;
+      }
+      for (const x of d.operands) {
+        if (!seen.has(x)) {
+          seen.add(x);
+          const dd = defOf.get(x);
+          if (dd) {
+            cone.push(dd);
+          }
+        }
+      }
+    }
+    return false;
+  };
+  for (const [v, users] of baseUses) {
+    if (users.size < 2 || otherUse.has(v)) {
+      continue;
+    }
+    const d = defOf.get(v);
+    if (
+      d &&
+      d.opcode !== 'const' &&
+      d.opcode !== 'call' &&
+      d.opcode !== 'load' &&
+      d.opcode !== 'aload' &&
+      !coneHasAddr(d)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export interface StructureAnalysis {
   /** every positioned use of a value; a value absent here is dead */
   useSitesOf: Map<Value, UseSite[]>;
@@ -70,10 +137,32 @@ export interface AnalyzeOptions {
    *  candidate axis, never a default. Plain `br` args (loop-carried values) are out of scope:
    *  their homes are the loop-param machinery's question. */
   materializeJoinFeeds?: boolean;
+  /** The address-home axis (rank.ts `/addr-home`). A pure computed address the asm derived ONCE
+   *  and dereferenced at 2+ sites renders, by default, re-derived at each use — and the loads
+   *  through it re-read per use — where the original source may have spelled a pointer local plus
+   *  scalar temps (`u8 *entry = (u8 *)((a0 << 2) + base); type = entry[1]; idx = entry[0];`).
+   *  The two spellings are codegen-visible (the re-derive folds each deref offset into its OWN
+   *  pool literal; the home shares one base register across `[rN, #k]` accesses) and which one
+   *  the source used is not derivable from asm, so this is a differ-refereed candidate axis,
+   *  never a default. With it on: a non-const pure value consumed ONLY as the base operand of
+   *  2+ memory accesses materializes, and so does a multi-render `load` through such a base.
+   *  Both rules only ADD materialization, which is always semantics-preserving (see the
+   *  rereadGlobals note above — this axis is that coin's other face). Values whose cone holds a
+   *  gaddr/laddr stay out (`addressCone` — the standalone render would lose the byte-stride
+   *  cast), as do defs seated in a multi-block loop header (no seat for a temp, same refusal as
+   *  liveAcrossLoop's). */
+  homeSharedAddresses?: boolean;
 }
 
 export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {}): StructureAnalysis {
-  const { defs, dom, rereadGlobals = false, volatileGlobal, materializeJoinFeeds = false } = opts;
+  const {
+    defs,
+    dom,
+    rereadGlobals = false,
+    volatileGlobal,
+    materializeJoinFeeds = false,
+    homeSharedAddresses = false,
+  } = opts;
   // ── use registry ────────────────────────────────────────────────────────────────────────
   // Every use of a value, POSITIONED: the consuming op and its block/index. Successor args are
   // uses AT the terminator (they render in argAssigns at block end). A void function's `ret`
@@ -489,6 +578,22 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
     }
     return false;
   };
+  // ── the address-home axis's scope predicate ───────────────────────────────────────────────
+  // A value consumed ONLY as the base (operands[0]) of 2+ distinct memory accesses — the shape
+  // the axis homes. Any other use (a store's value slot, an aload index, arithmetic, a successor
+  // arg) disqualifies it: the home is justified by the shared-base reuse alone.
+  const usedOnlyAsSharedBase = (v: Value): boolean => {
+    const sites = useSitesOf.get(v) ?? [];
+    const consumers = new Set(sites.map((s) => s.op));
+    return (
+      consumers.size >= 2 &&
+      [...consumers].every(
+        (c) => MEM_BASE_OPS.has(c.opcode) && c.operands[0] === v && !c.operands.some((o, i) => i > 0 && o === v),
+      )
+    );
+  };
+  /** result values the address-home axis materialized — the load rule's admission key */
+  const axisHomedBases = new Set<Value>();
   // Decide in REVERSE program order so a consumer's own materialization is settled before any
   // producer asks for its emit position (SSA: uses follow defs in dominance/layout order) — and
   // iterate to a fixpoint for IR whose block layout does not follow dominance (hand-built IR):
@@ -537,6 +642,20 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           } else if (op.opcode !== 'const' && pr && copyInterdependent.has(pr) && !addressCone(op)) {
             materialize.add(op);
           }
+          // Third scope, under the address-home axis only (see AnalyzeOptions.homeSharedAddresses):
+          // a non-const pure value consumed ONLY as the base of 2+ memory accesses. The gaddr/laddr
+          // cone exclusion and the loop-header seat refusal are the axis's two refusals.
+          if (
+            homeSharedAddresses &&
+            op.opcode !== 'const' &&
+            pr &&
+            usedOnlyAsSharedBase(pr) &&
+            !addressCone(op) &&
+            !multiBlockHeaders.has(b)
+          ) {
+            materialize.add(op);
+            axisHomedBases.add(pr);
+          }
           continue;
         }
         const r = op.results[0];
@@ -568,6 +687,21 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         // touched only by `mov`). Rendering at the use would re-schedule the access to the far
         // side of the loop — the same refusal liveAcrossCall makes for a call, applied to a loop.
         if (liveAcrossLoop(op, r, consumers)) {
+          materialize.add(op);
+          continue;
+        }
+        // Address-home axis: a multi-render load THROUGH a base this axis homed re-reads what the
+        // asm read once into the register the home just reproduced — home the value too, at the
+        // load's own position. Only through axis-homed bases (the fixpoint's later sweep sees them
+        // even though reverse order visits the load first); the general multi-render re-read stays
+        // the default rule below.
+        if (
+          homeSharedAddresses &&
+          op.opcode === 'load' &&
+          consumers.length > 1 &&
+          axisHomedBases.has(op.operands[0]) &&
+          !multiBlockHeaders.has(b)
+        ) {
           materialize.add(op);
           continue;
         }

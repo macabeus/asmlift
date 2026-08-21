@@ -35,6 +35,7 @@ import { applyIdiomPatterns, raiseRecovered, structureChecked } from './pipeline
 import { type Prototypes, prototypesFromSymbols } from './proto';
 import { runPreRecovery } from './raise/pre-recovery';
 import { recoverTypes } from './raise/recover';
+import { hasHomeableSharedAddress } from './structure/analysis';
 import { type SymbolMap, symbolsByName } from './symbols';
 import { type TargetDescription, structureOptionsFor } from './target';
 
@@ -336,6 +337,20 @@ export function enumerateCandidates(
         ...inplaceCands.map((s) => ({ ...s, suffix: `${s.suffix}/merge-names`, mergeNames: true })),
       ]
     : inplaceCands.map((s) => ({ ...s, mergeNames: false }));
+  // `/addr-home` — the address-home axis (structure/analysis.ts AnalyzeOptions
+  // homeSharedAddresses): a pure computed address dereferenced at 2+ sites, and the multi-render
+  // loads through it, materialize into locals — the source's pointer-local + scalar-temp spelling,
+  // where the default re-derives per use (a pool literal per folded offset). Which side the source
+  // spelled is not derivable from asm, so both are emitted and the differ referees.
+  //
+  // Gated on the function HAVING a homeable shared base — the only thing the axis can change.
+  // The `addrhome:false` siblings enumerate first, same as `/inplace`'s ordering rule.
+  const addrHomeCands = hasHomeableSharedAddress(probe)
+    ? [
+        ...senseCands.map((s) => ({ ...s, addrhome: false })),
+        ...senseCands.map((s) => ({ ...s, suffix: `${s.suffix}/addr-home`, addrhome: true })),
+      ]
+    : senseCands.map((s) => ({ ...s, addrhome: false }));
 
   const seen = new Set<string>();
   const out: Candidate[] = [];
@@ -367,10 +382,11 @@ export function enumerateCandidates(
       // which is the same trade one level up. `senseCands` puts each `mergeNames:false` sibling
       // first, so the entry is always recorded before its merged twin is reached.
       const droppedPrimary = new Set<string>();
-      for (const s of senseCands) {
+      for (const s of addrHomeCands) {
         if (
           (s.mergeNames && droppedPrimary.has(s.suffix.replace('/merge-names', ''))) ||
-          (s.inplace && droppedPrimary.has(s.suffix.replace('/inplace', '')))
+          (s.inplace && droppedPrimary.has(s.suffix.replace('/inplace', ''))) ||
+          (s.addrhome && droppedPrimary.has(s.suffix.replace('/addr-home', '')))
         ) {
           // A SKIPPED variant is recorded exactly like a dropped one, or the closure would not be
           // transitive: with plain X dropped and X/inplace skipped-but-unrecorded,
@@ -391,10 +407,11 @@ export function enumerateCandidates(
             spellBitfieldMembers: s.bitfields,
             rereadGlobals: s.reread,
             materializeJoinFeeds: s.inplace,
+            homeSharedAddresses: s.addrhome,
             coalesceMergeNames: s.mergeNames,
           });
         } catch (e) {
-          if (!s.anchor && !s.join && s.bitfields && !s.reread && !s.inplace && !s.mergeNames) {
+          if (!s.anchor && !s.join && s.bitfields && !s.reread && !s.inplace && !s.mergeNames && !s.addrhome) {
             throw e; // the base axes keep their behavior: a structuring failure aborts the row
           }
           // Recorded for EVERY dropped variant: a candidate with more axes on looks its siblings
