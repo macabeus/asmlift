@@ -70,12 +70,22 @@ function collectAssigns(stmts: Stmt[], out: { name: string; value: Expr }[]): vo
   }
 }
 
+/** The locals the lever would qualify — rank.ts's input for the per-local SUBSET enumeration:
+ *  which pointers the original declared volatile is per-pointer knowledge the asm does not
+ *  carry (an MMIO block and a plain RAM table can sit side by side, and qualifying the table
+ *  blocks the read collapses its region wants), so each non-empty subset is its own candidate
+ *  when few enough locals qualify, and the differ referees. */
+export function volatileEligibleLocals(sfn: SFn): string[] {
+  return sfn.locals.filter(eligibility(sfn)).map((l) => l.name);
+}
+
 /** The `/volatile` candidate, or null when no local qualifies. Read-only: returns a fresh SFn
  *  sharing the (unmodified) body. `only` narrows the lever to the named locals — a /volatile
  *  PRODUCT (rank.ts) qualifies just the locals its first lever centres on (kept walk bases,
  *  created hoists), so the product never degenerates into a general /volatile composition over
- *  the function's other locals. */
-export function volatilePtrLocals(sfn: SFn, only?: ReadonlySet<string>): SFn | null {
+ *  the function's other locals — and the subset enumeration re-uses the same door. */
+/** the shared eligibility predicate (the GATE in the header) for one function's locals */
+function eligibility(sfn: SFn): (l: SFn['locals'][number]) => boolean {
   const assigns: { name: string; value: Expr }[] = [];
   collectAssigns(sfn.body, assigns);
   const numericFed = new Set<string>();
@@ -97,13 +107,37 @@ export function volatilePtrLocals(sfn: SFn, only?: ReadonlySet<string>): SFn | n
       }
     }
   }
-  const qualifies = (l: SFn['locals'][number]): boolean =>
+  return (l) =>
     l.type.kind === 'ptr' &&
     l.volatile === undefined &&
     l.pointeeVolatile === undefined &&
     numericFed.has(l.name) &&
-    !tainted.has(l.name) &&
-    (only === undefined || only.has(l.name));
+    !tainted.has(l.name);
+}
+
+/** The proper non-empty SUBSETS of the qualifying locals (within `within`, when given) as
+ *  alternative outputs — one candidate per subset, labeled by its member names. Empty above
+ *  three qualifiers: the arm is capped at 6 extra spellings, and the all-qualifiers form is the
+ *  plain lever's own candidate. */
+export function volatileSubsetCandidates(sfn: SFn, within?: ReadonlySet<string>): { merged: string; sfn: SFn }[] {
+  const elig = volatileEligibleLocals(sfn).filter((n) => within === undefined || within.has(n));
+  if (elig.length < 2 || elig.length > 3) {
+    return [];
+  }
+  const out: { merged: string; sfn: SFn }[] = [];
+  for (let mask = 1; mask < (1 << elig.length) - 1; mask++) {
+    const subset = elig.filter((_, i) => (mask & (1 << i)) !== 0);
+    const r = volatilePtrLocals(sfn, new Set(subset));
+    if (r) {
+      out.push({ merged: subset.join('-'), sfn: r });
+    }
+  }
+  return out;
+}
+
+export function volatilePtrLocals(sfn: SFn, only?: ReadonlySet<string>): SFn | null {
+  const eligible = eligibility(sfn);
+  const qualifies = (l: SFn['locals'][number]): boolean => eligible(l) && (only === undefined || only.has(l.name));
   if (!sfn.locals.some(qualifies)) {
     return null;
   }

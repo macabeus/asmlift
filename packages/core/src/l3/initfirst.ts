@@ -12,15 +12,23 @@
 //   • common-arm hoist — both arms of an `if` begin with the SAME pure-const assign
 //     (`if (c) { v = 0; } else { v = 0; … }`, gcc's inverted-guard shape): the assign moves above
 //     the `if`, and an emptied then-arm flips into its negated else form.
-//   • guard re-spelling — an else-less `if` whose then-arm begins with `v = K` and whose
-//     condition carries the CONST K as a comparison operand: the assign moves above and that
-//     operand becomes `v`.
+//   • guard re-spelling — an else-less `if` whose then-arm begins with `v = X` and whose
+//     condition carries X ITSELF as a comparison side: the assign moves above and that side
+//     becomes `v`. X is a const (`for (j = 0; j < n;…)`'s shape) or a pure NON-VOLATILE read
+//     (`for (j = *p; j < size;…)` — guard and init read the same cell back to back, which the
+//     local-spelling source reads ONCE; collapsing the adjacent pair is what the compiler saw).
 //
 // SCOPE (decline over approximate): both rewrites touch PRIVATE locals only — a bare-global
 // assign stores memory other code observes, a VOLATILE local's store is itself observable (the
 // escaped DMA scratch), and a local whose ADDRESS is taken anywhere can be read through the
-// pointer where no name betrays it — all three stay put. Hoisted assigns carry pure CONST
-// values (an effect or a memory read would reorder against the condition), and the condition
+// pointer where no name betrays it — all three stay put. The common-arm hoist carries pure
+// CONST values only. A guard re-spell's X must be call-free and marker-free, may mention only
+// the function's own non-volatile params/locals (a global or `&gSym` could be project-declared
+// volatile, and a volatile read may not be deduplicated), and the substitution must PRESERVE
+// THE COMPARE'S MEANING: the variable's declared type can differ from X's rendered type, so the
+// swap is admitted only when both sides were provably non-negative (every signedness reading
+// agrees there) or the compare's rendered signedness is unchanged — anything indeterminate
+// refuses. The condition
 // must not read the variable (its pre-assign value dies in the move). The guard re-spelling
 // mints a write on a previously write-free path, so it needs that write to be DEAD there: the
 // variable must be untouched after the `if` in its own list and in the tail of every ancestor
@@ -29,7 +37,8 @@
 // re-enters everything, a case can fall through), so there the variable must appear nowhere
 // outside the rewritten `if` at all. Declines (null) when nothing changes.
 import type { Expr, SFn, Stmt } from './ast';
-import { NEGATE_REL, exprChildren, stmtChildren, stmtExprs } from './ast';
+import { NEGATE_REL, exprChildren, exprEquals, stmtChildren, stmtExprs } from './ast';
+import { declaredTypes, provablyNonNegative, renderedIntSignedness } from './typing';
 
 const readsVar = (e: Expr, name: string): boolean =>
   ((e.k === 'var' || e.k === 'addr') && e.name === name) || exprChildren(e).some((c) => readsVar(c, name));
@@ -63,6 +72,38 @@ export function initFirstGuards(sfn: SFn): SFn | null {
     }
   };
   sweep(sfn.body);
+  const volatileLocals = new Set(
+    sfn.locals.filter((l) => l.volatile === true || l.pointeeVolatile === true).map((l) => l.name),
+  );
+  const ownNames = new Set([...sfn.params.map((p) => p.name), ...sfn.locals.map((l) => l.name)]);
+  // a guard re-spell's X: call/marker-free, and every named leaf a non-volatile param/local of
+  // THIS function (a global or &gSym could be project-declared volatile)
+  const hoistableRead = (e: Expr): boolean => {
+    if (e.k === 'call' || e.k === 'marker' || e.k === 'addr') {
+      return false;
+    }
+    if (e.k === 'var' && (!ownNames.has(e.name) || volatileLocals.has(e.name))) {
+      return false;
+    }
+    return exprChildren(e).every(hoistableRead);
+  };
+  const env = declaredTypes(sfn);
+  // the compare-meaning gate (see SCOPE): substituting `v` for X may change the compare's
+  // rendered signedness through v's declared type
+  const meaningPreserved = (l: Expr, r: Expr, side: 'l' | 'r', v: string): boolean => {
+    if (provablyNonNegative(l, env) && provablyNonNegative(r, env)) {
+      return true;
+    }
+    const sign = (a: Expr, b: Expr): boolean | undefined => {
+      const sa = renderedIntSignedness(a, env);
+      const sb = renderedIntSignedness(b, env);
+      return sa === false || sb === false ? false : sa === true && sb === true ? true : undefined;
+    };
+    const before = sign(l, r);
+    const vv: Expr = { k: 'var', name: v };
+    const after = side === 'l' ? sign(vv, r) : sign(l, vv);
+    return before !== undefined && before === after;
+  };
 
   // `tails`: for each ancestor list, the statements after the ancestor on the path here.
   // `strong`: a loop or switch ancestor exists, so tails stop bounding what runs after.
@@ -140,11 +181,11 @@ export function initFirstGuards(sfn: SFn): SFn | null {
           }
         }
       }
-      // guard re-spelling
+      // guard re-spelling — X a const or a hoistable read, matched as a whole comparison side
       if (
         els.length === 0 &&
         then.length > 0 &&
-        isConstAssign(then[0]) &&
+        then[0].k === 'assign' &&
         !moved.has(then[0]) &&
         fnLocal.has(then[0].name) &&
         cond.k === 'bin' &&
@@ -152,20 +193,27 @@ export function initFirstGuards(sfn: SFn): SFn | null {
       ) {
         const init = then[0];
         const rest = list.slice(i + 1);
-        const constSide =
-          cond.l.k === 'const' && cond.l.value === init.value.value
-            ? 'l'
-            : cond.r.k === 'const' && cond.r.value === init.value.value
-              ? 'r'
-              : null;
+        const side =
+          isConstAssign(init) || hoistableRead(init.value)
+            ? exprEquals(cond.l, init.value)
+              ? ('l' as const)
+              : exprEquals(cond.r, init.value)
+                ? ('r' as const)
+                : null
+            : null;
         const deadAfter = ctx.strong
           ? !touchesOutside(sfn.body, s0, init.name)
           : !rest.some((t) => stmtTouches(t, init.name)) &&
             ctx.tails.every((tail) => !tail.some((t) => stmtTouches(t, init.name)));
-        if (constSide !== null && !readsVar(cond, init.name) && deadAfter) {
+        if (
+          side !== null &&
+          !readsVar(cond, init.name) &&
+          deadAfter &&
+          meaningPreserved(cond.l, cond.r, side, init.name)
+        ) {
           out.push(init);
           moved.add(init);
-          cond = { ...cond, [constSide]: { k: 'var', name: init.name } };
+          cond = { ...cond, [side]: { k: 'var', name: init.name } };
           then = then.slice(1);
           changed = true;
         }

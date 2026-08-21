@@ -4,7 +4,7 @@
 import { expect, test } from 'vitest';
 
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
-import { pollGuards } from '../src/l3/pollguard';
+import { pollGuards, pollReads } from '../src/l3/pollguard';
 
 const s32 = { kind: 'int', width: 32, signed: true } as const;
 const v = (name: string): Expr => ({ k: 'var', name });
@@ -28,4 +28,64 @@ test('nested inside a loop, the wrap still lands in place', () => {
   const r = pollGuards(fn([outer]));
   const w = r!.body[0] as Extract<Stmt, { k: 'while' }>;
   expect(w.body[0].k).toBe('if');
+});
+
+// ── /pollread (same file): a materialized poll re-reads in its own condition ────────────────
+const c = (value: number): Expr => ({ k: 'const', value });
+const bin = (op: '&' | '!=', l: Expr, r: Expr): Expr => ({ k: 'bin', op, l, r });
+const deref2 = (base: Expr): Expr => ({ k: 'index', base, idx: c(2), width: 4, signed: true });
+const assign = (name: string, value: Expr): Stmt => ({ k: 'assign', name, value });
+const POLLV: Stmt[] = [
+  assign('v4', deref2(v('p1'))),
+  {
+    k: 'while',
+    cond: bin('!=', bin('&', v('v4'), c(0x80000000)), c(0)),
+    body: [assign('v4', deref2(v('p1')))],
+  },
+];
+const fnP = (body: Stmt[]): SFn => ({
+  name: 'f',
+  params: [],
+  locals: [
+    { name: 'v4', type: s32 },
+    { name: 'p1', type: { kind: 'ptr', to: s32 }, pointeeVolatile: true },
+  ],
+  retType: s32,
+  body,
+});
+
+test('a materialized poll re-spells with the read in its condition, temp and decl dropped', () => {
+  const r = pollReads(fnP([...POLLV]));
+  expect(r).not.toBeNull();
+  expect(r!.body).toEqual([{ k: 'while', cond: bin('!=', bin('&', deref2(v('p1')), c(0x80000000)), c(0)), body: [] }]);
+  expect(r!.locals.map((l) => l.name)).toEqual(['p1']);
+});
+
+test('refused: the variable is read after the loop (its last value is live)', () => {
+  const r = pollReads(fnP([...POLLV, { k: 'return', value: v('v4') }]));
+  expect(r).toBeNull();
+});
+
+test('refused: the condition reads the variable twice (per-iteration reads would double)', () => {
+  const twice: Stmt[] = [
+    assign('v4', deref2(v('p1'))),
+    {
+      k: 'while',
+      cond: bin('!=', bin('&', v('v4'), v('v4')), c(0)),
+      body: [assign('v4', deref2(v('p1')))],
+    },
+  ];
+  expect(pollReads(fnP(twice))).toBeNull();
+});
+
+test('refused: the body re-read differs from the pre-read', () => {
+  const diff: Stmt[] = [
+    assign('v4', deref2(v('p1'))),
+    {
+      k: 'while',
+      cond: bin('!=', bin('&', v('v4'), c(0x80000000)), c(0)),
+      body: [assign('v4', c(0))],
+    },
+  ];
+  expect(pollReads(fnP(diff))).toBeNull();
 });

@@ -24,12 +24,12 @@ import { initFirstGuards } from './l3/initfirst';
 import { mulFirstSums } from './l3/mulfirst';
 import { nearBaseClusters } from './l3/nearbase';
 import { parkParamsFirst } from './l3/parkfirst';
-import { pollGuards } from './l3/pollguard';
+import { pollGuards, pollReads } from './l3/pollguard';
 import { registerishSpellings } from './l3/regspell';
 import { reindexWalks } from './l3/reindex';
 import { hoistScopedBases } from './l3/scopebase';
 import { type SymbolRef, collectSymbolRefs } from './l3/symbol-refs';
-import { volatilePtrLocals } from './l3/volatileptr';
+import { volatilePtrLocals, volatileSubsetCandidates } from './l3/volatileptr';
 import { RewritePattern } from './pattern/engine';
 import { applyIdiomPatterns, raiseRecovered, structureChecked } from './pipeline';
 import { type Prototypes, prototypesFromSymbols } from './proto';
@@ -152,11 +152,29 @@ const STRUCTURING_AXES: readonly StructuringAxis[] = [
 const SHAPE_PRODUCTS: { suffix: string; apply: (sfn: SFn) => SFn | null }[] = [
   { suffix: '/initfirst', apply: initFirstGuards },
   { suffix: '/pollguard', apply: pollGuards },
+  { suffix: '/pollread', apply: pollReads },
 ];
 const SHAPE_SUBSETS: (typeof SHAPE_PRODUCTS)[number][][] = [
   ...SHAPE_PRODUCTS.map((x) => [x]),
   ...(SHAPE_PRODUCTS.length > 1 ? [SHAPE_PRODUCTS] : []),
 ];
+
+/** The subset applied in table order, SKIP-ON-DECLINE: a member that declines contributes
+ *  nothing rather than killing the combination — the all-shapes candidate is "everything that
+ *  fires", so a pair is reachable whenever the third declines. Null when nothing fired (the
+ *  suffix would mislead and the source would duplicate a smaller subset's). */
+const applyShapes = (subset: readonly (typeof SHAPE_PRODUCTS)[number][], from: SFn): SFn | null => {
+  let cur = from;
+  let fired = false;
+  for (const sp of subset) {
+    const r = sp.apply(cur);
+    if (r) {
+      cur = r;
+      fired = true;
+    }
+  }
+  return fired ? cur : null;
+};
 
 const SIGN_CANDS = [
   { label: 'unsigned', signed: false },
@@ -538,15 +556,11 @@ export function enumerateCandidates(
             // fixed order below. A shape that never fires declines and costs nothing.
             if (!SHAPE_PRODUCTS.some(({ suffix: sx }) => suffix.includes(sx))) {
               for (const subset of SHAPE_SUBSETS) {
-                let out: SFn | null = alt;
-                let sx = '';
-                for (const sp2 of subset) {
-                  out = out === null ? null : (sp2.apply(out) ?? null);
-                  sx += sp2.suffix;
-                }
-                if (out !== null && out !== alt) {
+                const out = applyShapes(subset, alt);
+                if (out !== null) {
                   assertResolved(out);
                   assertDerefsTyped(out);
+                  const sx = subset.map((sp2) => sp2.suffix).join('');
                   spellings.push({ suffix: `${suffix}${sx}`, source: backend.emit(out), ...refsOf(out) });
                 }
               }
@@ -564,9 +578,7 @@ export function enumerateCandidates(
         // same footing as the others: the primary inline spelling stays in the list, so the differ
         // referees and this can never cost a match.
         for (const subset of SHAPE_SUBSETS) {
-          respell(subset.map((x) => x.suffix).join(''), () =>
-            subset.reduce<SFn | null>((acc, x) => (acc === null ? null : (x.apply(acc) ?? null)), sfn),
-          );
+          respell(subset.map((x) => x.suffix).join(''), () => applyShapes(subset, sfn));
         }
         respell('/argbase', () => materializeArgBases(sfn));
         // `/volatile` — declare a pointer local holding a NUMERIC address as pointing to volatile
@@ -613,6 +625,18 @@ export function enumerateCandidates(
         };
         enumerate('/scopebase-coalesce', () => hoistScopedBases(sfn));
         enumerate('/coalesce', () => sfn);
+        // `/volatile`'s per-local SUBSETS: which pointers the source declared volatile is
+        // per-pointer knowledge (an MMIO block and a plain RAM table sit side by side, and
+        // qualifying the table blocks the read collapse its region wants), so each proper
+        // non-empty subset is its own candidate — the same alternative-OUTPUTS mechanism as the
+        // coalesce merges, not a product (l3/volatileptr.ts volatileSubsetCandidates carries the
+        // ≤3 cap). The all-qualifiers form is plain `/volatile` above; the livebase product's
+        // subsets ride below with the product's own `only` scope.
+        enumerate(
+          '/volatile',
+          () => sfn,
+          (s) => volatileSubsetCandidates(s),
+        );
         respell('/indexed', () => reindexWalks(sfn));
         respell('/indexed/volatile', () => {
           const kept = new Set<string>();
@@ -642,6 +666,10 @@ export function enumerateCandidates(
           return volatilePtrLocals(r, created);
         };
         respell('/livebase/volatile', livebaseVolatile);
+        enumerate('/livebase/volatile', livebase, (r) => {
+          const before = new Set(sfn.locals.map((l) => l.name));
+          return volatileSubsetCandidates(r, new Set(r.locals.filter((l) => !before.has(l.name)).map((l) => l.name)));
+        });
         // The livebase × indexed PAIRINGS — the third sanctioned product kind (see POLICY):
         // row-demanded, and the joint spelling is reachable from neither lever alone (the
         // frame-copy + DMA shape).

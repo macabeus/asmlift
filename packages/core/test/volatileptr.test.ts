@@ -7,7 +7,7 @@ import { expect, test } from 'vitest';
 
 import { T } from '../src/ir/types';
 import { type SFn, type Stmt } from '../src/l3/ast';
-import { volatilePtrLocals } from '../src/l3/volatileptr';
+import { volatilePtrLocals, volatileSubsetCandidates } from '../src/l3/volatileptr';
 
 const fn = (locals: SFn['locals'], body: Stmt[]): SFn => ({
   name: 'f',
@@ -141,4 +141,33 @@ test('`only` narrows the lever: a qualifying local outside the set is not marked
   expect(out?.locals.find((l) => l.name === 'q')?.pointeeVolatile).toBe(true);
   expect(out?.locals.find((l) => l.name === 'p')?.pointeeVolatile).toBeUndefined();
   expect(volatilePtrLocals(s, new Set(['nosuch']))).toBeNull();
+});
+
+// ── the per-local SUBSET candidates ─────────────────────────────────────────────────────────
+const twoPtrs: SFn['locals'] = [
+  { name: 'p0', type: T.ptr(T.u(16)) },
+  { name: 'p1', type: T.ptr(T.s(32)) },
+];
+const init = (name: string, addr: number): Stmt => ({
+  k: 'assign',
+  name,
+  value: { k: 'cast', to: T.ptr(T.s(32)), e: { k: 'const', value: addr } },
+});
+
+test('two qualifying locals yield the two proper subsets, labeled by member', () => {
+  const cands = volatileSubsetCandidates(fn(twoPtrs, [init('p0', 0x3001048), init('p1', 0x40000d4)]));
+  expect(cands.map((c) => c.merged).sort()).toEqual(['p0', 'p1']);
+  const p1only = cands.find((c) => c.merged === 'p1')!.sfn;
+  expect(p1only.locals.find((l) => l.name === 'p1')!.pointeeVolatile).toBe(true);
+  expect(p1only.locals.find((l) => l.name === 'p0')!.pointeeVolatile).toBeUndefined();
+});
+
+test('one qualifying local yields no subsets — the plain lever already is that candidate', () => {
+  expect(volatileSubsetCandidates(fn(twoPtrs, [init('p1', 0x40000d4)]))).toEqual([]);
+});
+
+test('above three qualifiers the arm caps out empty', () => {
+  const four: SFn['locals'] = [0, 1, 2, 3].map((i) => ({ name: `p${i}`, type: T.ptr(T.s(32)) }));
+  const inits = [0, 1, 2, 3].map((i) => init(`p${i}`, 0x4000000 + i * 4));
+  expect(volatileSubsetCandidates(fn(four, inits))).toEqual([]);
 });
