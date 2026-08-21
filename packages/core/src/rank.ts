@@ -344,13 +344,16 @@ export function enumerateCandidates(
   // spelled is not derivable from asm, so both are emitted and the differ referees.
   //
   // Gated on the function HAVING a homeable shared base — the only thing the axis can change.
-  // The `addrhome:false` siblings enumerate first, same as `/inplace`'s ordering rule.
-  const addrHomeCands = hasHomeableSharedAddress(probe)
-    ? [
-        ...senseCands.map((s) => ({ ...s, addrhome: false })),
-        ...senseCands.map((s) => ({ ...s, suffix: `${s.suffix}/addr-home`, addrhome: true })),
-      ]
-    : senseCands.map((s) => ({ ...s, addrhome: false }));
+  // PER SYMBOL VARIANT, not on the shared probe: a map-lifted probe spells the shared base's
+  // constants as `gaddr`, whose cone the axis refuses — so the probe would blind the
+  // `/raw-globals` siblings, whose own lift has the plain-const cone the axis serves. The chain
+  // carries the axis unconditionally and each variant's loop skips it when its lifted fn has no
+  // homeable base (every `addrhome` variant skips together, so the dropped-sibling closure has
+  // no hole). The `addrhome:false` siblings enumerate first, same as `/inplace`'s ordering rule.
+  const addrHomeCands = [
+    ...senseCands.map((s) => ({ ...s, addrhome: false })),
+    ...senseCands.map((s) => ({ ...s, suffix: `${s.suffix}/addr-home`, addrhome: true })),
+  ];
 
   const seen = new Set<string>();
   const out: Candidate[] = [];
@@ -375,6 +378,8 @@ export function enumerateCandidates(
       // The shared tower spine (pipeline.ts) — the candidate's ONE difference from decompile() is the
       // signedness pin, injected between pre-recovery and recoverTypes via the beforeRecover hook.
       raiseRecovered(fn, target, { beforeRecover: () => pinScalarParams(fn, cand.signed, ptrIdx) });
+      // this variant's own gate for the `/addr-home` axis — see the chain-construction note
+      const canAddrHome = hasHomeableSharedAddress(fn);
       // `/merge-names` combinations whose un-merged sibling was DROPPED. `structure()` already
       // refuses to let the axis unlock a function the primary declines, but it can only see its own
       // refusals — a boundary contract fails out here, in `structureChecked`. Without this a
@@ -383,6 +388,9 @@ export function enumerateCandidates(
       // first, so the entry is always recorded before its merged twin is reached.
       const droppedPrimary = new Set<string>();
       for (const s of addrHomeCands) {
+        if (s.addrhome && !canAddrHome) {
+          continue; // the axis cannot change this variant — not a drop, nothing derives from it
+        }
         if (
           (s.mergeNames && droppedPrimary.has(s.suffix.replace('/merge-names', ''))) ||
           (s.inplace && droppedPrimary.has(s.suffix.replace('/inplace', ''))) ||
