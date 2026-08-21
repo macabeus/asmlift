@@ -19,12 +19,11 @@
 // the same empty forwarding block seen from the other side, which dominates its header instead of
 // the reverse. Reachability alone cannot refuse one, because an INNER loop's preheader sitting
 // inside an OUTER loop is reachable from the inner header round the outer back-edge. Folding a
-// preheader hands the structurer a guard branching straight at the header, which is the guard-FUSED
-// shape — and fusion is admitted on SHAPE alone (`isGuardShapedPred`), with a documented gap for a
-// guard that tests something other than the loop: it is DROPPED, not declined. So a guard `a0 != 0`
-// in front of a `v < a0` loop simply disappears from the emitted C, and at `a0 = -5` the asm
-// returns 1 where that C returns 0. This gate is the only thing between the pass and that shape,
-// which is what makes it a SOUNDNESS gate rather than a quality one.
+// preheader hands the structurer a guard branching straight at the header — the guarded-self-loop
+// shape, where the structurer either fuses under its guard proof or keeps the guard as its own
+// `if` (declining loud on the hazards). The guard therefore survives the fold either way; what the
+// gate preserves is the SHAPE — a forward trampoline is not a latch, and folding one re-casts an
+// unrelated branch as a loop guard — which is the `target-dominates` entry's own note below.
 import { Fn, dominators } from '../ir/core';
 import { type Gate, firstRejection } from '../l3/gates';
 
@@ -58,11 +57,14 @@ export const LATCH_GATES: readonly Gate<LatchCandidate>[] = [
   },
   {
     id: 'target-dominates',
-    why: 'a preheader is the same empty block from the other side; folding it drops a guard',
-    sound: true,
-    // The refusal test alone would not do: it asserts that nothing was folded, which is what a
-    // gate that never fires looks like too. The named one ablates this entry and reads the C.
-    guardedBy: 'ablating the dominance gate DROPS a guard from the emitted C',
+    why: "a preheader is the same empty block from the other side; folding it re-shapes another block's branch into a loop guard",
+    // Formerly `sound`: the fold once handed the guard's cond_br to a fusion that DROPPED an
+    // unproven guard outright. That burden now lives in the guarded-self-loop emitter — an
+    // unproven guard keeps its `if` (or declines loud), and a multi-block loop's guard never had
+    // a fusion path to lose it to — so ablating this gate re-shapes the C without making it
+    // wrong, which is a heuristic by the Gate contract. The named test pins the second layer.
+    sound: false,
+    guardedBy: 'ablating the dominance gate hands a guard to the kept-guard loop emitter',
     rejects: (c) => !c.dominatesBlock,
   },
 ];

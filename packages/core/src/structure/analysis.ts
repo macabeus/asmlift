@@ -6,7 +6,7 @@
 //   • the effect-ordering model — which call/load defs must MATERIALIZE as named temps at
 //     their own program position instead of inlining at their use.
 import { globalCellOf, mayWriteGlobal } from '../ir/alias';
-import { Block, Fn, Op, Value, successorsOf } from '../ir/core';
+import { Block, Fn, Op, Value, defOpMap, successorsOf } from '../ir/core';
 import { EFFECTFUL_OPS } from '../ir/opcodes';
 
 export interface UseSite {
@@ -39,6 +39,9 @@ export interface AnalyzeOptions {
    *  rebuilt. Absent ⇒ the global-aware alias rule below cannot resolve anything and every write
    *  bars, exactly as before it existed. */
   defs?: Map<Value, Op>;
+  /** Dominator sets, when the caller already holds them (structure() does) — consumed by the
+   *  live-across-a-loop rule's back-edge detection. Absent ⇒ that rule stands down. */
+  dom?: Map<Block, Set<Block>>;
   /** THE value-home axis (rank.ts `/reread-globals`). A read of a named global is barred from
    *  rendering at its use by any write in between — even a store to an unrelated global, which
    *  cannot possibly change what it sees. That over-conservatism is what invents the locals the
@@ -70,7 +73,7 @@ export interface AnalyzeOptions {
 }
 
 export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {}): StructureAnalysis {
-  const { defs, rereadGlobals = false, volatileGlobal, materializeJoinFeeds = false } = opts;
+  const { defs, dom, rereadGlobals = false, volatileGlobal, materializeJoinFeeds = false } = opts;
   // ── use registry ────────────────────────────────────────────────────────────────────────
   // Every use of a value, POSITIONED: the consuming op and its block/index. Successor args are
   // uses AT the terminator (they render in argAssigns at block end). A void function's `ret`
@@ -368,6 +371,124 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
     }
     return false;
   };
+  // ── interdependent parallel-copy args ─────────────────────────────────────────────────────
+  // A terminator's successor args are ONE parallel copy (argAssigns), whose every read means the
+  // PRE-copy value. An arg whose def-tree reads a SIBLING arg of the same edge cannot read it by
+  // name there — so the sibling's whole expression is re-derived inside this arg's copy, and
+  // `sequentialize` spills old-value temps to untangle the order: arithmetic the compiler
+  // performed once, emitted per reader (the coupled-recurrence loop, `a += b*c; d += a;`). The
+  // read sibling is the register the copy machinery cannot represent — materialize its def. The
+  // walk crosses pure defs only (a call/load render is those rules' question) and stops at
+  // params, which always carry a name.
+  const defOf = defs ?? defOpMap(fn);
+  const copyInterdependent = new Set<Value>();
+  const pureReads = (root: Value, acc: Set<Value>) => {
+    const stack = [root];
+    while (stack.length) {
+      const x = stack.pop()!;
+      const d = defOf.get(x);
+      if (!d || acc.has(x)) {
+        continue;
+      }
+      acc.add(x);
+      if (d.opcode !== 'call' && d.opcode !== 'load' && d.opcode !== 'aload') {
+        stack.push(...d.operands);
+      }
+    }
+  };
+  for (const b of fn.blocks) {
+    for (const s of b.ops[b.ops.length - 1]?.successors ?? []) {
+      if (s.args.length < 2) {
+        continue;
+      }
+      for (const w of s.args) {
+        const d = defOf.get(w);
+        if (!d || d.opcode === 'call' || d.opcode === 'load' || d.opcode === 'aload') {
+          continue;
+        }
+        const reads = new Set<Value>();
+        for (const o of d.operands) {
+          pureReads(o, reads);
+        }
+        for (const v of s.args) {
+          if (v !== w && reads.has(v)) {
+            copyInterdependent.add(v);
+          }
+        }
+      }
+    }
+  }
+  // ── natural loops, for the live-across-a-loop rule ────────────────────────────────────────
+  // From the caller's dominators (a back edge is `latch → header` with the header dominating the
+  // latch); the body is the backward closure from the latch. With no `dom` the rule stands
+  // down — the same posture as the `defs`-carried rules.
+  const loopBodies: { header: Block; body: Set<Block> }[] = [];
+  if (dom) {
+    const predsOf = new Map<Block, Block[]>();
+    for (const b of fn.blocks) {
+      predsOf.set(b, []);
+    }
+    for (const b of fn.blocks) {
+      for (const s of successorsOf(b)) {
+        predsOf.get(s)!.push(b);
+      }
+    }
+    for (const latch of fn.blocks) {
+      for (const header of successorsOf(latch)) {
+        if (!dom.get(latch)?.has(header)) {
+          continue;
+        }
+        const body = new Set<Block>([header]);
+        const work = [latch];
+        while (work.length) {
+          const x = work.pop()!;
+          if (!body.has(x)) {
+            body.add(x);
+            work.push(...(predsOf.get(x) ?? []));
+          }
+        }
+        loopBodies.push({ header, body });
+      }
+    }
+  }
+  /** The def's value enters some loop's header live and every consumer sits outside that loop,
+   *  as does the def: the value is carried ACROSS the loop, not into it. */
+  // Never for a def in a MULTI-BLOCK loop header: a test-at-top `while`'s condition has no seat
+  // for a materialized temp (the structurer's headerPure gate), so materializing there trades a
+  // structuring function for a decline. Self-loop headers stay eligible — their kept-guard
+  // do-while form hosts the temp.
+  const multiBlockHeaders = new Set(loopBodies.filter((L) => L.body.size > 1).map((L) => L.header));
+  const liveAcrossLoop = (def: Op, r: Value, consumers: Op[]): boolean =>
+    !multiBlockHeaders.has(opBlock.get(def)!) &&
+    loopBodies.some(
+      (L) =>
+        liveIn.get(L.header)!.has(r) &&
+        !L.body.has(opBlock.get(def)!) &&
+        consumers.every((c) => !L.body.has(opBlock.get(c)!)),
+    );
+  /** Any gaddr/laddr in the op's cone (the op included): rendered standalone, an address
+   *  computation loses the memAccess's inline byte-stride cast — those stay with the cast-aware
+   *  base machinery. */
+  const addressCone = (op0: Op): boolean => {
+    const seen = new Set<Value>();
+    const cone = [op0];
+    while (cone.length) {
+      const d = cone.pop()!;
+      if (d.opcode === 'gaddr' || d.opcode === 'laddr') {
+        return true;
+      }
+      for (const x of d.operands) {
+        if (!seen.has(x)) {
+          seen.add(x);
+          const dd = defOf.get(x);
+          if (dd) {
+            cone.push(dd);
+          }
+        }
+      }
+    }
+    return false;
+  };
   // Decide in REVERSE program order so a consumer's own materialization is settled before any
   // producer asks for its emit position (SSA: uses follow defs in dominance/layout order) — and
   // iterate to a fixpoint for IR whose block layout does not follow dominance (hand-built IR):
@@ -400,15 +521,21 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           // across `foo(...)` calls). WITHOUT a call in its live range the const is instead cheaply
           // re-materialized at each use (a bare `movs r, #0` per init), so materializing it would
           // ADD pointless copies and MISS — hence the call gate (the small-constant regression).
-          // Cheap deref casts still land on the `index` node at the use, preserving byte strides;
-          // NON-const pure ops are excluded (an address computation `&g + i` rendered standalone
-          // loses the memAccess's inline `(u8 *)` cast — cast-aware base materialization is separate).
+          // Cheap deref casts still land on the `index` node at the use, preserving byte strides.
+          // Second scope: a NON-const read by a sibling parallel-copy arg (`copyInterdependent`) —
+          // the one place a pure value's inlining is not value-identical rendering but a
+          // re-derivation the copy machinery is forced into. Address cones are excluded from it
+          // (an `&g + i` rendered standalone loses the memAccess's inline `(u8 *)` cast —
+          // cast-aware base materialization is separate), and consts are not in it at all: a
+          // re-derived const is re-materialization, which is the compiler's own behavior.
           const pr = op.results[0];
           if (op.opcode === 'const' && pr && useSitesOf.has(pr)) {
             const cons = [...new Set((useSitesOf.get(pr) ?? []).map((s) => s.op))];
             if (cons.length > 1 && liveAcrossCall(op, cons)) {
               materialize.add(op);
             }
+          } else if (op.opcode !== 'const' && pr && copyInterdependent.has(pr) && !addressCone(op)) {
+            materialize.add(op);
           }
           continue;
         }
@@ -433,6 +560,14 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         const isCall = op.opcode === 'call';
         // A call must EXECUTE once — any second operand slot duplicates it → named temp.
         if (isCall && sites.length > 1) {
+          materialize.add(op);
+          continue;
+        }
+        // Live across a LOOP neither side belongs to: the access ran before the loop and the
+        // value crossed it in a callee-saved register (hipress's `keep = p[1]`, homed in r8 and
+        // touched only by `mov`). Rendering at the use would re-schedule the access to the far
+        // side of the loop — the same refusal liveAcrossCall makes for a call, applied to a loop.
+        if (liveAcrossLoop(op, r, consumers)) {
           materialize.add(op);
           continue;
         }

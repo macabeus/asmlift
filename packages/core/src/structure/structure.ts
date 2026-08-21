@@ -772,6 +772,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     returnsVoid,
     {
       defs,
+      dom,
       rereadGlobals,
       materializeJoinFeeds,
       // the map's own declaration truth: a volatile object's read may not be duplicated or moved
@@ -1317,6 +1318,29 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
               name = nm;
               break;
             }
+          }
+        }
+        // A MATERIALIZED back-edge arg is this variable's in-place update (`add r4, r4, r0`
+        // mutates the same register the param lives in) — adopt its name so the def assigns the
+        // loop variable directly and the update copy elides. Sound only when every read of the
+        // param sits at-or-before the def in the header (the def's own operands included): the
+        // assignment splits the iteration into old-value-before / new-value-after, and a later
+        // read of the OLD value would silently get the new one — position-granular, because
+        // liveness is block-granular and the param is killed from its own block's liveIn.
+        if (name === undefined) {
+          const ba = backArgs?.[i];
+          const d = ba !== undefined ? defs.get(ba) : undefined;
+          const nm = ba !== undefined ? varName.get(ba) : undefined;
+          if (
+            nm !== undefined &&
+            !exclude.has(nm) &&
+            d !== undefined &&
+            materialize.has(d) &&
+            opBlock.get(d) === header &&
+            (useSitesOf.get(p) ?? []).every((s) => s.blk === header && s.idx <= opIndex.get(d)!) &&
+            canTakeName(p, header, nm)
+          ) {
+            name = nm;
           }
         }
         name ??= `v${fresh++}`;
@@ -2058,12 +2082,13 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // pure decline-or-emit predicates, extracted to hazards.ts behind the explicit-deps factory.
   // `varName` is captured as a live reference: it is still being populated here in the naming
   // pipeline, and each check reads the names that exist when EMISSION calls it.
-  const { readsClobbered, loopUpdateHazard, sinkablePreUpdateSlots, sameAtEntry } = makeLoopHazards({
+  const { readsClobbered, loopUpdateHazard, sinkablePreUpdateSlots, sameAtEntry, loopWriteSet } = makeLoopHazards({
     defs,
     varName,
     useSitesOf,
     liveIn,
     opBlock,
+    materialize,
     respelledDefs: bitfieldSpelling,
   });
 
@@ -2422,21 +2447,15 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       return out;
     }
 
-    // guard-fused loop: this cond_br decides "enter loop header h vs its exit". Emit the
-    // inits unconditionally, then a while whose own test subsumes this guard. Never fuse when `b`
-    // is itself the header (a guard-LESS single-block do-while would emit the update once before a
+    // guarded self-loop: this cond_br decides "enter loop header h vs its exit". Emit the inits
+    // unconditionally, then either a `while` whose own test subsumes this guard (fused — only under
+    // the guard proof below), or the guard kept as its own `if` around a bottom-tested `do-while`
+    // (gcc's "guard + do-while" shape, emitted as itself). Never claim when `b` is itself the
+    // header (a guard-LESS single-block do-while would emit the update once before a
     // wrongly-`while` loop) — require a DISTINCT dominating guard block.
     for (const h of [takenB, fallB]) {
       const li = loops.get(h);
       if (li && h !== b && (takenB === li.exit || fallB === li.exit)) {
-        // A MATERIALIZED header op's temp is assigned only inside the body (sideEffects), but the
-        // un-rotated `while` condition renders BEFORE the body ever ran — reading the temp
-        // uninitialized on the first test. Mirror of the headerPure gate: decline loud.
-        if (li.header.ops.some((o) => materialize.has(o))) {
-          throw new StructureError(
-            `cannot structure '${fn.name}': loop header holds a materialized def its condition would read uninitialized`,
-          );
-        }
         // Self-loop emitter hazards: the while condition, the header→exit args, and every
         // post-loop use of a header-computed value render under the un-rotation sub — sound only
         // when their loop-variable reads go through sub-mapped back-edge args (post-update). A
@@ -2444,7 +2463,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         // holds → decline LOUD, never emit wrong code.
         const sub = loopSub(li);
         const updates = argAssigns(li.header, li.header);
-        const updateWrites = updateWriteSet(updates);
+        const updateWrites = loopWriteSet(updates, [li.header], li.header);
         const hterm = li.header.ops[li.header.ops.length - 1];
         const hexitArgs = (successorTo(li.header, li.exit)?.args ?? []) as Value[];
         // FUSION IS ONLY SOUND WHEN EVERYTHING IT DROPS IS REDUNDANT. `isGuardShapedPred` asks about
@@ -2462,18 +2481,24 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         li.header.params.forEach(
           (_, i) => initArgs[i] !== undefined && entryVals.set(li.backArgOfParam[i], initArgs[i]),
         );
-        // (1) Is the guard PROVABLY the loop's own test? Fusion DELETES it and lets the `while`
-        // re-test, so when it tests something else the emitted C loses the `if` outright and runs a
-        // loop the source skipped. Structural equality is a sufficient proof, never a necessary
-        // one: `str[0]` and `str[i]` at `i = 0`, or a signed `e <= 0` beside an unsigned `e != 0`,
-        // are the same test spelled differently, and normalising those needs a canonical form this
-        // pass does not have. Refusing every unproven guard costs rows whose fusion is sound, so it
-        // refuses only the SINK below, which is what makes the fused zero-trip path load-bearing.
-        // KNOWN GAP: a loop with no repairable exit copy still fuses on shape alone, so an `if`
-        // about something else is silently dropped.
+        // (1) Is the guard PROVABLY the loop's own test? Fusing DELETES it and lets the `while`
+        // re-test, so an unproven fuse would lose the `if` outright and run a loop the source
+        // skipped. Structural equality is a sufficient proof, never a necessary one: `str[0]` and
+        // `str[i]` at `i = 0`, or a signed `e <= 0` beside an unsigned `e != 0`, are the same test
+        // spelled differently, and normalising those needs a canonical form this pass does not
+        // have. An unproven guard therefore KEEPS its `if`, with the loop as a `do-while` inside it
+        // — every test the asm performs is emitted as itself. The proof still gates the SINK below:
+        // a sunk copy runs once per iteration, and only the proof (fused form) or the kept `if`
+        // makes the zero-trip path skip it. The kept `if` would widen the sink's key to unproven
+        // guards too; no row needs that yet, so it stays keyed on the proof.
         const enterIsTaken = takenB === h;
         const contIsTaken = hterm.successors[0].block === li.header;
         const guardProven = sameAtEntry(hterm.operands[0], term.operands[0], entryVals, enterIsTaken !== contIsTaken);
+        // Fused `while` additionally requires a header free of MATERIALIZED defs: their temps are
+        // assigned only inside the body (sideEffects), and an un-rotated `while` condition renders
+        // BEFORE the body ever ran — reading a temp uninitialized on the first test. The kept-guard
+        // `do-while` tests after the body, so it carries no such restriction.
+        const fused = guardProven && !li.header.ops.some((o) => materialize.has(o));
         // A pre-update exit copy is repairable rather than fatal: emitted at the TOP of the body it
         // captures the value one iteration before the update, which is what the exit edge carries.
         // Its post-loop copy is then dropped, so the ZERO-TRIP path needs the guard→exit edge as a
@@ -2524,9 +2549,95 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
               `loop initialisation reads`,
           );
         }
+        // ZERO-TRIP reads (kept-guard form only): the body sits inside `if (guard)`, so a
+        // materialized header def's temp is assigned only when the guard held. A kept exit arg or
+        // a post-loop read reaching such a temp — by its NAME, which is how a materialized def
+        // renders — reads it uninitialized on the guard-false path, silently. Loop-variable names
+        // are exempt (the inits write them unconditionally, and staleExit already proved their
+        // zero-trip values); so is anything named outside the header. Decline loud.
+        if (!fused) {
+          const paramNames = new Set(li.header.params.map((q) => varName.get(q)));
+          const bodyTemp = (v: Value): boolean => {
+            const d = defs.get(v);
+            return (
+              d !== undefined &&
+              materialize.has(d) &&
+              opBlock.get(d) === li.header &&
+              varName.has(v) &&
+              !paramNames.has(varName.get(v))
+            );
+          };
+          const reachesBodyTemp = (root: Value): boolean => {
+            const stack = [root];
+            const seen = new Set<Value>();
+            while (stack.length) {
+              const v = stack.pop()!;
+              if (seen.has(v)) {
+                continue;
+              }
+              seen.add(v);
+              if (sub.has(v)) {
+                continue; // renders as its loop variable's name — unconditionally initialized
+              }
+              if (bodyTemp(v)) {
+                return true;
+              }
+              if (varName.has(v)) {
+                continue; // named outside the guarded body — assigned on both paths
+              }
+              const d = defs.get(v);
+              if (d) {
+                stack.push(...d.operands);
+              }
+            }
+            return false;
+          };
+          if (
+            hexitArgs.some((a, j) => !sunk.has(j) && reachesBodyTemp(a)) ||
+            [...(liveIn.get(li.exit) ?? [])].some(bodyTemp)
+          ) {
+            throw new StructureError(
+              `cannot structure '${fn.name}': a post-loop read reaches a temp the guarded body may never assign`,
+            );
+          }
+        }
+        const inits = argAssigns(b, h);
+        const loopStmt = emitWhile(li, updates, preUpdateCopies(li.exit, hexitArgs, sunk), fused ? 'while' : 'dowhile');
+        // The guard-read substitution: an init arg reads as its loop variable's NAME. The inits
+        // just assigned them (value-identical), and that is the source spelling — `if (n > 0)`
+        // tests the loop variable, which is also the parked register the target's guard reads.
+        // Not an UNMATERIALIZED const: the guard compared an immediate (`cmp rX, #0`), and an
+        // immediate is what re-spelling it as the counter's name would un-spell.
+        const gsub = new Map<Value, string>();
+        li.header.params.forEach((p, i) => {
+          const a = initArgs[i];
+          const ad = a !== undefined ? defs.get(a) : undefined;
+          if (a !== undefined && !(ad?.opcode === 'const' && !materialize.has(ad))) {
+            gsub.set(a, varName.get(p)!);
+          }
+        });
+        if (!fused) {
+          // The kept guard's condition renders AFTER the seed and the inits, but tests the state
+          // BEFORE them — a read of a just-(non-identity-)written name is sound only through
+          // `gsub`, whose mapped values the inits deliberately hold.
+          const writes = new Set([...seedWrites, ...updateWriteSet(inits)]);
+          if (readsClobbered(term.operands[0], gsub, writes)) {
+            throw new StructureError(
+              `cannot structure '${fn.name}': the kept guard's condition reads a name the loop initialisation overwrites`,
+            );
+          }
+        }
         out.push(...seed); // zero-trip value for the sunk copies
-        out.push(...argAssigns(b, h)); // loop-variable initialisation
-        out.push(emitWhile(li, updates, preUpdateCopies(li.exit, hexitArgs, sunk)));
+        out.push(...inits); // loop-variable initialisation
+        if (fused) {
+          out.push(loopStmt);
+        } else {
+          let gcond = exprWith(gsub)(term.operands[0]);
+          if (!enterIsTaken) {
+            gcond = negateCond(gcond);
+          } // entering the loop must be `taken`
+          out.push(mkIf(gcond, [loopStmt], []));
+        }
         // The header→exit edge may carry non-identity phi args (the exit param merges the guard-false
         // value with the loop's final value). Emit those copies after the loop — dropping them returns
         // a stale value. Read under the un-rotation substitution (post-loop the params hold their
@@ -2577,7 +2688,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // `readsClobbered` distinguishes the two at the VALUE level; on a hazard, decline (fall
       // through → honest loud fail) rather than emit wrong code.
       const updateCopies = argAssigns(b, loopCtx.header);
-      const updateWrites = updateWriteSet(updateCopies);
+      const updateWrites = loopWriteSet(updateCopies, loopCtx.body, loopCtx.header);
       const exitArgs = (successorTo(b, exitB)?.args ?? []) as Value[];
       // The exit ARM may also read loop-body-computed values directly (an exitB dominated by `b`
       // — e.g. its `ret` operand), not just through edge args: apply the same escape test to the
@@ -2705,20 +2816,30 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         };
       });
 
-  // Un-rotate a header's do-while latch into a `while`: the test reads the header's own
-  // params (back-edge args substituted back), and the body is any sunk trailing copies, then the
-  // header's SIDE EFFECTS in program order, then its parallel update. The side effects are
-  // required — a copies-only body would silently delete every store/discarded call in the header.
-  // Effect order is right by construction: statements read pre-update names, the updates land
-  // after, and a sunk copy reads the top-of-iteration value it is there to capture.
-  const emitWhile = (li: LoopInfo, updates?: Stmt[], sunkCopies: Stmt[] = []): Stmt => {
+  // A guarded self-loop's body and latch test. The test reads the header's own params (back-edge
+  // args substituted back), and the body is any sunk trailing copies, then the header's SIDE
+  // EFFECTS in program order, then its parallel update. The side effects are required — a
+  // copies-only body would silently delete every store/discarded call in the header. Effect order
+  // is right by construction: statements read pre-update names, the updates land after, and a sunk
+  // copy reads the top-of-iteration value it is there to capture.
+  //
+  // The SAME cond/body serve both forms: as a `while` (guard fused away — the un-rotation), the
+  // first test reads the just-emitted init values; as a `dowhile` (guard kept as its own `if`),
+  // every test runs after the update wrote the params' next values. Both are what that form's
+  // source spelling means.
+  const emitWhile = (
+    li: LoopInfo,
+    updates?: Stmt[],
+    sunkCopies: Stmt[] = [],
+    kind: 'while' | 'dowhile' = 'while',
+  ): Stmt => {
     const term = li.header.ops[li.header.ops.length - 1];
     let cond = exprWith(loopSub(li))(term.operands[0]);
     if (term.successors[0].block !== li.header) {
       cond = negateCond(cond);
     } // loop-continue must be `taken`
     const body = [...sunkCopies, ...sideEffects(li.header), ...(updates ?? argAssigns(li.header, li.header))];
-    return { k: 'while', cond, body };
+    return kind === 'while' ? { k: 'while', cond, body } : { k: 'dowhile', cond, body };
   };
 
   // Test-at-top `while`: the header's cond_br is the loop condition. The body is a region that stops
@@ -2763,7 +2884,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // path applies; on a hazard, decline LOUD.
     const sub = latchSub(dw);
     const updates = argAssigns(dw.latch, dw.header);
-    const updateWrites = updateWriteSet(updates);
+    const updateWrites = loopWriteSet(updates, dw.body, dw.header);
     const lterm = dw.latch.ops[dw.latch.ops.length - 1];
     // KNOWN GAP, and the reason the sink stands down rather than repairing anything. A body
     // block's param may adopt a LOOP VARIABLE's name (canTakeName waives the liveness half for a

@@ -59,6 +59,9 @@ export interface LoopHazardDeps {
   liveIn: Map<Block, Set<Value>>;
   /** op → the block holding it (analysis.ts) */
   opBlock: Map<Op, Block>;
+  /** defs that emit as named temps at their own position (analysis.ts) — `loopWriteSet` reads it
+   *  to see the in-place write an adopted materialized def performs. LIVE, like `varName`. */
+  materialize: Set<Op>;
   /** Ops whose LOWERING discards their operand tree and spells something else — today the
    *  bitfield-extract fold, which renders a global member read in place of a shift pair. A walk
    *  over the operands cannot see what such an op will render, so predicates that reason about
@@ -94,6 +97,7 @@ export interface LoopHazards {
     gates?: readonly Gate<SinkCandidate>[],
   ): Set<number>;
   sameAtEntry(a: Value, b: Value, entry: Map<Value, Value>, negated?: boolean): boolean;
+  loopWriteSet(updates: Stmt[], bodyBlocks: Iterable<Block>, header: Block): Set<string>;
 }
 
 /** The names a loop update assigns (its non-identity copies) — the write set every loop-emission
@@ -165,7 +169,30 @@ export const PREUPDATE_SINK_GATES: readonly Gate<SinkCandidate>[] = [
 ];
 
 export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
-  const { defs, varName, useSitesOf, liveIn, opBlock, respelledDefs } = deps;
+  const { defs, varName, useSitesOf, liveIn, opBlock, materialize, respelledDefs } = deps;
+
+  // The names one loop iteration writes under its VARIABLES' names: the update copies, plus a
+  // loop-variable name a materialized body def writes IN PLACE. Adoption (seedLoopParams) makes
+  // that def's update copy an identity — elided, so `updateWriteSet(updates)` alone no longer
+  // carries the name — but the write still happens mid-body via sideEffects, and a
+  // pre-update-read check keyed on the write set is blind to it without this. Non-param
+  // materialized names stay out: a fresh temp is assigned once per iteration, so an
+  // out-of-position read of it is the current value, not a stale one (its zero-trip hazard is
+  // the kept-guard site's separate check).
+  const loopWriteSet = (updates: Stmt[], bodyBlocks: Iterable<Block>, header: Block): Set<string> => {
+    const writes = updateWriteSet(updates);
+    const paramNames = new Set(header.params.map((p) => varName.get(p)));
+    for (const bb of bodyBlocks) {
+      for (const op of bb.ops) {
+        const r = op.results[0];
+        const nm = r !== undefined && materialize.has(op) ? varName.get(r) : undefined;
+        if (nm !== undefined && paramNames.has(nm)) {
+          writes.add(nm);
+        }
+      }
+    }
+    return writes;
+  };
 
   // Does rendering `v` under `sub` read a variable that a pending loop update (`updateWrites`, the
   // names it assigns) overwrites, via a path OTHER than a `sub`-mapped back-edge arg? Such a read is a
@@ -443,5 +470,5 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     return !!da && !!db && sameOp(da, db, NEGATED_ICMP[da.opcode] === db.opcode);
   };
 
-  return { readsClobbered, loopEscapeHazard, loopUpdateHazard, sinkablePreUpdateSlots, sameAtEntry };
+  return { readsClobbered, loopEscapeHazard, loopUpdateHazard, sinkablePreUpdateSlots, sameAtEntry, loopWriteSet };
 }

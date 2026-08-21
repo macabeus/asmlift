@@ -182,12 +182,15 @@ test('dominators: a latch is dominated by its header, a preheader is not', () =>
 });
 
 // THE POSITIVE CONTROL for the dominance gate, run through the emitter rather than through a fold
-// count. `toBe(0)` on a refusal proves only that nothing happened; what makes the gate SOUND is
-// what happens when it is gone — and because the gates are a table, that ablation is a value passed
-// to the real pass, not a test-only branch inside it.
-test('ablating the dominance gate DROPS a guard from the emitted C', () => {
+// count alone — and because the gates are a table, the ablation is a value passed to the real
+// pass, not a test-only branch inside it. Two layers stand between this fold and a dropped guard:
+// this gate refuses to fold the preheader (the guard's cond_br never takes the fusable shape), and
+// the guarded-self-loop emitter's own guard proof refuses to fuse an unproven guard (it survives
+// as its `if` around a `do-while`). Ablating the first layer must land in the second — the guard
+// stays in the C either way.
+test('ablating the dominance gate hands a guard to the kept-guard loop emitter', () => {
   // The guard tests `a0 != 0`; the loop tests `v < a0`. They are different predicates, so a fusion
-  // admitted on shape alone deletes the guard outright.
+  // admitted on shape alone would delete the guard outright.
   const IR = `fn g {
 ^bb0(%0: s32):
   %1: s32 = const {value=0}
@@ -213,8 +216,10 @@ test('ablating the dominance gate DROPS a guard from the emitted C', () => {
 
   const ablated = parse(IR);
   expect(foldEmptyLatches(ablated, without(LATCH_GATES, 'target-dominates'))).toBe(1);
-  // silently, with no decline and no marker: at a0 = -5 the asm returns 1 and this returns 0
-  expect(emit(ablated)).not.toContain('a0 != 0');
+  // at a0 = -5 the asm returns 1; a fused `while (v0 < a0)` would return 0
+  const c = emit(ablated);
+  expect(c).toContain('a0 != 0'); // the guard the asm branched on survives the fold
+  expect(c).toContain('do {'); // as the kept-guard form — the second layer, not a lucky no-fuse
 });
 
 // THE WIRING. Every test above calls `foldEmptyLatches` directly, so deleting the call in
