@@ -1275,6 +1275,65 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc', 'ido7.1', 'gcc2.7.2kmc'],
     ctx: 's32 hipress(u8 *p, s32 n);',
   },
+  // The EXPRESSION-home third of the family (the first two thirds: `dma_*` = one base pointer's
+  // home, `hipress` = a loaded value's home). Under loop pressure agbcc computes a repeated
+  // expensive expression ONCE and homes it — a loop-invariant shift hoisted into a callee-saved
+  // register, a two-instruction constant materialized once per iteration and read back, an
+  // incremented counter parked in `ip` — where a per-use spelling re-derives each of them.
+  // `sizehome` isolates the invariant hoist (w>>1 lands in TWO homes, one per signedness, plus
+  // the VRAM base constant); `maskhome` is the composite frame-copy + DMA shape (the inner copy
+  // loop adds the pressure that turns every home callee-saved); `fieldbase` isolates neighbor
+  // CELLS of one object derived from a single base register (`add #72`/`add #74` off one pool
+  // word where the halfword offset exceeds the load range, the word offset staying inline) — a
+  // per-cell spelling anchors one pool constant per address instead. `dma_wait:agbcc` is the
+  // whole third's control: the same mask reused once, in a function small enough that
+  // re-materializing is what the compiler does too.
+  //
+  // agbcc only. The poll loops decline on ido7.1/gcc2.7.2kmc's branch-likely lift gap, so those
+  // lanes would measure that link, not this family (`dma_wait` already carries the attributed
+  // declines); mwcc_242_81 stays off per the `hipress` hazard policy until a probe clears it.
+  {
+    sym: 'sizehome',
+    src:
+      'void sizehome(u8 *dst, s32 w, s32 n){' +
+      ' volatile s32 *dma = (volatile s32 *)0x040000d4; s32 i;' +
+      ' for (i = 0; i < n; i++){' +
+      ' dma[0] = (s32)dst; dma[1] = 0x06000000 + (w >> 1) * i;' +
+      ' dma[2] = (u32)w >> 1 | 0x80000000;' +
+      ' while (dma[2] & 0x80000000) {} } }',
+    features: ['value-home', 'pointer'],
+    toolchains: ['agbcc'],
+    ctx: 'void sizehome(u8 *dst, s32 w, s32 n);',
+    proto: { sizehome: { returnsVoid: true } },
+  },
+  {
+    sym: 'maskhome',
+    src:
+      'void maskhome(u8 *src, u8 *dst, s32 w, s32 h){' +
+      ' volatile s32 *dma = (volatile s32 *)0x040000d4; s32 x, y;' +
+      ' for (y = 0; y < h; y++){' +
+      ' for (x = 0; x < w; x++){ dst[x] = src[x + w * y]; }' +
+      ' dma[0] = (s32)dst; dma[1] = 0x06000000 + (w >> 1) * y;' +
+      ' dma[2] = (u32)w >> 1 | 0x80000000;' +
+      ' if (dma[2] & 0x80000000) { do {} while (dma[2] & 0x80000000); } } }',
+    features: ['value-home', 'pointer'],
+    toolchains: ['agbcc'],
+    ctx: 'void maskhome(u8 *src, u8 *dst, s32 w, s32 h);',
+    proto: { maskhome: { returnsVoid: true } },
+  },
+  {
+    sym: 'fieldbase',
+    src:
+      'void fieldbase(s32 n){' +
+      ' u8 *b = (u8 *)0x03001000; s32 i;' +
+      ' for (i = 0; i < n; i++){' +
+      ' if (i < *(u16 *)(b + 72)) { *(u16 *)(b + 74) = i; }' +
+      ' *(s32 *)(b + 112) = i; } }',
+    features: ['value-home', 'pointer'],
+    toolchains: ['agbcc'],
+    ctx: 'void fieldbase(s32 n);',
+    proto: { fieldbase: { returnsVoid: true } },
+  },
 ];
 
 // ── C++ (mwcc `.cp` frontend, PPC only) ───────────────────────────────────────────────────

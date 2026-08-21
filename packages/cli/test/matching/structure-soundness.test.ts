@@ -158,11 +158,13 @@ describe('C6 — parallel-copy read-set walkers cover the full Expr union', () =
   ret %5
 }
 `);
-    // The correct sequentialization (read-then-increment) is what lets recognizeForLoops lift
-    // the increment into the for-header (it must be the body's LAST statement): the body reads
-    // a0[v1] at the PRE-update index. Broken walkers emit `v1 = v1 + 1; v0 = a0[v1];`,
-    // which reads the post-update index (and can never become this for-shape).
-    expect(src).toMatch(/for \(v1 = 0; v1 < a1; v1 = v1 \+ 1\) \{\s*\n\s*v0 = a0\[v1\];\s*\n\s*\}/);
+    // The correct sequentialization: the body reads a0[v1] at the PRE-update index, the
+    // increment lands after. Broken walkers emit `v1 = v1 + 1; v0 = a0[v1];`, which reads the
+    // post-update index. The `a2` guard is NOT the loop's own test, so it survives as its `if`
+    // around the do-while (the kept-guard form) — the fused `for` this test once pinned dropped
+    // it outright.
+    expect(src).toContain('if (a2)');
+    expect(src).toMatch(/do \{\s*\n\s*v0 = a0\[v1\];\s*\n\s*v1 = v1 \+ 1;\s*\n\s*\} while \(v1 < a1\);/);
   });
 });
 
@@ -280,10 +282,13 @@ describe('F1/F2 — write-site interference + materialization gate', () => {
 
   // F2: a guard-fused self-loop whose header holds a MATERIALIZED load (barred by the aliasing
   // store) would render the temp in the while condition before the body ever assigned it.
-  test('guard-fusion declines when the header holds a materialized def', () => {
-    expect(() =>
-      structure(
-        parse(`fn selfmat {
+  test('a materialized header def structures as guard + do-while, the load a statement before the store', () => {
+    // Fusion into a `while` is out (its first test would read the temp uninitialized); the
+    // kept-guard do-while hosts it: the load renders at its own position ABOVE the store, the
+    // bottom test reads the temp and the post-update variable. The loud path this test once
+    // pinned survives where it must — a post-loop read of the temp on the zero-trip path still
+    // declines (kept-guard-loop.test.ts pins it).
+    const src = emit(`fn selfmat {
 ^bb0(%0: unk32, %1: s32):
   cond_br %1, ^bb1(%1), ^bb2()
 ^bb1(%2: s32):
@@ -296,9 +301,11 @@ describe('F1/F2 — write-site interference + materialization gate', () => {
   %6: s32 = const {value=0}
   ret %6
 }
-`),
-      ),
-    ).toThrow(/materialized def/);
+`);
+    expect(src).toContain('if (v1)');
+    expect(src).toMatch(
+      /v0 = \*\(s32 \*\)a0;\s*\n\s*\*\(s32 \*\)a0 = v1;\s*\n\s*v1 = v1 \+ -1;\s*\n\s*\} while \(v0 != v1\);/,
+    );
   });
 });
 
