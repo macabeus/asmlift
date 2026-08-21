@@ -129,3 +129,34 @@ const ADOPTED_COND = `fn adoptcond {
 test('a bottom test reading the pre-update adopted variable declines', () => {
   expect(() => emit(ADOPTED_COND)).toThrow(/reads a pre-update loop variable/);
 });
+
+// liveAcrossLoop must not fire for a def in a MULTI-BLOCK loop header: a test-at-top while's
+// condition has no seat for a materialized temp (headerPure), so the whole function would
+// decline. The header load here also feeds a use past the second loop — it stays inline.
+const HEADER_LOAD_CROSSES = `fn liveacross {
+^bb0(%0: s32*, %1: s32):
+  %2: s32 = const {value=0}
+  br ^bb1(%2)
+^bb1(%3: s32):
+  %4: s32 = load %0 {off=0, width=4, signed=1}
+  %5: u32 = icmp_ne %4, %3
+  cond_br %5, ^bb2(%3), ^bb3(%1)
+^bb2(%6: s32):
+  %7: s32 = const {value=1}
+  %8: s32 = add %6, %7
+  br ^bb1(%8)
+^bb3(%9: s32):
+  %10: s32 = const {value=1}
+  %11: s32 = sub %9, %10
+  %12: u32 = icmp_ne %11, %2
+  cond_br %12, ^bb3(%11), ^bb4()
+^bb4():
+  ret %4
+}
+`;
+
+test('a while-header load crossing a later loop stays inline: the function still structures', () => {
+  const c = emit(HEADER_LOAD_CROSSES);
+  expect(c).toContain('*a0 != v0');
+  expect(c).toContain('return *a0;');
+});

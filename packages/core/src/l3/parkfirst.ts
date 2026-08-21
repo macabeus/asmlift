@@ -11,16 +11,22 @@
 // SCOPE (decline over approximate): only plain assigns in the ENTRY straight-line prefix (the
 // leading run of assigns) move; a park's RHS must read parameters alone through pure scalar
 // nodes (var/const/un/bin/cast — a memory read or a call would be re-scheduled, not re-spelled);
-// and a park never crosses a statement that writes a name it reads, or reads or writes its
-// destination. Relative order — of the parks and of everything else — is preserved. Declines
-// (null) when nothing moves.
+// and a park never crosses a statement that writes a name it reads, reads or writes its
+// destination (`&v` counts as touching v), or carries a call. Relative order — of the parks and
+// of everything else — is preserved. Declines (null) when nothing moves.
+//
+// The kmc hipress residual is this axis's OTHER projection — its keep-load renders first while
+// gcc2.7.2 schedules it last — so a second inhabitant consolidates both into one entry-prefix
+// ordering lever rather than growing a sibling.
 import type { Expr, SFn, Stmt } from './ast';
-import { exprChildren } from './ast';
+import { exprChildren, exprHasEffect } from './ast';
 
 type Assign = Extract<Stmt, { k: 'assign' }>;
 
+// `addr` counts as touching its name: `foo(&v)` may read or write v through the pointer, so a
+// park must treat it exactly like a direct read-and-write of v.
 const readVars = (e: Expr, acc: Set<string> = new Set()): Set<string> => {
-  if (e.k === 'var') {
+  if (e.k === 'var' || e.k === 'addr') {
     acc.add(e.name);
   }
   for (const c of exprChildren(e)) {
@@ -59,7 +65,15 @@ export function parkParamsFirst(sfn: SFn): SFn | null {
     // park is re-checked against it like any other crossed statement.
     if (!params.has(st.name) && pureOverParams(st.value, params)) {
       const reads = readVars(st.value);
-      if (rest.every((c) => !reads.has(c.name) && c.name !== st.name && !readVars(c.value).has(st.name))) {
+      if (
+        rest.every(
+          (c) =>
+            !exprHasEffect(c.value) && // a call can write anything an escaped address reaches
+            !reads.has(c.name) &&
+            c.name !== st.name &&
+            !readVars(c.value).has(st.name),
+        )
+      ) {
         parks.push(st);
         continue;
       }

@@ -53,3 +53,9 @@ test('the prefix ends at the first non-assign: a park after it stays put', () =>
   const r = parkParamsFirst(fn([assign('v0', deref('a0', 1)), ifStmt, assign('v8', v('a1'))]));
   expect(r).toBeNull();
 });
+
+test('refused: a park never crosses a call — `x = foo(&v)` touches v through the pointer', () => {
+  const call = { k: 'call' as const, fn: 'foo', args: [{ k: 'addr' as const, name: 'v8' }] };
+  const r = parkParamsFirst(fn([assign('x', call), assign('v8', v('a1'))]));
+  expect(r).toBeNull();
+});

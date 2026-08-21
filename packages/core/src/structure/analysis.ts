@@ -475,7 +475,13 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
   }
   /** The def's value enters some loop's header live and every consumer sits outside that loop,
    *  as does the def: the value is carried ACROSS the loop, not into it. */
+  // Never for a def in a MULTI-BLOCK loop header: a test-at-top `while`'s condition has no seat
+  // for a materialized temp (the structurer's headerPure gate), so materializing there trades a
+  // structuring function for a decline. Self-loop headers stay eligible — their kept-guard
+  // do-while form hosts the temp.
+  const multiBlockHeaders = new Set(loopBodies.filter((L) => L.body.size > 1).map((L) => L.header));
   const liveAcrossLoop = (def: Op, r: Value, consumers: Op[]): boolean =>
+    !multiBlockHeaders.has(opBlock.get(def)!) &&
     loopBodies.some(
       (L) =>
         liveIn.get(L.header)!.has(r) &&
