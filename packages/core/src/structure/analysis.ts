@@ -97,6 +97,55 @@ export function hasHomeableSharedAddress(fn: Fn): boolean {
   return false;
 }
 
+/** rank.ts's enumeration gate for the `/expr-home` axis: does the function HAVE a value the
+ *  axis would home — a pure non-const def with 2+ distinct consumers inside a loop the def sits
+ *  outside, cone-free? Loops here are LAYOUT ranges (a successor at an equal-or-earlier block
+ *  position closes one) — the axis's own rule uses the real dominator-based model, so this
+ *  over-approximates the same way hasHomeableSharedAddress does: a false positive costs one
+ *  duplicate-collapsed candidate, never a wrong one. */
+export function hasLoopSharedPureValue(fn: Fn): boolean {
+  const defOf = defOpMap(fn);
+  const pos = new Map<Block, number>(fn.blocks.map((b, i) => [b, i]));
+  const ranges: [number, number][] = [];
+  for (const b of fn.blocks) {
+    for (const sx of successorsOf(b)) {
+      if (pos.get(sx)! <= pos.get(b)!) {
+        ranges.push([pos.get(sx)!, pos.get(b)!]);
+      }
+    }
+  }
+  if (ranges.length === 0) {
+    return false;
+  }
+  const consumers = new Map<Value, Set<Op>>();
+  const opPos = new Map<Op, number>();
+  for (const b of fn.blocks) {
+    for (const op of b.ops) {
+      opPos.set(op, pos.get(b)!);
+      for (const o of op.operands) {
+        (consumers.get(o) ?? consumers.set(o, new Set()).get(o)!).add(op);
+      }
+    }
+  }
+  for (const [v, cs] of consumers) {
+    const d = defOf.get(v);
+    if (!d || d.opcode === 'const' || d.opcode === 'call' || d.opcode === 'load' || d.opcode === 'aload') {
+      continue;
+    }
+    const dp = opPos.get(d)!;
+    if (
+      ranges.some(
+        ([lo, hi]) =>
+          (dp < lo || dp > hi) && [...cs].filter((c) => opPos.get(c)! >= lo && opPos.get(c)! <= hi).length >= 2,
+      ) &&
+      !coneHoldsAddr(d, defOf)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export interface StructureAnalysis {
   /** every positioned use of a value; a value absent here is dead */
   useSitesOf: Map<Value, UseSite[]>;
@@ -174,6 +223,17 @@ export interface AnalyzeOptions {
    *  have already rendered per-use inside separate arms, and only this phase's positioned
    *  memory model can merge them into pre-branch temps. */
   homeSharedAddresses?: boolean;
+  /** The loop-expression-home axis (rank.ts `/expr-home`). A pure computed value defined outside
+   *  a loop and consumed by 2+ distinct ops inside it is one the compiler holds in a
+   *  (callee-saved) register across the iterations — it never re-derives per use in a loop —
+   *  where the default renders it re-derived at each use; the source may have spelled a typed
+   *  local (`u32 size = 16 << t;` driving a loop bound, a product and a shift). The home's
+   *  declared type is the IR value's recovered type, so a u32 value's compares stay unsigned
+   *  through the local. Straight-line multi-use values stay OUT (the small-constant class the
+   *  const-across-call scope's note records); shared memory-access bases are `/addr-home`'s.
+   *  Same refusals as that axis: gaddr/laddr cones and multi-block-loop-header seats. Adding
+   *  materialization preserves semantics for the admitted values, exactly as above. */
+  homeLoopExprs?: boolean;
 }
 
 export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {}): StructureAnalysis {
@@ -184,6 +244,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
     volatileGlobal,
     materializeJoinFeeds = false,
     homeSharedAddresses = false,
+    homeLoopExprs = false,
   } = opts;
   // ── use registry ────────────────────────────────────────────────────────────────────────
   // Every use of a value, POSITIONED: the consuming op and its block/index. Successor args are
@@ -594,6 +655,14 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
   };
   /** result values the address-home axis materialized — the load rule's admission key */
   const axisHomedBases = new Set<Value>();
+  /** the loop-expression-home axis's scope: some loop the def's block is outside has 2+ distinct
+   *  consumers of the value inside it (loop model = the caller's dominators; absent ⇒ never) */
+  const loopSharedConsumers = (v: Value, defBlk: Block): boolean => {
+    const consumers = [...new Set((useSitesOf.get(v) ?? []).map((s) => s.op))];
+    return loopBodies.some(
+      (L) => !L.body.has(defBlk) && consumers.filter((c) => L.body.has(opBlock.get(c)!)).length >= 2,
+    );
+  };
   // Decide in REVERSE program order so a consumer's own materialization is settled before any
   // producer asks for its emit position (SSA: uses follow defs in dominance/layout order) — and
   // iterate to a fixpoint for IR whose block layout does not follow dominance (hand-built IR):
@@ -655,6 +724,20 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           ) {
             materialize.add(op);
             axisHomedBases.add(pr);
+          }
+          // Fourth scope, under the loop-expression-home axis (AnalyzeOptions.homeLoopExprs): a
+          // pure non-const value defined outside a loop with 2+ distinct consumers inside it.
+          // Shared bases stay the previous scope's (its load rule needs the registration).
+          if (
+            homeLoopExprs &&
+            op.opcode !== 'const' &&
+            pr &&
+            !usedOnlyAsSharedBase(pr) &&
+            loopSharedConsumers(pr, b) &&
+            !addressCone(op) &&
+            !multiBlockHeaders.has(b)
+          ) {
+            materialize.add(op);
           }
           continue;
         }

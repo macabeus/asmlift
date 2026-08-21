@@ -35,7 +35,7 @@ import { applyIdiomPatterns, raiseRecovered, structureChecked } from './pipeline
 import { type Prototypes, prototypesFromSymbols } from './proto';
 import { runPreRecovery } from './raise/pre-recovery';
 import { recoverTypes } from './raise/recover';
-import { hasHomeableSharedAddress } from './structure/analysis';
+import { hasHomeableSharedAddress, hasLoopSharedPureValue } from './structure/analysis';
 import { type SymbolMap, symbolsByName } from './symbols';
 import { type TargetDescription, structureOptionsFor } from './target';
 
@@ -55,7 +55,7 @@ import { type TargetDescription, structureOptionsFor } from './target';
  *  materialization or merging, so it cannot unlock a function the primary declines; the
  *  exemption is stated here rather than left implicit in a missing `||` arm. */
 interface StructuringAxis {
-  flag: 'reread' | 'inplace' | 'mergeNames' | 'addrHome';
+  flag: 'reread' | 'inplace' | 'mergeNames' | 'addrHome' | 'exprHome';
   suffix: string;
   options: (on: boolean) => Parameters<typeof structureChecked>[1];
   probeGate?: (probe: Fn, defs: Map<Value, Op>) => boolean;
@@ -123,6 +123,19 @@ const STRUCTURING_AXES: readonly StructuringAxis[] = [
     suffix: '/addr-home',
     options: (on) => ({ homeSharedAddresses: on }),
     variantGate: hasHomeableSharedAddress,
+    strip: true,
+  },
+  // `/expr-home` — the loop-expression-home axis (structure/analysis.ts AnalyzeOptions
+  // homeLoopExprs): a pure value defined outside a loop with 2+ distinct consumers inside it
+  // materializes into a local carrying the value's recovered type — the register the compiler
+  // holds across the iterations (`u32 size = 16 << t;` driving a loop bound, a product and a
+  // shift), where the default re-derives per use. Gated per symbol variant like `/addr-home`
+  // (the cone refusal reads the variant's own lift).
+  {
+    flag: 'exprHome',
+    suffix: '/expr-home',
+    options: (on) => ({ homeLoopExprs: on }),
+    variantGate: hasLoopSharedPureValue,
     strip: true,
   },
 ];
@@ -374,6 +387,7 @@ export function enumerateCandidates(
     inplace: false,
     mergeNames: false,
     addrHome: false,
+    exprHome: false,
   }));
   for (const ax of STRUCTURING_AXES) {
     if (ax.probeGate === undefined || ax.probeGate(probe, probeDefs)) {

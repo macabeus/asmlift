@@ -72,42 +72,75 @@ export function derefStrideOk(rt: IrType | undefined, width: number, signed: boo
   return false;
 }
 
-/** Does the rendered expression PROMOTE to `unsigned int` under C's usual arithmetic
- *  conversions — the fact that decides a `<`'s compare signedness? Tri-state: true/false when
- *  provable from the declared types, undefined when not (a call's C type lives in the project
- *  ctx). Narrower ints promote to signed `int`, so only a full-width unsigned (or a pointer)
- *  answers true. Shifts take the LEFT operand's promoted type; comparisons/logic yield `int`.
- *  This is deliberately separate from `exprCType`, whose integer results are pointer-ness-only
- *  (its contract forbids consulting it for signedness); the leaf cases delegate to it because
- *  var/cast/index/field types ARE the declarations it judges against. */
-export function promotesUnsigned(e: Expr, varType: VarTypes): boolean | undefined {
-  const rec = (x: Expr): boolean | undefined => promotesUnsigned(x, varType);
+/**
+ * The C SIGNEDNESS a rendered integer expression actually has — `true`/`false`, or `undefined`
+ * when it is not determinable here. The deliberate complement to l3/typing's `exprCType`, which is
+ * pointer-ness-accurate and reports every integer as `s32` by contract; this models the two C
+ * rules that contract omits, integer PROMOTION and the usual arithmetic CONVERSIONS.
+ *
+ * It lives HERE, in the C-family backend, because it is a model of C's own rules with no meaning
+ * for another language — the same reason the cast it feeds is synthesized here rather than in the
+ * tower. `exprCType` stays in l3/ because Pascal consults it too.
+ *
+ * It exists for one question, and the question is byte-load-bearing: C spells both `>>>` and `>>`
+ * as `>>` and chooses between them from the left operand's type. A logical shift rendered over a
+ * signed expression recompiles to `asr` where the target has `lsr`, and evaluates to a different
+ * value. The C-family backend casts the operand whenever this returns anything but the signedness
+ * the operator needs, so `undefined` is the safe answer in every case the model does not cover — a
+ * redundant cast is codegen-identical, a missing one is a miscompile.
+ *
+ * Anything narrower than 32 bits promotes to `int` and is therefore SIGNED, whatever it was
+ * declared. Pointers, calls and markers are `undefined`.
+ */
+export function renderedIntSignedness(e: Expr, varType: VarTypes): boolean | undefined {
+  const rec = (x: Expr): boolean | undefined => renderedIntSignedness(x, varType);
+  // an lvalue-ish leaf: its C type is a declaration / an explicit cast / a carried access width
+  const promoted = (t: IrType | undefined): boolean | undefined =>
+    t?.kind !== 'int' ? undefined : t.width < 32 ? true : t.width === 32 ? t.signed : undefined;
   switch (e.k) {
+    case 'var':
+    case 'cast':
+    case 'index':
+    case 'field':
+      return promoted(exprCType(e, varType));
+    // A decimal literal is `int` when it fits in one; C89 gives a larger one an unsigned type,
+    // which is not the same operand — so it is left undetermined rather than assumed. INT_MIN is
+    // in that larger class despite fitting: the backend prints it as `-2147483648`, which C lexes
+    // as unary minus applied to `2147483648` — a constant too big for `int`, hence unsigned long.
     case 'const':
-      return false;
+      return e.value > -2147483648 && e.value <= 2147483647 ? true : undefined;
+    // `-x` / `~x` carry the PROMOTED type of the operand; `!x` is `int`.
     case 'un':
-      return e.op === '!' ? false : rec(e.e);
+      return e.op === '!' ? true : rec(e.e);
     case 'bin': {
-      if (['<', '<=', '>', '>=', '==', '!=', '&&', '||'].includes(e.op)) {
-        return false;
-      }
+      // Shifts take the type of the LEFT operand alone — the right is promoted independently.
       if (e.op === '<<' || e.op === '>>' || e.op === '>>>') {
         return rec(e.l);
       }
-      const l = rec(e.l);
-      const r = rec(e.r);
-      return l === true || r === true ? true : l === false && r === false ? false : undefined;
-    }
-    default: {
-      const t = exprCType(e, varType);
-      if (t === undefined) {
-        return undefined;
-      }
-      if (t.kind === 'ptr' || t.kind === 'array') {
+      // Comparisons and the logical connectives yield `int`.
+      if (['<', '<=', '>', '>=', '==', '!=', '&&', '||'].includes(e.op)) {
         return true;
       }
-      return t.kind === 'int' ? t.width === 32 && !t.signed : undefined;
+      // Usual arithmetic conversions over the remaining binary operators: at equal rank, unsigned
+      // wins. Either side unknown leaves the result unknown — EXCEPT when the known side is
+      // unsigned, which already decides it.
+      //
+      // That exception is the one place this returns a DEFINITE answer from an unknown operand,
+      // and it is sound only because every integer here is rank `int`: at UNEQUAL rank C converts
+      // to the wider type first, so `unsigned int & long long` is SIGNED. Core has no 64-bit
+      // integer type at all (the decomp typedef vocabulary stops at 32 — see contracts.ts
+      // SCALAR_WIDTHS), so the unequal-rank case cannot arise. Adding one would invalidate this.
+      const l = rec(e.l);
+      const r = rec(e.r);
+      if (l === false || r === false) {
+        return false;
+      }
+      return l === true && r === true ? true : undefined;
     }
+    case 'call':
+    case 'marker':
+    case 'addr':
+      return undefined;
   }
 }
 

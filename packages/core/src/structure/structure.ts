@@ -53,7 +53,7 @@ import {
   negateCond,
 } from '../l3/ast';
 import type { Gate } from '../l3/gates';
-import { exprCType, promotesUnsigned, provablyNonNegative, ptrElemBytes } from '../l3/typing';
+import { exprCType, provablyNonNegative, ptrElemBytes, renderedIntSignedness } from '../l3/typing';
 import { returnType } from '../raise/recover';
 import { collectStructs } from '../raise/structs';
 import {
@@ -710,6 +710,10 @@ export interface StructureOptions {
   // through it, reproducing the source's pointer-local + scalar-temp spelling. Off by default;
   // rank.ts enumerates the ON spelling as the `/addr-home` axis — see analysis.ts AnalyzeOptions.
   homeSharedAddresses?: boolean;
+  // Materialize a pure value defined outside a loop with 2+ distinct consumers inside it — the
+  // register the compiler holds across the iterations. Off by default; rank.ts enumerates the ON
+  // spelling as the `/expr-home` axis — see analysis.ts AnalyzeOptions.
+  homeLoopExprs?: boolean;
   // Merge two variables that a merge copy would join, when the values under them never interfere
   // (structure/namecoalesce.ts). Off by default; rank.ts enumerates the ON spelling as the
   // `/merge-names` axis. Which variables the compiler's own coalescer shared is not derivable from
@@ -753,7 +757,17 @@ export interface StructureHooks {
  *  SCOPE: refusals thrown by `structure()` itself. A decline can also come from `structureChecked`'s
  *  boundary contracts, which run OUTSIDE it — `rank.ts` closes that half, where the contracts are. */
 function assertPrimaryAccepts(fn: Fn, opts: StructureOptions, hooks: StructureHooks): void {
-  structure(fn, { ...opts, coalesceMergeNames: false, materializeJoinFeeds: false, homeSharedAddresses: false }, hooks);
+  structure(
+    fn,
+    {
+      ...opts,
+      coalesceMergeNames: false,
+      materializeJoinFeeds: false,
+      homeSharedAddresses: false,
+      homeLoopExprs: false,
+    },
+    hooks,
+  );
 }
 
 export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureHooks = {}): SFn {
@@ -771,13 +785,14 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     rereadGlobals = false,
     materializeJoinFeeds = false,
     homeSharedAddresses = false,
+    homeLoopExprs = false,
     coalesceMergeNames = false,
     onGap = 'strict',
     symbols,
   } = opts;
   // These levers all change which edge copies elide as identities (extra materialization does
   // too), which the loop emitters' hazard predicates read — so the invariant above covers each.
-  if (coalesceMergeNames || materializeJoinFeeds || homeSharedAddresses) {
+  if (coalesceMergeNames || materializeJoinFeeds || homeSharedAddresses || homeLoopExprs) {
     assertPrimaryAccepts(fn, opts, hooks);
   }
   const defs = defOpMap(fn);
@@ -795,6 +810,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       rereadGlobals,
       materializeJoinFeeds,
       homeSharedAddresses,
+      homeLoopExprs,
       // the map's own declaration truth: a volatile object's read may not be duplicated or moved
       volatileGlobal: (n) => {
         const si = symbols?.get(n);
@@ -1553,6 +1569,48 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     }
   }
 
+  // ── declaration-signedness reconciliation ──────────────────────────────────────────────────
+  // A name's declared type is its FIRST claimant's, and the first claimant of a u32 loop counter
+  // is often an s32-typed sibling (the pre-increment value, a const's copy) — so the counter
+  // declares s32, every compare through it renders signed, and an unsigned icmp silently
+  // compiles to the compare the machine never did (the compare-cast at CMP_TO_BIN patches the
+  // sites it can see, but a later re-spell can substitute the var into a compare that needed no
+  // cast at emission — the initfirst guard swap). The declaration is the honest fix: a name
+  // flips to u32 when SOME value under it is u32-typed and NO value under it carries signed-use
+  // evidence (an icmp_s* / sdiv / smod / shr_s operand). Only int32 declarations reconcile; the
+  // flip is byte-invariant everywhere but the compares it corrects (+/-/*/&/|/^/<< are
+  // sign-blind, `>>` self-corrects via the backend's shiftOperand cast, division is evidence-
+  // blocked).
+  {
+    const SIGNED_USE = new Set(['icmp_slt', 'icmp_sle', 'icmp_sgt', 'icmp_sge', 'sdiv', 'smod', 'shr_s']);
+    const signedEvidence = new Set<Value>();
+    for (const b of fn.blocks) {
+      for (const op of b.ops) {
+        if (SIGNED_USE.has(op.opcode)) {
+          for (const o of op.operands) {
+            signedEvidence.add(o);
+          }
+        }
+      }
+    }
+    const claimants = new Map<string, Value[]>();
+    for (const [v, n] of [...varName, ...backArgName]) {
+      (claimants.get(n) ?? claimants.set(n, []).get(n)!).push(v);
+    }
+    for (const [n, vs] of claimants) {
+      const t = varType.get(n);
+      if (t?.kind !== 'int' || t.width !== 32 || !t.signed) {
+        continue;
+      }
+      if (
+        vs.some((v) => v.type.kind === 'int' && v.type.width === 32 && !v.type.signed) &&
+        vs.every((v) => !signedEvidence.has(v))
+      ) {
+        varType.set(n, T.u(32));
+      }
+    }
+  }
+
   // ── def-site anchoring of constant merge copies (anchorConstCopies) ──────────────────────────
   // An edge copy `v = K` places the constant where the EDGE is, but the asm often materialized K
   // earlier: `movs r9, #0` at entry ahead of a single-armed overwrite, `movs r5, #1` at the top
@@ -1836,8 +1894,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // sign-agnostic and icmp_s* keeps its documented residual above.
       if (
         /^icmp_u/.test(d.opcode) &&
-        promotesUnsigned(l, vtEnv) !== true &&
-        promotesUnsigned(r, vtEnv) !== true &&
+        renderedIntSignedness(l, vtEnv) !== false &&
+        renderedIntSignedness(r, vtEnv) !== false &&
         !(provablyNonNegative(l, vtEnv) && provablyNonNegative(r, vtEnv))
       ) {
         const irUnsigned = (v: Value): boolean => v.type.kind === 'int' && !v.type.signed;

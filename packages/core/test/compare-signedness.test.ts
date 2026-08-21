@@ -107,3 +107,54 @@ const EQCMP = `fn eqcmp {
 test('==/!= never cast', () => {
   expect(emit(EQCMP)).not.toContain('(u32)');
 });
+
+// ── declaration-signedness reconciliation (structure.ts) ─────────────────────────────────────
+// A name's declared type is its first claimant's; a u32 loop counter often gets claimed first by
+// an s32 sibling and declares s32 — which a later re-spell can smuggle into a compare the cast
+// site already judged (the initfirst guard swap). The declaration flips to u32 when some value
+// under the name is u32 and none carries signed-use evidence.
+
+// The counter merges an s32-typed init path with a u32-typed post-increment (typed by its
+// icmp_ult use): the declaration must come out u32 and the compare needs no cast.
+const RECON = `fn recon {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=16}
+  %3: u32 = shl %2, %0
+  %4: s32 = const {value=0}
+  br ^bb1(%4)
+^bb1(%5: s32):
+  %6: s32 = const {value=50339840}
+  %7: s32 = add %5, %6
+  store %7, %5 {off=0, width=1}
+  %8: s32 = const {value=1}
+  %9: u32 = add %5, %8
+  %10: u32 = icmp_ult %9, %3
+  cond_br %10, ^bb1(%9), ^bb2()
+^bb2():
+  ret %9
+}
+`;
+
+test('a mixed-claimant counter with unsigned-only evidence declares u32', () => {
+  const src = emit(RECON);
+  expect(src).toMatch(/u32 v\d+;/);
+});
+
+// The same counter ALSO feeding a signed compare: the flip must refuse — flipping would render
+// the icmp_slt unsigned, the wrongness this family exists to prevent, just mirrored.
+const RECONS = RECON.replace('fn recon', 'fn recons').replace(
+  '^bb2():\n  ret %9',
+  `^bb2():
+  %11: s32 = const {value=0}
+  %12: u32 = icmp_slt %9, %11
+  cond_br %12, ^bb3(), ^bb4()
+^bb3():
+  ret %11
+^bb4():
+  ret %9`,
+);
+
+test('signed-use evidence blocks the flip', () => {
+  const src = emit(RECONS);
+  expect(src).not.toMatch(/u32 v\d+;/);
+});
