@@ -19,6 +19,7 @@ interface Fixture {
   useSitesOf?: Map<Value, UseSite[]>;
   liveIn?: Map<Block, Set<Value>>;
   opBlock?: Map<Op, Block>;
+  materialize?: Set<Op>;
   respelledDefs?: Map<Op, unknown>;
 }
 const make = (f: Fixture = {}) =>
@@ -28,6 +29,7 @@ const make = (f: Fixture = {}) =>
     useSitesOf: f.useSitesOf ?? new Map(),
     liveIn: f.liveIn ?? new Map(),
     opBlock: f.opBlock ?? new Map(),
+    materialize: f.materialize ?? new Set(),
     respelledDefs: f.respelledDefs ?? new Map(),
   });
 

@@ -2082,12 +2082,13 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // pure decline-or-emit predicates, extracted to hazards.ts behind the explicit-deps factory.
   // `varName` is captured as a live reference: it is still being populated here in the naming
   // pipeline, and each check reads the names that exist when EMISSION calls it.
-  const { readsClobbered, loopUpdateHazard, sinkablePreUpdateSlots, sameAtEntry } = makeLoopHazards({
+  const { readsClobbered, loopUpdateHazard, sinkablePreUpdateSlots, sameAtEntry, loopWriteSet } = makeLoopHazards({
     defs,
     varName,
     useSitesOf,
     liveIn,
     opBlock,
+    materialize,
     respelledDefs: bitfieldSpelling,
   });
 
@@ -2113,31 +2114,6 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // their header-param NAMES — post-loop the params already hold their updated values, so a merged
   // exit value is read as `v` not `v-1`.
   const tempCounter = { n: 0 }; // per-function swap-cycle temp names (sequentialize)
-  // The names one loop iteration writes under its VARIABLES' names: the update copies, plus a
-  // loop-variable name a materialized body def writes IN PLACE. Adoption (seedLoopParams) makes
-  // that def's update copy an identity — elided, so `updateWriteSet(updates)` alone no longer
-  // carries the name — but the write still happens mid-body via sideEffects, and every
-  // pre-update-read hazard check keyed on the write set is blind to it without this. Non-param
-  // materialized names stay out: a fresh temp is assigned once per iteration, so a post-loop
-  // read of it is the final value, not a stale one (its zero-trip hazard is checked separately
-  // at the kept-guard site).
-  const loopWriteSet = (
-    updates: Stmt[],
-    bodyBlocks: Iterable<Block>,
-    paramNames: Set<string | undefined>,
-  ): Set<string> => {
-    const writes = updateWriteSet(updates);
-    for (const bb of bodyBlocks) {
-      for (const op of bb.ops) {
-        const r = op.results[0];
-        const nm = r !== undefined && materialize.has(op) ? varName.get(r) : undefined;
-        if (nm !== undefined && paramNames.has(nm)) {
-          writes.add(nm);
-        }
-      }
-    }
-    return writes;
-  };
   // The copies for ONE specific successor record — the workhorse behind argAssigns, taken
   // directly by the switch_br path, whose duplicate case targets successorTo cannot
   // disambiguate.
@@ -2487,7 +2463,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         // holds → decline LOUD, never emit wrong code.
         const sub = loopSub(li);
         const updates = argAssigns(li.header, li.header);
-        const updateWrites = loopWriteSet(updates, [li.header], new Set(li.header.params.map((q) => varName.get(q))));
+        const updateWrites = loopWriteSet(updates, [li.header], li.header);
         const hterm = li.header.ops[li.header.ops.length - 1];
         const hexitArgs = (successorTo(li.header, li.exit)?.args ?? []) as Value[];
         // FUSION IS ONLY SOUND WHEN EVERYTHING IT DROPS IS REDUNDANT. `isGuardShapedPred` asks about
@@ -2513,8 +2489,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         // have. An unproven guard therefore KEEPS its `if`, with the loop as a `do-while` inside it
         // — every test the asm performs is emitted as itself. The proof still gates the SINK below:
         // a sunk copy runs once per iteration, and only the proof (fused form) or the kept `if`
-        // makes the zero-trip path skip it; the sink predates the kept-guard form and stays keyed
-        // on the proof until a row needs the wider key.
+        // makes the zero-trip path skip it. The kept `if` would widen the sink's key to unproven
+        // guards too; no row needs that yet, so it stays keyed on the proof.
         const enterIsTaken = takenB === h;
         const contIsTaken = hterm.successors[0].block === li.header;
         const guardProven = sameAtEntry(hterm.operands[0], term.operands[0], entryVals, enterIsTaken !== contIsTaken);
@@ -2712,11 +2688,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // `readsClobbered` distinguishes the two at the VALUE level; on a hazard, decline (fall
       // through → honest loud fail) rather than emit wrong code.
       const updateCopies = argAssigns(b, loopCtx.header);
-      const updateWrites = loopWriteSet(
-        updateCopies,
-        loopCtx.body,
-        new Set(loopCtx.header.params.map((q) => varName.get(q))),
-      );
+      const updateWrites = loopWriteSet(updateCopies, loopCtx.body, loopCtx.header);
       const exitArgs = (successorTo(b, exitB)?.args ?? []) as Value[];
       // The exit ARM may also read loop-body-computed values directly (an exitB dominated by `b`
       // — e.g. its `ret` operand), not just through edge args: apply the same escape test to the
@@ -2912,7 +2884,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // path applies; on a hazard, decline LOUD.
     const sub = latchSub(dw);
     const updates = argAssigns(dw.latch, dw.header);
-    const updateWrites = loopWriteSet(updates, dw.body, new Set(dw.header.params.map((q) => varName.get(q))));
+    const updateWrites = loopWriteSet(updates, dw.body, dw.header);
     const lterm = dw.latch.ops[dw.latch.ops.length - 1];
     // KNOWN GAP, and the reason the sink stands down rather than repairing anything. A body
     // block's param may adopt a LOOP VARIABLE's name (canTakeName waives the liveness half for a

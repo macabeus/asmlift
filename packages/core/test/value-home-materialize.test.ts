@@ -7,6 +7,10 @@
 //   • liveAcrossLoop — an access performed BEFORE a loop whose single use renders AFTER it.
 //     Rendering at the use re-schedules the access to the far side of the loop; the compiler
 //     parked the value in a callee-saved register for the loop's whole duration instead.
+//
+// Plus the rules' interaction hazards, each pinned from an adversarial round: the adoption's
+// in-place write staying visible to the loop hazard checks (sink / loud decline), and the
+// multi-block-header stand-down that keeps a while-header load from de-structuring its function.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';

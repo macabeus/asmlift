@@ -12,7 +12,7 @@
 // leading run of assigns) move; a park's RHS must read parameters alone through pure scalar
 // nodes (var/const/un/bin/cast — a memory read or a call would be re-scheduled, not re-spelled);
 // and a park never crosses a statement that writes a name it reads, reads or writes its
-// destination (`&v` counts as touching v), or carries a call. Relative order — of the parks and
+// destination (`&v` counts as touching v), or carries an effect. Relative order — of the parks and
 // of everything else — is preserved. Declines (null) when nothing moves.
 //
 // The kmc hipress residual is this axis's OTHER projection — its keep-load renders first while
