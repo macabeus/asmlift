@@ -6,7 +6,7 @@
 //   • the effect-ordering model — which call/load defs must MATERIALIZE as named temps at
 //     their own program position instead of inlining at their use.
 import { globalCellOf, mayWriteGlobal } from '../ir/alias';
-import { Block, Fn, Op, Value, successorsOf } from '../ir/core';
+import { Block, Fn, Op, Value, defOpMap, successorsOf } from '../ir/core';
 import { EFFECTFUL_OPS } from '../ir/opcodes';
 
 export interface UseSite {
@@ -39,6 +39,9 @@ export interface AnalyzeOptions {
    *  rebuilt. Absent ⇒ the global-aware alias rule below cannot resolve anything and every write
    *  bars, exactly as before it existed. */
   defs?: Map<Value, Op>;
+  /** Dominator sets, when the caller already holds them (structure() does) — consumed by the
+   *  live-across-a-loop rule's back-edge detection. Absent ⇒ that rule stands down. */
+  dom?: Map<Block, Set<Block>>;
   /** THE value-home axis (rank.ts `/reread-globals`). A read of a named global is barred from
    *  rendering at its use by any write in between — even a store to an unrelated global, which
    *  cannot possibly change what it sees. That over-conservatism is what invents the locals the
@@ -70,7 +73,7 @@ export interface AnalyzeOptions {
 }
 
 export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {}): StructureAnalysis {
-  const { defs, rereadGlobals = false, volatileGlobal, materializeJoinFeeds = false } = opts;
+  const { defs, dom, rereadGlobals = false, volatileGlobal, materializeJoinFeeds = false } = opts;
   // ── use registry ────────────────────────────────────────────────────────────────────────
   // Every use of a value, POSITIONED: the consuming op and its block/index. Successor args are
   // uses AT the terminator (they render in argAssigns at block end). A void function's `ret`
@@ -377,14 +380,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
   // read sibling is the register the copy machinery cannot represent — materialize its def. The
   // walk crosses pure defs only (a call/load render is those rules' question) and stops at
   // params, which always carry a name.
-  const defOf = new Map<Value, Op>();
-  for (const b of fn.blocks) {
-    for (const op of b.ops) {
-      for (const r of op.results) {
-        defOf.set(r, op);
-      }
-    }
-  }
+  const defOf = defs ?? defOpMap(fn);
   const copyInterdependent = new Set<Value>();
   const pureReads = (root: Value, acc: Set<Value>) => {
     const stack = [root];
@@ -423,11 +419,11 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
     }
   }
   // ── natural loops, for the live-across-a-loop rule ────────────────────────────────────────
-  // Retreating edges via DFS colors; the body is the backward closure from the latch. On an
-  // irreducible CFG a retreating edge is not a true back edge and the "body" over-claims — which
-  // only over-materializes, the safe direction.
+  // From the caller's dominators (a back edge is `latch → header` with the header dominating the
+  // latch); the body is the backward closure from the latch. With no `dom` the rule stands
+  // down — the same posture as the `defs`-carried rules.
   const loopBodies: { header: Block; body: Set<Block> }[] = [];
-  {
+  if (dom) {
     const predsOf = new Map<Block, Block[]>();
     for (const b of fn.blocks) {
       predsOf.set(b, []);
@@ -437,40 +433,22 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         predsOf.get(s)!.push(b);
       }
     }
-    const color = new Map<Block, 1 | 2>(); // 1 = on the DFS stack, 2 = done
-    const backEdges: { latch: Block; header: Block }[] = [];
-    if (fn.blocks.length > 0) {
-      const stack: { b: Block; succ: Block[]; i: number }[] = [];
-      color.set(fn.blocks[0], 1);
-      stack.push({ b: fn.blocks[0], succ: successorsOf(fn.blocks[0]), i: 0 });
-      while (stack.length) {
-        const top = stack[stack.length - 1];
-        if (top.i < top.succ.length) {
-          const s = top.succ[top.i++];
-          const c = color.get(s);
-          if (c === undefined) {
-            color.set(s, 1);
-            stack.push({ b: s, succ: successorsOf(s), i: 0 });
-          } else if (c === 1) {
-            backEdges.push({ latch: top.b, header: s });
+    for (const latch of fn.blocks) {
+      for (const header of successorsOf(latch)) {
+        if (!dom.get(latch)?.has(header)) {
+          continue;
+        }
+        const body = new Set<Block>([header]);
+        const work = [latch];
+        while (work.length) {
+          const x = work.pop()!;
+          if (!body.has(x)) {
+            body.add(x);
+            work.push(...(predsOf.get(x) ?? []));
           }
-        } else {
-          color.set(top.b, 2);
-          stack.pop();
         }
+        loopBodies.push({ header, body });
       }
-    }
-    for (const { latch, header } of backEdges) {
-      const body = new Set<Block>([header]);
-      const work = [latch];
-      while (work.length) {
-        const x = work.pop()!;
-        if (!body.has(x)) {
-          body.add(x);
-          work.push(...(predsOf.get(x) ?? []));
-        }
-      }
-      loopBodies.push({ header, body });
     }
   }
   /** The def's value enters some loop's header live and every consumer sits outside that loop,

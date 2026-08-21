@@ -772,6 +772,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     returnsVoid,
     {
       defs,
+      dom,
       rereadGlobals,
       materializeJoinFeeds,
       // the map's own declaration truth: a volatile object's read may not be duplicated or moved
