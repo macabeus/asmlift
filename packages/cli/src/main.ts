@@ -328,7 +328,17 @@ export async function runCli(
       const table = ranked.candidates
         .map((c) => `asmlift: [score] ${c.label}: ${c.score.score}${c.score.match ? ' (match)' : ''}\n`)
         .join('');
-      return { code: ranked.best.score.match ? 0 : 1, stdout: ranked.best.source, stderr: targetTrace + warn + table };
+      // Spellings the scorer refused are recorded, not silent: a lever whose every candidate
+      // fails to build looks identical to one that declined unless the drops are visible.
+      const drops = ranked.dropped.length
+        ? `asmlift: [dropped] ${ranked.dropped.length} candidate(s) failed to score; first: ` +
+          `${ranked.dropped[0].label}: ${ranked.dropped[0].error}\n`
+        : '';
+      return {
+        code: ranked.best.score.match ? 0 : 1,
+        stdout: ranked.best.source,
+        stderr: targetTrace + warn + table + drops,
+      };
     } catch (e) {
       const kind = isDecline(e) ? 'declined' : 'internal error';
       return {

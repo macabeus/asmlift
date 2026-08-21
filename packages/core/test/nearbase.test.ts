@@ -130,6 +130,23 @@ test('a struct-pointer cast base is never a cluster member (the dot-form stride)
   expect(r).toBeNull(); // one scalar member is no cluster
 });
 
+test('derefs UNDER a struct-pointer cast never seed a cluster either — collect and rewrite agree', () => {
+  // rewrite refuses these subtrees, so collecting beneath them would mint a base local with
+  // zero uses: a dead-local candidate that can never match and still costs a compile
+  const under = (addr: number): Expr => ({
+    k: 'cast',
+    to: { kind: 'ptr', to: { kind: 'struct', name: 'S' } } as never,
+    e: deref(addr, 4),
+  });
+  const r = nearBaseClusters255(
+    fn([
+      { k: 'exprstmt', value: under(100) },
+      { k: 'exprstmt', value: under(104) },
+    ]),
+  );
+  expect(r).toBeNull();
+});
+
 test('a field subtree is never entered: its interior deref keeps its spelling', () => {
   const fieldExpr: Expr = { k: 'field', base: deref(100, 4), name: 'field_0', width: 4, signed: false } as never;
   const r = nearBaseClusters255(

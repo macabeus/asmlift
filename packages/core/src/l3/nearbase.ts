@@ -50,6 +50,9 @@ export function nearBaseClusters(sfn: SFn, span: number): SFn | null {
     if (e.k === 'field') {
       return e; // a dot-form subtree keeps its struct base — never collected, never rewritten
     }
+    if (e.k === 'cast' && e.to.kind === 'ptr' && e.to.to.kind === 'struct') {
+      return e; // rewrite refuses these subtrees, so collecting under them would seed a cluster
+    }
     const m = mapExprChildren(e, collect);
     if (m.k === 'index') {
       const c = baseConst(m.base);

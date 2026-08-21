@@ -8,7 +8,7 @@ import { describe, expect, test } from 'vitest';
 
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
-import { coalesceCandidates } from '../src/l3/coalesce';
+import { ARM_DISJOINT_GATES, armDisjointUnder, coalesceCandidates } from '../src/l3/coalesce';
 
 const asg = (n: string, v: number): Stmt => ({ k: 'assign', name: n, value: { k: 'const', value: v } });
 const use = (n: string): Stmt => ({ k: 'exprstmt', value: { k: 'call', fn: 'f', args: [{ k: 'var', name: n }] } });
@@ -155,12 +155,28 @@ describe('arm-disjoint admission', () => {
   });
 
   test('a volatile pair never merges — slot identity is observable', () => {
-    const locals = [
-      { name: 'x', type: T.s(32), volatile: true as const },
-      { name: 'y', type: T.s(32), volatile: true as const },
+    for (const qualifier of ['volatile', 'pointeeVolatile'] as const) {
+      const locals = [
+        { name: 'x', type: T.s(32), [qualifier]: true },
+        { name: 'y', type: T.s(32), [qualifier]: true },
+      ];
+      const out = coalesceCandidates(fn([armIf(cnd, arm('x'), arm('y'))], locals));
+      expect(out.map((c) => c.merged)).not.toContain('y-x');
+    }
+  });
+
+  test('a local not const-initialized at its arm’s first mention never merges (the growth bound)', () => {
+    // arm B first mentions y through a computed assign — the load-fed-temp shape of a big if
+    const armB: Stmt[] = [
+      { k: 'assign', name: 'y', value: { k: 'bin', op: '+', l: { k: 'var', name: 'y' }, r: { k: 'const', value: 1 } } },
+      use('y'),
     ];
-    const out = coalesceCandidates(fn([armIf(cnd, arm('x'), arm('y'))], locals));
-    expect(out.map((c) => c.merged)).not.toContain('y-x');
+    const { candidates, refusals } = armDisjointUnder(
+      ARM_DISJOINT_GATES,
+      fn([armIf(cnd, arm('x'), armB)], L('x', 'y')),
+    );
+    expect(candidates.map((c) => c.merged)).not.toContain('y-x');
+    expect(refusals.get('arm-init')).toBeGreaterThan(0); // the gate is reached, not decorative
   });
 
   test('params never merge through the arm path either', () => {

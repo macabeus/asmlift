@@ -1,8 +1,8 @@
-// STRUCT-HARDEN: the structurer's two compiler-canonicalization heuristics — the divergent-if
-// branch sense and the arg-copy emission order — are per-compiler choices, not universals, so
-// they live as `compilerBehaviors` levers (target.ts) threaded through StructureOptions. These
-// tests prove the two BRANCH/ARG-COPY levers are LOAD-BEARING — flipping each visibly changes the
-// emitted structure — so they are real data, not decorative scaffolding.
+// STRUCT-HARDEN: the structurer's compiler-canonicalization levers — the divergent-if branch
+// sense, the JOINED-if branch sense (rank.ts's /flip-join axis, threaded through
+// StructureOptions rather than target data), and the arg-copy emission order. These tests prove
+// the levers are LOAD-BEARING — flipping each visibly changes the emitted structure — so they
+// are real data, not decorative scaffolding.
 // (The third lever, `coalesceLoopInit`, is exercised behaviorally by the `countdown` loop fixture
 // in packages/cli/test/matching/mips-controlflow.test.ts, where IDO's true keeps the induction var in its arg register;
 // here it is only checked for correct target→StructureOptions projection.) Toolchain-free.
@@ -89,9 +89,9 @@ describe('STRUCT-HARDEN: the compiler-behavior levers are load-bearing', () => {
 
   test('negateJoinedBranchSense flips a JOINED if and leaves the divergent axis independent', () => {
     // The four sense combinations are four DISTINCT spellings: each axis moves exactly its own
-    // if class. Without the ipd guard on the joined branch, flip-join re-negated a divergent if
-    // whose preserve pin was false — collapsing {divergent flipped × joined flipped} into a
-    // duplicate.
+    // if class. Without the ipd guard on the joined branch, flip-join would re-negate a
+    // divergent if whose preserve pin is false — collapsing {divergent flipped × joined flipped}
+    // into a duplicate.
     const four = [
       emit(BOTHIFS, { preserveDivergentBranchSense: true, negateJoinedBranchSense: false }),
       emit(BOTHIFS, { preserveDivergentBranchSense: true, negateJoinedBranchSense: true }),

@@ -263,6 +263,7 @@ export function armDisjointUnder(
     return out;
   };
   const total = mentionsOf(sfn.body);
+  const params = new Set(sfn.params.map((p) => p.name));
   const locals = new Map(sfn.locals.map((l) => [l.name, l]));
   const typeOf = new Map(sfn.locals.map((l) => [l.name, typeToString(l.type)]));
   const out: { merged: string; sfn: SFn }[] = [];
@@ -297,8 +298,11 @@ export function armDisjointUnder(
       if (st.k === 'if' && st.then.length && st.else.length) {
         const thenM = mentionsOf(st.then);
         const elseM = mentionsOf(st.else);
+        // locals only, and never a name that is ALSO a param — the span path holds the same
+        // belief as a gate, and a local shadowing a param would let rename() rewrite the param's
+        // own mentions
         const confined = (m: Map<string, number>): string[] =>
-          [...m.entries()].filter(([n, k]) => locals.has(n) && total.get(n) === k).map(([n]) => n);
+          [...m.entries()].filter(([n, k]) => locals.has(n) && !params.has(n) && total.get(n) === k).map(([n]) => n);
         for (const a of confined(thenM)) {
           for (const b of confined(elseM)) {
             // the survivor is the earlier declaration, matching how a shared source local reads
@@ -316,12 +320,10 @@ export function armDisjointUnder(
               refusals.set(refused, (refusals.get(refused) ?? 0) + 1);
               continue;
             }
-            {
-              out.push({
-                merged: `${gone}-${kept}`,
-                sfn: { ...sfn, body: rename(sfn.body, gone, kept), locals: sfn.locals.filter((l) => l.name !== gone) },
-              });
-            }
+            out.push({
+              merged: `${gone}-${kept}`,
+              sfn: { ...sfn, body: rename(sfn.body, gone, kept), locals: sfn.locals.filter((l) => l.name !== gone) },
+            });
           }
         }
       }
