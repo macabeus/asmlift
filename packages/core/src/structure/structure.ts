@@ -663,6 +663,14 @@ export interface StructureOptions {
   returnsVoid?: boolean;
   coalesceLoopInit?: boolean;
   preserveDivergentBranchSense?: boolean;
+  // Spell a JOINED two-armed if with the negated condition and swapped arms: the asm branched
+  // forward to the taken block and fell through to the other, so a compiler that preserves
+  // source branch direction saw the FALL-THROUGH arm as `then` — the same layout evidence the
+  // divergent case reads (preserveDivergentBranchSense), which post-dominance hides here because
+  // both arms reconverge. Which sense the source spelled is genuinely ambiguous (either compiles
+  // to either layout when the optimizer re-orders), so this is a differ-refereed candidate axis
+  // (rank.ts `/flip-join`), never a default.
+  negateJoinedBranchSense?: boolean;
   orderArgCopiesByComputation?: boolean;
   // Comparison-tree switch recovery: treat an `x != K` test as a case (the EQUAL side is a case
   // body). GCC freely uses `!=`; IDO prefers `==`/`<`. A per-compiler DATA lever, not an `arch ==`
@@ -749,6 +757,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     returnsVoid = false,
     coalesceLoopInit = false,
     preserveDivergentBranchSense = true,
+    negateJoinedBranchSense = false,
     orderArgCopiesByComputation = true,
     switchAllowsNeqCase = true,
     defOrderLoadPairs = true,
@@ -2812,6 +2821,17 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // inverts branch canonicalization sets preserveDivergentBranchSense false and falls through
       // to the positive form below.
       out.push({ k: 'if', cond: negateCond(cond), then: elseS, else: thenS });
+      return out;
+    }
+    if (negateJoinedBranchSense && ipd !== null && thenS.length && elseS.length) {
+      // JOINED arms only (`ipd !== null` — a divergent if belongs to preserveDivergentBranchSense
+      // above, and without the check a /flip-branch variant would fall through here and get
+      // flipped BACK, collapsing the {divergent flipped × joined flipped} combination), and both
+      // arms real: the flipped spelling is a genuine sibling, not noise on a one-armed if
+      out.push({ k: 'if', cond: negateCond(cond), then: elseS, else: thenS });
+      if (merge && merge !== stop) {
+        out.push(...structureRegion(merge, stop));
+      }
       return out;
     }
     out.push(mkIf(cond, thenS, elseS));

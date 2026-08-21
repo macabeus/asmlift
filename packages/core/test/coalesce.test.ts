@@ -8,7 +8,7 @@ import { describe, expect, test } from 'vitest';
 
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
-import { coalesceCandidates } from '../src/l3/coalesce';
+import { ARM_DISJOINT_GATES, armDisjointUnder, coalesceCandidates } from '../src/l3/coalesce';
 
 const asg = (n: string, v: number): Stmt => ({ k: 'assign', name: n, value: { k: 'const', value: v } });
 const use = (n: string): Stmt => ({ k: 'exprstmt', value: { k: 'call', fn: 'f', args: [{ k: 'var', name: n }] } });
@@ -110,5 +110,96 @@ describe('gates: the self-reading assign', () => {
     const out = coalesceCandidates(fn([asg('a', 1), use('a'), asg('b', 2), use('b')]));
     expect(out).toHaveLength(1);
     expect(out[0].merged).toBe('a-b');
+  });
+});
+
+describe('arm-disjoint admission', () => {
+  const armIf = (cond: Expr, thenS: Stmt[], elseS: Stmt[]): Stmt => ({ k: 'if', cond, then: thenS, else: elseS });
+  const cnd: Expr = { k: 'bin', op: '!=', l: { k: 'var', name: 'a' }, r: { k: 'const', value: 0 } };
+  // each arm: init, a loop mentioning the counter, a use — the shapes the span gates must refuse
+  const arm = (n: string): Stmt[] => [
+    asg(n, 0),
+    {
+      k: 'dowhile',
+      cond: { k: 'bin', op: '<', l: { k: 'var', name: n }, r: { k: 'const', value: 9 } },
+      body: [use(n)],
+    },
+  ];
+
+  test('counters confined to opposite arms of one if merge, span gates notwithstanding', () => {
+    const out = coalesceCandidates(fn([armIf(cnd, arm('x'), arm('y'))], L('x', 'y')));
+    expect(out.map((c) => c.merged)).toContain('y-x'); // survivor = the earlier declaration
+    const merged = out.find((c) => c.merged === 'y-x')!.sfn;
+    expect(names(merged)).toEqual(['x']);
+    expect(JSON.stringify(merged.body)).not.toContain('"y"');
+  });
+
+  test('a mention outside the arms (the if condition, a tail statement) breaks confinement', () => {
+    const inCond = coalesceCandidates(
+      fn(
+        [armIf({ k: 'bin', op: '!=', l: { k: 'var', name: 'x' }, r: { k: 'const', value: 0 } }, arm('x'), arm('y'))],
+        L('x', 'y'),
+      ),
+    );
+    expect(inCond.map((c) => c.merged)).not.toContain('y-x');
+    const inTail = coalesceCandidates(fn([armIf(cnd, arm('x'), arm('y')), use('y')], L('x', 'y')));
+    expect(inTail.map((c) => c.merged)).not.toContain('y-x');
+  });
+
+  test('an in-loop if never admits its arm pair', () => {
+    // the loop re-enters the if: a later entry can take the other arm and read what the first left
+    const out = coalesceCandidates(
+      fn([{ k: 'dowhile', cond: cnd, body: [armIf(cnd, arm('x'), arm('y'))] }], L('x', 'y')),
+    );
+    expect(out.map((c) => c.merged)).not.toContain('y-x');
+  });
+
+  test('a volatile pair never merges — slot identity is observable', () => {
+    for (const qualifier of ['volatile', 'pointeeVolatile'] as const) {
+      const locals = [
+        { name: 'x', type: T.s(32), [qualifier]: true },
+        { name: 'y', type: T.s(32), [qualifier]: true },
+      ];
+      const out = coalesceCandidates(fn([armIf(cnd, arm('x'), arm('y'))], locals));
+      expect(out.map((c) => c.merged)).not.toContain('y-x');
+    }
+  });
+
+  test('a local not const-initialized at its arm’s first mention never merges (the growth bound)', () => {
+    // arm B first mentions y through a computed assign — the load-fed-temp shape of a big if
+    const armB: Stmt[] = [
+      { k: 'assign', name: 'y', value: { k: 'bin', op: '+', l: { k: 'var', name: 'y' }, r: { k: 'const', value: 1 } } },
+      use('y'),
+    ];
+    const { candidates, refusals } = armDisjointUnder(
+      ARM_DISJOINT_GATES,
+      fn([armIf(cnd, arm('x'), armB)], L('x', 'y')),
+    );
+    expect(candidates.map((c) => c.merged)).not.toContain('y-x');
+    expect(refusals.get('arm-init')).toBeGreaterThan(0); // the gate is reached, not decorative
+  });
+
+  test('params never merge through the arm path either', () => {
+    const f = fn([armIf(cnd, arm('x'), arm('y'))], L('x'));
+    f.params = [{ name: 'y', type: T.s(32) }];
+    expect(coalesceCandidates(f).map((c) => c.merged)).not.toContain('y-x');
+  });
+});
+
+describe('volatile pairs (span path)', () => {
+  test('a volatile pair never merges through the span path — object or pointee qualifier alike', () => {
+    // typeToString spells neither qualifier, so without the gate the qualified local absorbs
+    // into a plain one and every access loses (or gains) its volatility.
+    const body = [asg('a', 1), use('a'), asg('b', 2), use('b')];
+    const objectVolatile = [
+      { name: 'a', type: T.s(32), volatile: true as const },
+      { name: 'b', type: T.s(32) },
+    ];
+    expect(coalesceCandidates(fn(body, objectVolatile))).toEqual([]);
+    const pointeeVolatile = [
+      { name: 'a', type: T.s(32), pointeeVolatile: true as const },
+      { name: 'b', type: T.s(32) },
+    ];
+    expect(coalesceCandidates(fn(body, pointeeVolatile))).toEqual([]);
   });
 });

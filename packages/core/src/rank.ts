@@ -19,7 +19,7 @@ import { verify } from './ir/verify';
 import { materializeArgBases } from './l3/argbase';
 import type { LanguageBackend, SFn } from './l3/ast';
 import { LIVEBASE_GATES, hoistReusedGlobalBases } from './l3/basecse';
-import { coalesceCandidates } from './l3/coalesce';
+import { armDisjointCandidates, coalesceCandidates } from './l3/coalesce';
 import { initFirstGuards } from './l3/initfirst';
 import { mulFirstSums } from './l3/mulfirst';
 import { nearBaseClusters } from './l3/nearbase';
@@ -228,11 +228,21 @@ export function enumerateCandidates(
   // ambiguous, so both placements are emitted and the differ referees. Crossed with branch sense
   // (an anchored copy empties an arm, which is exactly what changes which sense wins); the dedup
   // below collapses every variant the anchoring left unchanged.
-  const baseSense = [
+  const senseAnchor = [
     { suffix: '', sense: defSense, anchor: false, bitfields: true },
     { suffix: '/flip-branch', sense: !defSense, anchor: false, bitfields: true },
     { suffix: '/defsite', sense: defSense, anchor: true, bitfields: true },
     { suffix: '/flip-branch/defsite', sense: !defSense, anchor: true, bitfields: true },
+  ];
+  // `/flip-join` — the JOINED-if sibling of `/flip-branch` (structure.ts
+  // negateJoinedBranchSense): a reconverging two-armed if reads the same fall-through-is-then
+  // layout evidence the divergent case does, and which sense the source spelled is just as
+  // ambiguous — so both are emitted and the differ referees. Crossed with the pair above
+  // (divergent and joined ifs are disjoint sets, so the axes are independent); a function with
+  // no two-armed joined if emits identical source and the dedup collapses it before any compile.
+  const baseSense = [
+    ...senseAnchor.map((s) => ({ ...s, join: false })),
+    ...senseAnchor.map((s) => ({ ...s, suffix: `${s.suffix}/flip-join`, join: true })),
   ];
   // `/no-bitfield` — keep the honest shift spelling where the map would name a bitfield member.
   // The named read recompiles at the DECLARATION's access width; where that diverges from the
@@ -376,6 +386,7 @@ export function enumerateCandidates(
           sfn = structureChecked(fn, {
             ...svOpts,
             preserveDivergentBranchSense: s.sense,
+            negateJoinedBranchSense: s.join,
             anchorConstCopies: s.anchor,
             spellBitfieldMembers: s.bitfields,
             rereadGlobals: s.reread,
@@ -383,7 +394,7 @@ export function enumerateCandidates(
             coalesceMergeNames: s.mergeNames,
           });
         } catch (e) {
-          if (!s.anchor && s.bitfields && !s.reread && !s.inplace && !s.mergeNames) {
+          if (!s.anchor && !s.join && s.bitfields && !s.reread && !s.inplace && !s.mergeNames) {
             throw e; // the base axes keep their behavior: a structuring failure aborts the row
           }
           // Recorded for EVERY dropped variant: a candidate with more axes on looks its siblings
@@ -440,8 +451,8 @@ export function enumerateCandidates(
         // so they compose as an axis rather than a pairing; a third blanket product needs the
         // same argument, not just a row. And a specific LEVER PAIRING is admitted when a row
         // demands it AND the joint spelling is reachable from neither lever alone (the
-        // /livebase × /indexed pairings below — a hoisted MMIO base and a re-indexed walk in one
-        // function); anything else stays un-composed. And a lever must
+        // /livebase × /indexed, × /nearbase, and × /coalesce pairings below, each with its
+        // demanding row); anything else stays un-composed. And a lever must
         // PRESERVE SEMANTICS by construction: the differ referees byte-exactness (a wrong candidate
         // can never fake a score-0 match), but on a NONMATCH row the best-scoring source is shown
         // to the user — a semantically-wrong re-spelling there is plausible-but-wrong output, the
@@ -522,11 +533,15 @@ export function enumerateCandidates(
         // runs outside `respell`'s try is the one way a lever can cost a match. `enumerate` re-runs
         // the hoist per candidate, which is pure and cheap, rather than caching it outside the guard.
         respell('/scopebase', () => hoistScopedBases(sfn));
-        const enumerate = (label: string, from: () => SFn | null | undefined): void => {
+        const enumerate = (
+          label: string,
+          from: () => SFn | null | undefined,
+          variantsOf: (s: SFn) => { merged: string; sfn: SFn }[] = coalesceCandidates,
+        ): void => {
           let variants: { merged: string; sfn: SFn }[] = [];
           try {
             const base = from();
-            variants = base ? coalesceCandidates(base) : [];
+            variants = base ? variantsOf(base) : [];
           } catch (e) {
             opts.onLeverError?.(name + label, e instanceof Error ? e.message.split('\n')[0] : String(e));
             return;
@@ -587,6 +602,28 @@ export function enumerateCandidates(
         // spellings are emitted; the differ referees.
         const nearSpan = target.compilerBehaviors.nearBaseSpan;
         respell('/nearbase', () => (nearSpan !== undefined ? nearBaseClusters(sfn, nearSpan) : null));
+        // The livebase × nearbase PAIRINGS — the same admission as livebase × indexed above:
+        // the volatile triple is the row-demanded one, and the joint spelling is reachable from
+        // neither lever alone (a neighbor-cell object and a multi-index MMIO block in one
+        // function — each lever's constants are invisible to the other's model); the plain
+        // sibling rides for symmetry with /livebase/indexed.
+        respell('/livebase/nearbase', () => {
+          const r = livebase();
+          return r && nearSpan !== undefined ? nearBaseClusters(r, nearSpan) : null;
+        });
+        respell('/livebase/volatile/nearbase', () => {
+          const r = livebaseVolatile();
+          return r && nearSpan !== undefined ? nearBaseClusters(r, nearSpan) : null;
+        });
+        // The livebase × coalesce PAIRINGS — same admission again: the volatile triple is the
+        // row-demanded one, the joint spelling reachable from neither lever alone (an MMIO base
+        // worth homing and a counter shared across both arms of one if, in one function); the
+        // plain sibling rides for symmetry.
+        // ARM-DISJOINT merges only: the demanding row's shared counter is that class, and the
+        // span-model merges already ride the plain /coalesce label — pairing them too would
+        // multiply candidates with no row behind it.
+        enumerate('/livebase/coalesce', livebase, armDisjointCandidates);
+        enumerate('/livebase/volatile/coalesce', livebaseVolatile, armDisjointCandidates);
         // `/parkfirst` — incoming-argument parks lead the entry prefix (l3/parkfirst.ts): the
         // park's `mov` lifts to pure SSA aliasing, so its position is unrecoverable and the
         // default order is emission's. Both orders are emitted; the differ referees.

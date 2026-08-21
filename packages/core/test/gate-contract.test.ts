@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 import { BASECSE_GATES, LIVEBASE_GATES } from '../src/l3/basecse';
-import { COALESCE_GATES } from '../src/l3/coalesce';
+import { ARM_DISJOINT_GATES, COALESCE_GATES } from '../src/l3/coalesce';
 import { type Gate, ablateHeuristic, gateTableDefects } from '../src/l3/gates';
 import { LATCH_GATES } from '../src/raise/latch';
 import { PREUPDATE_SINK_GATES } from '../src/structure/hazards';
@@ -23,6 +23,7 @@ import { NAME_COALESCE_GATES } from '../src/structure/namecoalesce';
 // short and obvious.
 const TABLES: Record<string, readonly Gate<never>[]> = {
   COALESCE_GATES: COALESCE_GATES as readonly Gate<never>[],
+  ARM_DISJOINT_GATES: ARM_DISJOINT_GATES as readonly Gate<never>[],
   BASECSE_GATES: BASECSE_GATES as readonly Gate<never>[],
   LIVEBASE_GATES: LIVEBASE_GATES as readonly Gate<never>[],
   PREUPDATE_SINK_GATES: PREUPDATE_SINK_GATES as readonly Gate<never>[],

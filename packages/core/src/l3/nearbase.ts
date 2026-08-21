@@ -9,15 +9,21 @@
 //
 //     *(u16 *)0x0300104A   →   u8 *b = (u8 *)0x03001048;  *(u16 *)(b + 2)
 //
-// SCOPE (decline over approximate): only CONST deref bases (an integer used in arithmetic is
-// not an address and never rewrites; a struct-pointer cast base and everything inside a
-// dot-form field subtree keep their spelling — their stride is the struct's, not a byte's); a
-// cluster needs at least two DISTINCT addresses within the target's declared derivation reach
-// of its lowest (TargetDescription nearBaseSpan — beyond it the derive costs more than the pool
-// word it saves); every access the walk visits rewrites, so a cluster splits only across the
-// field-subtree boundary. A member basecse already hoisted arrives as a `var` base and is
-// invisible here — the reused-base and neighbor-base spellings stay separate candidates.
-// Declines (null) when no cluster forms.
+// SCOPE (decline over approximate): cluster MEMBERSHIP comes from CONST deref bases only (a
+// struct-pointer cast base and everything inside a dot-form field subtree keep their spelling —
+// their stride is the struct's, not a byte's); a cluster needs at least two DISTINCT addresses
+// within the target's declared derivation reach of its lowest (TargetDescription nearBaseSpan —
+// beyond it the derive costs more than the pool word it saves); every access the walk visits
+// rewrites, so a cluster splits only across the field-subtree and struct-pointer-cast
+// boundaries. A member basecse
+// already hoisted arrives as a `var` base and is invisible here — the reused-base and
+// neighbor-base spellings stay separate candidates. Once a cluster HAS formed, a bare const
+// VALUE inside its window re-spells too, as `(s32)(b + off)` — the address of a cell handed to
+// something (a DMA source register) is the same derived add in the original, and the two
+// spellings are value-equal by construction, so the differ referees — including an integer that
+// only coincidentally lands in the window, which is the stated cost of the lever (the `s32` cast
+// assumes addresses below 2^31, true of every target that declares nearBaseSpan today). Declines
+// (null) when no cluster forms.
 import type { Expr, SFn, Stmt } from './ast';
 import { mapExprChildren, mapStmtExprs } from './ast';
 import { nameAllocator } from './hoist';
@@ -44,6 +50,9 @@ export function nearBaseClusters(sfn: SFn, span: number): SFn | null {
   const collect = (e: Expr): Expr => {
     if (e.k === 'field') {
       return e; // a dot-form subtree keeps its struct base — never collected, never rewritten
+    }
+    if (e.k === 'cast' && e.to.kind === 'ptr' && e.to.to.kind === 'struct') {
+      return e; // rewrite refuses these subtrees, so collecting under them would seed a cluster
     }
     const m = mapExprChildren(e, collect);
     if (m.k === 'index') {
@@ -81,24 +90,41 @@ export function nearBaseClusters(sfn: SFn, span: number): SFn | null {
   for (const lo of new Set(baseOf.values())) {
     baseName.set(lo, fresh());
   }
+  const derived = (lo: number, off: number): Expr =>
+    off === 0
+      ? { k: 'var', name: baseName.get(lo)! }
+      : { k: 'bin', op: '+', l: { k: 'var', name: baseName.get(lo)! }, r: { k: 'const', value: off } };
+  // the cluster (if any) whose window covers a bare const value
+  const windows = [...new Set(baseOf.values())];
+  const coveringLo = (v: number): number | undefined => windows.find((lo) => v >= lo && v - lo <= span);
   const rewrite = (e: Expr): Expr => {
     if (e.k === 'field') {
       return e;
     }
-    const m = mapExprChildren(e, rewrite);
-    if (m.k === 'index') {
-      const c = baseConst(m.base);
+    if (e.k === 'index') {
+      const c = baseConst(e.base);
       const lo = c !== null ? baseOf.get(c) : undefined;
       if (c !== null && lo !== undefined) {
-        const off = c - lo;
-        const base: Expr =
-          off === 0
-            ? { k: 'var', name: baseName.get(lo)! }
-            : { k: 'bin', op: '+', l: { k: 'var', name: baseName.get(lo)! }, r: { k: 'const', value: off } };
-        return { ...m, base };
+        // the base is replaced wholesale — its inner const must not reach the value path below
+        return { ...e, base: derived(lo, c - lo), idx: rewrite(e.idx) };
       }
+      return { ...e, base: rewrite(e.base), idx: rewrite(e.idx) };
     }
-    return m;
+    if (e.k === 'cast' && e.to.kind === 'ptr' && e.to.to.kind === 'struct') {
+      return e; // the struct-arrays base keeps its spelling — same refusal as baseConst's
+    }
+    if (e.k === 'const') {
+      const lo = coveringLo(e.value);
+      if (lo !== undefined) {
+        return {
+          k: 'cast',
+          to: { kind: 'int', width: 32, signed: true },
+          e: derived(lo, e.value - lo),
+        };
+      }
+      return e;
+    }
+    return mapExprChildren(e, rewrite);
   };
   const inits: Stmt[] = [...baseName.entries()].map(([lo, name]) => ({
     k: 'assign',

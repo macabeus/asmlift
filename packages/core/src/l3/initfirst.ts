@@ -8,7 +8,7 @@
 //
 //     if (0 < n) { v = 0; … }   →   v = 0; if (v < n) { … }
 //
-// Two rewrites (the guard re-spelling top-level-only — see SCOPE):
+// Two rewrites (the guard re-spelling gated on the moved write being dead — see SCOPE):
 //   • common-arm hoist — both arms of an `if` begin with the SAME pure-const assign
 //     (`if (c) { v = 0; } else { v = 0; … }`, gcc's inverted-guard shape): the assign moves above
 //     the `if`, and an emptied then-arm flips into its negated else form.
@@ -22,34 +22,23 @@
 // pointer where no name betrays it — all three stay put. Hoisted assigns carry pure CONST
 // values (an effect or a memory read would reorder against the condition), and the condition
 // must not read the variable (its pre-assign value dies in the move). The guard re-spelling
-// mints a write on a previously write-free path, so it fires only in the TOP-LEVEL statement
-// list — nested anywhere, a loop re-executes the skip-path write and an outer list can read it
-// — and only when the variable appears nowhere after the `if` there. Declines (null) when
-// nothing changes.
+// mints a write on a previously write-free path, so it needs that write to be DEAD there: the
+// variable must be untouched after the `if` in its own list and in the tail of every ancestor
+// list (a sibling arm of an ancestor `if` is not "after" — it never runs in the same entry).
+// Under a loop or switch ancestor the tails stop describing what runs next (a back edge
+// re-enters everything, a case can fall through), so there the variable must appear nowhere
+// outside the rewritten `if` at all. Declines (null) when nothing changes.
 import type { Expr, SFn, Stmt } from './ast';
-import { NEGATE_REL, exprChildren, stmtExprs } from './ast';
+import { NEGATE_REL, exprChildren, stmtChildren, stmtExprs } from './ast';
 
 const readsVar = (e: Expr, name: string): boolean =>
   ((e.k === 'var' || e.k === 'addr') && e.name === name) || exprChildren(e).some((c) => readsVar(c, name));
 
-const stmtTouches = (s: Stmt, name: string): boolean => {
-  if (stmtExprs(s).some((e) => readsVar(e, name))) {
-    return true;
-  }
-  switch (s.k) {
-    case 'if':
-      return [...s.then, ...s.else].some((x) => stmtTouches(x, name));
-    case 'while':
-    case 'dowhile':
-      return s.body.some((x) => stmtTouches(x, name));
-    case 'for':
-      return [s.init, s.inc, ...s.body].some((x) => stmtTouches(x, name));
-    case 'switch':
-      return [...s.cases.flatMap((c) => c.body), ...(s.default ?? [])].some((x) => stmtTouches(x, name));
-    default:
-      return false;
-  }
-};
+// READS only — a pure write in a tail is benign (it overwrites the minted value on every path,
+// and any read after it is that write's business); touchesOutside below is TOTAL because strong
+// mode must know the name is absent, presence of any kind included.
+const stmtTouches = (s: Stmt, name: string): boolean =>
+  stmtExprs(s).some((e) => readsVar(e, name)) || stmtChildren(s).some((x) => stmtTouches(x, name));
 
 const isConstAssign = (s: Stmt): s is Extract<Stmt, { k: 'assign' }> & { value: { k: 'const'; value: number } } =>
   s.k === 'assign' && s.value.k === 'const';
@@ -70,32 +59,37 @@ export function initFirstGuards(sfn: SFn): SFn | null {
   const sweep = (stmts: Stmt[]): void => {
     for (const st of stmts) {
       stmtExprs(st).forEach(dropAddressTaken);
-      switch (st.k) {
-        case 'if':
-          sweep(st.then);
-          sweep(st.else);
-          break;
-        case 'while':
-        case 'dowhile':
-          sweep(st.body);
-          break;
-        case 'for':
-          sweep([st.init, st.inc, ...st.body]);
-          break;
-        case 'switch':
-          sweep([...st.cases.flatMap((cs) => cs.body), ...(st.default ?? [])]);
-          break;
-        default:
-          break;
-      }
+      sweep(stmtChildren(st));
     }
   };
   sweep(sfn.body);
 
-  const rewriteList = (list: Stmt[], topLevel: boolean): Stmt[] => {
+  // `tails`: for each ancestor list, the statements after the ancestor on the path here.
+  // `strong`: a loop or switch ancestor exists, so tails stop bounding what runs after.
+  interface Ctx {
+    tails: Stmt[][];
+    strong: boolean;
+  }
+  // TOTAL (reads and pure writes) — see the note on stmtTouches. Runs against the pre-rewrite
+  // tree (`skip` is an original-tree statement, found by identity); the rewrites never change a
+  // name's presence in a subtree, so the verdict carries over to the rewritten one.
+  const touchesOutside = (list: Stmt[], skip: Stmt, name: string): boolean =>
+    list.some(
+      (st) =>
+        st !== skip &&
+        (stmtExprs(st).some((e) => readsVar(e, name)) ||
+          (st.k === 'assign' && st.name === name) ||
+          touchesOutside(stmtChildren(st), skip, name)),
+    );
+  // Assigns this pass itself hoisted to an arm head's parent list. An ancestor `if` whose arm now
+  // BEGINS with one would otherwise re-spell it again — rewriting its own condition's accidental
+  // matching const into the variable and stealing the arrangement the inner guard needed.
+  const moved = new Set<Stmt>();
+  const rewriteList = (list: Stmt[], ctx: Ctx): Stmt[] => {
     const out: Stmt[] = [];
-    for (const s0 of list) {
-      const s = recurse(s0);
+    for (let i = 0; i < list.length; i++) {
+      const s0 = list[i];
+      const s = recurse(s0, { tails: [...ctx.tails, list.slice(i + 1)], strong: ctx.strong });
       if (s.k !== 'if') {
         out.push(s);
         continue;
@@ -109,6 +103,8 @@ export function initFirstGuards(sfn: SFn): SFn | null {
         if (
           t0 === undefined ||
           e0 === undefined ||
+          moved.has(t0) ||
+          moved.has(e0) ||
           !isConstAssign(t0) ||
           !isConstAssign(e0) ||
           !fnLocal.has(t0.name) ||
@@ -119,6 +115,7 @@ export function initFirstGuards(sfn: SFn): SFn | null {
           break;
         }
         out.push(t0);
+        moved.add(t0);
         hoisted.push({ name: t0.name, value: t0.value.value });
         changed = true;
         then = then.slice(1);
@@ -145,24 +142,29 @@ export function initFirstGuards(sfn: SFn): SFn | null {
       }
       // guard re-spelling
       if (
-        topLevel &&
         els.length === 0 &&
         then.length > 0 &&
         isConstAssign(then[0]) &&
+        !moved.has(then[0]) &&
         fnLocal.has(then[0].name) &&
         cond.k === 'bin' &&
         NEGATE_REL[cond.op]
       ) {
         const init = then[0];
-        const rest = list.slice(list.indexOf(s0) + 1);
+        const rest = list.slice(i + 1);
         const constSide =
           cond.l.k === 'const' && cond.l.value === init.value.value
             ? 'l'
             : cond.r.k === 'const' && cond.r.value === init.value.value
               ? 'r'
               : null;
-        if (constSide !== null && !readsVar(cond, init.name) && !rest.some((t) => stmtTouches(t, init.name))) {
+        const deadAfter = ctx.strong
+          ? !touchesOutside(sfn.body, s0, init.name)
+          : !rest.some((t) => stmtTouches(t, init.name)) &&
+            ctx.tails.every((tail) => !tail.some((t) => stmtTouches(t, init.name)));
+        if (constSide !== null && !readsVar(cond, init.name) && deadAfter) {
           out.push(init);
+          moved.add(init);
           cond = { ...cond, [constSide]: { k: 'var', name: init.name } };
           then = then.slice(1);
           changed = true;
@@ -173,26 +175,27 @@ export function initFirstGuards(sfn: SFn): SFn | null {
     return out;
   };
 
-  const recurse = (s: Stmt): Stmt => {
+  const recurse = (s: Stmt, ctx: Ctx): Stmt => {
+    const strong = { ...ctx, strong: true };
     switch (s.k) {
       case 'if':
-        return { ...s, then: rewriteList(s.then, false), else: rewriteList(s.else, false) };
+        return { ...s, then: rewriteList(s.then, ctx), else: rewriteList(s.else, ctx) };
       case 'while':
       case 'dowhile':
-        return { ...s, body: rewriteList(s.body, false) };
+        return { ...s, body: rewriteList(s.body, strong) };
       case 'for':
-        return { ...s, body: rewriteList(s.body, false) };
+        return { ...s, body: rewriteList(s.body, strong) };
       case 'switch':
         return {
           ...s,
-          cases: s.cases.map((c) => ({ ...c, body: rewriteList(c.body, false) })),
-          ...(s.default ? { default: rewriteList(s.default, false) } : {}),
+          cases: s.cases.map((c) => ({ ...c, body: rewriteList(c.body, strong) })),
+          ...(s.default ? { default: rewriteList(s.default, strong) } : {}),
         };
       default:
         return s;
     }
   };
 
-  const body = rewriteList(sfn.body, true);
+  const body = rewriteList(sfn.body, { tails: [], strong: false });
   return changed ? { ...sfn, body } : null;
 }

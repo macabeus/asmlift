@@ -143,3 +143,95 @@ test('refused for an address-taken local: a captured pointer reads it with no na
   };
   expect(initFirstGuards(g)).toBeNull();
 });
+
+test('the guard re-spells NESTED under an if when the variable is dead after it', () => {
+  // if (a0 != 0) { if (0 < a0) { v0 = 0; do … } }  →  the init hoists within the outer arm
+  const r = initFirstGuards(
+    fn([
+      {
+        k: 'if',
+        cond: bin('!=', v('a0'), c(0)),
+        then: [
+          {
+            k: 'if',
+            cond: bin('<', c(0), v('a0')),
+            then: [assign('v0', c(0)), dowhile(bin('<', v('v0'), v('a0')), [])],
+            else: [],
+          },
+        ],
+        else: [],
+      },
+    ]),
+  );
+  expect(r).not.toBeNull();
+  const outer = r!.body[0] as Extract<Stmt, { k: 'if' }>;
+  expect(outer.then[0]).toEqual(assign('v0', c(0)));
+  expect((outer.then[1] as Extract<Stmt, { k: 'if' }>).cond).toEqual(bin('<', v('v0'), v('a0')));
+});
+
+test('refused nested: an ancestor tail reads the variable (the skip path would now hold K)', () => {
+  const r = initFirstGuards(
+    fn([
+      {
+        k: 'if',
+        cond: bin('!=', v('a0'), c(0)),
+        then: [
+          {
+            k: 'if',
+            cond: bin('<', c(0), v('a0')),
+            then: [assign('v0', c(0)), dowhile(bin('<', v('v0'), v('a0')), [])],
+            else: [],
+          },
+        ],
+        else: [],
+      },
+      assign('a0', v('v0')),
+    ]),
+  );
+  expect(r).toBeNull();
+});
+
+test('both arms of one if re-spell their own guard over a SHARED counter (never live across arms)', () => {
+  const arm = (base: number): Stmt => ({
+    k: 'if',
+    cond: bin('<', c(0), v('a0')),
+    then: [assign('v0', c(0)), dowhile(bin('<', v('v0'), v('a0')), [assign('v0', bin('<', v('v0'), c(base)))])],
+    else: [],
+  });
+  const r = initFirstGuards(fn([{ k: 'if', cond: bin('!=', v('a0'), c(0)), then: [arm(1)], else: [arm(2)] }]));
+  expect(r).not.toBeNull();
+  for (const armOut of [
+    (r!.body[0] as Extract<Stmt, { k: 'if' }>).then,
+    (r!.body[0] as Extract<Stmt, { k: 'if' }>).else,
+  ]) {
+    expect(armOut[0]).toEqual(assign('v0', c(0)));
+    expect((armOut[1] as Extract<Stmt, { k: 'if' }>).cond).toEqual(bin('<', v('v0'), v('a0')));
+  }
+});
+
+test('under a loop ancestor the re-spell fires only when the variable appears nowhere outside its if', () => {
+  const inner: Stmt = {
+    k: 'if',
+    cond: bin('<', c(0), v('a0')),
+    then: [assign('v0', c(0)), dowhile(bin('<', v('v0'), v('a0')), [])],
+    else: [],
+  };
+  // confined to the if: fires even under the loop
+  const ok = initFirstGuards(fn([{ k: 'dowhile', cond: bin('!=', v('a0'), c(5)), body: [inner] }]));
+  expect(ok).not.toBeNull();
+  const loop = ok!.body[0] as Extract<Stmt, { k: 'dowhile' }>;
+  expect(loop.body[0]).toEqual(assign('v0', c(0)));
+  // a sibling arm touching it counts as "outside" once a loop ancestor exists: the next
+  // iteration can run that arm and read what the skip-path write left behind
+  const armB: Stmt = { k: 'if', cond: bin('<', v('v0'), c(9)), then: [assign('a0', c(1))], else: [] };
+  const shared = initFirstGuards(
+    fn([
+      {
+        k: 'dowhile',
+        cond: bin('!=', v('a0'), c(5)),
+        body: [{ k: 'if', cond: bin('!=', v('a0'), c(0)), then: [inner], else: [armB] }],
+      },
+    ]),
+  );
+  expect(shared).toBeNull();
+});
