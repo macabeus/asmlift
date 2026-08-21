@@ -1319,6 +1319,29 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
             }
           }
         }
+        // A MATERIALIZED back-edge arg is this variable's in-place update (`add r4, r4, r0`
+        // mutates the same register the param lives in) — adopt its name so the def assigns the
+        // loop variable directly and the update copy elides. Sound only when every read of the
+        // param sits at-or-before the def in the header (the def's own operands included): the
+        // assignment splits the iteration into old-value-before / new-value-after, and a later
+        // read of the OLD value would silently get the new one — position-granular, because
+        // liveness is block-granular and the param is killed from its own block's liveIn.
+        if (name === undefined) {
+          const ba = backArgs?.[i];
+          const d = ba !== undefined ? defs.get(ba) : undefined;
+          const nm = ba !== undefined ? varName.get(ba) : undefined;
+          if (
+            nm !== undefined &&
+            !exclude.has(nm) &&
+            d !== undefined &&
+            materialize.has(d) &&
+            opBlock.get(d) === header &&
+            (useSitesOf.get(p) ?? []).every((s) => s.blk === header && s.idx <= opIndex.get(d)!) &&
+            canTakeName(p, header, nm)
+          ) {
+            name = nm;
+          }
+        }
         name ??= `v${fresh++}`;
         varName.set(p, name);
         if (!varType.has(name)) {

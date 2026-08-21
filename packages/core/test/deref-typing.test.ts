@@ -604,8 +604,10 @@ describe('byte offsets on a rendered pointer', () => {
       '.L1:\n\tldr\tr2, [r3]\n\tadd\tr4, r4, r2\n\tadd\tr3, r3, #0x4\n\tsub\tr1, r1, #0x1\n' +
       '\tcmp\tr1, #0x0\n\tbne\t.L1\n\tadd\tr0, r4, #0\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
     const src = decompile('f', walkedIntoVar, ARMV4T_AGBCC).source;
-    expect(src).toContain('s32 * v1;');
-    expect(src).toContain('v1 = (s32 *)((u8 *)a0 + (a1 << 1));');
+    expect(src).toMatch(/s32 \* v\d+;/);
+    // the byte offset is a materialized local here — `a1 << 1` also seeds the loop counter, and a
+    // value read by a sibling copy arg is computed once, as the asm's single `lsl` was
+    expect(src).toMatch(/v\d+ = \(s32 \*\)\(\(u8 \*\)a0 \+ v\d+\);/);
   });
 
   test('a BYTE pointee walked by a runtime offset is left alone — the control', () => {
