@@ -14,7 +14,8 @@
 // their stride is the struct's, not a byte's); a cluster needs at least two DISTINCT addresses
 // within the target's declared derivation reach of its lowest (TargetDescription nearBaseSpan —
 // beyond it the derive costs more than the pool word it saves); every access the walk visits
-// rewrites, so a cluster splits only across the field-subtree boundary. A member basecse
+// rewrites, so a cluster splits only across the field-subtree and struct-pointer-cast
+// boundaries. A member basecse
 // already hoisted arrives as a `var` base and is invisible here — the reused-base and
 // neighbor-base spellings stay separate candidates. Once a cluster HAS formed, a bare const
 // VALUE inside its window re-spells too, as `(s32)(b + off)` — the address of a cell handed to

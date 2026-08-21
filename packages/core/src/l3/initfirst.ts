@@ -8,7 +8,7 @@
 //
 //     if (0 < n) { v = 0; … }   →   v = 0; if (v < n) { … }
 //
-// Two rewrites (the guard re-spelling top-level-only — see SCOPE):
+// Two rewrites (the guard re-spelling gated on the moved write being dead — see SCOPE):
 //   • common-arm hoist — both arms of an `if` begin with the SAME pure-const assign
 //     (`if (c) { v = 0; } else { v = 0; … }`, gcc's inverted-guard shape): the assign moves above
 //     the `if`, and an emptied then-arm flips into its negated else form.

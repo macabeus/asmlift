@@ -451,8 +451,8 @@ export function enumerateCandidates(
         // so they compose as an axis rather than a pairing; a third blanket product needs the
         // same argument, not just a row. And a specific LEVER PAIRING is admitted when a row
         // demands it AND the joint spelling is reachable from neither lever alone (the
-        // /livebase × /indexed pairings below — a hoisted MMIO base and a re-indexed walk in one
-        // function); anything else stays un-composed. And a lever must
+        // /livebase × /indexed, × /nearbase, and × /coalesce pairings below, each with its
+        // demanding row); anything else stays un-composed. And a lever must
         // PRESERVE SEMANTICS by construction: the differ referees byte-exactness (a wrong candidate
         // can never fake a score-0 match), but on a NONMATCH row the best-scoring source is shown
         // to the user — a semantically-wrong re-spelling there is plausible-but-wrong output, the
