@@ -347,12 +347,12 @@ export function enumerateCandidates(
   // PER SYMBOL VARIANT, not on the shared probe: a map-lifted probe spells the shared base's
   // constants as `gaddr`, whose cone the axis refuses — so the probe would blind the
   // `/raw-globals` siblings, whose own lift has the plain-const cone the axis serves. The chain
-  // carries the axis unconditionally and each variant's loop skips it when its lifted fn has no
-  // homeable base (every `addrhome` variant skips together, so the dropped-sibling closure has
-  // no hole). The `addrhome:false` siblings enumerate first, same as `/inplace`'s ordering rule.
+  // carries the axis unconditionally and each variant filters the `addrHome` arm out when its own
+  // lifted fn has no homeable base (the whole arm goes together, so the dropped-sibling closure
+  // has no hole). The `addrHome:false` siblings enumerate first, same as `/inplace`'s ordering.
   const addrHomeCands = [
-    ...senseCands.map((s) => ({ ...s, addrhome: false })),
-    ...senseCands.map((s) => ({ ...s, suffix: `${s.suffix}/addr-home`, addrhome: true })),
+    ...senseCands.map((s) => ({ ...s, addrHome: false })),
+    ...senseCands.map((s) => ({ ...s, suffix: `${s.suffix}/addr-home`, addrHome: true })),
   ];
 
   const seen = new Set<string>();
@@ -379,7 +379,7 @@ export function enumerateCandidates(
       // signedness pin, injected between pre-recovery and recoverTypes via the beforeRecover hook.
       raiseRecovered(fn, target, { beforeRecover: () => pinScalarParams(fn, cand.signed, ptrIdx) });
       // this variant's own gate for the `/addr-home` axis — see the chain-construction note
-      const canAddrHome = hasHomeableSharedAddress(fn);
+      const variantCands = hasHomeableSharedAddress(fn) ? addrHomeCands : addrHomeCands.filter((s) => !s.addrHome);
       // `/merge-names` combinations whose un-merged sibling was DROPPED. `structure()` already
       // refuses to let the axis unlock a function the primary declines, but it can only see its own
       // refusals — a boundary contract fails out here, in `structureChecked`. Without this a
@@ -387,14 +387,11 @@ export function enumerateCandidates(
       // which is the same trade one level up. `senseCands` puts each `mergeNames:false` sibling
       // first, so the entry is always recorded before its merged twin is reached.
       const droppedPrimary = new Set<string>();
-      for (const s of addrHomeCands) {
-        if (s.addrhome && !canAddrHome) {
-          continue; // the axis cannot change this variant — not a drop, nothing derives from it
-        }
+      for (const s of variantCands) {
         if (
           (s.mergeNames && droppedPrimary.has(s.suffix.replace('/merge-names', ''))) ||
           (s.inplace && droppedPrimary.has(s.suffix.replace('/inplace', ''))) ||
-          (s.addrhome && droppedPrimary.has(s.suffix.replace('/addr-home', '')))
+          (s.addrHome && droppedPrimary.has(s.suffix.replace('/addr-home', '')))
         ) {
           // A SKIPPED variant is recorded exactly like a dropped one, or the closure would not be
           // transitive: with plain X dropped and X/inplace skipped-but-unrecorded,
@@ -415,11 +412,11 @@ export function enumerateCandidates(
             spellBitfieldMembers: s.bitfields,
             rereadGlobals: s.reread,
             materializeJoinFeeds: s.inplace,
-            homeSharedAddresses: s.addrhome,
+            homeSharedAddresses: s.addrHome,
             coalesceMergeNames: s.mergeNames,
           });
         } catch (e) {
-          if (!s.anchor && !s.join && s.bitfields && !s.reread && !s.inplace && !s.mergeNames && !s.addrhome) {
+          if (!s.anchor && !s.join && s.bitfields && !s.reread && !s.inplace && !s.mergeNames && !s.addrHome) {
             throw e; // the base axes keep their behavior: a structuring failure aborts the row
           }
           // Recorded for EVERY dropped variant: a candidate with more axes on looks its siblings

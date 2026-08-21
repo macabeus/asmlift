@@ -775,8 +775,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     onGap = 'strict',
     symbols,
   } = opts;
-  // Both levers change which edge copies elide as identities, which the loop emitters' hazard
-  // predicates read — so the invariant above covers both.
+  // These levers all change which edge copies elide as identities (extra materialization does
+  // too), which the loop emitters' hazard predicates read — so the invariant above covers each.
   if (coalesceMergeNames || materializeJoinFeeds || homeSharedAddresses) {
     assertPrimaryAccepts(fn, opts, hooks);
   }

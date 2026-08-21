@@ -12,8 +12,11 @@ import { cBackend } from '../src/backend/c';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
 import { recoverTypes } from '../src/raise/recover';
+import { enumerateCandidates } from '../src/rank';
 import { hasHomeableSharedAddress } from '../src/structure/analysis';
 import { structure } from '../src/structure/structure';
+import { type SymbolMap } from '../src/symbols';
+import { ARMV4T_AGBCC } from '../src/target';
 
 const emit = (ir: string, on: boolean): string => {
   const fn = parse(ir);
@@ -122,4 +125,68 @@ const GADDR = `fn withsym {
 test('a base whose cone holds a gaddr is not homed', () => {
   expect(emit(GADDR, true)).toBe(emit(GADDR, false));
   expect(hasHomeableSharedAddress(parse(GADDR))).toBe(false);
+});
+
+// A base that is ALSO the `ret` operand. For a void-prototyped function the ret operand is a
+// phantom (the register just happens to hold the base at `bx lr` — common agbcc output), so the
+// gate must not count it: analyze() skips it under returnsVoid, which the gate cannot know. For
+// a non-void function the axis's own rule still refuses — the gate's true is then the documented
+// duplicate-collapsed-candidate over-approximation.
+const RETBASE = `fn retbase {
+^bb0(%0: u32):
+  %1: s32 = const {value=2}
+  %2: u32 = shl %0, %1
+  %3: s32 = const {value=134576844}
+  %4: u32 = add %2, %3
+  %5: s32 = load %4 {off=1, signed=false, width=1}
+  store %4, %5 {off=2, width=1}
+  %6: s32 = load %4 {off=0, signed=false, width=1}
+  store %4, %6 {off=3, width=1}
+  ret %4
+}
+`;
+
+test('a ret-operand base still passes the gate, and the axis homes it under returnsVoid', () => {
+  expect(hasHomeableSharedAddress(parse(RETBASE))).toBe(true);
+  const emitVoid = (on: boolean): string => {
+    const fn = parse(RETBASE);
+    verify(fn);
+    recoverTypes(fn);
+    return cBackend.emit(structure(fn, { returnsVoid: true, homeSharedAddresses: on }));
+  };
+  const on = emitVoid(true);
+  expect(count(on, '134576844')).toBe(1);
+  expect(count(emitVoid(false), '134576844')).toBeGreaterThanOrEqual(2);
+});
+
+test('the same base genuinely returned is refused by the axis — gate over-approximates only', () => {
+  const emitRet = (on: boolean): string => {
+    const fn = parse(RETBASE);
+    verify(fn);
+    recoverTypes(fn);
+    return cBackend.emit(structure(fn, { homeSharedAddresses: on }));
+  };
+  expect(emitRet(true)).toBe(emitRet(false));
+});
+
+// The per-variant enumeration gate: a symbol map naming the base constant makes the MAP-lifted
+// fn's cone hold a gaddr (axis refused), while the `/raw-globals` sibling lifts the plain const
+// the axis serves. A probe-level gate would blind the raw sibling — every `/addr-home` candidate
+// must therefore ride the raw variant, and at least one must exist.
+const PAIR_ASM =
+  'f:\n' +
+  '\tlsls\tr0, r0, #0x2\n\tlsls\tr1, r1, #0x1\n\tadds\tr0, r0, r1\n' +
+  '\tldr\tr1, .L1\n\tadds\tr0, r0, r1\n' +
+  '\tldrb\tr2, [r0, #0x1]\n\tldrb\tr1, [r0]\n' +
+  '\tcmp\tr2, #0x2\n\tbeq\t.L2\n' +
+  '\tsubs\tr0, r2, #0x2\n\tadds\tr0, r0, r1\n\tbx\tlr\n' +
+  '.L2:\n\tadds\tr0, r2, r1\n\tbx\tlr\n' +
+  '.L1:\n\t.word\t0x8057acc\n';
+
+test('a symbol map does not blind the raw sibling: /addr-home rides /raw-globals', () => {
+  const symbols: SymbolMap = new Map([[0x8057acc, [{ name: 'gEntries', kind: 'data' }]]]);
+  const cands = enumerateCandidates('f', PAIR_ASM, ARMV4T_AGBCC, { symbols });
+  const homed = cands.filter((c) => c.label.includes('/addr-home'));
+  expect(homed.length).toBeGreaterThan(0);
+  expect(homed.every((c) => c.label.includes('/raw-globals'))).toBe(true);
 });
