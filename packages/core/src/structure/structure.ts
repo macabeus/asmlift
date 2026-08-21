@@ -2549,11 +2549,25 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         }
         const inits = argAssigns(b, h);
         const loopStmt = emitWhile(li, updates, preUpdateCopies(li.exit, hexitArgs, sunk), fused ? 'while' : 'dowhile');
+        // The guard-read substitution: an init arg reads as its loop variable's NAME. The inits
+        // just assigned them (value-identical), and that is the source spelling — `if (n > 0)`
+        // tests the loop variable, which is also the parked register the target's guard reads.
+        // Not an UNMATERIALIZED const: the guard compared an immediate (`cmp rX, #0`), and an
+        // immediate is what re-spelling it as the counter's name would un-spell.
+        const gsub = new Map<Value, string>();
+        li.header.params.forEach((p, i) => {
+          const a = initArgs[i];
+          const ad = a !== undefined ? defs.get(a) : undefined;
+          if (a !== undefined && !(ad?.opcode === 'const' && !materialize.has(ad))) {
+            gsub.set(a, varName.get(p)!);
+          }
+        });
         if (!fused) {
           // The kept guard's condition renders AFTER the seed and the inits, but tests the state
-          // BEFORE them — sound only when no name it reads was just (non-identity) written.
+          // BEFORE them — a read of a just-(non-identity-)written name is sound only through
+          // `gsub`, whose mapped values the inits deliberately hold.
           const writes = new Set([...seedWrites, ...updateWriteSet(inits)]);
-          if (readsClobbered(term.operands[0], new Map(), writes)) {
+          if (readsClobbered(term.operands[0], gsub, writes)) {
             throw new StructureError(
               `cannot structure '${fn.name}': the kept guard's condition reads a name the loop initialisation overwrites`,
             );
@@ -2564,7 +2578,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         if (fused) {
           out.push(loopStmt);
         } else {
-          let gcond = expr(term.operands[0]);
+          let gcond = exprWith(gsub)(term.operands[0]);
           if (!enterIsTaken) {
             gcond = negateCond(gcond);
           } // entering the loop must be `taken`

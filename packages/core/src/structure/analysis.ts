@@ -422,6 +422,66 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
       }
     }
   }
+  // ── natural loops, for the live-across-a-loop rule ────────────────────────────────────────
+  // Retreating edges via DFS colors; the body is the backward closure from the latch. On an
+  // irreducible CFG a retreating edge is not a true back edge and the "body" over-claims — which
+  // only over-materializes, the safe direction.
+  const loopBodies: { header: Block; body: Set<Block> }[] = [];
+  {
+    const predsOf = new Map<Block, Block[]>();
+    for (const b of fn.blocks) {
+      predsOf.set(b, []);
+    }
+    for (const b of fn.blocks) {
+      for (const s of successorsOf(b)) {
+        predsOf.get(s)!.push(b);
+      }
+    }
+    const color = new Map<Block, 1 | 2>(); // 1 = on the DFS stack, 2 = done
+    const backEdges: { latch: Block; header: Block }[] = [];
+    if (fn.blocks.length > 0) {
+      const stack: { b: Block; succ: Block[]; i: number }[] = [];
+      color.set(fn.blocks[0], 1);
+      stack.push({ b: fn.blocks[0], succ: successorsOf(fn.blocks[0]), i: 0 });
+      while (stack.length) {
+        const top = stack[stack.length - 1];
+        if (top.i < top.succ.length) {
+          const s = top.succ[top.i++];
+          const c = color.get(s);
+          if (c === undefined) {
+            color.set(s, 1);
+            stack.push({ b: s, succ: successorsOf(s), i: 0 });
+          } else if (c === 1) {
+            backEdges.push({ latch: top.b, header: s });
+          }
+        } else {
+          color.set(top.b, 2);
+          stack.pop();
+        }
+      }
+    }
+    for (const { latch, header } of backEdges) {
+      const body = new Set<Block>([header]);
+      const work = [latch];
+      while (work.length) {
+        const x = work.pop()!;
+        if (!body.has(x)) {
+          body.add(x);
+          work.push(...(predsOf.get(x) ?? []));
+        }
+      }
+      loopBodies.push({ header, body });
+    }
+  }
+  /** The def's value enters some loop's header live and every consumer sits outside that loop,
+   *  as does the def: the value is carried ACROSS the loop, not into it. */
+  const liveAcrossLoop = (def: Op, r: Value, consumers: Op[]): boolean =>
+    loopBodies.some(
+      (L) =>
+        liveIn.get(L.header)!.has(r) &&
+        !L.body.has(opBlock.get(def)!) &&
+        consumers.every((c) => !L.body.has(opBlock.get(c)!)),
+    );
   /** Any gaddr/laddr in the op's cone (the op included): rendered standalone, an address
    *  computation loses the memAccess's inline byte-stride cast — those stay with the cast-aware
    *  base machinery. */
@@ -516,6 +576,14 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         const isCall = op.opcode === 'call';
         // A call must EXECUTE once — any second operand slot duplicates it → named temp.
         if (isCall && sites.length > 1) {
+          materialize.add(op);
+          continue;
+        }
+        // Live across a LOOP neither side belongs to: the access ran before the loop and the
+        // value crossed it in a callee-saved register (hipress's `keep = p[1]`, homed in r8 and
+        // touched only by `mov`). Rendering at the use would re-schedule the access to the far
+        // side of the loop — the same refusal liveAcrossCall makes for a call, applied to a loop.
+        if (liveAcrossLoop(op, r, consumers)) {
           materialize.add(op);
           continue;
         }

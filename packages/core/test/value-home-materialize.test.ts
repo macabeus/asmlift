@@ -51,3 +51,31 @@ test('a copy arg read by its sibling materializes: in-place updates, no re-deriv
   // the product appears ONCE — the sibling reads the materialized name, never the expression
   expect(c.match(/v1 \* v1/g)?.length).toBe(1);
 });
+
+// keep = p[1] before the loop, read once after it. Inline rendering would move the load to the
+// far side of the loop; the compiler performed it before and carried the value across.
+const CROSS_LOAD = `fn crossload {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = load %0 {off=4, width=4, signed=1}
+  %3: s32 = const {value=0}
+  %4: u32 = icmp_sle %1, %3
+  cond_br %4, ^bb2(%1), ^bb1(%1)
+^bb1(%5: s32):
+  %6: s32 = const {value=1}
+  %7: s32 = sub %5, %6
+  %8: u32 = icmp_ne %7, %3
+  cond_br %8, ^bb1(%7), ^bb2(%7)
+^bb2(%9: s32):
+  %10: s32 = add %9, %2
+  ret %10
+}
+`;
+
+test('a load live across a loop materializes before it instead of sinking past it', () => {
+  const c = emit(CROSS_LOAD);
+  const loadAt = c.search(/v\d+ = \(\(s32 \*\)a0\)\[1\];/);
+  const ifAt = c.indexOf('if (');
+  expect(loadAt).toBeGreaterThanOrEqual(0);
+  expect(ifAt).toBeGreaterThan(0);
+  expect(loadAt).toBeLessThan(ifAt); // the access stays on the def's side of the loop
+});

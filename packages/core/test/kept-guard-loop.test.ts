@@ -40,7 +40,8 @@ const UNPROVEN = `fn keptguard {
 
 test('an unproven guard keeps its if: guard + do-while, both tests emitted', () => {
   const c = emit(UNPROVEN);
-  expect(c).toContain('if (a0 > 0)');
+  // the guard reads the loop variable the init just assigned — the parked register's spelling
+  expect(c).toContain('if (v0 > 0)');
   expect(c).toContain('do {');
   expect(c).toContain('} while (v0 != 0);');
   expect(c).not.toContain('while (v0 != 0) {'); // not the fused while
@@ -90,8 +91,9 @@ const MATERIALIZED_HEADER = `fn matheader {
 
 test('a materialized header def structures as guard + do-while instead of declining', () => {
   const c = emit(MATERIALIZED_HEADER);
-  // the shared `0` is itself materialized (two reads live across the call), hence `!= v0`
-  expect(c).toContain('if (a0 != v0)');
+  // the shared `0` is materialized (two reads live across the call), hence `!= v0`; the guard
+  // reads the counter through its loop-variable name
+  expect(c).toContain('if (v2 != v0)');
   expect(c).toContain('= f();'); // the call's temp, assigned inside the body
   expect(c).toContain('do {');
 });
