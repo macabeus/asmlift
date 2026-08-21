@@ -1422,11 +1422,17 @@ export const SYNTHETIC: SynthSpec[] = [
   // declines on the MIPS `jal` call link exactly as `call1:gcc2.7.2kmc` does. Those lanes
   // measure their links; the family's signal lanes are agbcc (all three), `ucmp:gcc2.7.2kmc`,
   // and `entrypair:mwcc_242_81`. `sizebound:agbcc`'s residual after the typed home landed is
-  // three PLACEMENT classes, ladder-measured: the dma init leading the prologue, the u16
-  // pointer's init scoped inside the outer-loop guard, and one counter shared across both inner
-  // loops — each a cross-lever pairing (an init-order axis; scopebase×volatile-subset;
-  // coalesce on the homed composition) that must clear the POLICY admission bar with its own
-  // row before any lever is built. The mwcc lane's residual is NOT the shared-base home the agbcc
+  // TWO placement classes, measured disjoint and additive (8 + 8 = 16): the u16 pointer's init
+  // placed at its OWN scope while the dma pointer's stays at the function top (the leaf-base
+  // hoist is all-or-nothing, so the split placement is reachable from neither its function-top
+  // nor its scoped form alone), and ONE counter shared across the two sequential inner loops.
+  // Neither needs a new row. `ucmp:agbcc` already carries the shared-counter shape standalone —
+  // merging its two counters closes it 6 -> 0 — and once that ships, this row is the split
+  // placement's own demanding row (8 -> 0). What blocks them is existing code: two un-gated
+  // heuristics in scopebase.ts (repeated-const-offset, nested-loop) that are not in a gate
+  // table, and coalesce.ts's SOUND `loop` gate, whose blanket refusal stands in front of the
+  // span model that already reasons about sequential siblings correctly — so it must be
+  // replaced by a liveness argument, never ablated. The mwcc lane's residual is NOT the shared-base home the agbcc
   // lane closed (`/addr-home`): struct-arrays recovery consumes the full element address into
   // `[a0]` indexing, so the value the PPC target holds in r3 no longer exists in the IR to
   // home — a struct-element-home class the lane keeps measuring.
