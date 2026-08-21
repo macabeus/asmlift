@@ -969,23 +969,29 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // the loop reads them and nothing about it needs a statement position of its own — with a
     // single in-edge and a plain `br` into the header, so the guard's branch is still the only
     // decision. Anything else keeps the unguarded do-while recovery.
-    const preheader = direct
-      ? undefined
-      : (preds.get(b) ?? []).find((P) => {
-          const pt = P.ops[P.ops.length - 1];
-          return (
-            P !== b &&
-            pt?.opcode === 'br' &&
-            P.params.length === 0 &&
-            P.ops.every((o) => !EFFECTFUL_OPS.has(o.opcode) && !materialize.has(o)) &&
-            // at least one def the LOOP BODY reads — the loop-invariant-motion shape this claim
-            // exists for. A block that only computes the init args is the do-while path's
-            // ordinary entry chain, and that path's sink machinery handles it better.
-            P.ops.some((o) => o.results.some((r) => (useSitesOf.get(r) ?? []).some((site) => site.blk === b))) &&
-            (preds.get(P) ?? []).length === 1 &&
-            isGuardShapedPred(preds.get(P)![0], P, exit)
-          );
-        });
+    // The preheader claim is limited to loops whose header→exit edge carries NO args: with
+    // nothing riding the exit, the fusion site's zero-trip obligations (staleExit, the sink)
+    // are vacuous, so redirecting the loop from the do-while path can only change its SHAPE,
+    // never decline a function that structured before.
+    const exitCarriesNothing = (successorTo(b, exit)?.args ?? []).length === 0;
+    const preheader =
+      direct || !exitCarriesNothing
+        ? undefined
+        : (preds.get(b) ?? []).find((P) => {
+            const pt = P.ops[P.ops.length - 1];
+            return (
+              P !== b &&
+              pt?.opcode === 'br' &&
+              P.params.length === 0 &&
+              P.ops.every((o) => !EFFECTFUL_OPS.has(o.opcode) && !materialize.has(o)) &&
+              // at least one def the LOOP BODY reads — the loop-invariant-motion shape this claim
+              // exists for. A block that only computes the init args is the do-while path's
+              // ordinary entry chain, and that path's sink machinery handles it better.
+              P.ops.some((o) => o.results.some((r) => (useSitesOf.get(r) ?? []).some((site) => site.blk === b))) &&
+              (preds.get(P) ?? []).length === 1 &&
+              isGuardShapedPred(preds.get(P)![0], P, exit)
+            );
+          });
     if (!direct && !preheader) {
       continue;
     }
