@@ -79,3 +79,53 @@ test('a load live across a loop materializes before it instead of sinking past i
   expect(ifAt).toBeGreaterThan(0);
   expect(loadAt).toBeLessThan(ifAt); // the access stays on the def's side of the loop
 });
+
+// The adoption's in-place write must stay VISIBLE to the loop-hazard checks: adopting the
+// materialized def's name elides the update copy, so `updateWriteSet(updates)` alone no longer
+// carries the loop variable's name — `loopWriteSet` restores it. Without that, both shapes
+// below emitted silently wrong C.
+
+// r = p*p at the top of each iteration (pre-update p), carried out the exit edge; the update
+// p += q adopts p's name. The hazard fires and the copy SINKS to the body top — reading the
+// pre-update value — instead of rendering post-loop where the name holds the post-update one.
+const ADOPTED_EXIT_ARG = `fn adopt {
+^bb0(%0: s32, %1: s32):
+  br ^bb1(%0, %1)
+^bb1(%2: s32, %3: s32):
+  %4: s32 = mul %2, %2
+  %5: s32 = add %2, %3
+  %6: s32 = sub %3, %5
+  %7: s32 = const {value=0}
+  %8: u32 = icmp_ne %6, %7
+  cond_br %8, ^bb1(%5, %6), ^bb2(%4)
+^bb2(%9: s32):
+  ret %9
+}
+`;
+
+test('an exit arg reading the adopted loop variable sinks to the body top', () => {
+  const c = emit(ADOPTED_EXIT_ARG);
+  const body = c.slice(c.indexOf('do {'), c.indexOf('} while'));
+  expect(body).toContain('= v0 * v0;'); // inside the loop, before the update
+  expect(c.slice(c.indexOf('} while'))).not.toContain('v0 * v0');
+});
+
+// Test-then-update ordering: the do-while condition reads the PRE-update value, which the
+// adopted in-place write clobbers before the bottom test renders — decline loud.
+const ADOPTED_COND = `fn adoptcond {
+^bb0(%0: s32, %1: s32):
+  br ^bb1(%0, %1)
+^bb1(%2: s32, %3: s32):
+  %7: s32 = const {value=0}
+  %8: u32 = icmp_ne %2, %7
+  %5: s32 = add %2, %3
+  %6: s32 = sub %3, %5
+  cond_br %8, ^bb1(%5, %6), ^bb2(%6)
+^bb2(%9: s32):
+  ret %9
+}
+`;
+
+test('a bottom test reading the pre-update adopted variable declines', () => {
+  expect(() => emit(ADOPTED_COND)).toThrow(/reads a pre-update loop variable/);
+});

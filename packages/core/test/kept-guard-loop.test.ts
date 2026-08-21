@@ -97,3 +97,40 @@ test('a materialized header def structures as guard + do-while instead of declin
   expect(c).toContain('= f();'); // the call's temp, assigned inside the body
   expect(c).toContain('do {');
 });
+
+// ZERO-TRIP hazard: a materialized header def (u reads sibling t → t materializes) carried on
+// the exit edge. Inside `if (guard)` the temp is assigned only when the guard held, so a
+// post-loop read of its name on the guard-false path is uninitialized — decline loud, for the
+// proven-guard shape (kept only because the header holds materialized defs) and the unproven one.
+const ZERO_TRIP_PROVEN = `fn zerotrip {
+^bb0(%0: s32):
+  %1: s32 = const {value=1}
+  %2: s32 = sub %0, %1
+  %3: s32 = const {value=5}
+  %4: s32 = add %2, %3
+  %5: s32 = const {value=0}
+  %6: u32 = icmp_ne %0, %5
+  cond_br %6, ^bb1(%0), ^bb2(%2, %4)
+^bb1(%7: s32):
+  %8: s32 = const {value=1}
+  %9: s32 = sub %7, %8
+  %10: s32 = const {value=5}
+  %11: s32 = add %9, %10
+  %12: s32 = const {value=2}
+  %13: s32 = sub %7, %12
+  %14: u32 = icmp_ne %13, %5
+  cond_br %14, ^bb1(%13), ^bb2(%9, %11)
+^bb2(%15: s32, %16: s32):
+  %17: s32 = add %15, %16
+  ret %17
+}
+`;
+const ZERO_TRIP_UNPROVEN = ZERO_TRIP_PROVEN.replace('fn zerotrip', 'fn unproven').replace(
+  '%6: u32 = icmp_ne %0, %5\n  cond_br %6, ^bb1(%0), ^bb2(%2, %4)',
+  '%6: u32 = icmp_sle %0, %5\n  cond_br %6, ^bb2(%2, %4), ^bb1(%0)',
+);
+
+test('a materialized temp on the exit edge declines: the guarded body may never assign it', () => {
+  expect(() => emit(ZERO_TRIP_PROVEN)).toThrow(/a post-loop read reaches a temp/);
+  expect(() => emit(ZERO_TRIP_UNPROVEN)).toThrow(/a post-loop read reaches a temp/);
+});
