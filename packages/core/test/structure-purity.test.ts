@@ -64,14 +64,20 @@ test('structuring does not mutate the function it reads', () => {
     if (print(fn) !== before) {
       defects.push(`${name}: the primary run mutated the graph`);
     }
-    // the axis-on run, then the primary again — a leaked counter or a mutated graph shows here
-    try {
-      structure(fn, { ...opts, coalesceMergeNames: true });
-    } catch {
-      /* the axis declining is not a purity defect */
-    }
-    if (print(fn) !== before) {
-      defects.push(`${name}: the /merge-names run mutated the graph`);
+    // the axis-on runs, then the primary again — a leaked counter or a mutated graph shows here
+    for (const [label, axisOpts] of [
+      ['/merge-names', { coalesceMergeNames: true }],
+      ['/inplace', { materializeJoinFeeds: true }],
+      ['/addr-home', { homeSharedAddresses: true }],
+    ] as const) {
+      try {
+        structure(fn, { ...opts, ...axisOpts });
+      } catch {
+        /* the axis declining is not a purity defect */
+      }
+      if (print(fn) !== before) {
+        defects.push(`${name}: the ${label} run mutated the graph`);
+      }
     }
     if (cBackend.emit(structure(fn, opts)) !== first) {
       defects.push(`${name}: structuring is not idempotent`);

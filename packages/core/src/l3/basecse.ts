@@ -13,7 +13,10 @@
 // (base, width, signedness) — an AGGREGATE base (F9 spells a SCALAR global as a bare `var`, which is
 // never an `index`-of-leaf, so scalar recovery is untouched). Non-leaf bases (a local, a
 // struct-element `p[a0]`, arithmetic) are excluded: agbcc may re-derive those, so hoisting them can
-// MISMATCH (empirically confirmed). The hoisted local carries the access's pointer type, so the
+// MISMATCH (empirically confirmed) — the differ-refereed `/addr-home` axis
+// (structure/analysis.ts homeSharedAddresses) serves the shared gaddr-free ARITHMETIC bases
+// instead.
+// The hoisted local carries the access's pointer type, so the
 // deref cast the C backend applied inline at each `index` now lands ONCE on the local's initializer
 // and the accesses stride correctly with no per-use cast. A wrong hoist (a base agbcc would actually
 // re-materialize) only changes recompiled bytes -> a LOST match under the zero-lost gate, never a

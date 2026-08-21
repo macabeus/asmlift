@@ -1421,7 +1421,10 @@ export const SYNTHETIC: SynthSpec[] = [
   // staleExit decline (the kept-guard family's link, not this one); `entrypair:gcc2.7.2kmc`
   // declines on the MIPS `jal` call link exactly as `call1:gcc2.7.2kmc` does. Those lanes
   // measure their links; the family's signal lanes are agbcc (all three), `ucmp:gcc2.7.2kmc`,
-  // and `entrypair:mwcc_242_81`.
+  // and `entrypair:mwcc_242_81`. The mwcc lane's residual is NOT the shared-base home the agbcc
+  // lane closed (`/addr-home`): struct-arrays recovery consumes the full element address into
+  // `[a0]` indexing, so the value the PPC target holds in r3 no longer exists in the IR to
+  // home — a struct-element-home class the lane keeps measuring.
   {
     sym: 'sizebound',
     src:

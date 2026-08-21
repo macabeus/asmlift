@@ -706,6 +706,10 @@ export interface StructureOptions {
   // it and the identity arm elides to a one-sided in-place `if`. Off by default; rank.ts
   // enumerates the ON spelling as the `/inplace` axis — see analysis.ts AnalyzeOptions.
   materializeJoinFeeds?: boolean;
+  // Materialize a pure computed address shared by 2+ memory accesses, and the multi-render loads
+  // through it, reproducing the source's pointer-local + scalar-temp spelling. Off by default;
+  // rank.ts enumerates the ON spelling as the `/addr-home` axis — see analysis.ts AnalyzeOptions.
+  homeSharedAddresses?: boolean;
   // Merge two variables that a merge copy would join, when the values under them never interfere
   // (structure/namecoalesce.ts). Off by default; rank.ts enumerates the ON spelling as the
   // `/merge-names` axis. Which variables the compiler's own coalescer shared is not derivable from
@@ -740,7 +744,7 @@ export interface StructureHooks {
  *  how values are spelled — the loop emitters' hazard predicates read it, and several ask "does
  *  this edge copy survive identity elision", which merging two names quietly answers `no`. A pass
  *  that made a hazard invisible would trade a loud decline for a silent wrong answer, so the
- *  un-merged structuring runs first and its refusal stands. That is the whole invariant, rather
+ *  lever-less structuring runs first and its refusal stands. That is the whole invariant, rather
  *  than a list of individually patched guards, and it costs one extra structuring — nothing next to
  *  the compile the candidate exists to feed.
  *
@@ -749,7 +753,7 @@ export interface StructureHooks {
  *  SCOPE: refusals thrown by `structure()` itself. A decline can also come from `structureChecked`'s
  *  boundary contracts, which run OUTSIDE it — `rank.ts` closes that half, where the contracts are. */
 function assertPrimaryAccepts(fn: Fn, opts: StructureOptions, hooks: StructureHooks): void {
-  structure(fn, { ...opts, coalesceMergeNames: false, materializeJoinFeeds: false }, hooks);
+  structure(fn, { ...opts, coalesceMergeNames: false, materializeJoinFeeds: false, homeSharedAddresses: false }, hooks);
 }
 
 export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureHooks = {}): SFn {
@@ -766,13 +770,14 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     spellBitfieldMembers = true,
     rereadGlobals = false,
     materializeJoinFeeds = false,
+    homeSharedAddresses = false,
     coalesceMergeNames = false,
     onGap = 'strict',
     symbols,
   } = opts;
-  // Both levers change which edge copies elide as identities, which the loop emitters' hazard
-  // predicates read — so the invariant above covers both.
-  if (coalesceMergeNames || materializeJoinFeeds) {
+  // These levers all change which edge copies elide as identities (extra materialization does
+  // too), which the loop emitters' hazard predicates read — so the invariant above covers each.
+  if (coalesceMergeNames || materializeJoinFeeds || homeSharedAddresses) {
     assertPrimaryAccepts(fn, opts, hooks);
   }
   const defs = defOpMap(fn);
@@ -789,6 +794,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       dom,
       rereadGlobals,
       materializeJoinFeeds,
+      homeSharedAddresses,
       // the map's own declaration truth: a volatile object's read may not be duplicated or moved
       volatileGlobal: (n) => {
         const si = symbols?.get(n);

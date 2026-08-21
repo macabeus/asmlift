@@ -7,8 +7,8 @@
 //   2. the RENDER POSITION — a pure expression consumed twice has no single emit position, so
 //      every read feeding it is materialized, however harmless re-reading would be.
 //
-// Materializing is always sound, so the default spelling is never WRONG — it is just often not the
-// one the compiler was given. Hence an axis the differ referees, and hence the refusal tests: a
+// Materializing a global's READ is always sound (the deref cast renders at the def's position), so
+// the default spelling is never WRONG — it is just often not the one the compiler was given. Hence an axis the differ referees, and hence the refusal tests: a
 // same-global store, an unresolvable base, a call, and a volatile declaration must all keep the
 // local.
 import { describe, expect, test } from 'vitest';
