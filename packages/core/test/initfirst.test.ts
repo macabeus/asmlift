@@ -352,7 +352,9 @@ test('refused: a RAW-address deref never moves (no declaration claims it non-vol
 });
 
 test('refused: an effectful condition — the hoist would move the read across the call', () => {
-  const call: Expr = { k: 'call', fn: 'bump', args: [v('a0')] };
+  // the call side wears an (s32) cast so the compare-meaning gate is determinate and only the
+  // effect gate refuses — an uncast call refuses one gate earlier on indeterminate signedness
+  const call: Expr = { k: 'cast', to: s32, e: { k: 'call', fn: 'bump', args: [v('a0')] } };
   const r = initFirstGuards(
     fnWith(
       [{ name: 'v0', type: s32 }, ptrLocal],
@@ -367,4 +369,38 @@ test('refused: an effectful condition — the hoist would move the read across t
     ),
   );
   expect(r).toBeNull();
+});
+
+test('refused: a NARROW-declared variable — the assignment truncates, no signedness reasoning survives', () => {
+  const u8t = { kind: 'int', width: 8, signed: false } as const;
+  const r = initFirstGuards(
+    fnWith(
+      [{ name: 'v0', type: u8t }, ptrLocal],
+      [
+        {
+          k: 'if',
+          cond: bin('<', deref(v('p0')), v('a0')),
+          then: [assign('v0', deref(v('p0'))), dowhile(bin('<', v('v0'), v('a0')), [])],
+          else: [],
+        },
+      ],
+    ),
+  );
+  expect(r).toBeNull();
+});
+
+test('a CONST init still moves under an effectful condition — nothing crosses a hoisted 0', () => {
+  const call: Expr = { k: 'cast', to: s32, e: { k: 'call', fn: 'bump', args: [v('a0')] } };
+  const r = initFirstGuards(
+    fn([
+      {
+        k: 'if',
+        cond: bin('<', c(0), call),
+        then: [assign('v0', c(0)), dowhile(bin('<', v('v0'), v('a0')), [])],
+        else: [],
+      },
+    ]),
+  );
+  expect(r).not.toBeNull();
+  expect(r!.body[0]).toEqual(assign('v0', c(0)));
 });

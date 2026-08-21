@@ -166,8 +166,8 @@ test('off by default: the axis-off spelling keeps the uncast signed rendering', 
 });
 
 // A claimant feeding a SIGNED compare through an inline pure expression: the evidence is the
-// signed op's transitive input cone, so the flip must refuse — `v - 5 >= 0` rendered over a u32
-// v is always true in C where the machine's compare was signed.
+// signed op's transitive input cone, so the flip must refuse — `v - 5 < 0` rendered over a u32
+// v is always false in C where the machine's compare was signed.
 const RECOND = RECON.replace('fn recon', 'fn recond').replace(
   `^bb2():
   ret %9`,
@@ -204,4 +204,27 @@ const PTRCMP = `fn ptrcmp {
 
 test('a pointer-rendered side keeps its spelling', () => {
   expect(emit(PTRCMP)).not.toContain('(u32)');
+});
+
+// The kept-guard substitution channel: gsub renders the init ARG under the loop variable's
+// name, so a SIGNED zero-trip guard over the arg is evidence against the name even though the
+// arg claims it in neither naming map — the taint crosses edge arg↔param identities.
+const GSUB = `fn gsubhole {
+^bb0(%0: s32, %1: u32):
+  %2: s32 = const {value=0}
+  %3: u32 = icmp_sgt %0, %2
+  cond_br %3, ^bb1(%0), ^bb2()
+^bb1(%4: s32):
+  %5: s32 = const {value=1}
+  %6: u32 = sub %4, %5
+  store %6, %0 {off=0, width=4}
+  %7: u32 = icmp_ugt %6, %1
+  cond_br %7, ^bb1(%6), ^bb2()
+^bb2():
+  ret %2
+}
+`;
+
+test('a signed guard over the loop-init arg blocks the flip through the substitution channel', () => {
+  expect(emit(GSUB)).not.toMatch(/u32 v\d+;/);
 });

@@ -79,7 +79,7 @@ export function derefStrideOk(rt: IrType | undefined, width: number, signed: boo
  * rules that contract omits, integer PROMOTION and the usual arithmetic CONVERSIONS.
  *
  * THE one rendered-signedness judgment, and it lives beside the declarations it judges against
- * because three consumers now share it: the C-family backend's shift-operand cast, structure.ts's
+ * because three consumers share it: the C-family backend's shift-operand cast, structure.ts's
  * unsigned-compare cast (the /uns-cmp axis), and initfirst's compare-meaning gate. Two of those
  * models disagreeing about one expression is the drift this placement prevents.
  *

@@ -1406,7 +1406,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // `bcs`/`bcc` where an s32 home gives `bge`/`blt` — and the s32-home spelling of the same
   // hoist REGRESSES the real function, so a home lever without the width/sign choice cannot
   // close it). `ucmp` isolates the compare polarity alone, home-less: a u32 counter and a cast
-  // bound flip four branches and ripple two register picks — the /uns-cmp axis now spells the
+  // bound flip four branches and ripple two register picks — the /uns-cmp axis spells the
   // compares from the lifted icmp facts, and the lane's residual is the register ripple those
   // picks leave behind. `entrypair` — one COMPUTED address (`(a0 << 2) +
   // (a1 << 1) + table`) held in a pointer local with its two bytes read at `[r,#1]`/`[r,#0]`:

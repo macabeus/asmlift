@@ -28,8 +28,9 @@
 // THE COMPARE'S MEANING: the variable's declared type can differ from X's rendered type, so the
 // swap is admitted only when both sides were provably non-negative (every signedness reading
 // agrees there) or the compare's rendered signedness is unchanged — anything indeterminate
-// refuses. The condition must not read the variable (its pre-assign value dies in the move) and
-// must be effect-free as a whole (the hoist moves X's read above it). The guard re-spelling
+// refuses. The condition must not read the variable (its pre-assign value dies in the move)
+// and, for a READ X, must be effect-free as a whole (the hoist moves X's read above it). The
+// guard re-spelling
 // mints a write on a previously write-free path, so it needs that write to be DEAD there: the
 // variable must be untouched after the `if` in its own list and in the tail of every ancestor
 // list (a sibling arm of an ancestor `if` is not "after" — it never runs in the same entry).
@@ -78,9 +79,12 @@ export function initFirstGuards(sfn: SFn): SFn | null {
   const ownNames = new Set([...sfn.params.map((p) => p.name), ...sfn.locals.map((l) => l.name)]);
   // a guard re-spell's X: call/marker-free, every named leaf a non-volatile param/local of THIS
   // function (a global or &gSym could be project-declared volatile), and every deref rooted at a
-  // var through casts only — a raw `*(u16 *)CONST` deref has no declaration claiming
-  // non-volatility anywhere (it is exactly the idiom `/volatile` exists for), so collapsing its
-  // adjacent reads could merge two observable MMIO reads into one.
+  // var through casts only. The var-root rule is a TWO-WORLD argument, not a volatility proof: a
+  // deref through a plain-declared pointer local may still be MMIO, but the /volatile axis
+  // enumerates the qualified sibling — where this lever refuses — so both worlds reach the
+  // differ and collapsing reads here is the plain world's own premise. A raw `*(u16 *)CONST`
+  // deref has NO local for /volatile to qualify, so no sibling carries the volatile world and
+  // the collapse would silently discard it.
   const varRooted = (e: Expr): boolean => (e.k === 'var' ? true : e.k === 'cast' ? varRooted(e.e) : false);
   const hoistableRead = (e: Expr): boolean => {
     if (e.k === 'call' || e.k === 'marker' || e.k === 'addr') {
@@ -94,17 +98,24 @@ export function initFirstGuards(sfn: SFn): SFn | null {
     }
     return exprChildren(e).every(hoistableRead);
   };
-  // the hoist moves X's evaluation ABOVE the whole condition, so the condition's OTHER side must
-  // carry no effect it could cross (a call there could write the cell X reads)
+  // A READ X's hoist moves its evaluation ABOVE the whole condition, so the condition must
+  // carry no effect it could cross (a call there could write the cell X reads); a CONST init
+  // crosses nothing and keeps the wider admission.
   const effectFree = (e: Expr): boolean => e.k !== 'call' && e.k !== 'marker' && exprChildren(e).every(effectFree);
   const env = declaredTypes(sfn);
   // The compare-meaning gate (see SCOPE): substituting `v` for X may change the compare's
-  // rendered signedness through v's declared type. Sufficiency: after the hoist, v's runtime
-  // value EQUALS X's, so (a) both original sides provably in [0, 2^31) ⇒ signed and unsigned
+  // rendered signedness through v's declared type. Sufficiency: v's declared width must be 32
+  // (the assignment `v = X` then represents any 32-bit-or-narrower X exactly, so v's runtime
+  // value EQUALS X's — a narrow-declared v would truncate and no signedness reasoning survives
+  // that), and then (a) both original sides provably in [0, 2^31) ⇒ signed and unsigned
   // compares agree on the actual values whatever the swap does to rendered signedness; (b)
   // otherwise a defined, UNCHANGED rendered signedness over equal values gives the identical
   // result. Anything indeterminate refuses.
   const meaningPreserved = (l: Expr, r: Expr, side: 'l' | 'r', v: string): boolean => {
+    const vt = env(v);
+    if (vt?.kind !== 'int' || vt.width !== 32) {
+      return false;
+    }
     if (provablyNonNegative(l, env) && provablyNonNegative(r, env)) {
       return true;
     }
@@ -223,7 +234,7 @@ export function initFirstGuards(sfn: SFn): SFn | null {
           side !== null &&
           !readsVar(cond, init.name) &&
           deadAfter &&
-          effectFree(cond) &&
+          (isConstAssign(init) || effectFree(cond)) &&
           meaningPreserved(cond.l, cond.r, side, init.name)
         ) {
           out.push(init);

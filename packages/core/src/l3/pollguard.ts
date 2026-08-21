@@ -1,7 +1,6 @@
-// L3 poll-shape re-spelling levers: `pollGuards` regrows an empty bottom-tested loop's guard,
-// and `pollReads` (below) folds a materialized poll's re-read back into its while condition.
-// Both trade on the same fact: the two spellings of a busy-wait evaluate their condition — and
-// read their cell — the same number of times, so only bytes differ and the differ referees.
+// L3 poll-shape re-spelling levers: `pollGuards` regrows an empty bottom-tested loop's guard;
+// `pollReads` folds a materialized poll's re-read back into its while condition. Each carries
+// its own trace argument below.
 //
 //     do { } while (dma[2] & 0x80000000);   →   if (dma[2] & 0x80000000) { do { } while (…); }
 //
@@ -60,17 +59,20 @@ export function pollGuards(sfn: SFn): SFn | null {
 // per-iteration re-read; the source may have spelled the read INSIDE the condition of an
 // empty-bodied `while`. The two forms have IDENTICAL evaluation traces — the old form reads once
 // before plus once per iteration, the new form reads once per condition evaluation, and both
-// count 1 + iterations — so volatile reads COUNT the same; the effect-free-condition gate below
-// is what makes the ORDER identical too (with no other effect in the condition, there is nothing
-// for the embedded read to reorder against). What differs is bytes: the pre-read + temp spelling
-// materializes an extra register and instruction the in-condition spelling does not.
+// count 1 + iterations — so volatile reads COUNT the same; the condition gates below (call-free,
+// no volatile-rooted or raw derefs) are what make the ORDER identical too: with no other
+// observable effect in the condition, there is nothing for the embedded read to reorder against.
+// What differs is bytes: the pre-read + temp spelling materializes an extra register and
+// instruction the in-condition spelling does not.
 //
 // SCOPE (decline over approximate): the temp must be the function's OWN non-volatile LOCAL —
 // a bare global's assigns are stores other code observes, and its declaration cannot be
 // dropped; the body must be EXACTLY the one re-read assign of the same variable and the same
-// expression; the condition must read the variable EXACTLY once (a second read would double the
-// per-iteration evaluation of X) and be effect-free apart from X (embedding X inside the
-// condition unsequences it against any other effect there); the expression must not mention the
+// expression; the condition must read the variable EXACTLY once as a bare var — an `&v` there
+// is not a read and cannot be substituted — with a second read doubling the per-iteration
+// evaluation of X; the condition must be call/marker-free with every deref rooted at a
+// non-volatile-declared var (a volatile-rooted or raw-address deref is an observable read the
+// fold would unsequence against X inside one expression); the expression must not mention the
 // variable and must be call/marker-free; and the variable — address-taken uses included — must
 // appear NOWHERE else in the function, since its declaration is dropped with the temp.
 // Declines (null) when no poll matches.
@@ -78,15 +80,33 @@ export function pollReads(sfn: SFn): SFn | null {
   const ownPlain = new Set(
     sfn.locals.filter((l) => l.volatile !== true && l.pointeeVolatile !== true).map((l) => l.name),
   );
-  const countName = (e: Expr, n: string): number =>
-    ((e.k === 'var' || e.k === 'addr') && e.name === n ? 1 : 0) +
-    exprChildren(e).reduce((a, c) => a + countName(c, n), 0);
+  const volatileLocals = new Set(
+    sfn.locals.filter((l) => l.volatile === true || l.pointeeVolatile === true).map((l) => l.name),
+  );
+  const countVar = (e: Expr, n: string): number =>
+    (e.k === 'var' && e.name === n ? 1 : 0) + exprChildren(e).reduce((a, c) => a + countVar(c, n), 0);
+  const countAddr = (e: Expr, n: string): number =>
+    (e.k === 'addr' && e.name === n ? 1 : 0) + exprChildren(e).reduce((a, c) => a + countAddr(c, n), 0);
   const pure = (e: Expr): boolean => e.k !== 'call' && e.k !== 'marker' && exprChildren(e).every(pure);
+  const varRooted = (e: Expr): boolean => (e.k === 'var' ? true : e.k === 'cast' ? varRooted(e.e) : false);
+  // ORDER-safety for the condition's other reads: a deref there must be rooted at a var declared
+  // non-volatile — a volatile-rooted or raw-address deref is (or may be) an OBSERVABLE read the
+  // fold would unsequence against X inside one expression, where the original sequenced them.
+  const rootVar = (e: Expr): string | null => (e.k === 'var' ? e.name : e.k === 'cast' ? rootVar(e.e) : null);
+  const condDerefsPlain = (e: Expr): boolean => {
+    if (e.k === 'index' || e.k === 'field') {
+      const rv = varRooted(e.base) ? rootVar(e.base) : null;
+      if (rv === null || volatileLocals.has(rv)) {
+        return false;
+      }
+    }
+    return exprChildren(e).every(condDerefsPlain);
+  };
   const occurs = (list: Stmt[], n: string): number =>
     list.reduce(
       (a, st) =>
         a +
-        stmtExprs(st).reduce((x, e) => x + countName(e, n), 0) +
+        stmtExprs(st).reduce((x, e) => x + countVar(e, n) + countAddr(e, n), 0) +
         (st.k === 'assign' && st.name === n ? 1 : 0) +
         occurs(stmtChildren(st), n),
       0,
@@ -108,10 +128,13 @@ export function pollReads(sfn: SFn): SFn | null {
         w.body[0].k === 'assign' &&
         w.body[0].name === a.name &&
         exprEquals(w.body[0].value, a.value) &&
-        countName(w.cond, a.name) === 1 &&
-        countName(a.value, a.name) === 0 &&
+        countVar(w.cond, a.name) === 1 &&
+        countAddr(w.cond, a.name) === 0 &&
+        countVar(a.value, a.name) === 0 &&
+        countAddr(a.value, a.name) === 0 &&
         pure(a.value) &&
         pure(w.cond) &&
+        condDerefsPlain(w.cond) &&
         // the pattern owns exactly three occurrences: both assign targets and the cond read
         occurs(sfn.body, a.name) === 3
       ) {

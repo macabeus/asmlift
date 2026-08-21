@@ -122,3 +122,56 @@ test('refused: an effectful condition beside the polled variable', () => {
   ];
   expect(pollReads(fnP(eff))).toBeNull();
 });
+
+test('refused: the condition holds &v4, not a read — an addr cannot be substituted', () => {
+  const viaAddr: Stmt[] = [
+    assign('v4', deref2(v('p1'))),
+    {
+      k: 'while',
+      cond: bin('!=', { k: 'addr', name: 'v4' }, c(0)),
+      body: [assign('v4', deref2(v('p1')))],
+    },
+  ];
+  expect(pollReads(fnP(viaAddr))).toBeNull();
+});
+
+test('refused: a volatile-rooted deref beside the variable — the fold would unsequence two observable reads', () => {
+  const twoVol: Stmt[] = [
+    assign('v4', deref2(v('p1'))),
+    {
+      k: 'while',
+      cond: bin('!=', bin('&', v('v4'), { k: 'index', base: v('p2'), idx: c(0), width: 4, signed: true }), c(0)),
+      body: [assign('v4', deref2(v('p1')))],
+    },
+  ];
+  const f: SFn = {
+    name: 'f',
+    params: [],
+    locals: [
+      { name: 'v4', type: s32 },
+      { name: 'p1', type: { kind: 'ptr', to: s32 }, pointeeVolatile: true },
+      { name: 'p2', type: { kind: 'ptr', to: s32 }, pointeeVolatile: true },
+    ],
+    retType: s32,
+    body: twoVol,
+  };
+  expect(pollReads(f)).toBeNull();
+});
+
+test('refused: a param temp — the declaration to drop is not a local', () => {
+  const f: SFn = {
+    name: 'f',
+    params: [{ name: 'a0', type: s32 }],
+    locals: [{ name: 'p1', type: { kind: 'ptr', to: s32 }, pointeeVolatile: true }],
+    retType: s32,
+    body: [
+      assign('a0', deref2(v('p1'))),
+      {
+        k: 'while',
+        cond: bin('!=', bin('&', v('a0'), c(1)), c(0)),
+        body: [assign('a0', deref2(v('p1')))],
+      },
+    ],
+  };
+  expect(pollReads(f)).toBeNull();
+});

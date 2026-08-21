@@ -162,10 +162,9 @@ const STRUCTURING_AXES: readonly StructuringAxis[] = [
 /** The statement-shape products (rank's second sanctioned product mechanism): each entry is a
  *  statement-order/shape re-spelling orthogonal to every representation lever, derived onto every
  *  spelling as sanctioned in the POLICY note at the respell site. Each shape fires alone, plus
- *  all of them together in table order — not the full subset lattice. With three entries the
- *  pairs question is settled by skip-on-decline (applyShapes): a pair is reachable whenever the
- *  third member declines, and a row demanding a true exclusion pair — all three fire, the match
- *  needs exactly two — is what would earn the lattice. */
+ *  all of them together in table order — not the full subset lattice; the pairs question is
+ *  settled by applyShapes' skip-on-decline below, and a row demanding a true EXCLUSION pair —
+ *  all three fire, the match needs exactly two — is what would earn the lattice. */
 const SHAPE_PRODUCTS: { suffix: string; apply: (sfn: SFn) => SFn | null }[] = [
   { suffix: '/initfirst', apply: initFirstGuards },
   { suffix: '/pollguard', apply: pollGuards },
@@ -617,6 +616,7 @@ export function enumerateCandidates(
               respell(shaped.suffix, () => shaped.out);
             }
           } catch (e) {
+            // the error label falls back to the full subset — the fired set is unknown mid-throw
             const label = subset.map((x) => x.suffix).join('');
             opts.onLeverError?.(name + label, e instanceof Error ? e.message.split('\n')[0] : String(e));
           }

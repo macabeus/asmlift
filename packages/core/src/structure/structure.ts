@@ -1593,9 +1593,25 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   if (unsignedCompareSpelling) {
     // Signed-use evidence is the TRANSITIVE INPUT CONE of every signed op — a claimant can feed
     // an icmp_slt through an inline `sub` and the flip would still render that compare unsigned
-    // (`v - 5 >= 0`, always true in C), so direct operands are not enough. Over-tainting through
-    // impure defs only blocks flips: conservative-safe.
+    // (`v - 5 >= 0`, always true in C), so direct operands are not enough. The cone also crosses
+    // edge arg↔param identities in BOTH directions: a kept-guard's substitution (gsub) renders an
+    // init ARG under the loop variable's name, so a signed guard over the arg is evidence against
+    // the name even though the arg claims it in neither naming map. Over-tainting only blocks
+    // flips: conservative-safe.
     const SIGNED_USE = new Set(['icmp_slt', 'icmp_sle', 'icmp_sgt', 'icmp_sge', 'sdiv', 'smod', 'shr_s']);
+    const edgePeers = new Map<Value, Value[]>();
+    for (const b of fn.blocks) {
+      const term = b.ops[b.ops.length - 1];
+      for (const sx of term?.successors ?? []) {
+        sx.args.forEach((a, i) => {
+          const pv = sx.block.params[i];
+          if (pv !== undefined) {
+            (edgePeers.get(a) ?? edgePeers.set(a, []).get(a)!).push(pv);
+            (edgePeers.get(pv) ?? edgePeers.set(pv, []).get(pv)!).push(a);
+          }
+        });
+      }
+    }
     const signedEvidence = new Set<Value>();
     const work: Value[] = [];
     for (const b of fn.blocks) {
@@ -1613,6 +1629,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         if (d) {
           work.push(...d.operands);
         }
+        work.push(...(edgePeers.get(v) ?? []));
       }
     }
     // Params never reconcile: their declarations come from p.type, not varType, so a flip here
@@ -1916,7 +1933,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // unsigned exactly as the opcode says. A provably-unsigned operand leaves the spelling
       // alone, so correctly-typed compares never churn — as does a compare whose operands both
       // provably sit in [0, 2^31) (a `(u8)x > 4` byte test): there the signed spelling is
-      // value-faithful and the compiler already picks the unsigned branch itself. ==/!= are
+      // value-faithful and the compiler already picks the unsigned branch itself, and so does a
+      // pointer-rendered side: `p < end` already compares unsigned, and `(u32)p` against a
+      // pointer is the int-vs-ptr constraint violation the strict backends reject. ==/!= are
       // sign-agnostic and icmp_s* keeps its documented residual above.
       const ptrSide = (x: Expr): boolean => {
         const t2 = ctype(x);

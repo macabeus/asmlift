@@ -104,8 +104,10 @@ export function hasHomeableSharedAddress(fn: Fn): boolean {
  *  come from op operands only (branch-arg uses are invisible) — so unlike
  *  hasHomeableSharedAddress this diverges in BOTH directions: a false positive costs one
  *  duplicate-collapsed candidate, and a false negative silently skips the arm on IR whose block
- *  layout does not follow dominance. Acceptable because every frontend lays blocks out in
- *  address order, where a natural loop's back edge always points backward. */
+ *  layout does not follow dominance or whose in-loop consumption is all branch args. Acceptable
+ *  because every frontend lays blocks out in address order (a natural loop's back edge points
+ *  backward), and a value consumed ONLY as branch args reaches no compare/product/shift — the
+ *  shapes the home serves. */
 export function hasLoopSharedPureValue(fn: Fn): boolean {
   const defOf = defOpMap(fn);
   const pos = new Map<Block, number>(fn.blocks.map((b, i) => [b, i]));
