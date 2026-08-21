@@ -20,7 +20,9 @@ import { materializeArgBases } from './l3/argbase';
 import type { LanguageBackend, SFn } from './l3/ast';
 import { LIVEBASE_GATES, hoistReusedGlobalBases } from './l3/basecse';
 import { coalesceCandidates } from './l3/coalesce';
+import { initFirstGuards } from './l3/initfirst';
 import { mulFirstSums } from './l3/mulfirst';
+import { nearBaseClusters } from './l3/nearbase';
 import { parkParamsFirst } from './l3/parkfirst';
 import { registerishSpellings } from './l3/regspell';
 import { reindexWalks } from './l3/reindex';
@@ -439,6 +441,20 @@ export function enumerateCandidates(
             assertResolved(alt);
             assertDerefsTyped(alt);
             spellings.push({ suffix, source: backend.emit(alt), ...refsOf(alt) });
+            // `/initfirst` (l3/initfirst.ts) is derived onto EVERY spelling — the second
+            // sanctioned product after /volatile, on the same argument: a loop init's position
+            // against its guard is a statement-order fact orthogonal to what any representation
+            // lever changes, so the joint spelling is reachable from neither alone (sizehome's
+            // match is livebase + volatile + initfirst). It fires only where a guard+init shape
+            // exists; everywhere else the product declines and costs nothing.
+            if (!suffix.endsWith('/initfirst')) {
+              const fi = initFirstGuards(alt);
+              if (fi) {
+                assertResolved(fi);
+                assertDerefsTyped(fi);
+                spellings.push({ suffix: `${suffix}/initfirst`, source: backend.emit(fi), ...refsOf(fi) });
+              }
+            }
           } catch (e) {
             // A throwing lever, a contract failure, or an unspellable re-spelling: keep the primary.
             // REPORTED, not swallowed. `dropped` (below) records only spellings the SCORER refused,
@@ -451,6 +467,7 @@ export function enumerateCandidates(
         // `/argbase` — name a call's argument bases before the call (l3/argbase.ts). A lever on the
         // same footing as the others: the primary inline spelling stays in the list, so the differ
         // referees and this can never cost a match.
+        respell('/initfirst', () => initFirstGuards(sfn));
         respell('/argbase', () => materializeArgBases(sfn));
         // `/volatile` — declare a pointer local holding a NUMERIC address as pointing to volatile
         // data (l3/volatileptr.ts). A raw constant has no declaration anywhere, so the original
@@ -524,6 +541,10 @@ export function enumerateCandidates(
         // independent operand's load above the product's mflo/mullw, so def order re-spells a
         // product-first source as load-first. Both orders are emitted; the differ referees.
         respell('/mulfirst', () => mulFirstSums(sfn));
+        // `/nearbase` — neighbor absolute addresses derive from one shared base local
+        // (l3/nearbase.ts): one object's cells anchored as separate pool constants re-spell as
+        // offsets off its lowest address. Both spellings are emitted; the differ referees.
+        respell('/nearbase', () => nearBaseClusters(sfn));
         // `/parkfirst` — incoming-argument parks lead the entry prefix (l3/parkfirst.ts): the
         // park's `mov` lifts to pure SSA aliasing, so its position is unrecoverable and the
         // default order is emission's. Both orders are emitted; the differ referees.
