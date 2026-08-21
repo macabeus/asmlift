@@ -610,6 +610,11 @@ export function enumerateCandidates(
           const r = livebaseVolatile();
           return r && nearSpan !== undefined ? nearBaseClusters(r, nearSpan) : null;
         });
+        // The livebase × coalesce PAIRINGS — same admission again: row-demanded, and the joint
+        // spelling is reachable from neither lever alone (an MMIO base worth homing and a
+        // counter shared across both arms of one if, in one function).
+        enumerate('/livebase/coalesce', livebase);
+        enumerate('/livebase/volatile/coalesce', livebaseVolatile);
         // `/parkfirst` — incoming-argument parks lead the entry prefix (l3/parkfirst.ts): the
         // park's `mov` lifts to pure SSA aliasing, so its position is unrecoverable and the
         // default order is emission's. Both orders are emitted; the differ referees.

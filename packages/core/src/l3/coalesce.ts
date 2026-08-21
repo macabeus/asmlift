@@ -164,7 +164,120 @@ export const COALESCE_GATES: readonly Gate<MergePair>[] = [
  *  gate, is what keeps it from faking a match. The fuzz asserts it stays reachable, so the carve-out
  *  that excuses it cannot quietly become dead. */
 export function coalesceCandidates(sfn: SFn): { merged: string; sfn: SFn }[] {
-  return coalesceUnder(COALESCE_GATES, sfn).candidates;
+  const { candidates } = coalesceUnder(COALESCE_GATES, sfn);
+  const seen = new Set(candidates.map((c) => c.merged));
+  for (const c of armDisjointCandidates(sfn)) {
+    if (!seen.has(c.merged)) {
+      candidates.push(c);
+    }
+  }
+  return candidates;
+}
+
+/** One candidate ARM-DISJOINT merge: every mention of `a` inside one arm of a single `if`, every
+ *  mention of `b` inside the other. */
+export interface ArmPair {
+  a: string;
+  b: string;
+  /** the confining `if` has a loop ancestor, so it can run more than once */
+  ifInLoop: boolean;
+  sameType: boolean;
+  eitherIsParam: boolean;
+  eitherIsVolatile: boolean;
+}
+
+/** The arm-disjoint admission — the SECOND way a pair can merge, for pairs the span model must
+ *  refuse (`loop` rejects any in-loop local; `const-fed` rejects every counter). Two locals
+ *  confined to OPPOSITE arms of one `if` never coexist at runtime: the `if` picks one arm, so no
+ *  read of either can observe the other's write — no liveness reasoning needed. That argument is
+ *  exactly what the `loop` gate here protects: a loop ancestor re-enters the `if`, later entries
+ *  can take the other arm, and a value written on one visit becomes readable on the next. */
+export const ARM_DISJOINT_GATES: readonly Gate<ArmPair>[] = [
+  {
+    id: 'param',
+    why: 'a param is the function’s own signature, not a recovered local',
+    sound: false,
+    rejects: (c) => c.eitherIsParam,
+  },
+  {
+    id: 'type',
+    why: 'the survivor keeps its own declared type, so the two must agree',
+    sound: false,
+    rejects: (c) => !c.sameType,
+  },
+  {
+    id: 'volatile',
+    why: 'a volatile local’s slot identity is observable — merging changes which cell the accesses hit',
+    sound: true,
+    guardedBy: 'coalesce.test.ts: a volatile pair never merges',
+    rejects: (c) => c.eitherIsVolatile,
+  },
+  {
+    id: 'loop',
+    why: 'a loop ancestor re-enters the if, so opposite arms both run and a value could cross',
+    sound: true,
+    guardedBy: 'coalesce.test.ts: an in-loop if never admits its arm pair',
+    rejects: (c) => c.ifInLoop,
+  },
+];
+
+function armDisjointCandidates(sfn: SFn): { merged: string; sfn: SFn }[] {
+  if (sfn.locals.length < 2) {
+    return [];
+  }
+  const mentionsOf = (list: Stmt[]): Map<string, number> => {
+    const out = new Map<string, number>();
+    const walk = (stmts: Stmt[]): void => {
+      for (const st of stmts) {
+        const here = new Set<string>();
+        if (st.k === 'assign') here.add(st.name);
+        for (const e of stmtExprs(st)) namesIn(e, here);
+        for (const n of here) out.set(n, (out.get(n) ?? 0) + 1);
+        walk(stmtChildren(st));
+      }
+    };
+    walk(list);
+    return out;
+  };
+  const total = mentionsOf(sfn.body);
+  const params = new Set(sfn.params.map((p) => p.name));
+  const locals = new Map(sfn.locals.map((l) => [l.name, l]));
+  const typeOf = new Map(sfn.locals.map((l) => [l.name, typeToString(l.type)]));
+  const out: { merged: string; sfn: SFn }[] = [];
+  const declIdx = new Map(sfn.locals.map((l, i) => [l.name, i]));
+  const visit = (stmts: Stmt[], inLoop: boolean): void => {
+    for (const st of stmts) {
+      if (st.k === 'if' && st.then.length && st.else.length) {
+        const thenM = mentionsOf(st.then);
+        const elseM = mentionsOf(st.else);
+        const confined = (m: Map<string, number>): string[] =>
+          [...m.entries()].filter(([n, k]) => locals.has(n) && total.get(n) === k).map(([n]) => n);
+        for (const a of confined(thenM)) {
+          for (const b of confined(elseM)) {
+            // the survivor is the earlier declaration, matching how a shared source local reads
+            const [gone, kept] = (declIdx.get(a) ?? 0) <= (declIdx.get(b) ?? 0) ? [b, a] : [a, b];
+            const refused = firstRejection(ARM_DISJOINT_GATES, {
+              a: gone,
+              b: kept,
+              ifInLoop: inLoop,
+              sameType: typeOf.get(a) === typeOf.get(b),
+              eitherIsParam: params.has(a) || params.has(b),
+              eitherIsVolatile: locals.get(a)?.volatile === true || locals.get(b)?.volatile === true,
+            });
+            if (refused === null) {
+              out.push({
+                merged: `${gone}-${kept}`,
+                sfn: { ...sfn, body: rename(sfn.body, gone, kept), locals: sfn.locals.filter((l) => l.name !== gone) },
+              });
+            }
+          }
+        }
+      }
+      visit(stmtChildren(st), inLoop || st.k === 'while' || st.k === 'dowhile' || st.k === 'for');
+    }
+  };
+  visit(sfn.body, false);
+  return out;
 }
 
 /** `coalesceCandidates` with the gate table supplied, plus which gate refused each pair.
