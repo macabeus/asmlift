@@ -53,7 +53,7 @@ import {
   negateCond,
 } from '../l3/ast';
 import type { Gate } from '../l3/gates';
-import { exprCType, ptrElemBytes } from '../l3/typing';
+import { exprCType, provablyNonNegative, ptrElemBytes, renderedIntSignedness } from '../l3/typing';
 import { returnType } from '../raise/recover';
 import { collectStructs } from '../raise/structs';
 import {
@@ -710,6 +710,17 @@ export interface StructureOptions {
   // through it, reproducing the source's pointer-local + scalar-temp spelling. Off by default;
   // rank.ts enumerates the ON spelling as the `/addr-home` axis — see analysis.ts AnalyzeOptions.
   homeSharedAddresses?: boolean;
+  // Materialize a pure value defined outside a loop with 2+ distinct consumers inside it — the
+  // register the compiler holds across the iterations. Off by default; rank.ts enumerates the ON
+  // spelling as the `/expr-home` axis — see analysis.ts AnalyzeOptions.
+  homeLoopExprs?: boolean;
+  // Spell unsigned compares unsigned: cast an icmp_u* operand where the rendered operands do not
+  // guarantee it, and reconcile a mixed-claimant declaration to u32 when nothing under the name
+  // needs signed. Off by default: a signed spelling that byte-matched was PROVED non-negative by
+  // the compiler (it emits the unsigned branch from signed compares only then), so which spelling
+  // the source used is genuinely ambiguous at emission — rank.ts enumerates the ON spelling as
+  // the `/uns-cmp` axis and the differ referees.
+  unsignedCompareSpelling?: boolean;
   // Merge two variables that a merge copy would join, when the values under them never interfere
   // (structure/namecoalesce.ts). Off by default; rank.ts enumerates the ON spelling as the
   // `/merge-names` axis. Which variables the compiler's own coalescer shared is not derivable from
@@ -753,7 +764,17 @@ export interface StructureHooks {
  *  SCOPE: refusals thrown by `structure()` itself. A decline can also come from `structureChecked`'s
  *  boundary contracts, which run OUTSIDE it — `rank.ts` closes that half, where the contracts are. */
 function assertPrimaryAccepts(fn: Fn, opts: StructureOptions, hooks: StructureHooks): void {
-  structure(fn, { ...opts, coalesceMergeNames: false, materializeJoinFeeds: false, homeSharedAddresses: false }, hooks);
+  structure(
+    fn,
+    {
+      ...opts,
+      coalesceMergeNames: false,
+      materializeJoinFeeds: false,
+      homeSharedAddresses: false,
+      homeLoopExprs: false,
+    },
+    hooks,
+  );
 }
 
 export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureHooks = {}): SFn {
@@ -771,13 +792,15 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     rereadGlobals = false,
     materializeJoinFeeds = false,
     homeSharedAddresses = false,
+    homeLoopExprs = false,
+    unsignedCompareSpelling = false,
     coalesceMergeNames = false,
     onGap = 'strict',
     symbols,
   } = opts;
   // These levers all change which edge copies elide as identities (extra materialization does
   // too), which the loop emitters' hazard predicates read — so the invariant above covers each.
-  if (coalesceMergeNames || materializeJoinFeeds || homeSharedAddresses) {
+  if (coalesceMergeNames || materializeJoinFeeds || homeSharedAddresses || homeLoopExprs) {
     assertPrimaryAccepts(fn, opts, hooks);
   }
   const defs = defOpMap(fn);
@@ -795,6 +818,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       rereadGlobals,
       materializeJoinFeeds,
       homeSharedAddresses,
+      homeLoopExprs,
       // the map's own declaration truth: a volatile object's read may not be duplicated or moved
       volatileGlobal: (n) => {
         const si = symbols?.get(n);
@@ -1208,7 +1232,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   const backArgName = new Map<Value, string>();
   // The C static type of a rendered expression, over the declared variable types — what decides
   // whether a memory access's base may be dereferenced as spelled (memAccess/arrayAccess).
-  const ctype = (e0: Expr): IrType | undefined => exprCType(e0, (n) => varType.get(n));
+  const vtEnv = (n: string): IrType | undefined => varType.get(n);
+  const ctype = (e0: Expr): IrType | undefined => exprCType(e0, vtEnv);
 
   /** `&gSym` assigned to a `T *` local: the address of an AGGREGATE is not a pointer to its
    *  element. `&gArr` is `T (*)[n]`, `&gStruct` is `struct S *`, and neither is assignable to
@@ -1552,6 +1577,83 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     }
   }
 
+  // ── declaration-signedness reconciliation ──────────────────────────────────────────────────
+  // A name's declared type is its FIRST claimant's, and the first claimant of a u32 loop counter
+  // is often an s32-typed sibling (the pre-increment value, a const's copy) — so the counter
+  // declares s32, every compare through it renders signed, and an unsigned icmp silently
+  // compiles to the compare the machine never did (the compare-cast at CMP_TO_BIN patches the
+  // sites it can see, but a later re-spell can substitute the var into a compare that needed no
+  // cast at emission — the initfirst guard swap). The declaration is the honest fix: a name
+  // flips to u32 when SOME value under it is u32-typed and NO value under it carries signed-use
+  // evidence (the transitive input cone of any icmp_s* / sdiv / smod / shr_s). Only int32
+  // declarations reconcile; the flip is byte-invariant everywhere but the compares and unsigned
+  // divisions it corrects (+/-/*/&/|/^/<< are sign-blind, `>>` self-corrects via the backend's
+  // shiftOperand cast, a udiv/umod renders `/`/`%` unsigned through the flipped operand — the
+  // machine's own division — and SIGNED division is evidence-blocked).
+  if (unsignedCompareSpelling) {
+    // Signed-use evidence is the TRANSITIVE INPUT CONE of every signed op — a claimant can feed
+    // an icmp_slt through an inline `sub` and the flip would still render that compare unsigned
+    // (`v - 5 >= 0`, always true in C), so direct operands are not enough. The cone also crosses
+    // edge arg↔param identities in BOTH directions: a kept-guard's substitution (gsub) renders an
+    // init ARG under the loop variable's name, so a signed guard over the arg is evidence against
+    // the name even though the arg claims it in neither naming map. Over-tainting only blocks
+    // flips: conservative-safe.
+    const SIGNED_USE = new Set(['icmp_slt', 'icmp_sle', 'icmp_sgt', 'icmp_sge', 'sdiv', 'smod', 'shr_s']);
+    const edgePeers = new Map<Value, Value[]>();
+    for (const b of fn.blocks) {
+      const term = b.ops[b.ops.length - 1];
+      for (const sx of term?.successors ?? []) {
+        sx.args.forEach((a, i) => {
+          const pv = sx.block.params[i];
+          if (pv !== undefined) {
+            (edgePeers.get(a) ?? edgePeers.set(a, []).get(a)!).push(pv);
+            (edgePeers.get(pv) ?? edgePeers.set(pv, []).get(pv)!).push(a);
+          }
+        });
+      }
+    }
+    const signedEvidence = new Set<Value>();
+    const work: Value[] = [];
+    for (const b of fn.blocks) {
+      for (const op of b.ops) {
+        if (SIGNED_USE.has(op.opcode)) {
+          work.push(...op.operands);
+        }
+      }
+    }
+    while (work.length) {
+      const v = work.pop()!;
+      if (!signedEvidence.has(v)) {
+        signedEvidence.add(v);
+        const d = defs.get(v);
+        if (d) {
+          work.push(...d.operands);
+        }
+        work.push(...(edgePeers.get(v) ?? []));
+      }
+    }
+    // Params never reconcile: their declarations come from p.type, not varType, so a flip here
+    // would only desync the cast site's view from the emitted declaration — and param signedness
+    // is the sign-pin axis's dimension.
+    const paramNames = new Set(entry.params.map((_, i) => `a${i}`));
+    const claimants = new Map<string, Value[]>();
+    for (const [v, n] of [...varName, ...backArgName]) {
+      (claimants.get(n) ?? claimants.set(n, []).get(n)!).push(v);
+    }
+    for (const [n, vs] of claimants) {
+      const t = varType.get(n);
+      if (paramNames.has(n) || t?.kind !== 'int' || t.width !== 32 || !t.signed) {
+        continue;
+      }
+      if (
+        vs.some((v) => v.type.kind === 'int' && v.type.width === 32 && !v.type.signed) &&
+        vs.every((v) => !signedEvidence.has(v))
+      ) {
+        varType.set(n, T.u(32));
+      }
+    }
+  }
+
   // ── def-site anchoring of constant merge copies (anchorConstCopies) ──────────────────────────
   // An edge copy `v = K` places the constant where the EDGE is, but the asm often materialized K
   // earlier: `movs r9, #0` at entry ahead of a single-armed overwrite, `movs r5, #1` at the top
@@ -1820,12 +1922,42 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // signed cast on addr-carrying trees is the follow-up if it ever costs a row.
       const t = /^icmp_s/.test(d.opcode) ? T.s(32) : T.u(32);
       const intifyAddrCmp = (x: Expr): Expr => (x.k === 'addr' ? { k: 'cast', to: t, e: x } : x);
-      return {
-        k: 'bin',
-        op: CMP_TO_BIN[d.opcode],
-        l: intifyAddrCmp(e(d.operands[0])),
-        r: intifyAddrCmp(e(d.operands[1])),
+      let l = intifyAddrCmp(e(d.operands[0]));
+      let r = intifyAddrCmp(e(d.operands[1]));
+      // The same signedness hole for ORDINARY operands: an icmp_u* whose operands both render
+      // as signed-promoting C (an s32-declared var carrying a u32 value — declarations take the
+      // FIRST claimant's type; an inline `16 << t`, whose C type is the left operand's `int`)
+      // compiles to the SIGNED compare the machine did not do. When neither side provably
+      // promotes unsigned, one operand takes a (u32) cast — the side whose recovered VALUE type
+      // is unsigned, the honest one — and the usual arithmetic conversions make the compare
+      // unsigned exactly as the opcode says. A provably-unsigned operand leaves the spelling
+      // alone, so correctly-typed compares never churn — as does a compare whose operands both
+      // provably sit in [0, 2^31) (a `(u8)x > 4` byte test): there the signed spelling is
+      // value-faithful and the compiler already picks the unsigned branch itself, and so does a
+      // pointer-rendered side: `p < end` already compares unsigned, and `(u32)p` against a
+      // pointer is the int-vs-ptr constraint violation the strict backends reject. ==/!= are
+      // sign-agnostic and icmp_s* keeps its documented residual above.
+      const ptrSide = (x: Expr): boolean => {
+        const t2 = ctype(x);
+        return t2?.kind === 'ptr' || t2?.kind === 'array';
       };
+      if (
+        unsignedCompareSpelling &&
+        /^icmp_u/.test(d.opcode) &&
+        !ptrSide(l) &&
+        !ptrSide(r) &&
+        renderedIntSignedness(l, vtEnv) !== false &&
+        renderedIntSignedness(r, vtEnv) !== false &&
+        !(provablyNonNegative(l, vtEnv) && provablyNonNegative(r, vtEnv))
+      ) {
+        const irUnsigned = (v: Value): boolean => v.type.kind === 'int' && !v.type.signed;
+        if (!irUnsigned(d.operands[0]) && irUnsigned(d.operands[1])) {
+          r = { k: 'cast', to: T.u(32), e: r };
+        } else {
+          l = { k: 'cast', to: T.u(32), e: l };
+        }
+      }
+      return { k: 'bin', op: CMP_TO_BIN[d.opcode], l, r };
     }
     if (ARITH_TO_BIN[d.opcode]) {
       let l = e(d.operands[0]);

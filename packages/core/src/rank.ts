@@ -13,7 +13,7 @@ import { assertDerefsTyped, assertResolved } from './contracts';
 import type { AsmData } from './frontend/asmdata';
 import { frontendFor } from './frontend/registry';
 import { globalCellOf } from './ir/alias';
-import { Fn, type Value, defOpMap, successorsOf } from './ir/core';
+import { Fn, type Op, type Value, defOpMap, successorsOf } from './ir/core';
 import { T } from './ir/types';
 import { verify } from './ir/verify';
 import { materializeArgBases } from './l3/argbase';
@@ -24,20 +24,136 @@ import { initFirstGuards } from './l3/initfirst';
 import { mulFirstSums } from './l3/mulfirst';
 import { nearBaseClusters } from './l3/nearbase';
 import { parkParamsFirst } from './l3/parkfirst';
-import { pollGuards } from './l3/pollguard';
+import { pollGuards, pollReads } from './l3/pollguard';
 import { registerishSpellings } from './l3/regspell';
 import { reindexWalks } from './l3/reindex';
 import { hoistScopedBases } from './l3/scopebase';
 import { type SymbolRef, collectSymbolRefs } from './l3/symbol-refs';
-import { volatilePtrLocals } from './l3/volatileptr';
+import { volatilePtrLocals, volatileSubsetCandidates } from './l3/volatileptr';
 import { RewritePattern } from './pattern/engine';
 import { applyIdiomPatterns, raiseRecovered, structureChecked } from './pipeline';
 import { type Prototypes, prototypesFromSymbols } from './proto';
 import { runPreRecovery } from './raise/pre-recovery';
 import { recoverTypes } from './raise/recover';
-import { hasHomeableSharedAddress } from './structure/analysis';
+import { hasHomeableSharedAddress, hasLoopSharedPureValue } from './structure/analysis';
 import { type SymbolMap, symbolsByName } from './symbols';
 import { type TargetDescription, structureOptionsFor } from './target';
+
+/** The STRUCTURING AXES — the boolean candidate dimensions crossed into every enumeration
+ *  (after signedness/branch-sense/defsite/bitfields, which have their own shapes). One entry per
+ *  axis; chain construction, the dropped-sibling strip closure, the per-candidate
+ *  StructureOptions, and the base-axes abort guard all derive from this table, so a new axis is
+ *  one entry — not four hand-edited sites that can drift.
+ *
+ *  `probeGate` gates the arm's ENUMERATION on the shared probe (the only thing the axis can
+ *  change must exist at all); `variantGate` re-evaluates per symbol-variant on that variant's
+ *  own lifted fn (a map-lifted probe spells const bases as gaddr, which would blind the
+ *  /raw-globals siblings — the /addr-home lesson). `strip` opts the axis into the
+ *  dropped-sibling closure: an axis-ON candidate is skipped when its OFF sibling failed the
+ *  boundary contracts. Two axes are EXEMPT from structure()'s assertPrimaryAccepts invariant:
+ *  `/reread-globals` only relaxes inlining barriers and `/uns-cmp` only changes spelling and
+ *  declarations — neither adds materialization or merging, so neither can unlock a function the
+ *  primary declines (reread also skips the strip closure). Both exemptions are stated here
+ *  rather than left implicit in a missing `||` arm or trigger term. */
+interface StructuringAxis {
+  flag: 'reread' | 'inplace' | 'mergeNames' | 'addrHome' | 'exprHome' | 'unsCmp';
+  suffix: string;
+  options: (on: boolean) => Parameters<typeof structureChecked>[1];
+  probeGate?: (probe: Fn, defs: Map<Value, Op>) => boolean;
+  variantGate?: (fn: Fn) => boolean;
+  strip: boolean;
+}
+const STRUCTURING_AXES: readonly StructuringAxis[] = [
+  // `/reread-globals` — the VALUE-HOME axis (structure/analysis.ts AnalyzeOptions). Whether the
+  // source read a global once into a variable or re-read it at each use is not derivable from
+  // asm: the compiler CSEs the second spelling back into one load, and the round-5 dogfood
+  // watched agbcc land on both sides inside a single function (its highest-cost defect, 25 of
+  // 27 points on one klonoa function and 35/50 both ways on another). Gated on the function
+  // having a load that resolves to a named global at all.
+  {
+    flag: 'reread',
+    suffix: '/reread-globals',
+    options: (on) => ({ rereadGlobals: on }),
+    probeGate: (probe, defs) =>
+      probe.blocks.some((b) =>
+        b.ops.some((op) => op.opcode === 'load' && globalCellOf(defs, op.operands[0], op.attrs.off as number) !== null),
+      ),
+    strip: false,
+  },
+  // `/inplace` — materialize a load that feeds a `cond_br` join arg (structure.ts
+  // materializeJoinFeeds), so the merge homes in the load's own variable and the identity arm
+  // elides to a one-sided in-place overwrite (`v = *p; if (v > 31) v = 32;`). The recompiled
+  // code differs (the two-sided form needs a second register — at the margin a callee-save
+  // push — and the emptied arm flips the branch sense). Gated on a load-fed cond_br arg.
+  {
+    flag: 'inplace',
+    suffix: '/inplace',
+    options: (on) => ({ materializeJoinFeeds: on }),
+    probeGate: (probe, defs) =>
+      probe.blocks.some((b) =>
+        b.ops.some(
+          (op) =>
+            op.opcode === 'cond_br' && op.successors.some((sx) => sx.args.some((a) => defs.get(a)?.opcode === 'load')),
+        ),
+      ),
+    strip: true,
+  },
+  // `/merge-names` — coalesce two variables a merge copy would join when the values under them
+  // never interfere (structure/namecoalesce.ts). Whether the source had one variable there is
+  // not derivable, and the copies are worth less than they look — agbcc coalesces most of them
+  // itself, so which side scores better is per-function. Gated on a merge fed by 2+ edges.
+  {
+    flag: 'mergeNames',
+    suffix: '/merge-names',
+    options: (on) => ({ coalesceMergeNames: on }),
+    probeGate: (probe) =>
+      probe.blocks
+        .slice(1)
+        .some(
+          (b) => b.params.length > 0 && new Set(probe.blocks.filter((pr) => successorsOf(pr).includes(b))).size > 1,
+        ),
+    strip: true,
+  },
+  // `/addr-home` — the address-home axis (structure/analysis.ts AnalyzeOptions
+  // homeSharedAddresses): a pure computed address dereferenced at 2+ sites, and the multi-render
+  // loads through it, materialize into locals — the source's pointer-local + scalar-temp
+  // spelling, where the default re-derives per use (a pool literal per folded offset). Gated PER
+  // SYMBOL VARIANT (see the table doc) on that variant's own lifted fn having a homeable base.
+  {
+    flag: 'addrHome',
+    suffix: '/addr-home',
+    options: (on) => ({ homeSharedAddresses: on }),
+    variantGate: hasHomeableSharedAddress,
+    strip: true,
+  },
+  // `/expr-home` — the loop-expression-home axis (structure/analysis.ts AnalyzeOptions
+  // homeLoopExprs): a pure value defined outside a loop with 2+ distinct consumers inside it
+  // materializes into a local carrying the value's recovered type — the register the compiler
+  // holds across the iterations (`u32 size = 16 << t;` driving a loop bound, a product and a
+  // shift), where the default re-derives per use. Gated per symbol variant like `/addr-home`
+  // (the cone refusal reads the variant's own lift).
+  {
+    flag: 'exprHome',
+    suffix: '/expr-home',
+    options: (on) => ({ homeLoopExprs: on }),
+    variantGate: hasLoopSharedPureValue,
+    strip: true,
+  },
+  // `/uns-cmp` — spell unsigned compares unsigned (structure.ts unsignedCompareSpelling): an
+  // icmp_u* operand takes a (u32) cast where the rendered operands do not guarantee the
+  // unsignedness, and a mixed-claimant declaration reconciles to u32 when nothing under the
+  // name needs signed. Which side the source spelled is genuinely ambiguous: a signed spelling
+  // that byte-matched was PROVED non-negative by the compiler (only then does it emit the
+  // unsigned branch from a signed compare), and emission's provable set is smaller than the
+  // compiler's. Gated on the function having an unsigned compare at all.
+  {
+    flag: 'unsCmp',
+    suffix: '/uns-cmp',
+    options: (on) => ({ unsignedCompareSpelling: on }),
+    probeGate: (probe) => probe.blocks.some((b) => b.ops.some((op) => op.opcode.startsWith('icmp_u'))),
+    strip: true,
+  },
+];
 
 /** The signedness of the entry parameters — the classic ambiguity asm cannot resolve.
  *
@@ -46,16 +162,40 @@ import { type TargetDescription, structureOptionsFor } from './target';
 /** The statement-shape products (rank's second sanctioned product mechanism): each entry is a
  *  statement-order/shape re-spelling orthogonal to every representation lever, derived onto every
  *  spelling as sanctioned in the POLICY note at the respell site. Each shape fires alone, plus
- *  all of them together in table order — not the full subset lattice; a third entry decides
- *  whether its pairs earn a place. */
+ *  all of them together in table order — not the full subset lattice; the pairs question is
+ *  settled by applyShapes' skip-on-decline below, and a row demanding a true EXCLUSION pair —
+ *  all three fire, the match needs exactly two — is what would earn the lattice. */
 const SHAPE_PRODUCTS: { suffix: string; apply: (sfn: SFn) => SFn | null }[] = [
   { suffix: '/initfirst', apply: initFirstGuards },
   { suffix: '/pollguard', apply: pollGuards },
+  { suffix: '/pollread', apply: pollReads },
 ];
 const SHAPE_SUBSETS: (typeof SHAPE_PRODUCTS)[number][][] = [
   ...SHAPE_PRODUCTS.map((x) => [x]),
   ...(SHAPE_PRODUCTS.length > 1 ? [SHAPE_PRODUCTS] : []),
 ];
+
+/** The subset applied in table order, SKIP-ON-DECLINE: a member that declines contributes
+ *  nothing rather than killing the combination — the all-shapes candidate is "everything that
+ *  fires", so a pair is reachable whenever the third declines. The label is built from the
+ *  members that actually FIRED, so a suffix never names a lever that declined; a fired-set that
+ *  duplicates a smaller subset emits identical source and the dedup collapses it. Null when
+ *  nothing fired. */
+const applyShapes = (
+  subset: readonly (typeof SHAPE_PRODUCTS)[number][],
+  from: SFn,
+): { out: SFn; suffix: string } | null => {
+  let cur = from;
+  const fired: string[] = [];
+  for (const sp of subset) {
+    const r = sp.apply(cur);
+    if (r) {
+      cur = r;
+      fired.push(sp.suffix);
+    }
+  }
+  return fired.length > 0 ? { out: cur, suffix: fired.join('') } : null;
+};
 
 const SIGN_CANDS = [
   { label: 'unsigned', signed: false },
@@ -272,88 +412,31 @@ export function enumerateCandidates(
   // Access facts for name-only symbol declarations (see bareGlobalAccessFacts) — derived once
   // from the probe: widths/offsets are lift-time facts, identical across every candidate.
   const accessFacts = opts.symbols ? bareGlobalAccessFacts(probe) : new Map<string, never>();
-  // `/reread-globals` — the VALUE-HOME axis (structure/analysis.ts AnalyzeOptions). Whether the
-  // source read a global once into a variable or re-read it at each use is not derivable from asm:
-  // the compiler CSEs the second spelling back into one load, and the round-5 dogfood watched agbcc
-  // land on both sides inside a single function (its highest-cost defect, 25 of 27 points on one
-  // klonoa function and 35/50 both ways on another). So both spellings are emitted and the differ
-  // referees — the same footing as signedness and branch sense, and never a default: the cached
-  // spelling stays the primary, so this can only ever ADD a winner.
-  //
-  // Gated on the function having a load that resolves to a named global at all — the only thing the
-  // axis can change. The dedup below collapses the pair wherever it changed nothing.
+  // The axis chain, derived from STRUCTURING_AXES: each admitted axis doubles the list, OFF arm
+  // first — order is load-bearing for the dropped-primary skip below (every OFF sibling
+  // enumerates before its ON twin, so a twin's stripped-key lookup always finds a sibling that
+  // has already run or been condemned). Each per-axis rationale lives on its table entry; both
+  // arms are always emitted and the differ referees, never a default — the dedup below collapses
+  // a pair wherever the axis changed nothing.
   const probeDefs = defOpMap(probe);
-  const readsANamedGlobal = probe.blocks.some((b) =>
-    b.ops.some(
-      (op) => op.opcode === 'load' && globalCellOf(probeDefs, op.operands[0], op.attrs.off as number) !== null,
-    ),
-  );
-  const rereadCands = readsANamedGlobal
-    ? [
-        ...bitfieldCands.map((s) => ({ ...s, reread: false })),
-        ...bitfieldCands.map((s) => ({ ...s, suffix: `${s.suffix}/reread-globals`, reread: true })),
-      ]
-    : bitfieldCands.map((s) => ({ ...s, reread: false }));
-  // `/merge-names` — coalesce two variables a merge copy would join when the values under them
-  // never interfere (structure/namecoalesce.ts). Destroying SSA gives a merge and each arm feeding
-  // it their own variable unless the naming walk happens to share one, and every arm it did not
-  // share with pays a copy. Whether the source had one variable there is not derivable, and the
-  // copies are worth less than they look — agbcc coalesces most of them itself, so the two spellings
-  // compile to nearly the same code and which one scores better is per-function. So both are emitted
-  // and the differ referees.
-  //
-  // Gated on the function HAVING a merge fed by more than one edge — the only thing the axis can
-  // change. The dedup below collapses the pair wherever it changed nothing.
-  // `/inplace` — materialize a load that feeds a `cond_br` join arg (structure.ts
-  // materializeJoinFeeds), so the merge homes in the load's own variable and the identity arm
-  // elides to a one-sided in-place overwrite (`v = *p; if (v > 31) v = 32;`). Whether the source
-  // spelled the fresh temp or the overwrite is not derivable from asm, and the recompiled code
-  // differs (the two-sided form needs a second register — at the margin a callee-save push — and
-  // the emptied arm flips the branch sense), so both spellings are emitted and the differ
-  // referees.
-  //
-  // Gated on the function HAVING a load-fed cond_br arg — the only thing the axis can change.
-  const hasLoadFedJoin = probe.blocks.some((b) =>
-    b.ops.some(
-      (op) =>
-        op.opcode === 'cond_br' && op.successors.some((sx) => sx.args.some((a) => probeDefs.get(a)?.opcode === 'load')),
-    ),
-  );
-  // Order is load-bearing for the dropped-primary skip below, same as merge-names': every
-  // `inplace: false` sibling enumerates before its `/inplace` twin, so a twin's stripped-key
-  // lookup always finds a sibling that has already run (or been condemned).
-  const inplaceCands = hasLoadFedJoin
-    ? [
-        ...rereadCands.map((s) => ({ ...s, inplace: false })),
-        ...rereadCands.map((s) => ({ ...s, suffix: `${s.suffix}/inplace`, inplace: true })),
-      ]
-    : rereadCands.map((s) => ({ ...s, inplace: false }));
-  const hasMultiEdgeMerge = probe.blocks
-    .slice(1)
-    .some((b) => b.params.length > 0 && new Set(probe.blocks.filter((pr) => successorsOf(pr).includes(b))).size > 1);
-  const senseCands = hasMultiEdgeMerge
-    ? [
-        ...inplaceCands.map((s) => ({ ...s, mergeNames: false })),
-        ...inplaceCands.map((s) => ({ ...s, suffix: `${s.suffix}/merge-names`, mergeNames: true })),
-      ]
-    : inplaceCands.map((s) => ({ ...s, mergeNames: false }));
-  // `/addr-home` — the address-home axis (structure/analysis.ts AnalyzeOptions
-  // homeSharedAddresses): a pure computed address dereferenced at 2+ sites, and the multi-render
-  // loads through it, materialize into locals — the source's pointer-local + scalar-temp spelling,
-  // where the default re-derives per use (a pool literal per folded offset). Which side the source
-  // spelled is not derivable from asm, so both are emitted and the differ referees.
-  //
-  // Gated on the function HAVING a homeable shared base — the only thing the axis can change.
-  // PER SYMBOL VARIANT, not on the shared probe: a map-lifted probe spells the shared base's
-  // constants as `gaddr`, whose cone the axis refuses — so the probe would blind the
-  // `/raw-globals` siblings, whose own lift has the plain-const cone the axis serves. The chain
-  // carries the axis unconditionally and each variant filters the `addrHome` arm out when its own
-  // lifted fn has no homeable base (the whole arm goes together, so the dropped-sibling closure
-  // has no hole). The `addrHome:false` siblings enumerate first, same as `/inplace`'s ordering.
-  const addrHomeCands = [
-    ...senseCands.map((s) => ({ ...s, addrHome: false })),
-    ...senseCands.map((s) => ({ ...s, suffix: `${s.suffix}/addr-home`, addrHome: true })),
-  ];
+  type AxisCand = (typeof bitfieldCands)[number] & Record<StructuringAxis['flag'], boolean>;
+  let axisCands: AxisCand[] = bitfieldCands.map((s) => ({
+    ...s,
+    reread: false,
+    inplace: false,
+    mergeNames: false,
+    addrHome: false,
+    exprHome: false,
+    unsCmp: false,
+  }));
+  for (const ax of STRUCTURING_AXES) {
+    if (ax.probeGate === undefined || ax.probeGate(probe, probeDefs)) {
+      axisCands = [
+        ...axisCands,
+        ...axisCands.map((s) => ({ ...s, suffix: `${s.suffix}${ax.suffix}`, [ax.flag]: true }) as AxisCand),
+      ];
+    }
+  }
 
   const seen = new Set<string>();
   const out: Candidate[] = [];
@@ -378,8 +461,9 @@ export function enumerateCandidates(
       // The shared tower spine (pipeline.ts) — the candidate's ONE difference from decompile() is the
       // signedness pin, injected between pre-recovery and recoverTypes via the beforeRecover hook.
       raiseRecovered(fn, target, { beforeRecover: () => pinScalarParams(fn, cand.signed, ptrIdx) });
-      // this variant's own gate for the `/addr-home` axis — see the chain-construction note
-      const variantCands = hasHomeableSharedAddress(fn) ? addrHomeCands : addrHomeCands.filter((s) => !s.addrHome);
+      // the per-variant axis gates, on THIS variant's lifted fn — see the table doc
+      const variantOff = STRUCTURING_AXES.filter((ax) => ax.variantGate !== undefined && !ax.variantGate(fn));
+      const variantCands = axisCands.filter((s) => variantOff.every((ax) => !s[ax.flag]));
       // `/merge-names` combinations whose un-merged sibling was DROPPED. `structure()` already
       // refuses to let the axis unlock a function the primary declines, but it can only see its own
       // refusals — a boundary contract fails out here, in `structureChecked`. Without this a
@@ -389,9 +473,7 @@ export function enumerateCandidates(
       const droppedPrimary = new Set<string>();
       for (const s of variantCands) {
         if (
-          (s.mergeNames && droppedPrimary.has(s.suffix.replace('/merge-names', ''))) ||
-          (s.inplace && droppedPrimary.has(s.suffix.replace('/inplace', ''))) ||
-          (s.addrHome && droppedPrimary.has(s.suffix.replace('/addr-home', '')))
+          STRUCTURING_AXES.some((ax) => ax.strip && s[ax.flag] && droppedPrimary.has(s.suffix.replace(ax.suffix, '')))
         ) {
           // A SKIPPED variant is recorded exactly like a dropped one, or the closure would not be
           // transitive: with plain X dropped and X/inplace skipped-but-unrecorded,
@@ -410,13 +492,10 @@ export function enumerateCandidates(
             negateJoinedBranchSense: s.join,
             anchorConstCopies: s.anchor,
             spellBitfieldMembers: s.bitfields,
-            rereadGlobals: s.reread,
-            materializeJoinFeeds: s.inplace,
-            homeSharedAddresses: s.addrHome,
-            coalesceMergeNames: s.mergeNames,
+            ...STRUCTURING_AXES.reduce((acc, ax) => ({ ...acc, ...ax.options(s[ax.flag]) }), {}),
           });
         } catch (e) {
-          if (!s.anchor && !s.join && s.bitfields && !s.reread && !s.inplace && !s.mergeNames && !s.addrHome) {
+          if (!s.anchor && !s.join && s.bitfields && STRUCTURING_AXES.every((ax) => !s[ax.flag])) {
             throw e; // the base axes keep their behavior: a structuring failure aborts the row
           }
           // Recorded for EVERY dropped variant: a candidate with more axes on looks its siblings
@@ -463,7 +542,12 @@ export function enumerateCandidates(
         // never aborts the enumeration). A dropped re-spelling loses nothing: the primary remains.
         //
         // POLICY: re-spellings derive from the BASE spelling only — levers do not compose by
-        // default. THREE product mechanisms are sanctioned, each with its own admission bar.
+        // default. THREE product mechanisms are sanctioned, each with its own admission bar —
+        // plus ALTERNATIVE OUTPUTS: one lever whose single application has several legitimate
+        // results (which locals a coalesce merges, which pointers /volatile qualifies) emits
+        // each as its own candidate via `enumerate`, capped at the lever, with the base spelling
+        // retained; outputs may also ride an already-sanctioned product (the /livebase/volatile
+        // subsets), since they add no new lever to the composition.
         // Products with /volatile go only onto a lever whose re-spelling CENTRES ON a
         // numeric-address pointer local — the joint spelling is reachable from neither lever
         // alone, each product narrows /volatile to the lever's own locals (volatilePtrLocals'
@@ -499,16 +583,15 @@ export function enumerateCandidates(
             // fixed order below. A shape that never fires declines and costs nothing.
             if (!SHAPE_PRODUCTS.some(({ suffix: sx }) => suffix.includes(sx))) {
               for (const subset of SHAPE_SUBSETS) {
-                let out: SFn | null = alt;
-                let sx = '';
-                for (const sp2 of subset) {
-                  out = out === null ? null : (sp2.apply(out) ?? null);
-                  sx += sp2.suffix;
-                }
-                if (out !== null && out !== alt) {
-                  assertResolved(out);
-                  assertDerefsTyped(out);
-                  spellings.push({ suffix: `${suffix}${sx}`, source: backend.emit(out), ...refsOf(out) });
+                const shaped = applyShapes(subset, alt);
+                if (shaped !== null) {
+                  assertResolved(shaped.out);
+                  assertDerefsTyped(shaped.out);
+                  spellings.push({
+                    suffix: `${suffix}${shaped.suffix}`,
+                    source: backend.emit(shaped.out),
+                    ...refsOf(shaped.out),
+                  });
                 }
               }
             }
@@ -525,9 +608,18 @@ export function enumerateCandidates(
         // same footing as the others: the primary inline spelling stays in the list, so the differ
         // referees and this can never cost a match.
         for (const subset of SHAPE_SUBSETS) {
-          respell(subset.map((x) => x.suffix).join(''), () =>
-            subset.reduce<SFn | null>((acc, x) => (acc === null ? null : (x.apply(acc) ?? null)), sfn),
-          );
+          // the truthful suffix needs the pass to RUN first, so this bypasses respell's
+          // label-then-thunk shape: same try posture, label from the fired members
+          try {
+            const shaped = applyShapes(subset, sfn);
+            if (shaped !== null) {
+              respell(shaped.suffix, () => shaped.out);
+            }
+          } catch (e) {
+            // the error label falls back to the full subset — the fired set is unknown mid-throw
+            const label = subset.map((x) => x.suffix).join('');
+            opts.onLeverError?.(name + label, e instanceof Error ? e.message.split('\n')[0] : String(e));
+          }
         }
         respell('/argbase', () => materializeArgBases(sfn));
         // `/volatile` — declare a pointer local holding a NUMERIC address as pointing to volatile
@@ -574,6 +666,18 @@ export function enumerateCandidates(
         };
         enumerate('/scopebase-coalesce', () => hoistScopedBases(sfn));
         enumerate('/coalesce', () => sfn);
+        // `/volatile`'s per-local SUBSETS: which pointers the source declared volatile is
+        // per-pointer knowledge (an MMIO block and a plain RAM table sit side by side, and
+        // qualifying the table blocks the read collapse its region wants), so each proper
+        // non-empty subset is its own candidate — the same alternative-OUTPUTS mechanism as the
+        // coalesce merges, not a product (l3/volatileptr.ts volatileSubsetCandidates carries the
+        // ≤3 cap). The all-qualifiers form is plain `/volatile` above; the livebase product's
+        // subsets ride below with the product's own `only` scope.
+        enumerate(
+          '/volatile',
+          () => sfn,
+          (s) => volatileSubsetCandidates(s),
+        );
         respell('/indexed', () => reindexWalks(sfn));
         respell('/indexed/volatile', () => {
           const kept = new Set<string>();
@@ -603,6 +707,10 @@ export function enumerateCandidates(
           return volatilePtrLocals(r, created);
         };
         respell('/livebase/volatile', livebaseVolatile);
+        enumerate('/livebase/volatile', livebase, (r) => {
+          const before = new Set(sfn.locals.map((l) => l.name));
+          return volatileSubsetCandidates(r, new Set(r.locals.filter((l) => !before.has(l.name)).map((l) => l.name)));
+        });
         // The livebase × indexed PAIRINGS — the third sanctioned product kind (see POLICY):
         // row-demanded, and the joint spelling is reachable from neither lever alone (the
         // frame-copy + DMA shape).

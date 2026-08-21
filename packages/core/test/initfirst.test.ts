@@ -1,6 +1,8 @@
 // The /initfirst lever (l3/initfirst.ts): a loop init moves above its guard and the guard reads
-// the initialized variable. Both source forms lift to the same IR — a const has no position — so
-// the differ referees between them.
+// the initialized variable. Both source forms lift to the same IR — a const has no position, and
+// an adjacent pure-read pair collapses to one load either way — so the differ referees between
+// them. The read case's refusals (volatile, un-owned names, raw-address derefs, compare-meaning)
+// are pinned below alongside the const case's deadness rules.
 import { expect, test } from 'vitest';
 
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
@@ -71,7 +73,9 @@ test('refused: the variable appears after the if (the skip path would now hold K
   expect(r).toBeNull();
 });
 
-test('refused: a non-const init never moves across the condition', () => {
+test('a plain-read init moves too, replacing its own expression in the cond', () => {
+  // if (0 < a0) { v0 = a0; … } → v0 = a0; if (0 < v0): guard and init read the same value back
+  // to back; the local-spelling source reads it once.
   const r = initFirstGuards(
     fn([
       {
@@ -81,6 +85,93 @@ test('refused: a non-const init never moves across the condition', () => {
         else: [],
       },
     ]),
+  );
+  expect(r).not.toBeNull();
+  expect(r!.body[0]).toEqual(assign('v0', v('a0')));
+  expect((r!.body[1] as Extract<Stmt, { k: 'if' }>).cond).toEqual(bin('<', c(0), v('v0')));
+});
+
+// A deref init through the function's own plain pointer: the everyday `for (j = *p; j < size;…)`
+// shape. The identical deref side becomes the variable.
+const deref = (base: Expr): Expr => ({ k: 'index', base, idx: c(0), width: 2, signed: false });
+const fnWith = (locals: SFn['locals'], body: Stmt[]): SFn => ({
+  name: 'f',
+  params: [{ name: 'a0', type: s32 }],
+  locals,
+  retType: s32,
+  body,
+});
+const u32t = { kind: 'int', width: 32, signed: false } as const;
+const ptrLocal = { name: 'p0', type: { kind: 'ptr', to: { kind: 'int', width: 16, signed: false } } as const };
+
+test('a non-volatile deref init moves and the guard reads the variable', () => {
+  const r = initFirstGuards(
+    fnWith(
+      [{ name: 'v0', type: s32 }, ptrLocal],
+      [
+        {
+          k: 'if',
+          cond: bin('<', deref(v('p0')), v('a0')),
+          then: [assign('v0', deref(v('p0'))), dowhile(bin('<', v('v0'), v('a0')), [])],
+          else: [],
+        },
+      ],
+    ),
+  );
+  expect(r).not.toBeNull();
+  expect(r!.body[0]).toEqual(assign('v0', deref(v('p0'))));
+  expect((r!.body[1] as Extract<Stmt, { k: 'if' }>).cond).toEqual(bin('<', v('v0'), v('a0')));
+});
+
+test('refused: a deref through a VOLATILE pointer never moves (two observable reads)', () => {
+  const r = initFirstGuards(
+    fnWith(
+      [
+        { name: 'v0', type: u32t },
+        { ...ptrLocal, pointeeVolatile: true },
+      ],
+      [
+        {
+          k: 'if',
+          cond: bin('<', deref(v('p0')), v('a0')),
+          then: [assign('v0', deref(v('p0'))), dowhile(bin('<', v('v0'), v('a0')), [])],
+          else: [],
+        },
+      ],
+    ),
+  );
+  expect(r).toBeNull();
+});
+
+test('refused: an X mentioning a name the function does not own (a global could be volatile)', () => {
+  const r = initFirstGuards(
+    fn([
+      {
+        k: 'if',
+        cond: bin('<', v('gCount'), v('a0')),
+        then: [assign('v0', v('gCount')), dowhile(bin('<', v('v0'), v('a0')), [])],
+        else: [],
+      },
+    ]),
+  );
+  expect(r).toBeNull();
+});
+
+test('refused: the swap would flip the compare signedness (u32 variable into a signed compare)', () => {
+  // a0 < a0 spelled over s32 sides compares signed; v0 is u32-declared, so v0 < a0 compares
+  // unsigned — a different result whenever a0 is negative.
+  const r = initFirstGuards(
+    fnWith(
+      [{ name: 'v0', type: u32t }],
+      [
+        {
+          k: 'if',
+          cond: bin('<', v('a0'), c(-5)),
+          then: [assign('v0', v('a0')), dowhile(bin('!=', v('v0'), c(0)), [])],
+          else: [],
+        },
+      ],
+    ),
   );
   expect(r).toBeNull();
 });
@@ -234,4 +325,82 @@ test('under a loop ancestor the re-spell fires only when the variable appears no
     ]),
   );
   expect(shared).toBeNull();
+});
+
+test('refused: a RAW-address deref never moves (no declaration claims it non-volatile)', () => {
+  const raw: Expr = {
+    k: 'index',
+    base: { k: 'cast', to: { kind: 'ptr', to: { kind: 'int', width: 16, signed: false } }, e: c(0x4000130) },
+    idx: c(0),
+    width: 2,
+    signed: false,
+  };
+  const r = initFirstGuards(
+    fnWith(
+      [{ name: 'v0', type: s32 }],
+      [
+        {
+          k: 'if',
+          cond: bin('<', raw, v('a0')),
+          then: [assign('v0', raw), dowhile(bin('<', v('v0'), v('a0')), [])],
+          else: [],
+        },
+      ],
+    ),
+  );
+  expect(r).toBeNull();
+});
+
+test('refused: an effectful condition — the hoist would move the read across the call', () => {
+  // the call side wears an (s32) cast so the compare-meaning gate is determinate and only the
+  // effect gate refuses — an uncast call refuses one gate earlier on indeterminate signedness
+  const call: Expr = { k: 'cast', to: s32, e: { k: 'call', fn: 'bump', args: [v('a0')] } };
+  const r = initFirstGuards(
+    fnWith(
+      [{ name: 'v0', type: s32 }, ptrLocal],
+      [
+        {
+          k: 'if',
+          cond: bin('!=', call, deref(v('p0'))),
+          then: [assign('v0', deref(v('p0'))), dowhile(bin('!=', v('v0'), c(0)), [])],
+          else: [],
+        },
+      ],
+    ),
+  );
+  expect(r).toBeNull();
+});
+
+test('refused: a NARROW-declared variable — the assignment truncates, no signedness reasoning survives', () => {
+  const u8t = { kind: 'int', width: 8, signed: false } as const;
+  const r = initFirstGuards(
+    fnWith(
+      [{ name: 'v0', type: u8t }, ptrLocal],
+      [
+        {
+          k: 'if',
+          cond: bin('<', deref(v('p0')), v('a0')),
+          then: [assign('v0', deref(v('p0'))), dowhile(bin('<', v('v0'), v('a0')), [])],
+          else: [],
+        },
+      ],
+    ),
+  );
+  expect(r).toBeNull();
+});
+
+test('a CONST init still moves under an effectful condition — nothing crosses a hoisted 0', () => {
+  const call: Expr = { k: 'cast', to: s32, e: { k: 'call', fn: 'bump', args: [v('a0')] } };
+  const r = initFirstGuards(
+    fn([
+      {
+        k: 'if',
+        cond: bin('<', c(0), call),
+        then: [assign('v0', c(0)), dowhile(bin('<', v('v0'), v('a0')), [])],
+        else: [],
+      },
+    ]),
+  );
+  expect(r).not.toBeNull();
+  expect(r!.body[0]).toEqual(assign('v0', c(0)));
 });
