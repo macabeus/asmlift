@@ -601,6 +601,11 @@ interface LoopInfo {
   header: Block;
   exit: Block;
   backArgOfParam: Value[]; // index-aligned with header.params
+  /** The PURE forwarding block between the guard and the header, when the compiler's own
+   *  loop-invariant motion parked computations there (`mov r3,#0x80; lsl r3,#24` feeding the
+   *  latch test). Its defs render inline wherever the loop reads them; the block itself is never
+   *  structured — the guard's inits come from ITS edge into the header instead. */
+  preheader?: Block;
 }
 
 // One early-`return` exit out of a loop body, and the blocks of it the loop emits inside its body
@@ -957,11 +962,40 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // (entered by a plain br / fall-through) is a bottom-tested loop whose body always runs
     // once — a single-block do-while — and is claimed by the structured-loop discovery below
     // instead (each header lives in exactly ONE map, so seeding stays single-pass).
-    if (!(preds.get(b) ?? []).some((pr) => isGuardShapedPred(pr, b, exit))) {
+    const direct = (preds.get(b) ?? []).some((pr) => isGuardShapedPred(pr, b, exit));
+    // Or THROUGH a pure preheader: the compiler's loop-invariant motion parks computations in a
+    // forwarding block between the guard and the header (the mask re-materialization of a busy
+    // poll). The block must be PURE and unmaterialized — its defs then render inline wherever
+    // the loop reads them and nothing about it needs a statement position of its own — with a
+    // single in-edge and a plain `br` into the header, so the guard's branch is still the only
+    // decision. Anything else keeps the unguarded do-while recovery.
+    const preheader = direct
+      ? undefined
+      : (preds.get(b) ?? []).find((P) => {
+          const pt = P.ops[P.ops.length - 1];
+          return (
+            P !== b &&
+            pt?.opcode === 'br' &&
+            P.params.length === 0 &&
+            P.ops.every((o) => !EFFECTFUL_OPS.has(o.opcode) && !materialize.has(o)) &&
+            // at least one def the LOOP BODY reads — the loop-invariant-motion shape this claim
+            // exists for. A block that only computes the init args is the do-while path's
+            // ordinary entry chain, and that path's sink machinery handles it better.
+            P.ops.some((o) => o.results.some((r) => (useSitesOf.get(r) ?? []).some((site) => site.blk === b))) &&
+            (preds.get(P) ?? []).length === 1 &&
+            isGuardShapedPred(preds.get(P)![0], P, exit)
+          );
+        });
+    if (!direct && !preheader) {
       continue;
     }
     const back = successorTo(b, b)!;
-    loops.set(b, { header: b, exit, backArgOfParam: b.params.map((_, i) => back.args[i]) });
+    loops.set(b, {
+      header: b,
+      exit,
+      backArgOfParam: b.params.map((_, i) => back.args[i]),
+      ...(preheader ? { preheader } : {}),
+    });
   }
 
   // --- structured natural loops (test-at-top `while` / bottom-test `do-while`) ---
@@ -2454,8 +2488,10 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // header (a guard-LESS single-block do-while would emit the update once before a
     // wrongly-`while` loop) — require a DISTINCT dominating guard block.
     for (const h of [takenB, fallB]) {
-      const li = loops.get(h);
-      if (li && h !== b && (takenB === li.exit || fallB === li.exit)) {
+      // `h` may be the header itself or its PURE PREHEADER (the LoopInfo records which): the
+      // guard's branch enters the loop either way, and the preheader's defs render inline.
+      const li = loops.get(h) ?? [...loops.values()].find((l) => l.preheader === h);
+      if (li && h !== b && li.header !== b && (takenB === li.exit || fallB === li.exit)) {
         // Self-loop emitter hazards: the while condition, the header→exit args, and every
         // post-loop use of a header-computed value render under the un-rotation sub — sound only
         // when their loop-variable reads go through sub-mapped back-edge args (post-update). A
@@ -2472,7 +2508,10 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         // the arg the guard passes into the loop, so reading through it models the first iteration:
         // the state the guard tested. Two claims are checked against it, both LOUD on failure.
         const guardExit = successorTo(b, li.exit)!; // the fusion condition above guarantees this edge
-        const initArgs = (successorTo(b, h)?.args ?? []) as Value[];
+        // The loop's init edge: the guard's own edge into the header, or the preheader's `br`
+        // when one stands between — its args are what the first iteration actually receives.
+        const initFrom = li.preheader ?? b;
+        const initArgs = (successorTo(initFrom, li.header)?.args ?? []) as Value[];
         // Params first, BACK-EDGE ARGS SECOND: one value can be both — param `i+1` of a shifting
         // pair is also the back-edge arg of param `i` — and the emitted expression renders it
         // under the un-rotation substitution, so that reading is the one that must win.
@@ -2601,7 +2640,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
             );
           }
         }
-        const inits = argAssigns(b, h);
+        const inits = argAssigns(initFrom, li.header);
         const loopStmt = emitWhile(li, updates, preUpdateCopies(li.exit, hexitArgs, sunk), fused ? 'while' : 'dowhile');
         // The guard-read substitution: an init arg reads as its loop variable's NAME. The inits
         // just assigned them (value-identical), and that is the source spelling — `if (n > 0)`
