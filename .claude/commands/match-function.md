@@ -25,12 +25,13 @@ you looked at this function's diff is a failure, even if the row flips to MATCH.
    with `pnpm bench target <row-id> --out <dir>` so you can iterate without the full harness.
 4. State the baseline in your first user-facing message. Never report progress without a
    before/after pair of real command output.
-5. **Write the ranked repro down verbatim, flags included** — every later measurement (each
-   reviewer's, each remediation's, the PR body's) re-runs *that* command, not one recomposed from
-   memory. The flags are part of the number: a callee still written in assembly has no DWARF
-   signature, so `LoadBGTilemapData` without `--proto '{"thunk_HeapFree":{"params":1}}'` scores
-   578 where the round's baseline is 547 — a plausible number that is comparable to nothing.
-   Quote the candidate and dropped counts beside every ranked score.
+5. **Write every repro command down verbatim, flags included** — the `--only` line above, and any
+   ranked enumeration you run outside the harness. Every later measurement (each reviewer's, each
+   remediation's, the PR body's) re-runs *that* command, not one recomposed from memory. The flags
+   are part of the number: a callee still written in assembly has no DWARF signature, so
+   `LoadBGTilemapData` without `--proto '{"thunk_HeapFree":{"params":1}}'` scores 578 where the
+   round's baseline is 547 — a plausible number that is comparable to nothing. Quote the candidate
+   and dropped counts beside every ranked score.
 
 ## Phase 1 — Diagnose the gap honestly
 
