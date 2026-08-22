@@ -258,3 +258,48 @@ test('a default placed after a FALLING case is refused by the printer, not silen
   expect(() => emitCFamily('void f(s32 x)', sw(1))).toThrow(/falls through/);
   expect(emitCFamily('void f(s32 x)', sw(2))).toMatch(/case 1:[\s\S]*default:/); // after both: fine
 });
+
+// ── Regime B: the jump table ─────────────────────────────────────────────────────────────────────
+// agbcc's own output for a 5-arm dense switch whose source wrote the arms 3, 0, 4, 1, 2 with a
+// `default:` last. The TABLE's slots are ascending by construction (slot i is case i), so grouping
+// them in table order spells the arms 0..4 — while the bodies are laid out in the order the arms
+// were written, exactly as in the comparison tree above. Recompiling the layout spelling with agbcc
+// reproduces the target; the ascending spelling differs by 10 to 26 instructions depending on the
+// permutation.
+const table = (tail = '\tb\t.L3\n') =>
+  'f:\n\tadd\tr2, r1, #0\n' +
+  '\tcmp\tr0, #0x4\n\tbhi\t.L9\t@cond_branch\n' +
+  '\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L11\n\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n' +
+  '.L12:\n\t.align\t2, 0\n.L11:\n\t.word\t.L10\n\t.align\t2, 0\n' +
+  '.L10:\n\t.word\t.L5\n\t.word\t.L7\n\t.word\t.L8\n\t.word\t.L4\n\t.word\t.L6\n' + // cases 0..4
+  `.L4:\n\tadd\tr1, r2, #0x4\n${tail}` + // case 3 — written FIRST, so laid out first
+  '.L5:\n\tadd\tr1, r2, #0x1\n\tb\t.L3\n' + // case 0
+  '.L6:\n\tadd\tr1, r2, #0x5\n\tb\t.L3\n' + // case 4
+  '.L7:\n\tadd\tr1, r2, #0x2\n\tb\t.L3\n' + // case 1
+  '.L8:\n\tadd\tr1, r2, #0x3\n\tb\t.L3\n' + // case 2
+  '.L9:\n\tmov\tr1, #0x63\n' + // the default
+  '.L3:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr1, [r0]\n\tbx\tlr\n';
+
+test('jump-table arms come back in layout order too, not in TABLE order', () => {
+  // The lever is declared per compiler, not per regime: the fact underneath (bodies expand in source
+  // order, only the dispatch moves) is the same one, and agbcc's tables carry it — 8 dense arms
+  // written 5,2,0,4,1,3,6,7 lay their bodies out in that order under an ascending table.
+  expect(armOrder(of(table()))).toEqual([3, 0, 4, 1, 2]);
+  expect(of(table())).toMatch(/case 3:\s+v0 = a1 \+ 4;/); // each arm keeps its own body
+});
+
+test('a jump table under a compiler without the declaration keeps table order', () => {
+  const undeclared = { ...ARMV4T_AGBCC, compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors } };
+  delete undeclared.compilerBehaviors.switchArmsFollowLayout;
+  const out = decompile('f', table(), undeclared, { prototypes: { f: { returnsVoid: true } } }).source;
+  expect(armOrder(out)).toEqual([0, 1, 2, 3, 4]);
+});
+
+test('a jump-table arm that FALLS THROUGH is not reordered', () => {
+  // Regime B's emission order is load-bearing where Regime A's is not: a falling arm must be
+  // emitted directly above the one it falls into (the l3/ast.ts note), so its position is not free.
+  // Drop case 3's `b .L3` and it falls into case 0 — which layout order would put next, but that is
+  // the reordering this refuses. Table order keeps case 3 next to case 4, so the shape declines
+  // LOUD instead. Recovering it is a separate capability with its own evidence to gather.
+  expect(() => of(table(''))).toThrow(/falls through into an arm that is not the next one emitted/);
+});

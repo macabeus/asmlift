@@ -72,7 +72,7 @@ import { analyze } from './analysis';
 import { makeLoopHazards, updateWriteSet } from './hazards';
 import { analyzeLoops } from './loops';
 import { type NameMerge, coalesceNames } from './namecoalesce';
-import { makeSwitchRecovery } from './switch-recover';
+import { type ArmExit, makeSwitchRecovery } from './switch-recover';
 
 // Lower a constant-offset memory access to its lvalue/rvalue Expr. If the base was recovered as a
 // struct pointer (raise/structs.ts), the byte offset resolves to a NAMED field (`base->field_<off>`);
@@ -2490,7 +2490,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
 
   // ── Regime-A switch recovery (structure/switch-recover.ts): the recognizer's case bodies call
   // back into structureRegion, and Regime B (switch_br, below) shares its fall-through predicate.
-  const { recognizeSwitch, analyzeArmExit } = makeSwitchRecovery({
+  const { recognizeSwitch, analyzeArmExit, layoutIndex } = makeSwitchRecovery({
     fn,
     defs,
     dom,
@@ -2573,8 +2573,31 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       if (defEdge.block !== merge) {
         siblings.add(defEdge.block);
       }
-      // ONE emission order for the whole statement: the case arms in table order, then the default —
-      // which is exactly where C puts it. Adjacency is read off this array, so "falls into the next
+      // ARM ORDER. Grouping the table's slots by target walks them in TABLE order, which for a dense
+      // table is ascending case value — the neutral spelling, and the source's order only by
+      // accident. Where the compiler has declared that its block layout IS the order the arms were
+      // written (TargetDescription.switchArmsFollowLayout — the same fact and the same evidence
+      // Regime A reads, and agbcc's jump tables carry it too: 8 dense arms written 5,2,0,4,1,3,6,7
+      // lay their bodies out in that order under an ascending table), the bodies' layout is the
+      // evidence and the arms take it.
+      //
+      // Only when NO arm falls through. Here — unlike Regime A, which declines fall-through
+      // outright — emission order is load-bearing for correctness (the l3/ast.ts non-neutrality
+      // note): a falling arm must be emitted directly above the one it falls into, so its position
+      // is not free to move. `analyzeArmExit` does not depend on emission order, so the exits can
+      // be settled first and reused below. Ties (two table slots sharing one body) keep table
+      // order, which is ascending case value — the same tie-break Regime A declares.
+      const exitOf = new Map<Block, ArmExit>();
+      for (const entry of [...arms.map((a) => a.entry), defEdge.block]) {
+        if (!exitOf.has(entry)) {
+          exitOf.set(entry, analyzeArmExit(entry, b, merge, siblings));
+        }
+      }
+      if (switchArmsFollowLayout && [...exitOf.values()].every((e) => e.kind === 'break')) {
+        arms.sort((x, y) => layoutIndex(x.entry) - layoutIndex(y.entry));
+      }
+      // ONE emission order for the whole statement: the case arms, then the default — which is
+      // exactly where C puts it. Adjacency is read off this array, so "falls into the next
       // arm" needs no separate rule for a case that falls into the default (it is the arm after the
       // last case, and legal C).
       const emitOrder = [...arms, { entry: defEdge.block, edge: defEdge, values: null as number[] | null }];
@@ -2583,7 +2606,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // output (the same reason emitDoWhile reuses its `updates`).
       const edgeCopies = emitOrder.map((a) => argAssignsFor(b, a.edge));
       const bodies = emitOrder.map((a, i) => {
-        const exit = analyzeArmExit(a.entry, b, merge, siblings);
+        const exit = exitOf.get(a.entry)!;
         if (exit.kind === 'unstructurable') {
           throw new StructureError(`cannot structure '${fn.name}': ${exit.why}`);
         }

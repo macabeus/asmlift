@@ -48,6 +48,9 @@ export interface SwitchRecovery {
   /** shared with the Regime-B (`switch_br`) path in structure.ts, which recovers the fall-through
    *  this returns; Regime A only accepts `break` arms and otherwise declines to if-recovery. */
   analyzeArmExit: (entry: Block, b: Block, merge: Block | null, siblings: Set<Block>) => ArmExit;
+  /** a block's position in the ASSEMBLY — the arm-order evidence, shared with Regime B so the two
+   *  regimes read it from one definition (and one statement of what it rests on). */
+  layoutIndex: (blk: Block) => number;
 }
 
 export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
@@ -583,5 +586,5 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     }
     return out;
   };
-  return { recognizeSwitch, analyzeArmExit };
+  return { recognizeSwitch, analyzeArmExit, layoutIndex };
 }
