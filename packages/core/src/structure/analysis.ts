@@ -261,14 +261,14 @@ export interface AnalyzeOptions {
    *  SINKING that needs the barrier scan (the multi-render rule below), and that scan stays.
    *
    *  Four refusals, each with a reason rather than a threshold:
-   *    • an address CONE (gaddr/laddr) — the standing homing refusal: rendered standalone such a
-   *      value loses the memAccess's inline byte-stride cast (coneHoldsAddr);
-   *    • a MULTI-BLOCK LOOP HEADER seat — a test-at-top `while`'s condition has no seat for a
-   *      materialized temp, so it would trade a structuring function for a decline;
+   *    • no legal SEAT for a temp — an address cone or a multi-block loop header, the two every
+   *      homing rule makes; see `seatIsLegal`;
    *    • a LOOP PREHEADER of the loop the renders are in — see `preheaderOfRenderLoop`;
-   *    • a read C evaluates only under a `&&`/`||` — see `shortCircuitGuarded`. Both of those
-   *      refusals name a block the IR reports that the ASM did not: one a compiler pass moved the
-   *      read to, one a raise pass did. */
+   *    • a read C evaluates only under a `&&`/`||` — see `shortCircuitGuarded`. Those two both
+   *      name a block the IR reports that the ASM did not: one a compiler pass moved the read to,
+   *      one a raise pass did;
+   *    • a read that IS a block parameter's incoming copy — see `onlyFeedsBlockParams`, where
+   *      taking the seat manufactures a copy the compiler never emitted. */
   readsStayWhereWritten?: boolean;
 }
 
@@ -676,6 +676,17 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         consumers.every((c) => !L.body.has(opBlock.get(c)!)),
     );
   const addressCone = (op0: Op): boolean => coneHoldsAddr(op0, defOf);
+  /** IS THERE A LEGAL SEAT for a materialized temp at `op`, sitting in block `b`? The two refusals
+   *  every homing rule makes, in one place because four rules were spelling them out separately:
+   *    • an address CONE (gaddr/laddr) — rendered standalone such a value loses the memAccess's
+   *      inline byte-stride cast, so its VALUE changes; the cast-aware base machinery in l3/
+   *      serves those bases instead (see `addressCone`);
+   *    • a MULTI-BLOCK LOOP HEADER — a test-at-top `while`'s condition has no seat for a temp, so
+   *      taking one trades a structuring function for a decline (see `multiBlockHeaders`).
+   *  A rule contributes its own SCOPE on top; this answers only whether the seat exists. The
+   *  /addr-home load rule below asks the header half alone, because its admission key is a base
+   *  `axisHomedBases` already registered — and a cone-derived base can never be in it. */
+  const seatIsLegal = (op0: Op, b0: Block): boolean => !addressCone(op0) && !multiBlockHeaders.has(b0);
   // ── the address-home axis's scope predicate ───────────────────────────────────────────────
   // A value consumed ONLY as the base (operands[0]) of 2+ distinct memory accesses — the shape
   // the axis homes. Any other use (a store's value slot, an aload index, arithmetic, a successor
@@ -822,16 +833,8 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
             materialize.add(op);
           }
           // Third scope, under the address-home axis only (see AnalyzeOptions.homeSharedAddresses):
-          // a non-const pure value consumed ONLY as the base of 2+ memory accesses. The gaddr/laddr
-          // cone exclusion and the loop-header seat refusal are the axis's two refusals.
-          if (
-            homeSharedAddresses &&
-            op.opcode !== 'const' &&
-            pr &&
-            usedOnlyAsSharedBase(pr) &&
-            !addressCone(op) &&
-            !multiBlockHeaders.has(b)
-          ) {
+          // a non-const pure value consumed ONLY as the base of 2+ memory accesses.
+          if (homeSharedAddresses && op.opcode !== 'const' && pr && usedOnlyAsSharedBase(pr) && seatIsLegal(op, b)) {
             materialize.add(op);
             axisHomedBases.add(pr);
           }
@@ -844,8 +847,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
             pr &&
             !usedOnlyAsSharedBase(pr) &&
             loopSharedConsumers(pr, b) &&
-            !addressCone(op) &&
-            !multiBlockHeaders.has(b)
+            seatIsLegal(op, b)
           ) {
             materialize.add(op);
           }
@@ -896,8 +898,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           (op.opcode === 'load' || op.opcode === 'aload') &&
           readsStayWhereWritten &&
           dom &&
-          !addressCone(op) &&
-          !multiBlockHeaders.has(b) &&
+          seatIsLegal(op, b) &&
           !shortCircuitGuarded.has(r) &&
           !onlyFeedsBlockParams(r)
         ) {
