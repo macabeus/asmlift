@@ -193,7 +193,7 @@ this phase is the only pass they get.
   `asmlift-adversarial-validation.md`) with the round's outcome and any gate that turned out to be
   load-bearing.
 - Push the branch (this project's convention is commit + push on a finished goal).
-- Then `scripts/pr-wait.sh <pr>` — it blocks on the real CI event and exits with the ANSWER (0 merged · 1 a check failed · 3 green and ready to merge). Never ask a human whether CI is green or whether the PR merged; that question was asked six times in one session and the script answers all six.
+- Then `scripts/pr-wait.sh <pr>` — it polls the PR's real state under a deadline and exits with the ANSWER (0 merged · 1 a check failed · 2 still pending, nothing decided · 3 green and ready to merge). Never ask a human whether CI is green or whether the PR merged; that question was asked six times in one session and the script answers all six.
 
 ---
 
