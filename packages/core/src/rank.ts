@@ -145,8 +145,10 @@ const STRUCTURING_AXES: readonly StructuringAxis[] = [
   // the read then renders once inside it — the register the asm carried the DERIVED value in
   // (`eor r1,r1,r0` keeps `0x3FF ^ REG_KEYINPUT`), where the default homes the read and re-derives
   // the computation at every use. Both spellings compile (agbcc CSEs the re-derivation back), so
-  // the differ referees. Gated per symbol variant like its `/addr-home` and `/expr-home` siblings:
-  // a map-lifted probe spells the read's address as a gaddr, which the scope walk reads.
+  // the differ referees. Gated per symbol variant like its `/addr-home` and `/expr-home` siblings,
+  // and for the same reason the /addr-home lesson names: the scope refuses a cone holding a
+  // standalone address, and a pool constant the map lifts to a `gaddr` is a bare `const` in the
+  // `/raw-globals` sibling — so the two variants genuinely answer differently.
   {
     flag: 'derivedHome',
     suffix: '/derived-home',
@@ -501,8 +503,9 @@ export function enumerateCandidates(
       // changes the IR every structuring axis then reads: the value the argument carried loses a
       // consumer, so what materializes changes with it, and `kleod:ReadKeyInput` needs the
       // narrowed lift's `/flip-join/derived-home` spelling, which neither side reaches alone.
-      // The cross is paid in `structureChecked` calls, not compiles — a narrowing that changes
-      // nothing downstream emits the base spelling's source and the dedup collapses it.
+      // Only spellings the narrowing actually changed reach a compiler: one that changes nothing
+      // downstream emits the base spelling's source and the dedup collapses it, and a DECLARED
+      // arity records nothing and enumerates no variant at all.
       const liftVariants: { suffix: string; narrow: boolean }[] = hasSetupArgsNarrowing(base)
         ? [
             { suffix: '', narrow: false },

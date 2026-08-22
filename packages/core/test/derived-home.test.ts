@@ -5,9 +5,9 @@
 //
 // What these tests pin is the SCOPE, since the sibling homing axes already own the neighbouring
 // shapes: the read is what admits a straight-line value at all (nothing else in the cone is
-// evidence the compiler kept a register), a shared memory-access base stays /addr-home's, and the
-// three refusals hold — a cone crossing a `call`, a standalone address in the cone, and a write
-// able to execute between the read and the value's own position.
+// evidence the compiler kept a register), and the refusals hold — a cone crossing a `call`, a
+// standalone address in the cone, a write (a store or a call) able to execute between the read and
+// the value's own position, and a value inside a loop its read sits outside.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -141,4 +141,51 @@ const WRITEBETWEEN = `fn writebetween {
 test('a write between the read and the value refuses the home', () => {
   expect(emit(WRITEBETWEEN, true, false)).toBe(emit(WRITEBETWEEN, false, false));
   expect(hasDerivedReadHome(parse(WRITEBETWEEN))).toBe(true); // the gate admits; the rule refuses
+});
+
+// The read outside a loop, the value inside it: rendering the read at the value's own position
+// runs it once per iteration. Nothing writes here, so no barrier sees it — for a volatile cell
+// that is a second ACCESS, and for any other a second load.
+const READINLOOP = `fn readinloop {
+^bb0(%0: u32):
+  %1: u32 = const {value=134576844}
+  %2: u32 = load %1 {off=0, signed=false, width=1}
+  %3: u32 = const {value=0}
+  br ^bb1(%3)
+^bb1(%4: u32):
+  %5: u32 = const {value=1023}
+  %6: u32 = xor %5, %2
+  %7: u32 = add %4, %6
+  %8: u32 = mul %7, %6
+  %9: u32 = const {value=10}
+  %10: u32 = icmp_ult %8, %9
+  cond_br %10, ^bb1(%8), ^bb2()
+^bb2():
+  ret %8
+}
+`;
+
+test('a value inside a loop its read sits outside is not homed', () => {
+  expect(emit(READINLOOP, true, false)).toBe(emit(READINLOOP, false, false));
+});
+
+// A call between the read and the value: it may write anything the read looked at, so moving the
+// read past it is the same refusal a store earns (`call` is in EFFECTFUL_OPS).
+const CALLBETWEEN = `fn callbetween {
+^bb0(%0: u32):
+  %1: u32 = const {value=134576844}
+  %2: u32 = load %1 {off=0, signed=false, width=1}
+  %3: u32 = call %0 {target="side"}
+  %4: u32 = const {value=1023}
+  %5: u32 = xor %4, %2
+  %6: u32 = const {value=50333696}
+  store %6, %5 {off=0, width=2}
+  %7: u32 = const {value=50333700}
+  store %7, %5 {off=0, width=2}
+  ret %3
+}
+`;
+
+test('a call between the read and the value refuses the home', () => {
+  expect(emit(CALLBETWEEN, true, false)).toBe(emit(CALLBETWEEN, false, false));
 });

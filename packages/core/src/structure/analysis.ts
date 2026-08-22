@@ -154,8 +154,8 @@ export function hasLoopSharedPureValue(fn: Fn): boolean {
 /** rank.ts's enumeration gate for the `/derived-home` axis: does the function HAVE a value the
  *  axis would home — a pure non-const def with 2+ consumers whose cone stands on a memory read,
  *  with no call or standalone address in between? Mirrors the axis's scope rule in `analyze` minus
- *  the write-between and loop-header-seat refusals (both need the positioned model; a false
- *  positive costs one duplicate-collapsed candidate, never a wrong one). */
+ *  every refusal that needs the positioned model (the write-between, the read's loop, and the
+ *  header seat); a false positive costs one duplicate-collapsed candidate, never a wrong one. */
 export function hasDerivedReadHome(fn: Fn): boolean {
   const defOf = defOpMap(fn);
   const consumers = new Map<Value, Set<Op>>();
@@ -320,9 +320,10 @@ export interface AnalyzeOptions {
    *  freely-re-derivable value (the small-constant class) has no such proof at all, but a value
    *  standing on a read the source could not repeat is one the asm computed from a single access.
    *
-   *  Refusals: a cone crossing a `call` (homing would move a side effect), a write able to execute
-   *  between a cone read and this value's own position (the read would move across it), plus the
-   *  gaddr/laddr cone and multi-block-loop-header seat the sibling axes refuse. */
+   *  Refusals: a cone crossing a `call` (homing would move a side effect), a standalone gaddr/laddr
+   *  in the cone, a write able to execute between a cone read and this value's own position, a
+   *  value inside a loop its read sits outside (the read would run per iteration), and the
+   *  multi-block-loop-header seat the sibling axes refuse. */
   homeDerivedReads?: boolean;
   /** DEF-BLOCK PLACEMENT for memory reads — WHERE the read happens, not where the value lives.
    *  The sibling of the homing axes above: there the question is which register or offset holds a
@@ -809,10 +810,13 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
    *  compiler re-materializes for free, and homing it only adds copies — the small-constant class
    *  the const scope's note records.
    *
-   *  Each read must then reach `op0`'s position with nothing that writes memory able to execute in
-   *  between, because homing moves the read there: today it renders at its own def position (it
-   *  materialized) or inline at each of `op0`'s render positions, and both lie on the far side of
-   *  a write that this refusal is the only thing standing between. */
+   *  Each read must then REACH `op0`'s position, on two counts. Nothing that writes memory may
+   *  execute in between, because homing moves the read there: today it renders at its own def
+   *  position (it materialized) or inline at each of `op0`'s render positions, and both lie on the
+   *  far side of a write that this refusal is the only thing standing between. And `op0` may not
+   *  sit inside a loop the read is outside, where rendering the read would run it once per
+   *  iteration — a second load for any cell, and a second ACCESS for a volatile one, which no
+   *  write barrier can see. */
   const standsOnMovableRead = (op0: Op, blk: Block): boolean => {
     const reads: Op[] = [];
     const seen = new Set<Value>();
@@ -837,7 +841,14 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
       }
     }
     const at = { blk, idx: opIndex.get(op0)! };
-    return reads.length > 0 && reads.every((r) => !memWriteBetween(r, at, (x) => EFFECTFUL_OPS.has(x.opcode)));
+    return (
+      reads.length > 0 &&
+      reads.every(
+        (r) =>
+          !memWriteBetween(r, at, (x) => EFFECTFUL_OPS.has(x.opcode)) &&
+          !loopBodies.some((L) => L.body.has(blk) && !L.body.has(opBlock.get(r)!)),
+      )
+    );
   };
   /** 2+ distinct consuming ops — the multi-use the pure-op rule reads as a reused register. */
   const multiConsumer = (v: Value): boolean => new Set((useSitesOf.get(v) ?? []).map((s) => s.op)).size >= 2;
@@ -1023,8 +1034,8 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           }
           // Fifth scope, under the derived-read-home axis (AnalyzeOptions.homeDerivedReads): a
           // pure non-const value with 2+ consumers standing on a memory read. Shared bases stay
-          // the third scope's, and a value already inside a loop the fourth's — this one is the
-          // straight-line case neither reaches.
+          // the third scope's and values consumed across a loop the fourth's; what this one adds
+          // is the straight-line case, which neither reaches.
           if (
             homeDerivedReads &&
             op.opcode !== 'const' &&
