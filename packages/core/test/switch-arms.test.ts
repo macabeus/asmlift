@@ -152,18 +152,20 @@ test('a default entry the DISPATCH hands a value to still declines, and keeps th
 });
 
 test('two case values sharing ONE body have the same layout index, and stay in value order', () => {
-  // `case 2: case 3: …` branches both tests to the same label, so layout cannot order those two —
-  // the one thing the ordering rule cannot read off the assembly. Ascending value is the declared
-  // tie-break, so they keep the spelling they already had instead of inheriting whichever the tree
-  // walk reached first. (That Regime A emits the shared body once per label rather than stacking
-  // the labels as the jump-table path does is older than this and untouched here.)
+  // Two case values branching to the same label share a layout index, so layout cannot order those
+  // two — the one thing the ordering rule cannot read off the assembly. Ascending value is the
+  // declared tie-break, so they keep the spelling they already had instead of inheriting whichever
+  // the tree walk reached first. The dispatch below tests 3 BEFORE 2 for exactly that reason: the
+  // walk records 3 first, so a sort without the tie-break returns [3, 2, 1, 0] and only the
+  // tie-break puts them back in value order. (That Regime A emits the shared body once per label
+  // rather than stacking the labels as the jump-table path does is older than this and untouched.)
   const shared =
     'f:\n\tmov\tr2, #0x0\n' +
     '\tcmp\tr0, #0x1\n\tbeq\t.Lc1\t@cond_branch\n' +
     '\tcmp\tr0, #0x1\n\tbgt\t.Lhi\t@cond_branch\n' +
     '\tcmp\tr0, #0\n\tbeq\t.Lc0\t@cond_branch\n\tb\t.Lend\n' +
-    '.Lhi:\n\tcmp\tr0, #0x2\n\tbeq\t.Lsh\t@cond_branch\n' +
-    '\tcmp\tr0, #0x3\n\tbeq\t.Lsh\t@cond_branch\n\tb\t.Lend\n' +
+    '.Lhi:\n\tcmp\tr0, #0x3\n\tbeq\t.Lsh\t@cond_branch\n' + // 3 tested FIRST, so the walk records it first
+    '\tcmp\tr0, #0x2\n\tbeq\t.Lsh\t@cond_branch\n\tb\t.Lend\n' +
     '.Lsh:\n\tadd\tr2, r1, #0x7\n\tb\t.Lend\n' + // laid out FIRST, reached by both 2 and 3
     '.Lc1:\n\tadd\tr2, r1, #0x2\n\tb\t.Lend\n' +
     '.Lc0:\n\tadd\tr2, r1, #0x1\n' +
