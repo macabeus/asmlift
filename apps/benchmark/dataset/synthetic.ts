@@ -1592,20 +1592,26 @@ export const SYNTHETIC: SynthSpec[] = [
   // put it, while the asm lays that body out second.
   //
   // Two separate defects, one per row, both in structure/switch-recover.ts:
-  //   • `swarms` — a switch with NO default. Its fall-out edge lands on the MERGE, and the merge
-  //     carries the switch's own phi (the arms decide `w`), so the "default entry with a phi"
-  //     guard rejects the whole tree and recovery falls back to if-nesting. The phi belongs to the
-  //     switch's join, not to a default arm. `swtail`, the same dispatch with a phi-free merge,
-  //     IS recovered today — so the trigger is the phi, not the missing default.
+  //   • `swarms` — a switch with NO default, declining to if-nesting. The attribution that
+  //     authored this row named the "default entry with a phi" guard, reasoning that the fall-out
+  //     edge lands on the phi-carrying MERGE. The run falsified that: instrumenting every
+  //     `return null` showed the shape declining at `defaults.length > 1`, and the phi guard never
+  //     firing on this corpus at all. gcc 2.9-arm's `emit_case_nodes` gives every subtree that
+  //     runs out of case values its OWN jump to the default, so a four-case tree reaches it
+  //     through two bare `b .Ldefault` blocks — which recovery counted as two different defaults.
+  //     The default candidate is one of those bare blocks, never the merge, which is why the phi
+  //     guard cannot be what refuses this shape.
   //   • `swlayout` — the arms come back sorted by case VALUE. Its source order is 2, 0, 3, 1 and
   //     agbcc lays the bodies out in exactly that order; asmlift emits 0, 1, 2, 3, so every
   //     instruction after the first arm shifts. It carries a default, so recognition succeeds and
   //     ONLY the order is left — which is what separates it from `swarms`.
   //
   // `swdefault` is the control: byte-identical C to `swarms` except that the fall-out is spelled
-  // as `default: w = 0;` instead of an initialiser, which gives the default its own block. It
-  // MATCHES today and must keep matching — a fix that recovers `swarms` by loosening the phi guard
-  // must not start treating this row's real default arm as the join.
+  // as `default: w = 0;` instead of an initialiser, which gives the default its own block — one
+  // default candidate, so it was recovered before the collapse and must stay recovered after it.
+  // The collapse that closed `swarms` is what it guards: two leaves are one default only when each
+  // is a BARE jump to the same block passing the same values, and this row's real default arm has
+  // a body, so nothing may fold it into the fall-out.
   //
   // `swmulti` is the real function's shape rather than an isolate: a defaultless switch inside a
   // do-while whose four arms all decide the same three locals. It moves furthest (38) because its
