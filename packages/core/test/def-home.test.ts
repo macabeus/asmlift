@@ -370,3 +370,59 @@ test('an indexed read homes at its def block too', () => {
   expect(emit(ALOADSHARE, false)).not.toMatch(/v\d+ = a0\[a1\];/);
   expect(count(emit(ALOADSHARE, false), 'a0[a1]')).toBe(2);
 });
+
+// ── the refusal: the read IS a block parameter's incoming copy ───────────────────────────────
+// A value whose every use is a successor ARGUMENT already has a home — the parameter. Inlined,
+// the edge assignment is the read (`v1 = *gBase;`); materialized it becomes two names and a copy
+// between them (`v0 = *gBase; … v1 = v0;`) where the asm loaded straight into the register the
+// parameter became. That copy costs more than the placement gains: the four m4a track loops
+// (m4aMPlayVolumeControl, m4aMPlayPitchControl, m4aMPlayLFOSpeedSet, FadeOutBody) are this shape,
+// and homing them scored 26→33, 52→54, 27→30 and 69→71 against their own objects.
+//
+// The IR is what `decompile()` recovers from agbcc -O2's output for
+//   void loopinit(u32 mask){ u8 *p = *gBase; s32 i = *gCount; s32 b = 1;
+//     if (i > 0) { do { if (mask & b) p[19] = 3; b <<= 1; p += 80; i--; } while (i > 0); } }
+// — note the read really does sit above the loop guard there, so it is the SPELLING that fails,
+// not the placement: seating a read above the guard AND as the loop variable is loop-init
+// hoisting, which this rule does not do.
+const LOOPINIT = `fn loopinit {
+^bb0(%0: s32):
+  %1: s32* = const {value=50345012}
+  %2: u8* = load %1 {off=0, signed=true, width=4}
+  %3: s32 = const {value=4}
+  %4: s32* = sub %1, %3
+  %5: s32 = load %4 {off=0, signed=true, width=4}
+  %6: s32 = const {value=1}
+  %7: s32 = const {value=0}
+  %8: u32 = icmp_sle %5, %7
+  cond_br %8, ^bb5(), ^bb1()
+^bb1():
+  %9: s32 = const {value=3}
+  br ^bb2(%6, %2, %5)
+^bb2(%10: s32, %11: u8*, %12: s32):
+  %13: s32 = and %0, %10
+  %14: s32 = const {value=0}
+  %15: u32 = icmp_eq %13, %14
+  cond_br %15, ^bb4(), ^bb3()
+^bb3():
+  store %11, %9 {off=19, width=1}
+  br ^bb4()
+^bb4():
+  %16: s32 = shl %10 {imm=1}
+  %17: s32 = const {value=80}
+  %18: u8* = add %11, %17
+  %19: s32 = const {value=1}
+  %20: s32 = sub %12, %19
+  %21: s32 = const {value=0}
+  %22: u32 = icmp_sgt %20, %21
+  cond_br %22, ^bb2(%16, %18, %20), ^bb5()
+^bb5():
+  ret
+}
+`;
+
+test('a read that only feeds a block parameter is refused', () => {
+  const on = emit(LOOPINIT, true);
+  expect(on).toBe(emit(LOOPINIT, false));
+  expect(count(on, '(u8 *)*(s32 *)50345012')).toBe(1); // one name, no copy through a temp
+});

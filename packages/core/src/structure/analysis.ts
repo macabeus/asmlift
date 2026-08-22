@@ -737,6 +737,28 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
    *  in that cone the def block is a FOLD ARTIFACT rather than the block the asm read in, and the
    *  whole premise this rule reads placement under does not hold there. Naming it also breaks the
    *  re-guard: `p != 0 && *p != 0` would emit `v0 = *p;` above its own null check. */
+  /** THE def-block placement rule's copy refusal: is every use of the value a successor ARGUMENT,
+   *  i.e. is the value nothing but a block parameter's incoming copy?
+   *
+   *  Then the parameter IS the read's home. Inlined, the edge assignment is the read
+   *  (`v1 = mplay->tracks;`); materialized it becomes two names and a copy between them
+   *  (`v0 = mplay->tracks; … v1 = v0;`) where the asm loaded straight into the register the
+   *  parameter became — `ldr r1,[r4,#0x2C]` once, never a `mov`. The four m4a track loops
+   *  (m4aMPlayVolumeControl, m4aMPlayPitchControl, m4aMPlayLFOSpeedSet, FadeOutBody) are that
+   *  shape, and the manufactured copy costs more than the placement gains.
+   *
+   *  Note what this does NOT claim: those reads really do sit above the loop guard in the asm, so
+   *  the placement inference was right and the SPELLING is what fails. Seating the read above the
+   *  guard AND as the loop variable is loop-init hoisting, a capability this rule does not have. */
+  const argUsedValues = new Set<Value>();
+  const operandUsedValues = new Set<Value>();
+  for (const b of fn.blocks) {
+    for (const op of b.ops) {
+      op.operands.forEach((v) => operandUsedValues.add(v));
+      op.successors.forEach((sc) => sc.args.forEach((v) => argUsedValues.add(v)));
+    }
+  }
+  const onlyFeedsBlockParams = (v: Value): boolean => argUsedValues.has(v) && !operandUsedValues.has(v);
   const shortCircuitGuarded = new Set<Value>();
   {
     const stack = fn.blocks.flatMap((b) =>
@@ -876,7 +898,8 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           dom &&
           !addressCone(op) &&
           !multiBlockHeaders.has(b) &&
-          !shortCircuitGuarded.has(r)
+          !shortCircuitGuarded.has(r) &&
+          !onlyFeedsBlockParams(r)
         ) {
           const at = consumers.map((c) => emitPos(c));
           const rb = at.some((p) => p === null) ? null : [...new Set(at.map((p) => p!.blk))];
