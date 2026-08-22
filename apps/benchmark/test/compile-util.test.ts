@@ -60,3 +60,21 @@ describe('pickDiagnostics (pinned)', () => {
     expect(pickDiagnostics(['banner', 'more banner'])).toEqual([]);
   });
 });
+
+describe('compilerDiagnostics is machine-independent', () => {
+  test('an absolute temp path collapses to its basename', () => {
+    const agbcc =
+      'agbcc failed\n' +
+      "/var/folders/q_/6tsqtbsd2ks6l381b5yc8fvh0000gn/T/bench-cand-lIW6hf/c.c:1076: `gBgDataPtrs' undeclared";
+    expect(compilerDiagnostics(agbcc)).toBe("c.c:1076: `gBgDataPtrs' undeclared");
+  });
+
+  test('two runs of the same failure differ only by their mkdtemp suffix, and now agree', () => {
+    const at = (dir: string) => compilerDiagnostics(`/tmp/${dir}/c.c:12: invalid operands to binary <<`);
+    expect(at('bench-cand-8113VC')).toBe(at('bench-cand-5F2Xyi'));
+  });
+
+  test('a relative path is left alone', () => {
+    expect(compilerDiagnostics('c.i:12: parse error')).toBe('c.i:12: parse error');
+  });
+});

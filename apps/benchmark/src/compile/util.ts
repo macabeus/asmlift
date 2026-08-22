@@ -43,6 +43,16 @@ export function pickDiagnostics(lines: string[]): string[] {
   return [...picked];
 }
 
+/** An ABSOLUTE path in a diagnostic, collapsed to its basename. Every file a compile module names
+ *  is an mkdtemp scratch file, so the directory is a machine- AND run-local accident: two runs of
+ *  the identical failure print different text, which lands verbatim in results.json and churns the
+ *  committed artifact on every regeneration (and across machines). The basename is the part that
+ *  carries information — `c.c:1076:` says which candidate file and line. Stops at `:` so the
+ *  line/column suffix survives, and the leading `/` must open a TOKEN so that prose like
+ *  `struct/union/class` is not mistaken for one. A relative path has no leading `/` and is
+ *  untouched. */
+const ABSOLUTE_PATH = /(^|[\s("'`<])\/(?:[^\s:]+\/)+([^\s:/]+)/g;
+
 /** The diagnostic lines of a compiler's output as one string (capped at 5×240 chars,
  *  newline-joined), falling back to the first non-empty lines. Embedded in the compile modules'
  *  thrown Error messages, which the evaluator turns into row error markers. */
@@ -54,7 +64,7 @@ export function compilerDiagnostics(s: string): string {
   const diags = pickDiagnostics(lines);
   return (diags.length > 0 ? diags : lines)
     .slice(0, 5)
-    .map((l) => l.slice(0, 240))
+    .map((l) => l.replace(ABSOLUTE_PATH, '$1$2').slice(0, 240))
     .join('\n');
 }
 
