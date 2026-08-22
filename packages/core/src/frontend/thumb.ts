@@ -1353,6 +1353,26 @@ export function lift(
     ({ labelIndex, preds } = buildCfg(asmBlocks));
   }
 
+  // ENTRY-REACHABLE BLOCKS. Dead code is not evidence about anything: a reload in a block that
+  // never executes is not a read of the slot, and an instruction there is not a fact about the
+  // frame this function actually builds. Two analyses below rest on that, so it is computed once
+  // rather than once each — the second one was written without it and a single unreachable
+  // `mov r0, sp; bl use` appended to a five-argument forwarder was enough to turn a loud decline
+  // into a call with every argument dropped.
+  const entryReachable = ((): Set<number> => {
+    const live = new Set<number>([0]);
+    for (let changed = true; changed;) {
+      changed = false;
+      for (let b = 0; b < asmBlocks.length; b++) {
+        if (!live.has(b) && preds[b].some((q) => live.has(q))) {
+          live.add(b);
+          changed = true;
+        }
+      }
+    }
+    return live;
+  })();
+
   // --- ISA-neutral SSA construction (shared Braun builder) ---
   // THE FRAME PARTITION (frontend/ssa.ts, FrameModel). `[0, localArea)` is the whole of what this
   // function owns: an incoming stack argument is keyed `@sarg<k>` rather than `sp@<off>` precisely
@@ -1670,15 +1690,19 @@ export function lift(
   // `sp` in an argument register while also staging stack arguments would defeat it, exactly as
   // hand-written asm that skipped an argument store defeats the filter.
   //
-  // BLOCK-LOCAL AND KILL-ON-MENTION, because this licenses an ACCEPTANCE and so may never
-  // over-approximate. A block is straight-line, so a capture that is still held when the `bl` is
+  // ENTRY-REACHABLE, BLOCK-LOCAL AND KILL-ON-MENTION, because this licenses an ACCEPTANCE and so
+  // may never over-approximate. Unreachable blocks are skipped for the same reason (a)'s reload
+  // scan skips them — an instruction that never executes is not a fact about the frame, and one
+  // appended `mov r0, sp; bl use` after the return was enough to license the whole function.
+  // A block is straight-line, so a capture that is still held when the `bl` is
   // decoded is held on every execution that reaches it; and a register is dropped the moment ANY
   // other instruction so much as MENTIONS it, since a write cannot happen without the token
   // appearing. That over-kills (a `cmp` on the register between the capture and the call ends it)
   // and over-killing only costs a decline. ARGUMENT registers only: the frame base merely live
   // across a call is not evidence that it was passed to one.
   const frameBaseHandedToCallee = ((): boolean => {
-    for (const ab of asmBlocks) {
+    for (const b of entryReachable) {
+      const ab = asmBlocks[b];
       const held = new Set<string>();
       for (const ins of ab.instrs) {
         if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') {
@@ -1870,19 +1894,7 @@ export function lift(
       // Entry-REACHABLE blocks only: a reload in dead code is not evidence that live code reads the
       // slot back, and counting it lets an argument store satisfy (a) on the strength of an
       // instruction that never executes.
-      const live = new Set<number>([0]);
-      for (let changed = true; changed;) {
-        changed = false;
-        for (let b = 0; b < asmBlocks.length; b++) {
-          if (live.has(b)) {
-            continue;
-          }
-          if (preds[b].some((q) => live.has(q))) {
-            live.add(b);
-            changed = true;
-          }
-        }
-      }
+      const live = entryReachable;
       const reloaded = new Set<number>();
       for (const b of live) {
         for (const ins of asmBlocks[b].instrs) {

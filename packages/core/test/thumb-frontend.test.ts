@@ -1044,6 +1044,25 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       );
     });
 
+    // DEAD CODE IS NOT EVIDENCE. This is verbatim agbcc output for a five-argument forwarder —
+    // `void ctl(int a,int b,int c,int d,int e){ five(a,b,c,d,e); }`, whose [sp,#0] store IS the
+    // fifth outgoing argument — with one unreachable block appended after the return. Scanning
+    // every block for the capture let that block license the whole frame, and the lift emitted
+    // `five()` with all five arguments dropped.
+    test('a capture in an unreachable block proves nothing', () => {
+      const deadCapture =
+        'ctl:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tldr\tr4, [sp, #0xc]\n\tstr\tr4, [sp]\n\tbl\tfive\n' +
+        '\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n' +
+        '.L_unreached:\n\tmov\tr0, sp\n\tbl\tuse\n\tbx\tlr\n';
+      expect(() => decompile('ctl', deadCapture, ARMV4T_AGBCC)).toThrow(/never reloaded/);
+      // CONTROL: the same three instructions on a REACHABLE path do license it, so the test is
+      // about reachability and not about the shape of the appended block.
+      const liveCapture = deadCapture.replace('\tbl\tfive\n', '\tbl\tfive\n\tb\t.L_unreached\n');
+      expect(decompile('ctl', liveCapture, ARMV4T_AGBCC, { prototypes: { use: { params: 1 } } }).source).toContain(
+        'use(&sp0)',
+      );
+    });
+
     // …AND WHAT THE ACCEPTANCE COSTS, refused. The object's extent is inferred from OUR accesses,
     // so a wider real object has its later words written by the callee — and any of them modelled
     // as an SSA slot is a value the slot model forwards ACROSS the call that overwrote it. This is
