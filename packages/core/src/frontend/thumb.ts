@@ -2116,8 +2116,11 @@ export function lift(
   // hand-written asm that reserves one word, stages it as a call's fifth argument and ALSO puts sp
   // in an argument register defeats this — the same producer assumption the contiguity filter below
   // already makes, and the same one an earlier cut of this comment wrongly claimed was the whole
-  // exposure while a plain `memcpy` for a by-value struct argument walked through it.
-  const capturedObjectIsTheWholeFrame = frameBasePassedToCallee && localArea === 4;
+  // exposure while a plain `memcpy` for a by-value struct argument walked through it. The producer
+  // is named in the gate rather than left to the prose: `armv4t` has one compiler entry today, and
+  // a second one free to overlay a dead one-word local with a one-word outgoing area would inherit
+  // an acceptance whose only evidence is an agbcc compile table.
+  const capturedObjectIsTheWholeFrame = target.compiler === 'agbcc' && frameBasePassedToCallee && localArea === 4;
 
   const slotsOffReason = slotModelBlocker();
   const slotsOk = slotsOffReason === null;

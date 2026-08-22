@@ -984,6 +984,16 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       expect(out.source).toContain('use(&sp0)');
     });
 
+    // …and the evidence for all of it is an agbcc compile table, so the gate names agbcc. `armv4t`
+    // has one compiler entry today; a second one free to overlay a dead one-word local with a
+    // one-word outgoing area would otherwise inherit a proof nobody ran for it.
+    test('a second armv4t compiler does not inherit the proof', () => {
+      const notAgbcc = { ...ARMV4T_AGBCC, compiler: 'sdt' };
+      expect(() => decompile('f', addrTaken, notAgbcc, { prototypes: { use: { params: 1 } } })).toThrow(
+        /never reloaded/,
+      );
+    });
+
     // THE PIN THE PROOF RESTS ON. With a five-argument call in the same function, agbcc stages
     // argument 5 at [sp,#0] and the address-taken local moves ABOVE it — so `&w` is COMPUTED and
     // there is no bare `mov rD, sp` anywhere. Compiled, `void f(u32 i, s32 a, s32 b){ s32 w;
