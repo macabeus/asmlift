@@ -77,6 +77,15 @@ function run(sfn: SFn, sched: Schedule): Val[] {
           }
           break;
         }
+        case 'dowhile': {
+          // body-first: the body runs once before the condition is ever evaluated
+          const n = 1 + (sched() % 3);
+          for (let i = 0; i < n; i++) {
+            exec(s.body);
+            evalExpr(s.cond);
+          }
+          break;
+        }
         case 'for': {
           const n = sched() % 3;
           exec([s.init]);
@@ -110,9 +119,15 @@ function compare(orig: SFn, cand: SFn, draws: number[]): 'same' | 'undefined-onl
   return a.some((v, i) => v !== b[i]) ? 'undefined-only' : 'same';
 }
 
-// The generator emits only what the gate reasons about: constant-fed locals, reads, and the three
-// positions where a later-indexed statement can run before an earlier one — a loop body, and a
-// `for`'s init and inc.
+// The generator emits only what the gate reasons about: constant-fed locals, reads, and the
+// positions a back edge re-runs — a loop body (test-at-top, body-first, and `for`), a loop's own
+// condition, and a `for`'s inc. A `for`'s INIT is deliberately not one of them: it runs once,
+// ahead of the condition, which is why the span model places it outside its own loop.
+//
+// KNOWN GAP: `switch` fall-through, `break` and `continue` are not emitted, and a `for`'s init and
+// inc are always plain assigns, so the differential covers neither pairs split across the first
+// three nor a loop standing in an init/inc. Nothing else covers the first three; the init case is
+// pinned directly by coalesce.test.ts ('a loop in a `for`s INIT encloses its own …').
 const LOCALS = ['a', 'b', 'c'];
 
 function mulberry32(seed: number): () => number {
@@ -153,10 +168,14 @@ function generate(seed: number): SFn {
         out.push(assign());
       } else if (r < 0.75 || depth === 0) {
         out.push(obs());
-      } else if (r < 0.85) {
+      } else if (r < 0.82) {
         out.push({ k: 'if', cond: cond(), then: block(depth - 1), else: block(depth - 1) });
-      } else if (r < 0.93) {
+      } else if (r < 0.89) {
+        // test-at-top keeps its share: the ZERO-TRIP path is what the accepted-not-fixed
+        // carve-out rests on, and a do-while never has one
         out.push({ k: 'while', cond: cond(), body: block(depth - 1) });
+      } else if (r < 0.94) {
+        out.push({ k: 'dowhile', cond: cond(), body: block(depth - 1) });
       } else {
         out.push({ k: 'for', init: assign(), cond: cond(), inc: assign(), body: block(depth - 1) });
       }

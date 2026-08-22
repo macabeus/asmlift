@@ -2,10 +2,21 @@
 // merges the SOURCE AND DESTINATION OF A COPY, which is copy coalescing; this one merges two
 // UNRELATED locals whose spans are disjoint, which is register reuse. Neither subsumes the other —
 // a copy pair overlaps by construction, so `overlap` below rejects every candidate that one takes.
+//
+// TWO admission paths live here, each with its own gate table and its own reading of loops. The
+// SPAN path (COALESCE_GATES) proves disjoint liveness from preorder position, so it asks which
+// loops RE-RUN a mention of each local and refuses a pair only when one loop holds both. The
+// ARM-DISJOINT path (ARM_DISJOINT_GATES) proves the two never coexist because one `if` picks
+// between them, so it asks only whether ANY loop encloses that `if` — a second entry breaks the
+// argument however the arms' own loops relate. `coalesceCandidates` offers both.
 import { typeToString } from '../ir/types';
 import type { Expr, SFn, Stmt } from './ast';
 import { exprChildren, mapExprChildren, stmtChildren, stmtExprs } from './ast';
 import { type Gate, firstRejection } from './gates';
+
+/** THE loop-kind test, shared by both admission paths in this file — the span model's enclosure
+ *  walk and the arm path's `visit`. */
+const isLoop = (s: Stmt): boolean => s.k === 'while' || s.k === 'dowhile' || s.k === 'for';
 
 function namesIn(e: Expr, out: Set<string>): void {
   // `addr` names a GLOBAL, never a local — collected anyway. A name reaching BOTH forms would
@@ -25,39 +36,110 @@ function mentions(e: Expr, n: string): boolean {
 export interface Span {
   first: number;
   last: number;
-  inLoop: boolean;
+  /** every loop that RE-RUNS a mention of the local — the whole ancestor chain, not just the
+   *  innermost, because an outer loop re-runs an inner one's statements too. A `for`'s init is
+   *  not re-run by its own loop, so it contributes only the enclosing ones. */
+  loops: Set<Stmt>;
   constFed: boolean;
   /** the local's FIRST mention is a write, not a read */
   firstIsWrite: boolean;
 }
+/** The INDUCTION VARIABLE a `for` drives: the local its init writes and whose step computes the
+ *  next value from the CURRENT one, arithmetically. Those two writes are the variable's own
+ *  definition and its own history — not a feed from somewhere the compiler had a reason to
+ *  respect, which is what `const-fed` reads every non-const assign as.
+ *
+ *  Both halves of the step test are load-bearing, and neither is what the pipeline's `for`
+ *  producers check — `recognizeForLoops` (structure/structure.ts) admits ANY self-referencing step,
+ *  and l3/reindex.ts's two walk rewrites mint `iv = iv + 1`, so this predicate is implied by all
+ *  three rather than trusting any of them; a `for` reaching here may be a walk, not a count. `a = *p` (no self-read) and `p = p->next` / `a = tab[a]` (a self-read
+ *  that is still a MEMORY read every iteration) are both locals `const-fed` exists to refuse; only
+ *  arithmetic over the variable is its own history. The read must be a `var`: `mentions` counts an
+ *  `addr` too, and `&a` is not a read of `a`. */
+const readsVarArithmetically = (e: Expr, n: string): boolean => {
+  if (e.k === 'index' || e.k === 'field' || e.k === 'call' || e.k === 'marker' || e.k === 'addr') {
+    return false;
+  }
+  return (e.k === 'var' && e.name === n) || exprChildren(e).some((c) => readsVarArithmetically(c, n));
+};
+const stepIsArithmetic = (e: Expr, n: string): boolean => readsVarArithmetically(e, n) && !hasMemoryRead(e);
+const hasMemoryRead = (e: Expr): boolean =>
+  e.k === 'index' || e.k === 'field' || e.k === 'call' || e.k === 'marker' || exprChildren(e).some(hasMemoryRead);
+const forInductionVar = (s: Extract<Stmt, { k: 'for' }>): string | null =>
+  s.init.k === 'assign' &&
+  s.inc.k === 'assign' &&
+  s.init.name === s.inc.name &&
+  stepIsArithmetic(s.inc.value, s.inc.name)
+    ? s.init.name
+    : null;
+
 function spans(body: Stmt[]): Map<string, Span> {
   const out = new Map<string, Span>();
   let at = 0;
-  const walk = (list: Stmt[], inLoop: boolean): void => {
-    for (const s of list) {
-      at++;
-      const here = new Set<string>();
-      if (s.k === 'assign') here.add(s.name);
-      for (const e of stmtExprs(s)) namesIn(e, here);
-      for (const n of here) {
-        const sp = out.get(n) ?? {
-          first: at,
-          last: at,
-          inLoop,
-          constFed: true,
-          // an assign that ALSO READS the name (`b = g(b)`) is not a pure write; treating it as one
-          // let `g` receive the absorbed value
-          firstIsWrite: s.k === 'assign' && s.name === n && !stmtExprs(s).some((e) => mentions(e, n)),
-        };
-        sp.last = at;
-        sp.inLoop ||= inLoop;
-        if (s.k === 'assign' && s.name === n && s.value.k !== 'const') sp.constFed = false;
-        out.set(n, sp);
+  /** the statement's OWN mentions — an assign target, a condition, a scrutinee — at its own
+   *  position, inside the loops it runs under */
+  const record = (s: Stmt, loops: readonly Stmt[], inductionVar: string | null = null): void => {
+    at++;
+    const here = new Set<string>();
+    if (s.k === 'assign') here.add(s.name);
+    for (const e of stmtExprs(s)) namesIn(e, here);
+    for (const n of here) {
+      const sp = out.get(n) ?? {
+        first: at,
+        last: at,
+        loops: new Set<Stmt>(),
+        constFed: true,
+        // an assign that ALSO READS the name (`b = g(b)`) is not a pure write; treating it as one
+        // let `g` receive the absorbed value
+        firstIsWrite: s.k === 'assign' && s.name === n && !stmtExprs(s).some((e) => mentions(e, n)),
+      };
+      sp.last = at;
+      for (const l of loops) {
+        sp.loops.add(l);
       }
-      walk(stmtChildren(s), inLoop || s.k === 'while' || s.k === 'dowhile' || s.k === 'for');
+      if (s.k === 'assign' && s.name === n && s.value.k !== 'const' && n !== inductionVar) sp.constFed = false;
+      out.set(n, sp);
     }
   };
-  walk(body, false);
+  /** the loop set a while/do-while's own condition and children run under — its own. A `for` is
+   *  routed separately: `stmtChildren` hands back its init too, and the init is the one child its
+   *  loop does not re-run. */
+  const under = (s: Stmt, loops: readonly Stmt[]): readonly Stmt[] => (isLoop(s) ? [...loops, s] : loops);
+  const walk = (list: Stmt[], loops: readonly Stmt[]): void => {
+    for (const s of list) {
+      // A `for`'s INIT runs ONCE, ahead of the condition and outside the loop; its cond, inc and
+      // body run per iteration. Walking the init first is what makes `for (i = *p; …)` read as a
+      // local whose first mention is a WRITE, which is what it is.
+      if (s.k === 'for') {
+        const inductionVar = forInductionVar(s);
+        // The INIT runs once, so the `for` does not re-run it — but only an ASSIGN there is a
+        // shape this case places directly. Anything else (a loop, an `if`) goes through the generic
+        // walk, which places it and its children by its own kind; `forInductionVar` requires an
+        // assign init, so `counter` is null on that path anyway. The INC mirrors it, where the
+        // routing is uniformity rather than coverage: an inc's statements sit inside the `for`,
+        // which is already in every span the pair could share.
+        if (s.init.k === 'assign') {
+          record(s.init, loops, inductionVar);
+        } else {
+          walk([s.init], loops);
+        }
+        const inner = [...loops, s];
+        record(s, inner);
+        walk(s.body, inner);
+        if (s.inc.k === 'assign') {
+          record(s.inc, inner, inductionVar);
+        } else {
+          walk([s.inc], inner);
+        }
+        continue;
+      }
+      // a while/do-while CONDITION re-runs with the body, so it counts as inside its own loop
+      const inner = under(s, loops);
+      record(s, inner);
+      walk(stmtChildren(s), inner);
+    }
+  };
+  walk(body, []);
   return out;
 }
 function rename(body: Stmt[], from: string, to: string): Stmt[] {
@@ -96,20 +178,32 @@ export interface MergePair {
   /** either local is object-volatile or carries a pointee-volatile qualifier — typeToString
    *  spells neither, so `sameType` alone lets a qualified local absorb into a plain one */
   eitherIsVolatile: boolean;
+  /** some loop holds a mention of BOTH locals */
+  sharesLoop: boolean;
 }
 
 /** The admission rules, in evaluation order. Two arguments the `why` fields have no room for:
  *
- *  WHAT `loop` BUYS is the right to read preorder statement order as liveness. Preorder is a
- *  topological order of the CFG except where a later-indexed statement can run before an earlier
- *  one, and every position that does that — a `for`'s `init`/`inc`, any loop body — is inside a
- *  loop. A loop's own CONDITION is not covered: it is visited at the loop statement's own index with
- *  the ENCLOSING flag, which is safe only because a condition cannot WRITE.
+ *  WHAT `shared-loop` BUYS is the right to read preorder statement order as liveness. Preorder is a
+ *  topological order of the CFG except where a back edge runs a later-indexed statement before an
+ *  earlier one — and a back edge returns only to the head of its OWN loop, whose body is one
+ *  contiguous preorder range. So the reordering can reach a PAIR only when some loop holds a
+ *  mention of both locals: there the survivor's write can be followed, on the next iteration, by
+ *  the absorbed local's read. Where no loop holds both — two sibling loops, or one local living
+ *  before the loop the other lives in — no back edge connects the two ranges and preorder IS
+ *  execution order. The ancestor chain is what the span records, not the innermost loop: an outer
+ *  loop re-runs an inner one's statements, so it can reorder a pair that no inner loop shares.
  *
  *  ABLATE `first-is-write` ALONE AND NOTHING HAPPENS — `const-fed` masks it, so a survivor first
  *  mentioned by a read was uninitialized there in the original too. Drop both to see what it does,
  *  which is to bound the accepted class below by an order of magnitude. `const-fed` likewise bounds
- *  candidate growth: merges go as `L(L-1)/2` in the local count, each a distinct compile. */
+ *  candidate growth: merges go as `L(L-1)/2` in the local count, each a distinct compile. On a
+ *  loop-heavy function it is what bounds them, because `shared-loop` refuses only pairs a back
+ *  edge can reorder: klonoa's LoadBGTilemapData declares 43 locals — 1806 ordered pairs — and
+ *  `const-fed` is what keeps three of them (ablate it and the span path offers 273). A rule
+ *  refusing every in-loop local would make that bound redundant; this one does not, so any further
+ *  relaxation of `const-fed` is a multiplier, and three call sites pay it (`/coalesce`,
+ *  `/scopebase-coalesce`, the `/livebase` pairings). */
 export const COALESCE_GATES: readonly Gate<MergePair>[] = [
   {
     id: 'param',
@@ -131,15 +225,19 @@ export const COALESCE_GATES: readonly Gate<MergePair>[] = [
     rejects: (c) => c.eitherIsVolatile,
   },
   {
-    id: 'loop',
-    why: 'a back edge can run a later statement first, so preorder stops implying disjoint liveness',
+    id: 'shared-loop',
+    why: 'a back edge of a loop holding both locals re-runs the absorbed read after the survivor is written',
     sound: true,
-    guardedBy: 'coalesce-fuzz.test.ts: dropping it clobbers a defined read',
-    rejects: (c) => c.x.inLoop || c.y.inLoop,
+    // The ablation sweep proves this gate is load-bearing WHILE it is in the table; it is blind to
+    // the two ways the rule can go wrong from here — a relaxation, and an outright deletion, which
+    // would simply drop the gate from the table the sweep iterates. Both land on the arm named
+    // below, which checks what the pass still emits.
+    guardedBy: 'coalesce-fuzz.test.ts: no candidate the pass emits changes a DEFINED read',
+    rejects: (c) => c.sharesLoop,
   },
   {
     id: 'const-fed',
-    why: 'a load-fed local is one the compiler had a reason to keep where it was',
+    why: 'a load-fed local — other than a for induction variable, whose feeds are its own — is one the compiler had a reason to keep where it was',
     sound: false,
     rejects: (c) => !c.x.constFed || !c.y.constFed,
   },
@@ -169,7 +267,7 @@ export const COALESCE_GATES: readonly Gate<MergePair>[] = [
  *  emitted and the differ referees.
  *
  *  ACCEPTED, NOT FIXED: a survivor assigned only on SOME paths still absorbs the other's value on
- *  the paths that skip it. The original read an uninitialized local there, so both spellings are
+ *  the paths that skip it — a loop that runs zero iterations is one such path. The original read an uninitialized local there, so both spellings are
  *  ill-defined rather than one being wrong — but this is a real difference and the differ, not any
  *  gate, is what keeps it from faking a match. The fuzz asserts it stays reachable, so the carve-out
  *  that excuses it cannot quietly become dead. */
@@ -201,12 +299,19 @@ export interface ArmPair {
   bothArmConstInit: boolean;
 }
 
-/** The arm-disjoint admission — the SECOND way a pair can merge, for pairs the span model must
- *  refuse (`loop` rejects any in-loop local; `const-fed` rejects every counter). Two locals
- *  confined to OPPOSITE arms of one `if` never coexist at runtime: the `if` picks one arm, so no
- *  read of either can observe the other's write — no liveness reasoning needed. That argument is
- *  exactly what the `loop` gate here protects: a loop ancestor re-enters the `if`, later entries
- *  can take the other arm, and a value written on one visit becomes readable on the next. */
+/** The arm-disjoint admission — the SECOND way a pair can merge, and what it uniquely buys is the
+ *  DIRECTION: the span path's survivor is always the later RANGE, because `overlap` orders the pair
+ *  by position, while this path's is the earlier DECLARATION — the two disagree exactly when
+ *  declaration order disagrees with range order. It also admits a pair the span gates refuse for a
+ *  different reason: `arm-init` is a FIRST-MENTION rule where `const-fed` is an every-assign one,
+ *  so arms that open with a const write and then compute (`x = 0; x = x + 1;`) merge here and not
+ *  there. Two locals confined to
+ *  OPPOSITE arms of one `if` never coexist at runtime: the `if` picks one arm, so no read of either
+ *  can observe the other's write — no liveness reasoning needed. That argument is exactly what the
+ *  `loop` gate here protects: a loop ancestor re-enters the `if`, later entries can take the other
+ *  arm, and a value written on one visit becomes readable on the next. Note this gate wants ANY
+ *  enclosing loop, not the span model's shared-loop rule: never-coexisting is a claim about one
+ *  entry, so a second entry breaks it however the two arms' loops relate. */
 export const ARM_DISJOINT_GATES: readonly Gate<ArmPair>[] = [
   {
     id: 'type',
@@ -332,7 +437,7 @@ export function armDisjointUnder(
           }
         }
       }
-      visit(stmtChildren(st), inLoop || st.k === 'while' || st.k === 'dowhile' || st.k === 'for');
+      visit(stmtChildren(st), inLoop || isLoop(st));
     }
   };
   visit(sfn.body, false);
@@ -377,6 +482,7 @@ export function coalesceUnder(
         sameType: typeOf.get(a) === typeOf.get(b),
         eitherIsParam: params.has(a) || params.has(b),
         eitherIsVolatile: volatiles.has(a) || volatiles.has(b),
+        sharesLoop: [...x.loops].some((l) => y.loops.has(l)),
       });
       if (refused !== null) {
         refusals.set(refused, (refusals.get(refused) ?? 0) + 1);
