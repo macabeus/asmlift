@@ -206,10 +206,9 @@ test('an arm with NO body of its own has no layout evidence, and falls to the en
 test('a `default:` laid out among the cases is spelled there, with the `break;` that needs', () => {
   // The default is an arm, and gcc 2.9-arm expands its body in source order like any other:
   // `case 0, case 1, default, case 2, case 3` compiles to a block layout with the default's body
-  // third, which is this fixture. Emitting the label last instead moves every instruction after it
-  // — recompiling the layout spelling with agbcc reproduces the target exactly, the last spelling
-  // differs by 6 instructions. A default that is not last needs a `break;` of its own, or control
-  // would drop into the case below it.
+  // third, which is this fixture. Recompiling the layout spelling with agbcc reproduces the target
+  // exactly and the last spelling does not. A default that is not last needs a `break;` of its own,
+  // or control would drop into the case below it.
   const out = of(dispatch([0, 1, 'D', 2, 3], '.Ldef'));
   expect(out).toMatch(/case 1:\s+v0 = a1 \+ 2;\s+break;\s+default:\s+v0 = 99;\s+break;\s+case 2:/);
   expect(armOrder(out)).toEqual([0, 1, 2, 3]);
@@ -357,8 +356,7 @@ test('`stmtChildren` lists a mid-placed default where the backend prints it', ()
 // `default:` last. The TABLE's slots are ascending by construction (slot i is case i), so grouping
 // them in table order spells the arms 0..4 — while the bodies are laid out in the order the arms
 // were written, exactly as in the comparison tree above. Recompiling the layout spelling with agbcc
-// reproduces the target; the ascending spelling differs by 10 to 26 instructions depending on the
-// permutation.
+// reproduces the target and the ascending spelling does not.
 const table = (tail = '\tb\t.L3\n', defaultAfter = 5) => {
   const bodies = [
     `.L4:\n\tadd\tr1, r2, #0x4\n${tail}`, // case 3 — written FIRST, so laid out first

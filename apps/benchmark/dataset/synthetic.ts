@@ -1613,11 +1613,10 @@ export const SYNTHETIC: SynthSpec[] = [
   // is a bare EXIT to the same place carrying the same values, and this row's real default arm has
   // a body, so nothing may fold it into the fall-out.
   //
-  // Two more rows, one per half of what the ordering rule left out when it first shipped:
+  // Two rows for the halves of the ordering rule the four above cannot see:
   //   • `swdefmid` — the same four cases with `default: w = 99;` written THIRD. agbcc expands the
   //     default's body where the source wrote it like any other arm, so its block lands between
-  //     case 1's and case 2's, and emitting the label last moves every instruction after it. Every
-  //     other `default:` in this file is written last, where nothing could see the gap.
+  //     case 1's and case 2's, and emitting the label last moves every instruction after it.
   //   • `swjtorder` — five dense arms written 3, 0, 4, 1, 2, with a default. Five is enough for
   //     agbcc to emit a jump TABLE, whose slots are ascending by construction: grouping them in
   //     table order spells the arms 0..4 while the bodies are laid out in the order the arms were
@@ -1637,13 +1636,11 @@ export const SYNTHETIC: SynthSpec[] = [
   // do-while whose four arms all decide the same three locals. It moves furthest (38) because its
   // residual also carries the arm-order half and the loop's own value placement.
   //
-  // NOT the same gap as `uninit_sw` above, which contains the identical dispatch and also declined
-  // to if-nesting: there the arms leave a local undefined on the fall-out path, so the residual was
-  // read as dominated by the fabricated parameter that models the def-less read, and the row was
-  // written off as unable to gate this capability. That was wrong — closing the arm grouping took
-  // `uninit_sw` to MATCH, so the switch was the whole of what stood between it and its target and
-  // the def-less read cost it nothing. `swarms` still assigns `w = 0` first, which is what keeps
-  // the two rows separable: it isolates the dispatch with no `uninit-local` gap behind it at all.
+  // NOT the same gap as `uninit_sw` above, which contains the identical dispatch: there the arms
+  // leave a local undefined on the fall-out path, and the arm grouping alone takes that row to
+  // MATCH, so the def-less read costs it nothing and the switch was all that stood between it and
+  // its target. `swarms` assigns `w = 0` first, which is what keeps the two separable: it isolates
+  // the dispatch with no `uninit-local` gap behind it at all.
   //
   // agbcc only, and for the same reason the read-once family is: the inference "the asm's block
   // order is the source's arm order" is a fact about a compiler with no scheduler and no block

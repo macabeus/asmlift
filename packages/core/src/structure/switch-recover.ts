@@ -482,12 +482,11 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     const defaults = [...defaultCands].filter((d) => !caseBlocks.has(d));
     // ONE default reached by SEVERAL leaves. `balance_case_nodes`/`emit_case_nodes` give each
     // subtree that runs out of case values its own jump to the default, so agbcc's four-case tree
-    // reaches it through two `b .Ldefault` blocks — and comparing candidates by BLOCK counted that
-    // one default as two and declined the whole tree. Two leaves are the same default when each is
+    // reaches it through two `b .Ldefault` blocks, which comparing candidates by BLOCK would count
+    // as two different defaults and decline. Two leaves are the same default when each is
     // a bare EXIT to the same place carrying the same values: nothing about them can then differ,
-    // so the representative emits what either would.
-    // Anything else — a leaf with a body, two leaves passing different values — is still two
-    // defaults and still declines.
+    // so the representative emits what either would. Anything else — a leaf with a body, two
+    // leaves passing different values — is still two defaults and still declines.
     if (defaults.length > 1 && !defaults.every((d) => sameBareExit(defaults[0], d))) {
       return null;
     }
@@ -496,15 +495,11 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     // edge's only emission is its parallel copy (structure.ts argAssignsFor) — so an entry the
     // dispatch hands values to would lose them: `switch (x) { case 1: … case 2: … }` where the
     // fall-out edge also carried `w = 0` would drop that write silently. Case entries are held to
-    // the same rule where the walk records them (`asLeafOrTest`), by the same argument.
-    //
-    // The refusal is deliberately structural rather than "would these copies elide anyway", and
-    // strictness costs nothing here for a reason about the compiler rather than about a corpus:
-    // agbcc's `emit_case_nodes` reaches the default through a jump of its OWN — the bare
-    // `b .Ldefault` blocks collapsed above — and that jump carries the copies into the default ARM,
-    // so a dispatch branch handing the default entry its values directly is not a shape agbcc
-    // emits. A compiler that does emit it declines LOUD to if-recovery, which spells every copy
-    // the asm performs.
+    // the same rule where the walk records them (`asLeafOrTest`), by the same argument. Structural
+    // rather than "would these copies elide anyway", and strict at no cost: agbcc reaches its
+    // default through a jump of its OWN, which carries the copies into the default ARM, so a
+    // dispatch branch handing that entry its values is not a shape it emits. One that does declines
+    // LOUD to if-recovery, which spells every copy the asm performs.
     if (defaultBlk && defaultBlk.params.length) {
       return null;
     }
@@ -543,31 +538,18 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
       }
     }
 
-    // Build the switch. Bodies delegate to the existing structureRegion (loops/ifs inside cases,
-    // the onStack guard — all reused).
+    // ARM ORDER. Every arm here is CLOSED (`allArmsClosed`) and the case values are disjoint (PRE3),
+    // so the order carries no meaning and is pure matching evidence: ascending case VALUE is the
+    // neutral spelling, and where a compiler has declared `switchArmsFollowLayout` the layout of
+    // the bodies is the SOURCE's arm order instead.
     //
-    // ARM ORDER. Every arm here is CLOSED (`allArmsClosed` above — Regime A declines fall-through
-    // outright, unlike the `switch_br` path in structure.ts where emission order is load-bearing
-    // for correctness), and the case values are disjoint (PRE3 simulates the tree per value), so
-    // the order is free of meaning and pure matching evidence. Two orders are available:
-    //   - ascending case VALUE, the neutral default, and all a compiler that reorders blocks
-    //     leaves behind;
-    //   - the order the ASSEMBLY lays the bodies out, which is the SOURCE's arm order for a
-    //     compiler that emits case bodies as it walks the arms and never moves them afterwards.
-    //     `switchArmsFollowLayout` is where such a compiler declares that (TargetDescription
-    //     .compilerBehaviors), on its own evidence — never inherited.
-    // Two case VALUES can share one body block, and they then have the same layout index — so
-    // ascending value stays the tie-break. What produces such a tie on agbcc is jump.c's
-    // CROSS-JUMP, which merges two arms with identical bodies into one block both `beq`s reach
-    // (arms written 4, 0, 5, 3 with cases 4 and 3 both `n + 9` lay out as case 0, case 5, then one
-    // shared block). Stacked labels are NOT that source: agbcc compiles `case 2: case 3: foo();`
-    // to a range test (`cmp #3 / bgt`), which the walk reads as navigation and declines. So the
-    // tie-break orders arms whose relative order the MERGE erased, where ascending value is the
-    // neutral spelling rather than a recovered one.
-    // The other way an arm has no layout evidence: one the source wrote with no body of its own
-    // (`case k: break;`). Its dispatch edge resolves to the MERGE, so it inherits the merge's index
-    // and sorts after every arm that HAS a body, wherever the source put it. That position is a
-    // fallback, not a recovery — the assembly says nothing about it either way.
+    // TWO arms the layout cannot order, both falling back rather than recovering:
+    //   - two case VALUES sharing one body block share its index. jump.c's CROSS-JUMP is what
+    //     produces that on agbcc (stacked labels are not: `case 2: case 3:` compiles to a range test
+    //     the walk reads as navigation and declines), so the tie is one the MERGE erased, and
+    //     ascending value breaks it;
+    //   - an arm with no body of its own (`case k: break;`) has its edge resolve to the MERGE, so it
+    //     inherits the merge's index and sorts after every arm that HAS a body.
     const scrutExpr = expr(scrut);
     const sortedCases = [...cases.entries()].sort((a, c) =>
       switchArmsFollowLayout ? layoutIndex(a[1]) - layoutIndex(c[1]) || a[0] - c[0] : a[0] - c[0],
@@ -582,7 +564,6 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     const defBody = defaultBlk ? structureRegion(defaultBlk, merge) : [];
     // The `default:` arm is an ARM: where its block is laid out is read exactly as a case body's is
     // (`defaultLayoutPos`). Every arm here is closed, so the label diverts nothing wherever it lands.
-    //
     // The dispatch placed that block itself when the last test simply RAN OUT into it and no other
     // subtree jumps there — the two references the tree walk can count.
     const dispatchTargets = [...seen].flatMap((t) =>
