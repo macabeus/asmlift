@@ -1,4 +1,5 @@
-// Live-range coalescing (l3/coalesce.ts): two constant-fed locals whose ranges cannot overlap.
+// Live-range coalescing (l3/coalesce.ts): two locals whose ranges cannot overlap and that no loop
+// re-runs together — constant-fed, or fed only by their own `for` induction step.
 //
 // SSA destruction names each merge independently, so two unrelated phis get two locals where the
 // compiler held one register. WHICH pair it shared is not derivable from the tree — on the row this
@@ -15,7 +16,6 @@ import {
   coalesceCandidates,
   coalesceUnder,
 } from '../src/l3/coalesce';
-import { without } from '../src/l3/gates';
 
 const asg = (n: string, v: number): Stmt => ({ k: 'assign', name: n, value: { k: 'const', value: v } });
 const use = (n: string): Stmt => ({ k: 'exprstmt', value: { k: 'call', fn: 'f', args: [{ k: 'var', name: n }] } });
@@ -57,7 +57,7 @@ describe('gates', () => {
     expect(coalesceCandidates(fn([asg('a', 1), asg('b', 2), use('a'), use('b')]))).toEqual([]);
   });
 
-  test('a mention inside a LOOP blocks it — the sound-critical gate', () => {
+  test('a mention inside the SAME loop blocks it — the sound-critical gate', () => {
     // Without this, preorder order stops implying disjoint liveness: a back edge can run a later
     // statement before an earlier one. One shape, pinned; `coalesce-fuzz.test.ts` is what quantifies
     // over shapes, and it also checks that suppressing the gate really does clobber.
@@ -225,28 +225,39 @@ const forLoop = (n: string, init: Expr, body: Stmt[]): Stmt => ({
 const c0: Expr = { k: 'const', value: 0 };
 
 describe('the loop rule', () => {
-  // A counter's own increment is a non-const feed, so `const-fed` masks the loop rule on every
-  // loop shape. The ablation is the file's own seam for that: the real predicate, real input.
-  const merges = (body: Stmt[], locals?: SFn['locals']) =>
-    coalesceUnder(without(COALESCE_GATES, 'const-fed'), fn(body, locals)).candidates;
+  const run = (body: Stmt[]) => coalesceUnder(COALESCE_GATES, fn(body));
 
   test('counters in SIBLING loops merge — no back edge joins the two ranges', () => {
-    const out = merges([forLoop('a', c0, [use('a')]), forLoop('b', c0, [use('b')])]);
+    const out = coalesceCandidates(fn([forLoop('a', c0, [use('a')]), forLoop('b', c0, [use('b')])]));
     expect(out).toHaveLength(1);
     expect(names(out[0].sfn)).toEqual(['b']);
   });
 
   test('two locals in the SAME loop never merge — the next iteration reads the absorbed value', () => {
-    expect(merges([{ k: 'while', cond: c0, body: [asg('a', 1), use('a'), asg('b', 2), use('b')] }])).toHaveLength(0);
+    const r = run([{ k: 'while', cond: c0, body: [asg('a', 1), use('a'), asg('b', 2), use('b')] }]);
+    expect(r.candidates).toHaveLength(0);
+    expect(r.refusals.get('shared-loop')).toBeGreaterThan(0); // the rule that refused, not a neighbour
   });
 
   test('sibling INNER loops under a shared OUTER loop never merge — the outer back edge reorders them', () => {
     const nested: Stmt = { k: 'while', cond: c0, body: [forLoop('a', c0, [use('a')]), forLoop('b', c0, [use('b')])] };
-    expect(merges([nested])).toHaveLength(0);
+    const r = run([nested]);
+    expect(r.candidates).toHaveLength(0);
+    expect(r.refusals.get('shared-loop')).toBeGreaterThan(0);
   });
 
   test('a local living BEFORE the loop another lives in merges — no loop holds both', () => {
-    expect(merges([asg('a', 1), use('a'), forLoop('b', c0, [use('b')])])).toHaveLength(1);
+    const out = coalesceCandidates(fn([asg('a', 1), use('a'), forLoop('b', c0, [use('b')])]));
+    expect(out).toHaveLength(1);
+    expect(names(out[0].sfn)).toEqual(['b']); // the later range survives, as `overlap` orders it
+  });
+
+  test('a loop standing in a `for`s INIT position still encloses its own body', () => {
+    // the init runs once, so it is outside the `for` — but a loop THERE re-runs its own children,
+    // and a pair inside it must not read as straight-line
+    const initLoop: Stmt = { k: 'while', cond: c0, body: [use('a'), asg('a', 11), asg('b', 22), use('b')] };
+    const r = run([{ ...(forLoop('c', c0, [use('c')]) as Extract<Stmt, { k: 'for' }>), init: initLoop }]);
+    expect(r.candidates.map((x) => x.merged)).not.toContain('a-b');
   });
 });
 
@@ -263,10 +274,22 @@ describe('the counter model', () => {
     expect(names(out[0].sfn)).toEqual(['b']);
   });
 
-  test('a load-fed local that is NOT a counter still refuses', () => {
-    const out = coalesceCandidates(
+  test('a load-fed local that is NOT an induction variable still refuses', () => {
+    const r = coalesceUnder(
+      COALESCE_GATES,
       fn([forLoop('a', c0, [use('a')]), { k: 'assign', name: 'b', value: load }, use('b')]),
     );
-    expect(out).toHaveLength(0);
+    expect(r.candidates).toHaveLength(0);
+    expect(r.refusals.get('const-fed')).toBeGreaterThan(0);
+  });
+
+  test('a `for` whose STEP re-loads memory is not an induction variable — the exemption needs the self-read', () => {
+    const reloaded: Stmt = {
+      ...(forLoop('b', load, [use('b')]) as Extract<Stmt, { k: 'for' }>),
+      inc: { k: 'assign', name: 'b', value: load },
+    };
+    const r = coalesceUnder(COALESCE_GATES, fn([forLoop('a', c0, [use('a')]), reloaded]));
+    expect(r.candidates).toHaveLength(0);
+    expect(r.refusals.get('const-fed')).toBeGreaterThan(0);
   });
 });

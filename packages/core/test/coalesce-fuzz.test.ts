@@ -77,6 +77,15 @@ function run(sfn: SFn, sched: Schedule): Val[] {
           }
           break;
         }
+        case 'dowhile': {
+          // body-first: the body runs once before the condition is ever evaluated
+          const n = 1 + (sched() % 3);
+          for (let i = 0; i < n; i++) {
+            exec(s.body);
+            evalExpr(s.cond);
+          }
+          break;
+        }
         case 'for': {
           const n = sched() % 3;
           exec([s.init]);
@@ -110,9 +119,13 @@ function compare(orig: SFn, cand: SFn, draws: number[]): 'same' | 'undefined-onl
   return a.some((v, i) => v !== b[i]) ? 'undefined-only' : 'same';
 }
 
-// The generator emits only what the gate reasons about: constant-fed locals, reads, and the three
-// positions where a later-indexed statement can run before an earlier one — a loop body, and a
-// `for`'s init and inc.
+// The generator emits only what the gate reasons about: constant-fed locals, reads, and the
+// positions a back edge re-runs — a loop body (test-at-top, body-first, and `for`), a loop's own
+// condition, and a `for`'s inc. A `for`'s INIT is deliberately not one of them: it runs once,
+// ahead of the condition, which is why the span model places it outside its own loop.
+//
+// KNOWN GAP: `switch` fall-through, `break` and `continue` are not emitted, so the differential
+// does not cover pairs split across those. The unit tests pin the loop rule's shapes directly.
 const LOCALS = ['a', 'b', 'c'];
 
 function mulberry32(seed: number): () => number {
@@ -155,6 +168,8 @@ function generate(seed: number): SFn {
         out.push(obs());
       } else if (r < 0.85) {
         out.push({ k: 'if', cond: cond(), then: block(depth - 1), else: block(depth - 1) });
+      } else if (r < 0.9) {
+        out.push({ k: 'dowhile', cond: cond(), body: block(depth - 1) });
       } else if (r < 0.93) {
         out.push({ k: 'while', cond: cond(), body: block(depth - 1) });
       } else {

@@ -25,18 +25,25 @@ function mentions(e: Expr, n: string): boolean {
 export interface Span {
   first: number;
   last: number;
-  /** every loop statement holding a mention of the local — the whole ancestor chain, not the
-   *  innermost, because an OUTER loop re-runs an inner one's statements too */
+  /** every loop that RE-RUNS a mention of the local — the whole ancestor chain, not just the
+   *  innermost, because an outer loop re-runs an inner one's statements too. A `for`'s init is
+   *  not re-run by its own loop, so it contributes only the enclosing ones. */
   loops: Set<Stmt>;
   constFed: boolean;
   /** the local's FIRST mention is a write, not a read */
   firstIsWrite: boolean;
 }
-/** The name a `for` drives, when its init and inc write the same local — the loop's counter.
- *  Those two writes are the counter's own definition, not a feed from somewhere the compiler had
- *  a reason to respect, which is what `const-fed` reads every non-const assign as. */
-const forCounter = (s: Extract<Stmt, { k: 'for' }>): string | null =>
-  s.init.k === 'assign' && s.inc.k === 'assign' && s.init.name === s.inc.name ? s.init.name : null;
+/** The INDUCTION VARIABLE a `for` drives: the local its init writes and its step both writes AND
+ *  reads. Those two writes are the variable's own definition and its own history — not a feed from
+ *  somewhere the compiler had a reason to respect, which is what `const-fed` reads every non-const
+ *  assign as. The self-read is the load-bearing half: `for (a = *p; …; a = *p)` re-loads memory
+ *  every iteration and IS the kind of local `const-fed` exists to refuse. `recognizeForLoops`
+ *  (structure/structure.ts) demands the same self-read of every `for` it mints, so this agrees
+ *  with the only producer rather than trusting it. */
+const forInductionVar = (s: Extract<Stmt, { k: 'for' }>): string | null =>
+  s.init.k === 'assign' && s.inc.k === 'assign' && s.init.name === s.inc.name && mentions(s.inc.value, s.inc.name)
+    ? s.init.name
+    : null;
 
 function spans(body: Stmt[]): Map<string, Span> {
   const out = new Map<string, Span>();
@@ -66,24 +73,28 @@ function spans(body: Stmt[]): Map<string, Span> {
       out.set(n, sp);
     }
   };
+  /** the loop set a statement's CHILDREN run under — its own, when the statement is a loop */
+  const under = (s: Stmt, loops: readonly Stmt[]): readonly Stmt[] =>
+    s.k === 'while' || s.k === 'dowhile' || s.k === 'for' ? [...loops, s] : loops;
   const walk = (list: Stmt[], loops: readonly Stmt[]): void => {
     for (const s of list) {
       // A `for`'s INIT runs ONCE, ahead of the condition and outside the loop; its cond, inc and
       // body run per iteration. Walking the init first is what makes `for (i = *p; …)` read as a
       // local whose first mention is a WRITE, which is what it is.
       if (s.k === 'for') {
-        const counter = forCounter(s);
+        const counter = forInductionVar(s);
+        // the INIT runs once, outside — but if it is itself a loop, its own children are inside IT
         record(s.init, loops, counter);
-        walk(stmtChildren(s.init), loops);
+        walk(stmtChildren(s.init), under(s.init, loops));
         const inner = [...loops, s];
         record(s, inner);
         walk(s.body, inner);
         record(s.inc, inner, counter);
-        walk(stmtChildren(s.inc), inner);
+        walk(stmtChildren(s.inc), under(s.inc, inner));
         continue;
       }
       // a while/do-while CONDITION re-runs with the body, so it counts as inside its own loop
-      const inner = s.k === 'while' || s.k === 'dowhile' ? [...loops, s] : loops;
+      const inner = under(s, loops);
       record(s, inner);
       walk(stmtChildren(s), inner);
     }
@@ -146,7 +157,12 @@ export interface MergePair {
  *  ABLATE `first-is-write` ALONE AND NOTHING HAPPENS — `const-fed` masks it, so a survivor first
  *  mentioned by a read was uninitialized there in the original too. Drop both to see what it does,
  *  which is to bound the accepted class below by an order of magnitude. `const-fed` likewise bounds
- *  candidate growth: merges go as `L(L-1)/2` in the local count, each a distinct compile. */
+ *  candidate growth: merges go as `L(L-1)/2` in the local count, each a distinct compile — and
+ *  since `shared-loop` refuses only pairs a back edge can actually reorder, `const-fed` is now what
+ *  carries that budget on a loop-heavy function: ablating it takes LoadBGTilemapData's span
+ *  candidates from single digits to ~270, where under a blanket loop refusal it was inert. Any
+ *  further relaxation of it is a multiplier, not a no-op, and three call sites pay it
+ *  (`/coalesce`, `/scopebase-coalesce`, the `/livebase` pairings). */
 export const COALESCE_GATES: readonly Gate<MergePair>[] = [
   {
     id: 'param',
@@ -171,12 +187,15 @@ export const COALESCE_GATES: readonly Gate<MergePair>[] = [
     id: 'shared-loop',
     why: 'a back edge of a loop holding both locals re-runs the absorbed read after the survivor is written',
     sound: true,
-    guardedBy: 'coalesce-fuzz.test.ts: dropping it clobbers a defined read',
+    // BOTH halves are guarded, and they are different tests: dropping the gate must break something
+    // (the ablation sweep), and what the gate still ADMITS must change no defined read (arm A) —
+    // relaxing a refusal can only ever be caught by the second.
+    guardedBy: 'coalesce-fuzz.test.ts: no candidate the pass emits changes a DEFINED read',
     rejects: (c) => c.sharesLoop,
   },
   {
     id: 'const-fed',
-    why: 'a load-fed local is one the compiler had a reason to keep where it was',
+    why: 'a load-fed local — other than a for induction variable, whose feeds are its own — is one the compiler had a reason to keep where it was',
     sound: false,
     rejects: (c) => !c.x.constFed || !c.y.constFed,
   },
@@ -206,7 +225,7 @@ export const COALESCE_GATES: readonly Gate<MergePair>[] = [
  *  emitted and the differ referees.
  *
  *  ACCEPTED, NOT FIXED: a survivor assigned only on SOME paths still absorbs the other's value on
- *  the paths that skip it. The original read an uninitialized local there, so both spellings are
+ *  the paths that skip it — a loop that runs zero iterations is one such path. The original read an uninitialized local there, so both spellings are
  *  ill-defined rather than one being wrong — but this is a real difference and the differ, not any
  *  gate, is what keeps it from faking a match. The fuzz asserts it stays reachable, so the carve-out
  *  that excuses it cannot quietly become dead. */
@@ -238,12 +257,16 @@ export interface ArmPair {
   bothArmConstInit: boolean;
 }
 
-/** The arm-disjoint admission — the SECOND way a pair can merge, for pairs the span model must
- *  refuse (`loop` rejects any in-loop local; `const-fed` rejects every counter). Two locals
- *  confined to OPPOSITE arms of one `if` never coexist at runtime: the `if` picks one arm, so no
- *  read of either can observe the other's write — no liveness reasoning needed. That argument is
- *  exactly what the `loop` gate here protects: a loop ancestor re-enters the `if`, later entries
- *  can take the other arm, and a value written on one visit becomes readable on the next. */
+/** The arm-disjoint admission — the SECOND way a pair can merge, and what it uniquely buys is the
+ *  DIRECTION: the span path's survivor is always the later range, because `overlap` orders the pair
+ *  by position, while two locals in opposite arms may merge either way round and the earlier
+ *  declaration is a spelling the span path structurally cannot produce. Two locals confined to
+ *  OPPOSITE arms of one `if` never coexist at runtime: the `if` picks one arm, so no read of either
+ *  can observe the other's write — no liveness reasoning needed. That argument is exactly what the
+ *  `loop` gate here protects: a loop ancestor re-enters the `if`, later entries can take the other
+ *  arm, and a value written on one visit becomes readable on the next. Note this gate wants ANY
+ *  enclosing loop, not the span model's shared-loop rule: never-coexisting is a claim about one
+ *  entry, so a second entry breaks it however the two arms' loops relate. */
 export const ARM_DISJOINT_GATES: readonly Gate<ArmPair>[] = [
   {
     id: 'type',
