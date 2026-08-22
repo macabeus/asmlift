@@ -1802,20 +1802,25 @@ export const SYNTHETIC: SynthSpec[] = [
   // that it may be a call's outgoing stack argument. For an address-taken local that is a false
   // alarm, and three of these rows carried the decline.
   //
-  // That gate is now open for ONE shape and no wider: a frame of exactly one word whose base is
-  // handed to a callee by a bare `mov rD, sp`. NOT via callee arity, which this first tried and
-  // which cannot license an acceptance — a declared parameter list is a LOWER bound (variadics,
-  // multi-word parameters, a hidden struct-return pointer), so `arity <= 4` proves nothing and
-  // supplying a TRUE fact turned a correct decline into a call with its stack arguments deleted.
-  // What the frame size buys instead is that agbcc emits a bare `mov rD, sp` for a block-copy base
-  // too — a by-value struct argument's outgoing area, a struct return's hidden pointer — and every
-  // one of those needs at least two frame words, so in a one-word frame the capture can only be
-  // `&local`, and a one-word frame entirely occupied by that local has no room for an argument area
-  // under it. `stkarg` is the control that keeps the refusal honest.
+  // That gate is now open for ONE shape and no wider: a frame of exactly one word whose base a
+  // bare `mov rD, sp` hands to a callee, and which the caller either WRITES itself or passes at an
+  // argument above r0. NOT via callee arity, which this first tried and which cannot license an
+  // acceptance — a declared parameter list is a LOWER bound (variadics, multi-word parameters, a
+  // hidden struct-return pointer), so `arity <= 4` proves nothing and supplying a TRUE fact turned
+  // a correct decline into a call with its stack arguments deleted. What the frame size buys
+  // instead is that agbcc emits a bare `mov rD, sp` for a block-copy base too — a by-value struct
+  // argument's outgoing area, a struct return's hidden pointer — and all but one of those needs at
+  // least two frame words. The exception is a struct return of 4 bytes or fewer that is not
+  // INTEGER-LIKE (`{char a,b,c,d;}`, `{short a,b;}`), which agbcc returns in memory through a
+  // one-word temp: instruction for instruction an out-parameter call. What rules that out is that
+  // the temp is storage the CALLEE owns — written only by the callee, and its pointer is argument
+  // 0, always. `stkarg` is the control that keeps the refusal honest.
   //
   // STILL MISSING, and what these rows will pin next: any frame with a second word in it. The
   // object's real extent is inferred from the accesses this function makes, so a wider frame has
-  // bytes no model describes, and the refusal stands there.
+  // bytes no model describes, and the refusal stands there. An OUTPUT-only parameter taken at
+  // argument 0 is the other gap, and it is not narrowable from the assembly at all: it is
+  // instruction-for-instruction the struct return above.
   //
   // Coverage: 0 of the corpus's rows carried this decline. Two real rows do decline with
   // `stack pointer used as data`, both for OTHER reasons that this capability leaves untouched —
