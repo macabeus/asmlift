@@ -403,10 +403,51 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
 
     test('…and one set up after it still is', () => {
       expect(dc('\tbl\tfoo\n\tmov\tr0, #1\n\tmov\tr1, #2\n\tbl\tbar\n')).toContain('bar(1, 2);');
-      // the call's own result is the freshest r0 there is
-      expect(dc('\tbl\tfoo\n\tbl\tbar\n')).toContain('bar(foo());');
       // …and with no call in between, nothing is clobbered
       expect(dc('\tmov\tr1, #7\n\tmov\tr0, #1\n\tbl\tbar\n')).toContain('bar(1, 7);');
+    });
+
+    test('back-to-back calls are two statements, not a nest', () => {
+      // The return register IS argument 0 here, so `foo(); bar();` and `bar(foo())` assemble to the
+      // same bytes and the asm decides nothing. Only the nest needs `foo` to return a value and
+      // `bar` to accept one — which the project's own header rejects outright when it does not —
+      // and the caller set nothing up to say there is an argument at all.
+      expect(dc('\tbl\tfoo\n\tbl\tbar\n')).toContain('foo();\n    bar();');
+    });
+
+    test('…and a declared arity is still how the nest is recovered', () => {
+      const src = decompile('f', 'f:\n\tpush\t{lr}\n\tbl\tfoo\n\tbl\tbar\n\tpop\t{r0}\n\tbx\tlr\n', ARMV4T_AGBCC, {
+        prototypes: { ...P, bar: { params: 1 } },
+      }).source;
+      expect(src).toContain('bar(foo());');
+    });
+
+    test('…and a later argument register the caller DID set up carries the result with it', () => {
+      // agbcc's soft-float `a * b + c`: the product comes back in r0 and stays there while `c` goes
+      // into r1. Argument 0 is unfresh and argument 1 is not — a one-argument `__addsf3` is not a
+      // thing, so the run bridges across r0 rather than truncating the call to nothing.
+      expect(dc('\tbl\t__mulsf3\n\tadd\tr1, r4, #0\n\tbl\t__addsf3\n')).toContain('__addsf3(__mulsf3(), ');
+    });
+
+    test('…across the HOLE a 64-bit return spans, where the later register is the only evidence', () => {
+      // agbcc's soft-64 shift: `__muldi3`'s product occupies r0 AND r1, so argument 1 cannot be
+      // filled from the register file at all — the pre-call `asr r1` it would read is the value the
+      // callee overwrote. The caller's own `add r2` still proves the call takes arguments, so the
+      // run keeps r0 and stops at the hole rather than reading the site as argument-less.
+      expect(dc('\tbl\t__muldi3\n\tadd\tr2, r4, #0\n\tbl\t__ashrdi3\n')).toContain('__ashrdi3(__muldi3())');
+    });
+
+    test('a JOIN of that result with a caller-computed value stays an argument', () => {
+      // `if (c > 5) x = gVar; else x = foo(); bar(x);` — r0 at `bar` is a merge, and the register
+      // file cannot say which path put the value there. Reading it as the callee's own return drops
+      // the argument, and the merge dies with it: the global load is then unreachable from the
+      // emitted C, which no longer mentions gVar at all.
+      const src = dc(
+        '\tcmp\tr0, #0x5\n\tble\t.L3\n\tldr\tr0, .L5\n\tldr\tr0, [r0]\n\tb\t.L4\n' +
+          '.L5:\n\t.word\tgVar\n.L3:\n\tbl\tfoo\n.L4:\n\tbl\tbar\n',
+      );
+      expect(src).toContain('gVar');
+      expect(src).toMatch(/bar\(v\d\);/);
     });
 
     test('a clobber on ONE path is enough — the analysis is a must', () => {

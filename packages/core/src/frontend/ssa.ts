@@ -48,13 +48,14 @@ export interface SsaBuilder {
   /** Whether `reg` has a definition reaching block `b` (best-effort call-arity heuristic). */
   hasReachingDef(reg: string, b: number, seen?: Set<number>): boolean;
   /** Record that block `b` makes a call HERE: the ABI's caller-saved registers stop being ones the
-   *  caller set up. Call it AFTER `recordGuessedCall` for the same instruction, and before writing
-   *  the call's own result. */
+   *  caller set up. Call it AFTER `recordGuessedCall` for the same instruction, and after writing
+   *  the call's own result — the result is the CALLEE's, so it must not count as caller-side
+   *  argument setup for whatever call comes next. */
   noteCall(b: number): void;
   /** Register a `call` op whose arity was GUESSED (no prototype), so `finish` can cut it back to the
    *  argument registers that were actually set up on every path (see {@link trimClobberedCallArgs}).
-   *  `argRegs` is the target's argument-register order. */
-  recordGuessedCall(op: Op, b: number, argRegs: string[]): void;
+   *  `abi` is the target's argument-register order and its return register. */
+  recordGuessedCall(op: Op, b: number, abi: { argRegs: string[]; returnReg: string }): void;
   /** Remove trivial phis and enforce the frontend's postconditions; call once every block is
    *  filled. Throws FrontendUnsupportedError if a stack slot escaped as an entry parameter. */
   finish(): void;
@@ -129,7 +130,7 @@ export function makeSsaBuilder(
   const writtenSinceCall: Array<Set<string>> = irBlocks.map(() => new Set());
   const callsIn = new Set<number>();
   const guessedCalls: GuessedCallSite[] = [];
-  let argRegsSeen: string[] = [];
+  let abiSeen: { argRegs: string[]; returnReg: string } = { argRegs: [], returnReg: '' };
 
   const writeVar = (reg: string, b: number, v: Value) => {
     writtenSinceCall[b].add(reg);
@@ -280,10 +281,12 @@ export function makeSsaBuilder(
     hasReachingDef,
     noteCall: (b: number) => {
       callsIn.add(b);
-      writtenSinceCall[b] = new Set(); // the callee clobbers the caller-saved registers
+      // the callee clobbers the caller-saved registers, its own result register included — see
+      // the ordering contract on the interface
+      writtenSinceCall[b] = new Set();
     },
-    recordGuessedCall: (op: Op, b: number, argRegs: string[]) => {
-      argRegsSeen = argRegs;
+    recordGuessedCall: (op: Op, b: number, abi: { argRegs: string[]; returnReg: string }) => {
+      abiSeen = abi;
       guessedCalls.push({
         block: b,
         op,
@@ -299,8 +302,20 @@ export function makeSsaBuilder(
       // Guessed arities counted argument registers by reaching definition alone; now that every
       // block's calls are known, drop the ones an intervening call had already clobbered.
       if (guessedCalls.length) {
+        const calleeResults = new Set<Value>();
+        for (const b of irBlocks) {
+          for (const op of b.ops) {
+            if (op.opcode === 'call') {
+              for (const r of op.results) {
+                calleeResults.add(r);
+              }
+            }
+          }
+        }
         trimClobberedCallArgs({
-          argRegs: argRegsSeen,
+          argRegs: abiSeen.argRegs,
+          returnReg: abiSeen.returnReg,
+          calleeResults,
           preds,
           freshAtEnd: writtenSinceCall,
           callsIn,
@@ -390,6 +405,12 @@ export interface GuessedCallSite {
 
 export interface CallArgTrim {
   argRegs: string[];
+  /** the ABI return register. Load-bearing only where it IS `argRegs[0]` (ARM r0, PPC r3) — that
+   *  aliasing is what makes a callee's result indistinguishable from caller-side argument setup. */
+  returnReg: string;
+  /** every value a `call` op produced. Tells a callee's own return apart from a join that merely
+   *  PASSES THROUGH one, which the register file cannot: both leave argument 0 unfresh. */
+  calleeResults: ReadonlySet<Value>;
   /** one entry per CFG edge, as passed to {@link makeSsaBuilder} */
   preds: number[][];
   /** per block: the keys written since its LAST call (since its start if it makes none). Indexed by
@@ -412,17 +433,21 @@ export interface CallArgTrim {
  *  SCOPE: this closes the arguments an intervening CALL disproves, which is the common case in real
  *  code. It does not close the rest — a dead value the compiler happened to leave in the next
  *  argument register with no call in between still reads as an argument, and nothing about the
- *  register file can say otherwise. Only a declared prototype closes those.
+ *  register file can say otherwise. A declared prototype closes those outright; short of one, the
+ *  narrower reading is recorded here and offered as a ranked candidate ({@link narrowToSetupArgs}).
  *
  *  A must-analysis: a register is FRESH at a point iff on EVERY path reaching it, it was written
  *  after the last call. The entry block starts all-fresh (those are the caller's own arguments).
- *  The result only ever SHRINKS an arity — a register the analysis cannot prove clobbered stays an
- *  argument — so no real argument can be dropped by it.
+ *  The result only ever SHRINKS an arity, but two of the shrinks are REFUSALS and not proofs, so a
+ *  real argument CAN go with them: a fresh register above a hole stops the run (a 64-bit return
+ *  occupies two registers and the frontend cannot express one, so the caller's r2 goes with the
+ *  unfillable r1), and a callee's return read as the callee's own drops an argument a `g(f())`
+ *  source did pass. A declared prototype is what closes either.
  *
  *  Frontend-agnostic: the caller supplies what its own lifting scan observed, so nothing here
  *  re-derives which instruction writes which register. */
 export function trimClobberedCallArgs(inp: CallArgTrim): void {
-  const { argRegs, preds, freshAtEnd, callsIn, sites } = inp;
+  const { argRegs, returnReg, calleeResults, preds, freshAtEnd, callsIn, sites } = inp;
   const blockCount = freshAtEnd.length;
   const all = () => new Set(argRegs);
   const localEnd = (b: number) => freshAtEnd[b] ?? new Set<string>();
@@ -461,16 +486,103 @@ export function trimClobberedCallArgs(inp: CallArgTrim): void {
       freshOut[b] = fout;
     }
   }
-  for (const s of sites) {
-    const fresh = s.afterCallInBlock ? s.freshBefore : new Set([...freshIn[s.block], ...s.freshBefore]);
-    let n = 0;
+  const runOfFresh = (fresh: Set<string>, from: number): number => {
+    let n = from;
     while (n < argRegs.length && fresh.has(argRegs[n])) {
       n++;
     }
+    return n;
+  };
+  // A LATER argument register this caller set up proves the call takes arguments at all, and
+  // argument 0 sits below one that is proven — so it is being passed too, whatever put it there
+  // (`bl __mulsf3; add r1,r4,#0; bl __addsf3` is `__addsf3(__mulsf3(a, b), c)`).
+  const setsUpLater = (fresh: Set<string>): boolean => argRegs.some((r, i) => i > 0 && fresh.has(r));
+  // THE RETURN REGISTER IS NOT ARGUMENT SETUP. Where the ABI aliases it onto argument 0, the
+  // frontends record a call's clobber AFTER its own result, so the result leaves the register
+  // UNfresh here. That disproves caller setup only where the callee's return is BOTH what the
+  // register still holds and all the site has to go on: with a later register set up (above), or
+  // with a value no call produced — a join of one path's return with another path's caller-computed
+  // value — argument 0 is a real argument, and dropping the second kind would delete the
+  // instructions that computed it.
+  //
+  // With neither, the site carries no argument evidence at all: `bl f; bl g` is `f(); g();` as
+  // readily as `g(f())`, the two spell the same bytes on this ABI, and only the nested one needs
+  // `f` to return a value and `g` to accept one — a spelling the project's own header rejects
+  // outright when it does not. A declared prototype never reaches here, and stays the way `g(f())`
+  // is recovered.
+  const argcAt = (fresh: Set<string>, op: Op): number => {
+    if (argRegs[0] !== returnReg || fresh.has(argRegs[0])) {
+      return runOfFresh(fresh, 0);
+    }
+    if (setsUpLater(fresh) || !calleeResults.has(op.operands[0])) {
+      return runOfFresh(new Set([argRegs[0], ...fresh]), 0);
+    }
+    return 0;
+  };
+  for (const s of sites) {
+    const fresh = s.afterCallInBlock ? s.freshBefore : new Set([...freshIn[s.block], ...s.freshBefore]);
+    const n = argcAt(fresh, s.op);
     if (n < s.op.operands.length) {
       s.op.operands.length = n;
     }
+    // The SHORTER arity the same evidence also allows, recorded for {@link narrowToSetupArgs}: the
+    // run over what THIS BLOCK wrote, dropping the registers that are fresh only because no call
+    // stands between here and wherever they were last written. Both readings stay live, so this one
+    // is recorded rather than applied. A survivor is what it drops, so the join clause above has no
+    // place here — but `setsUpLater` still does: a register this block set up two instructions
+    // before the call is not something the narrower reading may call dead.
+    const localFresh = setsUpLater(s.freshBefore) ? new Set([argRegs[0], ...s.freshBefore]) : s.freshBefore;
+    const local = Math.min(runOfFresh(localFresh, 0), s.op.operands.length);
+    if (local < s.op.operands.length) {
+      setupArgc.set(s.op, local);
+    }
   }
+}
+
+/** The narrower arity {@link narrowToSetupArgs} would cut each guessed call to. A SIDE table and
+ *  not an attr: this is a fact about one LIFT, not part of the IR the rest of the pipeline compares
+ *  and prints — `structure/hazards.ts` decides two ops equal by comparing their attrs verbatim, so
+ *  an attr only one of an otherwise-matching pair carries would cost a recovery. */
+const setupArgc = new WeakMap<Op, number>();
+
+/** Whether anything in `fn` HAS the narrower reading — the lever's gate, so the ~99% of functions
+ *  with no narrowable call cost no re-lift. Read it off the lift itself: a later pipeline stage may
+ *  replace a `call` op (softdiv rewrites one to a division), and the table is keyed by op. */
+export function hasSetupArgsNarrowing(fn: Fn): boolean {
+  return fn.blocks.some((b) => b.ops.some((op) => setupArgc.has(op)));
+}
+
+/** Cut every guessed call to the arity its OWN BLOCK set up, and report whether anything moved.
+ *
+ *  `trimClobberedCallArgs` keeps an argument register whose value merely survives from an earlier
+ *  block, because compiled code really does pass one that way: agbcc leaves a value already in r0
+ *  where it is and branches to the call (`if (x) f(x);` is `cmp r0,#0; beq; bl f`, no setup at
+ *  all). Those are also the bytes `if (x) f();` compiles to, so usually neither reading is
+ *  refutable — but where the guard is an EQUALITY the compiler proves the argument constant and
+ *  has to materialize it (`if (x == 0) f(x);` opens the arm with `mov r0,#0`), and the absence of
+ *  that instruction rules the wider reading out. Which case a function is in is not knowable from
+ *  the register file, and is exactly what a differ decides. Hence a ranked candidate rather than a
+ *  default: the arm that passes only what the calling block itself put there.
+ *
+ *  Applies only to arities that were GUESSED — a declared prototype never recorded the fact. */
+export function narrowToSetupArgs(fn: Fn): boolean {
+  let changed = false;
+  for (const b of fn.blocks) {
+    for (const op of b.ops) {
+      const setup = setupArgc.get(op);
+      if (setup !== undefined && setup < op.operands.length) {
+        op.operands.length = setup;
+        changed = true;
+      }
+    }
+  }
+  if (changed) {
+    // A dropped argument can be a join's last reader, and `finish()` pruned the dead phis before
+    // this reading existed. Left in, the phi's edge args render as assignments to a local nothing
+    // reads (`v0 = UpdateWorldMapCursor();`) — see the note on the prune in `finish`.
+    pruneDeadParams(fn);
+  }
+  return changed;
 }
 
 /** The stack-slot key both the MIPS and Thumb frontends use for a word-sized local in the

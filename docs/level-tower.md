@@ -95,7 +95,8 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
     tree (e.g. `/argbase`, `/scopebase`, `/indexed`, `/livebase`, `/volatile`, `/mulfirst`,
     `/regcopy`, `/coalesce`) and STRUCTURING axes, which re-run `structure()` under a different
     lever (e.g. `/flip-branch`, `/defsite`, `/inplace`, `/no-bitfield`, `/reread-globals`,
-    `/merge-names`) — plus `/raw-globals` and the signedness pin, which re-run the lift itself.
+    `/merge-names`) — plus `/raw-globals`, the signedness pin and `/setup-args`, which re-run the
+    lift itself.
     The roster is illustrative; `rank.ts` is the source of truth.
     Each emits an _alternative candidate_ rather than replacing the primary, and the differ
     referees — the
