@@ -279,3 +279,34 @@ test('a reloc on a frame adjust (`addi r1`) is still loud — the teardown skip 
   const asm = '0:\taddi    r1,r1,0\n\t\t\t0: R_PPC_ADDR16_LO gFrame\n4:\tli      r3,5\n8:\tblr\n';
   expect(() => dis('fradj', asm)).toThrow(/data relocation/);
 });
+
+// r3 is BOTH argument 0 and the return register on this ABI, so what a guessed call arity reads
+// there depends on telling the callee's own result from caller-side setup — the same rule the
+// Thumb frontend runs (test/thumb-frontend.test.ts), on the second frontend that has the aliasing.
+describe('a guessed call arity and the EABI return register', () => {
+  const PRO = '0:\tstwu    r1,-16(r1)\n4:\tmflr    r0\n8:\tstw     r0,20(r1)\n';
+  const EPI = '24:\tlwz     r0,20(r1)\n28:\tmtlr    r0\n2c:\taddi    r1,r1,16\n30:\tblr\n';
+  const rel = (at: string, sym: string) => `\t\t\t${at}: R_PPC_REL24\t${sym}\n`;
+
+  test('back-to-back calls are two statements, not a nest', () => {
+    const asm =
+      PRO + 'c:\tbl      c <t+0xc>\n' + rel('c', 'foo') + '10:\tbl      10 <t+0x10>\n' + rel('10', 'bar') + EPI;
+    expect(dis('t', asm)).toContain('foo();\n    return bar();');
+  });
+
+  test('…but a JOIN of a return with a caller-computed value stays an argument', () => {
+    // r3 at `bar` merges `foo`'s return with the caller's own `add r3,r4,r5`. Reading the merge as
+    // the callee's result drops the argument, and the addition dies with it.
+    const asm =
+      PRO +
+      'c:\tcmpwi   r3,0\n10:\tbeq     1c <t+0x1c>\n14:\tadd     r3,r4,r5\n18:\tb       20 <t+0x20>\n' +
+      '1c:\tbl      1c <t+0x1c>\n' +
+      rel('1c', 'foo') +
+      '20:\tbl      20 <t+0x20>\n' +
+      rel('20', 'bar') +
+      EPI;
+    const src = dis('t', asm);
+    expect(src).toContain('a1 + a2');
+    expect(src).toMatch(/return bar\(v\d\);/);
+  });
+});
