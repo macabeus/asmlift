@@ -460,12 +460,13 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     // fall-out edge also carried `w = 0` would drop that write silently. Case entries are held to
     // the same rule where the walk records them (`asLeafOrTest`), by the same argument.
     //
-    // The refusal is deliberately structural rather than "would these copies elide anyway". It
-    // costs nothing to be strict here: across all 823 benchmark rows it fires ZERO times, because
-    // agbcc's `emit_case_nodes` reaches the default through a jump of its own — the bare
-    // `b .Ldefault` blocks collapsed above, which carry the copies into the default ARM instead.
-    // A shape that does hand the default values straight off a dispatch branch declines LOUD to
-    // if-recovery, which spells every copy the asm performs.
+    // The refusal is deliberately structural rather than "would these copies elide anyway", and
+    // strictness costs nothing here for a reason about the compiler rather than about a corpus:
+    // agbcc's `emit_case_nodes` reaches the default through a jump of its OWN — the bare
+    // `b .Ldefault` blocks collapsed above — and that jump carries the copies into the default ARM,
+    // so a dispatch branch handing the default entry its values directly is not a shape agbcc
+    // emits. A compiler that does emit it declines LOUD to if-recovery, which spells every copy
+    // the asm performs.
     if (defaultBlk && defaultBlk.params.length) {
       return null;
     }

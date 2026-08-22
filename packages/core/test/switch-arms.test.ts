@@ -137,7 +137,7 @@ test('a default entry the DISPATCH hands a value to still declines, and keeps th
   //
   // Structural on purpose, not "would this copy elide anyway": it costs nothing, because agbcc
   // reaches its default through a jump of its own (the collapsed `b .Ldefault` blocks above),
-  // which carries the copies into the default ARM. Across all 823 benchmark rows it never fires.
+  // which carries the copies into the default ARM instead of onto a dispatch branch.
   const out = of(
     'f:\n\tmov\tr2, #0x0\n' +
       '\tcmp\tr0, #0x1\n\tbeq\t.Lc1\t@cond_branch\n' +
