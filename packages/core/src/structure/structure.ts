@@ -802,7 +802,13 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     homeSharedAddresses = false,
     homeLoopExprs = false,
     // A per-compiler DEFAULT, so it is deliberately NOT reset by assertPrimaryAccepts and does
-    // not trigger it: the spelling it produces IS the primary on a target that declares it.
+    // not trigger it. The invariant is "a CANDIDATE must never unlock a function the PRIMARY
+    // declines", and the primary is this target's defaults with the candidate axes off — which is
+    // what the reset list spells. Resetting a default too would test a spelling asmlift never
+    // emits for this target and could only decline functions the shipped one structures. What the
+    // exemption does NOT cover is the separate question of whether a NEW default silences a
+    // decline of its own; that is measured, not asserted — over every agbcc function in the
+    // klonoa checkout (464), strict mode gives 0 outcome changes with it on vs off.
     readsStayWhereWritten = false,
     unsignedCompareSpelling = false,
     coalesceMergeNames = false,
