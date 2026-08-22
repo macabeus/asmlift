@@ -62,6 +62,10 @@ export function runCases(cases: Case[], outPath: string, shard: Shard = { idx: 0
   const tag = shard.n > 1 ? ` s${shard.idx}` : '';
   let done = 0;
   const buildFails: string[] = [];
+  // A skipped row is a MISSING measurement, not a decompiler outcome — and 40 of them scroll past
+  // unnoticed among 800 result lines. Counted here and totalled per tier by the orchestrator.
+  const skippedToolchains = new Set<string>();
+  let skips = 0;
 
   const flush = (): void => {
     const out: BenchOutput = { meta: benchMeta(results), results };
@@ -71,6 +75,8 @@ export function runCases(cases: Case[], outPath: string, shard: Shard = { idx: 0
   for (const c of mine) {
     if (!c.toolchain.available()) {
       console.log(`SKIP ${c.id}: toolchain unavailable`);
+      skips++;
+      skippedToolchains.add(c.toolchain.id);
       continue;
     }
     const t0 = Date.now();
@@ -112,6 +118,12 @@ export function runCases(cases: Case[], outPath: string, shard: Shard = { idx: 0
     flush();
   }
   flush();
+  if (skips > 0) {
+    // the shape the orchestrator greps for; keep the prefix and the `n/total` in step with it
+    console.log(
+      `SKIPPED ${skips}/${mine.length} case(s): toolchain unavailable (${[...skippedToolchains].join(', ')})`,
+    );
+  }
   if (buildFails.length > 0) {
     throw new Error(
       `${buildFails.length} target build(s) failed — every case must yield a row: ${buildFails.join(', ')}`,

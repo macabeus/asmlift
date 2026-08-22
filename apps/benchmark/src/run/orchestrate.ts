@@ -24,33 +24,49 @@ export interface OrchestrateOptions {
   toolchain?: string; // synthetic: single-toolchain filter
 }
 
+export interface ShardOutcome {
+  code: number;
+  skips: number; // rows this shard could not measure (toolchain unavailable)
+}
+
 /** One shard child (a tsx subprocess), stdout streamed with a shard prefix. Resolves on exit. */
-function runShard(tier: Tier, shard: string, extra: string[]): Promise<number> {
+function runShard(tier: Tier, shard: string, extra: string[]): Promise<ShardOutcome> {
   const child = spawn('tsx', [CLI, 'run', '--serial', '--tier', tier, '--shard', shard, ...extra], {
     cwd: join(import.meta.dirname, '..', '..', '..', '..'),
     stdio: ['ignore', 'pipe', 'inherit'],
   });
   const tag = `[${tier} ${shard}]`;
   let buf = '';
+  let skips = 0;
+  const line = (l: string): void => {
+    // the child's own end-of-shard tally (runner.ts) — the parent needs it to total a tier, and
+    // stdout is the only channel it has: the part files carry results, and a skipped row is
+    // precisely a row that produced none
+    const m = /^SKIPPED (\d+)\//.exec(l);
+    if (m) {
+      skips += Number(m[1]);
+    }
+    console.log(`${tag} ${l}`);
+  };
   child.stdout.setEncoding('utf8');
   child.stdout.on('data', (chunk: string) => {
     buf += chunk;
     let nl: number;
     while ((nl = buf.indexOf('\n')) >= 0) {
-      const line = buf.slice(0, nl);
+      const l = buf.slice(0, nl);
       buf = buf.slice(nl + 1);
-      if (line.trim()) {
-        console.log(`${tag} ${line}`);
+      if (l.trim()) {
+        line(l);
       }
     }
   });
-  return new Promise<number>((res) => {
+  return new Promise<ShardOutcome>((res) => {
     child.on('close', (code, signal) => {
       if (buf.trim()) {
-        console.log(`${tag} ${buf}`);
+        line(buf);
       }
       // a signal-killed child (OOM, segfault) reports code=null — that is a failure, not a 0
-      res(code ?? (signal ? 1 : 0));
+      res({ code: code ?? (signal ? 1 : 0), skips });
     });
   });
 }
@@ -94,15 +110,19 @@ export async function orchestrate(opts: OrchestrateOptions): Promise<void> {
     }
     const t0 = Date.now();
     console.log(`\n▶ ${tier}: fanning across ${opts.jobs} shards…`);
-    const codes = await Promise.all(
+    const outcomes = await Promise.all(
       Array.from({ length: opts.jobs }, (_, i) => runShard(tier, `${i}/${opts.jobs}`, extra)),
     );
-    const failed = codes.filter((c) => c !== 0).length;
+    const failed = outcomes.filter((o) => o.code !== 0).length;
     failedShards += failed;
+    const skips = outcomes.reduce((sum, o) => sum + o.skips, 0);
     const n = stitch(tier, opts.jobs);
     const secs = ((Date.now() - t0) / 1000).toFixed(1);
+    // A skip total belongs on the tier line, not only in the scrollback: an absent toolchain
+    // costs whole projects (marioparty3's 40 rows) and `bench regression` reads them as MISSING.
+    const skipNote = skips ? ` — ⚠ ${skips} row(s) SKIPPED, toolchain unavailable` : '';
     console.log(
-      `${failed ? '✗' : '✓'} ${tier}: ${n} results in ${secs}s${failed ? ` (${failed} shard(s) exited nonzero)` : ''} → results/${tier}.json`,
+      `${failed ? '✗' : '✓'} ${tier}: ${n} results in ${secs}s${failed ? ` (${failed} shard(s) exited nonzero)` : ''} → results/${tier}.json${skipNote}`,
     );
   }
   if (failedShards > 0) {
