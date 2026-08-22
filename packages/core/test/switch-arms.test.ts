@@ -230,6 +230,29 @@ test('a default the dispatch FALLS INTO keeps the last position', () => {
   expect(out).toMatch(/case 1:\s+v0 = 2;\s+break;\s+default:\s+v0 = 99;/);
 });
 
+test('which of two identical fall-out jumps the collapse keeps does not decide the label', () => {
+  // The collapse emits ONE representative for several bare jumps, and which one it keeps is a walk
+  // order accident. A bare jump is a block the dispatch minted, so its index is that accident and
+  // not a layout: reading it moved the label when the two jumps merely swapped addresses.
+  const jump = (n: number) => `.Lfo${n}:\n\tb\t.Lend\n`;
+  const twoFallOuts = (first: string, second: string) =>
+    'f:\n\tmov\tr2, #0x0\n' +
+    '\tcmp\tr0, #0x1\n\tbeq\t.Lc1\t@cond_branch\n' +
+    '\tcmp\tr0, #0x1\n\tbgt\t.Lhi\t@cond_branch\n' +
+    '\tcmp\tr0, #0\n\tbeq\t.Lc0\t@cond_branch\n\tb\t.Lfo1\n' +
+    '.Lhi:\n\tcmp\tr0, #0x2\n\tbeq\t.Lc2\t@cond_branch\n' +
+    '\tcmp\tr0, #0x3\n\tbeq\t.Lc3\t@cond_branch\n\tb\t.Lfo2\n' +
+    `.Lc0:\n\tadd\tr2, r1, #0x1\n\tb\t.Lend\n${first}` +
+    '.Lc1:\n\tadd\tr2, r1, #0x2\n\tb\t.Lend\n' +
+    `.Lc2:\n\tadd\tr2, r1, #0x3\n\tb\t.Lend\n${second}` +
+    '.Lc3:\n\tadd\tr2, r1, #0x4\n\tb\t.Lend\n' +
+    '.Lend:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr2, [r0]\n\tbx\tlr\n';
+  const early = of(twoFallOuts(jump(1), jump(2)));
+  const late = of(twoFallOuts(jump(2), jump(1)));
+  expect(early).toEqual(late);
+  expect(early).toMatch(/case 3:[\s\S]*default:/); // the label the assembly does not place goes last
+});
+
 test('two fall-out leaves the RETURN sink rewrote are still one default', () => {
   // jump.c's cross-jump merges two arms with identical bodies into one block both `beq`s reach —
   // and that multi-pred block is exactly what makes raise/retsink.ts sink the merge's return into

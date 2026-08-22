@@ -51,6 +51,8 @@ export interface SwitchRecovery {
   /** a block's position in the ASSEMBLY — the arm-order evidence, shared with Regime B so the two
    *  regimes read it from one definition (and one statement of what it rests on). */
   layoutIndex: (blk: Block) => number;
+  /** where the `default:` label goes among `armEntries`, or `undefined` for C's last position. */
+  defaultLayoutPos: (defaultBlk: Block, armEntries: Block[], placedByDispatch: boolean) => number | undefined;
 }
 
 export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
@@ -106,6 +108,19 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     const [x, y] = [a, c].map((blk) => blk.ops[0].successors[0]);
     return x.block === y.block && same(x.args, y.args);
   };
+
+  // Where the `default:` label goes among the arms, as a COUNT of the arms laid out before it — the
+  // same evidence the case bodies carry, read the same way. Compiled at every position of a 3- to
+  // 8-case switch, the default's block lands where the source wrote it. `undefined` ⇒ C's
+  // conventional last position, which is what every other producer of this node means.
+  //
+  // ONE refusal so far: a block with no body of its own is one the DISPATCH minted (`b .Ldefault`),
+  // so its index is where a jump landed. Which of several such the collapse below keeps is a
+  // walk-order accident, and reading it moved the label when two of them merely swapped addresses.
+  const defaultLayoutPos = (defaultBlk: Block, armEntries: Block[], placedByDispatch: boolean): number | undefined =>
+    !switchArmsFollowLayout || isBareExit(defaultBlk) || placedByDispatch
+      ? undefined
+      : armEntries.filter((e) => layoutIndex(e) < layoutIndex(defaultBlk)).length;
 
   // --- Regime A: comparison-tree switch recovery ----------------------------------------------------
   // Every ambiguity declines. Four preconditions are enforced below, annotated PRE1..PRE4:
@@ -558,12 +573,8 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     // An empty default arm is not a default (see the Regime-B note in structure.ts): the label
     // would carry no statement, which says nothing and is not valid C89.
     const defBody = defaultBlk ? structureRegion(defaultBlk, merge) : [];
-    // The `default:` arm is an ARM, and where a default block is laid out is the same evidence the
-    // case bodies carry: verified by compiling, `case 0, case 1, default, case 2, case 3` puts the
-    // default's block third, and each of the five positions of a 3- and a 4-case switch lands its
-    // block exactly where the source wrote it. Emitting the label last regardless moves every
-    // instruction after it. The position is a COUNT of the arms laid out before the default; every
-    // arm here is closed, so the label diverts nothing wherever it lands.
+    // The `default:` arm is an ARM: where its block is laid out is read exactly as a case body's is
+    // (`defaultLayoutPos`). Every arm here is closed, so the label diverts nothing wherever it lands.
     //
     // SCOPE — a default the dispatch FALLS INTO has no position of its own. `emit_case_nodes`
     // reaches the default by a jump from each exhausted subtree, but when the last test simply
@@ -579,10 +590,13 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
         fellInto.add(succ[1].block);
       }
     }
-    const defaultAt =
-      switchArmsFollowLayout && defaultBlk && !fellInto.has(defaultBlk)
-        ? sortedCases.filter(([, blk]) => layoutIndex(blk) < layoutIndex(defaultBlk)).length
-        : undefined;
+    const defaultAt = defaultBlk
+      ? defaultLayoutPos(
+          defaultBlk,
+          sortedCases.map(([, blk]) => blk),
+          fellInto.has(defaultBlk),
+        )
+      : undefined;
     const sw: Stmt = {
       k: 'switch',
       scrutinee: scrutExpr,
@@ -595,5 +609,5 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     }
     return out;
   };
-  return { recognizeSwitch, analyzeArmExit, layoutIndex };
+  return { recognizeSwitch, analyzeArmExit, layoutIndex, defaultLayoutPos };
 }
