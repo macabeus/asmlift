@@ -251,22 +251,27 @@ export interface AnalyzeOptions {
    *  The sibling of the homing axes above: there the question is which register or offset holds a
    *  value, here it is which BLOCK performs the read. A read whose every render sits in a block
    *  its own block STRICTLY DOMINATES has no rule at all above — the homing axes all want 2+
-   *  consumers or a shared base — so it sinks, and each arm re-reads it through a fresh pool
-   *  literal for the folded address.
+   *  consumers or a shared base — so it sinks, and each arm re-reads it: a second load either
+   *  way, plus a second pool literal when the address folded to a constant.
    *
    *  This is a per-compiler DATA lever (TargetDescription.compilerBehaviors
    *  `readsStayWhereWritten`), NOT a differ-refereed axis, and the distinction is the whole
    *  argument: an axis exists where the asm UNDERDETERMINES the source, because some pass
    *  collapses two spellings onto one output (`/uns-cmp`'s non-negativity proof is the type
-   *  case). On a compiler that neither hoists a read to a dominator nor schedules one across a
-   *  branch, asm placement is a FUNCTION of source placement — the sunk spelling is one that
-   *  compiler could not have emitted from this asm, so the differ has nothing to referee and
-   *  the extra candidate is pure cost. Which compilers may declare it, and on what evidence,
-   *  is stated at the target field; absent ⇒ the rule stands down entirely.
+   *  case). On a compiler that emits a read in the block the source spelled it in, re-spelling
+   *  the read at the block the asm performed it in reproduces that asm, while the sunk spelling
+   *  is one it emits only for a source that read per arm — so the differ has nothing to referee
+   *  and the extra candidate is pure cost. That claim runs one way only (emission from spelling,
+   *  never spelling from emission); which compilers may declare it, on what evidence, and which
+   *  passes the refusals below owe their existence to, is stated at the target field. Absent ⇒
+   *  the rule stands down entirely.
    *
-   *  Sound by construction: materializing moves a read from its render position back to its own
-   *  def position, which is where the ASM performed it — the conservative direction. It is
-   *  SINKING that needs the barrier scan (the multi-render rule below), and that scan stays.
+   *  Materializing is the conservative DIRECTION — it moves a read back to its own def position
+   *  rather than forward past a write — so no barrier scan is added; it is SINKING that needs one
+   *  (the multi-render rule below), and that scan stays. What it is NOT is sound by construction:
+   *  the def position is only the asm's read position while nothing has MOVED the def, which is
+   *  what the preheader and short-circuit refusals below are for. Getting that wrong emits a read
+   *  on a path the asm never ran it on.
    *
    *  Splits the read-once-or-per-use question with the `/reread-globals` axis above: that axis
    *  owns renders in the read's own block, this rule owns strictly dominated ones, and on a
