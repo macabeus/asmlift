@@ -66,12 +66,13 @@ describe('M1 — Thumb sp-as-data loud-fails (the MIPS/PPC guard, ported)', () =
   // FrontendUnsupportedError in strict; a stub diagnostic in annotate.
   //
   // THE FIRST SHAPE IS NOW MODELLED, and this pins WHICH one: a ONE-WORD frame whose base is passed
-  // to a callee. The frame size is half the proof — a bare `mov rD, sp` also names a block-copy
-  // base, and every one of those needs at least two frame words — so a four-byte frame entirely
-  // occupied by the object leaves no room for an outgoing argument area under it. The bar is not
-  // "produces something": the emitted C is recompiled and objdiffed against the same object, byte
-  // for byte. Anything larger, and `add rD, sp, #k`, still decline loud; the controls for that live
-  // in packages/core/test/thumb-frontend.test.ts, with the compiled counterexamples.
+  // to a callee, where the caller writes the object itself. The frame size is one half — a bare
+  // `mov rD, sp` also names a block-copy base, and all but one of those needs at least two frame
+  // words — and the post-lift audit is the other, since the exception is a small struct return
+  // whose hidden pointer looks exactly like an out-parameter. The bar is not "produces something":
+  // the emitted C is recompiled and objdiffed against the same object, byte for byte. Anything
+  // larger, and `add rD, sp, #k`, still decline loud; the controls for that live in
+  // packages/core/test/thumb-frontend.test.ts, with the compiled counterexamples.
   test('an address-taken local handed to a callee lifts, byte-exact', () => {
     const asm = compileTargetAsm('extern void g(int*); int atl(int a){ int local = a; g(&local); return local; }');
     const src = decompile('atl', asm, ARMV4T_AGBCC, { prototypes: { g: { params: 1, returnsVoid: true } } }).source;

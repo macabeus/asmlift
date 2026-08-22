@@ -961,8 +961,8 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
   // the layout: agbcc emits a bare `mov rD, sp` for a block-copy base too (a by-value struct
   // argument's outgoing area, a struct return's hidden pointer). `localArea === 4` excludes every
   // one of those that needs two frame words, and the frame-object audit re-proves the rest after
-  // the lift — that a call really does take the address, and that this function really does write
-  // the object. Every fixture below carries the frame size as part of the shape being pinned.
+  // the lift — that a call really does take the address, and that the object is not one the callee
+  // owns. Every fixture below carries the frame size as part of the shape being pinned.
   //
   // Unless a comment says otherwise the fixture is agbcc 2.9-arm-000512 output (`-O2
   // -mthumb-interwork -Wimplicit -fhex-asm -fprologue-bugfix`), not hand-written, because the whole

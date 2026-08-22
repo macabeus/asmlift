@@ -257,9 +257,8 @@ export function eliminateDeadStores(sfn: SFn): SFn {
   // observable through the escaped pointer wherever it sits, and this walk is BACKWARD, so the
   // `addr`-as-read pin above only ever protected the stores UPSTREAM of an `&sp0` occurrence.
   // Publish-the-address-then-fill (`g(&sp0); sp0 = v;`) puts one downstream, and this very pass
-  // deleted it. The rule used to key on `volatile` — true of the DMA idiom, where the object is
-  // published to a device register, and false of the ordinary `&local` argument that carries no
-  // qualifier in any source.
+  // deleted it. `volatile` stays in the test beside it because the qualifier is a separate reason
+  // (an MMIO cell the frontend never rendered an `&` for), not a spelling of this one.
   const addressTaken = new Set<string>();
   allAddrNamesInto(sfn.body, addressTaken);
   const volatiles = new Set(sfn.locals.filter((l) => l.volatile).map((l) => l.name));

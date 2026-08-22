@@ -2110,9 +2110,9 @@ export function lift(
   // argument slots; neither is provable here, so the answer stays the decline.
   //
   // What the frame size does NOT exclude is the one-word struct return in the table above, which is
-  // instruction-for-instruction an out-parameter call. That one is settled after the lift, on
-  // whether this function ever writes the object — see the premise re-check in the frame-object
-  // audit, which is also where the licence's other half is re-proven.
+  // instruction-for-instruction an out-parameter call. That one is settled after the lift, by the
+  // premise re-check in the frame-object audit — which is also where the licence's other half is
+  // re-proven.
   //
   // What it refuses that really is an addressable local: every frame with a second word in it. That
   // is a capability gap, not a wrong answer, and widening it needs a model of the object's real
@@ -2135,8 +2135,8 @@ export function lift(
   const usedSlotOffsets = new Set<number>();
 
   // …AND THE ONE OFFSET THAT MUST NOT BE A SLOT. When `capturedObjectIsTheWholeFrame` holds, the
-  // frame is one word, that word is an addressable local, and a callee is holding its address — so
-  // an `[sp,#0]` access is an access to THAT OBJECT. Keying it as an SSA slot instead moves the value into a
+  // frame is one word and a callee is being handed its address, so an `[sp,#0]` access is an access
+  // to THAT OBJECT — provisionally, since the audit is what proves the object is a local at all. Keying it as an SSA slot instead moves the value into a
   // register and deletes the store from memory — and the callee reading it through the pointer is
   // invisible to every check the slot model makes, so the deletion would be silent.
   //
@@ -3135,11 +3135,12 @@ export function lift(
       // second: the hardware reads the object, and the DMA-fill idiom this capability was built for
       // (`vu16 tmp; DmaSet(n, &tmp, …)`) is exactly that shape.
       const mayWrite = new Set<number>();
-      // …and a FOURTH, which is `escaped` split in two. `passedToCallee` is the address handed to a
-      // callee as an argument — the ordinary `&local`, and the only escape whose writer this
-      // frontend can name. `published` is the address WRITTEN TO MEMORY, which is how the DMA idiom
-      // hands the object to hardware. They decide different things (the slot rule below, and
-      // `volatile` at the stamp), and reading either off `escaped` gets one of them wrong.
+      // …and `escaped` SPLIT IN TWO, because the two escapes decide different things.
+      // `passedToCallee` is the address handed to a callee as an argument — the ordinary `&local`,
+      // and the only escape whose writer this frontend can name, which is what the slot rule below
+      // rests on. `published` is the address WRITTEN TO MEMORY, which is how the DMA idiom hands
+      // the object to hardware, and what `volatile` at the stamp keys on. Reading either off
+      // `escaped` gets the other one wrong.
       const passedToCallee = new Set<number>();
       const published = new Set<number>();
       // …and WHICH ARGUMENT it was passed as, because argument 0 is the one position a hidden
@@ -3218,8 +3219,8 @@ export function lift(
       // sp,#-4 / mov r0,sp / bl mk / ldr r0,[sp]`, instruction for instruction an out-parameter
       // call. Left alone that lifted as `mk(&sp0, a0)` — a call the real prototype rejects.
       //
-      // Two facts rule it out and either will do, because a return temp is a storage the CALLEE
-      // owns outright: it is written only by the callee, and its pointer is argument 0, always
+      // Two facts rule it out and either will do, because a return temp is storage the CALLEE owns
+      // outright: it is written only by the callee, and its pointer is argument 0, always
       // (compiled — `struct S4 mk3(int,int,int)` puts sp in r0 and shifts all three real arguments
       // up). So a store of our own says the object is one this function fills, and an address
       // handed over at r1 or above says the same by position.
