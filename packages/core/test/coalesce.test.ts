@@ -249,3 +249,24 @@ describe('the loop rule', () => {
     expect(merges([asg('a', 1), use('a'), forLoop('b', c0, [use('b')])])).toHaveLength(1);
   });
 });
+
+// ── the counter model ──────────────────────────────────────────────────────────────────────
+// `const-fed` predicts that a local fed from memory is one the compiler had a reason to keep
+// where it was. A `for`'s counter is fed by its own init and its own increment, which is not
+// that: the init IS the local's definition and the increment is its own history.
+const load: Expr = { k: 'index', base: { k: 'const', value: 0x3001048 }, idx: c0, width: 2, signed: false };
+
+describe('the counter model', () => {
+  test('a LOAD-fed counter merges — its init feed is its own definition, not a foreign feed', () => {
+    const out = coalesceCandidates(fn([forLoop('a', c0, [use('a')]), forLoop('b', load, [use('b')])]));
+    expect(out).toHaveLength(1);
+    expect(names(out[0].sfn)).toEqual(['b']);
+  });
+
+  test('a load-fed local that is NOT a counter still refuses', () => {
+    const out = coalesceCandidates(
+      fn([forLoop('a', c0, [use('a')]), { k: 'assign', name: 'b', value: load }, use('b')]),
+    );
+    expect(out).toHaveLength(0);
+  });
+});

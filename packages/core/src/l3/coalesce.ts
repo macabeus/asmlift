@@ -32,12 +32,18 @@ export interface Span {
   /** the local's FIRST mention is a write, not a read */
   firstIsWrite: boolean;
 }
+/** The name a `for` drives, when its init and inc write the same local — the loop's counter.
+ *  Those two writes are the counter's own definition, not a feed from somewhere the compiler had
+ *  a reason to respect, which is what `const-fed` reads every non-const assign as. */
+const forCounter = (s: Extract<Stmt, { k: 'for' }>): string | null =>
+  s.init.k === 'assign' && s.inc.k === 'assign' && s.init.name === s.inc.name ? s.init.name : null;
+
 function spans(body: Stmt[]): Map<string, Span> {
   const out = new Map<string, Span>();
   let at = 0;
   /** the statement's OWN mentions — an assign target, a condition, a scrutinee — at its own
    *  position, inside the loops it runs under */
-  const record = (s: Stmt, loops: readonly Stmt[]): void => {
+  const record = (s: Stmt, loops: readonly Stmt[], counter: string | null = null): void => {
     at++;
     const here = new Set<string>();
     if (s.k === 'assign') here.add(s.name);
@@ -56,7 +62,7 @@ function spans(body: Stmt[]): Map<string, Span> {
       for (const l of loops) {
         sp.loops.add(l);
       }
-      if (s.k === 'assign' && s.name === n && s.value.k !== 'const') sp.constFed = false;
+      if (s.k === 'assign' && s.name === n && s.value.k !== 'const' && n !== counter) sp.constFed = false;
       out.set(n, sp);
     }
   };
@@ -66,12 +72,13 @@ function spans(body: Stmt[]): Map<string, Span> {
       // body run per iteration. Walking the init first is what makes `for (i = *p; …)` read as a
       // local whose first mention is a WRITE, which is what it is.
       if (s.k === 'for') {
-        record(s.init, loops);
+        const counter = forCounter(s);
+        record(s.init, loops, counter);
         walk(stmtChildren(s.init), loops);
         const inner = [...loops, s];
         record(s, inner);
         walk(s.body, inner);
-        record(s.inc, inner);
+        record(s.inc, inner, counter);
         walk(stmtChildren(s.inc), inner);
         continue;
       }
