@@ -1482,6 +1482,98 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 's32 g(s32 v); s32 entrypair(u32 a0, u32 a1);',
     proto: { g: { params: 1 } },
   },
+
+  // WHERE THE READ HAPPENS, not where the value lives. The sibling of the value-home family
+  // above: there the diff is which register or offset holds a value; here it is which BLOCK
+  // performs the read. agbcc has no instruction scheduler (gcc 2.9-arm's SRCS compiles neither
+  // sched.c nor reorg.c), and its code-hoisting pass is compiled in but never runs: gcse.c
+  // guards `one_code_hoisting_pass` behind `optimize_size`, which toplev.c sets only for -Os,
+  // and every config here builds -O2. What does run at -O2 is partial-redundancy elimination,
+  // which deletes a redundant computation but never moves one up to a dominator. So a read the
+  // asm performs ABOVE a branch was written above that branch in the source. Compiling the same
+  // read once-per-arm emits it once per arm — a second load and a second pool literal for the
+  // folded address — so a decompiler that renders a value at its USE site produces a spelling the
+  // compiler could not have produced from that asm. Verified by compiling the pair: the two
+  // spellings differ, and the compiler moves neither.
+  //
+  // Cut from kleod:LoadBGTilemapData:agbcc, where re-reading ONE entry byte in two sibling arms
+  // is 15 points of the residual. Spelled with absolute GBA addresses so the rows stay
+  // self-contained (no ELF, no extern data — a synthetic candidate could not declare one).
+  //
+  // `readshare` is the isolate: one absolute byte read, two sibling arms, nothing else moving.
+  // `readarm` is its control — the same read with BOTH uses inside ONE arm, which asmlift
+  // already anchors at the def site, so the capability must leave it exactly where it is.
+  // `armshare` is the real function's shape (an indexed byte PAIR above two branches, the low
+  // byte used in both arms); it moves further than the isolate because its residual also carries
+  // the struct-array index that the /addr-home axis owns, so it is coverage, not an isolate.
+  // `readcall` is the one shape a "two or more sibling arms" rule would MISS: a single use,
+  // inside a short-circuit's right operand, feeding a call argument. It fails today for the same
+  // reason, and separates a placement rule keyed on strict dominance from one keyed on arm count.
+  //
+  // agbcc only. The mechanism above is a fact about THIS compiler, established by reading its
+  // pass list and confirmed by compiling both spellings. Whether ido7.1, gcc2.7.2kmc and
+  // mwcc_242_81 move a read the same way was NOT measured, so those lanes are left off rather
+  // than assumed: each needs its own read-it-then-compile-it pair before these rows mean
+  // anything there.
+  {
+    sym: 'readshare',
+    src:
+      '#define gKind ((u8 *)0x08057acc)\n' +
+      '#define gOutA ((u32 *)0x03003440)\n' +
+      '#define gOutB ((u32 *)0x03003444)\n' +
+      'void readshare(u32 c){ u32 s = *gKind;' +
+      ' if (c & 1){ *gOutA = s << 3; } else { *gOutB = s << 4; } }',
+    features: ['read-once', 'branch'],
+    toolchains: ['agbcc'],
+    ctx: 'void readshare(u32 c);',
+    proto: { readshare: { returnsVoid: true } },
+  },
+  {
+    sym: 'readarm',
+    src:
+      '#define gKind ((u8 *)0x08057acc)\n' +
+      '#define gOutA ((u32 *)0x03003440)\n' +
+      '#define gOutB ((u32 *)0x03003444)\n' +
+      'void readarm(u32 c){ u32 s = *gKind;' +
+      ' if (c & 1){ *gOutA = s << 3; *gOutB = s << 4; } }',
+    features: ['read-once', 'branch'],
+    toolchains: ['agbcc'],
+    ctx: 'void readarm(u32 c);',
+    proto: { readarm: { returnsVoid: true } },
+  },
+  {
+    sym: 'armshare',
+    src:
+      'struct Ent { u8 kind; u8 mode; };\n' +
+      '#define gEnts ((struct Ent *)0x08057acc)\n' +
+      '#define gFlag ((u8 *)0x03003430)\n' +
+      '#define gOutA ((u32 *)0x03003440)\n' +
+      '#define gOutB ((u32 *)0x03003444)\n' +
+      'void armshare(u32 a0, u32 a1){ struct Ent *e = &gEnts[(a0 << 1) + a1];' +
+      ' u32 mode = e->mode; u32 kind = e->kind;' +
+      ' if (*gFlag & 1){ if (mode == 2){ *gOutA = kind << 3; } else { *gOutB = kind << 4; } } }',
+    features: ['read-once', 'struct'],
+    toolchains: ['agbcc'],
+    ctx: 'void armshare(u32 a0, u32 a1);',
+    proto: { armshare: { returnsVoid: true } },
+  },
+  {
+    sym: 'readcall',
+    src:
+      'struct Ent { u8 kind; u8 mode; };\n' +
+      'struct Tile { s32 size; s32 pad; };\n' +
+      '#define gEnts ((struct Ent *)0x08057acc)\n' +
+      '#define gTiles ((struct Tile *)0x08189ccc)\n' +
+      '#define gFlag ((u8 *)0x03003430)\n' +
+      'u32 decomp(s32 n);\n' +
+      'void readcall(u32 a0, u32 a1){ struct Ent *e = &gEnts[(a0 << 1) + a1];' +
+      ' u32 mode = e->mode; u32 kind = e->kind;' +
+      ' if ((*gFlag & 1) && mode == 2){ decomp(gTiles[kind].size); } }',
+    features: ['read-once', 'branch'],
+    toolchains: ['agbcc'],
+    ctx: 'u32 decomp(s32 n); void readcall(u32 a0, u32 a1);',
+    proto: { decomp: { params: 1 }, readcall: { returnsVoid: true } },
+  },
 ];
 
 // ── C++ (mwcc `.cp` frontend, PPC only) ───────────────────────────────────────────────────

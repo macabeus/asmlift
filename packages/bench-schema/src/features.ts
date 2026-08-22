@@ -837,6 +837,30 @@ export const FEATURES: readonly FeatureDef[] = [
     seeAlso: ['pointer', 'struct', 'mmio', 'uninit-local'],
   },
   {
+    id: 'read-once',
+    label: 'Read once, above the branch',
+    group: 'memory',
+    evidence: 'judgement',
+    summary: 'the original read a value once before a branch; the candidate re-reads it in each arm',
+    detail:
+      'A decompiler renders a value where it is USED. An old compiler emits a read where the ' +
+      'SOURCE put it — agbcc has no instruction scheduler, and its code-hoisting pass is gated ' +
+      'behind -Os while every build here is -O2, so a read the asm performs above a branch was ' +
+      'written above that branch. Recovering ' +
+      'it at each use is therefore a spelling the compiler could not have produced from that asm: ' +
+      'it costs a second load, a second pool literal for the folded address, and a live range ' +
+      'short enough to change the whole allocation downstream. The tag marks rows where the diff ' +
+      'turns on that placement alone — the computation, the types and the control flow all agree. ' +
+      'No machine-checked floor: whether the source named a temp above the branch is ordinary C ' +
+      'style that no scan can distinguish from an incidental one.',
+    example: {
+      c: 'u32 s = *gKind; if (c & 1) { *gOutA = s << 3; } else { *gOutB = s << 4; }',
+      asm: '  ldr r1, =gKind\n  ldrb r1, [r1]      @ read ONCE, above the branch\n  cmp r0, #0',
+      toolchain: 'agbcc',
+    },
+    seeAlso: ['value-home', 'load', 'pointer', 'branch'],
+  },
+  {
     id: 'global',
     label: 'Global',
     group: 'memory',
