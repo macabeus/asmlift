@@ -185,8 +185,14 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
       const p = spawn('sh', ['-ec', cmd], { cwd: opts.cwd });
       let out = '',
         err = '';
-      p.stdout.on('data', (d) => (out += d));
-      p.stderr.on('data', (d) => (err += d));
+      // DECODED as it arrives, not concatenated as Buffers: `'' + buf` decodes each chunk on its
+      // own, so a multi-byte character straddling a chunk boundary would come out as replacement
+      // characters here and not in the sync runner (spawnSync decodes the whole buffer at once).
+      // The two must report a failed compile with the same text.
+      p.stdout.setEncoding('utf8');
+      p.stderr.setEncoding('utf8');
+      p.stdout.on('data', (d: string) => (out += d));
+      p.stderr.on('data', (d: string) => (err += d));
       // A shell that never starts is reported like any other failed compile, not as a rejected
       // promise: the ranked driver reads a THROWN compile the same way whichever runner produced
       // it, and a second `res` after `close` is a no-op.
