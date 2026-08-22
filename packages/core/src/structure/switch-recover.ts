@@ -83,19 +83,28 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
   const blockIndex = new Map(fn.blocks.map((blk, i) => [blk, i] as const));
   const layoutIndex = (blk: Block): number => blockIndex.get(blk) ?? -1;
 
-  /** Are these two blocks the SAME bare jump — no params, one `br`, same target, same args? Such a
-   *  block has no body of its own, so two of them are indistinguishable at emission. */
-  const sameBareJump = (a: Block, c: Block): boolean => {
+  /** A block with no body of its own: no params, and one op that only LEAVES. `ret` qualifies as
+   *  well as `br` because raise/retsink.ts rewrites the one into the other — a cross-jumped arm
+   *  body has two dispatch preds, which is exactly the shape that makes retsink sink the merge's
+   *  return into every leaf, the fall-out jumps included. */
+  const isBareExit = (blk: Block): boolean =>
+    blk.params.length === 0 && blk.ops.length === 1 && (blk.ops[0].opcode === 'br' || blk.ops[0].opcode === 'ret');
+
+  /** Are these two blocks the SAME bare exit — the same jump with the same args, or the same return
+   *  of the same values? Neither has a body, so two of them are indistinguishable at emission. */
+  const sameBareExit = (a: Block, c: Block): boolean => {
     if (a === c) {
       return true;
     }
-    for (const blk of [a, c]) {
-      if (blk.params.length || blk.ops.length !== 1 || blk.ops[0].opcode !== 'br') {
-        return false;
-      }
+    if (!isBareExit(a) || !isBareExit(c) || a.ops[0].opcode !== c.ops[0].opcode) {
+      return false;
+    }
+    const same = (x: readonly Value[], y: readonly Value[]) => x.length === y.length && x.every((v, i) => v === y[i]);
+    if (a.ops[0].opcode === 'ret') {
+      return same(a.ops[0].operands, c.ops[0].operands);
     }
     const [x, y] = [a, c].map((blk) => blk.ops[0].successors[0]);
-    return x.block === y.block && x.args.length === y.args.length && x.args.every((v, i) => v === y.args[i]);
+    return x.block === y.block && same(x.args, y.args);
   };
 
   // --- Regime A: comparison-tree switch recovery ----------------------------------------------------
@@ -453,11 +462,11 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     // subtree that runs out of case values its own jump to the default, so agbcc's four-case tree
     // reaches it through two `b .Ldefault` blocks — and comparing candidates by BLOCK counted that
     // one default as two and declined the whole tree. Two leaves are the same default when each is
-    // a BARE jump (no params, one `br`, no body of its own) to the same block passing the same
-    // values: nothing about them can then differ, so the representative emits what either would.
+    // a bare EXIT to the same place carrying the same values: nothing about them can then differ,
+    // so the representative emits what either would.
     // Anything else — a leaf with a body, two leaves passing different values — is still two
     // defaults and still declines.
-    if (defaults.length > 1 && !defaults.every((d) => sameBareJump(defaults[0], d))) {
+    if (defaults.length > 1 && !defaults.every((d) => sameBareExit(defaults[0], d))) {
       return null;
     }
     const defaultBlk = defaults[0] ?? null;

@@ -230,6 +230,31 @@ test('a default the dispatch FALLS INTO keeps the last position', () => {
   expect(out).toMatch(/case 1:\s+v0 = 2;\s+break;\s+default:\s+v0 = 99;/);
 });
 
+test('two fall-out leaves the RETURN sink rewrote are still one default', () => {
+  // jump.c's cross-jump merges two arms with identical bodies into one block both `beq`s reach —
+  // and that multi-pred block is exactly what makes raise/retsink.ts sink the merge's return into
+  // every leaf, the bare fall-out jumps included. Matching only `br` here declined the whole tree
+  // to if-nesting on the very switches the cross-jump had already tied.
+  const out = decompile(
+    'f',
+    'f:\n\tmov\tr2, #0x0\n' +
+      '\tcmp\tr0, #0x3\n\tbeq\t.Lsh\t@cond_branch\n' +
+      '\tcmp\tr0, #0x3\n\tbgt\t.Lhi\t@cond_branch\n' +
+      '\tcmp\tr0, #0\n\tbeq\t.Lc0\t@cond_branch\n\tb\t.Lend\n' +
+      '.Lhi:\n\tcmp\tr0, #0x4\n\tbeq\t.Lsh\t@cond_branch\n' + // 4 and 3 share ONE body
+      '\tcmp\tr0, #0x5\n\tbeq\t.Lc5\t@cond_branch\n\tb\t.Lend\n' +
+      '.Lc0:\n\tadd\tr2, r1, #0x1\n\tb\t.Lend\n' +
+      '.Lc5:\n\tadd\tr2, r1, #0x5\n\tb\t.Lend\n' +
+      '.Lsh:\n\tadd\tr2, r1, #0x9\n' +
+      '.Lend:\n\tadd\tr0, r2, #0\n\tbx\tlr\n',
+    ARMV4T_AGBCC,
+  ).source;
+  expect(out).toContain('switch (a0)');
+  expect(out).not.toContain('else'); // not the if-nesting fallback
+  expect(armOrder(out)).toEqual([0, 5, 3, 4]);
+  expect(out).toMatch(/default:\s+return 0;/); // the sunk return the leaves now hold
+});
+
 test('a default placed after a FALLING case is refused by the printer, not silently emitted', () => {
   // `defaultAt` is a spelling, and this is the one placement that is not: moving the label in
   // front of an arm that falls through diverts that arm into the default instead of into the case

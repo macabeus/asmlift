@@ -1610,7 +1610,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // as `default: w = 0;` instead of an initialiser, which gives the default its own block — one
   // default candidate, so it was recovered before the collapse and must stay recovered after it.
   // The collapse that closed `swarms` is what it guards: two leaves are one default only when each
-  // is a BARE jump to the same block passing the same values, and this row's real default arm has
+  // is a bare EXIT to the same place carrying the same values, and this row's real default arm has
   // a body, so nothing may fold it into the fall-out.
   //
   // Two more rows, one per half of what the ordering rule left out when it first shipped:
