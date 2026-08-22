@@ -108,11 +108,11 @@ attribution line for every decline naming its first blocker. Constraints learned
   Phase-3/4 probes so the row measures exactly what you measured. Never tune it toward either
   decompiler.
 - **Every row the comment names must exist, and every claim about one you did not run is a
-  prediction.** Paste the `grep -n "sym: '<name>'"` that proves each cited row is real before
-  resting an attribution on it, and mark a claim about a row you did not measure as a prediction
-  with the command that would falsify it. A family comment once rested its whole attribution on a
-  contrasting row nobody had written, and asserted a second row's score would move without
-  flipping — it flipped to MATCH the next round.
+  prediction.** Paste into your report the `grep -n "sym: '<name>'"` that proves each cited row is
+  real before resting an attribution on it, and mark a claim about a row you did not measure as a
+  prediction with the command that would falsify it. A family comment once rested its whole
+  attribution on a contrasting row nobody had written, and asserted a second row's score would
+  move without flipping — it flipped to MATCH the next round.
 - `features`: judgement tags only (source/codegen tags are derived). A new tag needs a
   `FeatureDef` in `packages/bench-schema/src/features.ts` and at least one row carrying it;
   a floor is optional and several tags deliberately have none.
