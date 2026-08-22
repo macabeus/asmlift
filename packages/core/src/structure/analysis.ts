@@ -759,7 +759,10 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
    *  into the `&&`/`||` right-hand side, where C's own short circuit re-guards it. So for a value
    *  in that cone the def block is a FOLD ARTIFACT rather than the block the asm read in, and the
    *  whole premise this rule reads placement under does not hold there. Naming it also breaks the
-   *  re-guard: `p != 0 && *p != 0` would emit `v0 = *p;` above its own null check. */
+   *  re-guard: `p != 0 && *p != 0` would emit `v0 = *p;` above its own null check.
+   *
+   *  An operand[0] cone is unconditional and keeps the rule; only the guarded side is collected. */
+  const shortCircuitGuarded = new Set<Value>();
   /** THE def-block placement rule's copy refusal: is every use of the value a successor ARGUMENT,
    *  i.e. is the value nothing but a block parameter's incoming copy?
    *
@@ -775,27 +778,35 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
    *  guard AND as the loop variable is loop-init hoisting, a capability this rule does not have. */
   const argUsedValues = new Set<Value>();
   const operandUsedValues = new Set<Value>();
-  for (const b of fn.blocks) {
-    for (const op of b.ops) {
-      op.operands.forEach((v) => operandUsedValues.add(v));
-      op.successors.forEach((sc) => sc.args.forEach((v) => argUsedValues.add(v)));
+  // Both sets serve that rule alone, so they are built only where it can fire — the same posture
+  // `condBrArgFed` takes above (every other target pays nothing for a behavior it never declares).
+  if (readsStayWhereWritten) {
+    const guarded: Value[] = [];
+    for (const b of fn.blocks) {
+      for (const op of b.ops) {
+        for (const v of op.operands) {
+          operandUsedValues.add(v);
+        }
+        for (const sc of op.successors) {
+          for (const v of sc.args) {
+            argUsedValues.add(v);
+          }
+        }
+        if (op.opcode === 'logic_and' || op.opcode === 'logic_or') {
+          guarded.push(op.operands[1]);
+        }
+      }
     }
-  }
-  const onlyFeedsBlockParams = (v: Value): boolean => argUsedValues.has(v) && !operandUsedValues.has(v);
-  const shortCircuitGuarded = new Set<Value>();
-  {
-    const stack = fn.blocks.flatMap((b) =>
-      b.ops.filter((op) => op.opcode === 'logic_and' || op.opcode === 'logic_or').map((op) => op.operands[1]),
-    );
-    while (stack.length) {
-      const v = stack.pop()!;
+    while (guarded.length) {
+      const v = guarded.pop()!;
       if (shortCircuitGuarded.has(v)) {
         continue;
       }
       shortCircuitGuarded.add(v);
-      stack.push(...(defOf.get(v)?.operands ?? []));
+      guarded.push(...(defOf.get(v)?.operands ?? []));
     }
   }
+  const onlyFeedsBlockParams = (v: Value): boolean => argUsedValues.has(v) && !operandUsedValues.has(v);
   // Decide in REVERSE program order so a consumer's own materialization is settled before any
   // producer asks for its emit position (SSA: uses follow defs in dominance/layout order) — and
   // iterate to a fixpoint for IR whose block layout does not follow dominance (hand-built IR):
