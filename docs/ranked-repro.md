@@ -34,8 +34,21 @@ workspace, so without them the sibling checkouts do not resolve and the run meas
   and both test suites, and a quieter pair measured **31m55s against 11m16s**. The ratio is the
   machine's, not the code's: re-time on your own log and quote that, never these. The
   `asmlift: [progress]` lines are what make a later claim about the run checkable from its log.
-- Quote the **candidate and dropped counts** beside every ranked score. A score from a run that
-  dropped candidates is not comparable to one that dropped none.
+- **`--proto`'s absence is now in the log.** Every run ends with an `asmlift: [proto]` line
+  naming the callees whose arity it had to guess (nothing declared them: no `--proto` entry, no
+  signature in `tools.asmlift.elf`). On the canonical LBG command that line is absent; without
+  `--proto` it reads `1 callee(s) have no declared arity … thunk_HeapFree`, in the same stderr you
+  are already pasting. Check the tail of your log before you quote a score.
+- Quote the counts by pasting the **`asmlift: [ranked]` line**, the last thing every ranked run
+  writes:
+
+  ```
+  asmlift: [ranked] 20608 candidate(s) scored, 0 dropped, best <label>: 531
+  ```
+
+  A score from a run that dropped candidates is not comparable to one that dropped none — and
+  "0 dropped" is now something the run SAYS. It used to be spelled as an absent line, so a clean
+  run, a truncated log and a killed run left identical evidence.
 
 ## Comparing two runs
 

@@ -30,6 +30,7 @@ import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import { guessedArityNote } from './callees';
 import { type CommandCompilers, compilersFromCommand } from './compile-command';
 import { type AsmliftToolConfig, loadDecompConfig, resolveTarget } from './config';
 import { ObjectInputUnsupportedError, asmDataForObject, disasmObject, isElfObject } from './objfile';
@@ -315,6 +316,10 @@ export async function runCli(
     symbols = asIfUndecompiled(symbols, name);
   }
 
+  // Which callees' arity this run had to guess — computed AFTER `asIfUndecompiled`, so the
+  // target's own withheld signature cannot make the note claim a fact the run did not use.
+  const protoNote = guessedArityNote(asm, name, prototypes, symbols);
+
   // --score-against: compile the output (and every ranked candidate) with the project's own
   // compiler command (decomp.yaml tools.asmlift.compiler — REQUIRED) and objdiff-score
   // against the given object. Inherently strict: candidates come from the strict tower, so a
@@ -394,10 +399,18 @@ export async function runCli(
         ? `asmlift: [dropped] ${ranked.dropped.length} candidate(s) failed to score; first: ` +
           `${ranked.dropped[0].label}: ${ranked.dropped[0].error}\n`
         : '';
+      // The two counts docs/ranked-repro.md requires beside every ranked score, as ONE line that
+      // is always present. They used to be recoverable only as the line count of a 2 MB stderr
+      // stream, and "0 dropped" was asserted by the ABSENCE of the `[dropped]` line above — so a
+      // clean run, a truncated log and a killed run left identical evidence for the claim this
+      // loop's every published score rests on.
+      const summary =
+        `asmlift: [ranked] ${ranked.candidates.length} candidate(s) scored, ${ranked.dropped.length} dropped, ` +
+        `best ${ranked.best.label}: ${ranked.best.score.score}${ranked.best.score.match ? ' (match)' : ''}\n`;
       return {
         code: ranked.best.score.match ? 0 : 1,
         stdout: ranked.best.source,
-        stderr: targetTrace + warn + table + drops,
+        stderr: targetTrace + warn + table + drops + summary + protoNote,
       };
     } catch (e) {
       const kind = isDecline(e) ? 'declined' : 'internal error';
@@ -412,7 +425,8 @@ export async function runCli(
   const onGap: OnGap = flags.has('strict') ? 'strict' : 'annotate';
   try {
     const result = decompile(name, asm, target, { backend, onGap, asmData, prototypes, symbols });
-    const stderr = targetTrace + warn + result.diagnostics.map((d) => `asmlift: [${d.stage}] ${d.reason}\n`).join('');
+    const stderr =
+      targetTrace + warn + result.diagnostics.map((d) => `asmlift: [${d.stage}] ${d.reason}\n`).join('') + protoNote;
     return { code: result.diagnostics.length === 0 ? 0 : 1, stdout: result.source, stderr };
   } catch (e) {
     const kind = isDecline(e) ? 'declined' : 'internal error';

@@ -134,14 +134,42 @@ function stitch(tier: Tier, n: number, filtered: boolean): number {
   return results.length;
 }
 
+/** Tiers are enqueued in this order (any tier not named keeps its `--tier` order, after these).
+ *  Measured over five full runs: the real tier's heaviest shard is 2-3x the synthetic tier's
+ *  (147/165/215/161/194s against 46/98/113/96/64s). With `tiers × jobs` tasks over `jobs` slots a
+ *  task queued late starts late, so the expensive tier is queued first — starting the longest
+ *  task last is exactly the tail the shared queue exists to remove. */
+const COST_ORDER: readonly Tier[] = ['real', 'synthetic'];
+
+/** Every tier's shard tasks, in the order the slots take them. Exported for the test: this
+ *  ordering is the whole scheduling decision, and it must stay a permutation of `tiers × jobs`. */
+export function shardQueue(opts: Pick<OrchestrateOptions, 'jobs' | 'tiers'>): { tier: Tier; shard: number }[] {
+  const rank = (t: Tier): number => (COST_ORDER.includes(t) ? COST_ORDER.indexOf(t) : COST_ORDER.length);
+  return opts.tiers
+    .map((tier, i) => ({ tier, i }))
+    .sort((a, b) => rank(a.tier) - rank(b.tier) || a.i - b.i)
+    .flatMap(({ tier }) => Array.from({ length: opts.jobs }, (_, shard) => ({ tier, shard })));
+}
+
 export async function orchestrate(opts: OrchestrateOptions): Promise<void> {
   mkdirSync(RESULTS_DIR, { recursive: true });
-  let failedShards = 0;
-  // Rows selected across every tier a filter could have selected in. Stays null on an unfiltered
-  // run, which is the only kind that reaches a branch — so this verdict cannot move a number.
-  let selected: number | null = null;
-  const untouched: Tier[] = [];
-  for (const tier of opts.tiers) {
+
+  // ONE queue across ALL tiers, drained by exactly `opts.jobs` slots. Fanning the tiers one after
+  // the other (a `Promise.all` per tier) made every run pay both tiers' TAILS: the real fan could
+  // not start until the last synthetic shard had exited, and the real fan then ended with one
+  // shard running alone for 46-59s (measured across five full runs) while seven slots idled — the
+  // synthetic work that could have filled them having already drained. Overlapping them is 15-27%
+  // off the run phase on those same five runs, and cannot be WORSE than the split fan: with
+  // `jobs` tasks per tier over `jobs` slots each slot runs one shard per tier, so the makespan is
+  // max_i(that slot's shards summed) ≤ the per-tier maxima summed, which is exactly what the
+  // split fan always paid.
+  //
+  // Concurrency is still capped at `opts.jobs`, so the Docker container pool and the machine see
+  // the load they always saw, and the same shard children run the same `idx % jobs` slices over
+  // the same rows in the same order — only scheduled to overlap. The canonical artifact cannot
+  // notice: merge.ts already sorts rows by id precisely because the shard count, and so the
+  // per-tier row order, differs by machine.
+  const extraFor = (tier: Tier): string[] => {
     const extra: string[] = [];
     if (opts.only) {
       extra.push('--only', opts.only);
@@ -152,20 +180,52 @@ export async function orchestrate(opts: OrchestrateOptions): Promise<void> {
     if (tier === 'real' && opts.project) {
       extra.push('--project', opts.project);
     }
-    const t0 = Date.now();
-    console.log(`\n▶ ${tier}: fanning across ${opts.jobs} shards…`);
-    const outcomes = await Promise.all(
-      Array.from({ length: opts.jobs }, (_, i) => runShard(tier, `${i}/${opts.jobs}`, extra)),
-    );
-    const failed = outcomes.filter((o) => o.code !== 0).length;
+    return extra;
+  };
+  const queue = shardQueue(opts);
+  const outcomes = new Map<Tier, ShardOutcome[]>(opts.tiers.map((t) => [t, []]));
+  // First child spawned → last child exited, per tier: with the tiers overlapping, a clock read
+  // once at the end of the run is no longer that tier's own elapsed time.
+  const span = new Map<Tier, { t0: number; t1: number }>();
+  const runStart = Date.now();
+  let next = 0;
+  // One slot: take the next shard task, run it to completion, repeat. `next++` needs no lock —
+  // the read and the increment are one synchronous step on the one event loop.
+  const slot = async (): Promise<void> => {
+    for (;;) {
+      const task = queue[next++];
+      if (!task) {
+        return;
+      }
+      if (!span.has(task.tier)) {
+        span.set(task.tier, { t0: Date.now(), t1: 0 });
+        console.log(`\n▶ ${task.tier}: fanning across ${opts.jobs} shards…`);
+      }
+      outcomes.get(task.tier)!.push(await runShard(task.tier, `${task.shard}/${opts.jobs}`, extraFor(task.tier)));
+      span.get(task.tier)!.t1 = Date.now();
+    }
+  };
+  await Promise.all(Array.from({ length: opts.jobs }, () => slot()));
+
+  let failedShards = 0;
+  // Rows selected across every tier a filter could have selected in. Stays null on an unfiltered
+  // run, which is the only kind that reaches a branch — so this verdict cannot move a number.
+  let selected: number | null = null;
+  const untouched: Tier[] = [];
+  // Stitched and reported in the CALLER's tier order, so the summary lines read as they always
+  // have however the queue interleaved the children.
+  for (const tier of opts.tiers) {
+    const mine = outcomes.get(tier)!;
+    const failed = mine.filter((o) => o.code !== 0).length;
     failedShards += failed;
-    const skips = outcomes.reduce((sum, o) => sum + o.skips, 0);
+    const skips = mine.reduce((sum, o) => sum + o.skips, 0);
     const filtered = tierIsFiltered(tier, opts);
     const n = stitch(tier, opts.jobs, filtered);
     if (filtered) {
       selected = (selected ?? 0) + n;
     }
-    const secs = ((Date.now() - t0) / 1000).toFixed(1);
+    const s = span.get(tier);
+    const secs = (((s?.t1 ?? 0) - (s?.t0 ?? 0)) / 1000).toFixed(1);
     // A skip total belongs on the tier line, not only in the scrollback: an absent toolchain
     // costs whole projects (marioparty3's 40 rows) and `bench regression` reads them as MISSING.
     const skipNote = skips ? ` — ⚠ ${skips} row(s) SKIPPED, toolchain unavailable` : '';
@@ -186,5 +246,5 @@ export async function orchestrate(opts: OrchestrateOptions): Promise<void> {
   if (selected === 0) {
     throw emptySelectionError(opts, untouched);
   }
-  console.log(`\nDone. Next: pnpm bench:merge`);
+  console.log(`\nDone in ${((Date.now() - runStart) / 1000).toFixed(1)}s. Next: pnpm bench:merge`);
 }
