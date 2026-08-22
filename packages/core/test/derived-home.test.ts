@@ -82,18 +82,21 @@ test('a value with no read in its cone is not homed', () => {
   expect(hasDerivedReadHome(parse(NOREAD))).toBe(false);
 });
 
-// A cone crossing a CALL: homing the value would move the call to the value's own position, which
-// is a side effect executing somewhere the asm never ran it.
+// A cone crossing a CALL, with the call ABOVE the read so no write barrier stands between the read
+// and the value: homing moves the call DOWN to the value's own position, a side effect executing
+// somewhere the asm never ran it. Without the cone's `call` refusal this emits
+// `v0 = *(u8 *)134576844 ^ get(a0);` — the read first, where the asm called first.
 const OVERCALL = `fn overcall {
 ^bb0(%0: u32):
   %1: u32 = call %0 {target="get"}
-  %2: u32 = const {value=1023}
-  %3: u32 = xor %2, %1
-  %4: u32 = const {value=50333696}
-  store %4, %3 {off=0, width=2}
-  %5: u32 = const {value=50333700}
-  store %5, %3 {off=0, width=2}
-  ret %3
+  %2: u32 = const {value=134576844}
+  %3: u32 = load %2 {off=0, signed=false, width=1}
+  %4: u32 = xor %3, %1
+  %5: u32 = const {value=50333696}
+  store %5, %4 {off=0, width=2}
+  %6: u32 = const {value=50333700}
+  store %6, %4 {off=0, width=2}
+  ret %4
 }
 `;
 
@@ -105,16 +108,18 @@ test('a cone crossing a call is not homed', () => {
 // A gaddr reached OUTSIDE a read's address: rendered standalone the address computation loses the
 // memAccess's inline byte-stride cast, so the value it names is not the value the uses see. (The
 // same gaddr UNDER a read is this axis's own clientele — the DERIVED fixture's `/raw-globals`
-// sibling — because the address stays inline at the deref.)
+// sibling — because the address stays inline at the deref.) The sum is INT-typed, so the
+// pointer-value refusal cannot pre-empt this one: without the cone's gaddr arm it homes as
+// `v0 = (u32)&gTable + *(u8 *)134576844;`.
 const ADDRCONE = `fn addrcone {
 ^bb0(%0: u32):
   %1: u32 = const {value=134576844}
   %2: u32 = load %1 {off=0, signed=false, width=1}
-  %3: u16* = gaddr {sym="gTable"}
-  %4: u16* = add %3, %2
-  %5: u32 = load %4 {off=0, signed=false, width=2}
-  %6: u32 = load %4 {off=2, signed=false, width=2}
-  %7: u32 = add %5, %6
+  %3: u8* = gaddr {sym="gTable"}
+  %4: u32 = add %3, %2
+  %5: u32 = const {value=3}
+  %6: u32 = mul %4, %5
+  %7: u32 = add %4, %6
   ret %7
 }
 `;
