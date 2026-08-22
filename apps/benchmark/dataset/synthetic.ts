@@ -1990,13 +1990,155 @@ export const SYNTHETIC: SynthSpec[] = [
       offloop: { returnsVoid: true },
     },
   },
+
+  // WHAT ENTERS A LOOP-CARRIED VALUE ON ITS FIRST ITERATION. The families above ask where a value
+  // LIVES or where it is READ; this one asks what a decompiler does when the answer is "nothing".
+  // A local decided inside a loop body on some but not all paths is a loop-carried phi whose
+  // entry operand is UNDEFINED — C spells that by simply not initialising it, and agbcc emits no
+  // instruction for it at all. asmlift has an `undef` opcode in the IR but the C backend has to
+  // spell it as an expression, so it materialises the entry value as a READ: of an uninitialised
+  // stack slot, or of a parameter it invented for the purpose. Every such read is an instruction
+  // the reference never emits, and it also pins a register at the loop preheader, so the cost is
+  // not just the load.
+  //
+  // Measured on kleod:LoadBGTilemapData:agbcc, both directions:
+  //   • REMOVING the five preheader reads from asmlift's own ranked winner (20608 candidates, 0
+  //     dropped, `unsigned/flip-branch/flip-join/merge-names/addr-home/expr-home/coalesce-v9-v23/
+  //     initfirst/raw-globals`) takes it from 473 to 459 against `build/src/gfx.o` — 14 points of
+  //     today's residual.
+  //   • ADDING the same five to a hand-written C spelling that is 12 points from the ROM takes it
+  //     to 366. The construct is cheap to carry when everything else is already wrong and a hard
+  //     blocker once it is not, which is why both numbers are quoted rather than either alone.
+  //
+  // `loopfall` is the isolate and `loopset` its control: byte-identical C except for the
+  // `else { w = 0; }`. With the else there is no undefined entry and asmlift MATCHes; without it,
+  // asmlift emits `void loopfall(u32 a0, u32 a1)` — a second parameter that exists only to be the
+  // undef — and opens the loop with `v1 = a1;`. A fix must not disturb `loopset`.
+  //
+  // `armfall` and `armdef` are the same pair at the real function's shape: a switch with no
+  // default inside a loop, whose arms decide two locals that the body then uses, so BOTH become
+  // loop-carried phis with undefined entries. They are coverage, not isolates — `armdef` is 7
+  // points off on its own, and its residual is entirely the dispatch tree (agbcc's balanced
+  // search `cmp #1/beq · cmp #1/bcc · cmp #2/beq` against asmlift's linear equality chain), which
+  // the `comparison-tree` class above already owns. What they add over `loopfall` is that the
+  // undef survives multi-arm merging: `armdef` carries no preheader read and `armfall` carries two.
+  //
+  // agbcc only. The claim is about what THIS compiler emits for an uninitialised loop-carried
+  // local, established by compiling both spellings of each pair; ido7.1, gcc2.7.2kmc and
+  // mwcc_242_81 were NOT measured, so those lanes are left off rather than assumed.
+  //
+  // m2c, on the identical `ctx` asmlift receives, does not produce compilable C for any of the
+  // four. On three it noncompiles by typing the address constant as `void *` and then reading
+  // members off it (`var_r3->unk0`) — its documented behaviour for a raw address with no struct
+  // context, not context withheld from it. On `armfall` it DECLINES, and the marker names this
+  // family directly: `M2C_ERROR(/* Read from unset register $r2 */)`, next to its own version of
+  // the fabricated entry read, `var_r5 = saved_reg_r5;`. Both decompilers hit the undefined
+  // loop-carried entry, in the same place; only the failure mode differs.
+  {
+    sym: 'loopfall',
+    src:
+      '#define gSrc ((u32 *)0x03003430)\n' +
+      '#define gOut ((u32 *)0x03003440)\n' +
+      'void loopfall(u32 n){ u32 w, i;' +
+      ' for (i = 0; i < n; i = i + 1) {' +
+      ' if (gSrc[i] < 8) { w = gSrc[i] >> 2; }' +
+      ' gOut[i] = w; } }',
+    features: ['uninit-local', 'merge-chain'],
+    toolchains: ['agbcc'],
+    ctx: 'void loopfall(u32 n);',
+    proto: { loopfall: { returnsVoid: true } },
+  },
+  {
+    sym: 'loopset',
+    src:
+      '#define gSrc ((u32 *)0x03003430)\n' +
+      '#define gOut ((u32 *)0x03003440)\n' +
+      'void loopset(u32 n){ u32 w, i;' +
+      ' for (i = 0; i < n; i = i + 1) {' +
+      ' if (gSrc[i] < 8) { w = gSrc[i] >> 2; } else { w = 0; }' +
+      ' gOut[i] = w; } }',
+    features: ['merge-chain'],
+    toolchains: ['agbcc'],
+    ctx: 'void loopset(u32 n);',
+    proto: { loopset: { returnsVoid: true } },
+  },
+  {
+    sym: 'armfall',
+    src:
+      'struct Bg { u16 h; u16 v; };\n' +
+      '#define gBgs ((struct Bg *)0x03003430)\n' +
+      '#define gOut ((u32 *)0x03003440)\n' +
+      'void armfall(u32 mode, u32 n){ u32 w, h, i;' +
+      ' for (i = 0; i < n; i = i + 1) {' +
+      ' switch (mode) {' +
+      ' case 0: w = gBgs[i].h; h = 32; break;' +
+      ' case 1: w = 32; h = gBgs[i].v; break;' +
+      ' case 2: w = gBgs[i].h; h = gBgs[i].v; break; }' +
+      ' gOut[i] = w + h; } }',
+    features: ['uninit-local', 'merge-chain'],
+    toolchains: ['agbcc'],
+    ctx: 'void armfall(u32 mode, u32 n);',
+    proto: { armfall: { returnsVoid: true } },
+  },
+  {
+    sym: 'armdef',
+    src:
+      'struct Bg { u16 h; u16 v; };\n' +
+      '#define gBgs ((struct Bg *)0x03003430)\n' +
+      '#define gOut ((u32 *)0x03003440)\n' +
+      'void armdef(u32 mode, u32 n){ u32 w, h, i;' +
+      ' for (i = 0; i < n; i = i + 1) {' +
+      ' switch (mode) {' +
+      ' case 0: w = gBgs[i].h; h = 32; break;' +
+      ' case 1: w = 32; h = gBgs[i].v; break;' +
+      ' case 2: w = gBgs[i].h; h = gBgs[i].v; break;' +
+      ' default: w = 0; h = 0; break; }' +
+      ' gOut[i] = w + h; } }',
+    features: ['merge-chain'],
+    toolchains: ['agbcc'],
+    ctx: 'void armdef(u32 mode, u32 n);',
+    proto: { armdef: { returnsVoid: true } },
+  },
+
+  // A STATEMENT WHOSE ONLY EFFECT IS ON THE ALLOCATOR. `gBgs[2].v = gBgs[2].v + 0;` reads a field
+  // and writes the same value back. agbcc deletes both the load and the store — the compiled
+  // reference contains no `ldrh`/`strh` for it — but NOT its aliasing consequence: while loop
+  // optimisation still sees the store, `gBgs[k].dst` is a possibly-aliased memory read and stays
+  // inside the loop. Delete the statement from the source and agbcc hoists that load to the
+  // preheader and strength-reduces the store into `stmia r3!, {r0}` — a different loop. Verified
+  // by compiling the pair.
+  //
+  // asmlift recovers the re-read correctly (its candidate loads through the base every iteration)
+  // and drops the no-op statement, which is the right thing to do with a statement that emits
+  // nothing. The row is here because the residual that leaves is not nothing: 8 rows, all one
+  // register number — the reference pushes `{r4, r5, lr}` and asmlift's candidate `{r4, lr}`,
+  // every instruction otherwise identical. That the *deleted* statement is what claims the extra
+  // register was NOT established: re-inserting it into asmlift's raw-address spelling makes agbcc
+  // keep the `ldrh`/`strh` (the struct-typed reference spelling is what lets it delete them), so
+  // the row records the residual and its size, not a mechanism.
+  //
+  // Cut from kleod:LoadBGTilemapData:agbcc, where the same statement is written verbatim in the
+  // second decomp's 98.24% attempt at that function and is worth 178 points there: removing it
+  // takes that spelling from 12 to 190 against the ROM object.
+  //
+  // agbcc only, for the same reason as the family above: the deletion-but-not-the-alias behaviour
+  // is this compiler's, established by compiling both spellings.
+  {
+    sym: 'reread',
+    src:
+      'struct Bg { u32 *dst; u16 h; u16 v; };\n' +
+      '#define gBgs ((struct Bg *)0x03003430)\n' +
+      'void reread(u32 k, u32 n){ u32 i;' +
+      ' for (i = 0; i < n; i = i + 1) {' +
+      ' gBgs[2].v = gBgs[2].v + 0;' +
+      ' gBgs[k].dst[i] = i << 6; } }',
+    features: ['read-once', 'global'],
+    toolchains: ['agbcc'],
+    ctx: 'void reread(u32 k, u32 n);',
+    proto: { reread: { returnsVoid: true } },
+  },
 ];
 
-// ── C++ (mwcc `.cp` frontend, PPC only) ───────────────────────────────────────────────────
-// The measured symbol is an `extern "C"` wrapper: the method inlines into it at -O4, so the row
-// measures C++ codegen (this-pointer member access) under a symbol name BOTH decompilers can
-// spell — candidates stay plain C and score through the normal C path. A mangled-method axis
-// (scoring `len2__3VecFv` itself, asmlift's cpp backend vs m2c's demangler) is future dataset work.
 export const SYNTHETIC_CPP: SynthSpec[] = [
   {
     sym: 'Vec__len2',
