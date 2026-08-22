@@ -7,7 +7,8 @@
 // shapes: the read is what admits a straight-line value at all (nothing else in the cone is
 // evidence the compiler kept a register), and the refusals hold — a cone crossing a `call`, a
 // standalone address in the cone, a write (a store or a call) able to execute between the read and
-// the value's own position, and a value inside a loop its read sits outside.
+// the value's own position, and a read outside the value's own block — above a branch or outside a
+// loop — where homing would change which paths read, and how often.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -188,4 +189,32 @@ const CALLBETWEEN = `fn callbetween {
 
 test('a call between the read and the value refuses the home', () => {
   expect(emit(CALLBETWEEN, true, false)).toBe(emit(CALLBETWEEN, false, false));
+});
+
+// The read above a branch, the value inside one arm: rendering the read at the value's own
+// position runs it only when the arm is taken. Harmless for an ordinary cell and a worse spelling
+// than the asm's, but for a VOLATILE one it is an access that no longer happens — and no write
+// barrier can see that either.
+const READABOVEBRANCH = `fn readabovebranch {
+^bb0(%0: u32):
+  %1: u32 = const {value=67109168}
+  %2: u32 = load %1 {off=0, signed=false, width=2}
+  %3: u32 = const {value=0}
+  %4: u32 = icmp_ne %0, %3
+  cond_br %4, ^bb1(), ^bb2()
+^bb1():
+  %5: u32 = const {value=1023}
+  %6: u32 = xor %5, %2
+  %7: u32 = const {value=50333696}
+  store %7, %6 {off=0, width=2}
+  %8: u32 = const {value=50333700}
+  store %8, %6 {off=0, width=2}
+  br ^bb2()
+^bb2():
+  ret
+}
+`;
+
+test('a value in a block its read sits above is not homed', () => {
+  expect(emit(READABOVEBRANCH, true)).toBe(emit(READABOVEBRANCH, false));
 });

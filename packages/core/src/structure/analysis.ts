@@ -154,8 +154,8 @@ export function hasLoopSharedPureValue(fn: Fn): boolean {
 /** rank.ts's enumeration gate for the `/derived-home` axis: does the function HAVE a value the
  *  axis would home — a pure non-const def with 2+ consumers whose cone stands on a memory read,
  *  with no call or standalone address in between? Mirrors the axis's scope rule in `analyze` minus
- *  every refusal that needs the positioned model (the write-between, the read's loop, and the
- *  header seat); a false positive costs one duplicate-collapsed candidate, never a wrong one. */
+ *  every refusal that needs the positioned model (the read's block, the write-between, the header
+ *  seat); a false positive costs one duplicate-collapsed candidate, never a wrong one. */
 export function hasDerivedReadHome(fn: Fn): boolean {
   const defOf = defOpMap(fn);
   const consumers = new Map<Value, Set<Op>>();
@@ -321,9 +321,9 @@ export interface AnalyzeOptions {
    *  standing on a read the source could not repeat is one the asm computed from a single access.
    *
    *  Refusals: a cone crossing a `call` (homing would move a side effect), a standalone gaddr/laddr
-   *  in the cone, a write able to execute between a cone read and this value's own position, a
-   *  value inside a loop its read sits outside (the read would run per iteration), and the
-   *  multi-block-loop-header seat the sibling axes refuse. */
+   *  in the cone, a cone read outside this value's own block or barred from it by a write (homing
+   *  renders the read here, and moving it across a branch or into a loop changes which paths read
+   *  and how often), and the multi-block-loop-header seat the sibling axes refuse. */
   homeDerivedReads?: boolean;
   /** DEF-BLOCK PLACEMENT for memory reads — WHERE the read happens, not where the value lives.
    *  The sibling of the homing axes above: there the question is which register or offset holds a
@@ -810,13 +810,17 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
    *  compiler re-materializes for free, and homing it only adds copies — the small-constant class
    *  the const scope's note records.
    *
-   *  Each read must then REACH `op0`'s position, on two counts. Nothing that writes memory may
-   *  execute in between, because homing moves the read there: today it renders at its own def
-   *  position (it materialized) or inline at each of `op0`'s render positions, and both lie on the
-   *  far side of a write that this refusal is the only thing standing between. And `op0` may not
-   *  sit inside a loop the read is outside, where rendering the read would run it once per
-   *  iteration — a second load for any cell, and a second ACCESS for a volatile one, which no
-   *  write barrier can see. */
+   *  Each read must then sit in `op0`'s OWN BLOCK, and reach `op0`'s position with nothing that
+   *  writes memory able to execute in between — homing renders the read at `op0`, so both are
+   *  about moving it there.
+   *
+   *  The same block is what makes the axis's claim true at all: the register handoff it reproduces
+   *  is one straight-line run of the asm, `ldrh` into `eor` into three uses. Across blocks WHICH
+   *  BLOCK reads is `readsStayWhereWritten`'s question, not this one, and answering it here goes
+   *  wrong in both directions — a value below a branch pulls the read into an arm that may not
+   *  run, a value inside a loop pulls it in to run per iteration. Neither is a write, so no
+   *  barrier sees either; for an ordinary cell they are worse spellings, and for a volatile one
+   *  they are a missing access and a duplicated one. */
   const standsOnMovableRead = (op0: Op, blk: Block): boolean => {
     const reads: Op[] = [];
     const seen = new Set<Value>();
@@ -843,11 +847,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
     const at = { blk, idx: opIndex.get(op0)! };
     return (
       reads.length > 0 &&
-      reads.every(
-        (r) =>
-          !memWriteBetween(r, at, (x) => EFFECTFUL_OPS.has(x.opcode)) &&
-          !loopBodies.some((L) => L.body.has(blk) && !L.body.has(opBlock.get(r)!)),
-      )
+      reads.every((r) => opBlock.get(r) === blk && !memWriteBetween(r, at, (x) => EFFECTFUL_OPS.has(x.opcode)))
     );
   };
   /** 2+ distinct consuming ops — the multi-use the pure-op rule reads as a reused register. */
