@@ -1,7 +1,7 @@
 // The candidate-compile command factory (src/compile-command.ts) — the seam a project fills
 // with its own toolchain. Offline: the "compilers" here are plain sh commands.
 import { C_TYPEDEFS } from '@asmlift/core/target';
-import { readFileSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { expect, test } from 'vitest';
 
@@ -47,7 +47,10 @@ test('a typedef-rejecting template (header-injecting project) drops the prelude 
 test('a prelude-tolerant template keeps the prelude (probe verdict cached across candidates)', () => {
   // the counter file records every template execution: 1 probe + 2 candidates = 3, not 4 —
   // the verdict is cached per compiler instance
+  // pid-keyed and APPENDED to: pids are reused, so a file left by an earlier run under the same
+  // pid would make this count too high and fail a clean tree. Start from empty.
   const counter = `${process.env.TMPDIR ?? '/tmp'}/asmlift-probe-count-${process.pid}`;
+  rmSync(counter, { force: true });
   const compile = compileFromCommand(`echo x >> ${counter} && cp {{inputPath}} {{outputPath}}`);
   const first = compile('s32 f(void) { return 1; }\n', 'f', 'c');
   expect(readFileSync(first, 'utf8').startsWith(C_TYPEDEFS)).toBe(true);
@@ -162,6 +165,7 @@ test('the world is probed ONCE across every worker, not once per worker', async 
   // N workers starting together each see an unset probe verdict; without a shared in-flight
   // promise they all probe, and a slow template pays for it N times
   const counter = `${process.env.TMPDIR ?? '/tmp'}/asmlift-worker-probe-${process.pid}`;
+  rmSync(counter, { force: true }); // appended to, and pids are reused — see the sync twin above
   const { worker } = compilersFromCommand(`echo x >> ${counter} && cp {{inputPath}} {{outputPath}}`);
   const workers = [worker(), worker(), worker(), worker()];
   await Promise.all(workers.map((w, i) => w(`s32 f${i}(void) { return ${i}; }\n`, `f${i}`, 'c')));
