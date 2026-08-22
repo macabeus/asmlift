@@ -676,6 +676,12 @@ export interface StructureOptions {
   // body). GCC freely uses `!=`; IDO prefers `==`/`<`. A per-compiler DATA lever, not an `arch ==`
   // branch — default true (permissive; the decline path keeps it sound either way).
   switchAllowsNeqCase?: boolean;
+  // Comparison-tree switch recovery: emit the case arms in the order the ASSEMBLY lays their
+  // bodies out, rather than sorted by ascending case value. A per-compiler DATA lever declared in
+  // TargetDescription.compilerBehaviors — a compiler opts in on evidence that it neither reorders
+  // basic blocks nor schedules across them, so the layout it produced IS the order the source
+  // wrote. Default false: absent, the arms keep the ascending spelling.
+  switchArmsFollowLayout?: boolean;
   // Commutative load pairs re-spell in def (evaluation) order — see the swap in lowerDef. Default
   // true; verified byte-exact on agbcc and IDO. A per-compiler DATA lever declared in
   // TargetDescription.compilerBehaviors: the first compiler whose scheduler is shown re-ordering
@@ -792,6 +798,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     negateJoinedBranchSense = false,
     orderArgCopiesByComputation = true,
     switchAllowsNeqCase = true,
+    switchArmsFollowLayout = false,
     defOrderLoadPairs = true,
     anchorConstCopies = false,
     littleEndian = true,
@@ -2492,6 +2499,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     isNamed: (v) => varName.has(v),
     isCmpOpcode: (opcode) => !!CMP_TO_BIN[opcode],
     switchAllowsNeqCase,
+    switchArmsFollowLayout,
     emitsAnchoredWrite: (blk) => blk.ops.some((o) => anchoredAt.has(o)),
     expr: (v) => expr(v),
     structureRegion: (b, stop) => structureRegion(b, stop),

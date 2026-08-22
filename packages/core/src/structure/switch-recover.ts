@@ -19,6 +19,8 @@ export interface SwitchRecoverDeps {
   /** is this opcode an integer comparison? */
   isCmpOpcode: (opcode: string) => boolean;
   switchAllowsNeqCase: boolean;
+  /** emit the case arms in the ASSEMBLY's block-layout order rather than by ascending case value */
+  switchArmsFollowLayout: boolean;
   /** does emitting this block's ops carry a statement beyond the ops themselves? A def-site
    *  ANCHORED merge copy (structure.ts anchorConstCopies) is attached to a const op and emitted
    *  with the block's side effects — a test block carrying one is not pure however pure its
@@ -58,6 +60,7 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     isNamed,
     isCmpOpcode,
     switchAllowsNeqCase,
+    switchArmsFollowLayout,
     emitsAnchoredWrite,
     expr,
     structureRegion,
@@ -489,10 +492,25 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
       }
     }
 
-    // Build the switch. Cases sorted ascending (safe: no fall-through — PRE2). Bodies delegate to the
-    // existing structureRegion (loops/ifs inside cases, the onStack guard — all reused).
+    // Build the switch. Bodies delegate to the existing structureRegion (loops/ifs inside cases,
+    // the onStack guard — all reused).
+    //
+    // ARM ORDER. Every arm here is CLOSED (`allArmsClosed` above — Regime A declines fall-through
+    // outright, unlike the `switch_br` path in structure.ts where emission order is load-bearing
+    // for correctness), and the case values are disjoint (PRE3 simulates the tree per value), so
+    // the order is free of meaning and pure matching evidence. Two orders are available:
+    //   - ascending case VALUE, the neutral default, and all a compiler that reorders blocks
+    //     leaves behind;
+    //   - the order the ASSEMBLY lays the bodies out, which is the SOURCE's arm order for a
+    //     compiler that emits case bodies as it walks the arms and never moves them afterwards.
+    //     `switchArmsFollowLayout` is where such a compiler declares that (TargetDescription
+    //     .compilerBehaviors), on its own evidence — never inherited.
+    // Ties are impossible (a block has one layout index), and the value order stays the
+    // tie-break spelling for everyone who has not declared.
     const scrutExpr = expr(scrut);
-    const sortedCases = [...cases.entries()].sort((a, c) => a[0] - c[0]);
+    const sortedCases = [...cases.entries()].sort((a, c) =>
+      switchArmsFollowLayout ? layoutIndex(a[1]) - layoutIndex(c[1]) : a[0] - c[0],
+    );
     const outCases: SwitchCase[] = sortedCases.map(([k, blk]) => ({
       values: [k],
       body: structureRegion(blk, merge),

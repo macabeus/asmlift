@@ -6,7 +6,7 @@
 import { expect, test } from 'vitest';
 
 import { decompile } from '../src/pipeline';
-import { ARMV4T_AGBCC } from '../src/target';
+import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC } from '../src/target';
 
 // agbcc's own output for `switch (mode) { case 0..3 }` with the arms in `order`, reduced to the
 // shape that matters: the balanced comparison tree, four one-instruction bodies, a merge that
@@ -56,4 +56,31 @@ test('two fall-out leaves passing DIFFERENT values are two defaults and still de
   const out = of(dispatch([0, 1, 2, 3]).replace(/\tb\t\.Lend\n(?=\.Lc0:)/, '\tmov\tr2, #0x9\n\tb\t.Lend\n'));
   expect(out).toContain('else'); // declined to if-recovery
   expect(out).toContain('9'); // …and the second leaf's write survives
+});
+
+// ── arm ORDER ────────────────────────────────────────────────────────────────────────────────────
+// The dispatch tree above the bodies is the same whatever order the arms were written in, so the
+// only evidence of that order is where agbcc laid the bodies out — and it lays them out as it
+// walks the arms (`stmt.c`: `before_case` is taken after the bodies, and the closing
+// `reorder_insns` moves only the dispatch to the front; the Makefile compiles neither sched.c nor
+// reorg.c). Emitting the arms sorted by case value instead moves every instruction after the first.
+test('the arms come back in the ASSEMBLY’s layout order, not sorted by case value', () => {
+  expect(armOrder(of(dispatch([2, 0, 3, 1])))).toEqual([2, 0, 3, 1]);
+  expect(armOrder(of(dispatch([3, 2, 1, 0])))).toEqual([3, 2, 1, 0]);
+  expect(armOrder(of(dispatch([0, 1, 2, 3])))).toEqual([0, 1, 2, 3]);
+  // …and the arm KEEPS its own body: this is a reordering, not a relabelling. `case k` adds k+1.
+  expect(of(dispatch([2, 0, 3, 1]))).toMatch(/case 2:\s*\n\s*v0 = a1 \+ 3;/);
+  expect(of(dispatch([2, 0, 3, 1]))).toMatch(/case 1:\s*\n\s*v0 = a1 \+ 2;/);
+});
+
+test('a compiler that has not declared layout-order arms keeps the ascending spelling', () => {
+  // The rule is agbcc's, from agbcc's sources. IDO/KMC-GCC/CodeWarrior all have schedulers and
+  // none has been put through that evidence, so they take the ascending order until they declare.
+  const undeclared = { ...ARMV4T_AGBCC, compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors } };
+  delete undeclared.compilerBehaviors.switchArmsFollowLayout;
+  const out = decompile('f', dispatch([2, 0, 3, 1]), undeclared, { prototypes: { f: { returnsVoid: true } } }).source;
+  expect(armOrder(out)).toEqual([0, 1, 2, 3]);
+  for (const t of [MIPS_IDO, MIPS_GCC, PPC_MWCC]) {
+    expect(t.compilerBehaviors.switchArmsFollowLayout).toBeUndefined();
+  }
 });
