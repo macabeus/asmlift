@@ -260,12 +260,15 @@ export interface AnalyzeOptions {
    *  def position, which is where the ASM performed it — the conservative direction. It is
    *  SINKING that needs the barrier scan (the multi-render rule below), and that scan stays.
    *
-   *  Three refusals, each with a reason rather than a threshold:
+   *  Four refusals, each with a reason rather than a threshold:
    *    • an address CONE (gaddr/laddr) — the standing homing refusal: rendered standalone such a
    *      value loses the memAccess's inline byte-stride cast (coneHoldsAddr);
    *    • a MULTI-BLOCK LOOP HEADER seat — a test-at-top `while`'s condition has no seat for a
    *      materialized temp, so it would trade a structuring function for a decline;
-   *    • a LOOP PREHEADER of the loop the renders are in — see `preheaderOfRenderLoop`. */
+   *    • a LOOP PREHEADER of the loop the renders are in — see `preheaderOfRenderLoop`;
+   *    • a read C evaluates only under a `&&`/`||` — see `shortCircuitGuarded`. Both of those
+   *      refusals name a block the IR reports that the ASM did not: one a compiler pass moved the
+   *      read to, one a raise pass did. */
   readsStayWhereWritten?: boolean;
 }
 
@@ -718,6 +721,31 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
    *  of the function keeps the rule. */
   const preheaderOfRenderLoop = (b: Block, renders: readonly Block[]): boolean =>
     loopBodies.some((L) => !L.body.has(b) && successorsOf(b).includes(L.header) && renders.some((x) => L.body.has(x)));
+  /** THE def-block placement rule's short-circuit refusal: values C evaluates only under a
+   *  `&&`/`||` — the SECOND operand of every `logic_and`/`logic_or`, and everything it reads.
+   *
+   *  raise/shortcircuit.ts recovers a connective by hoisting the guarded arm's whole pure body,
+   *  memory reads included, into the block ABOVE the branch (its value form and its control-flow
+   *  form both splice that body into the head). ir/opcodes.ts states the safety argument as the
+   *  reason a read is deliberately absent from HOIST_UNSAFE_OPS: the structurer inlines it back
+   *  into the `&&`/`||` right-hand side, where C's own short circuit re-guards it. So for a value
+   *  in that cone the def block is a FOLD ARTIFACT rather than the block the asm read in, and the
+   *  whole premise this rule reads placement under does not hold there. Naming it also breaks the
+   *  re-guard: `p != 0 && *p != 0` would emit `v0 = *p;` above its own null check. */
+  const shortCircuitGuarded = new Set<Value>();
+  {
+    const stack = fn.blocks.flatMap((b) =>
+      b.ops.filter((op) => op.opcode === 'logic_and' || op.opcode === 'logic_or').map((op) => op.operands[1]),
+    );
+    while (stack.length) {
+      const v = stack.pop()!;
+      if (shortCircuitGuarded.has(v)) {
+        continue;
+      }
+      shortCircuitGuarded.add(v);
+      stack.push(...(defOf.get(v)?.operands ?? []));
+    }
+  }
   // Decide in REVERSE program order so a consumer's own materialization is settled before any
   // producer asks for its emit position (SSA: uses follow defs in dominance/layout order) — and
   // iterate to a fixpoint for IR whose block layout does not follow dominance (hand-built IR):
@@ -835,7 +863,14 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         // would re-read per arm through a fresh pool literal — a spelling the compiler could not
         // have produced from this asm. One render suffices (the short-circuit-into-a-call shape
         // has exactly one); an unresolvable render position refuses, as everywhere else.
-        if (!isCall && readsStayWhereWritten && dom && !addressCone(op) && !multiBlockHeaders.has(b)) {
+        if (
+          !isCall &&
+          readsStayWhereWritten &&
+          dom &&
+          !addressCone(op) &&
+          !multiBlockHeaders.has(b) &&
+          !shortCircuitGuarded.has(r)
+        ) {
           const at = consumers.map((c) => emitPos(c));
           const rb = at.some((p) => p === null) ? null : [...new Set(at.map((p) => p!.blk))];
           if (rb && rb.length > 0 && rb.every((x) => x !== b && dom.get(x)!.has(b)) && !preheaderOfRenderLoop(b, rb)) {

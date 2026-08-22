@@ -12,8 +12,9 @@
 //
 // What these tests pin is the SCOPE: one render is enough (a "2+ sibling arms" rule would miss
 // the short-circuit-into-a-call shape), renders in the def's own block are not this rule's
-// business, and three refusals hold — address cones, multi-block loop-header seats, and the loop
-// PREHEADER, which is the one place loop invariant motion still moves a read to a dominator.
+// business, and four refusals hold — address cones, multi-block loop-header seats, the loop
+// PREHEADER (where loop invariant motion parks a read), and the right operand of a `&&`/`||`
+// (where raise/shortcircuit.ts parks one).
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -263,4 +264,38 @@ test('only the compiler shown the evidence declares the behavior', () => {
   expect(structureOptionsFor(ARMV4T_AGBCC, false).readsStayWhereWritten).toBe(true);
   expect(structureOptionsFor(MIPS_IDO, false).readsStayWhereWritten).toBeUndefined();
   expect(structureOptionsFor(PPC_MWCC, false).readsStayWhereWritten).toBeUndefined();
+});
+
+// ── the refusal: a read C evaluates only under a `&&`/`||` ───────────────────────────────────
+// raise/shortcircuit.ts recovers a connective by hoisting the guarded arm's whole pure body —
+// memory reads included — into the block ABOVE the branch (both its value form and its
+// control-flow form do). ir/opcodes.ts states the safety argument in so many words: a read is
+// deliberately not HOIST_UNSAFE because the structurer inlines it back into the `&&`/`||`
+// right-hand side, where C's own short circuit re-guards it. So for a value in that cone the IR's
+// def block is a FOLD ARTIFACT, not the block the asm read in, and naming it there dereferences
+// past the guard the asm respected.
+//
+// The IR below is what `decompile()` recovers from agbcc -O2's own output for
+// `s32 sc9(s32 *p) { return (p != 0) && (*p != 0); }` — asm `cmp r0,#0 / beq .L3 / ldr r1,[r0]`,
+// so the `ldr` runs only when r0 != 0. Note the render block is a bare `ret` forwarding block: it
+// is that cosmetic CFG seam, not an asm block boundary, that makes the dominance test true.
+const SCGUARD = `fn sc9 {
+^bb0(%0: s32*):
+  %1: s32 = const {value=0}
+  %2: s32 = load %0 {off=0, signed=true, width=4}
+  %3: s32 = const {value=0}
+  %4: u32 = icmp_ne %2, %3
+  %5: u32 = icmp_ne %0, %1
+  %6: s32 = logic_and %5, %4
+  br ^bb1()
+^bb1():
+  ret %6
+}
+`;
+
+test('a read inside a short-circuit right operand is refused', () => {
+  const on = emit(SCGUARD, true, false);
+  expect(on).toBe(emit(SCGUARD, false, false));
+  expect(on).toContain('return a0 != 0 && *a0 != 0;');
+  expect(on).not.toMatch(/v\d+ = \*a0;/); // never a statement above the guard
 });
