@@ -277,9 +277,11 @@ export interface AnalyzeOptions {
    *  owns renders in the read's own block, this rule owns strictly dominated ones, and on a
    *  target that declares the behavior the rule reaches those first.
    *
-   *  Four refusals, each with a reason rather than a threshold:
+   *  Five refusals, each with a reason rather than a threshold:
    *    • no legal SEAT for a temp — an address cone or a multi-block loop header, the two every
    *      homing rule makes; see `seatIsLegal`;
+   *    • a FALL-THROUGH between def and render, where no branch separates them at all and the
+   *      dominance is an artifact of the frontend's block-per-label — see `fallThroughSeam`;
    *    • a LOOP PREHEADER of the loop the renders are in — see `preheaderOfRenderLoop`;
    *    • a read C evaluates only under a `&&`/`||` — see `shortCircuitGuarded`. Those two both
    *      name a block the IR reports that the ASM did not: one a compiler pass moved the read to,
@@ -648,17 +650,17 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
   // From the caller's dominators (a back edge is `latch → header` with the header dominating the
   // latch); the body is the backward closure from the latch. With no `dom` the rule stands
   // down — the same posture as the `defs`-carried rules.
+  const predsOf = new Map<Block, Block[]>();
+  for (const b of fn.blocks) {
+    predsOf.set(b, []);
+  }
+  for (const b of fn.blocks) {
+    for (const s of successorsOf(b)) {
+      predsOf.get(s)!.push(b);
+    }
+  }
   const loopBodies: { header: Block; body: Set<Block> }[] = [];
   if (dom) {
-    const predsOf = new Map<Block, Block[]>();
-    for (const b of fn.blocks) {
-      predsOf.set(b, []);
-    }
-    for (const b of fn.blocks) {
-      for (const s of successorsOf(b)) {
-        predsOf.get(s)!.push(b);
-      }
-    }
     for (const latch of fn.blocks) {
       for (const header of successorsOf(latch)) {
         if (!dom.get(latch)?.has(header)) {
@@ -754,6 +756,36 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
    *  of the function keeps the rule. */
   const preheaderOfRenderLoop = (b: Block, renders: readonly Block[]): boolean =>
     loopBodies.some((L) => !L.body.has(b) && successorsOf(b).includes(L.header) && renders.some((x) => L.body.has(x)));
+  /** THE def-block placement rule's seam refusal: the blocks a FALL-THROUGH puts below `b` with no
+   *  branch in between — the chain of unconditional `br` edges into a block that has `b`'s chain as
+   *  its only predecessor.
+   *
+   *  The frontends start a new block at every LABEL, so a label nothing branches to cuts one
+   *  straight line of asm in two (klonoa's `.s` files carry 145 such function-boundary artifacts).
+   *  A render on the far side of that cut is dominated by the read's block while no control flow
+   *  separates them, and the rule's premise — the compiler will not move a read ACROSS a branch —
+   *  says nothing there. Within one straight line agbcc DOES choose the order: compiled,
+   *  `m4aMPlayVolumeControl(gMPlayInfo_3, 255, *p)` emits `ldr r0,pool / ldrh r2,[p]` and the same
+   *  call with the read named above it emits those two in the opposite order, which is a byte
+   *  difference and the wrong side of it (StreamCmd_SetMusicParams). */
+  const fallThroughSeam = (b: Block, renders: readonly Block[]): boolean => {
+    const seen = new Set<Block>([b]);
+    for (let cur = b; ;) {
+      const t = cur.ops[cur.ops.length - 1];
+      if (t?.opcode !== 'br') {
+        return false;
+      }
+      const next = t.successors[0].block;
+      if (predsOf.get(next)!.length !== 1 || seen.has(next)) {
+        return false;
+      }
+      if (renders.includes(next)) {
+        return true;
+      }
+      seen.add(next);
+      cur = next;
+    }
+  };
   /** THE def-block placement rule's short-circuit refusal: values C evaluates only under a
    *  `&&`/`||` — the SECOND operand of every `logic_and`/`logic_or`, and everything it reads.
    *
@@ -932,7 +964,13 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         ) {
           const at = consumers.map((c) => emitPos(c));
           const rb = at.some((p) => p === null) ? null : [...new Set(at.map((p) => p!.blk))];
-          if (rb && rb.length > 0 && rb.every((x) => x !== b && dom.get(x)!.has(b)) && !preheaderOfRenderLoop(b, rb)) {
+          if (
+            rb &&
+            rb.length > 0 &&
+            rb.every((x) => x !== b && dom.get(x)!.has(b)) &&
+            !preheaderOfRenderLoop(b, rb) &&
+            !fallThroughSeam(b, rb)
+          ) {
             materialize.add(op);
             continue;
           }

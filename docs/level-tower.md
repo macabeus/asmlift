@@ -117,10 +117,12 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   that claim runs: it is emission-from-spelling, not spelling-from-emission. The converse would be
   false even here (agbcc's PRE does move a load into a block the source never read in), and a
   default read backwards is how a compiler fact turns into a wrong answer — so a per-compiler
-  default owes an explicit refusal for every pass that moves the thing it is placing. Getting that backwards is expensive in both
-  directions: an axis where a default belongs doubles every enumeration to referee a question with
-  one answer, and a default where an axis belongs quietly degrades every function the differ would
-  have rescued.
+  default owes an explicit refusal for every pass that moves the thing it is placing, and for every
+  IR boundary the frontend invents where the machine had none (a block starts at every label, so a
+  label nothing branches to makes one straight line of asm look like a dominating pair of blocks).
+  Getting the population backwards is expensive in both directions: an axis where a default belongs
+  doubles every enumeration to referee a question with one answer, and a default where an axis
+  belongs quietly degrades every function the differ would have rescued.
 
   Which population a pass belongs to decides how much its opinions cost. Four passes currently
   answer "is this address a local?" differently — `raise/gvn.ts` (never), `l3/basecse.ts`

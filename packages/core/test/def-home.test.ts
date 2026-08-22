@@ -12,9 +12,10 @@
 //
 // What these tests pin is the SCOPE: one render is enough (a "2+ sibling arms" rule would miss
 // the short-circuit-into-a-call shape), renders in the def's own block are not this rule's
-// business, and four refusals hold — address cones, multi-block loop-header seats, the loop
-// PREHEADER (where loop invariant motion parks a read), and the right operand of a `&&`/`||`
-// (where raise/shortcircuit.ts parks one).
+// business, and five refusals hold — address cones and multi-block loop-header seats, a
+// fall-through seam (no branch between read and render), the loop PREHEADER (where loop invariant
+// motion parks a read), the right operand of a `&&`/`||` (where raise/shortcircuit.ts parks one),
+// and a read that is only a block parameter's incoming copy.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -130,6 +131,68 @@ const SAMEBLOCK = `fn sameblock {
 test('a read rendered in its own block is untouched', () => {
   expect(emit(SAMEBLOCK, true)).toBe(emit(SAMEBLOCK, false));
   expect(emit(SAMEBLOCK, true)).not.toMatch(/u32 v\d+;/);
+});
+
+// ── the refusal: a FALL-THROUGH seam, where no branch separates read from render ─────────────
+// The frontends start a block at every LABEL, so a label nothing branches to splits one straight
+// line of asm in two and the upper half dominates the lower with no control flow between. The IR
+// below is what `decompile()` recovers from klonoa's StreamCmd_SetMusicParams, whose `.s` carries
+// a stray `sub_0804E9AC:` between the last `ldrh` and the `bl` that consumes it. Homing there
+// spells a read the compiler orders for itself: the reference C assembles byte-identical (104 of
+// 104 bytes), and the homed spelling misses by four — agbcc emits `ldr r0,pool / ldrh r2,[r4]`
+// from the inlined read and the two in the opposite order from the named one.
+const SEAM = `fn seam {
+^bb0():
+  %0: u16* = const {value=50352656}
+  %1: s32 = load %0 {off=0, signed=false, width=2}
+  br ^bb1()
+^bb1():
+  %2: s32 = const {value=50357936}
+  %3: s32 = const {value=255}
+  %4: s32 = call %2, %3, %1 {target="m4aMPlayVolumeControl"}
+  ret
+}
+`;
+
+test('a read whose render only a fall-through separates from it is refused', () => {
+  const on = emit(SEAM, true);
+  expect(on).toBe(emit(SEAM, false));
+  expect(on).toContain('m4aMPlayVolumeControl(50357936, 255, *(u16 *)50352656);');
+});
+
+// The refusal is "no branch between", not "the def block does not itself branch": a seam ABOVE a
+// real branch keeps the rule, because the divergence still lies between the read and both renders.
+const SEAMTHENBRANCH = `fn seamthenbranch {
+^bb0(%0: u32):
+  %1: u32 = const {value=134576844}
+  %2: u32 = load %1 {off=0, signed=false, width=1}
+  br ^bb1()
+^bb1():
+  %3: u32 = const {value=1}
+  %4: u32 = and %0, %3
+  %5: u32 = const {value=0}
+  %6: u32 = icmp_ne %4, %5
+  cond_br %6, ^bb2(), ^bb3()
+^bb2():
+  %7: u32 = const {value=3}
+  %8: u32 = shl %2, %7
+  %9: u32 = const {value=50340416}
+  store %9, %8 {off=0, width=4}
+  br ^bb4()
+^bb3():
+  %10: u32 = const {value=4}
+  %11: u32 = shl %2, %10
+  %12: u32 = const {value=50340420}
+  store %12, %11 {off=0, width=4}
+  br ^bb4()
+^bb4():
+  ret
+}
+`;
+
+test('a fall-through above a real branch still homes at the def block', () => {
+  expect(count(emit(SEAMTHENBRANCH, true), '134576844')).toBe(1);
+  expect(count(emit(SEAMTHENBRANCH, false), '134576844')).toBe(2);
 });
 
 // ── the refusal: a loop PREHEADER ────────────────────────────────────────────────────────────
@@ -277,8 +340,7 @@ test('only the compiler shown the evidence declares the behavior', () => {
 //
 // The IR below is what `decompile()` recovers from agbcc -O2's own output for
 // `s32 sc9(s32 *p) { return (p != 0) && (*p != 0); }` — asm `cmp r0,#0 / beq .L3 / ldr r1,[r0]`,
-// so the `ldr` runs only when r0 != 0. Note the render block is a bare `ret` forwarding block: it
-// is that cosmetic CFG seam, not an asm block boundary, that makes the dominance test true.
+// so the `ldr` runs only when r0 != 0.
 const SCGUARD = `fn sc9 {
 ^bb0(%0: s32*):
   %1: s32 = const {value=0}
@@ -298,6 +360,43 @@ test('a read inside a short-circuit right operand is refused', () => {
   expect(on).toBe(emit(SCGUARD, false, false));
   expect(on).toContain('return a0 != 0 && *a0 != 0;');
   expect(on).not.toMatch(/v\d+ = \*a0;/); // never a statement above the guard
+});
+
+// The same refusal where nothing else stands in its way: the connective's value is consumed once,
+// past a branch of its own, so the fold's head block really is strictly dominating and separated
+// by a branch. From agbcc -O2's output for
+//   extern int gA;
+//   void f(int *p, int c) { int t = (p != 0) && (*p != 0); if (c & 1) { gA = t; } }
+// — asm `cmp r0,#0 / beq .L3 / ldr r1,[r0]`, so the `ldr` again runs only when r0 != 0.
+const SCFAR = `fn f {
+^bb0(%0: s32*, %1: s32):
+  %2: s32 = const {value=0}
+  %3: s32 = load %0 {off=0, signed=true, width=4}
+  %4: s32 = const {value=0}
+  %5: u32 = icmp_ne %3, %4
+  %6: u32 = icmp_ne %0, %2
+  %7: s32 = logic_and %6, %5
+  br ^bb1()
+^bb1():
+  %8: s32 = const {value=1}
+  %9: s32* = and %8, %1
+  %10: s32 = const {value=0}
+  %11: u32 = icmp_eq %9, %10
+  cond_br %11, ^bb3(%9), ^bb2()
+^bb2():
+  %12: s32* = gaddr {sym="gA"}
+  store %12, %7 {off=0, width=4}
+  br ^bb3(%12)
+^bb3(%13: s32*):
+  ret %13
+}
+`;
+
+test('a short-circuit read is refused even with a branch between it and its render', () => {
+  const on = emit(SCFAR, true, false);
+  expect(on).toBe(emit(SCFAR, false, false));
+  expect(on).toContain('gA = a0 != 0 && *a0 != 0;');
+  expect(on).not.toMatch(/v\d+ = \*a0;/);
 });
 
 // ── the refusal that holds itself: partial redundancy elimination ────────────────────────────
