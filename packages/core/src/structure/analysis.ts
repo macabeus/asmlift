@@ -193,7 +193,15 @@ export interface AnalyzeOptions {
    *  scoped), so today's spelling is never wrong — only sometimes not the one the compiler was
    *  given.
    *  Which side matches is genuinely per-function (the same dogfood watched agbcc go both ways
-   *  inside ONE function), so this is a differ-refereed candidate axis, never a default. */
+   *  inside ONE function), so this is a differ-refereed candidate axis, never a default.
+   *
+   *  SCOPE, since `readsStayWhereWritten` below now answers the same question — read once and
+   *  reuse, or read per use — with the opposite default: this axis owns renders in the read's OWN
+   *  block, where nothing about placement is in evidence and both spellings really do compile.
+   *  A read whose every render sits in a STRICTLY DOMINATED block is the default's, and on a
+   *  target that declares it the axis cannot produce the re-read spelling there (the rule
+   *  materializes first). That is a pre-emption, not a conflict: a per-arm source read compiles to
+   *  a per-arm load on that compiler, so the sunk spelling is one it did not emit from this asm. */
   rereadGlobals?: boolean;
   /** "does the project declare this global volatile?" — a read of a volatile object may NOT be
    *  duplicated or moved, so the axis above refuses on one. Answers false for a symbol the map
@@ -259,6 +267,10 @@ export interface AnalyzeOptions {
    *  Sound by construction: materializing moves a read from its render position back to its own
    *  def position, which is where the ASM performed it — the conservative direction. It is
    *  SINKING that needs the barrier scan (the multi-render rule below), and that scan stays.
+   *
+   *  Splits the read-once-or-per-use question with the `/reread-globals` axis above: that axis
+   *  owns renders in the read's own block, this rule owns strictly dominated ones, and on a
+   *  target that declares the behavior the rule reaches those first.
    *
    *  Four refusals, each with a reason rather than a threshold:
    *    • no legal SEAT for a temp — an address cone or a multi-block loop header, the two every
