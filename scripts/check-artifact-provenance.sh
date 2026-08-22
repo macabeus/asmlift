@@ -10,14 +10,28 @@
 # looks.
 #
 # Fires on commits THIS BRANCH adds after the stamp that touch code the artifact measures.
-# Commits the base branch gained meanwhile are not this branch's problem, so they are excluded.
-# A stamp that is not in this repo's history (main squash-merges, so main's own stamp is always
-# unreachable) is UNKNOWN, not a failure.
+# Commits the base branch gained meanwhile are not this branch's problem, so every base ref
+# given is excluded — pass the base BRANCH, not only the sha a webhook payload froze: that sha
+# goes stale while the PR is open, while the merge ref CI checks out is rebuilt against the
+# base's moving tip, so excluding only the sha reports someone else's merged round as a commit
+# this branch added. Merge commits are skipped for the same reason: the one GitHub synthesizes
+# for `refs/pull/N/merge` is TREESAME to neither side once both touched these paths, and it is
+# not a change this branch made. A stamp that is not in this repo's history (main squash-merges,
+# so main's own stamp is always unreachable) is UNKNOWN, not a failure.
 #
-# usage: scripts/check-artifact-provenance.sh [base-ref]      (default: origin/main)
+# usage: scripts/check-artifact-provenance.sh [base-ref…]      (default: origin/main)
 set -eu
 
-base=${1:-origin/main}
+[ $# -gt 0 ] || set -- origin/main
+
+# the paths below are repo-relative, and a run from a subdirectory would find no artifact and
+# report success — the one answer a fail-loud check must never invent
+top=$(git rev-parse --show-toplevel 2>/dev/null) || {
+  echo "provenance: not a git checkout — UNKNOWN, not checked"
+  exit 0
+}
+cd "$top"
+
 artifact=apps/benchmark/results/results.json
 
 # what the artifact measures — a commit touching any of these invalidates it
@@ -35,12 +49,20 @@ if ! git cat-file -e "$stamp^{commit}" 2>/dev/null || ! git merge-base --is-ance
   exit 0
 fi
 
-git rev-parse --verify --quiet "$base^{commit}" >/dev/null || {
-  echo "provenance: base ref '$base' not in this checkout — UNKNOWN, not checked"
+# a ref the checkout does not have is not an error: CI passes both spellings of the base and
+# takes whichever exists, and only "none of them" is unknowable
+bases=''
+for ref in "$@"; do
+  if git rev-parse --verify --quiet "$ref^{commit}" >/dev/null 2>&1; then
+    bases="$bases $ref"
+  fi
+done
+[ -n "$bases" ] || {
+  echo "provenance: no base ref among '$*' is in this checkout — UNKNOWN, not checked"
   exit 0
 }
 
-after=$(git log --oneline HEAD --not "$stamp" "$base" -- $paths)
+after=$(git log --no-merges --oneline HEAD --not "$stamp" $bases -- $paths)
 
 if [ -n "$after" ]; then
   echo "provenance: FAIL — the artifact was generated at $(echo "$stamp" | cut -c1-7), and this branch"
@@ -52,3 +74,4 @@ if [ -n "$after" ]; then
 fi
 
 echo "provenance: OK — no commit after $(echo "$stamp" | cut -c1-7) touches what the artifact measures"
+echo "provenance: base(s) excluded:$bases"

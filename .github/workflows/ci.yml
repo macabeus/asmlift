@@ -38,6 +38,9 @@ jobs:
   # so it needs neither pnpm nor a toolchain — but it does need real history, hence its own
   # checkout at full depth. PR-only: main squash-merges, so main's own stamp is never reachable
   # and the check reports UNKNOWN there by design.
+  # BOTH spellings of the base go in: `base.sha` freezes at the event and goes stale as soon as
+  # main gains a round, while the merge ref checked out here is rebuilt against main's current
+  # tip — excluding only the frozen sha reports main's own commits as this branch's.
   artifact-provenance:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -45,7 +48,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - run: scripts/check-artifact-provenance.sh ${{ github.event.pull_request.base.sha }}
+      - env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: scripts/check-artifact-provenance.sh "origin/$BASE_REF" "$BASE_SHA"
 
   # The webapp — playground + benchmark, one Vite build: its own tsconfig (vite/DOM types) —
   # `tsc --noEmit && vite build` plus its unit tests are the gate. (This build type-checks the
