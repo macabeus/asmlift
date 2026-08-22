@@ -35,6 +35,7 @@ usage: asmlift <file.s|file.asm|file.o|-> [--target <agbcc|ido7.1|gcc2.7.2kmc|gc
                 [--name <symbol>] [--backend <c|pascal>] [--strict]
                 [--config <decomp.yaml>] [--score-against <target.o>]
                 [--asm-data <dump.txt>] [--proto <proto.json>]
+                [--jobs <n>] [--progress]
 ```
 
 | Flag              | Meaning                                                                                                                                                                                                                                                                                                    |
@@ -47,6 +48,8 @@ usage: asmlift <file.s|file.asm|file.o|-> [--target <agbcc|ido7.1|gcc2.7.2kmc|gc
 | `--score-against` | Compile the output (and every ranked candidate) and objdiff-score it against this object. Implies strict; the per-candidate score table goes to stderr                                                                                                                                                     |
 | `--asm-data`      | For text input: an `objdump -s -r -t` dump of the object the asm came from, supplying the data sections text lacks (jump tables, anonymous constants). Object-file input extracts this itself and does not take the flag                                                                                   |
 | `--proto`         | Function prototypes as JSON (`{"sym": {"params": N \| ["u8", ...], "returnsVoid": true}, ...}`): a callee's params drives its call-argument recovery; the decompiled function's own entry supplies its void-ness. Every entry is validated — a malformed one is refused (exit `64`), never quietly ignored |
+| `--jobs`          | With `--score-against`: compile `n` candidates at a time (default `1`). Candidate compiles are the bulk of a ranked run and are independent; the ranking is unchanged — the schedule cannot choose the winner                                                                                              |
+| `--progress`      | With `--score-against`: an `asmlift: [progress] i/n candidates scored` liveness line on stderr every few seconds. The `[score]` table is unchanged, so two runs still compare on their `[score]` lines                                                                                                     |
 
 Exit codes: `0` clean (or byte-exact match when scoring) · `1` gaps, declined, or nonmatch —
 the stderr tag says which (`[declined]` = principled refusal, `[internal error]` = bug) ·

@@ -8,16 +8,55 @@ import type { AsmData } from '@asmlift/core/frontend/asmdata';
 import type { LanguageBackend } from '@asmlift/core/l3/ast';
 import { RewritePattern } from '@asmlift/core/pattern/engine';
 import type { Prototypes } from '@asmlift/core/proto';
-import { type RankedResult as CoreRankedResult, type Scored, enumerateCandidates, rankBy } from '@asmlift/core/rank';
+import {
+  type Candidate,
+  type RankedResult as CoreRankedResult,
+  type Scored,
+  enumerateCandidates,
+  rankBy,
+} from '@asmlift/core/rank';
 import type { SymbolMap } from '@asmlift/core/symbols';
 import { type TargetDescription } from '@asmlift/core/target';
 
+import type { AsyncCandidateCompiler } from './compile-command';
 import { renderDeclarations } from './declare';
-import { type CandidateCompiler, MatchScore, scoreSource } from './score';
+import { type CandidateCompiler, MatchScore, scoreObjects, scoreSource } from './score';
 
 // The cli's candidate/result shapes are the core generics pinned to the objdiff MatchScore.
 export type RankedCandidate = Scored<MatchScore>;
 export type RankedResult = CoreRankedResult<MatchScore>;
+
+export interface RankOptions {
+  patterns?: RewritePattern[];
+  backend?: LanguageBackend;
+  prototypes?: Prototypes;
+  asmData?: AsmData;
+  /** address→symbol map (core symbols.ts) — same contract as DecompileOptions.symbols */
+  symbols?: SymbolMap;
+  /** a project's own toolchain — overrides the compiler registry */
+  compile?: CandidateCompiler;
+  /** Liveness only, never a measurement: called once per candidate as it is scored, carrying the
+   *  lowest score seen SO FAR. The ranking below is what decides the winner. */
+  onProgress?: (done: number, total: number, bestSoFar: number | undefined) => void;
+}
+
+// Self-declaring candidates: a candidate that names map-derived symbols carries their refs
+// (Candidate.symbolRefs) — rendered here into its per-candidate declaration block. The
+// compiler seam decides whether the block is USED (probed self-declared world) or ignored
+// (headers world / context-injecting compilers) — see compile-command.ts.
+const declarationsOf = (cand: Candidate): string | undefined =>
+  cand.symbolRefs?.length ? renderDeclarations(cand.symbolRefs) : undefined;
+
+// ONE enumeration for both drivers below: they must rank the same candidate set, or the pooled
+// run would be answering a different question than the serial one.
+const enumerate = (name: string, asm: string, target: TargetDescription, opts: RankOptions): Candidate[] =>
+  enumerateCandidates(name, asm, target, {
+    patterns: opts.patterns,
+    backend: opts.backend ?? cBackend,
+    prototypes: opts.prototypes,
+    asmData: opts.asmData,
+    symbols: opts.symbols,
+  });
 
 /** Enumerate each type/branch-sense candidate, recompile + objdiff-score it, and rank by the score. */
 export function decompileRanked(
@@ -25,38 +64,87 @@ export function decompileRanked(
   asm: string,
   target: TargetDescription,
   targetObj: string,
-  opts: {
-    patterns?: RewritePattern[];
-    backend?: LanguageBackend;
-    prototypes?: Prototypes;
-    asmData?: AsmData;
-    /** address→symbol map (core symbols.ts) — same contract as DecompileOptions.symbols */
-    symbols?: SymbolMap;
-    /** a project's own toolchain — overrides the compiler registry */
-    compile?: CandidateCompiler;
-  } = {},
+  opts: RankOptions = {},
 ): RankedResult {
   const backend = opts.backend ?? cBackend;
-  const candidates = enumerateCandidates(name, asm, target, {
-    patterns: opts.patterns,
-    backend,
-    prototypes: opts.prototypes,
-    asmData: opts.asmData,
-    symbols: opts.symbols,
+  const candidates = enumerate(name, asm, target, opts);
+  let done = 0;
+  let best: number | undefined;
+  return rankBy(candidates, name, (source, symbol, cand) => {
+    try {
+      const s = scoreSource(source, symbol, targetObj, target, backend.id, opts.compile, declarationsOf(cand));
+      best = best === undefined || s.score < best ? s.score : best;
+      return s;
+    } finally {
+      // a candidate the scorer REFUSED still counts as processed: progress must not stall on a
+      // lever whose every spelling fails to build
+      opts.onProgress?.(++done, candidates.length, best);
+    }
   });
-  // Self-declaring candidates: a candidate that names map-derived symbols carries their refs
-  // (Candidate.symbolRefs) — rendered here into its per-candidate declaration block. The
-  // compiler seam decides whether the block is USED (probed self-declared world) or ignored
-  // (headers world / context-injecting compilers) — see compile-command.ts.
-  return rankBy(candidates, name, (source, symbol, cand) =>
-    scoreSource(
-      source,
-      symbol,
-      targetObj,
-      target,
-      backend.id,
-      opts.compile,
-      cand.symbolRefs?.length ? renderDeclarations(cand.symbolRefs) : undefined,
-    ),
+}
+
+/** The same ranking with the candidate COMPILES run `jobs` at a time.
+ *
+ *  A ranked run is ~85% subprocess — one LBG-sized candidate measures ~50 ms to compile against
+ *  ~11 ms to score — and `rankBy`'s driver is synchronous, so today tens of thousands of
+ *  candidates compile one at a time on one core. Here each worker owns a scratch slot
+ *  (compile-command.ts `worker()`), takes the next unclaimed candidate, and scores its object the
+ *  moment it lands; the score runs on the main thread and overlaps the other workers' subprocesses.
+ *
+ *  ONLY the compile moves. The ordering is still core's `rankBy` over the same enumeration, run
+ *  afterwards against the memoized scores — so the winner, every tie-break and the `dropped` list
+ *  are what the serial path would have produced. The benchmark deliberately keeps calling
+ *  `decompileRanked`: a published measurement must not depend on a scheduler. */
+export async function decompileRankedParallel(
+  name: string,
+  asm: string,
+  target: TargetDescription,
+  targetObj: string,
+  opts: RankOptions & {
+    jobs: number;
+    /** mints one INDEPENDENT async compiler per worker (compile-command.ts `worker()`) */
+    worker: () => AsyncCandidateCompiler;
+  },
+): Promise<RankedResult> {
+  const backend = opts.backend ?? cBackend;
+  const candidates = enumerate(name, asm, target, opts);
+  // keyed by source, which core's enumeration has already deduped on — so it identifies a candidate
+  const scored = new Map<string, MatchScore | Error>();
+  let next = 0;
+  let done = 0;
+  let best: number | undefined;
+  await Promise.all(
+    Array.from({ length: Math.max(1, opts.jobs) }, async () => {
+      const compile = opts.worker();
+      for (;;) {
+        const i = next++;
+        if (i >= candidates.length) {
+          return;
+        }
+        const cand = candidates[i];
+        let result: MatchScore | Error;
+        try {
+          const obj = await compile(cand.source, name, backend.id, declarationsOf(cand));
+          result = scoreObjects(targetObj, obj, name);
+          best = best === undefined || result.score < best ? result.score : best;
+        } catch (e) {
+          // recorded, not thrown: `rankBy` below is what decides whether a refused candidate is
+          // survivable (a sibling scored) or fatal (every one failed)
+          result = e instanceof Error ? e : new Error(String(e));
+        }
+        scored.set(cand.source, result);
+        opts.onProgress?.(++done, candidates.length, best);
+      }
+    }),
   );
+  return rankBy(candidates, name, (source) => {
+    const r = scored.get(source);
+    if (r === undefined) {
+      throw new Error(`internal: a candidate reached ranking unscored (${source.length} bytes)`);
+    }
+    if (r instanceof Error) {
+      throw r;
+    }
+    return r;
+  });
 }
