@@ -107,3 +107,23 @@ test('a default entry the DISPATCH hands a value to still declines, and keeps th
   expect(out).toContain('v0 = 0;'); // the write the discarded edge carried
   expect(out).toContain('v0 = a1 + 2;');
 });
+
+test('two case values sharing ONE body have the same layout index, and stay in value order', () => {
+  // `case 2: case 3: …` branches both tests to the same label, so layout cannot order those two —
+  // the one thing the ordering rule cannot read off the assembly. Ascending value is the declared
+  // tie-break, so they keep the spelling they already had instead of inheriting whichever the tree
+  // walk reached first. (That Regime A emits the shared body once per label rather than stacking
+  // the labels as the jump-table path does is older than this and untouched here.)
+  const shared =
+    'f:\n\tmov\tr2, #0x0\n' +
+    '\tcmp\tr0, #0x1\n\tbeq\t.Lc1\t@cond_branch\n' +
+    '\tcmp\tr0, #0x1\n\tbgt\t.Lhi\t@cond_branch\n' +
+    '\tcmp\tr0, #0\n\tbeq\t.Lc0\t@cond_branch\n\tb\t.Lend\n' +
+    '.Lhi:\n\tcmp\tr0, #0x2\n\tbeq\t.Lsh\t@cond_branch\n' +
+    '\tcmp\tr0, #0x3\n\tbeq\t.Lsh\t@cond_branch\n\tb\t.Lend\n' +
+    '.Lsh:\n\tadd\tr2, r1, #0x7\n\tb\t.Lend\n' + // laid out FIRST, reached by both 2 and 3
+    '.Lc1:\n\tadd\tr2, r1, #0x2\n\tb\t.Lend\n' +
+    '.Lc0:\n\tadd\tr2, r1, #0x1\n' +
+    '.Lend:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr2, [r0]\n\tbx\tlr\n';
+  expect(armOrder(of(shared))).toEqual([2, 3, 1, 0]);
+});

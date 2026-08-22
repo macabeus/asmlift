@@ -517,11 +517,12 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     //     compiler that emits case bodies as it walks the arms and never moves them afterwards.
     //     `switchArmsFollowLayout` is where such a compiler declares that (TargetDescription
     //     .compilerBehaviors), on its own evidence — never inherited.
-    // Ties are impossible (a block has one layout index), and the value order stays the
-    // tie-break spelling for everyone who has not declared.
+    // Two case VALUES can share one body block (`case 2: case 3: foo();` branches both tests to
+    // the same label), and they then have the same layout index — so ascending value stays the
+    // tie-break, which is what those two arms were already spelled as.
     const scrutExpr = expr(scrut);
     const sortedCases = [...cases.entries()].sort((a, c) =>
-      switchArmsFollowLayout ? layoutIndex(a[1]) - layoutIndex(c[1]) : a[0] - c[0],
+      switchArmsFollowLayout ? layoutIndex(a[1]) - layoutIndex(c[1]) || a[0] - c[0] : a[0] - c[0],
     );
     const outCases: SwitchCase[] = sortedCases.map(([k, blk]) => ({
       values: [k],
