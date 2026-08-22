@@ -280,9 +280,8 @@ export function makeSsaBuilder(
     hasReachingDef,
     noteCall: (b: number) => {
       callsIn.add(b);
-      // The callee clobbers the caller-saved registers — INCLUDING the return register it just
-      // wrote, which the frontends define before getting here. Both are the callee's doing, and
-      // neither is argument setup the caller performed for whatever call comes next.
+      // the callee clobbers the caller-saved registers, its own result register included — see
+      // the ordering contract on the interface
       writtenSinceCall[b] = new Set();
     },
     recordGuessedCall: (op: Op, b: number, abi: { argRegs: string[]; returnReg: string }) => {
@@ -419,7 +418,8 @@ export interface CallArgTrim {
  *  SCOPE: this closes the arguments an intervening CALL disproves, which is the common case in real
  *  code. It does not close the rest — a dead value the compiler happened to leave in the next
  *  argument register with no call in between still reads as an argument, and nothing about the
- *  register file can say otherwise. Only a declared prototype closes those.
+ *  register file can say otherwise. A declared prototype closes those outright; short of one, the
+ *  narrower reading is recorded here and offered as a ranked candidate ({@link narrowToSetupArgs}).
  *
  *  A must-analysis: a register is FRESH at a point iff on EVERY path reaching it, it was written
  *  after the last call. The entry block starts all-fresh (those are the caller's own arguments).
@@ -481,22 +481,57 @@ export function trimClobberedCallArgs(inp: CallArgTrim): void {
     // THE RETURN REGISTER IS NOT ARGUMENT SETUP. Where the ABI aliases it onto argument 0, the
     // frontends record a call's clobber AFTER its own result, so the result leaves the register
     // UNfresh here — and an unfresh argument 0 with a fresh argument 1 behind it is the one shape
-    // that still proves a real argument: the caller set up the later register for this call, so
-    // whatever the callee left in the earlier one is being passed along with it
-    // (`bl __mulsf3; add r1,r4,#0; bl __addsf3` is `__addsf3(__mulsf3(a, b), c)`).
+    // that still carries one: the caller set up the later register for this call, so whatever the
+    // callee left in the earlier one is being passed along with it (`bl __mulsf3; add r1,r4,#0;
+    // bl __addsf3` is `__addsf3(__mulsf3(a, b), c)`).
     //
     // With NOTHING set up, the call has no caller-side argument evidence at all: `bl f; bl g` is
     // `f(); g();` as readily as `g(f())`, the two spell the same bytes on this ABI, and only the
     // nested one needs `f` to return a value and `g` to accept one — a spelling the project's own
-    // header rejects outright when it does not. So the run starts at 0, and a declared prototype
-    // (which no longer reaches here) stays the way `g(f())` is recovered.
+    // header rejects outright when it does not. So the run starts at 0; a declared prototype never
+    // reaches here, and stays the way `g(f())` is recovered.
     if (n === 0 && argRegs[0] === returnReg && argRegs.length > 1 && fresh.has(argRegs[1])) {
       n = runOfFresh(fresh, 1);
     }
     if (n < s.op.operands.length) {
       s.op.operands.length = n;
     }
+    // The SHORTER arity the same evidence also allows, recorded for {@link narrowToSetupArgs}: the
+    // run over what THIS BLOCK wrote, dropping the registers that are fresh only because no call
+    // stands between here and wherever they were last written. Both readings stay live, so this one
+    // is recorded rather than applied.
+    const local = Math.min(runOfFresh(s.freshBefore, 0), s.op.operands.length);
+    if (local < s.op.operands.length) {
+      s.op.attrs.argcSetup = local;
+    }
   }
+}
+
+/** Cut every guessed call to the arity its OWN BLOCK set up, and report whether anything moved.
+ *
+ *  `trimClobberedCallArgs` keeps an argument register whose value merely survives from an earlier
+ *  block, because compiled code really does pass one that way: agbcc leaves a value already in r0
+ *  where it is and branches to the call (`if (x) f(x);` is `cmp r0,#0; beq; bl f`, no setup at
+ *  all). Those are also the bytes `if (x) f();` compiles to, so usually neither reading is
+ *  refutable — but where the guard is an EQUALITY the compiler proves the argument constant and
+ *  has to materialize it (`if (x == 0) f(x);` opens the arm with `mov r0,#0`), and the absence of
+ *  that instruction rules the wider reading out. Which case a function is in is not knowable from
+ *  the register file, and is exactly what a differ decides. Hence a ranked candidate rather than a
+ *  default: the arm that passes only what the calling block itself put there.
+ *
+ *  Applies only to arities that were GUESSED — a declared prototype never recorded the fact. */
+export function narrowToSetupArgs(fn: Fn): boolean {
+  let changed = false;
+  for (const b of fn.blocks) {
+    for (const op of b.ops) {
+      const setup = op.attrs.argcSetup;
+      if (typeof setup === 'number' && setup < op.operands.length) {
+        op.operands.length = setup;
+        changed = true;
+      }
+    }
+  }
+  return changed;
 }
 
 /** The stack-slot key both the MIPS and Thumb frontends use for a word-sized local in the

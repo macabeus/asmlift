@@ -12,6 +12,7 @@ import { cBackend } from './backend/c';
 import { assertDerefsTyped, assertResolved } from './contracts';
 import type { AsmData } from './frontend/asmdata';
 import { frontendFor } from './frontend/registry';
+import { narrowToSetupArgs } from './frontend/ssa';
 import { globalCellOf } from './ir/alias';
 import { Fn, type Op, type Value, defOpMap, successorsOf } from './ir/core';
 import { T } from './ir/types';
@@ -440,6 +441,26 @@ export function enumerateCandidates(
 
   const seen = new Set<string>();
   const out: Candidate[] = [];
+  // The map-derived VALUE references one emitted tree contains, applied wherever a spelling is
+  // finalized — the single point a candidate comes into existence. No pipeline stage carries refs
+  // (SFn has no such field), so a future l3 pass that rewrites the tree can never leave a stale ref
+  // behind: whatever tree reaches emit is the tree the refs describe, by construction. Collected
+  // against the FULL name-keyed map for EVERY spelling variant — the '/raw-globals' sibling drops
+  // the map's shaped SPELLINGS, but its tree still NAMES pool/reloc-derived globals (ARM
+  // `.word gSym`, MIPS `%lo(gSym)`), and those references need declarations in the self-declared
+  // scoring world exactly like the named variant's (without them every raw sibling fails to compile
+  // there, and the eval-winning raw candidate becomes unreproducible outside project headers).
+  const refsOf = (tree: SFn): { symbolRefs?: SymbolRef[] } => {
+    const refs = baseOpts.symbols
+      ? collectSymbolRefs(tree.body, baseOpts.symbols, tree.name).map((r) => {
+          // name-only symbols carry the IR-derived access facts — the width authority
+          // for their synthesized declaration (shaped symbols keep the map's truth)
+          const access = r.info.shape === undefined ? accessFacts.get(r.name) : undefined;
+          return access ? { ...r, access } : r;
+        })
+      : [];
+    return refs.length ? { symbolRefs: refs } : {};
+  };
   // The SYMBOL-MAP spelling is itself a ranked LEVER on the same footing as signedness/branch
   // sense: naming a global changes agbcc's codegen (the eager-load effect), and which side
   // byte-wins is genuinely per-function — the dogfood's landed matches split between extern
@@ -512,27 +533,6 @@ export function enumerateCandidates(
         // when a loop re-spells, BOTH representations are emitted and the differ referees. The
         // re-spelling passes the same boundary contracts as the primary; one that fails them is
         // dropped here — never scored, never able to win.
-        // Each spelling's symbol refs are DERIVED from its own final tree right where the
-        // spelling is emitted — the single point a candidate comes into existence. No pipeline
-        // stage carries refs (SFn has no such field), so a future l3 pass that rewrites the tree
-        // can never leave a stale ref behind: whatever tree reaches emit is the tree the refs
-        // describe, by construction. Collected against the FULL name-keyed map for EVERY
-        // spelling variant — the '/raw-globals' sibling drops the map's shaped SPELLINGS, but
-        // its tree still NAMES pool/reloc-derived globals (ARM `.word gSym`, MIPS `%lo(gSym)`),
-        // and those references need declarations in the self-declared scoring world exactly
-        // like the named variant's (without them every raw sibling fails to compile there,
-        // and the eval-winning raw candidate becomes unreproducible outside project headers).
-        const refsOf = (tree: SFn): { symbolRefs?: SymbolRef[] } => {
-          const refs = baseOpts.symbols
-            ? collectSymbolRefs(tree.body, baseOpts.symbols, tree.name).map((r) => {
-                // name-only symbols carry the IR-derived access facts — the width authority
-                // for their synthesized declaration (shaped symbols keep the map's truth)
-                const access = r.info.shape === undefined ? accessFacts.get(r.name) : undefined;
-                return access ? { ...r, access } : r;
-              })
-            : [];
-          return refs.length ? { symbolRefs: refs } : {};
-        };
         const spellings: { suffix: string; source: string; symbolRefs?: SymbolRef[] }[] = [
           { suffix: '', source: backend.emit(sfn), ...refsOf(sfn) },
         ];
@@ -781,6 +781,43 @@ export function enumerateCandidates(
             ...(sp.symbolRefs ? { symbolRefs: sp.symbolRefs } : {}),
           });
         }
+      }
+      // `/setup-args` — pass a prototype-less callee only what the CALLING BLOCK set up; which of
+      // the two readings the source spelled is genuinely ambiguous, and frontend/ssa.ts
+      // narrowToSetupArgs carries the argument for why the differ is what settles it.
+      //
+      // The only LIFT-level lever, so it re-lifts rather than re-structuring — and like every lever
+      // under the POLICY note above it derives from the BASE spelling only: a narrower arity is
+      // orthogonal to branch sense and to every structuring axis, so crossing it with them would
+      // multiply candidates with no row behind it.
+      try {
+        const narrowed = frontend.lift(name, asm, target, prototypes, opts.asmData, sv.symbols);
+        if (narrowToSetupArgs(narrowed)) {
+          verify(narrowed);
+          applyIdiomPatterns(narrowed, target, opts.patterns);
+          raiseRecovered(narrowed, target, { beforeRecover: () => pinScalarParams(narrowed, cand.signed, ptrIdx) });
+          const nsfn = structureChecked(narrowed, {
+            ...svOpts,
+            preserveDivergentBranchSense: defSense,
+            negateJoinedBranchSense: false,
+            anchorConstCopies: false,
+            spellBitfieldMembers: true,
+            ...STRUCTURING_AXES.reduce((acc, ax) => ({ ...acc, ...ax.options(false) }), {}),
+          });
+          const source = backend.emit(nsfn);
+          if (!seen.has(source)) {
+            seen.add(source);
+            out.push({
+              label: `${cand.label}/setup-args${sv.suffix}`,
+              source,
+              group: svIndex,
+              ...refsOf(nsfn),
+            });
+          }
+        }
+      } catch (e) {
+        // A dropped lever, never an aborted enumeration — the same posture as `respell`.
+        opts.onLeverError?.(`${name}/setup-args`, e instanceof Error ? e.message.split('\n')[0] : String(e));
       }
     }
   }
