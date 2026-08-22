@@ -51,7 +51,8 @@ export interface SwitchRecovery {
   /** a block's position in the ASSEMBLY — the arm-order evidence, shared with Regime B so the two
    *  regimes read it from one definition (and one statement of what it rests on). */
   layoutIndex: (blk: Block) => number;
-  /** where the `default:` label goes among `armEntries`, or `undefined` for C's last position. */
+  /** where the `default:` label goes among `armEntries`, or `undefined` for C's last position —
+   *  shared with Regime B so both regimes state that refusal once. */
   defaultLayoutPos: (defaultBlk: Block, armEntries: Block[], placedByDispatch: boolean) => number | undefined;
 }
 

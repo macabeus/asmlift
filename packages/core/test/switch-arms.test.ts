@@ -335,19 +335,25 @@ test('a default placed after a FALLING case is refused by the printer, not silen
 // were written, exactly as in the comparison tree above. Recompiling the layout spelling with agbcc
 // reproduces the target; the ascending spelling differs by 10 to 26 instructions depending on the
 // permutation.
-const table = (tail = '\tb\t.L3\n') =>
-  'f:\n\tadd\tr2, r1, #0\n' +
-  '\tcmp\tr0, #0x4\n\tbhi\t.L9\t@cond_branch\n' +
-  '\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L11\n\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n' +
-  '.L12:\n\t.align\t2, 0\n.L11:\n\t.word\t.L10\n\t.align\t2, 0\n' +
-  '.L10:\n\t.word\t.L5\n\t.word\t.L7\n\t.word\t.L8\n\t.word\t.L4\n\t.word\t.L6\n' + // cases 0..4
-  `.L4:\n\tadd\tr1, r2, #0x4\n${tail}` + // case 3 — written FIRST, so laid out first
-  '.L5:\n\tadd\tr1, r2, #0x1\n\tb\t.L3\n' + // case 0
-  '.L6:\n\tadd\tr1, r2, #0x5\n\tb\t.L3\n' + // case 4
-  '.L7:\n\tadd\tr1, r2, #0x2\n\tb\t.L3\n' + // case 1
-  '.L8:\n\tadd\tr1, r2, #0x3\n\tb\t.L3\n' + // case 2
-  '.L9:\n\tmov\tr1, #0x63\n' + // the default
-  '.L3:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr1, [r0]\n\tbx\tlr\n';
+const table = (tail = '\tb\t.L3\n', defaultAfter = 5) => {
+  const bodies = [
+    `.L4:\n\tadd\tr1, r2, #0x4\n${tail}`, // case 3 — written FIRST, so laid out first
+    '.L5:\n\tadd\tr1, r2, #0x1\n\tb\t.L3\n', // case 0
+    '.L6:\n\tadd\tr1, r2, #0x5\n\tb\t.L3\n', // case 4
+    '.L7:\n\tadd\tr1, r2, #0x2\n\tb\t.L3\n', // case 1
+    '.L8:\n\tadd\tr1, r2, #0x3\n\tb\t.L3\n', // case 2
+  ];
+  bodies.splice(defaultAfter, 0, '.L9:\n\tmov\tr1, #0x63\n\tb\t.L3\n'); // the default
+  return (
+    'f:\n\tadd\tr2, r1, #0\n' +
+    '\tcmp\tr0, #0x4\n\tbhi\t.L9\t@cond_branch\n' +
+    '\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L11\n\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n' +
+    '.L12:\n\t.align\t2, 0\n.L11:\n\t.word\t.L10\n\t.align\t2, 0\n' +
+    '.L10:\n\t.word\t.L5\n\t.word\t.L7\n\t.word\t.L8\n\t.word\t.L4\n\t.word\t.L6\n' + // cases 0..4
+    bodies.join('').replace(/\tb\t\.L3\n$/, '') + // the last body falls into the merge
+    '.L3:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr1, [r0]\n\tbx\tlr\n'
+  );
+};
 
 test('jump-table arms come back in layout order too, not in TABLE order', () => {
   // The lever is declared per compiler, not per regime: the fact underneath (bodies expand in source
@@ -362,6 +368,22 @@ test('a jump table under a compiler without the declaration keeps table order', 
   delete undeclared.compilerBehaviors.switchArmsFollowLayout;
   const out = decompile('f', table(), undeclared, { prototypes: { f: { returnsVoid: true } } }).source;
   expect(armOrder(out)).toEqual([0, 1, 2, 3, 4]);
+});
+
+test('a jump-table `default:` is spelled where its body is laid out, at every position', () => {
+  // The default is an arm here too, and the table's range check BRANCHES to it (`bhi .Ldefault`) —
+  // never a block the dispatch ran into. Compiled: a 5-arm dense table lays the default's body at
+  // each of the six positions the source can write it in exactly there, and recompiling asmlift's
+  // own spelling reproduces the target at every one of them.
+  for (const at of [0, 1, 2, 3, 4, 5]) {
+    const out = of(table('\tb\t.L3\n', at));
+    const arms = [...out.matchAll(/case (\d+):|(default):/g)].map((m) => m[1] ?? m[2]);
+    expect(arms).toEqual([
+      ...['3', '0', '4', '1', '2'].slice(0, at),
+      'default',
+      ...['3', '0', '4', '1', '2'].slice(at),
+    ]);
+  }
 });
 
 test('a jump-table arm that FALLS THROUGH is not reordered', () => {

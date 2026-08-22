@@ -2490,7 +2490,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
 
   // ── Regime-A switch recovery (structure/switch-recover.ts): the recognizer's case bodies call
   // back into structureRegion, and Regime B (switch_br, below) shares its fall-through predicate.
-  const { recognizeSwitch, analyzeArmExit, layoutIndex } = makeSwitchRecovery({
+  const { recognizeSwitch, analyzeArmExit, layoutIndex, defaultLayoutPos } = makeSwitchRecovery({
     fn,
     defs,
     dom,
@@ -2585,21 +2585,35 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // outright — emission order is load-bearing for correctness (the l3/ast.ts non-neutrality
       // note): a falling arm must be emitted directly above the one it falls into, so its position
       // is not free to move. `analyzeArmExit` does not depend on emission order, so the exits can
-      // be settled first and reused below. Ties (two table slots sharing one body) keep table
-      // order, which is ascending case value — the same tie-break Regime A declares.
+      // be settled first and reused below. Grouping by target already gives every arm a DISTINCT
+      // entry block, so no two sort keys can be equal and the tie-break Regime A needs on shared
+      // bodies has nothing to decide here.
       const exitOf = new Map<Block, ArmExit>();
       for (const entry of [...arms.map((a) => a.entry), defEdge.block]) {
         if (!exitOf.has(entry)) {
           exitOf.set(entry, analyzeArmExit(entry, b, merge, siblings));
         }
       }
-      if (switchArmsFollowLayout && [...exitOf.values()].every((e) => e.kind === 'break')) {
+      const armsFollowLayout = switchArmsFollowLayout && [...exitOf.values()].every((e) => e.kind === 'break');
+      if (armsFollowLayout) {
         arms.sort((x, y) => layoutIndex(x.entry) - layoutIndex(y.entry));
       }
-      // ONE emission order for the whole statement: the case arms, then the default — which is
-      // exactly where C puts it. Adjacency is read off this array, so "falls into the next
-      // arm" needs no separate rule for a case that falls into the default (it is the arm after the
-      // last case, and legal C).
+      // The `default:` arm carries that evidence too, and a table hands it over the same way: the
+      // range check BRANCHES to the default (`bhi .Ldefault`), so its block is never one the
+      // dispatch ran into — measured, a 5-arm table lays the default's body at each of the six
+      // positions the source can write it in exactly there. `defaultLayoutPos` states the refusals.
+      const defaultAt =
+        armsFollowLayout && defEdge.block !== merge
+          ? defaultLayoutPos(
+              defEdge.block,
+              arms.map((a) => a.entry),
+              false,
+            )
+          : undefined;
+      // ONE emission order for the whole statement: the case arms, then the default. Adjacency is
+      // read off this array, so "falls into the next arm" needs no separate rule for a case that
+      // falls into the default (it is the arm after the last case, and legal C). Where the LABEL is
+      // printed is `defaultAt`, which the emission order does not follow.
       const emitOrder = [...arms, { entry: defEdge.block, edge: defEdge, values: null as number[] | null }];
       // Each arm's switch-edge copies, computed ONCE and in emission order: `argAssignsFor` mints
       // swap-cycle temp names, so calling it twice for one edge burns a temp number and changes the
@@ -2646,7 +2660,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         k: 'switch',
         scrutinee: expr(term.operands[0]),
         cases: outCases,
-        ...(defBody.length ? { default: defBody } : {}),
+        ...(defBody.length ? { default: defBody, ...(defaultAt !== undefined ? { defaultAt } : {}) } : {}),
       };
       out.push(sw);
       if (merge && merge !== stop) {

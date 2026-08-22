@@ -1624,11 +1624,14 @@ export const SYNTHETIC: SynthSpec[] = [
   //     written. `sw_jt` above is the same regime with ascending arms, where the two orders
   //     coincide and the row cannot fire.
   //
-  // And one for the `default:` position those cannot see either:
+  // And two for the `default:` positions those cannot see either, one per regime:
   //   • `swdeffirst` — the same four cases with `default:` written FIRST. That is the one position
   //     where the dispatch RUNS OUT into the default's block instead of jumping to it, and the
   //     reading recovery makes of a fall-through is the one thing the other subtree's surviving
   //     `b .Ldefault` licenses. `swdefmid` cannot see it: at position 2 both subtrees jump.
+  //   • `swjtdefmid` — `swjtorder`'s five arms, ascending, with `default:` written THIRD. Under the
+  //     jump table the default's body lands where the source wrote it too, and `swjtorder`'s own
+  //     default is written LAST, where the layout spelling and C's conventional one coincide.
   //
   // `swmulti` is the real function's shape rather than an isolate: a defaultless switch inside a
   // do-while whose four arms all decide the same three locals. It moves furthest (38) because its
@@ -1715,6 +1718,21 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc'],
     ctx: 'void swdeffirst(s32 mode, s32 n);',
     proto: { swdeffirst: { returnsVoid: true } },
+  },
+  {
+    sym: 'swjtdefmid',
+    src:
+      '#define gOut ((volatile s32 *)0x04000000)\n' +
+      'void swjtdefmid(s32 mode, s32 n){ s32 w;\n' +
+      ' switch (mode) { case 0: w = n + 1; break; case 1: w = n + 2; break;\n' +
+      '                 default: w = 99; break;\n' +
+      '                 case 2: w = n + 3; break; case 3: w = n + 4; break;\n' +
+      '                 case 4: w = n + 5; break; }\n' +
+      ' *gOut = w; }',
+    features: ['switch-arms', 'dense', 'branch'],
+    toolchains: ['agbcc'],
+    ctx: 'void swjtdefmid(s32 mode, s32 n);',
+    proto: { swjtdefmid: { returnsVoid: true } },
   },
   {
     sym: 'swlayout',
