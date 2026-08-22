@@ -1613,6 +1613,17 @@ export const SYNTHETIC: SynthSpec[] = [
   // is a BARE jump to the same block passing the same values, and this row's real default arm has
   // a body, so nothing may fold it into the fall-out.
   //
+  // Two more rows, one per half of what the ordering rule left out when it first shipped:
+  //   • `swdefmid` — the same four cases with `default: w = 99;` written THIRD. agbcc expands the
+  //     default's body where the source wrote it like any other arm, so its block lands between
+  //     case 1's and case 2's, and emitting the label last moves every instruction after it. Every
+  //     other `default:` in this file is written last, where nothing could see the gap.
+  //   • `swjtorder` — five dense arms written 3, 0, 4, 1, 2, with a default. Five is enough for
+  //     agbcc to emit a jump TABLE, whose slots are ascending by construction: grouping them in
+  //     table order spells the arms 0..4 while the bodies are laid out in the order the arms were
+  //     written. `sw_jt` above is the same regime with ascending arms, where the two orders
+  //     coincide and the row cannot fire.
+  //
   // `swmulti` is the real function's shape rather than an isolate: a defaultless switch inside a
   // do-while whose four arms all decide the same three locals. It moves furthest (38) because its
   // residual also carries the arm-order half and the loop's own value placement.
@@ -1656,6 +1667,34 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc'],
     ctx: 'void swdefault(s32 mode, s32 n);',
     proto: { swdefault: { returnsVoid: true } },
+  },
+  {
+    sym: 'swdefmid',
+    src:
+      '#define gOut ((volatile s32 *)0x04000000)\n' +
+      'void swdefmid(s32 mode, s32 n){ s32 w;\n' +
+      ' switch (mode) { case 0: w = n + 1; break; case 1: w = n + 2; break;\n' +
+      '                 default: w = 99; break;\n' +
+      '                 case 2: w = n + 3; break; case 3: w = n + 4; break; }\n' +
+      ' *gOut = w; }',
+    features: ['switch-arms', 'branch'],
+    toolchains: ['agbcc'],
+    ctx: 'void swdefmid(s32 mode, s32 n);',
+    proto: { swdefmid: { returnsVoid: true } },
+  },
+  {
+    sym: 'swjtorder',
+    src:
+      '#define gOut ((volatile s32 *)0x04000000)\n' +
+      'void swjtorder(s32 mode, s32 n){ s32 w;\n' +
+      ' switch (mode) { case 3: w = n + 4; break; case 0: w = n + 1; break;\n' +
+      '                 case 4: w = n + 5; break; case 1: w = n + 2; break;\n' +
+      '                 case 2: w = n + 3; break; default: w = 99; break; }\n' +
+      ' *gOut = w; }',
+    features: ['switch-arms', 'dense', 'branch'],
+    toolchains: ['agbcc'],
+    ctx: 'void swjtorder(s32 mode, s32 n);',
+    proto: { swjtorder: { returnsVoid: true } },
   },
   {
     sym: 'swlayout',
