@@ -172,3 +172,21 @@ test('two case values sharing ONE body have the same layout index, and stay in v
     '.Lend:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr2, [r0]\n\tbx\tlr\n';
   expect(armOrder(of(shared))).toEqual([2, 3, 1, 0]);
 });
+
+test('an arm with NO body of its own has no layout evidence, and falls to the end', () => {
+  // The other tie the assembly cannot break. `case 1: break;` compiles to a dispatch edge straight
+  // to the merge — there is no body laid out anywhere for it — so it inherits the merge's index and
+  // lands after every arm that has one, whatever the source wrote. Pinned as the FALLBACK it is:
+  // arms 0, 2 and 3 keep their layout order and the bodiless arm follows them.
+  const emptyArm =
+    'f:\n\tmov\tr3, #0x80\n\tlsl\tr3, r3, #0x13\n' +
+    '\tcmp\tr0, #0x1\n\tbeq\t.Lend\t@cond_branch\n' + // case 1 — straight to the merge
+    '\tcmp\tr0, #0x1\n\tbgt\t.Lhi\t@cond_branch\n' +
+    '\tcmp\tr0, #0\n\tbeq\t.Lc0\t@cond_branch\n\tb\t.Ldef\n' +
+    '.Lhi:\n\tcmp\tr0, #0x2\n\tbeq\t.Lc2\t@cond_branch\n' +
+    '\tcmp\tr0, #0x3\n\tbeq\t.Lc3\t@cond_branch\n\tb\t.Ldef\n' +
+    [0, 2, 3].map((k) => `.Lc${k}:\n\tmov\tr2, #0x${k + 1}\n\tstr\tr2, [r3]\n\tb\t.Lend\n`).join('') +
+    '.Ldef:\n\tmov\tr2, #0x9\n\tstr\tr2, [r3]\n' +
+    '.Lend:\n\tbx\tlr\n';
+  expect(armOrder(of(emptyArm))).toEqual([0, 2, 3, 1]);
+});

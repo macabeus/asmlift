@@ -534,6 +534,10 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     // to a range test (`cmp #3 / bgt`), which the walk reads as navigation and declines. So the
     // tie-break orders arms whose relative order the MERGE erased, where ascending value is the
     // neutral spelling rather than a recovered one.
+    // The other way an arm has no layout evidence: one the source wrote with no body of its own
+    // (`case k: break;`). Its dispatch edge resolves to the MERGE, so it inherits the merge's index
+    // and sorts after every arm that HAS a body, wherever the source put it. That position is a
+    // fallback, not a recovery — the assembly says nothing about it either way.
     const scrutExpr = expr(scrut);
     const sortedCases = [...cases.entries()].sort((a, c) =>
       switchArmsFollowLayout ? layoutIndex(a[1]) - layoutIndex(c[1]) || a[0] - c[0] : a[0] - c[0],
