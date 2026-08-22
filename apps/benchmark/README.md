@@ -112,6 +112,8 @@ pnpm bench:merge                      # = bench merge: tiers -> results/results.
 pnpm bench publish                    # re-stage results.json into the web app alone
 pnpm bench:smoke                      # one trivial fn through every available toolchain
 pnpm bench verify apps/benchmark/dataset/real/<p>.json   # compile-check loop for manifests
+pnpm bench regression --base origin/main   # gate: exit 1 on any lost match or vanished row
+pnpm bench diff --base origin/main         # gate: exit 1 if ANY compared field moved, row by row
 cd apps/web && pnpm run build         # the site (the Benchmark view renders results.json)
 ```
 
@@ -170,7 +172,7 @@ Host prerequisites (macOS; verified empirically):
 | `compile/`         | one module per toolchain — real-tier build + candidate steps shared (candidate-compile commands live in `dataset/toolchains/`)                                                  |
 | `eval/`            | `evaluate.ts` (both decompilers on one case), `asmlift.ts`, `m2c.ts`, `m2c-normalizer.ts` (objdump-to-GNU-as normalizer), `outcome.ts` (the symmetric classifier), `quality.ts` |
 | `run/`             | `runner.ts` (the ONE case loop), `orchestrate.ts` (spawns the shards, merges their partial results), `fidelity.ts` (the script-fidelity gate), `smoke.ts`, `verify.ts`          |
-| `report/`          | `merge.ts` (pure: tiers -> results.json), `gap-size.ts`, `repro-scripts.ts` (the embedded per-row scripts), `stale-check.ts`, `publish.ts` (the named cross-app step)           |
+| `report/`          | `merge.ts` (pure: tiers -> results.json), `gap-size.ts`, `repro-scripts.ts`, the three gates (`stale-check`/`regression`/`diff`) over `committed.ts`, `publish.ts`              |
 | `toolchains.ts`    | 4 toolchain adapters over `@asmlift/toolchains` (`buildTarget` + `score`)                                                                                                       |
 | `decomp-config.ts` | candidate compilation through the real `decomp.yaml` user path                                                                                                                  |
 | `cache.ts`         | content-keyed result cache (tmp-then-rename; m2c dirty-checkout fail-closed; versioned key)                                                                                     |
