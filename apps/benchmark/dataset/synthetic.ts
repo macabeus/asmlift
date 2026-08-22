@@ -1797,15 +1797,27 @@ export const SYNTHETIC: SynthSpec[] = [
   // every READ a load, which the ROM does not do. So the class is attributed, not closed, and
   // these rows pin the capability that has to exist first.
   //
-  // BEFORE ANY OF THAT, asmlift cannot LIFT such a function at all. `frontend/thumb.ts:1836`
-  // refuses a store to `[sp,#N]` that is never reloaded when its lower slots are supplied, on the
-  // grounds that it may be a call's outgoing stack argument. For an address-taken local that is a
-  // false alarm, and asmlift already holds the evidence that rules it out: it knows every callee's
-  // arity (`:1874` names one), so a frame whose every callee takes four arguments or fewer has no
-  // outgoing stack-argument area at all, and a `mov rD, sp` feeding a call argument is positive
-  // evidence of an addressable object. `stkarg` is the control that keeps the refusal honest.
+  // BEFORE ANY OF THAT, asmlift could not LIFT such a function at all: the Thumb frontend refuses a
+  // store to `[sp,#N]` that is never reloaded when its lower slots are supplied, on the grounds
+  // that it may be a call's outgoing stack argument. For an address-taken local that is a false
+  // alarm, and three of these rows carried the decline.
   //
-  // Coverage: 0 of the corpus's rows carry this decline. Two real rows do decline with
+  // That gate is now open for ONE shape and no wider: a frame of exactly one word whose base is
+  // handed to a callee by a bare `mov rD, sp`. NOT via callee arity, which this first tried and
+  // which cannot license an acceptance — a declared parameter list is a LOWER bound (variadics,
+  // multi-word parameters, a hidden struct-return pointer), so `arity <= 4` proves nothing and
+  // supplying a TRUE fact turned a correct decline into a call with its stack arguments deleted.
+  // What the frame size buys instead is that agbcc emits a bare `mov rD, sp` for a block-copy base
+  // too — a by-value struct argument's outgoing area, a struct return's hidden pointer — and every
+  // one of those needs at least two frame words, so in a one-word frame the capture can only be
+  // `&local`, and a one-word frame entirely occupied by that local has no room for an argument area
+  // under it. `stkarg` is the control that keeps the refusal honest.
+  //
+  // STILL MISSING, and what these rows will pin next: any frame with a second word in it. The
+  // object's real extent is inferred from the accesses this function makes, so a wider frame has
+  // bytes no model describes, and the refusal stands there.
+  //
+  // Coverage: 0 of the corpus's rows carried this decline. Two real rows do decline with
   // `stack pointer used as data`, both for OTHER reasons that this capability leaves untouched —
   // `pokeemerald:GetMoveTarget:agbcc` (consuming stack call arguments) and
   // `sa3:ProcessOamBuffers:agbcc` (only a plain `mov rD, sp` capture is modelled).
