@@ -429,6 +429,19 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       expect(dc('\tbl\t__mulsf3\n\tadd\tr1, r4, #0\n\tbl\t__addsf3\n')).toContain('__addsf3(__mulsf3(), ');
     });
 
+    test('a JOIN of that result with a caller-computed value stays an argument', () => {
+      // `if (c > 5) x = gVar; else x = foo(); bar(x);` — r0 at `bar` is a merge, and the register
+      // file cannot say which path put the value there. Reading it as the callee's own return drops
+      // the argument, and the merge dies with it: the global load is then unreachable from the
+      // emitted C, which no longer mentions gVar at all.
+      const src = dc(
+        '\tcmp\tr0, #0x5\n\tble\t.L3\n\tldr\tr0, .L5\n\tldr\tr0, [r0]\n\tb\t.L4\n' +
+          '.L5:\n\t.word\tgVar\n.L3:\n\tbl\tfoo\n.L4:\n\tbl\tbar\n',
+      );
+      expect(src).toContain('gVar');
+      expect(src).toMatch(/bar\(v\d\);/);
+    });
+
     test('a clobber on ONE path is enough — the analysis is a must', () => {
       // r1 survives the fall-through path and dies on the other; an argument has to be set up on
       // every path, so `bar` gets one argument, not two.

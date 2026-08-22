@@ -301,9 +301,20 @@ export function makeSsaBuilder(
       // Guessed arities counted argument registers by reaching definition alone; now that every
       // block's calls are known, drop the ones an intervening call had already clobbered.
       if (guessedCalls.length) {
+        const calleeResults = new Set<Value>();
+        for (const b of irBlocks) {
+          for (const op of b.ops) {
+            if (op.opcode === 'call') {
+              for (const r of op.results) {
+                calleeResults.add(r);
+              }
+            }
+          }
+        }
         trimClobberedCallArgs({
           argRegs: abiSeen.argRegs,
           returnReg: abiSeen.returnReg,
+          calleeResults,
           preds,
           freshAtEnd: writtenSinceCall,
           callsIn,
@@ -396,6 +407,9 @@ export interface CallArgTrim {
   /** the ABI return register. Load-bearing only where it IS `argRegs[0]` (ARM r0, PPC r3) — that
    *  aliasing is what makes a callee's result indistinguishable from caller-side argument setup. */
   returnReg: string;
+  /** every value a `call` op produced. Tells a callee's own return apart from a join that merely
+   *  PASSES THROUGH one, which the register file cannot: both leave argument 0 unfresh. */
+  calleeResults: ReadonlySet<Value>;
   /** one entry per CFG edge, as passed to {@link makeSsaBuilder} */
   preds: number[][];
   /** per block: the keys written since its LAST call (since its start if it makes none). Indexed by
@@ -429,7 +443,7 @@ export interface CallArgTrim {
  *  Frontend-agnostic: the caller supplies what its own lifting scan observed, so nothing here
  *  re-derives which instruction writes which register. */
 export function trimClobberedCallArgs(inp: CallArgTrim): void {
-  const { argRegs, returnReg, preds, freshAtEnd, callsIn, sites } = inp;
+  const { argRegs, returnReg, calleeResults, preds, freshAtEnd, callsIn, sites } = inp;
   const blockCount = freshAtEnd.length;
   const all = () => new Set(argRegs);
   const localEnd = (b: number) => freshAtEnd[b] ?? new Set<string>();
@@ -475,24 +489,33 @@ export function trimClobberedCallArgs(inp: CallArgTrim): void {
     }
     return n;
   };
+  // THE RETURN REGISTER IS NOT ARGUMENT SETUP. Where the ABI aliases it onto argument 0, the
+  // frontends record a call's clobber AFTER its own result, so the result leaves the register
+  // UNfresh here. That disproves caller setup only where the callee's return is what the register
+  // still HOLDS — a join of one path's return with another path's caller-computed value leaves
+  // argument 0 equally unfresh, and dropping THAT one deletes the instructions that computed it.
+  //
+  // An unfresh argument 0 with a fresh argument 1 behind it also still carries one: the caller set
+  // up the later register for this call, so whatever the callee left in the earlier one is being
+  // passed along with it (`bl __mulsf3; add r1,r4,#0; bl __addsf3` is `__addsf3(__mulsf3(a, b), c)`).
+  //
+  // With neither, the site carries no argument evidence at all: `bl f; bl g` is `f(); g();` as
+  // readily as `g(f())`, the two spell the same bytes on this ABI, and only the nested one needs
+  // `f` to return a value and `g` to accept one — a spelling the project's own header rejects
+  // outright when it does not. A declared prototype never reaches here, and stays the way `g(f())`
+  // is recovered.
+  const argcAt = (fresh: Set<string>, op: Op): number => {
+    if (argRegs[0] !== returnReg || fresh.has(argRegs[0])) {
+      return runOfFresh(fresh, 0);
+    }
+    if (!calleeResults.has(op.operands[0])) {
+      return runOfFresh(new Set([argRegs[0], ...fresh]), 0);
+    }
+    return argRegs.length > 1 && fresh.has(argRegs[1]) ? runOfFresh(fresh, 1) : 0;
+  };
   for (const s of sites) {
     const fresh = s.afterCallInBlock ? s.freshBefore : new Set([...freshIn[s.block], ...s.freshBefore]);
-    let n = runOfFresh(fresh, 0);
-    // THE RETURN REGISTER IS NOT ARGUMENT SETUP. Where the ABI aliases it onto argument 0, the
-    // frontends record a call's clobber AFTER its own result, so the result leaves the register
-    // UNfresh here — and an unfresh argument 0 with a fresh argument 1 behind it is the one shape
-    // that still carries one: the caller set up the later register for this call, so whatever the
-    // callee left in the earlier one is being passed along with it (`bl __mulsf3; add r1,r4,#0;
-    // bl __addsf3` is `__addsf3(__mulsf3(a, b), c)`).
-    //
-    // With NOTHING set up, the call has no caller-side argument evidence at all: `bl f; bl g` is
-    // `f(); g();` as readily as `g(f())`, the two spell the same bytes on this ABI, and only the
-    // nested one needs `f` to return a value and `g` to accept one — a spelling the project's own
-    // header rejects outright when it does not. So the run starts at 0; a declared prototype never
-    // reaches here, and stays the way `g(f())` is recovered.
-    if (n === 0 && argRegs[0] === returnReg && argRegs.length > 1 && fresh.has(argRegs[1])) {
-      n = runOfFresh(fresh, 1);
-    }
+    const n = argcAt(fresh, s.op);
     if (n < s.op.operands.length) {
       s.op.operands.length = n;
     }
@@ -530,6 +553,12 @@ export function narrowToSetupArgs(fn: Fn): boolean {
         changed = true;
       }
     }
+  }
+  if (changed) {
+    // A dropped argument can be a join's last reader, and `finish()` pruned the dead phis before
+    // this reading existed. Left in, the phi's edge args render as assignments to a local nothing
+    // reads (`v0 = UpdateWorldMapCursor();`) — see the note on the prune in `finish`.
+    pruneDeadParams(fn);
   }
   return changed;
 }
