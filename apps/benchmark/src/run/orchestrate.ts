@@ -71,8 +71,17 @@ function runShard(tier: Tier, shard: string, extra: string[]): Promise<ShardOutc
   });
 }
 
-/** Stitch `${tier}.part{0..n-1}.json` back into the canonical `${tier}.json`, delete the parts. */
-function stitch(tier: Tier, n: number): number {
+/** Which of the three filters can select a row in `tier`. `--only` is the one both tiers read, so
+ *  an `--only` naming a synthetic row selects nothing in `real` and that is an answer, not a typo
+ *  — which is why the empty-selection verdict is taken over the whole run, never per tier.
+ *  Exported for the test: this predicate is the whole rule. */
+export function tierIsFiltered(tier: Tier, opts: Pick<OrchestrateOptions, 'only' | 'project' | 'toolchain'>): boolean {
+  return Boolean(opts.only) || Boolean(tier === 'synthetic' ? opts.toolchain : opts.project);
+}
+
+/** Stitch `${tier}.part{0..n-1}.json` back into the canonical `${tier}.json`, delete the parts.
+ *  `filtered` says a filter could have selected rows here, which makes an empty result a typo. */
+function stitch(tier: Tier, n: number, filtered: boolean): number {
   const results: FunctionResult[] = [];
   let parts = 0;
   for (let i = 0; i < n; i++) {
@@ -89,6 +98,12 @@ function stitch(tier: Tier, n: number): number {
     // keep the last good canonical file instead of clobbering it with an empty set
     return 0;
   }
+  if (filtered && results.length === 0) {
+    // Same reason, one step earlier: a filter that selects nothing still has every shard write
+    // its own (empty) part file, so this is reached with parts > 0 and the write would replace a
+    // good 240-row `real.json` with `results: []` — which is what `bench merge` reads next.
+    return 0;
+  }
   const out: BenchOutput = { meta: benchMeta(results), results };
   writeFileSync(join(RESULTS_DIR, `${tier}.json`), JSON.stringify(out, null, 2));
   return results.length;
@@ -97,6 +112,9 @@ function stitch(tier: Tier, n: number): number {
 export async function orchestrate(opts: OrchestrateOptions): Promise<void> {
   mkdirSync(RESULTS_DIR, { recursive: true });
   let failedShards = 0;
+  // Rows selected across every tier a filter could have selected in. Stays null on an unfiltered
+  // run, which is the only kind that reaches a branch — so this verdict cannot move a number.
+  let selected: number | null = null;
   for (const tier of opts.tiers) {
     const extra: string[] = [];
     if (opts.only) {
@@ -116,18 +134,39 @@ export async function orchestrate(opts: OrchestrateOptions): Promise<void> {
     const failed = outcomes.filter((o) => o.code !== 0).length;
     failedShards += failed;
     const skips = outcomes.reduce((sum, o) => sum + o.skips, 0);
-    const n = stitch(tier, opts.jobs);
+    const filtered = tierIsFiltered(tier, opts);
+    const n = stitch(tier, opts.jobs, filtered);
+    if (filtered) {
+      selected = (selected ?? 0) + n;
+    }
     const secs = ((Date.now() - t0) / 1000).toFixed(1);
     // A skip total belongs on the tier line, not only in the scrollback: an absent toolchain
     // costs whole projects (marioparty3's 40 rows) and `bench regression` reads them as MISSING.
     const skipNote = skips ? ` — ⚠ ${skips} row(s) SKIPPED, toolchain unavailable` : '';
+    // `→ results/<tier>.json` is a claim about a write, so it goes only where one happened.
+    const empty = filtered && n === 0;
+    const wrote = empty ? ` — no row selected, results/${tier}.json left unchanged` : ` → results/${tier}.json`;
     console.log(
-      `${failed ? '✗' : '✓'} ${tier}: ${n} results in ${secs}s${failed ? ` (${failed} shard(s) exited nonzero)` : ''} → results/${tier}.json${skipNote}`,
+      `${failed ? '✗' : empty ? '–' : '✓'} ${tier}: ${n} results in ${secs}s${failed ? ` (${failed} shard(s) exited nonzero)` : ''}${wrote}${skipNote}`,
     );
   }
   if (failedShards > 0) {
     // all tiers stitched (partial results persist for debugging), but the run itself failed
     throw new Error(`${failedShards} shard(s) exited nonzero — see BUILD-FAIL/error lines above`);
+  }
+  if (selected === 0) {
+    // A green tick on a row that does not exist is how an attribution once rested on a control
+    // row nobody had written. `--only` is a SUBSTRING of the symbol, not the row id.
+    const shown = [
+      opts.only && `--only ${opts.only}`,
+      opts.project && `--project ${opts.project}`,
+      opts.toolchain && `--toolchain ${opts.toolchain}`,
+    ].filter(Boolean);
+    throw new Error(
+      `no row matched ${shown.join(' ')} in tier(s) ${opts.tiers.join('+')} — nothing was measured, ` +
+        `and results/*.json were left as they were. Check the symbol with ` +
+        `\`grep -rn "sym: '<name>'" apps/benchmark/dataset\`.`,
+    );
   }
   console.log(`\nDone. Next: pnpm bench:merge`);
 }
