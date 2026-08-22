@@ -1797,15 +1797,32 @@ export const SYNTHETIC: SynthSpec[] = [
   // every READ a load, which the ROM does not do. So the class is attributed, not closed, and
   // these rows pin the capability that has to exist first.
   //
-  // BEFORE ANY OF THAT, asmlift cannot LIFT such a function at all. `frontend/thumb.ts:1836`
-  // refuses a store to `[sp,#N]` that is never reloaded when its lower slots are supplied, on the
-  // grounds that it may be a call's outgoing stack argument. For an address-taken local that is a
-  // false alarm, and asmlift already holds the evidence that rules it out: it knows every callee's
-  // arity (`:1874` names one), so a frame whose every callee takes four arguments or fewer has no
-  // outgoing stack-argument area at all, and a `mov rD, sp` feeding a call argument is positive
-  // evidence of an addressable object. `stkarg` is the control that keeps the refusal honest.
+  // BEFORE ANY OF THAT, asmlift could not LIFT such a function at all: the Thumb frontend refuses a
+  // store to `[sp,#N]` that is never reloaded when its lower slots are supplied, on the grounds
+  // that it may be a call's outgoing stack argument. For an address-taken local that is a false
+  // alarm, and three of these rows carried the decline.
   //
-  // Coverage: 0 of the corpus's rows carry this decline. Two real rows do decline with
+  // That gate is now open for ONE shape and no wider: a frame of exactly one word whose base a
+  // bare `mov rD, sp` hands to a callee, and which the caller either WRITES itself or passes at an
+  // argument above r0. NOT via callee arity, which this first tried and which cannot license an
+  // acceptance — a declared parameter list is a LOWER bound (variadics, multi-word parameters, a
+  // hidden struct-return pointer), so `arity <= 4` proves nothing and supplying a TRUE fact turned
+  // a correct decline into a call with its stack arguments deleted. What the frame size buys
+  // instead is that agbcc emits a bare `mov rD, sp` for a block-copy base too — a by-value struct
+  // argument's outgoing area, a struct return's hidden pointer — and all but one of those needs at
+  // least two frame words. The exception is a struct return of 4 bytes or fewer that is not
+  // INTEGER-LIKE (`{char a,b,c,d;}`, `{short a,b;}`), which agbcc returns in memory through a
+  // one-word temp: instruction for instruction an out-parameter call. What rules that out is that
+  // the temp is storage the CALLEE owns — written only by the callee, and its pointer is argument
+  // 0, always. `stkarg` is the control that keeps the refusal honest.
+  //
+  // STILL MISSING, and what these rows will pin next: any frame with a second word in it. The
+  // object's real extent is inferred from the accesses this function makes, so a wider frame has
+  // bytes no model describes, and the refusal stands there. An OUTPUT-only parameter taken at
+  // argument 0 is the other gap, and it is not narrowable from the assembly at all: it is
+  // instruction-for-instruction the struct return above.
+  //
+  // Coverage: 0 of the corpus's rows carried this decline. Two real rows do decline with
   // `stack pointer used as data`, both for OTHER reasons that this capability leaves untouched —
   // `pokeemerald:GetMoveTarget:agbcc` (consuming stack call arguments) and
   // `sa3:ProcessOamBuffers:agbcc` (only a plain `mov rD, sp` capture is modelled).

@@ -64,16 +64,46 @@ describe('M1 — Thumb sp-as-data loud-fails (the MIPS/PPC guard, ported)', () =
   // `str r0, [sp]` / `add rD, sp, #N`). sp is never written in SSA, so lifting it materializes a
   // fabricated PHANTOM parameter — wrong arity, garbage address, silent. Required: loud
   // FrontendUnsupportedError in strict; a stub diagnostic in annotate.
-  test('address-taken local declines loud in strict mode', () => {
+  //
+  // THE FIRST SHAPE IS NOW MODELLED, and this pins WHICH one: a ONE-WORD frame whose base is passed
+  // to a callee, where the caller writes the object itself. The frame size is one half — a bare
+  // `mov rD, sp` also names a block-copy base, and all but one of those needs at least two frame
+  // words — and the post-lift audit is the other, since the exception is a small struct return
+  // whose hidden pointer looks exactly like an out-parameter. The bar is not "produces something":
+  // the emitted C is recompiled and objdiffed against the same object, byte for byte. Anything
+  // larger, and `add rD, sp, #k`, still decline loud; the controls for that live in
+  // packages/core/test/thumb-frontend.test.ts, with the compiled counterexamples.
+  test('an address-taken local handed to a callee lifts, byte-exact', () => {
     const asm = compileTargetAsm('extern void g(int*); int atl(int a){ int local = a; g(&local); return local; }');
-    expect(() => decompile('atl', asm, ARMV4T_AGBCC, { prototypes: { g: { params: 1, returnsVoid: true } } })).toThrow(
+    const src = decompile('atl', asm, ARMV4T_AGBCC, { prototypes: { g: { params: 1, returnsVoid: true } } }).source;
+    expect(src).toContain('g(&sp0)');
+    expect(src).toContain('return sp0;'); // RELOADED after the call — the callee may have written it
+    expect(scoreC(src, 'atl', assembleTarget(asm)).score).toBe(0);
+    // …and with an intervening call, the shape whose store reaches a `bl` unread
+    const across = compileTargetAsm(
+      'extern void g(int*); extern int q(int); int atlc(int a){ int local = a; int k = q(a); g(&local); return local + k; }',
+    );
+    const srcAcross = decompile('atlc', across, ARMV4T_AGBCC, {
+      prototypes: { g: { params: 1, returnsVoid: true }, q: { params: 1 } },
+    }).source;
+    expect(scoreC(srcAcross, 'atlc', assembleTarget(across)).score).toBe(0);
+  });
+
+  // TWO locals, so the second sits above the first and its address is COMPUTED. Same capability,
+  // one step past what the `mov` proof covers — it must still decline loud, in both modes, and
+  // name the shape rather than the generic sp message.
+  const twoLocals = 'extern void g(int*); int atl2(int a){ int x = a; int y = a + 1; g(&x); g(&y); return x + y; }';
+
+  test('a COMPUTED stack address declines loud in strict mode', () => {
+    const asm = compileTargetAsm(twoLocals);
+    expect(() => decompile('atl2', asm, ARMV4T_AGBCC, { prototypes: { g: { params: 1, returnsVoid: true } } })).toThrow(
       /stack pointer used as data/,
     );
   });
 
-  test('address-taken local stubs with a lift diagnostic in annotate mode', () => {
-    const asm = compileTargetAsm('extern void g(int*); int atl(int a){ int local = a; g(&local); return local; }');
-    const r = decompile('atl', asm, ARMV4T_AGBCC, {
+  test('a COMPUTED stack address stubs with a lift diagnostic in annotate mode', () => {
+    const asm = compileTargetAsm(twoLocals);
+    const r = decompile('atl2', asm, ARMV4T_AGBCC, {
       prototypes: { g: { params: 1, returnsVoid: true } },
       onGap: 'annotate',
     });
@@ -160,7 +190,11 @@ describe('report path parity with decompile()', () => {
   test('annotate mode: a NON-localizable failure stubs identically on both paths', () => {
     // The sp-as-data decline is a frontend THROW (no line to mark). decompile() degrades to a
     // stub; the report path must not accept onGap yet re-throw on the same input.
-    const asm = compileTargetAsm('extern void g(int*); int atl2(int a){ int local = a; g(&local); return local; }');
+    // TWO locals, so the second's address is COMPUTED (`add rD, sp, #4`) — the single-local shape
+    // is modelled now and lifts, which would make this test assert parity on a success path.
+    const asm = compileTargetAsm(
+      'extern void g(int*); int atl2(int a){ int x = a; int y = a + 1; g(&x); g(&y); return x + y; }',
+    );
     const protos = { prototypes: { g: { params: 1, returnsVoid: true } } as const, onGap: 'annotate' as const };
     const viaPipeline = decompile('atl2', asm, ARMV4T_AGBCC, protos);
     expect(viaPipeline.source).toContain('could not decompile'); // really the stub path

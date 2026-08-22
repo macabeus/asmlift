@@ -956,6 +956,319 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     expect(() => decompile('f', addrComputed, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
   });
 
+  // A ONE-WORD FRAME WHOSE BASE IS PASSED TO A CALLEE — the only thing in this file that makes the
+  // never-reloaded refusal stop firing, and never one fact. The capture alone proves nothing about
+  // the layout: agbcc emits a bare `mov rD, sp` for a block-copy base too (a by-value struct
+  // argument's outgoing area, a struct return's hidden pointer). `localArea === 4` excludes every
+  // one of those that needs two frame words, and the frame-object audit re-proves the rest after
+  // the lift — that a call really does take the address, and that the object is not one the callee
+  // owns. Every fixture below carries the frame size as part of the shape being pinned.
+  //
+  // Unless a comment says otherwise the fixture is agbcc 2.9-arm-000512 output (`-O2
+  // -mthumb-interwork -Wimplicit -fhex-asm -fprologue-bugfix`), not hand-written, because the whole
+  // argument is about what that compiler's frame layout can and cannot be.
+  describe('a one-word frame whose base is passed to a callee has no outgoing argument area', () => {
+    // `void f(u32 i){ s32 w; w = gEnts[i].h; use(&w); }` — the store at [sp,#0] is never reloaded
+    // BY US for the ordinary reason: the callee reads it through the pointer. Before this proof the
+    // never-reloaded condition read that as argument 5 of `use` and refused, and 3 of the corpus's
+    // rows (every one tagged `stack-addr`) declined on it.
+    const addrTaken =
+      'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x4\n\tlsl\tr1, r0, #0x2\n\tadd\tr1, r1, r0\n\tlsl\tr1, r1, #0x2\n' +
+      '\tldr\tr0, .L3\n\tadd\tr1, r1, r0\n\tldrh\tr0, [r1, #0x12]\n\tstr\tr0, [sp]\n\tmov\tr0, sp\n\tbl\tuse\n' +
+      '\tadd\tsp, sp, #0x4\n\tpop\t{r0}\n\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\t0x8057acc\n';
+
+    test('the never-reloaded store at [sp,#0] becomes the object, not an argument', () => {
+      const out = decompile('f', addrTaken, ARMV4T_AGBCC, { prototypes: { use: { params: 1, returnsVoid: true } } });
+      // the store SURVIVES as a write to memory — routed into the SSA slot model instead it would
+      // be a dead def, and DCE would delete the value the callee reads back
+      expect(out.source).toMatch(/sp0 = /);
+      expect(out.source).toContain('use(&sp0)');
+    });
+
+    // …and the evidence for all of it is an agbcc compile table, so the gate names agbcc. `armv4t`
+    // has one compiler entry today; a second one free to overlay a dead one-word local with a
+    // one-word outgoing area would otherwise inherit a proof nobody ran for it.
+    test('a second armv4t compiler does not inherit the proof', () => {
+      const notAgbcc = { ...ARMV4T_AGBCC, compiler: 'sdt' };
+      expect(() => decompile('f', addrTaken, notAgbcc, { prototypes: { use: { params: 1 } } })).toThrow(
+        /never reloaded/,
+      );
+    });
+
+    // THE PIN THE PROOF RESTS ON. With a five-argument call in the same function, agbcc stages
+    // argument 5 at [sp,#0] and the address-taken local moves ABOVE it — so `&w` is COMPUTED and
+    // there is no bare `mov rD, sp` anywhere. Compiled, `void f(u32 i, s32 a, s32 b){ s32 w;
+    // w = gEnts[i].h; five(a,b,a+b,a-b,a*b); use(&w); }` is this, verbatim. A frame with a genuine
+    // outgoing area must keep declining, and it does — one gate earlier, on the spelling the
+    // layout forces.
+    test('a frame with a GENUINE outgoing argument area still declines', () => {
+      const withArea =
+        'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr4, r2, #0\n\tlsl\tr2, r0, #0x2\n\tadd\tr2, r2, r0\n' +
+        '\tlsl\tr2, r2, #0x2\n\tldr\tr0, .L6\n\tadd\tr2, r2, r0\n\tldrh\tr0, [r2, #0x12]\n\tstr\tr0, [sp, #0x4]\n' +
+        '\tadd\tr2, r1, r4\n\tsub\tr3, r1, r4\n\tmov\tr0, r1\n\tmul\tr0, r0, r4\n\tstr\tr0, [sp]\n' +
+        '\tadd\tr0, r1, #0\n\tadd\tr1, r4, #0\n\tbl\tfive\n\tadd\tr0, sp, #0x4\n\tbl\tuse\n' +
+        '\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n.L7:\n\t.align\t2, 0\n.L6:\n\t.word\t0x8057acc\n';
+      expect(() => decompile('f', withArea, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+      // and the message stays TRUE for what it refuses: the local really is at a computed address
+      expect(() => decompile('f', withArea, ARMV4T_AGBCC)).toThrow(/address of a stack local is computed/);
+    });
+
+    // The arity refusal runs FIRST and still wins. A frame that both stages a fifth argument and
+    // passes its own base is a frame no agbcc layout produces, so the two facts contradict — and
+    // the honest answer to a contradiction is the decline, not a guess about which one to believe.
+    test('a declared fifth argument still refuses, whatever the capture says', () => {
+      const bothFacts =
+        'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tmov\tr0, sp\n\tbl\tuse\n' +
+        '\tadd\tsp, sp, #0x4\n\tpop\t{r0}\n\tbx\tr0\n';
+      expect(decompile('f', bothFacts, ARMV4T_AGBCC, { prototypes: { use: { params: 1 } } }).source).toContain(
+        'use(&sp0)',
+      );
+      expect(() => decompile('f', bothFacts, ARMV4T_AGBCC, { prototypes: { use: { params: 5 } } })).toThrow(
+        /declared with 5 arguments/,
+      );
+    });
+
+    // WHAT THE PROOF NEEDS, one condition at a time. Each of these is the same function with one
+    // link of the chain cut, and each must fall back to the refusal — an acceptance may never
+    // over-approximate, so anything short of "this register holds sp+0 at this call" is not it.
+    test('the capture must still be live, in an argument register, at a call in its own block', () => {
+      // (i) OVERWRITTEN before the call — the argument register no longer holds the frame base
+      const clobbered =
+        'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tmov\tr0, sp\n\tadd\tr0, r4, #0\n\tbl\tuse\n' +
+        '\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+      expect(() => decompile('f', clobbered, ARMV4T_AGBCC)).toThrow(/never reloaded/);
+      // (ii) captured into a CALLEE-SAVED register and never passed — merely live across the call
+      // is not "handed to" it
+      const notAnArg =
+        'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tmov\tr4, sp\n\tbl\tuse\n\tldrh\tr0, [r4]\n' +
+        '\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+      expect(() => decompile('f', notAnArg, ARMV4T_AGBCC)).toThrow(/never reloaded/);
+      // (iii) capture and call in DIFFERENT blocks — a block is straight-line, so "still held" is a
+      // fact there and a path question anywhere else; the proof stays block-local rather than
+      // guessing
+      const crossBlock =
+        'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tmov\tr0, sp\n\tb\t.L2\n' +
+        '.L2:\n\tbl\tuse\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+      expect(() => decompile('f', crossBlock, ARMV4T_AGBCC)).toThrow(/never reloaded/);
+      // …and a BARE REGISTER COPY does carry it, because a copy is the whole of what it does
+      const viaCopy =
+        'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tmov\tr4, sp\n\tmov\tr0, r4\n\tbl\tuse\n' +
+        '\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+      expect(decompile('f', viaCopy, ARMV4T_AGBCC, { prototypes: { use: { params: 1 } } }).source).toContain(
+        'use(&sp0)',
+      );
+    });
+
+    // DEAD CODE IS NOT EVIDENCE. This is verbatim agbcc output for a five-argument forwarder —
+    // `void ctl(int a,int b,int c,int d,int e){ five(a,b,c,d,e); }`, whose [sp,#0] store IS the
+    // fifth outgoing argument — with one unreachable block appended after the return. Scanning
+    // every block for the capture let that block license the whole frame, and the lift emitted
+    // `five()` with all five arguments dropped.
+    test('a capture in an unreachable block proves nothing', () => {
+      const deadCapture =
+        'ctl:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tldr\tr4, [sp, #0xc]\n\tstr\tr4, [sp]\n\tbl\tfive\n' +
+        '\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n' +
+        '.L_unreached:\n\tmov\tr0, sp\n\tbl\tuse\n\tbx\tlr\n';
+      expect(() => decompile('ctl', deadCapture, ARMV4T_AGBCC)).toThrow(/never reloaded/);
+      // CONTROL: the same three instructions on a REACHABLE path do license it, so the test is
+      // about reachability and not about the shape of the appended block.
+      const liveCapture = deadCapture.replace('\tbl\tfive\n', '\tbl\tfive\n\tb\t.L_unreached\n');
+      expect(decompile('ctl', liveCapture, ARMV4T_AGBCC, { prototypes: { use: { params: 1 } } }).source).toContain(
+        'use(&sp0)',
+      );
+    });
+
+    // THE TWO RULES INSIDE THE SCAN THAT ARE NOT ABOUT THE FRAME. Both are hand-written, because
+    // agbcc emits neither — and a rule inside an acceptance either carries a test or is decoration.
+    test('a call does not carry the base past it, and a `blx` target is not an argument', () => {
+      // (i) a CALLER-SAVED register that is not an argument register (`lr`, `ip`) does not survive
+      // the call that clobbers it, so a copy made afterwards carries nothing. Without the clear this
+      // lifted to `a(a0); use(&sp0)` on the strength of an `lr` the `bl` had already destroyed.
+      const acrossCall =
+        'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tmov\tlr, sp\n\tbl\ta\n' +
+        '\tmov\tr0, lr\n\tbl\tuse\n\tadd\tsp, sp, #0x4\n\tpop\t{r0}\n\tbx\tr0\n';
+      expect(() => decompile('f', acrossCall, ARMV4T_AGBCC)).toThrow(/never reloaded/);
+      // (ii) `blx rN` names its TARGET in the operand slot: it branches THROUGH the frame base, it
+      // does not pass it. Counting r3 there lifted this to `r3(a0)` — with the store to the frame
+      // gone entirely, as a dead def.
+      const blxTarget =
+        'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tmov\tr3, sp\n\tblx\tr3\n' +
+        '\tadd\tsp, sp, #0x4\n\tpop\t{r0}\n\tbx\tr0\n';
+      expect(() => decompile('f', blxTarget, ARMV4T_AGBCC)).toThrow(/never reloaded/);
+    });
+
+    // THE CONTROL THE ACCEPTANCE ACTUALLY NEEDS: both facts present at once — a bare `mov rD, sp`
+    // AND a genuine outgoing stack argument in the same frame. agbcc produces exactly that, and the
+    // capture is not an addressable local at all: it is the destination of the block copy that
+    // builds the outgoing area for a by-value struct argument, and `str r5,[sp]` is argument 5 of
+    // `five` sharing the same area. `void g3(struct Huge *p, int x){ takesH(*p); five(1,2,3,4,x); }`
+    // with `struct Huge { int a[40]; }`, compiled, is this verbatim.
+    //
+    // With the capture alone licensing the acceptance this lifted to `five(1, 2, 3, 4)` — the fifth
+    // argument written into a fabricated 4-byte local, in a frame declared 4 bytes where the machine
+    // reserves 0x90. No prototypes on purpose: that is the norm, and it is where the arity refusal
+    // has nothing to say.
+    test('a frame that BOTH passes its base and stages an outgoing argument still declines', () => {
+      const blockCopyBase =
+        'g3:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0x90\n\tadd\tr4, r0, #0\n\tadd\tr5, r1, #0\n' +
+        '\tadd\tr1, r4, #0\n\tadd\tr1, r1, #0x10\n\tmov\tr0, sp\n\tmov\tr2, #0x90\n\tbl\tmemcpy\n' +
+        '\tldr\tr0, [r4]\n\tldr\tr1, [r4, #0x4]\n\tldr\tr2, [r4, #0x8]\n\tldr\tr3, [r4, #0xc]\n\tbl\ttakesH\n' +
+        '\tstr\tr5, [sp]\n\tmov\tr0, #0x1\n\tmov\tr1, #0x2\n\tmov\tr2, #0x3\n\tmov\tr3, #0x4\n\tbl\tfive\n' +
+        '\tadd\tsp, sp, #0x90\n\tpop\t{r4, r5}\n\tpop\t{r0}\n\tbx\tr0\n';
+      expect(() => decompile('g3', blockCopyBase, ARMV4T_AGBCC)).toThrow(/never reloaded/);
+      // ORDER IS NOT THE DISCRIMINATOR. The same source with the five-argument call FIRST puts the
+      // argument store before the copy, and it must decline just the same.
+      const argFirst =
+        'g4:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x90\n\tadd\tr4, r0, #0\n\tstr\tr1, [sp]\n' +
+        '\tmov\tr0, #0x1\n\tmov\tr1, #0x2\n\tmov\tr2, #0x3\n\tmov\tr3, #0x4\n\tbl\tfive\n' +
+        '\tadd\tr1, r4, #0\n\tadd\tr1, r1, #0x10\n\tmov\tr0, sp\n\tmov\tr2, #0x90\n\tbl\tmemcpy\n' +
+        '\tldr\tr0, [r4]\n\tldr\tr1, [r4, #0x4]\n\tldr\tr2, [r4, #0x8]\n\tldr\tr3, [r4, #0xc]\n\tbl\ttakesH\n' +
+        '\tadd\tsp, sp, #0x90\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n';
+      expect(() => decompile('g4', argFirst, ARMV4T_AGBCC)).toThrow(/never reloaded/);
+    });
+
+    // …and the other block-copy base: a STRUCT-RETURN TEMP, where `mov r0, sp` is the hidden return
+    // pointer and the callee writes every byte of it. `struct Big { int a,b,c,d,e; }; void f(int x){
+    // struct Big b = mk(x); use2(b.a); }` compiled — five words, so the frame size refuses it.
+    //
+    // A ONE-WORD one does not refuse there, which is why the frame size is not the whole gate:
+    // agbcc returns a <=4-byte struct in MEMORY unless it is INTEGER-LIKE, and `struct S4 { char
+    // a,b,c,d; }` (also `{short a,b;}`) comes back through a one-word frame temp whose `mov r0, sp`
+    // is the hidden pointer — instruction for instruction an out-parameter call. Compiled, both:
+    //
+    //   struct R { int a; } / { int a[1]; } / { float f; }  → returned in r0, no frame at all
+    //   struct S4 { char a,b,c,d; } / { short a,b; }        → `add sp,#-4 / mov r0,sp / bl mk`
+    //
+    // What separates them is that a return temp is storage the CALLEE owns: it is written only by
+    // the callee, and its pointer is argument 0, always. Both are facts about the finished function
+    // rather than the text, so the premise re-check in the frame-object audit owns them.
+    test('a struct-return temp is not an object of the width we happen to touch', () => {
+      const structReturn =
+        'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x14\n\tadd\tr1, r0, #0\n\tmov\tr0, sp\n\tbl\tmk\n' +
+        '\tldr\tr0, [sp]\n\tbl\tuse2\n\tadd\tsp, sp, #0x14\n\tpop\t{r0}\n\tbx\tr0\n';
+      expect(() => decompile('f', structReturn, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+      // the ONE-WORD spelling of the same source — verbatim agbcc for `struct S4 { char a,b,c,d; };
+      // void f(int x){ struct S4 s = mk(x); use2(s.a); }`. Lifting it emitted `mk(&sp0, a0)`: a
+      // three-line function rendered as a call the real prototype rejects outright.
+      const oneWordReturn =
+        'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x4\n\tadd\tr1, r0, #0\n\tmov\tr0, sp\n\tbl\tmk\n' +
+        '\tldr\tr0, [sp]\n\tlsl\tr0, r0, #0x18\n\tlsr\tr0, r0, #0x18\n\tbl\tuse2\n' +
+        '\tadd\tsp, sp, #0x4\n\tpop\t{r0}\n\tbx\tr0\n';
+      expect(() => decompile('f', oneWordReturn, ARMV4T_AGBCC)).toThrow(/hidden struct-return pointer/);
+      expect(() => decompile('f', oneWordReturn, ARMV4T_AGBCC, { prototypes: { mk: { params: 1 } } })).toThrow(
+        /hidden struct-return pointer/,
+      );
+      // CONTROLS, one per fact. A store of OURS before the call is an in-out parameter no struct
+      // return can be…
+      const filledFirst =
+        'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tmov\tr0, sp\n\tbl\tmk\n' +
+        '\tldr\tr0, [sp]\n\tbl\tuse2\n\tadd\tsp, sp, #0x4\n\tpop\t{r0}\n\tbx\tr0\n';
+      expect(decompile('f', filledFirst, ARMV4T_AGBCC, { prototypes: { mk: { params: 1 } } }).source).toContain(
+        'mk(&sp0)',
+      );
+      // …and so is a never-written object handed over at r2, since the hidden pointer is argument 0
+      // and nothing shifts it. sa3's `Task_Interactable116` and `sub_801DD68` are this shape.
+      const outAtArg2 =
+        'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x4\n\tmov\tr1, r0\n\tmov\tr0, #0\n\tmov\tr2, sp\n\tbl\tmk\n' +
+        '\tldr\tr0, [sp]\n\tbl\tuse2\n\tadd\tsp, sp, #0x4\n\tpop\t{r0}\n\tbx\tr0\n';
+      expect(decompile('f', outAtArg2, ARMV4T_AGBCC, { prototypes: { mk: { params: 3 } } }).source).toContain('&sp0');
+    });
+
+    // THE LICENCE, RE-ASKED OF THE IR. `capturedObjectIsTheWholeFrame` reads the TEXT for "a
+    // register holding sp reaches a `bl` as an argument"; the audit knows exactly what the finished
+    // function passes. Where they disagree the licence is the wrong one, and an acceptance whose
+    // premise nothing re-checks is the cheapest place for a wrong answer to hide.
+    test('the acceptance is refused when the lifted function does not pass the address to a call', () => {
+      // a declared arity DROPS the address: the licence claimed `use` receives the frame base and
+      // the emitted call takes nothing — which also loses `five`'s fifth outgoing argument
+      const droppedByArity =
+        'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr4, [sp]\n\tmov\tr0, sp\n\tbl\tuse\n' +
+        '\tmov\tr0, #0x1\n\tmov\tr1, #0x2\n\tmov\tr2, #0x3\n\tmov\tr3, #0x4\n\tbl\tfive\n' +
+        '\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n';
+      expect(() => decompile('f', droppedByArity, ARMV4T_AGBCC, { prototypes: { use: { params: 0 } } })).toThrow(
+        /no call in the lifted function takes it/,
+      );
+      // CONTROL: the same function with `use` taking its argument is the shape this capability is
+      // for, and lifts.
+      expect(decompile('f', droppedByArity, ARMV4T_AGBCC, { prototypes: { use: { params: 1 } } }).source).toContain(
+        'use(&sp0)',
+      );
+    });
+
+    // A SPELLING IS NOT A FACT. The scan that licenses the acceptance drops a register the moment an
+    // instruction mentions it, and a RANGE-spelled register list mentions none of the registers it
+    // writes — so the same function lifted or declined on whether its `pop` was written `{r0-r3}`
+    // or `{r0, r1, r2, r3}`. The accepting side is verbatim agbcc for `void f(int a,b,c,d,e){
+    // five(a,b,c,d,e); }`, whose [sp,#0] store IS the fifth outgoing argument, with a capture the
+    // `pop` clobbers before the call: it emitted `five()` with all five arguments dropped.
+    test('a register RANGE kills the capture exactly as the enumerated list does', () => {
+      const withList = (list: string) =>
+        'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tldr\tr4, [sp, #0xc]\n\tstr\tr4, [sp]\n\tmov\tr2, sp\n' +
+        `\tadd\tsp, sp, #0x4\n\tpop\t{${list}}\n\tadd\tsp, sp, #-0x4\n\tbl\tfive\n` +
+        '\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n';
+      for (const list of ['r0, r1, r2, r3', 'r0-r3', 'R0-R3', 'r1-r3']) {
+        expect(() => decompile('f', withList(list), ARMV4T_AGBCC)).toThrow(/never reloaded/);
+      }
+      // …and the same for a range on a multi-load, which writes the list without popping it
+      const viaLdmia =
+        'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tldr\tr4, [sp, #0xc]\n\tstr\tr4, [sp]\n\tmov\tr2, sp\n' +
+        '\tldmia\tr1!, {r0-r3}\n\tbl\tfive\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n';
+      expect(() => decompile('f', viaLdmia, ARMV4T_AGBCC)).toThrow(/never reloaded/);
+    });
+
+    // …AND WHAT AN ESCAPE COSTS THE SLOT MODEL, refused. The object's extent is inferred from OUR
+    // accesses, so a wider real object has its later words written by the callee — and any of them
+    // modelled as an SSA slot is a value the slot model forwards ACROSS the call that overwrote it.
+    //
+    // HAND-WRITTEN, and the only fixture here that is: the shape needs the object reached ONLY
+    // through the captured pointer (an `[sp,#0]` access of its own would collide with the slot model
+    // and decline one gate earlier), which four corpus functions do and no small C source here does.
+    // Without this rule it lifted to `g(&sp0, …); use2(a1)` — the reload after the call replaced by
+    // the value from before it, `g`'s write dropped, no diagnostic.
+    test('a callee handed the frame base refuses the slot model above it', () => {
+      const slotAbove =
+        'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tmov\tr2, sp\n\tstr\tr0, [r2]\n\tstr\tr1, [sp, #0x4]\n' +
+        '\tmov\tr0, r2\n\tbl\tg\n\tldr\tr0, [sp, #0x4]\n\tbl\tuse2\n' +
+        '\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+      expect(() => decompile('f', slotAbove, ARMV4T_AGBCC)).toThrow(
+        /passed to a callee, which may write the slot at \[sp,#4\]/,
+      );
+      // CONTROL, and it is what makes the refusal a rule about the SLOT rather than about the call:
+      // drop the second word and the identical capture, escape and call lift.
+      const oneWord =
+        'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tmov\tr0, sp\n\tbl\tg\n' +
+        '\tadd\tsp, sp, #0x4\n\tpop\t{r0}\n\tbx\tr0\n';
+      expect(decompile('f', oneWord, ARMV4T_AGBCC, { prototypes: { g: { params: 1 } } }).source).toContain('g(&sp0)');
+    });
+
+    // `volatile` IS NOT FREE, so it goes only where the source writes one. The structurer emits one
+    // C read per USE, not per machine load, so the qualifier forbids the CSE that turns the
+    // reference's single `ldr` into four register copies. `void f(u32 i){ s32 w; w = gEnts[i].h;
+    // use(&w); four(w,w,w,w); }` compiled, and the candidate recompiled both ways:
+    //
+    //   reference / without volatile → ldr r3,[sp] / add r0,r3,#0 / add r1,r3,#0 / add r2,r3,#0
+    //   with volatile                → ldr r0,[sp] / ldr r1,[sp] / ldr r2,[sp] / ldr r3,[sp]
+    //
+    // Four instructions, so a byte-exact candidate becomes a nonmatch. agbcc also warns `discards
+    // qualifiers` at the call. The DMA idiom keeps it: there the address is PUBLISHED to a device
+    // register through a store, and every corpus project spells that scratch `vu16`.
+    test('an ordinary `&local` argument is not volatile; a published address is', () => {
+      const multiRead =
+        'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x4\n\tlsl\tr1, r0, #0x2\n\tadd\tr1, r1, r0\n\tlsl\tr1, r1, #0x2\n' +
+        '\tldr\tr0, .L3\n\tadd\tr1, r1, r0\n\tldrh\tr0, [r1, #0x12]\n\tstr\tr0, [sp]\n\tmov\tr0, sp\n\tbl\tuse\n' +
+        '\tldr\tr3, [sp]\n\tadd\tr0, r3, #0\n\tadd\tr1, r3, #0\n\tadd\tr2, r3, #0\n\tbl\tfour\n' +
+        '\tadd\tsp, sp, #0x4\n\tpop\t{r0}\n\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\t0x8057acc\n';
+      const src = decompile('f', multiRead, ARMV4T_AGBCC, {
+        prototypes: { use: { params: 1, returnsVoid: true }, four: { params: 4 } },
+      }).source;
+      expect(src).toContain('four(sp0, sp0, sp0, sp0)');
+      expect(src).not.toContain('volatile');
+      // …and the store still survives, which is what the qualifier used to be doing for asmlift's
+      // own dead-store pass (l3/dce.ts keys on address-taken now).
+      expect(src).toMatch(/sp0 = /);
+    });
+  });
+
   test('an address-taken frame local becomes a declared object whose address is a value', () => {
     // The DMA-fill idiom: `DmaFill16` expands to `vu16 tmp = v; DmaSet(…, &tmp, …)`, so agbcc
     // stores a halfword through a captured sp and hands the ADDRESS to the DMA source register.
