@@ -278,8 +278,8 @@ export interface AnalyzeOptions {
    *  target that declares the behavior the rule reaches those first.
    *
    *  Five refusals, each with a reason rather than a threshold:
-   *    • no legal SEAT for a temp — an address cone or a multi-block loop header, the two every
-   *      homing rule makes; see `seatIsLegal`;
+   *    • no SEAT for a temp — a multi-block loop header, whose test-at-top `while` condition has
+   *      no statement position; see `multiBlockHeaders`;
    *    • a FALL-THROUGH between def and render, where no branch separates them at all and the
    *      dominance is an artifact of the frontend's block-per-label — see `fallThroughSeam`;
    *    • a LOOP PREHEADER of the loop the renders are in — see `preheaderOfRenderLoop`;
@@ -694,18 +694,13 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         !L.body.has(opBlock.get(def)!) &&
         consumers.every((c) => !L.body.has(opBlock.get(c)!)),
     );
+  /** Would naming THIS op's own result change its value? Yes when the result is an ADDRESS built
+   *  over a gaddr/laddr: rendered standalone an `&g + i` loses the memAccess's inline byte-stride
+   *  cast, and the cast-aware base machinery in l3/ serves those bases instead. Asked by the rules
+   *  that home an address; a rule homing the SCALAR a load returns is not this case — the name
+   *  holds the loaded value and the address stays inline at the deref, which is why the load rules
+   *  (live-across-a-loop, join feeds, /addr-home's, def-block placement) do not ask it. */
   const addressCone = (op0: Op): boolean => coneHoldsAddr(op0, defOf);
-  /** IS THERE A LEGAL SEAT for a materialized temp at `op`, sitting in block `b`? The two refusals
-   *  every homing rule makes, in one place because four rules were spelling them out separately:
-   *    • an address CONE (gaddr/laddr) — rendered standalone such a value loses the memAccess's
-   *      inline byte-stride cast, so its VALUE changes; the cast-aware base machinery in l3/
-   *      serves those bases instead (see `addressCone`);
-   *    • a MULTI-BLOCK LOOP HEADER — a test-at-top `while`'s condition has no seat for a temp, so
-   *      taking one trades a structuring function for a decline (see `multiBlockHeaders`).
-   *  A rule contributes its own SCOPE on top; this answers only whether the seat exists. The
-   *  /addr-home load rule below asks the header half alone, because its admission key is a base
-   *  `axisHomedBases` already registered — and a cone-derived base can never be in it. */
-  const seatIsLegal = (op0: Op, b0: Block): boolean => !addressCone(op0) && !multiBlockHeaders.has(b0);
   // ── the address-home axis's scope predicate ───────────────────────────────────────────────
   // A value consumed ONLY as the base (operands[0]) of 2+ distinct memory accesses — the shape
   // the axis homes. Any other use (a store's value slot, an aload index, arithmetic, a successor
@@ -894,7 +889,14 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           }
           // Third scope, under the address-home axis only (see AnalyzeOptions.homeSharedAddresses):
           // a non-const pure value consumed ONLY as the base of 2+ memory accesses.
-          if (homeSharedAddresses && op.opcode !== 'const' && pr && usedOnlyAsSharedBase(pr) && seatIsLegal(op, b)) {
+          if (
+            homeSharedAddresses &&
+            op.opcode !== 'const' &&
+            pr &&
+            usedOnlyAsSharedBase(pr) &&
+            !addressCone(op) &&
+            !multiBlockHeaders.has(b)
+          ) {
             materialize.add(op);
             axisHomedBases.add(pr);
           }
@@ -907,7 +909,8 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
             pr &&
             !usedOnlyAsSharedBase(pr) &&
             loopSharedConsumers(pr, b) &&
-            seatIsLegal(op, b)
+            !addressCone(op) &&
+            !multiBlockHeaders.has(b)
           ) {
             materialize.add(op);
           }
@@ -958,7 +961,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           (op.opcode === 'load' || op.opcode === 'aload') &&
           readsStayWhereWritten &&
           dom &&
-          seatIsLegal(op, b) &&
+          !multiBlockHeaders.has(b) &&
           !shortCircuitGuarded.has(r) &&
           !onlyFeedsBlockParams(r)
         ) {

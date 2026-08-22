@@ -12,10 +12,10 @@
 //
 // What these tests pin is the SCOPE: one render is enough (a "2+ sibling arms" rule would miss
 // the short-circuit-into-a-call shape), renders in the def's own block are not this rule's
-// business, and five refusals hold — address cones and multi-block loop-header seats, a
-// fall-through seam (no branch between read and render), the loop PREHEADER (where loop invariant
-// motion parks a read), the right operand of a `&&`/`||` (where raise/shortcircuit.ts parks one),
-// and a read that is only a block parameter's incoming copy.
+// business, and five refusals hold — a multi-block loop-header seat, a fall-through seam (no
+// branch between read and render), the loop PREHEADER (where loop invariant motion parks a read),
+// the right operand of a `&&`/`||` (where raise/shortcircuit.ts parks one), and a read that is
+// only a block parameter's incoming copy.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -25,11 +25,11 @@ import { recoverTypes } from '../src/raise/recover';
 import { structure } from '../src/structure/structure';
 import { ARMV4T_AGBCC, MIPS_IDO, PPC_MWCC, structureOptionsFor } from '../src/target';
 
-const emit = (ir: string, on: boolean, returnsVoid = true): string => {
+const emit = (ir: string, on: boolean, returnsVoid = true, rereadGlobals = false): string => {
   const fn = parse(ir);
   verify(fn);
   recoverTypes(fn);
-  return cBackend.emit(structure(fn, { readsStayWhereWritten: on, returnsVoid }));
+  return cBackend.emit(structure(fn, { readsStayWhereWritten: on, rereadGlobals, returnsVoid }));
 };
 
 const count = (s: string, needle: string): number => s.split(needle).length - 1;
@@ -261,9 +261,13 @@ test('a read above the loop guard, not in the preheader, still homes at its def 
   expect(emit(ABOVEPRE, false)).not.toMatch(/= \*\(s32 \*\)50339840;/);
 });
 
-// ── the two inherited refusals ───────────────────────────────────────────────────────────────
-// An address CONE: rendered standalone an `&g + i` loses the memAccess's inline byte-stride cast,
-// so every homing rule refuses it (the cast-aware base machinery in l3/ serves those instead).
+// ── a read through a NAMED global ────────────────────────────────────────────────────────────
+// The rules that home an ADDRESS refuse a gaddr/laddr cone, because rendering `&g + i` standalone
+// loses the memAccess's inline byte-stride cast. Homing what a load RETURNS is not that case: the
+// name holds the scalar and the address stays inline at the deref. Compiled, `extern int gK; ... k
+// = gK; if (c&1) A(k<<3); else B(k<<4);` and the same body with `*(int*)0x03000100` in place of gK
+// emit identical code down to the one pool word, one `ldr r2,[r1]` above the `beq` — and the
+// per-arm spelling of either emits two `ldr`s and two pool words.
 const CONE = `fn cone {
 ^bb0(%0: u32):
   %1: u16* = gaddr {sym="gTable"}
@@ -286,13 +290,27 @@ const CONE = `fn cone {
 }
 `;
 
-test('a read through a gaddr cone is refused', () => {
-  expect(emit(CONE, true)).toBe(emit(CONE, false));
+test('a read through a named global homes at its def block, address still inline', () => {
+  const on = emit(CONE, true);
+  expect(on).toMatch(/v\d+ = gTable;/);
+  expect(count(on, 'gTable')).toBe(1);
+  expect(count(emit(CONE, false), 'gTable')).toBe(2);
 });
 
-// A MULTI-BLOCK LOOP HEADER seat: a test-at-top `while`'s condition has no seat for a
-// materialized temp, so homing there trades a structuring function for a decline — the same
-// refusal /addr-home, /expr-home and the live-across-a-loop rule already make.
+// Which is where this rule and the `/reread-globals` axis meet: the axis spells a named global's
+// read at each of its uses, this rule spells it once at the def block, and the rule runs first. So
+// on a target declaring the behavior the axis no longer reaches a read whose renders are all in
+// strictly dominated blocks — a pre-emption, not a conflict, and the axis keeps every read whose
+// renders sit in its own block.
+test('the def-block rule pre-empts the value-home axis on a strictly dominated read', () => {
+  expect(count(emit(CONE, false, true, true), 'gTable')).toBe(2);
+  expect(emit(CONE, true, true, true)).toBe(emit(CONE, true));
+});
+
+// ── the inherited refusal: a MULTI-BLOCK LOOP HEADER seat ────────────────────────────────────
+// A test-at-top `while`'s condition has no statement position for a materialized temp, so homing
+// there trades a structuring function for a decline — the same refusal /addr-home, /expr-home and
+// the live-across-a-loop rule already make.
 const HEADERSEAT = `fn headerseat {
 ^bb0(%0: s32):
   %1: s32 = const {value=0}
