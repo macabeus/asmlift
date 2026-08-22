@@ -137,7 +137,7 @@ attribution line for every decline naming its first blocker. Constraints learned
    already committed its own artifact compares it against itself, which is vacuous the other way.
 2. Expect the two tag-vocabulary tests to fail BETWEEN adding the tag and merging the artifacts;
    they must pass after. `npx vitest run`, `pnpm test:matching`, `pnpm typecheck`,
-   `npx eslint apps packages` (not `pnpm lint`), `pnpm format` check.
+   `pnpm lint`, `pnpm format` check.
 3. Artifacts (`apps/benchmark/results/results.json`, both web copies) regenerated at the source
    commit's HEAD (`meta.asmlift.dirty` must be false) and committed separately — **after** your
    final rebase, as the last commit. A rebase rewrites the commit the artifact's stamp names, and
@@ -145,7 +145,9 @@ attribution line for every decline naming its first blocker. Constraints learned
    `scripts/check-artifact-provenance.sh` fails both; run it before opening the PR.
 4. Zero-flip over the previously committed rows blocks the branch, same as `/match-function`.
    `pnpm bench diff --base origin/main` is that check by row and field, and its output is the
-   report's list of what moved.
+   report's list of what moved. It exits **2**, "nothing was compared", if `results.json` still
+   carries the base's `generatedAt` — the artifact is committed, so a gate run before `run`+`merge`
+   compares the base with itself and prints a green line in a second.
 
 ## Phase 8 — Write it down and report
 

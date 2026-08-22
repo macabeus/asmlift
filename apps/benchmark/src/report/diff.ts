@@ -14,7 +14,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { RESULTS_DIR } from '../config';
-import { byId, readCommitted, scrub } from './committed';
+import { RESULTS_PATH, byId, headContains, readCommitted, scrub, shortSha } from './committed';
 
 /** The fields a published claim is made of. `source` is in the list because a change that moves
  *  no score can still rewrite what the report shows, and `candidateLabel` because the ranked
@@ -87,13 +87,58 @@ export function compareMeasurements(base: BenchOutput, fresh: BenchOutput): Diff
   };
 }
 
+/** Is the artifact on disk still the base's own committed file, with no run behind it?
+ *
+ *  This gate reads whatever bytes happen to sit at `apps/benchmark/results/results.json` — and
+ *  that file is COMMITTED, so on a source-only branch with a clean tree it already IS the base's.
+ *  Running the gate then compares the base against ITSELF and prints `0 field change(s)` in about
+ *  a second, which is indistinguishable from the ~200s run it is supposed to summarise. That green
+ *  line is what a PR body publishes as its neutrality proof, so the cheapest way to produce it
+ *  must not be the one that measures nothing. (`committed.ts` guards the same vacuity on the BASE
+ *  side — `HEAD` comparing a branch against itself; this is the FRESH side of it.)
+ *
+ *  `meta.generatedAt` decides, because `bench merge` re-mints it from `new Date()` on every run
+ *  (`run/runner.ts` benchMeta). Equal stamps therefore mean no merge has run since the base's
+ *  artifact was committed — there are no false positives, and it also catches an artifact edited
+ *  by hand rather than measured. */
+export const notRegenerated = (base: BenchOutput, fresh: BenchOutput): boolean =>
+  base.meta.generatedAt === fresh.meta.generatedAt;
+
 /** CLI entry: the artifact at `base` vs the freshly merged one. Returns the process exit code —
- *  0 iff not one compared field moved and the row set is identical. */
+ *  0 iff not one compared field moved and the row set is identical, 2 if nothing was compared. */
 export function diffGate(base = 'HEAD'): number {
-  const report = compareMeasurements(
-    readCommitted(base),
-    JSON.parse(readFileSync(join(RESULTS_DIR, 'results.json'), 'utf8')) as BenchOutput,
+  const committed = readCommitted(base);
+  const fresh = JSON.parse(readFileSync(join(RESULTS_DIR, 'results.json'), 'utf8')) as BenchOutput;
+
+  // What was compared, before the verdict — a reader of a PR body can otherwise only take the
+  // tick on trust. The base by SHA (a branch name is a different commit on every machine), and
+  // the fresh artifact by the run that produced it.
+  const sha = shortSha(base);
+  const stamp = fresh.meta.asmlift;
+  console.log(
+    `diff: base ${base}${sha ? ` = ${sha}` : ''} (artifact generated ${committed.meta.generatedAt}) · ` +
+      `fresh ${RESULTS_PATH} generated ${fresh.meta.generatedAt}` +
+      (stamp ? ` at ${stamp.commit.slice(0, 7)}${stamp.dirty ? ' (dirty tree)' : ''}` : ''),
   );
+
+  if (notRegenerated(committed, fresh)) {
+    console.log(
+      `NOT REGENERATED — ${RESULTS_PATH} carries the same meta.generatedAt as ${base}'s, so it is still\n` +
+        `that committed file and no run stands behind this comparison. Run the benchmark first:\n` +
+        `  pnpm bench run && pnpm bench merge && pnpm bench diff --base ${base}\n` +
+        `Nothing was compared; this proves nothing.`,
+    );
+    return 2;
+  }
+
+  if (headContains(base) === false) {
+    console.log(
+      `WARNING: HEAD does not contain ${base} — everything ${base} gained meanwhile is being read as\n` +
+        `a change this branch made (or hidden by one). Rebase, re-run, then diff again.`,
+    );
+  }
+
+  const report = compareMeasurements(committed, fresh);
 
   for (const c of report.changed) {
     console.log(`CHANGED ${c.id} ${c.field}: ${c.from} → ${c.to}`);
