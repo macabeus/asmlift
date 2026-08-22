@@ -83,12 +83,16 @@ export function contentDir(tag: string, tu: string): string {
 
 /** A scratch directory REUSED across calls: made once, EMPTIED before each use. mkdtemp removes
  *  nothing, so the natural per-compile spelling leaks one directory per candidate — a full bench
- *  run leaves one per candidate compile behind, and they had accumulated into the millions.
+ *  run leaves one behind per candidate compile, and they had accumulated into the millions.
  *  Emptied rather than reused in place, so a step that exits 0 without writing its output still
  *  fails LOUD on the missing file instead of silently reading the previous candidate's.
  *
- *  `root` is `/tmp` for the DOCKERIZED toolchains — that is the container pool's mount, not a
- *  stylistic choice — and the OS temp dir for everything else. */
+ *  NOT for a directory the DOCKERIZED toolchains compile in. Those reach their scratch through a
+ *  bind mount of the host `/tmp`, and reusing one path there fails ~30% of compiles with
+ *  `c.o: No such file or directory` — measured, 4 concurrent workers × 40 compiles: 50/160
+ *  failures reusing the path, 0/160 with a fresh mkdtemp each time (emptying the CONTENTS and
+ *  keeping the inode fails identically, so it is the shared mount's view of the path, not the
+ *  inode). gcc272.ts and kmc.ts therefore keep mkdtemp-per-candidate and keep the leak. */
 export function scratchSlot(prefix: string, root: string = tmpdir()): () => string {
   let dir: string | undefined;
   return () => {

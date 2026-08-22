@@ -3,14 +3,14 @@
 // cannot express the container pool, so the harness strips this toolchain's decomp.yaml
 // compiler — the registry built-in serves candidate scoring).
 import { GCC_KMC_TOOLCHAIN, kmcCompile } from '@asmlift/toolchains';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { CPP } from '../config';
 import type { BuiltTarget } from '../toolchains';
 import { stripPrototype } from './agbcc';
 import type { RealCompile, RealProjectCfg } from './types';
-import { compilerDiagnostics, contentDir, run, scratchSlot } from './util';
+import { compilerDiagnostics, contentDir, run } from './util';
 
 /** .i → pooled docker KMC gcc → .o (same helper score.ts uses). */
 function compile(dir: string, iName: string, oName: string): void {
@@ -29,11 +29,6 @@ function disasm(oPath: string): string {
   return dis.stdout;
 }
 
-// One scratch dir each, reused per compile (util.ts scratchSlot) instead of one mkdtemp per
-// candidate — under /tmp, the container pool mount.
-const candScratch = scratchSlot('bench-cand-', '/tmp');
-const vendorScratch = scratchSlot('bench-vendor-', '/tmp');
-
 export const kmcReal: RealCompile = {
   buildTarget(iText): BuiltTarget {
     const dir = contentDir('gcc', iText);
@@ -44,7 +39,11 @@ export const kmcReal: RealCompile = {
     return { obj: oPath, asm: disasm(oPath) };
   },
   compileCandidate(tu, sym): string {
-    const dir = candScratch();
+    // candidate scratch must live under /tmp (the container pool's mount) — and stays ONE
+    // DIRECTORY PER CANDIDATE, leak and all: reusing a path the container reaches through
+    // that shared mount fails ~30% of compiles with `c.o: No such file or directory`
+    // (util.ts scratchSlot carries the measurement)
+    const dir = mkdtempSync(join('/tmp', 'bench-cand-'));
     const cPath = join(dir, 'c.c'),
       iPath = join(dir, 'c.i'),
       oPath = join(dir, 'c.o');
@@ -58,7 +57,7 @@ export const kmcReal: RealCompile = {
     return oPath;
   },
   preprocess(cfg: RealProjectCfg, tu: string): string {
-    const dir = vendorScratch();
+    const dir = mkdtempSync(join('/tmp', 'bench-vendor-'));
     const cPath = join(dir, 'u.c'),
       iPath = join(dir, 'u.i');
     writeFileSync(cPath, tu);
