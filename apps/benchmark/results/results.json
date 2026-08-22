@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generatedAt": "2026-08-22T07:20:50.590Z",
+    "generatedAt": "2026-08-22T11:30:20.960Z",
     "toolchains": [
       "ido7.1",
       "agbcc",
@@ -9,12 +9,12 @@
       "mwcc_242_81"
     ],
     "counts": {
-      "total": 819,
-      "synthetic": 579,
+      "total": 823,
+      "synthetic": 583,
       "real": 240
     },
     "asmlift": {
-      "commit": "245775c75c4cd3243acf9ec369495e15c2c66403",
+      "commit": "b8cce786d690f4cdb24a2304014cace2859901e1",
       "dirty": false
     },
     "m2c": {
@@ -83,11 +83,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "ido cc failed: cfe: Error: <tmp>/c.i, line 45: Unacceptable operand of '+'.",
-          "cfe: Error: <tmp>/c.i, line 46: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/c.i, line 47: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/c.i, line 48: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/c.i, line 49: Selector requires struct/union pointer as left hand side"
+          "ido cc failed: cfe: Error: c.i, line 45: Unacceptable operand of '+'.",
+          "cfe: Error: c.i, line 46: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: c.i, line 47: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: c.i, line 48: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: c.i, line 49: Selector requires struct/union pointer as left hand side"
         ]
       },
       "gapSize": null,
@@ -1878,8 +1878,8 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "ido cc failed: cfe: Error: <tmp>/c.i, line 6: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/c.i, line 7: Selector requires struct/union pointer as left hand side"
+          "ido cc failed: cfe: Error: c.i, line 6: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: c.i, line 7: Selector requires struct/union pointer as left hand side"
         ]
       },
       "gapSize": null,
@@ -1950,10 +1950,10 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "ido cc failed: cfe: Error: <tmp>/c.i, line 27: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/c.i, line 28: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/c.i, line 29: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/c.i, line 30: Selector requires struct/union pointer as left hand side"
+          "ido cc failed: cfe: Error: c.i, line 27: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: c.i, line 28: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: c.i, line 29: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: c.i, line 30: Selector requires struct/union pointer as left hand side"
         ]
       },
       "gapSize": null,
@@ -2019,11 +2019,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "ido cc failed: cfe: Error: <tmp>/c.i, line 40: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/c.i, line 45: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/c.i, line 48: Unacceptable operand of '+'.",
-          "cfe: Error: <tmp>/c.i, line 49: Unacceptable operand of '+'.",
-          "cfe: Error: <tmp>/c.i, line 50: Selector requires struct/union pointer as left hand side"
+          "ido cc failed: cfe: Error: c.i, line 40: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: c.i, line 45: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: c.i, line 48: Unacceptable operand of '+'.",
+          "cfe: Error: c.i, line 49: Unacceptable operand of '+'.",
+          "cfe: Error: c.i, line 50: Selector requires struct/union pointer as left hand side"
         ]
       },
       "gapSize": null,
@@ -2094,10 +2094,10 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "ido cc failed: cfe: Error: <tmp>/c.i, line 23: Syntax Error",
-          "cfe: Error: <tmp>/c.i, line 36: Syntax Error",
-          "cfe: Error: <tmp>/c.i, line 37: Syntax Error",
-          "cfe: Error: <tmp>/c.i, line 38: Syntax Error"
+          "ido cc failed: cfe: Error: c.i, line 23: Syntax Error",
+          "cfe: Error: c.i, line 36: Syntax Error",
+          "cfe: Error: c.i, line 37: Syntax Error",
+          "cfe: Error: c.i, line 38: Syntax Error"
         ]
       },
       "gapSize": null,
@@ -2341,10 +2341,10 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "ido cc failed: cfe: Error: <tmp>/c.i, line 4: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/c.i, line 5: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/c.i, line 6: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/c.i, line 7: Selector requires struct/union pointer as left hand side"
+          "ido cc failed: cfe: Error: c.i, line 4: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: c.i, line 5: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: c.i, line 6: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: c.i, line 7: Selector requires struct/union pointer as left hand side"
         ]
       },
       "gapSize": null,
@@ -2581,11 +2581,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "ido cc failed: cfe: Error: <tmp>/c.i, line 44: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/c.i, line 45: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/c.i, line 46: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/c.i, line 47: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/c.i, line 48: Selector requires struct/union pointer as left hand side"
+          "ido cc failed: cfe: Error: c.i, line 44: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: c.i, line 45: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: c.i, line 46: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: c.i, line 47: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: c.i, line 48: Selector requires struct/union pointer as left hand side"
         ]
       },
       "gapSize": null,
@@ -2656,11 +2656,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "ido cc failed: cfe: Error: <tmp>/c.i, line 45: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/c.i, line 46: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/c.i, line 47: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/c.i, line 48: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/c.i, line 62: Selector requires struct/union pointer as left hand side"
+          "ido cc failed: cfe: Error: c.i, line 45: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: c.i, line 46: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: c.i, line 47: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: c.i, line 48: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: c.i, line 62: Selector requires struct/union pointer as left hand side"
         ]
       },
       "gapSize": null,
@@ -2726,11 +2726,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "ido cc failed: cfe: Error: <tmp>/c.i, line 17: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/c.i, line 18: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/c.i, line 19: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/c.i, line 20: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/c.i, line 21: Selector requires struct/union pointer as left hand side"
+          "ido cc failed: cfe: Error: c.i, line 17: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: c.i, line 18: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: c.i, line 19: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: c.i, line 20: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: c.i, line 21: Selector requires struct/union pointer as left hand side"
         ]
       },
       "gapSize": null,
@@ -2881,11 +2881,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "ido cc failed: cfe: Error: <tmp>/c.i, line 10: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/c.i, line 11: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/c.i, line 12: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/c.i, line 13: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/c.i, line 14: Selector requires struct/union pointer as left hand side"
+          "ido cc failed: cfe: Error: c.i, line 10: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: c.i, line 11: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: c.i, line 12: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: c.i, line 13: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: c.i, line 14: Selector requires struct/union pointer as left hand side"
         ]
       },
       "gapSize": {
@@ -2961,9 +2961,9 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "ido cc failed: cfe: Error: <tmp>/c.i, line 4: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/c.i, line 5: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/c.i, line 6: Selector requires struct/union pointer as left hand side"
+          "ido cc failed: cfe: Error: c.i, line 4: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: c.i, line 5: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: c.i, line 6: Selector requires struct/union pointer as left hand side"
         ]
       },
       "gapSize": null,
@@ -3028,9 +3028,9 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "ido cc failed: cfe: Error: <tmp>/c.i, line 4: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/c.i, line 5: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/c.i, line 6: Selector requires struct/union pointer as left hand side"
+          "ido cc failed: cfe: Error: c.i, line 4: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: c.i, line 5: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: c.i, line 6: Selector requires struct/union pointer as left hand side"
         ]
       },
       "gapSize": null,
@@ -3094,9 +3094,9 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "ido cc failed: cfe: Error: <tmp>/c.i, line 6: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/c.i, line 7: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/c.i, line 8: Selector requires struct/union pointer as left hand side"
+          "ido cc failed: cfe: Error: c.i, line 6: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: c.i, line 7: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: c.i, line 8: Selector requires struct/union pointer as left hand side"
         ]
       },
       "gapSize": null,
@@ -3167,9 +3167,9 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "ido cc failed: cfe: Error: <tmp>/c.i, line 4: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/c.i, line 5: Selector requires struct/union pointer as left hand side",
-          "cfe: Error: <tmp>/c.i, line 6: Selector requires struct/union pointer as left hand side"
+          "ido cc failed: cfe: Error: c.i, line 4: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: c.i, line 5: Selector requires struct/union pointer as left hand side",
+          "cfe: Error: c.i, line 6: Selector requires struct/union pointer as left hand side"
         ]
       },
       "gapSize": null,
@@ -3249,11 +3249,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:1077: conflicting types for `gUnk_03004D80'",
-          "<tmp>/c.c:563: previous declaration of `gUnk_03004D80'",
-          "<tmp>/c.c:1087: `unksp0' undeclared (first use in this function)",
-          "<tmp>/c.c:1087: (Each undeclared identifier is reported only once",
-          "<tmp>/c.c:1087: for each function it appears in.)"
+          "agbcc failed: c.c:1077: conflicting types for `gUnk_03004D80'",
+          "c.c:563: previous declaration of `gUnk_03004D80'",
+          "c.c:1087: `unksp0' undeclared (first use in this function)",
+          "c.c:1087: (Each undeclared identifier is reported only once",
+          "c.c:1087: for each function it appears in.)"
         ]
       },
       "gapSize": {
@@ -3345,11 +3345,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:1072: conflicting types for `gUnk_03004670'",
-          "<tmp>/c.c:312: previous declaration of `gUnk_03004670'",
-          "<tmp>/c.c:1087: warning: dereferencing `void *' pointer",
-          "<tmp>/c.c:1087: void value not ignored as it ought to be",
-          "<tmp>/c.c:1090: warning: dereferencing `void *' pointer"
+          "agbcc failed: c.c:1072: conflicting types for `gUnk_03004670'",
+          "c.c:312: previous declaration of `gUnk_03004670'",
+          "c.c:1087: warning: dereferencing `void *' pointer",
+          "c.c:1087: void value not ignored as it ought to be",
+          "c.c:1090: warning: dereferencing `void *' pointer"
         ]
       },
       "gapSize": {
@@ -3594,7 +3594,7 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:1082: invalid operands to binary <<"
+          "agbcc failed: c.c:1082: invalid operands to binary <<"
         ]
       },
       "gapSize": {
@@ -3708,11 +3708,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:1152: structure has no member named `unk0'",
-          "<tmp>/c.c:1157: structure has no member named `unk0'",
-          "<tmp>/c.c:1162: structure has no member named `unk0'",
-          "<tmp>/c.c:1167: structure has no member named `unk0'",
-          "<tmp>/c.c:1179: `unksp0' undeclared (first use in this function)"
+          "agbcc failed: c.c:1152: structure has no member named `unk0'",
+          "c.c:1157: structure has no member named `unk0'",
+          "c.c:1162: structure has no member named `unk0'",
+          "c.c:1167: structure has no member named `unk0'",
+          "c.c:1179: `unksp0' undeclared (first use in this function)"
         ]
       },
       "gapSize": {
@@ -3804,11 +3804,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:1075: warning: dereferencing `void *' pointer",
-          "<tmp>/c.c:1075: request for member `unk0' in something not a structure or union",
-          "<tmp>/c.c:1076: warning: implicit declaration of function `thunk_HeapAlloc'",
-          "<tmp>/c.c:1076: warning: dereferencing `void *' pointer",
-          "<tmp>/c.c:1076: request for member `unk4' in something not a structure or union"
+          "agbcc failed: c.c:1075: warning: dereferencing `void *' pointer",
+          "c.c:1075: request for member `unk0' in something not a structure or union",
+          "c.c:1076: warning: implicit declaration of function `thunk_HeapAlloc'",
+          "c.c:1076: warning: dereferencing `void *' pointer",
+          "c.c:1076: request for member `unk4' in something not a structure or union"
         ]
       },
       "gapSize": null,
@@ -3882,8 +3882,8 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:1077: warning: dereferencing `void *' pointer",
-          "<tmp>/c.c:1077: void value not ignored as it ought to be"
+          "agbcc failed: c.c:1077: warning: dereferencing `void *' pointer",
+          "c.c:1077: void value not ignored as it ought to be"
         ]
       },
       "gapSize": null,
@@ -3968,11 +3968,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:1075: warning: implicit declaration of function `thunk_HeapAlloc'",
-          "<tmp>/c.c:1075: warning: assignment makes pointer from integer without a cast",
-          "<tmp>/c.c:1076: warning: implicit declaration of function `Decompress'",
-          "<tmp>/c.c:1077: invalid type argument of `->'",
-          "<tmp>/c.c:1078: invalid type argument of `->'"
+          "agbcc failed: c.c:1075: warning: implicit declaration of function `thunk_HeapAlloc'",
+          "c.c:1075: warning: assignment makes pointer from integer without a cast",
+          "c.c:1076: warning: implicit declaration of function `Decompress'",
+          "c.c:1077: invalid type argument of `->'",
+          "c.c:1078: invalid type argument of `->'"
         ]
       },
       "gapSize": {
@@ -4225,11 +4225,11 @@
           "addrDeref": 1
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:1075: warning: assignment makes pointer from integer without a cast",
-          "<tmp>/c.c:1076: invalid type argument of `->'",
-          "<tmp>/c.c:1076: warning: dereferencing `void *' pointer",
-          "<tmp>/c.c:1076: request for member `unk0' in something not a structure or union",
-          "<tmp>/c.c:1076: request for member `unk6' in something not a structure or union"
+          "agbcc failed: c.c:1075: warning: assignment makes pointer from integer without a cast",
+          "c.c:1076: invalid type argument of `->'",
+          "c.c:1076: warning: dereferencing `void *' pointer",
+          "c.c:1076: request for member `unk0' in something not a structure or union",
+          "c.c:1076: request for member `unk6' in something not a structure or union"
         ]
       },
       "gapSize": {
@@ -4313,11 +4313,11 @@
           "addrDeref": 10
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:1113: warning: dereferencing `void *' pointer",
-          "<tmp>/c.c:1113: request for member `unk9' in something not a structure or union",
-          "<tmp>/c.c:1114: warning: dereferencing `void *' pointer",
-          "<tmp>/c.c:1114: request for member `unk9' in something not a structure or union",
-          "<tmp>/c.c:1116: warning: dereferencing `void *' pointer"
+          "agbcc failed: c.c:1113: warning: dereferencing `void *' pointer",
+          "c.c:1113: request for member `unk9' in something not a structure or union",
+          "c.c:1114: warning: dereferencing `void *' pointer",
+          "c.c:1114: request for member `unk9' in something not a structure or union",
+          "c.c:1116: warning: dereferencing `void *' pointer"
         ]
       },
       "gapSize": null,
@@ -4415,11 +4415,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:1114: request for member `unkA' in something not a structure or union",
-          "<tmp>/c.c:1127: structure has no member named `unkC'",
-          "<tmp>/c.c:1128: structure has no member named `unk204'",
-          "<tmp>/c.c:1137: aggregate value used where an integer was expected",
-          "<tmp>/c.c:1145: structure has no member named `unkC'"
+          "agbcc failed: c.c:1114: request for member `unkA' in something not a structure or union",
+          "c.c:1127: structure has no member named `unkC'",
+          "c.c:1128: structure has no member named `unk204'",
+          "c.c:1137: aggregate value used where an integer was expected",
+          "c.c:1145: structure has no member named `unkC'"
         ]
       },
       "gapSize": {
@@ -4515,11 +4515,11 @@
           "addrDeref": 2
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:1077: invalid type argument of `->'",
-          "<tmp>/c.c:1078: invalid type argument of `->'",
-          "<tmp>/c.c:1079: invalid type argument of `->'",
-          "<tmp>/c.c:1080: invalid type argument of `->'",
-          "<tmp>/c.c:1081: invalid type argument of `->'"
+          "agbcc failed: c.c:1077: invalid type argument of `->'",
+          "c.c:1078: invalid type argument of `->'",
+          "c.c:1079: invalid type argument of `->'",
+          "c.c:1080: invalid type argument of `->'",
+          "c.c:1081: invalid type argument of `->'"
         ]
       },
       "gapSize": null,
@@ -4694,11 +4694,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:1075: warning: assignment discards qualifiers from pointer target type",
-          "<tmp>/c.c:1076: request for member `unk11' in something not a structure or union",
-          "<tmp>/c.c:1076: request for member `unk5' in something not a structure or union",
-          "<tmp>/c.c:1077: request for member `unk12' in something not a structure or union",
-          "<tmp>/c.c:1077: request for member `unk6' in something not a structure or union"
+          "agbcc failed: c.c:1075: warning: assignment discards qualifiers from pointer target type",
+          "c.c:1076: request for member `unk11' in something not a structure or union",
+          "c.c:1076: request for member `unk5' in something not a structure or union",
+          "c.c:1077: request for member `unk12' in something not a structure or union",
+          "c.c:1077: request for member `unk6' in something not a structure or union"
         ]
       },
       "gapSize": {
@@ -4950,10 +4950,10 @@
           "addrDeref": 5
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:1078: warning: assignment makes pointer from integer without a cast",
-          "<tmp>/c.c:1079: warning: dereferencing `void *' pointer",
-          "<tmp>/c.c:1079: request for member `unk3' in something not a structure or union",
-          "<tmp>/c.c:1079: request for member `unk14' in something not a structure or union"
+          "agbcc failed: c.c:1078: warning: assignment makes pointer from integer without a cast",
+          "c.c:1079: warning: dereferencing `void *' pointer",
+          "c.c:1079: request for member `unk3' in something not a structure or union",
+          "c.c:1079: request for member `unk14' in something not a structure or union"
         ]
       },
       "gapSize": null,
@@ -5206,9 +5206,9 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:1073: warning: dereferencing `void *' pointer",
-          "<tmp>/c.c:1073: request for member `unk0' in something not a structure or union",
-          "<tmp>/c.c:1073: request for member `unk1' in something not a structure or union"
+          "agbcc failed: c.c:1073: warning: dereferencing `void *' pointer",
+          "c.c:1073: request for member `unk0' in something not a structure or union",
+          "c.c:1073: request for member `unk1' in something not a structure or union"
         ]
       },
       "gapSize": null,
@@ -5279,11 +5279,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:1073: warning: dereferencing `void *' pointer",
-          "<tmp>/c.c:1073: request for member `unk0' in something not a structure or union",
-          "<tmp>/c.c:1073: request for member `unk1' in something not a structure or union",
-          "<tmp>/c.c:1073: request for member `unk2' in something not a structure or union",
-          "<tmp>/c.c:1073: request for member `unk3' in something not a structure or union"
+          "agbcc failed: c.c:1073: warning: dereferencing `void *' pointer",
+          "c.c:1073: request for member `unk0' in something not a structure or union",
+          "c.c:1073: request for member `unk1' in something not a structure or union",
+          "c.c:1073: request for member `unk2' in something not a structure or union",
+          "c.c:1073: request for member `unk3' in something not a structure or union"
         ]
       },
       "gapSize": null,
@@ -5593,11 +5593,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:1074: conflicting types for `sub_0805193C'",
-          "<tmp>/c.c:1072: previous declaration of `sub_0805193C'",
-          "<tmp>/c.c:1075: conflicting types for `thunk_sub_080002A0'",
-          "<tmp>/c.c:1071: previous declaration of `thunk_sub_080002A0'",
-          "<tmp>/c.c:1080: invalid type argument of `->'"
+          "agbcc failed: c.c:1074: conflicting types for `sub_0805193C'",
+          "c.c:1072: previous declaration of `sub_0805193C'",
+          "c.c:1075: conflicting types for `thunk_sub_080002A0'",
+          "c.c:1071: previous declaration of `thunk_sub_080002A0'",
+          "c.c:1080: invalid type argument of `->'"
         ]
       },
       "gapSize": {
@@ -5854,10 +5854,10 @@
           "addrDeref": 4
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:1079: warning: dereferencing `void *' pointer",
-          "<tmp>/c.c:1079: request for member `unk2' in something not a structure or union",
-          "<tmp>/c.c:1081: warning: dereferencing `void *' pointer",
-          "<tmp>/c.c:1081: request for member `unk2' in something not a structure or union"
+          "agbcc failed: c.c:1079: warning: dereferencing `void *' pointer",
+          "c.c:1079: request for member `unk2' in something not a structure or union",
+          "c.c:1081: warning: dereferencing `void *' pointer",
+          "c.c:1081: request for member `unk2' in something not a structure or union"
         ]
       },
       "gapSize": null,
@@ -5935,11 +5935,11 @@
           "addrDeref": 2
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:1076: invalid type argument of `->'",
-          "<tmp>/c.c:1076: warning: dereferencing `void *' pointer",
-          "<tmp>/c.c:1076: request for member `unk2' in something not a structure or union",
-          "<tmp>/c.c:1076: request for member `unk3' in something not a structure or union",
-          "<tmp>/c.c:1077: invalid type argument of `->'"
+          "agbcc failed: c.c:1076: invalid type argument of `->'",
+          "c.c:1076: warning: dereferencing `void *' pointer",
+          "c.c:1076: request for member `unk2' in something not a structure or union",
+          "c.c:1076: request for member `unk3' in something not a structure or union",
+          "c.c:1077: invalid type argument of `->'"
         ]
       },
       "gapSize": {
@@ -6139,7 +6139,7 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:1200: conversion to non-scalar type requested"
+          "agbcc failed: c.c:1200: conversion to non-scalar type requested"
         ]
       },
       "gapSize": null,
@@ -6304,7 +6304,7 @@
           "addrDeref": 2
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:1077: request for member `unk8' in something not a structure or union"
+          "agbcc failed: c.c:1077: request for member `unk8' in something not a structure or union"
         ]
       },
       "gapSize": null,
@@ -6650,11 +6650,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:1085: invalid operands to binary <<",
-          "<tmp>/c.c:1098: invalid operands to binary <<",
-          "<tmp>/c.c:1100: request for member `unk0' in something not a structure or union",
-          "<tmp>/c.c:1101: request for member `unk0' in something not a structure or union",
-          "<tmp>/c.c:1101: invalid operands to binary <<"
+          "agbcc failed: c.c:1085: invalid operands to binary <<",
+          "c.c:1098: invalid operands to binary <<",
+          "c.c:1100: request for member `unk0' in something not a structure or union",
+          "c.c:1101: request for member `unk0' in something not a structure or union",
+          "c.c:1101: invalid operands to binary <<"
         ]
       },
       "gapSize": null,
@@ -7151,11 +7151,11 @@
           "addrDeref": 3
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:1073: conflicting types for `ReadUnalignedU16'",
-          "<tmp>/c.c:1071: previous declaration of `ReadUnalignedU16'",
-          "<tmp>/c.c:1079: warning: dereferencing `void *' pointer",
-          "<tmp>/c.c:1079: request for member `unk2' in something not a structure or union",
-          "<tmp>/c.c:1079: warning: passing arg 1 of `ReadUnalignedU16' makes integer from pointer without a cast"
+          "agbcc failed: c.c:1073: conflicting types for `ReadUnalignedU16'",
+          "c.c:1071: previous declaration of `ReadUnalignedU16'",
+          "c.c:1079: warning: dereferencing `void *' pointer",
+          "c.c:1079: request for member `unk2' in something not a structure or union",
+          "c.c:1079: warning: passing arg 1 of `ReadUnalignedU16' makes integer from pointer without a cast"
         ]
       },
       "gapSize": null,
@@ -7489,11 +7489,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "gcc 2.7.2 failed: <tmp>/c.i:5582: warning: dereferencing `void *' pointer",
-          "<tmp>/c.i:5582: request for member `unk10' in something not a structure or union",
-          "<tmp>/c.i:5584: warning: dereferencing `void *' pointer",
-          "<tmp>/c.i:5584: request for member `unk10' in something not a structure or union",
-          "<tmp>/c.i:5588: warning: dereferencing `void *' pointer"
+          "gcc 2.7.2 failed: c.i:5582: warning: dereferencing `void *' pointer",
+          "c.i:5582: request for member `unk10' in something not a structure or union",
+          "c.i:5584: warning: dereferencing `void *' pointer",
+          "c.i:5584: request for member `unk10' in something not a structure or union",
+          "c.i:5588: warning: dereferencing `void *' pointer"
         ]
       },
       "gapSize": null,
@@ -7675,10 +7675,10 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "gcc 2.7.2 failed: <tmp>/c.i:5517: request for member `unk0' in something not a structure or union",
-          "<tmp>/c.i:5519: request for member `unk4' in something not a structure or union",
-          "<tmp>/c.i:5520: request for member `unk4' in something not a structure or union",
-          "<tmp>/c.i:5521: request for member `unk4' in something not a structure or union"
+          "gcc 2.7.2 failed: c.i:5517: request for member `unk0' in something not a structure or union",
+          "c.i:5519: request for member `unk4' in something not a structure or union",
+          "c.i:5520: request for member `unk4' in something not a structure or union",
+          "c.i:5521: request for member `unk4' in something not a structure or union"
         ]
       },
       "gapSize": {
@@ -8019,11 +8019,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "gcc 2.7.2 failed: <tmp>/c.i:5566: `sp28' undeclared (first use this function)",
-          "<tmp>/c.i:5566: (Each undeclared identifier is reported only once",
-          "<tmp>/c.i:5566: for each function it appears in.)",
-          "<tmp>/c.i:5570: `sp38' undeclared (first use this function)",
-          "<tmp>/c.i:5570: `sp48' undeclared (first use this function)"
+          "gcc 2.7.2 failed: c.i:5566: `sp28' undeclared (first use this function)",
+          "c.i:5566: (Each undeclared identifier is reported only once",
+          "c.i:5566: for each function it appears in.)",
+          "c.i:5570: `sp38' undeclared (first use this function)",
+          "c.i:5570: `sp48' undeclared (first use this function)"
         ]
       },
       "gapSize": null,
@@ -8270,10 +8270,10 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "gcc 2.7.2 failed: <tmp>/c.i:5604: request for member `unkC' in something not a structure or union",
-          "<tmp>/c.i:5621: request for member `unk3' in something not a structure or union",
-          "<tmp>/c.i:5624: request for member `unkC' in something not a structure or union",
-          "<tmp>/c.i:5627: request for member `unk4' in something not a structure or union"
+          "gcc 2.7.2 failed: c.i:5604: request for member `unkC' in something not a structure or union",
+          "c.i:5621: request for member `unk3' in something not a structure or union",
+          "c.i:5624: request for member `unkC' in something not a structure or union",
+          "c.i:5627: request for member `unk4' in something not a structure or union"
         ]
       },
       "gapSize": null,
@@ -8522,10 +8522,10 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "gcc 2.7.2 failed: <tmp>/c.i:5521: warning: dereferencing `void *' pointer",
-          "<tmp>/c.i:5521: request for member `unk6' in something not a structure or union",
-          "<tmp>/c.i:5522: warning: dereferencing `void *' pointer",
-          "<tmp>/c.i:5522: request for member `unk8' in something not a structure or union"
+          "gcc 2.7.2 failed: c.i:5521: warning: dereferencing `void *' pointer",
+          "c.i:5521: request for member `unk6' in something not a structure or union",
+          "c.i:5522: warning: dereferencing `void *' pointer",
+          "c.i:5522: request for member `unk8' in something not a structure or union"
         ]
       },
       "gapSize": null,
@@ -9021,7 +9021,7 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "gcc 2.7.2 failed: <tmp>/c.i:5513: invalid operands to binary +"
+          "gcc 2.7.2 failed: c.i:5513: invalid operands to binary +"
         ]
       },
       "gapSize": null,
@@ -9094,7 +9094,7 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "gcc 2.7.2 failed: <tmp>/c.i:5513: invalid operands to binary +"
+          "gcc 2.7.2 failed: c.i:5513: invalid operands to binary +"
         ]
       },
       "gapSize": null,
@@ -9248,7 +9248,7 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "gcc 2.7.2 failed: <tmp>/c.i:5513: structure has no member named `unkC'"
+          "gcc 2.7.2 failed: c.i:5513: structure has no member named `unkC'"
         ]
       },
       "gapSize": null,
@@ -9320,11 +9320,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "gcc 2.7.2 failed: <tmp>/c.i:5515: warning: dereferencing `void *' pointer",
-          "<tmp>/c.i:5515: request for member `unk0' in something not a structure or union",
-          "<tmp>/c.i:5515: request for member `unk1' in something not a structure or union",
-          "<tmp>/c.i:5515: request for member `unk2' in something not a structure or union",
-          "<tmp>/c.i:5515: request for member `unk3' in something not a structure or union"
+          "gcc 2.7.2 failed: c.i:5515: warning: dereferencing `void *' pointer",
+          "c.i:5515: request for member `unk0' in something not a structure or union",
+          "c.i:5515: request for member `unk1' in something not a structure or union",
+          "c.i:5515: request for member `unk2' in something not a structure or union",
+          "c.i:5515: request for member `unk3' in something not a structure or union"
         ]
       },
       "gapSize": {
@@ -9412,11 +9412,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "gcc 2.7.2 failed: <tmp>/c.i:5515: structure has no member named `unk10'",
-          "<tmp>/c.i:5516: warning: dereferencing `void *' pointer",
-          "<tmp>/c.i:5516: request for member `unk98' in something not a structure or union",
-          "<tmp>/c.i:5517: warning: dereferencing `void *' pointer",
-          "<tmp>/c.i:5517: request for member `unkFC' in something not a structure or union"
+          "gcc 2.7.2 failed: c.i:5515: structure has no member named `unk10'",
+          "c.i:5516: warning: dereferencing `void *' pointer",
+          "c.i:5516: request for member `unk98' in something not a structure or union",
+          "c.i:5517: warning: dereferencing `void *' pointer",
+          "c.i:5517: request for member `unkFC' in something not a structure or union"
         ]
       },
       "gapSize": null,
@@ -9488,10 +9488,10 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "gcc 2.7.2 failed: <tmp>/c.i:5530: request for member `unk0' in something not a structure or union",
-          "<tmp>/c.i:5531: request for member `unk1' in something not a structure or union",
-          "<tmp>/c.i:5549: request for member `unk0' in something not a structure or union",
-          "<tmp>/c.i:5550: request for member `unk1' in something not a structure or union"
+          "gcc 2.7.2 failed: c.i:5530: request for member `unk0' in something not a structure or union",
+          "c.i:5531: request for member `unk1' in something not a structure or union",
+          "c.i:5549: request for member `unk0' in something not a structure or union",
+          "c.i:5550: request for member `unk1' in something not a structure or union"
         ]
       },
       "gapSize": null,
@@ -10093,11 +10093,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "gcc 2.7.2 failed: <tmp>/c.i:5563: `sp28' undeclared (first use this function)",
-          "<tmp>/c.i:5563: (Each undeclared identifier is reported only once",
-          "<tmp>/c.i:5563: for each function it appears in.)",
-          "<tmp>/c.i:5567: `sp38' undeclared (first use this function)",
-          "<tmp>/c.i:5567: `sp48' undeclared (first use this function)"
+          "gcc 2.7.2 failed: c.i:5563: `sp28' undeclared (first use this function)",
+          "c.i:5563: (Each undeclared identifier is reported only once",
+          "c.i:5563: for each function it appears in.)",
+          "c.i:5567: `sp38' undeclared (first use this function)",
+          "c.i:5567: `sp48' undeclared (first use this function)"
         ]
       },
       "gapSize": null,
@@ -10172,11 +10172,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "gcc 2.7.2 failed: gcc 2.7.2 (docker) failed: <tmp>/c.i:5551: conflicting types for `gFirstMallocBlock'",
-          "<tmp>/c.i:5538: previous declaration of `gFirstMallocBlock'",
-          "<tmp>/c.i:5552: conflicting types for `gMallocFunc'",
-          "<tmp>/c.i:5537: previous declaration of `gMallocFunc'",
-          "<tmp>/c.i:5559: warning: assignment makes pointer from integer without a cast"
+          "gcc 2.7.2 failed: gcc 2.7.2 (docker) failed: c.i:5551: conflicting types for `gFirstMallocBlock'",
+          "c.i:5538: previous declaration of `gFirstMallocBlock'",
+          "c.i:5552: conflicting types for `gMallocFunc'",
+          "c.i:5537: previous declaration of `gMallocFunc'",
+          "c.i:5559: warning: assignment makes pointer from integer without a cast"
         ]
       },
       "gapSize": null,
@@ -10648,8 +10648,8 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:11332: structure has no member named `unkC'",
-          "<tmp>/c.c:11344: structure has no member named `unkC'"
+          "agbcc failed: c.c:11332: structure has no member named `unkC'",
+          "c.c:11344: structure has no member named `unkC'"
         ]
       },
       "gapSize": null,
@@ -10721,7 +10721,7 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:3929: invalid type argument of `unary *'"
+          "agbcc failed: c.c:3929: invalid type argument of `unary *'"
         ]
       },
       "gapSize": null,
@@ -10794,7 +10794,7 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:3930: invalid type argument of `unary *'"
+          "agbcc failed: c.c:3930: invalid type argument of `unary *'"
         ]
       },
       "gapSize": {
@@ -11067,11 +11067,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:8306: request for member `unk1' in something not a structure or union",
-          "<tmp>/c.c:8306: request for member `unk2' in something not a structure or union",
-          "<tmp>/c.c:8306: request for member `unk3' in something not a structure or union",
-          "<tmp>/c.c:8306: request for member `unk4' in something not a structure or union",
-          "<tmp>/c.c:8331: request for member `unk0' in something not a structure or union"
+          "agbcc failed: c.c:8306: request for member `unk1' in something not a structure or union",
+          "c.c:8306: request for member `unk2' in something not a structure or union",
+          "c.c:8306: request for member `unk3' in something not a structure or union",
+          "c.c:8306: request for member `unk4' in something not a structure or union",
+          "c.c:8331: request for member `unk0' in something not a structure or union"
         ]
       },
       "gapSize": null,
@@ -11739,7 +11739,7 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:3928: invalid type argument of `unary *'"
+          "agbcc failed: c.c:3928: invalid type argument of `unary *'"
         ]
       },
       "gapSize": {
@@ -11829,9 +11829,9 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:3922: warning: dereferencing `void *' pointer",
-          "<tmp>/c.c:3922: request for member `unk0' in something not a structure or union",
-          "<tmp>/c.c:3922: request for member `unk2' in something not a structure or union"
+          "agbcc failed: c.c:3922: warning: dereferencing `void *' pointer",
+          "c.c:3922: request for member `unk0' in something not a structure or union",
+          "c.c:3922: request for member `unk2' in something not a structure or union"
         ]
       },
       "gapSize": null,
@@ -12569,11 +12569,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:3930: warning: dereferencing `void *' pointer",
-          "<tmp>/c.c:3930: request for member `unk0' in something not a structure or union",
-          "<tmp>/c.c:3931: warning: dereferencing `void *' pointer",
-          "<tmp>/c.c:3931: request for member `unk2' in something not a structure or union",
-          "<tmp>/c.c:3932: warning: dereferencing `void *' pointer"
+          "agbcc failed: c.c:3930: warning: dereferencing `void *' pointer",
+          "c.c:3930: request for member `unk0' in something not a structure or union",
+          "c.c:3931: warning: dereferencing `void *' pointer",
+          "c.c:3931: request for member `unk2' in something not a structure or union",
+          "c.c:3932: warning: dereferencing `void *' pointer"
         ]
       },
       "gapSize": null,
@@ -12737,11 +12737,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:8597: conflicting types for `IsStringJapanese'",
-          "<tmp>/c.c:4062: previous declaration of `IsStringJapanese'",
-          "<tmp>/c.c:8609: warning: dereferencing `void *' pointer",
-          "<tmp>/c.c:8609: request for member `unk0' in something not a structure or union",
-          "<tmp>/c.c:8653: warning: dereferencing `void *' pointer"
+          "agbcc failed: c.c:8597: conflicting types for `IsStringJapanese'",
+          "c.c:4062: previous declaration of `IsStringJapanese'",
+          "c.c:8609: warning: dereferencing `void *' pointer",
+          "c.c:8609: request for member `unk0' in something not a structure or union",
+          "c.c:8653: warning: dereferencing `void *' pointer"
         ]
       },
       "gapSize": {
@@ -12824,10 +12824,10 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:3979: warning: dereferencing `void *' pointer",
-          "<tmp>/c.c:3979: request for member `unk8' in something not a structure or union",
-          "<tmp>/c.c:3980: warning: dereferencing `void *' pointer",
-          "<tmp>/c.c:3980: request for member `unk1' in something not a structure or union"
+          "agbcc failed: c.c:3979: warning: dereferencing `void *' pointer",
+          "c.c:3979: request for member `unk8' in something not a structure or union",
+          "c.c:3980: warning: dereferencing `void *' pointer",
+          "c.c:3980: request for member `unk1' in something not a structure or union"
         ]
       },
       "gapSize": null,
@@ -12999,10 +12999,10 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:3979: warning: dereferencing `void *' pointer",
-          "<tmp>/c.c:3979: request for member `unk1' in something not a structure or union",
-          "<tmp>/c.c:3980: warning: dereferencing `void *' pointer",
-          "<tmp>/c.c:3980: request for member `unk8' in something not a structure or union"
+          "agbcc failed: c.c:3979: warning: dereferencing `void *' pointer",
+          "c.c:3979: request for member `unk1' in something not a structure or union",
+          "c.c:3980: warning: dereferencing `void *' pointer",
+          "c.c:3980: request for member `unk8' in something not a structure or union"
         ]
       },
       "gapSize": null,
@@ -13079,10 +13079,10 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:3922: warning: dereferencing `void *' pointer",
-          "<tmp>/c.c:3922: request for member `unk0' in something not a structure or union",
-          "<tmp>/c.c:3923: warning: dereferencing `void *' pointer",
-          "<tmp>/c.c:3923: request for member `unk2' in something not a structure or union"
+          "agbcc failed: c.c:3922: warning: dereferencing `void *' pointer",
+          "c.c:3922: request for member `unk0' in something not a structure or union",
+          "c.c:3923: warning: dereferencing `void *' pointer",
+          "c.c:3923: request for member `unk2' in something not a structure or union"
         ]
       },
       "gapSize": null,
@@ -13458,7 +13458,7 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:3929: invalid type argument of `unary *'"
+          "agbcc failed: c.c:3929: invalid type argument of `unary *'"
         ]
       },
       "gapSize": {
@@ -13771,11 +13771,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:7056: structure has no member named `unk2'",
-          "<tmp>/c.c:7067: structure has no member named `unk2'",
-          "<tmp>/c.c:7073: structure has no member named `unk13'",
-          "<tmp>/c.c:7078: structure has no member named `unk2'",
-          "<tmp>/c.c:7089: structure has no member named `unk2'"
+          "agbcc failed: c.c:7056: structure has no member named `unk2'",
+          "c.c:7067: structure has no member named `unk2'",
+          "c.c:7073: structure has no member named `unk13'",
+          "c.c:7078: structure has no member named `unk2'",
+          "c.c:7089: structure has no member named `unk2'"
         ]
       },
       "gapSize": {
@@ -14110,11 +14110,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:323: warning: assignment makes pointer from integer without a cast",
-          "<tmp>/c.c:326: request for member `unk4' in something not a structure or union",
-          "<tmp>/c.c:328: request for member `unk4' in something not a structure or union",
-          "<tmp>/c.c:330: request for member `unk4' in something not a structure or union",
-          "<tmp>/c.c:332: request for member `unk0' in something not a structure or union"
+          "agbcc failed: c.c:323: warning: assignment makes pointer from integer without a cast",
+          "c.c:326: request for member `unk4' in something not a structure or union",
+          "c.c:328: request for member `unk4' in something not a structure or union",
+          "c.c:330: request for member `unk4' in something not a structure or union",
+          "c.c:332: request for member `unk0' in something not a structure or union"
         ]
       },
       "gapSize": {
@@ -14211,8 +14211,8 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:307: request for member `unk0' in something not a structure or union",
-          "<tmp>/c.c:308: request for member `unk4' in something not a structure or union"
+          "agbcc failed: c.c:307: request for member `unk0' in something not a structure or union",
+          "c.c:308: request for member `unk4' in something not a structure or union"
         ]
       },
       "gapSize": null,
@@ -14293,11 +14293,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:319: request for member `unk4' in something not a structure or union",
-          "<tmp>/c.c:322: request for member `unk4' in something not a structure or union",
-          "<tmp>/c.c:327: request for member `unk0' in something not a structure or union",
-          "<tmp>/c.c:328: request for member `unk4' in something not a structure or union",
-          "<tmp>/c.c:329: request for member `unk0' in something not a structure or union"
+          "agbcc failed: c.c:319: request for member `unk4' in something not a structure or union",
+          "c.c:322: request for member `unk4' in something not a structure or union",
+          "c.c:327: request for member `unk0' in something not a structure or union",
+          "c.c:328: request for member `unk4' in something not a structure or union",
+          "c.c:329: request for member `unk0' in something not a structure or union"
         ]
       },
       "gapSize": {
@@ -14474,7 +14474,7 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:964: invalid type argument of `unary *'"
+          "agbcc failed: c.c:964: invalid type argument of `unary *'"
         ]
       },
       "gapSize": {
@@ -14564,9 +14564,9 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:319: warning: assignment makes pointer from integer without a cast",
-          "<tmp>/c.c:322: warning: assignment makes pointer from integer without a cast",
-          "<tmp>/c.c:329: invalid type argument of `unary *'"
+          "agbcc failed: c.c:319: warning: assignment makes pointer from integer without a cast",
+          "c.c:322: warning: assignment makes pointer from integer without a cast",
+          "c.c:329: invalid type argument of `unary *'"
         ]
       },
       "gapSize": {
@@ -14648,9 +14648,9 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:931: union has no member named `unk6'",
-          "<tmp>/c.c:935: union has no member named `unk6'",
-          "<tmp>/c.c:937: union has no member named `unk6'"
+          "agbcc failed: c.c:931: union has no member named `unk6'",
+          "c.c:935: union has no member named `unk6'",
+          "c.c:937: union has no member named `unk6'"
         ]
       },
       "gapSize": null,
@@ -14730,11 +14730,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:1876: warning: dereferencing `void *' pointer",
-          "<tmp>/c.c:1876: request for member `unk0' in something not a structure or union",
-          "<tmp>/c.c:1877: warning: dereferencing `void *' pointer",
-          "<tmp>/c.c:1877: request for member `unk4' in something not a structure or union",
-          "<tmp>/c.c:1878: warning: dereferencing `void *' pointer"
+          "agbcc failed: c.c:1876: warning: dereferencing `void *' pointer",
+          "c.c:1876: request for member `unk0' in something not a structure or union",
+          "c.c:1877: warning: dereferencing `void *' pointer",
+          "c.c:1877: request for member `unk4' in something not a structure or union",
+          "c.c:1878: warning: dereferencing `void *' pointer"
         ]
       },
       "gapSize": {
@@ -14821,11 +14821,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:941: `unkspC' undeclared (first use in this function)",
-          "<tmp>/c.c:941: (Each undeclared identifier is reported only once",
-          "<tmp>/c.c:941: for each function it appears in.)",
-          "<tmp>/c.c:941: `unksp0' undeclared (first use in this function)",
-          "<tmp>/c.c:949: invalid type argument of `->'"
+          "agbcc failed: c.c:941: `unkspC' undeclared (first use in this function)",
+          "c.c:941: (Each undeclared identifier is reported only once",
+          "c.c:941: for each function it appears in.)",
+          "c.c:941: `unksp0' undeclared (first use in this function)",
+          "c.c:949: invalid type argument of `->'"
         ]
       },
       "gapSize": null,
@@ -14907,9 +14907,9 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:313: request for member `unk0' in something not a structure or union",
-          "<tmp>/c.c:314: request for member `unk0' in something not a structure or union",
-          "<tmp>/c.c:315: request for member `unk2' in something not a structure or union"
+          "agbcc failed: c.c:313: request for member `unk0' in something not a structure or union",
+          "c.c:314: request for member `unk0' in something not a structure or union",
+          "c.c:315: request for member `unk2' in something not a structure or union"
         ]
       },
       "gapSize": {
@@ -14994,9 +14994,9 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:363: `unksp0' undeclared (first use in this function)",
-          "<tmp>/c.c:363: (Each undeclared identifier is reported only once",
-          "<tmp>/c.c:363: for each function it appears in.)"
+          "agbcc failed: c.c:363: `unksp0' undeclared (first use in this function)",
+          "c.c:363: (Each undeclared identifier is reported only once",
+          "c.c:363: for each function it appears in.)"
         ]
       },
       "gapSize": null,
@@ -15097,11 +15097,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:919: conflicting types for `gBgOffsetsHBlankPrimary'",
-          "<tmp>/c.c:877: previous declaration of `gBgOffsetsHBlankPrimary'",
-          "<tmp>/c.c:920: conflicting types for `gFlags'",
-          "<tmp>/c.c:917: previous declaration of `gFlags'",
-          "<tmp>/c.c:921: conflicting types for `gHBlankCopySize'"
+          "agbcc failed: c.c:919: conflicting types for `gBgOffsetsHBlankPrimary'",
+          "c.c:877: previous declaration of `gBgOffsetsHBlankPrimary'",
+          "c.c:920: conflicting types for `gFlags'",
+          "c.c:917: previous declaration of `gFlags'",
+          "c.c:921: conflicting types for `gHBlankCopySize'"
         ]
       },
       "gapSize": {
@@ -15181,11 +15181,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:919: conflicting types for `gBgOffsetsHBlankPrimary'",
-          "<tmp>/c.c:877: previous declaration of `gBgOffsetsHBlankPrimary'",
-          "<tmp>/c.c:920: conflicting types for `gFlags'",
-          "<tmp>/c.c:917: previous declaration of `gFlags'",
-          "<tmp>/c.c:921: conflicting types for `gHBlankCopySize'"
+          "agbcc failed: c.c:919: conflicting types for `gBgOffsetsHBlankPrimary'",
+          "c.c:877: previous declaration of `gBgOffsetsHBlankPrimary'",
+          "c.c:920: conflicting types for `gFlags'",
+          "c.c:917: previous declaration of `gFlags'",
+          "c.c:921: conflicting types for `gHBlankCopySize'"
         ]
       },
       "gapSize": null,
@@ -15282,11 +15282,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:919: conflicting types for `gBgOffsetsHBlankPrimary'",
-          "<tmp>/c.c:877: previous declaration of `gBgOffsetsHBlankPrimary'",
-          "<tmp>/c.c:920: conflicting types for `gFlags'",
-          "<tmp>/c.c:917: previous declaration of `gFlags'",
-          "<tmp>/c.c:921: conflicting types for `gHBlankCopySize'"
+          "agbcc failed: c.c:919: conflicting types for `gBgOffsetsHBlankPrimary'",
+          "c.c:877: previous declaration of `gBgOffsetsHBlankPrimary'",
+          "c.c:920: conflicting types for `gFlags'",
+          "c.c:917: previous declaration of `gFlags'",
+          "c.c:921: conflicting types for `gHBlankCopySize'"
         ]
       },
       "gapSize": {
@@ -15383,11 +15383,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:330: warning: dereferencing `void *' pointer",
-          "<tmp>/c.c:330: request for member `unk2' in something not a structure or union",
-          "<tmp>/c.c:332: warning: dereferencing `void *' pointer",
-          "<tmp>/c.c:332: request for member `unk8' in something not a structure or union",
-          "<tmp>/c.c:333: warning: dereferencing `void *' pointer"
+          "agbcc failed: c.c:330: warning: dereferencing `void *' pointer",
+          "c.c:330: request for member `unk2' in something not a structure or union",
+          "c.c:332: warning: dereferencing `void *' pointer",
+          "c.c:332: request for member `unk8' in something not a structure or union",
+          "c.c:333: warning: dereferencing `void *' pointer"
         ]
       },
       "gapSize": {
@@ -15476,11 +15476,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:323: warning: dereferencing `void *' pointer",
-          "<tmp>/c.c:323: request for member `unk0' in something not a structure or union",
-          "<tmp>/c.c:323: request for member `unk6' in something not a structure or union",
-          "<tmp>/c.c:323: request for member `unk4' in something not a structure or union",
-          "<tmp>/c.c:323: request for member `unk2' in something not a structure or union"
+          "agbcc failed: c.c:323: warning: dereferencing `void *' pointer",
+          "c.c:323: request for member `unk0' in something not a structure or union",
+          "c.c:323: request for member `unk6' in something not a structure or union",
+          "c.c:323: request for member `unk4' in something not a structure or union",
+          "c.c:323: request for member `unk2' in something not a structure or union"
         ]
       },
       "gapSize": null,
@@ -15557,11 +15557,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:327: warning: dereferencing `void *' pointer",
-          "<tmp>/c.c:327: request for member `unk0' in something not a structure or union",
-          "<tmp>/c.c:328: warning: dereferencing `void *' pointer",
-          "<tmp>/c.c:328: request for member `unk2' in something not a structure or union",
-          "<tmp>/c.c:329: warning: dereferencing `void *' pointer"
+          "agbcc failed: c.c:327: warning: dereferencing `void *' pointer",
+          "c.c:327: request for member `unk0' in something not a structure or union",
+          "c.c:328: warning: dereferencing `void *' pointer",
+          "c.c:328: request for member `unk2' in something not a structure or union",
+          "c.c:329: warning: dereferencing `void *' pointer"
         ]
       },
       "gapSize": {
@@ -16536,11 +16536,11 @@
           "addrDeref": 9
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:409: warning: dereferencing `void *' pointer",
-          "<tmp>/c.c:409: void value not ignored as it ought to be",
-          "<tmp>/c.c:409: invalid use of void expression",
-          "<tmp>/c.c:410: warning: dereferencing `void *' pointer",
-          "<tmp>/c.c:410: invalid use of void expression"
+          "agbcc failed: c.c:409: warning: dereferencing `void *' pointer",
+          "c.c:409: void value not ignored as it ought to be",
+          "c.c:409: invalid use of void expression",
+          "c.c:410: warning: dereferencing `void *' pointer",
+          "c.c:410: invalid use of void expression"
         ]
       },
       "gapSize": {
@@ -16947,11 +16947,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "agbcc failed: <tmp>/c.c:996: redefinition of `struct MapEntity'",
-          "<tmp>/c.c:1000: syntax error before `?'",
-          "<tmp>/c.c:1000: warning: no semicolon at end of struct or union",
-          "<tmp>/c.c:1003: syntax error before `}'",
-          "<tmp>/c.c:1003: warning: useless keyword or type name in empty declaration"
+          "agbcc failed: c.c:996: redefinition of `struct MapEntity'",
+          "c.c:1000: syntax error before `?'",
+          "c.c:1000: warning: no semicolon at end of struct or union",
+          "c.c:1003: syntax error before `}'",
+          "c.c:1003: warning: useless keyword or type name in empty declaration"
         ]
       },
       "gapSize": null,
@@ -17653,8 +17653,8 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "kmc gcc failed: <tmp>/c.i:1837: request for member `unk2' in something not a structure or union",
-          "<tmp>/c.i:1838: request for member `unk0' in something not a structure or union"
+          "kmc gcc failed: c.i:1837: request for member `unk2' in something not a structure or union",
+          "c.i:1838: request for member `unk0' in something not a structure or union"
         ]
       },
       "note": "src/199C0.c: task init; allocates task memory, dispatches by global index",
@@ -17731,11 +17731,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "kmc gcc failed: kmc gcc (docker) failed: <tmp>/c.i:2621: conflicting types for `D_800AFE8C_A71FC'",
-          "<tmp>/c.i:2540: previous declaration of `D_800AFE8C_A71FC'",
-          "<tmp>/c.i:2633: request for member `unk8' in something not a structure or union",
-          "<tmp>/c.i:2639: request for member `unk59A' in something not a structure or union",
-          "<tmp>/c.i:2648: request for member `unk5B8' in something not a structure or union"
+          "kmc gcc failed: kmc gcc (docker) failed: c.i:2621: conflicting types for `D_800AFE8C_A71FC'",
+          "c.i:2540: previous declaration of `D_800AFE8C_A71FC'",
+          "c.i:2633: request for member `unk8' in something not a structure or union",
+          "c.i:2639: request for member `unk59A' in something not a structure or union",
+          "c.i:2648: request for member `unk5B8' in something not a structure or union"
         ]
       },
       "note": "src/1BBA0.c: nested loop counting active players, clears a flag row when none remain",
@@ -17893,11 +17893,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "kmc gcc failed: <tmp>/c.i:2718: request for member `unkC' in something not a structure or union",
-          "<tmp>/c.i:2721: request for member `unkC' in something not a structure or union",
-          "<tmp>/c.i:2726: request for member `unkC' in something not a structure or union",
-          "<tmp>/c.i:2733: request for member `unk10' in something not a structure or union",
-          "<tmp>/c.i:2734: request for member `unk10' in something not a structure or union"
+          "kmc gcc failed: c.i:2718: request for member `unkC' in something not a structure or union",
+          "c.i:2721: request for member `unkC' in something not a structure or union",
+          "c.i:2726: request for member `unkC' in something not a structure or union",
+          "c.i:2733: request for member `unk10' in something not a structure or union",
+          "c.i:2734: request for member `unk10' in something not a structure or union"
         ]
       },
       "gapSize": null,
@@ -18368,11 +18368,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "kmc gcc failed: <tmp>/c.i:2636: request for member `unk5E' in something not a structure or union",
-          "<tmp>/c.i:2644: request for member `unk5E' in something not a structure or union",
-          "<tmp>/c.i:2645: request for member `unk5E' in something not a structure or union",
-          "<tmp>/c.i:2646: request for member `unk61' in something not a structure or union",
-          "<tmp>/c.i:2647: request for member `unk50' in something not a structure or union"
+          "kmc gcc failed: c.i:2636: request for member `unk5E' in something not a structure or union",
+          "c.i:2644: request for member `unk5E' in something not a structure or union",
+          "c.i:2645: request for member `unk5E' in something not a structure or union",
+          "c.i:2646: request for member `unk61' in something not a structure or union",
+          "c.i:2647: request for member `unk50' in something not a structure or union"
         ]
       },
       "note": "src/2AF90.c: state-machine step with fall-through switch cases over a mode byte",
@@ -18440,10 +18440,10 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "kmc gcc failed: <tmp>/c.i:2610: request for member `unk3EC' in something not a structure or union",
-          "<tmp>/c.i:2610: request for member `unk3F0' in something not a structure or union",
-          "<tmp>/c.i:2612: request for member `unk3EC' in something not a structure or union",
-          "<tmp>/c.i:2612: request for member `unk3F0' in something not a structure or union"
+          "kmc gcc failed: c.i:2610: request for member `unk3EC' in something not a structure or union",
+          "c.i:2610: request for member `unk3F0' in something not a structure or union",
+          "c.i:2612: request for member `unk3EC' in something not a structure or union",
+          "c.i:2612: request for member `unk3F0' in something not a structure or union"
         ]
       },
       "note": "src/2AF90.c: proximity/heading test against the player position; fixed-point distance check",
@@ -18691,10 +18691,10 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "kmc gcc failed: kmc gcc (docker) failed: <tmp>/c.i:2472: conflicting types for `destroySceneModel'",
-          "<tmp>/c.i:2433: previous declaration of `destroySceneModel'",
-          "<tmp>/c.i:2477: request for member `unkD5' in something not a structure or union",
-          "<tmp>/c.i:2483: request for member `unkD5' in something not a structure or union"
+          "kmc gcc failed: kmc gcc (docker) failed: c.i:2472: conflicting types for `destroySceneModel'",
+          "c.i:2433: previous declaration of `destroySceneModel'",
+          "c.i:2477: request for member `unkD5' in something not a structure or union",
+          "c.i:2483: request for member `unkD5' in something not a structure or union"
         ]
       },
       "note": "src/2C8F0.c: destroys each scene model in a fixed array up to a live count",
@@ -18845,9 +18845,9 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "kmc gcc failed: kmc gcc (docker) failed: <tmp>/c.i:1846: conflicting types for `EepromSaveData'",
-          "<tmp>/c.i:1845: previous declaration of `EepromSaveData'",
-          "<tmp>/c.i:1848: invalid type argument of `->'"
+          "kmc gcc failed: kmc gcc (docker) failed: c.i:1846: conflicting types for `EepromSaveData'",
+          "c.i:1845: previous declaration of `EepromSaveData'",
+          "c.i:1848: invalid type argument of `->'"
         ]
       },
       "note": "src/38BE0.c: save-slot-in-use predicate; leaf",
@@ -18927,11 +18927,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "kmc gcc failed: kmc gcc (docker) failed: <tmp>/c.i:1846: conflicting types for `EepromSaveData'",
-          "<tmp>/c.i:1845: previous declaration of `EepromSaveData'",
-          "<tmp>/c.i:1855: request for member `unk4E' in something not a structure or union",
-          "<tmp>/c.i:1857: request for member `unk4F' in something not a structure or union",
-          "<tmp>/c.i:1860: request for member `unk50' in something not a structure or union"
+          "kmc gcc failed: kmc gcc (docker) failed: c.i:1846: conflicting types for `EepromSaveData'",
+          "c.i:1845: previous declaration of `EepromSaveData'",
+          "c.i:1855: request for member `unk4E' in something not a structure or union",
+          "c.i:1857: request for member `unk4F' in something not a structure or union",
+          "c.i:1860: request for member `unk50' in something not a structure or union"
         ]
       },
       "note": "src/38BE0.c: settings getter with if-chain over a global struct; leaf",
@@ -19084,11 +19084,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "kmc gcc failed: <tmp>/c.i:1839: request for member `unk0' in something not a structure or union",
-          "<tmp>/c.i:1839: request for member `unk8' in something not a structure or union",
-          "<tmp>/c.i:1843: request for member `unk0' in something not a structure or union",
-          "<tmp>/c.i:1844: request for member `unk8' in something not a structure or union",
-          "<tmp>/c.i:1846: request for member `unk8' in something not a structure or union"
+          "kmc gcc failed: c.i:1839: request for member `unk0' in something not a structure or union",
+          "c.i:1839: request for member `unk8' in something not a structure or union",
+          "c.i:1843: request for member `unk0' in something not a structure or union",
+          "c.i:1844: request for member `unk8' in something not a structure or union",
+          "c.i:1846: request for member `unk8' in something not a structure or union"
         ]
       },
       "gapSize": null,
@@ -19166,11 +19166,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "kmc gcc failed: <tmp>/c.i:2780: request for member `unk5E' in something not a structure or union",
-          "<tmp>/c.i:2783: request for member `unk10' in something not a structure or union",
-          "<tmp>/c.i:2784: request for member `unkBB8' in something not a structure or union",
-          "<tmp>/c.i:2784: request for member `unkB88' in something not a structure or union",
-          "<tmp>/c.i:2786: request for member `unk434' in something not a structure or union"
+          "kmc gcc failed: c.i:2780: request for member `unk5E' in something not a structure or union",
+          "c.i:2783: request for member `unk10' in something not a structure or union",
+          "c.i:2784: request for member `unkBB8' in something not a structure or union",
+          "c.i:2784: request for member `unkB88' in something not a structure or union",
+          "c.i:2786: request for member `unk434' in something not a structure or union"
         ]
       },
       "gapSize": null,
@@ -19321,11 +19321,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "kmc gcc failed: <tmp>/c.i:1993: request for member `unk0' in something not a structure or union",
-          "<tmp>/c.i:1994: request for member `unkE' in something not a structure or union",
-          "<tmp>/c.i:1995: request for member `unkA' in something not a structure or union",
-          "<tmp>/c.i:2010: request for member `unk8' in something not a structure or union",
-          "<tmp>/c.i:2011: request for member `unkC' in something not a structure or union"
+          "kmc gcc failed: c.i:1993: request for member `unk0' in something not a structure or union",
+          "c.i:1994: request for member `unkE' in something not a structure or union",
+          "c.i:1995: request for member `unkA' in something not a structure or union",
+          "c.i:2010: request for member `unk8' in something not a structure or union",
+          "c.i:2011: request for member `unkC' in something not a structure or union"
         ]
       },
       "gapSize": null,
@@ -19398,7 +19398,7 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "kmc gcc failed: <tmp>/c.i:1828: request for member `unk4' in something not a structure or union"
+          "kmc gcc failed: c.i:1828: request for member `unk4' in something not a structure or union"
         ]
       },
       "note": "src/1DCF60.c: reads a count field via base-relative offset; pure leaf",
@@ -19781,11 +19781,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "kmc gcc failed: <tmp>/c.i:1879: request for member `unk20' in something not a structure or union",
-          "<tmp>/c.i:1880: request for member `unk22' in something not a structure or union",
-          "<tmp>/c.i:1881: request for member `unk24' in something not a structure or union",
-          "<tmp>/c.i:1882: request for member `unk26' in something not a structure or union",
-          "<tmp>/c.i:1883: request for member `unk28' in something not a structure or union"
+          "kmc gcc failed: c.i:1879: request for member `unk20' in something not a structure or union",
+          "c.i:1880: request for member `unk22' in something not a structure or union",
+          "c.i:1881: request for member `unk24' in something not a structure or union",
+          "c.i:1882: request for member `unk26' in something not a structure or union",
+          "c.i:1883: request for member `unk28' in something not a structure or union"
         ]
       },
       "gapSize": null,
@@ -19855,11 +19855,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "kmc gcc failed: <tmp>/c.i:3444: request for member `unk60' in something not a structure or union",
-          "<tmp>/c.i:3445: request for member `unk54' in something not a structure or union",
-          "<tmp>/c.i:3446: request for member `unk64' in something not a structure or union",
-          "<tmp>/c.i:3447: request for member `unk58' in something not a structure or union",
-          "<tmp>/c.i:3448: request for member `unk68' in something not a structure or union"
+          "kmc gcc failed: c.i:3444: request for member `unk60' in something not a structure or union",
+          "c.i:3445: request for member `unk54' in something not a structure or union",
+          "c.i:3446: request for member `unk64' in something not a structure or union",
+          "c.i:3447: request for member `unk58' in something not a structure or union",
+          "c.i:3448: request for member `unk68' in something not a structure or union"
         ]
       },
       "gapSize": null,
@@ -19930,11 +19930,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "kmc gcc failed: kmc gcc (docker) failed: <tmp>/c.i:3443: conflicting types for `approximateCos'",
-          "<tmp>/c.i:1870: previous declaration of `approximateCos'",
-          "<tmp>/c.i:3445: conflicting types for `atan2Fixed'",
-          "<tmp>/c.i:1868: previous declaration of `atan2Fixed'",
-          "<tmp>/c.i:3453: request for member `unk94' in something not a structure or union"
+          "kmc gcc failed: kmc gcc (docker) failed: c.i:3443: conflicting types for `approximateCos'",
+          "c.i:1870: previous declaration of `approximateCos'",
+          "c.i:3445: conflicting types for `atan2Fixed'",
+          "c.i:1868: previous declaration of `atan2Fixed'",
+          "c.i:3453: request for member `unk94' in something not a structure or union"
         ]
       },
       "gapSize": null,
@@ -20000,11 +20000,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "kmc gcc failed: <tmp>/c.i:3445: request for member `unk54' in something not a structure or union",
-          "<tmp>/c.i:3446: request for member `unk60' in something not a structure or union",
-          "<tmp>/c.i:3447: request for member `unk6C' in something not a structure or union",
-          "<tmp>/c.i:3450: request for member `unk60' in something not a structure or union",
-          "<tmp>/c.i:3451: request for member `unk6C' in something not a structure or union"
+          "kmc gcc failed: c.i:3445: request for member `unk54' in something not a structure or union",
+          "c.i:3446: request for member `unk60' in something not a structure or union",
+          "c.i:3447: request for member `unk6C' in something not a structure or union",
+          "c.i:3450: request for member `unk60' in something not a structure or union",
+          "c.i:3451: request for member `unk6C' in something not a structure or union"
         ]
       },
       "gapSize": null,
@@ -20138,9 +20138,9 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "kmc gcc failed: <tmp>/c.i:3410: request for member `unkA0' in something not a structure or union",
-          "<tmp>/c.i:3411: request for member `unk8' in something not a structure or union",
-          "<tmp>/c.i:3412: request for member `unkC' in something not a structure or union"
+          "kmc gcc failed: c.i:3410: request for member `unkA0' in something not a structure or union",
+          "c.i:3411: request for member `unk8' in something not a structure or union",
+          "c.i:3412: request for member `unkC' in something not a structure or union"
         ]
       },
       "gapSize": null,
@@ -20298,11 +20298,11 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "kmc gcc failed: <tmp>/c.i:1846: request for member `unk0' in something not a structure or union",
-          "<tmp>/c.i:1847: request for member `unk4' in something not a structure or union",
-          "<tmp>/c.i:1848: request for member `unk8' in something not a structure or union",
-          "<tmp>/c.i:1848: request for member `unk6' in something not a structure or union",
-          "<tmp>/c.i:1849: request for member `unkA' in something not a structure or union"
+          "kmc gcc failed: c.i:1846: request for member `unk0' in something not a structure or union",
+          "c.i:1847: request for member `unk4' in something not a structure or union",
+          "c.i:1848: request for member `unk8' in something not a structure or union",
+          "c.i:1848: request for member `unk6' in something not a structure or union",
+          "c.i:1849: request for member `unkA' in something not a structure or union"
         ]
       },
       "note": "src/19E80.c: table lookup, pointer/array arithmetic, no calls",
@@ -57803,6 +57803,340 @@
       "scripts": {
         "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `swapp` — benchmark function synthetic:swapp:mwcc_242_81.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The benchmark's objdump→GNU-as normalization of this function's disassembly (m2c cannot\n# read raw objdump), including the jump-table/const data sections recovered from the target\n# object — the exact text the benchmark fed m2c.\ncat > in.s <<'ASM_INPUT'\nglabel swapp\n    lwz     r5,0(r3)\n    lwz     r0,0(r4)\n    stw     r0,0(r3)\n    stw     r5,0(r4)\n    blr\nASM_INPUT\n\n# The exact context header the benchmark passed via --context — prototypes only\n# (no struct/global layouts: the benchmark measures cold recovery).\ncat > ctx.h <<'CTX_INPUT'\nvoid swapp(int*,int*);\nCTX_INPUT\n\nargs=(\n  --target ppc-mwcc-c     # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function swapp        # the symbol to decompile from in.s\n  --context ctx.h         # the C context header above (typedefs + prototypes)\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
         "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `swapp` — benchmark function synthetic:swapp:mwcc_242_81.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:swapp:mwcc_242_81 --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact `objdump -d --no-show-raw-insn` text.\ncat > in.asm <<'ASM_INPUT'\n\ntarget.o:     file format elf32-powerpc\n\n\nDisassembly of section .text:\n\n00000000 <swapp>:\n   0:\tlwz     r5,0(r3)\n   4:\tlwz     r0,0(r4)\n   8:\tstw     r0,0(r3)\n   c:\tstw     r5,0(r4)\n  10:\tblr\nASM_INPUT\n\n# The target object's objdump -s -r -t dump — the data sections (jump tables, anonymous\n# constants) the text-only disassembly lacks; the benchmark recovered them from the object.\ncat > dump.txt <<'DUMP_INPUT'\n\ntarget.o:     file format elf32-powerpc\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 ref.c\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .mwcats.text\t00000000 .mwcats.text\n00000000 g     F .text\t00000014 swapp\n\n\nRELOCATION RECORDS FOR [.mwcats.text]:\nOFFSET   TYPE              VALUE\n00000004 R_PPC_ADDR32      swapp\n\n\nContents of section .text:\n 0000 80a30000 80040000 90030000 90a40000  ................\n 0010 4e800020                             N..             \nContents of section .mwcats.text:\n 0000 02000014 00000000                    ........        \nContents of section .comment:\n 0000 436f6465 57617272 696f720a 02040201  CodeWarrior.....\n 0010 01020016 2c000000 00000000 00000000  ....,...........\n 0020 00000000 00000000 00000000 00000000  ................\n 0030 00000000 00000001 00000000 00000004  ................\n 0040 00000000 00000004 00000000 00000004  ................\n 0050 00000000                             ....\nDUMP_INPUT\n\n# The prototype hints the benchmark fed asmlift (callee arities / void-ness).\ncat > proto.json <<'PROTO_INPUT'\n{\n  \"swapp\": {\n    \"returnsVoid\": true\n  }\n}\nPROTO_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target mwcc_242_81    # frontend + target description (ISA, calling convention, compiler idioms)\n  --name swapp            # the symbol to decompile (multi-function input selects by name)\n  --asm-data dump.txt     # the data sections above (jump-table/const recovery)\n  --proto proto.json      # the prototype hints above (callee arities / void-ness)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+      }
+    },
+    {
+      "id": "synthetic:swarms:agbcc",
+      "sym": "swarms",
+      "project": "synthetic",
+      "tier": "synthetic",
+      "toolchain": "agbcc",
+      "isa": "arm",
+      "compiler": "agbcc",
+      "language": "c",
+      "features": [
+        "switch-arms",
+        "branch",
+        "switch",
+        "comparison-tree"
+      ],
+      "loc": 5,
+      "refSource": "#define gOut ((volatile s32 *)0x04000000)\nvoid swarms(s32 mode, s32 n){ s32 w = 0;\n switch (mode) { case 0: w = n + 1; break; case 1: w = n + 2; break;\n                 case 2: w = n + 3; break; case 3: w = n + 4; break; }\n *gOut = w; }",
+      "targetAsm": "@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tswarms\n\t.type\t swarms,function\n\t.thumb_func\nswarms:\n\tmov\tr2, #0x0\n\tcmp\tr0, #0x1\n\tbeq\t.L5\t@cond_branch\n\tcmp\tr0, #0x1\n\tbgt\t.L10\t@cond_branch\n\tcmp\tr0, #0\n\tbeq\t.L4\t@cond_branch\n\tb\t.L3\n.L10:\n\tcmp\tr0, #0x2\n\tbeq\t.L6\t@cond_branch\n\tcmp\tr0, #0x3\n\tbeq\t.L7\t@cond_branch\n\tb\t.L3\n.L4:\n\tadd\tr2, r1, #0x1\n\tb\t.L3\n.L5:\n\tadd\tr2, r1, #0x2\n\tb\t.L3\n.L6:\n\tadd\tr2, r1, #0x3\n\tb\t.L3\n.L7:\n\tadd\tr2, r1, #0x4\n.L3:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr2, [r0]\n\tbx\tlr\n.Lfe1:\n\t.size\t swarms,.Lfe1-swarms\n",
+      "ctx": "void swarms(s32 mode, s32 n);",
+      "proto": {
+        "swarms": {
+          "returnsVoid": true
+        }
+      },
+      "asmlift": {
+        "decompiler": "asmlift",
+        "candidateLabel": "signed/defsite/flip-join",
+        "outcome": "nonmatch",
+        "source": "void swarms(s32 a0, s32 a1) {\n    s32 v0;\n    v0 = 0;\n    if (a0 != 1) {\n        if (a0 <= 1) {\n            if (a0 == 0) v0 = a1 + 1;\n        } else {\n            switch (a0) {\n                case 2:\n                    v0 = a1 + 3;\n                    break;\n                case 3:\n                    v0 = a1 + 4;\n                    break;\n            }\n        }\n    } else {\n        v0 = a1 + 2;\n    }\n    *(s32 *)(128 << 19) = v0;\n    return;\n}\n",
+        "score": 10,
+        "maxScore": 25,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 1,
+          "delete": 2,
+          "replace": 0,
+          "opMismatch": 1,
+          "argMismatch": 6
+        },
+        "quality": {
+          "score": 96,
+          "lines": 22,
+          "gotos": 0,
+          "casts": 1,
+          "unkGlue": 0,
+          "rawMem": 1,
+          "addrDeref": 0
+        }
+      },
+      "m2c": {
+        "decompiler": "m2c",
+        "outcome": "match",
+        "source": "void swarms(s32 mode, s32 n) {\n    s32 var_r2;\n\n    var_r2 = 0;\n    switch (mode) {                                 /* irregular */\n    case 0:\n        var_r2 = n + 1;\n        break;\n    case 1:\n        var_r2 = n + 2;\n        break;\n    case 2:\n        var_r2 = n + 3;\n        break;\n    case 3:\n        var_r2 = n + 4;\n        break;\n    }\n    *(s32 *)0x04000000 = var_r2;\n}\n",
+        "score": 0,
+        "maxScore": 24,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 0
+        },
+        "quality": {
+          "score": 100,
+          "lines": 19,
+          "gotos": 0,
+          "casts": 1,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 1
+        }
+      },
+      "gapSize": null,
+      "scripts": {
+        "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `swarms` — benchmark function synthetic:swarms:agbcc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The exact agbcc `.s` text the benchmark fed m2c, verbatim.\ncat > in.s <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tswarms\n\t.type\t swarms,function\n\t.thumb_func\nswarms:\n\tmov\tr2, #0x0\n\tcmp\tr0, #0x1\n\tbeq\t.L5\t@cond_branch\n\tcmp\tr0, #0x1\n\tbgt\t.L10\t@cond_branch\n\tcmp\tr0, #0\n\tbeq\t.L4\t@cond_branch\n\tb\t.L3\n.L10:\n\tcmp\tr0, #0x2\n\tbeq\t.L6\t@cond_branch\n\tcmp\tr0, #0x3\n\tbeq\t.L7\t@cond_branch\n\tb\t.L3\n.L4:\n\tadd\tr2, r1, #0x1\n\tb\t.L3\n.L5:\n\tadd\tr2, r1, #0x2\n\tb\t.L3\n.L6:\n\tadd\tr2, r1, #0x3\n\tb\t.L3\n.L7:\n\tadd\tr2, r1, #0x4\n.L3:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr2, [r0]\n\tbx\tlr\n.Lfe1:\n\t.size\t swarms,.Lfe1-swarms\nASM_INPUT\n\n# The exact context header the benchmark passed via --context — prototypes only\n# (no struct/global layouts: the benchmark measures cold recovery).\ncat > ctx.h <<'CTX_INPUT'\nvoid swarms(s32 mode, s32 n);\nCTX_INPUT\n\nargs=(\n  --target gba            # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function swarms       # the symbol to decompile from in.s\n  --context ctx.h         # the C context header above (typedefs + prototypes)\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `swarms` — benchmark function synthetic:swarms:agbcc.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:swarms:agbcc --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact agbcc `.s` text.\ncat > in.asm <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tswarms\n\t.type\t swarms,function\n\t.thumb_func\nswarms:\n\tmov\tr2, #0x0\n\tcmp\tr0, #0x1\n\tbeq\t.L5\t@cond_branch\n\tcmp\tr0, #0x1\n\tbgt\t.L10\t@cond_branch\n\tcmp\tr0, #0\n\tbeq\t.L4\t@cond_branch\n\tb\t.L3\n.L10:\n\tcmp\tr0, #0x2\n\tbeq\t.L6\t@cond_branch\n\tcmp\tr0, #0x3\n\tbeq\t.L7\t@cond_branch\n\tb\t.L3\n.L4:\n\tadd\tr2, r1, #0x1\n\tb\t.L3\n.L5:\n\tadd\tr2, r1, #0x2\n\tb\t.L3\n.L6:\n\tadd\tr2, r1, #0x3\n\tb\t.L3\n.L7:\n\tadd\tr2, r1, #0x4\n.L3:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr2, [r0]\n\tbx\tlr\n.Lfe1:\n\t.size\t swarms,.Lfe1-swarms\nASM_INPUT\n\n# The prototype hints the benchmark fed asmlift (callee arities / void-ness).\ncat > proto.json <<'PROTO_INPUT'\n{\n  \"swarms\": {\n    \"returnsVoid\": true\n  }\n}\nPROTO_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target agbcc          # frontend + target description (ISA, calling convention, compiler idioms)\n  --name swarms           # the symbol to decompile (multi-function input selects by name)\n  --proto proto.json      # the prototype hints above (callee arities / void-ness)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+      }
+    },
+    {
+      "id": "synthetic:swdefault:agbcc",
+      "sym": "swdefault",
+      "project": "synthetic",
+      "tier": "synthetic",
+      "toolchain": "agbcc",
+      "isa": "arm",
+      "compiler": "agbcc",
+      "language": "c",
+      "features": [
+        "switch-arms",
+        "branch",
+        "switch",
+        "comparison-tree"
+      ],
+      "loc": 6,
+      "refSource": "#define gOut ((volatile s32 *)0x04000000)\nvoid swdefault(s32 mode, s32 n){ s32 w;\n switch (mode) { case 0: w = n + 1; break; case 1: w = n + 2; break;\n                 case 2: w = n + 3; break; case 3: w = n + 4; break;\n                 default: w = 0; break; }\n *gOut = w; }",
+      "targetAsm": "@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tswdefault\n\t.type\t swdefault,function\n\t.thumb_func\nswdefault:\n\tcmp\tr0, #0x1\n\tbeq\t.L5\t@cond_branch\n\tcmp\tr0, #0x1\n\tbgt\t.L10\t@cond_branch\n\tcmp\tr0, #0\n\tbeq\t.L4\t@cond_branch\n\tb\t.L8\n.L10:\n\tcmp\tr0, #0x2\n\tbeq\t.L6\t@cond_branch\n\tcmp\tr0, #0x3\n\tbeq\t.L7\t@cond_branch\n\tb\t.L8\n.L4:\n\tadd\tr1, r1, #0x1\n\tb\t.L3\n.L5:\n\tadd\tr1, r1, #0x2\n\tb\t.L3\n.L6:\n\tadd\tr1, r1, #0x3\n\tb\t.L3\n.L7:\n\tadd\tr1, r1, #0x4\n\tb\t.L3\n.L8:\n\tmov\tr1, #0x0\n.L3:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr1, [r0]\n\tbx\tlr\n.Lfe1:\n\t.size\t swdefault,.Lfe1-swdefault\n",
+      "ctx": "void swdefault(s32 mode, s32 n);",
+      "proto": {
+        "swdefault": {
+          "returnsVoid": true
+        }
+      },
+      "asmlift": {
+        "decompiler": "asmlift",
+        "candidateLabel": "signed",
+        "outcome": "match",
+        "source": "void swdefault(s32 a0, s32 a1) {\n    s32 v0;\n    switch (a0) {\n        case 0:\n            v0 = a1 + 1;\n            break;\n        case 1:\n            v0 = a1 + 2;\n            break;\n        case 2:\n            v0 = a1 + 3;\n            break;\n        case 3:\n            v0 = a1 + 4;\n            break;\n        default:\n            v0 = 0;\n    }\n    *(s32 *)(128 << 19) = v0;\n    return;\n}\n",
+        "score": 0,
+        "maxScore": 25,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 0
+        },
+        "quality": {
+          "score": 92,
+          "lines": 21,
+          "gotos": 0,
+          "casts": 1,
+          "unkGlue": 0,
+          "rawMem": 1,
+          "addrDeref": 0
+        }
+      },
+      "m2c": {
+        "decompiler": "m2c",
+        "outcome": "match",
+        "source": "void swdefault(s32 mode, s32 n) {\n    s32 var_r1;\n\n    switch (mode) {                                 /* irregular */\n    case 0:\n        var_r1 = n + 1;\n        break;\n    case 1:\n        var_r1 = n + 2;\n        break;\n    case 2:\n        var_r1 = n + 3;\n        break;\n    case 3:\n        var_r1 = n + 4;\n        break;\n    default:\n        var_r1 = 0;\n        break;\n    }\n    *(s32 *)0x04000000 = var_r1;\n}\n",
+        "score": 0,
+        "maxScore": 25,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 0
+        },
+        "quality": {
+          "score": 96,
+          "lines": 21,
+          "gotos": 0,
+          "casts": 1,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 1
+        }
+      },
+      "gapSize": null,
+      "scripts": {
+        "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `swdefault` — benchmark function synthetic:swdefault:agbcc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The exact agbcc `.s` text the benchmark fed m2c, verbatim.\ncat > in.s <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tswdefault\n\t.type\t swdefault,function\n\t.thumb_func\nswdefault:\n\tcmp\tr0, #0x1\n\tbeq\t.L5\t@cond_branch\n\tcmp\tr0, #0x1\n\tbgt\t.L10\t@cond_branch\n\tcmp\tr0, #0\n\tbeq\t.L4\t@cond_branch\n\tb\t.L8\n.L10:\n\tcmp\tr0, #0x2\n\tbeq\t.L6\t@cond_branch\n\tcmp\tr0, #0x3\n\tbeq\t.L7\t@cond_branch\n\tb\t.L8\n.L4:\n\tadd\tr1, r1, #0x1\n\tb\t.L3\n.L5:\n\tadd\tr1, r1, #0x2\n\tb\t.L3\n.L6:\n\tadd\tr1, r1, #0x3\n\tb\t.L3\n.L7:\n\tadd\tr1, r1, #0x4\n\tb\t.L3\n.L8:\n\tmov\tr1, #0x0\n.L3:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr1, [r0]\n\tbx\tlr\n.Lfe1:\n\t.size\t swdefault,.Lfe1-swdefault\nASM_INPUT\n\n# The exact context header the benchmark passed via --context — prototypes only\n# (no struct/global layouts: the benchmark measures cold recovery).\ncat > ctx.h <<'CTX_INPUT'\nvoid swdefault(s32 mode, s32 n);\nCTX_INPUT\n\nargs=(\n  --target gba            # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function swdefault    # the symbol to decompile from in.s\n  --context ctx.h         # the C context header above (typedefs + prototypes)\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `swdefault` — benchmark function synthetic:swdefault:agbcc.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:swdefault:agbcc --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact agbcc `.s` text.\ncat > in.asm <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tswdefault\n\t.type\t swdefault,function\n\t.thumb_func\nswdefault:\n\tcmp\tr0, #0x1\n\tbeq\t.L5\t@cond_branch\n\tcmp\tr0, #0x1\n\tbgt\t.L10\t@cond_branch\n\tcmp\tr0, #0\n\tbeq\t.L4\t@cond_branch\n\tb\t.L8\n.L10:\n\tcmp\tr0, #0x2\n\tbeq\t.L6\t@cond_branch\n\tcmp\tr0, #0x3\n\tbeq\t.L7\t@cond_branch\n\tb\t.L8\n.L4:\n\tadd\tr1, r1, #0x1\n\tb\t.L3\n.L5:\n\tadd\tr1, r1, #0x2\n\tb\t.L3\n.L6:\n\tadd\tr1, r1, #0x3\n\tb\t.L3\n.L7:\n\tadd\tr1, r1, #0x4\n\tb\t.L3\n.L8:\n\tmov\tr1, #0x0\n.L3:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr1, [r0]\n\tbx\tlr\n.Lfe1:\n\t.size\t swdefault,.Lfe1-swdefault\nASM_INPUT\n\n# The prototype hints the benchmark fed asmlift (callee arities / void-ness).\ncat > proto.json <<'PROTO_INPUT'\n{\n  \"swdefault\": {\n    \"returnsVoid\": true\n  }\n}\nPROTO_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target agbcc          # frontend + target description (ISA, calling convention, compiler idioms)\n  --name swdefault        # the symbol to decompile (multi-function input selects by name)\n  --proto proto.json      # the prototype hints above (callee arities / void-ness)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+      }
+    },
+    {
+      "id": "synthetic:swlayout:agbcc",
+      "sym": "swlayout",
+      "project": "synthetic",
+      "tier": "synthetic",
+      "toolchain": "agbcc",
+      "isa": "arm",
+      "compiler": "agbcc",
+      "language": "c",
+      "features": [
+        "switch-arms",
+        "branch",
+        "switch",
+        "comparison-tree"
+      ],
+      "loc": 6,
+      "refSource": "#define gOut ((volatile s32 *)0x04000000)\nvoid swlayout(s32 mode, s32 n){ s32 w;\n switch (mode) { case 2: w = n + 3; break; case 0: w = n + 1; break;\n                 case 3: w = n + 4; break; case 1: w = n + 2; break;\n                 default: w = 0; break; }\n *gOut = w; }",
+      "targetAsm": "@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tswlayout\n\t.type\t swlayout,function\n\t.thumb_func\nswlayout:\n\tcmp\tr0, #0x1\n\tbeq\t.L7\t@cond_branch\n\tcmp\tr0, #0x1\n\tbgt\t.L10\t@cond_branch\n\tcmp\tr0, #0\n\tbeq\t.L5\t@cond_branch\n\tb\t.L8\n.L10:\n\tcmp\tr0, #0x2\n\tbeq\t.L4\t@cond_branch\n\tcmp\tr0, #0x3\n\tbeq\t.L6\t@cond_branch\n\tb\t.L8\n.L4:\n\tadd\tr1, r1, #0x3\n\tb\t.L3\n.L5:\n\tadd\tr1, r1, #0x1\n\tb\t.L3\n.L6:\n\tadd\tr1, r1, #0x4\n\tb\t.L3\n.L7:\n\tadd\tr1, r1, #0x2\n\tb\t.L3\n.L8:\n\tmov\tr1, #0x0\n.L3:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr1, [r0]\n\tbx\tlr\n.Lfe1:\n\t.size\t swlayout,.Lfe1-swlayout\n",
+      "ctx": "void swlayout(s32 mode, s32 n);",
+      "proto": {
+        "swlayout": {
+          "returnsVoid": true
+        }
+      },
+      "asmlift": {
+        "decompiler": "asmlift",
+        "candidateLabel": "signed",
+        "outcome": "nonmatch",
+        "source": "void swlayout(s32 a0, s32 a1) {\n    s32 v0;\n    switch (a0) {\n        case 0:\n            v0 = a1 + 1;\n            break;\n        case 1:\n            v0 = a1 + 2;\n            break;\n        case 2:\n            v0 = a1 + 3;\n            break;\n        case 3:\n            v0 = a1 + 4;\n            break;\n        default:\n            v0 = 0;\n    }\n    *(s32 *)(128 << 19) = v0;\n    return;\n}\n",
+        "score": 8,
+        "maxScore": 25,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 8
+        },
+        "quality": {
+          "score": 92,
+          "lines": 21,
+          "gotos": 0,
+          "casts": 1,
+          "unkGlue": 0,
+          "rawMem": 1,
+          "addrDeref": 0
+        }
+      },
+      "m2c": {
+        "decompiler": "m2c",
+        "outcome": "match",
+        "source": "void swlayout(s32 mode, s32 n) {\n    s32 var_r1;\n\n    switch (mode) {                                 /* irregular */\n    case 2:\n        var_r1 = n + 3;\n        break;\n    case 0:\n        var_r1 = n + 1;\n        break;\n    case 3:\n        var_r1 = n + 4;\n        break;\n    case 1:\n        var_r1 = n + 2;\n        break;\n    default:\n        var_r1 = 0;\n        break;\n    }\n    *(s32 *)0x04000000 = var_r1;\n}\n",
+        "score": 0,
+        "maxScore": 25,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 0
+        },
+        "quality": {
+          "score": 96,
+          "lines": 21,
+          "gotos": 0,
+          "casts": 1,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 1
+        }
+      },
+      "gapSize": null,
+      "scripts": {
+        "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `swlayout` — benchmark function synthetic:swlayout:agbcc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The exact agbcc `.s` text the benchmark fed m2c, verbatim.\ncat > in.s <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tswlayout\n\t.type\t swlayout,function\n\t.thumb_func\nswlayout:\n\tcmp\tr0, #0x1\n\tbeq\t.L7\t@cond_branch\n\tcmp\tr0, #0x1\n\tbgt\t.L10\t@cond_branch\n\tcmp\tr0, #0\n\tbeq\t.L5\t@cond_branch\n\tb\t.L8\n.L10:\n\tcmp\tr0, #0x2\n\tbeq\t.L4\t@cond_branch\n\tcmp\tr0, #0x3\n\tbeq\t.L6\t@cond_branch\n\tb\t.L8\n.L4:\n\tadd\tr1, r1, #0x3\n\tb\t.L3\n.L5:\n\tadd\tr1, r1, #0x1\n\tb\t.L3\n.L6:\n\tadd\tr1, r1, #0x4\n\tb\t.L3\n.L7:\n\tadd\tr1, r1, #0x2\n\tb\t.L3\n.L8:\n\tmov\tr1, #0x0\n.L3:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr1, [r0]\n\tbx\tlr\n.Lfe1:\n\t.size\t swlayout,.Lfe1-swlayout\nASM_INPUT\n\n# The exact context header the benchmark passed via --context — prototypes only\n# (no struct/global layouts: the benchmark measures cold recovery).\ncat > ctx.h <<'CTX_INPUT'\nvoid swlayout(s32 mode, s32 n);\nCTX_INPUT\n\nargs=(\n  --target gba            # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function swlayout     # the symbol to decompile from in.s\n  --context ctx.h         # the C context header above (typedefs + prototypes)\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `swlayout` — benchmark function synthetic:swlayout:agbcc.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:swlayout:agbcc --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact agbcc `.s` text.\ncat > in.asm <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tswlayout\n\t.type\t swlayout,function\n\t.thumb_func\nswlayout:\n\tcmp\tr0, #0x1\n\tbeq\t.L7\t@cond_branch\n\tcmp\tr0, #0x1\n\tbgt\t.L10\t@cond_branch\n\tcmp\tr0, #0\n\tbeq\t.L5\t@cond_branch\n\tb\t.L8\n.L10:\n\tcmp\tr0, #0x2\n\tbeq\t.L4\t@cond_branch\n\tcmp\tr0, #0x3\n\tbeq\t.L6\t@cond_branch\n\tb\t.L8\n.L4:\n\tadd\tr1, r1, #0x3\n\tb\t.L3\n.L5:\n\tadd\tr1, r1, #0x1\n\tb\t.L3\n.L6:\n\tadd\tr1, r1, #0x4\n\tb\t.L3\n.L7:\n\tadd\tr1, r1, #0x2\n\tb\t.L3\n.L8:\n\tmov\tr1, #0x0\n.L3:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr1, [r0]\n\tbx\tlr\n.Lfe1:\n\t.size\t swlayout,.Lfe1-swlayout\nASM_INPUT\n\n# The prototype hints the benchmark fed asmlift (callee arities / void-ness).\ncat > proto.json <<'PROTO_INPUT'\n{\n  \"swlayout\": {\n    \"returnsVoid\": true\n  }\n}\nPROTO_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target agbcc          # frontend + target description (ISA, calling convention, compiler idioms)\n  --name swlayout         # the symbol to decompile (multi-function input selects by name)\n  --proto proto.json      # the prototype hints above (callee arities / void-ness)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+      }
+    },
+    {
+      "id": "synthetic:swmulti:agbcc",
+      "sym": "swmulti",
+      "project": "synthetic",
+      "tier": "synthetic",
+      "toolchain": "agbcc",
+      "isa": "arm",
+      "compiler": "agbcc",
+      "language": "c",
+      "features": [
+        "switch-arms",
+        "struct",
+        "switch",
+        "do-while",
+        "loop",
+        "shift",
+        "bitwise",
+        "mmio",
+        "dma",
+        "comparison-tree"
+      ],
+      "loc": 14,
+      "refSource": "struct Ent { u16 w; u16 h; };\n#define gEnts ((struct Ent *)0x03003430)\n#define gDma ((volatile s32 *)0x040000d4)\nvoid swmulti(s32 mode, s32 idx, s32 n){ s32 a = 0, b = 0, c = 0; s32 i = 0;\n do {\n  switch (mode) {\n   case 0: a = gEnts[idx].w; b = 32 - a; c = 0;                break;\n   case 1: a = 32;           b = 0;      c = i << 5;           break;\n   case 2: a = gEnts[idx].h; b = 32 - a; c = i * gEnts[idx].h; break;\n   case 3: a = gEnts[idx].w; b = 16;     c = i & 32;           break;\n  }\n  gDma[0] = a; gDma[1] = b; gDma[2] = c;\n  i++;\n } while (i < n); }",
+      "targetAsm": "@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tswmulti\n\t.type\t swmulti,function\n\t.thumb_func\nswmulti:\n\tpush\t{r4, r5, r6, r7, lr}\n\tadd\tr4, r0, #0\n\tmov\tip, r2\n\tmov\tr3, #0x0\n\tmov\tr5, #0x0\n\tmov\tr6, #0x0\n\tmov\tr2, #0x0\n\tlsl\tr1, r1, #0x2\n\tldr\tr0, .L16\n\tadd\tr1, r1, r0\n\tmov\tr7, #0x20\n.L3:\n\tcmp\tr4, #0x1\n\tbeq\t.L8\t@cond_branch\n\tcmp\tr4, #0x1\n\tbgt\t.L13\t@cond_branch\n\tcmp\tr4, #0\n\tbeq\t.L7\t@cond_branch\n\tb\t.L6\n.L17:\n\t.align\t2, 0\n.L16:\n\t.word\t0x3003430\n.L13:\n\tcmp\tr4, #0x2\n\tbeq\t.L9\t@cond_branch\n\tcmp\tr4, #0x3\n\tbeq\t.L10\t@cond_branch\n\tb\t.L6\n.L7:\n\tldrh\tr3, [r1]\n\tsub\tr5, r7, r3\n\tmov\tr6, #0x0\n\tb\t.L6\n.L8:\n\tmov\tr3, #0x20\n\tmov\tr5, #0x0\n\tlsl\tr6, r2, #0x5\n\tb\t.L6\n.L9:\n\tldrh\tr3, [r1, #0x2]\n\tsub\tr5, r7, r3\n\tmov\tr6, r2\n\tmul\tr6, r6, r3\n\tb\t.L6\n.L10:\n\tldrh\tr3, [r1]\n\tmov\tr5, #0x10\n\tadd\tr6, r2, #0\n\tand\tr6, r6, r7\n.L6:\n\tldr\tr0, .L18\n\tstr\tr3, [r0]\n\tadd\tr0, r0, #0x4\n\tstr\tr5, [r0]\n\tadd\tr0, r0, #0x4\n\tstr\tr6, [r0]\n\tadd\tr2, r2, #0x1\n\tcmp\tr2, ip\n\tblt\t.L3\t@cond_branch\n\tpop\t{r4, r5, r6, r7}\n\tpop\t{r0}\n\tbx\tr0\n.L19:\n\t.align\t2, 0\n.L18:\n\t.word\t0x40000d4\n.Lfe1:\n\t.size\t swmulti,.Lfe1-swmulti\n",
+      "ctx": "void swmulti(s32 mode, s32 idx, s32 n);",
+      "proto": {
+        "swmulti": {
+          "returnsVoid": true
+        }
+      },
+      "asmlift": {
+        "decompiler": "asmlift",
+        "candidateLabel": "signed/flip-join",
+        "outcome": "nonmatch",
+        "source": "struct Elem0 { u16 field_0; u16 field_2; };\nvoid swmulti(s32 a0, s32 a1, s32 a2) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    v1 = 0;\n    v2 = 0;\n    v3 = 0;\n    v0 = 0;\n    do {\n        if (a0 != 1) {\n            if (a0 <= 1) {\n                if (a0 == 0) {\n                    v1 = ((struct Elem0 *)50345008)[a1].field_0;\n                    v2 = 32 - ((struct Elem0 *)50345008)[a1].field_0;\n                    v3 = 0;\n                }\n            } else {\n                switch (a0) {\n                    case 2:\n                        v1 = ((struct Elem0 *)50345008)[a1].field_2;\n                        v2 = 32 - ((struct Elem0 *)50345008)[a1].field_2;\n                        v3 = v0 * ((struct Elem0 *)50345008)[a1].field_2;\n                        break;\n                    case 3:\n                        v1 = ((struct Elem0 *)50345008)[a1].field_0;\n                        v2 = 16;\n                        v3 = v0 & 32;\n                        break;\n                }\n            }\n        } else {\n            v1 = 32;\n            v2 = 0;\n            v3 = v0 << 5;\n        }\n        *(s32 *)67109076 = v1;\n        *(s32 *)67109080 = v2;\n        *(s32 *)67109084 = v3;\n        v0 = v0 + 1;\n    } while (v0 < a2);\n    return;\n}\n",
+        "score": 20,
+        "maxScore": 62,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 8,
+          "delete": 8,
+          "replace": 0,
+          "opMismatch": 2,
+          "argMismatch": 2
+        },
+        "quality": {
+          "score": 98,
+          "lines": 44,
+          "gotos": 0,
+          "casts": 3,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        }
+      },
+      "m2c": {
+        "decompiler": "m2c",
+        "outcome": "noncompile",
+        "source": "void swmulti(s32 mode, s32 idx, s32 n) {\n    s32 temp_r1;\n    s32 var_r2;\n    s32 var_r5;\n    s32 var_r6;\n    u16 var_r3;\n\n    var_r3 = 0;\n    var_r5 = 0;\n    var_r6 = 0;\n    var_r2 = 0;\n    temp_r1 = idx * 4;\n    do {\n        switch (mode) {                             /* irregular */\n        case 0:\n            var_r3 = temp_r1->unk3003430;\n            var_r5 = 0x20 - var_r3;\n            var_r6 = 0;\n            break;\n        case 1:\n            var_r3 = 0x20;\n            var_r5 = 0;\n            var_r6 = var_r2 << 5;\n            break;\n        case 2:\n            var_r3 = (temp_r1 + 0x03003430)->unk2;\n            var_r5 = 0x20 - var_r3;\n            var_r6 = var_r2 * var_r3;\n            break;\n        case 3:\n            var_r3 = temp_r1->unk3003430;\n            var_r5 = 0x10;\n            var_r6 = var_r2 & 0x20;\n            break;\n        }\n        (void *)0x040000D4->unk0 = (s32) var_r3;\n        (void *)0x040000D4->unk4 = var_r5;\n        ((void *)0x040000D4 + 4)->unk4 = var_r6;\n        var_r2 += 1;\n    } while (var_r2 < n);\n}\n",
+        "score": null,
+        "maxScore": null,
+        "compileErrors": 1,
+        "quality": {
+          "score": 96,
+          "lines": 40,
+          "gotos": 0,
+          "casts": 4,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        },
+        "errorMarkers": [
+          "<tmp>/cand.c.pp.c:16: invalid type argument of `->'",
+          "<tmp>/cand.c.pp.c:26: invalid type argument of `->'",
+          "<tmp>/cand.c.pp.c:31: invalid type argument of `->'",
+          "<tmp>/cand.c.pp.c:36: invalid type argument of `->'",
+          "<tmp>/cand.c.pp.c:37: invalid type argument of `->'"
+        ]
+      },
+      "gapSize": {
+        "decompiler": "asmlift",
+        "score": 20,
+        "maxScore": 62,
+        "ratio": 0.3225806451612903,
+        "kinds": {
+          "insert": 8,
+          "delete": 8,
+          "replace": 0,
+          "opMismatch": 2,
+          "argMismatch": 2
+        }
+      },
+      "scripts": {
+        "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `swmulti` — benchmark function synthetic:swmulti:agbcc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The exact agbcc `.s` text the benchmark fed m2c, verbatim.\ncat > in.s <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tswmulti\n\t.type\t swmulti,function\n\t.thumb_func\nswmulti:\n\tpush\t{r4, r5, r6, r7, lr}\n\tadd\tr4, r0, #0\n\tmov\tip, r2\n\tmov\tr3, #0x0\n\tmov\tr5, #0x0\n\tmov\tr6, #0x0\n\tmov\tr2, #0x0\n\tlsl\tr1, r1, #0x2\n\tldr\tr0, .L16\n\tadd\tr1, r1, r0\n\tmov\tr7, #0x20\n.L3:\n\tcmp\tr4, #0x1\n\tbeq\t.L8\t@cond_branch\n\tcmp\tr4, #0x1\n\tbgt\t.L13\t@cond_branch\n\tcmp\tr4, #0\n\tbeq\t.L7\t@cond_branch\n\tb\t.L6\n.L17:\n\t.align\t2, 0\n.L16:\n\t.word\t0x3003430\n.L13:\n\tcmp\tr4, #0x2\n\tbeq\t.L9\t@cond_branch\n\tcmp\tr4, #0x3\n\tbeq\t.L10\t@cond_branch\n\tb\t.L6\n.L7:\n\tldrh\tr3, [r1]\n\tsub\tr5, r7, r3\n\tmov\tr6, #0x0\n\tb\t.L6\n.L8:\n\tmov\tr3, #0x20\n\tmov\tr5, #0x0\n\tlsl\tr6, r2, #0x5\n\tb\t.L6\n.L9:\n\tldrh\tr3, [r1, #0x2]\n\tsub\tr5, r7, r3\n\tmov\tr6, r2\n\tmul\tr6, r6, r3\n\tb\t.L6\n.L10:\n\tldrh\tr3, [r1]\n\tmov\tr5, #0x10\n\tadd\tr6, r2, #0\n\tand\tr6, r6, r7\n.L6:\n\tldr\tr0, .L18\n\tstr\tr3, [r0]\n\tadd\tr0, r0, #0x4\n\tstr\tr5, [r0]\n\tadd\tr0, r0, #0x4\n\tstr\tr6, [r0]\n\tadd\tr2, r2, #0x1\n\tcmp\tr2, ip\n\tblt\t.L3\t@cond_branch\n\tpop\t{r4, r5, r6, r7}\n\tpop\t{r0}\n\tbx\tr0\n.L19:\n\t.align\t2, 0\n.L18:\n\t.word\t0x40000d4\n.Lfe1:\n\t.size\t swmulti,.Lfe1-swmulti\nASM_INPUT\n\n# The exact context header the benchmark passed via --context — prototypes only\n# (no struct/global layouts: the benchmark measures cold recovery).\ncat > ctx.h <<'CTX_INPUT'\nvoid swmulti(s32 mode, s32 idx, s32 n);\nCTX_INPUT\n\nargs=(\n  --target gba            # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function swmulti      # the symbol to decompile from in.s\n  --context ctx.h         # the C context header above (typedefs + prototypes)\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `swmulti` — benchmark function synthetic:swmulti:agbcc.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:swmulti:agbcc --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact agbcc `.s` text.\ncat > in.asm <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tswmulti\n\t.type\t swmulti,function\n\t.thumb_func\nswmulti:\n\tpush\t{r4, r5, r6, r7, lr}\n\tadd\tr4, r0, #0\n\tmov\tip, r2\n\tmov\tr3, #0x0\n\tmov\tr5, #0x0\n\tmov\tr6, #0x0\n\tmov\tr2, #0x0\n\tlsl\tr1, r1, #0x2\n\tldr\tr0, .L16\n\tadd\tr1, r1, r0\n\tmov\tr7, #0x20\n.L3:\n\tcmp\tr4, #0x1\n\tbeq\t.L8\t@cond_branch\n\tcmp\tr4, #0x1\n\tbgt\t.L13\t@cond_branch\n\tcmp\tr4, #0\n\tbeq\t.L7\t@cond_branch\n\tb\t.L6\n.L17:\n\t.align\t2, 0\n.L16:\n\t.word\t0x3003430\n.L13:\n\tcmp\tr4, #0x2\n\tbeq\t.L9\t@cond_branch\n\tcmp\tr4, #0x3\n\tbeq\t.L10\t@cond_branch\n\tb\t.L6\n.L7:\n\tldrh\tr3, [r1]\n\tsub\tr5, r7, r3\n\tmov\tr6, #0x0\n\tb\t.L6\n.L8:\n\tmov\tr3, #0x20\n\tmov\tr5, #0x0\n\tlsl\tr6, r2, #0x5\n\tb\t.L6\n.L9:\n\tldrh\tr3, [r1, #0x2]\n\tsub\tr5, r7, r3\n\tmov\tr6, r2\n\tmul\tr6, r6, r3\n\tb\t.L6\n.L10:\n\tldrh\tr3, [r1]\n\tmov\tr5, #0x10\n\tadd\tr6, r2, #0\n\tand\tr6, r6, r7\n.L6:\n\tldr\tr0, .L18\n\tstr\tr3, [r0]\n\tadd\tr0, r0, #0x4\n\tstr\tr5, [r0]\n\tadd\tr0, r0, #0x4\n\tstr\tr6, [r0]\n\tadd\tr2, r2, #0x1\n\tcmp\tr2, ip\n\tblt\t.L3\t@cond_branch\n\tpop\t{r4, r5, r6, r7}\n\tpop\t{r0}\n\tbx\tr0\n.L19:\n\t.align\t2, 0\n.L18:\n\t.word\t0x40000d4\n.Lfe1:\n\t.size\t swmulti,.Lfe1-swmulti\nASM_INPUT\n\n# The prototype hints the benchmark fed asmlift (callee arities / void-ness).\ncat > proto.json <<'PROTO_INPUT'\n{\n  \"swmulti\": {\n    \"returnsVoid\": true\n  }\n}\nPROTO_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target agbcc          # frontend + target description (ISA, calling convention, compiler idioms)\n  --name swmulti          # the symbol to decompile (multi-function input selects by name)\n  --proto proto.json      # the prototype hints above (callee arities / void-ness)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
       }
     },
     {

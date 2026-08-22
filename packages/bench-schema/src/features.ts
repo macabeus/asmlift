@@ -116,6 +116,28 @@ export const FEATURES: readonly FeatureDef[] = [
     seeAlso: ['jump-table', 'comparison-tree', 'dense', 'sparse', 'fallthrough'],
   },
   {
+    id: 'switch-arms',
+    label: 'Switch arm grouping and order',
+    group: 'control-flow',
+    evidence: 'judgement',
+    summary: 'the diff turns on how the dispatch is grouped into arms, and in what order they are emitted',
+    detail:
+      'A multi-way dispatch can be spelled as one `switch` or as nested `if`/`else`, and its arms ' +
+      'can be written in any order — all of them behave identically and none of them compile ' +
+      'identically. An old compiler with no instruction scheduler and no block reordering pass ' +
+      'lays case bodies out in SOURCE order, so the assembly fixes both the grouping and the ' +
+      'sequence, and getting either wrong shifts every instruction after the first arm. The tag ' +
+      'marks rows where that is the whole diff: the arithmetic, the types and the case values all ' +
+      'agree. Floor: a `switch` in the body. Whether the original grouped its arms the way this ' +
+      "row's assembly implies is a human call — the same reason `read-once` has no machine floor.",
+    example: {
+      c: 'switch (mode) { case 2: …  case 0: …  case 3: …  case 1: … }',
+      asm: '  cmp r0, #1\n  beq .Lcase1        @ dispatch is a balanced tree\n.L4:               @ …but the BODIES are laid out 2, 0, 3, 1',
+      toolchain: 'agbcc',
+    },
+    seeAlso: ['switch', 'comparison-tree', 'branch', 'read-once'],
+  },
+  {
     id: 'dense',
     label: 'Dense case range',
     group: 'control-flow',
