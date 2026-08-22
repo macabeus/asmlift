@@ -4,6 +4,8 @@
 // where the two agree, and that a declared arity is outside the lever's reach entirely.
 import { describe, expect, test } from 'vitest';
 
+import { hasSetupArgsNarrowing } from '../src/frontend/ssa';
+import { lift } from '../src/frontend/thumb';
 import { decompile } from '../src/pipeline';
 import { enumerateCandidates } from '../src/rank';
 import { ARMV4T_AGBCC } from '../src/target';
@@ -43,6 +45,11 @@ describe('a guessed argument that survived from an earlier block', () => {
     const body = '\tmov\tr0, #1\n\tbl\tbar\n';
     expect(cands(body).every((c) => c.source.includes('bar(1)'))).toBe(true);
     expect(cands(body).some((c) => c.label.includes('/setup-args'))).toBe(false);
+    // …and the lift records nothing, so the lever does not re-lift at all. Asserted on the gate and
+    // not on the candidate list: the enumeration dedups by SOURCE, so an identical narrowing would
+    // vanish there whether or not anything ran.
+    expect(hasSetupArgsNarrowing(lift('f', fn(body), ARMV4T_AGBCC, P))).toBe(false);
+    expect(hasSetupArgsNarrowing(lift('f', fn(GUARDED_CALL) + POOL, ARMV4T_AGBCC, P))).toBe(true);
   });
 
   test('a DECLARED arity is not the lever’s to narrow', () => {
