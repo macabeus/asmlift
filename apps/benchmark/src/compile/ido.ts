@@ -1,15 +1,14 @@
 // IDO / MIPS (N64) — every harness-side spelling of "compile C with IDO": real-tier target
 // build, real-tier candidate compile (shared cc step). Flags come from @asmlift/toolchains.
 import { IDO_TOOLCHAIN } from '@asmlift/toolchains';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { CPP } from '../config';
 import type { BuiltTarget } from '../toolchains';
 import { stripPrototype } from './agbcc';
 import type { RealCompile, RealProjectCfg } from './types';
-import { compilerDiagnostics, contentDir, run } from './util';
+import { compilerDiagnostics, contentDir, run, scratchSlot } from './util';
 
 /** .i → IDO cc → .o. Shared by target and candidate. */
 function compile(iPath: string, oPath: string): void {
@@ -27,6 +26,11 @@ function disasm(oPath: string): string {
   return dis.stdout;
 }
 
+// One scratch dir each, reused per compile (util.ts scratchSlot) instead of one mkdtemp per
+// candidate.
+const candScratch = scratchSlot('bench-cand-');
+const vendorScratch = scratchSlot('bench-vendor-');
+
 export const idoReal: RealCompile = {
   buildTarget(iText): BuiltTarget {
     const dir = contentDir('ido', iText);
@@ -37,7 +41,7 @@ export const idoReal: RealCompile = {
     return { obj: oPath, asm: disasm(oPath) };
   },
   compileCandidate(tu, sym): string {
-    const dir = mkdtempSync(join(tmpdir(), 'bench-cand-'));
+    const dir = candScratch();
     const cPath = join(dir, 'c.c'),
       iPath = join(dir, 'c.i'),
       oPath = join(dir, 'c.o');
@@ -51,7 +55,7 @@ export const idoReal: RealCompile = {
     return oPath;
   },
   preprocess(cfg: RealProjectCfg, tu: string): string {
-    const dir = mkdtempSync(join(tmpdir(), 'bench-vendor-'));
+    const dir = vendorScratch();
     const cPath = join(dir, 'u.c'),
       iPath = join(dir, 'u.i');
     writeFileSync(cPath, tu);

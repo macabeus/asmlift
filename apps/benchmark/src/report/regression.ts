@@ -7,11 +7,11 @@
 // row missing from the fresh run (a silently-skipped toolchain reads as "no regression" without
 // this), exits non-zero.
 import type { BenchOutput, DecompilerId, Outcome } from '@asmlift/bench-schema';
-import { execSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { REPO_ROOT, RESULTS_DIR } from '../config';
+import { RESULTS_DIR } from '../config';
+import { readCommitted } from './committed';
 
 export interface OutcomeFlip {
   id: string;
@@ -66,16 +66,12 @@ export function compareOutcomes(committed: BenchOutput, fresh: BenchOutput): Reg
   return { missing, lost, gained, changed, ok: missing.length === 0 && lost.length === 0 };
 }
 
-/** CLI entry: committed HEAD results.json vs the freshly merged one. Returns the process exit
- *  code — 0 iff no match was lost AND no committed row vanished. */
-export function regressionGate(): number {
-  const committed = JSON.parse(
-    execSync('git show HEAD:apps/benchmark/results/results.json', {
-      cwd: REPO_ROOT,
-      encoding: 'utf8',
-      maxBuffer: 256e6,
-    }),
-  ) as BenchOutput;
+/** CLI entry: the committed results.json at `base` vs the freshly merged one. Returns the process
+ *  exit code — 0 iff no match was lost AND no committed row vanished. `base` defaults to HEAD;
+ *  a branch that has already committed its own artifact must pass its branch point instead, or
+ *  this compares the branch against itself. */
+export function regressionGate(base = 'HEAD'): number {
+  const committed = readCommitted(base);
   const fresh = JSON.parse(readFileSync(join(RESULTS_DIR, 'results.json'), 'utf8')) as BenchOutput;
   const report = compareOutcomes(committed, fresh);
 

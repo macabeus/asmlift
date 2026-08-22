@@ -1,10 +1,11 @@
 // The candidate-compile command factory (src/compile-command.ts) — the seam a project fills
 // with its own toolchain. Offline: the "compilers" here are plain sh commands.
 import { C_TYPEDEFS } from '@asmlift/core/target';
-import { readFileSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { expect, test } from 'vitest';
 
-import { compileFromCommand } from '../../src/compile-command';
+import { compileFromCommand, compilersFromCommand } from '../../src/compile-command';
 
 test('missing {{inputPath}}/{{outputPath}} placeholders is a construction-time error', () => {
   expect(() => compileFromCommand('cc -O2 -o out.o')).toThrow(/\{\{inputPath\}\} and \{\{outputPath\}\}/);
@@ -46,7 +47,10 @@ test('a typedef-rejecting template (header-injecting project) drops the prelude 
 test('a prelude-tolerant template keeps the prelude (probe verdict cached across candidates)', () => {
   // the counter file records every template execution: 1 probe + 2 candidates = 3, not 4 —
   // the verdict is cached per compiler instance
+  // pid-keyed and APPENDED to: pids are reused, so a file left by an earlier run under the same
+  // pid would make this count too high and fail a clean tree. Start from empty.
   const counter = `${process.env.TMPDIR ?? '/tmp'}/asmlift-probe-count-${process.pid}`;
+  rmSync(counter, { force: true });
   const compile = compileFromCommand(`echo x >> ${counter} && cp {{inputPath}} {{outputPath}}`);
   const first = compile('s32 f(void) { return 1; }\n', 'f', 'c');
   expect(readFileSync(first, 'utf8').startsWith(C_TYPEDEFS)).toBe(true);
@@ -144,4 +148,59 @@ test('no declarations argument ⇒ exactly the historical prelude behavior', () 
   const obj = compile('s32 f(void) { return 1; }\n', 'f', 'c');
   const written = readFileSync(obj, 'utf8');
   expect(written).toBe(C_TYPEDEFS + 's32 f(void) { return 1; }\n');
+});
+
+// ── the pooled flavour: `worker()` mints an independent async compiler per pool worker ──
+
+test('an async worker compiles exactly like the sync compiler', async () => {
+  const { compile, worker } = compilersFromCommand('cp {{inputPath}} {{outputPath}}');
+  const src = 's32 f(s32 a0) { return a0; }\n';
+  const sync = readFileSync(compile(src, 'f', 'c'), 'utf8');
+  const async1 = readFileSync(await worker()(src, 'f', 'c'), 'utf8');
+  expect(async1).toBe(sync);
+  expect(async1.startsWith(C_TYPEDEFS)).toBe(true);
+});
+
+test('the world is probed ONCE across every worker, not once per worker', async () => {
+  // N workers starting together each see an unset probe verdict; without a shared in-flight
+  // promise they all probe, and a slow template pays for it N times
+  const counter = `${process.env.TMPDIR ?? '/tmp'}/asmlift-worker-probe-${process.pid}`;
+  rmSync(counter, { force: true }); // appended to, and pids are reused — see the sync twin above
+  const { worker } = compilersFromCommand(`echo x >> ${counter} && cp {{inputPath}} {{outputPath}}`);
+  const workers = [worker(), worker(), worker(), worker()];
+  await Promise.all(workers.map((w, i) => w(`s32 f${i}(void) { return ${i}; }\n`, `f${i}`, 'c')));
+  // 1 probe + 4 candidates, not 4 probes + 4 candidates
+  expect(readFileSync(counter, 'utf8').trim().split('\n')).toHaveLength(5);
+});
+
+test('each worker gets its OWN scratch slot, so concurrent compiles cannot clobber each other', async () => {
+  const { worker } = compilersFromCommand('cp {{inputPath}} {{outputPath}}');
+  const a = worker(),
+    b = worker();
+  const [oa, ob] = await Promise.all([
+    a('s32 f(void) { return 1; }\n', 'f', 'c'),
+    b('s32 g(void) { return 2; }\n', 'g', 'c'),
+  ]);
+  expect(dirname(oa)).not.toBe(dirname(ob));
+  expect(readFileSync(oa, 'utf8')).toContain('return 1;');
+  expect(readFileSync(ob, 'utf8')).toContain('return 2;');
+});
+
+test('ONE scratch dir per worker across candidates — emptied, so a lying compiler still fails loud', async () => {
+  const { worker } = compilersFromCommand('test ! -e {{outputPath}} && cp {{inputPath}} {{outputPath}}');
+  const w = worker();
+  const first = await w('s32 f(void) { return 1; }\n', 'f', 'c');
+  const second = await w('s32 g(void) { return 2; }\n', 'g', 'c');
+  // same directory reused (the leak fix) — and the `test ! -e` above only passes because it was
+  // EMPTIED, which is what keeps "exited 0 but produced no object" reachable
+  expect(dirname(second)).toBe(dirname(first));
+  expect(readFileSync(second, 'utf8')).toContain('return 2;');
+});
+
+test('an async worker reports a failed compile as a THROW, exactly like the sync one', async () => {
+  const { compile, worker } = compilersFromCommand(
+    "echo 'version 2.4.2 required' >&2; false # {{inputPath}} {{outputPath}}",
+  );
+  expect(() => compile('int x;', 'f', 'c')).toThrow(/exit 1[\s\S]*version 2\.4\.2 required/);
+  await expect(worker()('int x;', 'f', 'c')).rejects.toThrow(/exit 1[\s\S]*version 2\.4\.2 required/);
 });

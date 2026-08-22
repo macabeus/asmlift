@@ -31,7 +31,17 @@ you looked at this function's diff is a failure, even if the row flips to MATCH.
    are part of the number: a callee still written in assembly has no DWARF signature, so
    `LoadBGTilemapData` without `--proto '{"thunk_HeapFree":{"params":1}}'` scores 578 where the
    round's baseline is 547 — a plausible number that is comparable to nothing. Quote the candidate
-   and dropped counts beside every ranked score.
+   and dropped counts beside every ranked score. Add `--jobs 6 --progress`: the candidate compiles
+   are ~85% of a ranked run and pool cleanly, and the `asmlift: [progress]` liveness lines are what
+   makes a later claim about the run checkable from its own log. Two LBG runs launched together
+   measured **36m10s serial against 21m32s at `--jobs 6`** (20608 candidates, 0 dropped, identical
+   winner) — but that machine was also running two full benches and both test suites, and a quieter
+   pair measured 31m55s against 11m16s. The ratio is the machine's, not the code's: re-time on your
+   own log and quote that, never these. Compare two runs on their `[score]` lines, and filter with
+   a FIXED string — `diff <(grep -F '[score]' a.err) <(grep -F '[score]' b.err)`. `grep '[progress]'` is a bracket
+   EXPRESSION matching any one of `p r o g e s`, so `grep -v '[progress]'` deletes almost every
+   line including every `[score]` one, and the diff passes having compared nothing. A neutrality
+   check that filters away what it is comparing is worse than none.
 
 ## Phase 1 — Diagnose the gap honestly
 
@@ -85,10 +95,16 @@ Per commit:
 
 ## Phase 4 — Full-bench zero-flip gate
 
-Before declaring the branch done: `pnpm bench run` (all tiers) and `pnpm bench regression`. **Any
-lost match blocks the branch.** If a match is lost, either tighten the gate on your lever or drop
-the lever — do not rationalize a trade unless the user explicitly approves it. Report the totals
-(asmlift vs m2c) before and after.
+Before declaring the branch done: `pnpm bench run` (all tiers), `pnpm bench:merge`, then
+`pnpm bench regression --base origin/main` and `pnpm bench diff --base origin/main`. **Any lost
+match blocks the branch.** Pass the base ref: both gates read the COMMITTED artifact, so on a
+branch that has already committed its own they compare it against itself and pass vacuously.
+`regression` answers "did a match break"; `diff` names every row and field that moved
+(`asmlift.{outcome,score,candidateLabel,source}`, `m2c.{outcome,score,source}`) — that list is the
+PR body's inventory of what the round did, and for a commit claiming to move nothing it is the
+gate. If a match is lost, either tighten the gate on your lever or drop the lever — do not
+rationalize a trade unless the user explicitly approves it. Report the totals (asmlift vs m2c)
+before and after.
 
 Three things this gate does not catch by itself:
 
@@ -102,10 +118,11 @@ Three things this gate does not catch by itself:
   row the regression gate cannot see it move — so remediation rewrites what it measures with
   nothing to notice. Re-run it at the branch's final commit and publish *that* number; "the
   primary output is byte-identical" is a claim about one candidate out of tens of thousands, not
-  about the best score. Launch it beside the final `pnpm bench run`, not after it. If you skip it
-  anyway, the cost you skipped it for is a number under Hard rule 5 — quote the log you read it
-  off. A round once skipped it on a re-score that "had not finished after 2h", written in a
-  session under an hour long that had run no ranked command at all.
+  about the best score. Launch it beside the final `pnpm bench run`, not after it, with
+  `--jobs 6 --progress`. Skipping it is now unquotable: the `[progress]` lines timestamp the run's
+  own cost, so "it had not finished" is checkable against the log — a round once wrote that of a
+  re-score "not finished after 2h", in a session under an hour long that had run no ranked
+  command at all.
 - **A corpus sweep's configuration is part of its claim.** Sweeping a project's functions with the
   new rule ON vs OFF proves nothing about the configuration you did not run: with a symbol map
   every absolute pool constant lifts to a `gaddr`, so a symbol-map sweep is blind to a rule that

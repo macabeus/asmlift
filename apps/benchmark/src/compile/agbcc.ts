@@ -3,13 +3,12 @@
 // @asmlift/toolchains; the decomp.yaml candidate command lives in
 // dataset/toolchains/agbcc/decomp.yaml.
 import { TOOLCHAIN } from '@asmlift/toolchains';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { BuiltTarget } from '../toolchains';
 import type { RealCompile, RealProjectCfg } from './types';
-import { compilerDiagnostics, contentDir, run } from './util';
+import { compilerDiagnostics, contentDir, run, scratchSlot } from './util';
 
 /** .i → agbcc → .s (asmlift ARM input) with the canonical .text/.align tail → as → .o. */
 function assemble(iPath: string, sPath: string, oPath: string): void {
@@ -24,6 +23,11 @@ function assemble(iPath: string, sPath: string, oPath: string): void {
   }
 }
 
+// One scratch dir each, reused per compile (util.ts scratchSlot) instead of one mkdtemp per
+// candidate.
+const candScratch = scratchSlot('bench-cand-');
+const vendorScratch = scratchSlot('bench-vendor-');
+
 export const agbccReal: RealCompile = {
   buildTarget(iText): BuiltTarget {
     const dir = contentDir('arm', iText);
@@ -35,7 +39,7 @@ export const agbccReal: RealCompile = {
     return { obj: oPath, asm: readFileSync(sPath, 'utf8') };
   },
   compileCandidate(tu, sym): string {
-    const dir = mkdtempSync(join(tmpdir(), 'bench-cand-'));
+    const dir = candScratch();
     const cPath = join(dir, 'c.c'),
       iPath = join(dir, 'c.i'),
       sPath = join(dir, 'c.s'),
@@ -51,7 +55,7 @@ export const agbccReal: RealCompile = {
     return oPath;
   },
   preprocess(cfg: RealProjectCfg, tu: string): string {
-    const dir = mkdtempSync(join(tmpdir(), 'bench-vendor-'));
+    const dir = vendorScratch();
     const cPath = join(dir, 'u.c'),
       iPath = join(dir, 'u.i');
     writeFileSync(cPath, tu);

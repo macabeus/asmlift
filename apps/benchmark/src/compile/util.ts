@@ -3,7 +3,8 @@ import { C_TYPEDEFS } from '@asmlift/core/target';
 import { spawnFailure } from '@asmlift/toolchains';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 /** Throws the named setup error when the binary itself couldn't spawn (ENOENT/timeout) —
@@ -78,6 +79,31 @@ export function contentDir(tag: string, tu: string): string {
   const d = join('/tmp', `bench-real-${tag}-${createHash('sha256').update(tu).digest('hex').slice(0, 16)}`);
   mkdirSync(d, { recursive: true });
   return d;
+}
+
+/** A scratch directory REUSED across calls: made once, EMPTIED before each use. mkdtemp removes
+ *  nothing, so the natural per-compile spelling leaks one directory per candidate — a full bench
+ *  run leaves one behind per candidate compile, and they had accumulated into the millions.
+ *  Emptied rather than reused in place, so a step that exits 0 without writing its output still
+ *  fails LOUD on the missing file instead of silently reading the previous candidate's.
+ *
+ *  NOT for a directory the DOCKERIZED toolchains compile in. Those reach their scratch through a
+ *  bind mount of the host `/tmp`, and reusing one path there fails ~30% of compiles with
+ *  `c.o: No such file or directory` — measured, 4 concurrent workers × 40 compiles: 50/160
+ *  failures reusing the path, 0/160 with a fresh mkdtemp each time (emptying the CONTENTS and
+ *  keeping the inode fails identically, so it is the shared mount's view of the path, not the
+ *  inode). gcc272.ts and kmc.ts therefore keep mkdtemp-per-candidate and keep the leak. */
+export function scratchSlot(prefix: string): () => string {
+  let dir: string | undefined;
+  return () => {
+    if (dir === undefined) {
+      dir = mkdtempSync(join(tmpdir(), prefix));
+      return dir;
+    }
+    rmSync(dir, { recursive: true, force: true });
+    mkdirSync(dir);
+    return dir;
+  };
 }
 
 export const shq = (s: string): string => `'${s.replaceAll("'", `'\\''`)}'`;

@@ -9,8 +9,8 @@
 // This module is deliberately free of score.ts/objdiff imports so the CLI can build a compiler
 // from config without loading the objdiff wasm, and so its tests stay offline.
 import { C_TYPEDEFS } from '@asmlift/core/target';
-import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -60,6 +60,25 @@ const PROBE_DECLS = renderDeclarations([
  *  simply ignore the argument — their context IS the headers world. */
 export type CandidateCompiler = (source: string, symbol: string, backendId: string, declarations?: string) => string;
 
+/** The same contract, run without blocking the event loop, so several candidates can compile at
+ *  once. Each worker owns its own scratch slot, so one worker's object survives exactly until
+ *  that worker compiles its next candidate — the caller must consume it before asking for
+ *  another (`rank.ts`'s pool scores each object the moment it lands). */
+export type AsyncCandidateCompiler = (
+  source: string,
+  symbol: string,
+  backendId: string,
+  declarations?: string,
+) => Promise<string>;
+
+/** One compiler instance in both flavours. `compile` is the synchronous contract every existing
+ *  caller uses; `worker()` mints an INDEPENDENT async compiler with its own scratch slot — call
+ *  it once per pool worker. Both share the one cached world probe below. */
+export interface CommandCompilers {
+  compile: CandidateCompiler;
+  worker: () => AsyncCandidateCompiler;
+}
+
 export interface CompileCommandOptions {
   /** Working directory for the command — the decomp.yaml's directory, so project-relative
    *  paths (`./tools/agbcc/bin/agbcc`) resolve regardless of where asmlift was invoked. */
@@ -89,7 +108,7 @@ const safe = (value: string, what: string): string => {
  *  TRUNCATED object gets scored (found scoring real 22/28/38 phantoms in the klonoa dogfood).
  *  A non-zero exit or a missing output object throws with the full command + its stderr —
  *  configured means configured, there is no fallback. */
-export function compileFromCommand(template: string, opts: CompileCommandOptions = {}): CandidateCompiler {
+export function compilersFromCommand(template: string, opts: CompileCommandOptions = {}): CommandCompilers {
   if (!template.includes('{{inputPath}}') || !template.includes('{{outputPath}}')) {
     throw new Error(`compiler command must contain {{inputPath}} and {{outputPath}} placeholders — got: ${template}`);
   }
@@ -101,9 +120,35 @@ export function compileFromCommand(template: string, opts: CompileCommandOptions
       `compiler command has an unknown placeholder ${unknown[0]} — supported: {{inputPath}}, {{outputPath}}, {{symbol}}`,
     );
   }
-  // One template execution: write `content`, substitute, run under `sh -ec`, demand the object.
-  const execute = (content: string, symbol: string, ext: 'c' | 'p'): { ok: boolean; cmd: string; err: string } => {
-    const dir = mkdtempSync(join(tmpdir(), 'asmlift-usercc-'));
+  // ONE scratch directory per WORKER, emptied before each compile — not one per candidate.
+  // mkdtemp never removes anything, so a per-candidate directory leaked one per compile: a
+  // ranked run over 20k candidates left 20k of them behind, and the temp dir had accumulated
+  // 1.5M. Emptied rather than reused: a step that exits 0 without writing its output must still
+  // fail LOUD, and a surviving sibling from the previous candidate is exactly what would let it
+  // pass (the same class of silent truncation the `sh -ec` note above is about).
+  //
+  // Reuse is safe HERE because the template runs a fresh process per compile against the host
+  // filesystem. It is NOT safe for a template that keeps a long-lived container with this
+  // directory's parent bind-mounted: the benchmark's dockerized toolchains measured ~30% of
+  // compiles failing on a reused path (apps/benchmark/src/compile/util.ts `scratchSlot`), which
+  // is why they still mkdtemp per candidate.
+  const slot = (): (() => string) => {
+    let dir: string | undefined;
+    return () => {
+      if (dir === undefined) {
+        dir = mkdtempSync(join(tmpdir(), 'asmlift-usercc-'));
+        return dir;
+      }
+      rmSync(dir, { recursive: true, force: true });
+      mkdirSync(dir);
+      return dir;
+    };
+  };
+
+  // One template execution, in two halves: `stage` writes the input and builds the command,
+  // `verdict` reads the exit status — shared verbatim by the sync and async runners so the two
+  // can never diverge on what counts as a failed compile or on how it is reported.
+  const stage = (dir: string, content: string, symbol: string, ext: 'c' | 'p') => {
     const inPath = join(dir, `cand.${ext}`);
     const outPath = join(dir, 'cand.o');
     writeFileSync(inPath, content);
@@ -111,19 +156,49 @@ export function compileFromCommand(template: string, opts: CompileCommandOptions
       .replaceAll('{{inputPath}}', safe(inPath, '{{inputPath}}'))
       .replaceAll('{{outputPath}}', safe(outPath, '{{outputPath}}'))
       .replaceAll('{{symbol}}', safe(symbol, 'the symbol name'));
-    const r = spawnSync('sh', ['-ec', cmd], { encoding: 'utf8', cwd: opts.cwd });
-    if (r.status !== 0) {
-      return {
-        ok: false,
-        cmd,
-        err: `compile command failed (exit ${r.status ?? 'signal'}): ${cmd}\n${(r.stderr || r.stdout).trim()}`,
-      };
+    return { outPath, cmd };
+  };
+  const verdict = (
+    status: number | null,
+    output: string,
+    cmd: string,
+    outPath: string,
+  ): { ok: boolean; cmd: string; err: string } => {
+    if (status !== 0) {
+      return { ok: false, cmd, err: `compile command failed (exit ${status ?? 'signal'}): ${cmd}\n${output.trim()}` };
     }
     if (!existsSync(outPath)) {
       return { ok: false, cmd, err: `compile command exited 0 but produced no object at {{outputPath}}: ${cmd}` };
     }
     return { ok: true, cmd: outPath, err: '' };
   };
+
+  const mainSlot = slot();
+  const execute = (content: string, symbol: string, ext: 'c' | 'p'): { ok: boolean; cmd: string; err: string } => {
+    const { outPath, cmd } = stage(mainSlot(), content, symbol, ext);
+    const r = spawnSync('sh', ['-ec', cmd], { encoding: 'utf8', cwd: opts.cwd });
+    return verdict(r.status, r.stderr || r.stdout, cmd, outPath);
+  };
+  const executeIn = (dir: string, content: string, symbol: string, ext: 'c' | 'p') =>
+    new Promise<{ ok: boolean; cmd: string; err: string }>((res) => {
+      const { outPath, cmd } = stage(dir, content, symbol, ext);
+      const p = spawn('sh', ['-ec', cmd], { cwd: opts.cwd });
+      let out = '',
+        err = '';
+      // DECODED as it arrives, not concatenated as Buffers: `'' + buf` decodes each chunk on its
+      // own, so a multi-byte character straddling a chunk boundary would come out as replacement
+      // characters here and not in the sync runner (spawnSync decodes the whole buffer at once).
+      // The two must report a failed compile with the same text.
+      p.stdout.setEncoding('utf8');
+      p.stderr.setEncoding('utf8');
+      p.stdout.on('data', (d: string) => (out += d));
+      p.stderr.on('data', (d: string) => (err += d));
+      // A shell that never starts is reported like any other failed compile, not as a rejected
+      // promise: the ranked driver reads a THROWN compile the same way whichever runner produced
+      // it, and a second `res` after `close` is a no-op.
+      p.on('error', (e) => res({ ok: false, cmd, err: `compile command failed to start: ${cmd}\n${e.message}` }));
+      p.on('close', (code) => res(verdict(code, err || out, cmd, outPath)));
+    });
 
   // Which WORLD candidates compile in — PROBED, never configured. Two worlds exist:
   //   • SELF-DECLARED: a bare template compiles the candidate alone, so it needs asmlift's
@@ -148,24 +223,58 @@ export function compileFromCommand(template: string, opts: CompileCommandOptions
     }
     return !execute(PROBE, symbol, 'c').ok;
   };
+  // The async twin, memoized as a PROMISE: N workers starting together would otherwise each see
+  // an unset `preludeOk` and probe the world N times.
+  let probing: Promise<boolean> | undefined;
+  const probeAsync = (symbol: string): Promise<boolean> =>
+    (probing ??= (async () => {
+      const probeSlot = slot();
+      if ((await executeIn(probeSlot(), C_TYPEDEFS + PROBE_DECLS + PROBE, symbol, 'c')).ok) {
+        return true;
+      }
+      return !(await executeIn(probeSlot(), PROBE, symbol, 'c')).ok;
+    })());
 
-  return (source, symbol, backendId, declarations) => {
-    let prelude = '';
-    if (backendId !== 'pascal') {
-      preludeOk ??= probePrelude(symbol);
-      // headers world ⇒ BOTH the prelude and the synthesized declarations drop — the injected
-      // headers own the types and every declaration (a second copy is a C89 collision).
-      // EXCEPT the address-cast macro defines: a duplicate `#define` with an identical body is
-      // legal C (unlike a duplicate typedef or struct), and the headers world does NOT
-      // necessarily supply them — a PREPROCESSED context has no macros left at all, so dropping
-      // these turns a macro-named candidate into `undeclared identifier`. They are emitted in
-      // both worlds for that reason.
-      prelude = preludeOk ? C_TYPEDEFS + (declarations ?? '') : macroDefinesOf(declarations);
-    }
-    const r = execute(prelude + source, symbol, backendId === 'pascal' ? 'p' : 'c');
+  // headers world ⇒ BOTH the prelude and the synthesized declarations drop — the injected
+  // headers own the types and every declaration (a second copy is a C89 collision).
+  // EXCEPT the address-cast macro defines: a duplicate `#define` with an identical body is
+  // legal C (unlike a duplicate typedef or struct), and the headers world does NOT
+  // necessarily supply them — a PREPROCESSED context has no macros left at all, so dropping
+  // these turns a macro-named candidate into `undeclared identifier`. They are emitted in
+  // both worlds for that reason.
+  const preludeFor = (world: boolean, declarations?: string): string =>
+    world ? C_TYPEDEFS + (declarations ?? '') : macroDefinesOf(declarations);
+  const unwrap = (r: { ok: boolean; cmd: string; err: string }): string => {
     if (!r.ok) {
       throw new Error(r.err);
     }
     return r.cmd;
   };
+
+  return {
+    compile: (source, symbol, backendId, declarations) => {
+      let prelude = '';
+      if (backendId !== 'pascal') {
+        preludeOk ??= probePrelude(symbol);
+        prelude = preludeFor(preludeOk, declarations);
+      }
+      return unwrap(execute(prelude + source, symbol, backendId === 'pascal' ? 'p' : 'c'));
+    },
+    worker: () => {
+      const mine = slot();
+      return async (source, symbol, backendId, declarations) => {
+        let prelude = '';
+        if (backendId !== 'pascal') {
+          preludeOk ??= await probeAsync(symbol);
+          prelude = preludeFor(preludeOk, declarations);
+        }
+        return unwrap(await executeIn(mine(), prelude + source, symbol, backendId === 'pascal' ? 'p' : 'c'));
+      };
+    },
+  };
+}
+
+/** The synchronous candidate compiler alone — the shape every non-pooled caller wants. */
+export function compileFromCommand(template: string, opts: CompileCommandOptions = {}): CandidateCompiler {
+  return compilersFromCommand(template, opts).compile;
 }

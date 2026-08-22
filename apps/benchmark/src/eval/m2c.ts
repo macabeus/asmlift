@@ -6,10 +6,10 @@
 // DECLINE marker, classified by the caller via outcome.ts); this runner scans only for m2c's
 // hard-failure report.
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { scratchSlot } from '../compile/util';
 import { M2C_DIR, M2C_PINNED_COMMIT } from '../config';
 import type { Toolchain } from '../toolchains';
 import { disasmToM2c, m2cTarget } from './m2c-normalizer';
@@ -42,6 +42,10 @@ export interface M2cOptions {
   lang?: 'c' | 'c++'; // 'c++' switches the mwcc target to ppc-mwcc-c++; no effect elsewhere
 }
 
+// One scratch dir, reused per invocation (compile/util.ts scratchSlot) instead of one mkdtemp
+// per row.
+const m2cScratch = scratchSlot('bench-m2c-');
+
 /** Feed a function to m2c. `asm` is the objdump text (MIPS/PPC) or agbcc `.s` (ARM); `asmKind`
  *  selects whether to normalize. Output classification (failed vs declined vs compile+score) is
  *  the caller's job via outcome.ts — this runner only detects "produced no usable output at all". */
@@ -55,7 +59,7 @@ export function runM2c(tc: Toolchain, sym: string, asm: string, opts: M2cOptions
     );
   }
   const asmText = tc.asmKind === 'objdump' ? disasmToM2c(asm, tc.isa === 'ppc' ? 'ppc' : 'mips', opts.asmDump) : asm; // agbcc .s is already GNU-as
-  const dir = mkdtempSync(join(tmpdir(), 'bench-m2c-'));
+  const dir = m2cScratch();
   const asmPath = join(dir, 'in.s');
   writeFileSync(asmPath, asmText);
   const args = ['m2c.py', '-t', m2cTarget(tc.compiler, opts.lang), '-f', sym, '--no-cache'];

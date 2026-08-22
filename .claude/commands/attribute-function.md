@@ -129,14 +129,17 @@ attribution line for every decline naming its first blocker. Constraints learned
 ## Phase 7 — Gates and commits
 
 1. Source commit first (dataset + tag). Then `pnpm bench run` (all tiers) → `pnpm bench:merge` →
-   `pnpm bench regression`. **Regression without a preceding run+merge compares stale results and
-   is vacuous** — the order is the gate.
+   `pnpm bench regression --base origin/main`. **Regression without a preceding run+merge compares
+   stale results and is vacuous** — the order is the gate; and without `--base`, a branch that has
+   already committed its own artifact compares it against itself, which is vacuous the other way.
 2. Expect the two tag-vocabulary tests to fail BETWEEN adding the tag and merging the artifacts;
    they must pass after. `npx vitest run`, `pnpm test:matching`, `pnpm typecheck`,
    `npx eslint apps packages` (not `pnpm lint`), `pnpm format` check.
 3. Artifacts (`apps/benchmark/results/results.json`, both web copies) regenerated at the source
    commit's HEAD (`meta.asmlift.dirty` must be false) and committed separately.
 4. Zero-flip over the previously committed rows blocks the branch, same as `/match-function`.
+   `pnpm bench diff --base origin/main` is that check by row and field, and its output is the
+   report's list of what moved.
 
 ## Phase 8 — Write it down and report
 

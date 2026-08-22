@@ -39,7 +39,10 @@ export const gcc272Real: RealCompile = {
     return { obj: oPath, asm: disasm(oPath) };
   },
   compileCandidate(tu, sym): string {
-    // candidate scratch must live under /tmp (the container pool's mount)
+    // candidate scratch must live under /tmp (the container pool's mount) — and stays ONE
+    // DIRECTORY PER CANDIDATE, leak and all: reusing a path the container reaches through
+    // that shared mount fails ~30% of compiles with `c.o: No such file or directory`
+    // (util.ts scratchSlot carries the measurement)
     const dir = mkdtempSync(join('/tmp', 'bench-cand-'));
     const cPath = join(dir, 'c.c'),
       iPath = join(dir, 'c.i'),

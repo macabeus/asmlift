@@ -30,7 +30,7 @@ import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import { type CandidateCompiler, compileFromCommand } from './compile-command';
+import { type CommandCompilers, compilersFromCommand } from './compile-command';
 import { type AsmliftToolConfig, loadDecompConfig, resolveTarget } from './config';
 import { ObjectInputUnsupportedError, asmDataForObject, disasmObject, isElfObject } from './objfile';
 
@@ -51,8 +51,19 @@ const BACKENDS: Record<string, LanguageBackend> = {
 
 // Every flag the CLI understands. An unknown flag is a HARD usage error — silently ignoring
 // `--nmae foo` or `--backned pascal` would quietly discard the user's intent.
-const KNOWN_FLAGS = new Set(['target', 'name', 'backend', 'strict', 'config', 'score-against', 'asm-data', 'proto']);
-const BOOL_FLAGS = new Set(['strict']);
+const KNOWN_FLAGS = new Set([
+  'target',
+  'name',
+  'backend',
+  'strict',
+  'config',
+  'score-against',
+  'asm-data',
+  'proto',
+  'jobs',
+  'progress',
+]);
+const BOOL_FLAGS = new Set(['strict', 'progress']);
 // The emitted source embeds the name verbatim; a non-identifier would be silently invalid C.
 const IDENT = /^[A-Za-z_$][A-Za-z0-9_$.]*$/;
 
@@ -60,6 +71,7 @@ const USAGE = `usage: asmlift <file.s|file.asm|file.o|-> [--target <${Object.key
                 [--name <symbol>] [--backend <c|pascal>] [--strict]
                 [--config <decomp.yaml>] [--score-against <target.o>]
                 [--asm-data <dump.txt>] [--proto <proto.json>]
+                [--jobs <n>] [--progress]
 
 Decompiles a function to source on stdout.
 Input: GBA .s text (agbcc output or pret-style splits), objdump -d text, or a
@@ -75,6 +87,9 @@ Gaps are annotated in-source as ASMLIFT_ERROR markers, diagnostics on stderr.
   --asm-data       for text input: objdump -s -r -t dump of the source object
                    (jump tables, anonymous constants)
   --proto          callee prototypes JSON, e.g. {"sym":{"params":2|["u8","s32"]}}
+  --jobs           with --score-against: compile n candidates at a time (default 1)
+  --progress       with --score-against: stream a liveness line to stderr while
+                   scoring; the [score] table it prints at the end is unchanged
 
 Exit codes: 0 clean/match · 1 gaps/declined/nonmatch · 64 usage · 66 unreadable input.
 Full reference (flags, decomp.yaml integration): the @asmlift/cli README.`;
@@ -100,6 +115,10 @@ export async function runCli(
   argv: string[],
   readInput: (path: string) => string | Uint8Array = defaultRead,
   objInput?: ObjInput,
+  /** where `--progress` writes. Absent (every non-process caller, including the tests) ⇒ the
+   *  flag has nothing to write to and the run is silent, so `runCli`'s result stays the whole
+   *  output. The process entry point below supplies stderr. */
+  progressSink?: (line: string) => void,
 ): Promise<CliResult> {
   const usage = (msg: string) => ({ code: 64, stdout: '', stderr: `asmlift: ${msg}\n${USAGE}\n` });
   const args = [...argv];
@@ -302,6 +321,36 @@ export async function runCli(
   // gap is a decline, never a scored stub. score.ts (objdiff-wasm) loads only on this path,
   // keeping plain decompiles toolchain-light.
   const scoreAgainst = flags.get('score-against') as string | undefined;
+  // Candidate compiles are ~85% of a ranked run's wall time and independent of one another, so
+  // --jobs runs n of them at once. Ranking is unaffected (rank.ts). Both flags belong to the
+  // ranked path alone: accepting them elsewhere would silently discard what the user asked for.
+  const jobsFlag = flags.get('jobs') as string | undefined;
+  if ((jobsFlag !== undefined || flags.has('progress')) && scoreAgainst === undefined) {
+    return usage('--jobs/--progress apply to --score-against runs only');
+  }
+  let jobs = 1;
+  if (jobsFlag !== undefined) {
+    jobs = Number(jobsFlag);
+    if (!Number.isInteger(jobs) || jobs < 1) {
+      return usage(`--jobs must be a positive integer (got ${JSON.stringify(jobsFlag)})`);
+    }
+  }
+  // At most one line every few seconds: enough to tell a 20-minute run from a hung one, few
+  // enough that the log stays readable. The `[progress]` prefix keeps it separable from the
+  // `[score]` lines two ranked logs are compared on.
+  let lastTick = 0;
+  const onProgress =
+    flags.has('progress') && progressSink
+      ? (doneN: number, total: number, bestSoFar: number | undefined) => {
+          const now = Date.now();
+          if (doneN < total && now - lastTick < 5000) {
+            return;
+          }
+          lastTick = now;
+          const best = bestSoFar === undefined ? '' : `, best so far ${bestSoFar}`;
+          progressSink(`asmlift: [progress] ${doneN}/${total} candidates scored${best}\n`);
+        }
+      : undefined;
   if (scoreAgainst !== undefined) {
     const targetObj = resolve(scoreAgainst);
     if (!existsSync(targetObj)) {
@@ -316,15 +365,26 @@ export async function runCli(
         "--score-against needs tools.asmlift.compiler in decomp.yaml — scoring must use YOUR project's compiler and flags",
       );
     }
-    let compile: CandidateCompiler;
+    let compilers: CommandCompilers;
     try {
-      compile = compileFromCommand(toolCfg.compiler, { cwd: configDir });
+      compilers = compilersFromCommand(toolCfg.compiler, { cwd: configDir });
     } catch (e) {
       return usage(`tools.asmlift.compiler: ${e instanceof Error ? e.message : e}`);
     }
+    const compile = compilers.compile;
     try {
-      const { decompileRanked } = await import('./rank');
-      const ranked = decompileRanked(name, asm, target, targetObj, { backend, asmData, prototypes, symbols, compile });
+      const { decompileRanked, decompileRankedParallel } = await import('./rank');
+      const rankOpts = { backend, asmData, prototypes, symbols, compile, ...(onProgress ? { onProgress } : {}) };
+      // jobs > 1 pools the candidate COMPILES; the ranking itself is the same code either way
+      // (rank.ts), so the two differ in scheduling only.
+      const ranked =
+        jobs > 1
+          ? await decompileRankedParallel(name, asm, target, targetObj, {
+              ...rankOpts,
+              jobs,
+              worker: compilers.worker,
+            })
+          : decompileRanked(name, asm, target, targetObj, rankOpts);
       const table = ranked.candidates
         .map((c) => `asmlift: [score] ${c.label}: ${c.score.score}${c.score.match ? ' (match)' : ''}\n`)
         .join('');
@@ -379,7 +439,9 @@ const invokedDirectly =
     pathToFileURL(realpathSync(process.argv[1])).href;
 
 if (invokedDirectly) {
-  const { code, stdout, stderr } = await runCli(process.argv.slice(2));
+  const { code, stdout, stderr } = await runCli(process.argv.slice(2), undefined, undefined, (line) =>
+    process.stderr.write(line),
+  );
   if (stdout) {
     process.stdout.write(stdout);
   }

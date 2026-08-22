@@ -7,17 +7,11 @@
 //     were skipped): committing would destroy data, not refresh it
 //   - dirty provenance: numbers from uncommitted code must never be published
 import type { BenchOutput, FunctionResult } from '@asmlift/bench-schema';
-import { execSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { REPO_ROOT, RESULTS_DIR } from '../config';
-
-/** Scratch-dir names and machine temp paths are run-local noise, not measurement. */
-const scrub = (s: string): string =>
-  s
-    .replace(/(?:asmlift|bench)-[A-Za-z0-9-]+-[A-Za-z0-9]{6}/g, '<scratch>')
-    .replace(/\/host-tmp\S*|\/var\/folders\S*|\/tmp\/\S*/g, '<tmp>');
+import { RESULTS_DIR } from '../config';
+import { readCommitted, scrub } from './committed';
 
 const rowKey = (r: FunctionResult): string =>
   JSON.stringify({
@@ -28,14 +22,8 @@ const rowKey = (r: FunctionResult): string =>
     refSource: r.refSource,
   });
 
-export function staleCheck(): 'stale' | 'fresh' {
-  const committed = JSON.parse(
-    execSync('git show HEAD:apps/benchmark/results/results.json', {
-      cwd: REPO_ROOT,
-      encoding: 'utf8',
-      maxBuffer: 256e6,
-    }),
-  ) as BenchOutput;
+export function staleCheck(base = 'HEAD'): 'stale' | 'fresh' {
+  const committed = readCommitted(base);
   const fresh = JSON.parse(readFileSync(join(RESULTS_DIR, 'results.json'), 'utf8')) as BenchOutput;
 
   if (fresh.meta.asmlift?.dirty !== false) {

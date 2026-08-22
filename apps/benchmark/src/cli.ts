@@ -14,8 +14,9 @@
 //                                        # pre-publish gate: re-run BOTH repro scripts, every function
 //   pnpm bench merge                     # tiers → results.json, then publish
 //   pnpm bench publish                   # re-stage results.json into the web app
-//   pnpm bench stale-check               # committed vs fresh results (measurement-level)
-//   pnpm bench regression                # committed vs fresh MATCH gate: exit 1 on any lost match
+//   pnpm bench stale-check [--base ref]  # committed vs fresh results (measurement-level)
+//   pnpm bench regression [--base ref]   # committed vs fresh MATCH gate: exit 1 on any lost match
+//   pnpm bench diff [--base ref]         # committed vs fresh per-ROW, per-FIELD: exit 1 on any move
 //   pnpm bench smoke                     # one trivial fn through every available toolchain
 //   pnpm bench verify <manifest.json>    # compile-check loop for authoring real manifests
 //   pnpm bench vendor [--project p]      # freeze the real tier's preprocessed TUs (needs checkouts)
@@ -58,6 +59,10 @@ const { values: opts, positionals } = parseArgs({
     build: { type: 'boolean', default: false },
     out: { type: 'string' },
     'project-root': { type: 'string' },
+    // which committed artifact the comparison gates read. HEAD by default; a branch that has
+    // already committed its own results.json must name its branch point (origin/main), or it
+    // compares itself against itself and every gate passes vacuously.
+    base: { type: 'string' },
   },
 });
 
@@ -233,7 +238,7 @@ switch (command) {
     // exit 0 either way; a thrown safety refusal (shrunk coverage / dirty provenance) exits 1.
     // Emits `stale=true|false` for GitHub Actions when GITHUB_OUTPUT is set.
     const { staleCheck } = await import('./report/stale-check');
-    const verdict = staleCheck();
+    const verdict = staleCheck(opts.base);
     console.log(`stale=${verdict === 'stale'}`);
     if (process.env.GITHUB_OUTPUT) {
       const { appendFileSync } = await import('node:fs');
@@ -245,7 +250,16 @@ switch (command) {
     // The refactor/feature gate `run` deliberately isn't: exit 1 on any match→non-match flip or
     // any committed row missing from the fresh run. Needs a merged results/results.json.
     const { regressionGate } = await import('./report/regression');
-    process.exit(regressionGate());
+    process.exit(regressionGate(opts.base));
+    break;
+  }
+  case 'diff': {
+    // The NEUTRALITY gate: exit 1 if any row's asmlift {outcome,score,candidateLabel,source} or
+    // m2c {outcome,score,source} moved, or if the row set changed. What a refactor, a harness
+    // change or a tooling change has to prove, and what `regression` (outcome only) and
+    // `stale-check` (one word, no row named) each answer half of.
+    const { diffGate } = await import('./report/diff');
+    process.exit(diffGate(opts.base));
     break;
   }
   case 'smoke':
@@ -267,7 +281,7 @@ switch (command) {
   }
   default:
     console.error(
-      `usage: bench <run|target|setup|fidelity|merge|publish|stale-check|regression|smoke|verify|vendor> — got ${JSON.stringify(command)}`,
+      `usage: bench <run|target|setup|fidelity|merge|publish|stale-check|regression|diff|smoke|verify|vendor> — got ${JSON.stringify(command)}`,
     );
     process.exit(2);
 }
