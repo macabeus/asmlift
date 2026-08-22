@@ -27,21 +27,12 @@ you looked at this function's diff is a failure, even if the row flips to MATCH.
    before/after pair of real command output.
 5. **Write every repro command down verbatim, flags included** — the `--only` line above, and any
    ranked enumeration you run outside the harness. Every later measurement (each reviewer's, each
-   remediation's, the PR body's) re-runs *that* command, not one recomposed from memory. The flags
-   are part of the number: a callee still written in assembly has no DWARF signature, so
-   `LoadBGTilemapData` without `--proto '{"thunk_HeapFree":{"params":1}}'` scores 578 where the
-   round's baseline is 547 — a plausible number that is comparable to nothing. Quote the candidate
-   and dropped counts beside every ranked score. Add `--jobs 6 --progress`: the candidate compiles
-   are ~85% of a ranked run and pool cleanly, and the `asmlift: [progress]` liveness lines are what
-   makes a later claim about the run checkable from its own log. Two LBG runs launched together
-   measured **36m10s serial against 21m32s at `--jobs 6`** (20608 candidates, 0 dropped, identical
-   winner) — but that machine was also running two full benches and both test suites, and a quieter
-   pair measured 31m55s against 11m16s. The ratio is the machine's, not the code's: re-time on your
-   own log and quote that, never these. Compare two runs on their `[score]` lines, and filter with
-   a FIXED string — `diff <(grep -F '[score]' a.err) <(grep -F '[score]' b.err)`. `grep '[progress]'` is a bracket
-   EXPRESSION matching any one of `p r o g e s`, so `grep -v '[progress]'` deletes almost every
-   line including every `[score]` one, and the diff passes having compared nothing. A neutrality
-   check that filters away what it is comparing is worse than none.
+   remediation's, the PR body's) re-runs *that* command, not one recomposed from memory. For the
+   ranked enumeration that means **the command in [`docs/ranked-repro.md`](../../docs/ranked-repro.md),
+   verbatim**: its flags (`--proto`, `--jobs 6 --progress`) are part of the number, and so is its
+   `grep -F '[score]'` comparison recipe. That file is shared with `/attribute-function` — the last
+   time this command was described in two prompts they drifted and a round published a number
+   comparable to nothing, so correct it there and never here.
 
 ## Phase 1 — Diagnose the gap honestly
 
@@ -108,18 +99,21 @@ before and after.
 
 Three things this gate does not catch by itself:
 
-- **The regenerated artifact is the LAST commit on the branch.** `results.json` stamps the commit
-  it was generated at, and every number you publish reads from it — so a commit that touches core,
-  cli, the harness or the dataset after it silently republishes numbers a rule version that no
-  longer exists produced. Regenerate after Phase 5's remediation, and run
-  `scripts/check-artifact-provenance.sh` before opening the PR.
+- **The regenerated artifact is the LAST commit on the branch — after the final rebase.**
+  `results.json` stamps the commit it was generated at, and every number you publish reads from it,
+  so a commit that touches core, cli, the harness or the dataset after it silently republishes
+  numbers a rule version that no longer exists produced. Rebasing counts twice over: it rewrites
+  the commit the stamp names, and it can slide a base commit that changes the decompiler underneath
+  numbers measured without it — which a per-row diff against the base then credits to your branch.
+  So the order is rebase → gates → regenerate → push. `scripts/check-artifact-provenance.sh` fails
+  all three shapes; run it before opening the PR.
 - **A number measured OUTSIDE the harness goes stale the same way, and nothing checks it.** The
   ranked run from Phase 0 measures the commit it ran at, and when the target is not a benchmark
   row the regression gate cannot see it move — so remediation rewrites what it measures with
   nothing to notice. Re-run it at the branch's final commit and publish *that* number; "the
   primary output is byte-identical" is a claim about one candidate out of tens of thousands, not
-  about the best score. Launch it beside the final `pnpm bench run`, not after it, with
-  `--jobs 6 --progress`. Skipping it is now unquotable: the `[progress]` lines timestamp the run's
+  about the best score. Launch it beside the final `pnpm bench run`, not after it, with the same
+  `docs/ranked-repro.md` flags. Skipping it is now unquotable: the `[progress]` lines timestamp the run's
   own cost, so "it had not finished" is checkable against the log — a round once wrote that of a
   re-score "not finished after 2h", in a session under an hour long that had run no ranked
   command at all.
