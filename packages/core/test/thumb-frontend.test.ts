@@ -1220,16 +1220,76 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     // accesses, so a wider real object has its later words written by the callee — and any of them
     // modelled as an SSA slot is a value the slot model forwards ACROSS the call that overwrote it.
     //
-    // HAND-WRITTEN, and the only fixture here that is: the shape needs the object reached ONLY
-    // through the captured pointer (an `[sp,#0]` access of its own would collide with the slot model
-    // and decline one gate earlier), which four corpus functions do and no small C source here does.
-    // Without this rule it lifted to `g(&sp0, …); use2(a1)` — the reload after the call replaced by
-    // the value from before it, `g`'s write dropped, no diagnostic.
+    // The fixture is the pair, because the pair is the argument: these two sources compile to ONE
+    // instruction stream, byte for byte, and they disagree about who owns [sp,#4].
+    //
+    //   u8 b;              s32 t0,t2..t7;  b = x; t0 = h(0); t   = h(1); … g(&b); use2(t0 + t   + …);
+    //   struct M { u8 b; u8 pad[3]; s32 t; } m;  m.b = x; …    m.t = h(1); … g(&m); use2(t0 + m.t + …);
+    //
+    // The eight `h` results exhaust the callee-saved registers, so one of them spills to [sp,#4] —
+    // and a spill is the only neighbour that can produce this shape. Give the byte local a DECLARED
+    // neighbour instead (`u8 b; volatile s32 t;`, same body) and agbcc puts the address-taken one
+    // ABOVE it, spelling `&b` as `add rD, sp, #0x4` — which declines earlier, on the spelling the
+    // layout forces. So the ambiguity is exactly "an addressable local at [sp,#0] with a reload
+    // spill above it", and no reading of the assembly resolves it: `struct M` needs
+    // the reload after `bl g` to read what `g` wrote, `u8 b` needs it to read what we stored.
+    // Without this rule both lifted to the same source — `g(&sp0); use2(v0 + v1 + …)` with the
+    // reload replaced by the value from before the call, `g`'s write dropped, no diagnostic.
     test('a callee handed the frame base refuses the slot model above it', () => {
       const slotAbove =
-        'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tmov\tr2, sp\n\tstr\tr0, [r2]\n\tstr\tr1, [sp, #0x4]\n' +
-        '\tmov\tr0, r2\n\tbl\tg\n\tldr\tr0, [sp, #0x4]\n\tbl\tuse2\n' +
-        '\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+        's_bytes_and_slot:\n' +
+        '\tpush\t{r4, r5, r6, r7, lr}\n' +
+        '\tmov\tr7, sl\n' +
+        '\tmov\tr6, r9\n' +
+        '\tmov\tr5, r8\n' +
+        '\tpush\t{r5, r6, r7}\n' +
+        '\tadd\tsp, sp, #-0x8\n' +
+        '\tmov\tr1, sp\n' +
+        '\tstrb\tr0, [r1]\n' +
+        '\tmov\tr0, #0x0\n' +
+        '\tbl\th\n' +
+        '\tadd\tr4, r0, #0\n' +
+        '\tmov\tr0, #0x1\n' +
+        '\tbl\th\n' +
+        '\tstr\tr0, [sp, #0x4]\n' +
+        '\tmov\tr0, #0x2\n' +
+        '\tbl\th\n' +
+        '\tadd\tr7, r0, #0\n' +
+        '\tmov\tr0, #0x3\n' +
+        '\tbl\th\n' +
+        '\tmov\tsl, r0\n' +
+        '\tmov\tr0, #0x4\n' +
+        '\tbl\th\n' +
+        '\tmov\tr9, r0\n' +
+        '\tmov\tr0, #0x5\n' +
+        '\tbl\th\n' +
+        '\tmov\tr8, r0\n' +
+        '\tmov\tr0, #0x6\n' +
+        '\tbl\th\n' +
+        '\tadd\tr6, r0, #0\n' +
+        '\tmov\tr0, #0x7\n' +
+        '\tbl\th\n' +
+        '\tadd\tr5, r0, #0\n' +
+        '\tmov\tr0, sp\n' +
+        '\tbl\tg\n' +
+        '\tldr\tr0, [sp, #0x4]\n' +
+        '\tadd\tr4, r4, r0\n' +
+        '\tadd\tr4, r4, r7\n' +
+        '\tadd\tr4, r4, sl\n' +
+        '\tadd\tr4, r4, r9\n' +
+        '\tadd\tr4, r4, r8\n' +
+        '\tadd\tr4, r4, r6\n' +
+        '\tadd\tr4, r4, r5\n' +
+        '\tadd\tr0, r4, #0\n' +
+        '\tbl\tuse2\n' +
+        '\tadd\tsp, sp, #0x8\n' +
+        '\tpop\t{r3, r4, r5}\n' +
+        '\tmov\tr8, r3\n' +
+        '\tmov\tr9, r4\n' +
+        '\tmov\tsl, r5\n' +
+        '\tpop\t{r4, r5, r6, r7}\n' +
+        '\tpop\t{r0}\n' +
+        '\tbx\tr0\n';
       expect(() => decompile('f', slotAbove, ARMV4T_AGBCC)).toThrow(
         /passed to a callee, which may write the slot at \[sp,#4\]/,
       );
@@ -1239,6 +1299,43 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tmov\tr0, sp\n\tbl\tg\n' +
         '\tadd\tsp, sp, #0x4\n\tpop\t{r0}\n\tbx\tr0\n';
       expect(decompile('f', oneWord, ARMV4T_AGBCC, { prototypes: { g: { params: 1 } } }).source).toContain('g(&sp0)');
+    });
+
+    // THE MULTI-WORD ANALOGUE of the same hazard, and it never reaches the rule above: a struct
+    // whose members are all stored before the escape stages a plausible argument BLOCK, so the
+    // contiguity condition refuses it one gate earlier. Compiled, `struct W { s32 a,b,c,d; };
+    // void f(s32 x){ struct W w; w.a=x; w.b=x+1; w.c=x+2; w.d=x+3; g(&w); use2(w.a+w.b+w.c+w.d); }`.
+    // Every extra word is another value a callee may write and this function reads back, so what
+    // the refusal costs grows with the extent while what licenses an acceptance does not.
+    test('a multi-word object handed to a callee declines on the argument-block condition', () => {
+      const fourWords =
+        'hazw:\n' +
+        '\tpush\t{lr}\n' +
+        '\tadd\tsp, sp, #-0x10\n' +
+        '\tstr\tr0, [sp]\n' +
+        '\tadd\tr1, r0, #0x1\n' +
+        '\tstr\tr1, [sp, #0x4]\n' +
+        '\tadd\tr1, r0, #0x2\n' +
+        '\tstr\tr1, [sp, #0x8]\n' +
+        '\tadd\tr0, r0, #0x3\n' +
+        '\tstr\tr0, [sp, #0xc]\n' +
+        '\tmov\tr0, sp\n' +
+        '\tbl\tg\n' +
+        '\tldr\tr0, [sp]\n' +
+        '\tldr\tr1, [sp, #0x4]\n' +
+        '\tadd\tr0, r0, r1\n' +
+        '\tldr\tr1, [sp, #0x8]\n' +
+        '\tadd\tr0, r0, r1\n' +
+        '\tldr\tr1, [sp, #0xc]\n' +
+        '\tadd\tr0, r0, r1\n' +
+        '\tbl\tuse2\n' +
+        '\tadd\tsp, sp, #0x10\n' +
+        '\tpop\t{r0}\n' +
+        '\tbx\tr0\n';
+      expect(() => decompile('hazw', fourWords, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+      expect(() => decompile('hazw', fourWords, ARMV4T_AGBCC)).toThrow(
+        /reaches `bl g` unread with its lower slots supplied/,
+      );
     });
 
     // `volatile` IS NOT FREE, so it goes only where the source writes one. The structurer emits one

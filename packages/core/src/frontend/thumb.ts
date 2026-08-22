@@ -2114,9 +2114,19 @@ export function lift(
   // premise re-check in the frame-object audit — which is also where the licence's other half is
   // re-proven.
   //
-  // What it refuses that really is an addressable local: every frame with a second word in it. That
-  // is a capability gap, not a wrong answer, and widening it needs a model of the object's real
-  // extent rather than a wider licence for this one.
+  // What it refuses that really is an addressable local: every frame with a second word in it —
+  // and that is where the capability ENDS, not where the next widening starts. An object's TOP has
+  // no asm-visible bound. Two sources that disagree about who owns [sp,#4] compile to one
+  // instruction stream, byte for byte (agbcc 2.9-arm-000512, `-O2 -mthumb-interwork -Wimplicit
+  // -fhex-asm -fprologue-bugfix`), with eight values live across the calls so one of them spills:
+  //
+  //   s32 loc; s32 t0..t7;                   loc = x;  t0 = h(0); … g(&loc); k(loc + t0 + …);
+  //   struct P { s32 a, b; } p; s32 t1..t7;  p.a = x;  p.b = h(0); … g(&p);   k(p.a + p.b + …);
+  //
+  // The first says a callee may not touch [sp,#4]; the second says it may, and the reload after the
+  // call must read what it wrote. Nothing distinguishes them, so a wider licence is not a harder
+  // proof — it is a guess. The frame is the only bound there is, and `localArea === 4` is a frame
+  // with no room for the question.
   //
   // RESIDUE, stated as what it is and not as the only one: the producer table is agbcc's, so
   // hand-written asm that reserves one word, stages it as a call's fifth argument and ALSO puts sp
@@ -3352,8 +3362,9 @@ export function lift(
       // WHAT IT COSTS, stated because the benchmark cannot see it: it refuses every word slot above
       // a call-passed object, which is blunter than the hazard it names, and four corpus functions
       // that lifted before it (sa3 `sub_809C274`, `UpdateAnimations`, `sub_801C4A0`, `sub_8062CFC`)
-      // now decline. None is a benchmark row. Narrowing it needs a bound on the
-      // object's real extent, which is the same thing the gate above lacks.
+      // now decline. None is a benchmark row. Narrowing it would need a bound on the object's real
+      // extent, and there is none to be had — see the twin at `capturedObjectIsTheWholeFrame`, and
+      // the compiled pair this rule's own test is built on.
       //
       // ABOVE the object only: a C object extends upward from its base, so a slot BELOW it cannot
       // be part of it, and the overlap checks above already own the bytes it does cover.
