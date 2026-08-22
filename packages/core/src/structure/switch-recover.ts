@@ -63,6 +63,27 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     structureRegion,
   } = deps;
 
+  // `fn.blocks` is in ASM LAYOUT order: the frontends build the list by scanning the instruction
+  // stream in address order, and raising only ever REMOVES blocks (never inserts or reorders), so a
+  // block's index is where its code sits in the assembly.
+  const blockIndex = new Map(fn.blocks.map((blk, i) => [blk, i] as const));
+  const layoutIndex = (blk: Block): number => blockIndex.get(blk) ?? -1;
+
+  /** Are these two blocks the SAME bare jump — no params, one `br`, same target, same args? Such a
+   *  block has no body of its own, so two of them are indistinguishable at emission. */
+  const sameBareJump = (a: Block, c: Block): boolean => {
+    if (a === c) {
+      return true;
+    }
+    for (const blk of [a, c]) {
+      if (blk.params.length || blk.ops.length !== 1 || blk.ops[0].opcode !== 'br') {
+        return false;
+      }
+    }
+    const [x, y] = [a, c].map((blk) => blk.ops[0].successors[0]);
+    return x.block === y.block && x.args.length === y.args.length && x.args.every((v, i) => v === y.args[i]);
+  };
+
   // --- Regime A: comparison-tree switch recovery ----------------------------------------------------
   // Every ambiguity declines. Four preconditions are enforced below, annotated PRE1..PRE4:
   // scrutinee identity/dominance, no fall-through, concrete interval consistency, test purity.
@@ -413,8 +434,20 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     } // not worth a switch (m2c: ≥2 cases)
     // The default is the single non-test leaf that is NOT a case body. 0 → no default; ≥2 distinct → decline.
     const caseBlocks = new Set(cases.values());
-    const defaults = [...defaultCands].filter((d) => !caseBlocks.has(d));
-    if (defaults.length > 1) {
+    // Layout order, so the representative picked below is the same block on every run (defaultCands
+    // is a Set filled in walk order).
+    const defaults = [...defaultCands]
+      .filter((d) => !caseBlocks.has(d))
+      .sort((a, c) => layoutIndex(a) - layoutIndex(c));
+    // ONE default reached by SEVERAL leaves. `balance_case_nodes`/`emit_case_nodes` give each
+    // subtree that runs out of case values its own jump to the default, so agbcc's four-case tree
+    // reaches it through two `b .Ldefault` blocks — and comparing candidates by BLOCK counted that
+    // one default as two and declined the whole tree. Two leaves are the same default when each is
+    // a BARE jump (no params, one `br`, no body of its own) to the same block passing the same
+    // values: nothing about them can then differ, so the representative emits what either would.
+    // Anything else — a leaf with a body, two leaves passing different values — is still two
+    // defaults and still declines.
+    if (defaults.length > 1 && !defaults.every((d) => sameBareJump(defaults[0], d))) {
       return null;
     }
     const defaultBlk = defaults[0] ?? null;
