@@ -72,7 +72,7 @@ import { analyze } from './analysis';
 import { makeLoopHazards, updateWriteSet } from './hazards';
 import { analyzeLoops } from './loops';
 import { type NameMerge, coalesceNames } from './namecoalesce';
-import { makeSwitchRecovery } from './switch-recover';
+import { type ArmExit, makeSwitchRecovery } from './switch-recover';
 
 // Lower a constant-offset memory access to its lvalue/rvalue Expr. If the base was recovered as a
 // struct pointer (raise/structs.ts), the byte offset resolves to a NAMED field (`base->field_<off>`);
@@ -676,6 +676,12 @@ export interface StructureOptions {
   // body). GCC freely uses `!=`; IDO prefers `==`/`<`. A per-compiler DATA lever, not an `arch ==`
   // branch — default true (permissive; the decline path keeps it sound either way).
   switchAllowsNeqCase?: boolean;
+  // Comparison-tree switch recovery: emit the case arms in the order the ASSEMBLY lays their
+  // bodies out, rather than sorted by ascending case value. A per-compiler DATA lever declared in
+  // TargetDescription.compilerBehaviors — a compiler opts in on evidence that it neither reorders
+  // basic blocks nor schedules across them, so the layout it produced IS the order the source
+  // wrote. Default false: absent, the arms keep the ascending spelling.
+  switchArmsFollowLayout?: boolean;
   // Commutative load pairs re-spell in def (evaluation) order — see the swap in lowerDef. Default
   // true; verified byte-exact on agbcc and IDO. A per-compiler DATA lever declared in
   // TargetDescription.compilerBehaviors: the first compiler whose scheduler is shown re-ordering
@@ -792,6 +798,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     negateJoinedBranchSense = false,
     orderArgCopiesByComputation = true,
     switchAllowsNeqCase = true,
+    switchArmsFollowLayout = false,
     defOrderLoadPairs = true,
     anchorConstCopies = false,
     littleEndian = true,
@@ -2483,7 +2490,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
 
   // ── Regime-A switch recovery (structure/switch-recover.ts): the recognizer's case bodies call
   // back into structureRegion, and Regime B (switch_br, below) shares its fall-through predicate.
-  const { recognizeSwitch, analyzeArmExit } = makeSwitchRecovery({
+  const { recognizeSwitch, analyzeArmExit, layoutIndex, defaultLayoutPos } = makeSwitchRecovery({
     fn,
     defs,
     dom,
@@ -2492,6 +2499,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     isNamed: (v) => varName.has(v),
     isCmpOpcode: (opcode) => !!CMP_TO_BIN[opcode],
     switchAllowsNeqCase,
+    switchArmsFollowLayout,
     emitsAnchoredWrite: (blk) => blk.ops.some((o) => anchoredAt.has(o)),
     expr: (v) => expr(v),
     structureRegion: (b, stop) => structureRegion(b, stop),
@@ -2565,17 +2573,54 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       if (defEdge.block !== merge) {
         siblings.add(defEdge.block);
       }
-      // ONE emission order for the whole statement: the case arms in table order, then the default —
-      // which is exactly where C puts it. Adjacency is read off this array, so "falls into the next
-      // arm" needs no separate rule for a case that falls into the default (it is the arm after the
-      // last case, and legal C).
+      // ARM ORDER. Grouping the table's slots by target walks them in TABLE order, which for a dense
+      // table is ascending case value — the neutral spelling, and the source's order only by
+      // accident. Where the compiler has declared that its block layout IS the order the arms were
+      // written (TargetDescription.switchArmsFollowLayout — the same fact and the same evidence
+      // Regime A reads, and agbcc's jump tables carry it too: 8 dense arms written 5,2,0,4,1,3,6,7
+      // lay their bodies out in that order under an ascending table), the bodies' layout is the
+      // evidence and the arms take it.
+      //
+      // Only when NO arm falls through. Here — unlike Regime A, which declines fall-through
+      // outright — emission order is load-bearing for correctness (the l3/ast.ts non-neutrality
+      // note): a falling arm must be emitted directly above the one it falls into, so its position
+      // is not free to move. `analyzeArmExit` does not depend on emission order, so the exits can
+      // be settled first and reused below. Grouping by target already gives every arm a DISTINCT
+      // entry block, so no two sort keys can be equal and the tie-break Regime A needs on shared
+      // bodies has nothing to decide here.
+      const exitOf = new Map<Block, ArmExit>();
+      for (const entry of [...arms.map((a) => a.entry), defEdge.block]) {
+        if (!exitOf.has(entry)) {
+          exitOf.set(entry, analyzeArmExit(entry, b, merge, siblings));
+        }
+      }
+      const armsFollowLayout = switchArmsFollowLayout && [...exitOf.values()].every((e) => e.kind === 'break');
+      if (armsFollowLayout) {
+        arms.sort((x, y) => layoutIndex(x.entry) - layoutIndex(y.entry));
+      }
+      // The `default:` arm carries that evidence too, and a table hands it over the same way: the
+      // range check BRANCHES to the default (`bhi .Ldefault`), so its block is never one the
+      // dispatch ran into — measured, a 5-arm table lays the default's body at each of the six
+      // positions the source can write it in exactly there. `defaultLayoutPos` states the refusals.
+      const defaultAt =
+        armsFollowLayout && defEdge.block !== merge
+          ? defaultLayoutPos(
+              defEdge.block,
+              arms.map((a) => a.entry),
+              false,
+            )
+          : undefined;
+      // ONE emission order for the whole statement: the case arms, then the default. Adjacency is
+      // read off this array, so "falls into the next arm" needs no separate rule for a case that
+      // falls into the default (it is the arm after the last case, and legal C). Where the LABEL is
+      // printed is `defaultAt`, which the emission order does not follow.
       const emitOrder = [...arms, { entry: defEdge.block, edge: defEdge, values: null as number[] | null }];
       // Each arm's switch-edge copies, computed ONCE and in emission order: `argAssignsFor` mints
       // swap-cycle temp names, so calling it twice for one edge burns a temp number and changes the
       // output (the same reason emitDoWhile reuses its `updates`).
       const edgeCopies = emitOrder.map((a) => argAssignsFor(b, a.edge));
       const bodies = emitOrder.map((a, i) => {
-        const exit = analyzeArmExit(a.entry, b, merge, siblings);
+        const exit = exitOf.get(a.entry)!;
         if (exit.kind === 'unstructurable') {
           throw new StructureError(`cannot structure '${fn.name}': ${exit.why}`);
         }
@@ -2615,7 +2660,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         k: 'switch',
         scrutinee: expr(term.operands[0]),
         cases: outCases,
-        ...(defBody.length ? { default: defBody } : {}),
+        ...(defBody.length ? { default: defBody, ...(defaultAt !== undefined ? { defaultAt } : {}) } : {}),
       };
       out.push(sw);
       if (merge && merge !== stop) {

@@ -75,6 +75,18 @@ export interface TargetDescription {
     // body). GCC freely emits `!=`; IDO prefers `==`/`<`. Absent ⇒ true (permissive); the
     // decline path keeps recovery sound either way.
     switchAllowsNeqCase?: boolean;
+    // Switch recovery: emit the case arms in the order the ASSEMBLY lays their bodies out, rather
+    // than sorted by ascending case value. True claims the compiler emits case bodies as it walks
+    // the arms and never MOVES one afterwards — neither reordering basic blocks nor scheduling
+    // across them. agbcc declares it from its own sources: `stmt.c` expand_end_case takes
+    // `before_case = get_last_insn()` AFTER the bodies are expanded in source order and its closing
+    // `reorder_insns` moves only the DISPATCH in front of them, and the Makefile's SRCS compiles
+    // neither sched.c nor reorg.c. SCOPE — SRCS does compile jump.c, whose cross-jump merges two
+    // identical arm bodies into ONE block, so a merged pair's own order is gone from the asm; that
+    // surfaces as two case values sharing a body, which switch-recover.ts ties by ascending value.
+    // Absent ⇒ ascending case value, where ido/kmc-gcc/mwcc sit: each has a scheduler and none has
+    // been put through that evidence. A compiler opts in on its own, never by inheriting.
+    switchArmsFollowLayout?: boolean;
     // Commutative load pairs re-spell in def (evaluation) order (structure.ts lowerDef). Absent
     // ⇒ true — verified byte-exact on agbcc and IDO; a compiler whose scheduler is shown
     // re-ordering independent loads opts OUT here.
@@ -134,6 +146,7 @@ export const ARMV4T_AGBCC: TargetDescription = {
     orderArgCopiesByComputation: true,
     nearBaseSpan: 255,
     readsStayWhereWritten: true,
+    switchArmsFollowLayout: true,
   },
 };
 

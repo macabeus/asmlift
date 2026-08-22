@@ -19,6 +19,8 @@ export interface SwitchRecoverDeps {
   /** is this opcode an integer comparison? */
   isCmpOpcode: (opcode: string) => boolean;
   switchAllowsNeqCase: boolean;
+  /** emit the case arms in the ASSEMBLY's block-layout order rather than by ascending case value */
+  switchArmsFollowLayout: boolean;
   /** does emitting this block's ops carry a statement beyond the ops themselves? A def-site
    *  ANCHORED merge copy (structure.ts anchorConstCopies) is attached to a const op and emitted
    *  with the block's side effects — a test block carrying one is not pure however pure its
@@ -46,6 +48,12 @@ export interface SwitchRecovery {
   /** shared with the Regime-B (`switch_br`) path in structure.ts, which recovers the fall-through
    *  this returns; Regime A only accepts `break` arms and otherwise declines to if-recovery. */
   analyzeArmExit: (entry: Block, b: Block, merge: Block | null, siblings: Set<Block>) => ArmExit;
+  /** a block's position in the ASSEMBLY — the arm-order evidence, shared with Regime B so the two
+   *  regimes read it from one definition (and one statement of what it rests on). */
+  layoutIndex: (blk: Block) => number;
+  /** where the `default:` label goes among `armEntries`, or `undefined` for C's last position —
+   *  shared with Regime B so both regimes state that refusal once. */
+  defaultLayoutPos: (defaultBlk: Block, armEntries: Block[], placedByDispatch: boolean) => number | undefined;
 }
 
 export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
@@ -58,10 +66,71 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     isNamed,
     isCmpOpcode,
     switchAllowsNeqCase,
+    switchArmsFollowLayout,
     emitsAnchoredWrite,
     expr,
     structureRegion,
   } = deps;
+
+  // A block's index in `fn.blocks` as its position in the ASSEMBLY — the sole warrant for reading a
+  // source's arm order off block indices below, and true PER FRONTEND rather than of the IR:
+  //   - thumb.ts and mips.ts build the list by scanning the instruction stream in address order;
+  //   - ppc.ts does not. It APPENDS a synthetic return block (`synthReturn`) at the end of the list
+  //     for every conditional-return branch, wherever in the stream that branch sits, so its list
+  //     is not address order at all;
+  //   - raising only ever REMOVES blocks from the list (raise/{divpow2,latch,retsink,shortcircuit}
+  //     .ts all `filter`), never inserts or reorders, so the frontend's order is what survives.
+  // `switchArmsFollowLayout` is therefore a claim about a target's FRONTEND as much as about its
+  // compiler, and a target opts in on both — which is why PPC_MWCC, whose frontend fails the first
+  // half, does not.
+  const blockIndex = new Map(fn.blocks.map((blk, i) => [blk, i] as const));
+  const layoutIndex = (blk: Block): number => blockIndex.get(blk) ?? -1;
+
+  /** A block with no body of its own: no params, and one op that only LEAVES. `ret` qualifies as
+   *  well as `br` because raise/retsink.ts rewrites the one into the other — a cross-jumped arm
+   *  body has two dispatch preds, which is exactly the shape that makes retsink sink the merge's
+   *  return into every leaf, the fall-out jumps included. */
+  const isBareExit = (blk: Block): boolean =>
+    blk.params.length === 0 && blk.ops.length === 1 && (blk.ops[0].opcode === 'br' || blk.ops[0].opcode === 'ret');
+
+  /** Are these two blocks the SAME bare exit — the same jump with the same args, or the same return
+   *  of the same values? Neither has a body, so two of them are indistinguishable at emission. */
+  const sameBareExit = (a: Block, c: Block): boolean => {
+    if (a === c) {
+      return true;
+    }
+    if (!isBareExit(a) || !isBareExit(c) || a.ops[0].opcode !== c.ops[0].opcode) {
+      return false;
+    }
+    const same = (x: readonly Value[], y: readonly Value[]) => x.length === y.length && x.every((v, i) => v === y[i]);
+    if (a.ops[0].opcode === 'ret') {
+      return same(a.ops[0].operands, c.ops[0].operands);
+    }
+    const [x, y] = [a, c].map((blk) => blk.ops[0].successors[0]);
+    return x.block === y.block && same(x.args, y.args);
+  };
+
+  // Where the `default:` label goes among the arms, as a COUNT of the arms laid out before it — the
+  // same evidence the case bodies carry, read the same way. Compiled at every position of a 3- to
+  // 8-case switch, the default's block lands where the source wrote it. `undefined` ⇒ C's
+  // conventional last position, which is what every other producer of this node means.
+  //
+  // THREE refusals. One is about a block the walk already read as a CASE arm — a dense table sends
+  // every unwritten value's slot to the default's block, so grouping the slots gives that block an
+  // arm of its own and its index is where THAT arm sits. The other two are about a block the
+  // DISPATCH placed rather than the arm:
+  //   - a block with no body of its own is one the dispatch minted (`b .Ldefault`), and which of
+  //     several such the collapse below keeps is a walk-order accident;
+  //   - `emit_case_nodes` ends every exhausted subtree with `emit_jump_if_reachable (default_label)`
+  //     and `expand_end_case` reorders the whole dispatch, those jumps included, ahead of the arm
+  //     bodies — so a jump survives as a plain FALL-THROUGH exactly when the default's body is the
+  //     arm the source wrote FIRST. That reading holds only while a second subtree still names the
+  //     label: a two-case chain names it once, and agbcc then lays that block right after the tests
+  //     whatever the source wrote, both spellings compiling to identical instructions.
+  const defaultLayoutPos = (defaultBlk: Block, armEntries: Block[], placedByDispatch: boolean): number | undefined =>
+    !switchArmsFollowLayout || isBareExit(defaultBlk) || armEntries.includes(defaultBlk) || placedByDispatch
+      ? undefined
+      : armEntries.filter((e) => layoutIndex(e) < layoutIndex(defaultBlk)).length;
 
   // --- Regime A: comparison-tree switch recovery ----------------------------------------------------
   // Every ambiguity declines. Four preconditions are enforced below, annotated PRE1..PRE4:
@@ -414,13 +483,29 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     // The default is the single non-test leaf that is NOT a case body. 0 → no default; ≥2 distinct → decline.
     const caseBlocks = new Set(cases.values());
     const defaults = [...defaultCands].filter((d) => !caseBlocks.has(d));
-    if (defaults.length > 1) {
+    // ONE default reached by SEVERAL leaves. `balance_case_nodes`/`emit_case_nodes` give each
+    // subtree that runs out of case values its own jump to the default, so agbcc's four-case tree
+    // reaches it through two `b .Ldefault` blocks, which comparing candidates by BLOCK would count
+    // as two different defaults and decline. Two leaves are the same default when each is
+    // a bare EXIT to the same place carrying the same values: nothing about them can then differ,
+    // so the representative emits what either would. Anything else — a leaf with a body, two
+    // leaves passing different values — is still two defaults and still declines.
+    if (defaults.length > 1 && !defaults.every((d) => sameBareExit(defaults[0], d))) {
       return null;
     }
     const defaultBlk = defaults[0] ?? null;
+    // A default entry that takes BLOCK PARAMETERS. Collapsing the tree DISCARDS its edges, and an
+    // edge's only emission is its parallel copy (structure.ts argAssignsFor) — so an entry the
+    // dispatch hands values to would lose them: `switch (x) { case 1: … case 2: … }` where the
+    // fall-out edge also carried `w = 0` would drop that write silently. Case entries are held to
+    // the same rule where the walk records them (`asLeafOrTest`), by the same argument. Structural
+    // rather than "would these copies elide anyway", and strict at no cost: agbcc reaches its
+    // default through a jump of its OWN, which carries the copies into the default ARM, so a
+    // dispatch branch handing that entry its values is not a shape it emits. One that does declines
+    // LOUD to if-recovery, which spells every copy the asm performs.
     if (defaultBlk && defaultBlk.params.length) {
       return null;
-    } // default entry with a phi → decline
+    }
     // A default candidate that is ALSO a case body means a relational edge hit a case leaf → ambiguous.
     if ([...defaultCands].some((d) => caseBlocks.has(d))) {
       return null;
@@ -456,10 +541,22 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
       }
     }
 
-    // Build the switch. Cases sorted ascending (safe: no fall-through — PRE2). Bodies delegate to the
-    // existing structureRegion (loops/ifs inside cases, the onStack guard — all reused).
+    // ARM ORDER. Every arm here is CLOSED (`allArmsClosed`) and the case values are disjoint (PRE3),
+    // so the order carries no meaning and is pure matching evidence: ascending case VALUE is the
+    // neutral spelling, and where a compiler has declared `switchArmsFollowLayout` the layout of
+    // the bodies is the SOURCE's arm order instead.
+    //
+    // TWO arms the layout cannot order, both falling back rather than recovering:
+    //   - two case VALUES sharing one body block share its index. jump.c's CROSS-JUMP is what
+    //     produces that on agbcc (stacked labels are not: `case 2: case 3:` compiles to a range test
+    //     the walk reads as navigation and declines), so the tie is one the MERGE erased, and
+    //     ascending value breaks it;
+    //   - an arm with no body of its own (`case k: break;`) has its edge resolve to the MERGE, so it
+    //     inherits the merge's index and sorts after every arm that HAS a body.
     const scrutExpr = expr(scrut);
-    const sortedCases = [...cases.entries()].sort((a, c) => a[0] - c[0]);
+    const sortedCases = [...cases.entries()].sort((a, c) =>
+      switchArmsFollowLayout ? layoutIndex(a[1]) - layoutIndex(c[1]) || a[0] - c[0] : a[0] - c[0],
+    );
     const outCases: SwitchCase[] = sortedCases.map(([k, blk]) => ({
       values: [k],
       body: structureRegion(blk, merge),
@@ -468,11 +565,30 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     // An empty default arm is not a default (see the Regime-B note in structure.ts): the label
     // would carry no statement, which says nothing and is not valid C89.
     const defBody = defaultBlk ? structureRegion(defaultBlk, merge) : [];
+    // The `default:` arm is an ARM: where its block is laid out is read exactly as a case body's is
+    // (`defaultLayoutPos`). Every arm here is closed, so the label diverts nothing wherever it lands.
+    // The dispatch placed that block itself when the last test simply RAN OUT into it and no other
+    // subtree jumps there — the two references the tree walk can count.
+    const dispatchTargets = [...seen].flatMap((t) =>
+      t.ops[t.ops.length - 1].successors.map((e) => forwardingTarget(e.block)),
+    );
+    const ranOutInto = (blk: Block) =>
+      [...seen].some((t) => {
+        const succ = t.ops[t.ops.length - 1].successors;
+        return succ.length > 1 && succ[1].block === blk;
+      }) && dispatchTargets.filter((e) => e === blk).length < 2;
+    const defaultAt = defaultBlk
+      ? defaultLayoutPos(
+          defaultBlk,
+          sortedCases.map(([, blk]) => blk),
+          ranOutInto(defaultBlk),
+        )
+      : undefined;
     const sw: Stmt = {
       k: 'switch',
       scrutinee: scrutExpr,
       cases: outCases,
-      ...(defBody.length ? { default: defBody } : {}),
+      ...(defBody.length ? { default: defBody, ...(defaultAt !== undefined ? { defaultAt } : {}) } : {}),
     };
     const out: Stmt[] = [sw];
     if (merge && merge !== stop) {
@@ -480,5 +596,5 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     }
     return out;
   };
-  return { recognizeSwitch, analyzeArmExit };
+  return { recognizeSwitch, analyzeArmExit, layoutIndex, defaultLayoutPos };
 }

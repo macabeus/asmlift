@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generatedAt": "2026-08-22T15:19:21.641Z",
+    "generatedAt": "2026-08-22T15:48:42.635Z",
     "toolchains": [
       "ido7.1",
       "agbcc",
@@ -9,12 +9,12 @@
       "mwcc_242_81"
     ],
     "counts": {
-      "total": 830,
-      "synthetic": 590,
+      "total": 834,
+      "synthetic": 594,
       "real": 240
     },
     "asmlift": {
-      "commit": "10d97275628a2d1cd40a5ee470facfcc03b46d76",
+      "commit": "578ed0c311379def248ccf256d82735563b0678c",
       "dirty": false
     },
     "m2c": {
@@ -4357,7 +4357,7 @@
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "candidateLabel": "unsigned/flip-branch/flip-join",
+        "candidateLabel": "unsigned/flip-join",
         "symbolsUsed": [
           {
             "name": "gEntity",
@@ -4377,22 +4377,22 @@
           }
         ],
         "outcome": "nonmatch",
-        "source": "struct Elem0 { u8 field_0; u8 _pad0[1]; };\nstruct Elem1 { u8 field_0; u8 _pad0[1]; };\nstruct Elem2 { u8 field_0; u8 _pad0[1]; };\nstruct Elem3 { u8 field_0; u8 _pad0[1]; };\nstruct Struct0 { u16 field_0; u16 field_2; u8 _pad0[8]; u8 field_12; u8 _pad1[2]; u8 field_15; u8 field_16; u8 _pad2[3]; u16 field_20; u8 field_22; };\nstruct Struct1 { u8 _pad0[2]; u16 field_2; u8 _pad1[4]; u8 field_8; u8 field_9; u8 _pad2[12]; u8 field_22; };\nstruct Struct2 { u8 _pad0[2]; u16 field_2; u8 _pad1[4]; u8 field_8; u8 field_9; u8 _pad2[12]; u8 field_22; };\nvoid EntityItemDrop(u32 a0) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    u8 * p0;\n    p0 = (u8 *)&gEntity;\n    if (gGameFlagsPtr[10] != 1) {\n        if (p0[(u8)a0 * 28 + 15] == 3) {\n            p0[(u8)a0 * 28 + 15] = 0;\n            ((struct Struct0 *)((u8)a0 * 28 + (u32)&gEntity))->field_20 = 0;\n            p0[(u8)a0 * 28 + 16] = 1;\n            p0[(u8)a0 * 28 + 12] = 1 - 5 & p0[(u8)a0 * 28 + 12];\n            if ((u32)(p0[129 << 2] << 28) >> 30 == 0) {\n                v2 = ((u16 *)&gEntity)[252] + 16;\n            } else {\n                v2 = ((u16 *)&gEntity)[252] - 16;\n            }\n            ((struct Struct0 *)((u8)a0 * 28 + (u32)&gEntity))->field_0 = v2;\n            ((struct Struct1 *)((u8)a0 * 28 + (u32)&gEntity))->field_2 = ((u16 *)&gEntity)[253];\n            p0[(u8)a0 * 28 + 8] = ((struct Elem0 *)&gItemDropParamTable)[(a0 << 24) + (228 << 24) >> 24].field_0;\n            p0[(u8)a0 * 28 + 9] = ((struct Elem1 *)((u32)&gItemDropParamTable + 1))[(a0 << 24) + (228 << 24) >> 24].field_0;\n            p0[(u8)a0 * 28 + 22] = 4;\n            return;\n        } else {\n            if (p0[(u8)a0 * 28 + 15] > 3) {\n                if (p0[(u8)a0 * 28 + 15] == 4) {\n                    p0[(u8)a0 * 28 + 15] = 0;\n                    ((struct Struct0 *)((u8)a0 * 28 + (u32)&gEntity))->field_20 = 0;\n                    p0[(u8)a0 * 28 + 16] = 1;\n                    p0[(u8)a0 * 28 + 12] = 1 - 5 & p0[(u8)a0 * 28 + 12];\n                    if ((u32)(p0[129 << 2] << 28) >> 30 == 0) {\n                        v3 = ((u16 *)&gEntity)[252] + 16;\n                    } else {\n                        v3 = ((u16 *)&gEntity)[252] - 16;\n                    }\n                    ((struct Struct0 *)((u8)a0 * 28 + (u32)&gEntity))->field_0 = v3;\n                    ((struct Struct2 *)((u8)a0 * 28 + (u32)&gEntity))->field_2 = ((u16 *)&gEntity)[253];\n                    p0[(u8)a0 * 28 + 8] = ((struct Elem2 *)((u32)&gItemDropParamTable + 10))[(a0 << 24) + (228 << 24) >> 24].field_0;\n                    p0[(u8)a0 * 28 + 9] = ((struct Elem3 *)((u32)&gItemDropParamTable + 11))[(a0 << 24) + (228 << 24) >> 24].field_0;\n                    p0[(u8)a0 * 28 + 22] = 2;\n                    return;\n                } else {\n                    return;\n                }\n            } else {\n                if (p0[(u8)a0 * 28 + 15] == 0) {\n                    ((struct Struct0 *)((u8)a0 * 28 + (u32)&gEntity))->field_2 = (134 << 1) - (*(s8 *)((u8)a0 * 28 + (u32)&gEntity + 9) * *(s16 *)((((struct Struct0 *)((u8)a0 * 28 + (u32)&gEntity))->field_20 << 1) + (u32)&gSineTable + 0) >> 8);\n                    ((struct Struct0 *)((u8)a0 * 28 + (u32)&gEntity))->field_0 = *(s8 *)((u8)a0 * 28 + (u32)&gEntity + 8) + ((struct Struct0 *)((u8)a0 * 28 + (u32)&gEntity))->field_0;\n                    v0 = p0[(u8)a0 * 28 + 22];\n                    v1 = ((struct Struct0 *)((u8)a0 * 28 + (u32)&gEntity))->field_20;\n                    ((struct Struct0 *)((u8)a0 * 28 + (u32)&gEntity))->field_20 = v1 + v0;\n                    if ((u16)(v1 + v0) != 136) {\n                        return;\n                    } else {\n                        p0[(u8)a0 * 28 + 15] = 28;\n                        p0[(u8)a0 * 28 + 16] = 0;\n                        return;\n                    }\n                } else {\n                    return;\n                }\n            }\n        }\n    } else {\n        p0[(u8)a0 * 28 + 15] = 28;\n        p0[(u8)a0 * 28 + 16] = 0;\n        return;\n    }\n}\n",
-        "score": 146,
-        "maxScore": 236,
+        "source": "struct Elem0 { u8 field_0; u8 _pad0[1]; };\nstruct Elem1 { u8 field_0; u8 _pad0[1]; };\nstruct Elem2 { u8 field_0; u8 _pad0[1]; };\nstruct Elem3 { u8 field_0; u8 _pad0[1]; };\nstruct Struct0 { u16 field_0; u16 field_2; u8 _pad0[8]; u8 field_12; u8 _pad1[2]; u8 field_15; u8 field_16; u8 _pad2[3]; u16 field_20; u8 field_22; };\nstruct Struct1 { u8 _pad0[2]; u16 field_2; u8 _pad1[4]; u8 field_8; u8 field_9; u8 _pad2[12]; u8 field_22; };\nstruct Struct2 { u8 _pad0[2]; u16 field_2; u8 _pad1[4]; u8 field_8; u8 field_9; u8 _pad2[12]; u8 field_22; };\nvoid EntityItemDrop(u32 a0) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    u8 * p0;\n    p0 = (u8 *)&gEntity;\n    if (gGameFlagsPtr[10] == 1) {\n        p0[(u8)a0 * 28 + 15] = 28;\n        p0[(u8)a0 * 28 + 16] = 0;\n        return;\n    } else {\n        switch (p0[(u8)a0 * 28 + 15]) {\n            case 3:\n                p0[(u8)a0 * 28 + 15] = 0;\n                ((struct Struct0 *)((u8)a0 * 28 + (u32)&gEntity))->field_20 = 0;\n                p0[(u8)a0 * 28 + 16] = 1;\n                p0[(u8)a0 * 28 + 12] = 1 - 5 & p0[(u8)a0 * 28 + 12];\n                if ((u32)(p0[129 << 2] << 28) >> 30 == 0) {\n                    v2 = ((u16 *)&gEntity)[252] + 16;\n                } else {\n                    v2 = ((u16 *)&gEntity)[252] - 16;\n                }\n                ((struct Struct0 *)((u8)a0 * 28 + (u32)&gEntity))->field_0 = v2;\n                ((struct Struct1 *)((u8)a0 * 28 + (u32)&gEntity))->field_2 = ((u16 *)&gEntity)[253];\n                p0[(u8)a0 * 28 + 8] = ((struct Elem0 *)&gItemDropParamTable)[(a0 << 24) + (228 << 24) >> 24].field_0;\n                p0[(u8)a0 * 28 + 9] = ((struct Elem1 *)((u32)&gItemDropParamTable + 1))[(a0 << 24) + (228 << 24) >> 24].field_0;\n                p0[(u8)a0 * 28 + 22] = 4;\n                return;\n            case 4:\n                p0[(u8)a0 * 28 + 15] = 0;\n                ((struct Struct0 *)((u8)a0 * 28 + (u32)&gEntity))->field_20 = 0;\n                p0[(u8)a0 * 28 + 16] = 1;\n                p0[(u8)a0 * 28 + 12] = 1 - 5 & p0[(u8)a0 * 28 + 12];\n                if ((u32)(p0[129 << 2] << 28) >> 30 == 0) {\n                    v3 = ((u16 *)&gEntity)[252] + 16;\n                } else {\n                    v3 = ((u16 *)&gEntity)[252] - 16;\n                }\n                ((struct Struct0 *)((u8)a0 * 28 + (u32)&gEntity))->field_0 = v3;\n                ((struct Struct2 *)((u8)a0 * 28 + (u32)&gEntity))->field_2 = ((u16 *)&gEntity)[253];\n                p0[(u8)a0 * 28 + 8] = ((struct Elem2 *)((u32)&gItemDropParamTable + 10))[(a0 << 24) + (228 << 24) >> 24].field_0;\n                p0[(u8)a0 * 28 + 9] = ((struct Elem3 *)((u32)&gItemDropParamTable + 11))[(a0 << 24) + (228 << 24) >> 24].field_0;\n                p0[(u8)a0 * 28 + 22] = 2;\n                return;\n            case 0:\n                ((struct Struct0 *)((u8)a0 * 28 + (u32)&gEntity))->field_2 = (134 << 1) - (*(s8 *)((u8)a0 * 28 + (u32)&gEntity + 9) * *(s16 *)((((struct Struct0 *)((u8)a0 * 28 + (u32)&gEntity))->field_20 << 1) + (u32)&gSineTable + 0) >> 8);\n                ((struct Struct0 *)((u8)a0 * 28 + (u32)&gEntity))->field_0 = *(s8 *)((u8)a0 * 28 + (u32)&gEntity + 8) + ((struct Struct0 *)((u8)a0 * 28 + (u32)&gEntity))->field_0;\n                v0 = p0[(u8)a0 * 28 + 22];\n                v1 = ((struct Struct0 *)((u8)a0 * 28 + (u32)&gEntity))->field_20;\n                ((struct Struct0 *)((u8)a0 * 28 + (u32)&gEntity))->field_20 = v1 + v0;\n                if ((u16)(v1 + v0) == 136) {\n                    p0[(u8)a0 * 28 + 15] = 28;\n                    p0[(u8)a0 * 28 + 16] = 0;\n                    return;\n                } else {\n                    return;\n                }\n            default:\n                return;\n        }\n    }\n}\n",
+        "score": 118,
+        "maxScore": 217,
         "compileErrors": null,
         "breakdown": {
-          "insert": 54,
-          "delete": 32,
-          "replace": 17,
-          "opMismatch": 2,
-          "argMismatch": 41
+          "insert": 35,
+          "delete": 12,
+          "replace": 21,
+          "opMismatch": 3,
+          "argMismatch": 47
         },
         "quality": {
-          "score": 76,
-          "lines": 77,
+          "score": 72,
+          "lines": 70,
           "gotos": 0,
-          "casts": 50,
+          "casts": 47,
           "unkGlue": 0,
           "rawMem": 3,
           "addrDeref": 0
@@ -4424,15 +4424,15 @@
       },
       "gapSize": {
         "decompiler": "asmlift",
-        "score": 146,
-        "maxScore": 236,
-        "ratio": 0.6186440677966102,
+        "score": 118,
+        "maxScore": 217,
+        "ratio": 0.543778801843318,
         "kinds": {
-          "insert": 54,
-          "delete": 32,
-          "replace": 17,
-          "opMismatch": 2,
-          "argMismatch": 41
+          "insert": 35,
+          "delete": 12,
+          "replace": 21,
+          "opMismatch": 3,
+          "argMismatch": 47
         }
       },
       "scripts": {
@@ -5986,7 +5986,7 @@
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "candidateLabel": "unsigned/flip-join/livebase/raw-globals",
+        "candidateLabel": "unsigned/flip-join/reread-globals",
         "symbolsUsed": [
           {
             "name": "gBg2XMag",
@@ -6014,20 +6014,20 @@
           }
         ],
         "outcome": "nonmatch",
-        "source": "struct Elem0 { u16 field_0; u16 field_2; u16 field_4; u16 field_6; u8 _pad0[20]; };\nstruct Elem1 { s32 field_0; u8 _pad0[4]; };\nvoid TransformSingleEntityToScreen(u32 a0, u32 a1, u32 a2, u32 a3, u32 a4) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    s32 v5;\n    s32 v6;\n    s32 v7;\n    s32 v8;\n    u8 * v9;\n    s32 v10;\n    s32 v11;\n    u16 * p0;\n    p0 = (u16 *)&gUnk_03003430;\n    v0 = ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_0;\n    v1 = p0[32];\n    ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_4 = v0 - (s8)a1 - v1;\n    v2 = ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_2;\n    v3 = p0[33];\n    ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_6 = v2 - (s8)a2 - v3;\n    v4 = p0[32];\n    v5 = p0[33];\n    v6 = gBg2XMag;\n    v7 = gBg2YMag;\n    v8 = p0[32];\n    if ((u8)a0 > 12) {\n        v9 = (u8 *)((s32 *)(((u8)a0 << 3) + gUnk_030051DC - 104))[1];\n    } else {\n        v9 = (u8 *)((struct Elem1 *)((u32)&gUnk_08078FC8 + 4))[(u8)a0].field_0;\n    }\n    switch (15 & v9[5]) {\n        case 0:\n        case 4:\n        case 5:\n            v11 = p0[33] - (s16)(u16)(v5 - (v2 - (s8)a2 - v3)) * v7 / 256;\n            v10 = (s32)((128 << 1) - gBg2YMag) >> 6;\n            break;\n        case 1:\n        case 6:\n        case 8:\n            v11 = p0[33] - (s16)(u16)(v5 - (v2 - (s8)a2 - v3)) * v7 / 256;\n            v10 = (s32)((128 << 1) - gBg2YMag) >> 5;\n            break;\n        case 2:\n        case 7:\n        case 9:\n        case 10:\n            v11 = p0[33] - (s16)(u16)(v5 - (v2 - (s8)a2 - v3)) * v7 / 256;\n            v10 = (s32)((128 << 1) - gBg2YMag) >> 4;\n            break;\n        case 3:\n        case 11:\n            v11 = p0[33] - (s16)(u16)(v5 - (v2 - (s8)a2 - v3)) * v7 / 256;\n            v10 = (s32)((128 << 1) - gBg2YMag) >> 3;\n            break;\n        default:\n            v11 = p0[33] - (s16)(u16)(v5 - (v2 - (s8)a2 - v3)) * v7 / 256;\n            v10 = (s32)((128 << 1) - gBg2YMag) >> 4;\n    }\n    ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_4 = v8 - v6 * (s16)(v4 - (v0 - (s8)a1 - v1)) / 256;\n    ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_6 = v11 + v10;\n    return;\n}\n",
-        "score": 215,
-        "maxScore": 259,
+        "source": "struct Elem0 { u16 field_0; u16 field_2; u16 field_4; u16 field_6; u8 _pad0[20]; };\nstruct Elem1 { s32 field_0; u8 _pad0[4]; };\nvoid TransformSingleEntityToScreen(u32 a0, u32 a1, u32 a2, u32 a3, u32 a4) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    u8 * v5;\n    s32 v6;\n    s32 v7;\n    v0 = ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_0;\n    ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_4 = v0 - (s8)a1 - gUnk_03003430.bg2HOfs;\n    v1 = ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_2;\n    ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_6 = v1 - (s8)a2 - gUnk_03003430.bg2VOfs;\n    v2 = gUnk_03003430.bg2HOfs;\n    v3 = gBg2XMag;\n    v4 = gUnk_03003430.bg2HOfs;\n    if ((u8)a0 > 12) {\n        v5 = (u8 *)((s32 *)(((u8)a0 << 3) + (u8 *)gUnk_030051DC - 104))[1];\n    } else {\n        v5 = (u8 *)((struct Elem1 *)((u32)&gUnk_08078FC8 + 4))[(u8)a0].field_0;\n    }\n    switch (15 & v5[5]) {\n        case 3:\n        case 11:\n            v7 = gUnk_03003430.bg2VOfs - (s16)(u16)(gUnk_03003430.bg2VOfs - (v1 - (s8)a2 - gUnk_03003430.bg2VOfs)) * gBg2YMag / 256;\n            v6 = (s32)((128 << 1) - gBg2YMag) >> 3;\n            break;\n        case 1:\n        case 6:\n        case 8:\n            v7 = gUnk_03003430.bg2VOfs - (s16)(u16)(gUnk_03003430.bg2VOfs - (v1 - (s8)a2 - gUnk_03003430.bg2VOfs)) * gBg2YMag / 256;\n            v6 = (s32)((128 << 1) - gBg2YMag) >> 5;\n            break;\n        case 0:\n        case 4:\n        case 5:\n            v7 = gUnk_03003430.bg2VOfs - (s16)(u16)(gUnk_03003430.bg2VOfs - (v1 - (s8)a2 - gUnk_03003430.bg2VOfs)) * gBg2YMag / 256;\n            v6 = (s32)((128 << 1) - gBg2YMag) >> 6;\n            break;\n        case 2:\n        case 7:\n        case 9:\n        case 10:\n            v7 = gUnk_03003430.bg2VOfs - (s16)(u16)(gUnk_03003430.bg2VOfs - (v1 - (s8)a2 - gUnk_03003430.bg2VOfs)) * gBg2YMag / 256;\n            v6 = (s32)((128 << 1) - gBg2YMag) >> 4;\n            break;\n        default:\n            v7 = gUnk_03003430.bg2VOfs - (s16)(u16)(gUnk_03003430.bg2VOfs - (v1 - (s8)a2 - gUnk_03003430.bg2VOfs)) * gBg2YMag / 256;\n            v6 = (s32)((128 << 1) - gBg2YMag) >> 4;\n    }\n    ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_4 = v4 - v3 * (s16)(v2 - (v0 - (s8)a1 - gUnk_03003430.bg2HOfs)) / 256;\n    ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_6 = v7 + v6;\n    return;\n}\n",
+        "score": 219,
+        "maxScore": 257,
         "compileErrors": null,
         "breakdown": {
-          "insert": 101,
-          "delete": 30,
-          "replace": 26,
+          "insert": 99,
+          "delete": 33,
+          "replace": 20,
           "opMismatch": 1,
-          "argMismatch": 57
+          "argMismatch": 66
         },
         "quality": {
           "score": 84,
-          "lines": 66,
+          "lines": 56,
           "gotos": 0,
           "casts": 37,
           "unkGlue": 0,
@@ -6057,15 +6057,15 @@
       },
       "gapSize": {
         "decompiler": "asmlift",
-        "score": 215,
-        "maxScore": 259,
-        "ratio": 0.8301158301158301,
+        "score": 219,
+        "maxScore": 257,
+        "ratio": 0.8521400778210116,
         "kinds": {
-          "insert": 101,
-          "delete": 30,
-          "replace": 26,
+          "insert": 99,
+          "delete": 33,
+          "replace": 20,
           "opMismatch": 1,
-          "argMismatch": 57
+          "argMismatch": 66
         }
       },
       "scripts": {
@@ -12357,13 +12357,13 @@
           }
         ],
         "outcome": "nonmatch",
-        "source": "s32 ModifyStatByNature(u32 a0, u32 a1, u32 a2) {\n    s32 v0;\n    s32 v1;\n    if ((a2 << 24) + (255 << 24) >> 24 > 4) {\n        return (u16)a1;\n    } else {\n        v0 = ((u8 *)&gNatureStatTable)[(u8)a2 + ((u8)a0 * 5 - 1)];\n        switch ((s8)v0) {\n            case -1:\n                v1 = 90;\n                return (u16)((u16)(v1 * (u16)a1) / 100);\n            case 1:\n                v1 = 110;\n                return (u16)((u16)(v1 * (u16)a1) / 100);\n            default:\n                return (u16)a1;\n        }\n    }\n}\n",
-        "score": 48,
-        "maxScore": 60,
+        "source": "s32 ModifyStatByNature(u32 a0, u32 a1, u32 a2) {\n    s32 v0;\n    s32 v1;\n    if ((a2 << 24) + (255 << 24) >> 24 > 4) {\n        return (u16)a1;\n    } else {\n        v0 = ((u8 *)&gNatureStatTable)[(u8)a2 + ((u8)a0 * 5 - 1)];\n        switch ((s8)v0) {\n            case 1:\n                v1 = 110;\n                return (u16)((u16)(v1 * (u16)a1) / 100);\n            case -1:\n                v1 = 90;\n                return (u16)((u16)(v1 * (u16)a1) / 100);\n            default:\n                return (u16)a1;\n        }\n    }\n}\n",
+        "score": 53,
+        "maxScore": 66,
         "compileErrors": null,
         "breakdown": {
-          "insert": 14,
-          "delete": 14,
+          "insert": 20,
+          "delete": 13,
           "replace": 10,
           "opMismatch": 1,
           "argMismatch": 9
@@ -12699,16 +12699,16 @@
         "candidateLabel": "unsigned/flip-join",
         "symbolsUsed": [],
         "outcome": "nonmatch",
-        "source": "void SetMauvilleOldManLanguage(u8 * a0, u32 a1, u32 a2, u32 a3, u32 a4) {\n    s32 v0;\n    u8 * v1;\n    u8 * v2;\n    u8 * v3;\n    s32 v4;\n    u8 * v5;\n    u8 * v6;\n    switch (*a0) {\n        case 0:\n            if (a3 == 1) {\n                v5 = a0 + 42;\n                *v5 = a1;\n                return;\n            } else {\n                v6 = a0 + 42;\n                *v6 = a2;\n                return;\n            }\n        case 1:\n            if (a3 == 1) {\n                a0[2] = a1;\n                return;\n            } else {\n                a0[2] = a2;\n                return;\n            }\n        case 2:\n            v0 = 0;\n            v1 = a0 + 50;\n            do {\n                if (IsStringJapanese(a0 + (11 * v0 + 5)) != 0) {\n                    *v1 = a1;\n                } else {\n                    *v1 = a2;\n                }\n                v1 = v1 + 1;\n                v0 = v0 + 1;\n            } while (v0 <= 3);\n            return;\n        case 3:\n            v3 = a0 + 52;\n            v2 = a0 + 8;\n            v4 = 3;\n            do {\n                if (IsStringJapanese(v2) != 0) {\n                    *v3 = a1;\n                } else {\n                    *v3 = a2;\n                }\n                v3 = v3 + 1;\n                v2 = v2 + 7;\n                v4 = v4 - 1;\n            } while (v4 >= 0);\n            return;\n        case 4:\n            if (a3 == 1) {\n                v5 = a0 + 32;\n                *v5 = a1;\n                return;\n            } else {\n                v6 = a0 + 32;\n                *v6 = a2;\n                return;\n            }\n        default:\n            return;\n    }\n}\n",
-        "score": 53,
-        "maxScore": 103,
+        "source": "void SetMauvilleOldManLanguage(u8 * a0, u32 a1, u32 a2, u32 a3, u32 a4) {\n    s32 v0;\n    u8 * v1;\n    u8 * v2;\n    u8 * v3;\n    s32 v4;\n    u8 * v5;\n    u8 * v6;\n    switch (*a0) {\n        case 2:\n            v0 = 0;\n            v1 = a0 + 50;\n            do {\n                if (IsStringJapanese(a0 + (11 * v0 + 5)) != 0) {\n                    *v1 = a1;\n                } else {\n                    *v1 = a2;\n                }\n                v1 = v1 + 1;\n                v0 = v0 + 1;\n            } while (v0 <= 3);\n            return;\n        case 3:\n            v3 = a0 + 52;\n            v2 = a0 + 8;\n            v4 = 3;\n            do {\n                if (IsStringJapanese(v2) != 0) {\n                    *v3 = a1;\n                } else {\n                    *v3 = a2;\n                }\n                v3 = v3 + 1;\n                v2 = v2 + 7;\n                v4 = v4 - 1;\n            } while (v4 >= 0);\n            return;\n        case 0:\n            if (a3 == 1) {\n                v5 = a0 + 42;\n                *v5 = a1;\n                return;\n            } else {\n                v6 = a0 + 42;\n                *v6 = a2;\n                return;\n            }\n        case 1:\n            if (a3 == 1) {\n                a0[2] = a1;\n                return;\n            } else {\n                a0[2] = a2;\n                return;\n            }\n        case 4:\n            if (a3 == 1) {\n                v5 = a0 + 32;\n                *v5 = a1;\n                return;\n            } else {\n                v6 = a0 + 32;\n                *v6 = a2;\n                return;\n            }\n        default:\n            return;\n    }\n}\n",
+        "score": 14,
+        "maxScore": 89,
         "compileErrors": null,
         "breakdown": {
-          "insert": 14,
-          "delete": 16,
+          "insert": 0,
+          "delete": 2,
           "replace": 0,
           "opMismatch": 0,
-          "argMismatch": 23
+          "argMismatch": 12
         },
         "quality": {
           "score": 96,
@@ -12746,15 +12746,15 @@
       },
       "gapSize": {
         "decompiler": "asmlift",
-        "score": 53,
-        "maxScore": 103,
-        "ratio": 0.5145631067961165,
+        "score": 14,
+        "maxScore": 89,
+        "ratio": 0.15730337078651685,
         "kinds": {
-          "insert": 14,
-          "delete": 16,
+          "insert": 0,
+          "delete": 2,
           "replace": 0,
           "opMismatch": 0,
-          "argMismatch": 23
+          "argMismatch": 12
         }
       },
       "scripts": {
@@ -16817,25 +16817,25 @@
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "candidateLabel": "unsigned/flip-join",
+        "candidateLabel": "unsigned/defsite/flip-join",
         "symbolsUsed": [],
         "outcome": "nonmatch",
-        "source": "struct Struct0 { s32 field_0; u8 _pad0[4]; s32 field_8; u16 field_12; u16 field_14; u8 _pad1[4]; u16 field_20; u16 field_22; u8 _pad2[2]; u8 field_26; u8 field_27; u8 field_28; u8 _pad3[2]; u8 field_31; s32 field_32; };\nvoid sub_804D360(struct Struct0 * a0, u32 a1, u32 a2) {\n    s32 v0;\n    if ((s16)a1 != 1) {\n        if ((s16)a1 <= 1) {\n            if ((s16)a1 != 0) {\n                v0 = 0;\n            } else {\n                if ((u16)a2 == 2) {\n                    v0 = 128 << 3 | 128 << 4;\n                } else {\n                    v0 = 128 << 3;\n                }\n            }\n        } else {\n            switch ((s16)a1) {\n                case 2:\n                    if ((u16)a2 == 0) {\n                        v0 = 128 << 4 | 128 << 3;\n                    } else {\n                        v0 = 128 << 4;\n                    }\n                    break;\n                case 3:\n                    if ((u16)a2 == 0) {\n                        v0 = 128 << 3;\n                    } else {\n                        v0 = 0;\n                    }\n                    break;\n                default:\n                    v0 = 0;\n            }\n        }\n    } else {\n        if ((u16)a2 == 2) {\n            v0 = 128 << 4;\n        } else {\n            v0 = 0;\n        }\n    }\n    a0->field_0 = VramMalloc(9, (s16)a1, (u16)a2);\n    a0->field_12 = 235 << 2;\n    a0->field_26 = 6;\n    a0->field_20 = 192 << 3;\n    a0->field_14 = 0;\n    a0->field_22 = 0;\n    a0->field_27 = 255;\n    a0->field_28 = 16;\n    a0->field_31 = 0;\n    a0->field_32 = 16 - 17;\n    a0->field_8 = v0 | 128 << 5;\n    UpdateSpriteAnimation(a0, 0, 0);\n    return;\n}\n",
-        "score": 55,
-        "maxScore": 92,
+        "source": "struct Struct0 { s32 field_0; u8 _pad0[4]; s32 field_8; u16 field_12; u16 field_14; u8 _pad1[4]; u16 field_20; u16 field_22; u8 _pad2[2]; u8 field_26; u8 field_27; u8 field_28; u8 _pad3[2]; u8 field_31; s32 field_32; };\nvoid sub_804D360(struct Struct0 * a0, u32 a1, u32 a2) {\n    s32 v0;\n    v0 = 0;\n    switch ((s16)a1) {\n        case 0:\n            if ((u16)a2 == 2) {\n                v0 = 128 << 3 | 128 << 4;\n            } else {\n                v0 = 128 << 3;\n            }\n            break;\n        case 1:\n            if ((u16)a2 == 2) v0 = 128 << 4;\n            break;\n        case 2:\n            if ((u16)a2 == 0) {\n                v0 = 128 << 4 | 128 << 3;\n            } else {\n                v0 = 128 << 4;\n            }\n            break;\n        case 3:\n            if ((u16)a2 == 0) v0 = 128 << 3;\n            break;\n    }\n    a0->field_0 = VramMalloc(9, (s16)a1, (u16)a2);\n    a0->field_12 = 235 << 2;\n    a0->field_26 = 6;\n    a0->field_20 = 192 << 3;\n    a0->field_14 = 0;\n    a0->field_22 = 0;\n    a0->field_27 = 255;\n    a0->field_28 = 16;\n    a0->field_31 = 0;\n    a0->field_32 = 16 - 17;\n    a0->field_8 = v0 | 128 << 5;\n    UpdateSpriteAnimation(a0, 0, 0);\n    return;\n}\n",
+        "score": 44,
+        "maxScore": 88,
         "compileErrors": null,
         "breakdown": {
-          "insert": 17,
-          "delete": 8,
-          "replace": 2,
-          "opMismatch": 3,
-          "argMismatch": 25
+          "insert": 13,
+          "delete": 4,
+          "replace": 1,
+          "opMismatch": 0,
+          "argMismatch": 26
         },
         "quality": {
-          "score": 84,
-          "lines": 55,
+          "score": 90,
+          "lines": 40,
           "gotos": 0,
-          "casts": 10,
+          "casts": 7,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -58425,22 +58425,22 @@
       },
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "signed/defsite/flip-join",
-        "outcome": "nonmatch",
-        "source": "void swarms(s32 a0, s32 a1) {\n    s32 v0;\n    v0 = 0;\n    if (a0 != 1) {\n        if (a0 <= 1) {\n            if (a0 == 0) v0 = a1 + 1;\n        } else {\n            switch (a0) {\n                case 2:\n                    v0 = a1 + 3;\n                    break;\n                case 3:\n                    v0 = a1 + 4;\n                    break;\n            }\n        }\n    } else {\n        v0 = a1 + 2;\n    }\n    *(s32 *)(128 << 19) = v0;\n    return;\n}\n",
-        "score": 10,
-        "maxScore": 25,
+        "candidateLabel": "signed/defsite",
+        "outcome": "match",
+        "source": "void swarms(s32 a0, s32 a1) {\n    s32 v0;\n    v0 = 0;\n    switch (a0) {\n        case 0:\n            v0 = a1 + 1;\n            break;\n        case 1:\n            v0 = a1 + 2;\n            break;\n        case 2:\n            v0 = a1 + 3;\n            break;\n        case 3:\n            v0 = a1 + 4;\n            break;\n    }\n    *(s32 *)(128 << 19) = v0;\n    return;\n}\n",
+        "score": 0,
+        "maxScore": 24,
         "compileErrors": null,
         "breakdown": {
-          "insert": 1,
-          "delete": 2,
+          "insert": 0,
+          "delete": 0,
           "replace": 0,
-          "opMismatch": 1,
-          "argMismatch": 6
+          "opMismatch": 0,
+          "argMismatch": 0
         },
         "quality": {
           "score": 96,
-          "lines": 22,
+          "lines": 20,
           "gotos": 0,
           "casts": 1,
           "unkGlue": 0,
@@ -58558,6 +58558,324 @@
       }
     },
     {
+      "id": "synthetic:swdeffirst:agbcc",
+      "sym": "swdeffirst",
+      "project": "synthetic",
+      "tier": "synthetic",
+      "toolchain": "agbcc",
+      "isa": "arm",
+      "compiler": "agbcc",
+      "language": "c",
+      "features": [
+        "switch-arms",
+        "branch",
+        "switch",
+        "comparison-tree"
+      ],
+      "loc": 6,
+      "refSource": "#define gOut ((volatile s32 *)0x04000000)\nvoid swdeffirst(s32 mode, s32 n){ s32 w;\n switch (mode) { default: w = 99; break;\n                 case 0: w = n + 1; break; case 1: w = n + 2; break;\n                 case 2: w = n + 3; break; case 3: w = n + 4; break; }\n *gOut = w; }",
+      "targetAsm": "@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tswdeffirst\n\t.type\t swdeffirst,function\n\t.thumb_func\nswdeffirst:\n\tcmp\tr0, #0x1\n\tbeq\t.L6\t@cond_branch\n\tcmp\tr0, #0x1\n\tbgt\t.L10\t@cond_branch\n\tcmp\tr0, #0\n\tbeq\t.L5\t@cond_branch\n\tb\t.L4\n.L10:\n\tcmp\tr0, #0x2\n\tbeq\t.L7\t@cond_branch\n\tcmp\tr0, #0x3\n\tbeq\t.L8\t@cond_branch\n.L4:\n\tmov\tr1, #0x63\n\tb\t.L3\n.L5:\n\tadd\tr1, r1, #0x1\n\tb\t.L3\n.L6:\n\tadd\tr1, r1, #0x2\n\tb\t.L3\n.L7:\n\tadd\tr1, r1, #0x3\n\tb\t.L3\n.L8:\n\tadd\tr1, r1, #0x4\n.L3:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr1, [r0]\n\tbx\tlr\n.Lfe1:\n\t.size\t swdeffirst,.Lfe1-swdeffirst\n",
+      "ctx": "void swdeffirst(s32 mode, s32 n);",
+      "proto": {
+        "swdeffirst": {
+          "returnsVoid": true
+        }
+      },
+      "asmlift": {
+        "decompiler": "asmlift",
+        "candidateLabel": "signed",
+        "outcome": "match",
+        "source": "void swdeffirst(s32 a0, s32 a1) {\n    s32 v0;\n    switch (a0) {\n        default:\n            v0 = 99;\n            break;\n        case 0:\n            v0 = a1 + 1;\n            break;\n        case 1:\n            v0 = a1 + 2;\n            break;\n        case 2:\n            v0 = a1 + 3;\n            break;\n        case 3:\n            v0 = a1 + 4;\n            break;\n    }\n    *(s32 *)(128 << 19) = v0;\n    return;\n}\n",
+        "score": 0,
+        "maxScore": 24,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 0
+        },
+        "quality": {
+          "score": 92,
+          "lines": 22,
+          "gotos": 0,
+          "casts": 1,
+          "unkGlue": 0,
+          "rawMem": 1,
+          "addrDeref": 0
+        }
+      },
+      "m2c": {
+        "decompiler": "m2c",
+        "outcome": "match",
+        "source": "void swdeffirst(s32 mode, s32 n) {\n    s32 var_r1;\n\n    switch (mode) {                                 /* irregular */\n    default:\n        var_r1 = 0x63;\n        break;\n    case 0:\n        var_r1 = n + 1;\n        break;\n    case 1:\n        var_r1 = n + 2;\n        break;\n    case 2:\n        var_r1 = n + 3;\n        break;\n    case 3:\n        var_r1 = n + 4;\n        break;\n    }\n    *(s32 *)0x04000000 = var_r1;\n}\n",
+        "score": 0,
+        "maxScore": 24,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 0
+        },
+        "quality": {
+          "score": 96,
+          "lines": 21,
+          "gotos": 0,
+          "casts": 1,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 1
+        }
+      },
+      "gapSize": null,
+      "scripts": {
+        "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `swdeffirst` — benchmark function synthetic:swdeffirst:agbcc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The exact agbcc `.s` text the benchmark fed m2c, verbatim.\ncat > in.s <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tswdeffirst\n\t.type\t swdeffirst,function\n\t.thumb_func\nswdeffirst:\n\tcmp\tr0, #0x1\n\tbeq\t.L6\t@cond_branch\n\tcmp\tr0, #0x1\n\tbgt\t.L10\t@cond_branch\n\tcmp\tr0, #0\n\tbeq\t.L5\t@cond_branch\n\tb\t.L4\n.L10:\n\tcmp\tr0, #0x2\n\tbeq\t.L7\t@cond_branch\n\tcmp\tr0, #0x3\n\tbeq\t.L8\t@cond_branch\n.L4:\n\tmov\tr1, #0x63\n\tb\t.L3\n.L5:\n\tadd\tr1, r1, #0x1\n\tb\t.L3\n.L6:\n\tadd\tr1, r1, #0x2\n\tb\t.L3\n.L7:\n\tadd\tr1, r1, #0x3\n\tb\t.L3\n.L8:\n\tadd\tr1, r1, #0x4\n.L3:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr1, [r0]\n\tbx\tlr\n.Lfe1:\n\t.size\t swdeffirst,.Lfe1-swdeffirst\nASM_INPUT\n\n# The exact context header the benchmark passed via --context — prototypes only\n# (no struct/global layouts: the benchmark measures cold recovery).\ncat > ctx.h <<'CTX_INPUT'\nvoid swdeffirst(s32 mode, s32 n);\nCTX_INPUT\n\nargs=(\n  --target gba            # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function swdeffirst   # the symbol to decompile from in.s\n  --context ctx.h         # the C context header above (typedefs + prototypes)\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `swdeffirst` — benchmark function synthetic:swdeffirst:agbcc.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:swdeffirst:agbcc --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact agbcc `.s` text.\ncat > in.asm <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tswdeffirst\n\t.type\t swdeffirst,function\n\t.thumb_func\nswdeffirst:\n\tcmp\tr0, #0x1\n\tbeq\t.L6\t@cond_branch\n\tcmp\tr0, #0x1\n\tbgt\t.L10\t@cond_branch\n\tcmp\tr0, #0\n\tbeq\t.L5\t@cond_branch\n\tb\t.L4\n.L10:\n\tcmp\tr0, #0x2\n\tbeq\t.L7\t@cond_branch\n\tcmp\tr0, #0x3\n\tbeq\t.L8\t@cond_branch\n.L4:\n\tmov\tr1, #0x63\n\tb\t.L3\n.L5:\n\tadd\tr1, r1, #0x1\n\tb\t.L3\n.L6:\n\tadd\tr1, r1, #0x2\n\tb\t.L3\n.L7:\n\tadd\tr1, r1, #0x3\n\tb\t.L3\n.L8:\n\tadd\tr1, r1, #0x4\n.L3:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr1, [r0]\n\tbx\tlr\n.Lfe1:\n\t.size\t swdeffirst,.Lfe1-swdeffirst\nASM_INPUT\n\n# The prototype hints the benchmark fed asmlift (callee arities / void-ness).\ncat > proto.json <<'PROTO_INPUT'\n{\n  \"swdeffirst\": {\n    \"returnsVoid\": true\n  }\n}\nPROTO_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target agbcc          # frontend + target description (ISA, calling convention, compiler idioms)\n  --name swdeffirst       # the symbol to decompile (multi-function input selects by name)\n  --proto proto.json      # the prototype hints above (callee arities / void-ness)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+      }
+    },
+    {
+      "id": "synthetic:swdefmid:agbcc",
+      "sym": "swdefmid",
+      "project": "synthetic",
+      "tier": "synthetic",
+      "toolchain": "agbcc",
+      "isa": "arm",
+      "compiler": "agbcc",
+      "language": "c",
+      "features": [
+        "switch-arms",
+        "branch",
+        "switch",
+        "comparison-tree"
+      ],
+      "loc": 6,
+      "refSource": "#define gOut ((volatile s32 *)0x04000000)\nvoid swdefmid(s32 mode, s32 n){ s32 w;\n switch (mode) { case 0: w = n + 1; break; case 1: w = n + 2; break;\n                 default: w = 99; break;\n                 case 2: w = n + 3; break; case 3: w = n + 4; break; }\n *gOut = w; }",
+      "targetAsm": "@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tswdefmid\n\t.type\t swdefmid,function\n\t.thumb_func\nswdefmid:\n\tcmp\tr0, #0x1\n\tbeq\t.L5\t@cond_branch\n\tcmp\tr0, #0x1\n\tbgt\t.L10\t@cond_branch\n\tcmp\tr0, #0\n\tbeq\t.L4\t@cond_branch\n\tb\t.L6\n.L10:\n\tcmp\tr0, #0x2\n\tbeq\t.L7\t@cond_branch\n\tcmp\tr0, #0x3\n\tbeq\t.L8\t@cond_branch\n\tb\t.L6\n.L4:\n\tadd\tr1, r1, #0x1\n\tb\t.L3\n.L5:\n\tadd\tr1, r1, #0x2\n\tb\t.L3\n.L6:\n\tmov\tr1, #0x63\n\tb\t.L3\n.L7:\n\tadd\tr1, r1, #0x3\n\tb\t.L3\n.L8:\n\tadd\tr1, r1, #0x4\n.L3:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr1, [r0]\n\tbx\tlr\n.Lfe1:\n\t.size\t swdefmid,.Lfe1-swdefmid\n",
+      "ctx": "void swdefmid(s32 mode, s32 n);",
+      "proto": {
+        "swdefmid": {
+          "returnsVoid": true
+        }
+      },
+      "asmlift": {
+        "decompiler": "asmlift",
+        "candidateLabel": "signed",
+        "outcome": "match",
+        "source": "void swdefmid(s32 a0, s32 a1) {\n    s32 v0;\n    switch (a0) {\n        case 0:\n            v0 = a1 + 1;\n            break;\n        case 1:\n            v0 = a1 + 2;\n            break;\n        default:\n            v0 = 99;\n            break;\n        case 2:\n            v0 = a1 + 3;\n            break;\n        case 3:\n            v0 = a1 + 4;\n            break;\n    }\n    *(s32 *)(128 << 19) = v0;\n    return;\n}\n",
+        "score": 0,
+        "maxScore": 25,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 0
+        },
+        "quality": {
+          "score": 92,
+          "lines": 22,
+          "gotos": 0,
+          "casts": 1,
+          "unkGlue": 0,
+          "rawMem": 1,
+          "addrDeref": 0
+        }
+      },
+      "m2c": {
+        "decompiler": "m2c",
+        "outcome": "match",
+        "source": "void swdefmid(s32 mode, s32 n) {\n    s32 var_r1;\n\n    switch (mode) {                                 /* irregular */\n    case 0:\n        var_r1 = n + 1;\n        break;\n    case 1:\n        var_r1 = n + 2;\n        break;\n    default:\n        var_r1 = 0x63;\n        break;\n    case 2:\n        var_r1 = n + 3;\n        break;\n    case 3:\n        var_r1 = n + 4;\n        break;\n    }\n    *(s32 *)0x04000000 = var_r1;\n}\n",
+        "score": 0,
+        "maxScore": 25,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 0
+        },
+        "quality": {
+          "score": 96,
+          "lines": 21,
+          "gotos": 0,
+          "casts": 1,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 1
+        }
+      },
+      "gapSize": null,
+      "scripts": {
+        "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `swdefmid` — benchmark function synthetic:swdefmid:agbcc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The exact agbcc `.s` text the benchmark fed m2c, verbatim.\ncat > in.s <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tswdefmid\n\t.type\t swdefmid,function\n\t.thumb_func\nswdefmid:\n\tcmp\tr0, #0x1\n\tbeq\t.L5\t@cond_branch\n\tcmp\tr0, #0x1\n\tbgt\t.L10\t@cond_branch\n\tcmp\tr0, #0\n\tbeq\t.L4\t@cond_branch\n\tb\t.L6\n.L10:\n\tcmp\tr0, #0x2\n\tbeq\t.L7\t@cond_branch\n\tcmp\tr0, #0x3\n\tbeq\t.L8\t@cond_branch\n\tb\t.L6\n.L4:\n\tadd\tr1, r1, #0x1\n\tb\t.L3\n.L5:\n\tadd\tr1, r1, #0x2\n\tb\t.L3\n.L6:\n\tmov\tr1, #0x63\n\tb\t.L3\n.L7:\n\tadd\tr1, r1, #0x3\n\tb\t.L3\n.L8:\n\tadd\tr1, r1, #0x4\n.L3:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr1, [r0]\n\tbx\tlr\n.Lfe1:\n\t.size\t swdefmid,.Lfe1-swdefmid\nASM_INPUT\n\n# The exact context header the benchmark passed via --context — prototypes only\n# (no struct/global layouts: the benchmark measures cold recovery).\ncat > ctx.h <<'CTX_INPUT'\nvoid swdefmid(s32 mode, s32 n);\nCTX_INPUT\n\nargs=(\n  --target gba            # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function swdefmid     # the symbol to decompile from in.s\n  --context ctx.h         # the C context header above (typedefs + prototypes)\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `swdefmid` — benchmark function synthetic:swdefmid:agbcc.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:swdefmid:agbcc --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact agbcc `.s` text.\ncat > in.asm <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tswdefmid\n\t.type\t swdefmid,function\n\t.thumb_func\nswdefmid:\n\tcmp\tr0, #0x1\n\tbeq\t.L5\t@cond_branch\n\tcmp\tr0, #0x1\n\tbgt\t.L10\t@cond_branch\n\tcmp\tr0, #0\n\tbeq\t.L4\t@cond_branch\n\tb\t.L6\n.L10:\n\tcmp\tr0, #0x2\n\tbeq\t.L7\t@cond_branch\n\tcmp\tr0, #0x3\n\tbeq\t.L8\t@cond_branch\n\tb\t.L6\n.L4:\n\tadd\tr1, r1, #0x1\n\tb\t.L3\n.L5:\n\tadd\tr1, r1, #0x2\n\tb\t.L3\n.L6:\n\tmov\tr1, #0x63\n\tb\t.L3\n.L7:\n\tadd\tr1, r1, #0x3\n\tb\t.L3\n.L8:\n\tadd\tr1, r1, #0x4\n.L3:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr1, [r0]\n\tbx\tlr\n.Lfe1:\n\t.size\t swdefmid,.Lfe1-swdefmid\nASM_INPUT\n\n# The prototype hints the benchmark fed asmlift (callee arities / void-ness).\ncat > proto.json <<'PROTO_INPUT'\n{\n  \"swdefmid\": {\n    \"returnsVoid\": true\n  }\n}\nPROTO_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target agbcc          # frontend + target description (ISA, calling convention, compiler idioms)\n  --name swdefmid         # the symbol to decompile (multi-function input selects by name)\n  --proto proto.json      # the prototype hints above (callee arities / void-ness)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+      }
+    },
+    {
+      "id": "synthetic:swjtdefmid:agbcc",
+      "sym": "swjtdefmid",
+      "project": "synthetic",
+      "tier": "synthetic",
+      "toolchain": "agbcc",
+      "isa": "arm",
+      "compiler": "agbcc",
+      "language": "c",
+      "features": [
+        "switch-arms",
+        "dense",
+        "branch",
+        "switch",
+        "jump-table"
+      ],
+      "loc": 7,
+      "refSource": "#define gOut ((volatile s32 *)0x04000000)\nvoid swjtdefmid(s32 mode, s32 n){ s32 w;\n switch (mode) { case 0: w = n + 1; break; case 1: w = n + 2; break;\n                 default: w = 99; break;\n                 case 2: w = n + 3; break; case 3: w = n + 4; break;\n                 case 4: w = n + 5; break; }\n *gOut = w; }",
+      "targetAsm": "@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tswjtdefmid\n\t.type\t swjtdefmid,function\n\t.thumb_func\nswjtdefmid:\n\tadd\tr2, r1, #0\n\tcmp\tr0, #0x4\n\tbhi\t.L6\t@cond_branch\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L11\n\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n.L12:\n\t.align\t2, 0\n.L11:\n\t.word\t.L10\n\t.align\t2, 0\n\t.align\t2, 0\n.L10:\n\t.word\t.L4\n\t.word\t.L5\n\t.word\t.L7\n\t.word\t.L8\n\t.word\t.L9\n.L4:\n\tadd\tr1, r2, #0x1\n\tb\t.L3\n.L5:\n\tadd\tr1, r2, #0x2\n\tb\t.L3\n.L6:\n\tmov\tr1, #0x63\n\tb\t.L3\n.L7:\n\tadd\tr1, r2, #0x3\n\tb\t.L3\n.L8:\n\tadd\tr1, r2, #0x4\n\tb\t.L3\n.L9:\n\tadd\tr1, r2, #0x5\n.L3:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr1, [r0]\n\tbx\tlr\n.Lfe1:\n\t.size\t swjtdefmid,.Lfe1-swjtdefmid\n",
+      "ctx": "void swjtdefmid(s32 mode, s32 n);",
+      "proto": {
+        "swjtdefmid": {
+          "returnsVoid": true
+        }
+      },
+      "asmlift": {
+        "decompiler": "asmlift",
+        "candidateLabel": "unsigned",
+        "outcome": "match",
+        "source": "void swjtdefmid(u32 a0, u32 a1) {\n    s32 v0;\n    switch (a0) {\n        case 0:\n            v0 = a1 + 1;\n            break;\n        case 1:\n            v0 = a1 + 2;\n            break;\n        default:\n            v0 = 99;\n            break;\n        case 2:\n            v0 = a1 + 3;\n            break;\n        case 3:\n            v0 = a1 + 4;\n            break;\n        case 4:\n            v0 = a1 + 5;\n            break;\n    }\n    *(s32 *)(128 << 19) = v0;\n    return;\n}\n",
+        "score": 0,
+        "maxScore": 29,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 0
+        },
+        "quality": {
+          "score": 92,
+          "lines": 25,
+          "gotos": 0,
+          "casts": 1,
+          "unkGlue": 0,
+          "rawMem": 1,
+          "addrDeref": 0
+        }
+      },
+      "m2c": {
+        "decompiler": "m2c",
+        "outcome": "match",
+        "source": "void swjtdefmid(s32 mode, s32 n) {\n    s32 var_r1;\n\n    switch (mode) {\n    case 0:\n        var_r1 = n + 1;\n        break;\n    case 1:\n        var_r1 = n + 2;\n        break;\n    default:\n        var_r1 = 0x63;\n        break;\n    case 2:\n        var_r1 = n + 3;\n        break;\n    case 3:\n        var_r1 = n + 4;\n        break;\n    case 4:\n        var_r1 = n + 5;\n        break;\n    }\n    *(s32 *)0x04000000 = var_r1;\n}\n",
+        "score": 0,
+        "maxScore": 29,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 0
+        },
+        "quality": {
+          "score": 96,
+          "lines": 24,
+          "gotos": 0,
+          "casts": 1,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 1
+        }
+      },
+      "gapSize": null,
+      "scripts": {
+        "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `swjtdefmid` — benchmark function synthetic:swjtdefmid:agbcc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The exact agbcc `.s` text the benchmark fed m2c, verbatim.\ncat > in.s <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tswjtdefmid\n\t.type\t swjtdefmid,function\n\t.thumb_func\nswjtdefmid:\n\tadd\tr2, r1, #0\n\tcmp\tr0, #0x4\n\tbhi\t.L6\t@cond_branch\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L11\n\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n.L12:\n\t.align\t2, 0\n.L11:\n\t.word\t.L10\n\t.align\t2, 0\n\t.align\t2, 0\n.L10:\n\t.word\t.L4\n\t.word\t.L5\n\t.word\t.L7\n\t.word\t.L8\n\t.word\t.L9\n.L4:\n\tadd\tr1, r2, #0x1\n\tb\t.L3\n.L5:\n\tadd\tr1, r2, #0x2\n\tb\t.L3\n.L6:\n\tmov\tr1, #0x63\n\tb\t.L3\n.L7:\n\tadd\tr1, r2, #0x3\n\tb\t.L3\n.L8:\n\tadd\tr1, r2, #0x4\n\tb\t.L3\n.L9:\n\tadd\tr1, r2, #0x5\n.L3:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr1, [r0]\n\tbx\tlr\n.Lfe1:\n\t.size\t swjtdefmid,.Lfe1-swjtdefmid\nASM_INPUT\n\n# The exact context header the benchmark passed via --context — prototypes only\n# (no struct/global layouts: the benchmark measures cold recovery).\ncat > ctx.h <<'CTX_INPUT'\nvoid swjtdefmid(s32 mode, s32 n);\nCTX_INPUT\n\nargs=(\n  --target gba            # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function swjtdefmid   # the symbol to decompile from in.s\n  --context ctx.h         # the C context header above (typedefs + prototypes)\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `swjtdefmid` — benchmark function synthetic:swjtdefmid:agbcc.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:swjtdefmid:agbcc --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact agbcc `.s` text.\ncat > in.asm <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tswjtdefmid\n\t.type\t swjtdefmid,function\n\t.thumb_func\nswjtdefmid:\n\tadd\tr2, r1, #0\n\tcmp\tr0, #0x4\n\tbhi\t.L6\t@cond_branch\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L11\n\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n.L12:\n\t.align\t2, 0\n.L11:\n\t.word\t.L10\n\t.align\t2, 0\n\t.align\t2, 0\n.L10:\n\t.word\t.L4\n\t.word\t.L5\n\t.word\t.L7\n\t.word\t.L8\n\t.word\t.L9\n.L4:\n\tadd\tr1, r2, #0x1\n\tb\t.L3\n.L5:\n\tadd\tr1, r2, #0x2\n\tb\t.L3\n.L6:\n\tmov\tr1, #0x63\n\tb\t.L3\n.L7:\n\tadd\tr1, r2, #0x3\n\tb\t.L3\n.L8:\n\tadd\tr1, r2, #0x4\n\tb\t.L3\n.L9:\n\tadd\tr1, r2, #0x5\n.L3:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr1, [r0]\n\tbx\tlr\n.Lfe1:\n\t.size\t swjtdefmid,.Lfe1-swjtdefmid\nASM_INPUT\n\n# The prototype hints the benchmark fed asmlift (callee arities / void-ness).\ncat > proto.json <<'PROTO_INPUT'\n{\n  \"swjtdefmid\": {\n    \"returnsVoid\": true\n  }\n}\nPROTO_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target agbcc          # frontend + target description (ISA, calling convention, compiler idioms)\n  --name swjtdefmid       # the symbol to decompile (multi-function input selects by name)\n  --proto proto.json      # the prototype hints above (callee arities / void-ness)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+      }
+    },
+    {
+      "id": "synthetic:swjtorder:agbcc",
+      "sym": "swjtorder",
+      "project": "synthetic",
+      "tier": "synthetic",
+      "toolchain": "agbcc",
+      "isa": "arm",
+      "compiler": "agbcc",
+      "language": "c",
+      "features": [
+        "switch-arms",
+        "dense",
+        "branch",
+        "switch",
+        "jump-table"
+      ],
+      "loc": 6,
+      "refSource": "#define gOut ((volatile s32 *)0x04000000)\nvoid swjtorder(s32 mode, s32 n){ s32 w;\n switch (mode) { case 3: w = n + 4; break; case 0: w = n + 1; break;\n                 case 4: w = n + 5; break; case 1: w = n + 2; break;\n                 case 2: w = n + 3; break; default: w = 99; break; }\n *gOut = w; }",
+      "targetAsm": "@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tswjtorder\n\t.type\t swjtorder,function\n\t.thumb_func\nswjtorder:\n\tadd\tr2, r1, #0\n\tcmp\tr0, #0x4\n\tbhi\t.L9\t@cond_branch\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L11\n\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n.L12:\n\t.align\t2, 0\n.L11:\n\t.word\t.L10\n\t.align\t2, 0\n\t.align\t2, 0\n.L10:\n\t.word\t.L5\n\t.word\t.L7\n\t.word\t.L8\n\t.word\t.L4\n\t.word\t.L6\n.L4:\n\tadd\tr1, r2, #0x4\n\tb\t.L3\n.L5:\n\tadd\tr1, r2, #0x1\n\tb\t.L3\n.L6:\n\tadd\tr1, r2, #0x5\n\tb\t.L3\n.L7:\n\tadd\tr1, r2, #0x2\n\tb\t.L3\n.L8:\n\tadd\tr1, r2, #0x3\n\tb\t.L3\n.L9:\n\tmov\tr1, #0x63\n.L3:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr1, [r0]\n\tbx\tlr\n.Lfe1:\n\t.size\t swjtorder,.Lfe1-swjtorder\n",
+      "ctx": "void swjtorder(s32 mode, s32 n);",
+      "proto": {
+        "swjtorder": {
+          "returnsVoid": true
+        }
+      },
+      "asmlift": {
+        "decompiler": "asmlift",
+        "candidateLabel": "unsigned",
+        "outcome": "match",
+        "source": "void swjtorder(u32 a0, u32 a1) {\n    s32 v0;\n    switch (a0) {\n        case 3:\n            v0 = a1 + 4;\n            break;\n        case 0:\n            v0 = a1 + 1;\n            break;\n        case 4:\n            v0 = a1 + 5;\n            break;\n        case 1:\n            v0 = a1 + 2;\n            break;\n        case 2:\n            v0 = a1 + 3;\n            break;\n        default:\n            v0 = 99;\n    }\n    *(s32 *)(128 << 19) = v0;\n    return;\n}\n",
+        "score": 0,
+        "maxScore": 29,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 0
+        },
+        "quality": {
+          "score": 92,
+          "lines": 24,
+          "gotos": 0,
+          "casts": 1,
+          "unkGlue": 0,
+          "rawMem": 1,
+          "addrDeref": 0
+        }
+      },
+      "m2c": {
+        "decompiler": "m2c",
+        "outcome": "match",
+        "source": "void swjtorder(s32 mode, s32 n) {\n    s32 var_r1;\n\n    switch (mode) {\n    case 3:\n        var_r1 = n + 4;\n        break;\n    case 0:\n        var_r1 = n + 1;\n        break;\n    case 4:\n        var_r1 = n + 5;\n        break;\n    case 1:\n        var_r1 = n + 2;\n        break;\n    case 2:\n        var_r1 = n + 3;\n        break;\n    default:\n        var_r1 = 0x63;\n        break;\n    }\n    *(s32 *)0x04000000 = var_r1;\n}\n",
+        "score": 0,
+        "maxScore": 29,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 0
+        },
+        "quality": {
+          "score": 96,
+          "lines": 24,
+          "gotos": 0,
+          "casts": 1,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 1
+        }
+      },
+      "gapSize": null,
+      "scripts": {
+        "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `swjtorder` — benchmark function synthetic:swjtorder:agbcc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The exact agbcc `.s` text the benchmark fed m2c, verbatim.\ncat > in.s <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tswjtorder\n\t.type\t swjtorder,function\n\t.thumb_func\nswjtorder:\n\tadd\tr2, r1, #0\n\tcmp\tr0, #0x4\n\tbhi\t.L9\t@cond_branch\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L11\n\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n.L12:\n\t.align\t2, 0\n.L11:\n\t.word\t.L10\n\t.align\t2, 0\n\t.align\t2, 0\n.L10:\n\t.word\t.L5\n\t.word\t.L7\n\t.word\t.L8\n\t.word\t.L4\n\t.word\t.L6\n.L4:\n\tadd\tr1, r2, #0x4\n\tb\t.L3\n.L5:\n\tadd\tr1, r2, #0x1\n\tb\t.L3\n.L6:\n\tadd\tr1, r2, #0x5\n\tb\t.L3\n.L7:\n\tadd\tr1, r2, #0x2\n\tb\t.L3\n.L8:\n\tadd\tr1, r2, #0x3\n\tb\t.L3\n.L9:\n\tmov\tr1, #0x63\n.L3:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr1, [r0]\n\tbx\tlr\n.Lfe1:\n\t.size\t swjtorder,.Lfe1-swjtorder\nASM_INPUT\n\n# The exact context header the benchmark passed via --context — prototypes only\n# (no struct/global layouts: the benchmark measures cold recovery).\ncat > ctx.h <<'CTX_INPUT'\nvoid swjtorder(s32 mode, s32 n);\nCTX_INPUT\n\nargs=(\n  --target gba            # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function swjtorder    # the symbol to decompile from in.s\n  --context ctx.h         # the C context header above (typedefs + prototypes)\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `swjtorder` — benchmark function synthetic:swjtorder:agbcc.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:swjtorder:agbcc --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact agbcc `.s` text.\ncat > in.asm <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tswjtorder\n\t.type\t swjtorder,function\n\t.thumb_func\nswjtorder:\n\tadd\tr2, r1, #0\n\tcmp\tr0, #0x4\n\tbhi\t.L9\t@cond_branch\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L11\n\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n.L12:\n\t.align\t2, 0\n.L11:\n\t.word\t.L10\n\t.align\t2, 0\n\t.align\t2, 0\n.L10:\n\t.word\t.L5\n\t.word\t.L7\n\t.word\t.L8\n\t.word\t.L4\n\t.word\t.L6\n.L4:\n\tadd\tr1, r2, #0x4\n\tb\t.L3\n.L5:\n\tadd\tr1, r2, #0x1\n\tb\t.L3\n.L6:\n\tadd\tr1, r2, #0x5\n\tb\t.L3\n.L7:\n\tadd\tr1, r2, #0x2\n\tb\t.L3\n.L8:\n\tadd\tr1, r2, #0x3\n\tb\t.L3\n.L9:\n\tmov\tr1, #0x63\n.L3:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr1, [r0]\n\tbx\tlr\n.Lfe1:\n\t.size\t swjtorder,.Lfe1-swjtorder\nASM_INPUT\n\n# The prototype hints the benchmark fed asmlift (callee arities / void-ness).\ncat > proto.json <<'PROTO_INPUT'\n{\n  \"swjtorder\": {\n    \"returnsVoid\": true\n  }\n}\nPROTO_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target agbcc          # frontend + target description (ISA, calling convention, compiler idioms)\n  --name swjtorder        # the symbol to decompile (multi-function input selects by name)\n  --proto proto.json      # the prototype hints above (callee arities / void-ness)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+      }
+    },
+    {
       "id": "synthetic:swlayout:agbcc",
       "sym": "swlayout",
       "project": "synthetic",
@@ -58584,9 +58902,9 @@
       "asmlift": {
         "decompiler": "asmlift",
         "candidateLabel": "signed",
-        "outcome": "nonmatch",
-        "source": "void swlayout(s32 a0, s32 a1) {\n    s32 v0;\n    switch (a0) {\n        case 0:\n            v0 = a1 + 1;\n            break;\n        case 1:\n            v0 = a1 + 2;\n            break;\n        case 2:\n            v0 = a1 + 3;\n            break;\n        case 3:\n            v0 = a1 + 4;\n            break;\n        default:\n            v0 = 0;\n    }\n    *(s32 *)(128 << 19) = v0;\n    return;\n}\n",
-        "score": 8,
+        "outcome": "match",
+        "source": "void swlayout(s32 a0, s32 a1) {\n    s32 v0;\n    switch (a0) {\n        case 2:\n            v0 = a1 + 3;\n            break;\n        case 0:\n            v0 = a1 + 1;\n            break;\n        case 3:\n            v0 = a1 + 4;\n            break;\n        case 1:\n            v0 = a1 + 2;\n            break;\n        default:\n            v0 = 0;\n    }\n    *(s32 *)(128 << 19) = v0;\n    return;\n}\n",
+        "score": 0,
         "maxScore": 25,
         "compileErrors": null,
         "breakdown": {
@@ -58594,7 +58912,7 @@
           "delete": 0,
           "replace": 0,
           "opMismatch": 0,
-          "argMismatch": 8
+          "argMismatch": 0
         },
         "quality": {
           "score": 92,
@@ -58668,22 +58986,22 @@
       },
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "signed/flip-join",
-        "outcome": "nonmatch",
-        "source": "struct Elem0 { u16 field_0; u16 field_2; };\nvoid swmulti(s32 a0, s32 a1, s32 a2) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    v1 = 0;\n    v2 = 0;\n    v3 = 0;\n    v0 = 0;\n    do {\n        if (a0 != 1) {\n            if (a0 <= 1) {\n                if (a0 == 0) {\n                    v1 = ((struct Elem0 *)50345008)[a1].field_0;\n                    v2 = 32 - ((struct Elem0 *)50345008)[a1].field_0;\n                    v3 = 0;\n                }\n            } else {\n                switch (a0) {\n                    case 2:\n                        v1 = ((struct Elem0 *)50345008)[a1].field_2;\n                        v2 = 32 - ((struct Elem0 *)50345008)[a1].field_2;\n                        v3 = v0 * ((struct Elem0 *)50345008)[a1].field_2;\n                        break;\n                    case 3:\n                        v1 = ((struct Elem0 *)50345008)[a1].field_0;\n                        v2 = 16;\n                        v3 = v0 & 32;\n                        break;\n                }\n            }\n        } else {\n            v1 = 32;\n            v2 = 0;\n            v3 = v0 << 5;\n        }\n        *(s32 *)67109076 = v1;\n        *(s32 *)67109080 = v2;\n        *(s32 *)67109084 = v3;\n        v0 = v0 + 1;\n    } while (v0 < a2);\n    return;\n}\n",
-        "score": 20,
-        "maxScore": 62,
+        "candidateLabel": "signed",
+        "outcome": "match",
+        "source": "struct Elem0 { u16 field_0; u16 field_2; };\nvoid swmulti(s32 a0, s32 a1, s32 a2) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    v1 = 0;\n    v2 = 0;\n    v3 = 0;\n    v0 = 0;\n    do {\n        switch (a0) {\n            case 0:\n                v1 = ((struct Elem0 *)50345008)[a1].field_0;\n                v2 = 32 - ((struct Elem0 *)50345008)[a1].field_0;\n                v3 = 0;\n                break;\n            case 1:\n                v1 = 32;\n                v2 = 0;\n                v3 = v0 << 5;\n                break;\n            case 2:\n                v1 = ((struct Elem0 *)50345008)[a1].field_2;\n                v2 = 32 - ((struct Elem0 *)50345008)[a1].field_2;\n                v3 = v0 * ((struct Elem0 *)50345008)[a1].field_2;\n                break;\n            case 3:\n                v1 = ((struct Elem0 *)50345008)[a1].field_0;\n                v2 = 16;\n                v3 = v0 & 32;\n                break;\n        }\n        *(s32 *)67109076 = v1;\n        *(s32 *)67109080 = v2;\n        *(s32 *)67109084 = v3;\n        v0 = v0 + 1;\n    } while (v0 < a2);\n    return;\n}\n",
+        "score": 0,
+        "maxScore": 54,
         "compileErrors": null,
         "breakdown": {
-          "insert": 8,
-          "delete": 8,
+          "insert": 0,
+          "delete": 0,
           "replace": 0,
-          "opMismatch": 2,
-          "argMismatch": 2
+          "opMismatch": 0,
+          "argMismatch": 0
         },
         "quality": {
           "score": 98,
-          "lines": 44,
+          "lines": 40,
           "gotos": 0,
           "casts": 3,
           "unkGlue": 0,
@@ -58715,19 +59033,7 @@
           "<tmp>/cand.c.pp.c:37: invalid type argument of `->'"
         ]
       },
-      "gapSize": {
-        "decompiler": "asmlift",
-        "score": 20,
-        "maxScore": 62,
-        "ratio": 0.3225806451612903,
-        "kinds": {
-          "insert": 8,
-          "delete": 8,
-          "replace": 0,
-          "opMismatch": 2,
-          "argMismatch": 2
-        }
-      },
+      "gapSize": null,
       "scripts": {
         "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `swmulti` — benchmark function synthetic:swmulti:agbcc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The exact agbcc `.s` text the benchmark fed m2c, verbatim.\ncat > in.s <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tswmulti\n\t.type\t swmulti,function\n\t.thumb_func\nswmulti:\n\tpush\t{r4, r5, r6, r7, lr}\n\tadd\tr4, r0, #0\n\tmov\tip, r2\n\tmov\tr3, #0x0\n\tmov\tr5, #0x0\n\tmov\tr6, #0x0\n\tmov\tr2, #0x0\n\tlsl\tr1, r1, #0x2\n\tldr\tr0, .L16\n\tadd\tr1, r1, r0\n\tmov\tr7, #0x20\n.L3:\n\tcmp\tr4, #0x1\n\tbeq\t.L8\t@cond_branch\n\tcmp\tr4, #0x1\n\tbgt\t.L13\t@cond_branch\n\tcmp\tr4, #0\n\tbeq\t.L7\t@cond_branch\n\tb\t.L6\n.L17:\n\t.align\t2, 0\n.L16:\n\t.word\t0x3003430\n.L13:\n\tcmp\tr4, #0x2\n\tbeq\t.L9\t@cond_branch\n\tcmp\tr4, #0x3\n\tbeq\t.L10\t@cond_branch\n\tb\t.L6\n.L7:\n\tldrh\tr3, [r1]\n\tsub\tr5, r7, r3\n\tmov\tr6, #0x0\n\tb\t.L6\n.L8:\n\tmov\tr3, #0x20\n\tmov\tr5, #0x0\n\tlsl\tr6, r2, #0x5\n\tb\t.L6\n.L9:\n\tldrh\tr3, [r1, #0x2]\n\tsub\tr5, r7, r3\n\tmov\tr6, r2\n\tmul\tr6, r6, r3\n\tb\t.L6\n.L10:\n\tldrh\tr3, [r1]\n\tmov\tr5, #0x10\n\tadd\tr6, r2, #0\n\tand\tr6, r6, r7\n.L6:\n\tldr\tr0, .L18\n\tstr\tr3, [r0]\n\tadd\tr0, r0, #0x4\n\tstr\tr5, [r0]\n\tadd\tr0, r0, #0x4\n\tstr\tr6, [r0]\n\tadd\tr2, r2, #0x1\n\tcmp\tr2, ip\n\tblt\t.L3\t@cond_branch\n\tpop\t{r4, r5, r6, r7}\n\tpop\t{r0}\n\tbx\tr0\n.L19:\n\t.align\t2, 0\n.L18:\n\t.word\t0x40000d4\n.Lfe1:\n\t.size\t swmulti,.Lfe1-swmulti\nASM_INPUT\n\n# The exact context header the benchmark passed via --context — prototypes only\n# (no struct/global layouts: the benchmark measures cold recovery).\ncat > ctx.h <<'CTX_INPUT'\nvoid swmulti(s32 mode, s32 idx, s32 n);\nCTX_INPUT\n\nargs=(\n  --target gba            # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function swmulti      # the symbol to decompile from in.s\n  --context ctx.h         # the C context header above (typedefs + prototypes)\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
         "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `swmulti` — benchmark function synthetic:swmulti:agbcc.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:swmulti:agbcc --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact agbcc `.s` text.\ncat > in.asm <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tswmulti\n\t.type\t swmulti,function\n\t.thumb_func\nswmulti:\n\tpush\t{r4, r5, r6, r7, lr}\n\tadd\tr4, r0, #0\n\tmov\tip, r2\n\tmov\tr3, #0x0\n\tmov\tr5, #0x0\n\tmov\tr6, #0x0\n\tmov\tr2, #0x0\n\tlsl\tr1, r1, #0x2\n\tldr\tr0, .L16\n\tadd\tr1, r1, r0\n\tmov\tr7, #0x20\n.L3:\n\tcmp\tr4, #0x1\n\tbeq\t.L8\t@cond_branch\n\tcmp\tr4, #0x1\n\tbgt\t.L13\t@cond_branch\n\tcmp\tr4, #0\n\tbeq\t.L7\t@cond_branch\n\tb\t.L6\n.L17:\n\t.align\t2, 0\n.L16:\n\t.word\t0x3003430\n.L13:\n\tcmp\tr4, #0x2\n\tbeq\t.L9\t@cond_branch\n\tcmp\tr4, #0x3\n\tbeq\t.L10\t@cond_branch\n\tb\t.L6\n.L7:\n\tldrh\tr3, [r1]\n\tsub\tr5, r7, r3\n\tmov\tr6, #0x0\n\tb\t.L6\n.L8:\n\tmov\tr3, #0x20\n\tmov\tr5, #0x0\n\tlsl\tr6, r2, #0x5\n\tb\t.L6\n.L9:\n\tldrh\tr3, [r1, #0x2]\n\tsub\tr5, r7, r3\n\tmov\tr6, r2\n\tmul\tr6, r6, r3\n\tb\t.L6\n.L10:\n\tldrh\tr3, [r1]\n\tmov\tr5, #0x10\n\tadd\tr6, r2, #0\n\tand\tr6, r6, r7\n.L6:\n\tldr\tr0, .L18\n\tstr\tr3, [r0]\n\tadd\tr0, r0, #0x4\n\tstr\tr5, [r0]\n\tadd\tr0, r0, #0x4\n\tstr\tr6, [r0]\n\tadd\tr2, r2, #0x1\n\tcmp\tr2, ip\n\tblt\t.L3\t@cond_branch\n\tpop\t{r4, r5, r6, r7}\n\tpop\t{r0}\n\tbx\tr0\n.L19:\n\t.align\t2, 0\n.L18:\n\t.word\t0x40000d4\n.Lfe1:\n\t.size\t swmulti,.Lfe1-swmulti\nASM_INPUT\n\n# The prototype hints the benchmark fed asmlift (callee arities / void-ness).\ncat > proto.json <<'PROTO_INPUT'\n{\n  \"swmulti\": {\n    \"returnsVoid\": true\n  }\n}\nPROTO_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target agbcc          # frontend + target description (ISA, calling convention, compiler idioms)\n  --name swmulti          # the symbol to decompile (multi-function input selects by name)\n  --proto proto.json      # the prototype hints above (callee arities / void-ness)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
@@ -62837,22 +63143,22 @@
       "targetAsm": "@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tuninit_sw\n\t.type\t uninit_sw,function\n\t.thumb_func\nuninit_sw:\n\tcmp\tr0, #0x1\n\tbeq\t.L5\t@cond_branch\n\tcmp\tr0, #0x1\n\tbgt\t.L10\t@cond_branch\n\tcmp\tr0, #0\n\tbeq\t.L4\t@cond_branch\n\tb\t.L3\n.L10:\n\tcmp\tr0, #0x2\n\tbeq\t.L6\t@cond_branch\n\tcmp\tr0, #0x3\n\tbeq\t.L7\t@cond_branch\n\tb\t.L3\n.L4:\n\tadd\tr2, r1, #0\n\tb\t.L3\n.L5:\n\tlsl\tr2, r1, #0x1\n\tb\t.L3\n.L6:\n\tlsl\tr0, r1, #0x1\n\tadd\tr2, r0, r1\n\tb\t.L3\n.L7:\n\tlsl\tr2, r1, #0x2\n.L3:\n\tadd\tr0, r2, #0x1\n\tbx\tlr\n.Lfe1:\n\t.size\t uninit_sw,.Lfe1-uninit_sw\n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned/flip-join",
-        "outcome": "nonmatch",
-        "source": "s32 uninit_sw(u32 a0, u32 a1, u32 a2) {\n    if (a0 != 1) {\n        if (a0 <= 1) {\n            if (a0 == 0) a2 = a1;\n        } else {\n            switch (a0) {\n                case 2:\n                    a2 = a1 * 3;\n                    break;\n                case 3:\n                    a2 = a1 << 2;\n                    break;\n            }\n        }\n    } else {\n        a2 = a1 << 1;\n    }\n    return a2 + 1;\n}\n",
-        "score": 15,
-        "maxScore": 27,
+        "candidateLabel": "signed",
+        "outcome": "match",
+        "source": "s32 uninit_sw(s32 a0, s32 a1, s32 a2) {\n    switch (a0) {\n        case 0:\n            a2 = a1;\n            break;\n        case 1:\n            a2 = a1 << 1;\n            break;\n        case 2:\n            a2 = a1 * 3;\n            break;\n        case 3:\n            a2 = a1 << 2;\n            break;\n    }\n    return a2 + 1;\n}\n",
+        "score": 0,
+        "maxScore": 22,
         "compileErrors": null,
         "breakdown": {
-          "insert": 5,
-          "delete": 6,
-          "replace": 1,
-          "opMismatch": 2,
-          "argMismatch": 1
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 0
         },
         "quality": {
           "score": 100,
-          "lines": 19,
+          "lines": 17,
           "gotos": 0,
           "casts": 0,
           "unkGlue": 0,

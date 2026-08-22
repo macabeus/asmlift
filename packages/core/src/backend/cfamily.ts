@@ -303,7 +303,41 @@ function printStmt(s: Stmt, indent: string, vt: VarTypes, leaf?: LeafHook): stri
       const out = [`${indent}switch (${pe(s.scrutinee, 99)}) {`];
       const ci = indent + '    '; // case-label indent
       const bi = indent + '        '; // case-body indent
-      for (const c of s.cases) {
+      // `?.length`, not just presence: a label with no statement under it is not valid C89, and an
+      // L3 pass (dce, reindex) may empty a default that arrived with statements — the structurer's
+      // own "don't attach an empty default" rule cannot see that.
+      const hasDefault = !!s.default?.length;
+      // Where the `default:` label goes, as a COUNT of case arms before it (l3/ast.ts): absent ⇒
+      // after all of them. A count past the arms matches no position at all and the label would
+      // simply not be printed — the default arm vanishing from a switch that has one — so a
+      // producer that hands one over fails loud, like the falling-arm placement below.
+      const defAt = hasDefault ? (s.defaultAt ?? s.cases.length) : -1;
+      if (hasDefault && (defAt < 0 || defAt > s.cases.length)) {
+        throw new Error(`c backend: a switch places its default at arm ${defAt} of ${s.cases.length}`);
+      }
+      const printDefault = (): void => {
+        out.push(`${ci}default:`);
+        for (const t of s.default!) {
+          out.push(...printStmt(t, bi, vt, leaf));
+        }
+        // A default that is NOT last would otherwise fall into the case below it — the mirror of the
+        // rule for cases. The last one needs no `break;` because there is nothing under it.
+        if (defAt < s.cases.length && !endsTerminated(s.default!)) {
+          out.push(`${bi}break;`);
+        }
+      };
+      s.cases.forEach((c, i) => {
+        if (i === defAt) {
+          // Moving the label in FRONT of a falling arm would divert that arm into the default —
+          // a silent control-flow change. Recovery only positions a default among closed arms, so
+          // this is a producer bug rather than an input shape: fail loud.
+          if (i > 0 && s.cases[i - 1].fallsThrough) {
+            throw new Error(
+              `c backend: a switch places its default after a case that falls through, which would divert it`,
+            );
+          }
+          printDefault();
+        }
         for (const v of c.values) {
           out.push(`${ci}case ${v}:`);
         }
@@ -315,15 +349,9 @@ function printStmt(s: Stmt, indent: string, vt: VarTypes, leaf?: LeafHook): stri
         if (!c.fallsThrough && !endsTerminated(c.body)) {
           out.push(`${bi}break;`);
         }
-      }
-      // `?.length`, not just presence: a label with no statement under it is not valid C89, and an
-      // L3 pass (dce, reindex) may empty a default that arrived with statements — the structurer's
-      // own "don't attach an empty default" rule cannot see that.
-      if (s.default?.length) {
-        out.push(`${ci}default:`);
-        for (const t of s.default) {
-          out.push(...printStmt(t, bi, vt, leaf));
-        }
+      });
+      if (defAt === s.cases.length) {
+        printDefault();
       }
       out.push(`${indent}}`);
       return out;

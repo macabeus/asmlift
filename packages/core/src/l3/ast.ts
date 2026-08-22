@@ -130,7 +130,19 @@ export type Stmt =
   | { k: 'continue' }
   // A multi-way `switch` over an integer scrutinee (recovered from a comparison tree — Regime A — or
   // a jump-table `switch_br` — Regime B). `cases` are emitted IN ARRAY ORDER; `default` (if present)
-  // is emitted last.
+  // is emitted after `defaultAt` of them, or after all of them when that is absent.
+  //
+  // `defaultAt` exists because C lets `default:` sit BETWEEN case labels and a compiler that lays
+  // case bodies out in source order shows where the source put it. It is a COUNT of preceding arms,
+  // not an index into an array a later pass may rebuild, and a count past the arms is a producer bug
+  // a backend refuses. Setting it is legal only when the arm before the label does not fall through:
+  // moving the label in front of a falling arm would divert that arm into the default. The C-family
+  // printer terminates a non-final default with `break;` for the mirror-image reason.
+  //
+  // Unlike `fallsThrough` below, `defaultAt` is a SPELLING: every arm it can sit between is closed,
+  // so a backend with no positional default (Pascal's `otherwise`) may ignore it and still emit the
+  // same program — the one placement that would change one is the falling arm the rule above already
+  // refuses, and which that backend loud-fails anyway.
   //
   // NON-NEUTRALITY NOTE (like the `index` node above): `fallsThrough` encodes a C/C++ control-flow
   // concept POSITIONALLY — `cases[i].fallsThrough === true` means control continues into
@@ -139,7 +151,7 @@ export type Stmt =
   // Pascal backend MUST loud-fail a `fallsThrough` case (it has no faithful spelling), exactly as it
   // loud-fails `field`/`cast`. Recovery must therefore only set `fallsThrough` when the fall-through
   // target is the emission-adjacent case.
-  | { k: 'switch'; scrutinee: Expr; cases: SwitchCase[]; default?: Stmt[] }
+  | { k: 'switch'; scrutinee: Expr; cases: SwitchCase[]; default?: Stmt[]; defaultAt?: number }
   | { k: 'return'; value?: Expr };
 
 /** One arm of a `switch`. `values` stacks multiple `case K:` labels onto one body (`case 1: case 2:`).
@@ -397,7 +409,8 @@ export function exprHasEffect(e: Expr): boolean {
   return e.k === 'call' || e.k === 'marker' || exprChildren(e).some(exprHasEffect);
 }
 
-/** The statements a statement DIRECTLY contains. NOTE for document-order walks: a `for`'s
+/** The statements a statement DIRECTLY contains, in the order a backend prints them — a `switch`
+ *  splices its default in at `defaultAt` for that reason. NOTE for document-order walks: a `for`'s
  *  init/inc are listed here while its cond is in stmtExprs — a walker visiting exprs-then-stmts
  *  sees the cond before the init. */
 export function stmtChildren(s: Stmt): Stmt[] {
@@ -416,8 +429,11 @@ export function stmtChildren(s: Stmt): Stmt[] {
       return s.body;
     case 'for':
       return [s.init, s.inc, ...s.body];
-    case 'switch':
-      return [...s.cases.flatMap((c) => c.body), ...(s.default ?? [])];
+    case 'switch': {
+      const arms = s.cases.map((c) => c.body);
+      arms.splice(s.defaultAt ?? s.cases.length, 0, s.default ?? []);
+      return arms.flat();
+    }
   }
 }
 

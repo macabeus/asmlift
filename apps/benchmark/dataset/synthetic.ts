@@ -1592,30 +1592,55 @@ export const SYNTHETIC: SynthSpec[] = [
   // put it, while the asm lays that body out second.
   //
   // Two separate defects, one per row, both in structure/switch-recover.ts:
-  //   • `swarms` — a switch with NO default. Its fall-out edge lands on the MERGE, and the merge
-  //     carries the switch's own phi (the arms decide `w`), so the "default entry with a phi"
-  //     guard rejects the whole tree and recovery falls back to if-nesting. The phi belongs to the
-  //     switch's join, not to a default arm. `swtail`, the same dispatch with a phi-free merge,
-  //     IS recovered today — so the trigger is the phi, not the missing default.
+  //   • `swarms` — a switch with NO default, declining to if-nesting. The attribution that
+  //     authored this row named the "default entry with a phi" guard, reasoning that the fall-out
+  //     edge lands on the phi-carrying MERGE. The run falsified that: instrumenting every
+  //     `return null` showed the shape declining at `defaults.length > 1`, and the phi guard never
+  //     firing on this corpus at all. gcc 2.9-arm's `emit_case_nodes` gives every subtree that
+  //     runs out of case values its OWN jump to the default, so a four-case tree reaches it
+  //     through two bare `b .Ldefault` blocks — which recovery counted as two different defaults.
+  //     The default candidate is one of those bare blocks, never the merge, which is why the phi
+  //     guard cannot be what refuses this shape.
   //   • `swlayout` — the arms come back sorted by case VALUE. Its source order is 2, 0, 3, 1 and
   //     agbcc lays the bodies out in exactly that order; asmlift emits 0, 1, 2, 3, so every
   //     instruction after the first arm shifts. It carries a default, so recognition succeeds and
   //     ONLY the order is left — which is what separates it from `swarms`.
   //
   // `swdefault` is the control: byte-identical C to `swarms` except that the fall-out is spelled
-  // as `default: w = 0;` instead of an initialiser, which gives the default its own block. It
-  // MATCHES today and must keep matching — a fix that recovers `swarms` by loosening the phi guard
-  // must not start treating this row's real default arm as the join.
+  // as `default: w = 0;` instead of an initialiser, which gives the default its own block — one
+  // default candidate, so it was recovered before the collapse and must stay recovered after it.
+  // The collapse that closed `swarms` is what it guards: two leaves are one default only when each
+  // is a bare EXIT to the same place carrying the same values, and this row's real default arm has
+  // a body, so nothing may fold it into the fall-out.
+  //
+  // Two rows for the halves of the ordering rule the four above cannot see:
+  //   • `swdefmid` — the same four cases with `default: w = 99;` written THIRD. agbcc expands the
+  //     default's body where the source wrote it like any other arm, so its block lands between
+  //     case 1's and case 2's, and emitting the label last moves every instruction after it.
+  //   • `swjtorder` — five dense arms written 3, 0, 4, 1, 2, with a default. Five is enough for
+  //     agbcc to emit a jump TABLE, whose slots are ascending by construction: grouping them in
+  //     table order spells the arms 0..4 while the bodies are laid out in the order the arms were
+  //     written. `sw_jt` above is the same regime with ascending arms, where the two orders
+  //     coincide and the row cannot fire.
+  //
+  // And two for the `default:` positions those cannot see either, one per regime:
+  //   • `swdeffirst` — the same four cases with `default:` written FIRST. That is the one position
+  //     where the dispatch RUNS OUT into the default's block instead of jumping to it, and the
+  //     reading recovery makes of a fall-through is the one thing the other subtree's surviving
+  //     `b .Ldefault` licenses. `swdefmid` cannot see it: at position 2 both subtrees jump.
+  //   • `swjtdefmid` — `swjtorder`'s five arms, ascending, with `default:` written THIRD. Under the
+  //     jump table the default's body lands where the source wrote it too, and `swjtorder`'s own
+  //     default is written LAST, where the layout spelling and C's conventional one coincide.
   //
   // `swmulti` is the real function's shape rather than an isolate: a defaultless switch inside a
   // do-while whose four arms all decide the same three locals. It moves furthest (38) because its
   // residual also carries the arm-order half and the loop's own value placement.
   //
-  // NOT the same gap as `uninit_sw` above, which contains the identical dispatch and also declines
-  // to if-nesting: there the arms leave a local undefined on the fall-out path, so the residual is
-  // dominated by the fabricated parameter that models the def-less read, and the row cannot gate
-  // this capability — closing the arm grouping would move its score without changing its outcome.
-  // `swarms` assigns `w = 0` first for exactly that reason.
+  // NOT the same gap as `uninit_sw` above, which contains the identical dispatch: there the arms
+  // leave a local undefined on the fall-out path, and the arm grouping alone takes that row to
+  // MATCH, so the def-less read costs it nothing and the switch was all that stood between it and
+  // its target. `swarms` assigns `w = 0` first, which is what keeps the two separable: it isolates
+  // the dispatch with no `uninit-local` gap behind it at all.
   //
   // agbcc only, and for the same reason the read-once family is: the inference "the asm's block
   // order is the source's arm order" is a fact about a compiler with no scheduler and no block
@@ -1648,6 +1673,63 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc'],
     ctx: 'void swdefault(s32 mode, s32 n);',
     proto: { swdefault: { returnsVoid: true } },
+  },
+  {
+    sym: 'swdefmid',
+    src:
+      '#define gOut ((volatile s32 *)0x04000000)\n' +
+      'void swdefmid(s32 mode, s32 n){ s32 w;\n' +
+      ' switch (mode) { case 0: w = n + 1; break; case 1: w = n + 2; break;\n' +
+      '                 default: w = 99; break;\n' +
+      '                 case 2: w = n + 3; break; case 3: w = n + 4; break; }\n' +
+      ' *gOut = w; }',
+    features: ['switch-arms', 'branch'],
+    toolchains: ['agbcc'],
+    ctx: 'void swdefmid(s32 mode, s32 n);',
+    proto: { swdefmid: { returnsVoid: true } },
+  },
+  {
+    sym: 'swjtorder',
+    src:
+      '#define gOut ((volatile s32 *)0x04000000)\n' +
+      'void swjtorder(s32 mode, s32 n){ s32 w;\n' +
+      ' switch (mode) { case 3: w = n + 4; break; case 0: w = n + 1; break;\n' +
+      '                 case 4: w = n + 5; break; case 1: w = n + 2; break;\n' +
+      '                 case 2: w = n + 3; break; default: w = 99; break; }\n' +
+      ' *gOut = w; }',
+    features: ['switch-arms', 'dense', 'branch'],
+    toolchains: ['agbcc'],
+    ctx: 'void swjtorder(s32 mode, s32 n);',
+    proto: { swjtorder: { returnsVoid: true } },
+  },
+  {
+    sym: 'swdeffirst',
+    src:
+      '#define gOut ((volatile s32 *)0x04000000)\n' +
+      'void swdeffirst(s32 mode, s32 n){ s32 w;\n' +
+      ' switch (mode) { default: w = 99; break;\n' +
+      '                 case 0: w = n + 1; break; case 1: w = n + 2; break;\n' +
+      '                 case 2: w = n + 3; break; case 3: w = n + 4; break; }\n' +
+      ' *gOut = w; }',
+    features: ['switch-arms', 'branch'],
+    toolchains: ['agbcc'],
+    ctx: 'void swdeffirst(s32 mode, s32 n);',
+    proto: { swdeffirst: { returnsVoid: true } },
+  },
+  {
+    sym: 'swjtdefmid',
+    src:
+      '#define gOut ((volatile s32 *)0x04000000)\n' +
+      'void swjtdefmid(s32 mode, s32 n){ s32 w;\n' +
+      ' switch (mode) { case 0: w = n + 1; break; case 1: w = n + 2; break;\n' +
+      '                 default: w = 99; break;\n' +
+      '                 case 2: w = n + 3; break; case 3: w = n + 4; break;\n' +
+      '                 case 4: w = n + 5; break; }\n' +
+      ' *gOut = w; }',
+    features: ['switch-arms', 'dense', 'branch'],
+    toolchains: ['agbcc'],
+    ctx: 'void swjtdefmid(s32 mode, s32 n);',
+    proto: { swjtdefmid: { returnsVoid: true } },
   },
   {
     sym: 'swlayout',
