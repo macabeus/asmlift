@@ -124,8 +124,10 @@ function compare(orig: SFn, cand: SFn, draws: number[]): 'same' | 'undefined-onl
 // condition, and a `for`'s inc. A `for`'s INIT is deliberately not one of them: it runs once,
 // ahead of the condition, which is why the span model places it outside its own loop.
 //
-// KNOWN GAP: `switch` fall-through, `break` and `continue` are not emitted, so the differential
-// does not cover pairs split across those. The unit tests pin the loop rule's shapes directly.
+// KNOWN GAP: `switch` fall-through, `break` and `continue` are not emitted, and a `for`'s init and
+// inc are always plain assigns, so the differential covers neither pairs split across the first
+// three nor a loop standing in an init/inc. Nothing else covers the first three; the init case is
+// pinned directly by coalesce.test.ts ('a loop in a `for`s INIT encloses its own …').
 const LOCALS = ['a', 'b', 'c'];
 
 function mulberry32(seed: number): () => number {
@@ -166,12 +168,14 @@ function generate(seed: number): SFn {
         out.push(assign());
       } else if (r < 0.75 || depth === 0) {
         out.push(obs());
-      } else if (r < 0.85) {
+      } else if (r < 0.82) {
         out.push({ k: 'if', cond: cond(), then: block(depth - 1), else: block(depth - 1) });
-      } else if (r < 0.9) {
-        out.push({ k: 'dowhile', cond: cond(), body: block(depth - 1) });
-      } else if (r < 0.93) {
+      } else if (r < 0.89) {
+        // test-at-top keeps its share: the ZERO-TRIP path is what the accepted-not-fixed
+        // carve-out rests on, and a do-while never has one
         out.push({ k: 'while', cond: cond(), body: block(depth - 1) });
+      } else if (r < 0.94) {
+        out.push({ k: 'dowhile', cond: cond(), body: block(depth - 1) });
       } else {
         out.push({ k: 'for', init: assign(), cond: cond(), inc: assign(), body: block(depth - 1) });
       }

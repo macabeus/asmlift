@@ -215,7 +215,7 @@ describe('volatile pairs (span path)', () => {
 // The gate refuses a pair only when some loop holds a mention of BOTH locals — there the
 // survivor's write can be followed, on the next iteration, by the absorbed local's read. Two
 // SIBLING loops share no back edge, so preorder is execution order and the merge is legal.
-const forLoop = (n: string, init: Expr, body: Stmt[]): Stmt => ({
+const forLoop = (n: string, init: Expr, body: Stmt[]): Extract<Stmt, { k: 'for' }> => ({
   k: 'for',
   init: { k: 'assign', name: n, value: init },
   cond: { k: 'bin', op: '<', l: { k: 'var', name: n }, r: { k: 'const', value: 10 } },
@@ -223,12 +223,13 @@ const forLoop = (n: string, init: Expr, body: Stmt[]): Stmt => ({
   body,
 });
 const c0: Expr = { k: 'const', value: 0 };
+const rd = (n: string): Expr => ({ k: 'var', name: n });
 
 describe('the loop rule', () => {
   const run = (body: Stmt[]) => coalesceUnder(COALESCE_GATES, fn(body));
 
   test('counters in SIBLING loops merge — no back edge joins the two ranges', () => {
-    const out = coalesceCandidates(fn([forLoop('a', c0, [use('a')]), forLoop('b', c0, [use('b')])]));
+    const out = run([forLoop('a', c0, [use('a')]), forLoop('b', c0, [use('b')])]).candidates;
     expect(out).toHaveLength(1);
     expect(names(out[0].sfn)).toEqual(['b']);
   });
@@ -247,28 +248,40 @@ describe('the loop rule', () => {
   });
 
   test('a local living BEFORE the loop another lives in merges — no loop holds both', () => {
-    const out = coalesceCandidates(fn([asg('a', 1), use('a'), forLoop('b', c0, [use('b')])]));
+    const out = run([asg('a', 1), use('a'), forLoop('b', c0, [use('b')])]).candidates;
     expect(out).toHaveLength(1);
     expect(names(out[0].sfn)).toEqual(['b']); // the later range survives, as `overlap` orders it
   });
 
-  test('a loop standing in a `for`s INIT position still encloses its own body', () => {
-    // the init runs once, so it is outside the `for` — but a loop THERE re-runs its own children,
-    // and a pair inside it must not read as straight-line
+  // A loop standing in a `for`'s INIT position: the init runs once, so the `for` does not re-run
+  // it — but the loop re-runs its OWN condition and body, and a pair inside it must not read as
+  // straight-line. (`c`, the outer counter, is deliberately undeclared: only declared locals pair.)
+  test('a loop in a `for`s INIT encloses its own BODY', () => {
     const initLoop: Stmt = { k: 'while', cond: c0, body: [use('a'), asg('a', 11), asg('b', 22), use('b')] };
-    const r = run([{ ...(forLoop('c', c0, [use('c')]) as Extract<Stmt, { k: 'for' }>), init: initLoop }]);
-    expect(r.candidates.map((x) => x.merged)).not.toContain('a-b');
+    const r = run([{ ...forLoop('c', c0, [use('c')]), init: initLoop }]);
+    expect(r.candidates).toHaveLength(0);
+    expect(r.refusals.get('shared-loop')).toBeGreaterThan(0);
+  });
+
+  test('a loop in a `for`s INIT encloses its own CONDITION', () => {
+    // `a` is mentioned only in the init-loop's condition, `b` only in its body: the condition
+    // re-runs with the body, so one loop holds both
+    const initLoop: Stmt = { k: 'while', cond: rd('a'), body: [asg('b', 2), use('b')] };
+    const r = run([asg('a', 7), { ...forLoop('c', c0, [use('c')]), init: initLoop }]);
+    expect(r.candidates).toHaveLength(0);
+    expect(r.refusals.get('shared-loop')).toBeGreaterThan(0);
   });
 });
 
-// ── the counter model ──────────────────────────────────────────────────────────────────────
+// ── the induction-variable model ───────────────────────────────────────────────────────────
 // `const-fed` predicts that a local fed from memory is one the compiler had a reason to keep
-// where it was. A `for`'s counter is fed by its own init and its own increment, which is not
-// that: the init IS the local's definition and the increment is its own history.
+// where it was. A `for`'s induction variable is fed by its own init and by a step that computes
+// the next value ARITHMETICALLY from the current one — the init is the local's definition and the
+// step is its own history. A step that reads memory every iteration (`p = p->next`) is not.
 const load: Expr = { k: 'index', base: { k: 'const', value: 0x3001048 }, idx: c0, width: 2, signed: false };
 
-describe('the counter model', () => {
-  test('a LOAD-fed counter merges — its init feed is its own definition, not a foreign feed', () => {
+describe('the induction-variable model', () => {
+  test('a LOAD-fed induction variable merges — its init feed is its own definition', () => {
     const out = coalesceCandidates(fn([forLoop('a', c0, [use('a')]), forLoop('b', load, [use('b')])]));
     expect(out).toHaveLength(1);
     expect(names(out[0].sfn)).toEqual(['b']);
@@ -283,9 +296,21 @@ describe('the counter model', () => {
     expect(r.refusals.get('const-fed')).toBeGreaterThan(0);
   });
 
-  test('a `for` whose STEP re-loads memory is not an induction variable — the exemption needs the self-read', () => {
+  test('a `for` whose STEP reads memory THROUGH the variable is not one either', () => {
+    // `p = p->next` — a self-read, but a memory read every iteration, which is what const-fed
+    // exists to refuse. recognizeForLoops mints exactly this shape for a list walk.
+    const walkStep: Stmt = {
+      ...forLoop('b', c0, [use('b')]),
+      inc: { k: 'assign', name: 'b', value: { k: 'field', base: rd('b'), name: 'field_4' } },
+    };
+    const r = coalesceUnder(COALESCE_GATES, fn([forLoop('a', c0, [use('a')]), walkStep]));
+    expect(r.candidates).toHaveLength(0);
+    expect(r.refusals.get('const-fed')).toBeGreaterThan(0);
+  });
+
+  test('a `for` whose STEP re-loads a fixed address is not one either', () => {
     const reloaded: Stmt = {
-      ...(forLoop('b', load, [use('b')]) as Extract<Stmt, { k: 'for' }>),
+      ...forLoop('b', load, [use('b')]),
       inc: { k: 'assign', name: 'b', value: load },
     };
     const r = coalesceUnder(COALESCE_GATES, fn([forLoop('a', c0, [use('a')]), reloaded]));
