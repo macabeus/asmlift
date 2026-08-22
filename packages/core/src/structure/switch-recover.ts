@@ -526,9 +526,14 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     //     compiler that emits case bodies as it walks the arms and never moves them afterwards.
     //     `switchArmsFollowLayout` is where such a compiler declares that (TargetDescription
     //     .compilerBehaviors), on its own evidence — never inherited.
-    // Two case VALUES can share one body block (`case 2: case 3: foo();` branches both tests to
-    // the same label), and they then have the same layout index — so ascending value stays the
-    // tie-break, which is what those two arms were already spelled as.
+    // Two case VALUES can share one body block, and they then have the same layout index — so
+    // ascending value stays the tie-break. What produces such a tie on agbcc is jump.c's
+    // CROSS-JUMP, which merges two arms with identical bodies into one block both `beq`s reach
+    // (arms written 4, 0, 5, 3 with cases 4 and 3 both `n + 9` lay out as case 0, case 5, then one
+    // shared block). Stacked labels are NOT that source: agbcc compiles `case 2: case 3: foo();`
+    // to a range test (`cmp #3 / bgt`), which the walk reads as navigation and declines. So the
+    // tie-break orders arms whose relative order the MERGE erased, where ascending value is the
+    // neutral spelling rather than a recovered one.
     const scrutExpr = expr(scrut);
     const sortedCases = [...cases.entries()].sort((a, c) =>
       switchArmsFollowLayout ? layoutIndex(a[1]) - layoutIndex(c[1]) || a[0] - c[0] : a[0] - c[0],

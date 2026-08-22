@@ -75,9 +75,10 @@ export interface TargetDescription {
     // body). GCC freely emits `!=`; IDO prefers `==`/`<`. Absent ⇒ true (permissive); the
     // decline path keeps recovery sound either way.
     switchAllowsNeqCase?: boolean;
-    // Regime-A switch recovery: emit the case arms in the order the ASSEMBLY lays their bodies
-    // out, rather than sorted by ascending case value. True says "this compiler's block layout IS
-    // the source's arm order" — it must neither reorder basic blocks nor schedule across them.
+    // Switch recovery: emit the case arms in the order the ASSEMBLY lays their bodies out, rather
+    // than sorted by ascending case value. True says "this compiler emits case bodies as it walks
+    // the arms and never MOVES one afterwards" — it must neither reorder basic blocks nor schedule
+    // across them.
     //
     // agbcc (gcc 2.9-arm) declares TRUE from its own sources plus a compiled pair: `stmt.c`
     // expand_end_case takes `before_case = get_last_insn()` AFTER the case bodies have been
@@ -85,10 +86,21 @@ export interface TargetDescription {
     // moves only the DISPATCH in front of them, leaving the bodies where the arms put them; the
     // Makefile's SRCS compiles neither sched.c nor reorg.c, so nothing moves them afterwards. The
     // pair: `case 0,1,2,3` against `case 2,0,3,1` compile to the SAME dispatch tree with the
-    // bodies laid out in their respective source orders.
+    // bodies laid out in their respective source orders — for the comparison tree and for the jump
+    // table alike (8 dense arms written 5,2,0,4,1,3,6,7 lay their bodies out in that order under a
+    // table whose slots are ascending).
+    //
+    // SCOPE — what that pair CANNOT show. SRCS does compile jump.c, whose cross-jump MERGES two
+    // arms with identical bodies into a single block: arms written 4,0,5,3 with cases 4 and 3 both
+    // `n + 9` lay out as case 0, case 5, then one block that both `beq`s reach, standing where the
+    // LATER of the two was written. A merged pair's own order is gone from the asm; it surfaces as
+    // two case values sharing one body, the tie switch-recover.ts breaks by ascending value. So
+    // this reads the order of the bodies that SURVIVE, and a compiler whose jump optimiser moves
+    // the survivor elsewhere is not admitted by a two-source pair — it owes evidence about that
+    // optimiser as much as about its scheduler.
     //
     // ABSENT ⇒ ascending case value, where ido/kmc-gcc/mwcc sit: each has a scheduler and none has
-    // been put through that pair. A compiler opts in on its own evidence, never by inheriting.
+    // been put through that evidence. A compiler opts in on its own, never by inheriting.
     switchArmsFollowLayout?: boolean;
     // Commutative load pairs re-spell in def (evaluation) order (structure.ts lowerDef). Absent
     // ⇒ true — verified byte-exact on agbcc and IDO; a compiler whose scheduler is shown
