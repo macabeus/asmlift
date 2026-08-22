@@ -3,12 +3,10 @@
 // lives: a read whose every render sits in a block its own block STRICTLY DOMINATES emits as a
 // named temp in its own block, instead of sinking and being re-read per arm.
 //
-// Not a differ-refereed axis. On a compiler that neither hoists a read to a dominator nor
-// schedules one across a branch, asm placement is a FUNCTION of source placement — the sunk
-// spelling is one that compiler could not have emitted from this asm — so there is nothing to
-// referee. agbcc is such a compiler at -O2 (no sched.c/reorg.c in its SRCS; gcse.c runs
-// one_code_hoisting_pass only under `optimize_size`); every other target leaves the field absent
-// and the rule stands down.
+// Not a differ-refereed axis: where the compiler neither hoists a read to a dominator nor
+// schedules one across a branch, the sunk spelling is one it could not have emitted from this asm.
+// agbcc is such a compiler at -O2; the evidence, and what a compiler owes before declaring it, is
+// at TargetDescription.compilerBehaviors.
 //
 // What these tests pin is the SCOPE: one render is enough (a "2+ sibling arms" rule would miss
 // the short-circuit-into-a-call shape), renders in the def's own block are not this rule's
@@ -134,13 +132,11 @@ test('a read rendered in its own block is untouched', () => {
 });
 
 // ── the refusal: a FALL-THROUGH seam, where no branch separates read from render ─────────────
-// The frontends start a block at every LABEL, so a label nothing branches to splits one straight
-// line of asm in two and the upper half dominates the lower with no control flow between. The IR
-// below is what `decompile()` recovers from klonoa's StreamCmd_SetMusicParams, whose `.s` carries
-// a stray `sub_0804E9AC:` between the last `ldrh` and the `bl` that consumes it. Homing there
-// spells a read the compiler orders for itself: the reference C assembles byte-identical (104 of
-// 104 bytes), and the homed spelling misses by four — agbcc emits `ldr r0,pool / ldrh r2,[r4]`
-// from the inlined read and the two in the opposite order from the named one.
+// The IR below is what `decompile()` recovers from klonoa's StreamCmd_SetMusicParams, whose `.s`
+// carries a stray `sub_0804E9AC:` between the last `ldrh` and the `bl` that consumes it — a label
+// nothing branches to, which splits one straight line of asm into a dominating pair of blocks.
+// Compiled and assembled, the inlined read reproduces the object byte for byte (104 of 104) and
+// the named one misses by four.
 const SEAM = `fn seam {
 ^bb0():
   %0: u16* = const {value=50352656}
@@ -196,11 +192,9 @@ test('a fall-through above a real branch still homes at the def block', () => {
 });
 
 // ── the refusal: a loop PREHEADER ────────────────────────────────────────────────────────────
-// Loop invariant motion (loop.c) DOES run at -O2, and it is the one pass that still moves a read
-// to a dominator. Compiled, `for (i=0;i<n;i++) t += *gK * i;` puts the read in the block AFTER the
-// loop guard (`cmp/bge` then `ldr r0,.L8; ldr r4,[r0]`), while the read written above the loop
-// lands ABOVE the guard. So a read seated in the preheader is evidence of a read in the BODY, and
-// homing it there would spell the one source this asm rules out.
+// The CFG agbcc -O2 emits for `for (i=0;i<n;i++) t += gK * i;`, where loop invariant motion parks
+// the read below the loop guard — the one landing spot a source read above the loop could not
+// have produced.
 const PREHEADER = `fn preheader {
 ^bb0(%0: s32):
   %1: s32 = const {value=0}
@@ -298,10 +292,8 @@ test('a read through a named global homes at its def block, address still inline
 });
 
 // Which is where this rule and the `/reread-globals` axis meet: the axis spells a named global's
-// read at each of its uses, this rule spells it once at the def block, and the rule runs first. So
-// on a target declaring the behavior the axis no longer reaches a read whose renders are all in
-// strictly dominated blocks — a pre-emption, not a conflict, and the axis keeps every read whose
-// renders sit in its own block.
+// read at each of its uses, this rule spells it once at the def block, and the rule runs first —
+// so on a declaring target the axis reaches only reads whose renders sit in their own block.
 test('the def-block rule pre-empts the value-home axis on a strictly dominated read', () => {
   expect(count(emit(CONE, false, true, true), 'gTable')).toBe(2);
   expect(emit(CONE, true, true, true)).toBe(emit(CONE, true));
@@ -348,13 +340,9 @@ test('only the compiler shown the evidence declares the behavior', () => {
 });
 
 // ── the refusal: a read C evaluates only under a `&&`/`||` ───────────────────────────────────
-// raise/shortcircuit.ts recovers a connective by hoisting the guarded arm's whole pure body —
-// memory reads included — into the block ABOVE the branch (both its value form and its
-// control-flow form do). ir/opcodes.ts states the safety argument in so many words: a read is
-// deliberately not HOIST_UNSAFE because the structurer inlines it back into the `&&`/`||`
-// right-hand side, where C's own short circuit re-guards it. So for a value in that cone the IR's
-// def block is a FOLD ARTIFACT, not the block the asm read in, and naming it there dereferences
-// past the guard the asm respected.
+// raise/shortcircuit.ts hoists a connective's guarded arm into the block above the branch, so the
+// IR's def block there is a fold artifact and naming the read dereferences past the guard the asm
+// respected. Two fixtures, because the seam refusal above covers the first one too.
 //
 // The IR below is what `decompile()` recovers from agbcc -O2's own output for
 // `s32 sc9(s32 *p) { return (p != 0) && (*p != 0); }` — asm `cmp r0,#0 / beq .L3 / ldr r1,[r0]`,
@@ -494,14 +482,12 @@ test('an indexed read homes at its def block too', () => {
 // between them (`v0 = *gBase; … v1 = v0;`) where the asm loaded straight into the register the
 // parameter became. That copy costs more than the placement gains: the four m4a track loops
 // (m4aMPlayVolumeControl, m4aMPlayPitchControl, m4aMPlayLFOSpeedSet, FadeOutBody) are this shape,
-// and homing them scored 26→33, 52→54, 27→30 and 69→71 against their own objects.
+// and homing them scored 26→33, 36→39, 28→31 and 69→73 against their own objects.
 //
 // The IR is what `decompile()` recovers from agbcc -O2's output for
 //   void loopinit(u32 mask){ u8 *p = *gBase; s32 i = *gCount; s32 b = 1;
 //     if (i > 0) { do { if (mask & b) p[19] = 3; b <<= 1; p += 80; i--; } while (i > 0); } }
-// — note the read really does sit above the loop guard there, so it is the SPELLING that fails,
-// not the placement: seating a read above the guard AND as the loop variable is loop-init
-// hoisting, which this rule does not do.
+// — the read really does sit above the loop guard there, so it is the SPELLING that fails.
 const LOOPINIT = `fn loopinit {
 ^bb0(%0: s32):
   %1: s32* = const {value=50345012}

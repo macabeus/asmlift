@@ -249,45 +249,37 @@ export interface AnalyzeOptions {
   homeLoopExprs?: boolean;
   /** DEF-BLOCK PLACEMENT for memory reads — WHERE the read happens, not where the value lives.
    *  The sibling of the homing axes above: there the question is which register or offset holds a
-   *  value, here it is which BLOCK performs the read. A read whose every render sits in a block
-   *  its own block STRICTLY DOMINATES has no rule at all above — the homing axes all want 2+
-   *  consumers or a shared base — so it sinks, and each arm re-reads it: a second load either
-   *  way, plus a second pool literal when the address folded to a constant.
+   *  value, here which BLOCK performs the read. A read whose every render sits in a block its own
+   *  block STRICTLY DOMINATES has no rule at all above — those axes want 2+ consumers or a shared
+   *  base — so it sinks and each arm re-reads it: a second load either way, plus a second pool
+   *  literal when the address folded to a constant.
    *
-   *  This is a per-compiler DATA lever (TargetDescription.compilerBehaviors
-   *  `readsStayWhereWritten`), NOT a differ-refereed axis, and the distinction is the whole
-   *  argument: an axis exists where the asm UNDERDETERMINES the source, because some pass
-   *  collapses two spellings onto one output (`/uns-cmp`'s non-negativity proof is the type
-   *  case). On a compiler that emits a read in the block the source spelled it in, re-spelling
-   *  the read at the block the asm performed it in reproduces that asm, while the sunk spelling
-   *  is one it emits only for a source that read per arm — so the differ has nothing to referee
-   *  and the extra candidate is pure cost. That claim runs one way only (emission from spelling,
-   *  never spelling from emission); which compilers may declare it, on what evidence, and which
-   *  passes the refusals below owe their existence to, is stated at the target field. Absent ⇒
-   *  the rule stands down entirely.
+   *  A per-compiler DATA lever (TargetDescription.compilerBehaviors `readsStayWhereWritten`), not
+   *  a differ-refereed axis, and that distinction is the argument: an axis exists where the asm
+   *  UNDERDETERMINES the source, some pass having collapsed two spellings onto one output
+   *  (`/uns-cmp`'s non-negativity proof is the type case). Where the compiler emits a read in the
+   *  block the source spelled it in, re-spelling it at the block the asm read in reproduces that
+   *  asm while the sunk spelling is one it emits only for a source that read per arm — nothing for
+   *  the differ to referee, and the extra candidate is pure cost. Which compilers may declare
+   *  that, and on what evidence, is at the target field; absent ⇒ the rule stands down entirely.
    *
-   *  Materializing is the conservative DIRECTION — it moves a read back to its own def position
-   *  rather than forward past a write — so no barrier scan is added; it is SINKING that needs one
-   *  (the multi-render rule below), and that scan stays. What it is NOT is sound by construction:
-   *  the def position is only the asm's read position while nothing has MOVED the def, which is
-   *  what the preheader and short-circuit refusals below are for. Getting that wrong emits a read
-   *  on a path the asm never ran it on.
+   *  Materializing is the conservative DIRECTION — back to the read's own def position, never
+   *  forward past a write — so it adds no barrier scan; SINKING is what needs one (the
+   *  multi-render rule below) and that scan stays. It is NOT sound by construction: the def block
+   *  is the asm's read block only while nothing moved the def and a branch really does lie
+   *  between, which is what the refusals are for. Getting that wrong emits a read on a path the
+   *  asm never ran it on.
    *
-   *  Splits the read-once-or-per-use question with the `/reread-globals` axis above: that axis
-   *  owns renders in the read's own block, this rule owns strictly dominated ones, and on a
-   *  target that declares the behavior the rule reaches those first.
-   *
-   *  Five refusals, each with a reason rather than a threshold:
-   *    • no SEAT for a temp — a multi-block loop header, whose test-at-top `while` condition has
-   *      no statement position; see `multiBlockHeaders`;
-   *    • a FALL-THROUGH between def and render, where no branch separates them at all and the
-   *      dominance is an artifact of the frontend's block-per-label — see `fallThroughSeam`;
-   *    • a LOOP PREHEADER of the loop the renders are in — see `preheaderOfRenderLoop`;
-   *    • a read C evaluates only under a `&&`/`||` — see `shortCircuitGuarded`. Those two both
-   *      name a block the IR reports that the ASM did not: one a compiler pass moved the read to,
-   *      one a raise pass did;
-   *    • a read that IS a block parameter's incoming copy — see `onlyFeedsBlockParams`, where
-   *      taking the seat manufactures a copy the compiler never emitted. */
+   *  Five refusals:
+   *    • a multi-block loop HEADER, whose test-at-top condition seats no temp — `multiBlockHeaders`
+   *    • a FALL-THROUGH between def and render, where the dominance is the frontend's
+   *      block-per-label and no branch separates them — `fallThroughSeam`
+   *    • a loop PREHEADER of the loop the renders are in, where loop invariant motion parks a read
+   *      the source wrote in the BODY — `preheaderOfRenderLoop`
+   *    • a read C evaluates only under a `&&`/`||`, whose def block raise/shortcircuit.ts made —
+   *      `shortCircuitGuarded`
+   *    • a read that IS a block parameter's incoming copy, where the seat manufactures a copy the
+   *      compiler never emitted — `onlyFeedsBlockParams` */
   readsStayWhereWritten?: boolean;
 }
 
@@ -728,41 +720,31 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
   /** THE def-block placement rule's loop refusal: is `b` a PREHEADER of some loop whose body holds
    *  one of the render blocks — outside the body, and a predecessor of the header?
    *
-   *  Two passes still move a read BETWEEN blocks on a compiler with no code hoister, and this is
-   *  the one whose landing spot the source could not have spelled: loop invariant motion (loop.c,
-   *  which agbcc DOES compile and run at -O2) parks the read BELOW the loop guard, where a
-   *  source-level read above the loop would sit above it. (The other is partial redundancy
-   *  elimination — gcse.c's `one_pre_gcse_pass`, also -O2 — which refuses itself: it leaves one
-   *  read per incoming path feeding a merge parameter, so every render is in the read's own block
-   *  and the rule's render-position test declines. See the target field's doc.) Compiled, with the
-   *  read written INSIDE the loop and nothing aliasing it, agbcc emits
+   *  Loop invariant motion (loop.c, which agbcc does compile and run at -O2) is the pass whose
+   *  landing spot the source could not have spelled: it parks the read BELOW the loop guard, where
+   *  a read the source wrote above the loop sits above it. Compiled,
+   *  `for (i=0;i<n;i++) t += gK*i;` emits `mov r2,#0 / cmp r2,r3 / bge .L4 / ldr r0,.L8 /
+   *  ldr r4,[r0]` — guard first, read after — while hoisting `gK` into a local above the loop by
+   *  hand puts both `ldr`s ahead of the guard. So a read in the preheader is evidence of a read in
+   *  the BODY, and inferring def-block placement there spells the one source the asm rules out.
+   *  (With an aliasing store in the loop agbcc hoists only the address constant and leaves the
+   *  `ldr` in the body — same conclusion, weaker premise.)
    *
-   *      mov r2, #0 / cmp r2, r3 / bge .L4      <- the loop GUARD
-   *      ldr r0, .L8 / ldr r4, [r0]            <- the read, hoisted into the PREHEADER
-   *    .L6:  … the body …
-   *
-   *  while the same read written ABOVE the loop lands above the guard instead
-   *  (`ldr r0,.L8 / ldr r3,[r0] / mov r1,#0 / cmp r1,r2 / bge .L4`). So a read in the preheader is
-   *  evidence of a read in the BODY, and inferring def-block placement there would spell the one
-   *  source the asm rules out. (With an aliasing store in the loop agbcc hoists only the address
-   *  constant and leaves the `ldr` in the body — the same conclusion, weaker premise.)
-   *
-   *  Narrow on purpose: a loop merely lying between def and render is not this shape, and the rest
-   *  of the function keeps the rule. */
+   *  Narrow on purpose: a loop merely lying between def and render is not this shape. */
   const preheaderOfRenderLoop = (b: Block, renders: readonly Block[]): boolean =>
     loopBodies.some((L) => !L.body.has(b) && successorsOf(b).includes(L.header) && renders.some((x) => L.body.has(x)));
-  /** THE def-block placement rule's seam refusal: the blocks a FALL-THROUGH puts below `b` with no
-   *  branch in between — the chain of unconditional `br` edges into a block that has `b`'s chain as
-   *  its only predecessor.
+  /** THE def-block placement rule's seam refusal: does a FALL-THROUGH alone put a render below
+   *  `b` — a chain of unconditional `br` edges, each into a block whose only predecessor is the
+   *  one before it?
    *
-   *  The frontends start a new block at every LABEL, so a label nothing branches to cuts one
-   *  straight line of asm in two (klonoa's `.s` files carry 145 such function-boundary artifacts).
-   *  A render on the far side of that cut is dominated by the read's block while no control flow
-   *  separates them, and the rule's premise — the compiler will not move a read ACROSS a branch —
-   *  says nothing there. Within one straight line agbcc DOES choose the order: compiled,
-   *  `m4aMPlayVolumeControl(gMPlayInfo_3, 255, *p)` emits `ldr r0,pool / ldrh r2,[p]` and the same
-   *  call with the read named above it emits those two in the opposite order, which is a byte
-   *  difference and the wrong side of it (StreamCmd_SetMusicParams). */
+   *  The frontends start a block at every LABEL, so a label nothing branches to cuts one straight
+   *  line of asm in two and the upper half dominates the lower with no control flow between. The
+   *  rule's premise is that the compiler will not move a read ACROSS a branch, which says nothing
+   *  there — while WITHIN a straight line agbcc picks the order itself. Compiled, klonoa's
+   *  StreamCmd_SetMusicParams (a stray `sub_0804E9AC:` between its last `ldrh r2,[r4]` and the
+   *  `bl` consuming it) assembles byte-identical to its object from the inlined read and four
+   *  bytes off from the named one, which swaps that `ldrh` with the `ldr r0,pool` beside it. Of
+   *  the rule's 20 firings over the 464 klonoa agbcc functions, 13 were across such a seam. */
   const fallThroughSeam = (b: Block, renders: readonly Block[]): boolean => {
     const seen = new Set<Block>([b]);
     for (let cur = b; ;) {
@@ -801,9 +783,10 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
    *  Then the parameter IS the read's home. Inlined, the edge assignment is the read
    *  (`v1 = mplay->tracks;`); materialized it becomes two names and a copy between them
    *  (`v0 = mplay->tracks; … v1 = v0;`) where the asm loaded straight into the register the
-   *  parameter became — `ldr r1,[r4,#0x2C]` once, never a `mov`. The four m4a track loops
-   *  (m4aMPlayVolumeControl, m4aMPlayPitchControl, m4aMPlayLFOSpeedSet, FadeOutBody) are that
-   *  shape, and the manufactured copy costs more than the placement gains.
+   *  parameter became — `ldr r1,[r4,#0x2C]` once, never a `mov`. Six of klonoa's matched m4a
+   *  functions are that shape, and the manufactured copy costs more than the placement gains:
+   *  scored against their own objects, dropping the refusal takes m4aMPlayVolumeControl 26→33,
+   *  m4aMPlayPitchControl 36→39, m4aMPlayLFOSpeedSet 28→31 and FadeOutBody 69→73.
    *
    *  Note what this does NOT claim: those reads really do sit above the loop guard in the asm, so
    *  the placement inference was right and the SPELLING is what fails. Seating the read above the
@@ -949,14 +932,11 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           continue;
         }
         // ── DEF-BLOCK PLACEMENT (readsStayWhereWritten; see AnalyzeOptions) ──────────────────
-        // Every place this read renders sits in a block its OWN block strictly dominates ⇒ the
-        // asm read it once, above the branch, and on a compiler that emits a read where the source
-        // spelled it, re-spelling it there reproduces the asm. Sinking it instead re-reads per
-        // arm: a second load either way, plus a second pool literal when the address folded to a
-        // constant, plus the index arithmetic again when it did not. One render suffices (the
-        // short-circuit-into-a-call shape has exactly one); an unresolvable render position
-        // refuses, as everywhere else. Both memory reads, spelled positively — a `call` is the
-        // enclosing arm's other member and has its own execute-once rules above.
+        // Every render in a block this one strictly dominates, with a branch between ⇒ the asm
+        // read once above that branch, and re-spelling the read there reproduces it. ONE render
+        // suffices — the short-circuit-into-a-call shape has exactly one — and an unresolvable
+        // render position refuses, as everywhere else. Both memory reads, spelled positively: a
+        // `call` is the enclosing arm's other member and has its own execute-once rules above.
         if (
           (op.opcode === 'load' || op.opcode === 'aload') &&
           readsStayWhereWritten &&

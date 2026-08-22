@@ -84,39 +84,23 @@ export interface TargetDescription {
     // `add rd, #imm8` reaches 255. Absent ⇒ the lever stands down for this target.
     nearBaseSpan?: number;
     // Does this compiler EMIT a memory read in the block the source SPELLED it in? One direction
-    // only, and that asymmetry is the whole of it: the def-block placement rule in
-    // structure/analysis.ts (StructureOptions.readsStayWhereWritten) re-spells a read at the block
-    // the asm performed it in, and what makes that reproduce the asm is that the compiler emits a
-    // spelled read where it stands — nothing sinks it past a branch, nothing lifts it ahead to a
-    // dominator. The CONVERSE ("the asm's read block is where the source read") is a different and
-    // FALSE claim on this compiler; the rule does not rest on it, and no default should be
-    // declared as if it did.
+    // only: the def-block placement rule (StructureOptions.readsStayWhereWritten) re-spells a read
+    // at the block the asm performed it in, which reproduces the asm iff nothing sinks a spelled
+    // read past a branch and nothing lifts one to a dominator. The CONVERSE — the asm's read block
+    // is where the source read — is FALSE even here, and no default may be declared as if it held.
     //
-    // agbcc (gcc 2.9-arm, -O2) declares TRUE, from its own sources plus a compiled pair:
-    //   • no scheduler at all — gcc/Makefile's SRCS compiles neither sched.c nor reorg.c, and
-    //     toplev.c has no flag_schedule_insns, so nothing sinks a read past a branch;
-    //   • code hoisting is compiled in but never runs at -O2 — gcse.c calls
-    //     one_code_hoisting_pass only `if (optimize_size)`, which toplev.c sets only for -Os
-    //     (so a -Os project would NOT get this declaration), so nothing lifts a spelled read
-    //     ahead of where it stands;
-    //   • compiling `s = *g; if (c) A(s); else B(s);` against `if (c) A(*g); else B(*g);` emits
-    //     one ldrb + one pool word vs. one ldrb + one pool word PER ARM, and moves neither.
+    // agbcc (gcc 2.9-arm, -O2) declares TRUE from its own sources plus a compiled pair: gcc's
+    // Makefile SRCS compiles neither sched.c nor reorg.c and toplev.c never mentions
+    // flag_schedule_insns, so there is no scheduler; gcse.c calls one_code_hoisting_pass only
+    // `if (optimize_size)`, which toplev.c sets only for -Os, so at -O2 the hoister is compiled in
+    // and never runs (a -Os project would NOT get this declaration); and `s = *g; if (c) A(s);
+    // else B(s);` against `if (c) A(*g); else B(*g);` emits one ldrb + one pool word versus one of
+    // each PER ARM, moving neither. The two passes that DO move a read between blocks at -O2 —
+    // loop invariant motion, and the PRE that makes the converse false — are refusals the rule
+    // owes; structure/analysis.ts carries them.
     //
-    // Two passes DO move a read BETWEEN blocks at -O2, and each is a refusal the rule owes rather
-    // than a counterexample to the claim above:
-    //   • loop invariant motion (loop.c) hoists an invariant read into the loop PREHEADER, below
-    //     the loop guard — `preheaderOfRenderLoop` in structure/analysis.ts;
-    //   • partial redundancy elimination — gcse.c runs `one_pre_gcse_pass` on the `else` of that
-    //     same `if (optimize_size)`, so it runs at -O2 and it DOES move loads. Compiled,
-    //     `if (c) p[0]=p[4]; else p[1]=7; p[2]=p[4];` puts a second `ldr r0,[r1,#0x10]` at the end
-    //     of the else arm — a read that arm never spelled — and deletes the merge's. That is why
-    //     the converse is false. It is also self-refusing: PRE leaves one read per incoming path
-    //     feeding a merge parameter, so every render sits in the read's OWN block and the rule's
-    //     render-position test declines (pinned by the compiled fixture in def-home.test.ts).
-    //
-    // ABSENT ⇒ the rule stands down, which is where ido/kmc-gcc/mwcc sit: each has a scheduler,
-    // and none has been put through that read-it-then-compile-it pair. A compiler opts IN only on
-    // its own evidence — never by inheriting agbcc's.
+    // ABSENT ⇒ the rule stands down, where ido/kmc-gcc/mwcc sit: each has a scheduler and none has
+    // been put through that pair. A compiler opts in on its own evidence, never by inheriting.
     readsStayWhereWritten?: boolean;
   };
 }

@@ -715,12 +715,11 @@ export interface StructureOptions {
   // spelling as the `/expr-home` axis — see analysis.ts AnalyzeOptions.
   homeLoopExprs?: boolean;
   // Emit a memory read as a named temp in ITS OWN block when every place it renders sits in a
-  // block that block strictly dominates. A per-compiler DATA lever declared in
-  // TargetDescription.compilerBehaviors (`readsStayWhereWritten`) and threaded here, NOT a
-  // differ-refereed axis: on a compiler with neither a scheduler nor a code hoister the sunk
-  // spelling is one it could not have produced from this asm, so there is nothing to referee.
-  // Absent ⇒ off, which is every compiler that has not been shown that pair — see the target
-  // field's doc and analysis.ts AnalyzeOptions for the refusals.
+  // block that block strictly dominates. A per-compiler DATA lever (TargetDescription
+  // .compilerBehaviors), not a differ-refereed axis: where the compiler has neither a scheduler
+  // nor a code hoister, the sunk spelling is one it could not have emitted from this asm, so there
+  // is nothing to referee. Absent ⇒ off — the target field carries the evidence a compiler owes,
+  // analysis.ts AnalyzeOptions the refusals.
   readsStayWhereWritten?: boolean;
   // Spell unsigned compares unsigned: cast an icmp_u* operand where the rendered operands do not
   // guarantee it, and reconcile a mixed-claimant declaration to u32 when nothing under the name
@@ -801,14 +800,6 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     materializeJoinFeeds = false,
     homeSharedAddresses = false,
     homeLoopExprs = false,
-    // A per-compiler DEFAULT, so it is deliberately NOT reset by assertPrimaryAccepts and does
-    // not trigger it. The invariant is "a CANDIDATE must never unlock a function the PRIMARY
-    // declines", and the primary is this target's defaults with the candidate axes off — which is
-    // what the reset list spells. Resetting a default too would test a spelling asmlift never
-    // emits for this target and could only decline functions the shipped one structures. What the
-    // exemption does NOT cover is the separate question of whether a NEW default silences a
-    // decline of its own; that is measured, not asserted — over every agbcc function in the
-    // klonoa checkout (464), strict mode gives 0 outcome changes with it on vs off.
     readsStayWhereWritten = false,
     unsignedCompareSpelling = false,
     coalesceMergeNames = false,
@@ -817,6 +808,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   } = opts;
   // These levers all change which edge copies elide as identities (extra materialization does
   // too), which the loop emitters' hazard predicates read — so the invariant above covers each.
+  // A per-compiler DEFAULT is not among them, however much it materializes: the primary IS this
+  // target's defaults, so resetting one would probe a spelling asmlift never emits here.
   if (coalesceMergeNames || materializeJoinFeeds || homeSharedAddresses || homeLoopExprs) {
     assertPrimaryAccepts(fn, opts, hooks);
   }
