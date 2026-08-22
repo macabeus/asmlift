@@ -3319,7 +3319,9 @@ export function lift(
       // from OUR accesses, which is the number that is too small in this shape.
       //
       // On an escape and not on "a laddr exists": an address dereferenced only in-function cannot
-      // be written by anyone else, and the overlap checks above cover its aliasing.
+      // be written by anyone else, and the overlap checks above cover its aliasing. `mayWrite`
+      // where the slot rule below takes the same argument on `passedToCallee` — deliberately
+      // unequal strengths, for the reason stated there; widening one is not widening both.
       if (mayWrite.size > 0 && irBlocks.some((blk) => blk.ops.some((op) => op.opcode === 'undef'))) {
         fail(
           'the captured address escapes, so a callee may write any frame offset and an unstored slot is not provably uninitialised',
@@ -3348,8 +3350,8 @@ export function lift(
       //
       // WHAT IT COSTS, stated because the benchmark cannot see it: it refuses every word slot above
       // a call-passed object, which is blunter than the hazard it names, and four corpus functions
-      // that lifted before it (sa3 `sub_809C274`; klonoa `UpdateAnimations`, `sub_801C4A0`,
-      // `sub_8062CFC`) now decline. None is a benchmark row. Narrowing it needs a bound on the
+      // that lifted before it (sa3 `sub_809C274`, `UpdateAnimations`, `sub_801C4A0`, `sub_8062CFC`)
+      // now decline. None is a benchmark row. Narrowing it needs a bound on the
       // object's real extent, which is the same thing the gate above lacks.
       //
       // ABOVE the object only: a C object extends upward from its base, so a slot BELOW it cannot
