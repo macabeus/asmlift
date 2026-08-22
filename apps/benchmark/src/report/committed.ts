@@ -4,7 +4,7 @@
 // ITSELF and every gate passes vacuously — which is why the real check is against the branch
 // POINT (`origin/main`), and why every gate here takes a `--base`.
 import type { BenchOutput, FunctionResult } from '@asmlift/bench-schema';
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 
 import { REPO_ROOT } from '../config';
 
@@ -14,7 +14,15 @@ export const RESULTS_PATH = 'apps/benchmark/results/results.json';
 export function readCommitted(ref = 'HEAD'): BenchOutput {
   let raw: string;
   try {
-    raw = execSync(`git show ${ref}:${RESULTS_PATH}`, { cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 256e6 });
+    // execFile, not a shell string: `ref` comes straight from `--base`, and a shell would have to
+    // be trusted with whatever it contains — a ref with a space, a `$` or a `;` in it would
+    // otherwise be re-split, expanded or run rather than read.
+    raw = execFileSync('git', ['show', `${ref}:${RESULTS_PATH}`], {
+      cwd: REPO_ROOT,
+      encoding: 'utf8',
+      maxBuffer: 256e6,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
   } catch (e) {
     throw new Error(
       `cannot read ${RESULTS_PATH} at '${ref}' — fetch the ref first (git fetch origin) or pass a --base that exists: ${
