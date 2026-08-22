@@ -125,3 +125,19 @@ test('--proto: unreadable file and non-object JSON stay distinguishable (66 vs 6
   expect(scalar.code).toBe(64);
   expect(scalar.stderr).toContain('must be an object mapping a symbol name to its prototype');
 });
+
+test('--jobs/--progress belong to the ranked path and are refused elsewhere, not ignored', async () => {
+  for (const flag of [['--jobs', '4'], ['--progress']]) {
+    const r = await run('agbcc-clamp0.s', '--target', 'agbcc', ...flag);
+    expect(r.code).toBe(64);
+    expect(r.stderr).toContain('--jobs/--progress apply to --score-against runs only');
+  }
+});
+
+test('--jobs must be a positive integer', async () => {
+  for (const bad of ['0', '-2', '2.5', 'six', '']) {
+    const r = await run('agbcc-clamp0.s', '--target', 'agbcc', '--score-against', '/nonexistent.o', '--jobs', bad);
+    expect(r.code).toBe(64);
+    expect(r.stderr).toContain('--jobs must be a positive integer');
+  }
+});
