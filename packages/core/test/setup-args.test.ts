@@ -1,7 +1,8 @@
-// The `/setup-args` lever (rank.ts, frontend/ssa.ts narrowToSetupArgs) — the arity a
+// The `/setup-args` lift variant (rank.ts, frontend/ssa.ts narrowToSetupArgs) — the arity a
 // prototype-less call gets when only the CALLING BLOCK's own setup counts. Pins: that the wider
 // reading stays the default, that the narrower one is offered beside it, that neither an argument
-// the block set up nor a declared arity is the lever's to drop.
+// the block set up nor a declared arity is the lever's to drop, and that the narrowed lift carries
+// the whole re-spelling cross rather than one fixed spelling of itself.
 import { describe, expect, test } from 'vitest';
 
 import { hasSetupArgsNarrowing } from '../src/frontend/ssa';
@@ -50,6 +51,16 @@ describe('a guessed argument that survived from an earlier block', () => {
     // vanish there whether or not anything ran.
     expect(hasSetupArgsNarrowing(lift('f', fn(body), ARMV4T_AGBCC, P))).toBe(false);
     expect(hasSetupArgsNarrowing(lift('f', fn(GUARDED_CALL) + POOL, ARMV4T_AGBCC, P))).toBe(true);
+  });
+
+  test('…and the narrowed lift carries the re-spelling cross, not one fixed spelling', () => {
+    // A lift variant, not a re-spelling lever: dropping an argument changes the IR every
+    // structuring axis then reads, so the axes have to run under it. `kleod:ReadKeyInput` needs
+    // `/setup-args/flip-join/derived-home`, a spelling neither side reaches alone.
+    const labels = cands(GUARDED_CALL, POOL).map((c) => c.label);
+    expect(labels).toContain('unsigned/setup-args');
+    expect(labels.filter((l) => l.startsWith('unsigned/setup-args/')).length).toBeGreaterThan(0);
+    expect(labels).toContain('unsigned/setup-args/flip-join');
   });
 
   test('a DECLARED arity is not the lever’s to narrow', () => {
