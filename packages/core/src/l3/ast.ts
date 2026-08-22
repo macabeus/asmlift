@@ -130,7 +130,14 @@ export type Stmt =
   | { k: 'continue' }
   // A multi-way `switch` over an integer scrutinee (recovered from a comparison tree — Regime A — or
   // a jump-table `switch_br` — Regime B). `cases` are emitted IN ARRAY ORDER; `default` (if present)
-  // is emitted last.
+  // is emitted after `defaultAt` of them, or after all of them when that is absent.
+  //
+  // `defaultAt` exists because C lets `default:` sit BETWEEN case labels and a compiler that lays
+  // case bodies out in source order shows where the source put it. It is a COUNT of preceding arms,
+  // not an index into an array a later pass may rebuild, and a backend clamps it to the arms it
+  // actually has. Setting it is legal only when the arm before the label does not fall through:
+  // moving the label in front of a falling arm would divert that arm into the default. The C-family
+  // printer terminates a non-final default with `break;` for the mirror-image reason.
   //
   // NON-NEUTRALITY NOTE (like the `index` node above): `fallsThrough` encodes a C/C++ control-flow
   // concept POSITIONALLY — `cases[i].fallsThrough === true` means control continues into
@@ -139,7 +146,7 @@ export type Stmt =
   // Pascal backend MUST loud-fail a `fallsThrough` case (it has no faithful spelling), exactly as it
   // loud-fails `field`/`cast`. Recovery must therefore only set `fallsThrough` when the fall-through
   // target is the emission-adjacent case.
-  | { k: 'switch'; scrutinee: Expr; cases: SwitchCase[]; default?: Stmt[] }
+  | { k: 'switch'; scrutinee: Expr; cases: SwitchCase[]; default?: Stmt[]; defaultAt?: number }
   | { k: 'return'; value?: Expr };
 
 /** One arm of a `switch`. `values` stacks multiple `case K:` labels onto one body (`case 1: case 2:`).

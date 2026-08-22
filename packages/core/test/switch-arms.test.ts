@@ -5,6 +5,9 @@
 // default — so a four-case tree reaches the default through two `b .Ldefault` blocks.
 import { expect, test } from 'vitest';
 
+import { emitCFamily } from '../src/backend/cfamily';
+import { T } from '../src/ir/types';
+import type { SFn, Stmt } from '../src/l3/ast';
 import { decompile } from '../src/pipeline';
 import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC } from '../src/target';
 
@@ -13,7 +16,9 @@ import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC } from '../src/target';
 // takes the result as a block parameter, and — the point — TWO jumps to the fall-out.
 // `out` is where a subtree that runs out of case values jumps: `.Lend` (the merge — the source
 // wrote no `default:`) or `.Ldef` (a real default arm, emitted by `tail`).
-const dispatch = (order: readonly number[], out = '.Lend', tail = '') =>
+// `order` may contain 'D', the real `default:` arm's body, laid out among the cases exactly as
+// agbcc lays it out when the source wrote `default:` there.
+const dispatch = (order: readonly (number | 'D')[], out = '.Lend', tail = '') =>
   'f:\n\tmov\tr2, #0x0\n' +
   '\tcmp\tr0, #0x1\n\tbeq\t.Lc1\t@cond_branch\n' +
   '\tcmp\tr0, #0x1\n\tbgt\t.Lhi\t@cond_branch\n' +
@@ -22,7 +27,11 @@ const dispatch = (order: readonly number[], out = '.Lend', tail = '') =>
   '.Lhi:\n\tcmp\tr0, #0x2\n\tbeq\t.Lc2\t@cond_branch\n' +
   '\tcmp\tr0, #0x3\n\tbeq\t.Lc3\t@cond_branch\n' +
   `\tb\t${out}\n` + // fall-out #2 — a SECOND block jumping to the same place
-  order.map((k) => `.Lc${k}:\n\tadd\tr2, r1, #0x${k + 1}\n\tb\t.Lend\n`).join('') +
+  order
+    .map((k) =>
+      k === 'D' ? '.Ldef:\n\tmov\tr2, #0x63\n\tb\t.Lend\n' : `.Lc${k}:\n\tadd\tr2, r1, #0x${k + 1}\n\tb\t.Lend\n`,
+    )
+    .join('') +
   tail +
   '.Lend:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr2, [r0]\n\tbx\tlr\n';
 
@@ -189,4 +198,63 @@ test('an arm with NO body of its own has no layout evidence, and falls to the en
     '.Ldef:\n\tmov\tr2, #0x9\n\tstr\tr2, [r3]\n' +
     '.Lend:\n\tbx\tlr\n';
   expect(armOrder(of(emptyArm))).toEqual([0, 2, 3, 1]);
+});
+
+// ── the `default:` arm's own position ────────────────────────────────────────────────────────────
+test('a `default:` laid out among the cases is spelled there, with the `break;` that needs', () => {
+  // The default is an arm, and gcc 2.9-arm expands its body in source order like any other:
+  // `case 0, case 1, default, case 2, case 3` compiles to a block layout with the default's body
+  // third, which is this fixture. Emitting the label last instead moves every instruction after it
+  // — recompiling the layout spelling with agbcc reproduces the target exactly, the last spelling
+  // differs by 6 instructions. A default that is not last needs a `break;` of its own, or control
+  // would drop into the case below it.
+  const out = of(dispatch([0, 1, 'D', 2, 3], '.Ldef'));
+  expect(out).toMatch(/case 1:\s+v0 = a1 \+ 2;\s+break;\s+default:\s+v0 = 99;\s+break;\s+case 2:/);
+  expect(armOrder(out)).toEqual([0, 1, 2, 3]);
+});
+
+test('a default the dispatch FALLS INTO keeps the last position', () => {
+  // Scope. `emit_case_nodes` reaches the default by a jump from each exhausted subtree, but when
+  // the tests simply run out the fall-through block IS the default's first block — placed there by
+  // the dispatch, not by the arm. agbcc emits exactly this for a two-case switch, and it emits it
+  // whether the source wrote `default:` first or last (both compile to the same instructions), so
+  // the layout is no evidence at all. Recovery keeps C's conventional last position.
+  const out = of(
+    'f:\n\tcmp\tr0, #0\n\tbeq\t.Lc0\t@cond_branch\n' +
+      '\tcmp\tr0, #0x1\n\tbeq\t.Lc1\t@cond_branch\n' +
+      '\tmov\tr2, #0x63\n\tb\t.Lend\n' + // the default arm, where the dispatch ran out
+      '.Lc0:\n\tmov\tr2, #0x1\n\tb\t.Lend\n' +
+      '.Lc1:\n\tmov\tr2, #0x2\n' +
+      '.Lend:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr2, [r0]\n\tbx\tlr\n',
+  );
+  expect(out).toMatch(/case 1:\s+v0 = 2;\s+break;\s+default:\s+v0 = 99;/);
+});
+
+test('a default placed after a FALLING case is refused by the printer, not silently emitted', () => {
+  // `defaultAt` is a spelling, and this is the one placement that is not: moving the label in
+  // front of an arm that falls through diverts that arm into the default instead of into the case
+  // below. Recovery only positions a default among closed arms, so reaching the printer with one
+  // is a producer bug — it fails loud rather than emitting C that runs a different program.
+  const arm = (v: number, to: number, fallsThrough: boolean) => ({
+    values: [v],
+    body: [{ k: 'assign', name: 'w', value: { k: 'const', value: to } } as Stmt],
+    fallsThrough,
+  });
+  const sw = (defaultAt: number): SFn => ({
+    name: 'f',
+    params: [{ name: 'x', type: T.s(32) }],
+    locals: [{ name: 'w', type: T.s(32) }],
+    retType: T.void(),
+    body: [
+      {
+        k: 'switch',
+        scrutinee: { k: 'var', name: 'x' },
+        cases: [arm(0, 1, true), arm(1, 2, false)],
+        default: [{ k: 'assign', name: 'w', value: { k: 'const', value: 9 } } as Stmt],
+        defaultAt,
+      },
+    ],
+  });
+  expect(() => emitCFamily('void f(s32 x)', sw(1))).toThrow(/falls through/);
+  expect(emitCFamily('void f(s32 x)', sw(2))).toMatch(/case 1:[\s\S]*default:/); // after both: fine
 });

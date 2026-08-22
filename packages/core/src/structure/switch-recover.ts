@@ -546,11 +546,36 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     // An empty default arm is not a default (see the Regime-B note in structure.ts): the label
     // would carry no statement, which says nothing and is not valid C89.
     const defBody = defaultBlk ? structureRegion(defaultBlk, merge) : [];
+    // The `default:` arm is an ARM, and where a default block is laid out is the same evidence the
+    // case bodies carry: verified by compiling, `case 0, case 1, default, case 2, case 3` puts the
+    // default's block third, and each of the five positions of a 3- and a 4-case switch lands its
+    // block exactly where the source wrote it. Emitting the label last regardless moves every
+    // instruction after it. The position is a COUNT of the arms laid out before the default; every
+    // arm here is closed, so the label diverts nothing wherever it lands.
+    //
+    // SCOPE — a default the dispatch FALLS INTO has no position of its own. `emit_case_nodes`
+    // reaches the default by a jump from each exhausted subtree, but when the last test simply
+    // runs out, its fall-through block is the default's first block, placed there by the dispatch
+    // rather than by the arm. Measured: `switch (x) { case 0: … case 1: … default: … }` lays that
+    // block right after the tests with the REST of the same arm last, and writing the default
+    // first compiles to identical instructions — the asm cannot tell the two spellings apart. So
+    // recovery keeps the C-conventional last position there instead of inventing evidence.
+    const fellInto = new Set<Block>();
+    for (const t of seen) {
+      const succ = t.ops[t.ops.length - 1].successors;
+      if (succ.length > 1) {
+        fellInto.add(succ[1].block);
+      }
+    }
+    const defaultAt =
+      switchArmsFollowLayout && defaultBlk && !fellInto.has(defaultBlk)
+        ? sortedCases.filter(([, blk]) => layoutIndex(blk) < layoutIndex(defaultBlk)).length
+        : undefined;
     const sw: Stmt = {
       k: 'switch',
       scrutinee: scrutExpr,
       cases: outCases,
-      ...(defBody.length ? { default: defBody } : {}),
+      ...(defBody.length ? { default: defBody, ...(defaultAt !== undefined ? { defaultAt } : {}) } : {}),
     };
     const out: Stmt[] = [sw];
     if (merge && merge !== stop) {
