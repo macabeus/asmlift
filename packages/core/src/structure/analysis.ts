@@ -239,6 +239,34 @@ export interface AnalyzeOptions {
    *  Same refusals as that axis: gaddr/laddr cones and multi-block-loop-header seats. Adding
    *  materialization preserves semantics for the admitted values, exactly as above. */
   homeLoopExprs?: boolean;
+  /** DEF-BLOCK PLACEMENT for memory reads — WHERE the read happens, not where the value lives.
+   *  The sibling of the homing axes above: there the question is which register or offset holds a
+   *  value, here it is which BLOCK performs the read. A read whose every render sits in a block
+   *  its own block STRICTLY DOMINATES has no rule at all above — the homing axes all want 2+
+   *  consumers or a shared base — so it sinks, and each arm re-reads it through a fresh pool
+   *  literal for the folded address.
+   *
+   *  This is a per-compiler DATA lever (TargetDescription.compilerBehaviors
+   *  `readsStayWhereWritten`), NOT a differ-refereed axis, and the distinction is the whole
+   *  argument: an axis exists where the asm UNDERDETERMINES the source, because some pass
+   *  collapses two spellings onto one output (`/uns-cmp`'s non-negativity proof is the type
+   *  case). On a compiler that neither hoists a read to a dominator nor schedules one across a
+   *  branch, asm placement is a FUNCTION of source placement — the sunk spelling is one that
+   *  compiler could not have emitted from this asm, so the differ has nothing to referee and
+   *  the extra candidate is pure cost. Which compilers may declare it, and on what evidence,
+   *  is stated at the target field; absent ⇒ the rule stands down entirely.
+   *
+   *  Sound by construction: materializing moves a read from its render position back to its own
+   *  def position, which is where the ASM performed it — the conservative direction. It is
+   *  SINKING that needs the barrier scan (the multi-render rule below), and that scan stays.
+   *
+   *  Three refusals, each with a reason rather than a threshold:
+   *    • an address CONE (gaddr/laddr) — the standing homing refusal: rendered standalone such a
+   *      value loses the memAccess's inline byte-stride cast (coneHoldsAddr);
+   *    • a MULTI-BLOCK LOOP HEADER seat — a test-at-top `while`'s condition has no seat for a
+   *      materialized temp, so it would trade a structuring function for a decline;
+   *    • a LOOP PREHEADER of the loop the renders are in — see `preheaderOfRenderLoop`. */
+  readsStayWhereWritten?: boolean;
 }
 
 export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {}): StructureAnalysis {
@@ -250,6 +278,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
     materializeJoinFeeds = false,
     homeSharedAddresses = false,
     homeLoopExprs = false,
+    readsStayWhereWritten = false,
   } = opts;
   // ── use registry ────────────────────────────────────────────────────────────────────────
   // Every use of a value, POSITIONED: the consuming op and its block/index. Successor args are
@@ -668,6 +697,27 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
       (L) => !L.body.has(defBlk) && consumers.filter((c) => L.body.has(opBlock.get(c)!)).length >= 2,
     );
   };
+  /** THE def-block placement rule's loop refusal: is `b` a PREHEADER of some loop whose body holds
+   *  one of the render blocks — outside the body, and a predecessor of the header?
+   *
+   *  This is the one place a compiler with no hoister still moves a read to a dominator: loop
+   *  invariant motion (loop.c, which agbcc DOES compile and run at -O2). Compiled, with the read
+   *  written INSIDE the loop and nothing aliasing it, agbcc emits
+   *
+   *      mov r2, #0 / cmp r2, r3 / bge .L4      <- the loop GUARD
+   *      ldr r0, .L8 / ldr r4, [r0]            <- the read, hoisted into the PREHEADER
+   *    .L6:  … the body …
+   *
+   *  while the same read written ABOVE the loop lands above the guard instead
+   *  (`ldr r0,.L8 / ldr r3,[r0] / mov r1,#0 / cmp r1,r2 / bge .L4`). So a read in the preheader is
+   *  evidence of a read in the BODY, and inferring def-block placement there would spell the one
+   *  source the asm rules out. (With an aliasing store in the loop agbcc hoists only the address
+   *  constant and leaves the `ldr` in the body — the same conclusion, weaker premise.)
+   *
+   *  Narrow on purpose: a loop merely lying between def and render is not this shape, and the rest
+   *  of the function keeps the rule. */
+  const preheaderOfRenderLoop = (b: Block, renders: readonly Block[]): boolean =>
+    loopBodies.some((L) => !L.body.has(b) && successorsOf(b).includes(L.header) && renders.some((x) => L.body.has(x)));
   // Decide in REVERSE program order so a consumer's own materialization is settled before any
   // producer asks for its emit position (SSA: uses follow defs in dominance/layout order) — and
   // iterate to a fixpoint for IR whose block layout does not follow dominance (hand-built IR):
@@ -777,6 +827,21 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         if (liveAcrossLoop(op, r, consumers)) {
           materialize.add(op);
           continue;
+        }
+        // ── DEF-BLOCK PLACEMENT (readsStayWhereWritten; see AnalyzeOptions) ──────────────────
+        // Every place this read renders sits in a block its OWN block strictly dominates ⇒ the
+        // asm read it once, above the branch, and on a compiler that neither hoists reads to a
+        // dominator nor schedules them across one, that is where the SOURCE read it. Sinking it
+        // would re-read per arm through a fresh pool literal — a spelling the compiler could not
+        // have produced from this asm. One render suffices (the short-circuit-into-a-call shape
+        // has exactly one); an unresolvable render position refuses, as everywhere else.
+        if (!isCall && readsStayWhereWritten && dom && !addressCone(op) && !multiBlockHeaders.has(b)) {
+          const at = consumers.map((c) => emitPos(c));
+          const rb = at.some((p) => p === null) ? null : [...new Set(at.map((p) => p!.blk))];
+          if (rb && rb.length > 0 && rb.every((x) => x !== b && dom.get(x)!.has(b)) && !preheaderOfRenderLoop(b, rb)) {
+            materialize.add(op);
+            continue;
+          }
         }
         // Address-home axis: a multi-render load THROUGH a base this axis homed re-reads what the
         // asm read once into the register the home just reproduced — home the value too, at the

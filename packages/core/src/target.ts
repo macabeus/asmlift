@@ -83,6 +83,25 @@ export interface TargetDescription {
     // neighbor absolute addresses within this many bytes may share one base local. Thumb's
     // `add rd, #imm8` reaches 255. Absent ⇒ the lever stands down for this target.
     nearBaseSpan?: number;
+    // Does this compiler leave a MEMORY READ in the block the source wrote it in — i.e. is the
+    // block the asm reads in evidence for the block the source read in? A compiler that hoists a
+    // read to a dominator (code hoisting / PRE with load motion) or sinks one past a branch
+    // (instruction scheduling across blocks) breaks that inference; one with neither pass makes
+    // asm placement a FUNCTION of source placement, which is what the def-block placement rule in
+    // structure/analysis.ts consumes (StructureOptions.readsStayWhereWritten).
+    //
+    // agbcc (gcc 2.9-arm, -O2) declares TRUE, from its own sources plus a compiled pair:
+    //   • no scheduler at all — gcc/Makefile's SRCS compiles neither sched.c nor reorg.c, and
+    //     toplev.c has no flag_schedule_insns;
+    //   • code hoisting is compiled in but never runs at -O2 — gcse.c calls
+    //     one_code_hoisting_pass only `if (optimize_size)`, which toplev.c sets only for -Os
+    //     (so a -Os project would NOT get this declaration);
+    //   • compiling `s = *g; if (c) A(s); else B(s);` against `if (c) A(*g); else B(*g);` emits
+    //     one ldrb + one pool word vs. one ldrb + one pool word PER ARM, and moves neither.
+    // ABSENT ⇒ the rule stands down, which is where ido/kmc-gcc/mwcc sit: each has a scheduler,
+    // and none has been put through that read-it-then-compile-it pair. A compiler opts IN only on
+    // its own evidence — never by inheriting agbcc's.
+    readsStayWhereWritten?: boolean;
   };
 }
 
@@ -114,6 +133,7 @@ export const ARMV4T_AGBCC: TargetDescription = {
     preserveDivergentBranchSense: true,
     orderArgCopiesByComputation: true,
     nearBaseSpan: 255,
+    readsStayWhereWritten: true,
   },
 };
 

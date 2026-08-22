@@ -714,6 +714,14 @@ export interface StructureOptions {
   // register the compiler holds across the iterations. Off by default; rank.ts enumerates the ON
   // spelling as the `/expr-home` axis — see analysis.ts AnalyzeOptions.
   homeLoopExprs?: boolean;
+  // Emit a memory read as a named temp in ITS OWN block when every place it renders sits in a
+  // block that block strictly dominates. A per-compiler DATA lever declared in
+  // TargetDescription.compilerBehaviors (`readsStayWhereWritten`) and threaded here, NOT a
+  // differ-refereed axis: on a compiler with neither a scheduler nor a code hoister the sunk
+  // spelling is one it could not have produced from this asm, so there is nothing to referee.
+  // Absent ⇒ off, which is every compiler that has not been shown that pair — see the target
+  // field's doc and analysis.ts AnalyzeOptions for the refusals.
+  readsStayWhereWritten?: boolean;
   // Spell unsigned compares unsigned: cast an icmp_u* operand where the rendered operands do not
   // guarantee it, and reconcile a mixed-claimant declaration to u32 when nothing under the name
   // needs signed. Off by default: a signed spelling that byte-matched was PROVED non-negative by
@@ -793,6 +801,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     materializeJoinFeeds = false,
     homeSharedAddresses = false,
     homeLoopExprs = false,
+    // A per-compiler DEFAULT, so it is deliberately NOT reset by assertPrimaryAccepts and does
+    // not trigger it: the spelling it produces IS the primary on a target that declares it.
+    readsStayWhereWritten = false,
     unsignedCompareSpelling = false,
     coalesceMergeNames = false,
     onGap = 'strict',
@@ -819,6 +830,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       materializeJoinFeeds,
       homeSharedAddresses,
       homeLoopExprs,
+      readsStayWhereWritten,
       // the map's own declaration truth: a volatile object's read may not be duplicated or moved
       volatileGlobal: (n) => {
         const si = symbols?.get(n);
