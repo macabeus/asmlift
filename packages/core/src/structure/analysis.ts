@@ -151,6 +151,63 @@ export function hasLoopSharedPureValue(fn: Fn): boolean {
   return false;
 }
 
+/** rank.ts's enumeration gate for the `/derived-home` axis: does the function HAVE a value the
+ *  axis would home — a pure non-const def with 2+ consumers whose cone stands on a memory read,
+ *  with no call or standalone address in between? Mirrors the axis's scope rule in `analyze` minus
+ *  the write-between and loop-header-seat refusals (both need the positioned model; a false
+ *  positive costs one duplicate-collapsed candidate, never a wrong one). */
+export function hasDerivedReadHome(fn: Fn): boolean {
+  const defOf = defOpMap(fn);
+  const consumers = new Map<Value, Set<Op>>();
+  for (const b of fn.blocks) {
+    for (const op of b.ops) {
+      for (const o of op.operands) {
+        (consumers.get(o) ?? consumers.set(o, new Set()).get(o)!).add(op);
+      }
+    }
+  }
+  const standsOnRead = (op0: Op): boolean => {
+    let read = false;
+    const seen = new Set<Value>();
+    const cone = [op0];
+    while (cone.length) {
+      const d = cone.pop()!;
+      if (d.opcode === 'load' || d.opcode === 'aload') {
+        read = true;
+        continue;
+      }
+      if (d.opcode === 'call' || d.opcode === 'gaddr' || d.opcode === 'laddr') {
+        return false;
+      }
+      for (const x of d.operands) {
+        if (!seen.has(x)) {
+          seen.add(x);
+          const dd = defOf.get(x);
+          if (dd) {
+            cone.push(dd);
+          }
+        }
+      }
+    }
+    return read;
+  };
+  for (const [v, cs] of consumers) {
+    const d = defOf.get(v);
+    if (
+      cs.size >= 2 &&
+      d &&
+      d.opcode !== 'const' &&
+      d.opcode !== 'call' &&
+      d.opcode !== 'load' &&
+      d.opcode !== 'aload' &&
+      standsOnRead(d)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export interface StructureAnalysis {
   /** every positioned use of a value; a value absent here is dead */
   useSitesOf: Map<Value, UseSite[]>;
@@ -247,6 +304,26 @@ export interface AnalyzeOptions {
    *  Same refusals as that axis: gaddr/laddr cones and multi-block-loop-header seats. Adding
    *  materialization preserves semantics for the admitted values, exactly as above. */
   homeLoopExprs?: boolean;
+  /** The derived-read-home axis (rank.ts `/derived-home`). A memory read whose value is not used
+   *  directly but through a pure computation with 2+ consumers puts the home on the WRONG node:
+   *  the read materializes (its consumer resolves no single render position) and the computation
+   *  then re-derives from that local at every use, where the asm computed it ONCE — the read's
+   *  register died at the computation and the DERIVED value is what a register carried on
+   *  (`eor r1,r1,r0` keeps `0x3FF ^ REG_KEYINPUT`, never the raw halfword). With this on, a pure
+   *  non-const value with 2+ consumers whose operand cone bottoms out at a memory read
+   *  materializes instead; the read then renders exactly once, inside the home.
+   *
+   *  A differ-refereed axis, not a fix: agbcc CSEs a re-derived expression back to one
+   *  instruction often enough that both spellings do compile, and which one the source spelled is
+   *  not derivable. What the cone's read supplies is the evidence the straight-line case otherwise
+   *  lacks — `/expr-home` takes a loop as proof the value stayed in a register, and a
+   *  freely-re-derivable value (the small-constant class) has no such proof at all, but a value
+   *  standing on a read the source could not repeat is one the asm computed from a single access.
+   *
+   *  Refusals: a cone crossing a `call` (homing would move a side effect), a write able to execute
+   *  between a cone read and this value's own position (the read would move across it), plus the
+   *  gaddr/laddr cone and multi-block-loop-header seat the sibling axes refuse. */
+  homeDerivedReads?: boolean;
   /** DEF-BLOCK PLACEMENT for memory reads — WHERE the read happens, not where the value lives.
    *  The sibling of the homing axes above: there the question is which register or offset holds a
    *  value, here which BLOCK performs the read. A read whose every render sits in a block its own
@@ -292,6 +369,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
     materializeJoinFeeds = false,
     homeSharedAddresses = false,
     homeLoopExprs = false,
+    homeDerivedReads = false,
     readsStayWhereWritten = false,
   } = opts;
   // ── use registry ────────────────────────────────────────────────────────────────────────
@@ -717,6 +795,52 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
       (L) => !L.body.has(defBlk) && consumers.filter((c) => L.body.has(opBlock.get(c)!)).length >= 2,
     );
   };
+  /** The derived-read-home axis's scope: does `op0` stand on a memory READ that may render at
+   *  `op0`'s own position?
+   *
+   *  The cone walk STOPS at a read — its address stays inline at the deref, so nothing below it is
+   *  ever rendered standalone — and refuses on anything else that cannot move to `op0`: a `call`
+   *  (a side effect), and a gaddr/laddr reached OUTSIDE a read's address (rendered standalone an
+   *  `&g + i` loses the memAccess's byte-stride cast). `coneHoldsAddr` cannot answer this: it
+   *  crosses reads, so it refuses every value standing on a named global's load — which is this
+   *  axis's whole clientele.
+   *
+   *  At least one read is required. A value derivable from locals and constants alone is one the
+   *  compiler re-materializes for free, and homing it only adds copies — the small-constant class
+   *  the const scope's note records.
+   *
+   *  Each read must then reach `op0`'s position with nothing that writes memory able to execute in
+   *  between, because homing moves the read there: today it renders at its own def position (it
+   *  materialized) or inline at each of `op0`'s render positions, and both lie on the far side of
+   *  a write that this refusal is the only thing standing between. */
+  const standsOnMovableRead = (op0: Op, blk: Block): boolean => {
+    const reads: Op[] = [];
+    const seen = new Set<Value>();
+    const cone = [op0];
+    while (cone.length) {
+      const d = cone.pop()!;
+      if (d.opcode === 'load' || d.opcode === 'aload') {
+        reads.push(d);
+        continue;
+      }
+      if (d.opcode === 'call' || d.opcode === 'gaddr' || d.opcode === 'laddr') {
+        return false;
+      }
+      for (const x of d.operands) {
+        if (!seen.has(x)) {
+          seen.add(x);
+          const dd = defOf.get(x);
+          if (dd) {
+            cone.push(dd);
+          }
+        }
+      }
+    }
+    const at = { blk, idx: opIndex.get(op0)! };
+    return reads.length > 0 && reads.every((r) => !memWriteBetween(r, at, (x) => EFFECTFUL_OPS.has(x.opcode)));
+  };
+  /** 2+ distinct consuming ops — the multi-use the pure-op rule reads as a reused register. */
+  const multiConsumer = (v: Value): boolean => new Set((useSitesOf.get(v) ?? []).map((s) => s.op)).size >= 2;
   /** THE def-block placement rule's loop refusal: is `b` a PREHEADER of some loop whose body holds
    *  one of the render blocks — outside the body, and a predecessor of the header?
    *
@@ -893,6 +1017,21 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
             !usedOnlyAsSharedBase(pr) &&
             loopSharedConsumers(pr, b) &&
             !addressCone(op) &&
+            !multiBlockHeaders.has(b)
+          ) {
+            materialize.add(op);
+          }
+          // Fifth scope, under the derived-read-home axis (AnalyzeOptions.homeDerivedReads): a
+          // pure non-const value with 2+ consumers standing on a memory read. Shared bases stay
+          // the third scope's, and a value already inside a loop the fourth's — this one is the
+          // straight-line case neither reaches.
+          if (
+            homeDerivedReads &&
+            op.opcode !== 'const' &&
+            pr &&
+            !usedOnlyAsSharedBase(pr) &&
+            multiConsumer(pr) &&
+            standsOnMovableRead(op, b) &&
             !multiBlockHeaders.has(b)
           ) {
             materialize.add(op);

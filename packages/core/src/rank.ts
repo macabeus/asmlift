@@ -36,7 +36,7 @@ import { applyIdiomPatterns, raiseRecovered, structureChecked } from './pipeline
 import { type Prototypes, prototypesFromSymbols } from './proto';
 import { runPreRecovery } from './raise/pre-recovery';
 import { recoverTypes } from './raise/recover';
-import { hasHomeableSharedAddress, hasLoopSharedPureValue } from './structure/analysis';
+import { hasDerivedReadHome, hasHomeableSharedAddress, hasLoopSharedPureValue } from './structure/analysis';
 import { type SymbolMap, symbolsByName } from './symbols';
 import { type TargetDescription, structureOptionsFor } from './target';
 
@@ -57,7 +57,7 @@ import { type TargetDescription, structureOptionsFor } from './target';
  *  primary declines (reread also skips the strip closure). Both exemptions are stated here
  *  rather than left implicit in a missing `||` arm or trigger term. */
 interface StructuringAxis {
-  flag: 'reread' | 'inplace' | 'mergeNames' | 'addrHome' | 'exprHome' | 'unsCmp';
+  flag: 'reread' | 'inplace' | 'mergeNames' | 'addrHome' | 'exprHome' | 'derivedHome' | 'unsCmp';
   suffix: string;
   options: (on: boolean) => Parameters<typeof structureChecked>[1];
   probeGate?: (probe: Fn, defs: Map<Value, Op>) => boolean;
@@ -138,6 +138,20 @@ const STRUCTURING_AXES: readonly StructuringAxis[] = [
     suffix: '/expr-home',
     options: (on) => ({ homeLoopExprs: on }),
     variantGate: hasLoopSharedPureValue,
+    strip: true,
+  },
+  // `/derived-home` — the derived-read-home axis (structure/analysis.ts AnalyzeOptions
+  // homeDerivedReads): a pure value with 2+ consumers standing on a memory read materializes, and
+  // the read then renders once inside it — the register the asm carried the DERIVED value in
+  // (`eor r1,r1,r0` keeps `0x3FF ^ REG_KEYINPUT`), where the default homes the read and re-derives
+  // the computation at every use. Both spellings compile (agbcc CSEs the re-derivation back), so
+  // the differ referees. Gated per symbol variant like its `/addr-home` and `/expr-home` siblings:
+  // a map-lifted probe spells the read's address as a gaddr, which the scope walk reads.
+  {
+    flag: 'derivedHome',
+    suffix: '/derived-home',
+    options: (on) => ({ homeDerivedReads: on }),
+    variantGate: hasDerivedReadHome,
     strip: true,
   },
   // `/uns-cmp` — spell unsigned compares unsigned (structure.ts unsignedCompareSpelling): an
@@ -428,6 +442,7 @@ export function enumerateCandidates(
     mergeNames: false,
     addrHome: false,
     exprHome: false,
+    derivedHome: false,
     unsCmp: false,
   }));
   for (const ax of STRUCTURING_AXES) {
