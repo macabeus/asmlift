@@ -337,3 +337,36 @@ test('a read PRE inserted into a sibling arm keeps its per-arm spelling', () => 
   expect(on).toBe(emit(PREINSERT, false, false));
   expect(count(on, 'a1[4]')).toBe(2); // one per arm, exactly as the asm reads it
 });
+
+// ── the other half of the scope: an `aload` ──────────────────────────────────────────────────
+// The rule admits both memory reads. An `aload`'s address is a runtime index, so its per-arm cost
+// is the duplicated `ldr` plus the index arithmetic rather than a second pool word — a different
+// cost, the same placement fact. This is the shape carrying `synthetic:armshare:agbcc`, whose
+// homed read (`kind`) lifts as an `aload` through a struct-array base.
+const ALOADSHARE = `fn aloadshare {
+^bb0(%0: s32*, %1: u32, %2: u32):
+  %3: s32 = aload %0, %1 {elemSize=4, signed=true}
+  %4: u32 = const {value=1}
+  %5: u32 = and %2, %4
+  %6: u32 = const {value=0}
+  %7: u32 = icmp_ne %5, %6
+  cond_br %7, ^bb1(), ^bb2()
+^bb1():
+  %8: u32 = const {value=50340416}
+  store %8, %3 {off=0, width=4}
+  br ^bb3()
+^bb2():
+  %9: u32 = const {value=50340420}
+  store %9, %3 {off=0, width=4}
+  br ^bb3()
+^bb3():
+  ret
+}
+`;
+
+test('an indexed read homes at its def block too', () => {
+  expect(emit(ALOADSHARE, true)).toMatch(/v\d+ = a0\[a1\];/);
+  expect(count(emit(ALOADSHARE, true), 'a0[a1]')).toBe(1);
+  expect(emit(ALOADSHARE, false)).not.toMatch(/v\d+ = a0\[a1\];/);
+  expect(count(emit(ALOADSHARE, false), 'a0[a1]')).toBe(2);
+});

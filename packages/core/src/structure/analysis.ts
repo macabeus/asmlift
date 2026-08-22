@@ -863,13 +863,15 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         }
         // ── DEF-BLOCK PLACEMENT (readsStayWhereWritten; see AnalyzeOptions) ──────────────────
         // Every place this read renders sits in a block its OWN block strictly dominates ⇒ the
-        // asm read it once, above the branch, and on a compiler that neither hoists reads to a
-        // dominator nor schedules them across one, that is where the SOURCE read it. Sinking it
-        // would re-read per arm through a fresh pool literal — a spelling the compiler could not
-        // have produced from this asm. One render suffices (the short-circuit-into-a-call shape
-        // has exactly one); an unresolvable render position refuses, as everywhere else.
+        // asm read it once, above the branch, and on a compiler that emits a read where the source
+        // spelled it, re-spelling it there reproduces the asm. Sinking it instead re-reads per
+        // arm: a second load either way, plus a second pool literal when the address folded to a
+        // constant, plus the index arithmetic again when it did not. One render suffices (the
+        // short-circuit-into-a-call shape has exactly one); an unresolvable render position
+        // refuses, as everywhere else. Both memory reads, spelled positively — a `call` is the
+        // enclosing arm's other member and has its own execute-once rules above.
         if (
-          !isCall &&
+          (op.opcode === 'load' || op.opcode === 'aload') &&
           readsStayWhereWritten &&
           dom &&
           !addressCone(op) &&
