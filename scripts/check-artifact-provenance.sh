@@ -44,13 +44,10 @@ paths='packages/core/src packages/cli/src packages/toolchains/src apps/benchmark
 stamp=$(sed -n 's/.*"commit": "\([0-9a-f]\{40\}\)".*/\1/p' "$artifact" | head -1)
 [ -n "$stamp" ] || { echo "provenance: $artifact carries no meta.asmlift.commit — UNKNOWN"; exit 0; }
 
-if ! git cat-file -e "$stamp^{commit}" 2>/dev/null || ! git merge-base --is-ancestor "$stamp" HEAD 2>/dev/null; then
-  echo "provenance: artifact stamp $(echo "$stamp" | cut -c1-7) is not an ancestor of HEAD — UNKNOWN, not checked"
-  exit 0
-fi
-
 # a ref the checkout does not have is not an error: CI passes both spellings of the base and
-# takes whichever exists, and only "none of them" is unknowable
+# takes whichever exists, and only "none of them" is unknowable. Resolved and printed before the
+# verdict, because a check whose failure mode is a silent no-op should always say what it compared
+# against — a run that quietly fell back to the frozen sha looks identical to a correct one.
 bases=''
 for ref in "$@"; do
   if git rev-parse --verify --quiet "$ref^{commit}" >/dev/null 2>&1; then
@@ -61,6 +58,12 @@ done
   echo "provenance: no base ref among '$*' is in this checkout — UNKNOWN, not checked"
   exit 0
 }
+echo "provenance: base(s) excluded:$bases"
+
+if ! git cat-file -e "$stamp^{commit}" 2>/dev/null || ! git merge-base --is-ancestor "$stamp" HEAD 2>/dev/null; then
+  echo "provenance: artifact stamp $(echo "$stamp" | cut -c1-7) is not an ancestor of HEAD — UNKNOWN, not checked"
+  exit 0
+fi
 
 after=$(git log --no-merges --oneline HEAD --not "$stamp" $bases -- $paths)
 
@@ -74,4 +77,3 @@ if [ -n "$after" ]; then
 fi
 
 echo "provenance: OK — no commit after $(echo "$stamp" | cut -c1-7) touches what the artifact measures"
-echo "provenance: base(s) excluded:$bases"
