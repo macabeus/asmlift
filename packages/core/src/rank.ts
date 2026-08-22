@@ -12,7 +12,7 @@ import { cBackend } from './backend/c';
 import { assertDerefsTyped, assertResolved } from './contracts';
 import type { AsmData } from './frontend/asmdata';
 import { frontendFor } from './frontend/registry';
-import { narrowToSetupArgs } from './frontend/ssa';
+import { hasSetupArgsNarrowing, narrowToSetupArgs } from './frontend/ssa';
 import { globalCellOf } from './ir/alias';
 import { Fn, type Op, type Value, defOpMap, successorsOf } from './ir/core';
 import { T } from './ir/types';
@@ -477,6 +477,7 @@ export function enumerateCandidates(
     const svOpts = sv.symbols ? baseOpts : { ...baseOpts, symbols: undefined };
     for (const cand of SIGN_CANDS) {
       const fn = frontend.lift(name, asm, target, prototypes, opts.asmData, sv.symbols);
+      const narrowable = hasSetupArgsNarrowing(fn); // the `/setup-args` gate, read off the raw lift
       verify(fn);
       applyIdiomPatterns(fn, target, opts.patterns);
       // The shared tower spine (pipeline.ts) — the candidate's ONE difference from decompile() is the
@@ -786,13 +787,14 @@ export function enumerateCandidates(
       // the two readings the source spelled is genuinely ambiguous, and frontend/ssa.ts
       // narrowToSetupArgs carries the argument for why the differ is what settles it.
       //
-      // The only LIFT-level lever, so it re-lifts rather than re-structuring — and like every lever
-      // under the POLICY note above it derives from the BASE spelling only: a narrower arity is
-      // orthogonal to branch sense and to every structuring axis, so crossing it with them would
-      // multiply candidates with no row behind it.
+      // The only LIFT-level lever, so it re-lifts rather than re-structuring — but only where the
+      // first lift already found a call to narrow. And like every lever under the POLICY note above
+      // it derives from the BASE spelling only: a narrower arity is orthogonal to branch sense and
+      // to every structuring axis, so crossing it with them would multiply candidates with no row
+      // behind it.
       try {
-        const narrowed = frontend.lift(name, asm, target, prototypes, opts.asmData, sv.symbols);
-        if (narrowToSetupArgs(narrowed)) {
+        const narrowed = narrowable ? frontend.lift(name, asm, target, prototypes, opts.asmData, sv.symbols) : null;
+        if (narrowed && narrowToSetupArgs(narrowed)) {
           verify(narrowed);
           applyIdiomPatterns(narrowed, target, opts.patterns);
           raiseRecovered(narrowed, target, { beforeRecover: () => pinScalarParams(narrowed, cand.signed, ptrIdx) });

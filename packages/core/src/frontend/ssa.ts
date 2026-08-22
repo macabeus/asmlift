@@ -541,6 +541,13 @@ export function trimClobberedCallArgs(inp: CallArgTrim): void {
  *  an attr only one of an otherwise-matching pair carries would cost a recovery. */
 const setupArgc = new WeakMap<Op, number>();
 
+/** Whether anything in `fn` HAS the narrower reading — the lever's gate, so the ~99% of functions
+ *  with no narrowable call cost no re-lift. Read it off the lift itself: a later pipeline stage may
+ *  replace a `call` op (softdiv rewrites one to a division), and the table is keyed by op. */
+export function hasSetupArgsNarrowing(fn: Fn): boolean {
+  return fn.blocks.some((b) => b.ops.some((op) => setupArgc.has(op)));
+}
+
 /** Cut every guessed call to the arity its OWN BLOCK set up, and report whether anything moved.
  *
  *  `trimClobberedCallArgs` keeps an argument register whose value merely survives from an earlier
