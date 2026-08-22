@@ -20,9 +20,12 @@ one) is an unfinished finding.
 
 1. Resolve the row: `pnpm bench run --tier real --only $1`. Record the outcome verbatim for both
    decompilers.
-2. Reproduce outside the harness: run the CLI from the project checkout with `--config decomp.yaml
-   --score-against <target.o>` (add `--proto` if a callee's arity is known to matter — say so).
-   The best `[score]` line is the number every later claim is measured against.
+2. Reproduce outside the harness with **the command in
+   [`docs/ranked-repro.md`](../../docs/ranked-repro.md), verbatim** — its flags (`--proto` when a
+   callee's arity matters, `--jobs 6 --progress`) are part of the number, and its `grep -F
+   '[score]'` recipe is how two such runs get compared. That file is shared with
+   `/match-function`; correct it there, never here. The best `[score]` line is the number every
+   later claim is measured against, and it goes into your report verbatim, flags included.
 3. State the baseline in your first user-facing message.
 
 ## Phase 1 — Capture what was actually compiled
@@ -136,7 +139,10 @@ attribution line for every decline naming its first blocker. Constraints learned
    they must pass after. `npx vitest run`, `pnpm test:matching`, `pnpm typecheck`,
    `npx eslint apps packages` (not `pnpm lint`), `pnpm format` check.
 3. Artifacts (`apps/benchmark/results/results.json`, both web copies) regenerated at the source
-   commit's HEAD (`meta.asmlift.dirty` must be false) and committed separately.
+   commit's HEAD (`meta.asmlift.dirty` must be false) and committed separately — **after** your
+   final rebase, as the last commit. A rebase rewrites the commit the artifact's stamp names, and
+   it can slide a base commit that changes the decompiler underneath numbers measured without one.
+   `scripts/check-artifact-provenance.sh` fails both; run it before opening the PR.
 4. Zero-flip over the previously committed rows blocks the branch, same as `/match-function`.
    `pnpm bench diff --base origin/main` is that check by row and field, and its output is the
    report's list of what moved.

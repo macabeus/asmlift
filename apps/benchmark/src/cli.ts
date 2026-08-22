@@ -40,7 +40,7 @@ import { RESULTS_DIR } from './config';
 import { materializeScoringContext, writeScoreConfig } from './decomp-config';
 import { merge } from './report/merge';
 import { publish } from './report/publish';
-import { type Tier, orchestrate } from './run/orchestrate';
+import { type Tier, emptySelectionError, orchestrate, tierIsFiltered } from './run/orchestrate';
 import { parseShard, runCases } from './run/runner';
 import { smoke } from './run/smoke';
 import { verify } from './run/verify';
@@ -115,11 +115,33 @@ switch (command) {
     if (opts.serial) {
       mkdirSync(RESULTS_DIR, { recursive: true });
       const shard = opts.shard ? parseShard(opts.shard) : { idx: 0, n: 1 };
+      // The same empty-selection verdict the fanned-out path takes, because this path writes
+      // <tier>.json DIRECTLY: `--tier synthetic --only <typo> --toolchain agbcc --serial` — the
+      // per-toolchain smoke shape /attribute-function instructs — replaced a 594-row
+      // synthetic.json with an empty one and exited 0, and the next `bench merge` published the
+      // other tier alone. A shard CHILD is exempt: it always writes its part file (even 0 rows —
+      // the stitcher owns <tier>.json), and a filter narrower than the shard count legitimately
+      // leaves most shards empty.
+      let selected: number | null = null;
+      const untouched: Tier[] = [];
       for (const tier of tiers) {
-        // a spawned shard child ALWAYS writes its part file (even 0/1) — the stitcher owns <tier>.json
         const out = join(RESULTS_DIR, opts.shard ? `${tier}.part${shard.idx}.json` : `${tier}.json`);
-        const n = runCases(casesFor(tier), out, shard).length;
+        const filtered = !opts.shard && tierIsFiltered(tier, opts);
+        const cases = casesFor(tier);
+        if (filtered && cases.length === 0) {
+          selected = selected ?? 0;
+          untouched.push(tier);
+          console.log(`\nNo ${tier} row selected — ${out} left unchanged`);
+          continue;
+        }
+        const n = runCases(cases, out, shard).length;
+        if (filtered) {
+          selected = (selected ?? 0) + n;
+        }
         console.log(`\nWrote ${n} ${tier} results → ${out}`);
+      }
+      if (selected === 0) {
+        throw emptySelectionError(opts, untouched);
       }
     } else {
       const jobs = Number(opts.jobs ?? Math.min(8, cpus().length));
