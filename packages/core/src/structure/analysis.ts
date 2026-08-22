@@ -703,9 +703,14 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
   /** THE def-block placement rule's loop refusal: is `b` a PREHEADER of some loop whose body holds
    *  one of the render blocks — outside the body, and a predecessor of the header?
    *
-   *  This is the one place a compiler with no hoister still moves a read to a dominator: loop
-   *  invariant motion (loop.c, which agbcc DOES compile and run at -O2). Compiled, with the read
-   *  written INSIDE the loop and nothing aliasing it, agbcc emits
+   *  Two passes still move a read BETWEEN blocks on a compiler with no code hoister, and this is
+   *  the one whose landing spot the source could not have spelled: loop invariant motion (loop.c,
+   *  which agbcc DOES compile and run at -O2) parks the read BELOW the loop guard, where a
+   *  source-level read above the loop would sit above it. (The other is partial redundancy
+   *  elimination — gcse.c's `one_pre_gcse_pass`, also -O2 — which refuses itself: it leaves one
+   *  read per incoming path feeding a merge parameter, so every render is in the read's own block
+   *  and the rule's render-position test declines. See the target field's doc.) Compiled, with the
+   *  read written INSIDE the loop and nothing aliasing it, agbcc emits
    *
    *      mov r2, #0 / cmp r2, r3 / bge .L4      <- the loop GUARD
    *      ldr r0, .L8 / ldr r4, [r0]            <- the read, hoisted into the PREHEADER

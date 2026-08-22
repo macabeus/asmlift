@@ -1488,13 +1488,14 @@ export const SYNTHETIC: SynthSpec[] = [
   // performs the read. agbcc has no instruction scheduler (gcc 2.9-arm's SRCS compiles neither
   // sched.c nor reorg.c), and its code-hoisting pass is compiled in but never runs: gcse.c
   // guards `one_code_hoisting_pass` behind `optimize_size`, which toplev.c sets only for -Os,
-  // and every config here builds -O2. What does run at -O2 is partial-redundancy elimination,
-  // which deletes a redundant computation but never moves one up to a dominator. So a read the
-  // asm performs ABOVE a branch was written above that branch in the source. Compiling the same
-  // read once-per-arm emits it once per arm — a second load and a second pool literal for the
-  // folded address — so a decompiler that renders a value at its USE site produces a spelling the
-  // compiler could not have produced from that asm. Verified by compiling the pair: the two
-  // spellings differ, and the compiler moves neither.
+  // and every config here builds -O2. So a read SPELLED above a branch is EMITTED above it — the
+  // direction these rows measure. (Not the converse: partial-redundancy elimination does run at
+  // -O2, and compiled it inserts a load into a sibling arm the source never read in, so the asm's
+  // read block is not proof of the source's.) Compiling the same read once-per-arm emits it once
+  // per arm — a second load and a second pool literal for the folded address — so a decompiler
+  // that renders a value at its USE site produces a spelling this compiler emits only for a source
+  // that read per arm. Verified by compiling the pair: the two spellings differ, and the compiler
+  // moves neither.
   //
   // Cut from kleod:LoadBGTilemapData:agbcc, where re-reading ONE entry byte in two sibling arms
   // is 15 points of the residual. Spelled with absolute GBA addresses so the rows stay

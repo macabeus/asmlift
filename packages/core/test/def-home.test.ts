@@ -299,3 +299,41 @@ test('a read inside a short-circuit right operand is refused', () => {
   expect(on).toContain('return a0 != 0 && *a0 != 0;');
   expect(on).not.toMatch(/v\d+ = \*a0;/); // never a statement above the guard
 });
+
+// ── the refusal that holds itself: partial redundancy elimination ────────────────────────────
+// agbcc's gcse.c runs `one_pre_gcse_pass` on the `else` of `if (optimize_size)`, so it DOES run at
+// -O2 and it DOES move loads. Compiled,
+//
+//   void f(int c, int *p) { if (c) { p[0] = p[4]; } else { p[1] = 7; } p[2] = p[4]; }
+//
+// emits `ldr r0,[r1,#0x10]` in the then-arm AND a second one as the LAST insn of the else arm —
+// a read that arm never spelled — with the merge's read deleted. So the asm's read block is not
+// proof of the source's, which is why the rule's claim runs the other way (a read SPELLED in a
+// block is EMITTED in it). This shape needs no refusal of its own: PRE leaves one read per
+// incoming path feeding a merge parameter, so each render is in its own read's block and the
+// render-position test declines. The IR below is what `decompile()` recovers from that output.
+const PREINSERT = `fn f {
+^bb0(%0: s32, %1: s32*):
+  %2: s32 = const {value=0}
+  %3: u32 = icmp_eq %0, %2
+  cond_br %3, ^bb2(), ^bb1()
+^bb1():
+  %4: s32 = load %1 {off=16, signed=true, width=4}
+  store %1, %4 {off=0, width=4}
+  br ^bb3(%4)
+^bb2():
+  %5: s32 = const {value=7}
+  store %1, %5 {off=4, width=4}
+  %6: s32 = load %1 {off=16, signed=true, width=4}
+  br ^bb3(%6)
+^bb3(%7: s32):
+  store %1, %7 {off=8, width=4}
+  ret %7
+}
+`;
+
+test('a read PRE inserted into a sibling arm keeps its per-arm spelling', () => {
+  const on = emit(PREINSERT, true, false);
+  expect(on).toBe(emit(PREINSERT, false, false));
+  expect(count(on, 'a1[4]')).toBe(2); // one per arm, exactly as the asm reads it
+});

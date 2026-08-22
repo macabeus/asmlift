@@ -111,9 +111,13 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   apart (`/uns-cmp`: a signed compare emits the unsigned branch only once the compiler has PROVED
   the operand non-negative, and emission's provable set is smaller than the compiler's). A default
   is right when the mapping is a function — `readsStayWhereWritten` says a compiler with neither an
-  instruction scheduler nor a code hoister cannot have moved a memory read across a block boundary,
-  so the block the asm reads in _is_ the block the source read in, and the sunk spelling is one that
-  compiler could not have emitted from this asm. Getting that backwards is expensive in both
+  instruction scheduler nor a code hoister emits a memory read in the block the source spelled it
+  in, so re-spelling a read at the block the asm performed it in reproduces that asm, while the sunk
+  per-arm spelling is one this compiler emits only for a source that read per arm. Note which way
+  that claim runs: it is emission-from-spelling, not spelling-from-emission. The converse would be
+  false even here (agbcc's PRE does move a load into a block the source never read in), and a
+  default read backwards is how a compiler fact turns into a wrong answer — so a per-compiler
+  default owes an explicit refusal for every pass that moves the thing it is placing. Getting that backwards is expensive in both
   directions: an axis where a default belongs doubles every enumeration to referee a question with
   one answer, and a default where an axis belongs quietly degrades every function the differ would
   have rescued.
