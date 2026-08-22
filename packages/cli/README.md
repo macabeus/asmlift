@@ -51,6 +51,10 @@ usage: asmlift <file.s|file.asm|file.o|-> [--target <agbcc|ido7.1|gcc2.7.2kmc|gc
 | `--jobs`          | With `--score-against`: compile `n` candidates at a time (default `1`). Candidate compiles are the bulk of a ranked run and are independent; the ranking is unchanged — the schedule cannot choose the winner                                                                                              |
 | `--progress`      | With `--score-against`: an `asmlift: [progress] i/n candidates scored` liveness line on stderr every few seconds. The `[score]` table is unchanged, so two runs still compare on their `[score]` lines                                                                                                     |
 
+Above `--jobs 1` it is YOUR `compiler` template that runs concurrently. Each worker gets its own
+`{{inputPath}}`/`{{outputPath}}` scratch directory, but every worker runs from the config's
+directory, so a template that writes to a fixed path inside the project races itself.
+
 Exit codes: `0` clean (or byte-exact match when scoring) · `1` gaps, declined, or nonmatch —
 the stderr tag says which (`[declined]` = principled refusal, `[internal error]` = bug) ·
 `64` usage error · `66` unreadable input.
