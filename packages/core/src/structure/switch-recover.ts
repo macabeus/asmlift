@@ -454,9 +454,21 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
       return null;
     }
     const defaultBlk = defaults[0] ?? null;
+    // A default entry that takes BLOCK PARAMETERS. Collapsing the tree DISCARDS its edges, and an
+    // edge's only emission is its parallel copy (structure.ts argAssignsFor) — so an entry the
+    // dispatch hands values to would lose them: `switch (x) { case 1: … case 2: … }` where the
+    // fall-out edge also carried `w = 0` would drop that write silently. Case entries are held to
+    // the same rule where the walk records them (`asLeafOrTest`), by the same argument.
+    //
+    // The refusal is deliberately structural rather than "would these copies elide anyway". It
+    // costs nothing to be strict here: across all 823 benchmark rows it fires ZERO times, because
+    // agbcc's `emit_case_nodes` reaches the default through a jump of its own — the bare
+    // `b .Ldefault` blocks collapsed above, which carry the copies into the default ARM instead.
+    // A shape that does hand the default values straight off a dispatch branch declines LOUD to
+    // if-recovery, which spells every copy the asm performs.
     if (defaultBlk && defaultBlk.params.length) {
       return null;
-    } // default entry with a phi → decline
+    }
     // A default candidate that is ALSO a case body means a relational edge hit a case leaf → ambiguous.
     if ([...defaultCands].some((d) => caseBlocks.has(d))) {
       return null;

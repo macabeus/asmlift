@@ -84,3 +84,26 @@ test('a compiler that has not declared layout-order arms keeps the ascending spe
     expect(t.compilerBehaviors.switchArmsFollowLayout).toBeUndefined();
   }
 });
+
+test('a default entry the DISPATCH hands a value to still declines, and keeps the write', () => {
+  // The other refusal in the same neighbourhood, pinned. Here `bne` branches straight to the
+  // merge, so the default entry is a block with a PARAMETER and the edge into it carries `w = 0`.
+  // Collapsing the tree discards that edge, and an edge's only emission is its copy — so a
+  // `switch` with no default would drop the write and look entirely ordinary doing it. Recovery
+  // declines to if-nesting, which spells every copy the assembly performs.
+  //
+  // Structural on purpose, not "would this copy elide anyway": it costs nothing, because agbcc
+  // reaches its default through a jump of its own (the collapsed `b .Ldefault` blocks above),
+  // which carries the copies into the default ARM. Across all 823 benchmark rows it never fires.
+  const out = of(
+    'f:\n\tmov\tr2, #0x0\n' +
+      '\tcmp\tr0, #0x1\n\tbeq\t.Lc1\t@cond_branch\n' +
+      '\tcmp\tr0, #0x2\n\tbne\t.Lend\t@cond_branch\n' +
+      '.Lc2:\n\tadd\tr2, r1, #0x2\n\tb\t.Lend\n' +
+      '.Lc1:\n\tadd\tr2, r1, #0x1\n' +
+      '.Lend:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr2, [r0]\n\tbx\tlr\n',
+  );
+  expect(out).not.toContain('switch');
+  expect(out).toContain('v0 = 0;'); // the write the discarded edge carried
+  expect(out).toContain('v0 = a1 + 2;');
+});
