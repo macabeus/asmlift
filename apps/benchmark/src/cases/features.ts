@@ -85,6 +85,7 @@ export const JUDGEMENT_FLOOR: Record<string, (body: string, asm: string, whole: 
   },
   // a TYPE tag: the evidence is in the signature, not the body
   double: (_b, _asm, whole) => /\bdouble\b/.test(whole),
+  'switch-arms': (b) => /\bswitch\s*\(/.test(b),
   dense: (b) => /\bswitch\s*\(/.test(b),
   sparse: (b) => /\bswitch\s*\(/.test(b),
   fallthrough: (b) => /\bswitch\s*\(/.test(b),

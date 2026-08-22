@@ -1575,6 +1575,116 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'u32 decomp(s32 n); void readcall(u32 a0, u32 a1);',
     proto: { decomp: { params: 1 }, readcall: { returnsVoid: true } },
   },
+
+  // WHICH ARMS, IN WHICH ORDER. The read-once family above asks where a value is COMPUTED; this
+  // one asks how a multi-way dispatch is GROUPED and SEQUENCED. Same compiler fact underneath:
+  // agbcc has no instruction scheduler and no block reordering pass (gcc 2.9-arm's SRCS compiles
+  // neither sched.c nor reorg.c), so a switch's case bodies are laid out in SOURCE order and the
+  // dispatch tree above them is `expand_end_case`'s balanced search. Reading a 4-case switch back
+  // therefore fixes both the grouping and the arm order, and getting either wrong moves every
+  // instruction after the first arm.
+  //
+  // Cut from kleod:LoadBGTilemapData:agbcc, where it is the single largest class in the residual:
+  // respelling its `if (v1 != 1) { if (v1 <= 1) { if (v1 == 0) … } else { switch { case 2, 3 } } }
+  // else { … }` as one four-case `switch` is worth 46 of 547 points — more than every capability
+  // the three previous rounds landed for that function, combined. Of the 46, the grouping is 8 and
+  // the ARM ORDER is 38: asmlift emits the `!= 1` arm last because an if/else has nowhere else to
+  // put it, while the asm lays that body out second.
+  //
+  // Two separate defects, one per row, both in structure/switch-recover.ts:
+  //   • `swarms` — a switch with NO default. Its fall-out edge lands on the MERGE, and the merge
+  //     carries the switch's own phi (the arms decide `w`), so the "default entry with a phi"
+  //     guard rejects the whole tree and recovery falls back to if-nesting. The phi belongs to the
+  //     switch's join, not to a default arm. `swtail`, the same dispatch with a phi-free merge,
+  //     IS recovered today — so the trigger is the phi, not the missing default.
+  //   • `swlayout` — the arms come back sorted by case VALUE. Its source order is 2, 0, 3, 1 and
+  //     agbcc lays the bodies out in exactly that order; asmlift emits 0, 1, 2, 3, so every
+  //     instruction after the first arm shifts. It carries a default, so recognition succeeds and
+  //     ONLY the order is left — which is what separates it from `swarms`.
+  //
+  // `swdefault` is the control: byte-identical C to `swarms` except that the fall-out is spelled
+  // as `default: w = 0;` instead of an initialiser, which gives the default its own block. It
+  // MATCHES today and must keep matching — a fix that recovers `swarms` by loosening the phi guard
+  // must not start treating this row's real default arm as the join.
+  //
+  // `swmulti` is the real function's shape rather than an isolate: a defaultless switch inside a
+  // do-while whose four arms all decide the same three locals. It moves furthest (38) because its
+  // residual also carries the arm-order half and the loop's own value placement.
+  //
+  // NOT the same gap as `uninit_sw` above, which contains the identical dispatch and also declines
+  // to if-nesting: there the arms leave a local undefined on the fall-out path, so the residual is
+  // dominated by the fabricated parameter that models the def-less read, and the row cannot gate
+  // this capability — closing the arm grouping would move its score without changing its outcome.
+  // `swarms` assigns `w = 0` first for exactly that reason.
+  //
+  // agbcc only, and for the same reason the read-once family is: the inference "the asm's block
+  // order is the source's arm order" is a fact about a compiler with no scheduler and no block
+  // reordering. The grouping half is a structurer defect and is ISA-independent, but whether
+  // ido7.1, gcc2.7.2kmc and mwcc_242_81 preserve arm layout was NOT measured, so those lanes are
+  // left off rather than assumed.
+  {
+    sym: 'swarms',
+    src:
+      '#define gOut ((volatile s32 *)0x04000000)\n' +
+      'void swarms(s32 mode, s32 n){ s32 w = 0;\n' +
+      ' switch (mode) { case 0: w = n + 1; break; case 1: w = n + 2; break;\n' +
+      '                 case 2: w = n + 3; break; case 3: w = n + 4; break; }\n' +
+      ' *gOut = w; }',
+    features: ['switch-arms', 'branch'],
+    toolchains: ['agbcc'],
+    ctx: 'void swarms(s32 mode, s32 n);',
+    proto: { swarms: { returnsVoid: true } },
+  },
+  {
+    sym: 'swdefault',
+    src:
+      '#define gOut ((volatile s32 *)0x04000000)\n' +
+      'void swdefault(s32 mode, s32 n){ s32 w;\n' +
+      ' switch (mode) { case 0: w = n + 1; break; case 1: w = n + 2; break;\n' +
+      '                 case 2: w = n + 3; break; case 3: w = n + 4; break;\n' +
+      '                 default: w = 0; break; }\n' +
+      ' *gOut = w; }',
+    features: ['switch-arms', 'branch'],
+    toolchains: ['agbcc'],
+    ctx: 'void swdefault(s32 mode, s32 n);',
+    proto: { swdefault: { returnsVoid: true } },
+  },
+  {
+    sym: 'swlayout',
+    src:
+      '#define gOut ((volatile s32 *)0x04000000)\n' +
+      'void swlayout(s32 mode, s32 n){ s32 w;\n' +
+      ' switch (mode) { case 2: w = n + 3; break; case 0: w = n + 1; break;\n' +
+      '                 case 3: w = n + 4; break; case 1: w = n + 2; break;\n' +
+      '                 default: w = 0; break; }\n' +
+      ' *gOut = w; }',
+    features: ['switch-arms', 'branch'],
+    toolchains: ['agbcc'],
+    ctx: 'void swlayout(s32 mode, s32 n);',
+    proto: { swlayout: { returnsVoid: true } },
+  },
+  {
+    sym: 'swmulti',
+    src:
+      'struct Ent { u16 w; u16 h; };\n' +
+      '#define gEnts ((struct Ent *)0x03003430)\n' +
+      '#define gDma ((volatile s32 *)0x040000d4)\n' +
+      'void swmulti(s32 mode, s32 idx, s32 n){ s32 a = 0, b = 0, c = 0; s32 i = 0;\n' +
+      ' do {\n' +
+      '  switch (mode) {\n' +
+      '   case 0: a = gEnts[idx].w; b = 32 - a; c = 0;                break;\n' +
+      '   case 1: a = 32;           b = 0;      c = i << 5;           break;\n' +
+      '   case 2: a = gEnts[idx].h; b = 32 - a; c = i * gEnts[idx].h; break;\n' +
+      '   case 3: a = gEnts[idx].w; b = 16;     c = i & 32;           break;\n' +
+      '  }\n' +
+      '  gDma[0] = a; gDma[1] = b; gDma[2] = c;\n' +
+      '  i++;\n' +
+      ' } while (i < n); }',
+    features: ['switch-arms', 'struct'],
+    toolchains: ['agbcc'],
+    ctx: 'void swmulti(s32 mode, s32 idx, s32 n);',
+    proto: { swmulti: { returnsVoid: true } },
+  },
 ];
 
 // ── C++ (mwcc `.cp` frontend, PPC only) ───────────────────────────────────────────────────
