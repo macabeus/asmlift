@@ -2091,7 +2091,8 @@ export function lift(
   //     2 words → `mov r1, sp; ldmia r0!,{…}; stmia r1!,{…}` — frame 8
   //     13+     → `mov r0, sp; mov r2,#0x44; bl memcpy` — frame 0x44 and up
   //   struct return, `void f(int x){ struct R r = mk(x); use2(r.a[0]); }`:
-  //     1 word  → returned in r0, no frame temp at all
+  //     1 word, INTEGER-LIKE (`{int a;}`, `{int a[1];}`, `{float f;}`) → r0, no frame temp
+  //     1 word, otherwise (`{char a,b,c,d;}`, `{short a,b;}`) → `mov r0, sp; bl mk` — frame 4
   //     2 words → `mov r0, sp; bl mk` — frame 8
   //
   // Left unguarded that cost an argument: `void g3(struct Huge *p, int x){ takesH(*p);
@@ -2102,11 +2103,16 @@ export function lift(
   //
   // So the gate is the MODEL'S OWN EXTENT. This frontend models the captured object as the single
   // word at [sp,#0] (`isFrameObjectAccess` below), and a one-word model is a description of the
-  // frame only when the frame IS that word. `localArea === 4` says exactly that, and it excludes
-  // every block-copy base the table above lists — each needs two frame words before agbcc names its
-  // base with a register at all. Any larger frame has bytes this model does not describe, and they
-  // are either the rest of a wider object the callee writes or another call's argument slots;
-  // neither is provable here, so the answer stays the decline.
+  // frame only when the frame IS that word. `localArea === 4` says exactly that. It excludes every
+  // block-copy base — each needs two frame words before agbcc names its base with a register at
+  // all — and the two-word struct returns with them. Any larger frame has bytes this model does not
+  // describe, and they are either the rest of a wider object the callee writes or another call's
+  // argument slots; neither is provable here, so the answer stays the decline.
+  //
+  // What the frame size does NOT exclude is the one-word struct return in the table above, which is
+  // instruction-for-instruction an out-parameter call. That one is settled after the lift, on
+  // whether this function ever writes the object — see the premise re-check in the frame-object
+  // audit, which is also where the licence's other half is re-proven.
   //
   // What it refuses that really is an addressable local: every frame with a second word in it. That
   // is a capability gap, not a wrong answer, and widening it needs a model of the object's real
@@ -2926,7 +2932,9 @@ export function lift(
         }
       }
     }
-    if (laddrs.length > 0) {
+    // …and it runs for a licensed acceptance with no object at all, so the premise re-check below
+    // is total rather than resting on "the capture always survives into the IR".
+    if (laddrs.length > 0 || capturedObjectIsTheWholeFrame) {
       const readOnlySinks = new Set(target.capabilities.readOnlyAddressSinks ?? []);
       const defOf = new Map<Value, Op>();
       for (const blk of irBlocks) {
@@ -3131,6 +3139,11 @@ export function lift(
       // That is the only escape whose writer this frontend can name, and it is the one the
       // outgoing-argument proof newly admits — so it carries its own rule below.
       const passedToCallee = new Set<number>();
+      // …and WHICH ARGUMENT it was passed as, because argument 0 is the one position a hidden
+      // struct-return pointer can occupy. A `call`'s operand index IS the argument index here (the
+      // `bl` arm reads r0..r<argc-1> in order), so an address handed over at r1 or above is an
+      // argument the source wrote.
+      const passedAboveArg0 = new Set<number>();
       for (const off of objects.keys()) {
         accesses.set(off, []);
       }
@@ -3170,6 +3183,9 @@ export function lift(
               }
               if (op.opcode === 'call') {
                 passedToCallee.add(off);
+                if (idx > 0) {
+                  passedAboveArg0.add(off);
+                }
               }
               return;
             }
@@ -3177,6 +3193,50 @@ export function lift(
           });
         }
       }
+
+      // THE ACCEPTANCE'S PREMISE, RE-ASKED OF THE IR. `capturedObjectIsTheWholeFrame` is a reading
+      // of the TEXT and it is the one thing in this file that switches a refusal OFF, so the two
+      // facts it claims are re-proven here, where they are exact, rather than left to the
+      // approximation that licensed them. Neither is a second opinion on the same evidence: the
+      // scan asks what a REGISTER holds at a `bl`; this asks what the finished function does with
+      // the OBJECT.
+      //
+      // PASSED TO A CALLEE. The whole licence is "a callee is holding the address of this frame",
+      // and the pre-lift scan can say that of a register whose value never reaches a call operand —
+      // a declared arity trims it away, or the register is dead by the time the call is built. When
+      // it does, [sp,#0] has been re-modelled as an addressable object on no evidence at all, and
+      // the outgoing argument that really lived there is gone from the call.
+      //
+      // NOT A STRUCT-RETURN TEMP. A one-word frame rules out agbcc's block-copy bases (each needs
+      // two words) but NOT the hidden return pointer of a <=4-byte non-integer-like struct, which is
+      // exactly one word: `struct S4 { char a,b,c,d; }; struct S4 s = mk(x);` compiles to `add
+      // sp,#-4 / mov r0,sp / bl mk / ldr r0,[sp]`, instruction for instruction an out-parameter
+      // call. Left alone that lifted as `mk(&sp0, a0)` — a call the real prototype rejects.
+      //
+      // Two facts rule it out and either will do, because a return temp is a storage the CALLEE
+      // owns outright: it is written only by the callee, and its pointer is argument 0, always
+      // (compiled — `struct S4 mk3(int,int,int)` puts sp in r0 and shifts all three real arguments
+      // up). So a store of our own says the object is one this function fills, and an address
+      // handed over at r1 or above says the same by position.
+      //
+      // The cost is stated rather than hidden: an OUTPUT-only parameter taken at argument 0 is
+      // byte-for-byte a struct return and declines with it. Separating those needs the callee's
+      // real signature, which is what the arity refusal above cannot get either.
+      if (capturedObjectIsTheWholeFrame) {
+        if (!passedToCallee.has(0)) {
+          fail(
+            'the one-word-frame proof licensed this lift on the frame base reaching a callee, and ' +
+              'no call in the lifted function takes it — so nothing rules out an outgoing stack argument at [sp,#0]',
+          );
+        }
+        if (!accesses.get(0)?.some((a) => !a.isLoad) && !passedAboveArg0.has(0)) {
+          fail(
+            'the one-word frame is handed to a callee as argument 0 and never written here, which ' +
+              'is how a hidden struct-return pointer looks — the callee owning the storage is not provably an addressable local',
+          );
+        }
+      }
+
       // The declared type of each object, and then that its bytes belong to nothing else.
       const extent = new Map<number, number>();
       for (const [off, acc] of accesses) {

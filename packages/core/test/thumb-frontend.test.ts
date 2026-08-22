@@ -957,11 +957,12 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
   });
 
   // A ONE-WORD FRAME WHOSE BASE IS PASSED TO A CALLEE — the only thing in this file that makes the
-  // never-reloaded refusal stop firing, and TWO facts, not one. The capture alone proves nothing
-  // about the layout: agbcc emits a bare `mov rD, sp` for a block-copy base too (a by-value struct
-  // argument's outgoing area, a struct return's hidden pointer), and both of those need at least
-  // two frame words. `localArea === 4` is what separates them, so every fixture below carries the
-  // frame size as part of the shape being pinned.
+  // never-reloaded refusal stop firing, and never one fact. The capture alone proves nothing about
+  // the layout: agbcc emits a bare `mov rD, sp` for a block-copy base too (a by-value struct
+  // argument's outgoing area, a struct return's hidden pointer). `localArea === 4` excludes every
+  // one of those that needs two frame words, and the frame-object audit re-proves the rest after
+  // the lift — that a call really does take the address, and that this function really does write
+  // the object. Every fixture below carries the frame size as part of the shape being pinned.
   //
   // Unless a comment says otherwise the fixture is agbcc 2.9-arm-000512 output (`-O2
   // -mthumb-interwork -Wimplicit -fhex-asm -fprologue-bugfix`), not hand-written, because the whole
@@ -1127,20 +1128,70 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     });
 
     // …and the other block-copy base: a STRUCT-RETURN TEMP, where `mov r0, sp` is the hidden return
-    // pointer and the callee writes all 20 bytes of it. `struct Big { int a,b,c,d,e; }; void f(int
-    // x){ struct Big b = mk(x); use2(b.a); }` compiled. Nothing but the frame size separates it from
-    // an out-parameter this capability WOULD lift, so the frame size is what decides.
+    // pointer and the callee writes every byte of it. `struct Big { int a,b,c,d,e; }; void f(int x){
+    // struct Big b = mk(x); use2(b.a); }` compiled — five words, so the frame size refuses it.
+    //
+    // A ONE-WORD one does not refuse there, which is why the frame size is not the whole gate:
+    // agbcc returns a <=4-byte struct in MEMORY unless it is INTEGER-LIKE, and `struct S4 { char
+    // a,b,c,d; }` (also `{short a,b;}`) comes back through a one-word frame temp whose `mov r0, sp`
+    // is the hidden pointer — instruction for instruction an out-parameter call. Compiled, both:
+    //
+    //   struct R { int a; } / { int a[1]; } / { float f; }  → returned in r0, no frame at all
+    //   struct S4 { char a,b,c,d; } / { short a,b; }        → `add sp,#-4 / mov r0,sp / bl mk`
+    //
+    // What separates them is that a return temp is storage the CALLEE owns: it is written only by
+    // the callee, and its pointer is argument 0, always. Both are facts about the finished function
+    // rather than the text, so the premise re-check in the frame-object audit owns them.
     test('a struct-return temp is not an object of the width we happen to touch', () => {
       const structReturn =
         'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x14\n\tadd\tr1, r0, #0\n\tmov\tr0, sp\n\tbl\tmk\n' +
         '\tldr\tr0, [sp]\n\tbl\tuse2\n\tadd\tsp, sp, #0x14\n\tpop\t{r0}\n\tbx\tr0\n';
       expect(() => decompile('f', structReturn, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
-      // CONTROL: the identical shape in a ONE-WORD frame is an ordinary out-parameter and lifts.
-      const outParam =
-        'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x4\n\tmov\tr0, sp\n\tbl\tmk\n' +
+      // the ONE-WORD spelling of the same source — verbatim agbcc for `struct S4 { char a,b,c,d; };
+      // void f(int x){ struct S4 s = mk(x); use2(s.a); }`. Lifting it emitted `mk(&sp0, a0)`: a
+      // three-line function rendered as a call the real prototype rejects outright.
+      const oneWordReturn =
+        'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x4\n\tadd\tr1, r0, #0\n\tmov\tr0, sp\n\tbl\tmk\n' +
+        '\tldr\tr0, [sp]\n\tlsl\tr0, r0, #0x18\n\tlsr\tr0, r0, #0x18\n\tbl\tuse2\n' +
+        '\tadd\tsp, sp, #0x4\n\tpop\t{r0}\n\tbx\tr0\n';
+      expect(() => decompile('f', oneWordReturn, ARMV4T_AGBCC)).toThrow(/hidden struct-return pointer/);
+      expect(() => decompile('f', oneWordReturn, ARMV4T_AGBCC, { prototypes: { mk: { params: 1 } } })).toThrow(
+        /hidden struct-return pointer/,
+      );
+      // CONTROLS, one per fact. A store of OURS before the call is an in-out parameter no struct
+      // return can be…
+      const filledFirst =
+        'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tmov\tr0, sp\n\tbl\tmk\n' +
         '\tldr\tr0, [sp]\n\tbl\tuse2\n\tadd\tsp, sp, #0x4\n\tpop\t{r0}\n\tbx\tr0\n';
-      expect(decompile('f', outParam, ARMV4T_AGBCC, { prototypes: { mk: { params: 1 } } }).source).toContain(
+      expect(decompile('f', filledFirst, ARMV4T_AGBCC, { prototypes: { mk: { params: 1 } } }).source).toContain(
         'mk(&sp0)',
+      );
+      // …and so is a never-written object handed over at r2, since the hidden pointer is argument 0
+      // and nothing shifts it. sa3's `Task_Interactable116` and `sub_801DD68` are this shape.
+      const outAtArg2 =
+        'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x4\n\tmov\tr1, r0\n\tmov\tr0, #0\n\tmov\tr2, sp\n\tbl\tmk\n' +
+        '\tldr\tr0, [sp]\n\tbl\tuse2\n\tadd\tsp, sp, #0x4\n\tpop\t{r0}\n\tbx\tr0\n';
+      expect(decompile('f', outAtArg2, ARMV4T_AGBCC, { prototypes: { mk: { params: 3 } } }).source).toContain('&sp0');
+    });
+
+    // THE LICENCE, RE-ASKED OF THE IR. `capturedObjectIsTheWholeFrame` reads the TEXT for "a
+    // register holding sp reaches a `bl` as an argument"; the audit knows exactly what the finished
+    // function passes. Where they disagree the licence is the wrong one, and an acceptance whose
+    // premise nothing re-checks is the cheapest place for a wrong answer to hide.
+    test('the acceptance is refused when the lifted function does not pass the address to a call', () => {
+      // a declared arity DROPS the address: the licence claimed `use` receives the frame base and
+      // the emitted call takes nothing — which also loses `five`'s fifth outgoing argument
+      const droppedByArity =
+        'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr4, [sp]\n\tmov\tr0, sp\n\tbl\tuse\n' +
+        '\tmov\tr0, #0x1\n\tmov\tr1, #0x2\n\tmov\tr2, #0x3\n\tmov\tr3, #0x4\n\tbl\tfive\n' +
+        '\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n';
+      expect(() => decompile('f', droppedByArity, ARMV4T_AGBCC, { prototypes: { use: { params: 0 } } })).toThrow(
+        /no call in the lifted function takes it/,
+      );
+      // CONTROL: the same function with `use` taking its argument is the shape this capability is
+      // for, and lifts.
+      expect(decompile('f', droppedByArity, ARMV4T_AGBCC, { prototypes: { use: { params: 1 } } }).source).toContain(
+        'use(&sp0)',
       );
     });
 
