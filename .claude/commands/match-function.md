@@ -90,13 +90,22 @@ lost match blocks the branch.** If a match is lost, either tighten the gate on y
 the lever — do not rationalize a trade unless the user explicitly approves it. Report the totals
 (asmlift vs m2c) before and after.
 
-Two things this gate does not catch by itself:
+Three things this gate does not catch by itself:
 
 - **The regenerated artifact is the LAST commit on the branch.** `results.json` stamps the commit
   it was generated at, and every number you publish reads from it — so a commit that touches core,
   cli, the harness or the dataset after it silently republishes numbers a rule version that no
   longer exists produced. Regenerate after Phase 5's remediation, and run
   `scripts/check-artifact-provenance.sh` before opening the PR.
+- **A number measured OUTSIDE the harness goes stale the same way, and nothing checks it.** The
+  ranked run from Phase 0 measures the commit it ran at, and when the target is not a benchmark
+  row the regression gate cannot see it move — so remediation rewrites what it measures with
+  nothing to notice. Re-run it at the branch's final commit and publish *that* number; "the
+  primary output is byte-identical" is a claim about one candidate out of tens of thousands, not
+  about the best score. Launch it beside the final `pnpm bench run`, not after it. If you skip it
+  anyway, the cost you skipped it for is a number under Hard rule 5 — quote the log you read it
+  off. A round once skipped it on a re-score that "had not finished after 2h", written in a
+  session under an hour long that had run no ranked command at all.
 - **A corpus sweep's configuration is part of its claim.** Sweeping a project's functions with the
   new rule ON vs OFF proves nothing about the configuration you did not run: with a symbol map
   every absolute pool constant lifts to a `gaddr`, so a symbol-map sweep is blind to a rule that
@@ -121,9 +130,18 @@ ad-hoc patch shaped like this one function. Read `docs/level-tower.md` and
 structure it introduced; is it data where it should be data; does it duplicate an existing pass;
 would a reviewer who has never seen $1 understand why it exists? Name the redesign if there is one."
 
-Then: **remediate every confirmed finding as new commits**, and **re-run both agents on the fixes**.
-Precedent from this repo's history: a remediation itself introduced a silent-wrong-address bug that
-only the second pass caught. One round is not enough.
+Then: **remediate every confirmed finding as new commits**, and **re-brief and re-run both agents
+on the fixes**. Precedent from this repo's history: a remediation itself introduced a
+silent-wrong-address bug that only the second pass caught. One round is not enough.
+
+The second brief carries the first round's triage ledger — every finding, its verdict, and the
+reason behind each DECLINE or NOT-REPRODUCED — and any premise this round has since falsified is
+struck from it, not restated. Reissuing the first brief with the round number changed spends the
+second wave re-finding the first wave's work: one round did exactly that, and its second breaker
+built a semantic-differential rig to re-report a pre-existing defect the first breaker's rig had
+already found and remediation had confirmed and declined with three reasons — while the brief
+still aimed its hunt list at a guard that round's own instrumentation had shown fires zero times
+on the corpus. A finding already triaged is not a new finding unless it falsifies the triage.
 
 ## Phase 6 — Audit the commentary you introduced
 

@@ -107,6 +107,12 @@ attribution line for every decline naming its first blocker. Constraints learned
 - The reference source in `src` is the definition of the target. Keep it verbatim from your
   Phase-3/4 probes so the row measures exactly what you measured. Never tune it toward either
   decompiler.
+- **Every row the comment names must exist, and every claim about one you did not run is a
+  prediction.** Paste into your report the `grep -n "sym: '<name>'"` that proves each cited row is
+  real before resting an attribution on it, and mark a claim about a row you did not measure as a
+  prediction with the command that would falsify it. A family comment once rested its whole
+  attribution on a contrasting row nobody had written, and asserted a second row's score would
+  move without flipping — it flipped to MATCH the next round.
 - `features`: judgement tags only (source/codegen tags are derived). A new tag needs a
   `FeatureDef` in `packages/bench-schema/src/features.ts` and at least one row carrying it;
   a floor is optional and several tags deliberately have none.
@@ -149,9 +155,13 @@ attribution line for every decline naming its first blocker. Constraints learned
 
 1. **Numbers come from commands.** Never state a score, a pool count, or a compiler behavior you
    did not just observe in tool output.
-2. **Every compiler claim is verified by compiling.** The diff suggests; only the compiler
-   confirms. A plausible mechanism read from source but not reproduced is a hypothesis, not a
-   finding.
+2. **Every compiler claim is verified by compiling — and every claim about asmlift's own code by
+   running asmlift.** The diff suggests; only the compiler confirms. The same asymmetry bites on
+   this side: name the site that declines by instrumenting it (print which `return null` fires) or
+   by ablating it and watching the row move, never by reading the source and inferring. A guard
+   you did not watch fire is a hypothesis, and one printed as a mechanism aims the next round at
+   the wrong guard — a round once attributed a decline to a refusal that fires zero times on the
+   whole corpus.
 3. **Never edit the benchmark to make a row look better** — the reference source defines the
    target; manifests and results are never tuned. Harness defects (a hang, a missing timeout)
    are fixed or documented as their own labelled change.
