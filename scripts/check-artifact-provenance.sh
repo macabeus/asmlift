@@ -33,8 +33,8 @@
 #      rebase onto a main that gained a decompiler change and the artifact commit now sits on top
 #      of it while still holding numbers measured without it. So a branch publishing its own
 #      artifact must have generated it on a tree that already contained the base. Only the paths
-#      that can move a row on their own are a failure here; a base change to the harness is
-#      reported and not failed, because it has been row-neutral before.
+#      that decide a measurement are a failure here; a base change to the harness around them is
+#      reported and not failed — see `measures` below for which is which, and why.
 #
 # usage: scripts/check-artifact-provenance.sh [base-ref…]      (default: origin/main)
 set -eu
@@ -55,10 +55,20 @@ artifact=apps/benchmark/results/results.json
 # (`packages/bench-schema` is deliberately absent: it defines the vocabulary the site RENDERS,
 #  and editing a definition's text moves no row.)
 paths='packages/core/src packages/cli/src packages/toolchains/src apps/benchmark/src apps/benchmark/dataset'
-# the subset that decides a measurement: the decompiler, the compilers it is driven through, and
-# the inputs. The rest is the harness around them — it can move a row and so stays in `paths`,
-# but a BASE change there is reported rather than failed (see verdict 3).
-measures='packages/core/src packages/toolchains/src apps/benchmark/dataset'
+# the subset that decides a measurement: the decompiler, the ranking and scoring it is graded by,
+# the compilers it is driven through, and the inputs. `packages/cli/src` is in this list and not
+# the remainder — `eval/asmlift.ts` imports `decompileRanked` from `@asmlift/cli/rank` and
+# `compile/real.ts` imports `scoreObjects` from `@asmlift/cli/score`, so that package picks the
+# winning candidate and computes the score of every row; #69, a round that moved rows, changed
+# `packages/cli/src/objdiff.ts`. Calling it "the harness around the decompiler" made verdict 3
+# exit 0 on a base commit to the ranker — the exact false pass verdict 3 exists to prevent.
+#
+# The remainder is `apps/benchmark/src`, where a BASE change is reported rather than failed. Not
+# because it is provably row-neutral — it is not — but because of what lands there: in this
+# repo's whole history exactly two commits touched it without also touching one of the paths
+# below, and both came from a meta round whose own gate is a full `bench run` diffed per row
+# against the base. The note is how a reviewer sees one anyway.
+measures='packages/core/src packages/cli/src packages/toolchains/src apps/benchmark/dataset'
 
 [ -f "$artifact" ] || { echo "provenance: no $artifact — nothing to check"; exit 0; }
 
@@ -82,9 +92,13 @@ done
 echo "provenance: base(s) excluded:$bases"
 
 # Does this branch publish an artifact of its own? Compared by blob, not by commit, because that
-# is the only question the stamp's reachability cannot answer after a rebase.
+# is the only question the stamp's reachability cannot answer after a rebase. Hashed from the file
+# ON DISK, not `HEAD:$artifact`, so it is the same bytes the stamp above was read from: an agent
+# who regenerates and runs this before committing would otherwise be told its artifact is the
+# base's — and skip verdicts 2 and 3 on the numbers it is about to publish. In CI the two are the
+# same file.
 own=yes
-head_blob=$(git rev-parse --verify --quiet "HEAD:$artifact" || true)
+head_blob=$(git hash-object "$artifact" 2>/dev/null || true)
 for ref in $bases; do
   base_blob=$(git rev-parse --verify --quiet "$ref:$artifact" || true)
   if [ -n "$head_blob" ] && [ "$head_blob" = "$base_blob" ]; then

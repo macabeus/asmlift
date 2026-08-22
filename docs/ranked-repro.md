@@ -17,8 +17,10 @@ npx tsx <repo>/packages/cli/src/main.ts <asm/nonmatchings/…/Fn.s> \
   --jobs 6 --progress
 ```
 
-Run it from the project checkout with `source /tmp/wt-env.sh` already done, and redirect stderr to
-a file — the `[score]` and `[progress]` lines are stderr, and they are the whole record.
+Run it from the project checkout and redirect stderr to a file — the `[score]` and `[progress]`
+lines are stderr, and they are the whole record. From a git worktree, export the harness's
+toolchain overrides first (`ASMLIFT_AGBCC` and the rest): a worktree's repo root is not the
+workspace, so without them the sibling checkouts do not resolve and the run measures nothing.
 
 ## The flags are part of the number
 

@@ -79,6 +79,31 @@ export function tierIsFiltered(tier: Tier, opts: Pick<OrchestrateOptions, 'only'
   return Boolean(opts.only) || Boolean(tier === 'synthetic' ? opts.toolchain : opts.project);
 }
 
+/** The verdict itself, shared by both run paths — the fanned-out one below and the `--serial` one
+ *  in cli.ts, which writes `<tier>.json` directly and so empties it exactly the same way.
+ *  `untouched` names the tier files that were left alone, because the OTHER tier in the same run
+ *  may legitimately have been rewritten (`--toolchain` filters only synthetic, `--project` only
+ *  real, so the unfiltered tier runs whole) — and a fail-loud message must not claim a write did
+ *  not happen when it did. */
+export function emptySelectionError(
+  opts: Pick<OrchestrateOptions, 'only' | 'project' | 'toolchain'>,
+  untouched: Tier[],
+): Error {
+  // `--only` is a SUBSTRING of the symbol, not the row id. A green tick on a row that does not
+  // exist is how an attribution once rested on a control row nobody had written.
+  const shown = [
+    opts.only && `--only ${opts.only}`,
+    opts.project && `--project ${opts.project}`,
+    opts.toolchain && `--toolchain ${opts.toolchain}`,
+  ].filter(Boolean);
+  const files = untouched.map((t) => `results/${t}.json`).join(' and ');
+  return new Error(
+    `no row matched ${shown.join(' ')} in tier(s) ${untouched.join('+')} — nothing was measured ` +
+      `there, and ${files} left unchanged. Check the symbol with ` +
+      `\`grep -rn "sym: '<name>'" apps/benchmark/dataset\`.`,
+  );
+}
+
 /** Stitch `${tier}.part{0..n-1}.json` back into the canonical `${tier}.json`, delete the parts.
  *  `filtered` says a filter could have selected rows here, which makes an empty result a typo. */
 function stitch(tier: Tier, n: number, filtered: boolean): number {
@@ -115,6 +140,7 @@ export async function orchestrate(opts: OrchestrateOptions): Promise<void> {
   // Rows selected across every tier a filter could have selected in. Stays null on an unfiltered
   // run, which is the only kind that reaches a branch — so this verdict cannot move a number.
   let selected: number | null = null;
+  const untouched: Tier[] = [];
   for (const tier of opts.tiers) {
     const extra: string[] = [];
     if (opts.only) {
@@ -145,6 +171,9 @@ export async function orchestrate(opts: OrchestrateOptions): Promise<void> {
     const skipNote = skips ? ` — ⚠ ${skips} row(s) SKIPPED, toolchain unavailable` : '';
     // `→ results/<tier>.json` is a claim about a write, so it goes only where one happened.
     const empty = filtered && n === 0;
+    if (empty) {
+      untouched.push(tier);
+    }
     const wrote = empty ? ` — no row selected, results/${tier}.json left unchanged` : ` → results/${tier}.json`;
     console.log(
       `${failed ? '✗' : empty ? '–' : '✓'} ${tier}: ${n} results in ${secs}s${failed ? ` (${failed} shard(s) exited nonzero)` : ''}${wrote}${skipNote}`,
@@ -155,18 +184,7 @@ export async function orchestrate(opts: OrchestrateOptions): Promise<void> {
     throw new Error(`${failedShards} shard(s) exited nonzero — see BUILD-FAIL/error lines above`);
   }
   if (selected === 0) {
-    // A green tick on a row that does not exist is how an attribution once rested on a control
-    // row nobody had written. `--only` is a SUBSTRING of the symbol, not the row id.
-    const shown = [
-      opts.only && `--only ${opts.only}`,
-      opts.project && `--project ${opts.project}`,
-      opts.toolchain && `--toolchain ${opts.toolchain}`,
-    ].filter(Boolean);
-    throw new Error(
-      `no row matched ${shown.join(' ')} in tier(s) ${opts.tiers.join('+')} — nothing was measured, ` +
-        `and results/*.json were left as they were. Check the symbol with ` +
-        `\`grep -rn "sym: '<name>'" apps/benchmark/dataset\`.`,
-    );
+    throw emptySelectionError(opts, untouched);
   }
   console.log(`\nDone. Next: pnpm bench:merge`);
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { tierIsFiltered } from '../src/run/orchestrate';
+import { emptySelectionError, tierIsFiltered } from '../src/run/orchestrate';
 
 // A filter that selects no row used to print `✓ real: 0 results` and exit 0, having replaced a
 // good 240-row `real.json` with `results: []` — the file `bench merge` reads next. The verdict is
@@ -22,5 +22,25 @@ describe('tierIsFiltered', () => {
     expect(tierIsFiltered('real', { toolchain: 'agbcc' })).toBe(false);
     expect(tierIsFiltered('real', { project: 'klonoa' })).toBe(true);
     expect(tierIsFiltered('synthetic', { project: 'klonoa' })).toBe(false);
+  });
+});
+
+// The message is fail-loud output, so it must not claim a write did not happen when it did:
+// `--project <typo>` with the default `--tier both` leaves real.json alone but runs synthetic
+// WHOLE and rewrites it, because --project does not filter synthetic at all.
+describe('emptySelectionError', () => {
+  it('names only the tier files that were actually left alone', () => {
+    expect(emptySelectionError({ project: 'nosuch' }, ['real']).message).toContain(
+      'in tier(s) real — nothing was measured there, and results/real.json left unchanged',
+    );
+    expect(emptySelectionError({ only: 'Nope' }, ['synthetic', 'real']).message).toContain(
+      'results/synthetic.json and results/real.json left unchanged',
+    );
+  });
+
+  it('quotes back every filter that was in force', () => {
+    const m = emptySelectionError({ only: 'Nope', toolchain: 'agbcc' }, ['synthetic']).message;
+    expect(m).toContain('--only Nope');
+    expect(m).toContain('--toolchain agbcc');
   });
 });
