@@ -38,22 +38,29 @@ PREFIXES='asmlift-usercc- asmlift-score- asmlift-ref- asmlift-target- asmlift-mi
 MINUTES=$((HOURS * 60))
 ROOTS="${TMPDIR:-/tmp} /tmp"
 
+# ONE traversal per root, not one per prefix: `find` stats every entry, and a temp dir with a
+# million of them takes minutes per pass.
+match=''
+for p in $PREFIXES; do
+  [ -z "$match" ] && match="-name $p*" || match="$match -o -name $p*"
+done
+
 total=0
 for root in $ROOTS; do
   [ -d "$root" ] || continue
-  for p in $PREFIXES; do
-    # -mmin bounds the sweep by age; -maxdepth 1 keeps it to the temp root itself. `-print` is
-    # counted rather than listed: there can be a million of them.
-    n=$(find "$root" -maxdepth 1 -name "$p*" -mmin +"$MINUTES" -print 2>/dev/null | wc -l | tr -d ' ')
-    [ "$n" -eq 0 ] && continue
-    total=$((total + n))
-    if [ "$APPLY" -eq 1 ]; then
-      find "$root" -maxdepth 1 -name "$p*" -mmin +"$MINUTES" -exec rm -rf {} + 2>/dev/null || true
-      echo "removed  $n	$root/$p*"
-    else
-      echo "would remove  $n	$root/$p*"
-    fi
-  done
+  # -mmin bounds the sweep by age; -maxdepth 1 keeps it to the temp root itself. Counted rather
+  # than listed: there can be a million of them.
+  # shellcheck disable=SC2086  # $match is a built find expression, word splitting is the point
+  n=$(find "$root" -maxdepth 1 \( $match \) -mmin +"$MINUTES" -print 2>/dev/null | wc -l | tr -d ' ')
+  [ "$n" -eq 0 ] && continue
+  total=$((total + n))
+  if [ "$APPLY" -eq 1 ]; then
+    # shellcheck disable=SC2086
+    find "$root" -maxdepth 1 \( $match \) -mmin +"$MINUTES" -exec rm -rf {} + 2>/dev/null || true
+    echo "removed       $n	$root"
+  else
+    echo "would remove  $n	$root"
+  fi
 done
 
 if [ "$APPLY" -eq 1 ]; then
