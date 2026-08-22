@@ -441,8 +441,8 @@ export function enumerateCandidates(
 
   const seen = new Set<string>();
   const out: Candidate[] = [];
-  // The map-derived VALUE references one emitted tree contains, applied wherever a spelling is
-  // finalized — the single point a candidate comes into existence. No pipeline stage carries refs
+  // The map-derived VALUE references one emitted tree contains, applied at every point a candidate
+  // is finalized and derived from the tree that candidate emitted. No pipeline stage carries refs
   // (SFn has no such field), so a future l3 pass that rewrites the tree can never leave a stale ref
   // behind: whatever tree reaches emit is the tree the refs describe, by construction. Collected
   // against the FULL name-keyed map for EVERY spelling variant — the '/raw-globals' sibling drops
@@ -787,11 +787,10 @@ export function enumerateCandidates(
       // the two readings the source spelled is genuinely ambiguous, and frontend/ssa.ts
       // narrowToSetupArgs carries the argument for why the differ is what settles it.
       //
-      // The only LIFT-level lever, so it re-lifts rather than re-structuring — but only where the
-      // first lift already found a call to narrow. And like every lever under the POLICY note above
-      // it derives from the BASE spelling only: a narrower arity is orthogonal to branch sense and
-      // to every structuring axis, so crossing it with them would multiply candidates with no row
-      // behind it.
+      // The only LIFT-level lever that changes the IR, so it re-lifts rather than re-structuring —
+      // but only where the first lift already found a call to narrow. And like every lever under
+      // the POLICY note above it derives from the BASE spelling only: levers do not compose by
+      // default, and no row has asked this one to.
       try {
         const narrowed = narrowable ? frontend.lift(name, asm, target, prototypes, opts.asmData, sv.symbols) : null;
         if (narrowed && narrowToSetupArgs(narrowed)) {

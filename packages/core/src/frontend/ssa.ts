@@ -53,7 +53,8 @@ export interface SsaBuilder {
    *  argument setup for whatever call comes next. */
   noteCall(b: number): void;
   /** Register a `call` op whose arity was GUESSED (no prototype), so `finish` can cut it back to the
-   *  argument registers that were actually set up on every path (see {@link trimClobberedCallArgs}). */
+   *  argument registers that were actually set up on every path (see {@link trimClobberedCallArgs}).
+   *  `abi` is the target's argument-register order and its return register. */
   recordGuessedCall(op: Op, b: number, abi: { argRegs: string[]; returnReg: string }): void;
   /** Remove trivial phis and enforce the frontend's postconditions; call once every block is
    *  filled. Throws FrontendUnsupportedError if a stack slot escaped as an entry parameter. */
@@ -437,8 +438,11 @@ export interface CallArgTrim {
  *
  *  A must-analysis: a register is FRESH at a point iff on EVERY path reaching it, it was written
  *  after the last call. The entry block starts all-fresh (those are the caller's own arguments).
- *  The result only ever SHRINKS an arity — a register the analysis cannot prove clobbered stays an
- *  argument — so no real argument can be dropped by it.
+ *  The result only ever SHRINKS an arity, but two of the shrinks are REFUSALS and not proofs, so a
+ *  real argument CAN go with them: a fresh register above a hole stops the run (a 64-bit return
+ *  occupies two registers and the frontend cannot express one, so the caller's r2 goes with the
+ *  unfillable r1), and a callee's return read as the callee's own drops an argument a `g(f())`
+ *  source did pass. A declared prototype is what closes either.
  *
  *  Frontend-agnostic: the caller supplies what its own lifting scan observed, so nothing here
  *  re-derives which instruction writes which register. */

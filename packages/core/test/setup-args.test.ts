@@ -1,7 +1,7 @@
 // The `/setup-args` lever (rank.ts, frontend/ssa.ts narrowToSetupArgs) — the arity a
 // prototype-less call gets when only the CALLING BLOCK's own setup counts. Pins: that the wider
-// reading stays the default, that the narrower one is offered beside it, that the pair collapses
-// where the two agree, and that a declared arity is outside the lever's reach entirely.
+// reading stays the default, that the narrower one is offered beside it, that neither an argument
+// the block set up nor a declared arity is the lever's to drop.
 import { describe, expect, test } from 'vitest';
 
 import { hasSetupArgsNarrowing } from '../src/frontend/ssa';
