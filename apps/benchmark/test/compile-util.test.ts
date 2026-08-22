@@ -1,8 +1,10 @@
 // Pin tests for compilerDiagnostics — the compile modules embed its output in the Error
 // messages that become row error markers, so it must surface real diagnostics, not banners.
+import { existsSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
-import { compilerDiagnostics, pickDiagnostics } from '../src/compile/util';
+import { compilerDiagnostics, pickDiagnostics, scratchSlot } from '../src/compile/util';
 
 describe('compilerDiagnostics (pinned)', () => {
   test('pre-3.0 gcc diagnostics (no "error" keyword) survive via their file:line prefix', () => {
@@ -76,5 +78,24 @@ describe('compilerDiagnostics is machine-independent', () => {
 
   test('a relative path is left alone', () => {
     expect(compilerDiagnostics('c.i:12: parse error')).toBe('c.i:12: parse error');
+  });
+});
+
+describe('scratchSlot (the leak fix)', () => {
+  test('one directory across calls, EMPTIED each time — so a stale sibling can never be read', () => {
+    const slot = scratchSlot('bench-slot-test-');
+    const first = slot();
+    writeFileSync(join(first, 'left-behind'), 'x');
+    const second = slot();
+    expect(second).toBe(first); // one directory, not one per call
+    expect(existsSync(join(second, 'left-behind'))).toBe(false); // emptied, so a missing output stays LOUD
+    rmSync(first, { recursive: true, force: true });
+  });
+
+  test('the root is honoured — the dockerized toolchains need /tmp, the container pool mount', () => {
+    const slot = scratchSlot('bench-slot-root-', '/tmp');
+    const dir = slot();
+    expect(dir.startsWith('/tmp/bench-slot-root-') || dir.startsWith('/private/tmp/bench-slot-root-')).toBe(true);
+    rmSync(dir, { recursive: true, force: true });
   });
 });

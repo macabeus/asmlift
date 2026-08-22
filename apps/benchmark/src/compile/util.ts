@@ -3,7 +3,8 @@ import { C_TYPEDEFS } from '@asmlift/core/target';
 import { spawnFailure } from '@asmlift/toolchains';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 /** Throws the named setup error when the binary itself couldn't spawn (ENOENT/timeout) —
@@ -78,6 +79,27 @@ export function contentDir(tag: string, tu: string): string {
   const d = join('/tmp', `bench-real-${tag}-${createHash('sha256').update(tu).digest('hex').slice(0, 16)}`);
   mkdirSync(d, { recursive: true });
   return d;
+}
+
+/** A scratch directory REUSED across calls: made once, EMPTIED before each use. mkdtemp removes
+ *  nothing, so the natural per-compile spelling leaks one directory per candidate — a full bench
+ *  run leaves one per candidate compile behind, and they had accumulated into the millions.
+ *  Emptied rather than reused in place, so a step that exits 0 without writing its output still
+ *  fails LOUD on the missing file instead of silently reading the previous candidate's.
+ *
+ *  `root` is `/tmp` for the DOCKERIZED toolchains — that is the container pool's mount, not a
+ *  stylistic choice — and the OS temp dir for everything else. */
+export function scratchSlot(prefix: string, root: string = tmpdir()): () => string {
+  let dir: string | undefined;
+  return () => {
+    if (dir === undefined) {
+      dir = mkdtempSync(join(root, prefix));
+      return dir;
+    }
+    rmSync(dir, { recursive: true, force: true });
+    mkdirSync(dir);
+    return dir;
+  };
 }
 
 export const shq = (s: string): string => `'${s.replaceAll("'", `'\\''`)}'`;

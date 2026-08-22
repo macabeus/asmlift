@@ -4,14 +4,14 @@
 // linux/386 container via the pooled helper (gcc272Compile) that score.ts also uses. The object
 // is disassembled + scored with the native host binutils/objdiff.
 import { GCC272_TOOLCHAIN, gcc272Compile } from '@asmlift/toolchains';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { CPP } from '../config';
 import type { BuiltTarget } from '../toolchains';
 import { stripPrototype } from './agbcc';
 import type { RealCompile, RealProjectCfg } from './types';
-import { compilerDiagnostics, contentDir, run } from './util';
+import { compilerDiagnostics, contentDir, run, scratchSlot } from './util';
 
 /** .i → pooled docker GCC 2.7.2 → .o (same helper score.ts uses). */
 function compile(dir: string, iName: string, oName: string): void {
@@ -30,6 +30,11 @@ function disasm(oPath: string): string {
   return dis.stdout;
 }
 
+// One scratch dir each, reused per compile (util.ts scratchSlot) instead of one mkdtemp per
+// candidate — under /tmp, the container pool mount.
+const candScratch = scratchSlot('bench-cand-', '/tmp');
+const vendorScratch = scratchSlot('bench-vendor-', '/tmp');
+
 export const gcc272Real: RealCompile = {
   buildTarget(iText): BuiltTarget {
     const dir = contentDir('gcc272', iText);
@@ -39,8 +44,7 @@ export const gcc272Real: RealCompile = {
     return { obj: oPath, asm: disasm(oPath) };
   },
   compileCandidate(tu, sym): string {
-    // candidate scratch must live under /tmp (the container pool's mount)
-    const dir = mkdtempSync(join('/tmp', 'bench-cand-'));
+    const dir = candScratch();
     const cPath = join(dir, 'c.c'),
       iPath = join(dir, 'c.i'),
       oPath = join(dir, 'c.o');
@@ -54,7 +58,7 @@ export const gcc272Real: RealCompile = {
     return oPath;
   },
   preprocess(cfg: RealProjectCfg, tu: string): string {
-    const dir = mkdtempSync(join('/tmp', 'bench-vendor-'));
+    const dir = vendorScratch();
     const cPath = join(dir, 'u.c'),
       iPath = join(dir, 'u.i');
     writeFileSync(cPath, tu);
