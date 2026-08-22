@@ -8,7 +8,7 @@
 #
 #   scripts/pr-wait.sh 82                  # wait for checks, then report what is missing
 #   scripts/pr-wait.sh 82 --until-merged   # …and keep waiting until it is merged or closed
-#   scripts/pr-wait.sh 82 --timeout 900    # give up after 15 minutes (default 3600s)
+#   scripts/pr-wait.sh 82 --timeout 900    # give up after 15 min (default 3600s) — the WHOLE run
 #
 # Exit codes — each one is an ANSWER, so a caller never has to ask a human:
 #   0  merged
@@ -18,9 +18,11 @@
 #   4  closed without merging
 #   64 usage / no such PR
 #
-# Waits on EVENTS, never on a process pattern: `gh pr checks --watch` long-polls GitHub, and the
-# merge phase polls the PR itself. A `pgrep -f` wait whose pattern matches the waiting shell
-# deadlocks forever, and cost this project eight hours once.
+# Waits on the PR's REAL state, never on a process pattern: both phases ask GitHub what the PR is
+# doing. A `pgrep -f` wait whose pattern matches the waiting shell deadlocks forever, and cost this
+# project eight hours once. Every wait here is bounded by --timeout, for the same reason: a queued
+# workflow with no free runner is otherwise indistinguishable from a hang, and re-enters exactly
+# the deadlock this script replaces.
 set -eu
 
 usage() {
@@ -67,6 +69,16 @@ say() { echo "pr-wait #$PR: $*"; }
 # One JSON read of the PR's own state. Kept in one place so every phase reads the same fields.
 state() { gh pr view "$PR" --json state,mergeStateStatus --jq '.state + " " + .mergeStateStatus'; }
 
+# The same read, but a transient API error is NOT an answer. Under `set -e` a bare `S=$(state)`
+# exits the script with gh's own status — which is 1, this script's code for A CHECK FAILED — so a
+# single network blip sent the caller hunting a red build that does not exist. UNKNOWN matches
+# neither MERGED nor CLOSED, so the poll just keeps waiting and the deadline decides.
+state_or_unknown() { state 2>/dev/null || echo "UNKNOWN transient-api-error"; }
+
+# One deadline for the whole run, so no phase can outlive --timeout.
+DEADLINE=$(($(date +%s) + TIMEOUT))
+expired() { [ "$(date +%s)" -ge "$DEADLINE" ]; }
+
 if ! S=$(state 2>&1); then
   echo "pr-wait: cannot read PR #$PR: $S" >&2
   exit 64
@@ -85,17 +97,32 @@ case "$S" in
     ;;
 esac
 
-# Phase 1 — the checks. `--watch` blocks on GitHub's side; `--fail-fast` returns the moment one
-# check fails, so a red build is not waited out to the end.
+# Phase 1 — the checks, polled on our own clock rather than inside `gh … --watch`. `--watch` has
+# no timeout of its own (its --interval is just how often it re-asks), so a queued or stuck job
+# blocks it forever; this loop asks the same question at the same rate and can stop. gh's exit
+# codes ARE the three answers: 0 all complete and passing, 8 still pending, anything else a
+# failure.
 say "watching checks…"
 CHECKS=0
-gh pr checks "$PR" --watch --fail-fast --interval "$INTERVAL" || CHECKS=$?
-if [ "$CHECKS" -ne 0 ]; then
-  # 8 is gh's "checks pending" (nothing to watch yet, e.g. no workflow has been queued)
-  if [ "$CHECKS" -eq 8 ]; then
-    say "no check has reported yet — re-run once CI has started"
+PENDING=0
+while :; do
+  CHECKS=0
+  gh pr checks "$PR" >/dev/null 2>&1 || CHECKS=$?
+  [ "$CHECKS" -eq 8 ] || break
+  # 8 also covers "no workflow has reported yet", which is what a PR opened seconds ago looks
+  # like — the single most likely first call. Waiting it out is the answer the caller asked for.
+  if [ "$PENDING" -eq 0 ]; then
+    say "checks pending…"
+  fi
+  PENDING=$((PENDING + 1))
+  if expired; then
+    say "checks still pending after ${TIMEOUT}s — giving up, nothing decided"
     exit 2
   fi
+  sleep "$INTERVAL"
+done
+gh pr checks "$PR" || true # the table itself, for the caller's log
+if [ "$CHECKS" -ne 0 ]; then
   say "a check FAILED — fix it before asking anyone about merging"
   exit 1
 fi
@@ -104,14 +131,13 @@ say "checks are green"
 # Phase 2 — the merge. Without --until-merged, green checks is the answer: report the merge state
 # and stop, so the caller can act instead of blocking on a human to press a button.
 if [ "$UNTIL_MERGED" -eq 0 ]; then
-  say "$(state) — checks green, PR open: nothing is missing, it is ready to merge"
+  say "$(state_or_unknown) — checks green, PR open: nothing is missing, it is ready to merge"
   exit 3
 fi
 
-START=$(date +%s)
 LAST=""
 while :; do
-  S=$(state)
+  S=$(state_or_unknown)
   [ "$S" = "$LAST" ] || say "$S"
   LAST="$S"
   case "$S" in
@@ -124,8 +150,7 @@ while :; do
       exit 4
       ;;
   esac
-  NOW=$(date +%s)
-  if [ $((NOW - START)) -ge "$TIMEOUT" ]; then
+  if expired; then
     say "still $S after ${TIMEOUT}s — giving up, nothing decided"
     exit 2
   fi
