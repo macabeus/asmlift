@@ -2097,6 +2097,12 @@ export function lift(
   // What it refuses that really is an addressable local: every frame with a second word in it. That
   // is a capability gap, not a wrong answer, and widening it needs a model of the object's real
   // extent rather than a wider licence for this one.
+  //
+  // RESIDUE, stated as what it is and not as the only one: the producer table is agbcc's, so
+  // hand-written asm that reserves one word, stages it as a call's fifth argument and ALSO puts sp
+  // in an argument register defeats this — the same producer assumption the contiguity filter below
+  // already makes, and the same one an earlier cut of this comment wrongly claimed was the whole
+  // exposure while a plain `memcpy` for a by-value struct argument walked through it.
   const capturedObjectIsTheWholeFrame = frameBasePassedToCallee && localArea === 4;
 
   const slotsOffReason = slotModelBlocker();
