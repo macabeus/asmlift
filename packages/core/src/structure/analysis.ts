@@ -814,6 +814,20 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
    *  writes memory able to execute in between — homing renders the read at `op0`, so both are
    *  about moving it there.
    *
+   *  A read OUTSIDE the cone bars it too. The default's "loads never bar a load" holds for reads
+   *  the compiler leaves unsequenced inside ONE expression, which is what the cone's own reads
+   *  become; a foreign read renders in a different statement, so moving past it reorders two
+   *  accesses — for two MMIO cells (this axis's clientele) an observable swap, as when `A`'s
+   *  derived value sits below `B`'s and homing both puts `B`'s read first.
+   *
+   *  And each read's value must go NOWHERE BUT the cone: exactly one use site. Homing resolves a
+   *  render position for a read that had none, so a SECOND use resolves a second one, and the
+   *  multi-render load rule then inlines the read at BOTH — two accesses where the asm has one
+   *  `ldrh`, which for a volatile cell is precisely the duplication `volatileGlobal` refuses. Two
+   *  homed values over one read is the same shape from the other side (each is the other's second
+   *  use), so one test covers both. This is what makes "renders once, inside the home" a property
+   *  rather than an aspiration: without it the axis silently doubles a hardware read.
+   *
    *  The same block is what makes the axis's claim true at all: the register handoff it reproduces
    *  is one straight-line run of the asm, `ldrh` into `eor` into three uses. Across blocks WHICH
    *  BLOCK reads is `readsStayWhereWritten`'s question, not this one, and answering it here goes
@@ -845,9 +859,15 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
       }
     }
     const at = { blk, idx: opIndex.get(op0)! };
+    const coneReads = new Set(reads);
+    const bars = (x: Op): boolean =>
+      EFFECTFUL_OPS.has(x.opcode) || ((x.opcode === 'load' || x.opcode === 'aload') && !coneReads.has(x));
     return (
       reads.length > 0 &&
-      reads.every((r) => opBlock.get(r) === blk && !memWriteBetween(r, at, (x) => EFFECTFUL_OPS.has(x.opcode)))
+      reads.every(
+        (r) =>
+          opBlock.get(r) === blk && (useSitesOf.get(r.results[0])?.length ?? 0) === 1 && !memWriteBetween(r, at, bars),
+      )
     );
   };
   /** 2+ distinct consuming ops — the multi-use the pure-op rule reads as a reused register. */

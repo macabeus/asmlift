@@ -17,13 +17,16 @@ import { verify } from '../src/ir/verify';
 import { recoverTypes } from '../src/raise/recover';
 import { hasDerivedReadHome } from '../src/structure/analysis';
 import { structure } from '../src/structure/structure';
+import type { SymbolInfo } from '../src/symbols';
 
-const emit = (ir: string, on: boolean, returnsVoid = true): string => {
+const emitWith = (ir: string, on: boolean, symbols?: Map<string, SymbolInfo>, returnsVoid = true): string => {
   const fn = parse(ir);
   verify(fn);
   recoverTypes(fn);
-  return cBackend.emit(structure(fn, { homeDerivedReads: on, returnsVoid }));
+  return cBackend.emit(structure(fn, { homeDerivedReads: on, returnsVoid, ...(symbols ? { symbols } : {}) }));
 };
+
+const emit = (ir: string, on: boolean, returnsVoid = true): string => emitWith(ir, on, undefined, returnsVoid);
 
 const count = (s: string, needle: string): number => s.split(needle).length - 1;
 
@@ -217,4 +220,86 @@ const READABOVEBRANCH = `fn readabovebranch {
 
 test('a value in a block its read sits above is not homed', () => {
   expect(emit(READABOVEBRANCH, true)).toBe(emit(READABOVEBRANCH, false));
+});
+
+// ── the read renders ONCE ────────────────────────────────────────────────────────────────────
+// The axis's whole claim. Homing resolves a render position for a read that had none, so any
+// SECOND consumer of that read resolves a second one and the multi-render load rule inlines it at
+// both — two accesses where the asm has one `ldrh`.
+
+// `0x3FF ^ REG_KEYINPUT` twice-consumed, with the raw halfword consumed once more beside it.
+const SECONDUSE = `fn seconduse {
+^bb0():
+  %0: u32 = const {value=67109168}
+  %1: u32 = load %0 {off=0, signed=false, width=2}
+  %2: u32 = const {value=1023}
+  %3: u32 = xor %2, %1
+  %4: u32 = add %3, %1
+  %5: u32 = mul %4, %3
+  ret %5
+}
+`;
+
+test('a read consumed outside the homed value is not homed — it would render twice', () => {
+  expect(emit(SECONDUSE, true, false)).toBe(emit(SECONDUSE, false, false));
+  expect(count(emit(SECONDUSE, true, false), '67109168')).toBe(1);
+});
+
+// TWO values over ONE read of a global the map declares volatile. Each is the other's second
+// consumer, so the same rule refuses both — and `volatileGlobal`'s contract (a volatile read is
+// neither duplicated nor moved), which `/reread-globals` honours in this same shape, holds here too.
+const TWOHOMES = `fn twohomes {
+^bb0():
+  %0: s32* = gaddr {sym="gVolReg"}
+  %1: s32 = load %0 {off=0, signed=true, width=4}
+  %2: s32 = const {value=1023}
+  %3: s32 = xor %1, %2
+  %4: s32 = const {value=15}
+  %5: s32 = and %1, %4
+  %6: s32* = gaddr {sym="gOutA"}
+  store %6, %3 {off=0, width=4}
+  %7: s32* = gaddr {sym="gOutB"}
+  store %7, %3 {off=0, width=4}
+  %8: s32* = gaddr {sym="gOutC"}
+  store %8, %5 {off=0, width=4}
+  %9: s32* = gaddr {sym="gOutD"}
+  store %9, %5 {off=0, width=4}
+  ret
+}
+`;
+
+test('two values over one volatile read leave it reading once', () => {
+  const volatileMap = new Map<string, SymbolInfo>([['gVolReg', { name: 'gVolReg', kind: 'data', volatile: true }]]);
+  const on = emitWith(TWOHOMES, true, volatileMap);
+  expect(count(on, 'gVolReg')).toBe(1);
+  expect(on).toBe(emitWith(TWOHOMES, false, volatileMap));
+});
+
+// Two independent MMIO reads whose derived values sit in the opposite order. Homing both would put
+// 0x04000134's access before 0x04000130's; a read outside the cone bars the move, so the lower
+// value homes and the upper read keeps its own position.
+const REORDER = `fn reorder {
+^bb0():
+  %0: u32 = const {value=67109168}
+  %1: u32 = load %0 {off=0, signed=false, width=2}
+  %2: u32 = const {value=67109172}
+  %3: u32 = load %2 {off=0, signed=false, width=2}
+  %4: u32 = const {value=1023}
+  %5: u32 = xor %4, %3
+  %6: u32 = xor %4, %1
+  %7: u32 = const {value=50333696}
+  store %7, %5 {off=0, width=2}
+  %8: u32 = const {value=50333698}
+  store %8, %5 {off=0, width=2}
+  %9: u32 = const {value=50333700}
+  store %9, %6 {off=0, width=2}
+  %10: u32 = const {value=50333702}
+  store %10, %6 {off=0, width=2}
+  ret
+}
+`;
+
+test('a read outside the cone bars the move, so two accesses keep their order', () => {
+  const on = emit(REORDER, true);
+  expect(on.indexOf('67109168')).toBeLessThan(on.indexOf('67109172'));
 });
