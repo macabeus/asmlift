@@ -94,9 +94,10 @@ match blocks the branch.** Pass the base ref: both gates read the COMMITTED arti
 branch that has already committed its own they compare it against itself and pass vacuously.
 `regression` answers "did a match break"; `diff` names every row and field that moved
 (`asmlift.{outcome,score,candidateLabel,source}`, `m2c.{outcome,score,source}`) — that list is the
-PR body's inventory of what the round did, and for a commit claiming to move nothing it is the gate. If a match is lost, either tighten the gate on your lever or drop
-the lever — do not rationalize a trade unless the user explicitly approves it. Report the totals
-(asmlift vs m2c) before and after.
+PR body's inventory of what the round did, and for a commit claiming to move nothing it is the
+gate. If a match is lost, either tighten the gate on your lever or drop the lever — do not
+rationalize a trade unless the user explicitly approves it. Report the totals (asmlift vs m2c)
+before and after.
 
 Three things this gate does not catch by itself:
 

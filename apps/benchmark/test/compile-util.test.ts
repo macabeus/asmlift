@@ -91,11 +91,4 @@ describe('scratchSlot (the leak fix)', () => {
     expect(existsSync(join(second, 'left-behind'))).toBe(false); // emptied, so a missing output stays LOUD
     rmSync(first, { recursive: true, force: true });
   });
-
-  test('the root is honoured — the dockerized toolchains need /tmp, the container pool mount', () => {
-    const slot = scratchSlot('bench-slot-root-', '/tmp');
-    const dir = slot();
-    expect(dir.startsWith('/tmp/bench-slot-root-') || dir.startsWith('/private/tmp/bench-slot-root-')).toBe(true);
-    rmSync(dir, { recursive: true, force: true });
-  });
 });

@@ -93,11 +93,11 @@ export function contentDir(tag: string, tu: string): string {
  *  failures reusing the path, 0/160 with a fresh mkdtemp each time (emptying the CONTENTS and
  *  keeping the inode fails identically, so it is the shared mount's view of the path, not the
  *  inode). gcc272.ts and kmc.ts therefore keep mkdtemp-per-candidate and keep the leak. */
-export function scratchSlot(prefix: string, root: string = tmpdir()): () => string {
+export function scratchSlot(prefix: string): () => string {
   let dir: string | undefined;
   return () => {
     if (dir === undefined) {
-      dir = mkdtempSync(join(root, prefix));
+      dir = mkdtempSync(join(tmpdir(), prefix));
       return dir;
     }
     rmSync(dir, { recursive: true, force: true });
