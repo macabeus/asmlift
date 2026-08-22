@@ -7,6 +7,7 @@ import { expect, test } from 'vitest';
 
 import { emitCFamily } from '../src/backend/cfamily';
 import { T } from '../src/ir/types';
+import { stmtChildren } from '../src/l3/ast';
 import type { SFn, Stmt } from '../src/l3/ast';
 import { decompile } from '../src/pipeline';
 import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC } from '../src/target';
@@ -35,6 +36,7 @@ const dispatch = (order: readonly (number | 'D')[], out = '.Lend', tail = '') =>
   tail +
   '.Lend:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr2, [r0]\n\tbx\tlr\n';
 
+const ZERO = { k: 'const', value: 0 } as const;
 const of = (asm: string) => decompile('f', asm, ARMV4T_AGBCC, { prototypes: { f: { returnsVoid: true } } }).source;
 /** the case labels in the order they are EMITTED */
 const armOrder = (out: string) => [...out.matchAll(/case (\d+):/g)].map((m) => Number(m[1]));
@@ -329,6 +331,25 @@ test('a default placed after a FALLING case is refused by the printer, not silen
   // A count past the arms matches no position, so the label would simply not be printed and the
   // default arm would vanish. Refused for the same reason, rather than silently dropped.
   expect(() => emitCFamily('void f(s32 x)', sw(3))).toThrow(/places its default at arm 3 of 2/);
+});
+
+test('`stmtChildren` lists a mid-placed default where the backend prints it', () => {
+  // The walkers' document order and the printer's are the same order — `collectMarkers` reports one
+  // per marker in it, so an ASMLIFT_ERROR inside a default that prints second must not be reported
+  // after the arms that print below it.
+  const arm = (v: number) => ({
+    values: [v],
+    body: [{ k: 'assign', name: `c${v}`, value: ZERO } as Stmt],
+    fallsThrough: false,
+  });
+  const sw: Stmt = {
+    k: 'switch',
+    scrutinee: { k: 'var', name: 'x' },
+    cases: [arm(0), arm(1)],
+    default: [{ k: 'assign', name: 'd', value: ZERO } as Stmt],
+    defaultAt: 1,
+  };
+  expect(stmtChildren(sw).map((c) => (c.k === 'assign' ? c.name : c.k))).toEqual(['c0', 'd', 'c1']);
 });
 
 // ── Regime B: the jump table ─────────────────────────────────────────────────────────────────────
