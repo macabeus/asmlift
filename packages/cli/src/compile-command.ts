@@ -126,6 +126,12 @@ export function compilersFromCommand(template: string, opts: CompileCommandOptio
   // 1.5M. Emptied rather than reused: a step that exits 0 without writing its output must still
   // fail LOUD, and a surviving sibling from the previous candidate is exactly what would let it
   // pass (the same class of silent truncation the `sh -ec` note above is about).
+  //
+  // Reuse is safe HERE because the template runs a fresh process per compile against the host
+  // filesystem. It is NOT safe for a template that keeps a long-lived container with this
+  // directory's parent bind-mounted: the benchmark's dockerized toolchains measured ~30% of
+  // compiles failing on a reused path (apps/benchmark/src/compile/util.ts `scratchSlot`), which
+  // is why they still mkdtemp per candidate.
   const slot = (): (() => string) => {
     let dir: string | undefined;
     return () => {
