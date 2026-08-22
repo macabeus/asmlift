@@ -157,6 +157,7 @@ attribution line for every decline naming its first blocker. Constraints learned
   An attribution that has silently gone stale sends the next session down the wrong lever.
 - Report: baseline, the named gap classes with their verified causes, the row matrix, and what
   a future `/match-function` should build first. Push the branch and open the PR.
+- Then `scripts/pr-wait.sh <pr>` — it polls the PR's real state under a deadline and exits with the ANSWER (0 merged · 1 a check failed · 2 still pending, nothing decided · 3 green and ready to merge). Never ask a human whether CI is green or whether the PR merged; that question was asked six times in one session and the script answers all six.
 
 ---
 

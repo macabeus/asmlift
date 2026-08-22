@@ -30,6 +30,7 @@ import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import { guessedArityNote } from './callees';
 import { type CommandCompilers, compilersFromCommand } from './compile-command';
 import { type AsmliftToolConfig, loadDecompConfig, resolveTarget } from './config';
 import { ObjectInputUnsupportedError, asmDataForObject, disasmObject, isElfObject } from './objfile';
@@ -70,7 +71,7 @@ const IDENT = /^[A-Za-z_$][A-Za-z0-9_$.]*$/;
 const USAGE = `usage: asmlift <file.s|file.asm|file.o|-> [--target <${Object.keys(TARGETS).join('|')}>]
                 [--name <symbol>] [--backend <c|pascal>] [--strict]
                 [--config <decomp.yaml>] [--score-against <target.o>]
-                [--asm-data <dump.txt>] [--proto <proto.json>]
+                [--asm-data <dump.txt>] [--proto <json|proto.json>]
                 [--jobs <n>] [--progress]
 
 Decompiles a function to source on stdout.
@@ -86,7 +87,8 @@ Gaps are annotated in-source as ASMLIFT_ERROR markers, diagnostics on stderr.
                    (implies --strict)
   --asm-data       for text input: objdump -s -r -t dump of the source object
                    (jump tables, anonymous constants)
-  --proto          callee prototypes JSON, e.g. {"sym":{"params":2|["u8","s32"]}}
+  --proto          callee prototypes, inline JSON or a path to it:
+                   {"sym":{"params":2|["u8","s32"]}}
   --jobs           with --score-against: compile n candidates at a time (default 1)
   --progress       with --score-against: stream a liveness line to stderr while
                    scoring; the [score] table it prints at the end is unchanged
@@ -260,14 +262,22 @@ export async function runCli(
   let prototypes: Prototypes | undefined;
   const protoFlag = flags.get('proto') as string | undefined;
   if (protoFlag !== undefined) {
+    // A table INLINE (`--proto '{"sym":{"params":1}}'`) or the path to one. Inline is the form
+    // docs/ranked-repro.md's canonical command uses, and the form the `[proto]` note below prints
+    // as its own remedy — but it used to be resolved as a path, so following either exited 66 on
+    // a missing file literally named `{"sym":{"params":1}}`. Three different scratch proto.json
+    // files got invented around that, carrying two different tables for the same "canonical" run.
+    const inline = protoFlag.trimStart().startsWith('{');
     let parsed: unknown;
     try {
-      parsed = JSON.parse(readFileSync(resolve(protoFlag), 'utf8'));
+      parsed = JSON.parse(inline ? protoFlag : readFileSync(resolve(protoFlag), 'utf8'));
     } catch (e) {
       return {
         code: 66,
         stdout: '',
-        stderr: `asmlift: cannot read --proto file: ${e instanceof Error ? e.message : e}\n`,
+        stderr: `asmlift: cannot ${inline ? 'parse --proto JSON' : 'read --proto file'}: ${
+          e instanceof Error ? e.message : e
+        }\n`,
       };
     }
     // Every entry, not just the envelope — an unreadable `params` decompiles at a guessed arity
@@ -314,6 +324,10 @@ export async function runCli(
   if (symbols) {
     symbols = asIfUndecompiled(symbols, name);
   }
+
+  // Which callees' arity this run had to guess — computed AFTER `asIfUndecompiled`, so the
+  // target's own withheld signature cannot make the note claim a fact the run did not use.
+  const protoNote = guessedArityNote(asm, name, prototypes, symbols);
 
   // --score-against: compile the output (and every ranked candidate) with the project's own
   // compiler command (decomp.yaml tools.asmlift.compiler — REQUIRED) and objdiff-score
@@ -394,10 +408,18 @@ export async function runCli(
         ? `asmlift: [dropped] ${ranked.dropped.length} candidate(s) failed to score; first: ` +
           `${ranked.dropped[0].label}: ${ranked.dropped[0].error}\n`
         : '';
+      // The two counts docs/ranked-repro.md requires beside every ranked score, as ONE line that
+      // is always present. They used to be recoverable only as the line count of a 2 MB stderr
+      // stream, and "0 dropped" was asserted by the ABSENCE of the `[dropped]` line above — so a
+      // clean run, a truncated log and a killed run left identical evidence for the claim this
+      // loop's every published score rests on.
+      const summary =
+        `asmlift: [ranked] ${ranked.candidates.length} candidate(s) scored, ${ranked.dropped.length} dropped, ` +
+        `best ${ranked.best.label}: ${ranked.best.score.score}${ranked.best.score.match ? ' (match)' : ''}\n`;
       return {
         code: ranked.best.score.match ? 0 : 1,
         stdout: ranked.best.source,
-        stderr: targetTrace + warn + table + drops,
+        stderr: targetTrace + warn + table + drops + summary + protoNote,
       };
     } catch (e) {
       const kind = isDecline(e) ? 'declined' : 'internal error';
@@ -412,7 +434,8 @@ export async function runCli(
   const onGap: OnGap = flags.has('strict') ? 'strict' : 'annotate';
   try {
     const result = decompile(name, asm, target, { backend, onGap, asmData, prototypes, symbols });
-    const stderr = targetTrace + warn + result.diagnostics.map((d) => `asmlift: [${d.stage}] ${d.reason}\n`).join('');
+    const stderr =
+      targetTrace + warn + result.diagnostics.map((d) => `asmlift: [${d.stage}] ${d.reason}\n`).join('') + protoNote;
     return { code: result.diagnostics.length === 0 ? 0 : 1, stdout: result.source, stderr };
   } catch (e) {
     const kind = isDecline(e) ? 'declined' : 'internal error';

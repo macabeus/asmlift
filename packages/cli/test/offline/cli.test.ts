@@ -126,6 +126,33 @@ test('--proto: unreadable file and non-object JSON stay distinguishable (66 vs 6
   expect(scalar.stderr).toContain('must be an object mapping a symbol name to its prototype');
 });
 
+// docs/ranked-repro.md's canonical command passes the table INLINE, and so does the `[proto]`
+// note's own printed remedy — but the flag used to resolve every value as a path, so following
+// either exited 66 on a missing file literally named `{"thunk_HeapFree":{"params":1}}`. Three
+// separate scratch proto.json files got invented around that, carrying two different tables for
+// what the doc calls one canonical run.
+test('--proto: an inline table is read as JSON, and means exactly what the file means', async () => {
+  const table = { callee: { params: 1 } };
+  const inline = await run('agbcc-clamp0.s', '--target', 'agbcc', '--proto', JSON.stringify(table));
+  expect(inline.code).toBe(0);
+  expect(inline.stderr).toBe('');
+  const viaFile = await run('agbcc-clamp0.s', '--target', 'agbcc', '--proto', protoFile(table));
+  expect(inline.stdout).toBe(viaFile.stdout);
+  // leading whitespace is still inline, not a path
+  expect((await run('agbcc-clamp0.s', '--target', 'agbcc', '--proto', ' {"callee":{"params":1}}')).code).toBe(0);
+});
+
+test('--proto: a malformed inline table says JSON, a missing path says file — both 66', async () => {
+  const bad = await run('agbcc-clamp0.s', '--target', 'agbcc', '--proto', '{"callee":');
+  expect(bad.code).toBe(66);
+  expect(bad.stderr).toContain('cannot parse --proto JSON');
+  const missing = await run('agbcc-clamp0.s', '--target', 'agbcc', '--proto', join(tmpdir(), 'nope-asmlift.json'));
+  expect(missing.code).toBe(66);
+  expect(missing.stderr).toContain('cannot read --proto file');
+  // an inline table that parses but is unusable is still the entry-level refusal, not 66
+  expect((await run('agbcc-clamp0.s', '--target', 'agbcc', '--proto', '{"callee":{"params":"1"}}')).code).toBe(64);
+});
+
 test('--jobs/--progress belong to the ranked path and are refused elsewhere, not ignored', async () => {
   for (const flag of [['--jobs', '4'], ['--progress']]) {
     const r = await run('agbcc-clamp0.s', '--target', 'agbcc', ...flag);
