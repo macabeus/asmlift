@@ -1134,6 +1134,27 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       );
     });
 
+    // A SPELLING IS NOT A FACT. The scan that licenses the acceptance drops a register the moment an
+    // instruction mentions it, and a RANGE-spelled register list mentions none of the registers it
+    // writes — so the same function lifted or declined on whether its `pop` was written `{r0-r3}`
+    // or `{r0, r1, r2, r3}`. The accepting side is verbatim agbcc for `void f(int a,b,c,d,e){
+    // five(a,b,c,d,e); }`, whose [sp,#0] store IS the fifth outgoing argument, with a capture the
+    // `pop` clobbers before the call: it emitted `five()` with all five arguments dropped.
+    test('a register RANGE kills the capture exactly as the enumerated list does', () => {
+      const withList = (list: string) =>
+        'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tldr\tr4, [sp, #0xc]\n\tstr\tr4, [sp]\n\tmov\tr2, sp\n' +
+        `\tadd\tsp, sp, #0x4\n\tpop\t{${list}}\n\tadd\tsp, sp, #-0x4\n\tbl\tfive\n` +
+        '\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n';
+      for (const list of ['r0, r1, r2, r3', 'r0-r3', 'R0-R3', 'r1-r3']) {
+        expect(() => decompile('f', withList(list), ARMV4T_AGBCC)).toThrow(/never reloaded/);
+      }
+      // …and the same for a range on a multi-load, which writes the list without popping it
+      const viaLdmia =
+        'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tldr\tr4, [sp, #0xc]\n\tstr\tr4, [sp]\n\tmov\tr2, sp\n' +
+        '\tldmia\tr1!, {r0-r3}\n\tbl\tfive\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n';
+      expect(() => decompile('f', viaLdmia, ARMV4T_AGBCC)).toThrow(/never reloaded/);
+    });
+
     // …AND WHAT AN ESCAPE COSTS THE SLOT MODEL, refused. The object's extent is inferred from OUR
     // accesses, so a wider real object has its later words written by the callee — and any of them
     // modelled as an SSA slot is a value the slot model forwards ACROSS the call that overwrote it.

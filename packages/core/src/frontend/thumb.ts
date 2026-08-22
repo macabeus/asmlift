@@ -1694,10 +1694,24 @@ export function lift(
             ? reg(ins.ops[0] ?? '')
             : null;
         // The OPERAND TOKENS, not the mnemonic: `asWritten` carries only the normalised mnemonic,
-        // and a reglist survives splitOperands as one token (`{r4, lr}`), so a `\bR\b` test over
-        // the tokens sees every register a `pop` or `ldmia` writes.
+        // so the operands are the only place a written register can appear — and they are
+        // RANGE-EXPANDED first, because a range spells none of the registers it writes. `pop
+        // {r0-r3}` writes r2 with the string `r2` nowhere in the instruction, so the bare `\bR\b`
+        // test let a dead capture survive the `pop` that destroyed it, the acceptance fired on a
+        // frame that really did stage an outgoing argument, and the lift dropped all five of that
+        // call's arguments. Two spellings of one instruction must not give two verdicts, and CASE
+        // is a third spelling of the same one — `expandRegList` is lowercase-only, so `{R0-R3}`
+        // leaked through the expansion exactly as the range leaked through the regex.
+        const mentions = expandRegList(
+          ins.ops
+            .join(' ')
+            .toLowerCase()
+            .replace(/[[\]{}!#]/g, ' ')
+            .split(/[,\s]+/)
+            .filter(Boolean),
+        );
         for (const r of [...held]) {
-          if (ins.ops.some((o) => new RegExp(`\\b${r}\\b`, 'i').test(o))) {
+          if (mentions.includes(r) || ins.ops.some((o) => new RegExp(`\\b${r}\\b`, 'i').test(o))) {
             held.delete(r);
           }
         }
