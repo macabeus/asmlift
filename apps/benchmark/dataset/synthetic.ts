@@ -1786,6 +1786,111 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'void use(s32 *p); void stkclamp(u32 i);',
     proto: { use: { params: 1, returnsVoid: true }, stkclamp: { returnsVoid: true } },
   },
+
+  // WHERE A CONSTANT OFFSET LIVES. The value-home family above asks which register or slot holds a
+  // value; this one asks whether a constant ADDED to it is part of the home or part of each use.
+  // A buffer pointer that the source advanced once (`p = alloc(k) + 4`) and a decompiler that
+  // re-derives the same address at every site (`*(u8 *)(base + 4 + i)`) describe the same bytes and
+  // compile to the same INSTRUCTION COUNT — they differ only in which operand carries the 4, which
+  // is why the class shows up as argument mismatches and never as a size difference.
+  //
+  // Verified by compiling the pair with agbcc 2.9-arm-000512 (`-O2 -mthumb-interwork
+  // -fprologue-bugfix`), same body, only the offset moved:
+  //
+  //   p = (u8 *)getbuf(k) + 4;  sink(p[i]);        putbuf(p - 4);
+  //       add r5, r0, #0x4   @ materialised once, then  add r0, r5, r4 / ldrb r0, [r0]
+  //       sub r0, r5, #0x4   @ and undone at the free
+  //   v = getbuf(k);          sink(*(u8*)(v+4+i)); putbuf(v + 4 - 4);
+  //       add r5, r0, #0     @ no offset in the home, then  add r0, r4, r5 / ldrb r0, [r0, #0x4]
+  //       add r0, r5, #0     @ and `+4-4` folds away entirely
+  //
+  // So the compiler moves NEITHER spelling toward the other: the offset stays where the source put
+  // it, and getting it wrong costs one operand on every use plus the two ends of the round trip.
+  //
+  // Cut from kleod:LoadBGTilemapData:agbcc, which allocates twice and frees twice through exactly
+  // this shape (`thunk_HeapFree(alloc + 4 - 4)`). At the round's best hand-built spelling, homing
+  // both `+ 4`s is worth 1 point (475 -> 474 against `build/src/gfx.o`) and removes 3 of the 4 ROM
+  // instructions that had no counterpart — `mov r1, #4`, `ldrb r0, [r0, #0]` and `sub r0, #4` go,
+  // and `sub r6, #4` stays. Round 2 measured the same edit at +5 on a 531-point rung and
+  // excluded it; the sign flips once the switch and the guard placements above it are right, which
+  // is why this is recorded as a row and not as an exclusion.
+  //
+  // `offhome` is the isolate: one call result, one `+ 4`, one indexed read, one free. `offuse` is
+  // its control — the same call whose result is read at ONE constant offset and freed unchanged,
+  // where folding the offset into the load is what the ROM does and asmlift already MATCHes; a fix
+  // that always hoists a constant offset into the home would break it. `offloop` is the real
+  // function's shape rather than an isolate, and shows the inconsistency directly: asmlift DOES
+  // create `v1 = v0 + 4` when a strength-reduced induction variable forces it, then still writes
+  // `v0 + 4 + v2` at the load in the same loop and `v0 + 4 - 4` at the free.
+  //
+  // agbcc only. The claim is about what THIS compiler does with the two spellings, established by
+  // compiling both; ido7.1, gcc2.7.2kmc and mwcc_242_81 were NOT measured, so those lanes are left
+  // off rather than assumed.
+  //
+  // m2c compiles none of the three, on the identical `ctx` asmlift receives: it types the call
+  // result as `s32` and then dereferences it (`*(temp_r5 + var_r4)`), and on `offuse` it types the
+  // same result as `void *` and reads `temp_r0->unk4`.
+  {
+    sym: 'offhome',
+    src:
+      'void *getbuf(s32 k);\n' +
+      'void putbuf(void *p);\n' +
+      'void sink(s32 x);\n' +
+      'void offhome(s32 k, s32 n){ u8 *p; s32 i;' +
+      ' p = (u8 *)getbuf(k) + 4;' +
+      ' for (i = 0; i < n; i = i + 1) { sink(p[i]); }' +
+      ' putbuf(p - 4); }',
+    features: ['value-home', 'pointer'],
+    toolchains: ['agbcc'],
+    ctx: 'void *getbuf(s32 k); void putbuf(void *p); void sink(s32 x); void offhome(s32 k, s32 n);',
+    proto: {
+      getbuf: { params: 1 },
+      putbuf: { params: 1, returnsVoid: true },
+      sink: { params: 1, returnsVoid: true },
+      offhome: { returnsVoid: true },
+    },
+  },
+  {
+    sym: 'offuse',
+    src:
+      'void *getbuf(s32 k);\n' +
+      'void putbuf(void *p);\n' +
+      'void sink(s32 x);\n' +
+      'void offuse(s32 k){ u8 *p;' +
+      ' p = (u8 *)getbuf(k);' +
+      ' sink(p[4]);' +
+      ' putbuf(p); }',
+    features: ['value-home', 'pointer'],
+    toolchains: ['agbcc'],
+    ctx: 'void *getbuf(s32 k); void putbuf(void *p); void sink(s32 x); void offuse(s32 k);',
+    proto: {
+      getbuf: { params: 1 },
+      putbuf: { params: 1, returnsVoid: true },
+      sink: { params: 1, returnsVoid: true },
+      offuse: { returnsVoid: true },
+    },
+  },
+  {
+    sym: 'offloop',
+    src:
+      'void *getbuf(s32 k);\n' +
+      'void putbuf(void *p);\n' +
+      '#define gDma ((volatile s32 *)0x040000d4)\n' +
+      'void offloop(s32 k, s32 n){ u8 *p; s32 i;' +
+      ' p = (u8 *)getbuf(k) + 4;' +
+      ' for (i = 0; i < n; i = i + 1) {' +
+      ' gDma[0] = (s32)(p + (i << 6));' +
+      ' gDma[2] = p[i]; }' +
+      ' putbuf(p - 4); }',
+    features: ['value-home', 'pointer'],
+    toolchains: ['agbcc'],
+    ctx: 'void *getbuf(s32 k); void putbuf(void *p); void offloop(s32 k, s32 n);',
+    proto: {
+      getbuf: { params: 1 },
+      putbuf: { params: 1, returnsVoid: true },
+      offloop: { returnsVoid: true },
+    },
+  },
 ];
 
 // ── C++ (mwcc `.cp` frontend, PPC only) ───────────────────────────────────────────────────
