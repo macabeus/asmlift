@@ -8,7 +8,13 @@
 # answers with for the first seconds of its life. Reading the exit status alone made all four a
 # red build, which is exactly the false red the script exists to remove.
 #
-# So gh is stubbed and each situation replayed. No network, no repo state, about a second.
+# The two deadlines are pinned here too: --timeout bounds a wait GitHub is answering, and
+# --unknown-timeout bounds one where it is not. Those cases assert the MESSAGE, not just the exit
+# code — both give up with 2, and a bug that let the silence budget cut short a healthy pending
+# wait would be invisible on the code alone.
+#
+# So gh is stubbed and each situation replayed. No network, no repo state, ~8s (measured 7.8-8.2s
+# over three runs here; the four cases that wait out a deadline are what it spends).
 #
 #   sh scripts/pr-wait-selftest.sh
 set -eu
@@ -43,13 +49,20 @@ STUB
 chmod +x "$tmp/bin/gh"
 
 fails=0
-expect() { # <situation> <expected exit> <why>
-  out=$(PATH="$tmp/bin:$PATH" GH_STUB="$1" sh "$target" 999 --timeout 1 --interval 1 2>&1) && rc=0 || rc=$?
-  if [ "$rc" -eq "$2" ]; then
+expect() { # <situation> <expected exit> <why> [flags] [output must contain]
+  flags=${4:-"--timeout 1 --interval 1"}
+  # shellcheck disable=SC2086 # $flags is a deliberate argument list
+  out=$(PATH="$tmp/bin:$PATH" GH_STUB="$1" sh "$target" 999 $flags 2>&1) && rc=0 || rc=$?
+  bad=""
+  [ "$rc" -eq "$2" ] || bad="exit $rc, expected $2"
+  if [ -n "${5:-}" ] && ! printf '%s\n' "$out" | grep -q -- "$5"; then
+    bad="${bad:+$bad; }said nothing matching '$5'"
+  fi
+  if [ -z "$bad" ]; then
     echo "ok   $1 → $rc   ($3)"
   else
     fails=$((fails + 1))
-    echo "FAIL $1 → $rc, expected $2   ($3)"
+    echo "FAIL $1: $bad   ($3)"
     printf '%s\n' "$out" | sed 's/^/       /'
   fi
 }
@@ -63,6 +76,14 @@ expect pending 2 "still running at the deadline — nothing decided"
 expect neterr 2 "unreachable API is not a red build"
 expect autherr 2 "an expired token is not a red build"
 expect nochecks 2 "no workflow has registered yet — the first call on a new PR"
+
+# The two deadlines are separate budgets. The prompts call this script with neither flag, so the
+# silence budget is the only thing standing between an expired token and an hour of a blocked
+# caller — and it must not shorten a wait GitHub is actually answering.
+expect neterr 2 "silence gives up on its OWN budget, not the whole --timeout" \
+  "--timeout 600 --interval 1 --unknown-timeout 1" "no check verdict at ALL for 1s"
+expect pending 2 "a pending check is an ANSWER: the silence budget must not cut it short" \
+  "--timeout 2 --interval 1 --unknown-timeout 1" "no check verdict after 2s"
 
 [ "$fails" -eq 0 ] || { echo "pr-wait-selftest: $fails case(s) failed"; exit 1; }
 echo "pr-wait-selftest: all cases hold"
