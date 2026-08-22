@@ -6,9 +6,10 @@
 // What these tests pin is the SCOPE, since the sibling homing axes already own the neighbouring
 // shapes: the read is what admits a straight-line value at all (nothing else in the cone is
 // evidence the compiler kept a register), and the refusals hold — a cone crossing a `call`, a
-// standalone address in the cone, a write (a store or a call) able to execute between the read and
-// the value's own position, and a read outside the value's own block — above a branch or outside a
-// loop — where homing would change which paths read, and how often.
+// standalone address in the cone, a value that is itself an address, a write (a store or a call)
+// able to execute between the read and the value's own position, a read outside the value's own
+// block — above a branch or outside a loop — and, for the "renders once" claim itself, a cone read
+// with any consumer outside the cone or another read standing between it and the home.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -156,8 +157,7 @@ test('a value that is itself an address is not homed', () => {
 });
 
 // A store between the read and the value: homing moves the read down across it, and on this IR the
-// store may alias, so the read would see memory it never saw. The enumeration gate cannot know
-// (it has no positioned model) — the axis's own rule is what refuses.
+// store may alias, so the read would see memory it never saw.
 const WRITEBETWEEN = `fn writebetween {
 ^bb0(%0: u32):
   %1: u32 = const {value=134576844}
@@ -175,7 +175,7 @@ const WRITEBETWEEN = `fn writebetween {
 
 test('a write between the read and the value refuses the home', () => {
   expect(emit(WRITEBETWEEN, true, false)).toBe(emit(WRITEBETWEEN, false, false));
-  expect(hasDerivedReadHome(parse(WRITEBETWEEN))).toBe(true); // the gate admits; the rule refuses
+  expect(hasDerivedReadHome(parse(WRITEBETWEEN))).toBe(false);
 });
 
 // The read outside a loop, the value inside it: rendering the read at the value's own position
@@ -333,4 +333,39 @@ const REORDER = `fn reorder {
 test('a read outside the cone bars the move, so two accesses keep their order', () => {
   const on = emit(REORDER, true);
   expect(on.indexOf('67109168')).toBeLessThan(on.indexOf('67109172'));
+});
+
+// ── the enumeration gate ─────────────────────────────────────────────────────────────────────
+// A derived value consumed once as an operand and once as a successor ARG. `analyze` counts both,
+// so the axis homes it (this is ReadKeyInput's own shape with the uses split across an edge) — a
+// gate blind to successor args would enumerate no candidate for it at all.
+const ARGUSE = `fn arguse {
+^bb0():
+  %0: u32 = const {value=67109168}
+  %1: u32 = load %0 {off=0, signed=false, width=2}
+  %2: u32 = const {value=1023}
+  %3: u32 = xor %2, %1
+  %4: u32 = const {value=50333696}
+  store %4, %3 {off=0, width=2}
+  br ^bb1(%3)
+^bb1(%5: u32):
+  %6: u32 = const {value=15}
+  %7: u32 = and %5, %6
+  ret %7
+}
+`;
+
+test('the gate counts successor args, so a value that rides an edge still enumerates', () => {
+  expect(hasDerivedReadHome(parse(ARGUSE))).toBe(true);
+  expect(emit(ARGUSE, true, false)).not.toBe(emit(ARGUSE, false, false));
+});
+
+test('the gate mirrors every refusal it can state without positions', () => {
+  // a TRUE doubles the function's whole structuring cross, so each of these would be paid for
+  // nothing: the read's own block, its single use, a write between, and a pointer-valued home
+  expect(hasDerivedReadHome(parse(READINLOOP))).toBe(false);
+  expect(hasDerivedReadHome(parse(READABOVEBRANCH))).toBe(false);
+  expect(hasDerivedReadHome(parse(SECONDUSE))).toBe(false);
+  expect(hasDerivedReadHome(parse(CALLBETWEEN))).toBe(false);
+  expect(hasDerivedReadHome(parse(PTRVALUE))).toBe(false);
 });

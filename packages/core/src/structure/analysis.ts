@@ -154,28 +154,56 @@ export function hasLoopSharedPureValue(fn: Fn): boolean {
 }
 
 /** rank.ts's enumeration gate for the `/derived-home` axis: does the function HAVE a value the
- *  axis would home — a pure non-const def with 2+ consumers whose cone stands on a memory read,
- *  with no call or standalone address in between? Mirrors the axis's scope rule in `analyze` minus
- *  every refusal that needs the positioned model (the read's block, the write-between, the header
- *  seat); a false positive costs one duplicate-collapsed candidate, never a wrong one. */
+ *  axis would home — a pure non-const, non-pointer def with 2+ consumers standing on a same-block
+ *  memory read that is used nowhere else and reaches it with no write in between, and with no call
+ *  or standalone address in the cone? A TRUE here DOUBLES the whole structuring cross for the
+ *  function — not one candidate — so every refusal cheap enough to state without the positioned
+ *  model is mirrored here; only the loop-header seat stays out.
+ *
+ *  Diverges in BOTH directions, like `hasLoopSharedPureValue` and unlike `hasHomeableSharedAddress`.
+ *  Over: the write scan is straight-line within the one block, where the rule's is cycle-aware, so
+ *  a write reaching only around a back edge is invisible here — a false positive costs a doubled
+ *  cross whose every candidate the source dedup then collapses. Under: use counting here is by SLOT
+ *  over operands and successor args, where `analyze` drops a void function's `ret` operand — so a
+ *  read whose second use is a suppressed return is refused here and admitted there, silently
+ *  skipping the arm. That shape is a void function returning the very halfword it read, which no
+ *  caller can observe; the axis's clientele reads to compute, not to return. */
 export function hasDerivedReadHome(fn: Fn): boolean {
   const defOf = defOpMap(fn);
   const consumers = new Map<Value, Set<Op>>();
+  const useSlots = new Map<Value, number>();
+  const blockOf = new Map<Op, Block>();
+  const idxOf = new Map<Op, number>();
   for (const b of fn.blocks) {
-    for (const op of b.ops) {
+    b.ops.forEach((op, i) => {
+      blockOf.set(op, b);
+      idxOf.set(op, i);
+      const use = (v: Value) => {
+        (consumers.get(v) ?? consumers.set(v, new Set()).get(v)!).add(op);
+        useSlots.set(v, (useSlots.get(v) ?? 0) + 1);
+      };
       for (const o of op.operands) {
-        (consumers.get(o) ?? consumers.set(o, new Set()).get(o)!).add(op);
+        use(o);
       }
-    }
+      for (const s of op.successors) {
+        for (const a of s.args) {
+          use(a);
+        }
+      }
+    });
   }
+  /** any op that writes memory strictly between two ops of one block — the rule's `memWriteBetween`
+   *  over the straight line the same-block requirement already pins */
+  const writeBetween = (b: Block, lo: number, hi: number): boolean =>
+    b.ops.slice(lo + 1, hi).some((x) => EFFECTFUL_OPS.has(x.opcode));
   const standsOnRead = (op0: Op): boolean => {
-    let read = false;
+    const reads: Op[] = [];
     const seen = new Set<Value>();
     const cone = [op0];
     while (cone.length) {
       const d = cone.pop()!;
       if (d.opcode === 'load' || d.opcode === 'aload') {
-        read = true;
+        reads.push(d);
         continue;
       }
       if (d.opcode === 'call' || d.opcode === 'gaddr' || d.opcode === 'laddr') {
@@ -191,7 +219,16 @@ export function hasDerivedReadHome(fn: Fn): boolean {
         }
       }
     }
-    return read;
+    const b = blockOf.get(op0)!;
+    return (
+      reads.length > 0 &&
+      reads.every(
+        (r) =>
+          blockOf.get(r) === b &&
+          (useSlots.get(r.results[0]) ?? 0) === 1 &&
+          !writeBetween(b, idxOf.get(r)!, idxOf.get(op0)!),
+      )
+    );
   };
   for (const [v, cs] of consumers) {
     const d = defOf.get(v);
@@ -202,6 +239,8 @@ export function hasDerivedReadHome(fn: Fn): boolean {
       d.opcode !== 'call' &&
       d.opcode !== 'load' &&
       d.opcode !== 'aload' &&
+      v.type.kind !== 'ptr' &&
+      v.type.kind !== 'array' &&
       standsOnRead(d)
     ) {
       return true;
@@ -322,10 +361,14 @@ export interface AnalyzeOptions {
    *  freely-re-derivable value (the small-constant class) has no such proof at all, but a value
    *  standing on a read the source could not repeat is one the asm computed from a single access.
    *
-   *  Refusals: a cone crossing a `call` (homing would move a side effect), a standalone gaddr/laddr
-   *  in the cone, a cone read outside this value's own block or barred from it by a write (homing
-   *  renders the read here, and moving it across a branch or into a loop changes which paths read
-   *  and how often), and the multi-block-loop-header seat the sibling axes refuse. */
+   *  Refusals, all of them about the ONE access the home must reproduce. A cone read used anywhere
+   *  but the cone (its second use resolves a second render position, so the read would render
+   *  twice). A cone read outside this value's own block, barred from it by a write, or barred by a
+   *  read outside the cone (moving the access across a branch, into a loop, or past another access
+   *  changes which paths read, how often, and in what order). A cone crossing a `call` (homing
+   *  would move a side effect). A standalone gaddr/laddr in the cone, or a value that is ITSELF an
+   *  address (rendered standalone the byte-stride cast lands outside the sum — see
+   *  `rendersAsAddress`). And the multi-block-loop-header seat the sibling axes refuse. */
   homeDerivedReads?: boolean;
   /** DEF-BLOCK PLACEMENT for memory reads — WHERE the read happens, not where the value lives.
    *  The sibling of the homing axes above: there the question is which register or offset holds a

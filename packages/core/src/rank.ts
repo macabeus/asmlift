@@ -505,7 +505,10 @@ export function enumerateCandidates(
       // narrowed lift's `/flip-join/derived-home` spelling, which neither side reaches alone.
       // Only spellings the narrowing actually changed reach a compiler: one that changes nothing
       // downstream emits the base spelling's source and the dedup collapses it, and a DECLARED
-      // arity records nothing and enumerates no variant at all.
+      // arity records nothing and enumerates no variant at all. What survives the dedup is the
+      // product's real price, and it is not free: over the benchmark's 272 agbcc rows this arm
+      // adds 1201 distinct candidates to 3862, all of them in the 13 rows whose narrowing changes
+      // anything downstream.
       const liftVariants: { suffix: string; narrow: boolean }[] = hasSetupArgsNarrowing(base)
         ? [
             { suffix: '', narrow: false },
