@@ -99,7 +99,7 @@ test('an arm that runs into the NEXT arm is recovered as C fall-through', () => 
   const out = convSrc([CALL_A, '\tbl\tsideB\n' + LEAVE]);
   expect(out).not.toContain('ASMLIFT_ERROR');
   // case 0 runs sideA and does NOT break before case 1
-  expect(out).toMatch(/case 0:\s*\n\s*a0 = sideA\(\);\s*\n\s*case 1:/);
+  expect(out).toMatch(/case 0:\s*\n\s*sideA\(\);\s*\n\s*case 1:/);
   // …and the body it falls into is emitted ONCE, under case 1.
   expect(out.match(/sideB\(/g)).toHaveLength(1);
 });
@@ -131,21 +131,23 @@ test('the LAST case may fall into a default that has a body — C emits the defa
     ARMV4T_AGBCC,
   ).source;
   expect(out).not.toContain('ASMLIFT_ERROR');
-  expect(out).toMatch(/case 1:\s*\n\s*a0 = sideB\(\);\s*\n\s*default:/);
+  expect(out).toMatch(/case 1:\s*\n\s*sideB\(\);\s*\n\s*default:/);
 });
 
 test('a fall-through that would carry an effect out of a loop DECLINES', () => {
   // The exit copies of a do-while render AFTER it, while the analysis decided where their values
   // may inline as if they sat on the latch's terminator — inside the loop. An arm ending in a loop
-  // whose result is only read by the next arm therefore came out as `do { i = i - 1; } while (…);
-  // a0 = sideA();` — the call once instead of once per iteration, in C that looks entirely
-  // ordinary. Loud beats plausible.
+  // whose result is read by the next arm therefore came out as `do { i = i - 1; } while (…);
+  // sideB(sideA());` — the call once instead of once per iteration, in C that looks entirely
+  // ordinary. Loud beats plausible. `sideB`'s arity is DECLARED, because the read has to be a real
+  // one: a guessed arity would not pass the loop's result at all (frontend/ssa.ts).
   const loop = '\tmov\tr4, #3\n.Llp:\n\tbl\tsideA\n\tsub\tr4, #1\n\tcmp\tr4, #0\n\tbne\t.Llp\n';
-  expect(() => decompile('f', conv([loop, '\tbl\tsideB\n' + LEAVE]), ARMV4T_AGBCC)).toThrow(
+  const oneArg = { prototypes: { sideB: { params: 1 } } };
+  expect(() => decompile('f', conv([loop, '\tbl\tsideB\n' + LEAVE]), ARMV4T_AGBCC, oneArg)).toThrow(
     /inlines a 'call' from inside the loop/,
   );
   // control: the SAME loop in a closed arm keeps the call inside the loop and recovers.
-  const closed = convSrc([loop + LEAVE, '\tbl\tsideB\n' + LEAVE]);
+  const closed = decompile('f', conv([loop + LEAVE, '\tbl\tsideB\n' + LEAVE]), ARMV4T_AGBCC, oneArg).source;
   expect(closed).toMatch(/do \{\s*\n\s*v0 = sideA\(\);/);
 });
 

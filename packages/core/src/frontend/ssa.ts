@@ -48,13 +48,13 @@ export interface SsaBuilder {
   /** Whether `reg` has a definition reaching block `b` (best-effort call-arity heuristic). */
   hasReachingDef(reg: string, b: number, seen?: Set<number>): boolean;
   /** Record that block `b` makes a call HERE: the ABI's caller-saved registers stop being ones the
-   *  caller set up. Call it AFTER `recordGuessedCall` for the same instruction, and before writing
-   *  the call's own result. */
+   *  caller set up. Call it AFTER `recordGuessedCall` for the same instruction, and after writing
+   *  the call's own result — the result is the CALLEE's, so it must not count as caller-side
+   *  argument setup for whatever call comes next. */
   noteCall(b: number): void;
   /** Register a `call` op whose arity was GUESSED (no prototype), so `finish` can cut it back to the
-   *  argument registers that were actually set up on every path (see {@link trimClobberedCallArgs}).
-   *  `argRegs` is the target's argument-register order. */
-  recordGuessedCall(op: Op, b: number, argRegs: string[]): void;
+   *  argument registers that were actually set up on every path (see {@link trimClobberedCallArgs}). */
+  recordGuessedCall(op: Op, b: number, abi: { argRegs: string[]; returnReg: string }): void;
   /** Remove trivial phis and enforce the frontend's postconditions; call once every block is
    *  filled. Throws FrontendUnsupportedError if a stack slot escaped as an entry parameter. */
   finish(): void;
@@ -129,7 +129,7 @@ export function makeSsaBuilder(
   const writtenSinceCall: Array<Set<string>> = irBlocks.map(() => new Set());
   const callsIn = new Set<number>();
   const guessedCalls: GuessedCallSite[] = [];
-  let argRegsSeen: string[] = [];
+  let abiSeen: { argRegs: string[]; returnReg: string } = { argRegs: [], returnReg: '' };
 
   const writeVar = (reg: string, b: number, v: Value) => {
     writtenSinceCall[b].add(reg);
@@ -280,10 +280,13 @@ export function makeSsaBuilder(
     hasReachingDef,
     noteCall: (b: number) => {
       callsIn.add(b);
-      writtenSinceCall[b] = new Set(); // the callee clobbers the caller-saved registers
+      // The callee clobbers the caller-saved registers — INCLUDING the return register it just
+      // wrote, which the frontends define before getting here. Both are the callee's doing, and
+      // neither is argument setup the caller performed for whatever call comes next.
+      writtenSinceCall[b] = new Set();
     },
-    recordGuessedCall: (op: Op, b: number, argRegs: string[]) => {
-      argRegsSeen = argRegs;
+    recordGuessedCall: (op: Op, b: number, abi: { argRegs: string[]; returnReg: string }) => {
+      abiSeen = abi;
       guessedCalls.push({
         block: b,
         op,
@@ -300,7 +303,8 @@ export function makeSsaBuilder(
       // block's calls are known, drop the ones an intervening call had already clobbered.
       if (guessedCalls.length) {
         trimClobberedCallArgs({
-          argRegs: argRegsSeen,
+          argRegs: abiSeen.argRegs,
+          returnReg: abiSeen.returnReg,
           preds,
           freshAtEnd: writtenSinceCall,
           callsIn,
@@ -390,6 +394,9 @@ export interface GuessedCallSite {
 
 export interface CallArgTrim {
   argRegs: string[];
+  /** the ABI return register. Load-bearing only where it IS `argRegs[0]` (ARM r0, PPC r3) — that
+   *  aliasing is what makes a callee's result indistinguishable from caller-side argument setup. */
+  returnReg: string;
   /** one entry per CFG edge, as passed to {@link makeSsaBuilder} */
   preds: number[][];
   /** per block: the keys written since its LAST call (since its start if it makes none). Indexed by
@@ -422,7 +429,7 @@ export interface CallArgTrim {
  *  Frontend-agnostic: the caller supplies what its own lifting scan observed, so nothing here
  *  re-derives which instruction writes which register. */
 export function trimClobberedCallArgs(inp: CallArgTrim): void {
-  const { argRegs, preds, freshAtEnd, callsIn, sites } = inp;
+  const { argRegs, returnReg, preds, freshAtEnd, callsIn, sites } = inp;
   const blockCount = freshAtEnd.length;
   const all = () => new Set(argRegs);
   const localEnd = (b: number) => freshAtEnd[b] ?? new Set<string>();
@@ -461,11 +468,30 @@ export function trimClobberedCallArgs(inp: CallArgTrim): void {
       freshOut[b] = fout;
     }
   }
-  for (const s of sites) {
-    const fresh = s.afterCallInBlock ? s.freshBefore : new Set([...freshIn[s.block], ...s.freshBefore]);
-    let n = 0;
+  const runOfFresh = (fresh: Set<string>, from: number): number => {
+    let n = from;
     while (n < argRegs.length && fresh.has(argRegs[n])) {
       n++;
+    }
+    return n;
+  };
+  for (const s of sites) {
+    const fresh = s.afterCallInBlock ? s.freshBefore : new Set([...freshIn[s.block], ...s.freshBefore]);
+    let n = runOfFresh(fresh, 0);
+    // THE RETURN REGISTER IS NOT ARGUMENT SETUP. Where the ABI aliases it onto argument 0, the
+    // frontends record a call's clobber AFTER its own result, so the result leaves the register
+    // UNfresh here — and an unfresh argument 0 with a fresh argument 1 behind it is the one shape
+    // that still proves a real argument: the caller set up the later register for this call, so
+    // whatever the callee left in the earlier one is being passed along with it
+    // (`bl __mulsf3; add r1,r4,#0; bl __addsf3` is `__addsf3(__mulsf3(a, b), c)`).
+    //
+    // With NOTHING set up, the call has no caller-side argument evidence at all: `bl f; bl g` is
+    // `f(); g();` as readily as `g(f())`, the two spell the same bytes on this ABI, and only the
+    // nested one needs `f` to return a value and `g` to accept one — a spelling the project's own
+    // header rejects outright when it does not. So the run starts at 0, and a declared prototype
+    // (which no longer reaches here) stays the way `g(f())` is recovered.
+    if (n === 0 && argRegs[0] === returnReg && argRegs.length > 1 && fresh.has(argRegs[1])) {
+      n = runOfFresh(fresh, 1);
     }
     if (n < s.op.operands.length) {
       s.op.operands.length = n;

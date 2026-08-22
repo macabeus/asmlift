@@ -2651,10 +2651,10 @@ export function lift(
           // known whether every path to here passes through another call, which would have clobbered
           // the argument registers this guess just read.
           if (declared === undefined) {
-            ssa.recordGuessedCall(callOp, bi, target.argRegs);
+            ssa.recordGuessedCall(callOp, bi, target);
           }
-          ssa.noteCall(bi); // the callee clobbers r0..r3 …
-          writeData('r0', bi, res); // … and then defines r0, which IS fresh for the next call
+          writeData('r0', bi, res); // the callee defines r0 …
+          ssa.noteCall(bi); // … and the clobber is recorded after it, so that def is the CALLEE's
           break;
         }
         default:

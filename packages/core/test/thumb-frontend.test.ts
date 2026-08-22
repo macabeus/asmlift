@@ -403,10 +403,30 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
 
     test('…and one set up after it still is', () => {
       expect(dc('\tbl\tfoo\n\tmov\tr0, #1\n\tmov\tr1, #2\n\tbl\tbar\n')).toContain('bar(1, 2);');
-      // the call's own result is the freshest r0 there is
-      expect(dc('\tbl\tfoo\n\tbl\tbar\n')).toContain('bar(foo());');
       // …and with no call in between, nothing is clobbered
       expect(dc('\tmov\tr1, #7\n\tmov\tr0, #1\n\tbl\tbar\n')).toContain('bar(1, 7);');
+    });
+
+    test('back-to-back calls are two statements, not a nest', () => {
+      // The return register IS argument 0 here, so `foo(); bar();` and `bar(foo())` assemble to the
+      // same bytes and the asm decides nothing. Only the nest needs `foo` to return a value and
+      // `bar` to accept one — which the project's own header rejects outright when it does not —
+      // and the caller set nothing up to say there is an argument at all.
+      expect(dc('\tbl\tfoo\n\tbl\tbar\n')).toContain('foo();\n    bar();');
+    });
+
+    test('…and a declared arity is still how the nest is recovered', () => {
+      const src = decompile('f', 'f:\n\tpush\t{lr}\n\tbl\tfoo\n\tbl\tbar\n\tpop\t{r0}\n\tbx\tlr\n', ARMV4T_AGBCC, {
+        prototypes: { ...P, bar: { params: 1 } },
+      }).source;
+      expect(src).toContain('bar(foo());');
+    });
+
+    test('…and a later argument register the caller DID set up carries the result with it', () => {
+      // agbcc's soft-float `a * b + c`: the product comes back in r0 and stays there while `c` goes
+      // into r1. Argument 0 is unfresh and argument 1 is not — a one-argument `__addsf3` is not a
+      // thing, so the run bridges across r0 rather than truncating the call to nothing.
+      expect(dc('\tbl\t__mulsf3\n\tadd\tr1, r4, #0\n\tbl\t__addsf3\n')).toContain('__addsf3(__mulsf3(), ');
     });
 
     test('a clobber on ONE path is enough — the analysis is a must', () => {
