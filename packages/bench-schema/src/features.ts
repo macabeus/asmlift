@@ -885,6 +885,31 @@ export const FEATURES: readonly FeatureDef[] = [
     seeAlso: ['value-home', 'load', 'pointer', 'branch'],
   },
   {
+    id: 'stack-addr',
+    label: 'Address-taken local',
+    group: 'memory',
+    evidence: 'judgement',
+    summary: "a local's address is taken, so the compiler must keep it in a stack slot",
+    detail:
+      'A local whose address escapes cannot live in a register: every assignment is a store and ' +
+      'every read is a load, at the exact places the source put them. That changes the ' +
+      'instruction COUNT, not just which register is named — in gcc 2.9 a store to such a slot ' +
+      'also kills CSE of any pointer-based load made before it, so a value read once above the ' +
+      'store and used again below it is loaded TWICE. Recovering the function means recognising ' +
+      'the slot as an addressable object rather than as a spill or as an outgoing stack argument, ' +
+      'which are the other two things a store to `[sp,#N]` can be. ' +
+      'No machine-checked floor beyond the `&`: whether a given slot is addressable, spilled or ' +
+      'an argument is exactly the judgement the tag records.',
+    example: {
+      c: 's32 w; u16 t = e->h; w = 32; if (t <= 31) { w = e->h; } use(&w);',
+      asm:
+        '  ldrh r1, [r2, #0x12]\n  mov r0, #0x20\n  str r0, [sp]      @ the store kills the load above\n' +
+        '  cmp r1, #0x1f\n  bhi .L3\n  ldrh r0, [r2, #0x12]   @ re-read, not CSE-shared\n  str r0, [sp]',
+      toolchain: 'agbcc',
+    },
+    seeAlso: ['value-home', 'uninit-local', 'multi-arg', 'store'],
+  },
+  {
     id: 'global',
     label: 'Global',
     group: 'memory',

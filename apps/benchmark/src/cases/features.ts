@@ -61,6 +61,12 @@ export const JUDGEMENT_FLOOR: Record<string, (body: string, asm: string, whole: 
       b,
     ),
   continue: (b) => /\bcontinue\b/.test(b),
+  // The necessary condition is a UNARY `&` on an identifier — `use(&w)`, `*p = &tmp`. `&&` and a
+  // binary `&` are excluded by requiring the character before it to be neither an identifier
+  // character, nor a closing `)`/`]`, nor another `&`. Whether the address-taken object is the one
+  // the diff turns on stays a human call.
+  'stack-addr': (b) => /(?:^|[^\w)\]&])&(?!&)\s*[A-Za-z_]/.test(b),
+
   // A merged value chain needs a branching construct AND more than one local for the arms to
   // decide. COUNTED ACROSS DECLARATION STATEMENTS, not within one: `void *a; void *b;` and
   // `void *a, *b;` declare the same two locals, and an earlier version of this rule required the
