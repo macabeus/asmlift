@@ -1685,6 +1685,107 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'void swmulti(s32 mode, s32 idx, s32 n);',
     proto: { swmulti: { returnsVoid: true } },
   },
+
+  // WHERE A LOCAL LIVES — the third thing a store to `[sp,#N]` can be. `value-home` above is about
+  // which register or offset a value ends up in; this family is about a local the compiler is not
+  // ALLOWED to put in a register at all, because its address escapes. That is not a placement
+  // preference, it is an instruction-count difference: every assignment becomes a store and every
+  // read a load, and in gcc 2.9 the store also kills CSE of pointer-based loads made before it.
+  //
+  // Verified by compiling five spellings with agbcc 2.9-arm-000512 (`-O2 -mthumb-interwork
+  // -fprologue-bugfix`), destination register-homed vs address-taken:
+  //
+  //   w = 32; if (e->h <= 31) w = e->h;            register-homed  → ONE ldrh (CSE shares it)
+  //   t = e->h; w = 32; if (t <= 31) w = e->h;     register-homed  → ONE ldrh
+  //   w = 32; if (e->h <= 31) w = e->h; use(&w);   address-taken   → ONE ldrh (store precedes it)
+  //   t = e->h; w = 32; if (t <= 31) w = e->h; use(&w);
+  //                                                address-taken   → TWO ldrh, the second after
+  //                                                                  the `str` that killed the first
+  //
+  // So both conditions are needed — the memory home AND a load issued before the store — and
+  // together they are what a decompiler has to reproduce to get the byte count right.
+  //
+  // Cut from kleod:LoadBGTilemapData:agbcc. At its best hand-built spelling (479 against
+  // `build/src/gfx.o`, from a 531 baseline) the residual's largest nameable group is exactly this:
+  // 15 stores to `[sp,#16..32]` and 5 `ldrh [rN,#18]` in the ROM with no counterpart in the
+  // candidate, where the candidate keeps the same values in registers and reads the field once.
+  // Forcing the home from the candidate side was measured and is WORSE — `volatile` on the one
+  // local costs 29 points (479 → 508), on three costs 23 (→ 502), and moving all three into a
+  // local aggregate whose address escapes costs 28 (→ 507) — because those spellings also make
+  // every READ a load, which the ROM does not do. So the class is attributed, not closed, and
+  // these rows pin the capability that has to exist first.
+  //
+  // BEFORE ANY OF THAT, asmlift cannot LIFT such a function at all. `frontend/thumb.ts:1836`
+  // refuses a store to `[sp,#N]` that is never reloaded when its lower slots are supplied, on the
+  // grounds that it may be a call's outgoing stack argument. For an address-taken local that is a
+  // false alarm, and asmlift already holds the evidence that rules it out: it knows every callee's
+  // arity (`:1874` names one), so a frame whose every callee takes four arguments or fewer has no
+  // outgoing stack-argument area at all, and a `mov rD, sp` feeding a call argument is positive
+  // evidence of an addressable object. `stkarg` is the control that keeps the refusal honest.
+  //
+  // Coverage: 0 of the corpus's rows carry this decline. Two real rows do decline with
+  // `stack pointer used as data`, both for OTHER reasons that this capability leaves untouched —
+  // `pokeemerald:GetMoveTarget:agbcc` (consuming stack call arguments) and
+  // `sa3:ProcessOamBuffers:agbcc` (only a plain `mov rD, sp` capture is modelled).
+  //
+  // agbcc only. The CSE-barrier half is a fact about gcc 2.9's alias handling, established by
+  // compiling the pairs above; ido7.1, gcc2.7.2kmc and mwcc_242_81 were NOT measured, and the
+  // outgoing-argument shape the refusal models is AAPCS's, so those lanes are left off rather than
+  // assumed.
+  //
+  // m2c compiles none of the three address-taken rows: it renames the slot `unksp0` and never
+  // declares it, on the identical `ctx` asmlift receives. It declines `stkarg` outright
+  // (`Unable to find stack arg 0x0`), which is the same blocker asmlift names there.
+  {
+    sym: 'stkaddr',
+    src:
+      'struct Ent { u16 pad[9]; u16 h; };\n' +
+      '#define gEnts ((struct Ent *)0x08057acc)\n' +
+      'void use(s32 *p);\n' +
+      'void stkaddr(u32 i){ s32 w; w = gEnts[i].h; use(&w); }',
+    features: ['stack-addr', 'struct'],
+    toolchains: ['agbcc'],
+    ctx: 'void use(s32 *p); void stkaddr(u32 i);',
+    proto: { use: { params: 1, returnsVoid: true }, stkaddr: { returnsVoid: true } },
+  },
+  {
+    sym: 'stkcall',
+    src:
+      'struct Ent { u16 pad[9]; u16 h; };\n' +
+      '#define gEnts ((struct Ent *)0x08057acc)\n' +
+      's32 four(s32 a, s32 b, s32 c, s32 d);\n' +
+      'void use(s32 *p);\n' +
+      'void stkcall(u32 i, s32 a, s32 b, s32 c){ s32 w; s32 k = a + b + c;' +
+      ' w = gEnts[i].h; k += four(a, b, c, w); use(&w); four(k, k, k, k); }',
+    features: ['stack-addr', 'struct'],
+    toolchains: ['agbcc'],
+    ctx: 's32 four(s32 a, s32 b, s32 c, s32 d); void use(s32 *p); void stkcall(u32 i, s32 a, s32 b, s32 c);',
+    proto: { four: { params: 4 }, use: { params: 1, returnsVoid: true }, stkcall: { returnsVoid: true } },
+  },
+  {
+    sym: 'stkarg',
+    src:
+      's32 five(s32 a, s32 b, s32 c, s32 d, s32 e);\n' +
+      '#define gOut ((volatile s32 *)0x03003440)\n' +
+      'void stkarg(s32 a, s32 b){ *gOut = five(a, b, a + b, a - b, a * b); }',
+    features: ['multi-arg'],
+    toolchains: ['agbcc'],
+    ctx: 's32 five(s32 a, s32 b, s32 c, s32 d, s32 e); void stkarg(s32 a, s32 b);',
+    proto: { five: { params: 5 }, stkarg: { returnsVoid: true } },
+  },
+  {
+    sym: 'stkclamp',
+    src:
+      'struct Ent { u16 pad[9]; u16 h; };\n' +
+      '#define gEnts ((struct Ent *)0x08057acc)\n' +
+      'void use(s32 *p);\n' +
+      'void stkclamp(u32 i){ s32 w; u16 t = gEnts[i].h;' +
+      ' w = 32; if (t <= 31) { w = gEnts[i].h; } use(&w); }',
+    features: ['stack-addr', 'struct'],
+    toolchains: ['agbcc'],
+    ctx: 'void use(s32 *p); void stkclamp(u32 i);',
+    proto: { use: { params: 1, returnsVoid: true }, stkclamp: { returnsVoid: true } },
+  },
 ];
 
 // ── C++ (mwcc `.cp` frontend, PPC only) ───────────────────────────────────────────────────
