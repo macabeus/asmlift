@@ -29,6 +29,15 @@ describe('a guessed argument that survived from an earlier block', () => {
     expect(cs.some((c) => c.label.includes('/setup-args'))).toBe(true);
   });
 
+  test('…and inert where the block set up a LATER argument register for the call', () => {
+    // `bl __mulsf3; add r1, r4, #0; bl __addsf3` — the block's own `add r1` proves __addsf3 takes
+    // arguments, so the product still in r0 is one of them. Calling that dead would be the lever
+    // asserting the instruction two above the `bl` is dead code.
+    const cs = cands('\tbl\t__mulsf3\n\tadd\tr1, r4, #0\n\tbl\t__addsf3\n');
+    expect(cs.every((c) => c.source.includes('__addsf3(__mulsf3(), '))).toBe(true);
+    expect(cs.some((c) => c.label.includes('/setup-args'))).toBe(false);
+  });
+
   test('the lever is inert where the calling block set every argument up itself', () => {
     // Nothing to disagree about: `mov r0,#1` is this block's own setup, so both readings are 1.
     const body = '\tmov\tr0, #1\n\tbl\tbar\n';

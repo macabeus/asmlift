@@ -489,15 +489,17 @@ export function trimClobberedCallArgs(inp: CallArgTrim): void {
     }
     return n;
   };
+  // A LATER argument register this caller set up proves the call takes arguments at all, and
+  // argument 0 sits below one that is proven — so it is being passed too, whatever put it there
+  // (`bl __mulsf3; add r1,r4,#0; bl __addsf3` is `__addsf3(__mulsf3(a, b), c)`).
+  const setsUpLater = (fresh: Set<string>): boolean => argRegs.some((r, i) => i > 0 && fresh.has(r));
   // THE RETURN REGISTER IS NOT ARGUMENT SETUP. Where the ABI aliases it onto argument 0, the
   // frontends record a call's clobber AFTER its own result, so the result leaves the register
-  // UNfresh here. That disproves caller setup only where the callee's return is what the register
-  // still HOLDS — a join of one path's return with another path's caller-computed value leaves
-  // argument 0 equally unfresh, and dropping THAT one deletes the instructions that computed it.
-  //
-  // An unfresh argument 0 with a fresh argument 1 behind it also still carries one: the caller set
-  // up the later register for this call, so whatever the callee left in the earlier one is being
-  // passed along with it (`bl __mulsf3; add r1,r4,#0; bl __addsf3` is `__addsf3(__mulsf3(a, b), c)`).
+  // UNfresh here. That disproves caller setup only where the callee's return is BOTH what the
+  // register still holds and all the site has to go on: with a later register set up (above), or
+  // with a value no call produced — a join of one path's return with another path's caller-computed
+  // value — argument 0 is a real argument, and dropping the second kind would delete the
+  // instructions that computed it.
   //
   // With neither, the site carries no argument evidence at all: `bl f; bl g` is `f(); g();` as
   // readily as `g(f())`, the two spell the same bytes on this ABI, and only the nested one needs
@@ -508,10 +510,10 @@ export function trimClobberedCallArgs(inp: CallArgTrim): void {
     if (argRegs[0] !== returnReg || fresh.has(argRegs[0])) {
       return runOfFresh(fresh, 0);
     }
-    if (!calleeResults.has(op.operands[0])) {
+    if (setsUpLater(fresh) || !calleeResults.has(op.operands[0])) {
       return runOfFresh(new Set([argRegs[0], ...fresh]), 0);
     }
-    return argRegs.length > 1 && fresh.has(argRegs[1]) ? runOfFresh(fresh, 1) : 0;
+    return 0;
   };
   for (const s of sites) {
     const fresh = s.afterCallInBlock ? s.freshBefore : new Set([...freshIn[s.block], ...s.freshBefore]);
@@ -522,8 +524,11 @@ export function trimClobberedCallArgs(inp: CallArgTrim): void {
     // The SHORTER arity the same evidence also allows, recorded for {@link narrowToSetupArgs}: the
     // run over what THIS BLOCK wrote, dropping the registers that are fresh only because no call
     // stands between here and wherever they were last written. Both readings stay live, so this one
-    // is recorded rather than applied.
-    const local = Math.min(runOfFresh(s.freshBefore, 0), s.op.operands.length);
+    // is recorded rather than applied. A survivor is what it drops, so the join clause above has no
+    // place here — but `setsUpLater` still does: a register this block set up two instructions
+    // before the call is not something the narrower reading may call dead.
+    const localFresh = setsUpLater(s.freshBefore) ? new Set([argRegs[0], ...s.freshBefore]) : s.freshBefore;
+    const local = Math.min(runOfFresh(localFresh, 0), s.op.operands.length);
     if (local < s.op.operands.length) {
       s.op.attrs.argcSetup = local;
     }

@@ -429,6 +429,14 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       expect(dc('\tbl\t__mulsf3\n\tadd\tr1, r4, #0\n\tbl\t__addsf3\n')).toContain('__addsf3(__mulsf3(), ');
     });
 
+    test('…across the HOLE a 64-bit return spans, where the later register is the only evidence', () => {
+      // agbcc's soft-64 shift: `__muldi3`'s product occupies r0 AND r1, so argument 1 cannot be
+      // filled from the register file at all — the pre-call `asr r1` it would read is the value the
+      // callee overwrote. The caller's own `add r2` still proves the call takes arguments, so the
+      // run keeps r0 and stops at the hole rather than reading the site as argument-less.
+      expect(dc('\tbl\t__muldi3\n\tadd\tr2, r4, #0\n\tbl\t__ashrdi3\n')).toContain('__ashrdi3(__muldi3())');
+    });
+
     test('a JOIN of that result with a caller-computed value stays an argument', () => {
       // `if (c > 5) x = gVar; else x = foo(); bar(x);` — r0 at `bar` is a merge, and the register
       // file cannot say which path put the value there. Reading it as the callee's own return drops
