@@ -50,12 +50,55 @@ test('a REAL default arm is still recovered as one, and is not confused with the
 });
 
 test('two fall-out leaves passing DIFFERENT values are two defaults and still decline', () => {
-  // The collapse claims only that a BARE jump has no body to differ in. Give the second leaf a
+  // The collapse claims only that a BARE jump has no body to differ in. Give the HIGH leaf a
   // different value for the merge's parameter and the two are genuinely different defaults —
-  // recovery must go back to if-nesting rather than pick one and drop the other's write.
+  // recovery must go back to if-nesting rather than pick one and give the other's path its value.
   const out = of(dispatch([0, 1, 2, 3]).replace(/\tb\t\.Lend\n(?=\.Lc0:)/, '\tmov\tr2, #0x9\n\tb\t.Lend\n'));
   expect(out).toContain('else'); // declined to if-recovery
-  expect(out).toContain('9'); // …and the second leaf's write survives
+  expect(out).toMatch(/default:\s+v0 = 9;/); // the high leaf's own write…
+  expect(out).toMatch(/else \{\s+v0 = 0;/); // …and the low leaf's, which the collapse would overwrite with 9
+});
+
+// Each half of the identity rule alone. Ablating either one leaves the three tests above green
+// while collapsing a pair the assembly distinguishes, so each owes its own falsifying shape:
+// the collapse emits the REPRESENTATIVE and discards the rest, and “what the rest could have
+// carried” is exactly a body and an edge value.
+test('two bare fall-out jumps passing DIFFERENT values are two defaults', () => {
+  // The ARGS half. Both leaves are bare jumps to the merge — no body between them to tell them
+  // apart — but they hand it different values: the low leaf 9 (the copy rides the edge, so the
+  // block holds no op of its own), the high leaf the entry's 0. Collapsing them gives `a0 > 3`
+  // the 9 the assembly writes only for `a0 < 0`. Comparing the target block alone cannot see it.
+  const out = of(
+    'f:\n\tmov\tr2, #0x0\n\tmov\tr3, #0x9\n' +
+      '\tcmp\tr0, #0x1\n\tbeq\t.Lc1\t@cond_branch\n' +
+      '\tcmp\tr0, #0x1\n\tbgt\t.Lhi\t@cond_branch\n' +
+      '\tcmp\tr0, #0\n\tbeq\t.Lc0\t@cond_branch\n' +
+      '\tmov\tr2, r3\n\tb\t.Lend\n' + // fall-out #1 — bare, carrying 9
+      '.Lhi:\n\tcmp\tr0, #0x2\n\tbeq\t.Lc2\t@cond_branch\n' +
+      '\tcmp\tr0, #0x3\n\tbeq\t.Lc3\t@cond_branch\n\tb\t.Lend\n' + // fall-out #2 — bare, carrying 0
+      [0, 1, 2, 3].map((k) => `.Lc${k}:\n\tadd\tr2, r1, #0x${k + 1}\n\tb\t.Lend\n`).join('') +
+      '.Lend:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr2, [r0]\n\tbx\tlr\n',
+  );
+  expect(armOrder(out)).not.toEqual([0, 1, 2, 3]); // not folded into one four-case switch
+  expect(out).toMatch(/else \{\s+v0 = 9;/); // 9 stays on the path that writes it
+});
+
+test('a fall-out leaf with a BODY is not a bare jump, and its store is not dropped', () => {
+  // The BODY half. Both leaves reach the merge with the same value, so the args agree — but the
+  // high one stores on the way. A bare jump has nothing to emit and the collapse emits only the
+  // representative, so accepting this pair drops the store from the output entirely.
+  const out = of(
+    'f:\n\tmov\tr2, #0x0\n\tmov\tr3, #0xa0\n\tlsl\tr3, r3, #0x13\n' +
+      '\tcmp\tr0, #0x1\n\tbeq\t.Lc1\t@cond_branch\n' +
+      '\tcmp\tr0, #0x1\n\tbgt\t.Lhi\t@cond_branch\n' +
+      '\tcmp\tr0, #0\n\tbeq\t.Lc0\t@cond_branch\n\tb\t.Lend\n' + // fall-out #1 — bare
+      '.Lhi:\n\tcmp\tr0, #0x2\n\tbeq\t.Lc2\t@cond_branch\n' +
+      '\tcmp\tr0, #0x3\n\tbeq\t.Lc3\t@cond_branch\n\tstr\tr1, [r3]\n\tb\t.Lend\n' + // #2 — stores first
+      [0, 1, 2, 3].map((k) => `.Lc${k}:\n\tadd\tr2, r1, #0x${k + 1}\n\tb\t.Lend\n`).join('') +
+      '.Lend:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr2, [r0]\n\tbx\tlr\n',
+  );
+  expect(armOrder(out)).not.toEqual([0, 1, 2, 3]);
+  expect(out).toContain('*(s32 *)(160 << 19) = a1;'); // the leaf's store survives
 });
 
 // ── arm ORDER ────────────────────────────────────────────────────────────────────────────────────
