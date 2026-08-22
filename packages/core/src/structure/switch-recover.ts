@@ -66,9 +66,17 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     structureRegion,
   } = deps;
 
-  // `fn.blocks` is in ASM LAYOUT order: the frontends build the list by scanning the instruction
-  // stream in address order, and raising only ever REMOVES blocks (never inserts or reorders), so a
-  // block's index is where its code sits in the assembly.
+  // A block's index in `fn.blocks` as its position in the ASSEMBLY — the sole warrant for reading a
+  // source's arm order off block indices below, and true PER FRONTEND rather than of the IR:
+  //   - thumb.ts and mips.ts build the list by scanning the instruction stream in address order;
+  //   - ppc.ts does not. It APPENDS a synthetic return block (`synthReturn`) at the end of the list
+  //     for every conditional-return branch, wherever in the stream that branch sits, so its list
+  //     is not address order at all;
+  //   - raising only ever REMOVES blocks from the list (raise/{divpow2,latch,retsink,shortcircuit}
+  //     .ts all `filter`), never inserts or reorders, so the frontend's order is what survives.
+  // `switchArmsFollowLayout` is therefore a claim about a target's FRONTEND as much as about its
+  // compiler, and a target opts in on both — which is why PPC_MWCC, whose frontend fails the first
+  // half, does not.
   const blockIndex = new Map(fn.blocks.map((blk, i) => [blk, i] as const));
   const layoutIndex = (blk: Block): number => blockIndex.get(blk) ?? -1;
 
