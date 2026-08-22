@@ -20,11 +20,13 @@ export interface UseSite {
 const MEM_BASE_OPS = new Set(['load', 'store', 'aload', 'astore']);
 
 /** Any gaddr/laddr in the op's operand cone (the op included). Rendered standalone, an address
- *  computation over one loses the memAccess's inline byte-stride cast — the value changes, so
- *  every homing rule refuses the cone (the cast-aware machinery in l3/basecse.ts, scopebase.ts
- *  and nearbase.ts serves those bases instead). The walk deliberately crosses loads — a gaddr
- *  reachable only through a load's address keeps its cast at that load's own deref, so
- *  over-refusal there costs a candidate, never soundness. */
+ *  computation over one loses the memAccess's inline byte-stride cast — the value changes, so a
+ *  homing rule asking this refuses the cone (the cast-aware machinery in l3/basecse.ts,
+ *  scopebase.ts and nearbase.ts serves those bases instead). The walk deliberately crosses loads —
+ *  a gaddr reachable only through a load's address keeps its cast at that load's own deref, so
+ *  over-refusal there costs a candidate, never soundness. That over-refusal is why the
+ *  derived-read-home axis asks its own pair instead (an address in the cone OUTSIDE a read, plus
+ *  `rendersAsAddress` on the value): reads over named globals are its whole clientele. */
 function coneHoldsAddr(op0: Op, defOf: Map<Value, Op>): boolean {
   const seen = new Set<Value>();
   const cone = [op0];
@@ -772,6 +774,17 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
    *  holds the loaded value and the address stays inline at the deref, which is why the load rules
    *  (live-across-a-loop, join feeds, /addr-home's, def-block placement) do not ask it. */
   const addressCone = (op0: Op): boolean => coneHoldsAddr(op0, defOf);
+  /** Is the op's own value an ADDRESS — a pointer the standalone rendering must cast? The same
+   *  hazard `addressCone` covers, asked of the value instead of its cone, for the derived-read-home
+   *  axis: that axis cannot use `addressCone` (it crosses reads, so it refuses every value over a
+   *  named global's load — the axis's clientele), and a pointer LOADED from memory puts its gaddr
+   *  under the read where the cone walk stops. Homed, `add(p, 8)` renders `(u16 *)(gPtr + 8)` — the
+   *  cast lands outside the sum, so a byte offset becomes element arithmetic and the address moves
+   *  (+16 where the inline `*(v0 + 4)` reads +8). */
+  const rendersAsAddress = (op: Op): boolean => {
+    const t = op.results[0]?.type;
+    return t?.kind === 'ptr' || t?.kind === 'array';
+  };
   // ── the address-home axis's scope predicate ───────────────────────────────────────────────
   // A value consumed ONLY as the base (operands[0]) of 2+ distinct memory accesses — the shape
   // the axis homes. Any other use (a store's value slot, an aload index, arithmetic, a successor
@@ -1061,6 +1074,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
             op.opcode !== 'const' &&
             pr &&
             !usedOnlyAsSharedBase(pr) &&
+            !rendersAsAddress(op) &&
             multiConsumer(pr) &&
             standsOnMovableRead(op, b) &&
             !multiBlockHeaders.has(b)

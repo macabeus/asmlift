@@ -124,6 +124,32 @@ test('a standalone address in the cone is not homed', () => {
   expect(hasDerivedReadHome(parse(ADDRCONE))).toBe(false);
 });
 
+// The value IS an address — a pointer loaded from a global, offset and then both dereferenced and
+// compared. Its gaddr sits UNDER the read, where the cone walk stops, so only the value's own type
+// answers: homed, the byte offset renders OUTSIDE the pointer cast, `(u16 *)(gPtr + 8)` where the
+// inline form reads `*(v0 + 4)` — element arithmetic, +16 bytes against +8.
+const PTRVALUE = `fn ptrvalue {
+^bb0(%0: u32):
+  %1: u16** = gaddr {sym="gPtr"}
+  %2: u16* = load %1 {off=0, signed=false, width=4}
+  %3: u32 = const {value=8}
+  %4: u16* = add %2, %3
+  %5: u32 = load %4 {off=0, signed=false, width=2}
+  %6: u32 = load %4 {off=2, signed=false, width=2}
+  %7: u32 = add %5, %6
+  %8: u32 = const {value=0}
+  %9: u32 = icmp_ne %4, %8
+  %10: u32 = add %7, %9
+  ret %10
+}
+`;
+
+test('a value that is itself an address is not homed', () => {
+  const off = emit(PTRVALUE, false, false);
+  expect(emit(PTRVALUE, true, false)).toBe(off);
+  expect(off).toContain('*(v0 + 4)');
+});
+
 // A store between the read and the value: homing moves the read down across it, and on this IR the
 // store may alias, so the read would see memory it never saw. The enumeration gate cannot know
 // (it has no positioned model) — the axis's own rule is what refuses.
