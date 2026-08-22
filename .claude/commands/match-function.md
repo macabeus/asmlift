@@ -25,6 +25,13 @@ you looked at this function's diff is a failure, even if the row flips to MATCH.
    with `pnpm bench target <row-id> --out <dir>` so you can iterate without the full harness.
 4. State the baseline in your first user-facing message. Never report progress without a
    before/after pair of real command output.
+5. **Write every repro command down verbatim, flags included** — the `--only` line above, and any
+   ranked enumeration you run outside the harness. Every later measurement (each reviewer's, each
+   remediation's, the PR body's) re-runs *that* command, not one recomposed from memory. The flags
+   are part of the number: a callee still written in assembly has no DWARF signature, so
+   `LoadBGTilemapData` without `--proto '{"thunk_HeapFree":{"params":1}}'` scores 578 where the
+   round's baseline is 547 — a plausible number that is comparable to nothing. Quote the candidate
+   and dropped counts beside every ranked score.
 
 ## Phase 1 — Diagnose the gap honestly
 
@@ -82,6 +89,19 @@ Before declaring the branch done: `pnpm bench run` (all tiers) and `pnpm bench r
 lost match blocks the branch.** If a match is lost, either tighten the gate on your lever or drop
 the lever — do not rationalize a trade unless the user explicitly approves it. Report the totals
 (asmlift vs m2c) before and after.
+
+Two things this gate does not catch by itself:
+
+- **The regenerated artifact is the LAST commit on the branch.** `results.json` stamps the commit
+  it was generated at, and every number you publish reads from it — so a commit that touches core,
+  cli, the harness or the dataset after it silently republishes numbers a rule version that no
+  longer exists produced. Regenerate after Phase 5's remediation, and run
+  `scripts/check-artifact-provenance.sh` before opening the PR.
+- **A corpus sweep's configuration is part of its claim.** Sweeping a project's functions with the
+  new rule ON vs OFF proves nothing about the configuration you did not run: with a symbol map
+  every absolute pool constant lifts to a `gaddr`, so a symbol-map sweep is blind to a rule that
+  only fires on raw addresses — which is exactly how a branch's own 464-function validation missed
+  a match it was losing. Run both, and say which sweep each count came from.
 
 ## Phase 5 — Adversarial round
 
@@ -163,3 +183,8 @@ this phase is the only pass they get.
    the next step would be. Do not force an ad-hoc hack to close the last few bytes.
 5. **Numbers come from commands.** Never state a diff number, a match, or a regression you did not
    just observe in tool output that you show or quote.
+6. **Never explain a discrepancy — re-run it.** A number that disagrees with this round's own
+   chain is a broken measurement until the Phase 0 command reproduces it. Running *a* command is
+   not enough to make a number real: a round once published 557 and 578 for a function whose
+   baseline was 547 and rationalised the gap as unpinned build objects, when the cause was a
+   dropped flag — the false number and the false story merged together.
