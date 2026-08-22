@@ -308,9 +308,13 @@ function printStmt(s: Stmt, indent: string, vt: VarTypes, leaf?: LeafHook): stri
       // own "don't attach an empty default" rule cannot see that.
       const hasDefault = !!s.default?.length;
       // Where the `default:` label goes, as a COUNT of case arms before it (l3/ast.ts): absent ⇒
-      // after all of them. Clamped, because a pass that rebuilds `cases` may have dropped one and
-      // the count is a spelling, never a semantic.
-      const defAt = hasDefault ? Math.max(0, Math.min(s.defaultAt ?? s.cases.length, s.cases.length)) : -1;
+      // after all of them. A count past the arms matches no position at all and the label would
+      // simply not be printed — the default arm vanishing from a switch that has one — so a
+      // producer that hands one over fails loud, like the falling-arm placement below.
+      const defAt = hasDefault ? (s.defaultAt ?? s.cases.length) : -1;
+      if (hasDefault && (defAt < 0 || defAt > s.cases.length)) {
+        throw new Error(`c backend: a switch places its default at arm ${defAt} of ${s.cases.length}`);
+      }
       const printDefault = (): void => {
         out.push(`${ci}default:`);
         for (const t of s.default!) {

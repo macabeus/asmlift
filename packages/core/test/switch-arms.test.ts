@@ -326,6 +326,9 @@ test('a default placed after a FALLING case is refused by the printer, not silen
   });
   expect(() => emitCFamily('void f(s32 x)', sw(1))).toThrow(/falls through/);
   expect(emitCFamily('void f(s32 x)', sw(2))).toMatch(/case 1:[\s\S]*default:/); // after both: fine
+  // A count past the arms matches no position, so the label would simply not be printed and the
+  // default arm would vanish. Refused for the same reason, rather than silently dropped.
+  expect(() => emitCFamily('void f(s32 x)', sw(3))).toThrow(/places its default at arm 3 of 2/);
 });
 
 // ── Regime B: the jump table ─────────────────────────────────────────────────────────────────────
