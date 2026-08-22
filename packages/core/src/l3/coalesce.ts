@@ -25,7 +25,9 @@ function mentions(e: Expr, n: string): boolean {
 export interface Span {
   first: number;
   last: number;
-  inLoop: boolean;
+  /** every loop statement holding a mention of the local — the whole ancestor chain, not the
+   *  innermost, because an OUTER loop re-runs an inner one's statements too */
+  loops: Set<Stmt>;
   constFed: boolean;
   /** the local's FIRST mention is a write, not a read */
   firstIsWrite: boolean;
@@ -33,31 +35,53 @@ export interface Span {
 function spans(body: Stmt[]): Map<string, Span> {
   const out = new Map<string, Span>();
   let at = 0;
-  const walk = (list: Stmt[], inLoop: boolean): void => {
-    for (const s of list) {
-      at++;
-      const here = new Set<string>();
-      if (s.k === 'assign') here.add(s.name);
-      for (const e of stmtExprs(s)) namesIn(e, here);
-      for (const n of here) {
-        const sp = out.get(n) ?? {
-          first: at,
-          last: at,
-          inLoop,
-          constFed: true,
-          // an assign that ALSO READS the name (`b = g(b)`) is not a pure write; treating it as one
-          // let `g` receive the absorbed value
-          firstIsWrite: s.k === 'assign' && s.name === n && !stmtExprs(s).some((e) => mentions(e, n)),
-        };
-        sp.last = at;
-        sp.inLoop ||= inLoop;
-        if (s.k === 'assign' && s.name === n && s.value.k !== 'const') sp.constFed = false;
-        out.set(n, sp);
+  /** the statement's OWN mentions — an assign target, a condition, a scrutinee — at its own
+   *  position, inside the loops it runs under */
+  const record = (s: Stmt, loops: readonly Stmt[]): void => {
+    at++;
+    const here = new Set<string>();
+    if (s.k === 'assign') here.add(s.name);
+    for (const e of stmtExprs(s)) namesIn(e, here);
+    for (const n of here) {
+      const sp = out.get(n) ?? {
+        first: at,
+        last: at,
+        loops: new Set<Stmt>(),
+        constFed: true,
+        // an assign that ALSO READS the name (`b = g(b)`) is not a pure write; treating it as one
+        // let `g` receive the absorbed value
+        firstIsWrite: s.k === 'assign' && s.name === n && !stmtExprs(s).some((e) => mentions(e, n)),
+      };
+      sp.last = at;
+      for (const l of loops) {
+        sp.loops.add(l);
       }
-      walk(stmtChildren(s), inLoop || s.k === 'while' || s.k === 'dowhile' || s.k === 'for');
+      if (s.k === 'assign' && s.name === n && s.value.k !== 'const') sp.constFed = false;
+      out.set(n, sp);
     }
   };
-  walk(body, false);
+  const walk = (list: Stmt[], loops: readonly Stmt[]): void => {
+    for (const s of list) {
+      // A `for`'s INIT runs ONCE, ahead of the condition and outside the loop; its cond, inc and
+      // body run per iteration. Walking the init first is what makes `for (i = *p; …)` read as a
+      // local whose first mention is a WRITE, which is what it is.
+      if (s.k === 'for') {
+        record(s.init, loops);
+        walk(stmtChildren(s.init), loops);
+        const inner = [...loops, s];
+        record(s, inner);
+        walk(s.body, inner);
+        record(s.inc, inner);
+        walk(stmtChildren(s.inc), inner);
+        continue;
+      }
+      // a while/do-while CONDITION re-runs with the body, so it counts as inside its own loop
+      const inner = s.k === 'while' || s.k === 'dowhile' ? [...loops, s] : loops;
+      record(s, inner);
+      walk(stmtChildren(s), inner);
+    }
+  };
+  walk(body, []);
   return out;
 }
 function rename(body: Stmt[], from: string, to: string): Stmt[] {
@@ -96,15 +120,21 @@ export interface MergePair {
   /** either local is object-volatile or carries a pointee-volatile qualifier — typeToString
    *  spells neither, so `sameType` alone lets a qualified local absorb into a plain one */
   eitherIsVolatile: boolean;
+  /** some loop holds a mention of BOTH locals */
+  sharesLoop: boolean;
 }
 
 /** The admission rules, in evaluation order. Two arguments the `why` fields have no room for:
  *
- *  WHAT `loop` BUYS is the right to read preorder statement order as liveness. Preorder is a
- *  topological order of the CFG except where a later-indexed statement can run before an earlier
- *  one, and every position that does that — a `for`'s `init`/`inc`, any loop body — is inside a
- *  loop. A loop's own CONDITION is not covered: it is visited at the loop statement's own index with
- *  the ENCLOSING flag, which is safe only because a condition cannot WRITE.
+ *  WHAT `shared-loop` BUYS is the right to read preorder statement order as liveness. Preorder is a
+ *  topological order of the CFG except where a back edge runs a later-indexed statement before an
+ *  earlier one — and a back edge returns only to the head of its OWN loop, whose body is one
+ *  contiguous preorder range. So the reordering can reach a PAIR only when some loop holds a
+ *  mention of both locals: there the survivor's write can be followed, on the next iteration, by
+ *  the absorbed local's read. Where no loop holds both — two sibling loops, or one local living
+ *  before the loop the other lives in — no back edge connects the two ranges and preorder IS
+ *  execution order. The ancestor chain is what the span records, not the innermost loop: an outer
+ *  loop re-runs an inner one's statements, so it can reorder a pair that no inner loop shares.
  *
  *  ABLATE `first-is-write` ALONE AND NOTHING HAPPENS — `const-fed` masks it, so a survivor first
  *  mentioned by a read was uninitialized there in the original too. Drop both to see what it does,
@@ -131,11 +161,11 @@ export const COALESCE_GATES: readonly Gate<MergePair>[] = [
     rejects: (c) => c.eitherIsVolatile,
   },
   {
-    id: 'loop',
-    why: 'a back edge can run a later statement first, so preorder stops implying disjoint liveness',
+    id: 'shared-loop',
+    why: 'a back edge of a loop holding both locals re-runs the absorbed read after the survivor is written',
     sound: true,
     guardedBy: 'coalesce-fuzz.test.ts: dropping it clobbers a defined read',
-    rejects: (c) => c.x.inLoop || c.y.inLoop,
+    rejects: (c) => c.sharesLoop,
   },
   {
     id: 'const-fed',
@@ -377,6 +407,7 @@ export function coalesceUnder(
         sameType: typeOf.get(a) === typeOf.get(b),
         eitherIsParam: params.has(a) || params.has(b),
         eitherIsVolatile: volatiles.has(a) || volatiles.has(b),
+        sharesLoop: [...x.loops].some((l) => y.loops.has(l)),
       });
       if (refused !== null) {
         refusals.set(refused, (refusals.get(refused) ?? 0) + 1);

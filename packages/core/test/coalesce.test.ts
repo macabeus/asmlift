@@ -8,7 +8,14 @@ import { describe, expect, test } from 'vitest';
 
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
-import { ARM_DISJOINT_GATES, armDisjointUnder, coalesceCandidates } from '../src/l3/coalesce';
+import {
+  ARM_DISJOINT_GATES,
+  COALESCE_GATES,
+  armDisjointUnder,
+  coalesceCandidates,
+  coalesceUnder,
+} from '../src/l3/coalesce';
+import { without } from '../src/l3/gates';
 
 const asg = (n: string, v: number): Stmt => ({ k: 'assign', name: n, value: { k: 'const', value: v } });
 const use = (n: string): Stmt => ({ k: 'exprstmt', value: { k: 'call', fn: 'f', args: [{ k: 'var', name: n }] } });
@@ -201,5 +208,44 @@ describe('volatile pairs (span path)', () => {
       { name: 'b', type: T.s(32) },
     ];
     expect(coalesceCandidates(fn(body, pointeeVolatile))).toEqual([]);
+  });
+});
+
+// ── the loop rule: what a back edge can actually reorder ────────────────────────────────────
+// The gate refuses a pair only when some loop holds a mention of BOTH locals — there the
+// survivor's write can be followed, on the next iteration, by the absorbed local's read. Two
+// SIBLING loops share no back edge, so preorder is execution order and the merge is legal.
+const forLoop = (n: string, init: Expr, body: Stmt[]): Stmt => ({
+  k: 'for',
+  init: { k: 'assign', name: n, value: init },
+  cond: { k: 'bin', op: '<', l: { k: 'var', name: n }, r: { k: 'const', value: 10 } },
+  inc: { k: 'assign', name: n, value: { k: 'bin', op: '+', l: { k: 'var', name: n }, r: { k: 'const', value: 1 } } },
+  body,
+});
+const c0: Expr = { k: 'const', value: 0 };
+
+describe('the loop rule', () => {
+  // A counter's own increment is a non-const feed, so `const-fed` masks the loop rule on every
+  // loop shape. The ablation is the file's own seam for that: the real predicate, real input.
+  const merges = (body: Stmt[], locals?: SFn['locals']) =>
+    coalesceUnder(without(COALESCE_GATES, 'const-fed'), fn(body, locals)).candidates;
+
+  test('counters in SIBLING loops merge — no back edge joins the two ranges', () => {
+    const out = merges([forLoop('a', c0, [use('a')]), forLoop('b', c0, [use('b')])]);
+    expect(out).toHaveLength(1);
+    expect(names(out[0].sfn)).toEqual(['b']);
+  });
+
+  test('two locals in the SAME loop never merge — the next iteration reads the absorbed value', () => {
+    expect(merges([{ k: 'while', cond: c0, body: [asg('a', 1), use('a'), asg('b', 2), use('b')] }])).toHaveLength(0);
+  });
+
+  test('sibling INNER loops under a shared OUTER loop never merge — the outer back edge reorders them', () => {
+    const nested: Stmt = { k: 'while', cond: c0, body: [forLoop('a', c0, [use('a')]), forLoop('b', c0, [use('b')])] };
+    expect(merges([nested])).toHaveLength(0);
+  });
+
+  test('a local living BEFORE the loop another lives in merges — no loop holds both', () => {
+    expect(merges([asg('a', 1), use('a'), forLoop('b', c0, [use('b')])])).toHaveLength(1);
   });
 });
