@@ -27,16 +27,30 @@ HOURS=6
 while [ $# -gt 0 ]; do
   case "$1" in
     --apply) APPLY=1 ;;
-    --hours) HOURS="$2"; shift ;;
+    --hours)
+      if [ $# -lt 2 ]; then echo "--hours needs a value" >&2; exit 2; fi
+      HOURS="$2"; shift ;;
     -h | --help) sed -n '2,22p' "$0"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
   shift
 done
 
+# A non-numeric --hours must NOT fall through: `$((abc * 60))` is 0 in POSIX arithmetic, which
+# would turn the age bound off entirely and let --apply delete the scratch dir of a run in flight.
+case "$HOURS" in
+  '' | *[!0-9]*) echo "--hours wants a whole number of hours, got '${HOURS}'" >&2; exit 2 ;;
+esac
+
 PREFIXES='asmlift-usercc- asmlift-score- asmlift-ref- asmlift-target- asmlift-mips-score- asmlift-mips-pas- bench-cand- bench-vendor- bench-m2c- bench-fidelity-'
 MINUTES=$((HOURS * 60))
-ROOTS="${TMPDIR:-/tmp} /tmp"
+# TMPDIR is /tmp on most Linux hosts and CI images, where listing both would sweep — and, in the
+# dry run, COUNT — the same root twice.
+ROOTS="${TMPDIR:-/tmp}"
+case "${TMPDIR:-/tmp}" in
+  /tmp | /tmp/) ;;
+  *) ROOTS="$ROOTS /tmp" ;;
+esac
 
 # ONE traversal per root, not one per prefix: `find` stats every entry, and a temp dir with a
 # million of them takes minutes per pass.
