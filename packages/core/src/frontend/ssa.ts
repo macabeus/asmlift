@@ -530,10 +530,16 @@ export function trimClobberedCallArgs(inp: CallArgTrim): void {
     const localFresh = setsUpLater(s.freshBefore) ? new Set([argRegs[0], ...s.freshBefore]) : s.freshBefore;
     const local = Math.min(runOfFresh(localFresh, 0), s.op.operands.length);
     if (local < s.op.operands.length) {
-      s.op.attrs.argcSetup = local;
+      setupArgc.set(s.op, local);
     }
   }
 }
+
+/** The narrower arity {@link narrowToSetupArgs} would cut each guessed call to. A SIDE table and
+ *  not an attr: this is a fact about one LIFT, not part of the IR the rest of the pipeline compares
+ *  and prints — `structure/hazards.ts` decides two ops equal by comparing their attrs verbatim, so
+ *  an attr only one of an otherwise-matching pair carries would cost a recovery. */
+const setupArgc = new WeakMap<Op, number>();
 
 /** Cut every guessed call to the arity its OWN BLOCK set up, and report whether anything moved.
  *
@@ -552,8 +558,8 @@ export function narrowToSetupArgs(fn: Fn): boolean {
   let changed = false;
   for (const b of fn.blocks) {
     for (const op of b.ops) {
-      const setup = op.attrs.argcSetup;
-      if (typeof setup === 'number' && setup < op.operands.length) {
+      const setup = setupArgc.get(op);
+      if (setup !== undefined && setup < op.operands.length) {
         op.operands.length = setup;
         changed = true;
       }
