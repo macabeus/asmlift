@@ -114,9 +114,15 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
   // 8-case switch, the default's block lands where the source wrote it. `undefined` ⇒ C's
   // conventional last position, which is what every other producer of this node means.
   //
-  // ONE refusal so far: a block with no body of its own is one the DISPATCH minted (`b .Ldefault`),
-  // so its index is where a jump landed. Which of several such the collapse below keeps is a
-  // walk-order accident, and reading it moved the label when two of them merely swapped addresses.
+  // TWO refusals, both about a block the DISPATCH placed rather than the arm:
+  //   - a block with no body of its own is one the dispatch minted (`b .Ldefault`), and which of
+  //     several such the collapse below keeps is a walk-order accident;
+  //   - `emit_case_nodes` ends every exhausted subtree with `emit_jump_if_reachable (default_label)`
+  //     and `expand_end_case` reorders the whole dispatch, those jumps included, ahead of the arm
+  //     bodies — so a jump survives as a plain FALL-THROUGH exactly when the default's body is the
+  //     arm the source wrote FIRST. That reading holds only while a second subtree still names the
+  //     label: a two-case chain names it once, and agbcc then lays that block right after the tests
+  //     whatever the source wrote, both spellings compiling to identical instructions.
   const defaultLayoutPos = (defaultBlk: Block, armEntries: Block[], placedByDispatch: boolean): number | undefined =>
     !switchArmsFollowLayout || isBareExit(defaultBlk) || placedByDispatch
       ? undefined
@@ -576,25 +582,21 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     // The `default:` arm is an ARM: where its block is laid out is read exactly as a case body's is
     // (`defaultLayoutPos`). Every arm here is closed, so the label diverts nothing wherever it lands.
     //
-    // SCOPE — a default the dispatch FALLS INTO has no position of its own. `emit_case_nodes`
-    // reaches the default by a jump from each exhausted subtree, but when the last test simply
-    // runs out, its fall-through block is the default's first block, placed there by the dispatch
-    // rather than by the arm. Measured: `switch (x) { case 0: … case 1: … default: … }` lays that
-    // block right after the tests with the REST of the same arm last, and writing the default
-    // first compiles to identical instructions — the asm cannot tell the two spellings apart. So
-    // recovery keeps the C-conventional last position there instead of inventing evidence.
-    const fellInto = new Set<Block>();
-    for (const t of seen) {
-      const succ = t.ops[t.ops.length - 1].successors;
-      if (succ.length > 1) {
-        fellInto.add(succ[1].block);
-      }
-    }
+    // The dispatch placed that block itself when the last test simply RAN OUT into it and no other
+    // subtree jumps there — the two references the tree walk can count.
+    const dispatchTargets = [...seen].flatMap((t) =>
+      t.ops[t.ops.length - 1].successors.map((e) => forwardingTarget(e.block)),
+    );
+    const ranOutInto = (blk: Block) =>
+      [...seen].some((t) => {
+        const succ = t.ops[t.ops.length - 1].successors;
+        return succ.length > 1 && succ[1].block === blk;
+      }) && dispatchTargets.filter((e) => e === blk).length < 2;
     const defaultAt = defaultBlk
       ? defaultLayoutPos(
           defaultBlk,
           sortedCases.map(([, blk]) => blk),
-          fellInto.has(defaultBlk),
+          ranOutInto(defaultBlk),
         )
       : undefined;
     const sw: Stmt = {

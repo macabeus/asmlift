@@ -1624,6 +1624,12 @@ export const SYNTHETIC: SynthSpec[] = [
   //     written. `sw_jt` above is the same regime with ascending arms, where the two orders
   //     coincide and the row cannot fire.
   //
+  // And one for the `default:` position those cannot see either:
+  //   • `swdeffirst` — the same four cases with `default:` written FIRST. That is the one position
+  //     where the dispatch RUNS OUT into the default's block instead of jumping to it, and the
+  //     reading recovery makes of a fall-through is the one thing the other subtree's surviving
+  //     `b .Ldefault` licenses. `swdefmid` cannot see it: at position 2 both subtrees jump.
+  //
   // `swmulti` is the real function's shape rather than an isolate: a defaultless switch inside a
   // do-while whose four arms all decide the same three locals. It moves furthest (38) because its
   // residual also carries the arm-order half and the loop's own value placement.
@@ -1695,6 +1701,20 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc'],
     ctx: 'void swjtorder(s32 mode, s32 n);',
     proto: { swjtorder: { returnsVoid: true } },
+  },
+  {
+    sym: 'swdeffirst',
+    src:
+      '#define gOut ((volatile s32 *)0x04000000)\n' +
+      'void swdeffirst(s32 mode, s32 n){ s32 w;\n' +
+      ' switch (mode) { default: w = 99; break;\n' +
+      '                 case 0: w = n + 1; break; case 1: w = n + 2; break;\n' +
+      '                 case 2: w = n + 3; break; case 3: w = n + 4; break; }\n' +
+      ' *gOut = w; }',
+    features: ['switch-arms', 'branch'],
+    toolchains: ['agbcc'],
+    ctx: 'void swdeffirst(s32 mode, s32 n);',
+    proto: { swdeffirst: { returnsVoid: true } },
   },
   {
     sym: 'swlayout',

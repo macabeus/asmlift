@@ -213,12 +213,11 @@ test('a `default:` laid out among the cases is spelled there, with the `break;` 
   expect(armOrder(out)).toEqual([0, 1, 2, 3]);
 });
 
-test('a default the dispatch FALLS INTO keeps the last position', () => {
-  // Scope. `emit_case_nodes` reaches the default by a jump from each exhausted subtree, but when
-  // the tests simply run out the fall-through block IS the default's first block — placed there by
-  // the dispatch, not by the arm. agbcc emits exactly this for a two-case switch, and it emits it
-  // whether the source wrote `default:` first or last (both compile to the same instructions), so
-  // the layout is no evidence at all. Recovery keeps C's conventional last position.
+test('a default the dispatch RAN OUT into, and nothing else names, keeps the last position', () => {
+  // A two-case chain: the tests run out into the default's block, and that fall-through is the only
+  // reference to it. agbcc then lays that block right after the tests whatever the source wrote —
+  // compiled both ways, `default:` first and `default:` last give identical instructions — so the
+  // layout is no evidence and C's conventional last position stands.
   const out = of(
     'f:\n\tcmp\tr0, #0\n\tbeq\t.Lc0\t@cond_branch\n' +
       '\tcmp\tr0, #0x1\n\tbeq\t.Lc1\t@cond_branch\n' +
@@ -228,6 +227,28 @@ test('a default the dispatch FALLS INTO keeps the last position', () => {
       '.Lend:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr2, [r0]\n\tbx\tlr\n',
   );
   expect(out).toMatch(/case 1:\s+v0 = 2;\s+break;\s+default:\s+v0 = 99;/);
+});
+
+test('a default a SECOND subtree still jumps to is spelled where it is laid out, even first', () => {
+  // The same fall-through, with the tree's other exhausted subtree still jumping to the label. That
+  // second reference is what pins the block: `emit_case_nodes` gives each exhausted subtree its own
+  // `emit_jump_if_reachable (default_label)` and `expand_end_case` reorders the whole dispatch ahead
+  // of the arm bodies, so the surviving fall-through means the default's body is the arm the source
+  // wrote FIRST. Compiled: at 3 through 8 cases the default's block lands where the source wrote it
+  // at every position, and this fixture is the one position the dispatch runs into.
+  const out = of(
+    'f:\n\tmov\tr2, #0x0\n' +
+      '\tcmp\tr0, #0x1\n\tbeq\t.Lc1\t@cond_branch\n' +
+      '\tcmp\tr0, #0x1\n\tbgt\t.Lhi\t@cond_branch\n' +
+      '\tcmp\tr0, #0\n\tbeq\t.Lc0\t@cond_branch\n\tb\t.Ldef\n' + // the subtree that JUMPS
+      '.Lhi:\n\tcmp\tr0, #0x2\n\tbeq\t.Lc2\t@cond_branch\n' +
+      '\tcmp\tr0, #0x3\n\tbeq\t.Lc3\t@cond_branch\n' + // …and the one that runs out
+      '.Ldef:\n\tmov\tr2, #0x63\n\tb\t.Lend\n' +
+      [0, 1, 2, 3].map((k) => `.Lc${k}:\n\tadd\tr2, r1, #0x${k + 1}\n\tb\t.Lend\n`).join('') +
+      '.Lend:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr2, [r0]\n\tbx\tlr\n',
+  );
+  expect(out).toMatch(/switch \(a0\) \{\s+default:\s+v0 = 99;\s+break;\s+case 0:/);
+  expect(armOrder(out)).toEqual([0, 1, 2, 3]);
 });
 
 test('which of two identical fall-out jumps the collapse keeps does not decide the label', () => {
