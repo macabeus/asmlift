@@ -32,9 +32,16 @@ you looked at this function's diff is a failure, even if the row flips to MATCH.
    `LoadBGTilemapData` without `--proto '{"thunk_HeapFree":{"params":1}}'` scores 578 where the
    round's baseline is 547 — a plausible number that is comparable to nothing. Quote the candidate
    and dropped counts beside every ranked score. Add `--jobs 6 --progress`: the candidate compiles
-   are ~85% of a ranked run and pool cleanly (LBG, measured: 20.7 min serial → ~8), and the
-   `asmlift: [progress]` liveness lines are what makes a later claim about the run checkable from
-   its own log. Compare two runs on their `[score]` lines — `[progress]` is timing, not measurement.
+   are ~85% of a ranked run and pool cleanly, and the `asmlift: [progress]` liveness lines are what
+   makes a later claim about the run checkable from its own log. Two LBG runs launched together
+   measured **36m10s serial against 21m32s at `--jobs 6`** (20608 candidates, 0 dropped, identical
+   winner) — but that machine was also running two full benches and both test suites, and a quieter
+   pair measured 31m55s against 11m16s. The ratio is the machine's, not the code's: re-time on your
+   own log and quote that, never these. Compare two runs on their `[score]` lines, and filter with
+   a FIXED string — `diff <(grep -F '[score]' a.err) <(grep -F '[score]' b.err)`. `grep '[progress]'` is a bracket
+   EXPRESSION matching any one of `p r o g e s`, so `grep -v '[progress]'` deletes almost every
+   line including every `[score]` one, and the diff passes having compared nothing. A neutrality
+   check that filters away what it is comparing is worse than none.
 
 ## Phase 1 — Diagnose the gap honestly
 
