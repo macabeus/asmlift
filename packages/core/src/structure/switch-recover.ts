@@ -115,7 +115,10 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
   // 8-case switch, the default's block lands where the source wrote it. `undefined` ⇒ C's
   // conventional last position, which is what every other producer of this node means.
   //
-  // TWO refusals, both about a block the DISPATCH placed rather than the arm:
+  // THREE refusals. One is about a block the walk already read as a CASE arm — a dense table sends
+  // every unwritten value's slot to the default's block, so grouping the slots gives that block an
+  // arm of its own and its index is where THAT arm sits. The other two are about a block the
+  // DISPATCH placed rather than the arm:
   //   - a block with no body of its own is one the dispatch minted (`b .Ldefault`), and which of
   //     several such the collapse below keeps is a walk-order accident;
   //   - `emit_case_nodes` ends every exhausted subtree with `emit_jump_if_reachable (default_label)`
@@ -125,7 +128,7 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
   //     label: a two-case chain names it once, and agbcc then lays that block right after the tests
   //     whatever the source wrote, both spellings compiling to identical instructions.
   const defaultLayoutPos = (defaultBlk: Block, armEntries: Block[], placedByDispatch: boolean): number | undefined =>
-    !switchArmsFollowLayout || isBareExit(defaultBlk) || placedByDispatch
+    !switchArmsFollowLayout || isBareExit(defaultBlk) || armEntries.includes(defaultBlk) || placedByDispatch
       ? undefined
       : armEntries.filter((e) => layoutIndex(e) < layoutIndex(defaultBlk)).length;
 

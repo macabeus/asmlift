@@ -408,6 +408,26 @@ test('a jump-table `default:` is spelled where its body is laid out, at every po
   }
 });
 
+test('a default the table also reaches as a CASE has that arm\u2019s index, not a position', () => {
+  // The slots an unwritten value falls to point at the default's own block, so grouping gives that
+  // block a `case` arm as well. Its layout index is then where that ARM sits and says nothing about
+  // where `default:` was written — the same "no evidence" rule the bodiless arm gets. Slot 4 here
+  // names `.L9`, so the arms are 3, 0, 1, 2 and 4, and the label stays last rather than landing
+  // where case 4 was laid out.
+  const shared = table()
+    .replace('\t.word\t.L6\n', '\t.word\t.L9\n')
+    .replace('.L6:\n\tadd\tr1, r2, #0x5\n\tb\t.L3\n', '');
+  const out = of(shared);
+  expect([...out.matchAll(/case (\d+):|(default):/g)].map((m) => m[1] ?? m[2])).toEqual([
+    '3',
+    '0',
+    '1',
+    '2',
+    '4',
+    'default',
+  ]);
+});
+
 test('a jump-table arm that FALLS THROUGH is not reordered', () => {
   // Regime B's emission order is load-bearing where Regime A's is not: a falling arm must be
   // emitted directly above the one it falls into (the l3/ast.ts note), so its position is not free.
