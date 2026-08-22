@@ -1611,11 +1611,13 @@ export const SYNTHETIC: SynthSpec[] = [
   // do-while whose four arms all decide the same three locals. It moves furthest (38) because its
   // residual also carries the arm-order half and the loop's own value placement.
   //
-  // NOT the same gap as `uninit_sw` above, which contains the identical dispatch and also declines
-  // to if-nesting: there the arms leave a local undefined on the fall-out path, so the residual is
-  // dominated by the fabricated parameter that models the def-less read, and the row cannot gate
-  // this capability — closing the arm grouping would move its score without changing its outcome.
-  // `swarms` assigns `w = 0` first for exactly that reason.
+  // NOT the same gap as `uninit_sw` above, which contains the identical dispatch and also declined
+  // to if-nesting: there the arms leave a local undefined on the fall-out path, so the residual was
+  // read as dominated by the fabricated parameter that models the def-less read, and the row was
+  // written off as unable to gate this capability. That was wrong — closing the arm grouping took
+  // `uninit_sw` to MATCH, so the switch was the whole of what stood between it and its target and
+  // the def-less read cost it nothing. `swarms` still assigns `w = 0` first, which is what keeps
+  // the two rows separable: it isolates the dispatch with no `uninit-local` gap behind it at all.
   //
   // agbcc only, and for the same reason the read-once family is: the inference "the asm's block
   // order is the source's arm order" is a fact about a compiler with no scheduler and no block
