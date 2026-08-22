@@ -3135,10 +3135,13 @@ export function lift(
       // second: the hardware reads the object, and the DMA-fill idiom this capability was built for
       // (`vu16 tmp; DmaSet(n, &tmp, …)`) is exactly that shape.
       const mayWrite = new Set<number>();
-      // A THIRD question, narrower than both: was the address handed to a CALLEE as an argument?
-      // That is the only escape whose writer this frontend can name, and it is the one the
-      // outgoing-argument proof newly admits — so it carries its own rule below.
+      // …and a FOURTH, which is `escaped` split in two. `passedToCallee` is the address handed to a
+      // callee as an argument — the ordinary `&local`, and the only escape whose writer this
+      // frontend can name. `published` is the address WRITTEN TO MEMORY, which is how the DMA idiom
+      // hands the object to hardware. They decide different things (the slot rule below, and
+      // `volatile` at the stamp), and reading either off `escaped` gets one of them wrong.
       const passedToCallee = new Set<number>();
+      const published = new Set<number>();
       // …and WHICH ARGUMENT it was passed as, because argument 0 is the one position a hidden
       // struct-return pointer can occupy. A `call`'s operand index IS the argument index here (the
       // `bl` arm reads r0..r<argc-1> in order), so an address handed over at r1 or above is an
@@ -3186,6 +3189,8 @@ export function lift(
                 if (idx > 0) {
                   passedAboveArg0.add(off);
                 }
+              } else {
+                published.add(off); // written to memory — the DMA idiom's `*dmaReg = &tmp`
               }
               return;
             }
@@ -3292,9 +3297,9 @@ export function lift(
       // symmetric: two objects are two separate C locals with no guaranteed adjacency, so a device
       // that READS past the one it was given is as wrong as a callee that writes past it. `DmaCopy`
       // with a count of two halfwords off `&sp0` transfers `[sp,#2]` too, and the emitted source
-      // transfers whatever the recompiler put after `sp0` — with the store to the second object
-      // deleted outright, since only the escaping one is `volatile`. Marking both volatile would
-      // not repair that: the locals are still placed independently.
+      // transfers whatever the recompiler put after `sp0`, and the second object's own store is
+      // whatever the recompiler made of it. Marking both volatile would not repair that: the locals
+      // are still placed independently.
       //
       // ACCEPTED RESIDUE, so the rule is not read as wider than it is: it counts `laddr` objects,
       // so a neighbour that is merely SPILLED to an SSA slot is over-read just the same and nothing
@@ -3371,33 +3376,36 @@ export function lift(
       // deliberately NOT chosen here: identifiers live in the structurer's namespace (params,
       // locals, globals, the symbol map), which the frontend cannot see — a frontend-chosen `sp0`
       // silently shadowed a project global of the same name.
-      // `volatile` iff the address escapes. For the DMA idiom this rule was written for that IS the
-      // source's own spelling — klonoa's `DMA_FILL` writes `vu##bit tmp` outright, sa3's does under
-      // `PLATFORM_GBA`, pokeemerald's inside `DMA_FILL_UNCHECKED` — so reproducing the source means
-      // reproducing the qualifier.
+      // `volatile` iff the address is PUBLISHED — written to memory, rather than handed to a
+      // callee. That is the DMA idiom this rule was written for and it IS the source's own
+      // spelling there: klonoa's `DMA_FILL` writes `vu##bit tmp` outright, sa3's does under
+      // `PLATFORM_GBA`, pokeemerald's inside `DMA_FILL_UNCHECKED`, and the address goes to a device
+      // register through a store. Reproducing that source means reproducing the qualifier.
       //
-      // For an ORDINARY `&local` argument it is NOT the source's spelling: `void f(u32 i){ s32 w;
-      // w = gEnts[i].h; use(&w); }` carries no qualifier and this still stamps one. It stays anyway
-      // because it is free where it is wrong and load-bearing where it is right, measured rather
-      // than assumed: both spellings of the emitted candidate for that function and for its
-      // branching sibling compile to byte-identical `.s` under agbcc 2.9-arm-000512 (`-O2
-      // -mthumb-interwork -Wimplicit -fhex-asm -fprologue-bugfix`), because taking the address is
-      // already what pins the local to memory. What separates the two cases is the SOURCE, which
-      // this frontend cannot see, so it stamps the conservative one.
+      // NOT on an ordinary `&local` ARGUMENT, where no source in the corpus writes one and the
+      // qualifier is not free. `void f(u32 i){ s32 w; w = gEnts[i].h; use(&w); four(w,w,w,w); }`
+      // compiles to one `ldr` reloaded into four registers by copies; the structurer emits one C
+      // read per USE rather than per machine load, so `volatile` forbids the CSE and makes it four
+      // `ldr`s — a byte-exact candidate turned into a four-instruction nonmatch (compiled, agbcc
+      // 2.9-arm-000512, `-O2 -mthumb-interwork -Wimplicit -fhex-asm -fprologue-bugfix`). It is free
+      // only where the object is read at most once, which is all the rows that first shipped it
+      // did. agbcc also warns `discards qualifiers` at every such call.
       //
       // NOT because gcc would otherwise delete the store. That claim was here for several releases
       // and does not reproduce: taking `&tmp` makes the local addressable, so gcc-2.9 keeps the
       // store with or without the qualifier, measured on store-then-escape, publish-then-fill, and
       // a loop that stores and escapes each iteration. What the qualifier does change is register
       // ALLOCATION — the same function compiled `vu16` and `u16` is 98 instructions either way and
-      // differs in three register assignments — which is why it still has to be right.
+      // differs in three register assignments — which is why it still has to be right. asmlift's
+      // OWN dead-store pass used to key on it; it keys on address-taken now (l3/dce.ts), so
+      // dropping the qualifier here cannot cost a store.
       //
       // An object whose address never leaves the function needs no volatile and must not pay it.
       for (const [off, ops] of objects) {
         const width = extent.get(off)!;
         const signed = accesses.get(off)!.some((a) => a.signed);
         for (const op of ops) {
-          op.attrs = { ...op.attrs, width, signed, ...(escaped.has(off) ? { volatile: true } : {}) };
+          op.attrs = { ...op.attrs, width, signed, ...(published.has(off) ? { volatile: true } : {}) };
         }
       }
     }

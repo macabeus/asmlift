@@ -110,3 +110,27 @@ describe('dead-local-store elimination', () => {
     expect(eliminateDeadStores(fn(body)).body).toEqual(body);
   });
 });
+
+// AN ADDRESS-TAKEN LOCAL is never a dead store, whatever its qualifiers. This walk is BACKWARD, so
+// the `addr`-as-read pin only protects the stores UPSTREAM of an `&sp0`; publish-then-fill puts one
+// downstream. The rule used to key on `volatile`, which the frontend stamps only where the address
+// is published to memory (the DMA idiom) — an ordinary `&local` argument carries no qualifier in
+// any source, and its store must survive here just the same.
+describe('an address-taken local is never a dead store', () => {
+  const publishThenFill: Stmt[] = [
+    { k: 'exprstmt', value: { k: 'call', fn: 'g', args: [{ k: 'addr', name: 'sp0' }] } },
+    { k: 'assign', name: 'sp0', value: { k: 'const', value: 5 } },
+  ];
+
+  test('a store AFTER the last `&sp0` survives without the volatile qualifier', () => {
+    expect(eliminateDeadStores(fn(publishThenFill, ['sp0'])).body).toEqual(publishThenFill);
+  });
+
+  test('CONTROL: the same store to a local whose address is never taken is dead', () => {
+    const body: Stmt[] = [
+      { k: 'exprstmt', value: { k: 'call', fn: 'g', args: [] } },
+      { k: 'assign', name: 'sp0', value: { k: 'const', value: 5 } },
+    ];
+    expect(eliminateDeadStores(fn(body, ['sp0'])).body).toEqual([body[0]]);
+  });
+});

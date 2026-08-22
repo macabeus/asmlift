@@ -1240,6 +1240,33 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         '\tadd\tsp, sp, #0x4\n\tpop\t{r0}\n\tbx\tr0\n';
       expect(decompile('f', oneWord, ARMV4T_AGBCC, { prototypes: { g: { params: 1 } } }).source).toContain('g(&sp0)');
     });
+
+    // `volatile` IS NOT FREE, so it goes only where the source writes one. The structurer emits one
+    // C read per USE, not per machine load, so the qualifier forbids the CSE that turns the
+    // reference's single `ldr` into four register copies. `void f(u32 i){ s32 w; w = gEnts[i].h;
+    // use(&w); four(w,w,w,w); }` compiled, and the candidate recompiled both ways:
+    //
+    //   reference / without volatile → ldr r3,[sp] / add r0,r3,#0 / add r1,r3,#0 / add r2,r3,#0
+    //   with volatile                → ldr r0,[sp] / ldr r1,[sp] / ldr r2,[sp] / ldr r3,[sp]
+    //
+    // Four instructions, so a byte-exact candidate becomes a nonmatch. agbcc also warns `discards
+    // qualifiers` at the call. The DMA idiom keeps it: there the address is PUBLISHED to a device
+    // register through a store, and every corpus project spells that scratch `vu16`.
+    test('an ordinary `&local` argument is not volatile; a published address is', () => {
+      const multiRead =
+        'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x4\n\tlsl\tr1, r0, #0x2\n\tadd\tr1, r1, r0\n\tlsl\tr1, r1, #0x2\n' +
+        '\tldr\tr0, .L3\n\tadd\tr1, r1, r0\n\tldrh\tr0, [r1, #0x12]\n\tstr\tr0, [sp]\n\tmov\tr0, sp\n\tbl\tuse\n' +
+        '\tldr\tr3, [sp]\n\tadd\tr0, r3, #0\n\tadd\tr1, r3, #0\n\tadd\tr2, r3, #0\n\tbl\tfour\n' +
+        '\tadd\tsp, sp, #0x4\n\tpop\t{r0}\n\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\t0x8057acc\n';
+      const src = decompile('f', multiRead, ARMV4T_AGBCC, {
+        prototypes: { use: { params: 1, returnsVoid: true }, four: { params: 4 } },
+      }).source;
+      expect(src).toContain('four(sp0, sp0, sp0, sp0)');
+      expect(src).not.toContain('volatile');
+      // …and the store still survives, which is what the qualifier used to be doing for asmlift's
+      // own dead-store pass (l3/dce.ts keys on address-taken now).
+      expect(src).toMatch(/sp0 = /);
+    });
   });
 
   test('an address-taken frame local becomes a declared object whose address is a value', () => {

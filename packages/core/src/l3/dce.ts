@@ -76,6 +76,25 @@ function allReadsInto(stmts: Stmt[], out: Set<string>): void {
   }
 }
 
+/** Every name whose ADDRESS is taken anywhere within these statements. Globals land here too and
+ *  are harmless — they were never store-eligible. */
+function allAddrNamesInto(stmts: Stmt[], out: Set<string>): void {
+  const walk = (e: Expr) => {
+    if (e.k === 'addr') {
+      out.add(e.name);
+    }
+    for (const c of exprChildren(e)) {
+      walk(c);
+    }
+  };
+  for (const s of stmts) {
+    for (const e of stmtExprs(s)) {
+      walk(e);
+    }
+    allAddrNamesInto(stmtChildren(s), out);
+  }
+}
+
 /** Backward live-variable walk over one block. `liveOut` is the set of locals live on exit;
  *  returns the rewritten block and the set live on entry. */
 function dceBlock(
@@ -234,13 +253,17 @@ function referencedNames(stmts: Stmt[], out: Set<string>): void {
 /** Remove dead local stores and simplify the branches they empty out, then drop any local
  *  declaration left unreferenced. Returns a new SFn; the input is not mutated. */
 export function eliminateDeadStores(sfn: SFn): SFn {
-  // A VOLATILE local is never eligible: its stores are observable through the escaped address (the
-  // DMA hardware reads them) wherever they sit. The `addr`-as-read pin alone only protected stores
-  // UPSTREAM of an `&sp0` occurrence in this backward walk — the legal publish-address-then-fill
-  // ordering (`*dmaReg = &sp0;` THEN `sp0 = v;`) had its store deleted by this very pass, defeating
-  // the volatile the frontend added precisely so the RECOMPILER would not delete it.
+  // AN ADDRESS-TAKEN local is never eligible, whatever its qualifiers: every store to it is
+  // observable through the escaped pointer wherever it sits, and this walk is BACKWARD, so the
+  // `addr`-as-read pin above only ever protected the stores UPSTREAM of an `&sp0` occurrence.
+  // Publish-the-address-then-fill (`g(&sp0); sp0 = v;`) puts one downstream, and this very pass
+  // deleted it. The rule used to key on `volatile` — true of the DMA idiom, where the object is
+  // published to a device register, and false of the ordinary `&local` argument that carries no
+  // qualifier in any source.
+  const addressTaken = new Set<string>();
+  allAddrNamesInto(sfn.body, addressTaken);
   const volatiles = new Set(sfn.locals.filter((l) => l.volatile).map((l) => l.name));
-  const locals = new Set(sfn.locals.filter((l) => !l.volatile).map((l) => l.name));
+  const locals = new Set(sfn.locals.filter((l) => !l.volatile && !addressTaken.has(l.name)).map((l) => l.name));
   const body = dceBlock(sfn.body, new Set<string>(), locals, volatiles).out;
   const used = new Set<string>();
   referencedNames(body, used);
