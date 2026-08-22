@@ -102,6 +102,28 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
     [ranked-candidate idea](asmlift-101.md#26-types-as-ranked-candidates-judged-by-the-differ)
     applied to spelling instead of types.
 
+  A third population sits underneath both: **per-compiler defaults**, declared as data in
+  `TargetDescription.compilerBehaviors` ([`target.ts`](../packages/core/src/target.ts)) and spread
+  onto `StructureOptions` by `structureOptionsFor`, so a compiler fact is one field rather than an
+  `arch ==` branch. The line between one of these and a ranked axis is not how confident the author
+  feels — it is whether the ASM UNDERDETERMINES THE SOURCE. An axis is right when some pass
+  genuinely collapses two source spellings onto one output, so nothing but the differ can tell them
+  apart (`/uns-cmp`: a signed compare emits the unsigned branch only once the compiler has PROVED
+  the operand non-negative, and emission's provable set is smaller than the compiler's). A default
+  is right when the mapping is a function — `readsStayWhereWritten` says a compiler with neither an
+  instruction scheduler nor a code hoister emits a memory read in the block the source spelled it
+  in, so re-spelling a read at the block the asm performed it in reproduces that asm, while the sunk
+  per-arm spelling is one this compiler emits only for a source that read per arm. Note which way
+  that claim runs: it is emission-from-spelling, not spelling-from-emission. The converse would be
+  false even here (agbcc's PRE does move a load into a block the source never read in), and a
+  default read backwards is how a compiler fact turns into a wrong answer — so a per-compiler
+  default owes an explicit refusal for every pass that moves the thing it is placing, and for every
+  IR boundary the frontend invents where the machine had none (a block starts at every label, so a
+  label nothing branches to makes one straight line of asm look like a dominating pair of blocks).
+  Getting the population backwards is expensive in both directions: an axis where a default belongs
+  doubles every enumeration to referee a question with one answer, and a default where an axis
+  belongs quietly degrades every function the differ would have rescued.
+
   Which population a pass belongs to decides how much its opinions cost. Four passes currently
   answer "is this address a local?" differently — `raise/gvn.ts` (never), `l3/basecse.ts`
   (function top), `l3/scopebase.ts` (innermost scope), `l3/argbase.ts` (immediately before the

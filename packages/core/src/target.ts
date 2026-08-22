@@ -83,6 +83,25 @@ export interface TargetDescription {
     // neighbor absolute addresses within this many bytes may share one base local. Thumb's
     // `add rd, #imm8` reaches 255. Absent ⇒ the lever stands down for this target.
     nearBaseSpan?: number;
+    // Does this compiler EMIT a memory read in the block the source SPELLED it in? One direction
+    // only: the def-block placement rule (StructureOptions.readsStayWhereWritten) re-spells a read
+    // at the block the asm performed it in, which reproduces the asm iff nothing sinks a spelled
+    // read past a branch and nothing lifts one to a dominator. The CONVERSE — the asm's read block
+    // is where the source read — is FALSE even here, and no default may be declared as if it held.
+    //
+    // agbcc (gcc 2.9-arm, -O2) declares TRUE from its own sources plus a compiled pair: gcc's
+    // Makefile SRCS compiles neither sched.c nor reorg.c and toplev.c never mentions
+    // flag_schedule_insns, so there is no scheduler; gcse.c calls one_code_hoisting_pass only
+    // `if (optimize_size)`, which toplev.c sets only for -Os, so at -O2 the hoister is compiled in
+    // and never runs (a -Os project would NOT get this declaration); and `s = *g; if (c) A(s);
+    // else B(s);` against `if (c) A(*g); else B(*g);` emits one ldrb + one pool word versus one of
+    // each PER ARM, moving neither. The two passes that DO move a read between blocks at -O2 —
+    // loop invariant motion, and the PRE that makes the converse false — are refusals the rule
+    // owes; structure/analysis.ts carries them.
+    //
+    // ABSENT ⇒ the rule stands down, where ido/kmc-gcc/mwcc sit: each has a scheduler and none has
+    // been put through that pair. A compiler opts in on its own evidence, never by inheriting.
+    readsStayWhereWritten?: boolean;
   };
 }
 
@@ -114,6 +133,7 @@ export const ARMV4T_AGBCC: TargetDescription = {
     preserveDivergentBranchSense: true,
     orderArgCopiesByComputation: true,
     nearBaseSpan: 255,
+    readsStayWhereWritten: true,
   },
 };
 

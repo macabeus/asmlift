@@ -193,7 +193,15 @@ export interface AnalyzeOptions {
    *  scoped), so today's spelling is never wrong — only sometimes not the one the compiler was
    *  given.
    *  Which side matches is genuinely per-function (the same dogfood watched agbcc go both ways
-   *  inside ONE function), so this is a differ-refereed candidate axis, never a default. */
+   *  inside ONE function), so this is a differ-refereed candidate axis, never a default.
+   *
+   *  SCOPE, since `readsStayWhereWritten` below now answers the same question — read once and
+   *  reuse, or read per use — with the opposite default: this axis owns renders in the read's OWN
+   *  block, where nothing about placement is in evidence and both spellings really do compile.
+   *  A read whose every render sits in a STRICTLY DOMINATED block is the default's, and on a
+   *  target that declares it the axis cannot produce the re-read spelling there (the rule
+   *  materializes first). That is a pre-emption, not a conflict: a per-arm source read compiles to
+   *  a per-arm load on that compiler, so the sunk spelling is one it did not emit from this asm. */
   rereadGlobals?: boolean;
   /** "does the project declare this global volatile?" — a read of a volatile object may NOT be
    *  duplicated or moved, so the axis above refuses on one. Answers false for a symbol the map
@@ -239,6 +247,40 @@ export interface AnalyzeOptions {
    *  Same refusals as that axis: gaddr/laddr cones and multi-block-loop-header seats. Adding
    *  materialization preserves semantics for the admitted values, exactly as above. */
   homeLoopExprs?: boolean;
+  /** DEF-BLOCK PLACEMENT for memory reads — WHERE the read happens, not where the value lives.
+   *  The sibling of the homing axes above: there the question is which register or offset holds a
+   *  value, here which BLOCK performs the read. A read whose every render sits in a block its own
+   *  block STRICTLY DOMINATES has no rule at all above — those axes want 2+ consumers or a shared
+   *  base — so it sinks and each arm re-reads it: a second load either way, plus a second pool
+   *  literal when the address folded to a constant.
+   *
+   *  A per-compiler DATA lever (TargetDescription.compilerBehaviors `readsStayWhereWritten`), not
+   *  a differ-refereed axis, and that distinction is the argument: an axis exists where the asm
+   *  UNDERDETERMINES the source, some pass having collapsed two spellings onto one output
+   *  (`/uns-cmp`'s non-negativity proof is the type case). Where the compiler emits a read in the
+   *  block the source spelled it in, re-spelling it at the block the asm read in reproduces that
+   *  asm while the sunk spelling is one it emits only for a source that read per arm — nothing for
+   *  the differ to referee, and the extra candidate is pure cost. Which compilers may declare
+   *  that, and on what evidence, is at the target field; absent ⇒ the rule stands down entirely.
+   *
+   *  Materializing is the conservative DIRECTION — back to the read's own def position, never
+   *  forward past a write — so it adds no barrier scan; SINKING is what needs one (the
+   *  multi-render rule below) and that scan stays. It is NOT sound by construction: the def block
+   *  is the asm's read block only while nothing moved the def and a branch really does lie
+   *  between, which is what the refusals are for. Getting that wrong emits a read on a path the
+   *  asm never ran it on.
+   *
+   *  Five refusals:
+   *    • a multi-block loop HEADER, whose test-at-top condition seats no temp — `multiBlockHeaders`
+   *    • a FALL-THROUGH between def and render, where the dominance is the frontend's
+   *      block-per-label and no branch separates them — `fallThroughSeam`
+   *    • a loop PREHEADER of the loop the renders are in, where loop invariant motion parks a read
+   *      the source wrote in the BODY — `preheaderOfRenderLoop`
+   *    • a read C evaluates only under a `&&`/`||`, whose def block raise/shortcircuit.ts made —
+   *      `shortCircuitGuarded`
+   *    • a read that IS a block parameter's incoming copy, where the seat manufactures a copy the
+   *      compiler never emitted — `onlyFeedsBlockParams` */
+  readsStayWhereWritten?: boolean;
 }
 
 export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {}): StructureAnalysis {
@@ -250,6 +292,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
     materializeJoinFeeds = false,
     homeSharedAddresses = false,
     homeLoopExprs = false,
+    readsStayWhereWritten = false,
   } = opts;
   // ── use registry ────────────────────────────────────────────────────────────────────────
   // Every use of a value, POSITIONED: the consuming op and its block/index. Successor args are
@@ -599,17 +642,17 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
   // From the caller's dominators (a back edge is `latch → header` with the header dominating the
   // latch); the body is the backward closure from the latch. With no `dom` the rule stands
   // down — the same posture as the `defs`-carried rules.
+  const predsOf = new Map<Block, Block[]>();
+  for (const b of fn.blocks) {
+    predsOf.set(b, []);
+  }
+  for (const b of fn.blocks) {
+    for (const s of successorsOf(b)) {
+      predsOf.get(s)!.push(b);
+    }
+  }
   const loopBodies: { header: Block; body: Set<Block> }[] = [];
   if (dom) {
-    const predsOf = new Map<Block, Block[]>();
-    for (const b of fn.blocks) {
-      predsOf.set(b, []);
-    }
-    for (const b of fn.blocks) {
-      for (const s of successorsOf(b)) {
-        predsOf.get(s)!.push(b);
-      }
-    }
     for (const latch of fn.blocks) {
       for (const header of successorsOf(latch)) {
         if (!dom.get(latch)?.has(header)) {
@@ -643,6 +686,12 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         !L.body.has(opBlock.get(def)!) &&
         consumers.every((c) => !L.body.has(opBlock.get(c)!)),
     );
+  /** Would naming THIS op's own result change its value? Yes when the result is an ADDRESS built
+   *  over a gaddr/laddr: rendered standalone an `&g + i` loses the memAccess's inline byte-stride
+   *  cast, and the cast-aware base machinery in l3/ serves those bases instead. Asked by the rules
+   *  that home an address; a rule homing the SCALAR a load returns is not this case — the name
+   *  holds the loaded value and the address stays inline at the deref, which is why the load rules
+   *  (live-across-a-loop, join feeds, /addr-home's, def-block placement) do not ask it. */
   const addressCone = (op0: Op): boolean => coneHoldsAddr(op0, defOf);
   // ── the address-home axis's scope predicate ───────────────────────────────────────────────
   // A value consumed ONLY as the base (operands[0]) of 2+ distinct memory accesses — the shape
@@ -668,6 +717,111 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
       (L) => !L.body.has(defBlk) && consumers.filter((c) => L.body.has(opBlock.get(c)!)).length >= 2,
     );
   };
+  /** THE def-block placement rule's loop refusal: is `b` a PREHEADER of some loop whose body holds
+   *  one of the render blocks — outside the body, and a predecessor of the header?
+   *
+   *  Loop invariant motion (loop.c, which agbcc does compile and run at -O2) is the pass whose
+   *  landing spot the source could not have spelled: it parks the read BELOW the loop guard, where
+   *  a read the source wrote above the loop sits above it. Compiled,
+   *  `for (i=0;i<n;i++) t += gK*i;` emits `mov r2,#0 / cmp r2,r3 / bge .L4 / ldr r0,.L8 /
+   *  ldr r4,[r0]` — guard first, read after — while hoisting `gK` into a local above the loop by
+   *  hand puts both `ldr`s ahead of the guard. So a read in the preheader is evidence of a read in
+   *  the BODY, and inferring def-block placement there spells the one source the asm rules out.
+   *  (With an aliasing store in the loop agbcc hoists only the address constant and leaves the
+   *  `ldr` in the body — same conclusion, weaker premise.)
+   *
+   *  Narrow on purpose: a loop merely lying between def and render is not this shape. */
+  const preheaderOfRenderLoop = (b: Block, renders: readonly Block[]): boolean =>
+    loopBodies.some((L) => !L.body.has(b) && successorsOf(b).includes(L.header) && renders.some((x) => L.body.has(x)));
+  /** THE def-block placement rule's seam refusal: does a FALL-THROUGH alone put a render below
+   *  `b` — a chain of unconditional `br` edges, each into a block whose only predecessor is the
+   *  one before it?
+   *
+   *  The frontends start a block at every LABEL, so a label nothing branches to cuts one straight
+   *  line of asm in two and the upper half dominates the lower with no control flow between. The
+   *  rule's premise is that the compiler will not move a read ACROSS a branch, which says nothing
+   *  there — while WITHIN a straight line agbcc picks the order itself. Compiled, klonoa's
+   *  StreamCmd_SetMusicParams (a stray `sub_0804E9AC:` between its last `ldrh r2,[r4]` and the
+   *  `bl` consuming it) assembles byte-identical to its object from the inlined read and four
+   *  bytes off from the named one, which swaps that `ldrh` with the `ldr r0,pool` beside it. Of
+   *  the rule's 20 firings over the 464 klonoa agbcc functions, 13 were across such a seam. */
+  const fallThroughSeam = (b: Block, renders: readonly Block[]): boolean => {
+    const seen = new Set<Block>([b]);
+    for (let cur = b; ;) {
+      const t = cur.ops[cur.ops.length - 1];
+      if (t?.opcode !== 'br') {
+        return false;
+      }
+      const next = t.successors[0].block;
+      if (predsOf.get(next)!.length !== 1 || seen.has(next)) {
+        return false;
+      }
+      if (renders.includes(next)) {
+        return true;
+      }
+      seen.add(next);
+      cur = next;
+    }
+  };
+  /** THE def-block placement rule's short-circuit refusal: values C evaluates only under a
+   *  `&&`/`||` — the SECOND operand of every `logic_and`/`logic_or`, and everything it reads.
+   *
+   *  raise/shortcircuit.ts recovers a connective by hoisting the guarded arm's whole pure body,
+   *  memory reads included, into the block ABOVE the branch (its value form and its control-flow
+   *  form both splice that body into the head). ir/opcodes.ts states the safety argument as the
+   *  reason a read is deliberately absent from HOIST_UNSAFE_OPS: the structurer inlines it back
+   *  into the `&&`/`||` right-hand side, where C's own short circuit re-guards it. So for a value
+   *  in that cone the def block is a FOLD ARTIFACT rather than the block the asm read in, and the
+   *  whole premise this rule reads placement under does not hold there. Naming it also breaks the
+   *  re-guard: `p != 0 && *p != 0` would emit `v0 = *p;` above its own null check.
+   *
+   *  An operand[0] cone is unconditional and keeps the rule; only the guarded side is collected. */
+  const shortCircuitGuarded = new Set<Value>();
+  /** THE def-block placement rule's copy refusal: is every use of the value a successor ARGUMENT,
+   *  i.e. is the value nothing but a block parameter's incoming copy?
+   *
+   *  Then the parameter IS the read's home. Inlined, the edge assignment is the read
+   *  (`v1 = mplay->tracks;`); materialized it becomes two names and a copy between them
+   *  (`v0 = mplay->tracks; … v1 = v0;`) where the asm loaded straight into the register the
+   *  parameter became — `ldr r1,[r4,#0x2C]` once, never a `mov`. Six of klonoa's matched m4a
+   *  functions are that shape, and the manufactured copy costs more than the placement gains:
+   *  scored against their own objects, dropping the refusal takes m4aMPlayVolumeControl 26→33,
+   *  m4aMPlayPitchControl 36→39, m4aMPlayLFOSpeedSet 28→31 and FadeOutBody 69→73.
+   *
+   *  Note what this does NOT claim: those reads really do sit above the loop guard in the asm, so
+   *  the placement inference was right and the SPELLING is what fails. Seating the read above the
+   *  guard AND as the loop variable is loop-init hoisting, a capability this rule does not have. */
+  const argUsedValues = new Set<Value>();
+  const operandUsedValues = new Set<Value>();
+  // Both sets serve that rule alone, so they are built only where it can fire — the same posture
+  // `condBrArgFed` takes above (every other target pays nothing for a behavior it never declares).
+  if (readsStayWhereWritten) {
+    const guarded: Value[] = [];
+    for (const b of fn.blocks) {
+      for (const op of b.ops) {
+        for (const v of op.operands) {
+          operandUsedValues.add(v);
+        }
+        for (const sc of op.successors) {
+          for (const v of sc.args) {
+            argUsedValues.add(v);
+          }
+        }
+        if (op.opcode === 'logic_and' || op.opcode === 'logic_or') {
+          guarded.push(op.operands[1]);
+        }
+      }
+    }
+    while (guarded.length) {
+      const v = guarded.pop()!;
+      if (shortCircuitGuarded.has(v)) {
+        continue;
+      }
+      shortCircuitGuarded.add(v);
+      guarded.push(...(defOf.get(v)?.operands ?? []));
+    }
+  }
+  const onlyFeedsBlockParams = (v: Value): boolean => argUsedValues.has(v) && !operandUsedValues.has(v);
   // Decide in REVERSE program order so a consumer's own materialization is settled before any
   // producer asks for its emit position (SSA: uses follow defs in dominance/layout order) — and
   // iterate to a fixpoint for IR whose block layout does not follow dominance (hand-built IR):
@@ -717,8 +871,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
             materialize.add(op);
           }
           // Third scope, under the address-home axis only (see AnalyzeOptions.homeSharedAddresses):
-          // a non-const pure value consumed ONLY as the base of 2+ memory accesses. The gaddr/laddr
-          // cone exclusion and the loop-header seat refusal are the axis's two refusals.
+          // a non-const pure value consumed ONLY as the base of 2+ memory accesses.
           if (
             homeSharedAddresses &&
             op.opcode !== 'const' &&
@@ -777,6 +930,33 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         if (liveAcrossLoop(op, r, consumers)) {
           materialize.add(op);
           continue;
+        }
+        // ── DEF-BLOCK PLACEMENT (readsStayWhereWritten; see AnalyzeOptions) ──────────────────
+        // Every render in a block this one strictly dominates, with a branch between ⇒ the asm
+        // read once above that branch, and re-spelling the read there reproduces it. ONE render
+        // suffices — the short-circuit-into-a-call shape has exactly one — and an unresolvable
+        // render position refuses, as everywhere else. Both memory reads, spelled positively: a
+        // `call` is the enclosing arm's other member and has its own execute-once rules above.
+        if (
+          (op.opcode === 'load' || op.opcode === 'aload') &&
+          readsStayWhereWritten &&
+          dom &&
+          !multiBlockHeaders.has(b) &&
+          !shortCircuitGuarded.has(r) &&
+          !onlyFeedsBlockParams(r)
+        ) {
+          const at = consumers.map((c) => emitPos(c));
+          const rb = at.some((p) => p === null) ? null : [...new Set(at.map((p) => p!.blk))];
+          if (
+            rb &&
+            rb.length > 0 &&
+            rb.every((x) => x !== b && dom.get(x)!.has(b)) &&
+            !preheaderOfRenderLoop(b, rb) &&
+            !fallThroughSeam(b, rb)
+          ) {
+            materialize.add(op);
+            continue;
+          }
         }
         // Address-home axis: a multi-render load THROUGH a base this axis homed re-reads what the
         // asm read once into the register the home just reproduced — home the value too, at the

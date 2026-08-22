@@ -714,6 +714,13 @@ export interface StructureOptions {
   // register the compiler holds across the iterations. Off by default; rank.ts enumerates the ON
   // spelling as the `/expr-home` axis — see analysis.ts AnalyzeOptions.
   homeLoopExprs?: boolean;
+  // Emit a memory read as a named temp in ITS OWN block when every place it renders sits in a
+  // block that block strictly dominates. A per-compiler DATA lever (TargetDescription
+  // .compilerBehaviors), not a differ-refereed axis: where the compiler has neither a scheduler
+  // nor a code hoister, the sunk spelling is one it could not have emitted from this asm, so there
+  // is nothing to referee. Absent ⇒ off — the target field carries the evidence a compiler owes,
+  // analysis.ts AnalyzeOptions the refusals.
+  readsStayWhereWritten?: boolean;
   // Spell unsigned compares unsigned: cast an icmp_u* operand where the rendered operands do not
   // guarantee it, and reconcile a mixed-claimant declaration to u32 when nothing under the name
   // needs signed. Off by default: a signed spelling that byte-matched was PROVED non-negative by
@@ -793,6 +800,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     materializeJoinFeeds = false,
     homeSharedAddresses = false,
     homeLoopExprs = false,
+    readsStayWhereWritten = false,
     unsignedCompareSpelling = false,
     coalesceMergeNames = false,
     onGap = 'strict',
@@ -800,6 +808,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   } = opts;
   // These levers all change which edge copies elide as identities (extra materialization does
   // too), which the loop emitters' hazard predicates read — so the invariant above covers each.
+  // A per-compiler DEFAULT is not among them, however much it materializes: the primary IS this
+  // target's defaults, so resetting one would probe a spelling asmlift never emits here.
   if (coalesceMergeNames || materializeJoinFeeds || homeSharedAddresses || homeLoopExprs) {
     assertPrimaryAccepts(fn, opts, hooks);
   }
@@ -819,6 +829,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       materializeJoinFeeds,
       homeSharedAddresses,
       homeLoopExprs,
+      readsStayWhereWritten,
       // the map's own declaration truth: a volatile object's read may not be duplicated or moved
       volatileGlobal: (n) => {
         const si = symbols?.get(n);
