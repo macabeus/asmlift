@@ -445,11 +445,7 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     } // not worth a switch (m2c: ≥2 cases)
     // The default is the single non-test leaf that is NOT a case body. 0 → no default; ≥2 distinct → decline.
     const caseBlocks = new Set(cases.values());
-    // Layout order, so the representative picked below is the same block on every run (defaultCands
-    // is a Set filled in walk order).
-    const defaults = [...defaultCands]
-      .filter((d) => !caseBlocks.has(d))
-      .sort((a, c) => layoutIndex(a) - layoutIndex(c));
+    const defaults = [...defaultCands].filter((d) => !caseBlocks.has(d));
     // ONE default reached by SEVERAL leaves. `balance_case_nodes`/`emit_case_nodes` give each
     // subtree that runs out of case values its own jump to the default, so agbcc's four-case tree
     // reaches it through two `b .Ldefault` blocks — and comparing candidates by BLOCK counted that
