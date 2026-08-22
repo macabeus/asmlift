@@ -9,7 +9,10 @@
 // scores in identical order, identical drops.
 import { ARMV4T_AGBCC } from '@asmlift/core/target';
 import { assembleTarget, compileCandAgbcc, compileTargetAsm } from '@asmlift/toolchains';
-import { describe, expect, test } from 'vitest';
+import { copyFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterAll, describe, expect, test } from 'vitest';
 
 import { decompileRanked, decompileRankedParallel } from '../../src/rank';
 
@@ -47,6 +50,37 @@ describe('the pooled ranked run is the serial ranked run', () => {
     expect(many.best.label).toBe(one.best.label);
     expect(many.candidates.map((c) => [c.label, c.score.score])).toEqual(
       one.candidates.map((c) => [c.label, c.score.score]),
+    );
+  });
+
+  // The lifetime the real pool runs under: `compilersFromCommand`'s `worker()` hands out ONE
+  // scratch directory per worker and EMPTIES it before each compile, so a worker's object is
+  // valid only until that worker asks for the next one. The driver is what has to honour that —
+  // it must score each object the moment it lands. `compileCandAgbcc` above mkdtemps per call and
+  // would therefore keep every object alive, hiding a driver that batched the compiles and scored
+  // afterwards; this worker reproduces the real lifetime so that shape cannot pass.
+  const slotDirs: string[] = [];
+  const slotWorker = () => {
+    const dir = mkdtempSync(join(tmpdir(), 'asmlift-ranklife-'));
+    slotDirs.push(dir);
+    const obj = join(dir, 'cand.o');
+    return async (source: string) => {
+      rmSync(obj, { force: true });
+      copyFileSync(compileCandAgbcc(source), obj);
+      return obj;
+    };
+  };
+  afterAll(() => slotDirs.forEach((d) => rmSync(d, { recursive: true, force: true })));
+
+  test('a worker whose object is wiped by its NEXT compile still ranks identically', async () => {
+    const asm = compileTargetAsm('int ifor(int a, int b){ if (a || b) return 42; return 7; }');
+    const obj = assembleTarget(asm);
+    const serial = decompileRanked('ifor', asm, ARMV4T_AGBCC, obj);
+    const pooled = await decompileRankedParallel('ifor', asm, ARMV4T_AGBCC, obj, { jobs: 3, worker: slotWorker });
+    expect(pooled.dropped).toEqual(serial.dropped); // a stale/absent object would land here
+    expect(pooled.best.label).toBe(serial.best.label);
+    expect(pooled.candidates.map((c) => [c.label, c.score.score])).toEqual(
+      serial.candidates.map((c) => [c.label, c.score.score]),
     );
   });
 
