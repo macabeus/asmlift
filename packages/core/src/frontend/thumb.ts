@@ -1654,59 +1654,33 @@ export function lift(
       : null;
   };
 
-  // THE FRAME BASE HANDED TO A CALLEE — the one fact that can DISPROVE an outgoing stack-argument
-  // area, and the only positive evidence this frontend has for an address-taken local at offset 0.
+  // THE FRAME BASE PASSED TO A CALLEE. What this computes is exactly what its name says and nothing
+  // more: somewhere in entry-reachable code a bare `mov rD, sp` copies the frame base into a
+  // register that is still an ARGUMENT register at a `bl`. It is a fact about a REGISTER, not about
+  // the frame's layout — an earlier cut of this treated it as proof that "[sp,#0] is an addressable
+  // local", and agbcc falsified that outright. The layout question is settled by the gate this
+  // feeds (`capturedObjectIsTheWholeFrame`, below `localArea`), not here.
   //
-  // Two layout facts, and they cannot both hold of one frame:
-  //   * a bare `mov rD, sp` names frame offset 0 EXACTLY. A copy carries no displacement, so the
-  //     value it produces is the bottom of the frame and nothing else.
-  //   * agbcc's ACCUMULATE_OUTGOING_ARGS puts a call's stack arguments at [sp,#0] upward,
-  //     contiguous from zero — the same layout `prefixStored` below already rests on — so EVERY
-  //     outgoing argument block contains [sp,#0].
-  // So if the bottom word of the frame is an addressable LOCAL, the frame has no argument area at
-  // all, and no store anywhere in it is an outgoing argument.
-  //
-  // VERIFIED BY COMPILING, not reasoned from the manual (agbcc 2.9-arm-000512, `-O2
-  // -mthumb-interwork -Wimplicit -fhex-asm -fprologue-bugfix`), one source carrying both features
-  // and the same source with the five-argument call removed:
-  //
-  //   void p2(u32 i, s32 a, s32 b){ s32 w; w = gEnts[i].h; five(a,b,a+b,a-b,a*b); use(&w); }
-  //       add sp, sp, #-0x8
-  //       str r0, [sp, #0x4]   @ the local moved ABOVE the outgoing area
-  //       str r0, [sp]         @ argument 5 of `five` — the area, at offset 0
-  //       bl  five
-  //       add r0, sp, #0x4     @ &w is COMPUTED; there is no `mov r0, sp` in this function
-  //
-  //   void p1(u32 i){ s32 w; w = gEnts[i].h; use(&w); }
-  //       add sp, sp, #-0x4
-  //       str r0, [sp]
-  //       mov r0, sp           @ &w, at offset 0, because nothing is reserved under it
-  //       bl  use
-  //
-  // The two shapes therefore stay apart on their own: the `add rD, sp, #k` spelling an argument
-  // area FORCES declines one gate above ("the address of a stack local is computed"), and this
-  // predicate only ever fires on the bare `mov`. The producer assumption is the same one the
-  // contiguity filter states — agbcc lays one frame out one way — and hand-written asm that put
-  // `sp` in an argument register while also staging stack arguments would defeat it, exactly as
-  // hand-written asm that skipped an argument store defeats the filter.
-  //
-  // ENTRY-REACHABLE, BLOCK-LOCAL AND KILL-ON-MENTION, because this licenses an ACCEPTANCE and so
-  // may never over-approximate. Unreachable blocks are skipped for the same reason (a)'s reload
-  // scan skips them — an instruction that never executes is not a fact about the frame, and one
-  // appended `mov r0, sp; bl use` after the return was enough to license the whole function.
-  // A block is straight-line, so a capture that is still held when the `bl` is
-  // decoded is held on every execution that reaches it; and a register is dropped the moment ANY
-  // other instruction so much as MENTIONS it, since a write cannot happen without the token
-  // appearing. That over-kills (a `cmp` on the register between the capture and the call ends it)
-  // and over-killing only costs a decline. ARGUMENT registers only: the frame base merely live
-  // across a call is not evidence that it was passed to one.
-  const frameBaseHandedToCallee = ((): boolean => {
+  // ENTRY-REACHABLE, BLOCK-LOCAL AND KILL-ON-MENTION, because this feeds an ACCEPTANCE and so may
+  // never over-approximate. Unreachable blocks are skipped for the same reason (a)'s reload scan
+  // skips them — an instruction that never executes is not a fact about the frame, and one appended
+  // `mov r0, sp; bl use` after the return was enough to license a whole function. A block is
+  // straight-line, so a capture that is still held when the `bl` is decoded is held on every
+  // execution that reaches it; and a register is dropped the moment ANY other instruction so much
+  // as MENTIONS it, since a write cannot happen without the token appearing. That over-kills (a
+  // `cmp` on the register between the capture and the call ends it) and over-killing only costs a
+  // decline. ARGUMENT registers only: the frame base merely live across a call is not evidence that
+  // it was passed to one, and for `blx rN` the TARGET register is not an argument either.
+  const frameBasePassedToCallee = ((): boolean => {
     for (const b of entryReachable) {
       const ab = asmBlocks[b];
       const held = new Set<string>();
       for (const ins of ab.instrs) {
         if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') {
-          if ([...held].some((r) => target.argRegs.includes(r))) {
+          // `blx rN` names its TARGET in the operand slot, so exclude it: `mov r3, sp; blx r3`
+          // branches THROUGH the frame base, it does not pass it.
+          const targetReg = ins.mnemonic === 'blx' ? reg(ins.ops[0] ?? '') : null;
+          if ([...held].some((r) => target.argRegs.includes(r) && r !== targetReg)) {
             return true;
           }
           held.clear(); // the callee clobbers the argument registers
@@ -1867,21 +1841,23 @@ export function lift(
     // for, and a never-reloaded store there is an ordinary dead local — which PR #30 modelled and
     // which must keep working.
     //
-    // …and not when the frame base was HANDED TO A CALLEE. Both conditions hunt for an argument
-    // block; every argument block contains [sp,#0] (that is what `prefixStored` encodes); and
-    // `frameBaseHandedToCallee` proves [sp,#0] is an addressable local instead. So there is no
-    // argument block to find, and both conditions can only fire as FALSE ALARMS — which is what
-    // they did: the three address-taken rows in the synthetic tier declined at (a) on a store that
-    // is never reloaded for the ordinary reason, that the CALLEE reads it through the pointer.
+    // …and not when the WHOLE FRAME is an object whose address a callee holds
+    // (`capturedObjectIsTheWholeFrame` — a one-word frame, passed by a bare `mov rD, sp`). Both
+    // conditions hunt for an argument block; every argument block starts at [sp,#0] (that is what
+    // `prefixStored` encodes); and a one-word frame that is entirely an addressable local has no
+    // room for one. So there is no argument block to find and both conditions can only fire as
+    // FALSE ALARMS — which is what they did: the three address-taken rows in the synthetic tier
+    // declined at (a) on a store that is never reloaded for the ordinary reason, that the CALLEE
+    // reads it through the pointer.
     //
-    // This is the only acceptance in this function, so keep straight what licenses it. NOT arity:
-    // a callee declared with four arguments proves nothing (see above), and this predicate is
+    // This is the only acceptance in this function, so keep straight what licenses it. NOT arity: a
+    // callee declared with four arguments proves nothing (see above), and the layout gate is
     // deliberately independent of the declarations. The arity refusal still runs FIRST and still
-    // wins — a frame that both stages a fifth argument and passes its own base is a frame no agbcc
-    // layout produces, so the honest answer there is the decline, not a guess about which
-    // contradictory fact to believe.
+    // wins — in a one-word frame a declared fifth argument and an addressable local at offset 0 are
+    // contradictory claims about the same word, so the honest answer there is the decline, not a
+    // guess about which one to believe.
     if (
-      !frameBaseHandedToCallee &&
+      !capturedObjectIsTheWholeFrame &&
       asmBlocks.some((ab) => ab.instrs.some((i) => i.mnemonic === 'bl' || i.mnemonic === 'blx'))
     ) {
       const slotAcc = (ins: Instr) => {
@@ -2087,15 +2063,51 @@ export function lift(
     return Math.max(0, reserved);
   })();
 
+  // …AND THE FRAME IS THAT OBJECT. `frameBasePassedToCallee` is a fact about a register; this is
+  // the layout fact, and it is the one that licenses turning the outgoing-argument refusals off.
+  //
+  // The reason it is needed at all: a bare `mov rD, sp` names frame offset 0, but agbcc emits one
+  // for TWO different things, and only one of them is an addressable local. The other is a
+  // BLOCK-COPY BASE — the destination of a by-value struct argument (which IS the outgoing argument
+  // area) and the hidden return pointer of a struct-returning call. Both compiled, agbcc
+  // 2.9-arm-000512, `-O2 -mthumb-interwork -Wimplicit -fhex-asm -fprologue-bugfix`:
+  //
+  //   by-value struct argument, `void f(struct S *p){ take(*p); }`, by stack words beyond r0-r3:
+  //     1 word  → `ldr r0,[r3,#0x10]; str r0,[sp]`  — no capture at all, frame 4
+  //     2 words → `mov r1, sp; ldmia r0!,{…}; stmia r1!,{…}` — frame 8
+  //     13+     → `mov r0, sp; mov r2,#0x44; bl memcpy` — frame 0x44 and up
+  //   struct return, `void f(int x){ struct R r = mk(x); use2(r.a[0]); }`:
+  //     1 word  → returned in r0, no frame temp at all
+  //     2 words → `mov r0, sp; bl mk` — frame 8
+  //
+  // Left unguarded that cost an argument: `void g3(struct Huge *p, int x){ takesH(*p);
+  // five(1,2,3,4,x); }` puts `str r5,[sp]` — argument 5 of `five` — in a frame whose offset 0 the
+  // memcpy also names, and the lift emitted `five(1, 2, 3, 4)` with the fifth argument written into
+  // a fabricated 4-byte local, in a frame declared 4 bytes where the machine reserves 0x90. Order
+  // is not the discriminator either: with the five-argument call FIRST the same thing happens.
+  //
+  // So the gate is the MODEL'S OWN EXTENT. This frontend models the captured object as the single
+  // word at [sp,#0] (`isFrameObjectAccess` below), and a one-word model is a description of the
+  // frame only when the frame IS that word. `localArea === 4` says exactly that, and it excludes
+  // every block-copy base the table above lists — each needs two frame words before agbcc names its
+  // base with a register at all. Any larger frame has bytes this model does not describe, and they
+  // are either the rest of a wider object the callee writes or another call's argument slots;
+  // neither is provable here, so the answer stays the decline.
+  //
+  // What it refuses that really is an addressable local: every frame with a second word in it. That
+  // is a capability gap, not a wrong answer, and widening it needs a model of the object's real
+  // extent rather than a wider licence for this one.
+  const capturedObjectIsTheWholeFrame = frameBasePassedToCallee && localArea === 4;
+
   const slotsOffReason = slotModelBlocker();
   const slotsOk = slotsOffReason === null;
   // Every offset the body actually keys as an SSA slot — the frame-object audit checks the
   // address-taken object cannot overlap one (two models for one byte is a silent disagreement).
   const usedSlotOffsets = new Set<number>();
 
-  // …AND THE ONE OFFSET THAT MUST NOT BE A SLOT. When `frameBaseHandedToCallee` holds, the bottom
-  // word of the frame is an addressable local whose address a callee is holding, so an `[sp,#0]`
-  // access is an access to THAT OBJECT. Keying it as an SSA slot instead moves the value into a
+  // …AND THE ONE OFFSET THAT MUST NOT BE A SLOT. When `capturedObjectIsTheWholeFrame` holds, the
+  // frame is one word, that word is an addressable local, and a callee is holding its address — so
+  // an `[sp,#0]` access is an access to THAT OBJECT. Keying it as an SSA slot instead moves the value into a
   // register and deletes the store from memory — and the callee reading it through the pointer is
   // invisible to every check the slot model makes, so the deletion would be silent.
   //
@@ -2108,7 +2120,7 @@ export function lift(
   // `[sp,#k]` anywhere turns the whole model off (slotModelBlocker), and the `mov rD, sp` arm then
   // declines the capture rather than reaching this.
   const isFrameObjectAccess = (base: string, off: number, regOff: string | undefined, width: number): boolean =>
-    slotsOk && frameBaseHandedToCallee && isSpReg(base) && regOff === undefined && off === 0 && width === 4;
+    slotsOk && capturedObjectIsTheWholeFrame && isSpReg(base) && regOff === undefined && off === 0 && width === 4;
 
   // The WRITE dual of readData, and the reason it exists is a lesson rather than a symmetry: the
   // first version of this guard checked sp in three decode arms (mov/add/sub) and its commit message
@@ -3229,21 +3241,28 @@ export function lift(
       // …and the SLOT MODEL is the third claim an escape retracts — the undef rule's argument
       // taken one step further. The extents above are inferred from OUR accesses, so an object
       // wider in the SOURCE than the bytes this function touches has its later words written by
-      // the callee —
-      // and any of those modelled as an SSA slot is a value the slot model forwards ACROSS the
-      // call that overwrote it. Not a hypothetical; compiled with agbcc 2.9-arm-000512 (`-O2
-      // -mthumb-interwork -Wimplicit -fhex-asm -fprologue-bugfix`):
+      // the callee — and any of those modelled as an SSA slot is a value the slot model forwards
+      // ACROSS the call that overwrote it.
       //
-      //   struct P { s32 a; s32 b; };
-      //   void haz(s32 x){ struct P p; p.a = x; p.b = x + 1; g(&p); use2(p.b); }
-      //       str r0, [sp]        @ p.a — the object this audit judges, width 4
-      //       str r0, [sp, #0x4]  @ p.b — a word the slot model keys
-      //       mov r0, sp / bl g   @ the base escapes; `g` may write p.b
-      //       ldr r0, [sp, #0x4]  @ …and the machine RELOADS it after the call
+      // Not a hypothetical, and not new with the outgoing-argument gate above either: this shape
+      // reached the old capture path and lifted wrongly. The object has to be reached ONLY through
+      // the captured pointer (an `[sp,#0]` access of its own collides with the slot model and
+      // declines at the overlap check), which is what four corpus functions do:
       //
-      // and the lift emitted `g(&sp0); use2(a0 + 1)` — the reload gone, the callee's write
-      // dropped, no diagnostic. Exactly the silent-wrong-answer trade the sp guards exist to
-      // prevent, so it refuses.
+      //     mov r2, sp / str r0, [r2]   @ the object, written through the captured address
+      //     str r1, [sp, #0x4]          @ a word the slot model keys
+      //     mov r0, r2 / bl g           @ the base escapes; `g` may write [sp,#4]
+      //     ldr r0, [sp, #0x4]          @ …and the machine RELOADS it after the call
+      //
+      // and the lift emitted `use2(a1)` — the reload replaced by the value from BEFORE the call,
+      // the callee's write dropped, no diagnostic. Exactly the silent-wrong-answer trade the sp
+      // guards exist to prevent, so it refuses.
+      //
+      // WHAT IT COSTS, stated because the benchmark cannot see it: it refuses every word slot above
+      // a call-passed object, which is blunter than the hazard it names, and four corpus functions
+      // that lifted before it (sa3 `sub_809C274`; klonoa `UpdateAnimations`, `sub_801C4A0`,
+      // `sub_8062CFC`) now decline. None is a benchmark row. Narrowing it needs a bound on the
+      // object's real extent, which is the same thing the gate above lacks.
       //
       // ABOVE the object only: a C object extends upward from its base, so a slot BELOW it cannot
       // be part of it, and the overlap checks above already own the bytes it does cover.
@@ -3269,10 +3288,19 @@ export function lift(
       // deliberately NOT chosen here: identifiers live in the structurer's namespace (params,
       // locals, globals, the symbol map), which the frontend cannot see — a frontend-chosen `sp0`
       // silently shadowed a project global of the same name.
-      // `volatile` iff the address escapes, because that is the SOURCE'S OWN SPELLING. Every GBA
-      // project in the corpus declares the DMA scratch volatile — klonoa's `DMA_FILL` writes
-      // `vu##bit tmp` outright, sa3's does under `PLATFORM_GBA`, pokeemerald's inside
-      // `DMA_FILL_UNCHECKED` — so reproducing the source means reproducing the qualifier.
+      // `volatile` iff the address escapes. For the DMA idiom this rule was written for that IS the
+      // source's own spelling — klonoa's `DMA_FILL` writes `vu##bit tmp` outright, sa3's does under
+      // `PLATFORM_GBA`, pokeemerald's inside `DMA_FILL_UNCHECKED` — so reproducing the source means
+      // reproducing the qualifier.
+      //
+      // For an ORDINARY `&local` argument it is NOT the source's spelling: `void f(u32 i){ s32 w;
+      // w = gEnts[i].h; use(&w); }` carries no qualifier and this still stamps one. It stays anyway
+      // because it is free where it is wrong and load-bearing where it is right, measured rather
+      // than assumed: both spellings of the emitted candidate for that function and for its
+      // branching sibling compile to byte-identical `.s` under agbcc 2.9-arm-000512 (`-O2
+      // -mthumb-interwork -Wimplicit -fhex-asm -fprologue-bugfix`), because taking the address is
+      // already what pins the local to memory. What separates the two cases is the SOURCE, which
+      // this frontend cannot see, so it stamps the conservative one.
       //
       // NOT because gcc would otherwise delete the store. That claim was here for several releases
       // and does not reproduce: taking `&tmp` makes the local addressable, so gcc-2.9 keeps the

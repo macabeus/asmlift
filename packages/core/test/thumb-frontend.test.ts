@@ -956,13 +956,17 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     expect(() => decompile('f', addrComputed, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
   });
 
-  // THE FRAME BASE HANDED TO A CALLEE — the one fact that disproves an outgoing stack-argument
-  // area, and the only thing in this file that makes the never-reloaded refusal stop firing.
+  // A ONE-WORD FRAME WHOSE BASE IS PASSED TO A CALLEE — the only thing in this file that makes the
+  // never-reloaded refusal stop firing, and TWO facts, not one. The capture alone proves nothing
+  // about the layout: agbcc emits a bare `mov rD, sp` for a block-copy base too (a by-value struct
+  // argument's outgoing area, a struct return's hidden pointer), and both of those need at least
+  // two frame words. `localArea === 4` is what separates them, so every fixture below carries the
+  // frame size as part of the shape being pinned.
   //
-  // Every fixture below is agbcc 2.9-arm-000512 output (`-O2 -mthumb-interwork -Wimplicit
-  // -fhex-asm -fprologue-bugfix`), not hand-written, because the whole argument is about what that
-  // compiler's frame layout can and cannot be.
-  describe('the frame base handed to a callee proves the frame has no outgoing argument area', () => {
+  // Unless a comment says otherwise the fixture is agbcc 2.9-arm-000512 output (`-O2
+  // -mthumb-interwork -Wimplicit -fhex-asm -fprologue-bugfix`), not hand-written, because the whole
+  // argument is about what that compiler's frame layout can and cannot be.
+  describe('a one-word frame whose base is passed to a callee has no outgoing argument area', () => {
     // `void f(u32 i){ s32 w; w = gEnts[i].h; use(&w); }` — the store at [sp,#0] is never reloaded
     // BY US for the ordinary reason: the callee reads it through the pointer. Before this proof the
     // never-reloaded condition read that as argument 5 of `use` and refused, and 3 of the corpus's
@@ -1063,17 +1067,88 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       );
     });
 
-    // …AND WHAT THE ACCEPTANCE COSTS, refused. The object's extent is inferred from OUR accesses,
-    // so a wider real object has its later words written by the callee — and any of them modelled
-    // as an SSA slot is a value the slot model forwards ACROSS the call that overwrote it. This is
-    // `struct P { s32 a; s32 b; }; void f(s32 x){ struct P p; p.a = x; p.b = x + 1; g(&p);
-    // use2(p.b); }` compiled, and before the refusal it lifted to `g(&sp0); use2(a0 + 1)` — the
-    // reload after the call gone, `g`'s write dropped, no diagnostic.
+    // THE TWO RULES INSIDE THE SCAN THAT ARE NOT ABOUT THE FRAME. Both are hand-written, because
+    // agbcc emits neither — and a rule inside an acceptance either carries a test or is decoration.
+    test('a call does not carry the base past it, and a `blx` target is not an argument', () => {
+      // (i) a CALLER-SAVED register that is not an argument register (`lr`, `ip`) does not survive
+      // the call that clobbers it, so a copy made afterwards carries nothing. Without the clear this
+      // lifted to `a(a0); use(&sp0)` on the strength of an `lr` the `bl` had already destroyed.
+      const acrossCall =
+        'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tmov\tlr, sp\n\tbl\ta\n' +
+        '\tmov\tr0, lr\n\tbl\tuse\n\tadd\tsp, sp, #0x4\n\tpop\t{r0}\n\tbx\tr0\n';
+      expect(() => decompile('f', acrossCall, ARMV4T_AGBCC)).toThrow(/never reloaded/);
+      // (ii) `blx rN` names its TARGET in the operand slot: it branches THROUGH the frame base, it
+      // does not pass it. Counting r3 there lifted this to `r3(a0)` — with the store to the frame
+      // gone entirely, as a dead def.
+      const blxTarget =
+        'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tmov\tr3, sp\n\tblx\tr3\n' +
+        '\tadd\tsp, sp, #0x4\n\tpop\t{r0}\n\tbx\tr0\n';
+      expect(() => decompile('f', blxTarget, ARMV4T_AGBCC)).toThrow(/never reloaded/);
+    });
+
+    // THE CONTROL THE ACCEPTANCE ACTUALLY NEEDS: both facts present at once — a bare `mov rD, sp`
+    // AND a genuine outgoing stack argument in the same frame. agbcc produces exactly that, and the
+    // capture is not an addressable local at all: it is the destination of the block copy that
+    // builds the outgoing area for a by-value struct argument, and `str r5,[sp]` is argument 5 of
+    // `five` sharing the same area. `void g3(struct Huge *p, int x){ takesH(*p); five(1,2,3,4,x); }`
+    // with `struct Huge { int a[40]; }`, compiled, is this verbatim.
+    //
+    // With the capture alone licensing the acceptance this lifted to `five(1, 2, 3, 4)` — the fifth
+    // argument written into a fabricated 4-byte local, in a frame declared 4 bytes where the machine
+    // reserves 0x90. No prototypes on purpose: that is the norm, and it is where the arity refusal
+    // has nothing to say.
+    test('a frame that BOTH passes its base and stages an outgoing argument still declines', () => {
+      const blockCopyBase =
+        'g3:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0x90\n\tadd\tr4, r0, #0\n\tadd\tr5, r1, #0\n' +
+        '\tadd\tr1, r4, #0\n\tadd\tr1, r1, #0x10\n\tmov\tr0, sp\n\tmov\tr2, #0x90\n\tbl\tmemcpy\n' +
+        '\tldr\tr0, [r4]\n\tldr\tr1, [r4, #0x4]\n\tldr\tr2, [r4, #0x8]\n\tldr\tr3, [r4, #0xc]\n\tbl\ttakesH\n' +
+        '\tstr\tr5, [sp]\n\tmov\tr0, #0x1\n\tmov\tr1, #0x2\n\tmov\tr2, #0x3\n\tmov\tr3, #0x4\n\tbl\tfive\n' +
+        '\tadd\tsp, sp, #0x90\n\tpop\t{r4, r5}\n\tpop\t{r0}\n\tbx\tr0\n';
+      expect(() => decompile('g3', blockCopyBase, ARMV4T_AGBCC)).toThrow(/never reloaded/);
+      // ORDER IS NOT THE DISCRIMINATOR. The same source with the five-argument call FIRST puts the
+      // argument store before the copy, and it must decline just the same.
+      const argFirst =
+        'g4:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x90\n\tadd\tr4, r0, #0\n\tstr\tr1, [sp]\n' +
+        '\tmov\tr0, #0x1\n\tmov\tr1, #0x2\n\tmov\tr2, #0x3\n\tmov\tr3, #0x4\n\tbl\tfive\n' +
+        '\tadd\tr1, r4, #0\n\tadd\tr1, r1, #0x10\n\tmov\tr0, sp\n\tmov\tr2, #0x90\n\tbl\tmemcpy\n' +
+        '\tldr\tr0, [r4]\n\tldr\tr1, [r4, #0x4]\n\tldr\tr2, [r4, #0x8]\n\tldr\tr3, [r4, #0xc]\n\tbl\ttakesH\n' +
+        '\tadd\tsp, sp, #0x90\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n';
+      expect(() => decompile('g4', argFirst, ARMV4T_AGBCC)).toThrow(/never reloaded/);
+    });
+
+    // …and the other block-copy base: a STRUCT-RETURN TEMP, where `mov r0, sp` is the hidden return
+    // pointer and the callee writes all 20 bytes of it. `struct Big { int a,b,c,d,e; }; void f(int
+    // x){ struct Big b = mk(x); use2(b.a); }` compiled. Nothing but the frame size separates it from
+    // an out-parameter this capability WOULD lift, so the frame size is what decides.
+    test('a struct-return temp is not an object of the width we happen to touch', () => {
+      const structReturn =
+        'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x14\n\tadd\tr1, r0, #0\n\tmov\tr0, sp\n\tbl\tmk\n' +
+        '\tldr\tr0, [sp]\n\tbl\tuse2\n\tadd\tsp, sp, #0x14\n\tpop\t{r0}\n\tbx\tr0\n';
+      expect(() => decompile('f', structReturn, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+      // CONTROL: the identical shape in a ONE-WORD frame is an ordinary out-parameter and lifts.
+      const outParam =
+        'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x4\n\tmov\tr0, sp\n\tbl\tmk\n' +
+        '\tldr\tr0, [sp]\n\tbl\tuse2\n\tadd\tsp, sp, #0x4\n\tpop\t{r0}\n\tbx\tr0\n';
+      expect(decompile('f', outParam, ARMV4T_AGBCC, { prototypes: { mk: { params: 1 } } }).source).toContain(
+        'mk(&sp0)',
+      );
+    });
+
+    // …AND WHAT AN ESCAPE COSTS THE SLOT MODEL, refused. The object's extent is inferred from OUR
+    // accesses, so a wider real object has its later words written by the callee — and any of them
+    // modelled as an SSA slot is a value the slot model forwards ACROSS the call that overwrote it.
+    //
+    // HAND-WRITTEN, and the only fixture here that is: the shape needs the object reached ONLY
+    // through the captured pointer (an `[sp,#0]` access of its own would collide with the slot model
+    // and decline one gate earlier), which four corpus functions do and no small C source here does.
+    // Without this rule it lifted to `g(&sp0, …); use2(a1)` — the reload after the call replaced by
+    // the value from before it, `g`'s write dropped, no diagnostic.
     test('a callee handed the frame base refuses the slot model above it', () => {
-      const widerObject =
-        'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n\tstr\tr0, [sp]\n\tadd\tr0, r0, #0x1\n\tstr\tr0, [sp, #0x4]\n' +
-        '\tmov\tr0, sp\n\tbl\tg\n\tldr\tr0, [sp, #0x4]\n\tbl\tuse2\n\tadd\tsp, sp, #0x8\n\tpop\t{r0}\n\tbx\tr0\n';
-      expect(() => decompile('f', widerObject, ARMV4T_AGBCC)).toThrow(
+      const slotAbove =
+        'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tmov\tr2, sp\n\tstr\tr0, [r2]\n\tstr\tr1, [sp, #0x4]\n' +
+        '\tmov\tr0, r2\n\tbl\tg\n\tldr\tr0, [sp, #0x4]\n\tbl\tuse2\n' +
+        '\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+      expect(() => decompile('f', slotAbove, ARMV4T_AGBCC)).toThrow(
         /passed to a callee, which may write the slot at \[sp,#4\]/,
       );
       // CONTROL, and it is what makes the refusal a rule about the SLOT rather than about the call:
