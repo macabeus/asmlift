@@ -845,9 +845,11 @@ export const FEATURES: readonly FeatureDef[] = [
     detail:
       'A decompiler renders a value where it is USED. An old compiler emits a read where the ' +
       'SOURCE put it — agbcc has no instruction scheduler, and its code-hoisting pass is gated ' +
-      'behind -Os while every build here is -O2, so a read the asm performs above a branch was ' +
-      'written above that branch. Recovering ' +
-      'it at each use is therefore a spelling the compiler could not have produced from that asm: ' +
+      'behind -Os while every build here is -O2, so a read SPELLED above a branch is EMITTED ' +
+      'above it. (Not the converse: partial-redundancy elimination does run at -O2 and inserts a ' +
+      'load into a sibling arm the source never read in, so the block a read appears in is not by ' +
+      'itself proof of the block the source read in.) Recovering ' +
+      'it at each use is therefore a spelling this compiler emits only for a source that read per arm: ' +
       'it costs a second load, a second pool literal for the folded address, and a live range ' +
       'short enough to change the whole allocation downstream. The tag marks rows where the diff ' +
       'turns on that placement alone — the computation, the types and the control flow all agree. ' +
