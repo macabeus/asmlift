@@ -1920,13 +1920,17 @@ export const SYNTHETIC: SynthSpec[] = [
   // excluded it; the sign flips once the switch and the guard placements above it are right, which
   // is why this is recorded as a row and not as an exclusion.
   //
-  // `offhome` is the isolate: one call result, one `+ 4`, one indexed read, one free. `offuse` is
-  // its control — the same call whose result is read at ONE constant offset and freed unchanged,
-  // where folding the offset into the load is what the ROM does and asmlift already MATCHes; a fix
-  // that always hoists a constant offset into the home would break it. `offloop` is the real
-  // function's shape rather than an isolate, and shows the inconsistency directly: asmlift DOES
-  // create `v1 = v0 + 4` when a strength-reduced induction variable forces it, then still writes
-  // `v0 + 4 + v2` at the load in the same loop and `v0 + 4 - 4` at the free.
+  // `offhome` is the isolate: one call result, one `+ 4`, one indexed read, one free — and it is
+  // what pins `/expr-home`'s scope (structure/analysis.ts loopSharedConsumers) at ONE in-loop
+  // consumer plus one anywhere, since the bias is read once inside the loop and once at the free.
+  // `offuse` is its control — the same call whose result is read at ONE constant offset and freed
+  // unchanged, where folding the offset into the load is what the ROM does and asmlift MATCHes; a
+  // rule that always hoisted a constant offset into the home would break it, and the loop gate is
+  // why this one cannot (`offuse` has no loop, so the axis is not even enumerated). `offloop` is
+  // the real function's shape rather than an isolate: the same bias with a strength-reduced
+  // induction variable also riding it. Its residual is not the bias — it is the IV's init copy
+  // sitting above the zero-trip guard where the ROM has it below, which is the guard-placement
+  // family, not this one.
   //
   // agbcc only. The claim is about what THIS compiler does with the two spellings, established by
   // compiling both; ido7.1, gcc2.7.2kmc and mwcc_242_81 were NOT measured, so those lanes are left
@@ -2058,16 +2062,25 @@ export const SYNTHETIC: SynthSpec[] = [
   //
   // `armfall` and `armdef` are the same pair at the real function's shape: a switch with no
   // default inside a loop, whose arms decide two locals that the body then uses, so BOTH become
-  // loop-carried phis with undefined entries. They are coverage, not isolates. `armdef` is 7
-  // points off on its own and NOT all of it is a class already owned: asmlift's C is
-  // `if (a0 != 1) { if (a0 >= 1) { if (a0 != 2) …`, which agbcc compiles to the same balanced
-  // search the reference uses, and exactly one compare differs (`cmp #1`/`bcc` against
-  // `cmp #0`/`beq`). The rest is arm LAYOUT — the reference falls through from case 2 into the
-  // shared `ldrh r0,[r3,#0x2]` tail and branches out of case 1, the candidate does the reverse —
-  // which is the insert-2/delete-2 half of the breakdown and belongs to no class here yet. What
-  // the pair adds over `loopfall` is that the undef survives multi-arm merging: `armdef` carries
-  // no preheader read and `armfall` carries one, `v3 = a2;` — the argument-register fabrication the
-  // rules above cannot reach, and the reason `armfall` (23) stays the harder of the two.
+  // loop-carried phis with undefined entries. They are coverage, not isolates — and they carry a
+  // second thing the pair above does not: agbcc spells `case 0:` of an unsigned switch as
+  // `cmp #1`/`bcc`, the SUBTREE BOUND rather than the value, so recovering it needs a relational
+  // dispatch edge admitting exactly one value to route a case (structure/switch-recover.ts). Read
+  // as navigation instead, that arm is a second default candidate, the whole tree declines to
+  // if-nesting, and both the compare and the arm layout change with it. `armdef` MATCHes on that,
+  // and is also what pins the reading's three refusals: the BRANCH of the test, never its
+  // fall-through; never the test that OPENS the dispatch; and only on a compiler that declared the
+  // spelling (`switchAllowsBoundCase` — agbcc alone). Each is a shape `emit_case_nodes` cannot
+  // emit, so a relational test in it is an ordinary comparison and recovers as one.
+  // What the pair adds over `loopfall` is that the undef survives multi-arm merging: `armdef`
+  // carries no preheader read and `armfall` carries one, `v3 = a2;` — the argument-register
+  // fabrication the rules above cannot reach. It costs `armfall` nothing at this rung, for the
+  // reason `loopfall` records: `a2` arrives in the register `v3` is allocated to, the copy
+  // coalesces, and agbcc emits no instruction for it. `armfall`'s residual 8 is the ZERO-TRIP
+  // GUARD instead — the ROM inits the counter above the test (`mov r6,#0 / cmp r6,r7 / bcs`)
+  // where the candidate tests the bound against zero and then stages the second induction
+  // register in two moves. The `/initfirst` sibling is enumerated and scores 9, so the
+  // guard-placement family does not close this shape on its own.
   //
   // WHY THERE IS NO ROW FOR MORE UNDEFINED ENTRIES. A ladder was measured off this family's own
   // shape, holding it fixed and varying only how many locals the arm decides (agbcc; each control
@@ -2381,22 +2394,19 @@ export const SYNTHETIC: SynthSpec[] = [
   // (fold-const rewrites the unsigned `> 0` to `!= 0`). Two instructions and a condition code.
   //
   // The re-spelling has a precondition the rest of the pipeline can take away from it: the guarded
-  // arm's FIRST statement must be the init `v = X`, and the guard's other side must be X ITSELF
-  // (`exprEquals(cond.l, init.value)`). `unsguard` is the row where a sibling lever takes it away.
-  // Its counter is unsigned, so the match needs `/uns-cmp` (structure.ts unsignedCompareSpelling)
-  // to spell the loop compares unsigned — and that axis renders the guard's constant side as
-  // `(u32)0`, which is no longer the init's `0`. Across all 30 enumerated candidates, NOT ONE
-  // carries `/uns-cmp` and `/initfirst` together; the two spellings the match needs are in
-  // different candidates:
-  //     unsigned/livebase/volatile/initfirst  (asmlift's winner) ....  2
+  // arm's FIRST statement must be the init `v = X`, and the guard's other side must be X ITSELF.
+  // `unsguard` is the row where a sibling lever contends for that side. Its counter is unsigned,
+  // so the match needs `/uns-cmp` (structure.ts unsignedCompareSpelling) to spell the loop compares
+  // unsigned, and that axis renders the guard's constant side as `(u32)0` — not the init's `0` to
+  // a structural match. So this row is what pins the side match's CAST TOLERANCE (l3/initfirst.ts):
+  // the match lives in the ONE candidate carrying both spellings, and each alone falls short —
+  //     unsigned/uns-cmp/livebase/volatile/initfirst ................  0  ← MATCH
+  //     unsigned/livebase/volatile/initfirst ........................  2
   //     unsigned/uns-cmp/livebase/volatile ..........................  5
-  //     the same candidate with the guard re-spelled by hand .........  0  ← MATCH
-  // Attributed by ABLATION, not by reading: teaching initfirst's side match to look through a cast
-  // makes `unsigned/uns-cmp/livebase/volatile/initfirst` appear (36 candidates, up from 30) and it
-  // scores 0. The blocker is the cast, not a hoist — `/uns-cmp` moves no statement. Re-running the
-  // WHOLE synthetic tier under that one-line ablation moves EXACTLY this row and no other (604
-  // rows, 1 moved), so it is the row that gates the change and nothing else in the corpus is
-  // holding it up — including `sizebound`, which carries both axes and does not move.
+  // What stands between them is the cast alone, not a hoist — `/uns-cmp` moves no statement — and
+  // the tolerance stops at WIDTH 32, since a narrowing cast is not the value `v = X` stores. This
+  // is the only row in the 604-row synthetic tier that tolerance moves, `sizebound` included,
+  // which carries both axes.
   //
   // `signguard` is the control, and it differs by ONE token: `s32 i` for `u32 i`. Nothing else in
   // the C changes, the halving keeps its `(u32)` cast so it stays an `lsr` on both, and asmlift

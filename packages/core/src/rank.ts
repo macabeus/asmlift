@@ -137,10 +137,10 @@ const STRUCTURING_AXES: readonly StructuringAxis[] = [
     strip: true,
   },
   // `/expr-home` — the loop-expression-home axis (structure/analysis.ts AnalyzeOptions
-  // homeLoopExprs): a pure value defined outside a loop with 2+ distinct consumers inside it
-  // materializes into a local carrying the value's recovered type — the register the compiler
-  // holds across the iterations (`u32 size = 16 << t;` driving a loop bound, a product and a
-  // shift), where the default re-derives per use. Gated per symbol variant like `/addr-home`
+  // homeLoopExprs): a pure value defined outside a loop with 2+ distinct consumers, at least one
+  // of them inside it, materializes into a local carrying the value's recovered type — the register
+  // the compiler holds across the iterations (`u32 size = 16 << t;` driving a loop bound, a product
+  // and a shift), where the default re-derives per use. Gated per symbol variant like `/addr-home`
   // (the cone refusal reads the variant's own lift).
   {
     flag: 'exprHome',
@@ -1017,7 +1017,14 @@ export function rankBy<S extends { score: number }>(
  *
  *  ENUMERATION ORDER last, which makes this a strict total order (indices are unique) and the
  *  result deterministic. Spelled explicitly rather than leaning on Array#sort's stability, which
- *  would make each preference an accident of two unrelated decisions. */
+ *  would make each preference an accident of two unrelated decisions.
+ *
+ *  WHAT NO TERM HERE WEIGHS: a comparison's rendered SIGNEDNESS. `/uns-cmp`'s whole product is
+ *  that polarity, and it carries in a DECLARED TYPE rather than a cast — `castCount` reads 0 on
+ *  both sides of the tie it loses — so at equal bytes enumeration order decides, and a rival
+ *  axis's spelling can publish a signed compare where the asm's is unsigned. Weighing it needs
+ *  the candidate's own SFn and the icmp facts it was structured from, neither of which this
+ *  comparator carries; `deviceVolatile` is the shape such a term would take. */
 export function compareScored<S extends { score: number }>(
   a: Candidate & { score: S; order: number },
   b: Candidate & { score: S; order: number },

@@ -100,16 +100,17 @@ export function hasHomeableSharedAddress(fn: Fn): boolean {
 }
 
 /** rank.ts's enumeration gate for the `/expr-home` axis: does the function HAVE a value the
- *  axis would home — a pure non-const def with 2+ distinct consumers inside a loop the def sits
- *  outside, cone-free? Loops here are LAYOUT ranges (a successor at an equal-or-earlier block
- *  position closes one) where the axis's own rule uses the dominator model, and consumers here
- *  come from op operands only (branch-arg uses are invisible) — so unlike
- *  hasHomeableSharedAddress this diverges in BOTH directions: a false positive costs one
- *  duplicate-collapsed candidate, and a false negative silently skips the arm on IR whose block
- *  layout does not follow dominance or whose in-loop consumption is all branch args. Acceptable
- *  because every frontend lays blocks out in address order (a natural loop's back edge points
- *  backward), and a value consumed ONLY as branch args reaches no compare/product/shift — the
- *  shapes the home serves. */
+ *  axis would home — a pure non-const def with 2+ distinct consumers, at least one of them inside
+ *  a loop the def sits outside, cone-free? Loops here are LAYOUT ranges (a successor at an
+ *  equal-or-earlier block position closes one) where the axis's own rule uses the dominator model,
+ *  and consumers here come from op operands only, where the rule counts `useSitesOf` and so counts
+ *  branch args too — unlike hasHomeableSharedAddress this therefore diverges in BOTH directions. A
+ *  false positive costs one duplicate-collapsed candidate. A false negative silently skips the arm:
+ *  on IR whose block layout does not follow dominance, which every frontend avoids by laying blocks
+ *  out in address order (a natural loop's back edge points backward), and on a value EITHER of
+ *  whose two consumers is a branch arg, which the rule would home and this never enumerates. The
+ *  second is unwitnessed over the 856-row bench, and costs a missing candidate, never a wrong
+ *  one. */
 export function hasLoopSharedPureValue(fn: Fn): boolean {
   const defOf = defOpMap(fn);
   const pos = new Map<Block, number>(fn.blocks.map((b, i) => [b, i]));
@@ -141,9 +142,9 @@ export function hasLoopSharedPureValue(fn: Fn): boolean {
     }
     const dp = opPos.get(d)!;
     if (
+      cs.size >= 2 &&
       ranges.some(
-        ([lo, hi]) =>
-          (dp < lo || dp > hi) && [...cs].filter((c) => opPos.get(c)! >= lo && opPos.get(c)! <= hi).length >= 2,
+        ([lo, hi]) => (dp < lo || dp > hi) && [...cs].some((c) => opPos.get(c)! >= lo && opPos.get(c)! <= hi),
       ) &&
       !coneHoldsAddr(d, defOf)
     ) {
@@ -335,8 +336,9 @@ export interface AnalyzeOptions {
    *  memory model can merge them into pre-branch temps. */
   homeSharedAddresses?: boolean;
   /** The loop-expression-home axis (rank.ts `/expr-home`). A pure computed value defined outside
-   *  a loop and consumed by 2+ distinct ops inside it is one the compiler holds in a
-   *  (callee-saved) register across the iterations — it never re-derives per use in a loop —
+   *  a loop and consumed by 2+ distinct ops, at least one of them inside that loop, is one the
+   *  compiler holds in a (callee-saved) register across the iterations — it never re-derives per
+   *  use in a loop —
    *  where the default renders it re-derived at each use; the source may have spelled a typed
    *  local (`u32 size = 16 << t;` driving a loop bound, a product and a shift). The home's
    *  declared type is the IR value's recovered type, so a u32 value's compares stay unsigned
@@ -844,12 +846,22 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
   };
   /** result values the address-home axis materialized — the load rule's admission key */
   const axisHomedBases = new Set<Value>();
-  /** the loop-expression-home axis's scope: some loop the def's block is outside has 2+ distinct
-   *  consumers of the value inside it (loop model = the caller's dominators; absent ⇒ never) */
+  /** The loop-expression-home axis's scope: 2+ distinct consumers of the value, at least one of
+   *  them inside a loop the def's block is outside (loop model = the caller's dominators; absent ⇒
+   *  never).
+   *
+   *  The two counts carry different halves of the evidence. ONE consumer inside the loop is what
+   *  says the compiler held the value in a callee-saved register across the iterations — it does
+   *  not re-derive per use in a loop, and a value crossing the loop boundary is pinned for the
+   *  whole nest. The SECOND consumer, anywhere, is what makes the home observable at all: a
+   *  single-use value inlines at its one use with the same bytes either way, so homing it can only
+   *  add a copy. Values consumed only OUTSIDE any loop are the straight-line class `/derived-home`
+   *  serves on its own evidence. */
   const loopSharedConsumers = (v: Value, defBlk: Block): boolean => {
     const consumers = [...new Set((useSitesOf.get(v) ?? []).map((s) => s.op))];
-    return loopBodies.some(
-      (L) => !L.body.has(defBlk) && consumers.filter((c) => L.body.has(opBlock.get(c)!)).length >= 2,
+    return (
+      consumers.length >= 2 &&
+      loopBodies.some((L) => !L.body.has(defBlk) && consumers.some((c) => L.body.has(opBlock.get(c)!)))
     );
   };
   /** The derived-read-home axis's scope: does `op0` stand on a memory READ that may render at
@@ -1095,8 +1107,9 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
             axisHomedBases.add(pr);
           }
           // Fourth scope, under the loop-expression-home axis (AnalyzeOptions.homeLoopExprs): a
-          // pure non-const value defined outside a loop with 2+ distinct consumers inside it.
-          // Shared bases stay the previous scope's (its load rule needs the registration).
+          // pure non-const value with 2+ distinct consumers, at least one of them inside a loop the
+          // def sits outside. Shared bases stay the previous scope's (its load rule needs the
+          // registration).
           if (
             homeLoopExprs &&
             op.opcode !== 'const' &&

@@ -19,14 +19,17 @@ export interface SwitchRecoverDeps {
   /** is this opcode an integer comparison? */
   isCmpOpcode: (opcode: string) => boolean;
   switchAllowsNeqCase: boolean;
+  /** read a relational test whose BRANCH admits exactly one scrutinee value as that case */
+  switchAllowsBoundCase: boolean;
   /** emit the case arms in the ASSEMBLY's block-layout order rather than by ascending case value */
   switchArmsFollowLayout: boolean;
-  /** does emitting this block's ops carry a statement beyond the ops themselves? A def-site
-   *  ANCHORED merge copy (structure.ts anchorConstCopies) is attached to a const op and emitted
-   *  with the block's side effects — a test block carrying one is not pure however pure its
-   *  opcodes look, because collapsing it into a `switch` discards the write while the edge copy
-   *  it replaced stays suppressed. */
-  emitsAnchoredWrite: (blk: Block) => boolean;
+  /** does emitting this block's ops carry a statement beyond the ops themselves? Collapsing a
+   *  test block into a `switch` re-renders its ops at their uses and emits no side effects for it,
+   *  so any op that renders as a STATEMENT of its own loses that statement. Two produce one: a
+   *  def-site ANCHORED merge copy (structure.ts anchorConstCopies), whose edge copy stays
+   *  suppressed, and a MATERIALIZED def, whose `v = …` assignment renders only here while its uses
+   *  read the bare name — leaving a local declared and never assigned. */
+  emitsOwnStatement: (blk: Block) => boolean;
   expr: (v: Value) => Expr;
   structureRegion: (b: Block, stop: Block | null) => Stmt[];
 }
@@ -66,8 +69,9 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     isNamed,
     isCmpOpcode,
     switchAllowsNeqCase,
+    switchAllowsBoundCase,
     switchArmsFollowLayout,
-    emitsAnchoredWrite,
+    emitsOwnStatement,
     expr,
     structureRegion,
   } = deps;
@@ -207,15 +211,20 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     }
   };
 
-  // A "pure test block": its only computation is constants + one integer comparison feeding its
-  // cond_br terminator. PRE4 (purity). The block does not VANISH when the tree collapses to a
-  // switch — its ops re-render at whichever use inlines them, at a point the switch decides — so
-  // the question is motion, not deletion, and `ORDER_SENSITIVE_OPS` is the set that asks it. NOT
-  // the trapping divides: a use is dominated by its def, so the re-rendered op runs on a subset of
-  // the paths it already ran on — nothing is speculated.
-  // The root block is exempt from the
-  // "only const/icmp" rule because its non-terminator ops are already emitted as sideEffects(b) before
-  // the switch; a non-root test block must be strictly pure.
+  // TWO QUESTIONS about a block, asked separately because the answers diverge and the walk needs
+  // both: WHAT does it test (`testInfo`), and may this recovery DISCARD it (`collapsible`)?
+  //
+  // PRE4 (purity) is the second. A collapsed test block's ops re-render at whichever use inlines
+  // them, at a point the switch decides — so the question is motion, not deletion, and
+  // `ORDER_SENSITIVE_OPS` is the set that asks it. NOT the trapping divides: a use is dominated by
+  // its def, so the re-rendered op runs on a subset of the paths it already ran on — nothing is
+  // speculated. `emitsOwnStatement` covers what motion cannot save: a statement belonging to the
+  // block rather than to a use. The root is exempt from all of it — its ops are already emitted as
+  // sideEffects(b) before the switch.
+  //
+  // A block that tests the scrutinee and is NOT collapsible is still dispatch, so the walk must
+  // read it as dispatch and decline, never re-read it as a case body — that would spell an arm
+  // whose guard the dispatch has already decided.
   interface TestInfo {
     x: Value;
     k: number;
@@ -223,7 +232,9 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     opcode: string;
     xOnLeft: boolean;
   }
-  const testInfo = (blk: Block, isRoot: boolean): TestInfo | null => {
+  const collapsible = (blk: Block): boolean =>
+    !blk.ops.some((op) => ORDER_SENSITIVE_OPS.has(op.opcode)) && !emitsOwnStatement(blk);
+  const testInfo = (blk: Block): TestInfo | null => {
     const term = blk.ops[blk.ops.length - 1];
     if (term.opcode !== 'cond_br') {
       return null;
@@ -232,9 +243,6 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     if (!cmp || !isCmpOpcode(cmp.opcode)) {
       return null;
     }
-    if (!isRoot && (blk.ops.some((op) => ORDER_SENSITIVE_OPS.has(op.opcode)) || emitsAnchoredWrite(blk))) {
-      return null;
-    } // PRE4 — anchored writes included: discarded with the block, while their edge copies stay suppressed
     // Which operand is the scrutinee, which is the constant?
     const [lo, ro] = cmp.operands;
     const lc = evalConst(lo),
@@ -282,6 +290,39 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
       default:
         return false;
     }
+  };
+
+  // Which single scrutinee value does this relational test's BRANCH admit, if exactly one? A
+  // relational side is a HALF-LINE in the compare's own ordering, so it can hold one value only at
+  // a domain endpoint — which is why testing the two endpoints and their neighbours decides it,
+  // with no interval lattice. `x < 1` over an unsigned scrutinee admits `{0}` and is agbcc's
+  // spelling of `case 0` in a balanced search: `emit_case_nodes` tests the subtree BOUND, not the
+  // value, whenever the remaining range has collapsed to one. Read as navigation instead, that
+  // arm's body becomes a second default candidate and the whole tree declines.
+  //
+  // THE BRANCH, never the fall-through. Every jump in `emit_case_nodes` that lands on a case body
+  // is its test's BRANCH — for a single-valued node, LT to `node->left->code_label` and GT to
+  // `node->right->code_label`, each guarded by `node_is_bounded` on that side — while the
+  // fall-through always continues into more dispatch, so a fall-side reading has no producer in
+  // this dispatch — and none turns up in 3176 generated agbcc dispatches.
+  //
+  // TWO PREMISES ABOUT THE DOMAIN. It is the 32-bit REGISTER's, not the scrutinee's recovered
+  // type, so a narrower type has a nearer endpoint this misses — which costs a case and never
+  // invents one. And it is the WHOLE of that domain, so an ancestor that already excluded the
+  // value makes the reading wrong; PRE3 is what catches that, simulating the original tree for
+  // every recovered case value and declining unless it lands on the recorded body, exactly as it
+  // does for the `eq` cases. Null when the branch admits none, several, or the whole domain.
+  const singletonTaken = (ti: TestInfo): number | null => {
+    const [min, max] = ti.opcode.startsWith('icmp_u') ? [0, -1] : [-0x80000000, 0x7fffffff];
+    for (const [v, next] of [
+      [min, min + 1],
+      [max, max - 1],
+    ]) {
+      if (evalCmp(ti.opcode, ti.xOnLeft, v, ti.k) && !evalCmp(ti.opcode, ti.xOnLeft, next, ti.k)) {
+        return v;
+      }
+    }
+    return null;
   };
 
   // Where does one arm's region LEAVE? Walk it from `entry`, never stepping THROUGH the merge or a
@@ -364,7 +405,7 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
   };
 
   const recognizeSwitch = (b: Block, stop: Block | null): Stmt[] | null => {
-    const root = testInfo(b, true);
+    const root = testInfo(b);
     if (!root) {
       return null;
     }
@@ -398,7 +439,7 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
       let cur = b;
       const guard = new Set<Block>();
       for (;;) {
-        const ti = testInfo(cur, cur === b);
+        const ti = testInfo(cur);
         if (!ti || ti.x !== scrut) {
           return cur;
         } // reached a leaf (case body / default)
@@ -419,15 +460,22 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
         return null;
       } // a test-block DAG cycle → decline
       seen.add(blk);
-      const ti = testInfo(blk, blk === b);
+      const ti = testInfo(blk);
       if (!ti || ti.x !== scrut) {
         return null;
       } // PRE1: every test is on the SAME Value
+      if (blk !== b && !collapsible(blk)) {
+        return null;
+      } // PRE4
       const term = blk.ops[blk.ops.length - 1];
       const taken = forwardingTarget(term.successors[0].block),
         fall = forwardingTarget(term.successors[1].block);
+      const isTestOn = (child: Block) => {
+        const t = testInfo(child);
+        return !!t && t.x === scrut;
+      };
       const asLeafOrTest = (child: Block, role: 'case' | 'nav', k?: number) => {
-        const isTest = !!testInfo(child, false) && testInfo(child, false)!.x === scrut;
+        const isTest = isTestOn(child);
         if (role === 'case') {
           if (isTest) {
             return false;
@@ -467,8 +515,17 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
           return null;
         }
       } else {
-        // relational → pure navigation
-        if (!asLeafOrTest(taken, 'nav')) {
+        // relational → navigation, except where the BRANCH has collapsed to a single value and
+        // lands on a BODY, on a compiler that declared the spelling. Two more refusals:
+        //   - a bound test at the ROOT. `emit_case_nodes` emits a single-valued node's own
+        //     `do_jump_if_equal` before either descent test, so a bound test always sits under
+        //     another test of the same tree; one that OPENS the region did not come from this
+        //     dispatch, and reading it as a case turns a comparison chain into a `switch`;
+        //   - a singleton branch onto another TEST of the scrutinee, which is the search
+        //     descending to pin the value. It is dispatch, so the walk reads it as dispatch —
+        //     recovering it, or declining at PRE4 if it is not collapsible.
+        const k = switchAllowsBoundCase && blk !== b && !isTestOn(taken) ? singletonTaken(ti) : null;
+        if (!asLeafOrTest(taken, k === null ? 'nav' : 'case', k ?? undefined)) {
           return null;
         }
         if (!asLeafOrTest(fall, 'nav')) {

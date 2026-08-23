@@ -106,6 +106,22 @@ export interface TargetDescription {
     // body). GCC freely emits `!=`; IDO prefers `==`/`<`. Absent ⇒ true (permissive); the
     // decline path keeps recovery sound either way.
     switchAllowsNeqCase?: boolean;
+    // Regime-A switch recovery: accept a RELATIONAL test whose BRANCH admits exactly one scrutinee
+    // value as that case (`cmp r0, #1 / bcc` is `case 0:` of an unsigned switch) rather than as
+    // navigation.
+    //
+    // A DEFAULT rather than a candidate axis because for agbcc the asm determines the source: at
+    // -O2 fold-const rewrites a bounded unsigned comparison into an equality before codegen, so
+    // `x < 1u` compiles to `cmp r0, #0 / bne` and `x > 0u` to `cmp r0, #0 / beq` — no source-level
+    // comparison chain emits a bound test at all. `emit_case_nodes` runs after folding and does:
+    // it jumps straight to `node->left->code_label` on LT once `node_is_bounded (node->left)`, so
+    // the remaining value's own test is never emitted. One producer, one reading.
+    //
+    // Absent ⇒ false, and inheriting it would be wrong rather than merely unmeasured: on the MIPS
+    // lanes `sltiu rd, rs, 1` is the ordinary spelling of `!x`, and it lifts to `icmp_ult rs, 1`
+    // with no equality fold anywhere — the identical IR shape, from a producer that is not a
+    // dispatch. Each compiler opts in on its own dispatch's evidence.
+    switchAllowsBoundCase?: boolean;
     // Switch recovery: emit the case arms in the order the ASSEMBLY lays their bodies out, rather
     // than sorted by ascending case value. True claims the compiler emits case bodies as it walks
     // the arms and never MOVES one afterwards — neither reordering basic blocks nor scheduling
@@ -191,6 +207,7 @@ export const ARMV4T_AGBCC: TargetDescription = {
     orderArgCopiesByComputation: true,
     nearBaseSpan: 255,
     readsStayWhereWritten: true,
+    switchAllowsBoundCase: true,
     switchArmsFollowLayout: true,
   },
 };

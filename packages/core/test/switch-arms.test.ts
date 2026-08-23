@@ -5,12 +5,17 @@
 // default — so a four-case tree reaches the default through two `b .Ldefault` blocks.
 import { expect, test } from 'vitest';
 
+import { cBackend } from '../src/backend/c';
 import { emitCFamily } from '../src/backend/cfamily';
+import { frontendFor } from '../src/frontend/registry';
 import { T } from '../src/ir/types';
+import { verify } from '../src/ir/verify';
 import { stmtChildren } from '../src/l3/ast';
 import type { SFn, Stmt } from '../src/l3/ast';
-import { decompile } from '../src/pipeline';
-import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC } from '../src/target';
+import { applyIdiomPatterns, decompile, raiseRecovered } from '../src/pipeline';
+import { structure } from '../src/structure/structure';
+import type { StructureOptions } from '../src/structure/structure';
+import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC, structureOptionsFor } from '../src/target';
 
 // agbcc's own output for `switch (mode) { case 0..3 }` with the arms in `order`, reduced to the
 // shape that matters: the balanced comparison tree, four one-instruction bodies, a merge that
@@ -38,6 +43,7 @@ const dispatch = (order: readonly (number | 'D')[], out = '.Lend', tail = '') =>
 
 const ZERO = { k: 'const', value: 0 } as const;
 const of = (asm: string) => decompile('f', asm, ARMV4T_AGBCC, { prototypes: { f: { returnsVoid: true } } }).source;
+const count = (s: string, needle: string): number => s.split(needle).length - 1;
 /** the case labels in the order they are EMITTED */
 const armOrder = (out: string) => [...out.matchAll(/case (\d+):/g)].map((m) => Number(m[1]));
 
@@ -435,4 +441,169 @@ test('a jump-table arm that FALLS THROUGH is not reordered', () => {
   // the reordering this refuses. Table order keeps case 3 next to case 4, so the shape declines
   // LOUD instead. Recovering it is a separate capability with its own evidence to gather.
   expect(() => of(table(''))).toThrow(/falls through into an arm that is not the next one emitted/);
+});
+
+// ── the case a RELATIONAL test pins ──────────────────────────────────────────────────────────────
+// `emit_case_nodes` tests a subtree's BOUND rather than its value once the remaining range has
+// collapsed to one, so agbcc spells `case 0:` of an unsigned switch as `cmp r0, #1 / bcc` — the
+// shape `synthetic:armdef:agbcc` and `synthetic:armfall:agbcc` both carry. Read as pure
+// navigation that arm's body is a second default candidate and the whole tree declines to
+// if-nesting, which compiles to a different compare AND a different arm layout.
+//
+// An `if (x < 1) … else if …` chain compiles to the same asm, so the reading is held to what
+// `emit_case_nodes` can emit: the BRANCH of a test BELOW the root, on a compiler that declared
+// `switchAllowsBoundCase`. Each of those three refusals has a fixture of its own below, and PRE3
+// closes the fourth question — a singleton an ancestor already ruled out.
+
+/** agbcc's own `switch (x) { case 0..2 }`: the dispatch verbatim from `-O2 -mthumb-interwork
+ *  -fhex-asm -fprologue-bugfix`, where `case 0:` is the bound test `cmp r0, #1 / bcc` under the
+ *  root's `== 1`, over one-instruction bodies. */
+const boundCase =
+  'f:\n\tmov\tr2, #0x0\n' +
+  '\tcmp\tr0, #0x1\n\tbeq\t.Lc1\t@cond_branch\n' +
+  '\tcmp\tr0, #0x1\n\tbcc\t.Lc0\t@cond_branch\n' + // x < 1, unsigned ⇒ exactly {0}
+  '\tcmp\tr0, #0x2\n\tbeq\t.Lc2\t@cond_branch\n\tb\t.Lend\n' +
+  [0, 1, 2].map((k) => `.Lc${k}:\n\tadd\tr2, r1, #0x${k + 1}\n\tb\t.Lend\n`).join('') +
+  '.Lend:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr2, [r0]\n\tbx\tlr\n';
+
+test('a relational test whose branch admits ONE value routes that case, not the default', () => {
+  const out = of(boundCase);
+  expect(out).toContain('switch (a0)');
+  expect(armOrder(out)).toEqual([0, 1, 2]);
+  expect(out).not.toContain('else'); // not the if-nesting fallback
+});
+
+test('the FALL side of a relational test is navigation, whatever it admits', () => {
+  // `emit_case_nodes` reaches a case body from a relational test only by BRANCHING to it; its
+  // fall-through always continues into more dispatch. So `cmp r0, #0 / bhi`, whose fall side is
+  // exactly {0}, did not come from a dispatch, and the tree stays the comparison chain it reads
+  // as.
+  const out = of(
+    'f:\n\tmov\tr2, #0x0\n' +
+      '\tcmp\tr0, #0\n\tbhi\t.Lhi\t@cond_branch\n' +
+      '\tadd\tr2, r1, #0x1\n\tb\t.Lend\n' +
+      '.Lhi:\n\tcmp\tr0, #0x5\n\tbeq\t.Lc5\t@cond_branch\n\tb\t.Ldef\n' +
+      '.Lc5:\n\tadd\tr2, r1, #0x2\n\tb\t.Lend\n' +
+      '.Ldef:\n\tmov\tr2, #0x63\n\tb\t.Lend\n' +
+      '.Lend:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr2, [r0]\n\tbx\tlr\n',
+  );
+  expect(out).not.toContain('switch (');
+  expect(out).toContain('a0 > 0');
+});
+
+test('a bound test that OPENS the dispatch is an ordinary `if`, not a case', () => {
+  // A single-valued node emits its own `do_jump_if_equal` before either descent test, so a bound
+  // test always sits UNDER another test of the tree, and one that opens the region has no producer
+  // in this dispatch. Root position is where the shape actually turns up — 15 of the 16 sites the
+  // reading is considered at over 15712 lifted functions — and none of them is a dispatch.
+  const out = of(
+    'f:\n\tmov\tr2, #0x0\n' +
+      '\tcmp\tr0, #0x1\n\tbcc\t.Lc0\t@cond_branch\n' +
+      '\tcmp\tr0, #0x5\n\tbeq\t.Lc5\t@cond_branch\n\tb\t.Ldef\n' +
+      '.Lc0:\n\tadd\tr2, r1, #0x1\n\tb\t.Lend\n' +
+      '.Lc5:\n\tadd\tr2, r1, #0x2\n\tb\t.Lend\n' +
+      '.Ldef:\n\tmov\tr2, #0x63\n\tb\t.Lend\n' +
+      '.Lend:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr2, [r0]\n\tbx\tlr\n',
+  );
+  expect(out).not.toContain('switch (');
+  expect(out).toContain('a0 < 1');
+});
+
+test('a bound branch onto another TEST is the search descending, and still recovers', () => {
+  // `cmp r0, #1 / bcc` reaching a block that pins the value with `== 0` is the dispatch walking
+  // down, not an arm: reading it as a case body would decline the whole tree, because a test is
+  // not a body. Navigation recovers the switch.
+  const out = of(
+    'f:\n\tmov\tr2, #0x0\n' +
+      '\tcmp\tr0, #0x1\n\tbcc\t.Lsub\t@cond_branch\n' +
+      '\tcmp\tr0, #0x5\n\tbeq\t.Lc5\t@cond_branch\n\tb\t.Ldef\n' +
+      '.Lsub:\n\tcmp\tr0, #0\n\tbeq\t.Lc0\t@cond_branch\n\tb\t.Ldef\n' +
+      '.Lc0:\n\tadd\tr2, r1, #0x1\n\tb\t.Lend\n' +
+      '.Lc5:\n\tadd\tr2, r1, #0x2\n\tb\t.Lend\n' +
+      '.Ldef:\n\tmov\tr2, #0x63\n\tb\t.Lend\n' +
+      '.Lend:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr2, [r0]\n\tbx\tlr\n',
+  );
+  expect(out).toContain('switch (a0)');
+  expect(armOrder(out)).toEqual([0, 5]);
+});
+
+test('a compiler that has not declared bound cases reads the branch as navigation', () => {
+  // The rule is agbcc's, from agbcc's `stmt.c`. The same asm is a plain if-else chain on a
+  // compiler whose dispatch never elides the remaining value's test, and IDO already pays for
+  // that mis-recognition once (`switchAllowsNeqCase: false`), so nobody inherits this one.
+  const undeclared = { ...ARMV4T_AGBCC, compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors } };
+  delete undeclared.compilerBehaviors.switchAllowsBoundCase;
+  const out = decompile('f', boundCase, undeclared, { prototypes: { f: { returnsVoid: true } } }).source;
+  expect(out).not.toContain('switch (');
+  for (const t of [MIPS_IDO, MIPS_GCC, PPC_MWCC]) {
+    expect(t.compilerBehaviors.switchAllowsBoundCase).toBeUndefined();
+  }
+});
+
+test('a singleton an ancestor already excluded is DEAD, and PRE3 declines rather than resurrect it', () => {
+  // The reading is over the whole 32-bit domain, so `x < 1` still says `{0}` under an ancestor
+  // that sent every x < 5 elsewhere. Simulating the original tree for the recovered value is what
+  // catches it: x == 0 reaches `.Ldef`, not `.Lc0`.
+  const out = of(
+    'f:\n\tmov\tr2, #0x0\n' +
+      '\tcmp\tr0, #0x5\n\tbcc\t.Ldef\t@cond_branch\n' +
+      '\tcmp\tr0, #0x1\n\tbcc\t.Lc0\t@cond_branch\n' + // unreachable under x >= 5
+      '\tcmp\tr0, #0x6\n\tbeq\t.Lc6\t@cond_branch\n' +
+      '\tcmp\tr0, #0x7\n\tbeq\t.Lc7\t@cond_branch\n\tb\t.Ldef\n' +
+      '.Ldef:\n\tmov\tr2, #0x63\n\tb\t.Lend\n' +
+      '.Lc0:\n\tadd\tr2, r1, #0x1\n\tb\t.Lend\n' +
+      '.Lc6:\n\tadd\tr2, r1, #0x7\n\tb\t.Lend\n' +
+      '.Lc7:\n\tadd\tr2, r1, #0x8\n\tb\t.Lend\n' +
+      '.Lend:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr2, [r0]\n\tbx\tlr\n',
+  );
+  expect(out).not.toContain('switch (');
+  expect(out).not.toContain('case 0:'); // x == 0 must still reach the 0x63 arm, not .Lc0's
+  expect(out).toContain('else');
+});
+
+// ── a test block that carries a STATEMENT ────────────────────────────────────────────────────────
+// Collapsing the tree re-renders a test block's ops at their uses and emits no side effects for the
+// block, so an op that renders as a statement of its OWN loses it. PRE4 is where that is refused,
+// and a MATERIALIZED def is the second producer beside the anchored merge copy: its `v = …` is the
+// only place the value is written, while its uses read the bare name.
+
+/** lift + structure with an axis forced on — `decompile` only offers the target's own defaults. */
+const homed = (asm: string, opts: StructureOptions): string => {
+  const fn = frontendFor(ARMV4T_AGBCC).lift('f', asm, ARMV4T_AGBCC, {}, undefined, undefined);
+  verify(fn);
+  applyIdiomPatterns(fn, ARMV4T_AGBCC);
+  raiseRecovered(fn, ARMV4T_AGBCC);
+  return cBackend.emit(structure(fn, { ...structureOptionsFor(ARMV4T_AGBCC, true), ...opts }));
+};
+
+/** `switch (x) { case 1, 2, 5 }` whose SECOND test block computes `a1 << 2` — read by the case-5
+ *  loop and by case 2, which is `/expr-home`'s scope. */
+const homeInTest =
+  'f:\n\tpush\t{r4, lr}\n\tmov\tr2, #0x0\n' +
+  '\tcmp\tr0, #0x1\n\tbeq\t.Lc1\t@cond_branch\n' +
+  '\tlsl\tr3, r1, #0x2\n' +
+  '\tcmp\tr0, #0x5\n\tbeq\t.Lc0\t@cond_branch\n' +
+  '\tcmp\tr0, #0x2\n\tbeq\t.Lc2\t@cond_branch\n\tb\t.Ldef\n' +
+  '.Lc0:\n\tmov\tr4, #0x0\n' +
+  '.Lloop:\n\tadd\tr2, r2, r3\n\tadd\tr4, r4, #0x1\n\tcmp\tr4, #0x3\n\tbne\t.Lloop\t@cond_branch\n\tb\t.Lend\n' +
+  '.Lc1:\n\tadd\tr2, r1, #0x2\n\tb\t.Lend\n' +
+  '.Lc2:\n\tadd\tr2, r3, #0x3\n\tb\t.Lend\n' +
+  '.Ldef:\n\tmov\tr2, #0x63\n\tb\t.Lend\n' +
+  '.Lend:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr2, [r0]\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n';
+
+test('a materialized def in a test block keeps its assignment — the tree declines around it', () => {
+  const out = homed(homeInTest, { homeLoopExprs: true });
+  const home = out.match(/(\w+) = a1 << 2;/);
+  expect(home).not.toBeNull();
+  // every read of the home is preceded by the write, on every path
+  expect(out.indexOf(`${home![1]} = a1 << 2;`)).toBeLessThan(out.indexOf(`+ ${home![1]}`));
+  expect(out).toContain('if (a0 == 1)'); // the block holding it is no longer a test of the tree
+});
+
+test('the same tree recovers whole when nothing homes in the test block', () => {
+  // Control: `/expr-home` off, so `a1 << 2` re-renders at its two uses and the test block is pure.
+  const out = homed(homeInTest, {});
+  expect(out).toContain('switch (a0)');
+  expect(armOrder(out)).toEqual([5, 1, 2]);
+  expect(count(out, 'a1 << 2')).toBe(2);
 });

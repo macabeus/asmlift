@@ -676,6 +676,11 @@ export interface StructureOptions {
   // body). GCC freely uses `!=`; IDO prefers `==`/`<`. A per-compiler DATA lever, not an `arch ==`
   // branch — default true (permissive; the decline path keeps it sound either way).
   switchAllowsNeqCase?: boolean;
+  // Comparison-tree switch recovery: treat a relational test whose BRANCH admits exactly one
+  // scrutinee value as that case rather than as navigation. A per-compiler DATA lever declared in
+  // TargetDescription.compilerBehaviors — a compiler opts in on evidence that its dispatch jumps
+  // straight to a bounded subtree's body. Default false: absent, every relational edge navigates.
+  switchAllowsBoundCase?: boolean;
   // Comparison-tree switch recovery: emit the case arms in the order the ASSEMBLY lays their
   // bodies out, rather than sorted by ascending case value. A per-compiler DATA lever declared in
   // TargetDescription.compilerBehaviors — a compiler opts in on evidence that it neither reorders
@@ -716,9 +721,9 @@ export interface StructureOptions {
   // through it, reproducing the source's pointer-local + scalar-temp spelling. Off by default;
   // rank.ts enumerates the ON spelling as the `/addr-home` axis — see analysis.ts AnalyzeOptions.
   homeSharedAddresses?: boolean;
-  // Materialize a pure value defined outside a loop with 2+ distinct consumers inside it — the
-  // register the compiler holds across the iterations. Off by default; rank.ts enumerates the ON
-  // spelling as the `/expr-home` axis — see analysis.ts AnalyzeOptions.
+  // Materialize a pure value with 2+ distinct consumers, at least one of them inside a loop the
+  // def sits outside — the register the compiler holds across the iterations. Off by default;
+  // rank.ts enumerates the ON spelling as the `/expr-home` axis — see analysis.ts AnalyzeOptions.
   homeLoopExprs?: boolean;
   // Materialize a pure value with 2+ consumers standing on a memory read — the register the asm
   // carried the DERIVED value in, where the read's own home is a register that died at the
@@ -804,6 +809,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     negateJoinedBranchSense = false,
     orderArgCopiesByComputation = true,
     switchAllowsNeqCase = true,
+    switchAllowsBoundCase = false,
     switchArmsFollowLayout = false,
     defOrderLoadPairs = true,
     anchorConstCopies = false,
@@ -2567,8 +2573,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     isNamed: (v) => varName.has(v),
     isCmpOpcode: (opcode) => !!CMP_TO_BIN[opcode],
     switchAllowsNeqCase,
+    switchAllowsBoundCase,
     switchArmsFollowLayout,
-    emitsAnchoredWrite: (blk) => blk.ops.some((o) => anchoredAt.has(o)),
+    emitsOwnStatement: (blk) => blk.ops.some((o) => anchoredAt.has(o) || materialize.has(o)),
     expr: (v) => expr(v),
     structureRegion: (b, stop) => structureRegion(b, stop),
   });
@@ -3460,7 +3467,11 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       ...fn.blocks
         .flatMap((b) => b.ops)
         .filter((op) => op.opcode === 'undef')
-        .map((op) => ({ name: undefName.get(op)!, type: varType.get(undefName.get(op)!) ?? op.results[0].type })),
+        .map((op) => ({
+          name: undefName.get(op)!,
+          type: varType.get(undefName.get(op)!) ?? op.results[0].type,
+          uninit: true as const,
+        })),
     ],
     ...(shapedGlobalTypes.size
       ? {
