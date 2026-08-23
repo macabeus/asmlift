@@ -209,7 +209,12 @@ export function initFirstGuards(sfn: SFn): SFn | null {
         }
       }
       // a COMMON-hoisted variable holds its const on both paths, so the condition's matching
-      // const operand reads through it unconditionally — no tail gate needed
+      // const operand reads through it unconditionally — no tail gate needed.
+      // A BARE const only, where the guard re-spelling below uses the cast-tolerant `sameValue`:
+      // this site does not run `meaningPreserved`, so it may not swap in a name whose declared
+      // type could re-render the compare's signedness — which is exactly what peeling a `(u32)`
+      // would put on the table. A row that needs `/uns-cmp`'s spelling hoisted here brings the
+      // gate with it.
       for (const hv of hoisted) {
         if (cond.k === 'bin' && NEGATE_REL[cond.op]) {
           if (cond.l.k === 'const' && cond.l.value === hv.value) {

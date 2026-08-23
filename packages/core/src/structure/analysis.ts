@@ -103,13 +103,14 @@ export function hasHomeableSharedAddress(fn: Fn): boolean {
  *  axis would home — a pure non-const def with 2+ distinct consumers, at least one of them inside
  *  a loop the def sits outside, cone-free? Loops here are LAYOUT ranges (a successor at an
  *  equal-or-earlier block position closes one) where the axis's own rule uses the dominator model,
- *  and consumers here come from op operands only (branch-arg uses are invisible) — so unlike
- *  hasHomeableSharedAddress this diverges in BOTH directions: a false positive costs one
- *  duplicate-collapsed candidate, and a false negative silently skips the arm on IR whose block
- *  layout does not follow dominance or whose in-loop consumption is all branch args. Acceptable
+ *  and consumers here come from op operands only, where the rule counts `useSitesOf` and so counts
+ *  branch args too — unlike hasHomeableSharedAddress this therefore diverges in BOTH directions. A
+ *  false positive costs one duplicate-collapsed candidate. A false negative silently skips the arm,
+ *  on IR whose block layout does not follow dominance, or on a value whose SECOND consumer is a
+ *  branch arg — the rule would home that one and the axis is never enumerated for it. Acceptable
  *  because every frontend lays blocks out in address order (a natural loop's back edge points
- *  backward), and a value consumed ONLY as branch args reaches no compare/product/shift — the
- *  shapes the home serves. */
+ *  backward), and the in-loop consumer that carries the register-pinning evidence is an operand
+ *  use of a compare/product/shift, which this does see. */
 export function hasLoopSharedPureValue(fn: Fn): boolean {
   const defOf = defOpMap(fn);
   const pos = new Map<Block, number>(fn.blocks.map((b, i) => [b, i]));

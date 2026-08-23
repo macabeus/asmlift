@@ -137,10 +137,10 @@ const STRUCTURING_AXES: readonly StructuringAxis[] = [
     strip: true,
   },
   // `/expr-home` — the loop-expression-home axis (structure/analysis.ts AnalyzeOptions
-  // homeLoopExprs): a pure value defined outside a loop with 2+ distinct consumers inside it
-  // materializes into a local carrying the value's recovered type — the register the compiler
-  // holds across the iterations (`u32 size = 16 << t;` driving a loop bound, a product and a
-  // shift), where the default re-derives per use. Gated per symbol variant like `/addr-home`
+  // homeLoopExprs): a pure value defined outside a loop with 2+ distinct consumers, at least one
+  // of them inside it, materializes into a local carrying the value's recovered type — the register
+  // the compiler holds across the iterations (`u32 size = 16 << t;` driving a loop bound, a product
+  // and a shift), where the default re-derives per use. Gated per symbol variant like `/addr-home`
   // (the cone refusal reads the variant's own lift).
   {
     flag: 'exprHome',
