@@ -1,9 +1,13 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
 import { LIVEBASE_GATES, baseSpanCandidates, hoistReusedGlobalBases } from '../src/l3/basecse';
 import { volatilePtrLocals } from '../src/l3/volatileptr';
+import { enumerateCandidates } from '../src/rank';
+import { ARMV4T_AGBCC } from '../src/target';
 
 const idx = (name: string, i: Expr, width = 1): Expr => ({
   k: 'index',
@@ -321,5 +325,41 @@ describe('base-span candidates (WHICH admitted bases get the local)', () => {
     for (const x of cands) {
       expect(boundBases(x.sfn).length).toBeLessThan(all.length);
     }
+  });
+});
+
+describe('the span split is WIRED into enumeration', () => {
+  // `corpus/agbcc-mixpoll.s` is synthetic:mixpoll:agbcc (real agbcc output, so no toolchain): one
+  // DMA register file at three offsets and three IWRAM halfwords read-modified in place, all in
+  // one loop — the shape whose enumeration held no proper subset before the split. The spellings
+  // are what the differ then referees; which one wins is the benchmark's business, not this test's.
+  const asm = readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-mixpoll.s'), 'utf8');
+  const cands = enumerateCandidates('mixpoll', asm, ARMV4T_AGBCC, { prototypes: { mixpoll: { returnsVoid: true } } });
+  const sourceFor = (label: string) => cands.find((x) => x.label === label)?.source;
+
+  test('both halves reach the candidate list, plain and volatile', () => {
+    // halves in first-use order — the halfword cells are touched before the register file here
+    expect(cands.filter((x) => x.label.startsWith('signed/livebase')).map((x) => x.label)).toEqual([
+      'signed/livebase',
+      'signed/livebase/volatile',
+      'signed/livebase-cell',
+      'signed/livebase-cell/volatile',
+      'signed/livebase-block',
+      'signed/livebase-block/volatile',
+    ]);
+  });
+
+  test('the block half binds the register file alone and leaves the scalar cells inline', () => {
+    const src = sourceFor('signed/livebase-block/volatile')!;
+    expect(src).toContain('volatile s32 * p0;');
+    expect(src).toContain('p0 = (s32 *)67109076;');
+    expect(src).toContain('*(u16 *)50335816 = *(u16 *)50335816 + 1;');
+    expect(src).not.toContain('50335816;'); // no init binds it
+  });
+
+  test('the cell half is the complement: the three halfwords bind, the register file stays inline', () => {
+    const src = sourceFor('signed/livebase-cell')!;
+    expect(src.match(/^\s+p\d+ = \(u16 \*\)\d+;$/gm)).toHaveLength(3);
+    expect(src).toContain('((s32 *)67109076)[1] =');
   });
 });

@@ -19,7 +19,7 @@ import { T } from './ir/types';
 import { verify } from './ir/verify';
 import { materializeArgBases } from './l3/argbase';
 import type { LanguageBackend, SFn } from './l3/ast';
-import { LIVEBASE_GATES, hoistReusedGlobalBases } from './l3/basecse';
+import { LIVEBASE_GATES, baseSpanCandidates, hoistReusedGlobalBases } from './l3/basecse';
 import { armDisjointCandidates, coalesceCandidates } from './l3/coalesce';
 import { initFirstGuards } from './l3/initfirst';
 import { mulFirstSums } from './l3/mulfirst';
@@ -765,6 +765,31 @@ export function enumerateCandidates(
             const before = new Set(sfn.locals.map((l) => l.name));
             return volatileSubsetCandidates(r, new Set(r.locals.filter((l) => !before.has(l.name)).map((l) => l.name)));
           });
+          // `/livebase`'s per-SPAN halves: WHICH of several numeric bases the source named is
+          // per-base knowledge the asm does not carry — a DMA register file wants one register held
+          // across the whole body while the scalar cell beside it re-materializes — so each span's
+          // hoist is its own candidate, the same alternative-OUTPUTS mechanism as the /volatile
+          // subsets above rather than a product. The all-spans form stays as plain `/livebase`, and
+          // each half rides a `/volatile` sibling for the reason the whole one does, scoped to the
+          // locals that half created. A span is one of two values (l3/basecse.ts `BaseSpan`), so
+          // this arm adds at most FOUR spellings however many bases the function has.
+          enumerate(
+            '/livebase',
+            () => sfn,
+            (s) => {
+              const before = new Set(s.locals.map((l) => l.name));
+              return baseSpanCandidates(s, LIVEBASE_GATES).flatMap(({ merged, sfn: r }) => {
+                const created = new Set(r.locals.filter((l) => !before.has(l.name)).map((l) => l.name));
+                const vol = volatilePtrLocals(r, created);
+                return vol
+                  ? [
+                      { merged, sfn: r },
+                      { merged: `${merged}/volatile`, sfn: vol },
+                    ]
+                  : [{ merged, sfn: r }];
+              });
+            },
+          );
           // The livebase × indexed PAIRINGS — the third sanctioned product kind (see POLICY):
           // row-demanded, and the joint spelling is reachable from neither lever alone (the
           // frame-copy + DMA shape).
