@@ -1288,12 +1288,28 @@ export function lift(
   // ends the block at it, but it has no static successor, so it must be a catchable "out of scope"
   // signal, not a vanished branch. Mirrors MIPS `jr`/PPC `bctr`. (A RECOGNISED jump table's
   // dispatch block is already elided above, so it is not scanned here.)
+  //
+  // The same rule for a `bl` that is not a call. agbcc relays a conditional branch past Thumb's
+  // ±256-byte reach through an unconditional one, and past THAT branch's own ±2 KB reach the relay
+  // becomes `bl .Lfar @far jump` — an intra-function long branch wearing the call mnemonic. The
+  // decode switch reads it as a call, so without this the lift emits a call to a block label
+  // (`.L3(a0, a1, a2)`): not a branch that vanished but a transfer turned into something that
+  // RETURNS, and syntactically not C. A target this function DEFINES is the discriminator; the
+  // entry label is excluded, where a `bl` really is recursion.
+  const entryLabel = rawBlocks[0]?.label;
   for (const ab of asmBlocks) {
     for (const ins of ab.instrs) {
       if (classifyXfer(ins) === 'indirect') {
         throw new FrontendUnsupportedError(
           `cannot lift '${name}': indirect/computed jump '${ins.mnemonic} ${ins.ops.join(', ')}' ` +
             `— jump tables / computed gotos / register tail calls not supported`,
+        );
+      }
+      const callee = (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') && ins.ops.length === 1 ? ins.ops[0] : undefined;
+      if (callee !== undefined && callee !== name && callee !== entryLabel && blockLabels.has(callee)) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': '${ins.mnemonic} ${callee}' branches to a label this function ` +
+            `defines — an intra-function long branch, not a call, and this frontend models only calls here`,
         );
       }
     }
