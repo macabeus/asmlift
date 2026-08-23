@@ -559,6 +559,55 @@
         }
       },
       "m2cCtx": true
+    },
+    {
+      "sym": "func_8006FEBC_70ABC",
+      "features": [
+        "struct",
+        "field",
+        "pointer",
+        "branch",
+        "mask",
+        "cast",
+        "narrow"
+      ],
+      "note": "The row hands asmlift the parameter list `include/6E840.h` declares, and asmlift never reads it: a function’s own `params` is inert, only a callee’s is consumed, so the argument register is recovered by the contiguous-arg heuristic instead.",
+      "prependC": "typedef struct {\n    u8 padding[0xB8];\n    s8 unkB8;\n} func_8006FEBC_70ABC_arg;",
+      "funcC": "void func_8006FEBC_70ABC(func_8006FEBC_70ABC_arg *arg0) {\n    if (arg0 != NULL) {\n        arg0->unkB8 = (u8)(arg0->unkB8 & 0xFE);\n    }\n}",
+      "sourceUrl": "https://github.com/macabeus/snowboardkids2-decomp/blob/63236cd8dce61b8a1b37765952eb340b66684476/src/6E840.c#L570-L574",
+      "m2cCtx": true,
+      "proto": {
+        "func_8006FEBC_70ABC": {
+          "returnsVoid": true,
+          "params": [
+            "func_8006FEBC_70ABC_arg *arg0"
+          ]
+        }
+      }
+    },
+    {
+      "sym": "unlockAllContent",
+      "features": [
+        "array",
+        "variable-index",
+        "global",
+        "struct",
+        "field",
+        "arithmetic",
+        "branch",
+        "value-home"
+      ],
+      "note": "Two sequential counted loops that the target runs on one register. asmlift cannot reuse one local across them: coalescing rejects a counter as load-fed, and the induction-variable exemption is only reachable from a `for`, which the bottom-tested loop gcc emits never becomes. Chosen after the rule that a row must also be one m2c matches was dropped — m2c’s outcome was not a selection criterion for this row.",
+      "prependC": "#include \"10AD0.h\"\n#include \"16FA0.h\"\n#include \"288A0.h\"\n#include \"3A1F0.h\"\n#include \"3E160.h\"\n#include \"4050.h\"\n#include \"413E0.h\"\n#include \"6E840.h\"\n#include \"D_800AFE8C_A71FC_type.h\"\n#include \"EepromSaveData_type.h\"\n#include \"common.h\"\n#include \"gamestate.h\"\n#include \"graphics.h\"\n#include \"overlay.h\"\n#include \"task_scheduler.h\"\nextern u8 gTitleExitMode;\nextern s32 gControllerInputs;\nextern s32 gButtonsPressed;\nextern u8 gDebugUnlockEnabled;\nextern u8 gTitleCameraSettings;\nextern s8 gTitleInitialized;",
+      "funcC": "void unlockAllContent(void) {\n    s32 i;\n\n    // First loop: initialize save_slot_status and save_slot_data\n    for (i = 0; i < 16; i++) {\n        EepromSaveData->save_slot_status[i] = 1;\n        EepromSaveData->save_slot_data[i] = 1;\n    }\n\n    // Second loop: initialize character_or_settings and related arrays\n    for (i = 0; i < 9; i++) {\n        EepromSaveData->character_or_settings[i] = i + 1;\n        EepromSaveData->character_or_settings[i + 9] = i + 0x11;\n        EepromSaveData->u.setting_42[i] = i + 9;\n    }\n\n    // Set individual bytes\n    EepromSaveData->setting_4B[0] = 0xD;\n    EepromSaveData->setting_4B[1] = 0xE;\n    EepromSaveData->setting_4B[2] = 0xF;\n    EepromSaveData->setting_4E = 1;\n    EepromSaveData->setting_4F = 1;\n    EepromSaveData->setting_50 = 1;\n}",
+      "sourceUrl": "https://github.com/macabeus/snowboardkids2-decomp/blob/63236cd8dce61b8a1b37765952eb340b66684476/src/title_screen.c#L545-L568",
+      "m2cCtx": true,
+      "proto": {
+        "unlockAllContent": {
+          "returnsVoid": true,
+          "params": []
+        }
+      }
     }
   ]
 }

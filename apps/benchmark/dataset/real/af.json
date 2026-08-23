@@ -493,6 +493,48 @@
       "funcC": "s16 atans_table(f32 x, f32 y) {\n    s32 tbl;\n\n    if (y >= 0.0f) {\n        if (x >= 0.0f) {\n            if (y <= x) {\n                if (y != 0.0f) {\n                    tbl = U_GetAtanTable(y, x);\n                } else {\n                    tbl = 0;\n                }\n            } else {\n                tbl = 0x4000 - U_GetAtanTable(x, y);\n            }\n        } else {\n            if (-x < y) {\n                tbl = U_GetAtanTable(-x, y) + 0x4000;\n            } else {\n                tbl = 0x8000 - U_GetAtanTable(y, -x);\n            }\n        }\n    } else if (x < 0.0f) {\n        if (-y <= -x) {\n            tbl = U_GetAtanTable(-y, -x) + 0x8000;\n        } else {\n            tbl = 0xC000 - U_GetAtanTable(-x, -y);\n        }\n    } else {\n        if (x < -y) {\n            tbl = U_GetAtanTable(x, -y) + 0xC000;\n        } else {\n            tbl = -U_GetAtanTable(-y, x);\n        }\n    }\n    return tbl;\n}",
       "prependC": "typedef unsigned char       u8;     /* unsigned  8-bit */\ntypedef unsigned short      u16;    /* unsigned 16-bit */\ntypedef unsigned long       u32;    /* unsigned 32-bit */\ntypedef unsigned long long  u64;    /* unsigned 64-bit */\ntypedef signed char         s8;     /* signed  8-bit */\ntypedef short               s16;    /* signed 16-bit */\ntypedef long                s32;    /* signed 32-bit */\ntypedef long long           s64;    /* signed 64-bit */\ntypedef float   f32;    /* single prec floating point */\ntypedef double  f64;    /* double prec floating point */\ntypedef struct xyz_t {\n    /* 0x0 */ f32 x;\n    /* 0x4 */ f32 y;\n    /* 0x8 */ f32 z;\n} xyz_t; // size = 0xC\n\ntypedef float MtxF_t[4][4];\ntypedef union {\n    MtxF_t mf;\n    struct {\n        float xx, yx, zx, wx, xy, yy, zy, wy, xz, yz, zz, wz, xw, yw, zw, ww;\n    };\n} MtxF; // size = 0x40\ntypedef long\tMtx_t[4][4];\n\ntypedef union {\n    Mtx_t\t\tm;\n    long long int\tforce_structure_alignment;\n} Mtx;",
       "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/sys_math_atan.c#L101-L136"
+    },
+    {
+      "sym": "mPl_SceneNo2SoundRoomType",
+      "features": [
+        "switch-arms",
+        "branch"
+      ],
+      "note": "Fourteen scattered labels through one IDO jump table. asmlift lowers the dispatch with the offset the target has ALREADY scaled, so the recovered switch indexes the table twice over.",
+      "prependC": "typedef long s32;",
+      "funcC": "s32 mPl_SceneNo2SoundRoomType(s32 arg0) {\n    switch (arg0) {\n        case 20:\n            return 1;\n        case 6:\n        case 9:\n        case 12:\n        case 14:\n        case 18:\n        case 21:\n        case 31:\n            return 2;\n        case 17:\n        case 22:\n        case 23:\n        case 24:\n        case 25:\n        case 29:\n            return 3;\n        default:\n            return 0;\n    }\n}",
+      "sourceUrl": "https://github.com/macabeus/af/blob/4515c15b5848b1ec85e78cb3776e12990cafe004/src/overlays/gamestates/ovl_play/m_play.c#L832-L854",
+      "proto": {
+        "mPl_SceneNo2SoundRoomType": {
+          "returnsVoid": false,
+          "params": [
+            "s32 arg0"
+          ]
+        }
+      }
+    },
+    {
+      "sym": "getScissorView",
+      "features": [
+        "struct",
+        "field",
+        "pointer",
+        "memory"
+      ],
+      "note": "One whole-object assignment of a 16-byte struct. asmlift’s C backend has no aggregate assignment at all — a multi-word copy is only ever emitted as N independent per-word statements, and no per-word spelling reproduces IDO’s block-move temp rotation. Chosen after the rule that a row must also be one m2c matches was dropped — m2c’s outcome was not a selection criterion for this row.",
+      "prependC": "typedef signed char s8;\ntypedef long s32;\ntypedef struct Viewport {\n    /* 0x00 */ s32 topY;\n    /* 0x04 */ s32 bottomY;\n    /* 0x08 */ s32 leftX;\n    /* 0x0C */ s32 rightX;\n} Viewport; // size = 0x10\ntypedef struct View {\n    /* 0x000 */ s32 unk_000;\n    /* 0x004 */ void* gfxCtx;\n    /* 0x008 */ Viewport viewport;\n    /* 0x018 */ s8 unk_018[0x110];\n} View; // size = 0x128",
+      "funcC": "void getScissorView(View* view, Viewport* viewport) {\n    *viewport = view->viewport;\n}",
+      "sourceUrl": "https://github.com/macabeus/af/blob/4515c15b5848b1ec85e78cb3776e12990cafe004/src/code/m_view.c#L106-L108",
+      "m2cCtx": true,
+      "proto": {
+        "getScissorView": {
+          "returnsVoid": true,
+          "params": [
+            "View* view",
+            "Viewport* viewport"
+          ]
+        }
+      }
     }
   ]
 }

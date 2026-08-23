@@ -158,5 +158,13 @@
   "HuMemAllocTag": {
     "tu": "HuMemAllocTag.i.gz",
     "ctx": "ctx-ac475e3b0255.i.gz"
+  },
+  "func_80047D4C_4894C": {
+    "tu": "func_80047D4C_4894C.i.gz",
+    "ctx": "ctx-4592024189d5.i.gz"
+  },
+  "HuPrcChildUnlink": {
+    "tu": "HuPrcChildUnlink.i.gz",
+    "ctx": "ctx-0eb9f921480c.i.gz"
   }
 }

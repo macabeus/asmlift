@@ -158,5 +158,13 @@
   "sub_803213C": {
     "tu": "sub_803213C.i.gz",
     "ctx": "ctx-c4f423915ef9.i.gz"
+  },
+  "Player_800D978": {
+    "tu": "Player_800D978.i.gz",
+    "ctx": "ctx-630e29f77ebe.i.gz"
+  },
+  "sub_8001FD4": {
+    "tu": "sub_8001FD4.i.gz",
+    "ctx": "ctx-821a493af5a3.i.gz"
   }
 }

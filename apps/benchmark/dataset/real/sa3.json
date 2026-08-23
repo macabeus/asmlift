@@ -526,6 +526,94 @@
         }
       },
       "m2cCtx": true
+    },
+    {
+      "sym": "Player_800D978",
+      "features": [
+        "bitfield",
+        "struct",
+        "field",
+        "pointer",
+        "mask"
+      ],
+      "note": "A WRITE to a declared bitfield member (`u8 unk2D_0 : 4`). asmlift can only spell a bitfield as a READ of a named global carrying map-declared bitfield facts, so the read-modify-write comes out as a byte-width mask where agbcc masks at int width. Chosen after the rule that a row must also be one m2c matches was dropped — m2c’s outcome was not a selection criterion for this row.",
+      "prependC": "#include \"global.h\"\n#include \"core.h\"\n#include \"flags.h\"\n#include \"trig.h\"\n#include \"module_unclear.h\"\n#include \"code_z_1.h\"\n#include \"malloc_ewram.h\"\n#include \"malloc_vram.h\"\n#include \"lib/m4a/m4a.h\"\n#include \"game/camera.h\"\n#include \"game/interactables/ice_launcher.h\"\n#include \"game/interactables/ramp.h\"\n#include \"game/player.h\"\n#include \"game/player_callbacks.h\"\n#include \"game/save.h\"\n#include \"game/stage.h\"\n#include \"constants/animations.h\"\n#include \"constants/anim_commands.h\" // for ANIM_CMD__PALETTE\n#include \"constants/move_states.h\"\n#include \"constants/songs.h\"\n#include \"constants/vram_hardcoded.h\"\n#include \"constants/zones.h\"",
+      "funcC": "void Player_800D978(Player *p)\n{\n    p->moveState &= 0xFFFDFFFF;\n    p->layer = PLAYER_LAYER_BACK;\n    Player_StopSong(p, SE_GRINDING);\n\n    p->charFlags.unk2D_0 = 0;\n    Player_8005380(p);\n}",
+      "sourceUrl": "https://github.com/macabeus/sa3/blob/a069e81bb4c7128e12bfb182bdcc49141ec5f7fb/src/game/stage/player.c#L7695-L7703",
+      "m2cCtx": true,
+      "proto": {
+        "Player_StopSong": {
+          "params": [
+            "Player *",
+            "u16 song"
+          ],
+          "returnsVoid": true
+        },
+        "Player_8005380": {
+          "params": [
+            "Player *p"
+          ],
+          "returnsVoid": true
+        },
+        "Player_800D978": {
+          "returnsVoid": true,
+          "params": [
+            "Player *p"
+          ]
+        }
+      }
+    },
+    {
+      "sym": "sub_8001FD4",
+      "features": [
+        "global",
+        "pointer",
+        "branch",
+        "value-home"
+      ],
+      "note": "Two named globals’ addresses are bound to locals and then live across calls. asmlift respells `&global` at each use because every homing lever it has requires a dereference over the base, and an address consumed only as a call argument is outside all of them — so the callee-saved registers, the prologue pool loads and the wider push/pop set are all missing. Chosen after the rule that a row must also be one m2c matches was dropped — m2c’s outcome was not a selection criterion for this row.",
+      "prependC": "#include \"global.h\"\n#include \"core.h\"\n#include \"flags.h\"\n#include \"lib/m4a/m4a.h\"\n#include \"lib/agb_flash/agb_flash.h\"\n#include \"lib/agb_flash/flash_internal.h\"\n#include \"malloc_ewram.h\"\n#include \"malloc_vram.h\"\n#include \"game/save.h\"\n#include \"game/stage.h\"\n#include \"gba/defines.h\"\n#include \"constants/characters.h\"\n#include \"constants/zones.h\"",
+      "funcC": "s32 sub_8001FD4(void)\n{\n    SaveGame *srcSave = LOADED_SAVE;\n    SaveGame *dstSave = &gUnknown_03000980;\n    SaveSectorData *sector = &gSaveSectorData;\n\n    ValidateSave(srcSave);\n    CpuCopy32(srcSave, dstSave, sizeof(SaveGame));\n    PackSaveSector(sector, dstSave);\n\n    {\n        s16 sectorId = sub_8001A90();\n        if (sectorId < 0) {\n            return -1;\n        } else {\n            return WriteSaveSector(sectorId, sector);\n        }\n    }\n}",
+      "sourceUrl": "https://github.com/macabeus/sa3/blob/a069e81bb4c7128e12bfb182bdcc49141ec5f7fb/src/code_0_0.c#L952-L970",
+      "m2cCtx": true,
+      "proto": {
+        "ValidateSave": {
+          "params": [
+            "SaveGame *save"
+          ],
+          "returnsVoid": true
+        },
+        "PackSaveSector": {
+          "params": [
+            "SaveSectorData *sector",
+            "SaveGame *save"
+          ],
+          "returnsVoid": true
+        },
+        "WriteSaveSector": {
+          "params": [
+            "s16 sectorId",
+            "SaveSectorData *sector"
+          ],
+          "returnsVoid": false
+        },
+        "sub_8001A90": {
+          "params": [],
+          "returnsVoid": false
+        },
+        "sub_8001FD4": {
+          "returnsVoid": false,
+          "params": []
+        },
+        "CpuSet": {
+          "params": [
+            "const void *src",
+            "void *dest",
+            "u32 control"
+          ],
+          "returnsVoid": true
+        }
+      }
     }
   ]
 }
