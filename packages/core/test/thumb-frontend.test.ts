@@ -1424,8 +1424,9 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     // base LIVE IN AN ARGUMENT REGISTER AT A `bl`; the DMA-fill idiom PUBLISHES the base to a
     // device register instead, and that path never asks the gate anything. So a published capture
     // in a frame far wider than one word lifts today, slots above it and all — which is why no
-    // widening of `localArea === 4` can reach `kleod:LoadBGTilemapData` (instrumented: localArea=60,
-    // frameBasePassedToCallee=false, and its lift is byte-identical with the conjunct widened).
+    // widening of `localArea === 4` can reach klonoa's `LoadBGTilemapData` (instrumented:
+    // localArea=60, frameBasePassedToCallee=false, and its lift is byte-identical with the
+    // conjunct widened).
     //
     // Compiled, frame 0xc, with the two incoming pointers spilled into the slots above the object:
     // `void dmawide(u16 *dst, s32 n){ vu16 tmp; s32 t0..t7; tmp = 0; t0 = h(0); … t7 = h(7);
