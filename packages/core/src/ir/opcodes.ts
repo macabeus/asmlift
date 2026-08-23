@@ -125,12 +125,16 @@ export const OPCODES = {
   // "the audit ran" a verifier-checkable fact instead of a convention: a frontend that emits a
   // laddr and skips the audit fails verify loudly instead of rendering `&undefined`.
   laddr: { operands: 0, results: 1, requiredAttrs: ['off', 'width', 'signed'] },
-  // An UNDEFINED value: storage nobody could have written before this read. The C declared a local
-  // with no initialiser and assigned it only inside some arms of a conditional or `switch` (a
-  // `switch` with no `default` being the commonest source), so the read is legal to compile and the
-  // compiler emitted the unassigned path faithfully.
+  // An UNDEFINED value: a read of storage that carries no INPUT — nothing was entitled to hand this
+  // function a value there, and none of its own stores reached it on this path. Deliberately NOT
+  // "storage nobody could have written": a callee-saved register holds the CALLER's value at entry,
+  // which is exactly what the prologue pushes it for, and the read is undefined all the same
+  // because the ABI gives no caller a way to pass an argument in one. The C declared a local with
+  // no initialiser and assigned it only inside some arms of a conditional or `switch` (a `switch`
+  // with no `default` being the commonest source), so the read is legal to compile and the compiler
+  // emitted the unassigned path faithfully.
   //
-  // "Nobody" is proved differently in the two places a local lives, and `frontend/ssa.ts`
+  // "No input" is established differently in the two places a local lives, and `frontend/ssa.ts`
   // (LiveInModel) is where each is declared:
   //   • a FRAME SLOT is storage whose only writer is this function's own stores — SOLE WRITER, not
   //     merely "owns the storage", because a frame the function owns can still be written by
