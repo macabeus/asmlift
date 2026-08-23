@@ -27,7 +27,7 @@ import { FrontendUnsupportedError } from './errors';
 import { assertInputFormat } from './format';
 import type { Frontend } from './frontend';
 import { opaqueDest } from './opaque';
-import { abiSortEntryParams, fallbackArgc, makeSsaBuilder, stackSlotKey } from './ssa';
+import { abiSortEntryParams, fallbackArgc, makeSsaBuilder, slotKeyOffset, stackSlotKey } from './ssa';
 
 interface Instr {
   /** the CANONICAL spelling — legacy names are normalised (see LEGACY_MNEMONICS) so that every
@@ -240,6 +240,12 @@ const immEq = (op: string | undefined, want: number): boolean =>
 // `toString`) answering true would let a junk token pass that test instead of poisoning the frame
 // depth. Unreachable from real assembly; the guarantee should not depend on that.
 const REG_NUM: Record<string, number> = Object.assign(Object.create(null), { sp: 13, lr: 14, pc: 15 });
+
+// Registers Thumb-1's `push` cannot name, in every spelling this ISA's asm uses for them. Saving
+// one takes agbcc's `mov rLow, rHi; push {rLow}`, which is why the prologue's save set has to read
+// the `mov` as well as the list (see `savedRegs`). Spellings, not numbers: nothing here normalises
+// a register name, so `sl` and `r10` are separate keys everywhere the frontend uses one.
+const HIGH_REGS: ReadonlySet<string> = new Set(['r8', 'r9', 'r10', 'r11', 'r12', 'sb', 'sl', 'fp', 'ip']);
 
 // Thumb-1 data-processing mnemonics that write the condition flags when their destination is a LOW
 // register — which is all of them on this ISA, `s`-suffix or not (the assembler picks the encoding).
@@ -1373,13 +1379,39 @@ export function lift(
     return live;
   })();
 
+  // A `scratchRegs` entry outside `nonArgRegs` is inert, and inert is how a partition rots: the
+  // list would go on reading as if it exempted something. Refused as a target bug, like the
+  // argRegs/uninitRegs contradiction, rather than declined as a property of the input.
+  const scratchRegs: ReadonlySet<string> = new Set(target.scratchRegs ?? []);
+  for (const r of scratchRegs) {
+    if (!(target.nonArgRegs ?? []).includes(r)) {
+      throw new Error(`target '${target.id}': scratch register ${r} is not among the non-argument registers`);
+    }
+  }
+
   // --- ISA-neutral SSA construction (shared Braun builder) ---
-  // THE FRAME PARTITION (frontend/ssa.ts, FrameModel). `[0, localArea)` is the whole of what this
+  // THE LIVE-IN PARTITION (frontend/ssa.ts, LiveInModel). `[0, localArea)` is the whole of what this
   // function owns: an incoming stack argument is keyed `@sarg<k>` rather than `sp@<off>` precisely
   // because it sits at or above this frame, so `callerParams` is empty. `localArea` is 0 whenever
   // the prologue walk cannot measure the frame, and the empty range then refuses every slot —
   // `slotOff` applies the same bound when minting keys, so this is the independent check.
-  const ssa = makeSsaBuilder(name, asmBlocks.length, preds, () => ({ ownedLocals: { from: 0, to: localArea } }));
+  //
+  // The register half needs both of its facts, and they come from different places. The target says
+  // which registers no caller can hand a value over in; `savedRegs` says which ones THIS function
+  // saved, and so could have homed a local in. A register in only the first is one the ABI does not
+  // describe — hand-written asm with a private convention, or a mid-function fragment — and it keeps
+  // the treatment a target claiming no partition gets. The save is asked only of the registers the
+  // ABI requires preserving: `target.scratchRegs` need none, so demanding one there would refuse a
+  // local the compiler was entitled to put in place with no prologue at all.
+  const ssa = makeSsaBuilder(name, asmBlocks.length, preds, () => ({
+    ownedLocals: { from: 0, to: localArea },
+    ...(target.nonArgRegs
+      ? {
+          uninitRegs: target.nonArgRegs.filter((r) => scratchRegs.has(r) || savedRegs.has(r)),
+          argRegs: target.argRegs,
+        }
+      : {}),
+  }));
   const { fn, irBlocks, readVar, writeVar, paramReg } = ssa;
 
   const constVal = (n: number, b: number): Value => {
@@ -2075,6 +2107,54 @@ export function lift(
       }
     }
     return Math.max(0, reserved);
+  })();
+
+  // WHAT THE PROLOGUE SAVED — the second half of the register partition (frontend/ssa.ts,
+  // LiveInModel.uninitRegs), in operand spellings. "The ABI does not pass arguments here" is a fact
+  // about the CALLER and cannot on its own make a def-less read an uninitialised local; what does is
+  // that the compiler homed a local in the register, which it may only do after saving it. Asm that
+  // saves nothing follows no such convention, and some of it really is handed live values there:
+  // the MP2K engine's hand-written `ChnVolSetAsm`, vendored in klonoa, sa3 and pokeemerald alike,
+  // takes two pointers in r4/r5 and has no prologue at all — classified by the ABI alone it lost its
+  // signature and stored through reads of registers nothing ever wrote.
+  //
+  // PER REGISTER, because saving r5 says nothing about r4 — a mid-function fragment reached by
+  // agbcc's `bl`-as-a-long-branch saves what it uses and is handed the rest.
+  //
+  // The prologue is the LEADING run of saves and reservations, so a `push` in the body cannot join
+  // the set. `HIGH_REGS` have no `push` encoding, so agbcc saves them as `mov rLow, rHi; push
+  // {rLow}` and the source of such a `mov` joins the set when its low register is pushed — every
+  // high-register inhabitant in the corpus goes through that idiom.
+  const savedRegs = ((): ReadonlySet<string> => {
+    const saved = new Set<string>();
+    const carries = new Map<string, string>(); // low register ← the high one moved into it
+    for (const x of asmBlocks[0].instrs) {
+      if (x.mnemonic === 'push') {
+        const list = definiteRegList(
+          x.ops
+            .join(',')
+            .replace(/[{}]/g, '')
+            .split(',')
+            .map((r) => r.trim())
+            .filter(Boolean),
+        );
+        if (list === null) {
+          break; // a list this cannot read is a save set this cannot vouch for
+        }
+        for (const r of list) {
+          saved.add(r);
+          const hi = carries.get(r);
+          if (hi !== undefined) {
+            saved.add(hi);
+          }
+        }
+      } else if (/^movs?$/.test(x.mnemonic) && HIGH_REGS.has(x.ops[1] ?? '') && !HIGH_REGS.has(x.ops[0] ?? '')) {
+        carries.set(x.ops[0], x.ops[1]);
+      } else if (spAdjust(x) === null) {
+        break;
+      }
+    }
+    return saved;
   })();
 
   // …AND THE FRAME IS THAT OBJECT. `frameBasePassedToCallee` is a fact about a register; this is
@@ -3365,7 +3445,14 @@ export function lift(
       //
       // On an escape and not on "a laddr exists": an address dereferenced only in-function cannot
       // be written by anyone else, and the overlap checks above cover its aliasing.
-      if (mayWrite.size > 0 && irBlocks.some((blk) => blk.ops.some((op) => op.opcode === 'undef'))) {
+      //
+      // FRAME undefs only. A register-keyed one says a local lives in a register the ABI does not
+      // pass arguments in, and no address reaches a register — the escape this retraction is about
+      // cannot touch it, and counting it would refuse the whole function for an unrelated escape.
+      const undefSlots = irBlocks.some((blk) =>
+        blk.ops.some((op) => op.opcode === 'undef' && slotKeyOffset(op.attrs.key as string) !== null),
+      );
+      if (mayWrite.size > 0 && undefSlots) {
         fail(
           'the captured address escapes, so a callee may write any frame offset and an unstored slot is not provably uninitialised',
         );
@@ -3534,9 +3621,11 @@ export function lift(
   // the `r8` live-in and `@sarg8` tied at 8, the sort is stable, the prologue reads r8 first — so
   // ABI argument 8 was emitted as `a9` and every parameter after it was off by one.
   //
-  // A callee-saved register read before it is written is not an argument in any case: it is a
-  // fragment artifact or an unmodelled effect, and the honest place for it is after everything the
-  // convention actually describes.
+  // The register partition (LiveInModel.uninitRegs) takes most of r4-sl before they reach here — one
+  // the ABI does not pass arguments in and this function saved is an uninitialised local, not a
+  // parameter. What still ranks 99 is `lr`/`pc`, which the partition does not list, and an r4-sl the
+  // prologue did not save. Not an argument either way, and the honest place for one is after
+  // everything the convention actually describes.
   abiSortEntryParams(entry, preds[0].length > 0, (v) => {
     const key = paramReg.get(v) ?? '';
     // an incoming STACK argument ranks by its ABI index, after every register argument

@@ -518,7 +518,7 @@ export function lift(
   });
 
   // NO FRAME PARTITION IS CLAIMED, so every def-less slot read refuses (frontend/ssa.ts,
-  // FrameModel). This frontend has no frame bound at all — `addiu sp,sp,±N` is transparent and
+  // LiveInModel). This frontend has no frame bound at all — `addiu sp,sp,±N` is transparent and
   // every word sp-relative access becomes `sp@<rawOff>` — so its slot keys span O32's CALLER-owned
   // register-parameter home area and the incoming stack arguments above it, where a def-less read
   // is argument 5, not an uninitialised local.

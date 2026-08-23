@@ -35,6 +35,26 @@ export interface TargetDescription {
   compiler: string; // 'agbcc' / 'ido' / 'gcc' / 'mwcc'
   argRegs: string[];
   returnReg: string;
+  /** Registers this ABI does NOT pass arguments in — half of what makes a def-less live-in read an
+   *  uninitialised local rather than an argument. The other half is a measurement the FRONTEND
+   *  owes (did this function save the register), and the rule that combines them is in
+   *  frontend/ssa.ts (LiveInModel.uninitRegs). ABSENT ⇒ no register partition is claimed, which is
+   *  what MIPS and PPC take today.
+   *
+   *  It must be DISJOINT from `argRegs`, and the frontend hands both to the builder so that is
+   *  checked rather than trusted (`checkedLiveInModel`): a spelling that lands in both lists used
+   *  to delete a parameter and emit `uninit_<reg>` in its place, silently. */
+  nonArgRegs?: readonly string[];
+  /** Of `nonArgRegs`, the ones this ABI does NOT require a callee to preserve — so the compiler may
+   *  home a local in one with no prologue save at all, and the save half of the rule above does not
+   *  apply to it. AAPCS's `ip` is the whole set here, and agbcc really does use it that way.
+   *
+   *  UNDER-stating this list only makes the classification stricter: an unlisted register whose save
+   *  the frontend cannot find falls back to being a parameter, which is what a target claiming no
+   *  partition gets. OVER-stating it is the unsound direction — a callee-saved register listed here
+   *  is classified with no evidence at all, which is the defect the save half exists to close. Every
+   *  entry must appear in `nonArgRegs`; the frontend refuses a target where one does not. */
+  scratchRegs?: readonly string[];
   // HARDWARE / ISA facts — independent of the compiler.
   capabilities: {
     endianness: 'little' | 'big'; // consumed by structureOptionsFor (bitfield extract recognition is LSB-first)
@@ -122,6 +142,16 @@ export const ARMV4T_AGBCC: TargetDescription = {
   compiler: 'agbcc',
   argRegs: ['r0', 'r1', 'r2', 'r3'],
   returnReg: 'r0',
+  // AAPCS passes four in r0-r3, so nothing above them can be an argument. The ATPCS aliases are
+  // the spellings this ISA's asm actually uses: censused over the vendored ARM asm, `sb`/`sl`/`ip`/
+  // `fp` all occur as operands and no `v<n>`/`a<n>` form does. `sp`, `lr` and `pc` are deliberately
+  // absent — sp is the frame, lr is the return address, and neither is a value a source declared.
+  nonArgRegs: ['r4', 'r5', 'r6', 'r7', 'r8', 'r9', 'r10', 'r11', 'r12', 'sb', 'sl', 'fp', 'ip'],
+  // AAPCS makes r4-r11 callee-saved and leaves r12 (`ip`, the intra-procedure-call scratch) to the
+  // caller, so a local in `ip` needs no save and agbcc puts one there: `dma_fill_uninit` compiles to
+  // `mov ip, r1` in two switch arms, no save anywhere, and a `mov r0, ip` past a third arm that
+  // writes nothing — an uninitialised local by construction.
+  scratchRegs: ['r12', 'ip'],
   // GBA hardware, which this target implies: agbcc is the GBA compiler and this is the only
   // armv4t entry, so `armv4t + agbcc` is the platform. Stated because nothing else states it.
   capabilities: {

@@ -9,7 +9,13 @@ import { Block, Op, Value, mkOp, mkValue } from '../src/ir/core';
 import { T } from '../src/ir/types';
 import { type Gate, without } from '../src/l3/gates';
 import type { UseSite } from '../src/structure/analysis';
-import { PREUPDATE_SINK_GATES, type SinkCandidate, makeLoopHazards, updateWriteSet } from '../src/structure/hazards';
+import {
+  PREUPDATE_SINK_GATES,
+  type SinkCandidate,
+  makeLoopHazards,
+  sunkCopyOverDroppedUndef,
+  updateWriteSet,
+} from '../src/structure/hazards';
 
 const v = (): Value => mkValue(T.s(32));
 
@@ -318,6 +324,26 @@ describe('sinkablePreUpdateSlots', () => {
     expect(h.sinkablePreUpdateSlots(header, exit, [p], body, empty, new Set(['v0']), ablated)).toEqual(new Set([0]));
   });
 
+  test('a BLOCK PARAM inside the body under the destination name counts as busy', () => {
+    // THE SHAPE THE UNDEF EDGE-COPY ELISION LEANS ON (structure.ts, undefCarriesNothing). A merge
+    // INSIDE the loop that adopted the exit param's name is what would put a sunk copy at the top of
+    // the body ahead of an undef edge into that same name — the one relocation `writesBefore` does
+    // not model. `definedInBody` answers it through its BLOCK-PARAM branch (the value has no
+    // defining op at all), so the sink refuses and the collision has no inhabitant. Pinned here
+    // because that branch, not the loop's single-exit rule, is what actually refuses it.
+    const { p, q, header, exit } = scaffold();
+    const other = v();
+    const merge: Block = { params: [other], ops: [] };
+    const body = new Set([header, merge]);
+    const h = make({
+      varName: names([p, 'v0'], [q, 'v1'], [other, 'v1']),
+      liveIn: new Map([[header, new Set<Value>()]]),
+    });
+    expect(h.sinkablePreUpdateSlots(header, exit, [p], body, empty, new Set(['v0']))).toEqual(new Set());
+    const ablated = without(PREUPDATE_SINK_GATES, 'dest-free-inside-loop');
+    expect(h.sinkablePreUpdateSlots(header, exit, [p], body, empty, new Set(['v0']), ablated)).toEqual(new Set([0]));
+  });
+
   test('ablating dest-free-inside-loop admits a name the loop still reads', () => {
     const { p, q, header, exit, body } = scaffold();
     const other = v();
@@ -389,5 +415,52 @@ describe('loopUpdateHazard (the composition)', () => {
     expect(h.loopUpdateHazard(cond, [], none, new Map(), new Set(['v0']), null, new Set())).toBe(true);
     expect(h.loopUpdateHazard(cond, [arg], none, new Map(), new Set(['v1']), null, new Set())).toBe(true);
     expect(h.loopUpdateHazard(cond, [arg], none, new Map(), new Set(['v9']), null, new Set())).toBe(false);
+  });
+});
+
+describe('sunkCopyOverDroppedUndef', () => {
+  // The postcondition on the pair of write RELOCATIONS (hazards.ts). No input inhabits the collision
+  // — `dest-free-inside-loop` refuses the sink first (the test above) — so the predicate is pinned
+  // here directly, on hand-built records, rather than through a function nothing can produce.
+  const blk = (): Block => ({ params: [], ops: [] });
+
+  test('no collision when the two records share no name', () => {
+    const pred = blk();
+    const header = blk();
+    const reaches = () => true;
+    expect(sunkCopyOverDroppedUndef([{ name: 'v0', pred }], [{ name: 'v1', home: header }], reaches)).toBe(null);
+  });
+
+  test('a sunk copy under the dropped name, in a loop that REACHES the edge, is the collision', () => {
+    const pred = blk();
+    const header = blk();
+    expect(
+      sunkCopyOverDroppedUndef(
+        [{ name: 'v0', pred }],
+        [{ name: 'v0', home: header }],
+        (h, p) => h === header && p === pred,
+      ),
+    ).toBe('v0');
+  });
+
+  test('the same name in a loop the edge is NOT inside is not a collision', () => {
+    // The name class is function-wide, so a bare name match is not enough: an unrelated loop
+    // elsewhere writing `v0` says nothing about an edge this one cannot reach.
+    const pred = blk();
+    const header = blk();
+    expect(sunkCopyOverDroppedUndef([{ name: 'v0', pred }], [{ name: 'v0', home: header }], () => false)).toBe(null);
+  });
+
+  test('the header being the edge itself counts — a self-loop writes before its own back edge', () => {
+    const header = blk();
+    expect(
+      sunkCopyOverDroppedUndef([{ name: 'v0', pred: header }], [{ name: 'v0', home: header }], (_h, p) => p !== header),
+    ).toBe('v0');
+  });
+
+  test('either record empty is vacuously safe', () => {
+    const pred = blk();
+    expect(sunkCopyOverDroppedUndef([{ name: 'v0', pred }], [], () => true)).toBe(null);
+    expect(sunkCopyOverDroppedUndef([], [{ name: 'v0', home: blk() }], () => true)).toBe(null);
   });
 });

@@ -472,3 +472,36 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
 
   return { readsClobbered, loopEscapeHazard, loopUpdateHazard, sinkablePreUpdateSlots, sameAtEntry, loopWriteSet };
 }
+
+/** THE WRITE RELOCATION THE UNDEF EDGE-COPY ELISION CANNOT SEE, as a postcondition on a whole
+ *  function. `undefCarriesNothing` (structure.ts) drops the copy into `name` on the edge out of
+ *  `pred` after proving no value in `name`'s class has a definition able to run before that edge.
+ *  It reads each such definition's home off `paramBlock`/`opBlock`, and a SUNK pre-update exit copy
+ *  is written somewhere else than its home says: its destination is the loop EXIT's param, so the
+ *  model homes it after the loop, while `preUpdateCopies` really writes it at the top of the body,
+ *  on every iteration, ahead of any edge inside that body.
+ *
+ *  Nothing today puts the two together — a merge inside the body that adopted the exit param's name
+ *  is a block param `definedInBody` sees, so `dest-free-inside-loop` refuses the sink before it
+ *  starts. But that gate carries its own KNOWN GAP (the natural-loop body excludes an early-return
+ *  arm's blocks, so a name assigned only there is invisible to it), which makes the pair a
+ *  conjecture rather than a proof. Checked here so that a widening of either — a broader sink, or a
+ *  naming pass that lets a body merge adopt an exit param's name — DECLINES instead of silently
+ *  substituting a defined value for the undefined one the machine leaves in place.
+ *
+ *  `reaches` is the caller's reachability (structure.ts's `reachFrom`), passed in so this stays a
+ *  pure function of the two records. Returns the colliding name, or null. */
+export function sunkCopyOverDroppedUndef(
+  drops: ReadonlyArray<{ name: string; pred: Block }>,
+  sunkCopies: ReadonlyArray<{ name: string; home: Block }>,
+  reaches: (home: Block, pred: Block) => boolean,
+): string | null {
+  for (const d of drops) {
+    for (const s of sunkCopies) {
+      if (s.name === d.name && (s.home === d.pred || reaches(s.home, d.pred))) {
+        return d.name;
+      }
+    }
+  }
+  return null;
+}

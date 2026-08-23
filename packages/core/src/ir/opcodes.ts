@@ -125,27 +125,38 @@ export const OPCODES = {
   // "the audit ran" a verifier-checkable fact instead of a convention: a frontend that emits a
   // laddr and skips the audit fails verify loudly instead of rendering `&undefined`.
   laddr: { operands: 0, results: 1, requiredAttrs: ['off', 'width', 'signed'] },
-  // An UNDEFINED value: storage whose ONLY writer is this function's own stores, read on a path
-  // where none of them ran. The C declared a local with no initialiser and assigned it only inside
-  // some arms of a conditional or `switch` (a `switch` with no `default` being the commonest
-  // source), so the read is legal to compile and the compiler emitted the unassigned path faithfully.
+  // An UNDEFINED value: a read of storage that carries no INPUT — nothing was entitled to hand this
+  // function a value there, and none of its own stores reached it on this path. Deliberately NOT
+  // "storage nobody could have written": a callee-saved register holds the CALLER's value at entry,
+  // which is exactly what the prologue pushes it for, and the read is undefined all the same
+  // because the ABI gives no caller a way to pass an argument in one. The C declared a local with
+  // no initialiser and assigned it only inside some arms of a conditional or `switch` (a `switch`
+  // with no `default` being the commonest source), so the read is legal to compile and the compiler
+  // emitted the unassigned path faithfully.
   //
-  // SOLE WRITER, not merely "owns the storage": a frame the function owns can still be written by
-  // someone else once an address into it escapes to a callee, which fills a wider object than any
-  // in-function access reveals. Whoever mints an `undef` owes the retraction on escape
-  // (frontend/thumb.ts, after the frame-object audit).
+  // "No input" is established differently in the two places a local lives, and `frontend/ssa.ts`
+  // (LiveInModel) is where each is declared:
+  //   • a FRAME SLOT is storage whose only writer is this function's own stores — SOLE WRITER, not
+  //     merely "owns the storage", because a frame the function owns can still be written by
+  //     someone else once an address into it escapes to a callee, which fills a wider object than
+  //     any in-function access reveals. Whoever mints one owes the retraction on escape
+  //     (frontend/thumb.ts, after the frame-object audit).
+  //   • a REGISTER the ABI does not pass arguments in AND this function's prologue SAVED cannot
+  //     carry a value a caller handed over, and has no address for anything else to reach it by, so
+  //     there is nothing to retract. The save is half of the premise, not a corroboration of it:
+  //     asm that follows no ABI is handed live values in registers it never saved.
   //
   // An opcode rather than a live-in because Braun's construction resolves a def-less read to a
-  // live-in, and a live-in of the entry block is a PARAMETER — right for a register, a fabricated
-  // argument for storage the function ALLOCATED. `frontend/ssa.ts` mints it where the partition
-  // says the storage is a local.
+  // live-in, and a live-in of the entry block is a PARAMETER — right for an argument register, a
+  // fabricated argument for anything else.
   //
   // Operand-free and pure like `laddr`, and out of raise/gvn.ts's NUMBERABLE set — where numbering
   // it would be VACUOUS rather than harmful, since two undefs in one function always carry
   // different keys. "Same key, therefore same value" is empty for a value that has none.
   //
-  // `key` names the storage (`sp@0`); the structurer reads it to name the local (`uninit_sp0`) and
-  // emits NO assignment — that absence is the recovery.
+  // `key` names the storage (`sp@0`, `r4`); the structurer reads it to name the local
+  // (`uninit_sp0`) and emits NO assignment — that absence is the recovery, and an edge argument
+  // that is one emits no copy either (structure.ts undefCarriesNothing).
   undef: { operands: 0, results: 1, requiredAttrs: ['key'] },
   // --- black-box escape hatch (keeps lifting total) ---
   // `effects: true`: an instruction asmlift could not model may do anything — write memory, trap,

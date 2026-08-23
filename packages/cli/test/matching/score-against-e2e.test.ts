@@ -42,6 +42,12 @@ describe('CLI --score-against (agbcc, real toolchain)', () => {
     expect(r.code).toBe(0);
     expect(r.stdout).toContain('ushr(u32 a0)');
     expect(r.stderr).toContain('(match)');
+    // WHICH TREE produced the score, on the score's own line — the wiring, not just the formatter
+    // (src/provenance.ts, provenance.test.ts). A run against different sources used to leave
+    // evidence identical to a clean one, and this is the only line anyone is told to quote.
+    expect(r.stderr).toMatch(
+      /asmlift: \[ranked\] \d+ candidate\(s\) scored, \d+ dropped, best [^\n]*\[asmlift source [0-9a-f]{7}[^\]]*\]\n/,
+    );
   });
 
   test('a failing user command is a loud scoring error, never a silent fallback', async () => {

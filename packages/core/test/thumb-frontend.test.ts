@@ -372,21 +372,71 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     expect(() => decompile('f', later, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
   });
 
-  test('a callee-saved live-in never takes an ARGUMENT slot from a stack argument', () => {
+  test('a callee-saved live-in is not an argument at all, so it cannot displace a stack one', () => {
     // A `/^r(\d+)$/` rank sent `sl`/`sb` to 99 but ranked `r8` at 8 and `r4` at 4 — invisible while
     // nothing else occupied ranks >= 4, a positional miscompile once stack arguments ranked there.
     // sa3's sub_80B6B3C is the live one: 10 arguments, `mov r5, r8` in its prologue, so the r8
     // live-in and @sarg8 tied at 8 and the stable sort gave the slot to whichever was read first —
     // the prologue. ABI argument 8 came out as `a9`, and everything after it shifted.
+    //
+    // The register partition answers it one step earlier: a register this ABI does not pass
+    // arguments in, saved by the prologue as this one is, never reaches the signature, so there is no
+    // tie left to break. The rank stays what a target declaring no partition gets, and `lr` still
+    // reaches it here.
     const hi =
       'f:\n\tpush\t{r4, r5, r6, r7, lr}\n\tmov\tr7, r8\n\tpush\t{r7}\n\tldr\tr0, [sp, #0x28]\n\tadd\tr0, r0, r7\n\tbx\tlr\n';
-    const src = decompile('f', hi, ARMV4T_AGBCC).source;
-    // ten parameters, and the STACK argument holds slot 8 — the r8 artifact ranks after them all
-    expect(src).toContain('s32 f(s32 a0, s32 a1, s32 a2, s32 a3, s32 a4, s32 a5, s32 a6, s32 a7, s32 a8, s32 a9)');
-    expect(src).toContain('return a8 + a9;');
-    // the same tie at the low end, where a phantom `r4` would otherwise outrank argument 5
-    const lo = 'f:\n\tpush\t{r5, lr}\n\tadd\tr5, r4, #1\n\tldr\tr0, [sp, #0x8]\n\tadd\tr0, r0, r5\n\tbx\tlr\n';
-    expect(decompile('f', lo, ARMV4T_AGBCC).source).toContain('return a4 + (a5 + 1);');
+    // NINE parameters — the stack argument holds slot 8, and the r8 live-in is an uninitialised local
+    expect(decompile('f', hi, ARMV4T_AGBCC).source).toBe(
+      's32 f(s32 a0, s32 a1, s32 a2, s32 a3, s32 a4, s32 a5, s32 a6, s32 a7, s32 a8) {\n' +
+        '    s32 uninit_r8;\n    return a8 + uninit_r8;\n}\n',
+    );
+    // The same at the low end, where a phantom `r4` would otherwise outrank argument 5. SAVED, which
+    // the `hi` case already is, and which the rule requires: the next test is the other side.
+    const lo =
+      'f:\n\tpush\t{r4, r5, lr}\n\tadd\tr5, r4, #1\n\tldr\tr0, [sp, #0xc]\n\tadd\tr0, r0, r5\n' +
+      '\tpop\t{r4, r5}\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(decompile('f', lo, ARMV4T_AGBCC).source).toBe(
+      's32 f(s32 a0, s32 a1, s32 a2, s32 a3, s32 a4) {\n    s32 uninit_r4;\n    return a4 + (uninit_r4 + 1);\n}\n',
+    );
+  });
+
+  // The other side of that fixture's premise, and the reason it had to be stated: the rule is
+  // "the compiler homed a local here", which is only true of a register the function SAVED.
+  test('a register the prologue never saved is not one the compiler homed a local in', () => {
+    // The MP2K engine's hand-written `ChnVolSetAsm` — vendored in klonoa, sa3 and pokeemerald
+    // alike — receives two pointers in r4/r5 by a private convention and has no prologue at all.
+    // Classified by the ABI alone it came out `s32 ChnVolSetAsm(void)` storing through
+    // `uninit_r4`, with no diagnostic: a correct two-pointer signature traded for C that reads
+    // whatever the registers happen to hold.
+    const noSave = 'f:\n\tldrb\tr0, [r4, #0x12]\n\tstrb\tr0, [r5, #2]\n\tbx\tlr\n';
+    expect(decompile('f', noSave, ARMV4T_AGBCC, { onGap: 'strict' }).source).toBe(
+      's32 f(u8 * a0, u8 * a1) {\n    s32 v0;\n    v0 = a0[18];\n    a1[2] = v0;\n    return v0;\n}\n',
+    );
+    // PER REGISTER, not per function: saving r5 says nothing about r4, and a mid-function fragment
+    // reached by agbcc's `bl`-as-a-long-branch is handed live values in registers it never saved
+    // while saving the ones it uses itself.
+    const half = 'f:\n\tpush\t{r5, lr}\n\tadd\tr5, r4, #1\n\tldr\tr0, [sp, #0x8]\n\tadd\tr0, r0, r5\n\tbx\tlr\n';
+    expect(decompile('f', half, ARMV4T_AGBCC).source).toBe(
+      's32 f(s32 a0, s32 a1, s32 a2, s32 a3, s32 a4, s32 a5) {\n    return a4 + (a5 + 1);\n}\n',
+    );
+    // r8-sl cannot be pushed directly, so agbcc saves them as `mov rLow, rHi; push {rLow}` — the
+    // shape every high-register inhabitant in the corpus goes through. Read literally, the save set
+    // would hold only the low register and the four of them would lose their local. (The `hi`
+    // fixture above is the positive half; this is what happens without the mov.)
+    const movless =
+      'f:\n\tpush\t{r4, r5, r6, r7, lr}\n\tpush\t{r7}\n\tldr\tr0, [sp, #0x28]\n\tmov\tr1, r8\n\tadd\tr0, r0, r1\n\tbx\tlr\n';
+    expect(decompile('f', movless, ARMV4T_AGBCC).source).toContain('s32 a9');
+  });
+
+  test('a register the ABI never asked anyone to preserve needs no save to hold a local', () => {
+    // AAPCS leaves r12 (`ip`) to the caller, so agbcc homes a local there with no prologue at all —
+    // `dma_fill_uninit` compiles to exactly this, `mov ip, rX` in some switch arms and a read past
+    // one that writes nothing. Demanding a save here would hand that local back to the signature as
+    // a fabricated parameter, which is what the rule was written to stop.
+    const scratch = 'f:\n\tcmp\tr0, #0x0\n\tbeq\t.L1\n\tmov\tip, r1\n.L1:\n\tmov\tr0, ip\n\tbx\tlr\n';
+    expect(decompile('f', scratch, ARMV4T_AGBCC, { onGap: 'strict' }).source).toBe(
+      's32 f(s32 a0, s32 a1) {\n    s32 uninit_ip;\n    if (a0 == 0) a1 = uninit_ip;\n    return a1;\n}\n',
+    );
   });
 
   // A guessed arity reads the argument REGISTERS, so it must respect what a call does to them.
@@ -579,10 +629,14 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     const two =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tcmp\tr0, #0\n\tbeq\t.L2\n\tstr\tr0, [sp]\n\tstr\tr0, [sp, #4]\n' +
       '.L2:\n\tldr\tr1, [sp]\n\tldr\tr2, [sp, #4]\n\tadd\tr0, r1, r2\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r3}\n\tbx\tr3\n';
-    // …and the names come from the KEYS, so each one points at the frame slot it stands for
+    // Each slot reaches the merge as its OWN variable, and neither carries the other's value. Only
+    // one is spelled by KEY: `sp@0`'s merge adopted the incoming parameter's name, so its undefined
+    // arm must overwrite `a0` — dropping that copy would hand the arm `a0`'s defined value instead
+    // (undefCarriesNothing, structure.ts). `sp@4`'s merge names nothing else, so its undefined arm
+    // assigns nothing and `v0` IS that uninitialised local.
     expect(decompile('f', two, ARMV4T_AGBCC).source).toBe(
-      's32 f(s32 a0) {\n    s32 v0;\n    s32 uninit_sp4;\n    s32 uninit_sp0;\n' +
-        '    if (a0 == 0) {\n        v0 = uninit_sp4;\n        a0 = uninit_sp0;\n    } else {\n        v0 = a0;\n    }\n' +
+      's32 f(s32 a0) {\n    s32 v0;\n    s32 uninit_sp0;\n' +
+        '    if (a0 == 0) {\n        a0 = uninit_sp0;\n    } else {\n        v0 = a0;\n    }\n' +
         '    return a0 + v0;\n}\n',
     );
   });
@@ -607,7 +661,12 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     test('DMA3SAD (+0) — the hardware reads the object, so the undef stands', () => {
       const src = decompile('f', escapeTo('0x00'), ARMV4T_AGBCC).source;
       expect(src).toContain('volatile s32 sp0;'); // the address still left the function
-      expect(src).toContain('uninit_sp4'); // …but nothing can write [sp,#4]
+      // …but nothing can write [sp,#4], so its merge still has an undefined arm: `v0` is that
+      // uninitialised local, declared and assigned only where the store runs.
+      expect(src).toBe(
+        's32 f(void) {\n    s32 v0;\n    volatile s32 sp0;\n    *(s32 *)67109076 = &sp0;\n' +
+          '    if (sp0 != 0) v0 = sp0;\n    return sp0 + v0;\n}\n',
+      );
     });
 
     test.each([
@@ -651,7 +710,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       ]);
       const withMap = decompile('f', escapeTo('0x00'), ARMV4T_AGBCC, { symbols }).source;
       expect(withMap).toContain('REG_DMA3SAD = &sp0;'); // the map really did rename it
-      expect(withMap).toContain('uninit_sp4'); // …and the undef still stands
+      expect(withMap).toContain('if (sp0 != 0) v0 = sp0;'); // …and the undef still stands
     });
 
     // A LITERAL register offset folds, because the predicate resolves an ADDRESS and `[r2, r5]`
@@ -659,7 +718,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     test('a register offset resolves when it is a literal and refuses when it is not', () => {
       const viaZero = escapeTo('0x00').replace('\tstr\tr4, [r2, #0x00]\n', '\tmov\tr5, #0x00\n\tstr\tr4, [r2, r5]\n');
       expect(viaZero).not.toBe(escapeTo('0x00'));
-      expect(decompile('f', viaZero, ARMV4T_AGBCC).source).toContain('uninit_sp4');
+      expect(decompile('f', viaZero, ARMV4T_AGBCC).source).toContain('if (sp0 != 0) v0 = sp0;');
 
       // …and a runtime offset is a base this cannot resolve, so it takes the conservative answer
       const viaParam = escapeTo('0x00').replace('\tstr\tr4, [r2, #0x00]\n', '\tstr\tr4, [r2, r0]\n');
@@ -701,13 +760,17 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     const captured =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tmov\tr4, sp\n\tldr\tr1, [r4]\n\tcmp\tr1, #0\n\tbeq\t.L2\n\tstr\tr1, [sp, #4]\n' +
       '.L2:\n\tldr\tr2, [sp, #4]\n\tadd\tr0, r1, r2\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r3}\n\tbx\tr3\n';
-    expect(decompile('f', captured, ARMV4T_AGBCC).source).toContain('uninit_sp4');
+    expect(decompile('f', captured, ARMV4T_AGBCC).source).toBe(
+      's32 f(void) {\n    s32 v0;\n    s32 sp0;\n    if (sp0 != 0) v0 = sp0;\n    return sp0 + v0;\n}\n',
+    );
     // POSITIVE CONTROL: the same undefined slot with no address taken at all still recovers, so the
     // guard is the escape and not something incidental about the shape.
     const noEscape =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tstr\tr0, [sp]\n\tldr\tr1, [sp]\n\tcmp\tr1, #0\n\tbeq\t.L2\n\tstr\tr1, [sp, #4]\n' +
       '.L2:\n\tldr\tr2, [sp, #4]\n\tadd\tr0, r1, r2\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r3}\n\tbx\tr3\n';
-    expect(decompile('f', noEscape, ARMV4T_AGBCC).source).toContain('uninit_sp4');
+    expect(decompile('f', noEscape, ARMV4T_AGBCC).source).toBe(
+      's32 f(s32 a0) {\n    s32 v0;\n    if (a0 != 0) v0 = a0;\n    return a0 + v0;\n}\n',
+    );
   });
 
   test('a push AFTER the reservation slides the slot window onto the pushed words', () => {
@@ -730,7 +793,9 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     const pushBefore =
       'f:\n\tpush\t{r4, lr}\n\tpush\t{r0}\n\tadd\tsp, sp, #-0x8\n\tcmp\tr0, #0\n\tbeq\t.L2\n\tstr\tr0, [sp]\n' +
       '.L2:\n\tldr\tr1, [sp]\n\tadd\tr0, r0, r1\n\tadd\tsp, sp, #0xc\n\tpop\t{r4}\n\tpop\t{r3}\n\tbx\tr3\n';
-    expect(decompile('f', pushBefore, ARMV4T_AGBCC).source).toContain('uninit_sp0');
+    expect(decompile('f', pushBefore, ARMV4T_AGBCC).source).toBe(
+      's32 f(s32 a0) {\n    s32 v0;\n    if (a0 != 0) v0 = a0;\n    return a0 + v0;\n}\n',
+    );
   });
 
   test('a word slot may not straddle the top of the reserved area', () => {
@@ -748,7 +813,9 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     const fits =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tcmp\tr0, #0\n\tbeq\t.L2\n\tstr\tr0, [sp, #4]\n' +
       '.L2:\n\tldr\tr1, [sp, #4]\n\tadd\tr0, r0, r1\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r3}\n\tbx\tr3\n';
-    expect(decompile('f', fits, ARMV4T_AGBCC).source).toContain('uninit_sp4');
+    expect(decompile('f', fits, ARMV4T_AGBCC).source).toBe(
+      's32 f(s32 a0) {\n    s32 v0;\n    if (a0 != 0) v0 = a0;\n    return a0 + v0;\n}\n',
+    );
   });
 
   test('the OUTGOING argument area is not a local, however far inside the frame it sits', () => {

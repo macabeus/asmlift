@@ -46,12 +46,22 @@ workspace, so without them the sibling checkouts do not resolve and the run meas
   writes:
 
   ```
-  asmlift: [ranked] 20608 candidate(s) scored, 0 dropped, best <label>: 531
+  asmlift: [ranked] 20608 candidate(s) scored, 0 dropped, best <label>: 531 [asmlift source 7362050]
   ```
 
   A score from a run that dropped candidates is not comparable to one that dropped none — and
   "0 dropped" is now something the run SAYS. It used to be spelled as an absent line, so a clean
   run, a truncated log and a killed run left identical evidence.
+
+- **The tree is part of the number too, and it is on that same line.** `[asmlift source <commit>]`
+  is the asmlift checkout the run loaded its code from; `+dirty` means `packages/` had uncommitted
+  changes, and `CHANGED DURING THE RUN` means the tree moved between the run's start and its end.
+  A reviewer's run of the command above returned **455** against a twice-reproduced **419** with a
+  spotless log — another session had written `packages/core/src/target.ts` inside that read-only
+  worktree at the minute it launched and restored it before it finished, so `git status` was clean
+  on both sides of the run. Rounds run in parallel worktrees other agents write to. If the stamp is
+  not a bare commit, the number is not comparable to anything; re-run it. `unversioned` means the
+  CLI was not run out of an asmlift checkout at all.
 
 ## Comparing two runs
 

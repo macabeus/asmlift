@@ -34,6 +34,7 @@ import { guessedArityNote } from './callees';
 import { type CommandCompilers, compilersFromCommand } from './compile-command';
 import { type AsmliftToolConfig, loadDecompConfig, resolveTarget } from './config';
 import { ObjectInputUnsupportedError, asmDataForObject, disasmObject, isElfObject } from './objfile';
+import { sampleSourceTree, sourceStamp } from './provenance';
 
 export { detectName };
 
@@ -387,6 +388,8 @@ export async function runCli(
     }
     const compile = compilers.compile;
     try {
+      // Sampled BEFORE the run and again after it — see provenance.ts for the run this exists for.
+      const treeBefore = sampleSourceTree();
       const { decompileRanked, decompileRankedParallel } = await import('./rank');
       const rankOpts = { backend, asmData, prototypes, symbols, compile, ...(onProgress ? { onProgress } : {}) };
       // jobs > 1 pools the candidate COMPILES; the ranking itself is the same code either way
@@ -413,9 +416,15 @@ export async function runCli(
       // stream, and "0 dropped" was asserted by the ABSENCE of the `[dropped]` line above — so a
       // clean run, a truncated log and a killed run left identical evidence for the claim this
       // loop's every published score rests on.
+      //
+      // …plus WHICH TREE produced them. The counts make a truncated run distinguishable from a clean
+      // one; the stamp makes a run against different SOURCES distinguishable from both, which no
+      // part of the log used to be (provenance.ts). On the same line as the score deliberately: the
+      // doc tells readers to quote this one line, so a stamp anywhere else is a stamp nobody pastes.
       const summary =
         `asmlift: [ranked] ${ranked.candidates.length} candidate(s) scored, ${ranked.dropped.length} dropped, ` +
-        `best ${ranked.best.label}: ${ranked.best.score.score}${ranked.best.score.match ? ' (match)' : ''}\n`;
+        `best ${ranked.best.label}: ${ranked.best.score.score}${ranked.best.score.match ? ' (match)' : ''} ` +
+        `[${sourceStamp(treeBefore, sampleSourceTree())}]\n`;
       return {
         code: ranked.best.score.match ? 0 : 1,
         stdout: ranked.best.source,

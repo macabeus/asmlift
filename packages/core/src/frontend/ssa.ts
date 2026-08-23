@@ -68,12 +68,13 @@ export interface SsaBuilder {
 // A virtual key must be outside its ISA's register grammar so it cannot collide with a real one, and
 // a key read with no reaching def becomes a function PARAMETER by the live-in path below — which is
 // how both of those capabilities get their parameters without a new opcode or pass.
-/** How this function's frame is PARTITIONED, in slot-key coordinates. RANGES rather than a verdict,
- *  so the classification below is checkable here: a frontend that is wrong about its own frame gets
- *  refused instead of believed, and a range that collapses to empty (an unmeasurable frame) stops
- *  claiming anything on its own. Ghidra carries the same partition as compiler-spec data
- *  (`<localrange>`, stack `<pentry>`) read by architecture-neutral code. */
-export interface FrameModel {
+/** What a def-less live-in MEANS here, in two coordinate systems — the frame in slot-key offsets,
+ *  the register file by key. RANGES and LISTS rather than a verdict, so the classification below is
+ *  checkable here: a frontend that is wrong about its own frame gets refused instead of believed,
+ *  and a range that collapses to empty (an unmeasurable frame) stops claiming anything on its own.
+ *  Ghidra carries the same partition as compiler-spec data (`<localrange>`, stack `<pentry>`) read
+ *  by architecture-neutral code. */
+export interface LiveInModel {
   /** Storage this function owns as LOCALS ⇒ a def-less read is an uninitialised local. `[from, to)`.
    *
    *  Asserts more than ownership: that this function's own stores are the ONLY writer. An address
@@ -84,19 +85,84 @@ export interface FrameModel {
    *  `[from, to)`. O32's register-parameter home area belongs to NEITHER range: caller-owned, but
    *  not an argument. */
   callerParams?: { from: number; to: number };
+  /** Registers a def-less read of which is an uninitialised local the compiler put in a register.
+   *  TWO facts, and the frontend owes both: the ABI passes no argument there (`target.nonArgRegs`,
+   *  so no caller could have handed a value over, however early the read happens) AND this function
+   *  saved the register (so it is one the compiler was free to home a local in). The ABI half alone
+   *  describes the CALLER, and asm that follows no ABI — hand-written, or a mid-function fragment,
+   *  which klonoa's `bl`-as-a-long-branch splits produce for real — is genuinely handed live values
+   *  in registers it never saved. Passing the ABI list unfiltered cost the MP2K engine's
+   *  `ChnVolSetAsm` its two-pointer signature and left it storing through `uninit_r4`, silently.
+   *
+   *  The save is a MEASUREMENT, like the frame's, and belongs to whoever can make it — Thumb reads
+   *  the leading push run (`savedRegs`); a frontend that cannot measure it passes nothing here and
+   *  keeps the parameter it would have got anyway.
+   *
+   *  The frame's sole-writer obligation has no counterpart here and needs none: a register has no
+   *  address, so nothing outside this function can name it and there is no escape to retract.
+   *
+   *  LISTED, not derived as "everything outside argRegs", because the complement contains the
+   *  VIRTUAL keys too (`@sarg<k>` — an incoming stack argument, which really is a parameter), and a
+   *  rule that had to exclude them would be reading a grammar this module does not own. A register
+   *  spelling nobody listed keeps its existing treatment, so the list is safe to grow.
+   *
+   *  Declaring this obliges `argRegs` below, and the two must be DISJOINT. */
+  uninitRegs?: readonly string[];
+  /** Registers the ABI DOES pass arguments in — the other side of the register partition, and the
+   *  only reason the side above is checkable rather than believed. The frame coordinate declares
+   *  both of its sides and refuses an offset in neither; this one declares both and refuses a key
+   *  in BOTH, which is the same move.
+   *
+   *  Without it the whole contract rests on one hand-written list in target.ts being right, in a
+   *  file whose idiom is "a compiler fact is one field": spelling `r1` where `r11` was meant
+   *  deletes a parameter and emits `s32 uninit_r1;` in its place, with no diagnostic anywhere.
+   *  `readRecursive` cannot catch that on its own — it never sees the argument registers, because
+   *  a read of one takes the parameter path by falling through every other case. */
+  argRegs?: readonly string[];
+}
+
+/** The register partition's postcondition, checked at the point of USE. `uninitRegs` asserts "no
+ *  caller could have handed a value over in these"; `argRegs` is the set of registers a caller
+ *  hands values over in. A key in both is a target that contradicts itself, and a `uninitRegs` with
+ *  no `argRegs` beside it is one whose assertion nothing can check — both refuse rather than
+ *  silently reclassify an argument as an uninitialised local. */
+function checkedLiveInModel(fnName: string, m: LiveInModel): LiveInModel {
+  if (m.uninitRegs === undefined) {
+    return m;
+  }
+  const args = m.argRegs;
+  if (args === undefined) {
+    throw new Error(
+      `lifting '${fnName}': the live-in model lists registers the ABI does not pass arguments in ` +
+        `but not the ones it does, so nothing can check the two agree`,
+    );
+  }
+  const both = m.uninitRegs.filter((r) => args.includes(r));
+  if (both.length > 0) {
+    throw new Error(
+      `lifting '${fnName}': the live-in model lists ${both.join(', ')} as BOTH an argument register ` +
+        `and one the ABI does not pass arguments in`,
+    );
+  }
+  return m;
 }
 
 export function makeSsaBuilder(
   name: string,
   blockCount: number,
   preds: number[][],
-  /** A supplier because the partition is MEASURED, not declared: Thumb's local area comes from a
-   *  prologue walk that runs after this call. Evaluated once, on first use. Omitted ⇒ no partition
-   *  is claimed, so every slot refuses; register keys are unaffected. */
-  frameOf: () => FrameModel = () => ({}),
+  /** A supplier because half the partition is MEASURED rather than declared: Thumb's local area
+   *  comes from a prologue walk that runs after this call. Evaluated once, on first use. Omitted ⇒
+   *  no partition is claimed, so every slot refuses and every register is a parameter. */
+  liveInOf: () => LiveInModel = () => ({}),
 ): SsaBuilder {
-  let frameMemo: FrameModel | null = null;
-  const frame = (): FrameModel => (frameMemo ??= frameOf());
+  let modelMemo: LiveInModel | null = null;
+  // Checked ONCE, where the model is materialised — every function with a parameter reads a
+  // register def-lessly, so this runs on effectively every lift rather than only on the rare
+  // function that reads the mis-listed register. A contradictory or half-declared partition is a
+  // bug in the TARGET, not an unliftable function, so it throws a plain Error: a decline would
+  // report the target's typo as a property of the input, once per function, forever.
+  const model = (): LiveInModel => (modelMemo ??= checkedLiveInModel(name, liveInOf()));
   const inRange = (off: number, r?: { from: number; to: number }) => r !== undefined && off >= r.from && off < r.to;
   const irBlocks: Block[] = Array.from({ length: blockCount }, () => ({ params: [] as Value[], ops: [] }));
   const fn: Fn = { name, blocks: irBlocks };
@@ -159,18 +225,22 @@ export function makeSsaBuilder(
     const ps = distinctPreds(b);
     if (ps.length === 0) {
       // A live-in with no predecessor is a value this function never produced: an incoming argument,
-      // or storage it allocated and never wrote. A register is the first; a slot is classified by
-      // WHERE IT IS, against the frontend's declared partition. The key spelling cannot decide it —
-      // `sp@40` is a local on one ABI and the caller's fifth argument on another — so a slot in
-      // neither range is refused rather than guessed.
+      // or storage it allocated and never wrote. WHICH ONE is the partition's answer, in whichever
+      // coordinate the key names. The key spelling cannot decide a slot on its own — `sp@40` is a
+      // local on one ABI and the caller's fifth argument on another — so a slot in neither range is
+      // refused rather than guessed. A register is decided by the calling convention instead of by
+      // a measurement: a caller cannot pass a value in a register the ABI does not pass arguments
+      // in, so a read of one before any write is an uninitialised local.
       const off = slotKeyOffset(reg);
-      if (off !== null && !inRange(off, frame().ownedLocals) && !inRange(off, frame().callerParams)) {
+      if (off !== null && !inRange(off, model().ownedLocals) && !inRange(off, model().callerParams)) {
         throw new FrontendUnsupportedError(
           `cannot lift '${name}': ${reg} is read on a path that never stores it, and lies outside ` +
             `this function's frame partition (uninitialised local, or storage it does not own) — not modelled`,
         );
       }
-      if (off !== null && inRange(off, frame().ownedLocals)) {
+      const uninitialised =
+        off !== null ? inRange(off, model().ownedLocals) : (model().uninitRegs?.includes(reg) ?? false);
+      if (uninitialised) {
         const op = mkOp('undef', { results: [mkValue(T.unk(32))], attrs: { key: reg } });
         irBlocks[b].ops.unshift(op); // ahead of everything in a block that nothing precedes
         defs[b].set(reg, op.results[0]);
@@ -362,7 +432,7 @@ export function makeSsaBuilder(
         // `undef`) or unclassified — both are bugs, and this is where a per-read test cannot be
         // total, so it is asserted over the finished function.
         const koff = key === undefined ? null : slotKeyOffset(key);
-        if (koff !== null && !inRange(koff, frame().callerParams)) {
+        if (koff !== null && !inRange(koff, model().callerParams)) {
           throw new FrontendUnsupportedError(
             `cannot lift '${name}': ${key} is read on a path that never stores it ` +
               `(partially-initialised local, or storage this function does not own) — not modelled`,
@@ -591,7 +661,7 @@ export function narrowToSetupArgs(fn: Fn): boolean {
 const SLOT_PREFIX = 'sp@';
 export const stackSlotKey = (off: number): string => `${SLOT_PREFIX}${off}`;
 /** The byte offset a slot key names, or null if `key` is not a slot key at all (an ordinary
- *  register). The grammar stays owned by this module — {@link FrameModel} is expressed in the same
+ *  register). The grammar stays owned by this module — {@link LiveInModel} is expressed in the same
  *  coordinate, so the classification rule can be generic. */
 export const slotKeyOffset = (key: string): number | null =>
   key.startsWith(SLOT_PREFIX) ? Number(key.slice(SLOT_PREFIX.length)) : null;

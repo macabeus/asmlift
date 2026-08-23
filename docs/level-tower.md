@@ -273,14 +273,17 @@ followed the second inhabitant, never preceded it.
   addressing/idiom shape; prefer a **new op** when downstream stages need to reason about the
   recovered concept as a first-class value.
 
-### A case where the bar was met on capability but not on the differ: `undef`
+### A case where the two halves of the bar were cleared a round apart: `undef`
 
-`undef` (an uninitialised local — storage whose only writer is this function's own stores, read on
-a path where none of them ran) is the only op that appears in emitted C without a byte match behind
-it, so it is worth being explicit about which half of the bar it cleared. (`opaque` also has none
-and never will, but it is the loud-gap escape hatch — it exists to stop a function compiling, not
-to be recovered code.) "Only writer" rather than "owns": the two
-came apart in review, and the escape clause below is the difference.
+`undef` (an uninitialised local, read on a path where nothing this function did wrote it) is the
+only op that appears in emitted C without a byte match behind it, so it is worth being explicit
+about how each half of the bar was cleared. (`opaque` also has none and never will, but it is the
+loud-gap escape hatch — it exists to stop a function compiling, not to be recovered code.) "Nobody
+wrote it" is established differently per coordinate, and neither is "this function owns the
+storage": a FRAME SLOT needs its function to be the SOLE WRITER — ownership is not enough, because
+an escaped address lets a callee write a frame the function owns, and the two came apart in review —
+while a REGISTER needs no proof at all, only ENTITLEMENT: a caller cannot have handed a value over
+in one the ABI does not pass arguments in.
 
 It clears "cannot be expressed in the current one", though narrowly. asmlift's builder had fused two
 questions — "is there a reaching definition?" and "is this a parameter?" — so a def-less read had
@@ -299,20 +302,90 @@ plain stack local.
 So `undef` is not a new idea; it is asmlift catching up to the one its own citation contains. What
 was genuinely missing was any way to SAY it, and that is what the opcode adds.
 
-It does **not** clear "the differ can prove the result matches". Measured across the whole corpus,
-**exactly one row moved** — `synthetic:uninit_spill:agbcc`, `declined → nonmatch`. The row in that
-family that already matched is the more instructive one: its fabricated parameter happens to land in
-the register the local occupied anyway, so it matches with an arity the source never had. That
-register-half fabrication is untouched here and is still silent, which is the honest shape of the
-remaining distance — a second, separate capability (the same shape in a _register_ rather than a
-slot) that cannot be classified without either prototype knowledge or prologue-save elision.
+It cleared "the differ can prove the result matches" a round LATER, and the distance between the two
+is the part worth keeping. On the day the opcode landed, **exactly one row moved** across the whole
+corpus — `synthetic:uninit_spill:agbcc`, `declined → nonmatch` — and this section concluded that half
+the bar was unmet. What that measured was one coordinate: a frame SLOT. The same question in the
+other one — the local the compiler put in a REGISTER — was written off here as a separate capability
+"that cannot be classified without either prototype knowledge or prologue-save elision". Half of
+that was wrong and half of it was right, and the round took two goes to find out which. Prototype
+knowledge, no: a caller cannot hand a value over in a register the ABI does not pass arguments in,
+so a def-less read of one owes no proof that nobody wrote it — which is exactly the mechanism
+behind the `unaff_<reg>` this section already cited, and it is one list per target
+(`target.nonArgRegs`). The prologue save, yes: that ABI fact describes the CALLER, and what makes a
+def-less read a LOCAL is that the compiler was free to home one there, which it is only after
+saving the register. So the classification is an intersection — the target's list against a save set
+the frontend measures (`frontend/ssa.ts`'s `LiveInModel.uninitRegs`, fed by Thumb's `savedRegs`) —
+and it is not the elision the sentence feared, only a read of the prologue that was already
+happening for the frame.
 
-The envelope is narrow, and worth stating in one sentence: **on Thumb, a word-wide slot strictly
-below the measured local area, which some store reaches but not on every path, in a function where
-no frame address escapes to something that could write the frame.** The last clause is a second
-function-wide condition, established after the fact by the frame-object audit rather than at the
-mint site — an escaped address usually means a callee may write any frame offset, so "no store of
-ours reaches it" stops implying "nobody wrote it". The qualifier on it is earned below.
+With both coordinates spelled — and with the structurer no longer emitting an edge copy for an
+argument that carries nothing — the differ agrees. Five rows move, `synthetic:loopfall:agbcc`
+MATCHes (11 → 0), and the corpus goes 441 → 442 over 856 rows with nothing lost and nothing worse;
+on the ranked real row `LoadBGTilemapData` the winner goes **473 → 419**. SIX rows that used to
+match with an arity the source never had — the fabricated parameter landing in the register the
+local occupied anyway — no longer need the coincidence, and all six now carry the arity their
+reference does: `synthetic:armhomes` 5 → 4, `hipress` 3 → 2, `maskhome` 7 → 4, `nestinit` 5 → 4,
+`sizehome` 4 → 3, and `kleod:UpdateHUDCounterDisplay` 2 → 0 against a reference that really is
+`(void)`.
+
+The lesson is not "measure again later". It is that the first measurement was taken against
+asmlift's own output, where a fabricated parameter is cheap because everything downstream of it is
+already wrong. What moved the number was pricing the same construct against a near-perfect
+reference decomp of the same game, where it costs an order of magnitude more. A differ verdict is
+only as strong as the baseline it is measured from.
+
+Which cuts the other way too, and `LoadBGTilemapData` is where. Priced against the reference C the
+construct is worth **354**; on this row it is worth **54**, and the difference is not a
+disappointment but the same sentence read backwards. That reference decomp does not match this
+function either: its C is `NONMATCH("asm/nonmatching/sub_0804B4B0.inc", …)` at a recorded 98.24%,
+its build links the assembly instead, and its ROM is byte-identical to the base ROM only because it
+does. LBG is the one function in a 4 MB decomp that is still open — so it is the last place a
+capability's value can be read off, and the 419 that remains is the allocation and ordering residue
+attributed long before this round, not one gap behind anything.
+
+The envelope is narrow, and has one sentence per coordinate. In the FRAME: **on Thumb, a word-wide
+slot strictly below the measured local area, which some store reaches but not on every path, in a
+function where no frame address escapes to something that could write the frame.** The last clause
+is a second function-wide condition, established after the fact by the frame-object audit rather
+than at the mint site — an escaped address usually means a callee may write any frame offset, so "no
+store of ours reaches it" stops implying "nobody wrote it". The qualifier on it is earned below. In
+the REGISTER FILE: **any key the target lists as one its ABI does not pass arguments in, read on a
+path that never wrote it, in a function whose prologue SAVED it.** The second clause is not about
+who could have written the register — a register has no address, so nothing outside the function can
+name it and there is nothing to retract — but about whether the answer's premise holds at all: the
+compiler homes a local in a callee-saved register only after saving it, and asm that saves nothing
+follows no such rule.
+
+The second clause was not there when the register half landed, and the population that needed it is
+small enough to name. Sweeping every Thumb function in the three vendored agbcc projects — klonoa,
+sa3 and pokeemerald, **2962** functions; `af` is N64/MIPS and declares no register partition at all
+— the ABI list on its own renders a register undef in 9 functions (13 (function, register) pairs),
+and **3** of them are outside the model: the MP2K engine's hand-written `ChnVolSetAsm`, vendored
+identically in all three, which receives two pointers in `r4`/`r5` with **no prologue at all** and
+came out as `s32 ChnVolSetAsm(void)` storing through `uninit_r4`. That is a correct signature traded
+for a silent wrong one, and the arity metric scored it as an improvement, because 2 → 0 is an arity
+decrease.
+
+Guessing which evidence separates the two populations got it wrong twice before the sweep settled
+it. "Written somewhere in the function" refuses correct inhabitants: `r5` in sa3's `sub_809630C` and
+`r6` in `sub_8024F84` are uninitialised locals the function pushes, reads and pops without ever
+writing, and the push/pop pair is elided before the SSA builder sees it, so `writeVar` never fires.
+"Not written and not saved" reads as the private-convention case but is not one:
+`MP2K_event_xwave` pushes `r4` and read-modify-writes it, an ordinary uninitialised local like the
+rest. What is left is the SAVE, alone, and one of the survivors is confirmed against a second decomp
+of the same game whose C declares that local uninitialised (`CheckTileCollisionVertical`, `r4`).
+
+Measuring the save costs one scan of the entry block's leading run, in the module that had already
+walked that prologue for `localArea` — `mov rLow, rHi; push {rLow}` counts as a save of `rHi`, which
+is how agbcc saves r8-sl and how every high-register inhabitant here is saved. Whole effect on the
+corpus: 6 functions, 0 lift↔decline flips. The three `ChnVolSetAsm` get their signature back; the
+three `SoundMainBTM` (`mov ip, r4`, no prologue either) go back to the fabricated trailing parameter
+they had before this capability existed, which is an over-count and not a wrong answer.
+
+The gap this leaves is one direction only. A register in the ABI list that the prologue did not save
+falls back to being a parameter — the treatment a target declaring no partition gets — so what the
+model cannot describe costs an invented argument, never an invented local.
 
 The reusable lesson is where the decision lives, not the op, and it is easier to state as the two
 arrangements that do not work.
@@ -335,8 +408,10 @@ comment. _A postcondition enforced by convention is not enforced_: a `push` afte
 slides the window off the reserved area while the verdict goes on saying `'undef'`.
 
 **What it is now: the frontend supplies the PARTITION, the shared pass applies the rule.**
-`FrameModel` carries byte ranges — `ownedLocals`, `callerParams` — and one generic rule classifies
-an offset against them, refusing anything that falls in neither. The dependency became an argument
+`LiveInModel` carries byte ranges — `ownedLocals`, `callerParams` — and one generic rule classifies
+an offset against them, refusing anything that falls in neither. The register coordinate joined it
+as a second declarative member (`uninitRegs`, a LIST rather than a range, because the complement of
+the argument registers also holds the frontends' virtual keys) under the same generic rule. The dependency became an argument
 instead of a promise: Thumb passes `{ from: 0, to: localArea }`, so when the prologue walk cannot
 measure the frame that range collapses to empty and every slot refuses on its own. MIPS claims no
 partition and therefore refuses, and the shape of its eventual fix is now a pair of numbers rather
