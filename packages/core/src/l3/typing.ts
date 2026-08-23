@@ -18,7 +18,7 @@
 // provably a pointer" (adds a cast — valid C either way); the deref contract treats `undefined`
 // as "not provably wrong" (no error).
 import { IrType, T, scalarTypeForAccess } from '../ir/types';
-import { type Expr, type SFn, exprChildren } from './ast';
+import { type BinOp, type Expr, type SFn, type Stmt, exprChildren, stmtChildren, stmtExprs } from './ast';
 
 /** The declared type of a printed variable — the env `exprCType` judges rendered C against.
  *  THE one copy of the SFn→env derivation (C printer, Pascal printer, deref contract): each
@@ -279,4 +279,111 @@ export function exprCType(e: Expr, varType: (name: string) => IrType | undefined
     case 'addr':
       return undefined;
   }
+}
+
+/** The C operators whose MACHINE FORM is decided by an operand's DECLARED signedness — every one
+ *  the C family can emit, and the reason each of the others is absent.
+ *
+ *  `/` `%` and the four RELATIONALS choose a signed or an unsigned operation from the usual
+ *  arithmetic conversions alone; nothing in the rendered text says which. `== !=` join them not
+ *  because the ANSWER can differ — it cannot, the bits are the bits — but because the instruction
+ *  does: mwcc spells `a0 != 0` as `cmpwi` over a signed operand and `cmplwi` over an unsigned one,
+ *  and byte-exactness is the only thing this decompiler is ranked on. `&& ||` truth-test each side
+ *  the same way. The two right SHIFTS are here for a third reason: C spells both `>>`, and the
+ *  backend's own operand cast (backend/cfamily.ts `shiftOperand`) is what says which — so a right
+ *  shift is where the declaration decides whether that cast is printed at all.
+ *
+ *  NOT here, and each absence is a claim: `+ - * & | ^ <<` and unary `- ~` produce the same 32 bits
+ *  under either signedness and lower to one instruction, so only the RESULT'S TYPE differs — which
+ *  `carries` propagates into whatever consumes it. Nothing widens: the decomp typedef vocabulary
+ *  stops at 32 bits (contracts.ts SCALAR_WIDTHS) and there is no floating type, so the
+ *  sign-extending conversions that would otherwise belong here have no spelling. */
+const SIGNEDNESS_DECIDED: ReadonlySet<BinOp> = new Set<BinOp>([
+  '/',
+  '%',
+  '<',
+  '<=',
+  '>',
+  '>=',
+  '==',
+  '!=',
+  '&&',
+  '||',
+  '>>',
+  '>>>',
+]);
+
+/** The operators whose result is `int` however their operands were declared — where a carried
+ *  signedness STOPS rather than propagating. */
+const YIELDS_INT: ReadonlySet<BinOp> = new Set<BinOp>(['<', '<=', '>', '>=', '==', '!=', '&&', '||']);
+
+/**
+ * Can the DECLARED SIGNEDNESS of `names` change the CODE this tree compiles to?
+ *
+ * The fourth consumer of this file's rendered-signedness model, and the only one that asks the
+ * question in reverse: the others ask what signedness an expression has, this asks whether the
+ * answer would MOVE if a declaration flipped. `rank.ts` uses it on the signedness axis — two
+ * candidates whose sources differ only in `u32 a0` against `s32 a0` are the same program compiled
+ * the same way, and hence the same bytes, exactly when this returns `false`.
+ *
+ * THREE positions read a declaration, not one: an operator from the table above, a TRUTH TEST (an
+ * `if`/loop condition, a `!`, either side of `&&`), and a `switch` SCRUTINEE. The last two because
+ * both lower to a comparison the rendered text never spells — nine agbcc `sw*` rows and five mwcc
+ * equality tests in the corpus match under one pin and not the other, with the two candidates
+ * differing in exactly one line, the signature.
+ *
+ * SOUND DIRECTION: `true` is the safe answer, and every case this does not model returns it by
+ * refusing to look further — `carries` treats a cast, a call, an `index`, a `field` and an `addr`
+ * as carrying nothing, because each renders at a type of its own that no parameter declaration can
+ * move. What it must never do is miss a site, so the positions above are closed and argued rather
+ * than sampled: nothing in the tower prunes on this being `false` except a candidate that a
+ * byte-identical sibling already covers.
+ *
+ * QUANTIFIER: a FORALL over sites — one reading position anywhere in the tree, with one named
+ * operand under it, answers `true` for the whole function. It therefore gets HARDER to satisfy as a
+ * function grows, which is the opposite of a predicate that admits on any one site.
+ */
+export function signednessObservable(fn: SFn, names: ReadonlySet<string>): boolean {
+  if (names.size === 0) {
+    return false;
+  }
+  // Does the rendered C TYPE of `e` depend on one of the named declarations? Bottom-up, and the
+  // default is `false` for every leaf whose C type is written down somewhere else.
+  const carries = (e: Expr): boolean => {
+    switch (e.k) {
+      case 'var':
+        return names.has(e.name);
+      case 'un':
+        return e.op !== '!' && carries(e.e);
+      case 'bin':
+        // a shift takes the type of its LEFT operand alone; the right is promoted on its own
+        if (e.op === '<<' || e.op === '>>' || e.op === '>>>') {
+          return carries(e.l);
+        }
+        return YIELDS_INT.has(e.op) ? false : carries(e.l) || carries(e.r);
+      default:
+        return false;
+    }
+  };
+  const inExpr = (e: Expr): boolean =>
+    (e.k === 'bin' && SIGNEDNESS_DECIDED.has(e.op) && (carries(e.l) || carries(e.r))) ||
+    (e.k === 'un' && e.op === '!' && carries(e.e)) ||
+    exprChildren(e).some(inExpr);
+  /** a condition or a scrutinee: the compiler emits a comparison the tree never spelled */
+  const tested = (e: Expr): boolean => carries(e) || inExpr(e);
+  const inStmts = (list: readonly Stmt[]): boolean =>
+    list.some((s) => {
+      switch (s.k) {
+        case 'if':
+        case 'while':
+        case 'dowhile':
+        case 'for':
+          return tested(s.cond) || inStmts(stmtChildren(s));
+        case 'switch':
+          return tested(s.scrutinee) || inStmts(stmtChildren(s));
+        default:
+          return stmtExprs(s).some(inExpr) || inStmts(stmtChildren(s));
+      }
+    });
+  return inStmts(fn.body);
 }
