@@ -16,16 +16,30 @@
 // SEMANTICS ARE PRESERVED BY CONSTRUCTION: this is constant propagation of a local that is
 // assigned once, from a compile-time constant, before anything mentions it, and whose address is
 // never taken — so every use reads that constant on every path, and the substituted expression
-// carries the local's own declared type, so each use renders at the C type the variable had.
+// carries the local's own declared type AND its pointee volatility, so each use renders at the
+// C type the variable had.
+//
+// THE QUALIFIER TRAVELS WITH THE ADDRESS. The deleted local is the only place a `volatile`
+// pointee could be written, and a raw address is precisely the case with no declaration
+// anywhere else to carry it — so dropping it here would spell an MMIO access non-volatile, and
+// the differ cannot referee that: `*(volatile u16 *)0x4000208` and `*(u16 *)0x4000208` compile
+// BYTE-IDENTICALLY on pokeemerald:EReader_Reset (agbcc 2.9-arm-000512, `-O2 -mthumb-interwork
+// -Wimplicit -fhex-asm -fprologue-bugfix`; `.s` diff empty, `.o` identical). rank.ts therefore
+// pairs this lever with `/volatile`, which supplies the qualifier on the pointer local, and the
+// substitution moves it onto every cast it mints.
 //
 // GATE — the local must be all of: pointer-typed; initialized by a bare `const` (a `(T *)base`
 // CAST initializer is l3/basecse.ts's reuse hoist, whose own lever family owns that question);
 // assigned exactly once, by a statement at the body's TOP LEVEL that no earlier statement's
 // mention precedes; never address-taken; used only as the base of an `index`, at 2+ sites (one
-// use is not the reused address this exists for); and carrying neither volatility flag nor
-// `frame` (a slot is an asm fact — see the SFn.locals doc). Anything else, and nothing
-// qualifying at all, DECLINES (null) rather than approximating.
-import type { IrType } from '../ir/types';
+// use is not the reused address this exists for); not object-`volatile` (a `T *volatile p` has
+// no inhabitant, and cfamily.ts prints that flag in the pointee's position); and not `frame` (a
+// slot is an asm fact — see the SFn.locals doc). Anything else, and nothing qualifying at all,
+// DECLINES (null) rather than approximating.
+//
+// KNOWN GAP: only `index` bases are re-spelled, so the same L2 home passed to a callee or used
+// as a `field` base is out of reach — the tally's `otherUses` refuses it. Re-spelling those
+// needs the un-homed tree, which is structure/analysis.ts's decision, not a substitution.
 import {
   type Expr,
   type SFn,
@@ -123,19 +137,16 @@ function tally(sfn: SFn): Map<string, Mentions> {
   return t;
 }
 
-/** The `/inlinebase` candidate, or null when no local qualifies. Read-only: returns a fresh SFn
- *  whose body is rebuilt, leaving the input untouched. */
-export function inlineConstBases(sfn: SFn): SFn | null {
+/** The locals the GATE admits, each with the cast its uses become. */
+function plan(sfn: SFn): Map<string, Extract<Expr, { k: 'cast' }>> {
   const t = tally(sfn);
-  const inline = new Map<string, IrType>();
-  const values = new Map<string, number>();
+  const out = new Map<string, Extract<Expr, { k: 'cast' }>>();
   for (const l of sfn.locals) {
     const m = t.get(l.name);
     if (
       m === undefined ||
       l.type.kind !== 'ptr' ||
       l.volatile !== undefined ||
-      l.pointeeVolatile !== undefined ||
       l.frame !== undefined ||
       m.assigns !== 1 ||
       m.topAssignAt === null ||
@@ -147,9 +158,26 @@ export function inlineConstBases(sfn: SFn): SFn | null {
     ) {
       continue;
     }
-    inline.set(l.name, l.type);
-    values.set(l.name, m.constValue);
+    out.set(l.name, {
+      k: 'cast',
+      to: l.type,
+      ...(l.pointeeVolatile ? { volatile: true as const } : {}),
+      e: { k: 'const', value: m.constValue },
+    });
   }
+  return out;
+}
+
+/** Which locals this lever would delete — rank.ts narrows `/volatile` to exactly these before
+ *  pairing, so the qualified output never qualifies a pointer the lever leaves standing. */
+export function inlinableConstBases(sfn: SFn): string[] {
+  return [...plan(sfn).keys()];
+}
+
+/** The `/inlinebase` candidate, or null when no local qualifies. Read-only: returns a fresh SFn
+ *  whose body is rebuilt, leaving the input untouched. */
+export function inlineConstBases(sfn: SFn): SFn | null {
+  const inline = plan(sfn);
   if (inline.size === 0) {
     return null;
   }
@@ -157,9 +185,9 @@ export function inlineConstBases(sfn: SFn): SFn | null {
   // (contracts.ts's dot-base exemption) read node identity.
   const sub = (e: Expr): Expr => {
     if (e.k === 'var') {
-      const to = inline.get(e.name);
-      if (to !== undefined) {
-        return { k: 'cast', to, e: { k: 'const', value: values.get(e.name)! } };
+      const at = inline.get(e.name);
+      if (at !== undefined) {
+        return { ...at, e: { ...at.e } };
       }
     }
     return mapExprChildren(e, sub);

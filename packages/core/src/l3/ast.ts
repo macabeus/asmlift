@@ -15,7 +15,13 @@ export type Expr =
   // `3 & (s32)p`). Scalar deref casts are backend-owned — the C-family printer synthesizes
   // them from the `index` node's width. Each backend spells the cast in its own syntax
   // (C: `(u8)e`; Pascal: no spelling yet → fails loud).
-  | { k: 'cast'; to: IrType; e: Expr }
+  //
+  // `volatile` qualifies the POINTEE of a pointer cast (`(volatile u16 *)0x4000208`) — the one
+  // place asmlift can say "this access is to a volatile object" when there is no declaration to
+  // hang it on, which is exactly the raw-address case (l3/inlinebase.ts). IrType models no
+  // cv-qualifier, deliberately: volatility is a SPELLING, carried at the declaration or the
+  // cast, the same split SFn.locals makes for `volatile`/`pointeeVolatile`.
+  | { k: 'cast'; to: IrType; e: Expr; volatile?: true }
   | { k: 'call'; fn: string; args: Expr[] }
   // The ADDRESS of a named global, `&gSym` (agbcc pool `.word gSym`, frontend `gaddr` op). A
   // DEREF of it collapses to the bare global: memAccess/arrayAccess spell `*(&gSym)` as `gSym`
@@ -260,7 +266,14 @@ export function exprEquals(a: Expr, b: Expr): boolean {
     }
     case 'cast': {
       const bb = b as typeof a;
-      return JSON.stringify(a.to) === JSON.stringify(bb.to) && exprEquals(a.e, bb.e);
+      // `volatile` is part of the SPELLING, compared for the same reason `lead` and `dot` are
+      // below: a CSE or dedup that treats these as equal keeps one node and drops the other,
+      // silently respelling a volatile access as a plain one.
+      return (
+        JSON.stringify(a.to) === JSON.stringify(bb.to) &&
+        (a.volatile ?? false) === (bb.volatile ?? false) &&
+        exprEquals(a.e, bb.e)
+      );
     }
     case 'call': {
       const bb = b as typeof a;

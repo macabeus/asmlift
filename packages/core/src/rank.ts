@@ -29,7 +29,7 @@ import {
 import { armDisjointCandidates, coalesceCandidates } from './l3/coalesce';
 import type { Gate } from './l3/gates';
 import { initFirstGuards } from './l3/initfirst';
-import { inlineConstBases } from './l3/inlinebase';
+import { inlinableConstBases, inlineConstBases } from './l3/inlinebase';
 import { mulFirstSums } from './l3/mulfirst';
 import { nearBaseClusters } from './l3/nearbase';
 import { parkParamsFirst } from './l3/parkfirst';
@@ -741,12 +741,40 @@ export function enumerateCandidates(
           // re-spelled per use is CSEd back into that same one, so which the source had is not
           // derivable. Its own bare-`const`-initializer gate keeps it off l3/basecse.ts's reuse
           // hoists, whose placement levers already answer that question.
+          //
+          // TWO ALTERNATIVE OUTPUTS, not a product: deleting the local also deletes the only place
+          // a `volatile` POINTEE could be written, and a raw address has no declaration anywhere
+          // else to carry it. So the qualified spelling is emitted too, `/volatile` narrowed to
+          // exactly the locals this lever deletes. It is enumerated FIRST deliberately: the two
+          // are byte-identical wherever the compiler was not exploiting the non-volatility (they
+          // are on pokeemerald:EReader_Reset — `.s` diff empty), so the score, the group and the
+          // cast count all tie and `compareScored` falls through to enumeration order. At an exact
+          // tie the qualified spelling is the one to publish: over-qualifying costs a reader
+          // nothing, while a dropped `volatile` on an MMIO cell is a real bug in the C that only
+          // this compiler at these flags hides.
+          //
+          // COST — it fires broadly: on 33 of the 69 klonoa functions that lift with no symbol map
+          // (a symbol-map sweep sees fewer, since an absolute pool constant lifts to a `gaddr`
+          // there). Both outputs together add 924 candidates over 51835, +1.8% on the corpus and
+          // up to +67% on one function — the same class of price the enumeration already pays for
+          // `/volatile`, which labels 30% of it. LoadBGTilemapData is untouched: 20608 candidates
+          // with the levers and without, because no local there is fed a bare constant.
+          const inlineVolatile = (): SFn | null => {
+            const only = new Set(inlinableConstBases(sfn));
+            const q = only.size ? volatilePtrLocals(sfn, only) : null;
+            return q ? inlineConstBases(q) : null;
+          };
+          respell('/inlinebase/volatile', inlineVolatile);
           respell('/inlinebase', () => inlineConstBases(sfn));
           // The `/inlinebase` × `/vol-slot` PAIRING — row-demanded, and the joint spelling is
           // reachable from neither lever alone: on pokeemerald:EReader_Reset the primary scores 11,
           // `/inlinebase` alone 11 and `/vol-slot` alone 2, and the pair 0. The two touch disjoint
           // locals (one pointer-typed, one a scalar frame slot), so applying them in either order
-          // gives the same spelling.
+          // gives the same spelling — and each of `/inlinebase`'s two outputs carries it.
+          respell('/inlinebase/volatile/vol-slot', () => {
+            const r = inlineVolatile();
+            return r ? volatileValueLocals(r) : null;
+          });
           respell('/inlinebase/vol-slot', () => {
             const r = inlineConstBases(sfn);
             return r ? volatileValueLocals(r) : null;

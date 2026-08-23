@@ -217,7 +217,10 @@ function printExpr(e: Expr, parentPrec: number, vt: VarTypes, leaf?: LeafHook): 
     // op. Under a POSTFIX parent ([]/->) the cast itself must parenthesize — `((struct S *)p)->f`,
     // NOT `(struct S *)p->f` (which C parses as a cast OF the member access).
     case 'cast': {
-      const s = `(${cType(e.to)})${rec(e.e, 2)}`;
+      // `volatile` binds to the POINTEE (`(volatile u16 *)a`), which is where the qualifier goes
+      // on a raw-address access — the same prefix position the declaration printer uses for a
+      // pointer local's `pointeeVolatile`.
+      const s = `(${e.volatile ? 'volatile ' : ''}${cType(e.to)})${rec(e.e, 2)}`;
       return parentPrec < 2 ? `(${s})` : s;
     }
     case 'bin': {

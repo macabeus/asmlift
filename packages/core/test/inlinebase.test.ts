@@ -6,8 +6,12 @@
 import { expect, test } from 'vitest';
 
 import { T } from '../src/ir/types';
+import { materializeArgBases } from '../src/l3/argbase';
 import { type Expr, type SFn, type Stmt } from '../src/l3/ast';
-import { inlineConstBases } from '../src/l3/inlinebase';
+import { hoistReusedGlobalBases } from '../src/l3/basecse';
+import { inlinableConstBases, inlineConstBases } from '../src/l3/inlinebase';
+import { nearBaseClusters } from '../src/l3/nearbase';
+import { hoistScopedBases } from '../src/l3/scopebase';
 import { enumerateCandidates } from '../src/rank';
 import { ARMV4T_AGBCC } from '../src/target';
 
@@ -109,13 +113,106 @@ test('a use that is not an `index` base is outside what the lever re-spells', ()
   expect(inlineConstBases(s)).toBeNull();
 });
 
-test('a volatile or frame local declines — both are asm facts, not spellings', () => {
-  for (const extra of [
-    { volatile: true as const },
-    { pointeeVolatile: true as const },
-    { frame: { loads: 1, stores: 1 } },
-  ]) {
+test('an object-volatile or frame local declines — both are asm facts, not spellings', () => {
+  for (const extra of [{ volatile: true as const }, { frame: { loads: 1, stores: 1 } }]) {
     expect(inlineConstBases(fn([{ name: 'p', type: PTR, ...extra }], twoUses()))).toBeNull();
+  }
+});
+
+test('a volatile POINTEE travels onto every cast the substitution mints', () => {
+  const out = inlineConstBases(fn([{ name: 'p', type: PTR, pointeeVolatile: true }], twoUses()))!;
+  for (const st of out.body) {
+    const lval = (st as Extract<Stmt, { k: 'store' }>).lval as Extract<Expr, { k: 'index' }>;
+    expect(lval.base).toEqual({ k: 'cast', to: PTR, volatile: true, e: { k: 'const', value: 0x4000208 } });
+  }
+});
+
+test('`inlinableConstBases` names exactly the locals the gate admits', () => {
+  expect(inlinableConstBases(fn([{ name: 'p', type: PTR }], twoUses()))).toEqual(['p']);
+  expect(inlinableConstBases(fn([{ name: 'p', type: PTR }], twoUses().slice(0, 2)))).toEqual([]);
+});
+
+// THE CROSS-MODULE PROMISE: no base-hoist lever may produce a local this one would eat. Pinned
+// behaviourally, on each lever's own smallest firing shape, because it is a constraint neither
+// side's own tests state. Only `basecse` rests on the CAST — patching it to hoist the bare base
+// fails this test, so the separation from that one lever really is a spelling agreement. The
+// other three are separated structurally and would survive the same edit: `scopebase` hoists
+// `(T *)&gSym`, whose initializer is an `addr` and not a const at all; `nearbase` spells every
+// member but the lowest as `(p0 + k)[0]`, an `otherUses`; `argbase` names one base per call
+// argument, so a hoist has one use where this lever wants two.
+test('no base-hoist lever produces a local this one would eat', () => {
+  const cidx = (value: number, i: number, width = 4): Expr => ({
+    k: 'index',
+    base: { k: 'const', value },
+    idx: { k: 'const', value: i },
+    width,
+    signed: true,
+  });
+  const bare = (body: Stmt[], globals?: SFn['globals']): SFn => ({
+    name: 'f',
+    params: [],
+    locals: [],
+    ...(globals ? { globals } : {}),
+    retType: T.void(),
+    body,
+  });
+  const basecse = hoistReusedGlobalBases(
+    bare([0, 1, 2].map((i) => ({ k: 'store', lval: cidx(0x40000d4, i), value: { k: 'const', value: 0 } }))),
+  );
+  const gx = (i: number): Expr => ({
+    k: 'index',
+    base: { k: 'var', name: 'g' },
+    idx: { k: 'const', value: i },
+    width: 2,
+    signed: false,
+  });
+  const scoped = hoistScopedBases(
+    bare(
+      [
+        {
+          k: 'dowhile',
+          cond: { k: 'const', value: 1 },
+          body: [0, 1, 2].map((i) => ({ k: 'store', lval: gx(i), value: { k: 'const', value: 0 } })),
+        },
+      ],
+      [{ name: 'g', type: T.ptr(T.u(16)) }],
+    ),
+  );
+  const argb = materializeArgBases({
+    name: 'f',
+    params: [],
+    locals: [{ name: 'v0', type: T.s(32) }],
+    retType: T.void(),
+    body: [
+      {
+        k: 'assign',
+        name: 'v0',
+        value: {
+          k: 'call',
+          fn: 'callee',
+          args: [
+            cidx(0x4000006, 0, 1),
+            { k: 'index', base: { k: 'addr', name: 'g' }, idx: { k: 'const', value: 8 }, width: 1, signed: false },
+          ],
+        },
+      },
+    ],
+  });
+  const near = nearBaseClusters(
+    bare([
+      { k: 'exprstmt', value: cidx(0x03001048, 0, 2) },
+      { k: 'exprstmt', value: cidx(0x0300104a, 0, 2) },
+    ]),
+    255,
+  );
+  for (const [name, out] of [
+    ['basecse', basecse],
+    ['scopebase', scoped],
+    ['argbase', argb],
+    ['nearbase', near],
+  ] as const) {
+    expect(out, `${name} fired`).not.toBeNull();
+    expect(inlinableConstBases(out!), `${name}'s hoist is not an /inlinebase inhabitant`).toEqual([]);
   }
 });
 
@@ -183,4 +280,18 @@ test('the /inlinebase × /vol-slot pair spells both, and neither lever reaches i
   expect(pair.source).toContain('volatile u16 sp0;');
   expect(pair.source).toContain('*(u16 *)67109384 = sp0;');
   expect(pair.source).not.toContain('v0');
+});
+
+test('the qualified output is enumerated, and BEFORE its plain twin so a tie publishes it', () => {
+  const labels = ereaderCandidates().map((c) => c.label);
+  for (const [q, plain] of [
+    ['unsigned/inlinebase/volatile', 'unsigned/inlinebase'],
+    ['unsigned/inlinebase/volatile/vol-slot', 'unsigned/inlinebase/vol-slot'],
+  ]) {
+    expect(labels.indexOf(q)).toBeGreaterThanOrEqual(0);
+    expect(labels.indexOf(q)).toBeLessThan(labels.indexOf(plain));
+  }
+  const q = ereaderCandidates().find((c) => c.label === 'unsigned/inlinebase/volatile/vol-slot')!;
+  expect(q.source).toContain('*(volatile u16 *)67109384 = sp0;');
+  expect(q.source).toContain('volatile u16 sp0;');
 });
