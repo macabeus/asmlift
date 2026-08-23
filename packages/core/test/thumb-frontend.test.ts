@@ -1290,7 +1290,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         '\tpop\t{r4, r5, r6, r7}\n' +
         '\tpop\t{r0}\n' +
         '\tbx\tr0\n';
-      expect(() => decompile('f', slotAbove, ARMV4T_AGBCC)).toThrow(
+      expect(() => decompile('s_bytes_and_slot', slotAbove, ARMV4T_AGBCC)).toThrow(
         /passed to a callee, which may write the slot at \[sp,#4\]/,
       );
       // CONTROL, and it is what makes the refusal a rule about the SLOT rather than about the call:
