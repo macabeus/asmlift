@@ -19,7 +19,7 @@ import { T } from './ir/types';
 import { verify } from './ir/verify';
 import { materializeArgBases } from './l3/argbase';
 import type { LanguageBackend, SFn } from './l3/ast';
-import { LIVEBASE_GATES, baseSpanCandidates, hoistReusedGlobalBases } from './l3/basecse';
+import { LIVEBASE_BLOCK_GATES, LIVEBASE_GATES, hoistReusedGlobalBases } from './l3/basecse';
 import { armDisjointCandidates, coalesceCandidates } from './l3/coalesce';
 import { initFirstGuards } from './l3/initfirst';
 import { mulFirstSums } from './l3/mulfirst';
@@ -212,6 +212,14 @@ const applyShapes = (
     }
   }
   return fired.length > 0 ? { out: cur, suffix: fired.join('') } : null;
+};
+
+/** The locals a lever added — a NAME diff rather than a positional slice, so a pass that ever
+ *  reorders locals cannot silently empty the set. It is what scopes `/volatile` to the pointers
+ *  the lever itself created (volatilePtrLocals' `only`), leaving the tree's own locals alone. */
+const createdLocals = (from: SFn, to: SFn): Set<string> => {
+  const before = new Set(from.locals.map((l) => l.name));
+  return new Set(to.locals.filter((l) => !before.has(l.name)).map((l) => l.name));
 };
 
 const SIGN_CANDS = [
@@ -751,45 +759,36 @@ export function enumerateCandidates(
           respell('/livebase', livebase);
           const livebaseVolatile = (): SFn | null => {
             const r = livebase();
-            if (!r) {
-              return null;
-            }
-            // Only the locals THIS lever created (a name-diff, not a positional slice, so a pass
-            // that ever reorders locals cannot silently empty the set) — see the POLICY note above.
-            const before = new Set(sfn.locals.map((l) => l.name));
-            const created = new Set(r.locals.filter((l) => !before.has(l.name)).map((l) => l.name));
-            return volatilePtrLocals(r, created);
+            // scoped to the locals THIS lever created — see the POLICY note above
+            return r ? volatilePtrLocals(r, createdLocals(sfn, r)) : null;
           };
           respell('/livebase/volatile', livebaseVolatile);
-          enumerate('/livebase/volatile', livebase, (r) => {
-            const before = new Set(sfn.locals.map((l) => l.name));
-            return volatileSubsetCandidates(r, new Set(r.locals.filter((l) => !before.has(l.name)).map((l) => l.name)));
+          enumerate('/livebase/volatile', livebase, (r) => volatileSubsetCandidates(r, createdLocals(sfn, r)));
+          // `/livebase-block` — the same hoist under one more gate: a base every access of which is
+          // ONE fixed offset stays inline (l3/basecse.ts LIVEBASE_BLOCK_GATES). WHICH of several
+          // numeric bases the source named is per-base knowledge the asm does not carry — a DMA
+          // register file wants one register held across the whole body while the IWRAM halfword
+          // beside it re-materializes — so the narrower hoist rides as its own candidate and the
+          // differ referees; plain `/livebase` (every admitted base) stays in the list, and the
+          // `/volatile` sibling rides for the reason the whole one does, scoped to what it created.
+          // It DECLINES unless the gate leaves a PROPER, NON-EMPTY subset: with no block base there
+          // is nothing to hoist, and with no cell base the result IS plain `/livebase`.
+          // ONE extra admission, so this adds two spellings however many bases the function has —
+          // but `respell` then fans each over SHAPE_SUBSETS, so the list pays up to five times that
+          // per structuring variant (measured: mixpoll 12 → 20 candidates, sizebound 224 → 288,
+          // LoadBGTilemapData 20608 → 23168).
+          const livebaseBlock = (): SFn | null => {
+            const all = livebase();
+            const block = hoistReusedGlobalBases(sfn, LIVEBASE_BLOCK_GATES);
+            return all && sfn.locals.length < block.locals.length && block.locals.length < all.locals.length
+              ? block
+              : null;
+          };
+          respell('/livebase-block', livebaseBlock);
+          respell('/livebase-block/volatile', () => {
+            const r = livebaseBlock();
+            return r ? volatilePtrLocals(r, createdLocals(sfn, r)) : null;
           });
-          // `/livebase`'s per-SPAN halves: WHICH of several numeric bases the source named is
-          // per-base knowledge the asm does not carry — a DMA register file wants one register held
-          // across the whole body while the scalar cell beside it re-materializes — so each span's
-          // hoist is its own candidate, the same alternative-OUTPUTS mechanism as the /volatile
-          // subsets above rather than a product. The all-spans form stays as plain `/livebase`, and
-          // each half rides a `/volatile` sibling for the reason the whole one does, scoped to the
-          // locals that half created. A span is one of two values (l3/basecse.ts `BaseSpan`), so
-          // this arm adds at most FOUR spellings however many bases the function has.
-          enumerate(
-            '/livebase',
-            () => sfn,
-            (s) => {
-              const before = new Set(s.locals.map((l) => l.name));
-              return baseSpanCandidates(s, LIVEBASE_GATES).flatMap(({ merged, sfn: r }) => {
-                const created = new Set(r.locals.filter((l) => !before.has(l.name)).map((l) => l.name));
-                const vol = volatilePtrLocals(r, created);
-                return vol
-                  ? [
-                      { merged, sfn: r },
-                      { merged: `${merged}/volatile`, sfn: vol },
-                    ]
-                  : [{ merged, sfn: r }];
-              });
-            },
-          );
           // The livebase × indexed PAIRINGS — the third sanctioned product kind (see POLICY):
           // row-demanded, and the joint spelling is reachable from neither lever alone (the
           // frame-copy + DMA shape).

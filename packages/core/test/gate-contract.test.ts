@@ -9,7 +9,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
-import { BASECSE_GATES, LIVEBASE_GATES } from '../src/l3/basecse';
+import { BASECSE_GATES, LIVEBASE_BLOCK_GATES, LIVEBASE_GATES } from '../src/l3/basecse';
 import { ARM_DISJOINT_GATES, COALESCE_GATES } from '../src/l3/coalesce';
 import { type Gate, ablateHeuristic, gateTableDefects } from '../src/l3/gates';
 import { LATCH_GATES } from '../src/raise/latch';
@@ -17,15 +17,16 @@ import { PREUPDATE_SINK_GATES } from '../src/structure/hazards';
 import { NAME_COALESCE_GATES } from '../src/structure/namecoalesce';
 
 // Every declared table, DERIVED tables included (LIVEBASE_GATES is basecse's admission with the
-// placement heuristics ablated — well-formedness is inherited, but registering it keeps the roster
-// the one place that answers "what tables ship?"). A pass that adopts gates.ts and forgets this
-// line gets no contract, which is the one hole the pattern cannot close for itself — so keep it
-// short and obvious.
+// placement heuristics ablated, LIVEBASE_BLOCK_GATES that one plus a selectivity rule —
+// well-formedness is inherited, but registering them keeps the roster the one place that answers
+// "what tables ship?"). A pass that adopts gates.ts and forgets this line gets no contract, which
+// is the one hole the pattern cannot close for itself — so keep it short and obvious.
 const TABLES: Record<string, readonly Gate<never>[]> = {
   COALESCE_GATES: COALESCE_GATES as readonly Gate<never>[],
   ARM_DISJOINT_GATES: ARM_DISJOINT_GATES as readonly Gate<never>[],
   BASECSE_GATES: BASECSE_GATES as readonly Gate<never>[],
   LIVEBASE_GATES: LIVEBASE_GATES as readonly Gate<never>[],
+  LIVEBASE_BLOCK_GATES: LIVEBASE_BLOCK_GATES as readonly Gate<never>[],
   PREUPDATE_SINK_GATES: PREUPDATE_SINK_GATES as readonly Gate<never>[],
   LATCH_GATES: LATCH_GATES as readonly Gate<never>[],
   NAME_COALESCE_GATES: NAME_COALESCE_GATES as readonly Gate<never>[],

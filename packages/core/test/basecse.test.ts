@@ -4,7 +4,8 @@ import { describe, expect, test } from 'vitest';
 
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
-import { LIVEBASE_GATES, baseSpanCandidates, hoistReusedGlobalBases } from '../src/l3/basecse';
+import { LIVEBASE_BLOCK_GATES, LIVEBASE_GATES, hoistReusedGlobalBases } from '../src/l3/basecse';
+import { without } from '../src/l3/gates';
 import { volatilePtrLocals } from '../src/l3/volatileptr';
 import { enumerateCandidates } from '../src/rank';
 import { ARMV4T_AGBCC } from '../src/target';
@@ -249,11 +250,11 @@ describe('/livebase admission (LIVEBASE_GATES: placement heuristics ablated)', (
   });
 });
 
-describe('base-span candidates (WHICH admitted bases get the local)', () => {
+describe('the block admission (WHICH admitted bases get the local)', () => {
   // One MMIO register file indexed at three cells, beside two scalar cells re-read in place —
   // all four in the same loop, so the default gates refuse every one and only /livebase's
   // ablation admits them. The source spelled the register file as a pointer and the scalars as
-  // bare derefs; the all-or-nothing hoist cannot say that, the span split can.
+  // bare derefs; the all-or-nothing hoist cannot say that, `single-cell` can.
   const mixed = (): SFn =>
     fn([
       {
@@ -274,16 +275,15 @@ describe('base-span candidates (WHICH admitted bases get the local)', () => {
       .filter((x): x is Stmt & { k: 'assign' } => x.k === 'assign')
       .map((x) => ((x.value as Expr & { k: 'cast' }).e as Expr & { k: 'const' }).value);
 
-  test('the two spans are emitted as separate hoists, in first-use order', () => {
-    const cands = baseSpanCandidates(mixed(), LIVEBASE_GATES);
-    expect(cands.map((x) => x.merged)).toEqual(['block', 'cell']);
-    expect(boundBases(cands[0].sfn)).toEqual([0x40000d4]);
-    expect(boundBases(cands[1].sfn)).toEqual([0x3001048, 0x3002048]);
+  test('the register file binds and the scalar cells stay inline', () => {
+    // the register file first: `collect` reads the loop's own CONDITION before its body
+    expect(boundBases(hoistReusedGlobalBases(mixed(), LIVEBASE_GATES))).toEqual([0x40000d4, 0x3001048, 0x3002048]);
+    expect(boundBases(hoistReusedGlobalBases(mixed(), LIVEBASE_BLOCK_GATES))).toEqual([0x40000d4]);
   });
 
-  test('the unhoisted span stays inline: a block-only hoist leaves the scalar cells as they were', () => {
-    const [block] = baseSpanCandidates(mixed(), LIVEBASE_GATES);
-    const loop = block.sfn.body[1] as Stmt & { k: 'dowhile' };
+  test('the unhoisted cells keep the spelling they had', () => {
+    const block = hoistReusedGlobalBases(mixed(), LIVEBASE_BLOCK_GATES);
+    const loop = block.body[1] as Stmt & { k: 'dowhile' };
     expect((loop.body[0] as Stmt & { k: 'store' }).lval).toEqual(cidx(0x3001048, c(0), 2));
     expect((loop.body[4] as Stmt & { k: 'store' }).lval).toEqual({
       k: 'index',
@@ -294,72 +294,85 @@ describe('base-span candidates (WHICH admitted bases get the local)', () => {
     });
   });
 
-  test('one span only ⇒ no candidates: there is no choice to offer', () => {
-    const oneSpan = fn([
-      { k: 'store', lval: cidx(0x3001048, c(0), 2), value: c(1) },
-      { k: 'store', lval: cidx(0x3001048, c(0), 2), value: c(2) },
-      { k: 'store', lval: cidx(0x3002048, c(0), 2), value: c(3) },
-      { k: 'store', lval: cidx(0x3002048, c(0), 2), value: c(4) },
-    ]);
-    expect(baseSpanCandidates(oneSpan, LIVEBASE_GATES)).toEqual([]);
-    expect(baseSpanCandidates(fn([]), LIVEBASE_GATES)).toEqual([]);
+  test("the axis is one gate: ablating `single-cell` is /livebase's own admission", () => {
+    expect(without(LIVEBASE_BLOCK_GATES, 'single-cell').map((g) => g.id)).toEqual(LIVEBASE_GATES.map((g) => g.id));
+    expect(boundBases(hoistReusedGlobalBases(mixed(), without(LIVEBASE_BLOCK_GATES, 'single-cell')))).toEqual(
+      boundBases(hoistReusedGlobalBases(mixed(), LIVEBASE_GATES)),
+    );
   });
 
-  test('a VARIABLE index spans cells however few constant offsets the base also touches', () => {
+  test('a VARIABLE index reaches a block of cells however few constant offsets it also touches', () => {
     const walk = fn([
       { k: 'store', lval: cidx(0x3001048, { k: 'var', name: 'a0' }, 2), value: c(1) },
       { k: 'store', lval: cidx(0x3001048, c(0), 2), value: c(2) },
       { k: 'store', lval: cidx(0x3002048, c(0), 2), value: c(3) },
       { k: 'store', lval: cidx(0x3002048, c(0), 2), value: c(4) },
     ]);
-    const cands = baseSpanCandidates(walk, LIVEBASE_GATES);
-    expect(cands.map((x) => x.merged)).toEqual(['block', 'cell']);
-    expect(boundBases(cands[0].sfn)).toEqual([0x3001048]);
+    expect(boundBases(hoistReusedGlobalBases(walk, LIVEBASE_BLOCK_GATES))).toEqual([0x3001048]);
   });
 
-  test('the split never changes what an access MEANS: only the base spans differ', () => {
-    // every candidate hoists a strict subset of the plain lever's own bases, and their union is it
+  test('the two DEGENERATE admissions, which rank turns into a decline', () => {
+    // all cells: nothing left to hoist, and the pass says so by returning the tree it was given
+    const cells = fn([
+      { k: 'store', lval: cidx(0x3001048, c(0), 2), value: c(1) },
+      { k: 'store', lval: cidx(0x3001048, c(0), 2), value: c(2) },
+      { k: 'store', lval: cidx(0x3002048, c(0), 2), value: c(3) },
+      { k: 'store', lval: cidx(0x3002048, c(0), 2), value: c(4) },
+    ]);
+    expect(hoistReusedGlobalBases(cells, LIVEBASE_BLOCK_GATES)).toBe(cells);
+    // all blocks: the gate rejects nothing, so this IS the /livebase hoist
+    const blocks = fn([
+      { k: 'store', lval: cidx(0x40000d4, c(0)), value: c(1) },
+      { k: 'store', lval: cidx(0x40000d4, c(1)), value: c(2) },
+    ]);
+    expect(boundBases(hoistReusedGlobalBases(blocks, LIVEBASE_BLOCK_GATES))).toEqual(
+      boundBases(hoistReusedGlobalBases(blocks, LIVEBASE_GATES)),
+    );
+  });
+
+  test('the narrower hoist never changes what an access MEANS: same bases, fewer of them bound', () => {
     const all = boundBases(hoistReusedGlobalBases(mixed(), LIVEBASE_GATES));
-    const cands = baseSpanCandidates(mixed(), LIVEBASE_GATES);
-    expect(cands.flatMap((x) => boundBases(x.sfn)).sort()).toEqual([...all].sort());
-    for (const x of cands) {
-      expect(boundBases(x.sfn).length).toBeLessThan(all.length);
-    }
+    const block = boundBases(hoistReusedGlobalBases(mixed(), LIVEBASE_BLOCK_GATES));
+    expect(block.every((b) => all.includes(b))).toBe(true);
+    expect(block.length).toBeLessThan(all.length);
   });
 });
 
-describe('the span split is WIRED into enumeration', () => {
-  // `corpus/agbcc-mixpoll.s` is synthetic:mixpoll:agbcc (real agbcc output, so no toolchain): one
-  // DMA register file at three offsets and three IWRAM halfwords read-modified in place, all in
-  // one loop — the shape whose enumeration held no proper subset before the split. The spellings
-  // are what the differ then referees; which one wins is the benchmark's business, not this test's.
-  const asm = readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-mixpoll.s'), 'utf8');
-  const cands = enumerateCandidates('mixpoll', asm, ARMV4T_AGBCC, { prototypes: { mixpoll: { returnsVoid: true } } });
-  const sourceFor = (label: string) => cands.find((x) => x.label === label)?.source;
+describe('the block admission is WIRED into enumeration', () => {
+  // Two real agbcc outputs, so no toolchain: `corpus/agbcc-mixpoll.s` is synthetic:mixpoll:agbcc —
+  // one DMA register file at three offsets beside three IWRAM halfwords read-modified in place,
+  // the shape whose enumeration held no proper subset of bases before this gate — and
+  // `corpus/agbcc-onepoll.s` is its control, byte-identical C with the halfwords deleted. Which
+  // spelling wins is the benchmark's business; these pin what reaches the differ at all.
+  const candsFor = (sym: string) =>
+    enumerateCandidates(
+      sym,
+      readFileSync(join(import.meta.dirname, 'corpus', `agbcc-${sym}.s`), 'utf8'),
+      ARMV4T_AGBCC,
+      { prototypes: { [sym]: { returnsVoid: true } } },
+    );
+  const cands = candsFor('mixpoll');
 
-  test('both halves reach the candidate list, plain and volatile', () => {
-    // halves in first-use order — the halfword cells are touched before the register file here
+  test('the narrower hoist reaches the candidate list, plain and volatile', () => {
     expect(cands.filter((x) => x.label.startsWith('signed/livebase')).map((x) => x.label)).toEqual([
       'signed/livebase',
       'signed/livebase/volatile',
-      'signed/livebase-cell',
-      'signed/livebase-cell/volatile',
       'signed/livebase-block',
       'signed/livebase-block/volatile',
     ]);
   });
 
-  test('the block half binds the register file alone and leaves the scalar cells inline', () => {
-    const src = sourceFor('signed/livebase-block/volatile')!;
+  test('it binds the register file alone and leaves the scalar cells inline', () => {
+    const src = cands.find((x) => x.label === 'signed/livebase-block/volatile')!.source;
     expect(src).toContain('volatile s32 * p0;');
     expect(src).toContain('p0 = (s32 *)67109076;');
     expect(src).toContain('*(u16 *)50335816 = *(u16 *)50335816 + 1;');
     expect(src).not.toContain('50335816;'); // no init binds it
   });
 
-  test('the cell half is the complement: the three halfwords bind, the register file stays inline', () => {
-    const src = sourceFor('signed/livebase-cell')!;
-    expect(src.match(/^\s+p\d+ = \(u16 \*\)\d+;$/gm)).toHaveLength(3);
-    expect(src).toContain('((s32 *)67109076)[1] =');
+  test('one base and no cell beside it ⇒ it DECLINES rather than repeat /livebase', () => {
+    const labels = candsFor('onepoll').map((x) => x.label);
+    expect(labels).toContain('signed/livebase/volatile');
+    expect(labels.filter((l) => l.includes('livebase-block'))).toEqual([]);
   });
 });

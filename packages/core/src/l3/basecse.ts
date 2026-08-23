@@ -8,10 +8,15 @@
 // base into a local pointer `T *p = (T *)base` and points each access at `p`, so the recompiled code
 // keeps the address in one register instead of reloading it.
 //
-// WHICH bases. The pass hoists every key its gate list admits, which answers the question per
-// FUNCTION where the source answered it per BASE — one register file spelled as a pointer local
-// beside scalar cells spelled as bare derefs. `baseSpanCandidates` splits the admission by SPAN
-// (see `BaseSpan`) and emits each half as its own candidate for the differ to referee.
+// WHICH bases. The pass hoists every key its gate list admits, which answers per FUNCTION a
+// question the source answered per BASE — one register file spelled as a pointer local beside
+// scalar cells spelled as bare derefs. The `single-cell` gate is what makes the narrower answer
+// reachable: under `LIVEBASE_BLOCK_GATES` a base every access of which is ONE fixed offset stays
+// inline, and rank emits that hoist as a second candidate for the differ to referee. The unit is
+// the (base, width, signedness) KEY, not the base — a base read at two widths is two keys, and the
+// gate can leave one of them inline while the other binds. COVERAGE: two admissions, not a subset
+// lattice, so "some of the several block bases" stays unreachable — a function with two register
+// files binds both or neither.
 //
 // SCOPE / SOUNDNESS. Only an `index` node whose base is a bare `addr` (a global address) or a bare
 // `const` (a numeric pointer address) is eligible, and only when 2+ such nodes share the SAME
@@ -58,8 +63,8 @@ interface Collected {
    *  tallied); a repeat means a scalar re-access, and ONE is enough to disqualify the base even
    *  when it also has distinct-offset uses. */
   constOffCount: Map<string, Map<number, number>>;
-  /** keys indexed by a NON-constant expression somewhere — an array walk, so the base spans
-   *  cells however few constant offsets it also touches (see `spanOf`). */
+  /** keys indexed by a NON-constant expression somewhere — an array walk, so the base reaches a
+   *  BLOCK of cells however few constant offsets it also touches (see `single-cell`). */
   varIndexed: Set<string>;
 }
 
@@ -128,6 +133,8 @@ export interface BaseKey {
   inLoop: boolean;
   /** some CONSTANT offset through this base is touched 2+ times */
   repeatedConstOffset: boolean;
+  /** every access is the SAME fixed offset — one scalar cell rather than a block of them */
+  singleCell: boolean;
 }
 
 /** The admission rules. NONE is sound, and that is a property of the pass rather than an oversight:
@@ -170,14 +177,25 @@ export const LIVEBASE_GATES: readonly Gate<BaseKey>[] = ablateHeuristic(
   'repeated-const-offset',
 );
 
-/** How much of an object a base's accesses reach: SEVERAL cells (2+ distinct constant offsets, or
- *  any variable index — a register file, a struct, an array) or a SINGLE one (a scalar). Which of
- *  the two a source spelled as a pointer local is exactly the question `baseSpanCandidates`
- *  enumerates; that it has TWO answers and not one per base is what bounds that enumeration. */
-export type BaseSpan = 'block' | 'cell';
-
-const spanOf = (c: Collected, k: string): BaseSpan =>
-  c.varIndexed.has(k) || (c.constOffCount.get(k)?.size ?? 0) >= 2 ? 'block' : 'cell';
+/** `/livebase-block`'s admission (rank.ts): `/livebase` plus the rule that a base reaching ONE
+ *  cell keeps re-materializing. It is the SELECTIVITY axis — the two tables differ by one gate, so
+ *  `without(LIVEBASE_BLOCK_GATES, 'single-cell')` is `/livebase`'s own admission and the axis can
+ *  be priced by ablation like any other.
+ *
+ *  Why this rule and not the address: an MMIO register file and the IWRAM halfword beside it are
+ *  both numeric constants in the same range, and the shape of the accesses is what separates them.
+ *  A strict refinement of `repeated-const-offset` (which `/livebase` ablates), so the default
+ *  admission is unchanged by it: past `single-use` a base with no variable index and one distinct
+ *  offset has touched that offset twice, which `repeated-const-offset` already rejects. */
+export const LIVEBASE_BLOCK_GATES: readonly Gate<BaseKey>[] = [
+  ...LIVEBASE_GATES,
+  {
+    id: 'single-cell',
+    why: 'a base reached at one fixed offset is a scalar the source spells as a bare deref',
+    sound: false,
+    rejects: (c) => c.singleCell,
+  },
+];
 
 /** The keys `gates` admits, in first-use order, with the census they were judged from. */
 function admit(sfn: SFn, gates: readonly Gate<BaseKey>[]): { c: Collected; keys: string[] } {
@@ -197,36 +215,15 @@ function admit(sfn: SFn, gates: readonly Gate<BaseKey>[]): { c: Collected; keys:
         uses: c.count.get(k) ?? 0,
         inLoop: c.inLoop.has(k),
         repeatedConstOffset: [...(c.constOffCount.get(k)?.values() ?? [])].some((n) => n >= 2),
+        singleCell: !c.varIndexed.has(k) && (c.constOffCount.get(k)?.size ?? 0) <= 1,
       }) === null,
   );
   return { c, keys };
 }
 
-/** The alternative HOISTS of one admission: the same gates, restricted to the bases of one span.
- *  Which of a function's several numeric bases the source named is per-base knowledge the asm does
- *  not carry — an MMIO register file wants one register held across the whole body while the
- *  scalar cell beside it re-materializes — so the spans are emitted as their own candidates and the
- *  differ referees, the same alternative-OUTPUTS mechanism as `volatileSubsetCandidates`.
- *
- *  BOUND: a span is one of two values, so this offers at most TWO extra spellings however many
- *  bases the function has — never a subset explosion. Empty when the admitted bases are all one
- *  span (no choice to offer) or when nothing is admitted; the all-spans hoist is the plain lever's
- *  own candidate and is never repeated here. */
-export function baseSpanCandidates(sfn: SFn, gates: readonly Gate<BaseKey>[]): { merged: BaseSpan; sfn: SFn }[] {
-  const { c, keys } = admit(sfn, gates);
-  const spans = [...new Set(keys.map((k) => spanOf(c, k)))];
-  return spans.length < 2 ? [] : spans.map((s) => ({ merged: s, sfn: hoistReusedGlobalBases(sfn, gates, s) }));
-}
-
-export function hoistReusedGlobalBases(
-  sfn: SFn,
-  gates: readonly Gate<BaseKey>[] = BASECSE_GATES,
-  /** hoist only the admitted bases of this span (`baseSpanCandidates`); absent ⇒ every one */
-  onlySpan?: BaseSpan,
-): SFn {
-  const { c, keys } = admit(sfn, gates);
+export function hoistReusedGlobalBases(sfn: SFn, gates: readonly Gate<BaseKey>[] = BASECSE_GATES): SFn {
+  const { c, keys: hoisted } = admit(sfn, gates);
   const { meta } = c;
-  const hoisted = onlySpan === undefined ? keys : keys.filter((k) => spanOf(c, k) === onlySpan);
   if (hoisted.length === 0) {
     return sfn;
   }
