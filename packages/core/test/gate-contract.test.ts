@@ -12,6 +12,8 @@ import { describe, expect, test } from 'vitest';
 import { BASECSE_GATES, LIVEBASE_BLOCK_GATES, LIVEBASE_GATES } from '../src/l3/basecse';
 import { ARM_DISJOINT_GATES, COALESCE_GATES } from '../src/l3/coalesce';
 import { type Gate, ablateHeuristic, gateTableDefects } from '../src/l3/gates';
+import { INLINEBASE_GATES } from '../src/l3/inlinebase';
+import { VOL_SLOT_GATES } from '../src/l3/volatileval';
 import { LATCH_GATES } from '../src/raise/latch';
 import { PREUPDATE_SINK_GATES } from '../src/structure/hazards';
 import { NAME_COALESCE_GATES } from '../src/structure/namecoalesce';
@@ -30,6 +32,8 @@ const TABLES: Record<string, readonly Gate<never>[]> = {
   PREUPDATE_SINK_GATES: PREUPDATE_SINK_GATES as readonly Gate<never>[],
   LATCH_GATES: LATCH_GATES as readonly Gate<never>[],
   NAME_COALESCE_GATES: NAME_COALESCE_GATES as readonly Gate<never>[],
+  INLINEBASE_GATES: INLINEBASE_GATES as readonly Gate<never>[],
+  VOL_SLOT_GATES: VOL_SLOT_GATES as readonly Gate<never>[],
 };
 
 /** Every `test(...)`/`describe(...)` title in the core suite, as one blob to search. */

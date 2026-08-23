@@ -7,11 +7,12 @@ import { expect, test } from 'vitest';
 
 import { T } from '../src/ir/types';
 import { materializeArgBases } from '../src/l3/argbase';
-import { type Expr, type SFn, type Stmt } from '../src/l3/ast';
+import { type Expr, type SFn, type Stmt, exprChildren, stmtExprs } from '../src/l3/ast';
 import { hoistReusedGlobalBases } from '../src/l3/basecse';
 import { inlinableConstBases, inlineConstBases } from '../src/l3/inlinebase';
 import { nearBaseClusters } from '../src/l3/nearbase';
 import { hoistScopedBases } from '../src/l3/scopebase';
+import { volatilePtrLocals } from '../src/l3/volatileptr';
 import { enumerateCandidates } from '../src/rank';
 import { ARMV4T_AGBCC } from '../src/target';
 
@@ -68,8 +69,21 @@ test('a CAST initializer is l3/basecse.ts’s reuse hoist, not a value home', ()
   expect(inlineConstBases(s)).toBeNull();
 });
 
+// The second assignment sits BELOW the top level and AFTER the uses, so every other gate still
+// admits the local: this is the count alone.
 test('a second assignment means the name is not one constant', () => {
-  const s = fn([{ name: 'p', type: PTR }], [...twoUses(), { k: 'assign', name: 'p', value: { k: 'const', value: 4 } }]);
+  const s = fn(
+    [{ name: 'p', type: PTR }],
+    [
+      ...twoUses(),
+      {
+        k: 'if',
+        cond: { k: 'const', value: 1 },
+        then: [{ k: 'assign', name: 'p', value: { k: 'const', value: 4 } }],
+        else: [],
+      },
+    ],
+  );
   expect(inlineConstBases(s)).toBeNull();
 });
 
@@ -125,6 +139,48 @@ test('a volatile POINTEE travels onto every cast the substitution mints', () => 
     const lval = (st as Extract<Stmt, { k: 'store' }>).lval as Extract<Expr, { k: 'index' }>;
     expect(lval.base).toEqual({ k: 'cast', to: PTR, volatile: true, e: { k: 'const', value: 0x4000208 } });
   }
+});
+
+test('a local fed a bare `0` is NULL, not an address', () => {
+  const zero: Stmt = { k: 'assign', name: 'q', value: { k: 'const', value: 0 } };
+  const s = fn(
+    [
+      { name: 'p', type: PTR },
+      { name: 'q', type: PTR },
+    ],
+    [
+      ...twoUses(),
+      zero,
+      { k: 'store', lval: deref('q'), value: { k: 'const', value: 2 } },
+      { k: 'store', lval: deref('q'), value: { k: 'const', value: 3 } },
+    ],
+  );
+  expect(inlinableConstBases(s)).toEqual(['p']);
+});
+
+// rank.ts's `/inlinebase/volatile` output narrows the qualifier lever to the locals this one
+// deletes, so the two gates have to agree about what an address is — a local either lever admits
+// alone would put an unqualified access under a label that says every one is qualified.
+test('every local the qualified output inlines is one the qualifier reached', () => {
+  const s = fn([{ name: 'p', type: PTR }], twoUses());
+  const only = new Set(inlinableConstBases(s));
+  const out = inlineConstBases(volatilePtrLocals(s, only)!)!;
+  const casts: Extract<Expr, { k: 'cast' }>[] = [];
+  const walk = (e: Expr): void => {
+    if (e.k === 'cast') {
+      casts.push(e);
+    }
+    for (const c of exprChildren(e)) {
+      walk(c);
+    }
+  };
+  for (const st of out.body) {
+    for (const e of stmtExprs(st)) {
+      walk(e);
+    }
+  }
+  expect(casts.length).toBe(2);
+  expect(casts.every((c) => c.volatile === true)).toBe(true);
 });
 
 test('`inlinableConstBases` names exactly the locals the gate admits', () => {

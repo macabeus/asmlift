@@ -18,12 +18,15 @@
 // its own, so this lever cannot reach it. The flag is the set of slots asmlift PROVED, not the
 // set of values a source could have qualified.
 //
-// GATE: a `frame` local of scalar integer type, carrying neither volatility flag already, whose
-// address is not taken anywhere in the body, and whose accesses in this tree are exactly the
-// machine's. Four reasons, in that order:
+// GATE (VOL_SLOT_GATES): a `frame` local of scalar integer type, carrying neither volatility flag
+// already, whose address is not taken anywhere in the body, and whose accesses in this tree are
+// exactly the machine's. Five reasons, in that order:
 //
 //   • The frame record is what gives the qualifier a home to force. Qualifying a register-homed
 //     value would enumerate a spelling no source that produced this asm could have had.
+//   • SCALAR, because a pointer local declares as `volatile u16 * p` — one prefix, two meanings —
+//     and cfamily.ts spells that for `pointeeVolatile`. On a pointer the qualifier would say
+//     something about the pointee the tree never claimed.
 //   • `volatile` already set is the frontend's stamp for an object whose address was PUBLISHED
 //     to memory (frontend/thumb.ts stamps it there, on `published`, not on any escape) — the
 //     candidate would duplicate the primary.
@@ -44,6 +47,7 @@
 //
 // No qualifying local ⇒ decline (null), so the lever never emits a duplicate of the primary.
 import { type Expr, type SFn, type Stmt, exprChildren, stmtChildren, stmtExprs } from './ast';
+import { type Gate, firstRejection } from './gates';
 
 /** What this tree does to one local: address-takings, reads, writes. */
 interface Uses {
@@ -90,22 +94,67 @@ function tally(sfn: SFn): Map<string, Uses> {
   return t;
 }
 
-/** the shared eligibility predicate (the GATE in the header) for one function's locals */
+/** One local as the gates read it. */
+interface SlotCtx {
+  hasFrame: boolean;
+  isScalar: boolean;
+  alreadyVolatile: boolean;
+  addrTaken: number;
+  /** the tree's reads and writes are the machine's loads and stores */
+  accessSetKept: boolean;
+}
+
+export const VOL_SLOT_GATES: readonly Gate<SlotCtx>[] = [
+  {
+    id: 'no-frame',
+    why: 'the frame record is the memory home the qualifier has to force',
+    sound: false,
+    rejects: (c) => !c.hasFrame,
+  },
+  {
+    id: 'non-scalar',
+    why: 'on a pointer declarator the one `volatile` prefix binds to the pointee, not the object',
+    sound: true,
+    guardedBy: 'volatileval.test.ts: a non-scalar frame local never qualifies',
+    rejects: (c) => !c.isScalar,
+  },
+  {
+    id: 'already-volatile',
+    why: 'the primary already declares it, so the candidate would duplicate it',
+    sound: false,
+    rejects: (c) => c.alreadyVolatile,
+  },
+  {
+    id: 'addr-taken',
+    why: 'an address-taken local already has a memory home, so there is none left to force',
+    sound: false,
+    rejects: (c) => c.addrTaken > 0,
+  },
+  {
+    id: 'access-set',
+    why: 'the qualifier asserts every access written is performed, so the tree’s must be the machine’s',
+    sound: true,
+    guardedBy: 'volatileval.test.ts: a store the tree no longer carries declines',
+    rejects: (c) => !c.accessSetKept,
+  },
+];
+
+/** the shared eligibility predicate (VOL_SLOT_GATES) for one function's locals */
 function eligibility(sfn: SFn): (l: SFn['locals'][number]) => boolean {
   const uses = tally(sfn);
   return (l) => {
     const u = uses.get(l.name);
+    if (u === undefined) {
+      return false;
+    }
     return (
-      u !== undefined &&
-      l.frame !== undefined &&
-      // a pointer local declares as `volatile u16 * p`, which cfamily.ts also spells for
-      // `pointeeVolatile` — one prefix, two meanings — so the object qualifier stays on scalars
-      l.type.kind === 'int' &&
-      l.volatile === undefined &&
-      l.pointeeVolatile === undefined &&
-      u.addrTaken === 0 &&
-      u.reads === l.frame.loads &&
-      u.writes === l.frame.stores
+      firstRejection(VOL_SLOT_GATES, {
+        hasFrame: l.frame !== undefined,
+        isScalar: l.type.kind === 'int',
+        alreadyVolatile: l.volatile !== undefined || l.pointeeVolatile !== undefined,
+        addrTaken: u.addrTaken,
+        accessSetKept: u.reads === l.frame?.loads && u.writes === l.frame?.stores,
+      }) === null
     );
   };
 }

@@ -16,8 +16,7 @@
 // SEMANTICS ARE PRESERVED BY CONSTRUCTION: this is constant propagation of a local that is
 // assigned once, from a compile-time constant, before anything mentions it, and whose address is
 // never taken — so every use reads that constant on every path, and the substituted expression
-// carries the local's own declared type AND its pointee volatility, so each use renders at the
-// C type the variable had.
+// carries the local's own declared type AND its pointee volatility.
 //
 // THE QUALIFIER TRAVELS WITH THE ADDRESS. The deleted local is the only place a `volatile`
 // pointee could be written, and a raw address is precisely the case with no declaration
@@ -27,16 +26,20 @@
 // there too — the shape that matches (agbcc 2.9-arm-000512, `-O2 -mthumb-interwork -Wimplicit
 // -fhex-asm -fprologue-bugfix`; `.s` diff empty, `.o` identical under cmp). So rank.ts emits
 // the qualified spelling as a second OUTPUT of this lever, `/volatile` narrowed to the locals
-// it deletes, and the substitution moves the qualifier onto every cast it mints.
+// it deletes. Each cast this mints carries the qualifier; a use whose width does not stride the
+// declared pointee renders through the C-family printer's reinterpret cast instead, which
+// carries it too (backend/cfamily.ts) — in C the access takes the OUTER type, so a plain cast
+// there would spell exactly the silent drop this paragraph exists to prevent.
 //
-// GATE — the local must be all of: pointer-typed; initialized by a bare `const` (a `(T *)base`
-// CAST initializer is l3/basecse.ts's reuse hoist, whose own lever family owns that question);
-// assigned exactly once, by a statement at the body's TOP LEVEL that no earlier statement's
-// mention precedes; never address-taken; used only as the base of an `index`, at 2+ sites (one
-// use is not the reused address this exists for); not object-`volatile` (a `T *volatile p` has
-// no inhabitant, and cfamily.ts prints that flag in the pointee's position); and not `frame` (a
-// slot is an asm fact — see the SFn.locals doc). Anything else, and nothing qualifying at all,
-// DECLINES (null) rather than approximating.
+// GATE (INLINEBASE_GATES) — the local must be all of: pointer-typed; initialized by a bare
+// NONZERO `const` (a `(T *)base` CAST initializer is l3/basecse.ts's reuse hoist, whose own lever
+// family owns that question; `0` is NULL, never an address, which is also the sibling qualifier
+// lever's rule); assigned exactly once, by a statement at the body's TOP LEVEL that no earlier
+// statement's mention precedes; never address-taken; used only as the base of an `index`, at 2+
+// sites (one use is not the reused address this exists for); not object-`volatile` (a
+// `T *volatile p` has no inhabitant, and cfamily.ts prints that flag in the pointee's position);
+// and not `frame` (a slot is an asm fact — see the SFn.locals doc). Anything else, and nothing
+// qualifying at all, DECLINES (null) rather than approximating.
 //
 // KNOWN GAP: only `index` bases are re-spelled, so the same L2 home passed to a callee or used
 // as a `field` base is out of reach — the tally's `otherUses` refuses it. Re-spelling those
@@ -51,6 +54,7 @@ import {
   stmtChildren,
   stmtExprs,
 } from './ast';
+import { type Gate, firstRejection } from './gates';
 
 /** What one local's mentions look like across the whole body. */
 interface Mentions {
@@ -138,7 +142,84 @@ function tally(sfn: SFn): Map<string, Mentions> {
   return t;
 }
 
-/** The locals the GATE admits, each with the cast its uses become. */
+/** One local as the gates read it. */
+interface BaseCtx {
+  isPointer: boolean;
+  objectVolatile: boolean;
+  hasFrame: boolean;
+  m: Mentions;
+}
+
+export const INLINEBASE_GATES: readonly Gate<BaseCtx>[] = [
+  {
+    id: 'non-pointer',
+    why: 'the lever re-spells an address; a scalar value home is a different question',
+    sound: false,
+    rejects: (c) => !c.isPointer,
+  },
+  {
+    id: 'object-volatile',
+    why: 'the substitution carries the POINTEE flag, so an object-volatile pointer would lose its own',
+    sound: true,
+    guardedBy: 'inlinebase.test.ts: an object-volatile or frame local declines',
+    rejects: (c) => c.objectVolatile,
+  },
+  {
+    id: 'frame',
+    why: 'a slot the asm materialized is an asm fact, not a spelling to undo',
+    sound: false,
+    rejects: (c) => c.hasFrame,
+  },
+  {
+    id: 'multi-assign',
+    why: 'a name assigned more than once is not one constant',
+    sound: true,
+    guardedBy: 'inlinebase.test.ts: a second assignment means the name is not one constant',
+    rejects: (c) => c.m.assigns !== 1,
+  },
+  {
+    id: 'const-init',
+    why: 'only a bare `const` at the body’s top level is an address available on every path',
+    sound: true,
+    guardedBy: 'inlinebase.test.ts: an assignment below the top level may not run on every path',
+    rejects: (c) => c.m.topAssignAt === null || c.m.constValue === null,
+  },
+  {
+    id: 'null-base',
+    why: '`0` is NULL, never an address — the sibling qualifier lever (volatileptr.ts) refuses it too',
+    sound: false,
+    rejects: (c) => c.m.constValue === 0,
+  },
+  {
+    id: 'use-before-assign',
+    why: 'a mention ahead of the assignment reads something the constant does not stand for',
+    sound: true,
+    guardedBy: 'inlinebase.test.ts: a use in a loop ABOVE the assignment reads the local before it is set',
+    rejects: (c) => c.m.firstAt !== c.m.topAssignAt,
+  },
+  {
+    id: 'addr-taken',
+    why: 'a deleted local has no address to take',
+    sound: true,
+    guardedBy: 'inlinebase.test.ts: an address-taken local has an identity the constant cannot stand in for',
+    rejects: (c) => c.m.addrTaken !== 0,
+  },
+  {
+    id: 'other-uses',
+    why: 'a use the substitution cannot reach would name the deleted local',
+    sound: true,
+    guardedBy: 'inlinebase.test.ts: a use that is not an `index` base is outside what the lever re-spells',
+    rejects: (c) => c.m.otherUses !== 0,
+  },
+  {
+    id: 'single-use',
+    why: 'one use is not the reused address this lever exists for',
+    sound: false,
+    rejects: (c) => c.m.baseUses < 2,
+  },
+];
+
+/** The locals INLINEBASE_GATES admits, each with the cast its uses become. */
 function plan(sfn: SFn): Map<string, Extract<Expr, { k: 'cast' }>> {
   const t = tally(sfn);
   const out = new Map<string, Extract<Expr, { k: 'cast' }>>();
@@ -146,16 +227,12 @@ function plan(sfn: SFn): Map<string, Extract<Expr, { k: 'cast' }>> {
     const m = t.get(l.name);
     if (
       m === undefined ||
-      l.type.kind !== 'ptr' ||
-      l.volatile !== undefined ||
-      l.frame !== undefined ||
-      m.assigns !== 1 ||
-      m.topAssignAt === null ||
-      m.constValue === null ||
-      m.firstAt !== m.topAssignAt ||
-      m.addrTaken !== 0 ||
-      m.otherUses !== 0 ||
-      m.baseUses < 2
+      firstRejection(INLINEBASE_GATES, {
+        isPointer: l.type.kind === 'ptr',
+        objectVolatile: l.volatile !== undefined,
+        hasFrame: l.frame !== undefined,
+        m,
+      }) !== null
     ) {
       continue;
     }
@@ -163,7 +240,7 @@ function plan(sfn: SFn): Map<string, Extract<Expr, { k: 'cast' }>> {
       k: 'cast',
       to: l.type,
       ...(l.pointeeVolatile ? { volatile: true as const } : {}),
-      e: { k: 'const', value: m.constValue },
+      e: { k: 'const', value: m.constValue! },
     });
   }
   return out;
