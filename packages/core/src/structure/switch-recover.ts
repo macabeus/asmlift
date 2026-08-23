@@ -19,6 +19,8 @@ export interface SwitchRecoverDeps {
   /** is this opcode an integer comparison? */
   isCmpOpcode: (opcode: string) => boolean;
   switchAllowsNeqCase: boolean;
+  /** read a relational test whose BRANCH admits exactly one scrutinee value as that case */
+  switchAllowsBoundCase: boolean;
   /** emit the case arms in the ASSEMBLY's block-layout order rather than by ascending case value */
   switchArmsFollowLayout: boolean;
   /** does emitting this block's ops carry a statement beyond the ops themselves? A def-site
@@ -66,6 +68,7 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     isNamed,
     isCmpOpcode,
     switchAllowsNeqCase,
+    switchAllowsBoundCase,
     switchArmsFollowLayout,
     emitsAnchoredWrite,
     expr,
@@ -284,25 +287,33 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     }
   };
 
-  // A relational test's two sides each admit a HALF-LINE of scrutinee values in the compare's own
-  // ordering, so the only way one of them can hold exactly ONE value is at a domain endpoint —
-  // which is why testing the two endpoints and their neighbours decides it, with no interval
-  // lattice. `x < 1` over an unsigned scrutinee admits `{0}` and is agbcc's spelling of `case 0`
-  // in a balanced search: `emit_case_nodes` tests the subtree BOUND, not the value, whenever the
-  // remaining range has collapsed to one. Read as navigation instead, that arm's body becomes a
-  // second default candidate and the whole tree declines.
+  // Which single scrutinee value does this relational test's BRANCH admit, if exactly one? A
+  // relational side is a HALF-LINE in the compare's own ordering, so it can hold one value only at
+  // a domain endpoint — which is why testing the two endpoints and their neighbours decides it,
+  // with no interval lattice. `x < 1` over an unsigned scrutinee admits `{0}` and is agbcc's
+  // spelling of `case 0` in a balanced search: `emit_case_nodes` tests the subtree BOUND, not the
+  // value, whenever the remaining range has collapsed to one. Read as navigation instead, that
+  // arm's body becomes a second default candidate and the whole tree declines.
   //
-  // The reading is over the FULL domain, so an ancestor test that already excluded the value makes
-  // it wrong — and PRE3 is what catches that: it simulates the original tree for every recovered
-  // case value and declines unless it lands on the recorded body, exactly as it does for the `eq`
-  // cases. Null when the side admits none, several, or the whole domain.
-  const singletonSide = (ti: TestInfo, want: boolean): number | null => {
+  // THE BRANCH ONLY. `emit_case_nodes` reaches a case body from a relational test in exactly two
+  // places — LT jumping to `node->left->code_label` and GT to `node->right->code_label`, each
+  // guarded by `node_is_bounded` on that side — and both are the jump, never the fall-through,
+  // which always continues into more dispatch. A fall-side reading has no producer, and the asm it
+  // does fire on is a source-level `if (x > 0) … else if …`.
+  //
+  // The domain is the 32-bit REGISTER's, not the scrutinee's recovered type: a narrower type has a
+  // nearer endpoint this misses, which costs a case and never invents one. Wider, the reading
+  // ignores an ancestor that already excluded the value — and PRE3 is what catches that: it
+  // simulates the original tree for every recovered case value and declines unless it lands on the
+  // recorded body, exactly as it does for the `eq` cases. Null when the branch admits none,
+  // several, or the whole domain.
+  const singletonTaken = (ti: TestInfo): number | null => {
     const [min, max] = ti.opcode.startsWith('icmp_u') ? [0, -1] : [-0x80000000, 0x7fffffff];
     for (const [v, next] of [
       [min, min + 1],
       [max, max - 1],
     ]) {
-      if (evalCmp(ti.opcode, ti.xOnLeft, v, ti.k) === want && evalCmp(ti.opcode, ti.xOnLeft, next, ti.k) !== want) {
+      if (evalCmp(ti.opcode, ti.xOnLeft, v, ti.k) && !evalCmp(ti.opcode, ti.xOnLeft, next, ti.k)) {
         return v;
       }
     }
@@ -451,8 +462,12 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
       const term = blk.ops[blk.ops.length - 1];
       const taken = forwardingTarget(term.successors[0].block),
         fall = forwardingTarget(term.successors[1].block);
+      const isTestOn = (child: Block) => {
+        const t = testInfo(child, false);
+        return !!t && t.x === scrut;
+      };
       const asLeafOrTest = (child: Block, role: 'case' | 'nav', k?: number) => {
-        const isTest = !!testInfo(child, false) && testInfo(child, false)!.x === scrut;
+        const isTest = isTestOn(child);
         if (role === 'case') {
           if (isTest) {
             return false;
@@ -492,12 +507,20 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
           return null;
         }
       } else {
-        // relational → navigation, except where one side has collapsed to a single value
-        const [tk, fk] = [singletonSide(ti, true), singletonSide(ti, false)];
-        if (!asLeafOrTest(taken, tk === null ? 'nav' : 'case', tk ?? undefined)) {
+        // relational → navigation, except where the BRANCH has collapsed to a single value and
+        // lands on a BODY. Two narrowings, each dropping a shape the compiler does not emit here:
+        //   - never at the ROOT. `emit_case_nodes` emits a single-valued node's own
+        //     `do_jump_if_equal` before either descent test, so the bound test always sits under
+        //     another test of the same tree; a relational test that opens the dispatch is an
+        //     ordinary `if`, and reading it as a case turns an if-else chain into a `switch`;
+        //   - a singleton branch whose target is itself a test STAYS navigation. That is the
+        //     search descending to pin the value, and reading it as a case declines (`asLeafOrTest`
+        //     refuses a test as a body) a tree the nav reading recovers.
+        const k = switchAllowsBoundCase && blk !== b && !isTestOn(taken) ? singletonTaken(ti) : null;
+        if (!asLeafOrTest(taken, k === null ? 'nav' : 'case', k ?? undefined)) {
           return null;
         }
-        if (!asLeafOrTest(fall, fk === null ? 'nav' : 'case', fk ?? undefined)) {
+        if (!asLeafOrTest(fall, 'nav')) {
           return null;
         }
       }

@@ -443,34 +443,93 @@ test('a jump-table arm that FALLS THROUGH is not reordered', () => {
 // shape `synthetic:armdef:agbcc` and `synthetic:armfall:agbcc` both carry. Read as pure
 // navigation that arm's body is a second default candidate and the whole tree declines to
 // if-nesting, which compiles to a different compare AND a different arm layout.
+//
+// The same asm is what an `if (x < 1) … else if …` chain compiles to, so the reading is held to
+// what `emit_case_nodes` can actually emit: the BRANCH of a test BELOW the root, on a compiler
+// that declared `switchAllowsBoundCase`. The three fixtures after the accepted one are those
+// three refusals, one apiece.
 
-test('a relational test whose side admits ONE value routes that case, not the default', () => {
-  const out = of(
-    'f:\n\tmov\tr2, #0x0\n' +
-      '\tcmp\tr0, #0x1\n\tbeq\t.Lc1\t@cond_branch\n' +
-      '\tcmp\tr0, #0x1\n\tbcc\t.Lc0\t@cond_branch\n' + // x < 1, unsigned ⇒ exactly {0}
-      '\tcmp\tr0, #0x2\n\tbeq\t.Lc2\t@cond_branch\n\tb\t.Lend\n' +
-      [0, 1, 2].map((k) => `.Lc${k}:\n\tadd\tr2, r1, #0x${k + 1}\n\tb\t.Lend\n`).join('') +
-      '.Lend:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr2, [r0]\n\tbx\tlr\n',
-  );
+/** agbcc's own `switch (mode) { case 0..2 }`, where `case 0:` is the bound test `cmp r0, #1 / bcc`
+ *  under the root's `== 1` — verbatim from `-O2 -mthumb-interwork -fhex-asm -fprologue-bugfix`. */
+const boundCase =
+  'f:\n\tmov\tr2, #0x0\n' +
+  '\tcmp\tr0, #0x1\n\tbeq\t.Lc1\t@cond_branch\n' +
+  '\tcmp\tr0, #0x1\n\tbcc\t.Lc0\t@cond_branch\n' + // x < 1, unsigned ⇒ exactly {0}
+  '\tcmp\tr0, #0x2\n\tbeq\t.Lc2\t@cond_branch\n\tb\t.Lend\n' +
+  [0, 1, 2].map((k) => `.Lc${k}:\n\tadd\tr2, r1, #0x${k + 1}\n\tb\t.Lend\n`).join('') +
+  '.Lend:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr2, [r0]\n\tbx\tlr\n';
+
+test('a relational test whose branch admits ONE value routes that case, not the default', () => {
+  const out = of(boundCase);
   expect(out).toContain('switch (a0)');
   expect(armOrder(out)).toEqual([0, 1, 2]);
   expect(out).not.toContain('else'); // not the if-nesting fallback
 });
 
-test('the singleton is read on the FALL side too, not only the taken one', () => {
+test('the FALL side of a relational test is navigation, whatever it admits', () => {
+  // `emit_case_nodes` reaches a case body from a relational test only by BRANCHING to it; its
+  // fall-through always continues into more dispatch. So `cmp r0, #0 / bhi`, whose fall side is
+  // exactly {0}, is not a switch here — it is `if (x > 0) … else if (x == 5) …`, and the two
+  // spellings compile to different code.
   const out = of(
     'f:\n\tmov\tr2, #0x0\n' +
-      '\tcmp\tr0, #0x1\n\tbeq\t.Lc1\t@cond_branch\n' +
-      '\tcmp\tr0, #0\n\tbhi\t.Lhi\t@cond_branch\n' + // x > 0 navigates; the FALL side is {0}
+      '\tcmp\tr0, #0\n\tbhi\t.Lhi\t@cond_branch\n' +
+      '\tadd\tr2, r1, #0x1\n\tb\t.Lend\n' +
+      '.Lhi:\n\tcmp\tr0, #0x5\n\tbeq\t.Lc5\t@cond_branch\n\tb\t.Ldef\n' +
+      '.Lc5:\n\tadd\tr2, r1, #0x2\n\tb\t.Lend\n' +
+      '.Ldef:\n\tmov\tr2, #0x63\n\tb\t.Lend\n' +
+      '.Lend:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr2, [r0]\n\tbx\tlr\n',
+  );
+  expect(out).not.toContain('switch (');
+  expect(out).toContain('a0 > 0');
+});
+
+test('a bound test that OPENS the dispatch is an ordinary `if`, not a case', () => {
+  // A single-valued node emits its own `do_jump_if_equal` before either descent test, so the
+  // bound test always sits UNDER another test of the tree. One that opens the region is the
+  // `if (x < 1) … else if (x == 5) …` chain, which recovers as the chain it is.
+  const out = of(
+    'f:\n\tmov\tr2, #0x0\n' +
+      '\tcmp\tr0, #0x1\n\tbcc\t.Lc0\t@cond_branch\n' +
+      '\tcmp\tr0, #0x5\n\tbeq\t.Lc5\t@cond_branch\n\tb\t.Ldef\n' +
       '.Lc0:\n\tadd\tr2, r1, #0x1\n\tb\t.Lend\n' +
-      '.Lhi:\n\tcmp\tr0, #0x2\n\tbeq\t.Lc2\t@cond_branch\n\tb\t.Lend\n' +
-      '.Lc1:\n\tadd\tr2, r1, #0x2\n\tb\t.Lend\n' +
-      '.Lc2:\n\tadd\tr2, r1, #0x3\n\tb\t.Lend\n' +
+      '.Lc5:\n\tadd\tr2, r1, #0x2\n\tb\t.Lend\n' +
+      '.Ldef:\n\tmov\tr2, #0x63\n\tb\t.Lend\n' +
+      '.Lend:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr2, [r0]\n\tbx\tlr\n',
+  );
+  expect(out).not.toContain('switch (');
+  expect(out).toContain('a0 < 1');
+});
+
+test('a bound branch onto another TEST is the search descending, and still recovers', () => {
+  // `cmp r0, #1 / bcc` reaching a block that pins the value with `== 0` is the dispatch walking
+  // down, not an arm: reading it as a case body would decline the whole tree, because a test is
+  // not a body. Navigation recovers the switch.
+  const out = of(
+    'f:\n\tmov\tr2, #0x0\n' +
+      '\tcmp\tr0, #0x1\n\tbcc\t.Lsub\t@cond_branch\n' +
+      '\tcmp\tr0, #0x5\n\tbeq\t.Lc5\t@cond_branch\n\tb\t.Ldef\n' +
+      '.Lsub:\n\tcmp\tr0, #0\n\tbeq\t.Lc0\t@cond_branch\n\tb\t.Ldef\n' +
+      '.Lc0:\n\tadd\tr2, r1, #0x1\n\tb\t.Lend\n' +
+      '.Lc5:\n\tadd\tr2, r1, #0x2\n\tb\t.Lend\n' +
+      '.Ldef:\n\tmov\tr2, #0x63\n\tb\t.Lend\n' +
       '.Lend:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr2, [r0]\n\tbx\tlr\n',
   );
   expect(out).toContain('switch (a0)');
-  expect(armOrder(out)).toEqual([0, 1, 2]);
+  expect(armOrder(out)).toEqual([0, 5]);
+});
+
+test('a compiler that has not declared bound cases reads the branch as navigation', () => {
+  // The rule is agbcc's, from agbcc's `stmt.c`. The same asm is a plain if-else chain on a
+  // compiler whose dispatch never elides the remaining value's test, and IDO already pays for
+  // that mis-recognition once (`switchAllowsNeqCase: false`), so nobody inherits this one.
+  const undeclared = { ...ARMV4T_AGBCC, compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors } };
+  delete undeclared.compilerBehaviors.switchAllowsBoundCase;
+  const out = decompile('f', boundCase, undeclared, { prototypes: { f: { returnsVoid: true } } }).source;
+  expect(out).not.toContain('switch (');
+  for (const t of [MIPS_IDO, MIPS_GCC, PPC_MWCC]) {
+    expect(t.compilerBehaviors.switchAllowsBoundCase).toBeUndefined();
+  }
 });
 
 test('a singleton an ancestor already excluded is DEAD, and PRE3 declines rather than resurrect it', () => {

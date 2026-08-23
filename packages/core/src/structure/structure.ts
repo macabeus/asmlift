@@ -676,6 +676,11 @@ export interface StructureOptions {
   // body). GCC freely uses `!=`; IDO prefers `==`/`<`. A per-compiler DATA lever, not an `arch ==`
   // branch — default true (permissive; the decline path keeps it sound either way).
   switchAllowsNeqCase?: boolean;
+  // Comparison-tree switch recovery: treat a relational test whose BRANCH admits exactly one
+  // scrutinee value as that case rather than as navigation. A per-compiler DATA lever declared in
+  // TargetDescription.compilerBehaviors — a compiler opts in on evidence that its dispatch jumps
+  // straight to a bounded subtree's body. Default false: absent, every relational edge navigates.
+  switchAllowsBoundCase?: boolean;
   // Comparison-tree switch recovery: emit the case arms in the order the ASSEMBLY lays their
   // bodies out, rather than sorted by ascending case value. A per-compiler DATA lever declared in
   // TargetDescription.compilerBehaviors — a compiler opts in on evidence that it neither reorders
@@ -804,6 +809,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     negateJoinedBranchSense = false,
     orderArgCopiesByComputation = true,
     switchAllowsNeqCase = true,
+    switchAllowsBoundCase = false,
     switchArmsFollowLayout = false,
     defOrderLoadPairs = true,
     anchorConstCopies = false,
@@ -2567,6 +2573,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     isNamed: (v) => varName.has(v),
     isCmpOpcode: (opcode) => !!CMP_TO_BIN[opcode],
     switchAllowsNeqCase,
+    switchAllowsBoundCase,
     switchArmsFollowLayout,
     emitsAnchoredWrite: (blk) => blk.ops.some((o) => anchoredAt.has(o)),
     expr: (v) => expr(v),
