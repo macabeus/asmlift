@@ -46,6 +46,7 @@ import { type Prototypes, prototypesFromSymbols } from './proto';
 import { runPreRecovery } from './raise/pre-recovery';
 import { recoverTypes } from './raise/recover';
 import { hasDerivedReadHome, hasHomeableSharedAddress, hasLoopSharedPureValue } from './structure/analysis';
+import { hasAmbiguousJoinedSense } from './structure/joinsense';
 import { type SymbolMap, symbolsByName } from './symbols';
 import { type TargetDescription, structureOptionsFor } from './target';
 
@@ -446,8 +447,9 @@ export function enumerateCandidates(
   // this axis emits the other. Read off the TARGET's sense, not this candidate's `s.sense`, so
   // `/flip-branch` still moves only divergent ifs and the two axes stay independent (the four
   // combinations are the same four as before — only which one carries the bare label changed).
-  // Crossed with the pair above; a function with no two-armed joined if emits identical source
-  // and the dedup collapses it before any compile.
+  // Crossed with the pair above, and GATED per lift variant on structure/joinsense.ts: the layout
+  // reading is the answer unless something moved the polarity out from under it, so most functions
+  // emit one sense here instead of two.
   const baseSense = [
     ...senseAnchor.map((s) => ({ ...s, join: false })),
     ...senseAnchor.map((s) => ({ ...s, suffix: `${s.suffix}/flip-join`, join: true })),
@@ -595,7 +597,14 @@ export function enumerateCandidates(
         }
         // the per-variant axis gates, on THIS variant's lifted fn — see the table doc
         const variantOff = STRUCTURING_AXES.filter((ax) => ax.variantGate !== undefined && !ax.variantGate(fn));
-        const variantCands = axisCands.filter((s) => variantOff.every((ax) => !s[ax.flag]));
+        // `/flip-join`'s own gate, on the same footing and read on the same fn (see
+        // structure/joinsense.ts): the joined sense is the layout's unless a fold or a
+        // branch-range trampoline moved the polarity out from under it, so the axis is
+        // enumerated only where one of those could have fired.
+        const joinAmbiguous = hasAmbiguousJoinedSense(fn);
+        const variantCands = axisCands.filter(
+          (s) => (joinAmbiguous || !s.join) && variantOff.every((ax) => !s[ax.flag]),
+        );
         // `/merge-names` combinations whose un-merged sibling was DROPPED. `structure()` already
         // refuses to let the axis unlock a function the primary declines, but it can only see its own
         // refusals — a boundary contract fails out here, in `structureChecked`. Without this a
