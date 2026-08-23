@@ -5,8 +5,9 @@
 // qualifying local means DECLINE, never a duplicate candidate.
 //
 // The end-to-end tests lift agbcc Thumb and check the emitted declaration, so they also pin the
-// producer of the `frame` record: a spill slot is marked with its access counts, a register-only
-// local is not marked at all.
+// producer of the `frame` record: a spill slot is marked with its access counts, while a
+// register-only local and a slot whose address escapes the direct load/store form are not marked
+// at all.
 import { expect, test } from 'vitest';
 
 import { parse } from '../src/ir/parse';

@@ -7,8 +7,9 @@
 //   2. memAccess/arrayAccess wrap any not-provably-pointer base in the honest reinterpret cast
 //      at the ACCESS's own width (end-to-end through decompile());
 //   3. `assertDerefsTyped` — the stage-boundary contract that flags a definite ill-typed deref;
-//   4. the printer parenthesizes prefix nodes (cast/unary) under postfix parents, and the
-//      single-line `if` inlining no longer truncates a multi-line then-statement (the gcd bug).
+//   4. the printer parenthesizes prefix nodes (cast/unary) under postfix parents, carries a
+//      volatile base's qualifier onto the cast it mints, and the single-line `if` inlining no
+//      longer truncates a multi-line then-statement (the gcd bug).
 import { describe, expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';

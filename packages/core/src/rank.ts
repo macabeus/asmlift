@@ -731,9 +731,10 @@ export function enumerateCandidates(
           // qualifier takes away the allocator's freedom to keep the value in a callee-saved
           // register across a call, and which of the three ways a slot can arise (a volatile local,
           // an address-taken one, plain register pressure) the source used is not derivable from
-          // the asm. A DECLARATION lever, not a structuring axis: it changes nothing structure()
-          // decides, so it rides the base spelling like its `/volatile` sibling rather than doubling
-          // every enumeration, and its frame-flag gate costs nothing on a function with no slot.
+          // the asm. A DECLARATION lever, not a structuring axis (docs/level-tower.md's third
+          // fork): it changes nothing structure() decides, so it rides the base spelling like its
+          // `/volatile` sibling rather than doubling every enumeration, and its frame-flag gate
+          // costs nothing on a function with no slot.
           respell('/vol-slot', () => volatileValueLocals(sfn));
           // `/inlinebase` — spell a CONSTANT-address pointer local at its uses instead
           // (l3/inlinebase.ts). The local is structure/analysis.ts's value home for a `const` the
@@ -755,10 +756,9 @@ export function enumerateCandidates(
           // (a symbol-map sweep sees fewer, since an absolute pool constant lifts to a `gaddr`
           // there). Both outputs together add 766 candidates over 47058, +1.6%, and up to +70% on
           // one function (EntityPositionFromLevelTable) — the same class of price the enumeration
-          // already pays for `/volatile`.
-          // Cheaper than the axis over the same question would be, which is the choice the lever's
-          // header argues; `/vol-slot` adds nothing at all there, since no klonoa function reaches
-          // its frame gate.
+          // already pays for `/volatile`, and cheaper than the axis over the same question would
+          // be — the choice the lever's header argues. `/vol-slot` adds nothing at all there: no
+          // klonoa function reaches its frame gate.
           const inlineVolatile = (): SFn | null => {
             const only = new Set(inlinableConstBases(sfn));
             const q = only.size ? volatilePtrLocals(sfn, only) : null;
@@ -988,9 +988,8 @@ export function rankBy<S extends { score: number }>(
  *  VOLATILITY next: at equal bytes the spelling that keeps a `volatile` is the one to publish.
  *  Over-qualifying costs a reader nothing, while a dropped `volatile` on an MMIO cell is a real
  *  bug in the C that only this compiler at these flags hides — the differ cannot referee it,
- *  because the compiler was not exploiting the non-volatility on this input. Declared here rather
- *  than left to the order two `respell` calls happen to sit in, which any lever adding a shape
- *  product between them silently reverses.
+ *  because the compiler was not exploiting the non-volatility on this input. A declared term
+ *  rather than an enumeration order, which an unrelated lever's spellings can slide between.
  *
  *  CAST COUNT next, and only WITHIN a group. A wrong signedness pin is what manufactures casts —
  *  the C backend has to cast a shift operand back to the signedness the machine op needs, so

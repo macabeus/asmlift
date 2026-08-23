@@ -186,10 +186,9 @@ export interface SFn {
    *  slotted. `loads`/`stores` are the yardstick a qualifier lever must match before it may
    *  declare every access to the object observable: the readability passes between here and L3
    *  may drop a store or render one machine load as two reads, and `volatile` over an access
-   *  set asmlift did not preserve is a source that contradicts itself. The name cannot carry
-   *  either fact — `sp<off>` is minted against the symbol map and grows `_` suffixes on
-   *  collision. ABSENT where the counts would be a floor rather than the set: the address
-   *  reaching anything but a direct load/store leaves accesses the count cannot see. */
+   *  set asmlift did not preserve is a source that contradicts itself. ABSENT where the counts
+   *  would be a floor rather than the set: an address reaching anything but a direct load/store
+   *  leaves accesses the count cannot see. */
   locals: {
     name: string;
     type: IrType;
@@ -267,9 +266,9 @@ export function exprEquals(a: Expr, b: Expr): boolean {
     }
     case 'cast': {
       const bb = b as typeof a;
-      // `volatile` is part of the SPELLING, compared for the same reason `lead` and `dot` are
-      // below: a CSE or dedup that treats these as equal keeps one node and drops the other,
-      // silently respelling a volatile access as a plain one.
+      // `volatile` is part of the SPELLING, compared for the same reason `lead` and `dot` are: a
+      // CSE or dedup that treats these as equal keeps one node and drops the other, silently
+      // respelling a volatile access as a plain one.
       return (
         JSON.stringify(a.to) === JSON.stringify(bb.to) &&
         (a.volatile ?? false) === (bb.volatile ?? false) &&

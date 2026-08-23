@@ -1,7 +1,7 @@
 // The `/inlinebase` lever (l3/inlinebase.ts): a pointer local holding a CONSTANT address is
 // deleted and each access through it re-spelled as the cast constant. The gate conditions are
-// what these tests pin — one bare-`const` assignment at the body's top level that nothing
-// mentions earlier, no address taken, every use an `index` base, 2+ of them — and nothing
+// what these tests pin — one bare, nonzero `const` assignment at the body's top level that
+// nothing mentions earlier, no address taken, every use an `index` base, 2+ of them — and nothing
 // qualifying means DECLINE, never a duplicate candidate.
 import { expect, test } from 'vitest';
 

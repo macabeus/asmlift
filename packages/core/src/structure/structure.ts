@@ -3390,8 +3390,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // NO record at all when the address reaches ANYTHING ELSE — a block argument, an offset
   // computation, a call. The count is then a floor rather than the access set, and it is read as
   // the access set (the l3/volatileval.ts gate), so it refuses instead of reporting a number that
-  // undercounts. Today the audit's direct re-rooting makes that unreachable; it is the invariant
-  // this counter rests on, asserted where it is consumed rather than argued in another file.
+  // undercounts. The frontend's audit re-roots every access directly, which makes that
+  // unreachable today — asserted here rather than inherited.
   const frameRecord = (at: Op): { frame?: { loads: number; stores: number } } => {
     const off = at.attrs.off as number;
     const roots = new Set<Value>();

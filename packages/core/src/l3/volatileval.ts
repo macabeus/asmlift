@@ -18,9 +18,7 @@
 // its own, so this lever cannot reach it. The flag is the set of slots asmlift PROVED, not the
 // set of values a source could have qualified.
 //
-// GATE (VOL_SLOT_GATES): a `frame` local of scalar integer type, carrying neither volatility flag
-// already, whose address is not taken anywhere in the body, and whose accesses in this tree are
-// exactly the machine's. Five reasons, in that order:
+// GATE — VOL_SLOT_GATES holds the rules; the argument behind each is here, where there is room:
 //
 //   • The frame record is what gives the qualifier a home to force. Qualifying a register-homed
 //     value would enumerate a spelling no source that produced this asm could have had.
@@ -47,10 +45,10 @@
 //
 // No qualifying local ⇒ decline (null), so the lever never emits a duplicate of the primary.
 //
-// ALL ELIGIBLE SLOTS OR NONE, where the sibling pointee lever enumerates per-local subsets: which
-// pointers a source declared volatile is per-pointer knowledge (an MMIO block beside a plain RAM
-// table), but a function reaching this gate with two eligible slots has no inhabitant — a Thumb
-// sub-word slot surviving the access-set rule is roughly one local per corpus.
+// ALL ELIGIBLE SLOTS OR NONE, where the sibling pointee lever enumerates per-local SUBSETS on the
+// argument that volatility is per-pointer knowledge. It is per-slot knowledge here too; the
+// subsets are simply uninhabited — of 311 agbcc benchmark rows, one reaches this gate at all, and
+// none reaches it with two eligible slots.
 import type { SFn } from './ast';
 import { type Gate, firstRejection } from './gates';
 import { localMentions, readsOf } from './mentions';
