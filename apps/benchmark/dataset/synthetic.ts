@@ -2251,9 +2251,12 @@ export const SYNTHETIC: SynthSpec[] = [
   // BASECSE_GATES. Two of those gates — `loop` (a function-top hoist of a loop base forces a
   // callee-saved register) and `repeated-const-offset` (a fixed offset touched twice is a scalar
   // RMW the compiler re-materializes) — are exactly wrong for an MMIO poll, so rank.ts's
-  // `/livebase` lever re-runs the pass with both ablated, leaving only `single-use`. That lever
-  // is ALL-OR-NOTHING over bases: `hoistReusedGlobalBases` hoists every key the gate list admits,
-  // and there is no candidate for a proper subset.
+  // `/livebase` lever re-runs the pass with both ablated, leaving only `single-use`. That lever was
+  // ALL-OR-NOTHING over bases — `hoistReusedGlobalBases` hoisted every key the gate list admits,
+  // with no candidate for a proper subset. `baseSpanCandidates` now splits the admission by SPAN
+  // (`block`: 2+ distinct constant offsets or a variable index; `cell`: one scalar cell) and rank
+  // emits each half plus its `/volatile` sibling, so this row MATCHES on
+  // `signed/livebase-block/volatile` and guards the split.
   //
   // ATTRIBUTED BY ABLATION, not by reading. Adding one more gate to LIVEBASE_GATES that rejects a
   // numeric base outside MMIO — per-base selectivity in its crudest form — takes this row from 11
@@ -2262,7 +2265,9 @@ export const SYNTHETIC: SynthSpec[] = [
   // `*(u16 *)0x03001048` in two loop bounds and hoisting THAT base is correct. So the pass is
   // right about the spelling and wrong about which bases get it — and an address threshold is NOT
   // the predicate to fix it with: it pays 4 points on `sizebound` for the 11 it wins here.
-  // `sizebound` is the row that referees whatever predicate a future lever proposes.
+  // `sizebound` is the row that referees whatever predicate a future lever proposes; under the
+  // shipped span split it holds at 16, because both of its bases are correct to hoist and the
+  // all-spans form is still plain `/livebase`.
   //
   // WATCH THE SIGN when writing one. `dma_wait:mwcc_242_81`'s base is 0xcc006000, which the IR
   // carries as a NEGATIVE 32-bit constant; a first cut of the probe compared the key as a signed
@@ -2280,16 +2285,17 @@ export const SYNTHETIC: SynthSpec[] = [
   // three IWRAM scalars that must stay inline absolute derefs. The ROM's own C is the reference,
   // and hoisting the three IWRAM cells is what costs — measured by hand-editing asmlift's own
   // winner one clause at a time against the same object:
-  //     all four bound, all four volatile (asmlift's winner) .................... 11
+  //     all four bound, all four volatile (the winner before the split) ......... 11
   //     all four bound, only the DMA base volatile .............................. 11
   //     all four bound, none volatile .......................................... 27
   //     ONLY the DMA base bound, volatile, the three IWRAM cells inline .......... 0  ← MATCH
   //     only the DMA base bound, NOT volatile ................................... 21
   // So the 11 is the hoist alone (qualifying the IWRAM cells `volatile` on top of the wrong hoist
   // is worth 0 here), and `volatile` on the base that needs it is worth 21 — the lever pair is
-  // right about both bases and wrong about which ones. A base census over all 12 enumerated
-  // candidates: every one binds either 0 or all 4 numeric bases, and marks 0 or 4 of them
-  // `volatile`. The matching spelling is in none of them.
+  // right about both bases and wrong about which ones. A base census over the 12 candidates
+  // enumeration once produced: every one bound either 0 or all 4 numeric bases, and marked 0 or 4
+  // of them `volatile`. The span split adds 16 more, two of which bind the DMA base alone; the
+  // scored `/livebase-block` reads 21, the number hand-editing that clause produced.
   //
   // `onepoll` is the control — byte-identical C with the three IWRAM statements deleted. One base,
   // no selectivity question, and `/livebase/volatile` MATCHes it. So the pair brackets the gap
@@ -2300,11 +2306,14 @@ export const SYNTHETIC: SynthSpec[] = [
   // `for` spelling the same shape scores 15, of which 11 is these bases and 4 is that guard
   // (verified by composing both fixes by hand: 15 → 4 → 0).
   //
-  // Cut from kleod:LoadBGTilemapData:agbcc. A base census over its whole 20608-candidate
-  // enumeration returns four shapes and no others: 13440 bind nothing, 1024 bind 0x03003430 alone
-  // (the default pass's own single admission), 3072 bind all five of 0x03003430 / 0x03003478 /
-  // 0x0300347A / 0x030034A0 (IWRAM) and 0x040000D4 (the DMA register file) plain, and 3072 bind
-  // those same five all `volatile`. Not one binds the DMA base alone.
+  // Cut from kleod:LoadBGTilemapData:agbcc. A base census over the 20608-candidate enumeration it
+  // had before the span split returned four shapes and no others: 13440 bound nothing, 1024 bound
+  // 0x03003430 alone (`/nearbase`'s cluster), 3072 bound all five of 0x03003430 / 0x03003478 /
+  // 0x0300347A / 0x030034A0 (IWRAM) and 0x040000D4 (the DMA register file) plain, and 3072 bound
+  // those same five all `volatile`. Not one bound the DMA base alone. The split adds that shape
+  // (25728 candidates, +24.8%) and LBG's ranked best does not move: 473 either way, same winner,
+  // which carries no hoisted base at all — so this axis is a capability the corpus needed and NOT
+  // the thing standing in front of that function.
   //
   // agbcc only. The claim is about what THIS compiler does with the two spellings, established by
   // compiling both; the poll declines on ido7.1/gcc2.7.2kmc's branch-likely lift link exactly as
