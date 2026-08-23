@@ -7,7 +7,15 @@
 // consume exactly the exported seam: `emitCFamily` + `cType` + `LeafHook`.
 import { IrType, T, scalarTypeForAccess, typeToString } from '../ir/types';
 import { BinOp, Expr, SFn, Stmt, dotBase } from '../l3/ast';
-import { type VarTypes, declaredTypes, derefStrideOk, exprCType, renderedIntSignedness } from '../l3/typing';
+import {
+  type PrintEnv,
+  assertsVolatile,
+  declaredTypes,
+  derefStrideOk,
+  exprCType,
+  printEnv,
+  renderedIntSignedness,
+} from '../l3/typing';
 
 // C operator precedence (lower binds tighter). Used to emit MINIMAL parentheses. Shared: C++ has
 // the same precedence for these operators.
@@ -91,7 +99,7 @@ export function renderStructDecl(name: string, fields: StructFieldDecl[]): strin
 // backend uses. The default (no hook) is byte-identical C.
 export type LeafHook = (e: Expr, rec: (e: Expr, p: number) => string) => string | null;
 
-function printExpr(e: Expr, parentPrec: number, vt: VarTypes, leaf?: LeafHook): string {
+function printExpr(e: Expr, parentPrec: number, vt: PrintEnv, leaf?: LeafHook): string {
   const rec = (x: Expr, p: number) => printExpr(x, p, vt, leaf);
   if (leaf) {
     const s = leaf(e, rec);
@@ -104,10 +112,22 @@ function printExpr(e: Expr, parentPrec: number, vt: VarTypes, leaf?: LeafHook): 
   // through the honest reinterpret cast at that width — the machine semantics of the access.
   // Materialized as a synthetic cast node so the spelling (text, precedence, parens) is exactly
   // that of a tree-level cast.
+  //
+  // AND IT CARRIES THE QUALIFIER. In C the access takes the OUTER type, so a plain cast over a
+  // base the tree declared volatile spells an MMIO access the compiler may CSE, reorder or drop —
+  // `((s32 *)(volatile u16 *)0x4000208)[i]` reads once where `((volatile s32 *)0x4000208)[i]`
+  // reads twice (agbcc 2.9-arm-000512, `-O2 -mthumb-interwork -Wimplicit -fhex-asm
+  // -fprologue-bugfix`), and referring to a volatile object through a non-volatile lvalue is
+  // undefined behaviour (C99 6.7.3p5).
   const legalized = (ix: Extract<Expr, { k: 'index' }>): Expr =>
-    derefStrideOk(exprCType(ix.base, vt), ix.width, ix.signed)
+    derefStrideOk(exprCType(ix.base, vt.type), ix.width, ix.signed)
       ? ix.base
-      : { k: 'cast', to: T.ptr(scalarTypeForAccess(ix.width, ix.signed)), e: ix.base };
+      : {
+          k: 'cast',
+          to: T.ptr(scalarTypeForAccess(ix.width, ix.signed)),
+          ...(assertsVolatile(ix.base, vt) ? { volatile: true as const } : {}),
+          e: ix.base,
+        };
   // C-FAMILY SHIFT LEGALIZATION, the same discipline one operator over. The tower keeps the two
   // right shifts apart (`>>>` logical, `>>` arithmetic); C spells BOTH `>>` and picks between them
   // from the LEFT OPERAND'S TYPE. So the operand must be made to carry the choice, or an `shr_u`
@@ -124,7 +144,7 @@ function printExpr(e: Expr, parentPrec: number, vt: VarTypes, leaf?: LeafHook): 
   // arithmetic rules upstream do emit that inner cast (intifyAddr).
   const shiftOperand = (e0: Extract<Expr, { k: 'bin' }>): Expr => {
     const wantSigned = e0.op === '>>';
-    if (renderedIntSignedness(e0.l, vt) === wantSigned) {
+    if (renderedIntSignedness(e0.l, vt.type) === wantSigned) {
       return e0.l;
     }
     const inner = e0.l.k === 'cast' && e0.l.to.kind === 'int' && e0.l.to.width === 32 ? e0.l.e : e0.l;
@@ -217,7 +237,10 @@ function printExpr(e: Expr, parentPrec: number, vt: VarTypes, leaf?: LeafHook): 
     // op. Under a POSTFIX parent ([]/->) the cast itself must parenthesize — `((struct S *)p)->f`,
     // NOT `(struct S *)p->f` (which C parses as a cast OF the member access).
     case 'cast': {
-      const s = `(${cType(e.to)})${rec(e.e, 2)}`;
+      // `volatile` binds to the POINTEE (`(volatile u16 *)a`), which is where the qualifier goes
+      // on a raw-address access — the same prefix position the declaration printer uses for a
+      // pointer local's `pointeeVolatile`.
+      const s = `(${e.volatile ? 'volatile ' : ''}${cType(e.to)})${rec(e.e, 2)}`;
       return parentPrec < 2 ? `(${s})` : s;
     }
     case 'bin': {
@@ -230,7 +253,7 @@ function printExpr(e: Expr, parentPrec: number, vt: VarTypes, leaf?: LeafHook): 
   }
 }
 
-function printStmt(s: Stmt, indent: string, vt: VarTypes, leaf?: LeafHook): string[] {
+function printStmt(s: Stmt, indent: string, vt: PrintEnv, leaf?: LeafHook): string[] {
   const pe = (e: Expr, p: number) => printExpr(e, p, vt, leaf);
   switch (s.k) {
     case 'assign':
@@ -424,9 +447,10 @@ function legalizePointerWrites(fn: SFn): SFn {
 
 function cFamilyBody(fn0: SFn, leaf?: LeafHook): string[] {
   const fn = legalizePointerWrites(fn0);
-  // The legalization env: every printed var's declared type, from the SAME params/locals the
-  // emitted declarations come from — so the printer judges exactly the C the reader will see.
-  const vt: VarTypes = declaredTypes(fn);
+  // The legalization env: every printed var's declared type and pointee volatility, from the SAME
+  // params/locals the emitted declarations come from — so the printer judges exactly the C the
+  // reader will see.
+  const vt: PrintEnv = printEnv(fn);
   const lines: string[] = [];
   for (const l of fn.locals) {
     // Both facts render at the PREFIX position, where C's declarator grammar reads them

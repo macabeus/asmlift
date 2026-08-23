@@ -3381,6 +3381,49 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   const localNames = [...new Set([...varName.values(), ...[...varType.keys()].filter((n) => /^t\d+$/.test(n))])].filter(
     (n) => /^[vt]\d+$/.test(n) && !globalNames.has(n),
   );
+  // The machine's static access counts for one frame object: every `load`/`store` rooted on an
+  // `laddr` at the same offset. Counted over the L2 blocks, so it is the access set the asm had,
+  // before any L3 readability pass could drop or duplicate one. Summed across the offset's
+  // `laddr` ops — the frontend's frame-object audit re-roots accesses onto per-offset captures
+  // and holds one object per offset, so several ops can name the same storage.
+  //
+  // NO record at all when the address reaches ANYTHING ELSE — a block argument, an offset
+  // computation, a call. The count is then a floor rather than the access set, and it is read as
+  // the access set (the l3/volatileval.ts gate), so it refuses instead of reporting a number that
+  // undercounts. Reached rather than theoretical: an address-escaped frame scratch takes it —
+  // `synthetic:dma_fill_uninit` and `kleod:ProcessInputAndUpdateEntities` both lose their record
+  // here.
+  const frameRecord = (at: Op): { frame?: { loads: number; stores: number } } => {
+    const off = at.attrs.off as number;
+    const roots = new Set<Value>();
+    for (const b of fn.blocks) {
+      for (const op of b.ops) {
+        if (op.opcode === 'laddr' && (op.attrs.off as number) === off) {
+          roots.add(op.results[0]);
+        }
+      }
+    }
+    let loads = 0;
+    let stores = 0;
+    for (const b of fn.blocks) {
+      for (const op of b.ops) {
+        const access = op.opcode === 'load' || op.opcode === 'store';
+        if (access && roots.has(op.operands[0])) {
+          if (op.opcode === 'load') {
+            loads++;
+          } else {
+            stores++;
+          }
+        }
+        // every OTHER mention of the address, operands and branch arguments alike
+        const elsewhere = op.operands.some((v, i) => roots.has(v) && !(access && i === 0));
+        if (elsewhere || op.successors.some((sx) => sx.args.some((v) => roots.has(v)))) {
+          return {};
+        }
+      }
+    }
+    return { frame: { loads, stores } };
+  };
   const structs = collectStructs(fn);
   return {
     name: fn.name,
@@ -3399,6 +3442,10 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
               {
                 name: laddrName.get(op)!,
                 type: T.int((op.attrs.width as number) * 8, op.attrs.signed as boolean),
+                // the asm materialized this slot's address, and this is how many times it
+                // loaded and stored through it — both asm facts, and the gate the
+                // l3/volatileval.ts lever reads (see the SFn.locals doc)
+                ...frameRecord(op),
                 // an ESCAPED address makes every store observable (the DMA hardware reads it), and
                 // the source spells the scratch volatile for that reason — see the stamp site in
                 // frontend/thumb.ts for why it is the SPELLING that matters and not dead-store

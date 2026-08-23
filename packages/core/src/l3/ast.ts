@@ -15,7 +15,13 @@ export type Expr =
   // `3 & (s32)p`). Scalar deref casts are backend-owned — the C-family printer synthesizes
   // them from the `index` node's width. Each backend spells the cast in its own syntax
   // (C: `(u8)e`; Pascal: no spelling yet → fails loud).
-  | { k: 'cast'; to: IrType; e: Expr }
+  //
+  // `volatile` qualifies the POINTEE of a pointer cast (`(volatile u16 *)0x4000208`) — the one
+  // place asmlift can say "this access is to a volatile object" when there is no declaration to
+  // hang it on, which is exactly the raw-address case (l3/inlinebase.ts). IrType models no
+  // cv-qualifier, deliberately: volatility is a SPELLING, carried at the declaration or the
+  // cast, the same split SFn.locals makes for `volatile`/`pointeeVolatile`.
+  | { k: 'cast'; to: IrType; e: Expr; volatile?: true }
   | { k: 'call'; fn: string; args: Expr[] }
   // The ADDRESS of a named global, `&gSym` (agbcc pool `.word gSym`, frontend `gaddr` op). A
   // DEREF of it collapses to the bare global: memAccess/arrayAccess spell `*(&gSym)` as `gSym`
@@ -169,8 +175,27 @@ export interface SFn {
    *  symbols.ts's cell-vs-pointee split: `volatile` = the local OBJECT is volatile (the
    *  address-escaped frame scratch; dce.ts treats reads of it as observable), `pointeeVolatile`
    *  = the local is a pointer TO volatile data (the l3/volatileptr.ts lever; a declaration
-   *  spelling only — nothing about the local itself is observable). */
-  locals: { name: string; type: IrType; volatile?: true; pointeeVolatile?: true }[];
+   *  spelling only — nothing about the local itself is observable).
+   *
+   *  `frame` is present on a local the structurer recovered from an `laddr` — the asm
+   *  MATERIALIZED the slot's address into a register, so the object provably lives in memory —
+   *  and carries the machine's static access counts for it. Under Thumb that envelope is a
+   *  SUB-WORD frame object: `strh/ldrh/strb/ldrb` have no `[sp,#imm]` form, so a compiler must
+   *  copy `sp` first, while a word spill goes straight to `[sp,#imm]` and is recovered as an
+   *  SSA value with no local of its own. So `frame` is NOT the set of every value the machine
+   *  slotted. `loads`/`stores` are the yardstick a qualifier lever must match before it may
+   *  declare every access to the object observable: the readability passes between here and L3
+   *  may drop a store or render one machine load as two reads, and `volatile` over an access
+   *  set asmlift did not preserve is a source that contradicts itself. ABSENT where the counts
+   *  would be a floor rather than the set: an address reaching anything but a direct load/store
+   *  leaves accesses the count cannot see. */
+  locals: {
+    name: string;
+    type: IrType;
+    volatile?: true;
+    pointeeVolatile?: true;
+    frame?: { loads: number; stores: number };
+  }[];
   /** project globals referenced with a known declaration shape (symbol map) — typed for the
    *  legalization env (exprCType) but NEVER declared by a backend: the project's own headers
    *  declare them, exactly like every other global name asmlift emits. */
@@ -241,7 +266,14 @@ export function exprEquals(a: Expr, b: Expr): boolean {
     }
     case 'cast': {
       const bb = b as typeof a;
-      return JSON.stringify(a.to) === JSON.stringify(bb.to) && exprEquals(a.e, bb.e);
+      // `volatile` is part of the SPELLING, compared for the same reason `lead` and `dot` are: a
+      // CSE or dedup that treats these as equal keeps one node and drops the other, silently
+      // respelling a volatile access as a plain one.
+      return (
+        JSON.stringify(a.to) === JSON.stringify(bb.to) &&
+        (a.volatile ?? false) === (bb.volatile ?? false) &&
+        exprEquals(a.e, bb.e)
+      );
     }
     case 'call': {
       const bb = b as typeof a;
@@ -434,6 +466,24 @@ export function stmtChildren(s: Stmt): Stmt[] {
       arms.splice(s.defaultAt ?? s.cases.length, 0, s.default ?? []);
       return arms.flat();
     }
+  }
+}
+
+/** Every expression node in a body, statements nested and children included — the whole-tree walk
+ *  the three functions above compose into, kept here so a new node kind is a compile error in one
+ *  of them rather than a silent miss in each caller's own recursion. */
+export function* walkExprs(body: Stmt[]): Generator<Expr> {
+  const expr = function* (e: Expr): Generator<Expr> {
+    yield e;
+    for (const c of exprChildren(e)) {
+      yield* expr(c);
+    }
+  };
+  for (const s of body) {
+    for (const e of stmtExprs(s)) {
+      yield* expr(e);
+    }
+    yield* walkExprs(stmtChildren(s));
   }
 }
 

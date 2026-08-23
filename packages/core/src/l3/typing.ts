@@ -18,7 +18,7 @@
 // provably a pointer" (adds a cast — valid C either way); the deref contract treats `undefined`
 // as "not provably wrong" (no error).
 import { IrType, T, scalarTypeForAccess } from '../ir/types';
-import type { Expr, SFn } from './ast';
+import { type Expr, type SFn, exprChildren } from './ast';
 
 /** The declared type of a printed variable — the env `exprCType` judges rendered C against.
  *  THE one copy of the SFn→env derivation (C printer, Pascal printer, deref contract): each
@@ -46,6 +46,37 @@ export function declaredTypes(fn: SFn): VarTypes {
 // ir/types.ts) because element scaling is a C-semantics fact, not an IR fact.
 export function ptrElemBytes(to: IrType): number {
   return to.kind === 'int' ? to.width / 8 : to.kind === 'ptr' ? 4 : 0;
+}
+
+/** The env a C-family printer judges rendered C against: the declared types, plus which printed
+ *  vars render as a pointer to VOLATILE. IrType models no cv-qualifier (see the `cast` node doc in
+ *  l3/ast.ts), so a printer that RE-TYPES an access — the deref legalization — has to read the
+ *  qualifier from here or the re-typing silently drops it. */
+export interface PrintEnv {
+  readonly type: VarTypes;
+  readonly volatilePointee: (name: string) => boolean;
+}
+
+export function printEnv(fn: SFn): PrintEnv {
+  // both flags, because the C declarator prints ONE `volatile ` prefix for a pointer local and it
+  // binds to the pointee either way (the declaration loop in backend/cfamily.ts)
+  const vol = new Set(
+    fn.locals.filter((l) => l.type.kind === 'ptr' && (l.pointeeVolatile || l.volatile)).map((l) => l.name),
+  );
+  return { type: declaredTypes(fn), volatilePointee: (n) => vol.has(n) };
+}
+
+/** Does anything under `e` assert a VOLATILE POINTEE? The two spellings that carry the qualifier
+ *  into printed C are a `volatile` cast node and a volatile-pointee declaration. The whole subtree
+ *  is searched, not the pointer spine: a cast to an integer type between the assertion and the
+ *  access — `(u32)p + 4` — renders the qualifier no less dropped, and over-qualifying an access
+ *  only restricts the compiler further, where under-qualifying is a lie about MMIO. */
+export function assertsVolatile(e: Expr, env: PrintEnv): boolean {
+  return (
+    (e.k === 'cast' && e.volatile === true) ||
+    (e.k === 'var' && env.volatilePointee(e.name)) ||
+    exprChildren(e).some((c) => assertsVolatile(c, env))
+  );
 }
 
 /** May a `width`-byte access of the given signedness dereference a base of rendered C type `rt` AS

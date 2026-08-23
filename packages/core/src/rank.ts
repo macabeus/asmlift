@@ -29,6 +29,7 @@ import {
 import { armDisjointCandidates, coalesceCandidates } from './l3/coalesce';
 import type { Gate } from './l3/gates';
 import { initFirstGuards } from './l3/initfirst';
+import { inlinableConstBases, inlineConstBases } from './l3/inlinebase';
 import { mulFirstSums } from './l3/mulfirst';
 import { nearBaseClusters } from './l3/nearbase';
 import { parkParamsFirst } from './l3/parkfirst';
@@ -37,7 +38,8 @@ import { registerishSpellings } from './l3/regspell';
 import { reindexWalks } from './l3/reindex';
 import { hoistScopedBases } from './l3/scopebase';
 import { type SymbolRef, collectSymbolRefs } from './l3/symbol-refs';
-import { volatilePtrLocals, volatileSubsetCandidates } from './l3/volatileptr';
+import { deviceVolatileClaims, volatilePtrLocals, volatileSubsetCandidates } from './l3/volatileptr';
+import { volatileValueLocals } from './l3/volatileval';
 import { RewritePattern } from './pattern/engine';
 import { applyIdiomPatterns, raiseRecovered, structureChecked } from './pipeline';
 import { type Prototypes, prototypesFromSymbols } from './proto';
@@ -373,6 +375,11 @@ export interface Candidate {
    *  whose tree still names pool/reloc-derived globals (it only drops the map's shaped
    *  SPELLINGS). Absent without a map — synthesis then has nothing to do. */
   symbolRefs?: SymbolRef[];
+  /** `volatile` claims this spelling makes on one of the target's device registers — the
+   *  volatility tie-break's input (compareScored). DERIVED from the tree the source was emitted
+   *  from, like `symbolRefs`, because the qualifier and the address it applies to are often two
+   *  statements apart and the rendered text cannot pair them. */
+  deviceVolatile?: number;
 }
 /** A candidate paired with its score `S` (the injected scorer's result shape — must carry `.score`). */
 export interface Scored<S> extends Candidate {
@@ -508,6 +515,13 @@ export function enumerateCandidates(
   // `.word gSym`, MIPS `%lo(gSym)`), and those references need declarations in the self-declared
   // scoring world exactly like the named variant's (without them every raw sibling fails to compile
   // there, and the eval-winning raw candidate becomes unreproducible outside project headers).
+  // The volatility tie-break's input, derived at the same moment as the refs and for the same
+  // reason: whatever tree reaches emit is the tree it describes. Absent on a target that declares
+  // no device window, which is how every non-GBA target opts out.
+  const volOf = (tree: SFn): { deviceVolatile?: number } => {
+    const n = deviceVolatileClaims(tree, target.capabilities.deviceRegisters);
+    return n > 0 ? { deviceVolatile: n } : {};
+  };
   const refsOf = (tree: SFn): { symbolRefs?: SymbolRef[] } => {
     const refs = baseOpts.symbols
       ? collectSymbolRefs(tree.body, baseOpts.symbols, tree.name).map((r) => {
@@ -628,8 +642,8 @@ export function enumerateCandidates(
           // when a loop re-spells, BOTH representations are emitted and the differ referees. The
           // re-spelling passes the same boundary contracts as the primary; one that fails them is
           // dropped here — never scored, never able to win.
-          const spellings: { suffix: string; source: string; symbolRefs?: SymbolRef[] }[] = [
-            { suffix: '', source: backend.emit(sfn), ...refsOf(sfn) },
+          const spellings: { suffix: string; source: string; symbolRefs?: SymbolRef[]; deviceVolatile?: number }[] = [
+            { suffix: '', source: backend.emit(sfn), ...refsOf(sfn), ...volOf(sfn) },
           ];
           // Representation re-spellings — each a lever on the same footing as signedness/branch sense,
           // each guarded: it must pass the same boundary contracts as the primary AND emit (a backend
@@ -673,7 +687,7 @@ export function enumerateCandidates(
               }
               assertResolved(alt);
               assertDerefsTyped(alt);
-              spellings.push({ suffix, source: backend.emit(alt), ...refsOf(alt) });
+              spellings.push({ suffix, source: backend.emit(alt), ...refsOf(alt), ...volOf(alt) });
               // STATEMENT-SHAPE products, derived onto EVERY spelling — the second sanctioned
               // product mechanism (the POLICY note above carries the admission argument). Each is
               // a statement-order/shape fact orthogonal to representation; subsets compose in the
@@ -688,6 +702,7 @@ export function enumerateCandidates(
                       suffix: `${suffix}${shaped.suffix}`,
                       source: backend.emit(shaped.out),
                       ...refsOf(shaped.out),
+                      ...volOf(shaped.out),
                     });
                   }
                 }
@@ -725,6 +740,58 @@ export function enumerateCandidates(
           // motion, which lands the allocator on different homes). Both spellings are emitted and
           // the differ referees.
           respell('/volatile', () => volatilePtrLocals(sfn));
+          // `/vol-slot` — declare a STACK-HOMED scalar local volatile (l3/volatileval.ts). The
+          // qualifier takes away the allocator's freedom to keep the value in a callee-saved
+          // register across a call, and which of the three ways a slot can arise (a volatile local,
+          // an address-taken one, plain register pressure) the source used is not derivable from
+          // the asm. A DECLARATION lever, not a structuring axis (docs/level-tower.md's third
+          // fork): it changes nothing structure() decides, so it rides the base spelling like its
+          // `/volatile` sibling rather than doubling every enumeration, and its frame-flag gate
+          // costs nothing on a function with no slot.
+          respell('/vol-slot', () => volatileValueLocals(sfn));
+          // `/inlinebase` — spell a CONSTANT-address pointer local at its uses instead
+          // (l3/inlinebase.ts). The local is structure/analysis.ts's value home for a `const` the
+          // asm kept in a callee-saved register across a call; the register is real, but a constant
+          // re-spelled per use is CSEd back into that same one, so which the source had is not
+          // derivable. Its own bare-`const`-initializer gate keeps it off l3/basecse.ts's reuse
+          // hoists, whose placement levers already answer that question.
+          //
+          // TWO ALTERNATIVE OUTPUTS, not a product: deleting the local also deletes the only place
+          // a `volatile` POINTEE could be written, and a raw address has no declaration anywhere
+          // else to carry it. So the qualified spelling is emitted too, `/volatile` narrowed to
+          // exactly the locals this lever deletes. Usually the bytes separate them and the score
+          // decides (11 against 12 on pokeemerald:EReader_Reset), but where the compiler was not
+          // exploiting the non-volatility they are byte-identical — as they are on that row's
+          // WINNING shape, the one that also qualifies the slot — and `compareScored`'s device-
+          // volatility term picks the qualified twin, 0x4000208 being REG_IME.
+          //
+          // COST — it fires broadly: on 33 of the 69 klonoa functions that lift with no symbol map
+          // (a symbol-map sweep sees fewer, since an absolute pool constant lifts to a `gaddr`
+          // there). Both outputs together add 766 candidates over 47058, +1.6%, and up to +67% on
+          // one function (EntityPositionFromLevelTable) — the same class of price the enumeration
+          // already pays for `/volatile`, and cheaper than the axis over the same question would
+          // be — the choice the lever's header argues. `/vol-slot` adds nothing at all there: no
+          // klonoa function reaches its frame gate.
+          const inlineVolatile = (): SFn | null => {
+            const only = new Set(inlinableConstBases(sfn));
+            const q = only.size ? volatilePtrLocals(sfn, only) : null;
+            return q ? inlineConstBases(q) : null;
+          };
+          respell('/inlinebase/volatile', inlineVolatile);
+          respell('/inlinebase', () => inlineConstBases(sfn));
+          // The `/inlinebase` × `/vol-slot` PAIRING — row-demanded, and the joint spelling is
+          // reachable from neither lever alone: on pokeemerald:EReader_Reset the primary scores 11,
+          // `/inlinebase` alone 11 and `/vol-slot` alone 2, and the pair 0. The two touch disjoint
+          // locals (one pointer-typed, one a scalar frame slot), so applying them in either order
+          // gives the same spelling — and each of `/inlinebase`'s two outputs carries it.
+          respell('/inlinebase/volatile/vol-slot', () => {
+            const r = inlineVolatile();
+            return r ? volatileValueLocals(r) : null;
+          });
+          respell('/inlinebase/vol-slot', () => {
+            const r = inlineConstBases(sfn);
+            return r ? volatileValueLocals(r) : null;
+          });
           // `/scopebase` — name a reused global base at the INNERMOST scope holding its uses
           // (l3/scopebase.ts). Distinct from basecse's function-top hoist, which the primary already
           // carries: this one fires exactly where that placement would extend a live range the
@@ -882,6 +949,7 @@ export function enumerateCandidates(
               source,
               group: svIndex,
               ...(sp.symbolRefs ? { symbolRefs: sp.symbolRefs } : {}),
+              ...(sp.deviceVolatile ? { deviceVolatile: sp.deviceVolatile } : {}),
             });
           }
         }
@@ -931,6 +999,15 @@ export function rankBy<S extends { score: number }>(
  *
  *  GROUP next: a named symbol-map spelling beats its `/raw-globals` sibling at equal bytes.
  *
+ *  DEVICE VOLATILITY next: at equal bytes, the spelling that qualifies a DEVICE REGISTER
+ *  (`capabilities.deviceRegisters`) is the one to publish. A dropped `volatile` on an MMIO cell is
+ *  a real bug in the C that only this compiler at these flags hides — the differ cannot referee
+ *  it, because the compiler was not exploiting the non-volatility on this input. Gated on the
+ *  window rather than counting the word, because outside it the qualifier is a claim about
+ *  ordinary memory that the asm does not support — over the 856-row bench, counting the word
+ *  alone decides twelve rows and only two of them touch a device address. A declared term rather
+ *  than an enumeration order, which an unrelated lever's spellings can slide between.
+ *
  *  CAST COUNT next, and only WITHIN a group. A wrong signedness pin is what manufactures casts —
  *  the C backend has to cast a shift operand back to the signedness the machine op needs, so
  *  pinning `u32` on a genuinely-signed parameter buys `s32 f(u32 a0) { return (s32)a0 >> a1; }`
@@ -946,7 +1023,11 @@ export function compareScored<S extends { score: number }>(
   b: Candidate & { score: S; order: number },
 ): number {
   return (
-    a.score.score - b.score.score || a.group - b.group || castCount(a.source) - castCount(b.source) || a.order - b.order
+    a.score.score - b.score.score ||
+    a.group - b.group ||
+    (b.deviceVolatile ?? 0) - (a.deviceVolatile ?? 0) ||
+    castCount(a.source) - castCount(b.source) ||
+    a.order - b.order
   );
 }
 

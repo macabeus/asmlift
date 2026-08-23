@@ -7,8 +7,9 @@
 //   2. memAccess/arrayAccess wrap any not-provably-pointer base in the honest reinterpret cast
 //      at the ACCESS's own width (end-to-end through decompile());
 //   3. `assertDerefsTyped` — the stage-boundary contract that flags a definite ill-typed deref;
-//   4. the printer parenthesizes prefix nodes (cast/unary) under postfix parents, and the
-//      single-line `if` inlining no longer truncates a multi-line then-statement (the gcd bug).
+//   4. the printer parenthesizes prefix nodes (cast/unary) under postfix parents, carries a
+//      volatile base's qualifier onto the cast it mints, and the single-line `if` inlining no
+//      longer truncates a multi-line then-statement (the gcd bug).
 import { describe, expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -211,6 +212,47 @@ describe('printer — prefix nodes under postfix parents, and the truncating sin
       ],
     };
     expect(cBackend.emit(idx)).toContain('((u8 *)n)[n]');
+  });
+
+  // The legalization RE-TYPES the access, and in C the access takes the outer type — so a cast
+  // minted over a volatile base has to carry the qualifier or the access stops being volatile.
+  test('a legalized deref keeps the volatile its base declares', () => {
+    const mk = (locals: SFn['locals'], base: Expr): SFn => ({
+      name: 'f',
+      params: [{ name: 'n', type: T.s(32) }],
+      locals,
+      retType: T.void(),
+      body: [{ k: 'store', lval: { k: 'index', base, idx: V('n'), width: 4, signed: true }, value: C(0) }],
+    });
+    // a pointee-volatile DECLARATION (the /volatile lever's local)
+    expect(cBackend.emit(mk([{ name: 'p', type: T.ptr(T.u(16)), pointeeVolatile: true }], V('p')))).toContain(
+      '((volatile s32 *)p)[n] = 0;',
+    );
+    // a volatile CAST (the /inlinebase lever's re-spelled raw address)
+    const raw: Expr = { k: 'cast', to: T.ptr(T.u(16)), volatile: true, e: C(67109384) };
+    expect(cBackend.emit(mk([], raw))).toContain('((volatile s32 *)(volatile u16 *)67109384)[n] = 0;');
+    // …and a base that declares nothing volatile is not over-qualified
+    expect(cBackend.emit(mk([{ name: 'p', type: T.ptr(T.u(16)) }], V('p')))).toContain('((s32 *)p)[n] = 0;');
+  });
+
+  // Two lever gates rest on this: `volatile` on a POINTER local would read as pointee volatility,
+  // so neither lever may produce one.
+  test('a pointer local prints one `volatile` prefix, and it binds to the pointee', () => {
+    const mk = (l: SFn['locals'][number]): string =>
+      cBackend.emit({ name: 'f', params: [], locals: [l], retType: T.void(), body: [] });
+    expect(mk({ name: 'p', type: T.ptr(T.u(16)), pointeeVolatile: true })).toContain('volatile u16 * p;');
+    expect(mk({ name: 'p', type: T.ptr(T.u(16)), volatile: true })).toContain('volatile u16 * p;');
+  });
+
+  test('a base that already strides the access is spelled bare, qualifier and all', () => {
+    const fn: SFn = {
+      name: 'f',
+      params: [{ name: 'n', type: T.s(32) }],
+      locals: [{ name: 'p', type: T.ptr(T.u(16)), pointeeVolatile: true }],
+      retType: T.void(),
+      body: [{ k: 'store', lval: { k: 'index', base: V('p'), idx: V('n'), width: 2, signed: false }, value: C(0) }],
+    };
+    expect(cBackend.emit(fn)).toContain('p[n] = 0;');
   });
 
   test('the prefix `*` form self-parenthesizes under a postfix parent; nested `-` never lexes as --', () => {

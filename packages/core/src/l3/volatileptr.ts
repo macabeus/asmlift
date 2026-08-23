@@ -25,7 +25,7 @@
 // The symbol map owns a declared global's volatility, and a mixed-feed local would read the
 // mapped global through a volatile view the map never granted. No qualifying local ⇒ decline
 // (null), so the lever never emits a duplicate of the primary.
-import { type Expr, type SFn, type Stmt, mapExprChildren } from './ast';
+import { type Expr, type SFn, type Stmt, mapExprChildren, walkExprs } from './ast';
 
 const isNumericAddr = (e: Expr): boolean =>
   (e.k === 'const' && e.value !== 0) || (e.k === 'cast' && e.to.kind === 'ptr' && isNumericAddr(e.e));
@@ -71,6 +71,45 @@ function collectAssigns(stmts: Stmt[], out: { name: string; value: Expr }[]): vo
     }
   }
 }
+
+/** How many of this tree's `volatile` claims land on a DEVICE REGISTER — the gate on rank.ts's
+ *  volatility tie-break, so it is counted here beside the lever that mints the claims.
+ *
+ *  Two spellings assert one: a `volatile` pointer cast over a numeric address (what
+ *  l3/inlinebase.ts leaves at each use), and a pointee-volatile pointer local, which asserts it
+ *  at whichever numeric address feeds the local. A `volatile` SCALAR local (l3/volatileval.ts)
+ *  asserts nothing about an address — it is a stack slot — so it is not counted.
+ *
+ *  Nothing outside the window counts. A qualifier on ordinary memory is a claim about the source
+ *  the differ cannot referee and the range cannot support, and preferring it corpus-wide buys one
+ *  honest MMIO spelling at the price of many false ones. */
+export function deviceVolatileClaims(sfn: SFn, window?: readonly [number, number]): number {
+  if (window === undefined) {
+    return 0;
+  }
+  const inWindow = (e: Expr): boolean => {
+    const c = constAddr(e);
+    return c !== null && c >= window[0] && c < window[1];
+  };
+  let n = 0;
+  const assigns: { name: string; value: Expr }[] = [];
+  collectAssigns(sfn.body, assigns);
+  for (const l of sfn.locals) {
+    if (l.type.kind === 'ptr' && (l.pointeeVolatile !== undefined || l.volatile !== undefined)) {
+      n += assigns.filter((a) => a.name === l.name && inWindow(a.value)).length;
+    }
+  }
+  for (const e of walkExprs(sfn.body)) {
+    if (e.k === 'cast' && e.volatile === true && inWindow(e.e)) {
+      n++;
+    }
+  }
+  return n;
+}
+
+/** the numeric address an expression IS, through any number of pointer casts, or null */
+const constAddr = (e: Expr): number | null =>
+  e.k === 'const' ? e.value : e.k === 'cast' && e.to.kind === 'ptr' ? constAddr(e.e) : null;
 
 /** The locals the lever would qualify — the per-local SUBSET enumeration's input (below):
  *  which pointers the original declared volatile is per-pointer knowledge the asm does not
