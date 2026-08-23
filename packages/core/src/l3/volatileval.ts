@@ -29,10 +29,10 @@
 //     candidate would duplicate the primary.
 //   • An address-TAKEN local already has a memory home in every spelling, so there is no home
 //     left for the qualifier to move: EReader_Reset's slot read and written through a pointer
-//     local scores 9 with the qualifier and 9 without, the same breakdown both ways (agbcc
-//     2.9-arm-000512, `-O2 -mthumb-interwork -Wimplicit -fhex-asm -fprologue-bugfix`). What it
-//     can still do there is stop reads collapsing, which frontend/thumb.ts measured turning a
-//     byte-exact candidate into a four-instruction nonmatch.
+//     local compiles to IDENTICAL assembly with the qualifier and without (agbcc 2.9-arm-000512,
+//     `-O2 -mthumb-interwork -Wimplicit -fhex-asm -fprologue-bugfix`). What it can still do
+//     there is stop reads collapsing, which frontend/thumb.ts measured turning a byte-exact
+//     candidate into a four-instruction nonmatch.
 //   • ACCESS-SET EQUALITY is what makes the qualified spelling honest, and it is the one
 //     condition the tree alone cannot answer. `volatile` asserts that every access written is an
 //     access performed; the passes between the asm and here break that in both directions and

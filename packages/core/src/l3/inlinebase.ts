@@ -21,12 +21,13 @@
 //
 // THE QUALIFIER TRAVELS WITH THE ADDRESS. The deleted local is the only place a `volatile`
 // pointee could be written, and a raw address is precisely the case with no declaration
-// anywhere else to carry it — so dropping it here would spell an MMIO access non-volatile, and
-// the differ cannot referee that: `*(volatile u16 *)0x4000208` and `*(u16 *)0x4000208` compile
-// BYTE-IDENTICALLY on pokeemerald:EReader_Reset (agbcc 2.9-arm-000512, `-O2 -mthumb-interwork
-// -Wimplicit -fhex-asm -fprologue-bugfix`; `.s` diff empty, `.o` identical). rank.ts therefore
-// pairs this lever with `/volatile`, which supplies the qualifier on the pointer local, and the
-// substitution moves it onto every cast it mints.
+// anywhere else to carry it — so dropping it here spells an MMIO access non-volatile in the one
+// place the differ sometimes cannot referee. On pokeemerald:EReader_Reset the two spellings
+// separate at 11 against 12 on their own, and are BYTE-IDENTICAL once the slot qualifier is
+// there too — the shape that matches (agbcc 2.9-arm-000512, `-O2 -mthumb-interwork -Wimplicit
+// -fhex-asm -fprologue-bugfix`; `.s` diff empty, `.o` identical under cmp). So rank.ts emits
+// the qualified spelling as a second OUTPUT of this lever, `/volatile` narrowed to the locals
+// it deletes, and the substitution moves the qualifier onto every cast it mints.
 //
 // GATE — the local must be all of: pointer-typed; initialized by a bare `const` (a `(T *)base`
 // CAST initializer is l3/basecse.ts's reuse hoist, whose own lever family owns that question);

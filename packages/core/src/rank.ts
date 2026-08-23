@@ -745,20 +745,22 @@ export function enumerateCandidates(
           // TWO ALTERNATIVE OUTPUTS, not a product: deleting the local also deletes the only place
           // a `volatile` POINTEE could be written, and a raw address has no declaration anywhere
           // else to carry it. So the qualified spelling is emitted too, `/volatile` narrowed to
-          // exactly the locals this lever deletes. It is enumerated FIRST deliberately: the two
-          // are byte-identical wherever the compiler was not exploiting the non-volatility (they
-          // are on pokeemerald:EReader_Reset — `.s` diff empty), so the score, the group and the
-          // cast count all tie and `compareScored` falls through to enumeration order. At an exact
-          // tie the qualified spelling is the one to publish: over-qualifying costs a reader
-          // nothing, while a dropped `volatile` on an MMIO cell is a real bug in the C that only
-          // this compiler at these flags hides.
+          // exactly the locals this lever deletes. It is enumerated FIRST deliberately: usually the
+          // bytes separate them and the score decides (11 against 12 on pokeemerald:EReader_Reset),
+          // but where the compiler was not exploiting the non-volatility they are byte-identical —
+          // as they are on that row's WINNING shape, the one that also qualifies the slot — and
+          // then the group and the cast count tie too and `compareScored` falls through to
+          // enumeration order. At an exact tie the qualified spelling is the one to publish:
+          // over-qualifying costs a reader nothing, while a dropped `volatile` on an MMIO cell is
+          // a real bug in the C that only this compiler at these flags hides.
           //
           // COST — it fires broadly: on 33 of the 69 klonoa functions that lift with no symbol map
           // (a symbol-map sweep sees fewer, since an absolute pool constant lifts to a `gaddr`
           // there). Both outputs together add 924 candidates over 51835, +1.8% on the corpus and
           // up to +67% on one function — the same class of price the enumeration already pays for
-          // `/volatile`, which labels 30% of it. LoadBGTilemapData is untouched: 20608 candidates
-          // with the levers and without, because no local there is fed a bare constant.
+          // `/volatile`, which labels 30% of it. LoadBGTilemapData is untouched: 17152 candidates
+          // and best 419 with the levers and without, because no local there is fed a bare
+          // constant.
           const inlineVolatile = (): SFn | null => {
             const only = new Set(inlinableConstBases(sfn));
             const q = only.size ? volatilePtrLocals(sfn, only) : null;
