@@ -106,12 +106,12 @@ export function initFirstGuards(sfn: SFn): SFn | null {
   // carry no effect it could cross (a call there could write the cell X reads); a CONST init
   // crosses nothing and keeps the wider admission.
   const effectFree = (e: Expr): boolean => e.k !== 'call' && e.k !== 'marker' && exprChildren(e).every(effectFree);
-  // A compare operand and the init's value can denote the same 32-bit value under different
-  // SPELLINGS: `/uns-cmp` wraps one side in `(u32)` to make the branch unsigned, and that side is
-  // often the very const the init assigns — so the two levers never composed. Matching under a
-  // width-32 INT cast restores it: `v = X` stores X's 32 bits, `v` is 32-bit-declared
+  // A compare operand and the init's value denote the same 32-bit value under different SPELLINGS
+  // when a width-32 cast is all that separates them: `/uns-cmp` wraps one side in `(u32)` to make
+  // the branch unsigned, and on a zero-trip guard that side is the very const the init assigns.
+  // The swap is still exact — `v = X` stores X's 32 bits and `v` is 32-bit-declared
   // (meaningPreserved refuses otherwise), so `v` and `(u32)X` carry the same bit pattern and only
-  // the compare's rendered signedness can differ — which meaningPreserved checks separately. A
+  // the compare's rendered signedness can differ, which meaningPreserved checks separately. A
   // NARROWING cast changes the value and never matches; a POINTER cast is excluded by the same
   // width test, and with it every volatile-qualified spelling (the qualifier lives on a pointee).
   const sameValue = (a: Expr, b: Expr): boolean => exprEquals(stripWideIntCast(a), stripWideIntCast(b));

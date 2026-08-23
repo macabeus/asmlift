@@ -406,8 +406,8 @@ test('a CONST init still moves under an effectful condition — nothing crosses 
 });
 
 // `/uns-cmp` renders one compare operand `(u32)…` to make the branch unsigned, and on a
-// zero-trip guard that operand IS the init's const — so before the side match looked through the
-// cast the two levers never appeared in one candidate (`synthetic:unsguard:agbcc`).
+// zero-trip guard that operand IS the init's const. Without the cast tolerance the two levers
+// cannot appear in one candidate, which is what `synthetic:unsguard:agbcc` needs.
 test('a (u32)-cast comparison side still matches the init it spells: (u32)0 < n → v < n', () => {
   const r = initFirstGuards(
     fnWith(
