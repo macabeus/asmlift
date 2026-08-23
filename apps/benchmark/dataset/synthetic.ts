@@ -478,11 +478,13 @@ export const SYNTHETIC: SynthSpec[] = [
   //     vs stored on NO path reaching the read (frontend/mips.ts, which still conflates the
   //     second with a 5th+ stack argument). uninit_join and uninit_sw hit one each, on ido7.1.
   //   • a register ⇒ silent: nothing guards it and the read becomes a fabricated extra parameter.
-  //     MEASURED, and the two rows disagree, which is why both are here. On uninit_sw:agbcc the
-  //     fabrication perturbs codegen and the row is a NONMATCH (`uninit_sw(u32,u32,u32)` for a
-  //     two-argument function). On uninit_join:agbcc the invented parameter lands in the register
-  //     the local was allocated to anyway, so it byte-MATCHES with an arity the source never had —
-  //     a fidelity gap the byte score cannot see, and the reason this row is worth keeping green.
+  //     MEASURED: both agbcc rows byte-MATCH anyway, because the invented parameter lands in the
+  //     register the local was allocated to — `uninit_sw(s32 a0, s32 a1, s32 a2)` for a
+  //     two-argument function, and `uninit_join(s32 a0, s32 a1)` for a one-argument one. A trailing
+  //     parameter nothing reads costs nothing on this ABI. That is a fidelity gap the byte score
+  //     cannot see, and the reason these rows are worth keeping green: they are the rows where a
+  //     future `undef` must change the C and NOT the bytes. The loop-carried version of the same
+  //     fabrication is not free, and has its own family (`loopfall`, below).
   //
   // WHICH of those you get is decided by register pressure, not by the C, and that is what
   // uninit_spill is for. The first two rows are small enough that agbcc keeps the local in a
@@ -1991,15 +1993,22 @@ export const SYNTHETIC: SynthSpec[] = [
     },
   },
 
-  // WHAT ENTERS A LOOP-CARRIED VALUE ON ITS FIRST ITERATION. The families above ask where a value
-  // LIVES or where it is READ; this one asks what a decompiler does when the answer is "nothing".
+  // WHAT ENTERS A LOOP-CARRIED VALUE ON ITS FIRST ITERATION. The `uninit-local` family above
+  // already asks what a decompiler does with a local read on a path that never assigns it, and
+  // already records the register answer: nothing guards it, and the read becomes a fabricated
+  // extra parameter. This family is the LOOP-CARRIED entry of that same question, which those
+  // rows do not reach: their undef is decided at an ordinary join, and even where the value is
+  // then used in a loop (`uninit_spill`) the phi is not a loop header's. Here it is, so the
+  // fabrication lands in the preheader and its register is pinned across the whole loop.
+  //
   // A local decided inside a loop body on some but not all paths is a loop-carried phi whose
-  // entry operand is UNDEFINED — C spells that by simply not initialising it, and agbcc emits no
-  // instruction for it at all. asmlift has an `undef` opcode in the IR but the C backend has to
-  // spell it as an expression, so it materialises the entry value as a READ: of an uninitialised
-  // stack slot, or of a parameter it invented for the purpose. Every such read is an instruction
-  // the reference never emits, and it also pins a register at the loop preheader, so the cost is
-  // not just the load.
+  // entry operand is UNDEFINED. C spells that by simply not initialising it and agbcc emits no
+  // instruction for it. asmlift has an `undef` opcode in the IR but the C backend has to spell it
+  // as an expression, so it materialises the entry as a READ: of an uninitialised stack slot, or
+  // of a parameter it invented for the purpose. The cost is NOT the read. On `loopfall` agbcc
+  // emits no instruction for `v1 = a1;` at all — `a1` arrives in the register `v1` is allocated
+  // to and the copy coalesces away. What it costs is the pin: an argument register is occupied
+  // across the loop, and the allocation downstream is a different one.
   //
   // Measured on kleod:LoadBGTilemapData:agbcc, both directions:
   //   • REMOVING the five preheader reads from asmlift's own ranked winner (20608 candidates, 0
@@ -2015,25 +2024,39 @@ export const SYNTHETIC: SynthSpec[] = [
   // asmlift emits `void loopfall(u32 a0, u32 a1)` — a second parameter that exists only to be the
   // undef — and opens the loop with `v1 = a1;`. A fix must not disturb `loopset`.
   //
+  // MEASURE A FIX ON THE NON-VOLATILE LANE. `loopfall`'s stored winner is the `volatile` one, and
+  // deleting the fabricated read from IT scores WORSE — 11 to 12 — because the volatile spelling
+  // is compensating elsewhere. The same C without `volatile` goes 14 to 4. The row records 11
+  // because 11 is what the ranked pick scores, but a round that ablates the winner and reads the
+  // sign off that one number will conclude the capability is not worth building.
+  //
   // `armfall` and `armdef` are the same pair at the real function's shape: a switch with no
   // default inside a loop, whose arms decide two locals that the body then uses, so BOTH become
-  // loop-carried phis with undefined entries. They are coverage, not isolates — `armdef` is 7
-  // points off on its own, and its residual is entirely the dispatch tree (agbcc's balanced
-  // search `cmp #1/beq · cmp #1/bcc · cmp #2/beq` against asmlift's linear equality chain), which
-  // the `comparison-tree` class above already owns. What they add over `loopfall` is that the
-  // undef survives multi-arm merging: `armdef` carries no preheader read and `armfall` carries two.
+  // loop-carried phis with undefined entries. They are coverage, not isolates. `armdef` is 7
+  // points off on its own and NOT all of it is a class already owned: asmlift's C is
+  // `if (a0 != 1) { if (a0 >= 1) { if (a0 != 2) …`, which agbcc compiles to the same balanced
+  // search the reference uses, and exactly one compare differs (`cmp #1`/`bcc` against
+  // `cmp #0`/`beq`). The rest is arm LAYOUT — the reference falls through from case 2 into the
+  // shared `ldrh r0,[r3,#0x2]` tail and branches out of case 1, the candidate does the reverse —
+  // which is the insert-2/delete-2 half of the breakdown and belongs to no class here yet. What
+  // the pair adds over `loopfall` is that the undef survives multi-arm merging: `armdef` carries
+  // no preheader read and `armfall` carries two.
   //
   // agbcc only. The claim is about what THIS compiler emits for an uninitialised loop-carried
   // local, established by compiling both spellings of each pair; ido7.1, gcc2.7.2kmc and
   // mwcc_242_81 were NOT measured, so those lanes are left off rather than assumed.
   //
-  // m2c, on the identical `ctx` asmlift receives, does not produce compilable C for any of the
-  // four. On three it noncompiles by typing the address constant as `void *` and then reading
-  // members off it (`var_r3->unk0`) — its documented behaviour for a raw address with no struct
-  // context, not context withheld from it. On `armfall` it DECLINES, and the marker names this
-  // family directly: `M2C_ERROR(/* Read from unset register $r2 */)`, next to its own version of
-  // the fabricated entry read, `var_r5 = saved_reg_r5;`. Both decompilers hit the undefined
-  // loop-carried entry, in the same place; only the failure mode differs.
+  // m2c, on the identical `ctx` asmlift receives, produces compilable C for none of the four, and
+  // it reaches the same construct on the two rows that have one. On `armfall` it DECLINES:
+  // `M2C_ERROR(/* Read from unset register $r2 */)`, beside its own fabricated entry read
+  // `var_r5 = saved_reg_r5;`. On `loopfall` it noncompiles ON that fabrication — the first error
+  // is `` `saved_reg_r4' undeclared ``, from its own `var_r4 = saved_reg_r4;`. Both decompilers
+  // hit the undefined loop-carried entry, in the same place; only the failure mode differs.
+  // The other two errors are not about this family and are not evidence for it: every one of the
+  // four also types the address constant as `void *` and reads members off it (`var_r3->unk0`),
+  // which is m2c's documented behaviour for a raw address with no struct context; and `armdef`
+  // fails FIRST on `` `NULL' undeclared ``, which is a thin-`ctx` artifact — any real project
+  // context declares NULL — so that row's classification rests on the `void *` error, not on it.
   {
     sym: 'loopfall',
     src:
