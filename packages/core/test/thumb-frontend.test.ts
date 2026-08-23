@@ -1227,12 +1227,20 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     //   struct M { u8 b; u8 pad[3]; s32 t; } m;  m.b = x; …    m.t = h(1); … g(&m); use2(t0 + m.t + …);
     //
     // The eight `h` results exhaust the callee-saved registers, so one of them spills to [sp,#4] —
-    // and a spill is the only neighbour that can produce this shape. Give the byte local a DECLARED
-    // neighbour instead (`u8 b; volatile s32 t;`, same body) and agbcc puts the address-taken one
-    // ABOVE it, spelling `&b` as `add rD, sp, #0x4` — which declines earlier, on the spelling the
-    // layout forces. So the ambiguity is exactly "an addressable local at [sp,#0] with a reload
-    // spill above it", and no reading of the assembly resolves it: `struct M` needs
-    // the reload after `bl g` to read what `g` wrote, `u8 b` needs it to read what we stored.
+    // and a spill is the only neighbour that can produce this shape. What moves the object OFF
+    // [sp,#0] is a neighbour that is MEMORY-HOMED, not one that is merely declared: all eight here
+    // are declared and the address-taken byte still sits at [sp,#0], because a declared local lives
+    // in a register until something spills it. Compiled, all three:
+    //
+    //   u8 b; s32 t;           b = x; t = h(1); g(&b); use2(t);   frame 4, `mov r1, sp / strb r0,[r1]`
+    //   u8 b; volatile s32 t;  …same body…                        frame 8, `add r4, sp, #0x4`
+    //   u8 a; u8 arr[8];       a = x; garr(arr); g(&a); …          frame 0xc, `add r4, sp, #0x8`
+    //
+    // A homed neighbour takes [sp,#0] and the address-taken local goes above it, spelled `add rD,
+    // sp, #k` — which declines earlier, on the spelling the layout forces. So the ambiguity is
+    // exactly "an addressable local at [sp,#0] with a reload spill above it", and no reading of the
+    // assembly resolves it: `struct M` needs the reload after `bl g` to read what `g` wrote, `u8 b`
+    // needs it to read what we stored.
     // Without this rule both lifted to the same source — `g(&sp0); use2(v0 + v1 + …)` with the
     // reload replaced by the value from before the call, `g`'s write dropped, no diagnostic.
     test('a callee handed the frame base refuses the slot model above it', () => {
