@@ -1,5 +1,6 @@
-// The frame partition (frontend/ssa.ts, FrameModel) is the rule that decides what a def-less
-// live-in MEANS, and these exercise it directly on the builder rather than through a frontend.
+// The live-in partition (frontend/ssa.ts, LiveInModel) is the rule that decides what a def-less
+// live-in MEANS — the frame in slot-key offsets, the register file by key — and these exercise it
+// directly on the builder rather than through a frontend.
 //
 // AT THIS LEVEL because the rule's purpose is to be falsifiable INDEPENDENTLY of what a frontend
 // believes about its own frame. Driving it through Thumb could only confirm that Thumb and the rule
@@ -69,4 +70,35 @@ test('an EMPTY ownedLocals range refuses, so an unmeasurable frame cannot assert
   expect(() => readDefLess(stackSlotKey(0), () => ({ ownedLocals: { from: 0, to: 0 } }))).toThrow(
     /lies outside this function's frame partition/,
   );
+});
+
+// ── the REGISTER half ────────────────────────────────────────────────────────────────────────
+// The same question in the other coordinate. It is answered from the calling convention rather
+// than from a measurement: a caller cannot hand a value over in a register the ABI does not pass
+// arguments in, so a read of one before any write is an uninitialised local however early it
+// happens. Nothing here refuses — an unlisted register keeps its existing treatment.
+
+test('a register the ABI does not pass arguments in is an uninitialised local', () => {
+  const ssa = readDefLess('r4', () => ({ uninitRegs: ['r4', 'r5'] }));
+  expect(definedBy(ssa, 'r4')).toEqual({ undefKeys: ['r4'], paramKeys: [] });
+});
+
+test('an ARGUMENT register is still a parameter, whatever else the list holds', () => {
+  const ssa = readDefLess('r0', () => ({ uninitRegs: ['r4', 'r5'] }));
+  expect(definedBy(ssa, 'r0')).toEqual({ undefKeys: [], paramKeys: ['r0'] });
+});
+
+test('a VIRTUAL key is never listed, so an incoming stack argument stays a parameter', () => {
+  // Why the partition LISTS the uninitialised registers instead of deriving them as "everything
+  // outside argRegs": the complement holds the frontends' virtual keys too, and Thumb's `@sarg<k>`
+  // is a real incoming argument. A derived rule would have to know a key grammar this module does
+  // not own; a list cannot make that mistake.
+  const ssa = readDefLess('@sarg4', () => ({ uninitRegs: ['r4', 'r5'] }));
+  expect(definedBy(ssa, '@sarg4')).toEqual({ undefKeys: [], paramKeys: ['@sarg4'] });
+});
+
+test('an unlisted register keeps its existing treatment, so the list is safe to grow', () => {
+  // `lr` is what ARMv4T leaves out — the return address, not a value a source could have declared.
+  const ssa = readDefLess('lr', () => ({ uninitRegs: ['r4', 'r5'] }));
+  expect(definedBy(ssa, 'lr')).toEqual({ undefKeys: [], paramKeys: ['lr'] });
 });

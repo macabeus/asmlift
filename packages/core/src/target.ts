@@ -35,6 +35,13 @@ export interface TargetDescription {
   compiler: string; // 'agbcc' / 'ido' / 'gcc' / 'mwcc'
   argRegs: string[];
   returnReg: string;
+  /** Registers this ABI does NOT pass arguments in ⇒ a def-less live-in read of one is an
+   *  uninitialised local the compiler put in a register, not an argument (frontend/ssa.ts,
+   *  LiveInModel.uninitRegs). Every spelling the frontend can key a register by, aliases included —
+   *  a missing one keeps that register's existing treatment, so the list is safe to grow and never
+   *  silently reclassifies. ABSENT ⇒ no register partition is claimed, which is what MIPS and PPC
+   *  take today. */
+  nonArgRegs?: readonly string[];
   // HARDWARE / ISA facts — independent of the compiler.
   capabilities: {
     endianness: 'little' | 'big'; // consumed by structureOptionsFor (bitfield extract recognition is LSB-first)
@@ -122,6 +129,12 @@ export const ARMV4T_AGBCC: TargetDescription = {
   compiler: 'agbcc',
   argRegs: ['r0', 'r1', 'r2', 'r3'],
   returnReg: 'r0',
+  // AAPCS passes four in r0-r3, so nothing above them can be an argument. The ATPCS aliases are
+  // here because the frontend keys a register by the TOKEN the asm spells: censused over the
+  // vendored ARM asm, `sb`/`sl`/`ip`/`fp` all occur as operands and no `v<n>`/`a<n>` form does.
+  // `sp`, `lr` and `pc` are deliberately absent — sp is the frame, lr is the return address, and
+  // neither is a value a source could have declared.
+  nonArgRegs: ['r4', 'r5', 'r6', 'r7', 'r8', 'r9', 'r10', 'r11', 'r12', 'sb', 'sl', 'fp', 'ip'],
   // GBA hardware, which this target implies: agbcc is the GBA compiler and this is the only
   // armv4t entry, so `armv4t + agbcc` is the platform. Stated because nothing else states it.
   capabilities: {

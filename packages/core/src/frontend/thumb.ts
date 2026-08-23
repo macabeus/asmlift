@@ -27,7 +27,7 @@ import { FrontendUnsupportedError } from './errors';
 import { assertInputFormat } from './format';
 import type { Frontend } from './frontend';
 import { opaqueDest } from './opaque';
-import { abiSortEntryParams, fallbackArgc, makeSsaBuilder, stackSlotKey } from './ssa';
+import { abiSortEntryParams, fallbackArgc, makeSsaBuilder, slotKeyOffset, stackSlotKey } from './ssa';
 
 interface Instr {
   /** the CANONICAL spelling — legacy names are normalised (see LEGACY_MNEMONICS) so that every
@@ -1374,12 +1374,18 @@ export function lift(
   })();
 
   // --- ISA-neutral SSA construction (shared Braun builder) ---
-  // THE FRAME PARTITION (frontend/ssa.ts, FrameModel). `[0, localArea)` is the whole of what this
+  // THE LIVE-IN PARTITION (frontend/ssa.ts, LiveInModel). `[0, localArea)` is the whole of what this
   // function owns: an incoming stack argument is keyed `@sarg<k>` rather than `sp@<off>` precisely
   // because it sits at or above this frame, so `callerParams` is empty. `localArea` is 0 whenever
   // the prologue walk cannot measure the frame, and the empty range then refuses every slot —
-  // `slotOff` applies the same bound when minting keys, so this is the independent check.
-  const ssa = makeSsaBuilder(name, asmBlocks.length, preds, () => ({ ownedLocals: { from: 0, to: localArea } }));
+  // `slotOff` applies the same bound when minting keys, so this is the independent check. The
+  // register half is the calling convention's, taken straight off the target: it covers the shape
+  // agbcc reaches for once it runs out of low registers — a local homed in r4-r7, or shuffled up
+  // into r8-sl, read on a path that never wrote it.
+  const ssa = makeSsaBuilder(name, asmBlocks.length, preds, () => ({
+    ownedLocals: { from: 0, to: localArea },
+    ...(target.nonArgRegs ? { uninitRegs: target.nonArgRegs } : {}),
+  }));
   const { fn, irBlocks, readVar, writeVar, paramReg } = ssa;
 
   const constVal = (n: number, b: number): Value => {
@@ -3365,7 +3371,14 @@ export function lift(
       //
       // On an escape and not on "a laddr exists": an address dereferenced only in-function cannot
       // be written by anyone else, and the overlap checks above cover its aliasing.
-      if (mayWrite.size > 0 && irBlocks.some((blk) => blk.ops.some((op) => op.opcode === 'undef'))) {
+      //
+      // FRAME undefs only. A register-keyed one says a local lives in a register the ABI does not
+      // pass arguments in, and no address reaches a register — the escape this retraction is about
+      // cannot touch it, and counting it would refuse the whole function for an unrelated escape.
+      const undefSlots = irBlocks.some((blk) =>
+        blk.ops.some((op) => op.opcode === 'undef' && slotKeyOffset(op.attrs.key as string) !== null),
+      );
+      if (mayWrite.size > 0 && undefSlots) {
         fail(
           'the captured address escapes, so a callee may write any frame offset and an unstored slot is not provably uninitialised',
         );
@@ -3534,9 +3547,10 @@ export function lift(
   // the `r8` live-in and `@sarg8` tied at 8, the sort is stable, the prologue reads r8 first — so
   // ABI argument 8 was emitted as `a9` and every parameter after it was off by one.
   //
-  // A callee-saved register read before it is written is not an argument in any case: it is a
-  // fragment artifact or an unmodelled effect, and the honest place for it is after everything the
-  // convention actually describes.
+  // The register partition (LiveInModel.uninitRegs) now takes r4-sl before they get here — a
+  // register the ABI does not pass arguments in is an uninitialised local, not a parameter — so
+  // what still ranks 99 is what the partition does not list: `lr` and `pc`. Not an argument either
+  // way, and the honest place for one is after everything the convention actually describes.
   abiSortEntryParams(entry, preds[0].length > 0, (v) => {
     const key = paramReg.get(v) ?? '';
     // an incoming STACK argument ranks by its ABI index, after every register argument

@@ -372,21 +372,28 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     expect(() => decompile('f', later, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
   });
 
-  test('a callee-saved live-in never takes an ARGUMENT slot from a stack argument', () => {
+  test('a callee-saved live-in is not an argument at all, so it cannot displace a stack one', () => {
     // A `/^r(\d+)$/` rank sent `sl`/`sb` to 99 but ranked `r8` at 8 and `r4` at 4 — invisible while
     // nothing else occupied ranks >= 4, a positional miscompile once stack arguments ranked there.
     // sa3's sub_80B6B3C is the live one: 10 arguments, `mov r5, r8` in its prologue, so the r8
     // live-in and @sarg8 tied at 8 and the stable sort gave the slot to whichever was read first —
     // the prologue. ABI argument 8 came out as `a9`, and everything after it shifted.
+    //
+    // The register partition (target.nonArgRegs) answers it one step earlier: a register this ABI
+    // does not pass arguments in never reaches the signature, so there is no tie left to break. The
+    // rank stays what a target declaring no register partition gets, and `lr` still reaches it here.
     const hi =
       'f:\n\tpush\t{r4, r5, r6, r7, lr}\n\tmov\tr7, r8\n\tpush\t{r7}\n\tldr\tr0, [sp, #0x28]\n\tadd\tr0, r0, r7\n\tbx\tlr\n';
-    const src = decompile('f', hi, ARMV4T_AGBCC).source;
-    // ten parameters, and the STACK argument holds slot 8 — the r8 artifact ranks after them all
-    expect(src).toContain('s32 f(s32 a0, s32 a1, s32 a2, s32 a3, s32 a4, s32 a5, s32 a6, s32 a7, s32 a8, s32 a9)');
-    expect(src).toContain('return a8 + a9;');
-    // the same tie at the low end, where a phantom `r4` would otherwise outrank argument 5
+    // NINE parameters — the stack argument holds slot 8, and the r8 live-in is an uninitialised local
+    expect(decompile('f', hi, ARMV4T_AGBCC).source).toBe(
+      's32 f(s32 a0, s32 a1, s32 a2, s32 a3, s32 a4, s32 a5, s32 a6, s32 a7, s32 a8) {\n' +
+        '    s32 uninit_r8;\n    return a8 + uninit_r8;\n}\n',
+    );
+    // the same at the low end, where a phantom `r4` would otherwise outrank argument 5
     const lo = 'f:\n\tpush\t{r5, lr}\n\tadd\tr5, r4, #1\n\tldr\tr0, [sp, #0x8]\n\tadd\tr0, r0, r5\n\tbx\tlr\n';
-    expect(decompile('f', lo, ARMV4T_AGBCC).source).toContain('return a4 + (a5 + 1);');
+    expect(decompile('f', lo, ARMV4T_AGBCC).source).toBe(
+      's32 f(s32 a0, s32 a1, s32 a2, s32 a3, s32 a4) {\n    s32 uninit_r4;\n    return a4 + (uninit_r4 + 1);\n}\n',
+    );
   });
 
   // A guessed arity reads the argument REGISTERS, so it must respect what a call does to them.
