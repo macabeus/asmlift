@@ -2164,6 +2164,15 @@ export function lift(
   // is named in the gate rather than left to the prose: `armv4t` has one compiler entry today, and
   // a second one free to overlay a dead one-word local with a one-word outgoing area would inherit
   // an acceptance whose only evidence is an agbcc compile table.
+  //
+  // WHICH CONJUNCT REFUSES WHAT, because a round spent itself on the frame size for a target that
+  // fails the OTHER one. `kleod:LoadBGTilemapData` reserves 0x3C, and its `mov r5, sp` is the
+  // DMA-fill PUBLISH (`strh r7, [r5]` / `mov r0, sp` / `str r0, [r2]`, r2 = 0x040000D4) rather
+  // than a base live in an argument register at a `bl`: instrumented, it reaches here with
+  // localArea=60 and frameBasePassedToCallee=false. So no widening of the frame size can reach it
+  // — widened to `localArea >= 4` its lift is byte-identical (measured) — and it already lifts
+  // today, with the object modelled as `volatile u16 sp0`. Whatever its residual is, this gate is
+  // not it.
   const capturedObjectIsTheWholeFrame = target.compiler === 'agbcc' && frameBasePassedToCallee && localArea === 4;
 
   const slotsOffReason = slotModelBlocker();

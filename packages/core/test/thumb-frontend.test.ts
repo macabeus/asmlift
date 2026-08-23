@@ -1403,6 +1403,60 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       expect(() => decompile('big3f', blockCopy, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
     });
 
+    // …AND THE OTHER CONJUNCT, which is the one a wide frame actually meets. This gate needs the
+    // base LIVE IN AN ARGUMENT REGISTER AT A `bl`; the DMA-fill idiom PUBLISHES the base to a
+    // device register instead, and that path never asks the gate anything. So a published capture
+    // in a frame far wider than one word lifts today, slots above it and all — which is why no
+    // widening of `localArea === 4` can reach `kleod:LoadBGTilemapData` (instrumented: localArea=60,
+    // frameBasePassedToCallee=false, and its lift is byte-identical with the conjunct widened).
+    //
+    // Compiled, frame 0xc, with the two incoming pointers spilled into the slots above the object:
+    // `void dmawide(u16 *dst, s32 n){ vu16 tmp; s32 t0..t7; tmp = 0; t0 = h(0); … t7 = h(7);
+    // REG_DMA3[0] = (u32)&tmp; REG_DMA3[1] = (u32)dst; REG_DMA3[2] = n | 0x81000000;
+    // use2(t0 + … + t7); }`. The arities are declared because a GUESSED four-argument `h` reads the
+    // register that still holds the base as an argument, and the object is then "passed to a
+    // callee" on the strength of a guess — the same lower-bound trap `--proto` exists for.
+    test('a PUBLISHED capture in a wider frame lifts — this gate governs the callee-passed one', () => {
+      const dmawide =
+        'dmawide:\n' +
+        '\tpush\t{r4, r5, r6, r7, lr}\n' +
+        '\tmov\tr7, sl\n\tmov\tr6, r9\n\tmov\tr5, r8\n\tpush\t{r5, r6, r7}\n' +
+        '\tadd\tsp, sp, #-0xc\n' +
+        '\tstr\tr0, [sp, #0x4]\n' +
+        '\tstr\tr1, [sp, #0x8]\n' +
+        '\tmov\tr1, sp\n' +
+        '\tmov\tr0, #0x0\n' +
+        '\tstrh\tr0, [r1]\n' +
+        '\tmov\tr0, #0x0\n\tbl\th\n\tadd\tr4, r0, #0\n' +
+        '\tmov\tr0, #0x1\n\tbl\th\n\tadd\tr7, r0, #0\n' +
+        '\tmov\tr0, #0x2\n\tbl\th\n\tmov\tsl, r0\n' +
+        '\tmov\tr0, #0x3\n\tbl\th\n\tmov\tr9, r0\n' +
+        '\tmov\tr0, #0x4\n\tbl\th\n\tmov\tr8, r0\n' +
+        '\tmov\tr0, #0x5\n\tbl\th\n\tadd\tr6, r0, #0\n' +
+        '\tmov\tr0, #0x6\n\tbl\th\n\tadd\tr5, r0, #0\n' +
+        '\tmov\tr0, #0x7\n\tbl\th\n' +
+        '\tldr\tr1, .L3\n' +
+        '\tmov\tr2, sp\n' +
+        '\tstr\tr2, [r1]\n' +
+        '\tadd\tr1, r1, #0x4\n' +
+        '\tldr\tr3, [sp, #0x4]\n' +
+        '\tstr\tr3, [r1]\n' +
+        '\tldr\tr2, .L3+0x4\n' +
+        '\tmov\tr1, #0x81\n\tlsl\tr1, r1, #0x18\n' +
+        '\tldr\tr3, [sp, #0x8]\n\torr\tr1, r1, r3\n\tstr\tr1, [r2]\n' +
+        '\tadd\tr4, r4, r7\n\tadd\tr4, r4, sl\n\tadd\tr4, r4, r9\n\tadd\tr4, r4, r8\n' +
+        '\tadd\tr4, r4, r6\n\tadd\tr4, r4, r5\n\tadd\tr4, r4, r0\n\tadd\tr0, r4, #0\n\tbl\tuse2\n' +
+        '\tadd\tsp, sp, #0xc\n' +
+        '\tpop\t{r3, r4, r5}\n\tmov\tr8, r3\n\tmov\tr9, r4\n\tmov\tsl, r5\n' +
+        '\tpop\t{r4, r5, r6, r7}\n\tpop\t{r0}\n\tbx\tr0\n' +
+        '.L4:\n\t.align\t2, 0\n.L3:\n\t.word\t0x40000d4\n\t.word\t0x40000dc\n';
+      const src = decompile('dmawide', dmawide, ARMV4T_AGBCC, {
+        prototypes: { h: { params: 1 }, use2: { params: 1 } },
+      }).source;
+      expect(src).toContain('volatile u16 sp0;');
+      expect(src).toContain('*(s32 *)67109076 = &sp0;');
+    });
+
     // `volatile` IS NOT FREE, so it goes only where the source writes one. The structurer emits one
     // C read per USE, not per machine load, so the qualifier forbids the CSE that turns the
     // reference's single `ldr` into four register copies. `void f(u32 i){ s32 w; w = gEnts[i].h;
