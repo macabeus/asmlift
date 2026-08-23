@@ -2309,14 +2309,21 @@ export const SYNTHETIC: SynthSpec[] = [
   // `for` spelling the same shape scores 15, of which 11 is these bases and 4 is that guard
   // (verified by composing both fixes by hand: 15 → 4 → 0).
   //
-  // Cut from kleod:LoadBGTilemapData:agbcc. A base census over the 20608-candidate enumeration it
-  // had before the gate returned four shapes and no others: 13440 bound nothing, 1024 bound
-  // 0x03003430 alone (`/nearbase`'s cluster), 3072 bound all five of 0x03003430 / 0x03003478 /
-  // 0x0300347A / 0x030034A0 (IWRAM) and 0x040000D4 (the DMA register file) plain, and 3072 bound
-  // those same five all `volatile`. Not one bound the DMA base alone. The gate adds that shape
-  // (23168 candidates, +12.4%) and LBG's ranked best does not move: 473 either way, same winner,
-  // which carries no hoisted base at all — so this axis is a capability the corpus needed and NOT
-  // the thing standing in front of that function.
+  // Cut from kleod:LoadBGTilemapData:agbcc, and it pays there. The row exists because a base census
+  // over that function's enumeration returned four shapes and no others: bind nothing, bind
+  // 0x03003430 alone (`/nearbase`'s cluster), bind all five of 0x03003430 / 0x03003478 /
+  // 0x0300347A / 0x030034A0 (IWRAM) and 0x040000D4 (the DMA register file) plain, and bind those
+  // same five all `volatile`.
+  // Not one bound the DMA base alone. With the gate, the narrower hoist IS LBG's ranked winner —
+  // `docs/ranked-repro.md`'s command, run either side of it:
+  //
+  //   without  17152 candidate(s) scored, 0 dropped, best …/addr-home/livebase/volatile/
+  //            coalesce-v20-v17/initfirst/raw-globals: 419
+  //   with     19712 candidate(s) scored, 0 dropped, best …/addr-home/livebase-block/volatile/
+  //            initfirst/raw-globals: 406
+  //
+  // 419 → 406 for 2560 more candidates, attributed twice over: the second log's best candidate
+  // carrying no `-block` label reads 419 exactly, which is what the first log's winner scores.
   //
   // agbcc only. The claim is about what THIS compiler does with the two spellings, established by
   // compiling both; the poll declines on ido7.1/gcc2.7.2kmc's branch-likely lift link exactly as

@@ -774,8 +774,8 @@ export function enumerateCandidates(
           // is nothing to hoist, and with no cell base the result IS plain `/livebase`.
           // ONE extra admission, so this adds two spellings however many bases the function has —
           // but `respell` then fans each over SHAPE_SUBSETS, so the list pays up to five times that
-          // per structuring variant (measured: mixpoll 12 → 20 candidates, sizebound 224 → 288,
-          // LoadBGTilemapData 20608 → 23168).
+          // per structuring variant: mixpoll 12 → 20 candidates, sizebound 224 → 288, and about a
+          // seventh more on a 17k-candidate real function (the mixpoll dataset entry prices one).
           const livebaseBlock = (): SFn | null => {
             const all = livebase();
             const block = hoistReusedGlobalBases(sfn, LIVEBASE_BLOCK_GATES);
