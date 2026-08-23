@@ -47,7 +47,7 @@ test('an entry const anchors above the if; the emptied arm flips it single-armed
 
 test('off by default: the same IR keeps the two-armed edge placement', () => {
   const off = emit(PREINIT, false);
-  expect(off).toContain('if (a0 != 7)');
+  expect(off).toContain('if (a0 == 7)');
   expect(off).toContain('v0 = 0;');
   expect(off).toContain('v0 = 1;');
   expect(emit(PREINIT, false)).toBe(off); // and the option default matches anchor:false

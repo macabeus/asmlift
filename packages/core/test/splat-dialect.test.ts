@@ -65,10 +65,10 @@ test('splat: a full function decompiles — branch, delay slot, .L target, join'
   expect(decompile('func_8000113C_1D3C', SPLAT_CLAMP, MIPS_IDO).source).toBe(
     's32 func_8000113C_1D3C(s32 a0) {\n' +
       '    s32 v0;\n' +
-      '    if (a0 <= 0) {\n' +
-      '        v0 = 0;\n' +
-      '    } else {\n' +
+      '    if (a0 > 0) {\n' +
       '        v0 = (a0 << 8 | 255) << 16 >> 16;\n' +
+      '    } else {\n' +
+      '        v0 = 0;\n' +
       '    }\n' +
       '    return v0;\n' +
       '}\n',

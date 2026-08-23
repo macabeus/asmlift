@@ -442,10 +442,12 @@ export function enumerateCandidates(
   ];
   // `/flip-join` — the JOINED-if sibling of `/flip-branch` (structure.ts
   // negateJoinedBranchSense): a reconverging two-armed if reads the same fall-through-is-then
-  // layout evidence the divergent case does, and which sense the source spelled is just as
-  // ambiguous — so both are emitted and the differ referees. Crossed with the pair above
-  // (divergent and joined ifs are disjoint sets, so the axes are independent); a function with
-  // no two-armed joined if emits identical source and the dedup collapses it before any compile.
+  // layout evidence the divergent case does, so the DEFAULT sense is now the divergent one's and
+  // this axis emits the other. Read off the TARGET's sense, not this candidate's `s.sense`, so
+  // `/flip-branch` still moves only divergent ifs and the two axes stay independent (the four
+  // combinations are the same four as before — only which one carries the bare label changed).
+  // Crossed with the pair above; a function with no two-armed joined if emits identical source
+  // and the dedup collapses it before any compile.
   const baseSense = [
     ...senseAnchor.map((s) => ({ ...s, join: false })),
     ...senseAnchor.map((s) => ({ ...s, suffix: `${s.suffix}/flip-join`, join: true })),
@@ -619,7 +621,7 @@ export function enumerateCandidates(
             sfn = structureChecked(fn, {
               ...svOpts,
               preserveDivergentBranchSense: s.sense,
-              negateJoinedBranchSense: s.join,
+              negateJoinedBranchSense: s.join ? !defSense : defSense,
               anchorConstCopies: s.anchor,
               spellBitfieldMembers: s.bitfields,
               ...STRUCTURING_AXES.reduce((acc, ax) => ({ ...acc, ...ax.options(s[ax.flag]) }), {}),

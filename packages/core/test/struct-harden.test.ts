@@ -107,6 +107,16 @@ describe('STRUCT-HARDEN: the compiler-behavior levers are load-bearing', () => {
     expect(emit(DIVERGE, { negateJoinedBranchSense: true })).toBe(emit(DIVERGE, {}));
   });
 
+  test('the joined sense DEFAULTS to the divergent one', () => {
+    // One claim about one compiler: the layout evidence a joined `if` leaves is the evidence the
+    // divergent case already reads, so an absent lever spells both classes the same way. The
+    // pin travels with preserveDivergentBranchSense rather than being a second constant.
+    expect(emit(BOTHIFS, {})).toBe(emit(BOTHIFS, { negateJoinedBranchSense: true }));
+    expect(emit(BOTHIFS, { preserveDivergentBranchSense: false })).toBe(
+      emit(BOTHIFS, { preserveDivergentBranchSense: false, negateJoinedBranchSense: false }),
+    );
+  });
+
   test('orderArgCopiesByComputation flips the order of independent edge assignments', () => {
     // true (the default): the copy whose value is computed FIRST in the predecessor is emitted
     // first — here v1 (= a1 + a0, the first add) precedes v0 (= a0 + a1, the second add).

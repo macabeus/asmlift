@@ -63,6 +63,15 @@ const MATCH_CASES: { sym: string; c: string; expect: string }[] = [
     expect:
       's32 maxab(s32 a0, s32 a1) {\n    if (a0 < a1) {\n        return a1;\n    } else {\n        return a0;\n    }\n}\n',
   },
+  // The joined sibling of `maxab`: return-sinking gives both arms one `return v0`, so the sense
+  // is the JOINED one. CW hoisted `b+2` before the branch, and the arms in the source's own order
+  // are what recompiles to that.
+  {
+    sym: 'selret',
+    c: 'int selret(int a,int b){ if(a<b) return a+1; return b+2; }',
+    expect:
+      's32 selret(s32 a0, s32 a1) {\n    s32 v0;\n    if (a0 < a1) {\n        v0 = a0 + 1;\n    } else {\n        v0 = a1 + 2;\n    }\n    return v0;\n}\n',
+  },
 ];
 
 describe('PowerPC (CodeWarrior) fixtures: compile → disasm → decompile → recompile → objdiff', () => {
@@ -259,13 +268,6 @@ const NEARMISS_CASES: { sym: string; c: string; expect: string; note: string }[]
     c: 'int clamp0(int x){ if(x<0) x=0; return x; }',
     expect: 's32 clamp0(s32 a0) {\n    if (a0 < 0) {\n        return 0;\n    } else {\n        return a0;\n    }\n}\n',
     note: 'the if/else-return recompiles to a different branch layout than the original bgelr',
-  },
-  {
-    sym: 'selret',
-    c: 'int selret(int a,int b){ if(a<b) return a+1; return b+2; }',
-    expect:
-      's32 selret(s32 a0, s32 a1) {\n    s32 v0;\n    if (a0 >= a1) {\n        v0 = a1 + 2;\n    } else {\n        v0 = a0 + 1;\n    }\n    return v0;\n}\n',
-    note: 'CW hoisted `b+2` before the branch (speculative); the recovered if/else does not',
   },
 ];
 

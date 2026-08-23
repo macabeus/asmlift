@@ -667,9 +667,10 @@ export interface StructureOptions {
   // forward to the taken block and fell through to the other, so a compiler that preserves
   // source branch direction saw the FALL-THROUGH arm as `then` — the same layout evidence the
   // divergent case reads (preserveDivergentBranchSense), which post-dominance hides here because
-  // both arms reconverge. Which sense the source spelled is genuinely ambiguous (either compiles
-  // to either layout when the optimizer re-orders), so this is a differ-refereed candidate axis
-  // (rank.ts `/flip-join`), never a default.
+  // both arms reconverge. DEFAULTS to preserveDivergentBranchSense: it is the same claim about
+  // the same compiler, and a joined `if` is not a different question because its arms happen to
+  // rejoin. rank.ts's `/flip-join` axis emits the other sense, so where a pass did invert the
+  // branch the differ still reaches that spelling.
   negateJoinedBranchSense?: boolean;
   orderArgCopiesByComputation?: boolean;
   // Comparison-tree switch recovery: treat an `x != K` test as a case (the EQUAL side is a case
@@ -806,7 +807,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     returnsVoid = false,
     coalesceLoopInit = false,
     preserveDivergentBranchSense = true,
-    negateJoinedBranchSense = false,
+    negateJoinedBranchSense = preserveDivergentBranchSense,
     orderArgCopiesByComputation = true,
     switchAllowsNeqCase = true,
     switchAllowsBoundCase = false,
