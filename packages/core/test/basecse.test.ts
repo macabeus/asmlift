@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest';
 
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
-import { LIVEBASE_GATES, hoistReusedGlobalBases } from '../src/l3/basecse';
+import { LIVEBASE_GATES, baseSpanCandidates, hoistReusedGlobalBases } from '../src/l3/basecse';
 import { volatilePtrLocals } from '../src/l3/volatileptr';
 
 const idx = (name: string, i: Expr, width = 1): Expr => ({
@@ -242,5 +242,84 @@ describe('/livebase admission (LIVEBASE_GATES: placement heuristics ablated)', (
     );
     expect(hoisted.locals).toHaveLength(1);
     expect(hoistReusedGlobalBases(hoisted, LIVEBASE_GATES)).toBe(hoisted);
+  });
+});
+
+describe('base-span candidates (WHICH admitted bases get the local)', () => {
+  // One MMIO register file indexed at three cells, beside two scalar cells re-read in place —
+  // all four in the same loop, so the default gates refuse every one and only /livebase's
+  // ablation admits them. The source spelled the register file as a pointer and the scalars as
+  // bare derefs; the all-or-nothing hoist cannot say that, the span split can.
+  const mixed = (): SFn =>
+    fn([
+      {
+        k: 'dowhile',
+        cond: { k: 'bin', op: '!=', l: cidx(0x40000d4, c(2)), r: c(0) },
+        body: [
+          { k: 'store', lval: cidx(0x3001048, c(0), 2), value: c(1) },
+          { k: 'store', lval: cidx(0x3002048, c(0), 2), value: c(2) },
+          { k: 'store', lval: cidx(0x3001048, c(0), 2), value: c(3) },
+          { k: 'store', lval: cidx(0x3002048, c(0), 2), value: c(4) },
+          { k: 'store', lval: cidx(0x40000d4, c(0)), value: c(0) },
+          { k: 'store', lval: cidx(0x40000d4, c(1)), value: c(0) },
+        ],
+      },
+    ]);
+  const boundBases = (s: SFn): number[] =>
+    s.body
+      .filter((x): x is Stmt & { k: 'assign' } => x.k === 'assign')
+      .map((x) => ((x.value as Expr & { k: 'cast' }).e as Expr & { k: 'const' }).value);
+
+  test('the two spans are emitted as separate hoists, in first-use order', () => {
+    const cands = baseSpanCandidates(mixed(), LIVEBASE_GATES);
+    expect(cands.map((x) => x.merged)).toEqual(['block', 'cell']);
+    expect(boundBases(cands[0].sfn)).toEqual([0x40000d4]);
+    expect(boundBases(cands[1].sfn)).toEqual([0x3001048, 0x3002048]);
+  });
+
+  test('the unhoisted span stays inline: a block-only hoist leaves the scalar cells as they were', () => {
+    const [block] = baseSpanCandidates(mixed(), LIVEBASE_GATES);
+    const loop = block.sfn.body[1] as Stmt & { k: 'dowhile' };
+    expect((loop.body[0] as Stmt & { k: 'store' }).lval).toEqual(cidx(0x3001048, c(0), 2));
+    expect((loop.body[4] as Stmt & { k: 'store' }).lval).toEqual({
+      k: 'index',
+      base: { k: 'var', name: 'p0' },
+      idx: c(0),
+      width: 4,
+      signed: true,
+    });
+  });
+
+  test('one span only ⇒ no candidates: there is no choice to offer', () => {
+    const oneSpan = fn([
+      { k: 'store', lval: cidx(0x3001048, c(0), 2), value: c(1) },
+      { k: 'store', lval: cidx(0x3001048, c(0), 2), value: c(2) },
+      { k: 'store', lval: cidx(0x3002048, c(0), 2), value: c(3) },
+      { k: 'store', lval: cidx(0x3002048, c(0), 2), value: c(4) },
+    ]);
+    expect(baseSpanCandidates(oneSpan, LIVEBASE_GATES)).toEqual([]);
+    expect(baseSpanCandidates(fn([]), LIVEBASE_GATES)).toEqual([]);
+  });
+
+  test('a VARIABLE index spans cells however few constant offsets the base also touches', () => {
+    const walk = fn([
+      { k: 'store', lval: cidx(0x3001048, { k: 'var', name: 'a0' }, 2), value: c(1) },
+      { k: 'store', lval: cidx(0x3001048, c(0), 2), value: c(2) },
+      { k: 'store', lval: cidx(0x3002048, c(0), 2), value: c(3) },
+      { k: 'store', lval: cidx(0x3002048, c(0), 2), value: c(4) },
+    ]);
+    const cands = baseSpanCandidates(walk, LIVEBASE_GATES);
+    expect(cands.map((x) => x.merged)).toEqual(['block', 'cell']);
+    expect(boundBases(cands[0].sfn)).toEqual([0x3001048]);
+  });
+
+  test('the split never changes what an access MEANS: only the base spans differ', () => {
+    // every candidate hoists a strict subset of the plain lever's own bases, and their union is it
+    const all = boundBases(hoistReusedGlobalBases(mixed(), LIVEBASE_GATES));
+    const cands = baseSpanCandidates(mixed(), LIVEBASE_GATES);
+    expect(cands.flatMap((x) => boundBases(x.sfn)).sort()).toEqual([...all].sort());
+    for (const x of cands) {
+      expect(boundBases(x.sfn).length).toBeLessThan(all.length);
+    }
   });
 });
