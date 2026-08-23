@@ -1301,13 +1301,25 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       expect(decompile('f', oneWord, ARMV4T_AGBCC, { prototypes: { g: { params: 1 } } }).source).toContain('g(&sp0)');
     });
 
-    // THE MULTI-WORD ANALOGUE of the same hazard, and it never reaches the rule above: a struct
-    // whose members are all stored before the escape stages a plausible argument BLOCK, so the
-    // contiguity condition refuses it one gate earlier. Compiled, `struct W { s32 a,b,c,d; };
-    // void f(s32 x){ struct W w; w.a=x; w.b=x+1; w.c=x+2; w.d=x+3; g(&w); use2(w.a+w.b+w.c+w.d); }`.
-    // Every extra word is another value a callee may write and this function reads back, so what
-    // the refusal costs grows with the extent while what licenses an acceptance does not.
-    test('a multi-word object handed to a callee declines on the argument-block condition', () => {
+    // THE MULTI-WORD ANALOGUE of the same hazard, which declines LOUDLY — but at the first gate it
+    // meets, not at the rule that owns it, and the assertion pins only the former. Compiled,
+    // `struct W { s32 a,b,c,d; }; void f(s32 x){ struct W w; w.a=x; w.b=x+1; w.c=x+2; w.d=x+3;
+    // g(&w); use2(w.a+w.b+w.c+w.d); }`. Every extra word is another value a callee may write and
+    // this function reads back, so what the refusal costs grows with the extent while what licenses
+    // an acceptance does not.
+    //
+    // WHICH GATE, measured both ways, because the message is easy to read as an attribution and it
+    // is not one. Today it lands on the contiguity filter, whose wording offers "it may be that
+    // call's outgoing stack argument" — a possibility this stream's own layout rules out, since
+    // `mov r0, sp` is live in r0 at the `bl` and agbcc lays outgoing stack arguments from [sp,#0]
+    // upward (compiled: add a five-argument call to the one-word shape and the local moves to
+    // [sp,#4] while `&w` becomes `add r0, sp, #0x4`). The filter cannot use that fact because the
+    // licence carrying it is off above one word — it is skipped only under
+    // `capturedObjectIsTheWholeFrame`. Widen that conjunct to `localArea >= 4` and this same
+    // fixture declines at the rule above instead: "the captured address at [sp,#0) is passed to a
+    // callee, which may write the slot at [sp,#4]". That is the refusal this shape belongs to, and
+    // a reader chasing the contiguity filter would be attacking the wrong one.
+    test('a multi-word object handed to a callee declines, at the first gate it meets', () => {
       const fourWords =
         'hazw:\n' +
         '\tpush\t{lr}\n' +
@@ -1333,9 +1345,6 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         '\tpop\t{r0}\n' +
         '\tbx\tr0\n';
       expect(() => decompile('hazw', fourWords, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
-      expect(() => decompile('hazw', fourWords, ARMV4T_AGBCC)).toThrow(
-        /reaches `bl g` unread with its lower slots supplied/,
-      );
     });
 
     // …AND THE TWO SHAPES WHOSE EXTENT THE ASM DOES PIN, because the round that wrote the rule
