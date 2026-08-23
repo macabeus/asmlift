@@ -158,6 +158,25 @@ describe('the candidate ordering (rank.ts compareScored)', () => {
     expect([bare, noisy].sort(compareScored)[0].label).toBe('raw');
   });
 
+  test('at equal casts the COMPACTER spelling wins over enumeration order', () => {
+    // The two byte-identical spellings synthetic:iszero has: the bare `if/else` is enumerated
+    // first, and the `/defsite`-anchored pre-initialization says the same thing in four fewer
+    // lines. Casts tie at zero, so without this key enumeration order installs the longer one.
+    const long = cand(
+      'unsigned',
+      0,
+      's32 v0;\nif (a0 == 0) {\n    v0 = 1;\n} else {\n    v0 = 0;\n}\nreturn v0;',
+      0,
+      0,
+    );
+    const short = cand('unsigned/defsite', 0, 's32 v0;\nv0 = 0;\nif (a0 == 0) v0 = 1;\nreturn v0;', 0, 1);
+    expect([long, short].sort(compareScored)[0].label).toBe('unsigned/defsite');
+    // …and it stays UNDER the cast count: a compacter spelling does not buy its way past noise.
+    const noisy = cand('noisy', 0, 'return (u32)v0;', 0, 0);
+    const clean = cand('clean', 0, 's32 v1;\nv1 = v0;\nreturn v1;', 0, 1);
+    expect([noisy, clean].sort(compareScored)[0].label).toBe('clean');
+  });
+
   test('equal on every key falls back to enumeration order — a strict total order', () => {
     const a = cand('a', 0, 'x;', 0, 0);
     const b = cand('b', 0, 'x;', 0, 1);

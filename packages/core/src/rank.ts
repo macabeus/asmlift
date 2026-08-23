@@ -1021,6 +1021,12 @@ export function rankBy<S extends { score: number }>(
  *  cast the wrong pin simply lost on score; now it ties, and enumeration order alone would
  *  silently install the noisier spelling.
  *
+ *  LINE COUNT next, the other half of the same job: two spellings can tie on score AND on casts
+ *  and still differ by a whole control-flow shape — a `/defsite`-anchored `v0 = 0; if (c) v0 = 1;`
+ *  against the four-line `if/else` its sibling emits. Counted the way the report counts it
+ *  (apps/benchmark/src/eval/quality.ts `lines`), for the same reason `castCount` is: ranking must
+ *  not optimize for something the published metric measures differently.
+ *
  *  ENUMERATION ORDER last, which makes this a strict total order (indices are unique) and the
  *  result deterministic. Spelled explicitly rather than leaning on Array#sort's stability, which
  *  would make each preference an accident of two unrelated decisions.
@@ -1040,8 +1046,15 @@ export function compareScored<S extends { score: number }>(
     a.group - b.group ||
     (b.deviceVolatile ?? 0) - (a.deviceVolatile ?? 0) ||
     castCount(a.source) - castCount(b.source) ||
+    lineCount(a.source) - lineCount(b.source) ||
     a.order - b.order
   );
+}
+
+/** Non-blank lines in a candidate's rendered source — the compactness tie-break above, counted
+ *  exactly as `quality.ts` counts `lines`. Deterministic, and total on any string. */
+function lineCount(source: string): number {
+  return source.split('\n').filter((l) => l.trim().length > 0).length;
 }
 
 /** Scalar casts in a candidate's rendered source — the readability tie-break above.
