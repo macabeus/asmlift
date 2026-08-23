@@ -213,6 +213,38 @@ describe('printer — prefix nodes under postfix parents, and the truncating sin
     expect(cBackend.emit(idx)).toContain('((u8 *)n)[n]');
   });
 
+  // The legalization RE-TYPES the access, and in C the access takes the outer type — so a cast
+  // minted over a volatile base has to carry the qualifier or the access stops being volatile.
+  test('a legalized deref keeps the volatile its base declares', () => {
+    const mk = (locals: SFn['locals'], base: Expr): SFn => ({
+      name: 'f',
+      params: [{ name: 'n', type: T.s(32) }],
+      locals,
+      retType: T.void(),
+      body: [{ k: 'store', lval: { k: 'index', base, idx: V('n'), width: 4, signed: true }, value: C(0) }],
+    });
+    // a pointee-volatile DECLARATION (the /volatile lever's local)
+    expect(cBackend.emit(mk([{ name: 'p', type: T.ptr(T.u(16)), pointeeVolatile: true }], V('p')))).toContain(
+      '((volatile s32 *)p)[n] = 0;',
+    );
+    // a volatile CAST (the /inlinebase lever's re-spelled raw address)
+    const raw: Expr = { k: 'cast', to: T.ptr(T.u(16)), volatile: true, e: C(67109384) };
+    expect(cBackend.emit(mk([], raw))).toContain('((volatile s32 *)(volatile u16 *)67109384)[n] = 0;');
+    // …and a base that declares nothing volatile is not over-qualified
+    expect(cBackend.emit(mk([{ name: 'p', type: T.ptr(T.u(16)) }], V('p')))).toContain('((s32 *)p)[n] = 0;');
+  });
+
+  test('a base that already strides the access is spelled bare, qualifier and all', () => {
+    const fn: SFn = {
+      name: 'f',
+      params: [{ name: 'n', type: T.s(32) }],
+      locals: [{ name: 'p', type: T.ptr(T.u(16)), pointeeVolatile: true }],
+      retType: T.void(),
+      body: [{ k: 'store', lval: { k: 'index', base: V('p'), idx: V('n'), width: 2, signed: false }, value: C(0) }],
+    };
+    expect(cBackend.emit(fn)).toContain('p[n] = 0;');
+  });
+
   test('the prefix `*` form self-parenthesizes under a postfix parent; nested `-` never lexes as --', () => {
     const mk = (value: Expr): SFn => ({
       name: 'f',
