@@ -13,7 +13,7 @@ import { inlinableConstBases, inlineConstBases } from '../src/l3/inlinebase';
 import { nearBaseClusters } from '../src/l3/nearbase';
 import { hoistScopedBases } from '../src/l3/scopebase';
 import { volatilePtrLocals } from '../src/l3/volatileptr';
-import { enumerateCandidates } from '../src/rank';
+import { type Candidate, compareScored, enumerateCandidates } from '../src/rank';
 import { ARMV4T_AGBCC } from '../src/target';
 
 const PTR = T.ptr(T.u(16));
@@ -338,16 +338,25 @@ test('the /inlinebase × /vol-slot pair spells both, and neither lever reaches i
   expect(pair.source).not.toContain('v0');
 });
 
-test('the qualified output is enumerated, and BEFORE its plain twin so a tie publishes it', () => {
+test('the qualified output is enumerated alongside its plain twin', () => {
   const labels = ereaderCandidates().map((c) => c.label);
-  for (const [q, plain] of [
-    ['unsigned/inlinebase/volatile', 'unsigned/inlinebase'],
-    ['unsigned/inlinebase/volatile/vol-slot', 'unsigned/inlinebase/vol-slot'],
-  ]) {
-    expect(labels.indexOf(q)).toBeGreaterThanOrEqual(0);
-    expect(labels.indexOf(q)).toBeLessThan(labels.indexOf(plain));
+  for (const q of ['unsigned/inlinebase/volatile', 'unsigned/inlinebase/volatile/vol-slot']) {
+    expect(labels).toContain(q);
+    expect(labels).toContain(q.replace('/volatile', ''));
   }
   const q = ereaderCandidates().find((c) => c.label === 'unsigned/inlinebase/volatile/vol-slot')!;
   expect(q.source).toContain('*(volatile u16 *)67109384 = sp0;');
   expect(q.source).toContain('volatile u16 sp0;');
+});
+
+// The bytes cannot referee these two — the compiler was not exploiting the non-volatility — so
+// the ordering has to, whatever order the two spellings were enumerated in.
+test('at an exact tie the qualified spelling wins, from either enumeration order', () => {
+  const cands = ereaderCandidates();
+  const pick = (label: string) => cands.find((c) => c.label === label)!;
+  const q = pick('unsigned/inlinebase/volatile/vol-slot');
+  const plain = pick('unsigned/inlinebase/vol-slot');
+  const scored = (c: Candidate, order: number) => ({ ...c, score: { score: 0 }, order });
+  expect(compareScored(scored(q, 0), scored(plain, 1))).toBeLessThan(0);
+  expect(compareScored(scored(q, 1), scored(plain, 0))).toBeLessThan(0);
 });

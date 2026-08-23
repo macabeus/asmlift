@@ -745,14 +745,11 @@ export function enumerateCandidates(
           // TWO ALTERNATIVE OUTPUTS, not a product: deleting the local also deletes the only place
           // a `volatile` POINTEE could be written, and a raw address has no declaration anywhere
           // else to carry it. So the qualified spelling is emitted too, `/volatile` narrowed to
-          // exactly the locals this lever deletes. It is enumerated FIRST deliberately: usually the
-          // bytes separate them and the score decides (11 against 12 on pokeemerald:EReader_Reset),
-          // but where the compiler was not exploiting the non-volatility they are byte-identical —
-          // as they are on that row's WINNING shape, the one that also qualifies the slot — and
-          // then the group and the cast count tie too and `compareScored` falls through to
-          // enumeration order. At an exact tie the qualified spelling is the one to publish:
-          // over-qualifying costs a reader nothing, while a dropped `volatile` on an MMIO cell is
-          // a real bug in the C that only this compiler at these flags hides.
+          // exactly the locals this lever deletes. Usually the bytes separate them and the score
+          // decides (11 against 12 on pokeemerald:EReader_Reset), but where the compiler was not
+          // exploiting the non-volatility they are byte-identical — as they are on that row's
+          // WINNING shape, the one that also qualifies the slot — and `compareScored`'s volatility
+          // term picks the qualified twin.
           //
           // COST — it fires broadly: on 33 of the 69 klonoa functions that lift with no symbol map
           // (a symbol-map sweep sees fewer, since an absolute pool constant lifts to a `gaddr`
@@ -987,6 +984,13 @@ export function rankBy<S extends { score: number }>(
  *
  *  GROUP next: a named symbol-map spelling beats its `/raw-globals` sibling at equal bytes.
  *
+ *  VOLATILITY next: at equal bytes the spelling that keeps a `volatile` is the one to publish.
+ *  Over-qualifying costs a reader nothing, while a dropped `volatile` on an MMIO cell is a real
+ *  bug in the C that only this compiler at these flags hides — the differ cannot referee it,
+ *  because the compiler was not exploiting the non-volatility on this input. Declared here rather
+ *  than left to the order two `respell` calls happen to sit in, which any lever adding a shape
+ *  product between them silently reverses.
+ *
  *  CAST COUNT next, and only WITHIN a group. A wrong signedness pin is what manufactures casts —
  *  the C backend has to cast a shift operand back to the signedness the machine op needs, so
  *  pinning `u32` on a genuinely-signed parameter buys `s32 f(u32 a0) { return (s32)a0 >> a1; }`
@@ -1002,8 +1006,19 @@ export function compareScored<S extends { score: number }>(
   b: Candidate & { score: S; order: number },
 ): number {
   return (
-    a.score.score - b.score.score || a.group - b.group || castCount(a.source) - castCount(b.source) || a.order - b.order
+    a.score.score - b.score.score ||
+    a.group - b.group ||
+    volatileCount(b.source) - volatileCount(a.source) ||
+    castCount(a.source) - castCount(b.source) ||
+    a.order - b.order
   );
+}
+
+/** `volatile` qualifiers in a candidate's rendered source — the volatility tie-break above. A TEXT
+ *  count, like `castCount`, so it reads the C the user is shown rather than a tree the ranking
+ *  layer would have to be handed. */
+function volatileCount(source: string): number {
+  return source.match(/\bvolatile\b/g)?.length ?? 0;
 }
 
 /** Scalar casts in a candidate's rendered source — the readability tie-break above.
