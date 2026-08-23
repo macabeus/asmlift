@@ -2070,7 +2070,13 @@ export const SYNTHETIC: SynthSpec[] = [
   // if-nesting, and both the compare and the arm layout change with it. `armdef` MATCHes on that.
   // What the pair adds over `loopfall` is that the undef survives multi-arm merging: `armdef`
   // carries no preheader read and `armfall` carries one, `v3 = a2;` — the argument-register
-  // fabrication the rules above cannot reach, and the whole of `armfall`'s residual 8.
+  // fabrication the rules above cannot reach. It costs `armfall` nothing at this rung, for the
+  // reason `loopfall` records: `a2` arrives in the register `v3` is allocated to, the copy
+  // coalesces, and agbcc emits no instruction for it. `armfall`'s residual 8 is the ZERO-TRIP
+  // GUARD instead — the ROM inits the counter above the test (`mov r6,#0 / cmp r6,r7 / bcs`)
+  // where the candidate tests the bound against zero and then stages the second induction
+  // register in two moves. The `/initfirst` sibling is enumerated and scores 9, so the
+  // guard-placement family does not close this shape on its own.
   //
   // WHY THERE IS NO ROW FOR MORE UNDEFINED ENTRIES. A ladder was measured off this family's own
   // shape, holding it fixed and varying only how many locals the arm decides (agbcc; each control
