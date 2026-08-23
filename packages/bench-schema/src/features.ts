@@ -316,6 +316,30 @@ export const FEATURES: readonly FeatureDef[] = [
     seeAlso: ['loop'],
   },
   {
+    id: 'guard-init',
+    label: 'Init-first loop guard',
+    group: 'control-flow',
+    evidence: 'judgement',
+    summary: "a counted loop's zero-trip guard tests the initialised counter, not the constant",
+    detail:
+      '`for (i = 0; i < n; i++)` compiles with the init ABOVE the zero-trip test, so the guard ' +
+      'compares the COUNTER against the bound (`mov r4, #0` / `cmp r4, r5`). The same loop ' +
+      'written `if (0 < n) { i = 0; do … }` compiles with the init behind the branch and the ' +
+      'guard against the CONSTANT (`cmp r5, #0`) — and on an UNSIGNED bound the branch opcode ' +
+      'changes too, because the compiler folds the unsigned `> 0` to `!= 0` (`beq` where the ' +
+      'counted form gives `bcs`). Both source forms lift to the same IR — a constant has no ' +
+      'position — so which one the original spelled is a judgement worth two instructions and a ' +
+      'condition code, and it is the mirror of `do-while` at the TOP of the loop. The floor is ' +
+      'only the necessary condition (a counter the loop itself initialises to 0); whether the ' +
+      "guard's spelling is what the diff turns on stays a human call.",
+    example: {
+      c: 'for (i = 0; i < n; i++) { … }',
+      asm: '\tmov\tr4, #0x0\n\tcmp\tr4, r5\t@ the counter against the bound, not #0\n\tbge\t.L4',
+      toolchain: 'agbcc',
+    },
+    seeAlso: ['loop', 'do-while', 'branch', 'unsigned'],
+  },
+  {
     id: 'break',
     label: 'Break',
     group: 'control-flow',

@@ -2193,6 +2193,162 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'void rereadctl(u32 k, u32 n);',
     proto: { rereadctl: { returnsVoid: true } },
   },
+
+  // WHICH of several numeric bases gets the pointer local. The `dma_*` rows above ask whether a
+  // reused absolute address is spelled as one base local at all; this pair asks the question a
+  // function with SEVERAL of them poses, which those rows cannot: the answer is per base, and
+  // asmlift's is per function.
+  //
+  // `l3/basecse.ts` hoists a base indexed at 2+ sites into a typed pointer local, gated by
+  // BASECSE_GATES. Two of those gates — `loop` (a function-top hoist of a loop base forces a
+  // callee-saved register) and `repeated-const-offset` (a fixed offset touched twice is a scalar
+  // RMW the compiler re-materializes) — are exactly wrong for an MMIO poll, so rank.ts's
+  // `/livebase` lever re-runs the pass with both ablated, leaving only `single-use`. That lever
+  // is ALL-OR-NOTHING over bases: `hoistReusedGlobalBases` hoists every key the gate list admits,
+  // and there is no candidate for a proper subset. `/volatile` (l3/volatileptr.ts) does enumerate
+  // subsets — but `volatileSubsetCandidates` returns `[]` outside `2 <= eligible <= 3`, so the
+  // subset door is shut on exactly the functions that have several bases.
+  //
+  // `mixpoll` is the isolate: one DMA register file that must be a bound `volatile` local, and
+  // three IWRAM scalars that must stay inline absolute derefs. The ROM's own C is the reference,
+  // and hoisting the three IWRAM cells is what costs — measured by hand-editing asmlift's own
+  // winner one clause at a time against the same object:
+  //     all four bound, all four volatile (asmlift's winner) .................... 11
+  //     all four bound, only the DMA base volatile .............................. 11
+  //     all four bound, none volatile .......................................... 27
+  //     ONLY the DMA base bound, volatile, the three IWRAM cells inline .......... 0  ← MATCH
+  //     only the DMA base bound, NOT volatile ................................... 21
+  // So the 11 is the hoist alone (qualifying the IWRAM cells `volatile` on top of the wrong hoist
+  // is worth 0 here), and `volatile` on the base that needs it is worth 21 — the lever pair is
+  // right about both bases and wrong about which ones. A base census over all 12 enumerated
+  // candidates: every one binds either 0 or all 4 numeric bases, and marks 0 or 4 of them
+  // `volatile`. The matching spelling is in none of them.
+  //
+  // `onepoll` is the control — byte-identical C with the three IWRAM statements deleted. One base,
+  // no selectivity question, and `/livebase/volatile` MATCHes it. So the pair brackets the gap
+  // exactly: 0 with one base, 11 with four, same lever, same poll, same loop.
+  //
+  // The loop is spelled `i = 0; do … while` rather than `for` deliberately: a `for` puts the
+  // family below's zero-trip guard into the same row, and this row is about the bases. With the
+  // `for` spelling the same shape scores 15, of which 11 is these bases and 4 is that guard
+  // (verified by composing both fixes by hand: 15 → 4 → 0).
+  //
+  // Cut from kleod:LoadBGTilemapData:agbcc. A base census over its whole 20608-candidate
+  // enumeration returns four shapes and no others: 13440 bind nothing, 1024 bind 0x03003430 alone
+  // (the default pass's own single admission), 3072 bind all five of 0x03003430 / 0x03003478 /
+  // 0x0300347A / 0x030034A0 (IWRAM) and 0x040000D4 (the DMA register file) plain, and 3072 bind
+  // those same five all `volatile`. Not one binds the DMA base alone, and five eligible locals is
+  // also why no `/volatile-<name>` subset label exists there: the cap is 3.
+  //
+  // agbcc only. The claim is about what THIS compiler does with the two spellings, established by
+  // compiling both; the poll declines on ido7.1/gcc2.7.2kmc's branch-likely lift link exactly as
+  // `dma_wait` records, and mwcc_242_81 stays off per the `hipress` hazard policy.
+  {
+    sym: 'mixpoll',
+    src:
+      '#define gRows (*(u16 *)0x03001048)\n' +
+      '#define gCols (*(u16 *)0x03002048)\n' +
+      '#define gTiles (*(u16 *)0x03003048)\n' +
+      'void mixpoll(s32 n){ volatile s32 *dma = (volatile s32 *)0x040000d4; s32 i; i = 0;' +
+      ' do { gRows = gRows + 1; gCols = gCols + 2; gTiles = gTiles + 3;' +
+      ' dma[0] = 0x03004000; dma[1] = 0x06000000 + i; dma[2] = (u32)i >> 1 | 0x80000000;' +
+      ' while (dma[2] & 0x80000000) {} i = i + 1; } while (i < n); }',
+    features: ['value-home', 'pointer'],
+    toolchains: ['agbcc'],
+    ctx: 'void mixpoll(s32 n);',
+    proto: { mixpoll: { returnsVoid: true } },
+  },
+  {
+    sym: 'onepoll',
+    src:
+      'void onepoll(s32 n){ volatile s32 *dma = (volatile s32 *)0x040000d4; s32 i; i = 0;' +
+      ' do { dma[0] = 0x03004000; dma[1] = 0x06000000 + i; dma[2] = (u32)i >> 1 | 0x80000000;' +
+      ' while (dma[2] & 0x80000000) {} i = i + 1; } while (i < n); }',
+    features: ['value-home', 'pointer'],
+    toolchains: ['agbcc'],
+    ctx: 'void onepoll(s32 n);',
+    proto: { onepoll: { returnsVoid: true } },
+  },
+
+  // WHO OWNS THE FIRST STATEMENT OF A ZERO-TRIP GUARD'S ARM. `for (i = 0; i < n; i++)` compiles
+  // with the init ABOVE the test, so the guard compares the COUNTER against the bound; the same
+  // loop written `if (0 < n) { i = 0; do … }` compiles with the init behind the branch and the
+  // guard against the CONSTANT. Both spellings lift to the same IR — a constant has no position —
+  // so `l3/initfirst.ts` emits the init-first sibling as `/initfirst` and the differ referees.
+  // Verified by compiling the four-way pair with this agbcc (`-O2 -fhex-asm -fprologue-bugfix`):
+  //     s32 counter, `for`   :  mov r4, #0x0 / cmp r4, r5 / bge
+  //     s32 counter, guard   :                 cmp r5, #0 / ble
+  //     u32 counter, `for`   :  mov r4, #0x0 / cmp r4, r5 / bcs
+  //     u32 counter, guard   :                 cmp r5, #0 / beq
+  // — the operand pair always changes, and on an unsigned bound the branch OPCODE changes too
+  // (fold-const rewrites the unsigned `> 0` to `!= 0`). Two instructions and a condition code.
+  //
+  // The re-spelling has a precondition the rest of the pipeline can take away from it: the guarded
+  // arm's FIRST statement must be the init `v = X`, and the guard's other side must be X ITSELF
+  // (`exprEquals(cond.l, init.value)`). `unsguard` is the row where a sibling lever takes it away.
+  // Its counter is unsigned, so the match needs `/uns-cmp` (structure.ts unsignedCompareSpelling)
+  // to spell the loop compares unsigned — and that axis renders the guard's constant side as
+  // `(u32)0`, which is no longer the init's `0`. Across all 30 enumerated candidates, NOT ONE
+  // carries `/uns-cmp` and `/initfirst` together; the two spellings the match needs are in
+  // different candidates:
+  //     unsigned/livebase/volatile/initfirst  (asmlift's winner) ....  2
+  //     unsigned/uns-cmp/livebase/volatile ..........................  5
+  //     the same candidate with the guard re-spelled by hand .........  0  ← MATCH
+  // Attributed by ABLATION, not by reading: teaching initfirst's side match to look through a cast
+  // makes `unsigned/uns-cmp/livebase/volatile/initfirst` appear (36 candidates, up from 30) and it
+  // scores 0. The blocker is the cast, not a hoist — `/uns-cmp` moves no statement.
+  //
+  // `signguard` is the control, and it differs by ONE token: `s32 i` for `u32 i`. Nothing else in
+  // the C changes, the halving keeps its `(u32)` cast so it stays an `lsr` on both, and asmlift
+  // MATCHes it with `/initfirst` in the label. So the pair brackets the gap exactly: the guard
+  // re-spelling works, and it is the unsignedness that removes it.
+  //
+  // A SECOND blocker sits at the same precondition and has NO row: `/expr-home` can land its hoist
+  // at the head of the guarded arm (`if (0 < n) { v0 = 128 << 24; v1 = 0; do …`), and then `then[0]`
+  // is not the init. It reproduces synthetically — on a probe of this shape with a loop-invariant
+  // constant used twice, every `/expr-home` label lacks an `/initfirst` sibling and hand-composing
+  // them improves 31 → 26 — but on every shape tried the `/expr-home` branch scores far behind the
+  // winner, so no row demands it and none was written. What would earn one: a target whose ranked
+  // winner carries `/expr-home` with the hoist INSIDE the guard. (`sizebound:agbcc` carries both
+  // `/expr-home` and `/initfirst`, because there the homed value is parameter-derived and agbcc
+  // materialises it before the guard — that composition is not the broken one.)
+  //
+  // Cut from kleod:LoadBGTilemapData:agbcc, whose L1 guard is `movs r3, #0 / … / cmp r3, r2 / bge`
+  // in the ROM and `if (0 < *(u16 *)50345082)` in the ranked winner.
+  //
+  // agbcc only, as the poll rows above: `ucmp` already carries the compare-polarity axis on all
+  // four toolchains, and what this pair adds is its interaction with a guarded do-while that the
+  // GBA DMA poll is what produces here.
+  //
+  // m2c compiles neither, on the identical `ctx` asmlift receives, and for the reason every
+  // raw-address row here records rather than for anything in this family: it types the address
+  // constant as `void *` and reads members off it (`(void *)0x040000D4->unk0`). It does reach the
+  // construct — on `unsguard` it emits `var_r1 = 0;` ABOVE the guard and then tests
+  // `if (temp_r2 > 0U)`, i.e. the init placement right and the compared operand pair wrong.
+  {
+    sym: 'unsguard',
+    src:
+      'void unsguard(s32 t){ volatile s32 *dma = (volatile s32 *)0x040000d4; u32 i;' +
+      ' for (i = 0; i < 16 << t; i++){' +
+      ' dma[0] = 0x03002000; dma[1] = 0x06000000 + i; dma[2] = (u32)i >> 1 | 0x80000000;' +
+      ' while (dma[2] & 0x80000000) {} } }',
+    features: ['guard-init', 'unsigned'],
+    toolchains: ['agbcc'],
+    ctx: 'void unsguard(s32 t);',
+    proto: { unsguard: { returnsVoid: true } },
+  },
+  {
+    sym: 'signguard',
+    src:
+      'void signguard(s32 t){ volatile s32 *dma = (volatile s32 *)0x040000d4; s32 i;' +
+      ' for (i = 0; i < 16 << t; i++){' +
+      ' dma[0] = 0x03002000; dma[1] = 0x06000000 + i; dma[2] = (u32)i >> 1 | 0x80000000;' +
+      ' while (dma[2] & 0x80000000) {} } }',
+    features: ['guard-init'],
+    toolchains: ['agbcc'],
+    ctx: 'void signguard(s32 t);',
+    proto: { signguard: { returnsVoid: true } },
+  },
 ];
 
 // ── C++ (mwcc `.cp` frontend, PPC only) ───────────────────────────────────────────────────
