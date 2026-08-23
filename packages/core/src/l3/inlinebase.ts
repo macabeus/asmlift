@@ -41,9 +41,21 @@
 // and not `frame` (a slot is an asm fact — see the SFn.locals doc). Anything else, and nothing
 // qualifying at all, DECLINES (null) rather than approximating.
 //
-// KNOWN GAP: only `index` bases are re-spelled, so the same L2 home passed to a callee or used
-// as a `field` base is out of reach — `otherUses` refuses it. Re-spelling those
-// needs the un-homed tree, which is structure/analysis.ts's decision, not a substitution.
+// A RE-SPELLING RATHER THAN A STRUCTURING AXIS, which is a cost choice and not the
+// underdetermination one (docs/level-tower.md, "a third fork sits inside the ranked population").
+// The question — does a `const` with 2+ consumers live across a call in a named local — is the one
+// `/reread-globals`, `/addr-home`, `/expr-home` and `/derived-home` each answer as a
+// STRUCTURING_AXES entry. An axis here would double the enumeration on every function it admits;
+// substituting on the already-homed tree costs 766 candidates over 47058 (+1.6%) across the 33 of
+// 69 klonoa functions that lift with no symbol map.
+//
+// KNOWN GAP, and it is the price of that choice rather than an oversight: only `index` bases are
+// re-spelled, so the same L2 home passed to a callee or standing as a `field` base is out of
+// reach — `otherUses` refuses it. Reaching those needs the un-homed tree, which is
+// structure/analysis.ts's decision; the day a row demands one, this becomes the axis.
+//
+// The idiom it recovers is every GBA project's register macro: `*(vu16 *)0x4000208` is what
+// `REG_IME` expands to, so the deleted local is not merely an undone home.
 import { type Expr, type SFn, mapExprChildren, mapStmtExprs } from './ast';
 import { type Gate, firstRejection } from './gates';
 import { type Mentions, localMentions } from './mentions';

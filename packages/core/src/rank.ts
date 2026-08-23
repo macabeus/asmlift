@@ -753,11 +753,12 @@ export function enumerateCandidates(
           //
           // COST — it fires broadly: on 33 of the 69 klonoa functions that lift with no symbol map
           // (a symbol-map sweep sees fewer, since an absolute pool constant lifts to a `gaddr`
-          // there). Both outputs together add 924 candidates over 51835, +1.8% on the corpus and
-          // up to +67% on one function — the same class of price the enumeration already pays for
-          // `/volatile`, which labels 30% of it. LoadBGTilemapData is untouched: 17152 candidates
-          // and best 419 with the levers and without, because no local there is fed a bare
-          // constant.
+          // there). Both outputs together add 766 candidates over 47058, +1.6%, and up to +70% on
+          // one function (EntityPositionFromLevelTable) — the same class of price the enumeration
+          // already pays for `/volatile`.
+          // Cheaper than the axis over the same question would be, which is the choice the lever's
+          // header argues; `/vol-slot` adds nothing at all there, since no klonoa function reaches
+          // its frame gate.
           const inlineVolatile = (): SFn | null => {
             const only = new Set(inlinableConstBases(sfn));
             const q = only.size ? volatilePtrLocals(sfn, only) : null;
