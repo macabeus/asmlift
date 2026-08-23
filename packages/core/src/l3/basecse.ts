@@ -195,6 +195,12 @@ export const LIVEBASE_BLOCK_GATES: readonly Gate<BaseKey>[] = [
   },
 ];
 
+/** The keys `gates` admits, in first-use order — the census without the rewrite, so a caller
+ *  choosing between admissions can compare what two tables would bind for one tree walk each. */
+export function admittedBases(sfn: SFn, gates: readonly Gate<BaseKey>[]): readonly string[] {
+  return admit(sfn, gates).keys;
+}
+
 /** The keys `gates` admits, in first-use order, with the census they were judged from. */
 function admit(sfn: SFn, gates: readonly Gate<BaseKey>[]): { c: Collected; keys: string[] } {
   const c: Collected = {
