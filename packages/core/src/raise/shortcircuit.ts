@@ -310,16 +310,17 @@ export function recognizeShortCircuit(fn: Fn): boolean {
 // WHICH SPELLING, and why the fold alone does not decide it. `if (a && b) X else Y` and its dual
 // `if (!a || !b) Y else X` are the same program and NOT the same bytes — agbcc lays the arms out in
 // source order, so which was written is recorded in the branch senses. This rewrite keeps ^h's
-// unchanged successor slot, so the connective comes out in the orientation those senses spell: the
-// source's own for a `||` (synthetic:ifor_near:agbcc byte-matches), the dual for an `&&`. Reaching
-// the other is `negateCond`'s job (l3/ast.ts distributes `!(a && b)`), but the lever that calls it —
-// `preserveDivergentBranchSense` — covers DIVERGENT ifs only, so a reconverging one has no dual
-// candidate: synthetic:ifand_near:agbcc, which the un-folded spelling would match.
+// unchanged successor slot, so the connective comes out in the orientation those senses spell, and
+// which of the two that is depends on the branch RANGE below, not on the source. Reaching the
+// other is `negateCond`'s job (l3/ast.ts distributes `!(a && b)`), and rank.ts's `/flip-join` axis
+// is what asks for it on a RECONVERGING if — the default spells the layout reading and the axis
+// spells its dual, so both orientations are compiled and the differ picks (synthetic:ifand_near
+// matches at the default, synthetic:ifor_near on the axis).
 //
-// That lever cannot simply be widened. It is a per-FUNCTION boolean defaulting to true on every
-// target, so flipping it for reconverging ifs would flip every `if` in the function at once — and
-// of the 28 real rows carrying the `short-circuit` tag, 22 hold two or more. What this fold's
-// output needs is its own gate, on the condition BEING one of these connectives.
+// What neither reaches is the MIXED spelling. `negateJoinedBranchSense` is a per-FUNCTION boolean,
+// so the axis negates every joined `if` at once — and of the 28 real rows carrying the
+// `short-circuit` tag, 22 hold two or more. A per-SITE negation is the open lever; a gate deciding
+// whether to ENUMERATE the axis is not it, and prunes a spelling the differ would have refereed.
 //
 // WHICH slot ^g lands in is decided by the asm's branch POLARITY, and on Thumb the branch RANGE
 // decides the polarity — so the same source `&&` reaches this pass two different ways:
