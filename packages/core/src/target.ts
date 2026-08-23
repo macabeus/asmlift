@@ -110,11 +110,11 @@ export interface TargetDescription {
     // value as that case (`cmp r0, #1 / bcc` is `case 0:` of an unsigned switch) rather than as
     // navigation. agbcc declares it from its own sources: `stmt.c` emit_case_nodes jumps straight
     // to `node->left->code_label` on LT once `node_is_bounded (node->left)`, so the remaining
-    // value's own test is never emitted. A source-level `if (x < 1) … else if …` compiles to the
-    // same asm and the two spell different bytes, so this is a claim about ONE compiler's dispatch
-    // — the same class as `switchAllowsNeqCase`, whose IDO entry names that mis-recognition.
-    // Absent ⇒ false: ido/kmc-gcc/mwcc have not been put through the evidence, and a compiler opts
-    // in on its own, never by inheriting.
+    // value's own test is never emitted. A relational test is an ordinary comparison everywhere
+    // else, so reading one as a case is a claim about ONE compiler's dispatch — the same class as
+    // `switchAllowsNeqCase`, whose IDO entry names what the mis-recognition costs. Absent ⇒ false:
+    // ido/kmc-gcc/mwcc have not been put through the evidence, and a compiler opts in on its own,
+    // never by inheriting.
     switchAllowsBoundCase?: boolean;
     // Switch recovery: emit the case arms in the order the ASSEMBLY lays their bodies out, rather
     // than sorted by ascending case value. True claims the compiler emits case bodies as it walks

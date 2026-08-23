@@ -2070,8 +2070,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // if-nesting, and both the compare and the arm layout change with it. `armdef` MATCHes on that,
   // and is also what pins the reading's three refusals: the BRANCH of the test, never its
   // fall-through; never the test that OPENS the dispatch; and only on a compiler that declared the
-  // spelling (`switchAllowsBoundCase` — agbcc alone). Each of the three is a shape an
-  // `if (x < 1) … else if …` chain does produce and `emit_case_nodes` does not.
+  // spelling (`switchAllowsBoundCase` — agbcc alone). Each is a shape `emit_case_nodes` cannot
+  // emit, so a relational test in it is an ordinary comparison and recovers as one.
   // What the pair adds over `loopfall` is that the undef survives multi-arm merging: `armdef`
   // carries no preheader read and `armfall` carries one, `v3 = a2;` — the argument-register
   // fabrication the rules above cannot reach. It costs `armfall` nothing at this rung, for the

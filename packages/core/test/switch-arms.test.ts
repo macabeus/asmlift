@@ -470,8 +470,8 @@ test('a relational test whose branch admits ONE value routes that case, not the 
 test('the FALL side of a relational test is navigation, whatever it admits', () => {
   // `emit_case_nodes` reaches a case body from a relational test only by BRANCHING to it; its
   // fall-through always continues into more dispatch. So `cmp r0, #0 / bhi`, whose fall side is
-  // exactly {0}, is not a switch here — it is `if (x > 0) … else if (x == 5) …`, and the two
-  // spellings compile to different code.
+  // exactly {0}, did not come from a dispatch, and the tree stays the comparison chain it reads
+  // as — no fall-side singleton appears in 3176 compiled agbcc switches.
   const out = of(
     'f:\n\tmov\tr2, #0x0\n' +
       '\tcmp\tr0, #0\n\tbhi\t.Lhi\t@cond_branch\n' +
@@ -488,8 +488,8 @@ test('the FALL side of a relational test is navigation, whatever it admits', () 
 test('a bound test that OPENS the dispatch is an ordinary `if`, not a case', () => {
   // A single-valued node emits its own `do_jump_if_equal` before either descent test, so a bound
   // test always sits UNDER another test of the tree, and one that opens the region has no producer
-  // in this dispatch. asmlift keeps the chain — which is also the spelling agbcc compiles to 11
-  // instructions where the `switch` takes 13, in a different register allocation.
+  // in this dispatch. Root position is where the shape actually turns up — 15 of the 16 sites the
+  // reading is considered at over 15712 lifted functions — and none of them is a dispatch.
   const out = of(
     'f:\n\tmov\tr2, #0x0\n' +
       '\tcmp\tr0, #0x1\n\tbcc\t.Lc0\t@cond_branch\n' +

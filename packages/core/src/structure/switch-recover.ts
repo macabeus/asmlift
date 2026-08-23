@@ -295,11 +295,11 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
   // value, whenever the remaining range has collapsed to one. Read as navigation instead, that
   // arm's body becomes a second default candidate and the whole tree declines.
   //
-  // THE BRANCH, never the fall-through. `emit_case_nodes` reaches a case body from a relational
-  // test in exactly two places — LT jumping to `node->left->code_label` and GT to
-  // `node->right->code_label`, each guarded by `node_is_bounded` on that side — and both are the
-  // jump; the fall-through always continues into more dispatch. The asm a fall-side reading fires
-  // on is a source-level `if (x > 0) … else if …` instead.
+  // THE BRANCH, never the fall-through. Every jump in `emit_case_nodes` that lands on a case body
+  // is its test's BRANCH — for a single-valued node, LT to `node->left->code_label` and GT to
+  // `node->right->code_label`, each guarded by `node_is_bounded` on that side — while the
+  // fall-through always continues into more dispatch. So a fall-side reading has no producer in
+  // this dispatch, and none appears in 3176 compiled agbcc switches.
   //
   // TWO PREMISES ABOUT THE DOMAIN. It is the 32-bit REGISTER's, not the scrutinee's recovered
   // type, so a narrower type has a nearer endpoint this misses — which costs a case and never
@@ -508,11 +508,11 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
         }
       } else {
         // relational → navigation, except where the BRANCH has collapsed to a single value and
-        // lands on a BODY, on a compiler that declared the spelling. Two shapes this dispatch does
-        // not emit, both of which an `if (x < 1) … else if …` chain does:
+        // lands on a BODY, on a compiler that declared the spelling. Two more refusals:
         //   - a bound test at the ROOT. `emit_case_nodes` emits a single-valued node's own
         //     `do_jump_if_equal` before either descent test, so a bound test always sits under
-        //     another test of the same tree; one that OPENS the region is an ordinary `if`;
+        //     another test of the same tree; one that OPENS the region did not come from this
+        //     dispatch, and reading it as a case turns a comparison chain into a `switch`;
         //   - a singleton branch onto another TEST, which is the search descending to pin the
         //     value. Navigation recovers it; a case body may not be a test, so reading it as one
         //     would decline the whole tree.
