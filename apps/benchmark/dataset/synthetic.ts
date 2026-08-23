@@ -2010,14 +2010,32 @@ export const SYNTHETIC: SynthSpec[] = [
   // to and the copy coalesces away. What it costs is the pin: an argument register is occupied
   // across the loop, and the allocation downstream is a different one.
   //
-  // Measured on kleod:LoadBGTilemapData:agbcc, both directions:
+  // Measured on kleod:LoadBGTilemapData:agbcc, both directions. PRICE CORRECTED: the ADDING number
+  // was first taken against a reference source that carries three register-allocation coercions
+  // (statements with no semantic content, marked `// FAKE?` there). Deleting them halves it, so
+  // both endpoints are quoted:
   //   • REMOVING the five preheader reads from asmlift's own ranked winner (20608 candidates, 0
   //     dropped, `unsigned/flip-branch/flip-join/merge-names/addr-home/expr-home/coalesce-v9-v23/
   //     initfirst/raw-globals`) takes it from 473 to 459 against `build/src/gfx.o` — 14 points of
-  //     today's residual.
-  //   • ADDING five preheader reads of the same shape to a hand-written C spelling that is 12
-  //     points from the ROM takes it to 366. The construct is cheap to carry when everything else is already wrong and a hard
-  //     blocker once it is not, which is why both numbers are quoted rather than either alone.
+  //     today's residual. The same edit against the OTHER decomp's object reads 479 to 462; that
+  //     rig scores the identical winner C 6 points higher, so the two are not interchangeable.
+  //   • ADDING five preheader reads of the same shape to the reference C: 207 to 386, i.e. +179,
+  //     with the three coercions deleted. With them in play the same edit reads 12 to 366 (+354),
+  //     which is the number this comment first recorded. +179 is the honest one — the coercions
+  //     and the materialisation contend for the same registers, so stacking them double-counts.
+  // The construct is cheap to carry when everything else is already wrong and a hard blocker once
+  // it is not, which is why both directions are quoted rather than either alone.
+  //
+  // AND THE PRICE IS NOT FOR THE UNDEFINEDNESS — three controls on the same reference and rig:
+  //     five preheader reads of UNDEFINED locals (what this family names) .... 386  (+179)
+  //     the same five with their sources given real definitions ............... 401  (+194)
+  //     the same five sourced from ordinary extra parameters .................. 392  (+185)
+  //     the same five sourced from the constant 0 ............................. 246   (+39)
+  // A DEFINED source costs MORE. So the cost is the pin, exactly as the paragraph above says, and
+  // not the `undef`: five extra values materialised in a preheader and live across the nest, which
+  // is the same register budget `/expr-home` and `/addr-home` spend. Only the constant is cheap,
+  // because it is rematerialised and extends no live range. A lever that stops SPELLING the entry
+  // as an undefined read but still emits the copy will move these rows by nothing.
   //
   // `loopfall` is the isolate and `loopset` its control: byte-identical C except for the
   // `else { w = 0; }`. With the else there is no undefined entry and asmlift MATCHes; without it,
