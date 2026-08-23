@@ -720,6 +720,11 @@ export interface StructureOptions {
   // register the compiler holds across the iterations. Off by default; rank.ts enumerates the ON
   // spelling as the `/expr-home` axis — see analysis.ts AnalyzeOptions.
   homeLoopExprs?: boolean;
+  // Materialize a pure value with 2+ consumers standing on a memory read — the register the asm
+  // carried the DERIVED value in, where the read's own home is a register that died at the
+  // computation. Off by default; rank.ts enumerates the ON spelling as the `/derived-home` axis —
+  // see analysis.ts AnalyzeOptions.
+  homeDerivedReads?: boolean;
   // Emit a memory read as a named temp in ITS OWN block when every place it renders sits in a
   // block that block strictly dominates. A per-compiler DATA lever (TargetDescription
   // .compilerBehaviors), not a differ-refereed axis: where the compiler has neither a scheduler
@@ -785,6 +790,7 @@ function assertPrimaryAccepts(fn: Fn, opts: StructureOptions, hooks: StructureHo
       materializeJoinFeeds: false,
       homeSharedAddresses: false,
       homeLoopExprs: false,
+      homeDerivedReads: false,
     },
     hooks,
   );
@@ -807,6 +813,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     materializeJoinFeeds = false,
     homeSharedAddresses = false,
     homeLoopExprs = false,
+    homeDerivedReads = false,
     readsStayWhereWritten = false,
     unsignedCompareSpelling = false,
     coalesceMergeNames = false,
@@ -817,7 +824,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // too), which the loop emitters' hazard predicates read — so the invariant above covers each.
   // A per-compiler DEFAULT is not among them, however much it materializes: the primary IS this
   // target's defaults, so resetting one would probe a spelling asmlift never emits here.
-  if (coalesceMergeNames || materializeJoinFeeds || homeSharedAddresses || homeLoopExprs) {
+  if (coalesceMergeNames || materializeJoinFeeds || homeSharedAddresses || homeLoopExprs || homeDerivedReads) {
     assertPrimaryAccepts(fn, opts, hooks);
   }
   const defs = defOpMap(fn);
@@ -836,6 +843,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       materializeJoinFeeds,
       homeSharedAddresses,
       homeLoopExprs,
+      homeDerivedReads,
       readsStayWhereWritten,
       // the map's own declaration truth: a volatile object's read may not be duplicated or moved
       volatileGlobal: (n) => {

@@ -20,11 +20,13 @@ export interface UseSite {
 const MEM_BASE_OPS = new Set(['load', 'store', 'aload', 'astore']);
 
 /** Any gaddr/laddr in the op's operand cone (the op included). Rendered standalone, an address
- *  computation over one loses the memAccess's inline byte-stride cast — the value changes, so
- *  every homing rule refuses the cone (the cast-aware machinery in l3/basecse.ts, scopebase.ts
- *  and nearbase.ts serves those bases instead). The walk deliberately crosses loads — a gaddr
- *  reachable only through a load's address keeps its cast at that load's own deref, so
- *  over-refusal there costs a candidate, never soundness. */
+ *  computation over one loses the memAccess's inline byte-stride cast — the value changes, so a
+ *  homing rule asking this refuses the cone (the cast-aware machinery in l3/basecse.ts,
+ *  scopebase.ts and nearbase.ts serves those bases instead). The walk deliberately crosses loads —
+ *  a gaddr reachable only through a load's address keeps its cast at that load's own deref, so
+ *  over-refusal there costs a candidate, never soundness. That over-refusal is why the
+ *  derived-read-home axis asks its own pair instead (an address in the cone OUTSIDE a read, plus
+ *  `rendersAsAddress` on the value): reads over named globals are its whole clientele. */
 function coneHoldsAddr(op0: Op, defOf: Map<Value, Op>): boolean {
   const seen = new Set<Value>();
   const cone = [op0];
@@ -151,6 +153,102 @@ export function hasLoopSharedPureValue(fn: Fn): boolean {
   return false;
 }
 
+/** rank.ts's enumeration gate for the `/derived-home` axis: does the function HAVE a value the
+ *  axis would home — a pure non-const, non-pointer def with 2+ consumers standing on a same-block
+ *  memory read that is used nowhere else and reaches it with no write in between, and with no call
+ *  or standalone address in the cone? A TRUE here DOUBLES the whole structuring cross for the
+ *  function — not one candidate — so every refusal cheap enough to state without the positioned
+ *  model is mirrored here; only the loop-header seat stays out.
+ *
+ *  Diverges in BOTH directions, like `hasLoopSharedPureValue` and unlike `hasHomeableSharedAddress`.
+ *  Over: the write scan is straight-line within the one block, where the rule's is cycle-aware, so
+ *  a write reaching only around a back edge is invisible here — a false positive costs a doubled
+ *  cross whose every candidate the source dedup then collapses. Under: use counting here is by SLOT
+ *  over operands and successor args, where `analyze` drops a void function's `ret` operand — so a
+ *  read whose second use is a suppressed return is refused here and admitted there, silently
+ *  skipping the arm. That shape is a void function returning the very halfword it read, which no
+ *  caller can observe; the axis's clientele reads to compute, not to return. */
+export function hasDerivedReadHome(fn: Fn): boolean {
+  const defOf = defOpMap(fn);
+  const consumers = new Map<Value, Set<Op>>();
+  const useSlots = new Map<Value, number>();
+  const blockOf = new Map<Op, Block>();
+  const idxOf = new Map<Op, number>();
+  for (const b of fn.blocks) {
+    b.ops.forEach((op, i) => {
+      blockOf.set(op, b);
+      idxOf.set(op, i);
+      const use = (v: Value) => {
+        (consumers.get(v) ?? consumers.set(v, new Set()).get(v)!).add(op);
+        useSlots.set(v, (useSlots.get(v) ?? 0) + 1);
+      };
+      for (const o of op.operands) {
+        use(o);
+      }
+      for (const s of op.successors) {
+        for (const a of s.args) {
+          use(a);
+        }
+      }
+    });
+  }
+  /** any op that writes memory strictly between two ops of one block — the rule's `memWriteBetween`
+   *  over the straight line the same-block requirement already pins */
+  const writeBetween = (b: Block, lo: number, hi: number): boolean =>
+    b.ops.slice(lo + 1, hi).some((x) => EFFECTFUL_OPS.has(x.opcode));
+  const standsOnRead = (op0: Op): boolean => {
+    const reads: Op[] = [];
+    const seen = new Set<Value>();
+    const cone = [op0];
+    while (cone.length) {
+      const d = cone.pop()!;
+      if (d.opcode === 'load' || d.opcode === 'aload') {
+        reads.push(d);
+        continue;
+      }
+      if (d.opcode === 'call' || d.opcode === 'gaddr' || d.opcode === 'laddr') {
+        return false;
+      }
+      for (const x of d.operands) {
+        if (!seen.has(x)) {
+          seen.add(x);
+          const dd = defOf.get(x);
+          if (dd) {
+            cone.push(dd);
+          }
+        }
+      }
+    }
+    const b = blockOf.get(op0)!;
+    return (
+      reads.length > 0 &&
+      reads.every(
+        (r) =>
+          blockOf.get(r) === b &&
+          (useSlots.get(r.results[0]) ?? 0) === 1 &&
+          !writeBetween(b, idxOf.get(r)!, idxOf.get(op0)!),
+      )
+    );
+  };
+  for (const [v, cs] of consumers) {
+    const d = defOf.get(v);
+    if (
+      cs.size >= 2 &&
+      d &&
+      d.opcode !== 'const' &&
+      d.opcode !== 'call' &&
+      d.opcode !== 'load' &&
+      d.opcode !== 'aload' &&
+      v.type.kind !== 'ptr' &&
+      v.type.kind !== 'array' &&
+      standsOnRead(d)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export interface StructureAnalysis {
   /** every positioned use of a value; a value absent here is dead */
   useSitesOf: Map<Value, UseSite[]>;
@@ -247,6 +345,31 @@ export interface AnalyzeOptions {
    *  Same refusals as that axis: gaddr/laddr cones and multi-block-loop-header seats. Adding
    *  materialization preserves semantics for the admitted values, exactly as above. */
   homeLoopExprs?: boolean;
+  /** The derived-read-home axis (rank.ts `/derived-home`). A memory read whose value is not used
+   *  directly but through a pure computation with 2+ consumers puts the home on the WRONG node:
+   *  the read materializes (its consumer resolves no single render position) and the computation
+   *  then re-derives from that local at every use, where the asm computed it ONCE — the read's
+   *  register died at the computation and the DERIVED value is what a register carried on
+   *  (`eor r1,r1,r0` keeps `0x3FF ^ REG_KEYINPUT`, never the raw halfword). With this on, a pure
+   *  non-const value with 2+ consumers whose operand cone bottoms out at a memory read
+   *  materializes instead; the read then renders exactly once, inside the home.
+   *
+   *  A differ-refereed axis, not a fix: agbcc CSEs a re-derived expression back to one
+   *  instruction often enough that both spellings do compile, and which one the source spelled is
+   *  not derivable. What the cone's read supplies is the evidence the straight-line case otherwise
+   *  lacks — `/expr-home` takes a loop as proof the value stayed in a register, and a
+   *  freely-re-derivable value (the small-constant class) has no such proof at all, but a value
+   *  standing on a read the source could not repeat is one the asm computed from a single access.
+   *
+   *  Refusals, all of them about the ONE access the home must reproduce. A cone read used anywhere
+   *  but the cone (its second use resolves a second render position, so the read would render
+   *  twice). A cone read outside this value's own block, barred from it by a write, or barred by a
+   *  read outside the cone (moving the access across a branch, into a loop, or past another access
+   *  changes which paths read, how often, and in what order). A cone crossing a `call` (homing
+   *  would move a side effect). A standalone gaddr/laddr in the cone, or a value that is ITSELF an
+   *  address (rendered standalone the byte-stride cast lands outside the sum — see
+   *  `rendersAsAddress`). And the multi-block-loop-header seat the sibling axes refuse. */
+  homeDerivedReads?: boolean;
   /** DEF-BLOCK PLACEMENT for memory reads — WHERE the read happens, not where the value lives.
    *  The sibling of the homing axes above: there the question is which register or offset holds a
    *  value, here which BLOCK performs the read. A read whose every render sits in a block its own
@@ -292,6 +415,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
     materializeJoinFeeds = false,
     homeSharedAddresses = false,
     homeLoopExprs = false,
+    homeDerivedReads = false,
     readsStayWhereWritten = false,
   } = opts;
   // ── use registry ────────────────────────────────────────────────────────────────────────
@@ -693,6 +817,17 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
    *  holds the loaded value and the address stays inline at the deref, which is why the load rules
    *  (live-across-a-loop, join feeds, /addr-home's, def-block placement) do not ask it. */
   const addressCone = (op0: Op): boolean => coneHoldsAddr(op0, defOf);
+  /** Is the op's own value an ADDRESS — a pointer the standalone rendering must cast? The same
+   *  hazard `addressCone` covers, asked of the value instead of its cone, for the derived-read-home
+   *  axis: that axis cannot use `addressCone` (it crosses reads, so it refuses every value over a
+   *  named global's load — the axis's clientele), and a pointer LOADED from memory puts its gaddr
+   *  under the read where the cone walk stops. Homed, `add(p, 8)` renders `(u16 *)(gPtr + 8)` — the
+   *  cast lands outside the sum, so a byte offset becomes element arithmetic and the address moves
+   *  (+16 where the inline `*(v0 + 4)` reads +8). */
+  const rendersAsAddress = (op: Op): boolean => {
+    const t = op.results[0]?.type;
+    return t?.kind === 'ptr' || t?.kind === 'array';
+  };
   // ── the address-home axis's scope predicate ───────────────────────────────────────────────
   // A value consumed ONLY as the base (operands[0]) of 2+ distinct memory accesses — the shape
   // the axis homes. Any other use (a store's value slot, an aload index, arithmetic, a successor
@@ -717,6 +852,82 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
       (L) => !L.body.has(defBlk) && consumers.filter((c) => L.body.has(opBlock.get(c)!)).length >= 2,
     );
   };
+  /** The derived-read-home axis's scope: does `op0` stand on a memory READ that may render at
+   *  `op0`'s own position?
+   *
+   *  The cone walk STOPS at a read — its address stays inline at the deref, so nothing below it is
+   *  ever rendered standalone — and refuses on anything else that cannot move to `op0`: a `call`
+   *  (a side effect), and a gaddr/laddr reached OUTSIDE a read's address (rendered standalone an
+   *  `&g + i` loses the memAccess's byte-stride cast). `coneHoldsAddr` cannot answer this: it
+   *  crosses reads, so it refuses every value standing on a named global's load — which is this
+   *  axis's whole clientele.
+   *
+   *  At least one read is required. A value derivable from locals and constants alone is one the
+   *  compiler re-materializes for free, and homing it only adds copies — the small-constant class
+   *  the const scope's note records.
+   *
+   *  Each read must then sit in `op0`'s OWN BLOCK, and reach `op0`'s position with nothing that
+   *  writes memory able to execute in between — homing renders the read at `op0`, so both are
+   *  about moving it there.
+   *
+   *  A read OUTSIDE the cone bars it too. The default's "loads never bar a load" holds for reads
+   *  the compiler leaves unsequenced inside ONE expression, which is what the cone's own reads
+   *  become; a foreign read renders in a different statement, so moving past it reorders two
+   *  accesses — for two MMIO cells (this axis's clientele) an observable swap, as when `A`'s
+   *  derived value sits below `B`'s and homing both puts `B`'s read first.
+   *
+   *  And each read's value must go NOWHERE BUT the cone: exactly one use site. Homing resolves a
+   *  render position for a read that had none, so a SECOND use resolves a second one, and the
+   *  multi-render load rule then inlines the read at BOTH — two accesses where the asm has one
+   *  `ldrh`, which for a volatile cell is precisely the duplication `volatileGlobal` refuses. Two
+   *  homed values over one read is the same shape from the other side (each is the other's second
+   *  use), so one test covers both. This is what makes "renders once, inside the home" a property
+   *  rather than an aspiration: without it the axis silently doubles a hardware read.
+   *
+   *  The same block is what makes the axis's claim true at all: the register handoff it reproduces
+   *  is one straight-line run of the asm, `ldrh` into `eor` into three uses. Across blocks WHICH
+   *  BLOCK reads is `readsStayWhereWritten`'s question, not this one, and answering it here goes
+   *  wrong in both directions — a value below a branch pulls the read into an arm that may not
+   *  run, a value inside a loop pulls it in to run per iteration. Neither is a write, so no
+   *  barrier sees either; for an ordinary cell they are worse spellings, and for a volatile one
+   *  they are a missing access and a duplicated one. */
+  const standsOnMovableRead = (op0: Op, blk: Block): boolean => {
+    const reads: Op[] = [];
+    const seen = new Set<Value>();
+    const cone = [op0];
+    while (cone.length) {
+      const d = cone.pop()!;
+      if (d.opcode === 'load' || d.opcode === 'aload') {
+        reads.push(d);
+        continue;
+      }
+      if (d.opcode === 'call' || d.opcode === 'gaddr' || d.opcode === 'laddr') {
+        return false;
+      }
+      for (const x of d.operands) {
+        if (!seen.has(x)) {
+          seen.add(x);
+          const dd = defOf.get(x);
+          if (dd) {
+            cone.push(dd);
+          }
+        }
+      }
+    }
+    const at = { blk, idx: opIndex.get(op0)! };
+    const coneReads = new Set(reads);
+    const bars = (x: Op): boolean =>
+      EFFECTFUL_OPS.has(x.opcode) || ((x.opcode === 'load' || x.opcode === 'aload') && !coneReads.has(x));
+    return (
+      reads.length > 0 &&
+      reads.every(
+        (r) =>
+          opBlock.get(r) === blk && (useSitesOf.get(r.results[0])?.length ?? 0) === 1 && !memWriteBetween(r, at, bars),
+      )
+    );
+  };
+  /** 2+ distinct consuming ops — the multi-use the pure-op rule reads as a reused register. */
+  const multiConsumer = (v: Value): boolean => new Set((useSitesOf.get(v) ?? []).map((s) => s.op)).size >= 2;
   /** THE def-block placement rule's loop refusal: is `b` a PREHEADER of some loop whose body holds
    *  one of the render blocks — outside the body, and a predecessor of the header?
    *
@@ -893,6 +1104,22 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
             !usedOnlyAsSharedBase(pr) &&
             loopSharedConsumers(pr, b) &&
             !addressCone(op) &&
+            !multiBlockHeaders.has(b)
+          ) {
+            materialize.add(op);
+          }
+          // Fifth scope, under the derived-read-home axis (AnalyzeOptions.homeDerivedReads): a
+          // pure non-const value with 2+ consumers standing on a memory read. Shared bases stay
+          // the third scope's and values consumed across a loop the fourth's; what this one adds
+          // is the straight-line case, which neither reaches.
+          if (
+            homeDerivedReads &&
+            op.opcode !== 'const' &&
+            pr &&
+            !usedOnlyAsSharedBase(pr) &&
+            !rendersAsAddress(op) &&
+            multiConsumer(pr) &&
+            standsOnMovableRead(op, b) &&
             !multiBlockHeaders.has(b)
           ) {
             materialize.add(op);
