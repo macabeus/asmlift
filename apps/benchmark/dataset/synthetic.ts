@@ -2015,8 +2015,8 @@ export const SYNTHETIC: SynthSpec[] = [
   //     dropped, `unsigned/flip-branch/flip-join/merge-names/addr-home/expr-home/coalesce-v9-v23/
   //     initfirst/raw-globals`) takes it from 473 to 459 against `build/src/gfx.o` — 14 points of
   //     today's residual.
-  //   • ADDING the same five to a hand-written C spelling that is 12 points from the ROM takes it
-  //     to 366. The construct is cheap to carry when everything else is already wrong and a hard
+  //   • ADDING five preheader reads of the same shape to a hand-written C spelling that is 12
+  //     points from the ROM takes it to 366. The construct is cheap to carry when everything else is already wrong and a hard
   //     blocker once it is not, which is why both numbers are quoted rather than either alone.
   //
   // `loopfall` is the isolate and `loopset` its control: byte-identical C except for the
@@ -2150,6 +2150,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // statement into asmlift's raw-address spelling makes agbcc keep the `ldrh`/`strh` (the
   // struct-typed reference spelling is what lets it delete them), so no candidate reproduces the
   // reference's combination. The row records the residual and its size, not a mechanism.
+  //
   // `value-home` and not `read-once`: read-once is about a value read once above a branch and
   // re-read per arm, and this row has no branch and no arm — the load sits inside the loop in the
   // reference AND in the candidate. A zero insert/delete breakdown over renamed registers is
@@ -2159,9 +2160,9 @@ export const SYNTHETIC: SynthSpec[] = [
   // claim above under the harness instead of in a commit message, and it MATCHes — so the pair
   // brackets the gap exactly, 0 without the statement and 8 with it.
   //
-  // Cut from kleod:LoadBGTilemapData:agbcc, where the same statement is written verbatim in the
-  // second decomp's 98.24% attempt at that function and is worth 178 points there: removing it
-  // takes that spelling from 12 to 190 against the ROM object.
+  // Cut from kleod:LoadBGTilemapData:agbcc, where the second decomp's 98.24% attempt writes the
+  // same construct as `gBgInfo[2].vLength += 0;` and marks it `// FAKE`. It is worth 178 points
+  // there: deleting that one statement takes the spelling from 12 to 190 against the ROM object.
   //
   // agbcc only, for the same reason as the family above: the deletion-but-not-the-alias behaviour
   // is this compiler's, established by compiling both spellings.
