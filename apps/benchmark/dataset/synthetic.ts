@@ -2010,14 +2010,34 @@ export const SYNTHETIC: SynthSpec[] = [
   // to and the copy coalesces away. What it costs is the pin: an argument register is occupied
   // across the loop, and the allocation downstream is a different one.
   //
-  // Measured on kleod:LoadBGTilemapData:agbcc, both directions:
+  // Measured on kleod:LoadBGTilemapData:agbcc, both directions. PRICE CORRECTED: the ADDING number
+  // was first taken against a reference source that carries three register-allocation coercions
+  // (statements with no semantic content, marked `// FAKE?` there). Deleting them halves it, so
+  // both endpoints are quoted:
   //   • REMOVING the five preheader reads from asmlift's own ranked winner (20608 candidates, 0
   //     dropped, `unsigned/flip-branch/flip-join/merge-names/addr-home/expr-home/coalesce-v9-v23/
   //     initfirst/raw-globals`) takes it from 473 to 459 against `build/src/gfx.o` — 14 points of
-  //     today's residual.
-  //   • ADDING five preheader reads of the same shape to a hand-written C spelling that is 12
-  //     points from the ROM takes it to 366. The construct is cheap to carry when everything else is already wrong and a hard
-  //     blocker once it is not, which is why both numbers are quoted rather than either alone.
+  //     today's residual. The same edit against the OTHER decomp's object reads 479 to 462; that
+  //     rig scores the identical winner C 6 points higher, so the two are not interchangeable.
+  //   • ADDING five preheader reads of the same shape to the reference C: 207 to 386, i.e. +179,
+  //     with the three coercions deleted. With them in play the same edit reads 12 to 366 (+354),
+  //     which is the number this comment first recorded. +179 is the honest one — the coercions
+  //     and the materialisation contend for the same registers, so stacking them double-counts.
+  // The construct is cheap to carry when everything else is already wrong and a hard blocker once
+  // it is not, which is why both directions are quoted rather than either alone.
+  //
+  // AND THE PRICE IS NOT FOR THE UNDEFINEDNESS — controls on the same reference and rig, each
+  // keeping all five preheader materialisations and changing ONLY where their values come from:
+  //     five preheader reads of UNDEFINED locals (what this family names) .... 386  (+179)
+  //     the three local sources defined at their declarations ................ 402  (+195)
+  //     the three defined by assignment just above the copies ................ 392  (+185)
+  //     all five sourced from ordinary extra parameters ...................... 399  (+192)
+  //     all five sourced from the constant 0 ................................. 246   (+39)
+  // Every DEFINED source costs MORE. So the cost is the pin, exactly as the paragraph above says,
+  // and not the `undef`: five extra values materialised in a preheader and live across the nest,
+  // which is the same register budget `/expr-home` and `/addr-home` spend. Only the constant is
+  // cheap, because it is rematerialised and extends no live range. A lever that stops SPELLING the entry
+  // as an undefined read but still emits the copy will move these rows by nothing.
   //
   // `loopfall` is the isolate and `loopset` its control: byte-identical C except for the
   // `else { w = 0; }`. With the else there is no undefined entry and asmlift MATCHes; without it,
@@ -2192,6 +2212,184 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc'],
     ctx: 'void rereadctl(u32 k, u32 n);',
     proto: { rereadctl: { returnsVoid: true } },
+  },
+
+  // WHICH of several numeric bases gets the pointer local. The `dma_*` rows above ask whether a
+  // reused absolute address is spelled as one base local at all; this pair asks the question a
+  // function with SEVERAL of them poses, which those rows cannot: the answer is per base, and
+  // asmlift's is per function.
+  //
+  // `l3/basecse.ts` hoists a base indexed at 2+ sites into a typed pointer local, gated by
+  // BASECSE_GATES. Two of those gates — `loop` (a function-top hoist of a loop base forces a
+  // callee-saved register) and `repeated-const-offset` (a fixed offset touched twice is a scalar
+  // RMW the compiler re-materializes) — are exactly wrong for an MMIO poll, so rank.ts's
+  // `/livebase` lever re-runs the pass with both ablated, leaving only `single-use`. That lever
+  // is ALL-OR-NOTHING over bases: `hoistReusedGlobalBases` hoists every key the gate list admits,
+  // and there is no candidate for a proper subset.
+  //
+  // ATTRIBUTED BY ABLATION, not by reading. Adding one more gate to LIVEBASE_GATES that rejects a
+  // numeric base outside MMIO — per-base selectivity in its crudest form — takes this row from 11
+  // to MATCH. Re-running the WHOLE synthetic tier under it (604 rows) moves exactly one other row,
+  // and that row is the finding's other half: `sizebound` goes 16 → 20, because it reads
+  // `*(u16 *)0x03001048` in two loop bounds and hoisting THAT base is correct. So the pass is
+  // right about the spelling and wrong about which bases get it — and an address threshold is NOT
+  // the predicate to fix it with: it pays 4 points on `sizebound` for the 11 it wins here.
+  // `sizebound` is the row that referees whatever predicate a future lever proposes.
+  //
+  // WATCH THE SIGN when writing one. `dma_wait:mwcc_242_81`'s base is 0xcc006000, which the IR
+  // carries as a NEGATIVE 32-bit constant; a first cut of the probe compared the key as a signed
+  // decimal, rejected that base, and LOST a MATCH the tier already had. Reading it unsigned
+  // restores it. A per-base predicate is a place where a sign error costs a row silently.
+  //
+  // THE `/volatile` SUBSET CAP IS NOT A SECOND BLOCKER — measured, because it looks like one.
+  // `volatileSubsetCandidates` (l3/volatileptr.ts) returns `[]` outside `2 <= eligible <= 3`, and
+  // this row has four eligible locals, so no `/volatile-<name>` label exists here. Raising the cap
+  // to 8 makes eleven subset labels appear and leaves the row at 11 — every one of them still
+  // binds all four bases, and even the subsets that qualify exactly the DMA base score 11. Subset
+  // VOLATILITY on an all-or-nothing HOIST buys nothing. Do not spend a round on the cap.
+  //
+  // `mixpoll` is the isolate: one DMA register file that must be a bound `volatile` local, and
+  // three IWRAM scalars that must stay inline absolute derefs. The ROM's own C is the reference,
+  // and hoisting the three IWRAM cells is what costs — measured by hand-editing asmlift's own
+  // winner one clause at a time against the same object:
+  //     all four bound, all four volatile (asmlift's winner) .................... 11
+  //     all four bound, only the DMA base volatile .............................. 11
+  //     all four bound, none volatile .......................................... 27
+  //     ONLY the DMA base bound, volatile, the three IWRAM cells inline .......... 0  ← MATCH
+  //     only the DMA base bound, NOT volatile ................................... 21
+  // So the 11 is the hoist alone (qualifying the IWRAM cells `volatile` on top of the wrong hoist
+  // is worth 0 here), and `volatile` on the base that needs it is worth 21 — the lever pair is
+  // right about both bases and wrong about which ones. A base census over all 12 enumerated
+  // candidates: every one binds either 0 or all 4 numeric bases, and marks 0 or 4 of them
+  // `volatile`. The matching spelling is in none of them.
+  //
+  // `onepoll` is the control — byte-identical C with the three IWRAM statements deleted. One base,
+  // no selectivity question, and `/livebase/volatile` MATCHes it. So the pair brackets the gap
+  // exactly: 0 with one base, 11 with four, same lever, same poll, same loop.
+  //
+  // The loop is spelled `i = 0; do … while` rather than `for` deliberately: a `for` puts the
+  // family below's zero-trip guard into the same row, and this row is about the bases. With the
+  // `for` spelling the same shape scores 15, of which 11 is these bases and 4 is that guard
+  // (verified by composing both fixes by hand: 15 → 4 → 0).
+  //
+  // Cut from kleod:LoadBGTilemapData:agbcc. A base census over its whole 20608-candidate
+  // enumeration returns four shapes and no others: 13440 bind nothing, 1024 bind 0x03003430 alone
+  // (the default pass's own single admission), 3072 bind all five of 0x03003430 / 0x03003478 /
+  // 0x0300347A / 0x030034A0 (IWRAM) and 0x040000D4 (the DMA register file) plain, and 3072 bind
+  // those same five all `volatile`. Not one binds the DMA base alone.
+  //
+  // agbcc only. The claim is about what THIS compiler does with the two spellings, established by
+  // compiling both; the poll declines on ido7.1/gcc2.7.2kmc's branch-likely lift link exactly as
+  // `dma_wait` records, and mwcc_242_81 stays off per the `hipress` hazard policy.
+  {
+    sym: 'mixpoll',
+    src:
+      '#define gRows (*(u16 *)0x03001048)\n' +
+      '#define gCols (*(u16 *)0x03002048)\n' +
+      '#define gTiles (*(u16 *)0x03003048)\n' +
+      'void mixpoll(s32 n){ volatile s32 *dma = (volatile s32 *)0x040000d4; s32 i; i = 0;' +
+      ' do { gRows = gRows + 1; gCols = gCols + 2; gTiles = gTiles + 3;' +
+      ' dma[0] = 0x03004000; dma[1] = 0x06000000 + i; dma[2] = (u32)i >> 1 | 0x80000000;' +
+      ' while (dma[2] & 0x80000000) {} i = i + 1; } while (i < n); }',
+    features: ['value-home', 'pointer'],
+    toolchains: ['agbcc'],
+    ctx: 'void mixpoll(s32 n);',
+    proto: { mixpoll: { returnsVoid: true } },
+  },
+  {
+    sym: 'onepoll',
+    src:
+      'void onepoll(s32 n){ volatile s32 *dma = (volatile s32 *)0x040000d4; s32 i; i = 0;' +
+      ' do { dma[0] = 0x03004000; dma[1] = 0x06000000 + i; dma[2] = (u32)i >> 1 | 0x80000000;' +
+      ' while (dma[2] & 0x80000000) {} i = i + 1; } while (i < n); }',
+    features: ['value-home', 'pointer'],
+    toolchains: ['agbcc'],
+    ctx: 'void onepoll(s32 n);',
+    proto: { onepoll: { returnsVoid: true } },
+  },
+
+  // WHO OWNS THE FIRST STATEMENT OF A ZERO-TRIP GUARD'S ARM. `for (i = 0; i < n; i++)` compiles
+  // with the init ABOVE the test, so the guard compares the COUNTER against the bound; the same
+  // loop written `if (0 < n) { i = 0; do … }` compiles with the init behind the branch and the
+  // guard against the CONSTANT. Both spellings lift to the same IR — a constant has no position —
+  // so `l3/initfirst.ts` emits the init-first sibling as `/initfirst` and the differ referees.
+  // Verified by compiling the four-way pair with this agbcc (`-O2 -fhex-asm -fprologue-bugfix`):
+  //     s32 counter, `for`   :  mov r4, #0x0 / cmp r4, r5 / bge
+  //     s32 counter, guard   :                 cmp r5, #0 / ble
+  //     u32 counter, `for`   :  mov r4, #0x0 / cmp r4, r5 / bcs
+  //     u32 counter, guard   :                 cmp r5, #0 / beq
+  // — the operand pair always changes, and on an unsigned bound the branch OPCODE changes too
+  // (fold-const rewrites the unsigned `> 0` to `!= 0`). Two instructions and a condition code.
+  //
+  // The re-spelling has a precondition the rest of the pipeline can take away from it: the guarded
+  // arm's FIRST statement must be the init `v = X`, and the guard's other side must be X ITSELF
+  // (`exprEquals(cond.l, init.value)`). `unsguard` is the row where a sibling lever takes it away.
+  // Its counter is unsigned, so the match needs `/uns-cmp` (structure.ts unsignedCompareSpelling)
+  // to spell the loop compares unsigned — and that axis renders the guard's constant side as
+  // `(u32)0`, which is no longer the init's `0`. Across all 30 enumerated candidates, NOT ONE
+  // carries `/uns-cmp` and `/initfirst` together; the two spellings the match needs are in
+  // different candidates:
+  //     unsigned/livebase/volatile/initfirst  (asmlift's winner) ....  2
+  //     unsigned/uns-cmp/livebase/volatile ..........................  5
+  //     the same candidate with the guard re-spelled by hand .........  0  ← MATCH
+  // Attributed by ABLATION, not by reading: teaching initfirst's side match to look through a cast
+  // makes `unsigned/uns-cmp/livebase/volatile/initfirst` appear (36 candidates, up from 30) and it
+  // scores 0. The blocker is the cast, not a hoist — `/uns-cmp` moves no statement. Re-running the
+  // WHOLE synthetic tier under that one-line ablation moves EXACTLY this row and no other (604
+  // rows, 1 moved), so it is the row that gates the change and nothing else in the corpus is
+  // holding it up — including `sizebound`, which carries both axes and does not move.
+  //
+  // `signguard` is the control, and it differs by ONE token: `s32 i` for `u32 i`. Nothing else in
+  // the C changes, the halving keeps its `(u32)` cast so it stays an `lsr` on both, and asmlift
+  // MATCHes it with `/initfirst` in the label. So the pair brackets the gap exactly: the guard
+  // re-spelling works, and it is the unsignedness that removes it.
+  //
+  // A SECOND blocker sits at the same precondition and has NO row: `/expr-home` can land its hoist
+  // at the head of the guarded arm (`if (0 < n) { v0 = 128 << 24; v1 = 0; do …`), and then `then[0]`
+  // is not the init. It reproduces on THIS row — of its 30 candidates, 12 carry `/expr-home` and
+  // not one of those carries `/initfirst` — but they all score 21 against the winner's 2, and
+  // hand-composing the two spellings on that branch recovers a single point (31 → 30 on a hand
+  // probe of the `/expr-home` shape). So no row demands it and none was written. What would earn
+  // one: a target whose ranked winner carries `/expr-home` with the hoist INSIDE the guard.
+  // (`sizebound:agbcc` carries both `/expr-home` and `/initfirst`, because there the homed value
+  // is parameter-derived and agbcc materialises it before the guard — that composition is not the
+  // broken one.)
+  //
+  // Cut from kleod:LoadBGTilemapData:agbcc, whose L1 guard is `movs r3, #0 / … / cmp r3, r2 / bge`
+  // in the ROM and `if (0 < *(u16 *)50345082)` in the ranked winner.
+  //
+  // agbcc only, as the poll rows above: `ucmp` already carries the compare-polarity axis on all
+  // four toolchains, and what this pair adds is its interaction with a guarded do-while that the
+  // GBA DMA poll is what produces here.
+  //
+  // m2c compiles neither, on the identical `ctx` asmlift receives, and for the reason every
+  // raw-address row here records rather than for anything in this family: it types the address
+  // constant as `void *` and reads members off it (`(void *)0x040000D4->unk0`). It does reach the
+  // construct — on `unsguard` it emits `var_r1 = 0;` ABOVE the guard and then tests
+  // `if (temp_r2 > 0U)`, i.e. the init placement right and the compared operand pair wrong.
+  {
+    sym: 'unsguard',
+    src:
+      'void unsguard(s32 t){ volatile s32 *dma = (volatile s32 *)0x040000d4; u32 i;' +
+      ' for (i = 0; i < 16 << t; i++){' +
+      ' dma[0] = 0x03002000; dma[1] = 0x06000000 + i; dma[2] = (u32)i >> 1 | 0x80000000;' +
+      ' while (dma[2] & 0x80000000) {} } }',
+    features: ['guard-init', 'unsigned'],
+    toolchains: ['agbcc'],
+    ctx: 'void unsguard(s32 t);',
+    proto: { unsguard: { returnsVoid: true } },
+  },
+  {
+    sym: 'signguard',
+    src:
+      'void signguard(s32 t){ volatile s32 *dma = (volatile s32 *)0x040000d4; s32 i;' +
+      ' for (i = 0; i < 16 << t; i++){' +
+      ' dma[0] = 0x03002000; dma[1] = 0x06000000 + i; dma[2] = (u32)i >> 1 | 0x80000000;' +
+      ' while (dma[2] & 0x80000000) {} } }',
+    features: ['guard-init'],
+    toolchains: ['agbcc'],
+    ctx: 'void signguard(s32 t);',
+    proto: { signguard: { returnsVoid: true } },
   },
 ];
 

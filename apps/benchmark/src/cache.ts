@@ -164,6 +164,17 @@ export function cachedM2cResult(inputs: M2cKeyInputs, compute: () => DecompilerR
     return JSON.parse(readFileSync(path, 'utf8')) as DecompilerResult;
   }
   const result = compute();
-  put(path, JSON.stringify(result));
+  // NEVER cache an EMPTY failure. `failed` covers three things (m2c.ts runM2c): a nonzero exit, a
+  // failure report m2c itself wrote, and NO OUTPUT AT ALL. The first two are m2c's own behaviour
+  // and are worth caching — the third never is. m2c always says something when it gives up, so an
+  // empty stdout AND stderr means the process did not run: a spawn that lost the race for a pid or
+  // a file descriptor under a parallel shard fan, which is exactly when it happens. Cached, one
+  // such loss is permanent — every later run reads the poisoned entry in half a second and the
+  // regression gate reports a LOST row that no code change caused. Observed once: a full-run shard
+  // wrote `synthetic:astore:gcc2.7.2kmc [m2c] match → failed, "empty output"` while running m2c on
+  // the same inputs by hand returned the base's exact output three times over.
+  if (!(result.outcome === 'failed' && result.source.trim() === '')) {
+    put(path, JSON.stringify(result));
+  }
   return result;
 }

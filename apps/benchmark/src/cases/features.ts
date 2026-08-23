@@ -67,6 +67,12 @@ export const JUDGEMENT_FLOOR: Record<string, (body: string, asm: string, whole: 
   // the diff turns on stays a human call.
   'stack-addr': (b) => /(?:^|[^\w)\]&])&(?!&)\s*[A-Za-z_]/.test(b),
 
+  // The necessary condition is a counted loop whose own init clause zeroes the counter —
+  // `for (i = 0; …)`. That is the only spelling whose zero-trip guard the compiler can emit
+  // init-first, so a row claiming the tag must contain one. WHICH of the two guard spellings the
+  // original used, and whether that is what the diff turns on, is the judgement.
+  'guard-init': (b) => /\bfor\s*\(\s*\w+\s*=\s*0\s*;/.test(b),
+
   // A merged value chain needs a branching construct AND more than one local for the arms to
   // decide. COUNTED ACROSS DECLARATION STATEMENTS, not within one: `void *a; void *b;` and
   // `void *a, *b;` declare the same two locals, and an earlier version of this rule required the
