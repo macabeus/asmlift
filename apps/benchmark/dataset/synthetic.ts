@@ -2067,7 +2067,11 @@ export const SYNTHETIC: SynthSpec[] = [
   // `cmp #1`/`bcc`, the SUBTREE BOUND rather than the value, so recovering it needs a relational
   // dispatch edge admitting exactly one value to route a case (structure/switch-recover.ts). Read
   // as navigation instead, that arm is a second default candidate, the whole tree declines to
-  // if-nesting, and both the compare and the arm layout change with it. `armdef` MATCHes on that.
+  // if-nesting, and both the compare and the arm layout change with it. `armdef` MATCHes on that,
+  // and is also what pins the reading's three refusals: the BRANCH of the test, never its
+  // fall-through; never the test that OPENS the dispatch; and only on a compiler that declared the
+  // spelling (`switchAllowsBoundCase` — agbcc alone). Each of the three is a shape an
+  // `if (x < 1) … else if …` chain does produce and `emit_case_nodes` does not.
   // What the pair adds over `loopfall` is that the undef survives multi-arm merging: `armdef`
   // carries no preheader read and `armfall` carries one, `v3 = a2;` — the argument-register
   // fabrication the rules above cannot reach. It costs `armfall` nothing at this rung, for the
