@@ -273,14 +273,17 @@ followed the second inhabitant, never preceded it.
   addressing/idiom shape; prefer a **new op** when downstream stages need to reason about the
   recovered concept as a first-class value.
 
-### A case where the bar was met on capability but not on the differ: `undef`
+### A case where the two halves of the bar were cleared a round apart: `undef`
 
-`undef` (an uninitialised local — storage whose only writer is this function's own stores, read on
-a path where none of them ran) is the only op that appears in emitted C without a byte match behind
-it, so it is worth being explicit about which half of the bar it cleared. (`opaque` also has none
-and never will, but it is the loud-gap escape hatch — it exists to stop a function compiling, not
-to be recovered code.) "Only writer" rather than "owns": the two
-came apart in review, and the escape clause below is the difference.
+`undef` (an uninitialised local, read on a path where nothing this function did wrote it) is the
+only op that appears in emitted C without a byte match behind it, so it is worth being explicit
+about how each half of the bar was cleared. (`opaque` also has none and never will, but it is the
+loud-gap escape hatch — it exists to stop a function compiling, not to be recovered code.) "Nobody
+wrote it" is established differently per coordinate, and neither is "this function owns the
+storage": a FRAME SLOT needs its function to be the SOLE WRITER — ownership is not enough, because
+an escaped address lets a callee write a frame the function owns, and the two came apart in review —
+while a REGISTER needs no proof at all, only ENTITLEMENT: a caller cannot have handed a value over
+in one the ABI does not pass arguments in.
 
 It clears "cannot be expressed in the current one", though narrowly. asmlift's builder had fused two
 questions — "is there a reaching definition?" and "is this a parameter?" — so a def-less read had
@@ -299,20 +302,49 @@ plain stack local.
 So `undef` is not a new idea; it is asmlift catching up to the one its own citation contains. What
 was genuinely missing was any way to SAY it, and that is what the opcode adds.
 
-It does **not** clear "the differ can prove the result matches". Measured across the whole corpus,
-**exactly one row moved** — `synthetic:uninit_spill:agbcc`, `declined → nonmatch`. The row in that
-family that already matched is the more instructive one: its fabricated parameter happens to land in
-the register the local occupied anyway, so it matches with an arity the source never had. That
-register-half fabrication is untouched here and is still silent, which is the honest shape of the
-remaining distance — a second, separate capability (the same shape in a _register_ rather than a
-slot) that cannot be classified without either prototype knowledge or prologue-save elision.
+It cleared "the differ can prove the result matches" a round LATER, and the distance between the two
+is the part worth keeping. On the day the opcode landed, **exactly one row moved** across the whole
+corpus — `synthetic:uninit_spill:agbcc`, `declined → nonmatch` — and this section concluded that half
+the bar was unmet. What that measured was one coordinate: a frame SLOT. The same question in the
+other one — the local the compiler put in a REGISTER — was written off here as a separate capability
+"that cannot be classified without either prototype knowledge or prologue-save elision". It needs
+neither. A caller cannot hand a value over in a register the ABI does not pass arguments in, so a
+def-less read of one is an uninitialised local by ENTITLEMENT rather than by proof that nobody wrote
+it — which is exactly the mechanism behind the `unaff_<reg>` this section already cited, and it is
+one list per target (`target.nonArgRegs`, read by `frontend/ssa.ts`'s `LiveInModel.uninitRegs`).
 
-The envelope is narrow, and worth stating in one sentence: **on Thumb, a word-wide slot strictly
-below the measured local area, which some store reaches but not on every path, in a function where
-no frame address escapes to something that could write the frame.** The last clause is a second
-function-wide condition, established after the fact by the frame-object audit rather than at the
-mint site — an escaped address usually means a callee may write any frame offset, so "no store of
-ours reaches it" stops implying "nobody wrote it". The qualifier on it is earned below.
+With both coordinates spelled — and with the structurer no longer emitting an edge copy for an
+argument that carries nothing — the differ agrees. Five rows move, `synthetic:loopfall:agbcc`
+MATCHes (11 → 0), and the corpus goes 439 → 440 with nothing lost; on the ranked real row
+`LoadBGTilemapData` the winner goes **473 → 419**. The row that used to match with an arity the
+source never had — its fabricated parameter landing in the register the local occupied anyway — no
+longer needs the coincidence.
+
+The lesson is not "measure again later". It is that the first measurement was taken against
+asmlift's own output, where a fabricated parameter is cheap because everything downstream of it is
+already wrong. What moved the number was pricing the same construct against a near-perfect
+reference decomp of the same game, where it costs an order of magnitude more. A differ verdict is
+only as strong as the baseline it is measured from.
+
+The envelope is narrow, and has one sentence per coordinate. In the FRAME: **on Thumb, a word-wide
+slot strictly below the measured local area, which some store reaches but not on every path, in a
+function where no frame address escapes to something that could write the frame.** The last clause
+is a second function-wide condition, established after the fact by the frame-object audit rather
+than at the mint site — an escaped address usually means a callee may write any frame offset, so "no
+store of ours reaches it" stops implying "nobody wrote it". The qualifier on it is earned below. In
+the REGISTER FILE: **any key the target lists as one its ABI does not pass arguments in, read on a
+path that never wrote it.** No measurement and no second condition — a register has no address, so
+nothing outside the function can name it and there is nothing to retract.
+
+KNOWN GAP, register half: the rule is the target's ABI, and a function that does not follow that ABI
+is outside the model. Hand-written assembly with a private convention (klonoa's MP2K engine) and a
+mid-function fragment reached by agbcc's `bl`-as-long-branch both really do receive a value in `r4`,
+and both now render it as an uninitialised local. What changed there is not soundness — the
+fabricated trailing parameter they used to get was equally silent — but plausibility: a reader
+rejects a ten-parameter signature on sight and reads `s32 uninit_r8;` as a deliberate recovery.
+Positive evidence separating the two populations exists and nothing consults it yet: a local the
+compiler homed in a callee-saved register is WRITTEN somewhere in the function and SAVED in the
+prologue, so "read, never written, never saved" is a function the ABI model does not describe.
 
 The reusable lesson is where the decision lives, not the op, and it is easier to state as the two
 arrangements that do not work.
@@ -335,8 +367,10 @@ comment. _A postcondition enforced by convention is not enforced_: a `push` afte
 slides the window off the reserved area while the verdict goes on saying `'undef'`.
 
 **What it is now: the frontend supplies the PARTITION, the shared pass applies the rule.**
-`FrameModel` carries byte ranges — `ownedLocals`, `callerParams` — and one generic rule classifies
-an offset against them, refusing anything that falls in neither. The dependency became an argument
+`LiveInModel` carries byte ranges — `ownedLocals`, `callerParams` — and one generic rule classifies
+an offset against them, refusing anything that falls in neither. The register coordinate joined it
+as a second declarative member (`uninitRegs`, a LIST rather than a range, because the complement of
+the argument registers also holds the frontends' virtual keys) under the same generic rule. The dependency became an argument
 instead of a promise: Thumb passes `{ from: 0, to: localArea }`, so when the prologue walk cannot
 measure the frame that range collapses to empty and every slot refuses on its own. MIPS claims no
 partition and therefore refuses, and the shape of its eventual fix is now a pair of numbers rather
