@@ -2255,8 +2255,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // ALL-OR-NOTHING over bases — `hoistReusedGlobalBases` hoisted every key the gate list admits,
   // with no candidate for a proper subset. A second admission, LIVEBASE_BLOCK_GATES, adds the
   // `single-cell` gate — a base every access of which is ONE fixed offset stays inline — and rank
-  // emits that narrower hoist plus its `/volatile` sibling as `/livebase-block`, so this row
-  // MATCHES on `signed/livebase-block/volatile` and guards the gate.
+  // carries both in one roster (LIVEBASE_ADMISSIONS), fanning every `/livebase` product over each,
+  // so this row MATCHES on `signed/livebase-block/volatile` and guards the gate.
   //
   // ATTRIBUTED BY ABLATION, not by reading. Adding one more gate to LIVEBASE_GATES that rejects a
   // numeric base outside MMIO — per-base selectivity in its crudest form — takes this row from 11
@@ -2265,9 +2265,12 @@ export const SYNTHETIC: SynthSpec[] = [
   // `*(u16 *)0x03001048` in two loop bounds and hoisting THAT base is correct. So the pass is
   // right about the spelling and wrong about which bases get it — and an address threshold is NOT
   // the predicate to fix it with: it pays 4 points on `sizebound` for the 11 it wins here.
-  // `sizebound` is the row that referees whatever predicate a future lever proposes; under the
-  // shipped gate it holds at 16, because both of its bases are correct to hoist and the
-  // hoist-everything form is still plain `/livebase`.
+  // `sizebound` is the row that referees whatever predicate a future lever proposes, and the
+  // shipped `single-cell` gate FAILS it as a rule, exactly as the address threshold does: that
+  // base is reached at one fixed offset only, so `-block` leaves it inline and its best spelling
+  // scores 36 where the winner that binds it scores 16. The row holds at 16 because the gate never
+  // SUBTRACTS a candidate — `/livebase` rides beside it and wins — and that coexistence is the
+  // whole reason a per-base predicate is allowed to be wrong. One that PRUNES has to be right.
   //
   // WATCH THE SIGN when writing one. `dma_wait:mwcc_242_81`'s base is 0xcc006000, which the IR
   // carries as a NEGATIVE 32-bit constant; a first cut of the probe compared the key as a signed
@@ -2292,13 +2295,18 @@ export const SYNTHETIC: SynthSpec[] = [
   //     only the DMA base bound, NOT volatile ................................... 21
   // So the 11 is the hoist alone (qualifying the IWRAM cells `volatile` on top of the wrong hoist
   // is worth 0 here), and `volatile` on the base that needs it is worth 21 — the lever pair is
-  // right about both bases and wrong about which ones. A base census over the 12 candidates
-  // enumeration once produced: every one bound either 0 or all 4 numeric bases, and marked 0 or 4
-  // of them `volatile`. The gate adds 8 more (12 → 20), two of which bind the DMA base alone; the
-  // scored `/livebase-block` reads 21, the number hand-editing that clause produced. The MIRROR
-  // admission — bind the scalar cells, leave the register file inline — is deliberately NOT
-  // enumerated: measured with both in the list, it doubles what the axis costs and wins 0 of the
-  // 856 rows. It is one more entry in LIVEBASE_BLOCK_GATES when a row asks for it.
+  // right about both bases and wrong about which ones. A base census over the enumeration without
+  // the gate: all 12 candidates bound either 0 or all 4 numeric bases, and marked 0 or 4 of them
+  // `volatile`. The gate adds 8 (12 → 20), and all eight bind the DMA base alone — one block hoist
+  // crossed over {unsigned, signed} × {plain, /expr-home} × {plain, /volatile}; the scored
+  // `/livebase-block` reads 21, the number hand-editing that clause produced.
+  //
+  // The MIRROR admission — bind the scalar cells, leave the register file inline — is deliberately
+  // NOT on rank.ts's roster, and what it would cost is measured rather than guessed: one gate table
+  // with the complementary predicate plus one row there (a gate can only reject MORE, so it is
+  // never an extra entry in LIVEBASE_BLOCK_GATES), and with it in the list the corpus enumerates
+  // 8141 candidates against 7405 while not one of the 856 rows changes outcome, score or winning
+  // label. It goes on the roster when a row asks for it.
   //
   // `onepoll` is the control — byte-identical C with the three IWRAM statements deleted. One base,
   // no selectivity question, and `/livebase/volatile` MATCHes it. So the pair brackets the gap
