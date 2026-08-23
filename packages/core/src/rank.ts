@@ -29,6 +29,7 @@ import {
 import { armDisjointCandidates, coalesceCandidates } from './l3/coalesce';
 import type { Gate } from './l3/gates';
 import { initFirstGuards } from './l3/initfirst';
+import { inlineConstBases } from './l3/inlinebase';
 import { mulFirstSums } from './l3/mulfirst';
 import { nearBaseClusters } from './l3/nearbase';
 import { parkParamsFirst } from './l3/parkfirst';
@@ -734,6 +735,22 @@ export function enumerateCandidates(
           // decides, so it rides the base spelling like its `/volatile` sibling rather than doubling
           // every enumeration, and its frame-flag gate costs nothing on a function with no slot.
           respell('/vol-slot', () => volatileValueLocals(sfn));
+          // `/inlinebase` — spell a CONSTANT-address pointer local at its uses instead
+          // (l3/inlinebase.ts). The local is structure/analysis.ts's value home for a `const` the
+          // asm kept in a callee-saved register across a call; the register is real, but a constant
+          // re-spelled per use is CSEd back into that same one, so which the source had is not
+          // derivable. Its own bare-`const`-initializer gate keeps it off l3/basecse.ts's reuse
+          // hoists, whose placement levers already answer that question.
+          respell('/inlinebase', () => inlineConstBases(sfn));
+          // The `/inlinebase` × `/vol-slot` PAIRING — row-demanded, and the joint spelling is
+          // reachable from neither lever alone: on pokeemerald:EReader_Reset the primary scores 11,
+          // `/inlinebase` alone 11 and `/vol-slot` alone 2, and the pair 0. The two touch disjoint
+          // locals (one pointer-typed, one a scalar frame slot), so applying them in either order
+          // gives the same spelling.
+          respell('/inlinebase/vol-slot', () => {
+            const r = inlineConstBases(sfn);
+            return r ? volatileValueLocals(r) : null;
+          });
           // `/scopebase` — name a reused global base at the INNERMOST scope holding its uses
           // (l3/scopebase.ts). Distinct from basecse's function-top hoist, which the primary already
           // carries: this one fires exactly where that placement would extend a live range the
