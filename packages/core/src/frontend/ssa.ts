@@ -85,35 +85,21 @@ export interface LiveInModel {
    *  `[from, to)`. O32's register-parameter home area belongs to NEITHER range: caller-owned, but
    *  not an argument. */
   callerParams?: { from: number; to: number };
-  /** Registers the ABI does not pass arguments in ⇒ a def-less read is an uninitialised local the
-   *  compiler put in a register (`target.nonArgRegs`). A caller cannot hand a value over in one, so
-   *  a read before any write is not an argument however early it happens.
+  /** Registers a def-less read of which is an uninitialised local the compiler put in a register.
+   *  TWO facts, and the frontend owes both: the ABI passes no argument there (`target.nonArgRegs`,
+   *  so no caller could have handed a value over, however early the read happens) AND this function
+   *  saved the register (so it is one the compiler was free to home a local in). The ABI half alone
+   *  describes the CALLER, and asm that follows no ABI — hand-written, or a mid-function fragment,
+   *  which klonoa's `bl`-as-a-long-branch splits produce for real — is genuinely handed live values
+   *  in registers it never saved. Passing the ABI list unfiltered cost the MP2K engine's
+   *  `ChnVolSetAsm` its two-pointer signature and left it storing through `uninit_r4`, silently.
+   *
+   *  The save is a MEASUREMENT, like the frame's, and belongs to whoever can make it — Thumb reads
+   *  the leading push run (`savedRegs`); a frontend that cannot measure it passes nothing here and
+   *  keeps the parameter it would have got anyway.
    *
    *  The frame's sole-writer obligation has no counterpart here and needs none: a register has no
    *  address, so nothing outside this function can name it and there is no escape to retract.
-   *
-   *  KNOWN GAP — THE PREMISE THIS DOES NOT TEST, AND ITS ONE MEASURED INHABITANT. "The compiler put
-   *  a local in it" also says the function SAVES the register or WRITES it; a function that does
-   *  neither — hand-written asm with a private convention, or a mid-function fragment, which
-   *  klonoa's `bl`-as-a-long-branch splits produce for real — is genuinely handed a value there, and
-   *  this classifies it as garbage. Neither fact is consulted at the mint site, and neither can be:
-   *  a write comes later in the same lift, and the save is elided before this module ever sees it.
-   *
-   *  Measured, not assumed. Across 2791 Thumb functions (klonoa + sa3 + pokeemerald + af), exactly
-   *  9 (function, register) pairs RENDER a register undef, and only one function is on the wrong
-   *  side of the premise — klonoa's `ChnVolSetAsm`, hand-written MP2K asm with NO prologue at all,
-   *  which takes two pointers in r4/r5 and comes out declaring `u8 *uninit_r4; u8 *uninit_r5;`. The
-   *  other seven are correct, one of them confirmed by a second decomp of the same game declaring
-   *  that local uninitialised in its C (`CheckTileCollisionVertical`, r4).
-   *
-   *  The discriminator is SAVED-OR-WRITTEN, and it needs both halves: probing the corpus, r5 in
-   *  sa3's `sub_809630C` and r6 in `sub_8024F84` are correct uninitialised locals that the function
-   *  never writes (push, read, pop), so "written" alone refuses them; while `ChnVolSetAsm`'s r4/r5
-   *  are in no push list, so "saved" is what separates it. Both halves are cheap on their own — one
-   *  set fed by `writeVar`, one scan of the push/pop lists — and the reason this is a gap rather
-   *  than a check is that the two are only complete at `finish()`, where an undef has already been
-   *  minted and consumed, so the refusal would be a DECLINE for a function that lifts today. That is
-   *  a default change and wants a full bench plus a ranked run to price, not a remediation commit.
    *
    *  LISTED, not derived as "everything outside argRegs", because the complement contains the
    *  VIRTUAL keys too (`@sarg<k>` — an incoming stack argument, which really is a parameter), and a

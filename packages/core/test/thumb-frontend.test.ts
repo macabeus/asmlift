@@ -403,6 +403,34 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     );
   });
 
+  // The other side of that fixture's premise, and the reason it had to be stated: the rule is
+  // "the compiler homed a local here", which is only true of a register the function SAVED.
+  test('a register the prologue never saved is not one the compiler homed a local in', () => {
+    // The MP2K engine's hand-written `ChnVolSetAsm` — vendored in klonoa, sa3 and pokeemerald
+    // alike — receives two pointers in r4/r5 by a private convention and has no prologue at all.
+    // Classified by the ABI alone it came out `s32 ChnVolSetAsm(void)` storing through
+    // `uninit_r4`, with no diagnostic: a correct two-pointer signature traded for C that reads
+    // whatever the registers happen to hold.
+    const noSave = 'f:\n\tldrb\tr0, [r4, #0x12]\n\tstrb\tr0, [r5, #2]\n\tbx\tlr\n';
+    expect(decompile('f', noSave, ARMV4T_AGBCC, { onGap: 'strict' }).source).toBe(
+      's32 f(u8 * a0, u8 * a1) {\n    s32 v0;\n    v0 = a0[18];\n    a1[2] = v0;\n    return v0;\n}\n',
+    );
+    // PER REGISTER, not per function: saving r5 says nothing about r4, and a mid-function fragment
+    // reached by agbcc's `bl`-as-a-long-branch is handed live values in registers it never saved
+    // while saving the ones it uses itself.
+    const half = 'f:\n\tpush\t{r5, lr}\n\tadd\tr5, r4, #1\n\tldr\tr0, [sp, #0x8]\n\tadd\tr0, r0, r5\n\tbx\tlr\n';
+    expect(decompile('f', half, ARMV4T_AGBCC).source).toBe(
+      's32 f(s32 a0, s32 a1, s32 a2, s32 a3, s32 a4, s32 a5) {\n    return a4 + (a5 + 1);\n}\n',
+    );
+    // r8-sl cannot be pushed directly, so agbcc saves them as `mov rLow, rHi; push {rLow}` — the
+    // shape every high-register inhabitant in the corpus goes through. Read literally, the save set
+    // would hold only the low register and the four of them would lose their local. (The `hi`
+    // fixture above is the positive half; this is what happens without the mov.)
+    const movless =
+      'f:\n\tpush\t{r4, r5, r6, r7, lr}\n\tpush\t{r7}\n\tldr\tr0, [sp, #0x28]\n\tmov\tr1, r8\n\tadd\tr0, r0, r1\n\tbx\tlr\n';
+    expect(decompile('f', movless, ARMV4T_AGBCC).source).toContain('s32 a9');
+  });
+
   // A guessed arity reads the argument REGISTERS, so it must respect what a call does to them.
   // r0..r3 are caller-saved: a value the call sits between cannot be an argument the caller set up,
   // and counting it invents arguments — which C89's implicit declarations accept silently.

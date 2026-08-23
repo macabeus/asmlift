@@ -35,8 +35,9 @@ export interface TargetDescription {
   compiler: string; // 'agbcc' / 'ido' / 'gcc' / 'mwcc'
   argRegs: string[];
   returnReg: string;
-  /** Registers this ABI does NOT pass arguments in ⇒ a def-less live-in read of one is an
-   *  uninitialised local, not an argument. The rule and what the list has to cover are in
+  /** Registers this ABI does NOT pass arguments in — half of what makes a def-less live-in read an
+   *  uninitialised local rather than an argument. The other half is a measurement the FRONTEND
+   *  owes (did this function save the register), and the rule that combines them is in
    *  frontend/ssa.ts (LiveInModel.uninitRegs). ABSENT ⇒ no register partition is claimed, which is
    *  what MIPS and PPC take today.
    *

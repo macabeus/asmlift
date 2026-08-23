@@ -241,6 +241,12 @@ const immEq = (op: string | undefined, want: number): boolean =>
 // depth. Unreachable from real assembly; the guarantee should not depend on that.
 const REG_NUM: Record<string, number> = Object.assign(Object.create(null), { sp: 13, lr: 14, pc: 15 });
 
+// Registers Thumb-1's `push` cannot name, in every spelling this ISA's asm uses for them. Saving
+// one takes agbcc's `mov rLow, rHi; push {rLow}`, which is why the prologue's save set has to read
+// the `mov` as well as the list (see `savedRegs`). Spellings, not numbers: nothing here normalises
+// a register name, so `sl` and `r10` are separate keys everywhere the frontend uses one.
+const HIGH_REGS: ReadonlySet<string> = new Set(['r8', 'r9', 'r10', 'r11', 'r12', 'sb', 'sl', 'fp', 'ip']);
+
 // Thumb-1 data-processing mnemonics that write the condition flags when their destination is a LOW
 // register — which is all of them on this ISA, `s`-suffix or not (the assembler picks the encoding).
 // Used to invalidate a pending compare: see the decode loop. `cmp`/`cmn`/`tst` are absent on purpose
@@ -1378,12 +1384,18 @@ export function lift(
   // function owns: an incoming stack argument is keyed `@sarg<k>` rather than `sp@<off>` precisely
   // because it sits at or above this frame, so `callerParams` is empty. `localArea` is 0 whenever
   // the prologue walk cannot measure the frame, and the empty range then refuses every slot —
-  // `slotOff` applies the same bound when minting keys, so this is the independent check. The
-  // register half is the calling convention's, taken straight off the target: it covers the local
-  // agbcc homes in r4-r7, or shuffles up into r8-sl, and reads on a path that never wrote it.
+  // `slotOff` applies the same bound when minting keys, so this is the independent check.
+  //
+  // The register half needs both of its facts, and they come from different places. The target says
+  // which registers no caller can hand a value over in; `savedRegs` says which ones THIS function
+  // saved, and so could have homed a local in. A register in only the first is one the ABI does not
+  // describe — hand-written asm with a private convention, or a mid-function fragment — and it keeps
+  // the treatment a target claiming no partition gets.
   const ssa = makeSsaBuilder(name, asmBlocks.length, preds, () => ({
     ownedLocals: { from: 0, to: localArea },
-    ...(target.nonArgRegs ? { uninitRegs: target.nonArgRegs, argRegs: target.argRegs } : {}),
+    ...(target.nonArgRegs
+      ? { uninitRegs: target.nonArgRegs.filter((r) => savedRegs.has(r)), argRegs: target.argRegs }
+      : {}),
   }));
   const { fn, irBlocks, readVar, writeVar, paramReg } = ssa;
 
@@ -2080,6 +2092,54 @@ export function lift(
       }
     }
     return Math.max(0, reserved);
+  })();
+
+  // WHAT THE PROLOGUE SAVED — the second half of the register partition (frontend/ssa.ts,
+  // LiveInModel.uninitRegs), in operand spellings. "The ABI does not pass arguments here" is a fact
+  // about the CALLER and cannot on its own make a def-less read an uninitialised local; what does is
+  // that the compiler homed a local in the register, which it may only do after saving it. Asm that
+  // saves nothing follows no such convention, and some of it really is handed live values there:
+  // the MP2K engine's hand-written `ChnVolSetAsm`, vendored in klonoa, sa3 and pokeemerald alike,
+  // takes two pointers in r4/r5 and has no prologue at all — classified by the ABI alone it lost its
+  // signature and stored through reads of registers nothing ever wrote.
+  //
+  // PER REGISTER, because saving r5 says nothing about r4 — a mid-function fragment reached by
+  // agbcc's `bl`-as-a-long-branch saves what it uses and is handed the rest.
+  //
+  // The prologue is the LEADING run of saves and reservations, so a `push` in the body cannot join
+  // the set. `HIGH_REGS` have no `push` encoding, so agbcc saves them as `mov rLow, rHi; push
+  // {rLow}` and the source of such a `mov` joins the set when its low register is pushed — every
+  // high-register inhabitant in the corpus goes through that idiom.
+  const savedRegs = ((): ReadonlySet<string> => {
+    const saved = new Set<string>();
+    const carries = new Map<string, string>(); // low register ← the high one moved into it
+    for (const x of asmBlocks[0].instrs) {
+      if (x.mnemonic === 'push') {
+        const list = definiteRegList(
+          x.ops
+            .join(',')
+            .replace(/[{}]/g, '')
+            .split(',')
+            .map((r) => r.trim())
+            .filter(Boolean),
+        );
+        if (list === null) {
+          break; // a list this cannot read is a save set this cannot vouch for
+        }
+        for (const r of list) {
+          saved.add(r);
+          const hi = carries.get(r);
+          if (hi !== undefined) {
+            saved.add(hi);
+          }
+        }
+      } else if (/^movs?$/.test(x.mnemonic) && HIGH_REGS.has(x.ops[1] ?? '') && !HIGH_REGS.has(x.ops[0] ?? '')) {
+        carries.set(x.ops[0], x.ops[1]);
+      } else if (spAdjust(x) === null) {
+        break;
+      }
+    }
+    return saved;
   })();
 
   // …AND THE FRAME IS THAT OBJECT. `frameBasePassedToCallee` is a fact about a register; this is
