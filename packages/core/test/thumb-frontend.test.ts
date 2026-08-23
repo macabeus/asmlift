@@ -428,6 +428,17 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     expect(decompile('f', movless, ARMV4T_AGBCC).source).toContain('s32 a9');
   });
 
+  test('a register the ABI never asked anyone to preserve needs no save to hold a local', () => {
+    // AAPCS leaves r12 (`ip`) to the caller, so agbcc homes a local there with no prologue at all —
+    // `dma_fill_uninit` compiles to exactly this, `mov ip, rX` in some switch arms and a read past
+    // one that writes nothing. Demanding a save here would hand that local back to the signature as
+    // a fabricated parameter, which is what the rule was written to stop.
+    const scratch = 'f:\n\tcmp\tr0, #0x0\n\tbeq\t.L1\n\tmov\tip, r1\n.L1:\n\tmov\tr0, ip\n\tbx\tlr\n';
+    expect(decompile('f', scratch, ARMV4T_AGBCC, { onGap: 'strict' }).source).toBe(
+      's32 f(s32 a0, s32 a1) {\n    s32 uninit_ip;\n    if (a0 == 0) a1 = uninit_ip;\n    return a1;\n}\n',
+    );
+  });
+
   // A guessed arity reads the argument REGISTERS, so it must respect what a call does to them.
   // r0..r3 are caller-saved: a value the call sits between cannot be an argument the caller set up,
   // and counting it invents arguments — which C89's implicit declarations accept silently.

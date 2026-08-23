@@ -1379,6 +1379,16 @@ export function lift(
     return live;
   })();
 
+  // A `scratchRegs` entry outside `nonArgRegs` is inert, and inert is how a partition rots: the
+  // list would go on reading as if it exempted something. Refused as a target bug, like the
+  // argRegs/uninitRegs contradiction, rather than declined as a property of the input.
+  const scratchRegs: ReadonlySet<string> = new Set(target.scratchRegs ?? []);
+  for (const r of scratchRegs) {
+    if (!(target.nonArgRegs ?? []).includes(r)) {
+      throw new Error(`target '${target.id}': scratch register ${r} is not among the non-argument registers`);
+    }
+  }
+
   // --- ISA-neutral SSA construction (shared Braun builder) ---
   // THE LIVE-IN PARTITION (frontend/ssa.ts, LiveInModel). `[0, localArea)` is the whole of what this
   // function owns: an incoming stack argument is keyed `@sarg<k>` rather than `sp@<off>` precisely
@@ -1390,11 +1400,16 @@ export function lift(
   // which registers no caller can hand a value over in; `savedRegs` says which ones THIS function
   // saved, and so could have homed a local in. A register in only the first is one the ABI does not
   // describe — hand-written asm with a private convention, or a mid-function fragment — and it keeps
-  // the treatment a target claiming no partition gets.
+  // the treatment a target claiming no partition gets. The save is asked only of the registers the
+  // ABI requires preserving: `target.scratchRegs` need none, so demanding one there would refuse a
+  // local the compiler was entitled to put in place with no prologue at all.
   const ssa = makeSsaBuilder(name, asmBlocks.length, preds, () => ({
     ownedLocals: { from: 0, to: localArea },
     ...(target.nonArgRegs
-      ? { uninitRegs: target.nonArgRegs.filter((r) => savedRegs.has(r)), argRegs: target.argRegs }
+      ? {
+          uninitRegs: target.nonArgRegs.filter((r) => scratchRegs.has(r) || savedRegs.has(r)),
+          argRegs: target.argRegs,
+        }
       : {}),
   }));
   const { fn, irBlocks, readVar, writeVar, paramReg } = ssa;
