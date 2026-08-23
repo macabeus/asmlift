@@ -336,10 +336,22 @@ describe('the block admission (WHICH admitted bases get the local)', () => {
     expect(block.every((b) => all.includes(b))).toBe(true);
     expect(block.length).toBeLessThan(all.length);
   });
+
+  test('two register files bind TOGETHER — the COVERAGE limit the roster stops at', () => {
+    const twoFiles = fn([
+      { k: 'store', lval: cidx(0x40000d4, c(0)), value: c(1) },
+      { k: 'store', lval: cidx(0x40000d4, c(1)), value: c(2) },
+      { k: 'store', lval: cidx(0x40000b0, c(0)), value: c(3) },
+      { k: 'store', lval: cidx(0x40000b0, c(1)), value: c(4) },
+      { k: 'store', lval: cidx(0x3001048, c(0), 2), value: c(5) },
+      { k: 'store', lval: cidx(0x3001048, c(0), 2), value: c(6) },
+    ]);
+    expect(boundBases(hoistReusedGlobalBases(twoFiles, LIVEBASE_BLOCK_GATES))).toEqual([0x40000d4, 0x40000b0]);
+  });
 });
 
 describe('the block admission is WIRED into enumeration', () => {
-  // Two real agbcc outputs, so no toolchain: `corpus/agbcc-mixpoll.s` is synthetic:mixpoll:agbcc —
+  // Real agbcc outputs, so no toolchain: `corpus/agbcc-mixpoll.s` is synthetic:mixpoll:agbcc —
   // one DMA register file at three offsets beside three IWRAM halfwords read-modified in place,
   // the shape that needs a proper subset of its bases bound — and `corpus/agbcc-onepoll.s` is its
   // control, byte-identical C with the halfwords deleted. Which spelling wins is the benchmark's
@@ -374,5 +386,15 @@ describe('the block admission is WIRED into enumeration', () => {
     const labels = candsFor('onepoll').map((x) => x.label);
     expect(labels).toContain('signed/livebase/volatile');
     expect(labels.filter((l) => l.includes('livebase-block'))).toEqual([]);
+  });
+
+  test('every /livebase PRODUCT fans over the roster, and one of them is reachable no other way', () => {
+    // `corpus/agbcc-sizebound.s` is synthetic:sizebound:agbcc — a DMA register file beside a
+    // halfword read as two loop bounds. The wide admission binds that halfword, which leaves
+    // /nearbase no neighbour cells to cluster; only the narrow one leaves it inline, so the
+    // pairing exists on `-block` alone.
+    const labels = candsFor('sizebound').map((x) => x.label);
+    expect(labels).toContain('signed/livebase-block/volatile/nearbase');
+    expect(labels.filter((l) => l.startsWith('signed/livebase/') && l.includes('nearbase'))).toEqual([]);
   });
 });
