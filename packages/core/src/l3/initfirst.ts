@@ -53,9 +53,11 @@ const stmtTouches = (s: Stmt, name: string): boolean =>
 const isConstAssign = (s: Stmt): s is Extract<Stmt, { k: 'assign' }> & { value: { k: 'const'; value: number } } =>
   s.k === 'assign' && s.value.k === 'const';
 
-/** Peel value-preserving `(s32)`/`(u32)` casts. Width 32 only: a narrower target truncates. */
+/** Peel value-preserving `(s32)`/`(u32)` casts. Width 32 only: a narrower target truncates. A
+ *  `volatile` cast is never peeled — the qualifier is the access's meaning, and the differ cannot
+ *  referee its loss. */
 const stripWideIntCast = (e: Expr): Expr =>
-  e.k === 'cast' && e.to.kind === 'int' && e.to.width === 32 ? stripWideIntCast(e.e) : e;
+  e.k === 'cast' && e.to.kind === 'int' && e.to.width === 32 && e.volatile !== true ? stripWideIntCast(e.e) : e;
 
 export function initFirstGuards(sfn: SFn): SFn | null {
   let changed = false;
@@ -112,8 +114,7 @@ export function initFirstGuards(sfn: SFn): SFn | null {
   // The swap is still exact — `v = X` stores X's 32 bits and `v` is 32-bit-declared
   // (meaningPreserved refuses otherwise), so `v` and `(u32)X` carry the same bit pattern and only
   // the compare's rendered signedness can differ, which meaningPreserved checks separately. A
-  // NARROWING cast changes the value and never matches; a POINTER cast is excluded by the same
-  // width test, and with it every volatile-qualified spelling (the qualifier lives on a pointee).
+  // NARROWING cast changes the value and never matches, and a `volatile` one is not peeled at all.
   const sameValue = (a: Expr, b: Expr): boolean => exprEquals(stripWideIntCast(a), stripWideIntCast(b));
   const env = declaredTypes(sfn);
   // The compare-meaning gate (see SCOPE): substituting `v` for X may change the compare's

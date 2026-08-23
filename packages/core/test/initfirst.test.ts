@@ -446,3 +446,20 @@ test('refused: a NARROWING cast side is not the value the init stores ((u8)a0 vs
   );
   expect(r).toBeNull();
 });
+
+test('refused: a `volatile` cast side — the qualifier is the access, and the swap would drop it', () => {
+  const r = initFirstGuards(
+    fnWith(
+      [{ name: 'v0', type: u32t }],
+      [
+        {
+          k: 'if',
+          cond: bin('<', { k: 'cast', to: u32t, e: c(0), volatile: true }, v('a0')),
+          then: [assign('v0', c(0)), dowhile(bin('<', v('v0'), v('a0')), [])],
+          else: [],
+        },
+      ],
+    ),
+  );
+  expect(r).toBeNull();
+});
