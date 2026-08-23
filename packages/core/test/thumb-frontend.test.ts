@@ -1387,15 +1387,15 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     //
     // WHICH GATE, measured both ways, because the message is easy to read as an attribution and it
     // is not one. Today it lands on the contiguity filter, whose wording offers "it may be that
-    // call's outgoing stack argument" — a possibility this stream's own layout rules out, since
-    // `mov r0, sp` is live in r0 at the `bl` and agbcc lays outgoing stack arguments from [sp,#0]
-    // upward (compiled: add a five-argument call to the one-word shape and the local moves to
-    // [sp,#4] while `&w` becomes `add r0, sp, #0x4`). The filter cannot use that fact because the
-    // licence carrying it is off above one word — it is skipped only under
-    // `capturedObjectIsTheWholeFrame`. Widen that conjunct to `localArea >= 4` and this same
-    // fixture declines at the rule above instead: "the captured address at [sp,#0) is passed to a
-    // callee, which may write the slot at [sp,#4]". That is the refusal this shape belongs to, and
-    // a reader chasing the contiguity filter would be attacking the wrong one.
+    // call's outgoing stack argument". What rules that out here is NOT that `mov r0, sp` is live
+    // in r0 at the `bl` — the `g3` fixture above is a compiled frame where exactly that co-exists
+    // with a genuine outgoing argument at [sp,#0], because the copy is a block-copy base. It is
+    // that all four stores are RELOADED after the call: an outgoing argument is read by the callee
+    // and never by the caller, which is the filter's own condition (a) and the one it is not
+    // applying. Widen `capturedObjectIsTheWholeFrame` to `localArea >= 4` and this same fixture
+    // declines at the rule above instead: "the captured address at [sp,#0) is passed to a callee,
+    // which may write the slot at [sp,#4]". That is the refusal this shape belongs to, and a
+    // reader chasing the contiguity filter would be attacking the wrong one.
     test('a multi-word object handed to a callee declines, at the first gate it meets', () => {
       const fourWords =
         'hazw:\n' +
