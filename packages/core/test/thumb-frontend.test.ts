@@ -1424,9 +1424,9 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       expect(() => decompile('hazw', fourWords, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
     });
 
-    // …AND THE TWO SHAPES WHOSE EXTENT THE ASM DOES PIN, because the round that wrote the rule
-    // above generalised from the twin and said an object's top has no asm-visible bound. It has
-    // one in both of these, and both still decline — for reasons that are not about extent at all.
+    // …AND THE TWO SHAPES WHOSE EXTENT THE ASM DOES PIN, which is what stops the twin's undecidable
+    // slot from being read as a universal about an object's top. Both still decline, for reasons
+    // that are not about extent at all.
     // Each fixture is verbatim agbcc 2.9-arm-000512 output (`-O2 -mthumb-interwork -Wimplicit
     // -fhex-asm -fprologue-bugfix`), and each pins WHICH refusal answers, so a later round widening
     // the frame licence is told what it has actually reached.
@@ -1487,6 +1487,41 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         '\tbx\tr0\n' +
         '.L4:\n\t.align\t2, 0\n.L3:\n\t.word\tgK\n';
       expect(() => decompile('big3f', blockCopy, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+    });
+
+    // …AND THE SHAPE NO GATE ABOVE EVER ASKS ABOUT: an array. `void arrf(s32 x){ u8 buf[12];
+    // buf[0]=x; garr(buf); use2(buf[0]); }` compiles to `add sp,sp,#-0xc / mov r1,sp / strb r0,[r1]
+    // / mov r0,sp / bl garr`, and the frame licence never sees it — that gate only switches the
+    // outgoing-argument refusals off, while the object model runs on any frame. One object, no
+    // `undef`, no slot above, so all three escape rules pass it and the lift declared a 12-byte
+    // object `u8 sp0`: `garr` writing 8 bytes past a frame the recompile makes 4 wide, with no
+    // diagnostic. It declines on the frame being ACCOUNTED FOR.
+    test('an array whose top nothing bounds declines rather than shrinking the frame', () => {
+      const arrf =
+        'arrf:\n' +
+        '\tpush\t{lr}\n' +
+        '\tadd\tsp, sp, #-0xc\n' +
+        '\tmov\tr1, sp\n' +
+        '\tstrb\tr0, [r1]\n' +
+        '\tmov\tr0, sp\n' +
+        '\tbl\tgarr\n' +
+        '\tmov\tr0, sp\n' +
+        '\tldrb\tr0, [r0]\n' +
+        '\tbl\tuse2\n' +
+        '\tadd\tsp, sp, #0xc\n' +
+        '\tpop\t{r0}\n' +
+        '\tbx\tr0\n';
+      const protos = { prototypes: { garr: { params: 1 }, use2: { params: 1 } } };
+      expect(() => decompile('arrf', arrf, ARMV4T_AGBCC, protos)).toThrow(
+        /the word at \[sp,#4\] is neither an object this lift models nor a slot it keys/,
+      );
+      expect(() => decompile('arrf', arrf, ARMV4T_AGBCC, protos)).toThrow(
+        /nothing bounds the captured object's extent/,
+      );
+      // CONTROL, and it is what makes the refusal about the UNACCOUNTED WORD rather than about the
+      // array: the same capture, escape and read-back in a frame the object fills lifts.
+      const oneWordArr = arrf.replace(/#-0xc/, '#-0x4').replace(/#0xc/, '#0x4');
+      expect(decompile('arrf', oneWordArr, ARMV4T_AGBCC, protos).source).toContain('garr(&sp0)');
     });
 
     // …AND THE OTHER CONJUNCT, which is the one a wide frame actually meets. This gate needs the

@@ -2114,12 +2114,14 @@ export function lift(
   // premise re-check in the frame-object audit — which is also where the licence's other half is
   // re-proven.
   //
-  // What it refuses that really is an addressable local: every frame with a second word in it —
-  // and that is where the capability ENDS, but naming the obstacle exactly is the point. An earlier
-  // cut of this comment said an object's TOP has no asm-visible bound and that the frame is the
-  // only bound there is; a compile falsifies that as a universal. Three shapes, each compiled with
-  // agbcc 2.9-arm-000512, `-O2 -mthumb-interwork -Wimplicit -fhex-asm -fprologue-bugfix`, and only
-  // the first is about extent at all:
+  // WHAT THIS GATE IS NOT. It switches the outgoing-argument refusals off, and nothing else. The
+  // object model runs on ANY frame — the `laddrs` path in the audit below — so a `u8 buf[12]`
+  // handed to a callee arrives there through a frame this conjunct never looks at, and what bounds
+  // its extent is the audit's frame-accounting rule rather than anything here.
+  //
+  // WHY IT IS NOT WIDENED anyway, since a wider frame is the obvious next lever. Three shapes,
+  // each compiled with agbcc 2.9-arm-000512, `-O2 -mthumb-interwork -Wimplicit -fhex-asm
+  // -fprologue-bugfix`, and only the first is about extent at all:
   //
   // UNDECIDABLE — a slot THIS FUNCTION stores and reloads. Two sources that disagree about who
   // owns [sp,#4] compile to one instruction stream, byte for byte, with eight values live across
@@ -2129,51 +2131,45 @@ export function lift(
   //   struct P { s32 a, b; } p; s32 t1..t7;  p.a = x;  p.b = h(0); … g(&p);   k(p.a + p.b + …);
   //
   // The first says a callee may not touch [sp,#4]; the second says it may, and the reload after the
-  // call must read what it wrote. Nothing distinguishes them, so a licence over THAT slot is a
-  // guess rather than a harder proof — which is what the slot rule in the audit refuses, and it is
-  // the shape a wider frame licence would have had to decide.
+  // call must read what it wrote. Nothing distinguishes them, so a licence over THAT slot would be
+  // a guess — which is why the slot rule in the audit refuses the shape rather than deciding it.
   //
   // PINNED, and refused by the MODEL — sub-word members. Thumb has no sp-relative `strb`, so a
   // byte or halfword member is reached through a copy of sp, and the access at +4 witnesses that
   // the object reaches past its first word: `struct Q { u8 a; u8 pad[3]; u8 b; }` filled and then
   // handed over compiles to `mov r1, sp / strb r0, [r1] / strb r0, [r1, #0x4] / mov r0, sp / bl g`.
   // The escape is a use that is not an access, so the capture cannot be split per offset, and the
-  // audit judges the [+4] access against the one object it does model — it declines with "a store
-  // at [+4] through the captured address — only a scalar at the captured address is modelled", and
-  // with the SAME message when this conjunct is widened to `localArea >= 4` (measured). The frame
-  // size is not what refuses it; `extent` carries one width from one access, so there is no
-  // aggregate object for it to be.
+  // audit judges the [+4] access against the one object it does model — "only a scalar at the
+  // captured address is modelled", and the SAME message when this conjunct is widened to
+  // `localArea >= 4` (measured).
   //
   // PINNED, and ambiguous in its ROLE — a frame-covering block copy. `struct Big { s32 a[17]; };
-  // b = gK; g(&b);` compiles to `add sp,#-0x44 / mov r0,sp / mov r2,#0x44 / bl memcpy`, a
-  // constant-size write from [sp,#0] whose size equals the reservation: bounded from below by the
-  // copy and from above by the frame, so the extent is pinned exactly. What is NOT pinned is what
-  // the object IS — the producer table above records those same instructions for a by-value struct
-  // ARGUMENT block and for a struct-return temp. Widening this conjunct moves it exactly there:
-  // it then declines at "which is how a hidden struct-return pointer looks" (measured), never at
-  // anything about extent.
+  // b = gK; g(&b);` compiles to `add sp,#-0x44 / mov r0,sp / mov r2,#0x44 / bl memcpy`: the copy
+  // bounds the object from below and the reservation from above, so the extent is exact. What is
+  // NOT pinned is what the object IS — the producer table above records those same instructions
+  // for a by-value struct ARGUMENT block and for a struct-return temp. Widening this conjunct
+  // moves it exactly there: it then declines at "which is how a hidden struct-return pointer
+  // looks" (measured), never at anything about extent.
   //
-  // So `localArea === 4` is where this model's extent ends rather than where proof runs out, and
-  // the next widening needs an aggregate object first, and a role proof for the block-copy shape.
+  // So a wider frame licence admits nothing this model can describe. `extent` is one scalar width
+  // from one access, and the second access that would build a wider object is a `[+k]` the audit
+  // refuses first: widened, the sub-word shape declines on the very same message and the
+  // block-copy one moves onto the struct-return refusal (both measured).
   //
-  // RESIDUE, stated as what it is and not as the only one: the producer table is agbcc's, so
-  // hand-written asm that reserves one word, stages it as a call's fifth argument and ALSO puts sp
-  // in an argument register defeats this — the same producer assumption the contiguity filter below
-  // already makes, and the same one an earlier cut of this comment wrongly claimed was the whole
-  // exposure while a plain `memcpy` for a by-value struct argument walked through it. The producer
-  // is named in the gate rather than left to the prose: `armv4t` has one compiler entry today, and
-  // a second one free to overlay a dead one-word local with a one-word outgoing area would inherit
-  // an acceptance whose only evidence is an agbcc compile table.
+  // RESIDUE: the producer table is agbcc's, so hand-written asm that reserves one word, stages it
+  // as a call's fifth argument and ALSO puts sp in an argument register defeats this — the same
+  // producer assumption the contiguity filter below makes. The producer is named in the gate
+  // rather than left to the prose: `armv4t` has one compiler entry today, and a second one free to
+  // overlay a dead one-word local with a one-word outgoing area would inherit an acceptance whose
+  // only evidence is an agbcc compile table.
   //
-  // WHICH CONJUNCT REFUSES WHAT, because a round spent itself on the frame size for a target that
-  // fails the OTHER one. klonoa's `LoadBGTilemapData` (a checkout function, not a benchmark row)
-  // reserves 0x3C, and its `mov r5, sp` is the DMA-fill PUBLISH (`strh r7, [r5]` / `mov r0, sp` /
-  // `str r0, [r2]`, r2 = 0x040000D4) rather than a base live in an argument register at a `bl`:
-  // instrumented, it reaches here with
-  // localArea=60 and frameBasePassedToCallee=false. So no widening of the frame size can reach it
-  // — widened to `localArea >= 4` its lift is byte-identical (measured) — and it already lifts
-  // today, with the object modelled as `volatile u16 sp0`. Whatever its residual is, this gate is
-  // not it.
+  // WHICH CONJUNCT REFUSES WHAT, for a reader arriving with a wide frame in hand. klonoa's
+  // `LoadBGTilemapData` (a checkout function, not a benchmark row) reserves 0x3C and fails the
+  // OTHER conjunct: its `mov r5, sp` is the DMA-fill PUBLISH (`strh r7, [r5]` / `mov r0, sp` /
+  // `str r0, [r2]`, r2 = 0x040000D4), not a base live in an argument register at a `bl`.
+  // Instrumented, it arrives with localArea=60 and frameBasePassedToCallee=false, lifts today with
+  // the object modelled as `volatile u16 sp0`, and its lift is byte-identical with this conjunct
+  // widened to `localArea >= 4` (measured). No answer to the frame size moves it.
   const capturedObjectIsTheWholeFrame = target.compiler === 'agbcc' && frameBasePassedToCallee && localArea === 4;
 
   const slotsOffReason = slotModelBlocker();
@@ -3426,6 +3422,58 @@ export function lift(
             fail(
               `the captured address at [sp,#${off}) ${how}, which may write the ` +
                 `slot at [sp,#${slot}] — this function's own store there would be forwarded past the write`,
+            );
+          }
+        }
+      }
+      // …and the FOURTH claim an escape retracts is the object's TOP, which the three rules above
+      // leave to whatever this function happened to touch. `extent` is one width from one access,
+      // so an object wider in the SOURCE than those bytes is declared too small — and a callee
+      // holding its address writes frame bytes the emitted C never allocated. Compiled:
+      //
+      //     u8 buf[12]; buf[0] = x; garr(buf); use2(buf[0]);
+      //       → add sp,sp,#-0xc / mov r1,sp / strb r0,[r1] / mov r0,sp / bl garr
+      //
+      // lifted as `u8 sp0; garr(&sp0); use2(sp0)` — a 12-byte object declared one byte, in a frame
+      // the recompile makes 4 bytes wide, with `garr` writing the other 8 into the caller's. The
+      // three rules above all pass it: one object, no `undef` op, no slot above it.
+      //
+      // What licenses an answer is the frame being ACCOUNTED FOR, word by word. Every word of the
+      // reserved local area has to be an object this audit modelled or a slot the slot model keys;
+      // a word that is neither is storage nothing here describes, so the emitted C reserves less
+      // than the machine did and the writer reaches past what it allocated. Whole local area and
+      // not only the words above the object: a word BELOW cannot be part of the object, but it is
+      // still frame the declaration has to account for. Word granularity, not byte — the stack is
+      // word-aligned, so a halfword object owns its word and the padding beside it is not a second
+      // local.
+      //
+      // `mayWrite`, the predicate the two rules above take, and for the same reason: a device
+      // SOURCE register reads through the address and cannot write the frame back.
+      //
+      // WHAT IT LEAVES, since this is the extent question the gate comment above is about: a
+      // `mayWrite` escape is accepted only where the modelled objects and the keyed slots tile the
+      // reserved area between them — a word above the object is a slot (refused above), a second
+      // object (refused above), or unaccounted (refused here). That is not a wider extent model; it
+      // is the same one-scalar `extent`, made to say when it does not fit. An object of two words
+      // cannot be built here at all — the second access that would reach it is a `[+4]` the
+      // `scalar()` guard refuses — so no widening of the frame licence admits a shape this rule
+      // would then have to judge.
+      if (mayWrite.size > 0) {
+        const accountedWords = new Set<number>();
+        for (const [off, width] of extent) {
+          for (let w = off - (off % 4); w < off + width; w += 4) {
+            accountedWords.add(w);
+          }
+        }
+        for (const slot of usedSlotOffsets) {
+          accountedWords.add(slot - (slot % 4));
+        }
+        for (let w = 0; w < localArea; w += 4) {
+          if (!accountedWords.has(w)) {
+            fail(
+              `the word at [sp,#${w}] is neither an object this lift models nor a slot it keys, ` +
+                `and the captured address reaches something that may write it — nothing accounts for the ` +
+                `rest of the frame, so nothing bounds the captured object's extent`,
             );
           }
         }
