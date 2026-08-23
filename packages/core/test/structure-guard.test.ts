@@ -237,8 +237,8 @@ test('P2 keeps the update BEHIND an exit test that reads the pre-update inductio
   // what the IR says; the decrement must NOT precede the test.
   expect(src).toBe(
     's32 breakoldval(s32 a0) {\n    s32 v0;\n    s32 v1;\n    v0 = a0;\n    v1 = 0;\n' +
-      '    while (v0 != 0) {\n        if (v0 <= 3) {\n            v1 = v1 + v0;\n            return v1;\n' +
-      '        } else {\n            v1 = v1 + v0;\n            v0 = v0 - 1;\n        }\n    }\n    return v1;\n}\n',
+      '    while (v0 != 0) {\n        if (v0 > 3) {\n            v1 = v1 + v0;\n            v0 = v0 - 1;\n' +
+      '        } else {\n            v1 = v1 + v0;\n            return v1;\n        }\n    }\n    return v1;\n}\n',
   );
 });
 

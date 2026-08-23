@@ -103,8 +103,19 @@ describe('STRUCT-HARDEN: the compiler-behavior levers are load-bearing', () => {
     const divergentLine = (src: string) => src.split('\n').find((l) => l.includes('if ('));
     expect(divergentLine(four[0])).toBe(divergentLine(four[1]));
     expect(divergentLine(four[2])).toBe(divergentLine(four[3]));
-    // and a one-armed if never flips: the DIVERGE fixture is joined-flip-invariant
-    expect(emit(DIVERGE, { negateJoinedBranchSense: true })).toBe(emit(DIVERGE, {}));
+    // and a one-armed if never flips: the DIVERGE fixture is joined-flip-invariant. Both values
+    // stated explicitly — against `{}` this would compare the default against itself.
+    expect(emit(DIVERGE, { negateJoinedBranchSense: true })).toBe(emit(DIVERGE, { negateJoinedBranchSense: false }));
+  });
+
+  test('the joined sense DEFAULTS to the divergent one', () => {
+    // The axis's zero point, not a second constant: the layout evidence a joined `if` leaves is
+    // the evidence the divergent case already reads, so an absent lever spells both classes the
+    // same way and a target that opts out of one opts out of both.
+    expect(emit(BOTHIFS, {})).toBe(emit(BOTHIFS, { negateJoinedBranchSense: true }));
+    expect(emit(BOTHIFS, { preserveDivergentBranchSense: false })).toBe(
+      emit(BOTHIFS, { preserveDivergentBranchSense: false, negateJoinedBranchSense: false }),
+    );
   });
 
   test('orderArgCopiesByComputation flips the order of independent edge assignments', () => {

@@ -97,9 +97,7 @@ test('do-while: the trailing copy opens the body and leaves nothing behind after
       '    s32 v2;\n' +
       '    s32 v3;\n' +
       '    s32 t0;\n' +
-      '    if (a0 <= 0) {\n' +
-      '        v3 = 0;\n' +
-      '    } else {\n' +
+      '    if (a0 > 0) {\n' +
       '        v0 = 1;\n' +
       '        v2 = 0;\n' +
       '        v1 = 1;\n' +
@@ -110,6 +108,8 @@ test('do-while: the trailing copy opens the body and leaves nothing behind after
       '            v0 = v1;\n' +
       '            v1 = t0 + v1;\n' +
       '        } while (v2 < a0);\n' +
+      '    } else {\n' +
+      '        v3 = 0;\n' +
       '    }\n' +
       '    return v3;\n' +
       '}\n',

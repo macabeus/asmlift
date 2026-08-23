@@ -55,11 +55,14 @@ describe('a guessed argument that survived from an earlier block', () => {
 
   test('…and the narrowed lift carries the re-spelling cross, not one fixed spelling', () => {
     // A lift variant, not a re-spelling lever: dropping an argument changes the IR every
-    // structuring axis then reads, so the axes have to run under it. `kleod:ReadKeyInput` needs
-    // `/setup-args/flip-join/derived-home`, a spelling neither side reaches alone.
+    // structuring axis then reads, so the axes have to run under it. `kleod:ReadKeyInput` matches
+    // on `/setup-args/derived-home`, a product of this variant and an axis run beneath it.
     const labels = cands(GUARDED_CALL, POOL).map((c) => c.label);
     expect(labels).toContain('unsigned/setup-args');
     expect(labels.filter((l) => l.startsWith('unsigned/setup-args/')).length).toBeGreaterThan(0);
+    // both populations of the ranked fork run under the narrowing — a re-spelling of the tree
+    // (`/livebase`, and its own `/volatile` output) and a structuring axis (`/flip-join`)
+    expect(labels).toContain('unsigned/setup-args/livebase');
     expect(labels).toContain('unsigned/setup-args/flip-join');
   });
 

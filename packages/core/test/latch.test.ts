@@ -212,13 +212,15 @@ test('ablating the dominance gate hands a guard to the kept-guard loop emitter',
 
   const kept = parse(IR);
   expect(foldEmptyLatches(kept)).toBe(0);
-  expect(emit(kept)).toContain('a0 != 0'); // the guard the asm branched on
+  // the asm branches on `a0 != 0`; the guard is two-armed and joined, so the default joined sense
+  // emits the negation with the arms swapped
+  expect(emit(kept)).toContain('a0 == 0');
 
   const ablated = parse(IR);
   expect(foldEmptyLatches(ablated, without(LATCH_GATES, 'target-dominates'))).toBe(1);
   // at a0 = -5 the asm returns 1; a fused `while (v0 < a0)` would return 0
   const c = emit(ablated);
-  expect(c).toContain('a0 != 0'); // the guard the asm branched on survives the fold
+  expect(c).toContain('a0 != 0'); // the guard survives the fold — one-armed here, so the asm's own sense
   expect(c).toContain('do {'); // as the kept-guard form — the second layer, not a lucky no-fuse
 });
 

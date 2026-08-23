@@ -63,7 +63,7 @@ test('a load feeding a cond_br join renders as a one-sided in-place overwrite', 
 
 test('off by default: the same IR keeps the fresh-variable two-armed spelling', () => {
   const off = emit(CLAMP, false);
-  expect(off).toContain('if (*v0 <= 31) {');
+  expect(off).toContain('if (*v0 > 31) {');
   expect(off).toContain('v3 = *v0;');
   expect(off).toContain('v3 = 32;');
   expect(emit(CLAMP, false)).toBe(off);

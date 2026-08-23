@@ -73,7 +73,7 @@ test('two fall-out leaves passing DIFFERENT values are two defaults and still de
   const out = of(dispatch([0, 1, 2, 3]).replace(/\tb\t\.Lend\n(?=\.Lc0:)/, '\tmov\tr2, #0x9\n\tb\t.Lend\n'));
   expect(out).toContain('else'); // declined to if-recovery
   expect(out).toMatch(/default:\s+v0 = 9;/); // the high leaf's own write…
-  expect(out).toMatch(/else \{\s+v0 = 0;/); // …and the low leaf's, which the collapse would overwrite with 9
+  expect(out).toMatch(/if \(a0 != 0\) \{\s+v0 = 0;/); // …and the low leaf's, which the collapse would overwrite with 9
 });
 
 // Each half of the identity rule alone. Ablating either one leaves the three tests above green
@@ -97,7 +97,7 @@ test('two bare fall-out jumps passing DIFFERENT values are two defaults', () => 
       '.Lend:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr2, [r0]\n\tbx\tlr\n',
   );
   expect(armOrder(out)).not.toEqual([0, 1, 2, 3]); // not folded into one four-case switch
-  expect(out).toMatch(/else \{\s+v0 = 9;/); // 9 stays on the path that writes it
+  expect(out).toMatch(/if \(a0 != 0\) \{\s+v0 = 9;/); // 9 stays on the path that writes it
 });
 
 test('a fall-out leaf with a BODY is not a bare jump, and its store is not dropped', () => {
@@ -488,7 +488,9 @@ test('the FALL side of a relational test is navigation, whatever it admits', () 
       '.Lend:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr2, [r0]\n\tbx\tlr\n',
   );
   expect(out).not.toContain('switch (');
-  expect(out).toContain('a0 > 0');
+  // the relational test survives as an ordinary `if` — spelled with the arms swapped, which is
+  // the joined-if sense (structure.ts negateJoinedBranchSense)
+  expect(out).toContain('a0 <= 0');
 });
 
 test('a bound test that OPENS the dispatch is an ordinary `if`, not a case', () => {
@@ -506,7 +508,7 @@ test('a bound test that OPENS the dispatch is an ordinary `if`, not a case', () 
       '.Lend:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr2, [r0]\n\tbx\tlr\n',
   );
   expect(out).not.toContain('switch (');
-  expect(out).toContain('a0 < 1');
+  expect(out).toContain('a0 >= 1'); // the bound test as an `if`, at the joined sense
 });
 
 test('a bound branch onto another TEST is the search descending, and still recovers', () => {
@@ -597,7 +599,7 @@ test('a materialized def in a test block keeps its assignment — the tree decli
   expect(home).not.toBeNull();
   // every read of the home is preceded by the write, on every path
   expect(out.indexOf(`${home![1]} = a1 << 2;`)).toBeLessThan(out.indexOf(`+ ${home![1]}`));
-  expect(out).toContain('if (a0 == 1)'); // the block holding it is no longer a test of the tree
+  expect(out).toContain('if (a0 != 1)'); // the block holding it is no longer a test of the tree
 });
 
 test('the same tree recovers whole when nothing homes in the test block', () => {

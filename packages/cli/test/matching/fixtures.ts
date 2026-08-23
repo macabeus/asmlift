@@ -231,15 +231,15 @@ export const FIXTURES: DecompFixture[] = [
   },
   {
     // NEGATIVE fixture. `!=` does not reduce to the clean if-assign form: asmlift emits an
-    // if/else with a temp, which is not how agbcc lowered it → score 5, no byte-match. This
+    // if/else with a temp, which is not how agbcc lowered it → score 4, no byte-match. This
     // documents a real structuring gap AND guards the scorer's `match:false` reporting path.
     // It still exercises the `icmp_ne` lowering: a mutation flipping it changes expectSource.
     symbol: 'neset',
     referenceC: 'int neset(int x){ if (x != 0) return 5; return x; }',
     expectSource:
-      's32 neset(s32 a0) {\n    s32 v0;\n    if (a0 != 0) {\n        v0 = 5;\n' +
-      '    } else {\n        v0 = 0;\n    }\n    return v0;\n}\n',
-    expectScore: 5,
+      's32 neset(s32 a0) {\n    s32 v0;\n    if (a0 == 0) {\n        v0 = 0;\n' +
+      '    } else {\n        v0 = 5;\n    }\n    return v0;\n}\n',
+    expectScore: 4,
     expectMatch: false,
     note: 'compare — inequality (icmp_ne): NEGATIVE, documents the if/else-with-temp gap',
   },
@@ -471,28 +471,25 @@ export const FIXTURES: DecompFixture[] = [
   // `bhi`/`bls`/`bcc`/`bcs` must survive as real terminators: if the frontend drops one, the
   // boolean CFG collapses and the function silently miscompiles to a constant `return`. The
   // goldens pin both arms (`v0 = 0` / `v0 = 1`) and the unsigned compare sense ((u8) / u32).
-  // Deliberately NOT byte-exact yet — the boolean-diamond shape misses; the pinned score
-  // flips to 0 when boolean-value recovery covers it.
+  // Byte-exact: the joined-if sense is the divergent one's (structure.ts
+  // negateJoinedBranchSense), which puts `v0 = 1` in the arm the asm falls through into, and that
+  // is what agbcc emitted.
   {
     symbol: 'ult5',
     referenceC: 'int ult5(unsigned char x){ return x < 5; }',
     expectPatternHits: 1,
     expectSource:
-      's32 ult5(s32 a0) {\n    s32 v0;\n    if ((u8)a0 > 4) {\n        v0 = 0;\n' +
-      '    } else {\n        v0 = 1;\n    }\n    return v0;\n}\n',
-    expectMatch: false,
-    expectScore: 3,
-    note: 'thumb `bhi` survives — unsigned byte compare, both arms (NEGATIVE: near-miss)',
+      's32 ult5(s32 a0) {\n    s32 v0;\n    if ((u8)a0 <= 4) {\n        v0 = 1;\n' +
+      '    } else {\n        v0 = 0;\n    }\n    return v0;\n}\n',
+    note: 'thumb `bhi` survives — unsigned byte compare, both arms',
   },
   {
     symbol: 'ugt',
     referenceC: 'int ugt(unsigned a, unsigned b){ return a > b; }',
     expectSource:
-      's32 ugt(u32 a0, u32 a1) {\n    s32 v0;\n    if (a0 <= a1) {\n        v0 = 0;\n' +
-      '    } else {\n        v0 = 1;\n    }\n    return v0;\n}\n',
-    expectMatch: false,
-    expectScore: 3,
-    note: 'thumb unsigned `>` survives — u32-typed compare, both arms (NEGATIVE: near-miss)',
+      's32 ugt(u32 a0, u32 a1) {\n    s32 v0;\n    if (a0 > a1) {\n        v0 = 1;\n' +
+      '    } else {\n        v0 = 0;\n    }\n    return v0;\n}\n',
+    note: 'thumb unsigned `>` survives — u32-typed compare, both arms',
   },
 
   // ── MIPS (IDO) vertical slice — the second ISA through the SAME pipeline ──────────────

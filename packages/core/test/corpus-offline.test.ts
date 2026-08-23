@@ -132,7 +132,7 @@ const CASES: OfflineCase[] = [
     target: MIPS_IDO,
     note: 'materialised negated compare, then branched on — the stale-fold inversion',
     expect:
-      's32 inrange(s32 a0, s32 a1, s32 a2) {\n    s32 v0;\n    if (a0 < a1) {\n        v0 = a0 >= a1;\n    } else {\n        v0 = a2 >= a0;\n    }\n    return v0;\n}\n',
+      's32 inrange(s32 a0, s32 a1, s32 a2) {\n    s32 v0;\n    if (a0 >= a1) {\n        v0 = a2 >= a0;\n    } else {\n        v0 = a0 >= a1;\n    }\n    return v0;\n}\n',
   },
 
   // ── PowerPC / CodeWarrior (GameCube) — the third ISA, its objdump captured verbatim ──────

@@ -648,15 +648,18 @@ export const SYNTHETIC: SynthSpec[] = [
   // A short branch is `beq shared`, putting the second test on the FALL edge; the long form
   // inverts to `bne <second test>`, putting it on the TAKEN edge. Those are the fold's two arms —
   // `logic_or` and `logic_and` — so the near row and the far row do not exercise one code path at
-  // two sizes, they exercise BOTH paths. MEASURED, and it is the opposite of what the distance
-  // suggests: the near row folds to the swapped `||` and misses, while the far row folds to `&&`,
-  // the source's own orientation, and matches.
+  // two sizes, they exercise BOTH paths. MEASURED on the primary (unranked) output: `ifand_near`
+  // lands on the source's own `a != 0 && b != 0` and matches, while `ifand_far` lands on the
+  // `a == 0 || b == 0` dual and misses by 262. The distance is what decides which, so the
+  // orientation is a per-SITE fact and the per-function joined-sense default is a coin flip on
+  // this family whichever way it is set.
   //
-  // `ifor_near` is the ORIENTATION control. The same shape written the other way round matches
-  // today, so the gap is not "this shape is unrecoverable" but "one of the fold's two arms emits
-  // the spelling the compiler did not, and nothing referees it" — and a row that could falsify the
-  // claim is worth more than a third that restates it. There is deliberately no `ifor_far`:
-  // measured, a `||` matches at BOTH distances.
+  // `ifor_near` is the ORIENTATION control, and it lands on the dual too (`a == 0 && b == 0`, 20).
+  // So the gap is not "this shape is unrecoverable" but "one of the fold's two arms emits the
+  // spelling the compiler did not" — and a row that could falsify the claim is worth more than a
+  // third that restates it. What referees it on the RANKED path is `/flip-join`, which emits the
+  // other joined sense: all three rows match there, two of them on the axis. There is deliberately
+  // no `ifor_far`: measured, a `||` matches at BOTH distances.
   //
   // TOOLCHAINS, measured rather than assumed — and the answer differs per row.
   //
@@ -689,13 +692,12 @@ export const SYNTHETIC: SynthSpec[] = [
   // 375 and m2c 348 → 348. All three gained matches are synthetic rows authored for an
   // asmlift-specific gap, one of them (`ifand_far`) scoring MATCH either way — a byte score cannot
   // see the difference between the recovered `&&` and the tail-duplicated spelling agbcc
-  // cross-jumps back together, so a test pins that orientation, not this row; and
-  // every row reads `noncompile` for m2c on an unrelated pointer-spelling defect of its own, which
-  // on `ifand_near` hides that its orientation is the RIGHT one. The two gates are not the same
-  // either: `bench regression` fails only on a LOST match, so it holds `ifand_far` and `ifor_near`
-  // and says nothing about `ifand_near` — that one is pinned by
-  // packages/cli/test/matching/shortcircuit-branch.test.ts, which runs with the benchmark refresh
-  // rather than on every PR.
+  // cross-jumps back together, so a test pins that orientation, not this row; and every row reads
+  // `noncompile` for m2c on an unrelated pointer-spelling defect of its own. All five rows match
+  // on the ranked path, so `bench regression` holds every one — but only against a LOST match, and
+  // what these rows are really about is WHICH ORIENTATION won. That is
+  // packages/cli/test/matching/shortcircuit-branch.test.ts, which asserts the connective itself
+  // and runs with the benchmark refresh rather than on every PR.
   {
     sym: 'ifand_near',
     src: 'int ifand_near(int a, int b, int *p, int *q){ if (a && b) { p[0] = 1; q[0] = 2; p[1] = 3; q[1] = 4; } else { p[0] = -1; } return p[1]; }',
@@ -703,8 +705,8 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc', 'mwcc_242_81'],
     ctx: 'int ifand_near(int,int,int*,int*);',
     note:
-      'the diff is not a near miss but the whole spelling: the arms are exchanged and the ' +
-      "condition negated. m2c prints the source's own orientation here, and its output is " +
+      "at this distance the fold lands on the source's own `&&`, so asmlift matches at the " +
+      'default joined sense with no axis. m2c prints the same orientation, and its output is ' +
       'byte-exact once the `->unkN` pointer spelling it declines on is legalised — so the ' +
       'noncompile beside this row is an unrelated defect of its own, not distance from a match',
   },
@@ -716,11 +718,12 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'int ifand_far(int,int,int*,int*);',
     note:
       'the guarded arm is far enough that agbcc inverts the branch and puts the shared block behind ' +
-      'a long-branch trampoline on each edge. The fold looks through them, and this orientation ' +
-      "lands on the source's own `&&` rather than the dual `ifand_near` gets. The SCORE cannot " +
-      'police that: the un-folded spelling tail-duplicates the else arm and agbcc cross-jumps the ' +
-      'copies back together, so this row read MATCH before the shape was recovered too — what the ' +
-      'orientation is pinned by is a test, not this number',
+      'a long-branch trampoline on each edge. The fold looks through them, and the inverted ' +
+      "polarity lands this orientation on the `||` dual — so here the source's own `&&` is " +
+      "`/flip-join`'s spelling, the mirror of `ifand_near`. The SCORE cannot police that: the " +
+      'un-folded spelling tail-duplicates the else arm and agbcc cross-jumps the copies back ' +
+      'together, so this row read MATCH before the shape was recovered too — what the orientation ' +
+      'is pinned by is a test, not this number',
   },
   {
     sym: 'ifor_near',
@@ -2040,6 +2043,12 @@ export const SYNTHETIC: SynthSpec[] = [
   //     with the three coercions deleted. With them in play the same edit reads 12 to 366 (+354),
   //     which is the number this comment first recorded. +179 is the honest one — the coercions
   //     and the materialisation contend for the same registers, so stacking them double-counts.
+  // Both endpoints were taken against the ranked winner OF THAT RUN, and its label is not a handle
+  // that survives: an axis suffix names a sense relative to the target's DEFAULT, so `/flip-join`
+  // in it denotes the opposite spelling to the one it denotes now. The same command today reports
+  // `26880 candidate(s) scored, 0 dropped, best unsigned/flip-branch/defsite/merge-names/
+  // addr-home/uns-cmp/livebase-block/volatile/coalesce-v17-v10/initfirst/raw-globals: 395`. What
+  // transfers between runs is the SHAPE of the edit, never the label.
   // The construct is cheap to carry when everything else is already wrong and a hard blocker once
   // it is not, which is why both directions are quoted rather than either alone.
   //

@@ -58,12 +58,12 @@ test('a body `if` whose arm returns joins at the loop, not at the merged epilogu
       '    v0 = a0;\n' +
       '    v1 = a1;\n' +
       '    while (*v0 == *v1) {\n' +
-      '        if (*v0 != 0) {\n' +
-      '            v0 = v0 + 1;\n' +
-      '            v1 = v1 + 1;\n' +
-      '        } else {\n' +
+      '        if (*v0 == 0) {\n' +
       '            v2 = 0;\n' +
       '            return v2;\n' +
+      '        } else {\n' +
+      '            v0 = v0 + 1;\n' +
+      '            v1 = v1 + 1;\n' +
       '        }\n' +
       '    }\n' +
       '    v2 = *v0 - *v1;\n' +
@@ -194,20 +194,20 @@ const LATCH_ARM_STORE = `fn latcharm {
 `;
 
 test('a conditional-latch arm stores the value the IR read, not the updated one', () => {
-  // The update moves into the `else`: reaching the arm means this iteration ended in a `return`, so
-  // the increment it would have run never happens.
+  // The update moves into the arm that does NOT return: reaching the returning one means this
+  // iteration ended there, so the increment it would have run never happens.
   expect(emit(LATCH_ARM_STORE)).toBe(
     's32 latcharm(s32 * a0) {\n' +
       '    s32 v0;\n' +
       '    s32 v1;\n' +
       '    v0 = 0;\n' +
       '    while (v0 < 10) {\n' +
-      '        if (gFlag == 0) {\n' +
+      '        if (gFlag != 0) {\n' +
+      '            v0 = v0 + 1;\n' +
+      '        } else {\n' +
       '            *a0 = v0;\n' +
       '            v1 = 1;\n' +
       '            return v1;\n' +
-      '        } else {\n' +
-      '            v0 = v0 + 1;\n' +
       '        }\n' +
       '    }\n' +
       '    v1 = 0;\n' +

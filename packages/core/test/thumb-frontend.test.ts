@@ -636,7 +636,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     // assigns nothing and `v0` IS that uninitialised local.
     expect(decompile('f', two, ARMV4T_AGBCC).source).toBe(
       's32 f(s32 a0) {\n    s32 v0;\n    s32 uninit_sp0;\n' +
-        '    if (a0 == 0) {\n        a0 = uninit_sp0;\n    } else {\n        v0 = a0;\n    }\n' +
+        '    if (a0 != 0) {\n        v0 = a0;\n    } else {\n        a0 = uninit_sp0;\n    }\n' +
         '    return a0 + v0;\n}\n',
     );
   });

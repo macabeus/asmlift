@@ -21,10 +21,10 @@ const ranked = (c: string) => {
 };
 
 describe('the emitted orientation decides the match, and only one orientation is reachable', () => {
-  test('a reconverging `&&` reaches the source orientation through /flip-join and matches', () => {
+  test('a reconverging `&&` reaches the source orientation at the default sense and matches', () => {
     const { rk, target } = ranked(src('&&'));
-    // the fold alone emits the dual (`||` with exchanged arms); the /flip-join axis restores the
-    // source's own orientation, and that one is the bytes
+    // the `&&`'s tests all branch to the ELSE arm, so the fall-through IS the then-arm and the
+    // default joined sense spells the source's own orientation — which is the bytes
     expect(rk.best.source).toContain('&&');
     expect(rk.best.score.match).toBe(true);
     // the dual spelling is byte-identical evidence of the same fact, stated directly
@@ -33,7 +33,9 @@ describe('the emitted orientation decides the match, and only one orientation is
   });
 
   test('the same shape written `||` matches, so the fold itself is not the defect', () => {
-    // The control that keeps the claim honest: the fold emits the source's own orientation here.
+    // The control that keeps the claim honest, and the axis's own reason to exist: an `||`'s first
+    // test branches INTO the then-arm, so the fall-through reading is inverted here and the source
+    // orientation is /flip-join's.
     const { rk } = ranked(src('||'));
     expect(rk.best.source).toContain('||');
     expect(rk.best.score.match).toBe(true);

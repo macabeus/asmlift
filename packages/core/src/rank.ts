@@ -442,10 +442,22 @@ export function enumerateCandidates(
   ];
   // `/flip-join` — the JOINED-if sibling of `/flip-branch` (structure.ts
   // negateJoinedBranchSense): a reconverging two-armed if reads the same fall-through-is-then
-  // layout evidence the divergent case does, and which sense the source spelled is just as
-  // ambiguous — so both are emitted and the differ referees. Crossed with the pair above
-  // (divergent and joined ifs are disjoint sets, so the axes are independent); a function with
-  // no two-armed joined if emits identical source and the dedup collapses it before any compile.
+  // layout evidence the divergent case does, so the DEFAULT sense is the divergent one's and
+  // this axis emits the other. Read off the TARGET's sense, not this candidate's `s.sense`, so
+  // `/flip-branch` still moves only divergent ifs and the two axes stay independent. The suffix
+  // therefore names a sense RELATIVE to the target's default: a label quoted from a log identifies
+  // a spelling only together with the tree that produced it, which is what the `[asmlift source
+  // <commit>]` stamp on the `[ranked]` line is for (docs/ranked-repro.md).
+  // Crossed with the pair above. The two senses are two different sources wherever a two-armed
+  // joined `if` exists at all — agbcc emits different bytes for the arms-swapped spelling — and
+  // all three things that invert the polarity are per-SITE where this lever is per-function, so no
+  // per-function predicate decides it: a short-circuit fold choosing the orientation, a
+  // conditional branch relayed past Thumb's ±256-byte reach, and a rotated loop's zero-trip guard,
+  // where the `if` is the compiler's own and no source sense exists to be faithful to. The third
+  // is what keeps the residue on targets that have neither: of the 19 rows that still win on the
+  // axis, 7 are gcc2.7.2 / gcc2.7.2kmc / mwcc with no `short-circuit` tag and no Thumb branch
+  // range, and 5 of those 7 carry `loop`. A function with no two-armed joined if emits identical
+  // source and the dedup collapses it before any compile.
   const baseSense = [
     ...senseAnchor.map((s) => ({ ...s, join: false })),
     ...senseAnchor.map((s) => ({ ...s, suffix: `${s.suffix}/flip-join`, join: true })),
@@ -619,7 +631,7 @@ export function enumerateCandidates(
             sfn = structureChecked(fn, {
               ...svOpts,
               preserveDivergentBranchSense: s.sense,
-              negateJoinedBranchSense: s.join,
+              negateJoinedBranchSense: s.join ? !defSense : defSense,
               anchorConstCopies: s.anchor,
               spellBitfieldMembers: s.bitfields,
               ...STRUCTURING_AXES.reduce((acc, ax) => ({ ...acc, ...ax.options(s[ax.flag]) }), {}),
@@ -1015,6 +1027,12 @@ export function rankBy<S extends { score: number }>(
  *  cast the wrong pin simply lost on score; now it ties, and enumeration order alone would
  *  silently install the noisier spelling.
  *
+ *  LINE COUNT next, the other half of the same job: two spellings can tie on score AND on casts
+ *  and still differ by a whole control-flow shape — a `/defsite`-anchored `v0 = 0; if (c) v0 = 1;`
+ *  against the braced `if/else` its sibling emits. Counted the way the report counts it
+ *  (apps/benchmark/src/eval/quality.ts `lines`), for the same reason `castCount` is: ranking must
+ *  not optimize for something the published metric measures differently.
+ *
  *  ENUMERATION ORDER last, which makes this a strict total order (indices are unique) and the
  *  result deterministic. Spelled explicitly rather than leaning on Array#sort's stability, which
  *  would make each preference an accident of two unrelated decisions.
@@ -1034,8 +1052,15 @@ export function compareScored<S extends { score: number }>(
     a.group - b.group ||
     (b.deviceVolatile ?? 0) - (a.deviceVolatile ?? 0) ||
     castCount(a.source) - castCount(b.source) ||
+    lineCount(a.source) - lineCount(b.source) ||
     a.order - b.order
   );
+}
+
+/** Non-blank lines in a candidate's rendered source — the compactness tie-break above, counted
+ *  exactly as `quality.ts` counts `lines`. Deterministic, and total on any string. */
+function lineCount(source: string): number {
+  return source.split('\n').filter((l) => l.trim().length > 0).length;
 }
 
 /** Scalar casts in a candidate's rendered source — the readability tie-break above.

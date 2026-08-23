@@ -54,6 +54,32 @@ test('a side-effect-only unmodelled instruction declines loud, never silently va
   expect(annotated.diagnostics.some((d) => d.reason.includes('swi'))).toBe(true);
 });
 
+test('a `bl` into this function’s own text declines loud rather than emitting a call', () => {
+  // agbcc relays a conditional branch past Thumb's ±256-byte reach through `b .Lfar @long jump`,
+  // and past that branch's own ±2 KB reach through `bl .Lfar @far jump`. Read as a call, the
+  // second form emits `.L2(…)` — a transfer turned into something that returns, and not C.
+  const farJump =
+    '\t.code\t16\n\t.globl\tf\n\t.thumb_func\nf:\n\tcmp\tr0, #0\n\tbne\t.LCB0\n\tbl\t.L2\t@far jump\n' +
+    '.LCB0:\n\tmov\tr0, #1\n\tbx\tlr\n.L2:\n\tmov\tr0, #2\n\tbx\tlr\n';
+  expect(() => decompile('f', farJump, ARMV4T_AGBCC)).toThrow(FrontendUnsupportedError);
+  expect(() => decompile('f', farJump, ARMV4T_AGBCC)).toThrow(/targets a label inside this function/);
+  const annotated = decompile('f', farJump, ARMV4T_AGBCC, { onGap: 'annotate' });
+  expect(annotated.source).toContain('ASMLIFT_ERROR');
+  expect(annotated.source).not.toContain('.L2(');
+
+  // A DECLARED function is a call however the slice came to hold it. Recursion:
+  const rec =
+    '\t.code\t16\n\t.globl\tf\n\t.thumb_func\nf:\n\tpush\t{lr}\n\tcmp\tr0, #1\n\tble\t.L2\n' +
+    '\tsub\tr0, r0, #1\n\tbl\tf\n.L2:\n\tpop\t{r1}\n\tbx\tr1\n';
+  expect(decompile('f', rec, ARMV4T_AGBCC).source).toContain('f(');
+  // …and a `.thumb_func` sibling `f` both CALLS and falls through into, which is the shared-tail
+  // slice the decoder extends through — the call is to a symbol, so only the relay shape refuses.
+  const sibling =
+    '\t.code\t16\n\t.globl\tf\n\t.thumb_func\nf:\n\tpush\t{r4, lr}\n\tmov\tr4, r0\n\tbl\tg\n' +
+    '\tadd\tr0, r0, r4\n\t.globl\tg\n\t.thumb_func\ng:\n\tmov\tr0, #1\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+  expect(decompile('f', sibling, ARMV4T_AGBCC).source).toContain('g(');
+});
+
 test('control falling off the end declines loud, never a TypeError', () => {
   const noRet = '\t.code\t16\n\t.globl\tf\n\t.thumb_func\nf:\n\tmov\tr0, #1\n';
   expect(() => decompile('f', noRet, ARMV4T_AGBCC)).toThrow(/falls off the end/);
