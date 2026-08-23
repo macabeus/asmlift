@@ -76,15 +76,17 @@ test('an EMPTY ownedLocals range refuses, so an unmeasurable frame cannot assert
 // The same question in the other coordinate. It is answered from the calling convention rather
 // than from a measurement: a caller cannot hand a value over in a register the ABI does not pass
 // arguments in, so a read of one before any write is an uninitialised local however early it
-// happens. Nothing here refuses — an unlisted register keeps its existing treatment.
+// happens. An unlisted register keeps its existing treatment; what DOES refuse is a partition that
+// contradicts itself or declares only one side — the two tests at the end.
+const ARM_ARGS = ['r0', 'r1', 'r2', 'r3'];
 
 test('a register the ABI does not pass arguments in is an uninitialised local', () => {
-  const ssa = readDefLess('r4', () => ({ uninitRegs: ['r4', 'r5'] }));
+  const ssa = readDefLess('r4', () => ({ uninitRegs: ['r4', 'r5'], argRegs: ARM_ARGS }));
   expect(definedBy(ssa, 'r4')).toEqual({ undefKeys: ['r4'], paramKeys: [] });
 });
 
-test('an ARGUMENT register is still a parameter, whatever else the list holds', () => {
-  const ssa = readDefLess('r0', () => ({ uninitRegs: ['r4', 'r5'] }));
+test('an ARGUMENT register is still a parameter', () => {
+  const ssa = readDefLess('r0', () => ({ uninitRegs: ['r4', 'r5'], argRegs: ARM_ARGS }));
   expect(definedBy(ssa, 'r0')).toEqual({ undefKeys: [], paramKeys: ['r0'] });
 });
 
@@ -93,12 +95,36 @@ test('a VIRTUAL key is never listed, so an incoming stack argument stays a param
   // outside argRegs": the complement holds the frontends' virtual keys too, and Thumb's `@sarg<k>`
   // is a real incoming argument. A derived rule would have to know a key grammar this module does
   // not own; a list cannot make that mistake.
-  const ssa = readDefLess('@sarg4', () => ({ uninitRegs: ['r4', 'r5'] }));
+  const ssa = readDefLess('@sarg4', () => ({ uninitRegs: ['r4', 'r5'], argRegs: ARM_ARGS }));
   expect(definedBy(ssa, '@sarg4')).toEqual({ undefKeys: [], paramKeys: ['@sarg4'] });
 });
 
 test('an unlisted register keeps its existing treatment, so the list is safe to grow', () => {
   // `lr` is what ARMv4T leaves out — the return address, not a value a source could have declared.
-  const ssa = readDefLess('lr', () => ({ uninitRegs: ['r4', 'r5'] }));
+  const ssa = readDefLess('lr', () => ({ uninitRegs: ['r4', 'r5'], argRegs: ARM_ARGS }));
   expect(definedBy(ssa, 'lr')).toEqual({ undefKeys: [], paramKeys: ['lr'] });
+});
+
+test('a key in BOTH halves is a target contradicting itself, and refuses', () => {
+  // THE POINT OF DECLARING BOTH SIDES. `uninitRegs` asserts "no caller could have handed a value
+  // over here"; `argRegs` is where callers hand values over. A key in both is not a hard case, it
+  // is a target that cannot be true — and until the second list existed the silent outcome was a
+  // DELETED PARAMETER: `r1` written where `r11` was meant emits `s32 uninit_r1;` in its place, and
+  // nothing anywhere says so. `readRecursive` cannot catch it alone, because a read of an argument
+  // register reaches the parameter path by falling through every other case.
+  expect(() => readDefLess('r0', () => ({ uninitRegs: ['r0', 'r4'], argRegs: ARM_ARGS }))).toThrow(
+    /lists r0 as BOTH an argument register and one the ABI does not pass arguments in/,
+  );
+  // …and it refuses on ANY function lifted with that target, not only one that reads the mis-listed
+  // register: the model is checked where it is materialised, which every parameter read reaches.
+  expect(() => readDefLess('r4', () => ({ uninitRegs: ['r0', 'r4'], argRegs: ARM_ARGS }))).toThrow(/BOTH/);
+});
+
+test('a register partition with only one side declared cannot be checked, and refuses', () => {
+  expect(() => readDefLess('r4', () => ({ uninitRegs: ['r4'] }))).toThrow(
+    /lists registers the ABI does not pass arguments in but not the ones it does/,
+  );
+  // Claiming NEITHER side is still fine — that is what MIPS takes, and it leaves registers alone.
+  const ssa = readDefLess('r4', () => ({}));
+  expect(definedBy(ssa, 'r4')).toEqual({ undefKeys: [], paramKeys: ['r4'] });
 });

@@ -1383,7 +1383,7 @@ export function lift(
   // agbcc homes in r4-r7, or shuffles up into r8-sl, and reads on a path that never wrote it.
   const ssa = makeSsaBuilder(name, asmBlocks.length, preds, () => ({
     ownedLocals: { from: 0, to: localArea },
-    ...(target.nonArgRegs ? { uninitRegs: target.nonArgRegs } : {}),
+    ...(target.nonArgRegs ? { uninitRegs: target.nonArgRegs, argRegs: target.argRegs } : {}),
   }));
   const { fn, irBlocks, readVar, writeVar, paramReg } = ssa;
 

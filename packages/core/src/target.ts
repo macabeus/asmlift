@@ -38,7 +38,11 @@ export interface TargetDescription {
   /** Registers this ABI does NOT pass arguments in ⇒ a def-less live-in read of one is an
    *  uninitialised local, not an argument. The rule and what the list has to cover are in
    *  frontend/ssa.ts (LiveInModel.uninitRegs). ABSENT ⇒ no register partition is claimed, which is
-   *  what MIPS and PPC take today. */
+   *  what MIPS and PPC take today.
+   *
+   *  It must be DISJOINT from `argRegs`, and the frontend hands both to the builder so that is
+   *  checked rather than trusted (`checkedLiveInModel`): a spelling that lands in both lists used
+   *  to delete a parameter and emit `uninit_<reg>` in its place, silently. */
   nonArgRegs?: readonly string[];
   // HARDWARE / ISA facts — independent of the compiler.
   capabilities: {

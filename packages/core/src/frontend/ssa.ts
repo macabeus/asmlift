@@ -95,8 +95,47 @@ export interface LiveInModel {
    *  LISTED, not derived as "everything outside argRegs", because the complement contains the
    *  VIRTUAL keys too (`@sarg<k>` — an incoming stack argument, which really is a parameter), and a
    *  rule that had to exclude them would be reading a grammar this module does not own. A register
-   *  spelling nobody listed keeps its existing treatment, so the list is safe to grow. */
+   *  spelling nobody listed keeps its existing treatment, so the list is safe to grow.
+   *
+   *  Declaring this obliges `argRegs` below, and the two must be DISJOINT. */
   uninitRegs?: readonly string[];
+  /** Registers the ABI DOES pass arguments in — the other side of the register partition, and the
+   *  only reason the side above is checkable rather than believed. The frame coordinate declares
+   *  both of its sides and refuses an offset in neither; this one declares both and refuses a key
+   *  in BOTH, which is the same move.
+   *
+   *  Without it the whole contract rests on one hand-written list in target.ts being right, in a
+   *  file whose idiom is "a compiler fact is one field": spelling `r1` where `r11` was meant
+   *  deletes a parameter and emits `s32 uninit_r1;` in its place, with no diagnostic anywhere.
+   *  `readRecursive` cannot catch that on its own — it never sees the argument registers, because
+   *  a read of one takes the parameter path by falling through every other case. */
+  argRegs?: readonly string[];
+}
+
+/** The register partition's postcondition, checked at the point of USE. `uninitRegs` asserts "no
+ *  caller could have handed a value over in these"; `argRegs` is the set of registers a caller
+ *  hands values over in. A key in both is a target that contradicts itself, and a `uninitRegs` with
+ *  no `argRegs` beside it is one whose assertion nothing can check — both refuse rather than
+ *  silently reclassify an argument as an uninitialised local. */
+function checkedLiveInModel(fnName: string, m: LiveInModel): LiveInModel {
+  if (m.uninitRegs === undefined) {
+    return m;
+  }
+  const args = m.argRegs;
+  if (args === undefined) {
+    throw new Error(
+      `lifting '${fnName}': the live-in model lists registers the ABI does not pass arguments in ` +
+        `but not the ones it does, so nothing can check the two agree`,
+    );
+  }
+  const both = m.uninitRegs.filter((r) => args.includes(r));
+  if (both.length > 0) {
+    throw new Error(
+      `lifting '${fnName}': the live-in model lists ${both.join(', ')} as BOTH an argument register ` +
+        `and one the ABI does not pass arguments in`,
+    );
+  }
+  return m;
 }
 
 export function makeSsaBuilder(
@@ -109,7 +148,12 @@ export function makeSsaBuilder(
   liveInOf: () => LiveInModel = () => ({}),
 ): SsaBuilder {
   let modelMemo: LiveInModel | null = null;
-  const model = (): LiveInModel => (modelMemo ??= liveInOf());
+  // Checked ONCE, where the model is materialised — every function with a parameter reads a
+  // register def-lessly, so this runs on effectively every lift rather than only on the rare
+  // function that reads the mis-listed register. A contradictory or half-declared partition is a
+  // bug in the TARGET, not an unliftable function, so it throws a plain Error: a decline would
+  // report the target's typo as a property of the input, once per function, forever.
+  const model = (): LiveInModel => (modelMemo ??= checkedLiveInModel(name, liveInOf()));
   const inRange = (off: number, r?: { from: number; to: number }) => r !== undefined && off >= r.from && off < r.to;
   const irBlocks: Block[] = Array.from({ length: blockCount }, () => ({ params: [] as Value[], ops: [] }));
   const fn: Fn = { name, blocks: irBlocks };
