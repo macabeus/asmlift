@@ -95,7 +95,10 @@ export interface TargetDescription {
     // emitting the forward-branch-on-negated-condition (taken arm as `else`). IDO/MIPS preserves
     // source direction so this must be on to be byte-exact; agbcc/GCC canonicalize either way so
     // true is a safe default there. A compiler that inverts branch canonicalization sets it
-    // false. Absent ⇒ true; a compiler opts OUT.
+    // false. Absent ⇒ true; a compiler opts OUT. It carries the JOINED case with it:
+    // StructureOptions.negateJoinedBranchSense defaults to this value, so the first compiler that
+    // preserves divergent sense and inverts joined sense splits them by promoting that option to a
+    // field here — never by an `arch ==` branch in the structurer.
     preserveDivergentBranchSense?: boolean;
     // Order the parallel-copy assignments at a CFG edge by the order their values are COMPUTED
     // in the predecessor (vs. source/param order), matching a compiler that lays defining ops

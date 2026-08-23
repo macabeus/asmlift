@@ -448,9 +448,13 @@ export function enumerateCandidates(
   // combinations are the same four as before — only which one carries the bare label changed).
   // Crossed with the pair above. The two senses are two different sources wherever a two-armed
   // joined `if` exists at all — agbcc emits different bytes for the arms-swapped spelling — and
-  // what inverts the polarity (a short-circuit fold choosing the orientation, a conditional branch
-  // relayed past Thumb's ±256-byte reach) is per-SITE where this lever is per-function, so no
-  // per-function predicate decides it. A function with no two-armed joined if emits identical
+  // all three things that invert the polarity are per-SITE where this lever is per-function, so no
+  // per-function predicate decides it: a short-circuit fold choosing the orientation, a
+  // conditional branch relayed past Thumb's ±256-byte reach, and a rotated loop's zero-trip guard,
+  // where the `if` is the compiler's own and no source sense exists to be faithful to. The third
+  // is what keeps the residue on targets that have neither: of the 19 rows that still win on the
+  // axis, 7 are gcc2.7.2 / gcc2.7.2kmc / mwcc with no `short-circuit` tag and no Thumb branch
+  // range, and 5 of those 7 carry `loop`. A function with no two-armed joined if emits identical
   // source and the dedup collapses it before any compile.
   const baseSense = [
     ...senseAnchor.map((s) => ({ ...s, join: false })),

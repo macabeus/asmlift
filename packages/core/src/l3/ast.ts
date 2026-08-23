@@ -507,7 +507,7 @@ export function* walkExprs(body: Stmt[]): Generator<Expr> {
 //      holds. Same operands, same inputs — which is what makes it safe over a `b` that loads. It
 //      matters because a source `&&` and its dual `||` compile to the SAME branch graph, so the
 //      recognizers in raise/shortcircuit.ts can only pick whichever the asm's branch senses spell;
-//      distributing is what lets the `/flip-branch` candidate reach the other one;
+//      distributing is what lets the other one be spelled at all;
 //   3. `!!x` collapses to `x`, reachable only from a double flip that rule 2 now produces.
 //
 // CONTEXT REQUIREMENT, and it is the reason this is `negateCond` and not `negate`: rule 3 is valid
@@ -515,12 +515,15 @@ export function* walkExprs(body: Stmt[]): Generator<Expr> {
 // so this must never be used to negate a general integer expression — only an `if`/loop test or an
 // operand of one of the connectives above.
 //
-// SCOPE of rule 2: it only gives the differ a second spelling where a candidate lever already flips
-// the condition, and `preserveDivergentBranchSense` covers divergent `if`s ONLY. A connective that
-// ended up as a LOOP test therefore has no dual candidate at all — the differ never sees the other
-// form, so on such a row this rule changes how the code READS and nothing else. Widening the
-// branch-sense lever to loop tests is what would make it a matching lever there, and that is a
-// separate change.
+// SCOPE of rule 2: it fires wherever a branch-sense lever negates the condition, which is both `if`
+// classes — `preserveDivergentBranchSense` on divergent ifs, `negateJoinedBranchSense` on
+// reconverging ones — and on the joined class it is a DEFAULT emission, not a differ-only
+// alternative, so a source `&&` can come out as its `||` dual with no lever asked for
+// (`synthetic:ifand_far`, where the branch range put the fold on the other arm). Neither
+// lever reaches a LOOP test, so a connective that ended up as one has no dual candidate at all —
+// the differ never sees the other form, and on such a row this rule changes how the code READS and
+// nothing else. Widening a branch-sense lever to loop tests is what would make it a matching lever
+// there, and that is a separate change.
 export const NEGATE_REL: Partial<Record<BinOp, BinOp>> = {
   '<': '>=',
   '>=': '<',

@@ -667,10 +667,26 @@ export interface StructureOptions {
   // forward to the taken block and fell through to the other, so a compiler that preserves
   // source branch direction saw the FALL-THROUGH arm as `then` — the same layout evidence the
   // divergent case reads (preserveDivergentBranchSense), which post-dominance hides here because
-  // both arms reconverge. DEFAULTS to preserveDivergentBranchSense: it is the same claim about
-  // the same compiler, and a joined `if` is not a different question because its arms happen to
-  // rejoin. rank.ts's `/flip-join` axis emits the other sense, so where a pass did invert the
-  // branch the differ still reaches that spelling.
+  // both arms reconverge. Defaults to preserveDivergentBranchSense rather than to a constant, so a
+  // target that opts out of the divergent claim opts out of this one; target.ts says how.
+  //
+  // This is the ZERO POINT of rank.ts's `/flip-join` axis, not a per-compiler fact that closes
+  // the question — docs/level-tower.md wants a default only where the mapping is a FUNCTION, and
+  // 19 of the benchmark's 856 rows still reach their winning spelling through the axis (4 of them
+  // matches). Read it forward only: it says which sense to emit ABSENT evidence of an inversion,
+  // never that the asm's layout WAS the source's sense. What agbcc contributes is the refusals —
+  // its gcc Makefile SRCS compiles neither sched.c nor reorg.c and toplev.c never sets
+  // flag_schedule_insns, and gcse.c runs one_code_hoisting_pass only `if (optimize_size)`, which
+  // toplev.c sets for -Os alone — so no scheduler and no hoister moves an arm's body across the
+  // branch after stmt.c laid the arms out in source order.
+  //
+  // Three mechanisms DO invert the sense, and each is per-SITE where this lever is per-function,
+  // so no value here is right in every `if` of a function that holds several: a short-circuit
+  // fold picks which successor is `taken` from a branch polarity that Thumb's branch RANGE
+  // decides (raise/shortcircuit.ts); a relay past a conditional branch's reach inverts to jump
+  // around the long form; and a rotated loop's zero-trip guard is an `if` no source wrote at all
+  // (`synthetic:fib`, `for(i=0;i<n;i++)`, emits `if (0 >= a0) … else do{…}while`), so there no
+  // spelling is the faithful one and only the differ can choose.
   negateJoinedBranchSense?: boolean;
   orderArgCopiesByComputation?: boolean;
   // Comparison-tree switch recovery: treat an `x != K` test as a case (the EQUAL side is a case
