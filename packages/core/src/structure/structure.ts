@@ -3399,6 +3399,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
               {
                 name: laddrName.get(op)!,
                 type: T.int((op.attrs.width as number) * 8, op.attrs.signed as boolean),
+                // the machine gave this value a stack slot — an asm fact, and the gate the
+                // l3/volatileval.ts lever reads (see the SFn.locals doc)
+                frame: true as const,
                 // an ESCAPED address makes every store observable (the DMA hardware reads it), and
                 // the source spells the scratch volatile for that reason — see the stamp site in
                 // frontend/thumb.ts for why it is the SPELLING that matters and not dead-store

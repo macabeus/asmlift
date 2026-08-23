@@ -38,6 +38,7 @@ import { reindexWalks } from './l3/reindex';
 import { hoistScopedBases } from './l3/scopebase';
 import { type SymbolRef, collectSymbolRefs } from './l3/symbol-refs';
 import { volatilePtrLocals, volatileSubsetCandidates } from './l3/volatileptr';
+import { volatileValueLocals } from './l3/volatileval';
 import { RewritePattern } from './pattern/engine';
 import { applyIdiomPatterns, raiseRecovered, structureChecked } from './pipeline';
 import { type Prototypes, prototypesFromSymbols } from './proto';
@@ -725,6 +726,14 @@ export function enumerateCandidates(
           // motion, which lands the allocator on different homes). Both spellings are emitted and
           // the differ referees.
           respell('/volatile', () => volatilePtrLocals(sfn));
+          // `/vol-slot` — declare a STACK-HOMED scalar local volatile (l3/volatileval.ts). The
+          // qualifier takes away the allocator's freedom to keep the value in a callee-saved
+          // register across a call, and which of the three ways a slot can arise (a volatile local,
+          // an address-taken one, plain register pressure) the source used is not derivable from
+          // the asm. A DECLARATION lever, not a structuring axis: it changes nothing structure()
+          // decides, so it rides the base spelling like its `/volatile` sibling rather than doubling
+          // every enumeration, and its frame-flag gate costs nothing on a function with no slot.
+          respell('/vol-slot', () => volatileValueLocals(sfn));
           // `/scopebase` — name a reused global base at the INNERMOST scope holding its uses
           // (l3/scopebase.ts). Distinct from basecse's function-top hoist, which the primary already
           // carries: this one fires exactly where that placement would extend a live range the

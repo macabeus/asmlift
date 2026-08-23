@@ -169,8 +169,15 @@ export interface SFn {
    *  symbols.ts's cell-vs-pointee split: `volatile` = the local OBJECT is volatile (the
    *  address-escaped frame scratch; dce.ts treats reads of it as observable), `pointeeVolatile`
    *  = the local is a pointer TO volatile data (the l3/volatileptr.ts lever; a declaration
-   *  spelling only — nothing about the local itself is observable). */
-  locals: { name: string; type: IrType; volatile?: true; pointeeVolatile?: true }[];
+   *  spelling only — nothing about the local itself is observable).
+   *
+   *  `frame` marks a local the MACHINE gave a stack slot — the structurer recovered it from an
+   *  `laddr`, so its home is an asm fact rather than a recovery choice. Distinct from the
+   *  volatility flags: a frame local may be plain (the address never escaped). The
+   *  l3/volatileval.ts lever reads it, because a source-level `volatile` scalar always lands in
+   *  a slot, so the flag is exactly that lever's inhabitant set. The name cannot carry the fact
+   *  — `sp<off>` is minted against the symbol map and grows `_` suffixes on collision. */
+  locals: { name: string; type: IrType; volatile?: true; pointeeVolatile?: true; frame?: true }[];
   /** project globals referenced with a known declaration shape (symbol map) — typed for the
    *  legalization env (exprCType) but NEVER declared by a backend: the project's own headers
    *  declare them, exactly like every other global name asmlift emits. */
