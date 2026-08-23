@@ -2026,15 +2026,17 @@ export const SYNTHETIC: SynthSpec[] = [
   // The construct is cheap to carry when everything else is already wrong and a hard blocker once
   // it is not, which is why both directions are quoted rather than either alone.
   //
-  // AND THE PRICE IS NOT FOR THE UNDEFINEDNESS — three controls on the same reference and rig:
+  // AND THE PRICE IS NOT FOR THE UNDEFINEDNESS — controls on the same reference and rig, each
+  // keeping all five preheader materialisations and changing ONLY where their values come from:
   //     five preheader reads of UNDEFINED locals (what this family names) .... 386  (+179)
-  //     the same five with their sources given real definitions ............... 401  (+194)
-  //     the same five sourced from ordinary extra parameters .................. 392  (+185)
-  //     the same five sourced from the constant 0 ............................. 246   (+39)
-  // A DEFINED source costs MORE. So the cost is the pin, exactly as the paragraph above says, and
-  // not the `undef`: five extra values materialised in a preheader and live across the nest, which
-  // is the same register budget `/expr-home` and `/addr-home` spend. Only the constant is cheap,
-  // because it is rematerialised and extends no live range. A lever that stops SPELLING the entry
+  //     the three local sources defined at their declarations ................ 402  (+195)
+  //     the three defined by assignment just above the copies ................ 392  (+185)
+  //     all five sourced from ordinary extra parameters ...................... 399  (+192)
+  //     all five sourced from the constant 0 ................................. 246   (+39)
+  // Every DEFINED source costs MORE. So the cost is the pin, exactly as the paragraph above says,
+  // and not the `undef`: five extra values materialised in a preheader and live across the nest,
+  // which is the same register budget `/expr-home` and `/addr-home` spend. Only the constant is
+  // cheap, because it is rematerialised and extends no live range. A lever that stops SPELLING the entry
   // as an undefined read but still emits the copy will move these rows by nothing.
   //
   // `loopfall` is the isolate and `loopset` its control: byte-identical C except for the
@@ -2223,9 +2225,28 @@ export const SYNTHETIC: SynthSpec[] = [
   // RMW the compiler re-materializes) — are exactly wrong for an MMIO poll, so rank.ts's
   // `/livebase` lever re-runs the pass with both ablated, leaving only `single-use`. That lever
   // is ALL-OR-NOTHING over bases: `hoistReusedGlobalBases` hoists every key the gate list admits,
-  // and there is no candidate for a proper subset. `/volatile` (l3/volatileptr.ts) does enumerate
-  // subsets — but `volatileSubsetCandidates` returns `[]` outside `2 <= eligible <= 3`, so the
-  // subset door is shut on exactly the functions that have several bases.
+  // and there is no candidate for a proper subset.
+  //
+  // ATTRIBUTED BY ABLATION, not by reading. Adding one more gate to LIVEBASE_GATES that rejects a
+  // numeric base outside MMIO — per-base selectivity in its crudest form — takes this row from 11
+  // to MATCH. Re-running the WHOLE synthetic tier under it (604 rows) moves exactly one other row,
+  // and that row is the finding's other half: `sizebound` goes 16 → 20, because it reads
+  // `*(u16 *)0x03001048` in two loop bounds and hoisting THAT base is correct. So the pass is
+  // right about the spelling and wrong about which bases get it — and an address threshold is NOT
+  // the predicate to fix it with: it pays 4 points on `sizebound` for the 11 it wins here.
+  // `sizebound` is the row that referees whatever predicate a future lever proposes.
+  //
+  // WATCH THE SIGN when writing one. `dma_wait:mwcc_242_81`'s base is 0xcc006000, which the IR
+  // carries as a NEGATIVE 32-bit constant; a first cut of the probe compared the key as a signed
+  // decimal, rejected that base, and LOST a MATCH the tier already had. Reading it unsigned
+  // restores it. A per-base predicate is a place where a sign error costs a row silently.
+  //
+  // THE `/volatile` SUBSET CAP IS NOT A SECOND BLOCKER — measured, because it looks like one.
+  // `volatileSubsetCandidates` (l3/volatileptr.ts) returns `[]` outside `2 <= eligible <= 3`, and
+  // this row has four eligible locals, so no `/volatile-<name>` label exists here. Raising the cap
+  // to 8 makes eleven subset labels appear and leaves the row at 11 — every one of them still
+  // binds all four bases, and even the subsets that qualify exactly the DMA base score 11. Subset
+  // VOLATILITY on an all-or-nothing HOIST buys nothing. Do not spend a round on the cap.
   //
   // `mixpoll` is the isolate: one DMA register file that must be a bound `volatile` local, and
   // three IWRAM scalars that must stay inline absolute derefs. The ROM's own C is the reference,
@@ -2255,8 +2276,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // enumeration returns four shapes and no others: 13440 bind nothing, 1024 bind 0x03003430 alone
   // (the default pass's own single admission), 3072 bind all five of 0x03003430 / 0x03003478 /
   // 0x0300347A / 0x030034A0 (IWRAM) and 0x040000D4 (the DMA register file) plain, and 3072 bind
-  // those same five all `volatile`. Not one binds the DMA base alone, and five eligible locals is
-  // also why no `/volatile-<name>` subset label exists there: the cap is 3.
+  // those same five all `volatile`. Not one binds the DMA base alone.
   //
   // agbcc only. The claim is about what THIS compiler does with the two spellings, established by
   // compiling both; the poll declines on ido7.1/gcc2.7.2kmc's branch-likely lift link exactly as
@@ -2314,7 +2334,10 @@ export const SYNTHETIC: SynthSpec[] = [
   //     the same candidate with the guard re-spelled by hand .........  0  ← MATCH
   // Attributed by ABLATION, not by reading: teaching initfirst's side match to look through a cast
   // makes `unsigned/uns-cmp/livebase/volatile/initfirst` appear (36 candidates, up from 30) and it
-  // scores 0. The blocker is the cast, not a hoist — `/uns-cmp` moves no statement.
+  // scores 0. The blocker is the cast, not a hoist — `/uns-cmp` moves no statement. Re-running the
+  // WHOLE synthetic tier under that one-line ablation moves EXACTLY this row and no other (604
+  // rows, 1 moved), so it is the row that gates the change and nothing else in the corpus is
+  // holding it up — including `sizebound`, which carries both axes and does not move.
   //
   // `signguard` is the control, and it differs by ONE token: `s32 i` for `u32 i`. Nothing else in
   // the C changes, the halving keeps its `(u32)` cast so it stays an `lsr` on both, and asmlift
@@ -2323,13 +2346,14 @@ export const SYNTHETIC: SynthSpec[] = [
   //
   // A SECOND blocker sits at the same precondition and has NO row: `/expr-home` can land its hoist
   // at the head of the guarded arm (`if (0 < n) { v0 = 128 << 24; v1 = 0; do …`), and then `then[0]`
-  // is not the init. It reproduces synthetically — on a probe of this shape with a loop-invariant
-  // constant used twice, every `/expr-home` label lacks an `/initfirst` sibling and hand-composing
-  // them improves 31 → 26 — but on every shape tried the `/expr-home` branch scores far behind the
-  // winner, so no row demands it and none was written. What would earn one: a target whose ranked
-  // winner carries `/expr-home` with the hoist INSIDE the guard. (`sizebound:agbcc` carries both
-  // `/expr-home` and `/initfirst`, because there the homed value is parameter-derived and agbcc
-  // materialises it before the guard — that composition is not the broken one.)
+  // is not the init. It reproduces on THIS row — of its 30 candidates, 12 carry `/expr-home` and
+  // not one of those carries `/initfirst` — but they all score 21 against the winner's 2, and
+  // hand-composing the two spellings on that branch recovers a single point (31 → 30 on a hand
+  // probe of the `/expr-home` shape). So no row demands it and none was written. What would earn
+  // one: a target whose ranked winner carries `/expr-home` with the hoist INSIDE the guard.
+  // (`sizebound:agbcc` carries both `/expr-home` and `/initfirst`, because there the homed value
+  // is parameter-derived and agbcc materialises it before the guard — that composition is not the
+  // broken one.)
   //
   // Cut from kleod:LoadBGTilemapData:agbcc, whose L1 guard is `movs r3, #0 / … / cmp r3, r2 / bge`
   // in the ROM and `if (0 < *(u16 *)50345082)` in the ranked winner.
