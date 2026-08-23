@@ -170,12 +170,13 @@ test('--jobs must be a positive integer', async () => {
 });
 
 // docs/ranked-repro.md is the repo's ONE canonical ranked command, and the two tests above are
-// what its `--proto` spelling has to agree with. A round that measured on a build predating
-// inline support rewrote the page's command block to take a path and added prose saying inline
-// exits 66 — dating the claim to the day it stopped being true and sending the next reader back
-// to the scratch proto.json files inline support exists to remove. The page is prose, so nothing
-// but this re-runs it. The command BLOCK is what is checked, not the prose around it: the block
-// is what gets copied, and it is the thing the page exists to keep identical between rounds.
+// what its `--proto` spelling has to agree with. Nothing else re-runs the page, so a claim about
+// the flag can sit there being false for as long as nobody types it.
+// The command BLOCK is checked, not the prose around it: the block is what gets copied. A page
+// that quotes the inline form only to call it broken passes a prose-wide check.
+// Requiring the block to be inline is deliberate, not incidental — a path means a scratch file,
+// and scratch files carrying different tables for "the canonical run" is the drift the page opens
+// by describing.
 test("docs/ranked-repro.md's canonical command spells --proto a way the CLI accepts", async () => {
   const doc = readFileSync(join(import.meta.dirname, '../../../../docs/ranked-repro.md'), 'utf8');
   const block = doc.match(/```sh\n([\s\S]*?)```/)?.[1];
