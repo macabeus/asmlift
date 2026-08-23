@@ -233,10 +233,11 @@ const createdLocals = (from: SFn, to: SFn): Set<string> => {
  *  bases the source named is per-base knowledge the asm does not carry — a DMA register file wants
  *  one register held across the whole body while the IWRAM halfword beside it re-materializes — so
  *  each admission rides as its own candidate and the differ referees between them. Every
- *  `/livebase` product below fans over this table, so a new admission is one entry plus its gate
- *  table, not nine hand-edited sites that can drift — including a MIRROR admission (bind the
- *  scalar cells, leave the register file inline), which needs the complementary predicate in a
- *  table of its own rather than another entry in LIVEBASE_BLOCK_GATES: a gate can only reject more.
+ *  `/livebase` product below fans over this table, so a new admission is one entry here, one gate
+ *  table, and that table's line in the gate-contract roster — not nine hand-edited sites that can
+ *  drift. A MIRROR admission (bind the scalar cells, leave the register file inline) is that, with
+ *  the complementary predicate; it is never another entry in LIVEBASE_BLOCK_GATES, which can only
+ *  reject more.
  *
  *  WHAT BOUNDS IT. A row declines unless it binds a non-empty set of bases no earlier row already
  *  bound, and each product declines wherever its own lever does, so the list widens only where an
@@ -787,12 +788,8 @@ export function enumerateCandidates(
           // where the prediction is wrong — the compiler holds ONE base register across stores, the
           // loop, and the read-back. The primary already carries every base those rules admit, so a
           // hoist-nothing result means the lever has nothing to add and declines.
-          // One family per LIVEBASE_ADMISSIONS row, and the whole product surface below fans over
-          // the same list, so the admissions are interchangeable rather than a wide one with a
-          // narrow special case beside it. A row declines when it binds nothing (the lever has
-          // nothing the primary does not already carry) and when it binds exactly what an earlier
-          // row bound (the same spelling under a different label), so a narrower table costs
-          // candidates only on a function where it is a genuinely different set of bases.
+          // One family per LIVEBASE_ADMISSIONS row; a row binding exactly what an earlier row bound
+          // is the same spelling under a different label, so it declines for that too.
           const livebases = LIVEBASE_ADMISSIONS.map(({ suffix, gates }, i) => {
             const hoist = (): SFn | null => {
               const bound = admittedBases(sfn, gates);

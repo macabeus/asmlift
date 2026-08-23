@@ -2288,7 +2288,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // three IWRAM scalars that must stay inline absolute derefs. The ROM's own C is the reference,
   // and hoisting the three IWRAM cells is what costs — measured by hand-editing asmlift's own
   // winner one clause at a time against the same object:
-  //     all four bound, all four volatile (the winner before the split) ......... 11
+  //     all four bound, all four volatile (plain `/livebase/volatile`) ........... 11
   //     all four bound, only the DMA base volatile .............................. 11
   //     all four bound, none volatile .......................................... 27
   //     ONLY the DMA base bound, volatile, the three IWRAM cells inline .......... 0  ← MATCH

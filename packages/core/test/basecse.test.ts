@@ -254,7 +254,7 @@ describe('the block admission (WHICH admitted bases get the local)', () => {
   // One MMIO register file indexed at three cells, beside two scalar cells re-read in place — all
   // three bases in the same loop, so the default gates refuse every one and only /livebase's
   // ablation admits them. The source spelled the register file as a pointer and the scalars as
-  // bare derefs; the all-or-nothing hoist cannot say that, `single-cell` can.
+  // bare derefs; the all-or-nothing hoist cannot offer that, `single-cell` makes it a candidate.
   const mixed = (): SFn =>
     fn([
       {
