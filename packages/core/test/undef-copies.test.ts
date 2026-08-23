@@ -136,10 +136,14 @@ test('a store of an undefined value still emits', () => {
 // even though no member of its class has a def-block that reaches this predecessor. Dropping the
 // arm's copy there stores 0 where the machine stores whatever the arm left.
 //
-// The sibling displacement, a pre-update exit copy sunk to the top of a loop body, cannot collide
-// the same way: for it to precede an undef edge that edge would have to leave the body for the
-// loop's own exit, and a second live exit is what makes the shape decline as a `break` (structure.ts,
-// the single-exit rule) — so no loop with a sunk slot has one.
+// The sibling displacement is a pre-update exit copy sunk to the top of a loop body, and where that
+// edge goes is irrelevant to it: `preUpdateCopies` writes the name at the TOP OF THE BODY, so it
+// precedes every edge inside the loop, not only one leaving it. What refuses the collision is
+// `dest-free-inside-loop` (hazards.ts) — an in-body merge under the exit param's name is a block
+// param `definedInBody` sees, so the slot is never sunk (hazards.test.ts, 'a BLOCK PARAM inside the
+// body under the destination name counts as busy'). That gate is not stated about undef and carries
+// its own KNOWN GAP, so the pair is a conjecture; `sunkCopyOverDroppedUndef` re-checks it per
+// function and declines loud rather than substituting a defined value.
 const ANCHORED = `fn anch {
 ^bb0(%0: s32):
   %1: s32 = undef {key="sp@0"}

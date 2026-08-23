@@ -69,7 +69,7 @@ import {
   scalarCellType,
 } from '../symbols';
 import { analyze } from './analysis';
-import { makeLoopHazards, updateWriteSet } from './hazards';
+import { makeLoopHazards, sunkCopyOverDroppedUndef, updateWriteSet } from './hazards';
 import { analyzeLoops } from './loops';
 import { type NameMerge, coalesceNames } from './namecoalesce';
 import { type ArmExit, makeSwitchRecovery } from './switch-recover';
@@ -2347,12 +2347,28 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // that site dominates them. Its block is a write site for the name like any other, and without it
   // `v0 = 0; if (c) { } store v0;` drops the undefined arm's copy and stores 0 where the machine
   // stores whatever the arm left — the same substitution the parameter case makes, one axis over.
+  //
+  // THE SECOND RELOCATION goes the other way, and this test cannot see it at all. A SUNK pre-update
+  // exit copy (preUpdateCopies) writes the loop EXIT's param at the top of the loop BODY, so the
+  // home this reads for it — `paramBlock`, the exit block — sits strictly LATER in the CFG than
+  // where the copy lands. What keeps the two apart is not this test but `dest-free-inside-loop`
+  // (hazards.ts): a merge inside the body under the exit param's name is a block param
+  // `definedInBody` sees, so the slot is never sunk in the first place. That gate carries its own
+  // KNOWN GAP, so the pair is a conjecture rather than a proof — `sunkCopyOverDroppedUndef` re-checks
+  // it per function once both records below are complete, which is the only point at which they can
+  // be: the do-while path structures its body BEFORE it mints its sunk copies.
   const anchoredHome = new Map<string, Block[]>();
   for (const [def, entries] of anchoredAt) {
     for (const { name } of entries) {
       (anchoredHome.get(name) ?? anchoredHome.set(name, []).get(name)!).push(opBlock.get(def)!);
     }
   }
+  /** Every copy `undefCarriesNothing` dropped, with the edge it was dropped from. */
+  const droppedUndefCopies: { name: string; pred: Block }[] = [];
+  /** Every sunk pre-update exit copy, homed where it LANDS (the loop header whose body opens with
+   *  it) rather than where its destination param lives. These two lists are the postcondition's
+   *  whole input. */
+  const sunkCopyHomes: { name: string; home: Block }[] = [];
   const undefCarriesNothing = (arg: Value, name: string, pred: Block): boolean => {
     if (defs.get(arg)?.opcode !== 'undef') {
       return false;
@@ -2390,6 +2406,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         return;
       } // identity copy — coalesced away
       if (undefCarriesNothing(arg, name, pred)) {
+        droppedUndefCopies.push({ name, pred });
         return;
       }
       copies.push({ name, value: castAggregateAddr(name, argExpr(arg)), arg });
@@ -2901,7 +2918,12 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
           }
         }
         const inits = argAssigns(initFrom, li.header);
-        const loopStmt = emitWhile(li, updates, preUpdateCopies(li.exit, hexitArgs, sunk), fused ? 'while' : 'dowhile');
+        const loopStmt = emitWhile(
+          li,
+          updates,
+          preUpdateCopies(li.exit, hexitArgs, sunk, li.header),
+          fused ? 'while' : 'dowhile',
+        );
         // The guard-read substitution: an init arg reads as its loop variable's NAME. The inits
         // just assigned them (value-identical), and that is the source spelling — `if (n > 0)`
         // tests the loop variable, which is also the parked register the target's guard reads.
@@ -3109,7 +3131,11 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   //
   // The destination name is read as an invariant, not checked: every block param carries one.
   // `assertResolved` is what catches a widening that breaks that.
-  const preUpdateCopies = (exit: Block, exitArgs: readonly Value[], sunk: Set<number>): Stmt[] =>
+  //
+  // `home` is the loop HEADER — the block whose body these copies open, and so the block from which
+  // the write is reachable. Recorded rather than inferred because `exit` says the opposite (see
+  // `sunkCopyHomes`).
+  const preUpdateCopies = (exit: Block, exitArgs: readonly Value[], sunk: Set<number>, home: Block): Stmt[] =>
     [...sunk]
       .sort((x, y) => x - y)
       .map((j) => {
@@ -3119,9 +3145,11 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
               `inside a loop nested in another loop's post-loop naming`,
           );
         }
+        const name = varName.get(exit.params[j])!;
+        sunkCopyHomes.push({ name, home });
         return {
           k: 'assign' as const,
-          name: varName.get(exit.params[j])!,
+          name,
           value: exprWith(null)(exitArgs[j]),
         };
       });
@@ -3303,7 +3331,12 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // already holds the next value, so the latch-computed test reads `v`, not `v - 1`). `updates`
     // reuses the hazard check's computation — a second argAssigns call would burn a spurious
     // swap-cycle temp number.
-    const body = [...preUpdateCopies(dw.exit, exitArgs, sunk), ...inner, ...sideEffects(dw.latch), ...updates];
+    const body = [
+      ...preUpdateCopies(dw.exit, exitArgs, sunk, dw.header),
+      ...inner,
+      ...sideEffects(dw.latch),
+      ...updates,
+    ];
     let cond = exprWith(sub)(lterm.operands[0]);
     if (lterm.successors[1].block === dw.header) {
       cond = negateCond(cond);
@@ -3320,6 +3353,21 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   };
 
   const body = recognizeForLoops(structureRegion(entry, null));
+  // THE OBLIGATION `undefCarriesNothing` CANNOT DISCHARGE ON ITS OWN, checked now that both records
+  // are complete. That test reads each write site off `paramBlock`/`opBlock`, and a sunk pre-update
+  // exit copy is written somewhere else than either map says. What keeps them apart today is
+  // `dest-free-inside-loop`, a gate stated about something else entirely and carrying its own KNOWN
+  // GAP — so the day a widening lets the two meet, the emitted C substitutes a DEFINED value for the
+  // undefined one the machine leaves in place. Loud, because that failure has no other symptom.
+  const collided = sunkCopyOverDroppedUndef(droppedUndefCopies, sunkCopyHomes, (home, pred) =>
+    reachFrom(home).has(pred),
+  );
+  if (collided !== null) {
+    throw new StructureError(
+      `cannot structure '${fn.name}': a pre-update exit copy sunk into a loop body writes '${collided}' ` +
+        `ahead of an edge whose undefined argument's copy was dropped as carrying nothing`,
+    );
+  }
   // Strict-mode gaps decline HERE, naming the reasons — the same text annotate's markers
   // carry, so the two mode surfaces report the same decline (the reproduction scripts run
   // strict; the benchmark rows store annotate markers — fidelity holds them against each
