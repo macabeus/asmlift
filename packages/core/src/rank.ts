@@ -442,7 +442,7 @@ export function enumerateCandidates(
   ];
   // `/flip-join` — the JOINED-if sibling of `/flip-branch` (structure.ts
   // negateJoinedBranchSense): a reconverging two-armed if reads the same fall-through-is-then
-  // layout evidence the divergent case does, so the DEFAULT sense is now the divergent one's and
+  // layout evidence the divergent case does, so the DEFAULT sense is the divergent one's and
   // this axis emits the other. Read off the TARGET's sense, not this candidate's `s.sense`, so
   // `/flip-branch` still moves only divergent ifs and the two axes stay independent. The suffix
   // therefore names a sense RELATIVE to the target's default: a label quoted from a log identifies
@@ -1029,7 +1029,7 @@ export function rankBy<S extends { score: number }>(
  *
  *  LINE COUNT next, the other half of the same job: two spellings can tie on score AND on casts
  *  and still differ by a whole control-flow shape — a `/defsite`-anchored `v0 = 0; if (c) v0 = 1;`
- *  against the four-line `if/else` its sibling emits. Counted the way the report counts it
+ *  against the braced `if/else` its sibling emits. Counted the way the report counts it
  *  (apps/benchmark/src/eval/quality.ts `lines`), for the same reason `castCount` is: ranking must
  *  not optimize for something the published metric measures differently.
  *

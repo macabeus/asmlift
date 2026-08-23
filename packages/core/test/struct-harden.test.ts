@@ -109,9 +109,9 @@ describe('STRUCT-HARDEN: the compiler-behavior levers are load-bearing', () => {
   });
 
   test('the joined sense DEFAULTS to the divergent one', () => {
-    // One claim about one compiler: the layout evidence a joined `if` leaves is the evidence the
-    // divergent case already reads, so an absent lever spells both classes the same way. The
-    // pin travels with preserveDivergentBranchSense rather than being a second constant.
+    // The axis's zero point, not a second constant: the layout evidence a joined `if` leaves is
+    // the evidence the divergent case already reads, so an absent lever spells both classes the
+    // same way and a target that opts out of one opts out of both.
     expect(emit(BOTHIFS, {})).toBe(emit(BOTHIFS, { negateJoinedBranchSense: true }));
     expect(emit(BOTHIFS, { preserveDivergentBranchSense: false })).toBe(
       emit(BOTHIFS, { preserveDivergentBranchSense: false, negateJoinedBranchSense: false }),

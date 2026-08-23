@@ -471,9 +471,9 @@ export const FIXTURES: DecompFixture[] = [
   // `bhi`/`bls`/`bcc`/`bcs` must survive as real terminators: if the frontend drops one, the
   // boolean CFG collapses and the function silently miscompiles to a constant `return`. The
   // goldens pin both arms (`v0 = 0` / `v0 = 1`) and the unsigned compare sense ((u8) / u32).
-  // Byte-exact: the diamond recompiles to agbcc's own bytes once the joined-if sense is the
-  // divergent one's (structure.ts negateJoinedBranchSense), which puts `v0 = 1` in the arm the
-  // asm falls through into.
+  // Byte-exact: the joined-if sense is the divergent one's (structure.ts
+  // negateJoinedBranchSense), which puts `v0 = 1` in the arm the asm falls through into, and that
+  // is what agbcc emitted.
   {
     symbol: 'ult5',
     referenceC: 'int ult5(unsigned char x){ return x < 5; }',

@@ -1302,8 +1302,8 @@ export function lift(
   // The refusal is wider than that one shape because the asm does not separate it from a
   // locally-defined call thunk — `call_r3: bx r3`, ARMv4T's stand-in for the `blx rN` it has no
   // encoding for, which pokeemerald's m4a_1.s calls four times from inside MPlayMain's own slice.
-  // Both are a `bl` to a bare label the slice defines, both are preceded by a conditional branch
-  // over them, and both leave `lr` clobbered, so no liveness or layout fact tells them apart.
+  // Both are a `bl` to a bare label the slice defines, both sit under a conditional branch that
+  // skips them, and both leave `lr` clobbered, so no liveness or layout fact tells them apart.
   // Lifting the relay as a `br` is the other half of the gap and needs the same distinction plus a
   // proof that `lr` is dead there, since `bl` overwrites it and a branch must not.
   //

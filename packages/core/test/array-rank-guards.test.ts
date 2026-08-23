@@ -160,7 +160,7 @@ describe('the candidate ordering (rank.ts compareScored)', () => {
 
   test('at equal casts the COMPACTER spelling wins over enumeration order', () => {
     // The two byte-identical spellings synthetic:iszero has: the bare `if/else` is enumerated
-    // first, and the `/defsite`-anchored pre-initialization says the same thing in four fewer
+    // first, and the `/defsite`-anchored pre-initialization says the same thing in three fewer
     // lines. Casts tie at zero, so without this key enumeration order installs the longer one.
     const long = cand(
       'unsigned',

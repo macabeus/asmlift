@@ -682,8 +682,8 @@ export interface StructureOptions {
   //
   // Three mechanisms DO invert the sense, and each is per-SITE where this lever is per-function,
   // so no value here is right in every `if` of a function that holds several: a short-circuit
-  // fold picks which successor is `taken` from a branch polarity that Thumb's branch RANGE
-  // decides (raise/shortcircuit.ts); a relay past a conditional branch's reach inverts to jump
+  // fold picks which successor is `taken` from the asm's branch polarity, which on Thumb the
+  // branch RANGE decides (raise/shortcircuit.ts); a relay past a branch's reach inverts to jump
   // around the long form; and a rotated loop's zero-trip guard is an `if` no source wrote at all
   // (`synthetic:fib`, `for(i=0;i<n;i++)`, emits `if (0 >= a0) … else do{…}while`), so there no
   // spelling is the faithful one and only the differ can choose.
