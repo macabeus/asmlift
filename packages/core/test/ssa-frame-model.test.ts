@@ -73,11 +73,12 @@ test('an EMPTY ownedLocals range refuses, so an unmeasurable frame cannot assert
 });
 
 // ── the REGISTER half ────────────────────────────────────────────────────────────────────────
-// The same question in the other coordinate. It is answered from the calling convention rather
-// than from a measurement: a caller cannot hand a value over in a register the ABI does not pass
-// arguments in, so a read of one before any write is an uninitialised local however early it
-// happens. An unlisted register keeps its existing treatment; what DOES refuse is a partition that
-// contradicts itself or declares only one side — the two tests at the end.
+// The same question in the other coordinate. What reaches the builder is one list, and the rule
+// over it is flat: a key in `uninitRegs` read before any write is an uninitialised local. The two
+// facts that put a key on that list — the ABI passes no argument there, and this function's
+// prologue saved it — are the FRONTEND's to establish (thumb.ts `savedRegs`), for the same reason
+// `ownedLocals` is a range and not a verdict. An unlisted register keeps its existing treatment;
+// what DOES refuse is a partition that contradicts itself or declares only one side.
 const ARM_ARGS = ['r0', 'r1', 'r2', 'r3'];
 
 test('a register the ABI does not pass arguments in is an uninitialised local', () => {

@@ -141,8 +141,10 @@ export const OPCODES = {
   //     someone else once an address into it escapes to a callee, which fills a wider object than
   //     any in-function access reveals. Whoever mints one owes the retraction on escape
   //     (frontend/thumb.ts, after the frame-object audit).
-  //   • a REGISTER the ABI does not pass arguments in cannot carry a value a caller handed over,
-  //     and has no address for anything else to reach it by, so there is nothing to retract.
+  //   • a REGISTER the ABI does not pass arguments in AND this function's prologue SAVED cannot
+  //     carry a value a caller handed over, and has no address for anything else to reach it by, so
+  //     there is nothing to retract. The save is half of the premise, not a corroboration of it:
+  //     asm that follows no ABI is handed live values in registers it never saved.
   //
   // An opcode rather than a live-in because Braun's construction resolves a def-less read to a
   // live-in, and a live-in of the entry block is a PARAMETER — right for an argument register, a

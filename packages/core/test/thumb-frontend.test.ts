@@ -379,9 +379,10 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     // live-in and @sarg8 tied at 8 and the stable sort gave the slot to whichever was read first —
     // the prologue. ABI argument 8 came out as `a9`, and everything after it shifted.
     //
-    // The register partition (target.nonArgRegs) answers it one step earlier: a register this ABI
-    // does not pass arguments in never reaches the signature, so there is no tie left to break. The
-    // rank stays what a target declaring no register partition gets, and `lr` still reaches it here.
+    // The register partition answers it one step earlier: a register this ABI does not pass
+    // arguments in, saved by the prologue as this one is, never reaches the signature, so there is no
+    // tie left to break. The rank stays what a target declaring no partition gets, and `lr` still
+    // reaches it here.
     const hi =
       'f:\n\tpush\t{r4, r5, r6, r7, lr}\n\tmov\tr7, r8\n\tpush\t{r7}\n\tldr\tr0, [sp, #0x28]\n\tadd\tr0, r0, r7\n\tbx\tlr\n';
     // NINE parameters — the stack argument holds slot 8, and the r8 live-in is an uninitialised local
@@ -389,12 +390,8 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       's32 f(s32 a0, s32 a1, s32 a2, s32 a3, s32 a4, s32 a5, s32 a6, s32 a7, s32 a8) {\n' +
         '    s32 uninit_r8;\n    return a8 + uninit_r8;\n}\n',
     );
-    // The same at the low end, where a phantom `r4` would otherwise outrank argument 5. SAVED AND
-    // RESTORED, which the `hi` case above already is: "the compiler homed a local here" also says
-    // the function saved the register, and asm that reads r4 without saving it is asm agbcc cannot
-    // emit — a fragment or a private convention, the classification's KNOWN GAP (frontend/ssa.ts).
-    // A fixture that asserted the answer for one of those would be asserting it outside the
-    // population the rule is stated over.
+    // The same at the low end, where a phantom `r4` would otherwise outrank argument 5. SAVED, which
+    // the `hi` case already is, and which the rule requires: the next test is the other side.
     const lo =
       'f:\n\tpush\t{r4, r5, lr}\n\tadd\tr5, r4, #1\n\tldr\tr0, [sp, #0xc]\n\tadd\tr0, r0, r5\n' +
       '\tpop\t{r4, r5}\n\tpop\t{r1}\n\tbx\tr1\n';

@@ -485,9 +485,10 @@ export const SYNTHETIC: SynthSpec[] = [
   //     score cannot see, and the reason these rows are worth keeping green: they are the rows
   //     where the remaining half of `undef` must change the C and NOT the bytes. Both locals here
   //     land in r1/r2, so both rows sit on that half.
-  //   • a register the ABI does NOT pass arguments in ⇒ an `undef` (target.nonArgRegs). A caller
-  //     cannot hand a value over in one, so the fabrication has no premise there and the signature
-  //     stops growing. That is what closed `loopfall`, below.
+  //   • a register the ABI does NOT pass arguments in, which the prologue SAVED ⇒ an `undef`
+  //     (target.nonArgRegs against thumb.ts's `savedRegs`). A caller cannot hand a value over in
+  //     one, and the compiler homes a local there only after saving it, so the fabrication has no
+  //     premise and the signature stops growing. That is what closed `loopfall`, below.
   //
   // WHICH of those you get is decided by register pressure, not by the C, and that is what
   // uninit_spill is for. The first two rows are small enough that agbcc keeps the local in a
@@ -2014,8 +2015,8 @@ export const SYNTHETIC: SynthSpec[] = [
   //
   // Two rules close it, and each covers one of the two ways the entry got materialised. An `undef`
   // reaching a merge as an EDGE ARGUMENT emits no copy (structure.ts undefCarriesNothing), and a
-  // register the ABI does not pass arguments in is an `undef` rather than a parameter in the first
-  // place (target.nonArgRegs, frontend/ssa.ts). `loopfall` MATCHes on both together.
+  // saved register the ABI does not pass arguments in is an `undef` rather than a parameter in the
+  // first place (target.nonArgRegs, frontend/ssa.ts). `loopfall` MATCHes on both together.
   //
   // WHAT IS LEFT is the case neither rule can reach: a def-less read of an ARGUMENT register past
   // the function's real arity. Nothing in the asm separates "argument 3" from "a local agbcc homed

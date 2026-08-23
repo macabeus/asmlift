@@ -3606,10 +3606,11 @@ export function lift(
   // the `r8` live-in and `@sarg8` tied at 8, the sort is stable, the prologue reads r8 first — so
   // ABI argument 8 was emitted as `a9` and every parameter after it was off by one.
   //
-  // The register partition (LiveInModel.uninitRegs) takes r4-sl before they reach here — one the
-  // ABI does not pass arguments in is an uninitialised local, not a parameter — so what ranks 99
-  // is what the partition does not list: `lr` and `pc`. Not an argument either way, and the honest
-  // place for one is after everything the convention actually describes.
+  // The register partition (LiveInModel.uninitRegs) takes most of r4-sl before they reach here — one
+  // the ABI does not pass arguments in and this function saved is an uninitialised local, not a
+  // parameter. What still ranks 99 is `lr`/`pc`, which the partition does not list, and an r4-sl the
+  // prologue did not save. Not an argument either way, and the honest place for one is after
+  // everything the convention actually describes.
   abiSortEntryParams(entry, preds[0].length > 0, (v) => {
     const key = paramReg.get(v) ?? '';
     // an incoming STACK argument ranks by its ABI index, after every register argument
