@@ -579,10 +579,14 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     const two =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tcmp\tr0, #0\n\tbeq\t.L2\n\tstr\tr0, [sp]\n\tstr\tr0, [sp, #4]\n' +
       '.L2:\n\tldr\tr1, [sp]\n\tldr\tr2, [sp, #4]\n\tadd\tr0, r1, r2\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r3}\n\tbx\tr3\n';
-    // …and the names come from the KEYS, so each one points at the frame slot it stands for
+    // Each slot reaches the merge as its OWN variable, and neither carries the other's value. Only
+    // one is spelled by KEY: `sp@0`'s merge adopted the incoming parameter's name, so its undefined
+    // arm must overwrite `a0` — dropping that copy would hand the arm `a0`'s defined value instead
+    // (undefCarriesNothing, structure.ts). `sp@4`'s merge names nothing else, so its undefined arm
+    // assigns nothing and `v0` IS that uninitialised local.
     expect(decompile('f', two, ARMV4T_AGBCC).source).toBe(
-      's32 f(s32 a0) {\n    s32 v0;\n    s32 uninit_sp4;\n    s32 uninit_sp0;\n' +
-        '    if (a0 == 0) {\n        v0 = uninit_sp4;\n        a0 = uninit_sp0;\n    } else {\n        v0 = a0;\n    }\n' +
+      's32 f(s32 a0) {\n    s32 v0;\n    s32 uninit_sp0;\n' +
+        '    if (a0 == 0) {\n        a0 = uninit_sp0;\n    } else {\n        v0 = a0;\n    }\n' +
         '    return a0 + v0;\n}\n',
     );
   });
@@ -607,7 +611,12 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     test('DMA3SAD (+0) — the hardware reads the object, so the undef stands', () => {
       const src = decompile('f', escapeTo('0x00'), ARMV4T_AGBCC).source;
       expect(src).toContain('volatile s32 sp0;'); // the address still left the function
-      expect(src).toContain('uninit_sp4'); // …but nothing can write [sp,#4]
+      // …but nothing can write [sp,#4], so its merge still has an undefined arm: `v0` is that
+      // uninitialised local, declared and assigned only where the store runs.
+      expect(src).toBe(
+        's32 f(void) {\n    s32 v0;\n    volatile s32 sp0;\n    *(s32 *)67109076 = &sp0;\n' +
+          '    if (sp0 != 0) v0 = sp0;\n    return sp0 + v0;\n}\n',
+      );
     });
 
     test.each([
@@ -651,7 +660,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       ]);
       const withMap = decompile('f', escapeTo('0x00'), ARMV4T_AGBCC, { symbols }).source;
       expect(withMap).toContain('REG_DMA3SAD = &sp0;'); // the map really did rename it
-      expect(withMap).toContain('uninit_sp4'); // …and the undef still stands
+      expect(withMap).toContain('if (sp0 != 0) v0 = sp0;'); // …and the undef still stands
     });
 
     // A LITERAL register offset folds, because the predicate resolves an ADDRESS and `[r2, r5]`
@@ -659,7 +668,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     test('a register offset resolves when it is a literal and refuses when it is not', () => {
       const viaZero = escapeTo('0x00').replace('\tstr\tr4, [r2, #0x00]\n', '\tmov\tr5, #0x00\n\tstr\tr4, [r2, r5]\n');
       expect(viaZero).not.toBe(escapeTo('0x00'));
-      expect(decompile('f', viaZero, ARMV4T_AGBCC).source).toContain('uninit_sp4');
+      expect(decompile('f', viaZero, ARMV4T_AGBCC).source).toContain('if (sp0 != 0) v0 = sp0;');
 
       // …and a runtime offset is a base this cannot resolve, so it takes the conservative answer
       const viaParam = escapeTo('0x00').replace('\tstr\tr4, [r2, #0x00]\n', '\tstr\tr4, [r2, r0]\n');
@@ -701,13 +710,17 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     const captured =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tmov\tr4, sp\n\tldr\tr1, [r4]\n\tcmp\tr1, #0\n\tbeq\t.L2\n\tstr\tr1, [sp, #4]\n' +
       '.L2:\n\tldr\tr2, [sp, #4]\n\tadd\tr0, r1, r2\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r3}\n\tbx\tr3\n';
-    expect(decompile('f', captured, ARMV4T_AGBCC).source).toContain('uninit_sp4');
+    expect(decompile('f', captured, ARMV4T_AGBCC).source).toBe(
+      's32 f(void) {\n    s32 v0;\n    s32 sp0;\n    if (sp0 != 0) v0 = sp0;\n    return sp0 + v0;\n}\n',
+    );
     // POSITIVE CONTROL: the same undefined slot with no address taken at all still recovers, so the
     // guard is the escape and not something incidental about the shape.
     const noEscape =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tstr\tr0, [sp]\n\tldr\tr1, [sp]\n\tcmp\tr1, #0\n\tbeq\t.L2\n\tstr\tr1, [sp, #4]\n' +
       '.L2:\n\tldr\tr2, [sp, #4]\n\tadd\tr0, r1, r2\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r3}\n\tbx\tr3\n';
-    expect(decompile('f', noEscape, ARMV4T_AGBCC).source).toContain('uninit_sp4');
+    expect(decompile('f', noEscape, ARMV4T_AGBCC).source).toBe(
+      's32 f(s32 a0) {\n    s32 v0;\n    if (a0 != 0) v0 = a0;\n    return a0 + v0;\n}\n',
+    );
   });
 
   test('a push AFTER the reservation slides the slot window onto the pushed words', () => {
@@ -730,7 +743,9 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     const pushBefore =
       'f:\n\tpush\t{r4, lr}\n\tpush\t{r0}\n\tadd\tsp, sp, #-0x8\n\tcmp\tr0, #0\n\tbeq\t.L2\n\tstr\tr0, [sp]\n' +
       '.L2:\n\tldr\tr1, [sp]\n\tadd\tr0, r0, r1\n\tadd\tsp, sp, #0xc\n\tpop\t{r4}\n\tpop\t{r3}\n\tbx\tr3\n';
-    expect(decompile('f', pushBefore, ARMV4T_AGBCC).source).toContain('uninit_sp0');
+    expect(decompile('f', pushBefore, ARMV4T_AGBCC).source).toBe(
+      's32 f(s32 a0) {\n    s32 v0;\n    if (a0 != 0) v0 = a0;\n    return a0 + v0;\n}\n',
+    );
   });
 
   test('a word slot may not straddle the top of the reserved area', () => {
@@ -748,7 +763,9 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     const fits =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tcmp\tr0, #0\n\tbeq\t.L2\n\tstr\tr0, [sp, #4]\n' +
       '.L2:\n\tldr\tr1, [sp, #4]\n\tadd\tr0, r0, r1\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r3}\n\tbx\tr3\n';
-    expect(decompile('f', fits, ARMV4T_AGBCC).source).toContain('uninit_sp4');
+    expect(decompile('f', fits, ARMV4T_AGBCC).source).toBe(
+      's32 f(s32 a0) {\n    s32 v0;\n    if (a0 != 0) v0 = a0;\n    return a0 + v0;\n}\n',
+    );
   });
 
   test('the OUTGOING argument area is not a local, however far inside the frame it sits', () => {

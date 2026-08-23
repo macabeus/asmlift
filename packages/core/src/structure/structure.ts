@@ -2326,6 +2326,39 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // value. `sub` (used for the emitWhile un-rotation's exit copies) substitutes back-edge args to
   // their header-param NAMES — post-loop the params already hold their updated values, so a merged
   // exit value is read as `v` not `v-1`.
+  //
+  // AN UNDEFINED ARGUMENT CARRIES NOTHING, so it gets no copy — WHERE THE DESTINATION IS ITSELF
+  // UNDEFINED THERE. `undef` is storage whose only writer is this function and which no store of
+  // this function reached on this path (ir/opcodes.ts), so `w = uninit_sp0;` spells a READ of
+  // storage that was never written, a statement the asm has no instruction for. Dropping it leaves
+  // the variable holding whatever it held — which is the same thing exactly when nothing ever wrote
+  // it before this edge, and a DIFFERENT FUNCTION otherwise. That second case is real and reachable:
+  // a merge that adopted an incoming parameter's name emits `if (a0 == 0) a0 = uninit_sp0;`, and
+  // dropping THAT copy substitutes the parameter's defined value for the undefined one.
+  //
+  // So the test is over the destination's whole name class: no value spelled with that name may
+  // have a definition able to execute before this edge — its home block being this predecessor, or
+  // reaching it. A loop makes the second conjunct true on its own, which is what covers an earlier
+  // iteration's write. Conservative in the safe direction: unsure keeps the copy.
+  //
+  // Where it does fire the absence is not free — the read the copy spells occupies whatever
+  // register held the undefined value across the merge, and downstream allocation is a different
+  // one. Edge copies only: a `store` or a `ret` of an undef value is a real instruction and emits.
+  const undefCarriesNothing = (arg: Value, name: string, pred: Block): boolean => {
+    if (defs.get(arg)?.opcode !== 'undef') {
+      return false;
+    }
+    for (const [v, n] of varName) {
+      if (n !== name) {
+        continue;
+      }
+      const home = paramBlock.get(v) ?? opBlock.get(defs.get(v)!);
+      if (home === undefined || home === pred || reachFrom(home).has(pred)) {
+        return false;
+      }
+    }
+    return true;
+  };
   const tempCounter = { n: 0 }; // per-function swap-cycle temp names (sequentialize)
   // The copies for ONE specific successor record — the workhorse behind argAssigns, taken
   // directly by the switch_br path, whose duplicate case targets successorTo cannot
@@ -2349,6 +2382,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       if ((sub?.get(arg) ?? varName.get(arg)) === name) {
         return;
       } // identity copy — coalesced away
+      if (undefCarriesNothing(arg, name, pred)) {
+        return;
+      }
       copies.push({ name, value: castAggregateAddr(name, argExpr(arg)), arg });
     });
     // Emit in the order the args are COMPUTED in `pred` — a compiler that lays the defining ops
