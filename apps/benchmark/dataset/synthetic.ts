@@ -2046,6 +2046,12 @@ export const SYNTHETIC: SynthSpec[] = [
   // local, established by compiling both spellings of each pair; ido7.1, gcc2.7.2kmc and
   // mwcc_242_81 were NOT measured, so those lanes are left off rather than assumed.
   //
+  // NOT `merge-chain`, on `loopfall`/`loopset`. That tag is reserved for arms deciding more than
+  // one value; these decide exactly one (`w`) — `i` is the induction variable. The machine floor
+  // does not catch it because it counts DECLARED locals and `u32 w, i;` is two, which is the
+  // body-vs-declaration gap the floor's own comment calls out. `armfall`/`armdef` DO decide two
+  // (`w` and `h`, both computed), and keep it.
+  //
   // m2c, on the identical `ctx` asmlift receives, produces compilable C for none of the four, and
   // it reaches the same construct on the two rows that have one. On `armfall` it DECLINES:
   // `M2C_ERROR(/* Read from unset register $r2 */)`, beside its own fabricated entry read
@@ -2066,7 +2072,7 @@ export const SYNTHETIC: SynthSpec[] = [
       ' for (i = 0; i < n; i = i + 1) {' +
       ' if (gSrc[i] < 8) { w = gSrc[i] >> 2; }' +
       ' gOut[i] = w; } }',
-    features: ['uninit-local', 'merge-chain'],
+    features: ['uninit-local'],
     toolchains: ['agbcc'],
     ctx: 'void loopfall(u32 n);',
     proto: { loopfall: { returnsVoid: true } },
@@ -2080,7 +2086,7 @@ export const SYNTHETIC: SynthSpec[] = [
       ' for (i = 0; i < n; i = i + 1) {' +
       ' if (gSrc[i] < 8) { w = gSrc[i] >> 2; } else { w = 0; }' +
       ' gOut[i] = w; } }',
-    features: ['merge-chain'],
+    features: [],
     toolchains: ['agbcc'],
     ctx: 'void loopset(u32 n);',
     proto: { loopset: { returnsVoid: true } },
