@@ -1379,9 +1379,8 @@ export function lift(
   // because it sits at or above this frame, so `callerParams` is empty. `localArea` is 0 whenever
   // the prologue walk cannot measure the frame, and the empty range then refuses every slot —
   // `slotOff` applies the same bound when minting keys, so this is the independent check. The
-  // register half is the calling convention's, taken straight off the target: it covers the shape
-  // agbcc reaches for once it runs out of low registers — a local homed in r4-r7, or shuffled up
-  // into r8-sl, read on a path that never wrote it.
+  // register half is the calling convention's, taken straight off the target: it covers the local
+  // agbcc homes in r4-r7, or shuffles up into r8-sl, and reads on a path that never wrote it.
   const ssa = makeSsaBuilder(name, asmBlocks.length, preds, () => ({
     ownedLocals: { from: 0, to: localArea },
     ...(target.nonArgRegs ? { uninitRegs: target.nonArgRegs } : {}),
@@ -3547,10 +3546,10 @@ export function lift(
   // the `r8` live-in and `@sarg8` tied at 8, the sort is stable, the prologue reads r8 first — so
   // ABI argument 8 was emitted as `a9` and every parameter after it was off by one.
   //
-  // The register partition (LiveInModel.uninitRegs) now takes r4-sl before they get here — a
-  // register the ABI does not pass arguments in is an uninitialised local, not a parameter — so
-  // what still ranks 99 is what the partition does not list: `lr` and `pc`. Not an argument either
-  // way, and the honest place for one is after everything the convention actually describes.
+  // The register partition (LiveInModel.uninitRegs) takes r4-sl before they reach here — one the
+  // ABI does not pass arguments in is an uninitialised local, not a parameter — so what ranks 99
+  // is what the partition does not list: `lr` and `pc`. Not an argument either way, and the honest
+  // place for one is after everything the convention actually describes.
   abiSortEntryParams(entry, preds[0].length > 0, (v) => {
     const key = paramReg.get(v) ?? '';
     // an incoming STACK argument ranks by its ABI index, after every register argument

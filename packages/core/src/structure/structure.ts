@@ -2328,22 +2328,19 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // exit value is read as `v` not `v-1`.
   //
   // AN UNDEFINED ARGUMENT CARRIES NOTHING, so it gets no copy — WHERE THE DESTINATION IS ITSELF
-  // UNDEFINED THERE. `undef` is storage whose only writer is this function and which no store of
-  // this function reached on this path (ir/opcodes.ts), so `w = uninit_sp0;` spells a READ of
-  // storage that was never written, a statement the asm has no instruction for. Dropping it leaves
-  // the variable holding whatever it held — which is the same thing exactly when nothing ever wrote
-  // it before this edge, and a DIFFERENT FUNCTION otherwise. That second case is real and reachable:
-  // a merge that adopted an incoming parameter's name emits `if (a0 == 0) a0 = uninit_sp0;`, and
-  // dropping THAT copy substitutes the parameter's defined value for the undefined one.
+  // UNDEFINED THERE. `undef` is storage nothing wrote on this path (ir/opcodes.ts), so
+  // `w = uninit_sp0;` spells a read of storage that was never written: a statement the asm has no
+  // instruction for, whose cost is the register the undefined value then occupies across the merge.
+  // Dropping it leaves the variable holding whatever it held — the same thing exactly when nothing
+  // ever wrote it before this edge, and a DIFFERENT FUNCTION otherwise. That second case is real:
+  // a merge that adopted an incoming parameter's name emits `if (a0 == 0) a0 = uninit_sp0;`, where
+  // dropping the copy would substitute the parameter's defined value for the undefined one.
   //
   // So the test is over the destination's whole name class: no value spelled with that name may
   // have a definition able to execute before this edge — its home block being this predecessor, or
-  // reaching it. A loop makes the second conjunct true on its own, which is what covers an earlier
-  // iteration's write. Conservative in the safe direction: unsure keeps the copy.
-  //
-  // Where it does fire the absence is not free — the read the copy spells occupies whatever
-  // register held the undefined value across the merge, and downstream allocation is a different
-  // one. Edge copies only: a `store` or a `ret` of an undef value is a real instruction and emits.
+  // reaching it, which through a back edge is also how an earlier iteration's write is caught.
+  // Unsure keeps the copy. Edge copies only: a `store` or a `ret` of an undef value is a real
+  // instruction and emits.
   const undefCarriesNothing = (arg: Value, name: string, pred: Block): boolean => {
     if (defs.get(arg)?.opcode !== 'undef') {
       return false;

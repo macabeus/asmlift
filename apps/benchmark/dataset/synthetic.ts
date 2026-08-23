@@ -477,14 +477,17 @@ export const SYNTHETIC: SynthSpec[] = [
   //   • a stack slot ⇒ loud. Two guards split it — stored on SOME path (frontend/ssa.ts `finish`)
   //     vs stored on NO path reaching the read (frontend/mips.ts, which still conflates the
   //     second with a 5th+ stack argument). uninit_join and uninit_sw hit one each, on ido7.1.
-  //   • a register ⇒ silent: nothing guards it and the read becomes a fabricated extra parameter.
-  //     MEASURED: both agbcc rows byte-MATCH anyway, because the invented parameter lands in the
-  //     register the local was allocated to — `uninit_sw(s32 a0, s32 a1, s32 a2)` for a
-  //     two-argument function, and `uninit_join(s32 a0, s32 a1)` for a one-argument one. A trailing
-  //     parameter nothing reads costs nothing on this ABI. That is a fidelity gap the byte score
-  //     cannot see, and the reason these rows are worth keeping green: they are the rows where a
-  //     future `undef` must change the C and NOT the bytes. The loop-carried version of the same
-  //     fabrication is not free, and has its own family (`loopfall`, below).
+  //   • an ARGUMENT register ⇒ silent: nothing guards it and the read becomes a fabricated extra
+  //     parameter. MEASURED: both agbcc rows byte-MATCH anyway, because the invented parameter
+  //     lands in the register the local was allocated to — `uninit_sw(s32 a0, s32 a1, s32 a2)` for
+  //     a two-argument function, and `uninit_join(s32 a0, s32 a1)` for a one-argument one. A
+  //     trailing parameter nothing reads costs nothing on this ABI. That is a fidelity gap the byte
+  //     score cannot see, and the reason these rows are worth keeping green: they are the rows
+  //     where the remaining half of `undef` must change the C and NOT the bytes. Both locals here
+  //     land in r1/r2, so both rows sit on that half.
+  //   • a register the ABI does NOT pass arguments in ⇒ an `undef` (target.nonArgRegs). A caller
+  //     cannot hand a value over in one, so the fabrication has no premise there and the signature
+  //     stops growing. That is what closed `loopfall`, below.
   //
   // WHICH of those you get is decided by register pressure, not by the C, and that is what
   // uninit_spill is for. The first two rows are small enough that agbcc keeps the local in a
@@ -2003,12 +2006,21 @@ export const SYNTHETIC: SynthSpec[] = [
   //
   // A local decided inside a loop body on some but not all paths is a loop-carried phi whose
   // entry operand is UNDEFINED. C spells that by simply not initialising it and agbcc emits no
-  // instruction for it. asmlift has an `undef` opcode in the IR but the C backend has to spell it
-  // as an expression, so it materialises the entry as a READ: of an uninitialised stack slot, or
-  // of a parameter it invented for the purpose. The cost is NOT the read. On `loopfall` agbcc
-  // emits no instruction for `v1 = a1;` at all — `a1` arrives in the register `v1` is allocated
-  // to and the copy coalesces away. What it costs is the pin: an argument register is occupied
-  // across the loop, and the allocation downstream is a different one.
+  // instruction for it. asmlift used to materialise the entry as a READ — of an uninitialised
+  // stack slot, or of a parameter it invented for the purpose. The cost was NOT the read: on
+  // `loopfall` agbcc emits no instruction for `v1 = a1;` at all, since `a1` arrives in the
+  // register `v1` is allocated to and the copy coalesces away. What it cost was the pin — a
+  // register occupied across the loop, and a different allocation downstream.
+  //
+  // Two rules close it, and each covers one of the two ways the entry got materialised. An `undef`
+  // reaching a merge as an EDGE ARGUMENT emits no copy (structure.ts undefCarriesNothing), and a
+  // register the ABI does not pass arguments in is an `undef` rather than a parameter in the first
+  // place (target.nonArgRegs, frontend/ssa.ts). `loopfall` MATCHes on both together.
+  //
+  // WHAT IS LEFT is the case neither rule can reach: a def-less read of an ARGUMENT register past
+  // the function's real arity. Nothing in the asm separates "argument 3" from "a local agbcc homed
+  // in r2", so `armfall` still declares four parameters for a two-parameter source and still opens
+  // its loop with `v3 = a2;`. That is an arity question, not an initialisation one.
   //
   // Measured on kleod:LoadBGTilemapData:agbcc, both directions. PRICE CORRECTED: the ADDING number
   // was first taken against a reference source that carries three register-allocation coercions
@@ -2040,15 +2052,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // as an undefined read but still emits the copy will move these rows by nothing.
   //
   // `loopfall` is the isolate and `loopset` its control: byte-identical C except for the
-  // `else { w = 0; }`. With the else there is no undefined entry and asmlift MATCHes; without it,
-  // asmlift emits `void loopfall(u32 a0, u32 a1)` — a second parameter that exists only to be the
-  // undef — and opens the loop with `v1 = a1;`. A fix must not disturb `loopset`.
-  //
-  // MEASURE A FIX ON THE NON-VOLATILE LANE. `loopfall`'s stored winner is the `volatile` one, and
-  // deleting the fabricated read from IT scores WORSE — 11 to 12 — because the volatile spelling
-  // is compensating elsewhere. The same C without `volatile` goes 14 to 4. The row records 11
-  // because 11 is what the ranked pick scores, but a round that ablates the winner and reads the
-  // sign off that one number will conclude the capability is not worth building.
+  // `else { w = 0; }`. Both MATCH now; the pair is what keeps them matching for the same reason,
+  // since a rule that dropped a copy the destination still needed would break the control alone.
   //
   // `armfall` and `armdef` are the same pair at the real function's shape: a switch with no
   // default inside a loop, whose arms decide two locals that the body then uses, so BOTH become
@@ -2060,40 +2065,20 @@ export const SYNTHETIC: SynthSpec[] = [
   // shared `ldrh r0,[r3,#0x2]` tail and branches out of case 1, the candidate does the reverse —
   // which is the insert-2/delete-2 half of the breakdown and belongs to no class here yet. What
   // the pair adds over `loopfall` is that the undef survives multi-arm merging: `armdef` carries
-  // no preheader read and `armfall` carries two — and ONE OF `armfall`'S IS PAST THE REGISTER
-  // WINDOW. It declares six parameters for a two-parameter function, and this ABI passes four in
-  // r0–r3, so the sixth is a stack argument: its candidate carries `ldr r3, [sp, #0x1c]`, a load
-  // of a caller frame slot no caller ever wrote. That instruction is the loudest form the
-  // fabrication takes and it is already on a committed row; a later round should not author a
-  // second one for it.
+  // no preheader read and `armfall` carries one, `v3 = a2;` — the argument-register fabrication the
+  // rules above cannot reach, and the reason `armfall` (23) stays the harder of the two.
   //
-  // WHY THERE IS NO ROW FOR MORE UNDEFINED ENTRIES. Round 8 proposed two more pairs — three
-  // entries and four — and measured them off this family's own shape, holding it fixed and
-  // varying only how many locals the arm decides (agbcc; each control the same C plus the
-  // `else`). The gap grows monotonically and every control is 0; the 1-column IS
-  // `loopfall`/`loopset`:
-  //
-  //     undefined entries |  1 |  2 |  3 |  4 |  5
-  //     gap row           | 11 | 14 | 15 | 18 | 31
-  //     its control       |  0 |  0 |  0 |  0 |  0
-  //
-  // The SYMPTOM does change along that ladder. At one entry agbcc emits no instruction for the
-  // read; at three, asmlift opens the loop with `v1 = a2; v2 = a3; v3 = a1;` and agbcc emits four
-  // `add rX, rY, #0` preheader copies for it; at four the entry is the fifth parameter and the
-  // read becomes `ldr r3, [sp, #0x14]`; at five asmlift declares SEVEN parameters and emits three
-  // such loads (the reference has no `[sp` reference at any rung). None of it is a second
-  // capability, for three measured reasons:
-  //   • The out-of-window read is `armfall`'s, above — already committed.
-  //   • "a parameter past r3 that nothing reads is free" is already pinned by three MATCHING
-  //     rows: `maskhome:agbcc` declares seven parameters for a four-parameter source, and
-  //     `armhomes:agbcc`/`nestinit:agbcc` five for four.
-  //   • Multiplicity is severity, not a separable fix. NO choice of fabricated parameter is free
-  //     at ANY rung: at rung 1, reading `a1`/`a2`/`a3` in the control's own shape scores
-  //     13/12/9, and at rung 3 all six permutations of the three-entry preheader score 8..11 —
-  //     while a spelling that materialises NOTHING reaches 0 at every rung (the control's own C
-  //     with its `else` deleted, at rungs 1/2/3/5; the same shape without the control's second
-  //     induction pointer at 4). So no fix closes `loopfall` and leaves a longer rung open, and
-  //     the two extra gap rows would have put a second and third row's score behind one cause.
+  // WHY THERE IS NO ROW FOR MORE UNDEFINED ENTRIES. A ladder of two-to-five undefined entries was
+  // measured off this family's own shape, holding it fixed and varying only how many locals the arm
+  // decides (agbcc; each control the same C plus the `else`). The gap grew monotonically (11 / 14 /
+  // 15 / 18 / 31 against a control of 0 at every rung) and the symptom changed along it — at three
+  // entries agbcc emitted four `add rX, rY, #0` preheader copies, at four and five the fabricated
+  // entry ran past r3 and the read became `ldr r3, [sp, #N]`. Multiplicity is severity there, not a
+  // separable fix: NO choice of fabricated parameter was free at ANY rung (at rung 1 the three
+  // spellings scored 13/12/9, at rung 3 all six permutations 8..11), and only a spelling that
+  // materialised NOTHING reached 0 — which is what the two rules above now emit. Those numbers were
+  // taken before them and are not re-measured here; what they establish is that no longer rung is a
+  // capability this pair does not already hold.
   //
   // agbcc only. The claim is about what THIS compiler emits for an uninitialised loop-carried
   // local, established by compiling both spellings of each pair; ido7.1, gcc2.7.2kmc and

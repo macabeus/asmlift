@@ -103,13 +103,13 @@ export function makeSsaBuilder(
   name: string,
   blockCount: number,
   preds: number[][],
-  /** A supplier because the partition is MEASURED, not declared: Thumb's local area comes from a
-   *  prologue walk that runs after this call. Evaluated once, on first use. Omitted ⇒ no partition
-   *  is claimed, so every slot refuses and every register is a parameter. */
-  frameOf: () => LiveInModel = () => ({}),
+  /** A supplier because half the partition is MEASURED rather than declared: Thumb's local area
+   *  comes from a prologue walk that runs after this call. Evaluated once, on first use. Omitted ⇒
+   *  no partition is claimed, so every slot refuses and every register is a parameter. */
+  liveInOf: () => LiveInModel = () => ({}),
 ): SsaBuilder {
-  let frameMemo: LiveInModel | null = null;
-  const frame = (): LiveInModel => (frameMemo ??= frameOf());
+  let modelMemo: LiveInModel | null = null;
+  const model = (): LiveInModel => (modelMemo ??= liveInOf());
   const inRange = (off: number, r?: { from: number; to: number }) => r !== undefined && off >= r.from && off < r.to;
   const irBlocks: Block[] = Array.from({ length: blockCount }, () => ({ params: [] as Value[], ops: [] }));
   const fn: Fn = { name, blocks: irBlocks };
@@ -175,19 +175,18 @@ export function makeSsaBuilder(
       // or storage it allocated and never wrote. WHICH ONE is the partition's answer, in whichever
       // coordinate the key names. The key spelling cannot decide a slot on its own — `sp@40` is a
       // local on one ABI and the caller's fifth argument on another — so a slot in neither range is
-      // refused rather than guessed. A register is decided by the calling convention, which is not
-      // measured but declared: a caller cannot pass a value in a register the ABI does not pass
-      // arguments in, so a read of one before any write is an uninitialised local. Nothing here is
-      // refused, because an unlisted register keeps its existing treatment.
+      // refused rather than guessed. A register is decided by the calling convention instead of by
+      // a measurement: a caller cannot pass a value in a register the ABI does not pass arguments
+      // in, so a read of one before any write is an uninitialised local.
       const off = slotKeyOffset(reg);
-      if (off !== null && !inRange(off, frame().ownedLocals) && !inRange(off, frame().callerParams)) {
+      if (off !== null && !inRange(off, model().ownedLocals) && !inRange(off, model().callerParams)) {
         throw new FrontendUnsupportedError(
           `cannot lift '${name}': ${reg} is read on a path that never stores it, and lies outside ` +
             `this function's frame partition (uninitialised local, or storage it does not own) — not modelled`,
         );
       }
       const uninitialised =
-        off !== null ? inRange(off, frame().ownedLocals) : (frame().uninitRegs?.includes(reg) ?? false);
+        off !== null ? inRange(off, model().ownedLocals) : (model().uninitRegs?.includes(reg) ?? false);
       if (uninitialised) {
         const op = mkOp('undef', { results: [mkValue(T.unk(32))], attrs: { key: reg } });
         irBlocks[b].ops.unshift(op); // ahead of everything in a block that nothing precedes
@@ -380,7 +379,7 @@ export function makeSsaBuilder(
         // `undef`) or unclassified — both are bugs, and this is where a per-read test cannot be
         // total, so it is asserted over the finished function.
         const koff = key === undefined ? null : slotKeyOffset(key);
-        if (koff !== null && !inRange(koff, frame().callerParams)) {
+        if (koff !== null && !inRange(koff, model().callerParams)) {
           throw new FrontendUnsupportedError(
             `cannot lift '${name}': ${key} is read on a path that never stores it ` +
               `(partially-initialised local, or storage this function does not own) — not modelled`,
