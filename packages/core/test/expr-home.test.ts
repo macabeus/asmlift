@@ -1,11 +1,13 @@
 // The loop-expression-home axis (structure.ts homeLoopExprs, rank.ts `/expr-home`): a pure
-// non-const value defined outside a loop with 2+ distinct consumers inside it materializes into
-// a local carrying the value's recovered type — the register the compiler holds across the
-// iterations — where the default re-derives the expression at each use. Off by default.
+// non-const value defined outside a loop with 2+ distinct consumers, at least one of them inside
+// that loop, materializes into a local carrying the value's recovered type — the register the
+// compiler holds across the iterations — where the default re-derives the expression at each use.
+// Off by default.
 //
-// The scope conditions are what these tests pin: the consumers must sit inside a loop the def is
-// outside (straight-line multi-use stays inline — the small-constant class), shared memory-access
-// bases stay /addr-home's, and gaddr/laddr cones stay out.
+// The scope conditions are what these tests pin: some consumer must sit inside a loop the def is
+// outside (straight-line multi-use stays inline — the small-constant class) and a second consumer
+// must exist anywhere, shared memory-access bases stay /addr-home's, and gaddr/laddr cones stay
+// out.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -76,7 +78,9 @@ test('straight-line multi-use is not homed', () => {
   expect(hasLoopSharedPureValue(parse(STRAIGHT))).toBe(false);
 });
 
-// One consumer inside the loop, one outside: the in-loop count is 1 — not homed.
+// One consumer inside the loop, one outside — the biased-pointer shape
+// (`synthetic:offhome:agbcc`): the loop is what pins the value in a register, and the second use
+// is what makes the home observable, so ONE of each is the axis's scope.
 const ONEIN = `fn onein {
 ^bb0(%0: s32, %1: s32):
   %2: s32 = const {value=16}
@@ -93,7 +97,31 @@ const ONEIN = `fn onein {
 }
 `;
 
-test('a single in-loop consumer is not homed', () => {
+test('one in-loop consumer plus one outside homes: the loop pins it, the second use shares it', () => {
   const on = emit(ONEIN, true);
-  expect(count(on, '16 <<')).toBeGreaterThanOrEqual(2);
+  expect(count(on, '16 <<')).toBe(1);
+  expect(hasLoopSharedPureValue(parse(ONEIN))).toBe(true);
+});
+
+// The same value read at exactly ONE site: inlined there it costs the same bytes, so a home can
+// only add a copy.
+const ONEUSE = `fn oneuse {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=16}
+  %3: u32 = shl %2, %0
+  %4: s32 = const {value=0}
+  br ^bb1(%4)
+^bb1(%5: s32):
+  %6: s32 = const {value=1}
+  %7: s32 = add %5, %6
+  %8: u32 = icmp_ult %7, %3
+  cond_br %8, ^bb1(%7), ^bb2()
+^bb2():
+  ret %7
+}
+`;
+
+test('a value with one consumer overall is not homed', () => {
+  expect(emit(ONEUSE, true)).toBe(emit(ONEUSE, false));
+  expect(hasLoopSharedPureValue(parse(ONEUSE))).toBe(false);
 });
