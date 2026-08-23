@@ -46,53 +46,14 @@
 //     qualified spelling would declare an access set asmlift did not preserve, so both DECLINE.
 //
 // No qualifying local ⇒ decline (null), so the lever never emits a duplicate of the primary.
-import { type Expr, type SFn, type Stmt, exprChildren, stmtChildren, stmtExprs } from './ast';
+//
+// ALL ELIGIBLE SLOTS OR NONE, where the sibling pointee lever enumerates per-local subsets: which
+// pointers a source declared volatile is per-pointer knowledge (an MMIO block beside a plain RAM
+// table), but a function reaching this gate with two eligible slots has no inhabitant — a Thumb
+// sub-word slot surviving the access-set rule is roughly one local per corpus.
+import type { SFn } from './ast';
 import { type Gate, firstRejection } from './gates';
-
-/** What this tree does to one local: address-takings, reads, writes. */
-interface Uses {
-  addrTaken: number;
-  reads: number;
-  writes: number;
-}
-
-/** Tally every mention of every local, keyed by name. */
-function tally(sfn: SFn): Map<string, Uses> {
-  const t = new Map<string, Uses>(sfn.locals.map((l) => [l.name, { addrTaken: 0, reads: 0, writes: 0 }]));
-  const walk = (e: Expr): void => {
-    if (e.k === 'var' || e.k === 'addr') {
-      const u = t.get(e.name);
-      if (u) {
-        if (e.k === 'addr') {
-          u.addrTaken++;
-        } else {
-          u.reads++;
-        }
-      }
-    }
-    for (const c of exprChildren(e)) {
-      walk(c);
-    }
-  };
-  const stmt = (s: Stmt): void => {
-    if (s.k === 'assign') {
-      const u = t.get(s.name);
-      if (u) {
-        u.writes++;
-      }
-    }
-    for (const e of stmtExprs(s)) {
-      walk(e);
-    }
-    for (const c of stmtChildren(s)) {
-      stmt(c);
-    }
-  };
-  for (const s of sfn.body) {
-    stmt(s);
-  }
-  return t;
-}
+import { localMentions, readsOf } from './mentions';
 
 /** One local as the gates read it. */
 interface SlotCtx {
@@ -141,7 +102,7 @@ export const VOL_SLOT_GATES: readonly Gate<SlotCtx>[] = [
 
 /** the shared eligibility predicate (VOL_SLOT_GATES) for one function's locals */
 function eligibility(sfn: SFn): (l: SFn['locals'][number]) => boolean {
-  const uses = tally(sfn);
+  const uses = localMentions(sfn);
   return (l) => {
     const u = uses.get(l.name);
     if (u === undefined) {
@@ -153,7 +114,7 @@ function eligibility(sfn: SFn): (l: SFn['locals'][number]) => boolean {
         isScalar: l.type.kind === 'int',
         alreadyVolatile: l.volatile !== undefined || l.pointeeVolatile !== undefined,
         addrTaken: u.addrTaken,
-        accessSetKept: u.reads === l.frame?.loads && u.writes === l.frame?.stores,
+        accessSetKept: readsOf(u) === l.frame?.loads && u.assigns === l.frame?.stores,
       }) === null
     );
   };

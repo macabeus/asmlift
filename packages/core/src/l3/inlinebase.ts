@@ -42,105 +42,11 @@
 // qualifying at all, DECLINES (null) rather than approximating.
 //
 // KNOWN GAP: only `index` bases are re-spelled, so the same L2 home passed to a callee or used
-// as a `field` base is out of reach — the tally's `otherUses` refuses it. Re-spelling those
+// as a `field` base is out of reach — `otherUses` refuses it. Re-spelling those
 // needs the un-homed tree, which is structure/analysis.ts's decision, not a substitution.
-import {
-  type Expr,
-  type SFn,
-  type Stmt,
-  exprChildren,
-  mapExprChildren,
-  mapStmtExprs,
-  stmtChildren,
-  stmtExprs,
-} from './ast';
+import { type Expr, type SFn, mapExprChildren, mapStmtExprs } from './ast';
 import { type Gate, firstRejection } from './gates';
-
-/** What one local's mentions look like across the whole body. */
-interface Mentions {
-  assigns: number;
-  /** body-top-level index of its single top-level assignment, or null */
-  topAssignAt: number | null;
-  /** the bare-`const` value that assignment stores, or null if it stores anything else */
-  constValue: number | null;
-  addrTaken: number;
-  /** uses as the `base` of an `index` node — the only use this lever can re-spell */
-  baseUses: number;
-  otherUses: number;
-  /** body-top-level index of the first statement mentioning the name at all */
-  firstAt: number | null;
-}
-
-const blank = (): Mentions => ({
-  assigns: 0,
-  topAssignAt: null,
-  constValue: null,
-  addrTaken: 0,
-  baseUses: 0,
-  otherUses: 0,
-  firstAt: null,
-});
-
-/** Visit every node, telling the callback whether it stands as an `index`'s base. */
-function walkExpr(e: Expr, visit: (x: Expr, isIndexBase: boolean) => void, isIndexBase = false): void {
-  visit(e, isIndexBase);
-  if (e.k === 'index') {
-    walkExpr(e.base, visit, true);
-    walkExpr(e.idx, visit, false);
-    return;
-  }
-  for (const c of exprChildren(e)) {
-    walkExpr(c, visit, false);
-  }
-}
-
-/** Tally every mention of every local, keyed by name. */
-function tally(sfn: SFn): Map<string, Mentions> {
-  const t = new Map<string, Mentions>(sfn.locals.map((l) => [l.name, blank()]));
-  const seen = (name: string, at: number): Mentions | undefined => {
-    const m = t.get(name);
-    if (m && m.firstAt === null) {
-      m.firstAt = at;
-    }
-    return m;
-  };
-  const stmt = (s: Stmt, at: number, top: boolean): void => {
-    if (s.k === 'assign') {
-      const m = seen(s.name, at);
-      if (m) {
-        m.assigns++;
-        if (top) {
-          m.topAssignAt = at;
-          m.constValue = s.value.k === 'const' ? s.value.value : null;
-        }
-      }
-    }
-    for (const e of stmtExprs(s)) {
-      walkExpr(e, (x, isIndexBase) => {
-        if (x.k === 'var') {
-          const m = seen(x.name, at);
-          if (m) {
-            if (isIndexBase) {
-              m.baseUses++;
-            } else {
-              m.otherUses++;
-            }
-          }
-        } else if (x.k === 'addr') {
-          const m = seen(x.name, at);
-          if (m) {
-            m.addrTaken++;
-          }
-        }
-      });
-    }
-    for (const c of stmtChildren(s)) {
-      stmt(c, at, false);
-    }
-  };
-  sfn.body.forEach((s, i) => stmt(s, i, true));
-  return t;
-}
+import { type Mentions, localMentions } from './mentions';
 
 /** One local as the gates read it. */
 interface BaseCtx {
@@ -221,7 +127,7 @@ export const INLINEBASE_GATES: readonly Gate<BaseCtx>[] = [
 
 /** The locals INLINEBASE_GATES admits, each with the cast its uses become. */
 function plan(sfn: SFn): Map<string, Extract<Expr, { k: 'cast' }>> {
-  const t = tally(sfn);
+  const t = localMentions(sfn);
   const out = new Map<string, Extract<Expr, { k: 'cast' }>>();
   for (const l of sfn.locals) {
     const m = t.get(l.name);

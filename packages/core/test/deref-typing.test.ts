@@ -234,6 +234,15 @@ describe('printer — prefix nodes under postfix parents, and the truncating sin
     expect(cBackend.emit(mk([{ name: 'p', type: T.ptr(T.u(16)) }], V('p')))).toContain('((s32 *)p)[n] = 0;');
   });
 
+  // Two lever gates rest on this: `volatile` on a POINTER local would read as pointee volatility,
+  // so neither lever may produce one.
+  test('a pointer local prints one `volatile` prefix, and it binds to the pointee', () => {
+    const mk = (l: SFn['locals'][number]): string =>
+      cBackend.emit({ name: 'f', params: [], locals: [l], retType: T.void(), body: [] });
+    expect(mk({ name: 'p', type: T.ptr(T.u(16)), pointeeVolatile: true })).toContain('volatile u16 * p;');
+    expect(mk({ name: 'p', type: T.ptr(T.u(16)), volatile: true })).toContain('volatile u16 * p;');
+  });
+
   test('a base that already strides the access is spelled bare, qualifier and all', () => {
     const fn: SFn = {
       name: 'f',
