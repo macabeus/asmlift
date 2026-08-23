@@ -321,16 +321,28 @@ happening for the frame.
 
 With both coordinates spelled — and with the structurer no longer emitting an edge copy for an
 argument that carries nothing — the differ agrees. Five rows move, `synthetic:loopfall:agbcc`
-MATCHes (11 → 0), and the corpus goes 439 → 440 with nothing lost; on the ranked real row
-`LoadBGTilemapData` the winner goes **473 → 419**. The row that used to match with an arity the
-source never had — its fabricated parameter landing in the register the local occupied anyway — no
-longer needs the coincidence.
+MATCHes (11 → 0), and the corpus goes 441 → 442 over 856 rows with nothing lost and nothing worse;
+on the ranked real row `LoadBGTilemapData` the winner goes **473 → 419**. SIX rows that used to
+match with an arity the source never had — the fabricated parameter landing in the register the
+local occupied anyway — no longer need the coincidence, and all six now carry the arity their
+reference does: `synthetic:armhomes` 5 → 4, `hipress` 3 → 2, `maskhome` 7 → 4, `nestinit` 5 → 4,
+`sizehome` 4 → 3, and `kleod:UpdateHUDCounterDisplay` 2 → 0 against a reference that really is
+`(void)`.
 
 The lesson is not "measure again later". It is that the first measurement was taken against
 asmlift's own output, where a fabricated parameter is cheap because everything downstream of it is
 already wrong. What moved the number was pricing the same construct against a near-perfect
 reference decomp of the same game, where it costs an order of magnitude more. A differ verdict is
 only as strong as the baseline it is measured from.
+
+Which cuts the other way too, and `LoadBGTilemapData` is where. Priced against the reference C the
+construct is worth **354**; on this row it is worth **54**, and the difference is not a
+disappointment but the same sentence read backwards. That reference decomp does not match this
+function either: its C is `NONMATCH("asm/nonmatching/sub_0804B4B0.inc", …)` at a recorded 98.24%,
+its build links the assembly instead, and its ROM is byte-identical to the base ROM only because it
+does. LBG is the one function in a 4 MB decomp that is still open — so it is the last place a
+capability's value can be read off, and the 419 that remains is the allocation and ordering residue
+attributed long before this round, not one gap behind anything.
 
 The envelope is narrow, and has one sentence per coordinate. In the FRAME: **on Thumb, a word-wide
 slot strictly below the measured local area, which some store reaches but not on every path, in a
