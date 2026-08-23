@@ -171,13 +171,25 @@ export interface SFn {
    *  = the local is a pointer TO volatile data (the l3/volatileptr.ts lever; a declaration
    *  spelling only — nothing about the local itself is observable).
    *
-   *  `frame` marks a local the MACHINE gave a stack slot — the structurer recovered it from an
-   *  `laddr`, so its home is an asm fact rather than a recovery choice. Distinct from the
-   *  volatility flags: a frame local may be plain (the address never escaped). The
-   *  l3/volatileval.ts lever reads it, because a source-level `volatile` scalar always lands in
-   *  a slot, so the flag is exactly that lever's inhabitant set. The name cannot carry the fact
-   *  — `sp<off>` is minted against the symbol map and grows `_` suffixes on collision. */
-  locals: { name: string; type: IrType; volatile?: true; pointeeVolatile?: true; frame?: true }[];
+   *  `frame` is present on a local the structurer recovered from an `laddr` — the asm
+   *  MATERIALIZED the slot's address into a register, so the object provably lives in memory —
+   *  and carries the machine's static access counts for it. Under Thumb that envelope is a
+   *  SUB-WORD frame object: `strh/ldrh/strb/ldrb` have no `[sp,#imm]` form, so a compiler must
+   *  copy `sp` first, while a word spill goes straight to `[sp,#imm]` and is recovered as an
+   *  SSA value with no local of its own. So `frame` is NOT the set of every value the machine
+   *  slotted. `loads`/`stores` are the yardstick a qualifier lever must match before it may
+   *  declare every access to the object observable: the readability passes between here and L3
+   *  may drop a store or render one machine load as two reads, and `volatile` over an access
+   *  set asmlift did not preserve is a source that contradicts itself. The name cannot carry
+   *  either fact — `sp<off>` is minted against the symbol map and grows `_` suffixes on
+   *  collision. */
+  locals: {
+    name: string;
+    type: IrType;
+    volatile?: true;
+    pointeeVolatile?: true;
+    frame?: { loads: number; stores: number };
+  }[];
   /** project globals referenced with a known declaration shape (symbol map) — typed for the
    *  legalization env (exprCType) but NEVER declared by a backend: the project's own headers
    *  declare them, exactly like every other global name asmlift emits. */

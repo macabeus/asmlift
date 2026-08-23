@@ -136,7 +136,7 @@ export function inlineConstBases(sfn: SFn): SFn | null {
       l.type.kind !== 'ptr' ||
       l.volatile !== undefined ||
       l.pointeeVolatile !== undefined ||
-      l.frame === true ||
+      l.frame !== undefined ||
       m.assigns !== 1 ||
       m.topAssignAt === null ||
       m.constValue === null ||

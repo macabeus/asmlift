@@ -110,7 +110,11 @@ test('a use that is not an `index` base is outside what the lever re-spells', ()
 });
 
 test('a volatile or frame local declines — both are asm facts, not spellings', () => {
-  for (const extra of [{ volatile: true as const }, { pointeeVolatile: true as const }, { frame: true as const }]) {
+  for (const extra of [
+    { volatile: true as const },
+    { pointeeVolatile: true as const },
+    { frame: { loads: 1, stores: 1 } },
+  ]) {
     expect(inlineConstBases(fn([{ name: 'p', type: PTR, ...extra }], twoUses()))).toBeNull();
   }
 });

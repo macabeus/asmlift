@@ -1,10 +1,12 @@
 // The `/vol-slot` lever (l3/volatileval.ts): a stack-homed scalar local is re-declared
 // `volatile`. The gate conditions are what these tests pin: only a `frame` local (the machine
 // really gave it a slot), only a scalar, never one already carrying a volatility flag, never an
-// address-taken one — and no qualifying local means DECLINE, never a duplicate candidate.
+// address-taken one, and never one whose accesses in the tree are not the machine's — and no
+// qualifying local means DECLINE, never a duplicate candidate.
 //
 // The end-to-end tests lift agbcc Thumb and check the emitted declaration, so they also pin the
-// producer of the `frame` flag: a spill slot is marked, a register-only local is not.
+// producer of the `frame` record: a spill slot is marked with its access counts, a register-only
+// local is not marked at all.
 import { expect, test } from 'vitest';
 
 import { T } from '../src/ir/types';
@@ -25,7 +27,7 @@ const fn = (locals: SFn['locals'], body: Stmt[]): SFn => ({
 test('a stack-homed scalar local becomes a volatile object', () => {
   const s = fn(
     [
-      { name: 'sp0', type: T.u(16), frame: true },
+      { name: 'sp0', type: T.u(16), frame: { loads: 0, stores: 1 } },
       { name: 'v0', type: T.s(32) },
     ],
     [{ k: 'assign', name: 'sp0', value: { k: 'var', name: 'v0' } }],
@@ -45,7 +47,7 @@ test('a register-homed scalar never qualifies — the machine gave it no slot to
 
 test('an already-volatile frame local declines rather than duplicating the primary', () => {
   const s = fn(
-    [{ name: 'sp0', type: T.u(16), frame: true, volatile: true }],
+    [{ name: 'sp0', type: T.u(16), frame: { loads: 0, stores: 1 }, volatile: true }],
     [{ k: 'assign', name: 'sp0', value: { k: 'const', value: 0 } }],
   );
   expect(volatileValueLocals(s)).toBeNull();
@@ -53,7 +55,7 @@ test('an already-volatile frame local declines rather than duplicating the prima
 
 test('an address-taken frame local is excluded — its home is already forced', () => {
   const s = fn(
-    [{ name: 'sp0', type: T.u(16), frame: true }],
+    [{ name: 'sp0', type: T.u(16), frame: { loads: 0, stores: 1 } }],
     [
       { k: 'assign', name: 'sp0', value: { k: 'const', value: 0 } },
       { k: 'exprstmt', value: { k: 'call', fn: 'g', args: [{ k: 'addr', name: 'sp0' }] } },
@@ -64,7 +66,7 @@ test('an address-taken frame local is excluded — its home is already forced', 
 
 test('an address taken deep inside a loop arm still vetoes', () => {
   const s = fn(
-    [{ name: 'sp0', type: T.u(16), frame: true }],
+    [{ name: 'sp0', type: T.u(16), frame: { loads: 0, stores: 0 } }],
     [
       {
         k: 'dowhile',
@@ -78,29 +80,43 @@ test('an address taken deep inside a loop arm still vetoes', () => {
 
 test('a non-scalar frame local never qualifies', () => {
   const s = fn(
-    [{ name: 'sp0', type: T.ptr(T.u(16)), frame: true }],
+    [{ name: 'sp0', type: T.ptr(T.u(16)), frame: { loads: 0, stores: 1 } }],
     [{ k: 'assign', name: 'sp0', value: { k: 'const', value: 0 } }],
   );
   expect(volatileValueLocals(s)).toBeNull();
 });
 
-test('`only` narrows the lever to the named locals', () => {
+test('a store the tree no longer carries declines — `volatile` may not claim a dropped access', () => {
+  const body: Stmt[] = [
+    { k: 'assign', name: 'sp0', value: { k: 'const', value: 5 } },
+    { k: 'return', value: { k: 'var', name: 'sp0' } },
+  ];
+  expect(volatileValueLocals(fn([{ name: 'sp0', type: T.u(16), frame: { loads: 1, stores: 2 } }], body))).toBeNull();
+  // the same local at the machine's own count qualifies, so it is the MISMATCH that vetoes
+  expect(
+    volatileValueLocals(fn([{ name: 'sp0', type: T.u(16), frame: { loads: 1, stores: 1 } }], body)),
+  ).not.toBeNull();
+});
+
+test('one machine load rendered as two reads declines — the same rule, other direction', () => {
   const s = fn(
+    [{ name: 'sp0', type: T.u(16), frame: { loads: 1, stores: 1 } }],
     [
-      { name: 'sp0', type: T.u(16), frame: true },
-      { name: 'sp4', type: T.s(32), frame: true },
-    ],
-    [
-      { k: 'assign', name: 'sp0', value: { k: 'const', value: 0 } },
-      { k: 'assign', name: 'sp4', value: { k: 'const', value: 0 } },
+      { k: 'assign', name: 'sp0', value: { k: 'const', value: 5 } },
+      {
+        k: 'return',
+        value: {
+          k: 'call',
+          fn: 'h',
+          args: [
+            { k: 'var', name: 'sp0' },
+            { k: 'var', name: 'sp0' },
+          ],
+        },
+      },
     ],
   );
-  const out = volatileValueLocals(s, new Set(['sp4']));
-  expect(out?.locals.map((l) => [l.name, l.volatile])).toEqual([
-    ['sp0', undefined],
-    ['sp4', true],
-  ]);
-  expect(volatileValueLocals(s, new Set(['nobody']))).toBeNull();
+  expect(volatileValueLocals(s)).toBeNull();
 });
 
 // A halfword spilled to the stack across a call — the shape the lever was built for, and the
@@ -139,4 +155,58 @@ test('/vol-slot is enumerated for the spill, and declares the slot volatile', ()
 test('a function with no frame object enumerates no /vol-slot candidate', () => {
   const NOSLOT = `f:\n\tadd\tr0, r0, #0x1\n\tbx\tlr\n`;
   expect(enumerateCandidates('f', NOSLOT, ARMV4T_AGBCC).some((c) => c.label.includes('/vol-slot'))).toBe(false);
+});
+
+// agbcc's own output for `s32 dv(u32 a0) { volatile u16 sp0; sp0 = 5; sp0 = a0 + 1; g(a0);
+// return sp0; }` — TWO `strh` to the slot, of which asmlift's dead-store pass keeps one.
+const DROPPED_STORE = `dv:
+\tpush\t{lr}
+\tadd\tsp, sp, #-0x4
+\tmov\tr2, sp
+\tmov\tr1, #0x5
+\tstrh\tr1, [r2]
+\tadd\tr1, r0, #0x1
+\tstrh\tr1, [r2]
+\tbl\tg
+\tmov\tr0, sp
+\tldrh\tr0, [r0]
+\tadd\tsp, sp, #0x4
+\tpop\t{r1}
+\tbx\tr1
+`;
+
+test('a slot whose dead store the readability pass dropped enumerates no /vol-slot candidate', () => {
+  const opts = { prototypes: { g: { params: 1 } } };
+  // the slot IS recovered, so the decline is the access-set rule and not a missing frame object
+  expect(decompile('dv', DROPPED_STORE, ARMV4T_AGBCC, opts).source).toContain('u16 sp0;');
+  expect(enumerateCandidates('dv', DROPPED_STORE, ARMV4T_AGBCC, opts).some((c) => c.label.includes('/vol-slot'))).toBe(
+    false,
+  );
+});
+
+// One `ldrh` feeding two uses: the structurer emits one C read per USE, so the tree reads the
+// slot twice where the machine loaded it once.
+const COLLAPSED_LOAD = `f:
+\tpush\t{lr}
+\tadd\tsp, sp, #-0x8
+\tadd\tr2, r0, #0x1
+\tmov\tr3, sp
+\tstrh\tr2, [r3, #0x4]
+\tbl\tg
+\tmov\tr3, sp
+\tldrh\tr2, [r3, #0x4]
+\tadd\tr0, r2, #0
+\tadd\tr1, r2, #0
+\tbl\th
+\tadd\tsp, sp, #0x8
+\tpop\t{r1}
+\tbx\tr1
+`;
+
+test('a slot read twice from one machine load enumerates no /vol-slot candidate', () => {
+  const opts = { prototypes: { g: { params: 1 }, h: { params: 2 } } };
+  expect(decompile('f', COLLAPSED_LOAD, ARMV4T_AGBCC, opts).source).toContain('h(sp4, sp4)');
+  expect(enumerateCandidates('f', COLLAPSED_LOAD, ARMV4T_AGBCC, opts).some((c) => c.label.includes('/vol-slot'))).toBe(
+    false,
+  );
 });

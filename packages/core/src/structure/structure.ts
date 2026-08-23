@@ -3381,6 +3381,36 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   const localNames = [...new Set([...varName.values(), ...[...varType.keys()].filter((n) => /^t\d+$/.test(n))])].filter(
     (n) => /^[vt]\d+$/.test(n) && !globalNames.has(n),
   );
+  // The machine's static access counts for one frame object: every `load`/`store` rooted on an
+  // `laddr` at the same offset. Counted over the L2 blocks, so it is the access set the asm had,
+  // before any L3 readability pass could drop or duplicate one. Summed across the offset's
+  // `laddr` ops — the frontend's frame-object audit re-roots accesses onto per-offset captures
+  // and holds one object per offset, so several ops can name the same storage.
+  const frameAccesses = (at: Op): { loads: number; stores: number } => {
+    const off = at.attrs.off as number;
+    const roots = new Set<Value>();
+    for (const b of fn.blocks) {
+      for (const op of b.ops) {
+        if (op.opcode === 'laddr' && (op.attrs.off as number) === off) {
+          roots.add(op.results[0]);
+        }
+      }
+    }
+    let loads = 0;
+    let stores = 0;
+    for (const b of fn.blocks) {
+      for (const op of b.ops) {
+        if ((op.opcode === 'load' || op.opcode === 'store') && roots.has(op.operands[0])) {
+          if (op.opcode === 'load') {
+            loads++;
+          } else {
+            stores++;
+          }
+        }
+      }
+    }
+    return { loads, stores };
+  };
   const structs = collectStructs(fn);
   return {
     name: fn.name,
@@ -3399,9 +3429,10 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
               {
                 name: laddrName.get(op)!,
                 type: T.int((op.attrs.width as number) * 8, op.attrs.signed as boolean),
-                // the machine gave this value a stack slot — an asm fact, and the gate the
+                // the asm materialized this slot's address, and this is how many times it
+                // loaded and stored through it — both asm facts, and the gate the
                 // l3/volatileval.ts lever reads (see the SFn.locals doc)
-                frame: true as const,
+                frame: frameAccesses(op),
                 // an ESCAPED address makes every store observable (the DMA hardware reads it), and
                 // the source spells the scratch volatile for that reason — see the stamp site in
                 // frontend/thumb.ts for why it is the SPELLING that matters and not dead-store
