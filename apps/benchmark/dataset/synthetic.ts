@@ -2133,12 +2133,25 @@ export const SYNTHETIC: SynthSpec[] = [
   //
   // asmlift recovers the re-read correctly (its candidate loads through the base every iteration)
   // and drops the no-op statement, which is the right thing to do with a statement that emits
-  // nothing. The row is here because the residual that leaves is not nothing: 8 rows, all one
-  // register number — the reference pushes `{r4, r5, lr}` and asmlift's candidate `{r4, lr}`,
-  // every instruction otherwise identical. That the *deleted* statement is what claims the extra
-  // register was NOT established: re-inserting it into asmlift's raw-address spelling makes agbcc
-  // keep the `ldrh`/`strh` (the struct-typed reference spelling is what lets it delete them), so
-  // the row records the residual and its size, not a mechanism.
+  // nothing. The row is here because the residual that leaves is not nothing: 8 rows, and every
+  // one of them is a register NAME. The breakdown is `replace 2, argMismatch 6` with insert and
+  // delete both zero — same opcodes, same operand structure, same order, so nothing here is a
+  // missing or extra instruction. It is two renamings: the base is r5 in the reference and r4 in
+  // the candidate (which is the `push {r4, r5, lr}` / `push {r4, lr}` pair, and the pop, and the
+  // 2 replaces), and r0 and r1 are exchanged through the whole body. That the *deleted* statement
+  // is what the 8 turns on IS established, by the control: `rereadctl` is the same C with the
+  // statement gone and asmlift MATCHes it. What is not established is WHY — re-inserting the
+  // statement into asmlift's raw-address spelling makes agbcc keep the `ldrh`/`strh` (the
+  // struct-typed reference spelling is what lets it delete them), so no candidate reproduces the
+  // reference's combination. The row records the residual and its size, not a mechanism.
+  // `value-home` and not `read-once`: read-once is about a value read once above a branch and
+  // re-read per arm, and this row has no branch and no arm — the load sits inside the loop in the
+  // reference AND in the candidate. A zero insert/delete breakdown over renamed registers is
+  // value-home's definition exactly.
+  //
+  // `rereadctl` is the control: the same C with the no-op statement gone. It keeps the compiler
+  // claim above under the harness instead of in a commit message, and it MATCHes — so the pair
+  // brackets the gap exactly, 0 without the statement and 8 with it.
   //
   // Cut from kleod:LoadBGTilemapData:agbcc, where the same statement is written verbatim in the
   // second decomp's 98.24% attempt at that function and is worth 178 points there: removing it
@@ -2155,10 +2168,23 @@ export const SYNTHETIC: SynthSpec[] = [
       ' for (i = 0; i < n; i = i + 1) {' +
       ' gBgs[2].v = gBgs[2].v + 0;' +
       ' gBgs[k].dst[i] = i << 6; } }',
-    features: ['read-once', 'global'],
+    features: ['value-home', 'global'],
     toolchains: ['agbcc'],
     ctx: 'void reread(u32 k, u32 n);',
     proto: { reread: { returnsVoid: true } },
+  },
+  {
+    sym: 'rereadctl',
+    src:
+      'struct Bg { u32 *dst; u16 h; u16 v; };\n' +
+      '#define gBgs ((struct Bg *)0x03003430)\n' +
+      'void rereadctl(u32 k, u32 n){ u32 i;' +
+      ' for (i = 0; i < n; i = i + 1) {' +
+      ' gBgs[k].dst[i] = i << 6; } }',
+    features: ['global'],
+    toolchains: ['agbcc'],
+    ctx: 'void rereadctl(u32 k, u32 n);',
+    proto: { rereadctl: { returnsVoid: true } },
   },
 ];
 
