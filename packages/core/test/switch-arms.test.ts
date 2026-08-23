@@ -444,13 +444,14 @@ test('a jump-table arm that FALLS THROUGH is not reordered', () => {
 // navigation that arm's body is a second default candidate and the whole tree declines to
 // if-nesting, which compiles to a different compare AND a different arm layout.
 //
-// The same asm is what an `if (x < 1) … else if …` chain compiles to, so the reading is held to
-// what `emit_case_nodes` can actually emit: the BRANCH of a test BELOW the root, on a compiler
-// that declared `switchAllowsBoundCase`. The three fixtures after the accepted one are those
-// three refusals, one apiece.
+// An `if (x < 1) … else if …` chain compiles to the same asm, so the reading is held to what
+// `emit_case_nodes` can emit: the BRANCH of a test BELOW the root, on a compiler that declared
+// `switchAllowsBoundCase`. Each of those three refusals has a fixture of its own below, and PRE3
+// closes the fourth question — a singleton an ancestor already ruled out.
 
-/** agbcc's own `switch (mode) { case 0..2 }`, where `case 0:` is the bound test `cmp r0, #1 / bcc`
- *  under the root's `== 1` — verbatim from `-O2 -mthumb-interwork -fhex-asm -fprologue-bugfix`. */
+/** agbcc's own `switch (x) { case 0..2 }`: the dispatch verbatim from `-O2 -mthumb-interwork
+ *  -fhex-asm -fprologue-bugfix`, where `case 0:` is the bound test `cmp r0, #1 / bcc` under the
+ *  root's `== 1`, over one-instruction bodies. */
 const boundCase =
   'f:\n\tmov\tr2, #0x0\n' +
   '\tcmp\tr0, #0x1\n\tbeq\t.Lc1\t@cond_branch\n' +
@@ -485,9 +486,10 @@ test('the FALL side of a relational test is navigation, whatever it admits', () 
 });
 
 test('a bound test that OPENS the dispatch is an ordinary `if`, not a case', () => {
-  // A single-valued node emits its own `do_jump_if_equal` before either descent test, so the
-  // bound test always sits UNDER another test of the tree. One that opens the region is the
-  // `if (x < 1) … else if (x == 5) …` chain, which recovers as the chain it is.
+  // A single-valued node emits its own `do_jump_if_equal` before either descent test, so a bound
+  // test always sits UNDER another test of the tree, and one that opens the region has no producer
+  // in this dispatch. asmlift keeps the chain — which is also the spelling agbcc compiles to 11
+  // instructions where the `switch` takes 13, in a different register allocation.
   const out = of(
     'f:\n\tmov\tr2, #0x0\n' +
       '\tcmp\tr0, #0x1\n\tbcc\t.Lc0\t@cond_branch\n' +

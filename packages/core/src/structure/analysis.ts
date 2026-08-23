@@ -105,12 +105,12 @@ export function hasHomeableSharedAddress(fn: Fn): boolean {
  *  equal-or-earlier block position closes one) where the axis's own rule uses the dominator model,
  *  and consumers here come from op operands only, where the rule counts `useSitesOf` and so counts
  *  branch args too — unlike hasHomeableSharedAddress this therefore diverges in BOTH directions. A
- *  false positive costs one duplicate-collapsed candidate. A false negative silently skips the arm,
- *  on IR whose block layout does not follow dominance, or on a value whose SECOND consumer is a
- *  branch arg — the rule would home that one and the axis is never enumerated for it. Acceptable
- *  because every frontend lays blocks out in address order (a natural loop's back edge points
- *  backward), and the in-loop consumer that carries the register-pinning evidence is an operand
- *  use of a compare/product/shift, which this does see. */
+ *  false positive costs one duplicate-collapsed candidate. A false negative silently skips the arm:
+ *  on IR whose block layout does not follow dominance, which every frontend avoids by laying blocks
+ *  out in address order (a natural loop's back edge points backward), and on a value EITHER of
+ *  whose two consumers is a branch arg, which the rule would home and this never enumerates. The
+ *  second is unwitnessed over the 856-row bench, and costs a missing candidate, never a wrong
+ *  one. */
 export function hasLoopSharedPureValue(fn: Fn): boolean {
   const defOf = defOpMap(fn);
   const pos = new Map<Block, number>(fn.blocks.map((b, i) => [b, i]));

@@ -295,18 +295,18 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
   // value, whenever the remaining range has collapsed to one. Read as navigation instead, that
   // arm's body becomes a second default candidate and the whole tree declines.
   //
-  // THE BRANCH ONLY. `emit_case_nodes` reaches a case body from a relational test in exactly two
-  // places — LT jumping to `node->left->code_label` and GT to `node->right->code_label`, each
-  // guarded by `node_is_bounded` on that side — and both are the jump, never the fall-through,
-  // which always continues into more dispatch. A fall-side reading has no producer, and the asm it
-  // does fire on is a source-level `if (x > 0) … else if …`.
+  // THE BRANCH, never the fall-through. `emit_case_nodes` reaches a case body from a relational
+  // test in exactly two places — LT jumping to `node->left->code_label` and GT to
+  // `node->right->code_label`, each guarded by `node_is_bounded` on that side — and both are the
+  // jump; the fall-through always continues into more dispatch. The asm a fall-side reading fires
+  // on is a source-level `if (x > 0) … else if …` instead.
   //
-  // The domain is the 32-bit REGISTER's, not the scrutinee's recovered type: a narrower type has a
-  // nearer endpoint this misses, which costs a case and never invents one. Wider, the reading
-  // ignores an ancestor that already excluded the value — and PRE3 is what catches that: it
-  // simulates the original tree for every recovered case value and declines unless it lands on the
-  // recorded body, exactly as it does for the `eq` cases. Null when the branch admits none,
-  // several, or the whole domain.
+  // TWO PREMISES ABOUT THE DOMAIN. It is the 32-bit REGISTER's, not the scrutinee's recovered
+  // type, so a narrower type has a nearer endpoint this misses — which costs a case and never
+  // invents one. And it is the WHOLE of that domain, so an ancestor that already excluded the
+  // value makes the reading wrong; PRE3 is what catches that, simulating the original tree for
+  // every recovered case value and declining unless it lands on the recorded body, exactly as it
+  // does for the `eq` cases. Null when the branch admits none, several, or the whole domain.
   const singletonTaken = (ti: TestInfo): number | null => {
     const [min, max] = ti.opcode.startsWith('icmp_u') ? [0, -1] : [-0x80000000, 0x7fffffff];
     for (const [v, next] of [
@@ -508,14 +508,14 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
         }
       } else {
         // relational → navigation, except where the BRANCH has collapsed to a single value and
-        // lands on a BODY. Two narrowings, each dropping a shape the compiler does not emit here:
-        //   - never at the ROOT. `emit_case_nodes` emits a single-valued node's own
-        //     `do_jump_if_equal` before either descent test, so the bound test always sits under
-        //     another test of the same tree; a relational test that opens the dispatch is an
-        //     ordinary `if`, and reading it as a case turns an if-else chain into a `switch`;
-        //   - a singleton branch whose target is itself a test STAYS navigation. That is the
-        //     search descending to pin the value, and reading it as a case declines (`asLeafOrTest`
-        //     refuses a test as a body) a tree the nav reading recovers.
+        // lands on a BODY, on a compiler that declared the spelling. Two shapes this dispatch does
+        // not emit, both of which an `if (x < 1) … else if …` chain does:
+        //   - a bound test at the ROOT. `emit_case_nodes` emits a single-valued node's own
+        //     `do_jump_if_equal` before either descent test, so a bound test always sits under
+        //     another test of the same tree; one that OPENS the region is an ordinary `if`;
+        //   - a singleton branch onto another TEST, which is the search descending to pin the
+        //     value. Navigation recovers it; a case body may not be a test, so reading it as one
+        //     would decline the whole tree.
         const k = switchAllowsBoundCase && blk !== b && !isTestOn(taken) ? singletonTaken(ti) : null;
         if (!asLeafOrTest(taken, k === null ? 'nav' : 'case', k ?? undefined)) {
           return null;
