@@ -92,6 +92,20 @@ export interface LiveInModel {
    *  The frame's sole-writer obligation has no counterpart here and needs none: a register has no
    *  address, so nothing outside this function can name it and there is no escape to retract.
    *
+   *  KNOWN GAP — THE PREMISE THIS DOES NOT TEST. "The compiler put a local in it" also says the
+   *  function SAVED the register before using it that way; a function that follows no such
+   *  convention — hand-written asm, or a mid-function fragment, which klonoa's `bl`-as-a-long-branch
+   *  splits produce for real — is genuinely handed a value in r4, and this classifies it as garbage
+   *  and emits a read of an uninitialised local for it. Neither the save nor a write is consulted.
+   *  Nothing cheap separates the two: a WRITE does not, because the epilogue's restore is one (of
+   *  the 7 corpus inhabitants below, 3 have no other write of the register at all); the SAVE does,
+   *  but reading it means modelling the prologue — including agbcc's `mov rLow, rHi; push {rLow}`
+   *  for r8-sl — which is the prologue-save elision this coordinate exists to avoid needing.
+   *  Measured rather than assumed: across 2791 Thumb functions (klonoa + sa3 + pokeemerald + af)
+   *  exactly 7 (function, register) pairs render a register undef, every one of them saves the
+   *  register in its prologue, and one of the 7 is confirmed by a second decomp of the same game
+   *  declaring that local uninitialised in its C (klonoa CheckTileCollisionVertical, r4).
+   *
    *  LISTED, not derived as "everything outside argRegs", because the complement contains the
    *  VIRTUAL keys too (`@sarg<k>` — an incoming stack argument, which really is a parameter), and a
    *  rule that had to exclude them would be reading a grammar this module does not own. A register

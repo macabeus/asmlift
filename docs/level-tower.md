@@ -337,14 +337,25 @@ path that never wrote it.** No measurement and no second condition — a registe
 nothing outside the function can name it and there is nothing to retract.
 
 KNOWN GAP, register half: the rule is the target's ABI, and a function that does not follow that ABI
-is outside the model. Hand-written assembly with a private convention (klonoa's MP2K engine) and a
-mid-function fragment reached by agbcc's `bl`-as-long-branch both really do receive a value in `r4`,
-and both now render it as an uninitialised local. What changed there is not soundness — the
-fabricated trailing parameter they used to get was equally silent — but plausibility: a reader
-rejects a ten-parameter signature on sight and reads `s32 uninit_r8;` as a deliberate recovery.
-Positive evidence separating the two populations exists and nothing consults it yet: a local the
-compiler homed in a callee-saved register is WRITTEN somewhere in the function and SAVED in the
-prologue, so "read, never written, never saved" is a function the ABI model does not describe.
+is outside the model. Hand-written assembly with a private convention and a mid-function fragment
+reached by agbcc's `bl`-as-long-branch both really do receive a value in `r4`, and both now render it
+as an uninitialised local. What changed there is not soundness — the fabricated trailing parameter
+they used to get was equally silent — but plausibility: a reader rejects a ten-parameter signature on
+sight and reads `s32 uninit_r8;` as a deliberate recovery.
+
+The evidence that would separate the two populations is the PROLOGUE SAVE, and only that. "The
+compiler homed a local here" says the function saved the register first; it does not say the function
+writes it anywhere else, and a reading that assumed both was wrong. Measured across 2791 Thumb
+functions (klonoa + sa3 + pokeemerald + af), exactly 7 (function, register) pairs render a register
+undef, and in 3 of them the register's only other appearance is the epilogue's restore — itself a
+write, so "never written" is vacuous on real agbcc output rather than a discriminator. All 7 save the
+register in their prologue, `MP2K_event_xwave` included: it reads `r4` before writing it and pushes
+it, so it is an ordinary uninitialised local and not the private-convention case this paragraph used
+to cite. One of the 7 is confirmed against a second decomp of the same game, whose C declares that
+local uninitialised (`CheckTileCollisionVertical`, `r4`). Reading the save set means modelling the
+prologue — including agbcc's `mov rLow, rHi; push {rLow}` for r8-sl, which every sa3 inhabitant goes
+through — so the check this gap needs is exactly the prologue-save elision the coordinate was built
+to avoid needing. It stays a gap while no inhabitant is on the wrong side of it.
 
 The reusable lesson is where the decision lives, not the op, and it is easier to state as the two
 arrangements that do not work.

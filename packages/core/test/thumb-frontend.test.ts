@@ -389,8 +389,15 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       's32 f(s32 a0, s32 a1, s32 a2, s32 a3, s32 a4, s32 a5, s32 a6, s32 a7, s32 a8) {\n' +
         '    s32 uninit_r8;\n    return a8 + uninit_r8;\n}\n',
     );
-    // the same at the low end, where a phantom `r4` would otherwise outrank argument 5
-    const lo = 'f:\n\tpush\t{r5, lr}\n\tadd\tr5, r4, #1\n\tldr\tr0, [sp, #0x8]\n\tadd\tr0, r0, r5\n\tbx\tlr\n';
+    // The same at the low end, where a phantom `r4` would otherwise outrank argument 5. SAVED AND
+    // RESTORED, which the `hi` case above already is: "the compiler homed a local here" also says
+    // the function saved the register, and asm that reads r4 without saving it is asm agbcc cannot
+    // emit — a fragment or a private convention, the classification's KNOWN GAP (frontend/ssa.ts).
+    // A fixture that asserted the answer for one of those would be asserting it outside the
+    // population the rule is stated over.
+    const lo =
+      'f:\n\tpush\t{r4, r5, lr}\n\tadd\tr5, r4, #1\n\tldr\tr0, [sp, #0xc]\n\tadd\tr0, r0, r5\n' +
+      '\tpop\t{r4, r5}\n\tpop\t{r1}\n\tbx\tr1\n';
     expect(decompile('f', lo, ARMV4T_AGBCC).source).toBe(
       's32 f(s32 a0, s32 a1, s32 a2, s32 a3, s32 a4) {\n    s32 uninit_r4;\n    return a4 + (uninit_r4 + 1);\n}\n',
     );
