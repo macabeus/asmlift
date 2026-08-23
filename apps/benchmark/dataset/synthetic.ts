@@ -2043,6 +2043,12 @@ export const SYNTHETIC: SynthSpec[] = [
   //     with the three coercions deleted. With them in play the same edit reads 12 to 366 (+354),
   //     which is the number this comment first recorded. +179 is the honest one — the coercions
   //     and the materialisation contend for the same registers, so stacking them double-counts.
+  // Both endpoints were taken against the ranked winner OF THAT RUN, and its label is not a handle
+  // that survives: an axis suffix names a sense relative to the target's DEFAULT, so `/flip-join`
+  // in it denotes the opposite spelling to the one it denotes now. The same command today reports
+  // `26880 candidate(s) scored, 0 dropped, best unsigned/flip-branch/defsite/merge-names/
+  // addr-home/livebase-block/volatile/initfirst/raw-globals: 406`. What transfers between runs is
+  // the SHAPE of the edit, never the label.
   // The construct is cheap to carry when everything else is already wrong and a hard blocker once
   // it is not, which is why both directions are quoted rather than either alone.
   //
