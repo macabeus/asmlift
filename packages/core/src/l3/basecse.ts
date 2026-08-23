@@ -12,7 +12,8 @@
 // question the source answered per BASE — one register file spelled as a pointer local beside
 // scalar cells spelled as bare derefs. The `single-cell` gate is what makes the narrower answer
 // reachable: under `LIVEBASE_BLOCK_GATES` a base every access of which is ONE fixed offset stays
-// inline, and rank emits that hoist as a second candidate for the differ to referee. The unit is
+// inline, and rank's LIVEBASE_ADMISSIONS roster emits each table's hoist — and every product of
+// it — as its own candidate family, for the differ to referee between them. The unit is
 // the (base, width, signedness) KEY, not the base — a base read at two widths is two keys, and the
 // gate can leave one of them inline while the other binds. COVERAGE: two admissions, not a subset
 // lattice, so "some of the several block bases" stays unreachable — a function with two register
@@ -181,6 +182,13 @@ export const LIVEBASE_GATES: readonly Gate<BaseKey>[] = ablateHeuristic(
  *  by exactly one gate, so `without(LIVEBASE_BLOCK_GATES, 'single-cell')` is `/livebase`'s own
  *  admission and this selectivity axis prices by ablation like every other.
  *
+ *  `single-cell` GENERATES a narrower candidate; it does not classify, and taking it for a compiler
+ *  fact is the way to misuse it. Its counterexample is in this corpus: `synthetic:sizebound`'s
+ *  `*(u16 *)0x03001048` is reached at one fixed offset only — this rule rejects it — and binding it
+ *  is what the differ picks (16 against 36 on the same shape). The rule is legitimate anyway
+ *  because it never SUBTRACTS a candidate: `/livebase` rides beside it, and the differ referees.
+ *  Promote it into `BASECSE_GATES` or prune with it and that row pays.
+ *
  *  Why the ACCESS SHAPE and not the address: an MMIO register file and the IWRAM halfword beside
  *  it are both numeric constants in the same range. And why the rule is not in `BASECSE_GATES`: it
  *  would reject nothing there, being a strict refinement of `repeated-const-offset` — past
@@ -189,7 +197,7 @@ export const LIVEBASE_BLOCK_GATES: readonly Gate<BaseKey>[] = [
   ...LIVEBASE_GATES,
   {
     id: 'single-cell',
-    why: 'a base reached at one fixed offset is a scalar the source spells as a bare deref',
+    why: 'a base reached at one fixed offset reads as a scalar, which the source more often spells inline',
     sound: false,
     rejects: (c) => c.singleCell,
   },
