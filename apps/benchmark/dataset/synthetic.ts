@@ -2068,17 +2068,26 @@ export const SYNTHETIC: SynthSpec[] = [
   // no preheader read and `armfall` carries one, `v3 = a2;` — the argument-register fabrication the
   // rules above cannot reach, and the reason `armfall` (23) stays the harder of the two.
   //
-  // WHY THERE IS NO ROW FOR MORE UNDEFINED ENTRIES. A ladder of two-to-five undefined entries was
-  // measured off this family's own shape, holding it fixed and varying only how many locals the arm
-  // decides (agbcc; each control the same C plus the `else`). The gap grew monotonically (11 / 14 /
-  // 15 / 18 / 31 against a control of 0 at every rung) and the symptom changed along it — at three
-  // entries agbcc emitted four `add rX, rY, #0` preheader copies, at four and five the fabricated
-  // entry ran past r3 and the read became `ldr r3, [sp, #N]`. Multiplicity is severity there, not a
-  // separable fix: NO choice of fabricated parameter was free at ANY rung (at rung 1 the three
-  // spellings scored 13/12/9, at rung 3 all six permutations 8..11), and only a spelling that
-  // materialised NOTHING reached 0 — which is what the two rules above now emit. Those numbers were
-  // taken before them and are not re-measured here; what they establish is that no longer rung is a
-  // capability this pair does not already hold.
+  // WHY THERE IS NO ROW FOR MORE UNDEFINED ENTRIES. A ladder was measured off this family's own
+  // shape, holding it fixed and varying only how many locals the arm decides (agbcc; each control
+  // the same C plus the `else`, and every control MATCHes). Re-measured with the two rules above in
+  // place, because the first ladder was taken without them and its symptoms no longer reproduce:
+  // rung 1 is `loopfall` itself at 0, rung 4 is 14, rung 5 is 28, rung 6 is 31.
+  //
+  // The rungs do not stay in one class, and the claim is only about the one they leave. Every entry
+  // agbcc homes in r4-r7 costs nothing now. What the higher rungs add is entries homed in an
+  // ARGUMENT register — at rung 4 agbcc takes r7/r5/r4/r3 and asmlift fabricates `a1` for the r3
+  // one, and no `nonArgRegs` rule can cover that, because a caller really can pass a value in r3.
+  // So: no longer rung is a REGISTER fabrication this pair does not already hold, and the residue
+  // above rung 3 is the argument-register fabrication `armfall` gates at 23. (The first ladder
+  // reported the rung-4/5 read as `ldr r3, [sp, #N]`, an incoming STACK argument. That was the
+  // pre-rules shape: rung 6 spills a real entry to `[sp]` and asmlift still fabricates a register
+  // for it, so nothing here reaches a fabricated stack argument.)
+  //
+  // Multiplicity was severity in the first ladder and stays so: NO choice of fabricated parameter
+  // was free at ANY rung (at rung 1 the three spellings scored 13/12/9, at rung 3 all six
+  // permutations 8..11), and only a spelling that materialised NOTHING reached 0 — which is what
+  // the two rules above now emit for the callee-saved homes.
   //
   // agbcc only. The claim is about what THIS compiler emits for an uninitialised loop-carried
   // local, established by compiling both spellings of each pair; ido7.1, gcc2.7.2kmc and
