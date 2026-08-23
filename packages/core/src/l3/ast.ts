@@ -469,6 +469,24 @@ export function stmtChildren(s: Stmt): Stmt[] {
   }
 }
 
+/** Every expression node in a body, statements nested and children included — the whole-tree walk
+ *  the three functions above compose into, kept here so a new node kind is a compile error in one
+ *  of them rather than a silent miss in each caller's own recursion. */
+export function* walkExprs(body: Stmt[]): Generator<Expr> {
+  const expr = function* (e: Expr): Generator<Expr> {
+    yield e;
+    for (const c of exprChildren(e)) {
+      yield* expr(c);
+    }
+  };
+  for (const s of body) {
+    for (const e of stmtExprs(s)) {
+      yield* expr(e);
+    }
+    yield* walkExprs(stmtChildren(s));
+  }
+}
+
 // THE negation of a CONDITION — the one implementation, shared by every L3 pass that flips one.
 //
 // There were two, and they drifted: structure.ts's empty-then peephole learned to distribute over

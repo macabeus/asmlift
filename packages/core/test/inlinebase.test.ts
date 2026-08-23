@@ -350,13 +350,37 @@ test('the qualified output is enumerated alongside its plain twin', () => {
 });
 
 // The bytes cannot referee these two — the compiler was not exploiting the non-volatility — so
-// the ordering has to, whatever order the two spellings were enumerated in.
+// the ordering has to, whatever order the two spellings were enumerated in. 0x4000208 is REG_IME,
+// inside the target's device window, which is what admits the preference at all.
 test('at an exact tie the qualified spelling wins, from either enumeration order', () => {
   const cands = ereaderCandidates();
   const pick = (label: string) => cands.find((c) => c.label === label)!;
   const q = pick('unsigned/inlinebase/volatile/vol-slot');
   const plain = pick('unsigned/inlinebase/vol-slot');
+  expect(q.deviceVolatile).toBeGreaterThan(0);
+  expect(plain.deviceVolatile).toBeUndefined();
   const scored = (c: Candidate, order: number) => ({ ...c, score: { score: 0 }, order });
   expect(compareScored(scored(q, 0), scored(plain, 1))).toBeLessThan(0);
   expect(compareScored(scored(q, 1), scored(plain, 0))).toBeLessThan(0);
+});
+
+// The preference is the window's, not the word's: qualifying ordinary memory is a claim about the
+// source the asm does not carry, and counting the word alone decides twelve benchmark rows of
+// which only two touch a device address.
+test('the same spelling over an IWRAM address earns no preference', () => {
+  const iwram = EREADER.replace('0x4000208', '0x3005CC4');
+  const cands = enumerateCandidates('EReader_Reset', iwram, ARMV4T_AGBCC, {
+    prototypes: {
+      EReader_Reset: VOID0,
+      EReaderHelper_ClearSendRecvMgr: VOID0,
+      EReaderHelper_RestoreRegsState: VOID0,
+      RestoreSerialTimer3IntrHandlers: VOID0,
+    },
+  });
+  const q = cands.find((c) => c.label === 'unsigned/inlinebase/volatile/vol-slot')!;
+  expect(q.source).toContain('*(volatile u16 *)50355396');
+  expect(q.deviceVolatile).toBeUndefined();
+  const plain = cands.find((c) => c.label === 'unsigned/inlinebase/vol-slot')!;
+  const scored = (c: Candidate, order: number) => ({ ...c, score: { score: 0 }, order });
+  expect(compareScored(scored(q, 1), scored(plain, 0))).toBeGreaterThan(0);
 });

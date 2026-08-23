@@ -15,6 +15,9 @@
 //   • capabilities.flags → RESERVED, not yet read by any pass (PPC condition regs will).
 //   • capabilities.readOnlyAddressSinks → the Thumb frame-object audit: a frame address stored to
 //     one of these reached a device that only reads through it, so it does not retract `undef`.
+//   • capabilities.deviceRegisters → rank.ts's volatility tie-break: which of two byte-identical
+//     spellings publishes a `volatile` (a preference over the reader's C, never a qualifier the
+//     decompiler adds or removes).
 //   • compilerBehaviors.* → all consumed by the structurer (threaded via StructureOptions).
 //
 // `capabilities` (HARDWARE facts) vs `compilerBehaviors` (COMPILER canonicalization choices) are
@@ -71,6 +74,14 @@ export interface TargetDescription {
     // (ARMv4T is bi-endian). ABSENT ⇒ every escape is assumed to write, which is the safe
     // direction and what every other target gets.
     readOnlyAddressSinks?: readonly number[];
+    // The device-register window, `[start, end)`. A cell in it changes under the program's feet,
+    // so a source that touched one all but certainly declared it `volatile` — which makes it the
+    // gate on rank.ts's volatility tie-break. It never adds or removes a qualifier: which cells a
+    // source qualified is not derivable from the asm, so both spellings are still enumerated and
+    // the differ still referees. It decides only which of two spellings the bytes CANNOT separate
+    // is the one published. ABSENT ⇒ no preference at all, which is the neutral direction — the
+    // qualifier then reads as a claim about ordinary memory, and enumeration order decides.
+    deviceRegisters?: readonly [number, number];
   };
   // COMPILER BEHAVIORS — the specific compiler's canonicalization choices, distinct from
   // hardware `capabilities`. All consumed by the structurer (threaded through StructureOptions).
@@ -169,6 +180,10 @@ export const ARMV4T_AGBCC: TargetDescription = {
     // The idiom this exists for is their `DMA_FILL`: `vu16 tmp = value;
     // DmaSet(n, &tmp, dest, … DMA_SRC_FIXED …)`, where the frame local is the source.
     readOnlyAddressSinks: [0x040000b0, 0x040000bc, 0x040000c8, 0x040000d4],
+    // The GBA I/O register file — one page from 0x04000000, the last live register being
+    // 0x04000301 (HALTCNT). Everything a source reaches through `REG_*` is in here, and nothing
+    // else is: IWRAM, EWRAM, palette, VRAM and OAM are ordinary memory a source does not qualify.
+    deviceRegisters: [0x04000000, 0x04000400],
   },
   compilerBehaviors: {
     coalesceLoopInit: false,

@@ -38,7 +38,7 @@ import { registerishSpellings } from './l3/regspell';
 import { reindexWalks } from './l3/reindex';
 import { hoistScopedBases } from './l3/scopebase';
 import { type SymbolRef, collectSymbolRefs } from './l3/symbol-refs';
-import { volatilePtrLocals, volatileSubsetCandidates } from './l3/volatileptr';
+import { deviceVolatileClaims, volatilePtrLocals, volatileSubsetCandidates } from './l3/volatileptr';
 import { volatileValueLocals } from './l3/volatileval';
 import { RewritePattern } from './pattern/engine';
 import { applyIdiomPatterns, raiseRecovered, structureChecked } from './pipeline';
@@ -375,6 +375,11 @@ export interface Candidate {
    *  whose tree still names pool/reloc-derived globals (it only drops the map's shaped
    *  SPELLINGS). Absent without a map — synthesis then has nothing to do. */
   symbolRefs?: SymbolRef[];
+  /** `volatile` claims this spelling makes on one of the target's device registers — the
+   *  volatility tie-break's input (compareScored). DERIVED from the tree the source was emitted
+   *  from, like `symbolRefs`, because the qualifier and the address it applies to are often two
+   *  statements apart and the rendered text cannot pair them. */
+  deviceVolatile?: number;
 }
 /** A candidate paired with its score `S` (the injected scorer's result shape — must carry `.score`). */
 export interface Scored<S> extends Candidate {
@@ -510,6 +515,13 @@ export function enumerateCandidates(
   // `.word gSym`, MIPS `%lo(gSym)`), and those references need declarations in the self-declared
   // scoring world exactly like the named variant's (without them every raw sibling fails to compile
   // there, and the eval-winning raw candidate becomes unreproducible outside project headers).
+  // The volatility tie-break's input, derived at the same moment as the refs and for the same
+  // reason: whatever tree reaches emit is the tree it describes. Absent on a target that declares
+  // no device window, which is how every non-GBA target opts out.
+  const volOf = (tree: SFn): { deviceVolatile?: number } => {
+    const n = deviceVolatileClaims(tree, target.capabilities.deviceRegisters);
+    return n > 0 ? { deviceVolatile: n } : {};
+  };
   const refsOf = (tree: SFn): { symbolRefs?: SymbolRef[] } => {
     const refs = baseOpts.symbols
       ? collectSymbolRefs(tree.body, baseOpts.symbols, tree.name).map((r) => {
@@ -630,8 +642,8 @@ export function enumerateCandidates(
           // when a loop re-spells, BOTH representations are emitted and the differ referees. The
           // re-spelling passes the same boundary contracts as the primary; one that fails them is
           // dropped here — never scored, never able to win.
-          const spellings: { suffix: string; source: string; symbolRefs?: SymbolRef[] }[] = [
-            { suffix: '', source: backend.emit(sfn), ...refsOf(sfn) },
+          const spellings: { suffix: string; source: string; symbolRefs?: SymbolRef[]; deviceVolatile?: number }[] = [
+            { suffix: '', source: backend.emit(sfn), ...refsOf(sfn), ...volOf(sfn) },
           ];
           // Representation re-spellings — each a lever on the same footing as signedness/branch sense,
           // each guarded: it must pass the same boundary contracts as the primary AND emit (a backend
@@ -675,7 +687,7 @@ export function enumerateCandidates(
               }
               assertResolved(alt);
               assertDerefsTyped(alt);
-              spellings.push({ suffix, source: backend.emit(alt), ...refsOf(alt) });
+              spellings.push({ suffix, source: backend.emit(alt), ...refsOf(alt), ...volOf(alt) });
               // STATEMENT-SHAPE products, derived onto EVERY spelling — the second sanctioned
               // product mechanism (the POLICY note above carries the admission argument). Each is
               // a statement-order/shape fact orthogonal to representation; subsets compose in the
@@ -690,6 +702,7 @@ export function enumerateCandidates(
                       suffix: `${suffix}${shaped.suffix}`,
                       source: backend.emit(shaped.out),
                       ...refsOf(shaped.out),
+                      ...volOf(shaped.out),
                     });
                   }
                 }
@@ -749,8 +762,8 @@ export function enumerateCandidates(
           // exactly the locals this lever deletes. Usually the bytes separate them and the score
           // decides (11 against 12 on pokeemerald:EReader_Reset), but where the compiler was not
           // exploiting the non-volatility they are byte-identical — as they are on that row's
-          // WINNING shape, the one that also qualifies the slot — and `compareScored`'s volatility
-          // term picks the qualified twin.
+          // WINNING shape, the one that also qualifies the slot — and `compareScored`'s device-
+          // volatility term picks the qualified twin, 0x4000208 being REG_IME.
           //
           // COST — it fires broadly: on 33 of the 69 klonoa functions that lift with no symbol map
           // (a symbol-map sweep sees fewer, since an absolute pool constant lifts to a `gaddr`
@@ -936,6 +949,7 @@ export function enumerateCandidates(
               source,
               group: svIndex,
               ...(sp.symbolRefs ? { symbolRefs: sp.symbolRefs } : {}),
+              ...(sp.deviceVolatile ? { deviceVolatile: sp.deviceVolatile } : {}),
             });
           }
         }
@@ -985,11 +999,14 @@ export function rankBy<S extends { score: number }>(
  *
  *  GROUP next: a named symbol-map spelling beats its `/raw-globals` sibling at equal bytes.
  *
- *  VOLATILITY next: at equal bytes the spelling that keeps a `volatile` is the one to publish.
- *  Over-qualifying costs a reader nothing, while a dropped `volatile` on an MMIO cell is a real
- *  bug in the C that only this compiler at these flags hides — the differ cannot referee it,
- *  because the compiler was not exploiting the non-volatility on this input. A declared term
- *  rather than an enumeration order, which an unrelated lever's spellings can slide between.
+ *  DEVICE VOLATILITY next: at equal bytes, the spelling that qualifies a DEVICE REGISTER
+ *  (`capabilities.deviceRegisters`) is the one to publish. A dropped `volatile` on an MMIO cell is
+ *  a real bug in the C that only this compiler at these flags hides — the differ cannot referee
+ *  it, because the compiler was not exploiting the non-volatility on this input. Gated on the
+ *  window rather than counting the word, because outside it the qualifier is a claim about
+ *  ordinary memory that the asm does not support — over the 856-row bench, counting the word
+ *  alone decides twelve rows and only two of them touch a device address. A declared term rather
+ *  than an enumeration order, which an unrelated lever's spellings can slide between.
  *
  *  CAST COUNT next, and only WITHIN a group. A wrong signedness pin is what manufactures casts —
  *  the C backend has to cast a shift operand back to the signedness the machine op needs, so
@@ -1008,17 +1025,10 @@ export function compareScored<S extends { score: number }>(
   return (
     a.score.score - b.score.score ||
     a.group - b.group ||
-    volatileCount(b.source) - volatileCount(a.source) ||
+    (b.deviceVolatile ?? 0) - (a.deviceVolatile ?? 0) ||
     castCount(a.source) - castCount(b.source) ||
     a.order - b.order
   );
-}
-
-/** `volatile` qualifiers in a candidate's rendered source — the volatility tie-break above. A TEXT
- *  count, like `castCount`, so it reads the C the user is shown rather than a tree the ranking
- *  layer would have to be handed. */
-function volatileCount(source: string): number {
-  return source.match(/\bvolatile\b/g)?.length ?? 0;
 }
 
 /** Scalar casts in a candidate's rendered source — the readability tie-break above.
