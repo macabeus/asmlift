@@ -2060,7 +2060,40 @@ export const SYNTHETIC: SynthSpec[] = [
   // shared `ldrh r0,[r3,#0x2]` tail and branches out of case 1, the candidate does the reverse —
   // which is the insert-2/delete-2 half of the breakdown and belongs to no class here yet. What
   // the pair adds over `loopfall` is that the undef survives multi-arm merging: `armdef` carries
-  // no preheader read and `armfall` carries two.
+  // no preheader read and `armfall` carries two — and ONE OF `armfall`'S IS PAST THE REGISTER
+  // WINDOW. It declares six parameters for a two-parameter function, and this ABI passes four in
+  // r0–r3, so the sixth is a stack argument: its candidate carries `ldr r3, [sp, #0x1c]`, a load
+  // of a caller frame slot no caller ever wrote. That instruction is the loudest form the
+  // fabrication takes and it is already on a committed row; a later round should not author a
+  // second one for it.
+  //
+  // WHY THERE IS NO ROW FOR MORE UNDEFINED ENTRIES. Round 8 proposed two more pairs — three
+  // entries and four — and measured them off this family's own shape, holding it fixed and
+  // varying only how many locals the arm decides (agbcc; each control the same C plus the
+  // `else`). The gap grows monotonically and every control is 0; the 1-column IS
+  // `loopfall`/`loopset`:
+  //
+  //     undefined entries |  1 |  2 |  3 |  4 |  5
+  //     gap row           | 11 | 14 | 15 | 18 | 31
+  //     its control       |  0 |  0 |  0 |  0 |  0
+  //
+  // The SYMPTOM does change along that ladder. At one entry agbcc emits no instruction for the
+  // read; at three, asmlift opens the loop with `v1 = a2; v2 = a3; v3 = a1;` and agbcc emits four
+  // `add rX, rY, #0` preheader copies for it; at four the entry is the fifth parameter and the
+  // read becomes `ldr r3, [sp, #0x14]`; at five asmlift declares SEVEN parameters and emits three
+  // such loads (the reference has no `[sp` reference at any rung). None of it is a second
+  // capability, for three measured reasons:
+  //   • The out-of-window read is `armfall`'s, above — already committed.
+  //   • "a parameter past r3 that nothing reads is free" is already pinned by three MATCHING
+  //     rows: `maskhome:agbcc` declares seven parameters for a four-parameter source, and
+  //     `armhomes:agbcc`/`nestinit:agbcc` five for four.
+  //   • Multiplicity is severity, not a separable fix. NO choice of fabricated parameter is free
+  //     at ANY rung: at rung 1, reading `a1`/`a2`/`a3` in the control's own shape scores
+  //     13/12/9, and at rung 3 all six permutations of the three-entry preheader score 8..11 —
+  //     while a spelling that materialises NOTHING reaches 0 at every rung (the control's own C
+  //     with its `else` deleted, at rungs 1/2/3/5; the same shape without the control's second
+  //     induction pointer at 4). So no fix closes `loopfall` and leaves a longer rung open, and
+  //     the two extra gap rows would have put a second and third row's score behind one cause.
   //
   // agbcc only. The claim is about what THIS compiler emits for an uninitialised loop-carried
   // local, established by compiling both spellings of each pair; ido7.1, gcc2.7.2kmc and
