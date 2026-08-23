@@ -284,6 +284,31 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     }
   };
 
+  // A relational test's two sides each admit a HALF-LINE of scrutinee values in the compare's own
+  // ordering, so the only way one of them can hold exactly ONE value is at a domain endpoint —
+  // which is why testing the two endpoints and their neighbours decides it, with no interval
+  // lattice. `x < 1` over an unsigned scrutinee admits `{0}` and is agbcc's spelling of `case 0`
+  // in a balanced search: `emit_case_nodes` tests the subtree BOUND, not the value, whenever the
+  // remaining range has collapsed to one. Read as navigation instead, that arm's body becomes a
+  // second default candidate and the whole tree declines.
+  //
+  // The reading is over the FULL domain, so an ancestor test that already excluded the value makes
+  // it wrong — and PRE3 is what catches that: it simulates the original tree for every recovered
+  // case value and declines unless it lands on the recorded body, exactly as it does for the `eq`
+  // cases. Null when the side admits none, several, or the whole domain.
+  const singletonSide = (ti: TestInfo, want: boolean): number | null => {
+    const [min, max] = ti.opcode.startsWith('icmp_u') ? [0, -1] : [-0x80000000, 0x7fffffff];
+    for (const [v, next] of [
+      [min, min + 1],
+      [max, max - 1],
+    ]) {
+      if (evalCmp(ti.opcode, ti.xOnLeft, v, ti.k) === want && evalCmp(ti.opcode, ti.xOnLeft, next, ti.k) !== want) {
+        return v;
+      }
+    }
+    return null;
+  };
+
   // Where does one arm's region LEAVE? Walk it from `entry`, never stepping THROUGH the merge or a
   // sibling arm's entry, and classify what it steps INTO. `siblings` is every OTHER arm entry the
   // caller can emit a `case`/`default` label for — the merge is deliberately not among them, so a
@@ -467,11 +492,12 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
           return null;
         }
       } else {
-        // relational → pure navigation
-        if (!asLeafOrTest(taken, 'nav')) {
+        // relational → navigation, except where one side has collapsed to a single value
+        const [tk, fk] = [singletonSide(ti, true), singletonSide(ti, false)];
+        if (!asLeafOrTest(taken, tk === null ? 'nav' : 'case', tk ?? undefined)) {
           return null;
         }
-        if (!asLeafOrTest(fall, 'nav')) {
+        if (!asLeafOrTest(fall, fk === null ? 'nav' : 'case', fk ?? undefined)) {
           return null;
         }
       }

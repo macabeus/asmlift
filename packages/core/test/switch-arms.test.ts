@@ -436,3 +436,60 @@ test('a jump-table arm that FALLS THROUGH is not reordered', () => {
   // LOUD instead. Recovering it is a separate capability with its own evidence to gather.
   expect(() => of(table(''))).toThrow(/falls through into an arm that is not the next one emitted/);
 });
+
+// ── the case a RELATIONAL test pins ──────────────────────────────────────────────────────────────
+// `emit_case_nodes` tests a subtree's BOUND rather than its value once the remaining range has
+// collapsed to one, so agbcc spells `case 0:` of an unsigned switch as `cmp r0, #1 / bcc` — the
+// shape `synthetic:armdef:agbcc` and `synthetic:armfall:agbcc` both carry. Read as pure
+// navigation that arm's body is a second default candidate and the whole tree declines to
+// if-nesting, which compiles to a different compare AND a different arm layout.
+
+test('a relational test whose side admits ONE value routes that case, not the default', () => {
+  const out = of(
+    'f:\n\tmov\tr2, #0x0\n' +
+      '\tcmp\tr0, #0x1\n\tbeq\t.Lc1\t@cond_branch\n' +
+      '\tcmp\tr0, #0x1\n\tbcc\t.Lc0\t@cond_branch\n' + // x < 1, unsigned ⇒ exactly {0}
+      '\tcmp\tr0, #0x2\n\tbeq\t.Lc2\t@cond_branch\n\tb\t.Lend\n' +
+      [0, 1, 2].map((k) => `.Lc${k}:\n\tadd\tr2, r1, #0x${k + 1}\n\tb\t.Lend\n`).join('') +
+      '.Lend:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr2, [r0]\n\tbx\tlr\n',
+  );
+  expect(out).toContain('switch (a0)');
+  expect(armOrder(out)).toEqual([0, 1, 2]);
+  expect(out).not.toContain('else'); // not the if-nesting fallback
+});
+
+test('the singleton is read on the FALL side too, not only the taken one', () => {
+  const out = of(
+    'f:\n\tmov\tr2, #0x0\n' +
+      '\tcmp\tr0, #0x1\n\tbeq\t.Lc1\t@cond_branch\n' +
+      '\tcmp\tr0, #0\n\tbhi\t.Lhi\t@cond_branch\n' + // x > 0 navigates; the FALL side is {0}
+      '.Lc0:\n\tadd\tr2, r1, #0x1\n\tb\t.Lend\n' +
+      '.Lhi:\n\tcmp\tr0, #0x2\n\tbeq\t.Lc2\t@cond_branch\n\tb\t.Lend\n' +
+      '.Lc1:\n\tadd\tr2, r1, #0x2\n\tb\t.Lend\n' +
+      '.Lc2:\n\tadd\tr2, r1, #0x3\n\tb\t.Lend\n' +
+      '.Lend:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr2, [r0]\n\tbx\tlr\n',
+  );
+  expect(out).toContain('switch (a0)');
+  expect(armOrder(out)).toEqual([0, 1, 2]);
+});
+
+test('a singleton an ancestor already excluded is DEAD, and PRE3 declines rather than resurrect it', () => {
+  // The reading is over the whole 32-bit domain, so `x < 1` still says `{0}` under an ancestor
+  // that sent every x < 5 elsewhere. Simulating the original tree for the recovered value is what
+  // catches it: x == 0 reaches `.Ldef`, not `.Lc0`.
+  const out = of(
+    'f:\n\tmov\tr2, #0x0\n' +
+      '\tcmp\tr0, #0x5\n\tbcc\t.Ldef\t@cond_branch\n' +
+      '\tcmp\tr0, #0x1\n\tbcc\t.Lc0\t@cond_branch\n' + // unreachable under x >= 5
+      '\tcmp\tr0, #0x6\n\tbeq\t.Lc6\t@cond_branch\n' +
+      '\tcmp\tr0, #0x7\n\tbeq\t.Lc7\t@cond_branch\n\tb\t.Ldef\n' +
+      '.Ldef:\n\tmov\tr2, #0x63\n\tb\t.Lend\n' +
+      '.Lc0:\n\tadd\tr2, r1, #0x1\n\tb\t.Lend\n' +
+      '.Lc6:\n\tadd\tr2, r1, #0x7\n\tb\t.Lend\n' +
+      '.Lc7:\n\tadd\tr2, r1, #0x8\n\tb\t.Lend\n' +
+      '.Lend:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr2, [r0]\n\tbx\tlr\n',
+  );
+  expect(out).not.toContain('switch (');
+  expect(out).not.toContain('case 0:'); // x == 0 must still reach the 0x63 arm, not .Lc0's
+  expect(out).toContain('else');
+});
