@@ -521,9 +521,9 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
         //     `do_jump_if_equal` before either descent test, so a bound test always sits under
         //     another test of the same tree; one that OPENS the region did not come from this
         //     dispatch, and reading it as a case turns a comparison chain into a `switch`;
-        //   - a singleton branch onto another TEST, which is the search descending to pin the
-        //     value. Navigation recovers it; a case body may not be a test, so reading it as one
-        //     would decline the whole tree.
+        //   - a singleton branch onto another TEST of the scrutinee, which is the search
+        //     descending to pin the value. It is dispatch, so the walk reads it as dispatch —
+        //     recovering it, or declining at PRE4 if it is not collapsible.
         const k = switchAllowsBoundCase && blk !== b && !isTestOn(taken) ? singletonTaken(ti) : null;
         if (!asLeafOrTest(taken, k === null ? 'nav' : 'case', k ?? undefined)) {
           return null;
