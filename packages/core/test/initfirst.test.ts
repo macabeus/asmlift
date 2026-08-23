@@ -404,3 +404,45 @@ test('a CONST init still moves under an effectful condition — nothing crosses 
   expect(r).not.toBeNull();
   expect(r!.body[0]).toEqual(assign('v0', c(0)));
 });
+
+// `/uns-cmp` renders one compare operand `(u32)…` to make the branch unsigned, and on a
+// zero-trip guard that operand IS the init's const — so before the side match looked through the
+// cast the two levers never appeared in one candidate (`synthetic:unsguard:agbcc`).
+test('a (u32)-cast comparison side still matches the init it spells: (u32)0 < n → v < n', () => {
+  const r = initFirstGuards(
+    fnWith(
+      [{ name: 'v0', type: u32t }],
+      [
+        {
+          k: 'if',
+          cond: bin('<', { k: 'cast', to: u32t, e: c(0) }, v('a0')),
+          then: [assign('v0', c(0)), dowhile(bin('<', v('v0'), v('a0')), [])],
+          else: [],
+        },
+      ],
+    ),
+  );
+  expect(r).not.toBeNull();
+  expect(r!.body[0]).toEqual(assign('v0', c(0)));
+  // the WHOLE side becomes the variable — the cast went with it, and v0's u32 declaration is
+  // what keeps the compare unsigned
+  expect((r!.body[1] as Extract<Stmt, { k: 'if' }>).cond).toEqual(bin('<', v('v0'), v('a0')));
+});
+
+test('refused: a NARROWING cast side is not the value the init stores ((u8)a0 vs v0 = a0)', () => {
+  const u8t = { kind: 'int', width: 8, signed: false } as const;
+  const r = initFirstGuards(
+    fnWith(
+      [{ name: 'v0', type: u32t }],
+      [
+        {
+          k: 'if',
+          cond: bin('<', { k: 'cast', to: u8t, e: v('a0') }, c(9)),
+          then: [assign('v0', v('a0')), dowhile(bin('!=', v('v0'), c(0)), [])],
+          else: [],
+        },
+      ],
+    ),
+  );
+  expect(r).toBeNull();
+});

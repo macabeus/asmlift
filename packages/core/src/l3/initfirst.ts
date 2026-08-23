@@ -53,6 +53,10 @@ const stmtTouches = (s: Stmt, name: string): boolean =>
 const isConstAssign = (s: Stmt): s is Extract<Stmt, { k: 'assign' }> & { value: { k: 'const'; value: number } } =>
   s.k === 'assign' && s.value.k === 'const';
 
+/** Peel value-preserving `(s32)`/`(u32)` casts. Width 32 only: a narrower target truncates. */
+const stripWideIntCast = (e: Expr): Expr =>
+  e.k === 'cast' && e.to.kind === 'int' && e.to.width === 32 ? stripWideIntCast(e.e) : e;
+
 export function initFirstGuards(sfn: SFn): SFn | null {
   let changed = false;
   const fnLocal = new Set([
@@ -102,6 +106,15 @@ export function initFirstGuards(sfn: SFn): SFn | null {
   // carry no effect it could cross (a call there could write the cell X reads); a CONST init
   // crosses nothing and keeps the wider admission.
   const effectFree = (e: Expr): boolean => e.k !== 'call' && e.k !== 'marker' && exprChildren(e).every(effectFree);
+  // A compare operand and the init's value can denote the same 32-bit value under different
+  // SPELLINGS: `/uns-cmp` wraps one side in `(u32)` to make the branch unsigned, and that side is
+  // often the very const the init assigns — so the two levers never composed. Matching under a
+  // width-32 INT cast restores it: `v = X` stores X's 32 bits, `v` is 32-bit-declared
+  // (meaningPreserved refuses otherwise), so `v` and `(u32)X` carry the same bit pattern and only
+  // the compare's rendered signedness can differ — which meaningPreserved checks separately. A
+  // NARROWING cast changes the value and never matches; a POINTER cast is excluded by the same
+  // width test, and with it every volatile-qualified spelling (the qualifier lives on a pointee).
+  const sameValue = (a: Expr, b: Expr): boolean => exprEquals(stripWideIntCast(a), stripWideIntCast(b));
   const env = declaredTypes(sfn);
   // The compare-meaning gate (see SCOPE): substituting `v` for X may change the compare's
   // rendered signedness through v's declared type. Sufficiency: v's declared width must be 32
@@ -220,9 +233,9 @@ export function initFirstGuards(sfn: SFn): SFn | null {
         const rest = list.slice(i + 1);
         const side =
           isConstAssign(init) || hoistableRead(init.value)
-            ? exprEquals(cond.l, init.value)
+            ? sameValue(cond.l, init.value)
               ? ('l' as const)
-              : exprEquals(cond.r, init.value)
+              : sameValue(cond.r, init.value)
                 ? ('r' as const)
                 : null
             : null;
