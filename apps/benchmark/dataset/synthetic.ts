@@ -2251,9 +2251,12 @@ export const SYNTHETIC: SynthSpec[] = [
   // BASECSE_GATES. Two of those gates — `loop` (a function-top hoist of a loop base forces a
   // callee-saved register) and `repeated-const-offset` (a fixed offset touched twice is a scalar
   // RMW the compiler re-materializes) — are exactly wrong for an MMIO poll, so rank.ts's
-  // `/livebase` lever re-runs the pass with both ablated, leaving only `single-use`. That lever
-  // is ALL-OR-NOTHING over bases: `hoistReusedGlobalBases` hoists every key the gate list admits,
-  // and there is no candidate for a proper subset.
+  // `/livebase` lever re-runs the pass with both ablated, leaving only `single-use`. That lever was
+  // ALL-OR-NOTHING over bases — `hoistReusedGlobalBases` hoisted every key the gate list admits,
+  // with no candidate for a proper subset. A second admission, LIVEBASE_BLOCK_GATES, adds the
+  // `single-cell` gate — a base every access of which is ONE fixed offset stays inline — and rank
+  // carries both in one roster (LIVEBASE_ADMISSIONS), fanning every `/livebase` product over each,
+  // so this row MATCHES on `signed/livebase-block/volatile` and guards the gate.
   //
   // ATTRIBUTED BY ABLATION, not by reading. Adding one more gate to LIVEBASE_GATES that rejects a
   // numeric base outside MMIO — per-base selectivity in its crudest form — takes this row from 11
@@ -2262,7 +2265,12 @@ export const SYNTHETIC: SynthSpec[] = [
   // `*(u16 *)0x03001048` in two loop bounds and hoisting THAT base is correct. So the pass is
   // right about the spelling and wrong about which bases get it — and an address threshold is NOT
   // the predicate to fix it with: it pays 4 points on `sizebound` for the 11 it wins here.
-  // `sizebound` is the row that referees whatever predicate a future lever proposes.
+  // `sizebound` is the row that referees whatever predicate a future lever proposes, and the
+  // shipped `single-cell` gate FAILS it as a rule, exactly as the address threshold does: that
+  // base is reached at one fixed offset only, so `-block` leaves it inline and its best spelling
+  // scores 36 where the winner that binds it scores 16. The row holds at 16 because the gate never
+  // SUBTRACTS a candidate — `/livebase` rides beside it and wins — and that coexistence is the
+  // whole reason a per-base predicate is allowed to be wrong. One that PRUNES has to be right.
   //
   // WATCH THE SIGN when writing one. `dma_wait:mwcc_242_81`'s base is 0xcc006000, which the IR
   // carries as a NEGATIVE 32-bit constant; a first cut of the probe compared the key as a signed
@@ -2280,16 +2288,25 @@ export const SYNTHETIC: SynthSpec[] = [
   // three IWRAM scalars that must stay inline absolute derefs. The ROM's own C is the reference,
   // and hoisting the three IWRAM cells is what costs — measured by hand-editing asmlift's own
   // winner one clause at a time against the same object:
-  //     all four bound, all four volatile (asmlift's winner) .................... 11
+  //     all four bound, all four volatile (plain `/livebase/volatile`) ........... 11
   //     all four bound, only the DMA base volatile .............................. 11
   //     all four bound, none volatile .......................................... 27
   //     ONLY the DMA base bound, volatile, the three IWRAM cells inline .......... 0  ← MATCH
   //     only the DMA base bound, NOT volatile ................................... 21
   // So the 11 is the hoist alone (qualifying the IWRAM cells `volatile` on top of the wrong hoist
   // is worth 0 here), and `volatile` on the base that needs it is worth 21 — the lever pair is
-  // right about both bases and wrong about which ones. A base census over all 12 enumerated
-  // candidates: every one binds either 0 or all 4 numeric bases, and marks 0 or 4 of them
-  // `volatile`. The matching spelling is in none of them.
+  // right about both bases and wrong about which ones. A base census over the enumeration without
+  // the gate: all 12 candidates bound either 0 or all 4 numeric bases, and marked 0 or 4 of them
+  // `volatile`. The gate adds 8 (12 → 20), and all eight bind the DMA base alone — one block hoist
+  // crossed over {unsigned, signed} × {plain, /expr-home} × {plain, /volatile}; the scored
+  // `/livebase-block` reads 21, the number hand-editing that clause produced.
+  //
+  // The MIRROR admission — bind the scalar cells, leave the register file inline — is deliberately
+  // NOT on rank.ts's roster, and what it would cost is measured rather than guessed: one gate table
+  // with the complementary predicate plus one row there (a gate can only reject MORE, so it is
+  // never an extra entry in LIVEBASE_BLOCK_GATES), and with it in the list the corpus enumerates
+  // 8141 candidates against 7405 while not one of the 856 rows changes outcome, score or winning
+  // label. It goes on the roster when a row asks for it.
   //
   // `onepoll` is the control — byte-identical C with the three IWRAM statements deleted. One base,
   // no selectivity question, and `/livebase/volatile` MATCHes it. So the pair brackets the gap
@@ -2300,11 +2317,25 @@ export const SYNTHETIC: SynthSpec[] = [
   // `for` spelling the same shape scores 15, of which 11 is these bases and 4 is that guard
   // (verified by composing both fixes by hand: 15 → 4 → 0).
   //
-  // Cut from kleod:LoadBGTilemapData:agbcc. A base census over its whole 20608-candidate
-  // enumeration returns four shapes and no others: 13440 bind nothing, 1024 bind 0x03003430 alone
-  // (the default pass's own single admission), 3072 bind all five of 0x03003430 / 0x03003478 /
-  // 0x0300347A / 0x030034A0 (IWRAM) and 0x040000D4 (the DMA register file) plain, and 3072 bind
-  // those same five all `volatile`. Not one binds the DMA base alone.
+  // Cut from kleod:LoadBGTilemapData:agbcc, and it pays there. The row exists because a base census
+  // over that function's enumeration returned four shapes and no others: bind nothing, bind
+  // 0x03003430 alone (`/nearbase`'s cluster), bind all five of 0x03003430 / 0x03003478 /
+  // 0x0300347A / 0x030034A0 (IWRAM) and 0x040000D4 (the DMA register file) plain, and bind those
+  // same five all `volatile`.
+  // Not one bound the DMA base alone. With the gate, the narrower hoist IS LBG's ranked winner —
+  // `docs/ranked-repro.md`'s command, run either side of it:
+  //
+  //   without  17152 candidate(s) scored, 0 dropped, best …/addr-home/livebase/volatile/
+  //            coalesce-v20-v17/initfirst/raw-globals: 419
+  //   with     26880 candidate(s) scored, 0 dropped, best …/addr-home/livebase-block/volatile/
+  //            initfirst/raw-globals: 406
+  //
+  // 419 → 406, attributed twice over: the with-gate log's best candidate carrying no `-block` label
+  // reads 419 exactly, which is what the without-gate log's winner scores. The 9728 extra
+  // candidates are what fanning every `/livebase` product over both admissions costs on a function
+  // that inhabits them, and 5120 of them are the `/coalesce` pairing — worth 21 points on
+  // `/livebase` here (440 → 419) and nothing on the narrow admission, whose best paired spelling
+  // reads 408, two behind going unpaired.
   //
   // agbcc only. The claim is about what THIS compiler does with the two spellings, established by
   // compiling both; the poll declines on ido7.1/gcc2.7.2kmc's branch-likely lift link exactly as

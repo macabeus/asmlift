@@ -8,6 +8,17 @@
 // base into a local pointer `T *p = (T *)base` and points each access at `p`, so the recompiled code
 // keeps the address in one register instead of reloading it.
 //
+// WHICH bases. The pass hoists every key its gate list admits, which answers per FUNCTION a
+// question the source answered per BASE — one register file spelled as a pointer local beside
+// scalar cells spelled as bare derefs. The `single-cell` gate is what makes the narrower answer
+// reachable: under `LIVEBASE_BLOCK_GATES` a base every access of which is ONE fixed offset stays
+// inline, and rank's LIVEBASE_ADMISSIONS roster emits each table's hoist — and every product of
+// it — as its own candidate family, for the differ to referee between them. The unit is
+// the (base, width, signedness) KEY, not the base — a base read at two widths is two keys, and the
+// gate can leave one of them inline while the other binds. COVERAGE: two admissions, not a subset
+// lattice, so "some of the several block bases" stays unreachable — a function with two register
+// files binds both or neither.
+//
 // SCOPE / SOUNDNESS. Only an `index` node whose base is a bare `addr` (a global address) or a bare
 // `const` (a numeric pointer address) is eligible, and only when 2+ such nodes share the SAME
 // (base, width, signedness) — an AGGREGATE base (F9 spells a SCALAR global as a bare `var`, which is
@@ -53,6 +64,9 @@ interface Collected {
    *  tallied); a repeat means a scalar re-access, and ONE is enough to disqualify the base even
    *  when it also has distinct-offset uses. */
   constOffCount: Map<string, Map<number, number>>;
+  /** keys indexed by a NON-constant expression somewhere — an array walk, so the base reaches a
+   *  BLOCK of cells however few constant offsets it also touches (see `single-cell`). */
+  varIndexed: Set<string>;
 }
 
 /** Every `index` node whose base is a hoistable leaf, tallied by key (for the 2+-reuse test) and in
@@ -73,6 +87,8 @@ function collect(stmts: Stmt[], c: Collected, loop: boolean): void {
       if (e.idx.k === 'const') {
         const m = c.constOffCount.get(k) ?? c.constOffCount.set(k, new Map()).get(k)!;
         m.set(e.idx.value, (m.get(e.idx.value) ?? 0) + 1);
+      } else {
+        c.varIndexed.add(k);
       }
     }
     for (const ch of exprChildrenOf(e)) {
@@ -118,6 +134,8 @@ export interface BaseKey {
   inLoop: boolean;
   /** some CONSTANT offset through this base is touched 2+ times */
   repeatedConstOffset: boolean;
+  /** every access is the SAME fixed offset — one scalar cell rather than a block of them */
+  singleCell: boolean;
 }
 
 /** The admission rules. NONE is sound, and that is a property of the pass rather than an oversight:
@@ -160,19 +178,64 @@ export const LIVEBASE_GATES: readonly Gate<BaseKey>[] = ablateHeuristic(
   'repeated-const-offset',
 );
 
-export function hoistReusedGlobalBases(sfn: SFn, gates: readonly Gate<BaseKey>[] = BASECSE_GATES): SFn {
-  const c: Collected = { count: new Map(), order: [], meta: new Map(), inLoop: new Set(), constOffCount: new Map() };
+/** `/livebase-block`'s admission (rank.ts): `/livebase` plus `single-cell`. The two tables differ
+ *  by exactly one gate, so `without(LIVEBASE_BLOCK_GATES, 'single-cell')` is `/livebase`'s own
+ *  admission and this selectivity axis prices by ablation like every other.
+ *
+ *  `single-cell` GENERATES a narrower candidate; it does not classify, and taking it for a compiler
+ *  fact is the way to misuse it. Its counterexample is in this corpus: `synthetic:sizebound`'s
+ *  `*(u16 *)0x03001048` is reached at one fixed offset only — this rule rejects it — and binding it
+ *  is what the differ picks (16 against 36 on the same shape). The rule is legitimate anyway
+ *  because it never SUBTRACTS a candidate: `/livebase` rides beside it, and the differ referees.
+ *  Promote it into `BASECSE_GATES` or prune with it and that row pays.
+ *
+ *  Why the ACCESS SHAPE and not the address: an MMIO register file and the IWRAM halfword beside
+ *  it are both numeric constants in the same range. And why the rule is not in `BASECSE_GATES`: it
+ *  would reject nothing there, being a strict refinement of `repeated-const-offset` — past
+ *  `single-use`, a base with no variable index and one distinct offset touched it twice. */
+export const LIVEBASE_BLOCK_GATES: readonly Gate<BaseKey>[] = [
+  ...LIVEBASE_GATES,
+  {
+    id: 'single-cell',
+    why: 'a base reached at one fixed offset reads as a scalar, which the source more often spells inline',
+    sound: false,
+    rejects: (c) => c.singleCell,
+  },
+];
+
+/** The census without the rewrite, so a caller choosing between admissions can compare what two
+ *  tables would bind for one tree walk each. */
+export function admittedBases(sfn: SFn, gates: readonly Gate<BaseKey>[]): readonly string[] {
+  return admit(sfn, gates).keys;
+}
+
+/** The keys `gates` admits, in first-use order, with the census they were judged from. */
+function admit(sfn: SFn, gates: readonly Gate<BaseKey>[]): { c: Collected; keys: string[] } {
+  const c: Collected = {
+    count: new Map(),
+    order: [],
+    meta: new Map(),
+    inLoop: new Set(),
+    constOffCount: new Map(),
+    varIndexed: new Set(),
+  };
   collect(sfn.body, c, false);
-  const { count, order, meta } = c;
-  const hoisted = order.filter(
+  const keys = c.order.filter(
     (k) =>
       firstRejection(gates, {
         key: k,
-        uses: count.get(k) ?? 0,
+        uses: c.count.get(k) ?? 0,
         inLoop: c.inLoop.has(k),
         repeatedConstOffset: [...(c.constOffCount.get(k)?.values() ?? [])].some((n) => n >= 2),
+        singleCell: !c.varIndexed.has(k) && (c.constOffCount.get(k)?.size ?? 0) <= 1,
       }) === null,
   );
+  return { c, keys };
+}
+
+export function hoistReusedGlobalBases(sfn: SFn, gates: readonly Gate<BaseKey>[] = BASECSE_GATES): SFn {
+  const { c, keys: hoisted } = admit(sfn, gates);
+  const { meta } = c;
   if (hoisted.length === 0) {
     return sfn;
   }

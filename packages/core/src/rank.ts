@@ -19,8 +19,15 @@ import { T } from './ir/types';
 import { verify } from './ir/verify';
 import { materializeArgBases } from './l3/argbase';
 import type { LanguageBackend, SFn } from './l3/ast';
-import { LIVEBASE_GATES, hoistReusedGlobalBases } from './l3/basecse';
+import {
+  type BaseKey,
+  LIVEBASE_BLOCK_GATES,
+  LIVEBASE_GATES,
+  admittedBases,
+  hoistReusedGlobalBases,
+} from './l3/basecse';
 import { armDisjointCandidates, coalesceCandidates } from './l3/coalesce';
+import type { Gate } from './l3/gates';
 import { initFirstGuards } from './l3/initfirst';
 import { mulFirstSums } from './l3/mulfirst';
 import { nearBaseClusters } from './l3/nearbase';
@@ -213,6 +220,40 @@ const applyShapes = (
   }
   return fired.length > 0 ? { out: cur, suffix: fired.join('') } : null;
 };
+
+/** The locals a lever added — a NAME diff rather than a positional slice, so a pass that ever
+ *  reorders locals cannot silently empty the set. It is what scopes `/volatile` to the pointers
+ *  the lever itself created (volatilePtrLocals' `only`), leaving the tree's own locals alone. */
+const createdLocals = (from: SFn, to: SFn): Set<string> => {
+  const before = new Set(from.locals.map((l) => l.name));
+  return new Set(to.locals.filter((l) => !before.has(l.name)).map((l) => l.name));
+};
+
+/** The base-CSE ADMISSIONS `/livebase` offers the differ, widest first. WHICH of several numeric
+ *  bases the source named is per-base knowledge the asm does not carry — a DMA register file wants
+ *  one register held across the whole body while the IWRAM halfword beside it re-materializes — so
+ *  each admission rides as its own candidate and the differ referees between them. Every
+ *  `/livebase` product below fans over this table, so a new admission is one entry here, one gate
+ *  table, and that table's line in the gate-contract roster — not nine hand-edited sites that can
+ *  drift. A MIRROR admission (bind the scalar cells, leave the register file inline) is that, with
+ *  the complementary predicate; it is never another entry in LIVEBASE_BLOCK_GATES, which can only
+ *  reject more.
+ *
+ *  WHAT BOUNDS IT. A row declines unless it binds a non-empty set of bases no earlier row already
+ *  bound, and each product declines wherever its own lever does, so the list widens only where an
+ *  inhabitant exists — over the 856-row corpus the second admission reaches 8 rows, its `/nearbase`
+ *  pairing 3, and its `/indexed`, `/coalesce` and volatile-subset products none at all. A function
+ *  inhabiting them all pays far more, and the fan is not always a win there: the mixpoll dataset
+ *  entry prices one where the `/coalesce` pairing costs the most candidates of any and scores two
+ *  points worse than going unpaired. It fans anyway because a pairing belongs to the LEVER, not to
+ *  one of its admissions. Price a third admission on the corpus AND on a real function. */
+const LIVEBASE_ADMISSIONS: readonly { suffix: string; gates: readonly Gate<BaseKey>[] }[] = [
+  { suffix: '/livebase', gates: LIVEBASE_GATES },
+  { suffix: '/livebase-block', gates: LIVEBASE_BLOCK_GATES },
+];
+
+const sameBases = (a: readonly string[], b: readonly string[]): boolean =>
+  a.length === b.length && a.every((k, i) => k === b[i]);
 
 const SIGN_CANDS = [
   { label: 'unsigned', signed: false },
@@ -612,12 +653,14 @@ export function enumerateCandidates(
           // same argument, not just a row. And a specific LEVER PAIRING is admitted when a row
           // demands it AND the joint spelling is reachable from neither lever alone (the
           // /livebase × /indexed, × /nearbase, and × /coalesce pairings below, each with its
-          // demanding row); anything else stays un-composed. And a lever must
-          // PRESERVE SEMANTICS by construction: the differ referees byte-exactness (a wrong candidate
-          // can never fake a score-0 match), but on a NONMATCH row the best-scoring source is shown
-          // to the user — a semantically-wrong re-spelling there is plausible-but-wrong output, the
-          // defect class this project exists to avoid. Hence each lever's decline-over-approximate
-          // gates, adversarially audited.
+          // demanding row); anything else stays un-composed. A pairing is admitted for a LEVER, so
+          // it fans over that lever's whole admission table (LIVEBASE_ADMISSIONS): a roster row
+          // changes which bases the same hoist binds, not what pairing it with /coalesce means.
+          // And a lever must PRESERVE SEMANTICS by construction: the differ referees byte-exactness
+          // (a wrong candidate can never fake a score-0 match), but on a NONMATCH row the best-
+          // scoring source is shown to the user — a semantically-wrong re-spelling there is
+          // plausible-but-wrong output, the defect class this project exists to avoid. Hence each
+          // lever's decline-over-approximate gates, adversarially audited.
           // Takes a THUNK, so the lever's own computation is inside the try too. A lever that threw
           // from the pass itself — rather than from the contracts or the backend — would escape and
           // abort the whole enumeration for this row, primary included: the one way a lever can cost
@@ -744,38 +787,40 @@ export function enumerateCandidates(
           // where the prediction is wrong — the compiler holds ONE base register across stores, the
           // loop, and the read-back. The primary already carries every base those rules admit, so a
           // hoist-nothing result means the lever has nothing to add and declines.
-          const livebase = (): SFn | null => {
-            const r = hoistReusedGlobalBases(sfn, LIVEBASE_GATES);
-            return r === sfn ? null : r;
-          };
-          respell('/livebase', livebase);
-          const livebaseVolatile = (): SFn | null => {
-            const r = livebase();
-            if (!r) {
-              return null;
-            }
-            // Only the locals THIS lever created (a name-diff, not a positional slice, so a pass
-            // that ever reorders locals cannot silently empty the set) — see the POLICY note above.
-            const before = new Set(sfn.locals.map((l) => l.name));
-            const created = new Set(r.locals.filter((l) => !before.has(l.name)).map((l) => l.name));
-            return volatilePtrLocals(r, created);
-          };
-          respell('/livebase/volatile', livebaseVolatile);
-          enumerate('/livebase/volatile', livebase, (r) => {
-            const before = new Set(sfn.locals.map((l) => l.name));
-            return volatileSubsetCandidates(r, new Set(r.locals.filter((l) => !before.has(l.name)).map((l) => l.name)));
+          // One family per LIVEBASE_ADMISSIONS row; a row binding exactly what an earlier row bound
+          // is the same spelling under a different label, so it declines for that too.
+          const livebases = LIVEBASE_ADMISSIONS.map(({ suffix, gates }, i) => {
+            const hoist = (): SFn | null => {
+              const bound = admittedBases(sfn, gates);
+              const shadowed = LIVEBASE_ADMISSIONS.slice(0, i).some((a) =>
+                sameBases(bound, admittedBases(sfn, a.gates)),
+              );
+              return bound.length > 0 && !shadowed ? hoistReusedGlobalBases(sfn, gates) : null;
+            };
+            const volatiles = (): SFn | null => {
+              const r = hoist();
+              return r ? volatilePtrLocals(r, createdLocals(sfn, r)) : null;
+            };
+            return { suffix, hoist, volatiles };
           });
+          for (const { suffix, hoist, volatiles } of livebases) {
+            respell(suffix, hoist);
+            respell(`${suffix}/volatile`, volatiles);
+            enumerate(`${suffix}/volatile`, hoist, (r) => volatileSubsetCandidates(r, createdLocals(sfn, r)));
+          }
           // The livebase × indexed PAIRINGS — the third sanctioned product kind (see POLICY):
           // row-demanded, and the joint spelling is reachable from neither lever alone (the
           // frame-copy + DMA shape).
-          respell('/livebase/indexed', () => {
-            const r = livebase();
-            return r ? reindexWalks(r) : null;
-          });
-          respell('/livebase/volatile/indexed', () => {
-            const r = livebaseVolatile();
-            return r ? reindexWalks(r) : null;
-          });
+          for (const { suffix, hoist, volatiles } of livebases) {
+            respell(`${suffix}/indexed`, () => {
+              const r = hoist();
+              return r ? reindexWalks(r) : null;
+            });
+            respell(`${suffix}/volatile/indexed`, () => {
+              const r = volatiles();
+              return r ? reindexWalks(r) : null;
+            });
+          }
           // `/mulfirst` — product-first commutative sums (l3/mulfirst.ts): IDO/mwcc schedule the
           // independent operand's load above the product's mflo/mullw, so def order re-spells a
           // product-first source as load-first. Both orders are emitted; the differ referees.
@@ -791,14 +836,16 @@ export function enumerateCandidates(
           // neither lever alone (a neighbor-cell object and a multi-index MMIO block in one
           // function — each lever's constants are invisible to the other's model); the plain
           // sibling rides for symmetry with /livebase/indexed.
-          respell('/livebase/nearbase', () => {
-            const r = livebase();
-            return r && nearSpan !== undefined ? nearBaseClusters(r, nearSpan) : null;
-          });
-          respell('/livebase/volatile/nearbase', () => {
-            const r = livebaseVolatile();
-            return r && nearSpan !== undefined ? nearBaseClusters(r, nearSpan) : null;
-          });
+          for (const { suffix, hoist, volatiles } of livebases) {
+            respell(`${suffix}/nearbase`, () => {
+              const r = hoist();
+              return r && nearSpan !== undefined ? nearBaseClusters(r, nearSpan) : null;
+            });
+            respell(`${suffix}/volatile/nearbase`, () => {
+              const r = volatiles();
+              return r && nearSpan !== undefined ? nearBaseClusters(r, nearSpan) : null;
+            });
+          }
           // The livebase × coalesce PAIRINGS — same admission again: the volatile triple is the
           // row-demanded one, the joint spelling reachable from neither lever alone (an MMIO base
           // worth homing and a counter shared across both arms of one if, in one function); the
@@ -806,8 +853,10 @@ export function enumerateCandidates(
           // ARM-DISJOINT merges only: the demanding row's shared counter is that class, and the
           // span-model merges already ride the plain /coalesce label — pairing them too would
           // multiply candidates with no row behind it.
-          enumerate('/livebase/coalesce', livebase, armDisjointCandidates);
-          enumerate('/livebase/volatile/coalesce', livebaseVolatile, armDisjointCandidates);
+          for (const { suffix, hoist, volatiles } of livebases) {
+            enumerate(`${suffix}/coalesce`, hoist, armDisjointCandidates);
+            enumerate(`${suffix}/volatile/coalesce`, volatiles, armDisjointCandidates);
+          }
           // `/parkfirst` — incoming-argument parks lead the entry prefix (l3/parkfirst.ts): the
           // park's `mov` lifts to pure SSA aliasing, so its position is unrecoverable and the
           // default order is emission's. Both orders are emitted; the differ referees.
