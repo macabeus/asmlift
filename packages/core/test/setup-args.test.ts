@@ -59,10 +59,11 @@ describe('a guessed argument that survived from an earlier block', () => {
     // on `/setup-args/derived-home`, a product of this variant and an axis run beneath it.
     const labels = cands(GUARDED_CALL, POOL).map((c) => c.label);
     expect(labels).toContain('unsigned/setup-args');
+    expect(labels.filter((l) => l.startsWith('unsigned/setup-args/')).length).toBeGreaterThan(0);
     // both populations of the ranked fork run under the narrowing — a re-spelling of the tree
-    // (`/livebase`, and its own `/volatile` output) and a structuring axis (`/inplace`)
+    // (`/livebase`, and its own `/volatile` output) and a structuring axis (`/flip-join`)
     expect(labels).toContain('unsigned/setup-args/livebase');
-    expect(labels).toContain('unsigned/setup-args/inplace');
+    expect(labels).toContain('unsigned/setup-args/flip-join');
   });
 
   test('a DECLARED arity is not the lever’s to narrow', () => {

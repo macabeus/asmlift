@@ -46,7 +46,6 @@ import { type Prototypes, prototypesFromSymbols } from './proto';
 import { runPreRecovery } from './raise/pre-recovery';
 import { recoverTypes } from './raise/recover';
 import { hasDerivedReadHome, hasHomeableSharedAddress, hasLoopSharedPureValue } from './structure/analysis';
-import { hasAmbiguousJoinedSense } from './structure/joinsense';
 import { type SymbolMap, symbolsByName } from './symbols';
 import { type TargetDescription, structureOptionsFor } from './target';
 
@@ -447,9 +446,13 @@ export function enumerateCandidates(
   // this axis emits the other. Read off the TARGET's sense, not this candidate's `s.sense`, so
   // `/flip-branch` still moves only divergent ifs and the two axes stay independent (the four
   // combinations are the same four as before — only which one carries the bare label changed).
-  // Crossed with the pair above, and GATED per lift variant on structure/joinsense.ts: the layout
-  // reading is the answer unless something moved the polarity out from under it, so most functions
-  // emit one sense here rather than two.
+  // Crossed with the pair above, and UNGATED: the two senses are two different sources wherever a
+  // two-armed joined `if` exists at all, and no per-function predicate decides which the compiler
+  // wrote — agbcc emits different bytes for the arms-swapped spelling of the same `if`, and the
+  // shapes that invert the polarity (a short-circuit fold choosing the orientation, a conditional
+  // branch relayed past Thumb's ±256-byte reach) are per-SITE, where this lever is per-function.
+  // A function with no two-armed joined if emits identical source and the dedup collapses it
+  // before any compile.
   const baseSense = [
     ...senseAnchor.map((s) => ({ ...s, join: false })),
     ...senseAnchor.map((s) => ({ ...s, suffix: `${s.suffix}/flip-join`, join: true })),
@@ -597,12 +600,7 @@ export function enumerateCandidates(
         }
         // the per-variant axis gates, on THIS variant's lifted fn — see the table doc
         const variantOff = STRUCTURING_AXES.filter((ax) => ax.variantGate !== undefined && !ax.variantGate(fn));
-        // `/flip-join`'s own gate, on the same footing and read on the same fn — the two shapes
-        // that leave the joined sense open are structure/joinsense.ts's subject
-        const joinAmbiguous = hasAmbiguousJoinedSense(fn);
-        const variantCands = axisCands.filter(
-          (s) => (joinAmbiguous || !s.join) && variantOff.every((ax) => !s[ax.flag]),
-        );
+        const variantCands = axisCands.filter((s) => variantOff.every((ax) => !s[ax.flag]));
         // `/merge-names` combinations whose un-merged sibling was DROPPED. `structure()` already
         // refuses to let the axis unlock a function the primary declines, but it can only see its own
         // refusals — a boundary contract fails out here, in `structureChecked`. Without this a
