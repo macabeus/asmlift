@@ -13,7 +13,7 @@ cd <project checkout>            # e.g. apps/benchmark/checkouts/klonoa-empire-o
 npx tsx <repo>/packages/cli/src/main.ts <asm/nonmatchings/…/Fn.s> \
   --config decomp.yaml \
   --score-against <build/…/tu.o> \
-  --proto <proto.json> \
+  --proto '{"<callee>":{"params":N}}' \
   --jobs 6 --progress
 ```
 
@@ -26,11 +26,11 @@ workspace, so without them the sibling checkouts do not resolve and the run meas
 
 - **`--proto`, whenever a callee's arity matters.** A callee still written in assembly carries no
   DWARF signature, so asmlift has to guess its arity and guesses wrong. `LoadBGTilemapData`
-  without a `--proto` naming `{"thunk_HeapFree":{"params":1}}` scores **578** where the round's
-  baseline is **547** — a plausible number that is comparable to nothing.
-  **`--proto` takes a PATH, not inline JSON.** `--proto '{"thunk_HeapFree":{"params":1}}'` exits 66
-  with `cannot read --proto file`, so write the JSON to a file and pass that path. This page spelled
-  it inline until 2026-08-23, which made the command it documents unrunnable as written.
+  without `--proto '{"thunk_HeapFree":{"params":1}}'` scores **578** where the round's baseline is
+  **547** — a plausible number that is comparable to nothing. Pass the table inline, as above; a
+  path to a file holding the same JSON is accepted too, but a scratch file is one more thing that
+  drifts between rounds, and two of them carrying different tables is how the `557/578/547` above
+  happened.
 - **`--jobs 6 --progress`.** The candidate compiles are ~85% of a ranked run and pool cleanly.
   Two LBG runs launched together measured **36m10s serial against 21m32s at `--jobs 6`** (20608
   candidates, 0 dropped, identical winner) — but that machine was also running two full benches

@@ -168,3 +168,21 @@ test('--jobs must be a positive integer', async () => {
     expect(r.stderr).toContain('--jobs must be a positive integer');
   }
 });
+
+// docs/ranked-repro.md is the repo's ONE canonical ranked command, and the two tests above are
+// what its `--proto` spelling has to agree with. A round that measured on a build predating
+// inline support rewrote the page's command block to take a path and added prose saying inline
+// exits 66 — dating the claim to the day it stopped being true and sending the next reader back
+// to the scratch proto.json files inline support exists to remove. The page is prose, so nothing
+// but this re-runs it. The command BLOCK is what is checked, not the prose around it: the block
+// is what gets copied, and it is the thing the page exists to keep identical between rounds.
+test("docs/ranked-repro.md's canonical command spells --proto a way the CLI accepts", async () => {
+  const doc = readFileSync(join(import.meta.dirname, '../../../../docs/ranked-repro.md'), 'utf8');
+  const block = doc.match(/```sh\n([\s\S]*?)```/)?.[1];
+  const spelled = block?.match(/--proto\s+(\S+)/)?.[1];
+  expect(spelled, 'the canonical command block still passes --proto').toBeTruthy();
+  // the block writes the callee and the arity as placeholders; make them concrete, spelling intact
+  const concrete = spelled!.replace(/^'|'$/g, '').replace('<callee>', 'callee').replace(/\bN\b/, '1');
+  const r = await run('agbcc-clamp0.s', '--target', 'agbcc', '--proto', concrete);
+  expect(r.code, `docs/ranked-repro.md's command spells --proto ${spelled}`).toBe(0);
+});
