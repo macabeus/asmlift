@@ -446,13 +446,12 @@ export function enumerateCandidates(
   // this axis emits the other. Read off the TARGET's sense, not this candidate's `s.sense`, so
   // `/flip-branch` still moves only divergent ifs and the two axes stay independent (the four
   // combinations are the same four as before — only which one carries the bare label changed).
-  // Crossed with the pair above, and UNGATED: the two senses are two different sources wherever a
-  // two-armed joined `if` exists at all, and no per-function predicate decides which the compiler
-  // wrote — agbcc emits different bytes for the arms-swapped spelling of the same `if`, and the
-  // shapes that invert the polarity (a short-circuit fold choosing the orientation, a conditional
-  // branch relayed past Thumb's ±256-byte reach) are per-SITE, where this lever is per-function.
-  // A function with no two-armed joined if emits identical source and the dedup collapses it
-  // before any compile.
+  // Crossed with the pair above. The two senses are two different sources wherever a two-armed
+  // joined `if` exists at all — agbcc emits different bytes for the arms-swapped spelling — and
+  // what inverts the polarity (a short-circuit fold choosing the orientation, a conditional branch
+  // relayed past Thumb's ±256-byte reach) is per-SITE where this lever is per-function, so no
+  // per-function predicate decides it. A function with no two-armed joined if emits identical
+  // source and the dedup collapses it before any compile.
   const baseSense = [
     ...senseAnchor.map((s) => ({ ...s, join: false })),
     ...senseAnchor.map((s) => ({ ...s, suffix: `${s.suffix}/flip-join`, join: true })),

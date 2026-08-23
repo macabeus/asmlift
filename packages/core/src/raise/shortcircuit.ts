@@ -319,8 +319,8 @@ export function recognizeShortCircuit(fn: Fn): boolean {
 //
 // What neither reaches is the MIXED spelling. `negateJoinedBranchSense` is a per-FUNCTION boolean,
 // so the axis negates every joined `if` at once — and of the 28 real rows carrying the
-// `short-circuit` tag, 22 hold two or more. A per-SITE negation is the open lever; a gate deciding
-// whether to ENUMERATE the axis is not it, and prunes a spelling the differ would have refereed.
+// `short-circuit` tag, 22 hold two or more. A per-SITE negation is the open lever; a gate on
+// whether to ENUMERATE the axis does not reach it, and removes a spelling the differ would referee.
 //
 // WHICH slot ^g lands in is decided by the asm's branch POLARITY, and on Thumb the branch RANGE
 // decides the polarity — so the same source `&&` reaches this pass two different ways:
