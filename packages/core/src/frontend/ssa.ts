@@ -92,19 +92,28 @@ export interface LiveInModel {
    *  The frame's sole-writer obligation has no counterpart here and needs none: a register has no
    *  address, so nothing outside this function can name it and there is no escape to retract.
    *
-   *  KNOWN GAP — THE PREMISE THIS DOES NOT TEST. "The compiler put a local in it" also says the
-   *  function SAVED the register before using it that way; a function that follows no such
-   *  convention — hand-written asm, or a mid-function fragment, which klonoa's `bl`-as-a-long-branch
-   *  splits produce for real — is genuinely handed a value in r4, and this classifies it as garbage
-   *  and emits a read of an uninitialised local for it. Neither the save nor a write is consulted.
-   *  Nothing cheap separates the two: a WRITE does not, because the epilogue's restore is one (of
-   *  the 7 corpus inhabitants below, 3 have no other write of the register at all); the SAVE does,
-   *  but reading it means modelling the prologue — including agbcc's `mov rLow, rHi; push {rLow}`
-   *  for r8-sl — which is the prologue-save elision this coordinate exists to avoid needing.
-   *  Measured rather than assumed: across 2791 Thumb functions (klonoa + sa3 + pokeemerald + af)
-   *  exactly 7 (function, register) pairs render a register undef, every one of them saves the
-   *  register in its prologue, and one of the 7 is confirmed by a second decomp of the same game
-   *  declaring that local uninitialised in its C (klonoa CheckTileCollisionVertical, r4).
+   *  KNOWN GAP — THE PREMISE THIS DOES NOT TEST, AND ITS ONE MEASURED INHABITANT. "The compiler put
+   *  a local in it" also says the function SAVES the register or WRITES it; a function that does
+   *  neither — hand-written asm with a private convention, or a mid-function fragment, which
+   *  klonoa's `bl`-as-a-long-branch splits produce for real — is genuinely handed a value there, and
+   *  this classifies it as garbage. Neither fact is consulted at the mint site, and neither can be:
+   *  a write comes later in the same lift, and the save is elided before this module ever sees it.
+   *
+   *  Measured, not assumed. Across 2791 Thumb functions (klonoa + sa3 + pokeemerald + af), exactly
+   *  9 (function, register) pairs RENDER a register undef, and only one function is on the wrong
+   *  side of the premise — klonoa's `ChnVolSetAsm`, hand-written MP2K asm with NO prologue at all,
+   *  which takes two pointers in r4/r5 and comes out declaring `u8 *uninit_r4; u8 *uninit_r5;`. The
+   *  other seven are correct, one of them confirmed by a second decomp of the same game declaring
+   *  that local uninitialised in its C (`CheckTileCollisionVertical`, r4).
+   *
+   *  The discriminator is SAVED-OR-WRITTEN, and it needs both halves: probing the corpus, r5 in
+   *  sa3's `sub_809630C` and r6 in `sub_8024F84` are correct uninitialised locals that the function
+   *  never writes (push, read, pop), so "written" alone refuses them; while `ChnVolSetAsm`'s r4/r5
+   *  are in no push list, so "saved" is what separates it. Both halves are cheap on their own — one
+   *  set fed by `writeVar`, one scan of the push/pop lists — and the reason this is a gap rather
+   *  than a check is that the two are only complete at `finish()`, where an undef has already been
+   *  minted and consumed, so the refusal would be a DECLINE for a function that lifts today. That is
+   *  a default change and wants a full bench plus a ranked run to price, not a remediation commit.
    *
    *  LISTED, not derived as "everything outside argRegs", because the complement contains the
    *  VIRTUAL keys too (`@sarg<k>` — an incoming stack argument, which really is a parameter), and a

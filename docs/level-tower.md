@@ -343,19 +343,25 @@ as an uninitialised local. What changed there is not soundness — the fabricate
 they used to get was equally silent — but plausibility: a reader rejects a ten-parameter signature on
 sight and reads `s32 uninit_r8;` as a deliberate recovery.
 
-The evidence that would separate the two populations is the PROLOGUE SAVE, and only that. "The
-compiler homed a local here" says the function saved the register first; it does not say the function
-writes it anywhere else, and a reading that assumed both was wrong. Measured across 2791 Thumb
-functions (klonoa + sa3 + pokeemerald + af), exactly 7 (function, register) pairs render a register
-undef, and in 3 of them the register's only other appearance is the epilogue's restore — itself a
-write, so "never written" is vacuous on real agbcc output rather than a discriminator. All 7 save the
-register in their prologue, `MP2K_event_xwave` included: it reads `r4` before writing it and pushes
-it, so it is an ordinary uninitialised local and not the private-convention case this paragraph used
-to cite. One of the 7 is confirmed against a second decomp of the same game, whose C declares that
-local uninitialised (`CheckTileCollisionVertical`, `r4`). Reading the save set means modelling the
-prologue — including agbcc's `mov rLow, rHi; push {rLow}` for r8-sl, which every sa3 inhabitant goes
-through — so the check this gap needs is exactly the prologue-save elision the coordinate was built
-to avoid needing. It stays a gap while no inhabitant is on the wrong side of it.
+The evidence that separates the two populations is SAVED-OR-WRITTEN, and it needs both halves —
+measured, because guessing which half suffices got it wrong twice. Across 2791 Thumb functions
+(klonoa + sa3 + pokeemerald + af), exactly **9** (function, register) pairs render a register undef.
+"Written somewhere" alone refuses two correct ones: `r5` in sa3's `sub_809630C` and `r6` in
+`sub_8024F84` are uninitialised locals the function pushes, reads and pops without ever writing —
+and the push/pop pair is elided before the SSA builder sees it, so `writeVar` never fires for them.
+"Saved" alone is what catches the one function that really is outside the model: klonoa's
+`ChnVolSetAsm`, hand-written MP2K asm with **no prologue at all**, which receives two pointers in
+`r4`/`r5` and comes out as `u8 *uninit_r4; u8 *uninit_r5;` — that one is the private-convention case,
+not `MP2K_event_xwave`, which pushes `r4` and read-modify-writes it and is an ordinary uninitialised
+local like the rest. One of the nine is confirmed against a second decomp of the same game, whose C
+declares that local uninitialised (`CheckTileCollisionVertical`, `r4`).
+
+Both halves are cheap on their own — one set fed by `writeVar`, one scan of the push/pop lists. What
+keeps this a gap is WHEN they are complete: not at the mint site, where a later write has not
+happened yet, but at `finish()`, by which point the `undef` exists and has been consumed. So the
+refusal is a DECLINE for a function that lifts today, which makes it a default change wanting a full
+bench and a ranked run to price — not something to slip in beside a documentation fix. One function
+in 2791 is on the wrong side of the premise, and it is the specification for that change.
 
 The reusable lesson is where the decision lives, not the op, and it is easier to state as the two
 arrangements that do not work.
