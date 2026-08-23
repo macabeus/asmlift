@@ -90,7 +90,9 @@ Before declaring the branch done: `pnpm bench run` (all tiers), `pnpm bench:merg
 `pnpm bench regression --base origin/main` and `pnpm bench diff --base origin/main`. **Any lost
 match blocks the branch.** Pass the base ref: both gates read the COMMITTED artifact, so on a
 branch that has already committed its own they compare it against itself and pass vacuously.
-`regression` answers "did a match break"; `diff` names every row and field that moved
+Keep the order too: `diff` exits **2**, "nothing was compared", if `results.json` still carries the
+base's `generatedAt` — run before `run`+`merge` it compares the base with itself in a second and
+prints a green line. `regression` answers "did a match break"; `diff` names every row and field that moved
 (`asmlift.{outcome,score,candidateLabel,source}`, `m2c.{outcome,score,source}`) — that list is the
 PR body's inventory of what the round did, and for a commit claiming to move nothing it is the
 gate. If a match is lost, either tighten the gate on your lever or drop the lever — do not

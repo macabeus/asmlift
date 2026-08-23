@@ -17,6 +17,7 @@
 //   pnpm bench stale-check [--base ref]  # committed vs fresh results (measurement-level)
 //   pnpm bench regression [--base ref]   # committed vs fresh MATCH gate: exit 1 on any lost match
 //   pnpm bench diff [--base ref]         # committed vs fresh per-ROW, per-FIELD: exit 1 on any move
+//                                        #   exit 2 = nothing compared (no run behind it)
 //   pnpm bench smoke                     # one trivial fn through every available toolchain
 //   pnpm bench verify <manifest.json>    # compile-check loop for authoring real manifests
 //   pnpm bench vendor [--project p]      # freeze the real tier's preprocessed TUs (needs checkouts)

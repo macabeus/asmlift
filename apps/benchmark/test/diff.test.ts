@@ -3,7 +3,7 @@
 import type { BenchOutput, DecompilerResult, FunctionResult, Outcome } from '@asmlift/bench-schema';
 import { describe, expect, test } from 'vitest';
 
-import { compareMeasurements } from '../src/report/diff';
+import { compareMeasurements, notRegenerated } from '../src/report/diff';
 
 const res = (over: Partial<DecompilerResult> = {}): DecompilerResult =>
   ({
@@ -25,6 +25,8 @@ const row = (
 
 const out = (...results: FunctionResult[]): BenchOutput =>
   ({ meta: { generatedAt: 'whenever' }, results }) as unknown as BenchOutput;
+
+const at = (generatedAt: string): BenchOutput => ({ meta: { generatedAt }, results: [] }) as unknown as BenchOutput;
 
 describe('compareMeasurements', () => {
   test('identical rows: nothing moved', () => {
@@ -73,5 +75,18 @@ describe('compareMeasurements', () => {
     (fresh.meta as Record<string, unknown>).generatedAt = 'much later';
     (fresh.results[0].asmlift as unknown as Record<string, unknown>).maxScore = 999;
     expect(compareMeasurements(base, fresh).ok).toBe(true);
+  });
+});
+
+// The gate reads a COMMITTED file, so on a clean source-only branch it is already the base's own
+// artifact: run it without running the benchmark and it compares the base against itself and
+// prints a green line in about a second. That line is what a PR publishes as its proof.
+describe('notRegenerated', () => {
+  test('the same stamp as the base means no run stands behind the comparison', () => {
+    expect(notRegenerated(at('2026-08-22T21:42:27.432Z'), at('2026-08-22T21:42:27.432Z'))).toBe(true);
+  });
+
+  test('a real merge re-mints generatedAt, so a genuine regeneration always passes', () => {
+    expect(notRegenerated(at('2026-08-22T21:42:27.432Z'), at('2026-08-23T09:01:04.005Z'))).toBe(false);
   });
 });

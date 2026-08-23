@@ -33,6 +33,10 @@ jobs:
       # The benchmark harness's own toolchain-free tests (normalizer/heuristic/policy pins):
       # no Docker, no compilers — everything heavy is lazily invoked, never at import.
       - run: pnpm exec vitest run apps/benchmark/test
+      # scripts/pr-wait.sh's exit contract, replayed against a stubbed gh: no network, ~8s. The
+      # loop reads those codes instead of asking a human whether CI is green, so a code that
+      # quietly changes meaning is worse than no script at all.
+      - run: sh scripts/pr-wait-selftest.sh
 
   # Is the committed benchmark artifact older than the code it measures? Git-only and sub-second,
   # so it needs neither pnpm nor a toolchain — but it does need real history, hence its own

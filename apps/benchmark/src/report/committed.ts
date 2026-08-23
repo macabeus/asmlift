@@ -10,6 +10,36 @@ import { REPO_ROOT } from '../config';
 
 export const RESULTS_PATH = 'apps/benchmark/results/results.json';
 
+/** `git …` in the repo, or `undefined` when git declines to answer. Used only for the provenance
+ *  LINE a gate prints about itself, so a question git cannot answer must degrade to "not shown",
+ *  never to a thrown gate. */
+function git(...args: string[]): string | undefined {
+  try {
+    return execFileSync('git', args, { cwd: REPO_ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  } catch {
+    return undefined;
+  }
+}
+
+/** The sha `ref` names in THIS checkout, abbreviated. A gate that reports its base by NAME has
+ *  reported nothing checkable: `origin/main` is a different commit on every machine and after
+ *  every fetch. */
+export const shortSha = (ref: string): string | undefined => git('rev-parse', '--short', `${ref}^{commit}`);
+
+/** Does HEAD contain `ref`? `undefined` when git cannot say. A branch compared against a base it
+ *  has not merged in is credited with everything the base gained meanwhile. */
+export function headContains(ref: string): boolean | undefined {
+  if (git('rev-parse', '--verify', `${ref}^{commit}`) === undefined) {
+    return undefined;
+  }
+  try {
+    execFileSync('git', ['merge-base', '--is-ancestor', ref, 'HEAD'], { cwd: REPO_ROOT, stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** The artifact as of `ref` (a commit, tag or branch — `HEAD` by default). */
 export function readCommitted(ref = 'HEAD'): BenchOutput {
   let raw: string;
