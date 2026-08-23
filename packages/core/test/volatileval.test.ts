@@ -9,11 +9,15 @@
 // local is not marked at all.
 import { expect, test } from 'vitest';
 
+import { parse } from '../src/ir/parse';
 import { T } from '../src/ir/types';
+import { verify } from '../src/ir/verify';
 import { type SFn, type Stmt } from '../src/l3/ast';
 import { volatileValueLocals } from '../src/l3/volatileval';
 import { decompile } from '../src/pipeline';
+import { recoverTypes } from '../src/raise/recover';
 import { enumerateCandidates } from '../src/rank';
+import { structure } from '../src/structure/structure';
 import { ARMV4T_AGBCC } from '../src/target';
 
 const fn = (locals: SFn['locals'], body: Stmt[]): SFn => ({
@@ -117,6 +121,28 @@ test('one machine load rendered as two reads declines — the same rule, other d
     ],
   );
   expect(volatileValueLocals(s)).toBeNull();
+});
+
+// The counts are the machine's only while every access goes through the address DIRECTLY. Here
+// the second store PUBLISHES the address, so counting direct accesses would report 1 load and 1
+// store for an object reachable from anywhere — the tree can then satisfy the equality and the
+// lever would declare an access set the asm does not have.
+test('a frame object whose address escapes the direct form carries no counts', () => {
+  const fn = parse(`fn f {
+^bb0(%0: s32*):
+  %1: u16* = laddr {off=0, width=2, signed=false}
+  %2: u16 = const {value=5}
+  store %1, %2 {off=0, width=2, signed=false}
+  store %0, %1 {off=0, width=4, signed=false}
+  %3: u16 = load %1 {off=0, width=2, signed=false}
+  ret %3
+}
+`);
+  verify(fn);
+  recoverTypes(fn);
+  const sfn = structure(fn);
+  expect(sfn.locals.find((l) => l.name === 'sp0')?.frame).toBeUndefined();
+  expect(volatileValueLocals(sfn)).toBeNull();
 });
 
 // A halfword spilled to the stack across a call — the shape the lever was built for, and the

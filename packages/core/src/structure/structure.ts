@@ -3386,7 +3386,13 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // before any L3 readability pass could drop or duplicate one. Summed across the offset's
   // `laddr` ops — the frontend's frame-object audit re-roots accesses onto per-offset captures
   // and holds one object per offset, so several ops can name the same storage.
-  const frameAccesses = (at: Op): { loads: number; stores: number } => {
+  //
+  // NO record at all when the address reaches ANYTHING ELSE — a block argument, an offset
+  // computation, a call. The count is then a floor rather than the access set, and it is read as
+  // the access set (the l3/volatileval.ts gate), so it refuses instead of reporting a number that
+  // undercounts. Today the audit's direct re-rooting makes that unreachable; it is the invariant
+  // this counter rests on, asserted where it is consumed rather than argued in another file.
+  const frameRecord = (at: Op): { frame?: { loads: number; stores: number } } => {
     const off = at.attrs.off as number;
     const roots = new Set<Value>();
     for (const b of fn.blocks) {
@@ -3400,16 +3406,22 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     let stores = 0;
     for (const b of fn.blocks) {
       for (const op of b.ops) {
-        if ((op.opcode === 'load' || op.opcode === 'store') && roots.has(op.operands[0])) {
+        const access = op.opcode === 'load' || op.opcode === 'store';
+        if (access && roots.has(op.operands[0])) {
           if (op.opcode === 'load') {
             loads++;
           } else {
             stores++;
           }
         }
+        // every OTHER mention of the address, operands and branch arguments alike
+        const elsewhere = op.operands.some((v, i) => roots.has(v) && !(access && i === 0));
+        if (elsewhere || op.successors.some((sx) => sx.args.some((v) => roots.has(v)))) {
+          return {};
+        }
       }
     }
-    return { loads, stores };
+    return { frame: { loads, stores } };
   };
   const structs = collectStructs(fn);
   return {
@@ -3432,7 +3444,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
                 // the asm materialized this slot's address, and this is how many times it
                 // loaded and stored through it — both asm facts, and the gate the
                 // l3/volatileval.ts lever reads (see the SFn.locals doc)
-                frame: frameAccesses(op),
+                ...frameRecord(op),
                 // an ESCAPED address makes every store observable (the DMA hardware reads it), and
                 // the source spells the scratch volatile for that reason — see the stamp site in
                 // frontend/thumb.ts for why it is the SPELLING that matters and not dead-store

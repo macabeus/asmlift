@@ -188,7 +188,8 @@ export interface SFn {
    *  may drop a store or render one machine load as two reads, and `volatile` over an access
    *  set asmlift did not preserve is a source that contradicts itself. The name cannot carry
    *  either fact — `sp<off>` is minted against the symbol map and grows `_` suffixes on
-   *  collision. */
+   *  collision. ABSENT where the counts would be a floor rather than the set: the address
+   *  reaching anything but a direct load/store leaves accesses the count cannot see. */
   locals: {
     name: string;
     type: IrType;
