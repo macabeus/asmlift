@@ -251,8 +251,8 @@ describe('/livebase admission (LIVEBASE_GATES: placement heuristics ablated)', (
 });
 
 describe('the block admission (WHICH admitted bases get the local)', () => {
-  // One MMIO register file indexed at three cells, beside two scalar cells re-read in place —
-  // all four in the same loop, so the default gates refuse every one and only /livebase's
+  // One MMIO register file indexed at three cells, beside two scalar cells re-read in place — all
+  // three bases in the same loop, so the default gates refuse every one and only /livebase's
   // ablation admits them. The source spelled the register file as a pointer and the scalars as
   // bare derefs; the all-or-nothing hoist cannot say that, `single-cell` can.
   const mixed = (): SFn =>
@@ -341,9 +341,9 @@ describe('the block admission (WHICH admitted bases get the local)', () => {
 describe('the block admission is WIRED into enumeration', () => {
   // Two real agbcc outputs, so no toolchain: `corpus/agbcc-mixpoll.s` is synthetic:mixpoll:agbcc —
   // one DMA register file at three offsets beside three IWRAM halfwords read-modified in place,
-  // the shape whose enumeration held no proper subset of bases before this gate — and
-  // `corpus/agbcc-onepoll.s` is its control, byte-identical C with the halfwords deleted. Which
-  // spelling wins is the benchmark's business; these pin what reaches the differ at all.
+  // the shape that needs a proper subset of its bases bound — and `corpus/agbcc-onepoll.s` is its
+  // control, byte-identical C with the halfwords deleted. Which spelling wins is the benchmark's
+  // business; these pin what reaches the differ at all.
   const candsFor = (sym: string) =>
     enumerateCandidates(
       sym,

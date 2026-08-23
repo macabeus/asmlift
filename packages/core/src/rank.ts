@@ -759,7 +759,6 @@ export function enumerateCandidates(
           respell('/livebase', livebase);
           const livebaseVolatile = (): SFn | null => {
             const r = livebase();
-            // scoped to the locals THIS lever created — see the POLICY note above
             return r ? volatilePtrLocals(r, createdLocals(sfn, r)) : null;
           };
           respell('/livebase/volatile', livebaseVolatile);

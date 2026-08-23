@@ -177,16 +177,14 @@ export const LIVEBASE_GATES: readonly Gate<BaseKey>[] = ablateHeuristic(
   'repeated-const-offset',
 );
 
-/** `/livebase-block`'s admission (rank.ts): `/livebase` plus the rule that a base reaching ONE
- *  cell keeps re-materializing. It is the SELECTIVITY axis — the two tables differ by one gate, so
- *  `without(LIVEBASE_BLOCK_GATES, 'single-cell')` is `/livebase`'s own admission and the axis can
- *  be priced by ablation like any other.
+/** `/livebase-block`'s admission (rank.ts): `/livebase` plus `single-cell`. The two tables differ
+ *  by exactly one gate, so `without(LIVEBASE_BLOCK_GATES, 'single-cell')` is `/livebase`'s own
+ *  admission and this selectivity axis prices by ablation like every other.
  *
- *  Why this rule and not the address: an MMIO register file and the IWRAM halfword beside it are
- *  both numeric constants in the same range, and the shape of the accesses is what separates them.
- *  A strict refinement of `repeated-const-offset` (which `/livebase` ablates), so the default
- *  admission is unchanged by it: past `single-use` a base with no variable index and one distinct
- *  offset has touched that offset twice, which `repeated-const-offset` already rejects. */
+ *  Why the ACCESS SHAPE and not the address: an MMIO register file and the IWRAM halfword beside
+ *  it are both numeric constants in the same range. And why the rule is not in `BASECSE_GATES`: it
+ *  would reject nothing there, being a strict refinement of `repeated-const-offset` — past
+ *  `single-use`, a base with no variable index and one distinct offset touched it twice. */
 export const LIVEBASE_BLOCK_GATES: readonly Gate<BaseKey>[] = [
   ...LIVEBASE_GATES,
   {
