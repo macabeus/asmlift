@@ -484,8 +484,20 @@ export function enumerateCandidates(
   verify(probe);
   applyIdiomPatterns(probe, target, opts.patterns);
   runPreRecovery(probe, target, () => verify(probe));
+  // The param kinds `pinScalarParams` will find when it runs — read HERE because this is the one
+  // point the probe reaches that a candidate's own raise also reaches (raiseRecovered runs
+  // pre-recovery, then beforeRecover, then recoverTypes), and the recovery below overwrites them.
+  const pinKinds = probe.blocks[0].params.map((p) => p.type.kind);
   recoverTypes(probe);
   const ptrIdx = new Set<number>(probe.blocks[0].params.flatMap((p, i) => (NO_PIN_KINDS.has(p.type.kind) ? [i] : [])));
+  // The signedness axis DECLINES where the pin has nothing to pin: with every entry param either a
+  // recovered pointer/aggregate (NO_PIN_KINDS) or already typed, `pinScalarParams` writes nothing
+  // and the second pass re-lifts, re-raises, re-structures and re-emits a function BYTE-IDENTICAL
+  // to the first — every one of its spellings collapsing on the `seen` dedup below. Declining is
+  // not pruning: the candidate list is the same list, reached without building the duplicates.
+  const signCands = pinKinds.some((k, i) => !ptrIdx.has(i) && (k === 'unknown' || k === 'int'))
+    ? SIGN_CANDS
+    : SIGN_CANDS.slice(0, 1);
   // Access facts for name-only symbol declarations (see bareGlobalAccessFacts) — derived once
   // from the probe: widths/offsets are lift-time facts, identical across every candidate.
   const accessFacts = opts.symbols ? bareGlobalAccessFacts(probe) : new Map<string, never>();
@@ -559,7 +571,7 @@ export function enumerateCandidates(
     : [{ suffix: '' }];
   for (const [svIndex, sv] of symbolVariants.entries()) {
     const svOpts = sv.symbols ? baseOpts : { ...baseOpts, symbols: undefined };
-    for (const cand of SIGN_CANDS) {
+    for (const cand of signCands) {
       const base = frontend.lift(name, asm, target, prototypes, opts.asmData, sv.symbols);
       // `/setup-args` — pass a prototype-less callee only what the CALLING BLOCK set up; which of
       // the two readings the source spelled is genuinely ambiguous, and frontend/ssa.ts
