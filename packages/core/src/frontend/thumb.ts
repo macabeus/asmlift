@@ -2115,18 +2115,46 @@ export function lift(
   // re-proven.
   //
   // What it refuses that really is an addressable local: every frame with a second word in it —
-  // and that is where the capability ENDS, not where the next widening starts. An object's TOP has
-  // no asm-visible bound. Two sources that disagree about who owns [sp,#4] compile to one
-  // instruction stream, byte for byte (agbcc 2.9-arm-000512, `-O2 -mthumb-interwork -Wimplicit
-  // -fhex-asm -fprologue-bugfix`), with eight values live across the calls so one of them spills:
+  // and that is where the capability ENDS, but naming the obstacle exactly is the point. An earlier
+  // cut of this comment said an object's TOP has no asm-visible bound and that the frame is the
+  // only bound there is; a compile falsifies that as a universal. Three shapes, each compiled with
+  // agbcc 2.9-arm-000512, `-O2 -mthumb-interwork -Wimplicit -fhex-asm -fprologue-bugfix`, and only
+  // the first is about extent at all:
+  //
+  // UNDECIDABLE — a slot THIS FUNCTION stores and reloads. Two sources that disagree about who
+  // owns [sp,#4] compile to one instruction stream, byte for byte, with eight values live across
+  // the calls so one of them spills:
   //
   //   s32 loc; s32 t0..t7;                   loc = x;  t0 = h(0); … g(&loc); k(loc + t0 + …);
   //   struct P { s32 a, b; } p; s32 t1..t7;  p.a = x;  p.b = h(0); … g(&p);   k(p.a + p.b + …);
   //
   // The first says a callee may not touch [sp,#4]; the second says it may, and the reload after the
-  // call must read what it wrote. Nothing distinguishes them, so a wider licence is not a harder
-  // proof — it is a guess. The frame is the only bound there is, and `localArea === 4` is a frame
-  // with no room for the question.
+  // call must read what it wrote. Nothing distinguishes them, so a licence over THAT slot is a
+  // guess rather than a harder proof — which is what the slot rule in the audit refuses, and it is
+  // the shape a wider frame licence would have had to decide.
+  //
+  // PINNED, and refused by the MODEL — sub-word members. Thumb has no sp-relative `strb`, so a
+  // byte or halfword member is reached through a copy of sp, and the access at +4 witnesses that
+  // the object reaches past its first word: `struct Q { u8 a; u8 pad[3]; u8 b; }` filled and then
+  // handed over compiles to `mov r1, sp / strb r0, [r1] / strb r0, [r1, #0x4] / mov r0, sp / bl g`.
+  // The escape is a use that is not an access, so the capture cannot be split per offset, and the
+  // audit judges the [+4] access against the one object it does model — it declines with "a store
+  // at [+4] through the captured address — only a scalar at the captured address is modelled", and
+  // with the SAME message when this conjunct is widened to `localArea >= 4` (measured). The frame
+  // size is not what refuses it; `extent` carries one width from one access, so there is no
+  // aggregate object for it to be.
+  //
+  // PINNED, and ambiguous in its ROLE — a frame-covering block copy. `struct Big { s32 a[17]; };
+  // b = gK; g(&b);` compiles to `add sp,#-0x44 / mov r0,sp / mov r2,#0x44 / bl memcpy`, a
+  // constant-size write from [sp,#0] whose size equals the reservation: bounded from below by the
+  // copy and from above by the frame, so the extent is pinned exactly. What is NOT pinned is what
+  // the object IS — the producer table above records those same instructions for a by-value struct
+  // ARGUMENT block and for a struct-return temp. Widening this conjunct moves it exactly there:
+  // it then declines at "which is how a hidden struct-return pointer looks" (measured), never at
+  // anything about extent.
+  //
+  // So `localArea === 4` is where this model's extent ends rather than where proof runs out, and
+  // the next widening needs an aggregate object first, and a role proof for the block-copy shape.
   //
   // RESIDUE, stated as what it is and not as the only one: the producer table is agbcc's, so
   // hand-written asm that reserves one word, stages it as a call's fifth argument and ALSO puts sp
@@ -3362,9 +3390,13 @@ export function lift(
       // WHAT IT COSTS, stated because the benchmark cannot see it: it refuses every word slot above
       // a call-passed object, which is blunter than the hazard it names, and four corpus functions
       // that lifted before it (sa3 `sub_809C274`, `UpdateAnimations`, `sub_801C4A0`, `sub_8062CFC`)
-      // now decline. None is a benchmark row. Narrowing it would need a bound on the object's real
-      // extent, and there is none to be had — see the twin at `capturedObjectIsTheWholeFrame`, and
-      // the compiled pair this rule's own test is built on.
+      // now decline. None is a benchmark row. Narrowing it needs the object's real extent, and this
+      // model does not carry one: `extent` is a single width taken from a single access, so an
+      // object wider than that scalar has nothing here to be narrowed against. The asm sometimes
+      // cannot supply it either — the twin at `capturedObjectIsTheWholeFrame` (the compiled pair
+      // this rule's own test is built on) is exactly this rule's shape, a slot THIS FUNCTION stores
+      // and reloads, undecidable between a spill and a member. It is not the general case, and the
+      // gate comment says which shapes do pin an extent and what refuses those instead.
       //
       // ABOVE the object only: a C object extends upward from its base, so a slot BELOW it cannot
       // be part of it, and the overlap checks above already own the bytes it does cover.

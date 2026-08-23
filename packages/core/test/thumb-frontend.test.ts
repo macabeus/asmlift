@@ -1338,6 +1338,71 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       );
     });
 
+    // …AND THE TWO SHAPES WHOSE EXTENT THE ASM DOES PIN, because the round that wrote the rule
+    // above generalised from the twin and said an object's top has no asm-visible bound. It has
+    // one in both of these, and both still decline — for reasons that are not about extent at all.
+    // Each fixture is verbatim agbcc 2.9-arm-000512 output (`-O2 -mthumb-interwork -Wimplicit
+    // -fhex-asm -fprologue-bugfix`), and each pins WHICH refusal answers, so a later round widening
+    // the frame licence is told what it has actually reached.
+    //
+    // Sub-word members, `struct Q { u8 a; u8 pad[3]; u8 b; }; void q_bytes(s32 x){ struct Q q;
+    // q.a = x; q.b = x + 1; g(&q); use2(q.a + q.b); }`. Thumb has no sp-relative `strb`, so both
+    // members are reached THROUGH a copy of sp and the access at +4 witnesses that the object
+    // reaches past its first word. The escape is a use that is not an access, so the capture cannot
+    // be split per offset, and the audit judges [+4] against the single scalar it models. The frame
+    // gate is not what refuses it: widened to `localArea >= 4` it declines with this same message.
+    test('a sub-word member at +4 pins the extent, and the object MODEL is what refuses it', () => {
+      const subWordMembers =
+        'q_bytes:\n' +
+        '\tpush\t{lr}\n' +
+        '\tadd\tsp, sp, #-0x8\n' +
+        '\tmov\tr1, sp\n' +
+        '\tstrb\tr0, [r1]\n' +
+        '\tadd\tr0, r0, #0x1\n' +
+        '\tstrb\tr0, [r1, #0x4]\n' +
+        '\tmov\tr0, sp\n' +
+        '\tbl\tg\n' +
+        '\tmov\tr0, sp\n' +
+        '\tldrb\tr0, [r0]\n' +
+        '\tmov\tr1, sp\n' +
+        '\tldrb\tr1, [r1, #0x4]\n' +
+        '\tadd\tr0, r0, r1\n' +
+        '\tbl\tuse2\n' +
+        '\tadd\tsp, sp, #0x8\n' +
+        '\tpop\t{r0}\n' +
+        '\tbx\tr0\n';
+      expect(() => decompile('q_bytes', subWordMembers, ARMV4T_AGBCC)).toThrow(/at \[\+4\] through the captured/);
+      expect(() => decompile('q_bytes', subWordMembers, ARMV4T_AGBCC)).toThrow(
+        /only a scalar at the captured address is modelled/,
+      );
+    });
+
+    // A frame-covering block copy, `struct Big { s32 a[17]; }; extern const struct Big gK; void
+    // big3f(void){ struct Big b; b = gK; g(&b); use2(b.a[0]); }`. `mov r2,#0x44` bounds the object
+    // from below and the `add sp,#-0x44` reservation bounds it from above, so the two coincide and
+    // the extent is exact. What stays ambiguous is the object's ROLE — the same instructions are
+    // agbcc's by-value struct ARGUMENT block and its struct-return temp — which is where widening
+    // the frame licence lands this fixture: on the struct-return refusal, never on extent.
+    test('a frame-covering block copy pins the extent, and the object`s ROLE is what refuses it', () => {
+      const blockCopy =
+        'big3f:\n' +
+        '\tpush\t{lr}\n' +
+        '\tadd\tsp, sp, #-0x44\n' +
+        '\tldr\tr1, .L3\n' +
+        '\tmov\tr0, sp\n' +
+        '\tmov\tr2, #0x44\n' +
+        '\tbl\tmemcpy\n' +
+        '\tmov\tr0, sp\n' +
+        '\tbl\tg\n' +
+        '\tldr\tr0, [sp]\n' +
+        '\tbl\tuse2\n' +
+        '\tadd\tsp, sp, #0x44\n' +
+        '\tpop\t{r0}\n' +
+        '\tbx\tr0\n' +
+        '.L4:\n\t.align\t2, 0\n.L3:\n\t.word\tgK\n';
+      expect(() => decompile('big3f', blockCopy, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+    });
+
     // `volatile` IS NOT FREE, so it goes only where the source writes one. The structurer emits one
     // C read per USE, not per machine load, so the qualifier forbids the CSE that turns the
     // reference's single `ldr` into four register copies. `void f(u32 i){ s32 w; w = gEnts[i].h;
