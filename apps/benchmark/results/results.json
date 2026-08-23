@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generatedAt": "2026-08-23T17:33:20.986Z",
+    "generatedAt": "2026-08-23T18:41:41.744Z",
     "toolchains": [
       "ido7.1",
       "agbcc",
@@ -14,7 +14,7 @@
       "real": 252
     },
     "asmlift": {
-      "commit": "a599964efbb556f0a5641508e04cba96c119d680",
+      "commit": "3e5cdfb72f902a03edb1281c2cbe6b7c5e82080e",
       "dirty": false
     },
     "m2c": {
@@ -3721,6 +3721,18 @@
           {
             "label": "unsigned/livebase/raw-globals",
             "error": "agbcc failed: c.c:1079: invalid operands to binary <<"
+          },
+          {
+            "label": "unsigned/flip-join/raw-globals",
+            "error": "agbcc failed: c.c:1077: invalid operands to binary <<"
+          },
+          {
+            "label": "unsigned/flip-join/scopebase/raw-globals",
+            "error": "agbcc failed: c.c:1078: invalid operands to binary <<"
+          },
+          {
+            "label": "unsigned/flip-join/livebase/raw-globals",
+            "error": "agbcc failed: c.c:1079: invalid operands to binary <<"
           }
         ],
         "symbolsUsed": [
@@ -4471,7 +4483,7 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "no scorable candidate for 'EntityDeathAnimation': agbcc failed: c.c:1122: too many arguments to function `sub_08051A0C'"
+          "no scorable candidate for 'EntityDeathAnimation': agbcc failed: c.c:1119: too many arguments to function `sub_08051A0C'"
         ]
       },
       "m2c": {
@@ -8967,6 +8979,22 @@
             "error": "agbcc failed: c.c:1501: incompatible types in assignment"
           },
           {
+            "label": "unsigned/flip-join/raw-globals",
+            "error": "agbcc failed: c.c:1501: incompatible types in assignment"
+          },
+          {
+            "label": "unsigned/flip-join/volatile/raw-globals",
+            "error": "agbcc failed: c.c:1501: incompatible types in assignment"
+          },
+          {
+            "label": "unsigned/flip-join/livebase/raw-globals",
+            "error": "agbcc failed: c.c:1505: incompatible types in assignment"
+          },
+          {
+            "label": "unsigned/flip-join/livebase-block/raw-globals",
+            "error": "agbcc failed: c.c:1503: incompatible types in assignment"
+          },
+          {
             "label": "unsigned/reread-globals/raw-globals",
             "error": "agbcc failed: c.c:1485: incompatible types in assignment"
           },
@@ -8981,6 +9009,22 @@
           {
             "label": "unsigned/reread-globals/livebase-block/raw-globals",
             "error": "agbcc failed: c.c:1487: incompatible types in assignment"
+          },
+          {
+            "label": "unsigned/flip-join/reread-globals/raw-globals",
+            "error": "agbcc failed: c.c:1487: incompatible types in assignment"
+          },
+          {
+            "label": "unsigned/flip-join/reread-globals/volatile/raw-globals",
+            "error": "agbcc failed: c.c:1487: incompatible types in assignment"
+          },
+          {
+            "label": "unsigned/flip-join/reread-globals/livebase/raw-globals",
+            "error": "agbcc failed: c.c:1491: incompatible types in assignment"
+          },
+          {
+            "label": "unsigned/flip-join/reread-globals/livebase-block/raw-globals",
+            "error": "agbcc failed: c.c:1489: incompatible types in assignment"
           },
           {
             "label": "unsigned/derived-home/raw-globals",
@@ -8999,6 +9043,22 @@
             "error": "agbcc failed: c.c:1501: invalid operands to binary &"
           },
           {
+            "label": "unsigned/flip-join/derived-home/raw-globals",
+            "error": "agbcc failed: c.c:1501: invalid operands to binary &"
+          },
+          {
+            "label": "unsigned/flip-join/derived-home/volatile/raw-globals",
+            "error": "agbcc failed: c.c:1501: invalid operands to binary &"
+          },
+          {
+            "label": "unsigned/flip-join/derived-home/livebase/raw-globals",
+            "error": "agbcc failed: c.c:1505: invalid operands to binary &"
+          },
+          {
+            "label": "unsigned/flip-join/derived-home/livebase-block/raw-globals",
+            "error": "agbcc failed: c.c:1503: invalid operands to binary &"
+          },
+          {
             "label": "unsigned/uns-cmp/raw-globals",
             "error": "agbcc failed: c.c:1499: incompatible types in assignment"
           },
@@ -9013,6 +9073,22 @@
           {
             "label": "unsigned/uns-cmp/livebase-block/raw-globals",
             "error": "agbcc failed: c.c:1501: incompatible types in assignment"
+          },
+          {
+            "label": "unsigned/flip-join/uns-cmp/raw-globals",
+            "error": "agbcc failed: c.c:1501: incompatible types in assignment"
+          },
+          {
+            "label": "unsigned/flip-join/uns-cmp/volatile/raw-globals",
+            "error": "agbcc failed: c.c:1501: incompatible types in assignment"
+          },
+          {
+            "label": "unsigned/flip-join/uns-cmp/livebase/raw-globals",
+            "error": "agbcc failed: c.c:1505: incompatible types in assignment"
+          },
+          {
+            "label": "unsigned/flip-join/uns-cmp/livebase-block/raw-globals",
+            "error": "agbcc failed: c.c:1503: incompatible types in assignment"
           },
           {
             "label": "unsigned/reread-globals/uns-cmp/raw-globals",
@@ -9031,6 +9107,22 @@
             "error": "agbcc failed: c.c:1487: incompatible types in assignment"
           },
           {
+            "label": "unsigned/flip-join/reread-globals/uns-cmp/raw-globals",
+            "error": "agbcc failed: c.c:1487: incompatible types in assignment"
+          },
+          {
+            "label": "unsigned/flip-join/reread-globals/uns-cmp/volatile/raw-globals",
+            "error": "agbcc failed: c.c:1487: incompatible types in assignment"
+          },
+          {
+            "label": "unsigned/flip-join/reread-globals/uns-cmp/livebase/raw-globals",
+            "error": "agbcc failed: c.c:1491: incompatible types in assignment"
+          },
+          {
+            "label": "unsigned/flip-join/reread-globals/uns-cmp/livebase-block/raw-globals",
+            "error": "agbcc failed: c.c:1489: incompatible types in assignment"
+          },
+          {
             "label": "unsigned/derived-home/uns-cmp/raw-globals",
             "error": "agbcc failed: c.c:1499: invalid operands to binary &"
           },
@@ -9045,6 +9137,22 @@
           {
             "label": "unsigned/derived-home/uns-cmp/livebase-block/raw-globals",
             "error": "agbcc failed: c.c:1501: invalid operands to binary &"
+          },
+          {
+            "label": "unsigned/flip-join/derived-home/uns-cmp/raw-globals",
+            "error": "agbcc failed: c.c:1501: invalid operands to binary &"
+          },
+          {
+            "label": "unsigned/flip-join/derived-home/uns-cmp/volatile/raw-globals",
+            "error": "agbcc failed: c.c:1501: invalid operands to binary &"
+          },
+          {
+            "label": "unsigned/flip-join/derived-home/uns-cmp/livebase/raw-globals",
+            "error": "agbcc failed: c.c:1505: invalid operands to binary &"
+          },
+          {
+            "label": "unsigned/flip-join/derived-home/uns-cmp/livebase-block/raw-globals",
+            "error": "agbcc failed: c.c:1503: invalid operands to binary &"
           },
           {
             "label": "unsigned/setup-args/raw-globals",
@@ -9063,6 +9171,22 @@
             "error": "agbcc failed: c.c:1500: invalid operands to binary &"
           },
           {
+            "label": "unsigned/setup-args/flip-join/raw-globals",
+            "error": "agbcc failed: c.c:1500: invalid operands to binary &"
+          },
+          {
+            "label": "unsigned/setup-args/flip-join/volatile/raw-globals",
+            "error": "agbcc failed: c.c:1500: invalid operands to binary &"
+          },
+          {
+            "label": "unsigned/setup-args/flip-join/livebase/raw-globals",
+            "error": "agbcc failed: c.c:1504: invalid operands to binary &"
+          },
+          {
+            "label": "unsigned/setup-args/flip-join/livebase-block/raw-globals",
+            "error": "agbcc failed: c.c:1502: invalid operands to binary &"
+          },
+          {
             "label": "unsigned/setup-args/reread-globals/raw-globals",
             "error": "agbcc failed: c.c:1484: invalid operands to binary &"
           },
@@ -9077,6 +9201,22 @@
           {
             "label": "unsigned/setup-args/reread-globals/livebase-block/raw-globals",
             "error": "agbcc failed: c.c:1486: invalid operands to binary &"
+          },
+          {
+            "label": "unsigned/setup-args/flip-join/reread-globals/raw-globals",
+            "error": "agbcc failed: c.c:1486: invalid operands to binary &"
+          },
+          {
+            "label": "unsigned/setup-args/flip-join/reread-globals/volatile/raw-globals",
+            "error": "agbcc failed: c.c:1486: invalid operands to binary &"
+          },
+          {
+            "label": "unsigned/setup-args/flip-join/reread-globals/livebase/raw-globals",
+            "error": "agbcc failed: c.c:1490: invalid operands to binary &"
+          },
+          {
+            "label": "unsigned/setup-args/flip-join/reread-globals/livebase-block/raw-globals",
+            "error": "agbcc failed: c.c:1488: invalid operands to binary &"
           },
           {
             "label": "unsigned/setup-args/derived-home/raw-globals",
@@ -9095,6 +9235,22 @@
             "error": "agbcc failed: c.c:1500: invalid operands to binary &"
           },
           {
+            "label": "unsigned/setup-args/flip-join/derived-home/raw-globals",
+            "error": "agbcc failed: c.c:1500: invalid operands to binary &"
+          },
+          {
+            "label": "unsigned/setup-args/flip-join/derived-home/volatile/raw-globals",
+            "error": "agbcc failed: c.c:1500: invalid operands to binary &"
+          },
+          {
+            "label": "unsigned/setup-args/flip-join/derived-home/livebase/raw-globals",
+            "error": "agbcc failed: c.c:1504: invalid operands to binary &"
+          },
+          {
+            "label": "unsigned/setup-args/flip-join/derived-home/livebase-block/raw-globals",
+            "error": "agbcc failed: c.c:1502: invalid operands to binary &"
+          },
+          {
             "label": "unsigned/setup-args/uns-cmp/raw-globals",
             "error": "agbcc failed: c.c:1498: invalid operands to binary &"
           },
@@ -9109,6 +9265,22 @@
           {
             "label": "unsigned/setup-args/uns-cmp/livebase-block/raw-globals",
             "error": "agbcc failed: c.c:1500: invalid operands to binary &"
+          },
+          {
+            "label": "unsigned/setup-args/flip-join/uns-cmp/raw-globals",
+            "error": "agbcc failed: c.c:1500: invalid operands to binary &"
+          },
+          {
+            "label": "unsigned/setup-args/flip-join/uns-cmp/volatile/raw-globals",
+            "error": "agbcc failed: c.c:1500: invalid operands to binary &"
+          },
+          {
+            "label": "unsigned/setup-args/flip-join/uns-cmp/livebase/raw-globals",
+            "error": "agbcc failed: c.c:1504: invalid operands to binary &"
+          },
+          {
+            "label": "unsigned/setup-args/flip-join/uns-cmp/livebase-block/raw-globals",
+            "error": "agbcc failed: c.c:1502: invalid operands to binary &"
           },
           {
             "label": "unsigned/setup-args/reread-globals/uns-cmp/raw-globals",
@@ -9127,6 +9299,22 @@
             "error": "agbcc failed: c.c:1486: invalid operands to binary &"
           },
           {
+            "label": "unsigned/setup-args/flip-join/reread-globals/uns-cmp/raw-globals",
+            "error": "agbcc failed: c.c:1486: invalid operands to binary &"
+          },
+          {
+            "label": "unsigned/setup-args/flip-join/reread-globals/uns-cmp/volatile/raw-globals",
+            "error": "agbcc failed: c.c:1486: invalid operands to binary &"
+          },
+          {
+            "label": "unsigned/setup-args/flip-join/reread-globals/uns-cmp/livebase/raw-globals",
+            "error": "agbcc failed: c.c:1490: invalid operands to binary &"
+          },
+          {
+            "label": "unsigned/setup-args/flip-join/reread-globals/uns-cmp/livebase-block/raw-globals",
+            "error": "agbcc failed: c.c:1488: invalid operands to binary &"
+          },
+          {
             "label": "unsigned/setup-args/derived-home/uns-cmp/raw-globals",
             "error": "agbcc failed: c.c:1498: invalid operands to binary &"
           },
@@ -9141,6 +9329,22 @@
           {
             "label": "unsigned/setup-args/derived-home/uns-cmp/livebase-block/raw-globals",
             "error": "agbcc failed: c.c:1500: invalid operands to binary &"
+          },
+          {
+            "label": "unsigned/setup-args/flip-join/derived-home/uns-cmp/raw-globals",
+            "error": "agbcc failed: c.c:1500: invalid operands to binary &"
+          },
+          {
+            "label": "unsigned/setup-args/flip-join/derived-home/uns-cmp/volatile/raw-globals",
+            "error": "agbcc failed: c.c:1500: invalid operands to binary &"
+          },
+          {
+            "label": "unsigned/setup-args/flip-join/derived-home/uns-cmp/livebase/raw-globals",
+            "error": "agbcc failed: c.c:1504: invalid operands to binary &"
+          },
+          {
+            "label": "unsigned/setup-args/flip-join/derived-home/uns-cmp/livebase-block/raw-globals",
+            "error": "agbcc failed: c.c:1502: invalid operands to binary &"
           }
         ],
         "symbolsUsed": [
@@ -9266,7 +9470,7 @@
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "candidateLabel": "unsigned",
+        "candidateLabel": "unsigned/flip-join/raw-globals",
         "symbolsUsed": [
           {
             "name": "gBgTilemapBufs",
@@ -9282,22 +9486,22 @@
           }
         ],
         "outcome": "nonmatch",
-        "source": "struct Elem0 { u8 field_0; u8 _pad0[7]; };\nstruct Elem1 { u8 field_0; u8 _pad0[7]; };\nstruct Elem10 { u8 field_0; u8 _pad0[7]; };\nstruct Elem11 { u8 field_0; u8 _pad0[7]; };\nstruct Elem12 { u8 field_0; u8 _pad0[7]; };\nstruct Elem13 { u8 field_0; u8 _pad0[7]; };\nstruct Elem14 { u8 field_0; u8 _pad0[7]; };\nstruct Elem2 { u8 field_0; u8 _pad0[7]; };\nstruct Elem3 { u8 field_0; u8 _pad0[7]; };\nstruct Elem4 { u8 field_0; u8 _pad0[7]; };\nstruct Elem5 { u8 field_0; u8 _pad0[7]; };\nstruct Elem6 { u8 field_0; u8 _pad0[7]; };\nstruct Elem7 { u8 field_0; u8 _pad0[7]; };\nstruct Elem8 { u8 field_0; u8 _pad0[7]; };\nstruct Elem9 { u8 field_0; u8 _pad0[7]; };\nvoid UpdateWorldMapNodeTile(u32 a0) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    u16 * v3;\n    u16 * v4;\n    if ((u8)a0 <= 3) {\n        v0 = gUnk_08116880[(u8)a0];\n        ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(((struct Elem1 *)((u32)&gUnk_08116748 + 1))[(u8)a0].field_0 << 5) + ((struct Elem0 *)&gUnk_08116748)[(u8)a0].field_0] = *(u16 *)((v0 + 28 << 6) + ((u32)&gBgTilemapBufs + (128 << 4)));\n        ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(((struct Elem3 *)((u32)&gUnk_08116748 + 3))[(u8)a0].field_0 << 5) + ((struct Elem2 *)((u32)&gUnk_08116748 + 2))[(u8)a0].field_0] = ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(v0 + 28 << 5) + 1];\n        ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(((struct Elem5 *)((u32)&gUnk_08116748 + 5))[(u8)a0].field_0 << 5) + ((struct Elem4 *)((u32)&gUnk_08116748 + 4))[(u8)a0].field_0] = ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(v0 + 28 << 5) + 2];\n        v3 = (u16 *)((u32)&gBgTilemapBufs + (128 << 4));\n        v4 = (u16 *)(((((struct Elem7 *)((u32)&gUnk_08116748 + 7))[(u8)a0].field_0 << 5) + ((struct Elem6 *)((u32)&gUnk_08116748 + 6))[(u8)a0].field_0 << 1) + ((u32)&gBgTilemapBufs + (128 << 4)));\n        v2 = (v0 + 28 << 5) + 3;\n    } else {\n        v1 = gUnk_08116880[(u8)a0];\n        ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(((struct Elem8 *)((u32)&gUnk_08116748 + 1))[(u8)a0].field_0 << 5) + ((struct Elem0 *)&gUnk_08116748)[(u8)a0].field_0] = ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(v1 + 28 << 5) + 4];\n        ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(((struct Elem10 *)((u32)&gUnk_08116748 + 3))[(u8)a0].field_0 << 5) + ((struct Elem9 *)((u32)&gUnk_08116748 + 2))[(u8)a0].field_0] = ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(v1 + 28 << 5) + 5];\n        ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(((struct Elem12 *)((u32)&gUnk_08116748 + 5))[(u8)a0].field_0 << 5) + ((struct Elem11 *)((u32)&gUnk_08116748 + 4))[(u8)a0].field_0] = ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(v1 + 28 << 5) + 6];\n        v3 = (u16 *)((u32)&gBgTilemapBufs + (128 << 4));\n        v4 = (u16 *)(((((struct Elem14 *)((u32)&gUnk_08116748 + 7))[(u8)a0].field_0 << 5) + ((struct Elem13 *)((u32)&gUnk_08116748 + 6))[(u8)a0].field_0 << 1) + ((u32)&gBgTilemapBufs + (128 << 4)));\n        v2 = (v1 + 28 << 5) + 7;\n    }\n    *v4 = v3[v2];\n    return;\n}\n",
-        "score": 147,
+        "source": "struct Elem0 { u8 field_0; u8 _pad0[7]; };\nstruct Elem1 { u8 field_0; u8 _pad0[7]; };\nstruct Elem10 { u8 field_0; u8 _pad0[7]; };\nstruct Elem11 { u8 field_0; u8 _pad0[7]; };\nstruct Elem12 { u8 field_0; u8 _pad0[7]; };\nstruct Elem13 { u8 field_0; u8 _pad0[7]; };\nstruct Elem14 { u8 field_0; u8 _pad0[7]; };\nstruct Elem2 { u8 field_0; u8 _pad0[7]; };\nstruct Elem3 { u8 field_0; u8 _pad0[7]; };\nstruct Elem4 { u8 field_0; u8 _pad0[7]; };\nstruct Elem5 { u8 field_0; u8 _pad0[7]; };\nstruct Elem6 { u8 field_0; u8 _pad0[7]; };\nstruct Elem7 { u8 field_0; u8 _pad0[7]; };\nstruct Elem8 { u8 field_0; u8 _pad0[7]; };\nstruct Elem9 { u8 field_0; u8 _pad0[7]; };\nvoid UpdateWorldMapNodeTile(u32 a0) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    u16 * v3;\n    u16 * v4;\n    u8 * p0;\n    p0 = (u8 *)&gUnk_08116880;\n    if ((u8)a0 > 3) {\n        v1 = p0[(u8)a0];\n        ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(((struct Elem8 *)((u32)&gUnk_08116748 + 1))[(u8)a0].field_0 << 5) + ((struct Elem0 *)&gUnk_08116748)[(u8)a0].field_0] = ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(v1 + 28 << 5) + 4];\n        ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(((struct Elem10 *)((u32)&gUnk_08116748 + 3))[(u8)a0].field_0 << 5) + ((struct Elem9 *)((u32)&gUnk_08116748 + 2))[(u8)a0].field_0] = ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(v1 + 28 << 5) + 5];\n        ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(((struct Elem12 *)((u32)&gUnk_08116748 + 5))[(u8)a0].field_0 << 5) + ((struct Elem11 *)((u32)&gUnk_08116748 + 4))[(u8)a0].field_0] = ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(v1 + 28 << 5) + 6];\n        v3 = (u16 *)((u32)&gBgTilemapBufs + (128 << 4));\n        v4 = (u16 *)(((((struct Elem14 *)((u32)&gUnk_08116748 + 7))[(u8)a0].field_0 << 5) + ((struct Elem13 *)((u32)&gUnk_08116748 + 6))[(u8)a0].field_0 << 1) + ((u32)&gBgTilemapBufs + (128 << 4)));\n        v2 = (v1 + 28 << 5) + 7;\n    } else {\n        v0 = p0[(u8)a0];\n        ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(((struct Elem1 *)((u32)&gUnk_08116748 + 1))[(u8)a0].field_0 << 5) + ((struct Elem0 *)&gUnk_08116748)[(u8)a0].field_0] = *(u16 *)((v0 + 28 << 6) + ((u32)&gBgTilemapBufs + (128 << 4)));\n        ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(((struct Elem3 *)((u32)&gUnk_08116748 + 3))[(u8)a0].field_0 << 5) + ((struct Elem2 *)((u32)&gUnk_08116748 + 2))[(u8)a0].field_0] = ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(v0 + 28 << 5) + 1];\n        ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(((struct Elem5 *)((u32)&gUnk_08116748 + 5))[(u8)a0].field_0 << 5) + ((struct Elem4 *)((u32)&gUnk_08116748 + 4))[(u8)a0].field_0] = ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(v0 + 28 << 5) + 2];\n        v3 = (u16 *)((u32)&gBgTilemapBufs + (128 << 4));\n        v4 = (u16 *)(((((struct Elem7 *)((u32)&gUnk_08116748 + 7))[(u8)a0].field_0 << 5) + ((struct Elem6 *)((u32)&gUnk_08116748 + 6))[(u8)a0].field_0 << 1) + ((u32)&gBgTilemapBufs + (128 << 4)));\n        v2 = (v0 + 28 << 5) + 3;\n    }\n    *v4 = v3[v2];\n    return;\n}\n",
+        "score": 144,
         "maxScore": 171,
         "compileErrors": null,
         "breakdown": {
           "insert": 19,
-          "delete": 27,
-          "replace": 18,
-          "opMismatch": 0,
-          "argMismatch": 83
+          "delete": 28,
+          "replace": 21,
+          "opMismatch": 2,
+          "argMismatch": 74
         },
         "quality": {
           "score": 84,
-          "lines": 41,
+          "lines": 43,
           "gotos": 0,
-          "casts": 35,
+          "casts": 36,
           "unkGlue": 0,
           "rawMem": 1,
           "addrDeref": 0
@@ -9329,15 +9533,15 @@
       },
       "gapSize": {
         "decompiler": "asmlift",
-        "score": 147,
+        "score": 144,
         "maxScore": 171,
-        "ratio": 0.8596491228070176,
+        "ratio": 0.8421052631578947,
         "kinds": {
           "insert": 19,
-          "delete": 27,
-          "replace": 18,
-          "opMismatch": 0,
-          "argMismatch": 83
+          "delete": 28,
+          "replace": 21,
+          "opMismatch": 2,
+          "argMismatch": 74
         }
       },
       "scripts": {
@@ -10815,23 +11019,23 @@
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "candidateLabel": "unsigned",
+        "candidateLabel": "unsigned/flip-join",
         "symbolsUsed": [
           {
             "name": "omovl"
           }
         ],
         "outcome": "nonmatch",
-        "source": "s32 func_80045314_45F14(void) {\n    s32 v0;\n    if (omovl != 2) {\n        if (omovl != 3) {\n            v0 = 0;\n        } else {\n            v0 = -20;\n        }\n    } else {\n        v0 = 20;\n    }\n    return v0;\n}\n",
-        "score": 15,
-        "maxScore": 16,
+        "source": "s32 func_80045314_45F14(void) {\n    s32 v0;\n    if (omovl == 2) {\n        v0 = 20;\n    } else {\n        if (omovl == 3) {\n            v0 = -20;\n        } else {\n            v0 = 0;\n        }\n    }\n    return v0;\n}\n",
+        "score": 11,
+        "maxScore": 18,
         "compileErrors": null,
         "breakdown": {
-          "insert": 4,
+          "insert": 6,
           "delete": 3,
-          "replace": 2,
+          "replace": 1,
           "opMismatch": 0,
-          "argMismatch": 6
+          "argMismatch": 1
         },
         "quality": {
           "score": 100,
@@ -12055,7 +12259,7 @@
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "candidateLabel": "signed",
+        "candidateLabel": "signed/flip-join/reread-globals",
         "symbolsUsed": [
           {
             "name": "D_800CC69C_CD29C",
@@ -12063,22 +12267,22 @@
           }
         ],
         "outcome": "nonmatch",
-        "source": "void func_800600C0_60CC0(s32 a0, s32 a1) {\n    s32 v0;\n    s32 v1;\n    v0 = D_800CC69C_CD29C;\n    if (a1 != 0) {\n        v1 = ((s32 *)(((a0 << 16 >> 16) * 160 - (a0 << 16 >> 16) << 2) + v0))[14] | 16;\n    } else {\n        v1 = ((s32 *)(((a0 << 16 >> 16) * 160 - (a0 << 16 >> 16) << 2) + v0))[14] & -17;\n    }\n    ((s32 *)(((a0 << 16 >> 16) * 160 - (a0 << 16 >> 16) << 2) + v0))[14] = v1;\n    return;\n}\n",
-        "score": 41,
+        "source": "void func_800600C0_60CC0(s32 a0, s32 a1) {\n    s32 v0;\n    if (a1 == 0) {\n        v0 = ((s32 *)(((a0 << 16 >> 16) * 160 - (a0 << 16 >> 16) << 2) + (u8 *)D_800CC69C_CD29C))[14] & -17;\n    } else {\n        v0 = ((s32 *)(((a0 << 16 >> 16) * 160 - (a0 << 16 >> 16) << 2) + (u8 *)D_800CC69C_CD29C))[14] | 16;\n    }\n    ((s32 *)(((a0 << 16 >> 16) * 160 - (a0 << 16 >> 16) << 2) + (u8 *)D_800CC69C_CD29C))[14] = v0;\n    return;\n}\n",
+        "score": 37,
         "maxScore": 42,
         "compileErrors": null,
         "breakdown": {
           "insert": 23,
-          "delete": 7,
+          "delete": 4,
           "replace": 0,
           "opMismatch": 0,
-          "argMismatch": 11
+          "argMismatch": 10
         },
         "quality": {
-          "score": 98,
-          "lines": 12,
+          "score": 92,
+          "lines": 10,
           "gotos": 0,
-          "casts": 3,
+          "casts": 6,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -12816,17 +13020,17 @@
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "candidateLabel": "unsigned",
+        "candidateLabel": "unsigned/flip-join",
         "symbolsUsed": [],
         "outcome": "nonmatch",
-        "source": "struct Struct0 { s32 field_0; u8 _pad0[1]; u8 field_5; u8 _pad1[6]; s32 field_12; };\ns32 HuMemUsedMemorySizeGet(struct Struct0 * a0) {\n    struct Struct0 * v0;\n    s32 v1;\n    s32 v2;\n    v0 = a0;\n    v1 = 0;\n    do {\n        if (v0->field_5 == 1) {\n            v2 = v1 + v0->field_0;\n        } else {\n            v2 = v1;\n        }\n        v1 = v2;\n        v0 = (struct Struct0 *)v0->field_12;\n    } while (v0 != a0);\n    return v1;\n}\n",
-        "score": 5,
+        "source": "struct Struct0 { s32 field_0; u8 _pad0[1]; u8 field_5; u8 _pad1[6]; s32 field_12; };\ns32 HuMemUsedMemorySizeGet(struct Struct0 * a0) {\n    struct Struct0 * v0;\n    s32 v1;\n    s32 v2;\n    v0 = a0;\n    v1 = 0;\n    do {\n        if (v0->field_5 != 1) {\n            v2 = v1;\n        } else {\n            v2 = v1 + v0->field_0;\n        }\n        v1 = v2;\n        v0 = (struct Struct0 *)v0->field_12;\n    } while (v0 != a0);\n    return v1;\n}\n",
+        "score": 4,
         "maxScore": 13,
         "compileErrors": null,
         "breakdown": {
           "insert": 0,
           "delete": 0,
-          "replace": 4,
+          "replace": 3,
           "opMismatch": 0,
           "argMismatch": 1
         },
@@ -17166,6 +17370,18 @@
             "error": "agbcc failed: c.c:934: too many arguments to function `InputRecorderWrite'"
           },
           {
+            "label": "unsigned/flip-join",
+            "error": "agbcc failed: c.c:934: too many arguments to function `InputRecorderWrite'"
+          },
+          {
+            "label": "unsigned/flip-join/scopebase",
+            "error": "agbcc failed: c.c:935: too many arguments to function `InputRecorderWrite'"
+          },
+          {
+            "label": "unsigned/flip-join/parkfirst",
+            "error": "agbcc failed: c.c:934: too many arguments to function `InputRecorderWrite'"
+          },
+          {
             "label": "unsigned/reread-globals",
             "error": "agbcc failed: c.c:933: too many arguments to function `InputRecorderWrite'"
           },
@@ -17178,6 +17394,18 @@
             "error": "agbcc failed: c.c:933: too many arguments to function `InputRecorderWrite'"
           },
           {
+            "label": "unsigned/flip-join/reread-globals",
+            "error": "agbcc failed: c.c:933: too many arguments to function `InputRecorderWrite'"
+          },
+          {
+            "label": "unsigned/flip-join/reread-globals/scopebase",
+            "error": "agbcc failed: c.c:934: too many arguments to function `InputRecorderWrite'"
+          },
+          {
+            "label": "unsigned/flip-join/reread-globals/parkfirst",
+            "error": "agbcc failed: c.c:933: too many arguments to function `InputRecorderWrite'"
+          },
+          {
             "label": "unsigned/derived-home",
             "error": "agbcc failed: c.c:934: too many arguments to function `InputRecorderWrite'"
           },
@@ -17186,11 +17414,27 @@
             "error": "agbcc failed: c.c:935: too many arguments to function `InputRecorderWrite'"
           },
           {
+            "label": "unsigned/flip-join/derived-home",
+            "error": "agbcc failed: c.c:934: too many arguments to function `InputRecorderWrite'"
+          },
+          {
+            "label": "unsigned/flip-join/derived-home/scopebase",
+            "error": "agbcc failed: c.c:935: too many arguments to function `InputRecorderWrite'"
+          },
+          {
             "label": "unsigned/reread-globals/derived-home",
             "error": "agbcc failed: c.c:933: too many arguments to function `InputRecorderWrite'"
           },
           {
             "label": "unsigned/reread-globals/derived-home/scopebase",
+            "error": "agbcc failed: c.c:934: too many arguments to function `InputRecorderWrite'"
+          },
+          {
+            "label": "unsigned/flip-join/reread-globals/derived-home",
+            "error": "agbcc failed: c.c:933: too many arguments to function `InputRecorderWrite'"
+          },
+          {
+            "label": "unsigned/flip-join/reread-globals/derived-home/scopebase",
             "error": "agbcc failed: c.c:934: too many arguments to function `InputRecorderWrite'"
           },
           {
@@ -17210,6 +17454,22 @@
             "error": "agbcc failed: c.c:933: too many arguments to function `InputRecorderWrite'"
           },
           {
+            "label": "unsigned/flip-join/raw-globals",
+            "error": "agbcc failed: c.c:933: too many arguments to function `InputRecorderWrite'"
+          },
+          {
+            "label": "unsigned/flip-join/scopebase/raw-globals",
+            "error": "agbcc failed: c.c:934: too many arguments to function `InputRecorderWrite'"
+          },
+          {
+            "label": "unsigned/flip-join/livebase/raw-globals",
+            "error": "agbcc failed: c.c:935: too many arguments to function `InputRecorderWrite'"
+          },
+          {
+            "label": "unsigned/flip-join/parkfirst/raw-globals",
+            "error": "agbcc failed: c.c:933: too many arguments to function `InputRecorderWrite'"
+          },
+          {
             "label": "unsigned/reread-globals/raw-globals",
             "error": "agbcc failed: c.c:932: too many arguments to function `InputRecorderWrite'"
           },
@@ -17226,6 +17486,22 @@
             "error": "agbcc failed: c.c:932: too many arguments to function `InputRecorderWrite'"
           },
           {
+            "label": "unsigned/flip-join/reread-globals/raw-globals",
+            "error": "agbcc failed: c.c:932: too many arguments to function `InputRecorderWrite'"
+          },
+          {
+            "label": "unsigned/flip-join/reread-globals/scopebase/raw-globals",
+            "error": "agbcc failed: c.c:933: too many arguments to function `InputRecorderWrite'"
+          },
+          {
+            "label": "unsigned/flip-join/reread-globals/livebase/raw-globals",
+            "error": "agbcc failed: c.c:934: too many arguments to function `InputRecorderWrite'"
+          },
+          {
+            "label": "unsigned/flip-join/reread-globals/parkfirst/raw-globals",
+            "error": "agbcc failed: c.c:932: too many arguments to function `InputRecorderWrite'"
+          },
+          {
             "label": "unsigned/derived-home/raw-globals",
             "error": "agbcc failed: c.c:933: too many arguments to function `InputRecorderWrite'"
           },
@@ -17238,6 +17514,18 @@
             "error": "agbcc failed: c.c:935: too many arguments to function `InputRecorderWrite'"
           },
           {
+            "label": "unsigned/flip-join/derived-home/raw-globals",
+            "error": "agbcc failed: c.c:933: too many arguments to function `InputRecorderWrite'"
+          },
+          {
+            "label": "unsigned/flip-join/derived-home/scopebase/raw-globals",
+            "error": "agbcc failed: c.c:934: too many arguments to function `InputRecorderWrite'"
+          },
+          {
+            "label": "unsigned/flip-join/derived-home/livebase/raw-globals",
+            "error": "agbcc failed: c.c:935: too many arguments to function `InputRecorderWrite'"
+          },
+          {
             "label": "unsigned/reread-globals/derived-home/raw-globals",
             "error": "agbcc failed: c.c:932: too many arguments to function `InputRecorderWrite'"
           },
@@ -17247,6 +17535,18 @@
           },
           {
             "label": "unsigned/reread-globals/derived-home/livebase/raw-globals",
+            "error": "agbcc failed: c.c:934: too many arguments to function `InputRecorderWrite'"
+          },
+          {
+            "label": "unsigned/flip-join/reread-globals/derived-home/raw-globals",
+            "error": "agbcc failed: c.c:932: too many arguments to function `InputRecorderWrite'"
+          },
+          {
+            "label": "unsigned/flip-join/reread-globals/derived-home/scopebase/raw-globals",
+            "error": "agbcc failed: c.c:933: too many arguments to function `InputRecorderWrite'"
+          },
+          {
+            "label": "unsigned/flip-join/reread-globals/derived-home/livebase/raw-globals",
             "error": "agbcc failed: c.c:934: too many arguments to function `InputRecorderWrite'"
           }
         ],
@@ -19876,6 +20176,30 @@
             "error": "agbcc failed: c.c:2037: too many arguments to function `VramMalloc'"
           },
           {
+            "label": "unsigned/flip-join",
+            "error": "agbcc failed: c.c:2039: too many arguments to function `VramMalloc'"
+          },
+          {
+            "label": "unsigned/flip-join/initfirst",
+            "error": "agbcc failed: c.c:2035: too many arguments to function `VramMalloc'"
+          },
+          {
+            "label": "unsigned/flip-join/livebase",
+            "error": "agbcc failed: c.c:2041: too many arguments to function `VramMalloc'"
+          },
+          {
+            "label": "unsigned/flip-join/livebase/initfirst",
+            "error": "agbcc failed: c.c:2037: too many arguments to function `VramMalloc'"
+          },
+          {
+            "label": "unsigned/defsite/flip-join",
+            "error": "agbcc failed: c.c:2033: too many arguments to function `VramMalloc'"
+          },
+          {
+            "label": "unsigned/defsite/flip-join/livebase",
+            "error": "agbcc failed: c.c:2035: too many arguments to function `VramMalloc'"
+          },
+          {
             "label": "signed",
             "error": "agbcc failed: c.c:2041: too many arguments to function `VramMalloc'"
           },
@@ -19898,6 +20222,30 @@
           {
             "label": "signed/defsite/livebase",
             "error": "agbcc failed: c.c:2037: too many arguments to function `VramMalloc'"
+          },
+          {
+            "label": "signed/flip-join",
+            "error": "agbcc failed: c.c:2039: too many arguments to function `VramMalloc'"
+          },
+          {
+            "label": "signed/flip-join/initfirst",
+            "error": "agbcc failed: c.c:2035: too many arguments to function `VramMalloc'"
+          },
+          {
+            "label": "signed/flip-join/livebase",
+            "error": "agbcc failed: c.c:2041: too many arguments to function `VramMalloc'"
+          },
+          {
+            "label": "signed/flip-join/livebase/initfirst",
+            "error": "agbcc failed: c.c:2037: too many arguments to function `VramMalloc'"
+          },
+          {
+            "label": "signed/defsite/flip-join",
+            "error": "agbcc failed: c.c:2033: too many arguments to function `VramMalloc'"
+          },
+          {
+            "label": "signed/defsite/flip-join/livebase",
+            "error": "agbcc failed: c.c:2035: too many arguments to function `VramMalloc'"
           }
         ],
         "symbolsUsed": [],
@@ -19989,8 +20337,16 @@
             "error": "agbcc failed: c.c:2339: too many arguments to function `VramMalloc'"
           },
           {
+            "label": "unsigned/flip-join",
+            "error": "agbcc failed: c.c:2338: too many arguments to function `VramMalloc'"
+          },
+          {
             "label": "signed",
             "error": "agbcc failed: c.c:2339: too many arguments to function `VramMalloc'"
+          },
+          {
+            "label": "signed/flip-join",
+            "error": "agbcc failed: c.c:2338: too many arguments to function `VramMalloc'"
           }
         ],
         "symbolsUsed": [],
@@ -20419,7 +20775,7 @@
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "candidateLabel": "unsigned",
+        "candidateLabel": "unsigned/flip-join/derived-home",
         "symbolsUsed": [
           {
             "name": "gVramHeapMaxTileSlots",
@@ -20431,22 +20787,22 @@
           }
         ],
         "outcome": "nonmatch",
-        "source": "s32 VramGetTotalAllocatedTiles(void) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    v0 = gVramHeapMaxTileSlots;\n    if (0 < (u32)v0 >> 2) {\n        v1 = 0;\n        v2 = 0;\n        do {\n            if (gVramHeapState[v1] != 0) {\n                v2 = (u16)(v2 + gVramHeapState[v1]);\n                v1 = (u16)(gVramHeapState[v1] + (v1 + 65535));\n            }\n            v1 = (u16)(v1 + 1);\n        } while (v1 < (u32)v0 >> 2);\n    } else {\n        v2 = 0;\n    }\n    return (u32)(v2 << 18) >> 16;\n}\n",
-        "score": 21,
-        "maxScore": 45,
+        "source": "s32 VramGetTotalAllocatedTiles(void) {\n    u32 v0;\n    s32 v1;\n    s32 v2;\n    v0 = (u32)gVramHeapMaxTileSlots >> 2;\n    if (0 >= v0) {\n        v2 = 0;\n    } else {\n        v1 = 0;\n        v2 = 0;\n        do {\n            if (gVramHeapState[v1] != 0) {\n                v2 = (u16)(v2 + gVramHeapState[v1]);\n                v1 = (u16)(gVramHeapState[v1] + (v1 + 65535));\n            }\n            v1 = (u16)(v1 + 1);\n        } while (v1 < v0);\n    }\n    return (u32)(v2 << 18) >> 16;\n}\n",
+        "score": 18,
+        "maxScore": 42,
         "compileErrors": null,
         "breakdown": {
-          "insert": 8,
-          "delete": 6,
-          "replace": 0,
-          "opMismatch": 1,
-          "argMismatch": 6
+          "insert": 5,
+          "delete": 3,
+          "replace": 1,
+          "opMismatch": 2,
+          "argMismatch": 7
         },
         "quality": {
-          "score": 90,
+          "score": 94,
           "lines": 20,
           "gotos": 0,
-          "casts": 7,
+          "casts": 5,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -41968,16 +42324,16 @@
       "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    d  .text\t00000020 .text\n00000000 g     F .text\t00000018 land\n\n\nContents of section .text:\n 0000 0004102b 10400002 00000000 0005102b  ...+.@.........+\n 0010 03e00008 00000000 00000000 00000000  ................\nContents of section .options:\n 0000 01200000 00000000 80000034 00000000  . .........4....\n 0010 00000000 00000000 00000000 00007ff0  ................\n 0020 07100000 00000000 00000000 00000000  ................\n 0030 08100000 00000000 00000000 00000000  ................\nContents of section .reginfo:\n 0000 80000034 00000000 00000000 00000000  ...4............\n 0010 00000000 00007ff0                    ........        \nContents of section .mdebug:\n 0000 7009070a 00000006 00000004 00000188  p...............\n 0010 00000005 000002c8 00000001 0000018c  ................\n 0020 00000004 000001c0 00000000 00000000  ................\n 0030 00000011 000001f0 00000034 00000234  ...........4...4\n 0040 00000008 00000268 00000001 00000270  .......h.......p\n 0050 00000000 00000000 00000001 000002b8  ................\n 0060 05000000 00000000 00000001 00000000  ................\n 0070 00000000 00000000 ffffffff 00000000  ................\n 0080 00000000 00000000 001d001f 00000002  ................\n 0090 00000002 00000000 00000001 00000000  ................\n 00a0 2c200004 0000002e 00000000 1820000f  , ........... ..\n 00b0 0000002e 00000018 20200001 00000001  ........  ......\n 00c0 00000000 20200000 02000000 03000000  ....  ..........\n 00d0 04000000 05000000 06000000 07000000  ................\n 00e0 08000000 09000000 20000000 21000000  ........ ...!...\n 00f0 0a000000 0b000000 0b000000 1a000000  ................\n 0100 00000000 00000003 06000000 002f746d  ............./tm\n 0110 702f6173 6d6c6966 742d6d69 70732d72  p/asmlift-mips-r\n 0120 65662d32 33323266 36353036 33303261  ef-2322f6506302a\n 0130 6636322f 7265662e 63006c61 6e640000  f62/ref.c.land..\n 0140 6c616e64 00000000 00000000 00000001  land............\n 0150 00000000 00000033 00000000 00000004  .......3........\n 0160 00000000 00000006 00000000 00000000  ................\n 0170 00000001 00000000 00000011 00000000  ................\n 0180 00000000 01800000 00000000 00000001  ................\n 0190 00000000 00000000 00000000 18200001  ............. ..\n 01a0 00000000 00000000 00000000 00000000  ................\n 01b0 00000000 00000000 7fffffff 00000000  ................\n 01c0 00000000 00000002                    ........        \n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned",
+        "candidateLabel": "signed/flip-join",
         "outcome": "nonmatch",
-        "source": "s32 land(u32 a0, u32 a1) {\n    s32 v0;\n    if (0 < a0) {\n        v0 = 0 < a1;\n    } else {\n        v0 = 0 < a0;\n    }\n    return v0;\n}\n",
-        "score": 7,
-        "maxScore": 9,
+        "source": "s32 land(s32 a0, s32 a1) {\n    s32 v0;\n    if (0 >= a0) {\n        v0 = 0 < a0;\n    } else {\n        v0 = 0 < a1;\n    }\n    return v0;\n}\n",
+        "score": 5,
+        "maxScore": 6,
         "compileErrors": null,
         "breakdown": {
-          "insert": 3,
+          "insert": 0,
           "delete": 0,
-          "replace": 4,
+          "replace": 5,
           "opMismatch": 0,
           "argMismatch": 0
         },
@@ -51010,18 +51366,18 @@
       "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /host-tmp/asmlift-mgcc-ref-84c78a1282ec0a36/ref.c\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t0000004c nestedloop\n\n\nContents of section .text:\n 0000 27bdfff0 00003021 1880000d 00003821  '.....0!......8!\n 0010 18800007 00002821 00001821 00e33821  ......(!...!..8!\n 0020 24a50001 00a4102a 1440fffc 00661821  $......*.@...f.!\n 0030 24c60001 00c4102a 1440fff5 00000000  $......*.@......\n 0040 00e01021 03e00008 27bd0010 00000000  ...!....'.......\nContents of section .reginfo:\n 0000 a00000fc 00000000 00000000 00000000  ................\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.              \n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "signed",
+        "candidateLabel": "unsigned/flip-join",
         "outcome": "nonmatch",
-        "source": "s32 nestedloop(s32 a0) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    if (a0 > 0) {\n        v1 = 0;\n        v0 = 0;\n        do {\n            if (a0 > 0) {\n                v2 = v0;\n                v4 = 0;\n                v3 = 0;\n                do {\n                    v2 = v2 + v3;\n                    v4 = v4 + 1;\n                    v3 = v3 + v1;\n                } while (v4 < a0);\n                v0 = v2;\n            }\n            v1 = v1 + 1;\n        } while (v1 < a0);\n    } else {\n        v0 = 0;\n    }\n    return v0;\n}\n",
+        "source": "s32 nestedloop(u32 a0) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    if (a0 <= 0) {\n        v0 = 0;\n    } else {\n        v1 = 0;\n        v0 = 0;\n        do {\n            if (a0 > 0) {\n                v2 = v0;\n                v4 = 0;\n                v3 = 0;\n                do {\n                    v2 = v2 + v3;\n                    v4 = v4 + 1;\n                    v3 = v3 + v1;\n                } while (v4 < a0);\n                v0 = v2;\n            }\n            v1 = v1 + 1;\n        } while (v1 < a0);\n    }\n    return v0;\n}\n",
         "score": 16,
-        "maxScore": 24,
+        "maxScore": 23,
         "compileErrors": null,
         "breakdown": {
-          "insert": 5,
+          "insert": 4,
           "delete": 2,
-          "replace": 2,
+          "replace": 5,
           "opMismatch": 0,
-          "argMismatch": 7
+          "argMismatch": 5
         },
         "quality": {
           "score": 100,
