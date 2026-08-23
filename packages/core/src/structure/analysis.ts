@@ -1107,8 +1107,9 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
             axisHomedBases.add(pr);
           }
           // Fourth scope, under the loop-expression-home axis (AnalyzeOptions.homeLoopExprs): a
-          // pure non-const value defined outside a loop with 2+ distinct consumers inside it.
-          // Shared bases stay the previous scope's (its load rule needs the registration).
+          // pure non-const value with 2+ distinct consumers, at least one of them inside a loop the
+          // def sits outside. Shared bases stay the previous scope's (its load rule needs the
+          // registration).
           if (
             homeLoopExprs &&
             op.opcode !== 'const' &&

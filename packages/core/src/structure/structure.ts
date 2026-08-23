@@ -721,9 +721,9 @@ export interface StructureOptions {
   // through it, reproducing the source's pointer-local + scalar-temp spelling. Off by default;
   // rank.ts enumerates the ON spelling as the `/addr-home` axis — see analysis.ts AnalyzeOptions.
   homeSharedAddresses?: boolean;
-  // Materialize a pure value defined outside a loop with 2+ distinct consumers inside it — the
-  // register the compiler holds across the iterations. Off by default; rank.ts enumerates the ON
-  // spelling as the `/expr-home` axis — see analysis.ts AnalyzeOptions.
+  // Materialize a pure value with 2+ distinct consumers, at least one of them inside a loop the
+  // def sits outside — the register the compiler holds across the iterations. Off by default;
+  // rank.ts enumerates the ON spelling as the `/expr-home` axis — see analysis.ts AnalyzeOptions.
   homeLoopExprs?: boolean;
   // Materialize a pure value with 2+ consumers standing on a memory read — the register the asm
   // carried the DERIVED value in, where the read's own home is a register that died at the
