@@ -396,7 +396,10 @@ interface FlatItem {
   data?: { halfwords: boolean; values: string[]; inCode: boolean };
 }
 
-function decode(name: string, asm: string): { blocks: AsmBlock[]; dataWords: Map<string, string[]> } {
+function decode(
+  name: string,
+  asm: string,
+): { blocks: AsmBlock[]; dataWords: Map<string, string[]>; funcLabels: Set<string> } {
   // Flatten to (label | instr | data) items, then split into blocks at labels / after branches.
   // `.word LABEL` directives are captured into dataWords keyed by the most recent label (the
   // jump table); ALL word/halfword data also stays in-stream as items, so the raw-halfword and
@@ -916,7 +919,7 @@ function decode(name: string, asm: string): { blocks: AsmBlock[]; dataWords: Map
       boundaryIdx++;
       continue;
     }
-    return { blocks: live, dataWords };
+    return { blocks: live, dataWords, funcLabels: new Set(funcLabels) };
   }
 }
 
@@ -1222,7 +1225,7 @@ export function lift(
   symbols?: SymbolMap,
 ): Fn {
   assertInputFormat('thumb', 'gnu-as', asm);
-  const { blocks: rawBlocks, dataWords } = decode(name, asm);
+  const { blocks: rawBlocks, dataWords, funcLabels } = decode(name, asm);
 
   // Regime B: recover agbcc jump tables. A dispatch block (`mov pc, rN`) plus its bounds
   // predecessor (`cmp; bhi DEF`) collapse into a `switch_br` emitted from the BOUNDS block; the
@@ -1289,14 +1292,24 @@ export function lift(
   // signal, not a vanished branch. Mirrors MIPS `jr`/PPC `bctr`. (A RECOGNISED jump table's
   // dispatch block is already elided above, so it is not scanned here.)
   //
-  // The same rule for a `bl` that is not a call. agbcc relays a conditional branch past Thumb's
-  // ±256-byte reach through an unconditional one, and past THAT branch's own ±2 KB reach the relay
-  // becomes `bl .Lfar @far jump` — an intra-function long branch wearing the call mnemonic. The
-  // decode switch reads it as a call, so without this the lift emits a call to a block label
-  // (`.L3(a0, a1, a2)`): not a branch that vanished but a transfer turned into something that
-  // RETURNS, and syntactically not C. A target this function DEFINES is the discriminator; the
-  // entry label is excluded, where a `bl` really is recursion.
-  const entryLabel = rawBlocks[0]?.label;
+  // The same rule for a `bl` whose target is inside this function's own text. agbcc relays a
+  // conditional branch past Thumb's ±256-byte reach through an unconditional one, and past THAT
+  // branch's own ±2 KB reach the relay becomes `bl .Lfar @far jump` — an intra-function long
+  // branch wearing the call mnemonic. The decode switch reads it as a call, so without this the
+  // lift emits a call to a block label (`.L3(a0, a1, a2)`): not a branch that vanished but a
+  // transfer turned into something that RETURNS, and syntactically not C.
+  //
+  // The refusal is wider than that one shape because the asm does not separate it from a
+  // locally-defined call thunk — `call_r3: bx r3`, ARMv4T's stand-in for the `blx rN` it has no
+  // encoding for, which pokeemerald's m4a_1.s calls four times from inside MPlayMain's own slice.
+  // Both are a `bl` to a bare label the slice defines, both are preceded by a conditional branch
+  // over them, and both leave `lr` clobbered, so no liveness or layout fact tells them apart.
+  // Lifting the relay as a `br` is the other half of the gap and needs the same distinction plus a
+  // proof that `lr` is dead there, since `bl` overwrites it and a branch must not.
+  //
+  // DECLARED function starts are excluded: a `.thumb_func`/`thumb_func_start` label is a function
+  // by declaration, so `bl` to one is a call however the slice came to contain it — the entry
+  // itself (recursion), or a sibling a shared-tail slice extends through.
   for (const ab of asmBlocks) {
     for (const ins of ab.instrs) {
       if (classifyXfer(ins) === 'indirect') {
@@ -1306,10 +1319,11 @@ export function lift(
         );
       }
       const callee = (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') && ins.ops.length === 1 ? ins.ops[0] : undefined;
-      if (callee !== undefined && callee !== name && callee !== entryLabel && blockLabels.has(callee)) {
+      if (callee !== undefined && !funcLabels.has(callee) && blockLabels.has(callee)) {
         throw new FrontendUnsupportedError(
-          `cannot lift '${name}': '${ins.mnemonic} ${callee}' branches to a label this function ` +
-            `defines — an intra-function long branch, not a call, and this frontend models only calls here`,
+          `cannot lift '${name}': '${ins.mnemonic} ${callee}' targets a label inside this function ` +
+            `and not a declared function — an intra-function long branch and a locally-defined call ` +
+            `thunk are the same shape here, so this declines rather than guessing which`,
         );
       }
     }
