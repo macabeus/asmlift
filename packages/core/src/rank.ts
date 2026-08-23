@@ -444,8 +444,10 @@ export function enumerateCandidates(
   // negateJoinedBranchSense): a reconverging two-armed if reads the same fall-through-is-then
   // layout evidence the divergent case does, so the DEFAULT sense is now the divergent one's and
   // this axis emits the other. Read off the TARGET's sense, not this candidate's `s.sense`, so
-  // `/flip-branch` still moves only divergent ifs and the two axes stay independent (the four
-  // combinations are the same four as before — only which one carries the bare label changed).
+  // `/flip-branch` still moves only divergent ifs and the two axes stay independent. The suffix
+  // therefore names a sense RELATIVE to the target's default: a label quoted from a log identifies
+  // a spelling only together with the tree that produced it, which is what the `[asmlift source
+  // <commit>]` stamp on the `[ranked]` line is for (docs/ranked-repro.md).
   // Crossed with the pair above. The two senses are two different sources wherever a two-armed
   // joined `if` exists at all — agbcc emits different bytes for the arms-swapped spelling — and
   // all three things that invert the polarity are per-SITE where this lever is per-function, so no
