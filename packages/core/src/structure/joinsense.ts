@@ -1,38 +1,34 @@
 // Where the JOINED branch sense is still ambiguous — the gate on `rank.ts`'s `/flip-join` axis.
 //
 // `structure.ts` spells a two-armed reconverging `if` from the layout: the compiler branched
-// forward over the then-arm and fell through into it, so `cond_br`'s TAKEN slot is the else-arm
-// and the source's own sense comes back unflipped. That reading is the DEFAULT
+// forward over the then-arm and fell through into it, so `cond_br`'s TAKEN slot is the else-arm and
+// the source's own sense comes back unflipped. That reading is the default
 // (`negateJoinedBranchSense` follows `preserveDivergentBranchSense`), and it holds wherever the
 // source wrote the `if` and the polarity the structurer reads is the polarity the compiler emitted.
-// This predicate names the two shapes where one of those is not so, and the axis is enumerated
-// only there. Both are mechanical and read straight off the IR — neither is a judgement about the
-// function.
+// Two shapes break one of those, and the axis is enumerated only there.
 //
 // A FOLDED CONNECTIVE feeding the branch. `raise/shortcircuit.ts` rewrites two `cond_br` blocks
-// sharing a target into one `cond_br` over a `logic_and`/`logic_or`, and WHICH connective it
-// builds follows from which of ^h's edges led to ^g — so the fold, not the compiler, decides which
-// successor is `taken` (its "WHICH SPELLING" note asks for exactly this gate). Compiler-
-// independent: agbcc and mwcc both compile `if (a && b)` in pure layout sense, and both need the
-// flip on it.
+// sharing a target into one `cond_br` over a `logic_and`/`logic_or`, and which connective it builds
+// follows from which of ^h's edges led to ^g — so the FOLD decides which successor is `taken` (its
+// "WHICH SPELLING" note asks for exactly this gate). Not a compiler fact: `synthetic:ifor_near` is
+// one source that needs the flip on both agbcc/Thumb and mwcc/PowerPC.
 //
-// An EMPTY FALL-THROUGH edge — a fall block holding nothing but its own branch. Two different
-// things wear that shape, and the axis is owed under either. It is what a conditional branch that
+// An EMPTY FALL-THROUGH edge — a fall block holding nothing but its own branch. Two unrelated
+// things wear that shape and the axis is owed under both. It is what a conditional branch that
 // could not REACH its target leaves behind (agbcc past Thumb's ±256-byte range emits `b<cond>
-// .LCBn` and then `b .Lfar @long jump`), and the frontend lifts that verbatim, so `taken` is the
-// THEN arm and the layout reading is upside down. It is also what the preheader of a rotated
-// `for` loop decays to once its copies fold away — and there the `if` is the compiler's own
-// zero-trip guard, which no source wrote, so there is no source sense for the default to be
-// faithful to and the differ is the only referee available.
+// .LCBn` then `b .Lfar @long jump`), which the frontend lifts verbatim, so `taken` becomes the THEN
+// arm and the layout reading is upside down. It is also what a rotated `for` loop's preheader
+// decays to once its copies fold away — and there the `if` is the compiler's own zero-trip guard,
+// which no source wrote, so no source sense exists for the default to be faithful to.
 //
-// Everything else prunes, which is what makes this a PRUNING gate rather than an additive one, so
-// the claim behind it is stated where it can be checked: the one GCC-family pass that genuinely
-// inverts a two-armed joined if (`jump.c`'s `if (foo) bar; else break;`, which needs the else-arm
-// to end in an unconditional transfer) is NORMALISING — it produces exactly the layout the
-// arms-swapped spelling already produces — and `structure.ts` does not put a transfer inside a
-// two-armed joined arm anyway, bar the `clampToLoop` shape, whose two spellings compile alike.
-// If a future change makes the structurer emit `return`/`goto`/`break` inside such an arm in a
-// shape that does NOT converge, that residue returns and neither clause below sees it.
+// Everything else PRUNES, so the claim behind the pruning is stated where it can be checked: the
+// one GCC-family pass that genuinely inverts a two-armed joined if (`jump.c`'s
+// `if (foo) bar; else break;`, which needs the else-arm to end in an unconditional transfer) is
+// NORMALISING — it produces the layout the arms-swapped spelling already produces — and
+// `structure.ts` does not put a transfer inside a two-armed joined arm anyway, bar the
+// `clampToLoop` shape, whose two spellings compile alike. A change that makes the structurer emit
+// `return`/`goto`/`break` inside such an arm in a shape that does NOT converge brings that residue
+// back, and neither clause below would see it.
 import { type Fn, defOpMap } from '../ir/core';
 
 /** Does this function hold a `cond_br` whose TAKEN slot may not be the sense the source wrote?
@@ -51,9 +47,9 @@ export function hasAmbiguousJoinedSense(fn: Fn): boolean {
       return true;
     }
     // The FALL-THROUGH successor only: the inverted branch is the one that still reaches, so a
-    // relay can never sit on the taken edge. Tested for a lone `br` whatever it carries rather
-    // than through `forwardingTarget`, because this gate prunes — a relay it fails to see costs a
-    // match, one it over-reports costs a duplicate the dedup collapses.
+    // relay can never sit on the taken edge. A lone `br` whatever it carries, not
+    // `forwardingTarget` — this gate prunes, and a relay it fails to see costs a match where one
+    // it over-reports costs a duplicate the dedup collapses.
     const fall = term.successors[1].block;
     return fall.ops.length === 1 && fall.ops[0].opcode === 'br';
   });

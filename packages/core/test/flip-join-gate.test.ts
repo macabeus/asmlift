@@ -1,9 +1,8 @@
 // FLIP-JOIN GATE: which functions still owe the `/flip-join` enumeration. The joined-if sense is
-// the layout's by default, so the axis is enumerated only where the polarity the structurer reads
-// could have been moved out from under it — a short-circuit fold choosing the orientation, or a
-// branch-range trampoline on the fall-through edge (structure/joinsense.ts). Everywhere else the
-// flipped spelling is pruned, which is what makes the gate a claim rather than a saving.
-// Toolchain-free.
+// the layout's by default, so the axis is enumerated only where a short-circuit fold chose the
+// orientation, or the fall-through edge carries no work of its own (structure/joinsense.ts).
+// Everywhere else the flipped spelling is pruned, which is what makes the gate a claim rather than
+// a saving. Toolchain-free.
 import { describe, expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -70,9 +69,9 @@ describe('FLIP-JOIN GATE: the axis is enumerated only where the sense is still a
   });
 });
 
-// The gate reads the IR directly, so the three readings are pinned on the IR too — the trampoline
-// arm has no benchmark row behind it (no corpus function reaches Thumb's range on a fold-free if),
-// and a mechanism with no row is exactly the one a corpus sweep cannot re-derive.
+// The gate reads the IR directly, so each clause is pinned on the IR too — including the polarity
+// of the empty-edge one, which no corpus row can settle: every benchmark function that reaches it
+// does so on a rotated loop, so a sweep would leave the branch-range reading unexercised.
 const IR = (entry: string, rest: string) => parse(`fn f {\n^bb0(%0: s32, %1: s32*):\n${entry}${rest}}\n`);
 const ARMS = `^bb1():
   %8: s32 = const {value=1}

@@ -449,7 +449,7 @@ export function enumerateCandidates(
   // combinations are the same four as before — only which one carries the bare label changed).
   // Crossed with the pair above, and GATED per lift variant on structure/joinsense.ts: the layout
   // reading is the answer unless something moved the polarity out from under it, so most functions
-  // emit one sense here instead of two.
+  // emit one sense here rather than two.
   const baseSense = [
     ...senseAnchor.map((s) => ({ ...s, join: false })),
     ...senseAnchor.map((s) => ({ ...s, suffix: `${s.suffix}/flip-join`, join: true })),
@@ -597,10 +597,8 @@ export function enumerateCandidates(
         }
         // the per-variant axis gates, on THIS variant's lifted fn — see the table doc
         const variantOff = STRUCTURING_AXES.filter((ax) => ax.variantGate !== undefined && !ax.variantGate(fn));
-        // `/flip-join`'s own gate, on the same footing and read on the same fn (see
-        // structure/joinsense.ts): the joined sense is the layout's unless a fold or a
-        // branch-range trampoline moved the polarity out from under it, so the axis is
-        // enumerated only where one of those could have fired.
+        // `/flip-join`'s own gate, on the same footing and read on the same fn — the two shapes
+        // that leave the joined sense open are structure/joinsense.ts's subject
         const joinAmbiguous = hasAmbiguousJoinedSense(fn);
         const variantCands = axisCands.filter(
           (s) => (joinAmbiguous || !s.join) && variantOff.every((ax) => !s[ax.flag]),
