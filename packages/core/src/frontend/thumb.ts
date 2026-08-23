@@ -3178,17 +3178,17 @@ export function lift(
       const escaped = new Set<number>();
       // TWO QUESTIONS, not one. `escaped` asks whether the address LEFT the function, which is what
       // decides `volatile`. `mayWrite` asks whether it reached something that could write the frame
-      // BACK, which is what the two "a callee may write any frame offset" refusals below actually
-      // rest on. A store into a device's SOURCE register answers yes to the first and no to the
-      // second: the hardware reads the object, and the DMA-fill idiom this capability was built for
+      // BACK, which is what every "a callee may write any frame offset" refusal below rests on. A
+      // store into a device's SOURCE register answers yes to the first and no to the second: the
+      // hardware reads the object, and the DMA-fill idiom this capability was built for
       // (`vu16 tmp; DmaSet(n, &tmp, …)`) is exactly that shape.
       const mayWrite = new Set<number>();
-      // …and `escaped` SPLIT IN TWO, because the two escapes decide different things.
-      // `passedToCallee` is the address handed to a callee as an argument — the ordinary `&local`,
-      // and the only escape whose writer this frontend can name, which is what the slot rule below
-      // rests on. `published` is the address WRITTEN TO MEMORY, which is how the DMA idiom hands
-      // the object to hardware, and what `volatile` at the stamp keys on. Reading either off
-      // `escaped` gets the other one wrong.
+      // …and the two escapes SPLIT, because each decides something the other does not.
+      // `passedToCallee` is the address handed to a callee as an argument — the one escape whose
+      // writer this frontend can name, which is what the struct-return premise re-check below rests
+      // on, and what tells a refusal message which escape it is talking about. `published` is the
+      // address WRITTEN TO MEMORY, how the DMA idiom hands the object to hardware, and what
+      // `volatile` at the stamp keys on. Reading either off `escaped` gets the other one wrong.
       const passedToCallee = new Set<number>();
       const published = new Set<number>();
       // …and WHICH ARGUMENT it was passed as, because argument 0 is the one position a hidden
@@ -3368,9 +3368,7 @@ export function lift(
       // from OUR accesses, which is the number that is too small in this shape.
       //
       // On an escape and not on "a laddr exists": an address dereferenced only in-function cannot
-      // be written by anyone else, and the overlap checks above cover its aliasing. `mayWrite`
-      // where the slot rule below takes the same argument on `passedToCallee` — deliberately
-      // unequal strengths, for the reason stated there; widening one is not widening both.
+      // be written by anyone else, and the overlap checks above cover its aliasing.
       if (mayWrite.size > 0 && irBlocks.some((blk) => blk.ops.some((op) => op.opcode === 'undef'))) {
         fail(
           'the captured address escapes, so a callee may write any frame offset and an unstored slot is not provably uninitialised',
@@ -3398,31 +3396,36 @@ export function lift(
       // guards exist to prevent, so it refuses.
       //
       // WHAT IT COSTS, stated because the benchmark cannot see it: it refuses every word slot above
-      // a call-passed object, which is blunter than the hazard it names, and four corpus functions
-      // that lifted before it (sa3 `sub_809C274`, `UpdateAnimations`, `sub_801C4A0`, `sub_8062CFC`)
-      // now decline. None is a benchmark row. Narrowing it needs the object's real extent, and this
-      // model does not carry one: `extent` is a single width taken from a single access, so an
-      // object wider than that scalar has nothing here to be narrowed against. The asm sometimes
-      // cannot supply it either — the twin at `capturedObjectIsTheWholeFrame` (the compiled pair
-      // this rule's own test is built on) is exactly this rule's shape, a slot THIS FUNCTION stores
-      // and reloads, undecidable between a spill and a member. It is not the general case, and the
-      // gate comment says which shapes do pin an extent and what refuses those instead.
+      // a `mayWrite` object, which is blunter than the hazard it names — four corpus functions
+      // decline on it (sa3 `sub_809C274`, `UpdateAnimations`, `sub_801C4A0`, `sub_8062CFC`), none
+      // of them a benchmark row. Narrowing it needs the object's real extent, and this model does
+      // not carry one: `extent` is a single width from a single access. The asm sometimes cannot
+      // supply it either — the compiled twin at `capturedObjectIsTheWholeFrame` is exactly this
+      // rule's shape, a slot THIS FUNCTION stores and reloads, undecidable between a spill and a
+      // member.
       //
       // ABOVE the object only: a C object extends upward from its base, so a slot BELOW it cannot
       // be part of it, and the overlap checks above already own the bytes it does cover.
       //
-      // `passedToCallee`, not `escaped` or `mayWrite`: the DMA-fill idiom publishes the address to
-      // a device register through a store this cannot always resolve, and the shipped rows that do
-      // that also key slots — narrowing to the one escape whose writer is NAMED keeps this rule to
-      // the shape the outgoing-argument proof newly admits. What that leaves is stated residue,
-      // not an oversight: a base stored to an address this cannot resolve is vouched for as
-      // before.
-      for (const off of passedToCallee) {
+      // `mayWrite`, the same predicate the undef rule takes, because the two rules rest on one
+      // argument and a callee is not the only writer. `struct M { u8 b; u8 pad[3]; s32 t; };
+      // gp = &m; g2(); use2(m.t);` PUBLISHES the base to an ordinary global and the machine reloads
+      // [sp,#4] after `bl g2` — `g2` writes through `gp`, which points here. Keyed on
+      // `passedToCallee` that lifted as `use2(v0)`, the reload replaced by the value from before
+      // the call, no diagnostic: the same silent wrong answer as the call shape, one escape over.
+      //
+      // Not `escaped`, which is the strictly wider set and the one that costs: the DMA-fill idiom
+      // publishes to a device SOURCE register, which reads the object and never writes it, and
+      // `readsThrough` is exactly the exemption that keeps `mayWrite` off those rows. What stays
+      // residue is a base stored through a pointer this cannot resolve: unresolvable is the
+      // conservative answer there, so such a store IS in `mayWrite` and such a frame declines.
+      for (const off of mayWrite) {
         for (const slot of usedSlotOffsets) {
           if (slot > off) {
+            const how = passedToCallee.has(off) ? 'is passed to a callee' : 'is stored to memory';
             fail(
-              `the captured address at [sp,#${off}) is passed to a callee, which may write the ` +
-                `slot at [sp,#${slot}] — this function's own store there would be forwarded past the call`,
+              `the captured address at [sp,#${off}) ${how}, which may write the ` +
+                `slot at [sp,#${slot}] — this function's own store there would be forwarded past the write`,
             );
           }
         }

@@ -1309,6 +1309,75 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       expect(decompile('f', oneWord, ARMV4T_AGBCC, { prototypes: { g: { params: 1 } } }).source).toContain('g(&sp0)');
     });
 
+    // THE SAME HAZARD ONE ESCAPE OVER. A callee is not the only writer that can reach this frame:
+    // publish the base to an ordinary global and any later call writes through it. Verbatim agbcc
+    // for `struct M { u8 b; u8 pad[3]; s32 t; }; extern struct M *gp; void pub(s32 x){ struct M m;
+    // m.b = x; m.t = h(1); gp = &m; g2(); use2(m.t); }` — the machine RELOADS [sp,#4] after
+    // `bl g2`, so the value the source reads there is the one `g2` wrote.
+    //
+    // Keyed on `passedToCallee` this lifted as `use2(v0)`: the reload replaced by the value from
+    // before the call, `g2`'s write dropped, no diagnostic.
+    test('a PUBLISHED frame base refuses the slot model above it too', () => {
+      const publishedSlot =
+        'pub:\n' +
+        '\tpush\t{lr}\n' +
+        '\tadd\tsp, sp, #-0x8\n' +
+        '\tmov\tr1, sp\n' +
+        '\tstrb\tr0, [r1]\n' +
+        '\tmov\tr0, #0x1\n' +
+        '\tbl\th\n' +
+        '\tstr\tr0, [sp, #0x4]\n' +
+        '\tldr\tr0, .L3\n' +
+        '\tmov\tr1, sp\n' +
+        '\tstr\tr1, [r0]\n' +
+        '\tbl\tg2\n' +
+        '\tldr\tr0, [sp, #0x4]\n' +
+        '\tbl\tuse2\n' +
+        '\tadd\tsp, sp, #0x8\n' +
+        '\tpop\t{r0}\n' +
+        '\tbx\tr0\n' +
+        '.L4:\n\t.align\t2, 0\n.L3:\n\t.word\tgp\n';
+      const protos = { prototypes: { h: { params: 1 }, g2: { params: 0 }, use2: { params: 1 } } };
+      expect(() => decompile('pub', publishedSlot, ARMV4T_AGBCC, protos)).toThrow(
+        /is stored to memory, which may write the slot at \[sp,#4\]/,
+      );
+      // …and the MULTI-WORD analogue, where the same escape loses two reloads rather than one:
+      // `struct N { u8 b; u8 pad[3]; s32 t, u; }` filled the same way and read back as `m.t + m.u`
+      // lifted as `use2(v0 + v1)`. Verbatim agbcc, frame 0xc.
+      const publishedTwoSlots =
+        'pubw:\n' +
+        '\tpush\t{lr}\n' +
+        '\tadd\tsp, sp, #-0xc\n' +
+        '\tmov\tr1, sp\n' +
+        '\tstrb\tr0, [r1]\n' +
+        '\tmov\tr0, #0x1\n' +
+        '\tbl\th\n' +
+        '\tstr\tr0, [sp, #0x4]\n' +
+        '\tmov\tr0, #0x2\n' +
+        '\tbl\th\n' +
+        '\tstr\tr0, [sp, #0x8]\n' +
+        '\tldr\tr0, .L3\n' +
+        '\tmov\tr1, sp\n' +
+        '\tstr\tr1, [r0]\n' +
+        '\tbl\tg2\n' +
+        '\tldr\tr0, [sp, #0x4]\n' +
+        '\tldr\tr1, [sp, #0x8]\n' +
+        '\tadd\tr0, r0, r1\n' +
+        '\tbl\tuse2\n' +
+        '\tadd\tsp, sp, #0xc\n' +
+        '\tpop\t{r0}\n' +
+        '\tbx\tr0\n' +
+        '.L4:\n\t.align\t2, 0\n.L3:\n\t.word\tgq\n';
+      expect(() => decompile('pubw', publishedTwoSlots, ARMV4T_AGBCC, protos)).toThrow(
+        /is stored to memory, which may write the slot at \[sp,#4\]/,
+      );
+      // CONTROL, and it is what makes `mayWrite` the right predicate rather than `escaped`: the
+      // SAME publish to a DMA source register keeps lifting, because the device reads through the
+      // address and never writes it (`readsThrough`). Only the sink word differs from `pub`.
+      const dmaSink = publishedSlot.replace('.word\tgp', '.word\t0x40000d4');
+      expect(decompile('pub', dmaSink, ARMV4T_AGBCC, protos).source).toContain('volatile u8 sp0;');
+    });
+
     // THE MULTI-WORD ANALOGUE of the same hazard, which declines LOUDLY — but at the first gate it
     // meets, not at the rule that owns it, and the assertion pins only the former. Compiled,
     // `struct W { s32 a,b,c,d; }; void f(s32 x){ struct W w; w.a=x; w.b=x+1; w.c=x+2; w.d=x+3;
@@ -1427,6 +1496,11 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     // widening of `localArea === 4` can reach klonoa's `LoadBGTilemapData` (instrumented:
     // localArea=60, frameBasePassedToCallee=false, and its lift is byte-identical with the
     // conjunct widened).
+    //
+    // The slots above it survive on the DEVICE, not on the frame: a word store to a DMA SOURCE
+    // register is `readsThrough`, so this capture is never in `mayWrite` and neither the slot rule
+    // nor the frame-accounting rule looks at it. Publish the same base to an ordinary global and
+    // both refuse — the test above.
     //
     // Compiled, frame 0xc, with the two incoming pointers spilled into the slots above the object:
     // `void dmawide(u16 *dst, s32 n){ vu16 tmp; s32 t0..t7; tmp = 0; t0 = h(0); … t7 = h(7);
