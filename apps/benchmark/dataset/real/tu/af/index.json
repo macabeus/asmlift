@@ -158,5 +158,13 @@
   "atans_table": {
     "tu": "atans_table.i.gz",
     "ctx": "ctx-704e9fc8c667.i.gz"
+  },
+  "mPl_SceneNo2SoundRoomType": {
+    "tu": "mPl_SceneNo2SoundRoomType.i.gz",
+    "ctx": "ctx-fc118d566f62.i.gz"
+  },
+  "getScissorView": {
+    "tu": "getScissorView.i.gz",
+    "ctx": "ctx-13c0316c06e2.i.gz"
   }
 }

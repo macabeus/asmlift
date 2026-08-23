@@ -158,5 +158,13 @@
   "func_80038090_38C90": {
     "tu": "func_80038090_38C90.i.gz",
     "ctx": "ctx-61ff2cd29f43.i.gz"
+  },
+  "func_8006FEBC_70ABC": {
+    "tu": "func_8006FEBC_70ABC.i.gz",
+    "ctx": "ctx-69dc50ff9127.i.gz"
+  },
+  "unlockAllContent": {
+    "tu": "unlockAllContent.i.gz",
+    "ctx": "ctx-972a29fb32e3.i.gz"
   }
 }

@@ -158,5 +158,13 @@
   "EntityDeathAnimation": {
     "tu": "EntityDeathAnimation.i.gz",
     "ctx": "ctx-169871128279.i.gz"
+  },
+  "IsSelectButtonPressed": {
+    "tu": "IsSelectButtonPressed.i.gz",
+    "ctx": "ctx-468a872ed564.i.gz"
+  },
+  "VBlankDMA_Level2": {
+    "tu": "VBlankDMA_Level2.i.gz",
+    "ctx": "ctx-11a3f2b324e5.i.gz"
   }
 }
