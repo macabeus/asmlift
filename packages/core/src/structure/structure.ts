@@ -2575,7 +2575,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     switchAllowsNeqCase,
     switchAllowsBoundCase,
     switchArmsFollowLayout,
-    emitsAnchoredWrite: (blk) => blk.ops.some((o) => anchoredAt.has(o)),
+    emitsOwnStatement: (blk) => blk.ops.some((o) => anchoredAt.has(o) || materialize.has(o)),
     expr: (v) => expr(v),
     structureRegion: (b, stop) => structureRegion(b, stop),
   });
@@ -3467,7 +3467,11 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       ...fn.blocks
         .flatMap((b) => b.ops)
         .filter((op) => op.opcode === 'undef')
-        .map((op) => ({ name: undefName.get(op)!, type: varType.get(undefName.get(op)!) ?? op.results[0].type })),
+        .map((op) => ({
+          name: undefName.get(op)!,
+          type: varType.get(undefName.get(op)!) ?? op.results[0].type,
+          uninit: true as const,
+        })),
     ],
     ...(shapedGlobalTypes.size
       ? {

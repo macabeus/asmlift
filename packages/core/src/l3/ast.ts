@@ -195,6 +195,10 @@ export interface SFn {
     volatile?: true;
     pointeeVolatile?: true;
     frame?: { loads: number; stores: number };
+    /** the local stands on an `undef` — storage the asm reads without ever writing it, where the
+     *  MISSING assignment is the recovery. Marked because a local read and never assigned is
+     *  otherwise a dropped statement (contracts.ts assertLocalsWritten). */
+    uninit?: true;
   }[];
   /** project globals referenced with a known declaration shape (symbol map) — typed for the
    *  legalization env (exprCType) but NEVER declared by a backend: the project's own headers

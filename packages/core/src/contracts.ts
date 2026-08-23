@@ -237,6 +237,51 @@ export function assertEffectsPreserved(fn: Fn, sfn: SFn): void {
   }
 }
 
+/** Post structuring: a local the body READS must be WRITTEN somewhere in it. A materialized value
+ *  renders as one `v = …` statement at its def's position while every use reads the bare name, so
+ *  any pass that DISCARDS the statement's position — a collapsed switch test block, a suppressed
+ *  edge copy — leaves the reads standing over whatever the register allocator left behind. That is
+ *  the one wrongness the byte differ rewards rather than catches: the candidate compiles, scores,
+ *  and can win.
+ *
+ *  PRESENCE, not reaching definitions. The stronger question needs path sensitivity through
+ *  `switch` fall-through, `do-while` and `break`, where a false positive DECLINES a function that
+ *  is fine; assigned nowhere at all needs none of that and has no legitimate producer. Two local
+ *  kinds are exempt and both say so in their declaration: an `uninit` local stands on an `undef`,
+ *  where the missing assignment IS the recovery, and a `frame` local is the machine's own slot,
+ *  whose store the readability passes between here and L3 may have dropped. */
+export function assertLocalsWritten(sfn: SFn): void {
+  const suspect = new Set(sfn.locals.filter((l) => !l.frame && !l.uninit).map((l) => l.name));
+  if (!suspect.size) {
+    return;
+  }
+  const read = new Set<string>();
+  const written = new Set<string>();
+  // `&v` is a write channel this walk cannot follow — the callee/store behind it may fill the
+  // object — so it counts as one.
+  const walkExpr = (e: Expr): void => {
+    if ((e.k === 'var' || e.k === 'addr') && suspect.has(e.name)) {
+      (e.k === 'addr' ? written : read).add(e.name);
+    }
+    exprChildren(e).forEach(walkExpr);
+  };
+  const walkStmt = (st: Stmt): void => {
+    if (st.k === 'assign' && suspect.has(st.name)) {
+      written.add(st.name);
+    }
+    stmtExprs(st).forEach(walkExpr);
+    stmtChildren(st).forEach(walkStmt);
+  };
+  sfn.body.forEach(walkStmt);
+  const orphans = [...read].filter((n) => !written.has(n));
+  if (orphans.length) {
+    throw new ContractError(
+      `structuring emitted local(s) ${orphans.map((n) => `'${n}'`).join(', ')} in '${sfn.name}' read but ` +
+        `never assigned — a def whose assignment no render position emitted`,
+    );
+  }
+}
+
 /** Post structuring: the AST's memory accesses and operators must be SPELLABLE — a `field`
  *  node's base a pointer-to-struct (`->`) or a struct value (`.`, an array element) carrying
  *  that field; no pointer operand under an operator C rejects; and every SCALAR `index` node's
