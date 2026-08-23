@@ -168,3 +168,22 @@ test('--jobs must be a positive integer', async () => {
     expect(r.stderr).toContain('--jobs must be a positive integer');
   }
 });
+
+// docs/ranked-repro.md is the repo's ONE canonical ranked command, and the two tests above are
+// what its `--proto` spelling has to agree with. Nothing else re-runs the page, so a claim about
+// the flag can sit there being false for as long as nobody types it.
+// The command BLOCK is checked, not the prose around it: the block is what gets copied. A page
+// that quotes the inline form only to call it broken passes a prose-wide check.
+// Requiring the block to be inline is deliberate, not incidental — a path means a scratch file,
+// and scratch files carrying different tables for "the canonical run" is the drift the page opens
+// by describing.
+test("docs/ranked-repro.md's canonical command spells --proto a way the CLI accepts", async () => {
+  const doc = readFileSync(join(import.meta.dirname, '../../../../docs/ranked-repro.md'), 'utf8');
+  const block = doc.match(/```sh\n([\s\S]*?)```/)?.[1];
+  const spelled = block?.match(/--proto\s+(\S+)/)?.[1];
+  expect(spelled, 'the canonical command block still passes --proto').toBeTruthy();
+  // the block writes the callee and the arity as placeholders; make them concrete, spelling intact
+  const concrete = spelled!.replace(/^'|'$/g, '').replace('<callee>', 'callee').replace(/\bN\b/, '1');
+  const r = await run('agbcc-clamp0.s', '--target', 'agbcc', '--proto', concrete);
+  expect(r.code, `docs/ranked-repro.md's command spells --proto ${spelled}`).toBe(0);
+});
