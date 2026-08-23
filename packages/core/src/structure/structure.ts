@@ -3390,8 +3390,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // NO record at all when the address reaches ANYTHING ELSE — a block argument, an offset
   // computation, a call. The count is then a floor rather than the access set, and it is read as
   // the access set (the l3/volatileval.ts gate), so it refuses instead of reporting a number that
-  // undercounts. The frontend's audit re-roots every access directly, which makes that
-  // unreachable today — asserted here rather than inherited.
+  // undercounts. Reached rather than theoretical: an address-escaped frame scratch takes it —
+  // `synthetic:dma_fill_uninit` and `kleod:ProcessInputAndUpdateEntities` both lose their record
+  // here.
   const frameRecord = (at: Op): { frame?: { loads: number; stores: number } } => {
     const off = at.attrs.off as number;
     const roots = new Set<Value>();

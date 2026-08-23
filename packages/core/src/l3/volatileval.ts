@@ -47,8 +47,9 @@
 //
 // ALL ELIGIBLE SLOTS OR NONE, where the sibling pointee lever enumerates per-local SUBSETS on the
 // argument that volatility is per-pointer knowledge. It is per-slot knowledge here too; the
-// subsets are simply uninhabited — of 311 agbcc benchmark rows, one reaches this gate at all, and
-// none reaches it with two eligible slots.
+// subsets are simply uninhabited — across the 311 agbcc benchmark rows no function reaches this
+// gate with two eligible slots. How many reach it at all depends on the sweep's configuration, so
+// the subset question is the one to quote: two rows with the callee arities declared, one without.
 import type { SFn } from './ast';
 import { type Gate, firstRejection } from './gates';
 import { localMentions, readsOf } from './mentions';

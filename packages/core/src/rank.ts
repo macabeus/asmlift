@@ -754,7 +754,7 @@ export function enumerateCandidates(
           //
           // COST — it fires broadly: on 33 of the 69 klonoa functions that lift with no symbol map
           // (a symbol-map sweep sees fewer, since an absolute pool constant lifts to a `gaddr`
-          // there). Both outputs together add 766 candidates over 47058, +1.6%, and up to +70% on
+          // there). Both outputs together add 766 candidates over 47058, +1.6%, and up to +67% on
           // one function (EntityPositionFromLevelTable) — the same class of price the enumeration
           // already pays for `/volatile`, and cheaper than the axis over the same question would
           // be — the choice the lever's header argues. `/vol-slot` adds nothing at all there: no
