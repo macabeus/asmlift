@@ -2139,6 +2139,11 @@ export const SYNTHETIC: SynthSpec[] = [
   },
 ];
 
+// ── C++ (mwcc `.cp` frontend, PPC only) ───────────────────────────────────────────────────
+// The measured symbol is an `extern "C"` wrapper: the method inlines into it at -O4, so the row
+// measures C++ codegen (this-pointer member access) under a symbol name BOTH decompilers can
+// spell — candidates stay plain C and score through the normal C path. A mangled-method axis
+// (scoring `len2__3VecFv` itself, asmlift's cpp backend vs m2c's demangler) is future dataset work.
 export const SYNTHETIC_CPP: SynthSpec[] = [
   {
     sym: 'Vec__len2',
