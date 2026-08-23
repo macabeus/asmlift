@@ -1220,17 +1220,85 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     // accesses, so a wider real object has its later words written by the callee — and any of them
     // modelled as an SSA slot is a value the slot model forwards ACROSS the call that overwrote it.
     //
-    // HAND-WRITTEN, and the only fixture here that is: the shape needs the object reached ONLY
-    // through the captured pointer (an `[sp,#0]` access of its own would collide with the slot model
-    // and decline one gate earlier), which four corpus functions do and no small C source here does.
-    // Without this rule it lifted to `g(&sp0, …); use2(a1)` — the reload after the call replaced by
-    // the value from before it, `g`'s write dropped, no diagnostic.
+    // The fixture is the pair, because the pair is the argument: these two sources compile to ONE
+    // instruction stream, byte for byte, and they disagree about who owns [sp,#4].
+    //
+    //   u8 b;              s32 t0,t2..t7;  b = x; t0 = h(0); t   = h(1); … g(&b); use2(t0 + t   + …);
+    //   struct M { u8 b; u8 pad[3]; s32 t; } m;  m.b = x; …    m.t = h(1); … g(&m); use2(t0 + m.t + …);
+    //
+    // The eight `h` results exhaust the callee-saved registers, so one of them spills to [sp,#4] —
+    // and a spill is the only neighbour that can produce this shape. What moves the object OFF
+    // [sp,#0] is a neighbour that is MEMORY-HOMED, not one that is merely declared: all eight here
+    // are declared and the address-taken byte still sits at [sp,#0], because a declared local lives
+    // in a register until something spills it. Compiled, all three:
+    //
+    //   u8 b; s32 t;           b = x; t = h(1); g(&b); use2(t);   frame 4, `mov r1, sp / strb r0,[r1]`
+    //   u8 b; volatile s32 t;  …same body…                        frame 8, `add r4, sp, #0x4`
+    //   u8 a; u8 arr[8];       a = x; garr(arr); g(&a); …          frame 0xc, `add r4, sp, #0x8`
+    //
+    // A homed neighbour takes [sp,#0] and the address-taken local goes above it, spelled `add rD,
+    // sp, #k` — which declines earlier, on the spelling the layout forces. So the ambiguity is
+    // exactly "an addressable local at [sp,#0] with a reload spill above it", and no reading of the
+    // assembly resolves it: `struct M` needs the reload after `bl g` to read what `g` wrote, `u8 b`
+    // needs it to read what we stored.
+    // Without this rule both lifted to the same source — `g(&sp0); use2(v0 + v1 + …)` with the
+    // reload replaced by the value from before the call, `g`'s write dropped, no diagnostic.
     test('a callee handed the frame base refuses the slot model above it', () => {
       const slotAbove =
-        'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tmov\tr2, sp\n\tstr\tr0, [r2]\n\tstr\tr1, [sp, #0x4]\n' +
-        '\tmov\tr0, r2\n\tbl\tg\n\tldr\tr0, [sp, #0x4]\n\tbl\tuse2\n' +
-        '\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
-      expect(() => decompile('f', slotAbove, ARMV4T_AGBCC)).toThrow(
+        's_bytes_and_slot:\n' +
+        '\tpush\t{r4, r5, r6, r7, lr}\n' +
+        '\tmov\tr7, sl\n' +
+        '\tmov\tr6, r9\n' +
+        '\tmov\tr5, r8\n' +
+        '\tpush\t{r5, r6, r7}\n' +
+        '\tadd\tsp, sp, #-0x8\n' +
+        '\tmov\tr1, sp\n' +
+        '\tstrb\tr0, [r1]\n' +
+        '\tmov\tr0, #0x0\n' +
+        '\tbl\th\n' +
+        '\tadd\tr4, r0, #0\n' +
+        '\tmov\tr0, #0x1\n' +
+        '\tbl\th\n' +
+        '\tstr\tr0, [sp, #0x4]\n' +
+        '\tmov\tr0, #0x2\n' +
+        '\tbl\th\n' +
+        '\tadd\tr7, r0, #0\n' +
+        '\tmov\tr0, #0x3\n' +
+        '\tbl\th\n' +
+        '\tmov\tsl, r0\n' +
+        '\tmov\tr0, #0x4\n' +
+        '\tbl\th\n' +
+        '\tmov\tr9, r0\n' +
+        '\tmov\tr0, #0x5\n' +
+        '\tbl\th\n' +
+        '\tmov\tr8, r0\n' +
+        '\tmov\tr0, #0x6\n' +
+        '\tbl\th\n' +
+        '\tadd\tr6, r0, #0\n' +
+        '\tmov\tr0, #0x7\n' +
+        '\tbl\th\n' +
+        '\tadd\tr5, r0, #0\n' +
+        '\tmov\tr0, sp\n' +
+        '\tbl\tg\n' +
+        '\tldr\tr0, [sp, #0x4]\n' +
+        '\tadd\tr4, r4, r0\n' +
+        '\tadd\tr4, r4, r7\n' +
+        '\tadd\tr4, r4, sl\n' +
+        '\tadd\tr4, r4, r9\n' +
+        '\tadd\tr4, r4, r8\n' +
+        '\tadd\tr4, r4, r6\n' +
+        '\tadd\tr4, r4, r5\n' +
+        '\tadd\tr0, r4, #0\n' +
+        '\tbl\tuse2\n' +
+        '\tadd\tsp, sp, #0x8\n' +
+        '\tpop\t{r3, r4, r5}\n' +
+        '\tmov\tr8, r3\n' +
+        '\tmov\tr9, r4\n' +
+        '\tmov\tsl, r5\n' +
+        '\tpop\t{r4, r5, r6, r7}\n' +
+        '\tpop\t{r0}\n' +
+        '\tbx\tr0\n';
+      expect(() => decompile('s_bytes_and_slot', slotAbove, ARMV4T_AGBCC)).toThrow(
         /passed to a callee, which may write the slot at \[sp,#4\]/,
       );
       // CONTROL, and it is what makes the refusal a rule about the SLOT rather than about the call:
@@ -1239,6 +1307,281 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tmov\tr0, sp\n\tbl\tg\n' +
         '\tadd\tsp, sp, #0x4\n\tpop\t{r0}\n\tbx\tr0\n';
       expect(decompile('f', oneWord, ARMV4T_AGBCC, { prototypes: { g: { params: 1 } } }).source).toContain('g(&sp0)');
+    });
+
+    // THE SAME HAZARD ONE ESCAPE OVER. A callee is not the only writer that can reach this frame:
+    // publish the base to an ordinary global and any later call writes through it. Verbatim agbcc
+    // for `struct M { u8 b; u8 pad[3]; s32 t; }; extern struct M *gp; void pub(s32 x){ struct M m;
+    // m.b = x; m.t = h(1); gp = &m; g2(); use2(m.t); }` — the machine RELOADS [sp,#4] after
+    // `bl g2`, so the value the source reads there is the one `g2` wrote.
+    //
+    // Keyed on `passedToCallee` this lifted as `use2(v0)`: the reload replaced by the value from
+    // before the call, `g2`'s write dropped, no diagnostic.
+    test('a PUBLISHED frame base refuses the slot model above it too', () => {
+      const publishedSlot =
+        'pub:\n' +
+        '\tpush\t{lr}\n' +
+        '\tadd\tsp, sp, #-0x8\n' +
+        '\tmov\tr1, sp\n' +
+        '\tstrb\tr0, [r1]\n' +
+        '\tmov\tr0, #0x1\n' +
+        '\tbl\th\n' +
+        '\tstr\tr0, [sp, #0x4]\n' +
+        '\tldr\tr0, .L3\n' +
+        '\tmov\tr1, sp\n' +
+        '\tstr\tr1, [r0]\n' +
+        '\tbl\tg2\n' +
+        '\tldr\tr0, [sp, #0x4]\n' +
+        '\tbl\tuse2\n' +
+        '\tadd\tsp, sp, #0x8\n' +
+        '\tpop\t{r0}\n' +
+        '\tbx\tr0\n' +
+        '.L4:\n\t.align\t2, 0\n.L3:\n\t.word\tgp\n';
+      const protos = { prototypes: { h: { params: 1 }, g2: { params: 0 }, use2: { params: 1 } } };
+      expect(() => decompile('pub', publishedSlot, ARMV4T_AGBCC, protos)).toThrow(
+        /is stored to memory, which may write the slot at \[sp,#4\]/,
+      );
+      // …and the MULTI-WORD analogue, where the same escape loses two reloads rather than one:
+      // `struct N { u8 b; u8 pad[3]; s32 t, u; }` filled the same way and read back as `m.t + m.u`
+      // lifted as `use2(v0 + v1)`. Verbatim agbcc, frame 0xc.
+      const publishedTwoSlots =
+        'pubw:\n' +
+        '\tpush\t{lr}\n' +
+        '\tadd\tsp, sp, #-0xc\n' +
+        '\tmov\tr1, sp\n' +
+        '\tstrb\tr0, [r1]\n' +
+        '\tmov\tr0, #0x1\n' +
+        '\tbl\th\n' +
+        '\tstr\tr0, [sp, #0x4]\n' +
+        '\tmov\tr0, #0x2\n' +
+        '\tbl\th\n' +
+        '\tstr\tr0, [sp, #0x8]\n' +
+        '\tldr\tr0, .L3\n' +
+        '\tmov\tr1, sp\n' +
+        '\tstr\tr1, [r0]\n' +
+        '\tbl\tg2\n' +
+        '\tldr\tr0, [sp, #0x4]\n' +
+        '\tldr\tr1, [sp, #0x8]\n' +
+        '\tadd\tr0, r0, r1\n' +
+        '\tbl\tuse2\n' +
+        '\tadd\tsp, sp, #0xc\n' +
+        '\tpop\t{r0}\n' +
+        '\tbx\tr0\n' +
+        '.L4:\n\t.align\t2, 0\n.L3:\n\t.word\tgq\n';
+      expect(() => decompile('pubw', publishedTwoSlots, ARMV4T_AGBCC, protos)).toThrow(
+        /is stored to memory, which may write the slot at \[sp,#4\]/,
+      );
+      // CONTROL, and it is what makes `mayWrite` the right predicate rather than `escaped`: the
+      // SAME publish to a DMA source register keeps lifting, because the device reads through the
+      // address and never writes it (`readsThrough`). Only the sink word differs from `pub`.
+      const dmaSink = publishedSlot.replace('.word\tgp', '.word\t0x40000d4');
+      expect(decompile('pub', dmaSink, ARMV4T_AGBCC, protos).source).toContain('volatile u8 sp0;');
+    });
+
+    // THE MULTI-WORD ANALOGUE of the same hazard, which declines LOUDLY — but at the first gate it
+    // meets, not at the rule that owns it, and the assertion pins only the former. Compiled,
+    // `struct W { s32 a,b,c,d; }; void f(s32 x){ struct W w; w.a=x; w.b=x+1; w.c=x+2; w.d=x+3;
+    // g(&w); use2(w.a+w.b+w.c+w.d); }`. Every extra word is another value a callee may write and
+    // this function reads back, so what the refusal costs grows with the extent while what licenses
+    // an acceptance does not.
+    //
+    // WHICH GATE, measured both ways, because the message is easy to read as an attribution and it
+    // is not one. Today it lands on the contiguity filter, whose wording offers "it may be that
+    // call's outgoing stack argument". What rules that out here is NOT that `mov r0, sp` is live
+    // in r0 at the `bl` — the `g3` fixture above is a compiled frame where exactly that co-exists
+    // with a genuine outgoing argument at [sp,#0], because the copy is a block-copy base. It is
+    // that all four stores are RELOADED after the call: an outgoing argument is read by the callee
+    // and never by the caller, which is the filter's own condition (a) and the one it is not
+    // applying. Widen `capturedObjectIsTheWholeFrame` to `localArea >= 4` and this same fixture
+    // declines at the rule above instead: "the captured address at [sp,#0) is passed to a callee,
+    // which may write the slot at [sp,#4]". That is the refusal this shape belongs to, and a
+    // reader chasing the contiguity filter would be attacking the wrong one.
+    test('a multi-word object handed to a callee declines, at the first gate it meets', () => {
+      const fourWords =
+        'hazw:\n' +
+        '\tpush\t{lr}\n' +
+        '\tadd\tsp, sp, #-0x10\n' +
+        '\tstr\tr0, [sp]\n' +
+        '\tadd\tr1, r0, #0x1\n' +
+        '\tstr\tr1, [sp, #0x4]\n' +
+        '\tadd\tr1, r0, #0x2\n' +
+        '\tstr\tr1, [sp, #0x8]\n' +
+        '\tadd\tr0, r0, #0x3\n' +
+        '\tstr\tr0, [sp, #0xc]\n' +
+        '\tmov\tr0, sp\n' +
+        '\tbl\tg\n' +
+        '\tldr\tr0, [sp]\n' +
+        '\tldr\tr1, [sp, #0x4]\n' +
+        '\tadd\tr0, r0, r1\n' +
+        '\tldr\tr1, [sp, #0x8]\n' +
+        '\tadd\tr0, r0, r1\n' +
+        '\tldr\tr1, [sp, #0xc]\n' +
+        '\tadd\tr0, r0, r1\n' +
+        '\tbl\tuse2\n' +
+        '\tadd\tsp, sp, #0x10\n' +
+        '\tpop\t{r0}\n' +
+        '\tbx\tr0\n';
+      expect(() => decompile('hazw', fourWords, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+    });
+
+    // …AND THE TWO SHAPES WHOSE EXTENT THE ASM DOES PIN, which is what stops the twin's undecidable
+    // slot from being read as a universal about an object's top. Both still decline, for reasons
+    // that are not about extent at all.
+    // Each fixture is verbatim agbcc 2.9-arm-000512 output (`-O2 -mthumb-interwork -Wimplicit
+    // -fhex-asm -fprologue-bugfix`), and each pins WHICH refusal answers, so a later round widening
+    // the frame licence is told what it has actually reached.
+    //
+    // Sub-word members, `struct Q { u8 a; u8 pad[3]; u8 b; }; void q_bytes(s32 x){ struct Q q;
+    // q.a = x; q.b = x + 1; g(&q); use2(q.a + q.b); }`. Thumb has no sp-relative `strb`, so both
+    // members are reached THROUGH a copy of sp and the access at +4 witnesses that the object
+    // reaches past its first word. The escape is a use that is not an access, so the capture cannot
+    // be split per offset, and the audit judges [+4] against the single scalar it models. The frame
+    // gate is not what refuses it: widened to `localArea >= 4` it declines with this same message.
+    test('a sub-word member at +4 pins the extent, and the object MODEL is what refuses it', () => {
+      const subWordMembers =
+        'q_bytes:\n' +
+        '\tpush\t{lr}\n' +
+        '\tadd\tsp, sp, #-0x8\n' +
+        '\tmov\tr1, sp\n' +
+        '\tstrb\tr0, [r1]\n' +
+        '\tadd\tr0, r0, #0x1\n' +
+        '\tstrb\tr0, [r1, #0x4]\n' +
+        '\tmov\tr0, sp\n' +
+        '\tbl\tg\n' +
+        '\tmov\tr0, sp\n' +
+        '\tldrb\tr0, [r0]\n' +
+        '\tmov\tr1, sp\n' +
+        '\tldrb\tr1, [r1, #0x4]\n' +
+        '\tadd\tr0, r0, r1\n' +
+        '\tbl\tuse2\n' +
+        '\tadd\tsp, sp, #0x8\n' +
+        '\tpop\t{r0}\n' +
+        '\tbx\tr0\n';
+      expect(() => decompile('q_bytes', subWordMembers, ARMV4T_AGBCC)).toThrow(/at \[\+4\] through the captured/);
+      expect(() => decompile('q_bytes', subWordMembers, ARMV4T_AGBCC)).toThrow(
+        /only a scalar at the captured address is modelled/,
+      );
+    });
+
+    // A frame-covering block copy, `struct Big { s32 a[17]; }; extern const struct Big gK; void
+    // big3f(void){ struct Big b; b = gK; g(&b); use2(b.a[0]); }`. `mov r2,#0x44` bounds the object
+    // from below and the `add sp,#-0x44` reservation bounds it from above, so the two coincide and
+    // the extent is exact. What stays ambiguous is the object's ROLE — the same instructions are
+    // agbcc's by-value struct ARGUMENT block and its struct-return temp — which is where widening
+    // the frame licence lands this fixture: on the struct-return refusal, never on extent.
+    test('a frame-covering block copy pins the extent, and the object`s ROLE is what refuses it', () => {
+      const blockCopy =
+        'big3f:\n' +
+        '\tpush\t{lr}\n' +
+        '\tadd\tsp, sp, #-0x44\n' +
+        '\tldr\tr1, .L3\n' +
+        '\tmov\tr0, sp\n' +
+        '\tmov\tr2, #0x44\n' +
+        '\tbl\tmemcpy\n' +
+        '\tmov\tr0, sp\n' +
+        '\tbl\tg\n' +
+        '\tldr\tr0, [sp]\n' +
+        '\tbl\tuse2\n' +
+        '\tadd\tsp, sp, #0x44\n' +
+        '\tpop\t{r0}\n' +
+        '\tbx\tr0\n' +
+        '.L4:\n\t.align\t2, 0\n.L3:\n\t.word\tgK\n';
+      expect(() => decompile('big3f', blockCopy, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+    });
+
+    // …AND THE SHAPE NO GATE ABOVE EVER ASKS ABOUT: an array. `void arrf(s32 x){ u8 buf[12];
+    // buf[0]=x; garr(buf); use2(buf[0]); }` compiles to `add sp,sp,#-0xc / mov r1,sp / strb r0,[r1]
+    // / mov r0,sp / bl garr`, and the frame licence never sees it — that gate only switches the
+    // outgoing-argument refusals off, while the object model runs on any frame. One object, no
+    // `undef`, no slot above, so all three escape rules pass it and the lift declared a 12-byte
+    // object `u8 sp0`: `garr` writing 8 bytes past a frame the recompile makes 4 wide, with no
+    // diagnostic. It declines on the frame being ACCOUNTED FOR.
+    test('an array whose top nothing bounds declines rather than shrinking the frame', () => {
+      const arrf =
+        'arrf:\n' +
+        '\tpush\t{lr}\n' +
+        '\tadd\tsp, sp, #-0xc\n' +
+        '\tmov\tr1, sp\n' +
+        '\tstrb\tr0, [r1]\n' +
+        '\tmov\tr0, sp\n' +
+        '\tbl\tgarr\n' +
+        '\tmov\tr0, sp\n' +
+        '\tldrb\tr0, [r0]\n' +
+        '\tbl\tuse2\n' +
+        '\tadd\tsp, sp, #0xc\n' +
+        '\tpop\t{r0}\n' +
+        '\tbx\tr0\n';
+      const protos = { prototypes: { garr: { params: 1 }, use2: { params: 1 } } };
+      expect(() => decompile('arrf', arrf, ARMV4T_AGBCC, protos)).toThrow(
+        /the word at \[sp,#4\] is neither an object this lift models nor a slot it keys/,
+      );
+      expect(() => decompile('arrf', arrf, ARMV4T_AGBCC, protos)).toThrow(
+        /nothing bounds the captured object's extent/,
+      );
+      // CONTROL, and it is what makes the refusal about the UNACCOUNTED WORD rather than about the
+      // array: the same capture, escape and read-back in a frame the object fills lifts.
+      const oneWordArr = arrf.replace(/#-0xc/, '#-0x4').replace(/#0xc/, '#0x4');
+      expect(decompile('arrf', oneWordArr, ARMV4T_AGBCC, protos).source).toContain('garr(&sp0)');
+    });
+
+    // …AND THE OTHER CONJUNCT, which is the one a wide frame actually meets. This gate needs the
+    // base LIVE IN AN ARGUMENT REGISTER AT A `bl`; the DMA-fill idiom PUBLISHES the base to a
+    // device register instead, and that path never asks the gate anything. So a published capture
+    // in a frame far wider than one word lifts today, slots above it and all — which is why no
+    // widening of `localArea === 4` can reach klonoa's `LoadBGTilemapData` (instrumented:
+    // localArea=60, frameBasePassedToCallee=false, and its lift is byte-identical with the
+    // conjunct widened).
+    //
+    // The slots above it survive on the DEVICE, not on the frame: a word store to a DMA SOURCE
+    // register is `readsThrough`, so this capture is never in `mayWrite` and neither the slot rule
+    // nor the frame-accounting rule looks at it. Publish the same base to an ordinary global and
+    // both refuse — the test above.
+    //
+    // Compiled, frame 0xc, with the two incoming pointers spilled into the slots above the object:
+    // `void dmawide(u16 *dst, s32 n){ vu16 tmp; s32 t0..t7; tmp = 0; t0 = h(0); … t7 = h(7);
+    // REG_DMA3[0] = (u32)&tmp; REG_DMA3[1] = (u32)dst; REG_DMA3[2] = n | 0x81000000;
+    // use2(t0 + … + t7); }`. The arities are declared because a GUESSED four-argument `h` reads the
+    // register that still holds the base as an argument, and the object is then "passed to a
+    // callee" on the strength of a guess — the same lower-bound trap `--proto` exists for.
+    test('a PUBLISHED capture in a wider frame lifts — this gate governs the callee-passed one', () => {
+      const dmawide =
+        'dmawide:\n' +
+        '\tpush\t{r4, r5, r6, r7, lr}\n' +
+        '\tmov\tr7, sl\n\tmov\tr6, r9\n\tmov\tr5, r8\n\tpush\t{r5, r6, r7}\n' +
+        '\tadd\tsp, sp, #-0xc\n' +
+        '\tstr\tr0, [sp, #0x4]\n' +
+        '\tstr\tr1, [sp, #0x8]\n' +
+        '\tmov\tr1, sp\n' +
+        '\tmov\tr0, #0x0\n' +
+        '\tstrh\tr0, [r1]\n' +
+        '\tmov\tr0, #0x0\n\tbl\th\n\tadd\tr4, r0, #0\n' +
+        '\tmov\tr0, #0x1\n\tbl\th\n\tadd\tr7, r0, #0\n' +
+        '\tmov\tr0, #0x2\n\tbl\th\n\tmov\tsl, r0\n' +
+        '\tmov\tr0, #0x3\n\tbl\th\n\tmov\tr9, r0\n' +
+        '\tmov\tr0, #0x4\n\tbl\th\n\tmov\tr8, r0\n' +
+        '\tmov\tr0, #0x5\n\tbl\th\n\tadd\tr6, r0, #0\n' +
+        '\tmov\tr0, #0x6\n\tbl\th\n\tadd\tr5, r0, #0\n' +
+        '\tmov\tr0, #0x7\n\tbl\th\n' +
+        '\tldr\tr1, .L3\n' +
+        '\tmov\tr2, sp\n' +
+        '\tstr\tr2, [r1]\n' +
+        '\tadd\tr1, r1, #0x4\n' +
+        '\tldr\tr3, [sp, #0x4]\n' +
+        '\tstr\tr3, [r1]\n' +
+        '\tldr\tr2, .L3+0x4\n' +
+        '\tmov\tr1, #0x81\n\tlsl\tr1, r1, #0x18\n' +
+        '\tldr\tr3, [sp, #0x8]\n\torr\tr1, r1, r3\n\tstr\tr1, [r2]\n' +
+        '\tadd\tr4, r4, r7\n\tadd\tr4, r4, sl\n\tadd\tr4, r4, r9\n\tadd\tr4, r4, r8\n' +
+        '\tadd\tr4, r4, r6\n\tadd\tr4, r4, r5\n\tadd\tr4, r4, r0\n\tadd\tr0, r4, #0\n\tbl\tuse2\n' +
+        '\tadd\tsp, sp, #0xc\n' +
+        '\tpop\t{r3, r4, r5}\n\tmov\tr8, r3\n\tmov\tr9, r4\n\tmov\tsl, r5\n' +
+        '\tpop\t{r4, r5, r6, r7}\n\tpop\t{r0}\n\tbx\tr0\n' +
+        '.L4:\n\t.align\t2, 0\n.L3:\n\t.word\t0x40000d4\n\t.word\t0x40000dc\n';
+      const src = decompile('dmawide', dmawide, ARMV4T_AGBCC, {
+        prototypes: { h: { params: 1 }, use2: { params: 1 } },
+      }).source;
+      expect(src).toContain('volatile u16 sp0;');
+      expect(src).toContain('*(s32 *)67109076 = &sp0;');
     });
 
     // `volatile` IS NOT FREE, so it goes only where the source writes one. The structurer emits one

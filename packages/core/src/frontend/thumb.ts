@@ -2114,18 +2114,62 @@ export function lift(
   // premise re-check in the frame-object audit — which is also where the licence's other half is
   // re-proven.
   //
-  // What it refuses that really is an addressable local: every frame with a second word in it. That
-  // is a capability gap, not a wrong answer, and widening it needs a model of the object's real
-  // extent rather than a wider licence for this one.
+  // WHAT THIS GATE IS NOT. It switches the outgoing-argument refusals off, and nothing else. The
+  // object model runs on ANY frame — the `laddrs` path in the audit below — so a `u8 buf[12]`
+  // handed to a callee arrives there through a frame this conjunct never looks at, and what bounds
+  // its extent is the audit's frame-accounting rule rather than anything here.
   //
-  // RESIDUE, stated as what it is and not as the only one: the producer table is agbcc's, so
-  // hand-written asm that reserves one word, stages it as a call's fifth argument and ALSO puts sp
-  // in an argument register defeats this — the same producer assumption the contiguity filter below
-  // already makes, and the same one an earlier cut of this comment wrongly claimed was the whole
-  // exposure while a plain `memcpy` for a by-value struct argument walked through it. The producer
-  // is named in the gate rather than left to the prose: `armv4t` has one compiler entry today, and
-  // a second one free to overlay a dead one-word local with a one-word outgoing area would inherit
-  // an acceptance whose only evidence is an agbcc compile table.
+  // WHY IT IS NOT WIDENED anyway, since a wider frame is the obvious next lever. Three shapes,
+  // each compiled with agbcc 2.9-arm-000512, `-O2 -mthumb-interwork -Wimplicit -fhex-asm
+  // -fprologue-bugfix`, and only the first is about extent at all:
+  //
+  // UNDECIDABLE — a slot THIS FUNCTION stores and reloads. Two sources that disagree about who
+  // owns [sp,#4] compile to one instruction stream, byte for byte, with eight values live across
+  // the calls so one of them spills:
+  //
+  //   s32 loc; s32 t0..t7;                   loc = x;  t0 = h(0); … g(&loc); k(loc + t0 + …);
+  //   struct P { s32 a, b; } p; s32 t1..t7;  p.a = x;  p.b = h(0); … g(&p);   k(p.a + p.b + …);
+  //
+  // The first says a callee may not touch [sp,#4]; the second says it may, and the reload after the
+  // call must read what it wrote. Nothing distinguishes them, so a licence over THAT slot would be
+  // a guess — which is why the slot rule in the audit refuses the shape rather than deciding it.
+  //
+  // PINNED, and refused by the MODEL — sub-word members. Thumb has no sp-relative `strb`, so a
+  // byte or halfword member is reached through a copy of sp, and the access at +4 witnesses that
+  // the object reaches past its first word: `struct Q { u8 a; u8 pad[3]; u8 b; }` filled and then
+  // handed over compiles to `mov r1, sp / strb r0, [r1] / strb r0, [r1, #0x4] / mov r0, sp / bl g`.
+  // The escape is a use that is not an access, so the capture cannot be split per offset, and the
+  // audit judges the [+4] access against the one object it does model — "only a scalar at the
+  // captured address is modelled", and the SAME message when this conjunct is widened to
+  // `localArea >= 4` (measured).
+  //
+  // PINNED, and ambiguous in its ROLE — a frame-covering block copy. `struct Big { s32 a[17]; };
+  // b = gK; g(&b);` compiles to `add sp,#-0x44 / mov r0,sp / mov r2,#0x44 / bl memcpy`: the copy
+  // bounds the object from below and the reservation from above, so the extent is exact. What is
+  // NOT pinned is what the object IS — the producer table above records those same instructions
+  // for a by-value struct ARGUMENT block and for a struct-return temp. Widening this conjunct
+  // moves it exactly there: it then declines at "which is how a hidden struct-return pointer
+  // looks" (measured), never at anything about extent.
+  //
+  // So a wider frame licence admits nothing this model can describe. `extent` is one scalar width
+  // from one access, and the second access that would build a wider object is a `[+k]` the audit
+  // refuses first: widened, the sub-word shape declines on the very same message and the
+  // block-copy one moves onto the struct-return refusal (both measured).
+  //
+  // RESIDUE: the producer table is agbcc's, so hand-written asm that reserves one word, stages it
+  // as a call's fifth argument and ALSO puts sp in an argument register defeats this — the same
+  // producer assumption the contiguity filter below makes. The producer is named in the gate
+  // rather than left to the prose: `armv4t` has one compiler entry today, and a second one free to
+  // overlay a dead one-word local with a one-word outgoing area would inherit an acceptance whose
+  // only evidence is an agbcc compile table.
+  //
+  // WHICH CONJUNCT REFUSES WHAT, for a reader arriving with a wide frame in hand. klonoa's
+  // `LoadBGTilemapData` (a checkout function, not a benchmark row) reserves 0x3C and fails the
+  // OTHER conjunct: its `mov r5, sp` is the DMA-fill PUBLISH (`strh r7, [r5]` / `mov r0, sp` /
+  // `str r0, [r2]`, r2 = 0x040000D4), not a base live in an argument register at a `bl`.
+  // Instrumented, it arrives with localArea=60 and frameBasePassedToCallee=false, lifts today with
+  // the object modelled as `volatile u16 sp0`, and its lift is byte-identical with this conjunct
+  // widened to `localArea >= 4` (measured). No answer to the frame size moves it.
   const capturedObjectIsTheWholeFrame = target.compiler === 'agbcc' && frameBasePassedToCallee && localArea === 4;
 
   const slotsOffReason = slotModelBlocker();
@@ -3130,17 +3174,17 @@ export function lift(
       const escaped = new Set<number>();
       // TWO QUESTIONS, not one. `escaped` asks whether the address LEFT the function, which is what
       // decides `volatile`. `mayWrite` asks whether it reached something that could write the frame
-      // BACK, which is what the two "a callee may write any frame offset" refusals below actually
-      // rest on. A store into a device's SOURCE register answers yes to the first and no to the
-      // second: the hardware reads the object, and the DMA-fill idiom this capability was built for
+      // BACK, which is what every "a callee may write any frame offset" refusal below rests on. A
+      // store into a device's SOURCE register answers yes to the first and no to the second: the
+      // hardware reads the object, and the DMA-fill idiom this capability was built for
       // (`vu16 tmp; DmaSet(n, &tmp, …)`) is exactly that shape.
       const mayWrite = new Set<number>();
-      // …and `escaped` SPLIT IN TWO, because the two escapes decide different things.
-      // `passedToCallee` is the address handed to a callee as an argument — the ordinary `&local`,
-      // and the only escape whose writer this frontend can name, which is what the slot rule below
-      // rests on. `published` is the address WRITTEN TO MEMORY, which is how the DMA idiom hands
-      // the object to hardware, and what `volatile` at the stamp keys on. Reading either off
-      // `escaped` gets the other one wrong.
+      // …and the two escapes SPLIT, because each decides something the other does not.
+      // `passedToCallee` is the address handed to a callee as an argument — the one escape whose
+      // writer this frontend can name, which is what the struct-return premise re-check below rests
+      // on, and what tells a refusal message which escape it is talking about. `published` is the
+      // address WRITTEN TO MEMORY, how the DMA idiom hands the object to hardware, and what
+      // `volatile` at the stamp keys on. Reading either off `escaped` gets the other one wrong.
       const passedToCallee = new Set<number>();
       const published = new Set<number>();
       // …and WHICH ARGUMENT it was passed as, because argument 0 is the one position a hidden
@@ -3320,9 +3364,7 @@ export function lift(
       // from OUR accesses, which is the number that is too small in this shape.
       //
       // On an escape and not on "a laddr exists": an address dereferenced only in-function cannot
-      // be written by anyone else, and the overlap checks above cover its aliasing. `mayWrite`
-      // where the slot rule below takes the same argument on `passedToCallee` — deliberately
-      // unequal strengths, for the reason stated there; widening one is not widening both.
+      // be written by anyone else, and the overlap checks above cover its aliasing.
       if (mayWrite.size > 0 && irBlocks.some((blk) => blk.ops.some((op) => op.opcode === 'undef'))) {
         fail(
           'the captured address escapes, so a callee may write any frame offset and an unstored slot is not provably uninitialised',
@@ -3350,26 +3392,88 @@ export function lift(
       // guards exist to prevent, so it refuses.
       //
       // WHAT IT COSTS, stated because the benchmark cannot see it: it refuses every word slot above
-      // a call-passed object, which is blunter than the hazard it names, and four corpus functions
-      // that lifted before it (sa3 `sub_809C274`, `UpdateAnimations`, `sub_801C4A0`, `sub_8062CFC`)
-      // now decline. None is a benchmark row. Narrowing it needs a bound on the
-      // object's real extent, which is the same thing the gate above lacks.
+      // a `mayWrite` object, which is blunter than the hazard it names — four corpus functions
+      // decline on it (sa3 `sub_809C274`, `UpdateAnimations`, `sub_801C4A0`, `sub_8062CFC`), none
+      // of them a benchmark row. Narrowing it needs the object's real extent, and this model does
+      // not carry one: `extent` is a single width from a single access. The asm sometimes cannot
+      // supply it either — the compiled twin at `capturedObjectIsTheWholeFrame` is exactly this
+      // rule's shape, a slot THIS FUNCTION stores and reloads, undecidable between a spill and a
+      // member.
       //
       // ABOVE the object only: a C object extends upward from its base, so a slot BELOW it cannot
       // be part of it, and the overlap checks above already own the bytes it does cover.
       //
-      // `passedToCallee`, not `escaped` or `mayWrite`: the DMA-fill idiom publishes the address to
-      // a device register through a store this cannot always resolve, and the shipped rows that do
-      // that also key slots — narrowing to the one escape whose writer is NAMED keeps this rule to
-      // the shape the outgoing-argument proof newly admits. What that leaves is stated residue,
-      // not an oversight: a base stored to an address this cannot resolve is vouched for as
-      // before.
-      for (const off of passedToCallee) {
+      // `mayWrite`, the same predicate the undef rule takes, because the two rules rest on one
+      // argument and a callee is not the only writer. `struct M { u8 b; u8 pad[3]; s32 t; };
+      // gp = &m; g2(); use2(m.t);` PUBLISHES the base to an ordinary global and the machine reloads
+      // [sp,#4] after `bl g2` — `g2` writes through `gp`, which points here. Keyed on
+      // `passedToCallee` that lifted as `use2(v0)`, the reload replaced by the value from before
+      // the call, no diagnostic: the same silent wrong answer as the call shape, one escape over.
+      //
+      // Not `escaped`, which is the strictly wider set and the one that costs: the DMA-fill idiom
+      // publishes to a device SOURCE register, which reads the object and never writes it, and
+      // `readsThrough` is exactly the exemption that keeps `mayWrite` off those rows. What stays
+      // residue is a base stored through a pointer this cannot resolve: unresolvable is the
+      // conservative answer there, so such a store IS in `mayWrite` and such a frame declines.
+      for (const off of mayWrite) {
         for (const slot of usedSlotOffsets) {
           if (slot > off) {
+            const how = passedToCallee.has(off) ? 'is passed to a callee' : 'is stored to memory';
             fail(
-              `the captured address at [sp,#${off}) is passed to a callee, which may write the ` +
-                `slot at [sp,#${slot}] — this function's own store there would be forwarded past the call`,
+              `the captured address at [sp,#${off}) ${how}, which may write the ` +
+                `slot at [sp,#${slot}] — this function's own store there would be forwarded past the write`,
+            );
+          }
+        }
+      }
+      // …and the FOURTH claim an escape retracts is the object's TOP, which the three rules above
+      // leave to whatever this function happened to touch. `extent` is one width from one access,
+      // so an object wider in the SOURCE than those bytes is declared too small — and a callee
+      // holding its address writes frame bytes the emitted C never allocated. Compiled:
+      //
+      //     u8 buf[12]; buf[0] = x; garr(buf); use2(buf[0]);
+      //       → add sp,sp,#-0xc / mov r1,sp / strb r0,[r1] / mov r0,sp / bl garr
+      //
+      // lifted as `u8 sp0; garr(&sp0); use2(sp0)` — a 12-byte object declared one byte, in a frame
+      // the recompile makes 4 bytes wide, with `garr` writing the other 8 into the caller's. The
+      // three rules above all pass it: one object, no `undef` op, no slot above it.
+      //
+      // What licenses an answer is the frame being ACCOUNTED FOR, word by word. Every word of the
+      // reserved local area has to be an object this audit modelled or a slot the slot model keys;
+      // a word that is neither is storage nothing here describes, so the emitted C reserves less
+      // than the machine did and the writer reaches past what it allocated. Whole local area and
+      // not only the words above the object: a word BELOW cannot be part of the object, but it is
+      // still frame the declaration has to account for. Word granularity, not byte — the stack is
+      // word-aligned, so a halfword object owns its word and the padding beside it is not a second
+      // local.
+      //
+      // `mayWrite`, the predicate the two rules above take, and for the same reason: a device
+      // SOURCE register reads through the address and cannot write the frame back.
+      //
+      // WHAT IT LEAVES, since this is the extent question the gate comment above is about: a
+      // `mayWrite` escape is accepted only where the modelled objects and the keyed slots tile the
+      // reserved area between them — a word above the object is a slot (refused above), a second
+      // object (refused above), or unaccounted (refused here). That is not a wider extent model; it
+      // is the same one-scalar `extent`, made to say when it does not fit. An object of two words
+      // cannot be built here at all — the second access that would reach it is a `[+4]` the
+      // `scalar()` guard refuses — so no widening of the frame licence admits a shape this rule
+      // would then have to judge.
+      if (mayWrite.size > 0) {
+        const accountedWords = new Set<number>();
+        for (const [off, width] of extent) {
+          for (let w = off - (off % 4); w < off + width; w += 4) {
+            accountedWords.add(w);
+          }
+        }
+        for (const slot of usedSlotOffsets) {
+          accountedWords.add(slot - (slot % 4));
+        }
+        for (let w = 0; w < localArea; w += 4) {
+          if (!accountedWords.has(w)) {
+            fail(
+              `the word at [sp,#${w}] is neither an object this lift models nor a slot it keys, ` +
+                `and the captured address reaches something that may write it — nothing accounts for the ` +
+                `rest of the frame, so nothing bounds the captured object's extent`,
             );
           }
         }
