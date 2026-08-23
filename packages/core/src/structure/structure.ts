@@ -2341,20 +2341,30 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // reaching it, which through a back edge is also how an earlier iteration's write is caught.
   // Unsure keeps the copy. Edge copies only: a `store` or a `ret` of an undef value is a real
   // instruction and emits.
+  //
+  // A value's home is where the copies into it run, and anchoring MOVES one: an anchored const is
+  // written at the const's own def site instead of on the edges (anchorConstCopies, above), and
+  // that site dominates them. Its block is a write site for the name like any other, and without it
+  // `v0 = 0; if (c) { } store v0;` drops the undefined arm's copy and stores 0 where the machine
+  // stores whatever the arm left — the same substitution the parameter case makes, one axis over.
+  const anchoredHome = new Map<string, Block[]>();
+  for (const [def, entries] of anchoredAt) {
+    for (const { name } of entries) {
+      (anchoredHome.get(name) ?? anchoredHome.set(name, []).get(name)!).push(opBlock.get(def)!);
+    }
+  }
   const undefCarriesNothing = (arg: Value, name: string, pred: Block): boolean => {
     if (defs.get(arg)?.opcode !== 'undef') {
       return false;
     }
+    const writesBefore = (home: Block | undefined): boolean =>
+      home === undefined || home === pred || reachFrom(home).has(pred);
     for (const [v, n] of varName) {
-      if (n !== name) {
-        continue;
-      }
-      const home = paramBlock.get(v) ?? opBlock.get(defs.get(v)!);
-      if (home === undefined || home === pred || reachFrom(home).has(pred)) {
+      if (n === name && writesBefore(paramBlock.get(v) ?? opBlock.get(defs.get(v)!))) {
         return false;
       }
     }
-    return true;
+    return !(anchoredHome.get(name) ?? []).some(writesBefore);
   };
   const tempCounter = { n: 0 }; // per-function swap-cycle temp names (sequentialize)
   // The copies for ONE specific successor record — the workhorse behind argAssigns, taken

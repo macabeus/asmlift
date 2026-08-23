@@ -18,12 +18,13 @@ import { verify } from '../src/ir/verify';
 import { recoverTypes } from '../src/raise/recover';
 import { structure } from '../src/structure/structure';
 
-const emit = (ir: string, returnsVoid = true): string => {
+const emitWith = (ir: string, anchorConstCopies: boolean, returnsVoid = true): string => {
   const fn = parse(ir);
   verify(fn);
   recoverTypes(fn);
-  return cBackend.emit(structure(fn, { returnsVoid }));
+  return cBackend.emit(structure(fn, { anchorConstCopies, returnsVoid }));
 };
+const emit = (ir: string, returnsVoid = true): string => emitWith(ir, false, returnsVoid);
 
 // THE ISOLATE — `synthetic:loopfall`'s shape. A local decided inside a loop body on some but not
 // all paths is a loop-carried phi whose entry operand is undefined, and the entry operand is the
@@ -127,5 +128,45 @@ const STORED = `fn stored {
 test('a store of an undefined value still emits', () => {
   expect(emit(STORED)).toBe(
     'void stored(void) {\n    s32 uninit_sp0;\n    *(s32 *)50345024 = uninit_sp0;\n    return;\n}\n',
+  );
+});
+
+// THE REFUSAL, ONE AXIS OVER. `/defsite` (anchorConstCopies) MOVES a merge copy off the edge to the
+// const's own def site, which dominates it — so the name is written before the undefined arm runs
+// even though no member of its class has a def-block that reaches this predecessor. Dropping the
+// arm's copy there stores 0 where the machine stores whatever the arm left.
+//
+// The sibling displacement, a pre-update exit copy sunk to the top of a loop body, cannot collide
+// the same way: for it to precede an undef edge that edge would have to leave the body for the
+// loop's own exit, and a second live exit is what makes the shape decline as a `break` (structure.ts,
+// the single-exit rule) — so no loop with a sunk slot has one.
+const ANCHORED = `fn anch {
+^bb0(%0: s32):
+  %1: s32 = undef {key="sp@0"}
+  %2: s32 = const {value=0}
+  %3: s32 = const {value=7}
+  %4: u32 = icmp_eq %0, %3
+  cond_br %4, ^bb1(), ^bb2()
+^bb1():
+  br ^bb3(%2)
+^bb2():
+  br ^bb3(%1)
+^bb3(%5: s32):
+  %6: s32 = const {value=50345024}
+  store %6, %5 {off=0, width=4}
+  ret
+}
+`;
+
+test('an ANCHORED const is a write before the edge, so the copy stands', () => {
+  // off: the const rides its own edge, nothing precedes the undefined arm, and the copy drops
+  expect(emitWith(ANCHORED, false)).toBe(
+    'void anch(s32 a0) {\n    s32 v0;\n    s32 uninit_sp0;\n' +
+      '    if (a0 == 7) v0 = 0;\n    *(s32 *)50345024 = v0;\n    return;\n}\n',
+  );
+  // on: `v0 = 0;` is hoisted to the def site, so the undefined arm has to overwrite it
+  expect(emitWith(ANCHORED, true)).toBe(
+    'void anch(s32 a0) {\n    s32 v0;\n    s32 uninit_sp0;\n' +
+      '    v0 = 0;\n    if (a0 != 7) v0 = uninit_sp0;\n    *(s32 *)50345024 = v0;\n    return;\n}\n',
   );
 });
