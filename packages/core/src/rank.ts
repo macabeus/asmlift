@@ -241,13 +241,12 @@ const createdLocals = (from: SFn, to: SFn): Set<string> => {
  *
  *  WHAT BOUNDS IT. A row declines unless it binds a non-empty set of bases no earlier row already
  *  bound, and each product declines wherever its own lever does, so the list widens only where an
- *  inhabitant exists: over the 856-row corpus the second admission reaches 8 rows, its `/nearbase`
- *  pairing 3, and its `/indexed`, `/coalesce` and volatile-subset products none at all. A real
- *  function that inhabits them all pays much more — LoadBGTilemapData enumerates 26880 candidates
- *  against 19712 for the two spellings alone, and its best `-block/coalesce` scores 408 where the
- *  unpaired `-block` scores 406, so the symmetry is neither free nor always a win; it is here
- *  because a pairing belongs to the LEVER, not to one of its admissions. Price a third admission
- *  on the corpus AND on a real function before adding it. */
+ *  inhabitant exists — over the 856-row corpus the second admission reaches 8 rows, its `/nearbase`
+ *  pairing 3, and its `/indexed`, `/coalesce` and volatile-subset products none at all. A function
+ *  inhabiting them all pays far more, and the fan is not always a win there: the mixpoll dataset
+ *  entry prices one where the `/coalesce` pairing costs the most candidates of any and scores two
+ *  points worse than going unpaired. It fans anyway because a pairing belongs to the LEVER, not to
+ *  one of its admissions. Price a third admission on the corpus AND on a real function. */
 const LIVEBASE_ADMISSIONS: readonly { suffix: string; gates: readonly Gate<BaseKey>[] }[] = [
   { suffix: '/livebase', gates: LIVEBASE_GATES },
   { suffix: '/livebase-block', gates: LIVEBASE_BLOCK_GATES },

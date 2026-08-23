@@ -2327,11 +2327,15 @@ export const SYNTHETIC: SynthSpec[] = [
   //
   //   without  17152 candidate(s) scored, 0 dropped, best …/addr-home/livebase/volatile/
   //            coalesce-v20-v17/initfirst/raw-globals: 419
-  //   with     19712 candidate(s) scored, 0 dropped, best …/addr-home/livebase-block/volatile/
+  //   with     26880 candidate(s) scored, 0 dropped, best …/addr-home/livebase-block/volatile/
   //            initfirst/raw-globals: 406
   //
-  // 419 → 406 for 2560 more candidates, attributed twice over: the second log's best candidate
-  // carrying no `-block` label reads 419 exactly, which is what the first log's winner scores.
+  // 419 → 406, attributed twice over: the with-gate log's best candidate carrying no `-block` label
+  // reads 419 exactly, which is what the without-gate log's winner scores. The 9728 extra
+  // candidates are what fanning every `/livebase` product over both admissions costs on a function
+  // that inhabits them, and 5120 of them are the `/coalesce` pairing — worth 21 points on
+  // `/livebase` here (440 → 419) and nothing on the narrow admission, whose best paired spelling
+  // reads 408, two behind going unpaired.
   //
   // agbcc only. The claim is about what THIS compiler does with the two spellings, established by
   // compiling both; the poll declines on ido7.1/gcc2.7.2kmc's branch-likely lift link exactly as
