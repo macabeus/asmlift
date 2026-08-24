@@ -11,6 +11,7 @@ import { pascalBackend } from '@asmlift/core/backend/pascal';
 import { T } from '@asmlift/core/ir/types';
 import type { SFn } from '@asmlift/core/l3/ast';
 import { decompile } from '@asmlift/core/pipeline';
+import { enumerateCandidates } from '@asmlift/core/rank';
 import { MIPS_IDO } from '@asmlift/core/target';
 import { compileMipsTarget, scorePascalMips } from '@asmlift/toolchains';
 import { describe, expect, test } from 'vitest';
@@ -78,4 +79,23 @@ test('Pascal backend fails loud on signed remainder (no faithful `mod` spelling)
     body: [{ k: 'return', value: { k: 'bin', op: '%', l: { k: 'var', name: 'a0' }, r: { k: 'const', value: 3 } } }],
   };
   expect(() => pascalBackend.emit(smod)).toThrow(/no faithful IDO Pascal spelling/);
+});
+
+// A COMPARISON, through the RANKED enumeration rather than `decompile`. `structure()` is
+// language-neutral, and the signedness pin it puts on an `icmp_s*` operand that renders unsigned
+// is a `cast` node — which this backend refuses. So the fan asks it to spell a tree it cannot, on
+// a function whose other candidates it spells fine: the refusal must cost those candidates and
+// nothing else. None of the cases above has a comparison, so nothing here covered it.
+//
+// Scored no further than the enumeration: this printer's `if`/`else` still puts a `;` before the
+// `else`, which `upas` rejects — a separate gap, and one the recompile fails LOUD on.
+test('a comparison enumerates for Pascal: the unspellable candidates drop, the row survives', () => {
+  const c = 'int lt(int a, int b){ if (a < b) { return 1; } return 0; }';
+  const { asm } = compileMipsTarget(c, 'lt');
+  const candidates = enumerateCandidates('lt', asm, MIPS_IDO, { backend: pascalBackend });
+  expect(candidates.length).toBeGreaterThan(0);
+  // the pin fires only where a param is declared unsigned, so the surviving spellings are signed —
+  // and `Integer` is what makes the emitted `<` the signed compare the `slt` names
+  expect(candidates.every((k) => !k.label.startsWith('unsigned'))).toBe(true);
+  expect(candidates.every((k) => k.source.includes('a0: Integer'))).toBe(true);
 });

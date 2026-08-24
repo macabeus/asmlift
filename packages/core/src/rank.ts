@@ -431,6 +431,9 @@ export function enumerateCandidates(
   opts: EnumerateOptions = {},
 ): Candidate[] {
   const backend = opts.backend ?? cBackend;
+  /** The last refusal from a backend asked to spell a tree — what the empty-enumeration check
+   *  below reports, so "this backend can spell nothing here" names its reason. */
+  let lastEmitError: unknown = null;
   // Same merge as `decompile`: the project's DWARF signatures fill in what the caller did not
   // state, so both the annotate pass and the ranked candidates reason about one prototype table.
   const prototypes = prototypesFromSymbols(opts.symbols, opts.prototypes ?? {});
@@ -579,7 +582,20 @@ export function enumerateCandidates(
     // when a loop re-spells, BOTH representations are emitted and the differ referees. The
     // re-spelling passes the same boundary contracts as the primary; one that fails them is
     // dropped here — never scored, never able to win.
-    const spellings: Spelling[] = [{ suffix: '', source: backend.emit(sfn), ...refsOf(sfn), ...volOf(sfn) }];
+    const spellings: Spelling[] = [];
+    // The PRIMARY spelling takes the same posture as every re-spelling below: a backend that
+    // declines by throwing costs this tree's candidate, never the row. Structuring is
+    // language-neutral (the signedness pins it inserts are `cast` nodes, which the Pascal
+    // backend loud-declines), so one unspellable tree out of the fan is a candidate the differ
+    // never sees, not a function asmlift cannot decompile. Refusing EVERY tree is still loud —
+    // the empty-enumeration check at the end of enumerateCandidates raises the last refusal.
+    try {
+      spellings.push({ suffix: '', source: backend.emit(sfn), ...refsOf(sfn), ...volOf(sfn) });
+    } catch (e) {
+      lastEmitError = e;
+      opts.onLeverError?.(name, e instanceof Error ? e.message.split('\n')[0] : String(e));
+      return spellings;
+    }
     // Representation re-spellings — each a lever on the same footing as signedness/branch sense,
     // each guarded: it must pass the same boundary contracts as the primary AND emit (a backend
     // that declines by throwing — Pascal loud-fails unspellable shapes — drops the candidate,
@@ -1047,6 +1063,12 @@ export function enumerateCandidates(
         }
       }
     }
+  }
+  // Every tree the fan produced was refused by the backend. Each refusal on its own is a dropped
+  // candidate; all of them together is the row, and it stays LOUD — the alternative is a caller
+  // ranking an empty list and reporting no match for a function nothing ever tried to spell.
+  if (out.length === 0) {
+    throw new Error(`no spellable candidate for '${name}': ${firstLine(lastEmitError)}`, { cause: lastEmitError });
   }
   return out;
 }
