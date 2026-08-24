@@ -567,6 +567,15 @@ export function enumerateCandidates(
     : [{ suffix: '' }];
   for (const [svIndex, sv] of symbolVariants.entries()) {
     const svOpts = sv.symbols ? baseOpts : { ...baseOpts, symbols: undefined };
+    // `/no-bitfield` names a spelling the MAP makes available, so it has no inhabitant on the
+    // variant that structures without one: `spellBitfieldMembers` is read in exactly one place
+    // (structure.ts), inside `if (symCtx && littleEndian && spellBitfieldMembers)`, and `symCtx` is
+    // undefined precisely when `symbols` is. Both arms would structure the identical tree, so this
+    // declines to build the second one rather than leaving the skip above to collapse it.
+    // Declining is not pruning — same posture as the signedness decline below, and the same
+    // candidate list. bitfield-members.test.ts pins the premise the decline rests on, which is a
+    // claim about that one reader and would stop holding if a second one appeared outside it.
+    const svCands = sv.symbols ? axisCands : axisCands.filter((s) => s.bitfields);
     // The signedness axis DECLINES where the pin has nothing to pin. `pinScalarParams` writes only
     // over an entry param still `unknown`/`int` that is not one of the recovered pointers/
     // aggregates `ptrIdx` excludes; where no param is left, the second pass re-lifts, re-raises,
@@ -630,7 +639,7 @@ export function enumerateCandidates(
         }
         // the per-variant axis gates, on THIS variant's lifted fn — see the table doc
         const variantOff = STRUCTURING_AXES.filter((ax) => ax.variantGate !== undefined && !ax.variantGate(fn));
-        const variantCands = axisCands.filter((s) => variantOff.every((ax) => !s[ax.flag]));
+        const variantCands = svCands.filter((s) => variantOff.every((ax) => !s[ax.flag]));
         // `/merge-names` combinations whose un-merged sibling was DROPPED. `structure()` already
         // refuses to let the axis unlock a function the primary declines, but it can only see its own
         // refusals — a boundary contract fails out here, in `structureChecked`. Without this a
