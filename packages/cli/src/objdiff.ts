@@ -141,9 +141,11 @@ export function scoreObjects(targetObj: string, candidateObj: string, symbol: st
         row >= disp.rowCount
           ? 'none'
           : (objdiff.display.displayInstructionRow(od, s.id, row, CONFIG).diffKind ?? 'none');
+      // The candidate's row is only consulted where the target's is 'none'; anywhere else the row
+      // is already counted as a difference and displaying it renders text nothing reads. A MATCH
+      // still displays every row on both sides — reaching one means every row took this branch.
       const lk = kindOf(left, lSym, lDisp);
-      const rk = kindOf(right, rSym, rDisp);
-      const kind = lk !== 'none' ? lk : rk;
+      const kind = lk !== 'none' ? lk : kindOf(right, rSym, rDisp);
       if (kind === 'none') {
         matching++;
         continue;
