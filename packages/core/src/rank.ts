@@ -40,6 +40,7 @@ import { hoistScopedBases } from './l3/scopebase';
 import { type SymbolRef, collectSymbolRefs } from './l3/symbol-refs';
 import { deviceVolatileClaims, volatilePtrLocals, volatileSubsetCandidates } from './l3/volatileptr';
 import { volatileValueLocals } from './l3/volatileval';
+import { zeroSubNegates } from './l3/zerosub';
 import { RewritePattern } from './pattern/engine';
 import { applyIdiomPatterns, raiseRecovered, structureChecked } from './pipeline';
 import { type Prototypes, prototypesFromSymbols } from './proto';
@@ -668,6 +669,13 @@ export function enumerateCandidates(
       }
     }
     respell('/argbase', () => materializeArgBases(sfn));
+    // `/zerosub` — spell a negate of a SHARED subtraction as `0 - x` (l3/zerosub.ts). gcc 2.9
+    // folds `-(a - b)` into `(b - a)` before CSE but leaves `0 - (a - b)` as a negate of the
+    // subtraction itself, so over a value the function also uses elsewhere the two spellings are
+    // a computation and a register apart — and both are reachable from a real source. The differ
+    // referees; its gate keeps it off every shape where the fold rule does not apply, which is
+    // every operand but a shared subtraction.
+    respell('/zerosub', () => zeroSubNegates(sfn));
     // `/volatile` — declare a pointer local holding a NUMERIC address as pointing to volatile
     // data (l3/volatileptr.ts). A raw constant has no declaration anywhere, so the original
     // qualifier is not derivable — and it is codegen-visible (a volatile MEM is barred from
