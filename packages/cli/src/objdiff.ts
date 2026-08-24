@@ -141,11 +141,16 @@ export function scoreObjects(targetObj: string, candidateObj: string, symbol: st
         row >= disp.rowCount
           ? 'none'
           : (objdiff.display.displayInstructionRow(od, s.id, row, CONFIG).diffKind ?? 'none');
-      // The candidate's row is only consulted where the target's is 'none'; anywhere else the row
-      // is already counted as a difference and displaying it renders text nothing reads. A MATCH
-      // still displays every row on both sides — reaching one means every row took this branch.
+      // BOTH sides are displayed on every row, and only one of the two answers is read. That is
+      // deliberate and it is the fail-closed contract, not an oversight: displaying a row is how
+      // this wrapper learns the engine can decode it, so skipping the candidate's row wherever the
+      // target's already differs would turn an engine REFUSAL of the candidate into a plausible
+      // score — a candidate objdiff cannot disassemble would enter the ranking instead of being
+      // dropped, and `[ranked] 0 dropped` would still print. Measured at ~0.9 ms per scoring call
+      // on klonoa's `gfx.o`; that is the price of the guarantee.
       const lk = kindOf(left, lSym, lDisp);
-      const kind = lk !== 'none' ? lk : kindOf(right, rSym, rDisp);
+      const rk = kindOf(right, rSym, rDisp);
+      const kind = lk !== 'none' ? lk : rk;
       if (kind === 'none') {
         matching++;
         continue;
