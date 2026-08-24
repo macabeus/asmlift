@@ -2,8 +2,8 @@
 // PREPROCESSED C and its lexer cannot skip a comment — so `cpp` runs ahead of it, and on this
 // machine that one step is four processes (`sh`, the `cpp` shim, the gcc driver, `cc1 -E`) and
 // most of a candidate compile. `needsPreprocessing` is what lets a candidate spelling skip it,
-// and the whole safety of that rests on ONE claim, which the second test here is: where the
-// predicate says no, `cpp -P -nostdinc` returns the bytes it was given.
+// and the whole safety of that rests on ONE claim: where the predicate says no, `cpp -P
+// -nostdinc` returns the bytes it was given.
 import { C_TYPEDEFS } from '@asmlift/core/target';
 import { compileCandAgbcc, needsPreprocessing } from '@asmlift/toolchains';
 import { spawnSync } from 'node:child_process';
@@ -63,7 +63,7 @@ describe('the preprocessor runs where there is something to preprocess', () => {
     }
   });
 
-  // The annotate-mode stub (`onGap: "annotate"`) is ALL comment, and agbcc alone answers it with
+  // The annotate-mode stub (`onGap: "annotate"`) is ALL comment, and agbcc answers a `/*` with
   // `syntax error before '/'` — so that source must still reach the preprocessor.
   test('an all-comment annotate stub still compiles', () => {
     const stub = '/* asmlift could not decompile ‘f’ — lift: no reaching compare */\n';
