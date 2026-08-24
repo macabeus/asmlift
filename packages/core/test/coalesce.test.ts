@@ -186,6 +186,25 @@ describe('arm-disjoint admission', () => {
     expect(refusals.get('arm-init')).toBeGreaterThan(0); // the gate is reached, not decorative
   });
 
+  test('the first-mention verdict is per NAME, not per arm', () => {
+    // Two locals confined to the SAME arm, differing only in whether their first mention is a
+    // const write: the answer for one is not the answer for the other. `firstMention` is memoised
+    // on (arm, name) and this is the pair that tells a memo keyed on the arm alone from a correct
+    // one — it would admit three merges the `arm-init` gate refuses.
+    const computed = (n: string): Stmt => ({
+      k: 'assign',
+      name: n,
+      value: { k: 'bin', op: '+', l: { k: 'var', name: n }, r: { k: 'const', value: 1 } },
+    });
+    const half = (init: string, comp: string): Stmt[] => [asg(init, 1), use(init), computed(comp), use(comp)];
+    const { candidates, refusals } = armDisjointUnder(
+      ARM_DISJOINT_GATES,
+      fn([armIf(cnd, half('x1', 'x2'), half('y1', 'y2'))], L('x1', 'x2', 'y1', 'y2')),
+    );
+    expect(candidates.map((c) => c.merged)).toEqual(['y1-x1']);
+    expect(refusals.get('arm-init')).toBe(3); // (x1,y2), (x2,y1), (x2,y2)
+  });
+
   test('params never merge through the arm path either', () => {
     const f = fn([armIf(cnd, arm('x'), arm('y'))], L('x'));
     f.params = [{ name: 'y', type: T.s(32) }];
