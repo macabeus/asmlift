@@ -37,15 +37,21 @@ describe('the signedness axis declines where the pin writes nothing', () => {
     const { backend, emitted } = recordingBackend();
     const cands = enumerateCandidates('f', wrap(PTR_ONLY), ARMV4T_AGBCC, { backend });
     // The whole enumeration collapses onto one spelling, so the print count IS the work: eight
-    // axis points, printed once each — never the second pass's eight identical strings.
+    // axis points all reaching ONE structured tree, spelled once — never eight identical strings,
+    // and never the declined second pass's eight more.
     expect(cands.length).toBe(1);
     expect(new Set(emitted).size).toBe(1);
-    expect(emitted.length).toBe(8);
+    expect(emitted.length).toBe(1);
   });
 
   test('…and a scalar entry param keeps both passes', () => {
-    const cands = enumerateCandidates('f', wrap('\tasr\tr0, r0, #2\n'), ARMV4T_AGBCC, {});
+    // The counterpart, and what keeps the count above about the PIN rather than only about the
+    // tree skip: here the pin writes, the two passes reach two different trees, and both are
+    // spelled. A pin that wrote nothing would collapse this to one tree and one label.
+    const { backend, emitted } = recordingBackend();
+    const cands = enumerateCandidates('f', wrap('\tasr\tr0, r0, #2\n'), ARMV4T_AGBCC, { backend });
     expect(cands.map((c) => c.label)).toEqual(['unsigned', 'signed']);
+    expect(emitted.length).toBe(2);
   });
 
   // The per-variant decline, the shape addr-home.test.ts pins for its own gate: the `/raw-globals`

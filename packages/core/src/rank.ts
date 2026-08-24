@@ -523,6 +523,8 @@ export function enumerateCandidates(
   }
 
   const seen = new Set<string>();
+  // The structured trees already spelled — the skip below, at the point it is taken.
+  const seenTrees = new Set<string>();
   const out: Candidate[] = [];
   // The map-derived VALUE references one emitted tree contains, applied at every point a candidate
   // is finalized and derived from the tree that candidate emitted. No pipeline stage carries refs
@@ -671,6 +673,25 @@ export function enumerateCandidates(
             opts.onLeverError?.(name + lv.suffix + s.suffix, e instanceof Error ? e.message.split('\n')[0] : String(e));
             continue;
           }
+          // A TREE another axis point already spelled. Every re-spelling below is a pure function
+          // of `sfn` and this call's own constants, so a repeated tree can only re-emit sources
+          // `seen` already holds — the candidate list, its order and its labels are exactly the
+          // ones the whole fan produces, reached without re-deriving forty passes. An axis is
+          // INERT on most functions (nothing to re-read, no bitfield member, no joined if), and an
+          // inert axis is a factor of two in the cross that changes nothing: on
+          // kleod:LoadBGTilemapData with the project map, 1152 of 1536 axis points (75%) re-derive
+          // a tree an earlier one already emitted.
+          //
+          // Keyed on the JSON text, in a Set of STRINGS — a value comparison, so it can never
+          // merge two trees the way a hash could. Its one direction of error is a MISS (a
+          // differing key order re-runs a fan whose spellings then dedup as they do today), and
+          // the property that rules the other direction out — that the text determines the tree —
+          // is pinned by rank-tree-key.test.ts rather than assumed.
+          const treeKey = JSON.stringify(sfn);
+          if (seenTrees.has(treeKey)) {
+            continue;
+          }
+          seenTrees.add(treeKey);
           // The walk→index re-spelling (l3/reindex.ts) is a THIRD lever on the same footing as
           // signedness and branch sense: whether the source spelled `*p; p++` or `arr[i]` is
           // genuinely ambiguous from asm (compilers strength-reduce the latter into the former), so
