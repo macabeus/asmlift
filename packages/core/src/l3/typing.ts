@@ -140,13 +140,16 @@ export function arithConversionSignedness(l: Expr, r: Expr, varType: VarTypes): 
  * from the left operand's type, so a logical shift rendered over a signed expression recompiles to
  * `asr` where the target has `lsr` and evaluates to a different value.
  *
- * `undefined` means the model did not reach, never "possibly unsigned", and each consumer reads it
- * against its own operator's C default. Where that default is the WRONG one — a shift, an unsigned
- * divide — anything short of a proof takes a cast, because a redundant cast is codegen-identical
- * while a missing one is a miscompile. Where the default already AGREES — a signed divide, a signed
- * compare — only a definite `false` calls for one, and that is sound because nothing asmlift emits
- * declares an unsigned-returning callee: prototypes carry arity and `returnsVoid` only, and the
- * symbol map shapes data.
+ * `undefined` means the model did not reach, never "possibly signed": what a `call` renders as is
+ * decided by the prototype in scope, and the prototypes in scope are the PROJECT's — the scoring
+ * context prepends its headers, and those do declare unsigned-returning callees. So every consumer
+ * whose operator needs a definite signedness takes a cast on `undefined` exactly as on the wrong
+ * definite answer. A redundant cast is codegen-identical (`(s32)f() / a` and `f() / a` assemble
+ * instruction-for-instruction the same where `f` really returns `int`); a missing one is a
+ * miscompile — with `u32 f(void);` in scope `f() / a` calls `__udivsi3` where the machine called
+ * `__divsi3`, and `if (f() >= 0)` compiles to `bl f; mov r0, #0`, comparison and both arms gone.
+ * The one consumer that reads `undefined` the other way is the /uns-cmp axis's own gate, which is
+ * asking whether an operand is ALREADY unsigned.
  *
  * Anything narrower than 32 bits promotes to `int` and is therefore SIGNED, whatever it was
  * declared. Pointers, calls and markers are `undefined`.
@@ -162,12 +165,14 @@ export function renderedIntSignedness(e: Expr, varType: VarTypes): boolean | und
     case 'index':
     case 'field':
       return promoted(exprCType(e, varType));
-    // A decimal literal is `int` when it fits in one; C89 gives a larger one an unsigned type,
-    // which is not the same operand — so it is left undetermined rather than assumed. INT_MIN is
-    // in that larger class despite fitting: the backend prints it as `-2147483648`, which C lexes
-    // as unary minus applied to `2147483648` — a constant too big for `int`, hence unsigned long.
+    // A decimal literal is `int` when it fits in one, and C89 gives a larger one an UNSIGNED type
+    // — agbcc says so itself ("decimal constant is so large that it is unsigned"). INT_MIN is in
+    // that class despite fitting: the backend prints it as `-2147483648`, which C lexes as unary
+    // minus applied to `2147483648`. Definite, not undetermined, and it drags the whole
+    // expression with it: `a / -2147483648` compiles to `lsr r0, r0, #0x1f` — an unsigned divide
+    // folded to a shift — where `a / (s32)-2147483648` calls `__divsi3`.
     case 'const':
-      return e.value > -2147483648 && e.value <= 2147483647 ? true : undefined;
+      return e.value > -2147483648 && e.value <= 2147483647;
     // `-x` / `~x` carry the PROMOTED type of the operand; `!x` is `int`.
     case 'un':
       return e.op === '!' ? true : rec(e.e);

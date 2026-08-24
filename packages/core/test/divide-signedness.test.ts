@@ -12,7 +12,9 @@ import { expect, test } from 'vitest';
 import { cBackend } from '../src/backend/c';
 import { pascalBackend } from '../src/backend/pascal';
 import { parse } from '../src/ir/parse';
+import { T } from '../src/ir/types';
 import { verify } from '../src/ir/verify';
+import type { Expr, SFn } from '../src/l3/ast';
 import { recoverTypes } from '../src/raise/recover';
 import { structure } from '../src/structure/structure';
 
@@ -137,4 +139,51 @@ test('the Pascal backend declines an unsigned divide', () => {
   verify(fn);
   recoverTypes(fn);
   expect(() => pascalBackend.emit(structure(fn, {}))).toThrow(/unsigned divide|operator|spelling/i);
+});
+
+// The same rule over an operand the model cannot determine. With `u32 getv(void);` in scope agbcc
+// compiles `getv() / a0` to `bl __udivsi3` and `(s32)getv() / a0` to `bl __divsi3`; a redundant
+// cast where the callee really returns `int` is instruction-for-instruction identical.
+const SDIV_CALL = `fn sdivcall {
+^bb0(%0: s32):
+  %1: s32 = call {target="getv"}
+  %2: s32 = sdiv %1, %0
+  ret %2
+}
+`;
+
+test('a signed divide over a call takes the (s32) cast', () => {
+  expect(emit(SDIV_CALL)).toContain('(s32)getv() / a0');
+});
+
+// A decimal constant too big for `int` is unsigned in C89, so it makes the division unsigned:
+// `a0 / -2147483648` compiles to `lsr r0, r0, #0x1f` where `a0 / (s32)-2147483648` calls
+// `__divsi3`.
+const SDIV_INTMIN = `fn sdivintmin {
+^bb0(%0: s32):
+  %1: s32 = const {value=-2147483648}
+  %2: s32 = sdiv %0, %1
+  ret %2
+}
+`;
+
+test('a signed divide by a constant too big for `int` casts the constant', () => {
+  expect(emit(SDIV_INTMIN)).toContain('/ (s32)-2147483648');
+});
+
+// THE QUALIFIER SURVIVES THE PIN. `recast` REPLACES a 32-bit integer cast rather than wrapping it,
+// so a `volatile` one has to be rebuilt with its qualifier — dropping it is a silent change of what
+// the access means, and the differ cannot referee it (l3/initfirst.ts's `stripWideIntCast` refuses
+// the same peel one pass over). No pass mints a volatile INT cast today; the rule is checked here
+// rather than left to whichever one first does.
+test('a volatile cast keeps its qualifier when the pin re-types it', () => {
+  const volCast: Expr = { k: 'cast', to: T.u(32), volatile: true, e: { k: 'var', name: 'a0' } };
+  const sfn: SFn = {
+    name: 'volpin',
+    params: [{ name: 'a0', type: T.s(32) }],
+    locals: [],
+    retType: T.s(32),
+    body: [{ k: 'return', value: { k: 'bin', op: '/', l: volCast, r: { k: 'const', value: 3 } } }],
+  };
+  expect(cBackend.emit(sfn)).toContain('(volatile s32)a0 / 3');
 });

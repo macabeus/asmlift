@@ -39,7 +39,7 @@
 // outside the rewritten `if` at all. Declines (null) when nothing changes.
 import type { Expr, SFn, Stmt } from './ast';
 import { NEGATE_REL, exprChildren, exprEquals, stmtChildren, stmtExprs } from './ast';
-import { declaredTypes, provablyNonNegative, renderedIntSignedness } from './typing';
+import { arithConversionSignedness, declaredTypes, provablyNonNegative } from './typing';
 
 const readsVar = (e: Expr, name: string): boolean =>
   ((e.k === 'var' || e.k === 'addr') && e.name === name) || exprChildren(e).some((c) => readsVar(c, name));
@@ -133,14 +133,9 @@ export function initFirstGuards(sfn: SFn): SFn | null {
     if (provablyNonNegative(l, env) && provablyNonNegative(r, env)) {
       return true;
     }
-    const sign = (a: Expr, b: Expr): boolean | undefined => {
-      const sa = renderedIntSignedness(a, env);
-      const sb = renderedIntSignedness(b, env);
-      return sa === false || sb === false ? false : sa === true && sb === true ? true : undefined;
-    };
-    const before = sign(l, r);
+    const before = arithConversionSignedness(l, r, env);
     const vv: Expr = { k: 'var', name: v };
-    const after = side === 'l' ? sign(vv, r) : sign(l, vv);
+    const after = side === 'l' ? arithConversionSignedness(vv, r, env) : arithConversionSignedness(l, vv, env);
     return before !== undefined && before === after;
   };
 

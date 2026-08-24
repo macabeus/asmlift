@@ -2017,18 +2017,28 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
           l = { k: 'cast', to: T.u(32), e: l };
         }
       }
-      // The SIGNED direction of the same hole, and a DEFAULT rather than an arm of that axis:
-      // nothing underdetermines here. An icmp_s* operand that renders unsigned makes C compare
-      // unsigned (unsigned wins the usual arithmetic conversions), which is the compare the
-      // machine did not do; against a constant the test folds away entirely and takes the
-      // surrounding computation with it — agbcc compiles `(u32)a / b < 0` to `mov r0, #0`,
-      // deleting the `__udivsi3` call. The opcode names the compare and C's own default over two
-      // `int`s already agrees with it, so only a definite `false` calls for a cast (see
-      // renderedIntSignedness on reading `undefined` against an operator's own default). A
-      // pointer side needs no guard: it never renders a definite signedness.
+      // The SIGNED direction of the same hole, and a DEFAULT rather than an arm of that axis —
+      // not because nothing underdetermines, but because the underdetermination is INERT. An
+      // unsigned source compare can reach a signed opcode when the compiler proves the test is
+      // the sign bit (`u32 a; a < 0x80000000` compiles to `cmp r0, #0; bge`; kmc-gcc and gcc
+      // 2.7.2 fold it to `slti`), so an icmp_s* has more than one source — but the pinned
+      // spelling reproduces that branch too (`(s32)a >= 0` is the same `cmp r0, #0; bge`), so
+      // both sources reach ONE candidate and an axis would have doubled the fan to referee a
+      // question with one answer. Where the spellings genuinely diverge they diverge the way the
+      // opcode says, on every toolchain: an operand that renders unsigned makes C compare
+      // unsigned (agbcc `bls`, IDO/kmc-gcc/gcc 2.7.2 `sltu`/`sltiu` against `slt`/`slti`, mwcc
+      // `neg;or` against `neg;andc` in its branchless form), and against a constant the test
+      // folds away entirely and takes the surrounding computation with it — `(u32)a / b < 0`
+      // becomes `mov r0, #0`, deleting the `__udivsi3` call.
+      //
+      // `undefined` takes the cast exactly as a definite `false` does (see
+      // renderedIntSignedness): a call's signedness is the project header's, not this function's.
+      // A POINTER-rendered side is the one operand left alone, and not out of caution — `p < q`
+      // is already the unsigned compare C gives two addresses, where `(s32)p < (s32)q` would
+      // compare them signed.
       if (/^icmp_s/.test(d.opcode)) {
         const pinSigned = (x: Expr): Expr =>
-          renderedIntSignedness(x, vtEnv) === false ? { k: 'cast', to: T.s(32), e: x } : x;
+          renderedIntSignedness(x, vtEnv) === true || ptrSide(x) ? x : { k: 'cast', to: T.s(32), e: x };
         l = pinSigned(l);
         r = pinSigned(r);
       }

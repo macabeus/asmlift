@@ -275,3 +275,45 @@ const SIGNEDOK = `fn signedok {
 test('a signed compare over signed-rendering operands keeps its spelling', () => {
   expect(emit(SIGNEDOK, false)).not.toContain('(s32)');
 });
+
+// An operand whose rendering the model CANNOT determine takes the cast just the same. A callee's
+// return type is the project header's, not this function's — and with `u32 getv(void);` in scope
+// agbcc compiles `if (getv() >= 0)` to `bl getv; mov r0, #0x0`, deleting the comparison and both
+// arms, where `if ((s32)getv() >= 0)` keeps `cmp r0, #0; bge`.
+const SIGNEDCMP_CALL = `fn signedcmpcall {
+^bb0(%0: s32):
+  %1: s32 = call {target="getv"}
+  %2: s32 = const {value=0}
+  %3: u32 = icmp_slt %1, %2
+  cond_br %3, ^bb1(), ^bb2()
+^bb1():
+  ret %0
+^bb2():
+  %4: s32 = const {value=0}
+  ret %4
+}
+`;
+
+test('a signed compare over a call takes the (s32) cast', () => {
+  expect(emit(SIGNEDCMP_CALL, false)).toMatch(/\(s32\)getv\(\) [<>]=? 0/);
+});
+
+// A constant too big for `int` renders UNSIGNED in C89 and drags the compare with it: over `int a`,
+// `a <= -2147483648` compiles to `bls` where `a <= (s32)-2147483648` compiles to `ble`.
+const SIGNEDCMP_INTMIN = `fn signedcmpintmin {
+^bb0(%0: s32):
+  %1: s32 = const {value=-2147483648}
+  %2: u32 = icmp_sle %0, %1
+  cond_br %2, ^bb1(), ^bb2()
+^bb1():
+  %3: s32 = const {value=1}
+  ret %3
+^bb2():
+  %4: s32 = const {value=0}
+  ret %4
+}
+`;
+
+test('a signed compare against a constant too big for `int` casts the constant', () => {
+  expect(emit(SIGNEDCMP_INTMIN, false)).toContain('(s32)-2147483648');
+});

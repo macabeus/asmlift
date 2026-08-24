@@ -157,38 +157,38 @@ function printExpr(e: Expr, parentPrec: number, vt: PrintEnv, leaf?: LeafHook): 
   //
   // An existing 32-bit integer cast is REPLACED rather than wrapped — `(u32)(s32)&g` and `(u32)&g`
   // are the same bytes, and the arithmetic rules upstream do emit that inner cast (intifyAddr).
-  const recast = (x: Expr, signed: boolean): Expr => ({
-    k: 'cast',
-    to: T.int(32, signed),
-    e: x.k === 'cast' && x.to.kind === 'int' && x.to.width === 32 ? x.e : x,
-  });
+  // The replacement CARRIES the qualifier: re-typing a `volatile` cast without it drops an
+  // assertion the differ cannot referee the loss of, which is why l3/initfirst.ts's
+  // `stripWideIntCast` refuses the same peel one pass over.
+  const recast = (x: Expr, signed: boolean): Expr => {
+    const replaced = x.k === 'cast' && x.to.kind === 'int' && x.to.width === 32 ? x : undefined;
+    return {
+      k: 'cast',
+      to: T.int(32, signed),
+      ...(replaced?.volatile === true ? { volatile: true as const } : {}),
+      e: replaced ? replaced.e : x,
+    };
+  };
   // The two operators read their operands differently, so the pin does too. A SHIFT takes the type
   // of its left operand alone, and the cast goes on unless that operand PROVABLY renders as the op
   // needs — `undefined` is renderedIntSignedness's model not reaching, and a redundant cast is
   // codegen-identical while a missing one is a miscompile.
   //
   // A DIVIDE takes the usual arithmetic conversions over BOTH operands, where unsigned wins at
-  // equal rank, so the question is what the pair renders as and the two directions need different
-  // amounts of work. Unsigned: C's default over two `int`s is the wrong one, so anything short of
-  // a proof takes a cast — and one cast carries the whole operation. Signed: C's default already
-  // agrees with the op, so only a provably-unsigned operand breaks it, and then every such operand
-  // has to go, because one unsigned side is enough to make the division unsigned. Verified by
-  // compiling: `((u32)a / b) / 7` calls `__udivsi3` twice, `(s32)((u32)a / b) / 7` calls
-  // `__udivsi3` then `__divsi3`.
+  // equal rank, so the question is what the PAIR renders as. Once the pair renders wrong the two
+  // directions cost differently: unsigned takes ONE cast, which carries the whole operation, while
+  // signed has to pin EVERY operand short of a proof, because one unsigned side is enough to make
+  // the division unsigned. Verified by compiling: `((u32)a / b) / 7` calls `__udivsi3` twice,
+  // `(s32)((u32)a / b) / 7` calls `__udivsi3` then `__divsi3`.
   const pinnedOperands = (e0: Extract<Expr, { k: 'bin' }>, wantSigned: boolean): [Expr, Expr] => {
     if (e0.op === '>>' || e0.op === '>>>') {
       return [renderedIntSignedness(e0.l, vt.type) === wantSigned ? e0.l : recast(e0.l, wantSigned), e0.r];
     }
-    const bare = arithConversionSignedness(e0.l, e0.r, vt.type);
-    if (bare === wantSigned) {
+    if (arithConversionSignedness(e0.l, e0.r, vt.type) === wantSigned) {
       return [e0.l, e0.r];
     }
-    return wantSigned
-      ? [
-          renderedIntSignedness(e0.l, vt.type) === false ? recast(e0.l, true) : e0.l,
-          renderedIntSignedness(e0.r, vt.type) === false ? recast(e0.r, true) : e0.r,
-        ]
-      : [recast(e0.l, false), e0.r];
+    const pinSigned = (x: Expr): Expr => (renderedIntSignedness(x, vt.type) === true ? x : recast(x, true));
+    return wantSigned ? [pinSigned(e0.l), pinSigned(e0.r)] : [recast(e0.l, false), e0.r];
   };
   switch (e.k) {
     case 'var':
