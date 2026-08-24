@@ -134,9 +134,10 @@ test('releaseTarget drops the memo and the next score re-parses', () => {
 });
 
 // THE SCORE MEMO (src/objdiff.ts `candidateKey`). A score already computed against the retained
-// target is handed back rather than recomputed, so these pin what a hit is allowed to mean. Each
-// fails against a plausible spelling of the key: on a path-keyed one, on a symbol-less one, and on
-// a memo that outlives the target it was computed against.
+// target is handed back rather than recomputed, so these pin what a hit is allowed to mean: three
+// against a plausible wrong spelling of the key — path-keyed, symbol-less, or outliving the target
+// it was taken against — one against remembering a FAILURE, and one against handing out an object
+// its callers can mutate.
 
 test('a candidate rewritten in place is re-scored, never handed the previous one’s score', () => {
   // Every compile worker rewrites ONE scratch slot's `cand.o` (compile-command.ts), so this is the
