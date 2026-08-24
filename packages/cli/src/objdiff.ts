@@ -83,8 +83,9 @@ const disposeAll = (...xs: unknown[]): void => {
 const CONFIG = new objdiff.diff.DiffConfig();
 
 /** The parsed TARGET, memoized on its own BYTES. Every candidate in a ranked run is scored against
- *  the same target object, and parsing it is the largest single cost in a scoring call — 3.81 ms of
- *  9.19 on klonoa's 102 KB `gfx.o`, against 0.07 ms for the one-function candidate beside it.
+ *  the same target object, and parsing it once rather than once per candidate is what this saves:
+ *  on klonoa's 102 KB `gfx.o` that parse measured 3.81 ms, against 0.07 ms for the one-function
+ *  candidate beside it.
  *
  *  The key is the whole file content, compared byte for byte rather than by path, size or mtime: a
  *  hit then PROVES the parse would produce the same object, so a target rewritten in place between

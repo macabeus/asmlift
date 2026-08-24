@@ -99,8 +99,9 @@ export function decompileRanked(
 
 /** The same ranking with the candidate COMPILES run `jobs` at a time.
  *
- *  A ranked run is ~85% subprocess — one LBG-sized candidate measures ~50 ms to compile against
- *  ~11 ms to score — and `rankBy`'s driver is synchronous, so today tens of thousands of
+ *  A ranked run is mostly subprocess — on LoadBGTilemapData the compiles outweigh the scoring
+ *  about 8:1, and the run's own `[phase]` line (phase.ts) is where a current figure comes from —
+ *  and `rankBy`'s driver is synchronous, so today tens of thousands of
  *  candidates compile one at a time on one core. Here each worker owns a scratch slot
  *  (compile-command.ts `worker()`), takes the next unclaimed candidate, and scores its object the
  *  moment it lands; the score runs on the main thread and overlaps the other workers' subprocesses.

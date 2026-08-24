@@ -58,10 +58,11 @@ near-identical code diffs as ~100% different. Instead:
   word, a pc-relative offset, an immediate or a branch target, indistinguishably. The repo's own
   scorer fixtures render `add r0, #1` against `add r0, #2` as `arg-mismatch` with the SAME register.
   So `argMismatch / score` is not the register-allocation share: on LoadBGTilemapData at 395 it is
-  66.1%, while the rows whose only difference is a register are 41.3% — and 70 of the 261 are
-  provably something else (26 stack-slot offsets, 19 pc-relative pool loads, 13 branch targets, 10
-  pool words, 2 the frame size). A round published the first number as the second one. Decompose the
-  rows, then name the class.
+  66.1%, while the rows whose ONLY difference is a register are 163 — 41.3%. The other 98 move a
+  stack-slot offset, a pc-relative pool offset, a branch target, a bare immediate or the operand
+  shape, and 2 of them are the frame size. Say which convention a count uses: "rows involving a
+  register" is 217 of the same 261, because a row is free to change two things at once. A round
+  published the first number as the second one. Decompose the rows, then name the class.
 - Classify every diff region into a named pattern. Expect a MIX: some regions will be this row's
   capability gaps, some will belong to other, known machinery (dispatch shape of a recovered
   `switch`, signedness of locals, operand order). Separate them explicitly — a finding attributed

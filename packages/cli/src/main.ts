@@ -337,8 +337,9 @@ export async function runCli(
   // gap is a decline, never a scored stub. score.ts (objdiff-wasm) loads only on this path,
   // keeping plain decompiles toolchain-light.
   const scoreAgainst = flags.get('score-against') as string | undefined;
-  // Candidate compiles are ~85% of a ranked run's wall time and independent of one another, so
-  // --jobs runs n of them at once. Ranking is unaffected (rank.ts). Both flags belong to the
+  // Candidate compiles are most of the CPU a ranked run charges, and independent of one another,
+  // so --jobs runs n of them at once; what the split was on a given run is on its own `[phase]`
+  // line (phase.ts). Ranking is unaffected (rank.ts). Both flags belong to the
   // ranked path alone: accepting them elsewhere would silently discard what the user asked for.
   const jobsFlag = flags.get('jobs') as string | undefined;
   if ((jobsFlag !== undefined || flags.has('progress')) && scoreAgainst === undefined) {
