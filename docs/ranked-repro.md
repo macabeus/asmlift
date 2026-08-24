@@ -74,17 +74,18 @@ stopped at the list of dirty paths would have called such a bundle current.
   pastes, not from a rig outside the tree that the next round has to rebuild:
 
   ```
-  asmlift: [phase] wall 443.8s · enumerate 22.4s (1 call) · compile 2256.9s over 6 workers
-    (26880 calls) · score 254.2s (26880 calls) · rank 2.7s (1 call) · main-thread idle+other 164.6s
+  asmlift: [phase] wall 271.0s · enumerate 22.4s (1 call) · compile 1309.9s over 6 workers
+    (26880 calls) · score 166.1s (26880 calls) · rank 2.5s (1 call) · main-thread idle+other 80.0s
   ```
 
   Two denominators, answering different questions. `compile` is summed ACROSS workers, so
-  `compile / wall` is the pool's average parallelism — **5.09 of 6** above, which is what says
+  `compile / wall` is the pool's average parallelism — **4.83 of 6** above, which is what says
   whether more `--jobs` would buy anything. The MAIN THREAD's budget is `enumerate + score + rank`
-  = 279.3s of the 443.8s wall, of which scoring is 91%; the remaining `idle+other` is the main
-  thread waiting on subprocesses. Of the work charged at all (2536.2s), the compiles are **89%**.
-  That run shared its machine with another ranked run, so its wall is the machine's number and only
-  the shares travel.
+  = 191.0s of the 271.0s wall, of which scoring is 87%; the remaining `idle+other` is the main
+  thread waiting on subprocesses. Of the work charged at all (1500.9s), the compiles are **87%**.
+  Both figures move with the machine — the same command an hour earlier, sharing the box with
+  another ranked run, read `wall 443.8s · compile 2256.9s · score 254.2s` for the same 26880
+  candidates and the same score. Only the shares travel; re-time on your own log.
 
 - **`--proto`'s absence is now in the log.** Every run ends with an `asmlift: [proto]` line
   naming the callees whose arity it had to guess (nothing declared them: no `--proto` entry, no
