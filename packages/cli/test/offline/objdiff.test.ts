@@ -11,6 +11,8 @@
 //     const { copyFileSync } = await import("node:fs");
 //     copyFileSync(assembleTarget(compileTargetAsm("int add_one(int x) { return x + 1; }\n")), "test/offline/fixtures/objdiff/target.o");
 //     copyFileSync(assembleTarget(compileTargetAsm("int add_one(int x) { return x + 2; }\n")), "test/offline/fixtures/objdiff/candidate-diff.o");'
+import { copyFileSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from 'vitest';
 
@@ -48,4 +50,50 @@ test('unparseable object THROWS — never reports a score', () => {
 
 test('missing file THROWS', () => {
   expect(() => scoreObjects(TARGET, join(FIX, 'does-not-exist.o'), 'add_one')).toThrow();
+});
+
+// THE TARGET MEMO (src/objdiff.ts `targetObject`). The parse of the target object is reused across
+// calls, keyed on the file's whole content — so these pin what a hit is allowed to mean. Three of
+// them fail against the memo spelled the obvious wrong way: `rewritten in place` against a
+// path-keyed one, and the two below it against disposing the outgoing entry before the incoming
+// parse succeeds.
+
+test('a target rewritten in place is re-parsed, never scored against stale bytes', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'asmlift-objdiff-'));
+  const moving = join(dir, 'target.o');
+
+  copyFileSync(TARGET, moving);
+  expect(scoreObjects(moving, DIFF, 'add_one').match).toBe(false);
+
+  // same path, different bytes: the candidate is now its own target
+  copyFileSync(DIFF, moving);
+  const s = scoreObjects(moving, DIFF, 'add_one');
+  expect(s.match).toBe(true);
+  expect(s.score).toBe(0);
+});
+
+test('the same bytes under two paths score the same', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'asmlift-objdiff-'));
+  const copy = join(dir, 'copy.o');
+  copyFileSync(TARGET, copy);
+  expect(scoreObjects(copy, DIFF, 'add_one')).toEqual(scoreObjects(TARGET, DIFF, 'add_one'));
+});
+
+test('an unparseable target THROWS and leaves the previous one intact', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'asmlift-objdiff-'));
+  const broken = join(dir, 'broken.o');
+  writeFileSync(broken, 'not an object file');
+
+  const before = scoreObjects(TARGET, DIFF, 'add_one');
+  expect(() => scoreObjects(broken, DIFF, 'add_one')).toThrow();
+  expect(scoreObjects(TARGET, DIFF, 'add_one')).toEqual(before);
+});
+
+test('scoring the same target repeatedly is stable', () => {
+  // the memo hands the SAME engine handle to every diff; nothing may accumulate on it
+  const first = scoreObjects(TARGET, DIFF, 'add_one');
+  for (let i = 0; i < 5; i++) {
+    expect(scoreObjects(TARGET, TARGET, 'add_one').match).toBe(true);
+    expect(scoreObjects(TARGET, DIFF, 'add_one')).toEqual(first);
+  }
 });
