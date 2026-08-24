@@ -144,8 +144,9 @@ const v = (name: string): Expr => ({ k: 'var', name });
 const lit = (value: number): Expr => ({ k: 'const', value });
 const op = (o: BinOp, l: Expr, r: Expr): Expr => ({ k: 'bin', op: o, l, r });
 
-// LoadBGTilemapData's ONLY read of either pinned param, and the same expression in both symbol-map
-// configurations (250 emitted lines with the project's `elf:`, 258 without).
+// The one SHAPE in which LoadBGTilemapData reads either pinned param — twice, at adjacent bytes,
+// and the same in both symbol-map configurations (250 emitted lines with the project's `elf:`, 258
+// without).
 const LBG_READ: Expr = {
   k: 'cast',
   to: T.ptr(T.u(8)),
