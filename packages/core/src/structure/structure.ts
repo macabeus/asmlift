@@ -892,13 +892,14 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // of the same name. `sp<off>` uniquified with underscores until free; one name per offset.
   // `undef` locals are minted in the same pass off the same `taken` set — they need the same
   // protection from the symbol map, gaddr symbols and callee names that `laddr` names do.
+  //
+  // The map is CONSULTED, never copied in: `taken` is only probed and added to, so asking the
+  // name-keyed map answers the same question for every name in it. Copying it is work
+  // proportional to the whole PROJECT's symbol count on every structuring, and a ranked run
+  // structures one function thousands of times.
   const { laddr: laddrName, undef: undefName } = (() => {
     const taken = new Set<string>();
-    if (symbols) {
-      for (const [n] of symbols) {
-        taken.add(n);
-      }
-    }
+    const isTaken = (n: string): boolean => taken.has(n) || symbols?.has(n) === true;
     for (const b of fn.blocks) {
       for (const op of b.ops) {
         if (op.opcode === 'gaddr') {
@@ -912,7 +913,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     }
     const mint = (base: string): string => {
       let n = base;
-      while (taken.has(n)) {
+      while (isTaken(n)) {
         n += '_';
       }
       taken.add(n);
@@ -992,9 +993,12 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // Declaration-shape OVERRIDE (symbol map): a project-declared array/struct global is an
     // AGGREGATE whatever the usage inference saw — a lone off-0 access to `extern u16 tbl[]`
     // must still spell through the aggregate/array forms, never the bare scalar `tbl`.
+    // Driven from the FUNCTION's own globals, for the same reason the name minter above consults
+    // the map instead of copying it: a name outside `scalarGlobals` has nothing to override.
     if (symbols) {
-      for (const [n, si] of symbols) {
-        if (si.shape === 'array' || si.shape === 'struct') {
+      for (const n of [...scalarGlobals]) {
+        const shape = symbols.get(n)?.shape;
+        if (shape === 'array' || shape === 'struct') {
           scalarGlobals.delete(n);
         }
       }
