@@ -478,8 +478,8 @@ export function stmtChildren(s: Stmt): Stmt[] {
  *  of them rather than a silent miss in each caller's own recursion.
  *
  *  An EXPLICIT stack, not `yield*` recursion. A delegated generator costs a frame per nesting
- *  level on every value it forwards, so a body 10 statements deep charged every expression in it
- *  ten hand-offs; this walk runs on a whole function body once per emitted candidate. The stack
+ *  level on every value it forwards, so an expression ten levels down was handed off ten times; this
+ *  walk runs over a whole function body once per emitted candidate. The stack
  *  holds either a statement list still to expand or an expression still to visit — `Expr` is
  *  never an array, so the two are told apart without a tag — and both are pushed in reverse so
  *  they pop in document order, which is the order the recursion produced. */

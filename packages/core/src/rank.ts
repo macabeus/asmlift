@@ -411,7 +411,9 @@ export interface RankedResult<S> {
 /** Emit the DISTINCT type/branch-sense candidate spellings for `name` — PURE, no scoring.
  *  The ONE difference from `decompile()` is the signedness pin, injected between pre-recovery and
  *  recoverTypes via the `beforeRecover` hook. Duplicate sources are collapsed so the scorer never
- *  recompiles an identical spelling. */
+ *  recompiles an identical spelling, and the fan runs once per distinct STRUCTURED TREE rather
+ *  than once per axis point — an axis inert on this function reaches a tree an earlier point
+ *  already spelled, and every re-spelling is a pure function of that tree. */
 export function enumerateCandidates(
   name: string,
   asm: string,
@@ -523,7 +525,6 @@ export function enumerateCandidates(
   }
 
   const seen = new Set<string>();
-  // The structured trees already spelled — the skip below, at the point it is taken.
   const seenTrees = new Set<string>();
   const out: Candidate[] = [];
   // The map-derived VALUE references one emitted tree contains, applied at every point a candidate
@@ -571,7 +572,7 @@ export function enumerateCandidates(
     // variant that structures without one: `spellBitfieldMembers` is read in exactly one place
     // (structure.ts), inside `if (symCtx && littleEndian && spellBitfieldMembers)`, and `symCtx` is
     // undefined precisely when `symbols` is. Both arms would structure the identical tree, so this
-    // declines to build the second one rather than leaving the skip above to collapse it.
+    // declines to build the second one rather than leaving the tree skip to collapse it.
     // Declining is not pruning — same posture as the signedness decline below, and the same
     // candidate list. bitfield-members.test.ts pins the premise the decline rests on, which is a
     // claim about that one reader and would stop holding if a second one appeared outside it.
