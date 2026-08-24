@@ -62,12 +62,30 @@ stopped at the list of dirty paths would have called such a bundle current.
   path to a file holding the same JSON is accepted too, but a scratch file is one more thing that
   drifts between rounds, and two of them carrying different tables is how the `557/578/547` above
   happened.
-- **`--jobs 6 --progress`.** The candidate compiles are ~85% of a ranked run and pool cleanly.
+- **`--jobs 6 --progress`.** The candidate compiles dominate a ranked run and pool cleanly.
   Two LBG runs launched together measured **36m10s serial against 21m32s at `--jobs 6`** (20608
   candidates, 0 dropped, identical winner) — but that machine was also running two full benches
   and both test suites, and a quieter pair measured **31m55s against 11m16s**. The ratio is the
   machine's, not the code's: re-time on your own log and quote that, never these. The
   `asmlift: [progress]` lines are what make a later claim about the run checkable from its log.
+
+- **`--progress` also prints WHERE the time went**, as one `asmlift: [phase]` line from the run's own
+  clock (`packages/cli/src/phase.ts`) — so a per-phase claim comes from the log everyone already
+  pastes, not from a rig outside the tree that the next round has to rebuild:
+
+  ```
+  asmlift: [phase] wall 443.8s · enumerate 22.4s (1 call) · compile 2256.9s over 6 workers
+    (26880 calls) · score 254.2s (26880 calls) · rank 2.7s (1 call) · main-thread idle+other 164.6s
+  ```
+
+  Two denominators, answering different questions. `compile` is summed ACROSS workers, so
+  `compile / wall` is the pool's average parallelism — **5.09 of 6** above, which is what says
+  whether more `--jobs` would buy anything. The MAIN THREAD's budget is `enumerate + score + rank`
+  = 279.3s of the 443.8s wall, of which scoring is 91%; the remaining `idle+other` is the main
+  thread waiting on subprocesses. Of the work charged at all (2536.2s), the compiles are **89%**.
+  That run shared its machine with another ranked run, so its wall is the machine's number and only
+  the shares travel.
+
 - **`--proto`'s absence is now in the log.** Every run ends with an `asmlift: [proto]` line
   naming the callees whose arity it had to guess (nothing declared them: no `--proto` entry, no
   signature in `tools.asmlift.elf`). On the canonical LBG command that line is absent; without

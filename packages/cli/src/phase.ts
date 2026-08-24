@@ -1,7 +1,7 @@
 // asmlift — the ranked run's phase clock. A ranked run is four phases with wildly different costs
-// — enumerate the candidates, compile each one, score each object, order the results — and until
-// this existed the log said nothing about any of them: `--progress` counts candidates, and every
-// per-phase figure this project has published came from a throwaway rig outside the tree.
+// — enumerate the candidates, compile each one, score each object, order the results — and the
+// `asmlift: [phase]` line is what a run says about each. A per-phase claim then comes from the log
+// everyone already pastes, instead of from a rig outside the tree the next round has to rebuild.
 //
 // The clock is a VALUE the ranked path owns, not a module global: `main.ts` mints one per run and
 // threads it through `rank.ts`. A caller that mints none takes no timing and keeps no state.

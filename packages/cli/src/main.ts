@@ -392,9 +392,8 @@ export async function runCli(
       // Sampled BEFORE the run and again after it — see provenance.ts for the run this exists for.
       const treeBefore = sampleSourceTree();
       const { decompileRanked, decompileRankedParallel } = await import('./rank');
-      // Under `--progress`, the flag that already says "report on this run as it goes", the run
-      // also says what it SPENT (phase.ts). Off by default: the phase line is a measurement, and
-      // a run nobody is watching should write only what it computed.
+      // Under `--progress` — the flag that already says "report on this run as it goes" — the run
+      // also says what it SPENT (phase.ts). A run nobody is watching writes only what it computed.
       const clock = flags.has('progress') ? new PhaseClock() : undefined;
       const rankOpts = {
         backend,
@@ -441,8 +440,8 @@ export async function runCli(
       return {
         code: ranked.best.score.match ? 0 : 1,
         stdout: ranked.best.source,
-        // …and where the run's time went, above the line readers paste, so `[ranked]` and the
-        // `[proto]` tail stay adjacent.
+        // …and where the time went, ABOVE the line readers paste, so `[ranked]` and its `[proto]`
+        // tail stay adjacent.
         stderr: targetTrace + warn + table + drops + (clock?.report() ?? '') + summary + protoNote,
       };
     } catch (e) {

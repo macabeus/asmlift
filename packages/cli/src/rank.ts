@@ -73,9 +73,8 @@ export function decompileRanked(
 ): RankedResult {
   const backend = opts.backend ?? cBackend;
   const candidates = timed(opts.clock, 'enumerate', () => enumerate(name, asm, target, opts));
-  // The compile happens INSIDE scoreSource here, so it is charged from the compiler itself and
-  // the `score` frame around the call reports the rest — the pooled driver below awaits the two
-  // separately and needs no such wrapping.
+  // The compile happens INSIDE scoreSource here, so it is charged from the compiler itself and the
+  // `score` frame around the call keeps the rest. The pooled driver awaits the two separately.
   const compile: SyncCompiler | undefined =
     opts.clock && opts.compile
       ? (source, symbol, backendId, declarations) =>
