@@ -9,8 +9,10 @@ three different commands (PR #79).
 ## The command
 
 ```sh
+cd <repo> && pnpm --filter @asmlift/cli build     # rebuild the loader; see below
+
 cd <project checkout>            # e.g. apps/benchmark/checkouts/klonoa-empire-of-dreams
-npx tsx <repo>/packages/cli/src/main.ts <asm/nonmatchings/…/Fn.s> \
+node <repo>/packages/cli/dist/asmlift.mjs <asm/nonmatchings/…/Fn.s> \
   --config decomp.yaml \
   --score-against <build/…/tu.o> \
   --proto '{"<callee>":{"params":N}}' \
@@ -21,6 +23,26 @@ Run it from the project checkout and redirect stderr to a file — the `[score]`
 lines are stderr, and they are the whole record. From a git worktree, export the harness's
 toolchain overrides first (`ASMLIFT_AGBCC` and the rest): a worktree's repo root is not the
 workspace, so without them the sibling checkouts do not resolve and the run measures nothing.
+
+## The loader is part of the number
+
+Two loaders run the same sources. `npx tsx packages/cli/src/main.ts` reads and transforms every
+file on every run, and its transform wraps every arrow function in esbuild's `--keep-names` shim,
+which the enumerator's per-candidate closures then pay for on every candidate.
+`packages/cli/dist/asmlift.mjs` is those same sources bundled once without it, and it is what the
+command above runs. Both produce the same candidates and the same scores; the `[score]` diff below
+is the check, and it is cheap.
+
+**A bundle is only as fresh as its last build, and `dist/` is gitignored** — nothing rebuilds it for
+you, nothing commits it, and an old one runs exactly as happily as a new one. So rebuild before any
+run you intend to quote, and read the stamp: the build BAKES the tree it was built from into the
+bundle, and the run compares that bake against the checkout it is standing in. A bundle that no
+longer matches says `STALE BUNDLE` on the line you are pasting, instead of naming a commit whose
+code it is not running.
+
+The comparison is on `packages/` CONTENT, not on the commit: docs and the regenerated benchmark
+artifact are committed constantly and change nothing a ranked run computes, so a commit that leaves
+`packages/` alone is not staleness and does not warn.
 
 ## The flags are part of the number
 
@@ -54,14 +76,20 @@ workspace, so without them the sibling checkouts do not resolve and the run meas
   run, a truncated log and a killed run left identical evidence.
 
 - **The tree is part of the number too, and it is on that same line.** `[asmlift source <commit>]`
-  is the asmlift checkout the run loaded its code from; `+dirty` means `packages/` had uncommitted
-  changes, and `CHANGED DURING THE RUN` means the tree moved between the run's start and its end.
-  A reviewer's run of the command above returned **455** against a twice-reproduced **419** with a
-  spotless log — another session had written `packages/core/src/target.ts` inside that read-only
-  worktree at the minute it launched and restored it before it finished, so `git status` was clean
-  on both sides of the run. Rounds run in parallel worktrees other agents write to. If the stamp is
-  not a bare commit, the number is not comparable to anything; re-run it. `unversioned` means the
-  CLI was not run out of an asmlift checkout at all.
+  names the asmlift sources the run actually executed. A reviewer's run of the command above
+  returned **455** against a twice-reproduced **419** with a spotless log — another session had
+  written `packages/core/src/target.ts` inside that read-only worktree at the minute it launched and
+  restored it before it finished, so `git status` was clean on both sides of the run. Rounds run in
+  parallel worktrees other agents write to. **If the stamp is not a bare commit, the number is not
+  comparable to anything; fix what it names and re-run.**
+
+  | stamp                                            | what it says                                                                                                    |
+  | ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
+  | `asmlift source af59b99`                         | the commit whose `packages/` produced this score. Quotable.                                                     |
+  | `asmlift source af59b99+dirty`                   | uncommitted changes under `packages/`; nobody else can reproduce it                                             |
+  | `asmlift source af59b99, CHANGED DURING THE RUN` | the sources moved between the run's start and its end — a tsx run can load a file from either side of that edit |
+  | `asmlift source af59b99, STALE BUNDLE: …`        | the bundle ran `af59b99`'s code, and the checkout no longer holds it. Rebuild, re-run                           |
+  | `asmlift source unversioned`                     | not run out of an asmlift checkout at all (an installed package), so nothing here can name the sources          |
 
 ## Comparing two runs
 
