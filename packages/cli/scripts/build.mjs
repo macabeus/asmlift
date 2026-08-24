@@ -6,39 +6,36 @@
 // bake. src/provenance.ts is the reader: it compares this sample against the checkout and calls a
 // disagreement STALE.
 //
-// The reading is the SAME git commands src/provenance.ts takes, against the same repo root, because
-// the two are compared for exact equality.
+// The reading is src/provenance.ts's OWN sampler, bundled to a throwaway module and called here,
+// because the two samples are compared for EXACT equality. Restating the reading in this file
+// would put a second copy of it one edit away from disagreeing with the first — and a disagreement
+// here does not fail, it reports every run as stale forever.
 import { build } from 'esbuild';
-import { execFileSync } from 'node:child_process';
+import { rmSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const pkg = resolve(here, '..');
 
+const probe = resolve(pkg, 'dist/.provenance-probe.mjs');
+await build({
+  entryPoints: [resolve(pkg, 'src/provenance.ts')],
+  bundle: true,
+  platform: 'node',
+  format: 'esm',
+  target: 'node18',
+  outfile: probe,
+});
 /** The asmlift checkout this script lives in, or the unmeasurable sample when it is not in one —
  *  a bundle built outside a checkout stamps `unversioned`, never a commit it cannot vouch for. */
-function sampleBuildTree() {
-  const git = (cwd, ...args) => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8' });
-  try {
-    const root = git(here, 'rev-parse', '--show-toplevel').trim();
-    if (resolve(root, 'packages', 'cli', 'scripts') !== here) {
-      return { commit: null, tree: null, status: null };
-    }
-    return {
-      commit: git(root, 'rev-parse', 'HEAD').trim(),
-      tree: git(root, 'rev-parse', 'HEAD:packages').trim(),
-      status: git(root, 'status', '--porcelain', '--', 'packages'),
-    };
-  } catch {
-    return { commit: null, tree: null, status: null };
-  }
-}
+const { sampleSourceTree } = await import(pathToFileURL(probe).href);
+const built = sampleSourceTree(resolve(pkg, 'src'));
+rmSync(probe, { force: true });
 
-const built = sampleBuildTree();
 console.log(
   `asmlift: bundling ${built.commit === null ? 'an unversioned tree' : built.commit.slice(0, 7)}` +
-    `${built.status ? '+dirty' : ''} into dist/asmlift.mjs`,
+    `${built.dirty ? '+dirty' : ''} into dist/asmlift.mjs`,
 );
 
 await build({

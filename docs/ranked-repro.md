@@ -48,7 +48,10 @@ code it is not running.
 
 The comparison is on `packages/` CONTENT, not on the commit: docs and the regenerated benchmark
 artifact are committed constantly and change nothing a ranked run computes, so a commit that leaves
-`packages/` alone is not staleness and does not warn.
+`packages/` alone is not staleness and does not warn. CONTENT means the bytes — the check hashes
+every tracked-or-untracked file under `packages/` — so re-editing a file the tree was ALREADY
+carrying dirty is staleness like any other. That is the state a perf round runs in, and a check that
+stopped at the list of dirty paths would have called such a bundle current.
 
 ## The flags are part of the number
 
