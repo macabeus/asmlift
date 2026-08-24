@@ -62,12 +62,38 @@ stopped at the list of dirty paths would have called such a bundle current.
   path to a file holding the same JSON is accepted too, but a scratch file is one more thing that
   drifts between rounds, and two of them carrying different tables is how the `557/578/547` above
   happened.
-- **`--jobs 6 --progress`.** The candidate compiles are ~85% of a ranked run and pool cleanly.
+- **`--jobs 6 --progress`.** The candidate compiles dominate a ranked run and pool cleanly.
   Two LBG runs launched together measured **36m10s serial against 21m32s at `--jobs 6`** (20608
   candidates, 0 dropped, identical winner) — but that machine was also running two full benches
   and both test suites, and a quieter pair measured **31m55s against 11m16s**. The ratio is the
   machine's, not the code's: re-time on your own log and quote that, never these. The
   `asmlift: [progress]` lines are what make a later claim about the run checkable from its log.
+
+- **`--progress` also prints WHERE the time went**, as one `asmlift: [phase]` line from the run's own
+  clock (`packages/cli/src/phase.ts`) — so a per-phase claim comes from the log everyone already
+  pastes, not from a rig outside the tree that the next round has to rebuild:
+
+  ```
+  asmlift: [phase] wall 259.4s · enumerate 19.9s (1 call) · compile 1257.3s over 6 workers
+    (26880 calls) · score 163.7s (26880 calls) · rank 2.5s (1 call) · main-thread idle+other 73.3s
+  ```
+
+  Two denominators, answering different questions. `compile` is summed ACROSS workers, so
+  `compile / wall` is the pool's average parallelism — **4.85 of 6** above, which is what says
+  whether more `--jobs` would buy anything. The MAIN THREAD's budget is `enumerate + score + rank`
+  = 186.1s of the 259.4s wall, of which scoring is 88%; the remaining `idle+other` is the main
+  thread waiting on subprocesses. Of the work charged at all (1443.4s), the compiles are **87%**.
+
+  Both figures move with the machine, and by a lot. The same command on the same commit, sharing
+  the box with a full `pnpm bench run`, read `wall 426.3s · compile 2175.1s · score 211.2s` —
+  same 26880 candidates, same 0 dropped, same 395, same winner. Only the shares travel; re-time on
+  your own log, and say what else the machine was doing.
+
+  `idle+other` is the wall minus the work that HELD the main thread, which is not a fixed list of
+  phases: at `--jobs 1` the compiles run on the main thread and come out of it, at `--jobs n` they
+  are subprocess awaits and do not. So the residual means "waiting on subprocesses, plus whatever
+  this clock does not name" in both, and the parts never sum past the wall.
+
 - **`--proto`'s absence is now in the log.** Every run ends with an `asmlift: [proto]` line
   naming the callees whose arity it had to guess (nothing declared them: no `--proto` entry, no
   signature in `tools.asmlift.elf`). On the canonical LBG command that line is absent; without

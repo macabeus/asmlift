@@ -53,6 +53,16 @@ near-identical code diffs as ~100% different. Instead:
 - **Tally the literal pools on both sides** (`.word` / `.4byte`, counted per distinct value). A
   pool-shape divergence — baked-offset literals vs one plain base reused at `[rN, #imm]` — is
   often the dominant class and is invisible in an instruction-count comparison.
+- **The scorer's `breakdown` is not a census.** It counts objdiff's per-row `diffKind`, and
+  `arg-mismatch` means only "same opcode, some operand differs" — a register, a stack slot, a pool
+  word, a pc-relative offset, an immediate or a branch target, indistinguishably. The repo's own
+  scorer fixtures render `add r0, #1` against `add r0, #2` as `arg-mismatch` with the SAME register.
+  So `argMismatch / score` is not the register-allocation share: on LoadBGTilemapData at 395 it is
+  66.1%, while the rows whose ONLY difference is a register are 163 — 41.3%. The other 98 move a
+  stack-slot offset, a pc-relative pool offset, a branch target, a bare immediate or the operand
+  shape, and 2 of them are the frame size. Say which convention a count uses: "rows involving a
+  register" is 217 of the same 261, because a row is free to change two things at once. A round
+  published the first number as the second one. Decompose the rows, then name the class.
 - Classify every diff region into a named pattern. Expect a MIX: some regions will be this row's
   capability gaps, some will belong to other, known machinery (dispatch shape of a recovered
   `switch`, signedness of locals, operand order). Separate them explicitly — a finding attributed

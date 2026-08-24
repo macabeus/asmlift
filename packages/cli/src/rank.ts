@@ -18,8 +18,9 @@ import {
 import type { SymbolMap } from '@asmlift/core/symbols';
 import { type TargetDescription } from '@asmlift/core/target';
 
-import type { AsyncCandidateCompiler } from './compile-command';
+import type { AsyncCandidateCompiler, CandidateCompiler as SyncCompiler } from './compile-command';
 import { renderDeclarations } from './declare';
+import { type PhaseClock, timed, timedAsync } from './phase';
 import { type CandidateCompiler, MatchScore, scoreObjects, scoreSource } from './score';
 
 // The cli's candidate/result shapes are the core generics pinned to the objdiff MatchScore.
@@ -38,6 +39,10 @@ export interface RankOptions {
   /** Liveness only, never a measurement: called once per candidate as it is scored, carrying the
    *  lowest score seen SO FAR. The ranking below is what decides the winner. */
   onProgress?: (done: number, total: number, bestSoFar: number | undefined) => void;
+  /** Where this run's phase timings accumulate (phase.ts). Absent = no timing taken. The serial
+   *  driver can only separate the compile from the score when `compile` is supplied; reached
+   *  through the registry instead, the compile is charged to `score`. */
+  clock?: PhaseClock;
 }
 
 // Self-declaring candidates: a candidate that names map-derived symbols carries their refs
@@ -67,12 +72,21 @@ export function decompileRanked(
   opts: RankOptions = {},
 ): RankedResult {
   const backend = opts.backend ?? cBackend;
-  const candidates = enumerate(name, asm, target, opts);
+  const candidates = timed(opts.clock, 'enumerate', () => enumerate(name, asm, target, opts));
+  // The compile happens INSIDE scoreSource here, so it is charged from the compiler itself and the
+  // `score` frame around the call keeps the rest. The pooled driver awaits the two separately.
+  const compile: SyncCompiler | undefined =
+    opts.clock && opts.compile
+      ? (source, symbol, backendId, declarations) =>
+          timed(opts.clock, 'compile', () => opts.compile!(source, symbol, backendId, declarations))
+      : opts.compile;
   let done = 0;
   let best: number | undefined;
   return rankBy(candidates, name, (source, symbol, cand) => {
     try {
-      const s = scoreSource(source, symbol, targetObj, target, backend.id, opts.compile, declarationsOf(cand));
+      const s = timed(opts.clock, 'score', () =>
+        scoreSource(source, symbol, targetObj, target, backend.id, compile, declarationsOf(cand)),
+      );
       best = best === undefined || s.score < best ? s.score : best;
       return s;
     } finally {
@@ -85,8 +99,9 @@ export function decompileRanked(
 
 /** The same ranking with the candidate COMPILES run `jobs` at a time.
  *
- *  A ranked run is ~85% subprocess — one LBG-sized candidate measures ~50 ms to compile against
- *  ~11 ms to score — and `rankBy`'s driver is synchronous, so today tens of thousands of
+ *  A ranked run is mostly subprocess — on LoadBGTilemapData the compiles outweigh the scoring
+ *  about 8:1, and the run's own `[phase]` line (phase.ts) is where a current figure comes from —
+ *  and `rankBy`'s driver is synchronous, so today tens of thousands of
  *  candidates compile one at a time on one core. Here each worker owns a scratch slot
  *  (compile-command.ts `worker()`), takes the next unclaimed candidate, and scores its object the
  *  moment it lands; the score runs on the main thread and overlaps the other workers' subprocesses.
@@ -107,7 +122,11 @@ export async function decompileRankedParallel(
   },
 ): Promise<RankedResult> {
   const backend = opts.backend ?? cBackend;
-  const candidates = enumerate(name, asm, target, opts);
+  const clock = opts.clock;
+  if (clock) {
+    clock.workers = Math.max(1, opts.jobs);
+  }
+  const candidates = timed(clock, 'enumerate', () => enumerate(name, asm, target, opts));
   // keyed by source, which core's enumeration has already deduped on — so it identifies a candidate
   const scored = new Map<string, MatchScore | Error>();
   let next = 0;
@@ -124,8 +143,10 @@ export async function decompileRankedParallel(
         const cand = candidates[i];
         let result: MatchScore | Error;
         try {
-          const obj = await compile(cand.source, name, backend.id, declarationsOf(cand));
-          result = scoreObjects(targetObj, obj, name);
+          const obj = await timedAsync(clock, 'compile', () =>
+            compile(cand.source, name, backend.id, declarationsOf(cand)),
+          );
+          result = timed(clock, 'score', () => scoreObjects(targetObj, obj, name));
           best = best === undefined || result.score < best ? result.score : best;
         } catch (e) {
           // recorded, not thrown: `rankBy` below is what decides whether a refused candidate is
@@ -137,14 +158,16 @@ export async function decompileRankedParallel(
       }
     }),
   );
-  return rankBy(candidates, name, (source) => {
-    const r = scored.get(source);
-    if (r === undefined) {
-      throw new Error(`internal: a candidate reached ranking unscored (${source.length} bytes)`);
-    }
-    if (r instanceof Error) {
-      throw r;
-    }
-    return r;
-  });
+  return timed(clock, 'rank', () =>
+    rankBy(candidates, name, (source) => {
+      const r = scored.get(source);
+      if (r === undefined) {
+        throw new Error(`internal: a candidate reached ranking unscored (${source.length} bytes)`);
+      }
+      if (r instanceof Error) {
+        throw r;
+      }
+      return r;
+    }),
+  );
 }

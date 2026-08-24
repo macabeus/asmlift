@@ -77,18 +77,55 @@ const disposeAll = (...xs: unknown[]): void => {
   }
 };
 
+// ONE config for the process, default-constructed and never mutated: the scorer's behaviour is
+// objdiff's defaults. Nothing here may set a property on it — a knob that changes what a diff
+// counts changes every number this project has published.
+const CONFIG = new objdiff.diff.DiffConfig();
+
+/** The parsed TARGET, memoized on its own BYTES. Every candidate in a ranked run is scored against
+ *  the same target object, and parsing it once rather than once per candidate is what this saves:
+ *  on klonoa's 102 KB `gfx.o` that parse measured 3.81 ms, against 0.07 ms for the one-function
+ *  candidate beside it.
+ *
+ *  The key is the whole file content, compared byte for byte rather than by path, size or mtime: a
+ *  hit then PROVES the parse would produce the same object, so a target rewritten in place between
+ *  two calls can never be scored against stale bytes. The read stays — only the parse is saved.
+ *
+ *  ONE entry, held for the life of the process. `scoreObjects` is a published entry point, so an
+ *  embedder that scores once still retains an engine handle and a copy of the target's bytes
+ *  afterwards; `releaseTarget()` below is how it gets them back. */
+let parsedTarget: { bytes: Uint8Array; obj: ObjdiffWasm.diff.Object } | undefined;
+
+/** Drop the memoized target: its engine handle is disposed and its bytes are released. The next
+ *  `scoreObjects` re-parses. For an embedder holding this module open past its last score — the CLI
+ *  itself never needs it, since a ranked run scores one target and then exits. */
+export function releaseTarget(): void {
+  disposeAll(parsedTarget?.obj);
+  parsedTarget = undefined;
+}
+
+function targetObject(path: string): ObjdiffWasm.diff.Object {
+  const bytes = new Uint8Array(readFileSync(path));
+  if (parsedTarget && Buffer.compare(bytes, parsedTarget.bytes) === 0) {
+    return parsedTarget.obj;
+  }
+  // Parse BEFORE dropping the entry it replaces: a target that fails to parse must leave the
+  // previous one intact and throw, never leave a disposed handle behind for the next call.
+  const obj = objdiff.diff.Object.parse(bytes, CONFIG, 'target');
+  disposeAll(parsedTarget?.obj);
+  parsedTarget = { bytes, obj };
+  return obj;
+}
+
 export function scoreObjects(targetObj: string, candidateObj: string, symbol: string): MatchScore {
-  const cfg = new objdiff.diff.DiffConfig();
   const mappingConfig = { mappings: [], selectingLeft: undefined, selectingRight: undefined };
-  let target, candidate, left, right;
+  const target = targetObject(targetObj);
+  let candidate, left, right;
   try {
-    const parse = (path: string, side: ObjdiffWasm.diff.DiffSide) =>
-      objdiff.diff.Object.parse(new Uint8Array(readFileSync(path)), cfg, side);
-    target = parse(targetObj, 'target');
-    candidate = parse(candidateObj, 'base');
+    candidate = objdiff.diff.Object.parse(new Uint8Array(readFileSync(candidateObj)), CONFIG, 'base');
 
     // left = target, right = candidate (base).
-    ({ left, right } = objdiff.diff.runDiff(target, candidate, cfg, mappingConfig));
+    ({ left, right } = objdiff.diff.runDiff(target, candidate, CONFIG, mappingConfig));
     if (!left || !right) {
       throw new Error('objdiff runDiff returned an empty side');
     }
@@ -114,7 +151,14 @@ export function scoreObjects(targetObj: string, candidateObj: string, symbol: st
       // Rows past a side's own rowCount are that side's padding for the other side's
       // insertions — kind "none" here is a fact, not a swallowed error.
       const kindOf = (od: ObjdiffWasm.diff.ObjectDiff, s: ObjdiffWasm.diff.SymbolInfo, disp: { rowCount: number }) =>
-        row >= disp.rowCount ? 'none' : (objdiff.display.displayInstructionRow(od, s.id, row, cfg).diffKind ?? 'none');
+        row >= disp.rowCount
+          ? 'none'
+          : (objdiff.display.displayInstructionRow(od, s.id, row, CONFIG).diffKind ?? 'none');
+      // BOTH sides are displayed on every row and only one answer is read — displaying a row is
+      // how this wrapper learns the engine can decode it. Consulting the candidate only where the
+      // target's row said 'none' turns an engine REFUSAL of the candidate into a plausible score:
+      // it enters the ranking instead of being dropped, and `[ranked] 0 dropped` still prints.
+      // ~0.8 ms per scoring call on klonoa's `gfx.o` — the price of the guarantee.
       const lk = kindOf(left, lSym, lDisp);
       const rk = kindOf(right, rSym, rDisp);
       const kind = lk !== 'none' ? lk : rk;
@@ -131,6 +175,7 @@ export function scoreObjects(targetObj: string, candidateObj: string, symbol: st
 
     return { symbol, rows, matching, score: differences, match: differences === 0, breakdown };
   } finally {
-    disposeAll(left, right, candidate, target, cfg);
+    // the target and the config outlive the call by design; everything minted here does not
+    disposeAll(left, right, candidate);
   }
 }
