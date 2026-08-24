@@ -48,17 +48,90 @@ export function run(cmd: string, args: string[], env?: Record<string, string>) {
 }
 
 // ── agbcc / ARM ───────────────────────────────────────────────────────────────────────────
+// agbcc is `cc1`: it takes PREPROCESSED C, and its lexer cannot even skip a comment (a `/*` is
+// `syntax error before '/'`). So the preprocessor is not optional here — but it is only WORK
+// where the text has something for it to do, and a CANDIDATE spelling almost never does: of the
+// 7272 distinct sources the benchmark corpus enumerates, 7252 skip it and `cpp -P -nostdinc`
+// hands back every one of those byte for byte. The 20 that do not all name a libgcc callee like
+// `__ashrdi3`; the other text this compiler is handed, the annotate-mode stub, is all comment and
+// could never take the fast path.
+//
+// A REFERENCE source is a real translation unit and never plain here — 265 of the 311 only for
+// want of a final newline, which `cpp` would add. Appending it here instead would buy those back;
+// the flat "the preprocessor is the identity or it runs" rule is worth more than one target build
+// per row.
+
+/** Every construct the preprocessor acts on. A directive or operator (`#`), either comment, a
+ *  backslash-newline splice, a trigraph, a CR — plus, below, any token `cpp` would expand as a
+ *  predefined macro, which needs no `#` anywhere to fire. */
+const PREPROCESSOR_SYNTAX = /#|\/\*|\/\/|\\\n|\?\?|\r/;
+/** Whitespace the preprocessor REWRITES with nothing to expand: it deletes a blank line and a
+ *  trailing run, collapses an interior run to one space, and turns a tab, form feed or vertical
+ *  tab into one. What survives verbatim is a leading indent of spaces and single spaces between
+ *  tokens — all the C backend prints, so this rejects nothing it emits. Without the clause the
+ *  identity below is not the preprocessor's behaviour, only this corpus's. */
+const NORMALIZED_WHITESPACE = /[\t\f\v]|[ ]\n|(^|\n)[ ]*\n|\S {2}/;
+const IDENTIFIER = /[A-Za-z_][A-Za-z0-9_]*/g;
+/** The namespace C reserves for the implementation, which is where a preprocessor built-in has
+ *  to live (see `needsPreprocessing`). */
+const RESERVED_IDENTIFIER = /^_[_A-Z]/;
+
+/** The macros the preprocessor DECLARES with no input — its own `-dM` answer rather than a list
+ *  in this file, because the set is the host toolchain's and a hardcoded copy would rot silently.
+ *  Read once per process; an unreadable answer sends every source through the preprocessor, which
+ *  is the behaviour without any of this. */
+let predefines: ReadonlySet<string> | undefined;
+let predefinesRead = false;
+function predefinedMacros(): ReadonlySet<string> | undefined {
+  if (!predefinesRead) {
+    predefinesRead = true;
+    const r = spawnSync('cpp', ['-dM', '-E', '-nostdinc', '/dev/null'], { encoding: 'utf8' });
+    const names = r.status === 0 ? [...String(r.stdout).matchAll(/^#define (\w+)/gm)].map((m) => m[1]) : [];
+    predefines = names.length > 0 ? new Set(names) : undefined;
+  }
+  return predefines;
+}
+
+/** Would `cpp -P -nostdinc` change these bytes? Over-answering `true` only costs the old path.
+ *
+ *  A macro expands with no `#` anywhere, and `-dM` is not the whole list: the BUILT-INs the
+ *  preprocessor implements rather than defines — `__LINE__`, `__FILE__`, `__COUNTER__`,
+ *  `__TIMESTAMP__`, `_Pragma`, `__has_include` — are absent from that answer and expand anyway
+ *  (`__FILE__` bakes in the scratch path, so one spelling would not compile to the same bytes
+ *  twice). A built-in has to live in the namespace C reserves for the implementation or it would
+ *  break conforming programs, so RESERVED_IDENTIFIER covers them without enumerating them, and
+ *  the `-dM` set is there for whatever a host declares outside that namespace. Struct padding
+ *  (`_pad0`) is why the rule cannot simply be "starts with an underscore". */
+export function needsPreprocessing(text: string): boolean {
+  if (PREPROCESSOR_SYNTAX.test(text) || NORMALIZED_WHITESPACE.test(text) || !text.endsWith('\n')) {
+    return true;
+  }
+  const macros = predefinedMacros();
+  return (
+    macros === undefined || (text.match(IDENTIFIER) ?? []).some((id) => RESERVED_IDENTIFIER.test(id) || macros.has(id))
+  );
+}
+
+/** Write `text` as `<name>.c`, and the PREPROCESSED C the compiler reads as `<name>.pp.c`.
+ *  Returns the latter — the same path, holding the same bytes, whichever way it got there. */
+function writePreprocessed(dir: string, name: string, text: string): string {
+  const cPath = join(dir, `${name}.c`);
+  const ppPath = join(dir, `${name}.pp.c`);
+  writeFileSync(cPath, text);
+  if (needsPreprocessing(text)) {
+    run('sh', ['-c', `cpp -P -nostdinc ${cPath} > ${ppPath} 2>/dev/null`]);
+  } else {
+    writeFileSync(ppPath, text);
+  }
+  return ppPath;
+}
 
 /** Compile candidate C with agbcc + assemble; returns the object path. */
 function compileCandAgbcc(cSource: string): string {
   const dir = mkdtempSync(join(tmpdir(), 'asmlift-score-'));
-  const cPath = join(dir, 'cand.c');
-  const ppPath = join(dir, 'cand.pp.c');
   const sPath = join(dir, 'cand.s');
   const oPath = join(dir, 'cand.o');
-  writeFileSync(cPath, C_TYPEDEFS + cSource);
-
-  run('sh', ['-c', `cpp -P -nostdinc ${cPath} > ${ppPath} 2>/dev/null`]);
+  const ppPath = writePreprocessed(dir, 'cand', C_TYPEDEFS + cSource);
   const cc = run(TOOLCHAIN.agbcc, [ppPath, '-o', sPath, ...TOOLCHAIN.agbccFlags]);
   if (cc.status !== 0) {
     throw new Error(`agbcc failed: ${cc.stderr}`);
@@ -79,11 +152,8 @@ export { compileCandAgbcc };
 /** Compile reference C with agbcc and return its assembly text (the scoring target). */
 export function compileTargetAsm(cSource: string): string {
   const dir = mkdtempSync(join(tmpdir(), 'asmlift-ref-'));
-  const cPath = join(dir, 'ref.c');
-  const ppPath = join(dir, 'ref.pp.c');
   const sPath = join(dir, 'ref.s');
-  writeFileSync(cPath, C_TYPEDEFS + cSource);
-  run('sh', ['-c', `cpp -P -nostdinc ${cPath} > ${ppPath} 2>/dev/null`]);
+  const ppPath = writePreprocessed(dir, 'ref', C_TYPEDEFS + cSource);
   const cc = run(TOOLCHAIN.agbcc, [ppPath, '-o', sPath, ...TOOLCHAIN.agbccFlags]);
   if (cc.status !== 0) {
     throw new Error(`agbcc failed: ${cc.stderr}`);

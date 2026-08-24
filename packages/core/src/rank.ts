@@ -267,16 +267,22 @@ const SIGN_CANDS = [
 // `*(s32)`. Only genuine scalars carry the signedness axis.
 const NO_PIN_KINDS = new Set(['ptr', 'struct', 'array']);
 
-/** Pin every SCALAR entry param (index not in `ptrIdx`) to the candidate signedness, before recovery. */
-function pinScalarParams(fn: Fn, signed: boolean, ptrIdx: Set<number>): void {
+/** Pin every SCALAR entry param (index not in `ptrIdx`) to the candidate signedness, before
+ *  recovery. Answers whether any param was PINNABLE — not whether its type moved: which of the
+ *  two passes writes first is an accident of enumeration order, and the arms differ exactly where
+ *  a param can be written at all. */
+function pinScalarParams(fn: Fn, signed: boolean, ptrIdx: Set<number>): boolean {
+  let pinnable = false;
   fn.blocks[0].params.forEach((p, i) => {
     if (ptrIdx.has(i)) {
       return;
     }
     if (p.type.kind === 'unknown' || p.type.kind === 'int') {
+      pinnable = true;
       p.type = signed ? T.s(32) : T.u(32);
     }
   });
+  return pinnable;
 }
 
 /** Bare-global ACCESS FACTS for name-only map symbols — the width/signedness authority the
@@ -559,7 +565,20 @@ export function enumerateCandidates(
     : [{ suffix: '' }];
   for (const [svIndex, sv] of symbolVariants.entries()) {
     const svOpts = sv.symbols ? baseOpts : { ...baseOpts, symbols: undefined };
+    // The signedness axis DECLINES where the pin has nothing to pin. `pinScalarParams` writes only
+    // over an entry param still `unknown`/`int` that is not one of the recovered pointers/
+    // aggregates `ptrIdx` excludes; where no param is left, the second pass re-lifts, re-raises,
+    // re-structures and re-emits a function BYTE-IDENTICAL to the first, and every spelling it
+    // prints collapses on the `seen` dedup below. Declining is not pruning: the candidate list is
+    // the same list, reached without building the duplicates.
+    //
+    // Read off the pin's OWN call, per symbol variant — the `/raw-globals` arm lifts without the
+    // map and answers for itself, so no lift is governed by a fact measured on a different one.
+    let pinnable = false;
     for (const cand of SIGN_CANDS) {
+      if (cand.signed && !pinnable) {
+        break;
+      }
       const base = frontend.lift(name, asm, target, prototypes, opts.asmData, sv.symbols);
       // `/setup-args` — pass a prototype-less callee only what the CALLING BLOCK set up; which of
       // the two readings the source spelled is genuinely ambiguous, and frontend/ssa.ts
@@ -594,7 +613,11 @@ export function enumerateCandidates(
           // The shared tower spine (pipeline.ts) — the candidate's ONE difference from decompile()
           // is the signedness pin, injected between pre-recovery and recoverTypes via the
           // beforeRecover hook.
-          raiseRecovered(fn, target, { beforeRecover: () => pinScalarParams(fn, cand.signed, ptrIdx) });
+          raiseRecovered(fn, target, {
+            beforeRecover: () => {
+              pinnable = pinScalarParams(fn, cand.signed, ptrIdx) || pinnable;
+            },
+          });
         } catch (e) {
           if (!lv.narrow) {
             throw e; // the base lift keeps its behavior: a raising failure aborts the row
