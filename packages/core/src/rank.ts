@@ -688,9 +688,10 @@ export function enumerateCandidates(
           // `seen` already holds — the candidate list, its order and its labels are exactly the
           // ones the whole fan produces, reached without re-deriving forty passes. An axis is
           // INERT on most functions (nothing to re-read, no bitfield member, no joined if), and an
-          // inert axis is a factor of two in the cross that changes nothing: on
-          // kleod:LoadBGTilemapData with the project map, 1152 of 1536 axis points (75%) re-derive
-          // a tree an earlier one already emitted.
+          // inert axis is a factor of two in the cross that changes nothing: on the klonoa
+          // checkout's `LoadBGTilemapData`, the function docs/ranked-repro.md measures, 1152 of
+          // 1536 axis points (75%) re-derive a tree an earlier one already emitted with the
+          // project map, and 27456 of 29376 do over its first 61 functions.
           //
           // Keyed on the JSON text, in a Set of STRINGS — a value comparison, so it can never
           // merge two trees the way a hash could. Its one direction of error is a MISS (a
