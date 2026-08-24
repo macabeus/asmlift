@@ -50,32 +50,36 @@ export function run(cmd: string, args: string[], env?: Record<string, string>) {
 // ── agbcc / ARM ───────────────────────────────────────────────────────────────────────────
 // agbcc is `cc1`: it takes PREPROCESSED C, and its lexer cannot even skip a comment (a `/*` is
 // `syntax error before '/'`). So the preprocessor is not optional here — but it is only WORK
-// where the text has something for it to do, and a CANDIDATE spelling almost never does. The C
-// backend emits no directive, no comment and no line splice, so `cpp -P -nostdinc` hands the
-// compiler back the bytes it was given: over the benchmark artifact's 686 distinct candidate
-// sources it is the identity, byte for byte, on all 471 `needsPreprocessing` calls plain, and the
-// 620 agbcc accepts assemble to the same object either way. The 215 that still preprocess are the
-// annotate-mode stubs, which are all comment (199), and the ones naming a libgcc callee like
-// `__ashrdi3` (16).
+// where the text has something for it to do, and a CANDIDATE spelling almost never does: of the
+// 7272 distinct sources the benchmark corpus enumerates, 7252 skip it and `cpp -P -nostdinc`
+// hands back every one of those byte for byte. The 20 that do not all name a libgcc callee like
+// `__ashrdi3`; the other text this compiler is handed, the annotate-mode stub, is all comment and
+// could never take the fast path.
 //
-// A REFERENCE source is a real translation unit and hardly ever plain — 309 of the 311 here, and
-// 265 of those only for want of a final newline, which `cpp` would add. Appending it here instead
-// would buy those back; the flat "the preprocessor is the identity or it runs" rule is worth more
-// than one target build per row.
+// A REFERENCE source is a real translation unit and never plain here — 265 of the 311 only for
+// want of a final newline, which `cpp` would add. Appending it here instead would buy those back;
+// the flat "the preprocessor is the identity or it runs" rule is worth more than one target build
+// per row.
 
 /** Every construct the preprocessor acts on. A directive or operator (`#`), either comment, a
  *  backslash-newline splice, a trigraph, a CR — plus, below, any token `cpp` would expand as a
  *  predefined macro, which needs no `#` anywhere to fire. */
 const PREPROCESSOR_SYNTAX = /#|\/\*|\/\/|\\\n|\?\?|\r/;
+/** Whitespace the preprocessor REWRITES with nothing to expand: it deletes a blank line and a
+ *  trailing run, collapses an interior run to one space, and turns a tab, form feed or vertical
+ *  tab into one. What survives verbatim is a leading indent of spaces and single spaces between
+ *  tokens — all the C backend prints, so this rejects nothing it emits. Without the clause the
+ *  identity below is not the preprocessor's behaviour, only this corpus's. */
+const NORMALIZED_WHITESPACE = /[\t\f\v]|[ ]\n|(^|\n)[ ]*\n|\S {2}/;
 const IDENTIFIER = /[A-Za-z_][A-Za-z0-9_]*/g;
 /** The namespace C reserves for the implementation, which is where a preprocessor built-in has
  *  to live (see `needsPreprocessing`). */
 const RESERVED_IDENTIFIER = /^_[_A-Z]/;
 
 /** The macros the preprocessor DECLARES with no input — its own `-dM` answer rather than a list
- *  in this file, because the set is the host toolchain's (432 of them here) and a hardcoded copy
- *  would rot silently. Read once per process; an unreadable answer sends every source through the
- *  preprocessor, which is the behaviour without any of this. */
+ *  in this file, because the set is the host toolchain's and a hardcoded copy would rot silently.
+ *  Read once per process; an unreadable answer sends every source through the preprocessor, which
+ *  is the behaviour without any of this. */
 let predefines: ReadonlySet<string> | undefined;
 let predefinesRead = false;
 function predefinedMacros(): ReadonlySet<string> | undefined {
@@ -94,15 +98,12 @@ function predefinedMacros(): ReadonlySet<string> | undefined {
  *  preprocessor implements rather than defines — `__LINE__`, `__FILE__`, `__COUNTER__`,
  *  `__TIMESTAMP__`, `_Pragma`, `__has_include` — are absent from that answer and expand anyway
  *  (`__FILE__` bakes in the scratch path, so one spelling would not compile to the same bytes
- *  twice). A built-in must live in the namespace C reserves for the implementation — an
- *  underscore followed by an uppercase letter or another underscore — or it would break
- *  conforming programs, so RESERVED_IDENTIFIER covers them without enumerating them, and the
- *  `-dM` set covers whatever a host declares outside that namespace — every name it reports here
- *  is inside it, but the answer is the compiler's rather than this file's guess. Struct padding
- *  (`_pad0`) and libgcc callees (`__ashrdi3`) are the two `_` shapes asmlift really emits; only
- *  the second is reserved. */
+ *  twice). A built-in has to live in the namespace C reserves for the implementation or it would
+ *  break conforming programs, so RESERVED_IDENTIFIER covers them without enumerating them, and
+ *  the `-dM` set is there for whatever a host declares outside that namespace. Struct padding
+ *  (`_pad0`) is why the rule cannot simply be "starts with an underscore". */
 export function needsPreprocessing(text: string): boolean {
-  if (PREPROCESSOR_SYNTAX.test(text) || !text.endsWith('\n')) {
+  if (PREPROCESSOR_SYNTAX.test(text) || NORMALIZED_WHITESPACE.test(text) || !text.endsWith('\n')) {
     return true;
   }
   const macros = predefinedMacros();

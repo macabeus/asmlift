@@ -19,6 +19,27 @@ const PLAIN = [
   'u32 f(void) {\n    return *(volatile u32 *)0x4000006;\n}\n',
 ];
 
+/** The same spelling with whitespace the C backend never prints — each one a shape `cpp` REWRITES
+ *  where it expands nothing, which is why NORMALIZED_WHITESPACE has to refuse them. */
+const REWRITTEN = [
+  ['a tab', 's32 f(s32 a0) {\n\treturn a0 * 3;\n}\n'],
+  ['a form feed', 's32 f(s32 a0) {\n\f    return a0 * 3;\n}\n'],
+  ['a vertical tab', 's32 f(s32 a0) {\n\v    return a0 * 3;\n}\n'],
+  ['a blank line', 's32 f(s32 a0) {\n\n    return a0 * 3;\n}\n'],
+  ['a trailing space', 's32 f(s32 a0) {\n    return a0 * 3; \n}\n'],
+  ['an interior run of spaces', 's32 f(s32 a0) {\n    return a0 *  3;\n}\n'],
+] as const;
+
+/** What `cpp -P -nostdinc` makes of `text` — the old path, run for real. */
+function preprocessed(text: string): string {
+  const dir = mkdtempSync(join(tmpdir(), 'asmlift-pp-test-'));
+  const cPath = join(dir, 'in.c');
+  const ppPath = join(dir, 'in.pp.c');
+  writeFileSync(cPath, text);
+  expect(spawnSync('sh', ['-c', `cpp -P -nostdinc ${cPath} > ${ppPath} 2>/dev/null`]).status).toBe(0);
+  return readFileSync(ppPath, 'utf8');
+}
+
 describe('the preprocessor runs where there is something to preprocess', () => {
   test.each([
     ['a directive', '#define N 3\ns32 f(void) { return N; }\n'],
@@ -51,15 +72,23 @@ describe('the preprocessor runs where there is something to preprocess', () => {
   // The claim the skip rests on. Skipping is only sound because there is nothing to skip: the
   // preprocessor is the identity on this text, so the compiler reads the same bytes either way.
   test('…and `cpp -P -nostdinc` is the identity on it', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'asmlift-pp-test-'));
-    const cPath = join(dir, 'in.c');
-    const ppPath = join(dir, 'in.pp.c');
     for (const src of PLAIN) {
       const text = C_TYPEDEFS + src;
-      writeFileSync(cPath, text);
-      const r = spawnSync('sh', ['-c', `cpp -P -nostdinc ${cPath} > ${ppPath} 2>/dev/null`]);
-      expect(r.status).toBe(0);
-      expect(readFileSync(ppPath, 'utf8')).toBe(text);
+      expect(preprocessed(text)).toBe(text);
+    }
+  });
+
+  test.each(REWRITTEN)('%s takes the preprocessor', (_what, src) => {
+    expect(needsPreprocessing(C_TYPEDEFS + src)).toBe(true);
+  });
+
+  // What makes that clause load-bearing rather than defensive: on every one of those shapes the
+  // preprocessor really does hand back different bytes, so admitting one would compile a file
+  // nobody wrote.
+  test('…because the preprocessor is not the identity on any of them', () => {
+    for (const [, src] of REWRITTEN) {
+      const text = C_TYPEDEFS + src;
+      expect(preprocessed(text)).not.toBe(text);
     }
   });
 
