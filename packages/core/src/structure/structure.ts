@@ -723,7 +723,8 @@ export interface StructureOptions {
   // Spell `(x << a) >> b` extracts of a struct global as the map's named bitfield member. On by
   // default; rank.ts enumerates the OFF spelling as the `/no-bitfield` axis, because the named
   // read recompiles at the DECLARATION's access width — where that diverges from the asm's load
-  // width the honest shift spelling is the one that matches, and the differ referees.
+  // width the honest shift spelling is the one that matches, and the differ referees. Only the map
+  // carries the names, so with no `symbols` this is normalized to false whatever a caller passes.
   spellBitfieldMembers?: boolean;
   // Let a read of a named global render at its use across writes that PROVABLY cannot reach it
   // (a store to a different named global), instead of caching it in a local. Off by default;

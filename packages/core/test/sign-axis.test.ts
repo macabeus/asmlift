@@ -34,8 +34,8 @@ vi.mock('../src/frontend/registry', async (importOriginal) => {
 
 const wrap = (body: string) => `f:\n\tpush\t{lr}\n${body}\tpop\t{r1}\n\tbx\tr1\n`;
 
-/** cBackend, plus every spelling it was asked to print — the enumeration's real work, where the
- *  candidate list shows only what survived the dedup. */
+/** cBackend, plus every spelling it was asked to print — where the candidate list shows only what
+ *  survived the dedup. */
 function recordingBackend(): { backend: LanguageBackend; emitted: string[] } {
   const emitted: string[] = [];
   return {
@@ -60,12 +60,12 @@ describe('the signedness axis declines where the pin writes nothing', () => {
     const { backend, emitted } = recordingBackend();
     lifts.n = 0;
     const cands = enumerateCandidates('f', wrap(PTR_ONLY), ARMV4T_AGBCC, { backend });
-    // The whole enumeration collapses onto one spelling, so the print count IS the work: eight
-    // axis points all reaching ONE structured tree, spelled once — never eight identical strings.
+    // Eight axis points, one structured tree, one spelling printed — which is what the tree skip
+    // produces whether the decline fires or not. The count that answers for the DECLINE is below.
     expect(cands.length).toBe(1);
     expect(new Set(emitted).size).toBe(1);
     expect(emitted.length).toBe(1);
-    // …and the declined second pass never even lifted: the probe's lift plus the first pass's.
+    // The declined second pass never lifted: the probe's lift plus the first pass's.
     expect(lifts.n).toBe(2);
   });
 

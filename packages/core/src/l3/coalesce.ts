@@ -358,12 +358,11 @@ export function armDisjointUnder(
   if (sfn.locals.length < 2) {
     return { candidates: [], refusals };
   }
-  // Both whole-subtree walks below are MEMOISED on node identity, for one call. Sound because
-  // nothing here mutates the tree: the only rewrite is `rename`, which rebuilds every statement it
-  // touches and leaves `sfn` alone (structure-purity.test.ts pins the same promise one level up).
-  // They are memoised because the pair loop asks the same questions repeatedly — `firstMention`
-  // re-walked a statement's whole subtree once per statement it scanned, and its two calls in the
-  // a×b loop each depend on only ONE of a and b.
+  // Both whole-subtree walks below are MEMOISED on node identity, for one call: `firstMention`
+  // walks a statement's whole subtree once per statement it scans, and the a×b loop's two calls
+  // each depend on only ONE of a and b. Sound because nothing here mutates the tree — the only
+  // rewrite is `rename`, which rebuilds every statement it touches and leaves `sfn` alone
+  // (structure-purity.test.ts pins the same promise one level up).
   const countMentions = (list: Stmt[]): Map<string, number> => {
     const out = new Map<string, number>();
     const walk = (stmts: Stmt[]): void => {

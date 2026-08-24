@@ -142,9 +142,8 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   (`/inlinebase` re-spells `index` bases, so a home passed to a callee or standing as a `field` base
   is out of its grasp), where the axis would never have created the local at all. So re-spell while
   the shapes the substitution cannot reach have no row demanding them, take the axis when one
-  appears — and name the fork in the
-  lever's header, because otherwise the gap left behind reads as an oversight rather than as the
-  price of the mechanism.
+  appears — and name the fork in the lever's header, because otherwise the gap left behind reads as
+  an oversight rather than as the price of the mechanism.
 
   Which population a pass belongs to decides how much its opinions cost. Four passes currently
   answer "is this address a local?" differently — `raise/gvn.ts` (never), `l3/basecse.ts`

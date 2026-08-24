@@ -1,8 +1,8 @@
 // `walkExprs` is the ONE whole-tree expression walk every L3 pass composes out of
 // stmtExprs/stmtChildren/exprChildren, so its ORDER is a contract: a consumer that counts, or that
-// stops at the first hit, reads a different answer if the order moves. Nothing pinned it, and it
-// is written as an explicit stack rather than the obvious `yield*` recursion — so these tests are
-// the recursion, kept as the reference the stack is checked against.
+// stops at the first hit, reads a different answer if the order moves. It is written as an explicit
+// stack rather than the obvious `yield*` recursion, so these tests keep the recursion itself as the
+// reference the stack is checked against.
 import { expect, test } from 'vitest';
 
 import { type Expr, type Stmt, exprChildren, stmtChildren, stmtExprs, walkExprs } from '../src/l3/ast';

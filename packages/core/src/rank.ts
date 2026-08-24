@@ -564,13 +564,13 @@ export function enumerateCandidates(
     return refs.length ? { symbolRefs: refs } : {};
   };
   // THE RE-SPELLING FAN, as a function whose PARAMETER LIST is the invariant the tree skip below
-  // rests on: every spelling here is a pure function of the structured tree, so a tree an earlier
-  // axis point already spelled can only re-emit sources `seen` already holds. Inline in that loop
-  // the invariant would be a comment asking future levers not to read `fn` or the axis flags; as a
-  // signature, a lever that needs one has to widen it in front of a reviewer. The same argument
-  // l3/ast.ts's `walkExprs` header makes for its own shape, and it counts for more here: a lever
-  // reading `fn` would not misprint a candidate, it would DELETE one, and nothing in the harness
-  // reports a candidate that was never enumerated.
+  // rests on: every spelling here is a pure function of the structured tree and this call's own
+  // constants, so a tree an earlier axis point already spelled can only re-emit sources `seen`
+  // already holds. Inline in that loop the invariant would be a comment asking future levers not to
+  // read `fn` or the axis flags; as a signature, a lever that needs one has to widen it in front of
+  // a reviewer. The same argument l3/ast.ts's `walkExprs` header makes for its own shape, and it
+  // counts for more here: a lever reading `fn` would not misprint a candidate, it would DELETE one,
+  // and nothing in the harness reports a candidate that was never enumerated.
   const fanOut = (sfn: SFn): Spelling[] => {
     // The walk→index re-spelling (l3/reindex.ts) is a THIRD lever on the same footing as
     // signedness and branch sense: whether the source spelled `*p; p++` or `arr[i]` is
@@ -996,14 +996,15 @@ export function enumerateCandidates(
             opts.onLeverError?.(name + lv.suffix + s.suffix, e instanceof Error ? e.message.split('\n')[0] : String(e));
             continue;
           }
-          // A TREE another axis point already spelled. `fanOut` is a function of the tree alone —
-          // its signature is the argument — so a repeated tree can only re-emit sources `seen`
-          // already holds: the candidate list, its order and its labels are exactly the ones the
-          // whole fan produces, reached without re-deriving forty passes. An axis is INERT on most
-          // functions (nothing to re-read, no bitfield member, no joined if), and an inert axis is
-          // a factor of two in the cross that changes nothing: on the klonoa checkout's
-          // `LoadBGTilemapData` under docs/ranked-repro.md's flags, 640 of 1024 axis points (62.5%)
-          // re-derive a tree an earlier one already emitted.
+          // A TREE another axis point already spelled. `fanOut` reads the tree and this call's own
+          // constants, nothing that varies per axis point — its signature is the argument — so a
+          // repeated tree can only re-emit sources `seen` already holds: the candidate list, its
+          // order and its labels are exactly the ones the whole fan produces, reached without
+          // re-deriving forty passes. An axis is INERT on most functions (nothing to re-read, no
+          // bitfield member, no joined if), and an inert axis is a factor of two in the cross that
+          // changes nothing: on the klonoa checkout's `LoadBGTilemapData` under
+          // docs/ranked-repro.md's flags, 640 of 1024 axis points (62.5%) re-derive a tree an
+          // earlier one already emitted.
           //
           // Keyed on the JSON text, in a Set of STRINGS — a value comparison, so it can never
           // merge two trees the way a hash could. Its one direction of error is a MISS (a
