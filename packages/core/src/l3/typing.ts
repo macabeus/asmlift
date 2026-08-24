@@ -103,6 +103,27 @@ export function derefStrideOk(rt: IrType | undefined, width: number, signed: boo
   return false;
 }
 
+/** The USUAL ARITHMETIC CONVERSIONS over two rendered operands: at equal rank, unsigned wins.
+ *  Either side unknown leaves the result unknown — EXCEPT when the known side is unsigned, which
+ *  already decides it.
+ *
+ *  That exception is the one place this returns a DEFINITE answer from an unknown operand, and it
+ *  is sound only because every integer here is rank `int`: at UNEQUAL rank C converts to the wider
+ *  type first, so `unsigned int & long long` is SIGNED. Core has no 64-bit integer type at all
+ *  (the decomp typedef vocabulary stops at 32 — see contracts.ts SCALAR_WIDTHS), so the
+ *  unequal-rank case cannot arise. Adding one would invalidate this.
+ *
+ *  Exported because the C-family backend's operand pin asks the same question about an operator
+ *  whose own rendering it is deciding, so it cannot ask `renderedIntSignedness` about the node. */
+export function arithConversionSignedness(l: Expr, r: Expr, varType: VarTypes): boolean | undefined {
+  const ls = renderedIntSignedness(l, varType);
+  const rs = renderedIntSignedness(r, varType);
+  if (ls === false || rs === false) {
+    return false;
+  }
+  return ls === true && rs === true ? true : undefined;
+}
+
 /**
  * The C SIGNEDNESS a rendered integer expression actually has — `true`/`false`, or `undefined`
  * when it is not determinable here. The deliberate complement to `exprCType` above, which is
@@ -110,9 +131,10 @@ export function derefStrideOk(rt: IrType | undefined, width: number, signed: boo
  * rules that contract omits, integer PROMOTION and the usual arithmetic CONVERSIONS.
  *
  * THE one rendered-signedness judgment, and it lives beside the declarations it judges against
- * because three consumers share it: the C-family backend's shift-operand cast, structure.ts's
- * unsigned-compare cast (the /uns-cmp axis), and initfirst's compare-meaning gate. Two of those
- * models disagreeing about one expression is the drift this placement prevents.
+ * because four consumers share it: the C-family backend's operand pin, structure.ts's
+ * unsigned-compare cast (the /uns-cmp axis) and its signed-compare pin, and initfirst's
+ * compare-meaning gate. Two of those models disagreeing about one expression is the drift this
+ * placement prevents.
  *
  * The original question is byte-load-bearing: C spells both `>>>` and `>>`
  * as `>>` and chooses between them from the left operand's type. A logical shift rendered over a
@@ -145,29 +167,27 @@ export function renderedIntSignedness(e: Expr, varType: VarTypes): boolean | und
     case 'un':
       return e.op === '!' ? true : rec(e.e);
     case 'bin': {
-      // Shifts take the type of the LEFT operand alone — the right is promoted independently.
-      if (e.op === '<<' || e.op === '>>' || e.op === '>>>') {
+      // The SIGNEDNESS-CARRYING pairs — the ops the tower keeps apart because C spells each pair
+      // with one token and picks between them from the operand types (l3/ast.ts BinOp). The
+      // C-family backend PINS their operands, so what gets printed renders as the op says
+      // whatever the operands would have rendered as on their own. Reporting the operands here
+      // instead would answer about an expression nobody prints: a `>>` over a u32 var prints
+      // `(s32)v >> 3` and is signed, and a consumer told otherwise omits its own cast.
+      if (e.op === '>>' || e.op === '/' || e.op === '%') {
+        return true;
+      }
+      if (e.op === '>>>' || e.op === '/u' || e.op === '%u') {
+        return false;
+      }
+      // `<<` is sign-blind, so it keeps its left operand's type — nothing pins it.
+      if (e.op === '<<') {
         return rec(e.l);
       }
       // Comparisons and the logical connectives yield `int`.
       if (['<', '<=', '>', '>=', '==', '!=', '&&', '||'].includes(e.op)) {
         return true;
       }
-      // Usual arithmetic conversions over the remaining binary operators: at equal rank, unsigned
-      // wins. Either side unknown leaves the result unknown — EXCEPT when the known side is
-      // unsigned, which already decides it.
-      //
-      // That exception is the one place this returns a DEFINITE answer from an unknown operand,
-      // and it is sound only because every integer here is rank `int`: at UNEQUAL rank C converts
-      // to the wider type first, so `unsigned int & long long` is SIGNED. Core has no 64-bit
-      // integer type at all (the decomp typedef vocabulary stops at 32 — see contracts.ts
-      // SCALAR_WIDTHS), so the unequal-rank case cannot arise. Adding one would invalidate this.
-      const l = rec(e.l);
-      const r = rec(e.r);
-      if (l === false || r === false) {
-        return false;
-      }
-      return l === true && r === true ? true : undefined;
+      return arithConversionSignedness(e.l, e.r, varType);
     }
     case 'call':
     case 'marker':

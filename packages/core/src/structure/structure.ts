@@ -577,9 +577,9 @@ const ARITH_TO_BIN: Record<string, BinOp> = {
   sub: '-',
   mul: '*',
   sdiv: '/',
-  udiv: '/',
+  udiv: '/u', // the UNSIGNED quotient/remainder; the C backend spells them `/`/`%` over an
   smod: '%',
-  umod: '%',
+  umod: '%u', // operand it casts unsigned (l3/ast.ts BinOp, backend/cfamily.ts C_SPELLING)
   or: '|',
   and: '&',
   xor: '^',
@@ -2210,9 +2210,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         l = isPtrGlobal(l) ? intifyPtrGlobal(l) : l;
         r = isPtrGlobal(r) ? intifyPtrGlobal(r) : r;
       }
-      // (The two right shifts stay DISTINCT ops here — `>>>` logical, `>>` arithmetic. Which token
-      // a language spells each with, and what cast pins the choice, is a BACKEND decision; see
-      // l3/ast.ts BinOp and backend/cfamily.ts's shift rule.)
+      // (The signedness-carrying pairs stay DISTINCT ops here — `>>>`/`>>` and `/u` `%u`/`/` `%`.
+      // Which token a language spells each with, and what cast pins the choice, is a BACKEND
+      // decision; see l3/ast.ts BinOp and backend/cfamily.ts's C_SPELLING.)
       // SCOPE: this and intifyAddr cover the ARITHMETIC escapes. A pointer global under a
       // COMPARISON (`gPtr < K` — C compares unsigned whatever the asm's icmp_s* said) is the same
       // class as intifyAddrCmp's `addr` rule and is deliberately left alone here: it is valid C
