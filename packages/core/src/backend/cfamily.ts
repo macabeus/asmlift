@@ -169,10 +169,9 @@ function printExpr(e: Expr, parentPrec: number, vt: PrintEnv, leaf?: LeafHook): 
       e: replaced ? replaced.e : x,
     };
   };
-  // The two operators read their operands differently, so the pin does too. A SHIFT takes the type
-  // of its left operand alone, and the cast goes on unless that operand PROVABLY renders as the op
-  // needs — `undefined` is renderedIntSignedness's model not reaching, and a redundant cast is
-  // codegen-identical while a missing one is a miscompile.
+  // A SHIFT and a DIVIDE read their operands differently, so the pin does too. A SHIFT takes the
+  // type of its left operand alone, and the cast goes on unless that operand PROVABLY renders as
+  // the op needs (renderedIntSignedness's header carries the rule for reading `undefined`).
   //
   // A DIVIDE takes the usual arithmetic conversions over BOTH operands, where unsigned wins at
   // equal rank, so the question is what the PAIR renders as. Once the pair renders wrong the two

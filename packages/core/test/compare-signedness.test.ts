@@ -11,7 +11,8 @@
 // matching fixture). ==/!= never cast.
 //
 // The SIGNED direction is not the axis and is pinned at the end of this file: there the opcode
-// and C's own default agree, so only a rendering that provably disagrees takes a cast.
+// names the compare, so every operand short of a proof that it already renders signed takes a
+// cast — a pointer-rendered side excepted, where the cast would compare two addresses signed.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';

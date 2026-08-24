@@ -1996,7 +1996,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // value-faithful and the compiler already picks the unsigned branch itself, and so does a
       // pointer-rendered side: `p < end` already compares unsigned, and `(u32)p` against a
       // pointer is the int-vs-ptr constraint violation the strict backends reject. ==/!= are
-      // sign-agnostic and icmp_s* keeps its documented residual above.
+      // sign-agnostic; the icmp_s* direction is pinned below.
       const ptrSide = (x: Expr): boolean => {
         const t2 = ctype(x);
         return t2?.kind === 'ptr' || t2?.kind === 'array';

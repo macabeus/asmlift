@@ -82,8 +82,8 @@ export type Expr =
 // operand type could not carry them — a promoted narrow value is signed whatever it was loaded as.
 //
 // The divides earned it second, on pokeemerald:GetAnchorCoord — `(u32)(coord * a1) / (u32)a0`
-// standing beside two arithmetic shifts of the same values. Their one channel had been the operand
-// TYPES, reached only by flipping a declaration, and there that flip is unreachable and unsound at
+// standing beside two arithmetic shifts of the same values. Their only other channel is the operand
+// TYPES, reached by flipping a declaration, and there that flip is unreachable and unsound at
 // once: the divisor also feeds a signed compare, so the /uns-cmp reconciliation correctly refuses
 // it, and forcing it anyway makes agbcc delete the comparison as always-false. A per-operand pin is
 // the only spelling that says "this division alone is unsigned".

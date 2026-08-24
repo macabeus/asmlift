@@ -113,8 +113,9 @@ export function derefStrideOk(rt: IrType | undefined, width: number, signed: boo
  *  (the decomp typedef vocabulary stops at 32 — see contracts.ts SCALAR_WIDTHS), so the
  *  unequal-rank case cannot arise. Adding one would invalidate this.
  *
- *  Exported because the C-family backend's operand pin asks the same question about an operator
- *  whose own rendering it is deciding, so it cannot ask `renderedIntSignedness` about the node. */
+ *  Exported because two consumers ask it about an operator whose own rendering they are deciding,
+ *  so they cannot ask `renderedIntSignedness` about the node: the C-family backend's operand pin,
+ *  and initfirst's compare-meaning gate over a substitution not yet made. */
 export function arithConversionSignedness(l: Expr, r: Expr, varType: VarTypes): boolean | undefined {
   const ls = renderedIntSignedness(l, varType);
   const rs = renderedIntSignedness(r, varType);
