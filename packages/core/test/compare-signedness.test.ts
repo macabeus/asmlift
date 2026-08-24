@@ -8,7 +8,10 @@
 // The refusals are what these tests pin: a provably-unsigned operand leaves the spelling alone,
 // and so does a compare whose operands both provably sit in [0, 2^31) — `(u8)x > 4` is
 // value-faithful spelled signed, and the compiler picks the unsigned branch itself (the ult5
-// matching fixture). ==/!= never cast; icmp_s* is out of scope.
+// matching fixture). ==/!= never cast.
+//
+// The SIGNED direction is not the axis and is pinned at the end of this file: there the opcode
+// and C's own default agree, so only a rendering that provably disagrees takes a cast.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -227,4 +230,48 @@ const GSUB = `fn gsubhole {
 
 test('a signed guard over the loop-init arg blocks the flip through the substitution channel', () => {
   expect(emit(GSUB)).not.toMatch(/u32 v\d+;/);
+});
+
+// ── the SIGNED direction ───────────────────────────────────────────────────────────────────
+// Not the axis, and not a spelling choice: an icmp_s* operand that renders UNSIGNED makes C
+// compare unsigned, which is the compare the machine did not do. Where the other side is a
+// constant the test folds away entirely — agbcc compiles `(u32)a / b < 0` to `mov r0, #0`,
+// deleting the divide call with it. Always on, and it fires only where the rendering provably
+// disagrees with the opcode.
+const SIGNEDCMP = `fn signedcmp {
+^bb0(%0: u32):
+  %1: s32 = const {value=0}
+  %2: u32 = icmp_slt %0, %1
+  cond_br %2, ^bb1(), ^bb2()
+^bb1():
+  %3: s32 = const {value=1}
+  ret %3
+^bb2():
+  %4: s32 = const {value=0}
+  ret %4
+}
+`;
+
+test('a signed compare over an unsigned-rendering operand takes the (s32) cast', () => {
+  expect(emit(SIGNEDCMP, false)).toMatch(/\(s32\)a0 [<>]=? 0/);
+});
+
+// A signed compare whose operands already render signed is left alone — the everyday case, and
+// the reason this cannot churn the corpus.
+const SIGNEDOK = `fn signedok {
+^bb0(%0: s32):
+  %1: s32 = const {value=0}
+  %2: u32 = icmp_slt %0, %1
+  cond_br %2, ^bb1(), ^bb2()
+^bb1():
+  %3: s32 = const {value=1}
+  ret %3
+^bb2():
+  %4: s32 = const {value=0}
+  ret %4
+}
+`;
+
+test('a signed compare over signed-rendering operands keeps its spelling', () => {
+  expect(emit(SIGNEDOK, false)).not.toContain('(s32)');
 });

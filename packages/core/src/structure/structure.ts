@@ -1974,12 +1974,10 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // sign-agnostic ==/!=) spell `(u32)&gSym`, signed compares `(s32)&gSym` — exactly the
       // compare the asm did. The deref folds never see a compare operand, so no named spelling is
       // lost; a NARROWING cast (`(u8)&gSym`) is not a bare `addr` and keeps its truncation.
-      // SCOPE (adversarial review): this closes the hole for BARE addr operands only. An
-      // addr-carrying arithmetic tree (`(u32)&gSym + 4`, spelled by intifyAddr below) under an
-      // icmp_s* still compares unsigned in C (u32 wins the usual-arithmetic-conversions) — the
-      // same pre-existing wrongness the old ptr-vs-int spelling had, surfacing as a scoring
-      // nonmatch, never a silent regression of a formerly-correct compare. Rare shape; an outer
-      // signed cast on addr-carrying trees is the follow-up if it ever costs a row.
+      // SCOPE: this handles BARE addr operands. An addr-carrying arithmetic tree
+      // (`(u32)&gSym + 4`, spelled by intifyAddr below) renders unsigned and would compare
+      // unsigned under an icmp_s*; the signed operand pin at the end of this block catches it as
+      // one case of the general rule, needing no addr-specific reasoning.
       const t = /^icmp_s/.test(d.opcode) ? T.s(32) : T.u(32);
       const intifyAddrCmp = (x: Expr): Expr => (x.k === 'addr' ? { k: 'cast', to: t, e: x } : x);
       let l = intifyAddrCmp(e(d.operands[0]));
@@ -2016,6 +2014,22 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         } else {
           l = { k: 'cast', to: T.u(32), e: l };
         }
+      }
+      // The SIGNED direction of the same hole, and a DEFAULT rather than an arm of that axis:
+      // nothing underdetermines here. An icmp_s* operand that renders unsigned makes C compare
+      // unsigned (unsigned wins the usual arithmetic conversions), which is the compare the
+      // machine did not do; against a constant the test folds away entirely and takes the
+      // surrounding computation with it — agbcc compiles `(u32)a / b < 0` to `mov r0, #0`,
+      // deleting the `__udivsi3` call. The opcode names the compare and C's own default over two
+      // `int`s already agrees with it, so the cast fires ONLY where the rendering provably
+      // disagrees. `undefined` is left alone for that reason — it is the model not reaching, not
+      // evidence of unsignedness — which is also why a pointer side needs no guard (it never
+      // renders a definite signedness) and why a correctly-typed compare cannot churn.
+      if (/^icmp_s/.test(d.opcode)) {
+        const pinSigned = (x: Expr): Expr =>
+          renderedIntSignedness(x, vtEnv) === false ? { k: 'cast', to: T.s(32), e: x } : x;
+        l = pinSigned(l);
+        r = pinSigned(r);
       }
       return { k: 'bin', op: CMP_TO_BIN[d.opcode], l, r };
     }
