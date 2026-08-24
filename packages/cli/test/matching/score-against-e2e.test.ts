@@ -66,9 +66,10 @@ describe('CLI --score-against (agbcc, real toolchain)', () => {
     const pooled = await runCli([asmPath, '--name', 'ushr', '--score-against', obj, '--jobs', '2', '--progress']);
     expect(pooled.code).toBe(0);
     expect(pooled.stderr).toMatch(
-      /asmlift: \[phase] wall \d+\.\d+s · enumerate \d+\.\d+s \(1 call\) · compile \d+\.\d+s over 2 workers \(\d+ calls\) · score \d+\.\d+s \(\d+ calls\) · rank \d+\.\d+s \(1 call\) · main-thread idle\+other -?\d+\.\d+s\n/,
+      /asmlift: \[phase] wall \d+\.\d+s · enumerate \d+\.\d+s \(1 call\) · compile \d+\.\d+s over 2 workers \(\d+ calls\) · score \d+\.\d+s \(\d+ calls\) · rank \d+\.\d+s \(1 call\) · main-thread idle\+other \d+\.\d+s\n/,
     );
-    // serial: the compile happens inside the call that scores, and is charged apart anyway
+    // serial: the compile happens inside the call that scores, and is charged apart anyway —
+    // and, having held the main thread, it is not counted as idle on top (phase.ts)
     const serial = await runCli([asmPath, '--name', 'ushr', '--score-against', obj, '--progress']);
     expect(serial.stderr).toMatch(
       /asmlift: \[phase] .* compile \d+\.\d+s \(\d+ calls\) · score \d+\.\d+s \(\d+ calls\)/,

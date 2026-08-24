@@ -23,13 +23,20 @@ export class PhaseClock {
   // contains another one reports its own work: the serial driver compiles inside the call it
   // scores in, and a `score` that quietly counted the compile would be the whole profile wrong.
   readonly #children: number[] = [];
+  // Of everything charged, the part that HELD the main thread. Which phases those are is a
+  // property of the run and not of the phase name: the pooled driver awaits its compiles, so the
+  // main thread is free through them, while the serial driver runs each one on it.
+  #heldMs = 0;
   /** How many concurrent producers charged `compile` — reported so a summed figure larger than
    *  the wall clock reads as parallelism rather than as a broken measurement. */
   workers = 1;
 
-  #add(phase: Phase, ms: number): void {
+  #add(phase: Phase, ms: number, held: boolean): void {
     this.#ms.set(phase, (this.#ms.get(phase) ?? 0) + ms);
     this.#calls.set(phase, (this.#calls.get(phase) ?? 0) + 1);
+    if (held) {
+      this.#heldMs += ms;
+    }
   }
 
   /** Charge one SYNCHRONOUS phase, exclusive of any phase nested inside it. */
@@ -44,7 +51,7 @@ export class PhaseClock {
       if (this.#children.length > 0) {
         this.#children[this.#children.length - 1] += elapsed;
       }
-      this.#add(phase, elapsed - nested);
+      this.#add(phase, elapsed - nested, true);
     }
   }
 
@@ -55,7 +62,7 @@ export class PhaseClock {
     try {
       return await fn();
     } finally {
-      this.#add(phase, performance.now() - t0);
+      this.#add(phase, performance.now() - t0, false);
     }
   }
 
@@ -65,9 +72,9 @@ export class PhaseClock {
     return { ms: this.#ms.get(phase) ?? 0, calls: this.#calls.get(phase) ?? 0 };
   }
 
-  /** One `asmlift: [phase]` line. `main-thread idle+other` is the wall minus the phases that run
-   *  ON the main thread — the pool's waiting, plus everything this clock does not name — so it is
-   *  the honest size of what a reader may NOT conclude from the numbers beside it. */
+  /** One `asmlift: [phase]` line. `main-thread idle+other` is the wall minus everything charged
+   *  that held the main thread — the pool's waiting, plus all the work this clock does not name —
+   *  so it is the honest size of what a reader may NOT conclude from the numbers beside it. */
   report(): string {
     const wall = (performance.now() - this.#started) / 1000;
     const s = (phase: Phase) => (this.#ms.get(phase) ?? 0) / 1000;
@@ -76,7 +83,7 @@ export class PhaseClock {
       const pooled = p === 'compile' && this.workers > 1 ? ` over ${this.workers} workers` : '';
       return `${p} ${s(p).toFixed(1)}s${pooled} (${n} call${n === 1 ? '' : 's'})`;
     });
-    const other = wall - s('enumerate') - s('score') - s('rank');
+    const other = wall - this.#heldMs / 1000;
     return `asmlift: [phase] wall ${wall.toFixed(1)}s · ${parts.join(' · ')} · main-thread idle+other ${other.toFixed(1)}s\n`;
   }
 }
