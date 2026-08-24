@@ -882,13 +882,12 @@ export function enumerateCandidates(
   for (const [svIndex, sv] of symbolVariants.entries()) {
     const svOpts = sv.symbols ? baseOpts : { ...baseOpts, symbols: undefined };
     // `/no-bitfield` names a spelling the MAP makes available, so it has no inhabitant on the
-    // variant that structures without one: `spellBitfieldMembers` is read in exactly one place
-    // (structure.ts), inside `if (symCtx && littleEndian && spellBitfieldMembers)`, and `symCtx` is
-    // undefined precisely when `symbols` is. Both arms would structure the identical tree, so this
-    // declines to build the second one rather than leaving the tree skip to collapse it.
+    // variant that structures without one: structure() normalizes `spellBitfieldMembers` to false
+    // when `symbols` is absent, so both arms structure the identical tree whatever reads it. This
+    // declines to build the second arm rather than leaving the tree skip to collapse it, which is
+    // worth 512 of LoadBGTilemapData's 1536 structurings under docs/ranked-repro.md's flags.
     // Declining is not pruning — same posture as the signedness decline below, and the same
-    // candidate list. bitfield-members.test.ts pins the premise the decline rests on, which is a
-    // claim about that one reader and would stop holding if a second one appeared outside it.
+    // candidate list; bitfield-members.test.ts pins the normalization the decline rests on.
     const svCands = sv.symbols ? axisCands : axisCands.filter((s) => s.bitfields);
     // The signedness axis DECLINES where the pin has nothing to pin. `pinScalarParams` writes only
     // over an entry param still `unknown`/`int` that is not one of the recovered pointers/
@@ -996,15 +995,15 @@ export function enumerateCandidates(
             opts.onLeverError?.(name + lv.suffix + s.suffix, e instanceof Error ? e.message.split('\n')[0] : String(e));
             continue;
           }
-          // A TREE another axis point already spelled. Every re-spelling below is a pure function
-          // of `sfn` and this call's own constants, so a repeated tree can only re-emit sources
-          // `seen` already holds — the candidate list, its order and its labels are exactly the
-          // ones the whole fan produces, reached without re-deriving forty passes. An axis is
-          // INERT on most functions (nothing to re-read, no bitfield member, no joined if), and an
-          // inert axis is a factor of two in the cross that changes nothing: on the klonoa
-          // checkout's `LoadBGTilemapData`, the function docs/ranked-repro.md measures, 1152 of
-          // 1536 axis points (75%) re-derive a tree an earlier one already emitted with the
-          // project map, and 27456 of 29376 do over its first 61 functions.
+          // A TREE another axis point already spelled. `fanOut` is a function of the tree alone —
+          // its signature is the argument — so a repeated tree can only re-emit sources `seen`
+          // already holds: the candidate list, its order and its labels are exactly the ones the
+          // whole fan produces, reached without re-deriving forty passes. An axis is INERT on most
+          // functions (nothing to re-read, no bitfield member, no joined if), and an inert axis is
+          // a factor of two in the cross that changes nothing: on the klonoa checkout's
+          // `LoadBGTilemapData`, the function docs/ranked-repro.md measures, 1152 of 1536 axis
+          // points (75%) re-derive a tree an earlier one already emitted with the project map, and
+          // 27456 of 29376 do over its first 61 functions.
           //
           // Keyed on the JSON text, in a Set of STRINGS — a value comparison, so it can never
           // merge two trees the way a hash could. Its one direction of error is a MISS (a

@@ -831,7 +831,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     defOrderLoadPairs = true,
     anchorConstCopies = false,
     littleEndian = true,
-    spellBitfieldMembers = true,
+    spellBitfieldMembers: bitfieldSpellingWanted = true,
     rereadGlobals = false,
     materializeJoinFeeds = false,
     homeSharedAddresses = false,
@@ -843,6 +843,12 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     onGap = 'strict',
     symbols,
   } = opts;
+  // Only the MAP makes the named bitfield spelling available, so with no map this is not a choice.
+  // Normalized once here rather than left to each reader's own `symCtx &&` guard, because rank.ts's
+  // `/no-bitfield` decline rests on both arms structuring the IDENTICAL tree without a map — a
+  // second reader added outside that guard would otherwise delete a candidate silently, and nothing
+  // reports a candidate that was never enumerated (bitfield-members.test.ts).
+  const spellBitfieldMembers = symbols !== undefined && bitfieldSpellingWanted;
   // These levers all change which edge copies elide as identities (extra materialization does
   // too), which the loop emitters' hazard predicates read — so the invariant above covers each.
   // A per-compiler DEFAULT is not among them, however much it materializes: the primary IS this

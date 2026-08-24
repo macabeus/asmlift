@@ -173,11 +173,12 @@ describe('declaredFields — bitfields seat by BIT cursor', () => {
 });
 
 describe('the option is inert without a map — the `/no-bitfield` decline rests on this', () => {
-  // rank.ts does not enumerate `/no-bitfield` on the `/raw-globals` variant, because
-  // `spellBitfieldMembers` has ONE reader and it sits inside `if (symCtx && littleEndian &&
-  // spellBitfieldMembers)`, where `symCtx` is undefined precisely when the map is. That is a claim
-  // about this file, so it is tested here rather than asserted in a comment over there: a second
-  // reader added outside that guard makes the two spellings differ and fails this.
+  // rank.ts does not enumerate `/no-bitfield` on the `/raw-globals` variant, because with no map
+  // both arms structure the IDENTICAL tree. structure() makes that true for every reader of the
+  // option rather than for the one that happens to sit inside `if (symCtx && …)` today: with
+  // `symbols` absent the option is normalized to false at the boundary. These two tests are the
+  // check on that normalization — a claim about this file, tested here rather than asserted in a
+  // comment over there.
   const bothWays = (asm: string, symbols?: SymbolMap) => {
     const fn = () => {
       const lifted = frontendFor(ARMV4T_AGBCC).lift('f', asm, ARMV4T_AGBCC, {}, undefined, symbols);
