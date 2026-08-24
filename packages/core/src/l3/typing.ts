@@ -132,10 +132,10 @@ export function arithConversionSignedness(l: Expr, r: Expr, varType: VarTypes): 
  * rules that contract omits, integer PROMOTION and the usual arithmetic CONVERSIONS.
  *
  * THE one rendered-signedness judgment, and it lives beside the declarations it judges against
- * because four consumers share it: the C-family backend's operand pin, structure.ts's
- * unsigned-compare cast (the /uns-cmp axis) and its signed-compare pin, and initfirst's
- * compare-meaning gate. Two of those models disagreeing about one expression is the drift this
- * placement prevents.
+ * because every consumer shares it: the C-family backend's operand pin, structure.ts's
+ * unsigned-compare gate (the /uns-cmp axis) and its signed-compare pin, and — through
+ * `arithConversionSignedness` above — initfirst's compare-meaning gate. Two of those models
+ * disagreeing about one expression is the drift this placement prevents.
  *
  * The question is byte-load-bearing: C spells both `>>>` and `>>` as `>>` and chooses between them
  * from the left operand's type, so a logical shift rendered over a signed expression recompiles to

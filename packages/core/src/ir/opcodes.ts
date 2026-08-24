@@ -71,8 +71,8 @@ export const OPCODES = {
   // the register form (2 operands) is a real hardware divide (`div`/`divu` + `mflo`/`mfhi` on an
   // ISA with `capabilities.hwDivide`); the structurer branches on count. `udiv`/`smod`/`umod`
   // are 2-operand only. `sdiv`/`udiv` = quotient, `smod`/`umod` = remainder; signedness lives in
-  // the op (recovery types the operands to match), so the backend picks `/`/`%` over
-  // correctly-typed operands.
+  // the op, and L3 keeps the pair apart (`/`/`%` against `/u`/`%u`) so the C backend can spell
+  // both with C's one token over an operand cast that says which.
   sdiv: { operands: 'variadic', results: 1, traps: true },
   udiv: { operands: 2, results: 1, traps: true },
   smod: { operands: 2, results: 1, traps: true },

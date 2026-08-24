@@ -4,7 +4,7 @@
 // built through build_unary_op and FOLDED, so fold-const.c's "Convert - (a - b) to (b - a)"
 // (gcc/fold-const.c:4821) rewrites a negated subtraction into the reversed one before CSE ever
 // runs. `0 - x` reaches fold as a MINUS_EXPR with a zero left operand and comes back as a bare
-// `build1 (NEGATE_EXPR, …)` (gcc/fold-const.c:5082) which is never re-folded, so the subtraction
+// `build1 (NEGATE_EXPR, …)` (gcc/fold-const.c:5085) which is never re-folded, so the subtraction
 // survives as itself.
 //
 // With ONE use that difference is invisible: RTL combine folds the negate back in and both

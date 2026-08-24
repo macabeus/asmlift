@@ -1,7 +1,7 @@
 // The /zerosub re-spelling (l3/zerosub.ts): `-x` becomes `0 - x` when x is a subtraction the
 // function also computes elsewhere. gcc 2.9 folds `-(a - b)` to `(b - a)` before CSE
 // (gcc/fold-const.c:4821) but leaves `0 - (a - b)` as an unre-folded negate of the subtraction
-// itself (gcc/fold-const.c:5082), so over a SHARED value the two spellings are a computation and
+// itself (gcc/fold-const.c:5085), so over a SHARED value the two spellings are a computation and
 // a register apart — six instructions against five, compiled with agbcc.
 //
 // The refusals carry the lever: every operand shape the fold rule does not reach compiles the

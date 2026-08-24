@@ -584,11 +584,13 @@ export function enumerateCandidates(
     // dropped here — never scored, never able to win.
     const spellings: Spelling[] = [];
     // The PRIMARY spelling takes the same posture as every re-spelling below: a backend that
-    // declines by throwing costs this tree's candidate, never the row. Structuring is
-    // language-neutral (the signedness pins it inserts are `cast` nodes, which the Pascal
-    // backend loud-declines), so one unspellable tree out of the fan is a candidate the differ
-    // never sees, not a function asmlift cannot decompile. Refusing EVERY tree is still loud —
-    // the empty-enumeration check at the end of enumerateCandidates raises the last refusal.
+    // declines by throwing costs this tree — its primary and the re-spellings built from it —
+    // never the row. The opposite posture from the STRUCTURING refusal below, which aborts the
+    // row at the base point, and for the reason that separates them: that one says the lift is
+    // broken, this one that the target language has no spelling for a tree the lift got right
+    // (structuring is language-neutral, and the signedness pins it inserts are `cast` nodes the
+    // Pascal backend loud-declines). Refusing EVERY tree is still loud — the empty-enumeration
+    // check at the end raises the last refusal.
     try {
       spellings.push({ suffix: '', source: backend.emit(sfn), ...refsOf(sfn), ...volOf(sfn) });
     } catch (e) {

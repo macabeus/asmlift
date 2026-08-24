@@ -1648,10 +1648,10 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // cast at emission — the initfirst guard swap). The declaration is the honest fix: a name
   // flips to u32 when SOME value under it is u32-typed and NO value under it carries signed-use
   // evidence (the transitive input cone of any icmp_s* / sdiv / smod / shr_s). Only int32
-  // declarations reconcile; the flip is byte-invariant everywhere but the compares and unsigned
-  // divisions it corrects (+/-/*/&/|/^/<< are sign-blind, `>>` self-corrects via the backend's
-  // shiftOperand cast, a udiv/umod renders `/`/`%` unsigned through the flipped operand — the
-  // machine's own division — and SIGNED division is evidence-blocked).
+  // declarations reconcile; the flip is byte-invariant everywhere but the unsigned compares it
+  // corrects (+/-/*/&/|/^/<< are sign-blind; the signedness-carrying pairs — `>>`/`>>>` and
+  // `/`/`%` against `/u`/`%u` — say which they are through the backend's operand pin, so no
+  // declaration can change what they render; and SIGNED division is evidence-blocked).
   if (unsignedCompareSpelling) {
     // Signed-use evidence is the TRANSITIVE INPUT CONE of every signed op — a claimant can feed
     // an icmp_slt through an inline `sub` and the flip would still render that compare unsigned
