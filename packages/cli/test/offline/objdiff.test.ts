@@ -132,3 +132,52 @@ test('releaseTarget drops the memo and the next score re-parses', () => {
   releaseTarget(); // idempotent: nothing is left to dispose twice
   expect(scoreObjects(TARGET, DIFF, 'add_one')).toEqual(before);
 });
+
+// THE SCORE MEMO (src/objdiff.ts `candidateKey`). A score already computed against the retained
+// target is handed back rather than recomputed, so these pin what a hit is allowed to mean. Each
+// fails against a plausible spelling of the key: on a path-keyed one, on a symbol-less one, and on
+// a memo that outlives the target it was computed against.
+
+test('a candidate rewritten in place is re-scored, never handed the previous one’s score', () => {
+  // Every compile worker rewrites ONE scratch slot's `cand.o` (compile-command.ts), so this is the
+  // shape a ranked run actually presents — a path-keyed memo answers for the previous candidate.
+  const slot = join(SCRATCH, 'cand.o');
+
+  copyFileSync(DIFF, slot);
+  expect(scoreObjects(TARGET, slot, 'add_one').match).toBe(false);
+
+  copyFileSync(TARGET, slot);
+  expect(scoreObjects(TARGET, slot, 'add_one').match).toBe(true);
+});
+
+test('the symbol is part of the key — a second symbol is not answered from the first', () => {
+  // A key that named only the candidate's bytes would hand `add_one`'s score back for a symbol the
+  // object does not have: a throw turned into a plausible number, which is worse than either.
+  expect(scoreObjects(TARGET, DIFF, 'add_one').score).toBeGreaterThan(0);
+  expect(() => scoreObjects(TARGET, DIFF, 'no_such_symbol')).toThrow(/not found/);
+});
+
+test('the memo dies with the target — the same candidate is re-scored against a new one', () => {
+  const against = (t: string) => scoreObjects(t, DIFF, 'add_one');
+  expect(against(TARGET).match).toBe(false);
+  // same candidate bytes, different target: it is now its own target, and matches
+  expect(against(DIFF).match).toBe(true);
+  expect(against(TARGET).match).toBe(false);
+});
+
+test('a candidate that THROWS is not remembered — it throws again', () => {
+  expect(() => scoreObjects(TARGET, ODD_SIZE, 'add_one')).toThrow();
+  expect(() => scoreObjects(TARGET, ODD_SIZE, 'add_one')).toThrow();
+  expect(scoreObjects(TARGET, DIFF, 'add_one').match).toBe(false);
+});
+
+test('a returned score is FROZEN — one object serves every candidate with these bytes', () => {
+  const s = scoreObjects(TARGET, DIFF, 'add_one');
+  expect(Object.isFrozen(s)).toBe(true);
+  expect(Object.isFrozen(s.breakdown)).toBe(true);
+  // a caller mutating a shared score would rewrite every twin's; it throws instead
+  expect(() => {
+    (s as { score: number }).score = 99;
+  }).toThrow(TypeError);
+  expect(scoreObjects(TARGET, DIFF, 'add_one').score).toBe(s.score);
+});

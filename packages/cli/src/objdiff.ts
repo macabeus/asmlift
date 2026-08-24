@@ -8,6 +8,7 @@
 // FAIL-CLOSED: NOTHING is caught here. Any engine failure throws, and a row that cannot be
 // displayed can never count as matched — a swallowed per-row error could report a false
 // byte-exact match, the worst possible defect.
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type * as ObjdiffWasm from 'objdiff-wasm';
@@ -62,7 +63,7 @@ const DIFF_KINDS: Record<string, keyof DiffBreakdown> = {
 /** Diff `candidateObj` against `targetObj` for one symbol and tally objdiff's per-row diffKind.
  *  score === 0 ⇔ objdiff reports zero differing rows ⇔ byte-exact match. Throws when either
  *  object fails to parse, the symbol is missing on either side, or any row fails to display —
- *  an error is never a match. */
+ *  an error is never a match, and never a remembered one either. */
 // The engine's handles are component-model RESOURCES: without an explicit dispose they wait on
 // the FinalizationRegistry, which a tight synchronous scoring loop never lets run — after a few
 // hundred calls the wasm side exhausts and PANICS, and the poisoned instance then fails every
@@ -92,40 +93,62 @@ const CONFIG = new objdiff.diff.DiffConfig();
  *  two calls can never be scored against stale bytes. The read stays — only the parse is saved.
  *
  *  ONE entry, held for the life of the process. `scoreObjects` is a published entry point, so an
- *  embedder that scores once still retains an engine handle and a copy of the target's bytes
- *  afterwards; `releaseTarget()` below is how it gets them back. */
-let parsedTarget: { bytes: Uint8Array; obj: ObjdiffWasm.diff.Object } | undefined;
+ *  embedder that scores once still retains an engine handle, a copy of the target's bytes and
+ *  every score taken against them afterwards; `releaseTarget()` below is how it gets them back. */
+let parsedTarget: { bytes: Uint8Array; obj: ObjdiffWasm.diff.Object; scores: Map<string, MatchScore> } | undefined;
 
-/** Drop the memoized target: its engine handle is disposed and its bytes are released. The next
- *  `scoreObjects` re-parses. For an embedder holding this module open past its last score — the CLI
- *  itself never needs it, since a ranked run scores one target and then exits. */
+/** Drop the memoized target: its engine handle is disposed, and its bytes and the scores taken
+ *  against them are released. The next `scoreObjects` re-parses and re-scores. For an embedder
+ *  holding this module open past its last score — the CLI itself never needs it, since a ranked
+ *  run scores one target and then exits. */
 export function releaseTarget(): void {
   disposeAll(parsedTarget?.obj);
   parsedTarget = undefined;
 }
 
-function targetObject(path: string): ObjdiffWasm.diff.Object {
+function targetEntry(path: string): NonNullable<typeof parsedTarget> {
   const bytes = new Uint8Array(readFileSync(path));
   if (parsedTarget && Buffer.compare(bytes, parsedTarget.bytes) === 0) {
-    return parsedTarget.obj;
+    return parsedTarget;
   }
   // Parse BEFORE dropping the entry it replaces: a target that fails to parse must leave the
   // previous one intact and throw, never leave a disposed handle behind for the next call.
   const obj = objdiff.diff.Object.parse(bytes, CONFIG, 'target');
   disposeAll(parsedTarget?.obj);
-  parsedTarget = { bytes, obj };
-  return obj;
+  parsedTarget = { bytes, obj, scores: new Map() };
+  return parsedTarget;
 }
+
+/** A ranked run compiles far more candidates than it produces distinct OBJECTS, and identical
+ *  objects have one score by definition. The signedness pin alone emits a twin of every function,
+ *  and wherever the pin moves no instruction the two spellings are the same object:
+ *  LoadBGTilemapData enumerates 26880 candidates that compile to 6000 distinct objects, so 20880
+ *  of its scoring calls are repeats. Recognising a repeat HERE is an observation about two files;
+ *  predicting it in the enumerator is a claim about codegen, and core's test/sign-axis.test.ts is
+ *  where that claim dies.
+ *
+ *  The key is the candidate's own CONTENT, hashed, plus the symbol — the rest of what a score
+ *  depends on is the target's bytes, which is the entry's identity, so the memo belongs to the
+ *  entry and dies with it. Never a path: each compile worker rewrites one scratch slot's `cand.o`
+ *  (compile-command.ts), so a path key would answer for the previous candidate. */
+const candidateKey = (bytes: Uint8Array, symbol: string): string =>
+  `${createHash('sha256').update(bytes).digest('hex')} ${symbol}`;
 
 export function scoreObjects(targetObj: string, candidateObj: string, symbol: string): MatchScore {
   const mappingConfig = { mappings: [], selectingLeft: undefined, selectingRight: undefined };
-  const target = targetObject(targetObj);
+  const target = targetEntry(targetObj);
+  const candBytes = new Uint8Array(readFileSync(candidateObj));
+  const key = candidateKey(candBytes, symbol);
+  const remembered = target.scores.get(key);
+  if (remembered) {
+    return remembered;
+  }
   let candidate, left, right;
   try {
-    candidate = objdiff.diff.Object.parse(new Uint8Array(readFileSync(candidateObj)), CONFIG, 'base');
+    candidate = objdiff.diff.Object.parse(candBytes, CONFIG, 'base');
 
     // left = target, right = candidate (base).
-    ({ left, right } = objdiff.diff.runDiff(target, candidate, CONFIG, mappingConfig));
+    ({ left, right } = objdiff.diff.runDiff(target.obj, candidate, CONFIG, mappingConfig));
     if (!left || !right) {
       throw new Error('objdiff runDiff returned an empty side');
     }
@@ -173,7 +196,18 @@ export function scoreObjects(targetObj: string, candidateObj: string, symbol: st
       }
     }
 
-    return { symbol, rows, matching, score: differences, match: differences === 0, breakdown };
+    // FROZEN because the memo hands one object to every candidate that compiled to these bytes: a
+    // caller that mutated it would rewrite the others' scores, and this way it throws instead.
+    const scored: MatchScore = Object.freeze({
+      symbol,
+      rows,
+      matching,
+      score: differences,
+      match: differences === 0,
+      breakdown: Object.freeze(breakdown),
+    });
+    target.scores.set(key, scored);
+    return scored;
   } finally {
     // the target and the config outlive the call by design; everything minted here does not
     disposeAll(left, right, candidate);
