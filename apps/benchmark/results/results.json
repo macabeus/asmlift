@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generatedAt": "2026-08-23T21:26:16.118Z",
+    "generatedAt": "2026-08-24T00:19:30.558Z",
     "toolchains": [
       "ido7.1",
       "agbcc",
@@ -14,7 +14,7 @@
       "real": 252
     },
     "asmlift": {
-      "commit": "e6e692d18e9972280edd79eb02984eb625f65e81",
+      "commit": "e67d32ff60648a2b59c4f607f818b1d7dcbf8355",
       "dirty": false
     },
     "m2c": {
@@ -20190,54 +20190,6 @@
           {
             "label": "unsigned/defsite/flip-join/livebase",
             "error": "agbcc failed: c.c:2035: too many arguments to function `VramMalloc'"
-          },
-          {
-            "label": "signed",
-            "error": "agbcc failed: c.c:2041: too many arguments to function `VramMalloc'"
-          },
-          {
-            "label": "signed/initfirst",
-            "error": "agbcc failed: c.c:2037: too many arguments to function `VramMalloc'"
-          },
-          {
-            "label": "signed/livebase",
-            "error": "agbcc failed: c.c:2043: too many arguments to function `VramMalloc'"
-          },
-          {
-            "label": "signed/livebase/initfirst",
-            "error": "agbcc failed: c.c:2039: too many arguments to function `VramMalloc'"
-          },
-          {
-            "label": "signed/defsite",
-            "error": "agbcc failed: c.c:2035: too many arguments to function `VramMalloc'"
-          },
-          {
-            "label": "signed/defsite/livebase",
-            "error": "agbcc failed: c.c:2037: too many arguments to function `VramMalloc'"
-          },
-          {
-            "label": "signed/flip-join",
-            "error": "agbcc failed: c.c:2039: too many arguments to function `VramMalloc'"
-          },
-          {
-            "label": "signed/flip-join/initfirst",
-            "error": "agbcc failed: c.c:2035: too many arguments to function `VramMalloc'"
-          },
-          {
-            "label": "signed/flip-join/livebase",
-            "error": "agbcc failed: c.c:2041: too many arguments to function `VramMalloc'"
-          },
-          {
-            "label": "signed/flip-join/livebase/initfirst",
-            "error": "agbcc failed: c.c:2037: too many arguments to function `VramMalloc'"
-          },
-          {
-            "label": "signed/defsite/flip-join",
-            "error": "agbcc failed: c.c:2033: too many arguments to function `VramMalloc'"
-          },
-          {
-            "label": "signed/defsite/flip-join/livebase",
-            "error": "agbcc failed: c.c:2035: too many arguments to function `VramMalloc'"
           }
         ],
         "symbolsUsed": [],
@@ -20330,14 +20282,6 @@
           },
           {
             "label": "unsigned/flip-join",
-            "error": "agbcc failed: c.c:2338: too many arguments to function `VramMalloc'"
-          },
-          {
-            "label": "signed",
-            "error": "agbcc failed: c.c:2339: too many arguments to function `VramMalloc'"
-          },
-          {
-            "label": "signed/flip-join",
             "error": "agbcc failed: c.c:2338: too many arguments to function `VramMalloc'"
           }
         ],
