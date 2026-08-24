@@ -74,18 +74,25 @@ stopped at the list of dirty paths would have called such a bundle current.
   pastes, not from a rig outside the tree that the next round has to rebuild:
 
   ```
-  asmlift: [phase] wall 271.0s · enumerate 22.4s (1 call) · compile 1309.9s over 6 workers
-    (26880 calls) · score 166.1s (26880 calls) · rank 2.5s (1 call) · main-thread idle+other 80.0s
+  asmlift: [phase] wall 259.4s · enumerate 19.9s (1 call) · compile 1257.3s over 6 workers
+    (26880 calls) · score 163.7s (26880 calls) · rank 2.5s (1 call) · main-thread idle+other 73.3s
   ```
 
   Two denominators, answering different questions. `compile` is summed ACROSS workers, so
-  `compile / wall` is the pool's average parallelism — **4.83 of 6** above, which is what says
+  `compile / wall` is the pool's average parallelism — **4.85 of 6** above, which is what says
   whether more `--jobs` would buy anything. The MAIN THREAD's budget is `enumerate + score + rank`
-  = 191.0s of the 271.0s wall, of which scoring is 87%; the remaining `idle+other` is the main
-  thread waiting on subprocesses. Of the work charged at all (1500.9s), the compiles are **87%**.
-  Both figures move with the machine — the same command an hour earlier, sharing the box with
-  another ranked run, read `wall 443.8s · compile 2256.9s · score 254.2s` for the same 26880
-  candidates and the same score. Only the shares travel; re-time on your own log.
+  = 186.1s of the 259.4s wall, of which scoring is 88%; the remaining `idle+other` is the main
+  thread waiting on subprocesses. Of the work charged at all (1443.4s), the compiles are **87%**.
+
+  Both figures move with the machine, and by a lot. The same command on the same commit, sharing
+  the box with a full `pnpm bench run`, read `wall 426.3s · compile 2175.1s · score 211.2s` —
+  same 26880 candidates, same 0 dropped, same 395, same winner. Only the shares travel; re-time on
+  your own log, and say what else the machine was doing.
+
+  `idle+other` is the wall minus the work that HELD the main thread, which is not a fixed list of
+  phases: at `--jobs 1` the compiles run on the main thread and come out of it, at `--jobs n` they
+  are subprocess awaits and do not. So the residual means "waiting on subprocesses, plus whatever
+  this clock does not name" in both, and the parts never sum past the wall.
 
 - **`--proto`'s absence is now in the log.** Every run ends with an `asmlift: [proto]` line
   naming the callees whose arity it had to guess (nothing declared them: no `--proto` entry, no
