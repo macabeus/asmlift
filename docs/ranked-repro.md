@@ -33,6 +33,12 @@ which the enumerator's per-candidate closures then pay for on every candidate.
 command above runs. Both produce the same candidates and the same scores; the `[score]` diff below
 is the check, and it is cheap.
 
+Measured back to back on the LoadBGTilemapData command below — one machine, other work running on
+it, `--jobs 6`, 26880 candidates: **620s under tsx against 484s bundled**, of which the ENUMERATION
+(the only phase a loader touches — the candidate compiles are subprocesses) was **207s against
+118s**. Both printed the same `[ranked]` line, the same 26880 `[score]` lines and the same stdout
+byte for byte. The ratio is the machine's, not the code's: re-time on your own log.
+
 **A bundle is only as fresh as its last build, and `dist/` is gitignored** — nothing rebuilds it for
 you, nothing commits it, and an old one runs exactly as happily as a new one. So rebuild before any
 run you intend to quote, and read the stamp: the build BAKES the tree it was built from into the

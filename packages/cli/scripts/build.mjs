@@ -6,7 +6,7 @@
 // bake. src/provenance.ts is the reader: it compares this sample against the checkout and calls a
 // disagreement STALE.
 //
-// The reading is the SAME git commands src/provenance.ts takes, from the same directories, because
+// The reading is the SAME git commands src/provenance.ts takes, against the same repo root, because
 // the two are compared for exact equality.
 import { build } from 'esbuild';
 import { execFileSync } from 'node:child_process';
@@ -51,8 +51,9 @@ await build({
   // yaml is a plain runtime dependency.
   external: ['objdiff-wasm', 'yaml'],
   banner: { js: '#!/usr/bin/env node' },
-  // No --keep-names, which tsx's transform does install: the shim it wraps around every arrow
-  // function is most of why this loader is the faster one.
+  // No --keep-names. tsx's transform sets it (`keepNames:!0` in its esbuild options) and wraps every
+  // arrow function in the shim; this bundle has never carried it, and the two loaders otherwise run
+  // the same sources.
   define: { __ASMLIFT_BUILD__: JSON.stringify(built) },
   outfile: resolve(pkg, 'dist/asmlift.mjs'),
 });
