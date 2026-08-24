@@ -38,7 +38,6 @@ import { registerishSpellings } from './l3/regspell';
 import { reindexWalks } from './l3/reindex';
 import { hoistScopedBases } from './l3/scopebase';
 import { type SymbolRef, collectSymbolRefs } from './l3/symbol-refs';
-import { signednessObservable } from './l3/typing';
 import { deviceVolatileClaims, volatilePtrLocals, volatileSubsetCandidates } from './l3/volatileptr';
 import { volatileValueLocals } from './l3/volatileval';
 import { RewritePattern } from './pattern/engine';
@@ -382,15 +381,6 @@ export interface Candidate {
    *  statements apart and the rendered text cannot pair them. */
   deviceVolatile?: number;
 }
-/** An emitted spelling on its way to becoming a `Candidate` — the source plus the facts derived
- *  from the tree it was printed from, before the dedup decides whether it survives. */
-interface Spelling {
-  suffix: string;
-  source: string;
-  symbolRefs?: SymbolRef[];
-  deviceVolatile?: number;
-}
-
 /** A candidate paired with its score `S` (the injected scorer's result shape — must carry `.score`). */
 export interface Scored<S> extends Candidate {
   score: S;
@@ -567,37 +557,6 @@ export function enumerateCandidates(
       : [];
     return refs.length ? { symbolRefs: refs } : {};
   };
-  /** Print one spelling — or DECLINE it as a signedness twin of one already enumerated.
-   *
-   *  The signedness axis pins the entry scalars before recovery, so its two passes reach emission
-   *  with trees that can differ everywhere or nowhere. Where they differ NOWHERE but in the
-   *  parameters' own declarations, the two sources are the same C program compiled the same way:
-   *  the same bytes, so a candidate that can only TIE — and one that loses every later term of
-   *  `compareScored` to the sibling already in the list (same group, same volatile claims, same
-   *  casts since a declaration carries none, same lines, and an earlier place in enumeration
-   *  order). So it collapses on the `seen` dedup exactly like an identical source.
-   *
-   *  Both halves of the test are load-bearing, and either alone is unsound. Re-printing the tree
-   *  with every integer parameter spelled unsigned is what decides "identical but for the pin" —
-   *  from the EMITTER, not by diffing two strings for a line that looks like a signature.
-   *  `signednessObservable` then decides whether that difference can be READ: `return a0 / 7;` is
-   *  the same seven characters under either pin and two different instructions, so text alone would
-   *  drop the spelling that matches. The unsigned pass runs first and is wholly in `seen` before
-   *  this can fire, so the twin is looked up, never predicted — and when it misses, the spelling is
-   *  printed and ranked as before. */
-  const spellingOf = (signed: boolean, suffix: string, tree: SFn): Spelling | null => {
-    const ints = signed ? tree.params.filter((p) => p.type.kind === 'int') : [];
-    if (ints.length > 0 && !signednessObservable(tree, new Set(ints.map((p) => p.name)))) {
-      const twin = backend.emit({
-        ...tree,
-        params: tree.params.map((p) => (p.type.kind === 'int' ? { ...p, type: T.int(p.type.width, false) } : p)),
-      });
-      if (seen.has(twin)) {
-        return null;
-      }
-    }
-    return { suffix, source: backend.emit(tree), ...refsOf(tree), ...volOf(tree) };
-  };
   // The SYMBOL-MAP spelling is itself a ranked LEVER on the same footing as signedness/branch
   // sense: naming a global changes agbcc's codegen (the eager-load effect), and which side
   // byte-wins is genuinely per-function — the dogfood's landed matches split between extern
@@ -707,14 +666,9 @@ export function enumerateCandidates(
           // when a loop re-spells, BOTH representations are emitted and the differ referees. The
           // re-spelling passes the same boundary contracts as the primary; one that fails them is
           // dropped here — never scored, never able to win.
-          const spellings: Spelling[] = [];
-          const spell = (suffix: string, tree: SFn): void => {
-            const sp = spellingOf(cand.signed, suffix, tree);
-            if (sp) {
-              spellings.push(sp);
-            }
-          };
-          spell('', sfn);
+          const spellings: { suffix: string; source: string; symbolRefs?: SymbolRef[]; deviceVolatile?: number }[] = [
+            { suffix: '', source: backend.emit(sfn), ...refsOf(sfn), ...volOf(sfn) },
+          ];
           // Representation re-spellings — each a lever on the same footing as signedness/branch sense,
           // each guarded: it must pass the same boundary contracts as the primary AND emit (a backend
           // that declines by throwing — Pascal loud-fails unspellable shapes — drops the candidate,
@@ -757,7 +711,7 @@ export function enumerateCandidates(
               }
               assertResolved(alt);
               assertDerefsTyped(alt);
-              spell(suffix, alt);
+              spellings.push({ suffix, source: backend.emit(alt), ...refsOf(alt), ...volOf(alt) });
               // STATEMENT-SHAPE products, derived onto EVERY spelling — the second sanctioned
               // product mechanism (the POLICY note above carries the admission argument). Each is
               // a statement-order/shape fact orthogonal to representation; subsets compose in the
@@ -768,7 +722,12 @@ export function enumerateCandidates(
                   if (shaped !== null) {
                     assertResolved(shaped.out);
                     assertDerefsTyped(shaped.out);
-                    spell(`${suffix}${shaped.suffix}`, shaped.out);
+                    spellings.push({
+                      suffix: `${suffix}${shaped.suffix}`,
+                      source: backend.emit(shaped.out),
+                      ...refsOf(shaped.out),
+                      ...volOf(shaped.out),
+                    });
                   }
                 }
               }
@@ -1004,8 +963,7 @@ export function enumerateCandidates(
             // structures the same either way): no point scoring a duplicate spelling. Deduping the
             // WHOLE emitted set (not just scored survivors) is equivalent — an identical source
             // scores identically, so it can never change `best` — and it keeps the candidate set to
-            // the genuinely distinct spellings. A SIGNEDNESS TWIN collapses on the same rule one
-            // step removed: same program, one type spelled two ways, so the same bytes (spellingOf).
+            // the genuinely distinct spellings.
             if (seen.has(source)) {
               continue;
             }
