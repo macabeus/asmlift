@@ -14,9 +14,24 @@
 // instructions (one a register copy) where `0 - (a - b)` costs five. Both compiled with agbcc
 // `-O2 -mthumb-interwork -Wimplicit -fhex-asm -fprologue-bugfix`.
 //
+// NOT an agbcc rule, so no target gate: compiled on the shared shape, IDO, KMC GCC and gcc
+// 2.7.2/MIPS each emit a different function for the two spellings as well — IDO the other way
+// round, where `-(a - b)` is the `negu` and `0 - (a - b)` the reversed `subu` — and only mwcc
+// collapses them, where the duplicate scores identically and can neither win nor lose.
+//
 // So which one the source wrote is not recoverable — a `neg` is reachable from `-t` over a named
 // local as well — and the differ referees. Semantics are preserved by construction: `-x` and
 // `0 - x` are the same C expression for every integer type.
+//
+// A RE-SPELLING rather than a fourth value-home axis (docs/level-tower.md's third fork). The fold
+// rule fires at all only because asmlift INLINED a value the source bound to a local, and naming
+// that local reaches the same match by the other route: on `pokeemerald:GetAnchorCoord:agbcc`,
+// `s32 t = a1 - a0;` scores 0 against the row's own target.o where the inlined body with a plain
+// `-` scores 1. asmlift cannot spell it — all three home axes decline on pedigree (`/addr-home`
+// wants an address, `/expr-home` a loop, `/derived-home` a memory read) and this is a bare pure
+// value with three consumers. An axis admitting any such value would reach the use shapes a
+// substitution cannot, and would double the fan wherever it admits; this costs one candidate per
+// distinct tree carrying the shape. Take the axis when a row demands a shape this cannot reach.
 //
 // SCOPE (decline over approximate). Only a `bin('-')` operand, and only a SHARED one. Neither
 // restriction is caution: over any other operand shape the fold rule does not apply and the two
