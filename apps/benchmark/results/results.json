@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generatedAt": "2026-08-24T22:16:02.498Z",
+    "generatedAt": "2026-08-24T23:20:19.637Z",
     "toolchains": [
       "ido7.1",
       "agbcc",
@@ -14,7 +14,7 @@
       "real": 252
     },
     "asmlift": {
-      "commit": "5a0e41f738e14751d43da75d7a7828b175ceebea",
+      "commit": "1d5760c642654aabddbe14c6bc5e8453725877e0",
       "dirty": false
     },
     "m2c": {
@@ -8342,7 +8342,7 @@
           }
         ],
         "outcome": "nonmatch",
-        "source": "struct Elem0 { u16 field_0; u16 field_2; u16 field_4; u16 field_6; u8 _pad0[20]; };\nstruct Elem1 { s32 field_0; u8 _pad0[4]; };\nvoid TransformSingleEntityToScreen(u32 a0, u32 a1, u32 a2) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    u8 * v5;\n    s32 v6;\n    s32 v7;\n    v0 = ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_0 - (s8)a1 - gUnk_03003430.bg2HOfs;\n    ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_4 = v0;\n    v1 = ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_2 - (s8)a2 - gUnk_03003430.bg2VOfs;\n    ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_6 = v1;\n    v2 = gUnk_03003430.bg2HOfs;\n    v3 = gBg2XMag;\n    v4 = gUnk_03003430.bg2HOfs;\n    if ((u8)a0 > 12) {\n        v5 = (u8 *)((s32 *)(((u8)a0 << 3) + (u8 *)gUnk_030051DC - 104))[1];\n    } else {\n        v5 = (u8 *)((struct Elem1 *)((u32)&gUnk_08078FC8 + 4))[(u8)a0].field_0;\n    }\n    switch (15 & v5[5]) {\n        case 3:\n        case 11:\n            v7 = gUnk_03003430.bg2VOfs - (s16)(u16)(gUnk_03003430.bg2VOfs - v1) * gBg2YMag / 256;\n            v6 = (s32)((128 << 1) - gBg2YMag) >> 3;\n            break;\n        case 1:\n        case 6:\n        case 8:\n            v7 = gUnk_03003430.bg2VOfs - (s16)(u16)(gUnk_03003430.bg2VOfs - v1) * gBg2YMag / 256;\n            v6 = (s32)((128 << 1) - gBg2YMag) >> 5;\n            break;\n        case 0:\n        case 4:\n        case 5:\n            v7 = gUnk_03003430.bg2VOfs - (s16)(u16)(gUnk_03003430.bg2VOfs - v1) * gBg2YMag / 256;\n            v6 = (s32)((128 << 1) - gBg2YMag) >> 6;\n            break;\n        case 2:\n        case 7:\n        case 9:\n        case 10:\n            v7 = gUnk_03003430.bg2VOfs - (s16)(u16)(gUnk_03003430.bg2VOfs - v1) * gBg2YMag / 256;\n            v6 = (s32)((128 << 1) - gBg2YMag) >> 4;\n            break;\n        default:\n            v7 = gUnk_03003430.bg2VOfs - (s16)(u16)(gUnk_03003430.bg2VOfs - v1) * gBg2YMag / 256;\n            v6 = (s32)((128 << 1) - gBg2YMag) >> 4;\n    }\n    ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_4 = v4 - v3 * (s16)(v2 - v0) / 256;\n    ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_6 = v7 + v6;\n    return;\n}\n",
+        "source": "struct Elem0 { u16 field_0; u16 field_2; u16 field_4; u16 field_6; u8 _pad0[20]; };\nstruct Elem1 { s32 field_0; u8 _pad0[4]; };\nvoid TransformSingleEntityToScreen(u32 a0, u32 a1, u32 a2) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    u8 * v5;\n    s32 v6;\n    s32 v7;\n    v0 = ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_0 - (s8)a1 - gUnk_03003430.bg2HOfs;\n    ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_4 = v0;\n    v1 = ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_2 - (s8)a2 - gUnk_03003430.bg2VOfs;\n    ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_6 = v1;\n    v2 = gUnk_03003430.bg2HOfs;\n    v3 = gBg2XMag;\n    v4 = gUnk_03003430.bg2HOfs;\n    if ((u8)a0 > 12) {\n        v5 = (u8 *)((s32 *)(((u8)a0 << 3) + (u8 *)gUnk_030051DC - 104))[1];\n    } else {\n        v5 = (u8 *)((struct Elem1 *)((u32)&gUnk_08078FC8 + 4))[(u8)a0].field_0;\n    }\n    switch (15 & v5[5]) {\n        case 3:\n        case 11:\n            v7 = gUnk_03003430.bg2VOfs - (s32)((s16)(u16)(gUnk_03003430.bg2VOfs - v1) * gBg2YMag) / 256;\n            v6 = (s32)((128 << 1) - gBg2YMag) >> 3;\n            break;\n        case 1:\n        case 6:\n        case 8:\n            v7 = gUnk_03003430.bg2VOfs - (s32)((s16)(u16)(gUnk_03003430.bg2VOfs - v1) * gBg2YMag) / 256;\n            v6 = (s32)((128 << 1) - gBg2YMag) >> 5;\n            break;\n        case 0:\n        case 4:\n        case 5:\n            v7 = gUnk_03003430.bg2VOfs - (s32)((s16)(u16)(gUnk_03003430.bg2VOfs - v1) * gBg2YMag) / 256;\n            v6 = (s32)((128 << 1) - gBg2YMag) >> 6;\n            break;\n        case 2:\n        case 7:\n        case 9:\n        case 10:\n            v7 = gUnk_03003430.bg2VOfs - (s32)((s16)(u16)(gUnk_03003430.bg2VOfs - v1) * gBg2YMag) / 256;\n            v6 = (s32)((128 << 1) - gBg2YMag) >> 4;\n            break;\n        default:\n            v7 = gUnk_03003430.bg2VOfs - (s32)((s16)(u16)(gUnk_03003430.bg2VOfs - v1) * gBg2YMag) / 256;\n            v6 = (s32)((128 << 1) - gBg2YMag) >> 4;\n    }\n    ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_4 = v4 - v3 * (s16)(v2 - v0) / 256;\n    ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_6 = v7 + v6;\n    return;\n}\n",
         "score": 185,
         "maxScore": 226,
         "compileErrors": null,
@@ -8357,7 +8357,7 @@
           "score": 84,
           "lines": 56,
           "gotos": 0,
-          "casts": 31,
+          "casts": 36,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -8433,7 +8433,7 @@
         "decompiler": "asmlift",
         "symbolMap": true,
         "outcome": "noncompile",
-        "source": "void UpdateCameraScroll(void) {\n    s32 v0;\n    u32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    s32 v5;\n    s32 v6;\n    s32 v7;\n    s32 v8;\n    s32 v9;\n    s32 v10;\n    s32 v11;\n    s32 v12;\n    s32 v13;\n    s32 v14;\n    s32 v15;\n    s32 v16;\n    s32 v17;\n    s32 v18;\n    s32 v19;\n    if ((48 & gUnk_030051B8) == 0) {\n        v0 = gUnk_03003430.bg2HOfs;\n        if (*(s16 *)&gUnk_03002920 > (s16)(120 + v0)) {\n            if (*(u16 *)&gUnk_03002920 - 120 - gUnk_03003430.bg2HOfs > 5) {\n                v7 = 2;\n            } else {\n                v7 = 0 & -65536 | 1;\n            }\n            v12 = 16;\n            v11 = gHeldKeys;\n            v10 = 32;\n            if ((v10 & v11) != 0) {\n                v12 = 0;\n                v7 = v7 & -65536;\n            }\n        } else {\n            if (*(s16 *)&gUnk_03002920 < (s16)(120 + v0)) {\n                if (gUnk_03003430.bg2HOfs - (*(u16 *)&gUnk_03002920 - 120) > 5) {\n                    v8 = 0 & -65536;\n                    v9 = 65534;\n                } else {\n                    v8 = 0;\n                    v9 = 65535;\n                }\n                v12 = 32;\n                v7 = v8 | v9;\n                v11 = gHeldKeys;\n                v10 = 16;\n                if ((v10 & v11) != 0) {\n                    v12 = 0;\n                    v7 = v7 & -65536;\n                }\n            } else {\n                v12 = 0;\n                v7 = 0;\n            }\n        }\n    } else {\n        v12 = 0;\n        v7 = 0;\n    }\n    if ((192 & gUnk_030051B8) == 0) {\n        v1 = ((u16 *)&gUnk_03002920)[3];\n        if (v1 > 160) {\n            v13 = 68;\n        } else {\n            v13 = 0;\n        }\n        if ((u16)(v13 + v1) > 99) {\n            if ((u16)(v13 + v1 - 100) > 30) {\n                v15 = v12 | 128;\n                v7 = v7 & 65535;\n                v14 = 192 << 10;\n            } else {\n                v15 = v12 | 128;\n                v7 = v7 & 65535;\n                v14 = 65536;\n            }\n            v12 = v15;\n            v7 = v7 | v14;\n        } else {\n            if ((u16)(v13 + v1) <= 70) {\n                if ((u16)(v13 + 70 - v1) > 25) {\n                    v15 = (u8)(v12 | 64);\n                    v7 = v7 & 65535;\n                    v14 = -196608;\n                } else {\n                    v15 = (u8)(v12 | 64);\n                    v14 = -65536;\n                }\n                v12 = v15;\n                v7 = v7 | v14;\n            }\n        }\n    }\n    v2 = gUnk_030051B8;\n    v3 = gUnk_03005480;\n    v4 = gUnk_030034E8.unk0;\n    v5 = gUnk_030007C0;\n    v6 = gUnk_030034E8.unk4;\n    gUnk_03005480 = v3 + v4 & 65535;\n    gUnk_030007C0 = v5 + v6 & 65535;\n    if (gUnk_03005220.deathSequenceTimer != 0) {\n        v16 = (v12 | v2) & 48;\n        v17 = 0;\n    } else {\n        v16 = v12 | v2;\n        v17 = (v7 & -65536 | (u16)(v7 + (v3 + v4 >> 16))) & 65535 | ((u32)(v7 & -65536 | (u16)(v7 + (v3 + v4 >> 16))) >> 16) + (v5 + v6 >> 16) << 16;\n    }\n    if (v16 != 0) ScrollBGLayer(v16, v17);\n    gUnk_03003430.bg1HOfs = (u32)gUnk_03003430.bg2HOfs >> 1;\n    if ((gUnk_03004C20.globalFrameCounter & 3) == 0 && gUnk_03004660 == 0) {\n        if (gUnk_03003430.bg2VOfs >= gPrevBg2VOfs) {\n            v18 = gUnk_03003430.bg1VOfs + (gUnk_03003430.bg2VOfs - gPrevBg2VOfs & 1);\n        } else {\n            v18 = gUnk_03003430.bg1VOfs - (gPrevBg2VOfs - gUnk_03003430.bg2VOfs & 1);\n        }\n        gUnk_03003430.bg1VOfs = v18;\n        if ((128 << 8 & gUnk_03003430.bg1VOfs) != 0) {\n            v19 = 0;\n            gUnk_03003430.bg1VOfs = v19;\n        } else {\n            if ((u16)gUnk_03003430.bg1VOfs > 80) {\n                v19 = 80;\n                gUnk_03003430.bg1VOfs = v19;\n            }\n        }\n    }\n    gPrevBg2VOfs = gUnk_03003430.bg2VOfs;\n    *(u16 *)&gBg2PA = MultiplyQ8(*(s16 *)((gBg2Alpha + 64 << 1) + (u32)&gSineTable + 0), (s16)ReciprocalQ8(*(s16 *)&gBg2XMag));\n    *(u16 *)&gBg2PB = MultiplyQ8(*(s16 *)((gBg2Alpha << 1) + (u32)&gSineTable + 0), (s16)ReciprocalQ8(*(s16 *)&gBg2XMag));\n    *(u16 *)&gBg2PC = MultiplyQ8((s16)-((u16 *)&gSineTable)[gBg2Alpha], (s16)ReciprocalQ8(*(s16 *)&gBg2YMag));\n    *(u16 *)&gBg2PD = MultiplyQ8(*(s16 *)((gBg2Alpha + 64 << 1) + (u32)&gSineTable + 0), (s16)ReciprocalQ8(*(s16 *)&gBg2YMag));\n    gBg2X = (gUnk_03003430.bg2HOfs + 120 << 8) - *(s16 *)&gBg2PA * 120 - *(s16 *)&gBg2PB * 80;\n    gBg2Y = (gUnk_03003430.bg2VOfs + 80 << 8) - *(s16 *)&gBg2PC * 120 - *(s16 *)&gBg2PD * 80;\n    return;\n}\n",
+        "source": "void UpdateCameraScroll(void) {\n    s32 v0;\n    u32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    s32 v5;\n    s32 v6;\n    s32 v7;\n    s32 v8;\n    s32 v9;\n    s32 v10;\n    s32 v11;\n    s32 v12;\n    s32 v13;\n    s32 v14;\n    s32 v15;\n    s32 v16;\n    s32 v17;\n    s32 v18;\n    s32 v19;\n    if ((48 & gUnk_030051B8) == 0) {\n        v0 = gUnk_03003430.bg2HOfs;\n        if (*(s16 *)&gUnk_03002920 > (s16)(120 + v0)) {\n            if ((s32)(*(u16 *)&gUnk_03002920 - 120 - gUnk_03003430.bg2HOfs) > 5) {\n                v7 = 2;\n            } else {\n                v7 = 0 & -65536 | 1;\n            }\n            v12 = 16;\n            v11 = gHeldKeys;\n            v10 = 32;\n            if ((v10 & v11) != 0) {\n                v12 = 0;\n                v7 = v7 & -65536;\n            }\n        } else {\n            if (*(s16 *)&gUnk_03002920 < (s16)(120 + v0)) {\n                if ((s32)(gUnk_03003430.bg2HOfs - (*(u16 *)&gUnk_03002920 - 120)) > 5) {\n                    v8 = 0 & -65536;\n                    v9 = 65534;\n                } else {\n                    v8 = 0;\n                    v9 = 65535;\n                }\n                v12 = 32;\n                v7 = v8 | v9;\n                v11 = gHeldKeys;\n                v10 = 16;\n                if ((v10 & v11) != 0) {\n                    v12 = 0;\n                    v7 = v7 & -65536;\n                }\n            } else {\n                v12 = 0;\n                v7 = 0;\n            }\n        }\n    } else {\n        v12 = 0;\n        v7 = 0;\n    }\n    if ((192 & gUnk_030051B8) == 0) {\n        v1 = ((u16 *)&gUnk_03002920)[3];\n        if (v1 > 160) {\n            v13 = 68;\n        } else {\n            v13 = 0;\n        }\n        if ((u16)(v13 + v1) > 99) {\n            if ((u16)(v13 + v1 - 100) > 30) {\n                v15 = v12 | 128;\n                v7 = v7 & 65535;\n                v14 = 192 << 10;\n            } else {\n                v15 = v12 | 128;\n                v7 = v7 & 65535;\n                v14 = 65536;\n            }\n            v12 = v15;\n            v7 = v7 | v14;\n        } else {\n            if ((u16)(v13 + v1) <= 70) {\n                if ((u16)(v13 + 70 - v1) > 25) {\n                    v15 = (u8)(v12 | 64);\n                    v7 = v7 & 65535;\n                    v14 = -196608;\n                } else {\n                    v15 = (u8)(v12 | 64);\n                    v14 = -65536;\n                }\n                v12 = v15;\n                v7 = v7 | v14;\n            }\n        }\n    }\n    v2 = gUnk_030051B8;\n    v3 = gUnk_03005480;\n    v4 = gUnk_030034E8.unk0;\n    v5 = gUnk_030007C0;\n    v6 = gUnk_030034E8.unk4;\n    gUnk_03005480 = v3 + v4 & 65535;\n    gUnk_030007C0 = v5 + v6 & 65535;\n    if (gUnk_03005220.deathSequenceTimer != 0) {\n        v16 = (v12 | v2) & 48;\n        v17 = 0;\n    } else {\n        v16 = v12 | v2;\n        v17 = (v7 & -65536 | (u16)(v7 + (v3 + v4 >> 16))) & 65535 | ((u32)(v7 & -65536 | (u16)(v7 + (v3 + v4 >> 16))) >> 16) + (v5 + v6 >> 16) << 16;\n    }\n    if (v16 != 0) ScrollBGLayer(v16, v17);\n    gUnk_03003430.bg1HOfs = (u32)gUnk_03003430.bg2HOfs >> 1;\n    if ((gUnk_03004C20.globalFrameCounter & 3) == 0 && gUnk_03004660 == 0) {\n        if (gUnk_03003430.bg2VOfs >= gPrevBg2VOfs) {\n            v18 = gUnk_03003430.bg1VOfs + (gUnk_03003430.bg2VOfs - gPrevBg2VOfs & 1);\n        } else {\n            v18 = gUnk_03003430.bg1VOfs - (gPrevBg2VOfs - gUnk_03003430.bg2VOfs & 1);\n        }\n        gUnk_03003430.bg1VOfs = v18;\n        if ((128 << 8 & gUnk_03003430.bg1VOfs) != 0) {\n            v19 = 0;\n            gUnk_03003430.bg1VOfs = v19;\n        } else {\n            if ((u16)gUnk_03003430.bg1VOfs > 80) {\n                v19 = 80;\n                gUnk_03003430.bg1VOfs = v19;\n            }\n        }\n    }\n    gPrevBg2VOfs = gUnk_03003430.bg2VOfs;\n    *(u16 *)&gBg2PA = MultiplyQ8(*(s16 *)((gBg2Alpha + 64 << 1) + (u32)&gSineTable + 0), (s16)ReciprocalQ8(*(s16 *)&gBg2XMag));\n    *(u16 *)&gBg2PB = MultiplyQ8(*(s16 *)((gBg2Alpha << 1) + (u32)&gSineTable + 0), (s16)ReciprocalQ8(*(s16 *)&gBg2XMag));\n    *(u16 *)&gBg2PC = MultiplyQ8((s16)-((u16 *)&gSineTable)[gBg2Alpha], (s16)ReciprocalQ8(*(s16 *)&gBg2YMag));\n    *(u16 *)&gBg2PD = MultiplyQ8(*(s16 *)((gBg2Alpha + 64 << 1) + (u32)&gSineTable + 0), (s16)ReciprocalQ8(*(s16 *)&gBg2YMag));\n    gBg2X = (gUnk_03003430.bg2HOfs + 120 << 8) - *(s16 *)&gBg2PA * 120 - *(s16 *)&gBg2PB * 80;\n    gBg2Y = (gUnk_03003430.bg2VOfs + 80 << 8) - *(s16 *)&gBg2PC * 120 - *(s16 *)&gBg2PD * 80;\n    return;\n}\n",
         "score": null,
         "maxScore": null,
         "compileErrors": 1,
@@ -8441,7 +8441,7 @@
           "score": 76,
           "lines": 138,
           "gotos": 0,
-          "casts": 39,
+          "casts": 41,
           "unkGlue": 0,
           "rawMem": 3,
           "addrDeref": 0
@@ -8666,7 +8666,7 @@
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "candidateLabel": "unsigned/defsite/flip-join/scopebase-coalesce-v2-v4",
+        "candidateLabel": "unsigned/defsite/flip-join/derived-home/scopebase-coalesce-v2-v4",
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
@@ -8876,7 +8876,7 @@
           }
         ],
         "outcome": "match",
-        "source": "s32 UpdateHUDCounterDisplay(void) {\n    s32 v3;\n    s32 v4;\n    u16 * p0;\n    v3 = 0;\n    if (gUnk_03004C20.unkA == 1 || gUnk_03004C20.level == 6) {\n        v4 = 100;\n    } else {\n        v4 = 30;\n    }\n    if (v4 == gUnk_03005220.dreamStones) v3 = 1;\n    if (gUnk_03004C20.unkA == 1 || gUnk_03004C20.level == 6) {\n        v4 = 1;\n        if (gUnk_03005220.dreamStones > 99) {\n            p0 = (u16 *)&gBgTilemapBufs;\n            p0[594] = p0[659];\n            p0[626] = p0[691];\n        }\n    } else {\n        v4 = 0;\n    }\n    if (gUnk_03005220.dreamStones > 9) {\n        gBgTilemapBufs[0][(149 << 2) - v4] = gBgTilemapBufs[0][gUnk_03005220.dreamStones / 10 + 658];\n        gBgTilemapBufs[0][(157 << 2) - v4] = gBgTilemapBufs[0][gUnk_03005220.dreamStones / 10 + 690];\n    }\n    gBgTilemapBufs[0][597 - v4] = gBgTilemapBufs[0][gUnk_03005220.dreamStones % 10 + 658];\n    gBgTilemapBufs[0][629 - v4] = gBgTilemapBufs[0][gUnk_03005220.dreamStones % 10 + 690];\n    return v3;\n}\n",
+        "source": "s32 UpdateHUDCounterDisplay(void) {\n    s32 v0;\n    s32 v1;\n    s32 v3;\n    s32 v4;\n    u16 * p0;\n    v3 = 0;\n    if (gUnk_03004C20.unkA == 1 || gUnk_03004C20.level == 6) {\n        v4 = 100;\n    } else {\n        v4 = 30;\n    }\n    v0 = gUnk_03005220.dreamStones;\n    if (v4 == v0) v3 = 1;\n    if (gUnk_03004C20.unkA == 1 || gUnk_03004C20.level == 6) {\n        v4 = 1;\n        if (v0 > 99) {\n            p0 = (u16 *)&gBgTilemapBufs;\n            p0[594] = p0[659];\n            p0[626] = p0[691];\n        }\n    } else {\n        v4 = 0;\n    }\n    v1 = gUnk_03005220.dreamStones;\n    if (v1 > 9) {\n        gBgTilemapBufs[0][(149 << 2) - v4] = gBgTilemapBufs[0][v1 / 10 + 658];\n        gBgTilemapBufs[0][(157 << 2) - v4] = gBgTilemapBufs[0][(s32)gUnk_03005220.dreamStones / 10 + 690];\n    }\n    gBgTilemapBufs[0][597 - v4] = gBgTilemapBufs[0][(s32)gUnk_03005220.dreamStones % 10 + 658];\n    gBgTilemapBufs[0][629 - v4] = gBgTilemapBufs[0][(s32)gUnk_03005220.dreamStones % 10 + 690];\n    return v3;\n}\n",
         "score": 0,
         "maxScore": 136,
         "compileErrors": null,
@@ -8888,10 +8888,10 @@
           "argMismatch": 0
         },
         "quality": {
-          "score": 100,
-          "lines": 29,
+          "score": 94,
+          "lines": 33,
           "gotos": 0,
-          "casts": 2,
+          "casts": 5,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -37159,7 +37159,7 @@
         "decompiler": "asmlift",
         "candidateLabel": "unsigned/defsite",
         "outcome": "match",
-        "source": "s32 fcmp(void) {\n    s32 v0;\n    v0 = 0;\n    if (__gtsf2() > 0) v0 = 1;\n    return v0;\n}\n",
+        "source": "s32 fcmp(void) {\n    s32 v0;\n    v0 = 0;\n    if ((s32)__gtsf2() > 0) v0 = 1;\n    return v0;\n}\n",
         "score": 0,
         "maxScore": 10,
         "compileErrors": null,
@@ -37174,7 +37174,7 @@
           "score": 100,
           "lines": 6,
           "gotos": 0,
-          "casts": 1,
+          "casts": 2,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
