@@ -318,3 +318,32 @@ const SIGNEDCMP_INTMIN = `fn signedcmpintmin {
 test('a signed compare against a constant too big for `int` casts the constant', () => {
   expect(emit(SIGNEDCMP_INTMIN, false)).toContain('(s32)-2147483648');
 });
+
+// A POINTER-rendered side is left alone, and that is the pin's one SEMANTIC guard rather than a
+// cosmetic one: `p < end` is already the unsigned compare C gives two addresses, where
+// `(s32)p < (s32)end` compares them signed and inverts on any pair straddling 0x80000000. The
+// operands have to render as POINTERS, not merely stand on one — `*(u16 *)a0` over a `u32`-typed
+// operand renders `u32`, and there the pin fires and should.
+const PTRWALK = `fn ptrwalk {
+^bb0(%0: s32*, %1: s32*):
+  %9: s32 = const {value=0}
+  br ^bb1(%0, %9)
+^bb1(%2: s32*, %10: s32):
+  %3: u32 = icmp_slt %2, %1
+  cond_br %3, ^bb2(%2, %10), ^bb3(%10)
+^bb2(%4: s32*, %11: s32):
+  %5: s32 = load %4 {off=0, width=4, signed=true}
+  %6: s32 = const {value=4}
+  %7: s32* = add %4, %6
+  %8: s32 = add %11, %5
+  br ^bb1(%7, %8)
+^bb3(%12: s32):
+  ret %12
+}
+`;
+
+test('a signed compare between pointer-rendered operands takes no cast', () => {
+  const src = emit(PTRWALK, false);
+  expect(src).toMatch(/while \(v0 < a1\)/);
+  expect(src).not.toContain('(s32)');
+});
