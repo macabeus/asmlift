@@ -136,12 +136,17 @@ export function arithConversionSignedness(l: Expr, r: Expr, varType: VarTypes): 
  * compare-meaning gate. Two of those models disagreeing about one expression is the drift this
  * placement prevents.
  *
- * The original question is byte-load-bearing: C spells both `>>>` and `>>`
- * as `>>` and chooses between them from the left operand's type. A logical shift rendered over a
- * signed expression recompiles to `asr` where the target has `lsr`, and evaluates to a different
- * value. The C-family backend casts the operand whenever this returns anything but the signedness
- * the operator needs, so `undefined` is the safe answer in every case the model does not cover — a
- * redundant cast is codegen-identical, a missing one is a miscompile.
+ * The question is byte-load-bearing: C spells both `>>>` and `>>` as `>>` and chooses between them
+ * from the left operand's type, so a logical shift rendered over a signed expression recompiles to
+ * `asr` where the target has `lsr` and evaluates to a different value.
+ *
+ * `undefined` means the model did not reach, never "possibly unsigned", and each consumer reads it
+ * against its own operator's C default. Where that default is the WRONG one — a shift, an unsigned
+ * divide — anything short of a proof takes a cast, because a redundant cast is codegen-identical
+ * while a missing one is a miscompile. Where the default already AGREES — a signed divide, a signed
+ * compare — only a definite `false` calls for one, and that is sound because nothing asmlift emits
+ * declares an unsigned-returning callee: prototypes carry arity and `returnsVoid` only, and the
+ * symbol map shapes data.
  *
  * Anything narrower than 32 bits promotes to `int` and is therefore SIGNED, whatever it was
  * declared. Pointers, calls and markers are `undefined`.

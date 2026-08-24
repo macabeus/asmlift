@@ -577,9 +577,11 @@ const ARITH_TO_BIN: Record<string, BinOp> = {
   sub: '-',
   mul: '*',
   sdiv: '/',
-  udiv: '/u', // the UNSIGNED quotient/remainder; the C backend spells them `/`/`%` over an
+  // the UNSIGNED quotient/remainder — the C backend spells them `/`/`%` over an operand it casts
+  // unsigned (l3/ast.ts BinOp, backend/cfamily.ts C_SPELLING)
+  udiv: '/u',
   smod: '%',
-  umod: '%u', // operand it casts unsigned (l3/ast.ts BinOp, backend/cfamily.ts C_SPELLING)
+  umod: '%u',
   or: '|',
   and: '&',
   xor: '^',
@@ -2021,10 +2023,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // machine did not do; against a constant the test folds away entirely and takes the
       // surrounding computation with it — agbcc compiles `(u32)a / b < 0` to `mov r0, #0`,
       // deleting the `__udivsi3` call. The opcode names the compare and C's own default over two
-      // `int`s already agrees with it, so the cast fires ONLY where the rendering provably
-      // disagrees. `undefined` is left alone for that reason — it is the model not reaching, not
-      // evidence of unsignedness — which is also why a pointer side needs no guard (it never
-      // renders a definite signedness) and why a correctly-typed compare cannot churn.
+      // `int`s already agrees with it, so only a definite `false` calls for a cast (see
+      // renderedIntSignedness on reading `undefined` against an operator's own default). A
+      // pointer side needs no guard: it never renders a definite signedness.
       if (/^icmp_s/.test(d.opcode)) {
         const pinSigned = (x: Expr): Expr =>
           renderedIntSignedness(x, vtEnv) === false ? { k: 'cast', to: T.s(32), e: x } : x;

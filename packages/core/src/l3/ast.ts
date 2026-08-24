@@ -88,10 +88,10 @@ export type Expr =
 // it, and forcing it anyway makes agbcc delete the comparison as always-false. A per-operand pin is
 // the only spelling that says "this division alone is unsigned".
 //
-// The COMPARISONS stay collapsed, and the asymmetry is real rather than an omission: which side a
-// compare was spelled from genuinely underdetermines (a signed spelling that byte-matched was
-// proved non-negative by the compiler), so it is refereed as an axis — while a division helper is a
-// pure function of the expression's C type in every compiler here, with no such proof available.
+// The COMPARISONS stay collapsed, and that asymmetry is the rule applying rather than an omission:
+// which side a compare was spelled from genuinely underdetermines — a signed spelling that
+// byte-matched was proved non-negative by the compiler — so it is refereed as an axis, while a
+// division helper is a pure function of the expression's C type with no such proof available.
 export type BinOp =
   | '+'
   | '-'
