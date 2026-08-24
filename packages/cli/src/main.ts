@@ -34,7 +34,7 @@ import { guessedArityNote } from './callees';
 import { type CommandCompilers, compilersFromCommand } from './compile-command';
 import { type AsmliftToolConfig, loadDecompConfig, resolveTarget } from './config';
 import { ObjectInputUnsupportedError, asmDataForObject, disasmObject, isElfObject } from './objfile';
-import { sampleSourceTree, sourceStamp } from './provenance';
+import { bakedBuild, sampleSourceTree, sourceStamp } from './provenance';
 
 export { detectName };
 
@@ -424,7 +424,7 @@ export async function runCli(
       const summary =
         `asmlift: [ranked] ${ranked.candidates.length} candidate(s) scored, ${ranked.dropped.length} dropped, ` +
         `best ${ranked.best.label}: ${ranked.best.score.score}${ranked.best.score.match ? ' (match)' : ''} ` +
-        `[${sourceStamp(treeBefore, sampleSourceTree())}]\n`;
+        `[${sourceStamp(treeBefore, sampleSourceTree(), bakedBuild())}]\n`;
       return {
         code: ranked.best.score.match ? 0 : 1,
         stdout: ranked.best.source,

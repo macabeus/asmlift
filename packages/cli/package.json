@@ -11,7 +11,7 @@
     "./*": "./src/*.ts"
   },
   "scripts": {
-    "build": "esbuild src/main.ts --bundle --platform=node --format=esm --target=node18 --external:objdiff-wasm --external:yaml --banner:js=\"#!/usr/bin/env node\" --outfile=dist/asmlift.mjs",
+    "build": "node scripts/build.mjs",
     "prepublishOnly": "pnpm run build"
   },
   "dependencies": {

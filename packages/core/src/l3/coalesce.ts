@@ -358,7 +358,12 @@ export function armDisjointUnder(
   if (sfn.locals.length < 2) {
     return { candidates: [], refusals };
   }
-  const mentionsOf = (list: Stmt[]): Map<string, number> => {
+  // Both whole-subtree walks below are MEMOISED on node identity, for one call: `firstMention`
+  // walks a statement's whole subtree once per statement it scans, and the a×b loop's two calls
+  // each depend on only ONE of a and b. Sound because nothing here mutates the tree — the only
+  // rewrite is `rename`, which rebuilds every statement it touches and leaves `sfn` alone
+  // (structure-purity.test.ts pins the same promise one level up).
+  const countMentions = (list: Stmt[]): Map<string, number> => {
     const out = new Map<string, number>();
     const walk = (stmts: Stmt[]): void => {
       for (const st of stmts) {
@@ -372,6 +377,26 @@ export function armDisjointUnder(
     walk(list);
     return out;
   };
+  const listMentions = new Map<Stmt[], Map<string, number>>();
+  const mentionsOf = (list: Stmt[]): Map<string, number> => {
+    let m = listMentions.get(list);
+    if (m === undefined) {
+      m = countMentions(list);
+      listMentions.set(list, m);
+    }
+    return m;
+  };
+  // `stmtChildren` builds a FRESH array every call, so a statement's subtree counts are keyed on
+  // the statement rather than on the list `mentionsOf` would see.
+  const childMentions = new Map<Stmt, Map<string, number>>();
+  const mentionsUnder = (st: Stmt): Map<string, number> => {
+    let m = childMentions.get(st);
+    if (m === undefined) {
+      m = countMentions(stmtChildren(st));
+      childMentions.set(st, m);
+    }
+    return m;
+  };
   const total = mentionsOf(sfn.body);
   const params = new Set(sfn.params.map((p) => p.name));
   const locals = new Map(sfn.locals.map((l) => [l.name, l]));
@@ -383,12 +408,12 @@ export function armDisjointUnder(
   // The first PREORDER mention of `n` in an arm, looked for through if statements whose own
   // condition does not read it (an if's cond evaluates before either arm). 'const-write' is a
   // pure `n = K`; anything else mentioning n first — a read, a computed assign, a loop — refuses.
-  const firstMention = (list: Stmt[], n: string): 'const-write' | 'other' | null => {
+  const firstMentionIn = (list: Stmt[], n: string): 'const-write' | 'other' | null => {
     for (const st of list) {
       const here = new Set<string>();
       if (st.k === 'assign') here.add(st.name);
       for (const e of stmtExprs(st)) namesIn(e, here);
-      const inChildren = mentionsOf(stmtChildren(st)).has(n);
+      const inChildren = mentionsUnder(st).has(n);
       if (!here.has(n) && !inChildren) {
         continue;
       }
@@ -402,6 +427,20 @@ export function armDisjointUnder(
       return 'other';
     }
     return null;
+  };
+  // Per (arm, NAME): the answer depends on both, and the a×b loop below asks for each `a` once per
+  // `b` and each `b` once per `a`.
+  const firstMentions = new Map<Stmt[], Map<string, 'const-write' | 'other' | null>>();
+  const firstMention = (list: Stmt[], n: string): 'const-write' | 'other' | null => {
+    let per = firstMentions.get(list);
+    if (per === undefined) {
+      per = new Map();
+      firstMentions.set(list, per);
+    }
+    if (!per.has(n)) {
+      per.set(n, firstMentionIn(list, n));
+    }
+    return per.get(n)!;
   };
   const visit = (stmts: Stmt[], inLoop: boolean): void => {
     for (const st of stmts) {

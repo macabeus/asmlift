@@ -5,10 +5,14 @@
 // what keep it exact rather than approximate, so they are what these tests pin hardest.
 import { describe, expect, test } from 'vitest';
 
+import { cBackend } from '../src/backend/c';
 import { renderDeclarations } from '../src/declare';
-import { decompile } from '../src/pipeline';
-import { type SymbolInfo, type SymbolMap, type SymbolStructField, declaredFields } from '../src/symbols';
-import { ARMV4T_AGBCC } from '../src/target';
+import { frontendFor } from '../src/frontend/registry';
+import { verify } from '../src/ir/verify';
+import { applyIdiomPatterns, decompile, raiseRecovered } from '../src/pipeline';
+import { structure } from '../src/structure/structure';
+import { type SymbolInfo, type SymbolMap, type SymbolStructField, declaredFields, symbolsByName } from '../src/symbols';
+import { ARMV4T_AGBCC, structureOptionsFor } from '../src/target';
 
 // gState's first u16 packs three unsigned bitfields (the kleod Unk_03005220 shape): hearts
 // bits 0-1, stars bits 2-4, dreamStones bits 5-11; a plain u32 follows at byte 4.
@@ -165,6 +169,43 @@ describe('declaredFields — bitfields seat by BIT cursor', () => {
       { name: 'raw', offset: 0, size: 2, signed: false },
     ];
     expect(declaredFields(layout)?.map((f) => f.name)).toEqual(['raw']);
+  });
+});
+
+describe('the option is inert without a map — the `/no-bitfield` decline rests on this', () => {
+  // rank.ts does not enumerate `/no-bitfield` on the `/raw-globals` variant, because with no map
+  // both arms structure the IDENTICAL tree. structure() makes that true for every reader of the
+  // option rather than for the one that happens to sit inside `if (symCtx && …)` today: with
+  // `symbols` absent the option is normalized to false at the boundary. These two tests are the
+  // check on that normalization — a claim about this file, tested here rather than asserted in a
+  // comment over there.
+  const bothWays = (asm: string, symbols?: SymbolMap) => {
+    const fn = () => {
+      const lifted = frontendFor(ARMV4T_AGBCC).lift('f', asm, ARMV4T_AGBCC, {}, undefined, symbols);
+      verify(lifted);
+      applyIdiomPatterns(lifted, ARMV4T_AGBCC);
+      raiseRecovered(lifted, ARMV4T_AGBCC);
+      return lifted;
+    };
+    const opts = {
+      ...structureOptionsFor(ARMV4T_AGBCC, false),
+      ...(symbols ? { symbols: symbolsByName(symbols) } : {}),
+    };
+    return [true, false].map((spellBitfieldMembers) =>
+      cBackend.emit(structure(fn(), { ...opts, spellBitfieldMembers })),
+    );
+  };
+
+  test('with no symbol map both spellings structure the same function', () => {
+    const [on, off] = bothWays(EXTRACT('lsr'));
+    expect(on).toBe(off);
+    expect(on).not.toContain('dreamStones'); // and it really is the shift spelling, not a no-op fixture
+  });
+
+  test('WITH the map they differ — so the test above is not passing for want of a fold', () => {
+    const [on, off] = bothWays(EXTRACT('lsr'), mapWith(stateInfo()));
+    expect(on).toContain('gState.dreamStones');
+    expect(off).not.toContain('dreamStones');
   });
 });
 

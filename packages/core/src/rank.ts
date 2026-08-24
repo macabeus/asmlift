@@ -408,10 +408,21 @@ export interface RankedResult<S> {
   dropped: DroppedCandidate[];
 }
 
+/** One emitted spelling of a structured tree: the label suffix naming the lever that produced it,
+ *  the rendered source, and the tree-derived facts `compareScored` ranks by. */
+interface Spelling {
+  suffix: string;
+  source: string;
+  symbolRefs?: SymbolRef[];
+  deviceVolatile?: number;
+}
+
 /** Emit the DISTINCT type/branch-sense candidate spellings for `name` — PURE, no scoring.
  *  The ONE difference from `decompile()` is the signedness pin, injected between pre-recovery and
  *  recoverTypes via the `beforeRecover` hook. Duplicate sources are collapsed so the scorer never
- *  recompiles an identical spelling. */
+ *  recompiles an identical spelling, and the fan runs once per distinct STRUCTURED TREE rather
+ *  than once per axis point — an axis inert on this function reaches a tree an earlier point
+ *  already spelled, and every re-spelling is a pure function of that tree. */
 export function enumerateCandidates(
   name: string,
   asm: string,
@@ -523,6 +534,7 @@ export function enumerateCandidates(
   }
 
   const seen = new Set<string>();
+  const seenTrees = new Set<string>();
   const out: Candidate[] = [];
   // The map-derived VALUE references one emitted tree contains, applied at every point a candidate
   // is finalized and derived from the tree that candidate emitted. No pipeline stage carries refs
@@ -551,6 +563,310 @@ export function enumerateCandidates(
       : [];
     return refs.length ? { symbolRefs: refs } : {};
   };
+  // THE RE-SPELLING FAN, as a function whose PARAMETER LIST is the invariant the tree skip below
+  // rests on: every spelling here is a pure function of the structured tree and this call's own
+  // constants, so a tree an earlier axis point already spelled can only re-emit sources `seen`
+  // already holds. Inline in that loop the invariant would be a comment asking future levers not to
+  // read `fn` or the axis flags; as a signature, a lever that needs one has to widen it in front of
+  // a reviewer. The same argument l3/ast.ts's `walkExprs` header makes for its own shape, and it
+  // counts for more here: a lever reading `fn` would not misprint a candidate, it would DELETE one,
+  // and nothing in the harness reports a candidate that was never enumerated.
+  const fanOut = (sfn: SFn): Spelling[] => {
+    // The walk→index re-spelling (l3/reindex.ts) is a THIRD lever on the same footing as
+    // signedness and branch sense: whether the source spelled `*p; p++` or `arr[i]` is
+    // genuinely ambiguous from asm (compilers strength-reduce the latter into the former), so
+    // when a loop re-spells, BOTH representations are emitted and the differ referees. The
+    // re-spelling passes the same boundary contracts as the primary; one that fails them is
+    // dropped here — never scored, never able to win.
+    const spellings: Spelling[] = [{ suffix: '', source: backend.emit(sfn), ...refsOf(sfn), ...volOf(sfn) }];
+    // Representation re-spellings — each a lever on the same footing as signedness/branch sense,
+    // each guarded: it must pass the same boundary contracts as the primary AND emit (a backend
+    // that declines by throwing — Pascal loud-fails unspellable shapes — drops the candidate,
+    // never aborts the enumeration). A dropped re-spelling loses nothing: the primary remains.
+    //
+    // POLICY: re-spellings derive from the BASE spelling only — levers do not compose by
+    // default. THREE product mechanisms are sanctioned, each with its own admission bar —
+    // plus ALTERNATIVE OUTPUTS: one lever whose single application has several legitimate
+    // results (which locals a coalesce merges, which pointers /volatile qualifies) emits
+    // each as its own candidate via `enumerate`, capped at the lever, with the base spelling
+    // retained; outputs may also ride an already-sanctioned product (the /livebase/volatile
+    // subsets), since they add no new lever to the composition.
+    // Products with /volatile go only onto a lever whose re-spelling CENTRES ON a
+    // numeric-address pointer local — the joint spelling is reachable from neither lever
+    // alone, each product narrows /volatile to the lever's own locals (volatilePtrLocals'
+    // `only`), and each needed a row to demand it. The SHAPE products (SHAPE_PRODUCTS) are
+    // derived onto EVERY spelling: statement order/shape is orthogonal to what any
+    // representation lever changes — the same kind of independent dimension as signedness —
+    // so they compose as an axis rather than a pairing; a third blanket product needs the
+    // same argument, not just a row. And a specific LEVER PAIRING is admitted when a row
+    // demands it AND the joint spelling is reachable from neither lever alone (the
+    // /livebase × /indexed, × /nearbase, and × /coalesce pairings below, each with its
+    // demanding row); anything else stays un-composed. A pairing is admitted for a LEVER, so
+    // it fans over that lever's whole admission table (LIVEBASE_ADMISSIONS): a roster row
+    // changes which bases the same hoist binds, not what pairing it with /coalesce means.
+    // And a lever must PRESERVE SEMANTICS by construction: the differ referees byte-exactness
+    // (a wrong candidate can never fake a score-0 match), but on a NONMATCH row the best-
+    // scoring source is shown to the user — a semantically-wrong re-spelling there is
+    // plausible-but-wrong output, the defect class this project exists to avoid. Hence each
+    // lever's decline-over-approximate gates, adversarially audited.
+    // Takes a THUNK, so the lever's own computation is inside the try too. A lever that threw
+    // from the pass itself — rather than from the contracts or the backend — would escape and
+    // abort the whole enumeration for this row, primary included: the one way a lever can cost
+    // a match. Making that structural rather than per-call-site means no lever can opt out.
+    const respell = (suffix: string, make: () => SFn | null | undefined): void => {
+      try {
+        const alt = make();
+        if (!alt) {
+          return; // the lever declined to fire — no candidate, not a duplicate of the primary
+        }
+        assertResolved(alt);
+        assertDerefsTyped(alt);
+        spellings.push({ suffix, source: backend.emit(alt), ...refsOf(alt), ...volOf(alt) });
+        // STATEMENT-SHAPE products, derived onto EVERY spelling — the second sanctioned
+        // product mechanism (the POLICY note above carries the admission argument). Each is
+        // a statement-order/shape fact orthogonal to representation; subsets compose in the
+        // fixed order below. A shape that never fires declines and costs nothing.
+        if (!SHAPE_PRODUCTS.some(({ suffix: sx }) => suffix.includes(sx))) {
+          for (const subset of SHAPE_SUBSETS) {
+            const shaped = applyShapes(subset, alt);
+            if (shaped !== null) {
+              assertResolved(shaped.out);
+              assertDerefsTyped(shaped.out);
+              spellings.push({
+                suffix: `${suffix}${shaped.suffix}`,
+                source: backend.emit(shaped.out),
+                ...refsOf(shaped.out),
+                ...volOf(shaped.out),
+              });
+            }
+          }
+        }
+      } catch (e) {
+        // A throwing lever, a contract failure, or an unspellable re-spelling: keep the primary.
+        // REPORTED, not swallowed. `dropped` (below) records only spellings the SCORER refused,
+        // so without this a lever that fails here vanishes with no trace — indistinguishable
+        // from one that correctly declined, which is exactly the hidden failure
+        // DroppedCandidate exists to surface.
+        opts.onLeverError?.(name + suffix, e instanceof Error ? e.message.split('\n')[0] : String(e));
+      }
+    };
+    // `/argbase` — name a call's argument bases before the call (l3/argbase.ts). A lever on the
+    // same footing as the others: the primary inline spelling stays in the list, so the differ
+    // referees and this can never cost a match.
+    for (const subset of SHAPE_SUBSETS) {
+      // the truthful suffix needs the pass to RUN first, so this bypasses respell's
+      // label-then-thunk shape: same try posture, label from the fired members
+      try {
+        const shaped = applyShapes(subset, sfn);
+        if (shaped !== null) {
+          respell(shaped.suffix, () => shaped.out);
+        }
+      } catch (e) {
+        // the error label falls back to the full subset — the fired set is unknown mid-throw
+        const label = subset.map((x) => x.suffix).join('');
+        opts.onLeverError?.(name + label, e instanceof Error ? e.message.split('\n')[0] : String(e));
+      }
+    }
+    respell('/argbase', () => materializeArgBases(sfn));
+    // `/volatile` — declare a pointer local holding a NUMERIC address as pointing to volatile
+    // data (l3/volatileptr.ts). A raw constant has no declaration anywhere, so the original
+    // qualifier is not derivable — and it is codegen-visible (a volatile MEM is barred from
+    // motion, which lands the allocator on different homes). Both spellings are emitted and
+    // the differ referees.
+    respell('/volatile', () => volatilePtrLocals(sfn));
+    // `/vol-slot` — declare a STACK-HOMED scalar local volatile (l3/volatileval.ts). The
+    // qualifier takes away the allocator's freedom to keep the value in a callee-saved
+    // register across a call, and which of the three ways a slot can arise (a volatile local,
+    // an address-taken one, plain register pressure) the source used is not derivable from
+    // the asm. A DECLARATION lever, not a structuring axis (docs/level-tower.md's third
+    // fork): it changes nothing structure() decides, so it rides the base spelling like its
+    // `/volatile` sibling rather than doubling every enumeration, and its frame-flag gate
+    // costs nothing on a function with no slot.
+    respell('/vol-slot', () => volatileValueLocals(sfn));
+    // `/inlinebase` — spell a CONSTANT-address pointer local at its uses instead
+    // (l3/inlinebase.ts). The local is structure/analysis.ts's value home for a `const` the
+    // asm kept in a callee-saved register across a call; the register is real, but a constant
+    // re-spelled per use is CSEd back into that same one, so which the source had is not
+    // derivable. Its own bare-`const`-initializer gate keeps it off l3/basecse.ts's reuse
+    // hoists, whose placement levers already answer that question.
+    //
+    // TWO ALTERNATIVE OUTPUTS, not a product: deleting the local also deletes the only place
+    // a `volatile` POINTEE could be written, and a raw address has no declaration anywhere
+    // else to carry it. So the qualified spelling is emitted too, `/volatile` narrowed to
+    // exactly the locals this lever deletes. Usually the bytes separate them and the score
+    // decides (11 against 12 on pokeemerald:EReader_Reset), but where the compiler was not
+    // exploiting the non-volatility they are byte-identical — as they are on that row's
+    // WINNING shape, the one that also qualifies the slot — and `compareScored`'s device-
+    // volatility term picks the qualified twin, 0x4000208 being REG_IME.
+    //
+    // COST — it fires broadly: on 33 of the 69 klonoa functions that lift with no symbol map
+    // (a symbol-map sweep sees fewer, since an absolute pool constant lifts to a `gaddr`
+    // there). Both outputs together add 766 candidates over 47058, +1.6%, and up to +67% on
+    // one function (EntityPositionFromLevelTable) — the same class of price the enumeration
+    // already pays for `/volatile`, and cheaper than the axis over the same question would
+    // be — the choice the lever's header argues. `/vol-slot` adds nothing at all there: no
+    // klonoa function reaches its frame gate.
+    const inlineVolatile = (): SFn | null => {
+      const only = new Set(inlinableConstBases(sfn));
+      const q = only.size ? volatilePtrLocals(sfn, only) : null;
+      return q ? inlineConstBases(q) : null;
+    };
+    respell('/inlinebase/volatile', inlineVolatile);
+    respell('/inlinebase', () => inlineConstBases(sfn));
+    // The `/inlinebase` × `/vol-slot` PAIRING — row-demanded, and the joint spelling is
+    // reachable from neither lever alone: on pokeemerald:EReader_Reset the primary scores 11,
+    // `/inlinebase` alone 11 and `/vol-slot` alone 2, and the pair 0. The two touch disjoint
+    // locals (one pointer-typed, one a scalar frame slot), so applying them in either order
+    // gives the same spelling — and each of `/inlinebase`'s two outputs carries it.
+    respell('/inlinebase/volatile/vol-slot', () => {
+      const r = inlineVolatile();
+      return r ? volatileValueLocals(r) : null;
+    });
+    respell('/inlinebase/vol-slot', () => {
+      const r = inlineConstBases(sfn);
+      return r ? volatileValueLocals(r) : null;
+    });
+    // `/scopebase` — name a reused global base at the INNERMOST scope holding its uses
+    // (l3/scopebase.ts). Distinct from basecse's function-top hoist, which the primary already
+    // carries: this one fires exactly where that placement would extend a live range the
+    // original never had.
+    // `/scopebase`, and its COALESCED variants. Which locals a register allocator shared is not
+    // derivable from the tree — on the row this was built for the two legal merges score 18 and
+    // 40 against a no-merge 21, so committing to one by declaration order costs 19 points and
+    // discards the winner. Every variant is emitted and the differ referees, exactly as
+    // `/regcopy` does for its allocator-ambiguous tail choice.
+    //
+    // POLICY NOTE: rank.ts's rule is that re-spellings derive from the BASE spelling only —
+    // levers do not compose. These are not a second lever composed onto the first: coalescing is
+    // enumerated as alternative OUTPUTS of the base hoist, in the one place that knows the hoist
+    // just happened. The un-coalesced `/scopebase` stays in the list, so nothing is lost.
+    //
+    // EVERY pass invocation stays INSIDE a thunk — see the paragraph above on why a pass that
+    // runs outside `respell`'s try is the one way a lever can cost a match. `enumerate` re-runs
+    // the hoist per candidate, which is pure and cheap, rather than caching it outside the guard.
+    respell('/scopebase', () => hoistScopedBases(sfn));
+    const enumerate = (
+      label: string,
+      from: () => SFn | null | undefined,
+      variantsOf: (s: SFn) => { merged: string; sfn: SFn }[] = coalesceCandidates,
+    ): void => {
+      let variants: { merged: string; sfn: SFn }[] = [];
+      try {
+        const base = from();
+        variants = base ? variantsOf(base) : [];
+      } catch (e) {
+        opts.onLeverError?.(name + label, e instanceof Error ? e.message.split('\n')[0] : String(e));
+        return;
+      }
+      for (const c of variants) {
+        respell(`${label}-${c.merged}`, () => c.sfn);
+      }
+    };
+    enumerate('/scopebase-coalesce', () => hoistScopedBases(sfn));
+    enumerate('/coalesce', () => sfn);
+    // `/volatile`'s per-local SUBSETS: which pointers the source declared volatile is
+    // per-pointer knowledge (an MMIO block and a plain RAM table sit side by side, and
+    // qualifying the table blocks the read collapse its region wants), so each proper
+    // non-empty subset is its own candidate — the same alternative-OUTPUTS mechanism as the
+    // coalesce merges, not a product (l3/volatileptr.ts volatileSubsetCandidates carries the
+    // ≤3 cap). The all-qualifiers form is plain `/volatile` above; the livebase product's
+    // subsets ride below with the product's own `only` scope.
+    enumerate(
+      '/volatile',
+      () => sfn,
+      (s) => volatileSubsetCandidates(s),
+    );
+    respell('/indexed', () => reindexWalks(sfn));
+    respell('/indexed/volatile', () => {
+      const kept = new Set<string>();
+      const r = reindexWalks(sfn, kept);
+      return r ? volatilePtrLocals(r, kept) : null;
+    });
+    // `/livebase` — hoist a reused leaf base the default basecse pass REFUSED (l3/basecse.ts,
+    // LIVEBASE_GATES): its `loop` and `repeated-const-offset` rules predict re-materialization,
+    // and an MMIO poll (store then re-read the same fixed offset while it spins) is the shape
+    // where the prediction is wrong — the compiler holds ONE base register across stores, the
+    // loop, and the read-back. The primary already carries every base those rules admit, so a
+    // hoist-nothing result means the lever has nothing to add and declines.
+    // One family per LIVEBASE_ADMISSIONS row; a row binding exactly what an earlier row bound
+    // is the same spelling under a different label, so it declines for that too.
+    const livebases = LIVEBASE_ADMISSIONS.map(({ suffix, gates }, i) => {
+      const hoist = (): SFn | null => {
+        const bound = admittedBases(sfn, gates);
+        const shadowed = LIVEBASE_ADMISSIONS.slice(0, i).some((a) => sameBases(bound, admittedBases(sfn, a.gates)));
+        return bound.length > 0 && !shadowed ? hoistReusedGlobalBases(sfn, gates) : null;
+      };
+      const volatiles = (): SFn | null => {
+        const r = hoist();
+        return r ? volatilePtrLocals(r, createdLocals(sfn, r)) : null;
+      };
+      return { suffix, hoist, volatiles };
+    });
+    for (const { suffix, hoist, volatiles } of livebases) {
+      respell(suffix, hoist);
+      respell(`${suffix}/volatile`, volatiles);
+      enumerate(`${suffix}/volatile`, hoist, (r) => volatileSubsetCandidates(r, createdLocals(sfn, r)));
+    }
+    // The livebase × indexed PAIRINGS — the third sanctioned product kind (see POLICY):
+    // row-demanded, and the joint spelling is reachable from neither lever alone (the
+    // frame-copy + DMA shape).
+    for (const { suffix, hoist, volatiles } of livebases) {
+      respell(`${suffix}/indexed`, () => {
+        const r = hoist();
+        return r ? reindexWalks(r) : null;
+      });
+      respell(`${suffix}/volatile/indexed`, () => {
+        const r = volatiles();
+        return r ? reindexWalks(r) : null;
+      });
+    }
+    // `/mulfirst` — product-first commutative sums (l3/mulfirst.ts): IDO/mwcc schedule the
+    // independent operand's load above the product's mflo/mullw, so def order re-spells a
+    // product-first source as load-first. Both orders are emitted; the differ referees.
+    respell('/mulfirst', () => mulFirstSums(sfn));
+    // `/nearbase` — neighbor absolute addresses derive from one shared base local
+    // (l3/nearbase.ts): one object's cells anchored as separate pool constants re-spell as
+    // offsets off its lowest address, within the target's declared derivation reach. Both
+    // spellings are emitted; the differ referees.
+    const nearSpan = target.compilerBehaviors.nearBaseSpan;
+    respell('/nearbase', () => (nearSpan !== undefined ? nearBaseClusters(sfn, nearSpan) : null));
+    // The livebase × nearbase PAIRINGS — the same admission as livebase × indexed above:
+    // the volatile triple is the row-demanded one, and the joint spelling is reachable from
+    // neither lever alone (a neighbor-cell object and a multi-index MMIO block in one
+    // function — each lever's constants are invisible to the other's model); the plain
+    // sibling rides for symmetry with /livebase/indexed.
+    for (const { suffix, hoist, volatiles } of livebases) {
+      respell(`${suffix}/nearbase`, () => {
+        const r = hoist();
+        return r && nearSpan !== undefined ? nearBaseClusters(r, nearSpan) : null;
+      });
+      respell(`${suffix}/volatile/nearbase`, () => {
+        const r = volatiles();
+        return r && nearSpan !== undefined ? nearBaseClusters(r, nearSpan) : null;
+      });
+    }
+    // The livebase × coalesce PAIRINGS — same admission again: the volatile triple is the
+    // row-demanded one, the joint spelling reachable from neither lever alone (an MMIO base
+    // worth homing and a counter shared across both arms of one if, in one function); the
+    // plain sibling rides for symmetry.
+    // ARM-DISJOINT merges only: the demanding row's shared counter is that class, and the
+    // span-model merges already ride the plain /coalesce label — pairing them too would
+    // multiply candidates with no row behind it.
+    for (const { suffix, hoist, volatiles } of livebases) {
+      enumerate(`${suffix}/coalesce`, hoist, armDisjointCandidates);
+      enumerate(`${suffix}/volatile/coalesce`, volatiles, armDisjointCandidates);
+    }
+    // `/parkfirst` — incoming-argument parks lead the entry prefix (l3/parkfirst.ts): the
+    // park's `mov` lifts to pure SSA aliasing, so its position is unrecoverable and the
+    // default order is emission's. Both orders are emitted; the differ referees.
+    respell('/parkfirst', () => parkParamsFirst(sfn));
+    // the register-copy spelling (l3/regspell.ts): 0–3 variants (base; tail assign-back reusing
+    // the dead value var; tail assign-back into a fresh var — the tail choice is allocator-
+    // ambiguous, so both are ranked)
+    const REGCOPY_LABELS = ['/regcopy', '/regcopy-ret', '/regcopy-ret-fresh'];
+    registerishSpellings(sfn).forEach((alt, i) => respell(REGCOPY_LABELS[i] ?? `/regcopy-${i}`, () => alt));
+    return spellings;
+  };
   // The SYMBOL-MAP spelling is itself a ranked LEVER on the same footing as signedness/branch
   // sense: naming a global changes agbcc's codegen (the eager-load effect), and which side
   // byte-wins is genuinely per-function — the dogfood's landed matches split between extern
@@ -565,12 +881,21 @@ export function enumerateCandidates(
     : [{ suffix: '' }];
   for (const [svIndex, sv] of symbolVariants.entries()) {
     const svOpts = sv.symbols ? baseOpts : { ...baseOpts, symbols: undefined };
+    // `/no-bitfield` names a spelling the MAP makes available, so it has no inhabitant on the
+    // variant that structures without one: structure() normalizes `spellBitfieldMembers` to false
+    // when `symbols` is absent, so both arms structure the identical tree whatever reads it. This
+    // declines to build the second arm rather than leaving the tree skip to collapse it, which is
+    // worth 512 of LoadBGTilemapData's 1536 structurings under docs/ranked-repro.md's flags.
+    // Declining is not pruning — same posture as the signedness decline below, and the same
+    // candidate list; bitfield-members.test.ts pins the normalization the decline rests on.
+    const svCands = sv.symbols ? axisCands : axisCands.filter((s) => s.bitfields);
     // The signedness axis DECLINES where the pin has nothing to pin. `pinScalarParams` writes only
     // over an entry param still `unknown`/`int` that is not one of the recovered pointers/
-    // aggregates `ptrIdx` excludes; where no param is left, the second pass re-lifts, re-raises,
-    // re-structures and re-emits a function BYTE-IDENTICAL to the first, and every spelling it
-    // prints collapses on the `seen` dedup below. Declining is not pruning: the candidate list is
-    // the same list, reached without building the duplicates.
+    // aggregates `ptrIdx` excludes; where no param is left, the second pass re-lifts, re-raises and
+    // re-structures a function BYTE-IDENTICAL to the first, reaching a tree the first pass already
+    // spelled. Declining is not pruning: the candidate list is the same list, reached without
+    // building the duplicates. What the decline saves is therefore invisible in the candidates —
+    // sign-axis.test.ts counts LIFTS, the one reading of the enumeration that it moves.
     //
     // Read off the pin's OWN call, per symbol variant — the `/raw-globals` arm lifts without the
     // map and answers for itself, so no lift is governed by a fact measured on a different one.
@@ -628,7 +953,7 @@ export function enumerateCandidates(
         }
         // the per-variant axis gates, on THIS variant's lifted fn — see the table doc
         const variantOff = STRUCTURING_AXES.filter((ax) => ax.variantGate !== undefined && !ax.variantGate(fn));
-        const variantCands = axisCands.filter((s) => variantOff.every((ax) => !s[ax.flag]));
+        const variantCands = svCands.filter((s) => variantOff.every((ax) => !s[ax.flag]));
         // `/merge-names` combinations whose un-merged sibling was DROPPED. `structure()` already
         // refuses to let the axis unlock a function the primary declines, but it can only see its own
         // refusals — a boundary contract fails out here, in `structureChecked`. Without this a
@@ -671,303 +996,27 @@ export function enumerateCandidates(
             opts.onLeverError?.(name + lv.suffix + s.suffix, e instanceof Error ? e.message.split('\n')[0] : String(e));
             continue;
           }
-          // The walk→index re-spelling (l3/reindex.ts) is a THIRD lever on the same footing as
-          // signedness and branch sense: whether the source spelled `*p; p++` or `arr[i]` is
-          // genuinely ambiguous from asm (compilers strength-reduce the latter into the former), so
-          // when a loop re-spells, BOTH representations are emitted and the differ referees. The
-          // re-spelling passes the same boundary contracts as the primary; one that fails them is
-          // dropped here — never scored, never able to win.
-          const spellings: { suffix: string; source: string; symbolRefs?: SymbolRef[]; deviceVolatile?: number }[] = [
-            { suffix: '', source: backend.emit(sfn), ...refsOf(sfn), ...volOf(sfn) },
-          ];
-          // Representation re-spellings — each a lever on the same footing as signedness/branch sense,
-          // each guarded: it must pass the same boundary contracts as the primary AND emit (a backend
-          // that declines by throwing — Pascal loud-fails unspellable shapes — drops the candidate,
-          // never aborts the enumeration). A dropped re-spelling loses nothing: the primary remains.
+          // A TREE another axis point already spelled. `fanOut` reads the tree and this call's own
+          // constants, nothing that varies per axis point — its signature is the argument — so a
+          // repeated tree can only re-emit sources `seen` already holds: the candidate list, its
+          // order and its labels are exactly the ones the whole fan produces, reached without
+          // re-deriving forty passes. An axis is INERT on most functions (nothing to re-read, no
+          // bitfield member, no joined if), and an inert axis is a factor of two in the cross that
+          // changes nothing: on the klonoa checkout's `LoadBGTilemapData` under
+          // docs/ranked-repro.md's flags, 640 of 1024 axis points (62.5%) re-derive a tree an
+          // earlier one already emitted.
           //
-          // POLICY: re-spellings derive from the BASE spelling only — levers do not compose by
-          // default. THREE product mechanisms are sanctioned, each with its own admission bar —
-          // plus ALTERNATIVE OUTPUTS: one lever whose single application has several legitimate
-          // results (which locals a coalesce merges, which pointers /volatile qualifies) emits
-          // each as its own candidate via `enumerate`, capped at the lever, with the base spelling
-          // retained; outputs may also ride an already-sanctioned product (the /livebase/volatile
-          // subsets), since they add no new lever to the composition.
-          // Products with /volatile go only onto a lever whose re-spelling CENTRES ON a
-          // numeric-address pointer local — the joint spelling is reachable from neither lever
-          // alone, each product narrows /volatile to the lever's own locals (volatilePtrLocals'
-          // `only`), and each needed a row to demand it. The SHAPE products (SHAPE_PRODUCTS) are
-          // derived onto EVERY spelling: statement order/shape is orthogonal to what any
-          // representation lever changes — the same kind of independent dimension as signedness —
-          // so they compose as an axis rather than a pairing; a third blanket product needs the
-          // same argument, not just a row. And a specific LEVER PAIRING is admitted when a row
-          // demands it AND the joint spelling is reachable from neither lever alone (the
-          // /livebase × /indexed, × /nearbase, and × /coalesce pairings below, each with its
-          // demanding row); anything else stays un-composed. A pairing is admitted for a LEVER, so
-          // it fans over that lever's whole admission table (LIVEBASE_ADMISSIONS): a roster row
-          // changes which bases the same hoist binds, not what pairing it with /coalesce means.
-          // And a lever must PRESERVE SEMANTICS by construction: the differ referees byte-exactness
-          // (a wrong candidate can never fake a score-0 match), but on a NONMATCH row the best-
-          // scoring source is shown to the user — a semantically-wrong re-spelling there is
-          // plausible-but-wrong output, the defect class this project exists to avoid. Hence each
-          // lever's decline-over-approximate gates, adversarially audited.
-          // Takes a THUNK, so the lever's own computation is inside the try too. A lever that threw
-          // from the pass itself — rather than from the contracts or the backend — would escape and
-          // abort the whole enumeration for this row, primary included: the one way a lever can cost
-          // a match. Making that structural rather than per-call-site means no lever can opt out.
-          const respell = (suffix: string, make: () => SFn | null | undefined): void => {
-            try {
-              const alt = make();
-              if (!alt) {
-                return; // the lever declined to fire — no candidate, not a duplicate of the primary
-              }
-              assertResolved(alt);
-              assertDerefsTyped(alt);
-              spellings.push({ suffix, source: backend.emit(alt), ...refsOf(alt), ...volOf(alt) });
-              // STATEMENT-SHAPE products, derived onto EVERY spelling — the second sanctioned
-              // product mechanism (the POLICY note above carries the admission argument). Each is
-              // a statement-order/shape fact orthogonal to representation; subsets compose in the
-              // fixed order below. A shape that never fires declines and costs nothing.
-              if (!SHAPE_PRODUCTS.some(({ suffix: sx }) => suffix.includes(sx))) {
-                for (const subset of SHAPE_SUBSETS) {
-                  const shaped = applyShapes(subset, alt);
-                  if (shaped !== null) {
-                    assertResolved(shaped.out);
-                    assertDerefsTyped(shaped.out);
-                    spellings.push({
-                      suffix: `${suffix}${shaped.suffix}`,
-                      source: backend.emit(shaped.out),
-                      ...refsOf(shaped.out),
-                      ...volOf(shaped.out),
-                    });
-                  }
-                }
-              }
-            } catch (e) {
-              // A throwing lever, a contract failure, or an unspellable re-spelling: keep the primary.
-              // REPORTED, not swallowed. `dropped` (below) records only spellings the SCORER refused,
-              // so without this a lever that fails here vanishes with no trace — indistinguishable
-              // from one that correctly declined, which is exactly the hidden failure
-              // DroppedCandidate exists to surface.
-              opts.onLeverError?.(name + suffix, e instanceof Error ? e.message.split('\n')[0] : String(e));
-            }
-          };
-          // `/argbase` — name a call's argument bases before the call (l3/argbase.ts). A lever on the
-          // same footing as the others: the primary inline spelling stays in the list, so the differ
-          // referees and this can never cost a match.
-          for (const subset of SHAPE_SUBSETS) {
-            // the truthful suffix needs the pass to RUN first, so this bypasses respell's
-            // label-then-thunk shape: same try posture, label from the fired members
-            try {
-              const shaped = applyShapes(subset, sfn);
-              if (shaped !== null) {
-                respell(shaped.suffix, () => shaped.out);
-              }
-            } catch (e) {
-              // the error label falls back to the full subset — the fired set is unknown mid-throw
-              const label = subset.map((x) => x.suffix).join('');
-              opts.onLeverError?.(name + label, e instanceof Error ? e.message.split('\n')[0] : String(e));
-            }
+          // Keyed on the JSON text, in a Set of STRINGS — a value comparison, so it can never
+          // merge two trees the way a hash could. Its one direction of error is a MISS (a
+          // differing key order re-runs a fan whose spellings then dedup as they do today), and
+          // the property that rules the other direction out — that the text determines the tree —
+          // is pinned by rank-tree-key.test.ts rather than assumed.
+          const treeKey = JSON.stringify(sfn);
+          if (seenTrees.has(treeKey)) {
+            continue;
           }
-          respell('/argbase', () => materializeArgBases(sfn));
-          // `/volatile` — declare a pointer local holding a NUMERIC address as pointing to volatile
-          // data (l3/volatileptr.ts). A raw constant has no declaration anywhere, so the original
-          // qualifier is not derivable — and it is codegen-visible (a volatile MEM is barred from
-          // motion, which lands the allocator on different homes). Both spellings are emitted and
-          // the differ referees.
-          respell('/volatile', () => volatilePtrLocals(sfn));
-          // `/vol-slot` — declare a STACK-HOMED scalar local volatile (l3/volatileval.ts). The
-          // qualifier takes away the allocator's freedom to keep the value in a callee-saved
-          // register across a call, and which of the three ways a slot can arise (a volatile local,
-          // an address-taken one, plain register pressure) the source used is not derivable from
-          // the asm. A DECLARATION lever, not a structuring axis (docs/level-tower.md's third
-          // fork): it changes nothing structure() decides, so it rides the base spelling like its
-          // `/volatile` sibling rather than doubling every enumeration, and its frame-flag gate
-          // costs nothing on a function with no slot.
-          respell('/vol-slot', () => volatileValueLocals(sfn));
-          // `/inlinebase` — spell a CONSTANT-address pointer local at its uses instead
-          // (l3/inlinebase.ts). The local is structure/analysis.ts's value home for a `const` the
-          // asm kept in a callee-saved register across a call; the register is real, but a constant
-          // re-spelled per use is CSEd back into that same one, so which the source had is not
-          // derivable. Its own bare-`const`-initializer gate keeps it off l3/basecse.ts's reuse
-          // hoists, whose placement levers already answer that question.
-          //
-          // TWO ALTERNATIVE OUTPUTS, not a product: deleting the local also deletes the only place
-          // a `volatile` POINTEE could be written, and a raw address has no declaration anywhere
-          // else to carry it. So the qualified spelling is emitted too, `/volatile` narrowed to
-          // exactly the locals this lever deletes. Usually the bytes separate them and the score
-          // decides (11 against 12 on pokeemerald:EReader_Reset), but where the compiler was not
-          // exploiting the non-volatility they are byte-identical — as they are on that row's
-          // WINNING shape, the one that also qualifies the slot — and `compareScored`'s device-
-          // volatility term picks the qualified twin, 0x4000208 being REG_IME.
-          //
-          // COST — it fires broadly: on 33 of the 69 klonoa functions that lift with no symbol map
-          // (a symbol-map sweep sees fewer, since an absolute pool constant lifts to a `gaddr`
-          // there). Both outputs together add 766 candidates over 47058, +1.6%, and up to +67% on
-          // one function (EntityPositionFromLevelTable) — the same class of price the enumeration
-          // already pays for `/volatile`, and cheaper than the axis over the same question would
-          // be — the choice the lever's header argues. `/vol-slot` adds nothing at all there: no
-          // klonoa function reaches its frame gate.
-          const inlineVolatile = (): SFn | null => {
-            const only = new Set(inlinableConstBases(sfn));
-            const q = only.size ? volatilePtrLocals(sfn, only) : null;
-            return q ? inlineConstBases(q) : null;
-          };
-          respell('/inlinebase/volatile', inlineVolatile);
-          respell('/inlinebase', () => inlineConstBases(sfn));
-          // The `/inlinebase` × `/vol-slot` PAIRING — row-demanded, and the joint spelling is
-          // reachable from neither lever alone: on pokeemerald:EReader_Reset the primary scores 11,
-          // `/inlinebase` alone 11 and `/vol-slot` alone 2, and the pair 0. The two touch disjoint
-          // locals (one pointer-typed, one a scalar frame slot), so applying them in either order
-          // gives the same spelling — and each of `/inlinebase`'s two outputs carries it.
-          respell('/inlinebase/volatile/vol-slot', () => {
-            const r = inlineVolatile();
-            return r ? volatileValueLocals(r) : null;
-          });
-          respell('/inlinebase/vol-slot', () => {
-            const r = inlineConstBases(sfn);
-            return r ? volatileValueLocals(r) : null;
-          });
-          // `/scopebase` — name a reused global base at the INNERMOST scope holding its uses
-          // (l3/scopebase.ts). Distinct from basecse's function-top hoist, which the primary already
-          // carries: this one fires exactly where that placement would extend a live range the
-          // original never had.
-          // `/scopebase`, and its COALESCED variants. Which locals a register allocator shared is not
-          // derivable from the tree — on the row this was built for the two legal merges score 18 and
-          // 40 against a no-merge 21, so committing to one by declaration order costs 19 points and
-          // discards the winner. Every variant is emitted and the differ referees, exactly as
-          // `/regcopy` does for its allocator-ambiguous tail choice.
-          //
-          // POLICY NOTE: rank.ts's rule is that re-spellings derive from the BASE spelling only —
-          // levers do not compose. These are not a second lever composed onto the first: coalescing is
-          // enumerated as alternative OUTPUTS of the base hoist, in the one place that knows the hoist
-          // just happened. The un-coalesced `/scopebase` stays in the list, so nothing is lost.
-          //
-          // EVERY pass invocation stays INSIDE a thunk — see the paragraph above on why a pass that
-          // runs outside `respell`'s try is the one way a lever can cost a match. `enumerate` re-runs
-          // the hoist per candidate, which is pure and cheap, rather than caching it outside the guard.
-          respell('/scopebase', () => hoistScopedBases(sfn));
-          const enumerate = (
-            label: string,
-            from: () => SFn | null | undefined,
-            variantsOf: (s: SFn) => { merged: string; sfn: SFn }[] = coalesceCandidates,
-          ): void => {
-            let variants: { merged: string; sfn: SFn }[] = [];
-            try {
-              const base = from();
-              variants = base ? variantsOf(base) : [];
-            } catch (e) {
-              opts.onLeverError?.(name + label, e instanceof Error ? e.message.split('\n')[0] : String(e));
-              return;
-            }
-            for (const c of variants) {
-              respell(`${label}-${c.merged}`, () => c.sfn);
-            }
-          };
-          enumerate('/scopebase-coalesce', () => hoistScopedBases(sfn));
-          enumerate('/coalesce', () => sfn);
-          // `/volatile`'s per-local SUBSETS: which pointers the source declared volatile is
-          // per-pointer knowledge (an MMIO block and a plain RAM table sit side by side, and
-          // qualifying the table blocks the read collapse its region wants), so each proper
-          // non-empty subset is its own candidate — the same alternative-OUTPUTS mechanism as the
-          // coalesce merges, not a product (l3/volatileptr.ts volatileSubsetCandidates carries the
-          // ≤3 cap). The all-qualifiers form is plain `/volatile` above; the livebase product's
-          // subsets ride below with the product's own `only` scope.
-          enumerate(
-            '/volatile',
-            () => sfn,
-            (s) => volatileSubsetCandidates(s),
-          );
-          respell('/indexed', () => reindexWalks(sfn));
-          respell('/indexed/volatile', () => {
-            const kept = new Set<string>();
-            const r = reindexWalks(sfn, kept);
-            return r ? volatilePtrLocals(r, kept) : null;
-          });
-          // `/livebase` — hoist a reused leaf base the default basecse pass REFUSED (l3/basecse.ts,
-          // LIVEBASE_GATES): its `loop` and `repeated-const-offset` rules predict re-materialization,
-          // and an MMIO poll (store then re-read the same fixed offset while it spins) is the shape
-          // where the prediction is wrong — the compiler holds ONE base register across stores, the
-          // loop, and the read-back. The primary already carries every base those rules admit, so a
-          // hoist-nothing result means the lever has nothing to add and declines.
-          // One family per LIVEBASE_ADMISSIONS row; a row binding exactly what an earlier row bound
-          // is the same spelling under a different label, so it declines for that too.
-          const livebases = LIVEBASE_ADMISSIONS.map(({ suffix, gates }, i) => {
-            const hoist = (): SFn | null => {
-              const bound = admittedBases(sfn, gates);
-              const shadowed = LIVEBASE_ADMISSIONS.slice(0, i).some((a) =>
-                sameBases(bound, admittedBases(sfn, a.gates)),
-              );
-              return bound.length > 0 && !shadowed ? hoistReusedGlobalBases(sfn, gates) : null;
-            };
-            const volatiles = (): SFn | null => {
-              const r = hoist();
-              return r ? volatilePtrLocals(r, createdLocals(sfn, r)) : null;
-            };
-            return { suffix, hoist, volatiles };
-          });
-          for (const { suffix, hoist, volatiles } of livebases) {
-            respell(suffix, hoist);
-            respell(`${suffix}/volatile`, volatiles);
-            enumerate(`${suffix}/volatile`, hoist, (r) => volatileSubsetCandidates(r, createdLocals(sfn, r)));
-          }
-          // The livebase × indexed PAIRINGS — the third sanctioned product kind (see POLICY):
-          // row-demanded, and the joint spelling is reachable from neither lever alone (the
-          // frame-copy + DMA shape).
-          for (const { suffix, hoist, volatiles } of livebases) {
-            respell(`${suffix}/indexed`, () => {
-              const r = hoist();
-              return r ? reindexWalks(r) : null;
-            });
-            respell(`${suffix}/volatile/indexed`, () => {
-              const r = volatiles();
-              return r ? reindexWalks(r) : null;
-            });
-          }
-          // `/mulfirst` — product-first commutative sums (l3/mulfirst.ts): IDO/mwcc schedule the
-          // independent operand's load above the product's mflo/mullw, so def order re-spells a
-          // product-first source as load-first. Both orders are emitted; the differ referees.
-          respell('/mulfirst', () => mulFirstSums(sfn));
-          // `/nearbase` — neighbor absolute addresses derive from one shared base local
-          // (l3/nearbase.ts): one object's cells anchored as separate pool constants re-spell as
-          // offsets off its lowest address, within the target's declared derivation reach. Both
-          // spellings are emitted; the differ referees.
-          const nearSpan = target.compilerBehaviors.nearBaseSpan;
-          respell('/nearbase', () => (nearSpan !== undefined ? nearBaseClusters(sfn, nearSpan) : null));
-          // The livebase × nearbase PAIRINGS — the same admission as livebase × indexed above:
-          // the volatile triple is the row-demanded one, and the joint spelling is reachable from
-          // neither lever alone (a neighbor-cell object and a multi-index MMIO block in one
-          // function — each lever's constants are invisible to the other's model); the plain
-          // sibling rides for symmetry with /livebase/indexed.
-          for (const { suffix, hoist, volatiles } of livebases) {
-            respell(`${suffix}/nearbase`, () => {
-              const r = hoist();
-              return r && nearSpan !== undefined ? nearBaseClusters(r, nearSpan) : null;
-            });
-            respell(`${suffix}/volatile/nearbase`, () => {
-              const r = volatiles();
-              return r && nearSpan !== undefined ? nearBaseClusters(r, nearSpan) : null;
-            });
-          }
-          // The livebase × coalesce PAIRINGS — same admission again: the volatile triple is the
-          // row-demanded one, the joint spelling reachable from neither lever alone (an MMIO base
-          // worth homing and a counter shared across both arms of one if, in one function); the
-          // plain sibling rides for symmetry.
-          // ARM-DISJOINT merges only: the demanding row's shared counter is that class, and the
-          // span-model merges already ride the plain /coalesce label — pairing them too would
-          // multiply candidates with no row behind it.
-          for (const { suffix, hoist, volatiles } of livebases) {
-            enumerate(`${suffix}/coalesce`, hoist, armDisjointCandidates);
-            enumerate(`${suffix}/volatile/coalesce`, volatiles, armDisjointCandidates);
-          }
-          // `/parkfirst` — incoming-argument parks lead the entry prefix (l3/parkfirst.ts): the
-          // park's `mov` lifts to pure SSA aliasing, so its position is unrecoverable and the
-          // default order is emission's. Both orders are emitted; the differ referees.
-          respell('/parkfirst', () => parkParamsFirst(sfn));
-          // the register-copy spelling (l3/regspell.ts): 0–3 variants (base; tail assign-back reusing
-          // the dead value var; tail assign-back into a fresh var — the tail choice is allocator-
-          // ambiguous, so both are ranked)
-          const REGCOPY_LABELS = ['/regcopy', '/regcopy-ret', '/regcopy-ret-fresh'];
-          registerishSpellings(sfn).forEach((alt, i) => respell(REGCOPY_LABELS[i] ?? `/regcopy-${i}`, () => alt));
+          seenTrees.add(treeKey);
+          const spellings = fanOut(sfn);
           for (const sp of spellings) {
             const source = sp.source;
             // Collapse a spelling that produced identical source (a function with no divergent `if`

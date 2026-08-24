@@ -475,19 +475,37 @@ export function stmtChildren(s: Stmt): Stmt[] {
 
 /** Every expression node in a body, statements nested and children included — the whole-tree walk
  *  the three functions above compose into, kept here so a new node kind is a compile error in one
- *  of them rather than a silent miss in each caller's own recursion. */
+ *  of them rather than a silent miss in each caller's own recursion.
+ *
+ *  An EXPLICIT stack, not `yield*` recursion. A delegated generator costs a frame per nesting
+ *  level on every value it forwards, so an expression ten levels down was handed off ten times; this
+ *  walk runs over a whole function body once per emitted candidate. The stack
+ *  holds either a statement list still to expand or an expression still to visit — `Expr` is
+ *  never an array, so the two are told apart without a tag — and both are pushed in reverse so
+ *  they pop in document order, which is the order the recursion produced. */
 export function* walkExprs(body: Stmt[]): Generator<Expr> {
-  const expr = function* (e: Expr): Generator<Expr> {
-    yield e;
-    for (const c of exprChildren(e)) {
-      yield* expr(c);
+  const stack: (Expr | Stmt[])[] = [body];
+  while (stack.length > 0) {
+    const top = stack.pop()!;
+    if (Array.isArray(top)) {
+      for (let i = top.length - 1; i >= 0; i--) {
+        const s = top[i];
+        const children = stmtChildren(s);
+        if (children.length > 0) {
+          stack.push(children);
+        }
+        const exprs = stmtExprs(s);
+        for (let j = exprs.length - 1; j >= 0; j--) {
+          stack.push(exprs[j]);
+        }
+      }
+      continue;
     }
-  };
-  for (const s of body) {
-    for (const e of stmtExprs(s)) {
-      yield* expr(e);
+    yield top;
+    const children = exprChildren(top);
+    for (let i = children.length - 1; i >= 0; i--) {
+      stack.push(children[i]);
     }
-    yield* walkExprs(stmtChildren(s));
   }
 }
 

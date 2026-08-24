@@ -129,18 +129,21 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   decide it: a question the asm underdetermines can be answered by RE-RUNNING `structure()` under a
   different lever (a structuring axis) or by RE-SPELLING the tree `structure()` already produced.
   Both are ranked, both are refereed by the differ, so the deciding terms are COST and REACH. An
-  axis doubles the enumeration everywhere its gate admits, and a ranked run is already minutes:
+  axis doubles the enumeration wherever it CHANGES THE TREE, and costs one more `structure()` call
+  and nothing else wherever it does not — `rank.ts` fans a structured tree once and skips a tree an
+  earlier axis point already spelled, so an inert axis pays no re-spellings and no compiles. What is
+  expensive is therefore an axis that fires broadly, and a ranked run is already minutes:
   `/inlinebase` inverts `structure/analysis.ts`'s const value-home decision — the same question
   `/reread-globals`, `/addr-home`, `/expr-home` and `/derived-home` each answer as a
   `STRUCTURING_AXES` entry — and answering it by substitution instead costs **766 extra candidates
   over 47058, +1.6%**, on the 33 of 69 klonoa functions that lift with no symbol map, where an axis
-  over the same population would have doubled each of them. What a substitution pays for that is
-  REACH: it can only rewrite the use shapes it can reach (`/inlinebase` re-spells `index` bases, so
-  a home passed to a callee or standing as a `field` base is out of its grasp), where the axis
-  would never have created the local at all. So re-spell while the shapes the substitution cannot
-  reach have no row demanding them, take the axis when one appears — and name the fork in the
-  lever's header, because otherwise the gap left behind reads as an oversight rather than as the
-  price of the mechanism.
+  over the same population would have doubled every candidate on each of those 33. What a
+  substitution pays for that is REACH: it can only rewrite the use shapes it can reach
+  (`/inlinebase` re-spells `index` bases, so a home passed to a callee or standing as a `field` base
+  is out of its grasp), where the axis would never have created the local at all. So re-spell while
+  the shapes the substitution cannot reach have no row demanding them, take the axis when one
+  appears — and name the fork in the lever's header, because otherwise the gap left behind reads as
+  an oversight rather than as the price of the mechanism.
 
   Which population a pass belongs to decides how much its opinions cost. Four passes currently
   answer "is this address a local?" differently — `raise/gvn.ts` (never), `l3/basecse.ts`

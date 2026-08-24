@@ -4,6 +4,7 @@
 import { describe, expect, test } from 'vitest';
 
 import { decompile } from '../src/pipeline';
+import type { SymbolMap } from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
 
 const dc = (sym: string, body: string) => decompile(sym, `${sym}:\n${body}`, ARMV4T_AGBCC);
@@ -1721,6 +1722,12 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     );
   });
 
+  // one address-taken halfword frame object published to a DMA register — the shape that mints
+  // an `sp<off>` name, reused by the two shadowing tests below
+  const declaresSp0 =
+    'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tmov\tr4, sp\n\tstrh\tr0, [r4]\n\tldr\tr2, .L1\n\tstr\tr4, [r2]\n' +
+    '\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n.L1:\n\t.word\t0x40000D4\n';
+
   test('a callee named sp0 keeps its name — the minted local yields', () => {
     // Call targets are part of the namespace the structurer mints into: a local shadowing a
     // function named sp0 makes `sp0()` a call through a u16 object — a compile error. The minted
@@ -1732,6 +1739,17 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     expect(src).toContain('volatile u16 sp0_;');
     expect(src).toContain('&sp0_');
     expect(src).toContain('sp0(');
+  });
+
+  test('a MAP symbol named sp0 keeps its name — the minted local yields', () => {
+    // The third namespace the minter shares, and the only one nothing else in this layer walks:
+    // the project's symbol map. It is CONSULTED rather than copied into the taken set, so this
+    // pins the arm — a map name that stops being asked about mints a local that shadows a real
+    // project global, and `sp0` would then read the wrong object.
+    const mapWithSp0: SymbolMap = new Map([[0x03005220, [{ name: 'sp0', kind: 'data', declared: true }]]]);
+    const src = decompile('f', declaresSp0, ARMV4T_AGBCC, { symbols: mapWithSp0 }).source;
+    expect(src).toContain('volatile u16 sp0_;');
+    expect(src).toContain('&sp0_');
   });
 
   test('the frame-object audit refuses every use it cannot vouch for, loudly and by name', () => {

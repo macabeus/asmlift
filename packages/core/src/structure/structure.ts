@@ -723,7 +723,8 @@ export interface StructureOptions {
   // Spell `(x << a) >> b` extracts of a struct global as the map's named bitfield member. On by
   // default; rank.ts enumerates the OFF spelling as the `/no-bitfield` axis, because the named
   // read recompiles at the DECLARATION's access width — where that diverges from the asm's load
-  // width the honest shift spelling is the one that matches, and the differ referees.
+  // width the honest shift spelling is the one that matches, and the differ referees. Only the map
+  // carries the names, so with no `symbols` this is normalized to false whatever a caller passes.
   spellBitfieldMembers?: boolean;
   // Let a read of a named global render at its use across writes that PROVABLY cannot reach it
   // (a store to a different named global), instead of caching it in a local. Off by default;
@@ -831,7 +832,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     defOrderLoadPairs = true,
     anchorConstCopies = false,
     littleEndian = true,
-    spellBitfieldMembers = true,
+    spellBitfieldMembers: bitfieldSpellingWanted = true,
     rereadGlobals = false,
     materializeJoinFeeds = false,
     homeSharedAddresses = false,
@@ -843,6 +844,12 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     onGap = 'strict',
     symbols,
   } = opts;
+  // Only the MAP makes the named bitfield spelling available, so with no map this is not a choice.
+  // Normalized once here rather than left to each reader's own `symCtx &&` guard, because rank.ts's
+  // `/no-bitfield` decline rests on both arms structuring the IDENTICAL tree without a map — a
+  // second reader added outside that guard would otherwise delete a candidate silently, and nothing
+  // reports a candidate that was never enumerated (bitfield-members.test.ts).
+  const spellBitfieldMembers = symbols !== undefined && bitfieldSpellingWanted;
   // These levers all change which edge copies elide as identities (extra materialization does
   // too), which the loop emitters' hazard predicates read — so the invariant above covers each.
   // A per-compiler DEFAULT is not among them, however much it materializes: the primary IS this
@@ -892,13 +899,14 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // of the same name. `sp<off>` uniquified with underscores until free; one name per offset.
   // `undef` locals are minted in the same pass off the same `taken` set — they need the same
   // protection from the symbol map, gaddr symbols and callee names that `laddr` names do.
+  //
+  // The map is CONSULTED, never copied in: `taken` is only probed and added to, so asking the
+  // name-keyed map answers the same question for every name in it. Copying it is work
+  // proportional to the whole PROJECT's symbol count on every structuring, and a ranked run
+  // structures one function thousands of times.
   const { laddr: laddrName, undef: undefName } = (() => {
     const taken = new Set<string>();
-    if (symbols) {
-      for (const [n] of symbols) {
-        taken.add(n);
-      }
-    }
+    const isTaken = (n: string): boolean => taken.has(n) || symbols?.has(n) === true;
     for (const b of fn.blocks) {
       for (const op of b.ops) {
         if (op.opcode === 'gaddr') {
@@ -912,7 +920,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     }
     const mint = (base: string): string => {
       let n = base;
-      while (taken.has(n)) {
+      while (isTaken(n)) {
         n += '_';
       }
       taken.add(n);
@@ -992,9 +1000,12 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // Declaration-shape OVERRIDE (symbol map): a project-declared array/struct global is an
     // AGGREGATE whatever the usage inference saw — a lone off-0 access to `extern u16 tbl[]`
     // must still spell through the aggregate/array forms, never the bare scalar `tbl`.
+    // Driven from the FUNCTION's own globals, for the same reason the name minter above consults
+    // the map instead of copying it: a name outside `scalarGlobals` has nothing to override.
     if (symbols) {
-      for (const [n, si] of symbols) {
-        if (si.shape === 'array' || si.shape === 'struct') {
+      for (const n of [...scalarGlobals]) {
+        const shape = symbols.get(n)?.shape;
+        if (shape === 'array' || shape === 'struct') {
           scalarGlobals.delete(n);
         }
       }
