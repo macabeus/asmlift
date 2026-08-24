@@ -16,7 +16,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, expect, test } from 'vitest';
 
-import { scoreObjects } from '../../src/objdiff';
+import { releaseTarget, scoreObjects } from '../../src/objdiff';
 
 const FIX = join(import.meta.dirname, 'fixtures', 'objdiff');
 const TARGET = join(FIX, 'target.o');
@@ -124,4 +124,11 @@ test('the breakdown names the bucket, not just the total', () => {
   // `add r0, #1` against `add r0, #2` — same mnemonic, same register, differing immediate
   const s = scoreObjects(TARGET, DIFF, 'add_one');
   expect(s.breakdown).toEqual({ insert: 0, delete: 0, replace: 0, opMismatch: 0, argMismatch: s.score });
+});
+
+test('releaseTarget drops the memo and the next score re-parses', () => {
+  const before = scoreObjects(TARGET, DIFF, 'add_one');
+  releaseTarget();
+  releaseTarget(); // idempotent: nothing is left to dispose twice
+  expect(scoreObjects(TARGET, DIFF, 'add_one')).toEqual(before);
 });

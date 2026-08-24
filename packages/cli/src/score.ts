@@ -13,7 +13,7 @@ import { TargetDescription } from '@asmlift/core/target';
 import type { CandidateCompiler } from './compile-command';
 import { type MatchScore, scoreObjects } from './objdiff';
 
-export { scoreObjects } from './objdiff';
+export { releaseTarget, scoreObjects } from './objdiff';
 export type { DiffBreakdown, MatchScore } from './objdiff';
 export type { CandidateCompiler } from './compile-command';
 

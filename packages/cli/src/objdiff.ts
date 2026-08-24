@@ -88,8 +88,20 @@ const CONFIG = new objdiff.diff.DiffConfig();
  *
  *  The key is the whole file content, compared byte for byte rather than by path, size or mtime: a
  *  hit then PROVES the parse would produce the same object, so a target rewritten in place between
- *  two calls can never be scored against stale bytes. The read stays — only the parse is saved. */
+ *  two calls can never be scored against stale bytes. The read stays — only the parse is saved.
+ *
+ *  ONE entry, held for the life of the process. `scoreObjects` is a published entry point, so an
+ *  embedder that scores once still retains an engine handle and a copy of the target's bytes
+ *  afterwards; `releaseTarget()` below is how it gets them back. */
 let parsedTarget: { bytes: Uint8Array; obj: ObjdiffWasm.diff.Object } | undefined;
+
+/** Drop the memoized target: its engine handle is disposed and its bytes are released. The next
+ *  `scoreObjects` re-parses. For an embedder holding this module open past its last score — the CLI
+ *  itself never needs it, since a ranked run scores one target and then exits. */
+export function releaseTarget(): void {
+  disposeAll(parsedTarget?.obj);
+  parsedTarget = undefined;
+}
 
 function targetObject(path: string): ObjdiffWasm.diff.Object {
   const bytes = new Uint8Array(readFileSync(path));
