@@ -891,10 +891,11 @@ export function enumerateCandidates(
     const svCands = sv.symbols ? axisCands : axisCands.filter((s) => s.bitfields);
     // The signedness axis DECLINES where the pin has nothing to pin. `pinScalarParams` writes only
     // over an entry param still `unknown`/`int` that is not one of the recovered pointers/
-    // aggregates `ptrIdx` excludes; where no param is left, the second pass re-lifts, re-raises,
-    // re-structures and re-emits a function BYTE-IDENTICAL to the first, and every spelling it
-    // prints collapses on the `seen` dedup below. Declining is not pruning: the candidate list is
-    // the same list, reached without building the duplicates.
+    // aggregates `ptrIdx` excludes; where no param is left, the second pass re-lifts, re-raises and
+    // re-structures a function BYTE-IDENTICAL to the first, reaching a tree the first pass already
+    // spelled. Declining is not pruning: the candidate list is the same list, reached without
+    // building the duplicates. What the decline saves is therefore invisible in the candidates —
+    // sign-axis.test.ts counts LIFTS, the one reading of the enumeration that it moves.
     //
     // Read off the pin's OWN call, per symbol variant — the `/raw-globals` arm lifts without the
     // map and answers for itself, so no lift is governed by a fact measured on a different one.
@@ -1001,9 +1002,8 @@ export function enumerateCandidates(
           // whole fan produces, reached without re-deriving forty passes. An axis is INERT on most
           // functions (nothing to re-read, no bitfield member, no joined if), and an inert axis is
           // a factor of two in the cross that changes nothing: on the klonoa checkout's
-          // `LoadBGTilemapData`, the function docs/ranked-repro.md measures, 1152 of 1536 axis
-          // points (75%) re-derive a tree an earlier one already emitted with the project map, and
-          // 27456 of 29376 do over its first 61 functions.
+          // `LoadBGTilemapData` under docs/ranked-repro.md's flags, 640 of 1024 axis points (62.5%)
+          // re-derive a tree an earlier one already emitted.
           //
           // Keyed on the JSON text, in a Set of STRINGS — a value comparison, so it can never
           // merge two trees the way a hash could. Its one direction of error is a MISS (a
