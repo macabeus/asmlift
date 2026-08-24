@@ -34,6 +34,7 @@ import { guessedArityNote } from './callees';
 import { type CommandCompilers, compilersFromCommand } from './compile-command';
 import { type AsmliftToolConfig, loadDecompConfig, resolveTarget } from './config';
 import { ObjectInputUnsupportedError, asmDataForObject, disasmObject, isElfObject } from './objfile';
+import { PhaseClock } from './phase';
 import { bakedBuild, sampleSourceTree, sourceStamp } from './provenance';
 
 export { detectName };
@@ -391,7 +392,19 @@ export async function runCli(
       // Sampled BEFORE the run and again after it — see provenance.ts for the run this exists for.
       const treeBefore = sampleSourceTree();
       const { decompileRanked, decompileRankedParallel } = await import('./rank');
-      const rankOpts = { backend, asmData, prototypes, symbols, compile, ...(onProgress ? { onProgress } : {}) };
+      // Under `--progress`, the flag that already says "report on this run as it goes", the run
+      // also says what it SPENT (phase.ts). Off by default: the phase line is a measurement, and
+      // a run nobody is watching should write only what it computed.
+      const clock = flags.has('progress') ? new PhaseClock() : undefined;
+      const rankOpts = {
+        backend,
+        asmData,
+        prototypes,
+        symbols,
+        compile,
+        ...(onProgress ? { onProgress } : {}),
+        ...(clock ? { clock } : {}),
+      };
       // jobs > 1 pools the candidate COMPILES; the ranking itself is the same code either way
       // (rank.ts), so the two differ in scheduling only.
       const ranked =
@@ -428,7 +441,9 @@ export async function runCli(
       return {
         code: ranked.best.score.match ? 0 : 1,
         stdout: ranked.best.source,
-        stderr: targetTrace + warn + table + drops + summary + protoNote,
+        // …and where the run's time went, above the line readers paste, so `[ranked]` and the
+        // `[proto]` tail stay adjacent.
+        stderr: targetTrace + warn + table + drops + (clock?.report() ?? '') + summary + protoNote,
       };
     } catch (e) {
       const kind = isDecline(e) ? 'declined' : 'internal error';
