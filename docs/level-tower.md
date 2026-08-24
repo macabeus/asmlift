@@ -145,6 +145,30 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   appears — and name the fork in the lever's header, because otherwise the gap left behind reads as
   an oversight rather than as the price of the mechanism.
 
+  **An axis's 2× is intrinsic, and cannot be bought back by predicting which half is redundant.**
+  The signedness pin is the worked example, because it is the axis that fires most broadly:
+  `LoadBGTilemapData`'s 26880 candidates are 13440 twin pairs, every one of which ties in score, and
+  the fan as a whole compiles to 6000 distinct objects. The recurring proposal is to drop the
+  redundant spelling of each pair by asking the RENDERED TYPE which one it is, and that design space
+  turns out to be two points with nothing between them. Compare the pin's effect at every node
+  _including_ the `var` leaves and the predicate is sound — and is exactly "no pinned param is read
+  anywhere", which is the decline `rank.ts` already ships and which no winner inhabits. Exclude the
+  leaves, the only reading that prunes anything, and it deletes published byte-exact matches:
+  `synthetic:maxi:agbcc` is `if (a1 < a0) a1 = a0; return a1;`, no node of which changes type,
+  because C says a comparison yields `int` under either pin while the compiler picks the compare
+  INSTRUCTION from the operands — agbcc emits `bge` against `bcs`, one point of score between a
+  match and a nonmatch. The same hole swallows a `switch` scrutinee (`synthetic:sw_sparse:agbcc`,
+  `bgt` against `bhi`) and a boolean context (`synthetic:ifand_near:mwcc_242_81`). Neither point
+  reaches `LoadBGTilemapData`, four of whose address expression's ten nodes move with the leaves
+  already excluded. The only reading that would reach it sits BELOW both — absorb any difference
+  confined under an integer→pointer conversion, which all four of those nodes are — and agbcc
+  refutes that one on the same address: `*(u8 *)((a0 >> 2) + K)` is `asrs` under the signed pin
+  against `lsrs` under the unsigned one. The lattice is pinned in
+  [`test/sign-axis.test.ts`](../packages/core/test/sign-axis.test.ts). What IS removable is removed
+  by OBSERVATION rather than prediction, and belongs in the scorer, not the enumerator: identical
+  candidate objects have one score by definition, which is where
+  [`cli/src/objdiff.ts`](../packages/cli/src/objdiff.ts) collects the 20880 repeats.
+
   Which population a pass belongs to decides how much its opinions cost. Four passes currently
   answer "is this address a local?" differently — `raise/gvn.ts` (never), `l3/basecse.ts`
   (function top), `l3/scopebase.ts` (innermost scope), `l3/argbase.ts` (immediately before the
