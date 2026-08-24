@@ -27,9 +27,13 @@ describe('sourceStamp from source', () => {
     expect(sourceStamp(dirty, dirty, null)).toBe('asmlift source 8f1e183+dirty');
   });
 
-  test('THE RUN THIS EXISTS FOR: an edit made during the run and reverted before it ended', () => {
-    // Both single-ended readings are clean — the write landed after the first and the revert before
-    // the second — and the score was 36 points off with a spotless log. Only the PAIR sees it.
+  test('THE RUN THIS EXISTS FOR: a tree that disagrees with itself across the run', () => {
+    // The failure was a parallel session writing `packages/core/src/target.ts` while a run read it;
+    // the score came back 36 points off with a spotless log. Either single reading calls that tree
+    // clean. What the pair adds is exactly this: an edit standing at ONE of the two instants. An
+    // edit that lands and is reverted between them is invisible to the pair as well — the window is
+    // narrowed to the run, not closed — which is why `--jobs 6` runs are quoted from their stamp
+    // rather than trusted because one was absent.
     const clean = at('8f1e183a');
     const dirty = edited('8f1e183a', 'target.ts edit 1');
     expect(sourceStamp(clean, dirty, null)).toBe('asmlift source 8f1e183, CHANGED DURING THE RUN');

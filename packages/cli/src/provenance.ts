@@ -129,10 +129,12 @@ function contentDigest(root: string, list: string): string {
 /** The stamp, from a sample taken BEFORE the run, one taken AFTER it, and — when the CLI is a
  *  bundle — what that bundle was built from.
  *
- *  Two runtime samples rather than one because the failure that motivated this was an edit made
- *  DURING a run and reverted before it ended: a single reading at either end reports a clean tree
- *  for it. That edit cannot reach a bundle, whose `packages/` is frozen at build time and whose one
- *  file node loads at startup, so there the pair serves the staleness comparison instead. */
+ *  Two runtime samples rather than one because a single reading is blind to any edit not standing
+ *  at that instant, and a parallel session's write to `packages/` usually outlives one end of a run.
+ *  The pair reports an edit present at EITHER instant; one that lands and is reverted strictly
+ *  between them is still invisible, so this narrows the blind window to the run without closing it.
+ *  No such edit can reach a bundle, whose `packages/` is frozen at build time and whose one file
+ *  node loads at startup, so there the pair serves the staleness comparison instead. */
 export function sourceStamp(before: SourceSample, after: SourceSample, built: SourceSample | null): string {
   if (built !== null) {
     return bundleStamp(built, before, after);

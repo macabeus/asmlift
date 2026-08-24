@@ -90,7 +90,9 @@ stopped at the list of dirty paths would have called such a bundle current.
   written `packages/core/src/target.ts` inside that read-only worktree at the minute it launched and
   restored it before it finished, so `git status` was clean on both sides of the run. Rounds run in
   parallel worktrees other agents write to. **If the stamp is not a bare commit, the number is not
-  comparable to anything; fix what it names and re-run.**
+  comparable to anything; fix what it names and re-run.** A bare commit is not a proof of the
+  converse: the tree is sampled at the run's two ends, so an edit that lands and is reverted
+  strictly between them leaves no mark. The window is the run's length rather than unbounded.
 
   | stamp                                            | what it says                                                                                                    |
   | ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
