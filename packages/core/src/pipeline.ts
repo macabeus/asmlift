@@ -274,10 +274,10 @@ export function structureChecked(fn: Fn, opts: Parameters<typeof structure>[1]):
   assertLocalsWritten(raw);
   assertEffectsPreserved(fn, raw);
   // Then the readability/quality rewrites: merge a statement common to every arm of an if,
-  // drop dead stores (whose empty-then peephole flips the arm the merge empties), then hoist a
-  // reused aggregate-global
-  // base into a typed local pointer. The hoist moves the deref cast from each `index` node onto the
-  // local's initializer, so re-validate deref typing on the rewritten tree.
+  // drop dead stores (whose empty-then peephole flips the arm the merge empties), then hoist each
+  // leaf base the DEFAULT gate table admits into a typed local pointer. The hoist moves the deref
+  // cast from each `index` node onto the local's initializer, so re-validate deref typing on the
+  // rewritten tree.
   const sfn = hoistBaseLocals(eliminateDeadStores(mergeCommonTails(raw)));
   assertDerefsTyped(sfn);
   // Re-checked after the readability rewrites for the same reason deref typing is: a pass that

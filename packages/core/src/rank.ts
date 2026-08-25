@@ -237,12 +237,12 @@ const createdLocals = (from: SFn, to: SFn): Set<string> => {
 /** The base-CSE ADMISSIONS `/livebase` offers the differ, widest first. WHICH of several numeric
  *  bases the source named is per-base knowledge the asm does not carry — a DMA register file wants
  *  one register held across the whole body while the IWRAM halfword beside it re-materializes — so
- *  each admission rides as its own candidate and the differ referees between them. Every
- *  `/livebase` product below fans over this table, so a new admission is one entry here, one gate
- *  table, and that table's line in the gate-contract roster — not nine hand-edited sites that can
- *  drift. A MIRROR admission (bind the scalar cells, leave the register file inline) is that, with
- *  the complementary predicate; it is never another entry in LIVEBASE_BLOCK_GATES, which can only
- *  reject more.
+ *  each admission rides as its own candidate and the differ referees between them. A new
+ *  admission is one entry here, one gate table, and that table's line in the gate-contract
+ *  roster — not nine hand-edited sites that can drift; whether it also fans over the `/livebase`
+ *  PRODUCTS below is the entry's own `pairings`. A MIRROR admission (bind the scalar cells, leave
+ *  the register file inline) is that, with the complementary predicate; it is never another entry
+ *  in LIVEBASE_BLOCK_GATES, which can only reject more.
  *
  *  WHAT BOUNDS IT. A row declines unless it binds a non-empty set of bases no earlier row already
  *  bound, and each product declines wherever its own lever does, so the list widens only where an
@@ -263,11 +263,10 @@ const createdLocals = (from: SFn, to: SFn): Set<string> => {
  *  of them map-less: with a map the pool constant lifts to a `gaddr` and the numeric clause stands
  *  down. Two are ever offered the row, being the only two on a target that declares the fold —
  *  `synthetic:basecell` and `kleod:RollRandomLevelVariant`, three keys between them. The other
- *  three are `bg_mix` on the ido, kmc and mwcc lanes, where the target gate withholds it. That
- *  gate decides a SPELLING and not a score: a roster row only ever adds a candidate, and
- *  `compareScored` orders by score, so none of them can cost a row its match. The reason to
- *  withhold it is that `unfoldedOffset` would be read as evidence where the instruction carries
- *  the addend by construction, so there is none.
+ *  three are `bg_mix` on the ido, kmc and mwcc lanes, where the target gate withholds it — not to
+ *  protect a score (no roster row can cost one; see LIVEBASE_BLOCK_GATES) but because
+ *  `unfoldedOffset` would be read as evidence on an instruction that carries the addend by
+ *  construction, where there is none.
  *  On klonoa's `LoadBGTilemapData` — a checkout function rather than a row, so re-run it with the
  *  ranked command in docs/ranked-repro.md — the admission declines on every structuring, leaving
  *  that fan the size it was: 48000 candidates either way. All floors, though: the ranked path

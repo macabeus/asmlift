@@ -169,23 +169,24 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   candidate objects have one score by definition, which is where
   [`cli/src/objdiff.ts`](../packages/cli/src/objdiff.ts) collects the 20880 repeats.
 
-  Which population a pass belongs to decides how much its opinions cost. Five passes currently
-  answer "is this address a local?" differently — `raise/gvn.ts` (never), `l3/basecse.ts` (function
-  top), `l3/sinkinit.ts` (that same run, re-placed at each init's first use), `l3/scopebase.ts`
-  (innermost scope), `l3/argbase.ts` (immediately before the call). All but the first two are
-  candidate generators, so their disagreement costs a candidate. `gvn` and basecse's own hoist are
-  committed, so theirs would cost a **match**, and the constraint that keeps them compatible lives
-  in neither file: `gvn`'s entry-block hoist is free only because `structure/analysis.ts`
-  re-materializes address ops at each use instead of binding them to a local. That is a promise
+  Which population a pass belongs to decides how much its opinions cost. Several passes answer
+  "is this address a local?", and what separates them is PLACEMENT: never (`raise/gvn.ts`), the
+  function top (`l3/basecse.ts`, `l3/nearbase.ts`), that same run re-placed at each init's first
+  use (`l3/sinkinit.ts`), the innermost enclosing scope (`l3/scopebase.ts`), immediately before the
+  call (`l3/argbase.ts`). All but `gvn` and basecse's own hoist are candidate generators, so their
+  disagreement costs a candidate. Those two are committed, so theirs would cost a **match**, and
+  the constraint that keeps them compatible lives in neither file: `gvn`'s entry-block hoist is
+  free only because `structure/analysis.ts` re-materializes address ops at each use instead of
+  binding them to a local. That is a promise
   between modules, with no natural home in any one of their unit tests, so it is pinned in
   [`test/addr-placement.test.ts`](../packages/core/test/addr-placement.test.ts).
 
-  Two of the five now share their MECHANISM without sharing their POLICY, which is the shape the
-  rest should converge on: `l3/hoist.ts` owns name allocation, the leading base-init run and the
-  first-use query, while basecse and sinkinit keep their own answers to where an init goes. The
-  redesign that would finish it is `placeBaseLocals(sfn, policy)` — one hoist, placement as an
-  argument — and the row that earns it is one wanting a placement none of the five can express.
-  Nothing here is blocked on it today.
+  They already share their MECHANISM without sharing their POLICY, which is the shape to converge
+  on: `l3/hoist.ts` owns name allocation for every pass that mints a local, plus the leading
+  base-init run and the first-use query for the two that place into it, while each keeps its own
+  answer to where the init goes. The redesign that would finish it is
+  `placeBaseLocals(sfn, policy)` — one hoist, placement as an argument — and the row that earns it
+  is one wanting a placement none of them can express. Nothing here is blocked on it today.
 
   A second consolidation is BOOKED and deliberately unpaid: the three home scopes in
   `structure/analysis.ts` (`homeSharedAddresses`, `homeLoopExprs`, `homeDerivedReads`) are one

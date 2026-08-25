@@ -1093,9 +1093,8 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           } else if (op.opcode !== 'const' && pr && copyInterdependent.has(pr) && !addressCone(op)) {
             materialize.add(op);
           }
-          // The three AXIS scopes below are one `materialize.add(op)` behind three shared refusals,
-          // differing only in an eligibility predicate, and rank.ts already carries them as a data
-          // table — folding them into one is BOOKED in docs/level-tower.md and unpaid.
+          // Folding the three AXIS scopes below into one predicate-parameterized scope is BOOKED
+          // in docs/level-tower.md and deliberately unpaid; what it cannot absorb is named there.
           // Third scope, under the address-home axis only (see AnalyzeOptions.homeSharedAddresses):
           // a non-const pure value consumed ONLY as the base of 2+ memory accesses.
           if (

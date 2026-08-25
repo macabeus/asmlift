@@ -1,14 +1,13 @@
-// L3 — the MECHANISM shared by every pass that hoists a value into a fresh local: how a name is
-// chosen, and where the run of base inits at the top of a body starts and ends.
+// L3 — the two MECHANISMS a pass needs to place a hoisted local: how a fresh name is chosen, and
+// where the leading run of base inits starts and ends.
 //
-// Three passes name bases today (`basecse.ts` hoists a leaf base; `argbase.ts` names a call's
-// argument bases; `sinkinit.ts` re-places what basecse emitted), and they differ in POLICY — which
-// bases are eligible, when it is worth doing, and where the init goes — but not in either
-// mechanism. The naming half was copied once, and the copy silently lost a safety guard: basecse
-// added the callee-name exclusion in its own audit precisely so a hoist local could not shadow a
-// called function, and the second implementation did not have it. The init-run half was then
-// copied too, with a first-use query that answered a different question from basecse's. Both live
-// here now; the policy stays with each caller.
+// Their users differ. Every pass that mints a local takes `nameAllocator` (or `takenNames`, to
+// number its own); only the two that touch basecse's leading init run read the second half —
+// basecse re-orders that run, sinkinit sinks statements out of it, and they have to agree on where
+// it stops. POLICY stays with each caller: which values are eligible, when it is worth doing,
+// where the init goes. Both halves live here because both were per-caller copies once and both
+// copies drifted from their original — the naming one by losing the callee-name exclusion below,
+// the init one by asking a different first-use question.
 import type { Expr, SFn, Stmt } from './ast';
 import { mapExprChildren, stmtChildren, stmtExprs } from './ast';
 import { localMentions } from './mentions';

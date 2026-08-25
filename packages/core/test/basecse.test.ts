@@ -171,7 +171,7 @@ describe('leaf-base hoisting', () => {
       // the use-count rule, alone — unchanged by the lever's existence
       expect(hoistBaseLocals(input, without(BASECSE_GATES, 'single-use')).locals).toHaveLength(1);
       // ...and dropping the exemption's gate drops `reachedOnce` with it, landing on that exact
-      // table. Pinned so the DIFF above is not re-derived as an ablation by a later round.
+      // table, which is why the exemption's own price is the diff and not an ablation.
       expect(without(BASEFOLD_GATES, 'single-use-unfolded')).toEqual(without(BASECSE_GATES, 'single-use'));
     });
   });

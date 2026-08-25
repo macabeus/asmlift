@@ -2823,11 +2823,13 @@ export const SYNTHETIC: SynthSpec[] = [
   //   memory operand, so `((struct S *)0x3001100)->b` emits `.word 0x3001100` + `ldr [r0, #0x4]`,
   //   byte-identical to the named base (likewise a union member, and the write direction).
   //   asmlift can spell only one of the two, so the differ referees.
-  //   What the row guards is the three refusals that keep this off the naive ablation below: an
-  //   offset of 0 (there the fold is the identity), a target that declares no fold, and a SYMBOL
-  //   base — refused because the LIFT folds a relocation addend back into the index, so all four
-  //   spellings of that access reach L3 as one tree, NOT because the bytes agree: they do not,
-  //   `((u8 *)&gSym)[3]` emitting `.word gSym+0x3` + `ldrb [r1]`.
+  //   The row is agbcc alone and holds the ADMITTED case; the refusals that keep the admission
+  //   off the naive ablation below are gate-level, pinned in test/basecse.test.ts — an offset of 0
+  //   (there the fold is the identity), a base of 0 (no literal for a subscript to fold INTO), a
+  //   target that declares no fold, and a SYMBOL base. That last one is refused because the LIFT
+  //   folds a relocation addend back into the index, so all four spellings of that access reach L3
+  //   as one tree — NOT because the bytes agree: they do not, `((u8 *)&gSym)[3]` emitting
+  //   `.word gSym+0x3` + `ldrb [r1]`.
   //
   //   `basehome` MATCH — THREE accesses through one base whose first use is not the function's
   //   first statement. The hoist fires here, but `l3/basecse.ts` emits every init at the head of
@@ -2923,11 +2925,11 @@ export const SYNTHETIC: SynthSpec[] = [
   // `gCallbackQueue` alone on both rows — if 159→162 is carried by them and not by it, the win
   // survives and the loss does not. Run that before assuming this side needs a candidate.
   // The per-site-signedness round that shares two of those files has LANDED (5df7ced) and this
-  // family is measured on top of it: all seven synthetic rows and both real rows score identically before and after, and its
-  // structure.ts hunks (577, 1648, 1976-2048, 2221) do not touch anchorConstCopies. Nothing here
-  // needs `l3/typing.ts`, `backend/cfamily.ts` or `rank.ts`'s `SIGN_CANDS` either: every `signed/`
-  // candidate scores identically to its `unsigned/` twin on all 24 of 802's and all 4 of 832's,
-  // so the signedness axis contributes zero on both real rows.
+  // family is measured on top of it: all seven synthetic rows and both real rows score identically
+  // before and after, and its structure.ts hunks (577, 1648, 1976-2048, 2221) do not touch
+  // anchorConstCopies. Nothing here needs `l3/typing.ts`, `backend/cfamily.ts` or `rank.ts`'s
+  // `SIGN_CANDS` either: every `signed/` candidate scores identically to its `unsigned/` twin on
+  // all 24 of 802's and all 4 of 832's, so the signedness axis contributes zero on both real rows.
   //
   // NO NEW TAG, and one was tried: `param-width`, on the theory that asmlift must consume
   // `FnProto.params`' typed list. Handing asmlift the exact declared types via

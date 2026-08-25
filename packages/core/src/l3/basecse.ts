@@ -24,11 +24,10 @@
 // the theory that one access re-materializes as cheaply as a named local. A surviving `[rN, #imm]`
 // off a register holding a bare address constant is EVIDENCE against that theory, on a compiler
 // that folds a constant SUBSCRIPT into the literal it materializes
-// (TargetDescription.compilerBehaviors.foldsConstAddrOffset): `((u8 *)0x3001100)[3]` emits
-// `.word 0x3001103` + `ldrb [r1]`, where naming the base keeps `.word 0x3001100` +
-// `ldrb [r1, #0x3]`. `BaseKey.unfoldedOffset` is that shape — a NUMERIC base reached at a non-zero
-// constant offset, the frontend having folded any `add rN, #K` between the pool load and the
-// access back into one absolute address, so an offset arriving here was in the MEMORY OPERAND.
+// (TargetDescription.compilerBehaviors.foldsConstAddrOffset, where the compiled pair is).
+// `BaseKey.unfoldedOffset` is that shape — a NON-ZERO numeric base reached at a non-zero constant
+// offset, the frontend having folded any `add rN, #K` between the pool load and the access back
+// into one absolute address, so an offset arriving here was in the MEMORY OPERAND.
 // Two inline shapes could have put it there and do not: inline READS are not CSE'd across
 // addresses (three of them emit three pool words, and a base another use leaves live still takes
 // its own second word), and the inline STORE pair agbcc does CSE (`*(u8 *)0x3001100 = v;
@@ -50,10 +49,10 @@
 // frontend first, not widening this rule.
 //
 // SCOPE / SOUNDNESS. Only an `index` node whose base is a bare `addr` (a global address) or a bare
-// `const` (a numeric pointer address) is eligible, keyed by (base, width, signedness) — how many
-// nodes a key needs is the gate table's question — an AGGREGATE base (F9 spells a SCALAR global as
-// a bare `var`, which is never an `index`-of-leaf, so scalar recovery is untouched). Non-leaf bases (a local, a
-// struct-element `p[a0]`, arithmetic) are excluded: agbcc may re-derive those, so hoisting them can
+// `const` (a numeric pointer address) is eligible, keyed by (base, width, signedness) — never an
+// AGGREGATE base (F9 spells a SCALAR global as a bare `var`, which is never an `index`-of-leaf, so
+// scalar recovery is untouched). Non-leaf bases (a local, a struct-element `p[a0]`,
+// arithmetic) are excluded: agbcc may re-derive those, so hoisting them can
 // MISMATCH (empirically confirmed) — the differ-refereed `/addr-home` axis
 // (structure/analysis.ts homeSharedAddresses) serves the shared gaddr-free ARITHMETIC bases
 // instead.
@@ -214,15 +213,15 @@ export const BASECSE_GATES: readonly Gate<BaseKey>[] = [
  *  rather than a relaxed `single-use`, because the evidence is not proof — an inline
  *  aggregate-member access emits the same bytes — so the spelling it generates belongs beside the
  *  inline one with the differ between them, never committed on the single-shot path where nothing
- *  referees. `without(BASECSE_GATES, 'single-use')` still ablates the use-count rule alone, as it
- *  did before this table existed.
+ *  referees.
  *
- *  HOW TO PRICE THE EXEMPTION: the two tables' admitted-set DIFF, never an ablation. Ablation
- *  removes a whole gate, and this one carries the rule AND its exemption in a single `rejects` —
- *  so `without(BASEFOLD_GATES, 'single-use-unfolded')` is `without(BASECSE_GATES, 'single-use')`,
- *  gate object for gate object: the naive full ablation, which costs a real match. A relaxation
- *  has no ablation of its own. `admittedBases(sfn, BASEFOLD_GATES)` minus
- *  `admittedBases(sfn, BASECSE_GATES)` is exactly what it added.
+ *  HOW TO PRICE THE TWO RULES. `without(BASECSE_GATES, 'single-use')` ablates the use-count rule
+ *  alone. The EXEMPTION has no ablation of its own: ablation removes a whole gate, and this table's
+ *  gate carries the rule AND its exemption in one `rejects`, so
+ *  `without(BASEFOLD_GATES, 'single-use-unfolded')` is `without(BASECSE_GATES, 'single-use')` gate
+ *  object for gate object — the naive full ablation, which costs a real match. What the exemption
+ *  added is the two tables' admitted-set DIFF, `admittedBases(sfn, BASEFOLD_GATES)` minus
+ *  `admittedBases(sfn, BASECSE_GATES)`.
  *
  *  rank.ts offers the row only where the target declares
  *  `compilerBehaviors.foldsConstAddrOffset` — MIPS and PPC put the addend in the instruction by
