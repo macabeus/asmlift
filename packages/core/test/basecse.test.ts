@@ -8,7 +8,7 @@ import { LIVEBASE_BLOCK_GATES, LIVEBASE_GATES, hoistReusedGlobalBases } from '..
 import { without } from '../src/l3/gates';
 import { volatilePtrLocals } from '../src/l3/volatileptr';
 import { enumerateCandidates } from '../src/rank';
-import { ARMV4T_AGBCC } from '../src/target';
+import { ARMV4T_AGBCC, structureOptionsFor } from '../src/target';
 
 const idx = (name: string, i: Expr, width = 1): Expr => ({
   k: 'index',
@@ -103,6 +103,49 @@ describe('reused-global-base hoisting', () => {
     const out = hoistReusedGlobalBases(fn(body));
     expect(out.body).toEqual(body);
     expect(out.locals).toEqual([]);
+  });
+
+  // The offset the compiler DID NOT fold. On a target that folds an inline constant-address
+  // access's offset into the literal (`foldsConstAddrOffset`), the four cases differ by one fact
+  // each from the admitted one, and only the first has any asm evidence behind it.
+  describe('a single access whose offset survived into the instruction', () => {
+    const folds = { foldsConstAddrOffset: true };
+
+    test('a NUMERIC base at a non-zero offset is hoisted: the inline spelling could not emit it', () => {
+      const body: Stmt[] = [{ k: 'store', lval: cidx(0x3001100, c(3), 1), value: c(0) }];
+      const out = hoistReusedGlobalBases(fn(body), undefined, folds);
+      expect(out.locals).toEqual([{ name: 'p0', type: T.ptr(T.s(8)) }]);
+      expect(out.body[0]).toEqual({
+        k: 'assign',
+        name: 'p0',
+        value: { k: 'cast', to: T.ptr(T.s(8)), e: { k: 'const', value: 0x3001100 } },
+      });
+      expect(out.body[1]).toEqual({
+        k: 'store',
+        lval: { k: 'index', base: { k: 'var', name: 'p0' }, idx: c(3), width: 1, signed: true },
+        value: c(0),
+      });
+    });
+
+    test('at offset 0 it is left inline: there the fold is the identity', () => {
+      const input = fn([{ k: 'store', lval: cidx(0x3001100, c(0), 1), value: c(0) }]);
+      expect(hoistReusedGlobalBases(input, undefined, folds)).toBe(input);
+    });
+
+    test('a SYMBOL base is left inline: both spellings emit the same bytes', () => {
+      const input = fn([{ k: 'store', lval: idx('gTable', c(3)), value: c(0) }]);
+      expect(hoistReusedGlobalBases(input, undefined, folds)).toBe(input);
+    });
+
+    test('a target that declares no fold leaves it inline: the offset carries no evidence there', () => {
+      const input = fn([{ k: 'store', lval: cidx(0x3001100, c(3), 1), value: c(0) }]);
+      expect(hoistReusedGlobalBases(input)).toBe(input);
+    });
+
+    test('the agbcc target declares the fold, and the declaration is what reaches the pass', () => {
+      const input = fn([{ k: 'store', lval: cidx(0x3001100, c(3), 1), value: c(0) }]);
+      expect(hoistReusedGlobalBases(input, undefined, structureOptionsFor(ARMV4T_AGBCC, false)).locals).toHaveLength(1);
+    });
   });
 
   test('two DIFFERENT globals each indexed twice both hoist, in first-use order', () => {

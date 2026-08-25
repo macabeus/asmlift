@@ -145,6 +145,26 @@ export interface TargetDescription {
     // neighbor absolute addresses within this many bytes may share one base local. Thumb's
     // `add rd, #imm8` reaches 255. Absent ⇒ the lever stands down for this target.
     nearBaseSpan?: number;
+    // Does this compiler CONSTANT-FOLD a constant byte offset into the literal address it
+    // materializes for an INLINE constant-address access? True makes a surviving `[rN, #imm]`
+    // (imm non-zero) off a register holding a bare address constant evidence about the SOURCE:
+    // the inline spelling could not have produced it, so the source named that base.
+    // l3/basecse.ts reads it as `BaseKey.unfoldedOffset`.
+    //
+    // agbcc (gcc 2.9-arm, -O2) declares TRUE from compiled pairs in both directions, plus the
+    // probes that hunt a counterexample. `((u8 *)0x3001100)[3]` emits `.word 0x3001103` + `ldrb
+    // [r1]`; `u8 *p = (u8 *)0x3001100; p[3]` emits `.word 0x3001100` + `ldrb [r1, #0x3]`. Inline
+    // READS are never CSE'd across addresses (three inline reads emit three pool words, and a
+    // base left live by an unrelated use still gets its own second word); inline STORES are, and
+    // that is the shape to be careful about — `*(u8 *)0x3001100 = v; *(u16 *)0x3001102 = v;` emits
+    // one pool word plus `add r0, r0, #0x2`. It puts the shared offset in an ADD, never in the
+    // memory operand, and the frontend folds `add const, const` back into an absolute address at
+    // offset 0, so that shape reaches L3 as two offset-0 bases and says nothing here.
+    //
+    // ABSENT ⇒ the rule stands down. A compiler opts in on its own compiled pair, never by
+    // inheriting: the MIPS and PPC lanes put the addend in the instruction by construction
+    // (`lui`/`%lo`, `lis`/`ori`), so a surviving offset carries no information there at all.
+    foldsConstAddrOffset?: boolean;
     // Does this compiler EMIT a memory read in the block the source SPELLED it in? One direction
     // only: the def-block placement rule (StructureOptions.readsStayWhereWritten) re-spells a read
     // at the block the asm performed it in, which reproduces the asm iff nothing sinks a spelled
@@ -209,6 +229,7 @@ export const ARMV4T_AGBCC: TargetDescription = {
     preserveDivergentBranchSense: true,
     orderArgCopiesByComputation: true,
     nearBaseSpan: 255,
+    foldsConstAddrOffset: true,
     readsStayWhereWritten: true,
     switchAllowsBoundCase: true,
     switchArmsFollowLayout: true,

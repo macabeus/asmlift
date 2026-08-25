@@ -19,9 +19,21 @@
 // lattice, so "some of the several block bases" stays unreachable — a function with two register
 // files binds both or neither.
 //
+// WHAT THE ASM SETTLES. `single-use` refuses a base reached once, on the theory that one access
+// re-materializes as cheaply as a named local. Where the compiler constant-folds an inline
+// constant-address access's offset into the literal it materializes
+// (TargetDescription.compilerBehaviors.foldsConstAddrOffset) that theory is checkable rather than
+// assumed: `((u8 *)0x3001100)[3]` emits `.word 0x3001103` + `ldrb [r1]`, so a target holding
+// `.word 0x3001100` + `ldrb [r1, #0x3]` came from a source that named the base. The frontend keeps
+// that split — an `add rN, #K` between the pool load and the access folds back into one absolute
+// address, so a non-zero index arriving here means the offset was in the MEMORY OPERAND. That is
+// `unfoldedOffset`, and its three refusals: a SYMBOL base (both spellings emit the same bytes, so
+// the asm carries no evidence), an offset of 0 (the fold is the identity), and a target that
+// declares nothing (MIPS/PPC put the addend in the instruction whatever the source said).
+//
 // SCOPE / SOUNDNESS. Only an `index` node whose base is a bare `addr` (a global address) or a bare
-// `const` (a numeric pointer address) is eligible, and only when 2+ such nodes share the SAME
-// (base, width, signedness) — an AGGREGATE base (F9 spells a SCALAR global as a bare `var`, which is
+// `const` (a numeric pointer address) is eligible, keyed by (base, width, signedness) — how many
+// nodes a key needs is the gate table's question, above — an AGGREGATE base (F9 spells a SCALAR global as a bare `var`, which is
 // never an `index`-of-leaf, so scalar recovery is untouched). Non-leaf bases (a local, a
 // struct-element `p[a0]`, arithmetic) are excluded: agbcc may re-derive those, so hoisting them can
 // MISMATCH (empirically confirmed) — the differ-refereed `/addr-home` axis
@@ -136,6 +148,19 @@ export interface BaseKey {
   repeatedConstOffset: boolean;
   /** every access is the SAME fixed offset — one scalar cell rather than a block of them */
   singleCell: boolean;
+  /** A NUMERIC base reached at a non-zero constant offset, on a compiler that folds such an offset
+   *  into the literal it materializes (TargetDescription.compilerBehaviors.foldsConstAddrOffset).
+   *  There the asm's own split IS the answer: the inline spelling would have emitted the summed
+   *  literal at offset 0, so a surviving offset says the source held this base in a named object.
+   *  False for a SYMBOL base — `gSym[3]` and `p = gSym; p[3]` emit the same bytes, so the asm
+   *  carries no evidence — and false at offset 0, where the fold is the identity. */
+  unfoldedOffset: boolean;
+}
+
+/** The TARGET facts the admission reads, as a bag rather than a positional boolean so the call
+ *  sites name what they are passing. */
+export interface BaseCseFacts {
+  foldsConstAddrOffset?: boolean;
 }
 
 /** The admission rules. NONE is sound, and that is a property of the pass rather than an oversight:
@@ -149,9 +174,9 @@ export interface BaseKey {
 export const BASECSE_GATES: readonly Gate<BaseKey>[] = [
   {
     id: 'single-use',
-    why: 'one access re-materializes as cheaply as a named local',
+    why: 'one access re-materializes as cheaply as a named local, unless the asm shows it did not',
     sound: false,
-    rejects: (c) => c.uses < 2,
+    rejects: (c) => c.uses < 2 && !c.unfoldedOffset,
   },
   {
     id: 'loop',
@@ -205,12 +230,12 @@ export const LIVEBASE_BLOCK_GATES: readonly Gate<BaseKey>[] = [
 
 /** The census without the rewrite, so a caller choosing between admissions can compare what two
  *  tables would bind for one tree walk each. */
-export function admittedBases(sfn: SFn, gates: readonly Gate<BaseKey>[]): readonly string[] {
-  return admit(sfn, gates).keys;
+export function admittedBases(sfn: SFn, gates: readonly Gate<BaseKey>[], facts: BaseCseFacts = {}): readonly string[] {
+  return admit(sfn, gates, facts).keys;
 }
 
 /** The keys `gates` admits, in first-use order, with the census they were judged from. */
-function admit(sfn: SFn, gates: readonly Gate<BaseKey>[]): { c: Collected; keys: string[] } {
+function admit(sfn: SFn, gates: readonly Gate<BaseKey>[], facts: BaseCseFacts): { c: Collected; keys: string[] } {
   const c: Collected = {
     count: new Map(),
     order: [],
@@ -228,13 +253,21 @@ function admit(sfn: SFn, gates: readonly Gate<BaseKey>[]): { c: Collected; keys:
         inLoop: c.inLoop.has(k),
         repeatedConstOffset: [...(c.constOffCount.get(k)?.values() ?? [])].some((n) => n >= 2),
         singleCell: !c.varIndexed.has(k) && (c.constOffCount.get(k)?.size ?? 0) <= 1,
+        unfoldedOffset:
+          facts.foldsConstAddrOffset === true &&
+          c.meta.get(k)?.base.k === 'const' &&
+          [...(c.constOffCount.get(k)?.keys() ?? [])].some((o) => o !== 0),
       }) === null,
   );
   return { c, keys };
 }
 
-export function hoistReusedGlobalBases(sfn: SFn, gates: readonly Gate<BaseKey>[] = BASECSE_GATES): SFn {
-  const { c, keys: hoisted } = admit(sfn, gates);
+export function hoistReusedGlobalBases(
+  sfn: SFn,
+  gates: readonly Gate<BaseKey>[] = BASECSE_GATES,
+  facts: BaseCseFacts = {},
+): SFn {
+  const { c, keys: hoisted } = admit(sfn, gates, facts);
   const { meta } = c;
   if (hoisted.length === 0) {
     return sfn;

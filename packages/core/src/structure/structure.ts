@@ -780,6 +780,11 @@ export interface StructureOptions {
   // is nothing to referee. Absent ⇒ off — the target field carries the evidence a compiler owes,
   // analysis.ts AnalyzeOptions the refusals.
   readsStayWhereWritten?: boolean;
+  // The compiler constant-folds an inline constant-address access's byte offset into the literal
+  // it materializes. A per-compiler DATA lever declared in TargetDescription.compilerBehaviors,
+  // consumed by structureChecked's post-structure base hoist (l3/basecse.ts) rather than by
+  // `structure` itself — StructureOptions is the bag that reaches it. Absent ⇒ off.
+  foldsConstAddrOffset?: boolean;
   // Spell unsigned compares unsigned: cast an icmp_u* operand where the rendered operands do not
   // guarantee it, and reconcile a mixed-claimant declaration to u32 when nothing under the name
   // needs signed. Off by default: a signed spelling that byte-matched was PROVED non-negative by

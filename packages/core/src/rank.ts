@@ -832,11 +832,14 @@ export function enumerateCandidates(
     // hoist-nothing result means the lever has nothing to add and declines.
     // One family per LIVEBASE_ADMISSIONS row; a row binding exactly what an earlier row bound
     // is the same spelling under a different label, so it declines for that too.
+    const baseFacts = { foldsConstAddrOffset: target.compilerBehaviors.foldsConstAddrOffset };
     const livebases = LIVEBASE_ADMISSIONS.map(({ suffix, gates }, i) => {
       const hoist = (): SFn | null => {
-        const bound = admittedBases(sfn, gates);
-        const shadowed = LIVEBASE_ADMISSIONS.slice(0, i).some((a) => sameBases(bound, admittedBases(sfn, a.gates)));
-        return bound.length > 0 && !shadowed ? hoistReusedGlobalBases(sfn, gates) : null;
+        const bound = admittedBases(sfn, gates, baseFacts);
+        const shadowed = LIVEBASE_ADMISSIONS.slice(0, i).some((a) =>
+          sameBases(bound, admittedBases(sfn, a.gates, baseFacts)),
+        );
+        return bound.length > 0 && !shadowed ? hoistReusedGlobalBases(sfn, gates, baseFacts) : null;
       };
       const volatiles = (): SFn | null => {
         const r = hoist();
