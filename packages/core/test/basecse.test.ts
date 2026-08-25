@@ -4,11 +4,17 @@ import { describe, expect, test } from 'vitest';
 
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
-import { LIVEBASE_BLOCK_GATES, LIVEBASE_GATES, hoistReusedGlobalBases } from '../src/l3/basecse';
+import {
+  BASECSE_GATES,
+  BASEFOLD_GATES,
+  LIVEBASE_BLOCK_GATES,
+  LIVEBASE_GATES,
+  hoistReusedGlobalBases,
+} from '../src/l3/basecse';
 import { without } from '../src/l3/gates';
 import { volatilePtrLocals } from '../src/l3/volatileptr';
 import { enumerateCandidates } from '../src/rank';
-import { ARMV4T_AGBCC, structureOptionsFor } from '../src/target';
+import { ARMV4T_AGBCC } from '../src/target';
 
 const idx = (name: string, i: Expr, width = 1): Expr => ({
   k: 'index',
@@ -105,15 +111,13 @@ describe('reused-global-base hoisting', () => {
     expect(out.locals).toEqual([]);
   });
 
-  // The offset the compiler DID NOT fold. On a target that folds an inline constant-address
-  // access's offset into the literal (`foldsConstAddrOffset`), the four cases differ by one fact
-  // each from the admitted one, and only the first has any asm evidence behind it.
+  // The offset the compiler DID NOT fold — `BASEFOLD_GATES`, the admission that exempts
+  // `single-use` for it. Each refusal below differs by one fact from the admitted case.
   describe('a single access whose offset survived into the instruction', () => {
-    const folds = { foldsConstAddrOffset: true };
+    const oneStore = (): SFn => fn([{ k: 'store', lval: cidx(0x3001100, c(3), 1), value: c(0) }]);
 
-    test('a NUMERIC base at a non-zero offset is hoisted: the inline spelling could not emit it', () => {
-      const body: Stmt[] = [{ k: 'store', lval: cidx(0x3001100, c(3), 1), value: c(0) }];
-      const out = hoistReusedGlobalBases(fn(body), undefined, folds);
+    test('a NUMERIC base at a non-zero offset is hoisted', () => {
+      const out = hoistReusedGlobalBases(oneStore(), BASEFOLD_GATES);
       expect(out.locals).toEqual([{ name: 'p0', type: T.ptr(T.s(8)) }]);
       expect(out.body[0]).toEqual({
         k: 'assign',
@@ -127,24 +131,32 @@ describe('reused-global-base hoisting', () => {
       });
     });
 
+    test('the DEFAULT table leaves it inline: an inline aggregate member emits the same bytes', () => {
+      const input = oneStore();
+      expect(hoistReusedGlobalBases(input)).toBe(input);
+    });
+
     test('at offset 0 it is left inline: there the fold is the identity', () => {
       const input = fn([{ k: 'store', lval: cidx(0x3001100, c(0), 1), value: c(0) }]);
-      expect(hoistReusedGlobalBases(input, undefined, folds)).toBe(input);
+      expect(hoistReusedGlobalBases(input, BASEFOLD_GATES)).toBe(input);
     });
 
     test('a SYMBOL base is left inline: the lift folds a relocation addend into the index', () => {
       const input = fn([{ k: 'store', lval: idx('gTable', c(3)), value: c(0) }]);
-      expect(hoistReusedGlobalBases(input, undefined, folds)).toBe(input);
+      expect(hoistReusedGlobalBases(input, BASEFOLD_GATES)).toBe(input);
     });
 
-    test('a target that declares no fold leaves it inline: the offset carries no evidence there', () => {
-      const input = fn([{ k: 'store', lval: cidx(0x3001100, c(3), 1), value: c(0) }]);
-      expect(hoistReusedGlobalBases(input)).toBe(input);
-    });
-
-    test('the agbcc target declares the fold, and the declaration is what reaches the pass', () => {
-      const input = fn([{ k: 'store', lval: cidx(0x3001100, c(3), 1), value: c(0) }]);
-      expect(hoistReusedGlobalBases(input, undefined, structureOptionsFor(ARMV4T_AGBCC, false)).locals).toHaveLength(1);
+    test('the two tables are one gate apart, and each ablation prices its own rule', () => {
+      const input = oneStore();
+      // the exemption, alone
+      expect(hoistReusedGlobalBases(input, without(BASEFOLD_GATES, 'single-use-unfolded')).locals).toHaveLength(1);
+      // the use-count rule, alone — unchanged by the lever's existence
+      expect(hoistReusedGlobalBases(input, without(BASECSE_GATES, 'single-use')).locals).toHaveLength(1);
+      // and both tables still refuse what the PLACEMENT rules refuse
+      const inLoop = fn([
+        { k: 'while', cond: c(1), body: [{ k: 'store', lval: cidx(0x3001100, c(3), 1), value: c(0) }] },
+      ]);
+      expect(hoistReusedGlobalBases(inLoop, BASEFOLD_GATES).locals).toEqual([]);
     });
   });
 
@@ -399,13 +411,10 @@ describe('the block admission is WIRED into enumeration', () => {
   // the shape that needs a proper subset of its bases bound — and `corpus/agbcc-onepoll.s` is its
   // control, byte-identical C with the halfwords deleted. Which spelling wins is the benchmark's
   // business; these pin what reaches the differ at all.
-  const candsFor = (sym: string) =>
-    enumerateCandidates(
-      sym,
-      readFileSync(join(import.meta.dirname, 'corpus', `agbcc-${sym}.s`), 'utf8'),
-      ARMV4T_AGBCC,
-      { prototypes: { [sym]: { returnsVoid: true } } },
-    );
+  const candsFor = (sym: string, target = ARMV4T_AGBCC) =>
+    enumerateCandidates(sym, readFileSync(join(import.meta.dirname, 'corpus', `agbcc-${sym}.s`), 'utf8'), target, {
+      prototypes: { [sym]: { returnsVoid: true } },
+    });
   const cands = candsFor('mixpoll');
 
   test('the narrower hoist reaches the candidate list, plain and volatile', () => {
@@ -430,6 +439,29 @@ describe('the block admission is WIRED into enumeration', () => {
     const labels = candsFor('onepoll').map((x) => x.label);
     expect(labels).toContain('signed/livebase/volatile');
     expect(labels.filter((l) => l.includes('livebase-block'))).toEqual([]);
+  });
+
+  test('/basefold reaches the roster where the target declares the fold, and only there', () => {
+    // `corpus/agbcc-basecell.s` is synthetic:basecell:agbcc — ONE access through a numeric base at
+    // a non-zero byte offset, the shape the default table refuses and this admission exempts.
+    const labels = candsFor('basecell').map((x) => x.label);
+    expect(labels).toContain('unsigned/basefold');
+    // the fold is a per-compiler declaration, so a target without it never offers the row
+    const noFold = {
+      ...ARMV4T_AGBCC,
+      compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, foldsConstAddrOffset: undefined },
+    };
+    expect(
+      candsFor('basecell', noFold)
+        .map((x) => x.label)
+        .filter((l) => l.includes('basefold')),
+    ).toEqual([]);
+  });
+
+  test('/basefold declines where its exemption bound nothing the primary does not carry', () => {
+    // mixpoll's bases are all reached 2+ times, so the exemption is vacuous there and the row
+    // would only repeat the primary under another label.
+    expect(cands.map((x) => x.label).filter((l) => l.includes('basefold'))).toEqual([]);
   });
 
   test('every /livebase PRODUCT fans over the roster, and one of them is reachable no other way', () => {

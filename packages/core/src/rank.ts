@@ -20,6 +20,8 @@ import { verify } from './ir/verify';
 import { materializeArgBases } from './l3/argbase';
 import type { LanguageBackend, SFn } from './l3/ast';
 import {
+  BASECSE_GATES,
+  BASEFOLD_GATES,
   type BaseKey,
   LIVEBASE_BLOCK_GATES,
   LIVEBASE_GATES,
@@ -250,11 +252,33 @@ const createdLocals = (from: SFn, to: SFn): Set<string> => {
  *  inhabiting them all pays far more, and the fan is not always a win there: the mixpoll dataset
  *  entry prices one where the `/coalesce` pairing costs the most candidates of any and scores two
  *  points worse than going unpaired. It fans anyway because a pairing belongs to the LEVER, not to
- *  one of its admissions. Price a third admission on the corpus AND on a real function. */
-const LIVEBASE_ADMISSIONS: readonly { suffix: string; gates: readonly Gate<BaseKey>[] }[] = [
+ *  one of its admissions.
+ *
+ *  `/basefold` is the third admission and the only conditional one — `enumerateCandidates` appends
+ *  it where the target declares `compilerBehaviors.foldsConstAddrOffset`, and it declines wherever
+ *  its exemption bound nothing the primary does not already carry (`addsTo`). Priced both ways:
+ *  over the 887-row corpus it reaches 4 functions, and on `kleod:LoadBGTilemapData` it declines on
+ *  every structuring, leaving that fan the size it was. */
+interface BaseAdmission {
+  suffix: string;
+  gates: readonly Gate<BaseKey>[];
+  /** The table this row RELAXES. It declines where it binds exactly that table's set: the
+   *  relaxation added nothing, so the candidate would be the primary under another label. */
+  addsTo?: readonly Gate<BaseKey>[];
+}
+
+const LIVEBASE_ADMISSIONS: readonly BaseAdmission[] = [
   { suffix: '/livebase', gates: LIVEBASE_GATES },
   { suffix: '/livebase-block', gates: LIVEBASE_BLOCK_GATES },
 ];
+
+/** Narrower than either `/livebase` row, so it goes last: it keeps both placement heuristics and
+ *  exempts only `single-use`, and only for a base whose offset survived the compiler's fold. */
+const BASEFOLD_ADMISSION: BaseAdmission = {
+  suffix: '/basefold',
+  gates: BASEFOLD_GATES,
+  addsTo: BASECSE_GATES,
+};
 
 const sameBases = (a: readonly string[], b: readonly string[]): boolean =>
   a.length === b.length && a.every((k, i) => k === b[i]);
@@ -831,16 +855,20 @@ export function enumerateCandidates(
     // where the prediction is wrong — the compiler holds ONE base register across stores, the
     // loop, and the read-back. The primary already carries every base those rules admit, so a
     // hoist-nothing result means the lever has nothing to add and declines.
-    // One family per LIVEBASE_ADMISSIONS row; a row binding exactly what an earlier row bound
-    // is the same spelling under a different label, so it declines for that too.
-    const baseFacts = { foldsConstAddrOffset: target.compilerBehaviors.foldsConstAddrOffset };
-    const livebases = LIVEBASE_ADMISSIONS.map(({ suffix, gates }, i) => {
+    // One family per admission row; a row binding exactly what an earlier row bound is the same
+    // spelling under a different label, so it declines for that too. `/basefold` joins the roster
+    // where the target declares the fold, and declines further where its exemption bound nothing.
+    const admissions: readonly BaseAdmission[] = target.compilerBehaviors.foldsConstAddrOffset
+      ? [...LIVEBASE_ADMISSIONS, BASEFOLD_ADMISSION]
+      : LIVEBASE_ADMISSIONS;
+    const livebases = admissions.map(({ suffix, gates, addsTo }, i) => {
       const hoist = (): SFn | null => {
-        const bound = admittedBases(sfn, gates, baseFacts);
-        const shadowed = LIVEBASE_ADMISSIONS.slice(0, i).some((a) =>
-          sameBases(bound, admittedBases(sfn, a.gates, baseFacts)),
-        );
-        return bound.length > 0 && !shadowed ? hoistReusedGlobalBases(sfn, gates, baseFacts) : null;
+        const bound = admittedBases(sfn, gates);
+        if (bound.length === 0 || (addsTo && sameBases(bound, admittedBases(sfn, addsTo)))) {
+          return null;
+        }
+        const shadowed = admissions.slice(0, i).some((a) => sameBases(bound, admittedBases(sfn, a.gates)));
+        return shadowed ? null : hoistReusedGlobalBases(sfn, gates);
       };
       const volatiles = (): SFn | null => {
         const r = hoist();

@@ -19,25 +19,34 @@
 // lattice, so "some of the several block bases" stays unreachable — a function with two register
 // files binds both or neither.
 //
-// WHAT THE ASM SETTLES. `single-use` refuses a base reached once, on the theory that one access
-// re-materializes as cheaply as a named local. Where the compiler constant-folds an inline
-// constant-address access's offset into the literal it materializes
-// (TargetDescription.compilerBehaviors.foldsConstAddrOffset) that theory is checkable rather than
-// assumed: `((u8 *)0x3001100)[3]` emits `.word 0x3001103` + `ldrb [r1]`, so a target holding
-// `.word 0x3001100` + `ldrb [r1, #0x3]` came from a source that named the base. The frontend keeps
-// that split — an `add rN, #K` between the pool load and the access folds back into one absolute
-// address, so a non-zero index arriving here means the offset was in the MEMORY OPERAND. That is
-// `unfoldedOffset`, and its three refusals: an offset of 0 (there the fold is the identity), a
-// target that declares nothing (MIPS/PPC put the addend in the instruction whatever the source
-// said), and a SYMBOL base — where the split does not survive the LIFT. A relocation carries its
-// addend, so `.word gSym+0x3` + `ldrb [r1]` and `.word gSym` + `ldrb [r1, #0x3]` both reach here
-// as `index(addr gSym, 3)`; all four spellings of that access lift to one tree. Reaching the
-// symbol side means keeping the addend distinct in the frontend first, not widening this rule.
+// WHAT THE ASM SUGGESTS, AND WHY IT IS A CANDIDATE. `single-use` refuses a base reached once, on
+// the theory that one access re-materializes as cheaply as a named local. A surviving `[rN, #imm]`
+// off a register holding a bare address constant is EVIDENCE against that theory, on a compiler
+// that folds a constant SUBSCRIPT into the literal it materializes
+// (TargetDescription.compilerBehaviors.foldsConstAddrOffset): `((u8 *)0x3001100)[3]` emits
+// `.word 0x3001103` + `ldrb [r1]`, where naming the base keeps `.word 0x3001100` +
+// `ldrb [r1, #0x3]`. `BaseKey.unfoldedOffset` is that shape — a NUMERIC base reached at a non-zero
+// constant offset, the frontend having folded any `add rN, #K` between the pool load and the
+// access back into one absolute address, so an offset arriving here was in the MEMORY OPERAND.
+//
+// It is EVIDENCE and not proof, which is why `BASEFOLD_GATES` below is a lever rather than a
+// relaxation of the default table. agbcc folds a subscript but keeps an aggregate MEMBER offset in
+// the memory operand: `((struct S *)0x3001100)->b` emits `.word 0x3001100` + `ldr [r0, #0x4]`,
+// byte-identical to the named-base spelling, and the same holds for a union member and for a
+// store. So the shape has two sources and asmlift can spell only one of them; rank.ts offers both
+// and the differ referees.
+//
+// The rule is NUMERIC-only, and that refusal is about the LIFT rather than about the bytes.
+// agbcc folds a symbol's offset exactly as it folds a numeric one (`((u8 *)&gSym)[3]` emits
+// `.word gSym+0x3` + `ldrb [r1]`), but a relocation carries its addend and the frontend folds it
+// back into the index, so `.word gSym+0x3` + `[r1]` and `.word gSym` + `[r1, #0x3]` both reach
+// here as `index(addr gSym, 3)`. Reaching the symbol side means keeping the addend distinct in the
+// frontend first, not widening this rule.
 //
 // SCOPE / SOUNDNESS. Only an `index` node whose base is a bare `addr` (a global address) or a bare
 // `const` (a numeric pointer address) is eligible, keyed by (base, width, signedness) — how many
-// nodes a key needs is the gate table's question, above — an AGGREGATE base (F9 spells a SCALAR global as a bare `var`, which is
-// never an `index`-of-leaf, so scalar recovery is untouched). Non-leaf bases (a local, a
+// nodes a key needs is the gate table's question — an AGGREGATE base (F9 spells a SCALAR global as
+// a bare `var`, which is never an `index`-of-leaf, so scalar recovery is untouched). Non-leaf bases (a local, a
 // struct-element `p[a0]`, arithmetic) are excluded: agbcc may re-derive those, so hoisting them can
 // MISMATCH (empirically confirmed) — the differ-refereed `/addr-home` axis
 // (structure/analysis.ts homeSharedAddresses) serves the shared gaddr-free ARITHMETIC bases
@@ -151,19 +160,13 @@ export interface BaseKey {
   repeatedConstOffset: boolean;
   /** every access is the SAME fixed offset — one scalar cell rather than a block of them */
   singleCell: boolean;
-  /** A NUMERIC base reached at a non-zero constant offset, on a compiler that folds such an offset
-   *  into the literal it materializes (TargetDescription.compilerBehaviors.foldsConstAddrOffset).
-   *  There the asm's own split IS the answer: the inline spelling would have emitted the summed
-   *  literal at offset 0, so a surviving offset says the source held this base in a named object.
+  /** A NUMERIC base reached at a non-zero constant offset. On a compiler that folds a constant
+   *  subscript into the literal it materializes, that offset survived because something OTHER than
+   *  a subscript put it there — a named base, or an aggregate member (see the header). Read only by
+   *  `BASEFOLD_GATES`, whose roster row rank.ts offers only where the target declares the fold.
    *  False at offset 0, where the fold is the identity, and false for a SYMBOL base, whose split
-   *  the lift does not preserve — a relocation addend folds into the index (see the header). */
+   *  the lift does not preserve — a relocation addend folds into the index. */
   unfoldedOffset: boolean;
-}
-
-/** The TARGET facts the admission reads, as a bag rather than a positional boolean so the call
- *  sites name what they are passing. */
-export interface BaseCseFacts {
-  foldsConstAddrOffset?: boolean;
 }
 
 /** The admission rules. NONE is sound, and that is a property of the pass rather than an oversight:
@@ -174,12 +177,14 @@ export interface BaseCseFacts {
  *  in a register across the loop too — but hoisting to the FUNCTION TOP forces a callee-saved
  *  register, which can add the prologue push/pop the original avoided. `l3/scopebase.ts` is the
  *  scope-aware hoist that serves those instead. */
+const reachedOnce = (c: BaseKey): boolean => c.uses < 2;
+
 export const BASECSE_GATES: readonly Gate<BaseKey>[] = [
   {
     id: 'single-use',
-    why: 'one access re-materializes as cheaply as a named local, unless the asm shows it did not',
+    why: 'one access re-materializes as cheaply as a named local',
     sound: false,
-    rejects: (c) => c.uses < 2 && !c.unfoldedOffset,
+    rejects: reachedOnce,
   },
   {
     id: 'loop',
@@ -193,6 +198,28 @@ export const BASECSE_GATES: readonly Gate<BaseKey>[] = [
     sound: false,
     rejects: (c) => c.repeatedConstOffset,
   },
+];
+
+/** `/basefold`'s admission (rank.ts): the default rules with `single-use` EXEMPTING a base whose
+ *  offset survived into the memory operand (`unfoldedOffset`, see the header). A separate table
+ *  rather than a relaxed `single-use`, for two reasons that point the same way. The evidence is not
+ *  proof — an inline aggregate-member access emits the same bytes — so the spelling it generates
+ *  belongs beside the inline one with the differ between them, never committed on the single-shot
+ *  path where nothing referees. And keeping the two rules in two tables keeps both priceable:
+ *  `without(BASECSE_GATES, 'single-use')` still ablates the use-count rule alone, as it did before
+ *  this table existed, and `without(BASEFOLD_GATES, 'single-use-unfolded')` prices the exemption.
+ *
+ *  rank.ts offers the row only where the target declares
+ *  `compilerBehaviors.foldsConstAddrOffset` — MIPS and PPC put the addend in the instruction by
+ *  construction (`lui`/`%lo`, `lis`/`ori`), so a surviving offset carries no information there. */
+export const BASEFOLD_GATES: readonly Gate<BaseKey>[] = [
+  {
+    id: 'single-use-unfolded',
+    why: 'one access re-materializes as cheaply as a named local, unless its offset survived the fold',
+    sound: false,
+    rejects: (c) => reachedOnce(c) && !c.unfoldedOffset,
+  },
+  ...ablateHeuristic(BASECSE_GATES, 'single-use'),
 ];
 
 /** The `/livebase` lever's admission (rank.ts): the default rules with both PLACEMENT heuristics
@@ -233,12 +260,12 @@ export const LIVEBASE_BLOCK_GATES: readonly Gate<BaseKey>[] = [
 
 /** The census without the rewrite, so a caller choosing between admissions can compare what two
  *  tables would bind for one tree walk each. */
-export function admittedBases(sfn: SFn, gates: readonly Gate<BaseKey>[], facts: BaseCseFacts = {}): readonly string[] {
-  return admit(sfn, gates, facts).keys;
+export function admittedBases(sfn: SFn, gates: readonly Gate<BaseKey>[]): readonly string[] {
+  return admit(sfn, gates).keys;
 }
 
 /** The keys `gates` admits, in first-use order, with the census they were judged from. */
-function admit(sfn: SFn, gates: readonly Gate<BaseKey>[], facts: BaseCseFacts): { c: Collected; keys: string[] } {
+function admit(sfn: SFn, gates: readonly Gate<BaseKey>[]): { c: Collected; keys: string[] } {
   const c: Collected = {
     count: new Map(),
     order: [],
@@ -257,20 +284,14 @@ function admit(sfn: SFn, gates: readonly Gate<BaseKey>[], facts: BaseCseFacts): 
         repeatedConstOffset: [...(c.constOffCount.get(k)?.values() ?? [])].some((n) => n >= 2),
         singleCell: !c.varIndexed.has(k) && (c.constOffCount.get(k)?.size ?? 0) <= 1,
         unfoldedOffset:
-          facts.foldsConstAddrOffset === true &&
-          c.meta.get(k)?.base.k === 'const' &&
-          [...(c.constOffCount.get(k)?.keys() ?? [])].some((o) => o !== 0),
+          c.meta.get(k)?.base.k === 'const' && [...(c.constOffCount.get(k)?.keys() ?? [])].some((o) => o !== 0),
       }) === null,
   );
   return { c, keys };
 }
 
-export function hoistReusedGlobalBases(
-  sfn: SFn,
-  gates: readonly Gate<BaseKey>[] = BASECSE_GATES,
-  facts: BaseCseFacts = {},
-): SFn {
-  const { c, keys: hoisted } = admit(sfn, gates, facts);
+export function hoistReusedGlobalBases(sfn: SFn, gates: readonly Gate<BaseKey>[] = BASECSE_GATES): SFn {
+  const { c, keys: hoisted } = admit(sfn, gates);
   const { meta } = c;
   if (hoisted.length === 0) {
     return sfn;

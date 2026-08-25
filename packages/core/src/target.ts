@@ -18,7 +18,9 @@
 //   • capabilities.deviceRegisters → rank.ts's volatility tie-break: which of two byte-identical
 //     spellings publishes a `volatile` (a preference over the reader's C, never a qualifier the
 //     decompiler adds or removes).
-//   • compilerBehaviors.* → all consumed by the structurer (threaded via StructureOptions).
+//   • compilerBehaviors.* → mostly consumed by the structurer (threaded via StructureOptions).
+//     The exceptions are the two rank.ts reads off the target directly, because their consumers
+//     are L3 levers rather than the structurer: `nearBaseSpan` and `foldsConstAddrOffset`.
 //
 // `capabilities` (HARDWARE facts) vs `compilerBehaviors` (COMPILER canonicalization choices) are
 // deliberately separate bags: a new compiler must set its behaviors EXPLICITLY instead of
@@ -145,29 +147,33 @@ export interface TargetDescription {
     // neighbor absolute addresses within this many bytes may share one base local. Thumb's
     // `add rd, #imm8` reaches 255. Absent ⇒ the lever stands down for this target.
     nearBaseSpan?: number;
-    // Does this compiler CONSTANT-FOLD a constant byte offset into the literal address it
-    // materializes for an INLINE constant-address access? True makes a surviving `[rN, #imm]`
-    // (imm non-zero) off a register holding a bare address constant evidence about the SOURCE:
-    // the inline spelling could not have produced it, so the source named that base.
-    // l3/basecse.ts reads it as `BaseKey.unfoldedOffset`.
+    // Does this compiler CONSTANT-FOLD a constant SUBSCRIPT into the literal address it
+    // materializes for an inline constant-address access? True is what makes a surviving
+    // `[rN, #imm]` (imm non-zero) off a register holding a bare address constant say anything at
+    // all about the source, and rank.ts reads it as the gate on offering the `/basefold`
+    // admission (l3/basecse.ts BASEFOLD_GATES, keyed on `BaseKey.unfoldedOffset`).
     //
-    // agbcc (gcc 2.9-arm, -O2) declares TRUE from compiled pairs in both directions, plus the
-    // probes that hunt a counterexample. `((u8 *)0x3001100)[3]` emits `.word 0x3001103` + `ldrb
-    // [r1]`; `u8 *p = (u8 *)0x3001100; p[3]` emits `.word 0x3001100` + `ldrb [r1, #0x3]`. Inline
-    // READS are never CSE'd across addresses (three inline reads emit three pool words, and a
-    // base left live by an unrelated use still gets its own second word); inline STORES are, and
-    // that is the shape to be careful about — `*(u8 *)0x3001100 = v; *(u16 *)0x3001102 = v;` emits
-    // one pool word plus `add r0, r0, #0x2`. It puts the shared offset in an ADD, never in the
-    // memory operand, and the frontend folds `add const, const` back into an absolute address at
-    // offset 0, so that shape reaches L3 as two offset-0 bases and says nothing here.
+    // EVIDENCE, NOT PROOF, which is why the consumer is a differ-refereed candidate and not a
+    // default. agbcc (gcc 2.9-arm, -O2) folds the subscript — `((u8 *)0x3001100)[3]` emits
+    // `.word 0x3001103` + `ldrb [r1]` where `u8 *p = (u8 *)0x3001100; p[3]` emits
+    // `.word 0x3001100` + `ldrb [r1, #0x3]` — but keeps an aggregate MEMBER offset in the memory
+    // operand: `((struct S *)0x3001100)->b` emits `.word 0x3001100` + `ldr [r0, #0x4]`, the same
+    // bytes as the named base, and so do a union member and a store through one. Two sources, one
+    // byte pattern.
     //
-    // The claim is about a NUMERIC address, and only there — agbcc folds a SYMBOL's offset the
-    // same way (`((u8 *)&gStageData)[3]` emits `.word gStageData+0x3` + `ldrb [r1]`), but a
+    // Two shapes that look like counterexamples and are not. Inline READS are never CSE'd across
+    // addresses (three inline reads emit three pool words, and a base left live by an unrelated
+    // use still gets its own second word). Inline STORES are — `*(u8 *)0x3001100 = v;
+    // *(u16 *)0x3001102 = v;` emits one pool word plus `add r0, r0, #0x2` — but the shared offset
+    // lands in an ADD, never in the memory operand, and the frontend folds `add const, const` back
+    // into an absolute address, so that shape reaches L3 as two offset-0 bases.
+    //
+    // NUMERIC addresses only, and that refusal is about the LIFT. agbcc folds a SYMBOL's offset
+    // the same way (`((u8 *)&gStageData)[3]` emits `.word gStageData+0x3` + `ldrb [r1]`), but a
     // relocation carries its addend and the frontend folds it back into the index, so both
-    // spellings of a symbol access reach L3 as one tree. basecse.ts refuses that side for that
-    // reason rather than for a claim about the bytes.
+    // spellings of a symbol access reach L3 as one tree.
     //
-    // ABSENT ⇒ the rule stands down. A compiler opts in on its own compiled pair, never by
+    // ABSENT ⇒ the row is never offered. A compiler opts in on its own compiled pair, never by
     // inheriting: the MIPS and PPC lanes put the addend in the instruction by construction
     // (`lui`/`%lo`, `lis`/`ori`), so a surviving offset carries no information there at all.
     foldsConstAddrOffset?: boolean;

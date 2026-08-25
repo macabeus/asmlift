@@ -9,7 +9,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
-import { BASECSE_GATES, LIVEBASE_BLOCK_GATES, LIVEBASE_GATES } from '../src/l3/basecse';
+import { BASECSE_GATES, BASEFOLD_GATES, LIVEBASE_BLOCK_GATES, LIVEBASE_GATES } from '../src/l3/basecse';
 import { ARM_DISJOINT_GATES, COALESCE_GATES } from '../src/l3/coalesce';
 import { type Gate, ablateHeuristic, gateTableDefects } from '../src/l3/gates';
 import { INLINEBASE_GATES } from '../src/l3/inlinebase';
@@ -29,6 +29,7 @@ const TABLES: Record<string, readonly Gate<never>[]> = {
   COALESCE_GATES: COALESCE_GATES as readonly Gate<never>[],
   ARM_DISJOINT_GATES: ARM_DISJOINT_GATES as readonly Gate<never>[],
   BASECSE_GATES: BASECSE_GATES as readonly Gate<never>[],
+  BASEFOLD_GATES: BASEFOLD_GATES as readonly Gate<never>[],
   LIVEBASE_GATES: LIVEBASE_GATES as readonly Gate<never>[],
   LIVEBASE_BLOCK_GATES: LIVEBASE_BLOCK_GATES as readonly Gate<never>[],
   PREUPDATE_SINK_GATES: PREUPDATE_SINK_GATES as readonly Gate<never>[],
