@@ -14,8 +14,8 @@
 // has to re-spell `(u8)a` at every use; agbcc then elides an extension no use needs, gives the
 // extended value no register of its own, and the whole allocation moves.
 //
-// WIDTH AND SIGNEDNESS ARE READ OFF, NOT GUESSED: the shift pair says both (`lsl/asr #16` ⇒ `s16`,
-// `lsl/lsr #24` ⇒ `u8`), so no width is ever enumerated here.
+// WIDTH AND SIGNEDNESS ARE READ OFF, NOT GUESSED: the extension states both (agbcc's shift pair by
+// its amount and its `asr`/`lsr`, PPC's by the opcode), so no width is ever enumerated here.
 //
 // NOT agbcc-GATED, because the shape is not agbcc's alone: mwcc's PPC prologue widens a declared
 // narrow parameter with the `extsb`/`extsh` the frontend lifts to the same op, and the synthetic
