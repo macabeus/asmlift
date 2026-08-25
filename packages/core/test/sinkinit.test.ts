@@ -56,6 +56,8 @@ describe('sinking a leading base init to its first use', () => {
   });
 
   test('an `&p` escape counts as the first use, so the init stops above it', () => {
+    // the first-use query is l3/hoist.ts's, shared with basecse.ts; an init that crossed the
+    // escape would hand out the address of an unwritten cell
     const escape: Stmt = { k: 'exprstmt', value: { k: 'call', fn: 'g', args: [{ k: 'addr', name: 'p0' }] } };
     const out = sinkInitsToFirstUse(fn([init('p0', 0x3001100), plain(), escape, read('p0', 3)]));
     expect(out?.body.map((s) => s.k)).toEqual(['store', 'assign', 'exprstmt', 'store']);

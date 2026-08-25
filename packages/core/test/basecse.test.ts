@@ -275,6 +275,21 @@ describe('/livebase admission (LIVEBASE_GATES: placement heuristics ablated)', (
     expect(initOrder([refusedLoop, ...admitted('a0')])).toEqual([0x40000d4, 0x3001000]);
   });
 
+  test('an `&q` escape counts as a first use, so the existing init keeps its place ahead', () => {
+    // the first-use query is l3/hoist.ts's, shared with sinkinit.ts, and it counts `addr`. A
+    // narrower notion would sort `q` behind the minted base it is loaded before.
+    const input: SFn = {
+      ...fn([
+        { k: 'assign', name: 'q', value: { k: 'cast', to: T.ptr(T.s(8)), e: c(0x40000d4) } },
+        { k: 'exprstmt', value: { k: 'call', fn: 'g', args: [{ k: 'addr', name: 'q' }] } },
+        ...admitted('a0'),
+      ]),
+      locals: [{ name: 'q', type: T.ptr(T.s(8)) }],
+    };
+    const out = hoistReusedGlobalBases(input, LIVEBASE_GATES);
+    expect(out.body.slice(0, 2).map((st) => (st as Stmt & { k: 'assign' }).name)).toEqual(['q', 'p0']);
+  });
+
   test('a head write to a `volatile` local ends the reorderable run: volatile write order is kept', () => {
     const input: SFn = {
       ...fn([
