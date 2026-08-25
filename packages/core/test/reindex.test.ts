@@ -6,7 +6,8 @@ import { describe, expect, test } from 'vitest';
 import { cBackend } from '../src/backend/c';
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
-import { reindexWalks } from '../src/l3/reindex';
+import { without } from '../src/l3/gates';
+import { COUNTDOWN_GATES, reindexWalks } from '../src/l3/reindex';
 import { volatilePtrLocals } from '../src/l3/volatileptr';
 
 const V = (name: string): Expr => ({ k: 'var', name });
@@ -218,8 +219,7 @@ describe('v2 — the guarded countdown re-spells as a counted for', () => {
     expect(c).toContain('v1 = 0;');
     expect(c).toContain('for (i0 = 0; i0 < a1; i0 = i0 + 1)');
     expect(c).toContain('v0[i0]');
-    // the counter's uses are gone (its dead declaration survives, like every retired v1 walk var)
-    expect(c).not.toContain('v2 =');
+    expect(c).not.toContain('v2'); // the counter is gone, declaration included
     expect(c).not.toContain('do {');
     expect(c).not.toContain('else');
   });
@@ -578,4 +578,401 @@ describe('v3 — expression-base byte walk', () => {
     ];
     expect(reindexWalks(mkFn(init, wide))).toBeNull();
   });
+});
+
+// ── v4: the unguarded constant-trip countdown ────────────────────────────────────────────────
+
+/** The agbcc shape for `for(i=0;i<8;i++) s += p[i];` — a literal bound needs no zero-trip guard:
+ *  `v1 = a0; v0 = 0; v2 = 7; do { v0 = v0 + *v1; v1 = v1 + 1; v2 = v2 - 1; } while (v2 >= 0);` */
+function constCountdown(mut?: (fn: SFn) => void): SFn {
+  const fn: SFn = {
+    name: 'sum8',
+    retType: T.s(32),
+    params: [{ name: 'a0', type: T.ptr(T.s(32)) }],
+    locals: [
+      { name: 'v0', type: T.s(32) },
+      { name: 'v1', type: T.ptr(T.s(32)) },
+      { name: 'v2', type: T.s(32) },
+    ],
+    body: [
+      { k: 'assign', name: 'v1', value: V('a0') },
+      { k: 'assign', name: 'v0', value: C(0) },
+      { k: 'assign', name: 'v2', value: C(7) },
+      {
+        k: 'dowhile',
+        cond: { k: 'bin', op: '>=', l: V('v2'), r: C(0) },
+        body: [
+          { k: 'assign', name: 'v0', value: { k: 'bin', op: '+', l: V('v0'), r: deref('v1') } },
+          step('v1'),
+          { k: 'assign', name: 'v2', value: { k: 'bin', op: '-', l: V('v2'), r: C(1) } },
+        ],
+      },
+      { k: 'return', value: V('v0') },
+    ],
+  };
+  mut?.(fn);
+  return fn;
+}
+
+/** The loop statement of a `constCountdown` fixture, for mutators. */
+const cdLoop = (fn: SFn): Stmt & { k: 'dowhile' } => fn.body[3] as Stmt & { k: 'dowhile' };
+
+describe('v4 — the unguarded constant-trip countdown re-spells as a counted for', () => {
+  test('the golden shape: the counter init disappears, the walk keeps its init, C becomes C + 1', () => {
+    const out = reindexWalks(constCountdown());
+    expect(out).not.toBeNull();
+    const c = cBackend.emit(out!);
+    expect(c).toContain('v1 = a0;');
+    expect(c).toContain('v0 = 0;');
+    expect(c).toContain('for (i0 = 0; i0 < 8; i0 = i0 + 1)');
+    expect(c).toContain('v1[i0]');
+    expect(c).not.toContain('v2 =');
+    expect(c).not.toContain('do {');
+  });
+
+  test('the input SFn is never mutated', () => {
+    const sfn = constCountdown();
+    const before = JSON.stringify(sfn);
+    reindexWalks(sfn);
+    expect(JSON.stringify(sfn)).toBe(before);
+  });
+
+  test('refused: an UNSIGNED counter — `k >= 0` would never end the loop', () => {
+    expect(reindexWalks(constCountdown((fn) => (fn.locals[2].type = T.u(32))))).toBeNull();
+  });
+
+  test('refused: a negative constant — `k = -1` runs the body once, not C + 1 times', () => {
+    expect(reindexWalks(constCountdown((fn) => ((fn.body[2] as Stmt & { k: 'assign' }).value = C(-1))))).toBeNull();
+  });
+
+  test('refused: a variable trip count (that shape carries a guard — v2 owns it)', () => {
+    expect(
+      reindexWalks(
+        constCountdown((fn) => {
+          fn.params.push({ name: 'a1', type: T.s(32) });
+          (fn.body[2] as Stmt & { k: 'assign' }).value = V('a1');
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  test('refused: the `!= 0` exit — an unguarded loop with it counts one iteration fewer', () => {
+    expect(reindexWalks(constCountdown((fn) => (cdLoop(fn).cond = { k: 'bin', op: '!=', l: V('v2'), r: C(0) })))).toBe(
+      null,
+    );
+  });
+
+  test('refused: a break in the body', () => {
+    expect(reindexWalks(constCountdown((fn) => cdLoop(fn).body.unshift({ k: 'break' })))).toBeNull();
+  });
+
+  test('refused: the counter is read a fifth time (`*p = k`)', () => {
+    expect(
+      reindexWalks(constCountdown((fn) => cdLoop(fn).body.unshift({ k: 'store', lval: deref('v1'), value: V('v2') }))),
+    ).toBeNull();
+  });
+
+  test('refused: the walk pointer is read after the loop', () => {
+    expect(
+      reindexWalks(constCountdown((fn) => fn.body.splice(4, 0, { k: 'store', lval: deref('v1'), value: C(0) }))),
+    ).toBeNull();
+  });
+
+  test('refused: a wider deref would stride differently', () => {
+    expect(
+      reindexWalks(
+        constCountdown((fn) => {
+          (cdLoop(fn).body[0] as Stmt & { k: 'assign' }).value = {
+            k: 'bin',
+            op: '+',
+            l: V('v0'),
+            r: { k: 'index', base: V('v1'), idx: C(0), width: 1, signed: false },
+          };
+        }),
+      ),
+    ).toBeNull();
+  });
+});
+
+test('v4 refused: C + 1 would not fit a positive s32 — the bound would wrap negative', () => {
+  expect(reindexWalks(constCountdown((fn) => ((fn.body[2] as Stmt & { k: 'assign' }).value = C(0x7fffffff))))).toBe(
+    null,
+  );
+  // one below the edge still re-spells
+  expect(reindexWalks(constCountdown((fn) => ((fn.body[2] as Stmt & { k: 'assign' }).value = C(0x7ffffffe))))).not.toBe(
+    null,
+  );
+});
+
+// ── the shared countdown gate: what the counter may BE ────────────────────────────────────────
+
+/** `v1 = a0; gCount = 7; do { *v1 = 0; v1 += 1; gCount -= 1; } while (gCount >= 0);`
+ *  — a bare scalar GLOBAL in the counter's place. structure.ts spells a store to one as an
+ *  `assign`, so it arrives here shaped exactly like a local counter. */
+const globalCounter: SFn = {
+  name: 'clr',
+  retType: T.void(),
+  params: [{ name: 'a0', type: T.ptr(T.s(32)) }],
+  locals: [{ name: 'v1', type: T.ptr(T.s(32)) }],
+  globals: [{ name: 'gCount', type: T.s(32) }],
+  body: [
+    { k: 'assign', name: 'v1', value: V('a0') },
+    { k: 'assign', name: 'gCount', value: C(7) },
+    {
+      k: 'dowhile',
+      cond: { k: 'bin', op: '>=', l: V('gCount'), r: C(0) },
+      body: [
+        { k: 'store', lval: deref('v1'), value: C(0) },
+        step('v1'),
+        { k: 'assign', name: 'gCount', value: { k: 'bin', op: '-', l: V('gCount'), r: C(1) } },
+      ],
+    },
+  ],
+};
+
+test('the counter may not be a GLOBAL — the rewrite would stop writing a value other TUs observe', () => {
+  expect(reindexWalks(globalCounter)).toBeNull();
+});
+
+test('v4 refused: C + 1 must fit the COUNTER, not just an s32 — 200 in an s8 is -56', () => {
+  // the countdown runs the body ONCE (the s8 counter is negative at the first test); `i < 201`
+  // would run it 201 times and walk 200 words past the buffer
+  expect(
+    reindexWalks(
+      constCountdown((fn) => {
+        fn.locals[2].type = T.s(8);
+        (fn.body[2] as Stmt & { k: 'assign' }).value = C(200);
+      }),
+    ),
+  ).toBeNull();
+  // the same s8 counter within range still re-spells
+  expect(
+    reindexWalks(
+      constCountdown((fn) => {
+        fn.locals[2].type = T.s(8);
+        (fn.body[2] as Stmt & { k: 'assign' }).value = C(100);
+      }),
+    ),
+  ).not.toBeNull();
+});
+
+test('a v2 loop that declines on its skip arm mints nothing: no dead iv, no kept walk', () => {
+  // the guarded countdown's skip arm does NOT equal the else arm's leftovers, so v2 declines —
+  // while an ordinary v1 while-walk in the same function fires and takes the FIRST iv name
+  const fn = guardedCountdown((body) => {
+    (body[0] as Stmt & { k: 'if' }).then = [{ k: 'assign', name: 'v1', value: C(7) }];
+  });
+  fn.params.push({ name: 'a2', type: T.ptr(T.s(32)) });
+  fn.locals.push({ name: 'v3', type: T.ptr(T.s(32)) }, { name: 'v4', type: T.s(32) });
+  fn.body.splice(
+    1,
+    0,
+    { k: 'assign', name: 'v4', value: C(0) },
+    { k: 'assign', name: 'v3', value: V('a2') },
+    {
+      k: 'while',
+      cond: { k: 'bin', op: '<', l: V('v3'), r: { k: 'bin', op: '+', l: V('a2'), r: V('a1') } },
+      body: [{ k: 'assign', name: 'v4', value: { k: 'bin', op: '+', l: V('v4'), r: deref('v3') } }, step('v3')],
+    },
+  );
+  const kept = new Set<string>();
+  const out = reindexWalks(fn, kept)!;
+  expect(out).not.toBeNull();
+  const c = cBackend.emit(out);
+  expect(c).toContain('while (i0 < a1)'); // the walk that FIRED took the first name
+  expect(c).not.toContain('i1'); // …and nothing minted a second
+  expect(kept).toEqual(new Set(['a2'])); // not `v0`, the declined countdown's walk pointer
+});
+
+test('v4 refused: a deref standing AFTER the step reads the next element', () => {
+  expect(
+    reindexWalks(constCountdown((fn) => cdLoop(fn).body.splice(2, 0, { k: 'store', lval: deref('v1'), value: C(0) }))),
+  ).toBeNull();
+});
+
+test('v4 inside an outer loop: the counter re-inits per outer iteration, so the `for` does too', () => {
+  const inner = constCountdown();
+  const fn: SFn = {
+    ...inner,
+    locals: [...inner.locals, { name: 'v3', type: T.s(32) }],
+    body: [
+      { k: 'assign', name: 'v3', value: C(0) },
+      {
+        k: 'while',
+        cond: { k: 'bin', op: '<', l: V('v3'), r: C(4) },
+        body: [
+          ...inner.body.slice(0, 4),
+          { k: 'assign', name: 'v3', value: { k: 'bin', op: '+', l: V('v3'), r: C(1) } },
+        ],
+      },
+      { k: 'return', value: V('v0') },
+    ],
+  };
+  const c = cBackend.emit(reindexWalks(fn)!);
+  expect(c).toContain('while (v3 < 4) {');
+  expect(c).toContain('v1 = a0;');
+  expect(c).toContain('for (i0 = 0; i0 < 8; i0 = i0 + 1)');
+  expect(c).toContain('v1[i0]');
+  expect(c).not.toContain('v2 =');
+});
+
+// ── the shared countdown gate, as a table ─────────────────────────────────────────────────────
+
+/** One fixture per COUNTDOWN_GATES entry: a function the full table refuses, and refuses ON THAT
+ *  ENTRY — dropping it lets the same input through. `title` is what the entry's `guardedBy` names,
+ *  so gate-contract.test.ts can find it in this file's text. */
+const GATE_ABLATIONS: { id: string; title: string; fixture: () => SFn }[] = [
+  {
+    id: 'pointer-counter',
+    title: 'a pointer-typed counter declines',
+    // v2's counter carries no type rule of its own, so a pointer reaches the shared table
+    fixture: () => guardedCountdown((_body, fn) => (fn.locals[2].type = T.ptr(T.s(32)))),
+  },
+  {
+    id: 'global-counter',
+    title: 'the counter may not be a GLOBAL',
+    fixture: () => globalCounter,
+  },
+  {
+    id: 'volatile-counter',
+    title: 'a volatile counter declines',
+    fixture: () => constCountdown((fn) => (fn.locals[2].volatile = true)),
+  },
+  {
+    id: 'volatile-walk',
+    title: 'a volatile walk pointer declines',
+    // `pointeeVolatile`, the flag the `/volatile` lever mints — an object-volatile POINTER has no
+    // inhabitant (cfamily.ts), and `/volatile/indexed` (rank.ts) is what reaches this gate.
+    fixture: () => constCountdown((fn) => (fn.locals[1].pointeeVolatile = true)),
+  },
+  {
+    id: 'two-steps-one-pointer',
+    title: 'a pointer stepped twice in one body declines',
+    fixture: () => constCountdown((fn) => cdLoop(fn).body.push(step('v1'))),
+  },
+  {
+    id: 'body-exit',
+    title: 'a `break` in the body declines',
+    fixture: () => constCountdown((fn) => cdLoop(fn).body.unshift({ k: 'break' })),
+  },
+  {
+    id: 'walk-base',
+    title: 'a walk pointer with no init ahead of the loop declines',
+    fixture: () => constCountdown((fn) => fn.body.splice(0, 1)),
+  },
+  {
+    id: 'counter-roles',
+    title: 'a fifth mention of the counter declines',
+    fixture: () => constCountdown((fn) => cdLoop(fn).body.unshift({ k: 'store', lval: deref('v1'), value: V('v2') })),
+  },
+  {
+    id: 'walk-confined',
+    title: 'a walk pointer read after the loop declines',
+    fixture: () => constCountdown((fn) => fn.body.splice(4, 0, { k: 'store', lval: deref('v1'), value: C(0) })),
+  },
+  {
+    id: 'walk-stride',
+    title: 'a byte deref of a word walk declines',
+    fixture: () =>
+      constCountdown((fn) => {
+        (cdLoop(fn).body[0] as Stmt & { k: 'assign' }).value = {
+          k: 'bin',
+          op: '+',
+          l: V('v0'),
+          r: { k: 'index', base: V('v1'), idx: C(0), width: 1, signed: true },
+        };
+      }),
+  },
+  {
+    id: 'leftover-walk',
+    title: 'a leftover mentioning a walk pointer declines',
+    // BOTH arms carry the leftover, so the skip-arm equality still holds and this entry is the
+    // only thing standing between the rewrite and a skip path dereferencing an uninitialised `v0`
+    fixture: () =>
+      guardedCountdown((body) => {
+        const s = body[0] as Stmt & { k: 'if' };
+        const leftover: Stmt = { k: 'store', lval: deref('v0'), value: C(0) };
+        s.then.push(leftover);
+        s.else.splice(3, 0, leftover);
+      }),
+  },
+];
+
+describe('COUNTDOWN_GATES — each entry is load-bearing on its own input', () => {
+  test('every entry has a fixture, and every fixture an entry', () => {
+    expect(GATE_ABLATIONS.map((a) => a.id).sort()).toEqual(COUNTDOWN_GATES.map((g) => g.id).sort());
+  });
+
+  test.each(GATE_ABLATIONS)('$id — $title, and re-spells with the entry dropped', ({ id, fixture }) => {
+    expect(reindexWalks(fixture())).toBeNull();
+    expect(reindexWalks(fixture(), undefined, without(COUNTDOWN_GATES, id))).not.toBeNull();
+  });
+});
+
+test('the counter’s DECLARATION is retired with its writes, not left standing unused', () => {
+  const c = cBackend.emit(reindexWalks(constCountdown())!);
+  expect(c).not.toContain('v2'); // neither `s32 v2;` nor any use
+  expect(c).toContain('s32 v0;'); // the accumulator still is one
+});
+
+test('an ESCAPED counter address is a mention: `&k` published before the loop declines', () => {
+  // the four-roles rule is the whole licence for deleting the counter's writes, and a var-only
+  // count cannot see the escape — the DMA-published frame slot renders its address as `addr`
+  expect(
+    reindexWalks(
+      constCountdown((fn) =>
+        fn.body.splice(3, 0, {
+          k: 'store',
+          lval: {
+            k: 'index',
+            base: { k: 'cast', to: T.ptr(T.u(32)), e: C(0x40000d4) },
+            idx: C(0),
+            width: 4,
+            signed: false,
+          },
+          value: { k: 'addr', name: 'v2' },
+        }),
+      ),
+    ),
+  ).toBeNull();
+});
+
+test('a walk pointer whose ADDRESS escapes declines too', () => {
+  expect(
+    reindexWalks(
+      constCountdown((fn) =>
+        fn.body.splice(3, 0, {
+          k: 'store',
+          lval: { k: 'index', base: V('a0'), idx: C(0), width: 4, signed: true },
+          value: { k: 'addr', name: 'v1' },
+        }),
+      ),
+    ),
+  ).toBeNull();
+});
+
+test('a walk base agbcc REMATERIALIZED as a shift is admitted like a pool word', () => {
+  // `(s32 *)(128 << 18)` is 0x02000000 — agbcc emits `movs`+`lsls` for every shift-encodable GBA
+  // region and a pool word for the rest, and which one it picked is not a property of the source
+  const out = reindexWalks(
+    constCountdown((fn) => {
+      (fn.body[0] as Stmt & { k: 'assign' }).value = {
+        k: 'cast',
+        to: T.ptr(T.s(32)),
+        e: { k: 'bin', op: '<<', l: C(128), r: C(18) },
+      };
+    }),
+  );
+  expect(cBackend.emit(out!)).toContain('v1 = (s32 *)(128 << 18);');
+  expect(cBackend.emit(out!)).toContain('for (i0 = 0; i0 < 8; i0 = i0 + 1)');
+});
+
+test('a walk base holding a free VARIABLE is not a rematerializable address', () => {
+  expect(
+    reindexWalks(
+      constCountdown((fn) => {
+        (fn.body[0] as Stmt & { k: 'assign' }).value = { k: 'bin', op: '+', l: V('a0'), r: C(4) };
+      }),
+    ),
+  ).toBeNull();
 });

@@ -1,12 +1,16 @@
 // Def-site anchoring of constant merge copies (structure.ts anchorConstCopies): an edge copy
 // `v = K` whose constant the asm materialized EARLIER — `movs r9, #0` at entry ahead of a
 // single-armed overwrite — is emitted at the const op's original position and the edge copy is
-// suppressed. Off by default; rank.ts enumerates it as the `/defsite` axis.
+// suppressed. Off by default; rank.ts enumerates it as the `/defsite` axis, and its widening to a
+// loop header's entry const (`anchorLoopEntryConsts`) as `/defsite/loop-entry`.
 //
 // The refusal conditions are what make it sound, so they are what these tests pin hardest:
 // in-loop shapes decline outright (per-iteration precedence is not dominance — the /preinit
 // sticky-arm class), and a const whose write could clobber another anchored arg on a path to its
-// edge keeps the edge placement.
+// edge keeps the edge placement. The two flags are pinned as SEPARATE placements: one boolean
+// covering both makes the middle spelling unreachable. The refusals are not the whole guard: a
+// const anchored into a block the structurer never renders declines the FUNCTION — the pure
+// preheader pair below.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -15,11 +19,11 @@ import { verify } from '../src/ir/verify';
 import { recoverTypes } from '../src/raise/recover';
 import { structure } from '../src/structure/structure';
 
-const emit = (ir: string, anchor: boolean): string => {
+const emit = (ir: string, anchor: boolean, loopEntry = anchor): string => {
   const fn = parse(ir);
   verify(fn);
   recoverTypes(fn);
-  return cBackend.emit(structure(fn, { anchorConstCopies: anchor }));
+  return cBackend.emit(structure(fn, { anchorConstCopies: anchor, anchorLoopEntryConsts: loopEntry }));
 };
 
 // v = 0 at entry, conditionally overwritten to 1 — the asm shape `movs r9, #0` … `bne skip;
@@ -189,4 +193,195 @@ test('a test block carrying an anchored write is never consumed as a discarded t
   if (dispatch !== -1) {
     expect(write).toBeLessThan(dispatch);
   }
+});
+
+// LOOP-HEADER ENTRY ARG: the one merge arg whose def legitimately sits far above its edge —
+// `int s = 0;` at the top of a function, ahead of a `for` that accumulates into it. The
+// accumulator's back-edge value shares its name, which is why the blanket name-count rule cannot
+// decide this shape; what makes it sound is that every OTHER claimant lives inside the body, so
+// the only write to the name outside the loop is the anchored one.
+const ACCUM = `fn accum {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=0}
+  %3: u32 = icmp_eq %1, %2
+  cond_br %3, ^bb1(), ^bb2()
+^bb1():
+  %4: s32 = const {value=5}
+  br ^bb3(%4)
+^bb2():
+  %5: s32 = const {value=9}
+  br ^bb3(%5)
+^bb3(%6: s32):
+  br ^bb4(%2, %6)
+^bb4(%7: s32, %8: s32):
+  %9: s32 = add %7, %8
+  %10: s32 = const {value=1}
+  %11: s32 = sub %8, %10
+  %12: s32 = const {value=0}
+  %13: u32 = icmp_sge %11, %12
+  cond_br %13, ^bb4(%9, %11), ^bb5()
+^bb5():
+  ret %9
+}
+`;
+
+test("a loop header's entry const anchors at its def site, above the if the preheader sits under", () => {
+  expect(emit(ACCUM, false)).toContain('    }\n    v0 = 0;\n'); // preheader placement, below the if
+  expect(emit(ACCUM, true)).toContain(
+    's32 accum(s32 a0, s32 a1) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    v0 = 0;\n    if (',
+  );
+});
+
+test('the loop-entry widening is its OWN flag: plain /defsite still leaves the entry const on its edge', () => {
+  // The spelling in the middle — anchor what `/defsite` always anchored, leave a loop header's
+  // entry const at its edge. One boolean covering both placements would make it unreachable, and
+  // on a real function that is a quarter to a half of the candidate sources (klonoa's
+  // TransitionSelfRemoveFadeIn: 448 of 896).
+  expect(emit(ACCUM, true, false)).toBe(emit(ACCUM, false));
+});
+
+// Two forward preds, each passing its own constant for the accumulator slot. CONSERVATIVE, and
+// not proven necessary: with both consts anchored at their own def sites the writes would still
+// order correctly on every path. The rule refuses the shape rather than reasoning about it,
+// because the premise the name rule rests on — every write to the name outside the anchored one
+// is a back-edge copy — is stated over ONE entry edge.
+const TWO_PREHEADERS = `fn twopre {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=0}
+  %3: u32 = icmp_eq %1, %2
+  cond_br %3, ^bb1(), ^bb2()
+^bb1():
+  %4: s32 = const {value=5}
+  br ^bb4(%2, %4)
+^bb2():
+  %5: s32 = const {value=9}
+  %6: s32 = const {value=3}
+  br ^bb4(%6, %5)
+^bb4(%7: s32, %8: s32):
+  %9: s32 = add %7, %8
+  %10: s32 = const {value=1}
+  %11: s32 = sub %8, %10
+  %12: s32 = const {value=0}
+  %13: u32 = icmp_sge %11, %12
+  cond_br %13, ^bb4(%9, %11), ^bb5()
+^bb5():
+  ret %9
+}
+`;
+
+test('a loop header entered from two preheaders declines (conservative, not proven necessary)', () => {
+  expect(emit(TWO_PREHEADERS, true)).toBe(emit(TWO_PREHEADERS, false));
+});
+
+// The exit merge carries the accumulator under the SAME name from a block outside the body, so a
+// write to it exists outside the loop and the "only the anchored one" premise fails.
+const OUTSIDE_CLAIMANT = `fn outside {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=0}
+  %3: u32 = icmp_eq %1, %2
+  cond_br %3, ^bb1(), ^bb2()
+^bb1():
+  %4: s32 = const {value=5}
+  br ^bb3(%4)
+^bb2():
+  %5: s32 = const {value=9}
+  br ^bb3(%5)
+^bb3(%6: s32):
+  br ^bb4(%2, %6)
+^bb4(%7: s32, %8: s32):
+  %9: s32 = add %7, %8
+  %10: s32 = const {value=1}
+  %11: s32 = sub %8, %10
+  %12: s32 = const {value=0}
+  %13: u32 = icmp_sge %11, %12
+  cond_br %13, ^bb4(%9, %11), ^bb5(%9)
+^bb5(%14: s32):
+  %15: s32 = const {value=3}
+  %16: s32 = mul %14, %15
+  ret %16
+}
+`;
+
+test('a name claimed by a value outside the loop body declines', () => {
+  expect(emit(OUTSIDE_CLAIMANT, true)).toBe(emit(OUTSIDE_CLAIMANT, false));
+});
+
+// A guarded self-loop whose entry const sits in the PURE PREHEADER — the shape a compiler's
+// loop-invariant motion emits (`lui/ori` of the walk base parked between the guard and the
+// header). Loop recovery CLAIMS that block and never structures it: its defs render inline and
+// its EDGE args carry the inits (LoopInfo.preheader). So the anchor has no rendered position,
+// while the edge copy it replaced is already suppressed — the merge variable would be read where
+// nothing ever wrote it. `synthetic:ucmp:gcc2.7.2kmc` is the corpus inhabitant, and klonoa's
+// `ConfigureInterruptsForGameplay` the second.
+const PREHEADER_ANCHOR = `fn prehdranchor {
+^bb0(%0: s32):
+  %1: u16* = const {value=50331648}
+  %2: s32 = load %1 {off=4168, signed=false, width=2}
+  %3: s32 = const {value=0}
+  %4: u32 = icmp_eq %2, %3
+  cond_br %4, ^bb3(), ^bb1()
+^bb1():
+  %5: u16* = const {value=50335816}
+  %6: u8* = const {value=50339840}
+  br ^bb2(%6, %3)
+^bb2(%7: u8*, %8: s32):
+  %9: s32 = load %7 {off=4096, signed=false, width=1}
+  store %7, %9 {off=0, width=1}
+  %10: u32 = load %5 {off=0, signed=false, width=2}
+  %11: s32 = const {value=1}
+  %12: u32 = add %8, %11
+  %13: u32 = icmp_ult %12, %10
+  %14: u8* = add %7, %11
+  cond_br %13, ^bb2(%14, %12), ^bb3()
+^bb3():
+  ret
+}
+`;
+
+test('an entry const anchored into a loop’s pure preheader declines loud', () => {
+  expect(() => emit(PREHEADER_ANCHOR, true)).toThrow(
+    /suppressed from its edge for a def-site anchor that no rendered position emitted/,
+  );
+});
+
+test('the same const under plain /defsite keeps its edge copy', () => {
+  expect(emit(PREHEADER_ANCHOR, true, false)).toContain('v0 = (u8 *)50339840;');
+  expect(emit(PREHEADER_ANCHOR, false)).toContain('v0 = (u8 *)50339840;');
+});
+
+// The same unrendered preheader, for a carried value NOTHING READS: `%20` reaches the header as a
+// third param, rides the back edge unchanged (an identity copy, coalesced away) and is never
+// derefed, compared or returned. Its write is owed and never emitted — and no reader, no second
+// writer and no declaration survive to tell, so the spelling stands. The walk base is defined in
+// the ENTRY here, which is rendered, so the loud case above is not what this measures.
+const DEAD_ANCHOR = `fn deadanchor {
+^bb0(%0: s32):
+  %1: u16* = const {value=50331648}
+  %2: s32 = load %1 {off=4168, signed=false, width=2}
+  %3: s32 = const {value=0}
+  %6: u8* = const {value=50339840}
+  %4: u32 = icmp_eq %2, %3
+  cond_br %4, ^bb3(), ^bb1()
+^bb1():
+  %5: u16* = const {value=50335816}
+  %20: s32 = const {value=7}
+  br ^bb2(%6, %3, %20)
+^bb2(%7: u8*, %8: s32, %21: s32):
+  %9: s32 = load %7 {off=4096, signed=false, width=1}
+  store %7, %9 {off=0, width=1}
+  %10: u32 = load %5 {off=0, signed=false, width=2}
+  %11: s32 = const {value=1}
+  %12: u32 = add %8, %11
+  %13: u32 = icmp_ult %12, %10
+  %14: u8* = add %7, %11
+  cond_br %13, ^bb2(%14, %12, %21), ^bb3()
+^bb3():
+  ret
+}
+`;
+
+test('an anchored write nothing can observe is not a broken promise', () => {
+  const out = emit(DEAD_ANCHOR, true);
+  expect(out).toContain('v0 = (u8 *)50339840;');
+  expect(out).not.toContain('7');
 });

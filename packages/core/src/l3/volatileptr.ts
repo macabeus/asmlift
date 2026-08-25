@@ -16,19 +16,17 @@
 // one. C89 also admits the assignment without a cast change — the qualifier is added on the
 // pointee, and assignment may add pointee qualifiers.
 //
-// GATE: only a local of pointer type assigned a bare NONZERO numeric constant (or a cast of
-// one) somewhere in the body — `0` is NULL, never an address. A value CONTAINING a global's
-// address — `&gSym` at ANY depth: under a cast, inside interior-address arithmetic
-// (`(u16 *)((u32)&gSym + 8)`) — VETOES the local, qualifying assignments on other paths
+// GATE: only a local of pointer type assigned a REMATERIALIZABLE address somewhere in the body
+// (l3/ast.ts — any constant expression reading no variable and no memory, so a shift-encoded
+// hardware base qualifies exactly like a pool word); a bare `0` is NULL, never an address. A value
+// CONTAINING a global's address — `&gSym` at ANY depth: under a cast, inside interior-address
+// arithmetic (`(u16 *)((u32)&gSym + 8)`) — VETOES the local, qualifying assignments on other paths
 // notwithstanding, and the veto propagates through assignments to a FIXPOINT (`q` tainted,
 // `p = q` taints `p`; conservatively, `p` assigned ANY expression mentioning a tainted name).
 // The symbol map owns a declared global's volatility, and a mixed-feed local would read the
 // mapped global through a volatile view the map never granted. No qualifying local ⇒ decline
 // (null), so the lever never emits a duplicate of the primary.
-import { type Expr, type SFn, type Stmt, mapExprChildren, walkExprs } from './ast';
-
-const isNumericAddr = (e: Expr): boolean =>
-  (e.k === 'const' && e.value !== 0) || (e.k === 'cast' && e.to.kind === 'ptr' && isNumericAddr(e.e));
+import { type Expr, type SFn, type Stmt, mapExprChildren, rematerializableAddress, walkExprs } from './ast';
 
 const exprHas = (e: Expr, pred: (x: Expr) => boolean): boolean => {
   if (pred(e)) {
@@ -127,7 +125,7 @@ function eligibility(sfn: SFn): (l: SFn['locals'][number]) => boolean {
   const numericFed = new Set<string>();
   const tainted = new Set<string>();
   for (const a of assigns) {
-    if (isNumericAddr(a.value)) {
+    if (rematerializableAddress(a.value)) {
       numericFed.add(a.name);
     }
     if (exprHas(a.value, (x) => x.k === 'addr')) {

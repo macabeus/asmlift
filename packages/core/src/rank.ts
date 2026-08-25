@@ -455,11 +455,22 @@ export function enumerateCandidates(
   // ambiguous, so both placements are emitted and the differ referees. Crossed with branch sense
   // (an anchored copy empties an arm, which is exactly what changes which sense wins); the dedup
   // below collapses every variant the anchoring left unchanged.
+  //
+  // `/defsite/loop-entry` widens it to a LOOP HEADER's entry const (`int s = 0;` above the guard
+  // rather than on the edge into the loop). Its own point rather than a widening of `/defsite`
+  // because it is a SECOND placement decision: a function carrying both kinds of anchorable const
+  // has THREE spellings, and folding the two decisions into one boolean would delete the middle
+  // one — measured on klonoa's TransitionSelfRemoveFadeIn, where 448 of the 896 sources `/defsite`
+  // reaches became unreachable. Enumerated as a CHAIN (none ⊂ plain ⊂ plain + entry) rather than a
+  // 2×2 cross: the fourth point costs another quarter of the whole fan — the anchor dimension
+  // multiplies everything below it — and no row has been shown to need it.
   const senseAnchor = [
-    { suffix: '', sense: defSense, anchor: false, bitfields: true },
-    { suffix: '/flip-branch', sense: !defSense, anchor: false, bitfields: true },
-    { suffix: '/defsite', sense: defSense, anchor: true, bitfields: true },
-    { suffix: '/flip-branch/defsite', sense: !defSense, anchor: true, bitfields: true },
+    { suffix: '', sense: defSense, anchor: false, entry: false, bitfields: true },
+    { suffix: '/flip-branch', sense: !defSense, anchor: false, entry: false, bitfields: true },
+    { suffix: '/defsite', sense: defSense, anchor: true, entry: false, bitfields: true },
+    { suffix: '/flip-branch/defsite', sense: !defSense, anchor: true, entry: false, bitfields: true },
+    { suffix: '/defsite/loop-entry', sense: defSense, anchor: true, entry: true, bitfields: true },
+    { suffix: '/flip-branch/defsite/loop-entry', sense: !defSense, anchor: true, entry: true, bitfields: true },
   ];
   // `/flip-join` — the JOINED-if sibling of `/flip-branch` (structure.ts
   // negateJoinedBranchSense): a reconverging two-armed if reads the same fall-through-is-then
@@ -1007,6 +1018,7 @@ export function enumerateCandidates(
               preserveDivergentBranchSense: s.sense,
               negateJoinedBranchSense: s.join ? !defSense : defSense,
               anchorConstCopies: s.anchor,
+              anchorLoopEntryConsts: s.entry,
               spellBitfieldMembers: s.bitfields,
               ...STRUCTURING_AXES.reduce((acc, ax) => ({ ...acc, ...ax.options(s[ax.flag]) }), {}),
             });

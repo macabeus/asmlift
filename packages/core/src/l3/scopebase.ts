@@ -48,6 +48,7 @@ import { type IrType, T, scalarTypeForAccess } from '../ir/types';
 import type { Expr, SFn, Stmt } from './ast';
 import { mapExprChildren, stmtExprs } from './ast';
 import { nameAllocator } from './hoist';
+import { addressableGlobals } from './storage';
 
 /** A base this lever may name: a leaf whose value is a fixed address.
  *
@@ -263,10 +264,7 @@ function underNestedLoop(uses: Site[], depth: number): boolean {
  */
 export function hoistScopedBases(sfn: SFn): SFn | null {
   compound = false;
-  // A name that is BOTH a declared global and a local/param is not safely a global here: `&g` would
-  // take the address of the LOCAL, silently a different object. Excluded rather than assumed apart.
-  const shadowed = new Set([...sfn.locals.map((l) => l.name), ...sfn.params.map((p) => p.name)]);
-  const globals = new Set((sfn.globals ?? []).map((g) => g.name).filter((n) => !shadowed.has(n)));
+  const globals = addressableGlobals(sfn);
   const found = new Map<
     string,
     { uses: Site[]; sample: Extract<Expr, { k: 'index' }>; constOff: Map<number, number> }

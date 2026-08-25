@@ -51,6 +51,8 @@ import {
   gapReasonFor,
   mapExprChildren,
   negateCond,
+  stmtChildren,
+  walkExprs,
 } from '../l3/ast';
 import type { Gate } from '../l3/gates';
 import { exprCType, provablyNonNegative, ptrElemBytes, renderedIntSignedness } from '../l3/typing';
@@ -70,7 +72,7 @@ import {
 } from '../symbols';
 import { analyze } from './analysis';
 import { makeLoopHazards, sunkCopyOverDroppedUndef, updateWriteSet } from './hazards';
-import { analyzeLoops } from './loops';
+import { type NaturalLoop, analyzeLoops } from './loops';
 import { type NameMerge, coalesceNames } from './namecoalesce';
 import { type ArmExit, makeSwitchRecovery } from './switch-recover';
 
@@ -717,6 +719,27 @@ export interface StructureOptions {
   // the `if`, not as its else-arm. A differ-refereed candidate axis (rank.ts `/defsite`), never a
   // default — see the refusal conditions where it is computed.
   anchorConstCopies?: boolean;
+  // WIDEN `anchorConstCopies` to a LOOP HEADER's entry constant — `int s = 0;` hoisted above the
+  // `if` that guards the loop, rather than written on the edge into it. A second placement
+  // decision, so a second axis point (rank.ts `/defsite/loop-entry`) rather than a widening of
+  // the first: on a function carrying both kinds of anchorable const, folding them into one flag
+  // would make "anchor the plain ones, leave the loop's at its edge" — a spelling `/defsite`
+  // emits today — unreachable. Inert unless `anchorConstCopies` is also on.
+  //
+  // AN AXIS RATHER THAN AN EXTENSION OF `l3/initfirst.ts`, whose header opens on the same rewrite
+  // (`if (0 < n) { v = 0; … }` → `v = 0; if (v < n) { … }`) at a fraction of the price: a
+  // re-spelling adds candidates only where it fires, while this multiplies every candidate below
+  // it. The fork is REACH, and it is a hard one. `initfirst` MOVES A STATEMENT, and an edge copy
+  // is not a statement — structuring mints it, choosing between the edge and the const op's own
+  // position, and the IR that holds those positions is gone by the time L3 runs. So the shapes
+  // where the two coincide are initfirst's for free — except that they never do: its guard
+  // re-spelling wants an ELSE-LESS `if` and rewrites the condition to read the hoisted variable
+  // (`if (v < n)`), where anchoring leaves the condition alone, so the two emit different sources.
+  // Measured, not argued: `/initfirst` rides every spelling rank.ts enumerates, so it is scored on
+  // every benchmark row already, and on each row this axis wins its `/initfirst`-only sibling is
+  // either not enumerated at all or not byte-identical to the anchored source — the substitution
+  // reaches none of them. Take the axis only while rows demand that; the price is in rank.ts.
+  anchorLoopEntryConsts?: boolean;
   // HARDWARE fact from TargetDescription.capabilities.endianness, threaded by structureOptionsFor:
   // the bitfield extract recognizer solves an LSB-first equation, so it only runs on little-endian
   // data. The provider already refuses to EMIT bitfield facts for a big-endian ELF; this is the
@@ -816,6 +839,8 @@ function assertPrimaryAccepts(fn: Fn, opts: StructureOptions, hooks: StructureHo
       homeSharedAddresses: false,
       homeLoopExprs: false,
       homeDerivedReads: false,
+      anchorConstCopies: false,
+      anchorLoopEntryConsts: false,
     },
     hooks,
   );
@@ -833,6 +858,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     switchArmsFollowLayout = false,
     defOrderLoadPairs = true,
     anchorConstCopies = false,
+    anchorLoopEntryConsts = false,
     littleEndian = true,
     spellBitfieldMembers: bitfieldSpellingWanted = true,
     rereadGlobals = false,
@@ -856,7 +882,14 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // too), which the loop emitters' hazard predicates read — so the invariant above covers each.
   // A per-compiler DEFAULT is not among them, however much it materializes: the primary IS this
   // target's defaults, so resetting one would probe a spelling asmlift never emits here.
-  if (coalesceMergeNames || materializeJoinFeeds || homeSharedAddresses || homeLoopExprs || homeDerivedReads) {
+  if (
+    coalesceMergeNames ||
+    materializeJoinFeeds ||
+    homeSharedAddresses ||
+    homeLoopExprs ||
+    homeDerivedReads ||
+    anchorConstCopies
+  ) {
     assertPrimaryAccepts(fn, opts, hooks);
   }
   const defs = defOpMap(fn);
@@ -1728,7 +1761,15 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // REFUSAL CONDITIONS — each keeps the edge placement, never producing a different write:
   //   - the arg is not an UNNAMED `const` op (only a rematerializable constant carries
   //     unambiguous placement evidence; a named value's position is its materialized def's);
-  //   - the merge is a loop header (loop copies have their own placement discipline);
+  //   - the merge is a LOOP HEADER, unless `anchorLoopEntryConsts` is also on and the loop is
+  //     entered through ONE preheader with no value living outside the body under the same name.
+  //     A loop header's entry arg is the one merge arg whose def sits legitimately far above its
+  //     edge — `int s = 0;` ahead of a `for` accumulating into it — and the carried values that
+  //     share its name are what the name rule below would refuse it on. Anchoring holds exactly
+  //     when the name is written nowhere outside the loop but at the anchored site: the entry
+  //     copy runs once, before the body, and every other write to it is a back-edge copy strictly
+  //     after. Its own flag because it is a SECOND placement decision, and one boolean covering
+  //     both would delete a spelling rather than add one (see the option's doc);
   //   - the const's block does not dominate every edge source passing it (the anchored write
   //     must precede the edge on every path);
   //   - the const's block or any edge source sits inside ANY loop. Block-level dominance does
@@ -1736,11 +1777,21 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   //     suppressed edge in iteration 2 with the variable overwritten in between, the /preinit
   //     sticky-arm failure class (PR #13) — so in-loop shapes are declined outright;
   //   - the merge variable names any OTHER SSA value (a shared name has readers and writers
-  //     between the def site and the edge that edge placement respects and anchoring would not);
+  //     between the def site and the edge that edge placement respects and anchoring would not).
+  //     A loop header's carried value is the exception above: its other claimants all live in
+  //     the body;
   //   - another anchored const of the same variable lies on a path from this one to this one's
   //     edge (the later write would clobber this arg's value; both stay at their edges instead).
-  const anchoredAt = new Map<Op, { name: string; arg: Value }[]>();
+  //
+  // What the list does NOT cover is whether the def site is RENDERED at all; an anchor that lands
+  // in an elided block declines the whole function instead, at the postcondition after the render.
+  type AnchoredWrite = { name: string; arg: Value };
+  const anchoredAt = new Map<Op, AnchoredWrite[]>();
   const suppressedArgs = new Map<object, Set<number>>();
+  /** Every anchored write `sideEffects` actually rendered. The other half of the postcondition
+   *  below: suppressing an edge copy is a PROMISE that the def site emits the write instead, and
+   *  only the render can report that the promise was kept. */
+  const anchorsEmitted = new Set<AnchoredWrite>();
   if (anchorConstCopies) {
     const nameCount = new Map<string, number>();
     for (const n of varName.values()) {
@@ -1757,13 +1808,42 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // conservative "a write in `a` may execute between one in `b` and `b`'s terminator": same
     // block counts (op order refined by the caller where it matters), else CFG reachability
     const mayFollow = (a: Block, b: Block): boolean => a === b || reachFrom(a).has(b);
+    /** Where a value is WRITTEN: its block for a param, its def op's block otherwise. */
+    const blockOf = (v: Value): Block | undefined => {
+      const d = defs.get(v);
+      return paramBlock.get(v) ?? (d === undefined ? undefined : opBlock.get(d));
+    };
+    // A loop entered from ONE preheader — what makes "every write to the name outside the anchored
+    // one is a back-edge copy" statable: the premise is over ONE entry edge. CONSERVATIVE: two
+    // entry consts anchored at their own def sites would still order correctly, and this refuses
+    // the shape rather than reasoning about it. The other half of "entered only through its
+    // header" needs no test — `analyzeLoops` builds the body as the backward closure from the
+    // latches with the header already in it (loops.ts), so a body block's predecessors are all in
+    // the body by construction.
+    const singleEntry = (nl: NaturalLoop): boolean => nl.forwardPreds.length === 1;
     for (const M of fn.blocks) {
-      if (M === entry || M.params.length === 0 || forest.byHeader.has(M)) {
+      if (M === entry || M.params.length === 0) {
+        continue;
+      }
+      const loop = anchorLoopEntryConsts ? forest.byHeader.get(M) : undefined;
+      if (forest.byHeader.has(M) && (loop === undefined || !singleEntry(loop))) {
         continue;
       }
       M.params.forEach((p, i) => {
         const name = varName.get(p)!;
-        if (nameCount.get(name) !== 1) {
+        // the name belongs to this merge alone — or, at a loop header, to this merge and the
+        // body's own carried values, which are written only on the back edge
+        const soleClaimant =
+          nameCount.get(name) === 1 ||
+          (loop !== undefined &&
+            [...varName].every(([v, n]) => {
+              if (n !== name || v === p) {
+                return true;
+              }
+              const b = blockOf(v);
+              return b !== undefined && loop.body.has(b);
+            }));
+        if (!soleClaimant) {
           return;
         }
         // every in-edge record into M, grouped by the SSA value it passes for param i
@@ -2567,6 +2647,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // a merge copy anchored at this const's original position (anchorConstCopies, above)
       for (const a of anchoredAt.get(op) ?? []) {
         out.push({ k: 'assign', name: a.name, value: expr(a.arg) });
+        anchorsEmitted.add(a);
       }
     }
     return out;
@@ -3413,6 +3494,48 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   };
 
   const body = recognizeForLoops(structureRegion(entry, null));
+  // THE OBLIGATION `anchorConstCopies` CANNOT DISCHARGE ON ITS OWN, checked now that the render is
+  // complete. Anchoring is two edits that must both land: `suppressedArgs` DELETES a write from its
+  // edge, and `anchoredAt` owes it back at the const's def site. Its refusal conditions establish
+  // that the def block DOMINATES every suppressed edge — but dominating a block is not being
+  // rendered, and a block whose every op renders inline gets no statement position at all. A loop's
+  // claimed pure preheader is one (LoopInfo.preheader: the guarded-loop emitter takes its EDGE args
+  // and never structures it), and there is no reason to believe it is the last. A promise half-kept
+  // leaves the merge variable read where nothing wrote it — the one wrongness the byte differ
+  // rewards rather than catches, since the candidate compiles, scores, and can win.
+  //
+  // OBSERVABLE is the test, not "emitted". A merge name the rendered body never mentions has no
+  // reader to see the missing write and no second writer to disagree with it, and its declaration
+  // goes with it (l3/dce.ts prunes a local nothing references) — so the copy and the value it
+  // carried are gone together, which is a program the edge spelling can also produce. Only a name
+  // the body still uses is a broken promise, or a GLOBAL, whose store is observed outside this
+  // function whatever this body does with it. klonoa's `MPlayContinue` is the live inhabitant:
+  // its `/defsite` spelling is correct and main enumerates it.
+  const owed = [...anchoredAt.values()].flat().filter((w) => !anchorsEmitted.has(w));
+  if (owed.length > 0) {
+    const mentioned = new Set<string>(globalNames);
+    for (const e of walkExprs(body)) {
+      if (e.k === 'var' || e.k === 'addr') {
+        mentioned.add(e.name);
+      }
+    }
+    const assignTargets = (ss: Stmt[]): void => {
+      for (const st of ss) {
+        if (st.k === 'assign') {
+          mentioned.add(st.name);
+        }
+        assignTargets(stmtChildren(st));
+      }
+    };
+    assignTargets(body);
+    const broken = owed.find((w) => mentioned.has(w.name));
+    if (broken !== undefined) {
+      throw new StructureError(
+        `cannot structure '${fn.name}': the merge copy into '${broken.name}' was suppressed from ` +
+          `its edge for a def-site anchor that no rendered position emitted`,
+      );
+    }
+  }
   // THE OBLIGATION `undefCarriesNothing` CANNOT DISCHARGE ON ITS OWN, checked now that both records
   // are complete. That test reads each write site off `paramBlock`/`opBlock`, and a sunk pre-update
   // exit copy is written somewhere else than either map says. What keeps them apart today is

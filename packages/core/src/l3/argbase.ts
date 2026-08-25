@@ -41,6 +41,7 @@ import { type IrType, T, scalarTypeForAccess } from '../ir/types';
 import type { Expr, SFn, Stmt } from './ast';
 import { mapExprChildren, stmtExprs } from './ast';
 import { nameAllocator } from './hoist';
+import { declaredGlobals } from './storage';
 
 /** A base this pass may evaluate early: pure, and not something a store can change under us.
  *
@@ -103,7 +104,7 @@ function baseKey(n: Extract<Expr, { k: 'index' }>): string {
  * candidate at all rather than a duplicate of the primary).
  */
 export function materializeArgBases(sfn: SFn): SFn | null {
-  const globals = new Set((sfn.globals ?? []).map((g) => g.name));
+  const globals = declaredGlobals(sfn);
   const fresh = nameAllocator(sfn);
   const newLocals: { name: string; type: IrType }[] = [];
   let fired = false;

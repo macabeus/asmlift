@@ -30,39 +30,84 @@
 // The walk pointers KEEP their init and lose their step — gcc folds a loop-invariant pointer
 // local into addressing, so `p = B; … p[i]` and `B[i]` compile identically, and keeping the
 // local is what lets the `/volatile` lever qualify a numeric B. Several walk pointers share the
-// one counter (`dotprod`'s a/b pair). A loop is re-spelled only when ALL hold —
+// one counter (`dotprod`'s a/b pair). Its OWN rules, on top of the shared table below —
 //   • the guard tests THE SAME var the counter is initialised from, against 0, in the sense that
 //     skips the loop; the do-while exit is exactly `k != 0`;
-//   • the body's contiguous TAIL is the steps — ONE `p += 1` per walk pointer and `k -= 1`;
-//   • the counter is INTEGER-typed (a pointer's `k - 1` strides its element size — a different
-//     trip count) and appears in EXACTLY its four roles (init write, decrement write + read,
-//     exit read) — the rewrite deletes the init and the decrement, so any other use of k,
-//     wherever it hides (a leftover, the body, a nested loop), would survive them;
-//   • every p is mentioned only inside the `if`, and never by a leftover statement;
 //   • the skip arm's statements equal, in order, the else arm's loop-preceding statements minus
 //     the induction inits — anything left over means the arms are not the same computation;
-//   • every deref of a walk pointer reads its own element size (a `*(u8 *)p` over an `s32 *`
-//     walk strides 4 as a walk but 1 re-indexed — the v1 stride rule, same reason);
-//   • BODY has no `break`/`continue` targeting this loop — the original steps sat in the body's
-//     tail, which a `continue` skips, but a `for`'s inc runs: the two shapes genuinely differ;
 //   • n is never assigned in the function (a moving bound has no single trip count).
 // Everything else declines — the function keeps its countdown spelling, no candidate emitted.
 //
+// THE SHARED ADMISSION TABLE (`COUNTDOWN_GATES`) — the rules v2 and v4 both answer, as data, so
+// "is this rule load-bearing?" is an ablation a test runs rather than an argument a reader
+// audits. Each entry's `why` is its label; the argument is here:
+//   • the counter is INTEGER-typed. A pointer's `k - 1` strides its element size, so the trip
+//     count the rewrite computes would be a different loop's;
+//   • the counter is a DECLARED local or param. The rewrite deletes its init and its decrement,
+//     licensed by the four-roles rule proving nothing in THIS function reads it afterwards — not
+//     a property a global has, whose final value every other caller, ISR and translation unit
+//     observes. structure.ts spells a store to a bare scalar global as an `assign` like any
+//     other, so a global counter arrives here looking exactly like a local one;
+//   • neither the counter nor any walk pointer is declared `volatile`. Deleting the init, the
+//     decrement or a `p += 1` deletes accesses another agent is expected to see — a DMA-published
+//     frame slot (structure.ts stamps those) is the live shape;
+//   • the counter appears in EXACTLY its four roles (init write, decrement write + read, exit
+//     read), counted over the whole function; any other use — a leftover's read, the body's, a
+//     nested loop's, or an ESCAPED ADDRESS (`&k`, which the mention count sees) — would survive
+//     the deletion;
+//   • no walk pointer is stepped TWICE in one body — two `p += 1` stride 2, which `p[i]` does
+//     not. (That the tail holds a decrement and at least one step is shape recognition, not an
+//     admission rule: without them there is no countdown here to refuse.);
+//   • each walk pointer has an init ahead of the loop whose base the rewrite can leave standing:
+//     a var, or a rematerializable address (see `rematerializableAddress`);
+//   • every p is mentioned only inside the loop shape, and never by a leftover statement — a
+//     leftover outlives the deleted step, and its skip-arm twin reads a pointer that path never
+//     initialised;
+//   • every deref of a walk pointer reads its own element size (a `*(u8 *)p` over an `s32 *`
+//     walk strides 4 as a walk but 1 re-indexed — the v1 stride rule, same reason);
+//   • BODY has no `break`/`continue` targeting this loop — the original steps sat in the body's
+//     tail, which a `continue` skips, but a `for`'s inc runs: the two shapes genuinely differ.
+// Past the table, the counter's DECLARATION is retired with its writes: nothing mentions it any
+// more, and a declared-but-untouched local reads as the deliberate `uninit` slot it is not.
+//
 // v3 SCOPE — the up-counting BYTE walk with an EXPRESSION base (`p = (u8 *)(EXPR)` ahead of a
 // counter-carried do-while): full rules at `tryExprWalk` below.
+//
+// v4 SCOPE — the UNGUARDED countdown, the shape agbcc emits for `for(i=0;i<C;i++) a[i]` with a
+// LITERAL bound. A constant trip count needs no zero-trip guard, and the exit test agbcc writes
+// for it is `>= 0` rather than v2's `!= 0`:
+//
+//     p = B; k = C; do { BODY; p += 1; k -= 1 } while (k >= 0)
+//
+// re-spells as `p = B; for (i = 0; i < C + 1; i++) BODY[p[c] → p[i + c]]` — k counts C…0, so the
+// body runs C + 1 times. Everything downstream of the counter's init is v2's (respellCountdown);
+// what this shape adds is its own two rules —
+//   • the counter is declared SIGNED. `k >= 0` never fails for an unsigned k, so an unsigned
+//     declaration describes a loop that does not terminate, and `C + 1` would be a fiction;
+//   • C is a constant in [0, S32_MAX). Below zero `k = -1` runs the body once rather than
+//     `C + 1 = 0` times; at the top C + 1 wraps negative and the `for` runs zero times.
+// The induction inits are read out of the statements PRECEDING the do-while in its own list
+// rather than out of a guard arm, and the counter's init is the only one the rewrite deletes.
 import { IrType, T } from '../ir/types';
-import { Expr, SFn, Stmt, mapExprChildren, mapStmtExprs, stmtExprs } from './ast';
+import { Expr, SFn, Stmt, mapExprChildren, mapStmtExprs, rematerializableAddress, stmtExprs } from './ast';
+import { type Gate, firstRejection } from './gates';
+import { takenNames } from './hoist';
+import { nameStorage } from './storage';
+import { type VarTypes, declaredTypes } from './typing';
 
 interface WalkLoop {
   p: string; // the pointer induction var
   base: string; // the var `p` was initialised from
 }
 
-/** Total mentions of `name` across a statement list (reads, writes, everywhere). */
+/** Total mentions of `name` across a statement list (reads, writes, everywhere). `addr` counts:
+ *  `&x` is how a frame local's address renders (structure.ts laddrName), and an escaped address
+ *  is a read of the object by whatever holds it — the accounting these recognizers rest on is
+ *  "nothing else in the function touches this name", which a var-only count cannot say. */
 function countMentions(stmts: Stmt[], name: string): number {
   let n = 0;
   const inExpr = (e: Expr): void => {
-    if (e.k === 'var' && e.name === name) {
+    if ((e.k === 'var' || e.k === 'addr') && e.name === name) {
       n++;
     }
     mapExprChildren(e, (c) => {
@@ -134,9 +179,9 @@ function derefWidths(stmts: Stmt[], p: string): number[] {
   return out;
 }
 
-/** Does `e` mention var `name` anywhere? */
+/** Does `e` mention `name` anywhere — as a value or as an escaped address (see countMentions)? */
 function mentionsVar(e: Expr, name: string): boolean {
-  if (e.k === 'var') {
+  if (e.k === 'var' || e.k === 'addr') {
     return e.name === name;
   }
   let found = false;
@@ -164,6 +209,114 @@ function stmtAssigns(s: Stmt, name: string): boolean {
             : [];
   return kids.some((x) => stmtAssigns(x, name));
 }
+
+/** One countdown loop as the shared admission rules read it: every fact collected before any rule
+ *  runs. What is NOT here is the shape recognition — a body tail holding a decrement and at least
+ *  one pointer step — because without it there is no countdown to admit or refuse. */
+export interface CountdownCtx {
+  /** the counter's declaration, as the tree spells it */
+  kIsPointer: boolean;
+  kIsDeclared: boolean;
+  kIsVolatile: boolean;
+  /** a walk pointer stepped twice in one body */
+  dupStep: boolean;
+  /** walk pointers declared `volatile` */
+  volatileWalks: readonly string[];
+  /** the body left after the induction tail carries a `break`/`continue` for this loop */
+  coreHasExit: boolean;
+  /** walk pointers with no init ahead of the loop, or one whose base the rewrite cannot keep */
+  badBases: readonly string[];
+  /** total mentions of the counter across the WHOLE function */
+  kMentions: number;
+  /** walk pointers mentioned outside the loop shape */
+  unconfined: readonly string[];
+  /** walk pointers whose derefs disagree with their own element size */
+  badStrides: readonly string[];
+  /** statements ahead of the loop that survive it and still mention a walk pointer */
+  leakyLeftovers: number;
+}
+
+/** The admission rules v2 and v4 share, as data. The argument for each lives in the file header;
+ *  `why` is the label. */
+export const COUNTDOWN_GATES: readonly Gate<CountdownCtx>[] = [
+  {
+    id: 'pointer-counter',
+    why: 'C pointer arithmetic strides the pointee, so `k - 1` on a pointer counts elements, not iterations',
+    sound: true,
+    guardedBy: 'reindex.test.ts: a pointer-typed counter declines',
+    rejects: (c) => c.kIsPointer,
+  },
+  {
+    id: 'global-counter',
+    why: 'a global counter’s final value is observable to every other caller, ISR and translation unit',
+    sound: true,
+    guardedBy: 'reindex.test.ts: the counter may not be a GLOBAL',
+    rejects: (c) => !c.kIsDeclared,
+  },
+  {
+    id: 'volatile-counter',
+    why: 'the rewrite deletes the counter’s init and decrement, which a volatile object’s reader still expects',
+    sound: true,
+    guardedBy: 'reindex.test.ts: a volatile counter declines',
+    rejects: (c) => c.kIsVolatile,
+  },
+  {
+    id: 'volatile-walk',
+    why: 're-basing the derefs off a plain local turns N accesses to volatile data into N plain ones',
+    sound: true,
+    guardedBy: 'reindex.test.ts: a volatile walk pointer declines',
+    rejects: (c) => c.volatileWalks.length > 0,
+  },
+  {
+    id: 'two-steps-one-pointer',
+    why: 'a pointer stepped twice per iteration strides 2, which `p[i]` does not',
+    sound: true,
+    guardedBy: 'reindex.test.ts: a pointer stepped twice in one body declines',
+    rejects: (c) => c.dupStep,
+  },
+  {
+    id: 'body-exit',
+    why: 'the steps sat in the body tail, which a `continue` skips and a `for`’s inc does not',
+    sound: true,
+    guardedBy: 'reindex.test.ts: a `break` in the body declines',
+    rejects: (c) => c.coreHasExit,
+  },
+  {
+    id: 'walk-base',
+    why: 'the kept init must be a value the rewrite can leave standing — a var, or a rematerializable address',
+    sound: true,
+    guardedBy: 'reindex.test.ts: a walk pointer with no init ahead of the loop declines',
+    rejects: (c) => c.badBases.length > 0,
+  },
+  {
+    id: 'counter-roles',
+    why: 'exactly four mentions — init write, decrement write and read, exit read — are what the rewrite deletes',
+    sound: true,
+    guardedBy: 'reindex.test.ts: a fifth mention of the counter declines',
+    rejects: (c) => c.kMentions !== 4,
+  },
+  {
+    id: 'walk-confined',
+    why: 'a mention outside the loop shape reads a pointer whose step the rewrite deleted',
+    sound: true,
+    guardedBy: 'reindex.test.ts: a walk pointer read after the loop declines',
+    rejects: (c) => c.unconfined.length > 0,
+  },
+  {
+    id: 'walk-stride',
+    why: 'a deref reading a width other than the pointee’s makes walk and index forms read different addresses',
+    sound: true,
+    guardedBy: 'reindex.test.ts: a byte deref of a word walk declines',
+    rejects: (c) => c.badStrides.length > 0,
+  },
+  {
+    id: 'leftover-walk',
+    why: 'a leftover outlives the deleted step, and its skip-arm twin reads a pointer that path never set',
+    sound: true,
+    guardedBy: 'reindex.test.ts: a leftover mentioning a walk pointer declines',
+    rejects: (c) => c.leakyLeftovers > 0,
+  },
+];
 
 /** A `break`/`continue` that would target the ENCLOSING loop: found at if/switch depth, but not
  *  inside a nested loop (whose own exits target itself). */
@@ -391,7 +544,7 @@ function tryExprWalk(
   dw: Stmt & { k: 'dowhile' },
   ptrVars: Map<string, IrType>,
   fnBody: Stmt[],
-  declTypes: Map<string, IrType>,
+  declTypes: VarTypes,
   volatileLocals: ReadonlySet<string>,
 ): Stmt | null {
   if (prev?.k !== 'assign' || !ptrVars.has(prev.name) || volatileLocals.has(prev.name)) {
@@ -429,7 +582,7 @@ function tryExprWalk(
   // declTypes carries params, locals AND globals: a base declared nowhere has an unknowable C
   // stride (its project declaration decides), and a wider pointer strides its element under [i]
   // — both decline.
-  const baseT = declTypes.get(base.name);
+  const baseT = declTypes(base.name);
   if (baseT === undefined) {
     return null;
   }
@@ -478,7 +631,7 @@ function tryExprWalk(
     return null;
   }
   const pStepIdx = dw.body.length - 2 + tail.findIndex((st) => isIncOf(st, p) !== null);
-  const ivT = declTypes.get(iv);
+  const ivT = declTypes(iv);
   if (ivT !== undefined && ivT.kind !== 'int') {
     return null;
   }
@@ -528,14 +681,21 @@ function tryExprWalk(
  *  set too, inertly: the volatile lever marks only declared locals), v2 the walk pointers
  *  themselves — the locals the /indexed/volatile product (rank.ts) narrows the volatile lever
  *  to. A v3 loop contributes nothing: it DELETES its pointer, and its base is qualified through
- *  the /livebase pairings instead. */
-export function reindexWalks(sfn: SFn, keptWalks?: Set<string>): SFn | null {
+ *  the /livebase pairings instead. `gates` is the shared countdown admission table — a parameter
+ *  so a test can ablate one entry and re-run the real pass. */
+export function reindexWalks(
+  sfn: SFn,
+  keptWalks?: Set<string>,
+  gates: readonly Gate<CountdownCtx>[] = COUNTDOWN_GATES,
+): SFn | null {
   const ptrVars = new Map<string, IrType>();
-  const declTypes = new Map<string, IrType>();
-  const volatileLocals = new Set(sfn.locals.filter((l) => l.volatile === true).map((l) => l.name));
-  for (const v of [...sfn.params, ...sfn.locals, ...(sfn.globals ?? [])]) {
-    declTypes.set(v.name, v.type);
-  }
+  const declTypes = declaredTypes(sfn);
+  // BOTH volatility facts (ast.ts SFn.locals): the object-volatile counter, and the pointer whose
+  // POINTEE is volatile — which is the one the `/volatile` lever mints, and the one a walk carries.
+  const volatileLocals = new Set(
+    sfn.locals.filter((l) => l.volatile === true || l.pointeeVolatile === true).map((l) => l.name),
+  );
+  const storage = nameStorage(sfn);
   for (const v of [...sfn.params, ...sfn.locals]) {
     if (v.type.kind === 'ptr') {
       ptrVars.set(v.name, v.type);
@@ -546,7 +706,7 @@ export function reindexWalks(sfn: SFn, keptWalks?: Set<string>): SFn | null {
   }
 
   let fired = 0;
-  let ivCount = 0;
+  const taken = takenNames(sfn);
   const locals = [...sfn.locals];
 
   // SOUNDNESS GATE (adversarially learned; every rule REPRODUCED as a wrong-bytes or crash
@@ -581,10 +741,11 @@ export function reindexWalks(sfn: SFn, keptWalks?: Set<string>): SFn | null {
           soundWalk({ p, base: init.value.name }, 0, s)
         ) {
           const walk: WalkLoop = { p, base: init.value.name };
-          const iv = freshIv();
+          const iv = nextIv();
           const cond = reindexCond(s.cond, walk, iv);
           const body = cond ? reindexStmts(s.body, walk, iv) : null;
           if (cond && body) {
+            declareIv(iv);
             out.push({
               k: 'for',
               init: { k: 'assign', name: iv, value: { k: 'const', value: 0 } },
@@ -600,7 +761,6 @@ export function reindexWalks(sfn: SFn, keptWalks?: Set<string>): SFn | null {
             keptWalks?.add(walk.base);
             continue;
           }
-          retireIv();
         }
       }
       // `p = base; while (p < base + n) { …; p = p + 1; }`
@@ -616,10 +776,11 @@ export function reindexWalks(sfn: SFn, keptWalks?: Set<string>): SFn | null {
           soundWalk({ p, base: prev.value.name }, 1, s)
         ) {
           const walk: WalkLoop = { p, base: prev.value.name };
-          const iv = freshIv();
+          const iv = nextIv();
           const cond = reindexCond(s.cond, walk, iv);
           const body = cond ? reindexStmts(s.body.slice(0, -1), walk, iv) : null;
           if (cond && body) {
+            declareIv(iv);
             out[out.length - 1] = { k: 'assign', name: iv, value: { k: 'const', value: 0 } };
             out.push({
               k: 'while',
@@ -637,7 +798,6 @@ export function reindexWalks(sfn: SFn, keptWalks?: Set<string>): SFn | null {
             keptWalks?.add(walk.base);
             continue;
           }
-          retireIv();
         }
       }
       // v3 — the up-counting byte walk with an expression base: `p = (u8 *)(EXPR)` immediately
@@ -649,6 +809,14 @@ export function reindexWalks(sfn: SFn, keptWalks?: Set<string>): SFn | null {
         if (dw2) {
           out.pop(); // the walk init is subsumed by the indexed spelling
           out.push(recurse(dw2));
+          fired++;
+          continue;
+        }
+        // v4 — the unguarded constant-trip countdown (see the header)
+        const cd = respellConstCountdown(out, s);
+        if (cd) {
+          out.length = 0;
+          out.push(...cd.pre, cd.counted);
           fired++;
           continue;
         }
@@ -689,6 +857,140 @@ export function reindexWalks(sfn: SFn, keptWalks?: Set<string>): SFn | null {
     }
   };
 
+  /** The countdown machinery the guarded (v2) and the unguarded constant-trip (v4) shapes share:
+   *  everything downstream of "which statement inits the counter, and what is the trip count".
+   *  Recognizes the shape, collects what `gates` reads, and refuses on the first entry that
+   *  rejects. `confineTo` names the statements every mention of the counter and of each walk
+   *  pointer must live in, given the induction inits this found; `accept` is the caller's own
+   *  admission. Returns the inits it consumed, `pre` minus them, and the counted `for` — or null
+   *  (decline). */
+  function respellCountdown(
+    loop: Stmt & { k: 'dowhile' },
+    pre: Stmt[],
+    k: string,
+    kInit: Stmt & { k: 'assign' },
+    trip: Expr,
+    confineTo: (induction: Stmt[]) => Stmt[],
+    accept?: (leftovers: Stmt[]) => boolean,
+  ): { inductionInits: Set<Stmt>; leftovers: Stmt[]; counted: Stmt & { k: 'for' } } | null {
+    // SHAPE RECOGNITION — the body's contiguous tail is `k -= 1` and one `p += 1` per walk
+    // pointer. Not an admission rule: without a decrement and a step there is no countdown here
+    // at all, and the facts the rules read are derived from what this scan found.
+    const isDec = (x: Stmt): boolean =>
+      x.k === 'assign' &&
+      x.name === k &&
+      x.value.k === 'bin' &&
+      x.value.op === '-' &&
+      x.value.l.k === 'var' &&
+      x.value.l.name === k &&
+      x.value.r.k === 'const' &&
+      x.value.r.value === 1;
+    const walks: string[] = [];
+    let cut = loop.body.length;
+    let sawDec = false;
+    let dupStep = false;
+    for (let i = loop.body.length - 1; i >= 0; i--) {
+      const x = loop.body[i];
+      const p = isUnitStep(x, ptrVars);
+      if (p !== null) {
+        dupStep ||= walks.includes(p);
+        walks.push(p);
+        cut = i;
+        continue;
+      }
+      if (!sawDec && isDec(x)) {
+        sawDec = true;
+        cut = i;
+        continue;
+      }
+      break;
+    }
+    if (!sawDec || walks.length === 0) {
+      return null;
+    }
+    const bodyCore = loop.body.slice(0, cut);
+    const inits = new Map<string, Stmt & { k: 'assign' }>();
+    const badBases: string[] = [];
+    for (const p of walks) {
+      const init = pre.find((x): x is Stmt & { k: 'assign' } => x.k === 'assign' && x.name === p);
+      const bOk =
+        init &&
+        (init.value.k === 'var' ? init.value.name !== p && init.value.name !== k : rematerializableAddress(init.value));
+      if (bOk) {
+        inits.set(p, init);
+      } else {
+        badBases.push(p);
+      }
+    }
+    const shape = confineTo([kInit, ...inits.values(), loop]);
+    const inductionInits = new Set<Stmt>([kInit, ...inits.values()]);
+    const leftovers = pre.filter((x) => !inductionInits.has(x));
+    const elemSize = (t: IrType | undefined): number =>
+      t?.kind === 'ptr' ? (t.to.kind === 'int' ? t.to.width / 8 : t.to.kind === 'ptr' ? 4 : 0) : 0;
+    const ctx: CountdownCtx = {
+      kIsPointer: ptrVars.has(k),
+      kIsDeclared: storage.get(k) === 'local' || storage.get(k) === 'param',
+      kIsVolatile: volatileLocals.has(k),
+      dupStep,
+      volatileWalks: walks.filter((p) => volatileLocals.has(p)),
+      coreHasExit: hasLoopExit(bodyCore),
+      badBases,
+      kMentions: countMentions(sfn.body, k),
+      unconfined: walks.filter((p) => countMentions(sfn.body, p) !== countMentions(shape, p)),
+      badStrides: walks.filter((p) => {
+        const es = elemSize(ptrVars.get(p));
+        return es === 0 || !derefWidths([loop], p).every((w) => w === es);
+      }),
+      leakyLeftovers: leftovers.filter((x) => walks.some((w) => stmtMentions(x, w))).length,
+    };
+    if (firstRejection(gates, ctx) !== null) {
+      return null;
+    }
+    // The caller's own admission. It runs before anything is minted, and so does every rule
+    // above: the rewrite below is the first statement in this function that mutates `locals` or
+    // `keptWalks`, so a decline has nothing to undo.
+    if (accept && !accept(leftovers)) {
+      return null;
+    }
+    // rewrite: each walk pointer is its OWN base (kept local, step dropped)
+    const iv = nextIv();
+    let body: Stmt[] | null = bodyCore;
+    for (const p of walks) {
+      body = body === null ? null : reindexStmts(body, { p, base: p }, iv);
+    }
+    if (body === null) {
+      return null;
+    }
+    declareIv(iv);
+    for (const p of walks) {
+      keptWalks?.add(p);
+    }
+    // Nothing mentions the counter past this point: its init, its decrement and the exit test are
+    // all gone, and the four-roles rule says those were every mention it had. Its declaration goes
+    // with them — a local declared, never written and never read reads as the deliberately
+    // uninitialized slot `uninit` exists to mark. A PARAM keeps its declaration, having one for a
+    // reason the body does not decide.
+    const kDecl = locals.findIndex((l) => l.name === k);
+    if (kDecl >= 0) {
+      locals.splice(kDecl, 1);
+    }
+    return {
+      inductionInits,
+      leftovers,
+      counted: {
+        k: 'for',
+        init: { k: 'assign', name: iv, value: { k: 'const', value: 0 } },
+        cond: { k: 'bin', op: '<', l: { k: 'var', name: iv }, r: trip },
+        inc: {
+          k: 'assign',
+          name: iv,
+          value: { k: 'bin', op: '+', l: { k: 'var', name: iv }, r: { k: 'const', value: 1 } },
+        },
+        body,
+      },
+    };
+  }
+
   /** v2: `s` re-spelled as [C…, walk inits…, for], or null (decline). */
   function respellGuardedCountdown(s: Stmt & { k: 'if' }): Stmt[] | null {
     // which arm holds the loop, and does the guard skip it in the right sense?
@@ -720,13 +1022,6 @@ export function reindexWalks(sfn: SFn, keptWalks?: Set<string>): SFn | null {
       return null;
     }
     const k = lc.l.name;
-    // an INTEGER counter only: C pointer arithmetic strides the element size, so a pointer-typed
-    // k's `k - 1` counts elements-of-k, not iterations — the rewrite's `i < n` would run a
-    // different trip count. Declining on type closes every pointer-k shape at once (a self-step,
-    // an ordinary decrement, whatever spelling).
-    if (ptrVars.has(k)) {
-      return null;
-    }
     // the counter's init `k = N`, N a var the guard tests
     const kInit = pre.find((x): x is Stmt & { k: 'assign' } => x.k === 'assign' && x.name === k);
     if (!kInit || kInit.value.k !== 'var') {
@@ -739,138 +1034,80 @@ export function reindexWalks(sfn: SFn, keptWalks?: Set<string>): SFn | null {
     if (sfn.body.some((x) => stmtAssigns(x, n))) {
       return null; // a moving bound
     }
-    // the body's contiguous tail: `k -= 1` and `p += 1` per walk pointer
-    const isDec = (x: Stmt): boolean =>
-      x.k === 'assign' &&
-      x.name === k &&
-      x.value.k === 'bin' &&
-      x.value.op === '-' &&
-      x.value.l.k === 'var' &&
-      x.value.l.name === k &&
-      x.value.r.k === 'const' &&
-      x.value.r.value === 1;
-    const walks: string[] = [];
-    let cut = loop.body.length;
-    let sawDec = false;
-    let dupStep = false;
-    for (let i = loop.body.length - 1; i >= 0; i--) {
-      const x = loop.body[i];
-      const p = isUnitStep(x, ptrVars);
-      if (p !== null) {
-        dupStep ||= walks.includes(p);
-        walks.push(p);
-        cut = i;
-        continue;
-      }
-      if (!sawDec && isDec(x)) {
-        sawDec = true;
-        cut = i;
-        continue;
-      }
-      break;
-    }
-    // one step per pointer (a pointer-typed counter never reaches this scan — declined on type
-    // above)
-    if (!sawDec || walks.length === 0 || dupStep) {
-      return null;
-    }
-    const bodyCore = loop.body.slice(0, cut);
-    if (hasLoopExit(bodyCore)) {
-      return null;
-    }
-    // each walk pointer: an init `p = B` in pre (B a var or a numeric address), confined to the if
-    const inits = new Map<string, Stmt & { k: 'assign' }>();
-    for (const p of walks) {
-      const init = pre.find((x): x is Stmt & { k: 'assign' } => x.k === 'assign' && x.name === p);
-      const bOk =
-        init &&
-        (init.value.k === 'var' ||
-          (init.value.k === 'const' && init.value.value !== 0) ||
-          (init.value.k === 'cast' && init.value.e.k === 'const' && init.value.e.value !== 0));
-      if (!bOk || (init.value.k === 'var' && (init.value.name === p || init.value.name === k))) {
-        return null;
-      }
-      inits.set(p, init);
-    }
-    // The counter appears in EXACTLY its four roles — init write, decrement write + read, exit
-    // read. The rewrite deletes the init and the decrement, so ANY other use of k (a leftover's
-    // read, a second decrement, a body read like `*p = k`, a nested loop's) would survive
-    // referencing a variable that no longer exists as a counter. Counted over the whole
-    // function, which also confines k to this `if`.
-    if (countMentions(sfn.body, k) !== 4) {
-      return null;
-    }
-    // every p lives ONLY inside this `if` (the v1 rule, counted the same way) — its body uses
-    // are policed by reindexStmts (a bare `p` or a write declines; derefs rewrite)
-    for (const name of walks) {
-      if (countMentions(sfn.body, name) !== countMentions([s], name)) {
-        return null;
-      }
-    }
-    // every deref of p reads p's own element size — re-indexing must not change the stride
-    for (const p of walks) {
-      const pt = ptrVars.get(p);
-      const es = pt?.kind === 'ptr' ? (pt.to.kind === 'int' ? pt.to.width / 8 : pt.to.kind === 'ptr' ? 4 : 0) : 0;
-      if (es === 0 || !derefWidths([loop], p).every((w) => w === es)) {
-        return null;
-      }
-    }
     // the skip arm must be, in order, exactly `pre` minus the induction inits
-    const inductionInits = new Set<Stmt>([kInit, ...inits.values()]);
-    const leftovers = pre.filter((x) => !inductionInits.has(x));
-    // no leftover may mention a walk pointer: leftovers outlive the deleted step, and their
-    // skip-arm twins read a pointer the skip path never initialised
-    if (leftovers.some((x) => walks.some((w) => stmtMentions(x, w)))) {
+    const skipArmMatches = (leftovers: Stmt[]): boolean =>
+      skipArm.length === leftovers.length &&
+      skipArm.every((x, i) => JSON.stringify(x) === JSON.stringify(leftovers[i]));
+    const r = respellCountdown(loop, pre, k, kInit, { k: 'var', name: n }, () => [s], skipArmMatches);
+    if (!r) {
       return null;
     }
-    if (
-      skipArm.length !== leftovers.length ||
-      !skipArm.every((x, i) => JSON.stringify(x) === JSON.stringify(leftovers[i]))
-    ) {
-      return null;
-    }
-    // rewrite: each walk pointer is its OWN base (kept local, step dropped)
-    const iv = freshIv();
-    let body: Stmt[] | null = bodyCore;
-    for (const p of walks) {
-      body = body === null ? null : reindexStmts(body, { p, base: p }, iv);
-    }
-    if (body === null) {
-      retireIv();
-      return null;
-    }
-    for (const p of walks) {
-      keptWalks?.add(p);
-    }
-    return [
-      ...pre.filter((x) => x !== kInit),
-      {
-        k: 'for',
-        init: { k: 'assign', name: iv, value: { k: 'const', value: 0 } },
-        cond: { k: 'bin', op: '<', l: { k: 'var', name: iv }, r: { k: 'var', name: n } },
-        inc: {
-          k: 'assign',
-          name: iv,
-          value: { k: 'bin', op: '+', l: { k: 'var', name: iv }, r: { k: 'const', value: 1 } },
-        },
-        body,
-      },
-    ];
+    return [...pre.filter((x) => x !== kInit), r.counted];
   }
 
-  function freshIv(): string {
-    // collide-checked: pipeline naming is a*/v*/t*, but future naming (DWARF) may import
-    // real source names — never conflate with an existing i<N>.
-    let name = `i${ivCount++}`;
-    while (sfn.params.some((x) => x.name === name) || locals.some((x) => x.name === name)) {
-      name = `i${ivCount++}`;
+  /** v4: the UNGUARDED constant-trip countdown (see the header). `out` holds the statements
+   *  already emitted before `dw`, the induction inits among them. Returns the list replacing
+   *  `out` (itself minus the counter's init) and the counted `for`, or null (decline). */
+  function respellConstCountdown(out: Stmt[], dw: Stmt & { k: 'dowhile' }): { pre: Stmt[]; counted: Stmt } | null {
+    // the do-while exit: exactly `k >= 0` / `0 <= k`
+    const lc = dw.cond;
+    if (lc.k !== 'bin') {
+      return null;
     }
-    locals.push({ name, type: T.s(32) });
-    return name;
+    const kv =
+      lc.op === '>=' && lc.l.k === 'var' && lc.r.k === 'const' && lc.r.value === 0
+        ? lc.l.name
+        : lc.op === '<=' && lc.r.k === 'var' && lc.l.k === 'const' && lc.l.value === 0
+          ? lc.r.name
+          : null;
+    if (kv === null) {
+      return null;
+    }
+    // `k >= 0` terminates only for a SIGNED counter — an unsigned one never goes below zero, and
+    // the compiler that emitted this test proved it signed (`bge`). A declaration asmlift settled
+    // on unsigned describes a different loop, so the trip count `C + 1` would be a fiction.
+    const kT = declTypes(kv);
+    if (kT?.kind !== 'int' || !kT.signed) {
+      return null;
+    }
+    // the counter's init `k = C`, C a NON-NEGATIVE constant: the loop runs while k counts C…0, so
+    // the trip count is C + 1. That is a count only while BOTH ends are representable in the
+    // counter's OWN type — below zero `k = -1` runs the body once rather than `C + 1 = 0` times,
+    // and above its maximum `k = 200` in an `s8` is -56, which fails `k >= 0` at the first test
+    // and runs the body once where `i < 201` runs it 201 times.
+    const kMax = 2 ** (kT.width - 1) - 1;
+    const kInit = out.find((x): x is Stmt & { k: 'assign' } => x.k === 'assign' && x.name === kv);
+    if (!kInit || kInit.value.k !== 'const' || kInit.value.value < 0 || kInit.value.value >= kMax) {
+      return null;
+    }
+    const r = respellCountdown(dw, out, kv, kInit, { k: 'const', value: kInit.value.value + 1 }, (i) => i);
+    if (!r) {
+      return null;
+    }
+    return { pre: out.filter((x) => x !== kInit), counted: r.counted };
   }
-  function retireIv(): void {
-    locals.pop();
-    ivCount--;
+
+  /** The next free induction name: the lowest `i<N>` nothing in `sfn` already claims and no
+   *  earlier mint has COMMITTED. Pipeline naming is `a`/`v`/`t` prefixed, but a global is
+   *  referenced by bare name and future naming (DWARF) may import real source ones, so the
+   *  collision set is `takenNames`' — declarations, mentions, call targets and assignment
+   *  targets alike — not the declaration lists.
+   *
+   *  PURE: it reads that snapshot and the locals `declareIv` committed, so a recognizer that
+   *  mints and then declines leaves the next mint returning the same name. Callers hold at most
+   *  one uncommitted name at a time — every mint site rewrites and commits before the walk
+   *  recursion can reach another loop. */
+  function nextIv(): string {
+    let n = 0;
+    while (taken.has(`i${n}`) || locals.some((x) => x.name === `i${n}`)) {
+      n++;
+    }
+    return `i${n}`;
+  }
+  /** Commit a minted name: the ONE place the induction local is declared, called only once the
+   *  rewrite has succeeded. */
+  function declareIv(name: string): void {
+    locals.push({ name, type: T.s(32) });
   }
 
   const body = walkList(sfn.body);

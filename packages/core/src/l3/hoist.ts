@@ -10,7 +10,8 @@
 import type { Expr, SFn, Stmt } from './ast';
 import { mapExprChildren, stmtChildren, stmtExprs } from './ast';
 
-/** Every identifier a hoist name must not collide with, anywhere in `sfn`.
+/** Every identifier a MINTED name must not collide with, anywhere in `sfn` — the hoists below,
+ *  and reindex's induction names.
  *
  *  Wider than "the declared locals" on purpose, and each addition is a real collision:
  *   - params and locals, obviously;
@@ -18,7 +19,7 @@ import { mapExprChildren, stmtChildren, stmtExprs } from './ast';
  *     silently redirects every later mention of it;
  *   - every CALL TARGET — a local named like a callee shadows the function;
  *   - every assignment target, which includes names no declaration list carries. */
-function takenNames(sfn: SFn): Set<string> {
+export function takenNames(sfn: SFn): Set<string> {
   const taken = new Set<string>([...sfn.params.map((p) => p.name), ...sfn.locals.map((l) => l.name)]);
   const visit = (e: Expr): void => {
     if (e.k === 'var' || e.k === 'addr') {

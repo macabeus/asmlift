@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generatedAt": "2026-08-25T03:24:01.589Z",
+    "generatedAt": "2026-08-25T08:07:43.784Z",
     "toolchains": [
       "ido7.1",
       "agbcc",
@@ -14,7 +14,7 @@
       "real": 252
     },
     "asmlift": {
-      "commit": "f3e1285cd4989149f8b2c8da58c3e24a1ba23092",
+      "commit": "637b8cf97d3d12ebb89ff52de4f4593add6c8a3e",
       "dirty": false
     },
     "m2c": {
@@ -5290,7 +5290,7 @@
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "candidateLabel": "unsigned/setup-args/flip-join/uns-cmp/livebase-block",
+        "candidateLabel": "unsigned/setup-args/defsite/loop-entry/flip-join/derived-home/uns-cmp/livebase-block",
         "droppedCandidates": [
           {
             "label": "unsigned",
@@ -5330,6 +5330,26 @@
           },
           {
             "label": "unsigned/defsite/mulfirst",
+            "error": "agbcc failed: c.c:1468: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry",
+            "error": "agbcc failed: c.c:1468: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/coalesce-v19-v10",
+            "error": "agbcc failed: c.c:1467: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/livebase",
+            "error": "agbcc failed: c.c:1476: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/livebase-block",
+            "error": "agbcc failed: c.c:1472: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/mulfirst",
             "error": "agbcc failed: c.c:1468: warning: assignment makes integer from pointer without a cast"
           },
           {
@@ -5373,6 +5393,26 @@
             "error": "agbcc failed: c.c:1466: warning: assignment makes integer from pointer without a cast"
           },
           {
+            "label": "unsigned/defsite/loop-entry/flip-join",
+            "error": "agbcc failed: c.c:1466: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/coalesce-v19-v10",
+            "error": "agbcc failed: c.c:1465: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/livebase",
+            "error": "agbcc failed: c.c:1474: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/livebase-block",
+            "error": "agbcc failed: c.c:1470: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/mulfirst",
+            "error": "agbcc failed: c.c:1466: warning: assignment makes integer from pointer without a cast"
+          },
+          {
             "label": "unsigned/reread-globals",
             "error": "agbcc failed: c.c:1463: warning: assignment makes integer from pointer without a cast"
           },
@@ -5410,6 +5450,26 @@
           },
           {
             "label": "unsigned/defsite/reread-globals/mulfirst",
+            "error": "agbcc failed: c.c:1463: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals",
+            "error": "agbcc failed: c.c:1463: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/coalesce-v14-v6",
+            "error": "agbcc failed: c.c:1462: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/livebase",
+            "error": "agbcc failed: c.c:1471: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/livebase-block",
+            "error": "agbcc failed: c.c:1467: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/mulfirst",
             "error": "agbcc failed: c.c:1463: warning: assignment makes integer from pointer without a cast"
           },
           {
@@ -5453,6 +5513,26 @@
             "error": "agbcc failed: c.c:1461: warning: assignment makes integer from pointer without a cast"
           },
           {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals",
+            "error": "agbcc failed: c.c:1461: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/coalesce-v14-v6",
+            "error": "agbcc failed: c.c:1460: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/livebase",
+            "error": "agbcc failed: c.c:1469: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/livebase-block",
+            "error": "agbcc failed: c.c:1465: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/mulfirst",
+            "error": "agbcc failed: c.c:1461: warning: assignment makes integer from pointer without a cast"
+          },
+          {
             "label": "unsigned/derived-home",
             "error": "agbcc failed: c.c:1467: warning: assignment makes integer from pointer without a cast"
           },
@@ -5490,6 +5570,26 @@
           },
           {
             "label": "unsigned/defsite/derived-home/mulfirst",
+            "error": "agbcc failed: c.c:1467: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/derived-home",
+            "error": "agbcc failed: c.c:1467: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/derived-home/coalesce-v19-v10",
+            "error": "agbcc failed: c.c:1466: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/derived-home/livebase",
+            "error": "agbcc failed: c.c:1475: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/derived-home/livebase-block",
+            "error": "agbcc failed: c.c:1471: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/derived-home/mulfirst",
             "error": "agbcc failed: c.c:1467: warning: assignment makes integer from pointer without a cast"
           },
           {
@@ -5533,6 +5633,26 @@
             "error": "agbcc failed: c.c:1465: warning: assignment makes integer from pointer without a cast"
           },
           {
+            "label": "unsigned/defsite/loop-entry/flip-join/derived-home",
+            "error": "agbcc failed: c.c:1465: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/derived-home/coalesce-v19-v10",
+            "error": "agbcc failed: c.c:1464: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/derived-home/livebase",
+            "error": "agbcc failed: c.c:1473: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/derived-home/livebase-block",
+            "error": "agbcc failed: c.c:1469: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/derived-home/mulfirst",
+            "error": "agbcc failed: c.c:1465: warning: assignment makes integer from pointer without a cast"
+          },
+          {
             "label": "unsigned/reread-globals/derived-home",
             "error": "agbcc failed: c.c:1463: warning: assignment makes integer from pointer without a cast"
           },
@@ -5570,6 +5690,26 @@
           },
           {
             "label": "unsigned/defsite/reread-globals/derived-home/mulfirst",
+            "error": "agbcc failed: c.c:1463: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/derived-home",
+            "error": "agbcc failed: c.c:1463: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/derived-home/coalesce-v15-v7",
+            "error": "agbcc failed: c.c:1462: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/derived-home/livebase",
+            "error": "agbcc failed: c.c:1471: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/derived-home/livebase-block",
+            "error": "agbcc failed: c.c:1467: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/derived-home/mulfirst",
             "error": "agbcc failed: c.c:1463: warning: assignment makes integer from pointer without a cast"
           },
           {
@@ -5613,6 +5753,26 @@
             "error": "agbcc failed: c.c:1461: warning: assignment makes integer from pointer without a cast"
           },
           {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/derived-home",
+            "error": "agbcc failed: c.c:1461: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/derived-home/coalesce-v15-v7",
+            "error": "agbcc failed: c.c:1460: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/derived-home/livebase",
+            "error": "agbcc failed: c.c:1469: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/derived-home/livebase-block",
+            "error": "agbcc failed: c.c:1465: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/derived-home/mulfirst",
+            "error": "agbcc failed: c.c:1461: warning: assignment makes integer from pointer without a cast"
+          },
+          {
             "label": "unsigned/uns-cmp",
             "error": "agbcc failed: c.c:1468: warning: assignment makes integer from pointer without a cast"
           },
@@ -5650,6 +5810,26 @@
           },
           {
             "label": "unsigned/defsite/uns-cmp/mulfirst",
+            "error": "agbcc failed: c.c:1468: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/uns-cmp",
+            "error": "agbcc failed: c.c:1468: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/uns-cmp/coalesce-v19-v10",
+            "error": "agbcc failed: c.c:1467: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/uns-cmp/livebase",
+            "error": "agbcc failed: c.c:1476: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/uns-cmp/livebase-block",
+            "error": "agbcc failed: c.c:1472: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/uns-cmp/mulfirst",
             "error": "agbcc failed: c.c:1468: warning: assignment makes integer from pointer without a cast"
           },
           {
@@ -5693,6 +5873,26 @@
             "error": "agbcc failed: c.c:1466: warning: assignment makes integer from pointer without a cast"
           },
           {
+            "label": "unsigned/defsite/loop-entry/flip-join/uns-cmp",
+            "error": "agbcc failed: c.c:1466: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/uns-cmp/coalesce-v19-v10",
+            "error": "agbcc failed: c.c:1465: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/uns-cmp/livebase",
+            "error": "agbcc failed: c.c:1474: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/uns-cmp/livebase-block",
+            "error": "agbcc failed: c.c:1470: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/uns-cmp/mulfirst",
+            "error": "agbcc failed: c.c:1466: warning: assignment makes integer from pointer without a cast"
+          },
+          {
             "label": "unsigned/reread-globals/uns-cmp",
             "error": "agbcc failed: c.c:1463: warning: assignment makes integer from pointer without a cast"
           },
@@ -5730,6 +5930,26 @@
           },
           {
             "label": "unsigned/defsite/reread-globals/uns-cmp/mulfirst",
+            "error": "agbcc failed: c.c:1463: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/uns-cmp",
+            "error": "agbcc failed: c.c:1463: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/uns-cmp/coalesce-v14-v6",
+            "error": "agbcc failed: c.c:1462: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/uns-cmp/livebase",
+            "error": "agbcc failed: c.c:1471: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/uns-cmp/livebase-block",
+            "error": "agbcc failed: c.c:1467: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/uns-cmp/mulfirst",
             "error": "agbcc failed: c.c:1463: warning: assignment makes integer from pointer without a cast"
           },
           {
@@ -5773,6 +5993,26 @@
             "error": "agbcc failed: c.c:1461: warning: assignment makes integer from pointer without a cast"
           },
           {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/uns-cmp",
+            "error": "agbcc failed: c.c:1461: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/uns-cmp/coalesce-v14-v6",
+            "error": "agbcc failed: c.c:1460: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/uns-cmp/livebase",
+            "error": "agbcc failed: c.c:1469: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/uns-cmp/livebase-block",
+            "error": "agbcc failed: c.c:1465: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/uns-cmp/mulfirst",
+            "error": "agbcc failed: c.c:1461: warning: assignment makes integer from pointer without a cast"
+          },
+          {
             "label": "unsigned/derived-home/uns-cmp",
             "error": "agbcc failed: c.c:1467: warning: assignment makes integer from pointer without a cast"
           },
@@ -5810,6 +6050,26 @@
           },
           {
             "label": "unsigned/defsite/derived-home/uns-cmp/mulfirst",
+            "error": "agbcc failed: c.c:1467: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/derived-home/uns-cmp",
+            "error": "agbcc failed: c.c:1467: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/derived-home/uns-cmp/coalesce-v19-v10",
+            "error": "agbcc failed: c.c:1466: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/derived-home/uns-cmp/livebase",
+            "error": "agbcc failed: c.c:1475: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/derived-home/uns-cmp/livebase-block",
+            "error": "agbcc failed: c.c:1471: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/derived-home/uns-cmp/mulfirst",
             "error": "agbcc failed: c.c:1467: warning: assignment makes integer from pointer without a cast"
           },
           {
@@ -5853,6 +6113,26 @@
             "error": "agbcc failed: c.c:1465: warning: assignment makes integer from pointer without a cast"
           },
           {
+            "label": "unsigned/defsite/loop-entry/flip-join/derived-home/uns-cmp",
+            "error": "agbcc failed: c.c:1465: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/derived-home/uns-cmp/coalesce-v19-v10",
+            "error": "agbcc failed: c.c:1464: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/derived-home/uns-cmp/livebase",
+            "error": "agbcc failed: c.c:1473: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/derived-home/uns-cmp/livebase-block",
+            "error": "agbcc failed: c.c:1469: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/derived-home/uns-cmp/mulfirst",
+            "error": "agbcc failed: c.c:1465: warning: assignment makes integer from pointer without a cast"
+          },
+          {
             "label": "unsigned/reread-globals/derived-home/uns-cmp",
             "error": "agbcc failed: c.c:1463: warning: assignment makes integer from pointer without a cast"
           },
@@ -5893,6 +6173,26 @@
             "error": "agbcc failed: c.c:1463: warning: assignment makes integer from pointer without a cast"
           },
           {
+            "label": "unsigned/defsite/loop-entry/reread-globals/derived-home/uns-cmp",
+            "error": "agbcc failed: c.c:1463: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/derived-home/uns-cmp/coalesce-v15-v7",
+            "error": "agbcc failed: c.c:1462: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/derived-home/uns-cmp/livebase",
+            "error": "agbcc failed: c.c:1471: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/derived-home/uns-cmp/livebase-block",
+            "error": "agbcc failed: c.c:1467: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/derived-home/uns-cmp/mulfirst",
+            "error": "agbcc failed: c.c:1463: warning: assignment makes integer from pointer without a cast"
+          },
+          {
             "label": "unsigned/flip-join/reread-globals/derived-home/uns-cmp",
             "error": "agbcc failed: c.c:1461: warning: assignment makes integer from pointer without a cast"
           },
@@ -5930,6 +6230,26 @@
           },
           {
             "label": "unsigned/defsite/flip-join/reread-globals/derived-home/uns-cmp/mulfirst",
+            "error": "agbcc failed: c.c:1461: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/derived-home/uns-cmp",
+            "error": "agbcc failed: c.c:1461: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/derived-home/uns-cmp/coalesce-v15-v7",
+            "error": "agbcc failed: c.c:1460: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/derived-home/uns-cmp/livebase",
+            "error": "agbcc failed: c.c:1469: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/derived-home/uns-cmp/livebase-block",
+            "error": "agbcc failed: c.c:1465: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/derived-home/uns-cmp/mulfirst",
             "error": "agbcc failed: c.c:1461: warning: assignment makes integer from pointer without a cast"
           },
           {
@@ -6013,6 +6333,46 @@
             "error": "agbcc failed: c.c:1470: warning: assignment makes integer from pointer without a cast"
           },
           {
+            "label": "unsigned/defsite/loop-entry/raw-globals",
+            "error": "agbcc failed: c.c:1468: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/coalesce-v19-v10/raw-globals",
+            "error": "agbcc failed: c.c:1467: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/livebase/raw-globals",
+            "error": "agbcc failed: c.c:1482: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/livebase/volatile/raw-globals",
+            "error": "agbcc failed: c.c:1482: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/livebase/volatile-p1/raw-globals",
+            "error": "agbcc failed: c.c:1482: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/livebase/volatile-p5/raw-globals",
+            "error": "agbcc failed: c.c:1482: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/livebase-block/raw-globals",
+            "error": "agbcc failed: c.c:1478: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/livebase-block/volatile/raw-globals",
+            "error": "agbcc failed: c.c:1478: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/mulfirst/raw-globals",
+            "error": "agbcc failed: c.c:1468: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/nearbase/raw-globals",
+            "error": "agbcc failed: c.c:1470: warning: assignment makes integer from pointer without a cast"
+          },
+          {
             "label": "unsigned/flip-join/raw-globals",
             "error": "agbcc failed: c.c:1466: warning: assignment makes integer from pointer without a cast"
           },
@@ -6090,6 +6450,46 @@
           },
           {
             "label": "unsigned/defsite/flip-join/nearbase/raw-globals",
+            "error": "agbcc failed: c.c:1468: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/raw-globals",
+            "error": "agbcc failed: c.c:1466: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/coalesce-v19-v10/raw-globals",
+            "error": "agbcc failed: c.c:1465: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/livebase/raw-globals",
+            "error": "agbcc failed: c.c:1480: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/livebase/volatile/raw-globals",
+            "error": "agbcc failed: c.c:1480: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/livebase/volatile-p1/raw-globals",
+            "error": "agbcc failed: c.c:1480: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/livebase/volatile-p5/raw-globals",
+            "error": "agbcc failed: c.c:1480: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/livebase-block/raw-globals",
+            "error": "agbcc failed: c.c:1476: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/livebase-block/volatile/raw-globals",
+            "error": "agbcc failed: c.c:1476: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/mulfirst/raw-globals",
+            "error": "agbcc failed: c.c:1466: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/nearbase/raw-globals",
             "error": "agbcc failed: c.c:1468: warning: assignment makes integer from pointer without a cast"
           },
           {
@@ -6173,6 +6573,46 @@
             "error": "agbcc failed: c.c:1465: warning: assignment makes integer from pointer without a cast"
           },
           {
+            "label": "unsigned/defsite/loop-entry/reread-globals/raw-globals",
+            "error": "agbcc failed: c.c:1463: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/coalesce-v14-v6/raw-globals",
+            "error": "agbcc failed: c.c:1462: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/livebase/raw-globals",
+            "error": "agbcc failed: c.c:1477: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/livebase/volatile/raw-globals",
+            "error": "agbcc failed: c.c:1477: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/livebase/volatile-p1/raw-globals",
+            "error": "agbcc failed: c.c:1477: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/livebase/volatile-p5/raw-globals",
+            "error": "agbcc failed: c.c:1477: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/livebase-block/raw-globals",
+            "error": "agbcc failed: c.c:1473: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/livebase-block/volatile/raw-globals",
+            "error": "agbcc failed: c.c:1473: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/mulfirst/raw-globals",
+            "error": "agbcc failed: c.c:1463: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/nearbase/raw-globals",
+            "error": "agbcc failed: c.c:1465: warning: assignment makes integer from pointer without a cast"
+          },
+          {
             "label": "unsigned/flip-join/reread-globals/raw-globals",
             "error": "agbcc failed: c.c:1461: warning: assignment makes integer from pointer without a cast"
           },
@@ -6250,6 +6690,46 @@
           },
           {
             "label": "unsigned/defsite/flip-join/reread-globals/nearbase/raw-globals",
+            "error": "agbcc failed: c.c:1463: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/raw-globals",
+            "error": "agbcc failed: c.c:1461: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/coalesce-v14-v6/raw-globals",
+            "error": "agbcc failed: c.c:1460: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/livebase/raw-globals",
+            "error": "agbcc failed: c.c:1475: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/livebase/volatile/raw-globals",
+            "error": "agbcc failed: c.c:1475: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/livebase/volatile-p1/raw-globals",
+            "error": "agbcc failed: c.c:1475: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/livebase/volatile-p5/raw-globals",
+            "error": "agbcc failed: c.c:1475: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/livebase-block/raw-globals",
+            "error": "agbcc failed: c.c:1471: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/livebase-block/volatile/raw-globals",
+            "error": "agbcc failed: c.c:1471: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/mulfirst/raw-globals",
+            "error": "agbcc failed: c.c:1461: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/nearbase/raw-globals",
             "error": "agbcc failed: c.c:1463: warning: assignment makes integer from pointer without a cast"
           },
           {
@@ -6333,6 +6813,46 @@
             "error": "agbcc failed: c.c:1469: warning: assignment makes integer from pointer without a cast"
           },
           {
+            "label": "unsigned/defsite/loop-entry/derived-home/raw-globals",
+            "error": "agbcc failed: c.c:1467: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/derived-home/coalesce-v19-v10/raw-globals",
+            "error": "agbcc failed: c.c:1466: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/derived-home/livebase/raw-globals",
+            "error": "agbcc failed: c.c:1481: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/derived-home/livebase/volatile/raw-globals",
+            "error": "agbcc failed: c.c:1481: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/derived-home/livebase/volatile-p1/raw-globals",
+            "error": "agbcc failed: c.c:1481: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/derived-home/livebase/volatile-p5/raw-globals",
+            "error": "agbcc failed: c.c:1481: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/derived-home/livebase-block/raw-globals",
+            "error": "agbcc failed: c.c:1477: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/derived-home/livebase-block/volatile/raw-globals",
+            "error": "agbcc failed: c.c:1477: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/derived-home/mulfirst/raw-globals",
+            "error": "agbcc failed: c.c:1467: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/derived-home/nearbase/raw-globals",
+            "error": "agbcc failed: c.c:1469: warning: assignment makes integer from pointer without a cast"
+          },
+          {
             "label": "unsigned/flip-join/derived-home/raw-globals",
             "error": "agbcc failed: c.c:1465: warning: assignment makes integer from pointer without a cast"
           },
@@ -6410,6 +6930,46 @@
           },
           {
             "label": "unsigned/defsite/flip-join/derived-home/nearbase/raw-globals",
+            "error": "agbcc failed: c.c:1467: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/derived-home/raw-globals",
+            "error": "agbcc failed: c.c:1465: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/derived-home/coalesce-v19-v10/raw-globals",
+            "error": "agbcc failed: c.c:1464: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/derived-home/livebase/raw-globals",
+            "error": "agbcc failed: c.c:1479: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/derived-home/livebase/volatile/raw-globals",
+            "error": "agbcc failed: c.c:1479: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/derived-home/livebase/volatile-p1/raw-globals",
+            "error": "agbcc failed: c.c:1479: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/derived-home/livebase/volatile-p5/raw-globals",
+            "error": "agbcc failed: c.c:1479: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/derived-home/livebase-block/raw-globals",
+            "error": "agbcc failed: c.c:1475: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/derived-home/livebase-block/volatile/raw-globals",
+            "error": "agbcc failed: c.c:1475: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/derived-home/mulfirst/raw-globals",
+            "error": "agbcc failed: c.c:1465: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/derived-home/nearbase/raw-globals",
             "error": "agbcc failed: c.c:1467: warning: assignment makes integer from pointer without a cast"
           },
           {
@@ -6493,6 +7053,46 @@
             "error": "agbcc failed: c.c:1465: warning: assignment makes integer from pointer without a cast"
           },
           {
+            "label": "unsigned/defsite/loop-entry/reread-globals/derived-home/raw-globals",
+            "error": "agbcc failed: c.c:1463: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/derived-home/coalesce-v15-v7/raw-globals",
+            "error": "agbcc failed: c.c:1462: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/derived-home/livebase/raw-globals",
+            "error": "agbcc failed: c.c:1477: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/derived-home/livebase/volatile/raw-globals",
+            "error": "agbcc failed: c.c:1477: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/derived-home/livebase/volatile-p1/raw-globals",
+            "error": "agbcc failed: c.c:1477: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/derived-home/livebase/volatile-p5/raw-globals",
+            "error": "agbcc failed: c.c:1477: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/derived-home/livebase-block/raw-globals",
+            "error": "agbcc failed: c.c:1473: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/derived-home/livebase-block/volatile/raw-globals",
+            "error": "agbcc failed: c.c:1473: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/derived-home/mulfirst/raw-globals",
+            "error": "agbcc failed: c.c:1463: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/derived-home/nearbase/raw-globals",
+            "error": "agbcc failed: c.c:1465: warning: assignment makes integer from pointer without a cast"
+          },
+          {
             "label": "unsigned/flip-join/reread-globals/derived-home/raw-globals",
             "error": "agbcc failed: c.c:1461: warning: assignment makes integer from pointer without a cast"
           },
@@ -6570,6 +7170,46 @@
           },
           {
             "label": "unsigned/defsite/flip-join/reread-globals/derived-home/nearbase/raw-globals",
+            "error": "agbcc failed: c.c:1463: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/derived-home/raw-globals",
+            "error": "agbcc failed: c.c:1461: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/derived-home/coalesce-v15-v7/raw-globals",
+            "error": "agbcc failed: c.c:1460: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/derived-home/livebase/raw-globals",
+            "error": "agbcc failed: c.c:1475: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/derived-home/livebase/volatile/raw-globals",
+            "error": "agbcc failed: c.c:1475: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/derived-home/livebase/volatile-p1/raw-globals",
+            "error": "agbcc failed: c.c:1475: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/derived-home/livebase/volatile-p5/raw-globals",
+            "error": "agbcc failed: c.c:1475: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/derived-home/livebase-block/raw-globals",
+            "error": "agbcc failed: c.c:1471: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/derived-home/livebase-block/volatile/raw-globals",
+            "error": "agbcc failed: c.c:1471: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/derived-home/mulfirst/raw-globals",
+            "error": "agbcc failed: c.c:1461: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/derived-home/nearbase/raw-globals",
             "error": "agbcc failed: c.c:1463: warning: assignment makes integer from pointer without a cast"
           },
           {
@@ -6653,6 +7293,46 @@
             "error": "agbcc failed: c.c:1470: warning: assignment makes integer from pointer without a cast"
           },
           {
+            "label": "unsigned/defsite/loop-entry/uns-cmp/raw-globals",
+            "error": "agbcc failed: c.c:1468: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/uns-cmp/coalesce-v19-v10/raw-globals",
+            "error": "agbcc failed: c.c:1467: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/uns-cmp/livebase/raw-globals",
+            "error": "agbcc failed: c.c:1482: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/uns-cmp/livebase/volatile/raw-globals",
+            "error": "agbcc failed: c.c:1482: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/uns-cmp/livebase/volatile-p1/raw-globals",
+            "error": "agbcc failed: c.c:1482: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/uns-cmp/livebase/volatile-p5/raw-globals",
+            "error": "agbcc failed: c.c:1482: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/uns-cmp/livebase-block/raw-globals",
+            "error": "agbcc failed: c.c:1478: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/uns-cmp/livebase-block/volatile/raw-globals",
+            "error": "agbcc failed: c.c:1478: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/uns-cmp/mulfirst/raw-globals",
+            "error": "agbcc failed: c.c:1468: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/uns-cmp/nearbase/raw-globals",
+            "error": "agbcc failed: c.c:1470: warning: assignment makes integer from pointer without a cast"
+          },
+          {
             "label": "unsigned/flip-join/uns-cmp/raw-globals",
             "error": "agbcc failed: c.c:1466: warning: assignment makes integer from pointer without a cast"
           },
@@ -6730,6 +7410,46 @@
           },
           {
             "label": "unsigned/defsite/flip-join/uns-cmp/nearbase/raw-globals",
+            "error": "agbcc failed: c.c:1468: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/uns-cmp/raw-globals",
+            "error": "agbcc failed: c.c:1466: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/uns-cmp/coalesce-v19-v10/raw-globals",
+            "error": "agbcc failed: c.c:1465: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/uns-cmp/livebase/raw-globals",
+            "error": "agbcc failed: c.c:1480: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/uns-cmp/livebase/volatile/raw-globals",
+            "error": "agbcc failed: c.c:1480: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/uns-cmp/livebase/volatile-p1/raw-globals",
+            "error": "agbcc failed: c.c:1480: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/uns-cmp/livebase/volatile-p5/raw-globals",
+            "error": "agbcc failed: c.c:1480: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/uns-cmp/livebase-block/raw-globals",
+            "error": "agbcc failed: c.c:1476: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/uns-cmp/livebase-block/volatile/raw-globals",
+            "error": "agbcc failed: c.c:1476: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/uns-cmp/mulfirst/raw-globals",
+            "error": "agbcc failed: c.c:1466: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/uns-cmp/nearbase/raw-globals",
             "error": "agbcc failed: c.c:1468: warning: assignment makes integer from pointer without a cast"
           },
           {
@@ -6813,6 +7533,46 @@
             "error": "agbcc failed: c.c:1465: warning: assignment makes integer from pointer without a cast"
           },
           {
+            "label": "unsigned/defsite/loop-entry/reread-globals/uns-cmp/raw-globals",
+            "error": "agbcc failed: c.c:1463: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/uns-cmp/coalesce-v14-v6/raw-globals",
+            "error": "agbcc failed: c.c:1462: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/uns-cmp/livebase/raw-globals",
+            "error": "agbcc failed: c.c:1477: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/uns-cmp/livebase/volatile/raw-globals",
+            "error": "agbcc failed: c.c:1477: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/uns-cmp/livebase/volatile-p1/raw-globals",
+            "error": "agbcc failed: c.c:1477: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/uns-cmp/livebase/volatile-p5/raw-globals",
+            "error": "agbcc failed: c.c:1477: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/uns-cmp/livebase-block/raw-globals",
+            "error": "agbcc failed: c.c:1473: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/uns-cmp/livebase-block/volatile/raw-globals",
+            "error": "agbcc failed: c.c:1473: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/uns-cmp/mulfirst/raw-globals",
+            "error": "agbcc failed: c.c:1463: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/uns-cmp/nearbase/raw-globals",
+            "error": "agbcc failed: c.c:1465: warning: assignment makes integer from pointer without a cast"
+          },
+          {
             "label": "unsigned/flip-join/reread-globals/uns-cmp/raw-globals",
             "error": "agbcc failed: c.c:1461: warning: assignment makes integer from pointer without a cast"
           },
@@ -6890,6 +7650,46 @@
           },
           {
             "label": "unsigned/defsite/flip-join/reread-globals/uns-cmp/nearbase/raw-globals",
+            "error": "agbcc failed: c.c:1463: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/uns-cmp/raw-globals",
+            "error": "agbcc failed: c.c:1461: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/uns-cmp/coalesce-v14-v6/raw-globals",
+            "error": "agbcc failed: c.c:1460: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/uns-cmp/livebase/raw-globals",
+            "error": "agbcc failed: c.c:1475: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/uns-cmp/livebase/volatile/raw-globals",
+            "error": "agbcc failed: c.c:1475: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/uns-cmp/livebase/volatile-p1/raw-globals",
+            "error": "agbcc failed: c.c:1475: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/uns-cmp/livebase/volatile-p5/raw-globals",
+            "error": "agbcc failed: c.c:1475: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/uns-cmp/livebase-block/raw-globals",
+            "error": "agbcc failed: c.c:1471: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/uns-cmp/livebase-block/volatile/raw-globals",
+            "error": "agbcc failed: c.c:1471: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/uns-cmp/mulfirst/raw-globals",
+            "error": "agbcc failed: c.c:1461: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/uns-cmp/nearbase/raw-globals",
             "error": "agbcc failed: c.c:1463: warning: assignment makes integer from pointer without a cast"
           },
           {
@@ -6973,6 +7773,46 @@
             "error": "agbcc failed: c.c:1469: warning: assignment makes integer from pointer without a cast"
           },
           {
+            "label": "unsigned/defsite/loop-entry/derived-home/uns-cmp/raw-globals",
+            "error": "agbcc failed: c.c:1467: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/derived-home/uns-cmp/coalesce-v19-v10/raw-globals",
+            "error": "agbcc failed: c.c:1466: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/derived-home/uns-cmp/livebase/raw-globals",
+            "error": "agbcc failed: c.c:1481: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/derived-home/uns-cmp/livebase/volatile/raw-globals",
+            "error": "agbcc failed: c.c:1481: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/derived-home/uns-cmp/livebase/volatile-p1/raw-globals",
+            "error": "agbcc failed: c.c:1481: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/derived-home/uns-cmp/livebase/volatile-p5/raw-globals",
+            "error": "agbcc failed: c.c:1481: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/derived-home/uns-cmp/livebase-block/raw-globals",
+            "error": "agbcc failed: c.c:1477: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/derived-home/uns-cmp/livebase-block/volatile/raw-globals",
+            "error": "agbcc failed: c.c:1477: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/derived-home/uns-cmp/mulfirst/raw-globals",
+            "error": "agbcc failed: c.c:1467: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/derived-home/uns-cmp/nearbase/raw-globals",
+            "error": "agbcc failed: c.c:1469: warning: assignment makes integer from pointer without a cast"
+          },
+          {
             "label": "unsigned/flip-join/derived-home/uns-cmp/raw-globals",
             "error": "agbcc failed: c.c:1465: warning: assignment makes integer from pointer without a cast"
           },
@@ -7050,6 +7890,46 @@
           },
           {
             "label": "unsigned/defsite/flip-join/derived-home/uns-cmp/nearbase/raw-globals",
+            "error": "agbcc failed: c.c:1467: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/derived-home/uns-cmp/raw-globals",
+            "error": "agbcc failed: c.c:1465: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/derived-home/uns-cmp/coalesce-v19-v10/raw-globals",
+            "error": "agbcc failed: c.c:1464: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/derived-home/uns-cmp/livebase/raw-globals",
+            "error": "agbcc failed: c.c:1479: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/derived-home/uns-cmp/livebase/volatile/raw-globals",
+            "error": "agbcc failed: c.c:1479: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/derived-home/uns-cmp/livebase/volatile-p1/raw-globals",
+            "error": "agbcc failed: c.c:1479: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/derived-home/uns-cmp/livebase/volatile-p5/raw-globals",
+            "error": "agbcc failed: c.c:1479: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/derived-home/uns-cmp/livebase-block/raw-globals",
+            "error": "agbcc failed: c.c:1475: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/derived-home/uns-cmp/livebase-block/volatile/raw-globals",
+            "error": "agbcc failed: c.c:1475: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/derived-home/uns-cmp/mulfirst/raw-globals",
+            "error": "agbcc failed: c.c:1465: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/derived-home/uns-cmp/nearbase/raw-globals",
             "error": "agbcc failed: c.c:1467: warning: assignment makes integer from pointer without a cast"
           },
           {
@@ -7133,6 +8013,46 @@
             "error": "agbcc failed: c.c:1465: warning: assignment makes integer from pointer without a cast"
           },
           {
+            "label": "unsigned/defsite/loop-entry/reread-globals/derived-home/uns-cmp/raw-globals",
+            "error": "agbcc failed: c.c:1463: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/derived-home/uns-cmp/coalesce-v15-v7/raw-globals",
+            "error": "agbcc failed: c.c:1462: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/derived-home/uns-cmp/livebase/raw-globals",
+            "error": "agbcc failed: c.c:1477: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/derived-home/uns-cmp/livebase/volatile/raw-globals",
+            "error": "agbcc failed: c.c:1477: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/derived-home/uns-cmp/livebase/volatile-p1/raw-globals",
+            "error": "agbcc failed: c.c:1477: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/derived-home/uns-cmp/livebase/volatile-p5/raw-globals",
+            "error": "agbcc failed: c.c:1477: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/derived-home/uns-cmp/livebase-block/raw-globals",
+            "error": "agbcc failed: c.c:1473: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/derived-home/uns-cmp/livebase-block/volatile/raw-globals",
+            "error": "agbcc failed: c.c:1473: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/derived-home/uns-cmp/mulfirst/raw-globals",
+            "error": "agbcc failed: c.c:1463: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/reread-globals/derived-home/uns-cmp/nearbase/raw-globals",
+            "error": "agbcc failed: c.c:1465: warning: assignment makes integer from pointer without a cast"
+          },
+          {
             "label": "unsigned/flip-join/reread-globals/derived-home/uns-cmp/raw-globals",
             "error": "agbcc failed: c.c:1461: warning: assignment makes integer from pointer without a cast"
           },
@@ -7210,6 +8130,46 @@
           },
           {
             "label": "unsigned/defsite/flip-join/reread-globals/derived-home/uns-cmp/nearbase/raw-globals",
+            "error": "agbcc failed: c.c:1463: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/derived-home/uns-cmp/raw-globals",
+            "error": "agbcc failed: c.c:1461: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/derived-home/uns-cmp/coalesce-v15-v7/raw-globals",
+            "error": "agbcc failed: c.c:1460: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/derived-home/uns-cmp/livebase/raw-globals",
+            "error": "agbcc failed: c.c:1475: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/derived-home/uns-cmp/livebase/volatile/raw-globals",
+            "error": "agbcc failed: c.c:1475: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/derived-home/uns-cmp/livebase/volatile-p1/raw-globals",
+            "error": "agbcc failed: c.c:1475: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/derived-home/uns-cmp/livebase/volatile-p5/raw-globals",
+            "error": "agbcc failed: c.c:1475: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/derived-home/uns-cmp/livebase-block/raw-globals",
+            "error": "agbcc failed: c.c:1471: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/derived-home/uns-cmp/livebase-block/volatile/raw-globals",
+            "error": "agbcc failed: c.c:1471: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/derived-home/uns-cmp/mulfirst/raw-globals",
+            "error": "agbcc failed: c.c:1461: warning: assignment makes integer from pointer without a cast"
+          },
+          {
+            "label": "unsigned/defsite/loop-entry/flip-join/reread-globals/derived-home/uns-cmp/nearbase/raw-globals",
             "error": "agbcc failed: c.c:1463: warning: assignment makes integer from pointer without a cast"
           }
         ],
@@ -7308,14 +8268,14 @@
           }
         ],
         "outcome": "nonmatch",
-        "source": "struct Struct0 { u8 field_0; u8 _pad0[7]; u8 field_8; u8 _pad1[15]; s32 field_24; };\nstruct Struct1 { u8 field_0; s32 field_4; };\nvoid ProcessInputAndUpdateEntities(s32 a0) {\n    s32 v0;\n    u8 * v1;\n    u8 * v2;\n    u8 * v3;\n    struct Struct0 * v4;\n    u8 * v5;\n    s32 v6;\n    u8 * v7;\n    u32 v8;\n    u32 v9;\n    u32 v10;\n    s32 * v11;\n    u32 v12;\n    s32 v13;\n    u8 * v14;\n    s32 v15;\n    u16 * v16;\n    s32 v17;\n    volatile u16 sp0;\n    s32 * p0;\n    s32 * p1;\n    p0 = (s32 *)&REG_DMA3SAD;\n    p1 = (s32 *)&gCallbackQueue;\n    if ((1 & gNewKeys) == 0) {\n        v13 = (10 & gNewKeys) != 0;\n    } else {\n        v13 = (u8)(((u8 *)gUnk_03004658)[12] + 1);\n    }\n    if ((192 & gNewKeys) != 0) {\n        v0 = gUnk_030034BC;\n        v1 = gUnk_03004658;\n        v10 = 0;\n        do {\n            sp0 = 0;\n            *p0 = &sp0;\n            p0[1] = (v10 + v1[12] * 3 << 6) + ((v0 << 11) + ((u32)&gBgTilemapBufs + 330));\n            p0[2] = -2130706430;\n            sp0 = 0;\n            *p0 = &sp0;\n            p0[1] = (v10 + v1[12] * 3 << 6) + ((v0 << 11) + ((u32)&gBgTilemapBufs + 330 + 36));\n            p0[2] = -2130706430;\n            v10 = (u8)(v10 + 1);\n        } while (v10 <= 1);\n        switch (gUnk_030034C0) {\n            case 0:\n                if ((128 & gNewKeys) != 0) {\n                    m4aSongNumStart(81);\n                    ((u8 *)gUnk_03004658)[12] = ((u8 *)gUnk_03004658)[12] + 1;\n                    if (((u8 *)gUnk_03004658)[12] > 3) ((u8 *)gUnk_03004658)[12] = 0;\n                }\n                if ((64 & gNewKeys) != 0) {\n                    m4aSongNumStart(81);\n                    ((u8 *)gUnk_03004658)[12] = ((u8 *)gUnk_03004658)[12] - 1;\n                    if ((128 & ((u8 *)gUnk_03004658)[12]) != 0) {\n                        v14 = gUnk_03004658;\n                        v15 = 3;\n                        v14[12] = v15;\n                    }\n                }\n                break;\n            case 2:\n                if ((128 & gNewKeys) != 0) {\n                    m4aSongNumStart(81);\n                    ((u8 *)gUnk_03004658)[12] = ((u8 *)gUnk_03004658)[12] + 1;\n                    if (((u8 *)gUnk_03004658)[12] > 3) ((u8 *)gUnk_03004658)[12] = 0;\n                }\n                if ((64 & gNewKeys) != 0) {\n                    m4aSongNumStart(81);\n                    ((u8 *)gUnk_03004658)[12] = ((u8 *)gUnk_03004658)[12] - 1;\n                    if ((128 & ((u8 *)gUnk_03004658)[12]) != 0) {\n                        v14 = gUnk_03004658;\n                        v15 = 3;\n                        v14[12] = v15;\n                    }\n                }\n                break;\n            default:\n                if ((128 & gNewKeys) != 0) {\n                    m4aSongNumStart(81);\n                    ((u8 *)gUnk_03004658)[12] = ((u8 *)gUnk_03004658)[12] + 1;\n                    if (((u8 *)gUnk_03004658)[12] > 2) ((u8 *)gUnk_03004658)[12] = 0;\n                }\n                if ((64 & gNewKeys) != 0) {\n                    m4aSongNumStart(81);\n                    ((u8 *)gUnk_03004658)[12] = ((u8 *)gUnk_03004658)[12] - 1;\n                    if ((128 & ((u8 *)gUnk_03004658)[12]) != 0) {\n                        v14 = gUnk_03004658;\n                        v15 = 2;\n                        v14[12] = v15;\n                    }\n                }\n        }\n        v8 = 0;\n        do {\n            v9 = 0;\n            do {\n                if (gUnk_030034BC != 0) {\n                    v3 = gUnk_03004658;\n                    *(u16 *)(((v8 + v3[12] * 3 << 5) + (v9 + 165) << 1) + (gUnk_030034BC << 11) + (u32)&gBgTilemapBufs) = ((u16 *)((v8 * 30 + v9 << 1) + gBgDataPtrs.pBufBg3Tilemap))[157];\n                    v16 = (u16 *)(((v8 + v3[12] * 3 << 5) + (v9 + 183) << 1) + (gUnk_030034BC << 11) + (u32)&gBgTilemapBufs);\n                    v17 = *(u16 *)((v8 * 30 + v9 << 1) + gBgDataPtrs.pBufBg3Tilemap + ((157 << 1) + 36));\n                } else {\n                    v2 = gUnk_03004658;\n                    *(u16 *)(((v8 + v2[12] * 3 << 5) + (v9 + 165) << 1) + (gUnk_030034BC << 11) + (u32)&gBgTilemapBufs) = ((u16 *)((v8 * 30 + v9 << 1) + gBgDataPtrs.pBufBg3Tilemap))[157] + gUnk_03000800;\n                    v16 = (u16 *)(((v8 + v2[12] * 3 << 5) + (v9 + 183) << 1) + (gUnk_030034BC << 11) + (u32)&gBgTilemapBufs);\n                    v17 = ((u16 *)((v8 * 30 + v9 << 1) + gBgDataPtrs.pBufBg3Tilemap))[175] + gUnk_03000800;\n                }\n                *v16 = v17;\n                v9 = (u8)(v9 + 1);\n            } while (v9 <= 1);\n            v8 = (u8)(v8 + 1);\n        } while (v8 <= 1);\n    }\n    if (v13 != 0) v13 = gUnk_081166F8[0][v13 + ((gUnk_030034C0 << 2) - 1)];\n    switch (v13 - 1) {\n        case 0:\n            p1[10] = &ReadKeyInput;\n            v12 = 0;\n            v11 = (s32 *)((u32)&gCallbackQueue + 40);\n            do {\n                *v11 = v11[10];\n                v11 = v11 + 1;\n                v12 = v12 + 1;\n            } while (v12 <= 9);\n            p1[gCallbackQueue.currentCount - 1] = 0;\n            *(u8 *)((u32)&gCallbackQueue + 122 - 1) = gCallbackQueue.previousCount;\n            UpdateOamSortOrder();\n            m4aSoundVSyncOn();\n            m4aMPlayAllContinue();\n            return;\n        case 1:\n            UpdateOamSortOrder();\n            p1[1] = &TransitionFadeOutFull;\n            v4 = gUnk_03005284;\n            gUnk_03005220.unk4 = v4->field_24;\n            gUnk_03005220.lives = v4->field_0;\n            *(u8 *)&gUnk_03005220 = -4 & *(u8 *)&gUnk_03005220 | (u32)(v4->field_8 << 30) >> 30;\n            REG_BLDCNT = 0;\n            gBlendValue = 0;\n            return;\n        case 2:\n            v5 = gUnk_03005284;\n            v6 = 0;\n            gUnk_03005220.lives = v5[30];\n            *v5 = v5[30];\n            UpdateOamSortOrder();\n            gBlendValue = v6;\n            if (((u16 *)&gUnk_03004C20)[6] == 193 << 3) gUnk_03004C20.world = 5;\n            ((u8 *)&gUnk_030034B0)[6] = 15 & ((u8 *)&gUnk_030034B0)[6] | gUnk_03004C20.level << 4;\n            gUnk_03004C20.level = v6;\n            p1[1] = &TransitionGameOver;\n            return;\n        case 3:\n            p1[1] = &SetupBG3WindowOverlay;\n            thunk_HeapFree(gBgDataPtrs.pBufBg3Tilemap, &gCallbackQueue);\n            thunk_HeapFree(gBgDataPtrs.pBufBg3Tiles);\n            return;\n        case 4:\n            if (gUnk_03004C20.level != 0) {\n                v7 = gUnk_03005284;\n                gUnk_03005220.lives = v7[30];\n                *v7 = v7[30];\n            }\n            UpdateOamSortOrder();\n            REG_BLDCNT = 0;\n            gBlendValue = 0;\n            FreeAllDecompBuffers();\n            p1[1] = &TransitionToGameplayScreen;\n            return;\n        case 5:\n            gBlendValue = 0;\n            gUnk_03004C20.level = 9;\n            gUnk_03004D9C = 0;\n            InitOamEntries();\n            p1[1] = &TransitionSoftReset;\n            thunk_HeapFree(gBgDataPtrs.pBufBg3Tilemap, &gCallbackQueue);\n            thunk_HeapFree(gBgDataPtrs.pBufBg3Tiles);\n            return;\n        default:\n            return;\n    }\n}\n",
-        "score": 370,
+        "source": "struct Struct0 { u8 field_0; u8 _pad0[7]; u8 field_8; u8 _pad1[15]; s32 field_24; };\nstruct Struct1 { u8 field_0; s32 field_4; };\nvoid ProcessInputAndUpdateEntities(s32 a0) {\n    s32 v0;\n    u8 * v1;\n    u8 * v2;\n    u8 * v3;\n    struct Struct0 * v4;\n    u8 * v5;\n    s32 v6;\n    u8 * v7;\n    u32 v8;\n    u32 v9;\n    u32 v10;\n    s32 * v11;\n    u32 v12;\n    s32 v13;\n    u8 * v14;\n    s32 v15;\n    u16 * v16;\n    s32 v17;\n    volatile u16 sp0;\n    s32 * p0;\n    s32 * p1;\n    p0 = (s32 *)&REG_DMA3SAD;\n    p1 = (s32 *)&gCallbackQueue;\n    if ((1 & gNewKeys) == 0) {\n        v13 = (10 & gNewKeys) != 0;\n    } else {\n        v13 = (u8)(((u8 *)gUnk_03004658)[12] + 1);\n    }\n    if ((192 & gNewKeys) != 0) {\n        v10 = 0;\n        v0 = gUnk_030034BC << 11;\n        v1 = gUnk_03004658;\n        do {\n            sp0 = 0;\n            *p0 = &sp0;\n            p0[1] = (v10 + v1[12] * 3 << 6) + (v0 + ((u32)&gBgTilemapBufs + 330));\n            p0[2] = -2130706430;\n            sp0 = 0;\n            *p0 = &sp0;\n            p0[1] = (v10 + v1[12] * 3 << 6) + (v0 + ((u32)&gBgTilemapBufs + 330 + 36));\n            p0[2] = -2130706430;\n            v10 = (u8)(v10 + 1);\n        } while (v10 <= 1);\n        switch (gUnk_030034C0) {\n            case 0:\n                if ((128 & gNewKeys) != 0) {\n                    m4aSongNumStart(81);\n                    ((u8 *)gUnk_03004658)[12] = ((u8 *)gUnk_03004658)[12] + 1;\n                    if (((u8 *)gUnk_03004658)[12] > 3) ((u8 *)gUnk_03004658)[12] = 0;\n                }\n                if ((64 & gNewKeys) != 0) {\n                    m4aSongNumStart(81);\n                    ((u8 *)gUnk_03004658)[12] = ((u8 *)gUnk_03004658)[12] - 1;\n                    if ((128 & ((u8 *)gUnk_03004658)[12]) != 0) {\n                        v15 = 3;\n                        v14 = gUnk_03004658;\n                        v14[12] = v15;\n                    }\n                }\n                break;\n            case 2:\n                if ((128 & gNewKeys) != 0) {\n                    m4aSongNumStart(81);\n                    ((u8 *)gUnk_03004658)[12] = ((u8 *)gUnk_03004658)[12] + 1;\n                    if (((u8 *)gUnk_03004658)[12] > 3) ((u8 *)gUnk_03004658)[12] = 0;\n                }\n                if ((64 & gNewKeys) != 0) {\n                    m4aSongNumStart(81);\n                    ((u8 *)gUnk_03004658)[12] = ((u8 *)gUnk_03004658)[12] - 1;\n                    if ((128 & ((u8 *)gUnk_03004658)[12]) != 0) {\n                        v15 = 3;\n                        v14 = gUnk_03004658;\n                        v14[12] = v15;\n                    }\n                }\n                break;\n            default:\n                if ((128 & gNewKeys) != 0) {\n                    m4aSongNumStart(81);\n                    ((u8 *)gUnk_03004658)[12] = ((u8 *)gUnk_03004658)[12] + 1;\n                    if (((u8 *)gUnk_03004658)[12] > 2) ((u8 *)gUnk_03004658)[12] = 0;\n                }\n                if ((64 & gNewKeys) != 0) {\n                    m4aSongNumStart(81);\n                    ((u8 *)gUnk_03004658)[12] = ((u8 *)gUnk_03004658)[12] - 1;\n                    if ((128 & ((u8 *)gUnk_03004658)[12]) != 0) {\n                        v15 = 2;\n                        v14 = gUnk_03004658;\n                        v14[12] = v15;\n                    }\n                }\n        }\n        v8 = 0;\n        do {\n            v9 = 0;\n            do {\n                if (gUnk_030034BC != 0) {\n                    v3 = gUnk_03004658;\n                    *(u16 *)(((v8 + v3[12] * 3 << 5) + (v9 + 165) << 1) + (gUnk_030034BC << 11) + (u32)&gBgTilemapBufs) = ((u16 *)((v8 * 30 + v9 << 1) + gBgDataPtrs.pBufBg3Tilemap))[157];\n                    v16 = (u16 *)(((v8 + v3[12] * 3 << 5) + (v9 + 183) << 1) + (gUnk_030034BC << 11) + (u32)&gBgTilemapBufs);\n                    v17 = *(u16 *)((v8 * 30 + v9 << 1) + gBgDataPtrs.pBufBg3Tilemap + ((157 << 1) + 36));\n                } else {\n                    v2 = gUnk_03004658;\n                    *(u16 *)(((v8 + v2[12] * 3 << 5) + (v9 + 165) << 1) + (gUnk_030034BC << 11) + (u32)&gBgTilemapBufs) = ((u16 *)((v8 * 30 + v9 << 1) + gBgDataPtrs.pBufBg3Tilemap))[157] + gUnk_03000800;\n                    v16 = (u16 *)(((v8 + v2[12] * 3 << 5) + (v9 + 183) << 1) + (gUnk_030034BC << 11) + (u32)&gBgTilemapBufs);\n                    v17 = ((u16 *)((v8 * 30 + v9 << 1) + gBgDataPtrs.pBufBg3Tilemap))[175] + gUnk_03000800;\n                }\n                *v16 = v17;\n                v9 = (u8)(v9 + 1);\n            } while (v9 <= 1);\n            v8 = (u8)(v8 + 1);\n        } while (v8 <= 1);\n    }\n    if (v13 != 0) v13 = gUnk_081166F8[0][v13 + ((gUnk_030034C0 << 2) - 1)];\n    switch (v13 - 1) {\n        case 0:\n            p1[10] = &ReadKeyInput;\n            v12 = 0;\n            v11 = (s32 *)((u32)&gCallbackQueue + 40);\n            do {\n                *v11 = v11[10];\n                v11 = v11 + 1;\n                v12 = v12 + 1;\n            } while (v12 <= 9);\n            p1[gCallbackQueue.currentCount - 1] = 0;\n            *(u8 *)((u32)&gCallbackQueue + 122 - 1) = gCallbackQueue.previousCount;\n            UpdateOamSortOrder();\n            m4aSoundVSyncOn();\n            m4aMPlayAllContinue();\n            return;\n        case 1:\n            UpdateOamSortOrder();\n            p1[1] = &TransitionFadeOutFull;\n            v4 = gUnk_03005284;\n            gUnk_03005220.unk4 = v4->field_24;\n            gUnk_03005220.lives = v4->field_0;\n            *(u8 *)&gUnk_03005220 = -4 & *(u8 *)&gUnk_03005220 | (u32)(v4->field_8 << 30) >> 30;\n            REG_BLDCNT = 0;\n            gBlendValue = 0;\n            return;\n        case 2:\n            v5 = gUnk_03005284;\n            v6 = 0;\n            gUnk_03005220.lives = v5[30];\n            *v5 = v5[30];\n            UpdateOamSortOrder();\n            gBlendValue = v6;\n            if (((u16 *)&gUnk_03004C20)[6] == 193 << 3) gUnk_03004C20.world = 5;\n            ((u8 *)&gUnk_030034B0)[6] = 15 & ((u8 *)&gUnk_030034B0)[6] | gUnk_03004C20.level << 4;\n            gUnk_03004C20.level = v6;\n            p1[1] = &TransitionGameOver;\n            return;\n        case 3:\n            p1[1] = &SetupBG3WindowOverlay;\n            thunk_HeapFree(gBgDataPtrs.pBufBg3Tilemap, &gCallbackQueue);\n            thunk_HeapFree(gBgDataPtrs.pBufBg3Tiles);\n            return;\n        case 4:\n            if (gUnk_03004C20.level != 0) {\n                v7 = gUnk_03005284;\n                gUnk_03005220.lives = v7[30];\n                *v7 = v7[30];\n            }\n            UpdateOamSortOrder();\n            REG_BLDCNT = 0;\n            gBlendValue = 0;\n            FreeAllDecompBuffers();\n            p1[1] = &TransitionToGameplayScreen;\n            return;\n        case 5:\n            gBlendValue = 0;\n            gUnk_03004C20.level = 9;\n            gUnk_03004D9C = 0;\n            InitOamEntries();\n            p1[1] = &TransitionSoftReset;\n            thunk_HeapFree(gBgDataPtrs.pBufBg3Tilemap, &gCallbackQueue);\n            thunk_HeapFree(gBgDataPtrs.pBufBg3Tiles);\n            return;\n        default:\n            return;\n    }\n}\n",
+        "score": 369,
         "maxScore": 624,
         "compileErrors": null,
         "breakdown": {
           "insert": 98,
           "delete": 53,
-          "replace": 27,
+          "replace": 26,
           "opMismatch": 8,
           "argMismatch": 184
         },
@@ -7351,13 +8311,13 @@
       },
       "gapSize": {
         "decompiler": "asmlift",
-        "score": 370,
+        "score": 369,
         "maxScore": 624,
-        "ratio": 0.592948717948718,
+        "ratio": 0.5913461538461539,
         "kinds": {
           "insert": 98,
           "delete": 53,
-          "replace": 27,
+          "replace": 26,
           "opMismatch": 8,
           "argMismatch": 184
         }
@@ -13376,19 +14336,19 @@
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "candidateLabel": "signed/uns-cmp",
+        "candidateLabel": "signed/defsite/loop-entry/uns-cmp",
         "symbolsUsed": [],
         "outcome": "nonmatch",
-        "source": "s32 CalcCRC16(s32 a0, s32 a1) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    u32 v3;\n    s32 v4;\n    if (0 < a1) {\n        v0 = 0;\n        v1 = 4385;\n        do {\n            v2 = v1 ^ *(u8 *)(a0 + v0);\n            v3 = 0;\n            do {\n                if ((v2 & 1) != 0) {\n                    v4 = (u16)((u32)v2 >> 1 ^ 33800);\n                } else {\n                    v4 = (u32)v2 >> 1;\n                }\n                v2 = v4;\n                v3 = (u16)(v3 + 1);\n            } while (v3 <= 7);\n            v1 = v4;\n            v0 = (u16)(v0 + 1);\n        } while (v0 < a1);\n        v4 = v1;\n    } else {\n        v4 = 4385;\n    }\n    return (u16)~v4;\n}\n",
-        "score": 38,
-        "maxScore": 51,
+        "source": "s32 CalcCRC16(s32 a0, s32 a1) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    u32 v3;\n    s32 v4;\n    v1 = 4385;\n    v0 = 0;\n    if (0 < a1) {\n        do {\n            v2 = v1 ^ *(u8 *)(a0 + v0);\n            v3 = 0;\n            do {\n                if ((v2 & 1) != 0) {\n                    v4 = (u16)((u32)v2 >> 1 ^ 33800);\n                } else {\n                    v4 = (u32)v2 >> 1;\n                }\n                v2 = v4;\n                v3 = (u16)(v3 + 1);\n            } while (v3 <= 7);\n            v1 = v4;\n            v0 = (u16)(v0 + 1);\n        } while (v0 < a1);\n        v4 = v1;\n    } else {\n        v4 = 4385;\n    }\n    return (u16)~v4;\n}\n",
+        "score": 27,
+        "maxScore": 46,
         "compileErrors": null,
         "breakdown": {
-          "insert": 9,
-          "delete": 2,
-          "replace": 1,
+          "insert": 4,
+          "delete": 0,
+          "replace": 2,
           "opMismatch": 2,
-          "argMismatch": 24
+          "argMismatch": 19
         },
         "quality": {
           "score": 86,
@@ -13422,15 +14382,15 @@
       },
       "gapSize": {
         "decompiler": "asmlift",
-        "score": 38,
-        "maxScore": 51,
-        "ratio": 0.7450980392156863,
+        "score": 27,
+        "maxScore": 46,
+        "ratio": 0.5869565217391305,
         "kinds": {
-          "insert": 9,
-          "delete": 2,
-          "replace": 1,
+          "insert": 4,
+          "delete": 0,
+          "replace": 2,
           "opMismatch": 2,
-          "argMismatch": 24
+          "argMismatch": 19
         }
       },
       "scripts": {
@@ -14511,16 +15471,16 @@
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "candidateLabel": "signed",
+        "candidateLabel": "signed/defsite/loop-entry",
         "symbolsUsed": [],
         "outcome": "nonmatch",
-        "source": "s32 IsStringLengthAtLeast(s32 a0, s32 a1) {\n    s32 v0;\n    if (0 < a1) {\n        v0 = 0;\n        do {\n            switch (*(u8 *)(a0 + v0)) {\n                case 0:\n                    break;\n                case 255:\n                    break;\n                default:\n                    return 1;\n            }\n            v0 = (u8)(v0 + 1);\n        } while (v0 < a1);\n        return 0;\n    } else {\n        return 0;\n    }\n}\n",
-        "score": 10,
-        "maxScore": 23,
+        "source": "s32 IsStringLengthAtLeast(s32 a0, s32 a1) {\n    s32 v0;\n    v0 = 0;\n    if (0 < a1) {\n        do {\n            switch (*(u8 *)(a0 + v0)) {\n                case 0:\n                    break;\n                case 255:\n                    break;\n                default:\n                    return 1;\n            }\n            v0 = (u8)(v0 + 1);\n        } while (v0 < a1);\n        return 0;\n    } else {\n        return 0;\n    }\n}\n",
+        "score": 8,
+        "maxScore": 22,
         "compileErrors": null,
         "breakdown": {
-          "insert": 4,
-          "delete": 3,
+          "insert": 3,
+          "delete": 2,
           "replace": 0,
           "opMismatch": 2,
           "argMismatch": 1
@@ -14557,12 +15517,12 @@
       },
       "gapSize": {
         "decompiler": "asmlift",
-        "score": 10,
-        "maxScore": 23,
-        "ratio": 0.43478260869565216,
+        "score": 8,
+        "maxScore": 22,
+        "ratio": 0.36363636363636365,
         "kinds": {
-          "insert": 4,
-          "delete": 3,
+          "insert": 3,
+          "delete": 2,
           "replace": 0,
           "opMismatch": 2,
           "argMismatch": 1
@@ -20583,7 +21543,7 @@
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "candidateLabel": "unsigned/flip-join/derived-home",
+        "candidateLabel": "unsigned/defsite/loop-entry/initfirst",
         "symbolsUsed": [
           {
             "name": "gVramHeapMaxTileSlots",
@@ -20595,22 +21555,22 @@
           }
         ],
         "outcome": "nonmatch",
-        "source": "s32 VramGetTotalAllocatedTiles(void) {\n    u32 v0;\n    s32 v1;\n    s32 v2;\n    v0 = (u32)gVramHeapMaxTileSlots >> 2;\n    if (0 >= v0) {\n        v2 = 0;\n    } else {\n        v1 = 0;\n        v2 = 0;\n        do {\n            if (gVramHeapState[v1] != 0) {\n                v2 = (u16)(v2 + gVramHeapState[v1]);\n                v1 = (u16)(gVramHeapState[v1] + (v1 + 65535));\n            }\n            v1 = (u16)(v1 + 1);\n        } while (v1 < v0);\n    }\n    return (u32)(v2 << 18) >> 16;\n}\n",
-        "score": 18,
-        "maxScore": 42,
+        "source": "s32 VramGetTotalAllocatedTiles(void) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    v1 = 0;\n    v0 = gVramHeapMaxTileSlots;\n    v2 = 0;\n    if (v2 < (u32)v0 >> 2) {\n        do {\n            if (gVramHeapState[v1] != 0) {\n                v2 = (u16)(v2 + gVramHeapState[v1]);\n                v1 = (u16)(gVramHeapState[v1] + (v1 + 65535));\n            }\n            v1 = (u16)(v1 + 1);\n        } while (v1 < (u32)v0 >> 2);\n    }\n    return (u32)(v2 << 18) >> 16;\n}\n",
+        "score": 8,
+        "maxScore": 39,
         "compileErrors": null,
         "breakdown": {
-          "insert": 5,
-          "delete": 3,
-          "replace": 1,
-          "opMismatch": 2,
-          "argMismatch": 7
+          "insert": 2,
+          "delete": 2,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 4
         },
         "quality": {
-          "score": 94,
-          "lines": 20,
+          "score": 90,
+          "lines": 18,
           "gotos": 0,
-          "casts": 5,
+          "casts": 7,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -20641,16 +21601,16 @@
         }
       },
       "gapSize": {
-        "decompiler": "m2c",
-        "score": 16,
-        "maxScore": 38,
-        "ratio": 0.42105263157894735,
+        "decompiler": "asmlift",
+        "score": 8,
+        "maxScore": 39,
+        "ratio": 0.20512820512820512,
         "kinds": {
-          "insert": 1,
-          "delete": 1,
-          "replace": 1,
-          "opMismatch": 2,
-          "argMismatch": 11
+          "insert": 2,
+          "delete": 2,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 4
         }
       },
       "scripts": {
@@ -26088,7 +27048,7 @@
         "decompiler": "asmlift",
         "candidateLabel": "signed/indexed",
         "outcome": "match",
-        "source": "s32 arraysum(s32 * a0, s32 a1) {\n    s32 * v0;\n    s32 v1;\n    s32 v2;\n    s32 i0;\n    v0 = a0;\n    v1 = 0;\n    for (i0 = 0; i0 < a1; i0 = i0 + 1) {\n        v1 = v1 + v0[i0];\n    }\n    return v1;\n}\n",
+        "source": "s32 arraysum(s32 * a0, s32 a1) {\n    s32 * v0;\n    s32 v1;\n    s32 i0;\n    v0 = a0;\n    v1 = 0;\n    for (i0 = 0; i0 < a1; i0 = i0 + 1) {\n        v1 = v1 + v0[i0];\n    }\n    return v1;\n}\n",
         "score": 0,
         "maxScore": 11,
         "compileErrors": null,
@@ -26101,7 +27061,7 @@
         },
         "quality": {
           "score": 100,
-          "lines": 12,
+          "lines": 11,
           "gotos": 0,
           "casts": 0,
           "unkGlue": 0,
@@ -30595,7 +31555,7 @@
         "decompiler": "asmlift",
         "candidateLabel": "signed/inplace/indexed/volatile",
         "outcome": "match",
-        "source": "s32 clamp_inplace(s32 a0) {\n    s32 v0;\n    volatile u16 * v1;\n    s32 v2;\n    s32 v3;\n    s32 i0;\n    v2 = 0;\n    v1 = (u16 *)50331664;\n    for (i0 = 0; i0 < a0; i0 = i0 + 1) {\n        v0 = v1[i0];\n        if (v0 > 31) v0 = 32;\n        v2 = v2 + v0;\n    }\n    return v2;\n}\n",
+        "source": "s32 clamp_inplace(s32 a0) {\n    s32 v0;\n    volatile u16 * v1;\n    s32 v2;\n    s32 i0;\n    v2 = 0;\n    v1 = (u16 *)50331664;\n    for (i0 = 0; i0 < a0; i0 = i0 + 1) {\n        v0 = v1[i0];\n        if (v0 > 31) v0 = 32;\n        v2 = v2 + v0;\n    }\n    return v2;\n}\n",
         "score": 0,
         "maxScore": 17,
         "compileErrors": null,
@@ -30608,7 +31568,7 @@
         },
         "quality": {
           "score": 100,
-          "lines": 15,
+          "lines": 14,
           "gotos": 0,
           "casts": 1,
           "unkGlue": 0,
@@ -30816,7 +31776,7 @@
         "decompiler": "asmlift",
         "candidateLabel": "signed/inplace/indexed",
         "outcome": "nonmatch",
-        "source": "s32 clamp_inplace(s32 a0) {\n    s32 v0;\n    u16 * v1;\n    s32 v2;\n    s32 v3;\n    s32 i0;\n    v2 = 0;\n    v1 = (u16 *)-2145386480;\n    for (i0 = 0; i0 < a0; i0 = i0 + 1) {\n        v0 = v1[i0];\n        if (v0 > 31) v0 = 32;\n        v2 = v2 + v0;\n    }\n    return v2;\n}\n",
+        "source": "s32 clamp_inplace(s32 a0) {\n    s32 v0;\n    u16 * v1;\n    s32 v2;\n    s32 i0;\n    v2 = 0;\n    v1 = (u16 *)-2145386480;\n    for (i0 = 0; i0 < a0; i0 = i0 + 1) {\n        v0 = v1[i0];\n        if (v0 > 31) v0 = 32;\n        v2 = v2 + v0;\n    }\n    return v2;\n}\n",
         "score": 6,
         "maxScore": 15,
         "compileErrors": null,
@@ -30829,7 +31789,7 @@
         },
         "quality": {
           "score": 100,
-          "lines": 15,
+          "lines": 14,
           "gotos": 0,
           "casts": 1,
           "unkGlue": 0,
@@ -32064,7 +33024,7 @@
         "decompiler": "asmlift",
         "candidateLabel": "signed/indexed",
         "outcome": "match",
-        "source": "s32 continueloop(s32 * a0, s32 a1) {\n    s32 * v0;\n    s32 v1;\n    s32 v2;\n    s32 i0;\n    v0 = a0;\n    v1 = 0;\n    for (i0 = 0; i0 < a1; i0 = i0 + 1) {\n        if (v0[i0] >= 0) v1 = v1 + v0[i0];\n    }\n    return v1;\n}\n",
+        "source": "s32 continueloop(s32 * a0, s32 a1) {\n    s32 * v0;\n    s32 v1;\n    s32 i0;\n    v0 = a0;\n    v1 = 0;\n    for (i0 = 0; i0 < a1; i0 = i0 + 1) {\n        if (v0[i0] >= 0) v1 = v1 + v0[i0];\n    }\n    return v1;\n}\n",
         "score": 0,
         "maxScore": 13,
         "compileErrors": null,
@@ -32077,7 +33037,7 @@
         },
         "quality": {
           "score": 100,
-          "lines": 12,
+          "lines": 11,
           "gotos": 0,
           "casts": 0,
           "unkGlue": 0,
@@ -32285,7 +33245,7 @@
         "decompiler": "asmlift",
         "candidateLabel": "signed/indexed",
         "outcome": "match",
-        "source": "s32 continueloop(s32 * a0, s32 a1) {\n    s32 * v0;\n    s32 v1;\n    s32 v2;\n    s32 i0;\n    v0 = a0;\n    v1 = 0;\n    for (i0 = 0; i0 < a1; i0 = i0 + 1) {\n        if ((u32)v0[i0] >> 31 == 0) v1 = v1 + v0[i0];\n    }\n    return v1;\n}\n",
+        "source": "s32 continueloop(s32 * a0, s32 a1) {\n    s32 * v0;\n    s32 v1;\n    s32 i0;\n    v0 = a0;\n    v1 = 0;\n    for (i0 = 0; i0 < a1; i0 = i0 + 1) {\n        if ((u32)v0[i0] >> 31 == 0) v1 = v1 + v0[i0];\n    }\n    return v1;\n}\n",
         "score": 0,
         "maxScore": 12,
         "compileErrors": null,
@@ -32298,7 +33258,7 @@
         },
         "quality": {
           "score": 100,
-          "lines": 12,
+          "lines": 11,
           "gotos": 0,
           "casts": 1,
           "unkGlue": 0,
@@ -32726,7 +33686,7 @@
         "decompiler": "asmlift",
         "candidateLabel": "signed/indexed",
         "outcome": "match",
-        "source": "s32 countpos(s32 * a0, s32 a1) {\n    s32 * v0;\n    s32 v1;\n    s32 v2;\n    s32 i0;\n    v0 = a0;\n    v1 = 0;\n    for (i0 = 0; i0 < a1; i0 = i0 + 1) {\n        if (v0[i0] > 0) v1 = v1 + 1;\n    }\n    return v1;\n}\n",
+        "source": "s32 countpos(s32 * a0, s32 a1) {\n    s32 * v0;\n    s32 v1;\n    s32 i0;\n    v0 = a0;\n    v1 = 0;\n    for (i0 = 0; i0 < a1; i0 = i0 + 1) {\n        if (v0[i0] > 0) v1 = v1 + 1;\n    }\n    return v1;\n}\n",
         "score": 0,
         "maxScore": 14,
         "compileErrors": null,
@@ -32739,7 +33699,7 @@
         },
         "quality": {
           "score": 100,
-          "lines": 12,
+          "lines": 11,
           "gotos": 0,
           "casts": 0,
           "unkGlue": 0,
@@ -32952,7 +33912,7 @@
         "decompiler": "asmlift",
         "candidateLabel": "signed/indexed",
         "outcome": "match",
-        "source": "s32 countpos(s32 * a0, s32 a1) {\n    s32 * v0;\n    s32 v1;\n    s32 v2;\n    s32 i0;\n    v0 = a0;\n    v1 = 0;\n    for (i0 = 0; i0 < a1; i0 = i0 + 1) {\n        if (v0[i0] > 0) v1 = v1 + 1;\n    }\n    return v1;\n}\n",
+        "source": "s32 countpos(s32 * a0, s32 a1) {\n    s32 * v0;\n    s32 v1;\n    s32 i0;\n    v0 = a0;\n    v1 = 0;\n    for (i0 = 0; i0 < a1; i0 = i0 + 1) {\n        if (v0[i0] > 0) v1 = v1 + 1;\n    }\n    return v1;\n}\n",
         "score": 0,
         "maxScore": 12,
         "compileErrors": null,
@@ -32965,7 +33925,7 @@
         },
         "quality": {
           "score": 100,
-          "lines": 12,
+          "lines": 11,
           "gotos": 0,
           "casts": 0,
           "unkGlue": 0,
@@ -35398,22 +36358,22 @@
       "targetAsm": "@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tdma_fill_uninit\n\t.type\t dma_fill_uninit,function\n\t.thumb_func\ndma_fill_uninit:\n\tpush\t{r4, r5, r6, r7, lr}\n\tmov\tr7, sl\n\tmov\tr6, r9\n\tmov\tr5, r8\n\tpush\t{r5, r6, r7}\n\tadd\tsp, sp, #-0x14\n\tadd\tr4, r0, #0\n\tadd\tr3, r1, #0\n\tmov\tr0, #0x0\n\tstr\tr0, [sp, #0x10]\n\tcmp\tr4, #0\n\tbeq\t.L4\t@cond_branch\n\tcmp\tr4, #0x1\n\tbeq\t.L5\t@cond_branch\n\tb\t.L3\n.L4:\n\tldr\tr1, [r3]\n\tmov\tr8, r1\n\tldr\tr0, [r3, #0x4]\n\tstr\tr0, [sp, #0x4]\n\tldr\tr1, [r3, #0x8]\n\tmov\tip, r1\n\tldr\tr0, [r3, #0xc]\n\tstr\tr0, [sp, #0x8]\n\tldr\tr7, [r3, #0x10]\n\tldr\tr1, [r3, #0x14]\n\tstr\tr1, [sp, #0xc]\n\tldr\tr5, [r3, #0x18]\n\tldr\tr0, [r3, #0x1c]\n\tmov\tsl, r0\n\tldr\tr1, [r3, #0x20]\n\tmov\tr9, r1\n\tldr\tr6, [r3, #0x24]\n\tb\t.L3\n.L5:\n\tldr\tr0, [r3, #0x28]\n\tmov\tr8, r0\n\tldr\tr1, [r3, #0x2c]\n\tstr\tr1, [sp, #0x4]\n\tldr\tr0, [r3, #0x30]\n\tmov\tip, r0\n\tldr\tr1, [r3, #0x34]\n\tstr\tr1, [sp, #0x8]\n\tldr\tr7, [r3, #0x38]\n\tldr\tr0, [r3, #0x3c]\n\tstr\tr0, [sp, #0xc]\n\tldr\tr5, [r3, #0x40]\n\tldr\tr1, [r3, #0x44]\n\tmov\tsl, r1\n\tldr\tr0, [r3, #0x48]\n\tmov\tr9, r0\n\tldr\tr6, [r3, #0x4c]\n.L3:\n\tmov\tr0, sp\n\tstrh\tr4, [r0]\n\tldr\tr0, .L13\n\tmov\tr1, sp\n\tstr\tr1, [r0]\n\tadd\tr0, r0, #0x4\n\tstr\tr2, [r0]\n\tldr\tr1, .L13+0x4\n\tldr\tr0, .L13+0x8\n\tstr\tr0, [r1]\n\tldr\tr1, [sp, #0x4]\n\tmov\tr0, ip\n\tmul\tr0, r0, r1\n\tmov\tip, r0\n\tldr\tr1, [sp, #0x8]\n\tmov\tr0, r1\n\tmul\tr0, r0, r7\n\tadd\tr7, r0, #0\n\tldr\tr0, [sp, #0xc]\n\tmul\tr5, r5, r0\n\tmov\tr1, r9\n\tmov\tr4, sl\n\tmul\tr4, r4, r1\n\tadd\tr1, r3, #0\n\tmov\tr2, #0x7\n.L11:\n\tldmia\tr1!, {r0}\n\tmov\tr3, r8\n\tmul\tr3, r3, r0\n\tadd\tr0, r3, #0\n\tadd\tr0, r0, ip\n\tadd\tr0, r0, r7\n\tadd\tr0, r0, r5\n\tadd\tr0, r0, r4\n\tadd\tr0, r0, r6\n\tldr\tr3, [sp, #0x10]\n\tadd\tr3, r3, r0\n\tstr\tr3, [sp, #0x10]\n\tsub\tr2, r2, #0x1\n\tcmp\tr2, #0\n\tbge\t.L11\t@cond_branch\n\tadd\tr0, r3, #0\n\tadd\tsp, sp, #0x14\n\tpop\t{r3, r4, r5}\n\tmov\tr8, r3\n\tmov\tr9, r4\n\tmov\tsl, r5\n\tpop\t{r4, r5, r6, r7}\n\tpop\t{r1}\n\tbx\tr1\n.L14:\n\t.align\t2, 0\n.L13:\n\t.word\t0x40000d4\n\t.word\t0x40000dc\n\t.word\t-0x7effffe0\n.Lfe1:\n\t.size\t dma_fill_uninit,.Lfe1-dma_fill_uninit\n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned/derived-home",
+        "candidateLabel": "unsigned/defsite/loop-entry/derived-home/indexed",
         "outcome": "nonmatch",
-        "source": "s32 dma_fill_uninit(u32 a0, s32 * a1, u32 a2) {\n    s32 v0;\n    s32 * v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    s32 v5;\n    s32 v6;\n    s32 v7;\n    s32 v8;\n    s32 v9;\n    s32 v10;\n    s32 v11;\n    s32 v12;\n    volatile u16 sp0;\n    switch (a0) {\n        case 0:\n            v11 = *a1;\n            v3 = a1[1];\n            v4 = a1[2];\n            v5 = a1[3];\n            v6 = a1[4];\n            v7 = a1[5];\n            v8 = a1[6];\n            v10 = a1[7];\n            v9 = a1[8];\n            v12 = a1[9];\n            break;\n        case 1:\n            v11 = a1[10];\n            v3 = a1[11];\n            v4 = a1[12];\n            v5 = a1[13];\n            v6 = a1[14];\n            v7 = a1[15];\n            v8 = a1[16];\n            v10 = a1[17];\n            v9 = a1[18];\n            v12 = a1[19];\n            break;\n    }\n    sp0 = a0;\n    *(s32 *)67109076 = &sp0;\n    *(s32 *)67109080 = a2;\n    *(s32 *)67109084 = -2130706400;\n    v1 = a1;\n    v0 = 0;\n    v2 = 7;\n    do {\n        v0 = v0 + (v11 * *v1 + v4 * v3 + v5 * v6 + v8 * v7 + v10 * v9 + v12);\n        v1 = v1 + 1;\n        v2 = v2 - 1;\n    } while (v2 >= 0);\n    return v0;\n}\n",
-        "score": 68,
-        "maxScore": 113,
+        "source": "s32 dma_fill_uninit(u32 a0, s32 * a1, u32 a2) {\n    s32 v0;\n    s32 * v1;\n    s32 v3;\n    s32 v4;\n    s32 v5;\n    s32 v6;\n    s32 v7;\n    s32 v8;\n    s32 v9;\n    s32 v10;\n    s32 v11;\n    s32 v12;\n    volatile u16 sp0;\n    s32 i0;\n    v0 = 0;\n    switch (a0) {\n        case 0:\n            v11 = *a1;\n            v3 = a1[1];\n            v4 = a1[2];\n            v5 = a1[3];\n            v6 = a1[4];\n            v7 = a1[5];\n            v8 = a1[6];\n            v10 = a1[7];\n            v9 = a1[8];\n            v12 = a1[9];\n            break;\n        case 1:\n            v11 = a1[10];\n            v3 = a1[11];\n            v4 = a1[12];\n            v5 = a1[13];\n            v6 = a1[14];\n            v7 = a1[15];\n            v8 = a1[16];\n            v10 = a1[17];\n            v9 = a1[18];\n            v12 = a1[19];\n            break;\n    }\n    sp0 = a0;\n    *(s32 *)67109076 = &sp0;\n    *(s32 *)67109080 = a2;\n    *(s32 *)67109084 = -2130706400;\n    v1 = a1;\n    for (i0 = 0; i0 < 8; i0 = i0 + 1) {\n        v0 = v0 + (v11 * v1[i0] + v4 * v3 + v5 * v6 + v8 * v7 + v10 * v9 + v12);\n    }\n    return v0;\n}\n",
+        "score": 12,
+        "maxScore": 103,
         "compileErrors": null,
         "breakdown": {
-          "insert": 10,
-          "delete": 8,
-          "replace": 1,
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
           "opMismatch": 0,
-          "argMismatch": 49
+          "argMismatch": 12
         },
         "quality": {
           "score": 98,
-          "lines": 55,
+          "lines": 52,
           "gotos": 0,
           "casts": 3,
           "unkGlue": 0,
@@ -35443,15 +36403,15 @@
       },
       "gapSize": {
         "decompiler": "asmlift",
-        "score": 68,
-        "maxScore": 113,
-        "ratio": 0.6017699115044248,
+        "score": 12,
+        "maxScore": 103,
+        "ratio": 0.11650485436893204,
         "kinds": {
-          "insert": 10,
-          "delete": 8,
-          "replace": 1,
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
           "opMismatch": 0,
-          "argMismatch": 49
+          "argMismatch": 12
         }
       },
       "scripts": {
@@ -35897,7 +36857,7 @@
         "decompiler": "asmlift",
         "candidateLabel": "signed/indexed",
         "outcome": "match",
-        "source": "s32 dotprod(s32 * a0, s32 * a1, s32 a2) {\n    s32 * v0;\n    s32 * v1;\n    s32 v2;\n    s32 v3;\n    s32 i0;\n    v0 = a0;\n    v1 = a1;\n    v2 = 0;\n    for (i0 = 0; i0 < a2; i0 = i0 + 1) {\n        v2 = v2 + v0[i0] * v1[i0];\n    }\n    return v2;\n}\n",
+        "source": "s32 dotprod(s32 * a0, s32 * a1, s32 a2) {\n    s32 * v0;\n    s32 * v1;\n    s32 v2;\n    s32 i0;\n    v0 = a0;\n    v1 = a1;\n    v2 = 0;\n    for (i0 = 0; i0 < a2; i0 = i0 + 1) {\n        v2 = v2 + v0[i0] * v1[i0];\n    }\n    return v2;\n}\n",
         "score": 0,
         "maxScore": 17,
         "compileErrors": null,
@@ -35910,7 +36870,7 @@
         },
         "quality": {
           "score": 100,
-          "lines": 14,
+          "lines": 13,
           "gotos": 0,
           "casts": 0,
           "unkGlue": 0,
@@ -38426,15 +39386,15 @@
       "targetAsm": "@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tfib\n\t.type\t fib,function\n\t.thumb_func\nfib:\n\tmov\tr3, #0x0\n\tmov\tr2, #0x1\n\tcmp\tr3, r0\n\tbge\t.L4\t@cond_branch\n\tadd\tr1, r0, #0\n.L6:\n\tadd\tr0, r3, r2\n\tadd\tr3, r2, #0\n\tadd\tr2, r0, #0\n\tsub\tr1, r1, #0x1\n\tcmp\tr1, #0\n\tbne\t.L6\t@cond_branch\n.L4:\n\tadd\tr0, r3, #0\n\tbx\tlr\n.Lfe1:\n\t.size\t fib,.Lfe1-fib\n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "signed/flip-join",
+        "candidateLabel": "signed/defsite/loop-entry/flip-join",
         "outcome": "nonmatch",
-        "source": "s32 fib(s32 a0) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 t0;\n    if (0 >= a0) {\n        v0 = 0;\n    } else {\n        v0 = 1;\n        v1 = 0;\n        v2 = a0;\n        do {\n            v2 = v2 - 1;\n            t0 = v1;\n            v1 = v0;\n            v0 = t0 + v0;\n        } while (v2 != 0);\n        v0 = v1;\n    }\n    return v0;\n}\n",
-        "score": 16,
-        "maxScore": 19,
+        "source": "s32 fib(s32 a0) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 t0;\n    v1 = 0;\n    if (0 >= a0) {\n        v0 = 0;\n    } else {\n        v0 = 1;\n        v2 = a0;\n        do {\n            v2 = v2 - 1;\n            t0 = v1;\n            v1 = v0;\n            v0 = t0 + v0;\n        } while (v2 != 0);\n        v0 = v1;\n    }\n    return v0;\n}\n",
+        "score": 14,
+        "maxScore": 18,
         "compileErrors": null,
         "breakdown": {
-          "insert": 6,
-          "delete": 4,
+          "insert": 5,
+          "delete": 3,
           "replace": 1,
           "opMismatch": 1,
           "argMismatch": 4
@@ -38509,22 +39469,22 @@
       "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /host-tmp/asmlift-mgcc-ref-a2c7f3f5c37567ff/ref.c\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t0000003c fib\n\n\nContents of section .text:\n 0000 27bdfff8 24060001 00002821 18800008  '...$.....(!....\n 0010 00001821 00661021 00c01821 00403021  ...!.f.!...!.@0!\n 0020 24a50001 00a4102a 1440fffb 00661021  $......*.@...f.!\n 0030 00601021 03e00008 27bd0008 00000000  .`.!....'.......\nContents of section .reginfo:\n 0000 a000007c 00000000 00000000 00000000  ...|............\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.              \n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "signed",
+        "candidateLabel": "signed/defsite/loop-entry",
         "outcome": "nonmatch",
-        "source": "s32 fib(s32 a0) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 t0;\n    if (a0 > 0) {\n        v0 = 1;\n        v2 = 0;\n        v1 = 1;\n        do {\n            v3 = v0;\n            v2 = v2 + 1;\n            t0 = v0;\n            v0 = v1;\n            v1 = t0 + v1;\n        } while (v2 < a0);\n    } else {\n        v3 = 0;\n    }\n    return v3;\n}\n",
-        "score": 14,
-        "maxScore": 19,
+        "source": "s32 fib(s32 a0) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 t0;\n    v0 = 1;\n    v2 = 0;\n    v3 = 0;\n    if (a0 > 0) {\n        v1 = 1;\n        do {\n            v3 = v0;\n            v2 = v2 + 1;\n            t0 = v0;\n            v0 = v1;\n            v1 = t0 + v1;\n        } while (v2 < a0);\n    }\n    return v3;\n}\n",
+        "score": 12,
+        "maxScore": 17,
         "compileErrors": null,
         "breakdown": {
-          "insert": 4,
+          "insert": 2,
           "delete": 4,
-          "replace": 2,
+          "replace": 1,
           "opMismatch": 0,
-          "argMismatch": 4
+          "argMismatch": 5
         },
         "quality": {
           "score": 100,
-          "lines": 22,
+          "lines": 21,
           "gotos": 0,
           "casts": 0,
           "unkGlue": 0,
@@ -38828,15 +39788,15 @@
       "targetAsm": "@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tfindfirst\n\t.type\t findfirst,function\n\t.thumb_func\nfindfirst:\n\tpush\t{r4, lr}\n\tadd\tr4, r1, #0\n\tmov\tr1, #0x0\n\tcmp\tr1, r4\n\tbge\t.L4\t@cond_branch\n\tadd\tr3, r0, #0\n.L6:\n\tldr\tr0, [r3]\n\tcmp\tr0, r2\n\tbne\t.L5\t@cond_branch\n\tadd\tr0, r1, #0\n\tb\t.L9\n.L5:\n\tadd\tr3, r3, #0x4\n\tadd\tr1, r1, #0x1\n\tcmp\tr1, r4\n\tblt\t.L6\t@cond_branch\n.L4:\n\tmov\tr0, #0x1\n\tneg\tr0, r0\n.L9:\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n.Lfe1:\n\t.size\t findfirst,.Lfe1-findfirst\n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "signed",
+        "candidateLabel": "signed/defsite/loop-entry",
         "outcome": "nonmatch",
-        "source": "s32 findfirst(s32 * a0, s32 a1, s32 a2) {\n    s32 * v0;\n    s32 v1;\n    if (0 < a1) {\n        v0 = a0;\n        v1 = 0;\n        while (*v0 != a2) {\n            v0 = v0 + 1;\n            v1 = v1 + 1;\n            if (v1 >= a1) return -1;\n        }\n        return v1;\n    } else {\n        return -1;\n    }\n}\n",
-        "score": 14,
-        "maxScore": 26,
+        "source": "s32 findfirst(s32 * a0, s32 a1, s32 a2) {\n    s32 * v0;\n    s32 v1;\n    v1 = 0;\n    if (0 < a1) {\n        v0 = a0;\n        while (*v0 != a2) {\n            v0 = v0 + 1;\n            v1 = v1 + 1;\n            if (v1 >= a1) return -1;\n        }\n        return v1;\n    } else {\n        return -1;\n    }\n}\n",
+        "score": 12,
+        "maxScore": 25,
         "compileErrors": null,
         "breakdown": {
-          "insert": 6,
-          "delete": 5,
+          "insert": 5,
+          "delete": 4,
           "replace": 0,
           "opMismatch": 1,
           "argMismatch": 2
@@ -45201,7 +46161,7 @@
         "decompiler": "asmlift",
         "candidateLabel": "signed/indexed",
         "outcome": "match",
-        "source": "s32 loopif(s32 * a0, s32 a1) {\n    s32 * v0;\n    s32 v1;\n    s32 v2;\n    s32 i0;\n    v0 = a0;\n    v1 = 0;\n    for (i0 = 0; i0 < a1; i0 = i0 + 1) {\n        if (v0[i0] > 0) v1 = v1 + v0[i0];\n    }\n    return v1;\n}\n",
+        "source": "s32 loopif(s32 * a0, s32 a1) {\n    s32 * v0;\n    s32 v1;\n    s32 i0;\n    v0 = a0;\n    v1 = 0;\n    for (i0 = 0; i0 < a1; i0 = i0 + 1) {\n        if (v0[i0] > 0) v1 = v1 + v0[i0];\n    }\n    return v1;\n}\n",
         "score": 0,
         "maxScore": 13,
         "compileErrors": null,
@@ -45214,7 +46174,7 @@
         },
         "quality": {
           "score": 100,
-          "lines": 12,
+          "lines": 11,
           "gotos": 0,
           "casts": 0,
           "unkGlue": 0,
@@ -45422,7 +46382,7 @@
         "decompiler": "asmlift",
         "candidateLabel": "signed/indexed",
         "outcome": "match",
-        "source": "s32 loopif(s32 * a0, s32 a1) {\n    s32 * v0;\n    s32 v1;\n    s32 v2;\n    s32 i0;\n    v0 = a0;\n    v1 = 0;\n    for (i0 = 0; i0 < a1; i0 = i0 + 1) {\n        if (v0[i0] > 0) v1 = v1 + v0[i0];\n    }\n    return v1;\n}\n",
+        "source": "s32 loopif(s32 * a0, s32 a1) {\n    s32 * v0;\n    s32 v1;\n    s32 i0;\n    v0 = a0;\n    v1 = 0;\n    for (i0 = 0; i0 < a1; i0 = i0 + 1) {\n        if (v0[i0] > 0) v1 = v1 + v0[i0];\n    }\n    return v1;\n}\n",
         "score": 0,
         "maxScore": 12,
         "compileErrors": null,
@@ -45435,7 +46395,7 @@
         },
         "quality": {
           "score": 100,
-          "lines": 12,
+          "lines": 11,
           "gotos": 0,
           "casts": 0,
           "unkGlue": 0,
@@ -52877,10 +53837,10 @@
       "targetAsm": "@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tnestedloop\n\t.type\t nestedloop,function\n\t.thumb_func\nnestedloop:\n\tpush\t{r4, r5, lr}\n\tmov\tr5, #0x0\n\tmov\tr3, #0x0\n\tcmp\tr5, r0\n\tbge\t.L4\t@cond_branch\n.L6:\n\tadd\tr4, r3, #0x1\n\tcmp\tr0, #0\n\tble\t.L5\t@cond_branch\n\tmov\tr2, #0x0\n\tadd\tr1, r0, #0\n.L10:\n\tadd\tr5, r5, r2\n\tadd\tr2, r2, r3\n\tsub\tr1, r1, #0x1\n\tcmp\tr1, #0\n\tbne\t.L10\t@cond_branch\n.L5:\n\tadd\tr3, r4, #0\n\tcmp\tr3, r0\n\tblt\t.L6\t@cond_branch\n.L4:\n\tadd\tr0, r5, #0\n\tpop\t{r4, r5}\n\tpop\t{r1}\n\tbx\tr1\n.Lfe1:\n\t.size\t nestedloop,.Lfe1-nestedloop\n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "signed/initfirst",
+        "candidateLabel": "signed/defsite/loop-entry/initfirst",
         "outcome": "nonmatch",
-        "source": "s32 nestedloop(s32 a0) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    v1 = 0;\n    if (v1 < a0) {\n        v0 = 0;\n        do {\n            if (a0 > 0) {\n                v3 = v1;\n                v4 = a0;\n                v2 = 0;\n                do {\n                    v3 = v3 + v2;\n                    v2 = v2 + v0;\n                    v4 = v4 - 1;\n                } while (v4 != 0);\n                v1 = v3;\n            }\n            v0 = v0 + 1;\n        } while (v0 < a0);\n    }\n    return v1;\n}\n",
-        "score": 14,
+        "source": "s32 nestedloop(s32 a0) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    v0 = 0;\n    v1 = 0;\n    if (v1 < a0) {\n        do {\n            if (a0 > 0) {\n                v3 = v1;\n                v4 = a0;\n                v2 = 0;\n                do {\n                    v3 = v3 + v2;\n                    v2 = v2 + v0;\n                    v4 = v4 - 1;\n                } while (v4 != 0);\n                v1 = v3;\n            }\n            v0 = v0 + 1;\n        } while (v0 < a0);\n    }\n    return v1;\n}\n",
+        "score": 13,
         "maxScore": 23,
         "compileErrors": null,
         "breakdown": {
@@ -52888,7 +53848,7 @@
           "delete": 1,
           "replace": 0,
           "opMismatch": 0,
-          "argMismatch": 12
+          "argMismatch": 11
         },
         "quality": {
           "score": 100,
@@ -52961,22 +53921,22 @@
       "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /host-tmp/asmlift-mgcc-ref-84c78a1282ec0a36/ref.c\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t0000004c nestedloop\n\n\nContents of section .text:\n 0000 27bdfff0 00003021 1880000d 00003821  '.....0!......8!\n 0010 18800007 00002821 00001821 00e33821  ......(!...!..8!\n 0020 24a50001 00a4102a 1440fffc 00661821  $......*.@...f.!\n 0030 24c60001 00c4102a 1440fff5 00000000  $......*.@......\n 0040 00e01021 03e00008 27bd0010 00000000  ...!....'.......\nContents of section .reginfo:\n 0000 a00000fc 00000000 00000000 00000000  ................\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.              \n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "signed",
+        "candidateLabel": "signed/defsite/loop-entry/initfirst",
         "outcome": "nonmatch",
-        "source": "s32 nestedloop(s32 a0) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    if (a0 > 0) {\n        v1 = 0;\n        v0 = 0;\n        do {\n            if (a0 > 0) {\n                v2 = v0;\n                v4 = 0;\n                v3 = 0;\n                do {\n                    v2 = v2 + v3;\n                    v4 = v4 + 1;\n                    v3 = v3 + v1;\n                } while (v4 < a0);\n                v0 = v2;\n            }\n            v1 = v1 + 1;\n        } while (v1 < a0);\n    } else {\n        v0 = 0;\n    }\n    return v0;\n}\n",
-        "score": 16,
-        "maxScore": 24,
+        "source": "s32 nestedloop(s32 a0) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    v1 = 0;\n    v0 = 0;\n    if (a0 > v0) {\n        do {\n            if (a0 > 0) {\n                v2 = v0;\n                v4 = 0;\n                v3 = 0;\n                do {\n                    v2 = v2 + v3;\n                    v4 = v4 + 1;\n                    v3 = v3 + v1;\n                } while (v4 < a0);\n                v0 = v2;\n            }\n            v1 = v1 + 1;\n        } while (v1 < a0);\n    }\n    return v0;\n}\n",
+        "score": 13,
+        "maxScore": 21,
         "compileErrors": null,
         "breakdown": {
-          "insert": 5,
-          "delete": 2,
-          "replace": 2,
+          "insert": 2,
+          "delete": 0,
+          "replace": 0,
           "opMismatch": 0,
-          "argMismatch": 7
+          "argMismatch": 11
         },
         "quality": {
           "score": 100,
-          "lines": 28,
+          "lines": 26,
           "gotos": 0,
           "casts": 0,
           "unkGlue": 0,
@@ -53684,10 +54644,10 @@
       },
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "signed/expr-home",
+        "candidateLabel": "signed/defsite/loop-entry/expr-home",
         "outcome": "nonmatch",
-        "source": "void offloop(s32 a0, s32 a1) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    v0 = getbuf(a0) + 4;\n    v1 = v0;\n    for (v2 = 0; v2 < a1; v2 = v2 + 1) {\n        *(s32 *)67109076 = v1;\n        *(s32 *)67109084 = *(u8 *)(v0 + v2);\n        v1 = v1 + 64;\n    }\n    putbuf(v0 - 4);\n    return;\n}\n",
-        "score": 10,
+        "source": "void offloop(s32 a0, s32 a1) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    v0 = getbuf(a0) + 4;\n    v2 = 0;\n    v1 = v0;\n    while (v2 < a1) {\n        *(s32 *)67109076 = v1;\n        *(s32 *)67109084 = *(u8 *)(v0 + v2);\n        v1 = v1 + 64;\n        v2 = v2 + 1;\n    }\n    putbuf(v0 - 4);\n    return;\n}\n",
+        "score": 3,
         "maxScore": 27,
         "compileErrors": null,
         "breakdown": {
@@ -53695,11 +54655,11 @@
           "delete": 1,
           "replace": 0,
           "opMismatch": 0,
-          "argMismatch": 8
+          "argMismatch": 1
         },
         "quality": {
           "score": 94,
-          "lines": 14,
+          "lines": 16,
           "gotos": 0,
           "casts": 3,
           "unkGlue": 0,
@@ -53731,15 +54691,15 @@
       },
       "gapSize": {
         "decompiler": "asmlift",
-        "score": 10,
+        "score": 3,
         "maxScore": 27,
-        "ratio": 0.37037037037037035,
+        "ratio": 0.1111111111111111,
         "kinds": {
           "insert": 1,
           "delete": 1,
           "replace": 0,
           "opMismatch": 0,
-          "argMismatch": 8
+          "argMismatch": 1
         }
       },
       "scripts": {
@@ -55650,15 +56610,15 @@
       },
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned",
+        "candidateLabel": "unsigned/defsite/loop-entry",
         "outcome": "nonmatch",
-        "source": "void revarr(s32 * a0, u32 a1) {\n    s32 v0;\n    s32 v1;\n    s32 * v2;\n    s32 * v3;\n    s32 v4;\n    s32 v5;\n    v0 = a1 - 1;\n    if (0 < v0) {\n        v2 = a0;\n        v4 = 0;\n        v5 = v0;\n        v3 = (s32 *)((v0 << 2) + (u8 *)a0);\n        do {\n            v1 = *v2;\n            *v2 = *v3;\n            *v3 = v1;\n            v2 = v2 + 1;\n            v4 = v4 + 1;\n            v3 = v3 - 1;\n            v5 = v5 - 1;\n        } while (v4 < v5);\n    }\n    return;\n}\n",
-        "score": 9,
-        "maxScore": 23,
+        "source": "void revarr(s32 * a0, u32 a1) {\n    s32 v0;\n    s32 v1;\n    s32 * v2;\n    s32 * v3;\n    s32 v4;\n    s32 v5;\n    v4 = 0;\n    v0 = a1 - 1;\n    if (0 < v0) {\n        v2 = a0;\n        v5 = v0;\n        v3 = (s32 *)((v0 << 2) + (u8 *)a0);\n        do {\n            v1 = *v2;\n            *v2 = *v3;\n            *v3 = v1;\n            v2 = v2 + 1;\n            v4 = v4 + 1;\n            v3 = v3 - 1;\n            v5 = v5 - 1;\n        } while (v4 < v5);\n    }\n    return;\n}\n",
+        "score": 7,
+        "maxScore": 22,
         "compileErrors": null,
         "breakdown": {
-          "insert": 3,
-          "delete": 1,
+          "insert": 2,
+          "delete": 0,
           "replace": 0,
           "opMismatch": 1,
           "argMismatch": 4
@@ -55699,12 +56659,12 @@
       },
       "gapSize": {
         "decompiler": "asmlift",
-        "score": 9,
-        "maxScore": 23,
-        "ratio": 0.391304347826087,
+        "score": 7,
+        "maxScore": 22,
+        "ratio": 0.3181818181818182,
         "kinds": {
-          "insert": 3,
-          "delete": 1,
+          "insert": 2,
+          "delete": 0,
           "replace": 0,
           "opMismatch": 1,
           "argMismatch": 4
@@ -55741,18 +56701,18 @@
       "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /host-tmp/asmlift-mgcc-ref-4def56147e8e38f9/ref.c\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t0000004c revarr\n\n\nContents of section .text:\n 0000 27bdfff8 24a5ffff 18a0000d 00003821  '...$.........8!\n 0010 00051080 00443021 8c830000 8cc20000  .....D0!........\n 0020 24e70001 24a5ffff ac820000 24840004  $...$.......$...\n 0030 acc30000 00e5102a 1440fff7 24c6fffc  .......*.@..$...\n 0040 27bd0008 03e00008 00000000 00000000  '...............\nContents of section .reginfo:\n 0000 a00000fc 00000000 00000000 00000000  ................\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.              \n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned",
+        "candidateLabel": "unsigned/defsite/loop-entry",
         "outcome": "nonmatch",
-        "source": "void revarr(u32 a0, s32 * a1, u32 a2) {\n    s32 v0;\n    s32 v1;\n    s32 * v2;\n    s32 * v3;\n    s32 v4;\n    s32 v5;\n    v0 = a2 + -1;\n    if (v0 > 0) {\n        v2 = a1;\n        v4 = 0;\n        v5 = v0;\n        v3 = (s32 *)((v0 << 2) + (u8 *)a1);\n        do {\n            v1 = *v2;\n            *v2 = *v3;\n            *v3 = v1;\n            v4 = v4 + 1;\n            v5 = v5 + -1;\n            v2 = v2 + 1;\n            v3 = v3 + -1;\n        } while (v4 < v5);\n        a0 = v4 < v5;\n    }\n    return;\n}\n",
-        "score": 17,
-        "maxScore": 21,
+        "source": "void revarr(u32 a0, s32 * a1, u32 a2) {\n    s32 v0;\n    s32 v1;\n    s32 * v2;\n    s32 * v3;\n    s32 v4;\n    s32 v5;\n    v0 = a2 + -1;\n    v4 = 0;\n    if (v0 > 0) {\n        v2 = a1;\n        v5 = v0;\n        v3 = (s32 *)((v0 << 2) + (u8 *)a1);\n        do {\n            v1 = *v2;\n            *v2 = *v3;\n            *v3 = v1;\n            v4 = v4 + 1;\n            v5 = v5 + -1;\n            v2 = v2 + 1;\n            v3 = v3 + -1;\n        } while (v4 < v5);\n        a0 = v4 < v5;\n    }\n    return;\n}\n",
+        "score": 15,
+        "maxScore": 20,
         "compileErrors": null,
         "breakdown": {
-          "insert": 2,
+          "insert": 1,
           "delete": 2,
           "replace": 0,
           "opMismatch": 0,
-          "argMismatch": 13
+          "argMismatch": 12
         },
         "quality": {
           "score": 100,
@@ -61870,9 +62830,9 @@
       "asmDump": "\ntarget.o:     file format elf32-powerpc\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 ref.c\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .mwcats.text\t00000000 .mwcats.text\n00000000 g     F .text\t00000024 strlen1\n\n\nRELOCATION RECORDS FOR [.mwcats.text]:\nOFFSET   TYPE              VALUE\n00000004 R_PPC_ADDR32      strlen1\n\n\nContents of section .text:\n 0000 38800000 4800000c 38840001 38630001  8...H...8...8c..\n 0010 88030000 7c000775 4082fff0 7c832378  ....|..u@...|.#x\n 0020 4e800020                             N..             \nContents of section .mwcats.text:\n 0000 02000024 00000000                    ...$....        \nContents of section .comment:\n 0000 436f6465 57617272 696f720a 02040201  CodeWarrior.....\n 0010 01020016 2c000000 00000000 00000000  ....,...........\n 0020 00000000 00000000 00000000 00000000  ................\n 0030 00000000 00000001 00000000 00000004  ................\n 0040 00000000 00000004 00000000 00000004  ................\n 0050 00000000                             ....            \n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned",
+        "candidateLabel": "unsigned/defsite/loop-entry",
         "outcome": "match",
-        "source": "s32 strlen1(u8 * a0) {\n    u8 * v0;\n    s32 v1;\n    v0 = a0;\n    v1 = 0;\n    while ((s8)*v0 != 0) {\n        v1 = v1 + 1;\n        v0 = v0 + 1;\n    }\n    return v1;\n}\n",
+        "source": "s32 strlen1(u8 * a0) {\n    u8 * v0;\n    s32 v1;\n    v1 = 0;\n    for (v0 = a0; (s8)*v0 != 0; v0 = v0 + 1) {\n        v1 = v1 + 1;\n    }\n    return v1;\n}\n",
         "score": 0,
         "maxScore": 9,
         "compileErrors": null,
@@ -61885,7 +62845,7 @@
         },
         "quality": {
           "score": 100,
-          "lines": 11,
+          "lines": 9,
           "gotos": 0,
           "casts": 1,
           "unkGlue": 0,
@@ -69448,22 +70408,22 @@
       "targetAsm": "@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tuninit_spill\n\t.type\t uninit_spill,function\n\t.thumb_func\nuninit_spill:\n\tpush\t{r4, r5, r6, r7, lr}\n\tmov\tr7, sl\n\tmov\tr6, r9\n\tmov\tr5, r8\n\tpush\t{r5, r6, r7}\n\tadd\tsp, sp, #-0xc\n\tmov\tr6, #0x0\n\tmov\tsl, r6\n\tcmp\tr0, #0\n\tbeq\t.L4\t@cond_branch\n\tcmp\tr0, #0x1\n\tbeq\t.L5\t@cond_branch\n\tb\t.L3\n.L4:\n\tldr\tr7, [r1]\n\tmov\tip, r7\n\tldr\tr0, [r1, #0x4]\n\tstr\tr0, [sp]\n\tldr\tr6, [r1, #0x8]\n\tstr\tr6, [sp, #0x4]\n\tldr\tr7, [r1, #0xc]\n\tmov\tr9, r7\n\tldr\tr0, [r1, #0x10]\n\tstr\tr0, [sp, #0x8]\n\tldr\tr6, [r1, #0x14]\n\tmov\tr8, r6\n\tldr\tr5, [r1, #0x18]\n\tldr\tr4, [r1, #0x1c]\n\tldr\tr2, [r1, #0x20]\n\tldr\tr3, [r1, #0x24]\n\tb\t.L3\n.L5:\n\tldr\tr7, [r1, #0x28]\n\tmov\tip, r7\n\tldr\tr0, [r1, #0x2c]\n\tstr\tr0, [sp]\n\tldr\tr6, [r1, #0x30]\n\tstr\tr6, [sp, #0x4]\n\tldr\tr7, [r1, #0x34]\n\tmov\tr9, r7\n\tldr\tr0, [r1, #0x38]\n\tstr\tr0, [sp, #0x8]\n\tldr\tr6, [r1, #0x3c]\n\tmov\tr8, r6\n\tldr\tr5, [r1, #0x40]\n\tldr\tr4, [r1, #0x44]\n\tldr\tr2, [r1, #0x48]\n\tldr\tr3, [r1, #0x4c]\n.L3:\n\tldr\tr0, [sp]\n\tldr\tr6, [sp, #0x4]\n\tmov\tr7, r0\n\tmul\tr7, r7, r6\n\tstr\tr7, [sp, #0x4]\n\tldr\tr7, [sp, #0x8]\n\tmov\tr6, r9\n\tmul\tr6, r6, r7\n\tmov\tr0, r8\n\tmul\tr0, r0, r5\n\tadd\tr5, r0, #0\n\tmul\tr4, r4, r2\n\tmov\tr2, #0x7\n.L11:\n\tldmia\tr1!, {r0}\n\tmov\tr7, ip\n\tmul\tr7, r7, r0\n\tadd\tr0, r7, #0\n\tldr\tr7, [sp, #0x4]\n\tadd\tr0, r0, r7\n\tadd\tr0, r0, r6\n\tadd\tr0, r0, r5\n\tadd\tr0, r0, r4\n\tadd\tr0, r0, r3\n\tadd\tsl, sl, r0\n\tsub\tr2, r2, #0x1\n\tcmp\tr2, #0\n\tbge\t.L11\t@cond_branch\n\tmov\tr0, sl\n\tadd\tsp, sp, #0xc\n\tpop\t{r3, r4, r5}\n\tmov\tr8, r3\n\tmov\tr9, r4\n\tmov\tsl, r5\n\tpop\t{r4, r5, r6, r7}\n\tpop\t{r1}\n\tbx\tr1\n.Lfe1:\n\t.size\t uninit_spill,.Lfe1-uninit_spill\n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned/derived-home",
+        "candidateLabel": "unsigned/defsite/loop-entry/derived-home/indexed",
         "outcome": "nonmatch",
-        "source": "s32 uninit_spill(u32 a0, s32 * a1, u32 a2, u32 a3) {\n    s32 v0;\n    s32 * v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    s32 v5;\n    s32 v6;\n    s32 v7;\n    s32 v8;\n    s32 v9;\n    s32 v10;\n    switch (a0) {\n        case 0:\n            v10 = *a1;\n            v3 = a1[1];\n            v4 = a1[2];\n            v6 = a1[3];\n            v5 = a1[4];\n            v7 = a1[5];\n            v8 = a1[6];\n            v9 = a1[7];\n            a2 = a1[8];\n            a3 = a1[9];\n            break;\n        case 1:\n            v10 = a1[10];\n            v3 = a1[11];\n            v4 = a1[12];\n            v6 = a1[13];\n            v5 = a1[14];\n            v7 = a1[15];\n            v8 = a1[16];\n            v9 = a1[17];\n            a2 = a1[18];\n            a3 = a1[19];\n            break;\n    }\n    v1 = a1;\n    v0 = 0;\n    v2 = 7;\n    do {\n        v0 = v0 + (v10 * *v1 + v3 * v4 + v6 * v5 + v7 * v8 + v9 * a2 + a3);\n        v1 = v1 + 1;\n        v2 = v2 - 1;\n    } while (v2 >= 0);\n    return v0;\n}\n",
-        "score": 53,
-        "maxScore": 92,
+        "source": "s32 uninit_spill(u32 a0, s32 * a1, u32 a2, u32 a3) {\n    s32 v0;\n    s32 * v1;\n    s32 v3;\n    s32 v4;\n    s32 v5;\n    s32 v6;\n    s32 v7;\n    s32 v8;\n    s32 v9;\n    s32 v10;\n    s32 i0;\n    v0 = 0;\n    switch (a0) {\n        case 0:\n            v10 = *a1;\n            v3 = a1[1];\n            v4 = a1[2];\n            v6 = a1[3];\n            v5 = a1[4];\n            v7 = a1[5];\n            v8 = a1[6];\n            v9 = a1[7];\n            a2 = a1[8];\n            a3 = a1[9];\n            break;\n        case 1:\n            v10 = a1[10];\n            v3 = a1[11];\n            v4 = a1[12];\n            v6 = a1[13];\n            v5 = a1[14];\n            v7 = a1[15];\n            v8 = a1[16];\n            v9 = a1[17];\n            a2 = a1[18];\n            a3 = a1[19];\n            break;\n    }\n    v1 = a1;\n    for (i0 = 0; i0 < 8; i0 = i0 + 1) {\n        v0 = v0 + (v10 * v1[i0] + v3 * v4 + v6 * v5 + v7 * v8 + v9 * a2 + a3);\n    }\n    return v0;\n}\n",
+        "score": 13,
+        "maxScore": 83,
         "compileErrors": null,
         "breakdown": {
-          "insert": 10,
-          "delete": 4,
-          "replace": 3,
+          "insert": 1,
+          "delete": 0,
+          "replace": 0,
           "opMismatch": 0,
-          "argMismatch": 36
+          "argMismatch": 12
         },
         "quality": {
           "score": 100,
-          "lines": 48,
+          "lines": 45,
           "gotos": 0,
           "casts": 0,
           "unkGlue": 0,
@@ -69493,15 +70453,15 @@
       },
       "gapSize": {
         "decompiler": "asmlift",
-        "score": 53,
-        "maxScore": 92,
-        "ratio": 0.5760869565217391,
+        "score": 13,
+        "maxScore": 83,
+        "ratio": 0.1566265060240964,
         "kinds": {
-          "insert": 10,
-          "delete": 4,
-          "replace": 3,
+          "insert": 1,
+          "delete": 0,
+          "replace": 0,
           "opMismatch": 0,
-          "argMismatch": 36
+          "argMismatch": 12
         }
       },
       "scripts": {
