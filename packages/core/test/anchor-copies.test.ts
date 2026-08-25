@@ -190,3 +190,102 @@ test('a test block carrying an anchored write is never consumed as a discarded t
     expect(write).toBeLessThan(dispatch);
   }
 });
+
+// LOOP-HEADER ENTRY ARG: the one merge arg whose def legitimately sits far above its edge —
+// `int s = 0;` at the top of a function, ahead of a `for` that accumulates into it. The
+// accumulator's back-edge value shares its name, which is why the blanket name-count rule cannot
+// decide this shape; what makes it sound is that every OTHER claimant lives inside the body, so
+// the only write to the name outside the loop is the anchored one.
+const ACCUM = `fn accum {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=0}
+  %3: u32 = icmp_eq %1, %2
+  cond_br %3, ^bb1(), ^bb2()
+^bb1():
+  %4: s32 = const {value=5}
+  br ^bb3(%4)
+^bb2():
+  %5: s32 = const {value=9}
+  br ^bb3(%5)
+^bb3(%6: s32):
+  br ^bb4(%2, %6)
+^bb4(%7: s32, %8: s32):
+  %9: s32 = add %7, %8
+  %10: s32 = const {value=1}
+  %11: s32 = sub %8, %10
+  %12: s32 = const {value=0}
+  %13: u32 = icmp_sge %11, %12
+  cond_br %13, ^bb4(%9, %11), ^bb5()
+^bb5():
+  ret %9
+}
+`;
+
+test("a loop header's entry const anchors at its def site, above the if the preheader sits under", () => {
+  expect(emit(ACCUM, false)).toContain('    }\n    v0 = 0;\n'); // preheader placement, below the if
+  expect(emit(ACCUM, true)).toContain(
+    's32 accum(s32 a0, s32 a1) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    v0 = 0;\n    if (',
+  );
+});
+
+// Two forward preds: each writes the name at its OWN edge, outside the body, so suppressing one
+// leaves a path into the header carrying the other's value.
+const TWO_PREHEADERS = `fn twopre {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=0}
+  %3: u32 = icmp_eq %1, %2
+  cond_br %3, ^bb1(), ^bb2()
+^bb1():
+  %4: s32 = const {value=5}
+  br ^bb4(%2, %4)
+^bb2():
+  %5: s32 = const {value=9}
+  br ^bb4(%2, %5)
+^bb4(%7: s32, %8: s32):
+  %9: s32 = add %7, %8
+  %10: s32 = const {value=1}
+  %11: s32 = sub %8, %10
+  %12: s32 = const {value=0}
+  %13: u32 = icmp_sge %11, %12
+  cond_br %13, ^bb4(%9, %11), ^bb5()
+^bb5():
+  ret %9
+}
+`;
+
+test('a loop header entered from two preheaders declines', () => {
+  expect(emit(TWO_PREHEADERS, true)).toBe(emit(TWO_PREHEADERS, false));
+});
+
+// The exit merge carries the accumulator under the SAME name from a block outside the body, so a
+// write to it exists outside the loop and the "only the anchored one" premise fails.
+const OUTSIDE_CLAIMANT = `fn outside {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=0}
+  %3: u32 = icmp_eq %1, %2
+  cond_br %3, ^bb1(), ^bb2()
+^bb1():
+  %4: s32 = const {value=5}
+  br ^bb3(%4)
+^bb2():
+  %5: s32 = const {value=9}
+  br ^bb3(%5)
+^bb3(%6: s32):
+  br ^bb4(%2, %6)
+^bb4(%7: s32, %8: s32):
+  %9: s32 = add %7, %8
+  %10: s32 = const {value=1}
+  %11: s32 = sub %8, %10
+  %12: s32 = const {value=0}
+  %13: u32 = icmp_sge %11, %12
+  cond_br %13, ^bb4(%9, %11), ^bb5(%9)
+^bb5(%14: s32):
+  %15: s32 = const {value=3}
+  %16: s32 = mul %14, %15
+  ret %16
+}
+`;
+
+test('a name claimed by a value outside the loop body declines', () => {
+  expect(emit(OUTSIDE_CLAIMANT, true)).toBe(emit(OUTSIDE_CLAIMANT, false));
+});

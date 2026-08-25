@@ -70,7 +70,7 @@ import {
 } from '../symbols';
 import { analyze } from './analysis';
 import { makeLoopHazards, sunkCopyOverDroppedUndef, updateWriteSet } from './hazards';
-import { analyzeLoops } from './loops';
+import { type NaturalLoop, analyzeLoops } from './loops';
 import { type NameMerge, coalesceNames } from './namecoalesce';
 import { type ArmExit, makeSwitchRecovery } from './switch-recover';
 
@@ -816,6 +816,7 @@ function assertPrimaryAccepts(fn: Fn, opts: StructureOptions, hooks: StructureHo
       homeSharedAddresses: false,
       homeLoopExprs: false,
       homeDerivedReads: false,
+      anchorConstCopies: false,
     },
     hooks,
   );
@@ -856,7 +857,14 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // too), which the loop emitters' hazard predicates read — so the invariant above covers each.
   // A per-compiler DEFAULT is not among them, however much it materializes: the primary IS this
   // target's defaults, so resetting one would probe a spelling asmlift never emits here.
-  if (coalesceMergeNames || materializeJoinFeeds || homeSharedAddresses || homeLoopExprs || homeDerivedReads) {
+  if (
+    coalesceMergeNames ||
+    materializeJoinFeeds ||
+    homeSharedAddresses ||
+    homeLoopExprs ||
+    homeDerivedReads ||
+    anchorConstCopies
+  ) {
     assertPrimaryAccepts(fn, opts, hooks);
   }
   const defs = defOpMap(fn);
@@ -1728,7 +1736,15 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // REFUSAL CONDITIONS — each keeps the edge placement, never producing a different write:
   //   - the arg is not an UNNAMED `const` op (only a rematerializable constant carries
   //     unambiguous placement evidence; a named value's position is its materialized def's);
-  //   - the merge is a loop header (loop copies have their own placement discipline);
+  //   - the merge is a loop header whose entry side is not a single preheader, or whose body is
+  //     reachable from outside except through the header, or under whose name some value lives
+  //     OUTSIDE the body. A loop header's entry arg is the one merge arg whose def can sit
+  //     legitimately far above the edge — `int s = 0;` at the top of a function ahead of a
+  //     `for` that accumulates into it — and the back-edge args, which share the name, are what
+  //     the blanket name-count rule below refuses on. Anchoring stays sound exactly when the
+  //     name is written nowhere outside the loop but at the anchored site: the entry copy runs
+  //     once, before the body, and every other write to the name is a back-edge copy strictly
+  //     after it;
   //   - the const's block does not dominate every edge source passing it (the anchored write
   //     must precede the edge on every path);
   //   - the const's block or any edge source sits inside ANY loop. Block-level dominance does
@@ -1736,7 +1752,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   //     suppressed edge in iteration 2 with the variable overwritten in between, the /preinit
   //     sticky-arm failure class (PR #13) — so in-loop shapes are declined outright;
   //   - the merge variable names any OTHER SSA value (a shared name has readers and writers
-  //     between the def site and the edge that edge placement respects and anchoring would not);
+  //     between the def site and the edge that edge placement respects and anchoring would not).
+  //     A loop header's carried value is the exception above: its other claimants all live in
+  //     the body;
   //   - another anchored const of the same variable lies on a path from this one to this one's
   //     edge (the later write would clobber this arg's value; both stay at their edges instead).
   const anchoredAt = new Map<Op, { name: string; arg: Value }[]>();
@@ -1757,13 +1775,30 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // conservative "a write in `a` may execute between one in `b` and `b`'s terminator": same
     // block counts (op order refined by the caller where it matters), else CFG reachability
     const mayFollow = (a: Block, b: Block): boolean => a === b || reachFrom(a).has(b);
+    const blockOf = (v: Value): Block | undefined => paramBlock.get(v) ?? opBlock.get(defs.get(v)!);
+    // A loop whose body is entered ONLY through its header, from ONE preheader. Both halves are
+    // what make "every write to the name outside the anchored one is a back-edge copy" true: a
+    // second forward pred writes the name at its own edge outside the body, and a body block with
+    // an outside predecessor takes a copy into a body param from outside too.
+    const singleEntry = (nl: NaturalLoop): boolean =>
+      nl.forwardPreds.length === 1 &&
+      [...nl.body].every((b) => b === nl.header || (preds.get(b) ?? []).every((r) => nl.body.has(r)));
     for (const M of fn.blocks) {
-      if (M === entry || M.params.length === 0 || forest.byHeader.has(M)) {
+      if (M === entry || M.params.length === 0) {
+        continue;
+      }
+      const loop = forest.byHeader.get(M);
+      if (loop && !singleEntry(loop)) {
         continue;
       }
       M.params.forEach((p, i) => {
         const name = varName.get(p)!;
-        if (nameCount.get(name) !== 1) {
+        // the name belongs to this merge alone — or, at a loop header, to this merge and the
+        // body's own carried values, which are written only on the back edge
+        const soleClaimant =
+          nameCount.get(name) === 1 ||
+          (loop !== undefined && [...varName].every(([v, n]) => n !== name || v === p || loop.body.has(blockOf(v)!)));
+        if (!soleClaimant) {
           return;
         }
         // every in-edge record into M, grouped by the SSA value it passes for param i
