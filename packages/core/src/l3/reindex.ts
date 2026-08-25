@@ -50,6 +50,21 @@
 //
 // v3 SCOPE — the up-counting BYTE walk with an EXPRESSION base (`p = (u8 *)(EXPR)` ahead of a
 // counter-carried do-while): full rules at `tryExprWalk` below.
+//
+// v4 SCOPE — the UNGUARDED countdown, the shape agbcc emits for `for(i=0;i<C;i++) a[i]` with a
+// LITERAL bound. A constant trip count needs no zero-trip guard, and the exit test agbcc writes
+// for it is `>= 0` rather than v2's `!= 0`:
+//
+//     p = B; k = C; do { BODY; p += 1; k -= 1 } while (k >= 0)
+//
+// re-spells as `p = B; for (i = 0; i < C + 1; i++) BODY[p[c] → p[i + c]]` — k counts C…0, so the
+// body runs C + 1 times. Everything downstream of the counter's init is v2's (respellCountdown);
+// what this shape adds is its own two rules —
+//   • the counter is declared SIGNED. `k >= 0` never fails for an unsigned k, so an unsigned
+//     declaration describes a loop that does not terminate, and `C + 1` would be a fiction;
+//   • C is a NON-NEGATIVE constant (`k = -1` runs the body once, not `C + 1 = 0` times).
+// The induction inits are read out of the statements PRECEDING the do-while in its own list
+// rather than out of a guard arm, and the counter's init is the only one the rewrite deletes.
 import { IrType, T } from '../ir/types';
 import { Expr, SFn, Stmt, mapExprChildren, mapStmtExprs, stmtExprs } from './ast';
 
@@ -652,6 +667,14 @@ export function reindexWalks(sfn: SFn, keptWalks?: Set<string>): SFn | null {
           fired++;
           continue;
         }
+        // v4 — the unguarded constant-trip countdown (see the header)
+        const cd = respellConstCountdown(out, s);
+        if (cd) {
+          out.length = 0;
+          out.push(...cd.pre, cd.counted);
+          fired++;
+          continue;
+        }
       }
       // the guarded countdown (v2 — see the header): an `if` whose one arm is skip-copies C and
       // whose other arm is C ⊎ inductions followed by the do-while
@@ -689,55 +712,25 @@ export function reindexWalks(sfn: SFn, keptWalks?: Set<string>): SFn | null {
     }
   };
 
-  /** v2: `s` re-spelled as [C…, walk inits…, for], or null (decline). */
-  function respellGuardedCountdown(s: Stmt & { k: 'if' }): Stmt[] | null {
-    // which arm holds the loop, and does the guard skip it in the right sense?
-    const armWith = (arm: Stmt[]): { pre: Stmt[]; loop: Stmt & { k: 'dowhile' } } | null => {
-      const last = arm[arm.length - 1];
-      return last?.k === 'dowhile' ? { pre: arm.slice(0, -1), loop: last } : null;
-    };
-    const inElse = armWith(s.else);
-    const inThen = armWith(s.then);
-    const c = s.cond;
-    const guardSkips = (n: string, loopInElse: boolean): boolean => {
-      if (c.k !== 'bin') {
-        return false;
-      }
-      const zl = c.l.k === 'const' && c.l.value === 0 && c.r.k === 'var' && c.r.name === n;
-      const zr = c.r.k === 'const' && c.r.value === 0 && c.l.k === 'var' && c.l.name === n;
-      // loop in else ⇒ cond true skips: 0 >= n / n <= 0. Loop in then ⇒ cond true enters: 0 < n / n > 0.
-      return loopInElse ? (zl && c.op === '>=') || (zr && c.op === '<=') : (zl && c.op === '<') || (zr && c.op === '>');
-    };
-    const pick = inElse ?? inThen;
-    const skipArm = inElse ? s.then : s.else;
-    if (!pick || (inElse && inThen)) {
-      return null;
-    }
-    const { pre, loop } = pick;
-    // the do-while exit: exactly `k != 0`
-    const lc = loop.cond;
-    if (lc.k !== 'bin' || lc.op !== '!=' || lc.l.k !== 'var' || lc.r.k !== 'const' || lc.r.value !== 0) {
-      return null;
-    }
-    const k = lc.l.name;
+  /** The countdown machinery the guarded (v2) and the unguarded constant-trip (v4) shapes share:
+   *  everything downstream of "which statement inits the counter, and what is the trip count".
+   *  `confineTo` names the statements every mention of the counter and of each walk pointer must
+   *  live in, given the induction inits this found. Returns the inits it consumed, `pre` minus
+   *  them, and the counted `for` — or null (decline). */
+  function respellCountdown(
+    loop: Stmt & { k: 'dowhile' },
+    pre: Stmt[],
+    k: string,
+    kInit: Stmt & { k: 'assign' },
+    trip: Expr,
+    confineTo: (induction: Stmt[]) => Stmt[],
+  ): { inductionInits: Set<Stmt>; leftovers: Stmt[]; counted: Stmt & { k: 'for' } } | null {
     // an INTEGER counter only: C pointer arithmetic strides the element size, so a pointer-typed
     // k's `k - 1` counts elements-of-k, not iterations — the rewrite's `i < n` would run a
     // different trip count. Declining on type closes every pointer-k shape at once (a self-step,
     // an ordinary decrement, whatever spelling).
     if (ptrVars.has(k)) {
       return null;
-    }
-    // the counter's init `k = N`, N a var the guard tests
-    const kInit = pre.find((x): x is Stmt & { k: 'assign' } => x.k === 'assign' && x.name === k);
-    if (!kInit || kInit.value.k !== 'var') {
-      return null;
-    }
-    const n = kInit.value.name;
-    if (n === k || !guardSkips(n, pick === inElse)) {
-      return null;
-    }
-    if (sfn.body.some((x) => stmtAssigns(x, n))) {
-      return null; // a moving bound
     }
     // the body's contiguous tail: `k -= 1` and `p += 1` per walk pointer
     const isDec = (x: Stmt): boolean =>
@@ -778,7 +771,7 @@ export function reindexWalks(sfn: SFn, keptWalks?: Set<string>): SFn | null {
     if (hasLoopExit(bodyCore)) {
       return null;
     }
-    // each walk pointer: an init `p = B` in pre (B a var or a numeric address), confined to the if
+    // each walk pointer: an init `p = B` in pre (B a var or a numeric address)
     const inits = new Map<string, Stmt & { k: 'assign' }>();
     for (const p of walks) {
       const init = pre.find((x): x is Stmt & { k: 'assign' } => x.k === 'assign' && x.name === p);
@@ -792,18 +785,19 @@ export function reindexWalks(sfn: SFn, keptWalks?: Set<string>): SFn | null {
       }
       inits.set(p, init);
     }
+    const shape = confineTo([kInit, ...inits.values(), loop]);
     // The counter appears in EXACTLY its four roles — init write, decrement write + read, exit
     // read. The rewrite deletes the init and the decrement, so ANY other use of k (a leftover's
     // read, a second decrement, a body read like `*p = k`, a nested loop's) would survive
     // referencing a variable that no longer exists as a counter. Counted over the whole
-    // function, which also confines k to this `if`.
-    if (countMentions(sfn.body, k) !== 4) {
+    // function, which also confines k to the shape.
+    if (countMentions(sfn.body, k) !== 4 || countMentions(shape, k) !== 4) {
       return null;
     }
-    // every p lives ONLY inside this `if` (the v1 rule, counted the same way) — its body uses
+    // every p lives ONLY inside the shape (the v1 rule, counted the same way) — its body uses
     // are policed by reindexStmts (a bare `p` or a write declines; derefs rewrite)
     for (const name of walks) {
-      if (countMentions(sfn.body, name) !== countMentions([s], name)) {
+      if (countMentions(sfn.body, name) !== countMentions(shape, name)) {
         return null;
       }
     }
@@ -815,18 +809,11 @@ export function reindexWalks(sfn: SFn, keptWalks?: Set<string>): SFn | null {
         return null;
       }
     }
-    // the skip arm must be, in order, exactly `pre` minus the induction inits
     const inductionInits = new Set<Stmt>([kInit, ...inits.values()]);
     const leftovers = pre.filter((x) => !inductionInits.has(x));
     // no leftover may mention a walk pointer: leftovers outlive the deleted step, and their
     // skip-arm twins read a pointer the skip path never initialised
     if (leftovers.some((x) => walks.some((w) => stmtMentions(x, w)))) {
-      return null;
-    }
-    if (
-      skipArm.length !== leftovers.length ||
-      !skipArm.every((x, i) => JSON.stringify(x) === JSON.stringify(leftovers[i]))
-    ) {
       return null;
     }
     // rewrite: each walk pointer is its OWN base (kept local, step dropped)
@@ -842,12 +829,13 @@ export function reindexWalks(sfn: SFn, keptWalks?: Set<string>): SFn | null {
     for (const p of walks) {
       keptWalks?.add(p);
     }
-    return [
-      ...pre.filter((x) => x !== kInit),
-      {
+    return {
+      inductionInits,
+      leftovers,
+      counted: {
         k: 'for',
         init: { k: 'assign', name: iv, value: { k: 'const', value: 0 } },
-        cond: { k: 'bin', op: '<', l: { k: 'var', name: iv }, r: { k: 'var', name: n } },
+        cond: { k: 'bin', op: '<', l: { k: 'var', name: iv }, r: trip },
         inc: {
           k: 'assign',
           name: iv,
@@ -855,7 +843,104 @@ export function reindexWalks(sfn: SFn, keptWalks?: Set<string>): SFn | null {
         },
         body,
       },
-    ];
+    };
+  }
+
+  /** v2: `s` re-spelled as [C…, walk inits…, for], or null (decline). */
+  function respellGuardedCountdown(s: Stmt & { k: 'if' }): Stmt[] | null {
+    // which arm holds the loop, and does the guard skip it in the right sense?
+    const armWith = (arm: Stmt[]): { pre: Stmt[]; loop: Stmt & { k: 'dowhile' } } | null => {
+      const last = arm[arm.length - 1];
+      return last?.k === 'dowhile' ? { pre: arm.slice(0, -1), loop: last } : null;
+    };
+    const inElse = armWith(s.else);
+    const inThen = armWith(s.then);
+    const c = s.cond;
+    const guardSkips = (n: string, loopInElse: boolean): boolean => {
+      if (c.k !== 'bin') {
+        return false;
+      }
+      const zl = c.l.k === 'const' && c.l.value === 0 && c.r.k === 'var' && c.r.name === n;
+      const zr = c.r.k === 'const' && c.r.value === 0 && c.l.k === 'var' && c.l.name === n;
+      // loop in else ⇒ cond true skips: 0 >= n / n <= 0. Loop in then ⇒ cond true enters: 0 < n / n > 0.
+      return loopInElse ? (zl && c.op === '>=') || (zr && c.op === '<=') : (zl && c.op === '<') || (zr && c.op === '>');
+    };
+    const pick = inElse ?? inThen;
+    const skipArm = inElse ? s.then : s.else;
+    if (!pick || (inElse && inThen)) {
+      return null;
+    }
+    const { pre, loop } = pick;
+    // the do-while exit: exactly `k != 0`
+    const lc = loop.cond;
+    if (lc.k !== 'bin' || lc.op !== '!=' || lc.l.k !== 'var' || lc.r.k !== 'const' || lc.r.value !== 0) {
+      return null;
+    }
+    const k = lc.l.name;
+    // the counter's init `k = N`, N a var the guard tests
+    const kInit = pre.find((x): x is Stmt & { k: 'assign' } => x.k === 'assign' && x.name === k);
+    if (!kInit || kInit.value.k !== 'var') {
+      return null;
+    }
+    const n = kInit.value.name;
+    if (n === k || !guardSkips(n, pick === inElse)) {
+      return null;
+    }
+    if (sfn.body.some((x) => stmtAssigns(x, n))) {
+      return null; // a moving bound
+    }
+    const r = respellCountdown(loop, pre, k, kInit, { k: 'var', name: n }, () => [s]);
+    if (!r) {
+      return null;
+    }
+    // the skip arm must be, in order, exactly `pre` minus the induction inits
+    if (
+      skipArm.length !== r.leftovers.length ||
+      !skipArm.every((x, i) => JSON.stringify(x) === JSON.stringify(r.leftovers[i]))
+    ) {
+      return null;
+    }
+    return [...pre.filter((x) => x !== kInit), r.counted];
+  }
+
+  /** v4: the UNGUARDED constant-trip countdown (see the header) — `out`'s tail holds the
+   *  induction inits, `dw` is the loop. Returns the statements replacing them (the walk inits
+   *  the loop keeps, then the counted `for`) and how many of `out`'s trailing statements they
+   *  consume, or null (decline). */
+  function respellConstCountdown(out: Stmt[], dw: Stmt & { k: 'dowhile' }): { pre: Stmt[]; counted: Stmt } | null {
+    // the do-while exit: exactly `k >= 0` / `0 <= k`
+    const lc = dw.cond;
+    if (lc.k !== 'bin') {
+      return null;
+    }
+    const kv =
+      lc.op === '>=' && lc.l.k === 'var' && lc.r.k === 'const' && lc.r.value === 0
+        ? lc.l.name
+        : lc.op === '<=' && lc.r.k === 'var' && lc.l.k === 'const' && lc.l.value === 0
+          ? lc.r.name
+          : null;
+    if (kv === null) {
+      return null;
+    }
+    // `k >= 0` terminates only for a SIGNED counter — an unsigned one never goes below zero, and
+    // the compiler that emitted this test proved it signed (`bge`). A declaration asmlift settled
+    // on unsigned describes a different loop, so the trip count `C + 1` would be a fiction.
+    const kT = declTypes.get(kv);
+    if (kT?.kind !== 'int' || !kT.signed) {
+      return null;
+    }
+    // the counter's init `k = C`, C a NON-NEGATIVE constant: the loop runs while k counts C…0, so
+    // the trip count is C + 1 — which is a count only for C >= 0 (`k = -1` runs once, not zero
+    // times).
+    const kInit = out.find((x): x is Stmt & { k: 'assign' } => x.k === 'assign' && x.name === kv);
+    if (!kInit || kInit.value.k !== 'const' || kInit.value.value < 0) {
+      return null;
+    }
+    const r = respellCountdown(dw, out, kv, kInit, { k: 'const', value: kInit.value.value + 1 }, (i) => i);
+    if (!r) {
+      return null;
+    }
+    return { pre: out.filter((x) => x !== kInit), counted: r.counted };
   }
 
   function freshIv(): string {

@@ -579,3 +579,117 @@ describe('v3 — expression-base byte walk', () => {
     expect(reindexWalks(mkFn(init, wide))).toBeNull();
   });
 });
+
+// ── v4: the unguarded constant-trip countdown ────────────────────────────────────────────────
+
+/** The agbcc shape for `for(i=0;i<8;i++) s += p[i];` — a literal bound needs no zero-trip guard:
+ *  `v1 = a0; v0 = 0; v2 = 7; do { v0 = v0 + *v1; v1 = v1 + 1; v2 = v2 - 1; } while (v2 >= 0);` */
+function constCountdown(mut?: (fn: SFn) => void): SFn {
+  const fn: SFn = {
+    name: 'sum8',
+    retType: T.s(32),
+    params: [{ name: 'a0', type: T.ptr(T.s(32)) }],
+    locals: [
+      { name: 'v0', type: T.s(32) },
+      { name: 'v1', type: T.ptr(T.s(32)) },
+      { name: 'v2', type: T.s(32) },
+    ],
+    body: [
+      { k: 'assign', name: 'v1', value: V('a0') },
+      { k: 'assign', name: 'v0', value: C(0) },
+      { k: 'assign', name: 'v2', value: C(7) },
+      {
+        k: 'dowhile',
+        cond: { k: 'bin', op: '>=', l: V('v2'), r: C(0) },
+        body: [
+          { k: 'assign', name: 'v0', value: { k: 'bin', op: '+', l: V('v0'), r: deref('v1') } },
+          step('v1'),
+          { k: 'assign', name: 'v2', value: { k: 'bin', op: '-', l: V('v2'), r: C(1) } },
+        ],
+      },
+      { k: 'return', value: V('v0') },
+    ],
+  };
+  mut?.(fn);
+  return fn;
+}
+
+/** The loop statement of a `constCountdown` fixture, for mutators. */
+const cdLoop = (fn: SFn): Stmt & { k: 'dowhile' } => fn.body[3] as Stmt & { k: 'dowhile' };
+
+describe('v4 — the unguarded constant-trip countdown re-spells as a counted for', () => {
+  test('the golden shape: the counter init disappears, the walk keeps its init, C becomes C + 1', () => {
+    const out = reindexWalks(constCountdown());
+    expect(out).not.toBeNull();
+    const c = cBackend.emit(out!);
+    expect(c).toContain('v1 = a0;');
+    expect(c).toContain('v0 = 0;');
+    expect(c).toContain('for (i0 = 0; i0 < 8; i0 = i0 + 1)');
+    expect(c).toContain('v1[i0]');
+    expect(c).not.toContain('v2 =');
+    expect(c).not.toContain('do {');
+  });
+
+  test('the input SFn is never mutated', () => {
+    const sfn = constCountdown();
+    const before = JSON.stringify(sfn);
+    reindexWalks(sfn);
+    expect(JSON.stringify(sfn)).toBe(before);
+  });
+
+  test('refused: an UNSIGNED counter — `k >= 0` would never end the loop', () => {
+    expect(reindexWalks(constCountdown((fn) => (fn.locals[2].type = T.u(32))))).toBeNull();
+  });
+
+  test('refused: a negative constant — `k = -1` runs the body once, not C + 1 times', () => {
+    expect(reindexWalks(constCountdown((fn) => ((fn.body[2] as Stmt & { k: 'assign' }).value = C(-1))))).toBeNull();
+  });
+
+  test('refused: a variable trip count (that shape carries a guard — v2 owns it)', () => {
+    expect(
+      reindexWalks(
+        constCountdown((fn) => {
+          fn.params.push({ name: 'a1', type: T.s(32) });
+          (fn.body[2] as Stmt & { k: 'assign' }).value = V('a1');
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  test('refused: the `!= 0` exit — an unguarded loop with it counts one iteration fewer', () => {
+    expect(reindexWalks(constCountdown((fn) => (cdLoop(fn).cond = { k: 'bin', op: '!=', l: V('v2'), r: C(0) })))).toBe(
+      null,
+    );
+  });
+
+  test('refused: a break in the body', () => {
+    expect(reindexWalks(constCountdown((fn) => cdLoop(fn).body.unshift({ k: 'break' })))).toBeNull();
+  });
+
+  test('refused: the counter is read a fifth time (`*p = k`)', () => {
+    expect(
+      reindexWalks(constCountdown((fn) => cdLoop(fn).body.unshift({ k: 'store', lval: deref('v1'), value: V('v2') }))),
+    ).toBeNull();
+  });
+
+  test('refused: the walk pointer is read after the loop', () => {
+    expect(
+      reindexWalks(constCountdown((fn) => fn.body.splice(4, 0, { k: 'store', lval: deref('v1'), value: C(0) }))),
+    ).toBeNull();
+  });
+
+  test('refused: a wider deref would stride differently', () => {
+    expect(
+      reindexWalks(
+        constCountdown((fn) => {
+          (cdLoop(fn).body[0] as Stmt & { k: 'assign' }).value = {
+            k: 'bin',
+            op: '+',
+            l: V('v0'),
+            r: { k: 'index', base: V('v1'), idx: C(0), width: 1, signed: false },
+          };
+        }),
+      ),
+    ).toBeNull();
+  });
+});
