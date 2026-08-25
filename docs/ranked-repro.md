@@ -110,6 +110,10 @@ stopped at the list of dirty paths would have called such a bundle current.
   "0 dropped" is now something the run SAYS. It used to be spelled as an absent line, so a clean
   run, a truncated log and a killed run left identical evidence.
 
+  **The candidate COUNT belongs to the tree, not to the function.** Every axis admitted multiplies
+  it, so the counts quoted in the anecdotes above are each an A/B against themselves and none of
+  them is a figure to reproduce. Quote your own `[ranked]` line.
+
 - **The tree is part of the number too, and it is on that same line.** `[asmlift source <commit>]`
   names the asmlift sources the run actually executed. A reviewer's run of the command above
   returned **455** against a twice-reproduced **419** with a spotless log — another session had

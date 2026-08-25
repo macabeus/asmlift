@@ -227,16 +227,16 @@ export function returnType(fn: Fn): IrType {
       const v = term.operands[0];
       // A NARROW value in the return register does not make the DECLARED return type narrow: the
       // register is a word, and the value's width says how it was COMPUTED, not what the header
-      // spelled. The two readings compile the same through agbcc and do NOT through mwcc —
+      // spelled. The two readings compile alike through agbcc and do NOT through mwcc —
       // `s8 f(s8 x) { return x; }` drops the `extsb` that `s32 f(s8 x) { return x; }` keeps and the
       // target has (synthetic `sextb`/`tos8`).
       //
-      // A narrowed PARAMETER (raise/paramwidth.ts) is the only value that reaches here narrow — no
-      // frontend types a load's result below a word — and the widening lands on the same `s32` an
-      // untyped return falls back to two lines down, rather than on the value's own signedness: a
-      // `zext` states what the ARGUMENT was declared as, which is no evidence about the header's
-      // return type. Both spellings compile identically anyway (`u32 f(u8 x){return x;}` and its
-      // `s32` twin are one `lsl/lsr/bx lr` through agbcc), so nothing is being traded for it.
+      // The widening lands on `s32`, the same fallback an untyped return takes, rather than on the
+      // value's own signedness: a `zext` states what the ARGUMENT was declared as, which is no
+      // evidence about the header's return type — and `u32 f(u8 x){return x;}` and its `s32` twin
+      // are one `lsl/lsr/bx lr` through agbcc either way. A narrowed PARAMETER
+      // (raise/paramwidth.ts) is the only value that reaches here narrow: no frontend types a
+      // load's result below a word.
       return v.type.kind === 'unknown' || (v.type.kind === 'int' && v.type.width < 32) ? T.s(32) : v.type;
     }
   }
