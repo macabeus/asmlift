@@ -6,30 +6,39 @@
 // The refusals carry the file's weight, and the ordering one is measured rather than reasoned:
 // compiled with this benchmark's agbcc, `void pb(s32 *out, s32 a) { out[0]=1; out[1]=2;
 // out[2]=(u8)a; }` emits mov/str/mov/str/lsl/lsr/str — the shift pair stays WHERE THE SOURCE WROTE
-// IT, so a rule keyed only on "sole use, entry block" would hoist two instructions to the top.
+// IT, so a rule keyed only on "sole use, entry block" would hoist two instructions to the top. Each
+// refusal is then ABLATED against its own fixture: `without` drops that one gate, and the pass must
+// narrow — which is also what proves the fixture is refused by that gate alone.
 //
-// The last block pins what a narrow parameter means to the STRUCTURER, which is the module that
-// has to change to accept one: before this pass a parameter was always register-wide, so nothing
-// checked that a merged value fits the name it is destroyed into.
-// Toolchain-free.
+// The structurer block pins what a narrow parameter means to the module that has to accept one:
+// every other producer of an entry param types it register-wide, so nothing checked that a merged
+// value fits the name it is destroyed into. Toolchain-free.
 import { describe, expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
 import { parse } from '../src/ir/parse';
 import { print } from '../src/ir/print';
 import { verify } from '../src/ir/verify';
-import { narrowEntryParams } from '../src/raise/paramwidth';
+import { without } from '../src/l3/gates';
+import type { FnProto } from '../src/proto';
+import { PARAM_WIDTH_GATES, narrowEntryParams } from '../src/raise/paramwidth';
 import { recoverTypes } from '../src/raise/recover';
 import { enumerateCandidates } from '../src/rank';
 import { structure } from '../src/structure/structure';
 import { ARMV4T_AGBCC } from '../src/target';
 
-const run = (ir: string) => {
+const run = (ir: string, self?: FnProto) => {
   const fn = parse(ir);
   verify(fn);
-  const n = narrowEntryParams(fn);
+  const n = narrowEntryParams(fn, self);
   verify(fn);
   return { fn, n, ir: print(fn) };
+};
+/** the same pass with one gate dropped — the ablation each refusal below is measured against */
+const runWithout = (ir: string, gate: string, self?: FnProto): number => {
+  const fn = parse(ir);
+  verify(fn);
+  return narrowEntryParams(fn, self, without(PARAM_WIDTH_GATES, gate));
 };
 const emit = (ir: string): string => {
   const { fn } = run(ir);
@@ -58,6 +67,35 @@ const PROLOGUE_TWO_U8 = `fn f {
   %4: unk32 = zext %1 {width=8}
   %5: unk32 = add %3, %4
   store %2, %5 {off=0, width=4}
+  ret
+}
+`;
+
+/** the extension behind a store — where the SOURCE wrote the cast, not a prologue */
+const BEHIND_BODY_CODE = `fn f {
+^bb0(%0: unk32, %1: s32*):
+  %2: unk32 = const {value=1}
+  store %1, %2 {off=0, width=4}
+  %3: unk32 = zext %0 {width=8}
+  store %1, %3 {off=4, width=4}
+  ret
+}
+`;
+
+/** the entry block as a loop header: its params are merge values, not arguments */
+const ENTRY_IS_JOIN = `fn f {
+^bb0(%0: unk32, %1: s32*):
+  %2: unk32 = sext %0 {width=16}
+  store %1, %2 {off=0, width=4}
+  br ^bb0(%2, %1)
+}
+`;
+
+/** the parameter the pointer recovery already typed */
+const PARAM_TYPED = `fn f {
+^bb0(%0: s32*, %1: s32*):
+  %2: unk32 = sext %0 {width=16}
+  store %1, %2 {off=0, width=4}
   ret
 }
 `;
@@ -114,16 +152,7 @@ describe('refusals', () => {
   });
 
   test('an extension behind body code is where the SOURCE wrote it, not a prologue', () => {
-    const ir = `fn f {
-^bb0(%0: unk32, %1: s32*):
-  %2: unk32 = const {value=1}
-  store %1, %2 {off=0, width=4}
-  %3: unk32 = zext %0 {width=8}
-  store %1, %3 {off=4, width=4}
-  ret
-}
-`;
-    expect(run(ir).n).toBe(0);
+    expect(run(BEHIND_BODY_CODE).n).toBe(0);
   });
 
   test('an extension outside the entry block is refused', () => {
@@ -144,14 +173,7 @@ describe('refusals', () => {
   });
 
   test('an entry block with a predecessor carries merge values, not arguments', () => {
-    const ir = `fn f {
-^bb0(%0: unk32, %1: s32*):
-  %2: unk32 = sext %0 {width=16}
-  store %1, %2 {off=0, width=4}
-  br ^bb0(%2, %1)
-}
-`;
-    expect(run(ir).n).toBe(0);
+    expect(run(ENTRY_IS_JOIN).n).toBe(0);
   });
 
   test('an extension behind a nullary call is body code', () => {
@@ -182,15 +204,43 @@ describe('refusals', () => {
     // The typed parameter's SOLE use is the extension, so only the type stands between it and a
     // narrowing that would replace a recovered `s32 *` with `s16` — the struct/array recognizers
     // run ahead of this pass and write exactly such a type.
-    const ir = `fn f {
-^bb0(%0: s32*, %1: s32*):
-  %2: unk32 = sext %0 {width=16}
-  store %1, %2 {off=0, width=4}
-  ret
-}
-`;
-    expect(run(ir).n).toBe(0);
+    expect(run(PARAM_TYPED).n).toBe(0);
   });
+
+  test('a declared width the extension contradicts refuses the narrowing', () => {
+    // `int tou8(int x){ return (unsigned char)x; }` and `u8 tou8(u8 x){ return x; }` are the same
+    // bytes, so only the header separates them — and getting it wrong moves bytes in the CALLERS,
+    // which this per-function pass never compiles.
+    expect(run(PROLOGUE_S16, { params: ['int', 'void *'] }).n).toBe(0);
+    expect(run(PROLOGUE_S16, { params: ['s16', 'void *'] }).n).toBe(1);
+  });
+
+  test('a declaration asmlift cannot read leaves the inference standing', () => {
+    // A project typedef, a bare arity, a list too short for the entry: no opinion, not "wide".
+    expect(run(PROLOGUE_S16, { params: ['Direction', 'void *'] }).n).toBe(1);
+    expect(run(PROLOGUE_S16, { params: 2 }).n).toBe(1);
+    expect(run(PROLOGUE_S16, {}).n).toBe(1);
+  });
+});
+
+describe('every refusal is load-bearing', () => {
+  // Each case is the fixture its refusal rejects, re-run with exactly that gate dropped: the pass
+  // then narrows, which is the wrong answer the gate exists to prevent.
+  const ABLATIONS: [gate: string, ir: string, self?: FnProto][] = [
+    ['entry-is-join', ENTRY_IS_JOIN],
+    ['param-typed', PARAM_TYPED],
+    ['cast-width', PROLOGUE_S16.replace('sext %0 {width=16}', 'sext %0 {width=24}')],
+    ['raw-reader', PROLOGUE_S16.replace('store %1, %6 {off=4, width=4}', 'store %1, %0 {off=4, width=4}')],
+    ['proto-width', PROLOGUE_S16, { params: ['int', 'void *'] }],
+    ['not-prologue', BEHIND_BODY_CODE],
+  ];
+
+  for (const [gate, ir, self] of ABLATIONS) {
+    test(`without \`${gate}\` the pass narrows a parameter it must not`, () => {
+      expect(run(ir, self).n).toBe(0);
+      expect(runWithout(ir, gate, self)).toBe(1);
+    });
+  }
 });
 
 describe('the signedness axis has nothing left to ask', () => {

@@ -520,7 +520,7 @@ export function enumerateCandidates(
   const probe = frontend.lift(name, asm, target, prototypes, opts.asmData, opts.symbols);
   verify(probe);
   applyIdiomPatterns(probe, target, opts.patterns);
-  runPreRecovery(probe, target, () => verify(probe));
+  runPreRecovery(probe, target, () => verify(probe), prototypes[name]);
   recoverTypes(probe);
   const ptrIdx = new Set<number>(probe.blocks[0].params.flatMap((p, i) => (NO_PIN_KINDS.has(p.type.kind) ? [i] : [])));
   // Access facts for name-only symbol declarations (see bareGlobalAccessFacts) — derived once
@@ -980,11 +980,16 @@ export function enumerateCandidates(
           // The shared tower spine (pipeline.ts) — the candidate's ONE difference from decompile()
           // is the signedness pin, injected between pre-recovery and recoverTypes via the
           // beforeRecover hook.
-          raiseRecovered(fn, target, {
-            beforeRecover: () => {
-              pinnable = pinScalarParams(fn, cand.signed, ptrIdx) || pinnable;
+          raiseRecovered(
+            fn,
+            target,
+            {
+              beforeRecover: () => {
+                pinnable = pinScalarParams(fn, cand.signed, ptrIdx) || pinnable;
+              },
             },
-          });
+            prototypes[name],
+          );
         } catch (e) {
           if (!lv.narrow) {
             throw e; // the base lift keeps its behavior: a raising failure aborts the row

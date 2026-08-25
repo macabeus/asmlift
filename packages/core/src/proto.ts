@@ -1,23 +1,22 @@
 import type { SymbolMap } from './symbols';
 
 // asmlift — function prototypes: the single carrier for the caller-supplied facts a
-// matching-decomp project reads from its headers (arg counts, void-ness). One `Prototypes`
-// map, keyed by symbol, is threaded through every entry point and resolved at the point of
-// use — a callee's `params` gives its call-site arity, a function's own entry gives its
-// `returnsVoid`. It also keeps the frontend seam honest: a frontend receives prototypes,
-// not a grab-bag of ISA-specific options.
+// matching-decomp project reads from its headers (arg counts, parameter widths, void-ness). One
+// `Prototypes` map, keyed by symbol, is threaded through every entry point and resolved at the
+// point of use — a callee's `params` gives its call-site arity, a function's own entry gives its
+// `returnsVoid` and the widths raise/paramwidth.ts checks against. It also keeps the frontend seam
+// honest: a frontend receives prototypes, not a grab-bag of ISA-specific options.
 
-/** One declared parameter, as its C type text (`"u8"`, `"s32"`, `"void *"`). asmlift consumes
- *  only the COUNT today (call-site arity), and a caller who passes the typed list gets the types
- *  silently discarded — a project's header extraction naturally produces them, so the form is
- *  accepted rather than rejected.
+/** One declared parameter, as its C type text (`"u8"`, `"s32"`, `"void *"`, `"int"`). Two facts
+ *  are read off it: the list's LENGTH is the call-site arity (`protoArity`), and one entry's WIDTH
+ *  (`declaredWidth`) is what raise/paramwidth.ts checks its inference against.
  *
- *  WIDTH IS ALREADY DECIDED, FROM THE ASM: raise/paramwidth.ts declares a parameter at the width
- *  its prologue extension proves, and rank.ts's signedness axis enumerates the rest. So consuming
- *  this list is not a missing pin but a SECOND authority for the same fact, and the two disagree
- *  exactly where the asm is ambiguous (an elided extension no use needed leaves nothing to read).
- *  Whichever wins has to be argued and measured on its own — it would pin every parameter of every
- *  row from a caller-declared fact, and a declared `u32` kills the signed arm. */
+ *  A DECLARED WIDTH ONLY VETOES, never pins. Where the asm carries a prologue extension the
+ *  declaration contradicts, the declaration wins — it is a fact from the project's headers, where
+ *  the extension is an inference off an encoding two different C sources produce. Where the asm
+ *  carries no extension, this list is NOT consulted: pinning there would type every parameter of
+ *  every row from the declaration, and a declared `u32` kills rank.ts's signed arm before the
+ *  differ ever sees it. That half is an axis question and is not answered here. */
 export type ParamType = string;
 
 /** What the headers know about one function. All fields optional: a partial table (only
@@ -25,7 +24,8 @@ export type ParamType = string;
 export interface FnProto {
   /** declared parameters — either a bare arity COUNT or the typed parameter list a header
    *  extraction produces (`["u8", "s32"]`). BOTH forms yield the call-site arity via
-   *  `protoArity`; omit to let the frontend fall back to its contiguous-arg-register heuristic. */
+   *  `protoArity`; only the typed form carries a width. Omit to let the frontend fall back to its
+   *  contiguous-arg-register heuristic. */
   params?: number | ParamType[];
   /** the declared return type is `void`, so a trailing `bx lr` leaves a meaningless
    *  return register that must not surface as a `return` value. */
@@ -49,6 +49,43 @@ export function protoArity(p: FnProto | undefined): number | undefined {
   // Omitted OR malformed (e.g. a bare `"u8"` string reaching the untyped CLI `--proto` JSON):
   // fall back to the frontend's arg-register heuristic rather than misread a string's `.length`.
   return undefined;
+}
+
+/** Bit width per C89 base type on every target asmlift lifts (all ILP32). `long` is 32 here and
+ *  would not be on an LP64 host, so it is a target fact rather than a language one. */
+const BASE_WIDTHS: ReadonlyMap<string, number> = new Map([
+  ['char', 8],
+  ['short', 16],
+  ['short int', 16],
+  ['int', 32],
+  ['long', 32],
+  ['long int', 32],
+]);
+
+/** The bit width one declared parameter type spells, or `undefined` for a spelling this does not
+ *  read — a project typedef, a struct, a `float`. UNDEFINED IS "NO OPINION", never "wide": the one
+ *  consumer treats a width it can read as authority and a width it cannot as absence, so an
+ *  unrecognized spelling leaves the asm's own inference standing.
+ *
+ *  A pointer is register-wide whatever it points at, which is the fact the `*` test carries. */
+export function declaredWidth(t: ParamType): number | undefined {
+  const s = t
+    .replace(/\b(?:const|volatile)\b/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+  if (s.endsWith('*')) {
+    return 32;
+  }
+  const own = /^([su])(8|16|32)$/.exec(s);
+  if (own) {
+    return Number(own[2]);
+  }
+  // `unsigned`/`signed` alone is `unsigned int`/`signed int`; the signedness itself is not a width.
+  const base = s
+    .replace(/\b(?:signed|unsigned)\b/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+  return BASE_WIDTHS.get(base === '' && s !== '' ? 'int' : base);
 }
 
 /** Problems with a HAND-WRITTEN prototype table — empty when it is well formed.

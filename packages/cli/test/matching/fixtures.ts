@@ -442,6 +442,7 @@ export const FIXTURES: DecompFixture[] = [
     symbol: 'tou8',
     referenceC: 'int tou8(int x){ return (unsigned char)x; }',
     expectPatternHits: 1,
+    prototypes: { tou8: { params: ['int'] } },
     expectSource: 's32 tou8(s32 a0) {\n    return (u8)a0;\n}\n',
     note: 'cast idiom — zext byte (u8)',
   },
@@ -449,6 +450,7 @@ export const FIXTURES: DecompFixture[] = [
     symbol: 'tos8',
     referenceC: 'int tos8(int x){ return (signed char)x; }',
     expectPatternHits: 1,
+    prototypes: { tos8: { params: ['int'] } },
     expectSource: 's32 tos8(s32 a0) {\n    return (s8)a0;\n}\n',
     note: 'cast idiom — sext byte (s8)',
   },
@@ -456,6 +458,7 @@ export const FIXTURES: DecompFixture[] = [
     symbol: 'tou16',
     referenceC: 'int tou16(int x){ return (unsigned short)x; }',
     expectPatternHits: 1,
+    prototypes: { tou16: { params: ['int'] } },
     expectSource: 's32 tou16(s32 a0) {\n    return (u16)a0;\n}\n',
     note: 'cast idiom — zext half (u16)',
   },
@@ -463,6 +466,7 @@ export const FIXTURES: DecompFixture[] = [
     symbol: 'tos16',
     referenceC: 'int tos16(int x){ return (short)x; }',
     expectPatternHits: 1,
+    prototypes: { tos16: { params: ['int'] } },
     expectSource: 's32 tos16(s32 a0) {\n    return (s16)a0;\n}\n',
     note: 'cast idiom — sext half (s16)',
   },
@@ -479,7 +483,7 @@ export const FIXTURES: DecompFixture[] = [
     referenceC: 'int ult5(unsigned char x){ return x < 5; }',
     expectPatternHits: 1,
     expectSource:
-      's32 ult5(s32 a0) {\n    s32 v0;\n    if ((u8)a0 <= 4) {\n        v0 = 1;\n' +
+      's32 ult5(u8 a0) {\n    s32 v0;\n    if (a0 <= 4) {\n        v0 = 1;\n' +
       '    } else {\n        v0 = 0;\n    }\n    return v0;\n}\n',
     note: 'thumb `bhi` survives — unsigned byte compare, both arms',
   },

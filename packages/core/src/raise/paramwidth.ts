@@ -21,26 +21,33 @@
 // narrow parameter with the `extsb`/`extsh` the frontend lifts to the same op, and the synthetic
 // `sextb`/`tos8` rows keep matching on that toolchain through this pass.
 //
-// WHAT THE PROLOGUE TEST CANNOT SEE, stated because the discriminator above is the whole rule and
-// this is the seam in it. The scan steps over the pure materializations agbcc interleaves among the
-// extensions, so a constant the scheduler HOISTED above a mid-body cast leaves `pb` looking like
-// `pa`: `void pc(s32 a, s32 *out){ s32 t = 7; out[0] = (u8)a; out[1] = t; out[2] = t; }` emits
-// `mov r2,#0x7 / lsl / lsr / str / str / str` and is narrowed. Both spellings of `pc` compile to
-// BYTE-IDENTICAL code through agbcc, so this is a fidelity claim about the ROM's prototype rather
-// than a score: a ranked arm for the wide spelling would be a compile the differ cannot referee.
-// Where the two spellings DO differ in bytes, something reads the raw register or the extension is
-// behind body code, and the gates below refuse.
+// WHAT THE PROLOGUE TEST CANNOT SEE, and why the declaration settles it. The scan steps over the
+// pure materializations agbcc interleaves among the extensions, so a constant the scheduler HOISTED
+// above a mid-body cast leaves `pb` looking like `pa`:
+//
+//     void pc(s32 a, s32 *out) { s32 t = 7; out[0] = (u8)a; out[1] = t; out[2] = t; }
+//         movs r2,#7 / lsls r0,#24 / lsrs r0,#24 / str / str / str
+//     void pc(u8 a, s32 *out)  { s32 t = 7; out[0] = a;     out[1] = t; out[2] = t; }
+//         lsls r0,#24 / lsrs r0,#24 / movs r2,#7 / str / str / str
+//
+// Those two ROM sources are DIFFERENT BYTES — the const moves across the shift pair — so the width
+// is a fact here and not a spelling, while no reader of the raw register and no body code is
+// present to make the gates below refuse. Nor does the ORDER decide it: sa3's `sub_802DFC8` really
+// is declared `s16 direction` and agbcc emits its `movs r5, #0` before the `lsl/asr` too, so the
+// hoisted-const shape arrives from both source spellings and reaches this pass as the same IR.
+//
+// The tiebreak is therefore not in the asm, and the SCORE cannot supply it either: asmlift
+// re-materializes a small constant at each use instead of binding it to a local, so its own two
+// spellings of `pc` emit the same instruction order and score alike. `proto-width` takes the
+// tiebreak from the caller's declaration instead, and where none was supplied the extension stands.
+// What that refusal protects is a function this pass never compiles: agbcc truncates at every
+// PROTOTYPED CALL SITE of a narrow-declared callee — `lsl/asr` ahead of the `bl`, two Thumb
+// instructions per site — so a wrong width here costs bytes the per-function differ cannot see.
 import { type Fn, type Op, type Value, replaceAllUsesWith, successorsOf } from '../ir/core';
-import { CAST_WIDTHS, type Opcode } from '../ir/opcodes';
+import { CAST_WIDTHS, MATERIALIZING_OPS } from '../ir/opcodes';
 import { T } from '../ir/types';
 import { type Gate, firstRejection } from '../l3/gates';
-
-/** Ops the prologue scan steps OVER: the pure, operand-free materializations agbcc interleaves
- *  among the extensions — nothing here depends on a value, so its position says nothing about
- *  where the extensions sit. Named rather than derived from `operands: 0`, which also admits the
- *  EFFECTFUL nullary ops (a zero-argument `call`, an `opaque` with no sources) — and an extension
- *  behind a call is body code, the `pb` case this pass exists to refuse. */
-const PROLOGUE_SKIP: ReadonlySet<Opcode> = new Set<Opcode>(['const', 'gaddr', 'laddr', 'undef']);
+import { type FnProto, declaredWidth } from '../proto';
 
 /** What the gates below judge: one entry parameter and the extension that reads it. */
 export interface NarrowParamCandidate {
@@ -50,10 +57,12 @@ export interface NarrowParamCandidate {
   width: number;
   /** the entry block has predecessors */
   entryIsJoin: boolean;
-  /** the extension is in the entry block's PROLOGUE — see `PROLOGUE_SKIP` */
+  /** the extension is in the entry block's PROLOGUE — see the scan in `narrowEntryParams` */
   inPrologue: boolean;
   /** reads of the RAW parameter anywhere in the function */
   uses: number;
+  /** the width the caller's own prototype declares for this parameter, if it declares one */
+  declared: number | undefined;
 }
 
 export const PARAM_WIDTH_GATES: readonly Gate<NarrowParamCandidate>[] = [
@@ -86,6 +95,13 @@ export const PARAM_WIDTH_GATES: readonly Gate<NarrowParamCandidate>[] = [
     rejects: (c) => c.uses !== 1,
   },
   {
+    id: 'proto-width',
+    why: "the caller's headers declare this parameter, and a declaration outranks an inference",
+    sound: true,
+    guardedBy: 'param-width.test.ts: a declared width the extension contradicts refuses the narrowing',
+    rejects: (c) => c.declared !== undefined && c.declared !== c.width,
+  },
+  {
     id: 'not-prologue',
     why: 'an extension behind body code is where the SOURCE wrote the cast',
     sound: true,
@@ -109,17 +125,23 @@ function useCount(fn: Fn, v: Value): number {
 }
 
 /** Type an entry parameter at the width its prologue extension proves, and drop the extension.
- *  Returns the number of parameters narrowed. */
-export function narrowEntryParams(fn: Fn, gates: readonly Gate<NarrowParamCandidate>[] = PARAM_WIDTH_GATES): number {
+ *  `self` is the prototype the caller supplied for THIS function, if any. Returns the number of
+ *  parameters narrowed. */
+export function narrowEntryParams(
+  fn: Fn,
+  self?: FnProto,
+  gates: readonly Gate<NarrowParamCandidate>[] = PARAM_WIDTH_GATES,
+): number {
   const entry = fn.blocks[0];
+  const declared = Array.isArray(self?.params) ? self.params.map(declaredWidth) : [];
   const entryIsJoin = fn.blocks.some((b) => successorsOf(b).includes(entry));
   const params = new Set(entry.params);
-  // The prologue: the entry block's leading parameter extensions, plus the materializations
-  // `PROLOGUE_SKIP` names. Scanning stops at the first op that READS a value — body code has run
-  // by then, and an extension behind body code is where the SOURCE wrote it.
+  // The prologue: the entry block's leading parameter extensions, plus the `MATERIALIZING_OPS`
+  // agbcc interleaves among them. Scanning stops at the first op that READS a value — body code
+  // has run by then, and an extension behind body code is where the SOURCE wrote it.
   const prologue = new Set<Op>();
   for (const op of entry.ops) {
-    if (PROLOGUE_SKIP.has(op.opcode as Opcode)) {
+    if (MATERIALIZING_OPS.has(op.opcode)) {
       continue;
     }
     if ((op.opcode !== 'sext' && op.opcode !== 'zext') || !params.has(op.operands[0])) {
@@ -143,6 +165,7 @@ export function narrowEntryParams(fn: Fn, gates: readonly Gate<NarrowParamCandid
       entryIsJoin,
       inPrologue: prologue.has(op),
       uses: useCount(fn, p),
+      declared: declared[entry.params.indexOf(p)],
     };
     if (firstRejection(gates, c) !== null) {
       continue;

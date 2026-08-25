@@ -13,6 +13,7 @@
 import { Fn } from '../ir/core';
 import { simplifyTrivialPhis } from '../ir/simplify';
 import { dce } from '../pattern/engine';
+import type { FnProto } from '../proto';
 import type { TargetDescription } from '../target';
 import { recognizeArrays } from './arrays';
 import { recognizeConsts } from './const';
@@ -29,8 +30,10 @@ import { recognizeStructs } from './structs';
 export interface PreRecoveryPass {
   /** stable id — also the report's trace-stage key. */
   id: string;
-  /** run the recognizer; returns a truthy value (a change count, or `true`) iff it CHANGED the IR. */
-  run: (fn: Fn) => number | boolean;
+  /** run the recognizer; returns a truthy value (a change count, or `true`) iff it CHANGED the IR.
+   *  `self` is the prototype the caller supplied for the function being raised — read only by
+   *  parameter-width, which checks its inference against a declared width. */
+  run: (fn: Fn, self: FnProto | undefined) => number | boolean;
   /** run `dce` after this pass changes the IR (the pass declares it leaves dead ops behind). */
   dce: boolean;
   /** optional target gate (soft-div only fires on a no-hardware-divide target — see raise/softdiv.ts). */
@@ -102,12 +105,13 @@ export function runPreRecovery(
   fn: Fn,
   target: TargetDescription,
   afterPass?: (pass: PreRecoveryPass, result: number | boolean) => void,
+  self?: FnProto,
 ): void {
   for (const pass of PRE_RECOVERY_PASSES) {
     if (pass.gate && !pass.gate(target)) {
       continue;
     }
-    const result = pass.run(fn);
+    const result = pass.run(fn, self);
     if (result) {
       if (pass.dce) {
         dce(fn);

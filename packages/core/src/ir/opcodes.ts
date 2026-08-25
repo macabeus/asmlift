@@ -272,6 +272,19 @@ export const REEVAL_UNSAFE_OPS: ReadonlySet<string> = new Set(
   }),
 );
 
+/** Ops that MATERIALIZE a value out of nothing: no operands, no state read, no effect, no trap, no
+ *  control flow — so where one sits in a block says nothing about what ran before it. Derived, so a
+ *  future pure nullary opcode joins without a second edit. Consumed by raise/paramwidth.ts, whose
+ *  prologue scan steps over them; the effect flags are what keep the EFFECTFUL nullary ops (a
+ *  zero-argument `call`, an `opaque` with no sources) out, and an extension behind a call is body
+ *  code rather than a prologue. */
+export const MATERIALIZING_OPS: ReadonlySet<string> = new Set(
+  (Object.keys(OPCODES) as Opcode[]).filter((k) => {
+    const sig = OPCODES[k] as OpSig;
+    return sig.operands === 0 && !sig.terminator && !sig.effects && !sig.reads && !sig.traps;
+  }),
+);
+
 /** May a dead result of this opcode be deleted? Registered, no observable effects, not control
  *  flow. `opaque` is excluded via its `effects` flag — see the note on its signature. */
 export function isDceSafe(opcode: string): boolean {

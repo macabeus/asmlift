@@ -89,8 +89,9 @@ Gaps are annotated in-source as ASMLIFT_ERROR markers, diagnostics on stderr.
                    (implies --strict)
   --asm-data       for text input: objdump -s -r -t dump of the source object
                    (jump tables, anonymous constants)
-  --proto          callee prototypes, inline JSON or a path to it:
-                   {"sym":{"params":2|["u8","s32"]}}
+  --proto          function prototypes, inline JSON or a path to it:
+                   {"sym":{"params":2|["u8","s32"]}} — a callee's count gives
+                   its call-site arity, a typed list also gives its widths
   --jobs           with --score-against: compile n candidates at a time (default 1)
   --progress       with --score-against: stream a liveness line to stderr while
                    scoring; the [score] table it prints at the end is unchanged
