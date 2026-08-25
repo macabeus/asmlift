@@ -704,11 +704,14 @@ export const FEATURES: readonly FeatureDef[] = [
       'A counter declared `s16 i` rather than `s32 i` is re-narrowed on every iteration, and the ' +
       'compiler must keep both the raw halfword and its sign-extended value live. On agbcc that ' +
       'shows up twice: the sign extension is materialised once and reused for BOTH the address ' +
-      'scale and the increment, and the extra live value blocks the induction-variable ' +
-      'elimination that turns an indexed walk into a pointer walk — so the index survives into ' +
-      'the emitted code where a wide counter would have disappeared. A decompiler with no narrow ' +
-      'local type has to spell it `s32 v` plus a cast at every use, which agbcc folds ' +
-      'differently.',
+      'scale and the increment, and the loop keeps its INDEX where a wide counter would have been ' +
+      'strength-reduced into a pointer walk. The second effect is not register pressure — it is ' +
+      'the shape of the write-back: agbcc promotes every sub-word local to a word UNSIGNED, so a ' +
+      'narrow counter is written back through a LOGICAL right shift, and its loop optimiser looks ' +
+      'for a basic induction variable only through a sign-extension or an ARITHMETIC shift. The ' +
+      'logical one falls through, the counter is never recognised as one, and strength reduction ' +
+      'never runs on it. A decompiler with no narrow local type has to spell it `s32 v` plus a ' +
+      'cast at every use, which agbcc folds differently.',
     example: {
       c: 's16 i; for (i = 0; i < 10; i++) s += i;',
       asm: 'lsl r0, r1, #0x10 / asr r0, r0, #0x10 / add r2, r2, r0 / add r0, r0, #0x1',

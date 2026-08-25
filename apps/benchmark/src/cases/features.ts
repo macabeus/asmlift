@@ -70,8 +70,9 @@ export const JUDGEMENT_FLOOR: Record<string, (body: string, asm: string, whole: 
   // The necessary condition is a counted loop whose induction variable is DECLARED narrow —
   // `s16 i; … for (i = 0; …)`. BOTH halves are required, because either alone is a different tag:
   // a narrow local that is not a counter is `narrow`, and a wide counter is nothing at all. Which
-  // codegen consequence the row turns on — the re-materialised sign extension, or the pressure the
-  // extra live raw value adds — stays a human call.
+  // codegen consequence the row turns on — the re-materialised sign extension, or the index that
+  // survives because the narrowed write-back is not recognised as an induction variable — stays a
+  // human call.
   'narrow-counter': (b) => {
     const ctrs = [...b.matchAll(/\bfor\s*\(\s*(\w+)\s*=/g), ...b.matchAll(/(\w+)\s*=\s*0\s*;\s*do\b/g)].map(
       (m) => m[1],
