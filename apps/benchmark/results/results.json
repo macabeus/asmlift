@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generatedAt": "2026-08-25T08:07:43.784Z",
+    "generatedAt": "2026-08-25T10:32:06.353Z",
     "toolchains": [
       "ido7.1",
       "agbcc",
@@ -14,7 +14,7 @@
       "real": 252
     },
     "asmlift": {
-      "commit": "637b8cf97d3d12ebb89ff52de4f4593add6c8a3e",
+      "commit": "5b567eecf6b95b1bcdea14d91193b825a4cfa1ff",
       "dirty": false
     },
     "m2c": {
@@ -3389,7 +3389,7 @@
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "candidateLabel": "unsigned/reread-globals/expr-home",
+        "candidateLabel": "unsigned/initfirst",
         "symbolsUsed": [
           {
             "name": "gUnk_03004D80",
@@ -3397,22 +3397,22 @@
           }
         ],
         "outcome": "nonmatch",
-        "source": "struct Struct0 { u16 field_0; u16 field_2; s32 field_4; };\nstruct Struct1 { u16 field_0; u16 field_2; u8 _pad0[2]; u16 field_6; u8 field_8; };\ns32 * CheckTileCollisionVertical(s32 * a0, u32 a1, u32 a2, u32 a3) {\n    s32 v0;\n    u32 v1;\n    s32 v2;\n    s32 v3;\n    s32 uninit_r4;\n    v0 = (u16)a1;\n    v1 = (u16)a2;\n    if (gUnk_03004D80->unk2 < gUnk_03004D80->unk0) {\n        v3 = gUnk_03004D80->unk2;\n        v2 = gUnk_03004D80->unk2 * 12;\n        do {\n            if (v1 >= ((struct Struct1 *)(v2 + ((struct Struct0 *)gUnk_03004D80)->field_4))->field_2 && ((struct Struct1 *)(v2 + ((struct Struct0 *)gUnk_03004D80)->field_4))->field_6 >= (s32)(v1 - (u8)a3)) {\n                if (v0 < ((struct Struct1 *)(v2 + ((struct Struct0 *)gUnk_03004D80)->field_4))->field_0 + 3) {\n                    if (((struct Struct1 *)(v2 + ((struct Struct0 *)gUnk_03004D80)->field_4))->field_0 - 3 < v0) {\n                        *a0 = (uninit_r4 & -65536 | (u16)(((struct Struct1 *)(v2 + ((struct Struct0 *)gUnk_03004D80)->field_4))->field_0 - 3)) & -16711681 | ((struct Struct1 *)(v2 + ((struct Struct0 *)gUnk_03004D80)->field_4))->field_8 << 16;\n                        return a0;\n                    }\n                }\n            }\n            v2 = v2 + 12;\n            v3 = v3 + 1;\n        } while (v3 < gUnk_03004D80->unk0);\n    }\n    *a0 = uninit_r4 | 65535;\n    return a0;\n}\n",
-        "score": 63,
-        "maxScore": 96,
+        "source": "struct Struct0 { u16 field_0; u16 field_2; s32 field_4; };\nstruct Struct1 { u16 field_0; u16 field_2; u8 _pad0[2]; u16 field_6; u8 field_8; };\ns32 * CheckTileCollisionVertical(s32 * a0, u16 a1, u16 a2, u8 a3) {\n    struct Struct0 * v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    s32 uninit_r4;\n    v0 = gUnk_03004D80;\n    v4 = v0->field_2;\n    if (v4 < v0->field_0) {\n        v3 = v0->field_2 * 12;\n        do {\n            v1 = v0->field_4;\n            if (a2 >= ((struct Struct1 *)(v3 + v1))->field_2 && ((struct Struct1 *)(v3 + v1))->field_6 >= a2 - a3) {\n                v2 = ((struct Struct1 *)(v3 + v1))->field_0;\n                if (a1 < v2 + 3) {\n                    if (v2 - 3 < a1) {\n                        *a0 = (uninit_r4 & -65536 | (u16)(v2 - 3)) & -16711681 | ((struct Struct1 *)(v3 + v1))->field_8 << 16;\n                        return a0;\n                    }\n                }\n            }\n            v3 = v3 + 12;\n            v4 = v4 + 1;\n        } while (v4 < gUnk_03004D80->unk0);\n    }\n    *a0 = uninit_r4 | 65535;\n    return a0;\n}\n",
+        "score": 45,
+        "maxScore": 90,
         "compileErrors": null,
         "breakdown": {
-          "insert": 14,
-          "delete": 15,
-          "replace": 5,
+          "insert": 8,
+          "delete": 7,
+          "replace": 3,
           "opMismatch": 2,
-          "argMismatch": 27
+          "argMismatch": 25
         },
         "quality": {
-          "score": 94,
-          "lines": 29,
+          "score": 100,
+          "lines": 31,
           "gotos": 0,
-          "casts": 5,
+          "casts": 1,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -3444,15 +3444,15 @@
       },
       "gapSize": {
         "decompiler": "asmlift",
-        "score": 63,
-        "maxScore": 96,
-        "ratio": 0.65625,
+        "score": 45,
+        "maxScore": 90,
+        "ratio": 0.5,
         "kinds": {
-          "insert": 14,
-          "delete": 15,
-          "replace": 5,
+          "insert": 8,
+          "delete": 7,
+          "replace": 3,
           "opMismatch": 2,
-          "argMismatch": 27
+          "argMismatch": 25
         }
       },
       "scripts": {
@@ -3493,22 +3493,22 @@
           }
         ],
         "outcome": "nonmatch",
-        "source": "struct Elem0 { u8 field_0; u8 _pad0[7]; };\nstruct Elem1 { u8 field_0; u8 _pad0[7]; };\ns32 CheckWorldCompletion(u32 a0, u32 a1) {\n    u32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    u32 v4;\n    s32 v5;\n    s32 v6;\n    s32 v7;\n    s32 v8;\n    s32 v9;\n    s32 v10;\n    s32 v11;\n    s32 v12;\n    if ((u8)a0 <= 3) {\n        if ((128 & ((struct Elem0 *)((u8 *)gUnk_03004670 + 15))[(u8)a0].field_0) == 0 || (127 & ((struct Elem1 *)((u8 *)gUnk_03004670 + 8))[(u8)a0 + 1].field_0) == 127) {\n            return 0;\n        } else {\n            return 1;\n        }\n    } else {\n        if ((128 & *((u8 *)gUnk_03004670 + 55)) == 0) {\n            return 0;\n        } else {\n            v1 = 0;\n            v2 = 0;\n            v3 = 0;\n            v0 = 0;\n            do {\n                v6 = v1;\n                v7 = v2;\n                v8 = v3;\n                v4 = 0;\n                v5 = v0 << 3;\n                do {\n                    if (v4 != 3) {\n                        if (v4 == 5) {\n                            if ((127 & *((u8 *)gUnk_03004670 + 8 + v5)) == 100) {\n                                v10 = v7;\n                                v9 = (u8)(v6 + 1);\n                            } else {\n                                if (v4 != 7 && (127 & *((u8 *)gUnk_03004670 + 8 + v5)) == 30) {\n                                    v9 = v6;\n                                    v10 = (u8)(v7 + 1);\n                                } else {\n                                    v9 = v6;\n                                    v10 = v7;\n                                }\n                            }\n                        } else {\n                            if (v4 != 7 && (127 & *((u8 *)gUnk_03004670 + 8 + v5)) == 30) {\n                                v9 = v6;\n                                v10 = (u8)(v7 + 1);\n                            } else {\n                                v9 = v6;\n                                v10 = v7;\n                            }\n                        }\n                    } else {\n                        if ((127 & *((u8 *)gUnk_03004670 + 8 + v5)) == 100) {\n                            v10 = v7;\n                            v9 = (u8)(v6 + 1);\n                        } else {\n                            if (v4 != 7 && (127 & *((u8 *)gUnk_03004670 + 8 + v5)) == 30) {\n                                v9 = v6;\n                                v10 = (u8)(v7 + 1);\n                            } else {\n                                v9 = v6;\n                                v10 = v7;\n                            }\n                        }\n                    }\n                    if ((128 & *((u8 *)gUnk_03004670 + 8 + v5)) != 0) {\n                        v11 = (u8)(v8 + 1);\n                    } else {\n                        v11 = v8;\n                    }\n                    v6 = v9;\n                    v7 = v10;\n                    v8 = v11;\n                    v5 = v5 + 1;\n                    v4 = v4 + 1;\n                } while (v4 <= 6);\n                v0 = v0 + 1;\n                v1 = v9;\n                v2 = v10;\n                v3 = v11;\n            } while (v0 <= 4);\n            if ((127 & *((u8 *)gUnk_03004670 + 48)) == 30) {\n                v12 = (u8)1;\n            } else {\n                v12 = 0;\n            }\n            if ((127 & *((u8 *)gUnk_03004670 + 49)) == 30) v12 = (u8)(v12 + 1);\n            if ((u8)a0 == 4 && (127 & *((u8 *)gUnk_03004670 + 48)) != 127 && v3 == 35 || (u8)a0 == 5 && (127 & *((u8 *)gUnk_03004670 + 49)) != 127 && v2 + v1 > 24 || (u8)a0 == 6 && (127 & *((u8 *)gUnk_03004670 + 50)) != 127 && v2 + v1 + v12 == 37) {\n                return 1;\n            } else {\n                return 0;\n            }\n        }\n    }\n}\n",
-        "score": 144,
-        "maxScore": 226,
+        "source": "struct Elem0 { u8 field_0; u8 _pad0[7]; };\nstruct Elem1 { u8 field_0; u8 _pad0[7]; };\ns32 CheckWorldCompletion(u8 a0, u32 a1) {\n    u32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    u32 v4;\n    s32 v5;\n    s32 v6;\n    s32 v7;\n    s32 v8;\n    s32 v9;\n    s32 v10;\n    s32 v11;\n    s32 v12;\n    if (a0 <= 3) {\n        if ((128 & ((struct Elem0 *)((u8 *)gUnk_03004670 + 15))[a0].field_0) == 0 || (127 & ((struct Elem1 *)((u8 *)gUnk_03004670 + 8))[a0 + 1].field_0) == 127) {\n            return 0;\n        } else {\n            return 1;\n        }\n    } else {\n        if ((128 & *((u8 *)gUnk_03004670 + 55)) == 0) {\n            return 0;\n        } else {\n            v1 = 0;\n            v2 = 0;\n            v3 = 0;\n            v0 = 0;\n            do {\n                v6 = v1;\n                v7 = v2;\n                v8 = v3;\n                v4 = 0;\n                v5 = v0 << 3;\n                do {\n                    if (v4 != 3) {\n                        if (v4 == 5) {\n                            if ((127 & *((u8 *)gUnk_03004670 + 8 + v5)) == 100) {\n                                v10 = v7;\n                                v9 = (u8)(v6 + 1);\n                            } else {\n                                if (v4 != 7 && (127 & *((u8 *)gUnk_03004670 + 8 + v5)) == 30) {\n                                    v9 = v6;\n                                    v10 = (u8)(v7 + 1);\n                                } else {\n                                    v9 = v6;\n                                    v10 = v7;\n                                }\n                            }\n                        } else {\n                            if (v4 != 7 && (127 & *((u8 *)gUnk_03004670 + 8 + v5)) == 30) {\n                                v9 = v6;\n                                v10 = (u8)(v7 + 1);\n                            } else {\n                                v9 = v6;\n                                v10 = v7;\n                            }\n                        }\n                    } else {\n                        if ((127 & *((u8 *)gUnk_03004670 + 8 + v5)) == 100) {\n                            v10 = v7;\n                            v9 = (u8)(v6 + 1);\n                        } else {\n                            if (v4 != 7 && (127 & *((u8 *)gUnk_03004670 + 8 + v5)) == 30) {\n                                v9 = v6;\n                                v10 = (u8)(v7 + 1);\n                            } else {\n                                v9 = v6;\n                                v10 = v7;\n                            }\n                        }\n                    }\n                    if ((128 & *((u8 *)gUnk_03004670 + 8 + v5)) != 0) {\n                        v11 = (u8)(v8 + 1);\n                    } else {\n                        v11 = v8;\n                    }\n                    v6 = v9;\n                    v7 = v10;\n                    v8 = v11;\n                    v5 = v5 + 1;\n                    v4 = v4 + 1;\n                } while (v4 <= 6);\n                v0 = v0 + 1;\n                v1 = v9;\n                v2 = v10;\n                v3 = v11;\n            } while (v0 <= 4);\n            if ((127 & *((u8 *)gUnk_03004670 + 48)) == 30) {\n                v12 = (u8)1;\n            } else {\n                v12 = 0;\n            }\n            if ((127 & *((u8 *)gUnk_03004670 + 49)) == 30) v12 = (u8)(v12 + 1);\n            if (a0 == 4 && (127 & *((u8 *)gUnk_03004670 + 48)) != 127 && v3 == 35 || a0 == 5 && (127 & *((u8 *)gUnk_03004670 + 49)) != 127 && v2 + v1 > 24 || a0 == 6 && (127 & *((u8 *)gUnk_03004670 + 50)) != 127 && v2 + v1 + v12 == 37) {\n                return 1;\n            } else {\n                return 0;\n            }\n        }\n    }\n}\n",
+        "score": 135,
+        "maxScore": 222,
         "compileErrors": null,
         "breakdown": {
-          "insert": 39,
+          "insert": 35,
           "delete": 24,
-          "replace": 24,
-          "opMismatch": 3,
-          "argMismatch": 54
+          "replace": 23,
+          "opMismatch": 2,
+          "argMismatch": 51
         },
         "quality": {
           "score": 88,
           "lines": 104,
           "gotos": 0,
-          "casts": 28,
+          "casts": 22,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -3540,15 +3540,15 @@
       },
       "gapSize": {
         "decompiler": "asmlift",
-        "score": 144,
-        "maxScore": 226,
-        "ratio": 0.6371681415929203,
+        "score": 135,
+        "maxScore": 222,
+        "ratio": 0.6081081081081081,
         "kinds": {
-          "insert": 39,
+          "insert": 35,
           "delete": 24,
-          "replace": 24,
-          "opMismatch": 3,
-          "argMismatch": 54
+          "replace": 23,
+          "opMismatch": 2,
+          "argMismatch": 51
         }
       },
       "scripts": {
@@ -3588,7 +3588,7 @@
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "candidateLabel": "unsigned/merge-names/livebase-block",
+        "candidateLabel": "unsigned/defsite/merge-names/livebase",
         "symbolsUsed": [
           {
             "name": "gBgDataPtrs",
@@ -3624,22 +3624,22 @@
           }
         ],
         "outcome": "nonmatch",
-        "source": "void ConfigureEntityBehavior(u32 a0, u32 a1, u32 a2, u32 a3) {\n    s32 v0;\n    s32 v4;\n    s32 v5;\n    s32 v6;\n    s32 v7;\n    s32 v8;\n    s32 v9;\n    s32 v10;\n    s32 v11;\n    s32 v12;\n    s32 v13;\n    s32 v14;\n    s32 v16;\n    u8 * p0;\n    s32 * p1;\n    p0 = (u8 *)&gEntityInfo;\n    p1 = (s32 *)&REG_DMA3SAD;\n    if (a2 << 24 != 0) {\n        p0[995] = 25;\n        p0[967] = 25;\n        p0[967 - 28] = 25;\n        p0[911] = 25;\n    }\n    switch ((u8)a1) {\n        case 0:\n            v11 = 13;\n            v0 = (u8)a0 << 3;\n            v12 = v0 + (u32)&gUnk_03003D16;\n            v16 = ((u16 *)&gBgInfo)[36] * 28 - ((u16 *)&gBgInfo)[36];\n            v13 = gBgDataPtrs.pBufBg2Tilemap + (v0 + (v16 + 6));\n            a3 = gBgDataPtrs.pBufBg2Tilemap + 60;\n            break;\n        case 1:\n            v11 = 4;\n            v12 = ((u8)a0 << 3) + (u32)&gUnk_03003F56;\n            v10 = gBgDataPtrs.pBufBg2Tilemap;\n            v13 = gBgDataPtrs.pBufBg2Tilemap + (((u8)a0 << 3) + (((u16 *)&gBgInfo)[36] * 36 + 6));\n            v14 = ((u16 *)&gBgInfo)[36] * 20 - ((u16 *)&gBgInfo)[36];\n            a3 = v10 + (v14 + 60);\n            break;\n        case 2:\n            v11 = 6;\n            v12 = ((u8)a0 << 3) + (u32)&gUnk_03003E96;\n            v10 = gBgDataPtrs.pBufBg2Tilemap;\n            v13 = gBgDataPtrs.pBufBg2Tilemap + (((u8)a0 << 3) + (((u16 *)&gBgInfo)[36] * 33 + 6));\n            v14 = ((u16 *)&gBgInfo)[36] * 20 - ((u16 *)&gBgInfo)[36];\n            a3 = v10 + (v14 + 60);\n            break;\n        case 3:\n            v11 = 6;\n            v12 = ((u8)a0 << 3) + (u32)&gUnk_03003DD6;\n            v10 = gBgDataPtrs.pBufBg2Tilemap;\n            v13 = gBgDataPtrs.pBufBg2Tilemap + (((u8)a0 << 3) + (((u16 *)&gBgInfo)[36] * 30 + 6));\n            v14 = ((u16 *)&gBgInfo)[36] * 20 - ((u16 *)&gBgInfo)[36];\n            a3 = v10 + (v14 + 60);\n            break;\n        case 4:\n            v11 = 6;\n            v12 = ((u8)a0 << 3) + (u32)&gUnk_03003D16;\n            v9 = ((u16 *)&gBgInfo)[36];\n            v10 = gBgDataPtrs.pBufBg2Tilemap;\n            v13 = gBgDataPtrs.pBufBg2Tilemap + (((u8)a0 << 3) + (((u16 *)&gBgInfo)[36] * 28 - ((u16 *)&gBgInfo)[36] + 6));\n            v8 = 13;\n            v14 = v8 * v9;\n            a3 = v10 + (v14 + 60);\n            break;\n        case 5:\n            v11 = 6;\n            v12 = ((u8)a0 << 3) + (u32)&gUnk_03003D16;\n            v9 = ((u16 *)&gBgInfo)[36];\n            v10 = gBgDataPtrs.pBufBg2Tilemap;\n            v13 = gBgDataPtrs.pBufBg2Tilemap + (((u8)a0 << 3) + (((u16 *)&gBgInfo)[36] * 28 - ((u16 *)&gBgInfo)[36] + 6));\n            v8 = 22;\n            v14 = v8 * v9;\n            a3 = v10 + (v14 + 60);\n            break;\n        case 6:\n            v0 = (u8)a0 << 3;\n            v11 = 4;\n            v12 = v0 + (u32)&gUnk_03003F56;\n            v16 = ((u16 *)&gBgInfo)[36] * 36;\n            v13 = gBgDataPtrs.pBufBg2Tilemap + (v0 + (v16 + 6));\n            a3 = gBgDataPtrs.pBufBg2Tilemap + 60;\n            break;\n        case 7:\n            v0 = (u8)a0 << 3;\n            v11 = 7;\n            v12 = v0 + (u32)&gUnk_03003E96;\n            v16 = ((u16 *)&gBgInfo)[36] * 33;\n            v13 = gBgDataPtrs.pBufBg2Tilemap + (v0 + (v16 + 6));\n            a3 = gBgDataPtrs.pBufBg2Tilemap + 60;\n            break;\n        case 8:\n            v0 = (u8)a0 << 3;\n            v11 = 10;\n            v12 = v0 + (u32)&gUnk_03003DD6;\n            v16 = ((u16 *)&gBgInfo)[36] * 30;\n            v13 = gBgDataPtrs.pBufBg2Tilemap + (v0 + (v16 + 6));\n            a3 = gBgDataPtrs.pBufBg2Tilemap + 60;\n            break;\n        case 9:\n            v11 = 13;\n            v0 = (u8)a0 << 3;\n            v12 = v0 + (u32)&gUnk_03003D16;\n            v16 = ((u16 *)&gBgInfo)[36] * 28 - ((u16 *)&gBgInfo)[36];\n            v13 = gBgDataPtrs.pBufBg2Tilemap + (v0 + (v16 + 6));\n            a3 = gBgDataPtrs.pBufBg2Tilemap + 60;\n            break;\n    }\n    if (0 < v11) {\n        v4 = a3;\n        v5 = v12;\n        v6 = 0;\n        v7 = v13;\n        do {\n            *p1 = v4;\n            p1[1] = v5;\n            p1[2] = -2147483644;\n            while ((p1[2] & 128 << 24) != 0) {\n            }\n            *p1 = v4;\n            p1[1] = v7;\n            p1[2] = -2147483644;\n            while ((p1[2] & 128 << 24) != 0) {\n            }\n            v5 = v5 + 64;\n            v7 = v7 + ((u16 *)&gBgInfo)[36];\n            v4 = v4 + ((u16 *)&gBgInfo)[36];\n            v6 = (u8)(v6 + 1);\n        } while (v6 < v11);\n    }\n    return;\n}\n",
-        "score": 266,
-        "maxScore": 338,
+        "source": "void ConfigureEntityBehavior(u8 a0, u8 a1, u32 a2, u32 a3) {\n    s32 v0;\n    s32 v4;\n    s32 v5;\n    s32 v6;\n    s32 v7;\n    s32 v8;\n    s32 v9;\n    s32 v10;\n    s32 v11;\n    s32 v12;\n    s32 v13;\n    s32 v14;\n    s32 v16;\n    u8 * p0;\n    u16 * p1;\n    s32 * p2;\n    p0 = (u8 *)&gEntityInfo;\n    p1 = (u16 *)&gBgInfo;\n    p2 = (s32 *)&REG_DMA3SAD;\n    if (a2 << 24 != 0) {\n        p0[995] = 25;\n        p0[967] = 25;\n        p0[967 - 28] = 25;\n        p0[911] = 25;\n    }\n    switch (a1) {\n        case 0:\n            v11 = 13;\n            v0 = a0 << 3;\n            v12 = v0 + (u32)&gUnk_03003D16;\n            v16 = p1[36] * 28 - p1[36];\n            v13 = gBgDataPtrs.pBufBg2Tilemap + (v0 + (v16 + 6));\n            a3 = gBgDataPtrs.pBufBg2Tilemap + 60;\n            break;\n        case 1:\n            v11 = 4;\n            v12 = (a0 << 3) + (u32)&gUnk_03003F56;\n            v10 = gBgDataPtrs.pBufBg2Tilemap;\n            v13 = gBgDataPtrs.pBufBg2Tilemap + ((a0 << 3) + (p1[36] * 36 + 6));\n            v14 = p1[36] * 20 - p1[36];\n            a3 = v10 + (v14 + 60);\n            break;\n        case 2:\n            v11 = 6;\n            v12 = (a0 << 3) + (u32)&gUnk_03003E96;\n            v10 = gBgDataPtrs.pBufBg2Tilemap;\n            v13 = gBgDataPtrs.pBufBg2Tilemap + ((a0 << 3) + (p1[36] * 33 + 6));\n            v14 = p1[36] * 20 - p1[36];\n            a3 = v10 + (v14 + 60);\n            break;\n        case 3:\n            v11 = 6;\n            v12 = (a0 << 3) + (u32)&gUnk_03003DD6;\n            v10 = gBgDataPtrs.pBufBg2Tilemap;\n            v13 = gBgDataPtrs.pBufBg2Tilemap + ((a0 << 3) + (p1[36] * 30 + 6));\n            v14 = p1[36] * 20 - p1[36];\n            a3 = v10 + (v14 + 60);\n            break;\n        case 4:\n            v8 = 13;\n            v11 = 6;\n            v12 = (a0 << 3) + (u32)&gUnk_03003D16;\n            v9 = p1[36];\n            v10 = gBgDataPtrs.pBufBg2Tilemap;\n            v13 = gBgDataPtrs.pBufBg2Tilemap + ((a0 << 3) + (p1[36] * 28 - p1[36] + 6));\n            v14 = v8 * v9;\n            a3 = v10 + (v14 + 60);\n            break;\n        case 5:\n            v8 = 22;\n            v11 = 6;\n            v12 = (a0 << 3) + (u32)&gUnk_03003D16;\n            v9 = p1[36];\n            v10 = gBgDataPtrs.pBufBg2Tilemap;\n            v13 = gBgDataPtrs.pBufBg2Tilemap + ((a0 << 3) + (p1[36] * 28 - p1[36] + 6));\n            v14 = v8 * v9;\n            a3 = v10 + (v14 + 60);\n            break;\n        case 6:\n            v0 = a0 << 3;\n            v11 = 4;\n            v12 = v0 + (u32)&gUnk_03003F56;\n            v16 = p1[36] * 36;\n            v13 = gBgDataPtrs.pBufBg2Tilemap + (v0 + (v16 + 6));\n            a3 = gBgDataPtrs.pBufBg2Tilemap + 60;\n            break;\n        case 7:\n            v0 = a0 << 3;\n            v11 = 7;\n            v12 = v0 + (u32)&gUnk_03003E96;\n            v16 = p1[36] * 33;\n            v13 = gBgDataPtrs.pBufBg2Tilemap + (v0 + (v16 + 6));\n            a3 = gBgDataPtrs.pBufBg2Tilemap + 60;\n            break;\n        case 8:\n            v0 = a0 << 3;\n            v11 = 10;\n            v12 = v0 + (u32)&gUnk_03003DD6;\n            v16 = p1[36] * 30;\n            v13 = gBgDataPtrs.pBufBg2Tilemap + (v0 + (v16 + 6));\n            a3 = gBgDataPtrs.pBufBg2Tilemap + 60;\n            break;\n        case 9:\n            v11 = 13;\n            v0 = a0 << 3;\n            v12 = v0 + (u32)&gUnk_03003D16;\n            v16 = p1[36] * 28 - p1[36];\n            v13 = gBgDataPtrs.pBufBg2Tilemap + (v0 + (v16 + 6));\n            a3 = gBgDataPtrs.pBufBg2Tilemap + 60;\n            break;\n    }\n    if (0 < v11) {\n        v4 = a3;\n        v5 = v12;\n        v6 = 0;\n        v7 = v13;\n        do {\n            *p2 = v4;\n            p2[1] = v5;\n            p2[2] = -2147483644;\n            while ((p2[2] & 128 << 24) != 0) {\n            }\n            *p2 = v4;\n            p2[1] = v7;\n            p2[2] = -2147483644;\n            while ((p2[2] & 128 << 24) != 0) {\n            }\n            v5 = v5 + 64;\n            v7 = v7 + p1[36];\n            v4 = v4 + p1[36];\n            v6 = (u8)(v6 + 1);\n        } while (v6 < v11);\n    }\n    return;\n}\n",
+        "score": 237,
+        "maxScore": 332,
         "compileErrors": null,
         "breakdown": {
-          "insert": 29,
-          "delete": 54,
-          "replace": 23,
-          "opMismatch": 4,
-          "argMismatch": 156
+          "insert": 23,
+          "delete": 69,
+          "replace": 27,
+          "opMismatch": 6,
+          "argMismatch": 112
         },
         "quality": {
-          "score": 88,
-          "lines": 134,
+          "score": 96,
+          "lines": 136,
           "gotos": 0,
-          "casts": 43,
+          "casts": 4,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -3667,15 +3667,15 @@
       },
       "gapSize": {
         "decompiler": "asmlift",
-        "score": 266,
-        "maxScore": 338,
-        "ratio": 0.7869822485207101,
+        "score": 237,
+        "maxScore": 332,
+        "ratio": 0.713855421686747,
         "kinds": {
-          "insert": 29,
-          "delete": 54,
-          "replace": 23,
-          "opMismatch": 4,
-          "argMismatch": 156
+          "insert": 23,
+          "delete": 69,
+          "replace": 27,
+          "opMismatch": 6,
+          "argMismatch": 112
         }
       },
       "scripts": {
@@ -4469,7 +4469,7 @@
         "decompiler": "asmlift",
         "symbolMap": true,
         "outcome": "noncompile",
-        "source": "struct Elem0 { u16 field_0; u16 field_2; u8 _pad0[4]; u8 field_8; u8 field_9; u8 _pad1[5]; u8 field_15; u8 field_16; u8 _pad2[11]; };\nvoid EntityDeathAnimation(s32 a0, s32 a1) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    v0 = ((struct Elem0 *)&gEntityArray)[(u8)a0].field_9;\n    v1 = 0;\n    ((struct Elem0 *)&gEntityArray)[(u8)a0].field_9 = v0 - 1;\n    if ((u8)(v0 - 1) == 255) {\n        ((struct Elem0 *)&gEntityArray)[(u8)a0].field_9 = 25;\n        if (((struct Elem0 *)&gEntityArray)[(u8)a0].field_8 <= 5) {\n            v2 = *(u8 *)50352780;\n            SpawnEntityAtPosition(((struct Elem0 *)&gEntityArray)[(u8)a0 - v2].field_0, ((struct Elem0 *)&gEntityArray)[(u8)a0 - v2].field_2, (u8)(((struct Elem0 *)&gEntityArray)[(u8)a0].field_8 + 12), 0);\n        }\n        v3 = ((struct Elem0 *)&gEntityArray)[(u8)a0].field_8;\n        ((struct Elem0 *)&gEntityArray)[(u8)a0].field_8 = v3 - 1;\n        if ((v3 - 1 & 255) == 0) {\n            v4 = *(u8 *)50352780;\n            SpawnEntityAtPosition(((struct Elem0 *)&gEntityArray)[(u8)a0 - v4].field_0, ((struct Elem0 *)&gEntityArray)[(u8)a0 - v4].field_2, 2, (u8)((u8)a0 - v4));\n        } else {\n            m4aSongNumStart(86);\n            if (((struct Elem0 *)&gEntityArray)[(u8)a0].field_8 > 9) {\n                ((struct Elem0 *)&gEntityArray)[(u8)a0 + *(u8 *)50352780].field_15 = v1;\n                LoadSpriteFrame((u8)((u8)a0 + *(u8 *)50352780), (u8)sub_08051A0C(((struct Elem0 *)&gEntityArray)[(u8)a0].field_8, 10, 50352780));\n            }\n            LoadSpriteFrame((u8)a0, (u8)sub_08051A84(((struct Elem0 *)&gEntityArray)[(u8)a0].field_8, 10));\n            if (((struct Elem0 *)&gEntityArray)[(u8)a0].field_8 == 9) {\n                ((struct Elem0 *)&gEntityArray)[(u8)a0 + *(u8 *)50352780].field_15 = 28;\n                ((struct Elem0 *)&gEntityArray)[(u8)a0 + *(u8 *)50352780].field_16 = v1;\n            }\n        }\n    }\n    ((struct Elem0 *)&gEntityArray)[(u8)a0].field_0 = ((struct Elem0 *)&gEntityArray)[(u8)a0 - *(u8 *)50352780].field_0;\n    ((struct Elem0 *)&gEntityArray)[(u8)a0].field_2 = ((struct Elem0 *)&gEntityArray)[(u8)a0 - *(u8 *)50352780].field_2 - 32;\n    if (((struct Elem0 *)&gEntityArray)[(u8)a0].field_8 > 9) {\n        ((struct Elem0 *)&gEntityArray)[(u8)a0 + *(u8 *)50352780].field_0 = ((struct Elem0 *)&gEntityArray)[(u8)a0 - *(u8 *)50352780].field_0 - 3;\n        ((struct Elem0 *)&gEntityArray)[(u8)a0 + *(u8 *)50352780].field_2 = ((struct Elem0 *)&gEntityArray)[(u8)a0 - *(u8 *)50352780].field_2 - 32;\n        ((struct Elem0 *)&gEntityArray)[(u8)a0].field_0 = ((struct Elem0 *)&gEntityArray)[(u8)a0].field_0 + 3;\n    }\n    return;\n}\n",
+        "source": "struct Elem0 { u16 field_0; u16 field_2; u8 _pad0[4]; u8 field_8; u8 field_9; u8 _pad1[5]; u8 field_15; u8 field_16; u8 _pad2[11]; };\nvoid EntityDeathAnimation(u8 a0, s32 a1) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    v0 = ((struct Elem0 *)&gEntityArray)[a0].field_9;\n    v1 = 0;\n    ((struct Elem0 *)&gEntityArray)[a0].field_9 = v0 - 1;\n    if ((u8)(v0 - 1) == 255) {\n        ((struct Elem0 *)&gEntityArray)[a0].field_9 = 25;\n        if (((struct Elem0 *)&gEntityArray)[a0].field_8 <= 5) {\n            v2 = *(u8 *)50352780;\n            SpawnEntityAtPosition(((struct Elem0 *)&gEntityArray)[a0 - v2].field_0, ((struct Elem0 *)&gEntityArray)[a0 - v2].field_2, (u8)(((struct Elem0 *)&gEntityArray)[a0].field_8 + 12), 0);\n        }\n        v3 = ((struct Elem0 *)&gEntityArray)[a0].field_8;\n        ((struct Elem0 *)&gEntityArray)[a0].field_8 = v3 - 1;\n        if ((v3 - 1 & 255) == 0) {\n            v4 = *(u8 *)50352780;\n            SpawnEntityAtPosition(((struct Elem0 *)&gEntityArray)[a0 - v4].field_0, ((struct Elem0 *)&gEntityArray)[a0 - v4].field_2, 2, (u8)(a0 - v4));\n        } else {\n            m4aSongNumStart(86);\n            if (((struct Elem0 *)&gEntityArray)[a0].field_8 > 9) {\n                ((struct Elem0 *)&gEntityArray)[a0 + *(u8 *)50352780].field_15 = v1;\n                LoadSpriteFrame((u8)(a0 + *(u8 *)50352780), (u8)sub_08051A0C(((struct Elem0 *)&gEntityArray)[a0].field_8, 10, 50352780));\n            }\n            LoadSpriteFrame(a0, (u8)sub_08051A84(((struct Elem0 *)&gEntityArray)[a0].field_8, 10));\n            if (((struct Elem0 *)&gEntityArray)[a0].field_8 == 9) {\n                ((struct Elem0 *)&gEntityArray)[a0 + *(u8 *)50352780].field_15 = 28;\n                ((struct Elem0 *)&gEntityArray)[a0 + *(u8 *)50352780].field_16 = v1;\n            }\n        }\n    }\n    ((struct Elem0 *)&gEntityArray)[a0].field_0 = ((struct Elem0 *)&gEntityArray)[a0 - *(u8 *)50352780].field_0;\n    ((struct Elem0 *)&gEntityArray)[a0].field_2 = ((struct Elem0 *)&gEntityArray)[a0 - *(u8 *)50352780].field_2 - 32;\n    if (((struct Elem0 *)&gEntityArray)[a0].field_8 > 9) {\n        ((struct Elem0 *)&gEntityArray)[a0 + *(u8 *)50352780].field_0 = ((struct Elem0 *)&gEntityArray)[a0 - *(u8 *)50352780].field_0 - 3;\n        ((struct Elem0 *)&gEntityArray)[a0 + *(u8 *)50352780].field_2 = ((struct Elem0 *)&gEntityArray)[a0 - *(u8 *)50352780].field_2 - 32;\n        ((struct Elem0 *)&gEntityArray)[a0].field_0 = ((struct Elem0 *)&gEntityArray)[a0].field_0 + 3;\n    }\n    return;\n}\n",
         "score": null,
         "maxScore": null,
         "compileErrors": 1,
@@ -4477,7 +4477,7 @@
           "score": 88,
           "lines": 43,
           "gotos": 0,
-          "casts": 50,
+          "casts": 18,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -5035,7 +5035,7 @@
         "candidateLabel": "unsigned/regcopy-ret",
         "symbolsUsed": [],
         "outcome": "match",
-        "source": "s32 MultiplyQ4(u32 a0, u32 a1) {\n    s32 v0;\n    s32 w0;\n    v0 = (s16)a0 * (s16)a1;\n    w0 = v0;\n    if (w0 < 0) w0 = w0 + 15;\n    v0 = w0 << 12 >> 16;\n    return v0;\n}\n",
+        "source": "s32 MultiplyQ4(s16 a0, s16 a1) {\n    s32 v0;\n    s32 w0;\n    v0 = a0 * a1;\n    w0 = v0;\n    if (w0 < 0) w0 = w0 + 15;\n    v0 = w0 << 12 >> 16;\n    return v0;\n}\n",
         "score": 0,
         "maxScore": 12,
         "compileErrors": null,
@@ -5050,7 +5050,7 @@
           "score": 100,
           "lines": 9,
           "gotos": 0,
-          "casts": 2,
+          "casts": 0,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -5111,7 +5111,7 @@
         "candidateLabel": "unsigned/regcopy-ret",
         "symbolsUsed": [],
         "outcome": "match",
-        "source": "s32 MultiplyQ8(u32 a0, u32 a1) {\n    s32 v0;\n    s32 w0;\n    v0 = (s16)a0 * (s16)a1;\n    w0 = v0;\n    if (w0 < 0) w0 = w0 + 255;\n    v0 = w0 << 8 >> 16;\n    return v0;\n}\n",
+        "source": "s32 MultiplyQ8(s16 a0, s16 a1) {\n    s32 v0;\n    s32 w0;\n    v0 = a0 * a1;\n    w0 = v0;\n    if (w0 < 0) w0 = w0 + 255;\n    v0 = w0 << 8 >> 16;\n    return v0;\n}\n",
         "score": 0,
         "maxScore": 12,
         "compileErrors": null,
@@ -5126,7 +5126,7 @@
           "score": 100,
           "lines": 9,
           "gotos": 0,
-          "casts": 2,
+          "casts": 0,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -9274,7 +9274,7 @@
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "candidateLabel": "unsigned/reread-globals/derived-home",
+        "candidateLabel": "unsigned/derived-home",
         "symbolsUsed": [
           {
             "name": "gBg2XMag",
@@ -9302,22 +9302,22 @@
           }
         ],
         "outcome": "nonmatch",
-        "source": "struct Elem0 { u16 field_0; u16 field_2; u16 field_4; u16 field_6; u8 _pad0[20]; };\nstruct Elem1 { s32 field_0; u8 _pad0[4]; };\nvoid TransformSingleEntityToScreen(u32 a0, u32 a1, u32 a2) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    u8 * v5;\n    s32 v6;\n    s32 v7;\n    v0 = ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_0 - (s8)a1 - gUnk_03003430.bg2HOfs;\n    ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_4 = v0;\n    v1 = ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_2 - (s8)a2 - gUnk_03003430.bg2VOfs;\n    ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_6 = v1;\n    v2 = gUnk_03003430.bg2HOfs;\n    v3 = gBg2XMag;\n    v4 = gUnk_03003430.bg2HOfs;\n    if ((u8)a0 > 12) {\n        v5 = (u8 *)((s32 *)(((u8)a0 << 3) + (u8 *)gUnk_030051DC - 104))[1];\n    } else {\n        v5 = (u8 *)((struct Elem1 *)((u32)&gUnk_08078FC8 + 4))[(u8)a0].field_0;\n    }\n    switch (15 & v5[5]) {\n        case 3:\n        case 11:\n            v7 = gUnk_03003430.bg2VOfs - (s32)((s16)(u16)(gUnk_03003430.bg2VOfs - v1) * gBg2YMag) / 256;\n            v6 = (s32)((128 << 1) - gBg2YMag) >> 3;\n            break;\n        case 1:\n        case 6:\n        case 8:\n            v7 = gUnk_03003430.bg2VOfs - (s32)((s16)(u16)(gUnk_03003430.bg2VOfs - v1) * gBg2YMag) / 256;\n            v6 = (s32)((128 << 1) - gBg2YMag) >> 5;\n            break;\n        case 0:\n        case 4:\n        case 5:\n            v7 = gUnk_03003430.bg2VOfs - (s32)((s16)(u16)(gUnk_03003430.bg2VOfs - v1) * gBg2YMag) / 256;\n            v6 = (s32)((128 << 1) - gBg2YMag) >> 6;\n            break;\n        case 2:\n        case 7:\n        case 9:\n        case 10:\n            v7 = gUnk_03003430.bg2VOfs - (s32)((s16)(u16)(gUnk_03003430.bg2VOfs - v1) * gBg2YMag) / 256;\n            v6 = (s32)((128 << 1) - gBg2YMag) >> 4;\n            break;\n        default:\n            v7 = gUnk_03003430.bg2VOfs - (s32)((s16)(u16)(gUnk_03003430.bg2VOfs - v1) * gBg2YMag) / 256;\n            v6 = (s32)((128 << 1) - gBg2YMag) >> 4;\n    }\n    ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_4 = v4 - v3 * (s16)(v2 - v0) / 256;\n    ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_6 = v7 + v6;\n    return;\n}\n",
-        "score": 185,
-        "maxScore": 226,
+        "source": "struct Elem0 { u16 field_0; u16 field_2; u16 field_4; u16 field_6; u8 _pad0[20]; };\nstruct Elem1 { s32 field_0; u8 _pad0[4]; };\nvoid TransformSingleEntityToScreen(u8 a0, u32 a1, u32 a2) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    s32 v5;\n    s32 v6;\n    u8 * v7;\n    s32 v8;\n    s32 v9;\n    v0 = ((struct Elem0 *)&gUnk_03002920)[a0].field_0 - (s8)a1 - gUnk_03003430.bg2HOfs;\n    ((struct Elem0 *)&gUnk_03002920)[a0].field_4 = v0;\n    v1 = ((struct Elem0 *)&gUnk_03002920)[a0].field_2 - (s8)a2 - gUnk_03003430.bg2VOfs;\n    ((struct Elem0 *)&gUnk_03002920)[a0].field_6 = v1;\n    v2 = gUnk_03003430.bg2HOfs;\n    v3 = gUnk_03003430.bg2VOfs;\n    v4 = gBg2XMag;\n    v5 = gBg2YMag;\n    v6 = gUnk_03003430.bg2HOfs;\n    if (a0 > 12) {\n        v7 = (u8 *)((s32 *)((a0 << 3) + (u8 *)gUnk_030051DC - 104))[1];\n    } else {\n        v7 = (u8 *)((struct Elem1 *)((u32)&gUnk_08078FC8 + 4))[a0].field_0;\n    }\n    switch (15 & v7[5]) {\n        case 3:\n        case 11:\n            v9 = gUnk_03003430.bg2VOfs - (s16)(u16)(v3 - v1) * v5 / 256;\n            v8 = (s32)((128 << 1) - gBg2YMag) >> 3;\n            break;\n        case 1:\n        case 6:\n        case 8:\n            v9 = gUnk_03003430.bg2VOfs - (s16)(u16)(v3 - v1) * v5 / 256;\n            v8 = (s32)((128 << 1) - gBg2YMag) >> 5;\n            break;\n        case 0:\n        case 4:\n        case 5:\n            v9 = gUnk_03003430.bg2VOfs - (s16)(u16)(v3 - v1) * v5 / 256;\n            v8 = (s32)((128 << 1) - gBg2YMag) >> 6;\n            break;\n        case 2:\n        case 7:\n        case 9:\n        case 10:\n            v9 = gUnk_03003430.bg2VOfs - (s16)(u16)(v3 - v1) * v5 / 256;\n            v8 = (s32)((128 << 1) - gBg2YMag) >> 4;\n            break;\n        default:\n            v9 = gUnk_03003430.bg2VOfs - (s16)(u16)(v3 - v1) * v5 / 256;\n            v8 = (s32)((128 << 1) - gBg2YMag) >> 4;\n    }\n    ((struct Elem0 *)&gUnk_03002920)[a0].field_4 = v6 - v4 * (s16)(v2 - v0) / 256;\n    ((struct Elem0 *)&gUnk_03002920)[a0].field_6 = v9 + v8;\n    return;\n}\n",
+        "score": 163,
+        "maxScore": 217,
         "compileErrors": null,
         "breakdown": {
-          "insert": 68,
-          "delete": 34,
-          "replace": 13,
-          "opMismatch": 2,
-          "argMismatch": 68
+          "insert": 59,
+          "delete": 26,
+          "replace": 16,
+          "opMismatch": 1,
+          "argMismatch": 61
         },
         "quality": {
           "score": 84,
-          "lines": 56,
+          "lines": 60,
           "gotos": 0,
-          "casts": 36,
+          "casts": 22,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -9345,15 +9345,15 @@
       },
       "gapSize": {
         "decompiler": "asmlift",
-        "score": 185,
-        "maxScore": 226,
-        "ratio": 0.8185840707964602,
+        "score": 163,
+        "maxScore": 217,
+        "ratio": 0.7511520737327189,
         "kinds": {
-          "insert": 68,
-          "delete": 34,
-          "replace": 13,
-          "opMismatch": 2,
-          "argMismatch": 68
+          "insert": 59,
+          "delete": 26,
+          "replace": 16,
+          "opMismatch": 1,
+          "argMismatch": 61
         }
       },
       "scripts": {
@@ -10254,14 +10254,14 @@
           }
         ],
         "outcome": "nonmatch",
-        "source": "struct Elem0 { u8 field_0; u8 _pad0[7]; };\nstruct Elem1 { u8 field_0; u8 _pad0[7]; };\nstruct Elem10 { u8 field_0; u8 _pad0[7]; };\nstruct Elem11 { u8 field_0; u8 _pad0[7]; };\nstruct Elem12 { u8 field_0; u8 _pad0[7]; };\nstruct Elem13 { u8 field_0; u8 _pad0[7]; };\nstruct Elem14 { u8 field_0; u8 _pad0[7]; };\nstruct Elem2 { u8 field_0; u8 _pad0[7]; };\nstruct Elem3 { u8 field_0; u8 _pad0[7]; };\nstruct Elem4 { u8 field_0; u8 _pad0[7]; };\nstruct Elem5 { u8 field_0; u8 _pad0[7]; };\nstruct Elem6 { u8 field_0; u8 _pad0[7]; };\nstruct Elem7 { u8 field_0; u8 _pad0[7]; };\nstruct Elem8 { u8 field_0; u8 _pad0[7]; };\nstruct Elem9 { u8 field_0; u8 _pad0[7]; };\nvoid UpdateWorldMapNodeTile(u32 a0) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    u16 * v3;\n    u16 * v4;\n    u8 * p0;\n    p0 = (u8 *)&gUnk_08116880;\n    if ((u8)a0 > 3) {\n        v1 = p0[(u8)a0];\n        ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(((struct Elem8 *)((u32)&gUnk_08116748 + 1))[(u8)a0].field_0 << 5) + ((struct Elem0 *)&gUnk_08116748)[(u8)a0].field_0] = ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(v1 + 28 << 5) + 4];\n        ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(((struct Elem10 *)((u32)&gUnk_08116748 + 3))[(u8)a0].field_0 << 5) + ((struct Elem9 *)((u32)&gUnk_08116748 + 2))[(u8)a0].field_0] = ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(v1 + 28 << 5) + 5];\n        ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(((struct Elem12 *)((u32)&gUnk_08116748 + 5))[(u8)a0].field_0 << 5) + ((struct Elem11 *)((u32)&gUnk_08116748 + 4))[(u8)a0].field_0] = ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(v1 + 28 << 5) + 6];\n        v3 = (u16 *)((u32)&gBgTilemapBufs + (128 << 4));\n        v4 = (u16 *)(((((struct Elem14 *)((u32)&gUnk_08116748 + 7))[(u8)a0].field_0 << 5) + ((struct Elem13 *)((u32)&gUnk_08116748 + 6))[(u8)a0].field_0 << 1) + ((u32)&gBgTilemapBufs + (128 << 4)));\n        v2 = (v1 + 28 << 5) + 7;\n    } else {\n        v0 = p0[(u8)a0];\n        ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(((struct Elem1 *)((u32)&gUnk_08116748 + 1))[(u8)a0].field_0 << 5) + ((struct Elem0 *)&gUnk_08116748)[(u8)a0].field_0] = *(u16 *)((v0 + 28 << 6) + ((u32)&gBgTilemapBufs + (128 << 4)));\n        ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(((struct Elem3 *)((u32)&gUnk_08116748 + 3))[(u8)a0].field_0 << 5) + ((struct Elem2 *)((u32)&gUnk_08116748 + 2))[(u8)a0].field_0] = ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(v0 + 28 << 5) + 1];\n        ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(((struct Elem5 *)((u32)&gUnk_08116748 + 5))[(u8)a0].field_0 << 5) + ((struct Elem4 *)((u32)&gUnk_08116748 + 4))[(u8)a0].field_0] = ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(v0 + 28 << 5) + 2];\n        v3 = (u16 *)((u32)&gBgTilemapBufs + (128 << 4));\n        v4 = (u16 *)(((((struct Elem7 *)((u32)&gUnk_08116748 + 7))[(u8)a0].field_0 << 5) + ((struct Elem6 *)((u32)&gUnk_08116748 + 6))[(u8)a0].field_0 << 1) + ((u32)&gBgTilemapBufs + (128 << 4)));\n        v2 = (v0 + 28 << 5) + 3;\n    }\n    *v4 = v3[v2];\n    return;\n}\n",
-        "score": 144,
-        "maxScore": 171,
+        "source": "struct Elem0 { u8 field_0; u8 _pad0[7]; };\nstruct Elem1 { u8 field_0; u8 _pad0[7]; };\nstruct Elem10 { u8 field_0; u8 _pad0[7]; };\nstruct Elem11 { u8 field_0; u8 _pad0[7]; };\nstruct Elem12 { u8 field_0; u8 _pad0[7]; };\nstruct Elem13 { u8 field_0; u8 _pad0[7]; };\nstruct Elem14 { u8 field_0; u8 _pad0[7]; };\nstruct Elem2 { u8 field_0; u8 _pad0[7]; };\nstruct Elem3 { u8 field_0; u8 _pad0[7]; };\nstruct Elem4 { u8 field_0; u8 _pad0[7]; };\nstruct Elem5 { u8 field_0; u8 _pad0[7]; };\nstruct Elem6 { u8 field_0; u8 _pad0[7]; };\nstruct Elem7 { u8 field_0; u8 _pad0[7]; };\nstruct Elem8 { u8 field_0; u8 _pad0[7]; };\nstruct Elem9 { u8 field_0; u8 _pad0[7]; };\nvoid UpdateWorldMapNodeTile(u8 a0) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    u16 * v3;\n    u16 * v4;\n    u8 * p0;\n    p0 = (u8 *)&gUnk_08116880;\n    if (a0 > 3) {\n        v1 = p0[a0];\n        ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(((struct Elem8 *)((u32)&gUnk_08116748 + 1))[a0].field_0 << 5) + ((struct Elem0 *)&gUnk_08116748)[a0].field_0] = ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(v1 + 28 << 5) + 4];\n        ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(((struct Elem10 *)((u32)&gUnk_08116748 + 3))[a0].field_0 << 5) + ((struct Elem9 *)((u32)&gUnk_08116748 + 2))[a0].field_0] = ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(v1 + 28 << 5) + 5];\n        ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(((struct Elem12 *)((u32)&gUnk_08116748 + 5))[a0].field_0 << 5) + ((struct Elem11 *)((u32)&gUnk_08116748 + 4))[a0].field_0] = ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(v1 + 28 << 5) + 6];\n        v3 = (u16 *)((u32)&gBgTilemapBufs + (128 << 4));\n        v4 = (u16 *)(((((struct Elem14 *)((u32)&gUnk_08116748 + 7))[a0].field_0 << 5) + ((struct Elem13 *)((u32)&gUnk_08116748 + 6))[a0].field_0 << 1) + ((u32)&gBgTilemapBufs + (128 << 4)));\n        v2 = (v1 + 28 << 5) + 7;\n    } else {\n        v0 = p0[a0];\n        ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(((struct Elem1 *)((u32)&gUnk_08116748 + 1))[a0].field_0 << 5) + ((struct Elem0 *)&gUnk_08116748)[a0].field_0] = *(u16 *)((v0 + 28 << 6) + ((u32)&gBgTilemapBufs + (128 << 4)));\n        ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(((struct Elem3 *)((u32)&gUnk_08116748 + 3))[a0].field_0 << 5) + ((struct Elem2 *)((u32)&gUnk_08116748 + 2))[a0].field_0] = ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(v0 + 28 << 5) + 1];\n        ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(((struct Elem5 *)((u32)&gUnk_08116748 + 5))[a0].field_0 << 5) + ((struct Elem4 *)((u32)&gUnk_08116748 + 4))[a0].field_0] = ((u16 *)((u32)&gBgTilemapBufs + (128 << 4)))[(v0 + 28 << 5) + 2];\n        v3 = (u16 *)((u32)&gBgTilemapBufs + (128 << 4));\n        v4 = (u16 *)(((((struct Elem7 *)((u32)&gUnk_08116748 + 7))[a0].field_0 << 5) + ((struct Elem6 *)((u32)&gUnk_08116748 + 6))[a0].field_0 << 1) + ((u32)&gBgTilemapBufs + (128 << 4)));\n        v2 = (v0 + 28 << 5) + 3;\n    }\n    *v4 = v3[v2];\n    return;\n}\n",
+        "score": 145,
+        "maxScore": 172,
         "compileErrors": null,
         "breakdown": {
-          "insert": 19,
-          "delete": 28,
-          "replace": 21,
+          "insert": 20,
+          "delete": 29,
+          "replace": 20,
           "opMismatch": 2,
           "argMismatch": 74
         },
@@ -10269,7 +10269,7 @@
           "score": 84,
           "lines": 43,
           "gotos": 0,
-          "casts": 36,
+          "casts": 17,
           "unkGlue": 0,
           "rawMem": 1,
           "addrDeref": 0
@@ -10301,13 +10301,13 @@
       },
       "gapSize": {
         "decompiler": "asmlift",
-        "score": 144,
-        "maxScore": 171,
-        "ratio": 0.8421052631578947,
+        "score": 145,
+        "maxScore": 172,
+        "ratio": 0.8430232558139535,
         "kinds": {
-          "insert": 19,
-          "delete": 28,
-          "replace": 21,
+          "insert": 20,
+          "delete": 29,
+          "replace": 20,
           "opMismatch": 2,
           "argMismatch": 74
         }
@@ -14509,7 +14509,7 @@
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "candidateLabel": "signed/raw-globals",
+        "candidateLabel": "signed",
         "symbolsUsed": [
           {
             "name": "gBattleMoves",
@@ -14521,22 +14521,22 @@
           }
         ],
         "outcome": "nonmatch",
-        "source": "struct Elem0 { u8 _pad0[4]; u8 field_4; u8 _pad1[7]; };\ns32 CalculatePPWithBonus(s32 a0, s32 a1, s32 a2) {\n    return (u8)(((struct Elem0 *)&gBattleMoves)[(u16)a0].field_4 + ((((u8 *)&gPPUpGetMask)[(u8)a2] & a1) >> ((u8)a2 << 1)) * 20 * ((struct Elem0 *)&gBattleMoves)[(u16)a0].field_4 / 100);\n}\n",
-        "score": 17,
-        "maxScore": 36,
+        "source": "struct Elem0 { u8 _pad0[4]; u8 field_4; u8 _pad1[7]; };\ns32 CalculatePPWithBonus(u16 a0, s32 a1, u8 a2) {\n    return (u8)(((struct Elem0 *)&gBattleMoves)[a0].field_4 + ((gPPUpGetMask[a2] & a1) >> (a2 << 1)) * 20 * ((struct Elem0 *)&gBattleMoves)[a0].field_4 / 100);\n}\n",
+        "score": 13,
+        "maxScore": 35,
         "compileErrors": null,
         "breakdown": {
-          "insert": 3,
-          "delete": 3,
-          "replace": 4,
+          "insert": 2,
+          "delete": 2,
+          "replace": 2,
           "opMismatch": 0,
           "argMismatch": 7
         },
         "quality": {
-          "score": 92,
+          "score": 100,
           "lines": 4,
           "gotos": 0,
-          "casts": 6,
+          "casts": 1,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -14849,7 +14849,7 @@
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "candidateLabel": "unsigned/setup-args",
+        "candidateLabel": "unsigned/setup-args/livebase/raw-globals",
         "symbolsUsed": [
           {
             "name": "gPlayerAvatar",
@@ -14857,22 +14857,22 @@
           }
         ],
         "outcome": "nonmatch",
-        "source": "s32 DoForcedMovement(u32 a0, u32 a1, u32 a2) {\n    s32 v0;\n    s32 v1;\n    v0 = CheckForPlayerAvatarCollision((u8)a0);\n    v1 = 64;\n    gPlayerAvatar.flags = gPlayerAvatar.flags | v1;\n    if ((u8)v0 != 0) {\n        ForcedMovement_None();\n        if ((u8)v0 <= 4) {\n            return 0;\n        } else {\n            if ((u8)v0 == 6) PlayerJumpLedge((u8)a0);\n            gPlayerAvatar.flags = gPlayerAvatar.flags | v1;\n            gPlayerAvatar.runningState = 2;\n            return 1;\n        }\n    } else {\n        gPlayerAvatar.runningState = 2;\n        _call_via_r9((u8)a0);\n        return 1;\n    }\n}\n",
-        "score": 30,
-        "maxScore": 58,
+        "source": "s32 DoForcedMovement(u8 a0, u32 a1, u32 a2) {\n    s32 v0;\n    s32 v1;\n    u8 * p0;\n    p0 = (u8 *)&gPlayerAvatar;\n    v0 = CheckForPlayerAvatarCollision(a0);\n    v1 = 64;\n    *p0 = *p0 | v1;\n    if ((u8)v0 != 0) {\n        ForcedMovement_None();\n        if ((u8)v0 <= 4) {\n            return 0;\n        } else {\n            if ((u8)v0 == 6) PlayerJumpLedge(a0);\n            *p0 = *p0 | v1;\n            p0[2] = 2;\n            return 1;\n        }\n    } else {\n        p0[2] = 2;\n        _call_via_r9(a0);\n        return 1;\n    }\n}\n",
+        "score": 28,
+        "maxScore": 56,
         "compileErrors": null,
         "breakdown": {
-          "insert": 4,
-          "delete": 12,
-          "replace": 2,
+          "insert": 2,
+          "delete": 17,
+          "replace": 0,
           "opMismatch": 0,
-          "argMismatch": 12
+          "argMismatch": 9
         },
         "quality": {
-          "score": 92,
-          "lines": 22,
+          "score": 96,
+          "lines": 24,
           "gotos": 0,
-          "casts": 6,
+          "casts": 4,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -14900,15 +14900,15 @@
       },
       "gapSize": {
         "decompiler": "asmlift",
-        "score": 30,
-        "maxScore": 58,
-        "ratio": 0.5172413793103449,
+        "score": 28,
+        "maxScore": 56,
+        "ratio": 0.5,
         "kinds": {
-          "insert": 4,
-          "delete": 12,
-          "replace": 2,
+          "insert": 2,
+          "delete": 17,
+          "replace": 0,
           "opMismatch": 0,
-          "argMismatch": 12
+          "argMismatch": 9
         }
       },
       "scripts": {
@@ -15219,7 +15219,7 @@
           }
         ],
         "outcome": "nonmatch",
-        "source": "struct Elem0 { u8 _pad0[16]; u8 field_16; u8 _pad1[11]; };\ns32 GetGenderFromSpeciesAndPersonality(u32 a0, u32 a1) {\n    s32 v0;\n    if (((struct Elem0 *)&gSpeciesInfo)[(u16)a0].field_16 != 0) {\n        if (((struct Elem0 *)&gSpeciesInfo)[(u16)a0].field_16 >= 0 && ((struct Elem0 *)&gSpeciesInfo)[(u16)a0].field_16 <= 255 && ((struct Elem0 *)&gSpeciesInfo)[(u16)a0].field_16 >= 254) {\n            v0 = ((struct Elem0 *)&gSpeciesInfo)[(u16)a0].field_16;\n        } else {\n            if (((struct Elem0 *)&gSpeciesInfo)[(u16)a0].field_16 <= (255 & a1)) {\n                v0 = 0;\n            } else {\n                v0 = 254;\n            }\n        }\n    } else {\n        v0 = ((struct Elem0 *)&gSpeciesInfo)[(u16)a0].field_16;\n    }\n    return v0;\n}\n",
+        "source": "struct Elem0 { u8 _pad0[16]; u8 field_16; u8 _pad1[11]; };\ns32 GetGenderFromSpeciesAndPersonality(u16 a0, u32 a1) {\n    s32 v0;\n    if (((struct Elem0 *)&gSpeciesInfo)[a0].field_16 != 0) {\n        if (((struct Elem0 *)&gSpeciesInfo)[a0].field_16 >= 0 && ((struct Elem0 *)&gSpeciesInfo)[a0].field_16 <= 255 && ((struct Elem0 *)&gSpeciesInfo)[a0].field_16 >= 254) {\n            v0 = ((struct Elem0 *)&gSpeciesInfo)[a0].field_16;\n        } else {\n            if (((struct Elem0 *)&gSpeciesInfo)[a0].field_16 <= (255 & a1)) {\n                v0 = 0;\n            } else {\n                v0 = 254;\n            }\n        }\n    } else {\n        v0 = ((struct Elem0 *)&gSpeciesInfo)[a0].field_16;\n    }\n    return v0;\n}\n",
         "score": 29,
         "maxScore": 35,
         "compileErrors": null,
@@ -15231,10 +15231,10 @@
           "argMismatch": 10
         },
         "quality": {
-          "score": 90,
+          "score": 100,
           "lines": 18,
           "gotos": 0,
-          "casts": 7,
+          "casts": 0,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -15638,23 +15638,23 @@
         "symbolMap": true,
         "candidateLabel": "unsigned",
         "symbolsUsed": [],
-        "outcome": "nonmatch",
-        "source": "s32 MathUtil_Div16(u32 a0, u32 a1) {\n    s32 v0;\n    if ((s16)a1 != 0) {\n        v0 = (s16)(((u16)a0 << 16 >> 8) / (s16)a1);\n    } else {\n        v0 = 0;\n    }\n    return v0;\n}\n",
-        "score": 3,
+        "outcome": "match",
+        "source": "s32 MathUtil_Div16(u16 a0, s16 a1) {\n    s32 v0;\n    if (a1 != 0) {\n        v0 = (s16)((a0 << 16 >> 8) / a1);\n    } else {\n        v0 = 0;\n    }\n    return v0;\n}\n",
+        "score": 0,
         "maxScore": 16,
         "compileErrors": null,
         "breakdown": {
           "insert": 0,
-          "delete": 2,
+          "delete": 0,
           "replace": 0,
           "opMismatch": 0,
-          "argMismatch": 1
+          "argMismatch": 0
         },
         "quality": {
-          "score": 96,
+          "score": 100,
           "lines": 9,
           "gotos": 0,
-          "casts": 4,
+          "casts": 1,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -15684,19 +15684,7 @@
           "addrDeref": 0
         }
       },
-      "gapSize": {
-        "decompiler": "asmlift",
-        "score": 3,
-        "maxScore": 16,
-        "ratio": 0.1875,
-        "kinds": {
-          "insert": 0,
-          "delete": 2,
-          "replace": 0,
-          "opMismatch": 0,
-          "argMismatch": 1
-        }
-      },
+      "gapSize": null,
       "scripts": {
         "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `MathUtil_Div16` — benchmark function pokeemerald:MathUtil_Div16:agbcc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The exact agbcc `.s` text the benchmark fed m2c, verbatim.\ncat > in.s <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tMathUtil_Div16\n\t.type\t MathUtil_Div16,function\n\t.thumb_func\nMathUtil_Div16:\n\tpush\t{lr}\n\tlsl\tr0, r0, #0x10\n\tlsr\tr0, r0, #0x10\n\tlsl\tr1, r1, #0x10\n\tasr\tr1, r1, #0x10\n\tcmp\tr1, #0\n\tbeq\t.L3\t@cond_branch\n\tlsl\tr0, r0, #0x10\n\tasr\tr0, r0, #0x8\n\tbl\t__divsi3\n\tlsl\tr0, r0, #0x10\n\tasr\tr0, r0, #0x10\n\tb\t.L4\n.L3:\n\tmov\tr0, #0x0\n.L4:\n\tpop\t{r1}\n\tbx\tr1\n.Lfe1:\n\t.size\t MathUtil_Div16,.Lfe1-MathUtil_Div16\n\n.text\n\t.align\t2, 0\nASM_INPUT\n\n# (This function ran with NO context header — the benchmark fed m2c the assembly alone.)\n\nargs=(\n  --target gba            # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function MathUtil_Div16 # the symbol to decompile from in.s\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
         "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `MathUtil_Div16` — benchmark function pokeemerald:MathUtil_Div16:agbcc.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# This function's decomp project — the PINNED benchmark branch (provenance base + one\n# integration commit). Not needed to run this script (inputs are embedded/vendored); to\n# rebuild the project itself:\n#   git clone --branch asmlift-benchmark https://github.com/macabeus/pokeemerald.git pokeemerald\n#   make -C pokeemerald\n#   make -C pokeemerald asmlift-elf   # derive the symbols ELF (DWARF types-sidecar)\n# SYMBOLS: this row ran WITH the project's symbol map (names + declaration shapes derived\n# from the ELF its decomp.yaml names), vendored at apps/benchmark/dataset/real/tu/pokeemerald/symbols.json.gz\n#   sha256 of the decompressed map JSON: 0664158954110d15103e2f5655c956b305075b6c0f470015d5d39506f69ce46e\n# Set PROJECT_PATH to your BUILT checkout of the project above (clone recipe in the comments);\n# step 1 then points the scoring config at the checkout's decomp.yaml (tools.asmlift.elf) —\n# the CLI loads the same map, so this run reproduces the row's named spellings. A missing\n# checkout/ELF warns and runs map-less (output may then differ from the row).\nPROJECT_PATH='/path/to/pokeemerald'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# --project-root grafts the checkout's tools.asmlift.elf (the symbol map) into that decomp.yaml.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target pokeemerald:MathUtil_Div16:agbcc --out \"$PWD\" --project-root \"$PROJECT_PATH\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact agbcc `.s` text.\ncat > in.asm <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tMathUtil_Div16\n\t.type\t MathUtil_Div16,function\n\t.thumb_func\nMathUtil_Div16:\n\tpush\t{lr}\n\tlsl\tr0, r0, #0x10\n\tlsr\tr0, r0, #0x10\n\tlsl\tr1, r1, #0x10\n\tasr\tr1, r1, #0x10\n\tcmp\tr1, #0\n\tbeq\t.L3\t@cond_branch\n\tlsl\tr0, r0, #0x10\n\tasr\tr0, r0, #0x8\n\tbl\t__divsi3\n\tlsl\tr0, r0, #0x10\n\tasr\tr0, r0, #0x10\n\tb\t.L4\n.L3:\n\tmov\tr0, #0x0\n.L4:\n\tpop\t{r1}\n\tbx\tr1\n.Lfe1:\n\t.size\t MathUtil_Div16,.Lfe1-MathUtil_Div16\n\n.text\n\t.align\t2, 0\nASM_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\n# (real tier: candidates are scored INSIDE the project's own context — step 1 materializes the\n# row's vendored context next to target.o as ctx.i, and the generated decomp.yaml concatenates\n# it ahead of every candidate, so this scores in the same world the benchmark did)\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target agbcc          # frontend + target description (ISA, calling convention, compiler idioms)\n  --name MathUtil_Div16   # the symbol to decompile (multi-function input selects by name)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
@@ -15727,23 +15715,23 @@
         "symbolMap": true,
         "candidateLabel": "unsigned",
         "symbolsUsed": [],
-        "outcome": "nonmatch",
-        "source": "s32 MathUtil_Div16Shift(u32 a0, u32 a1, u32 a2) {\n    s32 v0;\n    if ((s16)a2 != 0) {\n        v0 = (s16)(((s16)(u16)a1 << (u8)a0) / (s16)a2);\n    } else {\n        v0 = 0;\n    }\n    return v0;\n}\n",
-        "score": 11,
-        "maxScore": 22,
+        "outcome": "match",
+        "source": "s32 MathUtil_Div16Shift(u8 a0, u16 a1, s16 a2) {\n    s32 v0;\n    if (a2 != 0) {\n        v0 = (s16)(((s16)a1 << a0) / a2);\n    } else {\n        v0 = 0;\n    }\n    return v0;\n}\n",
+        "score": 0,
+        "maxScore": 19,
         "compileErrors": null,
         "breakdown": {
-          "insert": 3,
-          "delete": 3,
-          "replace": 4,
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
           "opMismatch": 0,
-          "argMismatch": 1
+          "argMismatch": 0
         },
         "quality": {
-          "score": 92,
+          "score": 100,
           "lines": 9,
           "gotos": 0,
-          "casts": 6,
+          "casts": 2,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -15773,19 +15761,7 @@
           "addrDeref": 0
         }
       },
-      "gapSize": {
-        "decompiler": "m2c",
-        "score": 5,
-        "maxScore": 21,
-        "ratio": 0.23809523809523808,
-        "kinds": {
-          "insert": 2,
-          "delete": 2,
-          "replace": 0,
-          "opMismatch": 1,
-          "argMismatch": 0
-        }
-      },
+      "gapSize": null,
       "scripts": {
         "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `MathUtil_Div16Shift` — benchmark function pokeemerald:MathUtil_Div16Shift:agbcc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The exact agbcc `.s` text the benchmark fed m2c, verbatim.\ncat > in.s <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tMathUtil_Div16Shift\n\t.type\t MathUtil_Div16Shift,function\n\t.thumb_func\nMathUtil_Div16Shift:\n\tpush\t{lr}\n\tlsl\tr0, r0, #0x18\n\tlsr\tr3, r0, #0x18\n\tlsl\tr1, r1, #0x10\n\tlsr\tr0, r1, #0x10\n\tlsl\tr2, r2, #0x10\n\tasr\tr1, r2, #0x10\n\tcmp\tr1, #0\n\tbeq\t.L3\t@cond_branch\n\tlsl\tr0, r0, #0x10\n\tasr\tr0, r0, #0x10\n\tlsl\tr0, r0, r3\n\tbl\t__divsi3\n\tlsl\tr0, r0, #0x10\n\tasr\tr0, r0, #0x10\n\tb\t.L4\n.L3:\n\tmov\tr0, #0x0\n.L4:\n\tpop\t{r1}\n\tbx\tr1\n.Lfe1:\n\t.size\t MathUtil_Div16Shift,.Lfe1-MathUtil_Div16Shift\n\n.text\n\t.align\t2, 0\nASM_INPUT\n\n# (This function ran with NO context header — the benchmark fed m2c the assembly alone.)\n\nargs=(\n  --target gba            # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function MathUtil_Div16Shift # the symbol to decompile from in.s\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
         "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `MathUtil_Div16Shift` — benchmark function pokeemerald:MathUtil_Div16Shift:agbcc.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# This function's decomp project — the PINNED benchmark branch (provenance base + one\n# integration commit). Not needed to run this script (inputs are embedded/vendored); to\n# rebuild the project itself:\n#   git clone --branch asmlift-benchmark https://github.com/macabeus/pokeemerald.git pokeemerald\n#   make -C pokeemerald\n#   make -C pokeemerald asmlift-elf   # derive the symbols ELF (DWARF types-sidecar)\n# SYMBOLS: this row ran WITH the project's symbol map (names + declaration shapes derived\n# from the ELF its decomp.yaml names), vendored at apps/benchmark/dataset/real/tu/pokeemerald/symbols.json.gz\n#   sha256 of the decompressed map JSON: 0664158954110d15103e2f5655c956b305075b6c0f470015d5d39506f69ce46e\n# Set PROJECT_PATH to your BUILT checkout of the project above (clone recipe in the comments);\n# step 1 then points the scoring config at the checkout's decomp.yaml (tools.asmlift.elf) —\n# the CLI loads the same map, so this run reproduces the row's named spellings. A missing\n# checkout/ELF warns and runs map-less (output may then differ from the row).\nPROJECT_PATH='/path/to/pokeemerald'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# --project-root grafts the checkout's tools.asmlift.elf (the symbol map) into that decomp.yaml.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target pokeemerald:MathUtil_Div16Shift:agbcc --out \"$PWD\" --project-root \"$PROJECT_PATH\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact agbcc `.s` text.\ncat > in.asm <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tMathUtil_Div16Shift\n\t.type\t MathUtil_Div16Shift,function\n\t.thumb_func\nMathUtil_Div16Shift:\n\tpush\t{lr}\n\tlsl\tr0, r0, #0x18\n\tlsr\tr3, r0, #0x18\n\tlsl\tr1, r1, #0x10\n\tlsr\tr0, r1, #0x10\n\tlsl\tr2, r2, #0x10\n\tasr\tr1, r2, #0x10\n\tcmp\tr1, #0\n\tbeq\t.L3\t@cond_branch\n\tlsl\tr0, r0, #0x10\n\tasr\tr0, r0, #0x10\n\tlsl\tr0, r0, r3\n\tbl\t__divsi3\n\tlsl\tr0, r0, #0x10\n\tasr\tr0, r0, #0x10\n\tb\t.L4\n.L3:\n\tmov\tr0, #0x0\n.L4:\n\tpop\t{r1}\n\tbx\tr1\n.Lfe1:\n\t.size\t MathUtil_Div16Shift,.Lfe1-MathUtil_Div16Shift\n\n.text\n\t.align\t2, 0\nASM_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\n# (real tier: candidates are scored INSIDE the project's own context — step 1 materializes the\n# row's vendored context next to target.o as ctx.i, and the generated decomp.yaml concatenates\n# it ahead of every candidate, so this scores in the same world the benchmark did)\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target agbcc          # frontend + target description (ISA, calling convention, compiler idioms)\n  --name MathUtil_Div16Shift # the symbol to decompile (multi-function input selects by name)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
@@ -15889,7 +15865,7 @@
         "candidateLabel": "unsigned/regcopy-ret",
         "symbolsUsed": [],
         "outcome": "match",
-        "source": "s32 MathUtil_Mul16(u32 a0, u32 a1) {\n    s32 v0;\n    s32 w0;\n    v0 = (s16)a0 * (s16)a1;\n    w0 = v0;\n    if (w0 < 0) w0 = w0 + 255;\n    v0 = w0 << 8 >> 16;\n    return v0;\n}\n",
+        "source": "s32 MathUtil_Mul16(s16 a0, s16 a1) {\n    s32 v0;\n    s32 w0;\n    v0 = a0 * a1;\n    w0 = v0;\n    if (w0 < 0) w0 = w0 + 255;\n    v0 = w0 << 8 >> 16;\n    return v0;\n}\n",
         "score": 0,
         "maxScore": 12,
         "compileErrors": null,
@@ -15904,7 +15880,7 @@
           "score": 100,
           "lines": 9,
           "gotos": 0,
-          "casts": 2,
+          "casts": 0,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -15966,22 +15942,22 @@
         "candidateLabel": "unsigned",
         "symbolsUsed": [],
         "outcome": "nonmatch",
-        "source": "s32 MathUtil_Mul16Shift(u32 a0, u32 a1, u32 a2) {\n    return (s16)((s16)a1 * (s16)a2 / (1 << (u8)a0));\n}\n",
-        "score": 13,
-        "maxScore": 22,
+        "source": "s32 MathUtil_Mul16Shift(u8 a0, s16 a1, s16 a2) {\n    return (s16)(a1 * a2 / (1 << a0));\n}\n",
+        "score": 5,
+        "maxScore": 17,
         "compileErrors": null,
         "breakdown": {
-          "insert": 5,
-          "delete": 6,
+          "insert": 0,
+          "delete": 1,
           "replace": 0,
           "opMismatch": 0,
-          "argMismatch": 2
+          "argMismatch": 4
         },
         "quality": {
-          "score": 96,
+          "score": 100,
           "lines": 3,
           "gotos": 0,
-          "casts": 4,
+          "casts": 1,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -16012,7 +15988,7 @@
         }
       },
       "gapSize": {
-        "decompiler": "m2c",
+        "decompiler": "asmlift",
         "score": 5,
         "maxScore": 17,
         "ratio": 0.29411764705882354,
@@ -16130,22 +16106,22 @@
           }
         ],
         "outcome": "nonmatch",
-        "source": "s32 ModifyStatByNature(u32 a0, u32 a1, u32 a2) {\n    s32 v0;\n    s32 v1;\n    if ((a2 << 24) + (255 << 24) >> 24 > 4) {\n        return (u16)a1;\n    } else {\n        v0 = ((u8 *)&gNatureStatTable)[(u8)a2 + ((u8)a0 * 5 - 1)];\n        switch ((s8)v0) {\n            case 1:\n                v1 = 110;\n                return (u16)((u32)(u16)(v1 * (u16)a1) / 100);\n            case -1:\n                v1 = 90;\n                return (u16)((u32)(u16)(v1 * (u16)a1) / 100);\n            default:\n                return (u16)a1;\n        }\n    }\n}\n",
-        "score": 53,
-        "maxScore": 66,
+        "source": "s32 ModifyStatByNature(u8 a0, u16 a1, u32 a2) {\n    s32 v0;\n    s32 v1;\n    if ((a2 << 24) + (255 << 24) >> 24 > 4) {\n        return a1;\n    } else {\n        v0 = ((u8 *)&gNatureStatTable)[(u8)a2 + (a0 * 5 - 1)];\n        switch ((s8)v0) {\n            case 1:\n                v1 = 110;\n                return (u16)((u32)(u16)(v1 * a1) / 100);\n            case -1:\n                v1 = 90;\n                return (u16)((u32)(u16)(v1 * a1) / 100);\n            default:\n                return a1;\n        }\n    }\n}\n",
+        "score": 29,
+        "maxScore": 51,
         "compileErrors": null,
         "breakdown": {
-          "insert": 20,
-          "delete": 13,
-          "replace": 10,
+          "insert": 5,
+          "delete": 9,
+          "replace": 4,
           "opMismatch": 1,
-          "argMismatch": 9
+          "argMismatch": 10
         },
         "quality": {
           "score": 84,
           "lines": 19,
           "gotos": 0,
-          "casts": 14,
+          "casts": 9,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -16176,16 +16152,16 @@
         }
       },
       "gapSize": {
-        "decompiler": "m2c",
-        "score": 31,
-        "maxScore": 55,
-        "ratio": 0.5636363636363636,
+        "decompiler": "asmlift",
+        "score": 29,
+        "maxScore": 51,
+        "ratio": 0.5686274509803921,
         "kinds": {
-          "insert": 9,
-          "delete": 11,
-          "replace": 3,
+          "insert": 5,
+          "delete": 9,
+          "replace": 4,
           "opMismatch": 1,
-          "argMismatch": 7
+          "argMismatch": 10
         }
       },
       "scripts": {
@@ -16642,7 +16618,7 @@
           }
         ],
         "outcome": "nonmatch",
-        "source": "s32 Sin2(u32 a0) {\n    s32 v0;\n    s32 v1;\n    v0 = ((u16 *)&gSineDegreeTable)[(u16)((u32)(u16)a0 % 180)];\n    if (((u32)(u16)a0 / 180 & 1) == 0) {\n        v1 = v0 << 16;\n    } else {\n        v1 = -(v0 << 16);\n    }\n    return v1 >> 16;\n}\n",
+        "source": "s32 Sin2(u16 a0) {\n    s32 v0;\n    s32 v1;\n    v0 = ((u16 *)&gSineDegreeTable)[(u16)((u32)a0 % 180)];\n    if (((u32)a0 / 180 & 1) == 0) {\n        v1 = v0 << 16;\n    } else {\n        v1 = -(v0 << 16);\n    }\n    return v1 >> 16;\n}\n",
         "score": 23,
         "maxScore": 36,
         "compileErrors": null,
@@ -16654,10 +16630,10 @@
           "argMismatch": 11
         },
         "quality": {
-          "score": 92,
+          "score": 96,
           "lines": 11,
           "gotos": 0,
-          "casts": 6,
+          "casts": 4,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -17190,10 +17166,10 @@
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "candidateLabel": "unsigned/expr-home/initfirst",
+        "candidateLabel": "unsigned/uns-cmp/initfirst",
         "symbolsUsed": [],
         "outcome": "nonmatch",
-        "source": "s32 StringCopyN(u32 a0, u32 a1, u32 a2) {\n    u32 v0;\n    s32 v1;\n    v0 = (u8)a2;\n    v1 = 0;\n    if (v1 < v0) {\n        do {\n            *(u8 *)(a0 + v1) = *(u8 *)(a1 + v1);\n            v1 = (u16)(v1 + 1);\n        } while (v1 < v0);\n    }\n    return a0 + v0;\n}\n",
+        "source": "s32 StringCopyN(u32 a0, u32 a1, u8 a2) {\n    u32 v0;\n    v0 = 0;\n    if (v0 < a2) {\n        do {\n            *(u8 *)(a0 + v0) = *(u8 *)(a1 + v0);\n            v0 = (u16)(v0 + 1);\n        } while (v0 < a2);\n    }\n    return a0 + a2;\n}\n",
         "score": 9,
         "maxScore": 23,
         "compileErrors": null,
@@ -17205,10 +17181,10 @@
           "argMismatch": 4
         },
         "quality": {
-          "score": 88,
-          "lines": 13,
+          "score": 90,
+          "lines": 11,
           "gotos": 0,
-          "casts": 4,
+          "casts": 3,
           "unkGlue": 0,
           "rawMem": 2,
           "addrDeref": 0
@@ -17743,7 +17719,7 @@
         "candidateLabel": "unsigned/uns-cmp",
         "symbolsUsed": [],
         "outcome": "nonmatch",
-        "source": "s32 Base10DigitsToHexNibbles(u32 a0) {\n    s32 v0;\n    s32 v1;\n    u32 v2;\n    s32 v3;\n    v1 = (u16)a0;\n    v3 = 0;\n    v2 = 0;\n    do {\n        v0 = Div(v1, 10);\n        v3 = (u16)(v3 | (u8)(v1 - v0 * 10) << (v2 << 2));\n        v1 = (u16)v0;\n        v2 = (u8)(v2 + 1);\n    } while (v2 <= 3);\n    return v3;\n}\n",
+        "source": "s32 Base10DigitsToHexNibbles(u16 a0) {\n    s32 v0;\n    s32 v1;\n    u32 v2;\n    s32 v3;\n    v1 = a0;\n    v3 = 0;\n    v2 = 0;\n    do {\n        v0 = Div(v1, 10);\n        v3 = (u16)(v3 | (u8)(v1 - v0 * 10) << (v2 << 2));\n        v1 = (u16)v0;\n        v2 = (u8)(v2 + 1);\n    } while (v2 <= 3);\n    return v3;\n}\n",
         "score": 8,
         "maxScore": 32,
         "compileErrors": null,
@@ -17755,10 +17731,10 @@
           "argMismatch": 3
         },
         "quality": {
-          "score": 94,
+          "score": 96,
           "lines": 16,
           "gotos": 0,
-          "casts": 5,
+          "casts": 4,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -18532,7 +18508,7 @@
         "candidateLabel": "unsigned/uns-cmp",
         "symbolsUsed": [],
         "outcome": "nonmatch",
-        "source": "void numToASCII(u32 a0, u32 a1) {\n    s32 v0;\n    u32 v1;\n    u8 * v2;\n    s32 v3;\n    v0 = (u16)a1;\n    v1 = 0;\n    do {\n        if ((u32)(v0 & 240 << 8) >> 12 > 9) {\n            v2 = (u8 *)(a0 + v1);\n            v3 = ((u32)(v0 & 240 << 8) >> 12) + 87;\n        } else {\n            v2 = (u8 *)(a0 + v1);\n            v3 = ((u32)(v0 & 240 << 8) >> 12) + 48;\n        }\n        *v2 = v3;\n        v0 = (u32)(v0 << 20) >> 16;\n        v1 = (u8)(v1 + 1);\n    } while (v1 <= 3);\n    *(u8 *)(a0 + v1) = 0;\n    return;\n}\n",
+        "source": "void numToASCII(u32 a0, u16 a1) {\n    s32 v0;\n    u32 v1;\n    u8 * v2;\n    s32 v3;\n    v0 = a1;\n    v1 = 0;\n    do {\n        if ((u32)(v0 & 240 << 8) >> 12 > 9) {\n            v2 = (u8 *)(a0 + v1);\n            v3 = ((u32)(v0 & 240 << 8) >> 12) + 87;\n        } else {\n            v2 = (u8 *)(a0 + v1);\n            v3 = ((u32)(v0 & 240 << 8) >> 12) + 48;\n        }\n        *v2 = v3;\n        v0 = (u32)(v0 << 20) >> 16;\n        v1 = (u8)(v1 + 1);\n    } while (v1 <= 3);\n    *(u8 *)(a0 + v1) = 0;\n    return;\n}\n",
         "score": 8,
         "maxScore": 31,
         "compileErrors": null,
@@ -18547,7 +18523,7 @@
           "score": 84,
           "lines": 22,
           "gotos": 0,
-          "casts": 9,
+          "casts": 8,
           "unkGlue": 0,
           "rawMem": 1,
           "addrDeref": 0
@@ -19727,22 +19703,22 @@
         "candidateLabel": "unsigned",
         "symbolsUsed": [],
         "outcome": "nonmatch",
-        "source": "s32 sa2__sub_808558C(u32 a0, u32 a1, u32 a2) {\n    s32 v0;\n    if ((u16)((u16)a1 - (u16)a0 & (1 << (u8)a2) - 1) > (u32)(1 << (u8)a2) >> 1) {\n        v0 = (u16)((u16)a1 - (u16)a0 & (1 << (u8)a2) - 1) - (1 << (u8)a2) << 16;\n    } else {\n        v0 = (u16)((u16)a1 - (u16)a0 & (1 << (u8)a2) - 1) << 16;\n    }\n    return v0 >> 16;\n}\n",
-        "score": 19,
-        "maxScore": 25,
+        "source": "s32 sa2__sub_808558C(u16 a0, u16 a1, u8 a2) {\n    s32 v0;\n    if ((u16)(a1 - a0 & (1 << a2) - 1) > (u32)(1 << a2) >> 1) {\n        v0 = (u16)(a1 - a0 & (1 << a2) - 1) - (1 << a2) << 16;\n    } else {\n        v0 = (u16)(a1 - a0 & (1 << a2) - 1) << 16;\n    }\n    return v0 >> 16;\n}\n",
+        "score": 17,
+        "maxScore": 26,
         "compileErrors": null,
         "breakdown": {
-          "insert": 0,
-          "delete": 7,
+          "insert": 1,
+          "delete": 4,
           "replace": 2,
           "opMismatch": 0,
           "argMismatch": 10
         },
         "quality": {
-          "score": 88,
+          "score": 96,
           "lines": 9,
           "gotos": 0,
-          "casts": 15,
+          "casts": 4,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -19905,7 +19881,7 @@
         "candidateLabel": "signed",
         "symbolsUsed": [],
         "outcome": "nonmatch",
-        "source": "s32 sa2__sub_8085654(s32 a0, s32 a1, s32 a2, s32 a3, s32 a4) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    v1 = a0;\n    v2 = (u8)a4;\n    do {\n        v0 = __ashrdi3(__muldi3(a2, a2 >> 31, v1 - a1, v1 - a1 >> 31));\n        v1 = v1 - v0;\n        v2 = (u8)(v2 - 1);\n    } while (v2 != 255);\n    return v1;\n}\n",
+        "source": "s32 sa2__sub_8085654(s32 a0, s32 a1, s32 a2, s32 a3, u8 a4) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    v1 = a0;\n    v2 = a4;\n    do {\n        v0 = __ashrdi3(__muldi3(a2, a2 >> 31, v1 - a1, v1 - a1 >> 31));\n        v1 = v1 - v0;\n        v2 = (u8)(v2 - 1);\n    } while (v2 != 255);\n    return v1;\n}\n",
         "score": 20,
         "maxScore": 32,
         "compileErrors": null,
@@ -19920,7 +19896,7 @@
           "score": 100,
           "lines": 13,
           "gotos": 0,
-          "casts": 2,
+          "casts": 1,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -20961,74 +20937,26 @@
           {
             "label": "unsigned/defsite/flip-join/livebase",
             "error": "agbcc failed: c.c:2035: too many arguments to function `VramMalloc'"
-          },
-          {
-            "label": "signed",
-            "error": "agbcc failed: c.c:2041: too many arguments to function `VramMalloc'"
-          },
-          {
-            "label": "signed/initfirst",
-            "error": "agbcc failed: c.c:2037: too many arguments to function `VramMalloc'"
-          },
-          {
-            "label": "signed/livebase",
-            "error": "agbcc failed: c.c:2043: too many arguments to function `VramMalloc'"
-          },
-          {
-            "label": "signed/livebase/initfirst",
-            "error": "agbcc failed: c.c:2039: too many arguments to function `VramMalloc'"
-          },
-          {
-            "label": "signed/defsite",
-            "error": "agbcc failed: c.c:2035: too many arguments to function `VramMalloc'"
-          },
-          {
-            "label": "signed/defsite/livebase",
-            "error": "agbcc failed: c.c:2037: too many arguments to function `VramMalloc'"
-          },
-          {
-            "label": "signed/flip-join",
-            "error": "agbcc failed: c.c:2039: too many arguments to function `VramMalloc'"
-          },
-          {
-            "label": "signed/flip-join/initfirst",
-            "error": "agbcc failed: c.c:2035: too many arguments to function `VramMalloc'"
-          },
-          {
-            "label": "signed/flip-join/livebase",
-            "error": "agbcc failed: c.c:2041: too many arguments to function `VramMalloc'"
-          },
-          {
-            "label": "signed/flip-join/livebase/initfirst",
-            "error": "agbcc failed: c.c:2037: too many arguments to function `VramMalloc'"
-          },
-          {
-            "label": "signed/defsite/flip-join",
-            "error": "agbcc failed: c.c:2033: too many arguments to function `VramMalloc'"
-          },
-          {
-            "label": "signed/defsite/flip-join/livebase",
-            "error": "agbcc failed: c.c:2035: too many arguments to function `VramMalloc'"
           }
         ],
         "symbolsUsed": [],
         "outcome": "nonmatch",
-        "source": "struct Struct0 { s32 field_0; u8 _pad0[4]; s32 field_8; u16 field_12; u16 field_14; u8 _pad1[4]; u16 field_20; u16 field_22; u8 _pad2[2]; u8 field_26; u8 field_27; u8 field_28; u8 _pad3[2]; u8 field_31; s32 field_32; };\nvoid sub_802DFC8(u32 a0, struct Struct0 * a1) {\n    s32 v0;\n    s32 v1;\n    if ((8 & (s16)a0) != 0) {\n        v1 = 6;\n        v0 = (-(1 & (s16)a0) | 1 & (s16)a0) >> 31 & 128 << 3;\n    } else {\n        if ((4 & (s16)a0) != 0) {\n            v1 = 4;\n            if ((2 & (s16)a0) != 0) {\n                v0 = 128 << 3;\n            } else {\n                v0 = 0;\n            }\n            if ((1 & (s16)a0) != 0) v0 = v0 | 128 << 4;\n        } else {\n            if ((2 & (s16)a0) != 0) {\n                v1 = 2;\n                if ((1 & (s16)a0) != 0) {\n                    v0 = 128 << 3;\n                } else {\n                    v0 = 0;\n                }\n            } else {\n                v1 = 0;\n                if ((1 & (s16)a0) != 0) {\n                    v0 = 128 << 4;\n                } else {\n                    v0 = 0;\n                }\n            }\n        }\n    }\n    if (((u8 *)&gStageData)[3] != 7) {\n        if ((u8)(((u8 *)&gStageData)[10] - 3) <= 5) {\n            if (((u8 *)&gStageData)[9] == 5) {\n                a1->field_0 = VramMalloc(15);\n                a1->field_12 = 234 << 2;\n            } else {\n                if (((u8 *)&gStageData)[9] == 3) {\n                    a1->field_0 = VramMalloc(20);\n                    a1->field_12 = 987;\n                } else {\n                    a1->field_0 = VramMalloc(20);\n                    a1->field_12 = 866;\n                }\n            }\n        } else {\n            a1->field_0 = VramMalloc(20);\n            a1->field_12 = 866;\n        }\n    } else {\n        a1->field_0 = VramMalloc(20);\n        a1->field_12 = 866;\n        v0 = v0 | 128 << 2;\n    }\n    a1->field_26 = v1;\n    a1->field_20 = 192 << 3;\n    a1->field_14 = 0;\n    a1->field_22 = 0;\n    a1->field_27 = 255;\n    a1->field_28 = 16;\n    a1->field_31 = 0;\n    a1->field_32 = 16 - 17;\n    a1->field_8 = v0 | 128 << 5;\n    return;\n}\n",
-        "score": 62,
-        "maxScore": 137,
+        "source": "struct Struct0 { s32 field_0; u8 _pad0[4]; s32 field_8; u16 field_12; u16 field_14; u8 _pad1[4]; u16 field_20; u16 field_22; u8 _pad2[2]; u8 field_26; u8 field_27; u8 field_28; u8 _pad3[2]; u8 field_31; s32 field_32; };\nvoid sub_802DFC8(s16 a0, struct Struct0 * a1) {\n    s32 v0;\n    s32 v1;\n    if ((8 & a0) != 0) {\n        v1 = 6;\n        v0 = (-(1 & a0) | 1 & a0) >> 31 & 128 << 3;\n    } else {\n        if ((4 & a0) != 0) {\n            v1 = 4;\n            if ((2 & a0) != 0) {\n                v0 = 128 << 3;\n            } else {\n                v0 = 0;\n            }\n            if ((1 & a0) != 0) v0 = v0 | 128 << 4;\n        } else {\n            if ((2 & a0) != 0) {\n                v1 = 2;\n                if ((1 & a0) != 0) {\n                    v0 = 128 << 3;\n                } else {\n                    v0 = 0;\n                }\n            } else {\n                v1 = 0;\n                if ((1 & a0) != 0) {\n                    v0 = 128 << 4;\n                } else {\n                    v0 = 0;\n                }\n            }\n        }\n    }\n    if (((u8 *)&gStageData)[3] != 7) {\n        if ((u8)(((u8 *)&gStageData)[10] - 3) <= 5) {\n            if (((u8 *)&gStageData)[9] == 5) {\n                a1->field_0 = VramMalloc(15);\n                a1->field_12 = 234 << 2;\n            } else {\n                if (((u8 *)&gStageData)[9] == 3) {\n                    a1->field_0 = VramMalloc(20);\n                    a1->field_12 = 987;\n                } else {\n                    a1->field_0 = VramMalloc(20);\n                    a1->field_12 = 866;\n                }\n            }\n        } else {\n            a1->field_0 = VramMalloc(20);\n            a1->field_12 = 866;\n        }\n    } else {\n        a1->field_0 = VramMalloc(20);\n        a1->field_12 = 866;\n        v0 = v0 | 128 << 2;\n    }\n    a1->field_26 = v1;\n    a1->field_20 = 192 << 3;\n    a1->field_14 = 0;\n    a1->field_22 = 0;\n    a1->field_27 = 255;\n    a1->field_28 = 16;\n    a1->field_31 = 0;\n    a1->field_32 = 16 - 17;\n    a1->field_8 = v0 | 128 << 5;\n    return;\n}\n",
+        "score": 48,
+        "maxScore": 134,
         "compileErrors": null,
         "breakdown": {
-          "insert": 9,
-          "delete": 3,
+          "insert": 6,
+          "delete": 2,
           "replace": 6,
           "opMismatch": 0,
-          "argMismatch": 44
+          "argMismatch": 34
         },
         "quality": {
-          "score": 88,
+          "score": 94,
           "lines": 68,
           "gotos": 0,
-          "casts": 14,
+          "casts": 5,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -21106,34 +21034,26 @@
           {
             "label": "unsigned/flip-join",
             "error": "agbcc failed: c.c:2338: too many arguments to function `VramMalloc'"
-          },
-          {
-            "label": "signed",
-            "error": "agbcc failed: c.c:2339: too many arguments to function `VramMalloc'"
-          },
-          {
-            "label": "signed/flip-join",
-            "error": "agbcc failed: c.c:2338: too many arguments to function `VramMalloc'"
           }
         ],
         "symbolsUsed": [],
         "outcome": "nonmatch",
-        "source": "struct Struct0 { s32 field_0; u8 _pad0[4]; s32 field_8; u16 field_12; u16 field_14; u8 _pad1[4]; u16 field_20; u16 field_22; u8 _pad2[2]; u8 field_26; u8 field_27; u8 field_28; u8 _pad3[2]; u8 field_31; s32 field_32; };\nvoid sub_803213C(u32 a0, u32 a1, struct Struct0 * a2) {\n    s32 v0;\n    s32 v1;\n    v0 = 1;\n    if (((u8 *)&gStageData)[3] != 7) {\n        if ((u8)a0 != 0) {\n            a2->field_0 = VramMalloc(20);\n            a2->field_12 = 870;\n            a2->field_26 = 0;\n        } else {\n            a2->field_0 = VramMalloc(15);\n            a2->field_12 = 870;\n            a2->field_26 = v0;\n        }\n        v1 = (-((u8)a1 & v0) | (u8)a1 & v0) >> 31 & 128 << 3;\n    } else {\n        a2->field_0 = VramMalloc(15);\n        a2->field_12 = 870;\n        a2->field_26 = v0;\n        v1 = (-((u8)a1 & v0) | (u8)a1 & v0) >> 31 & 128 << 3 | 128 << 2;\n    }\n    a2->field_20 = 192 << 3;\n    a2->field_14 = 0;\n    a2->field_22 = 0;\n    a2->field_27 = 255;\n    a2->field_28 = 16;\n    a2->field_31 = 0;\n    a2->field_32 = 16 - 17;\n    a2->field_8 = v1 | 128 << 5;\n    return;\n}\n",
-        "score": 48,
-        "maxScore": 91,
+        "source": "struct Struct0 { s32 field_0; u8 _pad0[4]; s32 field_8; u16 field_12; u16 field_14; u8 _pad1[4]; u16 field_20; u16 field_22; u8 _pad2[2]; u8 field_26; u8 field_27; u8 field_28; u8 _pad3[2]; u8 field_31; s32 field_32; };\nvoid sub_803213C(u8 a0, u8 a1, struct Struct0 * a2) {\n    s32 v0;\n    s32 v1;\n    v0 = 1;\n    if (((u8 *)&gStageData)[3] != 7) {\n        if (a0 != 0) {\n            a2->field_0 = VramMalloc(20);\n            a2->field_12 = 870;\n            a2->field_26 = 0;\n        } else {\n            a2->field_0 = VramMalloc(15);\n            a2->field_12 = 870;\n            a2->field_26 = v0;\n        }\n        v1 = (-(a1 & v0) | a1 & v0) >> 31 & 128 << 3;\n    } else {\n        a2->field_0 = VramMalloc(15);\n        a2->field_12 = 870;\n        a2->field_26 = v0;\n        v1 = (-(a1 & v0) | a1 & v0) >> 31 & 128 << 3 | 128 << 2;\n    }\n    a2->field_20 = 192 << 3;\n    a2->field_14 = 0;\n    a2->field_22 = 0;\n    a2->field_27 = 255;\n    a2->field_28 = 16;\n    a2->field_31 = 0;\n    a2->field_32 = 16 - 17;\n    a2->field_8 = v1 | 128 << 5;\n    return;\n}\n",
+        "score": 39,
+        "maxScore": 87,
         "compileErrors": null,
         "breakdown": {
-          "insert": 20,
-          "delete": 10,
+          "insert": 16,
+          "delete": 8,
           "replace": 1,
-          "opMismatch": 2,
-          "argMismatch": 15
+          "opMismatch": 1,
+          "argMismatch": 13
         },
         "quality": {
-          "score": 92,
+          "score": 100,
           "lines": 32,
           "gotos": 0,
-          "casts": 6,
+          "casts": 1,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -21204,22 +21124,22 @@
         "candidateLabel": "unsigned/setup-args/defsite",
         "symbolsUsed": [],
         "outcome": "nonmatch",
-        "source": "struct Struct0 { s32 field_0; u8 _pad0[4]; s32 field_8; u16 field_12; u16 field_14; u8 _pad1[4]; u16 field_20; u16 field_22; u8 _pad2[2]; u8 field_26; u8 field_27; u8 field_28; u8 _pad3[2]; u8 field_31; s32 field_32; };\nvoid sub_804D360(struct Struct0 * a0, u32 a1, u32 a2) {\n    s32 v0;\n    v0 = 0;\n    switch ((s16)a1) {\n        case 0:\n            if ((u16)a2 == 2) {\n                v0 = 128 << 3 | 128 << 4;\n            } else {\n                v0 = 128 << 3;\n            }\n            break;\n        case 1:\n            if ((u16)a2 == 2) v0 = 128 << 4;\n            break;\n        case 2:\n            if ((u16)a2 == 0) {\n                v0 = 128 << 4 | 128 << 3;\n            } else {\n                v0 = 128 << 4;\n            }\n            break;\n        case 3:\n            if ((u16)a2 == 0) v0 = 128 << 3;\n            break;\n    }\n    a0->field_0 = VramMalloc(9);\n    a0->field_12 = 235 << 2;\n    a0->field_26 = 6;\n    a0->field_20 = 192 << 3;\n    a0->field_14 = 0;\n    a0->field_22 = 0;\n    a0->field_27 = 255;\n    a0->field_28 = 16;\n    a0->field_31 = 0;\n    a0->field_32 = 16 - 17;\n    a0->field_8 = v0 | 128 << 5;\n    UpdateSpriteAnimation(a0, 0, 0);\n    return;\n}\n",
-        "score": 22,
-        "maxScore": 82,
+        "source": "struct Struct0 { s32 field_0; u8 _pad0[4]; s32 field_8; u16 field_12; u16 field_14; u8 _pad1[4]; u16 field_20; u16 field_22; u8 _pad2[2]; u8 field_26; u8 field_27; u8 field_28; u8 _pad3[2]; u8 field_31; s32 field_32; };\nvoid sub_804D360(struct Struct0 * a0, s16 a1, u16 a2) {\n    s32 v0;\n    v0 = 0;\n    switch (a1) {\n        case 0:\n            if (a2 == 2) {\n                v0 = 128 << 3 | 128 << 4;\n            } else {\n                v0 = 128 << 3;\n            }\n            break;\n        case 1:\n            if (a2 == 2) v0 = 128 << 4;\n            break;\n        case 2:\n            if (a2 == 0) {\n                v0 = 128 << 4 | 128 << 3;\n            } else {\n                v0 = 128 << 4;\n            }\n            break;\n        case 3:\n            if (a2 == 0) v0 = 128 << 3;\n            break;\n    }\n    a0->field_0 = VramMalloc(9);\n    a0->field_12 = 235 << 2;\n    a0->field_26 = 6;\n    a0->field_20 = 192 << 3;\n    a0->field_14 = 0;\n    a0->field_22 = 0;\n    a0->field_27 = 255;\n    a0->field_28 = 16;\n    a0->field_31 = 0;\n    a0->field_32 = 16 - 17;\n    a0->field_8 = v0 | 128 << 5;\n    UpdateSpriteAnimation(a0, 0, 0);\n    return;\n}\n",
+        "score": 7,
+        "maxScore": 76,
         "compileErrors": null,
         "breakdown": {
-          "insert": 7,
-          "delete": 4,
+          "insert": 1,
+          "delete": 2,
           "replace": 0,
           "opMismatch": 0,
-          "argMismatch": 11
+          "argMismatch": 4
         },
         "quality": {
-          "score": 94,
+          "score": 100,
           "lines": 40,
           "gotos": 0,
-          "casts": 5,
+          "casts": 0,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -25971,23 +25891,23 @@
       "asmlift": {
         "decompiler": "asmlift",
         "candidateLabel": "unsigned",
-        "outcome": "nonmatch",
-        "source": "s32 addu8(u32 a0, u32 a1) {\n    return (u8)((u8)a0 + (u8)a1);\n}\n",
-        "score": 4,
+        "outcome": "match",
+        "source": "s32 addu8(u8 a0, u8 a1) {\n    return (u8)(a0 + a1);\n}\n",
+        "score": 0,
         "maxScore": 8,
         "compileErrors": null,
         "breakdown": {
           "insert": 0,
-          "delete": 4,
+          "delete": 0,
           "replace": 0,
           "opMismatch": 0,
           "argMismatch": 0
         },
         "quality": {
-          "score": 98,
+          "score": 100,
           "lines": 3,
           "gotos": 0,
-          "casts": 3,
+          "casts": 1,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -49244,14 +49164,14 @@
       "asmlift": {
         "decompiler": "asmlift",
         "candidateLabel": "signed",
-        "outcome": "nonmatch",
-        "source": "void memset1(s32 a0, s32 a1, s32 a2) {\n    s32 v0;\n    for (v0 = 0; v0 < a1; v0 = v0 + 1) {\n        *(u8 *)(a0 + v0) = (u8)a2;\n    }\n    return;\n}\n",
-        "score": 2,
+        "outcome": "match",
+        "source": "void memset1(s32 a0, s32 a1, u8 a2) {\n    s32 v0;\n    for (v0 = 0; v0 < a1; v0 = v0 + 1) {\n        *(u8 *)(a0 + v0) = a2;\n    }\n    return;\n}\n",
+        "score": 0,
         "maxScore": 15,
         "compileErrors": null,
         "breakdown": {
           "insert": 0,
-          "delete": 2,
+          "delete": 0,
           "replace": 0,
           "opMismatch": 0,
           "argMismatch": 0
@@ -49260,7 +49180,7 @@
           "score": 96,
           "lines": 7,
           "gotos": 0,
-          "casts": 2,
+          "casts": 1,
           "unkGlue": 0,
           "rawMem": 1,
           "addrDeref": 0
@@ -49290,19 +49210,7 @@
           "addrDeref": 0
         }
       },
-      "gapSize": {
-        "decompiler": "asmlift",
-        "score": 2,
-        "maxScore": 15,
-        "ratio": 0.13333333333333333,
-        "kinds": {
-          "insert": 0,
-          "delete": 2,
-          "replace": 0,
-          "opMismatch": 0,
-          "argMismatch": 0
-        }
-      },
+      "gapSize": null,
       "scripts": {
         "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `memset1` — benchmark function synthetic:memset1:agbcc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The exact agbcc `.s` text the benchmark fed m2c, verbatim.\ncat > in.s <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tmemset1\n\t.type\t memset1,function\n\t.thumb_func\nmemset1:\n\tpush\t{r4, lr}\n\tadd\tr4, r0, #0\n\tlsl\tr2, r2, #0x18\n\tlsr\tr2, r2, #0x18\n\tmov\tr3, #0x0\n\tcmp\tr3, r1\n\tbge\t.L4\t@cond_branch\n.L6:\n\tadd\tr0, r4, r3\n\tstrb\tr2, [r0]\n\tadd\tr3, r3, #0x1\n\tcmp\tr3, r1\n\tblt\t.L6\t@cond_branch\n.L4:\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n.Lfe1:\n\t.size\t memset1,.Lfe1-memset1\nASM_INPUT\n\n# The exact context header the benchmark passed via --context — prototypes only\n# (no struct/global layouts: the benchmark measures cold recovery).\ncat > ctx.h <<'CTX_INPUT'\nvoid memset1(u8*,int,u8);\nCTX_INPUT\n\nargs=(\n  --target gba            # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function memset1      # the symbol to decompile from in.s\n  --context ctx.h         # the C context header above (typedefs + prototypes)\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
         "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `memset1` — benchmark function synthetic:memset1:agbcc.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:memset1:agbcc --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact agbcc `.s` text.\ncat > in.asm <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tmemset1\n\t.type\t memset1,function\n\t.thumb_func\nmemset1:\n\tpush\t{r4, lr}\n\tadd\tr4, r0, #0\n\tlsl\tr2, r2, #0x18\n\tlsr\tr2, r2, #0x18\n\tmov\tr3, #0x0\n\tcmp\tr3, r1\n\tbge\t.L4\t@cond_branch\n.L6:\n\tadd\tr0, r4, r3\n\tstrb\tr2, [r0]\n\tadd\tr3, r3, #0x1\n\tcmp\tr3, r1\n\tblt\t.L6\t@cond_branch\n.L4:\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n.Lfe1:\n\t.size\t memset1,.Lfe1-memset1\nASM_INPUT\n\n# The prototype hints the benchmark fed asmlift (callee arities / void-ness).\ncat > proto.json <<'PROTO_INPUT'\n{\n  \"memset1\": {\n    \"returnsVoid\": true\n  }\n}\nPROTO_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target agbcc          # frontend + target description (ISA, calling convention, compiler idioms)\n  --name memset1          # the symbol to decompile (multi-function input selects by name)\n  --proto proto.json      # the prototype hints above (callee arities / void-ness)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
@@ -55621,7 +55529,7 @@
         "decompiler": "asmlift",
         "candidateLabel": "unsigned",
         "outcome": "match",
-        "source": "s32 promsh(u32 a0, u32 a1) {\n    return (s16)a0 + (s16)a1;\n}\n",
+        "source": "s32 promsh(s16 a0, s16 a1) {\n    return a0 + a1;\n}\n",
         "score": 0,
         "maxScore": 6,
         "compileErrors": null,
@@ -55636,7 +55544,7 @@
           "score": 100,
           "lines": 3,
           "gotos": 0,
-          "casts": 2,
+          "casts": 0,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -55837,7 +55745,7 @@
         "decompiler": "asmlift",
         "candidateLabel": "unsigned",
         "outcome": "match",
-        "source": "s32 promsh(u32 a0, u32 a1) {\n    return (s16)a0 + (s16)a1;\n}\n",
+        "source": "s32 promsh(s16 a0, s16 a1) {\n    return a0 + a1;\n}\n",
         "score": 0,
         "maxScore": 4,
         "compileErrors": null,
@@ -55852,7 +55760,7 @@
           "score": 100,
           "lines": 3,
           "gotos": 0,
-          "casts": 2,
+          "casts": 0,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -58447,7 +58355,7 @@
         "decompiler": "asmlift",
         "candidateLabel": "unsigned",
         "outcome": "match",
-        "source": "s32 sextb(u32 a0) {\n    return (s8)a0;\n}\n",
+        "source": "s32 sextb(s8 a0) {\n    return a0;\n}\n",
         "score": 0,
         "maxScore": 3,
         "compileErrors": null,
@@ -58462,7 +58370,7 @@
           "score": 100,
           "lines": 3,
           "gotos": 0,
-          "casts": 1,
+          "casts": 0,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -58660,7 +58568,7 @@
         "decompiler": "asmlift",
         "candidateLabel": "unsigned",
         "outcome": "match",
-        "source": "s32 sextb(u32 a0) {\n    return (s8)a0;\n}\n",
+        "source": "s32 sextb(s8 a0) {\n    return a0;\n}\n",
         "score": 0,
         "maxScore": 2,
         "compileErrors": null,
@@ -58675,7 +58583,7 @@
           "score": 100,
           "lines": 3,
           "gotos": 0,
-          "casts": 1,
+          "casts": 0,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -66553,23 +66461,23 @@
       "asmlift": {
         "decompiler": "asmlift",
         "candidateLabel": "unsigned",
-        "outcome": "nonmatch",
-        "source": "void sxparam(u32 a0, s32 * a1) {\n    s32 v0;\n    if ((8 & (s16)a0) != 0) {\n        v0 = 6;\n    } else {\n        if ((4 & (s16)a0) != 0) {\n            v0 = 4;\n        } else {\n            v0 = -(s16)((s16)a0 & 2) >> 31 & 2;\n        }\n    }\n    *a1 = v0;\n    return;\n}\n",
-        "score": 19,
-        "maxScore": 28,
+        "outcome": "match",
+        "source": "void sxparam(s16 a0, s32 * a1) {\n    s32 v0;\n    if ((8 & a0) != 0) {\n        v0 = 6;\n    } else {\n        if ((4 & a0) != 0) {\n            v0 = 4;\n        } else {\n            v0 = -(s16)(a0 & 2) >> 31 & 2;\n        }\n    }\n    *a1 = v0;\n    return;\n}\n",
+        "score": 0,
+        "maxScore": 25,
         "compileErrors": null,
         "breakdown": {
-          "insert": 3,
-          "delete": 3,
-          "replace": 2,
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
           "opMismatch": 0,
-          "argMismatch": 11
+          "argMismatch": 0
         },
         "quality": {
-          "score": 96,
+          "score": 100,
           "lines": 14,
           "gotos": 0,
-          "casts": 4,
+          "casts": 1,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -66913,7 +66821,7 @@
         "decompiler": "asmlift",
         "candidateLabel": "unsigned",
         "outcome": "match",
-        "source": "s32 tos8(u32 a0) {\n    return (s8)a0;\n}\n",
+        "source": "s32 tos8(s8 a0) {\n    return a0;\n}\n",
         "score": 0,
         "maxScore": 3,
         "compileErrors": null,
@@ -66928,7 +66836,7 @@
           "score": 100,
           "lines": 3,
           "gotos": 0,
-          "casts": 1,
+          "casts": 0,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -67132,7 +67040,7 @@
         "decompiler": "asmlift",
         "candidateLabel": "unsigned",
         "outcome": "match",
-        "source": "s32 tos8(u32 a0) {\n    return (s8)a0;\n}\n",
+        "source": "s32 tos8(s8 a0) {\n    return a0;\n}\n",
         "score": 0,
         "maxScore": 2,
         "compileErrors": null,
@@ -67147,7 +67055,7 @@
           "score": 100,
           "lines": 3,
           "gotos": 0,
-          "casts": 1,
+          "casts": 0,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -67203,7 +67111,7 @@
         "decompiler": "asmlift",
         "candidateLabel": "unsigned",
         "outcome": "match",
-        "source": "s32 tou16(u32 a0) {\n    return (u16)a0;\n}\n",
+        "source": "s32 tou16(u16 a0) {\n    return a0;\n}\n",
         "score": 0,
         "maxScore": 3,
         "compileErrors": null,
@@ -67218,7 +67126,7 @@
           "score": 100,
           "lines": 3,
           "gotos": 0,
-          "casts": 1,
+          "casts": 0,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -67490,7 +67398,7 @@
         "decompiler": "asmlift",
         "candidateLabel": "unsigned",
         "outcome": "match",
-        "source": "s32 tou8(u32 a0) {\n    return (u8)a0;\n}\n",
+        "source": "s32 tou8(u8 a0) {\n    return a0;\n}\n",
         "score": 0,
         "maxScore": 3,
         "compileErrors": null,
@@ -67505,7 +67413,7 @@
           "score": 100,
           "lines": 3,
           "gotos": 0,
-          "casts": 1,
+          "casts": 0,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -67776,23 +67684,23 @@
       "asmlift": {
         "decompiler": "asmlift",
         "candidateLabel": "unsigned",
-        "outcome": "nonmatch",
-        "source": "s32 truncmul(u32 a0, u32 a1) {\n    return (s16)((s16)a0 * (s16)a1);\n}\n",
-        "score": 4,
+        "outcome": "match",
+        "source": "s32 truncmul(s16 a0, s16 a1) {\n    return (s16)(a0 * a1);\n}\n",
+        "score": 0,
         "maxScore": 8,
         "compileErrors": null,
         "breakdown": {
           "insert": 0,
-          "delete": 4,
+          "delete": 0,
           "replace": 0,
           "opMismatch": 0,
           "argMismatch": 0
         },
         "quality": {
-          "score": 98,
+          "score": 100,
           "lines": 3,
           "gotos": 0,
-          "casts": 3,
+          "casts": 1,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -72540,7 +72448,7 @@
         "decompiler": "asmlift",
         "candidateLabel": "unsigned",
         "outcome": "match",
-        "source": "s32 zextb(u32 a0) {\n    return (u8)a0;\n}\n",
+        "source": "s32 zextb(u8 a0) {\n    return a0;\n}\n",
         "score": 0,
         "maxScore": 3,
         "compileErrors": null,
@@ -72555,7 +72463,7 @@
           "score": 100,
           "lines": 3,
           "gotos": 0,
-          "casts": 1,
+          "casts": 0,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -72848,23 +72756,23 @@
       "asmlift": {
         "decompiler": "asmlift",
         "candidateLabel": "unsigned",
-        "outcome": "nonmatch",
-        "source": "void zxparam(u32 a0, u32 a1, s32 * a2) {\n    *a2 = (u8)a0 & 1;\n    a2[1] = (u8)a1 & 1;\n    a2[2] = (u8)a0 + (u8)a1;\n    return;\n}\n",
-        "score": 8,
-        "maxScore": 21,
+        "outcome": "match",
+        "source": "void zxparam(u8 a0, u8 a1, s32 * a2) {\n    *a2 = a0 & 1;\n    a2[1] = a1 & 1;\n    a2[2] = a0 + a1;\n    return;\n}\n",
+        "score": 0,
+        "maxScore": 17,
         "compileErrors": null,
         "breakdown": {
-          "insert": 4,
-          "delete": 4,
+          "insert": 0,
+          "delete": 0,
           "replace": 0,
           "opMismatch": 0,
           "argMismatch": 0
         },
         "quality": {
-          "score": 96,
+          "score": 100,
           "lines": 6,
           "gotos": 0,
-          "casts": 4,
+          "casts": 0,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -72892,19 +72800,7 @@
           "<tmp>/cand.c.pp.c:9: request for member `unk8' in something not a structure or union"
         ]
       },
-      "gapSize": {
-        "decompiler": "asmlift",
-        "score": 8,
-        "maxScore": 21,
-        "ratio": 0.38095238095238093,
-        "kinds": {
-          "insert": 4,
-          "delete": 4,
-          "replace": 0,
-          "opMismatch": 0,
-          "argMismatch": 0
-        }
-      },
+      "gapSize": null,
       "scripts": {
         "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `zxparam` — benchmark function synthetic:zxparam:agbcc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The exact agbcc `.s` text the benchmark fed m2c, verbatim.\ncat > in.s <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tzxparam\n\t.type\t zxparam,function\n\t.thumb_func\nzxparam:\n\tpush\t{r4, lr}\n\tlsl\tr0, r0, #0x18\n\tlsr\tr0, r0, #0x18\n\tlsl\tr1, r1, #0x18\n\tlsr\tr1, r1, #0x18\n\tmov\tr4, #0x1\n\tadd\tr3, r0, #0\n\tand\tr3, r3, r4\n\tstr\tr3, [r2]\n\tadd\tr3, r1, #0\n\tand\tr3, r3, r4\n\tstr\tr3, [r2, #0x4]\n\tadd\tr0, r0, r1\n\tstr\tr0, [r2, #0x8]\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n.Lfe1:\n\t.size\t zxparam,.Lfe1-zxparam\nASM_INPUT\n\n# The exact context header the benchmark passed via --context — prototypes only\n# (no struct/global layouts: the benchmark measures cold recovery).\ncat > ctx.h <<'CTX_INPUT'\nvoid zxparam(u8 a, u8 b, s32 *out);\nCTX_INPUT\n\nargs=(\n  --target gba            # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function zxparam      # the symbol to decompile from in.s\n  --context ctx.h         # the C context header above (typedefs + prototypes)\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
         "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `zxparam` — benchmark function synthetic:zxparam:agbcc.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:zxparam:agbcc --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact agbcc `.s` text.\ncat > in.asm <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tzxparam\n\t.type\t zxparam,function\n\t.thumb_func\nzxparam:\n\tpush\t{r4, lr}\n\tlsl\tr0, r0, #0x18\n\tlsr\tr0, r0, #0x18\n\tlsl\tr1, r1, #0x18\n\tlsr\tr1, r1, #0x18\n\tmov\tr4, #0x1\n\tadd\tr3, r0, #0\n\tand\tr3, r3, r4\n\tstr\tr3, [r2]\n\tadd\tr3, r1, #0\n\tand\tr3, r3, r4\n\tstr\tr3, [r2, #0x4]\n\tadd\tr0, r0, r1\n\tstr\tr0, [r2, #0x8]\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n.Lfe1:\n\t.size\t zxparam,.Lfe1-zxparam\nASM_INPUT\n\n# The prototype hints the benchmark fed asmlift (callee arities / void-ness).\ncat > proto.json <<'PROTO_INPUT'\n{\n  \"zxparam\": {\n    \"params\": [\n      \"u8\",\n      \"u8\",\n      \"void *\"\n    ],\n    \"returnsVoid\": true\n  }\n}\nPROTO_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target agbcc          # frontend + target description (ISA, calling convention, compiler idioms)\n  --name zxparam          # the symbol to decompile (multi-function input selects by name)\n  --proto proto.json      # the prototype hints above (callee arities / void-ness)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
