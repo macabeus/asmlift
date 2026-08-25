@@ -51,6 +51,8 @@ import {
   gapReasonFor,
   mapExprChildren,
   negateCond,
+  stmtChildren,
+  walkExprs,
 } from '../l3/ast';
 import type { Gate } from '../l3/gates';
 import { exprCType, provablyNonNegative, ptrElemBytes, renderedIntSignedness } from '../l3/typing';
@@ -3501,14 +3503,37 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // and never structures it), and there is no reason to believe it is the last. A promise half-kept
   // leaves the merge variable read where nothing wrote it — the one wrongness the byte differ
   // rewards rather than catches, since the candidate compiles, scores, and can win.
-  for (const writes of anchoredAt.values()) {
-    for (const w of writes) {
-      if (!anchorsEmitted.has(w)) {
-        throw new StructureError(
-          `cannot structure '${fn.name}': the merge copy into '${w.name}' was suppressed from its ` +
-            `edge for a def-site anchor that no rendered position emitted`,
-        );
+  //
+  // OBSERVABLE is the test, not "emitted". A merge name the rendered body never mentions has no
+  // reader to see the missing write and no second writer to disagree with it, and its declaration
+  // goes with it (l3/dce.ts prunes a local nothing references) — so the copy and the value it
+  // carried are gone together, which is a program the edge spelling can also produce. Only a name
+  // the body still uses is a broken promise, or a GLOBAL, whose store is observed outside this
+  // function whatever this body does with it. klonoa's `MPlayContinue` is the live inhabitant:
+  // its `/defsite` spelling is correct and main enumerates it.
+  const owed = [...anchoredAt.values()].flat().filter((w) => !anchorsEmitted.has(w));
+  if (owed.length > 0) {
+    const mentioned = new Set<string>(globalNames);
+    for (const e of walkExprs(body)) {
+      if (e.k === 'var' || e.k === 'addr') {
+        mentioned.add(e.name);
       }
+    }
+    const assignTargets = (ss: Stmt[]): void => {
+      for (const st of ss) {
+        if (st.k === 'assign') {
+          mentioned.add(st.name);
+        }
+        assignTargets(stmtChildren(st));
+      }
+    };
+    assignTargets(body);
+    const broken = owed.find((w) => mentioned.has(w.name));
+    if (broken !== undefined) {
+      throw new StructureError(
+        `cannot structure '${fn.name}': the merge copy into '${broken.name}' was suppressed from ` +
+          `its edge for a def-site anchor that no rendered position emitted`,
+      );
     }
   }
   // THE OBLIGATION `undefCarriesNothing` CANNOT DISCHARGE ON ITS OWN, checked now that both records

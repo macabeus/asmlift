@@ -348,3 +348,40 @@ test('the same const under plain /defsite keeps its edge copy', () => {
   expect(emit(PREHEADER_ANCHOR, true, false)).toContain('v0 = (u8 *)50339840;');
   expect(emit(PREHEADER_ANCHOR, false)).toContain('v0 = (u8 *)50339840;');
 });
+
+// The same unrendered preheader, for a carried value NOTHING READS: `%20` reaches the header as a
+// third param, rides the back edge unchanged (an identity copy, coalesced away) and is never
+// derefed, compared or returned. Its write is owed and never emitted — and no reader, no second
+// writer and no declaration survive to tell, so the spelling stands. The walk base is defined in
+// the ENTRY here, which is rendered, so the loud case above is not what this measures.
+const DEAD_ANCHOR = `fn deadanchor {
+^bb0(%0: s32):
+  %1: u16* = const {value=50331648}
+  %2: s32 = load %1 {off=4168, signed=false, width=2}
+  %3: s32 = const {value=0}
+  %6: u8* = const {value=50339840}
+  %4: u32 = icmp_eq %2, %3
+  cond_br %4, ^bb3(), ^bb1()
+^bb1():
+  %5: u16* = const {value=50335816}
+  %20: s32 = const {value=7}
+  br ^bb2(%6, %3, %20)
+^bb2(%7: u8*, %8: s32, %21: s32):
+  %9: s32 = load %7 {off=4096, signed=false, width=1}
+  store %7, %9 {off=0, width=1}
+  %10: u32 = load %5 {off=0, signed=false, width=2}
+  %11: s32 = const {value=1}
+  %12: u32 = add %8, %11
+  %13: u32 = icmp_ult %12, %10
+  %14: u8* = add %7, %11
+  cond_br %13, ^bb2(%14, %12, %21), ^bb3()
+^bb3():
+  ret
+}
+`;
+
+test('an anchored write nothing can observe is not a broken promise', () => {
+  const out = emit(DEAD_ANCHOR, true);
+  expect(out).toContain('v0 = (u8 *)50339840;');
+  expect(out).not.toContain('7');
+});
