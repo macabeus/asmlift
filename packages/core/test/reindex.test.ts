@@ -815,3 +815,29 @@ test('v4 inside an outer loop: the counter re-inits per outer iteration, so the 
   expect(c).toContain('v1[i0]');
   expect(c).not.toContain('v2 =');
 });
+
+test('a walk base agbcc REMATERIALIZED as a shift is admitted like a pool word', () => {
+  // `(s32 *)(128 << 18)` is 0x02000000 — agbcc emits `movs`+`lsls` for every shift-encodable GBA
+  // region and a pool word for the rest, and which one it picked is not a property of the source
+  const out = reindexWalks(
+    constCountdown((fn) => {
+      (fn.body[0] as Stmt & { k: 'assign' }).value = {
+        k: 'cast',
+        to: T.ptr(T.s(32)),
+        e: { k: 'bin', op: '<<', l: C(128), r: C(18) },
+      };
+    }),
+  );
+  expect(cBackend.emit(out!)).toContain('v1 = (s32 *)(128 << 18);');
+  expect(cBackend.emit(out!)).toContain('for (i0 = 0; i0 < 8; i0 = i0 + 1)');
+});
+
+test('a walk base holding a free VARIABLE is not a rematerializable address', () => {
+  expect(
+    reindexWalks(
+      constCountdown((fn) => {
+        (fn.body[0] as Stmt & { k: 'assign' }).value = { k: 'bin', op: '+', l: V('a0'), r: C(4) };
+      }),
+    ),
+  ).toBeNull();
+});

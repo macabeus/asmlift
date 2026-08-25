@@ -241,6 +241,39 @@ function confinedToWalk(fnBody: Stmt[], name: string, initMentions: number, loop
   return countMentions(fnBody, name) === initMentions + countMentions([loop], name);
 }
 
+/** An address the target can REMATERIALIZE: a constant expression, reading no variable and no
+ *  memory. Which ENCODING the compiler picked for it is not a property of the source — agbcc
+ *  spells a pool word `(s32 *)33569456` but a shift-encodable one `(s32 *)(128 << 18)`, and every
+ *  GBA hardware region (EWRAM 0x2000000, I/O 0x4000000, VRAM 0x6000000 …) takes the second form —
+ *  so both must reach the same admission or the whole MMIO/VRAM fill family declines on its
+ *  address. Zero is excluded: a null base is not a walk. Spelled as "holds a non-zero constant
+ *  and nothing else" rather than by folding, which would need a constant evaluator this file has
+ *  no other use for. */
+function rematerializableAddress(e: Expr): boolean {
+  let nonZero = false;
+  let ok = true;
+  const visit = (x: Expr): void => {
+    switch (x.k) {
+      case 'const':
+        nonZero ||= x.value !== 0;
+        break;
+      case 'cast':
+      case 'bin':
+      case 'un':
+        break;
+      default:
+        ok = false; // var, addr, index, field, call, marker
+        return;
+    }
+    mapExprChildren(x, (c) => {
+      visit(c);
+      return c;
+    });
+  };
+  visit(e);
+  return ok && nonZero;
+}
+
 /** Rewrite every deref of `p` into an indexed access off `base`, and every OTHER mention of `p`
  *  fails the walk (returns null): `p[k]` → `base[i + k]` (`base[i]` for k 0). */
 function reindexExpr(e: Expr, walk: WalkLoop, iv: string): Expr | null {
@@ -784,15 +817,11 @@ export function reindexWalks(sfn: SFn, keptWalks?: Set<string>): SFn | null {
     if (hasLoopExit(bodyCore)) {
       return null;
     }
-    // each walk pointer: an init `p = B` in pre (B a var or a numeric address)
+    // each walk pointer: an init `p = B` in pre (B a var or a rematerializable address)
     const inits = new Map<string, Stmt & { k: 'assign' }>();
     for (const p of walks) {
       const init = pre.find((x): x is Stmt & { k: 'assign' } => x.k === 'assign' && x.name === p);
-      const bOk =
-        init &&
-        (init.value.k === 'var' ||
-          (init.value.k === 'const' && init.value.value !== 0) ||
-          (init.value.k === 'cast' && init.value.e.k === 'const' && init.value.e.value !== 0));
+      const bOk = init && (init.value.k === 'var' || rematerializableAddress(init.value));
       if (!bOk || (init.value.k === 'var' && (init.value.name === p || init.value.name === k))) {
         return null;
       }
