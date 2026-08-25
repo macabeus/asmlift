@@ -1,5 +1,6 @@
-// L3 pass: hoist a REUSED pointer base (a global address or a numeric pointer constant) into a
-// typed local pointer.
+// L3 pass: hoist a leaf pointer base (a global address or a numeric pointer constant) into a
+// typed local pointer. HOW MANY uses a base needs is the gate table's question, not the pass's:
+// the default table wants 2+, `BASEFOLD_GATES` admits one under the conditions below.
 //
 // A base indexed at 2+ sites — `((u8 *)&gTable)[i+5]` and `[i+6]`, or the MMIO/RAM constant
 // `((s32 *)0x40000d4)[0]`, `[1]`, `[2]` — re-materialized the address (a fresh pool load) at each
@@ -85,7 +86,7 @@ interface Collected {
   count: Map<string, number>;
   order: string[];
   meta: Map<string, { base: HoistableBase; width: number; signed: boolean }>;
-  /** keys with ANY use inside a loop — disqualified (see the loop note in `hoistReusedGlobalBases`). */
+  /** keys with ANY use inside a loop — disqualified (see the loop note in `hoistBaseLocals`). */
   inLoop: Set<string>;
   /** per key, how many times each CONSTANT offset was accessed — the input to the
    *  `repeated-const-offset` gate, which losing the ProcessHBlankWait match is what bought. A
@@ -98,7 +99,7 @@ interface Collected {
   varIndexed: Set<string>;
 }
 
-/** Every `index` node whose base is a hoistable leaf, tallied by key (for the 2+-reuse test) and in
+/** Every `index` node whose base is a hoistable leaf, tallied by key (the gates' use count) and in
  *  first-appearance order (so the hoisted assignments emit in the order the bases are first used,
  *  matching the compiler's pool-load order). `loop` marks uses nested in a while/do-while/for. */
 function collect(stmts: Stmt[], c: Collected, loop: boolean): void {
@@ -306,7 +307,7 @@ function admit(sfn: SFn, gates: readonly Gate<BaseKey>[]): { c: Collected; keys:
   return { c, keys };
 }
 
-export function hoistReusedGlobalBases(sfn: SFn, gates: readonly Gate<BaseKey>[] = BASECSE_GATES): SFn {
+export function hoistBaseLocals(sfn: SFn, gates: readonly Gate<BaseKey>[] = BASECSE_GATES): SFn {
   const { c, keys: hoisted } = admit(sfn, gates);
   const { meta } = c;
   if (hoisted.length === 0) {

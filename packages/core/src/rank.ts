@@ -25,7 +25,7 @@ import {
   LIVEBASE_BLOCK_GATES,
   LIVEBASE_GATES,
   admittedBases,
-  hoistReusedGlobalBases,
+  hoistBaseLocals,
 } from './l3/basecse';
 import { armDisjointCandidates, coalesceCandidates } from './l3/coalesce';
 import type { Gate } from './l3/gates';
@@ -897,7 +897,7 @@ export function enumerateCandidates(
           return null;
         }
         const shadowed = admissions.slice(0, i).some((a) => sameBases(bound, census(a.gates)));
-        return shadowed ? null : hoistReusedGlobalBases(sfn, gates);
+        return shadowed ? null : hoistBaseLocals(sfn, gates);
       };
       const volatiles = (): SFn | null => {
         const r = hoist();

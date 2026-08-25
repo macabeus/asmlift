@@ -40,7 +40,7 @@
 // assignment does not reach it — compiling C that reads an uninitialized pointer, which neither
 // boundary contract catches (they check resolution and deref typing, not definite assignment).
 //
-// ORDERING: `hoistReusedGlobalBases` (basecse) runs unconditionally in `structureChecked`, BEFORE
+// ORDERING: `hoistBaseLocals` (basecse) runs unconditionally in `structureChecked`, BEFORE
 // rank's levers see the tree. So this pass's `addr`/`const` input is only what basecse REFUSED —
 // loop uses and repeated-constant-offset uses — which is why it carries basecse's const-offset gate
 // rather than assuming those bases never arrive.

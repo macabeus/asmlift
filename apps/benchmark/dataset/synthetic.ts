@@ -2274,7 +2274,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // callee-saved register) and `repeated-const-offset` (a fixed offset touched twice is a scalar
   // RMW the compiler re-materializes) — are exactly wrong for an MMIO poll, so rank.ts's
   // `/livebase` lever re-runs the pass with both ablated, leaving only `single-use`. That lever was
-  // ALL-OR-NOTHING over bases — `hoistReusedGlobalBases` hoisted every key the gate list admits,
+  // ALL-OR-NOTHING over bases — `hoistBaseLocals` hoisted every key the gate list admits,
   // with no candidate for a proper subset. A second admission, LIVEBASE_BLOCK_GATES, adds the
   // `single-cell` gate — a base every access of which is ONE fixed offset stays inline — and rank
   // carries both in one roster (LIVEBASE_ADMISSIONS), fanning every `/livebase` product over each,

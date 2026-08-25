@@ -1,7 +1,7 @@
 // L3 — the MECHANISM shared by every pass that hoists a value into a fresh local: how a name is
 // chosen, and where the run of base inits at the top of a body starts and ends.
 //
-// Three passes name bases today (`basecse.ts` hoists a REUSED base; `argbase.ts` names a call's
+// Three passes name bases today (`basecse.ts` hoists a leaf base; `argbase.ts` names a call's
 // argument bases; `sinkinit.ts` re-places what basecse emitted), and they differ in POLICY — which
 // bases are eligible, when it is worth doing, and where the init goes — but not in either
 // mechanism. The naming half was copied once, and the copy silently lost a safety guard: basecse

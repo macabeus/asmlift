@@ -10,7 +10,7 @@ import {
   LIVEBASE_BLOCK_GATES,
   LIVEBASE_GATES,
   admittedBases,
-  hoistReusedGlobalBases,
+  hoistBaseLocals,
 } from '../src/l3/basecse';
 import { without } from '../src/l3/gates';
 import { volatilePtrLocals } from '../src/l3/volatileptr';
@@ -34,9 +34,9 @@ const cidx = (value: number, i: Expr, width = 4): Expr => ({
 const c = (value: number): Expr => ({ k: 'const', value });
 const fn = (body: Stmt[]): SFn => ({ name: 'f', params: [], locals: [], retType: T.void(), body });
 
-describe('reused-global-base hoisting', () => {
+describe('leaf-base hoisting', () => {
   test('a numeric pointer CONSTANT (MMIO/RAM base) indexed at ≥2 distinct offsets is hoisted', () => {
-    const out = hoistReusedGlobalBases(
+    const out = hoistBaseLocals(
       fn([
         { k: 'store', lval: cidx(0x40000d4, c(0)), value: c(0) },
         { k: 'store', lval: cidx(0x40000d4, c(1)), value: c(0) },
@@ -63,14 +63,14 @@ describe('reused-global-base hoisting', () => {
       { k: 'store', lval: cidx(0x4000200, c(0), 2), value: c(2) },
       { k: 'store', lval: cidx(0x4000200, c(0), 2), value: c(16) },
     ];
-    const out = hoistReusedGlobalBases(fn(body));
+    const out = hoistBaseLocals(fn(body));
     expect(out.body).toEqual(body);
     expect(out.locals).toEqual([]);
   });
 
   test('a global at the SAME variable index at ≥2 sites IS hoisted (not a fixed-offset scalar)', () => {
     const vi: Expr = { k: 'var', name: 'a0' };
-    const out = hoistReusedGlobalBases(
+    const out = hoistBaseLocals(
       fn([
         { k: 'assign', name: 't', value: idx('gSin', vi) },
         { k: 'assign', name: 'u', value: idx('gSin', vi) },
@@ -80,7 +80,7 @@ describe('reused-global-base hoisting', () => {
   });
 
   test('a global indexed at ≥2 sites is hoisted into a typed local pointer', () => {
-    const out = hoistReusedGlobalBases(
+    const out = hoistBaseLocals(
       fn([
         { k: 'store', lval: idx('gTable', c(5)), value: c(0) },
         { k: 'store', lval: idx('gTable', c(6)), value: c(0) },
@@ -107,7 +107,7 @@ describe('reused-global-base hoisting', () => {
 
   test('a global indexed ONCE is left inline (no hoist)', () => {
     const body: Stmt[] = [{ k: 'store', lval: idx('gTable', c(5)), value: c(0) }];
-    const out = hoistReusedGlobalBases(fn(body));
+    const out = hoistBaseLocals(fn(body));
     expect(out.body).toEqual(body);
     expect(out.locals).toEqual([]);
   });
@@ -118,7 +118,7 @@ describe('reused-global-base hoisting', () => {
     const oneStore = (): SFn => fn([{ k: 'store', lval: cidx(0x3001100, c(3), 1), value: c(0) }]);
 
     test('a NUMERIC base at a non-zero offset is hoisted', () => {
-      const out = hoistReusedGlobalBases(oneStore(), BASEFOLD_GATES);
+      const out = hoistBaseLocals(oneStore(), BASEFOLD_GATES);
       expect(out.locals).toEqual([{ name: 'p0', type: T.ptr(T.s(8)) }]);
       expect(out.body[0]).toEqual({
         k: 'assign',
@@ -134,30 +134,30 @@ describe('reused-global-base hoisting', () => {
 
     test('the DEFAULT table leaves it inline: an inline aggregate member emits the same bytes', () => {
       const input = oneStore();
-      expect(hoistReusedGlobalBases(input)).toBe(input);
+      expect(hoistBaseLocals(input)).toBe(input);
     });
 
     test('at offset 0 it is left inline: there the fold is the identity', () => {
       const input = fn([{ k: 'store', lval: cidx(0x3001100, c(0), 1), value: c(0) }]);
-      expect(hoistReusedGlobalBases(input, BASEFOLD_GATES)).toBe(input);
+      expect(hoistBaseLocals(input, BASEFOLD_GATES)).toBe(input);
     });
 
     test('a SYMBOL base is left inline: the lift folds a relocation addend into the index', () => {
       const input = fn([{ k: 'store', lval: idx('gTable', c(3)), value: c(0) }]);
-      expect(hoistReusedGlobalBases(input, BASEFOLD_GATES)).toBe(input);
+      expect(hoistBaseLocals(input, BASEFOLD_GATES)).toBe(input);
     });
 
     test('a base of 0 is left inline: no materialized literal, so nothing survived a fold', () => {
       const input = fn([{ k: 'store', lval: cidx(0, c(16), 1), value: c(0) }]);
-      expect(hoistReusedGlobalBases(input, BASEFOLD_GATES)).toBe(input);
+      expect(hoistBaseLocals(input, BASEFOLD_GATES)).toBe(input);
     });
 
     test('both tables still refuse what the PLACEMENT rules refuse', () => {
       const inLoop = fn([
         { k: 'while', cond: c(1), body: [{ k: 'store', lval: cidx(0x3001100, c(3), 1), value: c(0) }] },
       ]);
-      expect(hoistReusedGlobalBases(inLoop, BASEFOLD_GATES).locals).toEqual([]);
-      expect(hoistReusedGlobalBases(inLoop, BASECSE_GATES).locals).toEqual([]);
+      expect(hoistBaseLocals(inLoop, BASEFOLD_GATES).locals).toEqual([]);
+      expect(hoistBaseLocals(inLoop, BASECSE_GATES).locals).toEqual([]);
     });
 
     // What prices the exemption, and what does not. An ablation removes a whole gate, and this
@@ -169,7 +169,7 @@ describe('reused-global-base hoisting', () => {
         admittedBases(input, BASEFOLD_GATES).filter((k) => !admittedBases(input, BASECSE_GATES).includes(k)),
       ).toHaveLength(1);
       // the use-count rule, alone — unchanged by the lever's existence
-      expect(hoistReusedGlobalBases(input, without(BASECSE_GATES, 'single-use')).locals).toHaveLength(1);
+      expect(hoistBaseLocals(input, without(BASECSE_GATES, 'single-use')).locals).toHaveLength(1);
       // ...and dropping the exemption's gate drops `reachedOnce` with it, landing on that exact
       // table. Pinned so the DIFF above is not re-derived as an ablation by a later round.
       expect(without(BASEFOLD_GATES, 'single-use-unfolded')).toEqual(without(BASECSE_GATES, 'single-use'));
@@ -177,7 +177,7 @@ describe('reused-global-base hoisting', () => {
   });
 
   test('two DIFFERENT globals each indexed twice both hoist, in first-use order', () => {
-    const out = hoistReusedGlobalBases(
+    const out = hoistBaseLocals(
       fn([
         { k: 'store', lval: idx('gA', c(0)), value: c(1) },
         { k: 'store', lval: idx('gB', c(0)), value: c(1) },
@@ -198,14 +198,14 @@ describe('reused-global-base hoisting', () => {
         body: [{ k: 'store', lval: idx('gTable', c(4)), value: c(0) }],
       },
     ];
-    const out = hoistReusedGlobalBases(fn(body));
+    const out = hoistBaseLocals(fn(body));
     expect(out.body).toEqual(body); // unchanged
     expect(out.locals).toEqual([]);
   });
 
   test('same global at DIFFERENT widths is not merged (distinct pointer types)', () => {
     // gTable read as u8 once and as a u16 once → neither key reaches 2, nothing hoists.
-    const out = hoistReusedGlobalBases(
+    const out = hoistBaseLocals(
       fn([
         { k: 'store', lval: idx('gTable', c(0), 1), value: c(0) },
         { k: 'store', lval: idx('gTable', c(0), 2), value: c(0) },
@@ -229,9 +229,9 @@ describe('/livebase admission (LIVEBASE_GATES: placement heuristics ablated)', (
 
   test('the poll shape: default gates refuse, LIVEBASE_GATES hoists every access onto one local', () => {
     const input = poll();
-    expect(hoistReusedGlobalBases(input)).toBe(input);
+    expect(hoistBaseLocals(input)).toBe(input);
 
-    const out = hoistReusedGlobalBases(poll(), LIVEBASE_GATES);
+    const out = hoistBaseLocals(poll(), LIVEBASE_GATES);
     expect(out.locals).toEqual([{ name: 'p0', type: T.ptr(T.s(32)) }]);
     expect(out.body[0]).toEqual({
       k: 'assign',
@@ -249,14 +249,14 @@ describe('/livebase admission (LIVEBASE_GATES: placement heuristics ablated)', (
   });
 
   test('the /livebase/volatile product: the hoisted numeric base qualifies for the volatile lever', () => {
-    const out = hoistReusedGlobalBases(poll(), LIVEBASE_GATES);
+    const out = hoistBaseLocals(poll(), LIVEBASE_GATES);
     const vol = volatilePtrLocals(out);
     expect(vol?.locals.find((l) => l.name === 'p0')?.pointeeVolatile).toBe(true);
   });
 
   test('single-use survives the ablation: one access is still refused, and by the SAME object', () => {
     const input = fn([{ k: 'store', lval: cidx(0x40000d4, c(0)), value: c(0) }]);
-    expect(hoistReusedGlobalBases(input, LIVEBASE_GATES)).toBe(input);
+    expect(hoistBaseLocals(input, LIVEBASE_GATES)).toBe(input);
   });
 
   // Mixed admitted+refused bases: the lever re-runs on a tree whose head already holds the
@@ -272,8 +272,8 @@ describe('/livebase admission (LIVEBASE_GATES: placement heuristics ablated)', (
     body: [{ k: 'store', lval: cidx(0x40000d4, c(2)), value: c(1) }],
   };
   const initOrder = (body: Stmt[]): (number | undefined)[] => {
-    const afterDefault = hoistReusedGlobalBases(fn(body));
-    const out = hoistReusedGlobalBases(afterDefault, LIVEBASE_GATES);
+    const afterDefault = hoistBaseLocals(fn(body));
+    const out = hoistBaseLocals(afterDefault, LIVEBASE_GATES);
     expect(out.locals.map((l) => l.name)).toEqual(['p0', 'p1']);
     return out.body.slice(0, 2).map((s) => {
       const a = s as Stmt & { k: 'assign' };
@@ -302,7 +302,7 @@ describe('/livebase admission (LIVEBASE_GATES: placement heuristics ablated)', (
       ]),
       locals: [{ name: 'q', type: T.ptr(T.s(8)) }],
     };
-    const out = hoistReusedGlobalBases(input, LIVEBASE_GATES);
+    const out = hoistBaseLocals(input, LIVEBASE_GATES);
     expect(out.body.slice(0, 2).map((st) => (st as Stmt & { k: 'assign' }).name)).toEqual(['q', 'p0']);
   });
 
@@ -319,20 +319,20 @@ describe('/livebase admission (LIVEBASE_GATES: placement heuristics ablated)', (
         { name: 'v2', type: T.ptr(T.int(8, false)), volatile: true },
       ],
     };
-    const out = hoistReusedGlobalBases(input);
+    const out = hoistBaseLocals(input);
     // the hoist init lands above, and v1/v2 keep their order even though v2 is first-used first
     expect(out.body.slice(0, 3).map((s) => (s as Stmt & { k: 'assign' }).name)).toEqual(['p0', 'v1', 'v2']);
   });
 
   test('a base the default gates already admitted leaves nothing: the lever declines', () => {
-    const hoisted = hoistReusedGlobalBases(
+    const hoisted = hoistBaseLocals(
       fn([
         { k: 'store', lval: cidx(0x40000d4, c(0)), value: c(0) },
         { k: 'store', lval: cidx(0x40000d4, c(1)), value: c(0) },
       ]),
     );
     expect(hoisted.locals).toHaveLength(1);
-    expect(hoistReusedGlobalBases(hoisted, LIVEBASE_GATES)).toBe(hoisted);
+    expect(hoistBaseLocals(hoisted, LIVEBASE_GATES)).toBe(hoisted);
   });
 });
 
@@ -363,12 +363,12 @@ describe('the block admission (WHICH admitted bases get the local)', () => {
 
   test('the register file binds and the scalar cells stay inline', () => {
     // the register file first: `collect` reads the loop's own CONDITION before its body
-    expect(boundBases(hoistReusedGlobalBases(mixed(), LIVEBASE_GATES))).toEqual([0x40000d4, 0x3001048, 0x3002048]);
-    expect(boundBases(hoistReusedGlobalBases(mixed(), LIVEBASE_BLOCK_GATES))).toEqual([0x40000d4]);
+    expect(boundBases(hoistBaseLocals(mixed(), LIVEBASE_GATES))).toEqual([0x40000d4, 0x3001048, 0x3002048]);
+    expect(boundBases(hoistBaseLocals(mixed(), LIVEBASE_BLOCK_GATES))).toEqual([0x40000d4]);
   });
 
   test('the unhoisted cells keep the spelling they had', () => {
-    const block = hoistReusedGlobalBases(mixed(), LIVEBASE_BLOCK_GATES);
+    const block = hoistBaseLocals(mixed(), LIVEBASE_BLOCK_GATES);
     const loop = block.body[1] as Stmt & { k: 'dowhile' };
     expect((loop.body[0] as Stmt & { k: 'store' }).lval).toEqual(cidx(0x3001048, c(0), 2));
     expect((loop.body[4] as Stmt & { k: 'store' }).lval).toEqual({
@@ -382,8 +382,8 @@ describe('the block admission (WHICH admitted bases get the local)', () => {
 
   test("the axis is one gate: ablating `single-cell` is /livebase's own admission", () => {
     expect(without(LIVEBASE_BLOCK_GATES, 'single-cell').map((g) => g.id)).toEqual(LIVEBASE_GATES.map((g) => g.id));
-    expect(boundBases(hoistReusedGlobalBases(mixed(), without(LIVEBASE_BLOCK_GATES, 'single-cell')))).toEqual(
-      boundBases(hoistReusedGlobalBases(mixed(), LIVEBASE_GATES)),
+    expect(boundBases(hoistBaseLocals(mixed(), without(LIVEBASE_BLOCK_GATES, 'single-cell')))).toEqual(
+      boundBases(hoistBaseLocals(mixed(), LIVEBASE_GATES)),
     );
   });
 
@@ -394,7 +394,7 @@ describe('the block admission (WHICH admitted bases get the local)', () => {
       { k: 'store', lval: cidx(0x3002048, c(0), 2), value: c(3) },
       { k: 'store', lval: cidx(0x3002048, c(0), 2), value: c(4) },
     ]);
-    expect(boundBases(hoistReusedGlobalBases(walk, LIVEBASE_BLOCK_GATES))).toEqual([0x3001048]);
+    expect(boundBases(hoistBaseLocals(walk, LIVEBASE_BLOCK_GATES))).toEqual([0x3001048]);
   });
 
   test('the two DEGENERATE admissions, which rank turns into a decline', () => {
@@ -405,20 +405,20 @@ describe('the block admission (WHICH admitted bases get the local)', () => {
       { k: 'store', lval: cidx(0x3002048, c(0), 2), value: c(3) },
       { k: 'store', lval: cidx(0x3002048, c(0), 2), value: c(4) },
     ]);
-    expect(hoistReusedGlobalBases(cells, LIVEBASE_BLOCK_GATES)).toBe(cells);
+    expect(hoistBaseLocals(cells, LIVEBASE_BLOCK_GATES)).toBe(cells);
     // all blocks: the gate rejects nothing, so this IS the /livebase hoist
     const blocks = fn([
       { k: 'store', lval: cidx(0x40000d4, c(0)), value: c(1) },
       { k: 'store', lval: cidx(0x40000d4, c(1)), value: c(2) },
     ]);
-    expect(boundBases(hoistReusedGlobalBases(blocks, LIVEBASE_BLOCK_GATES))).toEqual(
-      boundBases(hoistReusedGlobalBases(blocks, LIVEBASE_GATES)),
+    expect(boundBases(hoistBaseLocals(blocks, LIVEBASE_BLOCK_GATES))).toEqual(
+      boundBases(hoistBaseLocals(blocks, LIVEBASE_GATES)),
     );
   });
 
   test('the narrower hoist never changes what an access MEANS: same bases, fewer of them bound', () => {
-    const all = boundBases(hoistReusedGlobalBases(mixed(), LIVEBASE_GATES));
-    const block = boundBases(hoistReusedGlobalBases(mixed(), LIVEBASE_BLOCK_GATES));
+    const all = boundBases(hoistBaseLocals(mixed(), LIVEBASE_GATES));
+    const block = boundBases(hoistBaseLocals(mixed(), LIVEBASE_BLOCK_GATES));
     expect(block.every((b) => all.includes(b))).toBe(true);
     expect(block.length).toBeLessThan(all.length);
   });
@@ -432,7 +432,7 @@ describe('the block admission (WHICH admitted bases get the local)', () => {
       { k: 'store', lval: cidx(0x3001048, c(0), 2), value: c(5) },
       { k: 'store', lval: cidx(0x3001048, c(0), 2), value: c(6) },
     ]);
-    expect(boundBases(hoistReusedGlobalBases(twoFiles, LIVEBASE_BLOCK_GATES))).toEqual([0x40000d4, 0x40000b0]);
+    expect(boundBases(hoistBaseLocals(twoFiles, LIVEBASE_BLOCK_GATES))).toEqual([0x40000d4, 0x40000b0]);
   });
 });
 

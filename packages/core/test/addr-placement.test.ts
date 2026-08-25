@@ -10,7 +10,7 @@ import { simplifyTrivialPhis } from '../src/ir/simplify';
 import { T } from '../src/ir/types';
 import { materializeArgBases } from '../src/l3/argbase';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
-import { hoistReusedGlobalBases } from '../src/l3/basecse';
+import { hoistBaseLocals } from '../src/l3/basecse';
 import { hoistScopedBases } from '../src/l3/scopebase';
 import { structureChecked } from '../src/pipeline';
 import { numberPureValues } from '../src/raise/gvn';
@@ -109,7 +109,7 @@ describe('basecse and scopebase disagree about a `for` init, and the disagreemen
   };
 
   test('basecse refuses it — its `for` children are recursed with the loop flag set', () => {
-    expect(cBackend.emit(hoistReusedGlobalBases(fn))).toContain('((u8 *)&g)[1]');
+    expect(cBackend.emit(hoistBaseLocals(fn))).toContain('((u8 *)&g)[1]');
   });
 
   test('scopebase hoists it, immediately before the loop', () => {
