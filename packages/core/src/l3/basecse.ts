@@ -165,12 +165,15 @@ export interface BaseKey {
   repeatedConstOffset: boolean;
   /** every access is the SAME fixed offset — one scalar cell rather than a block of them */
   singleCell: boolean;
-  /** A NUMERIC base reached at a non-zero constant offset. On a compiler that folds a constant
-   *  subscript into the literal it materializes, that offset survived because something OTHER than
-   *  a subscript put it there — a named base, or an aggregate member (see the header). Read only by
-   *  `BASEFOLD_GATES`, whose roster row rank.ts offers only where the target declares the fold.
-   *  False at offset 0, where the fold is the identity, and false for a SYMBOL base, whose split
-   *  the lift does not preserve — a relocation addend folds into the index. */
+  /** A NON-ZERO NUMERIC base reached at a non-zero constant offset. On a compiler that folds a
+   *  constant subscript into the literal it materializes, that offset survived because something
+   *  OTHER than a subscript put it there — a named base, or an aggregate member (see the header).
+   *  Read only by `BASEFOLD_GATES`, whose roster row rank.ts offers only where the target declares
+   *  the fold. Three refusals, each of them a place the fold left no evidence to read: offset 0,
+   *  where the fold is the identity; base 0, where there is no materialized literal for a subscript
+   *  to fold INTO — `((s8 *)0)[16]` is one instruction (`lb $v0, 16($zero)`), so the offset never
+   *  had anywhere else to be; and a SYMBOL base, whose split the lift does not preserve — a
+   *  relocation addend folds into the index. */
   unfoldedOffset: boolean;
 }
 
@@ -280,18 +283,20 @@ function admit(sfn: SFn, gates: readonly Gate<BaseKey>[]): { c: Collected; keys:
     varIndexed: new Set(),
   };
   collect(sfn.body, c, false);
-  const keys = c.order.filter(
-    (k) =>
+  const keys = c.order.filter((k) => {
+    const base = c.meta.get(k)!.base;
+    const offsets = c.constOffCount.get(k);
+    return (
       firstRejection(gates, {
         key: k,
         uses: c.count.get(k) ?? 0,
         inLoop: c.inLoop.has(k),
-        repeatedConstOffset: [...(c.constOffCount.get(k)?.values() ?? [])].some((n) => n >= 2),
-        singleCell: !c.varIndexed.has(k) && (c.constOffCount.get(k)?.size ?? 0) <= 1,
-        unfoldedOffset:
-          c.meta.get(k)?.base.k === 'const' && [...(c.constOffCount.get(k)?.keys() ?? [])].some((o) => o !== 0),
-      }) === null,
-  );
+        repeatedConstOffset: [...(offsets?.values() ?? [])].some((n) => n >= 2),
+        singleCell: !c.varIndexed.has(k) && (offsets?.size ?? 0) <= 1,
+        unfoldedOffset: base.k === 'const' && base.value !== 0 && [...(offsets?.keys() ?? [])].some((o) => o !== 0),
+      }) === null
+    );
+  });
   return { c, keys };
 }
 

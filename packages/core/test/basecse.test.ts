@@ -146,6 +146,11 @@ describe('reused-global-base hoisting', () => {
       expect(hoistReusedGlobalBases(input, BASEFOLD_GATES)).toBe(input);
     });
 
+    test('a base of 0 is left inline: no materialized literal, so nothing survived a fold', () => {
+      const input = fn([{ k: 'store', lval: cidx(0, c(16), 1), value: c(0) }]);
+      expect(hoistReusedGlobalBases(input, BASEFOLD_GATES)).toBe(input);
+    });
+
     test('the two tables are one gate apart, and each ablation prices its own rule', () => {
       const input = oneStore();
       // the exemption, alone
