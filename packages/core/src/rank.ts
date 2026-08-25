@@ -275,11 +275,16 @@ const createdLocals = (from: SFn, to: SFn): Set<string> => {
 interface BaseAdmission {
   suffix: string;
   gates: readonly Gate<BaseKey>[];
+  /** Whether the row joins the `/livebase ×` PAIRINGS below. Each of those products was added for
+   *  a row that demanded the joint spelling (see POLICY), and every demanding row so far is a
+   *  `/livebase` row — so a new admission joins them when a row demands it, not by roster
+   *  membership. */
+  pairings: boolean;
 }
 
 const LIVEBASE_ADMISSIONS: readonly BaseAdmission[] = [
-  { suffix: '/livebase', gates: LIVEBASE_GATES },
-  { suffix: '/livebase-block', gates: LIVEBASE_BLOCK_GATES },
+  { suffix: '/livebase', gates: LIVEBASE_GATES, pairings: true },
+  { suffix: '/livebase-block', gates: LIVEBASE_BLOCK_GATES, pairings: true },
 ];
 
 /** Narrower than either `/livebase` row, so it goes last: it keeps both placement heuristics and
@@ -287,6 +292,7 @@ const LIVEBASE_ADMISSIONS: readonly BaseAdmission[] = [
 const BASEFOLD_ADMISSION: BaseAdmission = {
   suffix: '/basefold',
   gates: BASEFOLD_GATES,
+  pairings: false,
 };
 
 const sameBases = (a: readonly string[], b: readonly string[]): boolean =>
@@ -884,7 +890,7 @@ export function enumerateCandidates(
       censuses.set(g, v);
       return v;
     };
-    const livebases = admissions.map(({ suffix, gates }, i) => {
+    const livebases = admissions.map(({ suffix, gates, pairings }, i) => {
       const hoist = (): SFn | null => {
         const bound = census(gates);
         if (bound.length === 0) {
@@ -897,8 +903,10 @@ export function enumerateCandidates(
         const r = hoist();
         return r ? volatilePtrLocals(r, createdLocals(sfn, r)) : null;
       };
-      return { suffix, hoist, volatiles };
+      return { suffix, hoist, volatiles, pairings };
     });
+    // Every product below fans over the rows a demanding row earned, never the whole roster.
+    const paired = livebases.filter((l) => l.pairings);
     for (const { suffix, hoist, volatiles } of livebases) {
       respell(suffix, hoist);
       respell(`${suffix}/volatile`, volatiles);
@@ -907,7 +915,7 @@ export function enumerateCandidates(
     // The livebase × indexed PAIRINGS — the third sanctioned product kind (see POLICY):
     // row-demanded, and the joint spelling is reachable from neither lever alone (the
     // frame-copy + DMA shape).
-    for (const { suffix, hoist, volatiles } of livebases) {
+    for (const { suffix, hoist, volatiles } of paired) {
       respell(`${suffix}/indexed`, () => {
         const r = hoist();
         return r ? reindexWalks(r) : null;
@@ -921,7 +929,7 @@ export function enumerateCandidates(
     // (kleod:DecompressDma), and the joint spelling is reachable from neither lever alone. The
     // bases whose placement moves the row are the ones only this lever's ablation binds, and
     // `/sinkinit` alone reads the DEFAULT hoist's head, which does not carry them.
-    for (const { suffix, hoist, volatiles } of livebases) {
+    for (const { suffix, hoist, volatiles } of paired) {
       respell(`${suffix}/sinkinit`, () => {
         const r = hoist();
         return r ? sinkInitsToFirstUse(r) : null;
@@ -946,7 +954,7 @@ export function enumerateCandidates(
     // neither lever alone (a neighbor-cell object and a multi-index MMIO block in one
     // function — each lever's constants are invisible to the other's model); the plain
     // sibling rides for symmetry with /livebase/indexed.
-    for (const { suffix, hoist, volatiles } of livebases) {
+    for (const { suffix, hoist, volatiles } of paired) {
       respell(`${suffix}/nearbase`, () => {
         const r = hoist();
         return r && nearSpan !== undefined ? nearBaseClusters(r, nearSpan) : null;
@@ -963,7 +971,7 @@ export function enumerateCandidates(
     // ARM-DISJOINT merges only: the demanding row's shared counter is that class, and the
     // span-model merges already ride the plain /coalesce label — pairing them too would
     // multiply candidates with no row behind it.
-    for (const { suffix, hoist, volatiles } of livebases) {
+    for (const { suffix, hoist, volatiles } of paired) {
       enumerate(`${suffix}/coalesce`, hoist, armDisjointCandidates);
       enumerate(`${suffix}/volatile/coalesce`, volatiles, armDisjointCandidates);
     }

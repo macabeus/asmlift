@@ -495,6 +495,18 @@ describe('the block admission is WIRED into enumeration', () => {
     expect(cands.map((x) => x.label).filter((l) => l.includes('basefold'))).toEqual([]);
   });
 
+  test('/basefold joins no PAIRING: no row demands the joint spelling', () => {
+    // The `/livebase ×` products fan over the rows that declared `pairings`, and this one does
+    // not — so the labels it contributes are its own family and nothing crossed with it.
+    const basefold = candsFor('basecell')
+      .map((x) => x.label)
+      .filter((l) => l.includes('basefold'));
+    expect(basefold.length).toBeGreaterThan(0);
+    for (const suffix of ['/indexed', '/nearbase', '/coalesce', '/sinkinit']) {
+      expect(basefold.filter((l) => l.includes(suffix))).toEqual([]);
+    }
+  });
+
   test('every /livebase PRODUCT fans over the roster, and one of them is reachable no other way', () => {
     // `corpus/agbcc-sizebound.s` is synthetic:sizebound:agbcc — a DMA register file beside a
     // halfword read as two loop bounds. The wide admission binds that halfword, which leaves
