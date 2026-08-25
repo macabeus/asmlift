@@ -15,11 +15,11 @@ import { verify } from '../src/ir/verify';
 import { recoverTypes } from '../src/raise/recover';
 import { structure } from '../src/structure/structure';
 
-const emit = (ir: string, anchor: boolean): string => {
+const emit = (ir: string, anchor: boolean, loopEntry = anchor): string => {
   const fn = parse(ir);
   verify(fn);
   recoverTypes(fn);
-  return cBackend.emit(structure(fn, { anchorConstCopies: anchor }));
+  return cBackend.emit(structure(fn, { anchorConstCopies: anchor, anchorLoopEntryConsts: loopEntry }));
 };
 
 // v = 0 at entry, conditionally overwritten to 1 — the asm shape `movs r9, #0` … `bne skip;
@@ -228,8 +228,19 @@ test("a loop header's entry const anchors at its def site, above the if the preh
   );
 });
 
-// Two forward preds: each writes the name at its OWN edge, outside the body, so suppressing one
-// leaves a path into the header carrying the other's value.
+test('the loop-entry widening is its OWN flag: plain /defsite still leaves the entry const on its edge', () => {
+  // The spelling in the middle — anchor what `/defsite` always anchored, leave a loop header's
+  // entry const at its edge. One boolean covering both placements would make it unreachable, and
+  // on a real function that is a quarter to a half of the candidate sources (klonoa's
+  // TransitionSelfRemoveFadeIn: 448 of 896).
+  expect(emit(ACCUM, true, false)).toBe(emit(ACCUM, false));
+});
+
+// Two forward preds, each passing its own constant for the accumulator slot. CONSERVATIVE, and
+// not proven necessary: with both consts anchored at their own def sites the writes would still
+// order correctly on every path. The rule refuses the shape rather than reasoning about it,
+// because the premise the name rule rests on — every write to the name outside the anchored one
+// is a back-edge copy — is stated over ONE entry edge.
 const TWO_PREHEADERS = `fn twopre {
 ^bb0(%0: s32, %1: s32):
   %2: s32 = const {value=0}
@@ -240,7 +251,8 @@ const TWO_PREHEADERS = `fn twopre {
   br ^bb4(%2, %4)
 ^bb2():
   %5: s32 = const {value=9}
-  br ^bb4(%2, %5)
+  %6: s32 = const {value=3}
+  br ^bb4(%6, %5)
 ^bb4(%7: s32, %8: s32):
   %9: s32 = add %7, %8
   %10: s32 = const {value=1}
@@ -253,7 +265,7 @@ const TWO_PREHEADERS = `fn twopre {
 }
 `;
 
-test('a loop header entered from two preheaders declines', () => {
+test('a loop header entered from two preheaders declines (conservative, not proven necessary)', () => {
   expect(emit(TWO_PREHEADERS, true)).toBe(emit(TWO_PREHEADERS, false));
 });
 

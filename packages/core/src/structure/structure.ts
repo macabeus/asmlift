@@ -717,6 +717,13 @@ export interface StructureOptions {
   // the `if`, not as its else-arm. A differ-refereed candidate axis (rank.ts `/defsite`), never a
   // default — see the refusal conditions where it is computed.
   anchorConstCopies?: boolean;
+  // WIDEN `anchorConstCopies` to a LOOP HEADER's entry constant — `int s = 0;` hoisted above the
+  // `if` that guards the loop, rather than written on the edge into it. A second placement
+  // decision, so a second axis point (rank.ts `/defsite/loop-entry`) rather than a widening of
+  // the first: on a function carrying both kinds of anchorable const, folding them into one flag
+  // would make "anchor the plain ones, leave the loop's at its edge" — a spelling `/defsite`
+  // emits today — unreachable. Inert unless `anchorConstCopies` is also on.
+  anchorLoopEntryConsts?: boolean;
   // HARDWARE fact from TargetDescription.capabilities.endianness, threaded by structureOptionsFor:
   // the bitfield extract recognizer solves an LSB-first equation, so it only runs on little-endian
   // data. The provider already refuses to EMIT bitfield facts for a big-endian ELF; this is the
@@ -817,6 +824,7 @@ function assertPrimaryAccepts(fn: Fn, opts: StructureOptions, hooks: StructureHo
       homeLoopExprs: false,
       homeDerivedReads: false,
       anchorConstCopies: false,
+      anchorLoopEntryConsts: false,
     },
     hooks,
   );
@@ -834,6 +842,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     switchArmsFollowLayout = false,
     defOrderLoadPairs = true,
     anchorConstCopies = false,
+    anchorLoopEntryConsts = false,
     littleEndian = true,
     spellBitfieldMembers: bitfieldSpellingWanted = true,
     rereadGlobals = false,
@@ -1736,13 +1745,15 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // REFUSAL CONDITIONS — each keeps the edge placement, never producing a different write:
   //   - the arg is not an UNNAMED `const` op (only a rematerializable constant carries
   //     unambiguous placement evidence; a named value's position is its materialized def's);
-  //   - the merge is a loop header entered other than through ONE preheader, or one under whose
-  //     name a value lives OUTSIDE the body. A loop header's entry arg is the one merge arg whose
-  //     def sits legitimately far above its edge — `int s = 0;` ahead of a `for` accumulating into
-  //     it — and the carried values that share its name are what the name rule below would refuse
-  //     it on. Anchoring holds exactly when the name is written nowhere outside the loop but at
-  //     the anchored site: the entry copy runs once, before the body, and every other write to it
-  //     is a back-edge copy strictly after;
+  //   - the merge is a LOOP HEADER, unless `anchorLoopEntryConsts` is also on and the loop is
+  //     entered through ONE preheader with no value living outside the body under the same name.
+  //     A loop header's entry arg is the one merge arg whose def sits legitimately far above its
+  //     edge — `int s = 0;` ahead of a `for` accumulating into it — and the carried values that
+  //     share its name are what the name rule below would refuse it on. Anchoring holds exactly
+  //     when the name is written nowhere outside the loop but at the anchored site: the entry
+  //     copy runs once, before the body, and every other write to it is a back-edge copy strictly
+  //     after. Its own flag because it is a SECOND placement decision, and one boolean covering
+  //     both would delete a spelling rather than add one (see the option's doc);
   //   - the const's block does not dominate every edge source passing it (the anchored write
   //     must precede the edge on every path);
   //   - the const's block or any edge source sits inside ANY loop. Block-level dominance does
@@ -1778,10 +1789,12 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       const d = defs.get(v);
       return paramBlock.get(v) ?? (d === undefined ? undefined : opBlock.get(d));
     };
-    // A loop whose body is entered ONLY through its header, from ONE preheader. Both halves are
-    // what make "every write to the name outside the anchored one is a back-edge copy" true: a
-    // second forward pred writes the name at its own edge outside the body, and a body block with
-    // an outside predecessor takes a copy into a body param from outside too.
+    // A loop whose body is entered ONLY through its header, from ONE preheader — what makes
+    // "every write to the name outside the anchored one is a back-edge copy" statable: the
+    // premise is over ONE entry edge, and a body block with an outside predecessor takes a copy
+    // into a body param from outside too. The single-preheader half is CONSERVATIVE: two entry
+    // consts anchored at their own def sites would still order correctly, and this refuses the
+    // shape rather than reasoning about it.
     const singleEntry = (nl: NaturalLoop): boolean =>
       nl.forwardPreds.length === 1 &&
       [...nl.body].every((b) => b === nl.header || (preds.get(b) ?? []).every((r) => nl.body.has(r)));
@@ -1789,8 +1802,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       if (M === entry || M.params.length === 0) {
         continue;
       }
-      const loop = forest.byHeader.get(M);
-      if (loop && !singleEntry(loop)) {
+      const loop = anchorLoopEntryConsts ? forest.byHeader.get(M) : undefined;
+      if (forest.byHeader.has(M) && (loop === undefined || !singleEntry(loop))) {
         continue;
       }
       M.params.forEach((p, i) => {
