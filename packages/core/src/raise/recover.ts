@@ -225,7 +225,12 @@ export function returnType(fn: Fn): IrType {
     const term = b.ops[b.ops.length - 1];
     if (term?.opcode === 'ret' && term.operands.length > 0) {
       const v = term.operands[0];
-      return v.type.kind === 'unknown' ? T.s(32) : v.type;
+      // A NARROW value in the return register does not make the DECLARED return type narrow: the
+      // register is a word, and the value's width says how it was computed (a byte load, a
+      // prologue-narrowed parameter), not what the header spelled. The two readings compile the
+      // same through agbcc and do NOT through mwcc — `s8 f(s8 x) { return x; }` drops the `extsb`
+      // that `s32 f(s8 x) { return x; }` keeps and the target has (synthetic `sextb`/`tos8`).
+      return v.type.kind === 'unknown' || (v.type.kind === 'int' && v.type.width < 32) ? T.s(32) : v.type;
     }
   }
   return T.s(32);
