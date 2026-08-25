@@ -448,6 +448,9 @@
     {
       "sym": "sub_802DFC8",
       "features": [
+        "value-home",
+        "sign-extend",
+        "mask",
         "struct",
         "field"
       ],
@@ -459,7 +462,8 @@
           "returnsVoid": true
         }
       },
-      "m2cCtx": true
+      "m2cCtx": true,
+      "note": "62, and NONE of it is struct or field recovery — asmlift's synthesized `struct Struct0` recovers every offset (0/8/12/14/20/22/26/27/28/31/32) and every access width correctly. Starting from asmlift's own winning source and changing only three HOMES, this row reaches 0 (rows=128) while still spelling `struct Struct0`, `field_N`, `16 - 17` and the raw `(-(x)|x)>>31 & C` idiom. The 8-subset lattice, each cell compiled through this row's own scoring context (RESIDUAL score, so 0 is a match): {} 62 / A 46 / B 23 / C 58 / AB 4 / AC 42 / BC 19 / ABC 0, where A = the narrowed parameter (the ROM extends `s16 direction` once at entry; asmlift re-spells `(s16)a0` at each of NINE uses), B = the merge initializer (`s32 mask = 0;` above the chain, which asmlift sinks into three `else { v0 = 0; }` arms that agbcc then if-converts), C = the base local (`gStageData` read at three offsets: the inline byte-cast costs 4, a base local assigned at the FUNCTION TOP costs 8, one assigned at its first use costs 0). Shapley 17.5 / 40.5 / 4.0; an earlier derivation with the extension homed one line higher gave 16.5 / 41.5 / 4.0, so read the split as ~17/~40/4 — what is stable is the ordering and v(AB)=58 of 62, i.e. no subset closes it. The three homes' ORDER is itself load-bearing: the hoisted `s32 v0 = 0;` must precede `s32 t0 = (s16)a0;`, and the other order costs 3 (`movs r5, #0` two instructions late). B's first blocker was watched firing and then ablated: with `structure.ts`'s `nameCount.get(name) !== 1` refusal off and the bundle rebuilt, this row goes 62 -> 23. Synthetic isolates: `sxparam` (19), `maskchain` (21), `basehome` (11), with `armkeep` (MATCH) the one control. `/setup-args` in the winning label is incidental: it is the arity repair for the callee `VramMalloc`, declared `void *VramMalloc(u32);` in the row's context, and the 24 candidates without it are all dropped as `too many arguments to function 'VramMalloc'` — the ranked line is `24 candidate(s) scored, 24 dropped, best unsigned/setup-args/defsite: 62`, and every `signed/` candidate scores identically to its `unsigned/` twin."
     },
     {
       "sym": "sub_806132C",
@@ -514,6 +518,9 @@
     {
       "sym": "sub_803213C",
       "features": [
+        "value-home",
+        "zero-extend",
+        "mask",
         "struct",
         "field"
       ],
@@ -525,7 +532,8 @@
           "returnsVoid": true
         }
       },
-      "m2cCtx": true
+      "m2cCtx": true,
+      "note": "48, and none of it struct or field recovery — same as sub_802DFC8, and verified the same way (asmlift's own winner reaches 0 at rows=71 with three homes changed and `struct Struct0`/`field_N` intact). The 8-subset lattice, RESIDUAL score per cell: {} 48 / A 39 / B 15 / C 46 / AB 2 / AC 38 / BC 13 / ABC 0, where A = the two narrowed `u8` parameters (extended once at entry in the ROM, re-spelled `(u8)a0`/`(u8)a1` per use), B = a pure expression the source computed ONCE above the `gameMode` test (`mask = (unk39 & 1) ? SPRITE_FLAG(X_FLIP,1) : 0`), which asmlift duplicates into both arms and agbcc does not re-hoist, C = the single-access `gStageData` base, whose byte offset gcc folds into the pool word (`.word gStageData+0x3` + `[r0]` against the ROM's `.word gStageData` + `[r0,#0x3]`). Shapley 10.8 / 35.3 / 1.8 (an earlier derivation gave 9.8 / 36.3 / 1.8; the +-1 is the repair's spelling, the ordering and v(AB)=46 of 48 are stable). ORDER matters here too: the shared constant must be spelled as a literal `1` inside the hoisted expression with `s32 v0 = 1;` BELOW it — homing it above instead moves `movs r6, #1` four instructions early and costs 2. `/defsite` cannot reach the expression: its merge args are an `or` and an `and`, not an unnamed const, and the refusal was watched firing 288x each. Synthetic isolates: `armexpr` (35), `zxparam` (8), `basecell` (2). `/setup-args` is incidental here too (the same `VramMalloc` arity repair): the ranked line is `4 candidate(s) scored, 4 dropped, best unsigned/setup-args: 48`, with `signed/` and `unsigned/` scoring identically on all four."
     },
     {
       "sym": "Player_800D978",
