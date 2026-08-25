@@ -20,7 +20,6 @@ import { verify } from './ir/verify';
 import { materializeArgBases } from './l3/argbase';
 import type { LanguageBackend, SFn } from './l3/ast';
 import {
-  BASECSE_GATES,
   BASEFOLD_GATES,
   type BaseKey,
   LIVEBASE_BLOCK_GATES,
@@ -255,14 +254,20 @@ const createdLocals = (from: SFn, to: SFn): Set<string> => {
  *  one of its admissions.
  *
  *  `/basefold` is the third admission and the only conditional one — `enumerateCandidates` appends
- *  it where the target declares `compilerBehaviors.foldsConstAddrOffset`, and it declines wherever
- *  its exemption bound nothing the primary does not already carry (`addsTo`). Narrow both ways.
+ *  it where the target declares `compilerBehaviors.foldsConstAddrOffset`. It needs no second
+ *  "did the primary already carry this" test: `structureChecked` runs the DEFAULT hoist to its
+ *  fixpoint before any tree reaches here, so a key still admissible is by construction one
+ *  `BASECSE_GATES` rejected, and binding nothing is the whole of the decline.
  *  Structure the corpus the way the committed path does — 1139 observations, every case in every
- *  symbol-map configuration it has — and the exemption adds a key on 5, every one of them
- *  map-less. Only 2 sit on a target that declares the fold, so only 2 are ever offered the row:
+ *  symbol-map configuration it has — and the exemption adds 6 keys over 5 observations, every one
+ *  of them map-less: with a map the pool constant lifts to a `gaddr` and the numeric clause stands
+ *  down. Two are ever offered the row, being the only two on a target that declares the fold —
  *  `synthetic:basecell` and `kleod:RollRandomLevelVariant`, three keys between them. The other
- *  three are `bg_mix` on the ido, kmc and mwcc lanes, and the target gate is the whole of what
- *  keeps the row away from them — the naive `single-use` ablation costs that row 1→10 on ido.
+ *  three are `bg_mix` on the ido, kmc and mwcc lanes, where the target gate withholds it. That
+ *  gate decides a SPELLING and not a score: a roster row only ever adds a candidate, and
+ *  `compareScored` orders by score, so none of them can cost a row its match. The reason to
+ *  withhold it is that `unfoldedOffset` would be read as evidence where the instruction carries
+ *  the addend by construction, so there is none.
  *  On klonoa's `LoadBGTilemapData` — a checkout function rather than a row, so re-run it with the
  *  ranked command in docs/ranked-repro.md — the admission declines on every structuring, leaving
  *  that fan the size it was: 48000 candidates either way. All floors, though: the ranked path
@@ -270,9 +275,6 @@ const createdLocals = (from: SFn, to: SFn): Set<string> => {
 interface BaseAdmission {
   suffix: string;
   gates: readonly Gate<BaseKey>[];
-  /** The table this row RELAXES. It declines where it binds exactly that table's set: the
-   *  relaxation added nothing, so the candidate would be the primary under another label. */
-  addsTo?: readonly Gate<BaseKey>[];
 }
 
 const LIVEBASE_ADMISSIONS: readonly BaseAdmission[] = [
@@ -285,7 +287,6 @@ const LIVEBASE_ADMISSIONS: readonly BaseAdmission[] = [
 const BASEFOLD_ADMISSION: BaseAdmission = {
   suffix: '/basefold',
   gates: BASEFOLD_GATES,
-  addsTo: BASECSE_GATES,
 };
 
 const sameBases = (a: readonly string[], b: readonly string[]): boolean =>
@@ -865,14 +866,14 @@ export function enumerateCandidates(
     // hoist-nothing result means the lever has nothing to add and declines.
     // One family per admission row; a row binding exactly what an earlier row bound is the same
     // spelling under a different label, so it declines for that too. `/basefold` joins the roster
-    // where the target declares the fold, and declines further where its exemption bound nothing.
+    // where the target declares the fold.
     const admissions: readonly BaseAdmission[] = target.compilerBehaviors.foldsConstAddrOffset
       ? [...LIVEBASE_ADMISSIONS, BASEFOLD_ADMISSION]
       : LIVEBASE_ADMISSIONS;
     // The CENSUS is a pure function of (this tree, that table) and every row asks for every
     // earlier row's, from thunks each product re-invokes — quadratic in the roster, times the
-    // number of products. Memoized on the gate table's identity; the value is a frozen key list
-    // nothing downstream can mutate, so this shares no tree.
+    // number of products. Memoized on the gate table's identity. The value is a list of key
+    // STRINGS whose two readers here only compare and count it, so a memo hit shares no tree.
     const censuses = new Map<readonly Gate<BaseKey>[], readonly string[]>();
     const census = (g: readonly Gate<BaseKey>[]): readonly string[] => {
       const hit = censuses.get(g);
@@ -883,10 +884,10 @@ export function enumerateCandidates(
       censuses.set(g, v);
       return v;
     };
-    const livebases = admissions.map(({ suffix, gates, addsTo }, i) => {
+    const livebases = admissions.map(({ suffix, gates }, i) => {
       const hoist = (): SFn | null => {
         const bound = census(gates);
-        if (bound.length === 0 || (addsTo && sameBases(bound, census(addsTo)))) {
+        if (bound.length === 0) {
           return null;
         }
         const shadowed = admissions.slice(0, i).some((a) => sameBases(bound, census(a.gates)));

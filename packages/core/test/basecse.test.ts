@@ -489,9 +489,9 @@ describe('the block admission is WIRED into enumeration', () => {
     ).toEqual([]);
   });
 
-  test('/basefold declines where its exemption bound nothing the primary does not carry', () => {
-    // mixpoll's bases are all reached 2+ times, so the exemption is vacuous there and the row
-    // would only repeat the primary under another label.
+  test('/basefold declines where its exemption binds nothing', () => {
+    // mixpoll's bases are all reached 2+ times, so the exemption is vacuous there — and every key
+    // it could have bound the DEFAULT hoist already took, before `fanOut` saw the tree.
     expect(cands.map((x) => x.label).filter((l) => l.includes('basefold'))).toEqual([]);
   });
 
