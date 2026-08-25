@@ -62,7 +62,8 @@
 // what this shape adds is its own two rules —
 //   • the counter is declared SIGNED. `k >= 0` never fails for an unsigned k, so an unsigned
 //     declaration describes a loop that does not terminate, and `C + 1` would be a fiction;
-//   • C is a NON-NEGATIVE constant (`k = -1` runs the body once, not `C + 1 = 0` times).
+//   • C is a constant in [0, S32_MAX). Below zero `k = -1` runs the body once rather than
+//     `C + 1 = 0` times; at the top C + 1 wraps negative and the `for` runs zero times.
 // The induction inits are read out of the statements PRECEDING the do-while in its own list
 // rather than out of a guard arm, and the counter's init is the only one the rewrite deletes.
 import { IrType, T } from '../ir/types';
@@ -903,10 +904,9 @@ export function reindexWalks(sfn: SFn, keptWalks?: Set<string>): SFn | null {
     return [...pre.filter((x) => x !== kInit), r.counted];
   }
 
-  /** v4: the UNGUARDED constant-trip countdown (see the header) — `out`'s tail holds the
-   *  induction inits, `dw` is the loop. Returns the statements replacing them (the walk inits
-   *  the loop keeps, then the counted `for`) and how many of `out`'s trailing statements they
-   *  consume, or null (decline). */
+  /** v4: the UNGUARDED constant-trip countdown (see the header). `out` holds the statements
+   *  already emitted before `dw`, the induction inits among them. Returns the list replacing
+   *  `out` (itself minus the counter's init) and the counted `for`, or null (decline). */
   function respellConstCountdown(out: Stmt[], dw: Stmt & { k: 'dowhile' }): { pre: Stmt[]; counted: Stmt } | null {
     // the do-while exit: exactly `k >= 0` / `0 <= k`
     const lc = dw.cond;

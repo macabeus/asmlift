@@ -1736,15 +1736,13 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // REFUSAL CONDITIONS — each keeps the edge placement, never producing a different write:
   //   - the arg is not an UNNAMED `const` op (only a rematerializable constant carries
   //     unambiguous placement evidence; a named value's position is its materialized def's);
-  //   - the merge is a loop header whose entry side is not a single preheader, or whose body is
-  //     reachable from outside except through the header, or under whose name some value lives
-  //     OUTSIDE the body. A loop header's entry arg is the one merge arg whose def can sit
-  //     legitimately far above the edge — `int s = 0;` at the top of a function ahead of a
-  //     `for` that accumulates into it — and the back-edge args, which share the name, are what
-  //     the blanket name-count rule below refuses on. Anchoring stays sound exactly when the
-  //     name is written nowhere outside the loop but at the anchored site: the entry copy runs
-  //     once, before the body, and every other write to the name is a back-edge copy strictly
-  //     after it;
+  //   - the merge is a loop header entered other than through ONE preheader, or one under whose
+  //     name a value lives OUTSIDE the body. A loop header's entry arg is the one merge arg whose
+  //     def sits legitimately far above its edge — `int s = 0;` ahead of a `for` accumulating into
+  //     it — and the carried values that share its name are what the name rule below would refuse
+  //     it on. Anchoring holds exactly when the name is written nowhere outside the loop but at
+  //     the anchored site: the entry copy runs once, before the body, and every other write to it
+  //     is a back-edge copy strictly after;
   //   - the const's block does not dominate every edge source passing it (the anchored write
   //     must precede the edge on every path);
   //   - the const's block or any edge source sits inside ANY loop. Block-level dominance does
