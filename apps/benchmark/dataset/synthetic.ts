@@ -2274,7 +2274,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // callee-saved register) and `repeated-const-offset` (a fixed offset touched twice is a scalar
   // RMW the compiler re-materializes) — are exactly wrong for an MMIO poll, so rank.ts's
   // `/livebase` lever re-runs the pass with both ablated, leaving only `single-use`. That lever was
-  // ALL-OR-NOTHING over bases — `hoistReusedGlobalBases` hoisted every key the gate list admits,
+  // ALL-OR-NOTHING over bases — `hoistBaseLocals` hoisted every key the gate list admits,
   // with no candidate for a proper subset. A second admission, LIVEBASE_BLOCK_GATES, adds the
   // `single-cell` gate — a base every access of which is ONE fixed offset stays inline — and rank
   // carries both in one roster (LIVEBASE_ADMISSIONS), fanning every `/livebase` product over each,
@@ -2810,15 +2810,28 @@ export const SYNTHETIC: SynthSpec[] = [
   //   merge args there are an `or` and an `and`, not an unnamed `const`, so `/defsite` cannot reach
   //   `armexpr`'s shape at all. That is why the expression home is a separate row from this one.
   //
-  //   `basecell` diff:2 — ONE access through a numeric base at a nonzero byte offset. gcc 2.9
-  //   folds `base + K` into the pool word, so the inline cast compiles to `.word 0x3001103` +
-  //   `ldrb r1, [r1]` where the pointer-local spelling keeps `.word 0x3001100` +
-  //   `ldrb r1, [r1, #0x3]` (compiled pair, both dumped). `l3/basecse.ts`'s `single-use` gate
-  //   rejects a base with `uses < 2` — its stated rationale, "one access re-materializes as
-  //   cheaply as a named local", is false at a nonzero offset — and `/livebase` keeps that gate,
-  //   so no candidate in the fan hoists it. Ablating that gate takes this row to MATCH.
+  //   `basecell` MATCH — ONE access through a numeric base at a nonzero byte offset. gcc 2.9
+  //   folds a constant SUBSCRIPT into the pool word, so the inline cast compiles to
+  //   `.word 0x3001103` + `ldrb r1, [r1]` where the pointer-local spelling keeps
+  //   `.word 0x3001100` + `ldrb r1, [r1, #0x3]` (compiled pair, both dumped). `l3/basecse.ts`'s
+  //   `single-use` gate rejected a base with `uses < 2` — its stated rationale, "one access
+  //   re-materializes as cheaply as a named local", is false at a nonzero offset — so the offset
+  //   the compiler did NOT fold rides as `BaseKey.unfoldedOffset` in a SECOND admission,
+  //   `BASEFOLD_GATES`, which rank.ts offers as `/basefold` wherever the target declares
+  //   `TargetDescription.compilerBehaviors.foldsConstAddrOffset`. A CANDIDATE and not a default,
+  //   because the same bytes have a second source: agbcc keeps an aggregate MEMBER offset in the
+  //   memory operand, so `((struct S *)0x3001100)->b` emits `.word 0x3001100` + `ldr [r0, #0x4]`,
+  //   byte-identical to the named base (likewise a union member, and the write direction).
+  //   asmlift can spell only one of the two, so the differ referees.
+  //   The row is agbcc alone and holds the ADMITTED case; the refusals that keep the admission
+  //   off the naive ablation below are gate-level, pinned in test/basecse.test.ts — an offset of 0
+  //   (there the fold is the identity), a base of 0 (no literal for a subscript to fold INTO), a
+  //   target that declares no fold, and a SYMBOL base. That last one is refused because the LIFT
+  //   folds a relocation addend back into the index, so all four spellings of that access reach L3
+  //   as one tree — NOT because the bytes agree: they do not, `((u8 *)&gSym)[3]` emitting
+  //   `.word gSym+0x3` + `ldrb [r1]`.
   //
-  //   `basehome` diff:11 — THREE accesses through one base whose first use is not the function's
+  //   `basehome` MATCH — THREE accesses through one base whose first use is not the function's
   //   first statement. The hoist fires here, but `l3/basecse.ts` emits every init at the head of
   //   `sfn.body`, so the base is live across the prologue and agbcc pays a callee-saved register
   //   for it: compiled pair, assigning at the top adds `push {r4, lr}` / `pop {r4}` / `pop {r0}` /
@@ -2828,10 +2841,12 @@ export const SYNTHETIC: SynthSpec[] = [
   //   than no hoist, which is the same signal the real row gives — on sub_802DFC8 the inline
   //   spelling scores 4, a top-assigned base local 8, a first-use-assigned one 0, and asmlift's
   //   own `/livebase` candidate (which does emit the base local, at the top) scores 66 against the
-  //   winner's 62. Ablating the `[...inits, ...rest]` placement to first-use takes this row to
-  //   MATCH. `l3/scopebase.ts` is the scope-aware sibling and does not help: the innermost
-  //   enclosing scope here IS the function body. Its header records this placement question as
-  //   unmeasured; this pair is the measurement.
+  //   winner's 62. `l3/sinkinit.ts` is that placement, carried as the differ-refereed `/sinkinit`
+  //   candidate rather than as basecse's own `[...inits, ...rest]` — taken as a DEFAULT the same
+  //   move costs `mixpoll` and `onepoll` their matches, which is the ledger below. `l3/scopebase.ts`
+  //   is the scope-aware sibling and does not help: the innermost enclosing scope here IS the
+  //   function body. Eligibility and placement are the two halves of one question and both ride as
+  //   candidates — `/basefold` and `/sinkinit`, paired over the admission roster.
   //
   // THE CONTROL. `armkeep` MATCH — the same pure expression computed in BOTH arms, but consumed
   //   inside each arm rather than merged out of the `if`. agbcc keeps both copies, asmlift emits
@@ -2867,15 +2882,18 @@ export const SYNTHETIC: SynthSpec[] = [
   //   permission to delete the refusal: its rationale is that a shared name has readers and
   //   writers between the def site and the edge, a MEANING concern a score cannot referee. The
   //   lever is "refine the refusal", and 0 regressions bounds only its placement cost.
-  //   `single-use` off (the `basecell` lever) — 19 rows move, 7 better and 12 WORSE, and one of
-  //   the twelve is a lost match. Better: `basecell` 2→MATCH, `sub_803213C` 48→46 (exactly its
+  //   `single-use` off (the `basecell` lever) — the NAIVE ablation, which is not what shipped:
+  //   19 rows move, 7 better and 12 WORSE, and one of the twelve is a lost match. What shipped is
+  //   a separate ADMISSION, narrower than the ablation and read by no committed path. Better:
+  //   `basecell` 2→MATCH, `sub_803213C` 48→46 (exactly its
   //   v(C)), `GetInput` 68→58, `RollRandomLevelVariant` 24→18, `EntityItemDrop` 118→116,
   //   `ProcessInputAndUpdateEntities` 370→366, `CountCollectedGems` 328→327. Worse:
   //   `UpdateFadeEffect` MATCH→2, `readarm` MATCH→8 and `armshare` MATCH→17 (both `read-once`),
   //   `readcall` 6→17, `bg_mix` ido7.1 1→10, `dma_fill_uninit` 68→71, `StreamCmd_SetWindowRegs`
   //   5→15, `Sin2` 23→31, `ModifyStatByNature` 53→57, `Random` 7→10, `CalculatePPWithBonus` 17→19,
   //   `UpdateWorldMapNodeAnim` 159→162.
-  //   placement → first use (the `basehome` lever) — 8 rows move, 4 better and 4 worse. Better:
+  //   placement → first use (the `basehome` lever), as a DEFAULT rather than the candidate that
+  //   shipped — 8 rows move, 4 better and 4 worse. Better:
   //   `basehome` 11→MATCH, `DecompressDma` 19→3 (the largest single move any lever here makes),
   //   `sub_802DFC8` 62→58 (exactly its v(C)), `sa2__sub_8083504` 70→68. Worse: `mixpoll` MATCH→2
   //   and `onepoll` MATCH→2 (both `value-home`), `sizebound` 16→20,
@@ -2890,16 +2908,28 @@ export const SYNTHETIC: SynthSpec[] = [
   //   parameter. Expect those two to flip WITH this family's rows, as confirmation, not collateral.
   //
   // WHERE A FIX WOULD GO. `packages/core/src/structure/structure.ts` (anchorConstCopies'
-  // single-claimant refusal, ~1766), `packages/core/src/l3/basecse.ts` (the `single-use` gate at
-  // :154 and the `[...inits, ...rest]` placement at :290), and `structure/analysis.ts` + `rank.ts`
-  // for the home itself — the three axes there are ONE capability gated on three incidental shapes,
-  // and this family's rows are exactly the cases none of the three admits. The per-site-signedness
-  // round that shares two of those files has LANDED (5df7ced) and this family is measured on top of
-  // it: all seven synthetic rows and both real rows score identically before and after, and its
-  // structure.ts hunks (577, 1648, 1976-2048, 2221) do not touch anchorConstCopies. Nothing here
-  // needs `l3/typing.ts`, `backend/cfamily.ts` or `rank.ts`'s `SIGN_CANDS` either: every `signed/`
-  // candidate scores identically to its `unsigned/` twin on all 24 of 802's and all 4 of 832's,
-  // so the signedness axis contributes zero on both real rows.
+  // single-claimant refusal, ~1766) and `structure/analysis.ts` + `rank.ts` for the home itself —
+  // the three axes there are ONE capability gated on three incidental shapes, and this family's
+  // remaining rows are exactly the cases none of the three admits. The two BASE rows are closed
+  // (`l3/basecse.ts`'s BASEFOLD_GATES carries the eligibility, `l3/sinkinit.ts` the placement,
+  // both as candidates), and what the ledger above still prices is the SYMBOL side of
+  // `single-use`. No GATE can decide that side, and the reason is the unit rather than the data:
+  // `Gate<BaseKey>` judges one key at a time, and the key the relaxation would admit on the two
+  // rows that move in opposite directions is the same key with the same facts —
+  // `a:gCallbackQueue 4 true`, one use at offset 1, `singleCell`, not `inLoop`, not
+  // `unfoldedOffset` — in BOTH symbol-map configurations, and both rows publish a map-ful winner.
+  // Their censuses are NOT identical (2 keys against 5 map-less, 2 against 3 map-ful), so a
+  // predicate over the whole census is a different question this has not answered. The open
+  // experiment is narrower than either: `UpdateWorldMapNodeAnim`'s two map-less-only keys are the
+  // only `reachedOnce` keys in the pair that are not `singleCell`, so refusing THOSE would admit
+  // `gCallbackQueue` alone on both rows — if 159→162 is carried by them and not by it, the win
+  // survives and the loss does not. Run that before assuming this side needs a candidate.
+  // The per-site-signedness round that shares two of those files has LANDED (5df7ced) and this
+  // family is measured on top of it: all seven synthetic rows and both real rows score identically
+  // before and after, and its structure.ts hunks (577, 1648, 1976-2048, 2221) do not touch
+  // anchorConstCopies. Nothing here needs `l3/typing.ts`, `backend/cfamily.ts` or `rank.ts`'s
+  // `SIGN_CANDS` either: every `signed/` candidate scores identically to its `unsigned/` twin on
+  // all 24 of 802's and all 4 of 832's, so the signedness axis contributes zero on both real rows.
   //
   // NO NEW TAG, and one was tried: `param-width`, on the theory that asmlift must consume
   // `FnProto.params`' typed list. Handing asmlift the exact declared types via

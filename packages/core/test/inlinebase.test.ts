@@ -8,7 +8,7 @@ import { expect, test } from 'vitest';
 import { T } from '../src/ir/types';
 import { materializeArgBases } from '../src/l3/argbase';
 import { type Expr, type SFn, type Stmt, exprChildren, stmtExprs } from '../src/l3/ast';
-import { hoistReusedGlobalBases } from '../src/l3/basecse';
+import { hoistBaseLocals } from '../src/l3/basecse';
 import { inlinableConstBases, inlineConstBases } from '../src/l3/inlinebase';
 import { nearBaseClusters } from '../src/l3/nearbase';
 import { hoistScopedBases } from '../src/l3/scopebase';
@@ -212,7 +212,7 @@ test('no base-hoist lever produces a local this one would eat', () => {
     retType: T.void(),
     body,
   });
-  const basecse = hoistReusedGlobalBases(
+  const basecse = hoistBaseLocals(
     bare([0, 1, 2].map((i) => ({ k: 'store', lval: cidx(0x40000d4, i), value: { k: 'const', value: 0 } }))),
   );
   const gx = (i: number): Expr => ({

@@ -18,7 +18,9 @@
 //   • capabilities.deviceRegisters → rank.ts's volatility tie-break: which of two byte-identical
 //     spellings publishes a `volatile` (a preference over the reader's C, never a qualifier the
 //     decompiler adds or removes).
-//   • compilerBehaviors.* → all consumed by the structurer (threaded via StructureOptions).
+//   • compilerBehaviors.* → mostly consumed by the structurer (threaded via StructureOptions).
+//     The exceptions are the two rank.ts reads off the target directly, because their consumers
+//     are L3 levers rather than the structurer: `nearBaseSpan` and `foldsConstAddrOffset`.
 //
 // `capabilities` (HARDWARE facts) vs `compilerBehaviors` (COMPILER canonicalization choices) are
 // deliberately separate bags: a new compiler must set its behaviors EXPLICITLY instead of
@@ -145,6 +147,16 @@ export interface TargetDescription {
     // neighbor absolute addresses within this many bytes may share one base local. Thumb's
     // `add rd, #imm8` reaches 255. Absent ⇒ the lever stands down for this target.
     nearBaseSpan?: number;
+    // Does this compiler CONSTANT-FOLD a constant SUBSCRIPT into the literal address it
+    // materializes for an inline constant-address access? agbcc does: `((u8 *)0x3001100)[3]`
+    // emits `.word 0x3001103` + `ldrb [r1]` where `u8 *p = (u8 *)0x3001100; p[3]` keeps
+    // `.word 0x3001100` + `ldrb [r1, #0x3]`. True is what lets an offset surviving into the memory
+    // operand say anything about the source at all; what l3/basecse.ts's `/basefold` admission
+    // does with it — and why that is a differ-refereed candidate rather than a default — is that
+    // file's header. A compiler opts in on its own compiled pair and never by inheriting: the MIPS
+    // and PPC lanes put the addend in the instruction by construction (`lui`/`%lo`, `lis`/`ori`),
+    // so a surviving offset carries no information there. Absent ⇒ the row is never offered.
+    foldsConstAddrOffset?: boolean;
     // Does this compiler EMIT a memory read in the block the source SPELLED it in? One direction
     // only: the def-block placement rule (StructureOptions.readsStayWhereWritten) re-spells a read
     // at the block the asm performed it in, which reproduces the asm iff nothing sinks a spelled
@@ -209,6 +221,7 @@ export const ARMV4T_AGBCC: TargetDescription = {
     preserveDivergentBranchSense: true,
     orderArgCopiesByComputation: true,
     nearBaseSpan: 255,
+    foldsConstAddrOffset: true,
     readsStayWhereWritten: true,
     switchAllowsBoundCase: true,
     switchArmsFollowLayout: true,

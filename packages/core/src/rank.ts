@@ -20,11 +20,12 @@ import { verify } from './ir/verify';
 import { materializeArgBases } from './l3/argbase';
 import type { LanguageBackend, SFn } from './l3/ast';
 import {
+  BASEFOLD_GATES,
   type BaseKey,
   LIVEBASE_BLOCK_GATES,
   LIVEBASE_GATES,
   admittedBases,
-  hoistReusedGlobalBases,
+  hoistBaseLocals,
 } from './l3/basecse';
 import { armDisjointCandidates, coalesceCandidates } from './l3/coalesce';
 import type { Gate } from './l3/gates';
@@ -37,6 +38,7 @@ import { pollGuards, pollReads } from './l3/pollguard';
 import { registerishSpellings } from './l3/regspell';
 import { reindexWalks } from './l3/reindex';
 import { hoistScopedBases } from './l3/scopebase';
+import { sinkInitsToFirstUse } from './l3/sinkinit';
 import { type SymbolRef, collectSymbolRefs } from './l3/symbol-refs';
 import { deviceVolatileClaims, volatilePtrLocals, volatileSubsetCandidates } from './l3/volatileptr';
 import { volatileValueLocals } from './l3/volatileval';
@@ -235,12 +237,12 @@ const createdLocals = (from: SFn, to: SFn): Set<string> => {
 /** The base-CSE ADMISSIONS `/livebase` offers the differ, widest first. WHICH of several numeric
  *  bases the source named is per-base knowledge the asm does not carry — a DMA register file wants
  *  one register held across the whole body while the IWRAM halfword beside it re-materializes — so
- *  each admission rides as its own candidate and the differ referees between them. Every
- *  `/livebase` product below fans over this table, so a new admission is one entry here, one gate
- *  table, and that table's line in the gate-contract roster — not nine hand-edited sites that can
- *  drift. A MIRROR admission (bind the scalar cells, leave the register file inline) is that, with
- *  the complementary predicate; it is never another entry in LIVEBASE_BLOCK_GATES, which can only
- *  reject more.
+ *  each admission rides as its own candidate and the differ referees between them. A new
+ *  admission is one entry here, one gate table, and that table's line in the gate-contract
+ *  roster — not nine hand-edited sites that can drift; whether it also fans over the `/livebase`
+ *  PRODUCTS below is the entry's own `pairings`. A MIRROR admission (bind the scalar cells, leave
+ *  the register file inline) is that, with the complementary predicate; it is never another entry
+ *  in LIVEBASE_BLOCK_GATES, which can only reject more.
  *
  *  WHAT BOUNDS IT. A row declines unless it binds a non-empty set of bases no earlier row already
  *  bound, and each product declines wherever its own lever does, so the list widens only where an
@@ -249,11 +251,48 @@ const createdLocals = (from: SFn, to: SFn): Set<string> => {
  *  inhabiting them all pays far more, and the fan is not always a win there: the mixpoll dataset
  *  entry prices one where the `/coalesce` pairing costs the most candidates of any and scores two
  *  points worse than going unpaired. It fans anyway because a pairing belongs to the LEVER, not to
- *  one of its admissions. Price a third admission on the corpus AND on a real function. */
-const LIVEBASE_ADMISSIONS: readonly { suffix: string; gates: readonly Gate<BaseKey>[] }[] = [
-  { suffix: '/livebase', gates: LIVEBASE_GATES },
-  { suffix: '/livebase-block', gates: LIVEBASE_BLOCK_GATES },
+ *  one of its admissions.
+ *
+ *  `/basefold` is the third admission and the only conditional one — `enumerateCandidates` appends
+ *  it where the target declares `compilerBehaviors.foldsConstAddrOffset`. It needs no second
+ *  "did the primary already carry this" test: `structureChecked` runs the DEFAULT hoist to its
+ *  fixpoint before any tree reaches here, so a key still admissible is by construction one
+ *  `BASECSE_GATES` rejected, and binding nothing is the whole of the decline.
+ *  Structure the corpus the way the committed path does — 1139 observations, every case in every
+ *  symbol-map configuration it has — and the exemption adds 6 keys over 5 observations, every one
+ *  of them map-less: with a map the pool constant lifts to a `gaddr` and the numeric clause stands
+ *  down. Two are ever offered the row, being the only two on a target that declares the fold —
+ *  `synthetic:basecell` and `kleod:RollRandomLevelVariant`, three keys between them. The other
+ *  three are `bg_mix` on the ido, kmc and mwcc lanes, where the target gate withholds it — not to
+ *  protect a score (no roster row can cost one; see LIVEBASE_BLOCK_GATES) but because
+ *  `unfoldedOffset` would be read as evidence on an instruction that carries the addend by
+ *  construction, where there is none.
+ *  On klonoa's `LoadBGTilemapData` — a checkout function rather than a row, so re-run it with the
+ *  ranked command in docs/ranked-repro.md — the admission declines on every structuring, leaving
+ *  that fan the size it was: 48000 candidates either way. All floors, though: the ranked path
+ *  structures each function many ways where this census builds one tree per observation. */
+interface BaseAdmission {
+  suffix: string;
+  gates: readonly Gate<BaseKey>[];
+  /** Whether the row joins the `/livebase ×` PAIRINGS below. Each of those products was added for
+   *  a row that demanded the joint spelling (see POLICY), and every demanding row so far is a
+   *  `/livebase` row — so a new admission joins them when a row demands it, not by roster
+   *  membership. */
+  pairings: boolean;
+}
+
+const LIVEBASE_ADMISSIONS: readonly BaseAdmission[] = [
+  { suffix: '/livebase', gates: LIVEBASE_GATES, pairings: true },
+  { suffix: '/livebase-block', gates: LIVEBASE_BLOCK_GATES, pairings: true },
 ];
+
+/** Narrower than either `/livebase` row, so it goes last: it keeps both placement heuristics and
+ *  exempts only `single-use`, and only for a base whose offset survived the compiler's fold. */
+const BASEFOLD_ADMISSION: BaseAdmission = {
+  suffix: '/basefold',
+  gates: BASEFOLD_GATES,
+  pairings: false,
+};
 
 const sameBases = (a: readonly string[], b: readonly string[]): boolean =>
   a.length === b.length && a.every((k, i) => k === b[i]);
@@ -830,20 +869,43 @@ export function enumerateCandidates(
     // where the prediction is wrong — the compiler holds ONE base register across stores, the
     // loop, and the read-back. The primary already carries every base those rules admit, so a
     // hoist-nothing result means the lever has nothing to add and declines.
-    // One family per LIVEBASE_ADMISSIONS row; a row binding exactly what an earlier row bound
-    // is the same spelling under a different label, so it declines for that too.
-    const livebases = LIVEBASE_ADMISSIONS.map(({ suffix, gates }, i) => {
+    // One family per admission row; a row binding exactly what an earlier row bound is the same
+    // spelling under a different label, so it declines for that too. `/basefold` joins the roster
+    // where the target declares the fold.
+    const admissions: readonly BaseAdmission[] = target.compilerBehaviors.foldsConstAddrOffset
+      ? [...LIVEBASE_ADMISSIONS, BASEFOLD_ADMISSION]
+      : LIVEBASE_ADMISSIONS;
+    // The CENSUS is a pure function of (this tree, that table) and every row asks for every
+    // earlier row's, from thunks each product re-invokes — quadratic in the roster, times the
+    // number of products. Memoized on the gate table's identity. The value is a list of key
+    // STRINGS whose two readers here only compare and count it, so a memo hit shares no tree.
+    const censuses = new Map<readonly Gate<BaseKey>[], readonly string[]>();
+    const census = (g: readonly Gate<BaseKey>[]): readonly string[] => {
+      const hit = censuses.get(g);
+      if (hit) {
+        return hit;
+      }
+      const v = admittedBases(sfn, g);
+      censuses.set(g, v);
+      return v;
+    };
+    const livebases = admissions.map(({ suffix, gates, pairings }, i) => {
       const hoist = (): SFn | null => {
-        const bound = admittedBases(sfn, gates);
-        const shadowed = LIVEBASE_ADMISSIONS.slice(0, i).some((a) => sameBases(bound, admittedBases(sfn, a.gates)));
-        return bound.length > 0 && !shadowed ? hoistReusedGlobalBases(sfn, gates) : null;
+        const bound = census(gates);
+        if (bound.length === 0) {
+          return null;
+        }
+        const shadowed = admissions.slice(0, i).some((a) => sameBases(bound, census(a.gates)));
+        return shadowed ? null : hoistBaseLocals(sfn, gates);
       };
       const volatiles = (): SFn | null => {
         const r = hoist();
         return r ? volatilePtrLocals(r, createdLocals(sfn, r)) : null;
       };
-      return { suffix, hoist, volatiles };
+      return { suffix, hoist, volatiles, pairings };
     });
+    // Every product below fans over the rows a demanding row earned, never the whole roster.
+    const paired = livebases.filter((l) => l.pairings);
     for (const { suffix, hoist, volatiles } of livebases) {
       respell(suffix, hoist);
       respell(`${suffix}/volatile`, volatiles);
@@ -852,7 +914,7 @@ export function enumerateCandidates(
     // The livebase × indexed PAIRINGS — the third sanctioned product kind (see POLICY):
     // row-demanded, and the joint spelling is reachable from neither lever alone (the
     // frame-copy + DMA shape).
-    for (const { suffix, hoist, volatiles } of livebases) {
+    for (const { suffix, hoist, volatiles } of paired) {
       respell(`${suffix}/indexed`, () => {
         const r = hoist();
         return r ? reindexWalks(r) : null;
@@ -860,6 +922,20 @@ export function enumerateCandidates(
       respell(`${suffix}/volatile/indexed`, () => {
         const r = volatiles();
         return r ? reindexWalks(r) : null;
+      });
+    }
+    // The livebase × sinkinit PAIRINGS — the same admission again: row-demanded
+    // (kleod:DecompressDma), and the joint spelling is reachable from neither lever alone. The
+    // bases whose placement moves the row are the ones only this lever's ablation binds, and
+    // `/sinkinit` alone reads the DEFAULT hoist's head, which does not carry them.
+    for (const { suffix, hoist, volatiles } of paired) {
+      respell(`${suffix}/sinkinit`, () => {
+        const r = hoist();
+        return r ? sinkInitsToFirstUse(r) : null;
+      });
+      respell(`${suffix}/volatile/sinkinit`, () => {
+        const r = volatiles();
+        return r ? sinkInitsToFirstUse(r) : null;
       });
     }
     // `/mulfirst` — product-first commutative sums (l3/mulfirst.ts): IDO/mwcc schedule the
@@ -877,7 +953,7 @@ export function enumerateCandidates(
     // neither lever alone (a neighbor-cell object and a multi-index MMIO block in one
     // function — each lever's constants are invisible to the other's model); the plain
     // sibling rides for symmetry with /livebase/indexed.
-    for (const { suffix, hoist, volatiles } of livebases) {
+    for (const { suffix, hoist, volatiles } of paired) {
       respell(`${suffix}/nearbase`, () => {
         const r = hoist();
         return r && nearSpan !== undefined ? nearBaseClusters(r, nearSpan) : null;
@@ -894,7 +970,7 @@ export function enumerateCandidates(
     // ARM-DISJOINT merges only: the demanding row's shared counter is that class, and the
     // span-model merges already ride the plain /coalesce label — pairing them too would
     // multiply candidates with no row behind it.
-    for (const { suffix, hoist, volatiles } of livebases) {
+    for (const { suffix, hoist, volatiles } of paired) {
       enumerate(`${suffix}/coalesce`, hoist, armDisjointCandidates);
       enumerate(`${suffix}/volatile/coalesce`, volatiles, armDisjointCandidates);
     }
@@ -902,6 +978,12 @@ export function enumerateCandidates(
     // park's `mov` lifts to pure SSA aliasing, so its position is unrecoverable and the
     // default order is emission's. Both orders are emitted; the differ referees.
     respell('/parkfirst', () => parkParamsFirst(sfn));
+    // `/sinkinit` — each leading pointer-base init sinks to its own first use (l3/sinkinit.ts):
+    // the base hoist places every init at the head of the body, which keeps the base live across
+    // everything above its first use and can cost a callee-saved register the original avoided.
+    // Which placement the source used is not derivable from the asm, so both are emitted and the
+    // differ referees.
+    respell('/sinkinit', () => sinkInitsToFirstUse(sfn));
     // the register-copy spelling (l3/regspell.ts): 0–3 variants (base; tail assign-back reusing
     // the dead value var; tail assign-back into a fresh var — the tail choice is allocator-
     // ambiguous, so both are ranked)
