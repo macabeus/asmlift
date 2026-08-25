@@ -2046,7 +2046,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // Both endpoints were taken against the ranked winner OF THAT RUN, and its label is not a handle
   // that survives: an axis suffix names a sense relative to the target's DEFAULT, so `/flip-join`
   // in it denotes the opposite spelling to the one it denotes now. The same command today reports
-  // `26880 candidate(s) scored, 0 dropped, best unsigned/flip-branch/defsite/merge-names/
+  // `40320 candidate(s) scored, 0 dropped, best unsigned/flip-branch/defsite/merge-names/
   // addr-home/uns-cmp/livebase-block/volatile/coalesce-v17-v10/initfirst/raw-globals: 395`. What
   // transfers between runs is the SHAPE of the edit, never the label.
   // The construct is cheap to carry when everything else is already wrong and a hard blocker once
@@ -2345,7 +2345,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // 0x0300347A / 0x030034A0 (IWRAM) and 0x040000D4 (the DMA register file) plain, and bind those
   // same five all `volatile`.
   // Not one bound the DMA base alone. With the gate, the narrower hoist IS LBG's ranked winner —
-  // `docs/ranked-repro.md`'s command, run either side of it:
+  // `docs/ranked-repro.md`'s command, run either side of it (an A/B against itself: the candidate
+  // counts below are that pair's, not a fan size to reproduce):
   //
   //   without  17152 candidate(s) scored, 0 dropped, best …/addr-home/livebase/volatile/
   //            coalesce-v20-v17/initfirst/raw-globals: 419
@@ -2901,12 +2902,14 @@ export const SYNTHETIC: SynthSpec[] = [
   // so the signedness axis contributes zero on both real rows.
   //
   // NO NEW TAG, and one was tried: `param-width`, on the theory that asmlift must consume
-  // `FnProto.params`' typed list (`protoArity` reads only its length). Handing asmlift the exact
-  // declared types via `--proto '{"sub_802DFC8":{"params":["s16","void *"],"returnsVoid":true}}'`
-  // returns the same ranked line and byte-identical stdout, while homing the cast with no declared
-  // type anywhere closes both real rows — so the gap is the home, not the types. The rows carry
-  // the typed list anyway, so both decompilers hold the same facts (the harness hands m2c the
-  // function's own prototype) and the rows start measuring the day the types are consumed.
+  // `FnProto.params`' typed list. Handing asmlift the exact declared types via
+  // `--proto '{"sub_802DFC8":{"params":["s16","void *"],"returnsVoid":true}}'` returns the same
+  // ranked line and byte-identical stdout, while homing the cast with no declared type anywhere
+  // closes both real rows — so the gap is the home, not the types. The list IS read now
+  // (raise/paramwidth.ts's `proto-width`), and it changes nothing here by construction: a
+  // declaration only refuses a narrowing it CONTRADICTS, and `s16` is what this row's own prologue
+  // extension already states. The rows carry the list anyway, so both decompilers hold the same
+  // facts — the harness hands m2c the function's own prototype.
   //
   // m2c, on the identical `ctx` asmlift receives, MATCHES `sxparam` and NONCOMPILES the other six
   // — for two reasons, neither of them this family, and it REACHES the construct in every case.

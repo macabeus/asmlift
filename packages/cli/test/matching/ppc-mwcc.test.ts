@@ -120,12 +120,12 @@ const S5_CASES: { sym: string; c: string; expect: string }[] = [
   {
     sym: 'extsb',
     c: 'int extsb(signed char x){ return (int)(signed char)x; }',
-    expect: 's32 extsb(s32 a0) {\n    return (s8)a0;\n}\n',
+    expect: 's32 extsb(s8 a0) {\n    return a0;\n}\n',
   },
   {
     sym: 'extsh',
     c: 'int extsh(short x){ return (int)(short)x; }',
-    expect: 's32 extsh(s32 a0) {\n    return (s16)a0;\n}\n',
+    expect: 's32 extsh(s16 a0) {\n    return a0;\n}\n',
   },
   {
     sym: 'clampand',

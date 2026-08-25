@@ -21,7 +21,7 @@ import { hoistReusedGlobalBases } from './l3/basecse';
 import { eliminateDeadStores } from './l3/dce';
 import { mergeCommonTails } from './l3/tailmerge';
 import { DEFAULT_IDIOM_PATTERNS, RewritePattern, applyPattern, dce, patternApplies } from './pattern/engine';
-import { type Prototypes, prototypesFromSymbols } from './proto';
+import { type FnProto, type Prototypes, prototypesFromSymbols } from './proto';
 import { RaiseUnsupportedError } from './raise/errors';
 import { foldEmptyLatches } from './raise/latch';
 import { type PreRecoveryPass, runPreRecovery } from './raise/pre-recovery';
@@ -126,7 +126,7 @@ function runTower(
 
   // (2.35–3.5) pre-recovery recognizers → type recovery → return-sinking, the ONE shared spine
   // (`raiseRecovered`) that trace.ts and the cli's rank.ts/report.ts also run.
-  raiseRecovered(fn, target);
+  raiseRecovered(fn, target, {}, prototypes[name]);
   const recovered = print(fn);
 
   // (4) structure: IR → neutral AST; boundary contract: no unresolved value leaked (strict), or
@@ -189,11 +189,16 @@ export interface RaiseHooks {
  *  of return-sinking does take away `br` predecessors it needs — the dominance gate is what makes
  *  that unreachable, since the blocks retsink wants are never back-edge sources. It goes last
  *  because that is where the CFG stops moving. */
-export function raiseRecovered(fn: Fn, target: TargetDescription, hooks: RaiseHooks = {}): void {
-  runPreRecovery(fn, target, (pass, result) => {
-    verify(fn);
-    hooks.afterPass?.(pass, result);
-  });
+export function raiseRecovered(fn: Fn, target: TargetDescription, hooks: RaiseHooks = {}, self?: FnProto): void {
+  runPreRecovery(
+    fn,
+    target,
+    (pass, result) => {
+      verify(fn);
+      hooks.afterPass?.(pass, result);
+    },
+    self,
+  );
   hooks.beforeRecover?.();
   recoverTypes(fn);
   verify(fn);

@@ -190,34 +190,39 @@ function traceTower(
   // type recovery → return-sinking, byte-identical to decompile()/decompileRanked by
   // construction. The trace's only additions are the entries, injected via the hooks
   // (each fires post-verify).
-  raiseRecovered(fn, target, {
-    afterPass: (pass, result) => {
-      // A pass with no registered strings still traces under a generic title: the traced tower
-      // must never crash (and so diverge from decompile()) just because a NEW pre-recovery pass
-      // landed before its trace entry did.
-      const t = PRE_RECOVERY_TRACE[pass.id] ?? {
-        stage: `stage:${pass.id}`,
-        title: () => `${pass.id} (pre-recovery pass)`,
-      };
-      trace.push({ id: t.stage, title: t.title(result), irDump: print(fn), verified: true });
+  raiseRecovered(
+    fn,
+    target,
+    {
+      afterPass: (pass, result) => {
+        // A pass with no registered strings still traces under a generic title: the traced tower
+        // must never crash (and so diverge from decompile()) just because a NEW pre-recovery pass
+        // landed before its trace entry did.
+        const t = PRE_RECOVERY_TRACE[pass.id] ?? {
+          stage: `stage:${pass.id}`,
+          title: () => `${pass.id} (pre-recovery pass)`,
+        };
+        trace.push({ id: t.stage, title: t.title(result), irDump: print(fn), verified: true });
+      },
+      afterRecover: () =>
+        trace.push({ id: 'stage:recover', title: 'Type recovery (in-place on IR)', irDump: print(fn), verified: true }),
+      afterRetsink: () =>
+        trace.push({
+          id: 'stage:retsink',
+          title: 'Return-sinking (tail-duplicate return-only merge)',
+          irDump: print(fn),
+          verified: true,
+        }),
+      afterLatchFold: () =>
+        trace.push({
+          id: 'stage:latchfold',
+          title: 'Empty-latch folding (splice out an SSA-emptied back-edge block)',
+          irDump: print(fn),
+          verified: true,
+        }),
     },
-    afterRecover: () =>
-      trace.push({ id: 'stage:recover', title: 'Type recovery (in-place on IR)', irDump: print(fn), verified: true }),
-    afterRetsink: () =>
-      trace.push({
-        id: 'stage:retsink',
-        title: 'Return-sinking (tail-duplicate return-only merge)',
-        irDump: print(fn),
-        verified: true,
-      }),
-    afterLatchFold: () =>
-      trace.push({
-        id: 'stage:latchfold',
-        title: 'Empty-latch folding (splice out an SSA-emptied back-edge block)',
-        irDump: print(fn),
-        verified: true,
-      }),
-  });
+    prototypes[name],
+  );
 
   // (4) structure → neutral AST; boundary contract: no unresolved value leaked (strict) or
   // spelled as a loud ASMLIFT_ERROR marker (annotate) — same onGap lever as decompile()

@@ -1408,7 +1408,17 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       paramBlock.set(pv, blk);
     }
   }
+  // AND THE NAME MUST BE WIDE ENOUGH TO HOLD `p`. Every edge into `B` copies its argument into
+  // `name`, which is a C assignment through `name`'s declaration — so a carrier declared narrower
+  // than the merged value TRUNCATES it. The only narrow carrier is a parameter raise/paramwidth.ts
+  // declared: its width is its signature type and cannot widen to suit a later claimant, and `u8 a0`
+  // adopted by a merge of `a0` with `0x1234` emits `a0 = 4660`, which agbcc compiles to 52.
+  // Register-width carriers are unaffected — a pointer or an `unknown` is a full word.
+  const carrierWidth = (t: IrType | undefined): number => (t?.kind === 'int' ? t.width : 32);
   const canTakeName = (p: Value, B: Block, name: string, pureAlias = false): boolean => {
+    if (carrierWidth(varType.get(name)) < carrierWidth(p.type)) {
+      return false;
+    }
     if (B.params.some((q) => q !== p && varName.get(q) === name)) {
       return false;
     }

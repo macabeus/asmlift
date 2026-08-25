@@ -102,8 +102,8 @@ describe('the signedness axis declines where the pin writes nothing', () => {
 // WHY THE FAN CANNOT BE THINNED.
 //
 // Where the pin changes the tree the axis doubles the candidate set, and much of that set is the
-// same program twice: klonoa's LoadBGTilemapData enumerates 26880 candidates as 13440 twin pairs,
-// every pair tying in score, and the whole fan compiles to 6000 distinct objects. The recurring
+// same program twice: klonoa's LoadBGTilemapData enumerates 40320 candidates as 20160 twin pairs,
+// every pair tying in score. The recurring
 // proposal is a predicate over the RENDERED TYPE — does any expression's type move under the pin?
 // — that would drop the redundant spelling of each pair before it is compiled. It cannot exist,
 // and the design space is a two-point lattice with nothing between the points. These tests pin

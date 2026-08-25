@@ -5,7 +5,7 @@
 import { describe, expect, test } from 'vitest';
 
 import { decompile } from '../src/pipeline';
-import { protoArity, prototypesFromSymbols } from '../src/proto';
+import { declaredWidth, protoArity, prototypesFromSymbols } from '../src/proto';
 import type { SymbolInfo, SymbolMap } from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
 
@@ -22,6 +22,33 @@ describe('protoArity', () => {
     expect(protoArity(undefined)).toBeUndefined();
     // malformed (a bare string, not a list) → undefined (fall back), NOT "u8".length === 3.
     expect(protoArity({ params: 'u8' as unknown as string[] })).toBeUndefined();
+  });
+});
+
+describe('declaredWidth', () => {
+  test("reads asmlift's own spellings, the C89 base types, and any pointer", () => {
+    expect(['u8', 's8', 'char', 'unsigned char', 'signed char'].map(declaredWidth)).toEqual([8, 8, 8, 8, 8]);
+    expect(['u16', 's16', 'short', 'unsigned short', 'short int'].map(declaredWidth)).toEqual([16, 16, 16, 16, 16]);
+    expect(['u32', 's32', 'int', 'unsigned', 'signed', 'long', 'unsigned long int'].map(declaredWidth)).toEqual([
+      32, 32, 32, 32, 32, 32, 32,
+    ]);
+    expect(['void *', 'struct Entity *', 'const u8 *', 'char**'].map(declaredWidth)).toEqual([32, 32, 32, 32]);
+    expect(declaredWidth('const int')).toBe(32);
+    expect(declaredWidth('  short   int ')).toBe(16);
+  });
+
+  test('a spelling it cannot read is NO OPINION, never a width', () => {
+    // The narrowing consumer treats undefined as "the header said nothing", so guessing here would
+    // veto a sound inference on a project typedef.
+    expect(['Direction', 'struct Entity', 'float', 'double', 'u64', 's24', ''].map(declaredWidth)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ]);
   });
 });
 

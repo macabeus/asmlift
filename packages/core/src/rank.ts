@@ -271,14 +271,19 @@ const NO_PIN_KINDS = new Set(['ptr', 'struct', 'array']);
 /** Pin every SCALAR entry param (index not in `ptrIdx`) to the candidate signedness, before
  *  recovery. Answers whether any param was PINNABLE — not whether its type moved: which of the
  *  two passes writes first is an accident of enumeration order, and the arms differ exactly where
- *  a param can be written at all. */
+ *  a param can be written at all.
+ *
+ *  A param NARROWED by raise/paramwidth.ts is not pinnable: the extension it was narrowed at states
+ *  the signedness as well as the width — agbcc's shift pair by its `asr`/`lsr`, PPC's `extsb`/`extsh`
+ *  by the opcode — so there is no question for the axis to put to the differ, and pinning would
+ *  widen it back to 32 bits. */
 function pinScalarParams(fn: Fn, signed: boolean, ptrIdx: Set<number>): boolean {
   let pinnable = false;
   fn.blocks[0].params.forEach((p, i) => {
     if (ptrIdx.has(i)) {
       return;
     }
-    if (p.type.kind === 'unknown' || p.type.kind === 'int') {
+    if (p.type.kind === 'unknown' || (p.type.kind === 'int' && p.type.width === 32)) {
       pinnable = true;
       p.type = signed ? T.s(32) : T.u(32);
     }
@@ -515,7 +520,7 @@ export function enumerateCandidates(
   const probe = frontend.lift(name, asm, target, prototypes, opts.asmData, opts.symbols);
   verify(probe);
   applyIdiomPatterns(probe, target, opts.patterns);
-  runPreRecovery(probe, target, () => verify(probe));
+  runPreRecovery(probe, target, () => verify(probe), prototypes[name]);
   recoverTypes(probe);
   const ptrIdx = new Set<number>(probe.blocks[0].params.flatMap((p, i) => (NO_PIN_KINDS.has(p.type.kind) ? [i] : [])));
   // Access facts for name-only symbol declarations (see bareGlobalAccessFacts) — derived once
@@ -975,11 +980,16 @@ export function enumerateCandidates(
           // The shared tower spine (pipeline.ts) — the candidate's ONE difference from decompile()
           // is the signedness pin, injected between pre-recovery and recoverTypes via the
           // beforeRecover hook.
-          raiseRecovered(fn, target, {
-            beforeRecover: () => {
-              pinnable = pinScalarParams(fn, cand.signed, ptrIdx) || pinnable;
+          raiseRecovered(
+            fn,
+            target,
+            {
+              beforeRecover: () => {
+                pinnable = pinScalarParams(fn, cand.signed, ptrIdx) || pinnable;
+              },
             },
-          });
+            prototypes[name],
+          );
         } catch (e) {
           if (!lv.narrow) {
             throw e; // the base lift keeps its behavior: a raising failure aborts the row

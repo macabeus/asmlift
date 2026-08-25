@@ -147,8 +147,8 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
 
   **An axis's 2× is intrinsic, and cannot be bought back by predicting which half is redundant.**
   The signedness pin is the worked example, because it is the axis that fires most broadly:
-  `LoadBGTilemapData`'s 26880 candidates are 13440 twin pairs, every one of which ties in score, and
-  the fan as a whole compiles to 6000 distinct objects. The recurring proposal is to drop the
+  `LoadBGTilemapData`'s 40320 candidates are 20160 twin pairs, every one of which ties in score. The
+  fan grows with every axis admitted, so quote your own `[ranked]` line. The recurring proposal is to drop the
   redundant spelling of each pair by asking the RENDERED TYPE which one it is, and that design space
   turns out to be two points with nothing between them. Compare the pin's effect at every node
   _including_ the `var` leaves and the predicate is sound — and is exactly "no pinned param is read
