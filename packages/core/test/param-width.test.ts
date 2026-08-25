@@ -82,6 +82,17 @@ describe('a parameter extended in the prologue is declared at that width', () =>
     expect(emit(PROLOGUE_TWO_U8)).toContain('void f(u8 a0, u8 a1, s32 * a2)');
   });
 
+  test('a materialization among the extensions does not end the prologue', () => {
+    // `s32 mask = 0;` above the chain: sa3's sub_802DFC8 puts `mov r5, #0x0` between the frame
+    // setup and its `lsl/asr`, and a constant depends on nothing, so its position says nothing
+    // about where the extension sits.
+    const ir = PROLOGUE_S16.replace(
+      '  %2: unk32 = sext %0 {width=16}',
+      '  %9: unk32 = const {value=0}\n  %2: unk32 = sext %0 {width=16}',
+    );
+    expect(run(ir).n).toBe(1);
+  });
+
   test('the shift kind picks the signedness and the shift amount the width', () => {
     const at = (op: string, width: number) =>
       run(PROLOGUE_S16.replace('sext %0 {width=16}', `${op} %0 {width=${width}}`)).fn.blocks[0].params[0].type;
