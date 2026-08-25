@@ -67,6 +67,22 @@ export const JUDGEMENT_FLOOR: Record<string, (body: string, asm: string, whole: 
   // the diff turns on stays a human call.
   'stack-addr': (b) => /(?:^|[^\w)\]&])&(?!&)\s*[A-Za-z_]/.test(b),
 
+  // The necessary condition is a counted loop whose induction variable is DECLARED narrow —
+  // `s16 i; … for (i = 0; …)`. BOTH halves are required, because either alone is a different tag:
+  // a narrow local that is not a counter is `narrow`, and a wide counter is nothing at all. Which
+  // codegen consequence the row turns on — the re-materialised sign extension, or the pressure the
+  // extra live raw value adds — stays a human call.
+  'narrow-counter': (b) => {
+    const ctrs = [...b.matchAll(/\bfor\s*\(\s*(\w+)\s*=/g), ...b.matchAll(/(\w+)\s*=\s*0\s*;\s*do\b/g)].map(
+      (m) => m[1],
+    );
+    return ctrs.some((v) =>
+      new RegExp(
+        `(?:^|[;{}(,])\\s*(?:unsigned\\s+|signed\\s+)?(?:s8|u8|s16|u16|char|short)\\s+[\\w\\s,*]*\\b${v}\\b\\s*[,;=)]`,
+      ).test(b),
+    );
+  },
+
   // The necessary condition is a counted loop whose own init clause zeroes the counter —
   // `for (i = 0; …)`. That is the only spelling whose zero-trip guard the compiler can emit
   // init-first, so a row claiming the tag must contain one. WHICH of the two guard spellings the
