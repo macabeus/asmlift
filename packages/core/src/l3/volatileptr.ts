@@ -25,10 +25,7 @@
 // The symbol map owns a declared global's volatility, and a mixed-feed local would read the
 // mapped global through a volatile view the map never granted. No qualifying local ⇒ decline
 // (null), so the lever never emits a duplicate of the primary.
-import { type Expr, type SFn, type Stmt, mapExprChildren, walkExprs } from './ast';
-
-const isNumericAddr = (e: Expr): boolean =>
-  (e.k === 'const' && e.value !== 0) || (e.k === 'cast' && e.to.kind === 'ptr' && isNumericAddr(e.e));
+import { type Expr, type SFn, type Stmt, mapExprChildren, rematerializableAddress, walkExprs } from './ast';
 
 const exprHas = (e: Expr, pred: (x: Expr) => boolean): boolean => {
   if (pred(e)) {
@@ -127,7 +124,7 @@ function eligibility(sfn: SFn): (l: SFn['locals'][number]) => boolean {
   const numericFed = new Set<string>();
   const tainted = new Set<string>();
   for (const a of assigns) {
-    if (isNumericAddr(a.value)) {
+    if (rematerializableAddress(a.value)) {
       numericFed.add(a.name);
     }
     if (exprHas(a.value, (x) => x.k === 'addr')) {

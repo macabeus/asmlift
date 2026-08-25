@@ -1,8 +1,9 @@
 // The `/volatile` lever (l3/volatileptr.ts): a pointer local assigned a numeric address is
 // re-declared as pointing to volatile data. The gate conditions are what these tests pin:
-// nonzero numeric addresses only (0 is NULL), a symbol feed vetoes — bare `&gSym`, an interior
-// address, or a copy of a vetoed local alike — and no qualifying local means DECLINE, never a
-// duplicate candidate.
+// a rematerializable numeric address only — any encoding of one, since which the compiler picked
+// is not a property of the source, and a bare `0` is NULL rather than an address — a symbol feed
+// vetoes (bare `&gSym`, an interior address, or a copy of a vetoed local alike), and no qualifying
+// local means DECLINE, never a duplicate candidate.
 import { expect, test } from 'vitest';
 
 import { T } from '../src/ir/types';
@@ -170,4 +171,40 @@ test('above three qualifiers the arm caps out empty', () => {
   const four: SFn['locals'] = [0, 1, 2, 3].map((i) => ({ name: `p${i}`, type: T.ptr(T.s(32)) }));
   const inits = [0, 1, 2, 3].map((i) => init(`p${i}`, 0x4000000 + i * 4));
   expect(volatileSubsetCandidates(fn(four, inits))).toEqual([]);
+});
+
+test('a SHIFT-ENCODED hardware base qualifies like a pool word — same address, agbcc’s choice of encoding', () => {
+  const s = fn(
+    [{ name: 'p', type: T.ptr(T.u(16)) }],
+    [
+      {
+        k: 'assign',
+        name: 'p',
+        value: {
+          k: 'cast',
+          to: T.ptr(T.u(16)),
+          e: { k: 'bin', op: '<<', l: { k: 'const', value: 192 }, r: { k: 'const', value: 19 } },
+        },
+      },
+    ],
+  );
+  expect(volatilePtrLocals(s)?.locals[0].pointeeVolatile).toBe(true);
+});
+
+test('a folded-to-zero base still qualifies — the test is on the literals, not the value', () => {
+  const s = fn(
+    [{ name: 'p', type: T.ptr(T.u(16)) }],
+    [
+      {
+        k: 'assign',
+        name: 'p',
+        value: {
+          k: 'cast',
+          to: T.ptr(T.u(16)),
+          e: { k: 'bin', op: '-', l: { k: 'const', value: 5 }, r: { k: 'const', value: 5 } },
+        },
+      },
+    ],
+  );
+  expect(volatilePtrLocals(s)?.locals[0].pointeeVolatile).toBe(true);
 });

@@ -1797,15 +1797,14 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       const d = defs.get(v);
       return paramBlock.get(v) ?? (d === undefined ? undefined : opBlock.get(d));
     };
-    // A loop whose body is entered ONLY through its header, from ONE preheader — what makes
-    // "every write to the name outside the anchored one is a back-edge copy" statable: the
-    // premise is over ONE entry edge, and a body block with an outside predecessor takes a copy
-    // into a body param from outside too. The single-preheader half is CONSERVATIVE: two entry
-    // consts anchored at their own def sites would still order correctly, and this refuses the
-    // shape rather than reasoning about it.
-    const singleEntry = (nl: NaturalLoop): boolean =>
-      nl.forwardPreds.length === 1 &&
-      [...nl.body].every((b) => b === nl.header || (preds.get(b) ?? []).every((r) => nl.body.has(r)));
+    // A loop entered from ONE preheader — what makes "every write to the name outside the anchored
+    // one is a back-edge copy" statable: the premise is over ONE entry edge. CONSERVATIVE: two
+    // entry consts anchored at their own def sites would still order correctly, and this refuses
+    // the shape rather than reasoning about it. The other half of "entered only through its
+    // header" needs no test — `analyzeLoops` builds the body as the backward closure from the
+    // latches with the header already in it (loops.ts), so a body block's predecessors are all in
+    // the body by construction.
+    const singleEntry = (nl: NaturalLoop): boolean => nl.forwardPreds.length === 1;
     for (const M of fn.blocks) {
       if (M === entry || M.params.length === 0) {
         continue;

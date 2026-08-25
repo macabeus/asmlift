@@ -451,6 +451,45 @@ export function mapStmtExprs(s: Stmt, f: (e: Expr) => Expr): Stmt {
 
 /** Whether the tree contains a node with an EFFECT no re-ordering may move: a call, or a marker
  *  standing in for an unmodelled instruction (annotate mode). */
+/** An address the target can REMATERIALIZE: a constant expression, reading no variable and no
+ *  memory. Which ENCODING the compiler picked for it is not a property of the source — agbcc
+ *  spells a pool word `(s32 *)33569456` but a shift-encodable one `(s32 *)(128 << 18)`, and every
+ *  GBA hardware region (EWRAM 0x2000000, I/O 0x4000000, VRAM 0x6000000 …) takes the second form —
+ *  so both must reach the same admission or the whole MMIO/VRAM fill family declines on its
+ *  address. A bare `(T *)0` is excluded — a null base is not a walk — but the test is on the
+ *  LITERALS the expression mentions, not on the value they fold to, so `(T *)(5 - 5)` passes.
+ *  Folding would need a constant evaluator no consumer has another use for, and both consumers
+ *  keep the expression verbatim, so no decision downstream reads the value.
+ *
+ *  Two ask it: the walk re-index (l3/reindex.ts) about a walk base, and the `volatile` qualifier
+ *  (l3/volatileptr.ts) about what feeds a pointer local. They must agree — a MMIO fill whose base
+ *  one admits and the other refuses can be re-indexed but never qualified, so the paired
+ *  `/indexed/volatile` spelling is unreachable at exactly the hardware addresses it is for. */
+export function rematerializableAddress(e: Expr): boolean {
+  let nonZero = false;
+  let ok = true;
+  const visit = (x: Expr): void => {
+    switch (x.k) {
+      case 'const':
+        nonZero ||= x.value !== 0;
+        break;
+      case 'cast':
+      case 'bin':
+      case 'un':
+        break;
+      default:
+        ok = false; // var, addr, index, field, call, marker
+        return;
+    }
+    mapExprChildren(x, (c) => {
+      visit(c);
+      return c;
+    });
+  };
+  visit(e);
+  return ok && nonZero;
+}
+
 export function exprHasEffect(e: Expr): boolean {
   return e.k === 'call' || e.k === 'marker' || exprChildren(e).some(exprHasEffect);
 }
