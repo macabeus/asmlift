@@ -409,7 +409,8 @@ describe('the block admission is WIRED into enumeration', () => {
   const cands = candsFor('mixpoll');
 
   test('the narrower hoist reaches the candidate list, plain and volatile', () => {
-    expect(cands.filter((x) => x.label.startsWith('signed/livebase')).map((x) => x.label)).toEqual([
+    // the roster's own four labels — the pairings that ride on them are their own tests' business
+    expect(cands.filter((x) => /^signed\/livebase(-block)?(\/volatile)?$/.test(x.label)).map((x) => x.label)).toEqual([
       'signed/livebase',
       'signed/livebase/volatile',
       'signed/livebase-block',

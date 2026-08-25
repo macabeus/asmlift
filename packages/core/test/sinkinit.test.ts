@@ -1,8 +1,12 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
 import { sinkInitsToFirstUse } from '../src/l3/sinkinit';
+import { enumerateCandidates } from '../src/rank';
+import { ARMV4T_AGBCC } from '../src/target';
 
 const U8P = T.ptr(T.int(8, false));
 const c = (value: number): Expr => ({ k: 'const', value });
@@ -82,5 +86,25 @@ describe('sinking a leading base init to its first use', () => {
 
   test('no leading init at all: the lever declines', () => {
     expect(sinkInitsToFirstUse(fn([plain(), init('p0', 0x3001100), read('p0', 1)]))).toBeNull();
+  });
+});
+
+describe('the /livebase pairing is WIRED into enumeration', () => {
+  // `corpus/agbcc-mixpoll.s` is synthetic:mixpoll:agbcc — an MMIO poll whose bases the DEFAULT
+  // hoist refuses outright, so the tree this lever reads on its own carries no init at all.
+  const labels = enumerateCandidates(
+    'mixpoll',
+    readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-mixpoll.s'), 'utf8'),
+    ARMV4T_AGBCC,
+    { prototypes: { mixpoll: { returnsVoid: true } } },
+  ).map((x) => x.label);
+
+  test('the joint spelling reaches the differ, over the whole admission roster', () => {
+    expect(labels).toContain('signed/livebase/sinkinit');
+    expect(labels).toContain('signed/livebase-block/volatile/sinkinit');
+  });
+
+  test('and it is reachable no other way: the plain lever finds nothing to sink here', () => {
+    expect(labels.filter((l) => l.includes('sinkinit') && !l.includes('livebase'))).toEqual([]);
   });
 });

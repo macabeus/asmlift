@@ -866,6 +866,20 @@ export function enumerateCandidates(
         return r ? reindexWalks(r) : null;
       });
     }
+    // The livebase × sinkinit PAIRINGS — the same admission again: row-demanded
+    // (kleod:DecompressDma), and the joint spelling is reachable from neither lever alone. The
+    // bases whose placement moves the row are the ones only this lever's ablation binds, and
+    // `/sinkinit` alone reads the DEFAULT hoist's head, which does not carry them.
+    for (const { suffix, hoist, volatiles } of livebases) {
+      respell(`${suffix}/sinkinit`, () => {
+        const r = hoist();
+        return r ? sinkInitsToFirstUse(r) : null;
+      });
+      respell(`${suffix}/volatile/sinkinit`, () => {
+        const r = volatiles();
+        return r ? sinkInitsToFirstUse(r) : null;
+      });
+    }
     // `/mulfirst` — product-first commutative sums (l3/mulfirst.ts): IDO/mwcc schedule the
     // independent operand's load above the product's mflo/mullw, so def order re-spells a
     // product-first source as load-first. Both orders are emitted; the differ referees.
