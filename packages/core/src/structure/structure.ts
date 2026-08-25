@@ -1766,8 +1766,16 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   //     the body;
   //   - another anchored const of the same variable lies on a path from this one to this one's
   //     edge (the later write would clobber this arg's value; both stay at their edges instead).
-  const anchoredAt = new Map<Op, { name: string; arg: Value }[]>();
+  //
+  // What the list does NOT cover is whether the def site is RENDERED at all; an anchor that lands
+  // in an elided block declines the whole function instead, at the postcondition after the render.
+  type AnchoredWrite = { name: string; arg: Value };
+  const anchoredAt = new Map<Op, AnchoredWrite[]>();
   const suppressedArgs = new Map<object, Set<number>>();
+  /** Every anchored write `sideEffects` actually rendered. The other half of the postcondition
+   *  below: suppressing an edge copy is a PROMISE that the def site emits the write instead, and
+   *  only the render can report that the promise was kept. */
+  const anchorsEmitted = new Set<AnchoredWrite>();
   if (anchorConstCopies) {
     const nameCount = new Map<string, number>();
     for (const n of varName.values()) {
@@ -2624,6 +2632,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // a merge copy anchored at this const's original position (anchorConstCopies, above)
       for (const a of anchoredAt.get(op) ?? []) {
         out.push({ k: 'assign', name: a.name, value: expr(a.arg) });
+        anchorsEmitted.add(a);
       }
     }
     return out;
@@ -3470,6 +3479,25 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   };
 
   const body = recognizeForLoops(structureRegion(entry, null));
+  // THE OBLIGATION `anchorConstCopies` CANNOT DISCHARGE ON ITS OWN, checked now that the render is
+  // complete. Anchoring is two edits that must both land: `suppressedArgs` DELETES a write from its
+  // edge, and `anchoredAt` owes it back at the const's def site. Its refusal conditions establish
+  // that the def block DOMINATES every suppressed edge — but dominating a block is not being
+  // rendered, and a block whose every op renders inline gets no statement position at all. A loop's
+  // claimed pure preheader is one (LoopInfo.preheader: the guarded-loop emitter takes its EDGE args
+  // and never structures it), and there is no reason to believe it is the last. A promise half-kept
+  // leaves the merge variable read where nothing wrote it — the one wrongness the byte differ
+  // rewards rather than catches, since the candidate compiles, scores, and can win.
+  for (const writes of anchoredAt.values()) {
+    for (const w of writes) {
+      if (!anchorsEmitted.has(w)) {
+        throw new StructureError(
+          `cannot structure '${fn.name}': the merge copy into '${w.name}' was suppressed from its ` +
+            `edge for a def-site anchor that no rendered position emitted`,
+        );
+      }
+    }
+  }
   // THE OBLIGATION `undefCarriesNothing` CANNOT DISCHARGE ON ITS OWN, checked now that both records
   // are complete. That test reads each write site off `paramBlock`/`opBlock`, and a sunk pre-update
   // exit copy is written somewhere else than either map says. What keeps them apart today is

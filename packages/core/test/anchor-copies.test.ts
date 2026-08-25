@@ -303,3 +303,46 @@ const OUTSIDE_CLAIMANT = `fn outside {
 test('a name claimed by a value outside the loop body declines', () => {
   expect(emit(OUTSIDE_CLAIMANT, true)).toBe(emit(OUTSIDE_CLAIMANT, false));
 });
+
+// A guarded self-loop whose entry const sits in the PURE PREHEADER — the shape a compiler's
+// loop-invariant motion emits (`lui/ori` of the walk base parked between the guard and the
+// header). Loop recovery CLAIMS that block and never structures it: its defs render inline and
+// its EDGE args carry the inits (LoopInfo.preheader). So the anchor has no rendered position,
+// while the edge copy it replaced is already suppressed — the merge variable would be read where
+// nothing ever wrote it. `synthetic:ucmp:gcc2.7.2kmc` is the corpus inhabitant, and klonoa's
+// `ConfigureInterruptsForGameplay` the second.
+const PREHEADER_ANCHOR = `fn prehdranchor {
+^bb0(%0: s32):
+  %1: u16* = const {value=50331648}
+  %2: s32 = load %1 {off=4168, signed=false, width=2}
+  %3: s32 = const {value=0}
+  %4: u32 = icmp_eq %2, %3
+  cond_br %4, ^bb3(), ^bb1()
+^bb1():
+  %5: u16* = const {value=50335816}
+  %6: u8* = const {value=50339840}
+  br ^bb2(%6, %3)
+^bb2(%7: u8*, %8: s32):
+  %9: s32 = load %7 {off=4096, signed=false, width=1}
+  store %7, %9 {off=0, width=1}
+  %10: u32 = load %5 {off=0, signed=false, width=2}
+  %11: s32 = const {value=1}
+  %12: u32 = add %8, %11
+  %13: u32 = icmp_ult %12, %10
+  %14: u8* = add %7, %11
+  cond_br %13, ^bb2(%14, %12), ^bb3()
+^bb3():
+  ret
+}
+`;
+
+test('an entry const anchored into a loop’s pure preheader declines loud', () => {
+  expect(() => emit(PREHEADER_ANCHOR, true)).toThrow(
+    /suppressed from its edge for a def-site anchor that no rendered position emitted/,
+  );
+});
+
+test('the same const under plain /defsite keeps its edge copy', () => {
+  expect(emit(PREHEADER_ANCHOR, true, false)).toContain('v0 = (u8 *)50339840;');
+  expect(emit(PREHEADER_ANCHOR, false)).toContain('v0 = (u8 *)50339840;');
+});
