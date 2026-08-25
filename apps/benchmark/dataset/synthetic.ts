@@ -2469,6 +2469,256 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'void signguard(s32 t);',
     proto: { signguard: { returnsVoid: true } },
   },
+
+  // ── NARROW LOOP COUNTERS, AND THE ADDRESS SPELLING THEY UNLOCK ────────────────────────
+  // A counter declared `s16 i` is not a cosmetic choice: on agbcc it CHANGES WHICH LOOP THE
+  // COMPILER EMITS. Compiled pairs, this agbcc, `-mthumb-interwork -O2 -fhex-asm
+  // -fprologue-bugfix`:
+  //     s32 i, `s += i`      : mov r1,#0x0 / add r0,r0,r1 / add r1,r1,#0x1        (no extension)
+  //     s16 i, `s += i`      : lsl r0,r1,#0x10 / asr r0,r0,#0x10 / add r2,r2,r0 /
+  //                            add r0,r0,#0x1 / lsl / lsr r1 / asr r0             (`widecnt`,
+  //                                                                                `narrowcnt`)
+  // The sign extension is materialised ONCE and reused for both the use and the increment, and
+  // the raw halfword is kept live beside it.
+  //
+  // WHY THE INDEX SURVIVES. Not register pressure: with a WIDE counter and five extra live
+  // accumulators (enough that agbcc allocates r8 and pushes it) agbcc still eliminates the
+  // induction variable and emits the pointer walk `add r1,r1,#0x2 / add r3,r3,#0x2`. It is the
+  // RTL SHAPE of the counter's write-back, in two steps that are in the compiler:
+  //   1. `gcc/thumb.h:344` PROMOTE_MODE forces `UNSIGNEDP = 1` for EVERY sub-word integer mode,
+  //      so a declared `s16` local is kept ZERO-extended in its SImode home and the sign-extended
+  //      value is re-derived beside it — the `lsr r3,r1,#0x10` next to `asr r1,r1,#0x10` in
+  //      `membnarrow`'s target. The write-back is therefore `(lshiftrt (ashift (plus …) 16) 16)`.
+  //   2. `gcc/loop.c` `basic_induction_var` has a case for SIGN_EXTEND (5876) and one for
+  //      ASHIFTRT (5880); its own comment at 5756-5762 excludes ZERO_EXTEND on purpose
+  //      ("overflows … are defined … So we only check for SIGN_EXTEND and not ZERO_EXTEND").
+  //      LSHIFTRT has no case and falls to `default: return 0` (5902). No BIV ⇒ no strength
+  //      reduction ⇒ the indexed address survives, and only THEN does the base spelling decide
+  //      what agbcc hoists.
+  // Instrumented rather than read, by compiling the two RTL shapes with the SAME `s32` local over
+  // the same range, so declared width, liveness and pressure are all held fixed:
+  //     i = ((i + 1) << 16) >> 16   (ASHIFTRT) → add r1,r1,#0x2 / add r2,r2,#0x2 — IV ELIMINATED
+  //     i = (s32)(u16)(i + 1)       (LSHIFTRT) → lsl r0,r2,#0x1 / add r1,r4,r0   — index SURVIVES
+  // `u16 i` blocks the elimination the same way — PROMOTE_MODE unsigns both, so both reach the same
+  // LSHIFTRT — but only `s16` also pays for the materialised sign extension: swap `membnarrow`'s
+  // counter to `u16` and the object is 17 rows from its own `s16` target.
+  //
+  // So the two gaps compose in one direction only: with a wide counter asmlift MATCHES the
+  // member-array walk (`membwalk`, agbcc), and it is the narrow counter that exposes the address
+  // spelling. asmlift has NO narrow local type — over the 856 base rows its candidates declare no
+  // scalar local but `s32`/`u32` — so it spells the counter `s32 v0` plus `(s16)v0` at every use
+  // and `v0 = (u16)((s16)v0 + 1)` for the increment, which is the LSHIFTRT shape; and it renders
+  // the walked region as arithmetic on a cast pointer, `(a0 + 2)[(s16)v0]`, where the source's
+  // `d->name[i]` gives agbcc a loop-invariant base to hoist.
+  //
+  // WHICH LEVER IS WORTH WHAT. Every number is measured on THAT ROW'S OWN target, starting from
+  // asmlift's OWN published winner for the row and changing ONE axis — never by subtracting two
+  // rows' scores, which are two different functions with two different targets:
+  //     L1 = give the local a narrow type (`s16 v0`, casts dropped) instead of `s32 v0` + `(s16)v0`
+  //     L2 = render the walked region as an array MEMBER of a synthesized struct
+  //                   asmlift  L1 alone  L2 alone  L1+L2
+  //     widecnt        MATCH      —         —        —    CONTROL: wide counter, no memory
+  //     membwalk       MATCH      —         —        —    CONTROL: the member walk under a WIDE
+  //                                                       counter — the address spelling costs
+  //                                                       nothing on its own, so a fix for it must
+  //                                                       not be credited with a narrow-counter row
+  //     narrowcnt          1   0 MATCH      —        —    L1 alone, no memory
+  //     basefold          11   0 MATCH      —        —    L1 alone, WITH memory traffic
+  //     membnarrow        17     11        16     0 MATCH L1 + L2: the hoisted preheader base and
+  //                                                       the base-first index add
+  //     sibwalk           52     25        33     0 MATCH L1 + L2 over three sibling walks under one
+  //                                                       `s16` counter; also the guard below
+  // L1 IS THE LEVER TO BUILD FIRST. Alone it closes `narrowcnt` and `basefold` outright and takes
+  // 6 of `membnarrow`'s 17 and 27 of `sibwalk`'s 52. L2 alone is worth 1 and 19 — and 0 under a wide
+  // counter — but the residual L1 leaves is exactly L2's, and L2 closes it to a byte match on both.
+  // `narrowcnt`'s single row is the capability in miniature: the target derives the increment from
+  // the ALREADY-EXTENDED value (`add r0,r0,#0x1`), asmlift's cast spelling re-derives it from the
+  // raw halfword (`add r0,r1,#0x1`).
+  //
+  // `basefold` SIZES L1; it is not an association probe. BOTH sides fold the `+4` into the memory
+  // operand — target `ldrh r0,[r0,#0x4] / strh r0,[r2,#0x4]`, asmlift `ldrh r0,[r0,#0x4] /
+  // strh r0,[r1,#0x4]` — and changing ONLY the local's declared type in asmlift's winner makes the
+  // object BYTE-IDENTICAL to the reference (`cmp` passes), so its 11 is 100% L1. What it buys over
+  // `narrowcnt` is SCALE: the extension feeds the address too, so the target spends `lsl #0x10 /
+  // asr #0x10` then `lsl #0x1` where asmlift fuses both into `asr #0xf` — one missing capability
+  // costing 1 row in a scalar loop and 11 in an addressing one. Its `src` is AUTHORED, not cut from
+  // the project: sa3:PackSaveSector's reference has 22 `p->member[i]` and no pointer cast in 117 lines.
+  //
+  // THE LEVER THIS FAMILY DOES **NOT** GATE, measured rather than assumed. asmlift mints a fresh
+  // local per loop (`v0`, `v1`, `v2`) where the source reuses one `i`, and on sa3:PackSaveSector
+  // breaking that ONE spelling on an otherwise byte-matching source costs 243 rows — so "reuse the
+  // counter" is the first lever a reader will reach for. It buys NOTHING at synthetic scale. Taking
+  // asmlift's own winner and collapsing every minted counter onto one, scored against the same
+  // object; the probes are N sibling `u16` arrays whose lengths cycle 6/7/9, walked in order:
+  //     3 sibling loops   minted 52  reused 52          9 sibling loops   minted 191 reused 191
+  //     5 sibling loops   minted 102 reused 102        11 sibling loops   minted 235 reused 235
+  //     7 sibling loops   minted 148 reused 148        14 sibling loops   minted 301 reused 301
+  // Identical at every scale, to the row — and identical again in the state a round will actually be
+  // in, AFTER L1: `sibwalk` L1-minted 25, L1-reused 25. The 243 is a PRESSURE interaction (that
+  // function has 18 hoisted invariants competing for registers), not a spelling agbcc reads.
+  // `sibwalk` is the guard: if a round ships counter reuse, this row must not move.
+  //
+  // DECLINES, each named by asmlift's own message and each a PRE-EXISTING link, never this family:
+  //     widecnt   × gcc2.7.2kmc : "cannot lift 'widecnt': unmodelled control transfer 'bnezl' at
+  //                               0x14 — branch-likely / coprocessor branch not supported"
+  //     narrowcnt × ido7.1      : the same `bnezl` link, at 0x1c
+  //     narrowcnt × gcc2.7.2kmc : the same `bnezl` link, at 0x28
+  // The MIPS toolchains emit the counted loop with a branch-likely delay slot, so those three cells
+  // measure that link. Every other cell scores.
+  //
+  // WHY THE ctx SAYS `u8 *`. `ctx` reaches m2c ONLY — `evaluateM2c` is the only tool call that takes
+  // it, `runAsmlift` has no such parameter — so the spelling moves m2c's column and can never move
+  // asmlift's, which is why it has to be chosen honestly. `void *` is not honest here: m2c's BODY is
+  // byte-identical under `void *` and `u8 *`, but on `void *` it dereferences the void pointer
+  // (`*(d + 4 + temp_r0) = …`) and no compiler in the set accepts that, so the noncompile would be
+  // the harness's, not m2c's. `u8 *` withholds the layout just as completely, and under it m2c
+  // compiles — and BEATS asmlift on two rows:
+  //     membnarrow  m2c 11 vs asmlift 17        sibwalk  m2c 26 vs asmlift 52
+  //     membwalk    m2c  2 under BOTH spellings — the control that says the swap is not a general
+  //                 m2c boost; it moves exactly the narrow-counter rows.
+  // Not the real `struct S *`, because THE LAYOUT IS THE ANSWER: given it m2c emits
+  // `d->name[temp_r1_2]` and byte-MATCHes `membnarrow` (measured, 0) — that is L2 handed over, and
+  // a synthetic row gives asmlift no analogue for it. Every remaining noncompile is m2c's own: on a
+  // real, dereferenceable pointer type it still invents a struct member — `(temp_r0 + d)->unk4` on
+  // agbcc/basefold, `->unk4`/`->unkC` on gcc2.7.2kmc, "Selector requires struct/union pointer" on
+  // ido7.1, "not a struct/union/class" on mwcc; no void*/incomplete-type marker is left here. The
+  // harness gap this exposed is PRE-EXISTING: the synthetic tier hands `ctx` to m2c to READ but
+  // never to the candidate COMPILE, where the real tier escalates to the project context for
+  // exactly this reason (compile/real.ts:52-54 — "a harness artifact, not a decompiler weakness").
+  // 23 synthetic rows in older families still carry markers in that class; that is its own change.
+  //
+  // COVERAGE. No row CARRIED the `narrow-counter` tag before this family — trivially, the tag is new.
+  // The SHAPE was not uncovered. Reference side: 22 base rows pass this tag's own floor predicate,
+  // 18 agbcc, and one of those (`kleod:UpdateEntities:agbcc`) already MATCHES — a narrow counter is
+  // not automatically a gap. Candidate side: 17 base agbcc rows already carry a narrowed self-
+  // increment in their PUBLISHED asmlift output, 2 of those MATCHing; exactly ONE carries the SIGNED
+  // form these rows are cut from, `v = (u16)((s16)v + 1)` — `sa3:PackSaveSector` (366). PREDICTION,
+  // not measured: when L1 ships, the other 15 are where real-row movement shows first, falsifiable
+  // with `pnpm bench diff --base origin/main` on the branch that lands L1. What these six rows add
+  // is ISOLATION and SIZE: the shape alone, plus memory, plus a struct member, each on its target.
+  //
+  // TOOLCHAIN SCOPING. All six ship `toolchains: ALL` as COVERAGE; the analysis above is agbcc's
+  // alone. On mwcc_242_81 `membnarrow`, `basefold` and `sibwalk` all MATCH outright, so the gap
+  // does not exist on that compiler; `narrowcnt` is 16 there, and the MIPS lanes score something
+  // structurally different (ido7.1 4/4/12, gcc2.7.2kmc 7/7/21). Those cells are coverage, not
+  // evidence for the thesis.
+  //
+  // Cut from sa3:PackSaveSector:agbcc (asmlift 366, m2c noncompile). That row is CONJUNCTIVE: taking
+  // asmlift's published winner and applying one project spelling at a time recovers 55 rows for the
+  // member-array base (366 → 311) and 17 for the narrow counter (366 → 349), while both together
+  // reach 267 — a 99-row recovery, more than the 72 the two marginals sum to, and still far from a
+  // match; four other single-axis "fixes" make the row WORSE (375, 371, 370, 370). It reaches a byte
+  // match only when every spelling is right at once. So these rows size the two capabilities at
+  // their own scale and make no claim about how far they move that row alone.
+  {
+    sym: 'widecnt',
+    src:
+      's32 widecnt(void)\n' +
+      '{\n' +
+      '    s32 i;\n' +
+      '    s32 s;\n' +
+      '\n' +
+      '    s = 0;\n' +
+      '    for (i = 0; i < 10; i++) {\n' +
+      '        s += i;\n' +
+      '    }\n' +
+      '    return s;\n' +
+      '}',
+    features: ['arithmetic'],
+    toolchains: ALL,
+    ctx: 's32 widecnt(void);',
+  },
+  {
+    sym: 'narrowcnt',
+    src:
+      's32 narrowcnt(void)\n' +
+      '{\n' +
+      '    s16 i;\n' +
+      '    s32 s;\n' +
+      '\n' +
+      '    s = 0;\n' +
+      '    for (i = 0; i < 10; i++) {\n' +
+      '        s += i;\n' +
+      '    }\n' +
+      '    return s;\n' +
+      '}',
+    features: ['narrow-counter', 'narrow', 'sign-extend', 'arithmetic'],
+    toolchains: ALL,
+    ctx: 's32 narrowcnt(void);',
+  },
+  {
+    sym: 'membwalk',
+    src:
+      'struct S { s32 id; u16 name[6]; };\n' +
+      'void membwalk(struct S *d, struct S *s)\n' +
+      '{\n' +
+      '    s32 i;\n' +
+      '\n' +
+      '    for (i = 0; i < 6; i++) {\n' +
+      '        d->name[i] = s->name[i];\n' +
+      '    }\n' +
+      '}',
+    features: ['array', 'variable-index', 'struct', 'field'],
+    toolchains: ALL,
+    ctx: 'void membwalk(u8 *d, u8 *s);',
+    proto: { membwalk: { returnsVoid: true } },
+  },
+  {
+    sym: 'membnarrow',
+    src:
+      'struct S { s32 id; u16 name[6]; };\n' +
+      'void membnarrow(struct S *d, struct S *s)\n' +
+      '{\n' +
+      '    s16 i;\n' +
+      '\n' +
+      '    for (i = 0; i < 6; i++) {\n' +
+      '        d->name[i] = s->name[i];\n' +
+      '    }\n' +
+      '}',
+    features: ['narrow-counter', 'narrow', 'sign-extend', 'array', 'variable-index', 'struct', 'field'],
+    toolchains: ALL,
+    ctx: 'void membnarrow(u8 *d, u8 *s);',
+    proto: { membnarrow: { returnsVoid: true } },
+  },
+  {
+    sym: 'basefold',
+    src:
+      'void basefold(u8 *d, u8 *s)\n' +
+      '{\n' +
+      '    s16 i;\n' +
+      '\n' +
+      '    for (i = 0; i < 6; i++) {\n' +
+      '        *((u16 *)(d + 4) + i) = *((u16 *)(s + 4) + i);\n' +
+      '    }\n' +
+      '}',
+    features: ['narrow-counter', 'narrow', 'sign-extend', 'cast', 'pointer'],
+    toolchains: ALL,
+    ctx: 'void basefold(u8 *d, u8 *s);',
+    proto: { basefold: { returnsVoid: true } },
+  },
+  {
+    sym: 'sibwalk',
+    src:
+      'struct S { u16 a[6]; u16 b[7]; u16 c[9]; };\n' +
+      'void sibwalk(struct S *d, struct S *s)\n' +
+      '{\n' +
+      '    s16 i;\n' +
+      '\n' +
+      '    for (i = 0; i < 6; i++) {\n' +
+      '        d->a[i] = s->a[i];\n' +
+      '    }\n' +
+      '    for (i = 0; i < 7; i++) {\n' +
+      '        d->b[i] = s->b[i];\n' +
+      '    }\n' +
+      '    for (i = 0; i < 9; i++) {\n' +
+      '        d->c[i] = s->c[i];\n' +
+      '    }\n' +
+      '}',
+    features: ['narrow-counter', 'narrow', 'sign-extend', 'array', 'variable-index', 'struct', 'field'],
+    toolchains: ALL,
+    ctx: 'void sibwalk(u8 *d, u8 *s);',
+    proto: { sibwalk: { returnsVoid: true } },
+  },
 ];
 
 // ── C++ (mwcc `.cp` frontend, PPC only) ───────────────────────────────────────────────────

@@ -695,6 +695,31 @@ export const FEATURES: readonly FeatureDef[] = [
     seeAlso: ['cast', 'mixed-width', 'promotion'],
   },
   {
+    id: 'narrow-counter',
+    label: 'Narrow loop counter',
+    group: 'data-types',
+    evidence: 'judgement',
+    summary: "the loop's induction variable is declared narrower than a register",
+    detail:
+      'A counter declared `s16 i` rather than `s32 i` is re-narrowed on every iteration, and the ' +
+      'compiler must keep both the raw halfword and its sign-extended value live. On agbcc that ' +
+      'shows up twice: the sign extension is materialised once and reused for BOTH the address ' +
+      'scale and the increment, and the loop keeps its INDEX where a wide counter would have been ' +
+      'strength-reduced into a pointer walk. The second effect is not register pressure — it is ' +
+      'the shape of the write-back: agbcc promotes every sub-word local to a word UNSIGNED, so a ' +
+      'narrow counter is written back through a LOGICAL right shift, and its loop optimiser looks ' +
+      'for a basic induction variable only through a sign-extension or an ARITHMETIC shift. The ' +
+      'logical one falls through, the counter is never recognised as one, and strength reduction ' +
+      'never runs on it. A decompiler with no narrow local type has to spell it `s32 v` plus a ' +
+      'cast at every use, which agbcc folds differently.',
+    example: {
+      c: 's16 i; for (i = 0; i < 10; i++) s += i;',
+      asm: 'lsl r0, r1, #0x10 / asr r0, r0, #0x10 / add r2, r2, r0 / add r0, r0, #0x1',
+      toolchain: 'agbcc',
+    },
+    seeAlso: ['narrow', 'sign-extend', 'variable-index'],
+  },
+  {
     id: 'promotion',
     label: 'Integer promotion',
     group: 'data-types',
