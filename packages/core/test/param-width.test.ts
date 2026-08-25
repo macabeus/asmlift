@@ -7,6 +7,10 @@
 // compiled with this benchmark's agbcc, `void pb(s32 *out, s32 a) { out[0]=1; out[1]=2;
 // out[2]=(u8)a; }` emits mov/str/mov/str/lsl/lsr/str — the shift pair stays WHERE THE SOURCE WROTE
 // IT, so a rule keyed only on "sole use, entry block" would hoist two instructions to the top.
+//
+// The last block pins what a narrow parameter means to the STRUCTURER, which is the module that
+// has to change to accept one: before this pass a parameter was always register-wide, so nothing
+// checked that a merged value fits the name it is destroyed into.
 // Toolchain-free.
 import { describe, expect, test } from 'vitest';
 
@@ -150,11 +154,38 @@ describe('refusals', () => {
     expect(run(ir).n).toBe(0);
   });
 
+  test('an extension behind a nullary call is body code', () => {
+    // The scan steps over MATERIALIZATIONS, which depend on nothing. A call depends on the whole
+    // machine: `void f(s32 a) { sidefx(); consume((s16)a); }` compiled with this benchmark's agbcc
+    // puts the shift pair after the `bl`, and declaring `s16` there both re-spells the function's
+    // ABI and costs the byte match. `opaque` is the same shape — effectful, and nullary when it
+    // reads no register.
+    const call = `fn f {
+^bb0(%0: unk32, %1: s32*):
+  %2: unk32 = call {target="g"}
+  %3: unk32 = sext %0 {width=16}
+  store %1, %3 {off=0, width=4}
+  store %1, %2 {off=4, width=4}
+  ret
+}
+`;
+    expect(run(call).n).toBe(0);
+    expect(run(call.replace('call {target="g"}', 'opaque')).n).toBe(0);
+  });
+
+  test('a width no C type spells is refused', () => {
+    const ir = PROLOGUE_S16.replace('sext %0 {width=16}', 'sext %0 {width=24}');
+    expect(run(ir).n).toBe(0);
+  });
+
   test('a parameter the pointer recovery already typed is left alone', () => {
+    // The typed parameter's SOLE use is the extension, so only the type stands between it and a
+    // narrowing that would replace a recovered `s32 *` with `s16` — the struct/array recognizers
+    // run ahead of this pass and write exactly such a type.
     const ir = `fn f {
-^bb0(%0: s32*):
-  %1: unk32 = sext %0 {width=16}
-  store %0, %1 {off=0, width=4}
+^bb0(%0: s32*, %1: s32*):
+  %2: unk32 = sext %0 {width=16}
+  store %1, %2 {off=0, width=4}
   ret
 }
 `;
@@ -171,5 +202,34 @@ describe('the signedness axis has nothing left to ask', () => {
     const cands = enumerateCandidates('f', NARROW_PARAM_ASM, ARMV4T_AGBCC, {});
     expect(cands.length).toBe(1);
     expect(cands[0].source).toContain('s16 a0');
+  });
+});
+
+describe("a narrow parameter is not a wide value's home", () => {
+  // agbcc's `s32 f(u8 x, s32 c, s32 *out) { s32 t = c ? x : 0x1234; out[0] = t; return t; }`: the
+  // merge value reaches the structurer with `x` as one of its incoming arguments, and destroying
+  // SSA writes the OTHER argument through whatever name the merge takes. `u8 a0` as that name
+  // emits `a0 = 4660`, which agbcc truncates to 52 — silently, since it only warns.
+  const MERGE_ONTO_PARAM = `fn f {
+^bb0(%0: u8, %1: unk32, %2: s32*):
+  %3: unk32 = const {value=0}
+  %4: u32 = icmp_eq %1, %3
+  cond_br %4, ^bb1(), ^bb2(%0)
+^bb1():
+  %5: unk32 = const {value=4660}
+  br ^bb2(%5)
+^bb2(%6: unk32):
+  store %2, %6 {off=0, width=4}
+  ret %6
+}
+`;
+
+  test('a merge of the parameter with a wider value takes a fresh name', () => {
+    const fn = parse(MERGE_ONTO_PARAM);
+    verify(fn);
+    recoverTypes(fn);
+    const src = cBackend.emit(structure(fn));
+    expect(src).not.toMatch(/\ba0 = /);
+    expect(src).toContain('4660');
   });
 });

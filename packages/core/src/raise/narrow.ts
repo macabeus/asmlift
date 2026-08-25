@@ -24,10 +24,7 @@
 // the shift brings in, so `%134` is `sext(%133, 32 - 16)` — the same rewrite, and the reason this
 // pass matches the pair rather than either extension on its own.
 import { Fn, Op, Value } from '../ir/core';
-import { Opcode } from '../ir/opcodes';
-
-/** Widths `zext`/`sext` carry: a C type the backend can print as a cast. */
-const CAST_WIDTHS = new Set([8, 16]);
+import { CAST_WIDTHS, Opcode } from '../ir/opcodes';
 
 /** WHICH BITS a narrowing op keeps, as a key two ops can be compared on. The two spellings live in
  *  different bit-domains — `zext {width:w}` keeps the LOW `w` bits, `shr_u {imm:k}` keeps bits
