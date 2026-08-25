@@ -791,8 +791,9 @@ export function reindexWalks(sfn: SFn, keptWalks?: Set<string>): SFn | null {
     // read. The rewrite deletes the init and the decrement, so ANY other use of k (a leftover's
     // read, a second decrement, a body read like `*p = k`, a nested loop's) would survive
     // referencing a variable that no longer exists as a counter. Counted over the whole
-    // function, which also confines k to the shape.
-    if (countMentions(sfn.body, k) !== 4 || countMentions(shape, k) !== 4) {
+    // function, which also confines k to the shape: the four this shape accounts for are all
+    // inside it, so a fifth anywhere makes the total differ.
+    if (countMentions(sfn.body, k) !== 4) {
       return null;
     }
     // every p lives ONLY inside the shape (the v1 rule, counted the same way) — its body uses
