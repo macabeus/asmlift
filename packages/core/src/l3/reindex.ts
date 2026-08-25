@@ -90,6 +90,7 @@
 import { IrType, T } from '../ir/types';
 import { Expr, SFn, Stmt, mapExprChildren, mapStmtExprs, stmtExprs } from './ast';
 import { type Gate, firstRejection } from './gates';
+import { nameStorage } from './storage';
 
 interface WalkLoop {
   p: string; // the pointer induction var
@@ -719,10 +720,12 @@ export function reindexWalks(
   const ptrVars = new Map<string, IrType>();
   const declTypes = new Map<string, IrType>();
   const volatileLocals = new Set(sfn.locals.filter((l) => l.volatile === true).map((l) => l.name));
-  for (const v of [...sfn.params, ...sfn.locals, ...(sfn.globals ?? [])]) {
+  const storage = nameStorage(sfn);
+  // globals FIRST, so a shadowed name keeps the inner declaration's type — the same order
+  // `nameStorage` classifies in
+  for (const v of [...(sfn.globals ?? []), ...sfn.params, ...sfn.locals]) {
     declTypes.set(v.name, v.type);
   }
-  const scalarLocals = new Set([...sfn.params, ...sfn.locals].map((v) => v.name));
   for (const v of [...sfn.params, ...sfn.locals]) {
     if (v.type.kind === 'ptr') {
       ptrVars.set(v.name, v.type);
@@ -954,7 +957,7 @@ export function reindexWalks(
       t?.kind === 'ptr' ? (t.to.kind === 'int' ? t.to.width / 8 : t.to.kind === 'ptr' ? 4 : 0) : 0;
     const ctx: CountdownCtx = {
       kIsPointer: ptrVars.has(k),
-      kIsDeclared: scalarLocals.has(k),
+      kIsDeclared: storage.get(k) === 'local' || storage.get(k) === 'param',
       kIsVolatile: volatileLocals.has(k),
       dupStep,
       volatileWalks: walks.filter((p) => volatileLocals.has(p)),
