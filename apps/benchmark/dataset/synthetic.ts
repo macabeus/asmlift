@@ -2811,16 +2811,23 @@ export const SYNTHETIC: SynthSpec[] = [
   //   `armexpr`'s shape at all. That is why the expression home is a separate row from this one.
   //
   //   `basecell` MATCH — ONE access through a numeric base at a nonzero byte offset. gcc 2.9
-  //   folds `base + K` into the pool word, so the inline cast compiles to `.word 0x3001103` +
-  //   `ldrb r1, [r1]` where the pointer-local spelling keeps `.word 0x3001100` +
-  //   `ldrb r1, [r1, #0x3]` (compiled pair, both dumped). `l3/basecse.ts`'s `single-use` gate
-  //   rejected a base with `uses < 2` — its stated rationale, "one access re-materializes as
-  //   cheaply as a named local", is false at a nonzero offset — and the offset the compiler did
-  //   NOT fold is the asm's own evidence about the source, so the gate now reads it as
-  //   `BaseKey.unfoldedOffset` off `TargetDescription.compilerBehaviors.foldsConstAddrOffset`.
-  //   What the row guards is the three refusals that keep this off the naive ablation below: a
-  //   SYMBOL base (both spellings emit the same bytes), an offset of 0, and a target that declares
-  //   no fold.
+  //   folds a constant SUBSCRIPT into the pool word, so the inline cast compiles to
+  //   `.word 0x3001103` + `ldrb r1, [r1]` where the pointer-local spelling keeps
+  //   `.word 0x3001100` + `ldrb r1, [r1, #0x3]` (compiled pair, both dumped). `l3/basecse.ts`'s
+  //   `single-use` gate rejected a base with `uses < 2` — its stated rationale, "one access
+  //   re-materializes as cheaply as a named local", is false at a nonzero offset — so the offset
+  //   the compiler did NOT fold rides as `BaseKey.unfoldedOffset` in a SECOND admission,
+  //   `BASEFOLD_GATES`, which rank.ts offers as `/basefold` wherever the target declares
+  //   `TargetDescription.compilerBehaviors.foldsConstAddrOffset`. A CANDIDATE and not a default,
+  //   because the same bytes have a second source: agbcc keeps an aggregate MEMBER offset in the
+  //   memory operand, so `((struct S *)0x3001100)->b` emits `.word 0x3001100` + `ldr [r0, #0x4]`,
+  //   byte-identical to the named base (likewise a union member, and the write direction).
+  //   asmlift can spell only one of the two, so the differ referees.
+  //   What the row guards is the three refusals that keep this off the naive ablation below: an
+  //   offset of 0 (there the fold is the identity), a target that declares no fold, and a SYMBOL
+  //   base — refused because the LIFT folds a relocation addend back into the index, so all four
+  //   spellings of that access reach L3 as one tree, NOT because the bytes agree: they do not,
+  //   `((u8 *)&gSym)[3]` emitting `.word gSym+0x3` + `ldrb [r1]`.
   //
   //   `basehome` MATCH — THREE accesses through one base whose first use is not the function's
   //   first statement. The hoist fires here, but `l3/basecse.ts` emits every init at the head of
@@ -2836,7 +2843,8 @@ export const SYNTHETIC: SynthSpec[] = [
   //   candidate rather than as basecse's own `[...inits, ...rest]` — taken as a DEFAULT the same
   //   move costs `mixpoll` and `onepoll` their matches, which is the ledger below. `l3/scopebase.ts`
   //   is the scope-aware sibling and does not help: the innermost enclosing scope here IS the
-  //   function body.
+  //   function body. Eligibility and placement are the two halves of one question and both ride as
+  //   candidates — `/basefold` and `/sinkinit`, paired over the admission roster.
   //
   // THE CONTROL. `armkeep` MATCH — the same pure expression computed in BOTH arms, but consumed
   //   inside each arm rather than merged out of the `if`. agbcc keeps both copies, asmlift emits
@@ -2873,7 +2881,9 @@ export const SYNTHETIC: SynthSpec[] = [
   //   writers between the def site and the edge, a MEANING concern a score cannot referee. The
   //   lever is "refine the refusal", and 0 regressions bounds only its placement cost.
   //   `single-use` off (the `basecell` lever) — the NAIVE ablation, which is not what shipped:
-  //   19 rows move, 7 better and 12 WORSE, and one of the twelve is a lost match. Better: `basecell` 2→MATCH, `sub_803213C` 48→46 (exactly its
+  //   19 rows move, 7 better and 12 WORSE, and one of the twelve is a lost match. What shipped is
+  //   a separate ADMISSION, narrower than the ablation and read by no committed path. Better:
+  //   `basecell` 2→MATCH, `sub_803213C` 48→46 (exactly its
   //   v(C)), `GetInput` 68→58, `RollRandomLevelVariant` 24→18, `EntityItemDrop` 118→116,
   //   `ProcessInputAndUpdateEntities` 370→366, `CountCollectedGems` 328→327. Worse:
   //   `UpdateFadeEffect` MATCH→2, `readarm` MATCH→8 and `armshare` MATCH→17 (both `read-once`),
@@ -2899,8 +2909,9 @@ export const SYNTHETIC: SynthSpec[] = [
   // single-claimant refusal, ~1766) and `structure/analysis.ts` + `rank.ts` for the home itself —
   // the three axes there are ONE capability gated on three incidental shapes, and this family's
   // remaining rows are exactly the cases none of the three admits. The two BASE rows are closed
-  // (`l3/basecse.ts` reads the target's fold behaviour; `l3/sinkinit.ts` carries the placement),
-  // and what the ledger above still prices is the SYMBOL side of `single-use`, which no predicate
+  // (`l3/basecse.ts`'s BASEFOLD_GATES carries the eligibility, `l3/sinkinit.ts` the placement,
+  // both as candidates), and what the ledger above still prices is the SYMBOL side of
+  // `single-use`, which no predicate
   // over the base census can decide: `CountCollectedGems` and `UpdateWorldMapNodeAnim` present a
   // bit-identical census in BOTH symbol-map configurations and move in opposite directions under
   // the ablation, so that side can only ever be a candidate. The per-site-signedness
