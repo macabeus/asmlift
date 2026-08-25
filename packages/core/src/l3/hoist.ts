@@ -18,7 +18,7 @@ import { mapExprChildren, stmtChildren, stmtExprs } from './ast';
  *     silently redirects every later mention of it;
  *   - every CALL TARGET — a local named like a callee shadows the function;
  *   - every assignment target, which includes names no declaration list carries. */
-function takenNames(sfn: SFn): Set<string> {
+export function takenNames(sfn: SFn): Set<string> {
   const taken = new Set<string>([...sfn.params.map((p) => p.name), ...sfn.locals.map((l) => l.name)]);
   const visit = (e: Expr): void => {
     if (e.k === 'var' || e.k === 'addr') {

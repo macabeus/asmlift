@@ -91,7 +91,9 @@
 import { IrType, T } from '../ir/types';
 import { Expr, SFn, Stmt, mapExprChildren, mapStmtExprs, stmtExprs } from './ast';
 import { type Gate, firstRejection } from './gates';
+import { takenNames } from './hoist';
 import { nameStorage } from './storage';
+import { type VarTypes, declaredTypes } from './typing';
 
 interface WalkLoop {
   p: string; // the pointer induction var
@@ -260,7 +262,7 @@ export const COUNTDOWN_GATES: readonly Gate<CountdownCtx>[] = [
   },
   {
     id: 'volatile-walk',
-    why: 'deleting `p += 1` turns N volatile writes of a volatile pointer local into none',
+    why: 're-basing the derefs off a plain local turns N accesses to volatile data into N plain ones',
     sound: true,
     guardedBy: 'reindex.test.ts: a volatile walk pointer declines',
     rejects: (c) => c.volatileWalks.length > 0,
@@ -381,9 +383,10 @@ function confinedToWalk(fnBody: Stmt[], name: string, initMentions: number, loop
  *  spells a pool word `(s32 *)33569456` but a shift-encodable one `(s32 *)(128 << 18)`, and every
  *  GBA hardware region (EWRAM 0x2000000, I/O 0x4000000, VRAM 0x6000000 …) takes the second form —
  *  so both must reach the same admission or the whole MMIO/VRAM fill family declines on its
- *  address. Zero is excluded: a null base is not a walk. Spelled as "holds a non-zero constant
- *  and nothing else" rather than by folding, which would need a constant evaluator this file has
- *  no other use for. */
+ *  address. A bare `(T *)0` is excluded — a null base is not a walk — but the test is on the
+ *  LITERALS the expression mentions, not on the value they fold to, so `(T *)(5 - 5)` passes.
+ *  Folding would need a constant evaluator this file has no other use for, and the rewrite keeps
+ *  the init verbatim, so no decision downstream reads the value. */
 function rematerializableAddress(e: Expr): boolean {
   let nonZero = false;
   let ok = true;
@@ -575,7 +578,7 @@ function tryExprWalk(
   dw: Stmt & { k: 'dowhile' },
   ptrVars: Map<string, IrType>,
   fnBody: Stmt[],
-  declTypes: Map<string, IrType>,
+  declTypes: VarTypes,
   volatileLocals: ReadonlySet<string>,
 ): Stmt | null {
   if (prev?.k !== 'assign' || !ptrVars.has(prev.name) || volatileLocals.has(prev.name)) {
@@ -613,7 +616,7 @@ function tryExprWalk(
   // declTypes carries params, locals AND globals: a base declared nowhere has an unknowable C
   // stride (its project declaration decides), and a wider pointer strides its element under [i]
   // — both decline.
-  const baseT = declTypes.get(base.name);
+  const baseT = declTypes(base.name);
   if (baseT === undefined) {
     return null;
   }
@@ -662,7 +665,7 @@ function tryExprWalk(
     return null;
   }
   const pStepIdx = dw.body.length - 2 + tail.findIndex((st) => isIncOf(st, p) !== null);
-  const ivT = declTypes.get(iv);
+  const ivT = declTypes(iv);
   if (ivT !== undefined && ivT.kind !== 'int') {
     return null;
   }
@@ -720,14 +723,13 @@ export function reindexWalks(
   gates: readonly Gate<CountdownCtx>[] = COUNTDOWN_GATES,
 ): SFn | null {
   const ptrVars = new Map<string, IrType>();
-  const declTypes = new Map<string, IrType>();
-  const volatileLocals = new Set(sfn.locals.filter((l) => l.volatile === true).map((l) => l.name));
+  const declTypes = declaredTypes(sfn);
+  // BOTH volatility facts (ast.ts SFn.locals): the object-volatile counter, and the pointer whose
+  // POINTEE is volatile — which is the one the `/volatile` lever mints, and the one a walk carries.
+  const volatileLocals = new Set(
+    sfn.locals.filter((l) => l.volatile === true || l.pointeeVolatile === true).map((l) => l.name),
+  );
   const storage = nameStorage(sfn);
-  // globals FIRST, so a shadowed name keeps the inner declaration's type — the same order
-  // `nameStorage` classifies in
-  for (const v of [...(sfn.globals ?? []), ...sfn.params, ...sfn.locals]) {
-    declTypes.set(v.name, v.type);
-  }
   for (const v of [...sfn.params, ...sfn.locals]) {
     if (v.type.kind === 'ptr') {
       ptrVars.set(v.name, v.type);
@@ -738,7 +740,7 @@ export function reindexWalks(
   }
 
   let fired = 0;
-  let ivCount = 0;
+  const taken = takenNames(sfn);
   const locals = [...sfn.locals];
 
   // SOUNDNESS GATE (adversarially learned; every rule REPRODUCED as a wrong-bytes or crash
@@ -1098,7 +1100,7 @@ export function reindexWalks(
     // `k >= 0` terminates only for a SIGNED counter — an unsigned one never goes below zero, and
     // the compiler that emitted this test proved it signed (`bge`). A declaration asmlift settled
     // on unsigned describes a different loop, so the trip count `C + 1` would be a fiction.
-    const kT = declTypes.get(kv);
+    const kT = declTypes(kv);
     if (kT?.kind !== 'int' || !kT.signed) {
       return null;
     }
@@ -1119,16 +1121,22 @@ export function reindexWalks(
     return { pre: out.filter((x) => x !== kInit), counted: r.counted };
   }
 
-  /** The next free induction name. PURE with respect to the tree — it declares nothing, so a
-   *  recognizer that declines after calling it has no state to undo. Collide-checked: pipeline
-   *  naming is `a`/`v`/`t` prefixed, but future naming (DWARF) may import real source names, so
-   *  never conflate with an existing i<N>. */
+  /** The next free induction name: the lowest `i<N>` nothing in `sfn` already claims and no
+   *  earlier mint has COMMITTED. Pipeline naming is `a`/`v`/`t` prefixed, but a global is
+   *  referenced by bare name and future naming (DWARF) may import real source ones, so the
+   *  collision set is `takenNames`' — declarations, mentions, call targets and assignment
+   *  targets alike — not the declaration lists.
+   *
+   *  PURE: it reads that snapshot and the locals `declareIv` committed, so a recognizer that
+   *  mints and then declines leaves the next mint returning the same name. Callers hold at most
+   *  one uncommitted name at a time — every mint site rewrites and commits before the walk
+   *  recursion can reach another loop. */
   function nextIv(): string {
-    let name = `i${ivCount++}`;
-    while (sfn.params.some((x) => x.name === name) || locals.some((x) => x.name === name)) {
-      name = `i${ivCount++}`;
+    let n = 0;
+    while (taken.has(`i${n}`) || locals.some((x) => x.name === `i${n}`)) {
+      n++;
     }
-    return name;
+    return `i${n}`;
   }
   /** Commit a minted name: the ONE place the induction local is declared, called only once the
    *  rewrite has succeeded. */

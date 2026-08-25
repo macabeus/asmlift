@@ -841,7 +841,9 @@ const GATE_ABLATIONS: { id: string; title: string; fixture: () => SFn }[] = [
   {
     id: 'volatile-walk',
     title: 'a volatile walk pointer declines',
-    fixture: () => constCountdown((fn) => (fn.locals[1].volatile = true)),
+    // `pointeeVolatile`, the flag the `/volatile` lever mints — an object-volatile POINTER has no
+    // inhabitant (cfamily.ts), and `/volatile/indexed` (rank.ts) is what reaches this gate.
+    fixture: () => constCountdown((fn) => (fn.locals[1].pointeeVolatile = true)),
   },
   {
     id: 'two-steps-one-pointer',
