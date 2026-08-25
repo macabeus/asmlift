@@ -9,6 +9,7 @@ import {
   BASEFOLD_GATES,
   LIVEBASE_BLOCK_GATES,
   LIVEBASE_GATES,
+  admittedBases,
   hoistReusedGlobalBases,
 } from '../src/l3/basecse';
 import { without } from '../src/l3/gates';
@@ -151,17 +152,27 @@ describe('reused-global-base hoisting', () => {
       expect(hoistReusedGlobalBases(input, BASEFOLD_GATES)).toBe(input);
     });
 
-    test('the two tables are one gate apart, and each ablation prices its own rule', () => {
-      const input = oneStore();
-      // the exemption, alone
-      expect(hoistReusedGlobalBases(input, without(BASEFOLD_GATES, 'single-use-unfolded')).locals).toHaveLength(1);
-      // the use-count rule, alone — unchanged by the lever's existence
-      expect(hoistReusedGlobalBases(input, without(BASECSE_GATES, 'single-use')).locals).toHaveLength(1);
-      // and both tables still refuse what the PLACEMENT rules refuse
+    test('both tables still refuse what the PLACEMENT rules refuse', () => {
       const inLoop = fn([
         { k: 'while', cond: c(1), body: [{ k: 'store', lval: cidx(0x3001100, c(3), 1), value: c(0) }] },
       ]);
       expect(hoistReusedGlobalBases(inLoop, BASEFOLD_GATES).locals).toEqual([]);
+      expect(hoistReusedGlobalBases(inLoop, BASECSE_GATES).locals).toEqual([]);
+    });
+
+    // What prices the exemption, and what does not. An ablation removes a whole gate, and this
+    // one carries the rule AND its exemption together — so the price is the two tables'
+    // admitted-set DIFF, and the ablation is the naive one.
+    test('the exemption prices by the tables DIFF, because both ablations are the same table', () => {
+      const input = oneStore();
+      expect(
+        admittedBases(input, BASEFOLD_GATES).filter((k) => !admittedBases(input, BASECSE_GATES).includes(k)),
+      ).toHaveLength(1);
+      // the use-count rule, alone — unchanged by the lever's existence
+      expect(hoistReusedGlobalBases(input, without(BASECSE_GATES, 'single-use')).locals).toHaveLength(1);
+      // ...and dropping the exemption's gate drops `reachedOnce` with it, landing on that exact
+      // table. Pinned so the DIFF above is not re-derived as an ablation by a later round.
+      expect(without(BASEFOLD_GATES, 'single-use-unfolded')).toEqual(without(BASECSE_GATES, 'single-use'));
     });
   });
 

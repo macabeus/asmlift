@@ -210,12 +210,18 @@ export const BASECSE_GATES: readonly Gate<BaseKey>[] = [
 
 /** `/basefold`'s admission (rank.ts): the default rules with `single-use` EXEMPTING a base whose
  *  offset survived into the memory operand (`unfoldedOffset`, see the header). A separate table
- *  rather than a relaxed `single-use`, for two reasons that point the same way. The evidence is not
- *  proof — an inline aggregate-member access emits the same bytes — so the spelling it generates
- *  belongs beside the inline one with the differ between them, never committed on the single-shot
- *  path where nothing referees. And keeping the two rules in two tables keeps both priceable:
- *  `without(BASECSE_GATES, 'single-use')` still ablates the use-count rule alone, as it did before
- *  this table existed, and `without(BASEFOLD_GATES, 'single-use-unfolded')` prices the exemption.
+ *  rather than a relaxed `single-use`, because the evidence is not proof — an inline
+ *  aggregate-member access emits the same bytes — so the spelling it generates belongs beside the
+ *  inline one with the differ between them, never committed on the single-shot path where nothing
+ *  referees. `without(BASECSE_GATES, 'single-use')` still ablates the use-count rule alone, as it
+ *  did before this table existed.
+ *
+ *  HOW TO PRICE THE EXEMPTION: the two tables' admitted-set DIFF, never an ablation. Ablation
+ *  removes a whole gate, and this one carries the rule AND its exemption in a single `rejects` —
+ *  so `without(BASEFOLD_GATES, 'single-use-unfolded')` is `without(BASECSE_GATES, 'single-use')`,
+ *  gate object for gate object: the naive full ablation, which costs a real match. A relaxation
+ *  has no ablation of its own. `admittedBases(sfn, BASEFOLD_GATES)` minus
+ *  `admittedBases(sfn, BASECSE_GATES)` is exactly what it added.
  *
  *  rank.ts offers the row only where the target declares
  *  `compilerBehaviors.foldsConstAddrOffset` — MIPS and PPC put the addend in the instruction by
