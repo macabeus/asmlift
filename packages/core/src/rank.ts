@@ -861,13 +861,27 @@ export function enumerateCandidates(
     const admissions: readonly BaseAdmission[] = target.compilerBehaviors.foldsConstAddrOffset
       ? [...LIVEBASE_ADMISSIONS, BASEFOLD_ADMISSION]
       : LIVEBASE_ADMISSIONS;
+    // The CENSUS is a pure function of (this tree, that table) and every row asks for every
+    // earlier row's, from thunks each product re-invokes — quadratic in the roster, times the
+    // number of products. Memoized on the gate table's identity; the value is a frozen key list
+    // nothing downstream can mutate, so this shares no tree.
+    const censuses = new Map<readonly Gate<BaseKey>[], readonly string[]>();
+    const census = (g: readonly Gate<BaseKey>[]): readonly string[] => {
+      const hit = censuses.get(g);
+      if (hit) {
+        return hit;
+      }
+      const v = admittedBases(sfn, g);
+      censuses.set(g, v);
+      return v;
+    };
     const livebases = admissions.map(({ suffix, gates, addsTo }, i) => {
       const hoist = (): SFn | null => {
-        const bound = admittedBases(sfn, gates);
-        if (bound.length === 0 || (addsTo && sameBases(bound, admittedBases(sfn, addsTo)))) {
+        const bound = census(gates);
+        if (bound.length === 0 || (addsTo && sameBases(bound, census(addsTo)))) {
           return null;
         }
-        const shadowed = admissions.slice(0, i).some((a) => sameBases(bound, admittedBases(sfn, a.gates)));
+        const shadowed = admissions.slice(0, i).some((a) => sameBases(bound, census(a.gates)));
         return shadowed ? null : hoistReusedGlobalBases(sfn, gates);
       };
       const volatiles = (): SFn | null => {
