@@ -2911,12 +2911,19 @@ export const SYNTHETIC: SynthSpec[] = [
   // remaining rows are exactly the cases none of the three admits. The two BASE rows are closed
   // (`l3/basecse.ts`'s BASEFOLD_GATES carries the eligibility, `l3/sinkinit.ts` the placement,
   // both as candidates), and what the ledger above still prices is the SYMBOL side of
-  // `single-use`, which no predicate
-  // over the base census can decide: `CountCollectedGems` and `UpdateWorldMapNodeAnim` present a
-  // bit-identical census in BOTH symbol-map configurations and move in opposite directions under
-  // the ablation, so that side can only ever be a candidate. The per-site-signedness
-  // round that shares two of those files has LANDED (5df7ced) and this family is measured on top of
-  // it: all seven synthetic rows and both real rows score identically before and after, and its
+  // `single-use`. No GATE can decide that side, and the reason is the unit rather than the data:
+  // `Gate<BaseKey>` judges one key at a time, and the key the relaxation would admit on the two
+  // rows that move in opposite directions is the same key with the same facts —
+  // `a:gCallbackQueue 4 true`, one use at offset 1, `singleCell`, not `inLoop`, not
+  // `unfoldedOffset` — in BOTH symbol-map configurations, and both rows publish a map-ful winner.
+  // Their censuses are NOT identical (2 keys against 5 map-less, 2 against 3 map-ful), so a
+  // predicate over the whole census is a different question this has not answered. The open
+  // experiment is narrower than either: `UpdateWorldMapNodeAnim`'s two map-less-only keys are the
+  // only `reachedOnce` keys in the pair that are not `singleCell`, so refusing THOSE would admit
+  // `gCallbackQueue` alone on both rows — if 159→162 is carried by them and not by it, the win
+  // survives and the loss does not. Run that before assuming this side needs a candidate.
+  // The per-site-signedness round that shares two of those files has LANDED (5df7ced) and this
+  // family is measured on top of it: all seven synthetic rows and both real rows score identically before and after, and its
   // structure.ts hunks (577, 1648, 1976-2048, 2221) do not touch anchorConstCopies. Nothing here
   // needs `l3/typing.ts`, `backend/cfamily.ts` or `rank.ts`'s `SIGN_CANDS` either: every `signed/`
   // candidate scores identically to its `unsigned/` twin on all 24 of 802's and all 4 of 832's,
