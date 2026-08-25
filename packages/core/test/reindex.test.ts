@@ -6,7 +6,8 @@ import { describe, expect, test } from 'vitest';
 import { cBackend } from '../src/backend/c';
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
-import { reindexWalks } from '../src/l3/reindex';
+import { without } from '../src/l3/gates';
+import { COUNTDOWN_GATES, reindexWalks } from '../src/l3/reindex';
 import { volatilePtrLocals } from '../src/l3/volatileptr';
 
 const V = (name: string): Expr => ({ k: 'var', name });
@@ -218,8 +219,7 @@ describe('v2 — the guarded countdown re-spells as a counted for', () => {
     expect(c).toContain('v1 = 0;');
     expect(c).toContain('for (i0 = 0; i0 < a1; i0 = i0 + 1)');
     expect(c).toContain('v0[i0]');
-    // the counter's uses are gone (its dead declaration survives, like every retired v1 walk var)
-    expect(c).not.toContain('v2 =');
+    expect(c).not.toContain('v2'); // the counter is gone, declaration included
     expect(c).not.toContain('do {');
     expect(c).not.toContain('else');
   });
@@ -814,6 +814,139 @@ test('v4 inside an outer loop: the counter re-inits per outer iteration, so the 
   expect(c).toContain('for (i0 = 0; i0 < 8; i0 = i0 + 1)');
   expect(c).toContain('v1[i0]');
   expect(c).not.toContain('v2 =');
+});
+
+// ── the shared countdown gate, as a table ─────────────────────────────────────────────────────
+
+/** One fixture per COUNTDOWN_GATES entry: a function the full table refuses, and refuses ON THAT
+ *  ENTRY — dropping it lets the same input through. `title` is what the entry's `guardedBy` names,
+ *  so gate-contract.test.ts can find it in this file's text. */
+const GATE_ABLATIONS: { id: string; title: string; fixture: () => SFn }[] = [
+  {
+    id: 'pointer-counter',
+    title: 'a pointer-typed counter declines',
+    // v2's counter carries no type rule of its own, so a pointer reaches the shared table
+    fixture: () => guardedCountdown((_body, fn) => (fn.locals[2].type = T.ptr(T.s(32)))),
+  },
+  {
+    id: 'global-counter',
+    title: 'the counter may not be a GLOBAL',
+    fixture: () => globalCounter,
+  },
+  {
+    id: 'volatile-counter',
+    title: 'a volatile counter declines',
+    fixture: () => constCountdown((fn) => (fn.locals[2].volatile = true)),
+  },
+  {
+    id: 'volatile-walk',
+    title: 'a volatile walk pointer declines',
+    fixture: () => constCountdown((fn) => (fn.locals[1].volatile = true)),
+  },
+  {
+    id: 'two-steps-one-pointer',
+    title: 'a pointer stepped twice in one body declines',
+    fixture: () => constCountdown((fn) => cdLoop(fn).body.push(step('v1'))),
+  },
+  {
+    id: 'body-exit',
+    title: 'a `break` in the body declines',
+    fixture: () => constCountdown((fn) => cdLoop(fn).body.unshift({ k: 'break' })),
+  },
+  {
+    id: 'walk-base',
+    title: 'a walk pointer with no init ahead of the loop declines',
+    fixture: () => constCountdown((fn) => fn.body.splice(0, 1)),
+  },
+  {
+    id: 'counter-roles',
+    title: 'a fifth mention of the counter declines',
+    fixture: () => constCountdown((fn) => cdLoop(fn).body.unshift({ k: 'store', lval: deref('v1'), value: V('v2') })),
+  },
+  {
+    id: 'walk-confined',
+    title: 'a walk pointer read after the loop declines',
+    fixture: () => constCountdown((fn) => fn.body.splice(4, 0, { k: 'store', lval: deref('v1'), value: C(0) })),
+  },
+  {
+    id: 'walk-stride',
+    title: 'a byte deref of a word walk declines',
+    fixture: () =>
+      constCountdown((fn) => {
+        (cdLoop(fn).body[0] as Stmt & { k: 'assign' }).value = {
+          k: 'bin',
+          op: '+',
+          l: V('v0'),
+          r: { k: 'index', base: V('v1'), idx: C(0), width: 1, signed: true },
+        };
+      }),
+  },
+  {
+    id: 'leftover-walk',
+    title: 'a leftover mentioning a walk pointer declines',
+    // BOTH arms carry the leftover, so the skip-arm equality still holds and this entry is the
+    // only thing standing between the rewrite and a skip path dereferencing an uninitialised `v0`
+    fixture: () =>
+      guardedCountdown((body) => {
+        const s = body[0] as Stmt & { k: 'if' };
+        const leftover: Stmt = { k: 'store', lval: deref('v0'), value: C(0) };
+        s.then.push(leftover);
+        s.else.splice(3, 0, leftover);
+      }),
+  },
+];
+
+describe('COUNTDOWN_GATES — each entry is load-bearing on its own input', () => {
+  test('every entry has a fixture, and every fixture an entry', () => {
+    expect(GATE_ABLATIONS.map((a) => a.id).sort()).toEqual(COUNTDOWN_GATES.map((g) => g.id).sort());
+  });
+
+  test.each(GATE_ABLATIONS)('$id — $title, and re-spells with the entry dropped', ({ id, fixture }) => {
+    expect(reindexWalks(fixture())).toBeNull();
+    expect(reindexWalks(fixture(), undefined, without(COUNTDOWN_GATES, id))).not.toBeNull();
+  });
+});
+
+test('the counter’s DECLARATION is retired with its writes, not left standing unused', () => {
+  const c = cBackend.emit(reindexWalks(constCountdown())!);
+  expect(c).not.toContain('v2'); // neither `s32 v2;` nor any use
+  expect(c).toContain('s32 v0;'); // the accumulator still is one
+});
+
+test('an ESCAPED counter address is a mention: `&k` published before the loop declines', () => {
+  // the four-roles rule is the whole licence for deleting the counter's writes, and a var-only
+  // count cannot see the escape — the DMA-published frame slot renders its address as `addr`
+  expect(
+    reindexWalks(
+      constCountdown((fn) =>
+        fn.body.splice(3, 0, {
+          k: 'store',
+          lval: {
+            k: 'index',
+            base: { k: 'cast', to: T.ptr(T.u(32)), e: C(0x40000d4) },
+            idx: C(0),
+            width: 4,
+            signed: false,
+          },
+          value: { k: 'addr', name: 'v2' },
+        }),
+      ),
+    ),
+  ).toBeNull();
+});
+
+test('a walk pointer whose ADDRESS escapes declines too', () => {
+  expect(
+    reindexWalks(
+      constCountdown((fn) =>
+        fn.body.splice(3, 0, {
+          k: 'store',
+          lval: { k: 'index', base: V('a0'), idx: C(0), width: 4, signed: true },
+          value: { k: 'addr', name: 'v1' },
+        }),
+      ),
+    ),
+  ).toBeNull();
 });
 
 test('a walk base agbcc REMATERIALIZED as a shift is admitted like a pool word', () => {
