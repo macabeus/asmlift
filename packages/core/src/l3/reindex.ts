@@ -55,8 +55,9 @@
 //     read), counted over the whole function; any other use — a leftover's read, the body's, a
 //     nested loop's, or an ESCAPED ADDRESS (`&k`, which the mention count sees) — would survive
 //     the deletion;
-//   • the body's contiguous TAIL is the steps: ONE `p += 1` per walk pointer, and `k -= 1`. Two
-//     steps for one pointer stride 2, which `p[i]` does not;
+//   • no walk pointer is stepped TWICE in one body — two `p += 1` stride 2, which `p[i]` does
+//     not. (That the tail holds a decrement and at least one step is shape recognition, not an
+//     admission rule: without them there is no countdown here to refuse.);
 //   • each walk pointer has an init ahead of the loop whose base the rewrite can leave standing:
 //     a var, or a rematerializable address (see `rematerializableAddress`);
 //   • every p is mentioned only inside the loop shape, and never by a leftover statement — a
@@ -711,7 +712,8 @@ function tryExprWalk(
  *  set too, inertly: the volatile lever marks only declared locals), v2 the walk pointers
  *  themselves — the locals the /indexed/volatile product (rank.ts) narrows the volatile lever
  *  to. A v3 loop contributes nothing: it DELETES its pointer, and its base is qualified through
- *  the /livebase pairings instead. */
+ *  the /livebase pairings instead. `gates` is the shared countdown admission table — a parameter
+ *  so a test can ablate one entry and re-run the real pass. */
 export function reindexWalks(
   sfn: SFn,
   keptWalks?: Set<string>,
@@ -889,9 +891,11 @@ export function reindexWalks(
 
   /** The countdown machinery the guarded (v2) and the unguarded constant-trip (v4) shapes share:
    *  everything downstream of "which statement inits the counter, and what is the trip count".
-   *  `confineTo` names the statements every mention of the counter and of each walk pointer must
-   *  live in, given the induction inits this found. Returns the inits it consumed, `pre` minus
-   *  them, and the counted `for` — or null (decline). */
+   *  Recognizes the shape, collects what `gates` reads, and refuses on the first entry that
+   *  rejects. `confineTo` names the statements every mention of the counter and of each walk
+   *  pointer must live in, given the induction inits this found; `accept` is the caller's own
+   *  admission. Returns the inits it consumed, `pre` minus them, and the counted `for` — or null
+   *  (decline). */
   function respellCountdown(
     loop: Stmt & { k: 'dowhile' },
     pre: Stmt[],
@@ -993,10 +997,10 @@ export function reindexWalks(
     for (const p of walks) {
       keptWalks?.add(p);
     }
-    // The counter is now unmentioned — its init, its decrement and the exit test are all gone, and
-    // the four-roles rule says those were every mention it had. Its declaration goes with them: a
-    // local declared, never written and never read reads as a deliberately uninitialized slot,
-    // which is what `uninit` exists to mark. A PARAM keeps its declaration, having one for a
+    // Nothing mentions the counter past this point: its init, its decrement and the exit test are
+    // all gone, and the four-roles rule says those were every mention it had. Its declaration goes
+    // with them — a local declared, never written and never read reads as the deliberately
+    // uninitialized slot `uninit` exists to mark. A PARAM keeps its declaration, having one for a
     // reason the body does not decide.
     const kDecl = locals.findIndex((l) => l.name === k);
     if (kDecl >= 0) {

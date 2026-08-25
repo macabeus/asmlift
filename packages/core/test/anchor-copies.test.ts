@@ -1,12 +1,14 @@
 // Def-site anchoring of constant merge copies (structure.ts anchorConstCopies): an edge copy
 // `v = K` whose constant the asm materialized EARLIER — `movs r9, #0` at entry ahead of a
 // single-armed overwrite — is emitted at the const op's original position and the edge copy is
-// suppressed. Off by default; rank.ts enumerates it as the `/defsite` axis.
+// suppressed. Off by default; rank.ts enumerates it as the `/defsite` axis, and its widening to a
+// loop header's entry const (`anchorLoopEntryConsts`) as `/defsite/loop-entry`.
 //
 // The refusal conditions are what make it sound, so they are what these tests pin hardest:
 // in-loop shapes decline outright (per-iteration precedence is not dominance — the /preinit
 // sticky-arm class), and a const whose write could clobber another anchored arg on a path to its
-// edge keeps the edge placement.
+// edge keeps the edge placement. The two flags are pinned as SEPARATE placements: one boolean
+// covering both makes the middle spelling unreachable.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
