@@ -41,9 +41,10 @@
 // boundary contract catches (they check resolution and deref typing, not definite assignment).
 //
 // ORDERING: `hoistBaseLocals` (basecse) runs unconditionally in `structureChecked`, BEFORE
-// rank's levers see the tree. So this pass's `addr`/`const` input is only what basecse REFUSED —
-// loop uses and repeated-constant-offset uses — which is why it carries basecse's const-offset gate
-// rather than assuming those bases never arrive.
+// rank's levers see the tree. So this pass's `addr`/`const` input is what basecse's DEFAULT table
+// refused — EVERY gate in it, single-use bases as much as loop and repeated-constant-offset ones —
+// which is why the two refusals below re-state basecse's rather than assuming those bases never
+// arrive.
 import { type IrType, T, scalarTypeForAccess } from '../ir/types';
 import type { Expr, SFn, Stmt } from './ast';
 import { mapExprChildren, stmtExprs } from './ast';
