@@ -65,31 +65,41 @@ export type Expr =
   // default) never produces this node; it keeps the `"?"` sentinel → ContractError behavior.
   | { k: 'marker'; reason: string; args: Expr[] };
 
-// `>>` is the ARITHMETIC right shift and `>>>` the LOGICAL one. C spells both `>>` and picks from
-// the left operand's type, so the C backend synthesizes the cast that pins the choice — exactly as
-// it already synthesizes scalar deref casts from an `index` node's width. A backend with no
-// spelling for one of them (IDO Pascal) declines LOUDLY on the operation itself, rather than on
-// whatever artifact another language's spelling happened to leave in the tree.
+// THE SIGNEDNESS-CARRYING PAIRS. `>>` is the ARITHMETIC right shift and `>>>` the LOGICAL one;
+// `/`/`%` are the SIGNED quotient and remainder and `/u`/`%u` the unsigned ones. C spells each pair
+// with one token and picks between them from the operand types, so the C backend synthesizes the
+// cast that pins the choice — exactly as it already synthesizes scalar deref casts from an `index`
+// node's width. A backend with no spelling for one of them (IDO Pascal) declines LOUDLY on the
+// operation itself, rather than on whatever artifact another language's spelling happened to leave
+// in the tree.
 //
-// WHY THIS ONE SPLIT AND NOT THE OTHERS. "The machine distinguishes them" is NOT the rule — the
-// machine distinguishes `divu`/`div` and `sltu`/`slt` too, and ARITH_TO_BIN deliberately collapses
-// `udiv`→`/`, `umod`→`%`, `icmp_u*`→`<` etc., noting that "unsignedness is in the operand types".
-// Taking the machine as the rule would license four more splits with no inhabitant, which is what
-// "earn the level" forbids. The rule is the repo's own: the shift split because a real,
-// byte-load-bearing divergence HAD inhabitants (~20 rows, 5 projects, 4 compilers) and no other
-// channel could carry it — the operand type could not, since a promoted narrow value is signed
-// whatever it was loaded as.
+// WHY THESE SPLITS AND NOT THE OTHERS. "The machine distinguishes them" is NOT the rule — the
+// machine distinguishes `sltu`/`slt` too, and CMP_TO_BIN deliberately collapses `icmp_u*`→`<` etc.,
+// noting that "unsignedness is in the operand types". Taking the machine as the rule would license
+// more splits with no inhabitant, which is what "earn the level" forbids. The rule is the repo's
+// own: a split is earned by a real, byte-load-bearing divergence WITH inhabitants that no other
+// channel can carry. The shifts earned it first (~20 rows, 5 projects, 4 compilers) because the
+// operand type could not carry them — a promoted narrow value is signed whatever it was loaded as.
 //
-// The collapsed operators lean on exactly that channel, so they carry the same latent hazard:
-// `*(u16 *)p / 3` renders as a signed division of a promoted `int` where the asm did `divu`. It is
-// tolerated because no row has produced such a divergence. When one does, the fix is this same
-// split — not a per-site patch.
+// The divides earned it second, on pokeemerald:GetAnchorCoord — `(u32)(coord * a1) / (u32)a0`
+// standing beside two arithmetic shifts of the same values. Their only other channel is the operand
+// TYPES, reached by flipping a declaration, and there that flip is unreachable and unsound at
+// once: the divisor also feeds a signed compare, so the /uns-cmp reconciliation correctly refuses
+// it, and forcing it anyway makes agbcc delete the comparison as always-false. A per-operand pin is
+// the only spelling that says "this division alone is unsigned".
+//
+// The COMPARISONS stay collapsed, and that asymmetry is the rule applying rather than an omission:
+// which side a compare was spelled from genuinely underdetermines — a signed spelling that
+// byte-matched was proved non-negative by the compiler — so it is refereed as an axis, while a
+// division helper is a pure function of the expression's C type with no such proof available.
 export type BinOp =
   | '+'
   | '-'
   | '*'
   | '/'
+  | '/u'
   | '%'
+  | '%u'
   | '<'
   | '<='
   | '>'

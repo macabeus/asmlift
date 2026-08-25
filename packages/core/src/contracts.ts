@@ -309,7 +309,7 @@ export function assertDerefsTyped(sfn: SFn): void {
     }
   }
   // Ops C rejects outright on a pointer operand (the additive ops and &&/|| are legal C).
-  const NO_PTR_OPS = new Set<BinOp>(['&', '|', '^', '<<', '>>', '>>>', '*', '/', '%']);
+  const NO_PTR_OPS = new Set<BinOp>(['&', '|', '^', '<<', '>>', '>>>', '*', '/', '/u', '%', '%u']);
   // The comparison operators — where a bare `&SYM` operand is SIGN-ambiguous, not ill-formed.
   const CMP_OPS = new Set(['<', '<=', '>', '>=', '==', '!=']);
   // 1/2/4 only: the decomp typedef vocabulary (C_TYPEDEFS) has no 64-bit scalar, so a width-8

@@ -9,6 +9,7 @@ import { IrType, T, scalarTypeForAccess, typeToString } from '../ir/types';
 import { BinOp, Expr, SFn, Stmt, dotBase } from '../l3/ast';
 import {
   type PrintEnv,
+  arithConversionSignedness,
   assertsVolatile,
   declaredTypes,
   derefStrideOk,
@@ -22,12 +23,14 @@ import {
 const PREC: Record<BinOp, number> = {
   '*': 3,
   '/': 3,
+  '/u': 3, // the unsigned twins spell as C's `/` and `%` (see C_SPELLING) — same precedence
   '%': 3,
+  '%u': 3,
   '+': 4,
   '-': 4,
   '<<': 5,
   '>>': 5,
-  '>>>': 5, // spells as C's `>>` (see printExpr's shift rule) — same precedence
+  '>>>': 5, // spells as C's `>>` — same precedence
   '<': 6,
   '<=': 6,
   '>': 6,
@@ -39,6 +42,19 @@ const PREC: Record<BinOp, number> = {
   '|': 10,
   '&&': 11,
   '||': 12,
+};
+
+/** The signedness-carrying operator pairs and the ONE C token each pair shares (l3/ast.ts BinOp).
+ *  Membership here is what makes an operator's operands get pinned; every other operator prints
+ *  its own symbol and needs no cast, because C's own rules for it are sign-blind or already
+ *  agree. */
+const C_SPELLING: Partial<Record<BinOp, { token: string; signed: boolean }>> = {
+  '>>': { token: '>>', signed: true },
+  '>>>': { token: '>>', signed: false },
+  '/': { token: '/', signed: true },
+  '/u': { token: '/', signed: false },
+  '%': { token: '%', signed: true },
+  '%u': { token: '%', signed: false },
 };
 
 /** Spell a recovered type in the decomp C-family typedef vocabulary (`s32`/`u32`/`u8`/`T *`). */
@@ -128,27 +144,50 @@ function printExpr(e: Expr, parentPrec: number, vt: PrintEnv, leaf?: LeafHook): 
           ...(assertsVolatile(ix.base, vt) ? { volatile: true as const } : {}),
           e: ix.base,
         };
-  // C-FAMILY SHIFT LEGALIZATION, the same discipline one operator over. The tower keeps the two
-  // right shifts apart (`>>>` logical, `>>` arithmetic); C spells BOTH `>>` and picks between them
-  // from the LEFT OPERAND'S TYPE. So the operand must be made to carry the choice, or an `shr_u`
-  // recompiles to `asr` where the target has `lsr` AND evaluates differently —
-  // `*(u8 *)&g << 30 >> 30` promotes to `int`, so a 2-bit field holding 2 comes out -1.
+  // C-FAMILY OPERAND-SIGNEDNESS LEGALIZATION, the same discipline as the deref cast above one
+  // operator over. The tower keeps the signedness-carrying pairs apart (`>>>` logical / `>>`
+  // arithmetic, `/u` `%u` unsigned / `/` `%` signed); C spells each pair with ONE token and picks
+  // between them from the operand types. So the operands must be made to carry the choice, or an
+  // `shr_u` recompiles to `asr` where the target has `lsr` AND evaluates differently
+  // (`*(u8 *)&g << 30 >> 30` promotes to `int`, so a 2-bit field holding 2 comes out -1), and a
+  // `udiv` calls `__divsi3` where the target called `__udivsi3`.
   //
   // (engine.ts's zext fold covers the same hazard for widths C can NAME, by folding the whole
   // shift pair to a cast op. Every other extract width — every bitfield read — lands here.)
   //
-  // The cast is added unless the operand PROVABLY renders with the signedness the op needs:
-  // renderedIntSignedness answers `undefined` wherever its model does not reach, and a redundant
-  // cast is codegen-identical while a missing one is a miscompile. An existing 32-bit integer cast
-  // is REPLACED rather than wrapped — `(u32)(s32)&g` and `(u32)&g` are the same bytes, and the
-  // arithmetic rules upstream do emit that inner cast (intifyAddr).
-  const shiftOperand = (e0: Extract<Expr, { k: 'bin' }>): Expr => {
-    const wantSigned = e0.op === '>>';
-    if (renderedIntSignedness(e0.l, vt.type) === wantSigned) {
-      return e0.l;
+  // An existing 32-bit integer cast is REPLACED rather than wrapped — `(u32)(s32)&g` and `(u32)&g`
+  // are the same bytes, and the arithmetic rules upstream do emit that inner cast (intifyAddr).
+  // The replacement CARRIES the qualifier: re-typing a `volatile` cast without it drops an
+  // assertion the differ cannot referee the loss of, which is why l3/initfirst.ts's
+  // `stripWideIntCast` refuses the same peel one pass over.
+  const recast = (x: Expr, signed: boolean): Expr => {
+    const replaced = x.k === 'cast' && x.to.kind === 'int' && x.to.width === 32 ? x : undefined;
+    return {
+      k: 'cast',
+      to: T.int(32, signed),
+      ...(replaced?.volatile === true ? { volatile: true as const } : {}),
+      e: replaced ? replaced.e : x,
+    };
+  };
+  // A SHIFT and a DIVIDE read their operands differently, so the pin does too. A SHIFT takes the
+  // type of its left operand alone, and the cast goes on unless that operand PROVABLY renders as
+  // the op needs (renderedIntSignedness's header carries the rule for reading `undefined`).
+  //
+  // A DIVIDE takes the usual arithmetic conversions over BOTH operands, where unsigned wins at
+  // equal rank, so the question is what the PAIR renders as. Once the pair renders wrong the two
+  // directions cost differently: unsigned takes ONE cast, which carries the whole operation, while
+  // signed has to pin EVERY operand short of a proof, because one unsigned side is enough to make
+  // the division unsigned. Verified by compiling: `((u32)a / b) / 7` calls `__udivsi3` twice,
+  // `(s32)((u32)a / b) / 7` calls `__udivsi3` then `__divsi3`.
+  const pinnedOperands = (e0: Extract<Expr, { k: 'bin' }>, wantSigned: boolean): [Expr, Expr] => {
+    if (e0.op === '>>' || e0.op === '>>>') {
+      return [renderedIntSignedness(e0.l, vt.type) === wantSigned ? e0.l : recast(e0.l, wantSigned), e0.r];
     }
-    const inner = e0.l.k === 'cast' && e0.l.to.kind === 'int' && e0.l.to.width === 32 ? e0.l.e : e0.l;
-    return { k: 'cast', to: T.int(32, wantSigned), e: inner };
+    if (arithConversionSignedness(e0.l, e0.r, vt.type) === wantSigned) {
+      return [e0.l, e0.r];
+    }
+    const pinSigned = (x: Expr): Expr => (renderedIntSignedness(x, vt.type) === true ? x : recast(x, true));
+    return wantSigned ? [pinSigned(e0.l), pinSigned(e0.r)] : [recast(e0.l, false), e0.r];
   };
   switch (e.k) {
     case 'var':
@@ -245,9 +284,11 @@ function printExpr(e: Expr, parentPrec: number, vt: PrintEnv, leaf?: LeafHook): 
     }
     case 'bin': {
       const p = PREC[e.op];
-      // Both right shifts spell C's `>>`; `shiftOperand` supplies the operand cast that says which.
-      const shift = e.op === '>>' || e.op === '>>>';
-      const s = `${rec(shift ? shiftOperand(e) : e.l, p)} ${shift ? '>>' : e.op} ${rec(e.r, p - 1)}`;
+      // Each signedness-carrying pair spells with ONE C token; `pinnedOperands` supplies the
+      // operand cast that says which of the pair it is.
+      const pair = C_SPELLING[e.op];
+      const [l, r] = pair ? pinnedOperands(e, pair.signed) : [e.l, e.r];
+      const s = `${rec(l, p)} ${pair ? pair.token : e.op} ${rec(r, p - 1)}`;
       return p > parentPrec ? `(${s})` : s;
     }
   }

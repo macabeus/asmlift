@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generatedAt": "2026-08-24T21:30:26.443Z",
+    "generatedAt": "2026-08-24T23:54:54.451Z",
     "toolchains": [
       "ido7.1",
       "agbcc",
@@ -14,7 +14,7 @@
       "real": 252
     },
     "asmlift": {
-      "commit": "10f6f26e43675ee65e4d1a289092c9df4a32c0d4",
+      "commit": "fa8237d37218bfff9dfa7e08e982a59d7aace333",
       "dirty": false
     },
     "m2c": {
@@ -3397,22 +3397,22 @@
           }
         ],
         "outcome": "nonmatch",
-        "source": "struct Struct0 { u16 field_0; u16 field_2; s32 field_4; };\nstruct Struct1 { u16 field_0; u16 field_2; u8 _pad0[2]; u16 field_6; u8 field_8; };\ns32 * CheckTileCollisionVertical(s32 * a0, u32 a1, u32 a2, u32 a3) {\n    s32 v0;\n    u32 v1;\n    s32 v2;\n    s32 v3;\n    s32 uninit_r4;\n    v0 = (u16)a1;\n    v1 = (u16)a2;\n    if (gUnk_03004D80->unk2 < gUnk_03004D80->unk0) {\n        v3 = gUnk_03004D80->unk2;\n        v2 = gUnk_03004D80->unk2 * 12;\n        do {\n            if (v1 >= ((struct Struct1 *)(v2 + ((struct Struct0 *)gUnk_03004D80)->field_4))->field_2 && ((struct Struct1 *)(v2 + ((struct Struct0 *)gUnk_03004D80)->field_4))->field_6 >= v1 - (u8)a3) {\n                if (v0 < ((struct Struct1 *)(v2 + ((struct Struct0 *)gUnk_03004D80)->field_4))->field_0 + 3) {\n                    if (((struct Struct1 *)(v2 + ((struct Struct0 *)gUnk_03004D80)->field_4))->field_0 - 3 < v0) {\n                        *a0 = (uninit_r4 & -65536 | (u16)(((struct Struct1 *)(v2 + ((struct Struct0 *)gUnk_03004D80)->field_4))->field_0 - 3)) & -16711681 | ((struct Struct1 *)(v2 + ((struct Struct0 *)gUnk_03004D80)->field_4))->field_8 << 16;\n                        return a0;\n                    }\n                }\n            }\n            v2 = v2 + 12;\n            v3 = v3 + 1;\n        } while (v3 < gUnk_03004D80->unk0);\n    }\n    *a0 = uninit_r4 | 65535;\n    return a0;\n}\n",
-        "score": 64,
+        "source": "struct Struct0 { u16 field_0; u16 field_2; s32 field_4; };\nstruct Struct1 { u16 field_0; u16 field_2; u8 _pad0[2]; u16 field_6; u8 field_8; };\ns32 * CheckTileCollisionVertical(s32 * a0, u32 a1, u32 a2, u32 a3) {\n    s32 v0;\n    u32 v1;\n    s32 v2;\n    s32 v3;\n    s32 uninit_r4;\n    v0 = (u16)a1;\n    v1 = (u16)a2;\n    if (gUnk_03004D80->unk2 < gUnk_03004D80->unk0) {\n        v3 = gUnk_03004D80->unk2;\n        v2 = gUnk_03004D80->unk2 * 12;\n        do {\n            if (v1 >= ((struct Struct1 *)(v2 + ((struct Struct0 *)gUnk_03004D80)->field_4))->field_2 && ((struct Struct1 *)(v2 + ((struct Struct0 *)gUnk_03004D80)->field_4))->field_6 >= (s32)(v1 - (u8)a3)) {\n                if (v0 < ((struct Struct1 *)(v2 + ((struct Struct0 *)gUnk_03004D80)->field_4))->field_0 + 3) {\n                    if (((struct Struct1 *)(v2 + ((struct Struct0 *)gUnk_03004D80)->field_4))->field_0 - 3 < v0) {\n                        *a0 = (uninit_r4 & -65536 | (u16)(((struct Struct1 *)(v2 + ((struct Struct0 *)gUnk_03004D80)->field_4))->field_0 - 3)) & -16711681 | ((struct Struct1 *)(v2 + ((struct Struct0 *)gUnk_03004D80)->field_4))->field_8 << 16;\n                        return a0;\n                    }\n                }\n            }\n            v2 = v2 + 12;\n            v3 = v3 + 1;\n        } while (v3 < gUnk_03004D80->unk0);\n    }\n    *a0 = uninit_r4 | 65535;\n    return a0;\n}\n",
+        "score": 63,
         "maxScore": 96,
         "compileErrors": null,
         "breakdown": {
           "insert": 14,
           "delete": 15,
           "replace": 5,
-          "opMismatch": 3,
+          "opMismatch": 2,
           "argMismatch": 27
         },
         "quality": {
-          "score": 96,
+          "score": 94,
           "lines": 29,
           "gotos": 0,
-          "casts": 4,
+          "casts": 5,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -3444,14 +3444,14 @@
       },
       "gapSize": {
         "decompiler": "asmlift",
-        "score": 64,
+        "score": 63,
         "maxScore": 96,
-        "ratio": 0.6666666666666666,
+        "ratio": 0.65625,
         "kinds": {
           "insert": 14,
           "delete": 15,
           "replace": 5,
-          "opMismatch": 3,
+          "opMismatch": 2,
           "argMismatch": 27
         }
       },
@@ -8342,7 +8342,7 @@
           }
         ],
         "outcome": "nonmatch",
-        "source": "struct Elem0 { u16 field_0; u16 field_2; u16 field_4; u16 field_6; u8 _pad0[20]; };\nstruct Elem1 { s32 field_0; u8 _pad0[4]; };\nvoid TransformSingleEntityToScreen(u32 a0, u32 a1, u32 a2) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    u8 * v5;\n    s32 v6;\n    s32 v7;\n    v0 = ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_0 - (s8)a1 - gUnk_03003430.bg2HOfs;\n    ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_4 = v0;\n    v1 = ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_2 - (s8)a2 - gUnk_03003430.bg2VOfs;\n    ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_6 = v1;\n    v2 = gUnk_03003430.bg2HOfs;\n    v3 = gBg2XMag;\n    v4 = gUnk_03003430.bg2HOfs;\n    if ((u8)a0 > 12) {\n        v5 = (u8 *)((s32 *)(((u8)a0 << 3) + (u8 *)gUnk_030051DC - 104))[1];\n    } else {\n        v5 = (u8 *)((struct Elem1 *)((u32)&gUnk_08078FC8 + 4))[(u8)a0].field_0;\n    }\n    switch (15 & v5[5]) {\n        case 3:\n        case 11:\n            v7 = gUnk_03003430.bg2VOfs - (s16)(u16)(gUnk_03003430.bg2VOfs - v1) * gBg2YMag / 256;\n            v6 = (s32)((128 << 1) - gBg2YMag) >> 3;\n            break;\n        case 1:\n        case 6:\n        case 8:\n            v7 = gUnk_03003430.bg2VOfs - (s16)(u16)(gUnk_03003430.bg2VOfs - v1) * gBg2YMag / 256;\n            v6 = (s32)((128 << 1) - gBg2YMag) >> 5;\n            break;\n        case 0:\n        case 4:\n        case 5:\n            v7 = gUnk_03003430.bg2VOfs - (s16)(u16)(gUnk_03003430.bg2VOfs - v1) * gBg2YMag / 256;\n            v6 = (s32)((128 << 1) - gBg2YMag) >> 6;\n            break;\n        case 2:\n        case 7:\n        case 9:\n        case 10:\n            v7 = gUnk_03003430.bg2VOfs - (s16)(u16)(gUnk_03003430.bg2VOfs - v1) * gBg2YMag / 256;\n            v6 = (s32)((128 << 1) - gBg2YMag) >> 4;\n            break;\n        default:\n            v7 = gUnk_03003430.bg2VOfs - (s16)(u16)(gUnk_03003430.bg2VOfs - v1) * gBg2YMag / 256;\n            v6 = (s32)((128 << 1) - gBg2YMag) >> 4;\n    }\n    ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_4 = v4 - v3 * (s16)(v2 - v0) / 256;\n    ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_6 = v7 + v6;\n    return;\n}\n",
+        "source": "struct Elem0 { u16 field_0; u16 field_2; u16 field_4; u16 field_6; u8 _pad0[20]; };\nstruct Elem1 { s32 field_0; u8 _pad0[4]; };\nvoid TransformSingleEntityToScreen(u32 a0, u32 a1, u32 a2) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    u8 * v5;\n    s32 v6;\n    s32 v7;\n    v0 = ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_0 - (s8)a1 - gUnk_03003430.bg2HOfs;\n    ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_4 = v0;\n    v1 = ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_2 - (s8)a2 - gUnk_03003430.bg2VOfs;\n    ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_6 = v1;\n    v2 = gUnk_03003430.bg2HOfs;\n    v3 = gBg2XMag;\n    v4 = gUnk_03003430.bg2HOfs;\n    if ((u8)a0 > 12) {\n        v5 = (u8 *)((s32 *)(((u8)a0 << 3) + (u8 *)gUnk_030051DC - 104))[1];\n    } else {\n        v5 = (u8 *)((struct Elem1 *)((u32)&gUnk_08078FC8 + 4))[(u8)a0].field_0;\n    }\n    switch (15 & v5[5]) {\n        case 3:\n        case 11:\n            v7 = gUnk_03003430.bg2VOfs - (s32)((s16)(u16)(gUnk_03003430.bg2VOfs - v1) * gBg2YMag) / 256;\n            v6 = (s32)((128 << 1) - gBg2YMag) >> 3;\n            break;\n        case 1:\n        case 6:\n        case 8:\n            v7 = gUnk_03003430.bg2VOfs - (s32)((s16)(u16)(gUnk_03003430.bg2VOfs - v1) * gBg2YMag) / 256;\n            v6 = (s32)((128 << 1) - gBg2YMag) >> 5;\n            break;\n        case 0:\n        case 4:\n        case 5:\n            v7 = gUnk_03003430.bg2VOfs - (s32)((s16)(u16)(gUnk_03003430.bg2VOfs - v1) * gBg2YMag) / 256;\n            v6 = (s32)((128 << 1) - gBg2YMag) >> 6;\n            break;\n        case 2:\n        case 7:\n        case 9:\n        case 10:\n            v7 = gUnk_03003430.bg2VOfs - (s32)((s16)(u16)(gUnk_03003430.bg2VOfs - v1) * gBg2YMag) / 256;\n            v6 = (s32)((128 << 1) - gBg2YMag) >> 4;\n            break;\n        default:\n            v7 = gUnk_03003430.bg2VOfs - (s32)((s16)(u16)(gUnk_03003430.bg2VOfs - v1) * gBg2YMag) / 256;\n            v6 = (s32)((128 << 1) - gBg2YMag) >> 4;\n    }\n    ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_4 = v4 - v3 * (s16)(v2 - v0) / 256;\n    ((struct Elem0 *)&gUnk_03002920)[(u8)a0].field_6 = v7 + v6;\n    return;\n}\n",
         "score": 185,
         "maxScore": 226,
         "compileErrors": null,
@@ -8357,7 +8357,7 @@
           "score": 84,
           "lines": 56,
           "gotos": 0,
-          "casts": 31,
+          "casts": 36,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -8433,7 +8433,7 @@
         "decompiler": "asmlift",
         "symbolMap": true,
         "outcome": "noncompile",
-        "source": "void UpdateCameraScroll(void) {\n    s32 v0;\n    u32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    s32 v5;\n    s32 v6;\n    s32 v7;\n    s32 v8;\n    s32 v9;\n    s32 v10;\n    s32 v11;\n    s32 v12;\n    s32 v13;\n    s32 v14;\n    s32 v15;\n    s32 v16;\n    s32 v17;\n    s32 v18;\n    s32 v19;\n    if ((48 & gUnk_030051B8) == 0) {\n        v0 = gUnk_03003430.bg2HOfs;\n        if (*(s16 *)&gUnk_03002920 > (s16)(120 + v0)) {\n            if (*(u16 *)&gUnk_03002920 - 120 - gUnk_03003430.bg2HOfs > 5) {\n                v7 = 2;\n            } else {\n                v7 = 0 & -65536 | 1;\n            }\n            v12 = 16;\n            v11 = gHeldKeys;\n            v10 = 32;\n            if ((v10 & v11) != 0) {\n                v12 = 0;\n                v7 = v7 & -65536;\n            }\n        } else {\n            if (*(s16 *)&gUnk_03002920 < (s16)(120 + v0)) {\n                if (gUnk_03003430.bg2HOfs - (*(u16 *)&gUnk_03002920 - 120) > 5) {\n                    v8 = 0 & -65536;\n                    v9 = 65534;\n                } else {\n                    v8 = 0;\n                    v9 = 65535;\n                }\n                v12 = 32;\n                v7 = v8 | v9;\n                v11 = gHeldKeys;\n                v10 = 16;\n                if ((v10 & v11) != 0) {\n                    v12 = 0;\n                    v7 = v7 & -65536;\n                }\n            } else {\n                v12 = 0;\n                v7 = 0;\n            }\n        }\n    } else {\n        v12 = 0;\n        v7 = 0;\n    }\n    if ((192 & gUnk_030051B8) == 0) {\n        v1 = ((u16 *)&gUnk_03002920)[3];\n        if (v1 > 160) {\n            v13 = 68;\n        } else {\n            v13 = 0;\n        }\n        if ((u16)(v13 + v1) > 99) {\n            if ((u16)(v13 + v1 - 100) > 30) {\n                v15 = v12 | 128;\n                v7 = v7 & 65535;\n                v14 = 192 << 10;\n            } else {\n                v15 = v12 | 128;\n                v7 = v7 & 65535;\n                v14 = 65536;\n            }\n            v12 = v15;\n            v7 = v7 | v14;\n        } else {\n            if ((u16)(v13 + v1) <= 70) {\n                if ((u16)(v13 + 70 - v1) > 25) {\n                    v15 = (u8)(v12 | 64);\n                    v7 = v7 & 65535;\n                    v14 = -196608;\n                } else {\n                    v15 = (u8)(v12 | 64);\n                    v14 = -65536;\n                }\n                v12 = v15;\n                v7 = v7 | v14;\n            }\n        }\n    }\n    v2 = gUnk_030051B8;\n    v3 = gUnk_03005480;\n    v4 = gUnk_030034E8.unk0;\n    v5 = gUnk_030007C0;\n    v6 = gUnk_030034E8.unk4;\n    gUnk_03005480 = v3 + v4 & 65535;\n    gUnk_030007C0 = v5 + v6 & 65535;\n    if (gUnk_03005220.deathSequenceTimer != 0) {\n        v16 = (v12 | v2) & 48;\n        v17 = 0;\n    } else {\n        v16 = v12 | v2;\n        v17 = (v7 & -65536 | (u16)(v7 + (v3 + v4 >> 16))) & 65535 | ((u32)(v7 & -65536 | (u16)(v7 + (v3 + v4 >> 16))) >> 16) + (v5 + v6 >> 16) << 16;\n    }\n    if (v16 != 0) ScrollBGLayer(v16, v17);\n    gUnk_03003430.bg1HOfs = (u32)gUnk_03003430.bg2HOfs >> 1;\n    if ((gUnk_03004C20.globalFrameCounter & 3) == 0 && gUnk_03004660 == 0) {\n        if (gUnk_03003430.bg2VOfs >= gPrevBg2VOfs) {\n            v18 = gUnk_03003430.bg1VOfs + (gUnk_03003430.bg2VOfs - gPrevBg2VOfs & 1);\n        } else {\n            v18 = gUnk_03003430.bg1VOfs - (gPrevBg2VOfs - gUnk_03003430.bg2VOfs & 1);\n        }\n        gUnk_03003430.bg1VOfs = v18;\n        if ((128 << 8 & gUnk_03003430.bg1VOfs) != 0) {\n            v19 = 0;\n            gUnk_03003430.bg1VOfs = v19;\n        } else {\n            if ((u16)gUnk_03003430.bg1VOfs > 80) {\n                v19 = 80;\n                gUnk_03003430.bg1VOfs = v19;\n            }\n        }\n    }\n    gPrevBg2VOfs = gUnk_03003430.bg2VOfs;\n    *(u16 *)&gBg2PA = MultiplyQ8(*(s16 *)((gBg2Alpha + 64 << 1) + (u32)&gSineTable + 0), (s16)ReciprocalQ8(*(s16 *)&gBg2XMag));\n    *(u16 *)&gBg2PB = MultiplyQ8(*(s16 *)((gBg2Alpha << 1) + (u32)&gSineTable + 0), (s16)ReciprocalQ8(*(s16 *)&gBg2XMag));\n    *(u16 *)&gBg2PC = MultiplyQ8((s16)-((u16 *)&gSineTable)[gBg2Alpha], (s16)ReciprocalQ8(*(s16 *)&gBg2YMag));\n    *(u16 *)&gBg2PD = MultiplyQ8(*(s16 *)((gBg2Alpha + 64 << 1) + (u32)&gSineTable + 0), (s16)ReciprocalQ8(*(s16 *)&gBg2YMag));\n    gBg2X = (gUnk_03003430.bg2HOfs + 120 << 8) - *(s16 *)&gBg2PA * 120 - *(s16 *)&gBg2PB * 80;\n    gBg2Y = (gUnk_03003430.bg2VOfs + 80 << 8) - *(s16 *)&gBg2PC * 120 - *(s16 *)&gBg2PD * 80;\n    return;\n}\n",
+        "source": "void UpdateCameraScroll(void) {\n    s32 v0;\n    u32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    s32 v5;\n    s32 v6;\n    s32 v7;\n    s32 v8;\n    s32 v9;\n    s32 v10;\n    s32 v11;\n    s32 v12;\n    s32 v13;\n    s32 v14;\n    s32 v15;\n    s32 v16;\n    s32 v17;\n    s32 v18;\n    s32 v19;\n    if ((48 & gUnk_030051B8) == 0) {\n        v0 = gUnk_03003430.bg2HOfs;\n        if (*(s16 *)&gUnk_03002920 > (s16)(120 + v0)) {\n            if ((s32)(*(u16 *)&gUnk_03002920 - 120 - gUnk_03003430.bg2HOfs) > 5) {\n                v7 = 2;\n            } else {\n                v7 = 0 & -65536 | 1;\n            }\n            v12 = 16;\n            v11 = gHeldKeys;\n            v10 = 32;\n            if ((v10 & v11) != 0) {\n                v12 = 0;\n                v7 = v7 & -65536;\n            }\n        } else {\n            if (*(s16 *)&gUnk_03002920 < (s16)(120 + v0)) {\n                if ((s32)(gUnk_03003430.bg2HOfs - (*(u16 *)&gUnk_03002920 - 120)) > 5) {\n                    v8 = 0 & -65536;\n                    v9 = 65534;\n                } else {\n                    v8 = 0;\n                    v9 = 65535;\n                }\n                v12 = 32;\n                v7 = v8 | v9;\n                v11 = gHeldKeys;\n                v10 = 16;\n                if ((v10 & v11) != 0) {\n                    v12 = 0;\n                    v7 = v7 & -65536;\n                }\n            } else {\n                v12 = 0;\n                v7 = 0;\n            }\n        }\n    } else {\n        v12 = 0;\n        v7 = 0;\n    }\n    if ((192 & gUnk_030051B8) == 0) {\n        v1 = ((u16 *)&gUnk_03002920)[3];\n        if (v1 > 160) {\n            v13 = 68;\n        } else {\n            v13 = 0;\n        }\n        if ((u16)(v13 + v1) > 99) {\n            if ((u16)(v13 + v1 - 100) > 30) {\n                v15 = v12 | 128;\n                v7 = v7 & 65535;\n                v14 = 192 << 10;\n            } else {\n                v15 = v12 | 128;\n                v7 = v7 & 65535;\n                v14 = 65536;\n            }\n            v12 = v15;\n            v7 = v7 | v14;\n        } else {\n            if ((u16)(v13 + v1) <= 70) {\n                if ((u16)(v13 + 70 - v1) > 25) {\n                    v15 = (u8)(v12 | 64);\n                    v7 = v7 & 65535;\n                    v14 = -196608;\n                } else {\n                    v15 = (u8)(v12 | 64);\n                    v14 = -65536;\n                }\n                v12 = v15;\n                v7 = v7 | v14;\n            }\n        }\n    }\n    v2 = gUnk_030051B8;\n    v3 = gUnk_03005480;\n    v4 = gUnk_030034E8.unk0;\n    v5 = gUnk_030007C0;\n    v6 = gUnk_030034E8.unk4;\n    gUnk_03005480 = v3 + v4 & 65535;\n    gUnk_030007C0 = v5 + v6 & 65535;\n    if (gUnk_03005220.deathSequenceTimer != 0) {\n        v16 = (v12 | v2) & 48;\n        v17 = 0;\n    } else {\n        v16 = v12 | v2;\n        v17 = (v7 & -65536 | (u16)(v7 + (v3 + v4 >> 16))) & 65535 | ((u32)(v7 & -65536 | (u16)(v7 + (v3 + v4 >> 16))) >> 16) + (v5 + v6 >> 16) << 16;\n    }\n    if (v16 != 0) ScrollBGLayer(v16, v17);\n    gUnk_03003430.bg1HOfs = (u32)gUnk_03003430.bg2HOfs >> 1;\n    if ((gUnk_03004C20.globalFrameCounter & 3) == 0 && gUnk_03004660 == 0) {\n        if (gUnk_03003430.bg2VOfs >= gPrevBg2VOfs) {\n            v18 = gUnk_03003430.bg1VOfs + (gUnk_03003430.bg2VOfs - gPrevBg2VOfs & 1);\n        } else {\n            v18 = gUnk_03003430.bg1VOfs - (gPrevBg2VOfs - gUnk_03003430.bg2VOfs & 1);\n        }\n        gUnk_03003430.bg1VOfs = v18;\n        if ((128 << 8 & gUnk_03003430.bg1VOfs) != 0) {\n            v19 = 0;\n            gUnk_03003430.bg1VOfs = v19;\n        } else {\n            if ((u16)gUnk_03003430.bg1VOfs > 80) {\n                v19 = 80;\n                gUnk_03003430.bg1VOfs = v19;\n            }\n        }\n    }\n    gPrevBg2VOfs = gUnk_03003430.bg2VOfs;\n    *(u16 *)&gBg2PA = MultiplyQ8(*(s16 *)((gBg2Alpha + 64 << 1) + (u32)&gSineTable + 0), (s16)ReciprocalQ8(*(s16 *)&gBg2XMag));\n    *(u16 *)&gBg2PB = MultiplyQ8(*(s16 *)((gBg2Alpha << 1) + (u32)&gSineTable + 0), (s16)ReciprocalQ8(*(s16 *)&gBg2XMag));\n    *(u16 *)&gBg2PC = MultiplyQ8((s16)-((u16 *)&gSineTable)[gBg2Alpha], (s16)ReciprocalQ8(*(s16 *)&gBg2YMag));\n    *(u16 *)&gBg2PD = MultiplyQ8(*(s16 *)((gBg2Alpha + 64 << 1) + (u32)&gSineTable + 0), (s16)ReciprocalQ8(*(s16 *)&gBg2YMag));\n    gBg2X = (gUnk_03003430.bg2HOfs + 120 << 8) - *(s16 *)&gBg2PA * 120 - *(s16 *)&gBg2PB * 80;\n    gBg2Y = (gUnk_03003430.bg2VOfs + 80 << 8) - *(s16 *)&gBg2PC * 120 - *(s16 *)&gBg2PD * 80;\n    return;\n}\n",
         "score": null,
         "maxScore": null,
         "compileErrors": 1,
@@ -8441,7 +8441,7 @@
           "score": 76,
           "lines": 138,
           "gotos": 0,
-          "casts": 39,
+          "casts": 41,
           "unkGlue": 0,
           "rawMem": 3,
           "addrDeref": 0
@@ -8666,7 +8666,7 @@
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "candidateLabel": "unsigned/defsite/flip-join/scopebase-coalesce-v2-v4",
+        "candidateLabel": "unsigned/defsite/flip-join/derived-home/scopebase-coalesce-v2-v4",
         "droppedCandidates": [
           {
             "label": "unsigned/raw-globals",
@@ -8876,7 +8876,7 @@
           }
         ],
         "outcome": "match",
-        "source": "s32 UpdateHUDCounterDisplay(void) {\n    s32 v3;\n    s32 v4;\n    u16 * p0;\n    v3 = 0;\n    if (gUnk_03004C20.unkA == 1 || gUnk_03004C20.level == 6) {\n        v4 = 100;\n    } else {\n        v4 = 30;\n    }\n    if (v4 == gUnk_03005220.dreamStones) v3 = 1;\n    if (gUnk_03004C20.unkA == 1 || gUnk_03004C20.level == 6) {\n        v4 = 1;\n        if (gUnk_03005220.dreamStones > 99) {\n            p0 = (u16 *)&gBgTilemapBufs;\n            p0[594] = p0[659];\n            p0[626] = p0[691];\n        }\n    } else {\n        v4 = 0;\n    }\n    if (gUnk_03005220.dreamStones > 9) {\n        gBgTilemapBufs[0][(149 << 2) - v4] = gBgTilemapBufs[0][gUnk_03005220.dreamStones / 10 + 658];\n        gBgTilemapBufs[0][(157 << 2) - v4] = gBgTilemapBufs[0][gUnk_03005220.dreamStones / 10 + 690];\n    }\n    gBgTilemapBufs[0][597 - v4] = gBgTilemapBufs[0][gUnk_03005220.dreamStones % 10 + 658];\n    gBgTilemapBufs[0][629 - v4] = gBgTilemapBufs[0][gUnk_03005220.dreamStones % 10 + 690];\n    return v3;\n}\n",
+        "source": "s32 UpdateHUDCounterDisplay(void) {\n    s32 v0;\n    s32 v1;\n    s32 v3;\n    s32 v4;\n    u16 * p0;\n    v3 = 0;\n    if (gUnk_03004C20.unkA == 1 || gUnk_03004C20.level == 6) {\n        v4 = 100;\n    } else {\n        v4 = 30;\n    }\n    v0 = gUnk_03005220.dreamStones;\n    if (v4 == v0) v3 = 1;\n    if (gUnk_03004C20.unkA == 1 || gUnk_03004C20.level == 6) {\n        v4 = 1;\n        if (v0 > 99) {\n            p0 = (u16 *)&gBgTilemapBufs;\n            p0[594] = p0[659];\n            p0[626] = p0[691];\n        }\n    } else {\n        v4 = 0;\n    }\n    v1 = gUnk_03005220.dreamStones;\n    if (v1 > 9) {\n        gBgTilemapBufs[0][(149 << 2) - v4] = gBgTilemapBufs[0][v1 / 10 + 658];\n        gBgTilemapBufs[0][(157 << 2) - v4] = gBgTilemapBufs[0][(s32)gUnk_03005220.dreamStones / 10 + 690];\n    }\n    gBgTilemapBufs[0][597 - v4] = gBgTilemapBufs[0][(s32)gUnk_03005220.dreamStones % 10 + 658];\n    gBgTilemapBufs[0][629 - v4] = gBgTilemapBufs[0][(s32)gUnk_03005220.dreamStones % 10 + 690];\n    return v3;\n}\n",
         "score": 0,
         "maxScore": 136,
         "compileErrors": null,
@@ -8888,10 +8888,10 @@
           "argMismatch": 0
         },
         "quality": {
-          "score": 100,
-          "lines": 29,
+          "score": 94,
+          "lines": 33,
           "gotos": 0,
-          "casts": 2,
+          "casts": 5,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -9059,102 +9059,6 @@
             "error": "agbcc failed: c.c:1503: invalid operands to binary &"
           },
           {
-            "label": "unsigned/uns-cmp/raw-globals",
-            "error": "agbcc failed: c.c:1499: incompatible types in assignment"
-          },
-          {
-            "label": "unsigned/uns-cmp/volatile/raw-globals",
-            "error": "agbcc failed: c.c:1499: incompatible types in assignment"
-          },
-          {
-            "label": "unsigned/uns-cmp/livebase/raw-globals",
-            "error": "agbcc failed: c.c:1503: incompatible types in assignment"
-          },
-          {
-            "label": "unsigned/uns-cmp/livebase-block/raw-globals",
-            "error": "agbcc failed: c.c:1501: incompatible types in assignment"
-          },
-          {
-            "label": "unsigned/flip-join/uns-cmp/raw-globals",
-            "error": "agbcc failed: c.c:1501: incompatible types in assignment"
-          },
-          {
-            "label": "unsigned/flip-join/uns-cmp/volatile/raw-globals",
-            "error": "agbcc failed: c.c:1501: incompatible types in assignment"
-          },
-          {
-            "label": "unsigned/flip-join/uns-cmp/livebase/raw-globals",
-            "error": "agbcc failed: c.c:1505: incompatible types in assignment"
-          },
-          {
-            "label": "unsigned/flip-join/uns-cmp/livebase-block/raw-globals",
-            "error": "agbcc failed: c.c:1503: incompatible types in assignment"
-          },
-          {
-            "label": "unsigned/reread-globals/uns-cmp/raw-globals",
-            "error": "agbcc failed: c.c:1485: incompatible types in assignment"
-          },
-          {
-            "label": "unsigned/reread-globals/uns-cmp/volatile/raw-globals",
-            "error": "agbcc failed: c.c:1485: incompatible types in assignment"
-          },
-          {
-            "label": "unsigned/reread-globals/uns-cmp/livebase/raw-globals",
-            "error": "agbcc failed: c.c:1489: incompatible types in assignment"
-          },
-          {
-            "label": "unsigned/reread-globals/uns-cmp/livebase-block/raw-globals",
-            "error": "agbcc failed: c.c:1487: incompatible types in assignment"
-          },
-          {
-            "label": "unsigned/flip-join/reread-globals/uns-cmp/raw-globals",
-            "error": "agbcc failed: c.c:1487: incompatible types in assignment"
-          },
-          {
-            "label": "unsigned/flip-join/reread-globals/uns-cmp/volatile/raw-globals",
-            "error": "agbcc failed: c.c:1487: incompatible types in assignment"
-          },
-          {
-            "label": "unsigned/flip-join/reread-globals/uns-cmp/livebase/raw-globals",
-            "error": "agbcc failed: c.c:1491: incompatible types in assignment"
-          },
-          {
-            "label": "unsigned/flip-join/reread-globals/uns-cmp/livebase-block/raw-globals",
-            "error": "agbcc failed: c.c:1489: incompatible types in assignment"
-          },
-          {
-            "label": "unsigned/derived-home/uns-cmp/raw-globals",
-            "error": "agbcc failed: c.c:1499: invalid operands to binary &"
-          },
-          {
-            "label": "unsigned/derived-home/uns-cmp/volatile/raw-globals",
-            "error": "agbcc failed: c.c:1499: invalid operands to binary &"
-          },
-          {
-            "label": "unsigned/derived-home/uns-cmp/livebase/raw-globals",
-            "error": "agbcc failed: c.c:1503: invalid operands to binary &"
-          },
-          {
-            "label": "unsigned/derived-home/uns-cmp/livebase-block/raw-globals",
-            "error": "agbcc failed: c.c:1501: invalid operands to binary &"
-          },
-          {
-            "label": "unsigned/flip-join/derived-home/uns-cmp/raw-globals",
-            "error": "agbcc failed: c.c:1501: invalid operands to binary &"
-          },
-          {
-            "label": "unsigned/flip-join/derived-home/uns-cmp/volatile/raw-globals",
-            "error": "agbcc failed: c.c:1501: invalid operands to binary &"
-          },
-          {
-            "label": "unsigned/flip-join/derived-home/uns-cmp/livebase/raw-globals",
-            "error": "agbcc failed: c.c:1505: invalid operands to binary &"
-          },
-          {
-            "label": "unsigned/flip-join/derived-home/uns-cmp/livebase-block/raw-globals",
-            "error": "agbcc failed: c.c:1503: invalid operands to binary &"
-          },
-          {
             "label": "unsigned/setup-args/raw-globals",
             "error": "agbcc failed: c.c:1498: invalid operands to binary &"
           },
@@ -9249,102 +9153,6 @@
           {
             "label": "unsigned/setup-args/flip-join/derived-home/livebase-block/raw-globals",
             "error": "agbcc failed: c.c:1502: invalid operands to binary &"
-          },
-          {
-            "label": "unsigned/setup-args/uns-cmp/raw-globals",
-            "error": "agbcc failed: c.c:1498: invalid operands to binary &"
-          },
-          {
-            "label": "unsigned/setup-args/uns-cmp/volatile/raw-globals",
-            "error": "agbcc failed: c.c:1498: invalid operands to binary &"
-          },
-          {
-            "label": "unsigned/setup-args/uns-cmp/livebase/raw-globals",
-            "error": "agbcc failed: c.c:1502: invalid operands to binary &"
-          },
-          {
-            "label": "unsigned/setup-args/uns-cmp/livebase-block/raw-globals",
-            "error": "agbcc failed: c.c:1500: invalid operands to binary &"
-          },
-          {
-            "label": "unsigned/setup-args/flip-join/uns-cmp/raw-globals",
-            "error": "agbcc failed: c.c:1500: invalid operands to binary &"
-          },
-          {
-            "label": "unsigned/setup-args/flip-join/uns-cmp/volatile/raw-globals",
-            "error": "agbcc failed: c.c:1500: invalid operands to binary &"
-          },
-          {
-            "label": "unsigned/setup-args/flip-join/uns-cmp/livebase/raw-globals",
-            "error": "agbcc failed: c.c:1504: invalid operands to binary &"
-          },
-          {
-            "label": "unsigned/setup-args/flip-join/uns-cmp/livebase-block/raw-globals",
-            "error": "agbcc failed: c.c:1502: invalid operands to binary &"
-          },
-          {
-            "label": "unsigned/setup-args/reread-globals/uns-cmp/raw-globals",
-            "error": "agbcc failed: c.c:1484: invalid operands to binary &"
-          },
-          {
-            "label": "unsigned/setup-args/reread-globals/uns-cmp/volatile/raw-globals",
-            "error": "agbcc failed: c.c:1484: invalid operands to binary &"
-          },
-          {
-            "label": "unsigned/setup-args/reread-globals/uns-cmp/livebase/raw-globals",
-            "error": "agbcc failed: c.c:1488: invalid operands to binary &"
-          },
-          {
-            "label": "unsigned/setup-args/reread-globals/uns-cmp/livebase-block/raw-globals",
-            "error": "agbcc failed: c.c:1486: invalid operands to binary &"
-          },
-          {
-            "label": "unsigned/setup-args/flip-join/reread-globals/uns-cmp/raw-globals",
-            "error": "agbcc failed: c.c:1486: invalid operands to binary &"
-          },
-          {
-            "label": "unsigned/setup-args/flip-join/reread-globals/uns-cmp/volatile/raw-globals",
-            "error": "agbcc failed: c.c:1486: invalid operands to binary &"
-          },
-          {
-            "label": "unsigned/setup-args/flip-join/reread-globals/uns-cmp/livebase/raw-globals",
-            "error": "agbcc failed: c.c:1490: invalid operands to binary &"
-          },
-          {
-            "label": "unsigned/setup-args/flip-join/reread-globals/uns-cmp/livebase-block/raw-globals",
-            "error": "agbcc failed: c.c:1488: invalid operands to binary &"
-          },
-          {
-            "label": "unsigned/setup-args/derived-home/uns-cmp/raw-globals",
-            "error": "agbcc failed: c.c:1498: invalid operands to binary &"
-          },
-          {
-            "label": "unsigned/setup-args/derived-home/uns-cmp/volatile/raw-globals",
-            "error": "agbcc failed: c.c:1498: invalid operands to binary &"
-          },
-          {
-            "label": "unsigned/setup-args/derived-home/uns-cmp/livebase/raw-globals",
-            "error": "agbcc failed: c.c:1502: invalid operands to binary &"
-          },
-          {
-            "label": "unsigned/setup-args/derived-home/uns-cmp/livebase-block/raw-globals",
-            "error": "agbcc failed: c.c:1500: invalid operands to binary &"
-          },
-          {
-            "label": "unsigned/setup-args/flip-join/derived-home/uns-cmp/raw-globals",
-            "error": "agbcc failed: c.c:1500: invalid operands to binary &"
-          },
-          {
-            "label": "unsigned/setup-args/flip-join/derived-home/uns-cmp/volatile/raw-globals",
-            "error": "agbcc failed: c.c:1500: invalid operands to binary &"
-          },
-          {
-            "label": "unsigned/setup-args/flip-join/derived-home/uns-cmp/livebase/raw-globals",
-            "error": "agbcc failed: c.c:1504: invalid operands to binary &"
-          },
-          {
-            "label": "unsigned/setup-args/flip-join/derived-home/uns-cmp/livebase-block/raw-globals",
-            "error": "agbcc failed: c.c:1502: invalid operands to binary &"
           }
         ],
         "symbolsUsed": [
@@ -9386,7 +9194,7 @@
           }
         ],
         "outcome": "nonmatch",
-        "source": "void UpdateWorldMapNodeAnim(void) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    u16 * v5;\n    u16 * v6;\n    s32 * p0;\n    p0 = (s32 *)&REG_DMA3SAD;\n    if (gUnk_03004C08.unk0_0 <= 3) {\n        v2 = 0;\n    } else {\n        v2 = 4;\n    }\n    v0 = gUnk_08116880[gUnk_03004C08.unk0_0];\n    switch ((u8)(gUnk_03004C08.unk2 / 30) - 1) {\n        case 0:\n            if (gUnk_03004C08.unk2 % 30 << 24 == 0) m4aSongNumStart(137);\n            v5 = (u16 *)(((*(u8 *)(((u32)(*(s32 *)&gUnk_03004C08 << 28) >> 25) + ((u32)&gUnk_08116748 + 1)) << 5) + gUnk_08116748[0][(u32)(*(s32 *)&gUnk_03004C08 << 28) >> 25] << 1) + ((u32)&gBgTilemapBufs + (128 << 4)));\n            v6 = (u16 *)((v2 + (v0 + 28 << 5) << 1) + ((u32)&gBgTilemapBufs + (128 << 4)));\n            *v5 = *v6;\n            break;\n        case 1:\n            if (gUnk_03004C08.unk2 % 30 << 24 == 0) m4aSongNumStart(137);\n            v4 = (u32)&gBgTilemapBufs + (128 << 4);\n            v5 = (u16 *)(((*(u8 *)(((u32)(*(s32 *)&gUnk_03004C08 << 28) >> 25) + ((u32)&gUnk_08116748 + 3)) << 5) + *(u8 *)(((u32)(*(s32 *)&gUnk_03004C08 << 28) >> 25) + ((u32)&gUnk_08116748 + 2)) << 1) + ((u32)&gBgTilemapBufs + (128 << 4)));\n            v3 = (v0 + 28 << 5) + 1;\n            v6 = (u16 *)((v2 + v3 << 1) + v4);\n            *v5 = *v6;\n            break;\n        case 2:\n            if ((15 & *(u8 *)&gUnk_03004C08) == 6) {\n                gUnk_03004C08.unk2 = 149;\n            } else {\n                if (gUnk_03004C08.unk2 % 30 << 24 == 0) m4aSongNumStart(137);\n                v4 = (u32)&gBgTilemapBufs + (128 << 4);\n                v5 = (u16 *)(((*(u8 *)(((u32)(*(s32 *)&gUnk_03004C08 << 28) >> 25) + ((u32)&gUnk_08116748 + 5)) << 5) + *(u8 *)(((u32)(*(s32 *)&gUnk_03004C08 << 28) >> 25) + ((u32)&gUnk_08116748 + 4)) << 1) + ((u32)&gBgTilemapBufs + (128 << 4)));\n                v3 = (v0 + 28 << 5) + 2;\n                v6 = (u16 *)((v2 + v3 << 1) + v4);\n                *v5 = *v6;\n            }\n            break;\n        case 3:\n            if ((15 & *(u8 *)&gUnk_03004C08) != 4) {\n                if ((15 & *(u8 *)&gUnk_03004C08) != 6) {\n                    if (gUnk_03004C08.unk2 % 30 << 24 == 0) m4aSongNumStart(137);\n                    v4 = (u32)&gBgTilemapBufs + (128 << 4);\n                    v5 = (u16 *)(((*(u8 *)(((u32)(*(s32 *)&gUnk_03004C08 << 28) >> 25) + ((u32)&gUnk_08116748 + 7)) << 5) + *(u8 *)(((u32)(*(s32 *)&gUnk_03004C08 << 28) >> 25) + ((u32)&gUnk_08116748 + 6)) << 1) + ((u32)&gBgTilemapBufs + (128 << 4)));\n                    v3 = (v0 + 28 << 5) + 3;\n                    v6 = (u16 *)((v2 + v3 << 1) + v4);\n                    *v5 = *v6;\n                }\n            }\n            break;\n        case 4:\n            if (gUnk_03004C08.unk2 % 30 << 24 == 0) m4aSongNumStart(138);\n        case 5:\n        case 6:\n            if (gUnk_03004C08.unk0_0 <= 3) {\n                v1 = gUnk_03004C20.sceneFrameCounter;\n                if ((v1 & 3) == 0) {\n                    *p0 = ((u32)(224 << 19 & thunk_sub_080002A0(v1 & 3, 3) << 24) >> 19) + (u32)&gUnk_08116780;\n                    p0[1] = 83886432;\n                    p0[2] = -2147483632;\n                    SetWorldMapTilePalette(gUnk_03004C08.unk0_0, 11);\n                }\n            } else {\n                CopyWorldMapTiles(gUnk_03004C08.unk0_0);\n            }\n            break;\n        case 7:\n            CopyWorldMapTiles(gUnk_03004C08.unk0_0);\n            ((s32 *)&gCallbackQueue)[1] = &CountCollectedGems;\n            break;\n    }\n    gUnk_03004C08.unk2 = gUnk_03004C08.unk2 + 1;\n    return;\n}\n",
+        "source": "void UpdateWorldMapNodeAnim(void) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    u16 * v5;\n    u16 * v6;\n    s32 * p0;\n    p0 = (s32 *)&REG_DMA3SAD;\n    if (gUnk_03004C08.unk0_0 <= 3) {\n        v2 = 0;\n    } else {\n        v2 = 4;\n    }\n    v0 = gUnk_08116880[gUnk_03004C08.unk0_0];\n    switch ((u8)((u32)gUnk_03004C08.unk2 / 30) - 1) {\n        case 0:\n            if ((u32)gUnk_03004C08.unk2 % 30 << 24 == 0) m4aSongNumStart(137);\n            v5 = (u16 *)(((*(u8 *)(((u32)(*(s32 *)&gUnk_03004C08 << 28) >> 25) + ((u32)&gUnk_08116748 + 1)) << 5) + gUnk_08116748[0][(u32)(*(s32 *)&gUnk_03004C08 << 28) >> 25] << 1) + ((u32)&gBgTilemapBufs + (128 << 4)));\n            v6 = (u16 *)((v2 + (v0 + 28 << 5) << 1) + ((u32)&gBgTilemapBufs + (128 << 4)));\n            *v5 = *v6;\n            break;\n        case 1:\n            if ((u32)gUnk_03004C08.unk2 % 30 << 24 == 0) m4aSongNumStart(137);\n            v4 = (u32)&gBgTilemapBufs + (128 << 4);\n            v5 = (u16 *)(((*(u8 *)(((u32)(*(s32 *)&gUnk_03004C08 << 28) >> 25) + ((u32)&gUnk_08116748 + 3)) << 5) + *(u8 *)(((u32)(*(s32 *)&gUnk_03004C08 << 28) >> 25) + ((u32)&gUnk_08116748 + 2)) << 1) + ((u32)&gBgTilemapBufs + (128 << 4)));\n            v3 = (v0 + 28 << 5) + 1;\n            v6 = (u16 *)((v2 + v3 << 1) + v4);\n            *v5 = *v6;\n            break;\n        case 2:\n            if ((15 & *(u8 *)&gUnk_03004C08) == 6) {\n                gUnk_03004C08.unk2 = 149;\n            } else {\n                if ((u32)gUnk_03004C08.unk2 % 30 << 24 == 0) m4aSongNumStart(137);\n                v4 = (u32)&gBgTilemapBufs + (128 << 4);\n                v5 = (u16 *)(((*(u8 *)(((u32)(*(s32 *)&gUnk_03004C08 << 28) >> 25) + ((u32)&gUnk_08116748 + 5)) << 5) + *(u8 *)(((u32)(*(s32 *)&gUnk_03004C08 << 28) >> 25) + ((u32)&gUnk_08116748 + 4)) << 1) + ((u32)&gBgTilemapBufs + (128 << 4)));\n                v3 = (v0 + 28 << 5) + 2;\n                v6 = (u16 *)((v2 + v3 << 1) + v4);\n                *v5 = *v6;\n            }\n            break;\n        case 3:\n            if ((15 & *(u8 *)&gUnk_03004C08) != 4) {\n                if ((15 & *(u8 *)&gUnk_03004C08) != 6) {\n                    if ((u32)gUnk_03004C08.unk2 % 30 << 24 == 0) m4aSongNumStart(137);\n                    v4 = (u32)&gBgTilemapBufs + (128 << 4);\n                    v5 = (u16 *)(((*(u8 *)(((u32)(*(s32 *)&gUnk_03004C08 << 28) >> 25) + ((u32)&gUnk_08116748 + 7)) << 5) + *(u8 *)(((u32)(*(s32 *)&gUnk_03004C08 << 28) >> 25) + ((u32)&gUnk_08116748 + 6)) << 1) + ((u32)&gBgTilemapBufs + (128 << 4)));\n                    v3 = (v0 + 28 << 5) + 3;\n                    v6 = (u16 *)((v2 + v3 << 1) + v4);\n                    *v5 = *v6;\n                }\n            }\n            break;\n        case 4:\n            if ((u32)gUnk_03004C08.unk2 % 30 << 24 == 0) m4aSongNumStart(138);\n        case 5:\n        case 6:\n            if (gUnk_03004C08.unk0_0 <= 3) {\n                v1 = gUnk_03004C20.sceneFrameCounter;\n                if ((v1 & 3) == 0) {\n                    *p0 = ((u32)(224 << 19 & thunk_sub_080002A0(v1 & 3, 3) << 24) >> 19) + (u32)&gUnk_08116780;\n                    p0[1] = 83886432;\n                    p0[2] = -2147483632;\n                    SetWorldMapTilePalette(gUnk_03004C08.unk0_0, 11);\n                }\n            } else {\n                CopyWorldMapTiles(gUnk_03004C08.unk0_0);\n            }\n            break;\n        case 7:\n            CopyWorldMapTiles(gUnk_03004C08.unk0_0);\n            ((s32 *)&gCallbackQueue)[1] = &CountCollectedGems;\n            break;\n    }\n    gUnk_03004C08.unk2 = gUnk_03004C08.unk2 + 1;\n    return;\n}\n",
         "score": 159,
         "maxScore": 291,
         "compileErrors": null,
@@ -13568,10 +13376,10 @@
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "candidateLabel": "unsigned/uns-cmp",
+        "candidateLabel": "signed/uns-cmp",
         "symbolsUsed": [],
         "outcome": "nonmatch",
-        "source": "s32 CalcCRC16(u32 a0, u32 a1) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    u32 v3;\n    s32 v4;\n    if (0 < a1) {\n        v0 = 0;\n        v1 = 4385;\n        do {\n            v2 = v1 ^ *(u8 *)(a0 + v0);\n            v3 = 0;\n            do {\n                if ((v2 & 1) != 0) {\n                    v4 = (u16)((u32)v2 >> 1 ^ 33800);\n                } else {\n                    v4 = (u32)v2 >> 1;\n                }\n                v2 = v4;\n                v3 = (u16)(v3 + 1);\n            } while (v3 <= 7);\n            v1 = v4;\n            v0 = (u16)(v0 + 1);\n        } while (v0 < a1);\n        v4 = v1;\n    } else {\n        v4 = 4385;\n    }\n    return (u16)~v4;\n}\n",
+        "source": "s32 CalcCRC16(s32 a0, s32 a1) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    u32 v3;\n    s32 v4;\n    if (0 < a1) {\n        v0 = 0;\n        v1 = 4385;\n        do {\n            v2 = v1 ^ *(u8 *)(a0 + v0);\n            v3 = 0;\n            do {\n                if ((v2 & 1) != 0) {\n                    v4 = (u16)((u32)v2 >> 1 ^ 33800);\n                } else {\n                    v4 = (u32)v2 >> 1;\n                }\n                v2 = v4;\n                v3 = (u16)(v3 + 1);\n            } while (v3 <= 7);\n            v1 = v4;\n            v0 = (u16)(v0 + 1);\n        } while (v0 < a1);\n        v4 = v1;\n    } else {\n        v4 = 4385;\n    }\n    return (u16)~v4;\n}\n",
         "score": 38,
         "maxScore": 51,
         "compileErrors": null,
@@ -13579,8 +13387,8 @@
           "insert": 9,
           "delete": 2,
           "replace": 1,
-          "opMismatch": 3,
-          "argMismatch": 23
+          "opMismatch": 2,
+          "argMismatch": 24
         },
         "quality": {
           "score": 86,
@@ -13621,8 +13429,8 @@
           "insert": 9,
           "delete": 2,
           "replace": 1,
-          "opMismatch": 3,
-          "argMismatch": 23
+          "opMismatch": 2,
+          "argMismatch": 24
         }
       },
       "scripts": {
@@ -14363,25 +14171,25 @@
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "candidateLabel": "signed",
+        "candidateLabel": "signed/zerosub",
         "symbolsUsed": [],
-        "outcome": "nonmatch",
-        "source": "s32 GetAnchorCoord(s32 a0, s32 a1, s32 a2) {\n    s32 v0;\n    if (a1 - a0 < 0) {\n        v0 = -(a1 - a0) >> 9;\n    } else {\n        v0 = -(a1 - a0 >> 9);\n    }\n    return a2 - (a2 * a1 / a0 + v0);\n}\n",
-        "score": 2,
+        "outcome": "match",
+        "source": "s32 GetAnchorCoord(s32 a0, s32 a1, s32 a2) {\n    s32 v0;\n    if (a1 - a0 < 0) {\n        v0 = 0 - (a1 - a0) >> 9;\n    } else {\n        v0 = -(a1 - a0 >> 9);\n    }\n    return a2 - ((u32)(a2 * a1) / a0 + v0);\n}\n",
+        "score": 0,
         "maxScore": 20,
         "compileErrors": null,
         "breakdown": {
           "insert": 0,
           "delete": 0,
-          "replace": 1,
+          "replace": 0,
           "opMismatch": 0,
-          "argMismatch": 1
+          "argMismatch": 0
         },
         "quality": {
           "score": 100,
           "lines": 9,
           "gotos": 0,
-          "casts": 0,
+          "casts": 1,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -15362,7 +15170,7 @@
           }
         ],
         "outcome": "nonmatch",
-        "source": "s32 ModifyStatByNature(u32 a0, u32 a1, u32 a2) {\n    s32 v0;\n    s32 v1;\n    if ((a2 << 24) + (255 << 24) >> 24 > 4) {\n        return (u16)a1;\n    } else {\n        v0 = ((u8 *)&gNatureStatTable)[(u8)a2 + ((u8)a0 * 5 - 1)];\n        switch ((s8)v0) {\n            case 1:\n                v1 = 110;\n                return (u16)((u16)(v1 * (u16)a1) / 100);\n            case -1:\n                v1 = 90;\n                return (u16)((u16)(v1 * (u16)a1) / 100);\n            default:\n                return (u16)a1;\n        }\n    }\n}\n",
+        "source": "s32 ModifyStatByNature(u32 a0, u32 a1, u32 a2) {\n    s32 v0;\n    s32 v1;\n    if ((a2 << 24) + (255 << 24) >> 24 > 4) {\n        return (u16)a1;\n    } else {\n        v0 = ((u8 *)&gNatureStatTable)[(u8)a2 + ((u8)a0 * 5 - 1)];\n        switch ((s8)v0) {\n            case 1:\n                v1 = 110;\n                return (u16)((u32)(u16)(v1 * (u16)a1) / 100);\n            case -1:\n                v1 = 90;\n                return (u16)((u32)(u16)(v1 * (u16)a1) / 100);\n            default:\n                return (u16)a1;\n        }\n    }\n}\n",
         "score": 53,
         "maxScore": 66,
         "compileErrors": null,
@@ -15377,7 +15185,7 @@
           "score": 84,
           "lines": 19,
           "gotos": 0,
-          "casts": 12,
+          "casts": 14,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -15874,7 +15682,7 @@
           }
         ],
         "outcome": "nonmatch",
-        "source": "s32 Sin2(u32 a0) {\n    s32 v0;\n    s32 v1;\n    v0 = ((u16 *)&gSineDegreeTable)[(u16)((u16)a0 % 180)];\n    if (((u16)a0 / 180 & 1) == 0) {\n        v1 = v0 << 16;\n    } else {\n        v1 = -(v0 << 16);\n    }\n    return v1 >> 16;\n}\n",
+        "source": "s32 Sin2(u32 a0) {\n    s32 v0;\n    s32 v1;\n    v0 = ((u16 *)&gSineDegreeTable)[(u16)((u32)(u16)a0 % 180)];\n    if (((u32)(u16)a0 / 180 & 1) == 0) {\n        v1 = v0 << 16;\n    } else {\n        v1 = -(v0 << 16);\n    }\n    return v1 >> 16;\n}\n",
         "score": 23,
         "maxScore": 36,
         "compileErrors": null,
@@ -15886,10 +15694,10 @@
           "argMismatch": 11
         },
         "quality": {
-          "score": 96,
+          "score": 92,
           "lines": 11,
           "gotos": 0,
-          "casts": 4,
+          "casts": 6,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -17248,7 +17056,7 @@
           }
         ],
         "outcome": "nonmatch",
-        "source": "s32 * EwramMalloc(u32 a0) {\n    u32 v0;\n    s32 * v1;\n    if (a0 + 3 >> 2 != 0) {\n        v0 = (a0 + 3 >> 2 << 2) + 8;\n        v1 = (s32 *)&gEwramHeap;\n        do {\n            if (v0 <= v1[1]) {\n                if (v0 == v1[1]) {\n                    v1[1] = -v0;\n                    return v1 + 2;\n                } else {\n                    if (v0 + 8 <= v1[1]) {\n                        *(s32 *)((u8 *)v1 + v0) = *v1;\n                        ((s32 *)((u8 *)v1 + v0))[1] = v1[1] - v0;\n                        *v1 = (s32 *)((u8 *)v1 + v0);\n                        v1[1] = -v0;\n                        return v1 + 2;\n                    }\n                }\n            }\n            v1 = (s32 *)*v1;\n        } while (v1 != 0);\n        return ewram_end;\n    } else {\n        return ewram_end;\n    }\n}\n",
+        "source": "s32 * EwramMalloc(u32 a0) {\n    u32 v0;\n    s32 * v1;\n    if (a0 + 3 >> 2 != 0) {\n        v0 = (a0 + 3 >> 2 << 2) + 8;\n        v1 = (s32 *)&gEwramHeap;\n        do {\n            if (v0 <= v1[1]) {\n                if (v0 == v1[1]) {\n                    v1[1] = -v0;\n                    return v1 + 2;\n                } else {\n                    if ((s32)(v0 + 8) <= v1[1]) {\n                        *(s32 *)((u8 *)v1 + v0) = *v1;\n                        ((s32 *)((u8 *)v1 + v0))[1] = v1[1] - v0;\n                        *v1 = (s32 *)((u8 *)v1 + v0);\n                        v1[1] = -v0;\n                        return v1 + 2;\n                    }\n                }\n            }\n            v1 = (s32 *)*v1;\n        } while (v1 != 0);\n        return ewram_end;\n    } else {\n        return ewram_end;\n    }\n}\n",
         "score": 31,
         "maxScore": 51,
         "compileErrors": null,
@@ -17263,7 +17071,7 @@
           "score": 84,
           "lines": 28,
           "gotos": 0,
-          "casts": 8,
+          "casts": 9,
           "unkGlue": 0,
           "rawMem": 1,
           "addrDeref": 0
@@ -17764,7 +17572,7 @@
         "candidateLabel": "unsigned/uns-cmp",
         "symbolsUsed": [],
         "outcome": "nonmatch",
-        "source": "void numToASCII(u32 a0, u32 a1) {\n    s32 v0;\n    u32 v1;\n    u8 * v2;\n    s32 v3;\n    v0 = (u16)a1;\n    v1 = 0;\n    do {\n        if ((u32)((u32)(v0 & 240 << 8) >> 12) > 9) {\n            v2 = (u8 *)(a0 + v1);\n            v3 = ((u32)(v0 & 240 << 8) >> 12) + 87;\n        } else {\n            v2 = (u8 *)(a0 + v1);\n            v3 = ((u32)(v0 & 240 << 8) >> 12) + 48;\n        }\n        *v2 = v3;\n        v0 = (u32)(v0 << 20) >> 16;\n        v1 = (u8)(v1 + 1);\n    } while (v1 <= 3);\n    *(u8 *)(a0 + v1) = 0;\n    return;\n}\n",
+        "source": "void numToASCII(u32 a0, u32 a1) {\n    s32 v0;\n    u32 v1;\n    u8 * v2;\n    s32 v3;\n    v0 = (u16)a1;\n    v1 = 0;\n    do {\n        if ((u32)(v0 & 240 << 8) >> 12 > 9) {\n            v2 = (u8 *)(a0 + v1);\n            v3 = ((u32)(v0 & 240 << 8) >> 12) + 87;\n        } else {\n            v2 = (u8 *)(a0 + v1);\n            v3 = ((u32)(v0 & 240 << 8) >> 12) + 48;\n        }\n        *v2 = v3;\n        v0 = (u32)(v0 << 20) >> 16;\n        v1 = (u8)(v1 + 1);\n    } while (v1 <= 3);\n    *(u8 *)(a0 + v1) = 0;\n    return;\n}\n",
         "score": 8,
         "maxScore": 31,
         "compileErrors": null,
@@ -17779,7 +17587,7 @@
           "score": 84,
           "lines": 22,
           "gotos": 0,
-          "casts": 10,
+          "casts": 9,
           "unkGlue": 0,
           "rawMem": 1,
           "addrDeref": 0
@@ -22169,10 +21977,10 @@
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "candidateLabel": "unsigned/regcopy-ret",
+        "candidateLabel": "signed/regcopy-ret",
         "symbolsUsed": [],
         "outcome": "nonmatch",
-        "source": "s32 func_8002B4B8_2C0B8(u32 a0, u32 a1) {\n    s32 v0;\n    s32 w0;\n    v0 = (a1 & 8191) - (a0 & 8191) & 8191;\n    w0 = v0;\n    if (w0 >= 4097) w0 = w0 | 57344;\n    v0 = w0 << 16 >> 16;\n    return v0;\n}\n",
+        "source": "s32 func_8002B4B8_2C0B8(s32 a0, s32 a1) {\n    s32 v0;\n    s32 w0;\n    v0 = (a1 & 8191) - (a0 & 8191) & 8191;\n    w0 = v0;\n    if (w0 >= 4097) w0 = w0 | 57344;\n    v0 = w0 << 16 >> 16;\n    return v0;\n}\n",
         "score": 2,
         "maxScore": 11,
         "compileErrors": null,
@@ -28977,9 +28785,9 @@
       "asmDump": "\ntarget.o:     file format elf32-powerpc\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 ref.c\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .mwcats.text\t00000000 .mwcats.text\n00000000 g     F .text\t00000030 breakloop\n\n\nRELOCATION RECORDS FOR [.mwcats.text]:\nOFFSET   TYPE              VALUE\n00000004 R_PPC_ADDR32      breakloop\n\n\nContents of section .text:\n 0000 38a00000 7c8903a6 2c040000 4081001c  8...|...,...@...\n 0010 80030000 2c000000 41800010 38630004  ....,...A...8c..\n 0020 38a50001 4200ffec 7ca32b78 4e800020  8...B...|.+xN.. \nContents of section .mwcats.text:\n 0000 02000030 00000000                    ...0....        \nContents of section .comment:\n 0000 436f6465 57617272 696f720a 02040201  CodeWarrior.....\n 0010 01020016 2c000000 00000000 00000000  ....,...........\n 0020 00000000 00000000 00000000 00000000  ................\n 0030 00000000 00000001 00000000 00000004  ................\n 0040 00000000 00000004 00000000 00000004  ................\n 0050 00000000                             ....            \n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned",
+        "candidateLabel": "signed",
         "outcome": "nonmatch",
-        "source": "s32 breakloop(s32 * a0, u32 a1) {\n    s32 * v0;\n    s32 v1;\n    s32 v2;\n    if (a1 > 0) {\n        v0 = a0;\n        v2 = a1;\n        v1 = 0;\n        while (*v0 >= 0) {\n            v0 = v0 + 1;\n            v1 = v1 + 1;\n            v2 = v2 - 1;\n            if (v2 == 0) break;\n        }\n    } else {\n        v1 = 0;\n    }\n    return v1;\n}\n",
+        "source": "s32 breakloop(s32 * a0, s32 a1) {\n    s32 * v0;\n    s32 v1;\n    s32 v2;\n    if (a1 > 0) {\n        v0 = a0;\n        v2 = a1;\n        v1 = 0;\n        while (*v0 >= 0) {\n            v0 = v0 + 1;\n            v1 = v1 + 1;\n            v2 = v2 - 1;\n            if (v2 == 0) break;\n        }\n    } else {\n        v1 = 0;\n    }\n    return v1;\n}\n",
         "score": 15,
         "maxScore": 19,
         "compileErrors": null,
@@ -32044,22 +31852,22 @@
         "decompiler": "asmlift",
         "candidateLabel": "unsigned/initfirst",
         "outcome": "nonmatch",
-        "source": "s32 countdown(u32 a0) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    if (a0 > 0) {\n        v0 = 0;\n        if (a0 >> 3 != v0) {\n            v1 = a0 >> 3;\n            do {\n                v0 = v0 + 8;\n                v1 = v1 - 1;\n            } while (v1 != 0);\n            if ((a0 & 7) != 0) {\n                v0 = v0;\n                a0 = a0 & 7;\n                v2 = v0;\n                v3 = a0;\n                do {\n                    v2 = v2 + 1;\n                    v3 = v3 - 1;\n                } while (v3 != 0);\n                v0 = v2;\n            } else {\n                v0 = v0;\n            }\n        } else {\n            v2 = v0;\n            v3 = a0;\n            do {\n                v2 = v2 + 1;\n                v3 = v3 - 1;\n            } while (v3 != 0);\n            v0 = v2;\n        }\n    } else {\n        v0 = 0;\n    }\n    return v0;\n}\n",
-        "score": 21,
+        "source": "s32 countdown(u32 a0) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    if ((s32)a0 > 0) {\n        v0 = 0;\n        if (a0 >> 3 != v0) {\n            v1 = a0 >> 3;\n            do {\n                v0 = v0 + 8;\n                v1 = v1 - 1;\n            } while (v1 != 0);\n            if ((a0 & 7) != 0) {\n                v0 = v0;\n                a0 = a0 & 7;\n                v2 = v0;\n                v3 = a0;\n                do {\n                    v2 = v2 + 1;\n                    v3 = v3 - 1;\n                } while (v3 != 0);\n                v0 = v2;\n            } else {\n                v0 = v0;\n            }\n        } else {\n            v2 = v0;\n            v3 = a0;\n            do {\n                v2 = v2 + 1;\n                v3 = v3 - 1;\n            } while (v3 != 0);\n            v0 = v2;\n        }\n    } else {\n        v0 = 0;\n    }\n    return v0;\n}\n",
+        "score": 23,
         "maxScore": 27,
         "compileErrors": null,
         "breakdown": {
           "insert": 12,
           "delete": 1,
-          "replace": 4,
-          "opMismatch": 3,
-          "argMismatch": 1
+          "replace": 3,
+          "opMismatch": 2,
+          "argMismatch": 5
         },
         "quality": {
           "score": 100,
           "lines": 40,
           "gotos": 0,
-          "casts": 0,
+          "casts": 1,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -37351,7 +37159,7 @@
         "decompiler": "asmlift",
         "candidateLabel": "unsigned/defsite",
         "outcome": "match",
-        "source": "s32 fcmp(void) {\n    s32 v0;\n    v0 = 0;\n    if (__gtsf2() > 0) v0 = 1;\n    return v0;\n}\n",
+        "source": "s32 fcmp(void) {\n    s32 v0;\n    v0 = 0;\n    if ((s32)__gtsf2() > 0) v0 = 1;\n    return v0;\n}\n",
         "score": 0,
         "maxScore": 10,
         "compileErrors": null,
@@ -37366,7 +37174,7 @@
           "score": 100,
           "lines": 6,
           "gotos": 0,
-          "casts": 1,
+          "casts": 2,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -37902,9 +37710,9 @@
       "targetAsm": "@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tfib\n\t.type\t fib,function\n\t.thumb_func\nfib:\n\tmov\tr3, #0x0\n\tmov\tr2, #0x1\n\tcmp\tr3, r0\n\tbge\t.L4\t@cond_branch\n\tadd\tr1, r0, #0\n.L6:\n\tadd\tr0, r3, r2\n\tadd\tr3, r2, #0\n\tadd\tr2, r0, #0\n\tsub\tr1, r1, #0x1\n\tcmp\tr1, #0\n\tbne\t.L6\t@cond_branch\n.L4:\n\tadd\tr0, r3, #0\n\tbx\tlr\n.Lfe1:\n\t.size\t fib,.Lfe1-fib\n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned/flip-join",
+        "candidateLabel": "signed/flip-join",
         "outcome": "nonmatch",
-        "source": "s32 fib(u32 a0) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 t0;\n    if (0 >= a0) {\n        v0 = 0;\n    } else {\n        v0 = 1;\n        v1 = 0;\n        v2 = a0;\n        do {\n            v2 = v2 - 1;\n            t0 = v1;\n            v1 = v0;\n            v0 = t0 + v0;\n        } while (v2 != 0);\n        v0 = v1;\n    }\n    return v0;\n}\n",
+        "source": "s32 fib(s32 a0) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 t0;\n    if (0 >= a0) {\n        v0 = 0;\n    } else {\n        v0 = 1;\n        v1 = 0;\n        v2 = a0;\n        do {\n            v2 = v2 - 1;\n            t0 = v1;\n            v1 = v0;\n            v0 = t0 + v0;\n        } while (v2 != 0);\n        v0 = v1;\n    }\n    return v0;\n}\n",
         "score": 16,
         "maxScore": 19,
         "compileErrors": null,
@@ -38304,9 +38112,9 @@
       "targetAsm": "@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tfindfirst\n\t.type\t findfirst,function\n\t.thumb_func\nfindfirst:\n\tpush\t{r4, lr}\n\tadd\tr4, r1, #0\n\tmov\tr1, #0x0\n\tcmp\tr1, r4\n\tbge\t.L4\t@cond_branch\n\tadd\tr3, r0, #0\n.L6:\n\tldr\tr0, [r3]\n\tcmp\tr0, r2\n\tbne\t.L5\t@cond_branch\n\tadd\tr0, r1, #0\n\tb\t.L9\n.L5:\n\tadd\tr3, r3, #0x4\n\tadd\tr1, r1, #0x1\n\tcmp\tr1, r4\n\tblt\t.L6\t@cond_branch\n.L4:\n\tmov\tr0, #0x1\n\tneg\tr0, r0\n.L9:\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n.Lfe1:\n\t.size\t findfirst,.Lfe1-findfirst\n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned",
+        "candidateLabel": "signed",
         "outcome": "nonmatch",
-        "source": "s32 findfirst(s32 * a0, u32 a1, u32 a2) {\n    s32 * v0;\n    s32 v1;\n    if (0 < a1) {\n        v0 = a0;\n        v1 = 0;\n        while (*v0 != a2) {\n            v0 = v0 + 1;\n            v1 = v1 + 1;\n            if (v1 >= a1) return -1;\n        }\n        return v1;\n    } else {\n        return -1;\n    }\n}\n",
+        "source": "s32 findfirst(s32 * a0, s32 a1, s32 a2) {\n    s32 * v0;\n    s32 v1;\n    if (0 < a1) {\n        v0 = a0;\n        v1 = 0;\n        while (*v0 != a2) {\n            v0 = v0 + 1;\n            v1 = v1 + 1;\n            if (v1 >= a1) return -1;\n        }\n        return v1;\n    } else {\n        return -1;\n    }\n}\n",
         "score": 14,
         "maxScore": 26,
         "compileErrors": null,
@@ -43108,9 +42916,9 @@
       "targetAsm": "@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tllcmp\n\t.type\t llcmp,function\n\t.thumb_func\nllcmp:\n\tpush\t{r4, lr}\n\tmov\tr4, #0x0\n\tcmp\tr3, r1\n\tbgt\t.L4\t@cond_branch\n\tcmp\tr3, r1\n\tbne\t.L3\t@cond_branch\n\tcmp\tr2, r0\n\tbls\t.L3\t@cond_branch\n.L4:\n\tmov\tr4, #0x1\n.L3:\n\tadd\tr0, r4, #0\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n.Lfe1:\n\t.size\t llcmp,.Lfe1-llcmp\n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned",
+        "candidateLabel": "signed",
         "outcome": "nonmatch",
-        "source": "s32 llcmp(u32 a0, u32 a1, u32 a2, u32 a3) {\n    s32 v0;\n    if (a3 <= a1) {\n        if (a3 == a1 && a2 > a0) {\n            return 1;\n        } else {\n            v0 = 0;\n            return v0;\n        }\n    } else {\n        return 1;\n    }\n}\n",
+        "source": "s32 llcmp(s32 a0, s32 a1, s32 a2, s32 a3) {\n    s32 v0;\n    if (a3 <= a1) {\n        if (a3 == a1 && a2 > a0) {\n            return 1;\n        } else {\n            v0 = 0;\n            return v0;\n        }\n    } else {\n        return 1;\n    }\n}\n",
         "score": 11,
         "maxScore": 14,
         "compileErrors": null,
@@ -43118,8 +42926,8 @@
           "insert": 1,
           "delete": 4,
           "replace": 0,
-          "opMismatch": 2,
-          "argMismatch": 4
+          "opMismatch": 1,
+          "argMismatch": 5
         },
         "quality": {
           "score": 100,
@@ -43497,9 +43305,9 @@
       "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /host-tmp/asmlift-mgcc-ref-4db236487d605d43/ref.c\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t00000038 llshl\n\n\nContents of section .text:\n 0000 00063e80 04e10004 00000000 00c51004  ..>.............\n 0010 10000007 00001821 10e00004 00c41004  .......!........\n 0020 00063823 00e53806 00471025 00c51804  ..8#..8..G.%....\n 0030 03e00008 00000000 00000000 00000000  ................\nContents of section .reginfo:\n 0000 800000fc 00000000 00000000 00000000  ................\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.              \n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "signed",
+        "candidateLabel": "unsigned",
         "outcome": "nonmatch",
-        "source": "s32 llshl(s32 a0, s32 a1, s32 a2) {\n    s32 v0;\n    if (a2 << 26 < 0) {\n        return a1 << a2;\n    } else {\n        if (a2 << 26 != 0) {\n            v0 = a0 << a2 | (u32)a1 >> -a2;\n        } else {\n            v0 = a0 << a2;\n        }\n        return v0;\n    }\n}\n",
+        "source": "s32 llshl(u32 a0, u32 a1, u32 a2) {\n    s32 v0;\n    if ((s32)(a2 << 26) < 0) {\n        return a1 << a2;\n    } else {\n        if (a2 << 26 != 0) {\n            v0 = a0 << a2 | a1 >> -a2;\n        } else {\n            v0 = a0 << a2;\n        }\n        return v0;\n    }\n}\n",
         "score": 10,
         "maxScore": 15,
         "compileErrors": null,
@@ -46020,9 +45828,9 @@
       "targetAsm": "@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tmaxarr\n\t.type\t maxarr,function\n\t.thumb_func\nmaxarr:\n\tldr\tr3, [r0]\n\tcmp\tr1, #0x1\n\tble\t.L4\t@cond_branch\n\tadd\tr0, r0, #0x4\n\tsub\tr1, r1, #0x1\n.L6:\n\tldr\tr2, [r0]\n\tcmp\tr2, r3\n\tble\t.L5\t@cond_branch\n\tadd\tr3, r2, #0\n.L5:\n\tadd\tr0, r0, #0x4\n\tsub\tr1, r1, #0x1\n\tcmp\tr1, #0\n\tbne\t.L6\t@cond_branch\n.L4:\n\tadd\tr0, r3, #0\n\tbx\tlr\n.Lfe1:\n\t.size\t maxarr,.Lfe1-maxarr\n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned",
+        "candidateLabel": "signed",
         "outcome": "nonmatch",
-        "source": "s32 maxarr(s32 * a0, u32 a1) {\n    s32 * v0;\n    s32 v1;\n    s32 v2;\n    if (a1 > 1) {\n        v1 = *a0;\n        v0 = a0 + 1;\n        v2 = a1 - 1;\n        do {\n            if (*v0 > v1) v1 = *v0;\n            v0 = v0 + 1;\n            v2 = v2 - 1;\n        } while (v2 != 0);\n    } else {\n        v1 = *a0;\n    }\n    return v1;\n}\n",
+        "source": "s32 maxarr(s32 * a0, s32 a1) {\n    s32 * v0;\n    s32 v1;\n    s32 v2;\n    if (a1 > 1) {\n        v1 = *a0;\n        v0 = a0 + 1;\n        v2 = a1 - 1;\n        do {\n            if (*v0 > v1) v1 = *v0;\n            v0 = v0 + 1;\n            v2 = v2 - 1;\n        } while (v2 != 0);\n    } else {\n        v1 = *a0;\n    }\n    return v1;\n}\n",
         "score": 5,
         "maxScore": 17,
         "compileErrors": null,
@@ -46030,8 +45838,8 @@
           "insert": 2,
           "delete": 1,
           "replace": 1,
-          "opMismatch": 1,
-          "argMismatch": 0
+          "opMismatch": 0,
+          "argMismatch": 1
         },
         "quality": {
           "score": 100,
@@ -46253,17 +46061,17 @@
       "asmDump": "\ntarget.o:     file format elf32-powerpc\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 ref.c\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .mwcats.text\t00000000 .mwcats.text\n00000000 g     F .text\t00000034 maxarr\n\n\nRELOCATION RECORDS FOR [.mwcats.text]:\nOFFSET   TYPE              VALUE\n00000004 R_PPC_ADDR32      maxarr\n\n\nContents of section .text:\n 0000 3804ffff 38a30004 80630000 7c0903a6  8...8....c..|...\n 0010 2c040001 4c810020 80050000 7c001800  ,...L.. ....|...\n 0020 40810008 7c030378 38a50004 4200ffec  @...|..x8...B...\n 0030 4e800020                             N..             \nContents of section .mwcats.text:\n 0000 02000034 00000000                    ...4....        \nContents of section .comment:\n 0000 436f6465 57617272 696f720a 02040201  CodeWarrior.....\n 0010 01020016 2c000000 00000000 00000000  ....,...........\n 0020 00000000 00000000 00000000 00000000  ................\n 0030 00000000 00000001 00000000 00000004  ................\n 0040 00000000 00000004 00000000 00000004  ................\n 0050 00000000                             ....            \n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned/flip-branch/flip-join",
+        "candidateLabel": "signed",
         "outcome": "nonmatch",
-        "source": "s32 maxarr(s32 * a0, u32 a1) {\n    s32 * v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    if (a1 <= 1) {\n        return *a0;\n    } else {\n        v2 = a1 + -1;\n        v0 = a0 + 1;\n        v1 = *a0;\n        do {\n            if (*v0 <= v1) {\n                v3 = v1;\n            } else {\n                v3 = *v0;\n            }\n            v1 = v3;\n            v0 = v0 + 1;\n            v2 = v2 - 1;\n        } while (v2 != 0);\n        return v1;\n    }\n}\n",
-        "score": 15,
-        "maxScore": 18,
+        "source": "s32 maxarr(s32 * a0, s32 a1) {\n    s32 * v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    if (a1 > 1) {\n        v2 = a1 + -1;\n        v0 = a0 + 1;\n        v1 = *a0;\n        do {\n            if (*v0 > v1) {\n                v3 = *v0;\n            } else {\n                v3 = v1;\n            }\n            v1 = v3;\n            v0 = v0 + 1;\n            v2 = v2 - 1;\n        } while (v2 != 0);\n        return v1;\n    } else {\n        return *a0;\n    }\n}\n",
+        "score": 17,
+        "maxScore": 21,
         "compileErrors": null,
         "breakdown": {
-          "insert": 5,
-          "delete": 2,
-          "replace": 2,
-          "opMismatch": 3,
+          "insert": 8,
+          "delete": 4,
+          "replace": 1,
+          "opMismatch": 1,
           "argMismatch": 3
         },
         "quality": {
@@ -46718,18 +46526,18 @@
       "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /host-tmp/asmlift-mgcc-ref-820f10aa4bda9e53/ref.c\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t0000002c memcpy1\n\n\nContents of section .text:\n 0000 18c00008 00000000 00c43021 90a20000  ..........0!....\n 0010 a0820000 24840001 0086102a 1440fffb  ....$......*.@..\n 0020 24a50001 03e00008 00000000 00000000  $...............\nContents of section .reginfo:\n 0000 80000074 00000000 00000000 00000000  ...t............\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.              \n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned",
+        "candidateLabel": "signed",
         "outcome": "nonmatch",
-        "source": "void memcpy1(u32 a0, u32 a1, u8 * a2, u32 a3) {\n    u8 * v0;\n    u8 * v1;\n    if (a3 > 0) {\n        v0 = a2;\n        v1 = (u8 *)a1;\n        do {\n            *v1 = *v0;\n            v1 = v1 + 1;\n            v0 = v0 + 1;\n        } while (v1 < a3 + a1);\n        a0 = v1 < a3 + a1;\n    }\n    return;\n}\n",
+        "source": "void memcpy1(s32 a0, s32 a1, u8 * a2, s32 a3) {\n    u8 * v0;\n    u8 * v1;\n    if (a3 > 0) {\n        v0 = a2;\n        v1 = (u8 *)a1;\n        do {\n            *v1 = *v0;\n            v1 = v1 + 1;\n            v0 = v0 + 1;\n        } while (v1 < a3 + a1);\n        a0 = v1 < a3 + a1;\n    }\n    return;\n}\n",
         "score": 7,
         "maxScore": 11,
         "compileErrors": null,
         "breakdown": {
           "insert": 0,
           "delete": 0,
-          "replace": 2,
+          "replace": 1,
           "opMismatch": 0,
-          "argMismatch": 5
+          "argMismatch": 6
         },
         "quality": {
           "score": 100,
@@ -48205,9 +48013,9 @@
       "targetAsm": "@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tmergeloop\n\t.type\t mergeloop,function\n\t.thumb_func\nmergeloop:\n\tpush\t{r4, r5, lr}\n\tmov\tr3, #0x0\n\tmov\tr2, #0x0\n\tcmp\tr2, r0\n\tbge\t.L4\t@cond_branch\n\tmov\tr5, #0x1\n\tadd\tr4, r1, #0\n\tadd\tr1, r0, #0\n.L6:\n\tldr\tr2, [r4]\n\tadd\tr0, r2, #0\n\tand\tr0, r0, r5\n\tcmp\tr0, #0\n\tbeq\t.L7\t@cond_branch\n\tadd\tr3, r2, #0\n\tcmp\tr3, #0x20\n\tble\t.L8\t@cond_branch\n\tmov\tr3, #0x20\n.L8:\n\tlsl\tr2, r2, #0x1\n\tb\t.L5\n.L7:\n\tadd\tr3, r2, #0\n\tcmp\tr3, #0\n\tbge\t.L10\t@cond_branch\n\tmov\tr3, #0x0\n.L10:\n\tlsl\tr0, r2, #0x1\n\tadd\tr2, r0, r2\n.L5:\n\tadd\tr4, r4, #0x4\n\tsub\tr1, r1, #0x1\n\tcmp\tr1, #0\n\tbne\t.L6\t@cond_branch\n.L4:\n\tlsl\tr0, r3, #0x2\n\tadd\tr0, r0, r3\n\tlsl\tr0, r0, #0x1\n\tadd\tr0, r0, r2\n\tpop\t{r4, r5}\n\tpop\t{r1}\n\tbx\tr1\n.Lfe1:\n\t.size\t mergeloop,.Lfe1-mergeloop\n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned/inplace/merge-names",
+        "candidateLabel": "signed/inplace/merge-names",
         "outcome": "nonmatch",
-        "source": "s32 mergeloop(u32 a0, s32 * a1) {\n    s32 v0;\n    s32 * v1;\n    s32 v2;\n    s32 v3;\n    s32 v5;\n    if (0 < a0) {\n        v1 = a1;\n        v2 = a0;\n        do {\n            v0 = *v1;\n            if ((v0 & 1) != 0) {\n                if (v0 > 32) {\n                    v3 = 32;\n                } else {\n                    v3 = v0;\n                }\n                v5 = v0 << 1;\n            } else {\n                if (v0 < 0) {\n                    v3 = 0;\n                } else {\n                    v3 = v0;\n                }\n                v5 = v0 * 3;\n            }\n            v1 = v1 + 1;\n            v2 = v2 - 1;\n        } while (v2 != 0);\n    } else {\n        v3 = 0;\n        v5 = 0;\n    }\n    return v3 * 10 + v5;\n}\n",
+        "source": "s32 mergeloop(s32 a0, s32 * a1) {\n    s32 v0;\n    s32 * v1;\n    s32 v2;\n    s32 v3;\n    s32 v5;\n    if (0 < a0) {\n        v1 = a1;\n        v2 = a0;\n        do {\n            v0 = *v1;\n            if ((v0 & 1) != 0) {\n                if (v0 > 32) {\n                    v3 = 32;\n                } else {\n                    v3 = v0;\n                }\n                v5 = v0 << 1;\n            } else {\n                if (v0 < 0) {\n                    v3 = 0;\n                } else {\n                    v3 = v0;\n                }\n                v5 = v0 * 3;\n            }\n            v1 = v1 + 1;\n            v2 = v2 - 1;\n        } while (v2 != 0);\n    } else {\n        v3 = 0;\n        v5 = 0;\n    }\n    return v3 * 10 + v5;\n}\n",
         "score": 10,
         "maxScore": 39,
         "compileErrors": null,
@@ -48292,9 +48100,9 @@
       "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /host-tmp/asmlift-mgcc-ref-60ac6c949aaa5eb8/ref.c\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t0000007c mergeloop\n\n\nRELOCATION RECORDS FOR [.text]:\nOFFSET   TYPE              VALUE\n00000034 R_MIPS_26         .text\n\n\nContents of section .text:\n 0000 27bdfff8 00003021 18800016 00001821  '.....0!.......!\n 0010 00041080 00452021 8ca30000 30620001  .....E !....0b..\n 0020 10400006 28620020 10400002 24060020  .@..(b. .@..$.. \n 0030 00603021 08000015 00031840 00603021  .`0!.......@.`0!\n 0040 00061027 000217c3 00c23024 00031040  ...'......0$...@\n 0050 00431821 24a50004 00a4102a 1440ffee  .C.!$......*.@..\n 0060 00000000 00061080 00461021 00021040  .........F.!...@\n 0070 00431021 03e00008 27bd0008 00000000  .C.!....'.......\nContents of section .reginfo:\n 0000 a000007c 00000000 00000000 00000000  ...|............\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.              \n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned",
+        "candidateLabel": "signed",
         "outcome": "nonmatch",
-        "source": "s32 mergeloop(u32 a0, u32 a1) {\n    s32 * v0;\n    s32 v1;\n    s32 v2;\n    if (a0 > 0) {\n        v0 = (s32 *)a1;\n        do {\n            if ((*v0 & 1) != 0) {\n                if (*v0 < 32) {\n                    v1 = *v0;\n                } else {\n                    v1 = 32;\n                }\n                v2 = *v0 << 1;\n            } else {\n                v1 = *v0 & ~*v0 >> 31;\n                v2 = *v0 * 3;\n            }\n            v0 = v0 + 1;\n        } while (v0 < (a0 << 2) + a1);\n    } else {\n        v1 = 0;\n        v2 = 0;\n    }\n    return v1 * 10 + v2;\n}\n",
+        "source": "s32 mergeloop(s32 a0, s32 a1) {\n    s32 * v0;\n    s32 v1;\n    s32 v2;\n    if (a0 > 0) {\n        v0 = (s32 *)a1;\n        do {\n            if ((*v0 & 1) != 0) {\n                if (*v0 < 32) {\n                    v1 = *v0;\n                } else {\n                    v1 = 32;\n                }\n                v2 = *v0 << 1;\n            } else {\n                v1 = *v0 & ~*v0 >> 31;\n                v2 = *v0 * 3;\n            }\n            v0 = v0 + 1;\n        } while (v0 < (a0 << 2) + a1);\n    } else {\n        v1 = 0;\n        v2 = 0;\n    }\n    return v1 * 10 + v2;\n}\n",
         "score": 18,
         "maxScore": 34,
         "compileErrors": null,
@@ -49349,18 +49157,18 @@
       "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    d  .text\t00000020 .text\n00000000 g     F .text\t0000001c modpow2\n\n\nContents of section .text:\n 0000 04810004 3082000f 10400002 00000000  ....0....@......\n 0010 2442fff0 03e00008 00000000 00000000  $B..............\nContents of section .options:\n 0000 01200000 00000000 80000014 00000000  . ..............\n 0010 00000000 00000000 00000000 00007ff0  ................\n 0020 07100000 00000000 00000000 00000000  ................\n 0030 08100000 00000000 00000000 00000000  ................\nContents of section .reginfo:\n 0000 80000014 00000000 00000000 00000000  ................\n 0010 00000000 00007ff0                    ........        \nContents of section .mdebug:\n 0000 7009070a 00000007 00000004 00000188  p...............\n 0010 00000005 000002cc 00000001 0000018c  ................\n 0020 00000004 000001c0 00000000 00000000  ................\n 0030 00000011 000001f0 00000038 00000234  ...........8...4\n 0040 00000008 0000026c 00000001 00000274  .......l.......t\n 0050 00000000 00000000 00000001 000002bc  ................\n 0060 06000000 00000000 00000001 00000000  ................\n 0070 00000000 00000000 ffffffff 00000000  ................\n 0080 00000000 00000000 001d001f 00000002  ................\n 0090 00000002 00000000 00000001 00000000  ................\n 00a0 2c200004 0000002e 00000000 1820000f  , ........... ..\n 00b0 0000002e 0000001c 20200001 00000001  ........  ......\n 00c0 00000000 20200000 02000000 03000000  ....  ..........\n 00d0 04000000 05000000 06000000 07000000  ................\n 00e0 08000000 09000000 20000000 21000000  ........ ...!...\n 00f0 0a000000 0b000000 0b000000 1a000000  ................\n 0100 00000000 00000003 06000000 002f746d  ............./tm\n 0110 702f6173 6d6c6966 742d6d69 70732d72  p/asmlift-mips-r\n 0120 65662d32 62323461 62643838 34646237  ef-2b24abd884db7\n 0130 6263622f 7265662e 63006d6f 64706f77  bcb/ref.c.modpow\n 0140 32000000 6d6f6470 6f773200 00000000  2...modpow2.....\n 0150 00000001 00000000 00000036 00000000  ...........6....\n 0160 00000004 00000000 00000007 00000000  ................\n 0170 00000000 00000001 00000000 00000011  ................\n 0180 00000000 00000000 01800000 00000000  ................\n 0190 00000001 00000000 00000000 00000000  ................\n 01a0 18200001 00000000 00000000 00000000  . ..............\n 01b0 00000000 00000000 00000000 7fffffff  ................\n 01c0 00000000 00000000 00000002           ............    \n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned",
+        "candidateLabel": "signed/flip-join",
         "outcome": "nonmatch",
-        "source": "s32 modpow2(u32 a0) {\n    s32 v0;\n    if (a0 < 0 && (a0 & 15) != 0) {\n        v0 = (a0 & 15) + -16;\n    } else {\n        v0 = a0 & 15;\n    }\n    return v0;\n}\n",
+        "source": "s32 modpow2(s32 a0) {\n    s32 v0;\n    if (a0 >= 0 || (a0 & 15) == 0) {\n        v0 = a0 & 15;\n    } else {\n        v0 = (a0 & 15) + -16;\n    }\n    return v0;\n}\n",
         "score": 6,
-        "maxScore": 7,
+        "maxScore": 9,
         "compileErrors": null,
         "breakdown": {
-          "insert": 0,
-          "delete": 5,
-          "replace": 1,
+          "insert": 2,
+          "delete": 1,
+          "replace": 2,
           "opMismatch": 0,
-          "argMismatch": 0
+          "argMismatch": 1
         },
         "quality": {
           "score": 100,
@@ -51346,18 +51154,18 @@
       "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /host-tmp/asmlift-mgcc-ref-84c78a1282ec0a36/ref.c\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t0000004c nestedloop\n\n\nContents of section .text:\n 0000 27bdfff0 00003021 1880000d 00003821  '.....0!......8!\n 0010 18800007 00002821 00001821 00e33821  ......(!...!..8!\n 0020 24a50001 00a4102a 1440fffc 00661821  $......*.@...f.!\n 0030 24c60001 00c4102a 1440fff5 00000000  $......*.@......\n 0040 00e01021 03e00008 27bd0010 00000000  ...!....'.......\nContents of section .reginfo:\n 0000 a00000fc 00000000 00000000 00000000  ................\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.              \n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned/flip-join",
+        "candidateLabel": "signed",
         "outcome": "nonmatch",
-        "source": "s32 nestedloop(u32 a0) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    if (a0 <= 0) {\n        v0 = 0;\n    } else {\n        v1 = 0;\n        v0 = 0;\n        do {\n            if (a0 > 0) {\n                v2 = v0;\n                v4 = 0;\n                v3 = 0;\n                do {\n                    v2 = v2 + v3;\n                    v4 = v4 + 1;\n                    v3 = v3 + v1;\n                } while (v4 < a0);\n                v0 = v2;\n            }\n            v1 = v1 + 1;\n        } while (v1 < a0);\n    }\n    return v0;\n}\n",
+        "source": "s32 nestedloop(s32 a0) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    if (a0 > 0) {\n        v1 = 0;\n        v0 = 0;\n        do {\n            if (a0 > 0) {\n                v2 = v0;\n                v4 = 0;\n                v3 = 0;\n                do {\n                    v2 = v2 + v3;\n                    v4 = v4 + 1;\n                    v3 = v3 + v1;\n                } while (v4 < a0);\n                v0 = v2;\n            }\n            v1 = v1 + 1;\n        } while (v1 < a0);\n    } else {\n        v0 = 0;\n    }\n    return v0;\n}\n",
         "score": 16,
-        "maxScore": 23,
+        "maxScore": 24,
         "compileErrors": null,
         "breakdown": {
-          "insert": 4,
+          "insert": 5,
           "delete": 2,
-          "replace": 5,
+          "replace": 2,
           "opMismatch": 0,
-          "argMismatch": 5
+          "argMismatch": 7
         },
         "quality": {
           "score": 100,
@@ -51509,24 +51317,24 @@
       "asmDump": "\ntarget.o:     file format elf32-powerpc\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 ref.c\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .mwcats.text\t00000000 .mwcats.text\n00000000 g     F .text\t000000f8 nestedloop\n\n\nRELOCATION RECORDS FOR [.mwcats.text]:\nOFFSET   TYPE              VALUE\n00000004 R_PPC_ADDR32      nestedloop\n\n\nContents of section .text:\n 0000 9421fff0 39800000 39600000 93e1000c  .!..9...9`......\n 0010 3be00000 93c10008 480000c4 2c030000  ;.......H...,...\n 0020 3bc00000 408100b0 2c030008 3883fff8  ;...@...,...8...\n 0030 40810080 38040007 39400000 5400e8fe  @...8...9@..T...\n 0040 7c0903a6 2c040000 40810068 381e0001  |...,...@..h8...\n 0050 391e0002 7d3f01d6 7d8c5214 38fe0003  9...}?..}.R.8...\n 0060 38de0004 38be0005 389e0006 381e0007  8...8...8...8...\n 0070 7d8c4a14 7d1f41d6 7d4a5a14 3bde0008  }.J.}.A.}JZ.;...\n 0080 7cff39d6 7d8c4214 7cdf31d6 7d8c3a14  |.9.}.B.|.1.}.:.\n 0090 7cbf29d6 7d8c3214 7c9f21d6 7d8c2a14  |.).}.2.|.!.}.*.\n 00a0 7c1f01d6 7d8c2214 7d8c0214 4200ffa0  |...}.\".}...B...\n 00b0 7c9ef9d6 7c1e1850 7c0903a6 7c1e1800  |...|..P|...|...\n 00c0 40800014 7d8c2214 7c84fa14 3bde0001  @...}.\".|...;...\n 00d0 4200fff4 396b0008 3bff0001 7c1f1800  B...9k..;...|...\n 00e0 4180ff3c 83e1000c 7d836378 83c10008  A..<....}.cx....\n 00f0 38210010 4e800020                    8!..N..         \nContents of section .mwcats.text:\n 0000 020000f8 00000000                    ........        \nContents of section .comment:\n 0000 436f6465 57617272 696f720a 02040201  CodeWarrior.....\n 0010 01020016 2c000000 00000000 00000000  ....,...........\n 0020 00000000 00000000 00000000 00000000  ................\n 0030 00000000 00000001 00000000 00000004  ................\n 0040 00000000 00000004 00000000 00000004  ................\n 0050 00000000                             ....            \n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned/initfirst",
+        "candidateLabel": "unsigned/mulfirst/initfirst",
         "outcome": "nonmatch",
-        "source": "s32 nestedloop(u32 a0) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    s32 v5;\n    s32 v6;\n    s32 v7;\n    s32 v8;\n    s32 v9;\n    s32 v10;\n    v9 = 0;\n    v10 = 0;\n    for (v8 = 0; v8 < a0; v8 = v8 + 1) {\n        v0 = 0;\n        if (a0 > v0) {\n            v1 = v9;\n            v2 = 0;\n            v3 = a0 + -8 + 7 >> 3;\n            if (a0 > 8 && a0 + -8 > 0) {\n                do {\n                    v1 = v1 + v2 + v8 * (v0 + 1) + v8 * (v0 + 2) + v8 * (v0 + 3) + v8 * (v0 + 4) + v8 * (v0 + 5) + v8 * (v0 + 6) + v8 * (v0 + 7);\n                    v2 = v2 + v10;\n                    v0 = v0 + 8;\n                    v3 = v3 - 1;\n                } while (v3 != 0);\n            }\n            v9 = v1;\n            v4 = v9;\n            v6 = v0;\n            v5 = v0 * v8;\n            v7 = a0 - v0;\n            if (v6 < a0) {\n                do {\n                    v4 = v4 + v5;\n                    v5 = v5 + v8;\n                    v6 = v6 + 1;\n                    v7 = v7 - 1;\n                } while (v7 != 0);\n            }\n            v9 = v4;\n        }\n        v10 = v10 + 8;\n    }\n    return v9;\n}\n",
-        "score": 80,
-        "maxScore": 83,
+        "source": "s32 nestedloop(u32 a0) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    s32 v5;\n    s32 v6;\n    s32 v7;\n    s32 v8;\n    s32 v9;\n    s32 v10;\n    v9 = 0;\n    v10 = 0;\n    for (v8 = 0; v8 < (s32)a0; v8 = v8 + 1) {\n        v0 = 0;\n        if ((s32)a0 > v0) {\n            v1 = v9;\n            v2 = 0;\n            v3 = a0 + -8 + 7 >> 3;\n            if ((s32)a0 > 8 && (s32)(a0 + -8) > 0) {\n                do {\n                    v1 = v8 * (v0 + 7) + (v8 * (v0 + 6) + (v8 * (v0 + 5) + (v8 * (v0 + 4) + (v8 * (v0 + 3) + (v8 * (v0 + 2) + (v8 * (v0 + 1) + (v1 + v2)))))));\n                    v2 = v2 + v10;\n                    v0 = v0 + 8;\n                    v3 = v3 - 1;\n                } while (v3 != 0);\n            }\n            v9 = v1;\n            v4 = v9;\n            v6 = v0;\n            v5 = v0 * v8;\n            v7 = a0 - v0;\n            if (v6 < (s32)a0) {\n                do {\n                    v4 = v4 + v5;\n                    v5 = v5 + v8;\n                    v6 = v6 + 1;\n                    v7 = v7 - 1;\n                } while (v7 != 0);\n            }\n            v9 = v4;\n        }\n        v10 = v10 + 8;\n    }\n    return v9;\n}\n",
+        "score": 77,
+        "maxScore": 80,
         "compileErrors": null,
         "breakdown": {
-          "insert": 21,
-          "delete": 17,
-          "replace": 4,
-          "opMismatch": 3,
-          "argMismatch": 35
+          "insert": 18,
+          "delete": 13,
+          "replace": 6,
+          "opMismatch": 4,
+          "argMismatch": 36
         },
         "quality": {
-          "score": 100,
+          "score": 94,
           "lines": 47,
           "gotos": 0,
-          "casts": 0,
+          "casts": 5,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -52880,9 +52688,9 @@
       "targetAsm": "@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tpreupdate_exit_pure\n\t.type\t preupdate_exit_pure,function\n\t.thumb_func\npreupdate_exit_pure:\n\tadd\tr3, r0, #0\n\tcmp\tr1, #0\n\tble\t.L3\t@cond_branch\n\tlsl\tr0, r1, #0x2\n\tadd\tr0, r3, r0\n.L4:\n\tstr\tr1, [r0]\n\tlsl\tr2, r1, #0x3\n\tsub\tr0, r0, #0x4\n\tsub\tr1, r1, #0x1\n\tcmp\tr1, #0\n\tbne\t.L4\t@cond_branch\n.L3:\n\tadd\tr0, r2, #0\n\tbx\tlr\n.Lfe1:\n\t.size\t preupdate_exit_pure,.Lfe1-preupdate_exit_pure\n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "signed",
+        "candidateLabel": "unsigned/initfirst",
         "outcome": "nonmatch",
-        "source": "s32 preupdate_exit_pure(s32 a0, s32 a1, s32 a2) {\n    s32 * v0;\n    s32 v1;\n    if (a1 > 0) {\n        v1 = a1;\n        v0 = (s32 *)(a0 + (a1 << 2));\n        do {\n            a2 = v1 << 3;\n            *v0 = v1;\n            v0 = v0 - 1;\n            v1 = v1 - 1;\n        } while (v1 != 0);\n    }\n    return a2;\n}\n",
+        "source": "s32 preupdate_exit_pure(u32 a0, u32 a1, u32 a2) {\n    s32 * v0;\n    s32 v1;\n    v1 = a1;\n    if (v1 > 0) {\n        v0 = (s32 *)(a0 + (a1 << 2));\n        do {\n            a2 = v1 << 3;\n            *v0 = v1;\n            v0 = v0 - 1;\n            v1 = v1 - 1;\n        } while (v1 != 0);\n    }\n    return a2;\n}\n",
         "score": 2,
         "maxScore": 14,
         "compileErrors": null,
@@ -57672,9 +57480,9 @@
       "targetAsm": "@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tsignum\n\t.type\t signum,function\n\t.thumb_func\nsignum:\n\tmov\tr1, #0x0\n\tcmp\tr0, #0\n\tble\t.L3\t@cond_branch\n\tmov\tr1, #0x1\n.L3:\n\tlsr\tr0, r0, #0x1f\n\tsub\tr0, r1, r0\n\tbx\tlr\n.Lfe1:\n\t.size\t signum,.Lfe1-signum\n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "signed/defsite",
+        "candidateLabel": "unsigned/defsite",
         "outcome": "match",
-        "source": "s32 signum(s32 a0) {\n    s32 v0;\n    v0 = 0;\n    if (a0 > 0) v0 = 1;\n    return v0 - ((u32)a0 >> 31);\n}\n",
+        "source": "s32 signum(u32 a0) {\n    s32 v0;\n    v0 = 0;\n    if ((s32)a0 > 0) v0 = 1;\n    return v0 - (a0 >> 31);\n}\n",
         "score": 0,
         "maxScore": 7,
         "compileErrors": null,
@@ -57746,7 +57554,7 @@
         "decompiler": "asmlift",
         "candidateLabel": "unsigned",
         "outcome": "nonmatch",
-        "source": "s32 signum(u32 a0) {\n    return (0 < a0) - (a0 >> 31);\n}\n",
+        "source": "s32 signum(u32 a0) {\n    return (0 < (s32)a0) - (a0 >> 31);\n}\n",
         "score": 7,
         "maxScore": 8,
         "compileErrors": null,
@@ -57761,7 +57569,7 @@
           "score": 100,
           "lines": 3,
           "gotos": 0,
-          "casts": 0,
+          "casts": 1,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -59961,9 +59769,9 @@
       "targetAsm": "@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tstructarr\n\t.type\t structarr,function\n\t.thumb_func\nstructarr:\n\tmov\tr3, #0x0\n\tcmp\tr3, r1\n\tbge\t.L4\t@cond_branch\n\tadd\tr2, r0, #0\n.L6:\n\tldr\tr0, [r2]\n\tadd\tr3, r3, r0\n\tadd\tr2, r2, #0x8\n\tsub\tr1, r1, #0x1\n\tcmp\tr1, #0\n\tbne\t.L6\t@cond_branch\n.L4:\n\tadd\tr0, r3, #0\n\tbx\tlr\n.Lfe1:\n\t.size\t structarr,.Lfe1-structarr\n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned/flip-join",
+        "candidateLabel": "signed/flip-join",
         "outcome": "nonmatch",
-        "source": "s32 structarr(s32 * a0, u32 a1) {\n    s32 * v0;\n    s32 v1;\n    s32 v2;\n    if (0 >= a1) {\n        v1 = 0;\n    } else {\n        v0 = a0;\n        v1 = 0;\n        v2 = a1;\n        do {\n            v1 = v1 + *v0;\n            v0 = v0 + 2;\n            v2 = v2 - 1;\n        } while (v2 != 0);\n    }\n    return v1;\n}\n",
+        "source": "s32 structarr(s32 * a0, s32 a1) {\n    s32 * v0;\n    s32 v1;\n    s32 v2;\n    if (0 >= a1) {\n        v1 = 0;\n    } else {\n        v0 = a0;\n        v1 = 0;\n        v2 = a1;\n        do {\n            v1 = v1 + *v0;\n            v0 = v0 + 2;\n            v2 = v2 - 1;\n        } while (v2 != 0);\n    }\n    return v1;\n}\n",
         "score": 5,
         "maxScore": 15,
         "compileErrors": null,

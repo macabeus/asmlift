@@ -40,6 +40,7 @@ import { hoistScopedBases } from './l3/scopebase';
 import { type SymbolRef, collectSymbolRefs } from './l3/symbol-refs';
 import { deviceVolatileClaims, volatilePtrLocals, volatileSubsetCandidates } from './l3/volatileptr';
 import { volatileValueLocals } from './l3/volatileval';
+import { zeroSubNegates } from './l3/zerosub';
 import { RewritePattern } from './pattern/engine';
 import { applyIdiomPatterns, raiseRecovered, structureChecked } from './pipeline';
 import { type Prototypes, prototypesFromSymbols } from './proto';
@@ -430,6 +431,9 @@ export function enumerateCandidates(
   opts: EnumerateOptions = {},
 ): Candidate[] {
   const backend = opts.backend ?? cBackend;
+  /** The last refusal from a backend asked to spell a tree — what the empty-enumeration check
+   *  below reports, so "this backend can spell nothing here" names its reason. */
+  let lastEmitError: unknown = null;
   // Same merge as `decompile`: the project's DWARF signatures fill in what the caller did not
   // state, so both the annotate pass and the ranked candidates reason about one prototype table.
   const prototypes = prototypesFromSymbols(opts.symbols, opts.prototypes ?? {});
@@ -578,7 +582,22 @@ export function enumerateCandidates(
     // when a loop re-spells, BOTH representations are emitted and the differ referees. The
     // re-spelling passes the same boundary contracts as the primary; one that fails them is
     // dropped here — never scored, never able to win.
-    const spellings: Spelling[] = [{ suffix: '', source: backend.emit(sfn), ...refsOf(sfn), ...volOf(sfn) }];
+    const spellings: Spelling[] = [];
+    // The PRIMARY spelling takes the same posture as every re-spelling below: a backend that
+    // declines by throwing costs this tree — its primary and the re-spellings built from it —
+    // never the row. The opposite posture from the STRUCTURING refusal below, which aborts the
+    // row at the base point, and for the reason that separates them: that one says the lift is
+    // broken, this one that the target language has no spelling for a tree the lift got right
+    // (structuring is language-neutral, and the signedness pins it inserts are `cast` nodes the
+    // Pascal backend loud-declines). Refusing EVERY tree is still loud — the empty-enumeration
+    // check at the end raises the last refusal.
+    try {
+      spellings.push({ suffix: '', source: backend.emit(sfn), ...refsOf(sfn), ...volOf(sfn) });
+    } catch (e) {
+      lastEmitError = e;
+      opts.onLeverError?.(name, e instanceof Error ? e.message.split('\n')[0] : String(e));
+      return spellings;
+    }
     // Representation re-spellings — each a lever on the same footing as signedness/branch sense,
     // each guarded: it must pass the same boundary contracts as the primary AND emit (a backend
     // that declines by throwing — Pascal loud-fails unspellable shapes — drops the candidate,
@@ -668,6 +687,13 @@ export function enumerateCandidates(
       }
     }
     respell('/argbase', () => materializeArgBases(sfn));
+    // `/zerosub` — spell a negate of a SHARED subtraction as `0 - x` (l3/zerosub.ts). gcc 2.9
+    // folds `-(a - b)` into `(b - a)` before CSE but leaves `0 - (a - b)` as a negate of the
+    // subtraction itself, so over a value the function also uses elsewhere the two spellings are
+    // a computation and a register apart — and both are reachable from a real source. The differ
+    // referees; its gate keeps it off every shape where the fold rule does not apply, which is
+    // every operand but a shared subtraction.
+    respell('/zerosub', () => zeroSubNegates(sfn));
     // `/volatile` — declare a pointer local holding a NUMERIC address as pointing to volatile
     // data (l3/volatileptr.ts). A raw constant has no declaration anywhere, so the original
     // qualifier is not derivable — and it is codegen-visible (a volatile MEM is barred from
@@ -1039,6 +1065,12 @@ export function enumerateCandidates(
         }
       }
     }
+  }
+  // Every tree the fan produced was refused by the backend. Each refusal on its own is a dropped
+  // candidate; all of them together is the row, and it stays LOUD — the alternative is a caller
+  // ranking an empty list and reporting no match for a function nothing ever tried to spell.
+  if (out.length === 0) {
+    throw new Error(`no spellable candidate for '${name}': ${firstLine(lastEmitError)}`, { cause: lastEmitError });
   }
   return out;
 }

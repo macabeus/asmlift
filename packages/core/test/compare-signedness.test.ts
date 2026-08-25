@@ -8,7 +8,11 @@
 // The refusals are what these tests pin: a provably-unsigned operand leaves the spelling alone,
 // and so does a compare whose operands both provably sit in [0, 2^31) — `(u8)x > 4` is
 // value-faithful spelled signed, and the compiler picks the unsigned branch itself (the ult5
-// matching fixture). ==/!= never cast; icmp_s* is out of scope.
+// matching fixture). ==/!= never cast.
+//
+// The SIGNED direction is not the axis and is pinned at the end of this file: there the opcode
+// names the compare, so every operand short of a proof that it already renders signed takes a
+// cast — a pointer-rendered side excepted, where the cast would compare two addresses signed.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -227,4 +231,119 @@ const GSUB = `fn gsubhole {
 
 test('a signed guard over the loop-init arg blocks the flip through the substitution channel', () => {
   expect(emit(GSUB)).not.toMatch(/u32 v\d+;/);
+});
+
+// ── the SIGNED direction ───────────────────────────────────────────────────────────────────
+// Not the axis, and not a spelling choice: an icmp_s* operand that renders UNSIGNED makes C
+// compare unsigned, which is the compare the machine did not do. Where the other side is a
+// constant the test folds away entirely — agbcc compiles `(u32)a / b < 0` to `mov r0, #0`,
+// deleting the divide call with it. Always on, and it fires only where the rendering provably
+// disagrees with the opcode.
+const SIGNEDCMP = `fn signedcmp {
+^bb0(%0: u32):
+  %1: s32 = const {value=0}
+  %2: u32 = icmp_slt %0, %1
+  cond_br %2, ^bb1(), ^bb2()
+^bb1():
+  %3: s32 = const {value=1}
+  ret %3
+^bb2():
+  %4: s32 = const {value=0}
+  ret %4
+}
+`;
+
+test('a signed compare over an unsigned-rendering operand takes the (s32) cast', () => {
+  expect(emit(SIGNEDCMP, false)).toMatch(/\(s32\)a0 [<>]=? 0/);
+});
+
+// A signed compare whose operands already render signed is left alone — the everyday case, and
+// the reason this cannot churn the corpus.
+const SIGNEDOK = `fn signedok {
+^bb0(%0: s32):
+  %1: s32 = const {value=0}
+  %2: u32 = icmp_slt %0, %1
+  cond_br %2, ^bb1(), ^bb2()
+^bb1():
+  %3: s32 = const {value=1}
+  ret %3
+^bb2():
+  %4: s32 = const {value=0}
+  ret %4
+}
+`;
+
+test('a signed compare over signed-rendering operands keeps its spelling', () => {
+  expect(emit(SIGNEDOK, false)).not.toContain('(s32)');
+});
+
+// An operand whose rendering the model CANNOT determine takes the cast just the same. A callee's
+// return type is the project header's, not this function's — and with `u32 getv(void);` in scope
+// agbcc compiles `if (getv() >= 0)` to `bl getv; mov r0, #0x0`, deleting the comparison and both
+// arms, where `if ((s32)getv() >= 0)` keeps `cmp r0, #0; bge`.
+const SIGNEDCMP_CALL = `fn signedcmpcall {
+^bb0(%0: s32):
+  %1: s32 = call {target="getv"}
+  %2: s32 = const {value=0}
+  %3: u32 = icmp_slt %1, %2
+  cond_br %3, ^bb1(), ^bb2()
+^bb1():
+  ret %0
+^bb2():
+  %4: s32 = const {value=0}
+  ret %4
+}
+`;
+
+test('a signed compare over a call takes the (s32) cast', () => {
+  expect(emit(SIGNEDCMP_CALL, false)).toMatch(/\(s32\)getv\(\) [<>]=? 0/);
+});
+
+// A constant too big for `int` renders UNSIGNED in C89 and drags the compare with it: over `int a`,
+// `a <= -2147483648` compiles to `bls` where `a <= (s32)-2147483648` compiles to `ble`.
+const SIGNEDCMP_INTMIN = `fn signedcmpintmin {
+^bb0(%0: s32):
+  %1: s32 = const {value=-2147483648}
+  %2: u32 = icmp_sle %0, %1
+  cond_br %2, ^bb1(), ^bb2()
+^bb1():
+  %3: s32 = const {value=1}
+  ret %3
+^bb2():
+  %4: s32 = const {value=0}
+  ret %4
+}
+`;
+
+test('a signed compare against a constant too big for `int` casts the constant', () => {
+  expect(emit(SIGNEDCMP_INTMIN, false)).toContain('(s32)-2147483648');
+});
+
+// A POINTER-rendered side is left alone, and that is the pin's one SEMANTIC guard rather than a
+// cosmetic one: `p < end` is already the unsigned compare C gives two addresses, where
+// `(s32)p < (s32)end` compares them signed and inverts on any pair straddling 0x80000000. The
+// operands have to render as POINTERS, not merely stand on one — `*(u16 *)a0` over a `u32`-typed
+// operand renders `u32`, and there the pin fires and should.
+const PTRWALK = `fn ptrwalk {
+^bb0(%0: s32*, %1: s32*):
+  %9: s32 = const {value=0}
+  br ^bb1(%0, %9)
+^bb1(%2: s32*, %10: s32):
+  %3: u32 = icmp_slt %2, %1
+  cond_br %3, ^bb2(%2, %10), ^bb3(%10)
+^bb2(%4: s32*, %11: s32):
+  %5: s32 = load %4 {off=0, width=4, signed=true}
+  %6: s32 = const {value=4}
+  %7: s32* = add %4, %6
+  %8: s32 = add %11, %5
+  br ^bb1(%7, %8)
+^bb3(%12: s32):
+  ret %12
+}
+`;
+
+test('a signed compare between pointer-rendered operands takes no cast', () => {
+  const src = emit(PTRWALK, false);
+  expect(src).toMatch(/while \(v0 < a1\)/);
+  expect(src).not.toContain('(s32)');
 });

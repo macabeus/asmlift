@@ -577,9 +577,11 @@ const ARITH_TO_BIN: Record<string, BinOp> = {
   sub: '-',
   mul: '*',
   sdiv: '/',
-  udiv: '/',
+  // the UNSIGNED quotient/remainder — the C backend spells them `/`/`%` over an operand it casts
+  // unsigned (l3/ast.ts BinOp, backend/cfamily.ts C_SPELLING)
+  udiv: '/u',
   smod: '%',
-  umod: '%',
+  umod: '%u',
   or: '|',
   and: '&',
   xor: '^',
@@ -1646,10 +1648,10 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // cast at emission — the initfirst guard swap). The declaration is the honest fix: a name
   // flips to u32 when SOME value under it is u32-typed and NO value under it carries signed-use
   // evidence (the transitive input cone of any icmp_s* / sdiv / smod / shr_s). Only int32
-  // declarations reconcile; the flip is byte-invariant everywhere but the compares and unsigned
-  // divisions it corrects (+/-/*/&/|/^/<< are sign-blind, `>>` self-corrects via the backend's
-  // shiftOperand cast, a udiv/umod renders `/`/`%` unsigned through the flipped operand — the
-  // machine's own division — and SIGNED division is evidence-blocked).
+  // declarations reconcile; the flip is byte-invariant everywhere but the unsigned compares it
+  // corrects (+/-/*/&/|/^/<< are sign-blind; the signedness-carrying pairs — `>>`/`>>>` and
+  // `/`/`%` against `/u`/`%u` — say which they are through the backend's operand pin, so no
+  // declaration can change what they render; and SIGNED division is evidence-blocked).
   if (unsignedCompareSpelling) {
     // Signed-use evidence is the TRANSITIVE INPUT CONE of every signed op — a claimant can feed
     // an icmp_slt through an inline `sub` and the flip would still render that compare unsigned
@@ -1974,12 +1976,10 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // sign-agnostic ==/!=) spell `(u32)&gSym`, signed compares `(s32)&gSym` — exactly the
       // compare the asm did. The deref folds never see a compare operand, so no named spelling is
       // lost; a NARROWING cast (`(u8)&gSym`) is not a bare `addr` and keeps its truncation.
-      // SCOPE (adversarial review): this closes the hole for BARE addr operands only. An
-      // addr-carrying arithmetic tree (`(u32)&gSym + 4`, spelled by intifyAddr below) under an
-      // icmp_s* still compares unsigned in C (u32 wins the usual-arithmetic-conversions) — the
-      // same pre-existing wrongness the old ptr-vs-int spelling had, surfacing as a scoring
-      // nonmatch, never a silent regression of a formerly-correct compare. Rare shape; an outer
-      // signed cast on addr-carrying trees is the follow-up if it ever costs a row.
+      // SCOPE: this handles BARE addr operands. An addr-carrying arithmetic tree
+      // (`(u32)&gSym + 4`, spelled by intifyAddr below) renders unsigned and would compare
+      // unsigned under an icmp_s*; the signed operand pin at the end of this block catches it as
+      // one case of the general rule, needing no addr-specific reasoning.
       const t = /^icmp_s/.test(d.opcode) ? T.s(32) : T.u(32);
       const intifyAddrCmp = (x: Expr): Expr => (x.k === 'addr' ? { k: 'cast', to: t, e: x } : x);
       let l = intifyAddrCmp(e(d.operands[0]));
@@ -1996,7 +1996,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // value-faithful and the compiler already picks the unsigned branch itself, and so does a
       // pointer-rendered side: `p < end` already compares unsigned, and `(u32)p` against a
       // pointer is the int-vs-ptr constraint violation the strict backends reject. ==/!= are
-      // sign-agnostic and icmp_s* keeps its documented residual above.
+      // sign-agnostic; the icmp_s* direction is pinned below.
       const ptrSide = (x: Expr): boolean => {
         const t2 = ctype(x);
         return t2?.kind === 'ptr' || t2?.kind === 'array';
@@ -2016,6 +2016,31 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         } else {
           l = { k: 'cast', to: T.u(32), e: l };
         }
+      }
+      // The SIGNED direction of the same hole, and a DEFAULT rather than an arm of that axis —
+      // not because nothing underdetermines, but because the underdetermination is INERT. An
+      // unsigned source compare can reach a signed opcode when the compiler proves the test is
+      // the sign bit (`u32 a; a < 0x80000000` compiles to `cmp r0, #0; bge`; kmc-gcc and gcc
+      // 2.7.2 fold it to `slti`), so an icmp_s* has more than one source — but the pinned
+      // spelling reproduces that branch too (`(s32)a >= 0` is the same `cmp r0, #0; bge`), so
+      // both sources reach ONE candidate and an axis would have doubled the fan to referee a
+      // question with one answer. Where the spellings genuinely diverge they diverge the way the
+      // opcode says, on every toolchain: an operand that renders unsigned makes C compare
+      // unsigned (agbcc `bls`, IDO/kmc-gcc/gcc 2.7.2 `sltu`/`sltiu` against `slt`/`slti`, mwcc
+      // `neg;or` against `neg;andc` in its branchless form), and against a constant the test
+      // folds away entirely and takes the surrounding computation with it — `(u32)a / b < 0`
+      // becomes `mov r0, #0`, deleting the `__udivsi3` call.
+      //
+      // `undefined` takes the cast exactly as a definite `false` does (see
+      // renderedIntSignedness): a call's signedness is the project header's, not this function's.
+      // A POINTER-rendered side is the one operand left alone, and not out of caution — `p < q`
+      // is already the unsigned compare C gives two addresses, where `(s32)p < (s32)q` would
+      // compare them signed.
+      if (/^icmp_s/.test(d.opcode)) {
+        const pinSigned = (x: Expr): Expr =>
+          renderedIntSignedness(x, vtEnv) === true || ptrSide(x) ? x : { k: 'cast', to: T.s(32), e: x };
+        l = pinSigned(l);
+        r = pinSigned(r);
       }
       return { k: 'bin', op: CMP_TO_BIN[d.opcode], l, r };
     }
@@ -2196,9 +2221,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         l = isPtrGlobal(l) ? intifyPtrGlobal(l) : l;
         r = isPtrGlobal(r) ? intifyPtrGlobal(r) : r;
       }
-      // (The two right shifts stay DISTINCT ops here — `>>>` logical, `>>` arithmetic. Which token
-      // a language spells each with, and what cast pins the choice, is a BACKEND decision; see
-      // l3/ast.ts BinOp and backend/cfamily.ts's shift rule.)
+      // (The signedness-carrying pairs stay DISTINCT ops here — `>>>`/`>>` and `/u` `%u`/`/` `%`.
+      // Which token a language spells each with, and what cast pins the choice, is a BACKEND
+      // decision; see l3/ast.ts BinOp and backend/cfamily.ts's C_SPELLING.)
       // SCOPE: this and intifyAddr cover the ARITHMETIC escapes. A pointer global under a
       // COMPARISON (`gPtr < K` — C compares unsigned whatever the asm's icmp_s* said) is the same
       // class as intifyAddrCmp's `addr` rule and is deliberately left alone here: it is valid C

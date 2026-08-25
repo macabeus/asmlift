@@ -18,6 +18,10 @@ const OP: Partial<Record<BinOp, string>> = {
   // match C's truncated `%` (sign of the DIVIDEND) — verified: `a mod 3` mis-scores against the
   // IDO C `a % 3` codegen. There is no faithful IDO-Pascal spelling of a signed C remainder, so the
   // backend fails LOUD on `%` (below) rather than emit a silently-wrong `mod`. `/`→`div` DOES match.
+  //
+  // And no `/u`/`%u` either, for the same reason `>>>` is absent from BIT_FN below: `div` over this
+  // backend's signed `Integer` is the SIGNED division, so lending it to the unsigned twin would
+  // emit `div` where the machine did `divu`. They reach the loud decline instead.
   '+': '+',
   '-': '-',
   '*': '*',
