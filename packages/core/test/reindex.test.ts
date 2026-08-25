@@ -693,3 +693,13 @@ describe('v4 — the unguarded constant-trip countdown re-spells as a counted fo
     ).toBeNull();
   });
 });
+
+test('v4 refused: C + 1 would not fit a positive s32 — the bound would wrap negative', () => {
+  expect(reindexWalks(constCountdown((fn) => ((fn.body[2] as Stmt & { k: 'assign' }).value = C(0x7fffffff))))).toBe(
+    null,
+  );
+  // one below the edge still re-spells
+  expect(reindexWalks(constCountdown((fn) => ((fn.body[2] as Stmt & { k: 'assign' }).value = C(0x7ffffffe))))).not.toBe(
+    null,
+  );
+});

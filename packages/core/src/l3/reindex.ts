@@ -930,10 +930,11 @@ export function reindexWalks(sfn: SFn, keptWalks?: Set<string>): SFn | null {
       return null;
     }
     // the counter's init `k = C`, C a NON-NEGATIVE constant: the loop runs while k counts C…0, so
-    // the trip count is C + 1 — which is a count only for C >= 0 (`k = -1` runs once, not zero
-    // times).
+    // the trip count is C + 1. That is a count only for C >= 0 (`k = -1` runs once, not zero
+    // times) and only while C + 1 still fits a positive s32 — at S32_MAX the bound wraps negative
+    // and the `for` would run zero times where the countdown runs two billion.
     const kInit = out.find((x): x is Stmt & { k: 'assign' } => x.k === 'assign' && x.name === kv);
-    if (!kInit || kInit.value.k !== 'const' || kInit.value.value < 0) {
+    if (!kInit || kInit.value.k !== 'const' || kInit.value.value < 0 || kInit.value.value >= 0x7fffffff) {
       return null;
     }
     const r = respellCountdown(dw, out, kv, kInit, { k: 'const', value: kInit.value.value + 1 }, (i) => i);

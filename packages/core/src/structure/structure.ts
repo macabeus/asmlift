@@ -1775,7 +1775,11 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // conservative "a write in `a` may execute between one in `b` and `b`'s terminator": same
     // block counts (op order refined by the caller where it matters), else CFG reachability
     const mayFollow = (a: Block, b: Block): boolean => a === b || reachFrom(a).has(b);
-    const blockOf = (v: Value): Block | undefined => paramBlock.get(v) ?? opBlock.get(defs.get(v)!);
+    /** Where a value is WRITTEN: its block for a param, its def op's block otherwise. */
+    const blockOf = (v: Value): Block | undefined => {
+      const d = defs.get(v);
+      return paramBlock.get(v) ?? (d === undefined ? undefined : opBlock.get(d));
+    };
     // A loop whose body is entered ONLY through its header, from ONE preheader. Both halves are
     // what make "every write to the name outside the anchored one is a back-edge copy" true: a
     // second forward pred writes the name at its own edge outside the body, and a body block with
@@ -1797,7 +1801,14 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         // body's own carried values, which are written only on the back edge
         const soleClaimant =
           nameCount.get(name) === 1 ||
-          (loop !== undefined && [...varName].every(([v, n]) => n !== name || v === p || loop.body.has(blockOf(v)!)));
+          (loop !== undefined &&
+            [...varName].every(([v, n]) => {
+              if (n !== name || v === p) {
+                return true;
+              }
+              const b = blockOf(v);
+              return b !== undefined && loop.body.has(b);
+            }));
         if (!soleClaimant) {
           return;
         }
