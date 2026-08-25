@@ -552,6 +552,7 @@ export function reindexWalks(sfn: SFn, keptWalks?: Set<string>): SFn | null {
   for (const v of [...sfn.params, ...sfn.locals, ...(sfn.globals ?? [])]) {
     declTypes.set(v.name, v.type);
   }
+  const scalarLocals = new Set([...sfn.params, ...sfn.locals].map((v) => v.name));
   for (const v of [...sfn.params, ...sfn.locals]) {
     if (v.type.kind === 'ptr') {
       ptrVars.set(v.name, v.type);
@@ -725,12 +726,23 @@ export function reindexWalks(sfn: SFn, keptWalks?: Set<string>): SFn | null {
     kInit: Stmt & { k: 'assign' },
     trip: Expr,
     confineTo: (induction: Stmt[]) => Stmt[],
+    accept?: (leftovers: Stmt[]) => boolean,
   ): { inductionInits: Set<Stmt>; leftovers: Stmt[]; counted: Stmt & { k: 'for' } } | null {
     // an INTEGER counter only: C pointer arithmetic strides the element size, so a pointer-typed
     // k's `k - 1` counts elements-of-k, not iterations — the rewrite's `i < n` would run a
     // different trip count. Declining on type closes every pointer-k shape at once (a self-step,
     // an ordinary decrement, whatever spelling).
     if (ptrVars.has(k)) {
+      return null;
+    }
+    // …and a DECLARED one. The rewrite deletes the counter's init and its decrement, which the
+    // four-roles rule licenses by proving nothing in this function reads it afterwards — a
+    // property that says nothing about a GLOBAL, whose final value is observable to every other
+    // caller, ISR and translation unit. structure.ts spells a store to a bare scalar global as an
+    // `assign` like any other, so `gCount = 7; do { …; gCount = gCount - 1; } while (…)` reaches
+    // here looking exactly like a local counter, and the re-spelling would silently stop writing
+    // it.
+    if (!scalarLocals.has(k)) {
       return null;
     }
     // the body's contiguous tail: `k -= 1` and `p += 1` per walk pointer
@@ -818,6 +830,13 @@ export function reindexWalks(sfn: SFn, keptWalks?: Set<string>): SFn | null {
     if (leftovers.some((x) => walks.some((w) => stmtMentions(x, w)))) {
       return null;
     }
+    // The caller's own admission, and it runs HERE — before `freshIv` mints an induction local
+    // and before `keptWalks` records these pointers. Both outlive a `return null`: a retired
+    // candidate would leave a declared-but-unused `i<n>` in the tree and qualify the /volatile
+    // product on a pointer belonging to a loop that never re-spelled.
+    if (accept && !accept(leftovers)) {
+      return null;
+    }
     // rewrite: each walk pointer is its OWN base (kept local, step dropped)
     const iv = freshIv();
     let body: Stmt[] | null = bodyCore;
@@ -891,15 +910,12 @@ export function reindexWalks(sfn: SFn, keptWalks?: Set<string>): SFn | null {
     if (sfn.body.some((x) => stmtAssigns(x, n))) {
       return null; // a moving bound
     }
-    const r = respellCountdown(loop, pre, k, kInit, { k: 'var', name: n }, () => [s]);
-    if (!r) {
-      return null;
-    }
     // the skip arm must be, in order, exactly `pre` minus the induction inits
-    if (
-      skipArm.length !== r.leftovers.length ||
-      !skipArm.every((x, i) => JSON.stringify(x) === JSON.stringify(r.leftovers[i]))
-    ) {
+    const skipArmMatches = (leftovers: Stmt[]): boolean =>
+      skipArm.length === leftovers.length &&
+      skipArm.every((x, i) => JSON.stringify(x) === JSON.stringify(leftovers[i]));
+    const r = respellCountdown(loop, pre, k, kInit, { k: 'var', name: n }, () => [s], skipArmMatches);
+    if (!r) {
       return null;
     }
     return [...pre.filter((x) => x !== kInit), r.counted];
@@ -931,11 +947,13 @@ export function reindexWalks(sfn: SFn, keptWalks?: Set<string>): SFn | null {
       return null;
     }
     // the counter's init `k = C`, C a NON-NEGATIVE constant: the loop runs while k counts C…0, so
-    // the trip count is C + 1. That is a count only for C >= 0 (`k = -1` runs once, not zero
-    // times) and only while C + 1 still fits a positive s32 — at S32_MAX the bound wraps negative
-    // and the `for` would run zero times where the countdown runs two billion.
+    // the trip count is C + 1. That is a count only while BOTH ends are representable in the
+    // counter's OWN type — below zero `k = -1` runs the body once rather than `C + 1 = 0` times,
+    // and above its maximum `k = 200` in an `s8` is -56, which fails `k >= 0` at the first test
+    // and runs the body once where `i < 201` runs it 201 times.
+    const kMax = 2 ** (kT.width - 1) - 1;
     const kInit = out.find((x): x is Stmt & { k: 'assign' } => x.k === 'assign' && x.name === kv);
-    if (!kInit || kInit.value.k !== 'const' || kInit.value.value < 0 || kInit.value.value >= 0x7fffffff) {
+    if (!kInit || kInit.value.k !== 'const' || kInit.value.value < 0 || kInit.value.value >= kMax) {
       return null;
     }
     const r = respellCountdown(dw, out, kv, kInit, { k: 'const', value: kInit.value.value + 1 }, (i) => i);

@@ -703,3 +703,115 @@ test('v4 refused: C + 1 would not fit a positive s32 — the bound would wrap ne
     null,
   );
 });
+
+// ── the shared countdown gate: what the counter may BE ────────────────────────────────────────
+
+/** `v1 = a0; gCount = 7; do { *v1 = 0; v1 += 1; gCount -= 1; } while (gCount >= 0);`
+ *  — a bare scalar GLOBAL in the counter's place. structure.ts spells a store to one as an
+ *  `assign`, so it arrives here shaped exactly like a local counter. */
+const globalCounter: SFn = {
+  name: 'clr',
+  retType: T.void(),
+  params: [{ name: 'a0', type: T.ptr(T.s(32)) }],
+  locals: [{ name: 'v1', type: T.ptr(T.s(32)) }],
+  globals: [{ name: 'gCount', type: T.s(32) }],
+  body: [
+    { k: 'assign', name: 'v1', value: V('a0') },
+    { k: 'assign', name: 'gCount', value: C(7) },
+    {
+      k: 'dowhile',
+      cond: { k: 'bin', op: '>=', l: V('gCount'), r: C(0) },
+      body: [
+        { k: 'store', lval: deref('v1'), value: C(0) },
+        step('v1'),
+        { k: 'assign', name: 'gCount', value: { k: 'bin', op: '-', l: V('gCount'), r: C(1) } },
+      ],
+    },
+  ],
+};
+
+test('the counter may not be a GLOBAL — the rewrite would stop writing a value other TUs observe', () => {
+  expect(reindexWalks(globalCounter)).toBeNull();
+});
+
+test('v4 refused: C + 1 must fit the COUNTER, not just an s32 — 200 in an s8 is -56', () => {
+  // the countdown runs the body ONCE (the s8 counter is negative at the first test); `i < 201`
+  // would run it 201 times and walk 200 words past the buffer
+  expect(
+    reindexWalks(
+      constCountdown((fn) => {
+        fn.locals[2].type = T.s(8);
+        (fn.body[2] as Stmt & { k: 'assign' }).value = C(200);
+      }),
+    ),
+  ).toBeNull();
+  // the same s8 counter within range still re-spells
+  expect(
+    reindexWalks(
+      constCountdown((fn) => {
+        fn.locals[2].type = T.s(8);
+        (fn.body[2] as Stmt & { k: 'assign' }).value = C(100);
+      }),
+    ),
+  ).not.toBeNull();
+});
+
+test('a v2 loop that declines on its skip arm mints nothing: no dead iv, no kept walk', () => {
+  // the guarded countdown's skip arm does NOT equal the else arm's leftovers, so v2 declines —
+  // while an ordinary v1 while-walk in the same function fires and takes the FIRST iv name
+  const fn = guardedCountdown((body) => {
+    (body[0] as Stmt & { k: 'if' }).then = [{ k: 'assign', name: 'v1', value: C(7) }];
+  });
+  fn.params.push({ name: 'a2', type: T.ptr(T.s(32)) });
+  fn.locals.push({ name: 'v3', type: T.ptr(T.s(32)) }, { name: 'v4', type: T.s(32) });
+  fn.body.splice(
+    1,
+    0,
+    { k: 'assign', name: 'v4', value: C(0) },
+    { k: 'assign', name: 'v3', value: V('a2') },
+    {
+      k: 'while',
+      cond: { k: 'bin', op: '<', l: V('v3'), r: { k: 'bin', op: '+', l: V('a2'), r: V('a1') } },
+      body: [{ k: 'assign', name: 'v4', value: { k: 'bin', op: '+', l: V('v4'), r: deref('v3') } }, step('v3')],
+    },
+  );
+  const kept = new Set<string>();
+  const out = reindexWalks(fn, kept)!;
+  expect(out).not.toBeNull();
+  const c = cBackend.emit(out);
+  expect(c).toContain('while (i0 < a1)'); // the walk that FIRED took the first name
+  expect(c).not.toContain('i1'); // …and nothing minted a second
+  expect(kept).toEqual(new Set(['a2'])); // not `v0`, the declined countdown's walk pointer
+});
+
+test('v4 refused: a deref standing AFTER the step reads the next element', () => {
+  expect(
+    reindexWalks(constCountdown((fn) => cdLoop(fn).body.splice(2, 0, { k: 'store', lval: deref('v1'), value: C(0) }))),
+  ).toBeNull();
+});
+
+test('v4 inside an outer loop: the counter re-inits per outer iteration, so the `for` does too', () => {
+  const inner = constCountdown();
+  const fn: SFn = {
+    ...inner,
+    locals: [...inner.locals, { name: 'v3', type: T.s(32) }],
+    body: [
+      { k: 'assign', name: 'v3', value: C(0) },
+      {
+        k: 'while',
+        cond: { k: 'bin', op: '<', l: V('v3'), r: C(4) },
+        body: [
+          ...inner.body.slice(0, 4),
+          { k: 'assign', name: 'v3', value: { k: 'bin', op: '+', l: V('v3'), r: C(1) } },
+        ],
+      },
+      { k: 'return', value: V('v0') },
+    ],
+  };
+  const c = cBackend.emit(reindexWalks(fn)!);
+  expect(c).toContain('while (v3 < 4) {');
+  expect(c).toContain('v1 = a0;');
+  expect(c).toContain('for (i0 = 0; i0 < 8; i0 = i0 + 1)');
+  expect(c).toContain('v1[i0]');
+  expect(c).not.toContain('v2 =');
+});
