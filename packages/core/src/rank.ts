@@ -37,6 +37,7 @@ import { pollGuards, pollReads } from './l3/pollguard';
 import { registerishSpellings } from './l3/regspell';
 import { reindexWalks } from './l3/reindex';
 import { hoistScopedBases } from './l3/scopebase';
+import { sinkInitsToFirstUse } from './l3/sinkinit';
 import { type SymbolRef, collectSymbolRefs } from './l3/symbol-refs';
 import { deviceVolatileClaims, volatilePtrLocals, volatileSubsetCandidates } from './l3/volatileptr';
 import { volatileValueLocals } from './l3/volatileval';
@@ -905,6 +906,12 @@ export function enumerateCandidates(
     // park's `mov` lifts to pure SSA aliasing, so its position is unrecoverable and the
     // default order is emission's. Both orders are emitted; the differ referees.
     respell('/parkfirst', () => parkParamsFirst(sfn));
+    // `/sinkinit` — each leading pointer-base init sinks to its own first use (l3/sinkinit.ts):
+    // the base hoist places every init at the head of the body, which keeps the base live across
+    // everything above its first use and can cost a callee-saved register the original avoided.
+    // Which placement the source used is not derivable from the asm, so both are emitted and the
+    // differ referees.
+    respell('/sinkinit', () => sinkInitsToFirstUse(sfn));
     // the register-copy spelling (l3/regspell.ts): 0–3 variants (base; tail assign-back reusing
     // the dead value var; tail assign-back into a fresh var — the tail choice is allocator-
     // ambiguous, so both are ranked)
