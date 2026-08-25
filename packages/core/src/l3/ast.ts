@@ -449,8 +449,6 @@ export function mapStmtExprs(s: Stmt, f: (e: Expr) => Expr): Stmt {
   }
 }
 
-/** Whether the tree contains a node with an EFFECT no re-ordering may move: a call, or a marker
- *  standing in for an unmodelled instruction (annotate mode). */
 /** An address the target can REMATERIALIZE: a constant expression, reading no variable and no
  *  memory. Which ENCODING the compiler picked for it is not a property of the source — agbcc
  *  spells a pool word `(s32 *)33569456` but a shift-encodable one `(s32 *)(128 << 18)`, and every
@@ -464,7 +462,15 @@ export function mapStmtExprs(s: Stmt, f: (e: Expr) => Expr): Stmt {
  *  Two ask it: the walk re-index (l3/reindex.ts) about a walk base, and the `volatile` qualifier
  *  (l3/volatileptr.ts) about what feeds a pointer local. They must agree — a MMIO fill whose base
  *  one admits and the other refuses can be re-indexed but never qualified, so the paired
- *  `/indexed/volatile` spelling is unreachable at exactly the hardware addresses it is for. */
+ *  `/indexed/volatile` spelling is unreachable at exactly the hardware addresses it is for.
+ *
+ *  Two levers reading the same initializers are deliberately NOT here: l3/inlinebase.ts
+ *  substitutes the address at each use, l3/nearbase.ts clusters neighbours by distance, and both
+ *  need the VALUE, which is the evaluator above. Declining a shift-encoded base there costs a
+ *  lever that does not fire, and the population is small: over klonoa's 531 lifting functions,
+ *  one inlinebase-shaped local with no symbol map and none with it; a folded nearbase would form
+ *  a new cluster in 4 functions mapless and 1 with the map. Zero of either on the 324 agbcc
+ *  benchmark rows that lift. */
 export function rematerializableAddress(e: Expr): boolean {
   let nonZero = false;
   let ok = true;
@@ -490,6 +496,8 @@ export function rematerializableAddress(e: Expr): boolean {
   return ok && nonZero;
 }
 
+/** Whether the tree contains a node with an EFFECT no re-ordering may move: a call, or a marker
+ *  standing in for an unmodelled instruction (annotate mode). */
 export function exprHasEffect(e: Expr): boolean {
   return e.k === 'call' || e.k === 'marker' || exprChildren(e).some(exprHasEffect);
 }

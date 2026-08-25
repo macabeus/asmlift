@@ -9,8 +9,8 @@
 // sticky-arm class), and a const whose write could clobber another anchored arg on a path to its
 // edge keeps the edge placement. The two flags are pinned as SEPARATE placements: one boolean
 // covering both makes the middle spelling unreachable. The refusals are not the whole guard: a
-// const anchored into a block the structurer never renders declines the FUNCTION, and the last
-// two tests are that pair.
+// const anchored into a block the structurer never renders declines the FUNCTION — the pure
+// preheader pair below.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';

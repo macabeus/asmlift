@@ -733,9 +733,10 @@ export interface StructureOptions {
   // where the two coincide are initfirst's for free — except that they never do: its guard
   // re-spelling wants an ELSE-LESS `if` and rewrites the condition to read the hoisted variable
   // (`if (v < n)`), where anchoring leaves the condition alone, so the two emit different sources.
-  // `/initfirst` rides every spelling rank.ts enumerates, so it was scored on all 887 benchmark
-  // rows already: it wins 21 of them and NONE of the 15 this axis wins. Take the axis only while
-  // rows demand that; the price is in rank.ts.
+  // Measured, not argued: `/initfirst` rides every spelling rank.ts enumerates, so it is scored on
+  // every benchmark row already, and on each row this axis wins its `/initfirst`-only sibling is
+  // either not enumerated at all or not byte-identical to the anchored source — the substitution
+  // reaches none of them. Take the axis only while rows demand that; the price is in rank.ts.
   anchorLoopEntryConsts?: boolean;
   // HARDWARE fact from TargetDescription.capabilities.endianness, threaded by structureOptionsFor:
   // the bitfield extract recognizer solves an LSB-first equation, so it only runs on little-endian
