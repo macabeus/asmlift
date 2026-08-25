@@ -2719,6 +2719,298 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'void sibwalk(u8 *d, u8 *s);',
     proto: { sibwalk: { returnsVoid: true } },
   },
+
+  // WHERE A VALUE THAT SEVERAL PLACES NEED GETS ITS ONE HOME, in a function with no loop. The
+  // `value-home` rows above are all loop-shaped or address-shaped: `/addr-home` homes a base
+  // dereferenced at 2+ sites, `/expr-home` homes a pure value defined outside a LOOP, and
+  // `/derived-home` homes a pure value standing on a memory READ (rank.ts:128-164, all three
+  // gated in structure/analysis.ts). Nothing homes a plain computed value shared by two BRANCH
+  // ARMS, or a parameter's narrowing re-spelled at every use — and both are what a bit-test
+  // prologue is made of.
+  //
+  // Cut from sa3:sub_802DFC8:agbcc (62) and sa3:sub_803213C:agbcc (48), the two rows this family
+  // was written to explain. Both are m2c MATCHes; both were tagged `['struct','field']`, and that
+  // attribution is FALSIFIED — starting from asmlift's own winning source and changing only the
+  // three homes below, 802 reaches 0 (`rows=128`) and 832 reaches 0 (`rows=71`) while still
+  // carrying asmlift's synthesized `struct Struct0 { s32 field_0; u8 _pad0[4]; … }`, its `field_N`
+  // member names, `16 - 17` for -1 and the raw `(-(x)|x)>>31 & C` branchless idiom. asmlift's
+  // struct-pointer field recovery on those rows is already byte-perfect (offsets
+  // 0/8/12/14/20/22/26/27/28/31/32, every width right).
+  //
+  // The 8-subset lattice, every cell compiled through the row's own scoring context and scored
+  // against its own target — A = the narrowed-parameter home, B = the merge-init (802) / cross-arm
+  // expression (832) home, C = the base local. RESIDUAL score per subset, so 0 is a match:
+  //   802: {} 62 · A 46 · B 23 · C 58 · AB 4 · AC 42 · BC 19 · ABC 0  → Shapley 17.5 / 40.5 / 4.0
+  //   832: {} 48 · A 39 · B 15 · C 46 · AB 2 · AC 38 · BC 13 · ABC 0  → Shapley 10.8 / 35.3 / 1.8
+  // No subset closes either row — v(AB) is 58 of 62 and 46 of 48; only all three reach 0. A cell
+  // moves by ±1 when the repair is spelled differently, so read the split as ≈17/≈40/4 and
+  // ≈11/≈35/2; the ordering, v(AB) and "struct/field recovery is worth ZERO" do not move.
+  //
+  // A FOURTH DEGREE OF FREEDOM the class names hide: WHERE each home sits RELATIVE TO THE OTHERS
+  // — and the two rows want OPPOSITE answers. On 802 the merge-zero `s32 v0 = 0;` must sit ABOVE
+  // the narrowing home `s32 t0 = (s16)a0;`; put it below and `mov r5, #0x0` lands two instructions
+  // late, for 3. On 832 the shared constant `s32 v0 = 1;` must sit BELOW both narrowing homes; put
+  // it above and `mov r6, #0x1` lands four instructions early, for 2. What does NOT matter on 832
+  // is the spelling: the hoisted expression reading a literal `1` and reading the shared `v0` both
+  // score 0. A home lever picks a PLACE, and "the top of the body" is a place it can pick wrong in
+  // either direction.
+  //
+  // WHAT m2c DOES INSTEAD, and it is one mechanism, not three. m2c binds every register write to a
+  // named `Var` (`translate.py:3503-3577` `_eval_once`, the name minted at translate.py:3546), so
+  // a value used twice is EMITTED as `temp_rN = …;` and referred to. Its 802 output declares
+  // `s16 temp_r1;`, assigns `temp_r1 = direction;`, then tests `8 & temp_r1` — the entry `lsl/asr`
+  // given a name — and carries `var_r5 = 0;` above the chain. asmlift re-DERIVES an expression at
+  // each use instead, which is why the same three homes are missing at once.
+  //
+  // THE ROWS. Every score below is a round-trip: compile the reference with the benchmark's own
+  // agbcc, run the CLI on the produced `.s` and `--score-against` the produced `.o`. All seven
+  // score with 0 dropped candidates and none declines, so no number here stands in for a frontend
+  // link.
+  //
+  //   `sxparam` diff:19 — an `s16` parameter tested at three sites. agbcc extends it ONCE at entry
+  //   (`lsl r0,#0x10 / asr r2,r0,#0x10`) and all three tests then read r2 with the constant in the
+  //   other operand; asmlift declares `u32 a0` and re-spells `(s16)a0` at each use, which agbcc
+  //   ELIDES (an `& 8` does not care) — so the extended value never gets a register of its own and
+  //   the stream instead pays `add r2,r0,#0` at entry, `add r0,r2,#0` to read it back, and a
+  //   different allocation from there on. FIVE-RUNG LADDER, all compiled against this row's own
+  //   target:
+  //     19  asmlift today
+  //     16  the same source with ONLY the home added (`s32 t0 = (s16)a0;`)
+  //      2  …and the now-redundant inner narrowing dropped (`-(t0 & 2)` for `-(s16)(t0 & 2)`)
+  //      0  the home given the NARROW type (`s16 t0 = (s16)a0;`)
+  //      0  the parameter declared `s16`
+  //   The two middle rungs are what a builder needs: the capability is a home that CARRIES THE
+  //   WIDTH, or an s32 home plus the cast-cleanup a width-carrying home makes automatic. (On the
+  //   real rows the s32 home alone is enough — their re-spellings are not nested inside a cast.)
+  //   `zxparam` diff:8 is the unsigned side (`lsl #0x18 / lsr #0x18` once per parameter): 8 today,
+  //   and 0 for the homed `u8` temp, the homed `s32` temp AND the declared `u8` parameter alike.
+  //
+  //   `armexpr` diff:35 — a pure expression the source computed ONCE above an `if`, whose only
+  //   consumers are the two arms. asmlift sinks it into BOTH arms and agbcc does not re-hoist:
+  //   compiled pair, the pre-branch spelling emits the 8-instruction `mov/and/neg/orr/asr#31/mov/
+  //   lsl/and` chain once in the entry block, the per-arm spelling emits that entire chain TWICE,
+  //   once per arm. Homing it above the branch scores 0 — but ONLY with the signed parameter
+  //   asmlift's winner already declares (its label is `signed`): spelled `u32`, agbcc constant-
+  //   folds the whole `>>31` idiom to `mov r3, #0x0` and the same repair scores 18. The lever is a
+  //   home, not a re-typing, and it must not disturb the signedness the ranked candidate picked.
+  //
+  //   `maskchain` diff:21 — `s32 m = 0;` above a four-arm chain whose arms conditionally overwrite
+  //   it. asmlift re-materializes the 0 as an `else { v0 = 0; }` arm in three places and agbcc
+  //   IF-CONVERTS each two-armed form into the branchless `neg/orr/asr #31/and` idiom the source
+  //   never wrote — 4 `neg`s against the reference's 1. FIRST BLOCKER WATCHED FIRING, not inferred,
+  //   then ABLATED: `structure.ts`'s anchorConstCopies declines any merge variable whose name is
+  //   claimed by more than one SSA value (the `nameCount.get(name) !== 1` refusal at
+  //   structure.ts:1766, documented in that block's REFUSAL CONDITIONS list), and instrumented it
+  //   fires 48× on `v0` here. With that one condition ablated and the bundle rebuilt the row's
+  //   ranked line goes from `best signed/defsite: 21` to a MATCH. `/defsite` IS enumerated here
+  //   and wins the row — for the OTHER variable, the four-way `v`.
+  //   On sub_803213C the same pass declines for a different documented reason, watched the same
+  //   way: `v1` is CONSIDERED 288× and refused 288× on `opcode=or` plus 288× on `opcode=and` — the
+  //   merge args there are an `or` and an `and`, not an unnamed `const`, so `/defsite` cannot reach
+  //   `armexpr`'s shape at all. That is why the expression home is a separate row from this one.
+  //
+  //   `basecell` diff:2 — ONE access through a numeric base at a nonzero byte offset. gcc 2.9
+  //   folds `base + K` into the pool word, so the inline cast compiles to `.word 0x3001103` +
+  //   `ldrb r1, [r1]` where the pointer-local spelling keeps `.word 0x3001100` +
+  //   `ldrb r1, [r1, #0x3]` (compiled pair, both dumped). `l3/basecse.ts`'s `single-use` gate
+  //   rejects a base with `uses < 2` — its stated rationale, "one access re-materializes as
+  //   cheaply as a named local", is false at a nonzero offset — and `/livebase` keeps that gate,
+  //   so no candidate in the fan hoists it. Ablating that gate takes this row to MATCH.
+  //
+  //   `basehome` diff:11 — THREE accesses through one base whose first use is not the function's
+  //   first statement. The hoist fires here, but `l3/basecse.ts` emits every init at the head of
+  //   `sfn.body`, so the base is live across the prologue and agbcc pays a callee-saved register
+  //   for it: compiled pair, assigning at the top adds `push {r4, lr}` / `pop {r4}` / `pop {r0}` /
+  //   `bx r0` where assigning at first use keeps a plain `bx lr`. LADDER: asmlift today (top) 11;
+  //   NOT hoisting at all 9 (three fresh pool words, `.word 0x3001103` / `0x300110a` /
+  //   `0x3001109`); assigning at the first use that needs it 0. The current placement is worse
+  //   than no hoist, which is the same signal the real row gives — on sub_802DFC8 the inline
+  //   spelling scores 4, a top-assigned base local 8, a first-use-assigned one 0, and asmlift's
+  //   own `/livebase` candidate (which does emit the base local, at the top) scores 66 against the
+  //   winner's 62. Ablating the `[...inits, ...rest]` placement to first-use takes this row to
+  //   MATCH. `l3/scopebase.ts` is the scope-aware sibling and does not help: the innermost
+  //   enclosing scope here IS the function body. Its header records this placement question as
+  //   unmeasured; this pair is the measurement.
+  //
+  // THE CONTROL. `armkeep` MATCH — the same pure expression computed in BOTH arms, but consumed
+  //   inside each arm rather than merged out of the `if`. agbcc keeps both copies, asmlift emits
+  //   both copies, and the row matches. Hoisting it above the branch scores 9 against this row's
+  //   own target, so a cross-arm home keyed on "the same pure expression appears in both arms"
+  //   BREAKS it and the row says so. What it does NOT bracket: a home keyed on a MERGE VARIABLE's
+  //   incoming values — nothing can, on this compiler. Measured, `if (a) { out[0]=0; m=(b<<3)+7; }
+  //   else { out[0]=1; m=(b<<3)+7; } out[1]=m;` has its two copies SUNK by agbcc itself into the
+  //   join block, so the ROM never carries the per-arm spelling for that shape and no reference
+  //   source can produce it.
+  //   Three further controls were drafted and DELETED, each because it cannot detect its own fix:
+  //   `sxwide` (`out[0] = d; out[1] = d + 1;`) scores 0 in all four spellings — where the uses
+  //   consume the FULL value agbcc CSEs the extension, so per-use and homed are the same program;
+  //   `maskone` (`s32 m = 0; if (d & 2) m = 0x400;`) is if-converted, so it has no merge block and
+  //   no `/defsite` candidate exists at all; `basefirst`'s first use IS its first statement, which
+  //   makes top-placement and first-use placement the same tree. So no over-fire bracket for the
+  //   WIDTH home exists anywhere in the corpus. What would earn one is a shape where the home
+  //   forces a SPILL that per-use re-derivation avoids — unbuilt.
+  //
+  // WHAT ALREADY GATES THESE LEVERS (Phase 5, by ABLATION — the measure is whether a ROW moves,
+  // not whether a test exists). Each ablation was applied to `packages/`, the bundle rebuilt, all
+  // 887 rows re-run, and reverted. Read the regression columns first: two of the three levers pay
+  // for their wins in lost matches, and both bills are on the REAL tier.
+  //   `nameCount !== 1` off — 19 rows move, NONE of the 887 regresses. Synthetic (13): `mergeloop`
+  //   agbcc 10→MATCH and mwcc_242_81 18→MATCH and gcc2.7.2kmc 18→7, `maskchain` 21→MATCH,
+  //   `breakloop` kmc 11→5 and mwcc 15→14, `structarr` agbcc 5→2 and mwcc 45→44, `nestedloop` kmc
+  //   16→13, `countdown` mwcc 23→18, `clampu8` kmc 6→5, `arraysum` mwcc 45→44, `powi` mwcc 32→31.
+  //   Real (6): `sub_802DFC8` 62→23, `CalcCRC16` 38→23, `TrySetCantSelectMoveBattleScript` 192→146,
+  //   `VramGetTotalAllocatedTiles` 18→7, `CountCollectedGems` 328→324, `ConfigureEntityBehavior`
+  //   266→265. So the pre-existing `mergeloop` rows (tagged `merge-chain`) ALREADY gate this
+  //   capability and are the stronger gate — two of them go all the way to MATCH, where
+  //   `maskchain` is the non-loop isolate closest to the real rows. Zero regressions is NOT
+  //   permission to delete the refusal: its rationale is that a shared name has readers and
+  //   writers between the def site and the edge, a MEANING concern a score cannot referee. The
+  //   lever is "refine the refusal", and 0 regressions bounds only its placement cost.
+  //   `single-use` off (the `basecell` lever) — 19 rows move, 7 better and 12 WORSE, and one of
+  //   the twelve is a lost match. Better: `basecell` 2→MATCH, `sub_803213C` 48→46 (exactly its
+  //   v(C)), `GetInput` 68→58, `RollRandomLevelVariant` 24→18, `EntityItemDrop` 118→116,
+  //   `ProcessInputAndUpdateEntities` 370→366, `CountCollectedGems` 328→327. Worse:
+  //   `UpdateFadeEffect` MATCH→2, `readarm` MATCH→8 and `armshare` MATCH→17 (both `read-once`),
+  //   `readcall` 6→17, `bg_mix` ido7.1 1→10, `dma_fill_uninit` 68→71, `StreamCmd_SetWindowRegs`
+  //   5→15, `Sin2` 23→31, `ModifyStatByNature` 53→57, `Random` 7→10, `CalculatePPWithBonus` 17→19,
+  //   `UpdateWorldMapNodeAnim` 159→162.
+  //   placement → first use (the `basehome` lever) — 8 rows move, 4 better and 4 worse. Better:
+  //   `basehome` 11→MATCH, `DecompressDma` 19→3 (the largest single move any lever here makes),
+  //   `sub_802DFC8` 62→58 (exactly its v(C)), `sa2__sub_8083504` 70→68. Worse: `mixpoll` MATCH→2
+  //   and `onepoll` MATCH→2 (both `value-home`), `sizebound` 16→20,
+  //   `ProcessInputAndUpdateEntities` 370→376.
+  //   The two base levers INTERACT, so ship them together and re-measure rather than one at a
+  //   time: with BOTH ablated 21 rows move, 11 better and 10 worse, `armshare` and `readcall`
+  //   recover and `StreamCmd_SetWindowRegs` reaches MATCH, while `readarm`, `mixpoll`, `onepoll`
+  //   and `UpdateFadeEffect` stay lost — net −1 match, against −2 for `single-use` alone.
+  //   The `sxparam`/`zxparam` lever has no ablation (the capability does not exist yet), but two
+  //   pre-existing rows already move under exactly its repair: `addu8` and `truncmul` (both
+  //   `narrow`, both diff:4 on agbcc) reach 0 with the homed spelling AND with the declared narrow
+  //   parameter. Expect those two to flip WITH this family's rows, as confirmation, not collateral.
+  //
+  // WHERE A FIX WOULD GO. `packages/core/src/structure/structure.ts` (anchorConstCopies'
+  // single-claimant refusal, ~1766), `packages/core/src/l3/basecse.ts` (the `single-use` gate at
+  // :154 and the `[...inits, ...rest]` placement at :290), and `structure/analysis.ts` + `rank.ts`
+  // for the home itself — the three axes there are ONE capability gated on three incidental shapes,
+  // and this family's rows are exactly the cases none of the three admits. The per-site-signedness
+  // round that shares two of those files has LANDED (5df7ced) and this family is measured on top of
+  // it: all seven synthetic rows and both real rows score identically before and after, and its
+  // structure.ts hunks (577, 1648, 1976-2048, 2221) do not touch anchorConstCopies. Nothing here
+  // needs `l3/typing.ts`, `backend/cfamily.ts` or `rank.ts`'s `SIGN_CANDS` either: every `signed/`
+  // candidate scores identically to its `unsigned/` twin on all 24 of 802's and all 4 of 832's,
+  // so the signedness axis contributes zero on both real rows.
+  //
+  // NO NEW TAG, and one was tried: `param-width`, on the theory that asmlift must consume
+  // `FnProto.params`' typed list (`protoArity` reads only its length). Handing asmlift the exact
+  // declared types via `--proto '{"sub_802DFC8":{"params":["s16","void *"],"returnsVoid":true}}'`
+  // returns the same ranked line and byte-identical stdout, while homing the cast with no declared
+  // type anywhere closes both real rows — so the gap is the home, not the types. The rows carry
+  // the typed list anyway, so both decompilers hold the same facts (the harness hands m2c the
+  // function's own prototype) and the rows start measuring the day the types are consumed.
+  //
+  // m2c, on the identical `ctx` asmlift receives, MATCHES `sxparam` and NONCOMPILES the other six
+  // — for two reasons, neither of them this family, and it REACHES the construct in every case.
+  // (1) Five of the six (`zxparam`, `armexpr`, `armkeep`, `maskchain`, `basehome`) store through a
+  // pointer PARAMETER at more than one offset and m2c renders those as `out->unk0` / `out->unk4`
+  // on an `s32 *` it has no struct for — its documented raw-pointer member rendering, not context
+  // withheld, since the `ctx` declares the full prototype, parameter names and all. (2) Two
+  // (`basecell`, `basehome`) type the address constant as `void *` and read members off it
+  // (`(void *)0x03001100->unk3`), as every raw-address row in this file already records; on
+  // `basecell` that is the ONLY cause — its single store through the parameter renders as `*out`. What the output SHOWS is the point: on `armexpr` m2c hoists the
+  // whole chain above the branch (`var_r2 = …;` then `if (a != 0)`), on `armkeep` it keeps BOTH
+  // per-arm copies exactly as the reference wrote them, on `maskchain` it emits `var_r1 = 0;`
+  // above the chain, and on `zxparam` it declares `u8 temp_r0;` and assigns `temp_r0 = a;`. Every
+  // home this family is about, m2c has — and on `armkeep`, so does the restraint not to use one.
+  //
+  // agbcc only, as the `read-once` and `uninit-local` families are. Every claim above is a pair of
+  // spellings compiled with THIS compiler; whether ido7.1, gcc2.7.2kmc and mwcc_242_81 place a
+  // parameter's extension, a merge initializer or a base local the same way was NOT measured, so
+  // those lanes are left off rather than assumed. What would earn one: the same compiled pair on
+  // that toolchain showing the same divergence.
+  {
+    sym: 'sxparam',
+    src:
+      'void sxparam(s16 d, s32 *out){ s32 v;' +
+      ' if (d & 8) v = 6; else if (d & 4) v = 4; else if (d & 2) v = 2; else v = 0;' +
+      ' out[0] = v; }',
+    features: ['value-home', 'sign-extend', 'mask'],
+    toolchains: ['agbcc'],
+    ctx: 'void sxparam(s16 d, s32 *out);',
+    proto: { sxparam: { params: ['s16', 'void *'], returnsVoid: true } },
+  },
+  {
+    sym: 'zxparam',
+    src: 'void zxparam(u8 a, u8 b, s32 *out){ out[0] = a & 1; out[1] = b & 1; out[2] = a + b; }',
+    features: ['value-home', 'zero-extend', 'mask'],
+    toolchains: ['agbcc'],
+    ctx: 'void zxparam(u8 a, u8 b, s32 *out);',
+    proto: { zxparam: { params: ['u8', 'u8', 'void *'], returnsVoid: true } },
+  },
+  {
+    sym: 'armexpr',
+    src:
+      'void armexpr(u32 a, u32 b, s32 *out){\n' +
+      '  s32 m = (b & 1) ? 0x400 : 0;\n' +
+      '  if (a != 0) { out[0] = 0; } else { out[0] = 1; m |= 0x200; }\n' +
+      '  out[1] = m;\n' +
+      '}',
+    features: ['value-home', 'mask'],
+    toolchains: ['agbcc'],
+    ctx: 'void armexpr(u32 a, u32 b, s32 *out);',
+    proto: { armexpr: { params: ['u32', 'u32', 'void *'], returnsVoid: true } },
+  },
+  {
+    sym: 'armkeep',
+    src:
+      'void armkeep(u32 a, u32 b, s32 *out){\n' +
+      '  if (a != 0) { out[0] = (b << 3) + 7; }\n' +
+      '  else { out[1] = (b << 3) + 7; }\n' +
+      '}',
+    features: ['value-home', 'branch'],
+    toolchains: ['agbcc'],
+    ctx: 'void armkeep(u32 a, u32 b, s32 *out);',
+    proto: { armkeep: { params: ['u32', 'u32', 'void *'], returnsVoid: true } },
+  },
+  {
+    sym: 'maskchain',
+    src:
+      'void maskchain(s32 d, s32 *out){\n' +
+      '  s32 m = 0, v;\n' +
+      '  if (d & 8) { v = 6; m = (d & 1) ? 0x400 : 0; }\n' +
+      '  else if (d & 4) { v = 4; if (d & 2) m = 0x400; if (d & 1) m |= 0x800; }\n' +
+      '  else if (d & 2) { v = 2; if (d & 1) m = 0x400; }\n' +
+      '  else { v = 0; if (d & 1) m = 0x800; }\n' +
+      '  out[0] = v; out[1] = m;\n' +
+      '}',
+    features: ['value-home', 'mask'],
+    toolchains: ['agbcc'],
+    ctx: 'void maskchain(s32 d, s32 *out);',
+    proto: { maskchain: { params: ['s32', 'void *'], returnsVoid: true } },
+  },
+  {
+    sym: 'basecell',
+    src: '#define gStage 0x03001100\n' + 'void basecell(s32 *out){ u8 *p = (u8 *)gStage; out[0] = (p[3] != 7); }',
+    features: ['value-home', 'pointer'],
+    toolchains: ['agbcc'],
+    ctx: 'void basecell(s32 *out);',
+    proto: { basecell: { params: ['void *'], returnsVoid: true } },
+  },
+  {
+    sym: 'basehome',
+    src:
+      '#define gStage 0x03001100\n' +
+      'void basehome(s32 a, s32 b, s32 *out){\n' +
+      '  u8 *p;\n' +
+      '  out[0] = a * b;\n' +
+      '  out[1] = a + b;\n' +
+      '  p = (u8 *)gStage;\n' +
+      '  out[2] = p[3]; out[3] = p[10]; out[4] = p[9];\n' +
+      '}',
+    features: ['value-home', 'pointer'],
+    toolchains: ['agbcc'],
+    ctx: 'void basehome(s32 a, s32 b, s32 *out);',
+    proto: { basehome: { params: ['s32', 's32', 'void *'], returnsVoid: true } },
+  },
 ];
 
 // ── C++ (mwcc `.cp` frontend, PPC only) ───────────────────────────────────────────────────
