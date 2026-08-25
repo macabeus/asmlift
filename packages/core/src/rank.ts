@@ -263,8 +263,10 @@ const createdLocals = (from: SFn, to: SFn): Set<string> => {
  *  `synthetic:basecell` and `kleod:RollRandomLevelVariant`, three keys between them. The other
  *  three are `bg_mix` on the ido, kmc and mwcc lanes, and the target gate is the whole of what
  *  keeps the row away from them — the naive `single-use` ablation costs that row 1→10 on ido.
- *  On `kleod:LoadBGTilemapData` the admission declines on every structuring, leaving that fan the
- *  size it was. All floors: the ranked path structures each function many ways, this census once. */
+ *  On klonoa's `LoadBGTilemapData` — a checkout function rather than a row, so re-run it with the
+ *  ranked command in docs/ranked-repro.md — the admission declines on every structuring, leaving
+ *  that fan the size it was: 48000 candidates either way. All floors, though: the ranked path
+ *  structures each function many ways where this census builds one tree per observation. */
 interface BaseAdmission {
   suffix: string;
   gates: readonly Gate<BaseKey>[];
