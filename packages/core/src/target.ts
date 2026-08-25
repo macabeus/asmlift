@@ -148,34 +148,14 @@ export interface TargetDescription {
     // `add rd, #imm8` reaches 255. Absent ⇒ the lever stands down for this target.
     nearBaseSpan?: number;
     // Does this compiler CONSTANT-FOLD a constant SUBSCRIPT into the literal address it
-    // materializes for an inline constant-address access? True is what makes a surviving
-    // `[rN, #imm]` (imm non-zero) off a register holding a bare address constant say anything at
-    // all about the source, and rank.ts reads it as the gate on offering the `/basefold`
-    // admission (l3/basecse.ts BASEFOLD_GATES, keyed on `BaseKey.unfoldedOffset`).
-    //
-    // EVIDENCE, NOT PROOF, which is why the consumer is a differ-refereed candidate and not a
-    // default. agbcc (gcc 2.9-arm, -O2) folds the subscript — `((u8 *)0x3001100)[3]` emits
-    // `.word 0x3001103` + `ldrb [r1]` where `u8 *p = (u8 *)0x3001100; p[3]` emits
-    // `.word 0x3001100` + `ldrb [r1, #0x3]` — but keeps an aggregate MEMBER offset in the memory
-    // operand: `((struct S *)0x3001100)->b` emits `.word 0x3001100` + `ldr [r0, #0x4]`, the same
-    // bytes as the named base, and so do a union member and a store through one. Two sources, one
-    // byte pattern.
-    //
-    // Two shapes that look like counterexamples and are not. Inline READS are never CSE'd across
-    // addresses (three inline reads emit three pool words, and a base left live by an unrelated
-    // use still gets its own second word). Inline STORES are — `*(u8 *)0x3001100 = v;
-    // *(u16 *)0x3001102 = v;` emits one pool word plus `add r0, r0, #0x2` — but the shared offset
-    // lands in an ADD, never in the memory operand, and the frontend folds `add const, const` back
-    // into an absolute address, so that shape reaches L3 as two offset-0 bases.
-    //
-    // NUMERIC addresses only, and that refusal is about the LIFT. agbcc folds a SYMBOL's offset
-    // the same way (`((u8 *)&gStageData)[3]` emits `.word gStageData+0x3` + `ldrb [r1]`), but a
-    // relocation carries its addend and the frontend folds it back into the index, so both
-    // spellings of a symbol access reach L3 as one tree.
-    //
-    // ABSENT ⇒ the row is never offered. A compiler opts in on its own compiled pair, never by
-    // inheriting: the MIPS and PPC lanes put the addend in the instruction by construction
-    // (`lui`/`%lo`, `lis`/`ori`), so a surviving offset carries no information there at all.
+    // materializes for an inline constant-address access? agbcc does: `((u8 *)0x3001100)[3]`
+    // emits `.word 0x3001103` + `ldrb [r1]` where `u8 *p = (u8 *)0x3001100; p[3]` keeps
+    // `.word 0x3001100` + `ldrb [r1, #0x3]`. True is what lets an offset surviving into the memory
+    // operand say anything about the source at all; what l3/basecse.ts's `/basefold` admission
+    // does with it — and why that is a differ-refereed candidate rather than a default — is that
+    // file's header. A compiler opts in on its own compiled pair and never by inheriting: the MIPS
+    // and PPC lanes put the addend in the instruction by construction (`lui`/`%lo`, `lis`/`ori`),
+    // so a surviving offset carries no information there. Absent ⇒ the row is never offered.
     foldsConstAddrOffset?: boolean;
     // Does this compiler EMIT a memory read in the block the source SPELLED it in? One direction
     // only: the def-block placement rule (StructureOptions.readsStayWhereWritten) re-spells a read

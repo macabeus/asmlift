@@ -28,6 +28,11 @@
 // `ldrb [r1, #0x3]`. `BaseKey.unfoldedOffset` is that shape — a NUMERIC base reached at a non-zero
 // constant offset, the frontend having folded any `add rN, #K` between the pool load and the
 // access back into one absolute address, so an offset arriving here was in the MEMORY OPERAND.
+// Two inline shapes could have put it there and do not: inline READS are not CSE'd across
+// addresses (three of them emit three pool words, and a base another use leaves live still takes
+// its own second word), and the inline STORE pair agbcc does CSE (`*(u8 *)0x3001100 = v;
+// *(u16 *)0x3001102 = v;` → one pool word plus `add r0, r0, #0x2`) spends the offset on an `add`,
+// which the frontend folds back, so both arrive here at offset 0.
 //
 // It is EVIDENCE and not proof, which is why `BASEFOLD_GATES` below is a lever rather than a
 // relaxation of the default table. agbcc folds a subscript but keeps an aggregate MEMBER offset in

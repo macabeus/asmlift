@@ -256,9 +256,15 @@ const createdLocals = (from: SFn, to: SFn): Set<string> => {
  *
  *  `/basefold` is the third admission and the only conditional one — `enumerateCandidates` appends
  *  it where the target declares `compilerBehaviors.foldsConstAddrOffset`, and it declines wherever
- *  its exemption bound nothing the primary does not already carry (`addsTo`). Priced both ways:
- *  over the 887-row corpus it reaches 4 functions, and on `kleod:LoadBGTilemapData` it declines on
- *  every structuring, leaving that fan the size it was. */
+ *  its exemption bound nothing the primary does not already carry (`addsTo`). Narrow both ways.
+ *  Structure the corpus the way the committed path does — 1139 observations, every case in every
+ *  symbol-map configuration it has — and the exemption adds a key on 5, every one of them
+ *  map-less. Only 2 sit on a target that declares the fold, so only 2 are ever offered the row:
+ *  `synthetic:basecell` and `kleod:RollRandomLevelVariant`, three keys between them. The other
+ *  three are `bg_mix` on the ido, kmc and mwcc lanes, and the target gate is the whole of what
+ *  keeps the row away from them — the naive `single-use` ablation costs that row 1→10 on ido.
+ *  On `kleod:LoadBGTilemapData` the admission declines on every structuring, leaving that fan the
+ *  size it was. All floors: the ranked path structures each function many ways, this census once. */
 interface BaseAdmission {
   suffix: string;
   gates: readonly Gate<BaseKey>[];

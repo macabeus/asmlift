@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generatedAt": "2026-08-25T17:20:28.173Z",
+    "generatedAt": "2026-08-25T19:21:17.601Z",
     "toolchains": [
       "ido7.1",
       "agbcc",
@@ -14,7 +14,7 @@
       "real": 252
     },
     "asmlift": {
-      "commit": "2f50788362ff0200f9fb6f08e0c9e681504f2b26",
+      "commit": "38f0db7529035a6a227f7b44334961bb9346b23b",
       "dirty": false
     },
     "m2c": {
@@ -10169,7 +10169,7 @@
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "candidateLabel": "unsigned/derived-home/raw-globals",
+        "candidateLabel": "unsigned/derived-home/basefold/raw-globals",
         "droppedCandidates": [
           {
             "label": "unsigned",
@@ -29777,7 +29777,7 @@
       },
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned",
+        "candidateLabel": "unsigned/basefold",
         "outcome": "match",
         "source": "void basecell(s32 * a0) {\n    u8 * p0;\n    p0 = (u8 *)50336000;\n    *a0 = (7 ^ p0[3]) != 0;\n    return;\n}\n",
         "score": 0,
@@ -38269,7 +38269,7 @@
       },
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "signed/livebase-block/volatile/nearbase/initfirst",
+        "candidateLabel": "signed/livebase/volatile/nearbase/initfirst",
         "outcome": "match",
         "source": "void dmafield(s32 a0) {\n    s32 v0;\n    volatile s32 * p0;\n    u8 * p1;\n    p1 = (u8 *)50335744;\n    p0 = (s32 *)67109076;\n    v0 = 0;\n    if (v0 < a0) {\n        do {\n            if (v0 < *(u16 *)(p1 + 72)) *(u16 *)(p1 + 74) = v0;\n            *p0 = (s32)(p1 + 112);\n            p0[1] = ((s32 *)p1)[28];\n            p0[2] = v0 | 128 << 24;\n            while ((p0[2] & 128 << 24) != 0) {\n            }\n            v0 = v0 + 1;\n        } while (v0 < a0);\n    }\n    return;\n}\n",
         "score": 0,
