@@ -21,7 +21,7 @@ import { IrType, T, scalarTypeForAccess } from '../ir/types';
 import { type Expr, type SFn, exprChildren } from './ast';
 
 /** The declared type of a printed variable — the env `exprCType` judges rendered C against.
- *  THE one copy of the SFn→env derivation (C printer, Pascal printer, deref contract): each
+ *  THE one copy of the SFn→env derivation — printers, contracts and L3 levers alike: each
  *  consumer judging against anything but the declarations it emits would let them disagree. */
 export type VarTypes = (name: string) => IrType | undefined;
 

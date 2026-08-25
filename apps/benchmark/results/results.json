@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generatedAt": "2026-08-25T05:10:44.225Z",
+    "generatedAt": "2026-08-25T06:47:05.118Z",
     "toolchains": [
       "ido7.1",
       "agbcc",
@@ -14,8 +14,8 @@
       "real": 252
     },
     "asmlift": {
-      "commit": "a4334321463a67da9a8f1aedb90911abb5db3955",
-      "dirty": false
+      "commit": "82550f49c14f9b9ce988ac669b5670320a82bf7f",
+      "dirty": true
     },
     "m2c": {
       "commit": "ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0"
@@ -68447,24 +68447,24 @@
       "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /host-tmp/asmlift-mgcc-ref-e52bae9e2299cc4f/ref.c\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t00000080 ucmp\n\n\nContents of section .text:\n 0000 3c020300 94421048 27bdfff8 1040000c  <....B.H'....@..\n 0010 00001821 3c060300 34c61048 3c050300  ...!<...4..H<...\n 0020 34a52000 90a21000 a0a20000 94c20000  4. .............\n 0030 24630001 0062102b 1440fffa 24a50001  $c...b.+.@..$...\n 0040 3c030300 94631048 24020010 00822004  <....c.H$..... .\n 0050 0064102b 10400008 00000000 3c010300  .d.+.@......<...\n 0060 00230821 a0202000 24630001 0064102b  .#.!.  .$c...d.+\n 0070 1440fffa 00000000 03e00008 27bd0008  .@..........'...\nContents of section .reginfo:\n 0000 a000007e 00000000 00000000 00000000  ...~............\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.              \n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "unsigned/defsite/loop-entry/uns-cmp",
+        "candidateLabel": "unsigned/uns-cmp",
         "outcome": "nonmatch",
-        "source": "void ucmp(u32 a0) {\n    u8 * v0;\n    u32 v1;\n    u32 v2;\n    v1 = 0;\n    if (((u16 *)50331648)[2084] != 0) {\n        do {\n            *v0 = v0[4096];\n            v1 = v1 + 1;\n            v0 = v0 + 1;\n        } while (v1 < *(u16 *)50335816);\n    }\n    for (v2 = ((u16 *)50331648)[2084]; v2 < 16 << a0; v2 = v2 + 1) {\n        ((u8 *)(50331648 + v2))[8192] = 0;\n    }\n    return;\n}\n",
-        "score": 12,
-        "maxScore": 32,
+        "source": "void ucmp(u32 a0) {\n    u8 * v0;\n    u32 v1;\n    u32 v2;\n    v1 = 0;\n    v0 = (u8 *)50339840;\n    if (((u16 *)50331648)[2084] != 0) {\n        do {\n            *v0 = v0[4096];\n            v1 = v1 + 1;\n            v0 = v0 + 1;\n        } while (v1 < *(u16 *)50335816);\n    }\n    for (v2 = ((u16 *)50331648)[2084]; v2 < 16 << a0; v2 = v2 + 1) {\n        ((u8 *)(50331648 + v2))[8192] = 0;\n    }\n    return;\n}\n",
+        "score": 15,
+        "maxScore": 34,
         "compileErrors": null,
         "breakdown": {
-          "insert": 0,
+          "insert": 2,
           "delete": 3,
           "replace": 1,
           "opMismatch": 0,
-          "argMismatch": 8
+          "argMismatch": 9
         },
         "quality": {
-          "score": 96,
-          "lines": 17,
+          "score": 94,
+          "lines": 18,
           "gotos": 0,
-          "casts": 4,
+          "casts": 5,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -68496,15 +68496,15 @@
       },
       "gapSize": {
         "decompiler": "asmlift",
-        "score": 12,
-        "maxScore": 32,
-        "ratio": 0.375,
+        "score": 15,
+        "maxScore": 34,
+        "ratio": 0.4411764705882353,
         "kinds": {
-          "insert": 0,
+          "insert": 2,
           "delete": 3,
           "replace": 1,
           "opMismatch": 0,
-          "argMismatch": 8
+          "argMismatch": 9
         }
       },
       "scripts": {

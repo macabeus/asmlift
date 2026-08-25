@@ -10,7 +10,8 @@
 import type { Expr, SFn, Stmt } from './ast';
 import { mapExprChildren, stmtChildren, stmtExprs } from './ast';
 
-/** Every identifier a hoist name must not collide with, anywhere in `sfn`.
+/** Every identifier a MINTED name must not collide with, anywhere in `sfn` — the hoists below,
+ *  and reindex's induction names.
  *
  *  Wider than "the declared locals" on purpose, and each addition is a real collision:
  *   - params and locals, obviously;

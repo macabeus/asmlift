@@ -723,6 +723,19 @@ export interface StructureOptions {
   // the first: on a function carrying both kinds of anchorable const, folding them into one flag
   // would make "anchor the plain ones, leave the loop's at its edge" — a spelling `/defsite`
   // emits today — unreachable. Inert unless `anchorConstCopies` is also on.
+  //
+  // AN AXIS RATHER THAN AN EXTENSION OF `l3/initfirst.ts`, whose header opens on the same rewrite
+  // (`if (0 < n) { v = 0; … }` → `v = 0; if (v < n) { … }`) at a fraction of the price: a
+  // re-spelling adds candidates only where it fires, while this multiplies every candidate below
+  // it. The fork is REACH, and it is a hard one. `initfirst` MOVES A STATEMENT, and an edge copy
+  // is not a statement — structuring mints it, choosing between the edge and the const op's own
+  // position, and the IR that holds those positions is gone by the time L3 runs. So the shapes
+  // where the two coincide are initfirst's for free — except that they never do: its guard
+  // re-spelling wants an ELSE-LESS `if` and rewrites the condition to read the hoisted variable
+  // (`if (v < n)`), where anchoring leaves the condition alone, so the two emit different sources.
+  // `/initfirst` rides every spelling rank.ts enumerates, so it was scored on all 887 benchmark
+  // rows already: it wins 21 of them and NONE of the 15 this axis wins. Take the axis only while
+  // rows demand that; the price is in rank.ts.
   anchorLoopEntryConsts?: boolean;
   // HARDWARE fact from TargetDescription.capabilities.endianness, threaded by structureOptionsFor:
   // the bitfield extract recognizer solves an LSB-first equation, so it only runs on little-endian

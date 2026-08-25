@@ -16,8 +16,10 @@
 // one. C89 also admits the assignment without a cast change — the qualifier is added on the
 // pointee, and assignment may add pointee qualifiers.
 //
-// GATE: only a local of pointer type assigned a bare NONZERO numeric constant (or a cast of
-// one) somewhere in the body — `0` is NULL, never an address. A value CONTAINING a global's
+// GATE: only a local of pointer type assigned a REMATERIALIZABLE address somewhere in the body
+// (l3/ast.ts — any constant expression reading no variable and no memory, so a shift-encoded
+// hardware base qualifies exactly like a pool word); a bare `0` is NULL, never an address. A
+// value CONTAINING a global's
 // address — `&gSym` at ANY depth: under a cast, inside interior-address arithmetic
 // (`(u16 *)((u32)&gSym + 8)`) — VETOES the local, qualifying assignments on other paths
 // notwithstanding, and the veto propagates through assignments to a FIXPOINT (`q` tainted,
