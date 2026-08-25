@@ -273,9 +273,10 @@ const NO_PIN_KINDS = new Set(['ptr', 'struct', 'array']);
  *  two passes writes first is an accident of enumeration order, and the arms differ exactly where
  *  a param can be written at all.
  *
- *  A param NARROWED by raise/paramwidth.ts is not pinnable: its prologue shift pair states the
- *  signedness (`asr` against `lsr`) as well as the width, so there is no question for the axis to
- *  put to the differ, and pinning would widen it back to 32 bits. */
+ *  A param NARROWED by raise/paramwidth.ts is not pinnable: the extension it was narrowed at states
+ *  the signedness as well as the width — agbcc's shift pair by its `asr`/`lsr`, PPC's `extsb`/`extsh`
+ *  by the opcode — so there is no question for the axis to put to the differ, and pinning would
+ *  widen it back to 32 bits. */
 function pinScalarParams(fn: Fn, signed: boolean, ptrIdx: Set<number>): boolean {
   let pinnable = false;
   fn.blocks[0].params.forEach((p, i) => {

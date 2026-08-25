@@ -1,6 +1,8 @@
 // THE RETURN REGISTER IS A WORD. `returnType` reads the type of the value a `ret` carries, and that
-// value's type says how it was COMPUTED — a byte load, a prologue-narrowed parameter — not what the
-// header spelled. Declaring the narrow type is a different function on a compiler whose ABI puts
+// value's type says how it was COMPUTED — in the pipeline today, only ever by raise/paramwidth.ts
+// narrowing the parameter it returns — not what the header spelled. The two load cases below carry
+// a width no frontend produces (every lifted value starts `unk32`, and recovery types a load's BASE
+// rather than its result); they pin the rule over the whole `int` domain, not a reachable shape. Declaring the narrow type is a different function on a compiler whose ABI puts
 // the extension on the caller: compiled against the benchmark's own mwcc, `s8 sextb(s8 x) { return
 // x; }` drops the `extsb` that `s32 sextb(s8 x) { return x; }` keeps and the target has, while
 // agbcc emits both spellings identically. Toolchain-free.

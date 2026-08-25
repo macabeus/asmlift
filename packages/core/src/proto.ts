@@ -8,8 +8,16 @@ import type { SymbolMap } from './symbols';
 // not a grab-bag of ISA-specific options.
 
 /** One declared parameter, as its C type text (`"u8"`, `"s32"`, `"void *"`). asmlift consumes
- *  only the COUNT today (call-site arity), but a project's header extraction naturally produces
- *  the typed list, and keeping it lets a later pass pin an argument's width/signedness. */
+ *  only the COUNT today (call-site arity), and a caller who passes the typed list gets the types
+ *  silently discarded — a project's header extraction naturally produces them, so the form is
+ *  accepted rather than rejected.
+ *
+ *  WIDTH IS ALREADY DECIDED, FROM THE ASM: raise/paramwidth.ts declares a parameter at the width
+ *  its prologue extension proves, and rank.ts's signedness axis enumerates the rest. So consuming
+ *  this list is not a missing pin but a SECOND authority for the same fact, and the two disagree
+ *  exactly where the asm is ambiguous (an elided extension no use needed leaves nothing to read).
+ *  Whichever wins has to be argued and measured on its own — it would pin every parameter of every
+ *  row from a caller-declared fact, and a declared `u32` kills the signed arm. */
 export type ParamType = string;
 
 /** What the headers know about one function. All fields optional: a partial table (only
