@@ -27,9 +27,12 @@
 // `.word 0x3001100` + `ldrb [r1, #0x3]` came from a source that named the base. The frontend keeps
 // that split — an `add rN, #K` between the pool load and the access folds back into one absolute
 // address, so a non-zero index arriving here means the offset was in the MEMORY OPERAND. That is
-// `unfoldedOffset`, and its three refusals: a SYMBOL base (both spellings emit the same bytes, so
-// the asm carries no evidence), an offset of 0 (the fold is the identity), and a target that
-// declares nothing (MIPS/PPC put the addend in the instruction whatever the source said).
+// `unfoldedOffset`, and its three refusals: an offset of 0 (there the fold is the identity), a
+// target that declares nothing (MIPS/PPC put the addend in the instruction whatever the source
+// said), and a SYMBOL base — where the split does not survive the LIFT. A relocation carries its
+// addend, so `.word gSym+0x3` + `ldrb [r1]` and `.word gSym` + `ldrb [r1, #0x3]` both reach here
+// as `index(addr gSym, 3)`; all four spellings of that access lift to one tree. Reaching the
+// symbol side means keeping the addend distinct in the frontend first, not widening this rule.
 //
 // SCOPE / SOUNDNESS. Only an `index` node whose base is a bare `addr` (a global address) or a bare
 // `const` (a numeric pointer address) is eligible, keyed by (base, width, signedness) — how many
@@ -152,8 +155,8 @@ export interface BaseKey {
    *  into the literal it materializes (TargetDescription.compilerBehaviors.foldsConstAddrOffset).
    *  There the asm's own split IS the answer: the inline spelling would have emitted the summed
    *  literal at offset 0, so a surviving offset says the source held this base in a named object.
-   *  False for a SYMBOL base — `gSym[3]` and `p = gSym; p[3]` emit the same bytes, so the asm
-   *  carries no evidence — and false at offset 0, where the fold is the identity. */
+   *  False at offset 0, where the fold is the identity, and false for a SYMBOL base, whose split
+   *  the lift does not preserve — a relocation addend folds into the index (see the header). */
   unfoldedOffset: boolean;
 }
 

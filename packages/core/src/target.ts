@@ -161,6 +161,12 @@ export interface TargetDescription {
     // memory operand, and the frontend folds `add const, const` back into an absolute address at
     // offset 0, so that shape reaches L3 as two offset-0 bases and says nothing here.
     //
+    // The claim is about a NUMERIC address, and only there — agbcc folds a SYMBOL's offset the
+    // same way (`((u8 *)&gStageData)[3]` emits `.word gStageData+0x3` + `ldrb [r1]`), but a
+    // relocation carries its addend and the frontend folds it back into the index, so both
+    // spellings of a symbol access reach L3 as one tree. basecse.ts refuses that side for that
+    // reason rather than for a claim about the bytes.
+    //
     // ABSENT ⇒ the rule stands down. A compiler opts in on its own compiled pair, never by
     // inheriting: the MIPS and PPC lanes put the addend in the instruction by construction
     // (`lui`/`%lo`, `lis`/`ori`), so a surviving offset carries no information there at all.

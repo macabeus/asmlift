@@ -132,7 +132,7 @@ describe('reused-global-base hoisting', () => {
       expect(hoistReusedGlobalBases(input, undefined, folds)).toBe(input);
     });
 
-    test('a SYMBOL base is left inline: both spellings emit the same bytes', () => {
+    test('a SYMBOL base is left inline: the lift folds a relocation addend into the index', () => {
       const input = fn([{ k: 'store', lval: idx('gTable', c(3)), value: c(0) }]);
       expect(hoistReusedGlobalBases(input, undefined, folds)).toBe(input);
     });
