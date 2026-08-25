@@ -271,14 +271,18 @@ const NO_PIN_KINDS = new Set(['ptr', 'struct', 'array']);
 /** Pin every SCALAR entry param (index not in `ptrIdx`) to the candidate signedness, before
  *  recovery. Answers whether any param was PINNABLE — not whether its type moved: which of the
  *  two passes writes first is an accident of enumeration order, and the arms differ exactly where
- *  a param can be written at all. */
+ *  a param can be written at all.
+ *
+ *  A param NARROWED by raise/paramwidth.ts is not pinnable: its prologue shift pair states the
+ *  signedness (`asr` against `lsr`) as well as the width, so there is no question for the axis to
+ *  put to the differ, and pinning would widen it back to 32 bits. */
 function pinScalarParams(fn: Fn, signed: boolean, ptrIdx: Set<number>): boolean {
   let pinnable = false;
   fn.blocks[0].params.forEach((p, i) => {
     if (ptrIdx.has(i)) {
       return;
     }
-    if (p.type.kind === 'unknown' || p.type.kind === 'int') {
+    if (p.type.kind === 'unknown' || (p.type.kind === 'int' && p.type.width === 32)) {
       pinnable = true;
       p.type = signed ? T.s(32) : T.u(32);
     }
