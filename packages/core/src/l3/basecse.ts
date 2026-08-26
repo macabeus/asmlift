@@ -65,7 +65,7 @@ import { type IrType, T, scalarTypeForAccess } from '../ir/types';
 import type { Expr, SFn, Stmt } from './ast';
 import { mapExprChildren, mapStmtExprs, stmtChildren, stmtExprs } from './ast';
 import { type Gate, ablateHeuristic, firstRejection } from './gates';
-import { type BaseInit, firstUseIn, nameAllocator, splitLeadingBaseInits } from './hoist';
+import { type BaseInit, type BaseInitPlacement, nameAllocator, placeBaseLocals } from './hoist';
 
 // A HOISTABLE base is a bare `addr` (a global address) or a bare `const` (a numeric pointer
 // address). Both are relocation-invariant leaves whose value the compiler keeps in one register
@@ -306,7 +306,11 @@ function admit(sfn: SFn, gates: readonly Gate<BaseKey>[]): { c: Collected; keys:
   return { c, keys };
 }
 
-export function hoistBaseLocals(sfn: SFn, gates: readonly Gate<BaseKey>[] = BASECSE_GATES): SFn {
+export function hoistBaseLocals(
+  sfn: SFn,
+  gates: readonly Gate<BaseKey>[] = BASECSE_GATES,
+  placement: BaseInitPlacement = 'head',
+): SFn {
   const { c, keys: hoisted } = admit(sfn, gates);
   const { meta } = c;
   if (hoisted.length === 0) {
@@ -329,18 +333,15 @@ export function hoistBaseLocals(sfn: SFn, gates: readonly Gate<BaseKey>[] = BASE
   }
 
   const rewritten = sfn.body.map((s) => mapStmtExprs(s, (e) => rewrite(e, localFor)));
-  // Pool-load order (see `collect`): inits emit in first-use order. When rank's /livebase re-runs
-  // this pass, the tree's head already carries the default run's inits — blindly prepending would
-  // spell the new base's load above locals the compiler loads first. So the leading run of base
-  // inits (l3/hoist.ts, shared with sinkinit.ts) is re-ordered together with the new inits by each
-  // local's first use in the remaining body; ties keep list order, existing inits first. This
-  // deliberately reaches the single default run too (a head of user pointer inits before a firing
-  // hoist), where it repairs the same invariant.
-  const { inits: head, rest } = splitLeadingBaseInits(sfn, rewritten);
-  const inits = [...head, ...hoistStmts];
-  // with the minted locals declared, or the first-use query would not know their names
-  const firstUse = firstUseIn({ ...sfn, locals: [...sfn.locals, ...newLocals] }, rest);
-  const at = (s: BaseInit): number => firstUse.get(s.name) ?? rest.length;
-  inits.sort((a, b) => at(a) - at(b));
-  return { ...sfn, body: [...inits, ...rest], locals: [...sfn.locals, ...newLocals] };
+  // The new inits join the tree's LEADING run of base inits rather than being prepended above it:
+  // when rank's /livebase re-runs this pass the head already carries the default run's, and
+  // blindly prepending would spell the new base's pool load above locals the compiler loads first.
+  // `placement` then answers where that whole run goes (l3/hoist.ts, the mechanism sinkinit.ts's
+  // policy shares). Under the default `head` it is ordered by first use, which is pool-load order
+  // (see `collect`) — deliberately reaching the single default run too (a head of user pointer
+  // inits before a firing hoist), where it repairs the same invariant.
+  const locals = [...sfn.locals, ...newLocals];
+  // the minted locals must be DECLARED before the query, or first-use would not know their names
+  const { body } = placeBaseLocals({ ...sfn, locals }, rewritten, hoistStmts, placement);
+  return { ...sfn, body, locals };
 }

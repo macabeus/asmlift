@@ -4,6 +4,7 @@ import { describe, expect, test } from 'vitest';
 
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
+import { type BaseInit, placeBaseLocals } from '../src/l3/hoist';
 import { sinkInitsToFirstUse } from '../src/l3/sinkinit';
 import { enumerateCandidates } from '../src/rank';
 import { ARMV4T_AGBCC } from '../src/target';
@@ -88,6 +89,47 @@ describe('sinking a leading base init to its first use', () => {
 
   test('no leading init at all: the lever declines', () => {
     expect(sinkInitsToFirstUse(fn([plain(), init('p0', 0x3001100), read('p0', 1)]))).toBeNull();
+  });
+});
+
+describe('both placements are ONE mechanism with a policy argument (l3/hoist.ts)', () => {
+  // basecse.ts and sinkinit.ts answer "where does the run go" differently and nothing else, so the
+  // two answers are two values of one parameter. Pinned here because a caller re-growing its own
+  // placement is exactly the drift this fold removed.
+  const named = (name: string, addr: number): BaseInit => init(name, addr) as BaseInit;
+
+  test('`head` keeps the run at the top; `first-use` moves what it can, and says how much moved', () => {
+    const body = [init('p0', 0x3001100), plain(), plain(), read('p0', 2)];
+    const sfn = fn(body);
+    expect(placeBaseLocals(sfn, body, [], 'head')).toEqual({ body, moved: 0 });
+    const sunk = placeBaseLocals(sfn, body, [], 'first-use');
+    expect(sunk.body.map((s) => s.k)).toEqual(['store', 'store', 'assign', 'store']);
+    expect(sunk.moved).toBe(1);
+  });
+
+  test('a MINTED init obeys the same policy — the minting caller adds no placement of its own', () => {
+    const body = [init('p0', 0x3001100), plain(), read('p1', 1), read('p0', 2)];
+    const locals = [
+      { name: 'p0', type: U8P },
+      { name: 'p1', type: U8P },
+    ];
+    const sfn = fn(body, locals);
+    const minted = [named('p1', 0x4000000)];
+    // head: pool-load order, so the base first USED (p1) leads even though it was minted second
+    expect(placeBaseLocals(sfn, body, minted, 'head').body.map((s) => (s.k === 'assign' ? s.name : s.k))).toEqual([
+      'p1',
+      'p0',
+      'store',
+      'store',
+      'store',
+    ]);
+    expect(placeBaseLocals(sfn, body, minted, 'first-use').body.map((s) => (s.k === 'assign' ? s.name : s.k))).toEqual([
+      'store',
+      'p1',
+      'store',
+      'p0',
+      'store',
+    ]);
   });
 });
 
