@@ -29,7 +29,7 @@ import {
 } from './l3/basecse';
 import { armDisjointCandidates, coalesceCandidates } from './l3/coalesce';
 import type { Gate } from './l3/gates';
-import type { BaseInitPlacement } from './l3/hoist';
+import type { HoistPlacement } from './l3/hoist';
 import { initFirstGuards } from './l3/initfirst';
 import { inlinableConstBases, inlineConstBases } from './l3/inlinebase';
 import { mulFirstSums } from './l3/mulfirst';
@@ -331,7 +331,7 @@ interface BaseAdmission {
    *  two questions and this roster answers both, so a row can offer the same bases in the other
    *  position without a second gate table — and a row that wants both offers both, as the
    *  `/basefold` pair below does. */
-  placement: BaseInitPlacement;
+  placement: HoistPlacement;
   /** Whether the row joins the `/livebase ×` PAIRINGS below. Each of those products was added for
    *  a row that demanded the joint spelling (see POLICY), and every demanding row so far is a
    *  `/livebase` row — so a new admission joins them when a row demands it, not by roster

@@ -154,6 +154,6 @@ export function nearBaseClusters(sfn: SFn, span: number): SFn | null {
   // reached at 2+ addresses by construction, so its pool word is not "first touched late", and the
   // bytes say it was loaded before the hoist run beneath it.
   const rewritten = sfn.body.map((s) => mapStmtExprs(s, rewrite));
-  const { body } = placeBaseLocals({ ...sfn, locals, body: rewritten }, rewritten, inits, 'prepend');
+  const { body } = placeBaseLocals({ ...sfn, locals, body: rewritten }, inits, 'prepend');
   return { ...sfn, locals, body };
 }

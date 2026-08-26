@@ -31,6 +31,6 @@ import type { SFn } from './ast';
 import { placeBaseLocals } from './hoist';
 
 export function sinkInitsToFirstUse(sfn: SFn): SFn | null {
-  const { body, moved } = placeBaseLocals(sfn, sfn.body, [], 'first-use');
+  const { body, moved } = placeBaseLocals(sfn, [], 'first-use');
   return moved === 0 ? null : { ...sfn, body };
 }

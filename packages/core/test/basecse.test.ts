@@ -311,6 +311,35 @@ describe('leaf-base hoisting', () => {
       expect(hoistBaseLocals(input, BASEFOLD_GATES)).toBe(input);
     });
 
+    test('`prepend` is not a placement this pass may take — the hazard is typed out', () => {
+      // A run already at the head carries the bases the compiler loads FIRST; prepending a minted
+      // one above it spells its pool load first instead (the header). `HoistPlacement` excludes
+      // the value, so a roster row or a caller reaching for it is a TYPE error — checked by
+      // `pnpm typecheck`, whose root tsconfig includes `packages/*/test`.
+      const input: SFn = {
+        ...fn([
+          { k: 'assign', name: 'q0', value: { k: 'cast', to: T.ptr(T.u(8)), e: { k: 'const', value: 0x4000000 } } },
+          {
+            k: 'store',
+            lval: { k: 'index', base: { k: 'var', name: 'q0' }, idx: c(0), width: 1, signed: false },
+            value: c(1),
+          },
+          { k: 'store', lval: cidx(0x3001100, c(3), 1, fromOperand), value: c(0) },
+        ]),
+        locals: [{ name: 'q0', type: T.ptr(T.u(8)) }],
+      };
+      // @ts-expect-error 'prepend' is a BaseInitPlacement but not a HoistPlacement
+      const hazard = hoistBaseLocals(input, BASEFOLD_GATES, 'prepend');
+      // …and this is the shape it emits when the type is defeated: the minted p0 above q0.
+      expect(hazard.body.filter((st) => st.k === 'assign').map((st) => st.name)).toEqual(['p0', 'q0']);
+      // what the pass actually does with the placement it may take
+      expect(
+        hoistBaseLocals(input, BASEFOLD_GATES, 'head')
+          .body.filter((st) => st.k === 'assign')
+          .map((st) => st.name),
+      ).toEqual(['q0', 'p0']);
+    });
+
     test('both tables still refuse what the PLACEMENT rules refuse', () => {
       const inLoop = fn([
         { k: 'while', cond: c(1), body: [{ k: 'store', lval: cidx(0x3001100, c(3), 1, fromOperand), value: c(0) }] },

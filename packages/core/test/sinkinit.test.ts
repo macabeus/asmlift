@@ -95,14 +95,15 @@ describe('sinking a leading base init to its first use', () => {
 describe('both placements are ONE mechanism with a policy argument (l3/hoist.ts)', () => {
   // basecse.ts and sinkinit.ts answer "where does the run go" differently and nothing else, so the
   // two answers are two values of one parameter. Pinned here because a caller re-growing its own
-  // placement is exactly the drift this fold removed.
+  // placement is exactly the drift this fold removed. `prepend` is not one of them — it is
+  // nearbase.ts's abstention from the ordering, pinned separately below.
   const named = (name: string, addr: number): BaseInit => init(name, addr) as BaseInit;
 
   test('`head` keeps the run at the top; `first-use` moves what it can, and says how much moved', () => {
     const body = [init('p0', 0x3001100), plain(), plain(), read('p0', 2)];
     const sfn = fn(body);
-    expect(placeBaseLocals(sfn, body, [], 'head')).toEqual({ body, moved: 0 });
-    const sunk = placeBaseLocals(sfn, body, [], 'first-use');
+    expect(placeBaseLocals(sfn, [], 'head')).toEqual({ body, moved: 0 });
+    const sunk = placeBaseLocals(sfn, [], 'first-use');
     expect(sunk.body.map((s) => s.k)).toEqual(['store', 'store', 'assign', 'store']);
     expect(sunk.moved).toBe(1);
   });
@@ -116,14 +117,14 @@ describe('both placements are ONE mechanism with a policy argument (l3/hoist.ts)
     const sfn = fn(body, locals);
     const minted = [named('p1', 0x4000000)];
     // head: pool-load order, so the base first USED (p1) leads even though it was minted second
-    expect(placeBaseLocals(sfn, body, minted, 'head').body.map((s) => (s.k === 'assign' ? s.name : s.k))).toEqual([
+    expect(placeBaseLocals(sfn, minted, 'head').body.map((s) => (s.k === 'assign' ? s.name : s.k))).toEqual([
       'p1',
       'p0',
       'store',
       'store',
       'store',
     ]);
-    expect(placeBaseLocals(sfn, body, minted, 'first-use').body.map((s) => (s.k === 'assign' ? s.name : s.k))).toEqual([
+    expect(placeBaseLocals(sfn, minted, 'first-use').body.map((s) => (s.k === 'assign' ? s.name : s.k))).toEqual([
       'store',
       'p1',
       'store',
@@ -168,9 +169,9 @@ describe('composition and argument are one transform: sink(head(x)) === firstUse
       touch('pC'),
     ];
     const sfn: SFn = { name: 'f', params: [], locals, retType: T.void(), body };
-    const head = { ...sfn, body: placeBaseLocals(sfn, body, [], 'head').body };
+    const head = { ...sfn, body: placeBaseLocals(sfn, [], 'head').body };
     const composed = sinkInitsToFirstUse(head);
-    const argued = { ...sfn, body: placeBaseLocals(sfn, body, [], 'first-use').body };
+    const argued = { ...sfn, body: placeBaseLocals(sfn, [], 'first-use').body };
     expect(composed).not.toBeNull();
     expect(composed!.body).toEqual(argued.body);
     // …and the order really is the first-use one, not the input one — otherwise this would pass
@@ -185,9 +186,73 @@ describe('composition and argument are one transform: sink(head(x)) === firstUse
     const body: Stmt[] = [named('p0', 'gFirst'), named('p0', 'gSecond'), touch('p0')];
     const sfn: SFn = { name: 'f', params: [], locals, retType: T.void(), body };
     for (const placement of ['head', 'first-use'] as const) {
-      const out = placeBaseLocals(sfn, body, [], placement).body;
+      const out = placeBaseLocals(sfn, [], placement).body;
       expect(out.filter((st) => st.k === 'assign')).toEqual([named('p0', 'gFirst'), named('p0', 'gSecond')]);
     }
+  });
+
+  test('inits that SINK to the same statement keep first-use order, not the reverse of it', () => {
+    // The splice loop inserts at one index repeatedly, so the last init spliced lands on top —
+    // without a descending tie-break a run that sinks together comes out backwards, and the whole
+    // point of the sort above is that this order is the compiler's pool-load order. `head` cannot
+    // hit it (it never splices), so composition and argument would silently disagree here.
+    const locals = ['p0', 'p1'].map((name) => ({ name, type: U8P }));
+    const body: Stmt[] = [
+      named('p0', 'gA'),
+      named('p1', 'gB'),
+      plain(),
+      {
+        k: 'exprstmt',
+        value: {
+          k: 'call',
+          fn: 'sink',
+          args: [
+            { k: 'index', base: { k: 'var', name: 'p0' }, idx: c(0), width: 1, signed: false },
+            { k: 'index', base: { k: 'var', name: 'p1' }, idx: c(0), width: 1, signed: false },
+          ],
+        },
+      },
+    ];
+    const sfn: SFn = { name: 'f', params: [], locals, retType: T.void(), body };
+    const argued = placeBaseLocals(sfn, [], 'first-use');
+    expect(argued.body.map((st) => (st.k === 'assign' ? st.name : st.k))).toEqual(['store', 'p0', 'p1', 'exprstmt']);
+    // …and the composed spelling agrees, which is the invariant the suffix rests on
+    expect(sinkInitsToFirstUse({ ...sfn, body: placeBaseLocals(sfn, [], 'head').body })!.body).toEqual(argued.body);
+  });
+});
+
+describe("`prepend` is nearbase.ts's ABSTENTION, not a third position", () => {
+  // It consults neither the first-use query nor the ordering sort. Stated in l3/hoist.ts and
+  // pinned here so a reader who takes the enum for one axis is corrected by a failing test rather
+  // than by a compiled row: `l3/nearbase.ts` relies on the run beneath it keeping its own order
+  // (synthetic:dmafield), and `l3/basecse.ts` is typed out of reaching this value at all.
+  const named = (name: string, sym: string): BaseInit => ({
+    k: 'assign',
+    name,
+    value: { k: 'cast', to: U8P, e: { k: 'addr', name: sym } },
+  });
+  const touch = (name: string): Stmt => ({
+    k: 'store',
+    lval: { k: 'index', base: { k: 'var', name }, idx: c(0), width: 1, signed: false },
+    value: c(1),
+  });
+
+  test('it is exactly [...minted, ...body], even when the run below is out of first-use order', () => {
+    const locals = ['q0', 'q1', 'p0'].map((name) => ({ name, type: U8P }));
+    // q1 leads the run but q0 is touched first, so first-use order would reorder them
+    const body: Stmt[] = [named('q1', 'gQ1'), named('q0', 'gQ0'), touch('q0'), touch('p0'), touch('q1')];
+    const sfn: SFn = { name: 'f', params: [], locals, retType: T.void(), body };
+    const minted = [named('p0', 'gP0')];
+    expect(placeBaseLocals(sfn, minted, 'prepend')).toEqual({ body: [...minted, ...body], moved: 0 });
+    // the contrast: `head` sits in the same POSITION and reorders, so the two are not one axis
+    expect(placeBaseLocals(sfn, minted, 'head').body.map((st) => (st.k === 'assign' ? st.name : st.k))).toEqual([
+      'q0',
+      'p0',
+      'q1',
+      'store',
+      'store',
+      'store',
+    ]);
   });
 });
 

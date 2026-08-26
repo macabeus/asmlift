@@ -82,7 +82,7 @@ import { type IrType, T, scalarTypeForAccess } from '../ir/types';
 import type { Expr, SFn, Stmt } from './ast';
 import { mapExprChildren, mapStmtExprs, stmtChildren, stmtExprs } from './ast';
 import { type Gate, ablateHeuristic, firstRejection } from './gates';
-import { type BaseInit, type BaseInitPlacement, nameAllocator, placeBaseLocals } from './hoist';
+import { type BaseInit, type HoistPlacement, nameAllocator, placeBaseLocals } from './hoist';
 
 // A HOISTABLE base is a bare `addr` (a global address) or a bare `const` (a numeric pointer
 // address). Both are relocation-invariant leaves whose value the compiler keeps in one register
@@ -336,7 +336,7 @@ function admit(sfn: SFn, gates: readonly Gate<BaseKey>[]): { c: Collected; keys:
 export function hoistBaseLocals(
   sfn: SFn,
   gates: readonly Gate<BaseKey>[] = BASECSE_GATES,
-  placement: BaseInitPlacement = 'head',
+  placement: HoistPlacement = 'head',
 ): SFn {
   const { c, keys: hoisted } = admit(sfn, gates);
   const { meta } = c;
@@ -363,15 +363,15 @@ export function hoistBaseLocals(
   // The new inits join the tree's LEADING run of base inits rather than being prepended above it:
   // when rank's /livebase re-runs this pass the head already carries the default run's, and
   // blindly prepending would spell the new base's pool load above locals the compiler loads first.
-  // `placement` then answers where that whole run goes (l3/hoist.ts, the mechanism sinkinit.ts's
-  // policy shares). Under the default `head` it is ordered by first use, which is pool-load order
-  // (see `collect`) — deliberately reaching the single default run too (a head of user pointer
-  // inits before a firing hoist), where it repairs the same invariant.
+  // That is why `HoistPlacement` has no `prepend` — the hazard is typed out rather than warned
+  // about. `placement` then answers where the whole run goes (l3/hoist.ts, the mechanism
+  // sinkinit.ts's policy shares). Under either value it is ordered by first use, which is
+  // pool-load order (see `collect`) — deliberately reaching the single default run too (a head of
+  // user pointer inits before a firing hoist), where it repairs the same invariant.
   const locals = [...sfn.locals, ...newLocals];
-  // the minted locals must be DECLARED before the query, or first-use would not know their names.
-  // `body: rewritten` too: `placeBaseLocals` reads the shell for its declarations and takes the
-  // statements as its own argument, so handing it the PRE-rewrite body would be inert and would
-  // read as a bug at every later glance.
-  const { body } = placeBaseLocals({ ...sfn, locals, body: rewritten }, rewritten, hoistStmts, placement);
+  // The shell carries the minted DECLARATIONS and the REWRITTEN statements together: first-use
+  // would not know the new names without the first, and would query the pre-rewrite accesses
+  // without the second.
+  const { body } = placeBaseLocals({ ...sfn, locals, body: rewritten }, hoistStmts, placement);
   return { ...sfn, body, locals };
 }
