@@ -186,30 +186,33 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   base-init run and the first-use query for the two that place into it, while each keeps its own
   answer to where the init goes. The redesign that would finish it is
   `placeBaseLocals(sfn, policy)` — one hoist, placement as an argument — and the row that earns it
-  is one wanting a placement none of them can express. Nothing here is blocked on it today.
+  now exists. `sa3:sub_803213C` sits at 2 with an argMismatch-only residual and `v0 = 1;` as its
+  first statement: a PLACEMENT, not a spelling, and its twin `sa3:sub_802DFC8` wants the opposite
+  direction for its own merge-zero. `l3/sinkinit.ts` reaches neither — its leading run is
+  `isBaseInit`, a ptr-cast of an `addr`/`const`, so a scalar `v0 = 1;` is not in it, and widening
+  that predicate would also move what `l3/basecse.ts` re-orders, the two sharing
+  `splitLeadingBaseInits`. The knob belongs to a policy argument, not to `isBaseInit`.
 
   A second consolidation is BOOKED and deliberately unpaid: the FOUR home scopes in
   `structure/analysis.ts` (`homeSharedAddresses`, `homeLoopExprs`, `homeDerivedReads`,
   `homeMergeFeeds`) are one `materialize.add(op)` behind shared refusals, differing only in an
   eligibility predicate, and `rank.ts` already holds them as a data table (`STRUCTURING_AXES`) —
-  only the consumer side is un-consolidated. What it can NOT absorb is `l3/basecse.ts`, and the
-  reason is now ONE premise rather than two: `coneHoldsAddr` excludes basecse's symbol bases
-  through a refusal `analysis.ts` calls the soundness half of its own claim, and `mergeFeedHomes`
-  carries it too. The OTHER premise this paragraph used to give — "all three scopes carry
-  `op.opcode !== 'const'`, which excludes basecse's numeric bases" — is no longer true of the
-  family: `homeMergeFeeds` deliberately admits a `const`, because a const two arms of one merge
-  carry is a register the compiler reserved across the branch rather than a re-materialization.
-  So "one `homeSharedValues(eligibility, placement)`" is still two changes, not one — the
-  analysis.ts half is available, the basecse half would require deleting a sound refusal.
+  only the consumer side is un-consolidated. What it can NOT absorb is `l3/basecse.ts`, on one
+  premise: `coneHoldsAddr` excludes basecse's symbol bases through a refusal `analysis.ts` calls
+  the soundness half of its own claim, and all four scopes carry it. The const exclusion is NOT a
+  second premise — `homeMergeFeeds` deliberately admits a `const`, because a const two arms of one
+  merge carry is a register the compiler reserved across the branch rather than a
+  re-materialization. So "one `homeSharedValues(eligibility, placement)`" is two changes, not one:
+  the analysis.ts half is available, the basecse half would require deleting a sound refusal.
 
-  What the fourth scope adds to the PRICE of that half: `mergeFeedHomes` is the only one of the
-  four that is already a standalone function with an explicit parameter list, so it is the shape
-  the fold would take — but it is also the only one whose enumeration gate (`hasMergeFeedHome`)
-  RUNS the scope instead of re-implementing it. Its three siblings' gates
-  (`hasHomeableSharedAddress`, `hasLoopSharedPureValue`, `hasDerivedReadHome`) each restate their
-  scope's predicate by hand, ~200 lines whose safety rests on every copy staying no stricter than
-  the scope it mirrors, with nothing checking that and nothing in the harness reporting a candidate
-  that was never enumerated. That duplication is the fold's real price, and it is booked here.
+  The PRICE of that half is gate duplication. `mergeFeedHomes` is the only one of the four already
+  a standalone function with an explicit parameter list, so it is the shape the fold would take —
+  and the only one whose enumeration gate (`hasMergeFeedHome`) RUNS the scope instead of
+  re-implementing it. Its three siblings' gates (`hasHomeableSharedAddress`,
+  `hasLoopSharedPureValue`, `hasDerivedReadHome`) each restate their scope's predicate by hand,
+  ~200 lines whose safety rests on every copy staying no stricter than the scope it mirrors, with
+  nothing checking that and nothing in the harness reporting a candidate that was never
+  enumerated.
 
 The **backends** ([`backend/`](../packages/core/src/backend)) then print L3 as concrete source —
 C, Pascal, and a scoped C++ — one neutral tree, three spellings. Every language-specific decision

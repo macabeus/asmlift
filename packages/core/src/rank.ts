@@ -174,28 +174,21 @@ const STRUCTURING_AXES: readonly StructuringAxis[] = [
     strip: true,
   },
   // `/merge-home` — the merge-feed-home axis (structure/analysis.ts AnalyzeOptions
-  // homeMergeFeeds): a pure value that one join's incoming edges render into the SAME parameter
-  // slot from 2+ places materializes in the block that dominates them — the value the source
-  // computed once above the branch (`s32 m = (b & 1) ? 0x400 : 0;`), where the default has no name
-  // to reference on an edge and re-derives the whole expression per arm. Gated per symbol variant
-  // like its `/addr-home`, `/expr-home` and `/derived-home` siblings, on the scope itself rather
-  // than an approximation of it.
+  // homeMergeFeeds): a pure value one join's incoming edges render into the SAME parameter slot
+  // from 2+ places materializes in the block that dominates them — the value the source computed
+  // once above the branch (`s32 m = (b & 1) ? 0x400 : 0;`), where the default has no name to
+  // reference on an edge and re-derives the whole expression per arm. Gated per symbol variant on
+  // the scope itself rather than on an approximation of it.
   //
-  // An ADMISSION rather than a default, and the price of the alternative is measured over the whole
-  // corpus rather than argued: forced on for every candidate — the axis's own arm plus `structure`'s
-  // default, so the spelling is REPLACED across the fan instead of added — it costs three matches,
-  // `kleod:MultiplyQ4`, `kleod:MultiplyQ8` and `pokeemerald:MathUtil_Mul16` (each MATCH → 3), and
-  // perturbs two rows it was never designed for, `snowboardkids2:func_8002B4B8_2C0B8` 2 → 6 and
-  // `synthetic:llshl` 10 → 11. As a roster axis the un-homed spelling rides beside it and
-  // `compareScored` orders by score, so none of those losses is reachable.
+  // An ADMISSION, not a default: forced on, the spelling is REPLACED across the fan rather than
+  // added to it, which costs `kleod:MultiplyQ4`, `kleod:MultiplyQ8` and
+  // `pokeemerald:MathUtil_Mul16` their matches. On the roster that is unreachable — `compareScored`
+  // orders by score and the un-homed sibling rides beside it.
   //
-  // Part of its CONST clientele is a tree `/defsite` (anchorConstCopies) already emits, and the
-  // dedup collapses those — over the corpus rows the gate admits, `/merge-home` and `/defsite` are
-  // byte-identical on `synthetic:swarms` and `sa3:sub_804D360`, while `synthetic:maskchain`,
-  // `sa3:sub_802DFC8` and `kleod:UpdateCameraScroll` need this one. The two axes answer the same
-  // question there (where the write into a merge parameter lives) and differ on the rest:
-  // `/defsite` anchors a const AT ITS DEF, this homes whatever value the arms duplicate, const or
-  // not. So the enumeration cost on the overlap is real and the spelling is not new.
+  // Its fan is essentially one row's: over the 16 corpus rows the gate admits, 2790 → 5841
+  // candidates map-less and 2538 → 5363 with a map, of which `kleod:UpdateCameraScroll` (outcome
+  // `noncompile`, so they buy nothing) is +2944 and +2752, three rows add none at all where
+  // `/defsite` already spells the same tree, and the rest pay 107 and 73 between them.
   {
     flag: 'mergeHome',
     suffix: '/merge-home',
