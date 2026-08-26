@@ -6,8 +6,11 @@
 //
 // What these tests pin is the SCOPE, since a merge slot is the whole evidence: only the MAXIMAL
 // shared value homes (every node under a shared expression is itself rendered twice), only a def
-// the join's every arm reaches, and the refusals hold — a value computed separately in each arm, a
-// standalone address, a memory read, and a join inside a loop.
+// the join's every arm reaches, the COPY-SITE count is the count of places the slot's assignments
+// render (an edge count and a render count come apart in two CFG shapes), and every refusal the
+// scope states holds — a value computed separately in each arm, a value no edge carries, a
+// standalone address, a memory read, a trapping divide, an `undef`, a short-circuit-guarded cone
+// holding an order-sensitive op, and a join inside a loop.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';

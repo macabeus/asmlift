@@ -300,13 +300,11 @@ function naturalLoops(
  *    • a value that is ITSELF an address, or whose cone holds a gaddr/laddr — rendered standalone
  *      an `&g + i` loses the memAccess's inline byte-stride cast (`coneHoldsAddr`,
  *      `rendersAsAddress`), the same soundness half the sibling scopes state.
- *    • an op whose answer depends on WHERE it runs or that can TRAP — `REEVAL_UNSAFE_OPS`, read
- *      from the registry rather than re-listed, because the two models drifted apart here once
- *      already (the hand-written copy was that set minus the four divides, and a homed `sdiv`
- *      becomes an unconditional statement — `ir/opcodes.ts` books exactly that as a KNOWN GAP).
- *      Both halves matter: for a read WHERE it happens is the read rules' question, and a trapping
- *      op named at a def block raise/shortcircuit.ts hoisted it into runs on paths C's own `&&`
- *      would have re-guarded.
+ *    • an op whose answer depends on WHERE it runs, or that can TRAP — `REEVAL_UNSAFE_OPS`, read
+ *      from the registry rather than re-listed. Both halves carry: for a read WHERE it happens is
+ *      the read rules' question, and a homed divide becomes an unconditional statement at a def
+ *      block raise/shortcircuit.ts may have made, on paths C's own `&&` would have re-guarded —
+ *      the KNOWN GAP `ir/opcodes.ts` books against `HOIST_UNSAFE_OPS`.
  *    • an `undef` — the axis's premise is a value the source COMPUTED once above the branch, and
  *      an uninitialised register was never computed at all: homed, it spells `v0 = uninit_r5;`,
  *      a copy of a value nothing wrote, which no asm can have.
@@ -326,16 +324,15 @@ function naturalLoops(
 function mergeFeedHomes(fn: Fn, dom: Map<Block, Set<Block>>, defOf: Map<Value, Op>, inLoop: Set<Block>): Set<Op> {
   // Every block's incoming COPY SITES — the places its edge assignments render, each once.
   //
-  // Not the predecessor list: `predecessors` (ir/core.ts) lists a block once per successor EDGE,
-  // so walking it against that block's own successors visits a join two of one block's edges reach
-  // k² times, and a value carried on ONE of them then tallies 2 — the duplication half of the
-  // evidence, satisfied by a value nothing duplicates.
+  // Not the predecessor list: `predecessors` (ir/core.ts) lists a block once per successor EDGE, so
+  // walking it against that block's own successors visits a join two of one block's edges reach k²
+  // times, and a value carried on ONE of them tallies 2 — the duplication half of the evidence,
+  // satisfied by a value nothing duplicates.
   //
   // Not the raw edge list either. structure.ts's Regime B groups a `switch_br`'s table slots by
-  // target block — two slots naming one block are ONE arm carrying both `case` labels, and it
-  // refuses outright if their args disagree — so those emit ONE copy. A `cond_br`'s two arms each
-  // emit their own even when both name the join (`mergeconst`'s `cond_br ^bb3(%2), ^bb3(%2)` is two
-  // `v0 = 0;`), so those stay separate.
+  // target block — two slots naming one block are ONE arm carrying both `case` labels, args
+  // required to agree — so they emit ONE copy, while a `cond_br`'s two arms each emit their own
+  // even when both name the join.
   const copySitesOf = new Map<Block, Successor[]>();
   for (const b of fn.blocks) {
     const term = b.ops[b.ops.length - 1];
@@ -398,14 +395,10 @@ function mergeFeedHomes(fn: Fn, dom: Map<Block, Set<Block>>, defOf: Map<Value, O
     coneCache.set(root, acc);
     return acc;
   };
-  // Values C evaluates only under a `&&`/`||` — the SECOND operand of every `logic_and`/`logic_or`
-  // and everything it reads. raise/shortcircuit.ts recovers a connective by hoisting the guarded
-  // arm's pure body into the block ABOVE the branch, on the contract that the structurer inlines it
-  // back into the right-hand side where C's own short circuit re-guards it. So for a value in that
-  // cone the def block is a FOLD ARTIFACT, not the block the asm computed in, and NAMING it breaks
-  // the re-guard: `p != 0 && *p != 0` would emit `v0 = *p | 1;` above its own null check. The
-  // def-block placement rule refuses the same cone for the same reason (`shortCircuitGuarded`);
-  // that set is built only under `readsStayWhereWritten`, so this scope builds its own.
+  // Values C evaluates only under a `&&`/`||` — the SECOND operand of every `logic_and`/`logic_or`,
+  // and everything it reads. The def-block placement rule states the whole argument at
+  // `shortCircuitGuarded` below; this scope builds its own set because that one exists only under
+  // `readsStayWhereWritten`.
   const scGuarded = new Set<Value>();
   const scWork: Value[] = [];
   for (const b of fn.blocks) {
@@ -431,9 +424,7 @@ function mergeFeedHomes(fn: Fn, dom: Map<Block, Set<Block>>, defOf: Map<Value, O
       const d = defOf.get(x);
       return d !== undefined && REEVAL_UNSAFE_OPS.has(d.opcode);
     });
-  /** would materializing this op's result change what it means, or where it happens? Read from
-   *  `REEVAL_UNSAFE_OPS` rather than re-listed: the same membership hand-written here was that set
-   *  minus the trapping divides, which is how it admitted an `sdiv` as a feeder. */
+  /** would materializing this op's result change what it means, or where it happens? */
   const eligible = (op: Op): boolean => {
     const v = op.results[0];
     return (
