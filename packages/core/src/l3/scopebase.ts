@@ -13,14 +13,13 @@
 //   under either of basecse's positions — a live range the original never had, which is the
 //   register-pressure failure basecse's own loop gate exists for. First-use placement narrows that
 //   range and does not close it: the init still lands ABOVE the `if`, because sinking INTO the arm
-//   is what needs the domination work this pass does. That argument is why the lever is scope-aware; it is
-//   NOT a claim about what the lever achieves, and no committed measurement separates the two
-//   placements (the one that did edited a reference source by hand and cannot be re-run). On
-//   kleod:UpdateHUDCounterDisplay the primary path declines outright (a later pass retired the phi
-//   it keyed on, so the base's uses span the function body), and the cluster fallback below is what
-//   recovers it.
-//   basecse's header already names the gap — "a loop-body base is left
-//   inline for a future scope-aware hoist" — and this is that hoist.
+//   is what needs the domination work this pass does. That argument is why the lever is
+//   scope-aware; it is NOT a claim about what the lever achieves, and no committed measurement
+//   separates the two placements (the one that did edited a reference source by hand and cannot
+//   be re-run). On kleod:UpdateHUDCounterDisplay the primary path declines outright (a later pass
+//   retired the phi it keyed on, so the base's uses span the function body), and the cluster
+//   fallback below is what recovers it. basecse's header already names the gap — "a loop-body
+//   base is left inline for a future scope-aware hoist" — and this is that hoist.
 //
 //   ELIGIBILITY. With a symbol map that states an array's RANK, the access renders as the bare
 //   `gSym[0][i]`, whose base node is a `var` naming the global, not an `addr`. basecse's

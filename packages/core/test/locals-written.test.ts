@@ -73,10 +73,10 @@ describe('the LEVER guard set', () => {
   const times = (name: string) => rankSrc.split(`${name}(`).length - 1;
 
   test('is applied as a SET — every lever spelling gets all three, or none of them does', () => {
-    // The defect this pins is a NEW guard site added with two of the three, which is what the
-    // shipped version of this round had: `assertLocalsWritten` was in `structureChecked` and in
-    // neither of `respell`'s two emit paths. Counting rather than pattern-matching a call site, so
-    // the rule survives reformatting and states the invariant instead of a line number.
+    // The defect this pins is a NEW guard site added with two of the three — a contract wired into
+    // `structureChecked` and into neither of `respell`'s two emit paths. Counting rather than
+    // pattern-matching a call site, so the rule survives reformatting and states the invariant
+    // instead of a line number.
     expect(times('assertResolved')).toBeGreaterThan(0);
     expect(times('assertDerefsTyped')).toEqual(times('assertResolved'));
     expect(times('assertLocalsWritten')).toEqual(times('assertResolved'));

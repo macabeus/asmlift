@@ -290,11 +290,10 @@ const createdLocals = (from: SFn, to: SFn): Set<string> => {
  *  nothing is the whole of the decline.
  *  WHAT THE EXEMPTION REACHES, over the 325 agbcc rows the artifact carries and in BOTH symbol-map
  *  configurations — 451 observations, of which 39 do not lift on this one-tree census.
- *  HOW TO REPRODUCE IT, because the first published version of this census did not: the
- *  prototypes live inside `row.scripts.asmlift`'s `PROTO_INPUT` heredoc, NOT in a `row.proto`
- *  field, and a census that reads the field that is not there lifts all 451 with `prototypes: {}`
- *  while the harness scores every one of them with `--proto proto.json`. Numbers below are from
- *  the heredoc.
+ *  HOW TO REPRODUCE IT: the prototypes live inside `row.scripts.asmlift`'s `PROTO_INPUT`
+ *  heredoc, and there is no `row.proto` field — a census reaching for one lifts all 451 with
+ *  `prototypes: {}` while the harness scores every one of them with `--proto proto.json`, and
+ *  says nothing about it. Numbers below are from the heredoc.
  *  20 observations bind a key the default table refuses, spread over 14 rows in 4 projects (6
  *  map-ful, 14 map-less), 25 keys in all. FOUR are numeric — two on `kleod:RollRandomLevelVariant`
  *  and one each on `synthetic:basecell` and `synthetic:foldsink`, all map-less, because with a map
@@ -319,11 +318,12 @@ const createdLocals = (from: SFn, to: SFn): Set<string> => {
  *  5712), `kleod:ProcessInputAndUpdateEntities` +384, `kleod:UpdateWorldMapNodeAnim` +88,
  *  `kleod:CountCollectedGems` +64 and nothing else more than 32. The first of those is an
  *  `outcome: noncompile` row — `decompileRanked` throws only when EVERY candidate failed to build
- *  — so its whole fan is compiled and discarded, and this made that discard 10% bigger. Measured
- *  on the round's own two bench runs (shared box): that row 377.6s → 483.0s, the second 238.4s →
- *  313.6s for a 369 → 367 gain, real tier 416.1s → 529.4s. Priced, not free: the two rows the
- *  widening WINS (`ProcessInputAndUpdateEntities` and `CountCollectedGems`, both on the head row)
- *  and `sa3:sub_803213C` on the sunk one are what it is bought with. */
+ *  — so its whole fan is compiled and discarded, and this made that discard 10% bigger. Timed on
+ *  two full bench runs on a shared box: that row 377.6s → 483.0s, the second 238.4s → 313.6s for
+ *  a 369 → 367 gain, real tier 416.1s → 529.4s. Priced, not free, and bought with three rows:
+ *  `sa3:sub_803213C` (MATCH, sunk row), `kleod:ProcessInputAndUpdateEntities` (369 → 367) and
+ *  `kleod:CountCollectedGems` (328 → 327). Which ROW of the pair each is credited to is a label
+ *  and not a cause — see the note on BASEFOLD_ADMISSIONS, where the two are ablated apart. */
 interface BaseAdmission {
   suffix: string;
   gates: readonly Gate<BaseKey>[];
@@ -750,12 +750,18 @@ export function enumerateCandidates(
     // derived onto EVERY spelling: statement order/shape is orthogonal to what any
     // representation lever changes — the same kind of independent dimension as signedness —
     // so they compose as an axis rather than a pairing; a third blanket product needs the
-    // same argument, not just a row. And a specific LEVER PAIRING is admitted when a row
-    // demands it AND the joint spelling is reachable from neither lever alone (the
-    // /livebase × /indexed, × /nearbase, and × /coalesce pairings below, each with its
-    // demanding row); anything else stays un-composed. A pairing is admitted for a LEVER, so
-    // it fans over that lever's whole admission table (LIVEBASE_ADMISSIONS): a roster row
-    // changes which bases the same hoist binds, not what pairing it with /coalesce means.
+    // same argument, not just a row. And a specific LEVER PAIRING is admitted on one of two
+    // grounds, never on "it might help". FIRST, a row demands the joint spelling AND that
+    // spelling is reachable from neither lever alone: /livebase × /indexed, × /sinkinit,
+    // × /nearbase and × /coalesce, each with its demanding row at the respell site. SECOND, a
+    // lever COMMITS a policy the differ would otherwise never see — /nearbase × /sinkinit,
+    // where `l3/nearbase.ts` picks one of two init orderings inside the pass, so without the
+    // pairing that choice decides a match with no candidate beside it to lose to. The second
+    // ground is narrower than it looks: it needs a committed choice INSIDE a lever with an
+    // existing lever that expresses the alternative, not a lever one could imagine wanting
+    // twice. Anything else stays un-composed. A pairing is admitted for a LEVER, so it fans
+    // over that lever's whole admission table (LIVEBASE_ADMISSIONS): a roster row changes
+    // which bases the same hoist binds, not what pairing it with /coalesce means.
     // And a lever must PRESERVE SEMANTICS by construction: the differ referees byte-exactness
     // (a wrong candidate can never fake a score-0 match), but on a NONMATCH row the best-
     // scoring source is shown to the user — a semantically-wrong re-spelling there is
@@ -1053,9 +1059,9 @@ export function enumerateCandidates(
     // `l3/nearbase.ts` places them above the run already there, and that is a committed choice
     // made on one row (`synthetic:dmafield`) rather than on a compiler fact — a cluster base is
     // reached at 2+ addresses by construction, so "first touched late" says nothing about it, and
-    // which order the source wrote is per-function knowledge the asm does not carry. Nothing
-    // refereed it before this row existed. `/sinkinit` here is the same transform it is
-    // everywhere else — each leading base init at its own first use — applied to a run whose order
+    // which order the source wrote is per-function knowledge the asm does not carry. With no
+    // second candidate that choice decides a MATCH rather than a candidate, which is the whole
+    // reason this row is here. `/sinkinit` here is the same transform it is everywhere else — each leading base init at its own first use — applied to a run whose order
     // `prepend` chose, so where first use does not separate two inits the cluster base still leads
     // (that tie is the one thing this is NOT identical to `placeBaseLocals(…, 'first-use')` on;
     // pinned in test/sinkinit.test.ts). Priced over the corpus at 590 candidate sources on 15 of

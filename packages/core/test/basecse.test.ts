@@ -316,10 +316,11 @@ describe('leaf-base hoisting', () => {
     });
 
     test('a base of 0 reads the evidence like any other: agbcc materializes a zero base too', () => {
-      // The refusal that used to sit here quoted MIPS (`lb $v0, 16($zero)`) on a rule only agbcc
-      // runs. Compiled both ways with the benchmark's own flags: `((s8 *)0)[16]` is
-      // `mov r0, #0x10` + `ldrb [r0, #0]`, and `s8 *p = (s8 *)0; p[16]` is `mov r0, #0x0` +
-      // `ldrb [r0, #0x10]` — the same pair that discriminates at every other base.
+      // A zero base looks like the one address with nowhere else for an offset to go, and on MIPS
+      // it is (`lb $v0, 16($zero)`). This rule runs only on agbcc, which materializes it like any
+      // other constant — compiled both ways with the benchmark's own flags, `((s8 *)0)[16]` is
+      // `mov r0, #0x10` + `ldrb [r0, #0]` and `s8 *p = (s8 *)0; p[16]` is `mov r0, #0x0` +
+      // `ldrb [r0, #0x10]`, the same pair that discriminates at every other base.
       const evidence = fn([{ k: 'store', lval: cidx(0, c(16), 1, fromOperand), value: c(0) }]);
       expect(hoistBaseLocals(evidence, BASEFOLD_GATES).locals).toHaveLength(1);
       // …and with no operand offset it is refused, like any other base reached once

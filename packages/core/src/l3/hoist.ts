@@ -6,12 +6,9 @@
 // nearbase mint into it, sinkinit moves statements out of it, and all three have to agree on where
 // it stops and how a body carrying it is rebuilt. What stays with each caller is ELIGIBILITY:
 // which values become a local at all, and when it is worth doing. WHERE the run goes is
-// `placeBaseLocals`'s `placement` argument. That argument is not one axis: `head` and `first-use`
-// are two POSITIONS for a run this file has ordered, and `prepend` is nearbase's abstention from
-// the ordering altogether, which is why the two are separate types. Everything lives in one file
-// because each half was a per-caller copy once and each copy drifted from its original — the
-// naming one by losing the callee-name exclusion below, the init one by asking a different
-// first-use question, nearbase's by never ordering at all.
+// `placeBaseLocals`'s `placement` argument, and that argument is two questions rather than one —
+// see `HoistPlacement` and `BaseInitPlacement`. Everything lives in one file because each half was
+// a per-caller copy once and every copy drifted from its original.
 import type { Expr, SFn, Stmt } from './ast';
 import { mapExprChildren, stmtChildren, stmtExprs } from './ast';
 import { localMentions } from './mentions';
@@ -110,9 +107,9 @@ function firstUseIn(sfn: SFn, rest: readonly Stmt[]): Map<string, number> {
   return out;
 }
 
-/** WHERE a run of base inits sits, for a pass that puts the run in FIRST-USE order first — the
- *  order the compiler loads the pool words in (`l3/basecse.ts`'s `collect`), so it is the order a
- *  reference spelling that named these bases would have.
+/** WHERE a run of base inits sits, once this file has put it in FIRST-USE order — the order the
+ *  compiler loads the pool words in (`l3/basecse.ts`'s `collect`), so it is the order a reference
+ *  spelling that named these bases would have.
  *
  *  `head` keeps the whole ordered run at the top of the body.
  *  `first-use` then moves each init down to immediately before the statement that first mentions
@@ -120,20 +117,12 @@ function firstUseIn(sfn: SFn, rest: readonly Stmt[]): Map<string, number> {
  *  down the body out of the live range above it.
  *
  *  These two are the axis a roster admission may state (rank.ts) and the only values
- *  `hoistBaseLocals` accepts: applying `first-use` to a `head` result is `first-use` applied to
- *  the input, so the two compose and `/sinkinit` names one transform wherever it appears. */
+ *  `hoistBaseLocals` accepts. */
 export type HoistPlacement = 'head' | 'first-use';
 
 /** `HoistPlacement` plus the ABSTENTION: `prepend` puts the minted inits above a run that keeps
- *  the order it arrived in, consulting neither the first-use query nor the ordering sort — it is
- *  `[...minted, ...body]` and nothing more, which a test pins.
- *
- *  It is a third VALUE, not a third position, and only `l3/nearbase.ts` passes it. That pass's
- *  cluster bases are reached at 2+ addresses by construction, so "first touched late" says nothing
- *  about them, and the row that demands the lever prefers the pool word above the run already
- *  there: re-placing them in first-use order turns `synthetic:dmafield` from a MATCH into diff:5
- *  (measured, 2026-08-26). That is a corpus row and not a compiler mechanism, which is why the
- *  other ordering rides beside it as `/nearbase/sinkinit` for the differ to settle.
+ *  the order it arrived in, consulting neither the first-use query nor the sort. A third VALUE and
+ *  not a third position, passed only by `l3/nearbase.ts`, whose header carries the argument for it.
  *
  *  `hoistBaseLocals` may NOT be handed this: prepending there spells a newly minted base's pool
  *  load above locals the compiler loads first (`l3/basecse.ts`'s own header), so the two passes
@@ -153,15 +142,14 @@ export type BaseInitPlacement = HoistPlacement | 'prepend';
  *  rather than merely adjacent: `first-use` applied to a `head` result is `first-use` applied to
  *  the input, so `/livebase/sinkinit` (a hoist at the head that a second pass then sinks) and
  *  `/basefold/sinkinit` (one hoist placed at first use) are the same transform and the `/sinkinit`
- *  suffix names one thing wherever it appears. Ordering the run only on the `head` branch made
- *  them differ on exactly the inits that CANNOT move, which is the half of the run whose order the
- *  compiler still reads. Pinned in test/sinkinit.test.ts. `prepend` opts out of all of it and
- *  returns before the query — see `BaseInitPlacement`.
+ *  suffix names one thing wherever it appears. Order the run only on the `head` branch and they
+ *  part company on the inits that CANNOT move, which is the half of the run whose order the
+ *  compiler still reads. Pinned in test/sinkinit.test.ts. `prepend` opts out of all of it.
  *
  *  Ties keep list order — existing inits before minted ones, and two inits assigning the SAME
  *  local in their original sequence, which a stable sort is what guarantees: they write one cell,
- *  so their order is the only thing that says which value it ends up holding. Two inits that SINK
- *  to the same statement keep it too, which costs the splice loop below an explicit tie-break.
+ *  so their order is the only thing that says which value it ends up holding. Two that SINK to the
+ *  same statement keep it too, which is what the splice loop's second sort key is for.
  *
  *  Under `first-use`, an init then moves down if the function assigns its local exactly ONCE (the
  *  move would otherwise cross that other write), something in the remaining body mentions it, and

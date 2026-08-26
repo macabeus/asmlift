@@ -143,10 +143,8 @@ export function nearBaseClusters(sfn: SFn, span: number): SFn | null {
     })),
   ];
   // The body rebuild is `l3/hoist.ts`'s, shared with the two other passes that place into the
-  // leading base-init run — this pass is the THIRD, and it used to own a private copy of the
-  // rebuild, which is exactly the drift that put the mechanism in one file. What it does NOT share
-  // is the ordering: `prepend` returns before the first-use query, so this pass takes the rebuild
-  // and abstains from the policy (see `BaseInitPlacement`).
+  // leading base-init run. The ORDERING is not: `prepend` returns before the first-use query, so
+  // this pass takes the rebuild and abstains from the policy (see `BaseInitPlacement`).
   //
   // The DEFAULT is `prepend` — the cluster bases go ABOVE a run already there rather than being
   // merged into it in first-use order — and it rests on a row, not on a compiler fact. Placing

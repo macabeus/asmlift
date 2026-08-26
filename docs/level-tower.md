@@ -189,9 +189,10 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   that is `HoistPlacement`, the only thing `l3/basecse.ts` accepts and the only thing a roster
   admission may state, so a row in `rank.ts` says WHERE its locals go beside WHICH bases it binds.
   `l3/nearbase.ts`'s `prepend` is not a third position: it returns before the query and the sort,
-  so it is `[...minted, ...body]` and shares the rebuild only. It is a separate type for a reason —
-  handing it to `hoistBaseLocals` spells a minted base's pool load above the base the compiler
-  loads first, the exact hazard that file's own header forbids, and it used to typecheck.
+  so it is `[...minted, ...body]` and shares the rebuild only. It is a separate type and not a
+  third value of one — handing it to `hoistBaseLocals` spells a minted base's pool load above the
+  base the compiler loads first, the exact hazard that file's own header forbids, so the boundary
+  has to be something a caller cannot spell rather than something a comment asks it not to.
 
   Placement being an ARGUMENT is worth stating carefully, because two things about it are easy to
   overclaim. It is not what a single row needed, and it is not what made one reachable:
@@ -205,19 +206,20 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   `[]`, the standalone lever declines, and 0 of 12 candidates carry a `/sinkinit` or `/basefold`
   label. What made the row reachable is the SYMBOL half of `unfoldedOffset`; reaching it then cost
   a roster line, spelled as a placement argument here and spellable as `pairings: true` instead.
-  What the fold is actually worth is that the two spellings are now the same transform BY
+  What the fold is actually worth is that the two spellings are the same transform BY
   CONSTRUCTION (`placeBaseLocals` orders the run by first use before consulting the policy) rather
-  than by corpus luck. Before that they disagreed on the inits that CANNOT move, and — found in
-  round 2 — on the inits that sink to the SAME statement, where the splice loop reversed them:
-  3544 of 28646 candidate sources, 8 functions, no score change, and the first-use-ordered spelling
-  of a sunk run was never enumerated at all.
+  than by corpus luck. Two places let them drift apart before that, and both are cheap to
+  reintroduce: the inits that CANNOT move, if the run is ordered only on the `head` branch, and the
+  inits that sink to the SAME statement, if the splice loop lacks its descending tie-break — that
+  second one reversed 3544 of 28646 candidate sources across 8 functions while changing no score,
+  and left the first-use-ordered spelling of a sunk run unenumerable.
   And it is not a licence to unify POLICY: `l3/nearbase.ts` prepends, and re-placing its cluster
   bases in first-use order like basecse's turns `synthetic:dmafield` from a MATCH into diff:5.
   That is a row and not a mechanism, so it is a DEFAULT and the differ referees it like any other —
   `rank.ts` offers `/nearbase/sinkinit` beside `/nearbase` (+590 candidate sources on 15 of 1140
-  observations). Before that it did not, which made "placement is refereed by the differ per pass"
-  false for the one pass the sentence cited: nearbase emitted one tree and its ordering decided a
-  match with nothing beside it to lose to.
+  observations). "Placement is refereed by the differ per pass" is a claim about the ROSTER, not
+  about the passes: a lever that emits one tree referees nothing, and its ordering then decides a
+  match with no candidate beside it to lose to.
 
   The eligibility half is separate and stays separate. `gates` and `placement` are independent
   arguments and neither implies the other, which is what keeps the `for`-init disagreement in

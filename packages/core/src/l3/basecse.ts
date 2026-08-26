@@ -29,7 +29,7 @@
 // rather than the materialized literal, which `l3/ast.ts`'s `index.operandOff` carries down from
 // the lift because the fold at L3 makes the two indistinguishable.
 // HOW STRONG THE EVIDENCE IS, compiled in both directions rather than reasoned about — and the
-// answer differs between the two base kinds, which an earlier version of this note got wrong.
+// answer differs between the two base kinds, so read the one you are looking at.
 // For a NUMERIC base every inline shape tried spends the offset somewhere the operand does not
 // see it: one read folds it into the literal (`.word 0x3001103` + `ldrb [r0]`); several reads at
 // several offsets share ONE pool word and pay `sub`/`add` per access; a store pair agbcc CSEs
@@ -202,15 +202,15 @@ export interface BaseKey {
    *  Where the fold leaves no evidence to read is decided UPSTREAM and once, in
    *  `structure/structure.ts`: an offset the address expression carried (a relocation addend, a
    *  folded `add`) and an offset of 0 never set the flag, so absence is never proof of anything.
-   *  Nothing is subtracted again here, which also puts the whole judgement in `single-use-unfolded`
-   *  where `ablateHeuristic` can price it. A base of 0 used to be a second refusal and was wrong:
-   *  its reason was a MIPS instruction (`((s8 *)0)[16]` is one `lb $v0, 16($zero)`) quoted on a
-   *  rule only agbcc ever runs, and agbcc materializes a zero base like any other — compiled,
-   *  `((s8 *)0)[16]` is `mov r0, #0x10` + `ldrb [r0, #0]` against `s8 *p = (s8 *)0; p[16]`'s
-   *  `mov r0, #0x0` + `ldrb [r0, #0x10]`, the same discriminating pair as at 0x3001100. Deleting
-   *  it moved nothing: no agbcc tree in the corpus reaches a base-0 access with an operand offset
-   *  in either symbol-map configuration (two gcc2.7.2 trees do, and MIPS is offered no
-   *  `/basefold` row at all). */
+   *  Nothing is subtracted again here, which puts the whole judgement in `single-use-unfolded`
+   *  where `ablateHeuristic` can price it. A base of 0 is NOT a second refusal, tempting as it
+   *  looks: on MIPS `((s8 *)0)[16]` really is one `lb $v0, 16($zero)` with nowhere else for the
+   *  offset to be, but this rule runs only where `foldsConstAddrOffset` is declared, and agbcc
+   *  materializes a zero base like any other — `mov r0, #0x10` + `ldrb [r0, #0]` inline against
+   *  `s8 *p = (s8 *)0; p[16]`'s `mov r0, #0x0` + `ldrb [r0, #0x10]`, the same discriminating pair
+   *  as at 0x3001100. Refusing it costs nothing here either way (no agbcc tree in the corpus
+   *  reaches a base-0 access with an operand offset, in either symbol-map configuration), which is
+   *  exactly why an unmeasured clause could sit in it. */
   unfoldedOffset: boolean;
 }
 
