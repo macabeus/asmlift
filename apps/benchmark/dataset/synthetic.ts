@@ -3044,6 +3044,267 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'void basehome(s32 a, s32 b, s32 *out);',
     proto: { basehome: { params: ['s32', 's32', 'void *'], returnsVoid: true } },
   },
+
+  // A DEVICE REGISTER WRITTEN INSIDE A LOOP, WITH NOTHING READING IT BACK. A store to a DMA
+  // register is an EVENT: it must happen once per iteration, where the source put it. `volatile`
+  // is what says so, and asmlift's rendering of a device address is a plain `*(s32 *)67109076 =`
+  // — which at -O2 agbcc is free to promote. gcc's loop MEM-promotion keeps a loop-invariant
+  // store's address in a register and writes it back ONCE after the loop; the four `str`/`strh`
+  // the reference emits per iteration become one. Verified by compiling asmlift's own emitted
+  // candidate: on `dmafill` the reference's loop body holds 4 stores and the candidate's holds 1
+  // (the other three land after the `ble`), and on the `dmavolsrc` control both hold 4.
+  //
+  // WHY NO EXISTING ROW CATCHES IT, by a census of the committed `origin/main` artifact rather
+  // than by reading: of its 200 distinct synthetic rows, 22 reference a device register and 14 of
+  // those also contain a loop — but 11 of the 14 carry a `while (dma[2] & 0x80000000) {}` wait
+  // poll, whose read of the register file blocks the promotion outright. Of the three that do not
+  // poll, `dma_fill_uninit` writes its registers BEFORE its loop, and `swmulti` and `offloop` each
+  // read other memory inside it (`gEnts[idx].w`, `p[i]`), which blocks it too. A DMA FILL with no
+  // wait — the shape `DmaFill16` expands to — was not in the dataset at all, and neither was a
+  // bare device read-back: zero of the 200.
+  //
+  // THE TWO GAP ROWS ARE CONJUNCTIONS, AND EACH TERM IS PRICED. Pinning the stores `volatile` —
+  // the capability this family is named for — moves `dmafill` 30 → 25 and `dmaptrsrc` 40 → 38 and
+  // closes neither. Both rows also need the induction expression spelled UN-REDUCED inside the
+  // store (`base + (i << 6)`, what the reference compiles to) instead of the pre-strength-reduced
+  // accumulator asmlift emits (`v0 = (lo << 6) + base; … v0 = v0 + 64;`), and `dmaptrsrc` needs a
+  // third term besides. The lattices below are rooted at asmlift's OWN plain `unsigned` candidate,
+  // byte-identical to what `decompileRanked` emits — an absolute-address base, so one base spelling
+  // throughout. The `/nearbase` sibling each row actually publishes scores 5 lower on `dmafill`
+  // (30 against 35) and 2 lower on `dmaptrsrc` (40 against 42). V = pin the three stores,
+  // R = un-reduce, T = declare the recovered word field `void *`.
+  //   `dmafill`   000 35 · V 19 · R 34 · VR 0        Shapley V +25.00, R +10.00 (sum 35)
+  //   `dmaptrsrc` 000 42 · V 27 · R 35 · T 42        Shapley V +18.17, R +11.67, T +12.17 (sum 42)
+  //               VR 35 · VT 27 · RT 32 · VRT 0      first-in +15/+7/+0 · last-out +32/+27/+35
+  // R ALONE IS A REGRESSION on `dmafill` (34 against the shipped 30), and T alone is worth exactly
+  // ZERO. Read first-in, either lever looks not worth building; read last-out, each is worth
+  // 27–35 of a 42-point row. Quote the convention with the number.
+  //
+  // WHAT THE ROWS ISOLATE.
+  //   `dmafill`    30 — the minimum: three register stores and a `volatile u16` fill source, the
+  //                     destination a pure induction expression. NOTHING is read in the loop, so
+  //                     the promotion is available; V and R above are the whole residual.
+  //   `dmaptrsrc`  40 — the same loop with the destination's base read from a POINTER-typed field
+  //                     of a plain global. That read is what makes the loop promotable in the
+  //                     first place (below), so this is the shape the real function has.
+  //   `dmavolsrc`  MATCH — the family's control, and it is THREE-sided. Under a lever that pins
+  //                     device stores it stays 0 (the qualifier is free here); under one that
+  //                     declares recovered word fields `void *` it breaks to 44; under one that
+  //                     always pre-strength-reduces it breaks to 50. So one row brackets all
+  //                     three axes, and a lever that moves it has overreached.
+  //   `dmastride`  MATCH — the ADVERSE control for R, and the positive control for V. Its
+  //                     reference strides the destination itself (`p = p + 64`), so the
+  //                     accumulator asmlift emits is the RIGHT spelling and a lever that always
+  //                     un-reduces would break it. And asmlift wins it at `unsigned/livebase/
+  //                     volatile` — the very product `/nearbase` lacks (below).
+  //   `dmaback`    17 — `dmavolsrc` plus ONE statement: `gDma[2];`, the bare read-back the GBA
+  //                     DMA macros end with. asmlift emits IDENTICAL C for the two rows (`diff`
+  //                     of the two renderings, modulo the function name, is empty). Restoring the
+  //                     read in the candidate closes it to 0, with or without `volatile` on it.
+  //   `dmanest`     2 — `dmavolsrc` nested in an outer loop. Different residual entirely, kept
+  //                     here because it is the same construct: see the last block below.
+  //
+  // `/volatile`'S REACH IS THE HOLE, NOT ITS ABSENCE, attributed by instrumenting the refusal
+  // rather than by reading it. `rank.ts` offers plain `/volatile` (it declares a pointer local
+  // holding a numeric address as pointing at volatile data), and `volatilePtrLocals`
+  // (l3/volatileptr.ts) returns null when no local qualifies. A `console.error` on that return
+  // prints `volatilePtrLocals NULL sym=dmafill locals=v0, v1, sp0` on both gap rows and never
+  // prints OK: their base spelling has no pointer local at all, so the lever has nothing to
+  // qualify. Something else must create one first. `/livebase` does, and carries a `volatiles()`
+  // sibling through the `paired` products — which is exactly how `dmastride` MATCHes. `/nearbase`
+  // also does, and has NO such sibling: it is a standalone respell, and the only
+  // `/volatile/nearbase` in the file is `${suffix}/volatile/nearbase` inside `for (… of paired)`,
+  // so it only ever exists behind a `/livebase` prefix. The whole fan for each gap row is four
+  // labels — `{signed, unsigned} × {plain, /nearbase}` — and none carries `volatile`. Measured
+  // ceiling of the missing product: hand-writing `volatile u8 *p0` with volatile derefs scores 25
+  // on `dmafill`, the same as pinning the stores directly, against a closing score of 0.
+  //
+  // THE COMPILER FACT UNDER `dmaptrsrc`, verified in both directions on six compiled probes, each
+  // differing from its partner in ONE token. agbcc's -O2 sets `flag_strict_aliasing` (gcc/toplev.c,
+  // the `optimize >= 2` block), so `c_get_alias_set` (gcc/c-common.c) gives each main-variant type
+  // its own set and loop-invariant motion may move a load past a store of a DIFFERENT type. Load
+  // type vs the loop's store type, and whether the load left the loop:
+  //     s32   field  / s32 store   → stays        void * field / s32 store    → HOISTED
+  //     u16   field  / s32 store   → stays        s32 *  field / s32 store    → HOISTED
+  //     void * field / void ** store → stays      void * volatile / s32 store → stays
+  // So it is POINTER-ness, not width and not the cast: a no-op `(s32)` cast on an `s32` field and
+  // `(u8 *)` arithmetic on one both compile to the same bytes as the plain spelling. That matters
+  // here because a decompiler cannot see it — `ldr` is `ldr` whether the word is a pointer or an
+  // int — while `ldrh` betrays a `u16`. The consequence is second-order and it is what `dmaptrsrc`
+  // measures: the hoist makes the destination a strength-reduced accumulator, which leaves the
+  // loop body with no LOAD at all, which is what lets the promotion fire. The
+  // trap is that asmlift's own candidate has ALREADY hoisted the read by hand, so in that basin
+  // the declaration has nothing left to decide and prices at zero — which is the T +0 first-in
+  // above. It is +35 last-out.
+  //
+  // `dmaback`'S DECLINE, ATTRIBUTED BY INSTRUMENTATION rather than by reading: a temporary
+  // `console.error` on the filter at `packages/core/src/pattern/engine.ts:478` fires
+  // `dce DROPPED use-less load` on `dmaback` and does not fire on `dmavolsrc`, which drops the
+  // same three other ops (`add`, `shl`, `undef`) and no load. The load is eligible because
+  // `isDceSafe` (packages/core/src/ir/opcodes.ts:290) admits any opcode with no `effects` flag,
+  // and `load` has none — the flag set is exactly `astore call opaque store`. The read survives
+  // the frontend (it is `%20: unk32 = load %13` in the raw IR dump) and is gone by the folded
+  // one. The lever this row gates is therefore a type-directed one, not a new pass: a read of an
+  // address the target calls a device register is an execution, so it must reach
+  // structure.ts's `sideEffects` walk, which already emits exactly this shape for `call` and
+  // `opaque`. Cardinal-rule work: the reference's loop body carries one more instruction than the
+  // candidate's (`ldr r0, [r3]` after `str r6, [r3]`), and 17 points is what one dropped
+  // instruction costs in a 14-instruction loop body.
+  //
+  // `dmanest` IS A DIFFERENT MECHANISM and is deliberately the family's smallest row. Its two
+  // objdiff rows are `ldr r0, [r4, #4]` vs `[r4, #0]` and `.word 50345008` vs `.word 50345012`:
+  // under nesting asmlift stops rendering the element as a struct view (`((struct Elem0 *)
+  // 50345008)[a1].field_4`, what it emits for `dmavolsrc` and MATCHes with) and folds the field
+  // offset into the base instead (`((s32 *)((a1 << 3) + 50345008))[1]`). That FALSIFIES a premise
+  // written in two places in core — `packages/core/src/raise/structs.ts:25` and
+  // `packages/core/src/rank.ts:218` both say `->field_N` and `[idx]` compile identically so the
+  // differ cannot referee between them. On agbcc they do not: a COMPONENT_REF keeps the offset in
+  // the load displacement, an index folds it into the pool literal. Compiled both ways, at field
+  // offset 4 AND at offset 0, with an 8-byte struct and a 32-byte one. Keeping the view in the
+  // candidate closes the row to 0.
+  //
+  // NO ROW for the third gap this investigation named — a folded `symbol+k` pool literal against
+  // the reference's single `symbol` — and the reason is structural, not an omission: a synthetic
+  // candidate has no ELF, so no symbol map is ever attached and a `gaddr` never forms. Only a
+  // real-tier row can reach it.
+  //
+  // NO ROW for declaration order either, because one already exists: permuting the 14 declarations
+  // of asmlift's own winning `dma_fill_uninit` candidate and recompiling gives 0 / 6 / 9 / 12 over
+  // 40 random orders — one of them a byte MATCH — and the order asmlift ships sits at the worst of
+  // the four, which is the 12 that row publishes. So `dma_fill_uninit` is the gate for that
+  // capability and this family adds nothing to it.
+  //
+  // NO ROW for reusing ONE local across several disjoint loops, which is the largest single gap
+  // the LoadBGTilemapData ladder priced. `coalesceCandidates` (l3/coalesce.ts) is documented as
+  // "every legal SINGLE merge, each as its own tree", so a candidate carries at most one merge —
+  // and it takes four to reach the reference's spelling there. The reason there is no row is
+  // measured, not assumed. Two shapes reusing one counter across three and four disjoint
+  // call-bearing loops both reach MATCH with EXACTLY ONE `coalesce-vN-vM` token, because
+  // structure() already gives the loops fewer distinct locals than the reference has loops. A
+  // third, writing arrays instead of calling, gets no `coalesce-` candidate offered at all —
+  // agbcc strength-reduces its three loops apart, so the shared counter never survives into the
+  // recovery. Two more, adding register pressure, decline on a pre-existing frontend link (`stack
+  // pointer used as data`, frontend/thumb.ts:1492) that is not this family. Nothing under ~60
+  // instructions needed a second merge. The gate is real-tier.
+  //
+  // m2c scores none of the six, on the identical `ctx` asmlift receives, and for two reasons
+  // neither of which is this family and neither of which is context withheld. Five DECLINE: it
+  // types the DMA source-address store as `*(? **)0x040000D4 = &unksp0;` and the `?` placeholder
+  // is a gap. The `ctx` states the full prototype, parameter names and all, and the `?` is the
+  // pointee type of a STACK slot, which no prototype supplies. `dmastride` instead NONCOMPILES,
+  // because there its base is one recovered pointer rather than three absolute stores and it
+  // renders the writes as `(void *)0x040000D4->unk0 = &unksp0;` — the `void *`-member spelling
+  // every raw-address row in this file already records, and exactly what `dma_fill_uninit` (which
+  // also writes `&tmp` to a DMA register) produces. Checked, because a family comment once rested
+  // on a cross-reference nobody had opened.
+  // It REACHES the construct in every case, and two of its renderings are worth recording. On
+  // `dmafill` it recovers exactly the structure asmlift does, strength reduction included
+  // (`var_r0 = (var_r2 << 6) + base;` … `var_r0 += 0x40;`), and spells the three register writes
+  // through the same unpinned `*(s32 *)0x040000D8 =` — so BOTH terms of that row's conjunction
+  // are shared exposure, it simply never gets scored. And on `dmaback` its output carries NO
+  // read-back statement either — its whole `dmaback` rendering is character-for-character its
+  // `dmavolsrc` rendering, modulo the function name. Both decompilers drop a device read whose
+  // result nobody consumes.
+  //
+  // agbcc only, as the `read-once`, `uninit-local` and `value-home` families are. Every claim
+  // above is a pair of spellings compiled with THIS compiler; whether ido7.1, gcc2.7.2kmc and
+  // mwcc_242_81 promote a loop-invariant device store, delete a use-less device read, or read a
+  // field's pointer-ness in their alias analysis was NOT measured, so those lanes are left off
+  // rather than assumed. What would earn one: the same compiled pair on that toolchain showing
+  // the same divergence. `device-access` is on the three gap rows only; the two MATCH controls are
+  // deliberately untagged, as `rereadctl` is for `read-once` — a row with no residual has nothing
+  // for a "the diff turns on this" tag to be about.
+  //
+  // Cut from kleod:LoadBGTilemapData:agbcc, whose inner loop is a `DmaFill16` with no wait and
+  // whose reference source ends FIVE macro expansions in a bare read-back (`grep -c` over the
+  // preprocessed reference: 5). SAID PLAINLY BECAUSE IT IS EASY TO ASSUME OTHERWISE: closing
+  // these rows is not predicted to move that function. Its winner already declares the DMA base
+  // `volatile s32 *p0` and its label already carries `/volatile` — `/addr-home` makes the base a
+  // local there, so the reach problem this family measures does not arise. And the read-back gap
+  // points the OTHER way on it: over a 16-point spelling lattice on that function, restoring the
+  // five dropped read-backs is worth +7…+19 in the eight points that keep the reference's shared
+  // loop counters and −29…−48 in the eight that split them, and asmlift's spelling is the split
+  // one. `dmaback` is a fidelity row, priced, and the price on that function is negative.
+  {
+    sym: 'dmafill',
+    src:
+      '#define gDma ((volatile u32 *)0x040000d4)\n' +
+      'void dmafill(s32 lo, s32 base){ s32 i; volatile u16 tmp;\n' +
+      ' for (i = lo; i < 32; i++) { tmp = 0; gDma[0] = (u32)&tmp;\n' +
+      ' gDma[1] = (u32)(base + i * 64); gDma[2] = 0x81000020; } }',
+    features: ['device-access'],
+    toolchains: ['agbcc'],
+    ctx: 'void dmafill(s32 lo, s32 base);',
+    proto: { dmafill: { params: ['s32', 's32'], returnsVoid: true } },
+  },
+  {
+    sym: 'dmaptrsrc',
+    src:
+      'struct Bg { void *pTiles; void *pTilemap; };\n' +
+      '#define gBg ((struct Bg *)0x03003430)\n' +
+      '#define gDma ((volatile u32 *)0x040000d4)\n' +
+      'void dmaptrsrc(s32 lo, s32 bg){ s32 i; volatile u16 tmp;\n' +
+      ' for (i = lo; i < 32; i++) { tmp = 0; gDma[0] = (u32)&tmp;\n' +
+      ' gDma[1] = (u32)((u8 *)gBg[bg].pTilemap + i * 64); gDma[2] = 0x81000020; } }',
+    features: ['device-access', 'global'],
+    toolchains: ['agbcc'],
+    ctx: 'void dmaptrsrc(s32 lo, s32 bg);',
+    proto: { dmaptrsrc: { params: ['s32', 's32'], returnsVoid: true } },
+  },
+  {
+    sym: 'dmavolsrc',
+    src:
+      'struct Bg { void *pTiles; void *pTilemap; };\n' +
+      '#define gBgV ((volatile struct Bg *)0x03003430)\n' +
+      '#define gDma ((volatile u32 *)0x040000d4)\n' +
+      'void dmavolsrc(s32 lo, s32 bg){ s32 i; volatile u16 tmp;\n' +
+      ' for (i = lo; i < 32; i++) { tmp = 0; gDma[0] = (u32)&tmp;\n' +
+      ' gDma[1] = (u32)((u8 *)gBgV[bg].pTilemap + i * 64); gDma[2] = 0x81000020; } }',
+    features: ['global'],
+    toolchains: ['agbcc'],
+    ctx: 'void dmavolsrc(s32 lo, s32 bg);',
+    proto: { dmavolsrc: { params: ['s32', 's32'], returnsVoid: true } },
+  },
+  {
+    sym: 'dmastride',
+    src:
+      'void dmastride(s32 lo, s32 base){ s32 i; volatile u16 tmp;\n' +
+      ' volatile s32 *d = (volatile s32 *)0x040000d4; s32 p = base + lo * 64;\n' +
+      ' for (i = lo; i < 32; i++) { tmp = 0; d[0] = (s32)&tmp;\n' +
+      ' d[1] = p; d[2] = 0x81000020; p = p + 64; } }',
+    features: [],
+    toolchains: ['agbcc'],
+    ctx: 'void dmastride(s32 lo, s32 base);',
+    proto: { dmastride: { params: ['s32', 's32'], returnsVoid: true } },
+  },
+  {
+    sym: 'dmaback',
+    src:
+      'struct Bg { void *pTiles; void *pTilemap; };\n' +
+      '#define gBgV ((volatile struct Bg *)0x03003430)\n' +
+      '#define gDma ((volatile u32 *)0x040000d4)\n' +
+      'void dmaback(s32 lo, s32 bg){ s32 i; volatile u16 tmp;\n' +
+      ' for (i = lo; i < 32; i++) { tmp = 0; gDma[0] = (u32)&tmp;\n' +
+      ' gDma[1] = (u32)((u8 *)gBgV[bg].pTilemap + i * 64); gDma[2] = 0x81000020; gDma[2]; } }',
+    features: ['device-access', 'global'],
+    toolchains: ['agbcc'],
+    ctx: 'void dmaback(s32 lo, s32 bg);',
+    proto: { dmaback: { params: ['s32', 's32'], returnsVoid: true } },
+  },
+  {
+    sym: 'dmanest',
+    src:
+      'struct Bg { void *pTiles; void *pTilemap; };\n' +
+      '#define gBgV ((volatile struct Bg *)0x03003430)\n' +
+      '#define gDma ((volatile u32 *)0x040000d4)\n' +
+      'void dmanest(s32 lo, s32 bg, s32 n){ s32 i, j; volatile u16 tmp;\n' +
+      ' for (j = 0; j < n; j++) for (i = lo; i < 32; i++) { tmp = 0; gDma[0] = (u32)&tmp;\n' +
+      ' gDma[1] = (u32)((u8 *)gBgV[bg].pTilemap + j * 2048 + i * 64); gDma[2] = 0x81000020; } }',
+    features: ['value-home', 'global'],
+    toolchains: ['agbcc'],
+    ctx: 'void dmanest(s32 lo, s32 bg, s32 n);',
+    proto: { dmanest: { params: ['s32', 's32', 's32'], returnsVoid: true } },
+  },
 ];
 
 // ── C++ (mwcc `.cp` frontend, PPC only) ───────────────────────────────────────────────────
