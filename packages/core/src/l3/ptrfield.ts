@@ -47,21 +47,30 @@
 // help" is not enough.
 //
 // GATE (PTR_FIELD_GATES, read once per field): the field's recovered type must be a 32-bit
-// integer; the field must be READ somewhere (a field the function never touches is a pad, and
-// re-typing one asserts a layout the accesses do not support); it must never be a store LVALUE
-// (the write side would need a cast on the value, which is a second question); and it must never
-// stand as the BASE of another access (a field the tree already dereferences is one the recovery
-// typed from its own use, not from a width). Nothing qualifying ⇒ decline (null).
+// integer; it must never be a store LVALUE (the write side would need a cast on the value, which
+// is a second question); and it must never stand as the BASE of another access (a field the tree
+// already dereferences is one the recovery typed from its own use, not from a width). Nothing
+// qualifying ⇒ decline (null).
+//
+// SCOPE, because both of this table's blind spots look exactly like a gate refusing. First, only
+// fields the tree ACCESSES are ever built, so "a field nothing reaches is a pad" is not a rule
+// here — it cannot arise. It was one, ordered above `written`, and every case it fired on was a
+// WRITE-ONLY field: 78 corpus refusals carrying a reason ("no access reaches it") that was false
+// for all 78, while the sound gate that owns them sat below and fired never. Second, a field whose
+// BASE TYPE does not resolve is dropped by `plan` before any gate reads it — 151 of the corpus's
+// 820 field nodes, on 20 trees, all of them `[map]` configurations (kleod:CheckTileCollisionVertical,
+// FreeAllDecompBuffers, TransformSingleEntityToScreen and ConfigureEntityBehavior among them).
+// Declining there is right; being unable to say which of the two happened is the defect.
 import { type IrType, T } from '../ir/types';
 import { type Expr, type SFn, type Stmt, type StructType, mapExprChildren, mapStmtExprs, walkExprs } from './ast';
 import { type Gate, firstRejection } from './gates';
 import { declaredTypes, exprCType } from './typing';
 
-/** One recovered field as the gates read it. */
+/** One recovered field as the gates read it. Only fields the tree ACCESSES are ever built — a
+ *  declared field nothing reaches never reaches the table, so "is this a pad" is not a gate. */
 interface FieldCtx {
   /** the recovered type is a 32-bit integer — the width a pointer also fits */
   word: boolean;
-  reads: number;
   written: boolean;
   /** the field's value stands as the base of an `index` or another `field` */
   dereferenced: boolean;
@@ -74,12 +83,6 @@ export const PTR_FIELD_GATES: readonly Gate<FieldCtx>[] = [
     sound: true,
     guardedBy: 'ptrfield.test.ts: a halfword field declines',
     rejects: (c) => !c.word,
-  },
-  {
-    id: 'untouched',
-    why: 'a field no access reaches is a pad, and re-typing one asserts a layout with no evidence',
-    sound: false,
-    rejects: (c) => c.reads === 0,
   },
   {
     id: 'written',
@@ -121,7 +124,6 @@ function plan(sfn: SFn): Map<string, IrType> {
     const key = keyOf(st.name, name);
     const cur = seen.get(key) ?? {
       word: declared.kind === 'int' && declared.width === 32,
-      reads: 0,
       written: false,
       dereferenced: false,
       type: declared,
@@ -131,7 +133,7 @@ function plan(sfn: SFn): Map<string, IrType> {
   };
   for (const e of walkExprs(sfn.body)) {
     if (e.k === 'field') {
-      note(e.base, e.name, (c) => c.reads++);
+      note(e.base, e.name, () => {});
     }
     // a field standing as an access base is one the recovery typed from its own use
     const inner = e.k === 'index' ? e.base : e.k === 'field' ? e.base : null;
@@ -141,10 +143,7 @@ function plan(sfn: SFn): Map<string, IrType> {
   }
   for (const s of stores(sfn.body)) {
     if (s.lval.k === 'field') {
-      note(s.lval.base, s.lval.name, (c) => {
-        c.written = true;
-        c.reads--; // the walk above counted the lvalue as a read
-      });
+      note(s.lval.base, s.lval.name, (c) => (c.written = true));
     }
   }
   const out = new Map<string, IrType>();
