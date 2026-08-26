@@ -360,8 +360,10 @@ any object a C program declares, so a loop whose every write lands in that range
 ordinary read. That is a fact about the BOARD, not about C and not about the compiler, which is why
 it is a capability rather than a rule inside either file — and it keeps alias.ts's asymmetry, since
 every address the range cannot place still bars. The same field is the eligibility predicate for
-`l3/volstore.ts`, and `synthetic:ucmp:agbcc` is the row that proves it load-bearing: a byte-exact
-match whose loop stores to IWRAM, 15 points worse the moment the range is widened to admit it.
+`l3/volstore.ts` — a REACH gate there rather than a sound one, since a `volatile` qualifier only
+restricts the compiler: widening the range to admit every constant address adds candidates on two
+corpus rows and moves no score, so what the declaration buys is that the lever never claims
+volatility of ordinary memory, which the differ could only referee by luck.
 
 ## How the architecture came to be: earning L2
 

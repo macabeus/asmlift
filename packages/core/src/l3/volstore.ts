@@ -32,17 +32,27 @@
 // subscript, no `lead` — that constant must lie inside the window, and the access must not
 // already be qualified. Nothing qualifying ⇒ decline (null), never a duplicate of the primary.
 //
-// THE WINDOW IS THE WHOLE OF THE ADMISSION, and it is doing real work rather than decorating:
-// IWRAM, EWRAM, palette, VRAM and OAM are ordinary memory a source does not qualify (target.ts),
-// and `synthetic:ucmp:agbcc` is a shipped byte-exact match whose loop stores to 0x3001048 — pin
-// that and the row scores 15. So the range a target declares as memory-mapped I/O is the
-// eligibility predicate, not a hint.
+// THE WINDOW IS A REACH GATE, PRICED — not a soundness one, which is why it is `sound: false`.
+// A `volatile` qualifier only restricts the compiler, so widening the range can never make a
+// candidate WRONG; what it would make is a claim about ordinary memory that the target denies
+// (IWRAM, EWRAM, palette, VRAM and OAM are memory a source does not qualify — target.ts) and that
+// the differ can only referee by luck. Measured by running the lever twice, once with the declared
+// range and once with one admitting every constant address: 8 trees over 7 rows carry a
+// const-address store the window excludes, and the fan moves on two of them —
+// `synthetic:readarm` 6 candidates → 8 (the extra one TIES its match at 0) and
+// `synthetic:fieldbase` 14 → 20 (best extra 22, losing to 0). No row's score or outcome moves
+// either way. So the range buys candidate discipline and the honesty of the claim, and no match
+// rests on it.
 //
-// SCOPE: STORES only. A device READ is a different question with a different answer — asmlift's
-// dead-store elimination drops a use-less device load outright (synthetic:dmaback), so a read
-// that survives to L3 is one whose value the function consumes, and whether THAT may be CSEd is
-// the question `/reread-globals` refereess as a structuring axis. No row demands the read
-// spelling, and a lever with no inhabitant is what "earn the level" forbids.
+// SCOPE: STORES only. A device READ is a different question with a different answer — the idiom
+// fold's DCE drops a use-less device load outright (synthetic:dmaback), so a read that survives to
+// L3 is one whose value the function consumes, and whether THAT may be CSEd is the question
+// `/reread-globals` referees as a structuring axis. The price of pinning one is real and is
+// measured on `synthetic:ucmp:agbcc`, a byte-exact match whose loop test READS 0x3001048: qualify
+// that read and the row scores 15. This lever does not reach it — ucmp's stores go through a
+// runtime address (`*(u8 *)(v1 + 0x3002000)`), so it declines there on `non-const-address`, in
+// both configurations and with any window. No row demands the read spelling, and a lever with no
+// inhabitant is what "earn the level" forbids.
 import { type IrType, T, scalarTypeForAccess } from '../ir/types';
 import { type Expr, type SFn, type Stmt } from './ast';
 import { type Gate, firstRejection } from './gates';

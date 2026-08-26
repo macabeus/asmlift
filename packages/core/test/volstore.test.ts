@@ -41,8 +41,8 @@ test('a store at a constant address inside the device window is qualified', () =
 });
 
 test('a store to ordinary memory declines — the window is the eligibility predicate', () => {
-  // synthetic:ucmp:agbcc is a shipped byte-exact match whose loop stores to 0x3001048 (IWRAM);
-  // pinning that address costs the row 15 points, which is what this gate buys.
+  // IWRAM. Over the corpus the range excludes a const-address store on 7 rows; it is a reach
+  // gate, not a soundness one, and the lever's header carries the price.
   expect(volatileDeviceStores(fn([store(cell(0x03001048))]), GBA)).toBeNull();
 });
 

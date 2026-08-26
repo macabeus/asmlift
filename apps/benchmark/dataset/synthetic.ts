@@ -3155,8 +3155,12 @@ export const SYNTHETIC: SynthSpec[] = [
   // `{signed, unsigned} × {plain, /nearbase}`, every one carrying `v0 = v0 + 64;` and none
   // carrying `volatile`. `/vol-store` is the answer, because it qualifies the ACCESS and needs no
   // local at all; what keeps it off ordinary memory is the target's own declared window
-  // (`capabilities.deviceRegisters`), and that gate is load-bearing — `synthetic:ucmp:agbcc` is a
-  // shipped byte-exact match whose loop stores to 0x3001048, and pinning that costs the row 15.
+  // (`capabilities.deviceRegisters`), which is a REACH gate rather than a soundness one — over the
+  // corpus it excludes a const-address store on 7 rows and moves the fan on two of them
+  // (`readarm` 6 candidates → 8, `fieldbase` 14 → 20), with no score and no outcome moving either
+  // way. `synthetic:ucmp:agbcc` prices the DEVICE-READ side of the same question and belongs to it
+  // rather than here: qualifying the 0x3001048 its loop test reads costs that match 15, and
+  // `/vol-store` never reaches the row at all (its stores go through a runtime address).
   //
   // THE COMPILER FACT UNDER `dmaptrsrc`, verified in both directions on six compiled probes, each
   // differing from its partner in ONE token. agbcc's -O2 sets `flag_strict_aliasing` (gcc/toplev.c,

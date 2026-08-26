@@ -22,38 +22,39 @@
 // synthetic:dmafill, holding the rest fixed — a plain statement before the loop scores 19, the
 // same statement under an explicit guard 15, and letting the compiler create the giv 0.
 //
-// SEMANTICS. The rewrite rests on one invariant: at every read, `acc == g(ctr)`, where `g` is the
-// init expression with the counter's own start substituted by the counter. It holds at entry
-// because `ctr == start` there, and is preserved because the two steps run together at the bottom
-// of the body and `g` is linear with exactly the accumulator's stride — `g(x + D) - g(x) = K` is
-// checked structurally rather than assumed (`relate` below: a shift by `s` with `K = D · 2^s`, a
-// product by `M` with `K = D · M`, or the bare counter with `K = D`). Every way the invariant
-// could be broken is a gate that DECLINES: another write to either name, an address taken, a read
-// at or below the step, a read outside the loop, a `continue` (which runs a `for`'s increment but
-// skips the body's tail), and a step this file cannot relate to the init.
+// THE ARITHMETIC. The rewrite rests on one invariant: at every read, `acc == g(ctr)`, where `g` is
+// the init expression with the counter's own start substituted by the counter. It holds at entry
+// because `ctr == start` there, and is preserved because `g` is linear with exactly the
+// accumulator's stride — `g(x + D) - g(x) = K`, checked structurally rather than assumed
+// (`relate`: a `+` spine down to a shift by `s` with `K = D · 2^s`, a product by `M` with
+// `K = D · M`, or the bare counter with `K = D`; any other enclosing operator refuses, because
+// under it the stride is not `K`). Every way the invariant could be broken DECLINES: another
+// write to either name, an address taken, a read outside the loop, a read at or below the
+// accumulator's own step (where it stands one stride ahead of the counter), a `continue` (which
+// runs a `for`'s increment but skips the body's tail), and a step this file cannot relate.
 //
-// THE SECOND HALF IS RE-EVALUATION, and it is the dangerous one. The closed form is spelled at
-// each read, so whatever the init expression READ is read again there. Four gates carry it, the
-// first of which is the whole of the arithmetic half:
-//   • INIT-LOOP-VAR — the init reads a name the loop writes, so re-evaluating it inside the loop
-//     reads a different value. That includes the counter itself, which the substitution replaces
-//     only where it stands as the START expression.
-//   • MOVED-EFFECT — a call or a marker would run once per read instead of once, and one inside
-//     the counter-start subterm would be DROPPED instead (the init statement is deleted). All
-//     three gates therefore read the ORIGINAL init, which is the superset. Refused.
+// THE RE-EVALUATION is the dangerous half, because the closed form is spelled at each read and
+// carries whatever the init READ with it. All four gates below read the ORIGINAL init rather than
+// the substituted form: the init STATEMENT is deleted, so anything inside the counter-start
+// subterm the substitution replaces would be DROPPED rather than moved, which no gate reading the
+// closed form could see.
+//   • INIT-LOOP-VAR — the init names something the loop writes, so re-evaluating it inside the
+//     loop reads a different value. Covers the counter and the accumulator themselves, which are
+//     names the loop writes like any other.
+//   • MOVED-EFFECT — a call or a marker would run once per read instead of once. Refused.
 //   • MOVED-VOLATILE — a `volatile` access is one the source pinned precisely so it would not be
 //     duplicated or moved. Refused. No corpus row reaches it today (nothing on the base spelling
 //     this lever rides carries a qualifier on a READ), so it is guarded by its unit test alone.
 //   • MOVED-READ-ALIASABLE — an ordinary memory read moved into a loop sees whatever the loop
 //     wrote. asmlift can only rule that out for writes it can NAME, so a moved read is admitted on
 //     one configuration: every write in the loop goes to a compile-time-constant address INSIDE
-//     the target's declared device-register window, and every read the closed form performs is
-//     rooted at a constant OUTSIDE it. A device register is not the backing store of any object a
-//     C program declares (target.ts `deviceRegisters`), so such a loop cannot change what an
-//     ordinary read sees; and the read-side half is what keeps a DEVICE read from being duplicated
-//     into N of them. Anything else — a store through a local pointer, a call, a read rooted at no
-//     constant at all — REFUSES, which is `ir/alias.ts`'s posture ("unknown BARS") applied where
-//     there is no symbol map to resolve a name through.
+//     the target's declared device-register window, and every read is rooted at a constant OUTSIDE
+//     it. A device register is not the backing store of any object a C program declares (target.ts
+//     `deviceRegisters`), so such a loop cannot change what an ordinary read sees; the read-side
+//     half is what keeps a DEVICE read from being duplicated into N of them. Anything else — a
+//     store through a local pointer, a call, a read rooted at no constant at all — REFUSES, which
+//     is `ir/alias.ts`'s posture ("unknown BARS") applied where there is no symbol map to resolve
+//     a name through.
 //
 // Nothing qualifying ⇒ decline (null), never a duplicate of the primary.
 import {
