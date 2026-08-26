@@ -274,3 +274,76 @@ test('a nested loop is out of scope — the counter start must stand above the l
     unreduceAccumulators(fill({}, [s.body[0], s.body[1], { k: 'while', cond: c(1), body: [inner] }]), GBA),
   ).toBeNull();
 });
+
+test('an init reading a name the loop writes declines', () => {
+  // `w` is loop-carried, so evaluating the init inside the loop reads a different value
+  const s = fill(
+    {
+      locals: [
+        { name: 'acc', type: T.s(32) },
+        { name: 'i', type: T.s(32) },
+        { name: 'w', type: T.s(32) },
+      ],
+    },
+    [
+      set('i', v('a0')),
+      set('w', c(0)),
+      set('acc', plus(shl(v('a0'), c(6)), v('w'))),
+      {
+        k: 'while',
+        cond: { k: 'bin', op: '<=', l: v('i'), r: c(31) },
+        body: [
+          st(cell(0x040000d8), v('acc')),
+          set('w', plus(v('w'), c(1))),
+          set('acc', plus(v('acc'), c(64))),
+          set('i', plus(v('i'), c(1))),
+        ],
+      },
+    ],
+  );
+  expect(unreduceAccumulators(s, GBA)).toBeNull();
+});
+
+test('a scale between the counter and the sum must carry the WHOLE stride', () => {
+  // `(a0 << 6) + a1` walked by 1: the counter's own stride through that shift is 64, so no
+  // substitution relates the two. A rule that fell back to the bare counter here would spell a
+  // closed form 64× too fast — and would compile, and would score.
+  const s = fill({}, [
+    set('i', v('a0')),
+    set('acc', plus(shl(v('a0'), c(6)), v('a1'))),
+    {
+      k: 'while',
+      cond: { k: 'bin', op: '<=', l: v('i'), r: c(31) },
+      body: [st(cell(0x040000d8), v('acc')), set('acc', plus(v('acc'), c(1))), set('i', plus(v('i'), c(1)))],
+    },
+  ]);
+  expect(unreduceAccumulators(s, GBA)).toBeNull();
+});
+
+test('an enclosing operator that is not a sum declines', () => {
+  // `8 - a0` walks by -1 per step of the counter, not +1: only a `+` spine preserves the stride
+  const s = fill({}, [
+    set('i', v('a0')),
+    set('acc', { k: 'bin', op: '-', l: c(8), r: v('a0') }),
+    {
+      k: 'while',
+      cond: { k: 'bin', op: '<=', l: v('i'), r: c(31) },
+      body: [st(cell(0x040000d8), v('acc')), set('acc', plus(v('acc'), c(1))), set('i', plus(v('i'), c(1)))],
+    },
+  ]);
+  expect(unreduceAccumulators(s, GBA)).toBeNull();
+});
+
+test('a call inside the counter start declines — the init statement is deleted, not moved', () => {
+  const call: Expr = { k: 'call', fn: 'g', args: [] };
+  const s = fill({}, [
+    set('i', call),
+    set('acc', plus(shl(call, c(6)), v('a1'))),
+    {
+      k: 'while',
+      cond: { k: 'bin', op: '<=', l: v('i'), r: c(31) },
+      body: [st(cell(0x040000d8), v('acc')), set('acc', plus(v('acc'), c(64))), set('i', plus(v('i'), c(1)))],
+    },
+  ]);
+  expect(unreduceAccumulators(s, GBA)).toBeNull();
+});

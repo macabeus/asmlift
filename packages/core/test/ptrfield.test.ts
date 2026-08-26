@@ -116,3 +116,24 @@ test('two structs carrying the same field name are decided apart', () => {
   expect(out.structs!.find((x) => x.name === 'Elem0')!.fields[1].type).toEqual(T.ptr(T.void()));
   expect(out.structs!.find((x) => x.name === 'Elem1')!.fields[1].type).toEqual(T.s(32));
 });
+
+test('a read nested inside a loop is cast back exactly once', () => {
+  const st = elem();
+  const s = fn(st, [
+    {
+      k: 'while',
+      cond: { k: 'const', value: 1 },
+      body: [
+        {
+          k: 'if',
+          cond: { k: 'const', value: 1 },
+          then: [{ k: 'assign', name: 'v', value: access(st) }],
+          else: [],
+        },
+      ],
+    },
+  ]);
+  const src = cBackend.emit(pointerFields(s)!);
+  expect(src).toContain('v = (s32)((struct Elem0 *)50345008)[a1].field_4;');
+  expect(src).not.toContain('(s32)(s32)');
+});

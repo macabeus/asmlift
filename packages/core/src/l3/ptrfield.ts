@@ -196,25 +196,9 @@ export function pointerFields(sfn: SFn): SFn | null {
     locals: sfn.locals.map((l) => ({ ...l, type: flip(l.type) })),
     ...(sfn.globals ? { globals: sfn.globals.map((g) => ({ ...g, type: flip(g.type) })) } : {}),
     ...(sfn.structs ? { structs: sfn.structs.map((s): StructType => flipStruct(s)) } : {}),
-    body: sfn.body.map(function rewrite(s: Stmt): Stmt {
-      const mapped = mapStmtExprs(s, sub);
-      switch (mapped.k) {
-        case 'if':
-          return { ...mapped, then: mapped.then.map(rewrite), else: mapped.else.map(rewrite) };
-        case 'while':
-        case 'dowhile':
-          return { ...mapped, body: mapped.body.map(rewrite) };
-        case 'for':
-          return { ...mapped, init: rewrite(mapped.init), inc: rewrite(mapped.inc), body: mapped.body.map(rewrite) };
-        case 'switch':
-          return {
-            ...mapped,
-            cases: mapped.cases.map((c) => ({ ...c, body: c.body.map(rewrite) })),
-            ...(mapped.default ? { default: mapped.default.map(rewrite) } : {}),
-          };
-        default:
-          return mapped;
-      }
-    }),
+    // `mapStmtExprs` already recurses into nested statement lists, so ONE call per top-level
+    // statement rewrites the whole subtree — a second walk over its children would apply `sub`
+    // twice and cast each read back to an integer twice over.
+    body: sfn.body.map((s) => mapStmtExprs(s, sub)),
   };
 }

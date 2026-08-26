@@ -33,8 +33,14 @@
 // skips the body's tail), and a step this file cannot relate to the init.
 //
 // THE SECOND HALF IS RE-EVALUATION, and it is the dangerous one. The closed form is spelled at
-// each read, so whatever the init expression READ is read again there. Three gates carry it:
-//   • MOVED-EFFECT — a call or a marker would run once per read instead of once. Refused.
+// each read, so whatever the init expression READ is read again there. Four gates carry it, the
+// first of which is the whole of the arithmetic half:
+//   • INIT-LOOP-VAR — the init reads a name the loop writes, so re-evaluating it inside the loop
+//     reads a different value. That includes the counter itself, which the substitution replaces
+//     only where it stands as the START expression.
+//   • MOVED-EFFECT — a call or a marker would run once per read instead of once, and one inside
+//     the counter-start subterm would be DROPPED instead (the init statement is deleted). All
+//     three gates therefore read the ORIGINAL init, which is the superset. Refused.
 //   • MOVED-VOLATILE — a `volatile` access is one the source pinned precisely so it would not be
 //     duplicated or moved. Refused. No corpus row reaches it today (nothing on the base spelling
 //     this lever rides carries a qualifier on a READ), so it is guarded by its unit test alone.
@@ -81,6 +87,8 @@ interface AccCtx {
   hasContinue: boolean;
   /** the init relates to the counter's start by the accumulator's own stride */
   related: boolean;
+  /** the init reads a name the loop itself writes */
+  initLoopVar: boolean;
   /** the closed form contains a call or a marker */
   movedEffect: boolean;
   /** the closed form reads a `volatile` object */
@@ -154,6 +162,13 @@ export const UNREDUCE_GATES: readonly Gate<AccCtx>[] = [
     rejects: (c) => !c.related,
   },
   {
+    id: 'init-loop-var',
+    why: 'a name the loop writes reads differently once the init is evaluated inside it',
+    sound: true,
+    guardedBy: 'unreduce.test.ts: an init reading a name the loop writes declines',
+    rejects: (c) => c.initLoopVar,
+  },
+  {
     id: 'moved-effect',
     why: 'a call or a marker in the closed form would run once per read instead of once',
     sound: true,
@@ -194,47 +209,45 @@ function stepOf(s: Stmt, name: string): Expr | null {
  *  assumed: the substituted subterm must be structurally the counter's start, and the stride must
  *  come out of the scale. */
 function relate(init: Expr, start: Expr, ctr: string, k: Expr, d: number): Expr | null {
-  const occurrences = [...subterms(init)].filter((x) => exprEquals(x, start)).length;
-  if (occurrences !== 1) {
+  if ([...subterms(init)].filter((x) => exprEquals(x, start)).length !== 1) {
     return null; // zero: the init does not depend on the counter. two: which one is the index?
   }
   const kConst = k.k === 'const' ? k.value : null;
-  let matched: Expr | null = null;
-  const scaled = (x: Expr): Expr | null => {
+  const idx = (): Expr => ({ k: 'var', name: ctr });
+  const holds = (e: Expr): boolean => [...subterms(e)].some((x) => exprEquals(x, start));
+  // The path from the init's root down to the occurrence, one node at a time. Every node on it
+  // must be a `+` — so the init is a SUM of the scaled counter and terms that do not mention it,
+  // and the whole expression's stride is the scaled term's. Any other enclosing operator refuses:
+  // under a `-` on the right the stride flips sign, and under a second scale it multiplies.
+  const rec = (x: Expr): Expr | null => {
     // (a) `start << s` — the stride is `d << s`, so `k` has to be that constant
     if (x.k === 'bin' && x.op === '<<' && exprEquals(x.l, start) && x.r.k === 'const') {
-      const s = x.r.value;
-      return s >= 0 && s < 31 && kConst === d * 2 ** s
-        ? { k: 'bin', op: '<<', l: { k: 'var', name: ctr }, r: x.r }
-        : null;
+      const sh = x.r.value;
+      return sh >= 0 && sh < 31 && kConst === d * 2 ** sh ? { k: 'bin', op: '<<', l: idx(), r: x.r } : null;
     }
-    // (b) `start * M` in either order — the stride is `d · M`, checkable when `d` is 1 and `M`
-    //     is structurally `k`, or when both are constants. The OPERAND ORDER is kept: which side
-    //     a product's index sits on is a spelling the differ referees on its own (`/mulfirst`),
-    //     so rebuilding it in a canonical order would answer that question here instead.
-    if (x.k === 'bin' && x.op === '*') {
+    // (b) `start * M` in either order — the stride is `d · M`, checkable when `d` is 1 and `M` is
+    //     structurally `k`, or when both are constants. The OPERAND ORDER is kept: which side a
+    //     product's index sits on is a spelling the differ referees on its own (`/mulfirst`), so
+    //     rebuilding it in a canonical order would answer that question here instead.
+    if (x.k === 'bin' && x.op === '*' && (exprEquals(x.l, start) || exprEquals(x.r, start))) {
       const startLeft = exprEquals(x.l, start);
       const m = startLeft ? x.r : x.l;
-      if (!startLeft && !exprEquals(x.r, start)) {
-        return null;
-      }
       const ok = d === 1 ? exprEquals(m, k) : m.k === 'const' && kConst !== null && d * m.value === kConst;
-      const idx: Expr = { k: 'var', name: ctr };
-      return ok ? { k: 'bin', op: '*', l: startLeft ? idx : m, r: startLeft ? m : idx } : null;
+      return ok ? { k: 'bin', op: '*', l: startLeft ? idx() : m, r: startLeft ? m : idx() } : null;
     }
-    // (c) the bare counter — the stride is `d` itself
-    return exprEquals(x, start) && kConst === d ? { k: 'var', name: ctr } : null;
-  };
-  const sub = (x: Expr): Expr => {
-    const hit = scaled(x);
-    if (hit !== null) {
-      matched = matched === null ? hit : matched; // one occurrence, so one match
-      return hit;
+    // (c) the counter standing on its own in the sum — the stride is `d` itself
+    if (exprEquals(x, start)) {
+      return kConst === d ? idx() : null;
     }
-    return mapExprChildren(x, sub);
+    // (d) a `+` node: descend into whichever side carries the occurrence. There is exactly one.
+    if (x.k === 'bin' && x.op === '+') {
+      const left = holds(x.l);
+      const inner = rec(left ? x.l : x.r);
+      return inner === null ? null : left ? { ...x, l: inner } : { ...x, r: inner };
+    }
+    return null; // anything else between the root and the counter, and the stride is not `k`
   };
-  const closed = sub(init);
-  return matched === null ? null : closed;
+  return rec(init);
 }
 
 /** every node of an expression tree, itself included */
@@ -450,9 +463,13 @@ export function unreduceAccumulators(sfn: SFn, window?: readonly [number, number
         counterAddrTaken: addrTakenIn(sfn.body, ctr),
         hasContinue: hasContinueIn(loop.body),
         related: closed !== null,
-        movedEffect: closed !== null && exprHasEffect(closed),
-        movedVolatile: closed !== null && readsVolatile(closed, sfn),
-        movedAliasable: closed !== null && movedReadAliasable(closed, loop.body, window),
+        initLoopVar: [...namesUnder(initStmt.value)].some((n) => assignCount(loop.body, n) > 0),
+        // read off the ORIGINAL init, not the substituted form: the init STATEMENT is deleted, so
+        // an effect inside the counter-start subterm the substitution replaces would be dropped
+        // rather than moved — one fewer execution, which no gate reading `closed` could see.
+        movedEffect: exprHasEffect(initStmt.value),
+        movedVolatile: readsVolatile(initStmt.value, sfn),
+        movedAliasable: movedReadAliasable(initStmt.value, loop.body, window),
       };
       if (firstRejection(UNREDUCE_GATES, ctx) !== null) {
         continue;
