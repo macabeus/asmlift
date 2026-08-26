@@ -133,6 +133,64 @@ describe('both placements are ONE mechanism with a policy argument (l3/hoist.ts)
   });
 });
 
+// The `/sinkinit` SUFFIX has two producers in `rank.ts` — `/livebase*/sinkinit` composes a second
+// pass on top of a head hoist, `/basefold/sinkinit` is one hoist placed at first use — and a label
+// read out of a `[score]` log or an artifact row does not say which. They must therefore be the
+// SAME TRANSFORM, or one suffix names two things in the namespace cross-round attribution greps.
+describe('composition and argument are one transform: sink(head(x)) === firstUse(x)', () => {
+  // The only place they could disagree is the order of the inits that CANNOT move, which is the
+  // half of the run whose order the compiler still reads as pool-load order. `placeBaseLocals`
+  // orders the whole run by first use BEFORE consulting the policy, which is what makes the two
+  // agree; order it only on the `head` branch and this test is what fails.
+  const named = (name: string, sym: string): BaseInit => ({
+    k: 'assign',
+    name,
+    value: { k: 'cast', to: U8P, e: { k: 'addr', name: sym } },
+  });
+  const touch = (name: string): Stmt => ({
+    k: 'store',
+    lval: { k: 'index', base: { k: 'var', name }, idx: c(0), width: 1, signed: false },
+    value: c(1),
+  });
+
+  test('with immovable inits whose input order is NOT first-use order', () => {
+    // pA and pB are each assigned twice, so neither can move; in the body pB is touched first, so
+    // a first-use ordering has to put pB above pA even though pA was minted first. pC moves.
+    const locals = ['pA', 'pB', 'pC'].map((name) => ({ name, type: U8P }));
+    const body: Stmt[] = [
+      named('pA', 'gA'),
+      named('pB', 'gB'),
+      named('pC', 'gC'),
+      touch('pB'),
+      touch('pA'),
+      named('pA', 'gA2'),
+      named('pB', 'gB2'),
+      touch('pC'),
+    ];
+    const sfn: SFn = { name: 'f', params: [], locals, retType: T.void(), body };
+    const head = { ...sfn, body: placeBaseLocals(sfn, body, [], 'head').body };
+    const composed = sinkInitsToFirstUse(head);
+    const argued = { ...sfn, body: placeBaseLocals(sfn, body, [], 'first-use').body };
+    expect(composed).not.toBeNull();
+    expect(composed!.body).toEqual(argued.body);
+    // …and the order really is the first-use one, not the input one — otherwise this would pass
+    // for the trivial reason that neither did anything.
+    expect(argued.body.slice(0, 2).map((st) => (st.k === 'assign' ? st.name : st.k))).toEqual(['pB', 'pA']);
+  });
+
+  test('two inits assigning the SAME local keep their sequence — a stable sort is load-bearing', () => {
+    // They write one cell, so their order is the only thing that says which value it holds after
+    // the run. Both share a first-use key, so only sort stability keeps them apart.
+    const locals = [{ name: 'p0', type: U8P }];
+    const body: Stmt[] = [named('p0', 'gFirst'), named('p0', 'gSecond'), touch('p0')];
+    const sfn: SFn = { name: 'f', params: [], locals, retType: T.void(), body };
+    for (const placement of ['head', 'first-use'] as const) {
+      const out = placeBaseLocals(sfn, body, [], placement).body;
+      expect(out.filter((st) => st.k === 'assign')).toEqual([named('p0', 'gFirst'), named('p0', 'gSecond')]);
+    }
+  });
+});
+
 describe('the /livebase pairing is WIRED into enumeration', () => {
   // `corpus/agbcc-mixpoll.s` is synthetic:mixpoll:agbcc — an MMIO poll whose bases the DEFAULT
   // hoist refuses outright, so the tree this lever reads on its own carries no init at all.

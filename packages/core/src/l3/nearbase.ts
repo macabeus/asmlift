@@ -24,9 +24,9 @@
 // only coincidentally lands in the window, which is the stated cost of the lever (the `s32` cast
 // assumes addresses below 2^31, true of every target that declares nearBaseSpan today). Declines
 // (null) when no cluster forms.
-import type { Expr, SFn, Stmt } from './ast';
+import type { Expr, SFn } from './ast';
 import { mapExprChildren, mapStmtExprs } from './ast';
-import { nameAllocator } from './hoist';
+import { type BaseInit, nameAllocator, placeBaseLocals } from './hoist';
 
 /** The const behind a deref base, looked at through SCALAR value casts only — a cast to a
  *  struct pointer is the struct-arrays dot-form's base, whose stride the raw `u8 *` re-spelling
@@ -126,7 +126,7 @@ export function nearBaseClusters(sfn: SFn, span: number): SFn | null {
     }
     return mapExprChildren(e, rewrite);
   };
-  const inits: Stmt[] = [...baseName.entries()].map(([lo, name]) => ({
+  const inits: BaseInit[] = [...baseName.entries()].map(([lo, name]) => ({
     k: 'assign',
     name,
     value: {
@@ -135,15 +135,29 @@ export function nearBaseClusters(sfn: SFn, span: number): SFn | null {
       e: { k: 'const', value: lo },
     },
   }));
-  return {
-    ...sfn,
-    locals: [
-      ...sfn.locals,
-      ...[...baseName.values()].map((name) => ({
-        name,
-        type: { kind: 'ptr', to: { kind: 'int', width: 8, signed: false } } as SFn['locals'][number]['type'],
-      })),
-    ],
-    body: [...inits, ...sfn.body.map((s) => mapStmtExprs(s, rewrite))],
-  };
+  const locals = [
+    ...sfn.locals,
+    ...[...baseName.values()].map((name) => ({
+      name,
+      type: { kind: 'ptr', to: { kind: 'int', width: 8, signed: false } } as SFn['locals'][number]['type'],
+    })),
+  ];
+  // The body rebuild is `l3/hoist.ts`'s, shared with the two other passes that place into the
+  // leading base-init run — this pass is the THIRD, and it used to own a private copy of the
+  // rebuild, which is exactly the drift that put the mechanism in one file.
+  //
+  // The POLICY stays this pass's own, and it is `prepend`: the cluster bases go ABOVE a run
+  // already there rather than being merged into it in first-use order. That is not `l3/basecse.ts`
+  // blindly-prepending hazard read backwards — it is what this lever's demanding row says. Placing
+  // them in first-use order instead turns `synthetic:dmafield` (won by
+  // `signed/livebase/volatile/nearbase/initfirst`) from a MATCH into diff:5: its cluster base is
+  // reached at 2+ addresses by construction, so its pool word is not "first touched late", and the
+  // bytes say it was loaded before the hoist run beneath it.
+  const { body } = placeBaseLocals(
+    { ...sfn, locals },
+    sfn.body.map((s) => mapStmtExprs(s, rewrite)),
+    inits,
+    'prepend',
+  );
+  return { ...sfn, locals, body };
 }

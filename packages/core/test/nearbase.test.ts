@@ -166,3 +166,37 @@ test('declined: a hostile span (negative or NaN) instead of a stalled cluster wi
   expect(nearBaseClusters(fn(body), -1)).toBeNull();
   expect(nearBaseClusters(fn(body), Number.NaN)).toBeNull();
 });
+
+// WHERE the cluster base goes. This is the THIRD pass that places into the leading base-init run
+// (`l3/basecse.ts` and `l3/sinkinit.ts` are the others) and it now shares their body rebuild —
+// `l3/hoist.ts`'s `placeBaseLocals` — instead of a private prepend that had already drifted.
+//
+// Its POLICY stays its own, and it is `prepend`: the cluster base goes ABOVE a run already there,
+// not merged into it in first-use order. That is not an oversight to correct against basecse's
+// "blindly prepending is wrong" note — it is what this lever's demanding row says. Re-placing the
+// cluster bases in first-use order was measured on 2026-08-26 and turns `synthetic:dmafield` (won
+// by `signed/livebase/volatile/nearbase/initfirst`) from a MATCH into diff:5.
+test('the cluster base is spelled ABOVE a base-init run already at the head', () => {
+  const u8p = { kind: 'ptr', to: { kind: 'int', width: 8, signed: false } } as const;
+  const existing: Stmt = { k: 'assign', name: 'q0', value: { k: 'cast', to: u8p, e: c(0x04000000) } as never };
+  const useQ0: Stmt = {
+    k: 'exprstmt',
+    value: { k: 'index', base: { k: 'var', name: 'q0' }, idx: c(0), width: 1, signed: false },
+  };
+  const sfn: SFn = {
+    name: 'f',
+    params: [],
+    locals: [{ name: 'q0', type: u8p as never }],
+    retType: s32,
+    body: [
+      existing,
+      useQ0,
+      { k: 'assign', name: 'x', value: deref(0x03001048, 2) },
+      { k: 'exprstmt', value: deref(0x0300104a, 2) },
+    ],
+  };
+  const r = nearBaseClusters255(sfn);
+  expect(r).not.toBeNull();
+  // p0 (the cluster base, first USED third) leads; q0 (used first) keeps its place beneath it.
+  expect(r!.body.map((st) => (st.k === 'assign' ? st.name : st.k))).toEqual(['p0', 'q0', 'exprstmt', 'x', 'exprstmt']);
+});
