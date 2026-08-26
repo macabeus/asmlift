@@ -718,7 +718,7 @@ export function enumerateCandidates(
     }
   }
 
-  const seen = new Set<string>();
+  const seen = new Map<string, Candidate>();
   const seenTrees = new Set<string>();
   const out: Candidate[] = [];
   // The map-derived VALUE references one emitted tree contains, applied at every point a candidate
@@ -1406,18 +1406,27 @@ export function enumerateCandidates(
             // WHOLE emitted set (not just scored survivors) is equivalent — an identical source
             // scores identically, so it can never change `best` — and it keeps the candidate set to
             // the genuinely distinct spellings.
-            if (seen.has(source)) {
+            const dup = seen.get(source);
+            if (dup !== undefined) {
+              // The same TEXT, reached twice. `matchOnly` is a property of the DERIVATION and the
+              // published artifact is the text, so a spelling some sound route also produces is a
+              // proven one however the first route reached it — clear the flag rather than keeping
+              // whichever route the enumeration happened to walk first.
+              if (sp.matchOnly === undefined) {
+                delete dup.matchOnly;
+              }
               continue;
             }
-            seen.add(source);
-            out.push({
+            const made: Candidate = {
               label: `${cand.label}${lv.suffix}${s.suffix}${sp.suffix}${sv.suffix}`,
               source,
               group: svIndex,
               ...(sp.symbolRefs ? { symbolRefs: sp.symbolRefs } : {}),
               ...(sp.deviceVolatile ? { deviceVolatile: sp.deviceVolatile } : {}),
               ...(sp.matchOnly ? { matchOnly: sp.matchOnly } : {}),
-            });
+            };
+            seen.set(source, made);
+            out.push(made);
           }
         }
       }
@@ -1491,6 +1500,14 @@ export function rankBy<S extends { score: number }>(
  *  ordinary memory that the asm does not support — over the 856-row bench, counting the word
  *  alone decides twelve rows and only two of them touch a device address. A declared term rather
  *  than an enumeration order, which an unrelated lever's spellings can slide between.
+ *
+ *  IT IS A PREFERENCE, AND EVERY NEW MINTER INHERITS IT. `deviceVolatileClaims` only ever ADDS a
+ *  claim, so any lever that qualifies a device access wins its own tie by construction: when
+ *  `/vol-store` joined the roster, six rows changed their published `candidateLabel` and `source`
+ *  with no score and no outcome moving. That is a judgement about the source rather than a
+ *  measurement of it — the differ never refereed those six — and it is the same judgement this
+ *  term was declared to make, taken on the same evidence. What it must never do is change WHICH
+ *  candidates exist; that stays an admission question, one lever at a time.
  *
  *  CAST COUNT next, and only WITHIN a group. A wrong signedness pin is what manufactures casts —
  *  the C backend has to cast a shift operand back to the signedness the machine op needs, so
