@@ -26,11 +26,17 @@
 // qualifier goes on the POINTEE of the deref cast, which is where C puts it and what
 // backend/cfamily.ts already prints for the casts l3/inlinebase.ts mints.
 //
-// GATE (VOL_STORE_GATES, read once per access): the target must declare a device-register window
-// (TargetDescription.capabilities.deviceRegisters); the access's WHOLE address must be a
-// compile-time constant — a base that rematerializes to a numeric address plus a constant
-// subscript, no `lead` — that constant must lie inside the window, and the access must not
-// already be qualified. Nothing qualifying ⇒ decline (null), never a duplicate of the primary.
+// GATE (VOL_STORE_GATES, read once per access). THE ADMISSION RULE IS ONE: the access's WHOLE
+// address must be a compile-time constant — a base that rematerializes to a numeric address plus a
+// constant subscript, no `lead` — lying inside a device-register window the target declares
+// (TargetDescription.capabilities.deviceRegisters); and the access must not already be qualified.
+// The first three entries PARTITION the first half rather than adding to it: `inRange` is false
+// when there is no window OR no constant OR the wrong constant, so ablating `no-window` or
+// `non-const-address` changes no admission anywhere in the ctx space. What they buy is a refusal
+// that says WHICH half is missing — "this target declares no device page" and "this address is
+// IWRAM" are different facts about a row, and over the corpus they are 283 and 711 of the 1011
+// refusals against `outside-window`'s 17. Nothing qualifying ⇒ decline (null), never a duplicate
+// of the primary.
 //
 // THE WINDOW IS A REACH GATE, PRICED — not a soundness one, which is why it is `sound: false`.
 // A `volatile` qualifier only restricts the compiler, so widening the range can never make a
@@ -48,16 +54,26 @@
 // (l3/volatileptr.ts) does exactly that, and a sweep over 834 corpus trees finds it qualifying an
 // address outside this window on 21 (tree, local, address) pairs, 16 of them on agbcc — including
 // `kleod:WritePaletteColor:agbcc`, a published byte-exact MATCH whose winning source contains
-// `*(volatile s32 *)50351492 = v2 + 5;` at 0x03004D84, which is IWRAM. Both levers are right,
-// because they answer the same question from DIFFERENT EVIDENCE: `/volatile` qualifies a pointer
-// LOCAL the asm shows the compiler re-materializing rather than keeping, which is a codegen fact
-// about that object; this lever has no local and no codegen fact — only the address — so outside
-// a range the target has declared, it would be asserting volatility with nothing behind it. The
-// window is where this lever's evidence runs out, not where the target's permission does.
+// `*(volatile s32 *)50351492 = v2 + 5;` at 0x03004D84, which is IWRAM — the same minted-cast form
+// this lever produces, at an address this lever's window refuses.
+//
+// THE TWO ARE SEPARATED BY THEIR DERIVATION AND NOT BY WHAT THEY EMIT, which is the trap in
+// reading that spelling as a contradiction. `/inlinebase` alone mints no qualifier at all —
+// enumerated on that row, `unsigned/inlinebase` carries zero `volatile` casts and
+// `unsigned/inlinebase/volatile` carries three. The qualifier comes from `/volatile`, which put it
+// on a pointer LOCAL the asm shows the compiler re-materializing rather than keeping; inlining
+// then carries that codegen fact onto each cast it leaves behind. This lever runs where no such
+// local ever existed, so its only input is the number — and outside a range the target has
+// declared, a number supports nothing. The window is where THIS lever's evidence runs out, not
+// where the target's permission does.
 //
 // (So the two are not foldable on the window, and the fold is not free: adopting it for `/volatile`
 // would delete the WritePaletteColor spelling. `deviceVolatileClaims` in volatileptr.ts already
-// unifies the COUNT side, which is the half where one answer really is enough.)
+// unifies the COUNT side, which is the half where one answer really is enough. Nor do they
+// COMPOSE: a `/volatile × /vol-store` pairing would qualify a function's pointer-local homes and
+// its raw-constant stores together, and over 834 corpus trees both levers fire on ONE —
+// `kleod:SetupBG3WindowOverlay:agbcc`, which is `noncompile` on both decompilers. A pairing whose
+// whole reach is a row that does not compile is one a row has yet to demand.)
 //
 // SCOPE: STORES only. A device READ is a different question with a different answer — the idiom
 // fold's DCE drops a use-less device load outright (synthetic:dmaback), so a read that survives to
@@ -85,6 +101,9 @@ interface AccessCtx {
   qualified: boolean;
 }
 
+// One rule at three resolutions, most general first: `inRange` fails for all three reasons, so
+// only `outside-window` and `already-qualified` change an admission. See the header's GATE
+// paragraph — what the first two decide is the REASON a row is refused, not whether it is.
 export const VOL_STORE_GATES: readonly Gate<AccessCtx>[] = [
   {
     id: 'no-window',
@@ -100,7 +119,7 @@ export const VOL_STORE_GATES: readonly Gate<AccessCtx>[] = [
   },
   {
     // NOT "the target denies this address may be volatile" — `/volatile` qualifies IWRAM on eleven
-    // corpus rows, one of them a published match, and it is right to: see the header's last
+    // agbcc rows, one of them a published match, and it is right to: see the header's last
     // paragraph. This gate is about what THIS lever has evidence for, which is the address alone.
     id: 'outside-window',
     why: 'the address is the only evidence this lever has, and outside the window it supports nothing',
