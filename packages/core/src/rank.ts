@@ -950,8 +950,25 @@ export function enumerateCandidates(
     // the induction init — observable at all. Alone the two score 19 and 34 against the row's own
     // 30; together, 0. The TRIPLE adds `/ptr-field` for synthetic:dmaptrsrc, whose closed form
     // reads a struct field the un-reduce puts back inside the loop: 27 · 35 · 42 alone, 0
-    // together. The intermediate pairs are not admitted — no row demands one, and each scores
-    // worse than a lever already on the roster (VT 27, RT 32).
+    // together. The intermediate pairs are not admitted, and the reason is that NO ROW DEMANDS
+    // ONE — neither could win where they are reachable: compiled on synthetic:dmaptrsrc, VT TIES
+    // `/vol-store`'s 27 and RT LOSES to it at 32. (An earlier version of this note said "each
+    // scores worse than a lever already on the roster", which is loose twice over: VT ties rather
+    // than loses, and RT's 32 beats the ADMITTED standalone `/unreduce`'s 35. Ranking the pairs
+    // against the BEST already-admitted spelling is the comparison that holds.)
+    //
+    // WHAT THE STANDALONE LINES COST, since neither of the two levers ever wins one of the 894
+    // artifact rows alone — `/unreduce` appears in 2 winners and `/ptr-field` in 1, all three
+    // inside a pairing. They are kept because a lever has to be able to LOSE on its own terms: the
+    // admission posture (compareScored orders by score) is what makes a wrong re-spelling
+    // harmless, and it is only observable when the single-lever spelling is in the fan —
+    // `synthetic:dmastride` exists to show exactly that for `/unreduce`, at 33 against its match.
+    //
+    // AND THE SUBSET APPLIER IS NOT THE RIGHT MECHANISM HERE, though it looks like it: rebuilding
+    // this as a SHAPE_SUBSETS-style table would admit VT and RT by construction, because
+    // `applyShapes` is SKIP-ON-DECLINE and would emit "everything that fired" on any tree where
+    // one of the three declines. That is the property the shape products are designed around and
+    // the one the pairing policy forbids — a pair reaches the fan only when a row demands it.
     respell('/vol-store/unreduce', () => {
       const r = volatileDeviceStores(sfn, target.capabilities.deviceRegisters);
       return r ? unreduced(r) : null;

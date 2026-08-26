@@ -85,7 +85,28 @@
 // the sound alternative, the read hoisted into a local above the loop, scores 16, because a C
 // statement lands above the loop's ENTRY GUARD while the compiler's own hoist lands below it.
 //
+// SCOPE, stated because a decline outside it names no gate and so looks exactly like a gate that
+// refused. This pass walks TOP-LEVEL loops only: the counter's start and the accumulator's init are
+// found by scanning `sfn.body` above the loop, which is a flat list. A loop under an `if` — or
+// inside another loop — is never reached, even when both statements do stand above it in the
+// enclosing block, so the 13-gate table above answers for a smaller population than it appears to.
+// Measured over the corpus in both symbol-map configurations: of 834 trees, 189 carry a loop, 98
+// carry a TOP-LEVEL one, and 91 carry only nested ones — `arraysum`, `memcpy1`, `revarr`,
+// `dotprod`, `findfirst`, `mergeloop` and `synthetic:dmanest` among them. Widening it is a REACH
+// change and belongs to a row that demands it (dmanest is the obvious candidate), not to a
+// soundness pass; what belongs here is saying so.
+//
+// AND ITS SIBLING. `l3/reindex.ts` un-reduces a POINTER WALK over the same argument, with the same
+// shape of gate table, and it already handles the `if (guard) do {} while` rotation this file
+// cannot see. The split is by the induction variable's TYPE rather than by the question asked, and
+// it costs the duplication a reader will notice — `counter-roles` ≈ `acc-multi-assign` +
+// `acc-live-outside`, `walk-stride` ≈ `unrelated-step`, `body-exit` ≈ `continue-in-body`. Folding
+// them into one pass over one table is a real improvement and a real refactor; the gate this file
+// was actually MISSING from that table (`volatile-counter`) is in it now, which is the part that
+// could not wait.
+//
 // Nothing qualifying ⇒ decline (null), never a duplicate of the primary.
+import { cellAddress, inRange, rootConst } from './address';
 import {
   type Expr,
   type SFn,
@@ -351,17 +372,6 @@ const hasContinueIn = (stmts: readonly Stmt[]): boolean =>
 
 // ── the re-evaluation gates ─────────────────────────────────────────────────────────────────
 
-/** the numeric address behind a deref base, through scalar pointer casts only */
-const baseConst = (e: Expr): number | null =>
-  e.k === 'const'
-    ? e.value
-    : e.k === 'cast' && !(e.to.kind === 'ptr' && e.to.to.kind === 'struct')
-      ? baseConst(e.e)
-      : null;
-
-const inWindow = (a: number | null, w?: readonly [number, number]): boolean =>
-  w !== undefined && a !== null && a >= w[0] && a < w[1];
-
 /** every memory access in an expression, as its own node */
 const accessesIn = (e: Expr): (Extract<Expr, { k: 'index' }> | Extract<Expr, { k: 'field' }>)[] =>
   [...subterms(e)].filter((x): x is Extract<Expr, { k: 'index' | 'field' }> => x.k === 'index' || x.k === 'field');
@@ -383,31 +393,6 @@ function readsVolatile(e: Expr, sfn: SFn): boolean {
 const namesUnder = (e: Expr): string[] =>
   [...subterms(e)].filter((y): y is Extract<Expr, { k: 'var' }> => y.k === 'var').map((y) => y.name);
 
-/** The whole address a memory access denotes, or null when any part of it is not constant — the
- *  same reading l3/volstore.ts takes of a store lvalue. A `field` never resolves: its offset is
- *  the struct's, which this file has no layout for. */
-function constAddress(e: Expr): number | null {
-  if (e.k !== 'index' || e.lead !== undefined || e.idx.k !== 'const') {
-    return null;
-  }
-  const base = baseConst(e.base);
-  return base === null ? null : base + e.idx.value * e.width;
-}
-
-/** The constant an ACCESS CHAIN is rooted at, through any pointer cast and any number of
- *  subscripts and field selections — enough to place the object in the address map even when the
- *  element it reaches is not known. Wider than `baseConst` on purpose: a struct-pointer cast is
- *  excluded there because re-spelling THROUGH it would collapse the stride, and nothing here
- *  re-spells. */
-const rootConst = (e: Expr): number | null =>
-  e.k === 'const'
-    ? e.value
-    : e.k === 'cast'
-      ? rootConst(e.e)
-      : e.k === 'index' || e.k === 'field'
-        ? rootConst(e.base)
-        : null;
-
 /** Does a READ land on a device register? Two readings, and neither is enough alone. The chain's
  *  ROOT is what places an access whose subscripts are not constant — `((struct E *)0x03003430)
  *  [a1].field_4` has no compile-time address at all — and a read with no root is unplaceable, so
@@ -418,7 +403,7 @@ const rootConst = (e: Expr): number | null =>
  *  resolves the whole address or refuses. */
 const readsDevice = (r: Expr, window?: readonly [number, number]): boolean => {
   const root = rootConst(r);
-  return root === null || inWindow(root, window) || inWindow(constAddress(r), window);
+  return root === null || inRange(root, window) || inRange(cellAddress(r), window);
 };
 
 /** Can the loop's own writes change what a read in the closed form sees? Only "no" when every
@@ -436,7 +421,7 @@ function movedReadAliasable(closed: Expr, evaluated: readonly Stmt[], window?: r
     if (stmtExprs(s).some(exprHasEffect)) {
       return true;
     }
-    if (s.k === 'store' && !inWindow(constAddress(s.lval), window)) {
+    if (s.k === 'store' && !inRange(cellAddress(s.lval), window)) {
       return true;
     }
   }
@@ -454,7 +439,7 @@ function deviceWritesMemory(evaluated: readonly Stmt[], triggers?: readonly (rea
     if (s.k !== 'store' || s.lval.k !== 'index') {
       continue;
     }
-    const at = constAddress(s.lval);
+    const at = cellAddress(s.lval);
     if (at === null) {
       continue; // `movedReadAliasable` has already refused this loop
     }

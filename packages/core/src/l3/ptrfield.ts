@@ -8,15 +8,43 @@
 // `->field_N` vs `[idx]` question it was written about.
 //
 // IT IS NOT NEUTRAL TO THE COMPILER, which is the whole reason to spell it. A pointer and an `s32`
-// are different alias sets, so under `-fstrict-aliasing` the loop optimizer may hoist a pointer
-// field's load past an `s32` store it must otherwise keep behind — and on synthetic:dmaptrsrc that
+// are different alias sets, so under strict aliasing the loop optimizer may hoist a pointer field's
+// load past an `s32`-typed store it must otherwise keep behind — and on synthetic:dmaptrsrc that
 // hoist is the difference between a byte-exact match and a 32-point diff, once the accumulator is
 // un-reduced back into the loop. Which side matches is per-field knowledge nothing in the asm
 // carries, so both are enumerated and the differ referees.
 //
+// WHERE THE FLAG IS, because two readers have now looked for `-fstrict-aliasing` in the benchmark's
+// agbcc line and not found it: it is not there, and it does not need to be. `-O2` turns it on
+// (gcc 2.9 sets `flag_strict_aliasing` from `optimize >= 2`), which is why the CITATION is a
+// behaviour rather than a flag. Verified in BOTH directions on this row's own shape, objects
+// compared byte-for-byte:
+//     `void *` field, harness flags        → the field load is HOISTED above the loop label
+//     `s32`    field, harness flags        → it STAYS in the loop body
+//     `void *` field, + -fno-strict-aliasing → byte-IDENTICAL to the `s32` build
+//     `s32`    field, + -fstrict-aliasing    → byte-IDENTICAL to itself (the flag was already on)
+// So adding the flag proves nothing and REMOVING it proves everything, which is the direction a
+// reader checking this note should take. The stores the load is hoisted past are the loop's own
+// `*(volatile s32 *)0x040000D4/D8/DC` device writes — `volatile` restricts what may be done with
+// THOSE accesses and does not merge their type into the pointer's alias set.
+//
 // SEMANTICS ARE PRESERVED BY CONSTRUCTION on a target whose pointers are 32 bits: the declaration
 // changes, and every read is wrapped in a cast back to the field's own recovered integer type, so
-// each use computes the same value it did. Nothing else moves.
+// each use computes the same value it did. Nothing else moves. THE 32-BIT ASSUMPTION IS ASSERTED,
+// NOT CHECKED — there is no pointer-width field on TargetDescription to check it against, and the
+// assumption is already tower-wide (`l3/typing.ts`'s `ptrElemBytes` returns 4 for any pointee). On
+// a 64-bit target this lever would change a struct's LAYOUT rather than only its spelling, so the
+// width field is what that target's first row must add, and this note is where to start.
+//
+// IT FLIPS EVERY ADMITTED FIELD AT ONCE, and its own paragraph above says the knowledge is
+// PER-FIELD — so the subset enumeration `l3/volatileptr.ts` does for exactly this reason
+// (`volatileSubsetCandidates`, capped at three locals) is the shape this lever will eventually
+// want. It is not built yet because nothing demands it: swept over 834 corpus trees, the lever
+// fires on 42, and 34 of those have a single admitted field. The six 2-field trees and the two
+// 4-field ones (`sa3:sa2__sub_8083504` flips Struct0.field_8/12 and Struct2.field_8/12 together)
+// are where 1 of 3 and 1 of 15 non-empty subsets is reachable. A row that needs one of the missing
+// subsets is what earns the enumeration — and it will cost candidates, which is why "it might
+// help" is not enough.
 //
 // GATE (PTR_FIELD_GATES, read once per field): the field's recovered type must be a 32-bit
 // integer; the field must be READ somewhere (a field the function never touches is a pad, and

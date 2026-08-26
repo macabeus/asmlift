@@ -44,6 +44,21 @@
 // either way. So the range buys candidate discipline and the honesty of the claim, and no match
 // rests on it.
 //
+// WHAT THE WINDOW IS NOT: A CLAIM THAT NOTHING ELSE MAY QUALIFY ORDINARY MEMORY. `/volatile`
+// (l3/volatileptr.ts) does exactly that, and a sweep over 834 corpus trees finds it qualifying an
+// address outside this window on 21 (tree, local, address) pairs, 16 of them on agbcc — including
+// `kleod:WritePaletteColor:agbcc`, a published byte-exact MATCH whose winning source contains
+// `*(volatile s32 *)50351492 = v2 + 5;` at 0x03004D84, which is IWRAM. Both levers are right,
+// because they answer the same question from DIFFERENT EVIDENCE: `/volatile` qualifies a pointer
+// LOCAL the asm shows the compiler re-materializing rather than keeping, which is a codegen fact
+// about that object; this lever has no local and no codegen fact — only the address — so outside
+// a range the target has declared, it would be asserting volatility with nothing behind it. The
+// window is where this lever's evidence runs out, not where the target's permission does.
+//
+// (So the two are not foldable on the window, and the fold is not free: adopting it for `/volatile`
+// would delete the WritePaletteColor spelling. `deviceVolatileClaims` in volatileptr.ts already
+// unifies the COUNT side, which is the half where one answer really is enough.)
+//
 // SCOPE: STORES only. A device READ is a different question with a different answer — the idiom
 // fold's DCE drops a use-less device load outright (synthetic:dmaback), so a read that survives to
 // L3 is one whose value the function consumes, and whether THAT may be CSEd is the question
@@ -54,6 +69,7 @@
 // both configurations and with any window. No row demands the read spelling, and a lever with no
 // inhabitant is what "earn the level" forbids.
 import { type IrType, T, scalarTypeForAccess } from '../ir/types';
+import { cellAddress, inRange } from './address';
 import { type Expr, type SFn, type Stmt } from './ast';
 import { type Gate, firstRejection } from './gates';
 
@@ -83,8 +99,11 @@ export const VOL_STORE_GATES: readonly Gate<AccessCtx>[] = [
     rejects: (c) => c.address === null,
   },
   {
+    // NOT "the target denies this address may be volatile" — `/volatile` qualifies IWRAM on eleven
+    // corpus rows, one of them a published match, and it is right to: see the header's last
+    // paragraph. This gate is about what THIS lever has evidence for, which is the address alone.
     id: 'outside-window',
-    why: 'ordinary memory is not a device register — qualifying it claims what the target denies',
+    why: 'the address is the only evidence this lever has, and outside the window it supports nothing',
     sound: false,
     rejects: (c) => !c.inWindow,
   },
@@ -95,25 +114,6 @@ export const VOL_STORE_GATES: readonly Gate<AccessCtx>[] = [
     rejects: (c) => c.qualified,
   },
 ];
-
-/** The numeric address behind a deref base, through SCALAR pointer casts only — a struct-pointer
- *  cast is the dot-form's base, whose stride a raw re-spelling would collapse (the same reading
- *  l3/nearbase.ts's `baseConst` takes). */
-const baseConst = (e: Expr): number | null =>
-  e.k === 'const'
-    ? e.value
-    : e.k === 'cast' && !(e.to.kind === 'ptr' && e.to.to.kind === 'struct')
-      ? baseConst(e.e)
-      : null;
-
-/** The whole address an `index` access denotes, or null when any part of it is not constant. */
-function constAddress(ix: Extract<Expr, { k: 'index' }>): number | null {
-  if (ix.lead !== undefined) {
-    return null; // leading dimensions of a multidimensional global — not a numeric address
-  }
-  const base = baseConst(ix.base);
-  return base === null || ix.idx.k !== 'const' ? null : base + ix.idx.value * ix.width;
-}
 
 /** Does this base already assert volatility — a `volatile` cast at any depth of the cast chain? */
 const qualifiedBase = (e: Expr): boolean => e.k === 'cast' && (e.volatile === true || qualifiedBase(e.e));
@@ -126,11 +126,11 @@ function qualify(lval: Expr, window: readonly [number, number] | undefined): Exp
   if (lval.k !== 'index') {
     return lval; // a `field` lvalue is a recovered struct view, whose declaration owns volatility
   }
-  const address = constAddress(lval);
+  const address = cellAddress(lval);
   const ctx: AccessCtx = {
     hasWindow: window !== undefined,
     address,
-    inWindow: window !== undefined && address !== null && address >= window[0] && address < window[1],
+    inWindow: inRange(address, window),
     qualified: qualifiedBase(lval.base),
   };
   if (firstRejection(VOL_STORE_GATES, ctx) !== null) {

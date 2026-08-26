@@ -27,10 +27,21 @@
 // and no `defs` map to resolve, and the addresses it is about are RAW CONSTANTS — precisely the
 // case in which `globalCellOf` returns null and everything here bars. What it uses instead is the
 // TARGET's declared device-register range (`capabilities.deviceRegisters`): a write to a hardware
-// register is not a write to any object a C program declares, so a loop whose every write lands
-// there cannot change an ordinary read. That is a fact about the board rather than about C, which
-// is why it is a target capability and not a rule in this file. The asymmetry above is kept in
-// both: everything the range does not place BARS.
+// register is not a write to any object a C program declares, so no STORE THE C PERFORMS in such a
+// loop can change an ordinary read. That is a fact about the board rather than about C, which is
+// why it is a target capability and not a rule in this file. The asymmetry above is kept in both:
+// everything the range does not place BARS.
+//
+// AND IT IS NOT THE WHOLE ANSWER, which this comment used to claim it was. The sentence above
+// covers the CPU's stores and stops there — a DMA controller reads a control word and then WRITES
+// ORDINARY MEMORY on the program's behalf, so a loop whose every write is a "device register"
+// write can still rewrite the cell a moved read reads. Executed with the transfer modelled, the
+// admitted candidate turned a clean destination walk into wild writes. The second half of the
+// claim is therefore a second datum, `capabilities.deviceMemoryWriters`, and what it does not
+// settle is settled by the DIFFER instead (`Candidate.matchOnly`) rather than by a wider licence.
+// The lesson generalises past this file: a premise about the board is still a premise, and one
+// stated as an aside in a comment gets copied rather than checked — this one reached four files
+// before anything executed it.
 import { type Op, type Value } from './core';
 
 /** A byte cell of a named global: the symbol plus the byte offset within it. */

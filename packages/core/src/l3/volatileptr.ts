@@ -26,6 +26,7 @@
 // The symbol map owns a declared global's volatility, and a mixed-feed local would read the
 // mapped global through a volatile view the map never granted. No qualifying local ⇒ decline
 // (null), so the lever never emits a duplicate of the primary.
+import { addrConst } from './address';
 import { type Expr, type SFn, type Stmt, mapExprChildren, rematerializableAddress, walkExprs } from './ast';
 
 const exprHas = (e: Expr, pred: (x: Expr) => boolean): boolean => {
@@ -86,7 +87,7 @@ export function deviceVolatileClaims(sfn: SFn, window?: readonly [number, number
     return 0;
   }
   const inWindow = (e: Expr): boolean => {
-    const c = constAddr(e);
+    const c = addrConst(e);
     return c !== null && c >= window[0] && c < window[1];
   };
   let n = 0;
@@ -104,10 +105,6 @@ export function deviceVolatileClaims(sfn: SFn, window?: readonly [number, number
   }
   return n;
 }
-
-/** the numeric address an expression IS, through any number of pointer casts, or null */
-const constAddr = (e: Expr): number | null =>
-  e.k === 'const' ? e.value : e.k === 'cast' && e.to.kind === 'ptr' ? constAddr(e.e) : null;
 
 /** The locals the lever would qualify — the per-local SUBSET enumeration's input (below):
  *  which pointers the original declared volatile is per-pointer knowledge the asm does not

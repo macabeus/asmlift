@@ -375,7 +375,12 @@ test('a closed form that reads no memory needs no window at all', () => {
   expect(emit(unreduceAccumulators(fill(), undefined))).toContain('(i << 6) + a1');
 });
 
-test('a nested loop is out of scope — the counter start must stand above the loop', () => {
+test('a nested loop is out of scope — the pass walks TOP-LEVEL loops only', () => {
+  // The reason is the SCAN, not the fixture: the init and the counter start here stand above the
+  // loop exactly as they do in the accepted case, and the pass still never looks. 91 of the 189
+  // loop-bearing corpus trees are in this position (see the file header). A decline here names no
+  // gate, which is why the scope is written down rather than inferred from a table that answers
+  // for a smaller population than it appears to.
   const s = fill();
   const inner = s.body[2];
   expect(

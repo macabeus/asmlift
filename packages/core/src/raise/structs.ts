@@ -22,8 +22,21 @@
 //   base @ {off8 w4}           -> array  (single aligned access — no struct evidence)
 //   base @ aload(index)        -> array  (variable index — untouched)
 //
-// This recovery is BYTE-NEUTRAL — `->field_N` and `[idx]` compile identically, so it is a
-// representation upgrade driven by access evidence, not a scored lever. GAPS between accessed
+// This recovery is USUALLY BYTE-NEUTRAL — `->field_N` and `[idx]` mostly compile identically, so it
+// is a representation upgrade driven by access evidence rather than a scored lever. TWO
+// MEASUREMENTS SAY "USUALLY" IS THE RIGHT WORD, and both were made on agbcc against a real target
+// object, each pair differing in ONE token:
+//   • THE SPELLING. `synthetic:dmanest`'s reference compiles from `((struct Elem0 *)K)[a1].field_4`
+//     to a byte-exact match and from `((s32 *)((a1 << 3) + K))[1]` to a 2-point diff — a
+//     COMPONENT_REF keeps the offset in the load displacement, an index folds it into the pool
+//     literal. `l3/ptrfield.ts`'s header carries the reproduction.
+//   • THE FIELD TYPE, which this file assigns from the ACCESS WIDTH alone. A word field declared
+//     `void *` rather than `s32` changes agbcc's alias set and lets a loop-invariant load leave the
+//     loop: `synthetic:dmaptrsrc` matches with the pointer declaration and diffs by 32 without it.
+//     That is what `l3/ptrfield.ts` offers as a differ-ranked lever.
+// So the neutrality claim is CONDITIONAL, and nothing here says on what. Until it does, read it as
+// "no candidate is enumerated for this axis", not as "the differ could not referee one" — the
+// second reading is the one both measurements above falsify. GAPS between accessed
 // offsets (unaccessed leading/interior fields) are filled with `u8[N]` PAD fields so the declared
 // struct reproduces the observed offsets byte-for-byte and is self-describing (the same
 // discipline raise/struct-arrays.ts withPadding uses). Each accessed field must still be
