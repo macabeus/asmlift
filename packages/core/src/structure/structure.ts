@@ -773,6 +773,11 @@ export interface StructureOptions {
   // computation. Off by default; rank.ts enumerates the ON spelling as the `/derived-home` axis —
   // see analysis.ts AnalyzeOptions.
   homeDerivedReads?: boolean;
+  // Materialize a pure value that one join's incoming edges render into the SAME parameter slot
+  // from 2+ places — the value the source computed once above the branch and the copy machinery
+  // sinks into every arm. Off by default; rank.ts enumerates the ON spelling as the `/merge-home`
+  // axis — see analysis.ts AnalyzeOptions.
+  homeMergeFeeds?: boolean;
   // Emit a memory read as a named temp in ITS OWN block when every place it renders sits in a
   // block that block strictly dominates. A per-compiler DATA lever (TargetDescription
   // .compilerBehaviors), not a differ-refereed axis: where the compiler has neither a scheduler
@@ -839,6 +844,7 @@ function assertPrimaryAccepts(fn: Fn, opts: StructureOptions, hooks: StructureHo
       homeSharedAddresses: false,
       homeLoopExprs: false,
       homeDerivedReads: false,
+      homeMergeFeeds: false,
       anchorConstCopies: false,
       anchorLoopEntryConsts: false,
     },
@@ -866,6 +872,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     homeSharedAddresses = false,
     homeLoopExprs = false,
     homeDerivedReads = false,
+    homeMergeFeeds = false,
     readsStayWhereWritten = false,
     unsignedCompareSpelling = false,
     coalesceMergeNames = false,
@@ -888,6 +895,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     homeSharedAddresses ||
     homeLoopExprs ||
     homeDerivedReads ||
+    homeMergeFeeds ||
     anchorConstCopies
   ) {
     assertPrimaryAccepts(fn, opts, hooks);
@@ -909,6 +917,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       homeSharedAddresses,
       homeLoopExprs,
       homeDerivedReads,
+      homeMergeFeeds,
       readsStayWhereWritten,
       // the map's own declaration truth: a volatile object's read may not be duplicated or moved
       volatileGlobal: (n) => {

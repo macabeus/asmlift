@@ -7,7 +7,7 @@
 //     program position instead of inlining at their use (calls/loads for effect order, plus
 //     the pure defs the homing rules claim).
 import { globalCellOf, mayWriteGlobal } from '../ir/alias';
-import { Block, Fn, Op, Value, defOpMap, successorsOf } from '../ir/core';
+import { Block, Fn, Op, Value, defOpMap, dominators, predecessors, successorsOf } from '../ir/core';
 import { EFFECTFUL_OPS } from '../ir/opcodes';
 
 export interface UseSite {
@@ -250,6 +250,193 @@ export function hasDerivedReadHome(fn: Fn): boolean {
   return false;
 }
 
+/** Natural loops: a back edge is `latch → header` with the header dominating the latch, and the
+ *  body is the backward closure from the latch. Shared by the rules inside `analyze` and by the
+ *  `/merge-home` gate below, so the two cannot disagree about what "inside a loop" means. */
+function naturalLoops(
+  fn: Fn,
+  dom: Map<Block, Set<Block>>,
+  predsOf: Map<Block, Block[]>,
+): { header: Block; body: Set<Block> }[] {
+  const loops: { header: Block; body: Set<Block> }[] = [];
+  for (const latch of fn.blocks) {
+    for (const header of successorsOf(latch)) {
+      if (!dom.get(latch)?.has(header)) {
+        continue;
+      }
+      const body = new Set<Block>([header]);
+      const work = [latch];
+      while (work.length) {
+        const x = work.pop()!;
+        if (!body.has(x)) {
+          body.add(x);
+          work.push(...(predsOf.get(x) ?? []));
+        }
+      }
+      loops.push({ header, body });
+    }
+  }
+  return loops;
+}
+
+/** THE MERGE-FEED-HOME axis's scope (rank.ts `/merge-home`, AnalyzeOptions.homeMergeFeeds): the
+ *  pure defs it materializes.
+ *
+ *  A merge parameter whose incoming edges render ONE value's expression twice or more is a value
+ *  the source computed once ABOVE the branch and the copy machinery then sank into every arm —
+ *  `s32 m = (b & 1) ? 0x400 : 0;` becomes the whole `neg/orr/asr #31/and` chain in each arm, which
+ *  agbcc if-converts per arm instead of holding the value in a register across the branch. Homed at
+ *  the def, it renders once and the arms read the name.
+ *
+ *  Neither the value's use count nor its multi-render alone is the evidence: the sibling scopes'
+ *  clientele (a value re-derived at two ordinary uses) is a value the compiler DOES re-materialize
+ *  for free. What a merge slot adds is that the two renders are mutually exclusive ARMS of one
+ *  branch — a register the compiler had to reserve across it either way, so the sunk spelling is
+ *  strictly more work than the asm shows. Which side the source spelled is still not derivable
+ *  (nothing stops a source from writing the expression twice), so this is a differ-refereed
+ *  candidate axis, never a default.
+ *
+ *  Refusals:
+ *    • a value that is ITSELF an address, or whose cone holds a gaddr/laddr — rendered standalone
+ *      an `&g + i` loses the memAccess's inline byte-stride cast (`coneHoldsAddr`,
+ *      `rendersAsAddress`), the same soundness half the sibling scopes state.
+ *    • a memory read or an effectful op: WHERE those happen is the read/call rules' question, and
+ *      moving one to a dominating block runs it on paths the asm never ran it on.
+ *    • a def block or a join INSIDE A LOOP. A loop-carried merge parameter's "definition above the
+ *      branch" is the loop's entry initializer, whose placement `/defsite/loop-entry` already
+ *      decides; homing it here would answer the same question a second time, from a rule that
+ *      cannot see the loop's kept guard.
+ *  The `analyze` scope adds nothing to this list — the whole predicate is here, so the axis's
+ *  enumeration gate can run it rather than approximate it. */
+function mergeFeedHomes(
+  fn: Fn,
+  dom: Map<Block, Set<Block>>,
+  defOf: Map<Value, Op>,
+  predsOf: Map<Block, Block[]>,
+  inLoop: Set<Block>,
+): Set<Op> {
+  const joins = fn.blocks.filter((m) => m.params.length > 0 && (predsOf.get(m)?.length ?? 0) >= 2 && !inLoop.has(m));
+  if (joins.length === 0) {
+    return new Set<Op>();
+  }
+  const blockOf = new Map<Op, Block>();
+  for (const b of fn.blocks) {
+    for (const op of b.ops) {
+      blockOf.set(op, b);
+    }
+  }
+  // Every value an edge ARGUMENT renders — the argument itself plus its inlined operand cone,
+  // memoized per value so one walk serves every slot. The walk crosses PURE defs only: under a
+  // call or a memory read the value renders at that op's own position, never at this edge.
+  const coneCache = new Map<Value, Set<Value>>();
+  const coneOf = (root: Value): Set<Value> => {
+    const hit = coneCache.get(root);
+    if (hit) {
+      return hit;
+    }
+    const acc = new Set<Value>();
+    const stack = [root];
+    while (stack.length) {
+      const x = stack.pop()!;
+      if (acc.has(x)) {
+        continue;
+      }
+      acc.add(x);
+      const memo = coneCache.get(x);
+      if (memo) {
+        for (const y of memo) {
+          acc.add(y);
+        }
+        continue;
+      }
+      const d = defOf.get(x);
+      if (d && !EFFECTFUL_OPS.has(d.opcode) && d.opcode !== 'load' && d.opcode !== 'aload') {
+        stack.push(...d.operands);
+      }
+    }
+    coneCache.set(root, acc);
+    return acc;
+  };
+  /** would materializing this op's result change what it means, or where it happens? */
+  const eligible = (op: Op): boolean => {
+    const v = op.results[0];
+    return (
+      v !== undefined &&
+      !EFFECTFUL_OPS.has(op.opcode) &&
+      op.opcode !== 'load' &&
+      op.opcode !== 'aload' &&
+      v.type.kind !== 'ptr' &&
+      v.type.kind !== 'array' &&
+      !coneHoldsAddr(op, defOf)
+    );
+  };
+  const out = new Set<Op>();
+  for (const m of joins) {
+    for (let i = 0; i < m.params.length; i++) {
+      const tally = new Map<Value, number>();
+      const carried = new Set<Value>();
+      for (const p of predsOf.get(m)!) {
+        for (const sx of p.ops[p.ops.length - 1]?.successors ?? []) {
+          if (sx.block !== m || sx.args[i] === undefined) {
+            continue;
+          }
+          carried.add(sx.args[i]);
+          for (const v of coneOf(sx.args[i])) {
+            tally.set(v, (tally.get(v) ?? 0) + 1);
+          }
+        }
+      }
+      // The slot's feeders: rendered from 2+ of its edges, CARRIED unchanged by at least one of
+      // them, by a def this join's every arm reaches.
+      //
+      // Both counts carry a different half of the evidence. The 2+ renders are the duplication;
+      // what the carried edge adds is that the value IS the merge variable on some path — the
+      // register the compiler had to reserve across the branch either way, so the sunk spelling is
+      // strictly more work than the asm shows. Without it the scope reaches every shared
+      // SUBEXPRESSION of two arms, and `armkeep` is the row that says those must stay per-arm
+      // (agbcc keeps both copies; hoisting scores 9 against its own object). Only a DOMINATING def
+      // is one definition the source could have written above the branch.
+      const feeders: Op[] = [];
+      for (const [v, n] of tally) {
+        const d = n >= 2 && carried.has(v) ? defOf.get(v) : undefined;
+        const b = d ? blockOf.get(d) : undefined;
+        if (d && b && b !== m && dom.get(m)!.has(b) && !inLoop.has(b) && eligible(d)) {
+          feeders.push(d);
+        }
+      }
+      // Only the MAXIMAL ones. Every value under a shared expression is itself rendered twice, so
+      // the raw feeder set is the whole cone — and homing all of it spells one local per node
+      // (`v0 = 1; v1 = a1 & v0; …`) where the source spelled the expression. A feeder inside
+      // another's cone renders INSIDE that home, so its own is redundant; one that is not stays,
+      // which is what keeps a second slot's smaller feeder its home.
+      const covered = new Set<Value>();
+      for (const d of feeders) {
+        for (const v of coneOf(d.results[0])) {
+          if (v !== d.results[0]) {
+            covered.add(v);
+          }
+        }
+      }
+      for (const d of feeders) {
+        if (!covered.has(d.results[0])) {
+          out.add(d);
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/** rank.ts's enumeration gate for the `/merge-home` axis: does the function HAVE a value the axis
+ *  would home? The axis's own scope on its own dominators — not an approximation, so a function the
+ *  gate admits is one the rule really fires on. */
+export function hasMergeFeedHome(fn: Fn): boolean {
+  const dom = dominators(fn);
+  const predsOf = predecessors(fn);
+  const inLoop = new Set(naturalLoops(fn, dom, predsOf).flatMap((L) => [...L.body]));
+  return mergeFeedHomes(fn, dom, defOpMap(fn), predsOf, inLoop).size > 0;
+}
+
 export interface StructureAnalysis {
   /** every positioned use of a value; a value absent here is dead */
   useSitesOf: Map<Value, UseSite[]>;
@@ -372,6 +559,15 @@ export interface AnalyzeOptions {
    *  address (rendered standalone the byte-stride cast lands outside the sum — see
    *  `rendersAsAddress`). And the multi-block-loop-header seat the sibling axes refuse. */
   homeDerivedReads?: boolean;
+  /** The merge-feed-home axis (rank.ts `/merge-home`). A pure value one join's incoming edges
+   *  render into the SAME parameter slot from 2+ places is one the source computed once above the
+   *  branch: the copy machinery has no name to reference, so it re-derives the whole expression per
+   *  arm (`m = (-(b & 1) | b & 1) >> 31 & 0x400;` in both), and agbcc then if-converts each arm's
+   *  copy rather than holding the value across the branch. Materialized, the def renders once in
+   *  the dominating block and every arm reads its name. Which side the source spelled is not
+   *  derivable from asm, so this is a differ-refereed candidate axis, never a default; the scope
+   *  and its refusals are `mergeFeedHomes` above, which the axis's enumeration gate also runs. */
+  homeMergeFeeds?: boolean;
   /** DEF-BLOCK PLACEMENT for memory reads — WHERE the read happens, not where the value lives.
    *  The sibling of the homing axes above: there the question is which register or offset holds a
    *  value, here which BLOCK performs the read. A read whose every render sits in a block its own
@@ -418,6 +614,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
     homeSharedAddresses = false,
     homeLoopExprs = false,
     homeDerivedReads = false,
+    homeMergeFeeds = false,
     readsStayWhereWritten = false,
   } = opts;
   // ── use registry ────────────────────────────────────────────────────────────────────────
@@ -777,26 +974,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
       predsOf.get(s)!.push(b);
     }
   }
-  const loopBodies: { header: Block; body: Set<Block> }[] = [];
-  if (dom) {
-    for (const latch of fn.blocks) {
-      for (const header of successorsOf(latch)) {
-        if (!dom.get(latch)?.has(header)) {
-          continue;
-        }
-        const body = new Set<Block>([header]);
-        const work = [latch];
-        while (work.length) {
-          const x = work.pop()!;
-          if (!body.has(x)) {
-            body.add(x);
-            work.push(...(predsOf.get(x) ?? []));
-          }
-        }
-        loopBodies.push({ header, body });
-      }
-    }
-  }
+  const loopBodies = dom ? naturalLoops(fn, dom, predsOf) : [];
   /** The def's value enters some loop's header live and every consumer sits outside that loop,
    *  as does the def: the value is carried ACROSS the loop, not into it. */
   // Never for a def in a MULTI-BLOCK loop header: a test-at-top `while`'s condition has no seat
@@ -844,6 +1022,12 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
       )
     );
   };
+  // The merge-feed-home axis's ops, settled BEFORE the fixpoint: the scope reads the IR alone (no
+  // render positions, no `materialize`), so it cannot change as the set grows.
+  const mergeFeedOps =
+    homeMergeFeeds && dom
+      ? mergeFeedHomes(fn, dom, defOf, predsOf, new Set(loopBodies.flatMap((L) => [...L.body])))
+      : new Set<Op>();
   /** result values the address-home axis materialized — the load rule's admission key */
   const axisHomedBases = new Set<Value>();
   /** The loop-expression-home axis's scope: 2+ distinct consumers of the value, at least one of
@@ -1137,6 +1321,14 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
             standsOnMovableRead(op, b) &&
             !multiBlockHeaders.has(b)
           ) {
+            materialize.add(op);
+          }
+          // Sixth scope, under the merge-feed-home axis (AnalyzeOptions.homeMergeFeeds): a pure
+          // value a join's incoming edges render into one parameter slot from 2+ places. The only
+          // scope that admits a `const` — for every other one a re-derived const is
+          // re-materialization, the compiler's own behavior, while a const the arms of a branch
+          // merge is one it held in a register across them (`mov r5, #0` once, not per arm).
+          if (homeMergeFeeds && mergeFeedOps.has(op)) {
             materialize.add(op);
           }
           continue;
