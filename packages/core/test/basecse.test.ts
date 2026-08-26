@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
+import { cBackend } from '../src/backend/c';
+import { parse } from '../src/ir/parse';
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
 import {
@@ -14,6 +16,7 @@ import {
 } from '../src/l3/basecse';
 import { without } from '../src/l3/gates';
 import { volatilePtrLocals } from '../src/l3/volatileptr';
+import { structureChecked } from '../src/pipeline';
 import { enumerateCandidates } from '../src/rank';
 import { ARMV4T_AGBCC } from '../src/target';
 
@@ -33,6 +36,68 @@ const cidx = (value: number, i: Expr, width = 4): Expr => ({
 });
 const c = (value: number): Expr => ({ k: 'const', value });
 const fn = (body: Stmt[]): SFn => ({ name: 'f', params: [], locals: [], retType: T.void(), body });
+
+// The L2→L3 fact the fold evidence rests on. agbcc spells a constant SUBSCRIPT off a symbol by
+// folding it into the relocation (`((u8 *)&gSym)[3]` → `.word gSym+0x3` + `ldrb [r0]`) and leaves a
+// MEMBER or a named base's offset in the instruction (`gSym.d`, `u8 *p = …; p[3]` → `.word gSym` +
+// `ldrb [r0, #0x3]`) — so which side of that pair the asm sits on is what says which C could have
+// written it. Both sides denote the same cell and print the same subscript, which is why the
+// discriminator has to be CARRIED rather than re-derived from the tree.
+describe('where a constant offset came from survives the lift', () => {
+  const lifted = (ir: string): SFn => structureChecked(parse(ir), {});
+  const firstIndex = (sfn: SFn): Extract<Expr, { k: 'index' }> => {
+    const st = sfn.body[0];
+    expect(st.k).toBe('return');
+    const v = st.k === 'return' ? st.value : undefined;
+    expect(v?.k).toBe('index');
+    return v as Extract<Expr, { k: 'index' }>;
+  };
+  // `.word gSym` + `ldrb r0, [r0, #0x3]`
+  const OPERAND = `fn f {
+^bb0():
+  %0: u8* = gaddr {sym="gSym"}
+  %1: s32 = load %0 {off=3, signed=false, width=1}
+  ret %1
+}
+`;
+  // `.word gSym+0x3` + `ldrb r0, [r0]` — the relocation's addend, which the frontend keeps as an
+  // explicit add rather than as an operand offset
+  const ADDEND = `fn f {
+^bb0():
+  %0: u8* = gaddr {sym="gSym"}
+  %1: s32 = const {value=3}
+  %2: u8* = add %0, %1
+  %3: s32 = load %2 {off=0, signed=false, width=1}
+  ret %3
+}
+`;
+
+  test('the two lift to the same C, down to the byte', () => {
+    expect(cBackend.emit(lifted(ADDEND))).toEqual(cBackend.emit(lifted(OPERAND)));
+    expect(cBackend.emit(lifted(OPERAND))).toContain('((u8 *)&gSym)[3]');
+  });
+
+  test('and are told apart by `operandOff`, which nothing else about the node records', () => {
+    expect(firstIndex(lifted(OPERAND)).operandOff).toBe(true);
+    expect(firstIndex(lifted(ADDEND)).operandOff).toBeUndefined();
+    // …and only by it: strip the flag and the trees are equal key for key
+    const { operandOff: _drop, ...bare } = firstIndex(lifted(OPERAND));
+    expect(bare).toEqual(firstIndex(lifted(ADDEND)));
+  });
+
+  // …and the same on the plain pointer deref, the other spelling memAccess returns.
+  const deref = (off: number): string => `fn f {
+^bb0(%0: u8*):
+  %1: s32 = load %0 {off=${off}, signed=false, width=1}
+  ret %1
+}
+`;
+
+  test('an offset of 0 records nothing — there is nothing for a fold to have absorbed', () => {
+    expect(firstIndex(lifted(deref(3))).operandOff).toBe(true);
+    expect(firstIndex(lifted(deref(0))).operandOff).toBeUndefined();
+  });
+});
 
 describe('leaf-base hoisting', () => {
   test('a numeric pointer CONSTANT (MMIO/RAM base) indexed at ≥2 distinct offsets is hoisted', () => {

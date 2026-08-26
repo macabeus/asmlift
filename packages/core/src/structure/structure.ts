@@ -444,6 +444,12 @@ function memAccess(
       }
     }
   }
+  // Whether the constant offset reached this access through the instruction's MEMORY OPERAND.
+  // The two facts are separate at L2 — `off` is the load/store's own immediate, any addend the
+  // address carried is already inside `baseExpr` — and folding them into one subscript below is
+  // what makes the two indistinguishable at L3, so the discriminator is recorded before the fold
+  // (see the `operandOff` note in l3/ast.ts).
+  const fromOperand = off !== 0 ? ({ operandOff: true } as const) : {};
   const g = globalOf(baseExpr, width);
   if (g) {
     const idxVal = g.idx;
@@ -469,9 +475,9 @@ function memAccess(
     const lead = siArr === undefined ? null : bareArrayLead(siArr, width, signed);
     if (lead !== null) {
       sym!.noteGlobal(g.name, T.ptr(T.int(width * 8, siArr!.elemSigned ?? false)));
-      return { k: 'index', base: { k: 'var', name: g.name }, idx, width, signed, ...lead };
+      return { k: 'index', base: { k: 'var', name: g.name }, idx, width, signed, ...lead, ...fromOperand };
     }
-    return { k: 'index', base: { k: 'addr', name: g.name }, idx, width, signed };
+    return { k: 'index', base: { k: 'addr', name: g.name }, idx, width, signed, ...fromOperand };
   }
   const bt = base.type;
   if (bt.kind === 'ptr' && bt.to.kind === 'struct') {
@@ -483,7 +489,7 @@ function memAccess(
     const ok = rt?.kind === 'ptr' && rt.to.kind === 'struct' && rt.to.name === bt.to.name && baseExpr.k !== 'index';
     return { k: 'field', base: ok ? baseExpr : { k: 'cast', to: bt, e: baseExpr }, name: `field_${off}` };
   }
-  return { k: 'index', base: baseExpr, idx: { k: 'const', value: off / width }, width, signed };
+  return { k: 'index', base: baseExpr, idx: { k: 'const', value: off / width }, width, signed, ...fromOperand };
 }
 
 // A variable-index array access `base[index]`, or `base[index].field_K` when a `fieldOff` marks an
