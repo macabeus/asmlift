@@ -801,7 +801,11 @@ export function enumerateCandidates(
     // same argument, not just a row. And a specific LEVER PAIRING is admitted on one of two
     // grounds, never on "it might help". FIRST, a row demands the joint spelling AND that
     // spelling is reachable from neither lever alone: /livebase × /indexed, × /sinkinit,
-    // × /nearbase and × /coalesce, each with its demanding row at the respell site. SECOND, a
+    // × /nearbase and × /coalesce, plus /vol-store × /unreduce and that pair × /ptr-field —
+    // each with its demanding row at the respell site. (A TRIPLE is admitted on the same ground
+    // and no weaker one: it is one joint spelling with one demanding row, and the pairs BELOW it
+    // are not thereby admitted — on synthetic:dmaptrsrc the two intermediate pairs measure 27 and
+    // 32 against the triple's 0, and neither is in the fan.) SECOND, a
     // lever COMMITS a policy the differ would otherwise never see — /nearbase × /sinkinit,
     // where `l3/nearbase.ts` picks one of two init orderings inside the pass, so without the
     // pairing that choice decides a match with no candidate beside it to lose to. The second
@@ -813,7 +817,13 @@ export function enumerateCandidates(
     // And a lever must PRESERVE SEMANTICS by construction: the differ referees byte-exactness
     // (a wrong candidate can never fake a score-0 match), but on a NONMATCH row the best-
     // scoring source is shown to the user — a semantically-wrong re-spelling there is
-    // plausible-but-wrong output, the defect class this project exists to avoid. Hence each
+    // plausible-but-wrong output, the defect class this project exists to avoid. THE ONE
+    // EXCEPTION IS THE SAME RULE READ FORWARD: where a lever cannot establish its semantics from
+    // inside the pass — `l3/unreduce.ts` moving a read into a loop whose device stores may make
+    // the DEVICE write memory — the spelling is marked `Candidate.matchOnly` and published ONLY
+    // at a byte-exact score, which is the clause in brackets above used as a licence instead of a
+    // consolation. It is never shown as a best-effort answer, so the nonmatch case the sentence
+    // is about cannot arise. Hence each
     // lever's decline-over-approximate gates, adversarially audited.
     // Takes a THUNK, so the lever's own computation is inside the try too. A lever that threw
     // from the pass itself — rather than from the contracts or the backend — would escape and
@@ -1452,7 +1462,11 @@ export function rankBy<S extends { score: number }>(
     }
   });
   if (results.length === 0) {
-    throw new Error(`no scorable candidate for '${symbol}': ${firstLine(lastScoreErr)}`, { cause: lastScoreErr });
+    // Naming the withheld count matters here: "no scorable candidate" with a null cause reads as a
+    // scorer failure, and a list that was entirely proof-gated is a different thing entirely.
+    const why =
+      lastScoreErr !== null ? firstLine(lastScoreErr) : `${withheld.length} candidate(s) withheld, none scored`;
+    throw new Error(`no scorable candidate for '${symbol}': ${why}`, { cause: lastScoreErr });
   }
   results.sort(compareScored);
   return { best: results[0], candidates: results.map(({ order: _order, ...c }) => c), dropped, withheld };

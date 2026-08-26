@@ -3249,6 +3249,31 @@ export const SYNTHETIC: SynthSpec[] = [
   // `dmavolsrc` rendering, modulo the function name. Both decompilers drop a device read whose
   // result nobody consumes.
   //
+  // WHAT THE ADVERSARIAL ROUND FOUND, because the next round will build on these rows and the
+  // premise it falsified was written in four files. `/unreduce` licensed moving a memory read into
+  // a loop on the ground that "a write to a hardware register is not a write to any object a C
+  // program declares, so such a loop cannot change what an ordinary read sees". The first clause
+  // is true and the second does not follow: a DMA controller reads a control word and then WRITES
+  // ORDINARY MEMORY itself. `dmaptrsrc`'s own reference ends every iteration with
+  // `gDma[2] = 0x81000020` — bit 31 set, a 32-word transfer into `[DMA3DAD]` — so the loop this
+  // family is ABOUT is exactly the loop the premise fails on. Modelled and executed, the admitted
+  // candidate turned a clean destination walk into wild writes.
+  //
+  // The fix is not a bar, because barring costs this row's match and buys nothing: `dmaptrsrc`'s
+  // reference really does read `gBg[bg].pTilemap` inside the loop, and the SOUND alternative —
+  // the read hoisted into a local above the loop — compiles to 16, not 0, because a C statement
+  // lands above the loop's ENTRY GUARD while the compiler's own invariant hoist lands below it
+  // (both objects disassembled; the guard is the `cmp r2,#0x1f / bgt` the load moves across).
+  // What ships instead is a target datum for the memory-model half (`deviceMemoryWriters`, the
+  // four DMA channel-enable halfwords) and a PROOF requirement for what it cannot settle: the
+  // spelling is published only at a byte-exact score and withheld everywhere else. On this row 4
+  // of the 16 candidates are now withheld, all at 35, and the fan's two 0s are untouched.
+  //
+  // Also measured while these rows were being attacked, and useful to whoever takes `dmanest`:
+  // `((struct Elem0 *)K)[a1].field_4` scores 0 on that row and `((s32 *)((a1 << 3) + K))[1]`
+  // scores 2 — two spellings one token apart, so the "`->field_N` and `[idx]` compile identically"
+  // premise in raise/structs.ts is CONDITIONAL and nothing says on what.
+  //
   // agbcc only, as the `read-once`, `uninit-local` and `value-home` families are. Every claim
   // above is a pair of spellings compiled with THIS compiler; whether ido7.1, gcc2.7.2kmc and
   // mwcc_242_81 promote a loop-invariant device store, delete a use-less device read, or read a

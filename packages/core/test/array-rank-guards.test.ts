@@ -136,6 +136,10 @@ describe('the PUBLICATION rule for a proof-gated spelling (rank.ts withheldReaso
     expect(won.best.label).toBe('unsigned/unreduce');
     expect(won.withheld).toEqual([]);
   });
+
+  test('an all-withheld list fails LOUD and says so, rather than reading as a scorer failure', () => {
+    expect(() => rankBy([proofed], 'f', () => ({ score: 7 }))).toThrow(/1 candidate\(s\) withheld/);
+  });
 });
 
 describe('the candidate ordering (rank.ts compareScored)', () => {
