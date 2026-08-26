@@ -351,8 +351,21 @@ const LIVEBASE_ADMISSIONS: readonly BaseAdmission[] = [
  *  question the differ has to settle is where the pool load sits, not whether the local exists:
  *  the head keeps the address live over everything above the access, the first-use position is
  *  where a single access loaded it. Which one the source wrote is per-function knowledge the asm
- *  does not carry, so both ride and the differ referees — `synthetic:basecell` is won by the head
- *  row and `sa3:sub_803213C` by the sunk one. */
+ *  does not carry, so both ride and the differ referees.
+ *
+ *  WHAT EACH ROW IS WORTH, ablated through the harness rather than read off the winning labels,
+ *  because three of the four labels the head row wins are TIES the sunk row also reaches.
+ *  Dropping the SUNK row costs two matches: `synthetic:foldsink` MATCH → diff:2 and
+ *  `sa3:sub_803213C` MATCH → diff:2. Dropping the HEAD row costs no match anywhere — including
+ *  `synthetic:basecell`, which its label wins only because it is enumerated first: the two rows
+ *  emit the identical source set there (measured over the corpus sweep, 0 distinct sources lost
+ *  on that row) and `seen` collapses the sunk one, so that row does not bracket this placement and
+ *  no row in this corpus does. Its whole measured return is 2 points on one NONMATCH row
+ *  (`kleod:ProcessInputAndUpdateEntities` 367 with, 369 without); `kleod:CountCollectedGems` 327
+ *  and `kleod:RollRandomLevelVariant` 18 either way. It is kept because it is a real spelling —
+ *  1432 distinct candidate sources over 21 observations that nothing else emits, and a C source
+ *  that initializes its base pointers where it declares them is the ordinary case — but a later
+ *  round pricing the agbcc fan should know it costs half of what this pair adds for that. */
 const BASEFOLD_ADMISSIONS: readonly BaseAdmission[] = [
   { suffix: '/basefold', gates: BASEFOLD_GATES, placement: 'head', pairings: false },
   { suffix: '/basefold/sinkinit', gates: BASEFOLD_GATES, placement: 'first-use', pairings: false },
@@ -1242,6 +1255,14 @@ export function enumerateCandidates(
           // differing key order re-runs a fan whose spellings then dedup as they do today), and
           // the property that rules the other direction out — that the text determines the tree —
           // is pinned by rank-tree-key.test.ts rather than assumed.
+          //
+          // The key therefore spans EVIDENCE fields too, `index.operandOff` among them, which
+          // `exprEquals` deliberately ignores (l3/ast.ts). The two are right to disagree: two
+          // trees identical but for that flag denote the same cells, so a CSE may collapse them,
+          // and they admit different bases under `BASEFOLD_GATES`, so a fan may not. Dropping it
+          // from the key would be the direction the paragraph above rules out. Priced over the
+          // artifact (1140 observations, five toolchains, both symbol-map configurations): the
+          // flag splits 0 keys, so the miss it can cause has no inhabitant.
           const treeKey = JSON.stringify(sfn);
           if (seenTrees.has(treeKey)) {
             continue;

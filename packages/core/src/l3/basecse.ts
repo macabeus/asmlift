@@ -49,7 +49,12 @@
 // So on the symbol half this is weaker than evidence-with-two-known-exceptions: it is a hint with
 // a live counterexample, which is precisely why it is a ROSTER ADMISSION and not a gate relaxation
 // — the inline spelling rides beside it in every case and `compareScored` orders by score, so the
-// hint being wrong costs a candidate compile and never a match. Promoting it to a default would
+// hint FIRING wrongly costs a candidate compile and never a match. Note which direction that
+// covers: it does not say the flag is free to LOSE. A `/basefold*` candidate that is never
+// enumerated takes whatever it would have won with it (deleting the sunk roster row costs
+// `synthetic:foldsink` and `sa3:sub_803213C` their matches), which is why `index.operandOff` is
+// carried from the lift instead of re-derived, and why a committed pass that can drop it is worth
+// a test (test/basecse.test.ts, the tail-merge describe). Promoting the hint to a default would
 // need this paragraph to say something it does not.
 //
 // It is EVIDENCE and not proof, which is why `BASEFOLD_GATES` below is a lever rather than a

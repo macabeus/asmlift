@@ -2852,13 +2852,15 @@ export const SYNTHETIC: SynthSpec[] = [
   //   `foldsink` MATCH — `basecell`'s single fold-evidence access placed in `basehome`'s position:
   //   ONE access through a numeric base at a nonzero byte offset, three statements down, so the
   //   two halves of the question are BOTH live and the row can only match if both are answered.
-  //   LADDER, compiled and scored against the reference build: asmlift's inline cast 3; the base
-  //   local assigned at the top of the body 9 — WORSE than not hoisting, the same signal
-  //   `basehome` gives, and the reason a placement policy that picks wrong regresses rather than
-  //   stalls; the base local assigned at its first use 0. The row is the bracket on the `/basefold`
-  //   admission's PLACEMENT: `l3/hoist.ts` takes it as an argument and rank.ts offers the
-  //   admission at both positions (`/basefold` and `/basefold/sinkinit`), so pinning either
-  //   position as the admission's single answer costs this row or `basecell`.
+  //   LADDER, read off this row's own `[score]` table rather than off a hand-written variant:
+  //   asmlift's inline cast 2; the base local assigned at the top of the body 9 — WORSE than not
+  //   hoisting, the same signal `basehome` gives, and the reason a placement policy that picks
+  //   wrong regresses rather than stalls; the base local assigned at its first use 0. The row is
+  //   the bracket on the `/basefold` admission's SUNK placement: `l3/hoist.ts` takes placement as
+  //   an argument and rank.ts offers the admission at both positions, and deleting the sunk row
+  //   costs this row and `sa3:sub_803213C` their matches. It does not bracket the HEAD position —
+  //   nothing in this corpus does, `basecell` included (rank.ts's BASEFOLD_ADMISSIONS note has
+  //   that ablation).
   //
   // THE CONTROL. `armkeep` MATCH — the same pure expression computed in BOTH arms, but consumed
   //   inside each arm rather than merged out of the `if`. agbcc keeps both copies, asmlift emits

@@ -182,28 +182,42 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   between modules, with no natural home in any one of their unit tests, so it is pinned in
   [`test/addr-placement.test.ts`](../packages/core/test/addr-placement.test.ts).
 
-  All THREE that place into that run now share their MECHANISM and spell their policy as one
-  argument: `l3/hoist.ts` owns name allocation for every pass that mints a local, and
-  `placeBaseLocals(sfn, body, minted, placement)` owns the leading base-init run, the first-use
-  query and the body rebuild, with `head`, `first-use` and `prepend` as three values of one
-  parameter rather than three implementations. `l3/basecse.ts` takes the policy through, so an
-  admission in `rank.ts`'s roster states WHERE its locals go beside WHICH bases it binds.
+  All three that place into that run now share the body rebuild, and TWO of them share the policy
+  as an argument: `l3/hoist.ts` owns name allocation for every pass that mints a local, and
+  `placeBaseLocals(sfn, minted, placement)` owns the leading base-init run, the first-use query and
+  the rebuild. `head` and `first-use` are two positions for a run this file has already ordered —
+  that is `HoistPlacement`, the only thing `l3/basecse.ts` accepts and the only thing a roster
+  admission may state, so a row in `rank.ts` says WHERE its locals go beside WHICH bases it binds.
+  `l3/nearbase.ts`'s `prepend` is not a third position: it returns before the query and the sort,
+  so it is `[...minted, ...body]` and shares the rebuild only. It is a separate type for a reason —
+  handing it to `hoistBaseLocals` spells a minted base's pool load above the base the compiler
+  loads first, the exact hazard that file's own header forbids, and it used to typecheck.
 
   Placement being an ARGUMENT is worth stating carefully, because two things about it are easy to
-  overclaim. It is not what a single row needed: `sinkInitsToFirstUse(hoistBaseLocals(sfn, g,
-'head'))` and `hoistBaseLocals(sfn, g, 'first-use')` emit the same C on `sa3:sub_803213C`'s own
-  tree and on all 105 (observation, gate table) pairs where any base binds over the artifact's
-  agbcc rows in both symbol-map configurations — 74 of them with something actually moving — so
-  that row was reachable through the `/sinkinit` pairing `rank.ts` already had.
-  What the fold is actually worth is that those two are now the same transform BY CONSTRUCTION
-  (`placeBaseLocals` orders the run by first use before consulting the policy) rather than by
-  corpus luck. Before that they disagreed whenever two inits that CANNOT move arrived in an order
-  other than first-use order — constructible, with no inhabitant in this corpus, and pool-load
-  order when it happens — so one `/sinkinit` suffix named two transforms in the label namespace
-  cross-round attribution greps.
-  And it is not a licence to unify POLICY: `l3/nearbase.ts` wants `prepend`, and re-placing its
-  cluster bases in first-use order like basecse's turns `synthetic:dmafield` from a MATCH into
-  diff:5. Placement is refereed by the differ per pass, never derived from another pass's note.
+  overclaim. It is not what a single row needed, and it is not what made one reachable:
+  `sinkInitsToFirstUse(hoistBaseLocals(sfn, g, 'head'))` and `hoistBaseLocals(sfn, g, 'first-use')`
+  emit the same C on `sa3:sub_803213C`'s own tree and on all 105 (observation, gate table) pairs
+  where any base binds over the artifact's agbcc rows in both symbol-map configurations — 74 of
+  them with something actually moving. That is a lemma about the two SPELLINGS and nothing more.
+  It does not say the row was already reachable: the `/sinkinit` pairing loop fans only over rows
+  carrying `pairings`, which is `/livebase` and `/livebase-block`, and neither admits this row's
+  base — run `origin/main`'s core on `test/corpus/agbcc-tailmerge.s` and every gate table admits
+  `[]`, the standalone lever declines, and 0 of 12 candidates carry a `/sinkinit` or `/basefold`
+  label. What made the row reachable is the SYMBOL half of `unfoldedOffset`; reaching it then cost
+  a roster line, spelled as a placement argument here and spellable as `pairings: true` instead.
+  What the fold is actually worth is that the two spellings are now the same transform BY
+  CONSTRUCTION (`placeBaseLocals` orders the run by first use before consulting the policy) rather
+  than by corpus luck. Before that they disagreed on the inits that CANNOT move, and — found in
+  round 2 — on the inits that sink to the SAME statement, where the splice loop reversed them:
+  3544 of 28646 candidate sources, 8 functions, no score change, and the first-use-ordered spelling
+  of a sunk run was never enumerated at all.
+  And it is not a licence to unify POLICY: `l3/nearbase.ts` prepends, and re-placing its cluster
+  bases in first-use order like basecse's turns `synthetic:dmafield` from a MATCH into diff:5.
+  That is a row and not a mechanism, so it is a DEFAULT and the differ referees it like any other —
+  `rank.ts` offers `/nearbase/sinkinit` beside `/nearbase` (+590 candidate sources on 15 of 1140
+  observations). Before that it did not, which made "placement is refereed by the differ per pass"
+  false for the one pass the sentence cited: nearbase emitted one tree and its ordering decided a
+  match with nothing beside it to lose to.
 
   The eligibility half is separate and stays separate. `gates` and `placement` are independent
   arguments and neither implies the other, which is what keeps the `for`-init disagreement in
@@ -217,10 +231,15 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   For the record on what earned what, because a later round will re-derive it otherwise: the 2
   points on `sa3:sub_803213C` were the missing base local, NOT the position of the shared
   constant. The winning candidate still emits `v0 = 1;` as the first statement of the body;
-  `p0 = (u8 *)&gStageData;` sinking to its own first use is the whole of the difference. The
-  head placement scores worse than not hoisting at all (5 · 2 · 0 there, and 9 · 3 · 0 on the
-  `synthetic:foldsink` isolate), which is why the roster offers both and the differ referees —
-  `synthetic:basecell` is won by the head row.
+  `p0 = (u8 *)&gStageData;` sinking to its own first use is the whole of the difference. Head
+  placement scores worse than not hoisting at all, read off each row's own `[score]` table —
+  head 5 · inline 2 · sunk 0 there, and head 9 · inline 2 · sunk 0 on the `synthetic:foldsink`
+  isolate. So the roster offers both and the differ referees. The SUNK row is bracketed (delete it
+  and both those rows drop to diff:2); the HEAD row is not bracketed by anything in this corpus.
+  `synthetic:basecell` looks like its bracket and is not — both rows emit the identical source
+  there and `seen` collapses the sunk one, so the head row wins that label by being enumerated
+  first. Its measured return is 2 points on one nonmatch row, for 1432 of the 2878 candidate
+  sources the pair adds; `rank.ts`'s BASEFOLD_ADMISSIONS note carries the ablation.
 
   A second consolidation is BOOKED and deliberately unpaid: the FOUR home scopes in
   `structure/analysis.ts` (`homeSharedAddresses`, `homeLoopExprs`, `homeDerivedReads`,

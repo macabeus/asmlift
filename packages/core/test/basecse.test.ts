@@ -168,10 +168,19 @@ ${(thenCarriesEvidence ? addend : operand)('%6', '%9')}
   test('the blast radius is bounded to the roster: the COMMITTED table cannot read the flag', () => {
     // `unfoldedOffset` has exactly one reader — `BASEFOLD_GATES`' `single-use-unfolded` rule, which
     // only `rank.ts`'s roster asks for. So whatever a merge decides, `structureChecked`'s own hoist
-    // binds the same bases either way and the worst a lost or gained flag can do is offer or
-    // withhold a CANDIDATE. `compareScored` orders by score, so that can never cost a match.
-    // Widen the readership — promote the exemption into `BASECSE_GATES` — and this bound goes with
-    // it, which is the thing to check before doing so.
+    // binds the same bases either way: that is the bound, and it is about MEANING, not about
+    // score. Widen the readership — promote the exemption into `BASECSE_GATES` — and it goes.
+    //
+    // The two directions are NOT symmetric, and reading them as one is how this note first got
+    // written. A flag the merge INVENTS offers an extra candidate, and `compareScored` orders by
+    // score, so that costs a compile and nothing else. A flag it EATS withholds one, and
+    // withholding a `/basefold*` candidate costs whatever that candidate would have won: deleting
+    // the sunk roster row turns `synthetic:foldsink` and `sa3:sub_803213C` from MATCH into diff:2
+    // (ablated through the harness). So "it can only offer or withhold a candidate" is a bound on
+    // meaning and not on matches.
+    // Its reach today is zero, which is a measurement and not an argument: over the whole artifact
+    // (1140 observations, five toolchains, both symbol-map configurations) `mergeCommonTails`
+    // peels 25 tails and NONE of them is a pair of arms differing only in `operandOff`.
     expect(admittedBases(structureChecked(parse(twoArms(true)), {}), BASECSE_GATES)).toEqual([]);
     expect(admittedBases(structureChecked(parse(twoArms(false)), {}), BASECSE_GATES)).toEqual([]);
   });
@@ -741,14 +750,21 @@ describe('the block admission is WIRED into enumeration', () => {
 
   test('/basefold joins no PAIRING: no row demands the joint spelling', () => {
     // The `/livebase ×` products fan over the rows that declared `pairings`, and this one does
-    // not — so the labels it contributes are its own family and nothing crossed with it.
-    const basefold = candsFor('basecell')
+    // not — so the labels it contributes are its own family and nothing crossed with it. Read on
+    // `foldsink`, where BOTH roster rows fire and are distinct: on `basecell` they emit the same
+    // source and `seen` keeps only the head one, so `/basefold/sinkinit` is absent there for a
+    // reason that has nothing to do with pairings and this test would pass without checking
+    // anything.
+    const basefold = candsFor('foldsink')
       .map((x) => x.label)
       .filter((l) => l.includes('basefold'));
-    expect(basefold.length).toBeGreaterThan(0);
-    for (const suffix of ['/indexed', '/nearbase', '/coalesce', '/sinkinit']) {
+    expect(basefold).toContain('unsigned/basefold');
+    expect(basefold).toContain('unsigned/basefold/sinkinit');
+    // the roster's own two suffixes and nothing else — no product crossed with them
+    for (const suffix of ['/indexed', '/nearbase', '/coalesce']) {
       expect(basefold.filter((l) => l.includes(suffix))).toEqual([]);
     }
+    expect(basefold.filter((l) => l.includes('/sinkinit') && !l.includes('/basefold/sinkinit'))).toEqual([]);
   });
 
   test('every /livebase PRODUCT fans over the roster, and one of them is reachable no other way', () => {
