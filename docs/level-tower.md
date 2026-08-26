@@ -170,10 +170,11 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   [`cli/src/objdiff.ts`](../packages/cli/src/objdiff.ts) collects the 20880 repeats.
 
   Which population a pass belongs to decides how much its opinions cost. Several passes answer
-  "is this address a local?", and what separates them is PLACEMENT: never (`raise/gvn.ts`), the
-  function top (`l3/basecse.ts`, `l3/nearbase.ts`), that same run re-placed at each init's first
-  use (`l3/sinkinit.ts`), the innermost enclosing scope (`l3/scopebase.ts`), immediately before the
-  call (`l3/argbase.ts`). All but `gvn` and basecse's own hoist are candidate generators, so their
+  "is this address a local?", and what separates them is PLACEMENT: never (`raise/gvn.ts`), a
+  position in the top-level statement list — the function top, the minted inits above a run already
+  there, or each init at its first use (`l3/basecse.ts`, `l3/nearbase.ts`, `l3/sinkinit.ts`) — the
+  innermost enclosing scope (`l3/scopebase.ts`), immediately before the call (`l3/argbase.ts`).
+  All but `gvn` and basecse's own committed hoist are candidate generators, so their
   disagreement costs a candidate. Those two are committed, so theirs would cost a **match**, and
   the constraint that keeps them compatible lives in neither file: `gvn`'s entry-block hoist is
   free only because `structure/analysis.ts` re-materializes address ops at each use instead of
@@ -181,20 +182,45 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   between modules, with no natural home in any one of their unit tests, so it is pinned in
   [`test/addr-placement.test.ts`](../packages/core/test/addr-placement.test.ts).
 
-  The two that place into basecse's run now share their MECHANISM AND spell their policy as one
+  All THREE that place into that run now share their MECHANISM and spell their policy as one
   argument: `l3/hoist.ts` owns name allocation for every pass that mints a local, and
   `placeBaseLocals(sfn, body, minted, placement)` owns the leading base-init run, the first-use
-  query and the body rebuild, with `head` and `first-use` as two values of one parameter rather
-  than two implementations. `l3/basecse.ts` takes the policy through, so an admission in
-  `rank.ts`'s roster states WHERE its locals go beside WHICH bases it binds, and offering the same
-  bases in the other position costs one roster line instead of a second pass composed on top.
-  `sa3:sub_803213C` is what earned it: a base reached ONCE, where the pool load belongs at the
-  access and the head placement scores worse than not hoisting at all (5 · 2 · 0 there, and
-  9 · 3 · 0 on the `synthetic:foldsink` isolate). Which one a given source wrote is not derivable,
-  so the roster offers both and the differ referees — `synthetic:basecell` is won by the head row.
-  What the policy argument is NOT is a licence to move which bases BIND: `gates` and `placement`
-  are separate arguments and neither implies the other, which is what keeps the `for`-init
-  disagreement in `addr-placement.test.ts` a gate question rather than a placement one.
+  query and the body rebuild, with `head`, `first-use` and `prepend` as three values of one
+  parameter rather than three implementations. `l3/basecse.ts` takes the policy through, so an
+  admission in `rank.ts`'s roster states WHERE its locals go beside WHICH bases it binds.
+
+  Placement being an ARGUMENT is worth stating carefully, because two things about it are easy to
+  overclaim. It is not what a single row needed: `sinkInitsToFirstUse(hoistBaseLocals(sfn, g,
+'head'))` and `hoistBaseLocals(sfn, g, 'first-use')` emit the same C on `sa3:sub_803213C`'s own
+  tree and on all 105 (observation, gate table) pairs where any base binds over the artifact's
+  agbcc rows in both symbol-map configurations — 74 of them with something actually moving — so
+  that row was reachable through the `/sinkinit` pairing `rank.ts` already had.
+  What the fold is actually worth is that those two are now the same transform BY CONSTRUCTION
+  (`placeBaseLocals` orders the run by first use before consulting the policy) rather than by
+  corpus luck. Before that they disagreed whenever two inits that CANNOT move arrived in an order
+  other than first-use order — constructible, with no inhabitant in this corpus, and pool-load
+  order when it happens — so one `/sinkinit` suffix named two transforms in the label namespace
+  cross-round attribution greps.
+  And it is not a licence to unify POLICY: `l3/nearbase.ts` wants `prepend`, and re-placing its
+  cluster bases in first-use order like basecse's turns `synthetic:dmafield` from a MATCH into
+  diff:5. Placement is refereed by the differ per pass, never derived from another pass's note.
+
+  The eligibility half is separate and stays separate. `gates` and `placement` are independent
+  arguments and neither implies the other, which is what keeps the `for`-init disagreement in
+  `addr-placement.test.ts` a gate question. And `isBaseInit` ([`l3/hoist.ts`](../packages/core/src/l3/hoist.ts))
+  — a ptr-cast of an `addr`/`const` assigned into a declared non-volatile local — is the WRONG
+  place for any of this: it is the sole definition of where the run ends, read by all three passes
+  through `placeBaseLocals`, so widening it to admit (say) a scalar `v0 = 1;` would also move what
+  `l3/basecse.ts` RE-ORDERS. It is private now, which makes the trap easier to hit rather than
+  harder: the knob is three lines from the predicate. The knob is the policy argument.
+
+  For the record on what earned what, because a later round will re-derive it otherwise: the 2
+  points on `sa3:sub_803213C` were the missing base local, NOT the position of the shared
+  constant. The winning candidate still emits `v0 = 1;` as the first statement of the body;
+  `p0 = (u8 *)&gStageData;` sinking to its own first use is the whole of the difference. The
+  head placement scores worse than not hoisting at all (5 · 2 · 0 there, and 9 · 3 · 0 on the
+  `synthetic:foldsink` isolate), which is why the roster offers both and the differ referees —
+  `synthetic:basecell` is won by the head row.
 
   A second consolidation is BOOKED and deliberately unpaid: the FOUR home scopes in
   `structure/analysis.ts` (`homeSharedAddresses`, `homeLoopExprs`, `homeDerivedReads`,

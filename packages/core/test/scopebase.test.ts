@@ -1,9 +1,10 @@
 // The `/scopebase` lever (l3/scopebase.ts): name a reused global base at the INNERMOST scope that
 // holds its uses.
 //
-// It exists because `basecse.ts` hoists only to the FUNCTION TOP and only for an `addr`/`const`
-// base. Both limits cost real bytes: a top-level hoist extends a live range the original never had,
-// and the rank-aware bare spelling `gSym[0][i]` has a `var` base that basecse cannot see. These pin
+// It exists because `basecse.ts` hoists only to a POSITION IN THE TOP-LEVEL STATEMENT LIST — the
+// function top or an init's first use, never inside a nested scope — and only for an `addr`/`const`
+// base. Both limits cost real bytes: neither of those positions is inside the `if` arm that holds
+// the uses, and the rank-aware bare spelling `gSym[0][i]` has a `var` base basecse cannot see. These pin
 // the scope choice and every refusal — the lever is differ-refereed, so its risk is spelling
 // quality, not correctness of the winner, but a wrong REWRITE would still be shown on a nonmatch row.
 import { describe, expect, test } from 'vitest';

@@ -288,19 +288,42 @@ const createdLocals = (from: SFn, to: SFn): Set<string> => {
  *  this" test: `structureChecked` runs the DEFAULT hoist to its fixpoint before any tree reaches
  *  here, so a key still admissible is by construction one `BASECSE_GATES` rejected, and binding
  *  nothing is the whole of the decline.
- *  What the exemption reaches, over the 324 agbcc rows the artifact carries and in BOTH symbol-map
- *  configurations (450 observations): 18 observations where it binds a key the default table
- *  refuses, spread over 13 rows. One key is numeric on `synthetic:basecell` and two on
- *  `kleod:RollRandomLevelVariant`, both map-less — with a map the pool constant lifts to a `gaddr`
- *  and the numeric clause stands down. The other 17 are SYMBOL keys over 11 rows in three
- *  projects, 5 of those observations map-ful and 11 map-less. A target that declares no fold is
- *  offered neither row — not to protect a score (no roster row can cost one; see
- *  LIVEBASE_BLOCK_GATES) but because `unfoldedOffset` would be read as evidence on an instruction
- *  that carries the addend by construction, where there is none.
+ *  WHAT THE EXEMPTION REACHES, over the 325 agbcc rows the artifact carries and in BOTH symbol-map
+ *  configurations — 451 observations, of which 39 do not lift on this one-tree census.
+ *  HOW TO REPRODUCE IT, because the first published version of this census did not: the
+ *  prototypes live inside `row.scripts.asmlift`'s `PROTO_INPUT` heredoc, NOT in a `row.proto`
+ *  field, and a census that reads the field that is not there lifts all 451 with `prototypes: {}`
+ *  while the harness scores every one of them with `--proto proto.json`. Numbers below are from
+ *  the heredoc.
+ *  20 observations bind a key the default table refuses, spread over 14 rows in 4 projects (6
+ *  map-ful, 14 map-less), 25 keys in all. FOUR are numeric — two on `kleod:RollRandomLevelVariant`
+ *  and one each on `synthetic:basecell` and `synthetic:foldsink`, all map-less, because with a map
+ *  the pool constant lifts to a `gaddr` and the numeric clause stands down while the symbol clause
+ *  takes over. The other 21 are SYMBOL keys over 11 rows in three projects (6 of those
+ *  observations map-ful, 11 map-less), and all 21 are what the symbol half added: on the
+ *  value-proxy predicate this replaced, the same census binds the 4 numeric keys and nothing else,
+ *  losing none of them. `admittedBases(sfn, BASECSE_GATES)` — the COMMITTED table — differs on 0
+ *  of 451, which is the check that says the widening stayed on the roster.
+ *  A target that declares no fold is offered neither row — not to protect a score (no roster row
+ *  can cost one; see LIVEBASE_BLOCK_GATES) but because `unfoldedOffset` would be read as evidence
+ *  on an instruction that carries the addend by construction, where there is none.
  *  On klonoa's `LoadBGTilemapData` — a checkout function rather than a row, so re-run it with the
  *  ranked command in docs/ranked-repro.md — the admission declines on every structuring, leaving
  *  that fan the size it was: 48000 candidates either way. All floors, though: the ranked path
- *  structures each function many ways where this census builds one tree per observation. */
+ *  structures each function many ways where this census builds one tree per observation.
+ *
+ *  WHAT THE PAIR COSTS. The two rows plus the symbol widening add 2878 distinct candidates to the
+ *  agbcc tier — 24326 → 27204 over the same 451 observations, +11.8% — on 25 of them, 1446 sources
+ *  under `/basefold` and 1432 under `/basefold/sinkinit`. It is CONCENTRATED, not spread: in the
+ *  map configuration the harness uses on real rows, `kleod:UpdateCameraScroll` takes +512 (5200 →
+ *  5712), `kleod:ProcessInputAndUpdateEntities` +384, `kleod:UpdateWorldMapNodeAnim` +88,
+ *  `kleod:CountCollectedGems` +64 and nothing else more than 32. The first of those is an
+ *  `outcome: noncompile` row — `decompileRanked` throws only when EVERY candidate failed to build
+ *  — so its whole fan is compiled and discarded, and this made that discard 10% bigger. Measured
+ *  on the round's own two bench runs (shared box): that row 377.6s → 483.0s, the second 238.4s →
+ *  313.6s for a 369 → 367 gain, real tier 416.1s → 529.4s. Priced, not free: the two rows the
+ *  widening WINS (`ProcessInputAndUpdateEntities` and `CountCollectedGems`, both on the head row)
+ *  and `sa3:sub_803213C` on the sunk one are what it is bought with. */
 interface BaseAdmission {
   suffix: string;
   gates: readonly Gate<BaseKey>[];

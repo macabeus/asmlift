@@ -153,11 +153,7 @@ export function nearBaseClusters(sfn: SFn, span: number): SFn | null {
   // `signed/livebase/volatile/nearbase/initfirst`) from a MATCH into diff:5: its cluster base is
   // reached at 2+ addresses by construction, so its pool word is not "first touched late", and the
   // bytes say it was loaded before the hoist run beneath it.
-  const { body } = placeBaseLocals(
-    { ...sfn, locals },
-    sfn.body.map((s) => mapStmtExprs(s, rewrite)),
-    inits,
-    'prepend',
-  );
+  const rewritten = sfn.body.map((s) => mapStmtExprs(s, rewrite));
+  const { body } = placeBaseLocals({ ...sfn, locals, body: rewritten }, rewritten, inits, 'prepend');
   return { ...sfn, locals, body };
 }

@@ -55,8 +55,10 @@
 // in `test/addr-placement.test.ts`; before that they rested on a run nobody could repeat.
 //
 // FOUR modules now answer "is this address a local?" with independent policies — here: never;
-// basecse: at the function top, when reused 2+ times; l3/scopebase.ts: at the innermost scope
-// holding the uses; l3/argbase.ts: immediately before a call whose arguments share it. Reconciling
+// basecse: at whichever of the two positions `l3/hoist.ts` is handed (the COMMITTED call states
+// the function top, its roster admissions also offer each init's first use), when the gate table
+// admits the base; l3/scopebase.ts: at the innermost scope holding the uses; l3/argbase.ts:
+// immediately before a call whose arguments share it. Reconciling
 // them is recorded debt, and the same test pins the two places they actively disagree, because a
 // consolidation has to PICK rather than discover them: a `for`'s init (basecse reads it at loop
 // cadence and refuses, scopebase at the enclosing one and hoists) and a global name shadowed by a

@@ -28,11 +28,29 @@
 // `BaseKey.unfoldedOffset` is that shape: the access's constant offset reached the MEMORY OPERAND
 // rather than the materialized literal, which `l3/ast.ts`'s `index.operandOff` carries down from
 // the lift because the fold at L3 makes the two indistinguishable.
-// Two inline shapes could have put it there and do not: inline READS are not CSE'd across
-// addresses (three of them emit three pool words, and a base another use leaves live still takes
-// its own second word), and the inline STORE pair agbcc does CSE (`*(u8 *)0x3001100 = v;
-// *(u16 *)0x3001102 = v;` → one pool word plus `add r0, r0, #0x2`) spends the offset on an `add`,
-// which the frontend folds back into the address, leaving no operand offset to read.
+// HOW STRONG THE EVIDENCE IS, compiled in both directions rather than reasoned about — and the
+// answer differs between the two base kinds, which an earlier version of this note got wrong.
+// For a NUMERIC base every inline shape tried spends the offset somewhere the operand does not
+// see it: one read folds it into the literal (`.word 0x3001103` + `ldrb [r0]`); several reads at
+// several offsets share ONE pool word and pay `sub`/`add` per access; a store pair agbcc CSEs
+// (`*(u8 *)0x3001100 = v; *(u16 *)0x3001102 = v;` → one pool word plus `add r1, r1, #0x2`) spends
+// it on an add, which the frontend folds back into the address; and a read whose bare address is
+// ALSO used as a value takes a SECOND literal (`.word 0x3001100` + `.word 0x3001103`) rather than
+// an operand offset.
+// For a SYMBOL base that last shape is a COUNTEREXAMPLE, and it is the one thing that separates
+// the two. `void live(void){ sink((int)(u8 *)&gS); sink(((u8 *)&gS)[3]); }` emits ONE `.word gS`
+// and `ldrb r0, [r4, #0x3]` — agbcc CSEs the symbol reference where it re-materializes the integer
+// — so the inline subscript spelling produces exactly the shape this rule reads as evidence
+// against it. asmlift lifts that asm back to the correct `((u8 *)&gS)[3]` and then offers the
+// named-base respelling anyway. Measured reach: of the 21 keys the symbol half newly admits over
+// the artifact's agbcc rows in both symbol-map configurations, 4 are on a base whose address the
+// tree also uses as a value (2 distinct keys, on `kleod:ProcessInputAndUpdateEntities` and
+// `pokeemerald:TrySetCantSelectMoveBattleScript`).
+// So on the symbol half this is weaker than evidence-with-two-known-exceptions: it is a hint with
+// a live counterexample, which is precisely why it is a ROSTER ADMISSION and not a gate relaxation
+// — the inline spelling rides beside it in every case and `compareScored` orders by score, so the
+// hint being wrong costs a candidate compile and never a match. Promoting it to a default would
+// need this paragraph to say something it does not.
 //
 // It is EVIDENCE and not proof, which is why `BASEFOLD_GATES` below is a lever rather than a
 // relaxation of the default table. agbcc folds a subscript but keeps an aggregate MEMBER offset in
@@ -41,11 +59,11 @@
 // store. So the shape has two sources and asmlift can spell only one of them; rank.ts offers both
 // and the differ referees.
 //
-// A SYMBOL base carries the same evidence and reads the same rule. agbcc folds a symbol's offset
-// exactly as it folds a numeric one — `((u8 *)&gSym)[3]` emits `.word gSym+0x3` + `ldrb [r1]`
-// where `gSym.d` and `u8 *p = (u8 *)&gSym; p[3]` both emit `.word gSym` + `ldrb [r1, #0x3]` — and
-// the relocation's addend arrives as an explicit `add` where the operand offset arrives as the
-// load's own, so the two are one flag apart at the point the offsets fold together.
+// A SYMBOL base reads the same rule, one exception weaker (above). agbcc folds a symbol's offset
+// as it folds a numeric one — `((u8 *)&gSym)[3]` emits `.word gSym+0x3` + `ldrb [r1]` where
+// `gSym.d` and `u8 *p = (u8 *)&gSym; p[3]` both emit `.word gSym` + `ldrb [r1, #0x3]` — and the
+// relocation's addend arrives as an explicit `add` where the operand offset arrives as the load's
+// own, so the two are one flag apart at the point the offsets fold together.
 //
 // SCOPE / SOUNDNESS. Only an `index` node whose base is a bare `addr` (a global address) or a bare
 // `const` (a numeric pointer address) is eligible, keyed by (base, width, signedness) — never an
@@ -350,7 +368,10 @@ export function hoistBaseLocals(
   // (see `collect`) — deliberately reaching the single default run too (a head of user pointer
   // inits before a firing hoist), where it repairs the same invariant.
   const locals = [...sfn.locals, ...newLocals];
-  // the minted locals must be DECLARED before the query, or first-use would not know their names
-  const { body } = placeBaseLocals({ ...sfn, locals }, rewritten, hoistStmts, placement);
+  // the minted locals must be DECLARED before the query, or first-use would not know their names.
+  // `body: rewritten` too: `placeBaseLocals` reads the shell for its declarations and takes the
+  // statements as its own argument, so handing it the PRE-rewrite body would be inert and would
+  // read as a bug at every later glance.
+  const { body } = placeBaseLocals({ ...sfn, locals, body: rewritten }, rewritten, hoistStmts, placement);
   return { ...sfn, body, locals };
 }

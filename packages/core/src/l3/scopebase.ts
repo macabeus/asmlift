@@ -4,12 +4,16 @@
 // The lever earns its place: returning `null` from `hoistScopedBases` costs
 // kleod:UpdateHUDCounterDisplay its match, so the benchmark's zero-lost gate guards this file.
 //
-// `l3/basecse.ts` already hoists a reused leaf base — but always to the FUNCTION TOP, and only for
-// an `addr`/`const` base. Both limits are load-bearing here, and each costs a real row:
+// `l3/basecse.ts` already hoists a reused leaf base — but only into the TOP-LEVEL statement list
+// (the function top, or an init's first use where a roster row asks `l3/hoist.ts` for that), never
+// into a nested scope, and only for an `addr`/`const` base. Both limits are load-bearing here, and
+// each costs a real row:
 //
-//   PLACEMENT. A base used only inside one `if` arm, hoisted to the function top, is live across
-//   everything before that arm — a live range the original never had, which is the register-pressure
-//   failure basecse's own loop gate exists for. That argument is why the lever is scope-aware; it is
+//   PLACEMENT. A base used only inside one `if` arm is live across everything before that arm
+//   under either of basecse's positions — a live range the original never had, which is the
+//   register-pressure failure basecse's own loop gate exists for. First-use placement narrows that
+//   range and does not close it: the init still lands ABOVE the `if`, because sinking INTO the arm
+//   is what needs the domination work this pass does. That argument is why the lever is scope-aware; it is
 //   NOT a claim about what the lever achieves, and no committed measurement separates the two
 //   placements (the one that did edited a reference source by hand and cannot be re-run). On
 //   kleod:UpdateHUDCounterDisplay the primary path declines outright (a later pass retired the phi

@@ -130,9 +130,10 @@ export type BaseInitPlacement = 'head' | 'first-use' | 'prepend';
 /** `body` rebuilt with `minted` added to its leading base-init run and the whole run placed per
  *  `placement`, plus how many inits ended up away from the head.
  *
- *  `sfn` supplies the locals and is NOT read for its body — the caller may have rewritten it — so
- *  a caller that mints must pass an `sfn` already declaring the new names, or the first-use and
- *  mention queries would not know them.
+ *  `sfn` is the DECLARATION ENVIRONMENT: the locals and params the first-use and mention queries
+ *  resolve against, so a caller that mints must pass a shell already declaring the new names. Its
+ *  `body` is not read — `body` is the argument — and every caller passes the same statements in
+ *  both, so nothing here can be computed against a stale tree.
  *
  *  ONE ORDER, THEN THE POLICY. The run is put in FIRST-USE order under both policies before
  *  `placement` is consulted: that order is pool-load order, and it is what makes the two policies

@@ -1,5 +1,6 @@
 // The cross-module contract between the four passes that answer "is this address a local?" —
-// raise/gvn.ts (never), l3/basecse.ts (function top), l3/scopebase.ts (innermost scope),
+// raise/gvn.ts (never), l3/basecse.ts (the function top on its committed call; also each init's
+// first use, on the roster rows that ask for it), l3/scopebase.ts (innermost scope),
 // l3/argbase.ts (before the call). Each is unit-tested on its own; what has no home is what they
 // promise EACH OTHER, which is where a consolidation would break something silently.
 import { describe, expect, test } from 'vitest';

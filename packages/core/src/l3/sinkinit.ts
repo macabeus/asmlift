@@ -1,8 +1,10 @@
 // L3 re-spelling lever: sink each leading pointer-base INIT to the statement that first uses it.
 //
-// `l3/basecse.ts` emits every base hoist at the head of `sfn.body`, so a base first touched
-// halfway down the function is live across everything above it — a live range the original never
-// had, and agbcc pays for it with a callee-saved register. Compiled pair on `synthetic:basehome`:
+// `l3/basecse.ts`'s COMMITTED call emits every base hoist at the head of `sfn.body`, so a base
+// first touched halfway down the function is live across everything above it — a live range the
+// original never had, and agbcc pays for it with a callee-saved register. (Its roster admissions
+// can ask for this placement directly, through the same `l3/hoist.ts` mechanism this lever uses;
+// what this lever adds is reaching the run on a tree NOTHING re-hoisted.) Compiled pair on `synthetic:basehome`:
 // assigning at the top adds `push {r4, lr}` / `pop {r4}` / `pop {r0}` / `bx r0` where assigning at
 // the first use keeps a plain `bx lr`. The ladder that row records is the argument for the lever
 // being a PLACEMENT rather than a wider hoist — top-placed 11, not hoisted at all 9, placed at
