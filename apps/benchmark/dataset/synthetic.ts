@@ -2824,12 +2824,13 @@ export const SYNTHETIC: SynthSpec[] = [
   //   byte-identical to the named base (likewise a union member, and the write direction).
   //   asmlift can spell only one of the two, so the differ referees.
   //   The row is agbcc alone and holds the ADMITTED case; the refusals that keep the admission
-  //   off the naive ablation below are gate-level, pinned in test/basecse.test.ts — an offset of 0
-  //   (there the fold is the identity), a base of 0 (no literal for a subscript to fold INTO), a
-  //   target that declares no fold, and a SYMBOL base. That last one is refused because the LIFT
-  //   folds a relocation addend back into the index, so all four spellings of that access reach L3
-  //   as one tree — NOT because the bytes agree: they do not, `((u8 *)&gSym)[3]` emitting
-  //   `.word gSym+0x3` + `ldrb [r1]`.
+  //   off the naive ablation below are gate-level, pinned in test/basecse.test.ts — an offset the
+  //   ADDRESS carried rather than the memory operand (a relocation addend, a folded `add`, or an
+  //   offset of 0, where the fold is the identity), a base of 0 (no literal for a subscript to
+  //   fold INTO), and a target that declares no fold. A SYMBOL base reads the same rule off the
+  //   same evidence: the bytes never agreed there either (`((u8 *)&gSym)[3]` emits
+  //   `.word gSym+0x3` + `ldrb [r1]` where `gSym.d` and a named base both emit `.word gSym` +
+  //   `ldrb [r1, #0x3]`), and `index.operandOff` is what carries the difference down from the lift.
   //
   //   `basehome` MATCH — THREE accesses through one base whose first use is not the function's
   //   first statement. The hoist fires here, but `l3/basecse.ts` emits every init at the head of
@@ -2847,6 +2848,17 @@ export const SYNTHETIC: SynthSpec[] = [
   //   is the scope-aware sibling and does not help: the innermost enclosing scope here IS the
   //   function body. Eligibility and placement are the two halves of one question and both ride as
   //   candidates — `/basefold` and `/sinkinit`, paired over the admission roster.
+  //
+  //   `foldsink` MATCH — `basecell`'s single fold-evidence access placed in `basehome`'s position:
+  //   ONE access through a numeric base at a nonzero byte offset, three statements down, so the
+  //   two halves of the question are BOTH live and the row can only match if both are answered.
+  //   LADDER, compiled and scored against the reference build: asmlift's inline cast 3; the base
+  //   local assigned at the top of the body 9 — WORSE than not hoisting, the same signal
+  //   `basehome` gives, and the reason a placement policy that picks wrong regresses rather than
+  //   stalls; the base local assigned at its first use 0. The row is the bracket on the `/basefold`
+  //   admission's PLACEMENT: `l3/hoist.ts` takes it as an argument and rank.ts offers the
+  //   admission at both positions (`/basefold` and `/basefold/sinkinit`), so pinning either
+  //   position as the admission's single answer costs this row or `basecell`.
   //
   // THE CONTROL. `armkeep` MATCH — the same pure expression computed in BOTH arms, but consumed
   //   inside each arm rather than merged out of the `if`. agbcc keeps both copies, asmlift emits
@@ -3027,6 +3039,22 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc'],
     ctx: 'void basecell(s32 *out);',
     proto: { basecell: { params: ['void *'], returnsVoid: true } },
+  },
+  {
+    sym: 'foldsink',
+    src:
+      '#define gStage 0x03001100\n' +
+      'void foldsink(s32 a, s32 b, s32 *out){\n' +
+      '  u8 *p;\n' +
+      '  out[0] = a * b;\n' +
+      '  out[1] = a + b;\n' +
+      '  p = (u8 *)gStage;\n' +
+      '  out[2] = (p[3] != 7);\n' +
+      '}',
+    features: ['value-home', 'pointer'],
+    toolchains: ['agbcc'],
+    ctx: 'void foldsink(s32 a, s32 b, s32 *out);',
+    proto: { foldsink: { params: ['s32', 's32', 'void *'], returnsVoid: true } },
   },
   {
     sym: 'basehome',

@@ -22,17 +22,17 @@
 //
 // WHAT THE ASM SUGGESTS, AND WHY IT IS A CANDIDATE. `single-use` refuses a base reached once, on
 // the theory that one access re-materializes as cheaply as a named local. A surviving `[rN, #imm]`
-// off a register holding a bare address constant is EVIDENCE against that theory, on a compiler
-// that folds a constant SUBSCRIPT into the literal it materializes
+// off a register holding a bare address is EVIDENCE against that theory, on a compiler that folds
+// a constant SUBSCRIPT into the literal it materializes
 // (TargetDescription.compilerBehaviors.foldsConstAddrOffset, where the compiled pair is).
-// `BaseKey.unfoldedOffset` is that shape — a NON-ZERO numeric base reached at a non-zero constant
-// offset, the frontend having folded any `add rN, #K` between the pool load and the access back
-// into one absolute address, so an offset arriving here was in the MEMORY OPERAND.
+// `BaseKey.unfoldedOffset` is that shape: the access's constant offset reached the MEMORY OPERAND
+// rather than the materialized literal, which `l3/ast.ts`'s `index.operandOff` carries down from
+// the lift because the fold at L3 makes the two indistinguishable.
 // Two inline shapes could have put it there and do not: inline READS are not CSE'd across
 // addresses (three of them emit three pool words, and a base another use leaves live still takes
 // its own second word), and the inline STORE pair agbcc does CSE (`*(u8 *)0x3001100 = v;
 // *(u16 *)0x3001102 = v;` → one pool word plus `add r0, r0, #0x2`) spends the offset on an `add`,
-// which the frontend folds back, so both arrive here at offset 0.
+// which the frontend folds back into the address, leaving no operand offset to read.
 //
 // It is EVIDENCE and not proof, which is why `BASEFOLD_GATES` below is a lever rather than a
 // relaxation of the default table. agbcc folds a subscript but keeps an aggregate MEMBER offset in
@@ -41,12 +41,11 @@
 // store. So the shape has two sources and asmlift can spell only one of them; rank.ts offers both
 // and the differ referees.
 //
-// The rule is NUMERIC-only, and that refusal is about the LIFT rather than about the bytes.
-// agbcc folds a symbol's offset exactly as it folds a numeric one (`((u8 *)&gSym)[3]` emits
-// `.word gSym+0x3` + `ldrb [r1]`), but a relocation carries its addend and the frontend folds it
-// back into the index, so `.word gSym+0x3` + `[r1]` and `.word gSym` + `[r1, #0x3]` both reach
-// here as `index(addr gSym, 3)`. Reaching the symbol side means keeping the addend distinct in the
-// frontend first, not widening this rule.
+// A SYMBOL base carries the same evidence and reads the same rule. agbcc folds a symbol's offset
+// exactly as it folds a numeric one — `((u8 *)&gSym)[3]` emits `.word gSym+0x3` + `ldrb [r1]`
+// where `gSym.d` and `u8 *p = (u8 *)&gSym; p[3]` both emit `.word gSym` + `ldrb [r1, #0x3]` — and
+// the relocation's addend arrives as an explicit `add` where the operand offset arrives as the
+// load's own, so the two are one flag apart at the point the offsets fold together.
 //
 // SCOPE / SOUNDNESS. Only an `index` node whose base is a bare `addr` (a global address) or a bare
 // `const` (a numeric pointer address) is eligible, keyed by (base, width, signedness) — never an
@@ -96,6 +95,9 @@ interface Collected {
   /** keys indexed by a NON-constant expression somewhere — an array walk, so the base reaches a
    *  BLOCK of cells however few constant offsets it also touches (see `single-cell`). */
   varIndexed: Set<string>;
+  /** keys with an access whose constant offset arrived in the MEMORY OPERAND (l3/ast.ts
+   *  `index.operandOff`) — the input to `unfoldedOffset`. */
+  operandOff: Set<string>;
 }
 
 /** Every `index` node whose base is a hoistable leaf, tallied by key (the gates' use count) and in
@@ -118,6 +120,9 @@ function collect(stmts: Stmt[], c: Collected, loop: boolean): void {
         m.set(e.idx.value, (m.get(e.idx.value) ?? 0) + 1);
       } else {
         c.varIndexed.add(k);
+      }
+      if (e.operandOff) {
+        c.operandOff.add(k);
       }
     }
     for (const ch of exprChildrenOf(e)) {
@@ -165,15 +170,16 @@ export interface BaseKey {
   repeatedConstOffset: boolean;
   /** every access is the SAME fixed offset — one scalar cell rather than a block of them */
   singleCell: boolean;
-  /** A NON-ZERO NUMERIC base reached at a non-zero constant offset. On a compiler that folds a
-   *  constant subscript into the literal it materializes, that offset survived because something
-   *  OTHER than a subscript put it there — a named base, or an aggregate member (see the header).
-   *  Read only by `BASEFOLD_GATES`, whose roster row rank.ts offers only where the target declares
-   *  the fold. Three refusals, each of them a place the fold left no evidence to read: offset 0,
-   *  where the fold is the identity; base 0, where there is no materialized literal for a subscript
-   *  to fold INTO — `((s8 *)0)[16]` is one instruction (`lb $v0, 16($zero)`), so the offset never
-   *  had anywhere else to be; and a SYMBOL base, whose split the lift does not preserve — a
-   *  relocation addend folds into the index. */
+  /** A base whose constant offset arrived in the MEMORY OPERAND (l3/ast.ts `index.operandOff`).
+   *  On a compiler that folds a constant subscript into the literal it materializes, an offset
+   *  that reached the instruction instead survived because something OTHER than a subscript put it
+   *  there — a named base, or an aggregate member (see the header). Read only by
+   *  `BASEFOLD_GATES`, whose roster row rank.ts offers only where the target declares the fold.
+   *  Two refusals, each of them a place the fold left no evidence to read: an offset the address
+   *  expression carried (a relocation addend, a folded `add`), where the fold may already have
+   *  happened and an offset of 0, where it is the identity; and base 0, where there is no
+   *  materialized literal for a subscript to fold INTO — `((s8 *)0)[16]` is one instruction
+   *  (`lb $v0, 16($zero)`), so the offset never had anywhere else to be. */
   unfoldedOffset: boolean;
 }
 
@@ -225,7 +231,9 @@ export const BASECSE_GATES: readonly Gate<BaseKey>[] = [
  *
  *  rank.ts offers the row only where the target declares
  *  `compilerBehaviors.foldsConstAddrOffset` — MIPS and PPC put the addend in the instruction by
- *  construction (`lui`/`%lo`, `lis`/`ori`), so a surviving offset carries no information there. */
+ *  construction (`lui`/`%lo`, `lis`/`ori`), so a surviving offset carries no information there.
+ *  It offers it at BOTH placements (l3/hoist.ts): a base reached once is loaded where it is used,
+ *  so where the init sits is the question the differ has to settle, not whether it exists. */
 export const BASEFOLD_GATES: readonly Gate<BaseKey>[] = [
   {
     id: 'single-use-unfolded',
@@ -287,6 +295,7 @@ function admit(sfn: SFn, gates: readonly Gate<BaseKey>[]): { c: Collected; keys:
     inLoop: new Set(),
     constOffCount: new Map(),
     varIndexed: new Set(),
+    operandOff: new Set(),
   };
   collect(sfn.body, c, false);
   const keys = c.order.filter((k) => {
@@ -299,7 +308,7 @@ function admit(sfn: SFn, gates: readonly Gate<BaseKey>[]): { c: Collected; keys:
         inLoop: c.inLoop.has(k),
         repeatedConstOffset: [...(offsets?.values() ?? [])].some((n) => n >= 2),
         singleCell: !c.varIndexed.has(k) && (offsets?.size ?? 0) <= 1,
-        unfoldedOffset: base.k === 'const' && base.value !== 0 && [...(offsets?.keys() ?? [])].some((o) => o !== 0),
+        unfoldedOffset: c.operandOff.has(k) && (base.k === 'addr' || base.value !== 0),
       }) === null
     );
   });

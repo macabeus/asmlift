@@ -181,17 +181,20 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   between modules, with no natural home in any one of their unit tests, so it is pinned in
   [`test/addr-placement.test.ts`](../packages/core/test/addr-placement.test.ts).
 
-  They already share their MECHANISM without sharing their POLICY, which is the shape to converge
-  on: `l3/hoist.ts` owns name allocation for every pass that mints a local, plus the leading
-  base-init run and the first-use query for the two that place into it, while each keeps its own
-  answer to where the init goes. The redesign that would finish it is
-  `placeBaseLocals(sfn, policy)` — one hoist, placement as an argument — and the row that earns it
-  now exists. `sa3:sub_803213C` sits at 2 with an argMismatch-only residual and `v0 = 1;` as its
-  first statement: a PLACEMENT, not a spelling, and its twin `sa3:sub_802DFC8` wants the opposite
-  direction for its own merge-zero. `l3/sinkinit.ts` reaches neither — its leading run is
-  `isBaseInit`, a ptr-cast of an `addr`/`const`, so a scalar `v0 = 1;` is not in it, and widening
-  that predicate would also move what `l3/basecse.ts` re-orders, the two sharing
-  `splitLeadingBaseInits`. The knob belongs to a policy argument, not to `isBaseInit`.
+  The two that place into basecse's run now share their MECHANISM AND spell their policy as one
+  argument: `l3/hoist.ts` owns name allocation for every pass that mints a local, and
+  `placeBaseLocals(sfn, body, minted, placement)` owns the leading base-init run, the first-use
+  query and the body rebuild, with `head` and `first-use` as two values of one parameter rather
+  than two implementations. `l3/basecse.ts` takes the policy through, so an admission in
+  `rank.ts`'s roster states WHERE its locals go beside WHICH bases it binds, and offering the same
+  bases in the other position costs one roster line instead of a second pass composed on top.
+  `sa3:sub_803213C` is what earned it: a base reached ONCE, where the pool load belongs at the
+  access and the head placement scores worse than not hoisting at all (5 · 2 · 0 there, and
+  9 · 3 · 0 on the `synthetic:foldsink` isolate). Which one a given source wrote is not derivable,
+  so the roster offers both and the differ referees — `synthetic:basecell` is won by the head row.
+  What the policy argument is NOT is a licence to move which bases BIND: `gates` and `placement`
+  are separate arguments and neither implies the other, which is what keeps the `for`-init
+  disagreement in `addr-placement.test.ts` a gate question rather than a placement one.
 
   A second consolidation is BOOKED and deliberately unpaid: the FOUR home scopes in
   `structure/analysis.ts` (`homeSharedAddresses`, `homeLoopExprs`, `homeDerivedReads`,

@@ -29,6 +29,7 @@ import {
 } from './l3/basecse';
 import { armDisjointCandidates, coalesceCandidates } from './l3/coalesce';
 import type { Gate } from './l3/gates';
+import type { BaseInitPlacement } from './l3/hoist';
 import { initFirstGuards } from './l3/initfirst';
 import { inlinableConstBases, inlineConstBases } from './l3/inlinebase';
 import { mulFirstSums } from './l3/mulfirst';
@@ -281,20 +282,21 @@ const createdLocals = (from: SFn, to: SFn): Set<string> => {
  *  points worse than going unpaired. It fans anyway because a pairing belongs to the LEVER, not to
  *  one of its admissions.
  *
- *  `/basefold` is the third admission and the only conditional one — `enumerateCandidates` appends
- *  it where the target declares `compilerBehaviors.foldsConstAddrOffset`. It needs no second
- *  "did the primary already carry this" test: `structureChecked` runs the DEFAULT hoist to its
- *  fixpoint before any tree reaches here, so a key still admissible is by construction one
- *  `BASECSE_GATES` rejected, and binding nothing is the whole of the decline.
- *  Structure the corpus the way the committed path does — 1139 observations, every case in every
- *  symbol-map configuration it has — and the exemption adds 6 keys over 5 observations, every one
- *  of them map-less: with a map the pool constant lifts to a `gaddr` and the numeric clause stands
- *  down. Two are ever offered the row, being the only two on a target that declares the fold —
- *  `synthetic:basecell` and `kleod:RollRandomLevelVariant`, three keys between them. The other
- *  three are `bg_mix` on the ido, kmc and mwcc lanes, where the target gate withholds it — not to
- *  protect a score (no roster row can cost one; see LIVEBASE_BLOCK_GATES) but because
- *  `unfoldedOffset` would be read as evidence on an instruction that carries the addend by
- *  construction, where there is none.
+ *  `/basefold` is the third and fourth admission and the only conditional pair —
+ *  `enumerateCandidates` appends them where the target declares
+ *  `compilerBehaviors.foldsConstAddrOffset`. They need no second "did the primary already carry
+ *  this" test: `structureChecked` runs the DEFAULT hoist to its fixpoint before any tree reaches
+ *  here, so a key still admissible is by construction one `BASECSE_GATES` rejected, and binding
+ *  nothing is the whole of the decline.
+ *  What the exemption reaches, over the 324 agbcc rows the artifact carries and in BOTH symbol-map
+ *  configurations (450 observations): 18 observations where it binds a key the default table
+ *  refuses, spread over 13 rows. One key is numeric on `synthetic:basecell` and two on
+ *  `kleod:RollRandomLevelVariant`, both map-less — with a map the pool constant lifts to a `gaddr`
+ *  and the numeric clause stands down. The other 17 are SYMBOL keys over 11 rows in three
+ *  projects, 5 of those observations map-ful and 11 map-less. A target that declares no fold is
+ *  offered neither row — not to protect a score (no roster row can cost one; see
+ *  LIVEBASE_BLOCK_GATES) but because `unfoldedOffset` would be read as evidence on an instruction
+ *  that carries the addend by construction, where there is none.
  *  On klonoa's `LoadBGTilemapData` — a checkout function rather than a row, so re-run it with the
  *  ranked command in docs/ranked-repro.md — the admission declines on every structuring, leaving
  *  that fan the size it was: 48000 candidates either way. All floors, though: the ranked path
@@ -302,6 +304,11 @@ const createdLocals = (from: SFn, to: SFn): Set<string> => {
 interface BaseAdmission {
   suffix: string;
   gates: readonly Gate<BaseKey>[];
+  /** WHERE the locals this row binds are initialized (l3/hoist.ts). Eligibility and placement are
+   *  two questions and this roster answers both, so a row can offer the same bases in the other
+   *  position without a second gate table — and a row that wants both offers both, as the
+   *  `/basefold` pair below does. */
+  placement: BaseInitPlacement;
   /** Whether the row joins the `/livebase ×` PAIRINGS below. Each of those products was added for
    *  a row that demanded the joint spelling (see POLICY), and every demanding row so far is a
    *  `/livebase` row — so a new admission joins them when a row demands it, not by roster
@@ -310,17 +317,23 @@ interface BaseAdmission {
 }
 
 const LIVEBASE_ADMISSIONS: readonly BaseAdmission[] = [
-  { suffix: '/livebase', gates: LIVEBASE_GATES, pairings: true },
-  { suffix: '/livebase-block', gates: LIVEBASE_BLOCK_GATES, pairings: true },
+  { suffix: '/livebase', gates: LIVEBASE_GATES, placement: 'head', pairings: true },
+  { suffix: '/livebase-block', gates: LIVEBASE_BLOCK_GATES, placement: 'head', pairings: true },
 ];
 
-/** Narrower than either `/livebase` row, so it goes last: it keeps both placement heuristics and
- *  exempts only `single-use`, and only for a base whose offset survived the compiler's fold. */
-const BASEFOLD_ADMISSION: BaseAdmission = {
-  suffix: '/basefold',
-  gates: BASEFOLD_GATES,
-  pairings: false,
-};
+/** Narrower than either `/livebase` row, so both go last: they keep both placement heuristics and
+ *  exempt only `single-use`, and only for a base whose offset survived the compiler's fold.
+ *
+ *  They are ONE eligibility rule at the two placements, because for a base reached ONCE the
+ *  question the differ has to settle is where the pool load sits, not whether the local exists:
+ *  the head keeps the address live over everything above the access, the first-use position is
+ *  where a single access loaded it. Which one the source wrote is per-function knowledge the asm
+ *  does not carry, so both ride and the differ referees — `synthetic:basecell` is won by the head
+ *  row and `sa3:sub_803213C` by the sunk one. */
+const BASEFOLD_ADMISSIONS: readonly BaseAdmission[] = [
+  { suffix: '/basefold', gates: BASEFOLD_GATES, placement: 'head', pairings: false },
+  { suffix: '/basefold/sinkinit', gates: BASEFOLD_GATES, placement: 'first-use', pairings: false },
+];
 
 const sameBases = (a: readonly string[], b: readonly string[]): boolean =>
   a.length === b.length && a.every((k, i) => k === b[i]);
@@ -902,7 +915,7 @@ export function enumerateCandidates(
     // spelling under a different label, so it declines for that too. `/basefold` joins the roster
     // where the target declares the fold.
     const admissions: readonly BaseAdmission[] = target.compilerBehaviors.foldsConstAddrOffset
-      ? [...LIVEBASE_ADMISSIONS, BASEFOLD_ADMISSION]
+      ? [...LIVEBASE_ADMISSIONS, ...BASEFOLD_ADMISSIONS]
       : LIVEBASE_ADMISSIONS;
     // The CENSUS is a pure function of (this tree, that table) and every row asks for every
     // earlier row's, from thunks each product re-invokes — quadratic in the roster, times the
@@ -918,14 +931,18 @@ export function enumerateCandidates(
       censuses.set(g, v);
       return v;
     };
-    const livebases = admissions.map(({ suffix, gates, pairings }, i) => {
+    const livebases = admissions.map(({ suffix, gates, placement, pairings }, i) => {
       const hoist = (): SFn | null => {
         const bound = census(gates);
         if (bound.length === 0) {
           return null;
         }
-        const shadowed = admissions.slice(0, i).some((a) => sameBases(bound, census(a.gates)));
-        return shadowed ? null : hoistBaseLocals(sfn, gates);
+        // Same bases in the same POSITION is the same spelling under a second label; the same
+        // bases somewhere else is not, so an earlier row only shadows this one at its placement.
+        const shadowed = admissions
+          .slice(0, i)
+          .some((a) => a.placement === placement && sameBases(bound, census(a.gates)));
+        return shadowed ? null : hoistBaseLocals(sfn, gates, placement);
       };
       const volatiles = (): SFn | null => {
         const r = hoist();
