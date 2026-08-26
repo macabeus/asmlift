@@ -24,9 +24,9 @@
 // only coincidentally lands in the window, which is the stated cost of the lever (the `s32` cast
 // assumes addresses below 2^31, true of every target that declares nearBaseSpan today). Declines
 // (null) when no cluster forms.
-import type { Expr, SFn, Stmt } from './ast';
+import type { Expr, SFn } from './ast';
 import { mapExprChildren, mapStmtExprs } from './ast';
-import { nameAllocator } from './hoist';
+import { type BaseInit, nameAllocator, placeBaseLocals } from './hoist';
 
 /** The const behind a deref base, looked at through SCALAR value casts only — a cast to a
  *  struct pointer is the struct-arrays dot-form's base, whose stride the raw `u8 *` re-spelling
@@ -126,7 +126,7 @@ export function nearBaseClusters(sfn: SFn, span: number): SFn | null {
     }
     return mapExprChildren(e, rewrite);
   };
-  const inits: Stmt[] = [...baseName.entries()].map(([lo, name]) => ({
+  const inits: BaseInit[] = [...baseName.entries()].map(([lo, name]) => ({
     k: 'assign',
     name,
     value: {
@@ -135,15 +135,27 @@ export function nearBaseClusters(sfn: SFn, span: number): SFn | null {
       e: { k: 'const', value: lo },
     },
   }));
-  return {
-    ...sfn,
-    locals: [
-      ...sfn.locals,
-      ...[...baseName.values()].map((name) => ({
-        name,
-        type: { kind: 'ptr', to: { kind: 'int', width: 8, signed: false } } as SFn['locals'][number]['type'],
-      })),
-    ],
-    body: [...inits, ...sfn.body.map((s) => mapStmtExprs(s, rewrite))],
-  };
+  const locals = [
+    ...sfn.locals,
+    ...[...baseName.values()].map((name) => ({
+      name,
+      type: { kind: 'ptr', to: { kind: 'int', width: 8, signed: false } } as SFn['locals'][number]['type'],
+    })),
+  ];
+  // The body rebuild is `l3/hoist.ts`'s, shared with the two other passes that place into the
+  // leading base-init run. The ORDERING is not: `prepend` returns before the first-use query, so
+  // this pass takes the rebuild and abstains from the policy (see `BaseInitPlacement`).
+  //
+  // The DEFAULT is `prepend` — the cluster bases go ABOVE a run already there rather than being
+  // merged into it in first-use order — and it rests on a row, not on a compiler fact. Placing
+  // them in first-use order instead turns `synthetic:dmafield` (won by
+  // `signed/livebase/volatile/nearbase/initfirst`) from a MATCH into diff:5, measured 2026-08-26.
+  // The reading that goes with it — a cluster base is reached at 2+ addresses by construction, so
+  // its pool word is not "first touched late" — explains why first-use order is not obviously
+  // right, not why prepending is; which order the source wrote is per-function knowledge the asm
+  // does not carry. So it is a DEFAULT and not a decision: `rank.ts` offers the sunk ordering
+  // beside it as `/nearbase/sinkinit`, and the differ settles which one a function wanted.
+  const rewritten = sfn.body.map((s) => mapStmtExprs(s, rewrite));
+  const { body } = placeBaseLocals({ ...sfn, locals, body: rewritten }, inits, 'prepend');
+  return { ...sfn, locals, body };
 }

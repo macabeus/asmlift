@@ -4,6 +4,7 @@ import { expect, test } from 'vitest';
 
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
 import { nearBaseClusters } from '../src/l3/nearbase';
+import { sinkInitsToFirstUse } from '../src/l3/sinkinit';
 
 const nearBaseClusters255 = (sfn: SFn) => nearBaseClusters(sfn, 255);
 
@@ -165,4 +166,76 @@ test('declined: a hostile span (negative or NaN) instead of a stalled cluster wi
   ];
   expect(nearBaseClusters(fn(body), -1)).toBeNull();
   expect(nearBaseClusters(fn(body), Number.NaN)).toBeNull();
+});
+
+// WHERE the cluster base goes. This is the THIRD pass that places into the leading base-init run
+// (`l3/basecse.ts` and `l3/sinkinit.ts` are the others) and it now shares their body rebuild —
+// `l3/hoist.ts`'s `placeBaseLocals` — instead of a private prepend that had already drifted.
+//
+// Its POLICY stays its own, and it is `prepend`: the cluster base goes ABOVE a run already there,
+// not merged into it in first-use order. That is not an oversight to correct against basecse's
+// "blindly prepending is wrong" note — it is this lever's DEFAULT, and its demanding row is what
+// picked it: re-placing the cluster bases in first-use order was measured on 2026-08-26 and turns
+// `synthetic:dmafield` (won by `signed/livebase/volatile/nearbase/initfirst`) from a MATCH into
+// diff:5. A row and not a mechanism, so `rank.ts` offers the other ordering beside it
+// (`/nearbase/sinkinit`) and the differ settles it — the test below that.
+test('the cluster base is spelled ABOVE a base-init run already at the head', () => {
+  const u8p = { kind: 'ptr', to: { kind: 'int', width: 8, signed: false } } as const;
+  const existing: Stmt = { k: 'assign', name: 'q0', value: { k: 'cast', to: u8p, e: c(0x04000000) } as never };
+  const useQ0: Stmt = {
+    k: 'exprstmt',
+    value: { k: 'index', base: { k: 'var', name: 'q0' }, idx: c(0), width: 1, signed: false },
+  };
+  const sfn: SFn = {
+    name: 'f',
+    params: [],
+    locals: [{ name: 'q0', type: u8p as never }],
+    retType: s32,
+    body: [
+      existing,
+      useQ0,
+      { k: 'assign', name: 'x', value: deref(0x03001048, 2) },
+      { k: 'exprstmt', value: deref(0x0300104a, 2) },
+    ],
+  };
+  const r = nearBaseClusters255(sfn);
+  expect(r).not.toBeNull();
+  // p0 (the cluster base, first USED third) leads; q0 (used first) keeps its place beneath it.
+  expect(r!.body.map((st) => (st.k === 'assign' ? st.name : st.k))).toEqual(['p0', 'q0', 'exprstmt', 'x', 'exprstmt']);
+});
+
+// The OTHER ordering, which the roster now offers (`/nearbase/sinkinit`). Wired here rather than
+// only in rank.ts, because the value of offering it is that the two trees DIFFER — a version of
+// this that quietly emitted the same body would pass every enumeration count and referee nothing.
+test('the sunk sibling places each cluster init at its own first use instead', () => {
+  const u8p = { kind: 'ptr', to: { kind: 'int', width: 8, signed: false } } as const;
+  const existing: Stmt = { k: 'assign', name: 'q0', value: { k: 'cast', to: u8p, e: c(0x04000000) } as never };
+  const useQ0: Stmt = {
+    k: 'exprstmt',
+    value: { k: 'index', base: { k: 'var', name: 'q0' }, idx: c(0), width: 1, signed: false },
+  };
+  const sfn: SFn = {
+    name: 'f',
+    params: [],
+    locals: [{ name: 'q0', type: u8p as never }],
+    retType: s32,
+    body: [
+      existing,
+      useQ0,
+      { k: 'assign', name: 'x', value: deref(0x03001048, 2) },
+      { k: 'exprstmt', value: deref(0x0300104a, 2) },
+    ],
+  };
+  const prepended = nearBaseClusters255(sfn)!;
+  const sunk = sinkInitsToFirstUse(prepended);
+  expect(sunk).not.toBeNull();
+  // q0 stays at the head (its first use is the statement right below it); p0 drops to its own.
+  expect(sunk!.body.map((st) => (st.k === 'assign' ? st.name : st.k))).toEqual([
+    'q0',
+    'exprstmt',
+    'p0',
+    'x',
+    'exprstmt',
+  ]);
+  expect(sunk!.body).not.toEqual(prepended.body);
 });

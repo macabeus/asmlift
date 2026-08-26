@@ -2,6 +2,9 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
+import { cBackend } from '../src/backend/c';
+import { frontendFor } from '../src/frontend/registry';
+import { parse } from '../src/ir/parse';
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
 import {
@@ -14,25 +17,174 @@ import {
 } from '../src/l3/basecse';
 import { without } from '../src/l3/gates';
 import { volatilePtrLocals } from '../src/l3/volatileptr';
+import { structureChecked } from '../src/pipeline';
 import { enumerateCandidates } from '../src/rank';
+import type { SymbolInfo } from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
 
-const idx = (name: string, i: Expr, width = 1): Expr => ({
+// `fromOperand` marks the access whose offset reached the MEMORY OPERAND — what the structurer
+// records as `index.operandOff` and what `BaseKey.unfoldedOffset` is read off (see the describe
+// block below it and l3/ast.ts).
+const fromOperand = { operandOff: true } as const;
+const idx = (name: string, i: Expr, width = 1, evidence: object = {}): Expr => ({
   k: 'index',
   base: { k: 'addr', name },
   idx: i,
   width,
   signed: false,
+  ...evidence,
 });
-const cidx = (value: number, i: Expr, width = 4): Expr => ({
+const cidx = (value: number, i: Expr, width = 4, evidence: object = {}): Expr => ({
   k: 'index',
   base: { k: 'const', value },
   idx: i,
   width,
   signed: true,
+  ...evidence,
 });
 const c = (value: number): Expr => ({ k: 'const', value });
 const fn = (body: Stmt[]): SFn => ({ name: 'f', params: [], locals: [], retType: T.void(), body });
+
+// The L2→L3 fact the fold evidence rests on. agbcc spells a constant SUBSCRIPT off a symbol by
+// folding it into the relocation (`((u8 *)&gSym)[3]` → `.word gSym+0x3` + `ldrb [r0]`) and leaves a
+// MEMBER or a named base's offset in the instruction (`gSym.d`, `u8 *p = …; p[3]` → `.word gSym` +
+// `ldrb [r0, #0x3]`) — so which side of that pair the asm sits on is what says which C could have
+// written it. Both sides denote the same cell and print the same subscript, which is why the
+// discriminator has to be CARRIED rather than re-derived from the tree.
+describe('where a constant offset came from survives the lift', () => {
+  const lifted = (ir: string): SFn => structureChecked(parse(ir), {});
+  const firstIndex = (sfn: SFn): Extract<Expr, { k: 'index' }> => {
+    const st = sfn.body[0];
+    expect(st.k).toBe('return');
+    const v = st.k === 'return' ? st.value : undefined;
+    expect(v?.k).toBe('index');
+    return v as Extract<Expr, { k: 'index' }>;
+  };
+  // `.word gSym` + `ldrb r0, [r0, #0x3]`
+  const OPERAND = `fn f {
+^bb0():
+  %0: u8* = gaddr {sym="gSym"}
+  %1: s32 = load %0 {off=3, signed=false, width=1}
+  ret %1
+}
+`;
+  // `.word gSym+0x3` + `ldrb r0, [r0]` — the relocation's addend, which the frontend keeps as an
+  // explicit add rather than as an operand offset
+  const ADDEND = `fn f {
+^bb0():
+  %0: u8* = gaddr {sym="gSym"}
+  %1: s32 = const {value=3}
+  %2: u8* = add %0, %1
+  %3: s32 = load %2 {off=0, signed=false, width=1}
+  ret %3
+}
+`;
+
+  test('the two lift to the same C, down to the byte', () => {
+    expect(cBackend.emit(lifted(ADDEND))).toEqual(cBackend.emit(lifted(OPERAND)));
+    expect(cBackend.emit(lifted(OPERAND))).toContain('((u8 *)&gSym)[3]');
+  });
+
+  test('and are told apart by `operandOff`, which nothing else about the node records', () => {
+    expect(firstIndex(lifted(OPERAND)).operandOff).toBe(true);
+    expect(firstIndex(lifted(ADDEND)).operandOff).toBeUndefined();
+    // …and only by it: strip the flag and the trees are equal key for key
+    const { operandOff: _drop, ...bare } = firstIndex(lifted(OPERAND));
+    expect(bare).toEqual(firstIndex(lifted(ADDEND)));
+  });
+
+  // …and the same on the plain pointer deref, the other spelling memAccess returns.
+  const deref = (off: number): string => `fn f {
+^bb0(%0: u8*):
+  %1: s32 = load %0 {off=${off}, signed=false, width=1}
+  ret %1
+}
+`;
+
+  test('an offset of 0 records nothing — there is nothing for a fold to have absorbed', () => {
+    expect(firstIndex(lifted(deref(3))).operandOff).toBe(true);
+    expect(firstIndex(lifted(deref(0))).operandOff).toBeUndefined();
+  });
+
+  test('…and on the BARE-NAME array spelling a symbol map unlocks, which is a third mint site', () => {
+    // `memAccess` mints the flag at three places — the `&gSym`-based index, the plain deref (both
+    // above) and the bare `gSym[i]` form a rank-aware map produces. The third had no test: dropping
+    // `...fromOperand` from it left the entire toolchain-free suite green, so the evidence could be
+    // lost on exactly the rows a map serves without anything saying so.
+    const arr = new Map<string, SymbolInfo>([
+      ['gSym', { name: 'gSym', kind: 'data', shape: 'array', elemSize: 1, elemSigned: false, declared: true }],
+    ]);
+    const bare = structureChecked(parse(OPERAND), { symbols: arr });
+    expect(cBackend.emit(bare)).toContain('gSym[3]');
+    expect(firstIndex(bare).operandOff).toBe(true);
+  });
+});
+
+// The one field on `Expr` that is EVIDENCE rather than spelling, and the one place that asymmetry
+// is observable: `exprEquals` deliberately ignores it (two accesses agreeing on everything else
+// denote the same cell and print the same subscript), while a COMMITTED pass that collapses
+// statements with `exprEquals` runs UPSTREAM of the only pass that reads it —
+// `structureChecked` is `hoistBaseLocals(eliminateDeadStores(mergeCommonTails(raw)))`. So which of
+// two flags survives a merge is the merger's choice, not something read off the asm.
+describe('`operandOff` is provenance, and a committed merge upstream decides which one survives', () => {
+  // Two arms whose tails print the same C and differ ONLY in where the offset came from: one arm
+  // loaded `[r, #3]`, the other added the relocation addend first. `mergeCommonTails` peels the
+  // common tail off both.
+  const twoArms = (thenCarriesEvidence: boolean): string => {
+    const operand = (g: string, r: string) => `  ${r}: s32 = load ${g} {off=3, signed=false, width=1}`;
+    const addend = (g: string, r: string) =>
+      `  ${r}k: s32 = const {value=3}\n  ${r}a: u8* = add ${g}, ${r}k\n  ${r}: s32 = load ${r}a {off=0, signed=false, width=1}`;
+    return `fn f {
+^bb0(%0: s32):
+  %1: s32 = const {value=0}
+  %2: u32 = icmp_ne %0, %1
+  cond_br %2, ^bb1(), ^bb2()
+^bb1():
+  %3: u8* = gaddr {sym="gSym"}
+${(thenCarriesEvidence ? operand : addend)('%3', '%4')}
+  %5: s32 = call %4 {target="sink"}
+  br ^bb3()
+^bb2():
+  %6: u8* = gaddr {sym="gSym"}
+${(thenCarriesEvidence ? addend : operand)('%6', '%9')}
+  %10: s32 = call %9 {target="sink"}
+  br ^bb3()
+^bb3():
+  ret
+}
+`;
+  };
+
+  test('the arms merge, and WHICH arm carried the evidence decides what the roster gate sees', () => {
+    const merged = (thenCarriesEvidence: boolean) => structureChecked(parse(twoArms(thenCarriesEvidence)), {});
+    // one call left, not two: the tails really did collapse under `exprEquals`
+    expect(cBackend.emit(merged(true)).match(/sink\(/g)).toHaveLength(1);
+    // …and the ELSE arm's spelling is the survivor, so the same asm shape reaches the gate or does
+    // not depending only on which side of the `if` it sat on. Documented, not endorsed.
+    expect(admittedBases(merged(true), BASEFOLD_GATES)).toEqual([]);
+    expect(admittedBases(merged(false), BASEFOLD_GATES)).toEqual(['a:gSym 1 false']);
+  });
+
+  test('the blast radius is bounded to the roster: the COMMITTED table cannot read the flag', () => {
+    // `unfoldedOffset` has exactly one reader — `BASEFOLD_GATES`' `single-use-unfolded` rule, which
+    // only `rank.ts`'s roster asks for. So whatever a merge decides, `structureChecked`'s own hoist
+    // binds the same bases either way: that is the bound, and it is about MEANING, not about
+    // score. Widen the readership — promote the exemption into `BASECSE_GATES` — and it goes.
+    //
+    // The two directions are NOT symmetric, and reading them as one is how this note first got
+    // written. A flag the merge INVENTS offers an extra candidate, and `compareScored` orders by
+    // score, so that costs a compile and nothing else. A flag it EATS withholds one, and
+    // withholding a `/basefold*` candidate costs whatever that candidate would have won: deleting
+    // the sunk roster row turns `synthetic:foldsink` and `sa3:sub_803213C` from MATCH into diff:2
+    // (ablated through the harness). So "it can only offer or withhold a candidate" is a bound on
+    // meaning and not on matches.
+    // Its reach today is zero, which is a measurement and not an argument: over the whole artifact
+    // (1140 observations, five toolchains, both symbol-map configurations) `mergeCommonTails`
+    // peels 25 tails and NONE of them is a pair of arms differing only in `operandOff`.
+    expect(admittedBases(structureChecked(parse(twoArms(true)), {}), BASECSE_GATES)).toEqual([]);
+    expect(admittedBases(structureChecked(parse(twoArms(false)), {}), BASECSE_GATES)).toEqual([]);
+  });
+});
 
 describe('leaf-base hoisting', () => {
   test('a numeric pointer CONSTANT (MMIO/RAM base) indexed at ≥2 distinct offsets is hoisted', () => {
@@ -115,9 +267,9 @@ describe('leaf-base hoisting', () => {
   // The offset the compiler DID NOT fold — `BASEFOLD_GATES`, the admission that exempts
   // `single-use` for it. Each refusal below differs by one fact from the admitted case.
   describe('a single access whose offset survived into the instruction', () => {
-    const oneStore = (): SFn => fn([{ k: 'store', lval: cidx(0x3001100, c(3), 1), value: c(0) }]);
+    const oneStore = (): SFn => fn([{ k: 'store', lval: cidx(0x3001100, c(3), 1, fromOperand), value: c(0) }]);
 
-    test('a NUMERIC base at a non-zero offset is hoisted', () => {
+    test('a NUMERIC base whose offset reached the memory operand is hoisted', () => {
       const out = hoistBaseLocals(oneStore(), BASEFOLD_GATES);
       expect(out.locals).toEqual([{ name: 'p0', type: T.ptr(T.s(8)) }]);
       expect(out.body[0]).toEqual({
@@ -127,8 +279,23 @@ describe('leaf-base hoisting', () => {
       });
       expect(out.body[1]).toEqual({
         k: 'store',
-        lval: { k: 'index', base: { k: 'var', name: 'p0' }, idx: c(3), width: 1, signed: true },
+        lval: { k: 'index', base: { k: 'var', name: 'p0' }, idx: c(3), width: 1, signed: true, ...fromOperand },
         value: c(0),
+      });
+    });
+
+    test('a SYMBOL base is hoisted on the same evidence — the fold does not care which kind it is', () => {
+      const out = hoistBaseLocals(fn([{ k: 'store', lval: idx('gTable', c(3), 1, fromOperand), value: c(0) }]));
+      expect(out.locals).toEqual([]); // the default table still refuses it…
+      const fold = hoistBaseLocals(
+        fn([{ k: 'store', lval: idx('gTable', c(3), 1, fromOperand), value: c(0) }]),
+        BASEFOLD_GATES,
+      );
+      expect(fold.locals).toEqual([{ name: 'p0', type: T.ptr(T.u(8)) }]);
+      expect(fold.body[0]).toEqual({
+        k: 'assign',
+        name: 'p0',
+        value: { k: 'cast', to: T.ptr(T.u(8)), e: { k: 'addr', name: 'gTable' } },
       });
     });
 
@@ -137,24 +304,62 @@ describe('leaf-base hoisting', () => {
       expect(hoistBaseLocals(input)).toBe(input);
     });
 
-    test('at offset 0 it is left inline: there the fold is the identity', () => {
-      const input = fn([{ k: 'store', lval: cidx(0x3001100, c(0), 1), value: c(0) }]);
-      expect(hoistBaseLocals(input, BASEFOLD_GATES)).toBe(input);
+    test('an offset the ADDRESS carried is left inline, at either kind of base', () => {
+      // No `operandOff`: the constant is already inside the materialized literal (a relocation
+      // addend, a folded `add`) — which is where a subscript would have put it, so there is no
+      // evidence to read. An access at offset 0 reaches here the same way, the structurer having
+      // nothing to record when the fold would be the identity.
+      for (const lval of [cidx(0x3001100, c(3), 1), idx('gTable', c(3)), cidx(0x3001100, c(0), 1)]) {
+        const input = fn([{ k: 'store', lval, value: c(0) }]);
+        expect(hoistBaseLocals(input, BASEFOLD_GATES)).toBe(input);
+      }
     });
 
-    test('a SYMBOL base is left inline: the lift folds a relocation addend into the index', () => {
-      const input = fn([{ k: 'store', lval: idx('gTable', c(3)), value: c(0) }]);
-      expect(hoistBaseLocals(input, BASEFOLD_GATES)).toBe(input);
+    test('a base of 0 reads the evidence like any other: agbcc materializes a zero base too', () => {
+      // A zero base looks like the one address with nowhere else for an offset to go, and on MIPS
+      // it is (`lb $v0, 16($zero)`). This rule runs only on agbcc, which materializes it like any
+      // other constant — compiled both ways with the benchmark's own flags, `((s8 *)0)[16]` is
+      // `mov r0, #0x10` + `ldrb [r0, #0]` and `s8 *p = (s8 *)0; p[16]` is `mov r0, #0x0` +
+      // `ldrb [r0, #0x10]`, the same pair that discriminates at every other base.
+      const evidence = fn([{ k: 'store', lval: cidx(0, c(16), 1, fromOperand), value: c(0) }]);
+      expect(hoistBaseLocals(evidence, BASEFOLD_GATES).locals).toHaveLength(1);
+      // …and with no operand offset it is refused, like any other base reached once
+      const inline = fn([{ k: 'store', lval: cidx(0, c(16), 1), value: c(0) }]);
+      expect(hoistBaseLocals(inline, BASEFOLD_GATES)).toBe(inline);
     });
 
-    test('a base of 0 is left inline: no materialized literal, so nothing survived a fold', () => {
-      const input = fn([{ k: 'store', lval: cidx(0, c(16), 1), value: c(0) }]);
-      expect(hoistBaseLocals(input, BASEFOLD_GATES)).toBe(input);
+    test('`prepend` is not a placement this pass may take — the hazard is typed out', () => {
+      // A run already at the head carries the bases the compiler loads FIRST; prepending a minted
+      // one above it spells its pool load first instead (the header). `HoistPlacement` excludes
+      // the value, so a roster row or a caller reaching for it is a TYPE error — checked by
+      // `pnpm typecheck`, whose root tsconfig includes `packages/*/test`.
+      const input: SFn = {
+        ...fn([
+          { k: 'assign', name: 'q0', value: { k: 'cast', to: T.ptr(T.u(8)), e: { k: 'const', value: 0x4000000 } } },
+          {
+            k: 'store',
+            lval: { k: 'index', base: { k: 'var', name: 'q0' }, idx: c(0), width: 1, signed: false },
+            value: c(1),
+          },
+          { k: 'store', lval: cidx(0x3001100, c(3), 1, fromOperand), value: c(0) },
+        ]),
+        locals: [{ name: 'q0', type: T.ptr(T.u(8)) }],
+      };
+      // @ts-expect-error 'prepend' is a BaseInitPlacement but not a HoistPlacement
+      const hazard = hoistBaseLocals(input, BASEFOLD_GATES, 'prepend');
+      // …and this is the shape it emits when the type is defeated: the minted p0 above q0.
+      expect(hazard.body.filter((st) => st.k === 'assign').map((st) => st.name)).toEqual(['p0', 'q0']);
+      // what the pass actually does with the placement it may take
+      expect(
+        hoistBaseLocals(input, BASEFOLD_GATES, 'head')
+          .body.filter((st) => st.k === 'assign')
+          .map((st) => st.name),
+      ).toEqual(['q0', 'p0']);
     });
 
     test('both tables still refuse what the PLACEMENT rules refuse', () => {
       const inLoop = fn([
-        { k: 'while', cond: c(1), body: [{ k: 'store', lval: cidx(0x3001100, c(3), 1), value: c(0) }] },
+        { k: 'while', cond: c(1), body: [{ k: 'store', lval: cidx(0x3001100, c(3), 1, fromOperand), value: c(0) }] },
       ]);
       expect(hoistBaseLocals(inLoop, BASEFOLD_GATES).locals).toEqual([]);
       expect(hoistBaseLocals(inLoop, BASECSE_GATES).locals).toEqual([]);
@@ -442,8 +647,8 @@ describe('the block admission is WIRED into enumeration', () => {
   // the shape that needs a proper subset of its bases bound — and `corpus/agbcc-onepoll.s` is its
   // control, byte-identical C with the halfwords deleted. Which spelling wins is the benchmark's
   // business; these pin what reaches the differ at all.
-  const candsFor = (sym: string, target = ARMV4T_AGBCC) =>
-    enumerateCandidates(sym, readFileSync(join(import.meta.dirname, 'corpus', `agbcc-${sym}.s`), 'utf8'), target, {
+  const candsFor = (file: string, target = ARMV4T_AGBCC, sym = file) =>
+    enumerateCandidates(sym, readFileSync(join(import.meta.dirname, 'corpus', `agbcc-${file}.s`), 'utf8'), target, {
       prototypes: { [sym]: { returnsVoid: true } },
     });
   const cands = candsFor('mixpoll');
@@ -477,6 +682,9 @@ describe('the block admission is WIRED into enumeration', () => {
     // a non-zero byte offset, the shape the default table refuses and this admission exempts.
     const labels = candsFor('basecell').map((x) => x.label);
     expect(labels).toContain('unsigned/basefold');
+    // its first use IS its first statement, so the sunk row re-emits the head row's source and the
+    // dedup collapses it — the second placement costs nothing where it cannot move anything
+    expect(labels.filter((l) => l.includes('basefold/sinkinit'))).toEqual([]);
     // the fold is a per-compiler declaration, so a target without it never offers the row
     const noFold = {
       ...ARMV4T_AGBCC,
@@ -489,6 +697,52 @@ describe('the block admission is WIRED into enumeration', () => {
     ).toEqual([]);
   });
 
+  test('the admission rides at BOTH placements where they differ', () => {
+    // `corpus/agbcc-foldsink.s` is synthetic:foldsink:agbcc — the same single fold-evidence access
+    // three statements down, so head placement and first-use placement are different trees. Both
+    // are offered and the differ referees: the row is a MATCH on the sunk one, and the head one
+    // scores WORSE than not hoisting at all (the ladder is in the dataset's note).
+    const labels = candsFor('foldsink').map((x) => x.label);
+    expect(labels).toContain('unsigned/basefold');
+    expect(labels).toContain('unsigned/basefold/sinkinit');
+  });
+
+  test('two rows binding DIFFERENT bases both ride — the set half of the shadow rule', () => {
+    // `sameBases` collapses a row that binds exactly what an earlier row bound. mixpoll's two
+    // livebase rows bind different sets, so neither shadows the other. This pins the SET
+    // comparison only: both rows place at the head, so removing the rule's placement clause leaves
+    // this test green. What the POSITION clause pins is one describe below — `/basefold` and
+    // `/basefold/sinkinit` share one gate object, so without it the sunk row is shadowed on every
+    // function and never fires at all ('the admission rides at BOTH placements where they differ',
+    // the only test that fails when the clause goes).
+    const labels = candsFor('mixpoll').map((x) => x.label);
+    expect(labels.filter((l) => l.endsWith('/livebase'))).not.toEqual([]);
+    expect(labels.filter((l) => l.endsWith('/livebase-block'))).not.toEqual([]);
+  });
+
+  test('the SYMBOL half reaches the roster end to end, from real agbcc output', () => {
+    // `corpus/agbcc-tailmerge.s` is sa3:sub_803213C's own agbcc output — `.word gStageData` plus
+    // `ldrb r0, [r0, #0x3]`, the symbol + operand-offset shape the widening is about. Everything
+    // else about the symbol half is pinned on hand-built trees with `operandOff` written in by the
+    // test, or on the real-tier row, which needs the 2.2 GB project checkouts. This is the one
+    // offline gate that runs the whole chain: lift → `operandOff` → `BASEFOLD_GATES` → both
+    // placement labels. It fails on `origin/main`'s core, where the gate binds nothing.
+    const sfn = structureChecked(
+      frontendFor(ARMV4T_AGBCC).lift(
+        'sub_803213C',
+        readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-tailmerge.s'), 'utf8'),
+        ARMV4T_AGBCC,
+        { sub_803213C: { returnsVoid: true } },
+      ),
+      {},
+    );
+    expect(admittedBases(sfn, BASEFOLD_GATES)).toEqual(['a:gStageData 1 false']);
+    expect(admittedBases(sfn, BASECSE_GATES)).toEqual([]);
+    const labels = candsFor('tailmerge', ARMV4T_AGBCC, 'sub_803213C').map((x) => x.label);
+    expect(labels).toContain('unsigned/basefold');
+    expect(labels).toContain('unsigned/basefold/sinkinit');
+  });
+
   test('/basefold declines where its exemption binds nothing', () => {
     // mixpoll's bases are all reached 2+ times, so the exemption is vacuous there — and every key
     // it could have bound the DEFAULT hoist already took, before `fanOut` saw the tree.
@@ -497,14 +751,21 @@ describe('the block admission is WIRED into enumeration', () => {
 
   test('/basefold joins no PAIRING: no row demands the joint spelling', () => {
     // The `/livebase ×` products fan over the rows that declared `pairings`, and this one does
-    // not — so the labels it contributes are its own family and nothing crossed with it.
-    const basefold = candsFor('basecell')
+    // not — so the labels it contributes are its own family and nothing crossed with it. Read on
+    // `foldsink`, where BOTH roster rows fire and are distinct: on `basecell` they emit the same
+    // source and `seen` keeps only the head one, so `/basefold/sinkinit` is absent there for a
+    // reason that has nothing to do with pairings and this test would pass without checking
+    // anything.
+    const basefold = candsFor('foldsink')
       .map((x) => x.label)
       .filter((l) => l.includes('basefold'));
-    expect(basefold.length).toBeGreaterThan(0);
-    for (const suffix of ['/indexed', '/nearbase', '/coalesce', '/sinkinit']) {
+    expect(basefold).toContain('unsigned/basefold');
+    expect(basefold).toContain('unsigned/basefold/sinkinit');
+    // the roster's own two suffixes and nothing else — no product crossed with them
+    for (const suffix of ['/indexed', '/nearbase', '/coalesce']) {
       expect(basefold.filter((l) => l.includes(suffix))).toEqual([]);
     }
+    expect(basefold.filter((l) => l.includes('/sinkinit') && !l.includes('/basefold/sinkinit'))).toEqual([]);
   });
 
   test('every /livebase PRODUCT fans over the roster, and one of them is reachable no other way', () => {
@@ -515,5 +776,19 @@ describe('the block admission is WIRED into enumeration', () => {
     const labels = candsFor('sizebound').map((x) => x.label);
     expect(labels).toContain('signed/livebase-block/volatile/nearbase');
     expect(labels.filter((l) => l.startsWith('signed/livebase/') && l.includes('nearbase'))).toEqual([]);
+  });
+
+  test('/nearbase rides at BOTH orderings, so nothing commits its placement uncontested', () => {
+    // `l3/nearbase.ts` places its cluster inits above the run already there, on the strength of
+    // one row and no compiler fact. The sunk sibling is the other ordering; without it that
+    // choice decides `synthetic:dmafield`'s match with no candidate beside it to lose to.
+    const labels = candsFor('sizebound').map((x) => x.label);
+    expect(labels).toContain('signed/livebase-block/volatile/nearbase');
+    expect(labels).toContain('signed/defsite/loop-entry/livebase-block/volatile/nearbase/sinkinit');
+    // and the sunk one is a DIFFERENT candidate, not a relabelled duplicate
+    const src = (l: string) => candsFor('sizebound').find((x) => x.label === l)!.source;
+    expect(src('signed/defsite/loop-entry/livebase-block/volatile/nearbase')).not.toEqual(
+      src('signed/defsite/loop-entry/livebase-block/volatile/nearbase/sinkinit'),
+    );
   });
 });

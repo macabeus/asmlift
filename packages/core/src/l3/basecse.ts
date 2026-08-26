@@ -22,17 +22,40 @@
 //
 // WHAT THE ASM SUGGESTS, AND WHY IT IS A CANDIDATE. `single-use` refuses a base reached once, on
 // the theory that one access re-materializes as cheaply as a named local. A surviving `[rN, #imm]`
-// off a register holding a bare address constant is EVIDENCE against that theory, on a compiler
-// that folds a constant SUBSCRIPT into the literal it materializes
+// off a register holding a bare address is EVIDENCE against that theory, on a compiler that folds
+// a constant SUBSCRIPT into the literal it materializes
 // (TargetDescription.compilerBehaviors.foldsConstAddrOffset, where the compiled pair is).
-// `BaseKey.unfoldedOffset` is that shape — a NON-ZERO numeric base reached at a non-zero constant
-// offset, the frontend having folded any `add rN, #K` between the pool load and the access back
-// into one absolute address, so an offset arriving here was in the MEMORY OPERAND.
-// Two inline shapes could have put it there and do not: inline READS are not CSE'd across
-// addresses (three of them emit three pool words, and a base another use leaves live still takes
-// its own second word), and the inline STORE pair agbcc does CSE (`*(u8 *)0x3001100 = v;
-// *(u16 *)0x3001102 = v;` → one pool word plus `add r0, r0, #0x2`) spends the offset on an `add`,
-// which the frontend folds back, so both arrive here at offset 0.
+// `BaseKey.unfoldedOffset` is that shape: the access's constant offset reached the MEMORY OPERAND
+// rather than the materialized literal, which `l3/ast.ts`'s `index.operandOff` carries down from
+// the lift because the fold at L3 makes the two indistinguishable.
+// HOW STRONG THE EVIDENCE IS, compiled in both directions rather than reasoned about — and the
+// answer differs between the two base kinds, so read the one you are looking at.
+// For a NUMERIC base every inline shape tried spends the offset somewhere the operand does not
+// see it: one read folds it into the literal (`.word 0x3001103` + `ldrb [r0]`); several reads at
+// several offsets share ONE pool word and pay `sub`/`add` per access; a store pair agbcc CSEs
+// (`*(u8 *)0x3001100 = v; *(u16 *)0x3001102 = v;` → one pool word plus `add r1, r1, #0x2`) spends
+// it on an add, which the frontend folds back into the address; and a read whose bare address is
+// ALSO used as a value takes a SECOND literal (`.word 0x3001100` + `.word 0x3001103`) rather than
+// an operand offset.
+// For a SYMBOL base that last shape is a COUNTEREXAMPLE, and it is the one thing that separates
+// the two. `void live(void){ sink((int)(u8 *)&gS); sink(((u8 *)&gS)[3]); }` emits ONE `.word gS`
+// and `ldrb r0, [r4, #0x3]` — agbcc CSEs the symbol reference where it re-materializes the integer
+// — so the inline subscript spelling produces exactly the shape this rule reads as evidence
+// against it. asmlift lifts that asm back to the correct `((u8 *)&gS)[3]` and then offers the
+// named-base respelling anyway. Measured reach: of the 21 keys the symbol half newly admits over
+// the artifact's agbcc rows in both symbol-map configurations, 4 are on a base whose address the
+// tree also uses as a value (2 distinct keys, on `kleod:ProcessInputAndUpdateEntities` and
+// `pokeemerald:TrySetCantSelectMoveBattleScript`).
+// So on the symbol half this is weaker than evidence-with-two-known-exceptions: it is a hint with
+// a live counterexample, which is precisely why it is a ROSTER ADMISSION and not a gate relaxation
+// — the inline spelling rides beside it in every case and `compareScored` orders by score, so the
+// hint FIRING wrongly costs a candidate compile and never a match. Note which direction that
+// covers: it does not say the flag is free to LOSE. A `/basefold*` candidate that is never
+// enumerated takes whatever it would have won with it (deleting the sunk roster row costs
+// `synthetic:foldsink` and `sa3:sub_803213C` their matches), which is why `index.operandOff` is
+// carried from the lift instead of re-derived, and why a committed pass that can drop it is worth
+// a test (test/basecse.test.ts, the tail-merge describe). Promoting the hint to a default would
+// need this paragraph to say something it does not.
 //
 // It is EVIDENCE and not proof, which is why `BASEFOLD_GATES` below is a lever rather than a
 // relaxation of the default table. agbcc folds a subscript but keeps an aggregate MEMBER offset in
@@ -41,12 +64,11 @@
 // store. So the shape has two sources and asmlift can spell only one of them; rank.ts offers both
 // and the differ referees.
 //
-// The rule is NUMERIC-only, and that refusal is about the LIFT rather than about the bytes.
-// agbcc folds a symbol's offset exactly as it folds a numeric one (`((u8 *)&gSym)[3]` emits
-// `.word gSym+0x3` + `ldrb [r1]`), but a relocation carries its addend and the frontend folds it
-// back into the index, so `.word gSym+0x3` + `[r1]` and `.word gSym` + `[r1, #0x3]` both reach
-// here as `index(addr gSym, 3)`. Reaching the symbol side means keeping the addend distinct in the
-// frontend first, not widening this rule.
+// A SYMBOL base reads the same rule, one exception weaker (above). agbcc folds a symbol's offset
+// as it folds a numeric one — `((u8 *)&gSym)[3]` emits `.word gSym+0x3` + `ldrb [r1]` where
+// `gSym.d` and `u8 *p = (u8 *)&gSym; p[3]` both emit `.word gSym` + `ldrb [r1, #0x3]` — and the
+// relocation's addend arrives as an explicit `add` where the operand offset arrives as the load's
+// own, so the two are one flag apart at the point the offsets fold together.
 //
 // SCOPE / SOUNDNESS. Only an `index` node whose base is a bare `addr` (a global address) or a bare
 // `const` (a numeric pointer address) is eligible, keyed by (base, width, signedness) — never an
@@ -65,7 +87,7 @@ import { type IrType, T, scalarTypeForAccess } from '../ir/types';
 import type { Expr, SFn, Stmt } from './ast';
 import { mapExprChildren, mapStmtExprs, stmtChildren, stmtExprs } from './ast';
 import { type Gate, ablateHeuristic, firstRejection } from './gates';
-import { type BaseInit, firstUseIn, nameAllocator, splitLeadingBaseInits } from './hoist';
+import { type BaseInit, type HoistPlacement, nameAllocator, placeBaseLocals } from './hoist';
 
 // A HOISTABLE base is a bare `addr` (a global address) or a bare `const` (a numeric pointer
 // address). Both are relocation-invariant leaves whose value the compiler keeps in one register
@@ -96,6 +118,9 @@ interface Collected {
   /** keys indexed by a NON-constant expression somewhere — an array walk, so the base reaches a
    *  BLOCK of cells however few constant offsets it also touches (see `single-cell`). */
   varIndexed: Set<string>;
+  /** keys with an access whose constant offset arrived in the MEMORY OPERAND (l3/ast.ts
+   *  `index.operandOff`) — the input to `unfoldedOffset`. */
+  operandOff: Set<string>;
 }
 
 /** Every `index` node whose base is a hoistable leaf, tallied by key (the gates' use count) and in
@@ -118,6 +143,9 @@ function collect(stmts: Stmt[], c: Collected, loop: boolean): void {
         m.set(e.idx.value, (m.get(e.idx.value) ?? 0) + 1);
       } else {
         c.varIndexed.add(k);
+      }
+      if (e.operandOff) {
+        c.operandOff.add(k);
       }
     }
     for (const ch of exprChildrenOf(e)) {
@@ -165,15 +193,24 @@ export interface BaseKey {
   repeatedConstOffset: boolean;
   /** every access is the SAME fixed offset — one scalar cell rather than a block of them */
   singleCell: boolean;
-  /** A NON-ZERO NUMERIC base reached at a non-zero constant offset. On a compiler that folds a
-   *  constant subscript into the literal it materializes, that offset survived because something
-   *  OTHER than a subscript put it there — a named base, or an aggregate member (see the header).
-   *  Read only by `BASEFOLD_GATES`, whose roster row rank.ts offers only where the target declares
-   *  the fold. Three refusals, each of them a place the fold left no evidence to read: offset 0,
-   *  where the fold is the identity; base 0, where there is no materialized literal for a subscript
-   *  to fold INTO — `((s8 *)0)[16]` is one instruction (`lb $v0, 16($zero)`), so the offset never
-   *  had anywhere else to be; and a SYMBOL base, whose split the lift does not preserve — a
-   *  relocation addend folds into the index. */
+  /** A base whose constant offset arrived in the MEMORY OPERAND (l3/ast.ts `index.operandOff`).
+   *  On a compiler that folds a constant subscript into the literal it materializes, an offset
+   *  that reached the instruction instead survived because something OTHER than a subscript put it
+   *  there — a named base, or an aggregate member (see the header). Read only by
+   *  `BASEFOLD_GATES`, whose roster row rank.ts offers only where the target declares the fold.
+   *
+   *  Where the fold leaves no evidence to read is decided UPSTREAM and once, in
+   *  `structure/structure.ts`: an offset the address expression carried (a relocation addend, a
+   *  folded `add`) and an offset of 0 never set the flag, so absence is never proof of anything.
+   *  Nothing is subtracted again here, which puts the whole judgement in `single-use-unfolded`
+   *  where `ablateHeuristic` can price it. A base of 0 is NOT a second refusal, tempting as it
+   *  looks: on MIPS `((s8 *)0)[16]` really is one `lb $v0, 16($zero)` with nowhere else for the
+   *  offset to be, but this rule runs only where `foldsConstAddrOffset` is declared, and agbcc
+   *  materializes a zero base like any other — `mov r0, #0x10` + `ldrb [r0, #0]` inline against
+   *  `s8 *p = (s8 *)0; p[16]`'s `mov r0, #0x0` + `ldrb [r0, #0x10]`, the same discriminating pair
+   *  as at 0x3001100. Refusing it costs nothing here either way (no agbcc tree in the corpus
+   *  reaches a base-0 access with an operand offset, in either symbol-map configuration), which is
+   *  exactly why an unmeasured clause could sit in it. */
   unfoldedOffset: boolean;
 }
 
@@ -225,7 +262,9 @@ export const BASECSE_GATES: readonly Gate<BaseKey>[] = [
  *
  *  rank.ts offers the row only where the target declares
  *  `compilerBehaviors.foldsConstAddrOffset` — MIPS and PPC put the addend in the instruction by
- *  construction (`lui`/`%lo`, `lis`/`ori`), so a surviving offset carries no information there. */
+ *  construction (`lui`/`%lo`, `lis`/`ori`), so a surviving offset carries no information there.
+ *  It offers it at BOTH placements (l3/hoist.ts): a base reached once is loaded where it is used,
+ *  so where the init sits is the question the differ has to settle, not whether it exists. */
 export const BASEFOLD_GATES: readonly Gate<BaseKey>[] = [
   {
     id: 'single-use-unfolded',
@@ -287,10 +326,10 @@ function admit(sfn: SFn, gates: readonly Gate<BaseKey>[]): { c: Collected; keys:
     inLoop: new Set(),
     constOffCount: new Map(),
     varIndexed: new Set(),
+    operandOff: new Set(),
   };
   collect(sfn.body, c, false);
   const keys = c.order.filter((k) => {
-    const base = c.meta.get(k)!.base;
     const offsets = c.constOffCount.get(k);
     return (
       firstRejection(gates, {
@@ -299,14 +338,18 @@ function admit(sfn: SFn, gates: readonly Gate<BaseKey>[]): { c: Collected; keys:
         inLoop: c.inLoop.has(k),
         repeatedConstOffset: [...(offsets?.values() ?? [])].some((n) => n >= 2),
         singleCell: !c.varIndexed.has(k) && (offsets?.size ?? 0) <= 1,
-        unfoldedOffset: base.k === 'const' && base.value !== 0 && [...(offsets?.keys() ?? [])].some((o) => o !== 0),
+        unfoldedOffset: c.operandOff.has(k),
       }) === null
     );
   });
   return { c, keys };
 }
 
-export function hoistBaseLocals(sfn: SFn, gates: readonly Gate<BaseKey>[] = BASECSE_GATES): SFn {
+export function hoistBaseLocals(
+  sfn: SFn,
+  gates: readonly Gate<BaseKey>[] = BASECSE_GATES,
+  placement: HoistPlacement = 'head',
+): SFn {
   const { c, keys: hoisted } = admit(sfn, gates);
   const { meta } = c;
   if (hoisted.length === 0) {
@@ -329,18 +372,18 @@ export function hoistBaseLocals(sfn: SFn, gates: readonly Gate<BaseKey>[] = BASE
   }
 
   const rewritten = sfn.body.map((s) => mapStmtExprs(s, (e) => rewrite(e, localFor)));
-  // Pool-load order (see `collect`): inits emit in first-use order. When rank's /livebase re-runs
-  // this pass, the tree's head already carries the default run's inits — blindly prepending would
-  // spell the new base's load above locals the compiler loads first. So the leading run of base
-  // inits (l3/hoist.ts, shared with sinkinit.ts) is re-ordered together with the new inits by each
-  // local's first use in the remaining body; ties keep list order, existing inits first. This
-  // deliberately reaches the single default run too (a head of user pointer inits before a firing
-  // hoist), where it repairs the same invariant.
-  const { inits: head, rest } = splitLeadingBaseInits(sfn, rewritten);
-  const inits = [...head, ...hoistStmts];
-  // with the minted locals declared, or the first-use query would not know their names
-  const firstUse = firstUseIn({ ...sfn, locals: [...sfn.locals, ...newLocals] }, rest);
-  const at = (s: BaseInit): number => firstUse.get(s.name) ?? rest.length;
-  inits.sort((a, b) => at(a) - at(b));
-  return { ...sfn, body: [...inits, ...rest], locals: [...sfn.locals, ...newLocals] };
+  // The new inits join the tree's LEADING run of base inits rather than being prepended above it:
+  // when rank's /livebase re-runs this pass the head already carries the default run's, and
+  // blindly prepending would spell the new base's pool load above locals the compiler loads first.
+  // That is why `HoistPlacement` has no `prepend` — the hazard is typed out rather than warned
+  // about. `placement` then answers where the whole run goes (l3/hoist.ts, the mechanism
+  // sinkinit.ts's policy shares). Under either value it is ordered by first use, which is
+  // pool-load order (see `collect`) — deliberately reaching the single default run too (a head of
+  // user pointer inits before a firing hoist), where it repairs the same invariant.
+  const locals = [...sfn.locals, ...newLocals];
+  // The shell carries the minted DECLARATIONS and the REWRITTEN statements together: first-use
+  // would not know the new names without the first, and would query the pre-rewrite accesses
+  // without the second.
+  const { body } = placeBaseLocals({ ...sfn, locals, body: rewritten }, hoistStmts, placement);
+  return { ...sfn, body, locals };
 }
