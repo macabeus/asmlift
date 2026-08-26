@@ -153,7 +153,7 @@ test('an address-taken accumulator declines', () => {
   expect(unreduceAccumulators(s, GBA)).toBeNull();
 });
 
-test('a volatile or frame-homed accumulator declines', () => {
+test('a pinned accumulator declines, on every pin a local can carry', () => {
   expect(
     unreduceAccumulators(
       fill({
@@ -176,15 +176,27 @@ test('a volatile or frame-homed accumulator declines', () => {
       GBA,
     ),
   ).toBeNull();
-  // …and a POINTER-to-volatile accumulator, which is the fourth pin `SFn.locals` carries. Deleting
-  // one re-spells `*p = 0` as a raw cast with no qualifier on it: a volatile store silently made
-  // plain, which is the one wrongness the differ cannot referee. Every peer lever in l3/ tests both
-  // flags; this one used to test three of four.
+  // …a POINTER-to-volatile accumulator. Deleting one re-spells `*p = 0` as a raw cast with no
+  // qualifier on it: a volatile store silently made plain, which is the one wrongness the differ
+  // cannot referee.
   expect(
     unreduceAccumulators(
       fill({
         locals: [
           { name: 'acc', type: T.ptr(T.u(16)), pointeeVolatile: true },
+          { name: 'i', type: T.s(32) },
+        ],
+      }),
+      GBA,
+    ),
+  ).toBeNull();
+  // …and an `undef`-homed one, whose declaration says the asm READ the slot before writing it.
+  // That fact lives nowhere but the declaration, so deleting the local deletes the recovery.
+  expect(
+    unreduceAccumulators(
+      fill({
+        locals: [
+          { name: 'acc', type: T.s(32), uninit: true },
           { name: 'i', type: T.s(32) },
         ],
       }),
@@ -372,6 +384,22 @@ test('a moved read over a loop that ARMS A TRANSFER is offered only under proof'
   expect(unreduceAccumulators(loopWriting(0x040000d8), GBA, undefined)!.needsProof).toBe(true);
   // and a closed form that reads no memory has nothing to prove whatever the loop arms
   expect(unreduceAccumulators(fill(), GBA, undefined)!.needsProof).toBe(false);
+
+  // ARMED ABOVE THE LOOP is the same transfer. A repeating DMA keeps writing for as long as it is
+  // enabled, so where the arming STORE stands says nothing about when the device writes — which is
+  // why the trigger scan is the whole prefix and not the motion region.
+  const armedAbove = fill({}, [
+    // above BOTH anchors, so it is outside the motion region and only the prefix scan can see it
+    st({ k: 'index', base: c(0x040000dc), idx: c(0), width: 4, signed: true }, c(0xa2000020)),
+    set('i', v('a0')),
+    set('acc', plus(shl(v('a0'), c(6)), read)),
+    {
+      k: 'while',
+      cond: { k: 'bin', op: '<=', l: v('i'), r: c(31) },
+      body: [st(cell(0x040000d8), v('acc')), set('acc', plus(v('acc'), c(64))), set('i', plus(v('i'), c(1)))],
+    },
+  ]);
+  expect(unreduceAccumulators(armedAbove, GBA, DMA_TRIGGERS)!.needsProof).toBe(true);
 });
 
 test('a closed form that reads no memory needs no window at all', () => {
@@ -391,7 +419,7 @@ test('a nested loop is out of scope — the pass walks TOP-LEVEL loops only', ()
   ).toBeNull();
 });
 
-test('an init reading a name the loop writes declines, a `for`’s counter included', () => {
+test('an init reading a name the region assigns declines, in every part of it', () => {
   // `w` is loop-carried, so evaluating the init inside the loop reads a different value
   const s = fill(
     {
@@ -435,6 +463,72 @@ test('an init reading a name the loop writes declines, a `for`’s counter inclu
     },
   ]);
   expect(unreduceAccumulators(forCtr, GBA)).toBeNull();
+
+  // …AND THE PRE-LOOP GAP, which is the rest of the distance the init travels. The region opens
+  // at whichever of the two anchors comes FIRST, so all three of these are inside it: a write
+  // between the init and the loop, a write between the two anchors when the counter's start is
+  // taken LAST, and a store to memory the init read. Each diverges on every input vector.
+  const gap = (between: Stmt[], head?: Stmt[]): SFn =>
+    fill({}, [
+      ...(head ?? [set('i', v('a0')), set('acc', plus(shl(v('a0'), c(6)), v('a1')))]),
+      ...between,
+      {
+        k: 'while',
+        cond: { k: 'bin', op: '<=', l: v('i'), r: c(31) },
+        body: [st(cell(0x040000d8), v('acc')), set('acc', plus(v('acc'), c(64))), set('i', plus(v('i'), c(1)))],
+      },
+    ]);
+  // the accepted shape, to show the region is not a blanket bar
+  expect(emit(unreduceAccumulators(gap([]), GBA))).toContain('(i << 6) + a1');
+  // a free name of the init, rewritten below it
+  expect(unreduceAccumulators(gap([set('a1', plus(v('a1'), c(100)))]), GBA)).toBeNull();
+  // the counter's start taken AFTER the init, off a value that has since moved
+  expect(
+    unreduceAccumulators(
+      gap([], [set('acc', plus(shl(v('a0'), c(6)), v('a1'))), set('a0', plus(v('a0'), c(1))), set('i', v('a0'))]),
+      GBA,
+    ),
+  ).toBeNull();
+  // …and the memory half of the same question
+  expect(
+    unreduceAccumulators(
+      gap([st(cell(0x02000000), c(777))], [set('i', v('a0')), set('acc', plus(shl(v('a0'), c(6)), cell(0x02000000)))]),
+      GBA,
+    ),
+  ).toBeNull();
+});
+
+test('an init reading an address-escaped local declines', () => {
+  // `init-loop-var`'s other half. Nothing here ASSIGNS `w` — the loop hands its address to a
+  // callee, so the write is one no C-level assignment spells and `assignCount` cannot see. The
+  // closed form re-reads `w` once per iteration and picks up whatever the callee left.
+  const s = fill(
+    {
+      locals: [
+        { name: 'acc', type: T.s(32) },
+        { name: 'i', type: T.s(32) },
+        { name: 'w', type: T.s(32) },
+      ],
+    },
+    [
+      // above BOTH anchors, so the motion region does not contain it and `init-loop-var` — which
+      // reads assignment — has nothing to say. The escape is the only fact left.
+      set('w', c(1)),
+      set('i', v('a0')),
+      set('acc', plus(shl(v('a0'), c(6)), v('w'))),
+      {
+        k: 'while',
+        cond: { k: 'bin', op: '<=', l: v('i'), r: c(31) },
+        body: [
+          { k: 'exprstmt', value: { k: 'call', fn: 'bump', args: [{ k: 'addr', name: 'w' }] } },
+          st(cell(0x040000d8), v('acc')),
+          set('acc', plus(v('acc'), c(64))),
+          set('i', plus(v('i'), c(1))),
+        ],
+      },
+    ],
+  );
+  expect(unreduceAccumulators(s, GBA)).toBeNull();
 });
 
 test('a scale between the counter and the sum must carry the WHOLE stride', () => {

@@ -34,26 +34,40 @@
 // runs a `for`'s increment but skips the body's tail), and a step this file cannot relate.
 //
 // THE RE-EVALUATION is the dangerous half, because the closed form is spelled at each read and
-// carries whatever the init READ with it. All four gates below read the ORIGINAL init rather than
+// carries whatever the init READ with it. All five gates below read the ORIGINAL init rather than
 // the substituted form: the init STATEMENT is deleted, so anything inside the counter-start
 // subterm the substitution replaces would be DROPPED rather than moved, which no gate reading the
 // closed form could see.
-//   • INIT-LOOP-VAR — the init names something the loop writes, so re-evaluating it inside the
-//     loop reads a different value. It reads the loop's CONTROL statements as well as its body:
-//     a `for`'s counter is stepped in `loop.inc`, which is not in `loop.body`, so asking the body
-//     alone made the one name this gate exists to catch invisible on exactly the loop kind whose
-//     stepper lives outside it. `acc = (a1 << 6) + a0; for (a0 = a1; …; a0 = a0 + 1)` closed to
-//     `(a0 << 6) + a0` — sixty-four times too fast, compiling and scoring. A 20000-tree semantic
-//     fuzz over both trees on the same inputs put 145 of 2646 fired candidates on that one hole
-//     and nothing else; with the control statements included it finds none.
+//
+// AND THEY ALL ASK ABOUT THE MOTION REGION, which is not the loop. The init is deleted where it
+// stood and re-evaluated at every read, so the distance the values travel is everything between
+// the two — and BOTH ENDS of that span move. The counter's start is the other anchor, because the
+// substitution reads the closed form through it: taken after the init, off a value that has since
+// changed, the closed form is off by exactly that change. So the region opens at whichever anchor
+// comes FIRST and runs to the loop's last iteration, the loop entering whole so the walk reaches
+// its condition and a `for`'s own init and inc as well as its body.
+//   • INIT-LOOP-VAR — the init names something the region assigns, so re-evaluating it below that
+//     assignment reads a different value. Three shapes, all of which compiled, scored, and
+//     computed something else: `for (a0 = a1; …; a0 = a0 + 1)` over `acc = (a1 << 6) + a0` closed
+//     to `(a0 << 6) + a0` (a `for`'s counter is stepped in `loop.inc`, which is not in
+//     `loop.body`); `acc = (a0 << 6) + a1; a1 = a1 + 100;` above the loop; and the counter's start
+//     taken last, `acc = (a0 << 6) + a1; a0 = a0 + 1; i = a0;`. A semantic fuzz over both trees on
+//     the same inputs — 18 seeds, 1.08M generated trees, 111707 fired candidates, and a generator
+//     that emits a statement between the anchors — finds no divergence; asking the LOOP alone put
+//     351 of every 2940 firings on this one hole.
+//   • INIT-NAME-ESCAPES — the other half of the same question, for a write no assignment spells.
+//     A name whose address the function hands out can be rewritten by a callee or through a
+//     stashed pointer, which `assignCount` cannot see: `w = 1; i = a0; acc = (a0 << 6) + w;` over
+//     a loop calling `bump(&w)` re-reads `w` once per iteration and picks up whatever the callee
+//     left. Refused function-wide, because a stashed pointer outlives the statement that made it.
 //   • MOVED-EFFECT — a call or a marker would run once per read instead of once. Refused.
 //   • MOVED-VOLATILE — a `volatile` access is one the source pinned precisely so it would not be
 //     duplicated or moved. Refused. No corpus row reaches it today (nothing on the base spelling
 //     this lever rides carries a qualifier on a READ), so it is guarded by its unit test alone.
-//   • MOVED-READ-ALIASABLE — an ordinary memory read moved into a loop sees whatever the loop
-//     wrote. asmlift can only rule that out for writes it can NAME, so a moved read is admitted on
-//     one configuration: every write the loop evaluates — its body, its condition and a `for`'s
-//     own init/inc — goes to a compile-time-constant address INSIDE the target's declared
+//   • MOVED-READ-ALIASABLE — an ordinary memory read moved down the region sees whatever the
+//     region wrote. asmlift can only rule that out for writes it can NAME, so a moved read is
+//     admitted on one configuration: every write the region evaluates goes to a
+//     compile-time-constant address INSIDE the target's declared
 //     device-register window, and every read lands OUTSIDE it. A device register is not an object
 //     a C program declares (target.ts `deviceRegisters`), so no STORE the C performs there can
 //     change what an ordinary read sees; the read-side half is what keeps a DEVICE read from being
@@ -73,9 +87,12 @@
 // over a destination table into wild writes: the first transfer clobbers the table the init reads,
 // and every later iteration recomputes its destination from the garbage.
 //
-// So the loop's device writes are checked against `capabilities.deviceMemoryWriters` — the four
-// DMA channel-enable halfwords on this board — and a moved read over a loop that touches one is
-// NOT admitted on the gates alone. It is admitted only where the differ PROVES it: `needsProof`
+// So the function's device writes are checked against `capabilities.deviceMemoryWriters` — the
+// four DMA channel-enable halfwords on this board — and a moved read under one is NOT admitted on
+// the gates alone. That scan is the WHOLE PREFIX up to and including the loop, wider than the
+// motion region every other gate reads, because a repeating transfer keeps writing for as long as
+// it is enabled: where the arming store STANDS says nothing about when the device writes, and a
+// channel armed above the init is as asynchronous as one armed inside the loop. It is admitted only where the differ PROVES it: `needsProof`
 // rides out with the candidate, and rank.ts publishes such a spelling only at a byte-exact score,
 // withholding it (loudly, in `RankedResult.withheld`) at every other. That is not a softening of
 // the rule but the only evidence that settles it — a candidate whose object equals the target's
@@ -89,21 +106,19 @@
 // refused. This pass walks TOP-LEVEL loops only: the counter's start and the accumulator's init are
 // found by scanning `sfn.body` above the loop, which is a flat list. A loop under an `if` — or
 // inside another loop — is never reached, even when both statements do stand above it in the
-// enclosing block, so the 13-gate table above answers for a smaller population than it appears to.
-// Measured over the corpus in both symbol-map configurations: of 834 trees, 189 carry a loop, 98
-// carry a TOP-LEVEL one, and 91 carry only nested ones — `arraysum`, `memcpy1`, `revarr`,
-// `dotprod`, `findfirst`, `mergeloop` and `synthetic:dmanest` among them. Widening it is a REACH
-// change and belongs to a row that demands it (dmanest is the obvious candidate), not to a
-// soundness pass; what belongs here is saying so.
+// enclosing block. Measured over the corpus in both symbol-map configurations: of 834 trees, 189
+// carry a loop, 98 carry a TOP-LEVEL one, and 91 carry only nested ones — `arraysum`, `memcpy1`,
+// `revarr`, `dotprod`, `findfirst`, `mergeloop` and `synthetic:dmanest` among them. On klonoa's
+// `LoadBGTilemapData` the count is zero, over all 1344 trees its enumeration produces: a decline
+// there names no gate, and a reader will attribute one anyway. Widening the scan is a REACH change
+// and belongs to a row that demands it (dmanest is the obvious candidate), not to a soundness pass.
 //
-// AND IT ALREADY COST A WRONG ATTRIBUTION, which is why the paragraph above exists. A round
-// reported that this lever declines on klonoa's `LoadBGTilemapData` "on its `moved-read-aliasable`
-// gate — the loop stores through the local `p0`, which is not a constant address", read off the
-// gate table. INSTRUMENTED, the truth is that no gate is ever consulted: a `console.error` on
-// every pre-gate `continue` and on `firstRejection` prints, over all 1344 trees that function's
-// enumeration produces, exactly one kind of line — `topLevelLoops=0`. The function has no
-// top-level loop, so this pass never looks at a loop there at all. A refusal that names no gate is
-// a refusal a reader will attribute to whichever gate looks plausible.
+// AND THE TABLE ANSWERS FOR A SMALLER POPULATION STILL. Instrumented over those same 834 trees,
+// the 15 gates are consulted 36 times and only four ever decide: `acc-live-outside` 14,
+// `acc-read-at-step` 10, `unrelated-step` 7, `acc-multi-assign` 2, admit 3. The other eleven —
+// `moved-read-aliasable`, which the device-memory argument above rests on, among them — are held
+// by their unit tests and by the fuzz, and by nothing the corpus has yet shown them. Short-circuit
+// order hides a later gate behind an earlier one, so this counts FIRST rejections and not reach.
 //
 // AND ITS SIBLING. `l3/reindex.ts` un-reduces a POINTER WALK over the same argument, with the same
 // shape of gate table, and it already handles the `if (guard) do {} while` rotation this file
@@ -134,7 +149,7 @@ interface AccCtx {
   /** the accumulator is assigned exactly twice: its init above the loop and its step inside */
   assigns: number;
   addrTaken: boolean;
-  /** the local carries a qualifier or a frame slot — an asm fact rather than a spelling */
+  /** the local's DECLARATION carries an asm fact — a qualifier, a frame slot, an `undef` */
   pinned: boolean;
   /** the accumulator is mentioned outside the loop, other than by its own init */
   liveOutside: boolean;
@@ -149,8 +164,10 @@ interface AccCtx {
   hasContinue: boolean;
   /** the init relates to the counter's start by the accumulator's own stride */
   related: boolean;
-  /** the init reads a name the loop itself writes */
+  /** the init reads a name something in the motion region assigns */
   initLoopVar: boolean;
+  /** the init reads a name whose address the function hands out */
+  initNameEscapes: boolean;
   /** the closed form contains a call or a marker */
   movedEffect: boolean;
   /** the closed form reads a `volatile` object */
@@ -176,9 +193,9 @@ export const UNREDUCE_GATES: readonly Gate<AccCtx>[] = [
   },
   {
     id: 'acc-pinned',
-    why: 'a volatile or frame-homed local is an asm fact, not a spelling to undo',
+    why: 'a declaration that carries an asm fact cannot be deleted without dropping the fact',
     sound: true,
-    guardedBy: 'unreduce.test.ts: a volatile or frame-homed accumulator declines',
+    guardedBy: 'unreduce.test.ts: a pinned accumulator declines, on every pin a local can carry',
     rejects: (c) => c.pinned,
   },
   {
@@ -237,10 +254,21 @@ export const UNREDUCE_GATES: readonly Gate<AccCtx>[] = [
   },
   {
     id: 'init-loop-var',
-    why: 'a name the loop writes reads differently once the init is evaluated inside it',
+    why: 'a name the region assigns reads differently once the init is evaluated below it',
     sound: true,
-    guardedBy: 'unreduce.test.ts: an init reading a name the loop writes declines, a `for`’s counter included',
+    guardedBy: 'unreduce.test.ts: an init reading a name the region assigns declines, in every part of it',
     rejects: (c) => c.initLoopVar,
+  },
+  {
+    // `init-loop-var`'s other half. That gate reads C-LEVEL assignment, and a local whose address
+    // the function hands out is written where no assignment spells it — by a callee, or through a
+    // pointer the region stores into. The address is taken function-wide because a stashed pointer
+    // outlives the statement that made it.
+    id: 'init-name-escapes',
+    why: 'an address-escaped name is written where no assignment names it',
+    sound: true,
+    guardedBy: 'unreduce.test.ts: an init reading an address-escaped local declines',
+    rejects: (c) => c.initNameEscapes,
   },
   {
     id: 'moved-effect',
@@ -526,6 +554,11 @@ export function unreduceAccumulators(
       continue;
     }
     const outside = [...sfn.body.slice(0, li), ...sfn.body.slice(li + 1)];
+    const startIdx = loop.k === 'for' ? li : sfn.body.indexOf(startStmt);
+    // A device armed anywhere before the reads happen keeps writing memory WHILE they happen, so
+    // the trigger scan is the whole prefix rather than the motion region — a repeating transfer
+    // armed above the init is as asynchronous as one armed inside the loop.
+    const armed: Stmt[] = [...sfn.body.slice(0, li), loop];
     const rewrites = new Map<string, Expr>();
     for (const cand of sfn.locals) {
       const initStmt = sfn.body.slice(0, li).find((s) => s.k === 'assign' && s.name === cand.name);
@@ -535,18 +568,22 @@ export function unreduceAccumulators(
       }
       const k = stepOf(loop.body[stepIdx], cand.name)!;
       const closed = relate(initStmt.value, startStmt.value, ctr, k, d.value);
-      // Everything one iteration may EVALUATE — the loop itself, so the walk below reaches its
-      // condition and a `for`'s own init and inc as well as the body. Asking `loop.body` alone is
-      // what made a `for`'s counter step invisible to `init-loop-var`.
-      const evaluated: Stmt[] = [loop];
+      // THE MOTION REGION: everything that runs between where the init stood and the reads that
+      // replace it. Both endpoints move — the init is DELETED, and the counter's start is what the
+      // substitution reads the closed form through — so the region opens at whichever of the two
+      // comes first and runs to the loop's last iteration. The loop enters WHOLE, so the walk
+      // below reaches its condition and a `for`'s own init and inc as well as its body.
+      const initIdx = sfn.body.indexOf(initStmt);
+      const evaluated: Stmt[] = [...sfn.body.slice(Math.min(initIdx, startIdx) + 1, li), loop];
       const ctrLocal = sfn.locals.find((l) => l.name === ctr);
       const ctx: AccCtx = {
         assigns: assignCount(sfn.body, cand.name),
         addrTaken: addrTakenIn(sfn.body, cand.name),
-        // `pointeeVolatile` belongs here with the other three: deleting a `volatile u16 *` local
-        // and re-spelling `*p = 0` as a raw cast drops the qualifier silently, which is the one
-        // wrongness a differ cannot see. (l3/inlinebase.ts carries it onto the minted cast
-        // instead; this lever has no local left to carry anything.)
+        // Every flag `SFn.locals` can carry, because each is a fact about the ASM that only the
+        // declaration states: two qualifiers (deleting a `volatile u16 *` local re-spells `*p = 0`
+        // as a raw cast with no qualifier on it — l3/inlinebase.ts carries it onto the minted cast
+        // instead, and this lever has no local left to carry anything), a frame home, and an
+        // `undef` whose whole content is the assignment that is MISSING.
         pinned:
           cand.volatile !== undefined ||
           cand.pointeeVolatile !== undefined ||
@@ -568,6 +605,7 @@ export function unreduceAccumulators(
         related: closed !== null,
         // `evaluated`, not `loop.body`: a `for`'s counter is stepped in `loop.inc`
         initLoopVar: [...namesUnder(initStmt.value)].some((n) => assignCount(evaluated, n) > 0),
+        initNameEscapes: [...namesUnder(initStmt.value)].some((n) => addrTakenIn(sfn.body, n)),
         // read off the ORIGINAL init, not the substituted form: the init STATEMENT is deleted, so
         // an effect inside the counter-start subterm the substitution replaces would be dropped
         // rather than moved — one fewer execution, which no gate reading `closed` could see.
@@ -580,7 +618,7 @@ export function unreduceAccumulators(
       }
       // The gates have placed every write the C performs; what they cannot place is a write the
       // DEVICE performs in answer to one. A moved read over such a loop is offered under PROOF.
-      if (accessesIn(initStmt.value).length > 0 && deviceWritesMemory(evaluated, triggers)) {
+      if (accessesIn(initStmt.value).length > 0 && deviceWritesMemory(armed, triggers)) {
         needsProof = true;
       }
       rewrites.set(cand.name, closed!);
