@@ -193,11 +193,19 @@ export interface BaseKey {
    *  that reached the instruction instead survived because something OTHER than a subscript put it
    *  there — a named base, or an aggregate member (see the header). Read only by
    *  `BASEFOLD_GATES`, whose roster row rank.ts offers only where the target declares the fold.
-   *  Two refusals, each of them a place the fold left no evidence to read: an offset the address
-   *  expression carried (a relocation addend, a folded `add`), where the fold may already have
-   *  happened and an offset of 0, where it is the identity; and base 0, where there is no
-   *  materialized literal for a subscript to fold INTO — `((s8 *)0)[16]` is one instruction
-   *  (`lb $v0, 16($zero)`), so the offset never had anywhere else to be. */
+   *
+   *  Where the fold leaves no evidence to read is decided UPSTREAM and once, in
+   *  `structure/structure.ts`: an offset the address expression carried (a relocation addend, a
+   *  folded `add`) and an offset of 0 never set the flag, so absence is never proof of anything.
+   *  Nothing is subtracted again here, which also puts the whole judgement in `single-use-unfolded`
+   *  where `ablateHeuristic` can price it. A base of 0 used to be a second refusal and was wrong:
+   *  its reason was a MIPS instruction (`((s8 *)0)[16]` is one `lb $v0, 16($zero)`) quoted on a
+   *  rule only agbcc ever runs, and agbcc materializes a zero base like any other — compiled,
+   *  `((s8 *)0)[16]` is `mov r0, #0x10` + `ldrb [r0, #0]` against `s8 *p = (s8 *)0; p[16]`'s
+   *  `mov r0, #0x0` + `ldrb [r0, #0x10]`, the same discriminating pair as at 0x3001100. Deleting
+   *  it moved nothing: no agbcc tree in the corpus reaches a base-0 access with an operand offset
+   *  in either symbol-map configuration (two gcc2.7.2 trees do, and MIPS is offered no
+   *  `/basefold` row at all). */
   unfoldedOffset: boolean;
 }
 
@@ -317,7 +325,6 @@ function admit(sfn: SFn, gates: readonly Gate<BaseKey>[]): { c: Collected; keys:
   };
   collect(sfn.body, c, false);
   const keys = c.order.filter((k) => {
-    const base = c.meta.get(k)!.base;
     const offsets = c.constOffCount.get(k);
     return (
       firstRejection(gates, {
@@ -326,7 +333,7 @@ function admit(sfn: SFn, gates: readonly Gate<BaseKey>[]): { c: Collected; keys:
         inLoop: c.inLoop.has(k),
         repeatedConstOffset: [...(offsets?.values() ?? [])].some((n) => n >= 2),
         singleCell: !c.varIndexed.has(k) && (offsets?.size ?? 0) <= 1,
-        unfoldedOffset: c.operandOff.has(k) && (base.k === 'addr' || base.value !== 0),
+        unfoldedOffset: c.operandOff.has(k),
       }) === null
     );
   });

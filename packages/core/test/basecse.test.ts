@@ -306,9 +306,16 @@ describe('leaf-base hoisting', () => {
       }
     });
 
-    test('a base of 0 is left inline: no materialized literal, so nothing survived a fold', () => {
-      const input = fn([{ k: 'store', lval: cidx(0, c(16), 1, fromOperand), value: c(0) }]);
-      expect(hoistBaseLocals(input, BASEFOLD_GATES)).toBe(input);
+    test('a base of 0 reads the evidence like any other: agbcc materializes a zero base too', () => {
+      // The refusal that used to sit here quoted MIPS (`lb $v0, 16($zero)`) on a rule only agbcc
+      // runs. Compiled both ways with the benchmark's own flags: `((s8 *)0)[16]` is
+      // `mov r0, #0x10` + `ldrb [r0, #0]`, and `s8 *p = (s8 *)0; p[16]` is `mov r0, #0x0` +
+      // `ldrb [r0, #0x10]` — the same pair that discriminates at every other base.
+      const evidence = fn([{ k: 'store', lval: cidx(0, c(16), 1, fromOperand), value: c(0) }]);
+      expect(hoistBaseLocals(evidence, BASEFOLD_GATES).locals).toHaveLength(1);
+      // …and with no operand offset it is refused, like any other base reached once
+      const inline = fn([{ k: 'store', lval: cidx(0, c(16), 1), value: c(0) }]);
+      expect(hoistBaseLocals(inline, BASEFOLD_GATES)).toBe(inline);
     });
 
     test('`prepend` is not a placement this pass may take — the hazard is typed out', () => {
