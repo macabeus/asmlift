@@ -350,8 +350,8 @@ more than three gates pretending to a soundness they do not have.
 
 **A gate's PREMISE can be a target capability, and when it is, that is where it belongs.**
 `l3/unreduce.ts` deletes a loop-carried accumulator and re-spells each read as a closed form, which
-means a memory read in the accumulator's init is evaluated INSIDE the loop instead of once above
-it. Whether the loop's own writes can change what that read sees is the question
+means a memory read in the accumulator's init is evaluated at each read instead of once where the
+init stood. Whether the loop's own writes can change what that read sees is the question
 [`ir/alias.ts`](../packages/core/src/ir/alias.ts) exists for — but that predicate resolves NAMED
 globals through the L2 def map, and the addresses here are raw constants on a tree with no `Value`s
 left, so it answers "unknown" and bars everything. What decides it instead is
@@ -360,6 +360,19 @@ any object a C program declares, so no STORE THE C PERFORMS in such a loop can c
 read. That is a fact about the BOARD, not about C and not about the compiler, which is why it is a
 capability rather than a rule inside either file — and it keeps alias.ts's asymmetry, since every
 address the range cannot place still bars.
+
+**A SOUND GATE CAN BE SOUND ABOUT THE WRONG REGION, and nothing in this file's machinery notices.**
+`sound: true` costs a `guardedBy` test, and a table where every entry has one still answers the
+wrong question if the ctx it reads was built over the wrong span. Every gate above asked about the
+LOOP; the transform moves the init across everything between where it STOOD and each read, and the
+counter's start is a second anchor that can stand on either side of the init. Three shapes were
+admitted and diverged on every input vector. Two rounds fixed the same defect one scope apart — the
+first widened `loop.body` to `[loop]` to catch a `for`'s increment and stopped there — because a
+gate table makes the RULES reviewable and says nothing about the extent they range over. So a pass
+that MOVES code states its motion region as a named value the ctx is built from, and every gate that
+asks "can anything change this" reads that one. `deviceMemoryWriters` is the exception that proves
+it: an armed DMA writes for as long as it is enabled, so that scan is deliberately WIDER than the
+motion region — the whole prefix — and the difference is written down where the two are built.
 
 **And a premise about the board is still a premise.** That paragraph originally ended "so a loop
 whose every write lands in that range cannot change an ordinary read", which is FALSE on this
