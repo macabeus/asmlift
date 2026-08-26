@@ -36,6 +36,7 @@ import { mulFirstSums } from './l3/mulfirst';
 import { nearBaseClusters } from './l3/nearbase';
 import { parkParamsFirst } from './l3/parkfirst';
 import { pollGuards, pollReads } from './l3/pollguard';
+import { pointerFields } from './l3/ptrfield';
 import { registerishSpellings } from './l3/regspell';
 import { reindexWalks } from './l3/reindex';
 import { hoistScopedBases } from './l3/scopebase';
@@ -883,6 +884,11 @@ export function enumerateCandidates(
     // the invariant hoist, gcc/loop.c:1151 then :1173). The scalar-value sibling of `/indexed`,
     // which makes the same argument for a pointer walk.
     respell('/unreduce', () => unreduceAccumulators(sfn, target.capabilities.deviceRegisters));
+    // `/ptr-field` — declare a recovered WORD field a pointer (l3/ptrfield.ts). raise/structs.ts
+    // types a field from the access width alone, and on a 32-bit target `void *` fits that
+    // evidence exactly — but not the compiler's alias analysis, which is what lets a pointer
+    // field's load leave a loop an `s32` store pins it inside. Both are enumerated.
+    respell('/ptr-field', () => pointerFields(sfn));
     // `/inlinebase` — spell a CONSTANT-address pointer local at its uses instead
     // (l3/inlinebase.ts). The local is structure/analysis.ts's value home for a `const` the
     // asm kept in a callee-saved register across a call; the register is real, but a constant
