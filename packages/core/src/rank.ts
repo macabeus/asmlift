@@ -48,7 +48,12 @@ import { applyIdiomPatterns, raiseRecovered, structureChecked } from './pipeline
 import { type Prototypes, prototypesFromSymbols } from './proto';
 import { runPreRecovery } from './raise/pre-recovery';
 import { recoverTypes } from './raise/recover';
-import { hasDerivedReadHome, hasHomeableSharedAddress, hasLoopSharedPureValue } from './structure/analysis';
+import {
+  hasDerivedReadHome,
+  hasHomeableSharedAddress,
+  hasLoopSharedPureValue,
+  hasMergeFeedHome,
+} from './structure/analysis';
 import { type SymbolMap, symbolsByName } from './symbols';
 import { type TargetDescription, structureOptionsFor } from './target';
 
@@ -69,7 +74,7 @@ import { type TargetDescription, structureOptionsFor } from './target';
  *  primary declines (reread also skips the strip closure). Both exemptions are stated here
  *  rather than left implicit in a missing `||` arm or trigger term. */
 interface StructuringAxis {
-  flag: 'reread' | 'inplace' | 'mergeNames' | 'addrHome' | 'exprHome' | 'derivedHome' | 'unsCmp';
+  flag: 'reread' | 'inplace' | 'mergeNames' | 'addrHome' | 'exprHome' | 'derivedHome' | 'mergeHome' | 'unsCmp';
   suffix: string;
   options: (on: boolean) => Parameters<typeof structureChecked>[1];
   probeGate?: (probe: Fn, defs: Map<Value, Op>) => boolean;
@@ -166,6 +171,29 @@ const STRUCTURING_AXES: readonly StructuringAxis[] = [
     suffix: '/derived-home',
     options: (on) => ({ homeDerivedReads: on }),
     variantGate: hasDerivedReadHome,
+    strip: true,
+  },
+  // `/merge-home` — the merge-feed-home axis (structure/analysis.ts AnalyzeOptions
+  // homeMergeFeeds): a pure value one join's incoming edges render into the SAME parameter slot
+  // from 2+ places materializes in the block that dominates them — the value the source computed
+  // once above the branch (`s32 m = (b & 1) ? 0x400 : 0;`), where the default has no name to
+  // reference on an edge and re-derives the whole expression per arm. Gated per symbol variant on
+  // the scope itself rather than on an approximation of it.
+  //
+  // An ADMISSION, not a default: forced on, the spelling is REPLACED across the fan rather than
+  // added to it, which costs `kleod:MultiplyQ4`, `kleod:MultiplyQ8` and
+  // `pokeemerald:MathUtil_Mul16` their matches. On the roster that is unreachable — `compareScored`
+  // orders by score and the un-homed sibling rides beside it.
+  //
+  // Its fan is essentially one row's: over the 16 corpus rows the gate admits, 2790 → 5841
+  // candidates map-less and 2538 → 5363 with a map, of which `kleod:UpdateCameraScroll` (outcome
+  // `noncompile`, so they buy nothing) is +2944 and +2752, three rows add none at all where
+  // `/defsite` already spells the same tree, and the rest pay 107 and 73 between them.
+  {
+    flag: 'mergeHome',
+    suffix: '/merge-home',
+    options: (on) => ({ homeMergeFeeds: on }),
+    variantGate: hasMergeFeedHome,
     strip: true,
   },
   // `/uns-cmp` — spell unsigned compares unsigned (structure.ts unsignedCompareSpelling): an
@@ -581,6 +609,7 @@ export function enumerateCandidates(
     addrHome: false,
     exprHome: false,
     derivedHome: false,
+    mergeHome: false,
     unsCmp: false,
   }));
   for (const ax of STRUCTURING_AXES) {

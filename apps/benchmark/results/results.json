@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generatedAt": "2026-08-25T22:00:22.918Z",
+    "generatedAt": "2026-08-26T12:16:39.846Z",
     "toolchains": [
       "ido7.1",
       "agbcc",
@@ -14,7 +14,7 @@
       "real": 252
     },
     "asmlift": {
-      "commit": "ce845fa7f46a07917603c84f9c7ce9ee3145cbce",
+      "commit": "122bf0ee9273cecd8b97edb4545a2ec52310e551",
       "dirty": false
     },
     "m2c": {
@@ -10750,7 +10750,7 @@
           "addrDeref": 0
         },
         "errorMarkers": [
-          "no scorable candidate for 'UpdateCameraScroll': agbcc failed: c.c:1201: incompatible type for argument 2 of `ScrollBGLayer'"
+          "no scorable candidate for 'UpdateCameraScroll': agbcc failed: c.c:1195: incompatible type for argument 2 of `ScrollBGLayer'"
         ]
       },
       "m2c": {
@@ -18949,7 +18949,7 @@
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "candidateLabel": "unsigned",
+        "candidateLabel": "unsigned/merge-home",
         "symbolsUsed": [
           {
             "name": "gActiveBattler",
@@ -19017,20 +19017,20 @@
           }
         ],
         "outcome": "nonmatch",
-        "source": "struct Elem0 { u8 field_0; u8 _pad0[511]; };\nstruct Elem1 { u8 _pad0[4]; u16 field_4; u8 _pad1[13]; u8 field_19; u8 _pad2[8]; };\nstruct Elem2 { u8 _pad0[2]; u8 field_2; u8 _pad1[13]; };\nstruct Elem3 { s32 field_0; u8 _pad0[84]; };\nstruct Elem4 { u8 _pad0[1]; u8 field_1; u8 _pad1[10]; };\nstruct Elem5 { u8 _pad0[46]; u16 field_46; u8 _pad1[40]; };\nstruct Elem6 { u8 _pad0[7]; u8 field_7; u8 _pad1[20]; };\nstruct Elem7 { u8 field_0; u8 _pad0[511]; };\ns32 TrySetCantSelectMoveBattleScript(void) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    s32 v5;\n    s32 v6;\n    v0 = gActiveBattler;\n    v1 = *(u16 *)((((struct Elem0 *)((u32)&gBattleBufferB + 2))[v0].field_0 << 1) + 88 * v0 + ((u32)&gBattleMons + 12));\n    v2 = gBattleStruct;\n    if (((struct Elem1 *)&gDisableStructs)[v0].field_4 == v1 && v1 != 0) {\n        gBattleScripting.battler = v0;\n        gCurrentMove = v1;\n        if ((gBattleTypeFlags & 128 << 10) != 0) {\n            gPalaceSelectionBattleScripts[gActiveBattler] = &BattleScript_SelectingDisabledMoveInPalace;\n            ((struct Elem2 *)&gProtectStructs)[gActiveBattler].field_2 = ((struct Elem2 *)&gProtectStructs)[gActiveBattler].field_2 | 16;\n            v5 = 0;\n        } else {\n            gSelectionBattleScripts[gActiveBattler] = &BattleScript_SelectingDisabledMove;\n            v5 = 1;\n        }\n    } else {\n        v5 = 0;\n    }\n    if (v1 == gLastMoves[gActiveBattler] && v1 != 165 && ((struct Elem3 *)((u32)&gBattleMons + 80))[gActiveBattler].field_0 < 0) {\n        CancelMultiTurnMoves(gActiveBattler);\n        if ((gBattleTypeFlags & 128 << 10) != 0) {\n            gPalaceSelectionBattleScripts[gActiveBattler] = &BattleScript_SelectingTormentedMoveInPalace;\n            ((struct Elem2 *)&gProtectStructs)[gActiveBattler].field_2 = ((struct Elem2 *)&gProtectStructs)[gActiveBattler].field_2 | 16;\n        } else {\n            gSelectionBattleScripts[gActiveBattler] = &BattleScript_SelectingTormentedMove;\n            v5 = (u8)(v5 + 1);\n        }\n    }\n    if (((struct Elem1 *)&gDisableStructs)[gActiveBattler].field_19 << 28 != 0 && ((struct Elem4 *)&gBattleMoves)[v1].field_1 == 0) {\n        gCurrentMove = v1;\n        if ((gBattleTypeFlags & 128 << 10) != 0) {\n            gPalaceSelectionBattleScripts[gActiveBattler] = &BattleScript_SelectingNotAllowedMoveTauntInPalace;\n            ((struct Elem2 *)&gProtectStructs)[gActiveBattler].field_2 = ((struct Elem2 *)&gProtectStructs)[gActiveBattler].field_2 | 16;\n        } else {\n            gSelectionBattleScripts[gActiveBattler] = &BattleScript_SelectingNotAllowedMoveTaunt;\n            v5 = (u8)(v5 + 1);\n        }\n    }\n    if (GetImprisonedMovesCount(gActiveBattler, v1) << 24 != 0) {\n        gCurrentMove = v1;\n        if ((gBattleTypeFlags & 128 << 10) != 0) {\n            gPalaceSelectionBattleScripts[gActiveBattler] = &BattleScript_SelectingImprisonedMoveInPalace;\n            ((struct Elem2 *)&gProtectStructs)[gActiveBattler].field_2 = ((struct Elem2 *)&gProtectStructs)[gActiveBattler].field_2 | 16;\n        } else {\n            gSelectionBattleScripts[gActiveBattler] = &BattleScript_SelectingImprisonedMove;\n            v5 = (u8)(v5 + 1);\n        }\n    }\n    v3 = gActiveBattler;\n    if (((struct Elem5 *)&gBattleMons)[v3].field_46 == 175) {\n        v6 = ((struct Elem6 *)&gEnigmaBerries)[v3].field_7;\n    } else {\n        v6 = (u8)GetItemHoldEffect(((struct Elem5 *)&gBattleMons)[v3].field_46);\n    }\n    gPotentialItemEffectBattler = gActiveBattler;\n    if (v6 == 29) {\n        if (*(u16 *)(v2 + ((v0 << 1) + 200)) != 0 && (*(u16 *)(v2 + ((v0 << 1) + 200)) != 65535 && *(u16 *)(v2 + ((v0 << 1) + 200)) != v1)) {\n            gCurrentMove = *(u16 *)(v2 + ((v0 << 1) + 200));\n            gLastUsedItem = ((struct Elem5 *)&gBattleMons)[gActiveBattler].field_46;\n            v4 = gActiveBattler;\n            if ((gBattleTypeFlags & 128 << 10) != 0) {\n                ((struct Elem2 *)&gProtectStructs)[v4].field_2 = ((struct Elem2 *)&gProtectStructs)[v4].field_2 | 16;\n            } else {\n                gSelectionBattleScripts[v4] = &BattleScript_SelectingNotAllowedMoveChoiceItem;\n                v5 = (u8)(v5 + 1);\n            }\n        }\n    }\n    if (*(u8 *)(88 * gActiveBattler + ((struct Elem7 *)((u32)&gBattleBufferB + 2))[gActiveBattler].field_0 + ((u32)&gBattleMons + 36)) == 0) {\n        if ((gBattleTypeFlags & 128 << 10) != 0) {\n            ((struct Elem2 *)&gProtectStructs)[gActiveBattler].field_2 = ((struct Elem2 *)&gProtectStructs)[gActiveBattler].field_2 | 16;\n        } else {\n            gSelectionBattleScripts[gActiveBattler] = &BattleScript_SelectingMoveWithNoPP;\n            v5 = (u8)(v5 + 1);\n        }\n    }\n    return v5;\n}\n",
-        "score": 192,
-        "maxScore": 416,
+        "source": "struct Elem0 { u8 field_0; u8 _pad0[511]; };\nstruct Elem1 { u8 _pad0[4]; u16 field_4; u8 _pad1[13]; u8 field_19; u8 _pad2[8]; };\nstruct Elem2 { u8 _pad0[2]; u8 field_2; u8 _pad1[13]; };\nstruct Elem3 { s32 field_0; u8 _pad0[84]; };\nstruct Elem4 { u8 _pad0[1]; u8 field_1; u8 _pad1[10]; };\nstruct Elem5 { u8 _pad0[46]; u16 field_46; u8 _pad1[40]; };\nstruct Elem6 { u8 _pad0[7]; u8 field_7; u8 _pad1[20]; };\nstruct Elem7 { u8 field_0; u8 _pad0[511]; };\ns32 TrySetCantSelectMoveBattleScript(void) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    s32 v5;\n    s32 v6;\n    v0 = 0;\n    v1 = gActiveBattler;\n    v2 = *(u16 *)((((struct Elem0 *)((u32)&gBattleBufferB + 2))[v1].field_0 << 1) + 88 * v1 + ((u32)&gBattleMons + 12));\n    v3 = gBattleStruct;\n    if (((struct Elem1 *)&gDisableStructs)[v1].field_4 == v2 && v2 != 0) {\n        gBattleScripting.battler = v1;\n        gCurrentMove = v2;\n        if ((gBattleTypeFlags & 128 << 10) != 0) {\n            gPalaceSelectionBattleScripts[gActiveBattler] = &BattleScript_SelectingDisabledMoveInPalace;\n            ((struct Elem2 *)&gProtectStructs)[gActiveBattler].field_2 = ((struct Elem2 *)&gProtectStructs)[gActiveBattler].field_2 | 16;\n        } else {\n            gSelectionBattleScripts[gActiveBattler] = &BattleScript_SelectingDisabledMove;\n            v0 = 1;\n        }\n    }\n    if (v2 == gLastMoves[gActiveBattler] && v2 != 165 && ((struct Elem3 *)((u32)&gBattleMons + 80))[gActiveBattler].field_0 < 0) {\n        CancelMultiTurnMoves(gActiveBattler);\n        if ((gBattleTypeFlags & 128 << 10) != 0) {\n            gPalaceSelectionBattleScripts[gActiveBattler] = &BattleScript_SelectingTormentedMoveInPalace;\n            ((struct Elem2 *)&gProtectStructs)[gActiveBattler].field_2 = ((struct Elem2 *)&gProtectStructs)[gActiveBattler].field_2 | 16;\n        } else {\n            gSelectionBattleScripts[gActiveBattler] = &BattleScript_SelectingTormentedMove;\n            v0 = (u8)(v0 + 1);\n        }\n    }\n    if (((struct Elem1 *)&gDisableStructs)[gActiveBattler].field_19 << 28 != 0 && ((struct Elem4 *)&gBattleMoves)[v2].field_1 == 0) {\n        gCurrentMove = v2;\n        if ((gBattleTypeFlags & 128 << 10) != 0) {\n            gPalaceSelectionBattleScripts[gActiveBattler] = &BattleScript_SelectingNotAllowedMoveTauntInPalace;\n            ((struct Elem2 *)&gProtectStructs)[gActiveBattler].field_2 = ((struct Elem2 *)&gProtectStructs)[gActiveBattler].field_2 | 16;\n        } else {\n            gSelectionBattleScripts[gActiveBattler] = &BattleScript_SelectingNotAllowedMoveTaunt;\n            v0 = (u8)(v0 + 1);\n        }\n    }\n    if (GetImprisonedMovesCount(gActiveBattler, v2) << 24 != 0) {\n        gCurrentMove = v2;\n        if ((gBattleTypeFlags & 128 << 10) != 0) {\n            gPalaceSelectionBattleScripts[gActiveBattler] = &BattleScript_SelectingImprisonedMoveInPalace;\n            ((struct Elem2 *)&gProtectStructs)[gActiveBattler].field_2 = ((struct Elem2 *)&gProtectStructs)[gActiveBattler].field_2 | 16;\n        } else {\n            gSelectionBattleScripts[gActiveBattler] = &BattleScript_SelectingImprisonedMove;\n            v0 = (u8)(v0 + 1);\n        }\n    }\n    v4 = gActiveBattler;\n    if (((struct Elem5 *)&gBattleMons)[v4].field_46 == 175) {\n        v6 = ((struct Elem6 *)&gEnigmaBerries)[v4].field_7;\n    } else {\n        v6 = (u8)GetItemHoldEffect(((struct Elem5 *)&gBattleMons)[v4].field_46);\n    }\n    gPotentialItemEffectBattler = gActiveBattler;\n    if (v6 == 29) {\n        if (*(u16 *)(v3 + ((v1 << 1) + 200)) != 0 && (*(u16 *)(v3 + ((v1 << 1) + 200)) != 65535 && *(u16 *)(v3 + ((v1 << 1) + 200)) != v2)) {\n            gCurrentMove = *(u16 *)(v3 + ((v1 << 1) + 200));\n            gLastUsedItem = ((struct Elem5 *)&gBattleMons)[gActiveBattler].field_46;\n            v5 = gActiveBattler;\n            if ((gBattleTypeFlags & 128 << 10) != 0) {\n                ((struct Elem2 *)&gProtectStructs)[v5].field_2 = ((struct Elem2 *)&gProtectStructs)[v5].field_2 | 16;\n            } else {\n                gSelectionBattleScripts[v5] = &BattleScript_SelectingNotAllowedMoveChoiceItem;\n                v0 = (u8)(v0 + 1);\n            }\n        }\n    }\n    if (*(u8 *)(88 * gActiveBattler + ((struct Elem7 *)((u32)&gBattleBufferB + 2))[gActiveBattler].field_0 + ((u32)&gBattleMons + 36)) == 0) {\n        if ((gBattleTypeFlags & 128 << 10) != 0) {\n            ((struct Elem2 *)&gProtectStructs)[gActiveBattler].field_2 = ((struct Elem2 *)&gProtectStructs)[gActiveBattler].field_2 | 16;\n        } else {\n            gSelectionBattleScripts[gActiveBattler] = &BattleScript_SelectingMoveWithNoPP;\n            v0 = (u8)(v0 + 1);\n        }\n    }\n    return v0;\n}\n",
+        "score": 146,
+        "maxScore": 407,
         "compileErrors": null,
         "breakdown": {
-          "insert": 27,
-          "delete": 38,
-          "replace": 3,
-          "opMismatch": 4,
-          "argMismatch": 120
+          "insert": 18,
+          "delete": 27,
+          "replace": 5,
+          "opMismatch": 1,
+          "argMismatch": 95
         },
         "quality": {
           "score": 68,
-          "lines": 93,
+          "lines": 91,
           "gotos": 0,
           "casts": 13,
           "unkGlue": 0,
@@ -19064,15 +19064,15 @@
       },
       "gapSize": {
         "decompiler": "asmlift",
-        "score": 192,
-        "maxScore": 416,
-        "ratio": 0.46153846153846156,
+        "score": 146,
+        "maxScore": 407,
+        "ratio": 0.35872235872235875,
         "kinds": {
-          "insert": 27,
-          "delete": 38,
-          "replace": 3,
-          "opMismatch": 4,
-          "argMismatch": 120
+          "insert": 18,
+          "delete": 27,
+          "replace": 5,
+          "opMismatch": 1,
+          "argMismatch": 95
         }
       },
       "scripts": {
@@ -22455,7 +22455,7 @@
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "candidateLabel": "unsigned/setup-args/defsite/livebase/sinkinit",
+        "candidateLabel": "unsigned/setup-args/defsite/merge-home/livebase/sinkinit",
         "droppedCandidates": [
           {
             "label": "unsigned",
@@ -22528,24 +22528,96 @@
           {
             "label": "unsigned/defsite/flip-join/livebase/sinkinit",
             "error": "agbcc failed: c.c:2035: too many arguments to function `VramMalloc'"
+          },
+          {
+            "label": "unsigned/merge-home",
+            "error": "agbcc failed: c.c:2036: too many arguments to function `VramMalloc'"
+          },
+          {
+            "label": "unsigned/merge-home/initfirst",
+            "error": "agbcc failed: c.c:2024: too many arguments to function `VramMalloc'"
+          },
+          {
+            "label": "unsigned/merge-home/livebase",
+            "error": "agbcc failed: c.c:2038: too many arguments to function `VramMalloc'"
+          },
+          {
+            "label": "unsigned/merge-home/livebase/initfirst",
+            "error": "agbcc failed: c.c:2026: too many arguments to function `VramMalloc'"
+          },
+          {
+            "label": "unsigned/merge-home/livebase/sinkinit",
+            "error": "agbcc failed: c.c:2038: too many arguments to function `VramMalloc'"
+          },
+          {
+            "label": "unsigned/merge-home/livebase/sinkinit/initfirst",
+            "error": "agbcc failed: c.c:2026: too many arguments to function `VramMalloc'"
+          },
+          {
+            "label": "unsigned/defsite/merge-home",
+            "error": "agbcc failed: c.c:2024: too many arguments to function `VramMalloc'"
+          },
+          {
+            "label": "unsigned/defsite/merge-home/livebase",
+            "error": "agbcc failed: c.c:2026: too many arguments to function `VramMalloc'"
+          },
+          {
+            "label": "unsigned/defsite/merge-home/livebase/sinkinit",
+            "error": "agbcc failed: c.c:2026: too many arguments to function `VramMalloc'"
+          },
+          {
+            "label": "unsigned/flip-join/merge-home",
+            "error": "agbcc failed: c.c:2034: too many arguments to function `VramMalloc'"
+          },
+          {
+            "label": "unsigned/flip-join/merge-home/initfirst",
+            "error": "agbcc failed: c.c:2022: too many arguments to function `VramMalloc'"
+          },
+          {
+            "label": "unsigned/flip-join/merge-home/livebase",
+            "error": "agbcc failed: c.c:2036: too many arguments to function `VramMalloc'"
+          },
+          {
+            "label": "unsigned/flip-join/merge-home/livebase/initfirst",
+            "error": "agbcc failed: c.c:2024: too many arguments to function `VramMalloc'"
+          },
+          {
+            "label": "unsigned/flip-join/merge-home/livebase/sinkinit",
+            "error": "agbcc failed: c.c:2036: too many arguments to function `VramMalloc'"
+          },
+          {
+            "label": "unsigned/flip-join/merge-home/livebase/sinkinit/initfirst",
+            "error": "agbcc failed: c.c:2024: too many arguments to function `VramMalloc'"
+          },
+          {
+            "label": "unsigned/defsite/flip-join/merge-home",
+            "error": "agbcc failed: c.c:2022: too many arguments to function `VramMalloc'"
+          },
+          {
+            "label": "unsigned/defsite/flip-join/merge-home/livebase",
+            "error": "agbcc failed: c.c:2024: too many arguments to function `VramMalloc'"
+          },
+          {
+            "label": "unsigned/defsite/flip-join/merge-home/livebase/sinkinit",
+            "error": "agbcc failed: c.c:2024: too many arguments to function `VramMalloc'"
           }
         ],
         "symbolsUsed": [],
-        "outcome": "nonmatch",
-        "source": "struct Struct0 { s32 field_0; u8 _pad0[4]; s32 field_8; u16 field_12; u16 field_14; u8 _pad1[4]; u16 field_20; u16 field_22; u8 _pad2[2]; u8 field_26; u8 field_27; u8 field_28; u8 _pad3[2]; u8 field_31; s32 field_32; };\nvoid sub_802DFC8(s16 a0, struct Struct0 * a1) {\n    s32 v0;\n    s32 v1;\n    u8 * p0;\n    if ((8 & a0) != 0) {\n        v1 = 6;\n        v0 = (-(1 & a0) | 1 & a0) >> 31 & 128 << 3;\n    } else {\n        if ((4 & a0) != 0) {\n            v1 = 4;\n            if ((2 & a0) != 0) {\n                v0 = 128 << 3;\n            } else {\n                v0 = 0;\n            }\n            if ((1 & a0) != 0) v0 = v0 | 128 << 4;\n        } else {\n            if ((2 & a0) != 0) {\n                v1 = 2;\n                if ((1 & a0) != 0) {\n                    v0 = 128 << 3;\n                } else {\n                    v0 = 0;\n                }\n            } else {\n                v1 = 0;\n                if ((1 & a0) != 0) {\n                    v0 = 128 << 4;\n                } else {\n                    v0 = 0;\n                }\n            }\n        }\n    }\n    p0 = (u8 *)&gStageData;\n    if (p0[3] != 7) {\n        if ((u8)(p0[10] - 3) <= 5) {\n            if (p0[9] == 5) {\n                a1->field_0 = VramMalloc(15);\n                a1->field_12 = 234 << 2;\n            } else {\n                if (p0[9] == 3) {\n                    a1->field_0 = VramMalloc(20);\n                    a1->field_12 = 987;\n                } else {\n                    a1->field_0 = VramMalloc(20);\n                    a1->field_12 = 866;\n                }\n            }\n        } else {\n            a1->field_0 = VramMalloc(20);\n            a1->field_12 = 866;\n        }\n    } else {\n        a1->field_0 = VramMalloc(20);\n        a1->field_12 = 866;\n        v0 = v0 | 128 << 2;\n    }\n    a1->field_26 = v1;\n    a1->field_20 = 192 << 3;\n    a1->field_14 = 0;\n    a1->field_22 = 0;\n    a1->field_27 = 255;\n    a1->field_28 = 16;\n    a1->field_31 = 0;\n    a1->field_32 = 16 - 17;\n    a1->field_8 = v0 | 128 << 5;\n    return;\n}\n",
-        "score": 44,
-        "maxScore": 134,
+        "outcome": "match",
+        "source": "struct Struct0 { s32 field_0; u8 _pad0[4]; s32 field_8; u16 field_12; u16 field_14; u8 _pad1[4]; u16 field_20; u16 field_22; u8 _pad2[2]; u8 field_26; u8 field_27; u8 field_28; u8 _pad3[2]; u8 field_31; s32 field_32; };\nvoid sub_802DFC8(s16 a0, struct Struct0 * a1) {\n    s32 v0;\n    s32 v1;\n    u8 * p0;\n    v0 = 0;\n    if ((8 & a0) != 0) {\n        v1 = 6;\n        v0 = (-(1 & a0) | 1 & a0) >> 31 & 128 << 3;\n    } else {\n        if ((4 & a0) != 0) {\n            v1 = 4;\n            if ((2 & a0) != 0) v0 = 128 << 3;\n            if ((1 & a0) != 0) v0 = v0 | 128 << 4;\n        } else {\n            if ((2 & a0) != 0) {\n                v1 = 2;\n                if ((1 & a0) != 0) v0 = 128 << 3;\n            } else {\n                v1 = 0;\n                if ((1 & a0) != 0) v0 = 128 << 4;\n            }\n        }\n    }\n    p0 = (u8 *)&gStageData;\n    if (p0[3] != 7) {\n        if ((u8)(p0[10] - 3) <= 5) {\n            if (p0[9] == 5) {\n                a1->field_0 = VramMalloc(15);\n                a1->field_12 = 234 << 2;\n            } else {\n                if (p0[9] == 3) {\n                    a1->field_0 = VramMalloc(20);\n                    a1->field_12 = 987;\n                } else {\n                    a1->field_0 = VramMalloc(20);\n                    a1->field_12 = 866;\n                }\n            }\n        } else {\n            a1->field_0 = VramMalloc(20);\n            a1->field_12 = 866;\n        }\n    } else {\n        a1->field_0 = VramMalloc(20);\n        a1->field_12 = 866;\n        v0 = v0 | 128 << 2;\n    }\n    a1->field_26 = v1;\n    a1->field_20 = 192 << 3;\n    a1->field_14 = 0;\n    a1->field_22 = 0;\n    a1->field_27 = 255;\n    a1->field_28 = 16;\n    a1->field_31 = 0;\n    a1->field_32 = 16 - 17;\n    a1->field_8 = v0 | 128 << 5;\n    return;\n}\n",
+        "score": 0,
+        "maxScore": 128,
         "compileErrors": null,
         "breakdown": {
-          "insert": 6,
-          "delete": 2,
-          "replace": 6,
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
           "opMismatch": 0,
-          "argMismatch": 30
+          "argMismatch": 0
         },
         "quality": {
           "score": 100,
-          "lines": 70,
+          "lines": 59,
           "gotos": 0,
           "casts": 2,
           "unkGlue": 0,
@@ -22616,7 +22688,7 @@
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "candidateLabel": "unsigned/setup-args",
+        "candidateLabel": "unsigned/setup-args/merge-home",
         "droppedCandidates": [
           {
             "label": "unsigned",
@@ -22625,20 +22697,36 @@
           {
             "label": "unsigned/flip-join",
             "error": "agbcc failed: c.c:2338: too many arguments to function `VramMalloc'"
+          },
+          {
+            "label": "unsigned/merge-home",
+            "error": "agbcc failed: c.c:2340: too many arguments to function `VramMalloc'"
+          },
+          {
+            "label": "unsigned/merge-home/regcopy",
+            "error": "agbcc failed: c.c:2342: too many arguments to function `VramMalloc'"
+          },
+          {
+            "label": "unsigned/flip-join/merge-home",
+            "error": "agbcc failed: c.c:2339: too many arguments to function `VramMalloc'"
+          },
+          {
+            "label": "unsigned/flip-join/merge-home/regcopy",
+            "error": "agbcc failed: c.c:2341: too many arguments to function `VramMalloc'"
           }
         ],
         "symbolsUsed": [],
         "outcome": "nonmatch",
-        "source": "struct Struct0 { s32 field_0; u8 _pad0[4]; s32 field_8; u16 field_12; u16 field_14; u8 _pad1[4]; u16 field_20; u16 field_22; u8 _pad2[2]; u8 field_26; u8 field_27; u8 field_28; u8 _pad3[2]; u8 field_31; s32 field_32; };\nvoid sub_803213C(u8 a0, u8 a1, struct Struct0 * a2) {\n    s32 v0;\n    s32 v1;\n    v0 = 1;\n    if (((u8 *)&gStageData)[3] != 7) {\n        if (a0 != 0) {\n            a2->field_0 = VramMalloc(20);\n            a2->field_12 = 870;\n            a2->field_26 = 0;\n        } else {\n            a2->field_0 = VramMalloc(15);\n            a2->field_12 = 870;\n            a2->field_26 = v0;\n        }\n        v1 = (-(a1 & v0) | a1 & v0) >> 31 & 128 << 3;\n    } else {\n        a2->field_0 = VramMalloc(15);\n        a2->field_12 = 870;\n        a2->field_26 = v0;\n        v1 = (-(a1 & v0) | a1 & v0) >> 31 & 128 << 3 | 128 << 2;\n    }\n    a2->field_20 = 192 << 3;\n    a2->field_14 = 0;\n    a2->field_22 = 0;\n    a2->field_27 = 255;\n    a2->field_28 = 16;\n    a2->field_31 = 0;\n    a2->field_32 = 16 - 17;\n    a2->field_8 = v1 | 128 << 5;\n    return;\n}\n",
-        "score": 39,
-        "maxScore": 87,
+        "source": "struct Struct0 { s32 field_0; u8 _pad0[4]; s32 field_8; u16 field_12; u16 field_14; u8 _pad1[4]; u16 field_20; u16 field_22; u8 _pad2[2]; u8 field_26; u8 field_27; u8 field_28; u8 _pad3[2]; u8 field_31; s32 field_32; };\nvoid sub_803213C(u8 a0, u8 a1, struct Struct0 * a2) {\n    s32 v0;\n    s32 v1;\n    v0 = 1;\n    v1 = (-(a1 & v0) | a1 & v0) >> 31 & 128 << 3;\n    if (((u8 *)&gStageData)[3] != 7) {\n        if (a0 != 0) {\n            a2->field_0 = VramMalloc(20);\n            a2->field_12 = 870;\n            a2->field_26 = 0;\n        } else {\n            a2->field_0 = VramMalloc(15);\n            a2->field_12 = 870;\n            a2->field_26 = v0;\n        }\n    } else {\n        a2->field_0 = VramMalloc(15);\n        a2->field_12 = 870;\n        a2->field_26 = v0;\n        v1 = v1 | 128 << 2;\n    }\n    a2->field_20 = 192 << 3;\n    a2->field_14 = 0;\n    a2->field_22 = 0;\n    a2->field_27 = 255;\n    a2->field_28 = 16;\n    a2->field_31 = 0;\n    a2->field_32 = 16 - 17;\n    a2->field_8 = v1 | 128 << 5;\n    return;\n}\n",
+        "score": 2,
+        "maxScore": 71,
         "compileErrors": null,
         "breakdown": {
-          "insert": 16,
-          "delete": 8,
-          "replace": 1,
-          "opMismatch": 1,
-          "argMismatch": 13
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 2
         },
         "quality": {
           "score": 100,
@@ -28148,18 +28236,18 @@
       },
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "signed",
-        "outcome": "nonmatch",
-        "source": "void armexpr(s32 a0, s32 a1, s32 * a2) {\n    s32 v0;\n    if (a0 != 0) {\n        *a2 = 0;\n        v0 = (-(a1 & 1) | a1 & 1) >> 31 & 128 << 3;\n    } else {\n        *a2 = 1;\n        v0 = (-(a1 & 1) | a1 & 1) >> 31 & 128 << 3 | 128 << 2;\n    }\n    a2[1] = v0;\n    return;\n}\n",
-        "score": 35,
-        "maxScore": 39,
+        "candidateLabel": "signed/merge-home",
+        "outcome": "match",
+        "source": "void armexpr(s32 a0, s32 a1, s32 * a2) {\n    s32 v0;\n    v0 = (-(a1 & 1) | a1 & 1) >> 31 & 128 << 3;\n    if (a0 != 0) {\n        *a2 = 0;\n    } else {\n        *a2 = 1;\n        v0 = v0 | 128 << 2;\n    }\n    a2[1] = v0;\n    return;\n}\n",
+        "score": 0,
+        "maxScore": 23,
         "compileErrors": null,
         "breakdown": {
-          "insert": 16,
-          "delete": 11,
+          "insert": 0,
+          "delete": 0,
           "replace": 0,
           "opMismatch": 0,
-          "argMismatch": 8
+          "argMismatch": 0
         },
         "quality": {
           "score": 100,
@@ -28193,19 +28281,7 @@
           "<tmp>/cand.c.pp.c:13: request for member `unk4' in something not a structure or union"
         ]
       },
-      "gapSize": {
-        "decompiler": "asmlift",
-        "score": 35,
-        "maxScore": 39,
-        "ratio": 0.8974358974358975,
-        "kinds": {
-          "insert": 16,
-          "delete": 11,
-          "replace": 0,
-          "opMismatch": 0,
-          "argMismatch": 8
-        }
-      },
+      "gapSize": null,
       "scripts": {
         "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `armexpr` — benchmark function synthetic:armexpr:agbcc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The exact agbcc `.s` text the benchmark fed m2c, verbatim.\ncat > in.s <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tarmexpr\n\t.type\t armexpr,function\n\t.thumb_func\narmexpr:\n\tpush\t{r4, lr}\n\tadd\tr3, r2, #0\n\tmov\tr4, #0x1\n\tand\tr1, r1, r4\n\tneg\tr2, r1\n\torr\tr2, r2, r1\n\tasr\tr2, r2, #0x1f\n\tmov\tr1, #0x80\n\tlsl\tr1, r1, #0x3\n\tand\tr2, r2, r1\n\tcmp\tr0, #0\n\tbeq\t.L5\t@cond_branch\n\tmov\tr0, #0x0\n\tstr\tr0, [r3]\n\tb\t.L6\n.L5:\n\tstr\tr4, [r3]\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x2\n\torr\tr2, r2, r0\n.L6:\n\tstr\tr2, [r3, #0x4]\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n.Lfe1:\n\t.size\t armexpr,.Lfe1-armexpr\nASM_INPUT\n\n# The exact context header the benchmark passed via --context — prototypes only\n# (no struct/global layouts: the benchmark measures cold recovery).\ncat > ctx.h <<'CTX_INPUT'\nvoid armexpr(u32 a, u32 b, s32 *out);\nCTX_INPUT\n\nargs=(\n  --target gba            # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function armexpr      # the symbol to decompile from in.s\n  --context ctx.h         # the C context header above (typedefs + prototypes)\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
         "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `armexpr` — benchmark function synthetic:armexpr:agbcc.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:armexpr:agbcc --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact agbcc `.s` text.\ncat > in.asm <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tarmexpr\n\t.type\t armexpr,function\n\t.thumb_func\narmexpr:\n\tpush\t{r4, lr}\n\tadd\tr3, r2, #0\n\tmov\tr4, #0x1\n\tand\tr1, r1, r4\n\tneg\tr2, r1\n\torr\tr2, r2, r1\n\tasr\tr2, r2, #0x1f\n\tmov\tr1, #0x80\n\tlsl\tr1, r1, #0x3\n\tand\tr2, r2, r1\n\tcmp\tr0, #0\n\tbeq\t.L5\t@cond_branch\n\tmov\tr0, #0x0\n\tstr\tr0, [r3]\n\tb\t.L6\n.L5:\n\tstr\tr4, [r3]\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x2\n\torr\tr2, r2, r0\n.L6:\n\tstr\tr2, [r3, #0x4]\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n.Lfe1:\n\t.size\t armexpr,.Lfe1-armexpr\nASM_INPUT\n\n# The prototype hints the benchmark fed asmlift (callee arities / void-ness).\ncat > proto.json <<'PROTO_INPUT'\n{\n  \"armexpr\": {\n    \"params\": [\n      \"u32\",\n      \"u32\",\n      \"void *\"\n    ],\n    \"returnsVoid\": true\n  }\n}\nPROTO_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target agbcc          # frontend + target description (ISA, calling convention, compiler idioms)\n  --name armexpr          # the symbol to decompile (multi-function input selects by name)\n  --proto proto.json      # the prototype hints above (callee arities / void-ness)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
@@ -48624,22 +48700,22 @@
       },
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "signed/defsite",
-        "outcome": "nonmatch",
-        "source": "void maskchain(s32 a0, s32 * a1) {\n    s32 v0;\n    s32 v1;\n    if ((8 & a0) != 0) {\n        v1 = 6;\n        v0 = (-(1 & a0) | 1 & a0) >> 31 & 128 << 3;\n    } else {\n        if ((4 & a0) != 0) {\n            v1 = 4;\n            if ((2 & a0) != 0) {\n                v0 = 128 << 3;\n            } else {\n                v0 = 0;\n            }\n            if ((1 & a0) != 0) v0 = v0 | 128 << 4;\n        } else {\n            if ((2 & a0) != 0) {\n                v1 = 2;\n                if ((1 & a0) != 0) {\n                    v0 = 128 << 3;\n                } else {\n                    v0 = 0;\n                }\n            } else {\n                v1 = 0;\n                if ((1 & a0) != 0) {\n                    v0 = 128 << 4;\n                } else {\n                    v0 = 0;\n                }\n            }\n        }\n    }\n    *a1 = v1;\n    a1[1] = v0;\n    return;\n}\n",
-        "score": 21,
-        "maxScore": 65,
+        "candidateLabel": "signed/defsite/merge-home",
+        "outcome": "match",
+        "source": "void maskchain(s32 a0, s32 * a1) {\n    s32 v0;\n    s32 v1;\n    v0 = 0;\n    if ((8 & a0) != 0) {\n        v1 = 6;\n        v0 = (-(1 & a0) | 1 & a0) >> 31 & 128 << 3;\n    } else {\n        if ((4 & a0) != 0) {\n            v1 = 4;\n            if ((2 & a0) != 0) v0 = 128 << 3;\n            if ((1 & a0) != 0) v0 = v0 | 128 << 4;\n        } else {\n            if ((2 & a0) != 0) {\n                v1 = 2;\n                if ((1 & a0) != 0) v0 = 128 << 3;\n            } else {\n                v1 = 0;\n                if ((1 & a0) != 0) v0 = 128 << 4;\n            }\n        }\n    }\n    *a1 = v1;\n    a1[1] = v0;\n    return;\n}\n",
+        "score": 0,
+        "maxScore": 61,
         "compileErrors": null,
         "breakdown": {
-          "insert": 4,
-          "delete": 2,
-          "replace": 6,
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
           "opMismatch": 0,
-          "argMismatch": 9
+          "argMismatch": 0
         },
         "quality": {
           "score": 100,
-          "lines": 37,
+          "lines": 26,
           "gotos": 0,
           "casts": 0,
           "unkGlue": 0,
@@ -48668,19 +48744,7 @@
           "<tmp>/cand.c.pp.c:31: request for member `unk4' in something not a structure or union"
         ]
       },
-      "gapSize": {
-        "decompiler": "asmlift",
-        "score": 21,
-        "maxScore": 65,
-        "ratio": 0.3230769230769231,
-        "kinds": {
-          "insert": 4,
-          "delete": 2,
-          "replace": 6,
-          "opMismatch": 0,
-          "argMismatch": 9
-        }
-      },
+      "gapSize": null,
       "scripts": {
         "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `maskchain` — benchmark function synthetic:maskchain:agbcc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The exact agbcc `.s` text the benchmark fed m2c, verbatim.\ncat > in.s <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tmaskchain\n\t.type\t maskchain,function\n\t.thumb_func\nmaskchain:\n\tpush\t{r4, lr}\n\tadd\tr2, r0, #0\n\tadd\tr4, r1, #0\n\tmov\tr1, #0x0\n\tmov\tr0, #0x8\n\tand\tr0, r0, r2\n\tcmp\tr0, #0\n\tbeq\t.L3\t@cond_branch\n\tmov\tr3, #0x6\n\tmov\tr0, #0x1\n\tand\tr0, r0, r2\n\tneg\tr1, r0\n\torr\tr1, r1, r0\n\tasr\tr1, r1, #0x1f\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x3\n\tand\tr1, r1, r0\n\tb\t.L6\n.L3:\n\tmov\tr0, #0x4\n\tand\tr0, r0, r2\n\tcmp\tr0, #0\n\tbeq\t.L7\t@cond_branch\n\tmov\tr3, #0x4\n\tmov\tr0, #0x2\n\tand\tr0, r0, r2\n\tcmp\tr0, #0\n\tbeq\t.L8\t@cond_branch\n\tmov\tr1, #0x80\n\tlsl\tr1, r1, #0x3\n.L8:\n\tmov\tr0, #0x1\n\tand\tr0, r0, r2\n\tcmp\tr0, #0\n\tbeq\t.L6\t@cond_branch\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x4\n\torr\tr1, r1, r0\n\tb\t.L6\n.L7:\n\tmov\tr0, #0x2\n\tand\tr0, r0, r2\n\tcmp\tr0, #0\n\tbeq\t.L11\t@cond_branch\n\tmov\tr3, #0x2\n\tmov\tr0, #0x1\n\tand\tr0, r0, r2\n\tcmp\tr0, #0\n\tbeq\t.L6\t@cond_branch\n\tmov\tr1, #0x80\n\tlsl\tr1, r1, #0x3\n\tb\t.L6\n.L11:\n\tmov\tr3, #0x0\n\tmov\tr0, #0x1\n\tand\tr0, r0, r2\n\tcmp\tr0, #0\n\tbeq\t.L6\t@cond_branch\n\tmov\tr1, #0x80\n\tlsl\tr1, r1, #0x4\n.L6:\n\tstr\tr3, [r4]\n\tstr\tr1, [r4, #0x4]\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n.Lfe1:\n\t.size\t maskchain,.Lfe1-maskchain\nASM_INPUT\n\n# The exact context header the benchmark passed via --context — prototypes only\n# (no struct/global layouts: the benchmark measures cold recovery).\ncat > ctx.h <<'CTX_INPUT'\nvoid maskchain(s32 d, s32 *out);\nCTX_INPUT\n\nargs=(\n  --target gba            # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function maskchain    # the symbol to decompile from in.s\n  --context ctx.h         # the C context header above (typedefs + prototypes)\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
         "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `maskchain` — benchmark function synthetic:maskchain:agbcc.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:maskchain:agbcc --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact agbcc `.s` text.\ncat > in.asm <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tmaskchain\n\t.type\t maskchain,function\n\t.thumb_func\nmaskchain:\n\tpush\t{r4, lr}\n\tadd\tr2, r0, #0\n\tadd\tr4, r1, #0\n\tmov\tr1, #0x0\n\tmov\tr0, #0x8\n\tand\tr0, r0, r2\n\tcmp\tr0, #0\n\tbeq\t.L3\t@cond_branch\n\tmov\tr3, #0x6\n\tmov\tr0, #0x1\n\tand\tr0, r0, r2\n\tneg\tr1, r0\n\torr\tr1, r1, r0\n\tasr\tr1, r1, #0x1f\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x3\n\tand\tr1, r1, r0\n\tb\t.L6\n.L3:\n\tmov\tr0, #0x4\n\tand\tr0, r0, r2\n\tcmp\tr0, #0\n\tbeq\t.L7\t@cond_branch\n\tmov\tr3, #0x4\n\tmov\tr0, #0x2\n\tand\tr0, r0, r2\n\tcmp\tr0, #0\n\tbeq\t.L8\t@cond_branch\n\tmov\tr1, #0x80\n\tlsl\tr1, r1, #0x3\n.L8:\n\tmov\tr0, #0x1\n\tand\tr0, r0, r2\n\tcmp\tr0, #0\n\tbeq\t.L6\t@cond_branch\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x4\n\torr\tr1, r1, r0\n\tb\t.L6\n.L7:\n\tmov\tr0, #0x2\n\tand\tr0, r0, r2\n\tcmp\tr0, #0\n\tbeq\t.L11\t@cond_branch\n\tmov\tr3, #0x2\n\tmov\tr0, #0x1\n\tand\tr0, r0, r2\n\tcmp\tr0, #0\n\tbeq\t.L6\t@cond_branch\n\tmov\tr1, #0x80\n\tlsl\tr1, r1, #0x3\n\tb\t.L6\n.L11:\n\tmov\tr3, #0x0\n\tmov\tr0, #0x1\n\tand\tr0, r0, r2\n\tcmp\tr0, #0\n\tbeq\t.L6\t@cond_branch\n\tmov\tr1, #0x80\n\tlsl\tr1, r1, #0x4\n.L6:\n\tstr\tr3, [r4]\n\tstr\tr1, [r4, #0x4]\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n.Lfe1:\n\t.size\t maskchain,.Lfe1-maskchain\nASM_INPUT\n\n# The prototype hints the benchmark fed asmlift (callee arities / void-ness).\ncat > proto.json <<'PROTO_INPUT'\n{\n  \"maskchain\": {\n    \"params\": [\n      \"s32\",\n      \"void *\"\n    ],\n    \"returnsVoid\": true\n  }\n}\nPROTO_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target agbcc          # frontend + target description (ISA, calling convention, compiler idioms)\n  --name maskchain        # the symbol to decompile (multi-function input selects by name)\n  --proto proto.json      # the prototype hints above (callee arities / void-ness)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
@@ -53094,22 +53158,22 @@
       "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    d  .text\t00000020 .text\n00000000 g     F .text\t0000001c modpow2\n\n\nContents of section .text:\n 0000 04810004 3082000f 10400002 00000000  ....0....@......\n 0010 2442fff0 03e00008 00000000 00000000  $B..............\nContents of section .options:\n 0000 01200000 00000000 80000014 00000000  . ..............\n 0010 00000000 00000000 00000000 00007ff0  ................\n 0020 07100000 00000000 00000000 00000000  ................\n 0030 08100000 00000000 00000000 00000000  ................\nContents of section .reginfo:\n 0000 80000014 00000000 00000000 00000000  ................\n 0010 00000000 00007ff0                    ........        \nContents of section .mdebug:\n 0000 7009070a 00000007 00000004 00000188  p...............\n 0010 00000005 000002cc 00000001 0000018c  ................\n 0020 00000004 000001c0 00000000 00000000  ................\n 0030 00000011 000001f0 00000038 00000234  ...........8...4\n 0040 00000008 0000026c 00000001 00000274  .......l.......t\n 0050 00000000 00000000 00000001 000002bc  ................\n 0060 06000000 00000000 00000001 00000000  ................\n 0070 00000000 00000000 ffffffff 00000000  ................\n 0080 00000000 00000000 001d001f 00000002  ................\n 0090 00000002 00000000 00000001 00000000  ................\n 00a0 2c200004 0000002e 00000000 1820000f  , ........... ..\n 00b0 0000002e 0000001c 20200001 00000001  ........  ......\n 00c0 00000000 20200000 02000000 03000000  ....  ..........\n 00d0 04000000 05000000 06000000 07000000  ................\n 00e0 08000000 09000000 20000000 21000000  ........ ...!...\n 00f0 0a000000 0b000000 0b000000 1a000000  ................\n 0100 00000000 00000003 06000000 002f746d  ............./tm\n 0110 702f6173 6d6c6966 742d6d69 70732d72  p/asmlift-mips-r\n 0120 65662d32 62323461 62643838 34646237  ef-2b24abd884db7\n 0130 6263622f 7265662e 63006d6f 64706f77  bcb/ref.c.modpow\n 0140 32000000 6d6f6470 6f773200 00000000  2...modpow2.....\n 0150 00000001 00000000 00000036 00000000  ...........6....\n 0160 00000004 00000000 00000007 00000000  ................\n 0170 00000000 00000001 00000000 00000011  ................\n 0180 00000000 00000000 01800000 00000000  ................\n 0190 00000001 00000000 00000000 00000000  ................\n 01a0 18200001 00000000 00000000 00000000  . ..............\n 01b0 00000000 00000000 00000000 7fffffff  ................\n 01c0 00000000 00000000 00000002           ............    \n",
       "asmlift": {
         "decompiler": "asmlift",
-        "candidateLabel": "signed/flip-join",
+        "candidateLabel": "signed/merge-home",
         "outcome": "nonmatch",
-        "source": "s32 modpow2(s32 a0) {\n    s32 v0;\n    if (a0 >= 0 || (a0 & 15) == 0) {\n        v0 = a0 & 15;\n    } else {\n        v0 = (a0 & 15) + -16;\n    }\n    return v0;\n}\n",
-        "score": 6,
-        "maxScore": 9,
+        "source": "s32 modpow2(s32 a0) {\n    s32 v0;\n    v0 = a0 & 15;\n    if (a0 < 0 && v0 != 0) v0 = v0 + -16;\n    return v0;\n}\n",
+        "score": 4,
+        "maxScore": 8,
         "compileErrors": null,
         "breakdown": {
-          "insert": 2,
-          "delete": 1,
+          "insert": 1,
+          "delete": 0,
           "replace": 2,
           "opMismatch": 0,
           "argMismatch": 1
         },
         "quality": {
           "score": 100,
-          "lines": 9,
+          "lines": 6,
           "gotos": 0,
           "casts": 0,
           "unkGlue": 0,
