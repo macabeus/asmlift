@@ -48,7 +48,12 @@ import { applyIdiomPatterns, raiseRecovered, structureChecked } from './pipeline
 import { type Prototypes, prototypesFromSymbols } from './proto';
 import { runPreRecovery } from './raise/pre-recovery';
 import { recoverTypes } from './raise/recover';
-import { hasDerivedReadHome, hasHomeableSharedAddress, hasLoopSharedPureValue } from './structure/analysis';
+import {
+  hasDerivedReadHome,
+  hasHomeableSharedAddress,
+  hasLoopSharedPureValue,
+  hasMergeFeedHome,
+} from './structure/analysis';
 import { type SymbolMap, symbolsByName } from './symbols';
 import { type TargetDescription, structureOptionsFor } from './target';
 
@@ -69,7 +74,7 @@ import { type TargetDescription, structureOptionsFor } from './target';
  *  primary declines (reread also skips the strip closure). Both exemptions are stated here
  *  rather than left implicit in a missing `||` arm or trigger term. */
 interface StructuringAxis {
-  flag: 'reread' | 'inplace' | 'mergeNames' | 'addrHome' | 'exprHome' | 'derivedHome' | 'unsCmp';
+  flag: 'reread' | 'inplace' | 'mergeNames' | 'addrHome' | 'exprHome' | 'derivedHome' | 'mergeHome' | 'unsCmp';
   suffix: string;
   options: (on: boolean) => Parameters<typeof structureChecked>[1];
   probeGate?: (probe: Fn, defs: Map<Value, Op>) => boolean;
@@ -166,6 +171,20 @@ const STRUCTURING_AXES: readonly StructuringAxis[] = [
     suffix: '/derived-home',
     options: (on) => ({ homeDerivedReads: on }),
     variantGate: hasDerivedReadHome,
+    strip: true,
+  },
+  // `/merge-home` — the merge-feed-home axis (structure/analysis.ts AnalyzeOptions
+  // homeMergeFeeds): a pure value that one join's incoming edges render into the SAME parameter
+  // slot from 2+ places materializes in the block that dominates them — the value the source
+  // computed once above the branch (`s32 m = (b & 1) ? 0x400 : 0;`), where the default has no name
+  // to reference on an edge and re-derives the whole expression per arm. Gated per symbol variant
+  // like its `/addr-home`, `/expr-home` and `/derived-home` siblings, on the scope itself rather
+  // than an approximation of it.
+  {
+    flag: 'mergeHome',
+    suffix: '/merge-home',
+    options: (on) => ({ homeMergeFeeds: on }),
+    variantGate: hasMergeFeedHome,
     strip: true,
   },
   // `/uns-cmp` — spell unsigned compares unsigned (structure.ts unsignedCompareSpelling): an
@@ -581,6 +600,7 @@ export function enumerateCandidates(
     addrHome: false,
     exprHome: false,
     derivedHome: false,
+    mergeHome: false,
     unsCmp: false,
   }));
   for (const ax of STRUCTURING_AXES) {
