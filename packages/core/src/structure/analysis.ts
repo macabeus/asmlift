@@ -7,8 +7,8 @@
 //     program position instead of inlining at their use (calls/loads for effect order, plus
 //     the pure defs the homing rules claim).
 import { globalCellOf, mayWriteGlobal } from '../ir/alias';
-import { Block, Fn, Op, Value, defOpMap, dominators, predecessors, successorsOf } from '../ir/core';
-import { EFFECTFUL_OPS } from '../ir/opcodes';
+import { Block, Fn, Op, Successor, Value, defOpMap, dominators, predecessors, successorsOf } from '../ir/core';
+import { EFFECTFUL_OPS, REEVAL_UNSAFE_OPS } from '../ir/opcodes';
 
 export interface UseSite {
   blk: Block;
@@ -300,22 +300,63 @@ function naturalLoops(
  *    • a value that is ITSELF an address, or whose cone holds a gaddr/laddr — rendered standalone
  *      an `&g + i` loses the memAccess's inline byte-stride cast (`coneHoldsAddr`,
  *      `rendersAsAddress`), the same soundness half the sibling scopes state.
- *    • a memory read or an effectful op: WHERE those happen is the read/call rules' question, and
- *      moving one to a dominating block runs it on paths the asm never ran it on.
+ *    • an op whose answer depends on WHERE it runs or that can TRAP — `REEVAL_UNSAFE_OPS`, read
+ *      from the registry rather than re-listed, because the two models drifted apart here once
+ *      already (the hand-written copy was that set minus the four divides, and a homed `sdiv`
+ *      becomes an unconditional statement — `ir/opcodes.ts` books exactly that as a KNOWN GAP).
+ *      Both halves matter: for a read WHERE it happens is the read rules' question, and a trapping
+ *      op named at a def block raise/shortcircuit.ts hoisted it into runs on paths C's own `&&`
+ *      would have re-guarded.
+ *    • an `undef` — the axis's premise is a value the source COMPUTED once above the branch, and
+ *      an uninitialised register was never computed at all: homed, it spells `v0 = uninit_r5;`,
+ *      a copy of a value nothing wrote, which no asm can have.
+ *    • a value in a `&&`/`||`'s guarded cone WHOSE CONE HOLDS an order-sensitive op —
+ *      raise/shortcircuit.ts put that cone above the branch on the contract that the structurer
+ *      inlines it back under C's own short circuit, so its def block is a FOLD ARTIFACT rather than
+ *      the block the asm computed in, and naming it there emits `v0 = *p | 1;` above `p != 0`.
+ *      Narrowed to the order-sensitive cone deliberately: a PURE guarded value re-spelled above the
+ *      connective computes the same thing on the same paths, and refusing it outright costs
+ *      `synthetic:modpow2:ido7.1` 4 → 6 for no soundness gain.
  *    • a def block or a join INSIDE A LOOP. A loop-carried merge parameter's "definition above the
  *      branch" is the loop's entry initializer, whose placement `/defsite/loop-entry` already
  *      decides; homing it here would answer the same question a second time, from a rule that
  *      cannot see the loop's kept guard.
  *  The `analyze` scope adds nothing to this list — the whole predicate is here, so the axis's
  *  enumeration gate can run it rather than approximate it. */
-function mergeFeedHomes(
-  fn: Fn,
-  dom: Map<Block, Set<Block>>,
-  defOf: Map<Value, Op>,
-  predsOf: Map<Block, Block[]>,
-  inLoop: Set<Block>,
-): Set<Op> {
-  const joins = fn.blocks.filter((m) => m.params.length > 0 && (predsOf.get(m)?.length ?? 0) >= 2 && !inLoop.has(m));
+function mergeFeedHomes(fn: Fn, dom: Map<Block, Set<Block>>, defOf: Map<Value, Op>, inLoop: Set<Block>): Set<Op> {
+  // Every block's incoming COPY SITES — the places its edge assignments render, each once.
+  //
+  // Not the predecessor list: `predecessors` (ir/core.ts) lists a block once per successor EDGE,
+  // so walking it against that block's own successors visits a join two of one block's edges reach
+  // k² times, and a value carried on ONE of them then tallies 2 — the duplication half of the
+  // evidence, satisfied by a value nothing duplicates.
+  //
+  // Not the raw edge list either. structure.ts's Regime B groups a `switch_br`'s table slots by
+  // target block — two slots naming one block are ONE arm carrying both `case` labels, and it
+  // refuses outright if their args disagree — so those emit ONE copy. A `cond_br`'s two arms each
+  // emit their own even when both name the join (`mergeconst`'s `cond_br ^bb3(%2), ^bb3(%2)` is two
+  // `v0 = 0;`), so those stay separate.
+  const copySitesOf = new Map<Block, Successor[]>();
+  for (const b of fn.blocks) {
+    const term = b.ops[b.ops.length - 1];
+    const oneArmPerTarget = term?.opcode === 'switch_br';
+    const seen = new Set<Block>();
+    for (const sx of term?.successors ?? []) {
+      if (oneArmPerTarget && seen.has(sx.block)) {
+        continue;
+      }
+      seen.add(sx.block);
+      const at = copySitesOf.get(sx.block);
+      if (at) {
+        at.push(sx);
+      } else {
+        copySitesOf.set(sx.block, [sx]);
+      }
+    }
+  }
+  const joins = fn.blocks.filter(
+    (m) => m.params.length > 0 && (copySitesOf.get(m)?.length ?? 0) >= 2 && !inLoop.has(m),
+  );
   if (joins.length === 0) {
     return new Set<Op>();
   }
@@ -350,21 +391,56 @@ function mergeFeedHomes(
         continue;
       }
       const d = defOf.get(x);
-      if (d && !EFFECTFUL_OPS.has(d.opcode) && d.opcode !== 'load' && d.opcode !== 'aload') {
+      if (d && !REEVAL_UNSAFE_OPS.has(d.opcode)) {
         stack.push(...d.operands);
       }
     }
     coneCache.set(root, acc);
     return acc;
   };
-  /** would materializing this op's result change what it means, or where it happens? */
+  // Values C evaluates only under a `&&`/`||` — the SECOND operand of every `logic_and`/`logic_or`
+  // and everything it reads. raise/shortcircuit.ts recovers a connective by hoisting the guarded
+  // arm's pure body into the block ABOVE the branch, on the contract that the structurer inlines it
+  // back into the right-hand side where C's own short circuit re-guards it. So for a value in that
+  // cone the def block is a FOLD ARTIFACT, not the block the asm computed in, and NAMING it breaks
+  // the re-guard: `p != 0 && *p != 0` would emit `v0 = *p | 1;` above its own null check. The
+  // def-block placement rule refuses the same cone for the same reason (`shortCircuitGuarded`);
+  // that set is built only under `readsStayWhereWritten`, so this scope builds its own.
+  const scGuarded = new Set<Value>();
+  const scWork: Value[] = [];
+  for (const b of fn.blocks) {
+    for (const op of b.ops) {
+      if ((op.opcode === 'logic_and' || op.opcode === 'logic_or') && op.operands[1] !== undefined) {
+        scWork.push(op.operands[1]);
+      }
+    }
+  }
+  while (scWork.length) {
+    const v = scWork.pop()!;
+    if (scGuarded.has(v)) {
+      continue;
+    }
+    scGuarded.add(v);
+    scWork.push(...(defOf.get(v)?.operands ?? []));
+  }
+  /** does anything in the value's cone depend on WHERE it runs? The cone renders INSIDE the home,
+   *  so an order-sensitive op there moves with it. `coneOf` stops WALKING at those ops but still
+   *  records them, which is exactly the membership this asks. */
+  const coneHoldsOrderSensitive = (v: Value): boolean =>
+    [...coneOf(v)].some((x) => {
+      const d = defOf.get(x);
+      return d !== undefined && REEVAL_UNSAFE_OPS.has(d.opcode);
+    });
+  /** would materializing this op's result change what it means, or where it happens? Read from
+   *  `REEVAL_UNSAFE_OPS` rather than re-listed: the same membership hand-written here was that set
+   *  minus the trapping divides, which is how it admitted an `sdiv` as a feeder. */
   const eligible = (op: Op): boolean => {
     const v = op.results[0];
     return (
       v !== undefined &&
-      !EFFECTFUL_OPS.has(op.opcode) &&
-      op.opcode !== 'load' &&
-      op.opcode !== 'aload' &&
+      !REEVAL_UNSAFE_OPS.has(op.opcode) &&
+      op.opcode !== 'undef' &&
+      !(scGuarded.has(v) && coneHoldsOrderSensitive(v)) &&
       v.type.kind !== 'ptr' &&
       v.type.kind !== 'array' &&
       !coneHoldsAddr(op, defOf)
@@ -375,15 +451,14 @@ function mergeFeedHomes(
     for (let i = 0; i < m.params.length; i++) {
       const tally = new Map<Value, number>();
       const carried = new Set<Value>();
-      for (const p of predsOf.get(m)!) {
-        for (const sx of p.ops[p.ops.length - 1]?.successors ?? []) {
-          if (sx.block !== m || sx.args[i] === undefined) {
-            continue;
-          }
-          carried.add(sx.args[i]);
-          for (const v of coneOf(sx.args[i])) {
-            tally.set(v, (tally.get(v) ?? 0) + 1);
-          }
+      for (const sx of copySitesOf.get(m)!) {
+        const a = sx.args[i];
+        if (a === undefined) {
+          continue;
+        }
+        carried.add(a);
+        for (const v of coneOf(a)) {
+          tally.set(v, (tally.get(v) ?? 0) + 1);
         }
       }
       // The slot's feeders: rendered from 2+ of its edges, CARRIED unchanged by at least one of
@@ -434,7 +509,7 @@ export function hasMergeFeedHome(fn: Fn): boolean {
   const dom = dominators(fn);
   const predsOf = predecessors(fn);
   const inLoop = new Set(naturalLoops(fn, dom, predsOf).flatMap((L) => [...L.body]));
-  return mergeFeedHomes(fn, dom, defOpMap(fn), predsOf, inLoop).size > 0;
+  return mergeFeedHomes(fn, dom, defOpMap(fn), inLoop).size > 0;
 }
 
 export interface StructureAnalysis {
@@ -1026,7 +1101,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
   // render positions, no `materialize`), so it cannot change as the set grows.
   const mergeFeedOps =
     homeMergeFeeds && dom
-      ? mergeFeedHomes(fn, dom, defOf, predsOf, new Set(loopBodies.flatMap((L) => [...L.body])))
+      ? mergeFeedHomes(fn, dom, defOf, new Set(loopBodies.flatMap((L) => [...L.body])))
       : new Set<Op>();
   /** result values the address-home axis materialized — the load rule's admission key */
   const axisHomedBases = new Set<Value>();
@@ -1277,8 +1352,9 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           } else if (op.opcode !== 'const' && pr && copyInterdependent.has(pr) && !addressCone(op)) {
             materialize.add(op);
           }
-          // Folding the three AXIS scopes below into one predicate-parameterized scope is BOOKED
-          // in docs/level-tower.md and deliberately unpaid; what it cannot absorb is named there.
+          // Folding the FOUR AXIS scopes below into one predicate-parameterized scope is BOOKED
+          // in docs/level-tower.md and deliberately unpaid; what it cannot absorb is named there,
+          // along with the price the fourth one added to it (the gate duplication).
           // Third scope, under the address-home axis only (see AnalyzeOptions.homeSharedAddresses):
           // a non-const pure value consumed ONLY as the base of 2+ memory accesses.
           if (

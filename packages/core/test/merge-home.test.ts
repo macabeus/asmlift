@@ -265,3 +265,154 @@ test('a shared subexpression no edge carries is refused', () => {
   expect(emit(SUBEXPR, true)).toBe(emit(SUBEXPR, false));
   expect(hasMergeFeedHome(parse(SUBEXPR))).toBe(false);
 });
+
+// ── the COPY-SITE count: how many places the slot's edge assignments render ───────────────────
+// `predecessors` lists a block once per successor EDGE, so a join two of one block's edges reach
+// appears twice there; walking that against the same block's successors tallies each of those
+// edges twice, and a value carried on ONE of them satisfies both halves of the evidence. These
+// two pin the count against the shapes where an edge count and a render count come apart.
+
+// One `cond_br` whose two arms both target the join, each carrying its OWN value. `%A` is the
+// shared subexpression (rendered twice, carried by neither); `%X` and `%Y` render once each.
+const TWOEDGE = `fn twoedge {
+^bb0(%0: s32, %1: s32, %9: s32*):
+  %c1: s32 = const {value=1}
+  %A: s32 = and %1, %c1
+  %c2: s32 = const {value=8}
+  %X: s32 = or %A, %c2
+  %c3: s32 = const {value=16}
+  %Y: s32 = or %A, %c3
+  %z: s32 = const {value=0}
+  %t: u32 = icmp_eq %0, %z
+  cond_br %t, ^bb3(%X), ^bb3(%Y)
+^bb3(%p: s32):
+  store %9, %p {off=0, width=4}
+  ret
+}
+`;
+
+test('a value ONE edge carries is not homed, however many edges the join has', () => {
+  expect(emit(TWOEDGE, true)).toBe(emit(TWOEDGE, false));
+  expect(hasMergeFeedHome(parse(TWOEDGE))).toBe(false);
+});
+
+// A `switch_br` naming the join in two table slots — `case 0: case 1:` sharing one body, which
+// structure.ts's Regime B emits ONCE (and refuses outright if the two slots' args disagree). Two
+// edges, ONE copy: the value is rendered once, so the duplication evidence is absent.
+const SWDUP = `fn swdup {
+^bb0(%0: s32, %1: s32, %9: s32*):
+  %c1: s32 = const {value=1}
+  %A: s32 = and %1, %c1
+  %c8: s32 = const {value=8}
+  %X: s32 = or %A, %c8
+  switch_br %0, ^bb3(%X), ^bb3(%X), ^bb2() {cases=[0;1]}
+^bb2():
+  %c2: s32 = const {value=2}
+  br ^bb3(%c2)
+^bb3(%p: s32):
+  store %9, %p {off=0, width=4}
+  ret
+}
+`;
+
+test('two case labels sharing one body are ONE copy site, not two', () => {
+  const off = emit(SWDUP, false);
+  expect(off).toMatch(/case 0:\s*\n\s+case 1:\s*\n\s+v0 = a1 & 1 \| 8;/);
+  expect(emit(SWDUP, true)).toBe(off);
+  expect(hasMergeFeedHome(parse(SWDUP))).toBe(false);
+});
+
+// ── refusal: a TRAPPING op ───────────────────────────────────────────────────────────────────
+// `REEVAL_UNSAFE_OPS` is effects ∪ reads ∪ traps, and the divides are the traps half. Homed, a
+// divide becomes an unconditional statement at its def block — which raise/shortcircuit.ts or a
+// fold may have made, and which the arms' own guard no longer covers.
+const DIVFEED = `fn divfeed {
+^bb0(%0: s32, %1: s32, %9: s32*):
+  %Q: s32 = sdiv %0, %1
+  %z: s32 = const {value=0}
+  %t: u32 = icmp_slt %0, %z
+  cond_br %t, ^bb1(), ^bb2()
+^bb1():
+  br ^bb3(%Q)
+^bb2():
+  %c4: s32 = const {value=4}
+  %Y: s32 = or %Q, %c4
+  br ^bb3(%Y)
+^bb3(%p: s32):
+  store %9, %p {off=0, width=4}
+  ret
+}
+`;
+
+test('a trapping divide is refused as a feeder', () => {
+  expect(emit(DIVFEED, true)).toBe(emit(DIVFEED, false));
+  expect(hasMergeFeedHome(parse(DIVFEED))).toBe(false);
+});
+
+// ── refusal: an `undef` ──────────────────────────────────────────────────────────────────────
+// The axis's premise is a value the source COMPUTED once above the branch. An uninitialised
+// register was never computed, so homing it spells `v0 = uninit_r5;` — a copy of a value nothing
+// wrote, which no asm can have.
+const UNDEFFEED = `fn undeffeed {
+^bb0(%0: s32, %1: s32*):
+  %2: s32 = undef {key="r5"}
+  %3: s32 = const {value=0}
+  %4: u32 = icmp_eq %0, %3
+  cond_br %4, ^bb2(), ^bb1()
+^bb1():
+  br ^bb3(%2)
+^bb2():
+  %5: s32 = const {value=1}
+  %6: s32 = or %2, %5
+  br ^bb3(%6)
+^bb3(%7: s32):
+  store %1, %7 {off=0, width=4}
+  ret
+}
+`;
+
+test('an uninitialised register is refused as a feeder', () => {
+  expect(emit(UNDEFFEED, true)).toBe(emit(UNDEFFEED, false));
+  expect(hasMergeFeedHome(parse(UNDEFFEED))).toBe(false);
+});
+
+// ── refusal: a short-circuit-guarded cone holding a memory read ──────────────────────────────
+// raise/shortcircuit.ts hoists the guarded arm's pure body into the block ABOVE the branch on the
+// contract that the structurer inlines it back under C's own short circuit, so a value in that
+// cone has a FOLD-ARTIFACT def block. Homed there it emits `v0 = *p | 1;` above `p != 0`. The
+// refusal is narrowed to an ORDER-SENSITIVE cone on purpose: a pure guarded value re-spelled above
+// the connective computes the same thing on the same paths (and refusing those costs
+// `synthetic:modpow2:ido7.1` two points for no soundness gain).
+const SCREAD = `fn scread {
+^bb0(%0: s32*, %9: s32*, %8: s32):
+  %L: s32 = load %0 {off=0, width=4, signed=true}
+  %c1: s32 = const {value=1}
+  %A: s32 = or %L, %c1
+  %z: s32 = const {value=0}
+  %ne: u32 = icmp_ne %0, %z
+  %gt: u32 = icmp_sgt %A, %z
+  %an: s32 = logic_and %ne, %gt
+  %f: u32 = icmp_eq %an, %z
+  cond_br %f, ^bb4(), ^bb1()
+^bb1():
+  %t2: u32 = icmp_slt %8, %z
+  cond_br %t2, ^bb2(), ^bb3()
+^bb2():
+  br ^bb5(%A)
+^bb3():
+  %c4: s32 = const {value=4}
+  %Y: s32 = or %A, %c4
+  br ^bb5(%Y)
+^bb4():
+  %c0: s32 = const {value=0}
+  br ^bb5(%c0)
+^bb5(%p: s32):
+  store %9, %p {off=0, width=4}
+  ret
+}
+`;
+
+test('a short-circuit-guarded value whose cone holds a read is refused', () => {
+  expect(emit(SCREAD, true)).toBe(emit(SCREAD, false));
+  expect(hasMergeFeedHome(parse(SCREAD))).toBe(false);
+});

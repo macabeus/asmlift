@@ -180,6 +180,15 @@ const STRUCTURING_AXES: readonly StructuringAxis[] = [
   // to reference on an edge and re-derives the whole expression per arm. Gated per symbol variant
   // like its `/addr-home`, `/expr-home` and `/derived-home` siblings, on the scope itself rather
   // than an approximation of it.
+  //
+  // Part of its CONST clientele is a tree `/defsite` (anchorConstCopies) already emits, and the
+  // dedup collapses those — measured over the corpus rows the gate admits, `/merge-home` and
+  // `/defsite` are byte-identical on `synthetic:swarms` and `sa3:sub_804D360`, while
+  // `synthetic:maskchain`, `sa3:sub_802DFC8` and `kleod:UpdateCameraScroll` need this one. The two
+  // axes answer the same question there (where the write into a merge parameter lives) and differ
+  // on the rest: `/defsite` anchors a const AT ITS DEF, this homes whatever value the arms
+  // duplicate, const or not. So the enumeration cost on the overlap is real and the spelling is
+  // not new — worth knowing before pricing the axis by its candidate count.
   {
     flag: 'mergeHome',
     suffix: '/merge-home',
