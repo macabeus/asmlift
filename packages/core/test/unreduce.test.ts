@@ -66,8 +66,8 @@ test('a shift-scaled accumulator becomes the closed form in the counter', () => 
 });
 
 test('a PRODUCT-scaled accumulator relates through an invariant multiplier', () => {
-  // kleod:LoadBGTilemapData's own shape: the stride is an expression, not a constant, and the
-  // init carries it as the counter start's multiplier.
+  // klonoa's LoadBGTilemapData (a checkout function, not a benchmark row) has this shape: the
+  // stride is an expression rather than a constant, carried in the init as the start's multiplier.
   const stride = shl(c(16), v('a1'));
   const s = fill({}, [
     set('i', v('a0')),

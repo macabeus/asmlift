@@ -889,6 +889,23 @@ export function enumerateCandidates(
     // evidence exactly — but not the compiler's alias analysis, which is what lets a pointer
     // field's load leave a loop an `s32` store pins it inside. Both are enumerated.
     respell('/ptr-field', () => pointerFields(sfn));
+    // The `/vol-store` × `/unreduce` PAIRING — row-demanded (synthetic:dmafill), and the joint
+    // spelling is reachable from neither lever alone: pinning the stores keeps three of them in
+    // the loop body, which is what makes the loop's register pressure — and so the placement of
+    // the induction init — observable at all. Alone the two score 19 and 34 against the row's own
+    // 30; together, 0. The TRIPLE adds `/ptr-field` for synthetic:dmaptrsrc, whose closed form
+    // reads a struct field the un-reduce puts back inside the loop: 27 · 35 · 42 alone, 0
+    // together. The intermediate pairs are not admitted — no row demands one, and each scores
+    // worse than a lever already on the roster (VT 27, RT 32).
+    respell('/vol-store/unreduce', () => {
+      const r = volatileDeviceStores(sfn, target.capabilities.deviceRegisters);
+      return r ? unreduceAccumulators(r, target.capabilities.deviceRegisters) : null;
+    });
+    respell('/vol-store/unreduce/ptr-field', () => {
+      const r = volatileDeviceStores(sfn, target.capabilities.deviceRegisters);
+      const u = r ? unreduceAccumulators(r, target.capabilities.deviceRegisters) : null;
+      return u ? pointerFields(u) : null;
+    });
     // `/inlinebase` — spell a CONSTANT-address pointer local at its uses instead
     // (l3/inlinebase.ts). The local is structure/analysis.ts's value home for a `const` the
     // asm kept in a callee-saved register across a call; the register is real, but a constant
