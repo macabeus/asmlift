@@ -18,5 +18,8 @@
   },
   // One root typecheck spans both packages and the benchmark harness (all CI-gated);
   // apps/web is a separate vite app with its own tsconfig (its `tsc && vite build` is the gate).
-  "include": ["packages/*/src", "packages/*/test", "apps/benchmark/src"]
+  // `apps/benchmark/test` is in scope because its RANKING STUBS stand in for a core return type:
+  // outside the typecheck, a stub that stopped satisfying `RankedResult` still compiled, and the
+  // harness turned the resulting TypeError into a `noncompile` row.
+  "include": ["packages/*/src", "packages/*/test", "apps/benchmark/src", "apps/benchmark/test"]
 }

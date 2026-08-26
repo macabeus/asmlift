@@ -49,7 +49,7 @@ function rankPicking(pick: (label: string) => boolean): void {
       throw new Error(`no candidate matches the pick among: ${cands.map((c) => c.label).join(', ')}`);
     }
     const scored = { ...cand, score: SCORE };
-    return { best: scored, candidates: [scored], dropped: [] };
+    return { best: scored, candidates: [scored], dropped: [], withheld: [] };
   });
 }
 
@@ -158,6 +158,7 @@ describe('dropped candidates are recorded, never silently swallowed', () => {
         best: scored,
         candidates: [scored],
         dropped: [{ label: 'unsigned', error: "too many arguments to `thunk_sub_080002A0'" }],
+        withheld: [],
       };
     });
     const r = runAsmlift(TC, 'f', LOADH, 'obj', undefined, noCompile, MAP);

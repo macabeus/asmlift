@@ -72,6 +72,12 @@ export interface DecompilerResult {
    *  (in the emitter, or in the facts it was handed), and without this the row publishes a clean
    *  win with no trace that another spelling was refused. Absent ⇒ every candidate built. */
   droppedCandidates?: { label: string; error: string }[];
+  /** asmlift only, scored rows: candidate spellings that BUILT and SCORED and were then withheld
+   *  for want of a byte-exact proof, each with the score it reached and the reason publication
+   *  needed one. A different fact from `droppedCandidates` — nothing failed — and recorded for the
+   *  same reason: a row whose winner outranks a withheld sibling, or whose own winner is published
+   *  only because it matched, says none of that anywhere else. Absent ⇒ nothing was withheld. */
+  withheldCandidates?: { label: string; score: number; why: string }[];
 }
 
 /** MEASURED size of the remaining gap (merge-time): the best compiling candidate's absolute
