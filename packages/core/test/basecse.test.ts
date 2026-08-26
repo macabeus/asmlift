@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
+import { frontendFor } from '../src/frontend/registry';
 import { parse } from '../src/ir/parse';
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
@@ -18,6 +19,7 @@ import { without } from '../src/l3/gates';
 import { volatilePtrLocals } from '../src/l3/volatileptr';
 import { structureChecked } from '../src/pipeline';
 import { enumerateCandidates } from '../src/rank';
+import type { SymbolInfo } from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
 
 // `fromOperand` marks the access whose offset reached the MEMORY OPERAND — what the structurer
@@ -102,6 +104,76 @@ describe('where a constant offset came from survives the lift', () => {
   test('an offset of 0 records nothing — there is nothing for a fold to have absorbed', () => {
     expect(firstIndex(lifted(deref(3))).operandOff).toBe(true);
     expect(firstIndex(lifted(deref(0))).operandOff).toBeUndefined();
+  });
+
+  test('…and on the BARE-NAME array spelling a symbol map unlocks, which is a third mint site', () => {
+    // `memAccess` mints the flag at three places — the `&gSym`-based index, the plain deref (both
+    // above) and the bare `gSym[i]` form a rank-aware map produces. The third had no test: dropping
+    // `...fromOperand` from it left the entire toolchain-free suite green, so the evidence could be
+    // lost on exactly the rows a map serves without anything saying so.
+    const arr = new Map<string, SymbolInfo>([
+      ['gSym', { name: 'gSym', kind: 'data', shape: 'array', elemSize: 1, elemSigned: false, declared: true }],
+    ]);
+    const bare = structureChecked(parse(OPERAND), { symbols: arr });
+    expect(cBackend.emit(bare)).toContain('gSym[3]');
+    expect(firstIndex(bare).operandOff).toBe(true);
+  });
+});
+
+// The one field on `Expr` that is EVIDENCE rather than spelling, and the one place that asymmetry
+// is observable: `exprEquals` deliberately ignores it (two accesses agreeing on everything else
+// denote the same cell and print the same subscript), while a COMMITTED pass that collapses
+// statements with `exprEquals` runs UPSTREAM of the only pass that reads it —
+// `structureChecked` is `hoistBaseLocals(eliminateDeadStores(mergeCommonTails(raw)))`. So which of
+// two flags survives a merge is the merger's choice, not something read off the asm.
+describe('`operandOff` is provenance, and a committed merge upstream decides which one survives', () => {
+  // Two arms whose tails print the same C and differ ONLY in where the offset came from: one arm
+  // loaded `[r, #3]`, the other added the relocation addend first. `mergeCommonTails` peels the
+  // common tail off both.
+  const twoArms = (thenCarriesEvidence: boolean): string => {
+    const operand = (g: string, r: string) => `  ${r}: s32 = load ${g} {off=3, signed=false, width=1}`;
+    const addend = (g: string, r: string) =>
+      `  ${r}k: s32 = const {value=3}\n  ${r}a: u8* = add ${g}, ${r}k\n  ${r}: s32 = load ${r}a {off=0, signed=false, width=1}`;
+    return `fn f {
+^bb0(%0: s32):
+  %1: s32 = const {value=0}
+  %2: u32 = icmp_ne %0, %1
+  cond_br %2, ^bb1(), ^bb2()
+^bb1():
+  %3: u8* = gaddr {sym="gSym"}
+${(thenCarriesEvidence ? operand : addend)('%3', '%4')}
+  %5: s32 = call %4 {target="sink"}
+  br ^bb3()
+^bb2():
+  %6: u8* = gaddr {sym="gSym"}
+${(thenCarriesEvidence ? addend : operand)('%6', '%9')}
+  %10: s32 = call %9 {target="sink"}
+  br ^bb3()
+^bb3():
+  ret
+}
+`;
+  };
+
+  test('the arms merge, and WHICH arm carried the evidence decides what the roster gate sees', () => {
+    const merged = (thenCarriesEvidence: boolean) => structureChecked(parse(twoArms(thenCarriesEvidence)), {});
+    // one call left, not two: the tails really did collapse under `exprEquals`
+    expect(cBackend.emit(merged(true)).match(/sink\(/g)).toHaveLength(1);
+    // …and the ELSE arm's spelling is the survivor, so the same asm shape reaches the gate or does
+    // not depending only on which side of the `if` it sat on. Documented, not endorsed.
+    expect(admittedBases(merged(true), BASEFOLD_GATES)).toEqual([]);
+    expect(admittedBases(merged(false), BASEFOLD_GATES)).toEqual(['a:gSym 1 false']);
+  });
+
+  test('the blast radius is bounded to the roster: the COMMITTED table cannot read the flag', () => {
+    // `unfoldedOffset` has exactly one reader — `BASEFOLD_GATES`' `single-use-unfolded` rule, which
+    // only `rank.ts`'s roster asks for. So whatever a merge decides, `structureChecked`'s own hoist
+    // binds the same bases either way and the worst a lost or gained flag can do is offer or
+    // withhold a CANDIDATE. `compareScored` orders by score, so that can never cost a match.
+    // Widen the readership — promote the exemption into `BASECSE_GATES` — and this bound goes with
+    // it, which is the thing to check before doing so.
+    expect(admittedBases(structureChecked(parse(twoArms(true)), {}), BASECSE_GATES)).toEqual([]);
+    expect(admittedBases(structureChecked(parse(twoArms(false)), {}), BASECSE_GATES)).toEqual([]);
   });
 });
 
@@ -529,8 +601,8 @@ describe('the block admission is WIRED into enumeration', () => {
   // the shape that needs a proper subset of its bases bound — and `corpus/agbcc-onepoll.s` is its
   // control, byte-identical C with the halfwords deleted. Which spelling wins is the benchmark's
   // business; these pin what reaches the differ at all.
-  const candsFor = (sym: string, target = ARMV4T_AGBCC) =>
-    enumerateCandidates(sym, readFileSync(join(import.meta.dirname, 'corpus', `agbcc-${sym}.s`), 'utf8'), target, {
+  const candsFor = (file: string, target = ARMV4T_AGBCC, sym = file) =>
+    enumerateCandidates(sym, readFileSync(join(import.meta.dirname, 'corpus', `agbcc-${file}.s`), 'utf8'), target, {
       prototypes: { [sym]: { returnsVoid: true } },
     });
   const cands = candsFor('mixpoll');
@@ -589,12 +661,40 @@ describe('the block admission is WIRED into enumeration', () => {
     expect(labels).toContain('unsigned/basefold/sinkinit');
   });
 
-  test('the second placement does not shadow an earlier admission out of the roster', () => {
-    // `sameBases` collapses a row binding what an earlier row already bound — it must compare
-    // POSITION too, or a row added after `/livebase` would delete its candidate.
+  test('two rows binding DIFFERENT bases both ride — the set half of the shadow rule', () => {
+    // `sameBases` collapses a row that binds exactly what an earlier row bound. mixpoll's two
+    // livebase rows bind different sets, so neither shadows the other. This pins the SET
+    // comparison only: both rows place at the head, so removing the rule's placement clause leaves
+    // this test green. What the POSITION clause pins is one describe below — `/basefold` and
+    // `/basefold/sinkinit` share one gate object, so without it the sunk row is shadowed on every
+    // function and never fires at all ('the admission rides at BOTH placements where they differ',
+    // the only test that fails when the clause goes).
     const labels = candsFor('mixpoll').map((x) => x.label);
     expect(labels.filter((l) => l.endsWith('/livebase'))).not.toEqual([]);
     expect(labels.filter((l) => l.endsWith('/livebase-block'))).not.toEqual([]);
+  });
+
+  test('the SYMBOL half reaches the roster end to end, from real agbcc output', () => {
+    // `corpus/agbcc-tailmerge.s` is sa3:sub_803213C's own agbcc output — `.word gStageData` plus
+    // `ldrb r0, [r0, #0x3]`, the symbol + operand-offset shape the widening is about. Everything
+    // else about the symbol half is pinned on hand-built trees with `operandOff` written in by the
+    // test, or on the real-tier row, which needs the 2.2 GB project checkouts. This is the one
+    // offline gate that runs the whole chain: lift → `operandOff` → `BASEFOLD_GATES` → both
+    // placement labels. It fails on `origin/main`'s core, where the gate binds nothing.
+    const sfn = structureChecked(
+      frontendFor(ARMV4T_AGBCC).lift(
+        'sub_803213C',
+        readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-tailmerge.s'), 'utf8'),
+        ARMV4T_AGBCC,
+        { sub_803213C: { returnsVoid: true } },
+      ),
+      {},
+    );
+    expect(admittedBases(sfn, BASEFOLD_GATES)).toEqual(['a:gStageData 1 false']);
+    expect(admittedBases(sfn, BASECSE_GATES)).toEqual([]);
+    const labels = candsFor('tailmerge', ARMV4T_AGBCC, 'sub_803213C').map((x) => x.label);
+    expect(labels).toContain('unsigned/basefold');
+    expect(labels).toContain('unsigned/basefold/sinkinit');
   });
 
   test('/basefold declines where its exemption binds nothing', () => {
