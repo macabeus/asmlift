@@ -9,7 +9,7 @@
 // scoreFn, so the same enumeration feeds the cli's Node/objdiff scorer and the webapp's
 // wasm/objdiff scorer alike.
 import { cBackend } from './backend/c';
-import { assertDerefsTyped, assertResolved } from './contracts';
+import { assertDerefsTyped, assertLocalsWritten, assertResolved } from './contracts';
 import type { AsmData } from './frontend/asmdata';
 import { frontendFor } from './frontend/registry';
 import { hasSetupArgsNarrowing, narrowToSetupArgs } from './frontend/ssa';
@@ -729,6 +729,22 @@ export function enumerateCandidates(
     // from the pass itself — rather than from the contracts or the backend — would escape and
     // abort the whole enumeration for this row, primary included: the one way a lever can cost
     // a match. Making that structural rather than per-call-site means no lever can opt out.
+    //
+    // WHICH boundary contracts run here, and why it is three of the four. A lever gets the
+    // tree `structureChecked` already validated, so what these re-check is what a LEVER can
+    // break, not what structuring can. `assertResolved` and `assertDerefsTyped` catch an
+    // unspellable tree — a candidate the compiler would reject, which the harness would report
+    // as a dropped spelling with no cause. `assertLocalsWritten` catches the one wrongness the
+    // differ REWARDS: a pass that moves or suppresses an assignment and never emits it leaves
+    // the reads standing over whatever the allocator left behind, and that candidate compiles,
+    // scores, and can win (the shape #106 shipped). Levers that place a def — l3/sinkinit.ts,
+    // l3/basecse.ts's first-use policy, l3/nearbase.ts, l3/scopebase.ts, l3/argbase.ts — are
+    // exactly the population that can produce it, so the check belongs on every lever tree
+    // rather than on theirs. It costs nothing today: 0 violations over the 34357 trees the
+    // artifact's 325 agbcc rows enumerate in both symbol-map configurations.
+    // `assertEffectsPreserved` is the fourth and is NOT here: it needs the L1 `fn`, and
+    // `fanOut`'s parameter list is the invariant the tree-dedup skip rests on (see its header).
+    // Widening it for a contract is a defensible change and an argued one — not a silent import.
     const respell = (suffix: string, make: () => SFn | null | undefined): void => {
       try {
         const alt = make();
@@ -737,6 +753,7 @@ export function enumerateCandidates(
         }
         assertResolved(alt);
         assertDerefsTyped(alt);
+        assertLocalsWritten(alt);
         spellings.push({ suffix, source: backend.emit(alt), ...refsOf(alt), ...volOf(alt) });
         // STATEMENT-SHAPE products, derived onto EVERY spelling — the second sanctioned
         // product mechanism (the POLICY note above carries the admission argument). Each is
@@ -748,6 +765,7 @@ export function enumerateCandidates(
             if (shaped !== null) {
               assertResolved(shaped.out);
               assertDerefsTyped(shaped.out);
+              assertLocalsWritten(shaped.out);
               spellings.push({
                 suffix: `${suffix}${shaped.suffix}`,
                 source: backend.emit(shaped.out),
