@@ -39,22 +39,51 @@
 // subterm the substitution replaces would be DROPPED rather than moved, which no gate reading the
 // closed form could see.
 //   • INIT-LOOP-VAR — the init names something the loop writes, so re-evaluating it inside the
-//     loop reads a different value. Covers the counter and the accumulator themselves, which are
-//     names the loop writes like any other.
+//     loop reads a different value. It reads the loop's CONTROL statements as well as its body:
+//     a `for`'s counter is stepped in `loop.inc`, which is not in `loop.body`, so asking the body
+//     alone made the one name this gate exists to catch invisible on exactly the loop kind whose
+//     stepper lives outside it. `acc = (a1 << 6) + a0; for (a0 = a1; …; a0 = a0 + 1)` closed to
+//     `(a0 << 6) + a0` — sixty-four times too fast, compiling and scoring. A 20000-tree semantic
+//     fuzz over both trees on the same inputs put 145 of 2646 fired candidates on that one hole
+//     and nothing else; with the control statements included it finds none.
 //   • MOVED-EFFECT — a call or a marker would run once per read instead of once. Refused.
 //   • MOVED-VOLATILE — a `volatile` access is one the source pinned precisely so it would not be
 //     duplicated or moved. Refused. No corpus row reaches it today (nothing on the base spelling
 //     this lever rides carries a qualifier on a READ), so it is guarded by its unit test alone.
 //   • MOVED-READ-ALIASABLE — an ordinary memory read moved into a loop sees whatever the loop
 //     wrote. asmlift can only rule that out for writes it can NAME, so a moved read is admitted on
-//     one configuration: every write in the loop goes to a compile-time-constant address INSIDE
-//     the target's declared device-register window, and every read is rooted at a constant OUTSIDE
-//     it. A device register is not the backing store of any object a C program declares (target.ts
-//     `deviceRegisters`), so such a loop cannot change what an ordinary read sees; the read-side
-//     half is what keeps a DEVICE read from being duplicated into N of them. Anything else — a
-//     store through a local pointer, a call, a read rooted at no constant at all — REFUSES, which
-//     is `ir/alias.ts`'s posture ("unknown BARS") applied where there is no symbol map to resolve
-//     a name through.
+//     one configuration: every write the loop evaluates — its body, its condition and a `for`'s
+//     own init/inc — goes to a compile-time-constant address INSIDE the target's declared
+//     device-register window, and every read lands OUTSIDE it. A device register is not an object
+//     a C program declares (target.ts `deviceRegisters`), so no STORE the C performs there can
+//     change what an ordinary read sees; the read-side half is what keeps a DEVICE read from being
+//     duplicated into N of them, and it resolves an access's WHOLE address where the subscripts
+//     are constant, falling back to the chain's root only where they are not (a read rooted at
+//     0x03FFFFF0 whose element is 0x04000010 is a device read, and the root alone does not say
+//     so). Anything else — a store through a local pointer, a call, a read rooted at no constant
+//     at all — REFUSES, which is `ir/alias.ts`'s posture ("unknown BARS") applied where there is
+//     no symbol map to resolve a name through.
+//
+// AND THE PREMISE THAT IS NOT ENOUGH, which this file recorded as a fact about the board and which
+// is FALSE. "A write to a hardware register is not a write to any object a C program declares" is
+// true, and it does not finish the argument: a DMA controller READS a control word and then WRITES
+// ordinary memory on the program's behalf. On the GBA, storing `0x84000020` to `DMA3CNT`
+// (0x040000DC) starts a 32-word transfer into `[DMA3DAD]` — and every row this lever reaches
+// drives exactly that register. Modelled and executed, the admitted candidate turns a clean walk
+// over a destination table into wild writes: the first transfer clobbers the table the init reads,
+// and every later iteration recomputes its destination from the garbage.
+//
+// So the loop's device writes are checked against `capabilities.deviceMemoryWriters` — the four
+// DMA channel-enable halfwords on this board — and a moved read over a loop that touches one is
+// NOT admitted on the gates alone. It is admitted only where the differ PROVES it: `needsProof`
+// rides out with the candidate, and rank.ts publishes such a spelling only at a byte-exact score,
+// withholding it (loudly, in `RankedResult.withheld`) at every other. That is not a softening of
+// the rule but the only evidence that settles it — a candidate whose object equals the target's
+// IS the program, whatever a gate could have proved about it, and the one corpus inhabitant
+// (synthetic:dmaptrsrc) is exactly that: a byte-exact match whose reference source really does
+// read `gBg[bg].pTilemap` inside the loop. Barring it instead costs that match and buys nothing —
+// the sound alternative, the read hoisted into a local above the loop, scores 16, because a C
+// statement lands above the loop's ENTRY GUARD while the compiler's own hoist lands below it.
 //
 // Nothing qualifying ⇒ decline (null), never a duplicate of the primary.
 import {
@@ -84,6 +113,8 @@ interface AccCtx {
   /** the counter is assigned exactly twice: its init above the loop and its step inside */
   counterAssigns: number;
   counterAddrTaken: boolean;
+  /** the counter local carries a volatility qualifier — every closed form is a new read of it */
+  counterVolatile: boolean;
   /** a `continue` anywhere in the body */
   hasContinue: boolean;
   /** the init relates to the counter's start by the accumulator's own stride */
@@ -149,6 +180,18 @@ export const UNREDUCE_GATES: readonly Gate<AccCtx>[] = [
     rejects: (c) => c.counterAddrTaken,
   },
   {
+    // The accumulator's pin is `acc-pinned` above; this is the COUNTER's, and it is a different
+    // fact: substitution puts the counter where every accumulator read used to be, so a loop that
+    // read it once per iteration reads it once per USE. For a volatile object the access COUNT is
+    // the semantics (l3/volatileval.ts states the same rule), which is why l3/reindex.ts's
+    // `volatile-counter` sibling exists.
+    id: 'counter-volatile',
+    why: 'the closed form re-reads the counter at every use, and a volatile object counts its reads',
+    sound: true,
+    guardedBy: 'unreduce.test.ts: a volatile counter declines',
+    rejects: (c) => c.counterVolatile,
+  },
+  {
     id: 'continue-in-body',
     why: 'a `continue` runs a `for`’s increment but skips the body’s tail, desynchronizing the pair',
     sound: true,
@@ -166,7 +209,7 @@ export const UNREDUCE_GATES: readonly Gate<AccCtx>[] = [
     id: 'init-loop-var',
     why: 'a name the loop writes reads differently once the init is evaluated inside it',
     sound: true,
-    guardedBy: 'unreduce.test.ts: an init reading a name the loop writes declines',
+    guardedBy: 'unreduce.test.ts: an init reading a name the loop writes declines, a `for`’s counter included',
     rejects: (c) => c.initLoopVar,
   },
   {
@@ -365,15 +408,30 @@ const rootConst = (e: Expr): number | null =>
         ? rootConst(e.base)
         : null;
 
+/** Does a READ land on a device register? Two readings, and neither is enough alone. The chain's
+ *  ROOT is what places an access whose subscripts are not constant — `((struct E *)0x03003430)
+ *  [a1].field_4` has no compile-time address at all — and a read with no root is unplaceable, so
+ *  it bars. The WHOLE address is what places one whose subscripts are: `((s32 *)0x03FFFFF0)[8]`
+ *  denotes 0x04000010, BG0HOFS, which the root alone reports as EWRAM. The residual is stated
+ *  rather than hidden: a RUNTIME subscript can still carry an access from an out-of-window root
+ *  into the window, and nothing here bounds it — the write side has no such gap because it
+ *  resolves the whole address or refuses. */
+const readsDevice = (r: Expr, window?: readonly [number, number]): boolean => {
+  const root = rootConst(r);
+  return root === null || inWindow(root, window) || inWindow(constAddress(r), window);
+};
+
 /** Can the loop's own writes change what a read in the closed form sees? Only "no" when every
- *  write goes to a constant address inside the declared device window and every read is based
- *  outside it — see the file header. A closed form that reads nothing is never aliasable. */
-function movedReadAliasable(closed: Expr, loopBody: readonly Stmt[], window?: readonly [number, number]): boolean {
+ *  write the loop EVALUATES — body, condition, and a `for`'s init and inc — goes to a constant
+ *  address inside the declared device window, and every read lands outside it. See the file
+ *  header, including the premise this does NOT establish (a device that writes memory itself:
+ *  `deviceWritesMemory` below). A closed form that reads nothing is never aliasable. */
+function movedReadAliasable(closed: Expr, evaluated: readonly Stmt[], window?: readonly [number, number]): boolean {
   const reads = accessesIn(closed);
   if (reads.length === 0) {
     return false; // pure arithmetic re-evaluates to the same value whatever the loop wrote
   }
-  for (const s of allStmts(loopBody)) {
+  for (const s of allStmts(evaluated)) {
     // a call or an unmodelled instruction may write anything
     if (stmtExprs(s).some(exprHasEffect)) {
       return true;
@@ -382,10 +440,33 @@ function movedReadAliasable(closed: Expr, loopBody: readonly Stmt[], window?: re
       return true;
     }
   }
-  return reads.some((r) => {
-    const b = rootConst(r);
-    return b === null || inWindow(b, window);
-  });
+  return reads.some((r) => readsDevice(r, window));
+}
+
+/** Does the loop write a register the DEVICE answers by writing ordinary memory? The premise
+ *  `movedReadAliasable` rests on covers the CPU's own stores and nothing else; a DMA trigger is a
+ *  store whose effect is a write the C never spells. A store counts when its BYTE RANGE touches
+ *  one of the target's declared ranges, so the 32-bit `DMA3CNT` write reaches the enable halfword
+ *  four bytes into it. NO declared ranges ⇒ every device store counts, which is the conservative
+ *  direction and what a target that has said nothing gets. */
+function deviceWritesMemory(evaluated: readonly Stmt[], triggers?: readonly (readonly [number, number])[]): boolean {
+  for (const s of allStmts(evaluated)) {
+    if (s.k !== 'store' || s.lval.k !== 'index') {
+      continue;
+    }
+    const at = constAddress(s.lval);
+    if (at === null) {
+      continue; // `movedReadAliasable` has already refused this loop
+    }
+    if (triggers === undefined) {
+      return true;
+    }
+    const end = at + s.lval.width;
+    if (triggers.some(([lo, hi]) => at < hi && end > lo)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function* allStmts(stmts: readonly Stmt[]): Generator<Stmt> {
@@ -405,15 +486,28 @@ const counterStepStmt = (loop: Extract<Stmt, { k: 'while' | 'dowhile' | 'for' }>
 const controlStmts = (loop: Extract<Stmt, { k: 'while' | 'dowhile' | 'for' }>): Stmt[] =>
   loop.k === 'for' ? [loop.init, loop.inc] : [];
 
-/** The `/unreduce` candidate, or null when no accumulator qualifies. Read-only: returns a fresh
- *  SFn whose body is rebuilt, leaving the input untouched. `window` is the target's declared
- *  device-register range (TargetDescription.capabilities.deviceRegisters) — absent, the lever
- *  still fires on a closed form that reads no memory. */
-export function unreduceAccumulators(sfn: SFn, window?: readonly [number, number]): SFn | null {
+/** The `/unreduce` candidate. `sfn` is a fresh tree, the input left untouched; `needsProof` says
+ *  the closed form re-reads memory over a loop whose device writes may THEMSELVES write memory
+ *  (see the header), so rank.ts may publish it only at a byte-exact score. */
+export interface UnreduceResult {
+  sfn: SFn;
+  needsProof: boolean;
+}
+
+/** The `/unreduce` candidate, or null when no accumulator qualifies. `window` is the target's
+ *  declared device-register range (TargetDescription.capabilities.deviceRegisters) — absent, the
+ *  lever still fires on a closed form that reads no memory. `triggers` is
+ *  `capabilities.deviceMemoryWriters`; absent, EVERY device store is treated as one. */
+export function unreduceAccumulators(
+  sfn: SFn,
+  window?: readonly [number, number],
+  triggers?: readonly (readonly [number, number])[],
+): UnreduceResult | null {
   const body = [...sfn.body];
   const deletedInits = new Set<Stmt>();
   const deletedLocals = new Set<string>();
   let changed = false;
+  let needsProof = false;
 
   for (let li = 0; li < body.length; li++) {
     const loop = body[li];
@@ -447,10 +541,23 @@ export function unreduceAccumulators(sfn: SFn, window?: readonly [number, number
       }
       const k = stepOf(loop.body[stepIdx], cand.name)!;
       const closed = relate(initStmt.value, startStmt.value, ctr, k, d.value);
+      // Everything one iteration may EVALUATE — the loop itself, so the walk below reaches its
+      // condition and a `for`'s own init and inc as well as the body. Asking `loop.body` alone is
+      // what made a `for`'s counter step invisible to `init-loop-var`.
+      const evaluated: Stmt[] = [loop];
+      const ctrLocal = sfn.locals.find((l) => l.name === ctr);
       const ctx: AccCtx = {
         assigns: assignCount(sfn.body, cand.name),
         addrTaken: addrTakenIn(sfn.body, cand.name),
-        pinned: cand.volatile !== undefined || cand.frame !== undefined || cand.uninit !== undefined,
+        // `pointeeVolatile` belongs here with the other three: deleting a `volatile u16 *` local
+        // and re-spelling `*p = 0` as a raw cast drops the qualifier silently, which is the one
+        // wrongness a differ cannot see. (l3/inlinebase.ts carries it onto the minted cast
+        // instead; this lever has no local left to carry anything.)
+        pinned:
+          cand.volatile !== undefined ||
+          cand.pointeeVolatile !== undefined ||
+          cand.frame !== undefined ||
+          cand.uninit !== undefined,
         liveOutside: mentions(
           outside.filter((s) => s !== initStmt),
           cand.name,
@@ -462,18 +569,25 @@ export function unreduceAccumulators(sfn: SFn, window?: readonly [number, number
           mentions(controlStmts(loop), cand.name),
         counterAssigns: assignCount(sfn.body, ctr),
         counterAddrTaken: addrTakenIn(sfn.body, ctr),
+        counterVolatile: ctrLocal?.volatile === true || ctrLocal?.pointeeVolatile === true,
         hasContinue: hasContinueIn(loop.body),
         related: closed !== null,
-        initLoopVar: [...namesUnder(initStmt.value)].some((n) => assignCount(loop.body, n) > 0),
+        // `evaluated`, not `loop.body`: a `for`'s counter is stepped in `loop.inc`
+        initLoopVar: [...namesUnder(initStmt.value)].some((n) => assignCount(evaluated, n) > 0),
         // read off the ORIGINAL init, not the substituted form: the init STATEMENT is deleted, so
         // an effect inside the counter-start subterm the substitution replaces would be dropped
         // rather than moved — one fewer execution, which no gate reading `closed` could see.
         movedEffect: exprHasEffect(initStmt.value),
         movedVolatile: readsVolatile(initStmt.value, sfn),
-        movedAliasable: movedReadAliasable(initStmt.value, loop.body, window),
+        movedAliasable: movedReadAliasable(initStmt.value, evaluated, window),
       };
       if (firstRejection(UNREDUCE_GATES, ctx) !== null) {
         continue;
+      }
+      // The gates have placed every write the C performs; what they cannot place is a write the
+      // DEVICE performs in answer to one. A moved read over such a loop is offered under PROOF.
+      if (accessesIn(initStmt.value).length > 0 && deviceWritesMemory(evaluated, triggers)) {
+        needsProof = true;
       }
       rewrites.set(cand.name, closed!);
       deletedInits.add(initStmt);
@@ -500,9 +614,12 @@ export function unreduceAccumulators(sfn: SFn, window?: readonly [number, number
     return null;
   }
   return {
-    ...sfn,
-    locals: sfn.locals.filter((l) => !deletedLocals.has(l.name)),
-    body: body.filter((s) => !deletedInits.has(s)),
+    sfn: {
+      ...sfn,
+      locals: sfn.locals.filter((l) => !deletedLocals.has(l.name)),
+      body: body.filter((s) => !deletedInits.has(s)),
+    },
+    needsProof,
   };
 }
 

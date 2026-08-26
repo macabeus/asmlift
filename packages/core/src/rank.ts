@@ -42,7 +42,7 @@ import { reindexWalks } from './l3/reindex';
 import { hoistScopedBases } from './l3/scopebase';
 import { sinkInitsToFirstUse } from './l3/sinkinit';
 import { type SymbolRef, collectSymbolRefs } from './l3/symbol-refs';
-import { unreduceAccumulators } from './l3/unreduce';
+import { type UnreduceResult, unreduceAccumulators } from './l3/unreduce';
 import { deviceVolatileClaims, volatilePtrLocals, volatileSubsetCandidates } from './l3/volatileptr';
 import { volatileValueLocals } from './l3/volatileval';
 import { volatileDeviceStores } from './l3/volstore';
@@ -511,6 +511,19 @@ export interface Candidate {
    *  from, like `symbolRefs`, because the qualifier and the address it applies to are often two
    *  statements apart and the rendered text cannot pair them. */
   deviceVolatile?: number;
+  /** PUBLISHABLE ONLY WHERE THE DIFFER PROVES IT — a byte-exact score, nothing else.
+   *
+   *  The third admission ground, and the narrowest. A lever must preserve semantics by
+   *  construction (the POLICY note at the respell site), because on a nonmatch row the best
+   *  spelling is what the user is shown. One spelling cannot meet that bar from inside the pass:
+   *  `l3/unreduce.ts` moves a memory read into a loop whose stores are all device registers, and
+   *  on this board a device store can make the DEVICE write ordinary memory (a DMA trigger), which
+   *  no gate over the C can rule out. What settles it instead is the object: a candidate that
+   *  assembles to the target's own bytes IS the program, whatever a gate could have proved. So the
+   *  spelling is offered, scored, and then either wins on proof or is WITHHELD — never shown as a
+   *  best-effort answer. Both ranking drivers ask `withheldReason`, so neither can publish what the
+   *  other would not. */
+  matchOnly?: true;
 }
 /** A candidate paired with its score `S` (the injected scorer's result shape — must carry `.score`). */
 export interface Scored<S> extends Candidate {
@@ -526,12 +539,42 @@ export interface DroppedCandidate {
   error: string;
 }
 
+/** A candidate that BUILT and SCORED and was then withheld for want of proof (`Candidate.
+ *  matchOnly`). Kept apart from `dropped`, which means "the scorer refused it": a spelling that
+ *  compiled fine and simply did not earn publication is a different fact, and folding the two
+ *  would make the `[dropped]` line report compile failures that never happened. */
+export interface WithheldCandidate {
+  label: string;
+  score: number;
+  /** one line: why publication needed a proof this score did not supply */
+  why: string;
+}
+
 export interface RankedResult<S> {
   best: Scored<S>; // lowest score
   candidates: Scored<S>[]; // sorted best (lowest) first
   /** candidates whose scoreFn threw — empty when every spelling built */
   dropped: DroppedCandidate[];
+  /** candidates withheld for want of a byte-exact proof — empty unless a `matchOnly` lever fired */
+  withheld: WithheldCandidate[];
 }
+
+/** THE publication rule for a `matchOnly` spelling, in one place because there are TWO ranking
+ *  drivers over one enumeration (this module's sync `rankBy` and the webapp's async await-loop),
+ *  and a filter written twice is how they come to publish different answers. Null ⇒ publish.
+ *
+ *  `score === 0` is objdiff's byte-exact match (cli objdiff.ts states the equivalence), which is
+ *  why a bare `.score` suffices and the generic needs no `match` field. */
+export function withheldReason<S extends { score: number }>(c: Candidate, score: S): string | null {
+  return c.matchOnly === true && score.score !== 0
+    ? 'this spelling rests on a device-behaviour fact no gate over the C can settle; only a byte-exact score proves it'
+    : null;
+}
+
+/** What a re-spelling lever hands `respell`: its tree, or — when the lever cannot establish the
+ *  candidate's semantics from inside the pass — the tree paired with that fact. `undefined`/`null`
+ *  is a decline. */
+type LeverResult = SFn | { sfn: SFn; needsProof: boolean } | null | undefined;
 
 /** One emitted spelling of a structured tree: the label suffix naming the lever that produced it,
  *  the rendered source, and the tree-derived facts `compareScored` ranks by. */
@@ -540,6 +583,8 @@ interface Spelling {
   source: string;
   symbolRefs?: SymbolRef[];
   deviceVolatile?: number;
+  /** see `Candidate.matchOnly` — set by a lever that cannot establish its own semantics */
+  matchOnly?: true;
 }
 
 /** Emit the DISTINCT type/branch-sense candidate spellings for `name` — PURE, no scoring.
@@ -790,16 +835,20 @@ export function enumerateCandidates(
     // `assertEffectsPreserved` is the fourth and is NOT here: it needs the L1 `fn`, and
     // `fanOut`'s parameter list is the invariant the tree-dedup skip rests on (see its header).
     // Widening it for a contract is a defensible change and an argued one — not a silent import.
-    const respell = (suffix: string, make: () => SFn | null | undefined): void => {
+    // A lever returns its tree, or `{ sfn, needsProof }` when it cannot establish its own
+    // semantics from inside the pass (Candidate.matchOnly carries the argument).
+    const respell = (suffix: string, make: () => LeverResult): void => {
       try {
-        const alt = make();
-        if (!alt) {
+        const made = make();
+        if (!made) {
           return; // the lever declined to fire — no candidate, not a duplicate of the primary
         }
+        const alt = 'sfn' in made ? made.sfn : made;
+        const proof: { matchOnly?: true } = 'sfn' in made && made.needsProof ? { matchOnly: true } : {};
         assertResolved(alt);
         assertDerefsTyped(alt);
         assertLocalsWritten(alt);
-        spellings.push({ suffix, source: backend.emit(alt), ...refsOf(alt), ...volOf(alt) });
+        spellings.push({ suffix, source: backend.emit(alt), ...refsOf(alt), ...volOf(alt), ...proof });
         // STATEMENT-SHAPE products, derived onto EVERY spelling — the second sanctioned
         // product mechanism (the POLICY note above carries the admission argument). Each is
         // a statement-order/shape fact orthogonal to representation; subsets compose in the
@@ -816,6 +865,8 @@ export function enumerateCandidates(
                 source: backend.emit(shaped.out),
                 ...refsOf(shaped.out),
                 ...volOf(shaped.out),
+                // a shape derived from a proof-gated spelling inherits the requirement
+                ...proof,
               });
             }
           }
@@ -877,13 +928,17 @@ export function enumerateCandidates(
     // spelling is the only one that reproduces a device-driving loop body at all. Its window gate
     // is the target's own `deviceRegisters` range, which is what keeps it off ordinary memory.
     respell('/vol-store', () => volatileDeviceStores(sfn, target.capabilities.deviceRegisters));
+    /** `/unreduce` with both halves of the device model handed over — the SPELLING range and the
+     *  MEMORY-MODEL trigger list (target.ts). Written once because three call sites take it. */
+    const unreduced = (from: SFn): UnreduceResult | null =>
+      unreduceAccumulators(from, target.capabilities.deviceRegisters, target.capabilities.deviceMemoryWriters);
     // `/unreduce` — delete a loop-carried accumulator and spell each read as its closed form
     // (l3/unreduce.ts). Strength reduction is a compiler pass, so the accumulated form is what the
     // asm shows whichever form the source had; the un-reduced form is the other pre-image, and it
     // reaches a preheader slot no C statement can (a compiler-created giv init is inserted after
     // the invariant hoist, gcc/loop.c:1151 then :1173). The scalar-value sibling of `/indexed`,
     // which makes the same argument for a pointer walk.
-    respell('/unreduce', () => unreduceAccumulators(sfn, target.capabilities.deviceRegisters));
+    respell('/unreduce', () => unreduced(sfn));
     // `/ptr-field` — declare a recovered WORD field a pointer (l3/ptrfield.ts). raise/structs.ts
     // types a field from the access width alone, and on a 32-bit target `void *` fits that
     // evidence exactly — but not the compiler's alias analysis, which is what lets a pointer
@@ -899,12 +954,14 @@ export function enumerateCandidates(
     // worse than a lever already on the roster (VT 27, RT 32).
     respell('/vol-store/unreduce', () => {
       const r = volatileDeviceStores(sfn, target.capabilities.deviceRegisters);
-      return r ? unreduceAccumulators(r, target.capabilities.deviceRegisters) : null;
+      return r ? unreduced(r) : null;
     });
     respell('/vol-store/unreduce/ptr-field', () => {
       const r = volatileDeviceStores(sfn, target.capabilities.deviceRegisters);
-      const u = r ? unreduceAccumulators(r, target.capabilities.deviceRegisters) : null;
-      return u ? pointerFields(u) : null;
+      const u = r ? unreduced(r) : null;
+      // `/ptr-field` re-types; it never moves a read, so the proof requirement rides through it
+      const t = u ? pointerFields(u.sfn) : null;
+      return t && u ? { sfn: t, needsProof: u.needsProof } : null;
     });
     // `/inlinebase` — spell a CONSTANT-address pointer local at its uses instead
     // (l3/inlinebase.ts). The local is structure/analysis.ts's value home for a `const` the
@@ -1332,6 +1389,7 @@ export function enumerateCandidates(
               group: svIndex,
               ...(sp.symbolRefs ? { symbolRefs: sp.symbolRefs } : {}),
               ...(sp.deviceVolatile ? { deviceVolatile: sp.deviceVolatile } : {}),
+              ...(sp.matchOnly ? { matchOnly: sp.matchOnly } : {}),
             });
           }
         }
@@ -1360,10 +1418,17 @@ export function rankBy<S extends { score: number }>(
 ): RankedResult<S> {
   const results: (Scored<S> & { order: number })[] = [];
   const dropped: DroppedCandidate[] = []; // spellings that failed to build; only fatal if ALL do
+  const withheld: WithheldCandidate[] = []; // spellings that built but did not earn publication
   let lastScoreErr: unknown = null;
   candidates.forEach((c, order) => {
     try {
-      results.push({ ...c, order, score: scoreFn(c.source, symbol, c) });
+      const score = scoreFn(c.source, symbol, c);
+      const why = withheldReason(c, score);
+      if (why !== null) {
+        withheld.push({ label: c.label, score: score.score, why });
+        return;
+      }
+      results.push({ ...c, order, score });
     } catch (e) {
       lastScoreErr = e;
       dropped.push({ label: c.label, error: firstLine(e) });
@@ -1373,7 +1438,7 @@ export function rankBy<S extends { score: number }>(
     throw new Error(`no scorable candidate for '${symbol}': ${firstLine(lastScoreErr)}`, { cause: lastScoreErr });
   }
   results.sort(compareScored);
-  return { best: results[0], candidates: results.map(({ order: _order, ...c }) => c), dropped };
+  return { best: results[0], candidates: results.map(({ order: _order, ...c }) => c), dropped, withheld };
 }
 
 /** THE candidate ordering — score, then preference group, then readability, then enumeration

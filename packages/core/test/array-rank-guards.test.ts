@@ -13,7 +13,7 @@ import { T } from '../src/ir/types';
 import type { Expr, SFn } from '../src/l3/ast';
 import { exprEquals } from '../src/l3/ast';
 import { decompile } from '../src/pipeline';
-import { compareScored } from '../src/rank';
+import { compareScored, rankBy, withheldReason } from '../src/rank';
 import type { SymbolMap } from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
 
@@ -107,6 +107,34 @@ describe('shift signedness is judged in the environment that PRINTS the code', (
       ],
     ]);
     expect(decompile('f', asm, ARMV4T_AGBCC, { symbols: map }).source).toContain('(s32)gTable[a0] >> 4');
+  });
+});
+
+describe('the PUBLICATION rule for a proof-gated spelling (rank.ts withheldReason / rankBy)', () => {
+  // A `matchOnly` spelling is one whose semantics no gate over the C can settle — `/unreduce`
+  // moving a read into a loop that arms a DMA transfer. It is offered, scored, and then either
+  // wins on the differ's own proof or is withheld: never shown as the best-effort answer on a
+  // nonmatch row, which is the case the POLICY note says a wrong re-spelling would poison.
+  const plain = { label: 'unsigned', group: 0, source: 'a;' };
+  const proofed = { label: 'unsigned/unreduce', group: 0, source: 'b;', matchOnly: true as const };
+
+  test('a byte-exact score publishes it, and any other score withholds it', () => {
+    expect(withheldReason(proofed, { score: 0 })).toBeNull();
+    expect(withheldReason(proofed, { score: 1 })).not.toBeNull();
+    // an ordinary spelling is never withheld, whatever it scores
+    expect(withheldReason(plain, { score: 99 })).toBeNull();
+  });
+
+  test('rankBy withholds it rather than dropping it — the two are different facts', () => {
+    const score = (source: string) => ({ score: source === 'b;' ? 5 : 40 });
+    const r = rankBy([plain, proofed], 'f', (source) => score(source));
+    expect(r.candidates.map((c) => c.label)).toEqual(['unsigned']);
+    expect(r.dropped).toEqual([]);
+    expect(r.withheld.map((w) => [w.label, w.score])).toEqual([['unsigned/unreduce', 5]]);
+    // …and it WINS when it earns it, even though it scored second-best above
+    const won = rankBy([plain, proofed], 'f', (source) => (source === 'b;' ? { score: 0 } : { score: 40 }));
+    expect(won.best.label).toBe('unsigned/unreduce');
+    expect(won.withheld).toEqual([]);
   });
 });
 

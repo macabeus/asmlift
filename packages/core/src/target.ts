@@ -15,10 +15,15 @@
 //   • capabilities.flags → RESERVED, not yet read by any pass (PPC condition regs will).
 //   • capabilities.readOnlyAddressSinks → the Thumb frame-object audit: a frame address stored to
 //     one of these reached a device that only reads through it, so it does not retract `undef`.
-//   • capabilities.deviceRegisters → three readers, all asking "is this address a hardware
-//     register rather than an object": the `/vol-store` lever's eligibility (l3/volstore.ts),
-//     `/unreduce`'s disjointness gate for a read it moves into a loop (l3/unreduce.ts), and
-//     rank.ts's volatility tie-break between two byte-identical spellings.
+//   • capabilities.deviceRegisters → three readers, and they ask ONE question — "would a source
+//     have spelled this address `volatile`" — which is a question about SPELLING and may be
+//     approximate: the `/vol-store` lever's eligibility (l3/volstore.ts), rank.ts's volatility
+//     tie-break between two byte-identical spellings, and the first half of `/unreduce`'s
+//     disjointness gate (l3/unreduce.ts).
+//   • capabilities.deviceMemoryWriters → the MEMORY-MODEL question, which is a different one and
+//     may NOT be approximate: "can a write to this register make the DEVICE write ordinary
+//     memory". One reader — `/unreduce`'s second half. Split from `deviceRegisters` because
+//     conflating them recorded a false premise (see the field's own comment).
 //   • compilerBehaviors.* → mostly consumed by the structurer (threaded via StructureOptions).
 //     The exceptions are the two rank.ts reads off the target directly, because their consumers
 //     are L3 levers rather than the structurer: `nearBaseSpan` and `foldsConstAddrOffset`.
@@ -78,16 +83,38 @@ export interface TargetDescription {
     // direction and what every other target gets.
     readOnlyAddressSinks?: readonly number[];
     // The device-register window, `[start, end)`. A cell in it changes under the program's feet,
-    // so a source that touched one all but certainly declared it `volatile`. Two consumers read
-    // it, and they are the two halves of one claim: it is the ELIGIBILITY predicate for the
-    // `/vol-store` lever (l3/volstore.ts), which offers the qualified spelling of a fixed-address
-    // store, and the GATE on rank.ts's volatility tie-break, which picks the qualified twin when
-    // the bytes cannot separate the two. Neither decides for the reader: which cells a source
-    // qualified is not derivable from the asm, so both spellings are enumerated and the differ
-    // referees. ABSENT ⇒ the lever declines everywhere and the tie-break has no preference, which
-    // is the neutral direction — outside a declared window the qualifier is a claim about
-    // ordinary memory that the target does not support.
+    // so a source that touched one all but certainly declared it `volatile`. THREE consumers read
+    // it and all three ask the same SPELLING question — "would a source have written `volatile`
+    // here": it is the ELIGIBILITY predicate for the `/vol-store` lever (l3/volstore.ts), which
+    // offers the qualified spelling of a fixed-address store; the GATE on rank.ts's volatility
+    // tie-break, which picks the qualified twin when the bytes cannot separate the two; and the
+    // half of `/unreduce`'s disjointness gate that keeps a DEVICE read from being duplicated.
+    // None of them decides for the reader: which cells a source qualified is not derivable from
+    // the asm, so both spellings are enumerated and the differ referees. ABSENT ⇒ the lever
+    // declines everywhere and the tie-break has no preference, which is the neutral direction —
+    // outside a declared window the qualifier is a claim about ordinary memory that the target
+    // does not support.
+    //
+    // IT IS NOT A MEMORY-MODEL CLAIM, and reading it as one is how a false premise got recorded
+    // in four places (`deviceMemoryWriters` below carries the correction). Approximating the
+    // range costs a candidate; approximating the memory model costs a wrong answer.
     deviceRegisters?: readonly [number, number];
+    // Byte ranges, `[start, end)`, whose WRITE can make the DEVICE write ordinary memory. The
+    // separate, stronger claim: `deviceRegisters` says a cell is not an object a source declares,
+    // which is true and says nothing about what the DEVICE then does. A DMA controller reads a
+    // control word and writes memory on the program's behalf, so a loop whose every write is a
+    // "device register" write can still rewrite any cell — including one a moved read reads.
+    //
+    // GBA: the four DMA channel CONTROL halfwords (DMAnCNT_H). Bit 15 is the channel enable, and
+    // writing it with the bit set starts the transfer immediately; the other three registers of a
+    // channel (SAD, DAD, CNT_L) only stage it — which is the same split `readOnlyAddressSinks`
+    // above already reasons about from the source side. A store is a trigger when its BYTE RANGE
+    // touches one of these, so the 32-bit `DMA3CNT` write every GBA DMA macro ends with
+    // (`*(vu32 *)0x040000DC = 0x84000020`) is one, and a halfword write to `DMA3CNT_L` is not.
+    //
+    // ABSENT ⇒ the target claims nothing, and the one reader treats EVERY device write as a
+    // possible memory write — the conservative direction, and what every non-GBA target takes.
+    deviceMemoryWriters?: readonly (readonly [number, number])[];
   };
   // COMPILER BEHAVIORS — the specific compiler's canonicalization choices, distinct from
   // hardware `capabilities`. All consumed by the structurer (threaded through StructureOptions).
@@ -219,6 +246,15 @@ export const ARMV4T_AGBCC: TargetDescription = {
     // 0x04000301 (HALTCNT). Everything a source reaches through `REG_*` is in here, and nothing
     // else is: IWRAM, EWRAM, palette, VRAM and OAM are ordinary memory a source does not qualify.
     deviceRegisters: [0x04000000, 0x04000400],
+    // DMA0..3 CNT_H — the channel-enable halfwords. Writing one with bit 15 set arms the transfer,
+    // and the transfer writes ordinary memory at [DMAnDAD]. Every other I/O register on this board
+    // is read or written by the CPU alone.
+    deviceMemoryWriters: [
+      [0x040000ba, 0x040000bc],
+      [0x040000c6, 0x040000c8],
+      [0x040000d2, 0x040000d4],
+      [0x040000de, 0x040000e0],
+    ],
   },
   compilerBehaviors: {
     coalesceLoopInit: false,
