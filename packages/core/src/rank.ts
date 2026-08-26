@@ -41,6 +41,7 @@ import { reindexWalks } from './l3/reindex';
 import { hoistScopedBases } from './l3/scopebase';
 import { sinkInitsToFirstUse } from './l3/sinkinit';
 import { type SymbolRef, collectSymbolRefs } from './l3/symbol-refs';
+import { unreduceAccumulators } from './l3/unreduce';
 import { deviceVolatileClaims, volatilePtrLocals, volatileSubsetCandidates } from './l3/volatileptr';
 import { volatileValueLocals } from './l3/volatileval';
 import { volatileDeviceStores } from './l3/volstore';
@@ -875,6 +876,13 @@ export function enumerateCandidates(
     // spelling is the only one that reproduces a device-driving loop body at all. Its window gate
     // is the target's own `deviceRegisters` range, which is what keeps it off ordinary memory.
     respell('/vol-store', () => volatileDeviceStores(sfn, target.capabilities.deviceRegisters));
+    // `/unreduce` — delete a loop-carried accumulator and spell each read as its closed form
+    // (l3/unreduce.ts). Strength reduction is a compiler pass, so the accumulated form is what the
+    // asm shows whichever form the source had; the un-reduced form is the other pre-image, and it
+    // reaches a preheader slot no C statement can (a compiler-created giv init is inserted after
+    // the invariant hoist, gcc/loop.c:1151 then :1173). The scalar-value sibling of `/indexed`,
+    // which makes the same argument for a pointer walk.
+    respell('/unreduce', () => unreduceAccumulators(sfn, target.capabilities.deviceRegisters));
     // `/inlinebase` — spell a CONSTANT-address pointer local at its uses instead
     // (l3/inlinebase.ts). The local is structure/analysis.ts's value home for a `const` the
     // asm kept in a callee-saved register across a call; the register is real, but a constant

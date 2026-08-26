@@ -14,6 +14,7 @@ import { ARM_DISJOINT_GATES, COALESCE_GATES } from '../src/l3/coalesce';
 import { type Gate, ablateHeuristic, gateTableDefects } from '../src/l3/gates';
 import { INLINEBASE_GATES } from '../src/l3/inlinebase';
 import { COUNTDOWN_GATES } from '../src/l3/reindex';
+import { UNREDUCE_GATES } from '../src/l3/unreduce';
 import { VOL_SLOT_GATES } from '../src/l3/volatileval';
 import { VOL_STORE_GATES } from '../src/l3/volstore';
 import { LATCH_GATES } from '../src/raise/latch';
@@ -41,6 +42,7 @@ const TABLES: Record<string, readonly Gate<never>[]> = {
   VOL_SLOT_GATES: VOL_SLOT_GATES as readonly Gate<never>[],
   COUNTDOWN_GATES: COUNTDOWN_GATES as readonly Gate<never>[],
   VOL_STORE_GATES: VOL_STORE_GATES as readonly Gate<never>[],
+  UNREDUCE_GATES: UNREDUCE_GATES as readonly Gate<never>[],
 };
 
 /** Every `test(...)`/`describe(...)` title in the core suite, as one blob to search. */
