@@ -244,6 +244,47 @@ describe("`prepend` is nearbase.ts's ABSTENTION, not a third position", () => {
     const sfn: SFn = { name: 'f', params: [], locals, retType: T.void(), body };
     const minted = [named('p0', 'gP0')];
     expect(placeBaseLocals(sfn, minted, 'prepend')).toEqual({ body: [...minted, ...body], moved: 0 });
+    // …and sinking a prepend result is NOT the same as asking for `first-use` outright, because
+    // the run it hands the stable sort is in prepend's order: where first use does not separate a
+    // minted init from an existing one, the minted one keeps the lead `prepend` gave it. That is
+    // what `/nearbase/sinkinit` offers (rank.ts) — one transform, a different input — and writing
+    // "sink(prepend(x)) === firstUse(x)" by analogy with `head` is the mistake this pins.
+    const tie: SFn = {
+      ...sfn,
+      locals: [
+        { name: 'q0', type: U8P },
+        { name: 'p0', type: U8P },
+      ],
+      // q0 and p0 are first used by the SAME statement, so first use does not separate them
+      body: [
+        named('q0', 'gQ0'),
+        touch('unrelated'),
+        {
+          k: 'exprstmt',
+          value: {
+            k: 'call',
+            fn: 'sink',
+            args: [
+              { k: 'index', base: { k: 'var', name: 'q0' }, idx: c(0), width: 1, signed: false },
+              { k: 'index', base: { k: 'var', name: 'p0' }, idx: c(0), width: 1, signed: false },
+            ],
+          },
+        },
+      ],
+    };
+    const sunkPrepend = sinkInitsToFirstUse({ ...tie, body: placeBaseLocals(tie, minted, 'prepend').body });
+    expect(sunkPrepend!.body.map((st) => (st.k === 'assign' ? st.name : st.k))).toEqual([
+      'store',
+      'p0',
+      'q0',
+      'exprstmt',
+    ]);
+    expect(placeBaseLocals(tie, minted, 'first-use').body.map((st) => (st.k === 'assign' ? st.name : st.k))).toEqual([
+      'store',
+      'q0',
+      'p0',
+      'exprstmt',
+    ]);
     // the contrast: `head` sits in the same POSITION and reorders, so the two are not one axis
     expect(placeBaseLocals(sfn, minted, 'head').body.map((st) => (st.k === 'assign' ? st.name : st.k))).toEqual([
       'q0',

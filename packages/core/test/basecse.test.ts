@@ -760,4 +760,18 @@ describe('the block admission is WIRED into enumeration', () => {
     expect(labels).toContain('signed/livebase-block/volatile/nearbase');
     expect(labels.filter((l) => l.startsWith('signed/livebase/') && l.includes('nearbase'))).toEqual([]);
   });
+
+  test('/nearbase rides at BOTH orderings, so nothing commits its placement uncontested', () => {
+    // `l3/nearbase.ts` places its cluster inits above the run already there, on the strength of
+    // one row and no compiler fact. The sunk sibling is the other ordering; without it that
+    // choice decides `synthetic:dmafield`'s match with no candidate beside it to lose to.
+    const labels = candsFor('sizebound').map((x) => x.label);
+    expect(labels).toContain('signed/livebase-block/volatile/nearbase');
+    expect(labels).toContain('signed/defsite/loop-entry/livebase-block/volatile/nearbase/sinkinit');
+    // and the sunk one is a DIFFERENT candidate, not a relabelled duplicate
+    const src = (l: string) => candsFor('sizebound').find((x) => x.label === l)!.source;
+    expect(src('signed/defsite/loop-entry/livebase-block/volatile/nearbase')).not.toEqual(
+      src('signed/defsite/loop-entry/livebase-block/volatile/nearbase/sinkinit'),
+    );
+  });
 });

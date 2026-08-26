@@ -1034,21 +1034,35 @@ export function enumerateCandidates(
     // offsets off its lowest address, within the target's declared derivation reach. Both
     // spellings are emitted; the differ referees.
     const nearSpan = target.compilerBehaviors.nearBaseSpan;
-    respell('/nearbase', () => (nearSpan !== undefined ? nearBaseClusters(sfn, nearSpan) : null));
+    const near = (base: SFn | null): SFn | null =>
+      base !== null && nearSpan !== undefined ? nearBaseClusters(base, nearSpan) : null;
+    // …and WHERE its cluster inits sit, which is a second question with its own answer.
+    // `l3/nearbase.ts` places them above the run already there, and that is a committed choice
+    // made on one row (`synthetic:dmafield`) rather than on a compiler fact — a cluster base is
+    // reached at 2+ addresses by construction, so "first touched late" says nothing about it, and
+    // which order the source wrote is per-function knowledge the asm does not carry. Nothing
+    // refereed it before this row existed. `/sinkinit` here is the same transform it is
+    // everywhere else — each leading base init at its own first use — applied to a run whose order
+    // `prepend` chose, so where first use does not separate two inits the cluster base still leads
+    // (that tie is the one thing this is NOT identical to `placeBaseLocals(…, 'first-use')` on;
+    // pinned in test/sinkinit.test.ts). Priced over the corpus at 590 candidate sources on 15 of
+    // 1140 observations — where the two orderings agree the sink declines and nothing is added.
+    const nearSunk = (base: SFn | null): SFn | null => {
+      const r = near(base);
+      return r ? sinkInitsToFirstUse(r) : null;
+    };
+    respell('/nearbase', () => near(sfn));
+    respell('/nearbase/sinkinit', () => nearSunk(sfn));
     // The livebase × nearbase PAIRINGS — the same admission as livebase × indexed above:
     // the volatile triple is the row-demanded one, and the joint spelling is reachable from
     // neither lever alone (a neighbor-cell object and a multi-index MMIO block in one
     // function — each lever's constants are invisible to the other's model); the plain
     // sibling rides for symmetry with /livebase/indexed.
     for (const { suffix, hoist, volatiles } of paired) {
-      respell(`${suffix}/nearbase`, () => {
-        const r = hoist();
-        return r && nearSpan !== undefined ? nearBaseClusters(r, nearSpan) : null;
-      });
-      respell(`${suffix}/volatile/nearbase`, () => {
-        const r = volatiles();
-        return r && nearSpan !== undefined ? nearBaseClusters(r, nearSpan) : null;
-      });
+      respell(`${suffix}/nearbase`, () => near(hoist()));
+      respell(`${suffix}/volatile/nearbase`, () => near(volatiles()));
+      respell(`${suffix}/nearbase/sinkinit`, () => nearSunk(hoist()));
+      respell(`${suffix}/volatile/nearbase/sinkinit`, () => nearSunk(volatiles()));
     }
     // The livebase × coalesce PAIRINGS — same admission again: the volatile triple is the
     // row-demanded one, the joint spelling reachable from neither lever alone (an MMIO base

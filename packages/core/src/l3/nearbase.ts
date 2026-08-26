@@ -144,15 +144,19 @@ export function nearBaseClusters(sfn: SFn, span: number): SFn | null {
   ];
   // The body rebuild is `l3/hoist.ts`'s, shared with the two other passes that place into the
   // leading base-init run — this pass is the THIRD, and it used to own a private copy of the
-  // rebuild, which is exactly the drift that put the mechanism in one file.
+  // rebuild, which is exactly the drift that put the mechanism in one file. What it does NOT share
+  // is the ordering: `prepend` returns before the first-use query, so this pass takes the rebuild
+  // and abstains from the policy (see `BaseInitPlacement`).
   //
-  // The POLICY stays this pass's own, and it is `prepend`: the cluster bases go ABOVE a run
-  // already there rather than being merged into it in first-use order. That is not `l3/basecse.ts`
-  // blindly-prepending hazard read backwards — it is what this lever's demanding row says. Placing
+  // The DEFAULT is `prepend` — the cluster bases go ABOVE a run already there rather than being
+  // merged into it in first-use order — and it rests on a row, not on a compiler fact. Placing
   // them in first-use order instead turns `synthetic:dmafield` (won by
-  // `signed/livebase/volatile/nearbase/initfirst`) from a MATCH into diff:5: its cluster base is
-  // reached at 2+ addresses by construction, so its pool word is not "first touched late", and the
-  // bytes say it was loaded before the hoist run beneath it.
+  // `signed/livebase/volatile/nearbase/initfirst`) from a MATCH into diff:5, measured 2026-08-26.
+  // The reading that goes with it — a cluster base is reached at 2+ addresses by construction, so
+  // its pool word is not "first touched late" — explains why first-use order is not obviously
+  // right, not why prepending is; which order the source wrote is per-function knowledge the asm
+  // does not carry. So it is a DEFAULT and not a decision: `rank.ts` offers the sunk ordering
+  // beside it as `/nearbase/sinkinit`, and the differ settles which one a function wanted.
   const rewritten = sfn.body.map((s) => mapStmtExprs(s, rewrite));
   const { body } = placeBaseLocals({ ...sfn, locals, body: rewritten }, inits, 'prepend');
   return { ...sfn, locals, body };
