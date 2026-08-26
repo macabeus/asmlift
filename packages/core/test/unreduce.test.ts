@@ -67,8 +67,11 @@ test('a shift-scaled accumulator becomes the closed form in the counter', () => 
 });
 
 test('a PRODUCT-scaled accumulator relates through an invariant multiplier', () => {
-  // klonoa's LoadBGTilemapData (a checkout function, not a benchmark row) has this shape: the
-  // stride is an expression rather than a constant, carried in the init as the start's multiplier.
+  // klonoa's LoadBGTilemapData (a checkout function, not a benchmark row) has this shape in its
+  // SOURCE — the stride is an expression rather than a constant, carried in the init as the
+  // start's multiplier. The lever does not reach it there (every loop in that function is nested,
+  // and this pass walks top-level loops only, instrumented over all 1344 of its trees), so the
+  // fixture is the shape and not the row.
   const stride = shl(c(16), v('a1'));
   const s = fill({}, [
     set('i', v('a0')),

@@ -96,6 +96,15 @@
 // change and belongs to a row that demands it (dmanest is the obvious candidate), not to a
 // soundness pass; what belongs here is saying so.
 //
+// AND IT ALREADY COST A WRONG ATTRIBUTION, which is why the paragraph above exists. A round
+// reported that this lever declines on klonoa's `LoadBGTilemapData` "on its `moved-read-aliasable`
+// gate — the loop stores through the local `p0`, which is not a constant address", read off the
+// gate table. INSTRUMENTED, the truth is that no gate is ever consulted: a `console.error` on
+// every pre-gate `continue` and on `firstRejection` prints, over all 1344 trees that function's
+// enumeration produces, exactly one kind of line — `topLevelLoops=0`. The function has no
+// top-level loop, so this pass never looks at a loop there at all. A refusal that names no gate is
+// a refusal a reader will attribute to whichever gate looks plausible.
+//
 // AND ITS SIBLING. `l3/reindex.ts` un-reduces a POINTER WALK over the same argument, with the same
 // shape of gate table, and it already handles the `if (guard) do {} while` rotation this file
 // cannot see. The split is by the induction variable's TYPE rather than by the question asked, and
