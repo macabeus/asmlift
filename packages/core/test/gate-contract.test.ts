@@ -15,6 +15,7 @@ import { type Gate, ablateHeuristic, gateTableDefects } from '../src/l3/gates';
 import { INLINEBASE_GATES } from '../src/l3/inlinebase';
 import { COUNTDOWN_GATES } from '../src/l3/reindex';
 import { VOL_SLOT_GATES } from '../src/l3/volatileval';
+import { VOL_STORE_GATES } from '../src/l3/volstore';
 import { LATCH_GATES } from '../src/raise/latch';
 import { PARAM_WIDTH_GATES } from '../src/raise/paramwidth';
 import { PREUPDATE_SINK_GATES } from '../src/structure/hazards';
@@ -39,6 +40,7 @@ const TABLES: Record<string, readonly Gate<never>[]> = {
   INLINEBASE_GATES: INLINEBASE_GATES as readonly Gate<never>[],
   VOL_SLOT_GATES: VOL_SLOT_GATES as readonly Gate<never>[],
   COUNTDOWN_GATES: COUNTDOWN_GATES as readonly Gate<never>[],
+  VOL_STORE_GATES: VOL_STORE_GATES as readonly Gate<never>[],
 };
 
 /** Every `test(...)`/`describe(...)` title in the core suite, as one blob to search. */

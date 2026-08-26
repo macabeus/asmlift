@@ -43,6 +43,7 @@ import { sinkInitsToFirstUse } from './l3/sinkinit';
 import { type SymbolRef, collectSymbolRefs } from './l3/symbol-refs';
 import { deviceVolatileClaims, volatilePtrLocals, volatileSubsetCandidates } from './l3/volatileptr';
 import { volatileValueLocals } from './l3/volatileval';
+import { volatileDeviceStores } from './l3/volstore';
 import { zeroSubNegates } from './l3/zerosub';
 import { RewritePattern } from './pattern/engine';
 import { applyIdiomPatterns, raiseRecovered, structureChecked } from './pipeline';
@@ -866,6 +867,14 @@ export function enumerateCandidates(
     // `/volatile` sibling rather than doubling every enumeration, and its frame-flag gate
     // costs nothing on a function with no slot.
     respell('/vol-slot', () => volatileValueLocals(sfn));
+    // `/vol-store` — pin a store at a fixed DEVICE-REGISTER address `volatile` (l3/volstore.ts).
+    // Where `/volatile` above qualifies a pointer LOCAL holding the address, this qualifies the
+    // access itself, which is the spelling a `REG_*` macro produces and the one structure.ts
+    // leaves when the address re-materializes at each use. Codegen-visible: agbcc's `load_mems`
+    // hoists an unpinned fixed-address store clean out of a loop (gcc/loop.c:8934), so the pinned
+    // spelling is the only one that reproduces a device-driving loop body at all. Its window gate
+    // is the target's own `deviceRegisters` range, which is what keeps it off ordinary memory.
+    respell('/vol-store', () => volatileDeviceStores(sfn, target.capabilities.deviceRegisters));
     // `/inlinebase` — spell a CONSTANT-address pointer local at its uses instead
     // (l3/inlinebase.ts). The local is structure/analysis.ts's value home for a `const` the
     // asm kept in a callee-saved register across a call; the register is real, but a constant

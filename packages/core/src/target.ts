@@ -77,12 +77,15 @@ export interface TargetDescription {
     // direction and what every other target gets.
     readOnlyAddressSinks?: readonly number[];
     // The device-register window, `[start, end)`. A cell in it changes under the program's feet,
-    // so a source that touched one all but certainly declared it `volatile` — which makes it the
-    // gate on rank.ts's volatility tie-break. It never adds or removes a qualifier: which cells a
-    // source qualified is not derivable from the asm, so both spellings are still enumerated and
-    // the differ still referees. It decides only which of two spellings the bytes CANNOT separate
-    // is the one published. ABSENT ⇒ no preference at all, which is the neutral direction — the
-    // qualifier then reads as a claim about ordinary memory, and enumeration order decides.
+    // so a source that touched one all but certainly declared it `volatile`. Two consumers read
+    // it, and they are the two halves of one claim: it is the ELIGIBILITY predicate for the
+    // `/vol-store` lever (l3/volstore.ts), which offers the qualified spelling of a fixed-address
+    // store, and the GATE on rank.ts's volatility tie-break, which picks the qualified twin when
+    // the bytes cannot separate the two. Neither decides for the reader: which cells a source
+    // qualified is not derivable from the asm, so both spellings are enumerated and the differ
+    // referees. ABSENT ⇒ the lever declines everywhere and the tie-break has no preference, which
+    // is the neutral direction — outside a declared window the qualifier is a claim about
+    // ordinary memory that the target does not support.
     deviceRegisters?: readonly [number, number];
   };
   // COMPILER BEHAVIORS — the specific compiler's canonicalization choices, distinct from
