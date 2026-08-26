@@ -998,6 +998,39 @@ export const FEATURES: readonly FeatureDef[] = [
     summary: 'programs the DMA registers (0x040000B0–0x040000DF)',
     seeAlso: ['mmio', 'memory'],
   },
+  {
+    id: 'device-access',
+    label: 'Device access',
+    group: 'memory',
+    evidence: 'judgement',
+    summary: 'the diff turns on a device access the recovered C left unpinned',
+    detail:
+      'A store to a hardware register is an EVENT, not an assignment: it must happen where the ' +
+      'source put it, as many times as the source wrote it. `volatile` is what says so, and a ' +
+      'decompiler that renders the access as ordinary memory hands the recompiler licence to ' +
+      'move it or delete it. Both halves are observable at -O2 on agbcc, which turns on ' +
+      "`flag_strict_aliasing` (toplev.c) and gcc's loop MEM-promotion: a register store whose " +
+      'address is loop-invariant is hoisted into a register and written back once after the ' +
+      'loop, and a register READ whose result nobody consumes is deleted outright. The tag ' +
+      'marks rows whose residual TURNS ON that motion or that deletion — which is not the same ' +
+      'as the residual being only that. On a row where the deletion is the whole diff the two ' +
+      'coincide; where the motion is one term of a conjunction (a device store that is only ' +
+      'promotable because the surrounding expression was also spelled differently) the tag still ' +
+      'applies and the row is where the other terms are named and priced. ' +
+      'Distinct from `mmio`/`dma`, which are derived from the ADDRESS and say only that a ' +
+      'device register is referenced; this one is the judgement that the diff turns on it. ' +
+      'No machine-checked floor: whether a given access is the thing the diff turns on is ' +
+      'exactly the judgement the tag records.',
+    example: {
+      c: 'for (i = lo; i < 32; i++) { gDma[1] = base + i * 64; gDma[2] = 0x81000020; }',
+      asm:
+        '  str  r0, [r5]     @ INSIDE the loop, once per iteration\n' +
+        '  add  r0, r0, #0x40\n  ble  .L6\n' +
+        '  @ unpinned, the same C compiles the store to AFTER the branch instead',
+      toolchain: 'agbcc',
+    },
+    seeAlso: ['mmio', 'dma', 'value-home', 'load', 'store'],
+  },
 
   // ── calls ───────────────────────────────────────────────────────────────────────────────────
   {
