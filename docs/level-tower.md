@@ -92,8 +92,8 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
     Every path gets these, which is why the boundary contracts run on both sides of them (below).
   - **Ranked re-spellings**, in [`rank.ts`](../packages/core/src/rank.ts) and so on the
     `decompileRanked` path only. Two populations of them: SPELLING re-writes of one structured
-    tree (e.g. `/argbase`, `/scopebase`, `/indexed`, `/livebase`, `/volatile`, `/mulfirst`,
-    `/regcopy`, `/coalesce`) and STRUCTURING axes, which re-run `structure()` under a different
+    tree (e.g. `/argbase`, `/scopebase`, `/indexed`, `/livebase`, `/volatile`, `/vol-store`,
+    `/unreduce`, `/ptr-field`, `/mulfirst`, `/regcopy`, `/coalesce`) and STRUCTURING axes, which re-run `structure()` under a different
     lever (e.g. `/flip-branch`, `/defsite`, `/inplace`, `/no-bitfield`, `/reread-globals`,
     `/merge-names`) — plus `/raw-globals`, the signedness pin and `/setup-args`, which re-run the
     lift itself.
@@ -347,6 +347,21 @@ Adopt this when a pass's refusals are load-bearing — not for every `if` in the
 "earn it" discipline applies: `l3/basecse.ts` declares a table in which **no** gate is sound,
 because a wrong hoist there costs bytes and a match, never meaning, and saying so plainly is worth
 more than three gates pretending to a soundness they do not have.
+
+**A gate's PREMISE can be a target capability, and when it is, that is where it belongs.**
+`l3/unreduce.ts` deletes a loop-carried accumulator and re-spells each read as a closed form, which
+means a memory read in the accumulator's init is evaluated INSIDE the loop instead of once above
+it. Whether the loop's own writes can change what that read sees is the question
+[`ir/alias.ts`](../packages/core/src/ir/alias.ts) exists for — but that predicate resolves NAMED
+globals through the L2 def map, and the addresses here are raw constants on a tree with no `Value`s
+left, so it answers "unknown" and bars everything. What decides it instead is
+`TargetDescription.capabilities.deviceRegisters`: a write to a hardware register is not a write to
+any object a C program declares, so a loop whose every write lands in that range cannot change an
+ordinary read. That is a fact about the BOARD, not about C and not about the compiler, which is why
+it is a capability rather than a rule inside either file — and it keeps alias.ts's asymmetry, since
+every address the range cannot place still bars. The same field is the eligibility predicate for
+`l3/volstore.ts`, and `synthetic:ucmp:agbcc` is the row that proves it load-bearing: a byte-exact
+match whose loop stores to IWRAM, 15 points worse the moment the range is widened to admit it.
 
 ## How the architecture came to be: earning L2
 

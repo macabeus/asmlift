@@ -15,9 +15,10 @@
 //   • capabilities.flags → RESERVED, not yet read by any pass (PPC condition regs will).
 //   • capabilities.readOnlyAddressSinks → the Thumb frame-object audit: a frame address stored to
 //     one of these reached a device that only reads through it, so it does not retract `undef`.
-//   • capabilities.deviceRegisters → rank.ts's volatility tie-break: which of two byte-identical
-//     spellings publishes a `volatile` (a preference over the reader's C, never a qualifier the
-//     decompiler adds or removes).
+//   • capabilities.deviceRegisters → three readers, all asking "is this address a hardware
+//     register rather than an object": the `/vol-store` lever's eligibility (l3/volstore.ts),
+//     `/unreduce`'s disjointness gate for a read it moves into a loop (l3/unreduce.ts), and
+//     rank.ts's volatility tie-break between two byte-identical spellings.
 //   • compilerBehaviors.* → mostly consumed by the structurer (threaded via StructureOptions).
 //     The exceptions are the two rank.ts reads off the target directly, because their consumers
 //     are L3 levers rather than the structurer: `nearBaseSpan` and `foldsConstAddrOffset`.

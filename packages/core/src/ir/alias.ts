@@ -20,6 +20,17 @@
 //
 // Being conservative here costs at most a match (an extra local the compiler would have folded);
 // being wrong here is a silently wrong read. Every relaxation must keep that asymmetry.
+//
+// ONE OTHER PLACE ANSWERS THE SAME QUESTION, on a different premise, and it is not reachable from
+// here: `l3/unreduce.ts`'s `moved-read-aliasable` gate, which asks whether moving a read INTO a
+// loop lets the loop's own writes change what it sees. It runs on L3, where there are no `Value`s
+// and no `defs` map to resolve, and the addresses it is about are RAW CONSTANTS — precisely the
+// case in which `globalCellOf` returns null and everything here bars. What it uses instead is the
+// TARGET's declared device-register range (`capabilities.deviceRegisters`): a write to a hardware
+// register is not a write to any object a C program declares, so a loop whose every write lands
+// there cannot change an ordinary read. That is a fact about the board rather than about C, which
+// is why it is a target capability and not a rule in this file. The asymmetry above is kept in
+// both: everything the range does not place BARS.
 import { type Op, type Value } from './core';
 
 /** A byte cell of a named global: the symbol plus the byte offset within it. */
