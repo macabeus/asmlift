@@ -216,10 +216,6 @@ const STRUCTURING_AXES: readonly StructuringAxis[] = [
   },
 ];
 
-/** The signedness of the entry parameters — the classic ambiguity asm cannot resolve.
- *
- * Struct LAYOUT is recovered structurally (raise/structs.ts), not as a scored axis here:
- * `->field_N` and `[idx]` compile identically, so the differ cannot referee between them. */
 /** The statement-shape products (rank's second sanctioned product mechanism): each entry is a
  *  statement-order/shape re-spelling orthogonal to every representation lever, derived onto every
  *  spelling as sanctioned in the POLICY note at the respell site. Each shape fires alone, plus
@@ -377,6 +373,20 @@ const BASEFOLD_ADMISSIONS: readonly BaseAdmission[] = [
 const sameBases = (a: readonly string[], b: readonly string[]): boolean =>
   a.length === b.length && a.every((k, i) => k === b[i]);
 
+/** The signedness of the entry parameters — the classic ambiguity asm cannot resolve.
+ *
+ * Struct LAYOUT is recovered structurally (raise/structs.ts) rather than enumerated here, and the
+ * reason is REACH, not neutrality. This file used to say `->field_N` and `[idx]` "compile
+ * identically, so the differ cannot referee between them"; the second clause is FALSE on agbcc and
+ * `synthetic:dmanest` is the counterexample — the same element read scores 0 as
+ * `((struct Elem0 *)K)[a1].field_4` and 2 as `((s32 *)((a1 << 3) + K))[1]`, because an index folds
+ * the field offset into the pool literal (tree reassociation) where a COMPONENT_REF leaves it in
+ * the load displacement. `synthetic:dmaptrsrc` is a second counterexample on the field's TYPE.
+ *
+ * What is true is that no candidate is enumerated for the axis, and none is NEEDED: the recovery
+ * reads the base from the observed pool word and the field offset from the observed load
+ * displacement, so it reproduces the target's own split by construction. The measurements and the
+ * conditions are in `raise/structs.ts`; nothing about them belongs in a roster comment. */
 const SIGN_CANDS = [
   { label: 'unsigned', signed: false },
   { label: 'signed', signed: true },

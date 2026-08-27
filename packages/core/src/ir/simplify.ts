@@ -90,6 +90,16 @@ export function simplifyTrivialPhis(fn: Fn, onRemoved?: (param: Value) => void):
  * op later proves. Liveness is over the IR as it stands, and op-level DCE belongs to
  * `pattern/engine.ts`.
  *
+ * THAT MAKES TWO LIVENESS MODELS OVER ONE GRAPH, and they now DISAGREE about the same edge.
+ * `pattern/engine.ts`'s `dce` still counts every successor arg as a use unconditionally — the rule
+ * abandoned here — and it runs after every changing pre-recovery pass where this runs once, inside
+ * the frontend's `finish()`. The disagreement is one-sided and safe: `dce` is the COARSER of the
+ * two, so it only ever keeps an op this would have let go, never the reverse. Reach today is ZERO
+ * and that is measured rather than argued — a read-only copy of this fixpoint, run over 313 lifted
+ * klonoa functions after the frontend's own prune AND after every pre-recovery pass that changed
+ * the IR, reports 0 removable params at every checkpoint. Booked here so a future round that finds
+ * a nonzero reads it as the known divergence rather than a new discovery.
+ *
  * THE ENTRY BLOCK IS NEVER TOUCHED — its params are the function's signature, and an argument the
  * body ignores is still an argument (frontend/ssa.ts `ensureParam` creates exactly those on
  * purpose). They are therefore seeded LIVE rather than merely skipped: an entry block that is also

@@ -3205,13 +3205,33 @@ export const SYNTHETIC: SynthSpec[] = [
   // only each other and which no op reads — a ring `ir/simplify.ts`'s per-round reader scan could
   // never retire, each half counting as the other's reader. Attributed by instrumenting the
   // refusal: `NOTCLEAN block-arg-use op=cond_br` with `accesses=1 [load@4w4]` here against
-  // `ACCEPT stride=8 offs=4:4` on `dmavolsrc`. Least-fixpoint liveness retires the ring; the
-  // guard is untouched, and ablating it instead reaches 0 too but fans the row 28 → 36.
+  // `ACCEPT stride=8 offs=4:4` on `dmavolsrc`. Least-fixpoint liveness retires the ring; the guard
+  // is untouched, and ablating it INSTEAD reaches 0 too but fans the row 28 → 36 — while ablating
+  // it AS WELL is inert (26 either way), because a retired ring leaves the guard nothing to trip
+  // on. The two are not the same edit: one removes the cause, the other removes a real hazard's
+  // refusal and buys 8 spurious candidates.
   //
-  // THE COMPILER FACT OUTLIVES THE ROW, and it FALSIFIES a premise written in two places in core:
-  // `packages/core/src/raise/structs.ts:25` and `packages/core/src/rank.ts:218` both say
-  // `->field_N` and `[idx]` compile identically so the differ cannot referee between them. On
-  // agbcc they do not, and the two passes are nameable. The fold is TREE-level reassociation,
+  // WHAT MOVED IS THE WHOLE FAN, NOT ONE CANDIDATE, and the round's first posture argument was
+  // stated over the wrong object. `dmanest` goes from 28 candidates carrying the folded spelling
+  // 28/28 to 26 carrying the struct view 26/26: the folded spelling is no longer ENUMERABLE, and
+  // nothing reports a candidate never enumerated. "No second spelling exists for the differ to
+  // referee" is false — the differ referees these two at 0 against 2. The claim that holds is
+  // stronger and is a property of the RECOVERY: it takes the base from the observed pool word and
+  // the field offset from the observed load displacement, so it reproduces the target's own split
+  // by construction. Verified by lifting all three splits and scoring each against ITS OWN target:
+  // `.word 0x3003430`+`[r0,#4]` → `((struct Elem0 *)50345008)[a0].field_4` 0; `.word 0x3003434`
+  // +`[r0]` → `((struct Elem0 *)50345012)[a0].field_0` 0; `.word 0x3003430`+`[r0]` → base
+  // 50345008 `field_0` 0. Where the target folded, the recovery folds; the folded RENDERING was
+  // the lossy one, which is why removing it costs nothing (894 rows, 0 lost).
+  //
+  // THE COMPILER FACT OUTLIVES THE ROW, and it falsified a premise this repo held in two places.
+  // Both citations have since moved and neither should be repeated: `raise/structs.ts` states the
+  // conditional form already (it was corrected before this round, by #112's own measurements), and
+  // `rank.ts`'s copy was an ORPHANED docstring — a `/** */` block with a second one immediately
+  // below it, so it documented no declaration at all — now deleted, with the corrected note moved
+  // onto `SIGN_CANDS` where the signedness half belongs. The premise said `->field_N` and `[idx]`
+  // compile identically so the differ cannot referee between them. On agbcc they do not, and the
+  // two passes are nameable. The fold is TREE-level reassociation,
   // `((VAR+C1)+C2) → VAR+(C1+C2)` in `fold`'s `associate:` block (gcc/fold-const.c:4959, via
   // `split_tree` at :1226); a COMPONENT_REF never enters that arithmetic, because
   // `get_inner_reference` (gcc/expr.c:3929, called at :5444) hands back the bit position
