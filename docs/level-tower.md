@@ -92,8 +92,8 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
     Every path gets these, which is why the boundary contracts run on both sides of them (below).
   - **Ranked re-spellings**, in [`rank.ts`](../packages/core/src/rank.ts) and so on the
     `decompileRanked` path only. Two populations of them: SPELLING re-writes of one structured
-    tree (e.g. `/argbase`, `/scopebase`, `/indexed`, `/livebase`, `/volatile`, `/mulfirst`,
-    `/regcopy`, `/coalesce`) and STRUCTURING axes, which re-run `structure()` under a different
+    tree (e.g. `/argbase`, `/scopebase`, `/indexed`, `/livebase`, `/volatile`, `/vol-store`,
+    `/unreduce`, `/ptr-field`, `/mulfirst`, `/regcopy`, `/coalesce`) and STRUCTURING axes, which re-run `structure()` under a different
     lever (e.g. `/flip-branch`, `/defsite`, `/inplace`, `/no-bitfield`, `/reread-globals`,
     `/merge-names`) — plus `/raw-globals`, the signedness pin and `/setup-args`, which re-run the
     lift itself.
@@ -347,6 +347,50 @@ Adopt this when a pass's refusals are load-bearing — not for every `if` in the
 "earn it" discipline applies: `l3/basecse.ts` declares a table in which **no** gate is sound,
 because a wrong hoist there costs bytes and a match, never meaning, and saying so plainly is worth
 more than three gates pretending to a soundness they do not have.
+
+**A gate's PREMISE can be a target capability, and when it is, that is where it belongs.**
+`l3/unreduce.ts` deletes a loop-carried accumulator and re-spells each read as a closed form, which
+means a memory read in the accumulator's init is evaluated at each read instead of once where the
+init stood. Whether the loop's own writes can change what that read sees is the question
+[`ir/alias.ts`](../packages/core/src/ir/alias.ts) exists for — but that predicate resolves NAMED
+globals through the L2 def map, and the addresses here are raw constants on a tree with no `Value`s
+left, so it answers "unknown" and bars everything. What decides it instead is
+`TargetDescription.capabilities.deviceRegisters`: a write to a hardware register is not a write to
+any object a C program declares, so no STORE THE C PERFORMS in such a loop can change an ordinary
+read. That is a fact about the BOARD, not about C and not about the compiler, which is why it is a
+capability rather than a rule inside either file — and it keeps alias.ts's asymmetry, since every
+address the range cannot place still bars.
+
+**A SOUND GATE CAN BE SOUND ABOUT THE WRONG REGION, and nothing in this file's machinery notices.**
+`sound: true` costs a `guardedBy` test, and a table where every entry has one still answers the
+wrong question if the ctx it reads was built over the wrong span. Every gate above asked about the
+LOOP; the transform moves the init across everything between where it STOOD and each read, and the
+counter's start is a second anchor that can stand on either side of the init. Three shapes were
+admitted and diverged on every input vector. Two rounds fixed the same defect one scope apart — the
+first widened `loop.body` to `[loop]` to catch a `for`'s increment and stopped there — because a
+gate table makes the RULES reviewable and says nothing about the extent they range over. So a pass
+that MOVES code states its motion region as a named value the ctx is built from, and every gate that
+asks "can anything change this" reads that one. `deviceMemoryWriters` is the exception that proves
+it: an armed DMA writes for as long as it is enabled, so that scan is deliberately WIDER than the
+motion region — the whole prefix — and the difference is written down where the two are built.
+
+**And a premise about the board is still a premise.** That paragraph originally ended "so a loop
+whose every write lands in that range cannot change an ordinary read", which is FALSE on this
+board: a DMA controller reads a control word and then writes ordinary memory itself, so a loop
+whose every write is a device-register write can rewrite the very cell the moved read reads.
+Nothing caught it because nothing executed it — the claim was written as an aside and then copied
+into four files. The fix splits the datum in two: `deviceRegisters` keeps the SPELLING question
+("would a source have written `volatile` here"), where an approximation costs a candidate, and
+`deviceMemoryWriters` carries the MEMORY-MODEL question, where an approximation costs a wrong
+answer. **When neither datum settles it, the DIFFER can**: `Candidate.matchOnly` marks a spelling
+publishable only at a byte-exact score, because a candidate whose object equals the target's IS the
+program whatever a gate could have proved about it. That is the third admission ground and the
+narrowest — it exists because the alternative, barring the spelling outright, deletes a real match
+whose reference source has exactly that shape, and the sound alternative to it measures 16. The same field is the eligibility predicate for
+`l3/volstore.ts` — a REACH gate there rather than a sound one, since a `volatile` qualifier only
+restricts the compiler: widening the range to admit every constant address adds candidates on two
+corpus rows and moves no score, so what the declaration buys is that the lever never claims
+volatility of ordinary memory, which the differ could only referee by luck.
 
 ## How the architecture came to be: earning L2
 

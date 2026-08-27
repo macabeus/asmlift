@@ -24,19 +24,10 @@
 // only coincidentally lands in the window, which is the stated cost of the lever (the `s32` cast
 // assumes addresses below 2^31, true of every target that declares nearBaseSpan today). Declines
 // (null) when no cluster forms.
+import { baseConst } from './address';
 import type { Expr, SFn } from './ast';
 import { mapExprChildren, mapStmtExprs } from './ast';
 import { type BaseInit, nameAllocator, placeBaseLocals } from './hoist';
-
-/** The const behind a deref base, looked at through SCALAR value casts only — a cast to a
- *  struct pointer is the struct-arrays dot-form's base, whose stride the raw `u8 *` re-spelling
- *  would collapse, so it is never a cluster member. */
-const baseConst = (e: Expr): number | null =>
-  e.k === 'const'
-    ? e.value
-    : e.k === 'cast' && !(e.to.kind === 'ptr' && e.to.to.kind === 'struct')
-      ? baseConst(e.e)
-      : null;
 
 /** `span` is the target's single-add-immediate derivation reach
  *  (TargetDescription.compilerBehaviors.nearBaseSpan) — a target that declares none never runs

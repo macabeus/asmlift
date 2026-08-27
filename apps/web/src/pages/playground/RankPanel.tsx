@@ -65,7 +65,7 @@ export function RankCandidates({ ranking }: { ranking: Ranking }) {
     );
   }
 
-  const { candidates, best } = ranking.result;
+  const { candidates, best, dropped, withheld } = ranking.result;
   return (
     <div className="mt-1 rounded-lg border border-slate-700 bg-slate-900/70 p-2.5">
       <p className="mb-2 text-xs font-semibold text-slate-200">
@@ -105,6 +105,14 @@ export function RankCandidates({ ranking }: { ranking: Ranking }) {
           })}
         </tbody>
       </table>
+      {(withheld.length > 0 || dropped.length > 0) && (
+        <p className="mt-2 text-[10px] leading-relaxed text-amber-400/80">
+          {withheld.length > 0 &&
+            `${withheld.length} spelling(s) withheld — built and scored, but publication needs a
+            byte-exact score. `}
+          {dropped.length > 0 && `${dropped.length} spelling(s) failed to build.`}
+        </p>
+      )}
       <p className="mt-2 text-[10px] leading-relaxed text-slate-500">
         Score 0 = byte-exact. The differ is the fitness function: signedness and branch-sense are genuinely ambiguous
         from asm, so each spelling is compiled and scored, not guessed.

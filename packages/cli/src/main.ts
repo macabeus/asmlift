@@ -425,7 +425,15 @@ export async function runCli(
         ? `asmlift: [dropped] ${ranked.dropped.length} candidate(s) failed to score; first: ` +
           `${ranked.dropped[0].label}: ${ranked.dropped[0].error}\n`
         : '';
-      // The two counts docs/ranked-repro.md requires beside every ranked score, as ONE line that
+      // WITHHELD is a different fact from dropped and gets its own line: these compiled and scored
+      // and were then refused publication for want of a byte-exact proof (Candidate.matchOnly).
+      // Folding them into `dropped` would report compile failures that did not happen; leaving
+      // them out entirely would make `candidates scored` under-count the fan with no trace.
+      const held = ranked.withheld.length
+        ? `asmlift: [withheld] ${ranked.withheld.length} candidate(s) scored but unpublishable; first: ` +
+          `${ranked.withheld[0].label} at ${ranked.withheld[0].score}: ${ranked.withheld[0].why}\n`
+        : '';
+      // The three counts docs/ranked-repro.md requires beside every ranked score, as ONE line that
       // is always present. They used to be recoverable only as the line count of a 2 MB stderr
       // stream, and "0 dropped" was asserted by the ABSENCE of the `[dropped]` line above — so a
       // clean run, a truncated log and a killed run left identical evidence for the claim this
@@ -437,6 +445,7 @@ export async function runCli(
       // doc tells readers to quote this one line, so a stamp anywhere else is a stamp nobody pastes.
       const summary =
         `asmlift: [ranked] ${ranked.candidates.length} candidate(s) scored, ${ranked.dropped.length} dropped, ` +
+        `${ranked.withheld.length} withheld, ` +
         `best ${ranked.best.label}: ${ranked.best.score.score}${ranked.best.score.match ? ' (match)' : ''} ` +
         `[${sourceStamp(treeBefore, sampleSourceTree(), bakedBuild())}]\n`;
       return {
@@ -444,7 +453,7 @@ export async function runCli(
         stdout: ranked.best.source,
         // …and where the time went, ABOVE the line readers paste, so `[ranked]` and its `[proto]`
         // tail stay adjacent.
-        stderr: targetTrace + warn + table + drops + (clock?.report() ?? '') + summary + protoNote,
+        stderr: targetTrace + warn + table + drops + held + (clock?.report() ?? '') + summary + protoNote,
       };
     } catch (e) {
       const kind = isDecline(e) ? 'declined' : 'internal error';

@@ -3093,40 +3093,50 @@ export const SYNTHETIC: SynthSpec[] = [
   // wait — the shape `DmaFill16` expands to — was not in the dataset at all, and neither was a
   // bare device read-back: zero of the 200.
   //
-  // THE TWO GAP ROWS ARE CONJUNCTIONS, AND EACH TERM IS PRICED. Pinning the stores `volatile` —
-  // the capability this family is named for — moves `dmafill` 30 → 25 and `dmaptrsrc` 40 → 38 and
-  // closes neither. Both rows also need the induction expression spelled UN-REDUCED inside the
-  // store (`base + (i << 6)`, what the reference compiles to) instead of the pre-strength-reduced
-  // accumulator asmlift emits (`v0 = (lo << 6) + base; … v0 = v0 + 64;`), and `dmaptrsrc` needs a
-  // third term besides. The lattices below are rooted at asmlift's OWN plain `unsigned` candidate,
+  // THE TWO GAP ROWS WERE CONJUNCTIONS, AND EACH TERM IS PRICED. Both now MATCH, through three
+  // levers admitted together — `/vol-store` (pin a fixed-address device store `volatile`),
+  // `/unreduce` (delete the loop-carried accumulator and spell each read as its closed form) and
+  // `/ptr-field` (declare a recovered word field `void *`) — plus the two PAIRINGS that are the
+  // whole point of the family: `/vol-store/unreduce` closes `dmafill` and the triple closes
+  // `dmaptrsrc`. The lattices below are rooted at asmlift's OWN plain `unsigned` candidate,
   // byte-identical to what `decompileRanked` emits — an absolute-address base, so one base spelling
-  // throughout. The `/nearbase` sibling each row actually publishes scores 5 lower on `dmafill`
-  // (30 against 35) and 2 lower on `dmaptrsrc` (40 against 42). V = pin the three stores,
-  // R = un-reduce, T = declare the recovered word field `void *`.
+  // throughout. V = pin the three stores, R = un-reduce, T = the pointer field.
   //   `dmafill`   000 35 · V 19 · R 34 · VR 0        Shapley V +25.00, R +10.00 (sum 35)
   //   `dmaptrsrc` 000 42 · V 27 · R 35 · T 42        Shapley V +18.17, R +11.67, T +12.17 (sum 42)
   //               VR 35 · VT 27 · RT 32 · VRT 0      first-in +15/+7/+0 · last-out +32/+27/+35
-  // R ALONE IS A REGRESSION on `dmafill` (34 against the shipped 30), and T alone is worth exactly
-  // ZERO. Read first-in, either lever looks not worth building; read last-out, each is worth
-  // 27–35 of a 42-point row. Quote the convention with the number.
+  // R ALONE IS A REGRESSION on `dmafill` (34 against the 30 the row published), and T alone is
+  // worth exactly ZERO. Read first-in, either lever looks not worth building; read last-out, each
+  // is worth 27–35 of a 42-point row. Quote the convention with the number.
+  //
+  // THE PRICES ONLY HOLD IN THE ABSOLUTE-ADDRESS BASIN, which is why the three levers are offered
+  // on the BASE spelling rather than on whatever the row wins with. Bolting V and R onto the
+  // `/nearbase` spelling each row used to publish lands at 24 on `dmafill` and 22 on `dmaptrsrc` —
+  // better than the 30 and 40 they published, and not a match. Same edits, same compiler,
+  // different basin.
   //
   // WHAT THE ROWS ISOLATE.
-  //   `dmafill`    30 — the minimum: three register stores and a `volatile u16` fill source, the
-  //                     destination a pure induction expression. NOTHING is read in the loop, so
-  //                     the promotion is available; V and R above are the whole residual.
-  //   `dmaptrsrc`  40 — the same loop with the destination's base read from a POINTER-typed field
-  //                     of a plain global. That read is what makes the loop promotable in the
-  //                     first place (below), so this is the shape the real function has.
-  //   `dmavolsrc`  MATCH — the family's control, and it is THREE-sided. Under a lever that pins
-  //                     device stores it stays 0 (the qualifier is free here); under one that
-  //                     declares recovered word fields `void *` it breaks to 44; under one that
-  //                     always pre-strength-reduces it breaks to 50. So one row brackets all
-  //                     three axes, and a lever that moves it has overreached.
+  //   `dmafill`    MATCH at `/vol-store/unreduce` — the minimum: three register stores and a
+  //                     `volatile u16` fill source, the destination a pure induction expression.
+  //                     NOTHING is read in the loop, so the promotion is available; V and R above
+  //                     were the whole residual.
+  //   `dmaptrsrc`  MATCH at `/vol-store/unreduce/ptr-field` — the same loop with the destination's
+  //                     base read from a POINTER-typed field of a plain global. That read is what
+  //                     makes the loop promotable in the first place (below), so this is the shape
+  //                     the real function has.
+  //   `dmavolsrc`  MATCH — the family's control, and it is THREE-sided. All three axes now SHIP,
+  //                     so it brackets live levers rather than hypothetical ones: `/vol-store`
+  //                     ties it at 0 (the qualifier is free here, and the volatility tie-break
+  //                     publishes the qualified twin), `/ptr-field` offers a 44 that loses, and
+  //                     `/unreduce` declines outright — its loop has no accumulator, the field
+  //                     read having never left it. A lever that MOVES this row has overreached.
   //   `dmastride`  MATCH — the ADVERSE control for R, and the positive control for V. Its
   //                     reference strides the destination itself (`p = p + 64`), so the
   //                     accumulator asmlift emits is the RIGHT spelling and a lever that always
-  //                     un-reduces would break it. And asmlift wins it at `unsigned/livebase/
-  //                     volatile` — the very product `/nearbase` lacks (below).
+  //                     un-reduced would break it (23, measured as a default). `/unreduce` DOES
+  //                     fire here and offers exactly that spelling, at 33; the row keeps its
+  //                     MATCH because the lever is an ADMISSION and `compareScored` orders by
+  //                     score, so the worse spelling simply loses. That is what this row now
+  //                     proves. asmlift still wins it at `unsigned/livebase/volatile`.
   //   `dmaback`    17 — `dmavolsrc` plus ONE statement: `gDma[2];`, the bare read-back the GBA
   //                     DMA macros end with. asmlift emits IDENTICAL C for the two rows (`diff`
   //                     of the two renderings, modulo the function name, is empty). Restoring the
@@ -3134,20 +3144,23 @@ export const SYNTHETIC: SynthSpec[] = [
   //   `dmanest`     2 — `dmavolsrc` nested in an outer loop. Different residual entirely, kept
   //                     here because it is the same construct: see the last block below.
   //
-  // `/volatile`'S REACH IS THE HOLE, NOT ITS ABSENCE, attributed by instrumenting the refusal
-  // rather than by reading it. `rank.ts` offers plain `/volatile` (it declares a pointer local
-  // holding a numeric address as pointing at volatile data), and `volatilePtrLocals`
-  // (l3/volatileptr.ts) returns null when no local qualifies. A `console.error` on that return
-  // prints `volatilePtrLocals NULL sym=dmafill locals=v0, v1, sp0` on both gap rows and never
-  // prints OK: their base spelling has no pointer local at all, so the lever has nothing to
-  // qualify. Something else must create one first. `/livebase` does, and carries a `volatiles()`
-  // sibling through the `paired` products — which is exactly how `dmastride` MATCHes. `/nearbase`
-  // also does, and has NO such sibling: it is a standalone respell, and the only
-  // `/volatile/nearbase` in the file is `${suffix}/volatile/nearbase` inside `for (… of paired)`,
-  // so it only ever exists behind a `/livebase` prefix. The whole fan for each gap row is four
-  // labels — `{signed, unsigned} × {plain, /nearbase}` — and none carries `volatile`. Measured
-  // ceiling of the missing product: hand-writing `volatile u8 *p0` with volatile derefs scores 25
-  // on `dmafill`, the same as pinning the stores directly, against a closing score of 0.
+  // WHY `/volatile` COULD NOT REACH THESE ROWS, attributed by instrumenting the refusal rather
+  // than by reading it. `rank.ts`'s `/volatile` declares a pointer LOCAL holding a numeric address
+  // as pointing at volatile data, and `volatilePtrLocals` (l3/volatileptr.ts) returns null when no
+  // local qualifies. A `console.error` on that return prints `volatilePtrLocals NULL sym=dmafill
+  // locals=v0, v1, sp0` on both rows and never prints OK: their base spelling has no pointer local
+  // at all, so that lever has nothing to qualify, and hand-writing the local it would need
+  // (`volatile u8 *p0` with volatile derefs) scores 25 on `dmafill` against a closing 0. The
+  // capability was ABSENT from the fan rather than losing in it — the whole fan was four labels,
+  // `{signed, unsigned} × {plain, /nearbase}`, every one carrying `v0 = v0 + 64;` and none
+  // carrying `volatile`. `/vol-store` is the answer, because it qualifies the ACCESS and needs no
+  // local at all; what keeps it off ordinary memory is the target's own declared window
+  // (`capabilities.deviceRegisters`), which is a REACH gate rather than a soundness one — over the
+  // corpus it excludes a const-address store on 7 rows and moves the fan on two of them
+  // (`readarm` 6 candidates → 8, `fieldbase` 14 → 20), with no score and no outcome moving either
+  // way. `synthetic:ucmp:agbcc` prices the DEVICE-READ side of the same question and belongs to it
+  // rather than here: qualifying the 0x3001048 its loop test reads costs that match 15, and
+  // `/vol-store` never reaches the row at all (its stores go through a runtime address).
   //
   // THE COMPILER FACT UNDER `dmaptrsrc`, verified in both directions on six compiled probes, each
   // differing from its partner in ONE token. agbcc's -O2 sets `flag_strict_aliasing` (gcc/toplev.c,
@@ -3236,14 +3249,56 @@ export const SYNTHETIC: SynthSpec[] = [
   // `dmavolsrc` rendering, modulo the function name. Both decompilers drop a device read whose
   // result nobody consumes.
   //
+  // WHAT THE ADVERSARIAL ROUNDS FOUND, because the next round will build on these rows and the
+  // premise the first one falsified was written in four files. `/unreduce` licensed moving a memory read into
+  // a loop on the ground that "a write to a hardware register is not a write to any object a C
+  // program declares, so such a loop cannot change what an ordinary read sees". The first clause
+  // is true and the second does not follow: a DMA controller reads a control word and then WRITES
+  // ORDINARY MEMORY itself. `dmaptrsrc`'s own reference ends every iteration with
+  // `gDma[2] = 0x81000020` — bit 31 set, a 32-word transfer into `[DMA3DAD]` — so the loop this
+  // family is ABOUT is exactly the loop the premise fails on. Modelled and executed, the admitted
+  // candidate turned a clean destination walk into wild writes.
+  //
+  // The fix is not a bar, because barring costs this row's match and buys nothing: `dmaptrsrc`'s
+  // reference really does read `gBg[bg].pTilemap` inside the loop, and the SOUND alternative —
+  // the read hoisted into a local above the loop — compiles to 16, not 0, because a C statement
+  // lands above the loop's ENTRY GUARD while the compiler's own invariant hoist lands below it
+  // (both objects disassembled; the guard is the `cmp r2,#0x1f / bgt` the load moves across).
+  // What ships instead is a target datum for the memory-model half (`deviceMemoryWriters`, the
+  // four DMA channel-enable halfwords) and a PROOF requirement for what it cannot settle: the
+  // spelling is published only at a byte-exact score and withheld everywhere else. On this row 4
+  // of the 16 candidates are now withheld, all at 35, and the fan's two 0s are untouched — and
+  // that count is in the row's own `withheldCandidates`, because a MATCH resting entirely on the
+  // proof gate is not a thing an artifact should leave to prose.
+  //
+  // AND THE SECOND ROUND FOUND THE FIRST FIX'S SCOPE WRONG, which is the part to carry forward.
+  // The premise was corrected and the GATES still asked about the loop, while the transform moves
+  // the init across everything between where it stood and each read — plus the counter's start,
+  // which is a second anchor and can stand on either side of the init. Three shapes were admitted
+  // with no proof required and diverged on every input vector; the fuzz that reported zero could
+  // not generate any of them, because its generator never emitted a statement between the two
+  // inits. Neither row's spelling is affected — the region is empty on both — but a lever built on
+  // these rows must state the span its gates range over, not the statement they happen to sit next
+  // to.
+  //
+  // Also measured while these rows were being attacked, and useful to whoever takes `dmanest`:
+  // `((struct Elem0 *)K)[a1].field_4` scores 0 on that row and `((s32 *)((a1 << 3) + K))[1]`
+  // scores 2 — two spellings one token apart, so the "`->field_N` and `[idx]` compile identically"
+  // premise in raise/structs.ts is CONDITIONAL and nothing says on what. One thing that round will
+  // not get for free: `/unreduce` cannot see `dmanest`'s loops either. They are nested, and that
+  // pass walks TOP-LEVEL loops only (91 of the corpus's 189 loop-bearing trees are in the same
+  // position), so a decline there names no gate. Widening the scan is a prerequisite, not a side
+  // effect.
+  //
   // agbcc only, as the `read-once`, `uninit-local` and `value-home` families are. Every claim
   // above is a pair of spellings compiled with THIS compiler; whether ido7.1, gcc2.7.2kmc and
   // mwcc_242_81 promote a loop-invariant device store, delete a use-less device read, or read a
   // field's pointer-ness in their alias analysis was NOT measured, so those lanes are left off
   // rather than assumed. What would earn one: the same compiled pair on that toolchain showing
-  // the same divergence. `device-access` is on the three gap rows only; the two MATCH controls are
-  // deliberately untagged, as `rereadctl` is for `read-once` — a row with no residual has nothing
-  // for a "the diff turns on this" tag to be about.
+  // the same divergence. `device-access` is on `dmaback` alone now — the one row left whose
+  // residual turns on a device access. A row with no residual has nothing for a "the diff turns on
+  // this" tag to be about (the rule that keeps `rereadctl` untagged in `read-once`), so `dmafill`
+  // and `dmaptrsrc` carried it while they were gaps and lost it when they closed.
   //
   // Cut from kleod:LoadBGTilemapData:agbcc, whose inner loop is a `DmaFill16` with no wait and
   // whose reference source ends FIVE macro expansions in a bare read-back (`grep -c` over the
@@ -3262,7 +3317,7 @@ export const SYNTHETIC: SynthSpec[] = [
       'void dmafill(s32 lo, s32 base){ s32 i; volatile u16 tmp;\n' +
       ' for (i = lo; i < 32; i++) { tmp = 0; gDma[0] = (u32)&tmp;\n' +
       ' gDma[1] = (u32)(base + i * 64); gDma[2] = 0x81000020; } }',
-    features: ['device-access'],
+    features: [],
     toolchains: ['agbcc'],
     ctx: 'void dmafill(s32 lo, s32 base);',
     proto: { dmafill: { params: ['s32', 's32'], returnsVoid: true } },
@@ -3276,7 +3331,7 @@ export const SYNTHETIC: SynthSpec[] = [
       'void dmaptrsrc(s32 lo, s32 bg){ s32 i; volatile u16 tmp;\n' +
       ' for (i = lo; i < 32; i++) { tmp = 0; gDma[0] = (u32)&tmp;\n' +
       ' gDma[1] = (u32)((u8 *)gBg[bg].pTilemap + i * 64); gDma[2] = 0x81000020; } }',
-    features: ['device-access', 'global'],
+    features: ['global'],
     toolchains: ['agbcc'],
     ctx: 'void dmaptrsrc(s32 lo, s32 bg);',
     proto: { dmaptrsrc: { params: ['s32', 's32'], returnsVoid: true } },

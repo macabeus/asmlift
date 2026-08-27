@@ -292,22 +292,22 @@ describe('the detectors themselves', () => {
 
   it('holds judgement tags to a floor without pretending to decide them', () => {
     // rejects the fabrications …
-    expect(JUDGEMENT_FLOOR.arithmetic('{ GwSystem.minigame_index = arg0; }', '')).toBe(false);
-    expect(JUDGEMENT_FLOOR.array('{ return gPlayerAvatar.flags; }', '')).toBe(false);
-    expect(JUDGEMENT_FLOOR.table('{ return gEntityInfo[0x23].unkF; }', '')).toBe(false);
-    expect(JUDGEMENT_FLOOR.branch('{ s->a = 0; s->b = 0; }', '\tmov\tr0, #0')).toBe(false);
+    expect(JUDGEMENT_FLOOR.arithmetic('{ GwSystem.minigame_index = arg0; }', '', '')).toBe(false);
+    expect(JUDGEMENT_FLOOR.array('{ return gPlayerAvatar.flags; }', '', '')).toBe(false);
+    expect(JUDGEMENT_FLOOR.table('{ return gEntityInfo[0x23].unkF; }', '', '')).toBe(false);
+    expect(JUDGEMENT_FLOOR.branch('{ s->a = 0; s->b = 0; }', '\tmov\tr0, #0', '')).toBe(false);
     // … and accepts the real thing
-    expect(JUDGEMENT_FLOOR.arithmetic('{ return a * 10 + b; }', '')).toBe(true);
-    expect(JUDGEMENT_FLOOR.table('{ return gSineDegreeTable[angleMod]; }', '')).toBe(true);
-    expect(JUDGEMENT_FLOOR.cast('{ return (uintptr_t)(tgt - 1); }', '')).toBe(true);
-    expect(JUDGEMENT_FLOOR.fnptr('{ f(); }', '  28:\tjalr\tv0')).toBe(true);
+    expect(JUDGEMENT_FLOOR.arithmetic('{ return a * 10 + b; }', '', '')).toBe(true);
+    expect(JUDGEMENT_FLOOR.table('{ return gSineDegreeTable[angleMod]; }', '', '')).toBe(true);
+    expect(JUDGEMENT_FLOOR.cast('{ return (uintptr_t)(tgt - 1); }', '', '')).toBe(true);
+    expect(JUDGEMENT_FLOOR.fnptr('{ f(); }', '  28:\tjalr\tv0', '')).toBe(true);
     // merge-chain wants MORE THAN ONE local for the arms to decide, initialised or not
-    expect(JUDGEMENT_FLOOR['merge-chain']('{ int x; if (a) x = 1; else x = 2; return x; }', '')).toBe(false);
-    expect(JUDGEMENT_FLOOR['merge-chain']('{ int x, y; return f(x, y); }', '')).toBe(false);
+    expect(JUDGEMENT_FLOOR['merge-chain']('{ int x; if (a) x = 1; else x = 2; return x; }', '', '')).toBe(false);
+    expect(JUDGEMENT_FLOOR['merge-chain']('{ int x, y; return f(x, y); }', '', '')).toBe(false);
     // two locals declared one per line are still two locals — the comma is a spelling accident
-    expect(JUDGEMENT_FLOOR['merge-chain']('{ void *a; void *b; if (s) a = p; else b = p; }', '')).toBe(true);
-    expect(JUDGEMENT_FLOOR['merge-chain']('{ int x, y; if (a) { x = 1; y = 2; } return x + y; }', '')).toBe(true);
-    expect(JUDGEMENT_FLOOR['merge-chain']('{ int x = 0, y = 0, i; if (a) x = y; return x; }', '')).toBe(true);
+    expect(JUDGEMENT_FLOOR['merge-chain']('{ void *a; void *b; if (s) a = p; else b = p; }', '', '')).toBe(true);
+    expect(JUDGEMENT_FLOOR['merge-chain']('{ int x, y; if (a) { x = 1; y = 2; } return x + y; }', '', '')).toBe(true);
+    expect(JUDGEMENT_FLOOR['merge-chain']('{ int x = 0, y = 0, i; if (a) x = y; return x; }', '', '')).toBe(true);
   });
 
   it('separates I/O registers from other hardware address ranges', () => {

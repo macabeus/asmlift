@@ -46,7 +46,7 @@ describe('CLI --score-against (agbcc, real toolchain)', () => {
     // (src/provenance.ts, provenance.test.ts). A run against different sources used to leave
     // evidence identical to a clean one, and this is the only line anyone is told to quote.
     expect(r.stderr).toMatch(
-      /asmlift: \[ranked\] \d+ candidate\(s\) scored, \d+ dropped, best [^\n]*\[asmlift source [0-9a-f]{7}[^\]]*\]\n/,
+      /asmlift: \[ranked\] \d+ candidate\(s\) scored, \d+ dropped, \d+ withheld, best [^\n]*\[asmlift source [0-9a-f]{7}[^\]]*\]\n/,
     );
   });
 

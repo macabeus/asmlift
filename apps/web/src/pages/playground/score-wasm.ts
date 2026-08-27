@@ -17,8 +17,10 @@ import {
   type DroppedCandidate,
   type RankedResult,
   type Scored,
+  type WithheldCandidate,
   compareScored,
   enumerateCandidates,
+  withheldReason,
 } from '@asmlift/core/rank';
 import type { SymbolMap } from '@asmlift/core/symbols';
 import { C_TYPEDEFS, type TargetDescription } from '@asmlift/core/target';
@@ -208,6 +210,7 @@ export async function rankCandidatesInBrowser(
   // the CLI come to disagree about which spelling of the same function is best.
   const results: (Scored<MatchScore> & { order: number })[] = [];
   const dropped: DroppedCandidate[] = [];
+  const withheld: WithheldCandidate[] = [];
   let lastErr: unknown = null;
   for (const [order, c] of candidates.entries()) {
     try {
@@ -217,6 +220,14 @@ export async function rankCandidatesInBrowser(
         throw new Error(`agbcc could not compile candidate '${c.label}': ${firstLine(cc.stderr)}`);
       }
       const score = await scoreObjectBytes(t.obj, cc.obj, name);
+      // The PUBLICATION rule is imported for the same reason the ordering is: `withheldReason` is
+      // core's one copy, and a `matchOnly` spelling this driver published while the CLI withheld
+      // it would be the playground showing a source the CLI refuses to stand behind.
+      const why = withheldReason(c, score);
+      if (why !== null) {
+        withheld.push({ label: c.label, score: score.score, why });
+        continue;
+      }
       results.push({ ...c, order, score });
     } catch (e) {
       lastErr = e;
@@ -228,5 +239,5 @@ export async function rankCandidatesInBrowser(
     throw new Error(`no scorable candidate for '${name}': ${why}`, { cause: lastErr });
   }
   results.sort(compareScored);
-  return { best: results[0], candidates: results.map(({ order: _order, ...c }) => c), dropped };
+  return { best: results[0], candidates: results.map(({ order: _order, ...c }) => c), dropped, withheld };
 }

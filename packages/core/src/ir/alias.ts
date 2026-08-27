@@ -20,6 +20,28 @@
 //
 // Being conservative here costs at most a match (an extra local the compiler would have folded);
 // being wrong here is a silently wrong read. Every relaxation must keep that asymmetry.
+//
+// ONE OTHER PLACE ANSWERS THE SAME QUESTION, on a different premise, and it is not reachable from
+// here: `l3/unreduce.ts`'s `moved-read-aliasable` gate, which asks whether moving a read down to
+// the point that re-reads it lets the writes it crosses change what it sees. It runs on L3, where there are no `Value`s
+// and no `defs` map to resolve, and the addresses it is about are RAW CONSTANTS — precisely the
+// case in which `globalCellOf` returns null and everything here bars. What it uses instead is the
+// TARGET's declared device-register range (`capabilities.deviceRegisters`): a write to a hardware
+// register is not a write to any object a C program declares, so no STORE THE C PERFORMS over that
+// span can change an ordinary read. That is a fact about the board rather than about C, which is
+// why it is a target capability and not a rule in this file. The asymmetry above is kept in both:
+// everything the range does not place BARS.
+//
+// AND IT IS NOT THE WHOLE ANSWER, which this comment used to claim it was. The sentence above
+// covers the CPU's stores and stops there — a DMA controller reads a control word and then WRITES
+// ORDINARY MEMORY on the program's behalf, so a span whose every write is a "device register"
+// write can still rewrite the cell a moved read reads. Executed with the transfer modelled, the
+// admitted candidate turned a clean destination walk into wild writes. The second half of the
+// claim is therefore a second datum, `capabilities.deviceMemoryWriters`, and what it does not
+// settle is settled by the DIFFER instead (`Candidate.matchOnly`) rather than by a wider licence.
+// The lesson generalises past this file: a premise about the board is still a premise, and one
+// stated as an aside in a comment gets copied rather than checked — this one reached four files
+// before anything executed it.
 import { type Op, type Value } from './core';
 
 /** A byte cell of a named global: the symbol plus the byte offset within it. */

@@ -72,7 +72,7 @@ describe('compareMeasurements', () => {
   test('provenance and timings are not compared — only the six fields', () => {
     const base = out(row('a'));
     const fresh = out(row('a'));
-    (fresh.meta as Record<string, unknown>).generatedAt = 'much later';
+    (fresh.meta as unknown as Record<string, unknown>).generatedAt = 'much later';
     (fresh.results[0].asmlift as unknown as Record<string, unknown>).maxScore = 999;
     expect(compareMeasurements(base, fresh).ok).toBe(true);
   });

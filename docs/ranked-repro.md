@@ -103,12 +103,18 @@ stopped at the list of dirty paths would have called such a bundle current.
   writes:
 
   ```
-  asmlift: [ranked] 20608 candidate(s) scored, 0 dropped, best <label>: 531 [asmlift source 7362050]
+  asmlift: [ranked] 20608 candidate(s) scored, 0 dropped, 0 withheld, best <label>: 531 [asmlift source 7362050]
   ```
 
   A score from a run that dropped candidates is not comparable to one that dropped none — and
   "0 dropped" is now something the run SAYS. It used to be spelled as an absent line, so a clean
   run, a truncated log and a killed run left identical evidence.
+
+  **WITHHELD is a third count and a different fact.** `dropped` means the scorer refused a
+  spelling; `withheld` means one compiled, scored, and was refused PUBLICATION because it is
+  proof-gated (`Candidate.matchOnly` — a spelling whose semantics no gate over the C can settle, so
+  only a byte-exact score licenses it). Without the count, `candidates scored` silently
+  under-reports the fan. On the LBG command below it is 0, because `/unreduce` declines there.
 
   **The candidate COUNT belongs to the tree, not to the function.** Every axis admitted multiplies
   it, so the counts quoted in the anecdotes above are each an A/B against themselves and none of

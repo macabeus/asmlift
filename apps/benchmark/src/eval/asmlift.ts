@@ -114,6 +114,10 @@ export function runAsmlift(
       // candidate that compiles — but dropping them SILENTLY published a clean win over a
       // hidden failure, which is exactly what a scoring harness must not do.
       ...(ranked.dropped.length ? { droppedCandidates: ranked.dropped } : {}),
+      // Spellings that BUILT and were then withheld for want of a byte-exact proof. Same rule as
+      // above and a different fact: nothing failed, so folding the two would make `[dropped]`
+      // report compile errors that never happened.
+      ...(ranked.withheld.length ? { withheldCandidates: ranked.withheld } : {}),
       ...(usedSymbols ? { symbolsUsed: symbolsUsedFrom(best.symbolRefs) } : {}),
       outcome: s.match ? 'match' : 'nonmatch',
       source: best.source,

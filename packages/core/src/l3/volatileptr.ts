@@ -26,6 +26,7 @@
 // The symbol map owns a declared global's volatility, and a mixed-feed local would read the
 // mapped global through a volatile view the map never granted. No qualifying local ⇒ decline
 // (null), so the lever never emits a duplicate of the primary.
+import { addrConst, cellAddress, inRange } from './address';
 import { type Expr, type SFn, type Stmt, mapExprChildren, rematerializableAddress, walkExprs } from './ast';
 
 const exprHas = (e: Expr, pred: (x: Expr) => boolean): boolean => {
@@ -74,9 +75,15 @@ function collectAssigns(stmts: Stmt[], out: { name: string; value: Expr }[]): vo
  *  volatility tie-break, so it is counted here beside the lever that mints the claims.
  *
  *  Two spellings assert one: a `volatile` pointer cast over a numeric address (what
- *  l3/inlinebase.ts leaves at each use), and a pointee-volatile pointer local, which asserts it
- *  at whichever numeric address feeds the local. A `volatile` SCALAR local (l3/volatileval.ts)
- *  asserts nothing about an address — it is a stack slot — so it is not counted.
+ *  l3/inlinebase.ts leaves at each use and what l3/volstore.ts mints at a device store), and a
+ *  pointee-volatile pointer local, which asserts it at whichever numeric address feeds the local.
+ *  A `volatile` SCALAR local (l3/volatileval.ts) asserts nothing about an address — it is a stack
+ *  slot — so it is not counted.
+ *
+ *  A claim under a SUBSCRIPT is placed by the whole cell and not by the cast's own operand, which
+ *  is the disagreement l3/address.ts warns about: `((volatile s32 *)0x03FFFFF0)[8]` denotes
+ *  BG0HOFS, and asking the base alone reports EWRAM and counts nothing. Either reading landing in
+ *  the window counts it, so a runtime subscript over an in-window base still does.
  *
  *  Nothing outside the window counts. A qualifier on ordinary memory is a claim about the source
  *  the differ cannot referee and the range cannot support, and preferring it corpus-wide buys one
@@ -86,10 +93,16 @@ export function deviceVolatileClaims(sfn: SFn, window?: readonly [number, number
     return 0;
   }
   const inWindow = (e: Expr): boolean => {
-    const c = constAddr(e);
+    const c = addrConst(e);
     return c !== null && c >= window[0] && c < window[1];
   };
   let n = 0;
+  const underSubscript = new Set<Expr>();
+  for (const e of walkExprs(sfn.body)) {
+    if (e.k === 'index' && e.base.k === 'cast') {
+      underSubscript.add(e.base);
+    }
+  }
   const assigns: { name: string; value: Expr }[] = [];
   collectAssigns(sfn.body, assigns);
   for (const l of sfn.locals) {
@@ -98,16 +111,16 @@ export function deviceVolatileClaims(sfn: SFn, window?: readonly [number, number
     }
   }
   for (const e of walkExprs(sfn.body)) {
-    if (e.k === 'cast' && e.volatile === true && inWindow(e.e)) {
+    if (e.k === 'index' && e.base.k === 'cast' && e.base.volatile === true) {
+      if (inRange(cellAddress(e), window) || inWindow(e.base.e)) {
+        n++;
+      }
+    } else if (e.k === 'cast' && e.volatile === true && !underSubscript.has(e) && inWindow(e.e)) {
       n++;
     }
   }
   return n;
 }
-
-/** the numeric address an expression IS, through any number of pointer casts, or null */
-const constAddr = (e: Expr): number | null =>
-  e.k === 'const' ? e.value : e.k === 'cast' && e.to.kind === 'ptr' ? constAddr(e.e) : null;
 
 /** The locals the lever would qualify — the per-local SUBSET enumeration's input (below):
  *  which pointers the original declared volatile is per-pointer knowledge the asm does not
