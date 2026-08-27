@@ -44,8 +44,20 @@ const TC_CFG: Record<ToolchainId, unknown> = {
  *  language). The cached object file is returned by path and only ever READ downstream
  *  (objdiff target / objdump input). */
 export function cachedBuildTarget(tc: Toolchain, refC: string, sym: string, lang?: 'c' | 'c++'): BuiltTarget {
+  // A target function's disassembly is never legitimately empty, so an empty one is a build/dump
+  // step that failed without saying so — and the tmp-then-rename write makes it a WELL-FORMED
+  // cache entry with no TTL. Left alone it surfaces days later, in another module, as
+  // `disasmToM2c: could not parse objdump output` on a row that has been stable for weeks. So it
+  // is refused on the way in, and an entry already poisoned is a MISS rather than a result.
+  const build = (): BuiltTarget => {
+    const built = tc.buildTarget(refC, sym, lang);
+    if (built.asm.trim() === '') {
+      throw new Error(`buildTarget produced an empty disassembly for ${sym} on ${tc.id} — refusing to cache it`);
+    }
+    return built;
+  };
   if (!enabled()) {
-    return tc.buildTarget(refC, sym, lang);
+    return build();
   }
   // lang enters the key only for c++ (see cachedM2cResult for the rationale)
   const key = sha(
@@ -54,9 +66,12 @@ export function cachedBuildTarget(tc: Toolchain, refC: string, sym: string, lang
   const oPath = join(CACHE_DIR, `ref-${key}.o`);
   const aPath = join(CACHE_DIR, `ref-${key}.asm`);
   if (existsSync(oPath) && existsSync(aPath)) {
-    return { obj: oPath, asm: readFileSync(aPath, 'utf8') };
+    const asm = readFileSync(aPath, 'utf8');
+    if (asm.trim() !== '') {
+      return { obj: oPath, asm };
+    }
   }
-  const built = tc.buildTarget(refC, sym, lang);
+  const built = build();
   mkdirSync(CACHE_DIR, { recursive: true });
   const tmp = `${oPath}.tmp${process.pid}`;
   copyFileSync(built.obj, tmp);
