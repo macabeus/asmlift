@@ -79,13 +79,19 @@
 //     on the committed path, where removing it would drop copies from EVERY spelling rather than
 //     from an opt-in candidate, or `relocatable` is too narrow. Nothing has measured which.
 //
-// AND ONE ASYMMETRY THAT IS NOT A GAP. `type` is sound here, and `canTakeName` has no equivalent:
-// it declares a name from its FIRST taker and never re-checks a later adopter, a disagreement it
+// AND ONE ASYMMETRY THAT IS NOT A GAP — but the reason it is not one has changed, and the
+// difference matters. `type` is sound here, and `canTakeName` still has no full equivalent: it
+// declares a name from its FIRST taker and never re-checks a later adopter, a disagreement it
 // reaches 136 times over klonoa's 69 liftable functions. That sounds like the same defect on the
 // committed path, and it was measured: adding the check there moves one row better and two worse,
-// no match flips. The mismatches it tolerates are scalar (`s32` against `u32` — same width, same
-// bytes); what makes the rule SOUND here is the pointer case, where the survivor's declared type
-// decides how its arithmetic scales.
+// no match flips. The mismatches it tolerates are scalar and 32-BIT — `s32` against `u32`, same
+// width, same bytes at a read. That used to be a MEASUREMENT and is now a property of the rule:
+// `raise/narrowlocal.ts` made a sub-word block parameter possible, at which point `s8` against
+// `u8` was also "same width" and `canTakeName` admitted it — a silent wrong answer, since a narrow
+// declaration IS the extension it replaced (see the rule's own comment in structure.ts). It now
+// compares signedness below 32 bits, so what survives here is only the 32-bit case. What makes the
+// rule SOUND here is the pointer case, where the survivor's declared type decides how its
+// arithmetic scales.
 //
 // PURE: it reads the analysis maps and returns the renaming. Applying it is the caller's job.
 import { type Block, type Op, type Value, successorsOf } from '../ir/core';

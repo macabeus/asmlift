@@ -1434,9 +1434,24 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   //     `*out = a0` where the graph says `*out = (s16)a0` — a silent wrong answer, not a worse one.
   // Register-width carriers are unaffected — a pointer or an `unknown` is a full word, so the two
   // narrow-typing passes are the only producers either half can see.
+  //
+  // AND AT A SUB-WORD WIDTH, THE SIGNEDNESS IS PART OF THE WIDTH. A narrow declaration is where
+  // the extension went, and `u8` re-applies a DIFFERENT extension than `s8` — same bytes in the
+  // variable, different value at every read. `sa3`'s `sub_80B4654` merges a `zext8` arm with its
+  // own `u8` parameter and reads the merge through `lsls #24 / asrs #24`: the carrier is `s8`, and
+  // letting it adopt the `u8` parameter's name emits `sub_80B4FA8(a0, a1, …)`, which passes 144
+  // where the target passes -112 for every byte with bit 7 set. Width alone said 8 === 8 and
+  // admitted it — a silent wrong answer, not a worse score. At 32 bits the two spellings ARE the
+  // same bytes at a read, which is the mismatch `structure/namecoalesce.ts`'s header measured and
+  // this rule deliberately still tolerates.
   const carrierWidth = (t: IrType | undefined): number => (t?.kind === 'int' ? t.width : 32);
+  const carrierSign = (t: IrType | undefined): boolean | undefined =>
+    t?.kind === 'int' && t.width < 32 ? t.signed : undefined;
   const canTakeName = (p: Value, B: Block, name: string, pureAlias = false): boolean => {
     if (carrierWidth(varType.get(name)) !== carrierWidth(p.type)) {
+      return false;
+    }
+    if (carrierSign(varType.get(name)) !== carrierSign(p.type)) {
       return false;
     }
     if (B.params.some((q) => q !== p && varName.get(q) === name)) {
