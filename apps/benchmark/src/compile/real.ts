@@ -9,7 +9,7 @@ import { type MatchScore, scoreObjects } from '@asmlift/cli/score';
 import { macroDefinesOf } from '@asmlift/core/declare';
 import { C_TYPEDEFS } from '@asmlift/core/target';
 
-import type { BuiltTarget, ToolchainId } from '../toolchains';
+import { type BuiltTarget, type ToolchainId, checkedTarget } from '../toolchains';
 import { agbccReal, stripPrototype } from './agbcc';
 import { gcc272Real } from './gcc272';
 import { idoReal } from './ido';
@@ -43,9 +43,12 @@ export function realCompilerFor(toolchain: ToolchainId): RealCompile {
   return rc;
 }
 
-/** Compile a vendored (preprocessed) target TU → scoring target + disassembly. */
+/** Compile a vendored (preprocessed) target TU → scoring target + disassembly. The real tier's
+ *  `Case.build`, and the only place its `BuiltTarget`s are born — `checkedTarget` is stated here
+ *  rather than per compiler for the same reason the synthetic tier states it in `cachedBuildTarget`
+ *  and not in each `TOOLCHAINS[*].buildTarget`. */
 export function buildRealTarget(toolchain: ToolchainId, tuI: string): BuiltTarget {
-  return realCompilerFor(toolchain).buildTarget(tuI);
+  return checkedTarget(realCompilerFor(toolchain).buildTarget(tuI), `${toolchain} real-tier target`);
 }
 
 // ── context-aware candidate scoring ────────────────────────────────────────────────────────

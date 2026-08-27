@@ -35,6 +35,7 @@ import {
   scoreCMipsGcc,
   scoreCPpc,
 } from '@asmlift/toolchains';
+import { statSync } from 'node:fs';
 
 import { scoreViaBenchConfig } from './decomp-config';
 
@@ -43,6 +44,30 @@ export type { ToolchainId } from '@asmlift/bench-schema';
 export interface BuiltTarget {
   obj: string; // path to the scoring-target object
   asm: string; // disassembly / asm text (format per `asmKind`)
+}
+
+/** THE `BuiltTarget` INVARIANT, STATED WHERE BOTH TIERS CROSS. Neither half is ever legitimately
+ *  empty: the `.asm` is a decompiler's whole input and the `.o` is objdiff's scoring target, so an
+ *  empty one is a build or dump step that exited 0 having written nothing. Nothing downstream
+ *  notices — an empty disassembly decompiles to an empty function and an empty object scores every
+ *  candidate against nothing — and with a content-keyed, TTL-less cache in the path it stays
+ *  wrong forever: one such entry sat in `.cache/` until it surfaced days later, in another module,
+ *  as `disasmToM2c: could not parse objdump output` on a row stable for weeks.
+ *
+ *  IT IS NOT THE SAME REFUSAL as @asmlift/toolchains' `nonEmptyDump`, which guards the objdump
+ *  STEPS that package runs and names the invocation. This one is over the CONTRACT and names the
+ *  ROW, and it is the only one of the two the real tier ever reaches: `compile/{ido,kmc,gcc272}.ts`
+ *  run their own `disasm()` and agbcc's target is a `.s` read from disk, no objdump involved.
+ *  Both `Case.build` implementations go through it — `cachedBuildTarget` for the synthetic tier and
+ *  `buildRealTarget` for the real one — so all 894 rows are covered, not the 642 the cache sees. */
+export function checkedTarget(built: BuiltTarget, what: string): BuiltTarget {
+  if (built.asm.trim() === '') {
+    throw new Error(`${what} produced an empty disassembly — refusing it as a scoring target`);
+  }
+  if (statSync(built.obj).size === 0) {
+    throw new Error(`${what} produced an empty object — refusing it as a scoring target`);
+  }
+  return built;
 }
 
 export interface Toolchain {

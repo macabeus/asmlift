@@ -9,11 +9,11 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, test } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 
 import { cachedAsmDumpText, cachedBuildTarget, cachedExtractAsmData, sha } from '../src/cache';
 import { CACHE_DIR } from '../src/config';
-import { TOOLCHAINS } from '../src/toolchains';
+import { TOOLCHAINS, checkedTarget } from '../src/toolchains';
 
 // A stand-in for the real build step, counting its calls. `refC` is unique per test so the
 // content key is too, and nothing here touches a compiler.
@@ -37,7 +37,7 @@ describe('cachedBuildTarget refuses an empty disassembly', () => {
     process.env.ASMLIFT_BENCH_CACHE = '0';
     try {
       expect(() => cachedBuildTarget(tc, 'int poison_a(void){return 0;}', 'poison_a')).toThrow(
-        /empty disassembly for poison_a on agbcc/,
+        /poison_a on agbcc produced an empty disassembly/,
       );
     } finally {
       delete process.env.ASMLIFT_BENCH_CACHE;
@@ -68,7 +68,7 @@ describe('cachedBuildTarget refuses an empty disassembly', () => {
     process.env.ASMLIFT_BENCH_CACHE = '0';
     try {
       expect(() => cachedBuildTarget(tc, 'int poison_c(void){return 2;}', 'poison_c')).toThrow(
-        /empty object for poison_c on agbcc/,
+        /poison_c on agbcc produced an empty object/,
       );
     } finally {
       delete process.env.ASMLIFT_BENCH_CACHE;
@@ -118,6 +118,50 @@ describe('the PPC dump cache does not serve an empty entry', () => {
       }
       expect(served).not.toBe('');
       expect(served).not.toEqual({ sections: {}, relocs: [], symbols: {}, bigEndian: true });
+    }
+  });
+});
+
+// THE REAL TIER REACHES NEITHER GUARD ABOVE. Its `Case.build` is `buildRealTarget`, which never
+// touches this cache, and its disassembly comes from `compile/{ido,kmc,gcc272}.ts`'s own `disasm()`
+// — or, for agbcc, from a `.s` read off disk with no objdump in the path at all, so
+// @asmlift/toolchains' `nonEmptyDump` cannot see it either. 252 of the artifact's 894 rows are
+// real. The invariant is therefore stated over the CONTRACT, and both tiers cross it.
+describe('the BuiltTarget invariant covers the real tier too', () => {
+  const obj = join(mkdtempSync(join(tmpdir(), 'checked-target-')), 'a.o');
+  writeFileSync(obj, 'obj');
+  const empty = join(mkdtempSync(join(tmpdir(), 'checked-target-')), 'empty.o');
+  writeFileSync(empty, '');
+
+  test('checkedTarget refuses either empty half and passes a good pair through', () => {
+    expect(() => checkedTarget({ obj, asm: '  \n' }, 'row X')).toThrow(/row X produced an empty disassembly/);
+    expect(() => checkedTarget({ obj: empty, asm: 'fn:\n  bx lr\n' }, 'row X')).toThrow(
+      /row X produced an empty object/,
+    );
+    expect(checkedTarget({ obj, asm: 'fn:\n  bx lr\n' }, 'row X').asm).toContain('bx lr');
+  });
+
+  test('buildRealTarget routes through it — a compiler that emits nothing raises, naming the row', async () => {
+    vi.doMock('../src/compile/agbcc', async () => {
+      const real = await vi.importActual<typeof import('../src/compile/agbcc')>('../src/compile/agbcc');
+      return { ...real, agbccReal: { ...real.agbccReal, buildTarget: () => ({ obj, asm: '' }) } };
+    });
+    vi.resetModules();
+    const { buildRealTarget: fresh } = await import('../src/compile/real');
+    expect(() => fresh('agbcc', 'int f(void){return 0;}')).toThrow(/agbcc real-tier target produced an empty/);
+    vi.doUnmock('../src/compile/agbcc');
+    vi.resetModules();
+  });
+
+  test('and the synthetic seam raises with the SAME wording — one predicate, not two copies', () => {
+    const { tc } = fakeToolchain('   ');
+    process.env.ASMLIFT_BENCH_CACHE = '0';
+    try {
+      expect(() => cachedBuildTarget(tc, 'int poison_e(void){return 4;}', 'poison_e')).toThrow(
+        /produced an empty disassembly — refusing it as a scoring target/,
+      );
+    } finally {
+      delete process.env.ASMLIFT_BENCH_CACHE;
     }
   });
 });

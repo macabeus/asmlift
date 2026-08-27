@@ -180,6 +180,26 @@ export function assembleTarget(targetAsm: string): string {
 // candidate: compile its C → object, objdiff against the target. The objdiff engine is the
 // same arch-agnostic scorer used for ARM — it reads the ELF's arch itself.
 
+/** A DUMP THAT SUCCEEDED AND SAID NOTHING IS A FAILURE THAT DID NOT SAY SO. Every objdump this
+ *  package runs prints at least a `file format` header, so empty stdout on exit 0 is a dump step
+ *  that died quietly — a container that never ran the binary, a truncated pipe — and nothing
+ *  downstream notices: an empty disassembly parses as a function with no instructions and an empty
+ *  `objdump -s -r -t` parses as a well-formed EMPTY AsmData.
+ *
+ *  IT GUARDS THE STEP, NOT THE RESULT, and the two are different refusals doing different jobs.
+ *  This one names the objdump invocation and the object it ran on, and covers every caller of this
+ *  package including the CLI and the tests. What it CANNOT cover is a disassembly produced
+ *  somewhere else — apps/benchmark's real tier runs its own `disasm()` per compiler and agbcc's
+ *  target is a `.s` file read from disk, never an objdump at all — so the benchmark states the
+ *  same invariant a second time over the `BuiltTarget` CONTRACT (`checkedTarget`, naming the row),
+ *  where both tiers cross one seam. Neither placement subsumes the other. */
+export function nonEmptyDump(text: string, what: string): string {
+  if (text.trim() === '') {
+    throw new Error(`${what} exited 0 but produced NO output — refusing an empty dump`);
+  }
+  return text;
+}
+
 /** Compile reference C with IDO → {obj (scoring target), asm (disassembly, frontend input)}. */
 export function compileMipsTarget(cSource: string, _symbol: string): { obj: string; asm: string } {
   const dir = contentShareableDir('asmlift-mips-ref-', cSource);
@@ -194,7 +214,7 @@ export function compileMipsTarget(cSource: string, _symbol: string): { obj: stri
   if (dis.status !== 0) {
     throw new Error(`objdump failed: ${dis.stderr}`);
   }
-  return { obj: oPath, asm: dis.stdout };
+  return { obj: oPath, asm: nonEmptyDump(dis.stdout, `ido objdump on ${oPath}`) };
 }
 
 /** Compile one C/`.i` file → object with Mario Party 3's GCC 2.7.2 inside its linux/386 container
@@ -269,7 +289,7 @@ export function compileMipsGcc272Target(cSource: string, _symbol: string): { obj
   if (dis.status !== 0) {
     throw new Error(`objdump failed: ${dis.stderr}`);
   }
-  return { obj: oPath, asm: dis.stdout };
+  return { obj: oPath, asm: nonEmptyDump(dis.stdout, `gcc 2.7.2 objdump on ${oPath}`) };
 }
 
 /** Compile candidate IDO Pascal (via `cc`→`upas`, routed by the `.p` extension); returns the
@@ -487,7 +507,7 @@ export function compileMipsGccTarget(cSource: string, _symbol: string): { obj: s
   if (dis.status !== 0) {
     throw new Error(`objdump failed: ${dis.stderr}`);
   }
-  return { obj: oPath, asm: dis.stdout };
+  return { obj: oPath, asm: nonEmptyDump(dis.stdout, `kmc objdump on ${oPath}`) };
 }
 
 /** Compile candidate C with KMC GCC (dockerized); returns the object path. */
@@ -555,7 +575,8 @@ function ppcContainer(dir: string, srcC: string, outObj: string, disasm: boolean
       if (r.status !== 0) {
         throw new Error(`mwcceppc (docker) failed: ${r.stderr || r.stdout}`);
       }
-      return r.stdout;
+      // a compile-only run legitimately prints nothing; only the piped objdump owes output
+      return disasm ? nonEmptyDump(r.stdout, `ppc objdump (pooled) on ${dir}/${outObj}`) : r.stdout;
     }
   }
   const r = run(t.docker, [
@@ -577,7 +598,7 @@ function ppcContainer(dir: string, srcC: string, outObj: string, disasm: boolean
   if (r.status !== 0) {
     throw new Error(`mwcceppc (docker) failed: ${r.stderr || r.stdout}`);
   }
-  return r.stdout;
+  return disasm ? nonEmptyDump(r.stdout, `ppc objdump (one-shot) on ${dir}/${outObj}`) : r.stdout;
 }
 // CodeWarrior flags carry spaces (e.g. `msg_show_realref off`), so quote each token for the shell.
 function shq(s: string): string {
