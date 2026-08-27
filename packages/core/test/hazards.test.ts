@@ -140,29 +140,38 @@ describe('loopEscapeHazard', () => {
     expect(h.loopEscapeHazard(new Set([body]), new Map(), new Set(['v0']))).toBe(true);
   });
 
-  // The loop-carried exemption is about a param that STAYS INSIDE. It used to be unconditional,
-  // and that was a silent miscompile: post-loop the updated name holds the value the test failed
-  // on, while the PARAM meant the value at the top of that last iteration — one update behind.
-  // `sub` maps the back-edge arg, not the param, so nothing else in the pipeline reconciles them.
-  test('a loop-carried param is exempt only while it does not escape', () => {
+  // ONE RULE FOR EVERY BODY PARAM. A loop's own carried params used to be exempt outright, and
+  // that was a silent miscompile: post-loop the updated name holds the value the test failed on,
+  // while the PARAM meant the value at the top of that last iteration — one update behind. `sub`
+  // maps the back-edge arg, not the param, so nothing else in the pipeline reconciles them.
+  //
+  // A loop-carried param is EXACTLY the shape the caller passes as a header param, so this fixes
+  // the two facts the rule turns on and varies nothing else: it is the case that used to be waved
+  // through, and it must fire.
+  test('a param the loop carries is judged by the same rule as any other — no exemption', () => {
     const p = v();
-    const body: Block = { params: [p], ops: [] };
+    const header: Block = { params: [p], ops: [] };
     const outside: Block = { params: [], ops: [] };
     const inside = (uses: Block[]) =>
       make({ varName: new Map([[p, 'v0']]), useSitesOf: new Map([[p, uses.map(use)]]) });
 
-    // read only inside the body: the exemption stands
-    expect(inside([body]).loopEscapeHazard(new Set([body]), new Map(), new Set(['v0']), null, new Set([p]))).toBe(
-      false,
-    );
-    // read AFTER the loop, under a name the update writes: stale, and it declines
-    expect(inside([outside]).loopEscapeHazard(new Set([body]), new Map(), new Set(['v0']), null, new Set([p]))).toBe(
-      true,
-    );
+    // read AFTER the loop, under a name the update writes: stale, and it declines. The exemption
+    // this replaced returned false here, and the emitted C stored `i` where the asm stored `i-1`.
+    expect(inside([outside]).loopEscapeHazard(new Set([header]), new Map(), new Set(['v0']))).toBe(true);
+    // read only inside the body: nothing reads the moved-on name, so it is safe
+    expect(inside([header]).loopEscapeHazard(new Set([header]), new Map(), new Set(['v0']))).toBe(false);
     // read after the loop under a name the update does NOT write: nothing moved, so it is safe
-    expect(inside([outside]).loopEscapeHazard(new Set([body]), new Map(), new Set(['v9']), null, new Set([p]))).toBe(
-      false,
-    );
+    expect(inside([outside]).loopEscapeHazard(new Set([header]), new Map(), new Set(['v9']))).toBe(false);
+  });
+
+  // `varName` is populated as naming proceeds, so a param can reach here with no name at all.
+  // `updateWrites` holds names; the answer for a param that has none is "not written".
+  test('a param with no adopted name is not a hazard', () => {
+    const p = v();
+    const body: Block = { params: [p], ops: [] };
+    const outside: Block = { params: [], ops: [] };
+    const h = make({ varName: new Map(), useSitesOf: new Map([[p, [use(outside)]]]) });
+    expect(h.loopEscapeHazard(new Set([body]), new Map(), new Set(['v0']))).toBe(false);
   });
 });
 
@@ -436,9 +445,9 @@ describe('loopUpdateHazard (the composition)', () => {
       ]),
     });
     const none: Set<Block> = new Set();
-    expect(h.loopUpdateHazard(cond, [], none, new Map(), new Set(['v0']), null, new Set())).toBe(true);
-    expect(h.loopUpdateHazard(cond, [arg], none, new Map(), new Set(['v1']), null, new Set())).toBe(true);
-    expect(h.loopUpdateHazard(cond, [arg], none, new Map(), new Set(['v9']), null, new Set())).toBe(false);
+    expect(h.loopUpdateHazard(cond, [], none, new Map(), new Set(['v0']), null)).toBe(true);
+    expect(h.loopUpdateHazard(cond, [arg], none, new Map(), new Set(['v1']), null)).toBe(true);
+    expect(h.loopUpdateHazard(cond, [arg], none, new Map(), new Set(['v9']), null)).toBe(false);
   });
 });
 

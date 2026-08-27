@@ -55,6 +55,27 @@ const STORE_PREUPDATE = `fn storepre {
 // THE ONE FACT CHANGED: the store takes the POST-update value, which is what the name holds.
 const STORE_POSTUPDATE = STORE_PREUPDATE.replace('store %0, %2 {off=4, width=4}', 'store %0, %4 {off=4, width=4}');
 
+// THE SAME PROGRAM, SPELLED THE OTHER WAY: the pre-update value crosses the exit as an edge ARG
+// into a merge param instead of being read from the header param. `sinkablePreUpdateSlots` REPAIRS
+// this one — the copy moves into the body, ahead of the update — so the two spellings of one
+// hazard get opposite answers, and the boundary between them is an SSA-construction artifact
+// rather than a property of the program. Pinned here so the decline above is read as scoped to
+// "no exit slot to sink", never as "this hazard is unrepairable".
+const STORE_PREUPDATE_ON_EDGE = `fn storepre {
+^bb0(%0: s32*, %1: s32):
+  %9: s32 = const {value=0}
+  br ^bb1(%9)
+^bb1(%2: s32):
+  %3: s32 = const {value=1}
+  %4: s32 = add %2, %3
+  %5: u32 = icmp_slt %4, %1
+  cond_br %5, ^bb1(%4), ^bb2(%2)
+^bb2(%6: s32):
+  store %0, %6 {off=4, width=4}
+  ret
+}
+`;
+
 test('a post-loop store of the PRE-update counter declines instead of storing the post-update one', () => {
   expect(() => emit(STORE_PREUPDATE)).toThrow(StructureError);
   expect(() => emit(STORE_PREUPDATE)).toThrow(/reads a pre-update loop variable/);
@@ -67,4 +88,16 @@ test('the same loop storing the POST-update counter emits, and stores the counte
   const name = out.match(/(\w+) = \1 \+ 1;/)?.[1];
   expect(name).toBeDefined();
   expect(out).toContain(`= ${name};`);
+});
+
+test('the same pre-update value crossing the exit EDGE is repaired, not declined', () => {
+  const out = emit(STORE_PREUPDATE_ON_EDGE);
+  const counter = out.match(/(\w+) = \1 \+ 1;/)?.[1];
+  expect(counter).toBeDefined();
+  // the trailing copy sits inside the body AHEAD of the update, so it holds the pre-update value
+  const trailing = out.match(new RegExp(`(\\w+) = ${counter};\\s+${counter} = ${counter} \\+ 1;`))?.[1];
+  expect(trailing).toBeDefined();
+  // and the post-loop store takes that copy, never the moved-on counter
+  expect(out).toContain(`= ${trailing};`);
+  expect(out).not.toContain(`= ${counter};\n    return`);
 });
