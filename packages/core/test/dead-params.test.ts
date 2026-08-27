@@ -168,15 +168,21 @@ describe('pruneDeadParams', () => {
 
   // Liveness here runs BACKWARD along the edges, so a round-robin sweep of `fn.blocks` in forward
   // order advances it one hop per round and costs the SQUARE of the chain length. A worklist over
-  // an inverted edge index is linear whatever the block order. This is shared L1 substrate that
-  // runs once per lift on every ISA, and klonoa holds a single 28652-byte function; today's agbcc
-  // corpus tops out at 107 blocks, so nothing but a test reaches the shape.
+  // an inverted edge index is linear whatever the block order. Nothing in the corpus reaches the
+  // shape today (the largest klonoa function that lifts is 107 blocks), so only a test can hold
+  // the line — and this is shared L1 substrate that runs once per lift on every ISA.
   //
   // The budget is measured against `parse` OF THE SAME TEXT rather than a wall clock: parsing is
   // linear in the graph and touches the same structures, so the ratio calibrates itself to the
-  // machine. Over a 3001-block chain the two spellings are two orders of magnitude apart —
-  // worklist 0.45–0.47× parse, round-robin 48.5–50.7× — so 5 is a threshold neither noise nor a
-  // faster laptop can cross. Minimum of three runs, because scheduler noise only ever adds.
+  // machine. Over 3001 blocks each shape is ~0.4× parse today, and each goes to 20–34× with ONLY
+  // the half it is aimed at restored to the spelling it replaced (33.7× round-robin liveness on
+  // the live chain, 19.9× per-param arg re-walk on the dead one), so 5 is a threshold neither
+  // noise nor a faster laptop can cross. Minimum of three runs, because scheduler noise only ever
+  // adds.
+  //
+  // EACH SHAPE IS BLIND TO THE OTHER'S REGRESSION, which is why there are two: round-robin
+  // liveness costs 0.31× on the DEAD chain (every slot is dead, so the sweep settles in one round)
+  // and the per-param re-walk costs 0.43× on the LIVE one (nothing is removed, so it never runs).
   //
   // BOTH HALVES ARE BUDGETED, because the same commit rewrote both and they fail differently. The
   // LIVE chain times LIVENESS: one real reader at the far end keeps every slot, so the removal loop

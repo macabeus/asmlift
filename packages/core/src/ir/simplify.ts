@@ -95,10 +95,10 @@ export function simplifyTrivialPhis(fn: Fn, onRemoved?: (param: Value) => void):
  * abandoned here — and it runs after every changing pre-recovery pass where this runs once, inside
  * the frontend's `finish()`. The disagreement is one-sided and safe: `dce` is the COARSER of the
  * two, so it only ever keeps an op this would have let go, never the reverse. Reach today is ZERO
- * and that is measured rather than argued — a read-only copy of this fixpoint, run over 313 lifted
- * klonoa functions after the frontend's own prune AND after every pre-recovery pass that changed
- * the IR, reports 0 removable params at every checkpoint. Booked here so a future round that finds
- * a nonzero reads it as the known divergence rather than a new discovery.
+ * and that is measured rather than argued — re-running this fixpoint over the 458 klonoa functions
+ * that clear the frontend, at three checkpoints (straight after the lift, after the idiom fold and
+ * after type recovery), removes 0 further params at every one. Booked here so a future round that
+ * finds a nonzero reads it as the known divergence rather than a new discovery.
  *
  * THE ENTRY BLOCK IS NEVER TOUCHED — its params are the function's signature, and an argument the
  * body ignores is still an argument (frontend/ssa.ts `ensureParam` creates exactly those on
@@ -112,11 +112,13 @@ export function pruneDeadParams(fn: Fn, onRemoved?: (param: Value) => void): num
   // Liveness travels BACKWARD — from a live slot to the args feeding it — so it is driven off a
   // WORKLIST over an inverted edge index, not by re-sweeping the graph until a round adds nothing.
   // Round-robin over `fn.blocks` in forward order advances one hop per round along a chain of
-  // block params, which is quadratic in the chain length: a 2001-block chain measured 0.87 ms as
-  // a per-round reader scan and 286 ms as a round-robin fixpoint, 1001 → 2001 costing 9.2× for
-  // 2× the size. The worklist is linear in (values + edge args) whatever the block order, and it
-  // matters because this is shared L1 substrate that runs once per lift on every ISA — today's
-  // agbcc corpus tops out at 107 blocks, but klonoa holds one 28652-byte function.
+  // block params, which is quadratic in the chain length. The worklist is linear in
+  // (values + edge args) whatever the block order, and it matters because this is shared L1
+  // substrate that runs once per lift on every ISA. Nothing in the corpus reaches the shape today
+  // — the largest klonoa function that lifts at all is 107 blocks — but that ceiling is a property
+  // of what this frontend currently accepts (274 of the checkout's 732 `.s` decline), not of the
+  // game's code, so `test/dead-params.test.ts` budgets both halves against `parse` of the same
+  // text.
   //
   // `edgesTo` is the same index the removal pass needs, so it is built ONCE for both: without it
   // each removed param re-walks every op in the function.
