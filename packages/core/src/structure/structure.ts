@@ -1570,6 +1570,15 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         }
       }
       exclude.add(varName.get(p)!);
+      // THE BACK-EDGE ARGUMENT TAKES THE HEADER'S NAME, UNCONDITIONALLY — so if `p` is declared
+      // NARROW, every other reader of that argument reads it through the truncation. This site
+      // does not check that, and deliberately: the promise is a precondition of producing a narrow
+      // block parameter at all, held by `raise/narrowlocal.ts`'s `edge-reader` gate (every in-edge
+      // value is read nowhere but through an extension no wider than the declaration keeps). A
+      // width test HERE would be the wrong shape — it would refuse the loop's own update copy and
+      // silently un-coalesce it. Any future producer of a sub-word block parameter owes the same
+      // gate; without it this line emits `s16 v; do { … v = v + 1; } while (v < 32768);`, which
+      // agbcc compiles to an unconditional branch.
       if (backArgs) {
         backArgName.set(backArgs[i], varName.get(p)!);
       }
