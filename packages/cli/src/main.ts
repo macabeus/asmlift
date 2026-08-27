@@ -433,7 +433,7 @@ export async function runCli(
         ? `asmlift: [withheld] ${ranked.withheld.length} candidate(s) scored but unpublishable; first: ` +
           `${ranked.withheld[0].label} at ${ranked.withheld[0].score}: ${ranked.withheld[0].why}\n`
         : '';
-      // The two counts docs/ranked-repro.md requires beside every ranked score, as ONE line that
+      // The three counts docs/ranked-repro.md requires beside every ranked score, as ONE line that
       // is always present. They used to be recoverable only as the line count of a 2 MB stderr
       // stream, and "0 dropped" was asserted by the ABSENCE of the `[dropped]` line above — so a
       // clean run, a truncated log and a killed run left identical evidence for the claim this
