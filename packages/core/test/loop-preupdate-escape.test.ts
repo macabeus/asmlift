@@ -2,23 +2,24 @@
 // name is a silent miscompile.
 //
 // Both loop emitters that place the update at the BOTTOM of the body — the self-loop `while` and
-// the do-while — leave the name holding the value the test failed on. The back-edge ARG means
-// that; the block PARAM means the value at the top of that last iteration, and `sub` maps only the
-// former. agbcc spells the difference out by keeping a second register for it:
+// the do-while — leave that name holding the value the test failed on. The back-edge ARG means
+// that; the block PARAM means the value at the top of the last iteration, and `sub` maps only the
+// former. `structure/hazards.ts` used to exempt every loop-carried param from the escape check on
+// the grounds that a post-loop read of the updated name is exactly the intended final value —
+// true of the arg, false of the param. The emitted C stored `i` where the reference stored `i-1`;
+// it compiled, it scored, and no gate saw it, because regression, diff and corpus sweeps measure
+// REACH and never correctness. agbcc spells the difference out by keeping a second register:
 //
 //   .L10: add r3, r1, #0   @ r3 = n            for (n = 0; n < i; n++) { ...; }
 //         add r1, r3, #0x1 @ r1 = n + 1        *(s32 *)(b + m*24 + 4) = n;   <- n, not n+1
 //         blt .L10
 //         str r3, [r2, #0x4]
 //
-// `structure/hazards.ts` used to exempt every loop-carried param from the escape check on the
-// grounds that "a post-loop read of the updated name is exactly the intended final value" — true
-// of the back-edge arg, false of the param. The emitted C stored `i` where the reference stored
-// `i - 1`; it compiled, it scored, and no gate saw it, because regression, diff and corpus sweeps
-// measure REACH and never correctness. It is a decline now.
-//
-// A refusal test that declines for the WRONG reason reads as a pass, so each case pins the message
-// and carries a positive control differing in ONE fact.
+// WHICH ANSWER THE HAZARD GETS DEPENDS ON HOW SSA SPELLED THE VALUE, and both spellings are here:
+// crossing the exit as an edge ARG it is REPAIRED (`sinkablePreUpdateSlots` re-emits the copy
+// inside the body, ahead of the update, which is the listing above); read from the header PARAM it
+// DECLINES, there being no exit slot to sink. A refusal test that declines for the WRONG reason
+// reads as a pass, so each case pins the message and carries a control differing in ONE fact.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';

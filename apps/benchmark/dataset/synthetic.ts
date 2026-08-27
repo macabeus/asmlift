@@ -3084,8 +3084,9 @@ export const SYNTHETIC: SynthSpec[] = [
   // candidate: on `dmafill` the reference's loop body holds 4 stores and the candidate's holds 1
   // (the other three land after the `ble`), and on the `dmavolsrc` control both hold 4.
   //
-  // WHY NO EXISTING ROW CATCHES IT, by a census of the committed `origin/main` artifact rather
-  // than by reading: of its 200 distinct synthetic rows, 22 reference a device register and 14 of
+  // WHY NO EXISTING ROW CATCHES IT, by a census of the artifact as it stood BEFORE the six rows
+  // below existed (207 distinct synthetic syms today): of its 200 distinct synthetic rows, 22
+  // reference a device register and 14 of
   // those also contain a loop — but 11 of the 14 carry a `while (dma[2] & 0x80000000) {}` wait
   // poll, whose read of the register file blocks the promotion outright. Of the three that do not
   // poll, `dma_fill_uninit` writes its registers BEFORE its loop, and `swmulti` and `offloop` each
@@ -3156,9 +3157,9 @@ export const SYNTHETIC: SynthSpec[] = [
   // carrying `volatile`. `/vol-store` is the answer, because it qualifies the ACCESS and needs no
   // local at all; what keeps it off ordinary memory is the target's own declared window
   // (`capabilities.deviceRegisters`), which is a REACH gate rather than a soundness one — over the
-  // corpus it excludes a const-address store on 7 rows and moves the fan on two of them
-  // (`readarm` 6 candidates → 8, `fieldbase` 14 → 20), with no score and no outcome moving either
-  // way. `synthetic:ucmp:agbcc` prices the DEVICE-READ side of the same question and belongs to it
+  // corpus it excludes a const-address store on 7 rows, and lifting it would move the fan on two
+  // of them (`readarm` 6 candidates would become 8, `fieldbase` 14 would become 20 — 6 and 14 are
+  // what they enumerate today), with no score and no outcome moving either way. `synthetic:ucmp:agbcc` prices the DEVICE-READ side of the same question and belongs to it
   // rather than here: qualifying the 0x3001048 its loop test reads costs that match 15, and
   // `/vol-store` never reaches the row at all (its stores go through a runtime address).
   //
@@ -3211,11 +3212,18 @@ export const SYNTHETIC: SynthSpec[] = [
   // on. The two are not the same edit: one removes the cause, the other removes a real hazard's
   // refusal and buys 8 spurious candidates.
   //
-  // WHAT MOVED IS THE WHOLE FAN, NOT ONE CANDIDATE, and the round's first posture argument was
-  // stated over the wrong object. `dmanest` goes from 28 candidates carrying the folded spelling
-  // 28/28 to 26 carrying the struct view 26/26: the folded spelling is no longer ENUMERABLE, and
-  // nothing reports a candidate never enumerated. "No second spelling exists for the differ to
-  // referee" is false — the differ referees these two at 0 against 2. The claim that holds is
+  // WHAT MOVED IS THE WHOLE FAN, NOT ONE CANDIDATE. `dmanest` goes from 28 candidates carrying the
+  // folded spelling 28/28 to 26 carrying the struct view 26/26: the folded spelling is no longer
+  // ENUMERABLE, and nothing reports a candidate never enumerated. "No second spelling exists for
+  // the differ to referee" is false — the differ referees these two at 0 against 2.
+  //
+  // AND THE WINNING LABEL DID NOT MOVE AT ALL. `signed/vol-store/initfirst` before and after, at 2
+  // and at 0, while the winning PROGRAM changed completely (615 → 559 source bytes, a folded pool
+  // word for a struct view). `candidateLabel` names the LEVERS, not the program, so a label-keyed
+  // check sees nothing here — the inverse of the #112 trap, where the label gained `/vol-store` and
+  // announced a change of winner. Only the `source` byte field caught it in `bench diff`. Print the
+  // fan and diff the winner's text; a label is not an identity in either direction. The claim that
+  // holds about the recovery is
   // stronger and is a property of the RECOVERY: it takes the base from the observed pool word and
   // the field offset from the observed load displacement, so it reproduces the target's own split
   // by construction. Verified by lifting all three splits and scoring each against ITS OWN target:
@@ -3224,14 +3232,12 @@ export const SYNTHETIC: SynthSpec[] = [
   // 50345008 `field_0` 0. Where the target folded, the recovery folds; the folded RENDERING was
   // the lossy one, which is why removing it costs nothing (894 rows, 0 lost).
   //
-  // THE COMPILER FACT OUTLIVES THE ROW, and it falsified a premise this repo held in two places.
-  // Both citations have since moved and neither should be repeated: `raise/structs.ts` states the
-  // conditional form already (it was corrected before this round, by #112's own measurements), and
-  // `rank.ts`'s copy was an ORPHANED docstring — a `/** */` block with a second one immediately
-  // below it, so it documented no declaration at all — now deleted, with the corrected note moved
-  // onto `SIGN_CANDS` where the signedness half belongs. The premise said `->field_N` and `[idx]`
-  // compile identically so the differ cannot referee between them. On agbcc they do not, and the
-  // two passes are nameable. The fold is TREE-level reassociation,
+  // THE COMPILER FACT OUTLIVES THE ROW. It falsified a premise this repo held in two places —
+  // that `->field_N` and `[idx]` compile identically, so the differ cannot referee between them —
+  // and both citations have since been corrected (`raise/structs.ts` states the conditional form;
+  // `rank.ts`'s copy was an orphaned docstring and is gone, its signedness half now on
+  // `SIGN_CANDS`). On agbcc the two do not compile identically, and the two passes are nameable.
+  // The fold is TREE-level reassociation,
   // `((VAR+C1)+C2) → VAR+(C1+C2)` in `fold`'s `associate:` block (gcc/fold-const.c:4959, via
   // `split_tree` at :1226); a COMPONENT_REF never enters that arithmetic, because
   // `get_inner_reference` (gcc/expr.c:3929, called at :5444) hands back the bit position

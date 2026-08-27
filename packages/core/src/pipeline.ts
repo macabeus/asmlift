@@ -79,16 +79,13 @@ export interface DecompileResult {
   /** structured gap list — ALWAYS present. Non-empty ⇔ the source contains ASMLIFT_ERROR markers /
    *  a stub and will NOT compile until the user acts (the loud-in-artifact contract).
    *
-   *  EMPTY IS THE ABSENCE OF A GAP, NOT A PROMISE THAT THE C COMPILES, and the two used to be
-   *  written here as one thing. A gap is a place asmlift could not lift; a candidate can also fail
-   *  to compile because it names a symbol the caller has not declared, which is a CONTEXT question
-   *  and not a gap — the benchmark answers it by escalating to the function's vendored preprocessed
-   *  context. Most such names survive K&R implicit declaration, but a function ADDRESS does not:
-   *  klonoa's `UpdateStageSelectScreen` reports 0 gaps and emits `((s32 *)50345232)[1] =
-   *  &HandlePauseMenuInput;`, which agbcc rejects as `undeclared (first use in this function)`
-   *  while the plain call two hundred lines above it passes with a warning. Emitting a declaration
-   *  for an address-taken unknown callee would close it; that is an emitter change, and it moves
-   *  source bytes on every row that has one. */
+   *  EMPTY IS THE ABSENCE OF A GAP, NOT A PROMISE THAT THE C COMPILES. A candidate can also fail
+   *  on a symbol the caller never declared, which is a CONTEXT question the benchmark answers by
+   *  escalating to the vendored preprocessed context. Most such names survive K&R implicit
+   *  declaration; a function ADDRESS does not, and klonoa's `UpdateStageSelectScreen` reports 0
+   *  gaps while emitting `((s32 *)50345232)[1] = &HandlePauseMenuInput;`, which agbcc rejects
+   *  where the plain call above it passes with a warning. Declaring an address-taken unknown
+   *  callee would close it — an emitter change, moving source bytes on every row that has one. */
   diagnostics: Diagnostic[];
 }
 

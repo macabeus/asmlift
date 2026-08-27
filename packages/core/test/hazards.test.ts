@@ -142,12 +142,8 @@ describe('loopEscapeHazard', () => {
 
   // ONE RULE FOR EVERY BODY PARAM. A loop's own carried params used to be exempt outright, and
   // that was a silent miscompile: post-loop the updated name holds the value the test failed on,
-  // while the PARAM meant the value at the top of that last iteration — one update behind. `sub`
-  // maps the back-edge arg, not the param, so nothing else in the pipeline reconciles them.
-  //
-  // A loop-carried param is EXACTLY the shape the caller passes as a header param, so this fixes
-  // the two facts the rule turns on and varies nothing else: it is the case that used to be waved
-  // through, and it must fire.
+  // while the PARAM meant the value at the top of that last iteration. `sub` maps the back-edge
+  // arg, not the param, so nothing else in the pipeline reconciles them.
   test('a param the loop carries is judged by the same rule as any other — no exemption', () => {
     const p = v();
     const header: Block = { params: [p], ops: [] };
@@ -164,8 +160,7 @@ describe('loopEscapeHazard', () => {
     expect(inside([outside]).loopEscapeHazard(new Set([header]), new Map(), new Set(['v9']))).toBe(false);
   });
 
-  // `varName` is populated as naming proceeds, so a param can reach here with no name at all.
-  // `updateWrites` holds names; the answer for a param that has none is "not written".
+  // naming is still in progress here, so a param can arrive with no name; `updateWrites` holds names
   test('a param with no adopted name is not a hazard', () => {
     const p = v();
     const body: Block = { params: [p], ops: [] };

@@ -181,18 +181,12 @@ export function assembleTarget(targetAsm: string): string {
 // same arch-agnostic scorer used for ARM — it reads the ELF's arch itself.
 
 /** A DUMP THAT SUCCEEDED AND SAID NOTHING IS A FAILURE THAT DID NOT SAY SO. Every objdump this
- *  package runs prints at least a `file format` header, so empty stdout on exit 0 is a dump step
- *  that died quietly — a container that never ran the binary, a truncated pipe — and nothing
- *  downstream notices: an empty disassembly parses as a function with no instructions and an empty
- *  `objdump -s -r -t` parses as a well-formed EMPTY AsmData.
- *
- *  IT GUARDS THE STEP, NOT THE RESULT, and the two are different refusals doing different jobs.
- *  This one names the objdump invocation and the object it ran on, and covers every caller of this
- *  package including the CLI and the tests. What it CANNOT cover is a disassembly produced
- *  somewhere else — apps/benchmark's real tier runs its own `disasm()` per compiler and agbcc's
- *  target is a `.s` file read from disk, never an objdump at all — so the benchmark states the
- *  same invariant a second time over the `BuiltTarget` CONTRACT (`checkedTarget`, naming the row),
- *  where both tiers cross one seam. Neither placement subsumes the other. */
+ *  package runs prints at least a `file format` header, so empty stdout on exit 0 is a step that
+ *  died quietly — a container that never ran the binary, a truncated pipe — and nothing downstream
+ *  notices: an empty disassembly parses as a function with no instructions, an empty
+ *  `objdump -s -r -t` as a well-formed EMPTY AsmData. Guards the STEP, naming the invocation and
+ *  the object it ran on; the benchmark states the same invariant over the `BuiltTarget` CONTRACT,
+ *  for the producers this package does not own (apps/benchmark/src/toolchains.ts `checkedTarget`). */
 export function nonEmptyDump(text: string, what: string): string {
   if (text.trim() === '') {
     throw new Error(`${what} exited 0 but produced NO output — refusing an empty dump`);

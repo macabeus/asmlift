@@ -3183,9 +3183,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // WHAT THE REGION IS FOR: this arm renders INSTEAD of the next iteration, behind an update
       // already emitted, so a read of a loop variable here wanted the value it had before that —
       // `if (found) { *out = i; return; }` would store `i + 1`. Handing the arm's own region makes
-      // the escape check judge exactly those reads. (It used to carry an empty loop-param
-      // exemption set for contrast with the two sites below; hazards.ts has no exemption to opt
-      // out of any more.)
+      // the escape check judge exactly those reads.
       const exitRegion = new Set([exitB, ...reachFrom(exitB)].filter((x) => !loopCtx!.body.has(x)));
       const hazard = loopUpdateHazard(term.operands[0], exitArgs, loopCtx.body, sub, updateWrites, exitRegion);
       if (!hazard && !loopCtx.body.has(exitB) && ((isBreak && breakSafe) || (!isBreak && isArm(exitB)))) {

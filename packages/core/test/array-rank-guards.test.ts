@@ -239,9 +239,9 @@ describe('the LOGICAL right shift has no IDO Pascal spelling — it declines, ne
 // The obligation is created by ONE lever (`/unreduce`, when it cannot settle a device-memory fact
 // from inside the pass) and has to survive every lever composed after it. That carry used to be
 // hand-written per pairing — `return { sfn: t, needsProof: u.needsProof }` — and the union type
-// made `return t;` a type-correct way to delete it: ablated, tsc stayed clean and 118 test files /
-// 1714 tests stayed green, and the triple would have published an unprovable spelling as asmlift's
-// answer. Composing through one combinator is what makes that inexpressible, so the combinator is
+// made `return t;` a type-correct way to delete it: ablated, tsc stayed clean and every offline and
+// matching suite stayed green, and the triple would have published an unprovable spelling as
+// asmlift's answer. Composing through one combinator makes that inexpressible, so the combinator is
 // the thing to pin.
 describe('a proof obligation survives every lever composed after it (rank.ts composeLevers)', () => {
   const tree = (name: string): SFn => ({ name, params: [], locals: [], globals: [], retType: T.u(32), body: [] });

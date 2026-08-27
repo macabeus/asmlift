@@ -1,13 +1,10 @@
-// A DUMP STEP THAT EXITS 0 AND SAYS NOTHING has to raise here, because nothing downstream can
-// tell it apart from a function with no instructions or an object with no data section.
+// A DUMP STEP THAT EXITS 0 AND SAYS NOTHING has to raise, because nothing downstream can tell it
+// apart from a function with no instructions or an object with no data section.
 //
-// `packages/toolchains` had no test directory at all until this file — its three `nonEmptyDump`
-// throw sites were a mechanism with no row, and the vitest include globs named only
-// `packages/core/test`, `packages/cli/test/offline` and `apps/*/test`, so adding one would have
-// been collected by nothing. The glob now names this directory too.
-//
-// Everything here is TOOLCHAIN-FREE: the "objdump" and "cc" are two-line shell scripts, so these
-// cases run on a hosted runner with no Docker, no IDO and no CodeWarrior.
+// `packages/toolchains` runs those steps and had no test directory: until `vitest.config.ts` grew
+// this one, `nonEmptyDump` and its eight call sites were a mechanism no row could reach.
+// TOOLCHAIN-FREE by construction — the "objdump" and "cc" here are two-line shell scripts, so every
+// case runs on a hosted runner with no Docker, no IDO and no CodeWarrior.
 import { chmodSync, existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';

@@ -230,50 +230,33 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     updateWrites: Set<string>,
     region: Set<Block> | null = null,
   ): boolean => {
-    // Body-block PARAMS escape too: a param whose adopted name the update writes reads post-loop as
-    // the clobbered value. ONE rule covers every one of them, and the loop's own carried params —
-    // which this used to exempt outright — are not special.
+    // Body-block PARAMS escape too, and ONE rule covers all of them: escaped, under a name the
+    // update writes. The loop's own carried params used to be exempt outright and are not special
+    // — DELETED, not narrowed, and unnarrowable, because the only condition under the exemption
+    // was the rule's own. Anything implying NOT that is already what the rule returns; anything
+    // admitting it is the unconditional exemption back again. There being no third predicate is
+    // why `loopParams` left this file instead of being tightened inside it.
     //
-    // THE EXEMPTION WAS DELETED, NOT NARROWED, and it could not have been narrowed: the only
-    // condition under it is `escaped && the update writes the name`, so any exemption implying
-    // NOT that is already the answer the rule gives, and any exemption admitting it is the
-    // unconditional one back again. There is no third predicate, which is why `loopParams` is
-    // gone from this file rather than tightened inside it.
+    // Unconditional, it was a SILENT MISCOMPILE. "A post-loop read of the updated name is exactly
+    // the intended final value" holds for the BACK-EDGE ARG, which `sub` maps, and not for the
+    // PARAM, which is one update behind — and both emitters that passed a nonempty exemption set
+    // put the update at the BOTTOM of the body. The emitted C stored `i` where agbcc keeps a
+    // second register to store `i-1`; it compiled, it scored, and nothing in the tree noticed.
     //
-    // The unconditional exemption was a SILENT MISCOMPILE. Its rationale — "a post-loop read of
-    // the updated name is exactly the intended final value" — holds for the BACK-EDGE ARG, which
-    // `sub` maps, and not for the PARAM, which is one update behind. Both loop emitters that used
-    // to pass a nonempty exemption set put the update at the BOTTOM of the body (the self-loop
-    // `while` and the do-while), so exiting means the update already ran: post-loop the name holds
-    // the value the test failed on, while the param meant the value at the top of that last
-    // iteration. agbcc spells the difference out — `add r3,r1,#0 … add r1,r3,#1 … str r3` keeps a
-    // second register precisely so the store gets `i-1`, and the emitted C stored `i`. It
-    // compiled, it scored, and nothing in the tree noticed.
+    // ITS EVIDENCE IS A RIG, NOT THE CORPUS, which matters because the three disjuncts of
+    // `loopUpdateHazard` share one decline message. 121 generated loop shapes, each reference and
+    // each lift compiled natively and EXECUTED over an identical buffer: 76 wrong lifts became
+    // declines, 14 correct ones kept lifting with an identical hash. This clause then fires 0
+    // times over the klonoa checkout's 732 `.s` and over the 2737 candidates the 205 agbcc
+    // synthetic rows enumerate, where the predicate AROUND it fires 5 and 4 — on the condition, an
+    // exit arg, or an escaped op result (`synthetic:preupdate_escape` is the last of those).
     //
-    // Measured in BOTH directions before it shipped: over 121 generated loop shapes across two
-    // seeds, each reference and each lift COMPILED NATIVELY AND EXECUTED over an identical buffer
-    // with the buffer hash as the verdict, all 76 semantically-wrong lifts became declines and all
-    // 14 correct ones kept lifting with an identical hash — no correct lift lost, none left
-    // silently wrong. And THIS CLAUSE — not the predicate around it — has ZERO REACH on everything
-    // the repo owns, which is instrumented rather than argued and is worth stating per disjunct,
-    // because they share one decline message. Over all 732 `.s` in the klonoa checkout (426 lift /
-    // 306 decline, both gap modes; 469 of them under `asm/`, 257 / 212) `loopUpdateHazard` fires 4
-    // times on the CONDITION and once on an escaped op RESULT, and 0 times here. Over the 2737
-    // candidates the 205 agbcc synthetic rows enumerate: 1 condition, 2 exit args, 1 op result, 0
-    // here — `synthetic:preupdate_escape` included, which declines on its op result. sa3's 16 are
-    // TU-level asm and lift none. So the 121-shape rig is THIS clause's whole evidence base and a
-    // corpus sweep cannot renew it, while the surrounding predicate is exercised by five rows.
-    //
-    // AND IT IS A DECLINE ONLY BECAUSE OF HOW THE VALUE IS SPELLED. `sinkablePreUpdateSlots`
-    // below REPAIRS the same hazard — it re-emits the copy inside the body ahead of the update —
-    // whenever the pre-update value crosses the exit as an edge ARG. The identical program with
-    // the value read from the header PARAM instead reaches here, and there is no exit slot to
-    // sink. Reproduced side by side in test/loop-preupdate-escape.ts: `cond_br %5, ^bb1(%4),
-    // ^bb2(%2)` lifts to `do { v1 = v0; v0 = v0 + 1; } while (v0 < a1); a0[1] = v1;` — the agbcc
-    // listing above — where `^bb2()` reading `%2` declines. Routing the param spelling into the
-    // sink (normalising the escape into an exit slot, or widening the sink's candidates to body
-    // params read post-loop) is the consolidation, and it is a structure.ts change with a fan
-    // effect on every row, not an edit to this predicate.
+    // AND IT DECLINES ONLY BECAUSE OF HOW THE VALUE IS SPELLED. `sinkablePreUpdateSlots` below
+    // REPAIRS this hazard, re-emitting the copy inside the body ahead of the update, whenever the
+    // pre-update value crosses the exit as an edge ARG; read from the header PARAM instead it
+    // arrives here, with no exit slot to sink. Both spellings, and the agbcc listing, are in
+    // test/loop-preupdate-escape.test.ts. Routing the param one into the sink is a structure.ts
+    // change with a fan effect on every row, not an edit to this predicate.
     const escaped = (v: Value): boolean => {
       for (const s of useSitesOf.get(v) ?? []) {
         if (region ? region.has(s.blk) : !body.has(s.blk)) {
@@ -284,9 +267,8 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     };
     for (const bb of body) {
       for (const pv of bb.params) {
-        // `varName.get` is absent for a param no name was adopted for; `updateWrites` holds
-        // names, so an absent one is correctly not among them.
-        const n = varName.get(pv);
+        const n = varName.get(pv); // absent while naming is still in progress: not a written name
+
         if (n !== undefined && updateWrites.has(n) && escaped(pv)) {
           return true;
         }

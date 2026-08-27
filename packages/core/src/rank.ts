@@ -602,9 +602,8 @@ type LeverResult = SFn | { sfn: SFn; needsProof: boolean } | null | undefined;
  *  obligation through unchanged rather than discharging it.
  *
  *  REQUIRE-ALL, never skip-on-decline: one declining stage declines the whole composition, so the
- *  label always names exactly the levers that fired. `applyShapes` is the opposite by design (a
- *  shape that does not fire is simply absent from a shape SUBSET), and using it for the pairings
- *  would admit the intermediate pairs no row demands — the reason the pairing site rejects it. */
+ *  label always names exactly the levers that fired. That is the property the pairing site turns
+ *  on, and the reason it rejects `applyShapes` — see the POLICY note there. */
 export function composeLevers(sfn: SFn, stages: readonly ((s: SFn) => LeverResult)[]): LeverResult {
   let cur = sfn;
   let needsProof = false;
@@ -1023,9 +1022,8 @@ export function enumerateCandidates(
     // one of the three declines. That is the property the shape products are designed around and
     // the one the pairing policy forbids — a pair reaches the fan only when a row demands it.
     //
-    // Both go through `composeLevers`, which is REQUIRE-ALL and carries `/unreduce`'s proof
-    // obligation across the stages after it — hand-writing that carry made dropping it a
-    // type-correct edit no test anywhere caught.
+    // Both compose through `composeLevers`, which carries `/unreduce`'s proof obligation across
+    // the stages after it — hand-writing that carry made dropping it a type-correct edit.
     const volStore = (s: SFn): SFn | null => volatileDeviceStores(s, target.capabilities.deviceRegisters);
     respell('/vol-store/unreduce', () => composeLevers(sfn, [volStore, unreduced]));
     respell('/vol-store/unreduce/ptr-field', () => composeLevers(sfn, [volStore, unreduced, pointerFields]));

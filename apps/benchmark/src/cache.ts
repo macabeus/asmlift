@@ -79,11 +79,10 @@ export function cachedBuildTarget(tc: Toolchain, refC: string, sym: string, lang
 /** The PPC dockerized `objdump -s -r -t` text, content-cached by object bytes — the ONE cache
  *  path both PPC dump consumers share, so the path scheme cannot fork.
  *
- *  An empty dump is refused at the PRODUCER (`ppcObjdumpText`), which is where the refusal belongs
- *  — it covers this cache, the uncached MIPS dumps, and the direct `extractAsmData` callers at
- *  once. What is left for the cache is the DURABLE half of the same hazard: an entry written
- *  before that guard existed is a well-formed, TTL-less file that would be served forever, so an
- *  empty one READS AS A MISS and is rebuilt. */
+ *  An empty dump raises in `ppcObjdumpText`, covering this cache, the uncached MIPS dumps and the
+ *  direct `extractAsmData` callers at once. What is left for the cache is the DURABLE half: an
+ *  entry written before that guard existed is a well-formed, TTL-less file that would be served
+ *  forever, so an empty one READS AS A MISS and is rebuilt. */
 function cachedPpcDumpText(obj: string): string {
   if (!enabled()) {
     return ppcObjdumpText(obj);
