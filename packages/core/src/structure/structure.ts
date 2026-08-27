@@ -1442,8 +1442,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // letting it adopt the `u8` parameter's name emits `sub_80B4FA8(a0, a1, …)`, which passes 144
   // where the target passes -112 for every byte with bit 7 set. Width alone said 8 === 8 and
   // admitted it — a silent wrong answer, not a worse score. At 32 bits the two spellings ARE the
-  // same bytes at a read, which is the mismatch `structure/namecoalesce.ts`'s header measured and
-  // this rule deliberately still tolerates.
+  // same bytes at a read, which is the mismatch `structure/namecoalesce.ts`'s header names and this
+  // rule deliberately still tolerates.
   const carrierWidth = (t: IrType | undefined): number => (t?.kind === 'int' ? t.width : 32);
   const carrierSign = (t: IrType | undefined): boolean | undefined =>
     t?.kind === 'int' && t.width < 32 ? t.signed : undefined;
@@ -1482,6 +1482,37 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       const d = defs.get(v);
       if (d && materialize.has(d) && liveIn.get(opBlock.get(d)!)!.has(p)) {
         return false;
+      }
+    }
+    // AND A VALUE NOBODY NAMED IS STILL A READER OF THIS NAME. The loop above asks which NAMED
+    // values are live at `B`; an unnamed one is not stored anywhere, it is RE-DERIVED at its use
+    // from whatever its operands are called then — so a value live into `B` whose inlined
+    // expression mentions `name` reads the merge's assignment instead of what it was defined from.
+    // `s32 t = a - b; if (a > 0) { a = a + b; } return a + t;` is the whole shape: `t` is inlined,
+    // the merge takes `a0`, and the emitted `return a0 + (a0 - a1)` computes 13 where the asm
+    // computes 10 — agbcc emits exactly that asm, so this is not a generated-IR curiosity. The
+    // walk stops at any value with a name of its own (it reads THAT name) and at a materialized
+    // def (it is assigned at its own position, which the clause above already judges).
+    if (!pureAlias) {
+      const reDerives = (w: Value, seen: Set<Value>): boolean => {
+        if (w === p || seen.has(w)) {
+          return false;
+        }
+        seen.add(w);
+        const nm = varName.get(w);
+        if (nm !== undefined) {
+          return nm === name;
+        }
+        const d = defs.get(w);
+        if (!d || materialize.has(d)) {
+          return false;
+        }
+        return d.operands.some((o) => reDerives(o, seen));
+      };
+      for (const w of lin) {
+        if (reDerives(w, new Set())) {
+          return false;
+        }
       }
     }
     return true;

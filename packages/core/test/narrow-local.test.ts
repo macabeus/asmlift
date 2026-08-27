@@ -9,11 +9,14 @@
 // carrier's side: typing it narrow is unobservable only while the carrier's single reader reads
 // just those bits. `edge-reader` is the ARGUMENTS' side, and it is not implied by the first — the
 // C names an in-edge value with the carrier's variable, so that value's OTHER readers read the
-// truncation too. Each refusal is ABLATED against its own fixture — `without` drops that one gate
-// and the pass must then narrow, which is also what proves the fixture is refused by that gate
-// alone. `NOT_AN_EXTENSION` is the one fixture that cannot meet that standard (a wide counter
-// violates several rules at once), so it is pinned by ATTRIBUTION instead: which gate the table
-// names first.
+// truncation too.
+//
+// Each refusal is ABLATED against its own fixture — `without` drops that one gate and the pass must
+// then narrow, which is also what proves the fixture is refused by that gate alone. TWO cannot meet
+// that standard and each says so where it stands: `NOT_AN_EXTENSION` (a wide counter breaks several
+// rules at once) is pinned by ATTRIBUTION, and `reader-is-extension`/`cast-width` are one argument
+// in two entries, so what they get is a JOINT ablation. The behavioural half of the table — that
+// narrowing changes no program — is narrowlocal-fuzz.test.ts's.
 //
 // The two carriers of the accepted fixture are its own control: `narrowcnt`'s accumulator sits in
 // the same block, the same loop and the same terminator as its counter, and is refused while the
@@ -125,6 +128,28 @@ const MERGE_NO_TRUNCATION = `fn f {
 }
 `;
 
+/** the SAME merge with the truncation gcc sinks past the join: the carrier's reader is the `zext`
+ *  write-back and the sole reader of THAT is the `sext` the declaration is read through — `s16 v;
+ *  if (…) v = a + b; else v = a - b; *out = v;` as agbcc compiles it. Refusing it costs 6, scored
+ *  in packages/cli/test/matching/narrow-local.test.ts. */
+const MERGE_SUNK_TRUNCATION = `fn f {
+^bb0(%0: unk32, %1: s32*):
+  %2: unk32 = const {value=1}
+  %3: unk32 = add %0, %2
+  %4: unk32 = const {value=0}
+  %5: u32 = icmp_sgt %0, %4
+  cond_br %5, ^bb1(%3), ^bb2()
+^bb2():
+  %6: unk32 = add %0, %0
+  br ^bb1(%6)
+^bb1(%7: unk32):
+  %8: unk32 = zext %7 {width=16}
+  %9: unk32 = sext %8 {width=16}
+  store %1, %9 {off=0, width=4}
+  ret
+}
+`;
+
 describe('a block parameter extended at its only read is declared at that width', () => {
   test('a sole `sext {16}` types the carrier `s16` and drops the extension', () => {
     const { n, fn, ir } = run(NARROW_COUNTER);
@@ -141,6 +166,19 @@ describe('a block parameter extended at its only read is declared at that width'
     const src = emit(NARROW_COUNTER);
     expect(src).toContain('s16 v0');
     expect(src).toContain('v1 = v1 + v0;');
+  });
+
+  test('a truncation sunk past the join is the write-back, and narrows the merge carrier', () => {
+    // `edge-extends` reads WHERE the truncation is, not whether an in-edge carries one. In a loop
+    // it rides the back edge; across a plain merge gcc sinks the one common truncation past the
+    // join, where an in-edge test alone reads a real narrow local as a cast. The pair
+    // `zext {w}` -> `sext {w}` is what no cast on a wide local writes.
+    const { n, fn, ir } = run(MERGE_SUNK_TRUNCATION);
+    expect(n).toBe(1);
+    expect(fn.blocks[2].params[0].type).toEqual({ kind: 'int', width: 16, signed: false });
+    // the `zext` is gone and the `sext` now reads the carrier: `*out = (s16)v0`
+    expect(ir).not.toMatch(/zext/);
+    expect(ir.match(/sext/g)).toHaveLength(1);
   });
 
   test('the extension kind picks the signedness and its width the type', () => {
@@ -168,11 +206,9 @@ describe('refusals', () => {
   test('a carrier whose sole reader is not an extension states no width', () => {
     expect(run(NOT_AN_EXTENSION).n).toBe(0);
     // ATTRIBUTION, not ablation. A wide counter violates several rules at once, so no single
-    // `without` makes this fixture narrow — what a gate table owes here is the RIGHT reason.
-    // Fused into `raw-reader` and left below `cast-width`, this refusal was reported as "a width
-    // no C type spells", and so were 331 of the 332 width refusals over 200 agbcc functions
-    // (klonoa's 182 `nonmatchings` plus the sa3 sources this pass was built against). Both of
-    // this fixture's carriers — the counter and the accumulator — are read by the `add`.
+    // `without` makes this fixture narrow — what a gate table owes here is the RIGHT reason, and
+    // below `cast-width` this refusal reads as "a width no C type spells". Both of this fixture's
+    // carriers — the counter and the accumulator — are read by the `add`.
     expect(reasons(NOT_AN_EXTENSION)).toEqual(['reader-is-extension', 'reader-is-extension']);
     // and the accepted fixture's own accumulator is the same refusal, beside a narrowed counter
     expect(reasons(NARROW_COUNTER)).toEqual([null, 'reader-is-extension']);
@@ -193,6 +229,32 @@ describe('refusals', () => {
     expect(runWithout(ir, 'cast-width')).toBe(1);
   });
 
+  test('the width pair is jointly load-bearing and neither half alone', () => {
+    // `reader-is-extension` and `cast-width` are one soundness argument in two entries: a
+    // non-extension reader states `width = 0`, which the other refuses. So ablating EITHER changes
+    // nothing — which is not a licence to call either unsound, and not a guard a `sound: true`
+    // flag can rest on. Ablating BOTH is: the pass types the carrier `u0` and splices out the op
+    // that read it, so the function returns the carrier where the graph returns `carrier + 1`.
+    const ir = `fn f {
+^bb0():
+  %0: unk32 = const {value=0}
+  %1: unk32 = const {value=1}
+  br ^bb1(%0)
+^bb1(%2: unk32):
+  %3: unk32 = add %2, %1
+  ret %3
+}
+`;
+    expect(run(ir).n).toBe(0);
+    expect(runWithout(ir, 'reader-is-extension')).toBe(0);
+    expect(runWithout(ir, 'cast-width')).toBe(0);
+    const fn = parse(ir);
+    const both = without(without(NARROW_LOCAL_GATES, 'reader-is-extension'), 'cast-width');
+    expect(narrowBlockLocals(fn, both)).toBe(1);
+    expect(fn.blocks[1].params[0].type).toEqual({ kind: 'int', width: 0, signed: false });
+    expect(print(fn)).not.toMatch(/add/);
+  });
+
   test('a parameter the pointer recovery already typed is left alone', () => {
     // The struct/array recognizers run ahead of this pass and write exactly such a type; only the
     // type stands between a recovered `s32 *` carrier and an `s16` declaration.
@@ -202,27 +264,29 @@ describe('refusals', () => {
   });
 
   test('an in-edge value read at full width elsewhere refuses the narrowing', () => {
-    // THE SECOND HALF OF THE SOUNDNESS ARGUMENT, and the one the shipped pass was missing. The
-    // loop test reads the back-edge value ITSELF instead of a re-extension of it, so that value is
-    // observed at a width the carrier's declaration does not keep — and `structure.ts` gives it
-    // the carrier's name. On the real 9-instruction shape (an untruncated `adds r1, r2, #1` under
-    // a 32-bit `cmp`) the recovered C is `s16 v; do { *a0 = v; v = v + 1; } while (v < 32768);`,
-    // which this benchmark's own agbcc compiles to `b .L3` — an infinite loop, with `warning:
-    // comparison is always true due to limited range of data type`, out of assembly that
-    // terminates after 32768 iterations. The edge still EXTENDS, so `edge-extends` admits it and
-    // this gate is the only one that refuses.
+    // THE SECOND HALF OF THE SOUNDNESS ARGUMENT. The loop test reads the back-edge value ITSELF
+    // instead of a re-extension of it, so that value is observed at a width the carrier's
+    // declaration does not keep — and `structure.ts` gives it the carrier's name. The compiled
+    // consequence (an infinite loop out of assembly that terminates) is in narrowlocal.ts's header.
+    // The edge still EXTENDS, so `edge-extends` admits it and this gate is the only one refusing.
     const ir = NARROW_COUNTER.replace('  %9: unk32 = sext %8 {width=16}\n', '').replace('icmp_sle %9', 'icmp_sle %8');
     expect(run(ir).n).toBe(0);
     expect(runWithout(ir, 'edge-reader')).toBe(1);
   });
 
   test('a merge whose in-edges carry no truncation is a cast, not a declaration', () => {
-    // EVIDENCE, not soundness — `s32 v` with one `(s16)v` at the use computes the same numbers,
-    // which is exactly why a DEFAULT may not decide it silently. agbcc holds a narrow local
-    // extended in its register, so a real one is extended at its WRITES; a merge of two wide adds
-    // has no such write. Measured at 0 of 8 accepts over the same 200 agbcc functions.
+    // EVIDENCE, not soundness — `s32 v` with one `(s16)v` at the use computes the same numbers.
+    // With ONE extension the two spellings are the same IR in this pass's whole vocabulary: `u16 v`
+    // and `s32 v` + `(u16)v` both arrive as a merge carrier read by one `zext16` over raw in-edges,
+    // and they want opposite answers (the file header carries all four compiled round-trips). This
+    // refusal is therefore a CHOICE — keep the wide spelling where the asm does not say — and its
+    // price is 40 of 128 carriers over 2288 sa3 functions, none of them on a benchmark row. The
+    // `mergecast` row in the synthetic dataset is what holds the choice to a score.
     expect(run(MERGE_NO_TRUNCATION).n).toBe(0);
     expect(runWithout(MERGE_NO_TRUNCATION, 'edge-extends')).toBe(1);
+    // and the same fixture with the truncation SUNK to the join is admitted — the two differ by
+    // exactly the write-back `zext`, which is the evidence
+    expect(run(MERGE_SUNK_TRUNCATION).n).toBe(1);
   });
 
   test('an entry parameter is left to raise/paramwidth.ts', () => {
@@ -249,13 +313,12 @@ describe('the L1→L2 promise both width passes rest on', () => {
 });
 
 describe("a wide name is not a narrow carrier's home", () => {
-  // The converse of param-width.test.ts's "a narrow parameter is not a wide value's home", and the
-  // half this pass introduces. A name's declared type is fixed by its FIRST claimant and never
-  // re-checked, so a narrow carrier that adopts a name of a different shape is DECLARED as that
-  // shape — while its one reading extension is already gone, deleted against the promise that
-  // reading the local re-applies it. Both fixtures are POST-RAISE IR, written the way the two
-  // width passes leave it: the rule under test is the structurer's, and giving it its own input
-  // keeps it pinned when the raise gates above move.
+  // The converse of param-width.test.ts's "a narrow parameter is not a wide value's home". A name's
+  // declared type is fixed by its FIRST claimant and never re-checked, so a narrow carrier adopting
+  // a name of a different shape is DECLARED as that shape — while its one reading extension is
+  // already gone, deleted against the promise that reading the local re-applies it. Both fixtures
+  // are POST-RAISE IR: the rule under test is the structurer's, and giving it its own input keeps
+  // it pinned when the raise gates above move.
   const emitOf = (ir: string): string => {
     const fn = parse(ir);
     verify(fn);
@@ -283,8 +346,8 @@ describe("a wide name is not a narrow carrier's home", () => {
   // A SIGNEDNESS mismatch at the SAME width, which the width rule alone admits. This is `sa3`'s
   // `sub_80B4654` as the two raise passes leave it: a `u8` parameter merged with a `zext8` arm and
   // read through `lsls #24 / asrs #24`, so the carrier is `s8`. Adopting the `u8` parameter's name
-  // re-applies the WRONG extension — the emitted C passes 144 where the target passes -112 for
-  // every byte with bit 7 set, and agbcc emits `lsr` where the target has `asr`.
+  // re-applies the WRONG extension — 144 where the target passes -112 for every byte with bit 7
+  // set, and agbcc emits `lsr` where the target has `asr`.
   const MERGE_ONTO_UNSIGNED_NAME = `fn f {
 ^bb0(%0: s32*, %1: u8, %2: unk32, %3: unk32):
   %4: unk32 = const {value=4}

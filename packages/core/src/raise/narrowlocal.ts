@@ -16,9 +16,10 @@
 //     i = ((i + 1) << 16) >> 16;   ASHIFTRT   add r1,r1,#0x2 / add r2,r2,#0x2   index ELIMINATED
 //     i = (s32)(u16)(i + 1);       LSHIFTRT   lsl r0,r2,#0x1 / add r1,r0,r4     index SURVIVES
 //
-// So the width of a carrier is a fact about the emitted code. It is recovered here rather than
-// enumerated as a spelling for the same reason `paramwidth` recovers its own: the extension STATES
-// the width and the signedness, so there is nothing to guess and nothing for a differ to referee.
+// So the width of a carrier is a fact about the emitted code, and it is recovered here rather than
+// enumerated for the same reason `paramwidth` recovers its own: an extension states a width and a
+// signedness outright. What it does NOT always state is that the source DECLARED them — see
+// `edge-extends` below, where two spellings survive and this file picks one.
 //
 // SOUNDNESS HAS TWO HALVES, AND THE CARRIER'S OWN READERS ARE ONLY THE FIRST. Typing the carrier
 // narrow makes the C TRUNCATE at every incoming edge — `s16 v` assigned a wide expression keeps its
@@ -42,14 +43,38 @@
 //   arriving on an in-edge to be observed NOWHERE except through an extension of exactly this
 //   carrier's width and signedness, which is the same truncation the declaration performs.
 //
-// AND ONE HALF THAT IS EVIDENCE, NOT SOUNDNESS. `edge-extends`: agbcc holds a narrow local
-// sign/zero-extended in its register, so the extension of a REAL narrow local is at its writes, and
-// a merge carrier whose in-edges carry no truncation at all is equally faithfully spelled `s32 v` +
-// `(s16)v` at the one use. Deciding that with a default would foreclose a spelling no differ ever
-// sees — see raise/paramwidth.ts's `not-prologue`, which is the same discrimination for the entry
-// parameter. Measured at 0 of 8 accepts over 200 agbcc functions (klonoa's 182 `nonmatchings`
-// plus the 18 sa3 sources this pass was built against): every carrier this pass accepts already
-// has an extension or a constant on every in-edge.
+// AND ONE HALF THAT IS EVIDENCE, NOT SOUNDNESS — `edge-extends`, WHERE THE TRUNCATION IS. Both
+// spellings compute the same numbers, so nothing here is a correctness argument; what decides it is
+// which shape agbcc leaves in the asm. PROMOTE_MODE's write-back truncation is a `zext`, and where
+// it LANDS is the whole rule. In a loop it lands on the back edge, so the carrier's in-edge value
+// is itself an extension. Across a plain merge gcc SINKS the common truncation past the join, where
+// it stops being an in-edge fact and becomes the carrier's own reader — so an in-edge test alone
+// reads a real narrow local as a cast. All four spellings compiled with this benchmark's own agbcc,
+// each round-tripped through decompile() and scored against its own object:
+//
+//   SOURCE                              CARRIER'S READER   REFUSED   ADMITTED
+//   s16 v; … *out = v;                  zext16 -> sext16       6     0 MATCH
+//   s32 v; … *out = (s16)v;             sext16             0 MATCH       6
+//   u16 v; … *out = v;                  zext16                 4     0 MATCH
+//   s32 v; … *out = (u16)v;             zext16             0 MATCH       4
+//
+// Rows one and two are DECIDABLE and are decided: a `zext_w` read by a `sext_w` is the write-back
+// truncation followed by the declaration's own sign extension, and no cast on a wide local writes
+// that pair. Rows three and four are the same IR in this pass's whole vocabulary — same reader,
+// same raw in-edges, opposite answers — and differ only in the branch shape agbcc chose, which is
+// the score's business and not a raise-level gate's. So the gate admits the decidable half and
+// leaves the other refused, and the refusal is a CHOICE this file makes rather than evidence it
+// reads.
+//
+// ITS PRICE IS MEASURED OVER THE SET IT REFUSES, never over the set it admits — a gate priced on
+// its own accepts cannot show a cost. Over 2288 per-function sa3 sources, every one lifted, the
+// shipped table is `entry-param 1228 · reader-is-extension 2114 · param-typed 33 · raw-reader 13 ·
+// forwarded 7 · edge-reader 28 · edge-extends 40 · ACCEPT 60`. Reading the sunk write-back moved 9
+// carriers, in 9 functions, out of `edge-extends` and into `ACCEPT`. Of the 40 refusals left, 30
+// are a single `zext` (rows three and four) and 10 a single `sext` (row two), and they live in 37
+// functions, not one of which is among the 42 sa3 rows the benchmark carries — which is why
+// `bench diff` cannot price this gate at all, and why the three `merge*` rows in
+// apps/benchmark/dataset/synthetic.ts exist.
 //
 // NO LOOP GATE, deliberately: the extension is what states the width, and it states it whether or
 // not the block is a loop header. The loop is where the width is worth something, not where it
@@ -70,8 +95,10 @@ export interface NarrowLocalCandidate {
   width: number;
   /** the parameter belongs to the ENTRY block */
   isEntryParam: boolean;
-  /** reads of the RAW parameter by ops anywhere in the function */
-  uses: number;
+  /** reads of the RAW parameter by op OPERANDS anywhere in the function. Branch arguments are NOT
+   *  counted here — they are `forwarded`'s — which is where this differs from the identically
+   *  named field in raise/paramwidth.ts, whose `useCount` sums both. */
+  operandReads: number;
   /** the sole reader is a `sext`/`zext` */
   readerIsExtension: boolean;
   /** occurrences of the RAW parameter as a branch argument */
@@ -80,13 +107,24 @@ export interface NarrowLocalCandidate {
   edgeArgsObservedNarrow: boolean;
   /** every value arriving on an in-edge is itself an extension of at most this width, or a constant */
   edgeArgsExtend: boolean;
+  /** the sole reader is a `zext {w}` whose own sole reader is a `sext {w}` — PROMOTE_MODE's
+   *  write-back truncation sunk past a join, then the declaration's own sign extension */
+  writeBackTruncation: boolean;
 }
 
 export const NARROW_LOCAL_GATES: readonly Gate<NarrowLocalCandidate>[] = [
   {
+    // SOUND, and its safety lives in ANOTHER table — which the `sound` flag has no word for, so it
+    // is spelled out here. Dropping this rule does not re-decide an entry parameter, it takes the
+    // decision from raise/paramwidth.ts: this pass runs first and deletes the extension, leaving
+    // `proto-width` and `not-prologue` nothing to judge. Measured on the shape they exist for — a
+    // prologue `sext16` under a caller prototype declaring `u8` — paramwidth narrows 0, this pass
+    // narrows 0, this pass WITHOUT this gate narrows 1 to `s16` and paramwidth then sees nothing.
+    // A wrong parameter width costs bytes at every prototyped call site, which no per-function
+    // differ sees.
     id: 'entry-param',
     why: "a function's own arguments are the prologue pass's territory",
-    sound: false,
+    sound: true,
     guardedBy: 'narrow-local.test.ts: an entry parameter is left to raise/paramwidth.ts',
     rejects: (c) => c.isEntryParam,
   },
@@ -98,29 +136,39 @@ export const NARROW_LOCAL_GATES: readonly Gate<NarrowLocalCandidate>[] = [
     rejects: (c) => c.param.type.kind !== 'unknown',
   },
   {
-    // ORDERED ABOVE `cast-width` because it is what 331 of this pass's 332 width refusals over 200
-    // agbcc functions actually ARE. Fused into `raw-reader` and left below `cast-width`, every one
-    // of them was reported as "a width no C type spells" — a gate table that cannot attribute its
-    // own declines, which is the one thing a gate table is for.
+    // ORDERED ABOVE `cast-width`, which is where the attribution lives: over 2288 sa3 functions
+    // this rule refuses 2114 carriers and `cast-width` refuses none, and below it every one of
+    // those 2114 read as "a width no C type spells".
+    //
+    // THIS RULE AND `cast-width` ARE ONE SOUNDNESS ARGUMENT IN TWO ENTRIES, and neither is
+    // ablatable alone: a non-extension reader gives `width = 0`, which the other refuses, and no
+    // producer in the tree emits an extension at a width outside `CAST_WIDTHS` (the pattern engine
+    // and frontend/ppc.ts write 8 and 16; raise/narrow.ts re-writes a width already gated on that
+    // set), so `cast-width` fires 0 times in this order. Drop BOTH and the pass types a carrier
+    // `u0` and deletes the op that read it — which is why the joint ablation is the guard both
+    // name, and why neither may rest on an ablation of its own.
     id: 'reader-is-extension',
     why: 'a carrier whose sole reader is not an extension states no width at all',
     sound: true,
-    guardedBy: 'narrow-local.test.ts: a carrier whose sole reader is not an extension states no width',
+    guardedBy: 'narrow-local.test.ts: the width pair is jointly load-bearing and neither half alone',
     rejects: (c) => !c.readerIsExtension,
   },
   {
     id: 'cast-width',
     why: 'only 8 and 16 are widths a `zext`/`sext` — and so a C declaration — carries',
     sound: true,
-    guardedBy: 'narrow-local.test.ts: a width no C type spells is refused',
+    guardedBy: 'narrow-local.test.ts: the width pair is jointly load-bearing and neither half alone',
     rejects: (c) => !CAST_WIDTHS.has(c.width),
   },
   {
     id: 'raw-reader',
+    // Operand reads ONLY. raise/paramwidth.ts ships this id over a `useCount` that sums operands
+    // AND successor arguments; here a forwarded carrier is `forwarded`'s refusal, so the same shape
+    // is refused by both tables under two different names.
     why: 'a reader of the un-extended carrier observes the bits the declaration would drop',
     sound: true,
     guardedBy: 'narrow-local.test.ts: a second reader of the raw carrier refuses the narrowing',
-    rejects: (c) => c.uses !== 1,
+    rejects: (c) => c.operandReads !== 1,
   },
   {
     id: 'forwarded',
@@ -138,12 +186,17 @@ export const NARROW_LOCAL_GATES: readonly Gate<NarrowLocalCandidate>[] = [
   },
   {
     id: 'edge-extends',
-    // NOT sound: `s32 v` + one `(s16)v` at the use computes the same numbers. This is the
-    // discrimination `paramwidth`'s `not-prologue` makes for the entry parameter — which of two
-    // faithful spellings the SOURCE wrote — and a default that skips it forecloses one of them.
-    why: 'agbcc extends a narrow local at its writes, so a merge with no truncating in-edge is a cast',
+    // NOT sound: `s32 v` + one `(s16)v` at the use computes the same numbers, so what this decides
+    // is a spelling and the header's 2×2 is the evidence for the direction. It is NOT the same
+    // judgment as `paramwidth`'s `not-prologue`, which is `sound: true` for a reason this rule has
+    // no access to: a parameter's width is its SIGNATURE, and agbcc truncates at every prototyped
+    // call site of a narrow-declared callee — bytes in other functions, which no per-function
+    // differ sees. A block local's width leaves the function's interface alone, so the worst this
+    // rule can do is pick the losing spelling of two that compile, and nothing here is wrong.
+    why: 'the write-back truncation is the evidence: no truncation on an in-edge and none sunk to the join',
     sound: false,
-    rejects: (c) => !c.edgeArgsExtend,
+    guardedBy: 'narrow-local.test.ts: a merge whose in-edges carry no truncation is a cast, not a declaration',
+    rejects: (c) => !c.edgeArgsExtend && !c.writeBackTruncation,
   },
 ];
 
@@ -182,10 +235,8 @@ function readersOf(fn: Fn, v: Value): { ops: Op[]; forwarded: number } {
 }
 
 /** Every block parameter this pass judges, with the extension that would be deleted — the gate
- *  table's INPUT, separated from its application so a test can ask which gate refuses a shape
- *  rather than only whether the pass fired. Attribution is the whole point of a gate table, and
- *  fusing "the sole reader is not an extension" into a width rule cost this one exactly that:
- *  331 of 332 width refusals over 200 agbcc functions were reported as an unspellable width. */
+ *  table's INPUT, separated from its application so a test can ask WHICH gate refuses a shape
+ *  rather than only whether the pass fired. */
 export function narrowLocalCandidates(fn: Fn): { c: NarrowLocalCandidate; ext: Op }[] {
   const out: { c: NarrowLocalCandidate; ext: Op }[] = [];
   const defs = new Map<Value, Op>();
@@ -230,16 +281,28 @@ export function narrowLocalCandidates(fn: Fn): { c: NarrowLocalCandidate; ext: O
         }
         return d.opcode === 'const' || ((d.opcode === 'sext' || d.opcode === 'zext') && (d.attrs.width as number) <= w);
       });
+      // …and the same truncation SUNK PAST THE JOIN, which is where gcc puts it when every arm
+      // writes the local: the carrier's own reader is the `zext` write-back, and the sole reader of
+      // THAT is the sign extension the narrow declaration is read through. A cast on a wide local
+      // writes one extension, never this pair.
+      const extRead = ext.opcode === 'zext' ? readersOf(fn, ext.results[0]) : undefined;
+      const writeBackTruncation =
+        extRead !== undefined &&
+        extRead.forwarded === 0 &&
+        extRead.ops.length === 1 &&
+        extRead.ops[0].opcode === 'sext' &&
+        extRead.ops[0].attrs.width === w;
       out.push({
         c: {
           param: p,
           width: w,
           isEntryParam: i === 0,
-          uses: ops.length,
+          operandReads: ops.length,
           readerIsExtension: isExt,
           forwarded,
           edgeArgsObservedNarrow: observedNarrow,
           edgeArgsExtend: argExtends,
+          writeBackTruncation,
         },
         ext,
       });

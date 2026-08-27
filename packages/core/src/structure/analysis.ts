@@ -757,15 +757,26 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
       }
     }
   }
-  // The `/inplace` axis reads: which values ride a `cond_br` edge as a successor ARG. Built
-  // once; plain `br` args deliberately not collected (see AnalyzeOptions).
+  // Which values ride a branch edge as a successor ARG, in two scopes with two different readers.
+  //
+  // `branchArgFed` is EVERY multi-successor terminator's, and it is a correctness fact: an edge
+  // argument is emitted INSIDE the arm it belongs to, so a value that renders only there runs only
+  // on that path. For a call that is an effect the IR performs unconditionally and the C performs
+  // sometimes, and a `switch_br` does it as readily as a `cond_br`. Plain `br` args are excluded
+  // because their edge copy is on the one path that reaches the successor, so nothing conditional
+  // happens to them.
+  //
+  // `condBrArgFed` is the `/inplace` axis's narrower reading — a preference about where a load's
+  // value is homed, whose own scope note is on AnalyzeOptions.materializeJoinFeeds.
+  const branchArgFed = new Set<Value>();
   const condBrArgFed = new Set<Value>();
-  if (materializeJoinFeeds) {
-    for (const b of fn.blocks) {
-      for (const op of b.ops) {
-        if (op.opcode === 'cond_br') {
-          for (const s of op.successors) {
-            for (const a of s.args) {
+  for (const b of fn.blocks) {
+    for (const op of b.ops) {
+      if (op.successors.length > 1) {
+        for (const s of op.successors) {
+          for (const a of s.args) {
+            branchArgFed.add(a);
+            if (op.opcode === 'cond_br') {
               condBrArgFed.add(a);
             }
           }
@@ -1439,6 +1450,19 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         const isCall = op.opcode === 'call';
         // A call must EXECUTE once — any second operand slot duplicates it → named temp.
         if (isCall && sites.length > 1) {
+          materialize.add(op);
+          continue;
+        }
+        // …and ONCE means once on EVERY path the asm runs it on, which the multi-site rule above
+        // does not say. `anchored` calls a terminator a single render position, but a branch's edge
+        // copies are emitted inside the ARMS, so a call whose only consumer is an edge argument
+        // renders in one arm and is skipped on the others. Compiled: `s32 t = f2(a); if (a > 0) {
+        // return t; } return 0;` gives `bl f2` ahead of the `cmp`, and inlined at the edge the
+        // recovered C calls `f2` only in the `else`; a `switch_br` arm hides it the same way.
+        // Materializing puts it back at the position the asm executed it. Sole-use only in
+        // practice — a second use already materialized above — and it is 0 of 2288 sa3 functions,
+        // 2 of 412 klonoa ones.
+        if (isCall && branchArgFed.has(r)) {
           materialize.add(op);
           continue;
         }
