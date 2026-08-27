@@ -11,14 +11,15 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, test } from 'vitest';
 
-import { cachedBuildTarget } from '../src/cache';
+import { cachedAsmDumpText, cachedBuildTarget, cachedExtractAsmData, sha } from '../src/cache';
+import { CACHE_DIR } from '../src/config';
 import { TOOLCHAINS } from '../src/toolchains';
 
 // A stand-in for the real build step, counting its calls. `refC` is unique per test so the
 // content key is too, and nothing here touches a compiler.
-const fakeToolchain = (asm: string) => {
+const fakeToolchain = (asm: string, objBytes = 'obj') => {
   const obj = join(mkdtempSync(join(tmpdir(), 'cache-poison-')), 'a.o');
-  writeFileSync(obj, 'obj');
+  writeFileSync(obj, objBytes);
   let calls = 0;
   return { tc: { ...TOOLCHAINS.agbcc, buildTarget: () => (calls++, { obj, asm }) }, calls: () => calls };
 };
@@ -60,5 +61,63 @@ describe('cachedBuildTarget refuses an empty disassembly', () => {
     expect(cachedBuildTarget(tc, refC, 'poison_b').asm).toContain('bx lr');
     expect(calls()).toBe(2); // the empty one is not
     expect(readFileSync(aPath, 'utf8')).toContain('bx lr'); // and it got overwritten
+  });
+
+  test('the OBJECT half is checked too — an empty .o is refused on the way in', () => {
+    const { tc } = fakeToolchain('fn:\n  bx lr\n', '');
+    process.env.ASMLIFT_BENCH_CACHE = '0';
+    try {
+      expect(() => cachedBuildTarget(tc, 'int poison_c(void){return 2;}', 'poison_c')).toThrow(
+        /empty object for poison_c on agbcc/,
+      );
+    } finally {
+      delete process.env.ASMLIFT_BENCH_CACHE;
+    }
+  });
+
+  test('an entry whose .o half is empty is a MISS, however good the .asm half looks', () => {
+    const refC = 'int poison_d(void){return 3;}';
+    const { tc, calls } = fakeToolchain('fn:\n  bx lr\n');
+    const oPath = cachedBuildTarget(tc, refC, 'poison_d').obj;
+    written.push(oPath, oPath.replace(/\.o$/, '.asm'));
+    expect(calls()).toBe(1);
+
+    writeFileSync(oPath, '');
+    expect(cachedBuildTarget(tc, refC, 'poison_d').asm).toContain('bx lr');
+    expect(calls()).toBe(2);
+    expect(readFileSync(oPath, 'utf8')).toBe('obj');
+  });
+});
+
+// The PPC objdump text is the OTHER content-keyed, TTL-less cache in this module, and it feeds
+// BOTH decompilers on every mwcc row: `cachedAsmDumpText` -> m2c's data-section normalizer,
+// `cachedExtractAsmData` -> asmlift's Regime-B jump-table recovery. `parseAsmData` of nothing is a
+// well-formed EMPTY AsmData, so there is no throw anywhere to notice — which is exactly why an
+// entry that is already empty has to read back as a MISS.
+describe('the PPC dump cache does not serve an empty entry', () => {
+  test('an empty ppcdump-* entry is a miss, not an AsmData with no sections', () => {
+    // A UNIQUE object, so the content key cannot collide with any real row's.
+    const obj = join(mkdtempSync(join(tmpdir(), 'ppc-poison-')), 'a.o');
+    writeFileSync(obj, `ASMLIFT-CACHE-POISON-TEST-${process.pid}-${Math.random()}`);
+    const entry = join(CACHE_DIR, `ppcdump-${sha(readFileSync(obj))}.txt`);
+    written.push(entry);
+    writeFileSync(entry, '');
+
+    // The rebuild needs a PPC objdump this test has no business running, so the assertion is that
+    // the empty entry is NOT returned: it either raises on the way to the container or comes back
+    // with real content. What must never happen is the silent empty result.
+    for (const call of [
+      () => cachedExtractAsmData(obj, TOOLCHAINS.mwcc_242_81.targetDesc),
+      () => cachedAsmDumpText(obj, 'mwcc_242_81'),
+    ]) {
+      let served: unknown = 'THREW';
+      try {
+        served = call();
+      } catch {
+        /* a loud failure is the acceptable outcome */
+      }
+      expect(served).not.toBe('');
+      expect(served).not.toEqual({ sections: {}, relocs: [], symbols: {}, bigEndian: true });
+    }
   });
 });

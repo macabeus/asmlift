@@ -16,6 +16,23 @@ import { copyFileSync, rmSync } from 'node:fs';
 import { hostTmp, mkShareableTmp, poolExec, ppcPoolCfg, run } from './compile';
 import { GCC_KMC_TOOLCHAIN, IDO_TOOLCHAIN, MWCC_PPC_TOOLCHAIN } from './toolchain';
 
+/** A DUMP THAT SUCCEEDED AND SAID NOTHING IS A FAILURE THAT DID NOT SAY SO. `objdump -s -r -t`
+ *  always prints at least its `file format` header, so empty stdout on exit 0 is a dump step that
+ *  died quietly — a container that never ran the binary, a truncated pipe. Downstream nothing
+ *  notices: `parseAsmData` of nothing is a well-formed EMPTY AsmData (no sections, no relocs, no
+ *  symbols), so asmlift lifts a Regime-B jump table it cannot see and m2c's normalizer emits no
+ *  data section, both silently and both forever once a content-keyed cache has stored it.
+ *
+ *  The refusal lives HERE, at the one producer all three extractors and both cache consumers go
+ *  through, rather than at any one of them — the same failure reached the reference-build cache as
+ *  a zero-byte `.s` and surfaced days later in another module as an unparseable objdump. */
+function nonEmptyDump(text: string, what: string): string {
+  if (text.trim() === '') {
+    throw new Error(`${what} exited 0 but produced NO output — refusing an empty dump`);
+  }
+  return text;
+}
+
 /** Raw `objdump -s -r -t` text for a MIPS object (native objdump — only compilation is
  *  containerized). */
 export function mipsObjdumpText(obj: string, objdumpBin: string): string {
@@ -23,7 +40,7 @@ export function mipsObjdumpText(obj: string, objdumpBin: string): string {
   if (d.status !== 0) {
     throw new Error(`objdump (asmdata) failed: ${d.stderr}`);
   }
-  return d.stdout;
+  return nonEmptyDump(d.stdout, `objdump (asmdata) on ${obj}`);
 }
 
 /** Extract AsmData from a MIPS object. */
@@ -55,7 +72,7 @@ export function ppcObjdumpText(obj: string): string {
         if (r.status !== 0) {
           throw new Error(`ppc objdump (asmdata) failed: ${r.stderr || r.stdout}`);
         }
-        return r.stdout;
+        return nonEmptyDump(r.stdout, `ppc objdump (asmdata, pooled) on ${obj}`);
       }
     }
   } finally {
@@ -86,7 +103,7 @@ export function ppcObjdumpText(obj: string): string {
   if (r.status !== 0) {
     throw new Error(`ppc objdump (asmdata) failed: ${r.stderr || r.stdout}`);
   }
-  return r.stdout;
+  return nonEmptyDump(r.stdout, `ppc objdump (asmdata, one-shot) on ${obj}`);
 }
 
 /** Extract AsmData from a PPC (mwcc) object. */

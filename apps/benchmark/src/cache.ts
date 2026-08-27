@@ -14,7 +14,7 @@ import { extractAsmData, mipsObjdumpText, ppcObjdumpText } from '@asmlift/toolch
 import { GCC272_TOOLCHAIN, GCC_KMC_TOOLCHAIN, IDO_TOOLCHAIN, MWCC_PPC_TOOLCHAIN, TOOLCHAIN } from '@asmlift/toolchains';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { CACHE_DIR, M2C_DIR } from './config';
@@ -44,15 +44,20 @@ const TC_CFG: Record<ToolchainId, unknown> = {
  *  language). The cached object file is returned by path and only ever READ downstream
  *  (objdiff target / objdump input). */
 export function cachedBuildTarget(tc: Toolchain, refC: string, sym: string, lang?: 'c' | 'c++'): BuiltTarget {
-  // A target function's disassembly is never legitimately empty, so an empty one is a build/dump
-  // step that failed without saying so — and the tmp-then-rename write makes it a WELL-FORMED
-  // cache entry with no TTL. Left alone it surfaces days later, in another module, as
-  // `disasmToM2c: could not parse objdump output` on a row that has been stable for weeks. So it
-  // is refused on the way in, and an entry already poisoned is a MISS rather than a result.
+  // A target function's disassembly is never legitimately empty, and neither is its object, so an
+  // empty one is a build/dump step that failed without saying so — and the tmp-then-rename write
+  // makes it a WELL-FORMED cache entry with no TTL. Left alone it surfaces days later, in another
+  // module, as `disasmToM2c: could not parse objdump output` on a row that has been stable for
+  // weeks. So EITHER HALF empty is refused on the way in, and an entry already poisoned is a MISS
+  // rather than a result. The same discipline covers the PPC dump cache below, whose producer
+  // carries the refusal for all of its consumers.
   const build = (): BuiltTarget => {
     const built = tc.buildTarget(refC, sym, lang);
     if (built.asm.trim() === '') {
       throw new Error(`buildTarget produced an empty disassembly for ${sym} on ${tc.id} — refusing to cache it`);
+    }
+    if (statSync(built.obj).size === 0) {
+      throw new Error(`buildTarget produced an empty object for ${sym} on ${tc.id} — refusing to cache it`);
     }
     return built;
   };
@@ -67,7 +72,11 @@ export function cachedBuildTarget(tc: Toolchain, refC: string, sym: string, lang
   const aPath = join(CACHE_DIR, `ref-${key}.asm`);
   if (existsSync(oPath) && existsSync(aPath)) {
     const asm = readFileSync(aPath, 'utf8');
-    if (asm.trim() !== '') {
+    // BOTH halves, because the entry is two files and the observed poisoning had exactly one of
+    // them bad. An empty `.o` beside a good `.asm` is the same event with the halves swapped — a
+    // step that exited 0 having written nothing — and it is objdiff's scoring target, so left
+    // unchecked it scores every candidate against an empty object.
+    if (asm.trim() !== '' && statSync(oPath).size > 0) {
       return { obj: oPath, asm };
     }
   }
@@ -81,14 +90,23 @@ export function cachedBuildTarget(tc: Toolchain, refC: string, sym: string, lang
 }
 
 /** The PPC dockerized `objdump -s -r -t` text, content-cached by object bytes — the ONE cache
- *  path both PPC dump consumers share, so the path scheme cannot fork. */
+ *  path both PPC dump consumers share, so the path scheme cannot fork.
+ *
+ *  An empty dump is refused at the PRODUCER (`ppcObjdumpText`), which is where the refusal belongs
+ *  — it covers this cache, the uncached MIPS dumps, and the direct `extractAsmData` callers at
+ *  once. What is left for the cache is the DURABLE half of the same hazard: an entry written
+ *  before that guard existed is a well-formed, TTL-less file that would be served forever, so an
+ *  empty one READS AS A MISS and is rebuilt. */
 function cachedPpcDumpText(obj: string): string {
   if (!enabled()) {
     return ppcObjdumpText(obj);
   }
   const path = join(CACHE_DIR, `ppcdump-${sha(readFileSync(obj))}.txt`);
   if (existsSync(path)) {
-    return readFileSync(path, 'utf8');
+    const cached = readFileSync(path, 'utf8');
+    if (cached.trim() !== '') {
+      return cached;
+    }
   }
   const dump = ppcObjdumpText(obj);
   put(path, dump);
