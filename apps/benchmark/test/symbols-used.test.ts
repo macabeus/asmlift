@@ -171,3 +171,30 @@ describe('dropped candidates are recorded, never silently swallowed', () => {
     expect(runAsmlift(TC, 'f', LOADH, 'obj', undefined, noCompile, MAP)).not.toHaveProperty('droppedCandidates');
   });
 });
+
+describe('withheld candidates are recorded too, and are a different fact', () => {
+  const WHY = 'this spelling rests on a device-behaviour fact no gate over the C can settle';
+
+  test('a spelling refused PUBLICATION is published with the score it reached', () => {
+    ranked.mockImplementation((name, asm, target, _obj, opts) => {
+      const cands = enumerateCandidates(name, asm, target, opts);
+      const scored = { ...cands[0], score: SCORE };
+      return {
+        best: scored,
+        candidates: [scored],
+        dropped: [],
+        withheld: [{ label: 'unsigned/unreduce', score: 35, why: WHY }],
+      };
+    });
+    const r = runAsmlift(TC, 'f', LOADH, 'obj', undefined, noCompile, MAP);
+    // NOT folded into droppedCandidates: nothing failed to build, and reporting one as the other
+    // would make the dropped column name compile errors that never happened.
+    expect(r.droppedCandidates).toBeUndefined();
+    expect(r.withheldCandidates).toEqual([{ label: 'unsigned/unreduce', score: 35, why: WHY }]);
+  });
+
+  test('nothing withheld ⇒ the field is absent, not an empty array', () => {
+    rankPicking(() => true);
+    expect(runAsmlift(TC, 'f', LOADH, 'obj', undefined, noCompile, MAP)).not.toHaveProperty('withheldCandidates');
+  });
+});
