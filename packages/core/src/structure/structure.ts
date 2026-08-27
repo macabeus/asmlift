@@ -1423,15 +1423,20 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       paramBlock.set(pv, blk);
     }
   }
-  // AND THE NAME MUST BE WIDE ENOUGH TO HOLD `p`. Every edge into `B` copies its argument into
-  // `name`, which is a C assignment through `name`'s declaration — so a carrier declared narrower
-  // than the merged value TRUNCATES it. The only narrow carrier is a parameter raise/paramwidth.ts
-  // declared: its width is its signature type and cannot widen to suit a later claimant, and `u8 a0`
-  // adopted by a merge of `a0` with `0x1234` emits `a0 = 4660`, which agbcc compiles to 52.
-  // Register-width carriers are unaffected — a pointer or an `unknown` is a full word.
+  // AND THE NAME MUST BE EXACTLY AS WIDE AS `p`. Every edge into `B` copies its argument into
+  // `name`, which is a C assignment through `name`'s declaration, and the name's type is fixed by
+  // its FIRST claimant — so a width mismatch loses a truncation in one direction or the other:
+  //   • name NARROWER than the merged value truncates it. `u8 a0` (raise/paramwidth.ts) adopted by
+  //     a merge of `a0` with `0x1234` emits `a0 = 4660`, which agbcc compiles to 52.
+  //   • name WIDER than a narrow carrier drops the extension the carrier's declaration WAS. A
+  //     narrow block parameter (raise/narrowlocal.ts) has had its one reading extension deleted
+  //     against the promise that reading the local re-applies it, so adopting an `s32` name emits
+  //     `*out = a0` where the graph says `*out = (s16)a0` — a silent wrong answer, not a worse one.
+  // Register-width carriers are unaffected — a pointer or an `unknown` is a full word, so the two
+  // narrow-typing passes are the only producers either half can see.
   const carrierWidth = (t: IrType | undefined): number => (t?.kind === 'int' ? t.width : 32);
   const canTakeName = (p: Value, B: Block, name: string, pureAlias = false): boolean => {
-    if (carrierWidth(varType.get(name)) < carrierWidth(p.type)) {
+    if (carrierWidth(varType.get(name)) !== carrierWidth(p.type)) {
       return false;
     }
     if (B.params.some((q) => q !== p && varName.get(q) === name)) {

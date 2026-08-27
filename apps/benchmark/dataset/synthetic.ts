@@ -2506,11 +2506,10 @@ export const SYNTHETIC: SynthSpec[] = [
   //
   // So the two gaps compose in one direction only: with a wide counter asmlift MATCHES the
   // member-array walk (`membwalk`, agbcc), and it is the narrow counter that exposes the address
-  // spelling. asmlift has NO narrow local type — over the 856 base rows its candidates declare no
-  // scalar local but `s32`/`u32` — so it spells the counter `s32 v0` plus `(s16)v0` at every use
-  // and `v0 = (u16)((s16)v0 + 1)` for the increment, which is the LSHIFTRT shape; and it renders
-  // the walked region as arithmetic on a cast pointer, `(a0 + 2)[(s16)v0]`, where the source's
-  // `d->name[i]` gives agbcc a loop-invariant base to hoist.
+  // spelling. L1 has since SHIPPED as `raise/narrowlocal.ts`: a block parameter whose sole reader
+  // is its own extension is declared at that width, so the counter is now `s16 v0` read without a
+  // cast. L2 has not — asmlift still renders the walked region as arithmetic on a cast pointer,
+  // `(a0 + 2)[v0]`, where the source's `d->name[i]` gives agbcc a loop-invariant base to hoist.
   //
   // WHICH LEVER IS WORTH WHAT. Every number is measured on THAT ROW'S OWN target, starting from
   // asmlift's OWN published winner for the row and changing ONE axis — never by subtracting two
@@ -2529,6 +2528,7 @@ export const SYNTHETIC: SynthSpec[] = [
   //                                                       the base-first index add
   //     sibwalk           52     25        33     0 MATCH L1 + L2 over three sibling walks under one
   //                                                       `s16` counter; also the guard below
+  // The L1 column is now the SHIPPED column: those four scores are what `pnpm bench run` reads.
   // L1 IS THE LEVER TO BUILD FIRST. Alone it closes `narrowcnt` and `basefold` outright and takes
   // 6 of `membnarrow`'s 17 and 27 of `sibwalk`'s 52. L2 alone is worth 1 and 19 — and 0 under a wide
   // counter — but the residual L1 leaves is exactly L2's, and L2 closes it to a byte match on both.
@@ -2593,10 +2593,13 @@ export const SYNTHETIC: SynthSpec[] = [
   // 18 agbcc, and one of those (`kleod:UpdateEntities:agbcc`) already MATCHES — a narrow counter is
   // not automatically a gap. Candidate side: 17 base agbcc rows already carry a narrowed self-
   // increment in their PUBLISHED asmlift output, 2 of those MATCHing; exactly ONE carries the SIGNED
-  // form these rows are cut from, `v = (u16)((s16)v + 1)` — `sa3:PackSaveSector` (366). PREDICTION,
-  // not measured: when L1 ships, the other 15 are where real-row movement shows first, falsifiable
-  // with `pnpm bench diff --base origin/main` on the branch that lands L1. What these six rows add
-  // is ISOLATION and SIZE: the shape alone, plus memory, plus a struct member, each on its target.
+  // form these rows are cut from, `v = (u16)((s16)v + 1)` — `sa3:PackSaveSector` (366). That row's
+  // 15 unsigned siblings were where movement was predicted to show first; L1's own `bench diff`
+  // moved TWO real rows and neither is among them — `sa3:PackSaveSector` 366 → 360 (7 counters, and
+  // the winner drops `/vol-slot`) and `sa3:sa2__sub_8007958` 68 → 67 (one `s8`). The prediction was
+  // wrong because the published SPELLING is not the gate: what the pass reads is whether the
+  // carrier has a second reader. What these six rows add is ISOLATION and SIZE: the shape alone,
+  // plus memory, plus a struct member, each on its target.
   //
   // TOOLCHAIN SCOPING. All six ship `toolchains: ALL` as COVERAGE; the analysis above is agbcc's
   // alone. On mwcc_242_81 `membnarrow`, `basefold` and `sibwalk` all MATCH outright, so the gap
