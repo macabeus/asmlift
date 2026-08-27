@@ -290,7 +290,7 @@ test('a volatile read in the init declines', () => {
   expect(unreduceAccumulators(s, GBA)).toBeNull();
 });
 
-test('a moved read declines unless the loop writes only device cells', () => {
+test('a moved read declines unless the region writes only device cells', () => {
   const read = { ...cell(0x03001048) };
   const loopWith = (write: Expr): SFn =>
     fill({}, [

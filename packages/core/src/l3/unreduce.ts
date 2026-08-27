@@ -52,9 +52,9 @@
 //     to `(a0 << 6) + a0` (a `for`'s counter is stepped in `loop.inc`, which is not in
 //     `loop.body`); `acc = (a0 << 6) + a1; a1 = a1 + 100;` above the loop; and the counter's start
 //     taken last, `acc = (a0 << 6) + a1; a0 = a0 + 1; i = a0;`. A semantic fuzz over both trees on
-//     the same inputs — 18 seeds, 1.08M generated trees, 111707 fired candidates, and a generator
-//     that emits a statement between the anchors — finds no divergence; asking the LOOP alone put
-//     351 of every 2940 firings on this one hole.
+//     the same inputs — 18 seeds × 2 generator modes, the second of which emits a statement
+//     between the anchors, 1.08M trees and 111707 fired candidates — finds no divergence; asking
+//     the LOOP alone put 351 of every 2940 firings on this one hole.
 //   • INIT-NAME-ESCAPES — the other half of the same question, for a write no assignment spells.
 //     A name whose address the function hands out can be rewritten by a callee or through a
 //     stashed pointer, which `assignCount` cannot see: `w = 1; i = a0; acc = (a0 << 6) + w;` over
@@ -66,11 +66,11 @@
 //     this lever rides carries a qualifier on a READ), so it is guarded by its unit test alone.
 //   • MOVED-READ-ALIASABLE — an ordinary memory read moved down the region sees whatever the
 //     region wrote. asmlift can only rule that out for writes it can NAME, so a moved read is
-//     admitted on one configuration: every write the region evaluates goes to a
-//     compile-time-constant address INSIDE the target's declared
-//     device-register window, and every read lands OUTSIDE it. A device register is not an object
-//     a C program declares (target.ts `deviceRegisters`), so no STORE the C performs there can
-//     change what an ordinary read sees; the read-side half is what keeps a DEVICE read from being
+//     admitted on one configuration: every write the region evaluates goes to a compile-time
+//     constant address INSIDE the target's declared device-register window, and every read lands
+//     OUTSIDE it. A device register is not an object a C program declares (target.ts
+//     `deviceRegisters`), so no STORE the C performs there can change what an ordinary read sees;
+//     the read-side half is what keeps a DEVICE read from being
 //     duplicated into N of them, and it resolves an access's WHOLE address where the subscripts
 //     are constant, falling back to the chain's root only where they are not (a read rooted at
 //     0x03FFFFF0 whose element is 0x04000010 is a device read, and the root alone does not say
@@ -92,8 +92,10 @@
 // the gates alone. That scan is the WHOLE PREFIX up to and including the loop, wider than the
 // motion region every other gate reads, because a repeating transfer keeps writing for as long as
 // it is enabled: where the arming store STANDS says nothing about when the device writes, and a
-// channel armed above the init is as asynchronous as one armed inside the loop. It is admitted only where the differ PROVES it: `needsProof`
-// rides out with the candidate, and rank.ts publishes such a spelling only at a byte-exact score,
+// channel armed above the init is as asynchronous as one armed inside the loop.
+//
+// Such a read is admitted only where the differ PROVES it: `needsProof` rides out with the
+// candidate, and rank.ts publishes such a spelling only at a byte-exact score,
 // withholding it (loudly, in `RankedResult.withheld`) at every other. That is not a softening of
 // the rule but the only evidence that settles it — a candidate whose object equals the target's
 // IS the program, whatever a gate could have proved about it, and the one corpus inhabitant
@@ -172,7 +174,7 @@ interface AccCtx {
   movedEffect: boolean;
   /** the closed form reads a `volatile` object */
   movedVolatile: boolean;
-  /** the closed form reads memory the loop's own writes cannot be told apart from */
+  /** the closed form reads memory the region's own writes cannot be told apart from */
   movedAliasable: boolean;
 }
 
@@ -286,9 +288,9 @@ export const UNREDUCE_GATES: readonly Gate<AccCtx>[] = [
   },
   {
     id: 'moved-read-aliasable',
-    why: 'a read moved into a loop sees whatever writes the loop cannot be proved apart from',
+    why: 'a read moved down the region sees whatever writes the region cannot be proved apart from',
     sound: true,
-    guardedBy: 'unreduce.test.ts: a moved read declines unless the loop writes only device cells',
+    guardedBy: 'unreduce.test.ts: a moved read declines unless the region writes only device cells',
     rejects: (c) => c.movedAliasable,
   },
 ];
@@ -443,15 +445,18 @@ const readsDevice = (r: Expr, window?: readonly [number, number]): boolean => {
   return root === null || inRange(root, window) || inRange(cellAddress(r), window);
 };
 
-/** Can the loop's own writes change what a read in the closed form sees? Only "no" when every
- *  write the loop EVALUATES — body, condition, and a `for`'s init and inc — goes to a constant
- *  address inside the declared device window, and every read lands outside it. See the file
- *  header, including the premise this does NOT establish (a device that writes memory itself:
- *  `deviceWritesMemory` below). A closed form that reads nothing is never aliasable. */
+/** Can the region's writes change what a MEMORY read in the closed form sees? Only "no" when every
+ *  write it evaluates goes to a constant address inside the declared device window, and every read
+ *  lands outside it. See the file header, including the premise this does NOT establish (a device
+ *  that writes memory itself: `deviceWritesMemory` below).
+ *
+ *  MEMORY ONLY. The NAMES the closed form reads are `init-loop-var`'s question and
+ *  `init-name-escapes`', and a closed form with no memory access still has names — which is why
+ *  the early return below is not "nothing can change this". */
 function movedReadAliasable(closed: Expr, evaluated: readonly Stmt[], window?: readonly [number, number]): boolean {
   const reads = accessesIn(closed);
   if (reads.length === 0) {
-    return false; // pure arithmetic re-evaluates to the same value whatever the loop wrote
+    return false; // no access ⇒ no write can reach it; its NAMES are the two gates above
   }
   for (const s of allStmts(evaluated)) {
     // a call or an unmodelled instruction may write anything

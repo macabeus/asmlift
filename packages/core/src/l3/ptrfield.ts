@@ -10,8 +10,9 @@
 // IT IS NOT NEUTRAL TO THE COMPILER, which is the whole reason to spell it. A pointer and an `s32`
 // are different alias sets, so under strict aliasing the loop optimizer may hoist a pointer field's
 // load past an `s32`-typed store it must otherwise keep behind — and on synthetic:dmaptrsrc that
-// hoist is the difference between a byte-exact match and a 32-point diff, once the accumulator is
-// un-reduced back into the loop. Which side matches is per-field knowledge nothing in the asm
+// hoist is the difference between a byte-exact match and a 35-point diff, once the accumulator is
+// un-reduced back into the loop (that row's fan: `/vol-store/unreduce/ptr-field` 0,
+// `/vol-store/unreduce` 35). Which side matches is per-field knowledge nothing in the asm
 // carries, so both are enumerated and the differ referees.
 //
 // WHERE THE FLAG IS, because two readers have now looked for `-fstrict-aliasing` in the benchmark's
@@ -52,11 +53,10 @@
 // already dereferences is one the recovery typed from its own use, not from a width). Nothing
 // qualifying ⇒ decline (null).
 //
-// SCOPE, because both of this table's blind spots look exactly like a gate refusing. First, only
-// fields the tree ACCESSES are ever built, so "a field nothing reaches is a pad" is not a rule
-// here — it cannot arise. It was one, ordered above `written`, and every case it fired on was a
-// WRITE-ONLY field: 78 corpus refusals carrying a reason ("no access reaches it") that was false
-// for all 78, while the sound gate that owns them sat below and fired never. Second, a field whose
+// SCOPE, because both of this table's blind spots look exactly like a gate refusing. First, THERE
+// IS NO PAD RULE, deliberately: `plan` builds a ctx only for fields the tree ACCESSES, so "a field
+// nothing reaches" cannot arise — and a rule for it reads as one, then answers for the 78 corpus
+// WRITE-ONLY fields that `written` owns. Second, a field whose
 // BASE TYPE does not resolve is dropped by `plan` before any gate reads it — 151 of the corpus's
 // 820 field nodes, on 20 trees, all of them `[map]` configurations (kleod:CheckTileCollisionVertical,
 // FreeAllDecompBuffers, TransformSingleEntityToScreen and ConfigureEntityBehavior among them).
@@ -66,8 +66,7 @@ import { type Expr, type SFn, type Stmt, type StructType, mapExprChildren, mapSt
 import { type Gate, firstRejection } from './gates';
 import { declaredTypes, exprCType } from './typing';
 
-/** One recovered field as the gates read it. Only fields the tree ACCESSES are ever built — a
- *  declared field nothing reaches never reaches the table, so "is this a pad" is not a gate. */
+/** One recovered field as the gates read it — built only for fields the tree accesses. */
 interface FieldCtx {
   /** the recovered type is a 32-bit integer — the width a pointer also fits */
   word: boolean;

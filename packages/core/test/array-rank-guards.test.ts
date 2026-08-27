@@ -112,7 +112,7 @@ describe('shift signedness is judged in the environment that PRINTS the code', (
 
 describe('the PUBLICATION rule for a proof-gated spelling (rank.ts withheldReason / rankBy)', () => {
   // A `matchOnly` spelling is one whose semantics no gate over the C can settle — `/unreduce`
-  // moving a read into a loop that arms a DMA transfer. It is offered, scored, and then either
+  // moving a read down a span that arms a DMA transfer. It is offered, scored, and then either
   // wins on the differ's own proof or is withheld: never shown as the best-effort answer on a
   // nonmatch row, which is the case the POLICY note says a wrong re-spelling would poison.
   const plain = { label: 'unsigned', group: 0, source: 'a;' };

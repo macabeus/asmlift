@@ -3249,8 +3249,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // `dmavolsrc` rendering, modulo the function name. Both decompilers drop a device read whose
   // result nobody consumes.
   //
-  // WHAT THE ADVERSARIAL ROUND FOUND, because the next round will build on these rows and the
-  // premise it falsified was written in four files. `/unreduce` licensed moving a memory read into
+  // WHAT THE ADVERSARIAL ROUNDS FOUND, because the next round will build on these rows and the
+  // premise the first one falsified was written in four files. `/unreduce` licensed moving a memory read into
   // a loop on the ground that "a write to a hardware register is not a write to any object a C
   // program declares, so such a loop cannot change what an ordinary read sees". The first clause
   // is true and the second does not follow: a DMA controller reads a control word and then WRITES
@@ -3267,12 +3267,28 @@ export const SYNTHETIC: SynthSpec[] = [
   // What ships instead is a target datum for the memory-model half (`deviceMemoryWriters`, the
   // four DMA channel-enable halfwords) and a PROOF requirement for what it cannot settle: the
   // spelling is published only at a byte-exact score and withheld everywhere else. On this row 4
-  // of the 16 candidates are now withheld, all at 35, and the fan's two 0s are untouched.
+  // of the 16 candidates are now withheld, all at 35, and the fan's two 0s are untouched — and
+  // that count is in the row's own `withheldCandidates`, because a MATCH resting entirely on the
+  // proof gate is not a thing an artifact should leave to prose.
+  //
+  // AND THE SECOND ROUND FOUND THE FIRST FIX'S SCOPE WRONG, which is the part to carry forward.
+  // The premise was corrected and the GATES still asked about the loop, while the transform moves
+  // the init across everything between where it stood and each read — plus the counter's start,
+  // which is a second anchor and can stand on either side of the init. Three shapes were admitted
+  // with no proof required and diverged on every input vector; the fuzz that reported zero could
+  // not generate any of them, because its generator never emitted a statement between the two
+  // inits. Neither row's spelling is affected — the region is empty on both — but a lever built on
+  // these rows must state the span its gates range over, not the statement they happen to sit next
+  // to.
   //
   // Also measured while these rows were being attacked, and useful to whoever takes `dmanest`:
   // `((struct Elem0 *)K)[a1].field_4` scores 0 on that row and `((s32 *)((a1 << 3) + K))[1]`
   // scores 2 — two spellings one token apart, so the "`->field_N` and `[idx]` compile identically"
-  // premise in raise/structs.ts is CONDITIONAL and nothing says on what.
+  // premise in raise/structs.ts is CONDITIONAL and nothing says on what. One thing that round will
+  // not get for free: `/unreduce` cannot see `dmanest`'s loops either. They are nested, and that
+  // pass walks TOP-LEVEL loops only (91 of the corpus's 189 loop-bearing trees are in the same
+  // position), so a decline there names no gate. Widening the scan is a prerequisite, not a side
+  // effect.
   //
   // agbcc only, as the `read-once`, `uninit-local` and `value-home` families are. Every claim
   // above is a pair of spellings compiled with THIS compiler; whether ido7.1, gcc2.7.2kmc and
