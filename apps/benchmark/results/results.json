@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generatedAt": "2026-08-27T08:50:47.272Z",
+    "generatedAt": "2026-08-27T15:35:48.997Z",
     "toolchains": [
       "ido7.1",
       "agbcc",
@@ -14,7 +14,7 @@
       "real": 252
     },
     "asmlift": {
-      "commit": "0a0de6eebd9d7c186717ab1e49e29737fbef47c8",
+      "commit": "a87c4f9a077981cd11ddd36af5c8a4a3cd29de34",
       "dirty": false
     },
     "m2c": {
@@ -21934,25 +21934,25 @@
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "candidateLabel": "unsigned/expr-home/vol-slot",
+        "candidateLabel": "unsigned/expr-home",
         "symbolsUsed": [],
         "outcome": "nonmatch",
-        "source": "struct Elem0 { s32 field_0; u8 _pad0[16]; };\nstruct Elem1 { s32 field_0; u8 _pad0[16]; };\nstruct Elem2 { u8 field_0; u8 _pad0[1]; };\nstruct Elem3 { u8 field_0; u8 _pad0[1]; };\nstruct Struct0 { s32 field_0; u8 _pad0[12]; u8 field_16; u8 field_17; u8 field_18; u8 _pad1[33]; u16 field_52; };\nvoid PackSaveSector(s32 * a0, struct Struct0 * a1) {\n    struct Elem1 * v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    s32 v5;\n    s32 v6;\n    s32 v7;\n    s32 v8;\n    s32 v9;\n    s32 v10;\n    s32 v11;\n    u8 * v12;\n    s32 v13;\n    u8 * v14;\n    volatile u16 sp48;\n    *a0 = 1196707404;\n    a0[1] = a0[1] + 1;\n    a0[2] = a1->field_0;\n    v5 = 0;\n    do {\n        ((u16 *)(a0 + 3))[(s16)v5] = ((u16 *)((u8 *)a1 + 4))[(s16)v5];\n        v5 = (u16)((s16)v5 + 1);\n    } while ((s16)v5 <= 5);\n    ((u8 *)a0)[24] = 0;\n    ((u8 *)a0)[25] = a1->field_16;\n    ((u8 *)a0)[26] = a1->field_17;\n    ((u8 *)a0)[27] = a1->field_18;\n    ((u8 *)a0)[28] = 0;\n    sp48 = a1->field_52;\n    v0 = (u8 *)a1 + 96 + 1 + 3;\n    v6 = 0;\n    do {\n        ((u16 *)((u8 *)a0 + 30))[(s16)v6] = ((u16 *)((u8 *)v0 - 80))[(s16)v6];\n        v6 = (u16)((s16)v6 + 1);\n    } while ((s16)v6 <= 6);\n    v7 = 0;\n    do {\n        *(u8 *)(s32 *)((u8 *)(11 + a0) + (s16)v7) = *((u8 *)a1 + 34 + (s16)v7);\n        v7 = (u16)((s16)v7 + 1);\n    } while ((s16)v7 <= 6);\n    v8 = 0;\n    do {\n        *(51 + (u8 *)a0 + (s16)v8) = *(41 + (u8 *)a1 + (s16)v8);\n        v8 = (u16)((s16)v8 + 1);\n    } while ((s16)v8 <= 8);\n    v2 = 0;\n    do {\n        v9 = 0;\n        do {\n            *((u8 *)a0 + 62 + ((s16)v9 + (v2 << 16 >> 14))) = *((s16)v9 + (v2 << 16 >> 14) + ((u8 *)a1 + 55));\n            v9 = (u16)((s16)v9 + 1);\n        } while ((s16)v9 <= 3);\n        v2 = (u32)((v2 << 16) + (128 << 9)) >> 16;\n    } while ((s16)v2 <= 8);\n    *(u8 *)(a0 + 15) = *((u8 *)a1 + 50);\n    *(u16 *)((u8 *)a0 + 98) = sp48;\n    *((u8 *)a0 + 61) = *((u8 *)a1 + 51);\n    *((u8 *)a0 + 98 + 2) = *((u8 *)a1 + 96);\n    *((u8 *)a0 + 61 + 40) = *((u8 *)a1 + 51 + 47);\n    *((u8 *)a0 + 98 + 2 + 2) = *((u8 *)a1 + 96 + 1);\n    *((u8 *)a0 + 103) = 0;\n    v3 = 0;\n    do {\n        *(u8 *)((s32 *)((u8 *)a0 + (s16)v3 * 20) + 26) = *((u8 *)(struct Struct0 *)((u8 *)a1 + (s16)v3 * 20) + 116);\n        *((u8 *)(s32 *)((u8 *)a0 + (s16)v3 * 20) + 105) = *((u8 *)(struct Struct0 *)((u8 *)a1 + (s16)v3 * 20) + 117);\n        *((u8 *)(s32 *)((u8 *)a0 + (s16)v3 * 20) + 105 + 1) = *((u8 *)(struct Struct0 *)((u8 *)a1 + (s16)v3 * 20) + 119);\n        *((u8 *)(s32 *)((u8 *)a0 + (s16)v3 * 20) + 107) = *((u8 *)(struct Struct0 *)((u8 *)a1 + (s16)v3 * 20) + 118);\n        ((struct Elem0 *)((u8 *)a0 + 61 + 40 + 7))[(s16)v3].field_0 = v0[(s16)v3].field_0;\n        v10 = 0;\n        do {\n            *(u16 *)((u8 *)a0 + 98 + 2 + 2 + 10 + (((s16)v10 << 1) + (s16)v3 * 20)) = *(u16 *)((u8 *)a1 + 104 + (((s16)v10 << 1) + (s16)v3 * 20));\n            v10 = (u16)((s16)v10 + 1);\n        } while ((s16)v10 <= 5);\n        v3 = (u32)((v3 << 16) + (128 << 9)) >> 16;\n    } while ((s16)v3 <= 9);\n    v1 = 0;\n    do {\n        v4 = 0;\n        do {\n            v11 = 0;\n            do {\n                ((struct Elem3 *)(s32 *)((u8 *)a0 + (((s16)v11 << 2) + (s16)v4 * 20 + (s16)v1 * 80)))[152].field_0 = ((struct Elem2 *)(struct Struct0 *)((u8 *)a1 + (((s16)v11 << 2) + (s16)v4 * 20 + (s16)v1 * 80)))[150].field_0;\n                *(305 + (u8 *)(s32 *)((u8 *)a0 + (((s16)v11 << 2) + (s16)v4 * 20 + (s16)v1 * 80))) = *((u8 *)(struct Struct0 *)((u8 *)a1 + (((s16)v11 << 2) + (s16)v4 * 20 + (s16)v1 * 80)) + 301);\n                *(u16 *)(s32 *)((151 << 1) + 4 + (u8 *)(s32 *)((u8 *)a0 + (((s16)v11 << 2) + (s16)v4 * 20 + (s16)v1 * 80))) = ((u16 *)(struct Struct0 *)((u8 *)a1 + (((s16)v11 << 2) + (s16)v4 * 20 + (s16)v1 * 80)))[151];\n                v11 = (u16)((s16)v11 + 1);\n            } while ((s16)v11 <= 4);\n            v4 = (u32)((v4 << 16) + (128 << 9)) >> 16;\n        } while ((s16)v4 <= 3);\n        v1 = (u32)((v1 << 16) + (128 << 9)) >> 16;\n    } while ((s16)v1 <= 6);\n    switch (*(u16 *)(struct Struct0 *)((215 << 2) + (u8 *)a1)) {\n        case 1:\n            *(u8 *)(s32 *)((u8 *)a0 + (216 << 2)) = *(u16 *)(struct Struct0 *)((215 << 2) + (u8 *)a1);\n            break;\n        case 2:\n            v12 = (u8 *)a0 + 865;\n            *v12 = 1;\n            break;\n        case 256:\n            v12 = (u8 *)a0 + 866;\n            *v12 = 1;\n            break;\n    }\n    switch (*(u16 *)(862 + (u8 *)a1)) {\n        case 1:\n            v13 = 216 << 2;\n            *(u8 *)(s32 *)((u8 *)a0 + v13) = 2;\n            break;\n        case 2:\n            *((u8 *)a0 + 865) = *(u16 *)(862 + (u8 *)a1);\n            break;\n        case 256:\n            v13 = 866;\n            *(u8 *)(s32 *)((u8 *)a0 + v13) = 2;\n            break;\n    }\n    switch (*(u16 *)(struct Struct0 *)((u8 *)a1 + (216 << 2))) {\n        case 1:\n            v14 = (s32 *)((u8 *)a0 + (216 << 2));\n            *v14 = 4;\n            break;\n        case 2:\n            v14 = (u8 *)a0 + 865;\n            *v14 = 4;\n            break;\n        case 256:\n            v14 = (u8 *)a0 + 866;\n            *v14 = 4;\n            break;\n    }\n    *(u8 *)(s32 *)((u8 *)a0 + (217 << 2)) = *(u8 *)(struct Struct0 *)((u8 *)a1 + (217 << 2));\n    *((u8 *)a0 + 869) = *((u8 *)a1 + 869);\n    *((u8 *)a0 + 870) = *((u8 *)a1 + 870);\n    *((u8 *)a0 + 871) = 0;\n    a0[218] = GetSaveSectorChecksum(a0, 871, 0, a1);\n    return;\n}\n",
-        "score": 366,
-        "maxScore": 504,
+        "source": "struct Elem0 { s32 field_0; u8 _pad0[16]; };\nstruct Elem1 { s32 field_0; u8 _pad0[16]; };\nstruct Elem2 { u8 field_0; u8 _pad0[1]; };\nstruct Elem3 { u8 field_0; u8 _pad0[1]; };\nstruct Struct0 { s32 field_0; u8 _pad0[12]; u8 field_16; u8 field_17; u8 field_18; u8 _pad1[33]; u16 field_52; };\nvoid PackSaveSector(s32 * a0, struct Struct0 * a1) {\n    struct Elem1 * v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    s16 v5;\n    s16 v6;\n    s16 v7;\n    s16 v8;\n    s16 v9;\n    s16 v10;\n    s16 v11;\n    u8 * v12;\n    s32 v13;\n    u8 * v14;\n    u16 sp48;\n    *a0 = 1196707404;\n    a0[1] = a0[1] + 1;\n    a0[2] = a1->field_0;\n    v5 = 0;\n    do {\n        ((u16 *)(a0 + 3))[v5] = ((u16 *)((u8 *)a1 + 4))[v5];\n        v5 = (u16)(v5 + 1);\n    } while ((s16)v5 <= 5);\n    ((u8 *)a0)[24] = 0;\n    ((u8 *)a0)[25] = a1->field_16;\n    ((u8 *)a0)[26] = a1->field_17;\n    ((u8 *)a0)[27] = a1->field_18;\n    ((u8 *)a0)[28] = 0;\n    sp48 = a1->field_52;\n    v0 = (u8 *)a1 + 96 + 1 + 3;\n    v6 = 0;\n    do {\n        ((u16 *)((u8 *)a0 + 30))[v6] = ((u16 *)((u8 *)v0 - 80))[v6];\n        v6 = (u16)(v6 + 1);\n    } while ((s16)v6 <= 6);\n    v7 = 0;\n    do {\n        *(u8 *)(s32 *)((u8 *)(11 + a0) + v7) = *((u8 *)a1 + 34 + v7);\n        v7 = (u16)(v7 + 1);\n    } while ((s16)v7 <= 6);\n    v8 = 0;\n    do {\n        *(51 + (u8 *)a0 + v8) = *(41 + (u8 *)a1 + v8);\n        v8 = (u16)(v8 + 1);\n    } while ((s16)v8 <= 8);\n    v2 = 0;\n    do {\n        v9 = 0;\n        do {\n            *((u8 *)a0 + 62 + (v9 + (v2 << 16 >> 14))) = *(v9 + (v2 << 16 >> 14) + ((u8 *)a1 + 55));\n            v9 = (u16)(v9 + 1);\n        } while ((s16)v9 <= 3);\n        v2 = (u32)((v2 << 16) + (128 << 9)) >> 16;\n    } while ((s16)v2 <= 8);\n    *(u8 *)(a0 + 15) = *((u8 *)a1 + 50);\n    *(u16 *)((u8 *)a0 + 98) = sp48;\n    *((u8 *)a0 + 61) = *((u8 *)a1 + 51);\n    *((u8 *)a0 + 98 + 2) = *((u8 *)a1 + 96);\n    *((u8 *)a0 + 61 + 40) = *((u8 *)a1 + 51 + 47);\n    *((u8 *)a0 + 98 + 2 + 2) = *((u8 *)a1 + 96 + 1);\n    *((u8 *)a0 + 103) = 0;\n    v3 = 0;\n    do {\n        *(u8 *)((s32 *)((u8 *)a0 + (s16)v3 * 20) + 26) = *((u8 *)(struct Struct0 *)((u8 *)a1 + (s16)v3 * 20) + 116);\n        *((u8 *)(s32 *)((u8 *)a0 + (s16)v3 * 20) + 105) = *((u8 *)(struct Struct0 *)((u8 *)a1 + (s16)v3 * 20) + 117);\n        *((u8 *)(s32 *)((u8 *)a0 + (s16)v3 * 20) + 105 + 1) = *((u8 *)(struct Struct0 *)((u8 *)a1 + (s16)v3 * 20) + 119);\n        *((u8 *)(s32 *)((u8 *)a0 + (s16)v3 * 20) + 107) = *((u8 *)(struct Struct0 *)((u8 *)a1 + (s16)v3 * 20) + 118);\n        ((struct Elem0 *)((u8 *)a0 + 61 + 40 + 7))[(s16)v3].field_0 = v0[(s16)v3].field_0;\n        v10 = 0;\n        do {\n            *(u16 *)((u8 *)a0 + 98 + 2 + 2 + 10 + ((v10 << 1) + (s16)v3 * 20)) = *(u16 *)((u8 *)a1 + 104 + ((v10 << 1) + (s16)v3 * 20));\n            v10 = (u16)(v10 + 1);\n        } while ((s16)v10 <= 5);\n        v3 = (u32)((v3 << 16) + (128 << 9)) >> 16;\n    } while ((s16)v3 <= 9);\n    v1 = 0;\n    do {\n        v4 = 0;\n        do {\n            v11 = 0;\n            do {\n                ((struct Elem3 *)(s32 *)((u8 *)a0 + ((v11 << 2) + (s16)v4 * 20 + (s16)v1 * 80)))[152].field_0 = ((struct Elem2 *)(struct Struct0 *)((u8 *)a1 + ((v11 << 2) + (s16)v4 * 20 + (s16)v1 * 80)))[150].field_0;\n                *(305 + (u8 *)(s32 *)((u8 *)a0 + ((v11 << 2) + (s16)v4 * 20 + (s16)v1 * 80))) = *((u8 *)(struct Struct0 *)((u8 *)a1 + ((v11 << 2) + (s16)v4 * 20 + (s16)v1 * 80)) + 301);\n                *(u16 *)(s32 *)((151 << 1) + 4 + (u8 *)(s32 *)((u8 *)a0 + ((v11 << 2) + (s16)v4 * 20 + (s16)v1 * 80))) = ((u16 *)(struct Struct0 *)((u8 *)a1 + ((v11 << 2) + (s16)v4 * 20 + (s16)v1 * 80)))[151];\n                v11 = (u16)(v11 + 1);\n            } while ((s16)v11 <= 4);\n            v4 = (u32)((v4 << 16) + (128 << 9)) >> 16;\n        } while ((s16)v4 <= 3);\n        v1 = (u32)((v1 << 16) + (128 << 9)) >> 16;\n    } while ((s16)v1 <= 6);\n    switch (*(u16 *)(struct Struct0 *)((215 << 2) + (u8 *)a1)) {\n        case 1:\n            *(u8 *)(s32 *)((u8 *)a0 + (216 << 2)) = *(u16 *)(struct Struct0 *)((215 << 2) + (u8 *)a1);\n            break;\n        case 2:\n            v12 = (u8 *)a0 + 865;\n            *v12 = 1;\n            break;\n        case 256:\n            v12 = (u8 *)a0 + 866;\n            *v12 = 1;\n            break;\n    }\n    switch (*(u16 *)(862 + (u8 *)a1)) {\n        case 1:\n            v13 = 216 << 2;\n            *(u8 *)(s32 *)((u8 *)a0 + v13) = 2;\n            break;\n        case 2:\n            *((u8 *)a0 + 865) = *(u16 *)(862 + (u8 *)a1);\n            break;\n        case 256:\n            v13 = 866;\n            *(u8 *)(s32 *)((u8 *)a0 + v13) = 2;\n            break;\n    }\n    switch (*(u16 *)(struct Struct0 *)((u8 *)a1 + (216 << 2))) {\n        case 1:\n            v14 = (s32 *)((u8 *)a0 + (216 << 2));\n            *v14 = 4;\n            break;\n        case 2:\n            v14 = (u8 *)a0 + 865;\n            *v14 = 4;\n            break;\n        case 256:\n            v14 = (u8 *)a0 + 866;\n            *v14 = 4;\n            break;\n    }\n    *(u8 *)(s32 *)((u8 *)a0 + (217 << 2)) = *(u8 *)(struct Struct0 *)((u8 *)a1 + (217 << 2));\n    *((u8 *)a0 + 869) = *((u8 *)a1 + 869);\n    *((u8 *)a0 + 870) = *((u8 *)a1 + 870);\n    *((u8 *)a0 + 871) = 0;\n    a0[218] = GetSaveSectorChecksum(a0, 871, 0, a1);\n    return;\n}\n",
+        "score": 360,
+        "maxScore": 499,
         "compileErrors": null,
         "breakdown": {
-          "insert": 37,
-          "delete": 78,
-          "replace": 40,
-          "opMismatch": 3,
-          "argMismatch": 208
+          "insert": 32,
+          "delete": 75,
+          "replace": 34,
+          "opMismatch": 2,
+          "argMismatch": 217
         },
         "quality": {
           "score": 68,
           "lines": 144,
           "gotos": 0,
-          "casts": 181,
+          "casts": 156,
           "unkGlue": 0,
           "rawMem": 17,
           "addrDeref": 0
@@ -21984,15 +21984,15 @@
       },
       "gapSize": {
         "decompiler": "asmlift",
-        "score": 366,
-        "maxScore": 504,
-        "ratio": 0.7261904761904762,
+        "score": 360,
+        "maxScore": 499,
+        "ratio": 0.7214428857715431,
         "kinds": {
-          "insert": 37,
-          "delete": 78,
-          "replace": 40,
-          "opMismatch": 3,
-          "argMismatch": 208
+          "insert": 32,
+          "delete": 75,
+          "replace": 34,
+          "opMismatch": 2,
+          "argMismatch": 217
         }
       },
       "scripts": {
@@ -22603,22 +22603,22 @@
           }
         ],
         "outcome": "nonmatch",
-        "source": "void sa2__sub_8007958(u32 a0, u32 a1, u32 a2, u32 a3, u32 a4, u32 a5, u32 a6) {\n    u32 v0;\n    u32 v1;\n    s32 v2;\n    s32 v3;\n    u16 * v4;\n    s32 v5;\n    s32 v6;\n    v0 = (u8)a1;\n    v1 = (u8)a2;\n    gHBlankCopySize = 4;\n    v3 = (u16)a3;\n    v5 = (u8)a4;\n    gFlags = gFlags | 4;\n    gHBlankCopyTarget = (a0 << 24 >> 22) + (u32)&REG_BG0HOFS;\n    v2 = gBgOffsetsHBlankPrimary;\n    v4 = (u16 *)(v2 + (v0 << 2));\n    for (v6 = v0; v6 < v1; v6 = (u8)(v6 + 1)) {\n        *v4 = (u16)a5 + v3 & 511;\n        *(v4 + 1) = (u16)a6;\n        v4 = v4 + 1 + 1;\n        v3 = (u16)-((s16)v3 + (s8)v5);\n        v5 = (u8)-(s8)v5;\n    }\n    return;\n}\n",
-        "score": 68,
-        "maxScore": 87,
+        "source": "void sa2__sub_8007958(u32 a0, u32 a1, u32 a2, u32 a3, u32 a4, u32 a5, u32 a6) {\n    u32 v0;\n    u32 v1;\n    s32 v2;\n    s32 v3;\n    u16 * v4;\n    s8 v5;\n    s32 v6;\n    v0 = (u8)a1;\n    v1 = (u8)a2;\n    gHBlankCopySize = 4;\n    v3 = (u16)a3;\n    v5 = (u8)a4;\n    gFlags = gFlags | 4;\n    gHBlankCopyTarget = (a0 << 24 >> 22) + (u32)&REG_BG0HOFS;\n    v2 = gBgOffsetsHBlankPrimary;\n    v4 = (u16 *)(v2 + (v0 << 2));\n    for (v6 = v0; v6 < v1; v6 = (u8)(v6 + 1)) {\n        *v4 = (u16)a5 + v3 & 511;\n        *(v4 + 1) = (u16)a6;\n        v4 = v4 + 1 + 1;\n        v3 = (u16)-((s16)v3 + v5);\n        v5 = (u8)-v5;\n    }\n    return;\n}\n",
+        "score": 67,
+        "maxScore": 88,
         "compileErrors": null,
         "breakdown": {
-          "insert": 5,
-          "delete": 23,
-          "replace": 6,
-          "opMismatch": 0,
-          "argMismatch": 34
+          "insert": 6,
+          "delete": 24,
+          "replace": 7,
+          "opMismatch": 1,
+          "argMismatch": 29
         },
         "quality": {
           "score": 88,
           "lines": 26,
           "gotos": 0,
-          "casts": 13,
+          "casts": 11,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -22650,15 +22650,15 @@
       },
       "gapSize": {
         "decompiler": "asmlift",
-        "score": 68,
-        "maxScore": 87,
-        "ratio": 0.7816091954022989,
+        "score": 67,
+        "maxScore": 88,
+        "ratio": 0.7613636363636364,
         "kinds": {
-          "insert": 5,
-          "delete": 23,
-          "replace": 6,
-          "opMismatch": 0,
-          "argMismatch": 34
+          "insert": 6,
+          "delete": 24,
+          "replace": 7,
+          "opMismatch": 1,
+          "argMismatch": 29
         }
       },
       "scripts": {
@@ -31659,23 +31659,23 @@
       "asmlift": {
         "decompiler": "asmlift",
         "candidateLabel": "unsigned",
-        "outcome": "nonmatch",
-        "source": "void basefold(u32 a0, u32 a1) {\n    s32 v0;\n    v0 = 0;\n    do {\n        ((u16 *)(((s16)v0 << 1) + a0))[2] = ((u16 *)(((s16)v0 << 1) + a1))[2];\n        v0 = (u16)((s16)v0 + 1);\n    } while ((s16)v0 <= 5);\n    return;\n}\n",
-        "score": 11,
+        "outcome": "match",
+        "source": "void basefold(u32 a0, u32 a1) {\n    s16 v0;\n    v0 = 0;\n    do {\n        ((u16 *)((v0 << 1) + a0))[2] = ((u16 *)((v0 << 1) + a1))[2];\n        v0 = (u16)(v0 + 1);\n    } while ((s16)v0 <= 5);\n    return;\n}\n",
+        "score": 0,
         "maxScore": 20,
         "compileErrors": null,
         "breakdown": {
           "insert": 0,
-          "delete": 1,
-          "replace": 1,
+          "delete": 0,
+          "replace": 0,
           "opMismatch": 0,
-          "argMismatch": 9
+          "argMismatch": 0
         },
         "quality": {
-          "score": 90,
+          "score": 96,
           "lines": 9,
           "gotos": 0,
-          "casts": 7,
+          "casts": 4,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -31701,19 +31701,7 @@
           "<tmp>/cand.c.pp.c:11: request for member `unk4' in something not a structure or union"
         ]
       },
-      "gapSize": {
-        "decompiler": "asmlift",
-        "score": 11,
-        "maxScore": 20,
-        "ratio": 0.55,
-        "kinds": {
-          "insert": 0,
-          "delete": 1,
-          "replace": 1,
-          "opMismatch": 0,
-          "argMismatch": 9
-        }
-      },
+      "gapSize": null,
       "scripts": {
         "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `basefold` — benchmark function synthetic:basefold:agbcc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The exact agbcc `.s` text the benchmark fed m2c, verbatim.\ncat > in.s <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tbasefold\n\t.type\t basefold,function\n\t.thumb_func\nbasefold:\n\tpush\t{r4, lr}\n\tadd\tr4, r0, #0\n\tadd\tr3, r1, #0\n\tmov\tr0, #0x0\n.L6:\n\tlsl\tr1, r0, #0x10\n\tasr\tr1, r1, #0x10\n\tlsl\tr0, r1, #0x1\n\tadd\tr2, r0, r4\n\tadd\tr0, r0, r3\n\tldrh\tr0, [r0, #0x4]\n\tstrh\tr0, [r2, #0x4]\n\tadd\tr1, r1, #0x1\n\tlsl\tr1, r1, #0x10\n\tlsr\tr0, r1, #0x10\n\tasr\tr1, r1, #0x10\n\tcmp\tr1, #0x5\n\tble\t.L6\t@cond_branch\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n.Lfe1:\n\t.size\t basefold,.Lfe1-basefold\nASM_INPUT\n\n# The exact context header the benchmark passed via --context — prototypes only\n# (no struct/global layouts: the benchmark measures cold recovery).\ncat > ctx.h <<'CTX_INPUT'\nvoid basefold(u8 *d, u8 *s);\nCTX_INPUT\n\nargs=(\n  --target gba            # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function basefold     # the symbol to decompile from in.s\n  --context ctx.h         # the C context header above (typedefs + prototypes)\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
         "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `basefold` — benchmark function synthetic:basefold:agbcc.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:basefold:agbcc --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact agbcc `.s` text.\ncat > in.asm <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tbasefold\n\t.type\t basefold,function\n\t.thumb_func\nbasefold:\n\tpush\t{r4, lr}\n\tadd\tr4, r0, #0\n\tadd\tr3, r1, #0\n\tmov\tr0, #0x0\n.L6:\n\tlsl\tr1, r0, #0x10\n\tasr\tr1, r1, #0x10\n\tlsl\tr0, r1, #0x1\n\tadd\tr2, r0, r4\n\tadd\tr0, r0, r3\n\tldrh\tr0, [r0, #0x4]\n\tstrh\tr0, [r2, #0x4]\n\tadd\tr1, r1, #0x1\n\tlsl\tr1, r1, #0x10\n\tlsr\tr0, r1, #0x10\n\tasr\tr1, r1, #0x10\n\tcmp\tr1, #0x5\n\tble\t.L6\t@cond_branch\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n.Lfe1:\n\t.size\t basefold,.Lfe1-basefold\nASM_INPUT\n\n# The prototype hints the benchmark fed asmlift (callee arities / void-ness).\ncat > proto.json <<'PROTO_INPUT'\n{\n  \"basefold\": {\n    \"returnsVoid\": true\n  }\n}\nPROTO_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target agbcc          # frontend + target description (ISA, calling convention, compiler idioms)\n  --name basefold         # the symbol to decompile (multi-function input selects by name)\n  --proto proto.json      # the prototype hints above (callee arities / void-ness)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
@@ -52106,22 +52094,22 @@
         "decompiler": "asmlift",
         "candidateLabel": "unsigned",
         "outcome": "nonmatch",
-        "source": "void membnarrow(u16 * a0, u16 * a1) {\n    s32 v0;\n    v0 = 0;\n    do {\n        (a0 + 2)[(s16)v0] = (a1 + 2)[(s16)v0];\n        v0 = (u16)((s16)v0 + 1);\n    } while ((s16)v0 <= 5);\n    return;\n}\n",
-        "score": 17,
+        "source": "void membnarrow(u16 * a0, u16 * a1) {\n    s16 v0;\n    v0 = 0;\n    do {\n        (a0 + 2)[v0] = (a1 + 2)[v0];\n        v0 = (u16)(v0 + 1);\n    } while ((s16)v0 <= 5);\n    return;\n}\n",
+        "score": 11,
         "maxScore": 20,
         "compileErrors": null,
         "breakdown": {
           "insert": 0,
-          "delete": 1,
-          "replace": 6,
+          "delete": 0,
+          "replace": 5,
           "opMismatch": 0,
-          "argMismatch": 10
+          "argMismatch": 6
         },
         "quality": {
-          "score": 94,
+          "score": 100,
           "lines": 9,
           "gotos": 0,
-          "casts": 5,
+          "casts": 2,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -52152,16 +52140,16 @@
         }
       },
       "gapSize": {
-        "decompiler": "m2c",
+        "decompiler": "asmlift",
         "score": 11,
         "maxScore": 20,
         "ratio": 0.55,
         "kinds": {
           "insert": 0,
           "delete": 0,
-          "replace": 7,
+          "replace": 5,
           "opMismatch": 0,
-          "argMismatch": 4
+          "argMismatch": 6
         }
       },
       "scripts": {
@@ -56838,23 +56826,23 @@
       "asmlift": {
         "decompiler": "asmlift",
         "candidateLabel": "unsigned",
-        "outcome": "nonmatch",
-        "source": "s32 narrowcnt(void) {\n    s32 v0;\n    s32 v1;\n    v1 = 0;\n    v0 = 0;\n    do {\n        v1 = v1 + (s16)v0;\n        v0 = (u16)((s16)v0 + 1);\n    } while ((s16)v0 <= 9);\n    return v1;\n}\n",
-        "score": 1,
+        "outcome": "match",
+        "source": "s32 narrowcnt(void) {\n    s16 v0;\n    s32 v1;\n    v1 = 0;\n    v0 = 0;\n    do {\n        v1 = v1 + v0;\n        v0 = (u16)(v0 + 1);\n    } while ((s16)v0 <= 9);\n    return v1;\n}\n",
+        "score": 0,
         "maxScore": 13,
         "compileErrors": null,
         "breakdown": {
           "insert": 0,
           "delete": 0,
-          "replace": 1,
+          "replace": 0,
           "opMismatch": 0,
           "argMismatch": 0
         },
         "quality": {
-          "score": 94,
+          "score": 98,
           "lines": 11,
           "gotos": 0,
-          "casts": 5,
+          "casts": 3,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -63743,22 +63731,22 @@
         "decompiler": "asmlift",
         "candidateLabel": "unsigned",
         "outcome": "nonmatch",
-        "source": "void sibwalk(u16 * a0, u16 * a1) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    v0 = 0;\n    do {\n        a0[(s16)v0] = a1[(s16)v0];\n        v0 = (u16)((s16)v0 + 1);\n    } while ((s16)v0 <= 5);\n    v1 = 0;\n    do {\n        (a0 + 6)[(s16)v1] = (a1 + 6)[(s16)v1];\n        v1 = (u16)((s16)v1 + 1);\n    } while ((s16)v1 <= 6);\n    v2 = 0;\n    do {\n        (a0 + 13)[(s16)v2] = (a1 + 13)[(s16)v2];\n        v2 = (u16)((s16)v2 + 1);\n    } while ((s16)v2 <= 8);\n    return;\n}\n",
-        "score": 52,
+        "source": "void sibwalk(u16 * a0, u16 * a1) {\n    s16 v0;\n    s16 v1;\n    s16 v2;\n    v0 = 0;\n    do {\n        a0[v0] = a1[v0];\n        v0 = (u16)(v0 + 1);\n    } while ((s16)v0 <= 5);\n    v1 = 0;\n    do {\n        (a0 + 6)[v1] = (a1 + 6)[v1];\n        v1 = (u16)(v1 + 1);\n    } while ((s16)v1 <= 6);\n    v2 = 0;\n    do {\n        (a0 + 13)[v2] = (a1 + 13)[v2];\n        v2 = (u16)(v2 + 1);\n    } while ((s16)v2 <= 8);\n    return;\n}\n",
+        "score": 25,
         "maxScore": 58,
         "compileErrors": null,
         "breakdown": {
           "insert": 0,
-          "delete": 13,
-          "replace": 8,
+          "delete": 10,
+          "replace": 5,
           "opMismatch": 0,
-          "argMismatch": 31
+          "argMismatch": 10
         },
         "quality": {
-          "score": 88,
+          "score": 92,
           "lines": 21,
           "gotos": 0,
-          "casts": 15,
+          "casts": 6,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -63789,16 +63777,16 @@
         }
       },
       "gapSize": {
-        "decompiler": "m2c",
-        "score": 26,
+        "decompiler": "asmlift",
+        "score": 25,
         "maxScore": 58,
-        "ratio": 0.4482758620689655,
+        "ratio": 0.43103448275862066,
         "kinds": {
           "insert": 0,
           "delete": 10,
-          "replace": 10,
+          "replace": 5,
           "opMismatch": 0,
-          "argMismatch": 6
+          "argMismatch": 10
         }
       },
       "scripts": {
