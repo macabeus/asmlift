@@ -3141,7 +3141,7 @@ export const SYNTHETIC: SynthSpec[] = [
   //                     DMA macros end with. asmlift emits IDENTICAL C for the two rows (`diff`
   //                     of the two renderings, modulo the function name, is empty). Restoring the
   //                     read in the candidate closes it to 0, with or without `volatile` on it.
-  //   `dmanest`     2 — `dmavolsrc` nested in an outer loop. Different residual entirely, kept
+  //   `dmanest`  MATCH — `dmavolsrc` nested in an outer loop. Different residual entirely, kept
   //                     here because it is the same construct: see the last block below.
   //
   // WHY `/volatile` COULD NOT REACH THESE ROWS, attributed by instrumenting the refusal rather
@@ -3195,16 +3195,34 @@ export const SYNTHETIC: SynthSpec[] = [
   // instruction costs in a 14-instruction loop body.
   //
   // `dmanest` IS A DIFFERENT MECHANISM and is deliberately the family's smallest row. Its two
-  // objdiff rows are `ldr r0, [r4, #4]` vs `[r4, #0]` and `.word 50345008` vs `.word 50345012`:
-  // under nesting asmlift stops rendering the element as a struct view (`((struct Elem0 *)
-  // 50345008)[a1].field_4`, what it emits for `dmavolsrc` and MATCHes with) and folds the field
-  // offset into the base instead (`((s32 *)((a1 << 3) + 50345008))[1]`). That FALSIFIES a premise
-  // written in two places in core — `packages/core/src/raise/structs.ts:25` and
-  // `packages/core/src/rank.ts:218` both say `->field_N` and `[idx]` compile identically so the
-  // differ cannot referee between them. On agbcc they do not: a COMPONENT_REF keeps the offset in
-  // the load displacement, an index folds it into the pool literal. Compiled both ways, at field
-  // offset 4 AND at offset 0, with an 8-byte struct and a 32-byte one. Keeping the view in the
-  // candidate closes the row to 0.
+  // objdiff rows were `ldr r0, [r4, #4]` vs `[r4, #0]` and `.word 50345008` vs `.word 50345012`:
+  // under nesting asmlift stopped rendering the element as a struct view (`((struct Elem0 *)
+  // 50345008)[a1].field_4`, what it emits for `dmavolsrc`) and folded the field offset into the
+  // base instead (`((s32 *)((a1 << 3) + 50345008))[1]`). CLOSED, and NOT in the pass the residual
+  // names. Struct-array recovery is present, correct and general; what was missing sits one level
+  // below it. `raise/struct-arrays.ts` refuses an element pointer that reaches a successor arg,
+  // and the nesting makes the frontend mint a ring of block params around that pointer which feed
+  // only each other and which no op reads — a ring `ir/simplify.ts`'s per-round reader scan could
+  // never retire, each half counting as the other's reader. Attributed by instrumenting the
+  // refusal: `NOTCLEAN block-arg-use op=cond_br` with `accesses=1 [load@4w4]` here against
+  // `ACCEPT stride=8 offs=4:4` on `dmavolsrc`. Least-fixpoint liveness retires the ring; the
+  // guard is untouched, and ablating it instead reaches 0 too but fans the row 28 → 36.
+  //
+  // THE COMPILER FACT OUTLIVES THE ROW, and it FALSIFIES a premise written in two places in core:
+  // `packages/core/src/raise/structs.ts:25` and `packages/core/src/rank.ts:218` both say
+  // `->field_N` and `[idx]` compile identically so the differ cannot referee between them. On
+  // agbcc they do not, and the two passes are nameable. The fold is TREE-level reassociation,
+  // `((VAR+C1)+C2) → VAR+(C1+C2)` in `fold`'s `associate:` block (gcc/fold-const.c:4959, via
+  // `split_tree` at :1226); a COMPONENT_REF never enters that arithmetic, because
+  // `get_inner_reference` (gcc/expr.c:3929, called at :5444) hands back the bit position
+  // separately and `plus_constant` (:5631) applies it to the already-expanded address, where
+  // Thumb's `[reg,#imm]` absorbs it. So an index moves the offset into the POOL LITERAL and a
+  // field leaves it in the LOAD DISPLACEMENT. Compiled both ways at field offset 4 AND at offset
+  // 0, with an 8-byte struct and a 32-byte one: at offset 0 the two are byte-identical, so the
+  // discriminator is a NONZERO field offset. It reproduces at a cast symbol base (`.word gRaw`
+  // plus `#0x4`) but NOT at a real array declaration — `extern struct E gTab[]; gTab[i].f4` emits
+  // a third form, `.word gTab` + `add r1,r1,#0x4` + `ldr [r0]` — so the divergence is
+  // decl-vs-cast, and a price measured here does not carry to a `gaddr` array declaration.
   //
   // NO ROW for the third gap this investigation named — a folded `symbol+k` pool literal against
   // the reference's single `symbol` — and the reason is structural, not an omission: a synthetic
@@ -3281,14 +3299,10 @@ export const SYNTHETIC: SynthSpec[] = [
   // these rows must state the span its gates range over, not the statement they happen to sit next
   // to.
   //
-  // Also measured while these rows were being attacked, and useful to whoever takes `dmanest`:
-  // `((struct Elem0 *)K)[a1].field_4` scores 0 on that row and `((s32 *)((a1 << 3) + K))[1]`
-  // scores 2 — two spellings one token apart, so the "`->field_N` and `[idx]` compile identically"
-  // premise in raise/structs.ts is CONDITIONAL and nothing says on what. One thing that round will
-  // not get for free: `/unreduce` cannot see `dmanest`'s loops either. They are nested, and that
-  // pass walks TOP-LEVEL loops only (91 of the corpus's 189 loop-bearing trees are in the same
-  // position), so a decline there names no gate. Widening the scan is a prerequisite, not a side
-  // effect.
+  // `/unreduce` CANNOT SEE `dmanest`'s LOOPS, and that is unrelated to what closed the row. They
+  // are nested, and that pass walks TOP-LEVEL loops only (91 of the corpus's 189 loop-bearing
+  // trees are in the same position), so a decline there names no gate. Widening the scan is a
+  // prerequisite for any lever that wants those loops, not a side effect of one that does not.
   //
   // agbcc only, as the `read-once`, `uninit-local` and `value-home` families are. Every claim
   // above is a pair of spellings compiled with THIS compiler; whether ido7.1, gcc2.7.2kmc and
