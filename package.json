@@ -9,7 +9,7 @@
   "scripts": {
     "asmlift": "tsx packages/cli/src/main.ts",
     "test": "vitest run && vitest run --config vitest.matching.config.ts",
-    "test:offline": "vitest run packages/core/test packages/cli/test/offline",
+    "test:offline": "vitest run packages/core/test packages/cli/test/offline packages/toolchains/test",
     "test:matching": "vitest run --config vitest.matching.config.ts",
     "typecheck": "tsc --noEmit && tsc --noEmit -p packages/core && tsc --noEmit -p apps/web",
     "bench": "tsx apps/benchmark/src/cli.ts",
