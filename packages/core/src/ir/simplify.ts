@@ -72,65 +72,125 @@ export function simplifyTrivialPhis(fn: Fn, onRemoved?: (param: Value) => void):
 }
 
 /**
- * Remove block params NOTHING READS — no op operand, no successor arg (a self-feed from a back
- * edge does not count as a read). Their edge args are dropped with them, so a dead join value
+ * Remove block params NOTHING READS. Their edge args are dropped with them, so a dead join value
  * never surfaces downstream: left in place, the structurer dutifully materializes copies for it
  * on every in-edge (`a3 = v0` after a loop whose counter nobody consumes), and gates keyed on
  * "does this exit carry anything" see cargo that is not there.
  *
- * Iterated to a fixpoint: a param whose only reader was another dead param's edge arg dies on the
- * next round. A mutually-dead CYCLE (two params feeding only each other across blocks) survives —
- * each one's edge arg counts as the other's reader — which is conservative, never wrong.
+ * A read is an OP OPERAND. An edge arg is not one in itself — it forwards a value into a slot, and
+ * that is a read exactly when the slot is live — so liveness is a LEAST FIXPOINT seeded by the op
+ * operands and grown backwards along the edges. Asking instead "does any arg mention it" is what a
+ * per-round reader scan does, and it keeps a mutually-dead CYCLE alive forever: two params feeding
+ * only each other across blocks each count as the other's reader. Such a cycle is what the
+ * frontend's on-demand construction mints around a loop for a register left holding a stale value,
+ * and it is not inert — `raise/struct-arrays.ts` refuses an element pointer that reaches a block
+ * arg, so a dead ring around one costs the struct view of an array it has a single real use of.
+ *
+ * Still conservative in one direction: a param a real op operand reads survives, however dead that
+ * op later proves. Liveness is over the IR as it stands, and op-level DCE belongs to
+ * `pattern/engine.ts`.
+ *
+ * THAT MAKES TWO LIVENESS MODELS OVER ONE GRAPH, and they now DISAGREE about the same edge.
+ * `pattern/engine.ts`'s `dce` still counts every successor arg as a use unconditionally — the rule
+ * abandoned here — and it runs after every changing pre-recovery pass where this runs once, inside
+ * the frontend's `finish()`. The disagreement is one-sided and safe: `dce` is the COARSER of the
+ * two, so it only ever keeps an op this would have let go, never the reverse. Reach today is ZERO
+ * and that is measured rather than argued — re-running this fixpoint over the 458 klonoa functions
+ * that clear the frontend, at three checkpoints (straight after the lift, after the idiom fold and
+ * after type recovery), removes 0 further params at every one. Booked here so a future round that
+ * finds a nonzero reads it as the known divergence rather than a new discovery.
  *
  * THE ENTRY BLOCK IS NEVER TOUCHED — its params are the function's signature, and an argument the
  * body ignores is still an argument (frontend/ssa.ts `ensureParam` creates exactly those on
- * purpose). Returns how many were removed.
+ * purpose). They are therefore seeded LIVE rather than merely skipped: an entry block that is also
+ * a loop header has in-edges, and a slot that is kept has to keep whatever feeds it defined. A
+ * function with no blocks has no entry and no params, and is a no-op rather than a throw — this
+ * runs mid-construction, ahead of the verifier that rejects such a graph.
+ * Returns how many were removed.
  */
 export function pruneDeadParams(fn: Fn, onRemoved?: (param: Value) => void): number {
-  let removed = 0;
-  for (;;) {
-    const readers = new Set<Value>();
-    for (const b of fn.blocks) {
-      for (const op of b.ops) {
-        for (const v of op.operands) {
-          readers.add(v);
-        }
-        for (const s of op.successors) {
-          s.args.forEach((a, i) => {
-            if (s.block.params[i] !== a) {
-              readers.add(a); // feeding a DIFFERENT value into a slot is a read of that value
-            }
-          });
+  // Liveness travels BACKWARD — from a live slot to the args feeding it — so it is driven off a
+  // WORKLIST over an inverted edge index, not by re-sweeping the graph until a round adds nothing.
+  // Round-robin over `fn.blocks` in forward order advances one hop per round along a chain of
+  // block params, which is quadratic in the chain length. The worklist is linear in
+  // (values + edge args) whatever the block order, and it matters because this is shared L1
+  // substrate that runs once per lift on every ISA. Nothing in the corpus reaches the shape today
+  // — the largest klonoa function that lifts at all is 107 blocks — but that ceiling is a property
+  // of what this frontend currently accepts (274 of the checkout's 732 `.s` decline), not of the
+  // game's code, so `test/dead-params.test.ts` budgets both halves against `parse` of the same
+  // text.
+  //
+  // `edgesTo` is the same index the removal pass needs, so it is built ONCE for both: without it
+  // each removed param re-walks every op in the function.
+  const edgesTo = new Map<Block, Successor[]>();
+  for (const b of fn.blocks) {
+    for (const op of b.ops) {
+      for (const s of op.successors) {
+        const list = edgesTo.get(s.block);
+        if (list === undefined) {
+          edgesTo.set(s.block, [s]);
+        } else {
+          list.push(s);
         }
       }
-    }
-    let changed = false;
-    for (const b of fn.blocks) {
-      if (b === fn.blocks[0]) {
-        continue;
-      }
-      for (let i = b.params.length - 1; i >= 0; i--) {
-        const param = b.params[i];
-        if (readers.has(param)) {
-          continue;
-        }
-        onRemoved?.(param);
-        b.params.splice(i, 1);
-        for (const pb of fn.blocks) {
-          for (const op of pb.ops) {
-            for (const s of op.successors) {
-              if (s.block === b) {
-                s.args.splice(i, 1);
-              }
-            }
-          }
-        }
-        removed++;
-        changed = true;
-      }
-    }
-    if (!changed) {
-      return removed;
     }
   }
+  // Which args feed a given slot. Keyed by the PARAM value (identity is the graph's own), so a
+  // slot that becomes live hands back exactly the values that flow into it.
+  const feeders = new Map<Value, Value[]>();
+  for (const b of fn.blocks) {
+    b.params.forEach((slot, i) => {
+      const args = (edgesTo.get(b) ?? []).map((s) => s.args[i]).filter((a): a is Value => a !== undefined);
+      if (args.length > 0) {
+        feeders.set(slot, (feeders.get(slot) ?? []).concat(args));
+      }
+    });
+  }
+
+  const live = new Set<Value>();
+  const work: Value[] = [];
+  const mark = (v: Value): void => {
+    if (!live.has(v)) {
+      live.add(v);
+      work.push(v);
+    }
+  };
+  for (const p of fn.blocks[0]?.params ?? []) {
+    mark(p);
+  }
+  for (const b of fn.blocks) {
+    for (const op of b.ops) {
+      for (const v of op.operands) {
+        mark(v);
+      }
+    }
+  }
+  for (let v = work.pop(); v !== undefined; v = work.pop()) {
+    for (const a of feeders.get(v) ?? []) {
+      mark(a);
+    }
+  }
+
+  // One removal pass suffices: `live` is the fixpoint over the whole graph, so dropping the slots
+  // outside it cannot make a surviving slot dead, and the args it drops were feeding dead slots.
+  let removed = 0;
+  for (const b of fn.blocks) {
+    if (b === fn.blocks[0]) {
+      continue;
+    }
+    const incoming = edgesTo.get(b) ?? [];
+    for (let i = b.params.length - 1; i >= 0; i--) {
+      const param = b.params[i];
+      if (live.has(param)) {
+        continue;
+      }
+      onRemoved?.(param);
+      b.params.splice(i, 1);
+      for (const s of incoming) {
+        s.args.splice(i, 1);
+      }
+      removed++;
+    }
+  }
+  return removed;
 }

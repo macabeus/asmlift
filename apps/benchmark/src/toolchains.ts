@@ -35,6 +35,7 @@ import {
   scoreCMipsGcc,
   scoreCPpc,
 } from '@asmlift/toolchains';
+import { statSync } from 'node:fs';
 
 import { scoreViaBenchConfig } from './decomp-config';
 
@@ -43,6 +44,28 @@ export type { ToolchainId } from '@asmlift/bench-schema';
 export interface BuiltTarget {
   obj: string; // path to the scoring-target object
   asm: string; // disassembly / asm text (format per `asmKind`)
+}
+
+/** THE `BuiltTarget` INVARIANT, STATED WHERE BOTH TIERS CROSS. Neither half is ever legitimately
+ *  empty: the `.asm` is a decompiler's whole input and the `.o` is objdiff's scoring target, so an
+ *  empty one is a step that exited 0 having written nothing. Nothing downstream notices, and with a
+ *  content-keyed, TTL-less cache in the path it stays wrong forever — one such entry surfaced days
+ *  later, in another module, as `disasmToM2c: could not parse objdump output` on a row stable for
+ *  weeks.
+ *
+ *  @asmlift/toolchains' `nonEmptyDump` guards the objdump STEPS that package runs; this guards the
+ *  CONTRACT and names the ROW, and it is the only one of the two the real tier reaches —
+ *  `compile/{ido,kmc,gcc272}.ts` run their own `disasm()` and agbcc's target is a `.s` read from
+ *  disk, no objdump involved. Both `Case.build` implementations go through it, so all 894 rows are
+ *  covered and not the 642 the cache sees. */
+export function checkedTarget(built: BuiltTarget, what: string): BuiltTarget {
+  if (built.asm.trim() === '') {
+    throw new Error(`${what} produced an empty disassembly — refusing it as a scoring target`);
+  }
+  if (statSync(built.obj).size === 0) {
+    throw new Error(`${what} produced an empty object — refusing it as a scoring target`);
+  }
+  return built;
 }
 
 export interface Toolchain {

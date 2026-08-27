@@ -13,7 +13,7 @@ import { type AsmData, parseAsmData } from '@asmlift/core/frontend/asmdata';
 import type { TargetDescription } from '@asmlift/core/target';
 import { copyFileSync, rmSync } from 'node:fs';
 
-import { hostTmp, mkShareableTmp, poolExec, ppcPoolCfg, run } from './compile';
+import { hostTmp, mkShareableTmp, nonEmptyDump, poolExec, ppcPoolCfg, run } from './compile';
 import { GCC_KMC_TOOLCHAIN, IDO_TOOLCHAIN, MWCC_PPC_TOOLCHAIN } from './toolchain';
 
 /** Raw `objdump -s -r -t` text for a MIPS object (native objdump — only compilation is
@@ -23,10 +23,13 @@ export function mipsObjdumpText(obj: string, objdumpBin: string): string {
   if (d.status !== 0) {
     throw new Error(`objdump (asmdata) failed: ${d.stderr}`);
   }
-  return d.stdout;
+  return nonEmptyDump(d.stdout, `objdump (asmdata) on ${obj}`);
 }
 
-/** Extract AsmData from a MIPS object. */
+/** Extract AsmData from a MIPS object. An empty dump is refused by `mipsObjdumpText` above and
+ *  never reaches here, which matters because `parseAsmData` of nothing is a well-formed EMPTY
+ *  AsmData — no sections, no relocs, no symbols — so asmlift would lift a Regime-B jump table it
+ *  cannot see and say nothing about it. */
 export function extractMipsAsmData(obj: string, objdumpBin: string): AsmData {
   const dump = mipsObjdumpText(obj, objdumpBin);
   return parseAsmData(dump, dump, dump, true);
@@ -55,7 +58,7 @@ export function ppcObjdumpText(obj: string): string {
         if (r.status !== 0) {
           throw new Error(`ppc objdump (asmdata) failed: ${r.stderr || r.stdout}`);
         }
-        return r.stdout;
+        return nonEmptyDump(r.stdout, `ppc objdump (asmdata, pooled) on ${obj}`);
       }
     }
   } finally {
@@ -86,7 +89,7 @@ export function ppcObjdumpText(obj: string): string {
   if (r.status !== 0) {
     throw new Error(`ppc objdump (asmdata) failed: ${r.stderr || r.stdout}`);
   }
-  return r.stdout;
+  return nonEmptyDump(r.stdout, `ppc objdump (asmdata, one-shot) on ${obj}`);
 }
 
 /** Extract AsmData from a PPC (mwcc) object. */

@@ -216,10 +216,6 @@ const STRUCTURING_AXES: readonly StructuringAxis[] = [
   },
 ];
 
-/** The signedness of the entry parameters — the classic ambiguity asm cannot resolve.
- *
- * Struct LAYOUT is recovered structurally (raise/structs.ts), not as a scored axis here:
- * `->field_N` and `[idx]` compile identically, so the differ cannot referee between them. */
 /** The statement-shape products (rank's second sanctioned product mechanism): each entry is a
  *  statement-order/shape re-spelling orthogonal to every representation lever, derived onto every
  *  spelling as sanctioned in the POLICY note at the respell site. Each shape fires alone, plus
@@ -377,6 +373,20 @@ const BASEFOLD_ADMISSIONS: readonly BaseAdmission[] = [
 const sameBases = (a: readonly string[], b: readonly string[]): boolean =>
   a.length === b.length && a.every((k, i) => k === b[i]);
 
+/** The signedness of the entry parameters — the classic ambiguity asm cannot resolve.
+ *
+ * Struct LAYOUT is recovered structurally (raise/structs.ts) rather than enumerated here, and the
+ * reason is REACH, not neutrality. This file used to say `->field_N` and `[idx]` "compile
+ * identically, so the differ cannot referee between them"; the second clause is FALSE on agbcc and
+ * `synthetic:dmanest` is the counterexample — the same element read scores 0 as
+ * `((struct Elem0 *)K)[a1].field_4` and 2 as `((s32 *)((a1 << 3) + K))[1]`, because an index folds
+ * the field offset into the pool literal (tree reassociation) where a COMPONENT_REF leaves it in
+ * the load displacement. `synthetic:dmaptrsrc` is a second counterexample on the field's TYPE.
+ *
+ * What is true is that no candidate is enumerated for the axis, and none is NEEDED: the recovery
+ * reads the base from the observed pool word and the field offset from the observed load
+ * displacement, so it reproduces the target's own split by construction. The measurements and the
+ * conditions are in `raise/structs.ts`; nothing about them belongs in a roster comment. */
 const SIGN_CANDS = [
   { label: 'unsigned', signed: false },
   { label: 'signed', signed: true },
@@ -575,6 +585,38 @@ export function withheldReason<S extends { score: number }>(c: Candidate, score:
  *  candidate's semantics from inside the pass — the tree paired with that fact. `undefined`/`null`
  *  is a decline. */
 type LeverResult = SFn | { sfn: SFn; needsProof: boolean } | null | undefined;
+
+/** REQUIRE-ALL composition of re-spelling levers, and the ONE place a proof obligation crosses
+ *  from one lever to the next.
+ *
+ *  `LeverResult` is a union, so a hand-written composition can spell the obligation away by
+ *  accident and stay type-correct: `return pointerFields(u.sfn);` in place of
+ *  `return { sfn: t, needsProof: u.needsProof };` compiles, passes tsc and passes every suite,
+ *  and publishes as asmlift's answer a spelling that was supposed to be withheld unless byte-exact.
+ *  Composing through here makes dropping it INEXPRESSIBLE — a caller lists the stages and never
+ *  touches the flag.
+ *
+ *  The obligation is MONOTONE, which is what lets it be an `or`: it says "no gate over this C can
+ *  settle the fact this spelling rests on", and a later re-spelling cannot settle a fact about an
+ *  earlier one. `/ptr-field` re-types a field and never moves a read, so it carries `/unreduce`'s
+ *  obligation through unchanged rather than discharging it.
+ *
+ *  REQUIRE-ALL, never skip-on-decline: one declining stage declines the whole composition, so the
+ *  label always names exactly the levers that fired. That is the property the pairing site turns
+ *  on, and the reason it rejects `applyShapes` — see the POLICY note there. */
+export function composeLevers(sfn: SFn, stages: readonly ((s: SFn) => LeverResult)[]): LeverResult {
+  let cur = sfn;
+  let needsProof = false;
+  for (const stage of stages) {
+    const made = stage(cur);
+    if (!made) {
+      return null;
+    }
+    cur = 'sfn' in made ? made.sfn : made;
+    needsProof = needsProof || ('sfn' in made && made.needsProof);
+  }
+  return needsProof ? { sfn: cur, needsProof } : cur;
+}
 
 /** One emitted spelling of a structured tree: the label suffix naming the lever that produced it,
  *  the rendered source, and the tree-derived facts `compareScored` ranks by. */
@@ -979,17 +1021,12 @@ export function enumerateCandidates(
     // `applyShapes` is SKIP-ON-DECLINE and would emit "everything that fired" on any tree where
     // one of the three declines. That is the property the shape products are designed around and
     // the one the pairing policy forbids — a pair reaches the fan only when a row demands it.
-    respell('/vol-store/unreduce', () => {
-      const r = volatileDeviceStores(sfn, target.capabilities.deviceRegisters);
-      return r ? unreduced(r) : null;
-    });
-    respell('/vol-store/unreduce/ptr-field', () => {
-      const r = volatileDeviceStores(sfn, target.capabilities.deviceRegisters);
-      const u = r ? unreduced(r) : null;
-      // `/ptr-field` re-types; it never moves a read, so the proof requirement rides through it
-      const t = u ? pointerFields(u.sfn) : null;
-      return t && u ? { sfn: t, needsProof: u.needsProof } : null;
-    });
+    //
+    // Both compose through `composeLevers`, which carries `/unreduce`'s proof obligation across
+    // the stages after it — hand-writing that carry made dropping it a type-correct edit.
+    const volStore = (s: SFn): SFn | null => volatileDeviceStores(s, target.capabilities.deviceRegisters);
+    respell('/vol-store/unreduce', () => composeLevers(sfn, [volStore, unreduced]));
+    respell('/vol-store/unreduce/ptr-field', () => composeLevers(sfn, [volStore, unreduced, pointerFields]));
     // `/inlinebase` — spell a CONSTANT-address pointer local at its uses instead
     // (l3/inlinebase.ts). The local is structure/analysis.ts's value home for a `const` the
     // asm kept in a callee-saved register across a call; the register is real, but a constant

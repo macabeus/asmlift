@@ -12,6 +12,9 @@ export default defineConfig({
     include: [
       'packages/core/test/**/*.test.ts',
       'packages/cli/test/offline/**/*.test.ts',
+      // named explicitly rather than as `packages/*/test/**` — that glob would sweep in
+      // packages/cli/test/matching, which is Docker-bound and has its own serial config
+      'packages/toolchains/test/**/*.test.ts',
       'apps/*/test/**/*.test.{ts,tsx}',
     ],
   },

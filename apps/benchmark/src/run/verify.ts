@@ -6,7 +6,7 @@ import { decompile } from '@asmlift/core/pipeline';
 import { readFileSync } from 'node:fs';
 
 import { type RealManifest, resolveProjectRoot, validateManifest } from '../cases/manifests';
-import { makeTU, realCompilerFor } from '../compile/real';
+import { buildRealTarget, makeTU, realCompilerFor } from '../compile/real';
 import type { RealProjectCfg } from '../compile/types';
 import { TOOLCHAINS } from '../toolchains';
 
@@ -33,7 +33,7 @@ export function verify(manifestPath: string): void {
   for (const f of m.functions) {
     let asm: string;
     try {
-      asm = rc.buildTarget(rc.preprocess(cfg, makeTU(cfg, f.prependC ?? '', f.funcC))).asm;
+      asm = buildRealTarget(m.toolchain, rc.preprocess(cfg, makeTU(cfg, f.prependC ?? '', f.funcC))).asm;
     } catch (e) {
       console.log(`✗ COMPILE ${f.sym}: ${(e as Error).message.split('\n')[0]}`);
       continue;

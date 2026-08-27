@@ -3012,7 +3012,6 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
             sub,
             updateWrites,
             null,
-            new Set(li.header.params),
           )
         ) {
           throw new StructureError(
@@ -3181,20 +3180,12 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // — e.g. its `ret` operand), not just through edge args: apply the same escape test to the
       // arm's region (blocks reachable from exitB outside the loop body).
       //
-      // No loop-param exemption here. That exemption exists for reads AFTER the loop, where the
-      // updated name holding its final value is exactly what was meant. This arm renders INSTEAD of
-      // the next iteration, behind an update already emitted, so a read of a loop variable here
-      // wanted the value it had before that — `if (found) { *out = i; return; }` would store `i + 1`.
+      // WHAT THE REGION IS FOR: this arm renders INSTEAD of the next iteration, behind an update
+      // already emitted, so a read of a loop variable here wanted the value it had before that —
+      // `if (found) { *out = i; return; }` would store `i + 1`. Handing the arm's own region makes
+      // the escape check judge exactly those reads.
       const exitRegion = new Set([exitB, ...reachFrom(exitB)].filter((x) => !loopCtx!.body.has(x)));
-      const hazard = loopUpdateHazard(
-        term.operands[0],
-        exitArgs,
-        loopCtx.body,
-        sub,
-        updateWrites,
-        exitRegion,
-        new Set(),
-      );
+      const hazard = loopUpdateHazard(term.operands[0], exitArgs, loopCtx.body, sub, updateWrites, exitRegion);
       if (!hazard && !loopCtx.body.has(exitB) && ((isBreak && breakSafe) || (!isBreak && isArm(exitB)))) {
         out.push(...updateCopies); // the loop update, RAW (i++, p>>=1, …)
         let leaveCond = exprWith(sub)(term.operands[0]);
@@ -3451,7 +3442,6 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         sub,
         updateWrites,
         postLoop,
-        new Set(dw.header.params),
       )
     ) {
       throw new StructureError(

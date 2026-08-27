@@ -144,18 +144,26 @@ describe('C5 — loop conditions/exits never read a pre-update value under its p
 describe('C6 — parallel-copy read-set walkers cover the full Expr union', () => {
   // latch copy {v ← a[k], k ← k+1}: if the index read of k is invisible to exprVars, the
   // increment can sequentialize FIRST and the load reads the post-update index.
+  //
+  // THE EXIT EDGE CARRIES THE VALUE. This scaffold used to end `^bb2(): ret %5`, naming ^bb1's
+  // own param from a block ^bb1 does not dominate — not a shape any lift produces, and one that
+  // asks for the value at the TOP of the last iteration under a name the update has since moved
+  // on. `structure/hazards.ts` declines that now, so the scaffold is spelled the way SSA
+  // construction spells it: the merge param takes %8 from the latch and %3 from the guard. What
+  // this test pins is unaffected — the corrected fixture emits BYTE-IDENTICAL C at origin/main and
+  // at this tree, loop body and all.
   test("a copy keyed by another carried var orders before that var's update", () => {
     const src = emit(`fn c6 {
 ^bb0(%0: s32*, %1: s32, %2: s32):
   %3: s32 = const {value=0}
-  cond_br %2, ^bb1(%3, %3), ^bb2()
+  cond_br %2, ^bb1(%3, %3), ^bb2(%3)
 ^bb1(%5: s32, %6: s32):
   %7: s32 = add %6 {imm=1}
   %8: s32 = aload %0, %6 {elemSize=4, signed=true}
   %9: u32 = icmp_slt %7, %1
-  cond_br %9, ^bb1(%8, %7), ^bb2()
-^bb2():
-  ret %5
+  cond_br %9, ^bb1(%8, %7), ^bb2(%8)
+^bb2(%10: s32):
+  ret %10
 }
 `);
     // The correct sequentialization: the body reads a0[v1] at the PRE-update index, the
@@ -312,16 +320,22 @@ describe('F1/F2 — write-site interference + materialization gate', () => {
 describe('M7 — swap cycles terminate, spill through a declared temp', () => {
   test('a two-variable swap loop emits t0 = v0; v0 = v1; v1 = t0 and terminates', () => {
     // hazard: unbounded fresh temps → RangeError: Out of memory
+    //
+    // The exit edge carries the value, for the reason spelled out on C6: `^bb2(): ret %3` named
+    // the header's own param from a block the header does not dominate, and the value it asked for
+    // is one swap behind the name. At origin/main that scaffold emitted `return v1` — slot ONE's
+    // name for a read of slot ZERO's param. Corrected, it emits byte-identical C at origin/main
+    // and here.
     const src = emit(`fn m7 {
 ^bb0(%0: s32, %1: s32, %2: s32):
-  cond_br %2, ^bb1(%0, %1, %2), ^bb2()
+  cond_br %2, ^bb1(%0, %1, %2), ^bb2(%0)
 ^bb1(%3: s32, %4: s32, %5: s32):
   %6: s32 = add %5 {imm=-1}
   %7: s32 = const {value=0}
   %8: u32 = icmp_ne %6, %7
-  cond_br %8, ^bb1(%4, %3, %6), ^bb2()
-^bb2():
-  ret %3
+  cond_br %8, ^bb1(%4, %3, %6), ^bb2(%4)
+^bb2(%9: s32):
+  ret %9
 }
 `);
     expect(src).toContain('s32 t0;'); // the spill temp is DECLARED

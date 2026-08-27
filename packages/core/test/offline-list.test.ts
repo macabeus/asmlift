@@ -1,15 +1,24 @@
 // Self-verifying `test:offline` layout. The hosted CI gate runs the root package.json's
-// `test:offline` script, which lists two DIRECTORIES: `packages/core/test` and
-// `packages/cli/test/offline`. This meta-test enforces the rule that makes those directories
-// meaningful — a suite needs a toolchain iff it imports @asmlift/toolchains (the pinned
-// compile/score implementations that spawn agbcc/IDO/KMC/mwcc), `docker-gate`, or
-// `checkout-gate` (bench-owned project checkout + native binutils) — so drift is
-// a CI failure instead of a comment. (cli's `src/score` is a toolchain-FREE seam: the registry
+// `test:offline` script, which lists three DIRECTORIES: `packages/core/test`,
+// `packages/cli/test/offline` and `packages/toolchains/test`. This meta-test enforces the rule
+// that makes those directories meaningful — a suite needs a toolchain iff it imports
+// @asmlift/toolchains (the pinned compile/score implementations that spawn agbcc/IDO/KMC/mwcc),
+// `docker-gate`, or `checkout-gate` (bench-owned project checkout + native binutils) — so drift
+// is a CI failure instead of a comment. (cli's `src/score` is a toolchain-FREE seam: the registry
 // + objdiff, offline-safe by design.)
 //   • every @asmlift/core suite must be toolchain-free (core has no score.ts to import);
 //   • every `cli/test/offline` suite must be toolchain-free (it runs on hosted CI);
 //   • every `cli/test/matching` suite must import a toolchain helper — one that doesn't is
 //     offline-safe coverage that hosted CI silently never runs (move it to offline/).
+//
+// `packages/toolchains/test` IS THE ONE DIRECTORY THE IMPORT DERIVATION CANNOT JUDGE: the package
+// under test is @asmlift/toolchains, so every suite there imports it by construction and the rule
+// above would misread injected fakes as real compilers. No weaker proxy is offered in its place —
+// what stands there is the hosted run itself, which has no agbcc, no IDO and no Docker, so a suite
+// that needs one goes RED rather than silent. What IS derivable is the drift that hid the
+// directory in the first place: a suite reachable through `vitest.config.ts` but not through the
+// script CI runs is collected by nobody, so the two lists are checked against each other.
+//
 // This file is itself offline and covered by the core dir entry.
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -31,9 +40,21 @@ const suites = (dir: string) =>
     .sort();
 const usesToolchain = (dir: string, f: string) => TOOLCHAIN_IMPORT.test(readFileSync(join(dir, f), 'utf8'));
 
-test('test:offline runs exactly the two toolchain-free directories', () => {
+const OFFLINE_DIRS = ['packages/core/test', 'packages/cli/test/offline', 'packages/toolchains/test'];
+
+test('test:offline runs exactly the toolchain-free directories', () => {
   const script: string = pkg.scripts['test:offline'];
-  expect(script).toBe('vitest run packages/core/test packages/cli/test/offline');
+  expect(script).toBe(`vitest run ${OFFLINE_DIRS.join(' ')}`);
+});
+
+// CI runs `pnpm run test:offline`, never a bare `vitest run`, so a directory in the config's
+// include and not in the script is collected by nobody on a hosted runner. That is how
+// `packages/toolchains` sat with no test directory and three throw sites nothing could reach.
+test('every directory the vitest config collects is one the CI script runs', () => {
+  const cfg = readFileSync(join(coreTestDir, '../../..', 'vitest.config.ts'), 'utf8');
+  const globs = [...cfg.matchAll(/'([^']*\/test[^']*\*[^']*)'/g)].map((m) => m[1]);
+  const uncovered = globs.filter((g) => !OFFLINE_DIRS.some((d) => g.startsWith(d)) && !g.startsWith('apps/'));
+  expect(uncovered, `collected by vitest.config.ts but not by test:offline: ${uncovered.join(', ')}`).toEqual([]);
 });
 
 test('every core suite is toolchain-free', () => {

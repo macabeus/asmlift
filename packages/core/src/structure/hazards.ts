@@ -76,7 +76,6 @@ export interface LoopHazards {
     sub: Map<Value, string>,
     updateWrites: Set<string>,
     region?: Set<Block> | null,
-    loopParams?: Set<Value>,
   ): boolean;
   loopUpdateHazard(
     condV: Value,
@@ -85,7 +84,6 @@ export interface LoopHazards {
     sub: Map<Value, string>,
     updateWrites: Set<string>,
     region: Set<Block> | null,
-    loopParams: Set<Value>,
   ): boolean;
   sinkablePreUpdateSlots(
     header: Block,
@@ -231,12 +229,34 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     sub: Map<Value, string>,
     updateWrites: Set<string>,
     region: Set<Block> | null = null,
-    loopParams: Set<Value> = new Set(),
   ): boolean => {
-    // Body-block PARAMS escape too: a non-loop-carried param whose adopted name the update writes
-    // reads post-loop as the clobbered value. canTakeName prevents that adoption, so this firing
-    // means a naming bug — decline loud, never emit. The loop's own carried params (`loopParams`)
-    // are exempt: their post-loop read of the updated name is exactly the intended final value.
+    // Body-block PARAMS escape too, and ONE rule covers all of them: escaped, under a name the
+    // update writes. The loop's own carried params used to be exempt outright and are not special
+    // — DELETED, not narrowed, and unnarrowable, because the only condition under the exemption
+    // was the rule's own. Anything implying NOT that is already what the rule returns; anything
+    // admitting it is the unconditional exemption back again. There being no third predicate is
+    // why `loopParams` left this file instead of being tightened inside it.
+    //
+    // Unconditional, it was a SILENT MISCOMPILE. "A post-loop read of the updated name is exactly
+    // the intended final value" holds for the BACK-EDGE ARG, which `sub` maps, and not for the
+    // PARAM, which is one update behind — and both emitters that passed a nonempty exemption set
+    // put the update at the BOTTOM of the body. The emitted C stored `i` where agbcc keeps a
+    // second register to store `i-1`; it compiled, it scored, and nothing in the tree noticed.
+    //
+    // ITS EVIDENCE IS A RIG, NOT THE CORPUS, which matters because the three disjuncts of
+    // `loopUpdateHazard` share one decline message. 121 generated loop shapes, each reference and
+    // each lift compiled natively and EXECUTED over an identical buffer: 76 wrong lifts became
+    // declines, 14 correct ones kept lifting with an identical hash. This clause then fires 0
+    // times over the klonoa checkout's 732 `.s` and over the 2737 candidates the 205 agbcc
+    // synthetic rows enumerate, where the predicate AROUND it fires 5 and 4 — on the condition, an
+    // exit arg, or an escaped op result (`synthetic:preupdate_escape` is the last of those).
+    //
+    // AND IT DECLINES ONLY BECAUSE OF HOW THE VALUE IS SPELLED. `sinkablePreUpdateSlots` below
+    // REPAIRS this hazard, re-emitting the copy inside the body ahead of the update, whenever the
+    // pre-update value crosses the exit as an edge ARG; read from the header PARAM instead it
+    // arrives here, with no exit slot to sink. Both spellings, and the agbcc listing, are in
+    // test/loop-preupdate-escape.test.ts. Routing the param one into the sink is a structure.ts
+    // change with a fan effect on every row, not an edit to this predicate.
     const escaped = (v: Value): boolean => {
       for (const s of useSitesOf.get(v) ?? []) {
         if (region ? region.has(s.blk) : !body.has(s.blk)) {
@@ -247,10 +267,9 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     };
     for (const bb of body) {
       for (const pv of bb.params) {
-        if (loopParams.has(pv)) {
-          continue;
-        }
-        if (escaped(pv) && updateWrites.has(varName.get(pv)!)) {
+        const n = varName.get(pv); // absent while naming is still in progress: not a written name
+
+        if (n !== undefined && updateWrites.has(n) && escaped(pv)) {
           return true;
         }
       }
@@ -277,11 +296,10 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     sub: Map<Value, string>,
     updateWrites: Set<string>,
     region: Set<Block> | null,
-    loopParams: Set<Value>,
   ): boolean =>
     readsClobbered(condV, sub, updateWrites) ||
     exitArgs.some((a) => readsClobbered(a, sub, updateWrites)) ||
-    loopEscapeHazard(body, sub, updateWrites, region, loopParams);
+    loopEscapeHazard(body, sub, updateWrites, region);
 
   // Which pre-update exit copies can be REPAIRED instead of declined. The exiting edge hands a
   // loop variable's top-of-iteration value to a merge param, and post-loop that name has moved on

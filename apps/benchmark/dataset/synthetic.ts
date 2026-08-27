@@ -3084,8 +3084,9 @@ export const SYNTHETIC: SynthSpec[] = [
   // candidate: on `dmafill` the reference's loop body holds 4 stores and the candidate's holds 1
   // (the other three land after the `ble`), and on the `dmavolsrc` control both hold 4.
   //
-  // WHY NO EXISTING ROW CATCHES IT, by a census of the committed `origin/main` artifact rather
-  // than by reading: of its 200 distinct synthetic rows, 22 reference a device register and 14 of
+  // WHY NO EXISTING ROW CATCHES IT, by a census of the artifact as it stood BEFORE the six rows
+  // below existed (207 distinct synthetic syms today): of its 200 distinct synthetic rows, 22
+  // reference a device register and 14 of
   // those also contain a loop — but 11 of the 14 carry a `while (dma[2] & 0x80000000) {}` wait
   // poll, whose read of the register file blocks the promotion outright. Of the three that do not
   // poll, `dma_fill_uninit` writes its registers BEFORE its loop, and `swmulti` and `offloop` each
@@ -3141,7 +3142,7 @@ export const SYNTHETIC: SynthSpec[] = [
   //                     DMA macros end with. asmlift emits IDENTICAL C for the two rows (`diff`
   //                     of the two renderings, modulo the function name, is empty). Restoring the
   //                     read in the candidate closes it to 0, with or without `volatile` on it.
-  //   `dmanest`     2 — `dmavolsrc` nested in an outer loop. Different residual entirely, kept
+  //   `dmanest`  MATCH — `dmavolsrc` nested in an outer loop. Different residual entirely, kept
   //                     here because it is the same construct: see the last block below.
   //
   // WHY `/volatile` COULD NOT REACH THESE ROWS, attributed by instrumenting the refusal rather
@@ -3156,9 +3157,9 @@ export const SYNTHETIC: SynthSpec[] = [
   // carrying `volatile`. `/vol-store` is the answer, because it qualifies the ACCESS and needs no
   // local at all; what keeps it off ordinary memory is the target's own declared window
   // (`capabilities.deviceRegisters`), which is a REACH gate rather than a soundness one — over the
-  // corpus it excludes a const-address store on 7 rows and moves the fan on two of them
-  // (`readarm` 6 candidates → 8, `fieldbase` 14 → 20), with no score and no outcome moving either
-  // way. `synthetic:ucmp:agbcc` prices the DEVICE-READ side of the same question and belongs to it
+  // corpus it excludes a const-address store on 7 rows, and lifting it would move the fan on two
+  // of them (`readarm` 6 candidates would become 8, `fieldbase` 14 would become 20 — 6 and 14 are
+  // what they enumerate today), with no score and no outcome moving either way. `synthetic:ucmp:agbcc` prices the DEVICE-READ side of the same question and belongs to it
   // rather than here: qualifying the 0x3001048 its loop test reads costs that match 15, and
   // `/vol-store` never reaches the row at all (its stores go through a runtime address).
   //
@@ -3195,16 +3196,59 @@ export const SYNTHETIC: SynthSpec[] = [
   // instruction costs in a 14-instruction loop body.
   //
   // `dmanest` IS A DIFFERENT MECHANISM and is deliberately the family's smallest row. Its two
-  // objdiff rows are `ldr r0, [r4, #4]` vs `[r4, #0]` and `.word 50345008` vs `.word 50345012`:
-  // under nesting asmlift stops rendering the element as a struct view (`((struct Elem0 *)
-  // 50345008)[a1].field_4`, what it emits for `dmavolsrc` and MATCHes with) and folds the field
-  // offset into the base instead (`((s32 *)((a1 << 3) + 50345008))[1]`). That FALSIFIES a premise
-  // written in two places in core — `packages/core/src/raise/structs.ts:25` and
-  // `packages/core/src/rank.ts:218` both say `->field_N` and `[idx]` compile identically so the
-  // differ cannot referee between them. On agbcc they do not: a COMPONENT_REF keeps the offset in
-  // the load displacement, an index folds it into the pool literal. Compiled both ways, at field
-  // offset 4 AND at offset 0, with an 8-byte struct and a 32-byte one. Keeping the view in the
-  // candidate closes the row to 0.
+  // objdiff rows were `ldr r0, [r4, #4]` vs `[r4, #0]` and `.word 50345008` vs `.word 50345012`:
+  // under nesting asmlift stopped rendering the element as a struct view (`((struct Elem0 *)
+  // 50345008)[a1].field_4`, what it emits for `dmavolsrc`) and folded the field offset into the
+  // base instead (`((s32 *)((a1 << 3) + 50345008))[1]`). CLOSED, and NOT in the pass the residual
+  // names. Struct-array recovery is present, correct and general; what was missing sits one level
+  // below it. `raise/struct-arrays.ts` refuses an element pointer that reaches a successor arg,
+  // and the nesting makes the frontend mint a ring of block params around that pointer which feed
+  // only each other and which no op reads — a ring `ir/simplify.ts`'s per-round reader scan could
+  // never retire, each half counting as the other's reader. Attributed by instrumenting the
+  // refusal: `NOTCLEAN block-arg-use op=cond_br` with `accesses=1 [load@4w4]` here against
+  // `ACCEPT stride=8 offs=4:4` on `dmavolsrc`. Least-fixpoint liveness retires the ring; the guard
+  // is untouched, and ablating it INSTEAD reaches 0 too but fans the row 28 → 36 — while ablating
+  // it AS WELL is inert (26 either way), because a retired ring leaves the guard nothing to trip
+  // on. The two are not the same edit: one removes the cause, the other removes a real hazard's
+  // refusal and buys 8 spurious candidates.
+  //
+  // WHAT MOVED IS THE WHOLE FAN, NOT ONE CANDIDATE. `dmanest` goes from 28 candidates carrying the
+  // folded spelling 28/28 to 26 carrying the struct view 26/26: the folded spelling is no longer
+  // ENUMERABLE, and nothing reports a candidate never enumerated. "No second spelling exists for
+  // the differ to referee" is false — the differ referees these two at 0 against 2.
+  //
+  // AND THE WINNING LABEL DID NOT MOVE AT ALL. `signed/vol-store/initfirst` before and after, at 2
+  // and at 0, while the winning PROGRAM changed completely (615 → 559 source bytes, a folded pool
+  // word for a struct view). `candidateLabel` names the LEVERS, not the program, so a label-keyed
+  // check sees nothing here — the inverse of the #112 trap, where the label gained `/vol-store` and
+  // announced a change of winner. Only the `source` byte field caught it in `bench diff`. Print the
+  // fan and diff the winner's text; a label is not an identity in either direction. The claim that
+  // holds about the recovery is
+  // stronger and is a property of the RECOVERY: it takes the base from the observed pool word and
+  // the field offset from the observed load displacement, so it reproduces the target's own split
+  // by construction. Verified by lifting all three splits and scoring each against ITS OWN target:
+  // `.word 0x3003430`+`[r0,#4]` → `((struct Elem0 *)50345008)[a0].field_4` 0; `.word 0x3003434`
+  // +`[r0]` → `((struct Elem0 *)50345012)[a0].field_0` 0; `.word 0x3003430`+`[r0]` → base
+  // 50345008 `field_0` 0. Where the target folded, the recovery folds; the folded RENDERING was
+  // the lossy one, which is why removing it costs nothing (894 rows, 0 lost).
+  //
+  // THE COMPILER FACT OUTLIVES THE ROW. It falsified a premise this repo held in two places —
+  // that `->field_N` and `[idx]` compile identically, so the differ cannot referee between them —
+  // and both citations have since been corrected (`raise/structs.ts` states the conditional form;
+  // `rank.ts`'s copy was an orphaned docstring and is gone, its signedness half now on
+  // `SIGN_CANDS`). On agbcc the two do not compile identically, and the two passes are nameable.
+  // The fold is TREE-level reassociation,
+  // `((VAR+C1)+C2) → VAR+(C1+C2)` in `fold`'s `associate:` block (gcc/fold-const.c:4959, via
+  // `split_tree` at :1226); a COMPONENT_REF never enters that arithmetic, because
+  // `get_inner_reference` (gcc/expr.c:3929, called at :5444) hands back the bit position
+  // separately and `plus_constant` (:5631) applies it to the already-expanded address, where
+  // Thumb's `[reg,#imm]` absorbs it. So an index moves the offset into the POOL LITERAL and a
+  // field leaves it in the LOAD DISPLACEMENT. Compiled both ways at field offset 4 AND at offset
+  // 0, with an 8-byte struct and a 32-byte one: at offset 0 the two are byte-identical, so the
+  // discriminator is a NONZERO field offset. It reproduces at a cast symbol base (`.word gRaw`
+  // plus `#0x4`) but NOT at a real array declaration — `extern struct E gTab[]; gTab[i].f4` emits
+  // a third form, `.word gTab` + `add r1,r1,#0x4` + `ldr [r0]` — so the divergence is
+  // decl-vs-cast, and a price measured here does not carry to a `gaddr` array declaration.
   //
   // NO ROW for the third gap this investigation named — a folded `symbol+k` pool literal against
   // the reference's single `symbol` — and the reason is structural, not an omission: a synthetic
@@ -3281,14 +3325,10 @@ export const SYNTHETIC: SynthSpec[] = [
   // these rows must state the span its gates range over, not the statement they happen to sit next
   // to.
   //
-  // Also measured while these rows were being attacked, and useful to whoever takes `dmanest`:
-  // `((struct Elem0 *)K)[a1].field_4` scores 0 on that row and `((s32 *)((a1 << 3) + K))[1]`
-  // scores 2 — two spellings one token apart, so the "`->field_N` and `[idx]` compile identically"
-  // premise in raise/structs.ts is CONDITIONAL and nothing says on what. One thing that round will
-  // not get for free: `/unreduce` cannot see `dmanest`'s loops either. They are nested, and that
-  // pass walks TOP-LEVEL loops only (91 of the corpus's 189 loop-bearing trees are in the same
-  // position), so a decline there names no gate. Widening the scan is a prerequisite, not a side
-  // effect.
+  // `/unreduce` CANNOT SEE `dmanest`'s LOOPS, and that is unrelated to what closed the row. They
+  // are nested, and that pass walks TOP-LEVEL loops only (91 of the corpus's 189 loop-bearing
+  // trees are in the same position), so a decline there names no gate. Widening the scan is a
+  // prerequisite for any lever that wants those loops, not a side effect of one that does not.
   //
   // agbcc only, as the `read-once`, `uninit-local` and `value-home` families are. Every claim
   // above is a pair of spellings compiled with THIS compiler; whether ido7.1, gcc2.7.2kmc and

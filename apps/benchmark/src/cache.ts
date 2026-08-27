@@ -14,11 +14,11 @@ import { extractAsmData, mipsObjdumpText, ppcObjdumpText } from '@asmlift/toolch
 import { GCC272_TOOLCHAIN, GCC_KMC_TOOLCHAIN, IDO_TOOLCHAIN, MWCC_PPC_TOOLCHAIN, TOOLCHAIN } from '@asmlift/toolchains';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { CACHE_DIR, M2C_DIR } from './config';
-import type { BuiltTarget, Toolchain, ToolchainId } from './toolchains';
+import { type BuiltTarget, type Toolchain, type ToolchainId, checkedTarget } from './toolchains';
 
 const enabled = () => process.env.ASMLIFT_BENCH_CACHE !== '0';
 export const sha = (s: string | Buffer): string => createHash('sha256').update(s).digest('hex');
@@ -44,8 +44,12 @@ const TC_CFG: Record<ToolchainId, unknown> = {
  *  language). The cached object file is returned by path and only ever READ downstream
  *  (objdiff target / objdump input). */
 export function cachedBuildTarget(tc: Toolchain, refC: string, sym: string, lang?: 'c' | 'c++'): BuiltTarget {
+  // `checkedTarget` (toolchains.ts) states the non-emptiness invariant; what is CACHE-specific is
+  // that the tmp-then-rename write makes a bad result a WELL-FORMED entry with no TTL, so the same
+  // question has to be asked twice — once on the way in, and once of what is already on disk.
+  const build = (): BuiltTarget => checkedTarget(tc.buildTarget(refC, sym, lang), `${sym} on ${tc.id}`);
   if (!enabled()) {
-    return tc.buildTarget(refC, sym, lang);
+    return build();
   }
   // lang enters the key only for c++ (see cachedM2cResult for the rationale)
   const key = sha(
@@ -54,9 +58,16 @@ export function cachedBuildTarget(tc: Toolchain, refC: string, sym: string, lang
   const oPath = join(CACHE_DIR, `ref-${key}.o`);
   const aPath = join(CACHE_DIR, `ref-${key}.asm`);
   if (existsSync(oPath) && existsSync(aPath)) {
-    return { obj: oPath, asm: readFileSync(aPath, 'utf8') };
+    const asm = readFileSync(aPath, 'utf8');
+    // BOTH halves, because the entry is two files and the observed poisoning had exactly one of
+    // them bad. An empty `.o` beside a good `.asm` is the same event with the halves swapped — a
+    // step that exited 0 having written nothing — and it is objdiff's scoring target, so left
+    // unchecked it scores every candidate against an empty object.
+    if (asm.trim() !== '' && statSync(oPath).size > 0) {
+      return { obj: oPath, asm };
+    }
   }
-  const built = tc.buildTarget(refC, sym, lang);
+  const built = build();
   mkdirSync(CACHE_DIR, { recursive: true });
   const tmp = `${oPath}.tmp${process.pid}`;
   copyFileSync(built.obj, tmp);
@@ -66,14 +77,22 @@ export function cachedBuildTarget(tc: Toolchain, refC: string, sym: string, lang
 }
 
 /** The PPC dockerized `objdump -s -r -t` text, content-cached by object bytes — the ONE cache
- *  path both PPC dump consumers share, so the path scheme cannot fork. */
+ *  path both PPC dump consumers share, so the path scheme cannot fork.
+ *
+ *  An empty dump raises in `ppcObjdumpText`, covering this cache, the uncached MIPS dumps and the
+ *  direct `extractAsmData` callers at once. What is left for the cache is the DURABLE half: an
+ *  entry written before that guard existed is a well-formed, TTL-less file that would be served
+ *  forever, so an empty one READS AS A MISS and is rebuilt. */
 function cachedPpcDumpText(obj: string): string {
   if (!enabled()) {
     return ppcObjdumpText(obj);
   }
   const path = join(CACHE_DIR, `ppcdump-${sha(readFileSync(obj))}.txt`);
   if (existsSync(path)) {
-    return readFileSync(path, 'utf8');
+    const cached = readFileSync(path, 'utf8');
+    if (cached.trim() !== '') {
+      return cached;
+    }
   }
   const dump = ppcObjdumpText(obj);
   put(path, dump);
