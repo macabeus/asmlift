@@ -129,7 +129,7 @@ describe('loopEscapeHazard', () => {
     expect(h.loopEscapeHazard(new Set([body]), new Map(), new Set(['v0']), new Set([elsewhere]))).toBe(true);
   });
 
-  test('an escaping body-block param with a clobbered name fires; a loop-carried param is exempt', () => {
+  test('an escaping body-block param with a clobbered name fires', () => {
     const p = v();
     const body: Block = { params: [p], ops: [] };
     const outside: Block = { params: [], ops: [] };
@@ -138,7 +138,31 @@ describe('loopEscapeHazard', () => {
       useSitesOf: new Map([[p, [use(outside)]]]),
     });
     expect(h.loopEscapeHazard(new Set([body]), new Map(), new Set(['v0']))).toBe(true);
-    expect(h.loopEscapeHazard(new Set([body]), new Map(), new Set(['v0']), null, new Set([p]))).toBe(false);
+  });
+
+  // The loop-carried exemption is about a param that STAYS INSIDE. It used to be unconditional,
+  // and that was a silent miscompile: post-loop the updated name holds the value the test failed
+  // on, while the PARAM meant the value at the top of that last iteration — one update behind.
+  // `sub` maps the back-edge arg, not the param, so nothing else in the pipeline reconciles them.
+  test('a loop-carried param is exempt only while it does not escape', () => {
+    const p = v();
+    const body: Block = { params: [p], ops: [] };
+    const outside: Block = { params: [], ops: [] };
+    const inside = (uses: Block[]) =>
+      make({ varName: new Map([[p, 'v0']]), useSitesOf: new Map([[p, uses.map(use)]]) });
+
+    // read only inside the body: the exemption stands
+    expect(inside([body]).loopEscapeHazard(new Set([body]), new Map(), new Set(['v0']), null, new Set([p]))).toBe(
+      false,
+    );
+    // read AFTER the loop, under a name the update writes: stale, and it declines
+    expect(inside([outside]).loopEscapeHazard(new Set([body]), new Map(), new Set(['v0']), null, new Set([p]))).toBe(
+      true,
+    );
+    // read after the loop under a name the update does NOT write: nothing moved, so it is safe
+    expect(inside([outside]).loopEscapeHazard(new Set([body]), new Map(), new Set(['v9']), null, new Set([p]))).toBe(
+      false,
+    );
   });
 });
 

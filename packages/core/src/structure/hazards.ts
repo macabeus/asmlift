@@ -235,8 +235,29 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
   ): boolean => {
     // Body-block PARAMS escape too: a non-loop-carried param whose adopted name the update writes
     // reads post-loop as the clobbered value. canTakeName prevents that adoption, so this firing
-    // means a naming bug — decline loud, never emit. The loop's own carried params (`loopParams`)
-    // are exempt: their post-loop read of the updated name is exactly the intended final value.
+    // means a naming bug — decline loud, never emit.
+    //
+    // THE LOOP'S OWN CARRIED PARAMS (`loopParams`) ARE EXEMPT ONLY WHILE THEY DO NOT ESCAPE, and
+    // the unconditional exemption this used to carry was a SILENT MISCOMPILE. Its rationale — "a
+    // post-loop read of the updated name is exactly the intended final value" — holds for the
+    // BACK-EDGE ARG, which `sub` maps, and not for the PARAM, which is one update behind. Both
+    // call sites that pass a nonempty `loopParams` emit the update at the BOTTOM of the body (the
+    // self-loop `while` and the do-while), so exiting means the update already ran: post-loop the
+    // name holds the value the test failed on, while the param meant the value at the top of that
+    // last iteration. agbcc spells the difference out — `add r3,r1,#0 … add r1,r3,#1 … str r3`
+    // keeps a second register precisely so the store gets `i-1`, and the emitted C stored `i`.
+    // It compiled, it scored, and nothing in the tree noticed.
+    //
+    // Narrowing the exemption converts that into the loud decline below. Measured in BOTH
+    // directions before it shipped: over 121 generated loop shapes across two seeds, each
+    // reference and each lift COMPILED NATIVELY AND EXECUTED over an identical buffer with the
+    // buffer hash as the verdict, all 76 semantically-wrong lifts became declines and all 14
+    // correct ones kept lifting with an identical hash — no correct lift lost, none left silently
+    // wrong. Cost elsewhere is zero: 291 lifted klonoa functions and 205 agbcc synthetic rows are
+    // byte-identical, with no new decline in either.
+    //
+    // The refusal is a DECLINE, not a repair. Preserving the pre-update value in its own local is
+    // the right eventual answer and is a change to name assignment, not to this predicate.
     const escaped = (v: Value): boolean => {
       for (const s of useSitesOf.get(v) ?? []) {
         if (region ? region.has(s.blk) : !body.has(s.blk)) {
@@ -247,7 +268,7 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     };
     for (const bb of body) {
       for (const pv of bb.params) {
-        if (loopParams.has(pv)) {
+        if (loopParams.has(pv) && !(escaped(pv) && updateWrites.has(varName.get(pv)!))) {
           continue;
         }
         if (escaped(pv) && updateWrites.has(varName.get(pv)!)) {
