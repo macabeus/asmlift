@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generatedAt": "2026-08-26T22:28:33.764Z",
+    "generatedAt": "2026-08-27T00:23:36.102Z",
     "toolchains": [
       "ido7.1",
       "agbcc",
@@ -14,7 +14,7 @@
       "real": 252
     },
     "asmlift": {
-      "commit": "efa2b37a7c2da8e2772517a290a71a6873e6cac0",
+      "commit": "294dbbf7711d070f3ce5d60eeac9e08bd6ba4036",
       "dirty": false
     },
     "m2c": {
@@ -40428,6 +40428,28 @@
       "asmlift": {
         "decompiler": "asmlift",
         "candidateLabel": "unsigned/vol-store/unreduce/ptr-field",
+        "withheldCandidates": [
+          {
+            "label": "unsigned/unreduce",
+            "score": 35,
+            "why": "this spelling rests on a device-behaviour fact no gate over the C can settle; only a byte-exact score proves it"
+          },
+          {
+            "label": "unsigned/vol-store/unreduce",
+            "score": 35,
+            "why": "this spelling rests on a device-behaviour fact no gate over the C can settle; only a byte-exact score proves it"
+          },
+          {
+            "label": "signed/unreduce",
+            "score": 35,
+            "why": "this spelling rests on a device-behaviour fact no gate over the C can settle; only a byte-exact score proves it"
+          },
+          {
+            "label": "signed/vol-store/unreduce",
+            "score": 35,
+            "why": "this spelling rests on a device-behaviour fact no gate over the C can settle; only a byte-exact score proves it"
+          }
+        ],
         "outcome": "match",
         "source": "struct Elem0 { u8 _pad0[4]; void *field_4; };\nvoid dmaptrsrc(u32 a0, u32 a1) {\n    s32 v1;\n    volatile u16 sp0;\n    v1 = a0;\n    while (v1 <= 31) {\n        sp0 = 0;\n        *(volatile s32 *)67109076 = &sp0;\n        *(volatile s32 *)67109080 = (v1 << 6) + (s32)((struct Elem0 *)50345008)[a1].field_4;\n        *(volatile s32 *)67109084 = -2130706400;\n        v1 = v1 + 1;\n    }\n    return;\n}\n",
         "score": 0,
