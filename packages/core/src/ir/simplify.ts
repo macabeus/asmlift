@@ -93,11 +93,13 @@ export function simplifyTrivialPhis(fn: Fn, onRemoved?: (param: Value) => void):
  * THE ENTRY BLOCK IS NEVER TOUCHED — its params are the function's signature, and an argument the
  * body ignores is still an argument (frontend/ssa.ts `ensureParam` creates exactly those on
  * purpose). They are therefore seeded LIVE rather than merely skipped: an entry block that is also
- * a loop header has in-edges, and a slot that is kept has to keep whatever feeds it defined.
+ * a loop header has in-edges, and a slot that is kept has to keep whatever feeds it defined. A
+ * function with no blocks has no entry and no params, and is a no-op rather than a throw — this
+ * runs mid-construction, ahead of the verifier that rejects such a graph.
  * Returns how many were removed.
  */
 export function pruneDeadParams(fn: Fn, onRemoved?: (param: Value) => void): number {
-  const live = new Set<Value>(fn.blocks[0].params);
+  const live = new Set<Value>(fn.blocks[0]?.params ?? []);
   for (const b of fn.blocks) {
     for (const op of b.ops) {
       for (const v of op.operands) {

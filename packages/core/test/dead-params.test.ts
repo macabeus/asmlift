@@ -155,6 +155,10 @@ describe('pruneDeadParams', () => {
     verify(fn);
   });
 
+  test('a function with no blocks is a no-op, not a throw', () => {
+    expect(pruneDeadParams(parse('fn f {\n}\n'))).toBe(0);
+  });
+
   test('a back edge into the entry block keeps what it feeds, even into a slot nothing reads', () => {
     const fn = parse(ENTRY_IS_HEADER);
     expect(pruneDeadParams(fn)).toBe(0);
