@@ -13,7 +13,7 @@ import { T } from '../src/ir/types';
 import type { Expr, SFn } from '../src/l3/ast';
 import { exprEquals } from '../src/l3/ast';
 import { decompile } from '../src/pipeline';
-import { compareScored, rankBy, withheldReason } from '../src/rank';
+import { compareScored, composeLevers, rankBy, withheldReason } from '../src/rank';
 import type { SymbolMap } from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
 
@@ -230,5 +230,62 @@ describe('the LOGICAL right shift has no IDO Pascal spelling — it declines, ne
 
   test('the LOGICAL shift declines LOUDLY, naming the operator', () => {
     expect(() => pascalBackend.emit(shiftFn('>>>'))).toThrow(/operator '>>>' has no faithful IDO Pascal spelling/);
+  });
+});
+
+// THE PROPAGATION RULE, which is the other half of the mechanism above. `withheldReason` decides
+// what a proof-gated spelling may publish AT; this decides which spellings are proof-gated at all.
+//
+// The obligation is created by ONE lever (`/unreduce`, when it cannot settle a device-memory fact
+// from inside the pass) and has to survive every lever composed after it. That carry used to be
+// hand-written per pairing — `return { sfn: t, needsProof: u.needsProof }` — and the union type
+// made `return t;` a type-correct way to delete it: ablated, tsc stayed clean and 118 test files /
+// 1714 tests stayed green, and the triple would have published an unprovable spelling as asmlift's
+// answer. Composing through one combinator is what makes that inexpressible, so the combinator is
+// the thing to pin.
+describe('a proof obligation survives every lever composed after it (rank.ts composeLevers)', () => {
+  const tree = (name: string): SFn => ({ name, params: [], locals: [], globals: [], retType: T.u(32), body: [] });
+  const plain = (name: string) => (): SFn => tree(name);
+  const proving = (name: string) => (): { sfn: SFn; needsProof: boolean } => ({ sfn: tree(name), needsProof: true });
+  const settled = (name: string) => (): { sfn: SFn; needsProof: boolean } => ({ sfn: tree(name), needsProof: false });
+  const proofOf = (r: ReturnType<typeof composeLevers>) => (r && 'sfn' in r ? r.needsProof : false);
+  const treeOf = (r: ReturnType<typeof composeLevers>) => (r && 'sfn' in r ? r.sfn : r);
+
+  test('an obligation raised by an EARLY stage rides through the later ones', () => {
+    const out = composeLevers(tree('in'), [proving('a'), plain('b'), plain('c')]);
+    expect(proofOf(out)).toBe(true);
+    expect(treeOf(out)?.name).toBe('c'); // and the last stage's tree is what is emitted
+  });
+
+  test('an obligation raised by a LATE stage is carried too', () => {
+    expect(proofOf(composeLevers(tree('in'), [plain('a'), proving('b')]))).toBe(true);
+  });
+
+  test('a stage that settles its own fact does not gate the composition', () => {
+    const out = composeLevers(tree('in'), [settled('a'), plain('b')]);
+    expect(proofOf(out)).toBe(false);
+    expect(treeOf(out)?.name).toBe('b');
+  });
+
+  test('no obligation anywhere leaves the spelling ungated', () => {
+    expect(proofOf(composeLevers(tree('in'), [plain('a'), plain('b')]))).toBe(false);
+  });
+
+  // REQUIRE-ALL, not skip-on-decline: the label names the levers that fired, so a composition
+  // missing one of them must not be emitted under the full label.
+  test('one declining stage declines the whole composition, wherever it sits', () => {
+    const decline = () => null;
+    expect(composeLevers(tree('in'), [decline, proving('b')])).toBeNull();
+    expect(composeLevers(tree('in'), [proving('a'), decline])).toBeNull();
+    expect(composeLevers(tree('in'), [plain('a'), decline, plain('c')])).toBeNull();
+  });
+
+  test("each stage is handed the PREVIOUS stage's tree, not the original", () => {
+    const seen: string[] = [];
+    const step =
+      (name: string) =>
+      (s: SFn): SFn => (seen.push(s.name), tree(name));
+    composeLevers(tree('in'), [step('a'), step('b'), step('c')]);
+    expect(seen).toEqual(['in', 'a', 'b']);
   });
 });

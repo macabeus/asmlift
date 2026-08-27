@@ -254,11 +254,15 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     // seeds, each reference and each lift COMPILED NATIVELY AND EXECUTED over an identical buffer
     // with the buffer hash as the verdict, all 76 semantically-wrong lifts became declines and all
     // 14 correct ones kept lifting with an identical hash — no correct lift lost, none left
-    // silently wrong. REACH IS ZERO on everything the repo owns, instrumented rather than argued:
-    // the clause fires 0 times over klonoa's 469 `.s` (257 lift / 212 decline) in both gap modes,
-    // over all 732 `.s` in that checkout (426 / 306), over sa3's 16 (which are TU-level asm and
-    // lift none), and across the 2737 candidates the 205 agbcc synthetic rows enumerate. So the
-    // 121-shape rig is this refusal's whole evidence base, and a corpus sweep cannot renew it.
+    // silently wrong. And THIS CLAUSE — not the predicate around it — has ZERO REACH on everything
+    // the repo owns, which is instrumented rather than argued and is worth stating per disjunct,
+    // because they share one decline message. Over all 732 `.s` in the klonoa checkout (426 lift /
+    // 306 decline, both gap modes; 469 of them under `asm/`, 257 / 212) `loopUpdateHazard` fires 4
+    // times on the CONDITION and once on an escaped op RESULT, and 0 times here. Over the 2737
+    // candidates the 205 agbcc synthetic rows enumerate: 1 condition, 2 exit args, 1 op result, 0
+    // here — `synthetic:preupdate_escape` included, which declines on its op result. sa3's 16 are
+    // TU-level asm and lift none. So the 121-shape rig is THIS clause's whole evidence base and a
+    // corpus sweep cannot renew it, while the surrounding predicate is exercised by five rows.
     //
     // AND IT IS A DECLINE ONLY BECAUSE OF HOW THE VALUE IS SPELLED. `sinkablePreUpdateSlots`
     // below REPAIRS the same hazard — it re-emits the copy inside the body ahead of the update —

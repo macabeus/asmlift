@@ -586,6 +586,39 @@ export function withheldReason<S extends { score: number }>(c: Candidate, score:
  *  is a decline. */
 type LeverResult = SFn | { sfn: SFn; needsProof: boolean } | null | undefined;
 
+/** REQUIRE-ALL composition of re-spelling levers, and the ONE place a proof obligation crosses
+ *  from one lever to the next.
+ *
+ *  `LeverResult` is a union, so a hand-written composition can spell the obligation away by
+ *  accident and stay type-correct: `return pointerFields(u.sfn);` in place of
+ *  `return { sfn: t, needsProof: u.needsProof };` compiles, passes tsc and passes every suite,
+ *  and publishes as asmlift's answer a spelling that was supposed to be withheld unless byte-exact.
+ *  Composing through here makes dropping it INEXPRESSIBLE — a caller lists the stages and never
+ *  touches the flag.
+ *
+ *  The obligation is MONOTONE, which is what lets it be an `or`: it says "no gate over this C can
+ *  settle the fact this spelling rests on", and a later re-spelling cannot settle a fact about an
+ *  earlier one. `/ptr-field` re-types a field and never moves a read, so it carries `/unreduce`'s
+ *  obligation through unchanged rather than discharging it.
+ *
+ *  REQUIRE-ALL, never skip-on-decline: one declining stage declines the whole composition, so the
+ *  label always names exactly the levers that fired. `applyShapes` is the opposite by design (a
+ *  shape that does not fire is simply absent from a shape SUBSET), and using it for the pairings
+ *  would admit the intermediate pairs no row demands — the reason the pairing site rejects it. */
+export function composeLevers(sfn: SFn, stages: readonly ((s: SFn) => LeverResult)[]): LeverResult {
+  let cur = sfn;
+  let needsProof = false;
+  for (const stage of stages) {
+    const made = stage(cur);
+    if (!made) {
+      return null;
+    }
+    cur = 'sfn' in made ? made.sfn : made;
+    needsProof = needsProof || ('sfn' in made && made.needsProof);
+  }
+  return needsProof ? { sfn: cur, needsProof } : cur;
+}
+
 /** One emitted spelling of a structured tree: the label suffix naming the lever that produced it,
  *  the rendered source, and the tree-derived facts `compareScored` ranks by. */
 interface Spelling {
@@ -989,17 +1022,13 @@ export function enumerateCandidates(
     // `applyShapes` is SKIP-ON-DECLINE and would emit "everything that fired" on any tree where
     // one of the three declines. That is the property the shape products are designed around and
     // the one the pairing policy forbids — a pair reaches the fan only when a row demands it.
-    respell('/vol-store/unreduce', () => {
-      const r = volatileDeviceStores(sfn, target.capabilities.deviceRegisters);
-      return r ? unreduced(r) : null;
-    });
-    respell('/vol-store/unreduce/ptr-field', () => {
-      const r = volatileDeviceStores(sfn, target.capabilities.deviceRegisters);
-      const u = r ? unreduced(r) : null;
-      // `/ptr-field` re-types; it never moves a read, so the proof requirement rides through it
-      const t = u ? pointerFields(u.sfn) : null;
-      return t && u ? { sfn: t, needsProof: u.needsProof } : null;
-    });
+    //
+    // Both go through `composeLevers`, which is REQUIRE-ALL and carries `/unreduce`'s proof
+    // obligation across the stages after it — hand-writing that carry made dropping it a
+    // type-correct edit no test anywhere caught.
+    const volStore = (s: SFn): SFn | null => volatileDeviceStores(s, target.capabilities.deviceRegisters);
+    respell('/vol-store/unreduce', () => composeLevers(sfn, [volStore, unreduced]));
+    respell('/vol-store/unreduce/ptr-field', () => composeLevers(sfn, [volStore, unreduced, pointerFields]));
     // `/inlinebase` — spell a CONSTANT-address pointer local at its uses instead
     // (l3/inlinebase.ts). The local is structure/analysis.ts's value home for a `const` the
     // asm kept in a callee-saved register across a call; the register is real, but a constant
