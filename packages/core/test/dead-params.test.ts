@@ -165,4 +165,37 @@ describe('pruneDeadParams', () => {
     verify(fn);
     expect(print(fn)).toContain('^bb1(%4: s32):');
   });
+
+  // Liveness here runs BACKWARD along the edges, so a round-robin sweep of `fn.blocks` in forward
+  // order advances it one hop per round and costs the SQUARE of the chain length. A worklist over
+  // an inverted edge index is linear whatever the block order. This is shared L1 substrate that
+  // runs once per lift on every ISA, and klonoa holds a single 28652-byte function; today's agbcc
+  // corpus tops out at 107 blocks, so nothing but a test reaches the shape.
+  //
+  // The budget is measured against `parse` OF THE SAME TEXT rather than a wall clock: parsing is
+  // linear in the graph and touches the same structures, so the ratio calibrates itself to the
+  // machine. Over a 3001-block chain the two spellings are two orders of magnitude apart —
+  // worklist 0.45–0.47× parse, round-robin 48.5–50.7× — so 5 is a threshold neither noise nor a
+  // faster laptop can cross. Minimum of three runs, because scheduler noise only ever adds.
+  test('liveness is a worklist, not a round-robin sweep — a long param chain stays linear', () => {
+    const n = 3000;
+    const L = ['fn f {', '^bb0(%0: s32):', '  br ^bb1(%0)'];
+    for (let i = 1; i < n; i++) {
+      L.push(`^bb${i}(%${i}: s32):`, `  br ^bb${i + 1}(%${i})`);
+    }
+    L.push(`^bb${n}(%${n}: s32):`, `  %${n + 1}: u32 = icmp_ne %${n}, %${n}`, '  ret', '}');
+    const src = L.join('\n') + '\n';
+
+    let parseMs = Infinity,
+      pruneMs = Infinity;
+    for (let r = 0; r < 3; r++) {
+      let t0 = process.hrtime.bigint();
+      const fn = parse(src);
+      parseMs = Math.min(parseMs, Number(process.hrtime.bigint() - t0) / 1e6);
+      t0 = process.hrtime.bigint();
+      expect(pruneDeadParams(fn)).toBe(0); // ONE real reader at the far end: nothing is removable
+      pruneMs = Math.min(pruneMs, Number(process.hrtime.bigint() - t0) / 1e6);
+    }
+    expect(pruneMs / parseMs).toBeLessThan(5);
+  });
 });

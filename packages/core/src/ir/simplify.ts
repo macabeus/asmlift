@@ -99,29 +99,63 @@ export function simplifyTrivialPhis(fn: Fn, onRemoved?: (param: Value) => void):
  * Returns how many were removed.
  */
 export function pruneDeadParams(fn: Fn, onRemoved?: (param: Value) => void): number {
-  const live = new Set<Value>(fn.blocks[0]?.params ?? []);
+  // Liveness travels BACKWARD — from a live slot to the args feeding it — so it is driven off a
+  // WORKLIST over an inverted edge index, not by re-sweeping the graph until a round adds nothing.
+  // Round-robin over `fn.blocks` in forward order advances one hop per round along a chain of
+  // block params, which is quadratic in the chain length: a 2001-block chain measured 0.87 ms as
+  // a per-round reader scan and 286 ms as a round-robin fixpoint, 1001 → 2001 costing 9.2× for
+  // 2× the size. The worklist is linear in (values + edge args) whatever the block order, and it
+  // matters because this is shared L1 substrate that runs once per lift on every ISA — today's
+  // agbcc corpus tops out at 107 blocks, but klonoa holds one 28652-byte function.
+  //
+  // `edgesTo` is the same index the removal pass needs, so it is built ONCE for both: without it
+  // each removed param re-walks every op in the function.
+  const edgesTo = new Map<Block, Successor[]>();
   for (const b of fn.blocks) {
     for (const op of b.ops) {
-      for (const v of op.operands) {
-        live.add(v);
+      for (const s of op.successors) {
+        const list = edgesTo.get(s.block);
+        if (list === undefined) {
+          edgesTo.set(s.block, [s]);
+        } else {
+          list.push(s);
+        }
       }
     }
   }
-  let growing = true;
-  while (growing) {
-    growing = false;
-    for (const b of fn.blocks) {
-      for (const op of b.ops) {
-        for (const s of op.successors) {
-          s.args.forEach((a, i) => {
-            const slot = s.block.params[i];
-            if (slot !== undefined && live.has(slot) && !live.has(a)) {
-              live.add(a);
-              growing = true;
-            }
-          });
-        }
+  // Which args feed a given slot. Keyed by the PARAM value (identity is the graph's own), so a
+  // slot that becomes live hands back exactly the values that flow into it.
+  const feeders = new Map<Value, Value[]>();
+  for (const b of fn.blocks) {
+    b.params.forEach((slot, i) => {
+      const args = (edgesTo.get(b) ?? []).map((s) => s.args[i]).filter((a): a is Value => a !== undefined);
+      if (args.length > 0) {
+        feeders.set(slot, (feeders.get(slot) ?? []).concat(args));
       }
+    });
+  }
+
+  const live = new Set<Value>();
+  const work: Value[] = [];
+  const mark = (v: Value): void => {
+    if (!live.has(v)) {
+      live.add(v);
+      work.push(v);
+    }
+  };
+  for (const p of fn.blocks[0]?.params ?? []) {
+    mark(p);
+  }
+  for (const b of fn.blocks) {
+    for (const op of b.ops) {
+      for (const v of op.operands) {
+        mark(v);
+      }
+    }
+  }
+  for (let v = work.pop(); v !== undefined; v = work.pop()) {
+    for (const a of feeders.get(v) ?? []) {
+      mark(a);
     }
   }
 
@@ -132,6 +166,7 @@ export function pruneDeadParams(fn: Fn, onRemoved?: (param: Value) => void): num
     if (b === fn.blocks[0]) {
       continue;
     }
+    const incoming = edgesTo.get(b) ?? [];
     for (let i = b.params.length - 1; i >= 0; i--) {
       const param = b.params[i];
       if (live.has(param)) {
@@ -139,14 +174,8 @@ export function pruneDeadParams(fn: Fn, onRemoved?: (param: Value) => void): num
       }
       onRemoved?.(param);
       b.params.splice(i, 1);
-      for (const pb of fn.blocks) {
-        for (const op of pb.ops) {
-          for (const s of op.successors) {
-            if (s.block === b) {
-              s.args.splice(i, 1);
-            }
-          }
-        }
+      for (const s of incoming) {
+        s.args.splice(i, 1);
       }
       removed++;
     }
