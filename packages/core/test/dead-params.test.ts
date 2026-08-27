@@ -177,15 +177,27 @@ describe('pruneDeadParams', () => {
   // machine. Over a 3001-block chain the two spellings are two orders of magnitude apart —
   // worklist 0.45–0.47× parse, round-robin 48.5–50.7× — so 5 is a threshold neither noise nor a
   // faster laptop can cross. Minimum of three runs, because scheduler noise only ever adds.
-  test('liveness is a worklist, not a round-robin sweep — a long param chain stays linear', () => {
-    const n = 3000;
+  //
+  // BOTH HALVES ARE BUDGETED, because the same commit rewrote both and they fail differently. The
+  // LIVE chain times LIVENESS: one real reader at the far end keeps every slot, so the removal loop
+  // does no splicing at all and a regression there would not show. The DEAD chain times REMOVAL:
+  // nothing reads anything, so every slot goes, and the removal used to re-walk every op in the
+  // function per removed param — quadratic in a shape where liveness is trivial.
+  const chain = (n: number, live: boolean): string => {
     const L = ['fn f {', '^bb0(%0: s32):', '  br ^bb1(%0)'];
     for (let i = 1; i < n; i++) {
       L.push(`^bb${i}(%${i}: s32):`, `  br ^bb${i + 1}(%${i})`);
     }
-    L.push(`^bb${n}(%${n}: s32):`, `  %${n + 1}: u32 = icmp_ne %${n}, %${n}`, '  ret', '}');
-    const src = L.join('\n') + '\n';
+    L.push(`^bb${n}(%${n}: s32):`);
+    if (live) {
+      L.push(`  %${n + 1}: u32 = icmp_ne %${n}, %${n}`);
+    }
+    L.push('  ret', '}');
+    return L.join('\n') + '\n';
+  };
 
+  /** Slowest-case ratio of `pruneDeadParams` to `parse` over the same text, best of three. */
+  const budget = (src: string, expectRemoved: number): number => {
     let parseMs = Infinity,
       pruneMs = Infinity;
     for (let r = 0; r < 3; r++) {
@@ -193,9 +205,17 @@ describe('pruneDeadParams', () => {
       const fn = parse(src);
       parseMs = Math.min(parseMs, Number(process.hrtime.bigint() - t0) / 1e6);
       t0 = process.hrtime.bigint();
-      expect(pruneDeadParams(fn)).toBe(0); // ONE real reader at the far end: nothing is removable
+      expect(pruneDeadParams(fn)).toBe(expectRemoved);
       pruneMs = Math.min(pruneMs, Number(process.hrtime.bigint() - t0) / 1e6);
     }
-    expect(pruneMs / parseMs).toBeLessThan(5);
+    return pruneMs / parseMs;
+  };
+
+  test('LIVENESS is a worklist, not a round-robin sweep — a long live param chain stays linear', () => {
+    expect(budget(chain(3000, true), 0)).toBeLessThan(5);
+  });
+
+  test('REMOVAL uses the prebuilt edge index — dropping 3000 dead slots stays linear too', () => {
+    expect(budget(chain(3000, false), 3000)).toBeLessThan(5);
   });
 });

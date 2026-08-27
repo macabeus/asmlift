@@ -76,9 +76,19 @@ export interface DecompileResult {
   sfn: SFn;
   ir: { raw: string; folded: string; recovered: string }; // IR dumps: post-lift, post-idiom, post-recovery
   patternHits: number;
-  /** structured gap list — ALWAYS present; empty ⇔ the emission is gap-free (compiles + candidate
-   *  for scoring). Non-empty ⇔ the source contains ASMLIFT_ERROR markers / a stub and will NOT
-   *  compile until the user defines that symbol (the loud-in-artifact contract). */
+  /** structured gap list — ALWAYS present. Non-empty ⇔ the source contains ASMLIFT_ERROR markers /
+   *  a stub and will NOT compile until the user acts (the loud-in-artifact contract).
+   *
+   *  EMPTY IS THE ABSENCE OF A GAP, NOT A PROMISE THAT THE C COMPILES, and the two used to be
+   *  written here as one thing. A gap is a place asmlift could not lift; a candidate can also fail
+   *  to compile because it names a symbol the caller has not declared, which is a CONTEXT question
+   *  and not a gap — the benchmark answers it by escalating to the function's vendored preprocessed
+   *  context. Most such names survive K&R implicit declaration, but a function ADDRESS does not:
+   *  klonoa's `UpdateStageSelectScreen` reports 0 gaps and emits `((s32 *)50345232)[1] =
+   *  &HandlePauseMenuInput;`, which agbcc rejects as `undeclared (first use in this function)`
+   *  while the plain call two hundred lines above it passes with a warning. Emitting a declaration
+   *  for an address-taken unknown callee would close it; that is an emitter change, and it moves
+   *  source bytes on every row that has one. */
   diagnostics: Diagnostic[];
 }
 
