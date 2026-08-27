@@ -65,6 +65,42 @@ const SELF_FEED = `fn f {
 }
 `;
 
+// %2 and %4 feed ONLY each other around the loop and no op reads either: a mutually-dead cycle,
+// the shape the Thumb frontend mints for a register the epilogue leaves holding a stale pointer.
+// A per-round reader scan calls each one the other's reader and neither ever dies.
+const DEAD_CYCLE = `fn f {
+^bb0(%0: s32):
+  %1: s32 = const {value=0}
+  br ^bb1(%1)
+^bb1(%2: s32):
+  %3: u32 = icmp_ne %0, %0
+  cond_br %3, ^bb2(%2), ^bb3()
+^bb2(%4: s32):
+  br ^bb1(%4)
+^bb3():
+  ret
+}
+`;
+
+// The same cycle with ONE real op operand on it: liveness has to flow backwards around the whole
+// ring, so neither slot may go.
+const LIVE_CYCLE = DEAD_CYCLE.replace('br ^bb1(%4)', '%5: s32 = add %4, %4\n  br ^bb1(%4)');
+
+// An entry block that is ALSO a loop header: nothing reads entry param %1, but entry params are
+// never removed, so the back edge keeps feeding slot 1 — and %4, which is what it feeds, must stay
+// defined or that arg dangles.
+const ENTRY_IS_HEADER = `fn f {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=0}
+  %3: u32 = icmp_ne %0, %2
+  cond_br %3, ^bb1(%2), ^bb2()
+^bb1(%4: s32):
+  br ^bb0(%0, %4)
+^bb2():
+  ret
+}
+`;
+
 describe('pruneDeadParams', () => {
   test('a join param nothing reads is removed with its edge args', () => {
     const fn = parse(DEAD_JOIN);
@@ -100,5 +136,29 @@ describe('pruneDeadParams', () => {
     const fn = parse(DEAD_JOIN);
     pruneDeadParams(fn);
     expect(print(fn)).toContain('^bb0(%0: s32):');
+  });
+
+  test('a mutually-dead cycle of params dies — an edge arg is a read only if its slot is live', () => {
+    const fn = parse(DEAD_CYCLE);
+    expect(pruneDeadParams(fn)).toBe(2);
+    verify(fn);
+    const out = print(fn);
+    expect(out).toContain('^bb1():');
+    expect(out).toContain('^bb2():');
+    expect(out).toContain('^bb2(), ^bb3()'); // the forward arg went with the slot
+    expect(out).toContain('br ^bb1()'); // and so did the back edge's
+  });
+
+  test('one real op operand keeps the whole cycle', () => {
+    const fn = parse(LIVE_CYCLE);
+    expect(pruneDeadParams(fn)).toBe(0);
+    verify(fn);
+  });
+
+  test('a back edge into the entry block keeps what it feeds, even into a slot nothing reads', () => {
+    const fn = parse(ENTRY_IS_HEADER);
+    expect(pruneDeadParams(fn)).toBe(0);
+    verify(fn);
+    expect(print(fn)).toContain('^bb1(%4: s32):');
   });
 });
