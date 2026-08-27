@@ -47,10 +47,15 @@
 // raise/structs.ts recovers a struct from CONSTANT-offset accesses and leaves every variable-index
 // base alone (its `arrayBases` set); raise/struct-arrays.ts recovers an ARRAY OF STRUCTS, where the
 // index scales the stride and the constant offset is the field. This pass is the remaining corner —
-// the constant offset selects the member and the index strides inside it. The three ADDRESS shapes
-// are disjoint, so no priority rule decides between them; what a priority rule does decide is a
-// single BASE carrying two of the shapes, and there each pass refuses what another has claimed
-// (`base-typed` here, `arrayBases` and the `unknown` check there).
+// the constant offset selects the member and the index strides inside it.
+//
+// The three shapes are NOT disjoint, and the overlap is per-ACCESS rather than per-base:
+// `P->tbl[i].f` is an array of structs living at a member offset, so it carries both this pass's
+// address shape and struct-arrays'. Ordering alone does not deconflict them, because the two passes
+// claim different VALUES — struct-arrays types the materialized `add(P, K)`, this pass groups on
+// `P` — so each refuses what another has marked: `claimed-access` and `base-typed` here,
+// `arrayBases` and the `unknown` check there. `field_K[i].f` is a layout this pass does not declare;
+// the loud half of that refusal is in structure.ts's `arrayAccess`.
 import { type Fn, type Op, type Value, defOpMap } from '../ir/core';
 import { type IrType, type StructField, T, scalarTypeForAccess } from '../ir/types';
 import { type Gate, firstRejection } from '../l3/gates';
@@ -83,6 +88,8 @@ interface Member {
 export interface MemberArrayCandidate {
   /** the base is still untyped, so no earlier recovery has claimed it */
   untypedBase: boolean;
+  /** no access, nor the member address it is taken off, was already claimed by an earlier recovery */
+  unclaimedAccesses: boolean;
   /** the base is the address of a NAMED global, whose declaration is the project's own */
   namedGlobalBase: boolean;
   /** some access sits at a NONZERO member offset — a base walked only at offset 0 is a plain array */
@@ -112,6 +119,19 @@ export const MEMBER_ARRAY_GATES: readonly Gate<MemberArrayCandidate>[] = [
     sound: false,
     guardedBy: 'member-arrays.test.ts: an array-of-struct base declines',
     rejects: (c) => !c.untypedBase,
+  },
+  {
+    // The per-ACCESS half of `base-typed`, and it is a different region rather than a stronger
+    // rule: raise/struct-arrays.ts types the MATERIALIZED member address `add(P, K)` and marks the
+    // accesses it mints with its own `fieldOff`, while the base `P` this pass groups on stays
+    // untyped — so `P->tbl[i].f` reaches the gates as an ordinary member walk. Claiming it drops
+    // the field offset (an array of structs at a member offset is not the layout this pass
+    // declares) and re-spells the element STRIDE as a scalar width.
+    id: 'claimed-access',
+    why: 'an access another recovery has already claimed carries an offset this pass would drop',
+    sound: true,
+    guardedBy: 'member-arrays.test.ts: an array-of-struct member declines',
+    rejects: (c) => !c.unclaimedAccesses,
   },
   {
     // A named global's layout belongs to the project's headers — raise/structs.ts makes the same
@@ -427,6 +447,9 @@ export function memberArrayCandidates(fn: Fn): MemberArrayGroup[] {
       members,
       c: {
         untypedBase: base.type.kind === 'unknown',
+        unclaimedAccesses: accesses.every(
+          (a) => a.op.attrs.fieldOff === undefined && (a.addr === null || a.addr.type.kind === 'unknown'),
+        ),
         namedGlobalBase: defs.get(base)?.opcode === 'gaddr',
         hasNonZeroMember: members.some((m) => m.off > 0),
         offsetsInRange: members.every((m) => m.off < MAX_MEMBER_OFFSET),

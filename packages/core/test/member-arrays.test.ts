@@ -154,6 +154,7 @@ describe('member-array recovery — the gates', () => {
   test('an array-of-struct base declines', () => {
     // `add(base, index*8)` with a residual field offset is raise/struct-arrays.ts's shape: it types
     // the base first, and this pass must not clobber a type recovered from a machine-code stride.
+    // This is the offset-ZERO form, where the base struct-arrays types IS the base grouped on here.
     expect(
       refusals(`fn elem {
 ^bb0(%0: unk32, %1: unk32):
@@ -165,6 +166,54 @@ describe('member-array recovery — the gates', () => {
 }
 `),
     ).toEqual(['base-typed']);
+  });
+
+  // `d->tbl[i].f` — an array of STRUCTS at a member offset — is the same access under BOTH shapes,
+  // and `base-typed` cannot see it: struct-arrays types the materialized `add(P, K)`, while this
+  // pass resolves that add away and groups on `P`, which is still untyped. Claiming it declares an
+  // array of scalars, dropping the field offset and re-spelling the element stride as a width.
+  const ELEM_AT_4 = walk(
+    `  %12: unk32 = shl %6 {imm=2}
+  %13: unk32 = add %5, %12
+  %14: unk32 = load %13 {off=0, width=2, signed=false}
+  %15: unk32 = add %4, %12
+  store %15, %14 {off=2, width=2}
+`,
+    5,
+    MEMBER_AT_4,
+    'elemmemb',
+  );
+
+  /** The pre-recovery tail's own order up to this pass — struct-array recovery reaps its dead
+   *  element addresses before member-array recovery reads what is left. */
+  const claimedRefusals = (ir: string, gates = MEMBER_ARRAY_GATES): (string | null)[] => {
+    const fn = parse(ir);
+    verify(fn);
+    recognizeStructArrays(fn);
+    dce(fn);
+    return memberArrayCandidates(fn).map((g) => firstRejection(gates, g.c));
+  };
+
+  test('an array-of-struct member declines', () => {
+    expect(claimedRefusals(ELEM_AT_4)).toEqual(['claimed-access', 'claimed-access']);
+    // …and the gate is the only thing refusing it: with it ablated the base is admitted.
+    expect(claimedRefusals(ELEM_AT_4, without(MEMBER_ARRAY_GATES, 'claimed-access'))).toEqual([null, null]);
+  });
+
+  // …and the loud half of that refusal, which is what keeps the gate from being the only thing
+  // between the two shapes: an access carrying both offsets has no spelling here, so structuring
+  // declines rather than dropping one of them.
+  test('an ablated array-of-struct member declines loudly', () => {
+    const fn = parse(ELEM_AT_4);
+    verify(fn);
+    recognizeStructArrays(fn);
+    dce(fn);
+    expect(recognizeMemberArrays(fn, without(MEMBER_ARRAY_GATES, 'claimed-access'))).toBe(2);
+    dce(fn);
+    recoverTypes(fn);
+    expect(() => structure(fn, structureOptionsFor(ARMV4T_AGBCC, true))).toThrow(
+      /carries both a member offset \(4\) and a field offset \(2\)/,
+    );
   });
 
   // A named global's declaration is the project's own, and the accesses of one already render

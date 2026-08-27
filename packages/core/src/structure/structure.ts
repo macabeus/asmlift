@@ -535,6 +535,15 @@ function arrayAccess(
   // it. Same cast rule as memAccess's struct path — the recovered struct-pointer type is an L2 fact
   // the AST cannot carry, so a base that does not render as THAT struct pointer is cast here.
   if (memberOff !== undefined) {
+    // Both offsets on one access is `b->field_K[i].field_J` — an array of STRUCTS at a member
+    // offset, which raise/memberarrays.ts declares as an array of scalars and its `claimed-access`
+    // gate refuses. Spelling it through either offset alone addresses the wrong bytes, so the
+    // unreachable case declines loudly rather than dropping one.
+    if (fieldOff !== undefined) {
+      throw new StructureError(
+        `an array access carries both a member offset (${memberOff}) and a field offset (${fieldOff})`,
+      );
+    }
     const structTo = bt.kind === 'ptr' && bt.to.kind === 'struct' ? bt.to : null;
     const rt = ctype(baseExpr);
     const ok = rt?.kind === 'ptr' && rt.to.kind === 'struct' && rt.to.name === structTo?.name && baseExpr.k !== 'index';
