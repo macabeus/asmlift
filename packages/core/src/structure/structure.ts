@@ -492,9 +492,11 @@ function memAccess(
   return { k: 'index', base: baseExpr, idx: { k: 'const', value: off / width }, width, signed, ...fromOperand };
 }
 
-// A variable-index array access `base[index]`, or `base[index].field_K` when a `fieldOff` marks an
-// array-of-STRUCT element (raise/struct-arrays.ts). The `.field` on an array element prints
-// with `.` (the printer decides dot-vs-arrow from the base being an `index` node).
+// A variable-index array access `base[index]`; `base[index].field_K` when a `fieldOff` marks an
+// array-of-STRUCT element (raise/struct-arrays.ts); `base->field_K[index]` when a `memberOff` marks
+// an array MEMBER of a struct (raise/memberarrays.ts). The `.field` on an array element prints
+// with `.` (the printer decides dot-vs-arrow from the base being an `index` node); a member array's
+// own `field` base is a pointer, so it prints with `->`.
 //
 // Scalar path: a width-carrying `index` node, no cast — the backend legalizes (see memAccess).
 // Struct-array path: like memAccess's struct path, the recovered struct pointer type is an L2
@@ -507,6 +509,7 @@ function arrayAccess(
   baseExpr: Expr,
   idxExpr: Expr,
   fieldOff: number | undefined,
+  memberOff: number | undefined,
   elemSize: number,
   signed: boolean,
   ctype: (e: Expr) => IrType | undefined,
@@ -514,8 +517,10 @@ function arrayAccess(
 ): Expr {
   // A variable-index access off a global's address indexes the ADDRESS `&gSym` (the cast form
   // `((T *)&gSym)[i]` — valid for a struct global too, unlike casting the bare value). A
-  // struct-array-of-globals (fieldOff) through `&gSym` is out of scope — fall through.
-  if (baseExpr.k === 'addr' && fieldOff === undefined) {
+  // struct-array-of-globals (fieldOff) or a member array (memberOff) through `&gSym` falls through:
+  // this spelling has no place to put the constant offset, so taking it would DROP the member and
+  // address the wrong bytes.
+  if (baseExpr.k === 'addr' && fieldOff === undefined && memberOff === undefined) {
     // ARRAY-declared global (symbol map): the bare-name spelling, same rule as memAccess.
     const si = sym?.info(baseExpr.name);
     const lead = si === undefined ? null : bareArrayLead(si, elemSize, signed);
@@ -526,6 +531,22 @@ function arrayAccess(
     return { k: 'index', base: baseExpr, idx: idxExpr, width: elemSize, signed };
   }
   const bt = base.type;
+  // The member-array spelling: the constant offset selects a MEMBER and the index strides inside
+  // it. Same cast rule as memAccess's struct path — the recovered struct-pointer type is an L2 fact
+  // the AST cannot carry, so a base that does not render as THAT struct pointer is cast here.
+  if (memberOff !== undefined) {
+    const structTo = bt.kind === 'ptr' && bt.to.kind === 'struct' ? bt.to : null;
+    const rt = ctype(baseExpr);
+    const ok = rt?.kind === 'ptr' && rt.to.kind === 'struct' && rt.to.name === structTo?.name && baseExpr.k !== 'index';
+    const b = ok || structTo === null ? baseExpr : { k: 'cast' as const, to: T.ptr(structTo), e: baseExpr };
+    return {
+      k: 'index',
+      base: { k: 'field', base: b, name: `field_${memberOff}` },
+      idx: idxExpr,
+      width: elemSize,
+      signed,
+    };
+  }
   if (fieldOff !== undefined) {
     const structTo = bt.kind === 'ptr' && bt.to.kind === 'struct' ? bt.to : null;
     const rt = ctype(baseExpr);
@@ -2487,6 +2508,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         e(d.operands[0]),
         e(d.operands[1]),
         d.attrs.fieldOff as number | undefined,
+        d.attrs.memberOff as number | undefined,
         d.attrs.elemSize as number,
         (d.attrs.signed as boolean) ?? false,
         ctype,
@@ -2704,8 +2726,11 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
             expr(op.operands[0]),
             expr(op.operands[1]),
             op.attrs.fieldOff as number | undefined,
+            op.attrs.memberOff as number | undefined,
             elemSize,
-            elemSize === 4,
+            // a member array's store spells through the member's OWN declaration, which the
+            // recognizer records; every other astore keeps the width===4 convention
+            (op.attrs.signed as boolean | undefined) ?? elemSize === 4,
             ctype,
             symCtx,
           ),

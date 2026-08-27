@@ -19,6 +19,7 @@ import { UNREDUCE_GATES } from '../src/l3/unreduce';
 import { VOL_SLOT_GATES } from '../src/l3/volatileval';
 import { VOL_STORE_GATES } from '../src/l3/volstore';
 import { LATCH_GATES } from '../src/raise/latch';
+import { MEMBER_ARRAY_GATES } from '../src/raise/memberarrays';
 import { NARROW_LOCAL_GATES } from '../src/raise/narrowlocal';
 import { PARAM_WIDTH_GATES } from '../src/raise/paramwidth';
 import { PREUPDATE_SINK_GATES } from '../src/structure/hazards';
@@ -38,6 +39,7 @@ const TABLES: Record<string, readonly Gate<never>[]> = {
   LIVEBASE_BLOCK_GATES: LIVEBASE_BLOCK_GATES as readonly Gate<never>[],
   PREUPDATE_SINK_GATES: PREUPDATE_SINK_GATES as readonly Gate<never>[],
   LATCH_GATES: LATCH_GATES as readonly Gate<never>[],
+  MEMBER_ARRAY_GATES: MEMBER_ARRAY_GATES as readonly Gate<never>[],
   NARROW_LOCAL_GATES: NARROW_LOCAL_GATES as readonly Gate<never>[],
   PARAM_WIDTH_GATES: PARAM_WIDTH_GATES as readonly Gate<never>[],
   NAME_COALESCE_GATES: NAME_COALESCE_GATES as readonly Gate<never>[],

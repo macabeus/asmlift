@@ -203,6 +203,10 @@ export function recognizeStructs(fn: Fn): number {
     }
   }
 
+  // The NAME counter is seeded from the names already in the graph, not from this pass's own
+  // success count: raise/memberarrays.ts runs first and mints `Struct<N>` types of its own, and two
+  // different layouts under one name would leave `collectStructs` declaring only one of them.
+  let name = firstFreeStructIndex(fn);
   let count = 0;
   for (const base of order) {
     if (arrayBases.has(base)) {
@@ -217,7 +221,7 @@ export function recognizeStructs(fn: Fn): number {
       continue;
     } // uniform stride / single aligned access → array
     try {
-      base.type = T.ptr(buildStruct(`Struct${count}`, accesses));
+      base.type = T.ptr(buildStruct(`Struct${name}`, accesses));
     } catch (e) {
       // A NAMED global whose accesses synthesis cannot reconcile is not a reason to decline the
       // function: its declaration belongs to the project's own headers, and its constant-offset
@@ -233,9 +237,23 @@ export function recognizeStructs(fn: Fn): number {
       }
       throw e;
     }
+    name++;
     count++;
   }
   return count;
+}
+
+/** The lowest `Struct<N>` index no type in this function's graph already uses — the shared name
+ *  allocator for the two passes that synthesize a struct pointee. */
+export function firstFreeStructIndex(fn: Fn): number {
+  let next = 0;
+  for (const s of collectStructs(fn)) {
+    const m = /^Struct(\d+)$/.exec(s.name);
+    if (m) {
+      next = Math.max(next, Number(m[1]) + 1);
+    }
+  }
+  return next;
 }
 
 /** The distinct struct types this function's L2 GRAPH mentions (unwrapping struct pointers on every
