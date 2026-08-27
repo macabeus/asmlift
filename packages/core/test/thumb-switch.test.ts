@@ -140,12 +140,20 @@ test('a fall-through that would carry an effect out of a loop DECLINES', () => {
   // whose result is only read by the next arm therefore came out as `do { i = i - 1; } while (…);
   // a0 = sideA();` — the call once instead of once per iteration, in C that looks entirely
   // ordinary. Loud beats plausible.
-  const loop = '\tmov\tr4, #3\n.Llp:\n\tbl\tsideA\n\tsub\tr4, #1\n\tcmp\tr4, #0\n\tbne\t.Llp\n';
-  expect(() => decompile('f', conv([loop, '\tbl\tsideB\n' + LEAVE]), ARMV4T_AGBCC)).toThrow(
-    /inlines a 'call' from inside the loop/,
+  //
+  // A CALL no longer reaches it: structure/analysis.ts materializes any call whose value rides a
+  // `cond_br` edge, which pins it at the position the asm ran it, so this shape now RECOVERS —
+  // with `sideA()` inside the loop, which is what the asm does. What still reaches the decline is
+  // an `opaque`, the other member of `REPEATED_EFFECT`, for which no such rule exists.
+  const loop = (body: string) => `\tmov\tr4, #3\n.Llp:\n${body}\tsub\tr4, #1\n\tcmp\tr4, #0\n\tbne\t.Llp\n`;
+  const recovered = convSrc([loop('\tbl\tsideA\n'), '\tbl\tsideB\n' + LEAVE]);
+  expect(recovered).toMatch(/do \{\s*\n\s*v0 = sideA\(\);/);
+  expect(recovered.match(/sideA\(/g)).toHaveLength(1);
+  expect(() => decompile('f', conv([loop('\tmrs\tr0, cpsr\n'), '\tbl\tsideB\n' + LEAVE]), ARMV4T_AGBCC)).toThrow(
+    /inlines a 'opaque' from inside the loop/,
   );
   // control: the SAME loop in a closed arm keeps the call inside the loop and recovers.
-  const closed = convSrc([loop + LEAVE, '\tbl\tsideB\n' + LEAVE]);
+  const closed = convSrc([loop('\tbl\tsideA\n') + LEAVE, '\tbl\tsideB\n' + LEAVE]);
   expect(closed).toMatch(/do \{\s*\n\s*v0 = sideA\(\);/);
 });
 

@@ -1423,15 +1423,35 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       paramBlock.set(pv, blk);
     }
   }
-  // AND THE NAME MUST BE WIDE ENOUGH TO HOLD `p`. Every edge into `B` copies its argument into
-  // `name`, which is a C assignment through `name`'s declaration — so a carrier declared narrower
-  // than the merged value TRUNCATES it. The only narrow carrier is a parameter raise/paramwidth.ts
-  // declared: its width is its signature type and cannot widen to suit a later claimant, and `u8 a0`
-  // adopted by a merge of `a0` with `0x1234` emits `a0 = 4660`, which agbcc compiles to 52.
-  // Register-width carriers are unaffected — a pointer or an `unknown` is a full word.
+  // AND THE NAME MUST BE EXACTLY AS WIDE AS `p`. Every edge into `B` copies its argument into
+  // `name`, which is a C assignment through `name`'s declaration, and the name's type is fixed by
+  // its FIRST claimant — so a width mismatch loses a truncation in one direction or the other:
+  //   • name NARROWER than the merged value truncates it. `u8 a0` (raise/paramwidth.ts) adopted by
+  //     a merge of `a0` with `0x1234` emits `a0 = 4660`, which agbcc compiles to 52.
+  //   • name WIDER than a narrow carrier drops the extension the carrier's declaration WAS. A
+  //     narrow block parameter (raise/narrowlocal.ts) has had its one reading extension deleted
+  //     against the promise that reading the local re-applies it, so adopting an `s32` name emits
+  //     `*out = a0` where the graph says `*out = (s16)a0` — a silent wrong answer, not a worse one.
+  // Register-width carriers are unaffected — a pointer or an `unknown` is a full word, so the two
+  // narrow-typing passes are the only producers either half can see.
+  //
+  // AND AT A SUB-WORD WIDTH, THE SIGNEDNESS IS PART OF THE WIDTH. A narrow declaration is where
+  // the extension went, and `u8` re-applies a DIFFERENT extension than `s8` — same bytes in the
+  // variable, different value at every read. `sa3`'s `sub_80B4654` merges a `zext8` arm with its
+  // own `u8` parameter and reads the merge through `lsls #24 / asrs #24`: the carrier is `s8`, and
+  // letting it adopt the `u8` parameter's name emits `sub_80B4FA8(a0, a1, …)`, which passes 144
+  // where the target passes -112 for every byte with bit 7 set. Width alone said 8 === 8 and
+  // admitted it — a silent wrong answer, not a worse score. At 32 bits the two spellings ARE the
+  // same bytes at a read, which is the mismatch `structure/namecoalesce.ts`'s header names and this
+  // rule deliberately still tolerates.
   const carrierWidth = (t: IrType | undefined): number => (t?.kind === 'int' ? t.width : 32);
+  const carrierSign = (t: IrType | undefined): boolean | undefined =>
+    t?.kind === 'int' && t.width < 32 ? t.signed : undefined;
   const canTakeName = (p: Value, B: Block, name: string, pureAlias = false): boolean => {
-    if (carrierWidth(varType.get(name)) < carrierWidth(p.type)) {
+    if (carrierWidth(varType.get(name)) !== carrierWidth(p.type)) {
+      return false;
+    }
+    if (carrierSign(varType.get(name)) !== carrierSign(p.type)) {
       return false;
     }
     if (B.params.some((q) => q !== p && varName.get(q) === name)) {
@@ -1462,6 +1482,37 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       const d = defs.get(v);
       if (d && materialize.has(d) && liveIn.get(opBlock.get(d)!)!.has(p)) {
         return false;
+      }
+    }
+    // AND A VALUE NOBODY NAMED IS STILL A READER OF THIS NAME. The loop above asks which NAMED
+    // values are live at `B`; an unnamed one is not stored anywhere, it is RE-DERIVED at its use
+    // from whatever its operands are called then — so a value live into `B` whose inlined
+    // expression mentions `name` reads the merge's assignment instead of what it was defined from.
+    // `s32 t = a - b; if (a > 0) { a = a + b; } return a + t;` is the whole shape: `t` is inlined,
+    // the merge takes `a0`, and the emitted `return a0 + (a0 - a1)` computes 13 where the asm
+    // computes 10 — agbcc emits exactly that asm, so this is not a generated-IR curiosity. The
+    // walk stops at any value with a name of its own (it reads THAT name) and at a materialized
+    // def (it is assigned at its own position, which the clause above already judges).
+    if (!pureAlias) {
+      const reDerives = (w: Value, seen: Set<Value>): boolean => {
+        if (w === p || seen.has(w)) {
+          return false;
+        }
+        seen.add(w);
+        const nm = varName.get(w);
+        if (nm !== undefined) {
+          return nm === name;
+        }
+        const d = defs.get(w);
+        if (!d || materialize.has(d)) {
+          return false;
+        }
+        return d.operands.some((o) => reDerives(o, seen));
+      };
+      for (const w of lin) {
+        if (reDerives(w, new Set())) {
+          return false;
+        }
       }
     }
     return true;
@@ -1550,6 +1601,15 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         }
       }
       exclude.add(varName.get(p)!);
+      // THE BACK-EDGE ARGUMENT TAKES THE HEADER'S NAME, UNCONDITIONALLY — so if `p` is declared
+      // NARROW, every other reader of that argument reads it through the truncation. This site
+      // does not check that, and deliberately: the promise is a precondition of producing a narrow
+      // block parameter at all, held by `raise/narrowlocal.ts`'s `edge-reader` gate (every in-edge
+      // value is read nowhere but through an extension no wider than the declaration keeps). A
+      // width test HERE would be the wrong shape — it would refuse the loop's own update copy and
+      // silently un-coalesce it. Any future producer of a sub-word block parameter owes the same
+      // gate; without it this line emits `s16 v; do { … v = v + 1; } while (v < 32768);`, which
+      // agbcc compiles to an unconditional branch.
       if (backArgs) {
         backArgName.set(backArgs[i], varName.get(p)!);
       }

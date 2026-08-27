@@ -21,6 +21,7 @@ import { recognizeDivPow2 } from './divpow2';
 import { numberPureValues } from './gvn';
 import { recognizeMagicDivision } from './magicdiv';
 import { rerootNarrowReads } from './narrow';
+import { narrowBlockLocals } from './narrowlocal';
 import { narrowEntryParams } from './paramwidth';
 import { recognizeBranchShortCircuit, recognizeShortCircuit } from './shortcircuit';
 import { recognizeSoftDiv } from './softdiv';
@@ -43,7 +44,7 @@ export interface PreRecoveryPass {
 /** THE ordered pre-recovery pass list — the single source of truth shared by pipeline / rank / report.
  *  address-numbering → const-materialize → magic-division → pow2-division → soft-division → array-legalize →
  *  struct-array → struct-pointer → short-circuit → branch-short-circuit → narrow-reads →
- *  parameter-width. See each recognizer's file for the rationale. */
+ *  narrow-local → parameter-width. See each recognizer's file for the rationale. */
 export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
   // FIRST: collapsing duplicate address definitions removes block params every later recognizer
   // would otherwise have to reason around, and it can only shrink the value graph.
@@ -91,10 +92,15 @@ export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
   // loop variable's next value, and both short-circuit folds above rewrite the very edges it reads.
   // `dce: false` — the rewrite orphans nothing, since the operand it drops keeps its other use.
   { id: 'narrow', run: rerootNarrowReads, dce: false },
-  // AFTER every recognizer above, and the position is a consequence of what the pass does: it only
-  // ever DELETES an op and retypes an entry param, so running it last leaves each recognizer the
-  // shape it was written against, and none of them can match a shape this pass creates.
-  // `dce: false` — the extension it drops is spliced out here, and its result has no other reader.
+  // The two WIDTH passes, last and in either order relative to each other: each only DELETES an
+  // extension and retypes the parameter that fed it, so every recognizer above sees the shape it
+  // was written against and neither can match a shape the other creates. They are disjoint by
+  // construction — `narrowlocal` refuses an entry parameter, `paramwidth` reads only entry
+  // parameters — and `narrowlocal` cannot take an extension `narrow` above wants either, since a
+  // parameter carrying BOTH a `zext` and a `sext` has two readers and is refused.
+  // `dce: false` on both — the extension each drops is spliced out in place, and its result has no
+  // other reader.
+  { id: 'narrowlocal', run: (fn) => narrowBlockLocals(fn), dce: false },
   { id: 'paramwidth', run: narrowEntryParams, dce: false },
 ];
 

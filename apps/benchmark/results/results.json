@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generatedAt": "2026-08-27T08:50:47.272Z",
+    "generatedAt": "2026-08-27T18:47:49.561Z",
     "toolchains": [
       "ido7.1",
       "agbcc",
@@ -9,12 +9,12 @@
       "mwcc_242_81"
     ],
     "counts": {
-      "total": 894,
-      "synthetic": 642,
+      "total": 906,
+      "synthetic": 654,
       "real": 252
     },
     "asmlift": {
-      "commit": "0a0de6eebd9d7c186717ab1e49e29737fbef47c8",
+      "commit": "912513421583364a262c101dd27ff7e6e035cdeb",
       "dirty": false
     },
     "m2c": {
@@ -21934,25 +21934,25 @@
       "asmlift": {
         "decompiler": "asmlift",
         "symbolMap": true,
-        "candidateLabel": "unsigned/expr-home/vol-slot",
+        "candidateLabel": "unsigned/expr-home",
         "symbolsUsed": [],
         "outcome": "nonmatch",
-        "source": "struct Elem0 { s32 field_0; u8 _pad0[16]; };\nstruct Elem1 { s32 field_0; u8 _pad0[16]; };\nstruct Elem2 { u8 field_0; u8 _pad0[1]; };\nstruct Elem3 { u8 field_0; u8 _pad0[1]; };\nstruct Struct0 { s32 field_0; u8 _pad0[12]; u8 field_16; u8 field_17; u8 field_18; u8 _pad1[33]; u16 field_52; };\nvoid PackSaveSector(s32 * a0, struct Struct0 * a1) {\n    struct Elem1 * v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    s32 v5;\n    s32 v6;\n    s32 v7;\n    s32 v8;\n    s32 v9;\n    s32 v10;\n    s32 v11;\n    u8 * v12;\n    s32 v13;\n    u8 * v14;\n    volatile u16 sp48;\n    *a0 = 1196707404;\n    a0[1] = a0[1] + 1;\n    a0[2] = a1->field_0;\n    v5 = 0;\n    do {\n        ((u16 *)(a0 + 3))[(s16)v5] = ((u16 *)((u8 *)a1 + 4))[(s16)v5];\n        v5 = (u16)((s16)v5 + 1);\n    } while ((s16)v5 <= 5);\n    ((u8 *)a0)[24] = 0;\n    ((u8 *)a0)[25] = a1->field_16;\n    ((u8 *)a0)[26] = a1->field_17;\n    ((u8 *)a0)[27] = a1->field_18;\n    ((u8 *)a0)[28] = 0;\n    sp48 = a1->field_52;\n    v0 = (u8 *)a1 + 96 + 1 + 3;\n    v6 = 0;\n    do {\n        ((u16 *)((u8 *)a0 + 30))[(s16)v6] = ((u16 *)((u8 *)v0 - 80))[(s16)v6];\n        v6 = (u16)((s16)v6 + 1);\n    } while ((s16)v6 <= 6);\n    v7 = 0;\n    do {\n        *(u8 *)(s32 *)((u8 *)(11 + a0) + (s16)v7) = *((u8 *)a1 + 34 + (s16)v7);\n        v7 = (u16)((s16)v7 + 1);\n    } while ((s16)v7 <= 6);\n    v8 = 0;\n    do {\n        *(51 + (u8 *)a0 + (s16)v8) = *(41 + (u8 *)a1 + (s16)v8);\n        v8 = (u16)((s16)v8 + 1);\n    } while ((s16)v8 <= 8);\n    v2 = 0;\n    do {\n        v9 = 0;\n        do {\n            *((u8 *)a0 + 62 + ((s16)v9 + (v2 << 16 >> 14))) = *((s16)v9 + (v2 << 16 >> 14) + ((u8 *)a1 + 55));\n            v9 = (u16)((s16)v9 + 1);\n        } while ((s16)v9 <= 3);\n        v2 = (u32)((v2 << 16) + (128 << 9)) >> 16;\n    } while ((s16)v2 <= 8);\n    *(u8 *)(a0 + 15) = *((u8 *)a1 + 50);\n    *(u16 *)((u8 *)a0 + 98) = sp48;\n    *((u8 *)a0 + 61) = *((u8 *)a1 + 51);\n    *((u8 *)a0 + 98 + 2) = *((u8 *)a1 + 96);\n    *((u8 *)a0 + 61 + 40) = *((u8 *)a1 + 51 + 47);\n    *((u8 *)a0 + 98 + 2 + 2) = *((u8 *)a1 + 96 + 1);\n    *((u8 *)a0 + 103) = 0;\n    v3 = 0;\n    do {\n        *(u8 *)((s32 *)((u8 *)a0 + (s16)v3 * 20) + 26) = *((u8 *)(struct Struct0 *)((u8 *)a1 + (s16)v3 * 20) + 116);\n        *((u8 *)(s32 *)((u8 *)a0 + (s16)v3 * 20) + 105) = *((u8 *)(struct Struct0 *)((u8 *)a1 + (s16)v3 * 20) + 117);\n        *((u8 *)(s32 *)((u8 *)a0 + (s16)v3 * 20) + 105 + 1) = *((u8 *)(struct Struct0 *)((u8 *)a1 + (s16)v3 * 20) + 119);\n        *((u8 *)(s32 *)((u8 *)a0 + (s16)v3 * 20) + 107) = *((u8 *)(struct Struct0 *)((u8 *)a1 + (s16)v3 * 20) + 118);\n        ((struct Elem0 *)((u8 *)a0 + 61 + 40 + 7))[(s16)v3].field_0 = v0[(s16)v3].field_0;\n        v10 = 0;\n        do {\n            *(u16 *)((u8 *)a0 + 98 + 2 + 2 + 10 + (((s16)v10 << 1) + (s16)v3 * 20)) = *(u16 *)((u8 *)a1 + 104 + (((s16)v10 << 1) + (s16)v3 * 20));\n            v10 = (u16)((s16)v10 + 1);\n        } while ((s16)v10 <= 5);\n        v3 = (u32)((v3 << 16) + (128 << 9)) >> 16;\n    } while ((s16)v3 <= 9);\n    v1 = 0;\n    do {\n        v4 = 0;\n        do {\n            v11 = 0;\n            do {\n                ((struct Elem3 *)(s32 *)((u8 *)a0 + (((s16)v11 << 2) + (s16)v4 * 20 + (s16)v1 * 80)))[152].field_0 = ((struct Elem2 *)(struct Struct0 *)((u8 *)a1 + (((s16)v11 << 2) + (s16)v4 * 20 + (s16)v1 * 80)))[150].field_0;\n                *(305 + (u8 *)(s32 *)((u8 *)a0 + (((s16)v11 << 2) + (s16)v4 * 20 + (s16)v1 * 80))) = *((u8 *)(struct Struct0 *)((u8 *)a1 + (((s16)v11 << 2) + (s16)v4 * 20 + (s16)v1 * 80)) + 301);\n                *(u16 *)(s32 *)((151 << 1) + 4 + (u8 *)(s32 *)((u8 *)a0 + (((s16)v11 << 2) + (s16)v4 * 20 + (s16)v1 * 80))) = ((u16 *)(struct Struct0 *)((u8 *)a1 + (((s16)v11 << 2) + (s16)v4 * 20 + (s16)v1 * 80)))[151];\n                v11 = (u16)((s16)v11 + 1);\n            } while ((s16)v11 <= 4);\n            v4 = (u32)((v4 << 16) + (128 << 9)) >> 16;\n        } while ((s16)v4 <= 3);\n        v1 = (u32)((v1 << 16) + (128 << 9)) >> 16;\n    } while ((s16)v1 <= 6);\n    switch (*(u16 *)(struct Struct0 *)((215 << 2) + (u8 *)a1)) {\n        case 1:\n            *(u8 *)(s32 *)((u8 *)a0 + (216 << 2)) = *(u16 *)(struct Struct0 *)((215 << 2) + (u8 *)a1);\n            break;\n        case 2:\n            v12 = (u8 *)a0 + 865;\n            *v12 = 1;\n            break;\n        case 256:\n            v12 = (u8 *)a0 + 866;\n            *v12 = 1;\n            break;\n    }\n    switch (*(u16 *)(862 + (u8 *)a1)) {\n        case 1:\n            v13 = 216 << 2;\n            *(u8 *)(s32 *)((u8 *)a0 + v13) = 2;\n            break;\n        case 2:\n            *((u8 *)a0 + 865) = *(u16 *)(862 + (u8 *)a1);\n            break;\n        case 256:\n            v13 = 866;\n            *(u8 *)(s32 *)((u8 *)a0 + v13) = 2;\n            break;\n    }\n    switch (*(u16 *)(struct Struct0 *)((u8 *)a1 + (216 << 2))) {\n        case 1:\n            v14 = (s32 *)((u8 *)a0 + (216 << 2));\n            *v14 = 4;\n            break;\n        case 2:\n            v14 = (u8 *)a0 + 865;\n            *v14 = 4;\n            break;\n        case 256:\n            v14 = (u8 *)a0 + 866;\n            *v14 = 4;\n            break;\n    }\n    *(u8 *)(s32 *)((u8 *)a0 + (217 << 2)) = *(u8 *)(struct Struct0 *)((u8 *)a1 + (217 << 2));\n    *((u8 *)a0 + 869) = *((u8 *)a1 + 869);\n    *((u8 *)a0 + 870) = *((u8 *)a1 + 870);\n    *((u8 *)a0 + 871) = 0;\n    a0[218] = GetSaveSectorChecksum(a0, 871, 0, a1);\n    return;\n}\n",
-        "score": 366,
-        "maxScore": 504,
+        "source": "struct Elem0 { s32 field_0; u8 _pad0[16]; };\nstruct Elem1 { s32 field_0; u8 _pad0[16]; };\nstruct Elem2 { u8 field_0; u8 _pad0[1]; };\nstruct Elem3 { u8 field_0; u8 _pad0[1]; };\nstruct Struct0 { s32 field_0; u8 _pad0[12]; u8 field_16; u8 field_17; u8 field_18; u8 _pad1[33]; u16 field_52; };\nvoid PackSaveSector(s32 * a0, struct Struct0 * a1) {\n    struct Elem1 * v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 v4;\n    s16 v5;\n    s16 v6;\n    s16 v7;\n    s16 v8;\n    s16 v9;\n    s16 v10;\n    s16 v11;\n    u8 * v12;\n    s32 v13;\n    u8 * v14;\n    u16 sp48;\n    *a0 = 1196707404;\n    a0[1] = a0[1] + 1;\n    a0[2] = a1->field_0;\n    v5 = 0;\n    do {\n        ((u16 *)(a0 + 3))[v5] = ((u16 *)((u8 *)a1 + 4))[v5];\n        v5 = (u16)(v5 + 1);\n    } while ((s16)v5 <= 5);\n    ((u8 *)a0)[24] = 0;\n    ((u8 *)a0)[25] = a1->field_16;\n    ((u8 *)a0)[26] = a1->field_17;\n    ((u8 *)a0)[27] = a1->field_18;\n    ((u8 *)a0)[28] = 0;\n    sp48 = a1->field_52;\n    v0 = (u8 *)a1 + 96 + 1 + 3;\n    v6 = 0;\n    do {\n        ((u16 *)((u8 *)a0 + 30))[v6] = ((u16 *)((u8 *)v0 - 80))[v6];\n        v6 = (u16)(v6 + 1);\n    } while ((s16)v6 <= 6);\n    v7 = 0;\n    do {\n        *(u8 *)(s32 *)((u8 *)(11 + a0) + v7) = *((u8 *)a1 + 34 + v7);\n        v7 = (u16)(v7 + 1);\n    } while ((s16)v7 <= 6);\n    v8 = 0;\n    do {\n        *(51 + (u8 *)a0 + v8) = *(41 + (u8 *)a1 + v8);\n        v8 = (u16)(v8 + 1);\n    } while ((s16)v8 <= 8);\n    v2 = 0;\n    do {\n        v9 = 0;\n        do {\n            *((u8 *)a0 + 62 + (v9 + (v2 << 16 >> 14))) = *(v9 + (v2 << 16 >> 14) + ((u8 *)a1 + 55));\n            v9 = (u16)(v9 + 1);\n        } while ((s16)v9 <= 3);\n        v2 = (u32)((v2 << 16) + (128 << 9)) >> 16;\n    } while ((s16)v2 <= 8);\n    *(u8 *)(a0 + 15) = *((u8 *)a1 + 50);\n    *(u16 *)((u8 *)a0 + 98) = sp48;\n    *((u8 *)a0 + 61) = *((u8 *)a1 + 51);\n    *((u8 *)a0 + 98 + 2) = *((u8 *)a1 + 96);\n    *((u8 *)a0 + 61 + 40) = *((u8 *)a1 + 51 + 47);\n    *((u8 *)a0 + 98 + 2 + 2) = *((u8 *)a1 + 96 + 1);\n    *((u8 *)a0 + 103) = 0;\n    v3 = 0;\n    do {\n        *(u8 *)((s32 *)((u8 *)a0 + (s16)v3 * 20) + 26) = *((u8 *)(struct Struct0 *)((u8 *)a1 + (s16)v3 * 20) + 116);\n        *((u8 *)(s32 *)((u8 *)a0 + (s16)v3 * 20) + 105) = *((u8 *)(struct Struct0 *)((u8 *)a1 + (s16)v3 * 20) + 117);\n        *((u8 *)(s32 *)((u8 *)a0 + (s16)v3 * 20) + 105 + 1) = *((u8 *)(struct Struct0 *)((u8 *)a1 + (s16)v3 * 20) + 119);\n        *((u8 *)(s32 *)((u8 *)a0 + (s16)v3 * 20) + 107) = *((u8 *)(struct Struct0 *)((u8 *)a1 + (s16)v3 * 20) + 118);\n        ((struct Elem0 *)((u8 *)a0 + 61 + 40 + 7))[(s16)v3].field_0 = v0[(s16)v3].field_0;\n        v10 = 0;\n        do {\n            *(u16 *)((u8 *)a0 + 98 + 2 + 2 + 10 + ((v10 << 1) + (s16)v3 * 20)) = *(u16 *)((u8 *)a1 + 104 + ((v10 << 1) + (s16)v3 * 20));\n            v10 = (u16)(v10 + 1);\n        } while ((s16)v10 <= 5);\n        v3 = (u32)((v3 << 16) + (128 << 9)) >> 16;\n    } while ((s16)v3 <= 9);\n    v1 = 0;\n    do {\n        v4 = 0;\n        do {\n            v11 = 0;\n            do {\n                ((struct Elem3 *)(s32 *)((u8 *)a0 + ((v11 << 2) + (s16)v4 * 20 + (s16)v1 * 80)))[152].field_0 = ((struct Elem2 *)(struct Struct0 *)((u8 *)a1 + ((v11 << 2) + (s16)v4 * 20 + (s16)v1 * 80)))[150].field_0;\n                *(305 + (u8 *)(s32 *)((u8 *)a0 + ((v11 << 2) + (s16)v4 * 20 + (s16)v1 * 80))) = *((u8 *)(struct Struct0 *)((u8 *)a1 + ((v11 << 2) + (s16)v4 * 20 + (s16)v1 * 80)) + 301);\n                *(u16 *)(s32 *)((151 << 1) + 4 + (u8 *)(s32 *)((u8 *)a0 + ((v11 << 2) + (s16)v4 * 20 + (s16)v1 * 80))) = ((u16 *)(struct Struct0 *)((u8 *)a1 + ((v11 << 2) + (s16)v4 * 20 + (s16)v1 * 80)))[151];\n                v11 = (u16)(v11 + 1);\n            } while ((s16)v11 <= 4);\n            v4 = (u32)((v4 << 16) + (128 << 9)) >> 16;\n        } while ((s16)v4 <= 3);\n        v1 = (u32)((v1 << 16) + (128 << 9)) >> 16;\n    } while ((s16)v1 <= 6);\n    switch (*(u16 *)(struct Struct0 *)((215 << 2) + (u8 *)a1)) {\n        case 1:\n            *(u8 *)(s32 *)((u8 *)a0 + (216 << 2)) = *(u16 *)(struct Struct0 *)((215 << 2) + (u8 *)a1);\n            break;\n        case 2:\n            v12 = (u8 *)a0 + 865;\n            *v12 = 1;\n            break;\n        case 256:\n            v12 = (u8 *)a0 + 866;\n            *v12 = 1;\n            break;\n    }\n    switch (*(u16 *)(862 + (u8 *)a1)) {\n        case 1:\n            v13 = 216 << 2;\n            *(u8 *)(s32 *)((u8 *)a0 + v13) = 2;\n            break;\n        case 2:\n            *((u8 *)a0 + 865) = *(u16 *)(862 + (u8 *)a1);\n            break;\n        case 256:\n            v13 = 866;\n            *(u8 *)(s32 *)((u8 *)a0 + v13) = 2;\n            break;\n    }\n    switch (*(u16 *)(struct Struct0 *)((u8 *)a1 + (216 << 2))) {\n        case 1:\n            v14 = (s32 *)((u8 *)a0 + (216 << 2));\n            *v14 = 4;\n            break;\n        case 2:\n            v14 = (u8 *)a0 + 865;\n            *v14 = 4;\n            break;\n        case 256:\n            v14 = (u8 *)a0 + 866;\n            *v14 = 4;\n            break;\n    }\n    *(u8 *)(s32 *)((u8 *)a0 + (217 << 2)) = *(u8 *)(struct Struct0 *)((u8 *)a1 + (217 << 2));\n    *((u8 *)a0 + 869) = *((u8 *)a1 + 869);\n    *((u8 *)a0 + 870) = *((u8 *)a1 + 870);\n    *((u8 *)a0 + 871) = 0;\n    a0[218] = GetSaveSectorChecksum(a0, 871, 0, a1);\n    return;\n}\n",
+        "score": 360,
+        "maxScore": 499,
         "compileErrors": null,
         "breakdown": {
-          "insert": 37,
-          "delete": 78,
-          "replace": 40,
-          "opMismatch": 3,
-          "argMismatch": 208
+          "insert": 32,
+          "delete": 75,
+          "replace": 34,
+          "opMismatch": 2,
+          "argMismatch": 217
         },
         "quality": {
           "score": 68,
           "lines": 144,
           "gotos": 0,
-          "casts": 181,
+          "casts": 156,
           "unkGlue": 0,
           "rawMem": 17,
           "addrDeref": 0
@@ -21984,15 +21984,15 @@
       },
       "gapSize": {
         "decompiler": "asmlift",
-        "score": 366,
-        "maxScore": 504,
-        "ratio": 0.7261904761904762,
+        "score": 360,
+        "maxScore": 499,
+        "ratio": 0.7214428857715431,
         "kinds": {
-          "insert": 37,
-          "delete": 78,
-          "replace": 40,
-          "opMismatch": 3,
-          "argMismatch": 208
+          "insert": 32,
+          "delete": 75,
+          "replace": 34,
+          "opMismatch": 2,
+          "argMismatch": 217
         }
       },
       "scripts": {
@@ -22603,22 +22603,22 @@
           }
         ],
         "outcome": "nonmatch",
-        "source": "void sa2__sub_8007958(u32 a0, u32 a1, u32 a2, u32 a3, u32 a4, u32 a5, u32 a6) {\n    u32 v0;\n    u32 v1;\n    s32 v2;\n    s32 v3;\n    u16 * v4;\n    s32 v5;\n    s32 v6;\n    v0 = (u8)a1;\n    v1 = (u8)a2;\n    gHBlankCopySize = 4;\n    v3 = (u16)a3;\n    v5 = (u8)a4;\n    gFlags = gFlags | 4;\n    gHBlankCopyTarget = (a0 << 24 >> 22) + (u32)&REG_BG0HOFS;\n    v2 = gBgOffsetsHBlankPrimary;\n    v4 = (u16 *)(v2 + (v0 << 2));\n    for (v6 = v0; v6 < v1; v6 = (u8)(v6 + 1)) {\n        *v4 = (u16)a5 + v3 & 511;\n        *(v4 + 1) = (u16)a6;\n        v4 = v4 + 1 + 1;\n        v3 = (u16)-((s16)v3 + (s8)v5);\n        v5 = (u8)-(s8)v5;\n    }\n    return;\n}\n",
-        "score": 68,
-        "maxScore": 87,
+        "source": "void sa2__sub_8007958(u32 a0, u32 a1, u32 a2, u32 a3, u32 a4, u32 a5, u32 a6) {\n    u32 v0;\n    u32 v1;\n    s32 v2;\n    s32 v3;\n    u16 * v4;\n    s8 v5;\n    s32 v6;\n    v0 = (u8)a1;\n    v1 = (u8)a2;\n    gHBlankCopySize = 4;\n    v3 = (u16)a3;\n    v5 = (u8)a4;\n    gFlags = gFlags | 4;\n    gHBlankCopyTarget = (a0 << 24 >> 22) + (u32)&REG_BG0HOFS;\n    v2 = gBgOffsetsHBlankPrimary;\n    v4 = (u16 *)(v2 + (v0 << 2));\n    for (v6 = v0; v6 < v1; v6 = (u8)(v6 + 1)) {\n        *v4 = (u16)a5 + v3 & 511;\n        *(v4 + 1) = (u16)a6;\n        v4 = v4 + 1 + 1;\n        v3 = (u16)-((s16)v3 + v5);\n        v5 = (u8)-v5;\n    }\n    return;\n}\n",
+        "score": 67,
+        "maxScore": 88,
         "compileErrors": null,
         "breakdown": {
-          "insert": 5,
-          "delete": 23,
-          "replace": 6,
-          "opMismatch": 0,
-          "argMismatch": 34
+          "insert": 6,
+          "delete": 24,
+          "replace": 7,
+          "opMismatch": 1,
+          "argMismatch": 29
         },
         "quality": {
           "score": 88,
           "lines": 26,
           "gotos": 0,
-          "casts": 13,
+          "casts": 11,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -22650,15 +22650,15 @@
       },
       "gapSize": {
         "decompiler": "asmlift",
-        "score": 68,
-        "maxScore": 87,
-        "ratio": 0.7816091954022989,
+        "score": 67,
+        "maxScore": 88,
+        "ratio": 0.7613636363636364,
         "kinds": {
-          "insert": 5,
-          "delete": 23,
-          "replace": 6,
-          "opMismatch": 0,
-          "argMismatch": 34
+          "insert": 6,
+          "delete": 24,
+          "replace": 7,
+          "opMismatch": 1,
+          "argMismatch": 29
         }
       },
       "scripts": {
@@ -31659,23 +31659,23 @@
       "asmlift": {
         "decompiler": "asmlift",
         "candidateLabel": "unsigned",
-        "outcome": "nonmatch",
-        "source": "void basefold(u32 a0, u32 a1) {\n    s32 v0;\n    v0 = 0;\n    do {\n        ((u16 *)(((s16)v0 << 1) + a0))[2] = ((u16 *)(((s16)v0 << 1) + a1))[2];\n        v0 = (u16)((s16)v0 + 1);\n    } while ((s16)v0 <= 5);\n    return;\n}\n",
-        "score": 11,
+        "outcome": "match",
+        "source": "void basefold(u32 a0, u32 a1) {\n    s16 v0;\n    v0 = 0;\n    do {\n        ((u16 *)((v0 << 1) + a0))[2] = ((u16 *)((v0 << 1) + a1))[2];\n        v0 = (u16)(v0 + 1);\n    } while ((s16)v0 <= 5);\n    return;\n}\n",
+        "score": 0,
         "maxScore": 20,
         "compileErrors": null,
         "breakdown": {
           "insert": 0,
-          "delete": 1,
-          "replace": 1,
+          "delete": 0,
+          "replace": 0,
           "opMismatch": 0,
-          "argMismatch": 9
+          "argMismatch": 0
         },
         "quality": {
-          "score": 90,
+          "score": 96,
           "lines": 9,
           "gotos": 0,
-          "casts": 7,
+          "casts": 4,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -31701,19 +31701,7 @@
           "<tmp>/cand.c.pp.c:11: request for member `unk4' in something not a structure or union"
         ]
       },
-      "gapSize": {
-        "decompiler": "asmlift",
-        "score": 11,
-        "maxScore": 20,
-        "ratio": 0.55,
-        "kinds": {
-          "insert": 0,
-          "delete": 1,
-          "replace": 1,
-          "opMismatch": 0,
-          "argMismatch": 9
-        }
-      },
+      "gapSize": null,
       "scripts": {
         "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `basefold` — benchmark function synthetic:basefold:agbcc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The exact agbcc `.s` text the benchmark fed m2c, verbatim.\ncat > in.s <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tbasefold\n\t.type\t basefold,function\n\t.thumb_func\nbasefold:\n\tpush\t{r4, lr}\n\tadd\tr4, r0, #0\n\tadd\tr3, r1, #0\n\tmov\tr0, #0x0\n.L6:\n\tlsl\tr1, r0, #0x10\n\tasr\tr1, r1, #0x10\n\tlsl\tr0, r1, #0x1\n\tadd\tr2, r0, r4\n\tadd\tr0, r0, r3\n\tldrh\tr0, [r0, #0x4]\n\tstrh\tr0, [r2, #0x4]\n\tadd\tr1, r1, #0x1\n\tlsl\tr1, r1, #0x10\n\tlsr\tr0, r1, #0x10\n\tasr\tr1, r1, #0x10\n\tcmp\tr1, #0x5\n\tble\t.L6\t@cond_branch\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n.Lfe1:\n\t.size\t basefold,.Lfe1-basefold\nASM_INPUT\n\n# The exact context header the benchmark passed via --context — prototypes only\n# (no struct/global layouts: the benchmark measures cold recovery).\ncat > ctx.h <<'CTX_INPUT'\nvoid basefold(u8 *d, u8 *s);\nCTX_INPUT\n\nargs=(\n  --target gba            # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function basefold     # the symbol to decompile from in.s\n  --context ctx.h         # the C context header above (typedefs + prototypes)\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
         "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `basefold` — benchmark function synthetic:basefold:agbcc.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:basefold:agbcc --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact agbcc `.s` text.\ncat > in.asm <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tbasefold\n\t.type\t basefold,function\n\t.thumb_func\nbasefold:\n\tpush\t{r4, lr}\n\tadd\tr4, r0, #0\n\tadd\tr3, r1, #0\n\tmov\tr0, #0x0\n.L6:\n\tlsl\tr1, r0, #0x10\n\tasr\tr1, r1, #0x10\n\tlsl\tr0, r1, #0x1\n\tadd\tr2, r0, r4\n\tadd\tr0, r0, r3\n\tldrh\tr0, [r0, #0x4]\n\tstrh\tr0, [r2, #0x4]\n\tadd\tr1, r1, #0x1\n\tlsl\tr1, r1, #0x10\n\tlsr\tr0, r1, #0x10\n\tasr\tr1, r1, #0x10\n\tcmp\tr1, #0x5\n\tble\t.L6\t@cond_branch\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n.Lfe1:\n\t.size\t basefold,.Lfe1-basefold\nASM_INPUT\n\n# The prototype hints the benchmark fed asmlift (callee arities / void-ness).\ncat > proto.json <<'PROTO_INPUT'\n{\n  \"basefold\": {\n    \"returnsVoid\": true\n  }\n}\nPROTO_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target agbcc          # frontend + target description (ISA, calling convention, compiler idioms)\n  --name basefold         # the symbol to decompile (multi-function input selects by name)\n  --proto proto.json      # the prototype hints above (callee arities / void-ness)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
@@ -52106,22 +52094,22 @@
         "decompiler": "asmlift",
         "candidateLabel": "unsigned",
         "outcome": "nonmatch",
-        "source": "void membnarrow(u16 * a0, u16 * a1) {\n    s32 v0;\n    v0 = 0;\n    do {\n        (a0 + 2)[(s16)v0] = (a1 + 2)[(s16)v0];\n        v0 = (u16)((s16)v0 + 1);\n    } while ((s16)v0 <= 5);\n    return;\n}\n",
-        "score": 17,
+        "source": "void membnarrow(u16 * a0, u16 * a1) {\n    s16 v0;\n    v0 = 0;\n    do {\n        (a0 + 2)[v0] = (a1 + 2)[v0];\n        v0 = (u16)(v0 + 1);\n    } while ((s16)v0 <= 5);\n    return;\n}\n",
+        "score": 11,
         "maxScore": 20,
         "compileErrors": null,
         "breakdown": {
           "insert": 0,
-          "delete": 1,
-          "replace": 6,
+          "delete": 0,
+          "replace": 5,
           "opMismatch": 0,
-          "argMismatch": 10
+          "argMismatch": 6
         },
         "quality": {
-          "score": 94,
+          "score": 100,
           "lines": 9,
           "gotos": 0,
-          "casts": 5,
+          "casts": 2,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -52152,16 +52140,16 @@
         }
       },
       "gapSize": {
-        "decompiler": "m2c",
+        "decompiler": "asmlift",
         "score": 11,
         "maxScore": 20,
         "ratio": 0.55,
         "kinds": {
           "insert": 0,
           "delete": 0,
-          "replace": 7,
+          "replace": 5,
           "opMismatch": 0,
-          "argMismatch": 4
+          "argMismatch": 6
         }
       },
       "scripts": {
@@ -53740,6 +53728,329 @@
       }
     },
     {
+      "id": "synthetic:mergecast:agbcc",
+      "sym": "mergecast",
+      "project": "synthetic",
+      "tier": "synthetic",
+      "toolchain": "agbcc",
+      "isa": "arm",
+      "compiler": "agbcc",
+      "language": "c",
+      "features": [
+        "narrow",
+        "sign-extend",
+        "cast",
+        "branch",
+        "pointer"
+      ],
+      "loc": 11,
+      "refSource": "void mergecast(s32 *out, s32 a, s32 b, s32 c)\n{\n    s32 v;\n\n    if (c) {\n        v = a + b;\n    } else {\n        v = a - b;\n    }\n    out[0] = (s16)v;\n}",
+      "targetAsm": "@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tmergecast\n\t.type\t mergecast,function\n\t.thumb_func\nmergecast:\n\tpush\t{r4, lr}\n\tadd\tr4, r0, #0\n\tsub\tr0, r1, r2\n\tcmp\tr3, #0\n\tbeq\t.L3\t@cond_branch\n\tadd\tr0, r1, r2\n.L3:\n\tlsl\tr0, r0, #0x10\n\tasr\tr0, r0, #0x10\n\tstr\tr0, [r4]\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n.Lfe1:\n\t.size\t mergecast,.Lfe1-mergecast\n",
+      "ctx": "void mergecast(s32 *out, s32 a, s32 b, s32 c);",
+      "proto": {
+        "mergecast": {
+          "returnsVoid": true
+        }
+      },
+      "asmlift": {
+        "decompiler": "asmlift",
+        "candidateLabel": "unsigned",
+        "outcome": "match",
+        "source": "void mergecast(s32 * a0, u32 a1, u32 a2, u32 a3) {\n    s32 v0;\n    if (a3 != 0) {\n        v0 = a1 + a2;\n    } else {\n        v0 = a1 - a2;\n    }\n    *a0 = (s16)v0;\n    return;\n}\n",
+        "score": 0,
+        "maxScore": 12,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 0
+        },
+        "quality": {
+          "score": 100,
+          "lines": 10,
+          "gotos": 0,
+          "casts": 1,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        }
+      },
+      "m2c": {
+        "decompiler": "m2c",
+        "outcome": "nonmatch",
+        "source": "void mergecast(s32 *out, s32 a, s32 b, s32 c) {\n    s16 var_r0;\n\n    var_r0 = a - b;\n    if (c != 0) {\n        var_r0 = a + b;\n    }\n    *out = (s32) var_r0;\n}\n",
+        "score": 5,
+        "maxScore": 16,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 4,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 1
+        },
+        "quality": {
+          "score": 100,
+          "lines": 8,
+          "gotos": 0,
+          "casts": 1,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        }
+      },
+      "gapSize": null,
+      "scripts": {
+        "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `mergecast` — benchmark function synthetic:mergecast:agbcc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The exact agbcc `.s` text the benchmark fed m2c, verbatim.\ncat > in.s <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tmergecast\n\t.type\t mergecast,function\n\t.thumb_func\nmergecast:\n\tpush\t{r4, lr}\n\tadd\tr4, r0, #0\n\tsub\tr0, r1, r2\n\tcmp\tr3, #0\n\tbeq\t.L3\t@cond_branch\n\tadd\tr0, r1, r2\n.L3:\n\tlsl\tr0, r0, #0x10\n\tasr\tr0, r0, #0x10\n\tstr\tr0, [r4]\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n.Lfe1:\n\t.size\t mergecast,.Lfe1-mergecast\nASM_INPUT\n\n# The exact context header the benchmark passed via --context — prototypes only\n# (no struct/global layouts: the benchmark measures cold recovery).\ncat > ctx.h <<'CTX_INPUT'\nvoid mergecast(s32 *out, s32 a, s32 b, s32 c);\nCTX_INPUT\n\nargs=(\n  --target gba            # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function mergecast    # the symbol to decompile from in.s\n  --context ctx.h         # the C context header above (typedefs + prototypes)\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `mergecast` — benchmark function synthetic:mergecast:agbcc.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:mergecast:agbcc --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact agbcc `.s` text.\ncat > in.asm <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tmergecast\n\t.type\t mergecast,function\n\t.thumb_func\nmergecast:\n\tpush\t{r4, lr}\n\tadd\tr4, r0, #0\n\tsub\tr0, r1, r2\n\tcmp\tr3, #0\n\tbeq\t.L3\t@cond_branch\n\tadd\tr0, r1, r2\n.L3:\n\tlsl\tr0, r0, #0x10\n\tasr\tr0, r0, #0x10\n\tstr\tr0, [r4]\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n.Lfe1:\n\t.size\t mergecast,.Lfe1-mergecast\nASM_INPUT\n\n# The prototype hints the benchmark fed asmlift (callee arities / void-ness).\ncat > proto.json <<'PROTO_INPUT'\n{\n  \"mergecast\": {\n    \"returnsVoid\": true\n  }\n}\nPROTO_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target agbcc          # frontend + target description (ISA, calling convention, compiler idioms)\n  --name mergecast        # the symbol to decompile (multi-function input selects by name)\n  --proto proto.json      # the prototype hints above (callee arities / void-ness)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+      }
+    },
+    {
+      "id": "synthetic:mergecast:gcc2.7.2kmc",
+      "sym": "mergecast",
+      "project": "synthetic",
+      "tier": "synthetic",
+      "toolchain": "gcc2.7.2kmc",
+      "isa": "mips",
+      "compiler": "gcc",
+      "language": "c",
+      "features": [
+        "narrow",
+        "sign-extend",
+        "cast",
+        "branch",
+        "pointer"
+      ],
+      "loc": 11,
+      "refSource": "void mergecast(s32 *out, s32 a, s32 b, s32 c)\n{\n    s32 v;\n\n    if (c) {\n        v = a + b;\n    } else {\n        v = a - b;\n    }\n    out[0] = (s16)v;\n}",
+      "targetAsm": "\ntarget.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <mergecast>:\n   0:\tbnez\ta3,c <mergecast+0xc>\n   4:\taddu\tv0,a1,a2\n   8:\tsubu\tv0,a1,a2\n   c:\tsll\tv0,v0,0x10\n  10:\tsra\tv0,v0,0x10\n  14:\tjr\tra\n  18:\tsw\tv0,0(a0)\n  1c:\tnop\n",
+      "ctx": "void mergecast(s32 *out, s32 a, s32 b, s32 c);",
+      "proto": {
+        "mergecast": {
+          "returnsVoid": true
+        }
+      },
+      "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /host-tmp/asmlift-mgcc-ref-3c9a8ba9116a127a/ref.c\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t0000001c mergecast\n\n\nContents of section .text:\n 0000 14e00002 00a61021 00a61023 00021400  .......!...#....\n 0010 00021403 03e00008 ac820000 00000000  ................\nContents of section .reginfo:\n 0000 800000f4 00000000 00000000 00000000  ................\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.              \n",
+      "asmlift": {
+        "decompiler": "asmlift",
+        "candidateLabel": "unsigned",
+        "outcome": "match",
+        "source": "void mergecast(s32 * a0, u32 a1, u32 a2, u32 a3) {\n    s32 v0;\n    if (a3 == 0) {\n        v0 = a1 - a2;\n    } else {\n        v0 = a1 + a2;\n    }\n    *a0 = v0 << 16 >> 16;\n    return;\n}\n",
+        "score": 0,
+        "maxScore": 7,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 0
+        },
+        "quality": {
+          "score": 100,
+          "lines": 10,
+          "gotos": 0,
+          "casts": 0,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        }
+      },
+      "m2c": {
+        "decompiler": "m2c",
+        "outcome": "match",
+        "source": "void mergecast(s32 *out, s32 a, s32 b, s32 c) {\n    s16 var_v0;\n\n    var_v0 = a + b;\n    if (c == 0) {\n        var_v0 = a - b;\n    }\n    *out = (s32) var_v0;\n}\n",
+        "score": 0,
+        "maxScore": 7,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 0
+        },
+        "quality": {
+          "score": 100,
+          "lines": 8,
+          "gotos": 0,
+          "casts": 1,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        }
+      },
+      "gapSize": null,
+      "scripts": {
+        "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `mergecast` — benchmark function synthetic:mergecast:gcc2.7.2kmc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The benchmark's objdump→GNU-as normalization of this function's disassembly (m2c cannot\n# read raw objdump), including the jump-table/const data sections recovered from the target\n# object — the exact text the benchmark fed m2c.\ncat > in.s <<'ASM_INPUT'\nglabel mergecast\n    bnez\t$a3, .Lc\n    addu\t$v0, $a1, $a2\n    subu\t$v0, $a1, $a2\n.Lc:\n    sll\t$v0, $v0, 0x10\n    sra\t$v0, $v0, 0x10\n    jr\t$ra\n    sw\t$v0, 0($a0)\n    nop\nASM_INPUT\n\n# The exact context header the benchmark passed via --context — prototypes only\n# (no struct/global layouts: the benchmark measures cold recovery).\ncat > ctx.h <<'CTX_INPUT'\nvoid mergecast(s32 *out, s32 a, s32 b, s32 c);\nCTX_INPUT\n\nargs=(\n  --target mips-gcc-c     # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function mergecast    # the symbol to decompile from in.s\n  --context ctx.h         # the C context header above (typedefs + prototypes)\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `mergecast` — benchmark function synthetic:mergecast:gcc2.7.2kmc.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:mergecast:gcc2.7.2kmc --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact `objdump -d --no-show-raw-insn` text.\ncat > in.asm <<'ASM_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <mergecast>:\n   0:\tbnez\ta3,c <mergecast+0xc>\n   4:\taddu\tv0,a1,a2\n   8:\tsubu\tv0,a1,a2\n   c:\tsll\tv0,v0,0x10\n  10:\tsra\tv0,v0,0x10\n  14:\tjr\tra\n  18:\tsw\tv0,0(a0)\n  1c:\tnop\nASM_INPUT\n\n# The target object's objdump -s -r -t dump — the data sections (jump tables, anonymous\n# constants) the text-only disassembly lacks; the benchmark recovered them from the object.\ncat > dump.txt <<'DUMP_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /host-tmp/asmlift-mgcc-ref-3c9a8ba9116a127a/ref.c\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t0000001c mergecast\n\n\nContents of section .text:\n 0000 14e00002 00a61021 00a61023 00021400  .......!...#....\n 0010 00021403 03e00008 ac820000 00000000  ................\nContents of section .reginfo:\n 0000 800000f4 00000000 00000000 00000000  ................\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.\nDUMP_INPUT\n\n# The prototype hints the benchmark fed asmlift (callee arities / void-ness).\ncat > proto.json <<'PROTO_INPUT'\n{\n  \"mergecast\": {\n    \"returnsVoid\": true\n  }\n}\nPROTO_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target gcc2.7.2kmc    # frontend + target description (ISA, calling convention, compiler idioms)\n  --name mergecast        # the symbol to decompile (multi-function input selects by name)\n  --asm-data dump.txt     # the data sections above (jump-table/const recovery)\n  --proto proto.json      # the prototype hints above (callee arities / void-ness)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+      }
+    },
+    {
+      "id": "synthetic:mergecast:ido7.1",
+      "sym": "mergecast",
+      "project": "synthetic",
+      "tier": "synthetic",
+      "toolchain": "ido7.1",
+      "isa": "mips",
+      "compiler": "ido",
+      "language": "c",
+      "features": [
+        "narrow",
+        "sign-extend",
+        "cast",
+        "branch",
+        "pointer"
+      ],
+      "loc": 11,
+      "refSource": "void mergecast(s32 *out, s32 a, s32 b, s32 c)\n{\n    s32 v;\n\n    if (c) {\n        v = a + b;\n    } else {\n        v = a - b;\n    }\n    out[0] = (s16)v;\n}",
+      "targetAsm": "\ntarget.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <mergecast>:\n   0:\tbeqz\ta3,10 <mergecast+0x10>\n   4:\tsubu\tv0,a1,a2\n   8:\tb\t10 <mergecast+0x10>\n   c:\taddu\tv0,a1,a2\n  10:\tsll\tt6,v0,0x10\n  14:\tsra\tt7,t6,0x10\n  18:\tjr\tra\n  1c:\tsw\tt7,0(a0)\n",
+      "ctx": "void mergecast(s32 *out, s32 a, s32 b, s32 c);",
+      "proto": {
+        "mergecast": {
+          "returnsVoid": true
+        }
+      },
+      "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    d  .text\t00000020 .text\n00000000 g     F .text\t00000020 mergecast\n\n\nContents of section .text:\n 0000 10e00003 00a61023 10000001 00a61021  .......#.......!\n 0010 00027400 000e7c03 03e00008 ac8f0000  ..t...|.........\nContents of section .options:\n 0000 01200000 00000000 8000c0f4 00000000  . ..............\n 0010 00000000 00000000 00000000 00007ff0  ................\n 0020 07100000 00000000 00000000 00000000  ................\n 0030 08100000 00000000 00000000 00000000  ................\nContents of section .reginfo:\n 0000 8000c0f4 00000000 00000000 00000000  ................\n 0010 00000000 00007ff0                    ........        \nContents of section .mdebug:\n 0000 7009070a 00000008 00000008 00000188  p...............\n 0010 00000005 000002d4 00000001 00000190  ................\n 0020 00000004 000001c4 00000000 00000000  ................\n 0030 00000011 000001f4 00000038 00000238  ...........8...8\n 0040 0000000c 00000270 00000001 0000027c  .......p.......|\n 0050 00000000 00000000 00000001 000002c4  ................\n 0060 3030e141 10f00000 00000000 00000001  00.A............\n 0070 00000000 00000000 00000000 ffffffff  ................\n 0080 00000000 00000000 00000000 001d001f  ................\n 0090 00000003 0000000c 00000000 00000001  ................\n 00a0 00000000 2c200004 0000002e 00000000  ...., ..........\n 00b0 1820000f 0000002e 00000020 20200001  . .........   ..\n 00c0 00000001 00000000 20200000 02000000  ........  ......\n 00d0 03000000 04000000 05000000 06000000  ................\n 00e0 07000000 08000000 09000000 20000000  ............ ...\n 00f0 21000000 0a000000 0b000000 0b000000  !...............\n 0100 1a000000 00000000 00000003 06000000  ................\n 0110 002f746d 702f6173 6d6c6966 742d6d69  ./tmp/asmlift-mi\n 0120 70732d72 65662d33 63396138 62613931  ps-ref-3c9a8ba91\n 0130 31366131 3237612f 7265662e 63006d65  16a127a/ref.c.me\n 0140 72676563 61737400 6d657267 65636173  rgecast.mergecas\n 0150 74000000 00000000 00000001 00000000  t...............\n 0160 00000038 00000000 00000004 00000000  ...8............\n 0170 00000008 00000000 00000000 00000001  ................\n 0180 00000000 00000011 00000000 00000000  ................\n 0190 01800000 00000000 00000006 00000000  ................\n 01a0 00000000 00000000 18200001 00000000  ......... ......\n 01b0 00000000 00000000 00000000 00000000  ................\n 01c0 00000000 7fffffff 00000000 00000000  ................\n 01d0 00000002                             ....            \n",
+      "asmlift": {
+        "decompiler": "asmlift",
+        "candidateLabel": "unsigned",
+        "outcome": "match",
+        "source": "void mergecast(s32 * a0, u32 a1, u32 a2, u32 a3) {\n    s32 v0;\n    if (a3 != 0) {\n        v0 = a1 + a2;\n    } else {\n        v0 = a1 - a2;\n    }\n    *a0 = v0 << 16 >> 16;\n    return;\n}\n",
+        "score": 0,
+        "maxScore": 8,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 0
+        },
+        "quality": {
+          "score": 100,
+          "lines": 10,
+          "gotos": 0,
+          "casts": 0,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        }
+      },
+      "m2c": {
+        "decompiler": "m2c",
+        "outcome": "nonmatch",
+        "source": "void mergecast(s32 *out, s32 a, s32 b, s32 c) {\n    s16 var_v0;\n\n    var_v0 = a - b;\n    if (c != 0) {\n        var_v0 = a + b;\n    }\n    *out = (s32) var_v0;\n}\n",
+        "score": 7,
+        "maxScore": 10,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 2,
+          "delete": 1,
+          "replace": 1,
+          "opMismatch": 0,
+          "argMismatch": 3
+        },
+        "quality": {
+          "score": 100,
+          "lines": 8,
+          "gotos": 0,
+          "casts": 1,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        }
+      },
+      "gapSize": null,
+      "scripts": {
+        "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `mergecast` — benchmark function synthetic:mergecast:ido7.1.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The benchmark's objdump→GNU-as normalization of this function's disassembly (m2c cannot\n# read raw objdump), including the jump-table/const data sections recovered from the target\n# object — the exact text the benchmark fed m2c.\ncat > in.s <<'ASM_INPUT'\nglabel mergecast\n    beqz\t$a3, .L10\n    subu\t$v0, $a1, $a2\n    b\t.L10\n    addu\t$v0, $a1, $a2\n.L10:\n    sll\t$t6, $v0, 0x10\n    sra\t$t7, $t6, 0x10\n    jr\t$ra\n    sw\t$t7, 0($a0)\nASM_INPUT\n\n# The exact context header the benchmark passed via --context — prototypes only\n# (no struct/global layouts: the benchmark measures cold recovery).\ncat > ctx.h <<'CTX_INPUT'\nvoid mergecast(s32 *out, s32 a, s32 b, s32 c);\nCTX_INPUT\n\nargs=(\n  --target mips-ido-c     # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function mergecast    # the symbol to decompile from in.s\n  --context ctx.h         # the C context header above (typedefs + prototypes)\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `mergecast` — benchmark function synthetic:mergecast:ido7.1.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:mergecast:ido7.1 --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact `objdump -d --no-show-raw-insn` text.\ncat > in.asm <<'ASM_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <mergecast>:\n   0:\tbeqz\ta3,10 <mergecast+0x10>\n   4:\tsubu\tv0,a1,a2\n   8:\tb\t10 <mergecast+0x10>\n   c:\taddu\tv0,a1,a2\n  10:\tsll\tt6,v0,0x10\n  14:\tsra\tt7,t6,0x10\n  18:\tjr\tra\n  1c:\tsw\tt7,0(a0)\nASM_INPUT\n\n# The target object's objdump -s -r -t dump — the data sections (jump tables, anonymous\n# constants) the text-only disassembly lacks; the benchmark recovered them from the object.\ncat > dump.txt <<'DUMP_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    d  .text\t00000020 .text\n00000000 g     F .text\t00000020 mergecast\n\n\nContents of section .text:\n 0000 10e00003 00a61023 10000001 00a61021  .......#.......!\n 0010 00027400 000e7c03 03e00008 ac8f0000  ..t...|.........\nContents of section .options:\n 0000 01200000 00000000 8000c0f4 00000000  . ..............\n 0010 00000000 00000000 00000000 00007ff0  ................\n 0020 07100000 00000000 00000000 00000000  ................\n 0030 08100000 00000000 00000000 00000000  ................\nContents of section .reginfo:\n 0000 8000c0f4 00000000 00000000 00000000  ................\n 0010 00000000 00007ff0                    ........        \nContents of section .mdebug:\n 0000 7009070a 00000008 00000008 00000188  p...............\n 0010 00000005 000002d4 00000001 00000190  ................\n 0020 00000004 000001c4 00000000 00000000  ................\n 0030 00000011 000001f4 00000038 00000238  ...........8...8\n 0040 0000000c 00000270 00000001 0000027c  .......p.......|\n 0050 00000000 00000000 00000001 000002c4  ................\n 0060 3030e141 10f00000 00000000 00000001  00.A............\n 0070 00000000 00000000 00000000 ffffffff  ................\n 0080 00000000 00000000 00000000 001d001f  ................\n 0090 00000003 0000000c 00000000 00000001  ................\n 00a0 00000000 2c200004 0000002e 00000000  ...., ..........\n 00b0 1820000f 0000002e 00000020 20200001  . .........   ..\n 00c0 00000001 00000000 20200000 02000000  ........  ......\n 00d0 03000000 04000000 05000000 06000000  ................\n 00e0 07000000 08000000 09000000 20000000  ............ ...\n 00f0 21000000 0a000000 0b000000 0b000000  !...............\n 0100 1a000000 00000000 00000003 06000000  ................\n 0110 002f746d 702f6173 6d6c6966 742d6d69  ./tmp/asmlift-mi\n 0120 70732d72 65662d33 63396138 62613931  ps-ref-3c9a8ba91\n 0130 31366131 3237612f 7265662e 63006d65  16a127a/ref.c.me\n 0140 72676563 61737400 6d657267 65636173  rgecast.mergecas\n 0150 74000000 00000000 00000001 00000000  t...............\n 0160 00000038 00000000 00000004 00000000  ...8............\n 0170 00000008 00000000 00000000 00000001  ................\n 0180 00000000 00000011 00000000 00000000  ................\n 0190 01800000 00000000 00000006 00000000  ................\n 01a0 00000000 00000000 18200001 00000000  ......... ......\n 01b0 00000000 00000000 00000000 00000000  ................\n 01c0 00000000 7fffffff 00000000 00000000  ................\n 01d0 00000002                             ....\nDUMP_INPUT\n\n# The prototype hints the benchmark fed asmlift (callee arities / void-ness).\ncat > proto.json <<'PROTO_INPUT'\n{\n  \"mergecast\": {\n    \"returnsVoid\": true\n  }\n}\nPROTO_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target ido7.1         # frontend + target description (ISA, calling convention, compiler idioms)\n  --name mergecast        # the symbol to decompile (multi-function input selects by name)\n  --asm-data dump.txt     # the data sections above (jump-table/const recovery)\n  --proto proto.json      # the prototype hints above (callee arities / void-ness)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+      }
+    },
+    {
+      "id": "synthetic:mergecast:mwcc_242_81",
+      "sym": "mergecast",
+      "project": "synthetic",
+      "tier": "synthetic",
+      "toolchain": "mwcc_242_81",
+      "isa": "ppc",
+      "compiler": "mwcc",
+      "language": "c",
+      "features": [
+        "narrow",
+        "sign-extend",
+        "cast",
+        "branch",
+        "pointer"
+      ],
+      "loc": 11,
+      "refSource": "void mergecast(s32 *out, s32 a, s32 b, s32 c)\n{\n    s32 v;\n\n    if (c) {\n        v = a + b;\n    } else {\n        v = a - b;\n    }\n    out[0] = (s16)v;\n}",
+      "targetAsm": "\ntarget.o:     file format elf32-powerpc\n\n\nDisassembly of section .text:\n\n00000000 <mergecast>:\n   0:\tcmpwi   r6,0\n   4:\tsubf    r0,r5,r4\n   8:\tbeq     10 <mergecast+0x10>\n   c:\tadd     r0,r4,r5\n  10:\textsh   r0,r0\n  14:\tstw     r0,0(r3)\n  18:\tblr\n",
+      "ctx": "void mergecast(s32 *out, s32 a, s32 b, s32 c);",
+      "proto": {
+        "mergecast": {
+          "returnsVoid": true
+        }
+      },
+      "asmDump": "\ntarget.o:     file format elf32-powerpc\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 ref.c\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .mwcats.text\t00000000 .mwcats.text\n00000000 g     F .text\t0000001c mergecast\n\n\nRELOCATION RECORDS FOR [.mwcats.text]:\nOFFSET   TYPE              VALUE\n00000004 R_PPC_ADDR32      mergecast\n\n\nContents of section .text:\n 0000 2c060000 7c052050 41820008 7c042a14  ,...|. PA...|.*.\n 0010 7c000734 90030000 4e800020           |..4....N..     \nContents of section .mwcats.text:\n 0000 0200001c 00000000                    ........        \nContents of section .comment:\n 0000 436f6465 57617272 696f720a 02040201  CodeWarrior.....\n 0010 01020016 2c000000 00000000 00000000  ....,...........\n 0020 00000000 00000000 00000000 00000000  ................\n 0030 00000000 00000001 00000000 00000004  ................\n 0040 00000000 00000004 00000000 00000004  ................\n 0050 00000000                             ....            \n",
+      "asmlift": {
+        "decompiler": "asmlift",
+        "candidateLabel": "signed",
+        "outcome": "match",
+        "source": "void mergecast(s32 * a0, s32 a1, s32 a2, s32 a3) {\n    s32 v0;\n    if (a3 != 0) {\n        v0 = a1 + a2;\n    } else {\n        v0 = a1 - a2;\n    }\n    *a0 = (s16)v0;\n    return;\n}\n",
+        "score": 0,
+        "maxScore": 7,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 0
+        },
+        "quality": {
+          "score": 100,
+          "lines": 10,
+          "gotos": 0,
+          "casts": 1,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        }
+      },
+      "m2c": {
+        "decompiler": "m2c",
+        "outcome": "nonmatch",
+        "source": "void mergecast(s32 *out, s32 a, s32 b, s32 c) {\n    s16 var_r0;\n\n    var_r0 = a - b;\n    if (c != 0) {\n        var_r0 = a + b;\n    }\n    *out = (s32) var_r0;\n}\n",
+        "score": 3,
+        "maxScore": 9,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 2,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 1
+        },
+        "quality": {
+          "score": 100,
+          "lines": 8,
+          "gotos": 0,
+          "casts": 1,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        }
+      },
+      "gapSize": null,
+      "scripts": {
+        "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `mergecast` — benchmark function synthetic:mergecast:mwcc_242_81.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The benchmark's objdump→GNU-as normalization of this function's disassembly (m2c cannot\n# read raw objdump), including the jump-table/const data sections recovered from the target\n# object — the exact text the benchmark fed m2c.\ncat > in.s <<'ASM_INPUT'\nglabel mergecast\n    cmpwi   r6,0\n    subf    r0,r5,r4\n    beq      .L10\n    add     r0,r4,r5\n.L10:\n    extsh   r0,r0\n    stw     r0,0(r3)\n    blr\nASM_INPUT\n\n# The exact context header the benchmark passed via --context — prototypes only\n# (no struct/global layouts: the benchmark measures cold recovery).\ncat > ctx.h <<'CTX_INPUT'\nvoid mergecast(s32 *out, s32 a, s32 b, s32 c);\nCTX_INPUT\n\nargs=(\n  --target ppc-mwcc-c     # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function mergecast    # the symbol to decompile from in.s\n  --context ctx.h         # the C context header above (typedefs + prototypes)\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `mergecast` — benchmark function synthetic:mergecast:mwcc_242_81.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:mergecast:mwcc_242_81 --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact `objdump -d --no-show-raw-insn` text.\ncat > in.asm <<'ASM_INPUT'\n\ntarget.o:     file format elf32-powerpc\n\n\nDisassembly of section .text:\n\n00000000 <mergecast>:\n   0:\tcmpwi   r6,0\n   4:\tsubf    r0,r5,r4\n   8:\tbeq     10 <mergecast+0x10>\n   c:\tadd     r0,r4,r5\n  10:\textsh   r0,r0\n  14:\tstw     r0,0(r3)\n  18:\tblr\nASM_INPUT\n\n# The target object's objdump -s -r -t dump — the data sections (jump tables, anonymous\n# constants) the text-only disassembly lacks; the benchmark recovered them from the object.\ncat > dump.txt <<'DUMP_INPUT'\n\ntarget.o:     file format elf32-powerpc\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 ref.c\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .mwcats.text\t00000000 .mwcats.text\n00000000 g     F .text\t0000001c mergecast\n\n\nRELOCATION RECORDS FOR [.mwcats.text]:\nOFFSET   TYPE              VALUE\n00000004 R_PPC_ADDR32      mergecast\n\n\nContents of section .text:\n 0000 2c060000 7c052050 41820008 7c042a14  ,...|. PA...|.*.\n 0010 7c000734 90030000 4e800020           |..4....N..     \nContents of section .mwcats.text:\n 0000 0200001c 00000000                    ........        \nContents of section .comment:\n 0000 436f6465 57617272 696f720a 02040201  CodeWarrior.....\n 0010 01020016 2c000000 00000000 00000000  ....,...........\n 0020 00000000 00000000 00000000 00000000  ................\n 0030 00000000 00000001 00000000 00000004  ................\n 0040 00000000 00000004 00000000 00000004  ................\n 0050 00000000                             ....\nDUMP_INPUT\n\n# The prototype hints the benchmark fed asmlift (callee arities / void-ness).\ncat > proto.json <<'PROTO_INPUT'\n{\n  \"mergecast\": {\n    \"returnsVoid\": true\n  }\n}\nPROTO_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target mwcc_242_81    # frontend + target description (ISA, calling convention, compiler idioms)\n  --name mergecast        # the symbol to decompile (multi-function input selects by name)\n  --asm-data dump.txt     # the data sections above (jump-table/const recovery)\n  --proto proto.json      # the prototype hints above (callee arities / void-ness)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+      }
+    },
+    {
       "id": "synthetic:mergechain:agbcc",
       "sym": "mergechain",
       "project": "synthetic",
@@ -54652,6 +54963,644 @@
       "scripts": {
         "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `mergeloop` — benchmark function synthetic:mergeloop:mwcc_242_81.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The benchmark's objdump→GNU-as normalization of this function's disassembly (m2c cannot\n# read raw objdump), including the jump-table/const data sections recovered from the target\n# object — the exact text the benchmark fed m2c.\ncat > in.s <<'ASM_INPUT'\nglabel mergeloop\n    li      r0,0\n    li      r5,0\n    mtctr   r3\n    cmpwi   r3,0\n    ble      .L4c\n.L14:\n    lwz     r3,0(r4)\n    clrlwi. r0,r3,31\n    beq      .L38\n    cmpwi   r3,31\n    li      r0,32\n    bgt      .L30\n    mr      r0,r3\n.L30:\n    slwi    r5,r3,1\n    b        .L44\n.L38:\n    mulli   r5,r3,3\n    srawi   r0,r3,31\n    andc    r0,r3,r0\n.L44:\n    addi    r4,r4,4\n    bdnz     .L14\n.L4c:\n    mulli   r0,r0,10\n    add     r3,r5,r0\n    blr\nASM_INPUT\n\n# (This function ran with NO context header — the benchmark fed m2c the assembly alone.)\n\nargs=(\n  --target ppc-mwcc-c     # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function mergeloop    # the symbol to decompile from in.s\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
         "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `mergeloop` — benchmark function synthetic:mergeloop:mwcc_242_81.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:mergeloop:mwcc_242_81 --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact `objdump -d --no-show-raw-insn` text.\ncat > in.asm <<'ASM_INPUT'\n\ntarget.o:     file format elf32-powerpc\n\n\nDisassembly of section .text:\n\n00000000 <mergeloop>:\n   0:\tli      r0,0\n   4:\tli      r5,0\n   8:\tmtctr   r3\n   c:\tcmpwi   r3,0\n  10:\tble     4c <mergeloop+0x4c>\n  14:\tlwz     r3,0(r4)\n  18:\tclrlwi. r0,r3,31\n  1c:\tbeq     38 <mergeloop+0x38>\n  20:\tcmpwi   r3,31\n  24:\tli      r0,32\n  28:\tbgt     30 <mergeloop+0x30>\n  2c:\tmr      r0,r3\n  30:\tslwi    r5,r3,1\n  34:\tb       44 <mergeloop+0x44>\n  38:\tmulli   r5,r3,3\n  3c:\tsrawi   r0,r3,31\n  40:\tandc    r0,r3,r0\n  44:\taddi    r4,r4,4\n  48:\tbdnz    14 <mergeloop+0x14>\n  4c:\tmulli   r0,r0,10\n  50:\tadd     r3,r5,r0\n  54:\tblr\nASM_INPUT\n\n# The target object's objdump -s -r -t dump — the data sections (jump tables, anonymous\n# constants) the text-only disassembly lacks; the benchmark recovered them from the object.\ncat > dump.txt <<'DUMP_INPUT'\n\ntarget.o:     file format elf32-powerpc\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 ref.c\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .mwcats.text\t00000000 .mwcats.text\n00000000 g     F .text\t00000058 mergeloop\n\n\nRELOCATION RECORDS FOR [.mwcats.text]:\nOFFSET   TYPE              VALUE\n00000004 R_PPC_ADDR32      mergeloop\n\n\nContents of section .text:\n 0000 38000000 38a00000 7c6903a6 2c030000  8...8...|i..,...\n 0010 4081003c 80640000 546007ff 4182001c  @..<.d..T`..A...\n 0020 2c03001f 38000020 41810008 7c601b78  ,...8.. A...|`.x\n 0030 5465083c 48000010 1ca30003 7c60fe70  Te.<H.......|`.p\n 0040 7c600078 38840004 4200ffcc 1c00000a  |`.x8...B.......\n 0050 7c650214 4e800020                    |e..N..         \nContents of section .mwcats.text:\n 0000 02000058 00000000                    ...X....        \nContents of section .comment:\n 0000 436f6465 57617272 696f720a 02040201  CodeWarrior.....\n 0010 01020016 2c000000 00000000 00000000  ....,...........\n 0020 00000000 00000000 00000000 00000000  ................\n 0030 00000000 00000001 00000000 00000004  ................\n 0040 00000000 00000004 00000000 00000004  ................\n 0050 00000000                             ....\nDUMP_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target mwcc_242_81    # frontend + target description (ISA, calling convention, compiler idioms)\n  --name mergeloop        # the symbol to decompile (multi-function input selects by name)\n  --asm-data dump.txt     # the data sections above (jump-table/const recovery)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+      }
+    },
+    {
+      "id": "synthetic:mergenarrow:agbcc",
+      "sym": "mergenarrow",
+      "project": "synthetic",
+      "tier": "synthetic",
+      "toolchain": "agbcc",
+      "isa": "arm",
+      "compiler": "agbcc",
+      "language": "c",
+      "features": [
+        "narrow",
+        "sign-extend",
+        "branch",
+        "pointer"
+      ],
+      "loc": 11,
+      "refSource": "void mergenarrow(s32 *out, s32 a, s32 b, s32 c)\n{\n    s16 v;\n\n    if (c) {\n        v = a + b;\n    } else {\n        v = a - b;\n    }\n    out[0] = v;\n}",
+      "targetAsm": "@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tmergenarrow\n\t.type\t mergenarrow,function\n\t.thumb_func\nmergenarrow:\n\tpush\t{r4, lr}\n\tadd\tr4, r0, #0\n\tcmp\tr3, #0\n\tbeq\t.L3\t@cond_branch\n\tadd\tr0, r1, r2\n\tb\t.L5\n.L3:\n\tsub\tr0, r1, r2\n.L5:\n\tlsl\tr0, r0, #0x10\n\tlsr\tr0, r0, #0x10\n\tlsl\tr0, r0, #0x10\n\tasr\tr0, r0, #0x10\n\tstr\tr0, [r4]\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n.Lfe1:\n\t.size\t mergenarrow,.Lfe1-mergenarrow\n",
+      "ctx": "void mergenarrow(s32 *out, s32 a, s32 b, s32 c);",
+      "proto": {
+        "mergenarrow": {
+          "returnsVoid": true
+        }
+      },
+      "asmlift": {
+        "decompiler": "asmlift",
+        "candidateLabel": "unsigned",
+        "outcome": "match",
+        "source": "void mergenarrow(s32 * a0, u32 a1, u32 a2, u32 a3) {\n    u16 v0;\n    if (a3 != 0) {\n        v0 = a1 + a2;\n    } else {\n        v0 = a1 - a2;\n    }\n    *a0 = (s16)v0;\n    return;\n}\n",
+        "score": 0,
+        "maxScore": 15,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 0
+        },
+        "quality": {
+          "score": 100,
+          "lines": 10,
+          "gotos": 0,
+          "casts": 1,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        }
+      },
+      "m2c": {
+        "decompiler": "m2c",
+        "outcome": "match",
+        "source": "void mergenarrow(s32 *out, s32 a, s32 b, s32 c) {\n    u16 var_r0;\n\n    if (c != 0) {\n        var_r0 = a + b;\n    } else {\n        var_r0 = a - b;\n    }\n    *out = (s32) (s16) var_r0;\n}\n",
+        "score": 0,
+        "maxScore": 15,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 0
+        },
+        "quality": {
+          "score": 100,
+          "lines": 9,
+          "gotos": 0,
+          "casts": 2,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        }
+      },
+      "gapSize": null,
+      "scripts": {
+        "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `mergenarrow` — benchmark function synthetic:mergenarrow:agbcc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The exact agbcc `.s` text the benchmark fed m2c, verbatim.\ncat > in.s <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tmergenarrow\n\t.type\t mergenarrow,function\n\t.thumb_func\nmergenarrow:\n\tpush\t{r4, lr}\n\tadd\tr4, r0, #0\n\tcmp\tr3, #0\n\tbeq\t.L3\t@cond_branch\n\tadd\tr0, r1, r2\n\tb\t.L5\n.L3:\n\tsub\tr0, r1, r2\n.L5:\n\tlsl\tr0, r0, #0x10\n\tlsr\tr0, r0, #0x10\n\tlsl\tr0, r0, #0x10\n\tasr\tr0, r0, #0x10\n\tstr\tr0, [r4]\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n.Lfe1:\n\t.size\t mergenarrow,.Lfe1-mergenarrow\nASM_INPUT\n\n# The exact context header the benchmark passed via --context — prototypes only\n# (no struct/global layouts: the benchmark measures cold recovery).\ncat > ctx.h <<'CTX_INPUT'\nvoid mergenarrow(s32 *out, s32 a, s32 b, s32 c);\nCTX_INPUT\n\nargs=(\n  --target gba            # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function mergenarrow  # the symbol to decompile from in.s\n  --context ctx.h         # the C context header above (typedefs + prototypes)\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `mergenarrow` — benchmark function synthetic:mergenarrow:agbcc.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:mergenarrow:agbcc --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact agbcc `.s` text.\ncat > in.asm <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tmergenarrow\n\t.type\t mergenarrow,function\n\t.thumb_func\nmergenarrow:\n\tpush\t{r4, lr}\n\tadd\tr4, r0, #0\n\tcmp\tr3, #0\n\tbeq\t.L3\t@cond_branch\n\tadd\tr0, r1, r2\n\tb\t.L5\n.L3:\n\tsub\tr0, r1, r2\n.L5:\n\tlsl\tr0, r0, #0x10\n\tlsr\tr0, r0, #0x10\n\tlsl\tr0, r0, #0x10\n\tasr\tr0, r0, #0x10\n\tstr\tr0, [r4]\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n.Lfe1:\n\t.size\t mergenarrow,.Lfe1-mergenarrow\nASM_INPUT\n\n# The prototype hints the benchmark fed asmlift (callee arities / void-ness).\ncat > proto.json <<'PROTO_INPUT'\n{\n  \"mergenarrow\": {\n    \"returnsVoid\": true\n  }\n}\nPROTO_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target agbcc          # frontend + target description (ISA, calling convention, compiler idioms)\n  --name mergenarrow      # the symbol to decompile (multi-function input selects by name)\n  --proto proto.json      # the prototype hints above (callee arities / void-ness)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+      }
+    },
+    {
+      "id": "synthetic:mergenarrow:gcc2.7.2kmc",
+      "sym": "mergenarrow",
+      "project": "synthetic",
+      "tier": "synthetic",
+      "toolchain": "gcc2.7.2kmc",
+      "isa": "mips",
+      "compiler": "gcc",
+      "language": "c",
+      "features": [
+        "narrow",
+        "sign-extend",
+        "branch",
+        "pointer"
+      ],
+      "loc": 11,
+      "refSource": "void mergenarrow(s32 *out, s32 a, s32 b, s32 c)\n{\n    s16 v;\n\n    if (c) {\n        v = a + b;\n    } else {\n        v = a - b;\n    }\n    out[0] = v;\n}",
+      "targetAsm": "\ntarget.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <mergenarrow>:\n   0:\tbnez\ta3,c <mergenarrow+0xc>\n   4:\taddu\tv0,a1,a2\n   8:\tsubu\tv0,a1,a2\n   c:\tsll\tv0,v0,0x10\n  10:\tsra\tv0,v0,0x10\n  14:\tjr\tra\n  18:\tsw\tv0,0(a0)\n  1c:\tnop\n",
+      "ctx": "void mergenarrow(s32 *out, s32 a, s32 b, s32 c);",
+      "proto": {
+        "mergenarrow": {
+          "returnsVoid": true
+        }
+      },
+      "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /host-tmp/asmlift-mgcc-ref-ce7e41d035389caf/ref.c\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t0000001c mergenarrow\n\n\nContents of section .text:\n 0000 14e00002 00a61021 00a61023 00021400  .......!...#....\n 0010 00021403 03e00008 ac820000 00000000  ................\nContents of section .reginfo:\n 0000 800000f4 00000000 00000000 00000000  ................\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.              \n",
+      "asmlift": {
+        "decompiler": "asmlift",
+        "candidateLabel": "unsigned",
+        "outcome": "match",
+        "source": "void mergenarrow(s32 * a0, u32 a1, u32 a2, u32 a3) {\n    s32 v0;\n    if (a3 == 0) {\n        v0 = a1 - a2;\n    } else {\n        v0 = a1 + a2;\n    }\n    *a0 = v0 << 16 >> 16;\n    return;\n}\n",
+        "score": 0,
+        "maxScore": 7,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 0
+        },
+        "quality": {
+          "score": 100,
+          "lines": 10,
+          "gotos": 0,
+          "casts": 0,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        }
+      },
+      "m2c": {
+        "decompiler": "m2c",
+        "outcome": "match",
+        "source": "void mergenarrow(s32 *out, s32 a, s32 b, s32 c) {\n    s16 var_v0;\n\n    var_v0 = a + b;\n    if (c == 0) {\n        var_v0 = a - b;\n    }\n    *out = (s32) var_v0;\n}\n",
+        "score": 0,
+        "maxScore": 7,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 0
+        },
+        "quality": {
+          "score": 100,
+          "lines": 8,
+          "gotos": 0,
+          "casts": 1,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        }
+      },
+      "gapSize": null,
+      "scripts": {
+        "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `mergenarrow` — benchmark function synthetic:mergenarrow:gcc2.7.2kmc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The benchmark's objdump→GNU-as normalization of this function's disassembly (m2c cannot\n# read raw objdump), including the jump-table/const data sections recovered from the target\n# object — the exact text the benchmark fed m2c.\ncat > in.s <<'ASM_INPUT'\nglabel mergenarrow\n    bnez\t$a3, .Lc\n    addu\t$v0, $a1, $a2\n    subu\t$v0, $a1, $a2\n.Lc:\n    sll\t$v0, $v0, 0x10\n    sra\t$v0, $v0, 0x10\n    jr\t$ra\n    sw\t$v0, 0($a0)\n    nop\nASM_INPUT\n\n# The exact context header the benchmark passed via --context — prototypes only\n# (no struct/global layouts: the benchmark measures cold recovery).\ncat > ctx.h <<'CTX_INPUT'\nvoid mergenarrow(s32 *out, s32 a, s32 b, s32 c);\nCTX_INPUT\n\nargs=(\n  --target mips-gcc-c     # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function mergenarrow  # the symbol to decompile from in.s\n  --context ctx.h         # the C context header above (typedefs + prototypes)\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `mergenarrow` — benchmark function synthetic:mergenarrow:gcc2.7.2kmc.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:mergenarrow:gcc2.7.2kmc --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact `objdump -d --no-show-raw-insn` text.\ncat > in.asm <<'ASM_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <mergenarrow>:\n   0:\tbnez\ta3,c <mergenarrow+0xc>\n   4:\taddu\tv0,a1,a2\n   8:\tsubu\tv0,a1,a2\n   c:\tsll\tv0,v0,0x10\n  10:\tsra\tv0,v0,0x10\n  14:\tjr\tra\n  18:\tsw\tv0,0(a0)\n  1c:\tnop\nASM_INPUT\n\n# The target object's objdump -s -r -t dump — the data sections (jump tables, anonymous\n# constants) the text-only disassembly lacks; the benchmark recovered them from the object.\ncat > dump.txt <<'DUMP_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /host-tmp/asmlift-mgcc-ref-ce7e41d035389caf/ref.c\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t0000001c mergenarrow\n\n\nContents of section .text:\n 0000 14e00002 00a61021 00a61023 00021400  .......!...#....\n 0010 00021403 03e00008 ac820000 00000000  ................\nContents of section .reginfo:\n 0000 800000f4 00000000 00000000 00000000  ................\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.\nDUMP_INPUT\n\n# The prototype hints the benchmark fed asmlift (callee arities / void-ness).\ncat > proto.json <<'PROTO_INPUT'\n{\n  \"mergenarrow\": {\n    \"returnsVoid\": true\n  }\n}\nPROTO_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target gcc2.7.2kmc    # frontend + target description (ISA, calling convention, compiler idioms)\n  --name mergenarrow      # the symbol to decompile (multi-function input selects by name)\n  --asm-data dump.txt     # the data sections above (jump-table/const recovery)\n  --proto proto.json      # the prototype hints above (callee arities / void-ness)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+      }
+    },
+    {
+      "id": "synthetic:mergenarrow:ido7.1",
+      "sym": "mergenarrow",
+      "project": "synthetic",
+      "tier": "synthetic",
+      "toolchain": "ido7.1",
+      "isa": "mips",
+      "compiler": "ido",
+      "language": "c",
+      "features": [
+        "narrow",
+        "sign-extend",
+        "branch",
+        "pointer"
+      ],
+      "loc": 11,
+      "refSource": "void mergenarrow(s32 *out, s32 a, s32 b, s32 c)\n{\n    s16 v;\n\n    if (c) {\n        v = a + b;\n    } else {\n        v = a - b;\n    }\n    out[0] = v;\n}",
+      "targetAsm": "\ntarget.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <mergenarrow>:\n   0:\tbeqz\ta3,18 <mergenarrow+0x18>\n   4:\tsubu\tv0,a1,a2\n   8:\taddu\tv0,a1,a2\n   c:\tsll\tv0,v0,0x10\n  10:\tb\t20 <mergenarrow+0x20>\n  14:\tsra\tv0,v0,0x10\n  18:\tsll\tv0,v0,0x10\n  1c:\tsra\tv0,v0,0x10\n  20:\tjr\tra\n  24:\tsw\tv0,0(a0)\n\t...\n",
+      "ctx": "void mergenarrow(s32 *out, s32 a, s32 b, s32 c);",
+      "proto": {
+        "mergenarrow": {
+          "returnsVoid": true
+        }
+      },
+      "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    d  .text\t00000030 .text\n00000000 g     F .text\t00000028 mergenarrow\n\n\nContents of section .text:\n 0000 10e00005 00a61023 00a61021 00021400  .......#...!....\n 0010 10000003 00021403 00021400 00021403  ................\n 0020 03e00008 ac820000 00000000 00000000  ................\nContents of section .options:\n 0000 01200000 00000000 800000f4 00000000  . ..............\n 0010 00000000 00000000 00000000 00007ff0  ................\n 0020 07100000 00000000 00000000 00000000  ................\n 0030 08100000 00000000 00000000 00000000  ................\nContents of section .reginfo:\n 0000 800000f4 00000000 00000000 00000000  ................\n 0010 00000000 00007ff0                    ........        \nContents of section .mdebug:\n 0000 7009070a 0000000a 00000008 000001a8  p...............\n 0010 00000005 000002f8 00000001 000001b0  ................\n 0020 00000004 000001e4 00000000 00000000  ................\n 0030 00000011 00000214 0000003c 00000258  ...........<...X\n 0040 0000000c 00000294 00000001 000002a0  ................\n 0050 00000000 00000000 00000001 000002e8  ................\n 0060 3030e321 30f00000 00000000 00000001  00.!0...........\n 0070 00000000 00000000 00000000 ffffffff  ................\n 0080 00000000 00000000 00000000 001d001f  ................\n 0090 00000003 0000000c 00000000 00000001  ................\n 00a0 00000000 2c200004 0000002e 00000000  ...., ..........\n 00b0 1820000f 0000002e 00000028 20200001  . .........(  ..\n 00c0 00000001 00000000 20200000 02000000  ........  ......\n 00d0 03000000 04000000 05000000 06000000  ................\n 00e0 07000000 08000000 09000000 20000000  ............ ...\n 00f0 21000000 0a000000 0b000000 0b000000  !...............\n 0100 1a000000 00000000 00000003 06000000  ................\n 0110 002f746d 702f6173 6d6c6966 742d6d69  ./tmp/asmlift-mi\n 0120 70732d72 65662d63 65376534 31643033  ps-ref-ce7e41d03\n 0130 35333839 6361662f 7265662e 63006d65  5389caf/ref.c.me\n 0140 7267656e 6172726f 77000000 6d657267  rgenarrow...merg\n 0150 656e6172 726f7700 00000000 00000001  enarrow.........\n 0160 00000000 0000003a 00000000 00000004  .......:........\n 0170 00000000 0000000a 00000000 00000000  ................\n 0180 00000001 00000000 00000011 00000000  ................\n 0190 00000000 01800000 00000000 00000006  ................\n 01a0 00000000 00000000 00000000 18200001  ............. ..\n 01b0 00000000 00000000 00000000 00000000  ................\n 01c0 00000000 00000000 7fffffff 00000000  ................\n 01d0 00000000 00000002                    ........        \n",
+      "asmlift": {
+        "decompiler": "asmlift",
+        "candidateLabel": "signed",
+        "outcome": "match",
+        "source": "void mergenarrow(s32 * a0, s32 a1, s32 a2, s32 a3) {\n    s32 v0;\n    if (a3 != 0) {\n        v0 = a1 + a2 << 16 >> 16;\n    } else {\n        v0 = a1 - a2 << 16 >> 16;\n    }\n    *a0 = v0;\n    return;\n}\n",
+        "score": 0,
+        "maxScore": 10,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 0
+        },
+        "quality": {
+          "score": 100,
+          "lines": 10,
+          "gotos": 0,
+          "casts": 0,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        }
+      },
+      "m2c": {
+        "decompiler": "m2c",
+        "outcome": "nonmatch",
+        "source": "void mergenarrow(s32 *out, s32 a, s32 b, s32 c) {\n    s32 var_v0;\n\n    if (c != 0) {\n        var_v0 = (a + b) << 0x10;\n    } else {\n        var_v0 = (a - b) << 0x10;\n    }\n    *out = var_v0 >> 0x10;\n}\n",
+        "score": 7,
+        "maxScore": 11,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 1,
+          "delete": 2,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 4
+        },
+        "quality": {
+          "score": 100,
+          "lines": 9,
+          "gotos": 0,
+          "casts": 0,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        }
+      },
+      "gapSize": null,
+      "scripts": {
+        "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `mergenarrow` — benchmark function synthetic:mergenarrow:ido7.1.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The benchmark's objdump→GNU-as normalization of this function's disassembly (m2c cannot\n# read raw objdump), including the jump-table/const data sections recovered from the target\n# object — the exact text the benchmark fed m2c.\ncat > in.s <<'ASM_INPUT'\nglabel mergenarrow\n    beqz\t$a3, .L18\n    subu\t$v0, $a1, $a2\n    addu\t$v0, $a1, $a2\n    sll\t$v0, $v0, 0x10\n    b\t.L20\n    sra\t$v0, $v0, 0x10\n.L18:\n    sll\t$v0, $v0, 0x10\n    sra\t$v0, $v0, 0x10\n.L20:\n    jr\t$ra\n    sw\t$v0, 0($a0)\nASM_INPUT\n\n# The exact context header the benchmark passed via --context — prototypes only\n# (no struct/global layouts: the benchmark measures cold recovery).\ncat > ctx.h <<'CTX_INPUT'\nvoid mergenarrow(s32 *out, s32 a, s32 b, s32 c);\nCTX_INPUT\n\nargs=(\n  --target mips-ido-c     # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function mergenarrow  # the symbol to decompile from in.s\n  --context ctx.h         # the C context header above (typedefs + prototypes)\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `mergenarrow` — benchmark function synthetic:mergenarrow:ido7.1.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:mergenarrow:ido7.1 --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact `objdump -d --no-show-raw-insn` text.\ncat > in.asm <<'ASM_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <mergenarrow>:\n   0:\tbeqz\ta3,18 <mergenarrow+0x18>\n   4:\tsubu\tv0,a1,a2\n   8:\taddu\tv0,a1,a2\n   c:\tsll\tv0,v0,0x10\n  10:\tb\t20 <mergenarrow+0x20>\n  14:\tsra\tv0,v0,0x10\n  18:\tsll\tv0,v0,0x10\n  1c:\tsra\tv0,v0,0x10\n  20:\tjr\tra\n  24:\tsw\tv0,0(a0)\n\t...\nASM_INPUT\n\n# The target object's objdump -s -r -t dump — the data sections (jump tables, anonymous\n# constants) the text-only disassembly lacks; the benchmark recovered them from the object.\ncat > dump.txt <<'DUMP_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    d  .text\t00000030 .text\n00000000 g     F .text\t00000028 mergenarrow\n\n\nContents of section .text:\n 0000 10e00005 00a61023 00a61021 00021400  .......#...!....\n 0010 10000003 00021403 00021400 00021403  ................\n 0020 03e00008 ac820000 00000000 00000000  ................\nContents of section .options:\n 0000 01200000 00000000 800000f4 00000000  . ..............\n 0010 00000000 00000000 00000000 00007ff0  ................\n 0020 07100000 00000000 00000000 00000000  ................\n 0030 08100000 00000000 00000000 00000000  ................\nContents of section .reginfo:\n 0000 800000f4 00000000 00000000 00000000  ................\n 0010 00000000 00007ff0                    ........        \nContents of section .mdebug:\n 0000 7009070a 0000000a 00000008 000001a8  p...............\n 0010 00000005 000002f8 00000001 000001b0  ................\n 0020 00000004 000001e4 00000000 00000000  ................\n 0030 00000011 00000214 0000003c 00000258  ...........<...X\n 0040 0000000c 00000294 00000001 000002a0  ................\n 0050 00000000 00000000 00000001 000002e8  ................\n 0060 3030e321 30f00000 00000000 00000001  00.!0...........\n 0070 00000000 00000000 00000000 ffffffff  ................\n 0080 00000000 00000000 00000000 001d001f  ................\n 0090 00000003 0000000c 00000000 00000001  ................\n 00a0 00000000 2c200004 0000002e 00000000  ...., ..........\n 00b0 1820000f 0000002e 00000028 20200001  . .........(  ..\n 00c0 00000001 00000000 20200000 02000000  ........  ......\n 00d0 03000000 04000000 05000000 06000000  ................\n 00e0 07000000 08000000 09000000 20000000  ............ ...\n 00f0 21000000 0a000000 0b000000 0b000000  !...............\n 0100 1a000000 00000000 00000003 06000000  ................\n 0110 002f746d 702f6173 6d6c6966 742d6d69  ./tmp/asmlift-mi\n 0120 70732d72 65662d63 65376534 31643033  ps-ref-ce7e41d03\n 0130 35333839 6361662f 7265662e 63006d65  5389caf/ref.c.me\n 0140 7267656e 6172726f 77000000 6d657267  rgenarrow...merg\n 0150 656e6172 726f7700 00000000 00000001  enarrow.........\n 0160 00000000 0000003a 00000000 00000004  .......:........\n 0170 00000000 0000000a 00000000 00000000  ................\n 0180 00000001 00000000 00000011 00000000  ................\n 0190 00000000 01800000 00000000 00000006  ................\n 01a0 00000000 00000000 00000000 18200001  ............. ..\n 01b0 00000000 00000000 00000000 00000000  ................\n 01c0 00000000 00000000 7fffffff 00000000  ................\n 01d0 00000000 00000002                    ........\nDUMP_INPUT\n\n# The prototype hints the benchmark fed asmlift (callee arities / void-ness).\ncat > proto.json <<'PROTO_INPUT'\n{\n  \"mergenarrow\": {\n    \"returnsVoid\": true\n  }\n}\nPROTO_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target ido7.1         # frontend + target description (ISA, calling convention, compiler idioms)\n  --name mergenarrow      # the symbol to decompile (multi-function input selects by name)\n  --asm-data dump.txt     # the data sections above (jump-table/const recovery)\n  --proto proto.json      # the prototype hints above (callee arities / void-ness)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+      }
+    },
+    {
+      "id": "synthetic:mergenarrow:mwcc_242_81",
+      "sym": "mergenarrow",
+      "project": "synthetic",
+      "tier": "synthetic",
+      "toolchain": "mwcc_242_81",
+      "isa": "ppc",
+      "compiler": "mwcc",
+      "language": "c",
+      "features": [
+        "narrow",
+        "sign-extend",
+        "branch",
+        "pointer"
+      ],
+      "loc": 11,
+      "refSource": "void mergenarrow(s32 *out, s32 a, s32 b, s32 c)\n{\n    s16 v;\n\n    if (c) {\n        v = a + b;\n    } else {\n        v = a - b;\n    }\n    out[0] = v;\n}",
+      "targetAsm": "\ntarget.o:     file format elf32-powerpc\n\n\nDisassembly of section .text:\n\n00000000 <mergenarrow>:\n   0:\tcmpwi   r6,0\n   4:\tsubf    r0,r5,r4\n   8:\textsh   r0,r0\n   c:\tbeq     18 <mergenarrow+0x18>\n  10:\tadd     r0,r4,r5\n  14:\textsh   r0,r0\n  18:\textsh   r0,r0\n  1c:\tstw     r0,0(r3)\n  20:\tblr\n",
+      "ctx": "void mergenarrow(s32 *out, s32 a, s32 b, s32 c);",
+      "proto": {
+        "mergenarrow": {
+          "returnsVoid": true
+        }
+      },
+      "asmDump": "\ntarget.o:     file format elf32-powerpc\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 ref.c\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .mwcats.text\t00000000 .mwcats.text\n00000000 g     F .text\t00000024 mergenarrow\n\n\nRELOCATION RECORDS FOR [.mwcats.text]:\nOFFSET   TYPE              VALUE\n00000004 R_PPC_ADDR32      mergenarrow\n\n\nContents of section .text:\n 0000 2c060000 7c052050 7c000734 4182000c  ,...|. P|..4A...\n 0010 7c042a14 7c000734 7c000734 90030000  |.*.|..4|..4....\n 0020 4e800020                             N..             \nContents of section .mwcats.text:\n 0000 02000024 00000000                    ...$....        \nContents of section .comment:\n 0000 436f6465 57617272 696f720a 02040201  CodeWarrior.....\n 0010 01020016 2c000000 00000000 00000000  ....,...........\n 0020 00000000 00000000 00000000 00000000  ................\n 0030 00000000 00000001 00000000 00000004  ................\n 0040 00000000 00000004 00000000 00000004  ................\n 0050 00000000                             ....            \n",
+      "asmlift": {
+        "decompiler": "asmlift",
+        "candidateLabel": "signed",
+        "outcome": "match",
+        "source": "void mergenarrow(s32 * a0, s32 a1, s32 a2, s32 a3) {\n    s16 v0;\n    if (a3 != 0) {\n        v0 = (s16)(a1 + a2);\n    } else {\n        v0 = (s16)(a1 - a2);\n    }\n    *a0 = v0;\n    return;\n}\n",
+        "score": 0,
+        "maxScore": 9,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 0
+        },
+        "quality": {
+          "score": 100,
+          "lines": 10,
+          "gotos": 0,
+          "casts": 2,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        }
+      },
+      "m2c": {
+        "decompiler": "m2c",
+        "outcome": "match",
+        "source": "void mergenarrow(s32 *out, s32 a, s32 b, s32 c) {\n    s16 var_r0;\n\n    var_r0 = a - b;\n    if (c != 0) {\n        var_r0 = a + b;\n    }\n    *out = (s32) var_r0;\n}\n",
+        "score": 0,
+        "maxScore": 9,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 0
+        },
+        "quality": {
+          "score": 100,
+          "lines": 8,
+          "gotos": 0,
+          "casts": 1,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        }
+      },
+      "gapSize": null,
+      "scripts": {
+        "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `mergenarrow` — benchmark function synthetic:mergenarrow:mwcc_242_81.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The benchmark's objdump→GNU-as normalization of this function's disassembly (m2c cannot\n# read raw objdump), including the jump-table/const data sections recovered from the target\n# object — the exact text the benchmark fed m2c.\ncat > in.s <<'ASM_INPUT'\nglabel mergenarrow\n    cmpwi   r6,0\n    subf    r0,r5,r4\n    extsh   r0,r0\n    beq      .L18\n    add     r0,r4,r5\n    extsh   r0,r0\n.L18:\n    extsh   r0,r0\n    stw     r0,0(r3)\n    blr\nASM_INPUT\n\n# The exact context header the benchmark passed via --context — prototypes only\n# (no struct/global layouts: the benchmark measures cold recovery).\ncat > ctx.h <<'CTX_INPUT'\nvoid mergenarrow(s32 *out, s32 a, s32 b, s32 c);\nCTX_INPUT\n\nargs=(\n  --target ppc-mwcc-c     # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function mergenarrow  # the symbol to decompile from in.s\n  --context ctx.h         # the C context header above (typedefs + prototypes)\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `mergenarrow` — benchmark function synthetic:mergenarrow:mwcc_242_81.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:mergenarrow:mwcc_242_81 --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact `objdump -d --no-show-raw-insn` text.\ncat > in.asm <<'ASM_INPUT'\n\ntarget.o:     file format elf32-powerpc\n\n\nDisassembly of section .text:\n\n00000000 <mergenarrow>:\n   0:\tcmpwi   r6,0\n   4:\tsubf    r0,r5,r4\n   8:\textsh   r0,r0\n   c:\tbeq     18 <mergenarrow+0x18>\n  10:\tadd     r0,r4,r5\n  14:\textsh   r0,r0\n  18:\textsh   r0,r0\n  1c:\tstw     r0,0(r3)\n  20:\tblr\nASM_INPUT\n\n# The target object's objdump -s -r -t dump — the data sections (jump tables, anonymous\n# constants) the text-only disassembly lacks; the benchmark recovered them from the object.\ncat > dump.txt <<'DUMP_INPUT'\n\ntarget.o:     file format elf32-powerpc\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 ref.c\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .mwcats.text\t00000000 .mwcats.text\n00000000 g     F .text\t00000024 mergenarrow\n\n\nRELOCATION RECORDS FOR [.mwcats.text]:\nOFFSET   TYPE              VALUE\n00000004 R_PPC_ADDR32      mergenarrow\n\n\nContents of section .text:\n 0000 2c060000 7c052050 7c000734 4182000c  ,...|. P|..4A...\n 0010 7c042a14 7c000734 7c000734 90030000  |.*.|..4|..4....\n 0020 4e800020                             N..             \nContents of section .mwcats.text:\n 0000 02000024 00000000                    ...$....        \nContents of section .comment:\n 0000 436f6465 57617272 696f720a 02040201  CodeWarrior.....\n 0010 01020016 2c000000 00000000 00000000  ....,...........\n 0020 00000000 00000000 00000000 00000000  ................\n 0030 00000000 00000001 00000000 00000004  ................\n 0040 00000000 00000004 00000000 00000004  ................\n 0050 00000000                             ....\nDUMP_INPUT\n\n# The prototype hints the benchmark fed asmlift (callee arities / void-ness).\ncat > proto.json <<'PROTO_INPUT'\n{\n  \"mergenarrow\": {\n    \"returnsVoid\": true\n  }\n}\nPROTO_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target mwcc_242_81    # frontend + target description (ISA, calling convention, compiler idioms)\n  --name mergenarrow      # the symbol to decompile (multi-function input selects by name)\n  --asm-data dump.txt     # the data sections above (jump-table/const recovery)\n  --proto proto.json      # the prototype hints above (callee arities / void-ness)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+      }
+    },
+    {
+      "id": "synthetic:mergeu16:agbcc",
+      "sym": "mergeu16",
+      "project": "synthetic",
+      "tier": "synthetic",
+      "toolchain": "agbcc",
+      "isa": "arm",
+      "compiler": "agbcc",
+      "language": "c",
+      "features": [
+        "narrow",
+        "zero-extend",
+        "branch",
+        "pointer"
+      ],
+      "loc": 11,
+      "refSource": "void mergeu16(s32 *out, s32 a, s32 b, s32 c)\n{\n    u16 v;\n\n    if (c) {\n        v = a + b;\n    } else {\n        v = a - b;\n    }\n    out[0] = v;\n}",
+      "targetAsm": "@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tmergeu16\n\t.type\t mergeu16,function\n\t.thumb_func\nmergeu16:\n\tpush\t{r4, lr}\n\tadd\tr4, r0, #0\n\tcmp\tr3, #0\n\tbeq\t.L3\t@cond_branch\n\tadd\tr0, r1, r2\n\tb\t.L5\n.L3:\n\tsub\tr0, r1, r2\n.L5:\n\tlsl\tr0, r0, #0x10\n\tlsr\tr0, r0, #0x10\n\tstr\tr0, [r4]\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n.Lfe1:\n\t.size\t mergeu16,.Lfe1-mergeu16\n",
+      "ctx": "void mergeu16(s32 *out, s32 a, s32 b, s32 c);",
+      "proto": {
+        "mergeu16": {
+          "returnsVoid": true
+        }
+      },
+      "asmlift": {
+        "decompiler": "asmlift",
+        "candidateLabel": "unsigned",
+        "outcome": "nonmatch",
+        "source": "void mergeu16(s32 * a0, u32 a1, u32 a2, u32 a3) {\n    s32 v0;\n    if (a3 != 0) {\n        v0 = a1 + a2;\n    } else {\n        v0 = a1 - a2;\n    }\n    *a0 = (u16)v0;\n    return;\n}\n",
+        "score": 4,
+        "maxScore": 14,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 1,
+          "delete": 2,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 1
+        },
+        "quality": {
+          "score": 100,
+          "lines": 10,
+          "gotos": 0,
+          "casts": 1,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        }
+      },
+      "m2c": {
+        "decompiler": "m2c",
+        "outcome": "match",
+        "source": "void mergeu16(s32 *out, s32 a, s32 b, s32 c) {\n    u16 var_r0;\n\n    if (c != 0) {\n        var_r0 = a + b;\n    } else {\n        var_r0 = a - b;\n    }\n    *out = (s32) var_r0;\n}\n",
+        "score": 0,
+        "maxScore": 13,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 0
+        },
+        "quality": {
+          "score": 100,
+          "lines": 9,
+          "gotos": 0,
+          "casts": 1,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        }
+      },
+      "gapSize": null,
+      "scripts": {
+        "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `mergeu16` — benchmark function synthetic:mergeu16:agbcc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The exact agbcc `.s` text the benchmark fed m2c, verbatim.\ncat > in.s <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tmergeu16\n\t.type\t mergeu16,function\n\t.thumb_func\nmergeu16:\n\tpush\t{r4, lr}\n\tadd\tr4, r0, #0\n\tcmp\tr3, #0\n\tbeq\t.L3\t@cond_branch\n\tadd\tr0, r1, r2\n\tb\t.L5\n.L3:\n\tsub\tr0, r1, r2\n.L5:\n\tlsl\tr0, r0, #0x10\n\tlsr\tr0, r0, #0x10\n\tstr\tr0, [r4]\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n.Lfe1:\n\t.size\t mergeu16,.Lfe1-mergeu16\nASM_INPUT\n\n# The exact context header the benchmark passed via --context — prototypes only\n# (no struct/global layouts: the benchmark measures cold recovery).\ncat > ctx.h <<'CTX_INPUT'\nvoid mergeu16(s32 *out, s32 a, s32 b, s32 c);\nCTX_INPUT\n\nargs=(\n  --target gba            # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function mergeu16     # the symbol to decompile from in.s\n  --context ctx.h         # the C context header above (typedefs + prototypes)\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `mergeu16` — benchmark function synthetic:mergeu16:agbcc.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:mergeu16:agbcc --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact agbcc `.s` text.\ncat > in.asm <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tmergeu16\n\t.type\t mergeu16,function\n\t.thumb_func\nmergeu16:\n\tpush\t{r4, lr}\n\tadd\tr4, r0, #0\n\tcmp\tr3, #0\n\tbeq\t.L3\t@cond_branch\n\tadd\tr0, r1, r2\n\tb\t.L5\n.L3:\n\tsub\tr0, r1, r2\n.L5:\n\tlsl\tr0, r0, #0x10\n\tlsr\tr0, r0, #0x10\n\tstr\tr0, [r4]\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n.Lfe1:\n\t.size\t mergeu16,.Lfe1-mergeu16\nASM_INPUT\n\n# The prototype hints the benchmark fed asmlift (callee arities / void-ness).\ncat > proto.json <<'PROTO_INPUT'\n{\n  \"mergeu16\": {\n    \"returnsVoid\": true\n  }\n}\nPROTO_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target agbcc          # frontend + target description (ISA, calling convention, compiler idioms)\n  --name mergeu16         # the symbol to decompile (multi-function input selects by name)\n  --proto proto.json      # the prototype hints above (callee arities / void-ness)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+      }
+    },
+    {
+      "id": "synthetic:mergeu16:gcc2.7.2kmc",
+      "sym": "mergeu16",
+      "project": "synthetic",
+      "tier": "synthetic",
+      "toolchain": "gcc2.7.2kmc",
+      "isa": "mips",
+      "compiler": "gcc",
+      "language": "c",
+      "features": [
+        "narrow",
+        "zero-extend",
+        "branch",
+        "pointer"
+      ],
+      "loc": 11,
+      "refSource": "void mergeu16(s32 *out, s32 a, s32 b, s32 c)\n{\n    u16 v;\n\n    if (c) {\n        v = a + b;\n    } else {\n        v = a - b;\n    }\n    out[0] = v;\n}",
+      "targetAsm": "\ntarget.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <mergeu16>:\n   0:\tbnez\ta3,c <mergeu16+0xc>\n   4:\taddu\tv0,a1,a2\n   8:\tsubu\tv0,a1,a2\n   c:\tandi\tv0,v0,0xffff\n  10:\tjr\tra\n  14:\tsw\tv0,0(a0)\n\t...\n",
+      "ctx": "void mergeu16(s32 *out, s32 a, s32 b, s32 c);",
+      "proto": {
+        "mergeu16": {
+          "returnsVoid": true
+        }
+      },
+      "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /host-tmp/asmlift-mgcc-ref-212e08df11ba6cdc/ref.c\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t00000018 mergeu16\n\n\nContents of section .text:\n 0000 14e00002 00a61021 00a61023 3042ffff  .......!...#0B..\n 0010 03e00008 ac820000 00000000 00000000  ................\nContents of section .reginfo:\n 0000 800000f4 00000000 00000000 00000000  ................\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.              \n",
+      "asmlift": {
+        "decompiler": "asmlift",
+        "candidateLabel": "unsigned",
+        "outcome": "match",
+        "source": "void mergeu16(s32 * a0, u32 a1, u32 a2, u32 a3) {\n    s32 v0;\n    if (a3 == 0) {\n        v0 = a1 - a2;\n    } else {\n        v0 = a1 + a2;\n    }\n    *a0 = v0 & 65535;\n    return;\n}\n",
+        "score": 0,
+        "maxScore": 6,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 0
+        },
+        "quality": {
+          "score": 100,
+          "lines": 10,
+          "gotos": 0,
+          "casts": 0,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        }
+      },
+      "m2c": {
+        "decompiler": "m2c",
+        "outcome": "match",
+        "source": "void mergeu16(s32 *out, s32 a, s32 b, s32 c) {\n    s32 var_v0;\n\n    var_v0 = a + b;\n    if (c == 0) {\n        var_v0 = a - b;\n    }\n    *out = var_v0 & 0xFFFF;\n}\n",
+        "score": 0,
+        "maxScore": 6,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 0
+        },
+        "quality": {
+          "score": 100,
+          "lines": 8,
+          "gotos": 0,
+          "casts": 0,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        }
+      },
+      "gapSize": null,
+      "scripts": {
+        "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `mergeu16` — benchmark function synthetic:mergeu16:gcc2.7.2kmc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The benchmark's objdump→GNU-as normalization of this function's disassembly (m2c cannot\n# read raw objdump), including the jump-table/const data sections recovered from the target\n# object — the exact text the benchmark fed m2c.\ncat > in.s <<'ASM_INPUT'\nglabel mergeu16\n    bnez\t$a3, .Lc\n    addu\t$v0, $a1, $a2\n    subu\t$v0, $a1, $a2\n.Lc:\n    andi\t$v0, $v0, 0xffff\n    jr\t$ra\n    sw\t$v0, 0($a0)\nASM_INPUT\n\n# The exact context header the benchmark passed via --context — prototypes only\n# (no struct/global layouts: the benchmark measures cold recovery).\ncat > ctx.h <<'CTX_INPUT'\nvoid mergeu16(s32 *out, s32 a, s32 b, s32 c);\nCTX_INPUT\n\nargs=(\n  --target mips-gcc-c     # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function mergeu16     # the symbol to decompile from in.s\n  --context ctx.h         # the C context header above (typedefs + prototypes)\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `mergeu16` — benchmark function synthetic:mergeu16:gcc2.7.2kmc.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:mergeu16:gcc2.7.2kmc --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact `objdump -d --no-show-raw-insn` text.\ncat > in.asm <<'ASM_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <mergeu16>:\n   0:\tbnez\ta3,c <mergeu16+0xc>\n   4:\taddu\tv0,a1,a2\n   8:\tsubu\tv0,a1,a2\n   c:\tandi\tv0,v0,0xffff\n  10:\tjr\tra\n  14:\tsw\tv0,0(a0)\n\t...\nASM_INPUT\n\n# The target object's objdump -s -r -t dump — the data sections (jump tables, anonymous\n# constants) the text-only disassembly lacks; the benchmark recovered them from the object.\ncat > dump.txt <<'DUMP_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /host-tmp/asmlift-mgcc-ref-212e08df11ba6cdc/ref.c\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t00000018 mergeu16\n\n\nContents of section .text:\n 0000 14e00002 00a61021 00a61023 3042ffff  .......!...#0B..\n 0010 03e00008 ac820000 00000000 00000000  ................\nContents of section .reginfo:\n 0000 800000f4 00000000 00000000 00000000  ................\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.\nDUMP_INPUT\n\n# The prototype hints the benchmark fed asmlift (callee arities / void-ness).\ncat > proto.json <<'PROTO_INPUT'\n{\n  \"mergeu16\": {\n    \"returnsVoid\": true\n  }\n}\nPROTO_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target gcc2.7.2kmc    # frontend + target description (ISA, calling convention, compiler idioms)\n  --name mergeu16         # the symbol to decompile (multi-function input selects by name)\n  --asm-data dump.txt     # the data sections above (jump-table/const recovery)\n  --proto proto.json      # the prototype hints above (callee arities / void-ness)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+      }
+    },
+    {
+      "id": "synthetic:mergeu16:ido7.1",
+      "sym": "mergeu16",
+      "project": "synthetic",
+      "tier": "synthetic",
+      "toolchain": "ido7.1",
+      "isa": "mips",
+      "compiler": "ido",
+      "language": "c",
+      "features": [
+        "narrow",
+        "zero-extend",
+        "branch",
+        "pointer"
+      ],
+      "loc": 11,
+      "refSource": "void mergeu16(s32 *out, s32 a, s32 b, s32 c)\n{\n    u16 v;\n\n    if (c) {\n        v = a + b;\n    } else {\n        v = a - b;\n    }\n    out[0] = v;\n}",
+      "targetAsm": "\ntarget.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <mergeu16>:\n   0:\tbeqz\ta3,14 <mergeu16+0x14>\n   4:\tsubu\tv0,a1,a2\n   8:\taddu\tv0,a1,a2\n   c:\tb\t18 <mergeu16+0x18>\n  10:\tandi\tv0,v0,0xffff\n  14:\tandi\tv0,v0,0xffff\n  18:\tjr\tra\n  1c:\tsw\tv0,0(a0)\n",
+      "ctx": "void mergeu16(s32 *out, s32 a, s32 b, s32 c);",
+      "proto": {
+        "mergeu16": {
+          "returnsVoid": true
+        }
+      },
+      "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    d  .text\t00000020 .text\n00000000 g     F .text\t00000020 mergeu16\n\n\nContents of section .text:\n 0000 10e00004 00a61023 00a61021 10000002  .......#...!....\n 0010 3042ffff 3042ffff 03e00008 ac820000  0B..0B..........\nContents of section .options:\n 0000 01200000 00000000 800000f4 00000000  . ..............\n 0010 00000000 00000000 00000000 00007ff0  ................\n 0020 07100000 00000000 00000000 00000000  ................\n 0030 08100000 00000000 00000000 00000000  ................\nContents of section .reginfo:\n 0000 800000f4 00000000 00000000 00000000  ................\n 0010 00000000 00007ff0                    ........        \nContents of section .mdebug:\n 0000 7009070a 00000008 00000008 00000188  p...............\n 0010 00000005 000002d4 00000001 00000190  ................\n 0020 00000004 000001c4 00000000 00000000  ................\n 0030 00000011 000001f4 00000038 00000238  ...........8...8\n 0040 0000000c 00000270 00000001 0000027c  .......p.......|\n 0050 00000000 00000000 00000001 000002c4  ................\n 0060 3030e220 30f00000 00000000 00000001  00. 0...........\n 0070 00000000 00000000 00000000 ffffffff  ................\n 0080 00000000 00000000 00000000 001d001f  ................\n 0090 00000003 0000000c 00000000 00000001  ................\n 00a0 00000000 2c200004 0000002e 00000000  ...., ..........\n 00b0 1820000f 0000002e 00000020 20200001  . .........   ..\n 00c0 00000001 00000000 20200000 02000000  ........  ......\n 00d0 03000000 04000000 05000000 06000000  ................\n 00e0 07000000 08000000 09000000 20000000  ............ ...\n 00f0 21000000 0a000000 0b000000 0b000000  !...............\n 0100 1a000000 00000000 00000003 06000000  ................\n 0110 002f746d 702f6173 6d6c6966 742d6d69  ./tmp/asmlift-mi\n 0120 70732d72 65662d32 31326530 38646631  ps-ref-212e08df1\n 0130 31626136 6364632f 7265662e 63006d65  1ba6cdc/ref.c.me\n 0140 72676575 31360000 6d657267 65753136  rgeu16..mergeu16\n 0150 00000000 00000000 00000001 00000000  ................\n 0160 00000037 00000000 00000004 00000000  ...7............\n 0170 00000008 00000000 00000000 00000001  ................\n 0180 00000000 00000011 00000000 00000000  ................\n 0190 01800000 00000000 00000006 00000000  ................\n 01a0 00000000 00000000 18200001 00000000  ......... ......\n 01b0 00000000 00000000 00000000 00000000  ................\n 01c0 00000000 7fffffff 00000000 00000000  ................\n 01d0 00000002                             ....            \n",
+      "asmlift": {
+        "decompiler": "asmlift",
+        "candidateLabel": "unsigned",
+        "outcome": "match",
+        "source": "void mergeu16(s32 * a0, u32 a1, u32 a2, u32 a3) {\n    s32 v0;\n    if (a3 != 0) {\n        v0 = a1 + a2 & 65535;\n    } else {\n        v0 = a1 - a2 & 65535;\n    }\n    *a0 = v0;\n    return;\n}\n",
+        "score": 0,
+        "maxScore": 8,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 0
+        },
+        "quality": {
+          "score": 100,
+          "lines": 10,
+          "gotos": 0,
+          "casts": 0,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        }
+      },
+      "m2c": {
+        "decompiler": "m2c",
+        "outcome": "nonmatch",
+        "source": "void mergeu16(s32 *out, s32 a, s32 b, s32 c) {\n    s32 var_v0;\n\n    var_v0 = a - b;\n    if (c != 0) {\n        var_v0 = a + b;\n    }\n    *out = var_v0 & 0xFFFF;\n}\n",
+        "score": 4,
+        "maxScore": 8,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 2,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 2
+        },
+        "quality": {
+          "score": 100,
+          "lines": 8,
+          "gotos": 0,
+          "casts": 0,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        }
+      },
+      "gapSize": null,
+      "scripts": {
+        "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `mergeu16` — benchmark function synthetic:mergeu16:ido7.1.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The benchmark's objdump→GNU-as normalization of this function's disassembly (m2c cannot\n# read raw objdump), including the jump-table/const data sections recovered from the target\n# object — the exact text the benchmark fed m2c.\ncat > in.s <<'ASM_INPUT'\nglabel mergeu16\n    beqz\t$a3, .L14\n    subu\t$v0, $a1, $a2\n    addu\t$v0, $a1, $a2\n    b\t.L18\n    andi\t$v0, $v0, 0xffff\n.L14:\n    andi\t$v0, $v0, 0xffff\n.L18:\n    jr\t$ra\n    sw\t$v0, 0($a0)\nASM_INPUT\n\n# The exact context header the benchmark passed via --context — prototypes only\n# (no struct/global layouts: the benchmark measures cold recovery).\ncat > ctx.h <<'CTX_INPUT'\nvoid mergeu16(s32 *out, s32 a, s32 b, s32 c);\nCTX_INPUT\n\nargs=(\n  --target mips-ido-c     # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function mergeu16     # the symbol to decompile from in.s\n  --context ctx.h         # the C context header above (typedefs + prototypes)\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `mergeu16` — benchmark function synthetic:mergeu16:ido7.1.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:mergeu16:ido7.1 --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact `objdump -d --no-show-raw-insn` text.\ncat > in.asm <<'ASM_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <mergeu16>:\n   0:\tbeqz\ta3,14 <mergeu16+0x14>\n   4:\tsubu\tv0,a1,a2\n   8:\taddu\tv0,a1,a2\n   c:\tb\t18 <mergeu16+0x18>\n  10:\tandi\tv0,v0,0xffff\n  14:\tandi\tv0,v0,0xffff\n  18:\tjr\tra\n  1c:\tsw\tv0,0(a0)\nASM_INPUT\n\n# The target object's objdump -s -r -t dump — the data sections (jump tables, anonymous\n# constants) the text-only disassembly lacks; the benchmark recovered them from the object.\ncat > dump.txt <<'DUMP_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    d  .text\t00000020 .text\n00000000 g     F .text\t00000020 mergeu16\n\n\nContents of section .text:\n 0000 10e00004 00a61023 00a61021 10000002  .......#...!....\n 0010 3042ffff 3042ffff 03e00008 ac820000  0B..0B..........\nContents of section .options:\n 0000 01200000 00000000 800000f4 00000000  . ..............\n 0010 00000000 00000000 00000000 00007ff0  ................\n 0020 07100000 00000000 00000000 00000000  ................\n 0030 08100000 00000000 00000000 00000000  ................\nContents of section .reginfo:\n 0000 800000f4 00000000 00000000 00000000  ................\n 0010 00000000 00007ff0                    ........        \nContents of section .mdebug:\n 0000 7009070a 00000008 00000008 00000188  p...............\n 0010 00000005 000002d4 00000001 00000190  ................\n 0020 00000004 000001c4 00000000 00000000  ................\n 0030 00000011 000001f4 00000038 00000238  ...........8...8\n 0040 0000000c 00000270 00000001 0000027c  .......p.......|\n 0050 00000000 00000000 00000001 000002c4  ................\n 0060 3030e220 30f00000 00000000 00000001  00. 0...........\n 0070 00000000 00000000 00000000 ffffffff  ................\n 0080 00000000 00000000 00000000 001d001f  ................\n 0090 00000003 0000000c 00000000 00000001  ................\n 00a0 00000000 2c200004 0000002e 00000000  ...., ..........\n 00b0 1820000f 0000002e 00000020 20200001  . .........   ..\n 00c0 00000001 00000000 20200000 02000000  ........  ......\n 00d0 03000000 04000000 05000000 06000000  ................\n 00e0 07000000 08000000 09000000 20000000  ............ ...\n 00f0 21000000 0a000000 0b000000 0b000000  !...............\n 0100 1a000000 00000000 00000003 06000000  ................\n 0110 002f746d 702f6173 6d6c6966 742d6d69  ./tmp/asmlift-mi\n 0120 70732d72 65662d32 31326530 38646631  ps-ref-212e08df1\n 0130 31626136 6364632f 7265662e 63006d65  1ba6cdc/ref.c.me\n 0140 72676575 31360000 6d657267 65753136  rgeu16..mergeu16\n 0150 00000000 00000000 00000001 00000000  ................\n 0160 00000037 00000000 00000004 00000000  ...7............\n 0170 00000008 00000000 00000000 00000001  ................\n 0180 00000000 00000011 00000000 00000000  ................\n 0190 01800000 00000000 00000006 00000000  ................\n 01a0 00000000 00000000 18200001 00000000  ......... ......\n 01b0 00000000 00000000 00000000 00000000  ................\n 01c0 00000000 7fffffff 00000000 00000000  ................\n 01d0 00000002                             ....\nDUMP_INPUT\n\n# The prototype hints the benchmark fed asmlift (callee arities / void-ness).\ncat > proto.json <<'PROTO_INPUT'\n{\n  \"mergeu16\": {\n    \"returnsVoid\": true\n  }\n}\nPROTO_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target ido7.1         # frontend + target description (ISA, calling convention, compiler idioms)\n  --name mergeu16         # the symbol to decompile (multi-function input selects by name)\n  --asm-data dump.txt     # the data sections above (jump-table/const recovery)\n  --proto proto.json      # the prototype hints above (callee arities / void-ness)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+      }
+    },
+    {
+      "id": "synthetic:mergeu16:mwcc_242_81",
+      "sym": "mergeu16",
+      "project": "synthetic",
+      "tier": "synthetic",
+      "toolchain": "mwcc_242_81",
+      "isa": "ppc",
+      "compiler": "mwcc",
+      "language": "c",
+      "features": [
+        "narrow",
+        "zero-extend",
+        "branch",
+        "pointer"
+      ],
+      "loc": 11,
+      "refSource": "void mergeu16(s32 *out, s32 a, s32 b, s32 c)\n{\n    u16 v;\n\n    if (c) {\n        v = a + b;\n    } else {\n        v = a - b;\n    }\n    out[0] = v;\n}",
+      "targetAsm": "\ntarget.o:     file format elf32-powerpc\n\n\nDisassembly of section .text:\n\n00000000 <mergeu16>:\n   0:\tcmpwi   r6,0\n   4:\tsubf    r0,r5,r4\n   8:\tclrlwi  r0,r0,16\n   c:\tbeq     18 <mergeu16+0x18>\n  10:\tadd     r0,r4,r5\n  14:\tclrlwi  r0,r0,16\n  18:\tclrlwi  r0,r0,16\n  1c:\tstw     r0,0(r3)\n  20:\tblr\n",
+      "ctx": "void mergeu16(s32 *out, s32 a, s32 b, s32 c);",
+      "proto": {
+        "mergeu16": {
+          "returnsVoid": true
+        }
+      },
+      "asmDump": "\ntarget.o:     file format elf32-powerpc\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 ref.c\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .mwcats.text\t00000000 .mwcats.text\n00000000 g     F .text\t00000024 mergeu16\n\n\nRELOCATION RECORDS FOR [.mwcats.text]:\nOFFSET   TYPE              VALUE\n00000004 R_PPC_ADDR32      mergeu16\n\n\nContents of section .text:\n 0000 2c060000 7c052050 5400043e 4182000c  ,...|. PT..>A...\n 0010 7c042a14 5400043e 5400043e 90030000  |.*.T..>T..>....\n 0020 4e800020                             N..             \nContents of section .mwcats.text:\n 0000 02000024 00000000                    ...$....        \nContents of section .comment:\n 0000 436f6465 57617272 696f720a 02040201  CodeWarrior.....\n 0010 01020016 2c000000 00000000 00000000  ....,...........\n 0020 00000000 00000000 00000000 00000000  ................\n 0030 00000000 00000001 00000000 00000004  ................\n 0040 00000000 00000004 00000000 00000004  ................\n 0050 00000000                             ....            \n",
+      "asmlift": {
+        "decompiler": "asmlift",
+        "candidateLabel": "signed",
+        "outcome": "match",
+        "source": "void mergeu16(s32 * a0, s32 a1, s32 a2, s32 a3) {\n    s32 v0;\n    if (a3 != 0) {\n        v0 = a1 + a2 & 65535;\n    } else {\n        v0 = a1 - a2 & 65535;\n    }\n    *a0 = v0 & 65535;\n    return;\n}\n",
+        "score": 0,
+        "maxScore": 9,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 0
+        },
+        "quality": {
+          "score": 100,
+          "lines": 10,
+          "gotos": 0,
+          "casts": 0,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        }
+      },
+      "m2c": {
+        "decompiler": "m2c",
+        "outcome": "match",
+        "source": "void mergeu16(s32 *out, s32 a, s32 b, s32 c) {\n    u16 var_r0;\n\n    var_r0 = a - b;\n    if (c != 0) {\n        var_r0 = a + b;\n    }\n    *out = (s32) var_r0;\n}\n",
+        "score": 0,
+        "maxScore": 9,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 0
+        },
+        "quality": {
+          "score": 100,
+          "lines": 8,
+          "gotos": 0,
+          "casts": 1,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        }
+      },
+      "gapSize": null,
+      "scripts": {
+        "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `mergeu16` — benchmark function synthetic:mergeu16:mwcc_242_81.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The benchmark's objdump→GNU-as normalization of this function's disassembly (m2c cannot\n# read raw objdump), including the jump-table/const data sections recovered from the target\n# object — the exact text the benchmark fed m2c.\ncat > in.s <<'ASM_INPUT'\nglabel mergeu16\n    cmpwi   r6,0\n    subf    r0,r5,r4\n    clrlwi  r0,r0,16\n    beq      .L18\n    add     r0,r4,r5\n    clrlwi  r0,r0,16\n.L18:\n    clrlwi  r0,r0,16\n    stw     r0,0(r3)\n    blr\nASM_INPUT\n\n# The exact context header the benchmark passed via --context — prototypes only\n# (no struct/global layouts: the benchmark measures cold recovery).\ncat > ctx.h <<'CTX_INPUT'\nvoid mergeu16(s32 *out, s32 a, s32 b, s32 c);\nCTX_INPUT\n\nargs=(\n  --target ppc-mwcc-c     # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function mergeu16     # the symbol to decompile from in.s\n  --context ctx.h         # the C context header above (typedefs + prototypes)\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `mergeu16` — benchmark function synthetic:mergeu16:mwcc_242_81.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:mergeu16:mwcc_242_81 --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact `objdump -d --no-show-raw-insn` text.\ncat > in.asm <<'ASM_INPUT'\n\ntarget.o:     file format elf32-powerpc\n\n\nDisassembly of section .text:\n\n00000000 <mergeu16>:\n   0:\tcmpwi   r6,0\n   4:\tsubf    r0,r5,r4\n   8:\tclrlwi  r0,r0,16\n   c:\tbeq     18 <mergeu16+0x18>\n  10:\tadd     r0,r4,r5\n  14:\tclrlwi  r0,r0,16\n  18:\tclrlwi  r0,r0,16\n  1c:\tstw     r0,0(r3)\n  20:\tblr\nASM_INPUT\n\n# The target object's objdump -s -r -t dump — the data sections (jump tables, anonymous\n# constants) the text-only disassembly lacks; the benchmark recovered them from the object.\ncat > dump.txt <<'DUMP_INPUT'\n\ntarget.o:     file format elf32-powerpc\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 ref.c\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .mwcats.text\t00000000 .mwcats.text\n00000000 g     F .text\t00000024 mergeu16\n\n\nRELOCATION RECORDS FOR [.mwcats.text]:\nOFFSET   TYPE              VALUE\n00000004 R_PPC_ADDR32      mergeu16\n\n\nContents of section .text:\n 0000 2c060000 7c052050 5400043e 4182000c  ,...|. PT..>A...\n 0010 7c042a14 5400043e 5400043e 90030000  |.*.T..>T..>....\n 0020 4e800020                             N..             \nContents of section .mwcats.text:\n 0000 02000024 00000000                    ...$....        \nContents of section .comment:\n 0000 436f6465 57617272 696f720a 02040201  CodeWarrior.....\n 0010 01020016 2c000000 00000000 00000000  ....,...........\n 0020 00000000 00000000 00000000 00000000  ................\n 0030 00000000 00000001 00000000 00000004  ................\n 0040 00000000 00000004 00000000 00000004  ................\n 0050 00000000                             ....\nDUMP_INPUT\n\n# The prototype hints the benchmark fed asmlift (callee arities / void-ness).\ncat > proto.json <<'PROTO_INPUT'\n{\n  \"mergeu16\": {\n    \"returnsVoid\": true\n  }\n}\nPROTO_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target mwcc_242_81    # frontend + target description (ISA, calling convention, compiler idioms)\n  --name mergeu16         # the symbol to decompile (multi-function input selects by name)\n  --asm-data dump.txt     # the data sections above (jump-table/const recovery)\n  --proto proto.json      # the prototype hints above (callee arities / void-ness)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
       }
     },
     {
@@ -56838,23 +57787,23 @@
       "asmlift": {
         "decompiler": "asmlift",
         "candidateLabel": "unsigned",
-        "outcome": "nonmatch",
-        "source": "s32 narrowcnt(void) {\n    s32 v0;\n    s32 v1;\n    v1 = 0;\n    v0 = 0;\n    do {\n        v1 = v1 + (s16)v0;\n        v0 = (u16)((s16)v0 + 1);\n    } while ((s16)v0 <= 9);\n    return v1;\n}\n",
-        "score": 1,
+        "outcome": "match",
+        "source": "s32 narrowcnt(void) {\n    s16 v0;\n    s32 v1;\n    v1 = 0;\n    v0 = 0;\n    do {\n        v1 = v1 + v0;\n        v0 = (u16)(v0 + 1);\n    } while ((s16)v0 <= 9);\n    return v1;\n}\n",
+        "score": 0,
         "maxScore": 13,
         "compileErrors": null,
         "breakdown": {
           "insert": 0,
           "delete": 0,
-          "replace": 1,
+          "replace": 0,
           "opMismatch": 0,
           "argMismatch": 0
         },
         "quality": {
-          "score": 94,
+          "score": 98,
           "lines": 11,
           "gotos": 0,
-          "casts": 5,
+          "casts": 3,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -59248,23 +60197,28 @@
       },
       "asmlift": {
         "decompiler": "asmlift",
-        "outcome": "declined",
-        "source": "/* asmlift could not decompile 'preupdate_exit_call' — structure: cannot structure 'preupdate_exit_call': do-while condition or a post-loop value reads a pre-update loop variable */\n/* original assembly: */\n/*   @ Generated by gcc 2.9-arm-000512 for Thumb/elf */\n/*   \t.code\t16 */\n/*   .gcc2_compiled.: */\n/*   .text */\n/*   \t.align\t2, 0 */\n/*   \t.globl\tpreupdate_exit_call */\n/*   \t.type\t preupdate_exit_call,function */\n/*   \t.thumb_func */\n/*   preupdate_exit_call: */\n/*   \tpush\t{r4, r5, lr} */\n/*   \tadd\tr3, r0, #0 */\n/*   \tadd\tr4, r1, #0 */\n/*   \tadd\tr0, r2, #0 */\n/*   \tcmp\tr4, #0 */\n/*   \tble\t.L3\t@cond_branch */\n/*   \tlsl\tr0, r4, #0x2 */\n/*   \tadd\tr5, r3, r0 */\n/*   .L4: */\n/*   \tadd\tr0, r5, #0 */\n/*   \tbl\tcb */\n/*   \tsub\tr5, r5, #0x4 */\n/*   \tsub\tr4, r4, #0x1 */\n/*   \tcmp\tr4, #0 */\n/*   \tbne\t.L4\t@cond_branch */\n/*   .L3: */\n/*   \tpop\t{r4, r5} */\n/*   \tpop\t{r1} */\n/*   \tbx\tr1 */\n/*   .Lfe1: */\n/*   \t.size\t preupdate_exit_call,.Lfe1-preupdate_exit_call */\nvoid preupdate_exit_call(void) {\n    ASMLIFT_ERROR(\"could not decompile (structure): cannot structure 'preupdate_exit_call': do-while condition or a post-loop value reads a pre-update loop variable\");\n}\n",
-        "score": null,
-        "maxScore": null,
+        "candidateLabel": "unsigned/initfirst",
+        "outcome": "nonmatch",
+        "source": "s32 preupdate_exit_call(u32 a0, u32 a1, u32 a2) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    v2 = a1;\n    if (v2 > 0) {\n        v1 = a0 + (a1 << 2);\n        do {\n            v0 = cb(v1);\n            v1 = v1 - 4;\n            v2 = v2 - 1;\n        } while (v2 != 0);\n        a2 = v0;\n    }\n    return a2;\n}\n",
+        "score": 2,
+        "maxScore": 17,
         "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 2
+        },
         "quality": {
-          "score": 88,
-          "lines": 35,
+          "score": 100,
+          "lines": 16,
           "gotos": 0,
-          "casts": 1,
-          "unkGlue": 1,
+          "casts": 0,
+          "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
-        },
-        "errorMarkers": [
-          "structure: cannot structure 'preupdate_exit_call': do-while condition or a post-loop value reads a pre-update loop variable"
-        ]
+        }
       },
       "m2c": {
         "decompiler": "m2c",
@@ -59290,7 +60244,7 @@
           "addrDeref": 0
         }
       },
-      "note": "an exiting edge carrying a CALL's result computed from the pre-update loop variable. The call is a SECOND refusal sitting behind the pre-update one, so this row is expected to stay declined even once the pre-update read itself is recovered",
+      "note": "an exiting edge carrying a CALL's result computed from the pre-update loop variable. Authored as a second refusal behind the pre-update one; that second refusal has since been removed at its cause (a call feeding a branch edge is materialized where the asm ran it), so the row scores instead of declining and it is now the pre-update link alone that it measures",
       "gapSize": {
         "decompiler": "m2c",
         "score": 1,
@@ -63743,22 +64697,22 @@
         "decompiler": "asmlift",
         "candidateLabel": "unsigned",
         "outcome": "nonmatch",
-        "source": "void sibwalk(u16 * a0, u16 * a1) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    v0 = 0;\n    do {\n        a0[(s16)v0] = a1[(s16)v0];\n        v0 = (u16)((s16)v0 + 1);\n    } while ((s16)v0 <= 5);\n    v1 = 0;\n    do {\n        (a0 + 6)[(s16)v1] = (a1 + 6)[(s16)v1];\n        v1 = (u16)((s16)v1 + 1);\n    } while ((s16)v1 <= 6);\n    v2 = 0;\n    do {\n        (a0 + 13)[(s16)v2] = (a1 + 13)[(s16)v2];\n        v2 = (u16)((s16)v2 + 1);\n    } while ((s16)v2 <= 8);\n    return;\n}\n",
-        "score": 52,
+        "source": "void sibwalk(u16 * a0, u16 * a1) {\n    s16 v0;\n    s16 v1;\n    s16 v2;\n    v0 = 0;\n    do {\n        a0[v0] = a1[v0];\n        v0 = (u16)(v0 + 1);\n    } while ((s16)v0 <= 5);\n    v1 = 0;\n    do {\n        (a0 + 6)[v1] = (a1 + 6)[v1];\n        v1 = (u16)(v1 + 1);\n    } while ((s16)v1 <= 6);\n    v2 = 0;\n    do {\n        (a0 + 13)[v2] = (a1 + 13)[v2];\n        v2 = (u16)(v2 + 1);\n    } while ((s16)v2 <= 8);\n    return;\n}\n",
+        "score": 25,
         "maxScore": 58,
         "compileErrors": null,
         "breakdown": {
           "insert": 0,
-          "delete": 13,
-          "replace": 8,
+          "delete": 10,
+          "replace": 5,
           "opMismatch": 0,
-          "argMismatch": 31
+          "argMismatch": 10
         },
         "quality": {
-          "score": 88,
+          "score": 92,
           "lines": 21,
           "gotos": 0,
-          "casts": 15,
+          "casts": 6,
           "unkGlue": 0,
           "rawMem": 0,
           "addrDeref": 0
@@ -63789,16 +64743,16 @@
         }
       },
       "gapSize": {
-        "decompiler": "m2c",
-        "score": 26,
+        "decompiler": "asmlift",
+        "score": 25,
         "maxScore": 58,
-        "ratio": 0.4482758620689655,
+        "ratio": 0.43103448275862066,
         "kinds": {
           "insert": 0,
           "delete": 10,
-          "replace": 10,
+          "replace": 5,
           "opMismatch": 0,
-          "argMismatch": 6
+          "argMismatch": 10
         }
       },
       "scripts": {

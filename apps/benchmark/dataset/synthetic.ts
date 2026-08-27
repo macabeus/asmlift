@@ -550,12 +550,15 @@ export const SYNTHETIC: SynthSpec[] = [
   // NAME, so a computed arg needs an expression, and what its def-tree holds decides whether one
   // can be placed at the top of the body at all. Measured over the corpus, the tree is PURE
   // arithmetic over a loop variable in 11 of 12 (`preupdate_exit_pure`), a memory READ in none
-  // (`preupdate_exit`), and a CALL in one (`preupdate_exit_call`, and `_wrapup_reent`, which stops
-  // one guard later still on "a post-loop value inlines a 'call' from inside the loop").
+  // (`preupdate_exit`), and a CALL in one (`preupdate_exit_call`, and `_wrapup_reent`).
   //
   // So the three EXIT rows are the three tiers, not three copies: a fix for the pure tier closes
-  // the real bucket and must leave the other two declined, which is what makes them controls
-  // rather than duplicates. The pure row puts a STORE in the body AHEAD of the def, which is the
+  // the real bucket, and the other two are what say it did not overreach. The CALL tier used to
+  // stop one guard later still, on "a post-loop value inlines a 'call' from inside the loop"; it
+  // no longer does. `structure/analysis.ts` materializes any call whose value rides a branch edge
+  // — the placement that guard existed to refuse — so `preupdate_exit_call` now RECOVERS, at 2,
+  // with `cb` inside the loop where the asm calls it. What still reaches that guard is an
+  // `opaque`, the other member of `REPEATED_EFFECT`, for which no such rule exists. The pure row puts a STORE in the body AHEAD of the def, which is the
   // harder of the two shapes the corpus has — ten of the twelve have no effect in the latch block
   // at all, and `LoadBGTilemapData`, the function this link is being walked for, is the one that
   // does. A pure tree may be recomputed across it; a tree that read memory could not.
@@ -608,9 +611,10 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'int cb(int*);',
     proto: { cb: { params: 1 } },
     note:
-      "an exiting edge carrying a CALL's result computed from the pre-update loop variable. The call " +
-      'is a SECOND refusal sitting behind the pre-update one, so this row is expected to stay ' +
-      'declined even once the pre-update read itself is recovered',
+      "an exiting edge carrying a CALL's result computed from the pre-update loop variable. Authored " +
+      'as a second refusal behind the pre-update one; that second refusal has since been removed at ' +
+      'its cause (a call feeding a branch edge is materialized where the asm ran it), so the row ' +
+      'scores instead of declining and it is now the pre-update link alone that it measures',
   },
   {
     sym: 'preupdate_escape',
@@ -2506,11 +2510,10 @@ export const SYNTHETIC: SynthSpec[] = [
   //
   // So the two gaps compose in one direction only: with a wide counter asmlift MATCHES the
   // member-array walk (`membwalk`, agbcc), and it is the narrow counter that exposes the address
-  // spelling. asmlift has NO narrow local type — over the 856 base rows its candidates declare no
-  // scalar local but `s32`/`u32` — so it spells the counter `s32 v0` plus `(s16)v0` at every use
-  // and `v0 = (u16)((s16)v0 + 1)` for the increment, which is the LSHIFTRT shape; and it renders
-  // the walked region as arithmetic on a cast pointer, `(a0 + 2)[(s16)v0]`, where the source's
-  // `d->name[i]` gives agbcc a loop-invariant base to hoist.
+  // spelling. L1 has since SHIPPED as `raise/narrowlocal.ts`: a block parameter whose sole reader
+  // is its own extension is declared at that width, so the counter is now `s16 v0` read without a
+  // cast. L2 has not — asmlift still renders the walked region as arithmetic on a cast pointer,
+  // `(a0 + 2)[v0]`, where the source's `d->name[i]` gives agbcc a loop-invariant base to hoist.
   //
   // WHICH LEVER IS WORTH WHAT. Every number is measured on THAT ROW'S OWN target, starting from
   // asmlift's OWN published winner for the row and changing ONE axis — never by subtracting two
@@ -2529,6 +2532,7 @@ export const SYNTHETIC: SynthSpec[] = [
   //                                                       the base-first index add
   //     sibwalk           52     25        33     0 MATCH L1 + L2 over three sibling walks under one
   //                                                       `s16` counter; also the guard below
+  // The L1 column is now the SHIPPED column: those four scores are what `pnpm bench run` reads.
   // L1 IS THE LEVER TO BUILD FIRST. Alone it closes `narrowcnt` and `basefold` outright and takes
   // 6 of `membnarrow`'s 17 and 27 of `sibwalk`'s 52. L2 alone is worth 1 and 19 — and 0 under a wide
   // counter — but the residual L1 leaves is exactly L2's, and L2 closes it to a byte match on both.
@@ -2573,8 +2577,10 @@ export const SYNTHETIC: SynthSpec[] = [
   // byte-identical under `void *` and `u8 *`, but on `void *` it dereferences the void pointer
   // (`*(d + 4 + temp_r0) = …`) and no compiler in the set accepts that, so the noncompile would be
   // the harness's, not m2c's. `u8 *` withholds the layout just as completely, and under it m2c
-  // compiles — and BEATS asmlift on two rows:
-  //     membnarrow  m2c 11 vs asmlift 17        sibwalk  m2c 26 vs asmlift 52
+  // compiles — and where it lands is the L1/L2 split itself. Before L1 shipped m2c BEAT asmlift on
+  // both member rows (11 vs 17, 26 vs 52); with L1 in and L2 still missing the two are level:
+  //     membnarrow  m2c 11, asmlift 11 — a tie, and the 11 they both leave is L2's
+  //     sibwalk     m2c 26, asmlift 25 — asmlift ahead by one
   //     membwalk    m2c  2 under BOTH spellings — the control that says the swap is not a general
   //                 m2c boost; it moves exactly the narrow-counter rows.
   // Not the real `struct S *`, because THE LAYOUT IS THE ANSWER: given it m2c emits
@@ -2593,16 +2599,37 @@ export const SYNTHETIC: SynthSpec[] = [
   // 18 agbcc, and one of those (`kleod:UpdateEntities:agbcc`) already MATCHES — a narrow counter is
   // not automatically a gap. Candidate side: 17 base agbcc rows already carry a narrowed self-
   // increment in their PUBLISHED asmlift output, 2 of those MATCHing; exactly ONE carries the SIGNED
-  // form these rows are cut from, `v = (u16)((s16)v + 1)` — `sa3:PackSaveSector` (366). PREDICTION,
-  // not measured: when L1 ships, the other 15 are where real-row movement shows first, falsifiable
-  // with `pnpm bench diff --base origin/main` on the branch that lands L1. What these six rows add
-  // is ISOLATION and SIZE: the shape alone, plus memory, plus a struct member, each on its target.
+  // form these rows are cut from, `v = (u16)((s16)v + 1)` — `sa3:PackSaveSector` (366). That row's
+  // 15 unsigned siblings were where movement was predicted to show first; L1's own `bench diff`
+  // moved TWO real rows and neither is among them — `sa3:PackSaveSector` 366 → 360 (7 counters, and
+  // the winner drops `/vol-slot`) and `sa3:sa2__sub_8007958` 68 → 67 (one `s8`). The prediction was
+  // wrong because the published SPELLING is not the gate: what the pass reads is whether the
+  // carrier has a second reader. What the six counter rows add is ISOLATION and SIZE: the shape
+  // alone, plus memory, plus a struct member, each on its target.
   //
-  // TOOLCHAIN SCOPING. All six ship `toolchains: ALL` as COVERAGE; the analysis above is agbcc's
+  // TOOLCHAIN SCOPING. All nine ship `toolchains: ALL` as COVERAGE; the analysis above is agbcc's
   // alone. On mwcc_242_81 `membnarrow`, `basefold` and `sibwalk` all MATCH outright, so the gap
   // does not exist on that compiler; `narrowcnt` is 16 there, and the MIPS lanes score something
   // structurally different (ido7.1 4/4/12, gcc2.7.2kmc 7/7/21). Those cells are coverage, not
   // evidence for the thesis.
+  //
+  // THE THREE `merge*` ROWS ASK A DIFFERENT QUESTION: not what a narrow counter is worth, but
+  // WHERE THE EVIDENCE FOR A NARROW LOCAL IS. Off a loop there is no back edge to carry the
+  // write-back truncation, so gcc sinks it past the join and it arrives as the carrier's own
+  // reader. `raise/narrowlocal.ts`'s `edge-extends` is the rule that decides that, and not one of
+  // the carriers it judges over the sa3 corpus is on a real row — these three are what price it:
+  //     mergenarrow  `s16 v` across an if/else, read once      MATCH  without the sunk-write-back
+  //                                                                   rule it is 6
+  //     mergecast    the same merge as `s32 v` + `(s16)v`      MATCH  ADVERSE: a rule that narrows
+  //                                                                   on the extension alone spells
+  //                                                                   this `s16 v` and scores 6
+  //     mergeu16     `u16 v` across the same if/else               4  UNDECIDABLE, on purpose
+  // `mergeu16` is authored to stay open: `u16 v` and `s32 v` + `(u16)v` reach the pass as the same
+  // IR — one `zext16` over raw in-edges — and want opposite answers, differing only in the branch
+  // shape agbcc chose. asmlift keeps the wide spelling and pays 4 here; m2c takes the narrow one,
+  // MATCHes this row and pays 5 on `mergecast`. Two decompilers on opposite faces of one coin is
+  // the evidence that no DEFAULT settles it: the shape wants an enumerated candidate, which is a
+  // round of its own.
   //
   // Cut from sa3:PackSaveSector:agbcc (asmlift 366, m2c noncompile). That row is CONJUNCTIVE: taking
   // asmlift's published winner and applying one project spelling at a time recovers 55 rows for the
@@ -2611,6 +2638,63 @@ export const SYNTHETIC: SynthSpec[] = [
   // match; four other single-axis "fixes" make the row WORSE (375, 371, 370, 370). It reaches a byte
   // match only when every spelling is right at once. So these rows size the two capabilities at
   // their own scale and make no claim about how far they move that row alone.
+  {
+    sym: 'mergenarrow',
+    src:
+      'void mergenarrow(s32 *out, s32 a, s32 b, s32 c)\n' +
+      '{\n' +
+      '    s16 v;\n' +
+      '\n' +
+      '    if (c) {\n' +
+      '        v = a + b;\n' +
+      '    } else {\n' +
+      '        v = a - b;\n' +
+      '    }\n' +
+      '    out[0] = v;\n' +
+      '}',
+    features: ['narrow', 'sign-extend', 'branch', 'pointer'],
+    toolchains: ALL,
+    ctx: 'void mergenarrow(s32 *out, s32 a, s32 b, s32 c);',
+    proto: { mergenarrow: { returnsVoid: true } },
+  },
+  {
+    sym: 'mergecast',
+    src:
+      'void mergecast(s32 *out, s32 a, s32 b, s32 c)\n' +
+      '{\n' +
+      '    s32 v;\n' +
+      '\n' +
+      '    if (c) {\n' +
+      '        v = a + b;\n' +
+      '    } else {\n' +
+      '        v = a - b;\n' +
+      '    }\n' +
+      '    out[0] = (s16)v;\n' +
+      '}',
+    features: ['narrow', 'sign-extend', 'cast', 'branch', 'pointer'],
+    toolchains: ALL,
+    ctx: 'void mergecast(s32 *out, s32 a, s32 b, s32 c);',
+    proto: { mergecast: { returnsVoid: true } },
+  },
+  {
+    sym: 'mergeu16',
+    src:
+      'void mergeu16(s32 *out, s32 a, s32 b, s32 c)\n' +
+      '{\n' +
+      '    u16 v;\n' +
+      '\n' +
+      '    if (c) {\n' +
+      '        v = a + b;\n' +
+      '    } else {\n' +
+      '        v = a - b;\n' +
+      '    }\n' +
+      '    out[0] = v;\n' +
+      '}',
+    features: ['narrow', 'zero-extend', 'branch', 'pointer'],
+    toolchains: ALL,
+    ctx: 'void mergeu16(s32 *out, s32 a, s32 b, s32 c);',
+    proto: { mergeu16: { returnsVoid: true } },
+  },
   {
     sym: 'widecnt',
     src:
