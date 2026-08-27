@@ -360,4 +360,7 @@ test('every SOUND gate is load-bearing: dropping it changes what some function d
   }
   expect(inert).toEqual([]);
   expect([...OUT_OF_REACH].filter((id) => !NARROW_LOCAL_GATES.some((g) => g.id === id && g.sound))).toEqual([]);
-});
+  // A full SEEDS sweep per gate: ~1.8s alone, but this suite forks 160 files in parallel and the
+  // same loop measured 6.1s under that load — past vitest's 5s default, which fails as a timeout
+  // rather than as an inert gate.
+}, 30_000);
