@@ -192,6 +192,30 @@ test('…while an equal-width carrier is adopted by default and re-homed by the 
   expect(emit(WIDECARRIER, true)).toMatch(/v0 = a0;/);
 });
 
+// ── the axis widens `anchorConstCopies` ───────────────────────────────────────────────────────
+// Anchoring a constant edge copy at its def site needs the merge's name to claim no other SSA
+// value; adopting the parameter always leaves two claimants, so the default is never anchored and a
+// fresh home always is. That is a SECOND thing the axis buys, and it is what makes `/defsite`
+// non-inert on `synthetic:clampu8:mwcc_242_81`, whose winner is `signed/defsite/fresh-merge`.
+const CLAMPISH = `fn clampish {
+^bb0(%0: s32):
+  %1: s32 = const {value=255}
+  %2: u32 = icmp_sle %0, %1
+  cond_br %2, ^bb2(%0), ^bb1()
+^bb1():
+  br ^bb2(%1)
+^bb2(%3: s32):
+  ret %3
+}
+`;
+
+test('a re-homed merge is a sole claimant, so its constant arm anchors above the branch', () => {
+  expect(emit(CLAMPISH, false, { anchorConstCopies: true })).toMatch(/if \(a0 > 255\) a0 = 255;/);
+  const on = emit(CLAMPISH, true, { anchorConstCopies: true });
+  expect(on).toMatch(/v0 = 255;/);
+  expect(on).toMatch(/if \(a0 <= 255\) v0 = a0;/);
+});
+
 // ── each gate, ablated, on the fixture that pins it ───────────────────────────────────────────
 // The table is a parameter so the ablation runs the REAL pass rather than a re-implementation of
 // its condition; both gates are heuristics, so what dropping one changes is the spelling.

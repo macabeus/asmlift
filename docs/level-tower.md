@@ -163,6 +163,17 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   total: a row count ("105 rows pay ×2") understates the dominant row by two orders of magnitude,
   because rows are not the unit that compiles.
 
+  **And an axis can widen a gate it never mentions — price that too.** The un-collapse above is an
+  ENUMERATION cost; the same tree change can also satisfy an existing rule's precondition and admit
+  where that rule used to refuse. `anchorConstCopies` declines a merge whose variable names another
+  SSA value, so a merge that adopted its parameter is never anchored — and `/fresh-merge`, which
+  mints a home for exactly those merges, makes them sole claimants by construction: sole-claimant
+  admissions go **196 → 245** over 679 corpus rows, 34 rows gaining 49 merges, and
+  `synthetic:clampu8:mwcc_242_81` reaches MATCH through the pair (`signed/defsite` is inert on the
+  base tree and absent from its fan). So a new axis is priced over its own refusals AND over the
+  refusals it removes elsewhere; the second is the one nothing reports, because the widened gate
+  does not know it was widened.
+
   **An axis's 2× is intrinsic, and cannot be bought back by predicting which half is redundant.**
   The signedness pin is the worked example, because it is the axis that fires most broadly:
   `LoadBGTilemapData`'s 40320 candidates are 20160 twin pairs, every one of which ties in score. The

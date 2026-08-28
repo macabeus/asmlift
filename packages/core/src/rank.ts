@@ -223,23 +223,24 @@ const STRUCTURING_AXES: readonly StructuringAxis[] = [
     probeGate: (probe) => probe.blocks.some((b) => b.ops.some((op) => op.opcode.startsWith('icmp_u'))),
     strip: true,
   },
-  // `/fresh-merge` — the parameter-merge-home axis (structure.ts freshParamMerge): a merge that
-  // conditionally overwrites a function PARAMETER takes its own local
-  // (`if (a1 < a0) { v0 = a0; } else { v0 = a1; }`), where the default assigns back into the
-  // parameter (`if (a1 < a0) a1 = a0;`). Both are ordinary C with identical semantics, so nothing
-  // over the source decides it; what differs is placement freedom. A parameter is live from entry,
-  // so its home is the register the ABI handed it and the copy into it is pinned there; a fresh
-  // local is dead until its first arm, so the compiler may leave the copy where the asm has it. At
-  // two arguments the two spellings compile to the SAME bytes (agbcc and mwcc both, measured) —
-  // the returned value's home is occupied either way; the third argument is what makes the first
-  // parameter dead early enough for the placement to be observable.
+  // `/fresh-merge` — the parameter-merge-home axis (structure.ts `freshParamMerge`, whose
+  // `FRESH_MERGE_GATES` carry the argument): a merge that conditionally overwrites a parameter
+  // takes its own local (`if (a1 < a0) { v0 = a0; } else { v0 = a1; }`) where the default assigns
+  // back into the parameter (`if (a1 < a0) a1 = a0;`). Both are ordinary C over the same values, so
+  // the differ decides. At TWO arguments they compile to the SAME bytes on agbcc and on mwcc
+  // (measured, both directions), which is why `maxi`/`mini` hold under the axis.
   //
-  // Where the arm that reaches the join carries a CONSTANT, `/defsite` already writes it above the
-  // branch, and the pair spells m2c's own `v0 = 0xFF; if (a0 <= 0xFF) v0 = a0;` — which is how
-  // `synthetic:clampu8:mwcc_242_81` matches under `signed/defsite/fresh-merge`.
+  // IT ALSO UNLOCKS `/defsite`. `anchorConstCopies` refuses a merge whose name claims another SSA
+  // value, so a merge that adopted its parameter is never anchored, while a fresh home is sole by
+  // construction and a constant arm then writes above the branch. That pair spells m2c's own
+  // `v0 = 0xFF; if (a0 <= 0xFF) v0 = a0;`, which is how `synthetic:clampu8:mwcc_242_81` matches
+  // under `signed/defsite/fresh-merge` — `signed/defsite` is inert on the base tree and does not
+  // appear in that row's fan at all. Priced at the guard it widens: sole-claimant admissions go
+  // 196 → 245 over 679 corpus rows, 34 of them gaining 49 merges.
   //
   // Gated on the shared probe: a merge slot whose in-edge args differ and include an entry
-  // parameter. Structural, so it cannot answer differently per symbol variant.
+  // parameter — the rule's own precondition RESTATED, not derived from it, so the two can drift.
+  // Structural, so it cannot answer differently per symbol variant.
   {
     flag: 'freshMerge',
     suffix: '/fresh-merge',

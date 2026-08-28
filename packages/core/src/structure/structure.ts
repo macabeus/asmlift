@@ -2001,7 +2001,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   //   - the merge variable names any OTHER SSA value (a shared name has readers and writers
   //     between the def site and the edge that edge placement respects and anchoring would not).
   //     A loop header's carried value is the exception above: its other claimants all live in
-  //     the body;
+  //     the body. `freshParamMerge` WIDENS what this admits — a re-homed merge is sole by
+  //     construction — which is the pairing `/fresh-merge` and `/defsite` match `clampu8` on;
   //   - another anchored const of the same variable lies on a path from this one to this one's
   //     edge (the later write would clobber this arg's value; both stay at their edges instead).
   //
