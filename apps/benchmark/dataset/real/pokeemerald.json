@@ -30,6 +30,7 @@
         "fixed-point"
       ],
       "funcC": "s16 MathUtil_Mul16(s16 x, s16 y)\n{\n    s32 result;\n\n    result = x;\n    result *= y;\n    result /= 256;\n    return result;\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/math_util.c#L3-L11"
     },
     {
@@ -39,6 +40,7 @@
         "fixed-point"
       ],
       "funcC": "s16 MathUtil_Mul16Shift(u8 s, s16 x, s16 y)\n{\n    s32 result;\n\n    result = x;\n    result *= y;\n    result /= (1 << s);\n    return result;\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/math_util.c#L13-L21"
     },
     {
@@ -49,6 +51,7 @@
         "int64"
       ],
       "funcC": "s32 MathUtil_Mul32(s32 x, s32 y)\n{\n    s64 result;\n\n    result = x;\n    result *= y;\n    result /= 256;\n    return result;\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/math_util.c#L23-L31"
     },
     {
@@ -58,6 +61,7 @@
         "branch"
       ],
       "funcC": "s16 MathUtil_Div16(s16 x, s16 y)\n{\n    if (y == 0)\n    {\n        return 0;\n    }\n    return (x << 8) / y;\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/math_util.c#L33-L40"
     },
     {
@@ -67,6 +71,7 @@
         "branch"
       ],
       "funcC": "s16 MathUtil_Div16Shift(u8 s, s16 x, s16 y)\n{\n    if (y == 0)\n    {\n        return 0;\n    }\n    return (x << s) / y;\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/math_util.c#L42-L49"
     },
     {
@@ -75,6 +80,7 @@
         "arithmetic"
       ],
       "funcC": "s16 MathUtil_Inv16(s16 y)\n{\n    s32 x;\n\n    x = 0x10000;\n    return x / y;\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/math_util.c#L64-L70"
     },
     {
@@ -85,6 +91,7 @@
         "array"
       ],
       "funcC": "void StoreWordInTwoHalfwords(u16 *h, u32 w)\n{\n    h[0] = (u16)(w);\n    h[1] = (u16)(w >> 16);\n}",
+      "m2cCtx": true,
       "proto": {
         "StoreWordInTwoHalfwords": {
           "returnsVoid": true
@@ -100,6 +107,7 @@
         "array"
       ],
       "funcC": "void LoadWordFromTwoHalfwords(u16 *h, u32 *w)\n{\n    *w = h[0] | (s16)h[1] << 16;\n}",
+      "m2cCtx": true,
       "proto": {
         "LoadWordFromTwoHalfwords": {
           "returnsVoid": true
@@ -113,6 +121,7 @@
         "branch"
       ],
       "funcC": "int CountTrailingZeroBits(u32 value)\n{\n    u8 i;\n\n    for (i = 0; i < 32; i++)\n    {\n        if ((value & 1) == 0)\n            value >>= 1;\n        else\n            return i;\n    }\n    return 0;\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/util.c#L208-L220"
     },
     {
@@ -123,6 +132,7 @@
         "array"
       ],
       "funcC": "u32 CalcByteArraySum(const u8 *data, u32 length)\n{\n    u32 sum, i;\n    for (sum = 0, i = 0; i < length; i++)\n        sum += data[i];\n    return sum;\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/util.c#L256-L262"
     },
     {
@@ -131,6 +141,7 @@
         "branch"
       ],
       "funcC": "u16 CalcCRC16(const u8 *data, s32 length)\n{\n    u16 i, j;\n    u16 crc = 0x1121;\n\n    for (i = 0; i < length; i++)\n    {\n        crc ^= data[i];\n        for (j = 0; j < 8; j++)\n        {\n            if (crc & 1)\n                crc = (crc >> 1) ^ 0x8408;\n            else\n                crc >>= 1;\n        }\n    }\n    return ~crc;\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/util.c#L222-L239"
     },
     {
@@ -140,6 +151,7 @@
         "arithmetic"
       ],
       "funcC": "u16 Random(void)\n{\n    gRngValue = ISO_RANDOMIZE1(gRngValue);\n    sRandCount++;\n    return gRngValue >> 16;\n}",
+      "m2cCtx": true,
       "prependC": "#include \"random.h\"\nstatic u32 sRandCount;",
       "sourceUrl": "https://github.com/macabeus/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/random.c#L11-L16"
     },
@@ -151,6 +163,7 @@
         "branch"
       ],
       "funcC": "u16 StringLength(const u8 *str)\n{\n    u16 length = 0;\n\n    while (str[length] != EOS)\n        length++;\n\n    return length;\n}",
+      "m2cCtx": true,
       "prependC": "#include \"constants/characters.h\"",
       "sourceUrl": "https://github.com/macabeus/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/string_util.c#L114-L122"
     },
@@ -162,6 +175,7 @@
         "arithmetic"
       ],
       "funcC": "s32 StringCompare(const u8 *str1, const u8 *str2)\n{\n    while (*str1 == *str2)\n    {\n        if (*str1 == EOS)\n            return 0;\n        str1++;\n        str2++;\n    }\n\n    return *str1 - *str2;\n}",
+      "m2cCtx": true,
       "prependC": "#include \"constants/characters.h\"",
       "sourceUrl": "https://github.com/macabeus/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/string_util.c#L124-L135"
     },
@@ -173,6 +187,7 @@
         "arithmetic"
       ],
       "funcC": "s32 StringCompareN(const u8 *str1, const u8 *str2, u32 n)\n{\n    while (*str1 == *str2)\n    {\n        if (*str1 == EOS)\n            return 0;\n        str1++;\n        str2++;\n        if (--n == 0)\n            return 0;\n    }\n\n    return *str1 - *str2;\n}",
+      "m2cCtx": true,
       "prependC": "#include \"constants/characters.h\"",
       "sourceUrl": "https://github.com/macabeus/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/string_util.c#L137-L150"
     },
@@ -183,6 +198,7 @@
         "branch"
       ],
       "funcC": "u8 *StringCopy(u8 *dest, const u8 *src)\n{\n    while (*src != EOS)\n    {\n        *dest = *src;\n        dest++;\n        src++;\n    }\n\n    *dest = EOS;\n    return dest;\n}",
+      "m2cCtx": true,
       "prependC": "#include \"constants/characters.h\"",
       "sourceUrl": "https://github.com/macabeus/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/string_util.c#L75-L86"
     },
@@ -205,6 +221,7 @@
         "array"
       ],
       "funcC": "bool8 IsStringLengthAtLeast(const u8 *str, s32 n)\n{\n    u8 i;\n\n    for (i = 0; i < n; i++)\n        if (str[i] && str[i] != EOS)\n            return TRUE;\n\n    return FALSE;\n}",
+      "m2cCtx": true,
       "prependC": "#include \"constants/characters.h\"",
       "sourceUrl": "https://github.com/macabeus/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/string_util.c#L152-L161"
     },
@@ -215,6 +232,7 @@
         "array"
       ],
       "funcC": "u8 *StringCopyN(u8 *dest, const u8 *src, u8 n)\n{\n    u16 i;\n\n    for (i = 0; i < n; i++)\n        dest[i] = src[i];\n\n    return &dest[n];\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/string_util.c#L96-L104"
     },
     {
@@ -269,6 +287,7 @@
         "arithmetic"
       ],
       "funcC": "s16 Cos2(u16 angle)\n{\n    return Sin2(angle + 90);\n}",
+      "m2cCtx": true,
       "prependC": "s16 Sin2(u16 angle);",
       "sourceUrl": "https://github.com/macabeus/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/trig.c#L540-L543"
     },
@@ -280,6 +299,7 @@
         "struct"
       ],
       "funcC": "void PutMemBlockHeader(void *block, struct MemBlock *prev, struct MemBlock *next, u32 size)\n{\n    struct MemBlock *header = (struct MemBlock *)block;\n\n    header->flag = FALSE;\n    header->magic = MALLOC_SYSTEM_ID;\n    header->size = size;\n    header->prev = prev;\n    header->next = next;\n}",
+      "m2cCtx": true,
       "prependC": "#define MALLOC_SYSTEM_ID 0xA3A3\nstruct MemBlock {\n    bool16 flag;\n    u16 magic;\n    u32 size;\n    struct MemBlock *prev;\n    struct MemBlock *next;\n    u8 data[0];\n};",
       "proto": {
         "PutMemBlockHeader": {
@@ -312,6 +332,7 @@
         "struct"
       ],
       "funcC": "void StopScript(struct ScriptContext *ctx)\n{\n    ctx->mode = SCRIPT_MODE_STOPPED;\n    ctx->scriptPtr = NULL;\n}",
+      "m2cCtx": true,
       "prependC": "#include \"script.h\"\nenum {\n    SCRIPT_MODE_STOPPED,\n    SCRIPT_MODE_BYTECODE,\n    SCRIPT_MODE_NATIVE,\n};",
       "proto": {
         "StopScript": {
@@ -328,6 +349,7 @@
         "struct"
       ],
       "funcC": "u8 SetupBytecodeScript(struct ScriptContext *ctx, const u8 *ptr)\n{\n    ctx->scriptPtr = ptr;\n    ctx->mode = SCRIPT_MODE_BYTECODE;\n    return 1;\n}",
+      "m2cCtx": true,
       "prependC": "#include \"script.h\"\nenum {\n    SCRIPT_MODE_STOPPED,\n    SCRIPT_MODE_BYTECODE,\n    SCRIPT_MODE_NATIVE,\n};",
       "sourceUrl": "https://github.com/macabeus/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/script.c#L52-L57"
     },
@@ -340,6 +362,7 @@
         "table"
       ],
       "funcC": "static u8 TranslateBigMonSizeTableIndex(u16 a)\n{\n    u8 i;\n\n    for (i = 1; i < 15; i++)\n    {\n        if (a < sBigMonSizeTable[i].unk4)\n            return i - 1;\n    }\n    return i;\n}",
+      "m2cCtx": true,
       "prependC": "struct UnknownStruct\n{\n    u16 unk0;\n    u8 unk2;\n    u16 unk4;\n};\n\nstatic const struct UnknownStruct sBigMonSizeTable[] =\n{\n    {  290,   1,      0 },\n    {  300,   1,     10 },\n    {  400,   2,    110 },\n    {  500,   4,    310 },\n    {  600,  20,    710 },\n    {  700,  50,   2710 },\n    {  800, 100,   7710 },\n    {  900, 150,  17710 },\n    { 1000, 150,  32710 },\n    { 1100, 100, -17826 },\n    { 1200,  50,  -7826 },\n    { 1300,  20,  -2826 },\n    { 1400,   5,   -826 },\n    { 1500,   2,   -326 },\n    { 1600,   1,   -126 },\n    { 1700,   1,   -26 },\n};",
       "sourceUrl": "https://github.com/macabeus/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/pokemon_size_record.c#L67-L77"
     },
@@ -350,6 +373,7 @@
         "macro"
       ],
       "funcC": "static u16 FeebasRandom(void)\n{\n    sFeebasRngValue = ISO_RANDOMIZE2(sFeebasRngValue);\n    return sFeebasRngValue >> 16;\n}",
+      "m2cCtx": true,
       "prependC": "#include \"random.h\"\nstatic u32 sFeebasRngValue;",
       "sourceUrl": "https://github.com/macabeus/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/wild_encounter.c#L170-L174"
     },
@@ -399,6 +423,7 @@
         "memory"
       ],
       "funcC": "static void UNUSED SetMauvilleOldManLanguage(union OldMan *oldMan, u32 language1, u32 language2, u32 language3)\n{\n    s32 i;\n\n    switch (oldMan->common.id)\n    {\n    case MAUVILLE_MAN_TRADER:\n    {\n        struct MauvilleOldManTrader *trader = &oldMan->trader;\n\n        for (i = 0; i < NUM_TRADER_ITEMS; i++)\n        {\n            if (IsStringJapanese(trader->playerNames[i]))\n                trader->language[i] = language1;\n            else\n                trader->language[i] = language2;\n        }\n    }\n    break;\n    case MAUVILLE_MAN_STORYTELLER:\n    {\n        struct MauvilleManStoryteller *storyteller = &oldMan->storyteller;\n\n        for (i = 0; i < NUM_STORYTELLER_TALES; i++)\n        {\n            if (IsStringJapanese(storyteller->trainerNames[i]))\n                storyteller->language[i] = language1;\n            else\n                storyteller->language[i] = language2;\n        }\n    }\n    break;\n    case MAUVILLE_MAN_BARD:\n    {\n        struct MauvilleManBard *bard = &oldMan->bard;\n\n        if (language3 == LANGUAGE_JAPANESE)\n            bard->language = language1;\n        else\n            bard->language = language2;\n    }\n    break;\n    case MAUVILLE_MAN_HIPSTER:\n    {\n        struct MauvilleManHipster *hipster = &oldMan->hipster;\n\n        if (language3 == LANGUAGE_JAPANESE)\n            hipster->language = language1;\n        else\n            hipster->language = language2;\n    }\n    break;\n    case MAUVILLE_MAN_GIDDY:\n    {\n        struct MauvilleManGiddy *giddy = &oldMan->giddy;\n\n        if (language3 == LANGUAGE_JAPANESE)\n            giddy->language = language1;\n        else\n            giddy->language = language2;\n    }\n    break;\n    }\n}",
+      "m2cCtx": true,
       "prependC": "#include \"global.h\"\n#include \"main.h\"\n#include \"constants/songs.h\"\n#include \"constants/event_objects.h\"\n#include \"mauville_old_man.h\"\n#include \"event_data.h\"\n#include \"string_util.h\"\n#include \"text.h\"\n#include \"easy_chat.h\"\n#include \"script.h\"\n#include \"random.h\"\n#include \"event_scripts.h\"\n#include \"task.h\"\n#include \"menu.h\"\n#include \"m4a.h\"\n#include \"bard_music.h\"\n#include \"sound.h\"\n#include \"strings.h\"\n#include \"overworld.h\"\n#include \"field_message_box.h\"\n#include \"script_menu.h\"\n#include \"trader.h\"\n#include \"m4a.h\"\n#include \"constants/mauville_old_man.h\"",
       "sourceUrl": "https://github.com/macabeus/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/mauville_old_man.c#L793-L856",
       "proto": {
@@ -440,6 +465,7 @@
         "global"
       ],
       "funcC": "u8 GetMoveTarget(u16 move, u8 setTarget)\n{\n    u8 targetBattler = 0;\n    u8 moveTarget;\n    u8 side;\n\n    if (setTarget != NO_TARGET_OVERRIDE)\n        moveTarget = setTarget - 1;\n    else\n        moveTarget = gBattleMoves[move].target;\n\n    switch (moveTarget)\n    {\n    case MOVE_TARGET_SELECTED:\n        side = BATTLE_OPPOSITE(GetBattlerSide(gBattlerAttacker));\n        if (gSideTimers[side].followmeTimer && gBattleMons[gSideTimers[side].followmeTarget].hp)\n        {\n            targetBattler = gSideTimers[side].followmeTarget;\n        }\n        else\n        {\n            side = GetBattlerSide(gBattlerAttacker);\n            do\n            {\n                targetBattler = Random() % gBattlersCount;\n            } while (targetBattler == gBattlerAttacker || side == GetBattlerSide(targetBattler) || gAbsentBattlerFlags & gBitTable[targetBattler]);\n            if (gBattleMoves[move].type == TYPE_ELECTRIC\n                && AbilityBattleEffects(ABILITYEFFECT_COUNT_OTHER_SIDE, gBattlerAttacker, ABILITY_LIGHTNING_ROD, 0, 0)\n                && gBattleMons[targetBattler].ability != ABILITY_LIGHTNING_ROD)\n            {\n                targetBattler ^= BIT_FLANK;\n                RecordAbilityBattle(targetBattler, gBattleMons[targetBattler].ability);\n                gSpecialStatuses[targetBattler].lightningRodRedirected = 1;\n            }\n        }\n        break;\n    case MOVE_TARGET_DEPENDS:\n    case MOVE_TARGET_BOTH:\n    case MOVE_TARGET_FOES_AND_ALLY:\n    case MOVE_TARGET_OPPONENTS_FIELD:\n        targetBattler = GetBattlerAtPosition(BATTLE_OPPOSITE(GET_BATTLER_SIDE(gBattlerAttacker)));\n        if (gAbsentBattlerFlags & gBitTable[targetBattler])\n            targetBattler ^= BIT_FLANK;\n        break;\n    case MOVE_TARGET_RANDOM:\n        side = BATTLE_OPPOSITE(GetBattlerSide(gBattlerAttacker));\n        if (gSideTimers[side].followmeTimer && gBattleMons[gSideTimers[side].followmeTarget].hp)\n        {\n            targetBattler = gSideTimers[side].followmeTarget;\n        }\n        else if (gBattleTypeFlags & BATTLE_TYPE_DOUBLE && moveTarget & MOVE_TARGET_RANDOM)\n        {\n            if (GetBattlerSide(gBattlerAttacker) == B_SIDE_PLAYER)\n            {\n                if (Random() & 1)\n                    targetBattler = GetBattlerAtPosition(B_POSITION_OPPONENT_LEFT);\n                else\n                    targetBattler = GetBattlerAtPosition(B_POSITION_OPPONENT_RIGHT);\n            }\n            else\n            {\n                if (Random() & 1)\n                    targetBattler = GetBattlerAtPosition(B_POSITION_PLAYER_LEFT);\n                else\n                    targetBattler = GetBattlerAtPosition(B_POSITION_PLAYER_RIGHT);\n            }\n            if (gAbsentBattlerFlags & gBitTable[targetBattler])\n                targetBattler ^= BIT_FLANK;\n        }\n        else\n        {\n            targetBattler = GetBattlerAtPosition(BATTLE_OPPOSITE(GET_BATTLER_SIDE(gBattlerAttacker)));\n        }\n        break;\n    case MOVE_TARGET_USER_OR_SELECTED:\n    case MOVE_TARGET_USER:\n        targetBattler = gBattlerAttacker;\n        break;\n    }\n\n    *(gBattleStruct->moveTarget + gBattlerAttacker) = targetBattler;\n\n    return targetBattler;\n}",
+      "m2cCtx": true,
       "prependC": "#include \"global.h\"\n#include \"battle.h\"\n#include \"battle_anim.h\"\n#include \"battle_arena.h\"\n#include \"battle_pyramid.h\"\n#include \"battle_util.h\"\n#include \"pokemon.h\"\n#include \"international_string_util.h\"\n#include \"item.h\"\n#include \"util.h\"\n#include \"battle_scripts.h\"\n#include \"random.h\"\n#include \"text.h\"\n#include \"safari_zone.h\"\n#include \"sound.h\"\n#include \"sprite.h\"\n#include \"string_util.h\"\n#include \"task.h\"\n#include \"trig.h\"\n#include \"window.h\"\n#include \"battle_message.h\"\n#include \"battle_ai_script_commands.h\"\n#include \"battle_controllers.h\"\n#include \"event_data.h\"\n#include \"link.h\"\n#include \"field_weather.h\"\n#include \"constants/abilities.h\"\n#include \"constants/battle_anim.h\"\n#include \"constants/battle_move_effects.h\"\n#include \"constants/battle_script_commands.h\"\n#include \"constants/battle_string_ids.h\"\n#include \"constants/hold_effects.h\"\n#include \"constants/items.h\"\n#include \"constants/moves.h\"\n#include \"constants/songs.h\"\n#include \"constants/species.h\"\n#include \"constants/weather.h\"",
       "sourceUrl": "https://github.com/macabeus/pokeemerald/blob/25ffb2c12c069ac6b2040f9238b2978f1de72e3f/src/battle_util.c#L3828-L3911"
     },
@@ -506,6 +532,7 @@
       ],
       "note": "Signed arithmetic shifts and an unsigned divide meet in one expression. asmlift’s signedness lever is whole-function, so it cannot spell the per-site signedness this body needs — whichever way it is thrown, one of the two sites is wrong.",
       "funcC": "static s32 GetAnchorCoord(s32 a0, s32 a1, s32 coord)\n{\n    s32 subResult, var1;\n\n    subResult = a1 - a0;\n    if (subResult < 0)\n        var1 = -(subResult) >> 9;\n    else\n        var1 = -(subResult >> 9);\n    return coord - ((u32)(coord * a1) / (u32)(a0) + var1);\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/pokeemerald/blob/9d96fe4bd358bb7f8e70dc58702d5c4cb545b761/src/sprite.c#L1213-L1223",
       "proto": {
         "GetAnchorCoord": {
