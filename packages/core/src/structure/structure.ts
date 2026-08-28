@@ -38,7 +38,7 @@
 // header also entered by a plain br).
 import { type GlobalCell, globalCellOf, mayWriteGlobal } from '../ir/alias';
 import { Block, Fn, Op, Value, defOpMap, dominators, successorsOf } from '../ir/core';
-import { EFFECTFUL_OPS } from '../ir/opcodes';
+import { CAST_WIDTHS, EFFECTFUL_OPS } from '../ir/opcodes';
 import { type IrType, T, scalarTypeForAccess, typeEquals } from '../ir/types';
 import {
   BinOp,
@@ -2575,11 +2575,16 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       return { k: 'un', op: '~', e: needsIntSpelling(x) ? { k: 'cast', to: T.s(32), e: x } : x };
     }
     // Width-narrowing casts: `zext`/`sext` widen a `width`-bit value back to 32 → C `(u8)e`/`(s8)e`.
-    if (d.opcode === 'zext') {
-      return { k: 'cast', to: T.int(d.attrs.width as number, false), e: e(d.operands[0]) };
-    }
-    if (d.opcode === 'sext') {
-      return { k: 'cast', to: T.int(d.attrs.width as number, true), e: e(d.operands[0]) };
+    // The width is in BITS, and outside `CAST_WIDTHS` there is no C type to cast to — a GAP, not
+    // the `(u2)` the backend would otherwise print and no compiler accept. No frontend produces
+    // one (the cast idioms and PPC's `extsb`/`extsh` emit 8 and 16), so this is the loud floor
+    // under hand-written IR; `raise/narrowlocal.ts` and `raise/paramwidth.ts` refuse to NARROW on
+    // such a width, which is a different decision from spelling one.
+    if (d.opcode === 'zext' || d.opcode === 'sext') {
+      const w = d.attrs.width as number;
+      return CAST_WIDTHS.has(w)
+        ? { k: 'cast', to: T.int(w, d.opcode === 'sext'), e: e(d.operands[0]) }
+        : mkGap(`no C type for a ${w}-bit '${d.opcode}'`, [e(d.operands[0])]);
     }
     if (d.opcode === 'call') {
       return { k: 'call', fn: d.attrs.target as string, args: d.operands.map(e) };

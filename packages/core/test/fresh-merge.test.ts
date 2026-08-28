@@ -171,7 +171,7 @@ const NARROWCARRIER = `fn narrowcarrier {
   %5: u16 = const {value=7}
   br ^bb2(%5)
 ^bb2(%6: u16):
-  %7: s32 = zext %6 {width=2}
+  %7: s32 = zext %6 {width=16}
   ret %7
 }
 `;
