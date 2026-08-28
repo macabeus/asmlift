@@ -508,7 +508,7 @@
         "mPl_SceneNo2SoundRoomType": {
           "returnsVoid": false,
           "params": [
-            "s32 arg0"
+            "s32"
           ]
         }
       }
@@ -530,8 +530,8 @@
         "getScissorView": {
           "returnsVoid": true,
           "params": [
-            "View* view",
-            "Viewport* viewport"
+            "View*",
+            "Viewport*"
           ]
         }
       }

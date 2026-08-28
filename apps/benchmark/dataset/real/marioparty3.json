@@ -653,7 +653,7 @@
         "func_80047D4C_4894C": {
           "returnsVoid": true,
           "params": [
-            "omObjData *obj"
+            "omObjData *"
           ]
         }
       }
@@ -674,7 +674,7 @@
         "HuPrcChildUnlink": {
           "returnsVoid": true,
           "params": [
-            "Process *process"
+            "Process *"
           ]
         }
       }

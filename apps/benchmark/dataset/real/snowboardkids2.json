@@ -580,7 +580,7 @@
         "func_8006FEBC_70ABC": {
           "returnsVoid": true,
           "params": [
-            "func_8006FEBC_70ABC_arg *arg0"
+            "func_8006FEBC_70ABC_arg *"
           ]
         }
       }
