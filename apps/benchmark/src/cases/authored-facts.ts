@@ -3,8 +3,9 @@
 //
 // A row feeds its two decompilers separate, hand-written inputs. asmlift gets `proto` — void-ness,
 // callee arities, declared parameter types. m2c gets whatever a hand-written `ctx` declares, and on
-// a row with a vendored context also the function's own prototype line, which cases/real.ts's
-// `m2cFnPrototype` reconstructs from `funcC`. Nothing held any of them against each other, and a
+// a row with a vendored context the one prototype line cases/real.ts's `m2cOwnPrototype` derives
+// from that SAME `proto` (it used to reconstruct it from `funcC`, the answer, which is the leakage
+// that removal closed). Nothing held any of them against each other, and a
 // row that got one wrong scored a decompiler down FOR OBEYING IT: marioparty3:func_80056254_56E54
 // published `"returnsVoid": true` four lines under a `funcC` returning `(*arg0)->unk0C`, and
 // asmlift's faithful `return;` cost it a byte-exact match while m2c, which never reads `proto`,
