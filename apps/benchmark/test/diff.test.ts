@@ -54,6 +54,15 @@ describe('compareMeasurements', () => {
     expect(r.changed).toEqual([{ id: 'a', field: 'm2c.source', from: '15 bytes', to: '29 bytes' }]);
   });
 
+  test('a quality block that moves is reported, and an identical one is not', () => {
+    const q = { score: 100, lines: 3, gotos: 0, casts: 0, unkGlue: 0, rawMem: 0, addrDeref: 0 };
+    expect(compareMeasurements(out(row('a', { quality: q })), out(row('a', { quality: { ...q } }))).changed).toEqual(
+      [],
+    );
+    const moved = compareMeasurements(out(row('a', { quality: q })), out(row('a', { quality: { ...q, casts: 1 } })));
+    expect(moved.changed.map((c) => c.field)).toEqual(['asmlift.quality']);
+  });
+
   test('a run-local scratch name inside a source is NOT a measurement change', () => {
     const r = compareMeasurements(
       out(row('a', { source: '/* asmlift-usercc-Ab12Cd/cand.c */ void f(void) {}' })),

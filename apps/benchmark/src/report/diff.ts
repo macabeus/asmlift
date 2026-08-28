@@ -17,12 +17,24 @@ import { RESULTS_DIR } from '../config';
 import { RESULTS_PATH, byId, headContains, readCommitted, scrub, shortSha } from './committed';
 
 /** The fields a published claim is made of. `source` is in the list because a change that moves
- *  no score can still rewrite what the report shows, and `candidateLabel` because the ranked
- *  WINNER can change identity at an unchanged score (a tie-break moving is a real change). */
+ *  no score can still rewrite what the report shows, `candidateLabel` because the ranked WINNER
+ *  can change identity at an unchanged score (a tie-break moving is a real change), and `quality`
+ *  because the report publishes it: the row this gate was last run in anger on moved
+ *  `quality.casts` 0 → 1 and the gate could not see it, so "3 field changes" was the whole truth
+ *  about the fields listed here and not about the row. */
 const FIELDS = {
-  asmlift: ['outcome', 'score', 'candidateLabel', 'source'],
-  m2c: ['outcome', 'score', 'source'],
+  asmlift: ['outcome', 'score', 'candidateLabel', 'source', 'quality'],
+  m2c: ['outcome', 'score', 'source', 'quality'],
 } as const;
+
+/** Compared by VALUE with a stable key order — `quality` is an object, and comparing two of those
+ *  with `!==` reports every row as changed. */
+const stable = (v: unknown): string =>
+  JSON.stringify(v, (_k, x: unknown) =>
+    x && typeof x === 'object' && !Array.isArray(x)
+      ? Object.fromEntries(Object.entries(x as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)))
+      : x,
+  );
 
 export interface FieldChange {
   id: string;
@@ -69,7 +81,12 @@ export function compareMeasurements(base: BenchOutput, fresh: BenchOutput): Diff
         const b = (now[side] as unknown as Record<string, unknown>)[f];
         // sources are compared SCRUBBED, the same measurement-level equality stale-check uses:
         // a cold run re-mints scratch-dir names inside embedded asm comments
-        const [x, y] = f === 'source' ? [scrub(String(a ?? '')), scrub(String(b ?? ''))] : [a, b];
+        const [x, y] =
+          f === 'source'
+            ? [scrub(String(a ?? '')), scrub(String(b ?? ''))]
+            : f === 'quality'
+              ? [stable(a), stable(b)]
+              : [a, b];
         if (x !== y) {
           changed.push({ id: was.id, field: `${side}.${f}`, from: show(f, a), to: show(f, b) });
         }
