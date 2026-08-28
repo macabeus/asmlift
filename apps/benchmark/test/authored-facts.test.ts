@@ -21,7 +21,14 @@ import { join } from 'node:path';
 import { gunzipSync } from 'node:zlib';
 import { describe, expect, test } from 'vitest';
 
-import { ATTRIBUTE_MACROS, authoredFactProblems, quotedSignature } from '../src/cases/authored-facts';
+import { SYNTHETIC } from '../dataset/synthetic';
+import {
+  ATTRIBUTE_MACROS,
+  authoredFactProblems,
+  oracleFor,
+  protoFactProblems,
+  quotedSignature,
+} from '../src/cases/authored-facts';
 import { REAL_DIR, type RealManifest } from '../src/cases/manifests';
 import { m2cFnPrototype } from '../src/cases/real';
 
@@ -95,5 +102,43 @@ describe('the prototype line handed to m2c is plain C', () => {
         .map((fn) => `${man.project}:${fn.sym}`),
     );
     expect(unexplained).toEqual([]);
+  });
+});
+
+// The synthetic tier authors 86 `proto` tables of its own, and its `src` IS the compiler's input —
+// no headers, no macros — so it is its own oracle and the same check applies with no vendoring.
+// It is clean today; what this buys is that the NEXT hand-written spec cannot quietly declare a
+// void-ness its source refutes, which on the real tier cost a match before anything looked.
+describe('the synthetic tier declares nothing its own source refutes', () => {
+  test('every synthetic proto agrees with its src', () => {
+    const problems = SYNTHETIC.flatMap((s) => protoFactProblems(`synthetic:${s.sym}`, s.sym, s.proto, s.src));
+    expect(problems).toEqual([]);
+  });
+
+  test('every synthetic src yields exactly one definition of its symbol', () => {
+    const noOracle = SYNTHETIC.filter((s) => typeof oracleFor('', s.sym, s.src) === 'string').map((s) => s.sym);
+    expect(noOracle).toEqual([]);
+    expect(SYNTHETIC.length).toBeGreaterThan(200);
+  });
+
+  // The dataset's own stated policy, in its header: "`ctx` is the m2c --context (prototypes only
+  // — no struct layouts, so both decompilers must RECOVER structure); `proto` feeds asmlift the
+  // SAME info". Unchecked, that is a comment. A callee declared to one decompiler and not the
+  // other is an information asymmetry, and the round that hunts for those should not have to read
+  // 220 specs to find one.
+  test('a callee named in `ctx` for m2c has a `proto` entry for asmlift, and vice versa', () => {
+    const asymmetric = SYNTHETIC.flatMap((s) => {
+      const inCtx = [...(s.ctx ?? '').matchAll(/\b([A-Za-z_]\w*)\s*\(/g)].map((m) => m[1]).filter((n) => n !== s.sym);
+      const inProto = Object.keys(s.proto ?? {}).filter((n) => n !== s.sym);
+      return [
+        ...inCtx
+          .filter((n) => !inProto.includes(n))
+          .map((n) => `synthetic:${s.sym}: m2c is told about \`${n}\`, asmlift is not`),
+        ...inProto
+          .filter((n) => !inCtx.includes(n))
+          .map((n) => `synthetic:${s.sym}: asmlift is told about \`${n}\`, m2c is not`),
+      ];
+    });
+    expect(asymmetric).toEqual([]);
   });
 });

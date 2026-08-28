@@ -17,7 +17,7 @@
 //
 // What this does NOT check: whether a fact is USEFUL, or whether a row should carry one at all. A
 // missing `proto` is not a defect here; only a present one that the compiled function refutes.
-import { declaredWidth } from '@asmlift/core/proto';
+import { type Prototypes, declaredWidth } from '@asmlift/core/proto';
 
 import type { RealFunction } from './manifests';
 
@@ -150,6 +150,14 @@ function* occurrences(
   }
 }
 
+/** Does the compiled text call or declare `sym` at all? */
+function mentions(text: string, sym: string): boolean {
+  for (const _ of occurrences(text, sym)) {
+    return true;
+  }
+  return false;
+}
+
 /** The declarator prefix in front of a `sym (…)` occurrence: back to the previous statement
  *  boundary or cpp line marker. NOT back to the previous newline — a signature may wrap — so the
  *  marker lines the slice may swallow are dropped by `returnTypeOf`. */
@@ -235,60 +243,42 @@ export function quotedSignature(funcC: string): CompiledSignature | null {
 
 const isPointer = (t: string): boolean => t.includes('*');
 
-/** Every way one row's authored facts contradict its own compiled function. Empty = consistent. */
-export function authoredFactProblems(project: string, fn: RealFunction, tu: string): string[] {
-  const where = `${project}:${fn.sym}`;
-  const defs = definitionsOf(tu, fn.sym);
-  if (defs.length !== 1) {
-    return [
-      `${where}: the vendored TU holds ${defs.length} definitions of \`${fn.sym}\` — no oracle, so ` +
-        `none of this row's authored facts were checked (re-run \`bench vendor\`)`,
-    ];
+/** The compiled signature of `sym`, or the reason there is no oracle for it. Both tiers: the real
+ *  tier's oracle is its vendored preprocessed TU, the synthetic tier's is the `src` it compiles
+ *  verbatim. */
+export function oracleFor(where: string, sym: string, tu: string): CompiledSignature | string {
+  const defs = definitionsOf(tu, sym);
+  return defs.length === 1
+    ? defs[0]
+    : `${where}: the compiled source holds ${defs.length} definitions of \`${sym}\` — no oracle, so ` +
+        `none of this row's authored facts were checked (real tier: re-run \`bench vendor\`)`;
+}
+
+/** Every way one row's `proto` — the table asmlift receives — contradicts the function the
+ *  compiler actually saw. Tier-agnostic: `tu` is the compiled text, whatever produced it. */
+export function protoFactProblems(where: string, sym: string, proto: Prototypes | undefined, tu: string): string[] {
+  const oracle = oracleFor(where, sym, tu);
+  if (typeof oracle === 'string') {
+    return [oracle];
   }
-  const [real] = defs;
   const problems: string[] = [];
-  const realVoid = real.returnType === 'void';
-
-  // ── the reference source, which DEFINES the target and is also m2c's prototype line ──────────
-  const quoted = quotedSignature(fn.funcC);
-  if (!quoted) {
-    problems.push(`${where}: \`funcC\` has no parseable signature`);
-  } else {
-    if (quoted.returnType !== real.returnType) {
-      problems.push(
-        `${where}: \`funcC\` returns \`${quoted.returnType}\` but the compiled function returns ` +
-          `\`${real.returnType}\`` +
-          (/[A-Z_]{2,}/.test(quoted.returnType)
-            ? ` — if the extra token is an attribute macro, list it in ATTRIBUTE_MACROS`
-            : ''),
-      );
-    }
-    if (quoted.params.length !== real.params.length) {
-      problems.push(
-        `${where}: \`funcC\` declares ${quoted.params.length} parameter(s), the compiled function ` +
-          `takes ${real.params.length}`,
-      );
-    }
-  }
-
-  // ── the prototype table asmlift receives ─────────────────────────────────────────────────────
-  const proto = fn.proto ?? {};
-  const own = proto[fn.sym];
-  if (own?.returnsVoid !== undefined && own.returnsVoid !== realVoid) {
+  const table = proto ?? {};
+  const own = table[sym];
+  if (own?.returnsVoid !== undefined && own.returnsVoid !== (oracle.returnType === 'void')) {
     problems.push(
       `${where}: proto says \`returnsVoid: ${own.returnsVoid}\` but the compiled function returns ` +
-        `\`${real.returnType}\` — asmlift obeys the declaration, so this row scores it for a lie`,
+        `\`${oracle.returnType}\` — asmlift obeys the declaration, so this row scores it for a lie`,
     );
   }
   if (own?.params !== undefined) {
     const declared = typeof own.params === 'number' ? own.params : own.params.length;
-    if (declared !== real.params.length) {
+    if (declared !== oracle.params.length) {
       problems.push(
-        `${where}: proto declares ${declared} parameter(s), the compiled function takes ${real.params.length}`,
+        `${where}: proto declares ${declared} parameter(s), the compiled function takes ${oracle.params.length}`,
       );
     } else if (Array.isArray(own.params)) {
       own.params.forEach((p, i) => {
-        const r = real.params[i];
+        const r = oracle.params[i];
         if (isPointer(p) !== isPointer(r)) {
           problems.push(
             `${where}: proto parameter ${i} is \`${normParam(p)}\`, the compiled one is \`${normParam(r)}\``,
@@ -307,15 +297,16 @@ export function authoredFactProblems(project: string, fn: RealFunction, tu: stri
     }
   }
 
-  // ── callee entries: the row may only describe functions it actually calls ────────────────────
-  for (const [callee, entry] of Object.entries(proto)) {
-    if (callee === fn.sym) {
+  // callee entries: a row may only describe functions it actually calls, and must describe them
+  // the way they are declared where the compiled text declares them at all
+  for (const [callee, entry] of Object.entries(table)) {
+    if (callee === sym) {
       continue;
     }
-    if (![...occurrences(tu, callee)].length) {
+    if (!mentions(tu, callee)) {
       problems.push(
         `${where}: proto describes \`${callee}\`, which the compiled function never mentions ` +
-          `(check the macro-expanded name — \`CpuCopy32\` calls \`CpuSet\`)`,
+          `(check the macro-EXPANDED name — \`CpuCopy32(…)\` in the source is \`CpuSet(…)\` here)`,
       );
       continue;
     }
@@ -328,15 +319,46 @@ export function authoredFactProblems(project: string, fn: RealFunction, tu: stri
         problems.push(`${where}: proto gives \`${callee}\` ${declared} parameter(s); its declaration takes ${actual}`);
       }
     }
-    if (entry.returnsVoid !== undefined && decls.length > 0) {
-      const voids = new Set(decls.map((d) => d.returnType === 'void'));
-      if (voids.size === 1 && [...voids][0] !== entry.returnsVoid) {
-        problems.push(
-          `${where}: proto says \`${callee}\` returnsVoid: ${entry.returnsVoid}; it is declared ` +
-            `\`${decls[0].returnType}\``,
-        );
-      }
+    const voids = new Set(decls.map((d) => d.returnType === 'void'));
+    if (entry.returnsVoid !== undefined && voids.size === 1 && [...voids][0] !== entry.returnsVoid) {
+      problems.push(
+        `${where}: proto says \`${callee}\` returnsVoid: ${entry.returnsVoid}; it is declared ` +
+          `\`${decls[0].returnType}\``,
+      );
     }
   }
   return problems;
+}
+
+/** Every way one REAL row's authored facts contradict its own compiled function: its `proto`, plus
+ *  the reference source `funcC` — which is quoted out of the project by hand, DEFINES the target,
+ *  and is also the prototype line the harness hands m2c. */
+export function authoredFactProblems(project: string, fn: RealFunction, tu: string): string[] {
+  const where = `${project}:${fn.sym}`;
+  const oracle = oracleFor(where, fn.sym, tu);
+  if (typeof oracle === 'string') {
+    return [oracle];
+  }
+  const problems: string[] = [];
+  const quoted = quotedSignature(fn.funcC);
+  if (!quoted) {
+    problems.push(`${where}: \`funcC\` has no parseable signature`);
+  } else {
+    if (quoted.returnType !== oracle.returnType) {
+      problems.push(
+        `${where}: \`funcC\` returns \`${quoted.returnType}\` but the compiled function returns ` +
+          `\`${oracle.returnType}\`` +
+          (/[A-Z_]{2,}/.test(quoted.returnType)
+            ? ' — if the extra token is an attribute macro, list it in ATTRIBUTE_MACROS'
+            : ''),
+      );
+    }
+    if (quoted.params.length !== oracle.params.length) {
+      problems.push(
+        `${where}: \`funcC\` declares ${quoted.params.length} parameter(s), the compiled function ` +
+          `takes ${oracle.params.length}`,
+      );
+    }
+  }
+  return [...problems, ...protoFactProblems(where, fn.sym, fn.proto, tu)];
 }
