@@ -2,10 +2,11 @@
 // overwrites a function PARAMETER takes its own local instead of assigning back into the
 // parameter's name. Off by default.
 //
-// What these tests pin is the SCOPE. The carrier decides: an entry parameter, or a home this rule
-// itself minted — and nothing else, so a merge over ordinary locals keeps the adoption the rest of
-// the naming walk rests on. The refusals are here too: a redundant phi (which overwrites nothing),
-// and a loop header (whose init copy already IS the seed this rule mints for a plain merge).
+// What these tests pin is the SCOPE, since the carrier is the whole evidence: an entry parameter,
+// or a home this rule itself minted — and nothing else, so a merge over ordinary locals keeps the
+// adoption the rest of the naming walk rests on. The refusals are here too — a redundant phi, which
+// overwrites the parameter on no path, and a loop header, which `seedLoopParams` has already named
+// — and so is the axis that enumerates the spelling, with the function it costs nothing.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';

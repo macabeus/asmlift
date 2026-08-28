@@ -837,7 +837,7 @@ export interface StructureOptions {
   // what a differ-refereed spelling looks like.
   coalesceMergeNames?: boolean;
   // Give a merge that conditionally overwrites a FUNCTION PARAMETER its own local, instead of
-  // assigning back into the parameter's name (`if (a1 >= a0) v0 = a1; else v0 = a0;` for
+  // assigning back into the parameter's name (`if (a1 < a0) { v0 = a0; } else { v0 = a1; }` for
   // `if (a1 < a0) a1 = a0;`). Off by default; rank.ts enumerates the ON spelling as the
   // `/fresh-merge` axis. Both spellings are ordinary C with identical semantics, so nothing over
   // the source decides between them — what differs is where the compiler may place the copy. A
@@ -1392,7 +1392,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
    *  parameter. */
   const entryParams = new Set<Value>(entry.params);
   /** Merge params that took a fresh name only because `freshParamMerge` refused their parameter
-   *  carrier. The seed hoist's whole scope. */
+   *  carrier — what makes the rule closed under itself: a further merge carrying one of these is
+   *  refused for the same reason. */
   const paramSeededMerges = new Set<Value>();
   const backArgName = new Map<Value, string>();
   // The C static type of a rendered expression, over the declared variable types — what decides
@@ -1754,8 +1755,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         // but only one whose name survives the C3 interference check (else the edge copies into
         // the name would clobber a still-live value).
         let name: string | undefined;
-        /** Set when the ONE reason this merge went unnamed is `freshParamMerge`'s refusal — the
-         *  seed hoist below is scoped to exactly these params. */
+        /** Set when the ONE reason this merge went unnamed is `freshParamMerge`'s refusal. */
         let refusedParamCarrier = false;
         for (const c of [
           ...incoming.filter((c) => varName.has(c.v)),
@@ -1782,8 +1782,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
           //     the register was already re-homed there, so refusing again would only add a copy;
           //   - a REDUNDANT phi (every edge passes the same value) is refused nothing. It overwrites
           //     the parameter on no path, so a fresh name buys a copy and changes no placement;
-          //   - a LOOP HEADER param is never seen here — `seedLoopParams` named it already, and its
-          //     init copy is the seed this rule mints for a plain merge.
+          //   - a LOOP HEADER param is never seen here — `seedLoopParams` named it already, and
+          //     under `coalesceLoopInit` it deliberately keeps the parameter's own register.
           if (freshParamMerge && !allSame && (entryParams.has(c.v) || paramSeededMerges.has(c.v))) {
             refusedParamCarrier = true;
             continue;

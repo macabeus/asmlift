@@ -224,15 +224,19 @@ const STRUCTURING_AXES: readonly StructuringAxis[] = [
     strip: true,
   },
   // `/fresh-merge` — the parameter-merge-home axis (structure.ts freshParamMerge): a merge that
-  // conditionally overwrites a function PARAMETER takes its own local, seeded from the parameter
-  // above the branch (`v0 = a1; if (a1 < a0) v0 = a0;`), where the default assigns back into the
+  // conditionally overwrites a function PARAMETER takes its own local
+  // (`if (a1 < a0) { v0 = a0; } else { v0 = a1; }`), where the default assigns back into the
   // parameter (`if (a1 < a0) a1 = a0;`). Both are ordinary C with identical semantics, so nothing
   // over the source decides it; what differs is placement freedom. A parameter is live from entry,
-  // so its home is the register the ABI handed it and the copy into it sinks to the top of the
-  // function; a fresh local is dead until the seed, so the compiler may leave the copy where the
-  // asm has it. At two arguments the two spellings compile to the SAME bytes (agbcc and mwcc both,
-  // measured) — the returned value's home is occupied either way; the third argument is what makes
-  // the first parameter dead early enough for the placement to be observable.
+  // so its home is the register the ABI handed it and the copy into it is pinned there; a fresh
+  // local is dead until its first arm, so the compiler may leave the copy where the asm has it. At
+  // two arguments the two spellings compile to the SAME bytes (agbcc and mwcc both, measured) —
+  // the returned value's home is occupied either way; the third argument is what makes the first
+  // parameter dead early enough for the placement to be observable.
+  //
+  // Where the arm that reaches the join carries a CONSTANT, `/defsite` already writes it above the
+  // branch, and the pair spells m2c's own `v0 = 0xFF; if (a0 <= 0xFF) v0 = a0;` — which is how
+  // `synthetic:clampu8:mwcc_242_81` matches under `signed/defsite/fresh-merge`.
   //
   // Gated on the shared probe: a merge slot whose in-edge args differ and include an entry
   // parameter. Structural, so it cannot answer differently per symbol variant.
