@@ -23,6 +23,7 @@
         "baseline"
       ],
       "funcC": "s32 ReturnOne(void) {\n    return 1;\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/system.c#L12-L14"
     },
     {
@@ -32,6 +33,7 @@
         "pointer"
       ],
       "funcC": "void StrCpy(u8 *dst, u8 *src) {\n    u32 c;\n    do {\n        c = *src;\n        *dst = c;\n        c = *src;\n        dst++;\n        src++;\n    } while (c != 0);\n}",
+      "m2cCtx": true,
       "proto": {
         "StrCpy": {
           "returnsVoid": true
@@ -47,6 +49,7 @@
         "branch"
       ],
       "funcC": "s16 MultiplyQ8(s16 num1, s16 num2) {\n    s32 product;\n    s32 rounded;\n\n    product = num1 * num2;\n    rounded = product;\n    if (rounded < 0) {\n        rounded += 0xFF;\n    }\n    product = rounded >> 8;\n    return product;\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/system.c#L116-L127"
     },
     {
@@ -57,6 +60,7 @@
         "branch"
       ],
       "funcC": "s16 MultiplyQ4(s16 num1, s16 num2) {\n    s32 product;\n    s32 rounded;\n\n    product = num1 * num2;\n    rounded = product;\n    if (rounded < 0) {\n        rounded += 0xF;\n    }\n    product = rounded >> 4;\n    return product;\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/math.c#L25-L36"
     },
     {
@@ -65,6 +69,7 @@
         "arithmetic"
       ],
       "funcC": "s16 DivideQ8(s16 num1, s16 num2) {\n    return (num1 << 8) / num2;\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/math.c#L11-L13"
     },
     {
@@ -73,6 +78,7 @@
         "arithmetic"
       ],
       "funcC": "s16 ReciprocalQ8(s16 num1) {\n    s32 numerator = 0x10000;\n    return (numerator / num1);\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/math.c#L19-L22"
     },
     {
@@ -81,6 +87,7 @@
         "arithmetic"
       ],
       "funcC": "s16 DivideQ4(s16 num1, s16 num2) {\n    return ((num1 << 4) / num2);\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/math.c#L42-L44"
     },
     {
@@ -89,6 +96,7 @@
         "arithmetic"
       ],
       "funcC": "s16 ReciprocalQ4(s16 num1) {\n    s32 numerator = 0x100;\n    return (numerator / num1);\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/math.c#L50-L53"
     },
     {
@@ -141,6 +149,7 @@
         "memory"
       ],
       "funcC": "u32 ReadUnalignedU32(u8 *ptr) {\n    return ptr[0] + (ptr[1] << 8) + (ptr[2] << 16) + (ptr[3] << 24);\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/gfx.c#L70-L72"
     },
     {
@@ -316,6 +325,7 @@
         "memory"
       ],
       "funcC": "struct Unk_08014184 *CheckTileCollisionVertical(struct Unk_08014184 *arg0, u16 arg1, u16 arg2, u8 arg3) {\n    u32 var_r3;\n    struct Unk_08014184 var_r4;\n\n    for (var_r3 = gUnk_03004D80->unk2; var_r3 < gUnk_03004D80->unk0; var_r3++) {\n        if ((arg2 >= gUnk_03004D80->unk4[var_r3].unk2) && (gUnk_03004D80->unk4[var_r3].unk6 >= (arg2 - arg3))\n            && (arg1 < (gUnk_03004D80->unk4[var_r3].unk0 + 3)) && ((gUnk_03004D80->unk4[var_r3].unk0 - 3) < arg1)) {\n            var_r4.unk0 = gUnk_03004D80->unk4[var_r3].unk0 - 3;\n            var_r4.unk2 = gUnk_03004D80->unk4[var_r3].unk8;\n            *arg0 = var_r4;\n            goto exit;\n            return arg0;\n        }\n    }\n\n    var_r4.unk0 = -1;\n    *arg0 = var_r4;\nexit:\n    return arg0;\n}",
+      "m2cCtx": true,
       "prependC": "struct Unk_08014184 {\n    u16 unk0;\n    u8 unk2;\n    u8 pad3[0x4 - 0x3];\n};",
       "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/code_1.c#L43-L62"
     },
@@ -327,6 +337,7 @@
         "pointer"
       ],
       "funcC": "u32 ProcessHBlankWait(u32 idx) {\n    volatile u16 *ie;\n    volatile u16 *dispstat;\n    u8 *buf;\n    u32 off;\n    u8 *entry;\n    u32 timer;\n\n    ie = &REG_IE;\n    *ie |= 2;\n    dispstat = &REG_DISPSTAT;\n    *dispstat |= 0x10;\n\n    buf = gBuffer_52A4;\n    off = idx * 9;\n    off <<= 2;\n    off += (u32)buf;\n    entry = (u8 *)off;\n\n    if (entry[3] >> 7) {\n        return 1;\n    }\n    timer = *(u16 *)(entry + 0x14) - 1;\n    *(u16 *)(entry + 0x14) = timer;\n    if ((s32)(timer << 16) < 0) {\n        *ie &= 0xFFFD;\n        *dispstat &= 0xFFEF;\n        return 0;\n    }\n    return 1;\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/gfx.c#L536-L566"
     },
     {
@@ -349,6 +360,7 @@
         "memory"
       ],
       "funcC": "void WritePaletteColor(void) {\n    u8 **gp = &gStreamPtr;\n    u16 color = ReadUnalignedU16(*gp + 3);\n    u8 *ptr = *gp;\n    *(u16 *)(BG_PAL_RAM + ptr[2] * 2) = color;\n    *gp = ptr + 5;\n}",
+      "m2cCtx": true,
       "prependC": "u32 ReadUnalignedU16(u8 *);",
       "proto": {
         "WritePaletteColor": {
@@ -364,6 +376,7 @@
         "memory"
       ],
       "funcC": "u32 ReadUnalignedU16(u8 *ptr) {\n    return ptr[0] | (ptr[1] << 8);\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/gfx.c#L54-L56"
     },
     {
@@ -391,6 +404,7 @@
         "memory"
       ],
       "funcC": "void DmaSpriteToObjVram(u32 entryIdx, u32 frameIdx) {\n    vu32 *dma3 = &REG_DMA3SAD;\n    u32 base = *(vu32 *)&gGfxStreamBuffer;\n    u8 *entry = (u8 *)(entryIdx * 8 + base);\n    u16 tileCount = *(u16 *)(entry + 6);\n    dma3[0] = *(u32 *)entry + tileCount * (frameIdx << 5);\n\n    dma3[1] = (u32) * (u16 *)(entry + 4) * 32 + OBJ_VRAM;\n\n    dma3[2] = (*(u16 *)(entry + 6) << 4) | (0x80 << 24);\n    dma3[2];\n}",
+      "m2cCtx": true,
       "proto": {
         "DmaSpriteToObjVram": {
           "returnsVoid": true
@@ -405,6 +419,7 @@
         "global"
       ],
       "funcC": "void StreamCmd_SetWindowRegs(void) {\n    vu16 *reg = &REG_WININ;\n    u8 **streamPtrAddr = &gStreamPtr;\n    u8 *stream = *streamPtrAddr;\n\n    *reg = stream[2] | (stream[3] << 8);\n    reg++;\n    *reg = stream[4] | (stream[5] << 8);\n    *streamPtrAddr = stream + 6;\n}",
+      "m2cCtx": true,
       "proto": {
         "StreamCmd_SetWindowRegs": {
           "returnsVoid": true
@@ -419,6 +434,7 @@
         "global"
       ],
       "funcC": "void RollRandomLevelVariant(void) {\n    u8 *state = gGameFlags;\n    u8 difficulty = state[0x0C];\n    u32 difficultyIndex = (u8)(difficulty - 1);\n    u32 rng = thunk_sub_080002A0();\n    u8 *levelState = gControlBlock;\n    u32 parity = difficultyIndex & 1;\n    u32 variant = sub_0805193C((u8)rng, 5 - difficultyIndex);\n    levelState[0x0E] = parity + variant + 1;\n}",
+      "m2cCtx": true,
       "prependC": "u32 thunk_sub_080002A0(void);\nu32 sub_0805193C(u8, u32);",
       "proto": {
         "RollRandomLevelVariant": {
@@ -436,6 +452,7 @@
         "arithmetic"
       ],
       "funcC": "void TransformSingleEntityToScreen(u8 arg0, s8 arg1, s8 arg2) {\n    s32 temp_r0;\n    s32 temp_r0_2;\n    s16 temp_r1;\n    s16 temp_r2;\n    s32 var_r2;\n    s32 var_r4;\n    struct Unk_0300466C_4 *var_r0;\n\n    arg1++, arg1--; /* fake */\n    gUnk_03002920[arg0].xPosScreen = gUnk_03002920[arg0].xPosBg2 - arg1 - gUnk_03003430.bg2HOfs;\n    gUnk_03002920[arg0].yPosScreen = gUnk_03002920[arg0].yPosBg2 - arg2 - gUnk_03003430.bg2VOfs;\n\n    temp_r1 = gUnk_03003430.bg2HOfs - gUnk_03002920[arg0].xPosScreen;\n    temp_r2 = gUnk_03003430.bg2VOfs - gUnk_03002920[arg0].yPosScreen;\n\n    temp_r0 = temp_r1 * gBg2XMag;\n    if (temp_r0 < 0) {\n        temp_r0 += 0xFF;\n    }\n    var_r4 = temp_r0 >> 8;\n\n    temp_r0_2 = temp_r2 * gBg2YMag;\n    if (temp_r0_2 < 0) {\n        temp_r0_2 += 0xFF;\n    }\n    var_r2 = temp_r0_2 >> 8;\n\n    var_r4 = gUnk_03003430.bg2HOfs - var_r4;\n    if (arg0 > 0xC) {\n        var_r0 = (void *)gUnk_030051DC[arg0 - 0xD].unk4;\n    } else {\n        var_r0 = gUnk_08078FC8[arg0].unk4;\n    }\n\n    switch (var_r0->shape_size & 0xF) {\n        case 3:\n        case 11:\n            var_r2 = gUnk_03003430.bg2VOfs - var_r2 + ((0x100 - gBg2YMag) >> 3);\n            break;\n        case 1:\n        case 6:\n        case 8:\n            var_r2 = gUnk_03003430.bg2VOfs - var_r2 + ((0x100 - gBg2YMag) >> 5);\n            break;\n        case 0:\n        case 4:\n        case 5:\n            var_r2 = gUnk_03003430.bg2VOfs - var_r2 + ((0x100 - gBg2YMag) >> 6);\n            break;\n        default:\n            var_r2 = gUnk_03003430.bg2VOfs - var_r2 + ((0x100 - gBg2YMag) >> 4);\n            break;\n    }\n\n    gUnk_03002920[arg0].xPosScreen = var_r4;\n    gUnk_03002920[arg0].yPosScreen = var_r2;\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/9400132178f58db2d8b2638349ffa86155ed2e53/src/code_0.c#L1407-L1464"
     },
     {
@@ -468,6 +485,7 @@
         "branch"
       ],
       "funcC": "u8 CheckWorldCompletion(u8 arg0) {\n    u32 var_r0;\n    u32 var_r2;\n    u8 var_sl;\n    u8 var_ip;\n    u8 var_r6;\n    u8 var_r8;\n    u8 v50;\n    if (arg0 < 4) {\n        if (((gUnk_03004670->unk8[arg0][7] & 0x80) != 0) && ((gUnk_03004670->unk8[arg0 + 1][0] & 0x7F) != 0x7F))\n            return 1;\n    } else if ((gUnk_03004670->unk8[5][7] & 0x80) != 0) {\n        var_r8 = 0;\n        var_ip = 0;\n        var_r6 = 0;\n        var_sl = 0;\n        for (var_r0 = 0; var_r0 < 5; var_r0++) {\n            for (var_r2 = 0; var_r2 < 7; var_r2++) {\n                if ((var_r2 == 3 || var_r2 == 5) && (gUnk_03004670->unk8[var_r0][var_r2] & 0x7F) == 0x64)\n                    var_r8 += 1;\n                else if ((var_r2 != 7) && ((gUnk_03004670->unk8[var_r0][var_r2] & 0x7F) == 0x1E))\n                    var_ip += 1;\n                if (gUnk_03004670->unk8[var_r0][var_r2] & 0x80)\n                    var_r6 += 1;\n            }\n        }\n        v50 = gUnk_03004670->unk8[5][0] & 0x7F;\n        if (v50 == 0x1E)\n            var_sl += 1;\n        if ((gUnk_03004670->unk8[5][1] & 0x7F) == 0x1E)\n            var_sl += 1;\n        if ((arg0 == 4) && (v50 != 0x7F) && (var_r6 == 0x23))\n            return 1;\n        if ((arg0 == 5) && ((gUnk_03004670->unk8[5][1] & 0x7F) != 0x7F) && ((var_ip + var_r8) > 0x18))\n            return 1;\n        if ((arg0 == 6) && ((gUnk_03004670->unk8[5][2] & 0x7F) != 0x7F) && ((var_ip + var_r8 + var_sl) == 0x25))\n            return 1;\n    }\n    return 0;\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/ed09229e28615a1bd585a5be6b1a9ba2c8a77315/src/code_3.c#L1752-L1791"
     },
     {
@@ -499,6 +517,7 @@
         "pointer"
       ],
       "funcC": "void StreamCmd_SetBGScroll(void) {\n    u16 scrollX = ReadUnalignedU16(gStreamPtr + 3);\n    struct BGLayerState *tbl = gBGLayerState;\n    u8 *p = gStreamPtr;\n    u16 scrollY;\n    u8 *p2;\n    tbl[p[2]].scrollX = scrollX << 4;\n    scrollY = ReadUnalignedU16(p + 5);\n    p2 = gStreamPtr;\n    tbl[p2[2]].scrollY = scrollY << 4;\n    gStreamPtr = p2 + 7;\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/gfx.c#L429-L440"
     },
     {
@@ -509,6 +528,7 @@
         "global"
       ],
       "funcC": "void ProcessInputAndUpdateEntities(void) {\n    u8 sp4;\n    u32 var_r1;\n    u8 var_r4;\n    u8 var_r5;\n\n    sp4 = (gNewKeys & (START_BUTTON | B_BUTTON)) != 0;\n    if (gNewKeys & A_BUTTON) {\n        sp4 = gUnk_03004658[0xC] + 1;\n    }\n\n    if (gNewKeys & (DPAD_DOWN | DPAD_UP)) {\n        for (var_r5 = 0; var_r5 < 2; var_r5++) {\n            DmaFill16(3, 0, &gBgTilemapBufs[gUnk_030034BC][((var_r5 + (gUnk_03004658[0xC] * 3)) << 5) + 0xA5], 0x4);\n            DmaFill16(3, 0, &gBgTilemapBufs[gUnk_030034BC][((var_r5 + (gUnk_03004658[0xC] * 3)) << 5) + 0xB7], 0x4);\n        }\n\n        if ((gUnk_030034C0 == 0) || (gUnk_030034C0 == 2)) {\n            if (gNewKeys & DPAD_DOWN) {\n                m4aSongNumStart(0x51);\n                gUnk_03004658[0xC] += 1;\n                if (gUnk_03004658[0xC] > 3) {\n                    gUnk_03004658[0xC] = 0;\n                }\n            }\n\n            if (gNewKeys & DPAD_UP) {\n                m4aSongNumStart(0x51);\n                gUnk_03004658[0xC] -= 1;\n                if (gUnk_03004658[0xC] & 0x80) {\n                    gUnk_03004658[0xC] = 3;\n                }\n            }\n        } else {\n            if (gNewKeys & DPAD_DOWN) {\n                m4aSongNumStart(0x51);\n                gUnk_03004658[0xC] += 1;\n                if (gUnk_03004658[0xC] > 2) {\n                    gUnk_03004658[0xC] = 0;\n                }\n            }\n\n            if (gNewKeys & DPAD_UP) {\n                m4aSongNumStart(0x51);\n                gUnk_03004658[0xC] -= 1;\n                if (gUnk_03004658[0xC] & 0x80) {\n                    gUnk_03004658[0xC] = 2;\n                }\n            }\n        }\n\n        for (var_r5 = 0; var_r5 < 2; var_r5++) {\n            for (var_r4 = 0; var_r4 < 2; var_r4++) {\n                if (gUnk_030034BC == 0) {\n                    gBgTilemapBufs[gUnk_030034BC][((var_r5 + (gUnk_03004658[0xC] * 3)) << 5) + 0xA5 + var_r4]\n                        = gBgDataPtrs.pBufBg3Tilemap[(var_r5 * 0x1E) + 0x9D + var_r4] + gUnk_03000800;\n                    gBgTilemapBufs[gUnk_030034BC][((var_r5 + (gUnk_03004658[0xC] * 3)) << 5) + 0xB7 + var_r4]\n                        = gBgDataPtrs.pBufBg3Tilemap[(var_r5 * 0x1E) + 0xAF + var_r4] + gUnk_03000800;\n                } else {\n                    gBgTilemapBufs[gUnk_030034BC][((var_r5 + (gUnk_03004658[0xC] * 3)) << 5) + 0xA5 + var_r4]\n                        = gBgDataPtrs.pBufBg3Tilemap[(var_r5 * 0x1E) + 0x9D + var_r4];\n                    gBgTilemapBufs[gUnk_030034BC][((var_r5 + (gUnk_03004658[0xC] * 3)) << 5) + 0xB7 + var_r4]\n                        = gBgDataPtrs.pBufBg3Tilemap[(var_r5 * 0x1E) + 0xAF + var_r4];\n                }\n            }\n        }\n    }\n\n    if (sp4 > 0) {\n        sp4 = gUnk_081166F8[gUnk_030034C0][sp4 - 1];\n    }\n\n    switch (sp4 - 1) {\n        case 0:\n            gCallbackQueue.next[0] = ReadKeyInput;\n            for (var_r1 = 0; var_r1 < 10; var_r1++) {\n                gCallbackQueue.next[var_r1] = gCallbackQueue.previous[var_r1];\n            }\n            gCallbackQueue.current[gCallbackQueue.currentCount - 1] = NULL;\n            gCallbackQueue.nextCount = gCallbackQueue.previousCount;\n\n            UpdateOamSortOrder();\n            m4aSoundVSyncOn();\n            m4aMPlayAllContinue();\n            break;\n\n        case 1:\n            UpdateOamSortOrder();\n            gCallbackQueue.current[1] = TransitionFadeOutFull;\n            gUnk_03005220.unk4 = gUnk_03005284->unk18;\n            gUnk_03005220.lives = gUnk_03005284->unk0;\n            gUnk_03005220.hearts = gUnk_03005284->unk8_0;\n            REG_BLDCNT = 0;\n            gBlendValue = 0;\n            break;\n\n        case 2:\n            gUnk_03005284->unk0 = gUnk_03005220.lives = gUnk_03005284->unk1E;\n            UpdateOamSortOrder();\n            gBlendValue = 0;\n            if (gUnk_03004C20.world == 6 && gUnk_03004C20.level == 8) {\n                gUnk_03004C20.world = 5;\n            }\n            gUnk_030034B0.unk6_4 = gUnk_03004C20.level;\n            gUnk_03004C20.level = 0;\n            gCallbackQueue.current[1] = TransitionGameOver;\n            break;\n\n        case 3:\n            gCallbackQueue.current[1] = SetupBG3WindowOverlay;\n            thunk_HeapFree(gBgDataPtrs.pBufBg3Tilemap);\n            thunk_HeapFree(gBgDataPtrs.pBufBg3Tiles);\n            break;\n\n        case 4:\n            if (gUnk_03004C20.level != 0) {\n                gUnk_03005284->unk0 = gUnk_03005220.lives = gUnk_03005284->unk1E;\n            }\n            UpdateOamSortOrder();\n            REG_BLDCNT = 0;\n            gBlendValue = 0;\n            FreeAllDecompBuffers();\n            gCallbackQueue.current[1] = TransitionToGameplayScreen;\n            break;\n\n        case 5:\n            gBlendValue = 0;\n            gUnk_03004C20.level = 9;\n            gUnk_03004D9C = 0;\n            InitOamEntries();\n            gCallbackQueue.current[1] = TransitionSoftReset;\n            thunk_HeapFree(gBgDataPtrs.pBufBg3Tilemap);\n            thunk_HeapFree(gBgDataPtrs.pBufBg3Tiles);\n            break;\n    }\n}",
+      "m2cCtx": true,
       "prependC": "extern struct EntityAnimationInfo gEntityAnimationInfo[];\nextern void SetupBG3WindowOverlay(void);\nextern void UpdateScrollPosition(void);\nvoid SetPaletteAnimEntry(s32, u8);\nextern s16 MultiplyQ8(s16, s16);\nextern s16 ReciprocalQ8(s16);\nextern u8 thunk_sub_080002A0();\nextern u8 thunk_sub_080002D0();\nextern void VBlankCallback_Dialog(void);\n/* Cross-module function prototypes referenced by the decompiled functions below.\n * (ROM data symbols live in structs/variables.h.) */\nvoid HBlankScrollUpdate(void);\ns32 Abs(s32 n);\nvoid IntroSequenceUpdate(void);\nvoid TransitionReturnToWorldMap(void);\nvoid TransitionClearAndRestart(void);\nvoid TransitionSoftReset(void);\nvoid TransitionToGameplayScreen(void);\nvoid TransitionGameOver(void);\nvoid TransitionFadeOutFull(void);\nvoid UpdatePlayerFinalBoss(u8 arg0);\nvoid UpdatePlayerAlternate(u8 arg0);\nvoid UpdatePlayerMinigame(u8 arg0);\nvoid VBlankHandler_ModeB(void);\nvoid ReadKeyInput(void);\nvoid VBlankCallback_Gameplay(void);\nvoid AnimatePaletteEffects(void);\nvoid IntroScrollAnimation(void);\n\n/* ── kleod code_08039D8C.c shared scaffolding ─────────────────────────────\n * Common globals, cross-module externs, and helper inlines for the logic\n * functions ported from kleod's code_08039D8C.c. */\n\nextern struct BgDataPtrs gBgDataPtrs; /* 0x03004790 */\nextern u8 gBlendValue; /* 0x03005498 */\n\n/* Tile-collision query result (kleod CheckTileCollisionSloped). */\nstruct Unk_08014184 {\n    u16 unk0;\n    u8 unk2;\n    u8 pad3[0x4 - 0x3];\n};\n\n/* Cross-module functions (defined in code_1). */\nextern struct Unk_08014184 *CheckTileCollisionSloped(struct Unk_08014184 *, u16, u16, u8);\nstatic inline struct Unk_08014184 Call_CheckTileCollisionSloped(u16 arg1, u16 arg2, u8 arg3) {\n    struct Unk_08014184 sp;\n    CheckTileCollisionSloped(&sp, arg1, arg2, arg3);\n    return sp;\n}\nextern void PlayerRespawnOrDeath(s32);\nextern void SpawnEntityAtPosition(u16, u16, u8, u8);\n\n/* Forward decls (code_08039D8C.c cluster). */\nvoid InitGameplayState(void);\nvoid UpdateOamSortOrder(void);\nvoid ProcessInputAndUpdateEntities(void);\nvoid UpdateWorldMapInput(void);\nu8 CheckWorldCompletion(u8 arg0);\nvoid CopyWorldMapTiles(u8 arg0);\nvoid SetWorldMapTilePalette(u8 arg0, u8 arg1);\nvoid UpdateWorldMapNodeTile(u8 arg0);\nvoid UpdateEntities(void);\nvoid CountCollectedGems(void);\nvoid UpdateWorldMapNodeAnim(void);\nvoid GameplayMainLoop(void);\nvoid InitLevelState(void);\nvoid SpawnEntitiesForVision(u8 arg0);\nvoid GetEntityLookupData(u8 arg0);\nvoid ComputeScrollLimits(void);\nvoid ApplyPlayerMovement(u8 arg0, struct Unk_0803D4AC arg1);\nvoid UpdatePlayerNormal(u8 arg0);\nvoid SetupEntitySpawnTable(u8 arg0);\nvoid RollRandomLevelVariant(void);\nvoid UpdatePlayerBoss(u8 arg0);\nvoid ConfigureEntityBehavior(u8 arg0, u8 arg1, u8 arg2);\nvoid TransitionLevelVariant(u8 arg0);\nvoid UpdateLevelProgression(void);\nvoid SetEntityVisibility(u8 arg0);\nvoid UpdatePlayerSpecial(u8 arg0);\n#include \"m4a_internal.h\"",
       "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/704fd74330959112873665d790f911e3679770c0/src/code_3.c#L1495-L1630",
       "proto": {
@@ -526,6 +546,7 @@
         "merge-chain"
       ],
       "funcC": "void ConfigureEntityBehavior(u8 arg0, u8 arg1, u8 arg2) {\n    void *var_r3;\n    void *var_r5;\n    void *var_r6;\n    u32 var_sb;\n    u8 var_r1;\n\n    if (arg2 != 0) {\n        gEntityInfo[0x23].unkF = 0x19;\n        gEntityInfo[0x22].unkF = 0x19;\n        gEntityInfo[0x21].unkF = 0x19;\n        gEntityInfo[0x20].unkF = 0x19;\n    }\n\n    switch (arg1) {\n        case 0:\n            var_sb = 0xD;\n            var_r6 = &gUnk_03003D16[arg0];\n            var_r5 = &gBgDataPtrs.pBufBg2Tilemap[6 + (arg0 * 8) + (gBgInfo[2].hLength * 0x1B)];\n            var_r3 = gBgDataPtrs.pBufBg2Tilemap + 0x3C;\n            break;\n\n        case 1:\n            var_sb = 4;\n            var_r6 = &gUnk_03003F56[arg0];\n            var_r5 = &gBgDataPtrs.pBufBg2Tilemap[6 + (arg0 * 8) + (gBgInfo[2].hLength * 0x24)];\n            var_r3 = gBgDataPtrs.pBufBg2Tilemap + 0x3C + (gBgInfo[2].hLength * 0x13);\n            break;\n\n        case 2:\n            var_sb = 6;\n            var_r6 = &gUnk_03003E96[arg0];\n            var_r5 = &gBgDataPtrs.pBufBg2Tilemap[6 + (arg0 * 8) + (gBgInfo[2].hLength * 0x21)];\n            var_r3 = gBgDataPtrs.pBufBg2Tilemap + 0x3C + (gBgInfo[2].hLength * 0x13);\n            break;\n\n        case 3:\n            var_sb = 6;\n            var_r6 = &gUnk_03003DD6[arg0];\n            var_r5 = &gBgDataPtrs.pBufBg2Tilemap[6 + (arg0 * 8) + (gBgInfo[2].hLength * 0x1E)];\n            var_r3 = gBgDataPtrs.pBufBg2Tilemap + 0x3C + (gBgInfo[2].hLength * 0x13);\n            break;\n\n        case 4:\n            var_sb = 6;\n            var_r6 = &gUnk_03003D16[arg0];\n            var_r5 = &gBgDataPtrs.pBufBg2Tilemap[6 + (arg0 * 8) + (gBgInfo[2].hLength * 0x1B)];\n            var_r3 = gBgDataPtrs.pBufBg2Tilemap + 0x3C + (gBgInfo[2].hLength * 0xD);\n            break;\n\n        case 5:\n            var_sb = 6;\n            var_r6 = &gUnk_03003D16[arg0];\n            var_r5 = &gBgDataPtrs.pBufBg2Tilemap[6 + (arg0 * 8) + (gBgInfo[2].hLength * 0x1B)];\n            var_r3 = gBgDataPtrs.pBufBg2Tilemap + 0x3C + (gBgInfo[2].hLength * 0x16);\n            break;\n\n        case 6:\n            var_sb = 4;\n            var_r6 = &gUnk_03003F56[arg0];\n            var_r5 = &gBgDataPtrs.pBufBg2Tilemap[6 + (arg0 * 8) + (gBgInfo[2].hLength * 0x24)];\n            var_r3 = gBgDataPtrs.pBufBg2Tilemap + 0x3C;\n            break;\n\n        case 7:\n            var_sb = 7;\n            var_r6 = &gUnk_03003E96[arg0];\n            var_r5 = &gBgDataPtrs.pBufBg2Tilemap[6 + (arg0 * 8) + (gBgInfo[2].hLength * 0x21)];\n            var_r3 = gBgDataPtrs.pBufBg2Tilemap + 0x3C;\n            break;\n\n        case 8:\n            var_sb = 0xA;\n            var_r6 = &gUnk_03003DD6[arg0];\n            var_r5 = &gBgDataPtrs.pBufBg2Tilemap[6 + (arg0 * 8) + (gBgInfo[2].hLength * 0x1E)];\n            var_r3 = gBgDataPtrs.pBufBg2Tilemap + 0x3C;\n            break;\n\n        case 9:\n            var_sb = 0xD;\n            var_r6 = &gUnk_03003D16[arg0];\n            var_r5 = &gBgDataPtrs.pBufBg2Tilemap[6 + (arg0 * 8) + (gBgInfo[2].hLength * 0x1B)];\n            var_r3 = gBgDataPtrs.pBufBg2Tilemap + 0x3C;\n            break;\n    }\n\n    for (var_r1 = 0; var_r1 < var_sb; var_r1++) {\n        DmaCopy16Wait(3, var_r3, var_r6, 0x8);\n        DmaCopy16Wait(3, var_r3, var_r5, 0x8);\n        var_r6 += 0x40;\n        var_r5 += gBgInfo[2].hLength;\n        var_r3 += gBgInfo[2].hLength;\n    }\n}",
+      "m2cCtx": true,
       "prependC": "extern struct EntityAnimationInfo gEntityAnimationInfo[];\nextern void SetupBG3WindowOverlay(void);\nextern void UpdateScrollPosition(void);\nvoid SetPaletteAnimEntry(s32, u8);\nextern s16 MultiplyQ8(s16, s16);\nextern s16 ReciprocalQ8(s16);\nextern u8 thunk_sub_080002A0();\nextern u8 thunk_sub_080002D0();\nextern void VBlankCallback_Dialog(void);\n/* Cross-module function prototypes referenced by the decompiled functions below.\n * (ROM data symbols live in structs/variables.h.) */\nvoid HBlankScrollUpdate(void);\ns32 Abs(s32 n);\nvoid IntroSequenceUpdate(void);\nvoid TransitionReturnToWorldMap(void);\nvoid TransitionClearAndRestart(void);\nvoid TransitionSoftReset(void);\nvoid TransitionToGameplayScreen(void);\nvoid TransitionGameOver(void);\nvoid TransitionFadeOutFull(void);\nvoid UpdatePlayerFinalBoss(u8 arg0);\nvoid UpdatePlayerAlternate(u8 arg0);\nvoid UpdatePlayerMinigame(u8 arg0);\nvoid VBlankHandler_ModeB(void);\nvoid ReadKeyInput(void);\nvoid VBlankCallback_Gameplay(void);\nvoid AnimatePaletteEffects(void);\nvoid IntroScrollAnimation(void);\n\n/* ── kleod code_08039D8C.c shared scaffolding ─────────────────────────────\n * Common globals, cross-module externs, and helper inlines for the logic\n * functions ported from kleod's code_08039D8C.c. */\n\nextern struct BgDataPtrs gBgDataPtrs; /* 0x03004790 */\nextern u8 gBlendValue; /* 0x03005498 */\n\n/* Tile-collision query result (kleod CheckTileCollisionSloped). */\nstruct Unk_08014184 {\n    u16 unk0;\n    u8 unk2;\n    u8 pad3[0x4 - 0x3];\n};\n\n/* Cross-module functions (defined in code_1). */\nextern struct Unk_08014184 *CheckTileCollisionSloped(struct Unk_08014184 *, u16, u16, u8);\nstatic inline struct Unk_08014184 Call_CheckTileCollisionSloped(u16 arg1, u16 arg2, u8 arg3) {\n    struct Unk_08014184 sp;\n    CheckTileCollisionSloped(&sp, arg1, arg2, arg3);\n    return sp;\n}\nextern void PlayerRespawnOrDeath(s32);\nextern void SpawnEntityAtPosition(u16, u16, u8, u8);\n\n/* Forward decls (code_08039D8C.c cluster). */\nvoid InitGameplayState(void);\nvoid UpdateOamSortOrder(void);\nvoid ProcessInputAndUpdateEntities(void);\nvoid UpdateWorldMapInput(void);\nu8 CheckWorldCompletion(u8 arg0);\nvoid CopyWorldMapTiles(u8 arg0);\nvoid SetWorldMapTilePalette(u8 arg0, u8 arg1);\nvoid UpdateWorldMapNodeTile(u8 arg0);\nvoid UpdateEntities(void);\nvoid CountCollectedGems(void);\nvoid UpdateWorldMapNodeAnim(void);\nvoid GameplayMainLoop(void);\nvoid InitLevelState(void);\nvoid SpawnEntitiesForVision(u8 arg0);\nvoid GetEntityLookupData(u8 arg0);\nvoid ComputeScrollLimits(void);\nvoid ApplyPlayerMovement(u8 arg0, struct Unk_0803D4AC arg1);\nvoid UpdatePlayerNormal(u8 arg0);\nvoid SetupEntitySpawnTable(u8 arg0);\nvoid RollRandomLevelVariant(void);\nvoid UpdatePlayerBoss(u8 arg0);\nvoid ConfigureEntityBehavior(u8 arg0, u8 arg1, u8 arg2);\nvoid TransitionLevelVariant(u8 arg0);\nvoid UpdateLevelProgression(void);\nvoid SetEntityVisibility(u8 arg0);\nvoid UpdatePlayerSpecial(u8 arg0);",
       "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/704fd74330959112873665d790f911e3679770c0/src/code_3.c#L4121-L4214",
       "proto": {
@@ -575,6 +596,7 @@
         "global"
       ],
       "funcC": "void UpdateWorldMapNodeAnim(void) {\n    s32 var_r7;\n    s32 temp_r6;\n\n    if (gUnk_03004C08.unk0_0 < 4) {\n        var_r7 = 0;\n        temp_r6 = gUnk_08116880[gUnk_03004C08.unk0_0];\n    } else {\n        var_r7 = 4;\n        temp_r6 = gUnk_08116880[gUnk_03004C08.unk0_0];\n    }\n\n    switch ((gUnk_03004C08.unk2 / 30) - 1) {\n        case 0:\n            if ((gUnk_03004C08.unk2 % 30) == 0) {\n                m4aSongNumStart(0x89);\n            }\n            gBgTilemapBufs[1][gUnk_08116748[gUnk_03004C08.unk0_0][0] + (gUnk_08116748[gUnk_03004C08.unk0_0][1] << 5)]\n                = gBgTilemapBufs[1][0 + var_r7 + ((temp_r6 + 0x1C) << 5)];\n            break;\n\n        case 1:\n            if ((gUnk_03004C08.unk2 % 30) == 0) {\n                m4aSongNumStart(0x89);\n            }\n            gBgTilemapBufs[1][gUnk_08116748[gUnk_03004C08.unk0_0][2] + (gUnk_08116748[gUnk_03004C08.unk0_0][3] << 5)]\n                = gBgTilemapBufs[1][1 + var_r7 + ((temp_r6 + 0x1C) << 5)];\n            break;\n\n        case 2:\n            if (gUnk_03004C08.unk0_0 == 6) {\n                gUnk_03004C08.unk2 = 0x95;\n            } else {\n                if ((gUnk_03004C08.unk2 % 30) == 0) {\n                    m4aSongNumStart(0x89);\n                }\n                gBgTilemapBufs[1][gUnk_08116748[gUnk_03004C08.unk0_0][4] + (gUnk_08116748[gUnk_03004C08.unk0_0][5] << 5)]\n                    = gBgTilemapBufs[1][2 + var_r7 + ((temp_r6 + 0x1C) << 5)];\n            }\n            break;\n\n        case 3:\n            if ((gUnk_03004C08.unk0_0 != 4) && (gUnk_03004C08.unk0_0 != 6)) {\n                if ((gUnk_03004C08.unk2 % 30) == 0) {\n                    m4aSongNumStart(0x89);\n                }\n                gBgTilemapBufs[1][gUnk_08116748[gUnk_03004C08.unk0_0][6] + (gUnk_08116748[gUnk_03004C08.unk0_0][7] << 5)]\n                    = gBgTilemapBufs[1][3 + var_r7 + ((temp_r6 + 0x1C) << 5)];\n            }\n            break;\n\n        case 4:\n            if ((gUnk_03004C08.unk2 % 30) == 0) {\n                m4aSongNumStart(0x8A);\n            }\n            /* fallthrough */\n        case 5:\n        case 6:\n            if (gUnk_03004C08.unk0_0 < 4) {\n                if ((gUnk_03004C20.sceneFrameCounter % 4) == 0) {\n                    DmaCopy16(3, &gUnk_08116780[thunk_sub_080002A0() % 8], BG_PLTT + 0x160, 0x20);\n                    SetWorldMapTilePalette(gUnk_03004C08.unk0_0, 0xB);\n                }\n            } else {\n                CopyWorldMapTiles(gUnk_03004C08.unk0_0);\n            }\n            break;\n\n        case 7:\n            CopyWorldMapTiles(gUnk_03004C08.unk0_0);\n            gCallbackQueue.current[1] = CountCollectedGems;\n            break;\n    }\n\n    gUnk_03004C08.unk2 += 1;\n}",
+      "m2cCtx": true,
       "prependC": "extern struct EntityAnimationInfo gEntityAnimationInfo[];\nextern void SetupBG3WindowOverlay(void);\nextern void UpdateScrollPosition(void);\nvoid SetPaletteAnimEntry(s32, u8);\nextern s16 MultiplyQ8(s16, s16);\nextern s16 ReciprocalQ8(s16);\nextern u8 thunk_sub_080002A0();\nextern u8 thunk_sub_080002D0();\nextern void VBlankCallback_Dialog(void);\n/* Cross-module function prototypes referenced by the decompiled functions below.\n * (ROM data symbols live in structs/variables.h.) */\nvoid HBlankScrollUpdate(void);\ns32 Abs(s32 n);\nvoid IntroSequenceUpdate(void);\nvoid TransitionReturnToWorldMap(void);\nvoid TransitionClearAndRestart(void);\nvoid TransitionSoftReset(void);\nvoid TransitionToGameplayScreen(void);\nvoid TransitionGameOver(void);\nvoid TransitionFadeOutFull(void);\nvoid UpdatePlayerFinalBoss(u8 arg0);\nvoid UpdatePlayerAlternate(u8 arg0);\nvoid UpdatePlayerMinigame(u8 arg0);\nvoid VBlankHandler_ModeB(void);\nvoid ReadKeyInput(void);\nvoid VBlankCallback_Gameplay(void);\nvoid AnimatePaletteEffects(void);\nvoid IntroScrollAnimation(void);\n\n/* ── kleod code_08039D8C.c shared scaffolding ─────────────────────────────\n * Common globals, cross-module externs, and helper inlines for the logic\n * functions ported from kleod's code_08039D8C.c. */\n\nextern struct BgDataPtrs gBgDataPtrs; /* 0x03004790 */\nextern u8 gBlendValue; /* 0x03005498 */\n\n/* Tile-collision query result (kleod CheckTileCollisionSloped). */\nstruct Unk_08014184 {\n    u16 unk0;\n    u8 unk2;\n    u8 pad3[0x4 - 0x3];\n};\n\n/* Cross-module functions (defined in code_1). */\nextern struct Unk_08014184 *CheckTileCollisionSloped(struct Unk_08014184 *, u16, u16, u8);\nstatic inline struct Unk_08014184 Call_CheckTileCollisionSloped(u16 arg1, u16 arg2, u8 arg3) {\n    struct Unk_08014184 sp;\n    CheckTileCollisionSloped(&sp, arg1, arg2, arg3);\n    return sp;\n}\nextern void PlayerRespawnOrDeath(s32);\nextern void SpawnEntityAtPosition(u16, u16, u8, u8);\n\n/* Forward decls (code_08039D8C.c cluster). */\nvoid InitGameplayState(void);\nvoid UpdateOamSortOrder(void);\nvoid ProcessInputAndUpdateEntities(void);\nvoid UpdateWorldMapInput(void);\nu8 CheckWorldCompletion(u8 arg0);\nvoid CopyWorldMapTiles(u8 arg0);\nvoid SetWorldMapTilePalette(u8 arg0, u8 arg1);\nvoid UpdateWorldMapNodeTile(u8 arg0);\nvoid UpdateEntities(void);\nvoid CountCollectedGems(void);\nvoid UpdateWorldMapNodeAnim(void);\nvoid GameplayMainLoop(void);\nvoid InitLevelState(void);\nvoid SpawnEntitiesForVision(u8 arg0);\nvoid GetEntityLookupData(u8 arg0);\nvoid ComputeScrollLimits(void);\nvoid ApplyPlayerMovement(u8 arg0, struct Unk_0803D4AC arg1);\nvoid UpdatePlayerNormal(u8 arg0);\nvoid SetupEntitySpawnTable(u8 arg0);\nvoid RollRandomLevelVariant(void);\nvoid UpdatePlayerBoss(u8 arg0);\nvoid ConfigureEntityBehavior(u8 arg0, u8 arg1, u8 arg2);\nvoid TransitionLevelVariant(u8 arg0);\nvoid UpdateLevelProgression(void);\nvoid SetEntityVisibility(u8 arg0);\nvoid UpdatePlayerSpecial(u8 arg0);\n#include \"m4a_internal.h\"",
       "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/704fd74330959112873665d790f911e3679770c0/src/code_3.c#L1980-L2055",
       "proto": {
@@ -645,6 +667,7 @@
       "note": "A single-condition constant 0/1 select. asmlift’s return-sinking is gated to short-circuit conditions on the stated grounds that a single condition byte-matches as a merge variable — which is false here: agbcc lowers the merge variable branchlessly and erases the diamond the target keeps. Chosen after the rule that a row must also be one m2c matches was dropped — m2c’s outcome was not a selection criterion for this row.",
       "prependC": "#include \"global.h\"\n#include \"globals.h\"\n#include \"structs/variables.h\"\n#include \"data/trig.h\"\nextern struct EntityAnimationInfo gEntityAnimationInfo[];\nextern void SetupBG3WindowOverlay(void);\nextern void UpdateScrollPosition(void);\nextern s16 MultiplyQ8(s16, s16);\nextern s16 ReciprocalQ8(s16);\nextern u8 thunk_sub_080002A0();\nextern u8 thunk_sub_080002D0();\nextern void VBlankCallback_Dialog(void);\nextern struct Unk_08014184 *CheckTileCollisionSloped(struct Unk_08014184 *, u16, u16, u8);\nextern void PlayerRespawnOrDeath(s32);\nextern void SpawnEntityAtPosition(u16, u16, u8, u8);\ninline struct Unk_08014184 Call_CheckTileCollisionSloped(u16 arg1, u16 arg2, u8 arg3);\nvoid LoadLevel_World1_Vision1(void);\nvoid LoadLevel_World2_Vision1(void);\nvoid LoadLevel_World2_Vision2(void);\nvoid LoadLevel_World3_Vision1(void);\nvoid LoadLevel_World3_Vision2(void);\nvoid LoadLevel_World4_Vision1(void);\nvoid LoadLevel_World4_Vision2(void);\nvoid LoadLevel_World5_Vision1(void);\nvoid LoadLevel_World5_Vision2(void);\nvoid LoadLevel_World6_Vision1(void);\nvoid LoadLevel_World7_Vision2(void);\nvoid LoadLevel_World9_Vision1(void);\nvoid LoadLevel_World9_Vision2(void);\nvoid LoadLevel_BossArena(void);\nvoid InitGameplayState(void);\nvoid UpdateOamSortOrder(void);\nvoid ProcessInputAndUpdateEntities(void);\nvoid SetupBG3WindowOverlay(void);\nvoid UpdateWorldMapInput(void);\nu8 CheckWorldCompletion(u8 arg0);\nvoid CopyWorldMapTiles(u8 arg0);\nvoid SetWorldMapTilePalette(u8 arg0, u8 arg1);\nvoid UpdateWorldMapNodeTile(u8 arg0);\nvoid UpdateEntities(void);\nvoid CountCollectedGems(void);\nvoid UpdateWorldMapNodeAnim(void);\nvoid UpdateAllEntities(void);\nvoid GameplayMainLoop(void);\nvoid InitLevelState(void);\nvoid UpdateEntitySpawnState(u8 arg0);\nvoid SpawnEntitiesForVision(u8 arg0);\nvoid GetEntityLookupData(u8 idx);\nvoid ComputeScrollLimits(void);\nvoid ApplyPlayerMovement(u8 arg0, struct Unk_0803D4AC arg1);\nvoid UpdatePlayerNormal(u8 arg0);\nvoid SetupEntitySpawnTable(u8 arg0);\nvoid RollRandomLevelVariant(void);\nvoid UpdatePlayerBoss(u8 arg0);\nvoid ConfigureEntityBehavior(u8 arg0, u8 arg1, u8 arg2);\nvoid ResetEntityTypesOnDeath(u8 arg0);\nvoid UpdatePlayerMinigame(u8 arg0);\nvoid TransitionLevelVariant(u8 arg0);\nvoid UpdatePlayerAlternate(u8 arg0);\nvoid DecompressRowToTilemap(u8 arg0, u8 arg1);\nvoid SetEntityVisibility(u8 arg0);\nvoid UpdatePlayerSpecial(u8 arg0);\nvoid UpdateLevelScrollDMA(void);\nvoid UpdatePlayerFinalBoss(u8 arg0);\nvoid Decompress(void *dest, void *src);\nvoid DecompressDma(void *src, void *dest, u16 size);\nvoid *DecompressAlloc(void *src);\nvoid GameUpdate(void);\nu32 IsSelectButtonPressed(void);",
       "funcC": "u32 IsSelectButtonPressed(void) {\n    if (gKeysPrevious & 0x40)\n        return 1;\n    return 0;\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/704fd74330959112873665d790f911e3679770c0/src/code_3.c#L6394-L6398",
       "proto": {
         "IsSelectButtonPressed": {

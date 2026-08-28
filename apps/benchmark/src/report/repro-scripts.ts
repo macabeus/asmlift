@@ -11,9 +11,8 @@ import { join } from 'node:path';
 import { gunzipSync } from 'node:zlib';
 
 import { REAL_DIR, type RealManifest, loadManifestsForVendor } from '../cases/manifests';
-import { m2cFnPrototype } from '../cases/real';
 import { M2C_PINNED_COMMIT as M2C_COMMIT } from '../config';
-import { M2C_CTX_ATTRIBUTE_RE, disasmToM2c, m2cTarget } from '../eval/m2c-normalizer';
+import { disasmToM2c, m2cTarget } from '../eval/m2c-normalizer';
 
 // ── real-tier provenance preambles (comments only — nothing here executes) ────────────────
 // The committed manifests are part of the dataset, so the generator can name each project's
@@ -132,8 +131,8 @@ set -euo pipefail
 M2C_PATH='/path/to/m2c'${
     fn.ctxRef
       ? `
-# asmlift checkout — this function's context is the project's own vendored headers, stored in
-# the repo (referenced, not embedded — it is ~10–260 KB):
+# asmlift checkout — this function's context is the project's own vendored preprocessor
+# output, stored in the repo (referenced rather than embedded — it can be hundreds of KB):
 ASMLIFT_PATH='/path/to/asmlift'`
       : ''
   }
@@ -145,26 +144,41 @@ ASM_INPUT
 ${
   fn.ctxRef
     ? `
-# The project context the benchmark passed via --context, exactly as its real workflow would —
-# GCC attributes stripped (m2c's C parser cannot read them; same expression the harness uses)${
-        m2cFnPrototype(fn.sym, fn.refSource)
-          ? `,
-# plus the function's own prototype (the TU-derived context never forward-declares it)`
+# The project context the benchmark passed via --context: the VERBATIM vendored blob — this
+# function's translation unit run through the project's own preprocessor with the function body
+# removed, i.e. whatever that TU's headers and the manifest's prependC declare, and nothing
+# added. How much that is varies by project (a full header tree for some, a handful of typedefs
+# for others); the file below is the exact bytes, so read it rather than this comment.${
+        fn.ctxProto
+          ? `
+# One line is appended: the function's own prototype, and ONLY because the project's headers do
+# not declare it and the row's asmlift \`--proto\` already carries the same void-ness. It is
+# derived from that field, never from the reference source.`
           : ''
-      }.
-gunzip -kc "$ASMLIFT_PATH/${fn.ctxRef}" | perl -pe 's/${M2C_CTX_ATTRIBUTE_RE}//g' > ctx.h${
-        m2cFnPrototype(fn.sym, fn.refSource)
+      }
+gunzip -kc "$ASMLIFT_PATH/${fn.ctxRef}" > ctx.h${
+        fn.ctxProto
           ? `
 cat >> ctx.h <<'CTX_PROTO'
-${m2cFnPrototype(fn.sym, fn.refSource)}
+${fn.ctxProto}
 CTX_PROTO`
           : ''
       }
 `
     : fn.ctx
       ? `
-# The exact context header the benchmark passed via --context — prototypes only
-# (no struct/global layouts: the benchmark measures cold recovery).
+# The exact context header the benchmark passed via --context.${
+          fn.tier === 'real'
+            ? `
+# This is one of the six rows whose callees the project's own vendored headers do not declare, so
+# the benchmark states them here instead; the same callees are named to asmlift through its
+# --proto hints, and a test holds the two lists equal. Everything else the project declares
+# reaches asmlift as a symbol map and does not reach m2c on this row.`
+            : `
+# Prototypes only — no struct or global layouts. The synthetic tier measures COLD recovery and is
+# symmetric by construction: these are the same facts asmlift is given as --proto hints, and
+# neither tool is given a project.`
+        }
 cat > ctx.h <<'CTX_INPUT'
 ${fn.ctx.trimEnd()}
 CTX_INPUT
@@ -178,7 +192,7 @@ ${flagLine(`--target ${m2cTarget(fn.compiler, fn.language)}`, "ISA + compiler di
 ${flagLine(`--function ${fn.sym}`, 'the symbol to decompile from in.s')}${
     fn.ctx || fn.ctxRef
       ? `
-${flagLine('--context ctx.h', 'the C context header above (typedefs + prototypes)')}`
+${flagLine('--context ctx.h', fn.ctxRef ? 'the project context header written above' : fn.tier === 'real' ? "this row's authored callee prototypes, above" : 'the prototype header written above')}`
       : ''
   }
 ${flagLine('--no-cache', "bypass m2c's on-disk cache — always a fresh run")}

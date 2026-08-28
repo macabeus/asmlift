@@ -8,9 +8,20 @@
 //                      keeps the decompiled source AND the real compiler error
 //   failed           — no usable output at all (crash, "Function not found", empty)
 //
-// The LABEL is symmetric; the CAUSE is not: asmlift declines on capability gaps, while most m2c
-// declines are context-starvation — rows carry prototype-only context, never the struct/global
-// layouts m2c's normal workflow supplies. The report states this wherever declined counts appear.
+// The LABEL is symmetric; the CAUSE is not, and the shape of m2c's half CHANGED. It used to be
+// context starvation: most real rows carried no `--context` at all, so m2c declined on `?`
+// placeholders for types the project had written down. Every real row now carries one — 246 the
+// project's vendored context, six a hand-written list of callees the headers omit (see
+// cases/manifests.ts for the provisioning policy and its residuals) — and what survives is mostly
+// a callee the CONTEXT does not declare either: `? func_80038388_38F88(?)`, 10 of the real tier's
+// 15 m2c declines. The SYNTHETIC tier is unchanged and deliberately starved on both sides:
+// neither tool gets project data there.
+//
+// Note the PRECEDENCE, because it moves rows between labels without anything getting better or
+// worse: classification runs before any compile, so a decline marker outranks a compile failure.
+// Output that both bears a `?` and would not compile reads as `declined`; remove the `?` by
+// supplying the type and the SAME uncompilable construct then reads as `noncompile`. Neither
+// label scores, so that flip is a reclassification, not a regression.
 // Explicit incompleteness markers a decompiler emits where it KNOWS it has a gap
 // (classification runs BEFORE any compile — see the header).
 import { pickDiagnostics } from '../compile/util';

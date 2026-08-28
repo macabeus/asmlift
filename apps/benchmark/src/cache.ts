@@ -165,9 +165,11 @@ export function cachedM2cResult(inputs: M2cKeyInputs, compute: () => DecompilerR
   // change to them MUST bump `v`, or fixed rows keep serving stale results. `lang` enters the
   // key only for c++ so every existing C entry keeps its identity.
   // v13: assessQuality exempts project-idiom address casts from the casts count.
+  // v14: the objdump→GNU-as normalizer carries MIPS REL addends into %hi/%lo (m2c-normalizer.ts)
+  //      — the KEY holds the raw disassembly, so a normalizer change is invisible to it.
   const key = sha(
     JSON.stringify({
-      v: 13,
+      v: 14,
       kind: 'm2c',
       commit,
       tc: tcId,

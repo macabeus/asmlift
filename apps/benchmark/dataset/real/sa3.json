@@ -33,6 +33,7 @@
         "abs"
       ],
       "funcC": "u32 AbsMax(s32 a, s32 b)\n{\n    if (a < 0) {\n        a = -a;\n    }\n\n    if (b < 0) {\n        b = -b;\n    }\n\n    if (b < a) {\n        return a;\n    }\n    return b;\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L433-L447"
     },
     {
@@ -43,6 +44,7 @@
       ],
       "prependC": "u32 gRngPrevValue;\nu32 gRngValue;",
       "funcC": "void SeedRng(u32 a, u32 b)\n{\n    gRngPrevValue = a;\n    gRngValue = b;\n}",
+      "m2cCtx": true,
       "proto": {
         "SeedRng": {
           "returnsVoid": true
@@ -69,6 +71,7 @@
         "branch"
       ],
       "funcC": "s16 SA2_LABEL(sub_808558C)(u16 angleA, u16 angleB, u8 numDecimalBits)\n{\n    u32 c1 = (1 << numDecimalBits);\n    u16 c2 = c1 - 1;\n\n    angleB -= angleA;\n    angleB &= c2;\n\n    if (angleB <= (c1 / 2)) {\n        return angleB;\n    } else {\n        return (angleB - c1);\n    }\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L469-L482"
     },
     {
@@ -78,6 +81,7 @@
         "int64"
       ],
       "funcC": "s32 SA2_LABEL(sub_8085654)(s32 a, s32 b, s32 c, u8 d, u8 e)\n{\n    do {\n        a -= (((s64)c * (s64)(a - b))) >> d;\n        e -= 1;\n    } while (e != 0xFF);\n\n    return a;\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L509-L517"
     },
     {
@@ -87,6 +91,7 @@
         "int64"
       ],
       "funcC": "u32 SA2_LABEL(sub_80855C0)(s32 a, s32 b, s32 c, u8 d)\n{\n    s64 e = (s64)c * (a - b);\n\n    return a - (e >> d);\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L484-L489"
     },
     {
@@ -95,6 +100,7 @@
         "arithmetic"
       ],
       "funcC": "s32 SA2_LABEL(sub_80856DC)(s32 a, s32 b, s32 c) { return (a * 7 + b * 6 - c) / 12; }",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L529-L529"
     },
     {
@@ -103,6 +109,7 @@
         "arithmetic"
       ],
       "funcC": "s32 SA2_LABEL(sub_8085714)(s32 a, s32 b, s32 c) { return ((a + b * 8) - c) >> 3; }",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L533-L533"
     },
     {
@@ -111,6 +118,7 @@
         "arithmetic"
       ],
       "funcC": "s32 SA2_LABEL(sub_8085758)(s32 a, s32 b) { return b - a; }",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L539-L539"
     },
     {
@@ -166,6 +174,7 @@
         "branch"
       ],
       "funcC": "void numToASCII(u8 digits[5], u16 number)\n{\n    u8 i;\n\n    for (i = 0; i < 4; number <<= 4, i++) {\n        u16 value = ((number & 0xF000) >> 12);\n        if (value > 9) {\n            digits[i] = value + 87;\n        } else {\n            digits[i] = value + '0';\n        }\n    }\n\n    digits[i] = 0;\n}",
+      "m2cCtx": true,
       "proto": {
         "numToASCII": {
           "returnsVoid": true
@@ -177,6 +186,7 @@
       "sym": "Base10DigitsToHexNibbles",
       "features": [],
       "funcC": "u32 Base10DigitsToHexNibbles(u16 num)\n{\n    u8 i;\n    u16 result;\n    u8 lowDigit;\n    u16 remainder = num;\n\n    result = 0;\n    for (i = 0; i < 4; i++) {\n        s32 divisor = Div(remainder, 10);\n        lowDigit = remainder - (divisor * 10);\n        remainder = divisor;\n\n        result |= lowDigit << (i * 4);\n    }\n\n    return result;\n}\n",
+      "m2cCtx": true,
       "note": "Div() resolves to an inline macro (int division) — soft-div idiom.",
       "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/sprite.c#L147-L164"
     },
@@ -188,6 +198,7 @@
         "branch"
       ],
       "funcC": "u32 VerifyFlashSector_Core(u8 *src, u8 *tgt, u32 size)\n{\n    while (size-- != 0) {\n        if (*tgt++ != *src++)\n            return (uintptr_t)(tgt - 1);\n    }\n\n    return 0;\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/lib/agb_flash/agb_flash.c#L286-L294"
     },
     {
@@ -213,6 +224,7 @@
       ],
       "prependC": "#include \"game/save.h\"",
       "funcC": "u32 GetSaveSectorChecksum(SaveSectorData *sector)\n{\n    u8 *ptr = (u8 *)sector;\n\n    u32 checkSum = 0;\n    u32 i = 0;\n\n    u32 size = (sizeof(SaveSectorData) - sizeof(sector->checksum));\n\n    for (; i < size; i += sizeof(u32)) {\n        checkSum += *((u32 *)(ptr + i));\n    }\n\n    return checkSum;\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/code_0_0.c#L1036-L1050"
     },
     {
@@ -266,6 +278,7 @@
       ],
       "prependC": "#include \"core.h\"\n#include \"flags.h\"",
       "funcC": "void sa2__sub_8007858(u8 param0, int_vcount minY, int_vcount maxY, u16 param3, u16 param4)\n{\n    u16 *cursor;\n\n    gFlags |= FLAGS_EXECUTE_HBLANK_COPY;\n\n    gHBlankCopyTarget = (void *)&((u8 *)&REG_BG0HOFS)[param0 * 4];\n    gHBlankCopySize = 4;\n\n    cursor = &((u16 *)gBgOffsetsHBlankPrimary)[minY * 2];\n\n    param4 = (param4 - minY) & 0x1FF;\n    param3 &= 0x1FF;\n\n    while (minY < maxY) {\n        *cursor = param3;\n        cursor++;\n        *cursor = param4--;\n        cursor++;\n\n        minY++;\n    }\n}",
+      "m2cCtx": true,
       "proto": {
         "sa2__sub_8007858": {
           "returnsVoid": true
@@ -282,6 +295,7 @@
       ],
       "prependC": "#include \"core.h\"\n#include \"flags.h\"",
       "funcC": "void sa2__sub_8007958(u8 bg, int_vcount minY, int_vcount maxY, s16 param3, s8 param4, u16 param5, u16 param6)\n{\n    u16 *cursor;\n\n    gFlags |= FLAGS_EXECUTE_HBLANK_COPY;\n\n    gHBlankCopyTarget = (void *)&((u8 *)&REG_BG0HOFS)[bg * 4];\n    gHBlankCopySize = 4;\n\n    cursor = &((u16 *)gBgOffsetsHBlankPrimary)[minY * 2];\n\n    while (minY < maxY) {\n        *cursor = (param3 + param5) & 0x1FF;\n        cursor++;\n        *cursor = param6;\n        cursor++;\n\n        param3 = -(param3 + param4);\n        param4 = -param4;\n\n        minY++;\n    }\n}\n",
+      "m2cCtx": true,
       "proto": {
         "sa2__sub_8007958": {
           "returnsVoid": true
@@ -295,6 +309,7 @@
         "arithmetic"
       ],
       "funcC": "s32 SA2_LABEL(sub_80856F8)(s32 a, s32 b, s32 c) { return ((b * 6 - a) + c * 7) / 12; }",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L531-L531"
     },
     {
@@ -303,6 +318,7 @@
         "arithmetic"
       ],
       "funcC": "s32 SA2_LABEL(sub_8085720)(s32 a, s32 b, s32 c) { return ((b * 8 - a) + c) >> 3; }",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L535-L535"
     },
     {
@@ -311,6 +327,7 @@
         "arithmetic"
       ],
       "funcC": "s32 SA2_LABEL(sub_8085798)(s32 a, s32 b, s32 c) { return ((c - a) + ((c - a) >> 1)) - (b >> 1); }",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L549-L549"
     },
     {
@@ -319,6 +336,7 @@
         "arithmetic"
       ],
       "funcC": "s32 SA2_LABEL(sub_808595C)(s32 a, s32 b, s32 c)\n{\n    s32 e = (b - a);\n    s32 f = (c - b);\n    f -= e;\n    f >>= 1;\n    return e + f;\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L580-L587"
     },
     {
@@ -335,6 +353,7 @@
         }
       },
       "funcC": "void SA2_LABEL(sub_80838CC)(UNK_8085D14 *arg0, UNK_8085D14 *arg1, UNK_8085D14 *arg2)\n{\n    arg2->unk0 = (((arg0->unk6 * arg1->unk0) + (arg0->unk0 * arg1->unk6) + (arg0->unk2 * arg1->unk4)) - (arg0->unk4 * arg1->unk2)) >> 0xA;\n    arg2->unk2 = (((arg0->unk6 * arg1->unk2) - (arg0->unk0 * arg1->unk4)) + (arg0->unk2 * arg1->unk6) + (arg0->unk4 * arg1->unk0)) >> 0xA;\n    arg2->unk4 = ((((arg0->unk6 * arg1->unk4) + (arg0->unk0 * arg1->unk2)) - (arg0->unk2 * arg1->unk0)) + (arg0->unk4 * arg1->unk6)) >> 0xA;\n    arg2->unk6 = ((((arg0->unk6 * arg1->unk6) - (arg0->unk0 * arg1->unk0)) - (arg0->unk2 * arg1->unk2)) - (arg0->unk4 * arg1->unk4)) >> 0xA;\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L177-L183"
     },
     {
@@ -351,6 +370,7 @@
         }
       },
       "funcC": "void SA2_LABEL(sub_808399C)(UNK_8085D14 *arg0, UNK_8085D14 *arg1)\n{\n    s16 r6 = arg0->unk0;\n    s16 r5 = arg0->unk2;\n    s16 r4 = arg0->unk4;\n    arg0->unk0 = (((arg0->unk6 * arg1->unk0) + (r6 * arg1->unk6) + (r5 * arg1->unk4)) - (r4 * arg1->unk2)) >> 10;\n    arg0->unk2 = (((arg0->unk6 * arg1->unk2) - (r6 * arg1->unk4)) + (r5 * arg1->unk6) + (r4 * arg1->unk0)) >> 10;\n    arg0->unk4 = ((((arg0->unk6 * arg1->unk4) + (r6 * arg1->unk2)) - (r5 * arg1->unk0)) + (r4 * arg1->unk6)) >> 10;\n    arg0->unk6 = ((((arg0->unk6 * arg1->unk6) - (r6 * arg1->unk0)) - (r5 * arg1->unk2)) - (r4 * arg1->unk4)) >> 10;\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/math.c#L185-L194"
     },
     {
@@ -408,6 +428,7 @@
       ],
       "prependC": "#include \"core.h\"\n#include \"flags.h\"",
       "funcC": "void sa2__sub_80078D4(u8 bg, int_vcount minY, int_vcount maxY, u16 offsetEven, u16 offsetOdd)\n{\n    s32 fillVal;\n\n    gFlags |= FLAGS_EXECUTE_HBLANK_COPY;\n\n    gHBlankCopyTarget = (void *)&((u8 *)&REG_BG0HOFS)[bg * 4];\n    gHBlankCopySize = 4;\n\n    if (minY < maxY) {\n        fillVal = (offsetEven %= 512u) | ((offsetOdd % 512u) << 16);\n\n        DmaFill32(3, fillVal, &((u16 *)gBgOffsetsHBlankPrimary)[minY * 2], (maxY - minY) * 4);\n    }\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/bg_triangles.c#L850-L864"
     },
     {
@@ -417,6 +438,7 @@
         "memory"
       ],
       "funcC": "void PackSaveSector(SaveSectorData *sector, SaveGame *save)\n{\n    s16 i;\n    s16 j;\n    s16 k;\n\n    sector->header.magicNumber = 0x47544E4C;\n    sector->header.sectorId += 1;\n    sector->playerId = save->playerId;\n\n    for (i = 0; i < 6; i++) {\n        sector->playerName[i] = save->playerName[i];\n    }\n\n    sector->unk18 = 0;\n    sector->unlockedCharacters = save->unlockedCharacters;\n    sector->unlockedZones = save->unlockedZones;\n    sector->continueZone = save->continueZone;\n    sector->unk1C = 0;\n\n    for (i = 0; i < 7; i++) {\n        sector->chaoCount[i] = save->chaoCount[i];\n    }\n\n    for (i = 0; i < 7; i++) {\n        sector->specialKeys[i] = save->specialKeys[i];\n    }\n\n    for (i = 0; i < 9; i++) {\n        sector->unlockedStages[i] = save->unlockedStages[i];\n    }\n\n    for (i = 0; i < 9; i++) {\n        for (j = 0; j < 4; j++) {\n            sector->collectedMedals[i][j] = save->collectedMedals[i][j];\n        }\n    }\n\n    sector->collectedEmeralds = save->collectedEmeralds;\n    sector->unk62 = save->unk34;\n    sector->unlockFlags = save->unlockFlags;\n    sector->vsWins = save->vsWins;\n    sector->vsDraws = save->vsDraws;\n    sector->vsLosses = save->vsLosses;\n    sector->unk67 = 0;\n\n    for (i = 0; i < 10; i++) {\n        sector->vsRecords[i].slotFilled = save->vsRecords[i].slotFilled;\n        sector->vsRecords[i].wins = save->vsRecords[i].wins;\n        sector->vsRecords[i].draws = save->vsRecords[i].draws;\n        sector->vsRecords[i].losses = save->vsRecords[i].losses;\n\n        sector->vsRecords[i].playerId = save->vsRecords[i].playerId;\n\n        for (j = 0; j < 6; j++) {\n            sector->vsRecords[i].playerName[j] = save->vsRecords[i].playerName[j];\n        }\n    }\n\n#define Zone i\n#define Act  j\n#define Rank k\n    for (Zone = 0; Zone < (s32)ARRAY_COUNT(save->timeRecords.table); Zone++) {\n        for (Act = 0; Act < (s32)ARRAY_COUNT(save->timeRecords.table[0]); Act++) {\n            for (Rank = 0; Rank < (s32)ARRAY_COUNT(save->timeRecords.table[0][0]); Rank++) {\n                sector->timeRecords.table[Zone][Act][Rank].character1 = save->timeRecords.table[Zone][Act][Rank].character1;\n                sector->timeRecords.table[Zone][Act][Rank].character2 = save->timeRecords.table[Zone][Act][Rank].character2;\n                sector->timeRecords.table[Zone][Act][Rank].time = save->timeRecords.table[Zone][Act][Rank].time;\n            }\n        }\n    }\n#undef Rank\n#undef Act\n#undef Zone\n\n    switch (save->buttonConfig.jump) {\n        case A_BUTTON:\n            sector->buttonConfig.jump = 1;\n            break;\n        case B_BUTTON:\n            sector->buttonConfig.attack = 1;\n            break;\n        case R_BUTTON:\n            sector->buttonConfig.trick = 1;\n            break;\n    }\n\n    switch (save->buttonConfig.attack) {\n        case A_BUTTON:\n            sector->buttonConfig.jump = 2;\n            break;\n        case B_BUTTON:\n            sector->buttonConfig.attack = 2;\n            break;\n        case R_BUTTON:\n            sector->buttonConfig.trick = 2;\n            break;\n    }\n\n    switch (save->buttonConfig.trick) {\n        case A_BUTTON:\n            sector->buttonConfig.jump = 4;\n            break;\n        case B_BUTTON:\n            sector->buttonConfig.attack = 4;\n            break;\n        case R_BUTTON:\n            sector->buttonConfig.trick = 4;\n            break;\n    }\n\n    sector->difficulty = save->difficulty;\n    sector->disableTimeLimit = save->disableTimeLimit;\n    sector->language = save->language;\n    sector->unk367 = 0;\n    sector->checksum = GetSaveSectorChecksum(sector);\n}",
+      "m2cCtx": true,
       "prependC": "#include \"global.h\"\n#include \"core.h\"\n#include \"flags.h\"\n#include \"lib/m4a/m4a.h\"\n#include \"lib/agb_flash/agb_flash.h\"\n#include \"lib/agb_flash/flash_internal.h\"\n#include \"malloc_ewram.h\"\n#include \"malloc_vram.h\"\n#include \"game/save.h\"\n#include \"game/stage.h\"\n#include \"gba/defines.h\"\n#include \"constants/characters.h\"\n#include \"constants/zones.h\"",
       "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/code_0_0.c#L440-L556",
       "proto": {
@@ -442,6 +464,7 @@
         "global"
       ],
       "funcC": "u32 Sio32MultiLoadMain(u32 *progressCounterp)\n{\n    s32 dataCounter, dataCounterBak;\n    UNUSED s32 i, ii; // declared in SDK\n\n    switch (gSio32MultiLoadArea.state) {\n        case 0:\n            if (gSio32MultiLoadArea.type || gSio32MultiLoadArea.frameCounter) // Slave SIO Mode switch delay wait\n                gSio32MultiLoadArea.state = 1;\n            break;\n        case 1:\n            if (gSio32MultiLoadArea.type == SIO_SCK_IN) {\n                if (gSio32MultiLoadArea.frameCounter < SIO32ML_MODE_WAIT_FRAMES) // Master wait\n                    break;\n            } else // Slave\n                REG_SIOCNT = SIO_32BIT_MODE; // Switches to SIO mode\n            REG_SIODATA32 = 0; // Clears data registery\n            REG_IF = INTR_FLAG_SERIAL | SIO32ML_TIMER_INTR_FLAG; // Resets IF\n            if (gSio32MultiLoadArea.type == SIO_SCK_IN) { // Sets Master\n                REG_SIOCNT |= SIO_ENABLE; // Starts communication\n                REG_SIO32ML_TIMER = SIO32ML_TIMER_COUNT | ((TIMER_1CLK | TIMER_INTR_ENABLE | TIMER_ENABLE) << 16); // Starts timer\n                REG_IME = 0;\n                REG_IE |= SIO32ML_TIMER_INTR_FLAG; // Enables timer interrupt\n                REG_IME = 1;\n            } else { // Sets Slave\n                REG_SIOCNT |= SIO_INTR_ENABLE | SIO_ENABLE; // Starts communication\n                REG_IME = 0;\n                REG_IE |= INTR_FLAG_SERIAL; // Enables SIO interrupt\n                REG_IME = 1;\n            }\n            gSio32MultiLoadArea.frameCounter = 0;\n            gSio32MultiLoadArea.state = 2;\n            break;\n        case 2:\n            dataCounter = gSio32MultiLoadArea.dataCounter;\n            dataCounterBak = dataCounter;\n            if (dataCounter > SIO32ML_BLOCK_SIZE / 4)\n                dataCounter = SIO32ML_BLOCK_SIZE / 4;\n            else if (dataCounter < 0)\n                dataCounter = 0;\n            if (progressCounterp)\n                *progressCounterp = dataCounter; // Set progress counter\n            if (gSio32MultiLoadArea.type != SIO_SCK_IN) { // Slave\n                while (gSio32MultiLoadArea.checkSumCounter < dataCounter) // Receiving data sum check\n                    gSio32MultiLoadArea.checkSumTmp += ((s32 *)gSio32MultiLoadArea.datap)[gSio32MultiLoadArea.checkSumCounter++];\n                if (dataCounterBak > SIO32ML_BLOCK_SIZE / 4)\n                    if ((gSio32MultiLoadArea.checkSum += gSio32MultiLoadArea.checkSumTmp) == -1)\n                        gSio32MultiLoadArea.downloadSuccessFlag = 1; // Succeeds download\n            }\n            if (dataCounterBak > SIO32ML_BLOCK_SIZE / 4 // Complete communication\n                || gSio32MultiLoadArea.frameCounter == 0x8C) // SIO32ML_LD_TIMEOUT_FRAMES in SDK doesn't match\n                gSio32MultiLoadArea.state = 3; // Load time out\n            break;\n        case 3:\n            REG_IME = 0;\n            REG_IE &= ~(INTR_FLAG_SERIAL | SIO32ML_TIMER_INTR_FLAG); // Disables SIO and timer interrupt\n            REG_IME = 1;\n            REG_SIOCNT = SIO_32BIT_MODE; // Stops SIO32\n            *(vu32 *)REG_ADDR_SIOCNT = SIO_MULTI_MODE; // Switches to SIO mode\n            *(vu32 *)REG_ADDR_SIOCNT = SIO_MULTI_MODE | MULTI_SIO_BAUD_RATE_NO;\n            *(vu64 *)REG_ADDR_SIODATA32 = 0; // Clears data register\n            if (gSio32MultiLoadArea.type) // Master\n                REG_SIO32ML_TIMER = 0; // Resets timer\n            REG_IF = INTR_FLAG_SERIAL | SIO32ML_TIMER_INTR_FLAG; // Resets IF\n            if (!gSio32MultiLoadArea.type)\n                return 1; // Slave comes back first\n            gSio32MultiLoadArea.frameCounter = 0;\n            gSio32MultiLoadArea.state = 4;\n            break;\n        case 4:\n            if (gSio32MultiLoadArea.frameCounter >= 3) // Master comes back later\n                return 1;\n            break;\n    }\n    ++gSio32MultiLoadArea.frameCounter;\n    return 0;\n}",
+      "m2cCtx": true,
       "prependC": "#include \"sio32_multi_load.h\"\n#include \"global.h\"",
       "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/sio32_multi_load.c#L15-L91"
     },

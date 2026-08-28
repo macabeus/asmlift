@@ -26,6 +26,7 @@ export interface EvalSpec {
   loc: number;
   ctx?: string; // m2c --context (full text)
   ctxRef?: string; // published on the row in place of large vendored ctx text
+  ctxProto?: string; // the one line appended after the vendored blob, published verbatim
   proto?: Prototypes; // asmlift prototypes
   /** the project's vendored symbol map — asmlift-only input (m2c's analogue is its ctx) */
   symbols?: SymbolMap;
@@ -169,6 +170,7 @@ export function evaluate(
     targetAsm: asm,
     ctx: spec.ctxRef ? undefined : spec.ctx,
     ctxRef: spec.ctxRef,
+    ctxProto: spec.ctxProto,
     proto: spec.proto,
     asmDump,
     asmlift,

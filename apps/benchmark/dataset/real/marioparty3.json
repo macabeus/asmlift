@@ -375,6 +375,7 @@
         "store"
       ],
       "funcC": "void GWMgNoSet(s8 arg0) {\n    GwSystem.minigame_index = arg0;\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/save.c#L17-L19",
       "proto": {
         "GWMgNoSet": {
@@ -423,6 +424,7 @@
         "pointer"
       ],
       "funcC": "void func_8000F024_FC24(void **pool, u16 size, u16 segment) {\n    frameBufferPool = pool;\n    frameBufferCount = size;\n    frameBufferSegmentID = segment;\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/graphics.c#L225-L229",
       "prependC": "extern u16 frameBufferCount;\nextern u16 frameBufferSegmentID;\nextern void **frameBufferPool;",
       "proto": {
@@ -438,6 +440,7 @@
         "arithmetic"
       ],
       "funcC": "s32 func_80045314_45F14(void) {\n    switch (omovl) {\n        case 2:\n            return 20;\n        case 3:\n            return -20;\n        default:\n            return 0;\n    }\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/gamemes.c#L743-L752",
       "prependC": "extern s32 omovl;"
     },
@@ -448,6 +451,7 @@
         "arithmetic"
       ],
       "funcC": "u32 func_80056C98_57898(u8 **arg0) {\n    u8 *p = *arg0;\n    u32 val = (p[0] << 24) + (p[1] << 16) + (p[2] << 8) + p[3];\n\n    *arg0 = p + 4;\n    return val;\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/sprman.c#L777-L783"
     },
     {
@@ -474,6 +478,7 @@
         "arithmetic"
       ],
       "funcC": "s16 func_80011460_12060(u8 *arg0) {\n    s32 sum = 0;\n    s16 i = 1;\n    u8 c = arg0[0];\n\n    while (c != 0 && i < 28) {\n        sum += i * c;\n        arg0++;\n        i++;\n        c = arg0[0];\n    }\n    return sum;\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/hmfload.c#L31-L43"
     },
     {
@@ -499,6 +504,7 @@
         "arithmetic"
       ],
       "funcC": "u8 *GWBoardRecordGet(s16 arg0) {\n    s16 idx = arg0;\n\n    if (arg0 < 0) {\n        idx = GwSystem.current_board_index;\n    }\n\n    if (GwSystem.playMode & 1) {\n        return (u8 *)&GwCommon.unk_1D[2] + idx * 9;\n    }\n    return (u8 *)&GwCommon.unk_1D[0x38] + idx * 9;\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/save.c#L80-L91"
     },
     {
@@ -607,6 +613,7 @@
         "pointer"
       ],
       "funcC": "void FileSeek(HuFileInfoD *info, s32 arg1, s32 arg2) {\n    switch (arg2) {\n        case 0:\n            arg2 = (u32)(info->bytes + arg1);\n            break;\n        case 1:\n            arg2 = (u32)(info->bytesCopy + info->unkE + arg1);\n            break;\n        case 2:\n            arg2 = (u32)(info->bytes + info->size + arg1);\n            break;\n        default:\n            return;\n    }\n    arg2 = ((u32)arg2 < (u32)info->bytes) ? (u32)info->bytes : (u32)arg2;\n    arg2 = ((u32)arg2 >= (u32)(info->bytes + info->size)) ? (u32)(info->bytes + info->size - 1) : (u32)arg2;\n\n    if (((u32)arg2 < (u32)info->bytesCopy) || ((u32)arg2 >= (u32)(info->bytesCopy + 0x400))) {\n        info->unkC = 1;\n        info->unkE = arg2 & 1;\n        info->bytesCopy = (u8 *)(arg2 - info->unkE);\n    } else {\n        info->unkE = arg2 - (u32)info->bytesCopy;\n    }\n}",
+      "m2cCtx": true,
       "prependC": "#include \"common.h\"\n#include \"game/data.h\"\n#include \"rom.h\"\n#include \"malloc.h\"\n#include \"mallocblock.h\"\n#include \"decode.h\"",
       "sourceUrl": "https://github.com/macabeus/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/data.c#L304-L328",
       "proto": {
@@ -624,6 +631,7 @@
         "global"
       ],
       "funcC": "void *HuMemAllocTag(s32 size, s16 tag) {\n    s32 alignedSize;\n    void *data;\n    HuMallocHeader *firstBlk;\n    HuMallocHeader *newBlk;\n\n    alignedSize = (size + 7) & ~7;\n    data = gMallocFunc(alignedSize + sizeof(HuMallocHeader));\n    newBlk = (HuMallocHeader *)((s32)data + alignedSize);\n\n    firstBlk = gFirstMallocBlock;\n\n    newBlk->prev = firstBlk;\n    newBlk->next = firstBlk->next;\n    firstBlk->next->prev = newBlk;\n    firstBlk->next = newBlk;\n\n    newBlk->tag = tag;\n    newBlk->size = alignedSize;\n    newBlk->data = data;\n    newBlk->creationFrame = D_800D20AC_D2CAC;\n\n    return newBlk->data;\n}",
+      "m2cCtx": true,
       "prependC": "#include \"common.h\"\n#include \"mallocblock.h\"",
       "sourceUrl": "https://github.com/macabeus/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/mallocblock.c#L30-L53",
       "proto": {
