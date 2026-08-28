@@ -112,6 +112,13 @@ export const SYNTHETIC: SynthSpec[] = [
   // The same question asked of a memory READ rather than a second call: the read answers whichever
   // stores ran before it, and the call it would be hoisted over is one asmlift hands the pointer to.
   // Two reads would commute; a read against a call does not.
+  //
+  // Its agbcc cell (8) is a KNOWN, pre-existing silent de-sequencing, not a scoring curiosity —
+  // DO NOT close it by making the spelling match. agbcc reaches `smod` through raise/softdiv.ts
+  // (`bl __modsi3`), which invents the `%` exactly as the PPC fold does and carries no guard at
+  // all: asmlift emits `*a0 % (s32)hi()` and agbcc emits `bl hi | ldr r0,[r4]` against the
+  // reference's `ldr r4,[r0] | bl hi`. Proved pre-existing by decompiling the same asm with the
+  // hwmod patterns removed — byte-identical source. Guarding softdiv re-prices the largest tier.
   {
     sym: 'modread',
     src: 'int hi(void);\nint modread(int *p){ int x = *p; return x % hi(); }',
