@@ -1393,16 +1393,25 @@ export function enumerateCandidates(
       //
       // WHAT IT IS *NOT* FOR, because it was first shipped believing it was: the shared-arm
       // spelling `switch (x) { case 0: case 2: … }`. That is not an axis at all, it is the
-      // DEFAULT — structure/switch-recover.ts groups case values that share a body, and agbcc
-      // compiles the grouped arm and the `||` to a BYTE-IDENTICAL object (68 instructions each;
-      // two copies of the body is 89, and a different object). So on the row this axis was built
-      // for, `kleod:ProcessInputAndUpdateEntities:agbcc`, it is worth exactly 0: with the grouping
-      // in place the row scores 306 with the axis on and 306 with it off — same label chain minus
-      // the suffix, same breakdown cell for cell — in half the wall clock (681s → 339s). What it
-      // IS worth is the case where switch recovery declined ENTIRELY and the tree came out as
-      // nested `if`s, where there is no arm to group: `CountCollectedGems` 327 → 299 and
-      // `CheckWorldCompletion` 135 → 124, neither of which has a `switch` in its source at all.
-      // Telling those two populations apart would need an L3 fact (did recovery produce a grouped
+      // DEFAULT — structure/switch-recover.ts groups case values that share a body. The two are
+      // the same object only in the DEGENERATE shape, one case group plus `default:`, where the
+      // dispatch has nothing to balance: measured both directions, agbcc gives 12 instructions
+      // each and one .text md5, and IDO 64 bytes each and one md5. Add a second group and they
+      // part — agbcc 20 against 16 (the switch builds a balanced `bgt` dispatch where the chain
+      // tests sequentially), IDO 80 bytes each and different bytes; at three groups agbcc gives
+      // 24 against 20. So on a RECOVERED multi-group switch the connective is a genuine second
+      // spelling and this axis is the only thing that reaches it.
+      //
+      // What that leaves is a claim about ONE ROW rather than about the shape. On the row the
+      // axis was built for, `kleod:ProcessInputAndUpdateEntities:agbcc`, it is worth 0 POINTS:
+      // with the grouping in place the row scores 306 with the axis on and 306 with it off, same
+      // label chain minus the suffix, same breakdown cell for cell, in half the wall clock
+      // (681s → 339s). Worth 0 points is not worth nothing — the published winner there carries
+      // `/connective` and spells its site `gUnk_030034C0 == 0 || gUnk_030034C0 == 2`, so deleting
+      // the axis would move that row's source. Where it moves the SCORE is the case switch
+      // recovery declined ENTIRELY and the tree came out as nested `if`s: `CountCollectedGems`
+      // 327 → 299 and `CheckWorldCompletion` 135 → 124, neither of which has a `switch` at all.
+      // Telling the populations apart would need an L3 fact (did recovery produce a grouped
       // arm?) at a raise-level hook, which is a level inversion; the fan is the price instead.
       //
       // It rides the LIFT variants because the raise mutates in place: a second raise policy needs

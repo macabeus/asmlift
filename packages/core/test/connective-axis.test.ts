@@ -5,12 +5,13 @@
 // connective spelling is a DISTINCT source, enumerated only on a function whose fold actually
 // reaches the refusal. Toolchain-free.
 //
-// WHAT THIS AXIS IS NOT. `x == 0 || x == 2` and `switch (x) { case 0: case 2: … }` are not two
-// spellings a differ has to referee: agbcc compiles them to a BYTE-IDENTICAL object. The stacked
-// arm is the structurer's job and is now its DEFAULT (switch-recover.ts groups case values that
-// share a body), which is why the row this axis was built for scores the same with it off. What
-// is left for the axis is the tree switch recovery DECLINES on, which comes back as nested `if`s
-// with no arm to group — `kleod:CountCollectedGems` and `kleod:CheckWorldCompletion`.
+// WHAT THIS AXIS IS NOT. The stacked arm `switch (x) { case 0: case 2: … }` is the structurer's
+// job and is now its DEFAULT (switch-recover.ts groups case values that share a body), which is
+// why the row this axis was built for scores the same with it off. It is NOT the same object as
+// the `||` in general — that holds only for a switch with one case group plus `default:` (agbcc
+// 12 instructions each, IDO 64 bytes each), and a second group parts them (agbcc 20 against 16).
+// So the axis stays a real second spelling on a recovered multi-group switch, on top of the tree
+// switch recovery DECLINES on entirely — `kleod:CountCollectedGems`, `kleod:CheckWorldCompletion`.
 import { describe, expect, test } from 'vitest';
 
 import { enumerateCandidates } from '../src/rank';

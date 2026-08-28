@@ -612,6 +612,15 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     //     both checked against agbcc;
     //   - an arm with no body of its own (`case k: break;`) has its edge resolve to the MERGE, so it
     //     inherits the merge's index and sorts after every arm that HAS a body.
+    //
+    // BOOKED, UNPAID: the grouping makes arm ORDER observable on a shape the ascending-value
+    // fallback did not have before, and IDO turns out to lay case bodies out in SOURCE order too —
+    // the same function with `case 1:` written first and last differ (.text md5 ec39af99 against
+    // 689f34ec, 144 bytes each), which is what `switchArmsFollowLayout` recovers. target.ts sets
+    // the bar for opting a compiler in at a SOURCE-level argument about its passes, not at two
+    // objects, and that argument is unpaid for IDO; nothing here changes while it is. What the
+    // grouping cannot do is make a non-agbcc row worse, because the ungrouped spelling is not a
+    // rival there: under IDO it compiles to two copies and a different ROM entirely.
     const scrutExpr = expr(scrut);
     const sortedCases = [...cases.entries()].sort((a, c) =>
       switchArmsFollowLayout ? layoutIndex(a[1]) - layoutIndex(c[1]) || a[0] - c[0] : a[0] - c[0],
@@ -619,10 +628,21 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     // TWO VALUES ONE BODY IS ONE ARM. `SwitchCase.values` stacks labels for exactly this, and the
     // jump-table regime has always grouped (structure.ts's `armOf`); this regime emitted the SAME
     // body once per label instead — `structureRegion` run twice on one block — which is a
-    // duplication the IR never asked for, not a spelling choice. agbcc says so directly: the
-    // grouped arm and the `x == 0 || x == 2` the connective fold would spell compile to a
-    // BYTE-IDENTICAL object (68 instructions), while two copies of the body compile to 89 and a
-    // different object, so it is the DUPLICATE that is the unwarranted third spelling. Sound
+    // duplication the IR never asked for, not a spelling choice.
+    //
+    // WHY BLOCK IDENTITY IS THE RIGHT KEY, and not a body-equality one like `sameBareExit` above.
+    // agbcc MERGES two written-out copies into one block — target.ts's `switchArmsFollowLayout`
+    // note already says so from agbcc's own sources (SRCS compiles jump.c, whose cross-jump does
+    // it) — and compiling both directions at TOOLCHAIN.agbccFlags says where the merged block
+    // lands: at the LAST copy's position. So `case 0: A break; case 1: … case 2: A break;` and the
+    // grouped arm placed THERE are the same object (37 instructions, .text md5 555abb1a), while
+    // the grouped arm placed at the first value is not (fe4d7d35). That is why the grouped
+    // spelling round-trips rather than merely being shorter: agbcc declares
+    // `switchArmsFollowLayout`, so this regime emits the arm exactly where the merged block sits.
+    // IDO does the opposite and does not merge at all — 224 bytes against the grouped 144 — so on
+    // MIPS a shared block can ONLY have come from stacked labels. Under agbcc the duplicate is
+    // unreachable as a ROM shape and under IDO it is a DIFFERENT ROM, so on neither compiler do
+    // two DISTINCT blocks with equal bodies mean one arm. Sound also
     // because a case entry with a phi already declined above (`asLeafOrTest`), so two edges onto
     // one body bind nothing that could differ. Grouping preserves the sort: an arm takes the
     // position of its FIRST value, which is the position the old array gave that value's copy.

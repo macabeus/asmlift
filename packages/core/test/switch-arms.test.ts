@@ -174,8 +174,9 @@ test('two case values sharing ONE body have the same layout index, and stay in v
   // declared tie-break, so they keep the spelling they already had instead of inheriting whichever
   // the tree walk reached first. The dispatch below tests 3 BEFORE 2 for exactly that reason: the
   // walk records 3 first, so a sort without the tie-break returns [3, 2, 1, 0] and only the
-  // tie-break puts them back in value order. (That Regime A emits the shared body once per label
-  // rather than stacking the labels as the jump-table path does is older than this and untouched.)
+  // tie-break puts them back in value order. (Regime A now stacks the labels as the jump-table
+  // path always did; the two shared values are ONE arm, so what the tie-break orders is that arm
+  // against the others.)
   const shared =
     'f:\n\tmov\tr2, #0x0\n' +
     '\tcmp\tr0, #0x1\n\tbeq\t.Lc1\t@cond_branch\n' +
@@ -611,10 +612,10 @@ test('the same tree recovers whole when nothing homes in the test block', () => 
 });
 
 // TWO VALUES, ONE BODY. agbcc routes `case 0` and `case 2` to the same block whenever the source
-// stacked their labels (or wrote the `||`), and it does NOT re-merge two written-out copies:
-// `case 0: A break; case 2: A break;` compiles to 89 instructions and a different object than
-// `case 0: case 2: A break;`, which compiles byte-identically to `if (x == 0 || x == 2) A`.
-// So emitting the body once per label is a duplication, not a spelling — see switch-recover.ts.
+// stacked their labels, AND when it wrote the body out once per label — it merges the copies, at
+// the last one's position. IDO does not merge at all (224 bytes against the grouped 144). So a
+// shared block never means two arms on either compiler, and emitting the body once per label is a
+// duplication rather than a spelling — see switch-recover.ts for the measurements.
 const shared02 =
   'f:\n\tmov\tr2, #0x0\n' +
   '\tcmp\tr0, #0x1\n\tbeq\t.Lc1\t@cond_branch\n' +
@@ -657,6 +658,34 @@ const shared02MidDefault =
   '.Ldef:\n\tmov\tr2, #0x63\n\tb\t.Lend\n' +
   '.Lc3:\n\tadd\tr2, r1, #0x4\n\tb\t.Lend\n' +
   '.Lend:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr2, [r0]\n\tbx\tlr\n';
+
+// The counter-case for the grouping's KEY. Two case values whose bodies are DISTINCT blocks that
+// happen to hold the same statements: `sameBareExit` (this file's equivalence for "indistinguishable
+// at emission", used for `default:` candidates) would call these one arm, and block identity does
+// not. Block identity is right on both compilers measured — agbcc merges two written-out copies, so
+// this ROM shape is one it never emits, and IDO does not merge, so this ROM shape is exactly what
+// two arms compile to. Grouping here would recover something neither compiler did.
+const twinBodies =
+  'f:\n\tmov\tr2, #0x0\n' +
+  '\tcmp\tr0, #0x1\n\tbeq\t.Lc1\t@cond_branch\n' +
+  '\tcmp\tr0, #0x1\n\tbgt\t.Lhi\t@cond_branch\n' +
+  '\tcmp\tr0, #0\n\tbeq\t.Le0\t@cond_branch\n\tb\t.Ldef\n' +
+  '.Lhi:\n\tcmp\tr0, #0x2\n\tbeq\t.Le2\t@cond_branch\n' +
+  '\tcmp\tr0, #0x3\n\tbeq\t.Lc3\t@cond_branch\n\tb\t.Ldef\n' +
+  '.Le0:\n\tmov\tr0, #0x7\n\tb\t.Lend\n' +
+  '.Lc1:\n\tmov\tr0, #0x2\n\tb\t.Lend\n' +
+  '.Le2:\n\tmov\tr0, #0x7\n\tb\t.Lend\n' +
+  '.Lc3:\n\tmov\tr0, #0x4\n\tb\t.Lend\n' +
+  '.Ldef:\n\tmov\tr0, #0x63\n\tb\t.Lend\n' +
+  '.Lend:\n\tbx\tlr\n';
+
+test('two case values with EQUAL bodies in DIFFERENT blocks stay two arms', () => {
+  const out = decompile('f', twinBodies, ARMV4T_AGBCC, { prototypes: {} }).source;
+  expect(out).toContain('switch (a0)');
+  expect(armOrder(out)).toEqual([0, 1, 2, 3]);
+  expect(count(out, 'return 7;')).toBe(2); // two blocks, two arms — NOT stacked labels
+  expect(out).not.toMatch(/case 0:\s*\n\s*case 2:/);
+});
 
 test('…and `default:` still lands where the LAYOUT puts it, counted in arms', () => {
   const out = of(shared02MidDefault);

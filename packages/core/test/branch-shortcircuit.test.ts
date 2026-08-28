@@ -541,7 +541,9 @@ function relayedComparisonTree(): Fn {
 }
 
 /** `x == 1` on the head, `x == 2` on the second block, both reaching one shared block — the shape
- *  `switch (x) { case 1: case 2: … }` and `if (x == 1 || x == 2)` both compile to. */
+ *  `switch (x) { case 1: case 2: … }` compiles to, and the one `if (x == 1 || x == 2)` compiles to
+ *  as well WHERE THE SWITCH HAS NOTHING ELSE TO DISPATCH ON. They part as soon as it does (agbcc
+ *  20 instructions against 16 at two case groups), which is why the choice is the differ's. */
 function comparisonTree(): Fn {
   const shared = blk([mkOp('ret', { operands: [] })]);
   const other = blk([mkOp('ret', { operands: [] })]);
@@ -595,11 +597,11 @@ describe('the connective-vs-tree axis', () => {
   });
 
   test('the relayed clause does NOT move with the flag — it is a different statement', () => {
-    // The pairwise clause is switch-recover.ts's own PRE1, so it refuses exactly "a switch could
-    // have been recovered here" — a spelling question. The relayed clause is a blunt function-wide
-    // COUNT that fires on an ordinary loop counter (see the REFUSALS note), where there is no
-    // second legitimate spelling and the fold would just be wrong. It has no inhabitant in any
-    // benchmark row, so widening it would be scaffolding ahead of an inhabitant.
+    // The pairwise clause is switch-recover.ts's own PRE1, a NECESSARY condition for recovery, so
+    // it refuses "a switch could not be ruled out here" — close enough to a spelling question that
+    // an axis can referee it. The relayed clause is a blunt function-wide COUNT that fires on an
+    // ordinary loop counter (see the REFUSALS note) with no second legitimate spelling behind it.
+    // It has no inhabitant in any benchmark row, so widening it would be scaffolding.
     const fn = relayedComparisonTree();
     let seen = 0;
     expect(recognizeBranchShortCircuit(fn, { foldTreeOwned: true, onTreeOwned: () => seen++ })).toBe(false);

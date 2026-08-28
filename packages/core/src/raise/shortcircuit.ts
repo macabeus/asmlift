@@ -266,16 +266,30 @@ export function recognizeShortCircuit(fn: Fn): boolean {
 //     `icmp` (its `isCmpOpcode` gate), and a `logic_or` is not one, so folding first PERMANENTLY
 //     disqualifies the recovery and a clean `switch (x) { case 1: case 2: … }` degrades to a chain
 //     of nested `if`s. The two spellings are mutually exclusive within one raise and BOTH are
-//     legitimate C — `x == 0 || x == 2` and `switch (x) { case 0: case 2: }` compile to the same
-//     shape, and the asm does not say which was written. So this is a DEFAULT rather than a
-//     decision: the switch is the more specific recovery and wins the shape here, while
+//     legitimate C, and which of them the asm rules out depends on the shape: `x == 0 || x == 2`
+//     and `switch (x) { case 0: case 2: }` are ONE object only where the switch has a single case
+//     group plus `default:` (agbcc 12 instructions each, one md5; IDO 64 bytes each, one md5), and
+//     part as soon as there is a second group to balance a dispatch against (agbcc 20 against 16,
+//     IDO 80 bytes and different bytes). So this is a DEFAULT rather than a decision: the switch
+//     is the more specific recovery and wins the shape here, while
 //     `foldTreeOwned` spells the connective instead and the differ referees (rank.ts's
 //     `/connective`). ONLY THIS CLAUSE. Its notion of "same scrutinee" is switch-recover.ts's own
-//     PRE1, so what it refuses is exactly "a switch could have been recovered here" — the genuine
-//     two-spelling question. The relayed clause below is a different statement (see its own note:
-//     a blunt proxy that fires on an ordinary loop counter), it has NO inhabitant in any of the
-//     723 benchmark rows that lift, and a candidate born there would carry a `/connective` label
-//     for a fold that answers no connective-vs-tree question. It stays absolute.
+//     PRE1 — a NECESSARY condition for recovery, never a sufficient one, so what it refuses is
+//     "a switch could not be ruled out here" and it is a proxy too, just a far tighter one than
+//     the relayed clause. Priced over the set it REFUSES rather than the set it admits: it fires
+//     on 6 benchmark rows, and on 4 of them the published winner folds THROUGH it and carries
+//     `/connective` — including `kleod:CheckWorldCompletion`, whose refused site is
+//     `v5 == 3 || v5 == 5` on an ordinary inner-loop counter with no dispatch region anywhere
+//     near it. It protects the other 2 (`pokeemerald:IsStringLengthAtLeast`,
+//     `pokeemerald:TrySetCantSelectMoveBattleScript`), and it is the axis, not the clause, that
+//     keeps the 4. A structural discriminator would be strictly better and is L1-visible — is the
+//     shared block the entry of a region with dispatch-shaped in-edges, is the scrutinee defined
+//     by the enclosing loop header — and is UNBUILT; nothing here is a test of "am I inside a
+//     dispatch".
+//     The relayed clause below is a different statement (see its own note: a blunt proxy that
+//     fires on an ordinary loop counter), it has NO inhabitant in any of the 723 benchmark rows
+//     that lift, and a candidate born there would carry a `/connective` label for a fold that
+//     answers no connective-vs-tree question. It stays absolute.
 //   - the shared block was reached through a RELAY, and either test's scrutinee is compared against
 //     constants more than once in the function. This one is ABSOLUTE — `foldTreeOwned` does not
 //     widen it. Same reason as the bullet above, widened because the reach is: a relay is what
@@ -349,7 +363,15 @@ export interface BranchShortCircuitOptions {
   /** Take the fold at a site the PAIRWISE comparison-tree refusal owns, spelling the connective
    *  where the default leaves the tree for switch-recover.ts. rank.ts's `/connective` axis; see the
    *  REFUSALS note. It widens the SHAPE the fold accepts and nothing about what the fold may move —
-   *  every other refusal still applies, the RELAYED clause included. */
+   *  every other refusal still applies, the RELAYED clause included.
+   *
+   *  A NEW REFUSAL CONDITION, stated because it is one: this is per-FUNCTION and the question is
+   *  per-SITE. Every tree-owned site in a function flips together, so a function with two of them
+   *  wanting OPPOSITE spellings has no candidate that spells the mix, and nothing reports the gap
+   *  — the same shape memory's `joined-branch-sense-decidable` round recorded, costing
+   *  completeness here rather than correctness. The alternative is a fork per site:
+   *  `kleod:CheckWorldCompletion` refuses at 10 and goes 96 → 192 candidates as one boolean,
+   *  where a per-site fork would be 1024×. That is why the boolean, not an oversight. */
   foldTreeOwned?: boolean;
   /** Called at each site the pairwise tree-ownership refusal is the ONE thing stopping the fold —
    *  how rank.ts learns the axis has an inhabitant here without re-running the matcher. Asked LAST,

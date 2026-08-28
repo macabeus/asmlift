@@ -147,19 +147,33 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
 
   **Before either, ask whether the DEFAULT can already spell it — and prove the answer by
   compiling.** `/connective` was shipped on the premise that `x == 0 || x == 2` and
-  `switch (x) { case 0: case 2: … }` are two legitimate spellings of one asm shape that only a
-  differ can choose between. Under agbcc they are not two spellings: they compile to a
-  BYTE-IDENTICAL object (68 instructions each), while the third spelling — the same body written
-  out once per label, which is what `structure/switch-recover.ts` actually emitted — compiles to 89
-  instructions and a different object. So the axis was refereeing a question with one answer, and
-  the missing capability was a ten-line grouping in the structurer: with it, the row the axis was
-  built for (`kleod:ProcessInputAndUpdateEntities:agbcc`) scores 306 with the axis ON and 306 with
-  it OFF, same breakdown, in half the wall clock. What still earns the axis is the disjoint
-  population where switch recovery DECLINES and there is no arm to group.
+  `switch (x) { case 0: case 2: … }` are two spellings of one asm shape that only a differ can
+  choose between, and the row it was built for turned out to want neither: what was missing was a
+  ten-line grouping in the structurer, which took
+  `kleod:ProcessInputAndUpdateEntities:agbcc` from 367 to 306 with the axis ON and to 306 with it
+  OFF — same breakdown, half the wall clock.
 
-  The rule that follows is cheap and was skipped: **an underdetermination claim about two source
-  spellings is a COMPILER claim, so compile both and diff the objects before building anything.**
-  A score table cannot make it for you — the cheaper spelling was never in the fan to lose.
+  The rule that follows is cheap and was skipped twice: **an underdetermination claim about two
+  source spellings is a COMPILER claim, so compile both and diff the objects before building
+  anything.** A score table cannot make it for you — the cheaper spelling was never in the fan to
+  lose. Both of this axis's rounds then got the compile itself wrong in the same way, which is the
+  second half of the rule: **compile the shape you are generalizing over, not the first shape that
+  fits in a test file, and record the flags.** The measurements, all at `TOOLCHAIN.agbccFlags` and
+  `IDO_TOOLCHAIN.ccFlags`:
+
+  | shape                            | grouped vs `\|\|`                                                        | duplicated body vs grouped                                                                                                                                 |
+  | -------------------------------- | ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | agbcc, 1 case group + `default:` | 12 insns each, **one object**                                            | agbcc MERGES the copies                                                                                                                                    |
+  | agbcc, 2 groups                  | 20 vs 16 — **different** (balanced `bgt` dispatch vs a sequential chain) | merged block keeps the LAST copy's position, so it equals the grouped arm placed THERE (md5 555abb1a) and not the one placed at the first value (fe4d7d35) |
+  | agbcc, 3 groups                  | 24 vs 20 — **different**                                                 | —                                                                                                                                                          |
+  | IDO, 1 group + `default:`        | 64 bytes each, **one object**                                            | IDO does **not** merge: 224 bytes against 144                                                                                                              |
+  | IDO, 2 groups                    | 80 bytes each, **different bytes**                                       | the two placements also differ (689f34ec vs ec39af99)                                                                                                      |
+
+  So the identity is a property of the DEGENERATE shape, on both compilers, and the axis is a real
+  second spelling on every recovered multi-group switch. The grouping is right for a different
+  reason than the one first written down: under agbcc the duplicated source is unreachable as a ROM
+  shape, and under IDO it is a different ROM, so a shared block means stacked labels on either
+  compiler — an argument about the ROM, not about which source is prettier.
 
   **And 2× is a LOWER bound, not the price.** A new axis doubles its own admitting rows, and it
   also UN-COLLAPSES sibling axes that `seenTrees` was deduping away on the base tree: a sibling
