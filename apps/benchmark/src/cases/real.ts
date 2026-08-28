@@ -3,6 +3,11 @@
 // score with progressively richer context up to the function's own vendored context
 // (makeRealScorer), so an output referencing project globals/structs is never noncompile merely
 // for missing context.
+//
+// PROVISIONING: both tools read the SAME project declarations out of the same vendored freeze —
+// asmlift the vendored symbol map (`symbols`, own definition redacted), m2c the vendored
+// preprocessed context (`m2cCtx`). manifests.ts's `m2cCtx` doc states what each of those actually
+// carries and why the two are the parity pair; do not re-derive it here.
 import { asIfUndecompiled } from '@asmlift/core/symbols';
 
 import { buildRealTarget, makeRealCompile, makeRealScorer } from '../compile/real';
@@ -36,7 +41,9 @@ export function realCases(filter: RealFilter = {}): Case[] {
         // m2cCtx functions get the vendored project context (sanitized for m2c's C parser),
         // plus the function's OWN prototype (the TU-derived ctx never forward-declares it, so
         // m2c would guess the signature); the row references the vendored blob (ctxRef)
-        // instead of embedding ~100 KB of text
+        // instead of embedding ~100 KB of text. Set on every real row except the six whose
+        // callees the vendored headers do not declare, which keep a hand-written `ctx` — see
+        // manifests.ts.
         ctx: f.m2cCtx ? m2cRealCtx(man, f) : f.ctx,
         ctxRef: f.m2cCtx ? man.ctxPath(f.sym) : undefined,
         proto: f.proto,

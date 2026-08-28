@@ -6,12 +6,14 @@
 // It is the pre-existing `real-manifests.test.ts` policy suite's missing half: that one asks
 // whether a manifest is well-FORMED and portable, this one whether what it SAYS is true.
 //
-// KNOWN-UNCOVERED, deliberately: the provisioning asymmetry between the two tools. asmlift gets a
-// symbol map on all 252 real rows; m2c gets a `--context` on 112 and nothing at all on 140. That
-// is a benchmark POLICY question (what should each tool be given?), not a contradiction, and no
-// mechanical check can settle it. What IS checked below is the per-row authored half: where a row
-// hand-writes a `ctx`, the callees it names to m2c and the callees it names to asmlift must be the
-// same set.
+// The provisioning asymmetry this file used to record as KNOWN-UNCOVERED — asmlift with a symbol
+// map on all 252 real rows against m2c with a `--context` on 112 — was settled as a POLICY, not
+// closed by a check: every real row now carries either `m2cCtx` (the project's vendored context)
+// or a hand-written `ctx`, so both tools read the same project declarations. `no real row is left
+// without an m2c context` below pins that, and it is a policy pin, not a contradiction check —
+// the question of what each tool SHOULD be given is still not mechanically decidable. What is
+// checked as a contradiction is the per-row authored half: where a row hand-writes a `ctx`, the
+// callees it names to m2c and the callees it names to asmlift must be the same set.
 //
 // CI runs this: `.github/workflows/ci.yml` → `pnpm exec vitest run apps/benchmark/test`. It is
 // toolchain-free (JSON + gzip only) and in no `bench` command, deliberately — a dataset lie must
@@ -82,6 +84,17 @@ describe('every authored fact agrees with the function the compiler actually saw
     expect(unchecked).toEqual([]);
     expect(manifests.flatMap(({ man }) => man.functions).length).toBeGreaterThan(200);
   }, 30_000);
+
+  // The policy pin. Not a contradiction check — it is the round that gave the 140 context-free
+  // rows the project's own context, written down so the next row cannot quietly re-open the gap.
+  // It names the offending rows rather than asserting a count, so a correct new row is a
+  // one-word fix and not a reason to delete the gate.
+  test('no real row is left without an m2c context', () => {
+    const bare = manifests.flatMap(({ man }) =>
+      man.functions.filter((fn) => !fn.m2cCtx && fn.ctx === undefined).map((fn) => `${man.project}:${fn.sym}`),
+    );
+    expect(bare).toEqual([]);
+  });
 
   // The inventory of facts this cannot adjudicate must not rot: a callee the TU now declares is a
   // fact with an oracle, and leaving it listed would mute a check that works.

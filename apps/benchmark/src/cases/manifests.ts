@@ -25,10 +25,36 @@ export interface RealFunction {
   funcC: string; // the extracted function source (verbatim from the decomp)
   sourceUrl?: string; // commit-pinned GitHub permalink to funcC's span in the project
   prependC?: string; // extra decls to prepend AFTER the project headers (rarely needed)
-  ctx?: string; // m2c --context (prototypes only — no struct layouts, to match asmlift)
-  /** Feed m2c the function's VENDORED project context (attribute-sanitized). Set on functions
-   *  whose context-free m2c run declines on `?` placeholders — the context its real workflow
-   *  would always have. The row publishes the vendored file path (ctxRef), not the text. */
+  /** A HAND-WRITTEN m2c `--context` for this row: callee prototypes the project's own vendored
+   *  headers happen not to declare, so `m2cCtx` alone would lose them. Held symmetric with
+   *  `proto` by test/authored-facts.test.ts — a callee named to one decompiler and not the other
+   *  is the defect that check exists to catch. Six kleod rows use it; every other real row takes
+   *  the vendored context below. */
+  ctx?: string;
+  /** Feed m2c the function's VENDORED project context (attribute-sanitized) plus the function's
+   *  own prototype — the project's real headers, which is what its real workflow always has. The
+   *  row publishes the vendored file path (ctxRef), not the text.
+   *
+   *  WHAT EACH TOOL IS GIVEN ON THE REAL TIER, stated here once because it was previously stated
+   *  wrongly ("prototypes only — no struct layouts, to match asmlift"):
+   *
+   *    asmlift  the project's vendored SYMBOL MAP, on all 252 rows. Not name-and-address: sizes,
+   *             declaration shapes, scalar/element signedness, array extents, volatility,
+   *             const-ness, callee signatures, address-cast macro bodies, and — where the DWARF
+   *             types-sidecar carries them — struct tags with full field tables (name, offset,
+   *             size, pointer-ness, element size, array length). The row's OWN definition-derived
+   *             facts are redacted first (core's `asIfUndecompiled`).
+   *    m2c      the project's vendored preprocessed CONTEXT — the same headers, as C — on every
+   *             row that has no hand-written `ctx` above.
+   *
+   *  So withholding struct layouts from m2c does not "match asmlift"; it under-provisions m2c
+   *  against a tool that is handed layouts outright. This flag is therefore set on every real row
+   *  without a hand-written `ctx`, and both tools read the same project declarations out of the
+   *  same vendored freeze.
+   *
+   *  The SYNTHETIC tier is the opposite, deliberately: there NEITHER tool gets project data — the
+   *  spec's `ctx` is prototypes only and its `proto` carries the same facts to asmlift, so both
+   *  must recover structure (see dataset/synthetic.ts). Do not read this note as applying there. */
   m2cCtx?: boolean;
   proto?: Prototypes; // asmlift prototypes (void-ness / callee params)
   note?: string;

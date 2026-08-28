@@ -94,9 +94,13 @@ export function Methodology({ rows }: { rows: FunctionResult[] }) {
         <P>
           For synthetic functions, both decompilers get only the function's declared signature — its name, return type
           and parameter types, nothing else: no struct layouts, no global variable types. That half measures raw
-          recovery from assembly. For real functions where that signature alone left m2c declining, m2c additionally
-          receives the project's own headers via <span className="font-mono">--context</span>. The boundary is firm:
-          contexts contain exactly what the project declares, never authored types. Remaining declines are genuine
+          recovery from assembly, and it is symmetric by construction: the same facts go to m2c as a{' '}
+          <span className="font-mono">--context</span> and to asmlift as prototype hints. For real functions the
+          standard is different, because there the project itself is available to both: m2c receives the project's own
+          headers via <span className="font-mono">--context</span> and asmlift receives the project's symbol map, on
+          every row. That includes struct layouts and global types on both sides — the real tier measures recovery{' '}
+          <em>with</em> the project in hand, which is the situation a decompiler is actually used in. The boundary is
+          firm: both carry exactly what the project declares, never authored types. Remaining declines are genuine
           capability gaps on both sides.
         </P>
         <P>

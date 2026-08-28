@@ -145,8 +145,12 @@ ASM_INPUT
 ${
   fn.ctxRef
     ? `
-# The project context the benchmark passed via --context, exactly as its real workflow would —
-# GCC attributes stripped (m2c's C parser cannot read them; same expression the harness uses)${
+# The project context the benchmark passed via --context, exactly as its real workflow would:
+# the project's own headers, preprocessed and frozen in the repo. It is NOT trimmed to this
+# function and it is NOT prototypes-only — it carries the project's struct layouts and global
+# types, because on this tier asmlift is handed the same class of facts as a symbol map (see the
+# SYMBOLS note in this row's asmlift script). GCC attributes stripped (m2c's C parser cannot read
+# them; same expression the harness uses)${
         m2cFnPrototype(fn.sym, fn.refSource)
           ? `,
 # plus the function's own prototype (the TU-derived context never forward-declares it)`
@@ -163,8 +167,11 @@ CTX_PROTO`
 `
     : fn.ctx
       ? `
-# The exact context header the benchmark passed via --context — prototypes only
-# (no struct/global layouts: the benchmark measures cold recovery).
+# The exact context header the benchmark passed via --context. This is one of the few rows whose
+# callees the project's own vendored headers do not declare, so the benchmark states them here
+# instead; the same callees are named to asmlift through its --proto hints, and a test holds the
+# two lists equal. Everything else the project declares reaches asmlift as a symbol map and does
+# not reach m2c on this row.
 cat > ctx.h <<'CTX_INPUT'
 ${fn.ctx.trimEnd()}
 CTX_INPUT
@@ -178,7 +185,7 @@ ${flagLine(`--target ${m2cTarget(fn.compiler, fn.language)}`, "ISA + compiler di
 ${flagLine(`--function ${fn.sym}`, 'the symbol to decompile from in.s')}${
     fn.ctx || fn.ctxRef
       ? `
-${flagLine('--context ctx.h', 'the C context header above (typedefs + prototypes)')}`
+${flagLine('--context ctx.h', 'the project context header written above')}`
       : ''
   }
 ${flagLine('--no-cache', "bypass m2c's on-disk cache — always a fresh run")}
