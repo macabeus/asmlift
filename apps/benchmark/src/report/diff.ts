@@ -7,8 +7,8 @@
 // to one 'stale'/'fresh' word with no row and no field named.
 //
 // So every branch that had to prove neutrality wrote its own comparator, against its own idea of
-// which fields count. This is that comparison, once: for every row in the base artifact, the six
-// fields a published claim is made of, named individually when they move.
+// which fields count. This is that comparison, once: for every row in the base artifact, every
+// field a published claim is made of, named individually when it moves.
 import type { BenchOutput, FunctionResult } from '@asmlift/bench-schema';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -16,12 +16,12 @@ import { join } from 'node:path';
 import { RESULTS_DIR } from '../config';
 import { RESULTS_PATH, byId, headContains, readCommitted, scrub, shortSha } from './committed';
 
-/** The fields a published claim is made of. `source` is in the list because a change that moves
- *  no score can still rewrite what the report shows, `candidateLabel` because the ranked WINNER
- *  can change identity at an unchanged score (a tie-break moving is a real change), and `quality`
- *  because the report publishes it: the row this gate was last run in anger on moved
- *  `quality.casts` 0 → 1 and the gate could not see it, so "3 field changes" was the whole truth
- *  about the fields listed here and not about the row. */
+/** The fields a published claim is made of — every one the report shows, or the count this gate
+ *  prints is the truth about the LIST and not about the row. `source` is here because a change
+ *  that moves no score can still rewrite what the report shows, `candidateLabel` because the
+ *  ranked WINNER can change identity at an unchanged score (a tie-break moving is a real change),
+ *  and `quality` because the report publishes it — a row can move `quality.casts` 0 → 1 with
+ *  score, outcome and label all unchanged. */
 const FIELDS = {
   asmlift: ['outcome', 'score', 'candidateLabel', 'source', 'quality'],
   m2c: ['outcome', 'score', 'source', 'quality'],

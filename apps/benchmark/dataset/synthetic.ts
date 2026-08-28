@@ -3093,7 +3093,7 @@ export const SYNTHETIC: SynthSpec[] = [
   //
   // NO NEW TAG, and one was tried: `param-width`, on the theory that asmlift must consume
   // `FnProto.params`' typed list. Handing asmlift the exact declared types via
-  // `--proto '{"sub_802DFC8":{"params":["s16","void *"],"returnsVoid":true}}'` returns the same
+  // `--proto '{"sub_802DFC8":{"params":["s16","Sprite *"],"returnsVoid":true}}'` returns the same
   // ranked line and byte-identical stdout, while homing the cast with no declared type anywhere
   // closes both real rows — so the gap is the home, not the types. The list IS read now
   // (raise/paramwidth.ts's `proto-width`), and it changes nothing here by construction: a

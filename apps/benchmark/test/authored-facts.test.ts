@@ -1,17 +1,10 @@
 // THE GATE for a class the harness had no check for: a row telling one decompiler something its
-// own reference source contradicts, and then scoring the decompiler down for obeying it.
+// own reference source contradicts, and then scoring the decompiler down for obeying it. What a
+// contradiction looks like and what the oracle is worth are stated once, in
+// `src/cases/authored-facts.ts`; this file is where CI reads the answer.
 //
-// It ran uncaught in the published dataset. marioparty3:func_80056254_56E54 carried
-// `"returnsVoid": true` four lines under `void *func_80056254_56E54(…) { return (*arg0)->unk0C; }`;
-// asmlift honoured the declaration, emitted `return;`, and scored 2 — while m2c, which never reads
-// `proto`, matched. Nothing in the harness compared the two fields, and the row published
-// `quality 100` with no error marker, so the output looked like a wrong answer BY asmlift.
-//
-// This is the pre-existing `real-manifests.test.ts` policy suite's missing half: that one asks
-// whether a manifest is well-FORMED and portable, this one whether what it SAYS is true. The
-// oracle is the vendored preprocessed TU — the text the reference compiler saw AND the blob the
-// row's target is compiled from — so a `proto` contradiction cannot be reconciled by moving
-// `funcC`: that moves the target too, i.e. it decompiles a different function.
+// It is the pre-existing `real-manifests.test.ts` policy suite's missing half: that one asks
+// whether a manifest is well-FORMED and portable, this one whether what it SAYS is true.
 //
 // KNOWN-UNCOVERED, deliberately: the provisioning asymmetry between the two tools. asmlift gets a
 // symbol map on all 252 real rows; m2c gets a `--context` on 112 and nothing at all on 140. That

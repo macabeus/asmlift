@@ -21,7 +21,10 @@
 // re-vendoring — a stale target, which nothing else here notices.
 //
 // What this does NOT check: whether a fact is USEFUL, or whether a row should carry one at all. A
-// missing `proto` is not a defect here; only a present one that the compiled function refutes.
+// `proto` a row simply lacks is not a defect against the oracle; only a present one the compiled
+// function refutes. The one place a MISSING entry is a defect is between the two authored inputs
+// themselves — a callee a row declares to m2c in its own `ctx` and not to asmlift — and that
+// comparison lives in the test, on `declaredFunctionNames` below.
 import type { Prototypes } from '@asmlift/core/proto';
 
 import type { RealFunction } from './manifests';
