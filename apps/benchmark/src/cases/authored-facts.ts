@@ -2,29 +2,27 @@
 // actually compiled.
 //
 // A row feeds its two decompilers separate, hand-written inputs. asmlift gets `proto` — void-ness,
-// callee arities, declared parameter types. m2c gets the function's own prototype line,
-// reconstructed from `funcC` by cases/real.ts's `m2cFnPrototype` and appended to its context, plus
-// whatever a hand-written `ctx` declares. Nothing held any of them against each other, and a row
-// that got one wrong scored a decompiler down FOR OBEYING IT: marioparty3:func_80056254_56E54
-// published `"returnsVoid": true` four lines under
-// `void *func_80056254_56E54(…) { return (*arg0)->unk0C; }`, and asmlift's faithful `return;` cost
-// it a byte-exact match while m2c — which never reads `proto` — matched.
+// callee arities, declared parameter types. m2c gets whatever a hand-written `ctx` declares, and on
+// a row with a vendored context also the function's own prototype line, which cases/real.ts's
+// `m2cFnPrototype` reconstructs from `funcC`. Nothing held any of them against each other, and a
+// row that got one wrong scored a decompiler down FOR OBEYING IT: marioparty3:func_80056254_56E54
+// published `"returnsVoid": true` four lines under a `funcC` returning `(*arg0)->unk0C`, and
+// asmlift's faithful `return;` cost it a byte-exact match while m2c, which never reads `proto`,
+// matched.
 //
-// THE ORACLE IS THE ROW'S VENDORED PREPROCESSED TU, and what that is worth has a precise limit
-// worth stating, because the first version of this comment overstated it. The TU is
-// `cpp(project headers + prependC + funcC)` (cases/vendor.ts) — it is NOT independent of `funcC`.
-// What it is independent of is `proto`, and that is the axis the seed defect lived on: a `proto`
-// contradiction cannot be reconciled by editing the reference source, because THE SAME BLOB IS THE
-// TARGET (compile/real.ts's `buildRealTarget` compiles it) — moving `funcC` to agree with a wrong
-// `proto` moves the bytes the row scores against, i.e. it decompiles a different function, and it
-// takes the project checkout and `bench vendor` to do at all. Against `funcC` the check is
-// therefore narrower and still real: it catches a signature that disagrees with its own TU after
-// macro expansion, and it catches a `funcC` edited without re-vendoring (a STALE target, which
-// nothing else here notices).
+// THE ORACLE IS THE ROW'S COMPILED TEXT — the real tier's vendored preprocessed TU, the synthetic
+// tier's `src` — and what that is worth has a precise limit. The TU is `cpp(project headers +
+// prependC + funcC)` (cases/vendor.ts), so it is NOT independent of `funcC`. What it is independent
+// of is `proto`, which is the axis the seed defect lived on, and the property that keeps `funcC`
+// from being the field someone tunes is a different one: the same blob IS the target
+// (compile/real.ts), so moving the reference source to agree with a wrong prototype moves the bytes
+// the row scores against. Against `funcC` this therefore checks two narrower things, both real: a
+// signature that disagrees with its own TU after macro expansion, and a `funcC` edited without
+// re-vendoring — a stale target, which nothing else here notices.
 //
 // What this does NOT check: whether a fact is USEFUL, or whether a row should carry one at all. A
 // missing `proto` is not a defect here; only a present one that the compiled function refutes.
-import { type Prototypes, declaredWidth } from '@asmlift/core/proto';
+import type { Prototypes } from '@asmlift/core/proto';
 
 import type { RealFunction } from './manifests';
 
@@ -327,7 +325,18 @@ export function quotedSignature(funcC: string): CompiledSignature | null {
   return { returnType: returnTypeOf(head), params: splitParams(sig.slice(open + 1, close)) };
 }
 
-const isPointer = (t: string): boolean => t.includes('*');
+/** Does a DECLARED type name the same type the compiler compiled? The compiled parameter is
+ *  `TYPE` or `TYPE name`, and a declared type is the type text alone, so the two agree when the
+ *  compiled one is the declared one plus at most a declarator.
+ *
+ *  Compared as TEXT rather than as pointer-ness plus width, which is what the first version did and
+ *  which cannot see a wrong pointee: 8 synthetic specs declared `void *` to asmlift where their own
+ *  `ctx` told m2c `s32 *`, and every width- and pointer-based reading of that pair says they agree. */
+function declaredTypeMatches(declared: string, compiled: string): boolean {
+  const a = normParam(declared);
+  const b = normParam(compiled ?? '');
+  return a === b || (b.startsWith(`${a} `) && /^\w+$/.test(b.slice(a.length + 1)));
+}
 
 const TYPE_KEYWORDS: ReadonlySet<string> = new Set([
   'const',
@@ -438,19 +447,10 @@ export function protoFactProblems(
       );
     } else if (Array.isArray(own.params)) {
       own.params.forEach((p, i) => {
-        const r = oracle.params[i];
-        if (isPointer(p) !== isPointer(r)) {
+        if (!declaredTypeMatches(p, oracle.params[i])) {
           problems.push(
-            `${where}: proto parameter ${i} is \`${normParam(p)}\`, the compiled one is \`${normParam(r)}\``,
-          );
-          return;
-        }
-        const dp = declaredWidth(p);
-        const dr = declaredWidth(r);
-        if (dp !== undefined && dr !== undefined && dp !== dr) {
-          problems.push(
-            `${where}: proto parameter ${i} \`${normParam(p)}\` is ${dp}-bit, the compiled ` +
-              `\`${normParam(r)}\` is ${dr}-bit`,
+            `${where}: proto parameter ${i} is \`${normParam(p)}\`, the compiled one is ` +
+              `\`${normParam(oracle.params[i])}\``,
           );
         }
       });
@@ -512,10 +512,10 @@ export function protoFactProblems(
 
 /** Every way one REAL row's authored facts contradict its own compiled function: its `proto`, plus
  *  the reference source `funcC` — which is quoted out of the project by hand, DEFINES the target,
- *  and is also the prototype line the harness hands m2c. That last use is why the PARAMETER TYPES
- *  are compared and not merely counted: `m2cFnPrototype` splices this signature verbatim into
- *  m2c's context, so a parameter list the target refutes is the seed defect again, pointed at the
- *  other decompiler. */
+ *  and is, on every row that gets a vendored context, also the prototype line the harness hands
+ *  m2c. That last use is why the PARAMETER TYPES are compared and not merely counted: a parameter
+ *  list the target refutes is spliced verbatim into m2c's context, which is the seed defect again
+ *  with the other decompiler as the victim. */
 export function authoredFactProblems(project: string, fn: RealFunction, tu: string): string[] {
   const where = `${project}:${fn.sym}`;
   const oracle = oracleFor(where, fn.sym, tu);

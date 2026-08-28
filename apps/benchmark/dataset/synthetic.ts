@@ -3129,7 +3129,7 @@ export const SYNTHETIC: SynthSpec[] = [
     features: ['value-home', 'sign-extend', 'mask'],
     toolchains: ['agbcc'],
     ctx: 'void sxparam(s16 d, s32 *out);',
-    proto: { sxparam: { params: ['s16', 'void *'], returnsVoid: true } },
+    proto: { sxparam: { params: ['s16', 's32 *'], returnsVoid: true } },
   },
   {
     sym: 'zxparam',
@@ -3137,7 +3137,7 @@ export const SYNTHETIC: SynthSpec[] = [
     features: ['value-home', 'zero-extend', 'mask'],
     toolchains: ['agbcc'],
     ctx: 'void zxparam(u8 a, u8 b, s32 *out);',
-    proto: { zxparam: { params: ['u8', 'u8', 'void *'], returnsVoid: true } },
+    proto: { zxparam: { params: ['u8', 'u8', 's32 *'], returnsVoid: true } },
   },
   {
     sym: 'armexpr',
@@ -3150,7 +3150,7 @@ export const SYNTHETIC: SynthSpec[] = [
     features: ['value-home', 'mask'],
     toolchains: ['agbcc'],
     ctx: 'void armexpr(u32 a, u32 b, s32 *out);',
-    proto: { armexpr: { params: ['u32', 'u32', 'void *'], returnsVoid: true } },
+    proto: { armexpr: { params: ['u32', 'u32', 's32 *'], returnsVoid: true } },
   },
   {
     sym: 'armkeep',
@@ -3162,7 +3162,7 @@ export const SYNTHETIC: SynthSpec[] = [
     features: ['value-home', 'branch'],
     toolchains: ['agbcc'],
     ctx: 'void armkeep(u32 a, u32 b, s32 *out);',
-    proto: { armkeep: { params: ['u32', 'u32', 'void *'], returnsVoid: true } },
+    proto: { armkeep: { params: ['u32', 'u32', 's32 *'], returnsVoid: true } },
   },
   {
     sym: 'maskchain',
@@ -3178,7 +3178,7 @@ export const SYNTHETIC: SynthSpec[] = [
     features: ['value-home', 'mask'],
     toolchains: ['agbcc'],
     ctx: 'void maskchain(s32 d, s32 *out);',
-    proto: { maskchain: { params: ['s32', 'void *'], returnsVoid: true } },
+    proto: { maskchain: { params: ['s32', 's32 *'], returnsVoid: true } },
   },
   {
     sym: 'basecell',
@@ -3186,7 +3186,7 @@ export const SYNTHETIC: SynthSpec[] = [
     features: ['value-home', 'pointer'],
     toolchains: ['agbcc'],
     ctx: 'void basecell(s32 *out);',
-    proto: { basecell: { params: ['void *'], returnsVoid: true } },
+    proto: { basecell: { params: ['s32 *'], returnsVoid: true } },
   },
   {
     sym: 'foldsink',
@@ -3202,7 +3202,7 @@ export const SYNTHETIC: SynthSpec[] = [
     features: ['value-home', 'pointer'],
     toolchains: ['agbcc'],
     ctx: 'void foldsink(s32 a, s32 b, s32 *out);',
-    proto: { foldsink: { params: ['s32', 's32', 'void *'], returnsVoid: true } },
+    proto: { foldsink: { params: ['s32', 's32', 's32 *'], returnsVoid: true } },
   },
   {
     sym: 'basehome',
@@ -3218,7 +3218,7 @@ export const SYNTHETIC: SynthSpec[] = [
     features: ['value-home', 'pointer'],
     toolchains: ['agbcc'],
     ctx: 'void basehome(s32 a, s32 b, s32 *out);',
-    proto: { basehome: { params: ['s32', 's32', 'void *'], returnsVoid: true } },
+    proto: { basehome: { params: ['s32', 's32', 's32 *'], returnsVoid: true } },
   },
 
   // A DEVICE REGISTER WRITTEN INSIDE A LOOP, WITH NOTHING READING IT BACK. A store to a DMA

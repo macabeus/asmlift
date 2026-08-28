@@ -173,9 +173,10 @@ describe('neither decompiler is told a callee the other is not', () => {
   });
 });
 
-// The synthetic tier authors 86 `proto` tables of its own, and its `src` IS the compiler's input —
-// no headers, no macros — so it is its own oracle and the same check applies with no vendoring.
-// It is clean today; what this buys is that the NEXT hand-written spec cannot quietly declare a
+// The synthetic tier's `src` is compiled as written, so it is its own oracle and the same check
+// applies with no vendoring. Read UNpreprocessed, which is fine for what it is asked (38 specs do
+// carry a `#define`, none of them in a signature) and is the same limit ATTRIBUTE_MACROS names on
+// the real tier. What this buys is that the next hand-written spec cannot quietly declare a
 // void-ness its source refutes, which on the real tier cost a match before anything looked.
 describe('the synthetic tier declares nothing its own source refutes', () => {
   test('every synthetic proto agrees with its src', () => {
