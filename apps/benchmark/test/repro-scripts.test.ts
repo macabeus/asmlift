@@ -50,16 +50,30 @@ describe('m2cScript (pinned)', () => {
     expect(s).toContain('--target ppc-mwcc-c');
   });
 
-  test('vendored-context functions reference the repo blob and sanitize attributes', () => {
+  test('vendored-context functions reference the repo blob VERBATIM', () => {
     const withRef = rows.filter((r) => r.ctxRef);
     expect(withRef.length).toBeGreaterThan(0);
     for (const fn of withRef) {
       const s = m2cScript(fn);
-      expect(s, fn.id).toContain(`gunzip -kc "$ASMLIFT_PATH/${fn.ctxRef}"`);
-      expect(s, fn.id).toContain('perl -pe'); // the attribute-strip expression
+      expect(s, fn.id).toContain(`gunzip -kc "$ASMLIFT_PATH/${fn.ctxRef}" > ctx.h`);
+      // NO filter between the blob and ctx.h: the attribute strip that used to sit here deleted
+      // `packed` and silently repadded the project's structs (see eval/m2c-normalizer.ts).
+      expect(s, fn.id).not.toContain('perl -pe');
       expect(s, fn.id).toContain('--context ctx.h');
       expect(s, fn.id).toContain("ASMLIFT_PATH='/path/to/asmlift'");
       expect(fn.ctx, fn.id).toBeUndefined(); // referenced, never embedded
+    }
+  });
+
+  test('the appended prototype block appears exactly on the rows that carry one', () => {
+    for (const fn of rows) {
+      const s = m2cScript(fn);
+      if (fn.ctxProto) {
+        expect(s, fn.id).toContain(`cat >> ctx.h <<'CTX_PROTO'\n${fn.ctxProto}\nCTX_PROTO`);
+        expect(fn.ctxProto, fn.id).toMatch(/^void \w+\(.*\);$/); // proto-derived, never funcC text
+      } else {
+        expect(s, fn.id).not.toContain('CTX_PROTO');
+      }
     }
   });
 

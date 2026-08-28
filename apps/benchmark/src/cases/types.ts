@@ -20,6 +20,10 @@ export interface Case {
   sourceUrl?: string; // real tier: GitHub permalink to the reference source
   ctx?: string; // m2c --context (full text — inline authored, or sanitized vendored)
   ctxRef?: string; // repo-relative vendored-context path, published on the row instead of ctx
+  /** real tier: the one line appended to the vendored context after the blob (the function's own
+   *  prototype, when `proto` carries one). Published so the repro script reconstructs ctx.h
+   *  byte-identically instead of re-deriving it. */
+  ctxProto?: string;
   /** the project's vendored symbol map — threaded into asmlift only (m2c has its ctx) */
   symbols?: SymbolMap;
   proto?: Prototypes; // asmlift prototypes

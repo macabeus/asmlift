@@ -111,10 +111,14 @@ export interface FunctionResult {
   sourceUrl?: string;
   targetAsm: string; // disassembly both decompilers consumed
   ctx?: string; // the small authored context header m2c received via --context, when inline
-  /** Repo-relative path of the VENDORED project context m2c received (attribute-sanitized at
-   *  use) — set instead of `ctx` when the context is the project's own headers (~10–260 KB,
+  /** Repo-relative path of the VENDORED project context m2c received VERBATIM — set instead of
+   *  `ctx` when the context is the project's own frozen preprocessor output (17 B – 410 KB,
    *  referenced rather than embedded). */
   ctxRef?: string;
+  /** The single line appended after that blob: the function's own prototype, present only where
+   *  the project's headers do not declare it AND the row's `proto` says it returns void. Derived
+   *  from `proto` — never from the reference source. */
+  ctxProto?: string;
   /** Prototype hints asmlift received (structurally mirrors @asmlift/core/proto Prototypes —
    *  spelled out here so this package stays dependency-free): a callee's `params` (a bare arity
    *  count OR the typed parameter list) drives call argument recovery; the function's own entry

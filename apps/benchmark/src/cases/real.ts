@@ -5,16 +5,15 @@
 // for missing context.
 //
 // PROVISIONING: both tools read the SAME project declarations out of the same vendored freeze —
-// asmlift the vendored symbol map (`symbols`, own definition redacted), m2c the vendored
-// preprocessed context (`m2cCtx`). manifests.ts's `m2cCtx` doc states what each of those actually
-// carries and why the two are the parity pair; do not re-derive it here.
+// asmlift the vendored symbol map (`symbols`), m2c the vendored preprocessed context (`m2cCtx`).
+// Neither reads the reference source. manifests.ts's `m2cCtx` doc states what each of those
+// carries, and what is still asymmetric; do not re-derive it here.
+import type { Prototypes } from '@asmlift/core/proto';
 import { asIfUndecompiled } from '@asmlift/core/symbols';
 
 import { buildRealTarget, makeRealCompile, makeRealScorer } from '../compile/real';
-import { sanitizeM2cContext } from '../eval/m2c-normalizer';
 import { TOOLCHAINS } from '../toolchains';
-import { stripAttributeMacros } from './authored-facts';
-import { type RealFunction, type VendoredManifest, loadManifests } from './manifests';
+import { loadManifests } from './manifests';
 import type { Case } from './types';
 
 export interface RealFilter {
@@ -28,6 +27,8 @@ export function realCases(filter: RealFilter = {}): Case[] {
   for (const man of manifests) {
     const tc = TOOLCHAINS[man.toolchain];
     for (const f of man.functions.filter((x) => !filter.only || x.sym.includes(filter.only))) {
+      const ctxI = f.m2cCtx ? man.vendored(f.sym).ctxI : null;
+      const ctxProto = ctxI === null ? null : m2cOwnPrototype(f.sym, f.proto, ctxI);
       cases.push({
         id: `${man.project}:${f.sym}:${man.toolchain}`,
         tier: 'real',
@@ -38,14 +39,13 @@ export function realCases(filter: RealFilter = {}): Case[] {
         loc: f.funcC.split('\n').length,
         refSource: f.funcC,
         sourceUrl: f.sourceUrl,
-        // m2cCtx functions get the vendored project context (sanitized for m2c's C parser),
-        // plus the function's OWN prototype (the TU-derived ctx never forward-declares it, so
-        // m2c would guess the signature); the row references the vendored blob (ctxRef)
-        // instead of embedding ~100 KB of text. Set on every real row except the six whose
-        // callees the vendored headers do not declare, which keep a hand-written `ctx` — see
-        // manifests.ts.
-        ctx: f.m2cCtx ? m2cRealCtx(man, f) : f.ctx,
+        // m2cCtx rows get the vendored project context VERBATIM, plus at most the void-ness
+        // `proto` already gives asmlift (m2cOwnPrototype). The row references the vendored blob
+        // (ctxRef) instead of embedding ~100 KB of text. Set on every real row except the six
+        // whose callees the vendored headers do not declare, which keep a hand-written `ctx`.
+        ctx: ctxI === null ? f.ctx : appendCtxProto(ctxI, ctxProto),
         ctxRef: f.m2cCtx ? man.ctxPath(f.sym) : undefined,
+        ctxProto: ctxProto ?? undefined,
         proto: f.proto,
         // LEAKAGE-FREE by construction: every row here is a function someone already decompiled,
         // so the project ELF knows things about it that a user mid-decomp cannot. Score against
@@ -64,31 +64,42 @@ export function realCases(filter: RealFilter = {}): Case[] {
   return cases;
 }
 
-/** The m2c context for an m2cCtx-flagged function: the sanitized vendored project context plus
- *  the function's OWN prototype (the TU-derived ctx never forward-declares it). The prototype
- *  comes from the manifest's funcC — but ONLY when its signature declares the symbol as a plain
- *  identifier; raw project sources can wrap the name in an unexpanded macro
- *  (`void SA2_LABEL(sub_8083504)(…)`), which m2c's parser hard-fails on as K&R. */
-function m2cRealCtx(man: VendoredManifest, f: RealFunction): string {
-  const base = sanitizeM2cContext(man.vendored(f.sym).ctxI);
-  const sig = m2cFnPrototype(f.sym, f.funcC);
-  return sig ? `${base}\n${sig}\n` : base;
+/** The m2c `--context` text = the vendored blob, then the prototype line if there is one. ONE
+ *  expression, because the published repro script reconstructs the same file by appending a
+ *  heredoc to the gunzipped blob and the two must be byte-identical — `bench fidelity` compares
+ *  m2c's OUTPUT, so a divergence here is invisible to it. Every vendored blob ends in a newline
+ *  (held by test/authored-facts.test.ts), which is what makes the script's plain `>>` equal. */
+export function appendCtxProto(ctx: string, proto: string | null): string {
+  return proto === null ? ctx : `${ctx.endsWith('\n') ? ctx : `${ctx}\n`}${proto}\n`;
 }
 
-/** The function's own prototype line for the m2c context, or null when the source's signature
- *  does not declare the symbol as a plain identifier (unexpanded project macros — injecting
- *  those hard-fails m2c's parser as K&R). ALSO used by the repro-script generator: the script
- *  reconstructs the ctx from the vendored blob and must append the same line, or the published
- *  output would not reproduce (the fidelity gate holds the two equal by execution).
+/** The function's OWN prototype for the m2c context — derived from the manifest's `proto`, which
+ *  is the SAME field asmlift reads, and never from `funcC`.
  *
- *  ATTRIBUTE MACROS are stripped: a project may write one between the return type and the name
- *  (`static void UNUSED SetMauvilleOldManLanguage(…)`), the preprocessed TU does not contain it,
- *  and m2c's `--context` is a real C parser that answers the unexpanded token with
- *  `Syntax error when parsing C context` — a whole row `failed` on a macro that means nothing to
- *  the compiler. Held to the list by test/authored-facts.test.ts. */
-export function m2cFnPrototype(sym: string, funcC: string): string | null {
-  // NOT whitespace-normalized: the extra space a stripped macro leaves is nothing to a C parser,
-  // and every row without one must keep a byte-identical line (it is part of m2c's cache key).
-  const sig = stripAttributeMacros(funcC.slice(0, funcC.indexOf('{'))).trim();
-  return new RegExp(`\\b${sym}\\s*\\(`).test(sig) ? `${sig};` : null;
+ *  WHY NOT `funcC`. It used to be reconstructed from the reference source, and that made the
+ *  benchmark hold two opposite policies on one fact: core's `asIfUndecompiled` strips the row's
+ *  own `declared`/`signature` from asmlift's symbol map as definition-derived leakage ("only
+ *  CALLEE signatures transfer"), while the same signature — return type, parameter types and the
+ *  reference's own parameter NAMES — was pasted into m2c's context. It was load-bearing, not
+ *  cosmetic: ablating it moves matches. A fact the harness calls leakage on one side cannot be
+ *  provisioning on the other.
+ *
+ *  WHAT SURVIVES, in order:
+ *    1. the project's own headers declare the symbol → nothing is appended, m2c reads the real
+ *       declaration out of the context. That is a fact a user mid-decomp genuinely has: a header
+ *       declares a function whose body is still `INCLUDE_ASM`.
+ *    2. otherwise, at most what `proto[sym]` gives asmlift. `returnsVoid: true` is the only
+ *       return-type fact in that field, so it is the only one emitted; a non-void row gets
+ *       nothing, which is already m2c's default assumption. Parameter TYPES ride along where
+ *       `proto` lists them, parameter names never do. */
+export function m2cOwnPrototype(sym: string, proto: Prototypes | undefined, ctx: string): string | null {
+  if (new RegExp(`\\b${sym}\\s*\\(`).test(ctx)) {
+    return null; // the project's headers declare it — m2c reads it there
+  }
+  const p = proto?.[sym];
+  if (p?.returnsVoid !== true) {
+    return null;
+  }
+  const params = Array.isArray(p.params) ? (p.params.length === 0 ? 'void' : p.params.join(', ')) : '';
+  return `void ${sym}(${params});`;
 }

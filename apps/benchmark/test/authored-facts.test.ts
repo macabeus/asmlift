@@ -7,13 +7,15 @@
 // whether a manifest is well-FORMED and portable, this one whether what it SAYS is true.
 //
 // The provisioning asymmetry this file used to record as KNOWN-UNCOVERED — asmlift with a symbol
-// map on all 252 real rows against m2c with a `--context` on 112 — was settled as a POLICY, not
-// closed by a check: every real row now carries either `m2cCtx` (the project's vendored context)
-// or a hand-written `ctx`, so both tools read the same project declarations. `no real row is left
-// without an m2c context` below pins that, and it is a policy pin, not a contradiction check —
-// the question of what each tool SHOULD be given is still not mechanically decidable. What is
-// checked as a contradiction is the per-row authored half: where a row hand-writes a `ctx`, the
-// callees it names to m2c and the callees it names to asmlift must be the same set.
+// map on all 252 real rows against m2c with a `--context` on 112 — was settled as a POLICY: every
+// real row now carries either `m2cCtx` (the project's vendored context) or a hand-written `ctx`.
+// `no real row is left without an m2c context` below pins that. It is a policy pin, not a
+// contradiction check — what each tool SHOULD be given is not mechanically decidable, and the
+// README names the asymmetries that remain, in both directions.
+//
+// What IS checked as a contradiction: where a row hand-writes a `ctx`, the callees it names to
+// m2c and to asmlift must be the same set; and the line appended to a vendored context must be
+// derivable from `proto` — the field asmlift reads — rather than from the reference source.
 //
 // CI runs this: `.github/workflows/ci.yml` → `pnpm exec vitest run apps/benchmark/test`. It is
 // toolchain-free (JSON + gzip only) and in no `bench` command, deliberately — a dataset lie must
@@ -35,7 +37,7 @@ import {
   quotedSignature,
 } from '../src/cases/authored-facts';
 import { REAL_DIR, type RealManifest } from '../src/cases/manifests';
-import { m2cFnPrototype } from '../src/cases/real';
+import { m2cOwnPrototype } from '../src/cases/real';
 
 const files = readdirSync(REAL_DIR).filter((f) => f.endsWith('.json'));
 
@@ -117,33 +119,82 @@ describe('every authored fact agrees with the function the compiler actually saw
   }, 30_000);
 });
 
-describe('the prototype line handed to m2c is plain C', () => {
-  // m2c's `--context` runs a real C parser: an unexpanded attribute macro in the return-type
-  // position is `Syntax error when parsing C context` and the whole row becomes `failed`. The
-  // hard-fail is real — pokeemerald:SetMauvilleOldManLanguage reproduces it the moment that row
-  // is given a context — and it is invisible today only because that row has none.
-  test('no manifest signature reaches m2c carrying an attribute macro', () => {
-    const bad = manifests.flatMap(({ man }) =>
-      man.functions
-        .map((fn) => ({ where: `${man.project}:${fn.sym}`, line: m2cFnPrototype(fn.sym, fn.funcC) }))
-        .filter(({ line }) => line && [...ATTRIBUTE_MACROS].some((m) => new RegExp(`\\b${m}\\b`).test(line)))
-        .map(({ where, line }) => `${where}: ${line}`),
+describe('the prototype line appended to a vendored m2c context', () => {
+  /** The vendored CONTEXT blob of every function in one manifest (the `--context` m2c is given,
+   *  before the prototype line). */
+  function vendoredCtxs(man: RealManifest): Map<string, string> {
+    const dir = join(REAL_DIR, 'tu', man.project);
+    const index = JSON.parse(readFileSync(join(dir, 'index.json'), 'utf8')) as Record<
+      string,
+      { tu: string; ctx: string }
+    >;
+    return new Map(
+      man.functions.map((fn) => [fn.sym, gunzipSync(readFileSync(join(dir, index[fn.sym].ctx))).toString('utf8')]),
     );
+  }
+
+  const lines = manifests.flatMap(({ man }) => {
+    const ctxs = vendoredCtxs(man);
+    return man.functions
+      .filter((fn) => fn.m2cCtx)
+      .map((fn) => ({
+        where: `${man.project}:${fn.sym}`,
+        fn,
+        ctx: ctxs.get(fn.sym)!,
+        line: m2cOwnPrototype(fn.sym, fn.proto, ctxs.get(fn.sym)!),
+      }));
+  });
+
+  test('there are vendored-context rows to police', () => {
+    expect(lines.length).toBeGreaterThan(200);
+  });
+
+  // THE LEAKAGE GATE. It used to be reconstructed from `funcC` — the answer — while core's
+  // `asIfUndecompiled` stripped the same fact from asmlift's symbol map. A parameter NAME is the
+  // cheapest proof that reference text reached m2c: `proto` has no names to give.
+  test('no prototype line carries an identifier from the reference source', () => {
+    const leaks = lines
+      .filter(({ line }) => line !== null)
+      .flatMap(({ where, fn, line }) => {
+        const head = fn.funcC.slice(0, fn.funcC.indexOf('{'));
+        const names = new Set((head.match(/\b[A-Za-z_]\w*\b/g) ?? []).filter((n) => n !== fn.sym));
+        const declared = new Set(
+          (Array.isArray(fn.proto?.[fn.sym]?.params) ? (fn.proto[fn.sym].params as string[]) : []).flatMap(
+            (t) => t.match(/\b[A-Za-z_]\w*\b/g) ?? [],
+          ),
+        );
+        return (line!.match(/\b[A-Za-z_]\w*\b/g) ?? [])
+          .filter((w) => w !== 'void' && w !== fn.sym && !declared.has(w) && names.has(w))
+          .map((w) => `${where}: \`${w}\` reached m2c from the reference signature`);
+      });
+    expect(leaks).toEqual([]);
+  });
+
+  // m2c's `--context` runs a real C parser: an unexpanded attribute macro is `Syntax error when
+  // parsing C context` and the whole row becomes `failed`. `proto` param types are authored, so
+  // one can still arrive that way.
+  test('no prototype line carries an attribute macro', () => {
+    const bad = lines
+      .filter(({ line }) => line && [...ATTRIBUTE_MACROS].some((m) => new RegExp(`\\b${m}\\b`).test(line)))
+      .map(({ where, line }) => `${where}: ${line}`);
     expect(bad).toEqual([]);
   });
 
-  // A row that gets a context but no prototype line leaves m2c guessing the signature asmlift may
-  // be handed outright. The ONE tolerated reason is a macro-wrapped name (`SA2_LABEL(sub_8083504)`),
-  // which m2c's parser reads as K&R and rejects; any other row silently losing its prototype is a
-  // defect, not a limitation.
-  test('a context row without a prototype line has a macro-wrapped name', () => {
-    const unexplained = manifests.flatMap(({ man }) =>
-      man.functions
-        .filter((fn) => (fn.m2cCtx || fn.ctx) && m2cFnPrototype(fn.sym, fn.funcC) === null)
-        .filter((fn) => !/\)\s*\(/.test(fn.funcC.slice(0, fn.funcC.indexOf('{'))))
-        .map((fn) => `${man.project}:${fn.sym}`),
-    );
-    expect(unexplained).toEqual([]);
+  // The published repro script rebuilds ctx.h as `gunzip > ctx.h` then a heredoc `>>`. The
+  // harness builds the same file in memory. They are byte-identical only because every blob ends
+  // in a newline — `bench fidelity` compares m2c's OUTPUT, so it cannot see a divergence here.
+  test('every vendored context blob ends in a newline', () => {
+    const bad = lines.filter(({ ctx }) => !ctx.endsWith('\n')).map(({ where }) => where);
+    expect(bad).toEqual([]);
+  });
+
+  // A row whose headers already declare it gets nothing appended, and must not: a second
+  // declaration is where a conflicting return type would come from.
+  test('a row the vendored context declares gets no appended line', () => {
+    const bad = lines
+      .filter(({ fn, ctx, line }) => line !== null && new RegExp(`\\b${fn.sym}\\s*\\(`).test(ctx))
+      .map(({ where }) => where);
+    expect(bad).toEqual([]);
   });
 });
 

@@ -107,6 +107,7 @@ export function runCases(cases: Case[], outPath: string, shard: Shard = { idx: 0
       loc: c.loc,
       ctx: c.ctx,
       ctxRef: c.ctxRef,
+      ctxProto: c.ctxProto,
       proto: c.proto,
       symbols: c.symbols,
       note: c.note,

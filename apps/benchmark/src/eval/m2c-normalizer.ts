@@ -497,13 +497,11 @@ function rewriteInsn(ins: Insn, isa: Isa, textRelocs: Map<number, Reloc>, emissi
   return text;
 }
 
-// GCC attributes survive project preprocessing but m2c's C context parser (pycparser) cannot
-// read them — the m2c ecosystem strips them when generating a context. ONE pattern, used by the
-// harness (sanitizeM2cContext) and embedded as the perl expression in the reproduction scripts;
-// the script-fidelity gate byte-compares m2c's output, so the two copies cannot drift silently.
-export const M2C_CTX_ATTRIBUTE_RE = String.raw`__attribute__\s*\(\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\)\)`;
-
-/** A project context as m2c can parse it: GCC attributes stripped, nothing else touched. */
-export function sanitizeM2cContext(ctx: string): string {
-  return ctx.replaceAll(new RegExp(M2C_CTX_ATTRIBUTE_RE, 'g'), '');
-}
+// GCC ATTRIBUTES ARE NOT STRIPPED, and there used to be a function here that stripped them on
+// the belief that "m2c's C context parser (pycparser) cannot read them". It can: m2c's fork
+// parses `__attribute__((...))` and collects it (c_types.py `gcc_attributes`), and reads
+// `packed` when it lays a struct out. Deleting the attribute therefore did not make a context
+// parseable, it made it WRONG — a `packed` record silently gained the padding the compiler that
+// produced the target bytes never inserted. Measured over all 145 vendored blobs: 144 parse
+// verbatim, and the one that does not fails identically stripped (it carries `INCLUDE_ASM`
+// lines, not an attribute) and is used by no row. See test/authored-facts.test.ts.

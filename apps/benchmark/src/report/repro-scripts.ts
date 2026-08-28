@@ -11,9 +11,8 @@ import { join } from 'node:path';
 import { gunzipSync } from 'node:zlib';
 
 import { REAL_DIR, type RealManifest, loadManifestsForVendor } from '../cases/manifests';
-import { m2cFnPrototype } from '../cases/real';
 import { M2C_PINNED_COMMIT as M2C_COMMIT } from '../config';
-import { M2C_CTX_ATTRIBUTE_RE, disasmToM2c, m2cTarget } from '../eval/m2c-normalizer';
+import { disasmToM2c, m2cTarget } from '../eval/m2c-normalizer';
 
 // ── real-tier provenance preambles (comments only — nothing here executes) ────────────────
 // The committed manifests are part of the dataset, so the generator can name each project's
@@ -132,8 +131,8 @@ set -euo pipefail
 M2C_PATH='/path/to/m2c'${
     fn.ctxRef
       ? `
-# asmlift checkout — this function's context is the project's own vendored headers, stored in
-# the repo (referenced, not embedded — it is ~10–260 KB):
+# asmlift checkout — this function's context is the project's own vendored preprocessor
+# output, stored in the repo (referenced rather than embedded — it can be hundreds of KB):
 ASMLIFT_PATH='/path/to/asmlift'`
       : ''
   }
@@ -145,22 +144,23 @@ ASM_INPUT
 ${
   fn.ctxRef
     ? `
-# The project context the benchmark passed via --context, exactly as its real workflow would:
-# the project's own headers, preprocessed and frozen in the repo. It is NOT trimmed to this
-# function and it is NOT prototypes-only — it carries the project's struct layouts and global
-# types, because on this tier asmlift is handed the same class of facts as a symbol map (see the
-# SYMBOLS note in this row's asmlift script). GCC attributes stripped (m2c's C parser cannot read
-# them; same expression the harness uses)${
-        m2cFnPrototype(fn.sym, fn.refSource)
-          ? `,
-# plus the function's own prototype (the TU-derived context never forward-declares it)`
+# The project context the benchmark passed via --context: the VERBATIM vendored blob — this
+# function's translation unit run through the project's own preprocessor with the function body
+# removed, i.e. whatever that TU's headers and the manifest's prependC declare, and nothing
+# added. How much that is varies by project (a full header tree for some, a handful of typedefs
+# for others); the file below is the exact bytes, so read it rather than this comment.${
+        fn.ctxProto
+          ? `
+# One line is appended: the function's own prototype, and ONLY because the project's headers do
+# not declare it and the row's asmlift \`--proto\` already carries the same void-ness. It is
+# derived from that field, never from the reference source.`
           : ''
-      }.
-gunzip -kc "$ASMLIFT_PATH/${fn.ctxRef}" | perl -pe 's/${M2C_CTX_ATTRIBUTE_RE}//g' > ctx.h${
-        m2cFnPrototype(fn.sym, fn.refSource)
+      }
+gunzip -kc "$ASMLIFT_PATH/${fn.ctxRef}" > ctx.h${
+        fn.ctxProto
           ? `
 cat >> ctx.h <<'CTX_PROTO'
-${m2cFnPrototype(fn.sym, fn.refSource)}
+${fn.ctxProto}
 CTX_PROTO`
           : ''
       }
