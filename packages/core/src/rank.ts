@@ -762,17 +762,17 @@ export function enumerateCandidates(
   //
   // PER SYMBOL VARIANT, on a lift of its OWN, for the reason the `/setup-args` gate below states
   // for itself: no lift may be governed by a fact measured on a different one. The pin and
-  // `/setup-args` genuinely cannot move this answer — neither a parameter's type nor a call's
-  // argument list moves a `cond_br` — but a SYMBOL MAP can, by lifting a pool-loaded comparison
-  // constant as a `gaddr` the const-test test then does not read, and answering once on the mapped
-  // probe made the `/raw-globals` arm inherit it. Over the benchmark's 923 rows the two agree (21
-  // sites mapped, 21 raw, 0 divergences), so this buys no candidate today; what it buys is that a
-  // lift-time change that splits them enumerates both arms instead of silently dropping one, which
-  // is the failure nothing reports.
+  // `/setup-args` cannot move this answer — neither a parameter's type nor a call's argument list
+  // moves a `cond_br` — but a SYMBOL MAP can, by lifting a pool-loaded comparison constant as a
+  // `gaddr` the const-test test then does not read. Today they agree: over the 164 real rows that
+  // lift (the other 88 are frontend declines, and the 671 synthetic rows carry no map at all), 21
+  // sites mapped and 21 raw with no per-row divergence. So this buys no candidate; what it buys is
+  // that a lift-time change which splits them enumerates both arms rather than silently dropping
+  // one, the failure nothing reports.
   //
-  // The MAPPED variant reads it off the probe below, which is a lift in exactly that configuration
-  // — reuse, not inheritance. Only a variant lifting under DIFFERENT symbols pays a lift of its
-  // own, so the price is one extra lift + pre-recovery per `/raw-globals` arm, never per candidate.
+  // The MAPPED variant reads it off the probe below, itself a lift in exactly that configuration —
+  // reuse, not inheritance. Only a variant lifting under DIFFERENT symbols pays a lift of its own,
+  // so the price is one per `/raw-globals` arm and zero on a map-less row, never per candidate.
   let probeTreeOwned = false;
   const treeOwnedIn = (symbols: typeof opts.symbols): boolean => {
     if (symbols === opts.symbols) {
@@ -1373,7 +1373,6 @@ export function enumerateCandidates(
     // Declining is not pruning — same posture as the signedness decline below, and the same
     // candidate list; bitfield-members.test.ts pins the normalization the decline rests on.
     const svCands = sv.symbols ? axisCands : axisCands.filter((s) => s.bitfields);
-    // this variant's own answer to `/connective`'s enumeration gate — see `treeOwnedIn`
     const treeOwnedFold = treeOwnedIn(sv.symbols);
     // The signedness axis DECLINES where the pin has nothing to pin. `pinScalarParams` writes only
     // over an entry param still `unknown`/`int` that is not one of the recovered pointers/
@@ -1415,30 +1414,27 @@ export function enumerateCandidates(
       // leaving it to switch recovery. They are mutually exclusive within one raise
       // (raise/shortcircuit.ts's REFUSALS note has the mechanism: a folded `logic_or` is not the
       // `icmp` switch-recover.ts requires), so no predicate settles it — the differ does.
-      // Enumerated only where the probe saw the PAIRWISE refusal, 6 of the benchmark's 923 rows.
+      // Enumerated only where THIS VARIANT's lift reports the PAIRWISE refusal — 6 of 923 rows.
       //
-      // WHAT IT IS *NOT* FOR, because it was first shipped believing it was: the shared-arm
-      // spelling `switch (x) { case 0: case 2: … }`. That is not an axis at all, it is the
-      // DEFAULT — structure/switch-recover.ts groups case values that share a body. The two are
-      // the same object only in the DEGENERATE shape, one case group plus `default:`, where the
-      // dispatch has nothing to balance: measured both directions, agbcc gives 12 instructions
-      // each and one .text md5, and IDO 64 bytes each and one md5. Add a second group and they
-      // part — agbcc 20 against 16 (the switch builds a balanced `bgt` dispatch where the chain
-      // tests sequentially), IDO 80 bytes each and different bytes; at three groups agbcc gives
-      // 24 against 20. So on a RECOVERED multi-group switch the connective is a genuine second
-      // spelling and this axis is the only thing that reaches it.
+      // WHAT IT IS *NOT* FOR: the shared-arm spelling `switch (x) { case 0: case 2: … }`. That is
+      // the structurer's DEFAULT (switch-recover.ts groups case values sharing a body), and it is
+      // the same object as the `||` only in the DEGENERATE shape — one case group plus `default:`,
+      // where the dispatch has nothing to balance (agbcc 12 instructions each and one .text md5,
+      // IDO 64 bytes each and one md5). A second group parts them: agbcc 20 against 16, the switch
+      // building a balanced `bgt` dispatch where the chain tests sequentially; IDO 80 bytes each,
+      // different bytes. So on a recovered MULTI-GROUP switch the connective is a genuine second
+      // spelling, and this axis is the only thing that reaches it.
       //
-      // What that leaves is a claim about ONE ROW rather than about the shape. On the row the
-      // axis was built for, `kleod:ProcessInputAndUpdateEntities:agbcc`, it is worth 0 POINTS:
-      // with the grouping in place the row scores 306 with the axis on and 306 with it off, same
-      // label chain minus the suffix, same breakdown cell for cell, in half the wall clock
-      // (681s → 339s). Worth 0 points is not worth nothing — the published winner there carries
+      // Where it is worth 0 POINTS is one ROW, not the shape: on
+      // `kleod:ProcessInputAndUpdateEntities:agbcc` the grouping alone scores 306, and so does the
+      // grouping with this axis — same breakdown cell for cell, in half the wall clock (681s →
+      // 339s). Worth 0 points is not worth nothing: the published winner there carries
       // `/connective` and spells its site `gUnk_030034C0 == 0 || gUnk_030034C0 == 2`, so deleting
-      // the axis would move that row's source. Where it moves the SCORE is the case switch
-      // recovery declined ENTIRELY and the tree came out as nested `if`s: `CountCollectedGems`
-      // 327 → 299 and `CheckWorldCompletion` 135 → 124, neither of which has a `switch` at all.
-      // Telling the populations apart would need an L3 fact (did recovery produce a grouped
-      // arm?) at a raise-level hook, which is a level inversion; the fan is the price instead.
+      // the axis moves that row's source. It moves the SCORE where switch recovery declined
+      // ENTIRELY and the tree came out as nested `if`s — `CountCollectedGems` 327 → 299,
+      // `CheckWorldCompletion` 135 → 124, neither with a `switch` at all. Telling the populations
+      // apart needs an L3 fact (did recovery produce a grouped arm?) at a raise-level hook, which
+      // is a level inversion; the fan is the price instead.
       //
       // It rides the LIFT variants because the raise mutates in place: a second raise policy needs
       // its own copy of the lifted fn, exactly as `/setup-args` needs one to narrow. Crossed with
@@ -1461,11 +1457,8 @@ export function enumerateCandidates(
       for (const lv of liftVariants) {
         let fn: Fn;
         try {
-          // A NON-EMPTY SUFFIX IS WHAT NEEDS ITS OWN COPY — same spelling as the catch below,
-          // and for the same reason: the raise mutates in place, so any variant that is not the
-          // primary re-lifts. Naming the flags here instead would leave a fourth axis quietly
-          // sharing the primary's already-mutated `base`, and the catch would then swallow the
-          // failure as a dropped lever rather than rethrowing it.
+          // A NON-EMPTY SUFFIX IS WHAT NEEDS ITS OWN COPY, the catch below's spelling: naming the
+          // flags here would leave a fourth axis sharing the primary's already-mutated `base`.
           fn = lv.suffix === '' ? base : frontend.lift(name, asm, target, prototypes, opts.asmData, sv.symbols);
           if (lv.narrow && !narrowToSetupArgs(fn)) {
             continue; // nothing to cut after all — the base lift's own candidates already cover it

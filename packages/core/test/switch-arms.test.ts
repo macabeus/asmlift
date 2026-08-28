@@ -174,9 +174,8 @@ test('two case values sharing ONE body have the same layout index, and stay in v
   // declared tie-break, so they keep the spelling they already had instead of inheriting whichever
   // the tree walk reached first. The dispatch below tests 3 BEFORE 2 for exactly that reason: the
   // walk records 3 first, so a sort without the tie-break returns [3, 2, 1, 0] and only the
-  // tie-break puts them back in value order. (Regime A now stacks the labels as the jump-table
-  // path always did; the two shared values are ONE arm, so what the tie-break orders is that arm
-  // against the others.)
+  // tie-break puts them back in value order. (The two shared values are ONE arm with stacked
+  // labels, as in the jump-table path, so what the tie-break orders is that arm against the others.)
   const shared =
     'f:\n\tmov\tr2, #0x0\n' +
     '\tcmp\tr0, #0x1\n\tbeq\t.Lc1\t@cond_branch\n' +
@@ -642,8 +641,8 @@ test('two case values reaching one body are ONE arm with stacked labels', () => 
 // The same tree with the `default:` arm laid out BETWEEN two case bodies — where the arm-array
 // index `defaultLayoutPos` returns is observable. The index and the array it indexes have to be
 // the SAME list: counting the ungrouped entries (which hold `.Lc0` twice) against the grouped arm
-// array puts the label one arm too late, and this is the fixture that says so — it passed before
-// the grouping and passes after, and fails if the two lists are paired wrong.
+// array puts the label one arm too late. A PAIRING guard — it fails when the two lists are crossed,
+// not when either alone changes.
 const shared02MidDefault =
   'f:\n\tmov\tr2, #0x0\n' +
   '\tcmp\tr0, #0x1\n\tbeq\t.Lc1\t@cond_branch\n' +
@@ -659,12 +658,11 @@ const shared02MidDefault =
   '.Lc3:\n\tadd\tr2, r1, #0x4\n\tb\t.Lend\n' +
   '.Lend:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr2, [r0]\n\tbx\tlr\n';
 
-// The counter-case for the grouping's KEY. Two case values whose bodies are DISTINCT blocks that
-// happen to hold the same statements: `sameBareExit` (this file's equivalence for "indistinguishable
-// at emission", used for `default:` candidates) would call these one arm, and block identity does
-// not. Block identity is right on both compilers measured — agbcc merges two written-out copies, so
-// this ROM shape is one it never emits, and IDO does not merge, so this ROM shape is exactly what
-// two arms compile to. Grouping here would recover something neither compiler did.
+// The counter-case for the grouping's KEY. Two case values whose bodies are DISTINCT blocks holding
+// the same statements: `sameBareExit` — this file's equivalence for "indistinguishable at emission",
+// used for `default:` candidates — would call these one arm, and block identity does not. Block
+// identity is right on both compilers measured: agbcc merges two written-out copies, so it never
+// emits this ROM, and IDO does not merge, so this ROM is exactly what two arms compile to.
 const twinBodies =
   'f:\n\tmov\tr2, #0x0\n' +
   '\tcmp\tr0, #0x1\n\tbeq\t.Lc1\t@cond_branch\n' +

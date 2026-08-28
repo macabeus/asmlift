@@ -63,12 +63,13 @@ describe('/connective is enumerated wherever the tree refusal has an inhabitant'
   const POOL_SYMBOLS: SymbolMap = new Map([[0x3001234, [{ name: 'gMode', kind: 'data' }]]]);
 
   test('the PREDICATE is asked in both symbol-map configurations, and answers the same', () => {
-    // The obligation is on the predicate, so this asks the predicate — not the candidate labels,
-    // which a single shared boolean would satisfy just as well and which is what this test used to
-    // do. Lift the same function twice, with the map and without, and count the sites each lift's
-    // OWN refusal reports. rank.ts now reads one answer per symbol variant for exactly this
-    // reason; over every benchmark row that lifts the two agree (21 sites mapped, 21 raw), and the
-    // failure mode if a lift-time change ever splits them is a variant never enumerated.
+    // The obligation is on the PREDICATE, so this asks the predicate rather than the candidate
+    // labels — a single boolean shared by both arms satisfies those either way, which is what makes
+    // them unable to fail on this. Lift the same function twice, with the map and without, and
+    // count the sites each lift's OWN refusal reports; rank.ts reads one answer per symbol variant
+    // for the same reason. Over the 164 real rows that lift they agree, 21 sites each way with no
+    // per-row divergence, and the failure mode if a lift-time change splits them is a variant never
+    // enumerated.
     const sites = (symbols?: SymbolMap): number => {
       const fn = frontendFor(ARMV4T_AGBCC).lift('f', POOL_ASM, ARMV4T_AGBCC, P, undefined, symbols);
       applyIdiomPatterns(fn, ARMV4T_AGBCC, undefined);

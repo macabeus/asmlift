@@ -626,28 +626,26 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
       switchArmsFollowLayout ? layoutIndex(a[1]) - layoutIndex(c[1]) || a[0] - c[0] : a[0] - c[0],
     );
     // TWO VALUES ONE BODY IS ONE ARM. `SwitchCase.values` stacks labels for exactly this, and the
-    // jump-table regime has always grouped (structure.ts's `armOf`); this regime emitted the SAME
-    // body once per label instead — `structureRegion` run twice on one block — which is a
-    // duplication the IR never asked for, not a spelling choice.
+    // jump-table regime groups the same way (structure.ts's `armOf`). Emitting the body once per
+    // label is `structureRegion` run twice over one block: a duplication, not a spelling choice.
     //
-    // WHY BLOCK IDENTITY IS THE RIGHT KEY, and not a body-equality one like `sameBareExit` above.
-    // agbcc MERGES two written-out copies into one block — target.ts's `switchArmsFollowLayout`
-    // note already says so from agbcc's own sources (SRCS compiles jump.c, whose cross-jump does
-    // it) — and compiling both directions at TOOLCHAIN.agbccFlags says where the merged block
-    // lands: at the LAST copy's position. So `case 0: A break; case 1: … case 2: A break;` and the
-    // grouped arm placed THERE are the same object (37 instructions, .text md5 555abb1a), while
-    // the grouped arm placed at the first value is not (fe4d7d35). That is why the grouped
-    // spelling round-trips rather than merely being shorter: agbcc declares
-    // `switchArmsFollowLayout`, so this regime emits the arm exactly where the merged block sits.
-    // IDO does the opposite and does not merge at all — 224 bytes against the grouped 144 — so on
-    // MIPS a shared block can ONLY have come from stacked labels. Under agbcc the duplicate is
-    // unreachable as a ROM shape and under IDO it is a DIFFERENT ROM, so on neither compiler do
-    // two DISTINCT blocks with equal bodies mean one arm. Sound also
-    // because a case entry with a phi already declined above (`asLeafOrTest`), so two edges onto
-    // one body bind nothing that could differ. Grouping preserves the sort: an arm takes the
-    // position of its FIRST value, which is the position the old array gave that value's copy.
-    // `defaultLayoutPos` is handed the GROUPED entry list for the same reason: what it returns is
-    // an INDEX INTO the arm array, so the list it counts and the list it indexes must be one list.
+    // WHY BLOCK IDENTITY IS THE KEY, and not a body-equality one like `sameBareExit` above. agbcc
+    // MERGES two written-out copies into one block — target.ts's `switchArmsFollowLayout` note
+    // says so from agbcc's own sources, SRCS compiling jump.c — and compiling both directions at
+    // TOOLCHAIN.agbccFlags says WHERE the merged block lands: at the last copy's position. So
+    // `case 0: A break; case 1: … case 2: A break;` and the grouped arm placed THERE are one
+    // object (.text md5 555abb1a), while the grouped arm placed at the first value is not
+    // (fe4d7d35). That is why the grouped spelling round-trips rather than merely reading shorter:
+    // agbcc declares `switchArmsFollowLayout`, so the arm goes exactly where the merged block sits.
+    // IDO does not merge at all — 224 bytes against the grouped 144 — so on MIPS a shared block can
+    // only have come from stacked labels. Two DISTINCT blocks with equal bodies therefore mean one
+    // arm on neither compiler: under agbcc that ROM is unreachable, under IDO it is what two arms
+    // compile to. Sound also because a case entry with a phi already declined above
+    // (`asLeafOrTest`), so two edges onto one body bind nothing that could differ.
+    //
+    // An arm takes the position of its FIRST value, which keeps the sort above. `defaultLayoutPos`
+    // is handed the GROUPED entry list because what it returns is an INDEX INTO the arm array, so
+    // the list it counts and the list it indexes must be one list.
     const armsByBlock = new Map<Block, number[]>();
     for (const [k, blk] of sortedCases) {
       const prev = armsByBlock.get(blk);

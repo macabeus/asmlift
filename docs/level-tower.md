@@ -153,13 +153,12 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   `kleod:ProcessInputAndUpdateEntities:agbcc` from 367 to 306 with the axis ON and to 306 with it
   OFF — same breakdown, half the wall clock.
 
-  The rule that follows is cheap and was skipped twice: **an underdetermination claim about two
-  source spellings is a COMPILER claim, so compile both and diff the objects before building
-  anything.** A score table cannot make it for you — the cheaper spelling was never in the fan to
-  lose. Both of this axis's rounds then got the compile itself wrong in the same way, which is the
-  second half of the rule: **compile the shape you are generalizing over, not the first shape that
-  fits in a test file, and record the flags.** The measurements, all at `TOOLCHAIN.agbccFlags` and
-  `IDO_TOOLCHAIN.ccFlags`:
+  The rule that follows is cheap: **an underdetermination claim about two source spellings is a
+  COMPILER claim, so compile both and diff the objects before building anything.** A score table
+  cannot make it for you — the cheaper spelling was never in the fan to lose. And the compile has a
+  second half, which two attempts here got wrong in the same way: **compile the shape you are
+  generalizing over, not the first shape that fits in a test file, and record the flags.** The
+  measurements, all at `TOOLCHAIN.agbccFlags` and `IDO_TOOLCHAIN.ccFlags`:
 
   | shape                            | grouped vs `\|\|`                                                        | duplicated body vs grouped                                                                                                                                 |
   | -------------------------------- | ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -170,10 +169,10 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   | IDO, 2 groups                    | 80 bytes each, **different bytes**                                       | the two placements also differ (689f34ec vs ec39af99)                                                                                                      |
 
   So the identity is a property of the DEGENERATE shape, on both compilers, and the axis is a real
-  second spelling on every recovered multi-group switch. The grouping is right for a different
-  reason than the one first written down: under agbcc the duplicated source is unreachable as a ROM
-  shape, and under IDO it is a different ROM, so a shared block means stacked labels on either
-  compiler — an argument about the ROM, not about which source is prettier.
+  second spelling on every recovered multi-group switch. What makes the grouping right is an
+  argument about the ROM rather than about which source is prettier: under agbcc the duplicated
+  source is unreachable as a ROM shape, and under IDO it is a different ROM, so a shared block means
+  stacked labels on either compiler.
 
   **And 2× is a LOWER bound, not the price.** A new axis doubles its own admitting rows, and it
   also UN-COLLAPSES sibling axes that `seenTrees` was deduping away on the base tree: a sibling

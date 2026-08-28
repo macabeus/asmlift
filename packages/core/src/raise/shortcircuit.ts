@@ -276,20 +276,18 @@ export function recognizeShortCircuit(fn: Fn): boolean {
 //     `/connective`). ONLY THIS CLAUSE. Its notion of "same scrutinee" is switch-recover.ts's own
 //     PRE1 — a NECESSARY condition for recovery, never a sufficient one, so what it refuses is
 //     "a switch could not be ruled out here" and it is a proxy too, just a far tighter one than
-//     the relayed clause. Priced over the set it REFUSES rather than the set it admits: it fires
-//     on 6 benchmark rows, and on 4 of them the published winner folds THROUGH it and carries
-//     `/connective` — including `kleod:CheckWorldCompletion`, whose refused site is
-//     `v5 == 3 || v5 == 5` on an ordinary inner-loop counter with no dispatch region anywhere
-//     near it. It protects the other 2 (`pokeemerald:IsStringLengthAtLeast`,
-//     `pokeemerald:TrySetCantSelectMoveBattleScript`), and it is the axis, not the clause, that
-//     keeps the 4. A structural discriminator would be strictly better and is L1-visible — is the
-//     shared block the entry of a region with dispatch-shaped in-edges, is the scrutinee defined
-//     by the enclosing loop header — and is UNBUILT; nothing here is a test of "am I inside a
-//     dispatch".
+//     the relayed clause. Priced over the set it REFUSES rather than the set it admits: it fires on
+//     6 rows, protects 2 (`pokeemerald:IsStringLengthAtLeast`,
+//     `pokeemerald:TrySetCantSelectMoveBattleScript`), and on the other 4 the published winner
+//     folds THROUGH it — `kleod:CheckWorldCompletion`'s refused site is `v5 == 3 || v5 == 5` on an
+//     ordinary inner-loop counter with no dispatch region near it. It is the axis, not the clause,
+//     that keeps those 4. A structural discriminator is L1-visible and would be strictly better —
+//     is the shared block the entry of a region with dispatch-shaped in-edges, is the scrutinee
+//     defined by the enclosing loop header — and is UNBUILT.
 //     The relayed clause below is a different statement (see its own note: a blunt proxy that
-//     fires on an ordinary loop counter), it has NO inhabitant in any of the 723 benchmark rows
-//     that lift, and a candidate born there would carry a `/connective` label for a fold that
-//     answers no connective-vs-tree question. It stays absolute.
+//     fires on an ordinary loop counter), it has NO inhabitant anywhere in the benchmark's 923
+//     rows, and a candidate born there would carry a `/connective` label for a fold that answers
+//     no connective-vs-tree question. It stays absolute.
 //   - the shared block was reached through a RELAY, and either test's scrutinee is compared against
 //     constants more than once in the function. This one is ABSOLUTE — `foldTreeOwned` does not
 //     widen it. Same reason as the bullet above, widened because the reach is: a relay is what
@@ -367,11 +365,11 @@ export interface BranchShortCircuitOptions {
    *
    *  A NEW REFUSAL CONDITION, stated because it is one: this is per-FUNCTION and the question is
    *  per-SITE. Every tree-owned site in a function flips together, so a function with two of them
-   *  wanting OPPOSITE spellings has no candidate that spells the mix, and nothing reports the gap
-   *  — the same shape memory's `joined-branch-sense-decidable` round recorded, costing
-   *  completeness here rather than correctness. The alternative is a fork per site:
-   *  `kleod:CheckWorldCompletion` refuses at 10 and goes 96 → 192 candidates as one boolean,
-   *  where a per-site fork would be 1024×. That is why the boolean, not an oversight. */
+   *  wanting OPPOSITE spellings has no candidate that spells the mix, and nothing reports the gap.
+   *  A per-FUNCTION predicate cannot decide a per-SITE question — the same shape the joined-if
+   *  default hit — and here it costs completeness rather than correctness. The alternative is a
+   *  fork per site: `kleod:CheckWorldCompletion` refuses at 10 and goes 96 → 192 candidates as one
+   *  boolean, where a per-site fork would be 1024×. That is why the boolean, not an oversight. */
   foldTreeOwned?: boolean;
   /** Called at each site the pairwise tree-ownership refusal is the ONE thing stopping the fold —
    *  how rank.ts learns the axis has an inhabitant here without re-running the matcher. Asked LAST,
