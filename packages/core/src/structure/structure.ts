@@ -38,7 +38,7 @@
 // header also entered by a plain br).
 import { type GlobalCell, globalCellOf, mayWriteGlobal } from '../ir/alias';
 import { Block, Fn, Op, Value, defOpMap, dominators, successorsOf } from '../ir/core';
-import { EFFECTFUL_OPS } from '../ir/opcodes';
+import { CAST_WIDTHS, EFFECTFUL_OPS } from '../ir/opcodes';
 import { type IrType, T, scalarTypeForAccess, typeEquals } from '../ir/types';
 import {
   BinOp,
@@ -54,7 +54,7 @@ import {
   stmtChildren,
   walkExprs,
 } from '../l3/ast';
-import type { Gate } from '../l3/gates';
+import { type Gate, firstRejection } from '../l3/gates';
 import { exprCType, provablyNonNegative, ptrElemBytes, renderedIntSignedness } from '../l3/typing';
 import { returnType } from '../raise/recover';
 import { collectStructs } from '../raise/structs';
@@ -691,6 +691,83 @@ interface DoWhileInfo {
   arms: LoopArm[];
 }
 
+/** One carrier offered to one merge slot, as `FRESH_MERGE_GATES` judges it. */
+export interface FreshMergeCarrier {
+  /** every in-edge passes the SAME value, so the merge is a pure alias of the carrier */
+  readonly allSame: boolean;
+  /** the carrier is an entry parameter, or a merge home this rule itself minted */
+  readonly paramRooted: boolean;
+}
+
+/** `freshParamMerge`'s admission: may this merge take its OWN home instead of the carrier's name?
+ *  Nothing here is `sound` — both spellings are ordinary C over the same values, so `rank.ts`
+ *  enumerates the ON one as `/fresh-merge` and the differ referees it. What keeps them two
+ *  SPELLINGS rather than two PROGRAMS is `canTakeName`'s carrier width/sign check, which runs on
+ *  the same carrier one step earlier.
+ *
+ *  WHAT THE SPELLING BUYS: a parameter is live from entry, so its name pins the value to the
+ *  register the ABI handed it; a fresh local is dead until its first arm, so the compiler may place
+ *  the copy where the asm has it. Which merges actually needed a register of their own is not
+ *  recoverable from the C, and the rule is ALL-OR-NOTHING over a function's param-rooted slots. On
+ *  `max3` (agbcc -O2, scored against its own target) only the SECOND of the two chained merges is
+ *  load-bearing: re-homing just the first is byte-identical to re-homing neither (score 5), and
+ *  re-homing just the second is byte-identical to re-homing both (score 0, MATCH). Splitting the
+ *  choice per slot would be a fan of 2^slots, so the axis offers the whole-function spelling.
+ *
+ *  `param-rooted` is a SCOPE, not a derivation. A chain rooted in an ordinary merge home is left
+ *  alone, and widening to one is a different, unmeasured axis: 293 of 721 map-less corpus rows
+ *  carry at least one conditional merge slot (925 slots), of which the param rooting admits 109 —
+ *  `LoadBGTilemapData` is one of the other 184, which is why the axis has no reach there.
+ *
+ *  The rooting is over carrier VALUES, and two shapes carry a parameter's value past it under
+ *  another name, both reach-only: a redundant phi keeps the parameter's own name (`redundant-phi`)
+ *  and its result is then an ordinary carrier, which fires on 0 of 721 lifted corpus rows; and the
+ *  minted-home set records only merges that ended up FRESH, so a merge that refuses a parameter and
+ *  then adopts an ordinary local is not recorded — 336 firings over 6 rows. */
+export const FRESH_MERGE_GATES: readonly Gate<FreshMergeCarrier>[] = [
+  {
+    id: 'redundant-phi',
+    why: 'a merge every edge feeds the same value overwrites nothing, so its own home buys a copy',
+    sound: false,
+    guardedBy: 'fresh-merge.test.ts: a redundant phi over one parameter keeps the parameter',
+    rejects: (c) => c.allSame,
+  },
+  {
+    id: 'param-rooted',
+    why: "the rule's scope — a chain rooted in an ordinary merge home is a separate, unmeasured axis",
+    sound: false,
+    guardedBy: 'fresh-merge.test.ts: a merge over ordinary locals is untouched',
+    rejects: (c) => !c.paramRooted,
+  },
+];
+
+/** Whether any merge slot could reach `FRESH_MERGE_GATES` at all: an in-edge argument list that
+ *  differs and includes an entry parameter — what `rank.ts` gates enumeration of `/fresh-merge` on.
+ *  An OVER-approximation, which is the safe direction for a gate that only decides whether to
+ *  enumerate: the walk can still refuse
+ *  the carrier (`carriesPreUpdate`, `canTakeName`), and a slot whose carrier is a home this rule
+ *  mints is not visible here at all. */
+export function hasParamRootedMerge(fn: Fn): boolean {
+  const entryParams = new Set<Value>(fn.blocks[0].params);
+  return fn.blocks.slice(1).some((b) =>
+    b.params.some((_, i) => {
+      const args = fn.blocks.flatMap((pr) =>
+        pr.ops[pr.ops.length - 1].successors.filter((sx) => sx.block === b).map((sx) => sx.args[i]),
+      );
+      return args.some((a) => a !== args[0]) && args.some((a) => entryParams.has(a));
+    }),
+  );
+}
+
+/** True when the merge takes its own home. The table is a parameter so a test can drop one gate and
+ *  re-run the real pass (`StructureHooks.freshMergeGates`). */
+export function reHomesParamMerge(
+  c: FreshMergeCarrier,
+  gates: readonly Gate<FreshMergeCarrier>[] = FRESH_MERGE_GATES,
+): boolean {
+  return firstRejection(gates, c) === null;
+}
+
 // Structuring levers, threaded as DATA so a new one is a field here + its consumer, not a new
 // positional boolean widened across every call site:
 //   returnsVoid                    — from the function's own prototype (suppress phantom r0 return);
@@ -836,6 +913,14 @@ export interface StructureOptions {
   // function. Over the whole benchmark the axis wins one row by 3 points and loses none, which is
   // what a differ-refereed spelling looks like.
   coalesceMergeNames?: boolean;
+  // Give a merge whose carrier is a FUNCTION PARAMETER its own local, instead of assigning back
+  // into the parameter's name. Off by default; rank.ts enumerates the ON spelling as the
+  // `/fresh-merge` axis, and `FRESH_MERGE_GATES` holds the admission and the argument for it.
+  //
+  // NOT `materializeJoinFeeds` widened to parameters. That axis reaches its shape by giving the
+  // join's feed a NAME to adopt, and materialization is keyed on the defining `Op` — a parameter
+  // has none, so there is nothing to key.
+  freshParamMerge?: boolean;
   // How an unresolvable VALUE degrades (a live `opaque`, an unlowered transient op, a dropped def):
   //   "strict"   (default) — the `"?"` sentinel, tripping assertResolved at the boundary (loud in
   //              the PROCESS);
@@ -856,6 +941,8 @@ export interface StructureHooks {
   /** `coalesceMergeNames`'s admission rules, so a test can run the pass with one gate DROPPED —
    *  the ablation as a value rather than as a flag compiled into the shipped path. */
   nameCoalesceGates?: readonly Gate<NameMerge>[];
+  /** `freshParamMerge`'s admission rules, ablatable the same way. */
+  freshMergeGates?: readonly Gate<FreshMergeCarrier>[];
 }
 
 /** A CANDIDATE SPELLING MUST NEVER UNLOCK A FUNCTION THE PRIMARY DECLINES. `varName` is not only
@@ -876,6 +963,7 @@ function assertPrimaryAccepts(fn: Fn, opts: StructureOptions, hooks: StructureHo
     {
       ...opts,
       coalesceMergeNames: false,
+      freshParamMerge: false,
       materializeJoinFeeds: false,
       homeSharedAddresses: false,
       homeLoopExprs: false,
@@ -912,6 +1000,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     readsStayWhereWritten = false,
     unsignedCompareSpelling = false,
     coalesceMergeNames = false,
+    freshParamMerge = false,
     onGap = 'strict',
     symbols,
   } = opts;
@@ -927,6 +1016,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // target's defaults, so resetting one would probe a spelling asmlift never emits here.
   if (
     coalesceMergeNames ||
+    freshParamMerge ||
     materializeJoinFeeds ||
     homeSharedAddresses ||
     homeLoopExprs ||
@@ -1369,6 +1459,16 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     varName.set(p, `a${i}`);
     varType.set(`a${i}`, p.type);
   });
+  /** The function's own parameters, as VALUES — `FRESH_MERGE_GATES`' `param-rooted` half. A name
+   *  test would not do: a loop variable that adopted `a0` carries the name without being the
+   *  parameter. */
+  const entryParams = new Set<Value>(entry.params);
+  /** Merge params that took a fresh home because `param-rooted` refused their parameter carrier —
+   *  the set's other half, so a further merge carrying one of them is refused too. It records the
+   *  merges that ended up FRESH and no others: one that refuses a parameter and then adopts an
+   *  ordinary local passes the value on under that local's name (336 firings over 6 corpus rows),
+   *  which is the chain-rooted widening rather than this rule. */
+  const paramSeededMerges = new Set<Value>();
   const backArgName = new Map<Value, string>();
   // The C static type of a rendered expression, over the declared variable types — what decides
   // whether a memory access's base may be dereferenced as spelled (memAccess/arrayAccess).
@@ -1729,17 +1829,40 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         // but only one whose name survives the C3 interference check (else the edge copies into
         // the name would clobber a still-live value).
         let name: string | undefined;
+        /** Set when `FRESH_MERGE_GATES` refused a carrier here — not "the one reason this merge
+         *  went unnamed", since the rejections above it `continue` without recording. Over-marking
+         *  costs one downstream merge an extra fresh home, a spelling the differ referees. */
+        let refusedParamCarrier = false;
         for (const c of [
           ...incoming.filter((c) => varName.has(c.v)),
           ...incoming.filter((c) => backArgName.has(c.v)),
         ]) {
           const nm = varName.get(c.v) ?? backArgName.get(c.v)!;
-          if (!carriesPreUpdate(c.v, c.pr, b) && canTakeName(p, b, nm, allSame)) {
-            name = nm;
-            break;
+          if (carriesPreUpdate(c.v, c.pr, b) || !canTakeName(p, b, nm, allSame)) {
+            continue;
+          }
+          // `freshParamMerge` (the `/fresh-merge` axis): this merge takes its own home rather
+          // than the carrier's name — `FRESH_MERGE_GATES` above holds the admission and the
+          // argument for it. Absent the option nothing changes.
+          if (
+            freshParamMerge &&
+            reHomesParamMerge(
+              { allSame, paramRooted: entryParams.has(c.v) || paramSeededMerges.has(c.v) },
+              hooks.freshMergeGates,
+            )
+          ) {
+            refusedParamCarrier = true;
+            continue;
+          }
+          name = nm;
+          break;
+        }
+        if (name === undefined) {
+          name = `v${fresh++}`;
+          if (refusedParamCarrier) {
+            paramSeededMerges.add(p);
           }
         }
-        name ??= `v${fresh++}`;
         varName.set(p, name);
         if (!varType.has(name)) {
           varType.set(name, p.type);
@@ -1894,7 +2017,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   //   - the merge variable names any OTHER SSA value (a shared name has readers and writers
   //     between the def site and the edge that edge placement respects and anchoring would not).
   //     A loop header's carried value is the exception above: its other claimants all live in
-  //     the body;
+  //     the body. `freshParamMerge` WIDENS what this admits — a minted home is sole by
+  //     construction — which is the pairing `/fresh-merge` and `/defsite` match `clampu8` on;
   //   - another anchored const of the same variable lies on a path from this one to this one's
   //     edge (the later write would clobber this arg's value; both stay at their edges instead).
   //
@@ -2467,11 +2591,16 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       return { k: 'un', op: '~', e: needsIntSpelling(x) ? { k: 'cast', to: T.s(32), e: x } : x };
     }
     // Width-narrowing casts: `zext`/`sext` widen a `width`-bit value back to 32 → C `(u8)e`/`(s8)e`.
-    if (d.opcode === 'zext') {
-      return { k: 'cast', to: T.int(d.attrs.width as number, false), e: e(d.operands[0]) };
-    }
-    if (d.opcode === 'sext') {
-      return { k: 'cast', to: T.int(d.attrs.width as number, true), e: e(d.operands[0]) };
+    // The width is in BITS, and outside `CAST_WIDTHS` there is no C type to cast to — a GAP, not
+    // the `(u2)` the backend would otherwise print and no compiler accept. No frontend produces
+    // one (the cast idioms and PPC's `extsb`/`extsh` emit 8 and 16), so this is the loud floor
+    // under hand-written IR; `raise/narrowlocal.ts` and `raise/paramwidth.ts` refuse to NARROW on
+    // such a width, which is a different decision from spelling one.
+    if (d.opcode === 'zext' || d.opcode === 'sext') {
+      const w = d.attrs.width as number;
+      return CAST_WIDTHS.has(w)
+        ? { k: 'cast', to: T.int(w, d.opcode === 'sext'), e: e(d.operands[0]) }
+        : mkGap(`no C type for a ${w}-bit '${d.opcode}'`, [e(d.operands[0])]);
     }
     if (d.opcode === 'call') {
       return { k: 'call', fn: d.attrs.target as string, args: d.operands.map(e) };

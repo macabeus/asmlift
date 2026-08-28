@@ -95,7 +95,7 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
     tree (e.g. `/argbase`, `/scopebase`, `/indexed`, `/livebase`, `/volatile`, `/vol-store`,
     `/unreduce`, `/ptr-field`, `/mulfirst`, `/regcopy`, `/coalesce`) and STRUCTURING axes, which re-run `structure()` under a different
     lever (e.g. `/flip-branch`, `/defsite`, `/inplace`, `/no-bitfield`, `/reread-globals`,
-    `/merge-names`) — plus `/raw-globals`, the signedness pin and `/setup-args`, which re-run the
+    `/merge-names`, `/fresh-merge`) — plus `/raw-globals`, the signedness pin and `/setup-args`, which re-run the
     lift itself.
     The roster is illustrative; `rank.ts` is the source of truth.
     Each emits an _alternative candidate_ rather than replacing the primary, and the differ
@@ -144,6 +144,35 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   the shapes the substitution cannot reach have no row demanding them, take the axis when one
   appears — and name the fork in the lever's header, because otherwise the gap left behind reads as
   an oversight rather than as the price of the mechanism.
+
+  **And 2× is a LOWER bound, not the price.** A new axis doubles its own admitting rows, and it
+  also UN-COLLAPSES sibling axes that `seenTrees` was deduping away on the base tree: a sibling
+  whose re-spelling was inert on the old tree can be distinct on the new one, and then it enumerates
+  where it did not before. So the real multiplier is 2 × (siblings the new tree makes non-inert),
+  and it is measured, never assumed. `/fresh-merge` (structure.ts `freshParamMerge`, the parameter's
+  merge home) is the counterexample that fixes this: `synthetic:max3:agbcc` goes **2 candidates to
+  10, ×5** — `signed/flip-join` and `signed/merge-names` do not appear at all on the base tree, both
+  deduped as identical to `signed`, while `signed/flip-join/fresh-merge` and
+  `signed/merge-names/fresh-merge` are distinct spellings. Over the 39 map-less corpus rows the axis
+  admits, distinct sources go 5449 → 10028 (mean ×1.84, histogram {×1.5:1, ×1.8:1, ×2:12, ×2.33:2,
+  ×3:17, ×4:1, ×4.5:1, ×5:4}); below 2× where the new tree instead makes a sibling inert, above it
+  where it wakes one. Priced in the unit that costs compiles — surviving candidates over every row's
+  own `targetAsm`, map-less — `/fresh-merge` is **+4579 over an axis-free fan of 18106, +25.3%**,
+  and **94% of that is two klonoa functions**: `kleod:ProcessInputAndUpdateEntities:agbcc` 4800 →
+  8640 and `kleod:ConfigureEntityBehavior:agbcc` 480 → 960. Quote the concentration, not just the
+  total: a row count ("105 rows pay ×2") understates the dominant row by two orders of magnitude,
+  because rows are not the unit that compiles.
+
+  **And an axis can widen a gate it never mentions — price that too.** The un-collapse above is an
+  ENUMERATION cost; the same tree change can also satisfy an existing rule's precondition and admit
+  where that rule used to refuse. `anchorConstCopies` declines a merge whose variable names another
+  SSA value, so a merge that adopted its parameter is never anchored — and `/fresh-merge`, which
+  mints a home for exactly those merges, makes them sole claimants by construction: sole-claimant
+  admissions go **196 → 245** over 679 corpus rows, 34 rows gaining 49 merges, and
+  `synthetic:clampu8:mwcc_242_81` reaches MATCH through the pair (`signed/defsite` is inert on the
+  base tree and absent from its fan). So a new axis is priced over its own refusals AND over the
+  refusals it removes elsewhere; the second is the one nothing reports, because the widened gate
+  does not know it was widened.
 
   **An axis's 2× is intrinsic, and cannot be bought back by predicting which half is redundant.**
   The signedness pin is the worked example, because it is the axis that fires most broadly:

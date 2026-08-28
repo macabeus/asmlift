@@ -165,6 +165,10 @@ export const NAME_COALESCE_GATES: readonly Gate<NameMerge>[] = [
     guardedBy: 'namecoalesce.test.ts: ablating type merges two names the declarations disagree about',
     rejects: (c) => !c.sameType,
   },
+  // MIRROR: `structure.ts`'s `FRESH_MERGE_GATES` asks a parameter question too, and the two are not
+  // one predicate. This gate refuses merging two already-settled NAME CLASSES and is on by default
+  // within `/merge-names`; that one refuses one carrier at one merge SLOT and is off by default.
+  // Only their `entry.params` membership test coincides.
   {
     id: 'param',
     why: 'a function parameter is the signature the source wrote, not a recovered local',

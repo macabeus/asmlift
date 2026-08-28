@@ -509,3 +509,18 @@ test('the distribution is RECURSIVE — a nested connective dualizes too', () =>
   // !(a || (b && c))  →  !a && (!b || !c)
   expect(emitIr(nested)).toContain('a0 == 0 && (a1 == 0 || a2 == 0)');
 });
+
+test('a cast width no C type spells is a loud gap, not a `(u2)` cast', () => {
+  // `zext`/`sext` carry BITS, and `(u2)` is a type no compiler has — so the emitter must not spell
+  // one. No frontend produces a width outside 8/16; this is the floor under hand-written IR, and
+  // `raise/narrowlocal.ts`'s `cast-width` gate is a different decision (whether to NARROW on it).
+  const ir = (w: number) => `fn f {\n^bb0(%0: u16):\n  %1: s32 = zext %0 {width=${w}}\n  ret %1\n}\n`;
+  const run = (w: number): string => {
+    const fn = parse(ir(w));
+    verify(fn);
+    recoverTypes(fn);
+    return cBackend.emit(structure(fn));
+  };
+  expect(run(16)).toMatch(/return \(u16\)a0;/);
+  expect(() => run(2)).toThrow(/no C type for a 2-bit 'zext'/);
+});

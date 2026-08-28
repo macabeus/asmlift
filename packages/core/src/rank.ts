@@ -58,6 +58,7 @@ import {
   hasLoopSharedPureValue,
   hasMergeFeedHome,
 } from './structure/analysis';
+import { hasParamRootedMerge } from './structure/structure';
 import { type SymbolMap, symbolsByName } from './symbols';
 import { type TargetDescription, structureOptionsFor } from './target';
 
@@ -78,7 +79,16 @@ import { type TargetDescription, structureOptionsFor } from './target';
  *  primary declines (reread also skips the strip closure). Both exemptions are stated here
  *  rather than left implicit in a missing `||` arm or trigger term. */
 interface StructuringAxis {
-  flag: 'reread' | 'inplace' | 'mergeNames' | 'addrHome' | 'exprHome' | 'derivedHome' | 'mergeHome' | 'unsCmp';
+  flag:
+    | 'reread'
+    | 'inplace'
+    | 'mergeNames'
+    | 'addrHome'
+    | 'exprHome'
+    | 'derivedHome'
+    | 'mergeHome'
+    | 'unsCmp'
+    | 'freshMerge';
   suffix: string;
   options: (on: boolean) => Parameters<typeof structureChecked>[1];
   probeGate?: (probe: Fn, defs: Map<Value, Op>) => boolean;
@@ -212,6 +222,31 @@ const STRUCTURING_AXES: readonly StructuringAxis[] = [
     suffix: '/uns-cmp',
     options: (on) => ({ unsignedCompareSpelling: on }),
     probeGate: (probe) => probe.blocks.some((b) => b.ops.some((op) => op.opcode.startsWith('icmp_u'))),
+    strip: true,
+  },
+  // `/fresh-merge` — the parameter-merge-home axis (structure.ts `freshParamMerge`, whose
+  // `FRESH_MERGE_GATES` carry the argument): a merge whose carrier is a parameter takes its own
+  // local (`if (a1 < a0) { v0 = a0; } else { v0 = a1; }`) where the default assigns back into the
+  // parameter (`if (a1 < a0) a1 = a0;`). Both are ordinary C over the same values, so
+  // the differ decides. At TWO arguments they compile to the SAME bytes on agbcc and on mwcc
+  // (measured, both directions), which is why `maxi`/`mini` hold under the axis.
+  //
+  // IT ALSO UNLOCKS `/defsite`. `anchorConstCopies` refuses a merge whose name claims another SSA
+  // value, so a merge that adopted its parameter is never anchored, while a minted home is sole by
+  // construction and clears that one refusal — a constant arm then writes above the branch, where
+  // the remaining placement rules allow it. That pair spells m2c's own
+  // `v0 = 0xFF; if (a0 <= 0xFF) v0 = a0;`, which is how `synthetic:clampu8:mwcc_242_81` matches
+  // under `signed/defsite/fresh-merge` — `signed/defsite` is inert on the base tree and does not
+  // appear in that row's fan at all. Priced at the guard it widens: sole-claimant admissions go
+  // 196 → 245 over 679 corpus rows, 34 of them gaining 49 merges.
+  //
+  // Gated on `hasParamRootedMerge`, which lives beside the rule it over-approximates. Structural,
+  // so it cannot answer differently per symbol variant.
+  {
+    flag: 'freshMerge',
+    suffix: '/fresh-merge',
+    options: (on) => ({ freshParamMerge: on }),
+    probeGate: (probe) => hasParamRootedMerge(probe),
     strip: true,
   },
 ];
@@ -750,6 +785,7 @@ export function enumerateCandidates(
     derivedHome: false,
     mergeHome: false,
     unsCmp: false,
+    freshMerge: false,
   }));
   for (const ax of STRUCTURING_AXES) {
     if (ax.probeGate === undefined || ax.probeGate(probe, probeDefs)) {
