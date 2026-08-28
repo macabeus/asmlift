@@ -2510,10 +2510,11 @@ export const SYNTHETIC: SynthSpec[] = [
   //
   // So the two gaps compose in one direction only: with a wide counter asmlift MATCHES the
   // member-array walk (`membwalk`, agbcc), and it is the narrow counter that exposes the address
-  // spelling. L1 has since SHIPPED as `raise/narrowlocal.ts`: a block parameter whose sole reader
-  // is its own extension is declared at that width, so the counter is now `s16 v0` read without a
-  // cast. L2 has not — asmlift still renders the walked region as arithmetic on a cast pointer,
-  // `(a0 + 2)[v0]`, where the source's `d->name[i]` gives agbcc a loop-invariant base to hoist.
+  // spelling. Both levers ship. L1 is `raise/narrowlocal.ts`: a block parameter whose sole reader
+  // is its own extension is declared at that width, so the counter is `s16 v0` read without a cast.
+  // L2 is `raise/memberarrays.ts`: a constant offset feeding a variable-index walk selects a
+  // struct's array MEMBER, so the walked region is `a0->field_4[v0]` and agbcc gets the
+  // loop-invariant base to hoist that `(a0 + 2)[v0]` never gave it.
   //
   // WHICH LEVER IS WORTH WHAT. Every number is measured on THAT ROW'S OWN target, starting from
   // asmlift's OWN published winner for the row and changing ONE axis — never by subtracting two
@@ -2532,10 +2533,11 @@ export const SYNTHETIC: SynthSpec[] = [
   //                                                       the base-first index add
   //     sibwalk           52     25        33     0 MATCH L1 + L2 over three sibling walks under one
   //                                                       `s16` counter; also the guard below
-  // The L1 column is now the SHIPPED column: those four scores are what `pnpm bench run` reads.
-  // L1 IS THE LEVER TO BUILD FIRST. Alone it closes `narrowcnt` and `basefold` outright and takes
-  // 6 of `membnarrow`'s 17 and 27 of `sibwalk`'s 52. L2 alone is worth 1 and 19 — and 0 under a wide
-  // counter — but the residual L1 leaves is exactly L2's, and L2 closes it to a byte match on both.
+  // The `asmlift` column is the state before either lever; `L1+L2` is what `pnpm bench run` reads.
+  // WHAT THE ROWS PRICE IS A CONJUNCTION. Alone, L1 closes `narrowcnt` and `basefold` outright but
+  // takes only 6 of `membnarrow`'s 17 and 27 of `sibwalk`'s 52; L2 alone is worth 1 and 19, and 0
+  // under a wide counter. The decomposition held to the point: L1 shipped first and left the two
+  // member rows at exactly 11 and 25, and L2 on top of it closed both to a byte match.
   // `narrowcnt`'s single row is the capability in miniature: the target derives the increment from
   // the ALREADY-EXTENDED value (`add r0,r0,#0x1`), asmlift's cast spelling re-derives it from the
   // raw halfword (`add r0,r1,#0x1`).
@@ -2577,10 +2579,10 @@ export const SYNTHETIC: SynthSpec[] = [
   // byte-identical under `void *` and `u8 *`, but on `void *` it dereferences the void pointer
   // (`*(d + 4 + temp_r0) = …`) and no compiler in the set accepts that, so the noncompile would be
   // the harness's, not m2c's. `u8 *` withholds the layout just as completely, and under it m2c
-  // compiles — and where it lands is the L1/L2 split itself. Before L1 shipped m2c BEAT asmlift on
-  // both member rows (11 vs 17, 26 vs 52); with L1 in and L2 still missing the two are level:
-  //     membnarrow  m2c 11, asmlift 11 — a tie, and the 11 they both leave is L2's
-  //     sibwalk     m2c 26, asmlift 25 — asmlift ahead by one
+  // compiles — and where it lands is the L1/L2 split itself: withholding the layout costs m2c
+  // exactly what the two levers are worth, and it keeps paying it after they ship.
+  //     membnarrow  m2c 11, asmlift MATCH — the 11 m2c is left with is L2's
+  //     sibwalk     m2c 26, asmlift MATCH
   //     membwalk    m2c  2 under BOTH spellings — the control that says the swap is not a general
   //                 m2c boost; it moves exactly the narrow-counter rows.
   // Not the real `struct S *`, because THE LAYOUT IS THE ANSWER: given it m2c emits
@@ -2631,13 +2633,15 @@ export const SYNTHETIC: SynthSpec[] = [
   // the evidence that no DEFAULT settles it: the shape wants an enumerated candidate, which is a
   // round of its own.
   //
-  // Cut from sa3:PackSaveSector:agbcc (asmlift 366, m2c noncompile). That row is CONJUNCTIVE: taking
-  // asmlift's published winner and applying one project spelling at a time recovers 55 rows for the
-  // member-array base (366 → 311) and 17 for the narrow counter (366 → 349), while both together
-  // reach 267 — a 99-row recovery, more than the 72 the two marginals sum to, and still far from a
-  // match; four other single-axis "fixes" make the row WORSE (375, 371, 370, 370). It reaches a byte
-  // match only when every spelling is right at once. So these rows size the two capabilities at
-  // their own scale and make no claim about how far they move that row alone.
+  // Cut from sa3:PackSaveSector:agbcc (m2c noncompile), and the two levers do not reach it: it is
+  // refused for a third reason, a struct carrying constant-offset fields alongside its array members
+  // (`direct-access` in raise/memberarrays.ts). That row is CONJUNCTIVE, measured on the winner it
+  // published at 366: applying one project spelling at a time recovers 55 rows for the member-array
+  // base (366 → 311) and 17 for the narrow counter (366 → 349), while both together reach 267 — a
+  // 99-row recovery, more than the 72 the two marginals sum to, and still far from a match; four
+  // other single-axis "fixes" make the row WORSE (375, 371, 370, 370). It reaches a byte match only
+  // when every spelling is right at once. So these rows size the two capabilities at their own scale
+  // and make no claim about how far they move that row alone.
   {
     sym: 'mergenarrow',
     src:
