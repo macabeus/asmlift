@@ -84,6 +84,19 @@ export const SYNTHETIC: SynthSpec[] = [
     features: ['arithmetic', 'div-reg', 'signed'],
     toolchains: ALL,
   },
+  // The remainder whose two operands are CALLS, in the order the machine runs them. Folding the
+  // written-out idiom to `%` would drop both from two uses to one and inline them into the one
+  // expression, where C leaves their order unspecified and mwcc runs the RIGHT one first — so the
+  // fold must refuse here and spell the decomposition out, which names them and states the order.
+  // This row is that refusal's price: it is the shape the guard costs, published rather than argued.
+  {
+    sym: 'modseq',
+    src: 'int lo(void);\nint hi(void);\nint modseq(void){ int a = lo(); return a % hi(); }',
+    features: ['arithmetic', 'mod-reg', 'signed'],
+    toolchains: CALL,
+    ctx: 'int lo(void); int hi(void);',
+    proto: { lo: { params: 0 }, hi: { params: 0 } },
+  },
   {
     sym: 'udivv',
     src: 'unsigned udivv(unsigned a,unsigned b){ return a/b; }',
