@@ -310,3 +310,26 @@ describe('a guessed call arity and the EABI return register', () => {
     expect(src).toMatch(/return bar\(v\d\);/);
   });
 });
+
+// ── a CROSS-LEVEL contract: the frontend preserves a commutative instruction's operand order ──
+// The remainder idiom (pattern/engine.ts HWMOD_PATTERNS) declares its `mullw` node `ordered`, so
+// the L1 fold now READS an operand order the frontend must not normalise. `mul` is in the engine's
+// COMMUTATIVE set, so nothing else in the tower depends on it — before that pattern existed, a
+// frontend or ir/simplify.ts canonicalisation of `mullw`'s operands would have been free and
+// invisible. This pins the postcondition at the stage boundary rather than leaving it satisfied by
+// accident of implementation, and it does so where CI runs it: the end-to-end proof lives in the
+// matching suite, which needs a real mwcc, and asserting the IR shape alone would stay green
+// through a frontend that swapped the operands. Failure mode is a LOST match, not wrong C.
+describe('mullw operand order survives the frontend into the idiom layer', () => {
+  const TRIPLE = (mul: string) => `0:\tdivw    r0,r3,r4\n4:\t${mul}\n8:\tsubf    r3,r0,r3\nc:\tblr\n`;
+
+  test('quotient-first `mullw r0,r0,r4` folds back to the remainder operator', () => {
+    expect(dis('modq', TRIPLE('mullw   r0,r0,r4'))).toContain('return a0 % a1;');
+  });
+
+  test('divisor-first `mullw r0,r4,r0` does NOT — it stays the decomposition it already matches', () => {
+    const src = dis('modd', TRIPLE('mullw   r0,r4,r0'));
+    expect(src).toContain('return a0 - a1 * (a0 / a1);');
+    expect(src).not.toContain('%');
+  });
+});
