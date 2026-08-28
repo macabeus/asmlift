@@ -836,6 +836,21 @@ export interface StructureOptions {
   // function. Over the whole benchmark the axis wins one row by 3 points and loses none, which is
   // what a differ-refereed spelling looks like.
   coalesceMergeNames?: boolean;
+  // Give a merge that conditionally overwrites a FUNCTION PARAMETER its own local, instead of
+  // assigning back into the parameter's name (`if (a1 >= a0) v0 = a1; else v0 = a0;` for
+  // `if (a1 < a0) a1 = a0;`). Off by default; rank.ts enumerates the ON spelling as the
+  // `/fresh-merge` axis. Both spellings are ordinary C with identical semantics, so nothing over
+  // the source decides between them — what differs is where the compiler may place the copy. A
+  // parameter is live from entry, so its home is the register the ABI handed it and the copy into
+  // it is pinned there; a fresh local is dead until its first arm, so the compiler is free to
+  // place it where the asm did. At two arguments the two spellings compile to the same bytes (the
+  // returned value's home is occupied either way); a third argument is what makes the first
+  // parameter dead early enough for the difference to be observable.
+  //
+  // NOT `materializeJoinFeeds` widened to parameters. That axis reaches its shape by giving the
+  // join's feed a NAME to adopt, and materialization is keyed on the defining `Op` — a parameter
+  // has none, so there is nothing to key.
+  freshParamMerge?: boolean;
   // How an unresolvable VALUE degrades (a live `opaque`, an unlowered transient op, a dropped def):
   //   "strict"   (default) — the `"?"` sentinel, tripping assertResolved at the boundary (loud in
   //              the PROCESS);
@@ -876,6 +891,7 @@ function assertPrimaryAccepts(fn: Fn, opts: StructureOptions, hooks: StructureHo
     {
       ...opts,
       coalesceMergeNames: false,
+      freshParamMerge: false,
       materializeJoinFeeds: false,
       homeSharedAddresses: false,
       homeLoopExprs: false,
@@ -912,6 +928,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     readsStayWhereWritten = false,
     unsignedCompareSpelling = false,
     coalesceMergeNames = false,
+    freshParamMerge = false,
     onGap = 'strict',
     symbols,
   } = opts;
@@ -927,6 +944,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // target's defaults, so resetting one would probe a spelling asmlift never emits here.
   if (
     coalesceMergeNames ||
+    freshParamMerge ||
     materializeJoinFeeds ||
     homeSharedAddresses ||
     homeLoopExprs ||
@@ -1369,6 +1387,13 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     varName.set(p, `a${i}`);
     varType.set(`a${i}`, p.type);
   });
+  /** The function's own parameters, as VALUES — what `freshParamMerge` refuses to merge into. A
+   *  name test would not do: a loop variable that adopted `a0` carries the name without being the
+   *  parameter. */
+  const entryParams = new Set<Value>(entry.params);
+  /** Merge params that took a fresh name only because `freshParamMerge` refused their parameter
+   *  carrier. The seed hoist's whole scope. */
+  const paramSeededMerges = new Set<Value>();
   const backArgName = new Map<Value, string>();
   // The C static type of a rendered expression, over the declared variable types — what decides
   // whether a memory access's base may be dereferenced as spelled (memAccess/arrayAccess).
@@ -1729,17 +1754,49 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         // but only one whose name survives the C3 interference check (else the edge copies into
         // the name would clobber a still-live value).
         let name: string | undefined;
+        /** Set when the ONE reason this merge went unnamed is `freshParamMerge`'s refusal — the
+         *  seed hoist below is scoped to exactly these params. */
+        let refusedParamCarrier = false;
         for (const c of [
           ...incoming.filter((c) => varName.has(c.v)),
           ...incoming.filter((c) => backArgName.has(c.v)),
         ]) {
           const nm = varName.get(c.v) ?? backArgName.get(c.v)!;
-          if (!carriesPreUpdate(c.v, c.pr, b) && canTakeName(p, b, nm, allSame)) {
-            name = nm;
-            break;
+          if (carriesPreUpdate(c.v, c.pr, b) || !canTakeName(p, b, nm, allSame)) {
+            continue;
+          }
+          // freshParamMerge: a merge that CONDITIONALLY OVERWRITES a function parameter takes its
+          // own local instead of the parameter's name. Adoption spells the merge as `a1 = a0;`,
+          // which pins the value to the parameter's incoming register for the whole function; the
+          // fresh local is dead until its seed, so the compiler is free to place its copy where
+          // the asm did. Which one the source wrote is not derivable — both are ordinary C with
+          // identical semantics — so this is a differ-refereed axis (rank.ts `/fresh-merge`), and
+          // absent it nothing changes.
+          //
+          // REFUSAL CONDITIONS — outside these the carrier is adopted exactly as before:
+          //   - the carrier must be an ENTRY param, or a merge home this rule itself minted. Both
+          //     are homes the compiler was not free to place — the ABI pinned one at entry, and the
+          //     other is already carrying a conditional overwrite — so a second merge that took
+          //     either would chain the two values into one register. A local that merely CARRIES a
+          //     parameter's name (a loop header that adopted it under coalesceLoopInit) is neither:
+          //     the register was already re-homed there, so refusing again would only add a copy;
+          //   - a REDUNDANT phi (every edge passes the same value) is refused nothing. It overwrites
+          //     the parameter on no path, so a fresh name buys a copy and changes no placement;
+          //   - a LOOP HEADER param is never seen here — `seedLoopParams` named it already, and its
+          //     init copy is the seed this rule mints for a plain merge.
+          if (freshParamMerge && !allSame && (entryParams.has(c.v) || paramSeededMerges.has(c.v))) {
+            refusedParamCarrier = true;
+            continue;
+          }
+          name = nm;
+          break;
+        }
+        if (name === undefined) {
+          name = `v${fresh++}`;
+          if (refusedParamCarrier) {
+            paramSeededMerges.add(p);
           }
         }
-        name ??= `v${fresh++}`;
         varName.set(p, name);
         if (!varType.has(name)) {
           varType.set(name, p.type);
