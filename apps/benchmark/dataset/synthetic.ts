@@ -97,6 +97,29 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'int lo(void); int hi(void);',
     proto: { lo: { params: 0 }, hi: { params: 0 } },
   },
+  // `modseq` one PURE op deeper. The structurer inlines through single-use pure ops, so what lands
+  // at an operand of the invented `%` is the operand's whole CONE — a `+ 1` between the call and the
+  // fold does not make the call stay put. Sampling the refusal only where the effect is the operand's
+  // immediate def cannot see that, which is what this row exists to stop.
+  {
+    sym: 'modcone',
+    src: 'int lo(void);\nint hi(void);\nint modcone(void){ int a = lo() + 1; return a % hi(); }',
+    features: ['arithmetic', 'mod-reg', 'signed'],
+    toolchains: CALL,
+    ctx: 'int lo(void); int hi(void);',
+    proto: { lo: { params: 0 }, hi: { params: 0 } },
+  },
+  // The same question asked of a memory READ rather than a second call: the read answers whichever
+  // stores ran before it, and the call it would be hoisted over is one asmlift hands the pointer to.
+  // Two reads would commute; a read against a call does not.
+  {
+    sym: 'modread',
+    src: 'int hi(void);\nint modread(int *p){ int x = *p; return x % hi(); }',
+    features: ['arithmetic', 'mod-reg', 'signed', 'pointer'],
+    toolchains: CALL,
+    ctx: 'int hi(void);',
+    proto: { hi: { params: 0 } },
+  },
   {
     sym: 'udivv',
     src: 'unsigned udivv(unsigned a,unsigned b){ return a/b; }',
