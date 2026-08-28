@@ -1353,14 +1353,18 @@ export function enumerateCandidates(
       // A LIFT VARIANT, in the same product position as the signedness pin and the symbol-map
       // spelling — not a re-spelling lever under the POLICY note below. Dropping an argument
       // changes the IR every structuring axis then reads: the value the argument carried loses a
-      // consumer, so what materializes changes with it, and `kleod:ReadKeyInput` needs the
-      // narrowed lift's `/flip-join/derived-home` spelling, which neither side reaches alone.
+      // consumer, so what materializes changes with it, and a row whose callee arities are GUESSED
+      // can need the narrowed lift to reach a spelling neither side reaches alone —
+      // `kleod:ReadKeyInput` did, until its manifest declared those arities to asmlift as its own
+      // `ctx` already declared them to m2c; it now matches on the base lift, at
+      // `unsigned/derived-home`, enumerating no variant at all.
       // Only spellings the narrowing actually changed reach a compiler: one that changes nothing
       // downstream emits the base spelling's source and the dedup collapses it, and a DECLARED
       // arity records nothing and enumerates no variant at all. What survives the dedup is the
       // product's real price, and it is not free: over the benchmark's 272 agbcc rows this arm
       // adds 1201 distinct candidates to 3862, all of them in the 13 rows whose narrowing changes
-      // anything downstream.
+      // anything downstream — measured before those six kleod rows declared their callee arities,
+      // and declaring one takes its row out of this population.
       const liftVariants: { suffix: string; narrow: boolean }[] = hasSetupArgsNarrowing(base)
         ? [
             { suffix: '', narrow: false },
