@@ -754,30 +754,54 @@ export function enumerateCandidates(
   const bitfieldCands = mapHasBitfields
     ? [...baseSense, ...baseSense.map((s) => ({ ...s, suffix: `${s.suffix}/no-bitfield`, bitfields: false }))]
     : baseSense;
+  // `/connective`'s enumeration gate, read off the pass's OWN refusal rather than from a second
+  // copy of its matcher: the fold reports every site where the PAIRWISE comparison-tree refusal is
+  // the ONE thing stopping it — asked after `sameArgs` and the negatability check, so a report
+  // means a candidate that DIFFERS, not a refusal merely reached — and a function with none has no
+  // inhabitant for the axis.
+  //
+  // PER SYMBOL VARIANT, on a lift of its OWN, for the reason the `/setup-args` gate below states
+  // for itself: no lift may be governed by a fact measured on a different one. The pin and
+  // `/setup-args` genuinely cannot move this answer — neither a parameter's type nor a call's
+  // argument list moves a `cond_br` — but a SYMBOL MAP can, by lifting a pool-loaded comparison
+  // constant as a `gaddr` the const-test test then does not read, and answering once on the mapped
+  // probe made the `/raw-globals` arm inherit it. Over the benchmark's 923 rows the two agree (21
+  // sites mapped, 21 raw, 0 divergences), so this buys no candidate today; what it buys is that a
+  // lift-time change that splits them enumerates both arms instead of silently dropping one, which
+  // is the failure nothing reports.
+  //
+  // The MAPPED variant reads it off the probe below, which is a lift in exactly that configuration
+  // — reuse, not inheritance. Only a variant lifting under DIFFERENT symbols pays a lift of its
+  // own, so the price is one extra lift + pre-recovery per `/raw-globals` arm, never per candidate.
+  let probeTreeOwned = false;
+  const treeOwnedIn = (symbols: typeof opts.symbols): boolean => {
+    if (symbols === opts.symbols) {
+      return probeTreeOwned;
+    }
+    const p = frontend.lift(name, asm, target, prototypes, opts.asmData, symbols);
+    verify(p);
+    applyIdiomPatterns(p, target, opts.patterns);
+    let seen = false;
+    runPreRecovery(p, target, () => verify(p), prototypes[name], {
+      shortCircuit: {
+        onTreeOwned: () => {
+          seen = true;
+        },
+      },
+    });
+    return seen;
+  };
   // Probe: recover ONCE with no signedness pin, to learn which entry params are pointers/aggregates
   // so they are excluded from the signedness axis (see NO_PIN_KINDS). One extra lift+recover, no
   // compile. (The probe deliberately stops after recoverTypes — it only reads the param KINDS, so
   // the totality contract / return-sinking of the full spine are not run on it.)
-  //
-  // It also carries `/connective`'s enumeration gate, read off the pass's OWN refusal rather than
-  // from a second copy of its matcher: the fold reports every site where the PAIRWISE
-  // comparison-tree refusal is the ONE thing stopping it — asked after `sameArgs` and the
-  // negatability check, so a report means a candidate that DIFFERS, not a refusal merely reached
-  // — and a function with none has no inhabitant for the axis. Answered once per function, on
-  // the probe. The pin and `/setup-args` cannot move the answer — neither a parameter's type nor a
-  // call's argument list moves a `cond_br` — while a SYMBOL MAP in principle can, by lifting a
-  // pool-loaded comparison constant as a `gaddr` the const-test test then does not read. Over the
-  // benchmark's 923 rows the count is identical in both configurations (21 sites with the map, 21
-  // raw-globals, 0 divergences, over every row that lifts), and the failure mode if one ever
-  // diverges is a variant not enumerated, never a wrong one.
   const probe = frontend.lift(name, asm, target, prototypes, opts.asmData, opts.symbols);
   verify(probe);
   applyIdiomPatterns(probe, target, opts.patterns);
-  let treeOwnedFold = false;
   runPreRecovery(probe, target, () => verify(probe), prototypes[name], {
     shortCircuit: {
       onTreeOwned: () => {
-        treeOwnedFold = true;
+        probeTreeOwned = true;
       },
     },
   });
@@ -1349,6 +1373,8 @@ export function enumerateCandidates(
     // Declining is not pruning — same posture as the signedness decline below, and the same
     // candidate list; bitfield-members.test.ts pins the normalization the decline rests on.
     const svCands = sv.symbols ? axisCands : axisCands.filter((s) => s.bitfields);
+    // this variant's own answer to `/connective`'s enumeration gate — see `treeOwnedIn`
+    const treeOwnedFold = treeOwnedIn(sv.symbols);
     // The signedness axis DECLINES where the pin has nothing to pin. `pinScalarParams` writes only
     // over an entry param still `unknown`/`int` that is not one of the recovered pointers/
     // aggregates `ptrIdx` excludes; where no param is left, the second pass re-lifts, re-raises and
@@ -1435,8 +1461,12 @@ export function enumerateCandidates(
       for (const lv of liftVariants) {
         let fn: Fn;
         try {
-          fn =
-            lv.narrow || lv.connective ? frontend.lift(name, asm, target, prototypes, opts.asmData, sv.symbols) : base;
+          // A NON-EMPTY SUFFIX IS WHAT NEEDS ITS OWN COPY — same spelling as the catch below,
+          // and for the same reason: the raise mutates in place, so any variant that is not the
+          // primary re-lifts. Naming the flags here instead would leave a fourth axis quietly
+          // sharing the primary's already-mutated `base`, and the catch would then swallow the
+          // failure as a dropped lever rather than rethrowing it.
+          fn = lv.suffix === '' ? base : frontend.lift(name, asm, target, prototypes, opts.asmData, sv.symbols);
           if (lv.narrow && !narrowToSetupArgs(fn)) {
             continue; // nothing to cut after all — the base lift's own candidates already cover it
           }

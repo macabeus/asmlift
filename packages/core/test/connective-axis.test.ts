@@ -14,6 +14,9 @@
 // switch recovery DECLINES on entirely — `kleod:CountCollectedGems`, `kleod:CheckWorldCompletion`.
 import { describe, expect, test } from 'vitest';
 
+import { frontendFor } from '../src/frontend/registry';
+import { applyIdiomPatterns } from '../src/pipeline';
+import { runPreRecovery } from '../src/raise/pre-recovery';
 import { enumerateCandidates } from '../src/rank';
 import type { SymbolMap } from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
@@ -49,22 +52,38 @@ describe('/connective is enumerated wherever the tree refusal has an inhabitant'
     expect(all.some((c) => !c.label.includes('/connective') && !/ \|\| /.test(c.source))).toBe(true);
   });
 
-  test('the gate holds in BOTH symbol-map configurations', () => {
-    // rank.ts answers this gate ONCE, on a probe lifted WITH the map, and then applies the answer
-    // inside the symbol-variant loop — which also runs `/raw-globals`, lifting with no map at all.
-    // The promise is that the two arms agree, and the failure mode if they ever stop agreeing is a
-    // variant not enumerated. Over every benchmark row that lifts they do (21 sites with the map,
-    // 21 raw), and this pins the shape so a lift-time change has to break a test, not a comment.
-    // The scrutinee here is a POOL-LOADED global, which is the one input that differs between the
-    // two lifts — the map names the word, the raw arm sees a bare address.
-    const POOL_TREE =
-      '\tldr\tr1, .L9\n\tldr\tr0, [r1]\n\tcmp\tr0, #0\n\tbeq\t.L2\n\tcmp\tr0, #2\n\tbne\t.L4\n' +
-      '.L2:\n\tmov\tr2, #5\n\tstr\tr2, [r1]\n\tb\t.L5\n' +
-      '.L4:\n\tmov\tr2, #9\n\tstr\tr2, [r1]\n.L5:\n';
-    const symbols: SymbolMap = new Map([[0x3001234, [{ name: 'gMode', kind: 'data' }]]]);
-    const asm = `f:\n\tpush\t{lr}\n${POOL_TREE}\tpop\t{r1}\n\tbx\tr1\n.L9:\n\t.word\t0x3001234\n`;
-    const all = enumerateCandidates('f', asm, ARMV4T_AGBCC, { prototypes: P, symbols });
-    const conn = all.filter((c) => c.label.includes('/connective'));
+  // The scrutinee is a POOL-LOADED global, the one input that differs between the two lifts: the
+  // map names the word, the `/raw-globals` arm sees a bare address. `constTestScrutinee` reads
+  // through whichever the lift produced, so the gate's answer must not depend on which.
+  const POOL_TREE =
+    '\tldr\tr1, .L9\n\tldr\tr0, [r1]\n\tcmp\tr0, #0\n\tbeq\t.L2\n\tcmp\tr0, #2\n\tbne\t.L4\n' +
+    '.L2:\n\tmov\tr2, #5\n\tstr\tr2, [r1]\n\tb\t.L5\n' +
+    '.L4:\n\tmov\tr2, #9\n\tstr\tr2, [r1]\n.L5:\n';
+  const POOL_ASM = `f:\n\tpush\t{lr}\n${POOL_TREE}\tpop\t{r1}\n\tbx\tr1\n.L9:\n\t.word\t0x3001234\n`;
+  const POOL_SYMBOLS: SymbolMap = new Map([[0x3001234, [{ name: 'gMode', kind: 'data' }]]]);
+
+  test('the PREDICATE is asked in both symbol-map configurations, and answers the same', () => {
+    // The obligation is on the predicate, so this asks the predicate — not the candidate labels,
+    // which a single shared boolean would satisfy just as well and which is what this test used to
+    // do. Lift the same function twice, with the map and without, and count the sites each lift's
+    // OWN refusal reports. rank.ts now reads one answer per symbol variant for exactly this
+    // reason; over every benchmark row that lifts the two agree (21 sites mapped, 21 raw), and the
+    // failure mode if a lift-time change ever splits them is a variant never enumerated.
+    const sites = (symbols?: SymbolMap): number => {
+      const fn = frontendFor(ARMV4T_AGBCC).lift('f', POOL_ASM, ARMV4T_AGBCC, P, undefined, symbols);
+      applyIdiomPatterns(fn, ARMV4T_AGBCC, undefined);
+      let seen = 0;
+      runPreRecovery(fn, ARMV4T_AGBCC, undefined, P.f, { shortCircuit: { onTreeOwned: () => seen++ } });
+      return seen;
+    };
+    expect(sites(POOL_SYMBOLS)).toBeGreaterThan(0);
+    expect(sites(undefined)).toBe(sites(POOL_SYMBOLS));
+  });
+
+  test('…and each symbol variant enumerates the axis off its own answer', () => {
+    const conn = enumerateCandidates('f', POOL_ASM, ARMV4T_AGBCC, { prototypes: P, symbols: POOL_SYMBOLS }).filter(
+      (c) => c.label.includes('/connective'),
+    );
     expect(conn.some((c) => c.label.includes('/raw-globals'))).toBe(true);
     expect(conn.some((c) => !c.label.includes('/raw-globals'))).toBe(true);
   });
