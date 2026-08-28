@@ -167,11 +167,18 @@ CTX_PROTO`
 `
     : fn.ctx
       ? `
-# The exact context header the benchmark passed via --context. This is one of the few rows whose
-# callees the project's own vendored headers do not declare, so the benchmark states them here
-# instead; the same callees are named to asmlift through its --proto hints, and a test holds the
-# two lists equal. Everything else the project declares reaches asmlift as a symbol map and does
-# not reach m2c on this row.
+# The exact context header the benchmark passed via --context.${
+          fn.tier === 'real'
+            ? `
+# This is one of the six rows whose callees the project's own vendored headers do not declare, so
+# the benchmark states them here instead; the same callees are named to asmlift through its
+# --proto hints, and a test holds the two lists equal. Everything else the project declares
+# reaches asmlift as a symbol map and does not reach m2c on this row.`
+            : `
+# Prototypes only — no struct or global layouts. The synthetic tier measures COLD recovery and is
+# symmetric by construction: these are the same facts asmlift is given as --proto hints, and
+# neither tool is given a project.`
+        }
 cat > ctx.h <<'CTX_INPUT'
 ${fn.ctx.trimEnd()}
 CTX_INPUT
@@ -185,7 +192,7 @@ ${flagLine(`--target ${m2cTarget(fn.compiler, fn.language)}`, "ISA + compiler di
 ${flagLine(`--function ${fn.sym}`, 'the symbol to decompile from in.s')}${
     fn.ctx || fn.ctxRef
       ? `
-${flagLine('--context ctx.h', 'the project context header written above')}`
+${flagLine('--context ctx.h', fn.ctxRef ? 'the project context header written above' : fn.tier === 'real' ? "this row's authored callee prototypes, above" : 'the prototype header written above')}`
       : ''
   }
 ${flagLine('--no-cache', "bypass m2c's on-disk cache — always a fresh run")}
