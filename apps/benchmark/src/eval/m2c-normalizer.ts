@@ -231,6 +231,8 @@ interface DataEmission {
   fnSym: string; // the function symbol — its relocs mark jump-table entries alongside `.text`
   regions: Map<string, DataRegion>;
   jtblTargets: Set<number>;
+  /** instruction address → the MIPS REL addend recovered from the immediate (see mipsRelAddends) */
+  relAddends: Map<number, number>;
 }
 
 /** m2c resolves an indirect jump only through a table symbol named jtbl/jpt_/lbl_/jumptable_ —
@@ -295,6 +297,62 @@ function regionLines(e: DataEmission, region: DataRegion): string[] {
   return lines;
 }
 
+/** The immediate an instruction carries in the field a data reloc overwrites — the `1` of
+ *  `lbu v0,1(v0)`, the `0x0` of `lui v0,0x0`, the `85` of `addiu v1,v1,85`. objdump prints load
+ *  offsets in decimal and `lui` in hex, so both spellings are read. */
+function relocImm(text: string): number {
+  const m = /(-?(?:0x[0-9a-f]+|\d+))\(/.exec(text) ?? /(-?(?:0x[0-9a-f]+|\d+))$/.exec(text);
+  if (!m) {
+    return 0;
+  }
+  const neg = m[1].startsWith('-');
+  const v = Number(neg ? m[1].slice(1) : m[1]);
+  return Number.isNaN(v) ? 0 : neg ? -v : v;
+}
+
+/** MIPS relocations are REL: there is no addend FIELD, the addend lives in the instruction's own
+ *  immediate, split across the HI16/LO16 pair as `(hi_imm << 16) + (s16)lo_imm`. Rewriting that
+ *  immediate into `%hi`/`%lo` therefore DELETED it — `lbu v0,1(v0)` under `R_MIPS_LO16 GwSystem`
+ *  became `%lo(GwSystem)`, so m2c read the struct's first byte where the object reads its
+ *  second, and said so in compilable C. This recovers the addend per instruction so both halves
+ *  of a pair can emit `%hi(sym + n)` / `%lo(sym + n)`, which m2c's macro parser reads as an
+ *  expression. PPC is RELA and carries its addend on the record; nothing here applies to it.
+ *
+ *  PAIRING is the ABI's: a LO16 belongs to the HI16s that precede it against the same symbol
+ *  (one HI16 may be shared, so the whole pending run takes the pair's addend). An unpaired HI16
+ *  keeps its own immediate; an unpaired LO16 stands alone. */
+function mipsRelAddends(insns: Insn[], relocs: Reloc[]): Map<number, number> {
+  const imm = new Map(insns.map((i) => [i.addr, relocImm(i.text)]));
+  const out = new Map<number, number>();
+  const pendingHi = new Map<string, number[]>();
+  for (const r of [...relocs].sort((a, b) => a.off - b.off)) {
+    if (r.type === 'R_MIPS_HI16') {
+      pendingHi.set(r.sym, [...(pendingHi.get(r.sym) ?? []), r.off]);
+    } else if (r.type === 'R_MIPS_LO16') {
+      const his = pendingHi.get(r.sym) ?? [];
+      const hi = his.length === 0 ? 0 : (imm.get(his[his.length - 1]) ?? 0);
+      const addend = (hi << 16) + (((imm.get(r.off) ?? 0) << 16) >> 16);
+      out.set(r.off, addend);
+      for (const o of his) {
+        out.set(o, addend);
+      }
+      pendingHi.set(r.sym, []);
+    }
+  }
+  for (const his of pendingHi.values()) {
+    for (const o of his) {
+      out.set(o, (imm.get(o) ?? 0) << 16);
+    }
+  }
+  return out;
+}
+
+/** `sym`, `sym + 12`, `sym - 8000` — the macro argument for a reloc whose addend the immediate
+ *  carried. m2c parses the arithmetic; emitting the bare name would drop the offset. */
+function relocArg(name: string, addend: number): string {
+  return addend === 0 ? name : `${name} ${addend < 0 ? '-' : '+'} ${Math.abs(addend)}`;
+}
+
 /** Rewrite one instruction's data-referencing operand into macro syntax. Whitelisted reloc
  *  types only — anything else leaves the text untouched. A reloc against a NAMED symbol (an
  *  extern the context declares) takes the symbol name directly, with no region to emit —
@@ -307,13 +365,15 @@ function rewriteData(e: DataEmission, ins: Insn, r: Reloc): string | null {
     return null;
   }
   const t = ins.text;
+  // MIPS REL keeps the addend in the immediate this rewrite consumes — carry it into the macro.
+  const arg = relocArg(name, e.relAddends.get(ins.addr) ?? 0);
   switch (r.type) {
     case 'R_MIPS_HI16':
-      return t.replace(/0x[0-9a-f]+$|\d+$/, `%hi(${name})`);
+      return t.replace(/0x[0-9a-f]+$|\d+$/, `%hi(${arg})`);
     case 'R_MIPS_LO16':
       return /\(/.test(t)
-        ? t.replace(/(-?(?:0x[0-9a-f]+|\d+))\(/, `%lo(${name})(`)
-        : t.replace(/(-?(?:0x[0-9a-f]+|\d+))$/, `%lo(${name})`);
+        ? t.replace(/(-?(?:0x[0-9a-f]+|\d+))\(/, `%lo(${arg})(`)
+        : t.replace(/(-?(?:0x[0-9a-f]+|\d+))$/, `%lo(${arg})`);
     case 'R_PPC_ADDR16_HA':
       return t.replace(/(-?(?:0x[0-9a-f]+|\d+))$/, `${name}@ha`);
     case 'R_PPC_ADDR16_LO':
@@ -338,8 +398,15 @@ export function disasmToM2c(disasm: string, isa: Isa, asmDump?: string): string 
     throw new Error('disasmToM2c: could not parse objdump output');
   }
   const { sym, insns } = parsed;
-  const emission: DataEmission | null = asmDump
-    ? { dump: parseAsmDump(asmDump), fnSym: sym, regions: new Map(), jtblTargets: new Set() }
+  const dump = asmDump ? parseAsmDump(asmDump) : null;
+  const emission: DataEmission | null = dump
+    ? {
+        dump,
+        fnSym: sym,
+        regions: new Map(),
+        jtblTargets: new Set(),
+        relAddends: mipsRelAddends(insns, dump.relocs.get('.text') ?? []),
+      }
     : null;
   const textRelocs = new Map<number, Reloc>();
   if (emission) {
