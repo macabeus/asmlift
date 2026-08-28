@@ -353,6 +353,46 @@ test('unsequencedRightFirst admits the fold when a sibling effect stands between
   expect(applyPattern(twoCalls('f', 'g', '%0', '%1', between), HWMOD_SEQ)).toBe(1);
 });
 
+// The operand the fold names is not the only thing that moves with it: the structurer inlines
+// through pure single-use ops, so the whole inlinable CONE lands at that operand position. These
+// four pin the two ways the shallow reading of the question was wrong — one pure op between the
+// effect and the operand, and a memory read weighed against a call.
+const coneFn = (body: string, dividend: string, divisor: string) =>
+  parse(
+    `fn f {\n^bb0(%8: s32, %7: s32):\n${body}` +
+      `  %2: s32 = sdiv ${dividend}, ${divisor}\n  %3: s32 = mul %2, ${divisor}\n` +
+      `  %4: s32 = sub ${dividend}, %3\n  ret %4\n}\n`,
+  );
+
+test('unsequencedRightFirst refuses when a PURE op stands between the effect and the operand', () => {
+  // `(f() + 1) % g()` reorders exactly as `f() % g()` does — the `add` is inlined, not a barrier.
+  const body =
+    '  %0: s32 = call {target="f"}\n  %6: s32 = const {value=1}\n' +
+    '  %5: s32 = add %0, %6\n  %1: s32 = call {target="g"}\n';
+  expect(applyPattern(coneFn(body, '%5', '%1'), HWMOD_SEQ)).toBe(0);
+});
+
+test('unsequencedRightFirst admits when the cone stops at a MULTI-USE value', () => {
+  // A second use names `f()`'s result, so it is a statement at its own position and the order is
+  // pinned there; only the pure `add` is left inside the invented expression.
+  const body =
+    '  %0: s32 = call {target="f"}\n  %6: s32 = const {value=1}\n  %5: s32 = add %0, %6\n' +
+    '  %1: s32 = call {target="g"}\n  store %8, %0 {off=0, width=4}\n';
+  expect(applyPattern(coneFn(body, '%5', '%1'), HWMOD_SEQ)).toBe(1);
+});
+
+test('unsequencedRightFirst refuses hoisting a memory READ over a call', () => {
+  // The read answers whichever stores ran before it, and the call may be the one that writes.
+  const body = '  %0: s32 = load %8 {off=0, signed=true, width=4}\n  %1: s32 = call {target="g"}\n';
+  expect(applyPattern(coneFn(body, '%0', '%1'), HWMOD_SEQ)).toBe(0);
+});
+
+test('unsequencedRightFirst admits two READS, which commute', () => {
+  const body =
+    '  %0: s32 = load %8 {off=0, signed=true, width=4}\n' + '  %1: s32 = load %7 {off=0, signed=true, width=4}\n';
+  expect(applyPattern(coneFn(body, '%0', '%1'), HWMOD_SEQ)).toBe(1);
+});
+
 test('unsequencedRightFirst admits the fold when at most ONE operand has an effect', () => {
   const oneCall = parse(
     'fn f {\n^bb0(%1: s32):\n  %0: s32 = call {target="f"}\n' +
@@ -377,4 +417,15 @@ test('`ordered` on a node where it could not fire throws, naming the pattern', (
 test('`unsequencedRightFirst` naming a non-replaceWith operand throws, naming the pattern', () => {
   const bogus: RewritePattern = { ...HWMOD_SEQ, id: 'test/bogus-seq', unsequencedRightFirst: ['A', 'Z'] };
   expect(() => applyPattern(parse(MOD_BEFORE), bogus)).toThrow(/test\/bogus-seq.*'Z'/);
+});
+
+// The operand DIRECTION the field asserts was measured on one compiler, so a pattern that widens
+// its compiler gate would be inheriting an unmeasured fact silently. Make it loud instead.
+test('`unsequencedRightFirst` on a compiler the direction was not measured for throws', () => {
+  const widened: RewritePattern = {
+    ...HWMOD_SEQ,
+    id: 'test/widened-seq',
+    applies: { ...HWMOD_SEQ.applies, compilers: ['mwcc', 'gcc'] },
+  };
+  expect(() => applyPattern(parse(MOD_BEFORE), widened)).toThrow(/test\/widened-seq.*mwcc, gcc/);
 });

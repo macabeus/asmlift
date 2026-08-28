@@ -6,7 +6,7 @@
 // Crucially, rewrites go through replaceAllUsesWith + DCE — never in-place opcode
 // mutation of a live value.
 import { Block, Fn, Op, Value, defOpMap, mkOp, mkValue, replaceAllUsesWith } from '../ir/core';
-import { EFFECTFUL_OPS, NEGATED_ICMP, type Opcode, isDceSafe } from '../ir/opcodes';
+import { EFFECTFUL_OPS, NEGATED_ICMP, ORDER_SENSITIVE_OPS, type Opcode, isDceSafe } from '../ir/opcodes';
 import type { IrType } from '../ir/types';
 import { T } from '../ir/types';
 
@@ -80,14 +80,16 @@ export interface RewritePattern {
    *  UNSEQUENCED against each other. A fold that collapses a multi-op idiom into one op drops its
    *  operands from several uses to one, which lets the structurer inline both at that one use — and
    *  then the RECOMPILING COMPILER, not asmlift, picks which of the two runs first. Naming this pair
-   *  makes the driver refuse whenever the fold would CHANGE that order.
+   *  makes the driver refuse a fold that would CHANGE the machine's order. What counts as "the
+   *  operand" and as "the order" is subtler than it reads, and `reordersUnsequenced` below owns both.
    *
    *  The `RightFirst` half is a compiler fact about the operator the replacement spells, verified by
    *  compiling in both directions rather than assumed: mwcc lowers `f() % g()` as `bl g; bl f` and
-   *  `g() % f()` as `bl f; bl g`. So an inlined `A % B` runs B's def first, and the fold preserves
-   *  the machine's order only when B's def already precedes A's. It is spelled into the field name
-   *  rather than minted as an order enum because there is exactly one inhabitant; the second one
-   *  (mwcc evaluates `-` LEFT operand first — `f() - g()` is `bl f; bl g`) earns the enum. */
+   *  `g() % f()` as `bl f; bl g`. It holds per OPERATOR, not per target — the same compiler runs
+   *  `-`'s LEFT operand first (`f() - g()` is `bl f; bl g`) — which is why it lives on the pattern
+   *  rather than on TargetDescription, and stays a field name rather than an order enum while there
+   *  is one inhabitant. The direction was measured on ONE compiler, so `validatePattern` pins the
+   *  declaring pattern's compiler gate to that set; widening it fails loud. */
   unsequencedRightFirst?: [string, string];
 }
 
@@ -171,30 +173,21 @@ export const SDIV_POW2_2: RewritePattern = {
 // structurer the operator the source wrote, and re-emitting `%` reproduces the triple byte-exact.
 //
 // This is NOT the `capabilities.hwDivide` axis: MIPS also divides in hardware and needs no fold at
-// all, because `div` leaves the remainder in `hi` and the frontend reads it straight out as `smod`.
-// The narrower fact is a hardware divide that yields the QUOTIENT ONLY; `isa: 'ppc'` STANDS IN for
-// it rather than naming it — every PPC target happens to have it — and it stays a stand-in until a
-// second ISA earns the capability. `compilers` carries the half that was measured rather than
-// reasoned, that mwcc's lowering is exactly this triple in exactly this order. Both clauses are
-// true and neither is independently falsifiable today: PPC_MWCC is the only `isa: 'ppc'` target and
-// the only mwcc one, so the two select the same single target.
+// all, because `div` leaves the remainder in `hi` and the frontend reads it straight out. The
+// narrower fact is a hardware divide that yields the QUOTIENT ONLY; `isa: 'ppc'` STANDS IN for it
+// until a second ISA earns the capability, and `compilers` carries the measured half, that mwcc's
+// lowering is exactly this triple in exactly this order. Neither clause is independently
+// falsifiable today — PPC_MWCC is the only target either one selects.
 //
-// `ordered: true` on the multiply is why this pattern needs the flag at all — but the load-bearing
-// claim is WEAKER than "the multiply's order tells you what the source wrote", and only the weaker
-// one is true. Quotient-first is the PRECONDITION for re-emitting `%` to reproduce the triple, and
-// nothing more. mwcc's multiply order tracks the source-level operand order of the MULTIPLY alone:
-// `a - a / b * b` and `a - b * (a / b)` both give the swapped `mullw rP,b,rQ`, while `int q = a / b;
-// return a - q * b;` gives the SAME quotient-first triple as `a % b` — so the fold does fire on a
-// decomposition the source wrote, and that over-fire is byte-neutral rather than refused (both
-// spellings assemble identically, verified by compiling). The refusal direction is what the flag
-// buys: matching the swapped order would respell an already byte-exact decomposition into a miss.
+// `ordered: true` on the multiply says quotient-first is the PRECONDITION for re-emitting `%` — NOT
+// that the order identifies what the source wrote, which is false: `int q = a / b; return a - q *
+// b;` is a decomposition that compiles quotient-first too. So over-firing is byte-neutral (verified
+// by compiling both), and the flag buys the refusal direction: matching the swapped `mullw rP,b,rQ`
+// of `a - a / b * b` would respell an already byte-exact decomposition into a miss.
 //
-// `unsequencedRightFirst` is the fold's other guard, and it constrains what the fold may INVENT
-// rather than what it may match. See its declaration on RewritePattern.
-//
-// A CONSTANT divisor is out of reach here and deliberately left so: magicdiv runs after the idiom
-// fold, so `a % 10` still reaches L3 written out. It costs nothing — `mulli` has no register
-// operand order to lose, and both spellings assemble to the same bytes.
+// A CONSTANT divisor is out of reach and deliberately left so — see the recognizer table on
+// `smod` in ir/opcodes.ts, which owns why. It costs nothing: `mulli` has no register operand
+// order to lose, and both spellings assemble to the same bytes.
 function hwModPattern(div: 'sdiv' | 'udiv', mod: 'smod' | 'umod'): RewritePattern {
   return {
     id: `hwmod-${mod}`,
@@ -215,10 +208,8 @@ function hwModPattern(div: 'sdiv' | 'udiv', mod: 'smod' | 'umod'): RewritePatter
   };
 }
 
-/** `a - a / b * b` → `a % b`, signed and unsigned. Refuses unless the dividend and divisor are the
- *  SAME two values in both places (the `same` bindings) — a different operand is a subtraction, not
- *  a remainder — unless the multiply reads the quotient first, and unless collapsing the idiom would
- *  leave two observable effects unsequenced inside the one `%`. */
+/** `a - a / b * b` → `a % b`, signed and unsigned. The `same` bindings are load-bearing: a
+ *  different dividend or divisor is a subtraction, not a remainder. */
 export const HWMOD_PATTERNS: RewritePattern[] = [hwModPattern('sdiv', 'smod'), hwModPattern('udiv', 'umod')];
 
 // ── multiply-by-constant idioms (DIVMUL) ────────────────────────────────────────────────
@@ -484,12 +475,23 @@ function tryMatch(node: MatchNode, v: Value, defs: Map<Value, Op>, b: Binds): bo
   return node.args.every((a, i) => tryMatch(a, d.operands[i], defs, b));
 }
 
-/** Walk a pattern's match DAG once and reject a declaration that could not have an effect. Same
- *  diagnosability-first rule as the unbound-`replaceWith` throw below: `ordered` is consulted ONLY
- *  inside `tryMatch`'s commutative-swap branch, so on a non-commutative or non-binary node it would
- *  be silently inert, and a pattern author (or a generator emitting patterns as data) would get no
- *  error and no effect. */
+/** Walk a pattern's match DAG once and reject a declaration that could not have an effect, or one
+ *  whose compiler gate outruns the evidence behind it. Same diagnosability-first rule as the
+ *  unbound-`replaceWith` throw below: `ordered` is consulted ONLY inside `tryMatch`'s
+ *  commutative-swap branch, so on a non-commutative or non-binary node it would be silently inert,
+ *  and a pattern author (or a generator emitting patterns as data) would get no error and no effect.
+ *
+ *  Everything checked here is a property of the pattern OBJECT, so the answer is memoized against it
+ *  rather than recomputed per lift — patterns may still be built at runtime, which is why this is a
+ *  WeakSet and not module-scope validation of the DEFAULT list. */
+const UNSEQUENCED_RIGHT_FIRST_MEASURED_ON = ['mwcc'];
+const validated = new WeakSet<RewritePattern>();
+
 function validatePattern(pat: RewritePattern): void {
+  if (validated.has(pat)) {
+    return;
+  }
+  validated.add(pat);
   const walk = (n: MatchNode): void => {
     if (!('op' in n)) {
       return;
@@ -503,12 +505,23 @@ function validatePattern(pat: RewritePattern): void {
     n.args.forEach(walk);
   };
   walk(pat.match);
-  for (const name of pat.unsequencedRightFirst ?? []) {
+  if (!pat.unsequencedRightFirst) {
+    return;
+  }
+  for (const name of pat.unsequencedRightFirst) {
     if (!pat.replaceWith.args.includes(name)) {
       throw new Error(
         `pattern '${pat.id}' names '${name}' in 'unsequencedRightFirst', which is not a replaceWith operand`,
       );
     }
+  }
+  const on = pat.applies.compilers ?? [];
+  const measured = UNSEQUENCED_RIGHT_FIRST_MEASURED_ON;
+  if (on.length !== measured.length || !measured.every((c) => on.includes(c))) {
+    throw new Error(
+      `pattern '${pat.id}' declares 'unsequencedRightFirst' but applies to compilers [${on.join(', ')}]; ` +
+        `the operand direction is only measured for [${measured.join(', ')}] — measure the new one and widen the set`,
+    );
   }
 }
 
@@ -516,12 +529,22 @@ function validatePattern(pat: RewritePattern): void {
  *  the machine code, deciding which of two observable effects runs first?
  *
  *  The fold collapses a several-op idiom into one, which drops each named operand from two uses to
- *  one; the structurer then inlines a single-use effect at its one use, and both land as operands of
- *  ONE expression, where C leaves their order unspecified. asmlift's inline-at-use model
- *  (structure/analysis.ts) exempts exactly this case — "a sibling effect inlined into the SAME
- *  statement is not a reorder, the recompiling compiler orders unsequenced operands of one
- *  expression exactly as it originally chose to". That premise holds only when the expression
- *  asmlift re-spells is the one the source wrote. A fold INVENTS an expression, so it must check.
+ *  one; the structurer then inlines a single-use def at its one use, TRANSITIVELY THROUGH PURE
+ *  SINGLE-USE OPS. So what lands at an operand position is that operand's whole inlinable CONE, not
+ *  just its def, and the question has to be asked over the cones: one pure `+ 1` between an effect
+ *  and the fold's operand is the difference between `f() % g()` and `(f() + 1) % g()`, and the
+ *  second one reorders exactly as the first does. Both cones become operands of ONE expression,
+ *  where C leaves their order unspecified. asmlift's inline-at-use model (structure/analysis.ts)
+ *  exempts exactly this case — "a sibling effect inlined into the SAME statement is not a reorder,
+ *  the recompiling compiler orders unsequenced operands of one expression exactly as it originally
+ *  chose to". That premise holds only when the expression asmlift re-spells is the one the source
+ *  wrote. A fold INVENTS an expression, so it must check.
+ *
+ *  A cone's members are weighed by ORDER_SENSITIVE_OPS, not EFFECTFUL_OPS: a memory read answers
+ *  whichever stores ran before it, so hoisting a `load` over a `call` — one asmlift may itself be
+ *  passing the loaded pointer to — changes the answer as surely as swapping two calls. Two READS
+ *  are the exception and commute, the same fact the structurer states as "a load never bars a
+ *  load", so a hazard needs an EFFECT on at least one side; `*p % *q` is admitted.
  *
  *  Refuses only what it must — the alternative spelling (the idiom written out) names the operands
  *  and states the order, so a refusal is a loud, correct, slightly-worse-scoring answer. */
@@ -533,36 +556,68 @@ function reordersUnsequenced(
   defs: Map<Value, Op>,
   pid: string,
 ): boolean {
-  const [ld, rd] = names.map((n) => {
-    const v = binds.values.get(n);
-    if (!v) {
-      throw new Error(`pattern '${pid}' names unbound value '${n}' in 'unsequencedRightFirst'`);
-    }
-    return defs.get(v);
-  });
-  // At most one observable effect between the two: nothing to re-order. One def bound to BOTH names
-  // is one effect too — it cannot be sequenced against itself.
-  if (!ld || !rd || ld === rd || !EFFECTFUL_OPS.has(ld.opcode) || !EFFECTFUL_OPS.has(rd.opcode)) {
-    return false;
-  }
-  // Both defs and the fold's root must share ONE block. Across blocks the structurer materializes an
-  // effect unconditionally — its execution would otherwise become path-dependent — so the C names it
-  // and the machine's order is pinned there rather than left to the expression.
+  // Both cones are read within the ROOT's block, on two different grounds. A cross-block EFFECT the
+  // structurer materializes unconditionally — its execution would otherwise become path-dependent —
+  // so the C names it and pins the order there. A cross-block READ it does not; what pins that one
+  // is the structurer's own def→render write scan, where a call counts as a write, so a read cannot
+  // reach this expression across the very call it would be racing.
   const blk: Block | undefined = fn.blocks.find((b) => b.ops.includes(root));
-  if (!blk || !blk.ops.includes(ld) || !blk.ops.includes(rd)) {
+  if (!blk) {
     return false;
   }
-  const li = blk.ops.indexOf(ld);
-  const ri = blk.ops.indexOf(rd);
-  // The RIGHT operand's def already runs FIRST on the machine, which is the order the inlined
-  // spelling states. Nothing to lose.
-  if (ri < li) {
-    return false;
+  const at = new Map<Op, number>(blk.ops.map((o, i) => [o, i]));
+  const uses = new Map<Value, number>();
+  for (const b of fn.blocks) {
+    for (const o of b.ops) {
+      for (const v of [...o.operands, ...o.successors.flatMap((x) => x.args)]) {
+        uses.set(v, (uses.get(v) ?? 0) + 1);
+      }
+    }
   }
-  // The left def runs first, so an inlined `A op B` would swap them — UNLESS a sibling effect stands
-  // between the two. The inline-at-use model refuses to cross one, which forces a named temp at the
-  // def's own program position and pins the order there instead.
-  return !blk.ops.slice(li + 1, ri).some((o) => EFFECTFUL_OPS.has(o.opcode));
+  /** What the structurer may pull in at one operand position: the operand's own def — which this
+   *  fold is about to drop to a single use — then each operand def that is ALREADY single-use, a
+   *  multi-use value being named and so staying a statement of its own. */
+  const coneOf = (name: string): Set<Op> => {
+    const v = binds.values.get(name);
+    if (!v) {
+      throw new Error(`pattern '${pid}' names unbound value '${name}' in 'unsequencedRightFirst'`);
+    }
+    const cone = new Set<Op>();
+    const stack: (Op | undefined)[] = [defs.get(v)];
+    while (stack.length) {
+      const op = stack.pop();
+      if (!op || cone.has(op) || !at.has(op)) {
+        continue;
+      }
+      cone.add(op);
+      for (const o of op.operands) {
+        if (uses.get(o) === 1) {
+          stack.push(defs.get(o));
+        }
+      }
+    }
+    return cone;
+  };
+  const [lc, rc] = names.map(coneOf);
+  const sensitive = (c: Set<Op>) => [...c].filter((o) => ORDER_SENSITIVE_OPS.has(o.opcode));
+  for (const l of sensitive(lc)) {
+    for (const r of sensitive(rc)) {
+      // One op standing in BOTH cones is one evaluation and cannot be sequenced against itself; two
+      // READS commute; and a right-cone op the machine ALREADY runs first loses nothing.
+      if (l === r || at.get(l)! >= at.get(r)! || !(EFFECTFUL_OPS.has(l.opcode) || EFFECTFUL_OPS.has(r.opcode))) {
+        continue;
+      }
+      // The left one runs first, so an inlined `A op B` would swap them — UNLESS a sibling effect
+      // stands between, which the inline-at-use model refuses to cross, forcing a named temp at the
+      // def's own position. A cone member is no sibling: it is inlined into this very expression.
+      if (
+        !blk.ops.slice(at.get(l)! + 1, at.get(r)!).some((o) => EFFECTFUL_OPS.has(o.opcode) && !lc.has(o) && !rc.has(o))
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 /** Apply one pattern greedily to a fixed point. Returns the number of rewrites. */
