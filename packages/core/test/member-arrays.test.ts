@@ -243,6 +243,37 @@ describe('member-array recovery — the gates', () => {
     expect(refusals(GLOBAL_WALK)).toEqual(['global-base']);
   });
 
+  // …and a global reached through a MERGE is still a global: `d = c ? &gA : &gB` hands the walk a
+  // block parameter, whose own def is no `gaddr` at all.
+  test('a global base reached through a merge declines', () => {
+    expect(
+      refusals(`fn gsel {
+^bb0(%20: unk32):
+  %0: unk32 = gaddr {sym="gA"}
+  %21: unk32 = gaddr {sym="gB"}
+  %22: unk32 = const {value=0}
+  %23: unk32 = icmp_ne %20, %22
+  cond_br %23, ^bb3(%0), ^bb3(%21)
+^bb3(%24: unk32):
+  %2: unk32 = const {value=0}
+  %3: unk32 = const {value=4}
+  %4: unk32 = add %24, %3
+  br ^bb1(%2)
+^bb1(%6: unk32):
+  %7: unk32 = aload %4, %6 {elemSize=2, signed=false}
+  astore %4, %6, %7 {elemSize=2}
+  %8: unk32 = const {value=1}
+  %9: unk32 = add %6, %8
+  %10: unk32 = const {value=5}
+  %11: unk32 = icmp_sle %9, %10
+  cond_br %11, ^bb1(%9), ^bb2()
+^bb2():
+  ret
+}
+`),
+    ).toEqual(['global-base']);
+  });
+
   // …and the SPELLING behind that gate holds on its own. `&gSym` has no place to put a member
   // offset, so the global-address branch of arrayAccess must not swallow one — with the gate
   // ablated the member is spelled through the struct cast, never dropped onto `&gRgbMap` itself.
@@ -345,6 +376,65 @@ describe('member-array recovery — the gates', () => {
         ),
       ),
     ).toEqual(['member-align', 'member-align']);
+  });
+
+  // The OTHER half of `member-align`: a member below the base is unseatable whatever its element
+  // size divides, because the base points into the middle of an object rather than at a struct.
+  test('a member at a negative offset declines', () => {
+    expect(
+      refusals(`fn below {
+^bb0(%0: unk32):
+  %2: unk32 = const {value=0}
+  %3: unk32 = const {value=4}
+  %4: unk32 = add %0, %3
+  %13: unk32 = const {value=-4}
+  %14: unk32 = add %0, %13
+  br ^bb1(%2)
+^bb1(%6: unk32):
+  %7: unk32 = aload %4, %6 {elemSize=2, signed=false}
+  astore %14, %6, %7 {elemSize=2}
+  %8: unk32 = const {value=1}
+  %9: unk32 = add %6, %8
+  %10: unk32 = const {value=5}
+  %11: unk32 = icmp_sle %9, %10
+  cond_br %11, ^bb1(%9), ^bb2()
+^bb2():
+  ret
+}
+`),
+    ).toEqual(['member-align']);
+  });
+
+  // Two loops walking ONE member to two extents are not the contradiction two widths at one offset
+  // are: the member has to hold both, so the declaration takes the larger.
+  test('two walks of one member declare the larger count', () => {
+    const c = emit(`fn twowalk {
+^bb0(%0: unk32):
+  %2: unk32 = const {value=0}
+  %3: unk32 = const {value=4}
+  %4: unk32 = add %0, %3
+  br ^bb1(%2)
+^bb1(%6: unk32):
+  %7: unk32 = aload %4, %6 {elemSize=2, signed=false}
+  astore %4, %6, %7 {elemSize=2}
+  %8: unk32 = const {value=1}
+  %9: unk32 = add %6, %8
+  %10: unk32 = const {value=5}
+  %11: unk32 = icmp_sle %9, %10
+  cond_br %11, ^bb1(%9), ^bb2(%2)
+^bb2(%12: unk32):
+  %13: unk32 = const {value=0}
+  astore %4, %12, %13 {elemSize=2}
+  %14: unk32 = const {value=1}
+  %15: unk32 = add %12, %14
+  %16: unk32 = const {value=2}
+  %17: unk32 = icmp_sle %15, %16
+  cond_br %17, ^bb2(%15), ^bb3()
+^bb3():
+  ret
+}
+`);
+    expect(c).toContain('struct Struct0 { u8 _pad0[4]; u16 field_4[6]; };');
   });
 
   test('overlapping member runs decline', () => {

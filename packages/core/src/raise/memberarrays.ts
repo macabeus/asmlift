@@ -12,6 +12,13 @@
 // add as a MEMBER SELECTION instead: `P` points at a struct whose byte-K member is an array of
 // `elemSize` elements, and the access is `P->field_K[i]`.
 //
+// A BYTE member is outside that shape in both directions, and the bound is arrays.ts's rather than
+// this pass's: only the shift-scaled address is legalized, so a `u8[]` walk keeps its `add(base,
+// index)` and mints no site here — and that surviving add is then an escaping use of the base,
+// which refuses the WIDER members beside it too (`escaping-use`). A struct that mixes a byte member
+// with u16/s32 members is therefore not reached at all; legalizing the unscaled form is what would
+// reach it.
+//
 // WHY THE SPELLING IS NOT COSMETIC. agbcc puts the `+K` in a different place for each of the three
 // C spellings of this access, and only one of them is the target's. Compiled with this benchmark's
 // own agbcc and scored against `synthetic:membnarrow`'s own target object:
@@ -37,11 +44,16 @@
 // different question: where a base LOCAL goes is the L3 base-local levers' business, taken over
 // whatever type the recovery mints, not a second answer to the TYPE this pass decides.
 //
-// WHY THE COUNT IS A GATE RATHER THAN A GUESS. The declared element count of the TRAILING member is
-// byte-observable in its own right (agbcc hoists the base out of the loop only once the struct is
-// big enough), so it is read off the loop that walks the member — `boundedCount` below — and the
-// whole base DECLINES when no counted loop states it. An INTERIOR member's count is not a choice at
-// all: it is forced by the member that follows it.
+// WHY THE TRAILING COUNT IS A GATE RATHER THAN A GUESS, and it is the struct's SIZE that makes it
+// one. The count itself is nearly invisible: on `synthetic:membnarrow`'s own target, declaring the
+// walked member `u16 field_4[N]` scores 11 at N = 1 and 2 and MATCHES at every N from 3 to 100.
+// What moved was `sizeof` — hold the count at 1 and pad the struct instead and the same threshold
+// appears (size 6 and 8 score 11, size 10 and up match), because agbcc hoists the loop base out
+// only once the object is big enough. So a count is not a fact to derive but a free parameter with
+// a byte-observable LOWER BOUND, and inventing one invents a size. The count is therefore read off
+// the loop that walks the member — `boundedCount` below — and the whole base DECLINES when no
+// counted loop states one. An INTERIOR member's count is not a choice at all: it is forced by the
+// member that follows it.
 //
 // THE SIBLING PASSES, and why this is a third one rather than a case inside either.
 // raise/structs.ts recovers a struct from CONSTANT-offset accesses and leaves every variable-index
@@ -90,7 +102,7 @@ export interface MemberArrayCandidate {
   untypedBase: boolean;
   /** no access, nor the member address it is taken off, was already claimed by an earlier recovery */
   unclaimedAccesses: boolean;
-  /** the base is the address of a NAMED global, whose declaration is the project's own */
+  /** the base reaches the address of a NAMED global, whose declaration is the project's own */
   namedGlobalBase: boolean;
   /** some access sits at a NONZERO member offset — a base walked only at offset 0 is a plain array */
   hasNonZeroMember: boolean;
@@ -100,7 +112,7 @@ export interface MemberArrayCandidate {
   noDirectAccess: boolean;
   /** every use of the base and of every member address is a variable-index access BASE */
   noEscape: boolean;
-  /** every member offset is a multiple of its own element size */
+  /** every member offset is non-negative and a multiple of its own element size */
   aligned: boolean;
   /** accesses sharing an offset agree on element size and on load signedness */
   consistent: boolean;
@@ -121,12 +133,16 @@ export const MEMBER_ARRAY_GATES: readonly Gate<MemberArrayCandidate>[] = [
     rejects: (c) => !c.untypedBase,
   },
   {
-    // The per-ACCESS half of `base-typed`, and it is a different region rather than a stronger
-    // rule: raise/struct-arrays.ts types the MATERIALIZED member address `add(P, K)` and marks the
-    // accesses it mints with its own `fieldOff`, while the base `P` this pass groups on stays
-    // untyped — so `P->tbl[i].f` reaches the gates as an ordinary member walk. Claiming it drops
-    // the field offset (an array of structs at a member offset is not the layout this pass
-    // declares) and re-spells the element STRIDE as a scalar width.
+    // The evidence is per-ACCESS and the refusal is per-BASE. raise/struct-arrays.ts types the
+    // MATERIALIZED member address `add(P, K)` and marks the accesses it mints with its own
+    // `fieldOff`, while the base `P` this pass groups on stays untyped — so `P->tbl[i].f` reaches
+    // the gates as an ordinary member walk, and claiming it drops the field offset (an array of
+    // structs at a member offset is not the layout this pass declares) and re-spells the element
+    // STRIDE as a scalar width. One marked access refuses the whole base, which costs the members
+    // beside it: a struct walked at a member offset AND holding an array of structs elsewhere is
+    // refused entirely (measured at 4 points on such a shape). Claiming only the unmarked accesses
+    // would retype `P` underneath the accesses struct-arrays owns, so the narrower rule is a
+    // change to both passes rather than to this predicate.
     id: 'claimed-access',
     why: 'an access another recovery has already claimed carries an offset this pass would drop',
     sound: true,
@@ -134,9 +150,12 @@ export const MEMBER_ARRAY_GATES: readonly Gate<MemberArrayCandidate>[] = [
     rejects: (c) => !c.unclaimedAccesses,
   },
   {
-    // A named global's layout belongs to the project's headers — raise/structs.ts makes the same
-    // carve-out — and the symbol context already renders its accesses. Synthesizing a struct around
-    // one would re-declare a type asmlift does not own.
+    // A named global's layout belongs to the project's headers, and the member spelling is the one
+    // spelling that cannot consult them: structure.ts's `arrayAccess` renders `&gSym` through the
+    // symbol context — the map's own array declaration, `gSym[i]` — only while no member offset is
+    // set, and takes the `(struct StructN *)&gSym` cast once one is. So claiming a global trades a
+    // declaration asmlift has evidence for against one it invents. The base is resolved through
+    // block parameters because a global merged onto a `?:` is still a global.
     id: 'global-base',
     why: "a named global's layout is the project's own declaration, not one to synthesize",
     sound: false,
@@ -156,9 +175,10 @@ export const MEMBER_ARRAY_GATES: readonly Gate<MemberArrayCandidate>[] = [
     // with the roles reversed, and reading it as a member selection declares a 48 MB struct. Nothing
     // in the IR separates the two: raise/const.ts folds a pool-loaded literal and an add-immediate
     // into the same `const`. So the separation is STATED here rather than derived, and the number is
-    // chosen where the two populations do not overlap on this corpus — above every offset sa3 and
-    // klonoa admit (the largest is 26) and below every mapped GBA region base (0x02000000). A target
-    // whose objects run past it is what would earn a declared field to read instead.
+    // chosen where the two populations do not overlap: below every mapped GBA region base
+    // (0x02000000), and above the offsets this recognizer admits — 26 is the largest on the sa3 and
+    // klonoa corpora, and a hand-built struct is admitted at 40, 100 and 200. A target whose objects
+    // run past it is what would earn a declared field to read instead.
     id: 'member-offset-range',
     why: 'a materialized addend that large is an absolute address, not a member offset',
     sound: false,
@@ -173,6 +193,9 @@ export const MEMBER_ARRAY_GATES: readonly Gate<MemberArrayCandidate>[] = [
     rejects: (c) => !c.noDirectAccess,
   },
   {
+    // The byte member of the coverage bound above lands here too: an unlegalized `add(base, index)`
+    // is a use of the base that is not a variable-index access, so one `u8[]` member refuses every
+    // wider member of its struct.
     id: 'escaping-use',
     why: 'a use this rewrite cannot see keeps reading the base as a word the retype no longer spells',
     sound: false,
@@ -189,7 +212,9 @@ export const MEMBER_ARRAY_GATES: readonly Gate<MemberArrayCandidate>[] = [
   {
     // SOUND, and it is the address that is at stake rather than the spelling: C aligns a member to
     // its own element type, so declaring an `s32` member at byte 2 would seat it at byte 4 and
-    // every access through it would read four bytes off the observed address.
+    // every access through it would read four bytes off the observed address. A NEGATIVE offset is
+    // unseatable for a different reason — the base points into the middle of an object rather than
+    // at a struct — and the modulo alone does not catch it, because JS `-4 % 2` is `-0`.
     id: 'member-align',
     why: 'a member C cannot seat at its observed offset addresses different bytes than the asm did',
     sound: true,
@@ -207,7 +232,7 @@ export const MEMBER_ARRAY_GATES: readonly Gate<MemberArrayCandidate>[] = [
   },
   {
     id: 'trailing-unbounded',
-    why: "nothing but the walking loop's bound states the last member's element count, and the count is byte-observable",
+    why: "nothing but the walking loop's bound states the last member's element count, and a count invents a sizeof",
     sound: false,
     guardedBy: 'member-arrays.test.ts: a member walked to a runtime bound declines',
     rejects: (c) => !c.trailingBounded,
@@ -315,6 +340,36 @@ function boundedCount(fn: Fn, idx: Value, defs: Map<Value, Op>): number | null {
   return count >= 1 ? count : null;
 }
 
+/** Every value that reaches the address of a NAMED global. A `gaddr` result is one; so is a block
+ *  parameter ANY of whose in-edges carries one, because a base merged from `&gA` and `&gB` — or
+ *  from `&gA` and something else — still spells at least one global's layout. */
+function namedGlobals(fn: Fn, defs: Map<Value, Op>): Set<Value> {
+  const global = new Set<Value>();
+  const incoming = new Map<Value, Value[]>();
+  for (const b of fn.blocks) {
+    for (const op of b.ops) {
+      if (op.opcode === 'gaddr') {
+        global.add(op.results[0]);
+      }
+      for (const s of op.successors) {
+        s.block.params.forEach((param, i) => {
+          incoming.set(param, [...(incoming.get(param) ?? []), s.args[i]]);
+        });
+      }
+    }
+  }
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const [param, args] of incoming) {
+      if (!global.has(param) && args.some((a) => global.has(a) || defs.get(a)?.opcode === 'gaddr')) {
+        global.add(param);
+        grew = true;
+      }
+    }
+  }
+  return global;
+}
+
 /** Group every variable-index access by the base it is taken off, resolving a `add(P, K)` address
  *  into (P, K). An offset-0 access contributes its own base. */
 function accessesByBase(fn: Fn, defs: Map<Value, Op>): Map<Value, MemberAccess[]> {
@@ -357,6 +412,7 @@ export interface MemberArrayGroup {
  *  Exported so a corpus sweep can price the gate table over the bases it REFUSES. */
 export function memberArrayCandidates(fn: Fn): MemberArrayGroup[] {
   const defs = defOpMap(fn);
+  const global = namedGlobals(fn, defs);
   const out: MemberArrayGroup[] = [];
   const bounds = new Map<Value, number | null>();
   for (const [base, accesses] of accessesByBase(fn, defs)) {
@@ -450,7 +506,7 @@ export function memberArrayCandidates(fn: Fn): MemberArrayGroup[] {
         unclaimedAccesses: accesses.every(
           (a) => a.op.attrs.fieldOff === undefined && (a.addr === null || a.addr.type.kind === 'unknown'),
         ),
-        namedGlobalBase: defs.get(base)?.opcode === 'gaddr',
+        namedGlobalBase: global.has(base) || defs.get(base)?.opcode === 'gaddr',
         hasNonZeroMember: members.some((m) => m.off > 0),
         offsetsInRange: members.every((m) => m.off < MAX_MEMBER_OFFSET),
         noDirectAccess,
@@ -477,7 +533,10 @@ function fieldsOf(members: Member[]): StructField[] {
   for (const [i, m] of members.entries()) {
     const next = members[i + 1];
     // `trailing-unbounded` is what makes the trailing member's `bounds` non-empty; the `1` is what
-    // an ABLATION of that gate declares rather than a count of nothing.
+    // an ABLATION of that gate declares rather than a count of nothing. Two loops walking one
+    // member to two different extents are not a contradiction the way two WIDTHS at one offset are
+    // (`member-conflict`): the member has to hold both, so the larger is the smallest count that
+    // seats them.
     const count = next === undefined ? Math.max(1, ...m.bounds) : (next.off - m.off) / m.elemSize;
     fields.push({
       off: m.off,

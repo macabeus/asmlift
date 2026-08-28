@@ -80,13 +80,12 @@ export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
   { id: 'struct-arrays', run: recognizeStructArrays, dce: true },
   // member-arrays AFTER struct-arrays, and that order IS load-bearing — but the order alone does
   // not deconflict them, because the two passes claim different VALUES: struct-arrays types the
-  // materialized `add(P, K)` and member-arrays groups on `P`, so `P->tbl[i].f` reaches both — what
+  // materialized `add(P, K)` and member-arrays groups on `P`, so `P->tbl[i].f` reaches both. What
   // deconflicts them is member-arrays' `claimed-access` gate, reading the marks struct-arrays
-  // leaves. Its position before `structs` is NOT load-bearing — a base
-  // carrying both of THOSE shapes is refused on either side (`direct-access` here, the `unknown`
-  // check there) — and it sits there so the three struct synthesizers read in the order of their
-  // evidence. `narrowlocal` reads the carrier's extension chain rather than any address, so
-  // nothing here orders against it.
+  // leaves. Its position before `structs` is NOT load-bearing — a base carrying both of THOSE
+  // shapes is refused on either side (`direct-access` here, the `unknown` check there) — and it
+  // sits there so the three struct synthesizers read in the order of their evidence. `narrowlocal`
+  // reads the carrier's extension chain rather than any address, so nothing here orders against it.
   { id: 'member-arrays', run: (fn) => recognizeMemberArrays(fn), dce: true },
   { id: 'structs', run: recognizeStructs, dce: false },
   { id: 'shortcircuit', run: recognizeShortCircuit, dce: true },
