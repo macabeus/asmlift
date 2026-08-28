@@ -16,10 +16,8 @@ export type MatchNode =
       attrEquals?: Record<string, number>;
       bindImm?: Record<string, string>;
       /** Match this node's two operands in the WRITTEN order only, even when the opcode is in
-       *  `COMMUTATIVE`. For an idiom whose payoff is byte-fidelity, the machine's operand order can
-       *  itself be the evidence: PPC's `%` lowers to `divw; mullw rD,quotient,divisor; subf`, while
-       *  the same triple with the multiply's operands swapped is what a hand-written
-       *  `a - b * (a / b)` lowers to — folding both to one operator would respell the second. */
+       *  `COMMUTATIVE` — for an idiom where the machine's operand order is evidence about the
+       *  source rather than an accident of the encoding (see HWMOD_PATTERNS for the one case). */
       ordered?: true;
       args: MatchNode[];
     }
@@ -152,6 +150,50 @@ export const SDIV_POW2_2: RewritePattern = {
   },
   replaceWith: { op: 'sdiv', args: ['X'], attrs: { imm: 2 }, resultType: T.s() },
 };
+
+// ── the synthesized remainder (PPC) ─────────────────────────────────────────────────────
+// PowerPC divides in hardware but has no remainder instruction, so `a % b` is lowered as
+// `divw rQ,a,b; mullw rP,rQ,b; subf rD,rP,a` — the operator is GONE from the machine code, spelled
+// out as its own definition. Folding the triple back to one `smod`/`umod` gives recovery and the
+// structurer the operator the source wrote, and re-emitting `%` reproduces the triple byte-exact.
+//
+// This is NOT the `capabilities.hwDivide` axis: MIPS also divides in hardware and needs no fold at
+// all, because `div` leaves the remainder in `hi` and the frontend reads it straight out as `smod`.
+// The predicate is the narrower ISA fact — a hardware divide that yields the QUOTIENT ONLY — which
+// `isa: 'ppc'` names; `compilers` carries the half that was measured rather than reasoned, that
+// mwcc's lowering is exactly this triple in exactly this order.
+//
+// `ordered: true` on the multiply is why this pattern needs the flag at all. The swapped triple
+// (`mullw rP,b,rQ`) is what a source-level `a - b * (a / b)` compiles to — and `a - a / b * b`
+// too, mwcc emits the swap for both — which asmlift already reproduces byte-exact by spelling the
+// decomposition back out. Matching either order would respell that into a miss.
+//
+// A CONSTANT divisor is out of reach here and deliberately left so: magicdiv runs after the idiom
+// fold, so `a % 10` still reaches L3 written out. It costs nothing — `mulli` has no register
+// operand order to lose, and both spellings assemble to the same bytes.
+function hwModPattern(div: 'sdiv' | 'udiv', mod: 'smod' | 'umod'): RewritePattern {
+  return {
+    id: `hwmod-${mod}`,
+    applies: { isa: 'ppc', compilers: ['mwcc'] },
+    match: {
+      op: 'sub',
+      args: [
+        { bind: 'A' },
+        {
+          op: 'mul',
+          ordered: true,
+          args: [{ op: div, args: [{ same: 'A' }, { bind: 'B' }] }, { same: 'B' }],
+        },
+      ],
+    },
+    replaceWith: { op: mod, args: ['A', 'B'] },
+  };
+}
+
+/** `a - a / b * b` → `a % b`, signed and unsigned. Refuses unless the dividend and divisor are the
+ *  SAME two values in both places (the `same` bindings) — a different operand is a subtraction, not
+ *  a remainder — and unless the multiply reads the quotient first. */
+export const HWMOD_PATTERNS: RewritePattern[] = [hwModPattern('sdiv', 'smod'), hwModPattern('udiv', 'umod')];
 
 // ── multiply-by-constant idioms (DIVMUL) ────────────────────────────────────────────────
 // A compiler strength-reduces `x * C` for a small constant C into shifts + one add/sub, because a
@@ -318,15 +360,16 @@ export const NOT_CMP_PATTERNS: RewritePattern[] = [
 
 // The DEFAULT idiom bundle `decompile()` applies when the caller passes no `patterns`. It is
 // EVERY idiom asmlift owns; the list self-selects per target through patternApplies — agbcc/gcc get
-// sdiv-pow2, agbcc/ido/gcc get the mul-const folds, mwcc gets cntlzw-eq0 + rotl-mirror, and agbcc
-// gets the casts. MOST patterns are `{compilers}`-gated because they trade one spelling for another
-// and are only byte-safe where measured; the boolean-negation folds are deliberately UNGATED (see
-// their comment — the shape is its own gate), so "gated per compiler" is the common case, not the
-// invariant. Ordered like the sub-bundles: the
-// division idiom, then the multiplies (base folds before the composite tail). Passing an explicit
-// `patterns` (including `[]`) overrides this — `[]` runs the naive lift with no idiom folding.
+// sdiv-pow2, agbcc/ido/gcc get the mul-const folds, mwcc gets cntlzw-eq0 + rotl-mirror + the PPC
+// remainder fold, and agbcc gets the casts. MOST patterns are `{compilers}`-gated because they
+// trade one spelling for another and are only byte-safe where measured; the boolean-negation folds
+// are deliberately UNGATED (see their comment — the shape is its own gate), so "gated per compiler"
+// is the common case, not the invariant. Ordered like the sub-bundles: the division idioms, then
+// the multiplies (base folds before the composite tail). Passing an explicit `patterns` (including
+// `[]`) overrides this — `[]` runs the naive lift with no idiom folding.
 export const DEFAULT_IDIOM_PATTERNS: RewritePattern[] = [
   SDIV_POW2_2,
+  ...HWMOD_PATTERNS,
   CNTLZW_EQ0,
   // AFTER cntlzw-eq0, which is what turns mwcc's `clz(x) >> 5` into the `icmp_eq` this fold then
   // negates — `!(x == 0)` composes only in that order (each pattern runs to fixpoint in turn).

@@ -17,6 +17,7 @@ import { print } from '../src/ir/print';
 import { verify } from '../src/ir/verify';
 import {
   CNTLZW_EQ0,
+  HWMOD_PATTERNS,
   NOT_CMP_PATTERNS,
   type RewritePattern,
   SDIV_POW2_2,
@@ -250,4 +251,70 @@ test('without `ordered` the same pattern matches a commutative op both ways', ()
   const both: RewritePattern = { ...MUL_ORDER_PROBE, match: { ...MUL_ORDER_PROBE.match, ordered: undefined } };
   expect(applyPattern(parse(NEG_FIRST), both)).toBe(1);
   expect(applyPattern(parse(NEG_SECOND), both)).toBe(1);
+});
+
+// ── PPC's synthesized remainder ───────────────────────────────────────────────────────────────
+// `divw; mullw; subf` with the same two operands throughout IS `a % b` — PowerPC has no remainder
+// instruction, so the operator only exists in the source. The fold gives it back.
+const HWMOD_SMOD = HWMOD_PATTERNS[0];
+const HWMOD_UMOD = HWMOD_PATTERNS[1];
+
+const MOD_BEFORE = `fn modv {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = sdiv %0, %1
+  %3: s32 = mul %2, %1
+  %4: s32 = sub %0, %3
+  ret %4
+}
+`;
+
+const MOD_AFTER = `fn modv {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = smod %0, %1
+  ret %2
+}
+`;
+
+test('golden: hwmod-smod folds divide-multiply-subtract to one remainder', () => {
+  const fn = parse(MOD_BEFORE);
+  const n = applyPattern(fn, HWMOD_SMOD);
+  dce(fn);
+  expect(n).toBe(1);
+  expect(print(fn)).toBe(MOD_AFTER);
+  verify(fn);
+});
+
+test('golden: hwmod-umod is the same fold over the unsigned divide', () => {
+  const fn = parse(MOD_BEFORE.replace('sdiv', 'udiv'));
+  expect(applyPattern(fn, HWMOD_UMOD)).toBe(1);
+  dce(fn);
+  expect(print(fn)).toBe(MOD_AFTER.replace('smod', 'umod'));
+  verify(fn);
+});
+
+test('hwmod refuses the multiply that reads the DIVISOR first', () => {
+  // `mullw rP,b,rQ` is what a source-level `a - b * (a / b)` compiles to, and asmlift already
+  // reproduces that byte-exact by spelling the decomposition back out. Folding it would respell it.
+  expect(applyPattern(parse(MOD_BEFORE.replace('mul %2, %1', 'mul %1, %2')), HWMOD_SMOD)).toBe(0);
+});
+
+test('hwmod refuses a different dividend or a different divisor', () => {
+  const withThird = (body: string) => `fn f {\n^bb0(%0: s32, %1: s32, %9: s32):\n${body}  ret %4\n}\n`;
+  // `c - a / b * b` — the subtraction's left operand is not the dividend.
+  const otherDividend = withThird('  %2: s32 = sdiv %0, %1\n  %3: s32 = mul %2, %1\n  %4: s32 = sub %9, %3\n');
+  // `a - a / b * c` — the multiplier is not the divisor.
+  const otherDivisor = withThird('  %2: s32 = sdiv %0, %1\n  %3: s32 = mul %2, %9\n  %4: s32 = sub %0, %3\n');
+  expect(applyPattern(parse(otherDividend), HWMOD_SMOD)).toBe(0);
+  expect(applyPattern(parse(otherDivisor), HWMOD_SMOD)).toBe(0);
+});
+
+test('hwmod applies to PPC/mwcc only — not to the hardware-divide ISA that HAS a remainder', () => {
+  // Not the `hwDivide` axis: MIPS divides in hardware too, and needs no fold because `div` leaves
+  // the remainder in `hi` for the frontend to read out as `smod` directly.
+  const mips = { id: 'mips', compiler: 'ido', capabilities: { hwDivide: true, hwFloat: true } };
+  const arm = { id: 'armv4t', compiler: 'agbcc', capabilities: { hwDivide: false, hwFloat: false } };
+  const ppc = { id: 'ppc', compiler: 'mwcc', capabilities: { hwDivide: true, hwFloat: true } };
+  expect(patternApplies(HWMOD_SMOD, ppc)).toBe(true);
+  expect(patternApplies(HWMOD_SMOD, mips)).toBe(false);
+  expect(patternApplies(HWMOD_SMOD, arm)).toBe(false);
 });
