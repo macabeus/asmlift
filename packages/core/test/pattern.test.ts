@@ -15,7 +15,15 @@ import {
 import { parse } from '../src/ir/parse';
 import { print } from '../src/ir/print';
 import { verify } from '../src/ir/verify';
-import { CNTLZW_EQ0, NOT_CMP_PATTERNS, SDIV_POW2_2, applyPattern, dce, patternApplies } from '../src/pattern/engine';
+import {
+  CNTLZW_EQ0,
+  NOT_CMP_PATTERNS,
+  type RewritePattern,
+  SDIV_POW2_2,
+  applyPattern,
+  dce,
+  patternApplies,
+} from '../src/pattern/engine';
 
 // agbcc's signed /2 idiom, lifted to L1: shr_s(add(X, shr_u(X,31)), 1).
 const BEFORE = `fn half {
@@ -204,4 +212,42 @@ test('the four effect views over the registry name four different questions', ()
   // on a path that skipped it is not — which is the only difference between the two sets.
   expect(ORDER_SENSITIVE_OPS.has('sdiv')).toBe(false);
   expect(REEVAL_UNSAFE_OPS.has('sdiv')).toBe(true);
+});
+
+// ── an idiom that declares an operand order load-bearing ──────────────────────────────────────
+// `mul` is commutative, so by default a pattern node over one matches its operands in either
+// order. `ordered: true` turns that off for one node, which is what an idiom needs when the
+// machine's operand order is the evidence rather than an accident of the encoding.
+const MUL_ORDER_PROBE: RewritePattern = {
+  id: 'test/neg-times',
+  applies: {},
+  match: { op: 'mul', ordered: true, args: [{ op: 'neg', args: [{ bind: 'X' }] }, { bind: 'Y' }] },
+  replaceWith: { op: 'sub', args: ['Y', 'X'] },
+};
+
+const NEG_FIRST = `fn f {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = neg %0
+  %3: s32 = mul %2, %1
+  ret %3
+}
+`;
+
+const NEG_SECOND = `fn f {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = neg %0
+  %3: s32 = mul %1, %2
+  ret %3
+}
+`;
+
+test('`ordered` matches the written operand order and refuses the swap', () => {
+  expect(applyPattern(parse(NEG_FIRST), MUL_ORDER_PROBE)).toBe(1);
+  expect(applyPattern(parse(NEG_SECOND), MUL_ORDER_PROBE)).toBe(0);
+});
+
+test('without `ordered` the same pattern matches a commutative op both ways', () => {
+  const both: RewritePattern = { ...MUL_ORDER_PROBE, match: { ...MUL_ORDER_PROBE.match, ordered: undefined } };
+  expect(applyPattern(parse(NEG_FIRST), both)).toBe(1);
+  expect(applyPattern(parse(NEG_SECOND), both)).toBe(1);
 });

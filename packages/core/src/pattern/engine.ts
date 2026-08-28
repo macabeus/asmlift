@@ -11,7 +11,18 @@ import type { IrType } from '../ir/types';
 import { T } from '../ir/types';
 
 export type MatchNode =
-  | { op: string; attrEquals?: Record<string, number>; bindImm?: Record<string, string>; args: MatchNode[] }
+  | {
+      op: string;
+      attrEquals?: Record<string, number>;
+      bindImm?: Record<string, string>;
+      /** Match this node's two operands in the WRITTEN order only, even when the opcode is in
+       *  `COMMUTATIVE`. For an idiom whose payoff is byte-fidelity, the machine's operand order can
+       *  itself be the evidence: PPC's `%` lowers to `divw; mullw rD,quotient,divisor; subf`, while
+       *  the same triple with the multiply's operands swapped is what a hand-written
+       *  `a - b * (a / b)` lowers to — folding both to one operator would respell the second. */
+      ordered?: true;
+      args: MatchNode[];
+    }
   | { bind: string } // bind this operand's VALUE to a name
   | { same: string } // this operand must equal a previously-bound value
   | { constImm: string }; // this operand must be a `const`; bind its numeric VALUE to an imm name
@@ -331,6 +342,7 @@ export const DEFAULT_IDIOM_PATTERNS: RewritePattern[] = [
 // same test, and which one a frontend builds is an accident of how the branch was decoded — the
 // zero-test folds must match either. The ORDERED comparisons are deliberately absent: swapping the
 // operands of `a < b` is `b > a`, a different opcode, which this mechanism cannot express.
+// Membership here is about the OPCODE; a single pattern node opts back out with `ordered: true`.
 const COMMUTATIVE = new Set(['add', 'mul', 'and', 'or', 'xor', 'icmp_eq', 'icmp_ne']);
 
 interface Binds {
@@ -379,9 +391,10 @@ function tryMatch(node: MatchNode, v: Value, defs: Map<Value, Op>, b: Binds): bo
   if (d.operands.length !== node.args.length) {
     return false;
   }
-  // A commutative binary op matches its two args in EITHER order. Each order is tried on a cloned
-  // bind map so a partial (then-failed) match can't leak bindings; the first full match commits.
-  if (COMMUTATIVE.has(d.opcode) && node.args.length === 2) {
+  // A commutative binary op matches its two args in EITHER order, unless the pattern declared this
+  // node `ordered`. Each order is tried on a cloned bind map so a partial (then-failed) match can't
+  // leak bindings; the first full match commits.
+  if (COMMUTATIVE.has(d.opcode) && node.args.length === 2 && !node.ordered) {
     for (const [i, j] of [
       [0, 1],
       [1, 0],
