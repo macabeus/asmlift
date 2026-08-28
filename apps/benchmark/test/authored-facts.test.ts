@@ -9,9 +9,16 @@
 //
 // This is the pre-existing `real-manifests.test.ts` policy suite's missing half: that one asks
 // whether a manifest is well-FORMED and portable, this one whether what it SAYS is true. The
-// oracle is the vendored preprocessed TU — the exact text the reference compiler saw — so neither
-// authored field can be reconciled by editing the other, and `funcC`, which DEFINES the target, is
-// never the field that gets tuned.
+// oracle is the vendored preprocessed TU — the text the reference compiler saw AND the blob the
+// row's target is compiled from — so a `proto` contradiction cannot be reconciled by moving
+// `funcC`: that moves the target too, i.e. it decompiles a different function.
+//
+// KNOWN-UNCOVERED, deliberately: the provisioning asymmetry between the two tools. asmlift gets a
+// symbol map on all 252 real rows; m2c gets a `--context` on 112 and nothing at all on 140. That
+// is a benchmark POLICY question (what should each tool be given?), not a contradiction, and no
+// mechanical check can settle it. What IS checked below is the per-row authored half: where a row
+// hand-writes a `ctx`, the callees it names to m2c and the callees it names to asmlift must be the
+// same set.
 //
 // CI runs this: `.github/workflows/ci.yml` → `pnpm exec vitest run apps/benchmark/test`. It is
 // toolchain-free (JSON + gzip only) and in no `bench` command, deliberately — a dataset lie must
@@ -24,7 +31,10 @@ import { describe, expect, test } from 'vitest';
 import { SYNTHETIC } from '../dataset/synthetic';
 import {
   ATTRIBUTE_MACROS,
+  UNVERIFIABLE_CALLEE_PROTOS,
   authoredFactProblems,
+  declarationsOf,
+  declaredFunctionNames,
   oracleFor,
   protoFactProblems,
   quotedSignature,
@@ -64,14 +74,40 @@ describe('every authored fact agrees with the function the compiler actually saw
     }, 30_000);
   }
 
-  // The oracle has to actually resolve, or the suite above passes by checking nothing.
+  // The oracle has to actually resolve, or the suite above passes by checking nothing. Stated per
+  // row rather than as a row COUNT: adding a benchmark row is the routine operation here, and a
+  // gate that answers a correct new row with `expected 253 to be 252` gets deleted, not read.
   test('the oracle resolves for every row', () => {
-    const checked = manifests.flatMap(({ man }) => {
+    const unchecked = manifests.flatMap(({ man }) => {
       const tus = vendoredTUs(man);
-      return man.functions.map((fn) => quotedSignature(fn.funcC) !== null && tus.get(fn.sym)!.includes(fn.sym));
+      return man.functions
+        .filter(
+          (fn) => quotedSignature(fn.funcC) === null || typeof oracleFor('', fn.sym, tus.get(fn.sym)!) === 'string',
+        )
+        .map((fn) => `${man.project}:${fn.sym}`);
     });
-    expect(checked.length).toBe(252);
-    expect(checked.filter((ok) => !ok)).toEqual([]);
+    expect(unchecked).toEqual([]);
+    expect(manifests.flatMap(({ man }) => man.functions).length).toBeGreaterThan(200);
+  }, 30_000);
+
+  // The inventory of facts this cannot adjudicate must not rot: a callee the TU now declares is a
+  // fact with an oracle, and leaving it listed would mute a check that works.
+  test('every UNVERIFIABLE_CALLEE_PROTOS entry is still unverifiable, and still exists', () => {
+    const stale: string[] = [];
+    for (const key of UNVERIFIABLE_CALLEE_PROTOS.keys()) {
+      const [project, sym, callee] = key.split(':');
+      const entry = manifests.find(({ man }) => man.project === project);
+      const fn = entry?.man.functions.find((f) => f.sym === sym);
+      if (!fn?.proto?.[callee]) {
+        stale.push(`${key}: no such callee proto any more — drop the entry`);
+        continue;
+      }
+      const tu = vendoredTUs(entry!.man).get(sym)!;
+      if (declarationsOf(tu, callee).length > 0 || declarationsOf(fn.ctx ?? '', callee).length > 0) {
+        stale.push(`${key}: the row now declares it — drop the entry and let the row's own text answer`);
+      }
+    }
+    expect(stale).toEqual([]);
   }, 30_000);
 });
 
@@ -105,13 +141,47 @@ describe('the prototype line handed to m2c is plain C', () => {
   });
 });
 
+// A callee declared to one decompiler and not the other is an information asymmetry, and it is
+// only answerable where the declaration was AUTHORED for the row: a hand-written `ctx` on the real
+// tier, and every synthetic spec (whose `src` IS the compiler's input, so it is its own oracle).
+// The vendored `m2cCtx` blob is out of scope by construction — it is a whole project's headers,
+// not a per-row claim about what a callee looks like.
+const symmetryProblems = (where: string, ctx: string, protoKeys: string[], sym: string): string[] => {
+  const inCtx = declaredFunctionNames(ctx).filter((n) => n !== sym);
+  const inProto = protoKeys.filter((n) => n !== sym);
+  return [
+    ...inCtx.filter((n) => !inProto.includes(n)).map((n) => `${where}: m2c is told about \`${n}\`, asmlift is not`),
+    ...inProto.filter((n) => !inCtx.includes(n)).map((n) => `${where}: asmlift is told about \`${n}\`, m2c is not`),
+  ];
+};
+
+describe('neither decompiler is told a callee the other is not', () => {
+  test('every real row with a hand-written ctx declares the same callees to both', () => {
+    const asymmetric = manifests.flatMap(({ man }) =>
+      man.functions
+        .filter((fn) => fn.ctx)
+        .flatMap((fn) => symmetryProblems(`${man.project}:${fn.sym}`, fn.ctx!, Object.keys(fn.proto ?? {}), fn.sym)),
+    );
+    expect(asymmetric).toEqual([]);
+  });
+
+  test('every synthetic spec declares the same callees to both', () => {
+    const asymmetric = SYNTHETIC.flatMap((s) =>
+      symmetryProblems(`synthetic:${s.sym}`, s.ctx ?? '', Object.keys(s.proto ?? {}), s.sym),
+    );
+    expect(asymmetric).toEqual([]);
+  });
+});
+
 // The synthetic tier authors 86 `proto` tables of its own, and its `src` IS the compiler's input —
 // no headers, no macros — so it is its own oracle and the same check applies with no vendoring.
 // It is clean today; what this buys is that the NEXT hand-written spec cannot quietly declare a
 // void-ness its source refutes, which on the real tier cost a match before anything looked.
 describe('the synthetic tier declares nothing its own source refutes', () => {
   test('every synthetic proto agrees with its src', () => {
-    const problems = SYNTHETIC.flatMap((s) => protoFactProblems(`synthetic:${s.sym}`, s.sym, s.proto, s.src));
+    const problems = SYNTHETIC.flatMap((s) =>
+      protoFactProblems(`synthetic:${s.sym}`, s.sym, s.proto, s.src, s.ctx ?? ''),
+    );
     expect(problems).toEqual([]);
   });
 
@@ -119,26 +189,5 @@ describe('the synthetic tier declares nothing its own source refutes', () => {
     const noOracle = SYNTHETIC.filter((s) => typeof oracleFor('', s.sym, s.src) === 'string').map((s) => s.sym);
     expect(noOracle).toEqual([]);
     expect(SYNTHETIC.length).toBeGreaterThan(200);
-  });
-
-  // The dataset's own stated policy, in its header: "`ctx` is the m2c --context (prototypes only
-  // — no struct layouts, so both decompilers must RECOVER structure); `proto` feeds asmlift the
-  // SAME info". Unchecked, that is a comment. A callee declared to one decompiler and not the
-  // other is an information asymmetry, and the round that hunts for those should not have to read
-  // 220 specs to find one.
-  test('a callee named in `ctx` for m2c has a `proto` entry for asmlift, and vice versa', () => {
-    const asymmetric = SYNTHETIC.flatMap((s) => {
-      const inCtx = [...(s.ctx ?? '').matchAll(/\b([A-Za-z_]\w*)\s*\(/g)].map((m) => m[1]).filter((n) => n !== s.sym);
-      const inProto = Object.keys(s.proto ?? {}).filter((n) => n !== s.sym);
-      return [
-        ...inCtx
-          .filter((n) => !inProto.includes(n))
-          .map((n) => `synthetic:${s.sym}: m2c is told about \`${n}\`, asmlift is not`),
-        ...inProto
-          .filter((n) => !inCtx.includes(n))
-          .map((n) => `synthetic:${s.sym}: asmlift is told about \`${n}\`, m2c is not`),
-      ];
-    });
-    expect(asymmetric).toEqual([]);
   });
 });
