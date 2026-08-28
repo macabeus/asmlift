@@ -20,6 +20,7 @@ import { recognizeConsts } from './const';
 import { recognizeDivPow2 } from './divpow2';
 import { numberPureValues } from './gvn';
 import { recognizeMagicDivision } from './magicdiv';
+import { recognizeMemberArrays } from './memberarrays';
 import { rerootNarrowReads } from './narrow';
 import { narrowBlockLocals } from './narrowlocal';
 import { narrowEntryParams } from './paramwidth';
@@ -43,7 +44,7 @@ export interface PreRecoveryPass {
 
 /** THE ordered pre-recovery pass list — the single source of truth shared by pipeline / rank / report.
  *  address-numbering → const-materialize → magic-division → pow2-division → soft-division → array-legalize →
- *  struct-array → struct-pointer → short-circuit → branch-short-circuit → narrow-reads →
+ *  struct-array → member-array → struct-pointer → short-circuit → branch-short-circuit → narrow-reads →
  *  narrow-local → parameter-width. See each recognizer's file for the rationale. */
 export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
   // FIRST: collapsing duplicate address definitions removes block params every later recognizer
@@ -77,6 +78,15 @@ export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
   // discriminator note in raise/struct-arrays.ts) and BEFORE structs (an element's field
   // accesses must not be re-derived as constant-offset struct-pointer accesses).
   { id: 'struct-arrays', run: recognizeStructArrays, dce: true },
+  // member-arrays AFTER struct-arrays, and that order IS load-bearing — but the order alone does
+  // not deconflict them, because the two passes claim different VALUES: struct-arrays types the
+  // materialized `add(P, K)` and member-arrays groups on `P`, so `P->tbl[i].f` reaches both. What
+  // deconflicts them is member-arrays' `claimed-access` gate, reading the marks struct-arrays
+  // leaves. Its position before `structs` is NOT load-bearing — a base carrying both of THOSE
+  // shapes is refused on either side (`direct-access` here, the `unknown` check there) — and it
+  // sits there so the three struct synthesizers read in the order of their evidence. `narrowlocal`
+  // reads the carrier's extension chain rather than any address, so nothing here orders against it.
+  { id: 'member-arrays', run: (fn) => recognizeMemberArrays(fn), dce: true },
   { id: 'structs', run: recognizeStructs, dce: false },
   { id: 'shortcircuit', run: recognizeShortCircuit, dce: true },
   // The control-flow sibling, and this order IS load-bearing — value form FIRST.

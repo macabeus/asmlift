@@ -403,7 +403,8 @@ packages/core/            @asmlift/core — the pipeline
   src/ir/                 the IR substrate: types, ops, printer/parser, verifier
   src/pattern/            rewrite-patterns-as-data + the greedy driver
   src/raise/              L1→L2: recognizers (magicdiv, divpow2, softdiv, arrays, struct-arrays,
-                          structs, shortcircuit, narrow, paramwidth, retsink, latch, gvn)
+                          memberarrays, structs, shortcircuit, narrow, narrowlocal, paramwidth,
+                          retsink, latch, gvn)
                           + type recovery (recover.ts) — paramwidth decides a parameter's declared
                           WIDTH, so parameter types are not recover.ts's alone
   src/structure/          L2→L3: loop discovery, switch recovery, SSA destruction, emission
