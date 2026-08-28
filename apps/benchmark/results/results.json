@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generatedAt": "2026-08-28T11:04:41.025Z",
+    "generatedAt": "2026-08-28T11:49:46.357Z",
     "toolchains": [
       "ido7.1",
       "agbcc",
@@ -9,12 +9,12 @@
       "mwcc_242_81"
     ],
     "counts": {
-      "total": 914,
-      "synthetic": 662,
+      "total": 917,
+      "synthetic": 665,
       "real": 252
     },
     "asmlift": {
-      "commit": "5b097f8a3300c42fe47b645a800a77b9b2dec577",
+      "commit": "5ddb8cd32703d7ac6f8a16a804e719da4089f390",
       "dirty": false
     },
     "m2c": {
@@ -62622,6 +62622,244 @@
       "scripts": {
         "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `modpow2` — benchmark function synthetic:modpow2:mwcc_242_81.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The benchmark's objdump→GNU-as normalization of this function's disassembly (m2c cannot\n# read raw objdump), including the jump-table/const data sections recovered from the target\n# object — the exact text the benchmark fed m2c.\ncat > in.s <<'ASM_INPUT'\nglabel modpow2\n    slwi    r0,r3,28\n    srwi    r3,r3,31\n    subf    r0,r3,r0\n    rotlwi  r0,r0,4\n    add     r3,r0,r3\n    blr\nASM_INPUT\n\n# (This function ran with NO context header — the benchmark fed m2c the assembly alone.)\n\nargs=(\n  --target ppc-mwcc-c     # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function modpow2      # the symbol to decompile from in.s\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
         "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `modpow2` — benchmark function synthetic:modpow2:mwcc_242_81.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:modpow2:mwcc_242_81 --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact `objdump -d --no-show-raw-insn` text.\ncat > in.asm <<'ASM_INPUT'\n\ntarget.o:     file format elf32-powerpc\n\n\nDisassembly of section .text:\n\n00000000 <modpow2>:\n   0:\tslwi    r0,r3,28\n   4:\tsrwi    r3,r3,31\n   8:\tsubf    r0,r3,r0\n   c:\trotlwi  r0,r0,4\n  10:\tadd     r3,r0,r3\n  14:\tblr\nASM_INPUT\n\n# The target object's objdump -s -r -t dump — the data sections (jump tables, anonymous\n# constants) the text-only disassembly lacks; the benchmark recovered them from the object.\ncat > dump.txt <<'DUMP_INPUT'\n\ntarget.o:     file format elf32-powerpc\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 ref.c\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .mwcats.text\t00000000 .mwcats.text\n00000000 g     F .text\t00000018 modpow2\n\n\nRELOCATION RECORDS FOR [.mwcats.text]:\nOFFSET   TYPE              VALUE\n00000004 R_PPC_ADDR32      modpow2\n\n\nContents of section .text:\n 0000 5460e006 54630ffe 7c030050 5400203e  T`..Tc..|..PT. >\n 0010 7c601a14 4e800020                    |`..N..         \nContents of section .mwcats.text:\n 0000 02000018 00000000                    ........        \nContents of section .comment:\n 0000 436f6465 57617272 696f720a 02040201  CodeWarrior.....\n 0010 01020016 2c000000 00000000 00000000  ....,...........\n 0020 00000000 00000000 00000000 00000000  ................\n 0030 00000000 00000001 00000000 00000004  ................\n 0040 00000000 00000004 00000000 00000004  ................\n 0050 00000000                             ....\nDUMP_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target mwcc_242_81    # frontend + target description (ISA, calling convention, compiler idioms)\n  --name modpow2          # the symbol to decompile (multi-function input selects by name)\n  --asm-data dump.txt     # the data sections above (jump-table/const recovery)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+      }
+    },
+    {
+      "id": "synthetic:modseq:agbcc",
+      "sym": "modseq",
+      "project": "synthetic",
+      "tier": "synthetic",
+      "toolchain": "agbcc",
+      "isa": "arm",
+      "compiler": "agbcc",
+      "language": "c",
+      "features": [
+        "arithmetic",
+        "mod-reg",
+        "signed",
+        "soft-div",
+        "call"
+      ],
+      "loc": 3,
+      "refSource": "int lo(void);\nint hi(void);\nint modseq(void){ int a = lo(); return a % hi(); }",
+      "targetAsm": "@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tmodseq\n\t.type\t modseq,function\n\t.thumb_func\nmodseq:\n\tpush\t{r4, lr}\n\tbl\tlo\n\tadd\tr4, r0, #0\n\tbl\thi\n\tadd\tr1, r0, #0\n\tadd\tr0, r4, #0\n\tbl\t__modsi3\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n.Lfe1:\n\t.size\t modseq,.Lfe1-modseq\n",
+      "ctx": "int lo(void); int hi(void);",
+      "proto": {
+        "lo": {
+          "params": 0
+        },
+        "hi": {
+          "params": 0
+        }
+      },
+      "asmlift": {
+        "decompiler": "asmlift",
+        "candidateLabel": "unsigned",
+        "outcome": "match",
+        "source": "s32 modseq(void) {\n    return (s32)lo() % (s32)hi();\n}\n",
+        "score": 0,
+        "maxScore": 10,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 0
+        },
+        "quality": {
+          "score": 98,
+          "lines": 3,
+          "gotos": 0,
+          "casts": 3,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        }
+      },
+      "m2c": {
+        "decompiler": "m2c",
+        "outcome": "failed",
+        "source": "/*\nInternal error in function modseq:\n\nTraceback (most recent call last):\n  File \"/Users/macabeus/ApenasMeu/decompiler/m2c/m2c/main.py\", line 295, in run\n    raise decomp.state from None\n  File \"/Users/macabeus/ApenasMeu/decompiler/m2c/m2c/main.py\", line 181, in run\n    flow_graph = build_flowgraph(\n        function,\n    ...<4 lines>...\n        debug_patterns=options.debug_patterns,\n    )\n  File \"/Users/macabeus/ApenasMeu/decompiler/m2c/m2c/flow_graph.py\", line 1698, in build_flowgraph\n    blocks = build_blocks(\n        function, asm_data, arch, fragment=fragment, debug_patterns=debug_patterns\n    )\n  File \"/Users/macabeus/ApenasMeu/decompiler/m2c/m2c/flow_graph.py\", line 434, in build_blocks\n    function = simplify_standard_patterns(\n        function, asm_data, arch, debug_patterns=debug_patterns\n    )\n  File \"/Users/macabeus/ApenasMeu/decompiler/m2c/m2c/flow_graph.py\", line 408, in simplify_standard_patterns\n    new_body = simplify_patterns(\n        function.body, arch.asm_patterns, asm_data, arch, debug_patterns=debug_patterns\n    )\n  File \"/Users/macabeus/ApenasMeu/decompiler/m2c/m2c/asm_pattern.py\", line 325, in simplify_patterns\n    m = pattern.match(matcher)\n  File \"/Users/macabeus/ApenasMeu/decompiler/m2c/m2c/asm_pattern.py\", line 86, in match\n    return self.replace(m)\n           ~~~~~~~~~~~~^^^\n  File \"/Users/macabeus/ApenasMeu/decompiler/m2c/m2c/arch_arm.py\", line 998, in replace\n    assert isinstance(ins.args[0], AsmGlobalSymbol)\n           ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError\n*/\n",
+        "score": null,
+        "maxScore": null,
+        "compileErrors": null,
+        "quality": {
+          "score": 100,
+          "lines": 33,
+          "gotos": 0,
+          "casts": 0,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        },
+        "errorMarkers": [
+          "/*"
+        ]
+      },
+      "gapSize": null,
+      "scripts": {
+        "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `modseq` — benchmark function synthetic:modseq:agbcc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The exact agbcc `.s` text the benchmark fed m2c, verbatim.\ncat > in.s <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tmodseq\n\t.type\t modseq,function\n\t.thumb_func\nmodseq:\n\tpush\t{r4, lr}\n\tbl\tlo\n\tadd\tr4, r0, #0\n\tbl\thi\n\tadd\tr1, r0, #0\n\tadd\tr0, r4, #0\n\tbl\t__modsi3\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n.Lfe1:\n\t.size\t modseq,.Lfe1-modseq\nASM_INPUT\n\n# The exact context header the benchmark passed via --context — prototypes only\n# (no struct/global layouts: the benchmark measures cold recovery).\ncat > ctx.h <<'CTX_INPUT'\nint lo(void); int hi(void);\nCTX_INPUT\n\nargs=(\n  --target gba            # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function modseq       # the symbol to decompile from in.s\n  --context ctx.h         # the C context header above (typedefs + prototypes)\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `modseq` — benchmark function synthetic:modseq:agbcc.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:modseq:agbcc --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact agbcc `.s` text.\ncat > in.asm <<'ASM_INPUT'\n@ Generated by gcc 2.9-arm-000512 for Thumb/elf\n\t.code\t16\n.gcc2_compiled.:\n.text\n\t.align\t2, 0\n\t.globl\tmodseq\n\t.type\t modseq,function\n\t.thumb_func\nmodseq:\n\tpush\t{r4, lr}\n\tbl\tlo\n\tadd\tr4, r0, #0\n\tbl\thi\n\tadd\tr1, r0, #0\n\tadd\tr0, r4, #0\n\tbl\t__modsi3\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n.Lfe1:\n\t.size\t modseq,.Lfe1-modseq\nASM_INPUT\n\n# The prototype hints the benchmark fed asmlift (callee arities / void-ness).\ncat > proto.json <<'PROTO_INPUT'\n{\n  \"lo\": {\n    \"params\": 0\n  },\n  \"hi\": {\n    \"params\": 0\n  }\n}\nPROTO_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target agbcc          # frontend + target description (ISA, calling convention, compiler idioms)\n  --name modseq           # the symbol to decompile (multi-function input selects by name)\n  --proto proto.json      # the prototype hints above (callee arities / void-ness)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+      }
+    },
+    {
+      "id": "synthetic:modseq:gcc2.7.2kmc",
+      "sym": "modseq",
+      "project": "synthetic",
+      "tier": "synthetic",
+      "toolchain": "gcc2.7.2kmc",
+      "isa": "mips",
+      "compiler": "gcc",
+      "language": "c",
+      "features": [
+        "arithmetic",
+        "mod-reg",
+        "signed",
+        "call",
+        "hw-div"
+      ],
+      "loc": 3,
+      "refSource": "int lo(void);\nint hi(void);\nint modseq(void){ int a = lo(); return a % hi(); }",
+      "targetAsm": "\ntarget.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <modseq>:\n   0:\taddiu\tsp,sp,-24\n   4:\tsw\tra,20(sp)\n   8:\tjal\t0 <modseq>\n   c:\tsw\ts0,16(sp)\n  10:\tjal\t0 <modseq>\n  14:\tmove\ts0,v0\n  18:\tdiv\tzero,s0,v0\n  1c:\tbnez\tv0,28 <modseq+0x28>\n  20:\tnop\n  24:\tbreak\t0x7\n  28:\tli\tat,-1\n  2c:\tbne\tv0,at,40 <modseq+0x40>\n  30:\tlui\tat,0x8000\n  34:\tbne\ts0,at,40 <modseq+0x40>\n  38:\tnop\n  3c:\tbreak\t0x6\n  40:\tmfhi\tv0\n  44:\tlw\tra,20(sp)\n  48:\tlw\ts0,16(sp)\n  4c:\tjr\tra\n  50:\taddiu\tsp,sp,24\n\t...\n",
+      "ctx": "int lo(void); int hi(void);",
+      "proto": {
+        "lo": {
+          "params": 0
+        },
+        "hi": {
+          "params": 0
+        }
+      },
+      "asmDump": "\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /host-tmp/asmlift-mgcc-ref-50bc22d2e5bd5c7c/ref.c\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t00000054 modseq\n00000000         *UND*\t00000000 lo\n00000000         *UND*\t00000000 hi\n\n\nRELOCATION RECORDS FOR [.text]:\nOFFSET   TYPE              VALUE\n00000008 R_MIPS_26         lo\n00000010 R_MIPS_26         hi\n\n\nContents of section .text:\n 0000 27bdffe8 afbf0014 0c000000 afb00010  '...............\n 0010 0c000000 00408021 0202001a 14400002  .....@.!.....@..\n 0020 00000000 0007000d 2401ffff 14410004  ........$....A..\n 0030 3c018000 16010002 00000000 0006000d  <...............\n 0040 00001010 8fbf0014 8fb00010 03e00008  ................\n 0050 27bd0018 00000000 00000000 00000000  '...............\nContents of section .reginfo:\n 0000 a0010006 00000000 00000000 00000000  ................\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.              \n",
+      "asmlift": {
+        "decompiler": "asmlift",
+        "outcome": "declined",
+        "source": "/* asmlift could not decompile 'modseq' — lift: cannot lift 'modseq': function call 'jal' at 0x8 — MIPS calls not yet modelled */\n/* original assembly: */\n/*   target.o:     file format elf32-tradbigmips */\n/*   Disassembly of section .text: */\n/*   00000000 <modseq>: */\n/*      0:\taddiu\tsp,sp,-24 */\n/*      4:\tsw\tra,20(sp) */\n/*      8:\tjal\t0 <modseq> */\n/*      c:\tsw\ts0,16(sp) */\n/*     10:\tjal\t0 <modseq> */\n/*     14:\tmove\ts0,v0 */\n/*     18:\tdiv\tzero,s0,v0 */\n/*     1c:\tbnez\tv0,28 <modseq+0x28> */\n/*     20:\tnop */\n/*     24:\tbreak\t0x7 */\n/*     28:\tli\tat,-1 */\n/*     2c:\tbne\tv0,at,40 <modseq+0x40> */\n/*     30:\tlui\tat,0x8000 */\n/*     34:\tbne\ts0,at,40 <modseq+0x40> */\n/*     38:\tnop */\n/*     3c:\tbreak\t0x6 */\n/*     40:\tmfhi\tv0 */\n/*     44:\tlw\tra,20(sp) */\n/*     48:\tlw\ts0,16(sp) */\n/*     4c:\tjr\tra */\n/*     50:\taddiu\tsp,sp,24 */\n/*   \t... */\nvoid modseq(void) {\n    ASMLIFT_ERROR(\"could not decompile (lift): cannot lift 'modseq': function call 'jal' at 0x8 — MIPS calls not yet modelled\");\n}\n",
+        "score": null,
+        "maxScore": null,
+        "compileErrors": null,
+        "quality": {
+          "score": 88,
+          "lines": 30,
+          "gotos": 0,
+          "casts": 1,
+          "unkGlue": 1,
+          "rawMem": 0,
+          "addrDeref": 0
+        },
+        "errorMarkers": [
+          "lift: cannot lift 'modseq': function call 'jal' at 0x8 — MIPS calls not yet modelled"
+        ]
+      },
+      "m2c": {
+        "decompiler": "m2c",
+        "outcome": "noncompile",
+        "source": "Bad function call operand $lo\nBad function call operand $lo\nvoid modseq(void) {\n    // Error: Bad function call operand $lo\n    // At instruction: jal $lo\n}\n",
+        "score": null,
+        "maxScore": null,
+        "compileErrors": 1,
+        "quality": {
+          "score": 100,
+          "lines": 6,
+          "gotos": 0,
+          "casts": 1,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        },
+        "errorMarkers": [
+          "kmc gcc (docker) failed: <tmp>/cand.c:2: parse error before `function'"
+        ]
+      },
+      "gapSize": null,
+      "scripts": {
+        "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `modseq` — benchmark function synthetic:modseq:gcc2.7.2kmc.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The benchmark's objdump→GNU-as normalization of this function's disassembly (m2c cannot\n# read raw objdump), including the jump-table/const data sections recovered from the target\n# object — the exact text the benchmark fed m2c.\ncat > in.s <<'ASM_INPUT'\nglabel modseq\n    addiu\t$sp, $sp, -24\n    sw\t$ra, 20($sp)\n    jal\tlo\n    sw\t$s0, 16($sp)\n    jal\thi\n    move\t$s0, $v0\n    div\t$zero, $s0, $v0\n    bnez\t$v0, .L28\n    nop\n    break\t0x7\n.L28:\n    li\t$at, -1\n    bne\t$v0, $at, .L40\n    lui\t$at, 0x8000\n    bne\t$s0, $at, .L40\n    nop\n    break\t0x6\n.L40:\n    mfhi\t$v0\n    lw\t$ra, 20($sp)\n    lw\t$s0, 16($sp)\n    jr\t$ra\n    addiu\t$sp, $sp, 24\nASM_INPUT\n\n# The exact context header the benchmark passed via --context — prototypes only\n# (no struct/global layouts: the benchmark measures cold recovery).\ncat > ctx.h <<'CTX_INPUT'\nint lo(void); int hi(void);\nCTX_INPUT\n\nargs=(\n  --target mips-gcc-c     # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function modseq       # the symbol to decompile from in.s\n  --context ctx.h         # the C context header above (typedefs + prototypes)\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `modseq` — benchmark function synthetic:modseq:gcc2.7.2kmc.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:modseq:gcc2.7.2kmc --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact `objdump -d --no-show-raw-insn` text.\ncat > in.asm <<'ASM_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <modseq>:\n   0:\taddiu\tsp,sp,-24\n   4:\tsw\tra,20(sp)\n   8:\tjal\t0 <modseq>\n   c:\tsw\ts0,16(sp)\n  10:\tjal\t0 <modseq>\n  14:\tmove\ts0,v0\n  18:\tdiv\tzero,s0,v0\n  1c:\tbnez\tv0,28 <modseq+0x28>\n  20:\tnop\n  24:\tbreak\t0x7\n  28:\tli\tat,-1\n  2c:\tbne\tv0,at,40 <modseq+0x40>\n  30:\tlui\tat,0x8000\n  34:\tbne\ts0,at,40 <modseq+0x40>\n  38:\tnop\n  3c:\tbreak\t0x6\n  40:\tmfhi\tv0\n  44:\tlw\tra,20(sp)\n  48:\tlw\ts0,16(sp)\n  4c:\tjr\tra\n  50:\taddiu\tsp,sp,24\n\t...\nASM_INPUT\n\n# The target object's objdump -s -r -t dump — the data sections (jump tables, anonymous\n# constants) the text-only disassembly lacks; the benchmark recovered them from the object.\ncat > dump.txt <<'DUMP_INPUT'\n\ntarget.o:     file format elf32-tradbigmips\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 /host-tmp/asmlift-mgcc-ref-50bc22d2e5bd5c7c/ref.c\n00000000 l     O .text\t00000000 gcc2_compiled.\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .data\t00000000 .data\n00000000 l    d  .bss\t00000000 .bss\n00000000 l    d  .reginfo\t00000000 .reginfo\n00000000 l    d  .note\t00000000 .note\n00000000 l    d  .comment\t00000000 .comment\n00000000 g     F .text\t00000054 modseq\n00000000         *UND*\t00000000 lo\n00000000         *UND*\t00000000 hi\n\n\nRELOCATION RECORDS FOR [.text]:\nOFFSET   TYPE              VALUE\n00000008 R_MIPS_26         lo\n00000010 R_MIPS_26         hi\n\n\nContents of section .text:\n 0000 27bdffe8 afbf0014 0c000000 afb00010  '...............\n 0010 0c000000 00408021 0202001a 14400002  .....@.!.....@..\n 0020 00000000 0007000d 2401ffff 14410004  ........$....A..\n 0030 3c018000 16010002 00000000 0006000d  <...............\n 0040 00001010 8fbf0014 8fb00010 03e00008  ................\n 0050 27bd0018 00000000 00000000 00000000  '...............\nContents of section .reginfo:\n 0000 a0010006 00000000 00000000 00000000  ................\n 0010 00000000 00000000                    ........        \nContents of section .note:\n 0000 00000008 00000000 00000001 30312e30  ............01.0\n 0010 31000000                             1...            \nContents of section .comment:\n 0000 00474343 3a202847 4e552920 322e372e  .GCC: (GNU) 2.7.\n 0010 3200                                 2.\nDUMP_INPUT\n\n# The prototype hints the benchmark fed asmlift (callee arities / void-ness).\ncat > proto.json <<'PROTO_INPUT'\n{\n  \"lo\": {\n    \"params\": 0\n  },\n  \"hi\": {\n    \"params\": 0\n  }\n}\nPROTO_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target gcc2.7.2kmc    # frontend + target description (ISA, calling convention, compiler idioms)\n  --name modseq           # the symbol to decompile (multi-function input selects by name)\n  --asm-data dump.txt     # the data sections above (jump-table/const recovery)\n  --proto proto.json      # the prototype hints above (callee arities / void-ness)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
+      }
+    },
+    {
+      "id": "synthetic:modseq:mwcc_242_81",
+      "sym": "modseq",
+      "project": "synthetic",
+      "tier": "synthetic",
+      "toolchain": "mwcc_242_81",
+      "isa": "ppc",
+      "compiler": "mwcc",
+      "language": "c",
+      "features": [
+        "arithmetic",
+        "mod-reg",
+        "signed",
+        "call",
+        "hw-div"
+      ],
+      "loc": 3,
+      "refSource": "int lo(void);\nint hi(void);\nint modseq(void){ int a = lo(); return a % hi(); }",
+      "targetAsm": "\ntarget.o:     file format elf32-powerpc\n\n\nDisassembly of section .text:\n\n00000000 <modseq>:\n   0:\tstwu    r1,-16(r1)\n   4:\tmflr    r0\n   8:\tstw     r0,20(r1)\n   c:\tstw     r31,12(r1)\n  10:\tbl      10 <modseq+0x10>\n\t\t\t10: R_PPC_REL24\tlo\n  14:\tmr      r31,r3\n  18:\tbl      18 <modseq+0x18>\n\t\t\t18: R_PPC_REL24\thi\n  1c:\tdivw    r0,r31,r3\n  20:\tmullw   r0,r0,r3\n  24:\tsubf    r3,r0,r31\n  28:\tlwz     r31,12(r1)\n  2c:\tlwz     r0,20(r1)\n  30:\tmtlr    r0\n  34:\taddi    r1,r1,16\n  38:\tblr\n",
+      "ctx": "int lo(void); int hi(void);",
+      "proto": {
+        "lo": {
+          "params": 0
+        },
+        "hi": {
+          "params": 0
+        }
+      },
+      "asmDump": "\ntarget.o:     file format elf32-powerpc\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 ref.c\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .mwcats.text\t00000000 .mwcats.text\n00000000         *UND*\t00000000 lo\n00000000         *UND*\t00000000 hi\n00000000 g     F .text\t0000003c modseq\n\n\nRELOCATION RECORDS FOR [.text]:\nOFFSET   TYPE              VALUE\n00000010 R_PPC_REL24       lo\n00000018 R_PPC_REL24       hi\n\n\nRELOCATION RECORDS FOR [.mwcats.text]:\nOFFSET   TYPE              VALUE\n00000004 R_PPC_ADDR32      modseq\n\n\nContents of section .text:\n 0000 9421fff0 7c0802a6 90010014 93e1000c  .!..|...........\n 0010 48000001 7c7f1b78 48000001 7c1f1bd6  H...|..xH...|...\n 0020 7c0019d6 7c60f850 83e1000c 80010014  |...|`.P........\n 0030 7c0803a6 38210010 4e800020           |...8!..N..     \nContents of section .mwcats.text:\n 0000 0200003c 00000000                    ...<....        \nContents of section .comment:\n 0000 436f6465 57617272 696f720a 02040201  CodeWarrior.....\n 0010 01020016 2c000000 00000000 00000000  ....,...........\n 0020 00000000 00000000 00000000 00000000  ................\n 0030 00000000 00000001 00000000 00000004  ................\n 0040 00000000 00000004 00000000 00000000  ................\n 0050 00000000 00000000 00000000 00000004  ................\n 0060 00000000                             ....            \n",
+      "asmlift": {
+        "decompiler": "asmlift",
+        "candidateLabel": "unsigned",
+        "outcome": "nonmatch",
+        "source": "s32 modseq(void) {\n    s32 v0;\n    s32 v1;\n    v0 = lo();\n    v1 = hi();\n    return v0 - v0 / v1 * v1;\n}\n",
+        "score": 1,
+        "maxScore": 15,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 1
+        },
+        "quality": {
+          "score": 100,
+          "lines": 7,
+          "gotos": 0,
+          "casts": 1,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        }
+      },
+      "m2c": {
+        "decompiler": "m2c",
+        "outcome": "match",
+        "source": "s32 modseq(void) {\n    s32 temp_r31;\n\n    temp_r31 = lo();\n    return temp_r31 % hi();\n}\n",
+        "score": 0,
+        "maxScore": 15,
+        "compileErrors": null,
+        "breakdown": {
+          "insert": 0,
+          "delete": 0,
+          "replace": 0,
+          "opMismatch": 0,
+          "argMismatch": 0
+        },
+        "quality": {
+          "score": 100,
+          "lines": 5,
+          "gotos": 0,
+          "casts": 1,
+          "unkGlue": 0,
+          "rawMem": 0,
+          "addrDeref": 0
+        }
+      },
+      "gapSize": null,
+      "scripts": {
+        "m2c": "#!/usr/bin/env bash\n# Reproduce m2c on `modseq` — benchmark function synthetic:modseq:mwcc_242_81.\nset -euo pipefail\n\n# m2c checkout (https://github.com/matt-kempster/m2c); the benchmark pins commit ad5c529:\n#   git clone https://github.com/matt-kempster/m2c && git -C m2c checkout ad5c529a65ca1e5191b00a4a7b4cbfe79a7b45a0\nM2C_PATH='/path/to/m2c'\n\n# The benchmark's objdump→GNU-as normalization of this function's disassembly (m2c cannot\n# read raw objdump), including the jump-table/const data sections recovered from the target\n# object — the exact text the benchmark fed m2c.\ncat > in.s <<'ASM_INPUT'\nglabel modseq\n    stwu    r1,-16(r1)\n    mflr    r0\n    stw     r0,20(r1)\n    stw     r31,12(r1)\n    bl       lo\n    mr      r31,r3\n    bl       hi\n    divw    r0,r31,r3\n    mullw   r0,r0,r3\n    subf    r3,r0,r31\n    lwz     r31,12(r1)\n    lwz     r0,20(r1)\n    mtlr    r0\n    addi    r1,r1,16\n    blr\nASM_INPUT\n\n# The exact context header the benchmark passed via --context — prototypes only\n# (no struct/global layouts: the benchmark measures cold recovery).\ncat > ctx.h <<'CTX_INPUT'\nint lo(void); int hi(void);\nCTX_INPUT\n\nargs=(\n  --target ppc-mwcc-c     # ISA + compiler dialect (selects m2c's code-shape assumptions)\n  --function modseq       # the symbol to decompile from in.s\n  --context ctx.h         # the C context header above (typedefs + prototypes)\n  --no-cache              # bypass m2c's on-disk cache — always a fresh run\n)\npython3 \"$M2C_PATH/m2c.py\" \"${args[@]}\" in.s\n",
+        "asmlift": "#!/usr/bin/env bash\n# Reproduce asmlift on `modseq` — benchmark function synthetic:modseq:mwcc_242_81.\nset -euo pipefail\n\n# asmlift checkout — run `pnpm install` there once, with this function's toolchain available\n# (`pnpm bench setup` fetches bench-owned toolchains + pinned project checkouts;\n# apps/benchmark/README lists the env-var overrides; .github/workflows/benchmark.yml shows a\n# complete from-scratch setup):\nASMLIFT_PATH='/path/to/asmlift'\n\n# ── Step 1: scoring inputs ───────────────────────────────────────────────────\n# Builds this function's target object (content-cached) and writes a decomp.yaml whose compile\n# command is the benchmark's own toolchain invocation — what --score-against compiles with.\n# (progress goes to stderr so the script's stdout stays purely the decompiled source)\npnpm --dir \"$ASMLIFT_PATH\" bench target synthetic:modseq:mwcc_242_81 --out \"$PWD\" 1>&2\n\n# ── Step 2: the input the benchmark fed asmlift, verbatim ────────────────────\n# The exact `objdump -d --no-show-raw-insn` text.\ncat > in.asm <<'ASM_INPUT'\n\ntarget.o:     file format elf32-powerpc\n\n\nDisassembly of section .text:\n\n00000000 <modseq>:\n   0:\tstwu    r1,-16(r1)\n   4:\tmflr    r0\n   8:\tstw     r0,20(r1)\n   c:\tstw     r31,12(r1)\n  10:\tbl      10 <modseq+0x10>\n\t\t\t10: R_PPC_REL24\tlo\n  14:\tmr      r31,r3\n  18:\tbl      18 <modseq+0x18>\n\t\t\t18: R_PPC_REL24\thi\n  1c:\tdivw    r0,r31,r3\n  20:\tmullw   r0,r0,r3\n  24:\tsubf    r3,r0,r31\n  28:\tlwz     r31,12(r1)\n  2c:\tlwz     r0,20(r1)\n  30:\tmtlr    r0\n  34:\taddi    r1,r1,16\n  38:\tblr\nASM_INPUT\n\n# The target object's objdump -s -r -t dump — the data sections (jump tables, anonymous\n# constants) the text-only disassembly lacks; the benchmark recovered them from the object.\ncat > dump.txt <<'DUMP_INPUT'\n\ntarget.o:     file format elf32-powerpc\n\nSYMBOL TABLE:\n00000000 l    df *ABS*\t00000000 ref.c\n00000000 l    d  .text\t00000000 .text\n00000000 l    d  .mwcats.text\t00000000 .mwcats.text\n00000000         *UND*\t00000000 lo\n00000000         *UND*\t00000000 hi\n00000000 g     F .text\t0000003c modseq\n\n\nRELOCATION RECORDS FOR [.text]:\nOFFSET   TYPE              VALUE\n00000010 R_PPC_REL24       lo\n00000018 R_PPC_REL24       hi\n\n\nRELOCATION RECORDS FOR [.mwcats.text]:\nOFFSET   TYPE              VALUE\n00000004 R_PPC_ADDR32      modseq\n\n\nContents of section .text:\n 0000 9421fff0 7c0802a6 90010014 93e1000c  .!..|...........\n 0010 48000001 7c7f1b78 48000001 7c1f1bd6  H...|..xH...|...\n 0020 7c0019d6 7c60f850 83e1000c 80010014  |...|`.P........\n 0030 7c0803a6 38210010 4e800020           |...8!..N..     \nContents of section .mwcats.text:\n 0000 0200003c 00000000                    ...<....        \nContents of section .comment:\n 0000 436f6465 57617272 696f720a 02040201  CodeWarrior.....\n 0010 01020016 2c000000 00000000 00000000  ....,...........\n 0020 00000000 00000000 00000000 00000000  ................\n 0030 00000000 00000001 00000000 00000004  ................\n 0040 00000000 00000004 00000000 00000000  ................\n 0050 00000000 00000000 00000000 00000004  ................\n 0060 00000000                             ....\nDUMP_INPUT\n\n# The prototype hints the benchmark fed asmlift (callee arities / void-ness).\ncat > proto.json <<'PROTO_INPUT'\n{\n  \"lo\": {\n    \"params\": 0\n  },\n  \"hi\": {\n    \"params\": 0\n  }\n}\nPROTO_INPUT\n\n# ── Step 3: decompile + benchmark-grade scoring ──────────────────────────────\nargs=(\n  in.asm                  # input: the disassembly text above\n  --target mwcc_242_81    # frontend + target description (ISA, calling convention, compiler idioms)\n  --name modseq           # the symbol to decompile (multi-function input selects by name)\n  --asm-data dump.txt     # the data sections above (jump-table/const recovery)\n  --proto proto.json      # the prototype hints above (callee arities / void-ness)\n  --config decomp.yaml    # the compile command from step 1\n  --score-against target.o # rank candidate variants, objdiff-score each; exit 0 only on byte-exact\n)\n# the checkout's own asmlift bin (pnpm links it; it runs through the repo's pinned tsx)\n\"$ASMLIFT_PATH/node_modules/.bin/asmlift\" \"${args[@]}\"\n"
       }
     },
     {
