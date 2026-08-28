@@ -54,7 +54,7 @@ import {
   stmtChildren,
   walkExprs,
 } from '../l3/ast';
-import type { Gate } from '../l3/gates';
+import { type Gate, firstRejection } from '../l3/gates';
 import { exprCType, provablyNonNegative, ptrElemBytes, renderedIntSignedness } from '../l3/typing';
 import { returnType } from '../raise/recover';
 import { collectStructs } from '../raise/structs';
@@ -691,6 +691,66 @@ interface DoWhileInfo {
   arms: LoopArm[];
 }
 
+/** One carrier offered to one merge slot, as `FRESH_MERGE_GATES` judges it. */
+export interface FreshMergeCarrier {
+  /** every in-edge passes the SAME value, so the merge is a pure alias of the carrier */
+  readonly allSame: boolean;
+  /** the carrier is an entry parameter, or a merge home this rule itself minted */
+  readonly paramRooted: boolean;
+}
+
+/** `freshParamMerge`'s admission: may this merge take its OWN home instead of the carrier's name?
+ *  Nothing here is `sound` — both spellings are ordinary C over the same values, so `rank.ts`
+ *  enumerates the ON one as `/fresh-merge` and the differ referees it. What keeps them two
+ *  SPELLINGS rather than two PROGRAMS is `canTakeName`'s carrier width/sign check, which runs on
+ *  the same carrier one step earlier.
+ *
+ *  WHAT THE SPELLING BUYS: a parameter is live from entry, so its name pins the value to the
+ *  register the ABI handed it; a fresh local is dead until its first arm, so the compiler may place
+ *  the copy where the asm has it. Which merges actually needed a register of their own is not
+ *  recoverable from the C, and the rule is ALL-OR-NOTHING over a function's param-rooted slots. On
+ *  `max3` (agbcc -O2, scored against its own target) only the SECOND of the two chained merges is
+ *  load-bearing: re-homing just the first is byte-identical to re-homing neither (score 5), and
+ *  re-homing just the second is byte-identical to re-homing both (score 0, MATCH). Splitting the
+ *  choice per slot would be a fan of 2^slots, so the axis offers the whole-function spelling.
+ *
+ *  `param-rooted` is a SCOPE, not a derivation. A chain rooted in an ordinary merge home is left
+ *  alone, and widening to one is a different, unmeasured axis: 293 of 721 map-less corpus rows
+ *  carry at least one conditional merge slot (925 slots), of which the param rooting admits 109 —
+ *  `LoadBGTilemapData` is one of the other 184, which is why the axis has no reach there.
+ *
+ *  The rooting is over carrier VALUES, and two shapes carry a parameter's value past it under
+ *  another name. Both are reach-only — a spelling the differ referees, never a wrong answer — and
+ *  both are measured, not argued: a redundant phi keeps the parameter's own name (`redundant-phi`)
+ *  and its result is then an ordinary carrier, which fires on 0 of 721 lifted corpus rows; and the
+ *  minted-home set records only merges that ended up FRESH, so a merge that refuses a parameter and
+ *  then adopts an ordinary local is not recorded — 336 firings over 6 rows. */
+export const FRESH_MERGE_GATES: readonly Gate<FreshMergeCarrier>[] = [
+  {
+    id: 'redundant-phi',
+    why: 'a merge every edge feeds the same value overwrites nothing, so its own home buys a copy',
+    sound: false,
+    guardedBy: 'fresh-merge.test.ts: a redundant phi over one parameter keeps the parameter',
+    rejects: (c) => c.allSame,
+  },
+  {
+    id: 'param-rooted',
+    why: "only a parameter's register, or a home minted because of one, carries placement evidence",
+    sound: false,
+    guardedBy: 'fresh-merge.test.ts: a merge over ordinary locals is untouched',
+    rejects: (c) => !c.paramRooted,
+  },
+];
+
+/** True when the merge takes its own home. The table is a parameter so a test can drop one gate and
+ *  re-run the real pass (`StructureHooks.freshMergeGates`). */
+export function reHomesParamMerge(
+  c: FreshMergeCarrier,
+  gates: readonly Gate<FreshMergeCarrier>[] = FRESH_MERGE_GATES,
+): boolean {
+  return firstRejection(gates, c) === null;
+}
+
 // Structuring levers, threaded as DATA so a new one is a field here + its consumer, not a new
 // positional boolean widened across every call site:
 //   returnsVoid                    — from the function's own prototype (suppress phantom r0 return);
@@ -839,13 +899,7 @@ export interface StructureOptions {
   // Give a merge that conditionally overwrites a FUNCTION PARAMETER its own local, instead of
   // assigning back into the parameter's name (`if (a1 < a0) { v0 = a0; } else { v0 = a1; }` for
   // `if (a1 < a0) a1 = a0;`). Off by default; rank.ts enumerates the ON spelling as the
-  // `/fresh-merge` axis. Both spellings are ordinary C with identical semantics, so nothing over
-  // the source decides between them — what differs is where the compiler may place the copy. A
-  // parameter is live from entry, so its home is the register the ABI handed it and the copy into
-  // it is pinned there; a fresh local is dead until its first arm, so the compiler is free to
-  // place it where the asm did. At two arguments the two spellings compile to the same bytes (the
-  // returned value's home is occupied either way); a third argument is what makes the first
-  // parameter dead early enough for the difference to be observable.
+  // `/fresh-merge` axis, and `FRESH_MERGE_GATES` holds the admission and the argument for it.
   //
   // NOT `materializeJoinFeeds` widened to parameters. That axis reaches its shape by giving the
   // join's feed a NAME to adopt, and materialization is keyed on the defining `Op` — a parameter
@@ -871,6 +925,8 @@ export interface StructureHooks {
   /** `coalesceMergeNames`'s admission rules, so a test can run the pass with one gate DROPPED —
    *  the ablation as a value rather than as a flag compiled into the shipped path. */
   nameCoalesceGates?: readonly Gate<NameMerge>[];
+  /** `freshParamMerge`'s admission rules, ablatable the same way. */
+  freshMergeGates?: readonly Gate<FreshMergeCarrier>[];
 }
 
 /** A CANDIDATE SPELLING MUST NEVER UNLOCK A FUNCTION THE PRIMARY DECLINES. `varName` is not only
@@ -1387,13 +1443,15 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     varName.set(p, `a${i}`);
     varType.set(`a${i}`, p.type);
   });
-  /** The function's own parameters, as VALUES — what `freshParamMerge` refuses to merge into. A
-   *  name test would not do: a loop variable that adopted `a0` carries the name without being the
+  /** The function's own parameters, as VALUES — `FRESH_MERGE_GATES`' `param-rooted` half. A name
+   *  test would not do: a loop variable that adopted `a0` carries the name without being the
    *  parameter. */
   const entryParams = new Set<Value>(entry.params);
-  /** Merge params that took a fresh name only because `freshParamMerge` refused their parameter
-   *  carrier — what makes the rule closed under itself: a further merge carrying one of these is
-   *  refused for the same reason. */
+  /** Merge params that took a fresh home because `param-rooted` refused their parameter carrier —
+   *  the set's other half, so a further merge carrying one of them is refused too. It records the
+   *  merges that ended up FRESH and no others: one that refuses a parameter and then adopts an
+   *  ordinary local passes the value on under that local's name (336 firings over 6 corpus rows),
+   *  which is the chain-rooted widening rather than this rule. */
   const paramSeededMerges = new Set<Value>();
   const backArgName = new Map<Value, string>();
   // The C static type of a rendered expression, over the declared variable types — what decides
@@ -1755,12 +1813,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         // but only one whose name survives the C3 interference check (else the edge copies into
         // the name would clobber a still-live value).
         let name: string | undefined;
-        /** Set when a param carrier reached `freshParamMerge`'s clause and was refused there AND no
-         *  carrier was adopted afterwards. NOT "the one reason this merge went unnamed": carriers
-         *  the loop rejects earlier (`carriesPreUpdate` / `canTakeName`) `continue` without
-         *  recording, so a merge can carry this flag and also have had an unrelated refusal. The
-         *  consequence is reach-only — an over-marked entry makes one downstream merge take an
-         *  extra fresh home, a spelling the differ referees, never a wrong answer. */
+        /** Set when `FRESH_MERGE_GATES` refused a carrier here — not "the one reason this merge
+         *  went unnamed", since the rejections above it `continue` without recording. Over-marking
+         *  costs one downstream merge an extra fresh home, a spelling the differ referees. */
         let refusedParamCarrier = false;
         for (const c of [
           ...incoming.filter((c) => varName.has(c.v)),
@@ -1770,52 +1825,16 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
           if (carriesPreUpdate(c.v, c.pr, b) || !canTakeName(p, b, nm, allSame)) {
             continue;
           }
-          // freshParamMerge: a merge that CONDITIONALLY OVERWRITES a function parameter takes its
-          // own local instead of the parameter's name. Adoption spells the merge as `a1 = a0;`,
-          // which pins the value to the parameter's incoming register for the whole function; the
-          // fresh local is dead until its seed, so the compiler is free to place its copy where
-          // the asm did. Which one the source wrote is not derivable — both are ordinary C with
-          // identical semantics — so this is a differ-refereed axis (rank.ts `/fresh-merge`), and
-          // absent it nothing changes.
-          //
-          // REFUSAL CONDITIONS — outside these the carrier is adopted exactly as before:
-          //   - the carrier must be an ENTRY param, or a merge home this rule itself minted. THE
-          //     PREMISE IS THE ABI PIN, and only that: a parameter's home is the register the ABI
-          //     handed it, and a home minted BECAUSE of that pin inherits it — the value it carries
-          //     is the parameter's, one copy along. Clause 2 is the transitive closure of clause 1.
-          //
-          //     It is NOT "a carrier already holding a conditional overwrite would chain two values
-          //     through one register". That reason is equally true of an ORDINARY merge home, which
-          //     this rule deliberately leaves alone (`fresh-merge.test.ts`: 'a merge over ordinary
-          //     locals is untouched'), so stating it would make the implementation read as narrower
-          //     than its own reason. The chain-rooted widening is a DIFFERENT axis and unmeasured:
-          //     293 of 721 map-less corpus rows carry ≥1 conditional merge slot (925 slots) and the
-          //     param rooting admits 109 of those 293. `LoadBGTilemapData` is one of the other 184
-          //     — 37 conditional merge slots, none rooted in either of its 2 entry parameters — so
-          //     the axis having no reach there is a fact about THE ROOTING, not about the function;
-          //   - a REDUNDANT phi (every edge passes the same value) is refused nothing. It overwrites
-          //     the parameter on no path, so a fresh name buys a copy and changes no placement;
-          //   - a LOOP HEADER param is never seen here — `seedLoopParams` named it already, and
-          //     under `coalesceLoopInit` it deliberately keeps the parameter's own register.
-          //
-          // NO TYPE GUARD IS NEEDED HERE, and the reason is `canTakeName` two lines up, not this
-          // rule: it refuses any carrier whose declared width differs from the merge's, and any
-          // sub-32 signedness disagreement. So the two spellings this axis offers always declare
-          // the value at the same width — a narrow carrier is never adopted by a wider merge under
-          // EITHER setting, which is what would have made them two programs rather than two
-          // spellings (#106's class). Instrumenting the refusal over every row's full axis cross
-          // gives 5232 firings, 2064 with differing declared types and every one of those u32
-          // against s32 at width 32 — the `/unsigned` axis's own refereed question, which stores
-          // the same bits. `fresh-merge.test.ts` pins the narrow-carrier case rather than leaving
-          // it to this paragraph.
-          //
-          // Carrier eligibility is asked a SECOND time, of a different question, by
-          // `namecoalesce.ts`'s `param` gate ('a function parameter is the signature the source
-          // wrote, not a recovered local'). The two are not one predicate: that one refuses merging
-          // two already-settled NAME CLASSES and is on by default within `/merge-names`; this one
-          // refuses one carrier at one merge SLOT, is off by default, and closes over its own
-          // homes. Kept separate deliberately — see the mirror note there.
-          if (freshParamMerge && !allSame && (entryParams.has(c.v) || paramSeededMerges.has(c.v))) {
+          // `freshParamMerge` (the `/fresh-merge` axis): this merge takes its own home rather
+          // than the carrier's name — `FRESH_MERGE_GATES` above holds the admission and the
+          // argument for it. Absent the option nothing changes.
+          if (
+            freshParamMerge &&
+            reHomesParamMerge(
+              { allSame, paramRooted: entryParams.has(c.v) || paramSeededMerges.has(c.v) },
+              hooks.freshMergeGates,
+            )
+          ) {
             refusedParamCarrier = true;
             continue;
           }

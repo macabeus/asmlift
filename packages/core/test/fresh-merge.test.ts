@@ -12,16 +12,17 @@ import { expect, test } from 'vitest';
 import { cBackend } from '../src/backend/c';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
+import { without } from '../src/l3/gates';
 import { recoverTypes } from '../src/raise/recover';
 import { enumerateCandidates } from '../src/rank';
-import { type StructureOptions, structure } from '../src/structure/structure';
+import { FRESH_MERGE_GATES, type StructureHooks, type StructureOptions, structure } from '../src/structure/structure';
 import { ARMV4T_AGBCC } from '../src/target';
 
-const emit = (ir: string, on: boolean, extra: StructureOptions = {}): string => {
+const emit = (ir: string, on: boolean, extra: StructureOptions = {}, hooks: StructureHooks = {}): string => {
   const fn = parse(ir);
   verify(fn);
   recoverTypes(fn);
-  return cBackend.emit(structure(fn, { freshParamMerge: on, ...extra }));
+  return cBackend.emit(structure(fn, { freshParamMerge: on, ...extra }, hooks));
 };
 
 // ── the isolate: `int m = a>b?a:b; return m>c?m:c;` at agbcc -O2 ──────────────────────────────
@@ -189,4 +190,19 @@ const WIDECARRIER = NARROWCARRIER.replace('%0: u8', '%0: u16');
 test('…while an equal-width carrier is adopted by default and re-homed by the rule', () => {
   expect(emit(WIDECARRIER, false)).toMatch(/a0 = 7;/);
   expect(emit(WIDECARRIER, true)).toMatch(/v0 = a0;/);
+});
+
+// ── each gate, ablated, on the fixture that pins it ───────────────────────────────────────────
+// The table is a parameter so the ablation runs the REAL pass rather than a re-implementation of
+// its condition; both gates are heuristics, so what dropping one changes is the spelling.
+test('dropping `redundant-phi` re-homes the pure alias the rule leaves alone', () => {
+  const ablated = emit(ALIAS, true, {}, { freshMergeGates: without(FRESH_MERGE_GATES, 'redundant-phi') });
+  expect(ablated).not.toBe(emit(ALIAS, true));
+  expect(ablated).toMatch(/return v0;/);
+});
+
+test('dropping `param-rooted` re-homes a chain rooted in an ordinary local', () => {
+  const ablated = emit(CHAINLOCAL, true, {}, { freshMergeGates: without(FRESH_MERGE_GATES, 'param-rooted') });
+  expect(ablated).not.toBe(emit(CHAINLOCAL, true));
+  expect(ablated).toMatch(/s32 v1;/);
 });
