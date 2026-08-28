@@ -33,17 +33,17 @@ plus a transparent **readability heuristic** (`quality`), a measured **gap size*
 non-matching rows.
 
 The `declined` label is symmetric: capability gaps on both sides. Every real row **receives its
-context**: it is flagged `m2cCtx` in its manifest, which feeds m2c the project's own vendored
-context (GCC attributes stripped for m2c's C parser; the row publishes the file as `ctxRef`) plus
-the function's own prototype. Six kleod rows instead carry a hand-written `ctx` naming callees the
-project's headers do not declare, held symmetric with the `proto` hints asmlift gets by
-`test/authored-facts.test.ts`. Synthetic rows carry the prototype in the dataset (`ctx` —
-mirroring `proto`) and nothing else. The boundary is firm: contexts contain exactly what the
-project declares — **never authored types** (where a project types a global as a raw byte arena,
-an invented struct would copy the answer out of the reference source). Remaining m2c declines are
-genuine modeling gaps — carry flags, unknown instructions, and callees the project itself never
-declares — that context cannot fix; same class as asmlift's declines (the decline-reason Pareto in
-Gap Analysis is the roadmap).
+context**: 246 rows are flagged `m2cCtx` in their manifest, which feeds m2c that row's vendored
+project context verbatim (the row publishes the file as `ctxRef`); six kleod rows instead carry a
+hand-written `ctx` naming callees the project's headers do not declare, held symmetric with the
+`proto` hints asmlift gets by `test/authored-facts.test.ts`. Synthetic rows carry the prototype in
+the dataset (`ctx` — mirroring `proto`) and nothing else. The boundary is firm: a context is what
+that translation unit preprocesses to, **never an authored type** (where a project types a global
+as a raw byte arena, an invented struct would copy the answer out of the reference source), and it
+never carries the row's own signature as the reference source spells it. Remaining m2c declines
+are genuine modeling gaps — carry flags, unknown instructions, and callees the project itself
+never declares — that context cannot fix; same class as asmlift's declines (the decline-reason
+Pareto in Gap Analysis is the roadmap).
 
 ## Toolchains (the four `--target` IDs)
 
@@ -82,24 +82,42 @@ two lists equal. This is the half that isolates _raw recovery from assembly_.
 **Real tier — recovery with the project in hand, on both sides.** Here withholding project types
 would not be neutral, because asmlift is handed the project's vendored **symbol map** on every
 real row, and that map is not name-and-address: sizes, declaration shapes, signedness, array
-extents, volatility, const-ness, callee signatures, address-cast macro bodies, and — where the
-project links a DWARF types-sidecar — struct tags with full field tables (pokeemerald: 2179 of
-41016 entries carry a `layout`). So m2c receives the matching thing, the project's own
-preprocessed headers via `--context`, on every real row. That is parity, not generosity: both
-tools read the same project declarations out of the same vendored freeze, and neither is given
-anything the project does not itself declare.
+extents, volatility, const-ness, address-cast macro bodies, and, where the vendoring found them,
+callee signatures and struct tags with full field tables. So m2c is given the matching thing —
+that row's own vendored preprocessed context, verbatim, via `--context` — on every real row. Both
+tools read the same vendored freeze, and **neither is given the reference source**: m2c's context
+is the project's preprocessor output, and the row's own signature reaches it only through the same
+`proto` field asmlift reads (`m2cOwnPrototype`, at most `void f(…);` on 84 rows; on 39 more the
+project's own headers declare the function and m2c reads it there, as a user would).
 
-Two residual asymmetries are known and are NOT closed, both favouring m2c. m2c's context ends with
-the function's own prototype (the vendored headers never forward-declare it, and without it m2c
-guesses the signature); asmlift gets that fact only where a maintainer authored `proto`, which
-carries void-ness and callee arities rather than parameter types. And m2c reads callee prototypes
-straight out of the headers, while asmlift's channel for them is the symbol map's `signature`
-field, which the vendoring currently extracts for kleod and pokeemerald only — af, marioparty3,
-sa3 and snowboardkids2 vendor zero function signatures. A third is narrower: a manifest's
-per-function `prependC` already feeds BOTH tools' compile, and m2c can now READ it, so where it
-declares a struct type for a project static table (`sBigMonSizeTable`) m2c learns the element's
-field names while the symbol map gives asmlift only its element size. Closing any of the three is
-asmlift-side work on the map/`proto` pipeline, not a reason to take facts away from m2c.
+It is **not exact parity**, and pretending otherwise would be the same defect with the sign
+flipped. The residuals run in both directions; none is closed here, because closing any of them
+changes what asmlift is given and this change moves no asmlift row.
+
+_Favouring m2c._ (1) Struct field tables. `layout` is a vendoring product, and only pokeemerald
+carries it in bulk (2179 of 41016 entries); af 26 of 61860, kleod 25, sa3 8, marioparty3 7,
+snowboardkids2 5. Where m2c's context declares a record the map only sizes, m2c has field names
+asmlift must invent — `sa3:gSio32MultiLoadArea` is `{kind: data, size: 24}` in the map and
+`.state/.frameCounter/.type` in the context. (2) Callee prototypes: m2c reads them out of the
+headers, while asmlift's channel is the map's `signature` field, which the vendoring extracts for
+kleod and pokeemerald only — af, marioparty3, sa3 and snowboardkids2 vendor **zero**. (3) A
+manifest's per-function `prependC` already feeds BOTH tools' compile, and m2c can now READ it, so
+where it declares a struct type for a project static table (`sBigMonSizeTable`) m2c learns field
+names the map gives only an element size for.
+
+_Favouring asmlift._ (4) The map is whole-project and every row gets all of it; a context is one
+translation unit, so a fact in another TU's headers reaches asmlift and not m2c. (5) Four callees
+are named to asmlift through `proto` and are absent from the row's context, all on
+`sa3:sub_8001FD4` (`ValidateSave`, `PackSaveSector`, `WriteSaveSector`, `sub_8001A90`). (6) On the
+`nonvoid` rows `proto` gives asmlift the row's own parameter types and m2c gets nothing, because
+`proto` has no return type to state and inventing one is not parity.
+
+**A context is not one uniform thing**, and the repro scripts say so per row rather than
+generalising. It is whatever that TU preprocesses to: af's manifest has `headers: []` — its
+headers do not survive a host `cpp` — so an af row's entire context is that row's own `prependC`,
+17 to 603 bytes of typedefs, while marioparty3's is ~168 KB of real header tree and one
+pokeemerald row's is 410 KB. GCC attributes are **not** stripped: m2c's parser reads them, and
+deleting `__attribute__((packed))` silently repadded the project's own structs.
 
 ## Dataset
 

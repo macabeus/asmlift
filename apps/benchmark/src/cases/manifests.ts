@@ -31,26 +31,32 @@ export interface RealFunction {
    *  is the defect that check exists to catch. Six kleod rows use it; every other real row takes
    *  the vendored context below. */
   ctx?: string;
-  /** Feed m2c the function's VENDORED project context (attribute-sanitized) plus the function's
-   *  own prototype — the project's real headers, which is what its real workflow always has. The
-   *  row publishes the vendored file path (ctxRef), not the text.
+  /** Feed m2c the function's VENDORED project context: the exact bytes the project's own
+   *  preprocessor produced for this function's translation unit with the body removed. Passed
+   *  VERBATIM — the row publishes the file path (ctxRef), not the text.
    *
    *  WHAT EACH TOOL IS GIVEN ON THE REAL TIER, stated here once because it was previously stated
    *  wrongly ("prototypes only — no struct layouts, to match asmlift"):
    *
    *    asmlift  the project's vendored SYMBOL MAP, on all 252 rows. Not name-and-address: sizes,
    *             declaration shapes, scalar/element signedness, array extents, volatility,
-   *             const-ness, callee signatures, address-cast macro bodies, and — where the DWARF
-   *             types-sidecar carries them — struct tags with full field tables (name, offset,
-   *             size, pointer-ness, element size, array length). The row's OWN definition-derived
-   *             facts are redacted first (core's `asIfUndecompiled`).
-   *    m2c      the project's vendored preprocessed CONTEXT — the same headers, as C — on every
-   *             row that has no hand-written `ctx` above.
+   *             const-ness, address-cast macro bodies, and — where the vendoring found them —
+   *             callee signatures and struct tags with full field tables. The row's OWN
+   *             definition-derived facts are redacted first (core's `asIfUndecompiled`).
+   *    m2c      the same project's vendored preprocessed CONTEXT, plus at most the one prototype
+   *             line `proto` already gives asmlift (real.ts's `m2cOwnPrototype`). The reference
+   *             source reaches neither tool.
    *
    *  So withholding struct layouts from m2c does not "match asmlift"; it under-provisions m2c
-   *  against a tool that is handed layouts outright. This flag is therefore set on every real row
-   *  without a hand-written `ctx`, and both tools read the same project declarations out of the
-   *  same vendored freeze.
+   *  against a tool handed layouts outright. This flag is set on every real row without a
+   *  hand-written `ctx`.
+   *
+   *  IT IS NOT EXACT PARITY, and the residuals run in both directions — apps/benchmark/README.md
+   *  lists them. Nor is a "project context" one uniform thing: it is whatever that project's TU
+   *  preprocesses to. af's manifest has `headers: []` (its headers do not survive a host cpp), so
+   *  an af row's whole context is that row's own `prependC` — 17 to 603 bytes, a handful of
+   *  typedefs — while marioparty3's is ~168 KB of real header tree. Read the blob, not this
+   *  comment.
    *
    *  The SYNTHETIC tier is the opposite, deliberately: there NEITHER tool gets project data — the
    *  spec's `ctx` is prototypes only and its `proto` carries the same facts to asmlift, so both

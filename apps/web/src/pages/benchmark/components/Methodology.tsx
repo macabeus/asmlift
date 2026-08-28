@@ -96,12 +96,13 @@ export function Methodology({ rows }: { rows: FunctionResult[] }) {
           and parameter types, nothing else: no struct layouts, no global variable types. That half measures raw
           recovery from assembly, and it is symmetric by construction: the same facts go to m2c as a{' '}
           <span className="font-mono">--context</span> and to asmlift as prototype hints. For real functions the
-          standard is different, because there the project itself is available to both: m2c receives the project's own
-          headers via <span className="font-mono">--context</span> and asmlift receives the project's symbol map, on
-          every row. That includes struct layouts and global types on both sides — the real tier measures recovery{' '}
-          <em>with</em> the project in hand, which is the situation a decompiler is actually used in. The boundary is
-          firm: both carry exactly what the project declares, never authored types. Remaining declines are genuine
-          capability gaps on both sides.
+          standard is different, because there the project itself is available to both: m2c receives that function's own
+          preprocessed translation-unit context via <span className="font-mono">--context</span> and asmlift receives
+          the project's symbol map, on every row. The real tier therefore measures recovery <em>with</em> the project in
+          hand, which is the situation a decompiler is actually used in. It is not exact parity — the two channels carry
+          different things, and the residuals (in both directions) are listed in the benchmark's README. The boundary is
+          firm: both carry what the project itself declares, never authored types, and neither is handed the reference
+          source. Remaining declines are genuine capability gaps on both sides.
         </P>
         <P>
           asmlift's analogue of that context is the project's <em>symbol map</em>: names and declaration shapes derived
