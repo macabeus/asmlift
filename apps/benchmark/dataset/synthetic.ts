@@ -70,6 +70,21 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ALL,
   },
   {
+    sym: 'umodv',
+    src: 'unsigned umodv(unsigned a,unsigned b){ return a%b; }',
+    features: ['arithmetic', 'mod-reg', 'unsigned'],
+    toolchains: ALL,
+  },
+  // The remainder written OUT, as a source-level subtract-multiply-divide. It is not a `%` and must
+  // not be respelled as one: on an ISA that synthesizes `%` from exactly these three instructions,
+  // the two spellings differ by the multiply's operand order.
+  {
+    sym: 'modb',
+    src: 'int modb(int a,int b){ return a - b*(a/b); }',
+    features: ['arithmetic', 'div-reg', 'signed'],
+    toolchains: ALL,
+  },
+  {
     sym: 'udivv',
     src: 'unsigned udivv(unsigned a,unsigned b){ return a/b; }',
     features: ['arithmetic', 'div-reg', 'unsigned'],
