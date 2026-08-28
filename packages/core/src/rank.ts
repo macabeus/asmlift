@@ -78,7 +78,16 @@ import { type TargetDescription, structureOptionsFor } from './target';
  *  primary declines (reread also skips the strip closure). Both exemptions are stated here
  *  rather than left implicit in a missing `||` arm or trigger term. */
 interface StructuringAxis {
-  flag: 'reread' | 'inplace' | 'mergeNames' | 'addrHome' | 'exprHome' | 'derivedHome' | 'mergeHome' | 'unsCmp';
+  flag:
+    | 'reread'
+    | 'inplace'
+    | 'mergeNames'
+    | 'addrHome'
+    | 'exprHome'
+    | 'derivedHome'
+    | 'mergeHome'
+    | 'unsCmp'
+    | 'freshMerge';
   suffix: string;
   options: (on: boolean) => Parameters<typeof structureChecked>[1];
   probeGate?: (probe: Fn, defs: Map<Value, Op>) => boolean;
@@ -212,6 +221,36 @@ const STRUCTURING_AXES: readonly StructuringAxis[] = [
     suffix: '/uns-cmp',
     options: (on) => ({ unsignedCompareSpelling: on }),
     probeGate: (probe) => probe.blocks.some((b) => b.ops.some((op) => op.opcode.startsWith('icmp_u'))),
+    strip: true,
+  },
+  // `/fresh-merge` — the parameter-merge-home axis (structure.ts freshParamMerge): a merge that
+  // conditionally overwrites a function PARAMETER takes its own local, seeded from the parameter
+  // above the branch (`v0 = a1; if (a1 < a0) v0 = a0;`), where the default assigns back into the
+  // parameter (`if (a1 < a0) a1 = a0;`). Both are ordinary C with identical semantics, so nothing
+  // over the source decides it; what differs is placement freedom. A parameter is live from entry,
+  // so its home is the register the ABI handed it and the copy into it sinks to the top of the
+  // function; a fresh local is dead until the seed, so the compiler may leave the copy where the
+  // asm has it. At two arguments the two spellings compile to the SAME bytes (agbcc and mwcc both,
+  // measured) — the returned value's home is occupied either way; the third argument is what makes
+  // the first parameter dead early enough for the placement to be observable.
+  //
+  // Gated on the shared probe: a merge slot whose in-edge args differ and include an entry
+  // parameter. Structural, so it cannot answer differently per symbol variant.
+  {
+    flag: 'freshMerge',
+    suffix: '/fresh-merge',
+    options: (on) => ({ freshParamMerge: on }),
+    probeGate: (probe) => {
+      const entryParams = new Set<Value>(probe.blocks[0].params);
+      return probe.blocks.slice(1).some((b) =>
+        b.params.some((_, i) => {
+          const args = probe.blocks.flatMap((pr) =>
+            pr.ops[pr.ops.length - 1].successors.filter((sx) => sx.block === b).map((sx) => sx.args[i]),
+          );
+          return args.some((a) => a !== args[0]) && args.some((a) => entryParams.has(a));
+        }),
+      );
+    },
     strip: true,
   },
 ];
@@ -750,6 +789,7 @@ export function enumerateCandidates(
     derivedHome: false,
     mergeHome: false,
     unsCmp: false,
+    freshMerge: false,
   }));
   for (const ax of STRUCTURING_AXES) {
     if (ax.probeGate === undefined || ax.probeGate(probe, probeDefs)) {

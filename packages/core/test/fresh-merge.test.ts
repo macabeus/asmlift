@@ -12,7 +12,9 @@ import { cBackend } from '../src/backend/c';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
 import { recoverTypes } from '../src/raise/recover';
+import { enumerateCandidates } from '../src/rank';
 import { type StructureOptions, structure } from '../src/structure/structure';
+import { ARMV4T_AGBCC } from '../src/target';
 
 const emit = (ir: string, on: boolean, extra: StructureOptions = {}): string => {
   const fn = parse(ir);
@@ -126,4 +128,25 @@ test('a loop header still coalesces onto its init parameter', () => {
   const on = emit(LOOPHDR, true, { coalesceLoopInit: true });
   expect(on).toBe(emit(LOOPHDR, false, { coalesceLoopInit: true }));
   expect(on).toMatch(/a0 = a0 - 1;/);
+});
+
+// ── the axis, and what it costs a function that has no such merge ────────────────────────────
+test('/fresh-merge is enumerated where a merge slot mixes a parameter with something else', () => {
+  // `max3` at agbcc -O2: two `cmp`/conditional-copy pairs over the three argument registers.
+  const MAX3_ASM =
+    'max3:\n\tcmp\tr1, r0\n\tbge\t.L3\n\tadd\tr1, r0, #0\n.L3:\n\tadd\tr0, r2, #0\n' +
+    '\tcmp\tr0, r1\n\tbge\t.L4\n\tadd\tr0, r1, #0\n.L4:\n\tbx\tlr\n';
+  const all = enumerateCandidates('max3', MAX3_ASM, ARMV4T_AGBCC, {});
+  expect(all.some((c) => c.label.includes('/fresh-merge'))).toBe(true);
+  // A spelling of its own, not a duplicate the dedup would have collapsed.
+  const sources = (cs: typeof all) => new Set(cs.map((c) => c.source)).size;
+  expect(sources(all)).toBeGreaterThan(sources(all.filter((c) => !c.label.includes('/fresh-merge'))));
+});
+
+test('…and a function whose only merge carries the SAME parameter on every edge pays nothing', () => {
+  // The redundant-phi refusal, read off the gate rather than the rule: `r0` reaches the join
+  // unchanged on both paths, so there is no conditional overwrite to re-home.
+  const ALIAS_ASM = 'f:\n\tcmp\tr0, #0\n\tbeq\t.L2\n\tmov\tr2, #0\n\tstr\tr2, [r1]\n.L2:\n\tbx\tlr\n';
+  const all = enumerateCandidates('f', ALIAS_ASM, ARMV4T_AGBCC, {});
+  expect(all.some((c) => c.label.includes('/fresh-merge'))).toBe(false);
 });
