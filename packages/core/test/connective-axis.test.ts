@@ -1,9 +1,16 @@
-// CONNECTIVE: why `x == 0 || x == 2` and `switch (x) { case 0: case 2: }` are both enumerated.
-// One asm shape, two legitimate C spellings, and raise/shortcircuit.ts must pick ONE — a folded
-// `logic_or` is not the `icmp` switch-recover.ts requires, so whichever it takes disqualifies the
-// other for the rest of the run. The default leaves the tree (the more specific recovery); these
-// tests pin the other half — that the connective spelling is a DISTINCT source, enumerated only on
-// a function whose fold actually reaches the refusal. Toolchain-free.
+// CONNECTIVE: why the `||` spelling is enumerated beside the recovered comparison tree.
+// raise/shortcircuit.ts must pick ONE — a folded `logic_or` is not the `icmp` switch-recover.ts
+// requires, so whichever it takes disqualifies the other for the rest of the run. The default
+// leaves the tree (the more specific recovery); these tests pin the other half — that the
+// connective spelling is a DISTINCT source, enumerated only on a function whose fold actually
+// reaches the refusal. Toolchain-free.
+//
+// WHAT THIS AXIS IS NOT. `x == 0 || x == 2` and `switch (x) { case 0: case 2: … }` are not two
+// spellings a differ has to referee: agbcc compiles them to a BYTE-IDENTICAL object. The stacked
+// arm is the structurer's job and is now its DEFAULT (switch-recover.ts groups case values that
+// share a body), which is why the row this axis was built for scores the same with it off. What
+// is left for the axis is the tree switch recovery DECLINES on, which comes back as nested `if`s
+// with no arm to group — `kleod:CountCollectedGems` and `kleod:CheckWorldCompletion`.
 import { describe, expect, test } from 'vitest';
 
 import { enumerateCandidates } from '../src/rank';
@@ -32,9 +39,10 @@ describe('/connective is enumerated wherever the tree refusal has an inhabitant'
   });
 
   test('…and the tree spelling survives beside it', () => {
-    // `pokeemerald:IsStringLengthAtLeast` is the corpus row this protects: its refusal covers a
-    // real fall-through `switch`, and it keeps its score only because the tree spelling is still
-    // in the fan to win it. An axis that REPLACED the default rather than joining it costs it.
+    // `pokeemerald:IsStringLengthAtLeast` and `pokeemerald:TrySetCantSelectMoveBattleScript` are
+    // the corpus rows this protects: both reach the refusal and both keep their score only because
+    // the tree spelling is still in the fan to win it. An axis that REPLACED the default rather
+    // than joining it costs them.
     const all = cands(TREE);
     expect(all.some((c) => !c.label.includes('/connective') && !/ \|\| /.test(c.source))).toBe(true);
   });

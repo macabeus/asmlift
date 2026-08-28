@@ -760,13 +760,16 @@ export function enumerateCandidates(
   // the totality contract / return-sinking of the full spine are not run on it.)
   //
   // It also carries `/connective`'s enumeration gate, read off the pass's OWN refusal rather than
-  // from a second copy of its matcher: the fold reports every site the comparison-tree refusal
-  // owns, and a function with none has no inhabitant for the axis. Answered once per function, on
+  // from a second copy of its matcher: the fold reports every site where the PAIRWISE
+  // comparison-tree refusal is the ONE thing stopping it — asked after `sameArgs` and the
+  // negatability check, so a report means a candidate that DIFFERS, not a refusal merely reached
+  // — and a function with none has no inhabitant for the axis. Answered once per function, on
   // the probe. The pin and `/setup-args` cannot move the answer — neither a parameter's type nor a
   // call's argument list moves a `cond_br` — while a SYMBOL MAP in principle can, by lifting a
   // pool-loaded comparison constant as a `gaddr` the const-test test then does not read. Over the
-  // benchmark's 923 rows the count is identical in both configurations, and the failure mode if
-  // one ever diverges is a variant not enumerated, never a wrong one.
+  // benchmark's 923 rows the count is identical in both configurations (21 sites with the map, 21
+  // raw-globals, 0 divergences, over every row that lifts), and the failure mode if one ever
+  // diverges is a variant not enumerated, never a wrong one.
   const probe = frontend.lift(name, asm, target, prototypes, opts.asmData, opts.symbols);
   verify(probe);
   applyIdiomPatterns(probe, target, opts.patterns);
@@ -1383,11 +1386,24 @@ export function enumerateCandidates(
       // and declaring one takes its row out of this population.
       //
       // `/connective` — spell a same-scrutinee const-test chain as `x == 0 || x == 2` rather than
-      // leaving it to switch recovery as `switch (x) { case 0: case 2: }`. Both are legitimate C
-      // for one asm shape and they are mutually exclusive within one raise (raise/shortcircuit.ts's
-      // REFUSALS note has the mechanism: a folded `logic_or` is not the `icmp` switch-recover.ts
-      // requires), so no predicate settles it — the differ does. Enumerated only where the probe
-      // saw the refusal, which is 6 of the benchmark's 923 rows.
+      // leaving it to switch recovery. They are mutually exclusive within one raise
+      // (raise/shortcircuit.ts's REFUSALS note has the mechanism: a folded `logic_or` is not the
+      // `icmp` switch-recover.ts requires), so no predicate settles it — the differ does.
+      // Enumerated only where the probe saw the PAIRWISE refusal, 6 of the benchmark's 923 rows.
+      //
+      // WHAT IT IS *NOT* FOR, because it was first shipped believing it was: the shared-arm
+      // spelling `switch (x) { case 0: case 2: … }`. That is not an axis at all, it is the
+      // DEFAULT — structure/switch-recover.ts groups case values that share a body, and agbcc
+      // compiles the grouped arm and the `||` to a BYTE-IDENTICAL object (68 instructions each;
+      // two copies of the body is 89, and a different object). So on the row this axis was built
+      // for, `kleod:ProcessInputAndUpdateEntities:agbcc`, it is worth exactly 0: with the grouping
+      // in place the row scores 306 with the axis on and 306 with it off — same label chain minus
+      // the suffix, same breakdown cell for cell — in half the wall clock (681s → 339s). What it
+      // IS worth is the case where switch recovery declined ENTIRELY and the tree came out as
+      // nested `if`s, where there is no arm to group: `CountCollectedGems` 327 → 299 and
+      // `CheckWorldCompletion` 135 → 124, neither of which has a `switch` in its source at all.
+      // Telling those two populations apart would need an L3 fact (did recovery produce a grouped
+      // arm?) at a raise-level hook, which is a level inversion; the fan is the price instead.
       //
       // It rides the LIFT variants because the raise mutates in place: a second raise policy needs
       // its own copy of the lifted fn, exactly as `/setup-args` needs one to narrow. Crossed with
@@ -1432,7 +1448,11 @@ export function enumerateCandidates(
             { shortCircuit: { foldTreeOwned: lv.connective } },
           );
         } catch (e) {
-          if (!lv.narrow && !lv.connective) {
+          // THE PRIMARY IS THE EMPTY SUFFIX, by construction: every lift axis appends a non-empty
+          // one, so `suffix === ''` is the only spelling of "no lever is on" that stays correct
+          // when a fourth is added — the same reason the structuring half below reads its table
+          // instead of naming its flags.
+          if (lv.suffix === '') {
             throw e; // the base lift keeps its behavior: a raising failure aborts the row
           }
           // A dropped lever, never an aborted enumeration — the same posture as `respell`.
@@ -1475,8 +1495,7 @@ export function enumerateCandidates(
             });
           } catch (e) {
             if (
-              !lv.narrow &&
-              !lv.connective &&
+              lv.suffix === '' &&
               !s.anchor &&
               !s.join &&
               s.bitfields &&

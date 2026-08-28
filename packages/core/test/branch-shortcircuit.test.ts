@@ -594,10 +594,17 @@ describe('the connective-vs-tree axis', () => {
     verify(fn);
   });
 
-  test('the relayed clause moves with the same flag — one policy, two tests', () => {
+  test('the relayed clause does NOT move with the flag — it is a different statement', () => {
+    // The pairwise clause is switch-recover.ts's own PRE1, so it refuses exactly "a switch could
+    // have been recovered here" — a spelling question. The relayed clause is a blunt function-wide
+    // COUNT that fires on an ordinary loop counter (see the REFUSALS note), where there is no
+    // second legitimate spelling and the fold would just be wrong. It has no inhabitant in any
+    // benchmark row, so widening it would be scaffolding ahead of an inhabitant.
     const fn = relayedComparisonTree();
-    expect(recognizeBranchShortCircuit(fn, { foldTreeOwned: true })).toBe(true);
-    expect(connective(fn)).not.toBeNull();
+    let seen = 0;
+    expect(recognizeBranchShortCircuit(fn, { foldTreeOwned: true, onTreeOwned: () => seen++ })).toBe(false);
+    expect(connective(fn)).toBeNull();
+    expect(seen).toBe(0); // and it is not reported either — the axis has no inhabitant here
     verify(fn);
   });
 
@@ -606,6 +613,22 @@ describe('the connective-vs-tree axis', () => {
     const fn = comparisonTree();
     expect(recognizeBranchShortCircuit(fn, { onTreeOwned: () => seen++ })).toBe(false);
     expect(seen).toBeGreaterThan(0);
+  });
+
+  test('…and stays silent where a LATER refusal would have stopped the fold anyway', () => {
+    // The gate is asked LAST. A site the tree refusal owns but that `sameArgs` also refuses has no
+    // `/connective` candidate to offer, and reporting it would double the row's whole candidate
+    // cross to enumerate duplicates the dedup collapses.
+    const fn = comparisonTree();
+    const h = fn.blocks[0];
+    const ht = h.ops[h.ops.length - 1];
+    // give the shared edge from ^h an argument its sibling from ^g does not carry
+    const shared = forwardingTargetOf(ht.successors[0].block);
+    shared.params.push(mkValue(T.unk(32)));
+    ht.successors[0].args = [mkValue(T.unk(32))];
+    let seen = 0;
+    expect(recognizeBranchShortCircuit(fn, { onTreeOwned: () => seen++ })).toBe(false);
+    expect(seen).toBe(0);
   });
 
   test('…and stays silent where the fold was going to happen anyway', () => {
