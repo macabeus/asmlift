@@ -266,7 +266,7 @@
       "m2cCtx": true,
       "proto": {
         "func_80056254_56E54": {
-          "returnsVoid": true
+          "returnsVoid": false
         }
       }
     },
@@ -327,7 +327,7 @@
       "m2cCtx": true,
       "proto": {
         "func_80056260_56E60": {
-          "returnsVoid": true
+          "returnsVoid": false
         }
       }
     },
@@ -362,7 +362,7 @@
       "m2cCtx": true,
       "proto": {
         "func_8005614C_56D4C": {
-          "returnsVoid": true
+          "returnsVoid": false
         }
       }
     },
@@ -628,7 +628,7 @@
       "sourceUrl": "https://github.com/macabeus/marioparty3/blob/89c0fafd30375f21222c39bcefd8456bac130c53/src/mallocblock.c#L30-L53",
       "proto": {
         "HuMemAllocTag": {
-          "returnsVoid": true
+          "returnsVoid": false
         }
       }
     },
