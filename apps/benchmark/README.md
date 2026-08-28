@@ -32,17 +32,18 @@ For every `(function × toolchain)` case it runs BOTH decompilers and records, p
 plus a transparent **readability heuristic** (`quality`), a measured **gap size** for
 non-matching rows.
 
-The `declined` label is symmetric: capability gaps on both sides. Functions whose context-free
-m2c run declined on `?` placeholders **receive their context**: synthetic functions carry the
-prototype in the dataset (`ctx` — mirroring the `proto` hints asmlift gets), and real functions
-are flagged `m2cCtx` in their manifest, which feeds m2c the project's own vendored context
-(GCC attributes stripped for m2c's C parser; the row publishes the file as `ctxRef`), plus the
-function's own prototype. The boundary is firm: contexts contain exactly what the project
-declares — **never authored types** (where a project types a global as a raw byte arena, an
-invented struct would copy the answer out of the reference source). Remaining
-m2c declines are genuine modeling gaps (carry flags, unknown instructions) that context cannot
-fix — same class as asmlift's declines (the decline-reason Pareto in Gap Analysis is the
-roadmap).
+The `declined` label is symmetric: capability gaps on both sides. Every real row **receives its
+context**: it is flagged `m2cCtx` in its manifest, which feeds m2c the project's own vendored
+context (GCC attributes stripped for m2c's C parser; the row publishes the file as `ctxRef`) plus
+the function's own prototype. Six kleod rows instead carry a hand-written `ctx` naming callees the
+project's headers do not declare, held symmetric with the `proto` hints asmlift gets by
+`test/authored-facts.test.ts`. Synthetic rows carry the prototype in the dataset (`ctx` —
+mirroring `proto`) and nothing else. The boundary is firm: contexts contain exactly what the
+project declares — **never authored types** (where a project types a global as a raw byte arena,
+an invented struct would copy the answer out of the reference source). Remaining m2c declines are
+genuine modeling gaps — carry flags, unknown instructions, and callees the project itself never
+declares — that context cannot fix; same class as asmlift's declines (the decline-reason Pareto in
+Gap Analysis is the roadmap).
 
 ## Toolchains (the four `--target` IDs)
 
@@ -71,21 +72,39 @@ normalization (both read agbcc's `.s`).
 
 ## Important framing: context
 
-By default both decompilers get function prototypes (arities / void-ness / callee signatures) but
-**no struct or global type layouts** — isolating _raw recovery from assembly_, asmlift's design
-target. The one exception is described above: real functions whose m2c run declines purely for
-missing context receive the project's own headers via `--context`. m2c's normal in-project
-workflow supplies that full context on **every** function, which would raise its readability and
-compile rate on type-heavy code across the board; that is a different experiment. The report
-states this caveat prominently.
+The two tiers ask different questions, and they give the decompilers different things.
+
+**Synthetic tier — cold recovery, symmetric by construction.** Both decompilers get the function's
+declared signature and nothing else: no struct layouts, no global types. m2c gets it as a `ctx`
+header, asmlift gets the same facts as `proto` hints, and `test/authored-facts.test.ts` holds the
+two lists equal. This is the half that isolates _raw recovery from assembly_.
+
+**Real tier — recovery with the project in hand, on both sides.** Here withholding project types
+would not be neutral, because asmlift is handed the project's vendored **symbol map** on every
+real row, and that map is not name-and-address: sizes, declaration shapes, signedness, array
+extents, volatility, const-ness, callee signatures, address-cast macro bodies, and — where the
+project links a DWARF types-sidecar — struct tags with full field tables (pokeemerald: 2179 of
+41016 entries carry a `layout`). So m2c receives the matching thing, the project's own
+preprocessed headers via `--context`, on every real row. That is parity, not generosity: both
+tools read the same project declarations out of the same vendored freeze, and neither is given
+anything the project does not itself declare.
+
+Two residual asymmetries are known and are NOT closed, both favouring m2c. m2c's context ends with
+the function's own prototype (the vendored headers never forward-declare it, and without it m2c
+guesses the signature); asmlift gets that fact only where a maintainer authored `proto`, which
+carries void-ness and callee arities rather than parameter types. And m2c reads callee prototypes
+straight out of the headers, while asmlift's channel for them is the symbol map's `signature`
+field, which the vendoring currently extracts for kleod and pokeemerald only — af, marioparty3,
+sa3 and snowboardkids2 vendor zero function signatures. Closing either one is asmlift-side work on
+the map/`proto` pipeline, not a reason to take facts away from m2c.
 
 ## Dataset
 
 - **Synthetic tier** (`--tier synthetic`) — `dataset/synthetic.ts`: authored C functions spanning common features
   (arithmetic, bitwise, compare/logic, width casts, memory, structs, arrays, loops, calls, nested
-  control), each run on its assigned toolchains: ~124 functions → 483 cases.
-- **Real tier** (`--tier real`) — `dataset/real/*.json`: real matched functions extracted **verbatim** from five decomp projects (kleod, pokeemerald, sa3, af, snowboardkids2), compiled standalone
-  with asmlift's canonical toolchain flags using each project's headers as context: 130 cases
+  control), each run on its assigned toolchains: 215 functions → 671 cases.
+- **Real tier** (`--tier real`) — `dataset/real/*.json`: real matched functions extracted **verbatim** from six decomp projects (af, kleod, marioparty3, pokeemerald, sa3, snowboardkids2), compiled standalone
+  with asmlift's canonical toolchain flags using each project's headers as context: 252 cases
   (one toolchain each). Real game-code shapes, for anti-overfitting. (melee/mwcc_233 is excluded: its compiler version differs
   from asmlift's mwcc_242, so byte-match is not defined there.)
 
