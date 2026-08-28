@@ -102,6 +102,12 @@
       "proto": {
         "ReadKeyInput": {
           "returnsVoid": true
+        },
+        "SoftResetRom": {
+          "params": [
+            "u8"
+          ],
+          "returnsVoid": true
         }
       },
       "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/system.c#L44-L57"
@@ -115,6 +121,14 @@
       "ctx": "void m4aSoundVSync(void);\nvoid m4aSoundMain(void);",
       "proto": {
         "VBlankHandlerMinimal": {
+          "returnsVoid": true
+        },
+        "m4aSoundVSync": {
+          "params": [],
+          "returnsVoid": true
+        },
+        "m4aSoundMain": {
+          "params": [],
           "returnsVoid": true
         }
       },
@@ -158,6 +172,24 @@
       "proto": {
         "UpdateEntities": {
           "returnsVoid": true
+        },
+        "CheckWorldCompletion": {
+          "params": [
+            "u8"
+          ],
+          "returnsVoid": false
+        },
+        "CopyWorldMapTiles": {
+          "params": [
+            "u8"
+          ],
+          "returnsVoid": true
+        },
+        "UpdateWorldMapNodeTile": {
+          "params": [
+            "u8"
+          ],
+          "returnsVoid": true
         }
       },
       "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/code_3.c#L40-L48"
@@ -172,6 +204,26 @@
       "ctx": "void UpdateWorldMapNodeState(void);\nvoid UpdatePlayerInput(void);\nvoid InitPlayerCollision(void);\nvoid UpdateWorldMapCursor(void);\nvoid UpdatePaletteAnimations(void);",
       "proto": {
         "GameUpdate": {
+          "returnsVoid": true
+        },
+        "UpdateWorldMapNodeState": {
+          "params": [],
+          "returnsVoid": true
+        },
+        "UpdatePlayerInput": {
+          "params": [],
+          "returnsVoid": true
+        },
+        "InitPlayerCollision": {
+          "params": [],
+          "returnsVoid": true
+        },
+        "UpdateWorldMapCursor": {
+          "params": [],
+          "returnsVoid": true
+        },
+        "UpdatePaletteAnimations": {
+          "params": [],
           "returnsVoid": true
         }
       },
@@ -189,6 +241,33 @@
       "proto": {
         "Decompress": {
           "returnsVoid": true
+        },
+        "thunk_HeapAlloc": {
+          "params": [
+            "u32",
+            "u32"
+          ],
+          "returnsVoid": false
+        },
+        "thunk_HeapFree": {
+          "params": [
+            "void *"
+          ],
+          "returnsVoid": true
+        },
+        "HuffUnComp": {
+          "params": [
+            "void *",
+            "void *"
+          ],
+          "returnsVoid": true
+        },
+        "LZ77UnCompWram": {
+          "params": [
+            "void *",
+            "void *"
+          ],
+          "returnsVoid": true
         }
       },
       "sourceUrl": "https://github.com/Dream-Atelier/kl-eod-decomp/blob/494f49912be3c9f6d893dd5bc15fd81be64f4d13/src/code_3.c#L110-L121"
@@ -203,6 +282,26 @@
       "ctx": "void *thunk_HeapAlloc(u32, u32);\nvoid thunk_HeapFree(void *);\nvoid Decompress(void *, void *);",
       "proto": {
         "DecompressDma": {
+          "returnsVoid": true
+        },
+        "thunk_HeapAlloc": {
+          "params": [
+            "u32",
+            "u32"
+          ],
+          "returnsVoid": false
+        },
+        "thunk_HeapFree": {
+          "params": [
+            "void *"
+          ],
+          "returnsVoid": true
+        },
+        "Decompress": {
+          "params": [
+            "void *",
+            "void *"
+          ],
           "returnsVoid": true
         }
       },

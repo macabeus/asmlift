@@ -553,20 +553,20 @@
         "Player_StopSong": {
           "params": [
             "Player *",
-            "u16 song"
+            "u16"
           ],
           "returnsVoid": true
         },
         "Player_8005380": {
           "params": [
-            "Player *p"
+            "Player *"
           ],
           "returnsVoid": true
         },
         "Player_800D978": {
           "returnsVoid": true,
           "params": [
-            "Player *p"
+            "Player *"
           ]
         }
       }
@@ -587,21 +587,21 @@
       "proto": {
         "ValidateSave": {
           "params": [
-            "SaveGame *save"
+            "SaveGame *"
           ],
           "returnsVoid": true
         },
         "PackSaveSector": {
           "params": [
-            "SaveSectorData *sector",
-            "SaveGame *save"
+            "SaveSectorData *",
+            "SaveGame *"
           ],
           "returnsVoid": true
         },
         "WriteSaveSector": {
           "params": [
-            "s16 sectorId",
-            "SaveSectorData *sector"
+            "s16",
+            "SaveSectorData *"
           ],
           "returnsVoid": false
         },
@@ -615,9 +615,9 @@
         },
         "CpuSet": {
           "params": [
-            "const void *src",
-            "void *dest",
-            "u32 control"
+            "const void *",
+            "void *",
+            "u32"
           ],
           "returnsVoid": true
         }

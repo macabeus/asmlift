@@ -8,6 +8,7 @@ import { asIfUndecompiled } from '@asmlift/core/symbols';
 import { buildRealTarget, makeRealCompile, makeRealScorer } from '../compile/real';
 import { sanitizeM2cContext } from '../eval/m2c-normalizer';
 import { TOOLCHAINS } from '../toolchains';
+import { stripAttributeMacros } from './authored-facts';
 import { type RealFunction, type VendoredManifest, loadManifests } from './manifests';
 import type { Case } from './types';
 
@@ -71,8 +72,16 @@ function m2cRealCtx(man: VendoredManifest, f: RealFunction): string {
  *  does not declare the symbol as a plain identifier (unexpanded project macros — injecting
  *  those hard-fails m2c's parser as K&R). ALSO used by the repro-script generator: the script
  *  reconstructs the ctx from the vendored blob and must append the same line, or the published
- *  output would not reproduce (the fidelity gate holds the two equal by execution). */
+ *  output would not reproduce (the fidelity gate holds the two equal by execution).
+ *
+ *  ATTRIBUTE MACROS are stripped: a project may write one between the return type and the name
+ *  (`static void UNUSED SetMauvilleOldManLanguage(…)`), the preprocessed TU does not contain it,
+ *  and m2c's `--context` is a real C parser that answers the unexpanded token with
+ *  `Syntax error when parsing C context` — a whole row `failed` on a macro that means nothing to
+ *  the compiler. Held to the list by test/authored-facts.test.ts. */
 export function m2cFnPrototype(sym: string, funcC: string): string | null {
-  const sig = funcC.slice(0, funcC.indexOf('{')).trim();
+  // NOT whitespace-normalized: the extra space a stripped macro leaves is nothing to a C parser,
+  // and every row without one must keep a byte-identical line (it is part of m2c's cache key).
+  const sig = stripAttributeMacros(funcC.slice(0, funcC.indexOf('{'))).trim();
   return new RegExp(`\\b${sym}\\s*\\(`).test(sig) ? `${sig};` : null;
 }

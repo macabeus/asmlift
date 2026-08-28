@@ -7,8 +7,8 @@
 // to one 'stale'/'fresh' word with no row and no field named.
 //
 // So every branch that had to prove neutrality wrote its own comparator, against its own idea of
-// which fields count. This is that comparison, once: for every row in the base artifact, the six
-// fields a published claim is made of, named individually when they move.
+// which fields count. This is that comparison, once: for every row in the base artifact, every
+// field a published claim is made of, named individually when it moves.
 import type { BenchOutput, FunctionResult } from '@asmlift/bench-schema';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -16,13 +16,25 @@ import { join } from 'node:path';
 import { RESULTS_DIR } from '../config';
 import { RESULTS_PATH, byId, headContains, readCommitted, scrub, shortSha } from './committed';
 
-/** The fields a published claim is made of. `source` is in the list because a change that moves
- *  no score can still rewrite what the report shows, and `candidateLabel` because the ranked
- *  WINNER can change identity at an unchanged score (a tie-break moving is a real change). */
+/** The fields a published claim is made of — every one the report shows, or the count this gate
+ *  prints is the truth about the LIST and not about the row. `source` is here because a change
+ *  that moves no score can still rewrite what the report shows, `candidateLabel` because the
+ *  ranked WINNER can change identity at an unchanged score (a tie-break moving is a real change),
+ *  and `quality` because the report publishes it — a row can move `quality.casts` 0 → 1 with
+ *  score, outcome and label all unchanged. */
 const FIELDS = {
-  asmlift: ['outcome', 'score', 'candidateLabel', 'source'],
-  m2c: ['outcome', 'score', 'source'],
+  asmlift: ['outcome', 'score', 'candidateLabel', 'source', 'quality'],
+  m2c: ['outcome', 'score', 'source', 'quality'],
 } as const;
+
+/** Compared by VALUE with a stable key order — `quality` is an object, and comparing two of those
+ *  with `!==` reports every row as changed. */
+const stable = (v: unknown): string =>
+  JSON.stringify(v, (_k, x: unknown) =>
+    x && typeof x === 'object' && !Array.isArray(x)
+      ? Object.fromEntries(Object.entries(x as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)))
+      : x,
+  );
 
 export interface FieldChange {
   id: string;
@@ -69,7 +81,12 @@ export function compareMeasurements(base: BenchOutput, fresh: BenchOutput): Diff
         const b = (now[side] as unknown as Record<string, unknown>)[f];
         // sources are compared SCRUBBED, the same measurement-level equality stale-check uses:
         // a cold run re-mints scratch-dir names inside embedded asm comments
-        const [x, y] = f === 'source' ? [scrub(String(a ?? '')), scrub(String(b ?? ''))] : [a, b];
+        const [x, y] =
+          f === 'source'
+            ? [scrub(String(a ?? '')), scrub(String(b ?? ''))]
+            : f === 'quality'
+              ? [stable(a), stable(b)]
+              : [a, b];
         if (x !== y) {
           changed.push({ id: was.id, field: `${side}.${f}`, from: show(f, a), to: show(f, b) });
         }
