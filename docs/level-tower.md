@@ -145,6 +145,22 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   appears — and name the fork in the lever's header, because otherwise the gap left behind reads as
   an oversight rather than as the price of the mechanism.
 
+  **Before either, ask whether the DEFAULT can already spell it — and prove the answer by
+  compiling.** `/connective` was shipped on the premise that `x == 0 || x == 2` and
+  `switch (x) { case 0: case 2: … }` are two legitimate spellings of one asm shape that only a
+  differ can choose between. Under agbcc they are not two spellings: they compile to a
+  BYTE-IDENTICAL object (68 instructions each), while the third spelling — the same body written
+  out once per label, which is what `structure/switch-recover.ts` actually emitted — compiles to 89
+  instructions and a different object. So the axis was refereeing a question with one answer, and
+  the missing capability was a ten-line grouping in the structurer: with it, the row the axis was
+  built for (`kleod:ProcessInputAndUpdateEntities:agbcc`) scores 306 with the axis ON and 306 with
+  it OFF, same breakdown, in half the wall clock. What still earns the axis is the disjoint
+  population where switch recovery DECLINES and there is no arm to group.
+
+  The rule that follows is cheap and was skipped: **an underdetermination claim about two source
+  spellings is a COMPILER claim, so compile both and diff the objects before building anything.**
+  A score table cannot make it for you — the cheaper spelling was never in the fan to lose.
+
   **And 2× is a LOWER bound, not the price.** A new axis doubles its own admitting rows, and it
   also UN-COLLAPSES sibling axes that `seenTrees` was deduping away on the base tree: a sibling
   whose re-spelling was inert on the old tree can be distinct on the new one, and then it enumerates
@@ -292,6 +308,14 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   ~200 lines whose safety rests on every copy staying no stricter than the scope it mirrors, with
   nothing checking that and nothing in the harness reporting a candidate that was never
   enumerated.
+
+  `/connective`'s `onTreeOwned` is the SHAPE that blocker wants, one level down: the enumeration
+  gate is a callback the pass fires from its own refusal (`raise/shortcircuit.ts`), so there is no
+  second copy of the matcher to keep in step and the "no stricter than the scope it mirrors"
+  obligation is vacuous — and `PreRecoveryOptions` is the steering channel that makes it reusable,
+  one field per pass, the L1 analogue of `AnalyzeOptions`. Absorbing it into `STRUCTURING_AXES`
+  still needs one more gate KIND, since what is shipped is a side-effecting report rather than a
+  `variantGate` predicate; that step is smaller than the ~200 lines above and is not paid here.
 
 The **backends** ([`backend/`](../packages/core/src/backend)) then print L3 as concrete source —
 C, Pascal, and a scoped C++ — one neutral tree, three spellings. Every language-specific decision
