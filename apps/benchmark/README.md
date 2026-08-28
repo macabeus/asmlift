@@ -95,8 +95,11 @@ guesses the signature); asmlift gets that fact only where a maintainer authored 
 carries void-ness and callee arities rather than parameter types. And m2c reads callee prototypes
 straight out of the headers, while asmlift's channel for them is the symbol map's `signature`
 field, which the vendoring currently extracts for kleod and pokeemerald only — af, marioparty3,
-sa3 and snowboardkids2 vendor zero function signatures. Closing either one is asmlift-side work on
-the map/`proto` pipeline, not a reason to take facts away from m2c.
+sa3 and snowboardkids2 vendor zero function signatures. A third is narrower: a manifest's
+per-function `prependC` already feeds BOTH tools' compile, and m2c can now READ it, so where it
+declares a struct type for a project static table (`sBigMonSizeTable`) m2c learns the element's
+field names while the symbol map gives asmlift only its element size. Closing any of the three is
+asmlift-side work on the map/`proto` pipeline, not a reason to take facts away from m2c.
 
 ## Dataset
 
