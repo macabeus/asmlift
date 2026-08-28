@@ -84,33 +84,53 @@ would not be neutral, because asmlift is handed the project's vendored **symbol 
 real row, and that map is not name-and-address: sizes, declaration shapes, signedness, array
 extents, volatility, const-ness, address-cast macro bodies, and, where the vendoring found them,
 callee signatures and struct tags with full field tables. So m2c is given the matching thing —
-that row's own vendored preprocessed context, verbatim, via `--context` — on every real row. Both
-tools read the same vendored freeze, and **neither is given the reference source**: m2c's context
-is the project's preprocessor output, and the row's own signature reaches it only through the same
-`proto` field asmlift reads (`m2cOwnPrototype`, at most `void f(…);` on 84 rows; on 39 more the
-project's own headers declare the function and m2c reads it there, as a user would).
+that row's own vendored preprocessed context, verbatim, via `--context` — on every real row.
+
+**Neither tool is handed the row's own signature out of the reference source.** That is the
+harness's own leakage rule (core's `asIfUndecompiled`: "only CALLEE signatures transfer"), and it
+now applies to both halves. The row's own declaration reaches m2c only where the context already
+carries it (39 rows: 31 declared by the project's headers, as a user mid-decomp genuinely has, and
+8 by the forward declaration the manifest needs to compile the reference standalone — residual 4)
+or as the one line `proto` also gives asmlift (`m2cOwnPrototype`, at most `void f(…);`, 84 rows).
+The remaining 129 rows get nothing appended, and m2c infers the signature as asmlift does.
 
 It is **not exact parity**, and pretending otherwise would be the same defect with the sign
 flipped. The residuals run in both directions; none is closed here, because closing any of them
-changes what asmlift is given and this change moves no asmlift row.
+changes what asmlift is given or re-vendors the blobs both tools compile against, and this change
+moves no asmlift row.
 
-_Favouring m2c._ (1) Struct field tables. `layout` is a vendoring product, and only pokeemerald
-carries it in bulk (2179 of 41016 entries); af 26 of 61860, kleod 25, sa3 8, marioparty3 7,
-snowboardkids2 5. Where m2c's context declares a record the map only sizes, m2c has field names
-asmlift must invent — `sa3:gSio32MultiLoadArea` is `{kind: data, size: 24}` in the map and
-`.state/.frameCounter/.type` in the context. (2) Callee prototypes: m2c reads them out of the
-headers, while asmlift's channel is the map's `signature` field, which the vendoring extracts for
-kleod and pokeemerald only — af, marioparty3, sa3 and snowboardkids2 vendor **zero**. (3) A
-manifest's per-function `prependC` already feeds BOTH tools' compile, and m2c can now READ it, so
-where it declares a struct type for a project static table (`sBigMonSizeTable`) m2c learns field
-names the map gives only an element size for.
+_Favouring m2c._
 
-_Favouring asmlift._ (4) The map is whole-project and every row gets all of it; a context is one
-translation unit, so a fact in another TU's headers reaches asmlift and not m2c. (5) Four callees
-are named to asmlift through `proto` and are absent from the row's context, all on
-`sa3:sub_8001FD4` (`ValidateSave`, `PackSaveSector`, `WriteSaveSector`, `sub_8001A90`). (6) On the
-`nonvoid` rows `proto` gives asmlift the row's own parameter types and m2c gets nothing, because
-`proto` has no return type to state and inventing one is not parity.
+1. **Struct field tables.** `layout` is a vendoring product and only pokeemerald carries it in
+   bulk (2179 of 41016 entries; af 26 of 61860, kleod 25, sa3 8, marioparty3 7, snowboardkids2 5).
+   Where m2c's context declares a record the map only sizes, m2c has field names asmlift must
+   invent — `sa3:gSio32MultiLoadArea` is `{kind: data, size: 24}` in the map and
+   `.state/.frameCounter/.type/.datap` in the context.
+2. **Callee prototypes.** m2c reads them out of the headers; asmlift's channel is the map's
+   `signature` field, which the vendoring extracts for kleod and pokeemerald only — af,
+   marioparty3, sa3 and snowboardkids2 vendor **zero**.
+3. **`prependC` types.** A manifest's per-function `prependC` already feeds BOTH tools' compile,
+   and m2c can READ it, so where it declares a struct type for a project static table
+   (`pokeemerald:sBigMonSizeTable`) m2c learns field names the map gives only an element size for.
+4. **`prependC` forward declarations.** On 8 rows (7 kleod, `pokeemerald:AcroBikeHandleInputTurning`)
+   the declaration the reference needs to compile standalone IS the row's own signature, and it is
+   the only declaration of it in that context — the one place a signature fact still reaches m2c
+   and not asmlift. Measured by deleting the line and re-running m2c: 3 of the 8 change output
+   (`ConfigureEntityBehavior`, `IsSelectButtonPressed`, `AcroBikeHandleInputTurning`), none is a
+   match either way. Not closed because closing it means re-vendoring the blob asmlift's candidate
+   scorer also compiles against. Named by `test/authored-facts.test.ts`.
+
+_Favouring asmlift._
+
+5. **Scope.** The symbol map is whole-project and every row gets all of it; a context is one
+   translation unit, so a fact another TU's headers declare reaches asmlift and not m2c.
+6. **Named callees.** Four callees are named to asmlift through `proto` and are absent from the
+   row's context, all on `sa3:sub_8001FD4` (`ValidateSave`, `PackSaveSector`, `WriteSaveSector`,
+   `sub_8001A90`).
+7. **Non-void rows.** On the 6 rows whose `proto` says the function is non-void and whose context
+   does not declare it, asmlift is told that — and on 2 of them the parameter types
+   (`af:mPl_SceneNo2SoundRoomType`, `pokeemerald:GetAnchorCoord`) — while m2c is told nothing:
+   `proto` carries no return type to state, and inventing one would not be parity.
 
 **A context is not one uniform thing**, and the repro scripts say so per row rather than
 generalising. It is whatever that TU preprocesses to: af's manifest has `headers: []` — its

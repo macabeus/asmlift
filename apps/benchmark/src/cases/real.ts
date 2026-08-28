@@ -4,10 +4,11 @@
 // (makeRealScorer), so an output referencing project globals/structs is never noncompile merely
 // for missing context.
 //
-// PROVISIONING: both tools read the SAME project declarations out of the same vendored freeze —
+// PROVISIONING: both tools read the project's declarations out of the same vendored freeze —
 // asmlift the vendored symbol map (`symbols`), m2c the vendored preprocessed context (`m2cCtx`).
-// Neither reads the reference source. manifests.ts's `m2cCtx` doc states what each of those
-// carries, and what is still asymmetric; do not re-derive it here.
+// Neither is handed the row's own signature out of the reference source. manifests.ts's `m2cCtx`
+// doc states what each channel carries; README.md lists the residuals, in both directions, and
+// the one corner where a signature fact still reaches m2c only. Do not re-derive either here.
 import type { Prototypes } from '@asmlift/core/proto';
 import { asIfUndecompiled } from '@asmlift/core/symbols';
 

@@ -196,6 +196,30 @@ describe('the prototype line appended to a vendored m2c context', () => {
       .map(({ where }) => where);
     expect(bad).toEqual([]);
   });
+
+  // THE ONE PLACE a signature fact still reaches m2c and not asmlift, pinned by NAME so it cannot
+  // grow quietly. A manifest's `prependC` sometimes has to forward-declare the function for the
+  // reference to compile standalone, and m2c can read it. Closing it would mean re-vendoring the
+  // blob asmlift's candidate scorer also compiles against, so it is DISCLOSED (README residual 4)
+  // rather than removed — measured at 3 of 8 rows changing m2c's output and 0 matches either way.
+  test('only the known rows have their own signature declared by their prependC', () => {
+    const self = lines
+      .filter(({ fn }) => fn.prependC && new RegExp(`\\b${fn.sym}\\s*\\(`).test(fn.prependC))
+      .map(({ where }) => where)
+      .sort();
+    expect(self).toEqual(
+      [
+        'kleod:ConfigureEntityBehavior',
+        'kleod:CountCollectedGems',
+        'kleod:IsSelectButtonPressed',
+        'kleod:ProcessInputAndUpdateEntities',
+        'kleod:SetupBG3WindowOverlay',
+        'kleod:UpdateWorldMapNodeAnim',
+        'kleod:VBlankDMA_Level2',
+        'pokeemerald:AcroBikeHandleInputTurning',
+      ].sort(),
+    );
+  });
 });
 
 // A callee declared to one decompiler and not the other is an information asymmetry, and it is
