@@ -318,3 +318,63 @@ test('hwmod applies to PPC/mwcc only — not to the hardware-divide ISA that HAS
   expect(patternApplies(HWMOD_SMOD, mips)).toBe(false);
   expect(patternApplies(HWMOD_SMOD, arm)).toBe(false);
 });
+
+// ── an idiom that may not DE-SEQUENCE what it folds ───────────────────────────────────────────
+// A fold collapses several ops into one, which drops its operands from two uses to one — and the
+// structurer inlines a single-use effect AT its one use, so both land as operands of one C
+// expression, whose order C leaves unspecified. asmlift's inline-at-use model exempts that case on
+// the premise that "the recompiling compiler orders unsequenced operands of one expression exactly
+// as it originally chose to", which is true only when the expression is the one the SOURCE wrote.
+// A fold invents an expression, so it checks: mwcc evaluates `%`'s RIGHT operand first (compiled in
+// both directions), so an inlined `A % B` runs B's def first and the fold preserves the machine's
+// order only when B's def already precedes A's.
+const HWMOD_SEQ = HWMOD_PATTERNS[0];
+const twoCalls = (first: string, second: string, dividend: string, divisor: string, between = '') =>
+  parse(
+    `fn f {\n^bb0():\n  %0: s32 = call {target="${first}"}\n${between}  %1: s32 = call {target="${second}"}\n` +
+      `  %2: s32 = sdiv ${dividend}, ${divisor}\n  %3: s32 = mul %2, ${divisor}\n` +
+      `  %4: s32 = sub ${dividend}, %3\n  ret %4\n}\n`,
+  );
+
+test('unsequencedRightFirst refuses the fold that would swap two calls', () => {
+  // `f()` then `g()` on the machine, folded to `f() % g()` — which mwcc runs as `g()` then `f()`.
+  expect(applyPattern(twoCalls('f', 'g', '%0', '%1'), HWMOD_SEQ)).toBe(0);
+});
+
+test('unsequencedRightFirst admits the fold when the RIGHT operand`s def already runs first', () => {
+  // `f()` then `g()`, folded to `g() % f()` — mwcc runs `f()` then `g()`, the machine's own order.
+  expect(applyPattern(twoCalls('f', 'g', '%1', '%0'), HWMOD_SEQ)).toBe(1);
+});
+
+test('unsequencedRightFirst admits the fold when a sibling effect stands between the two', () => {
+  // The store is a barrier the inline-at-use model refuses to cross, so `f()`'s result gets a named
+  // temp at its own position and the order is pinned there rather than left to the expression.
+  const between = '  %9: s32 = const {value=0}\n  store %9, %9 {off=0, width=4}\n';
+  expect(applyPattern(twoCalls('f', 'g', '%0', '%1', between), HWMOD_SEQ)).toBe(1);
+});
+
+test('unsequencedRightFirst admits the fold when at most ONE operand has an effect', () => {
+  const oneCall = parse(
+    'fn f {\n^bb0(%1: s32):\n  %0: s32 = call {target="f"}\n' +
+      '  %2: s32 = sdiv %0, %1\n  %3: s32 = mul %2, %1\n  %4: s32 = sub %0, %3\n  ret %4\n}\n',
+  );
+  expect(applyPattern(oneCall, HWMOD_SEQ)).toBe(1);
+});
+
+// ── malformed pattern DATA fails loud, with the pattern's id ──────────────────────────────────
+// Patterns are meant to become generated data, so a declaration that could not have an effect is a
+// bug to report rather than to ignore. `ordered` is read only inside the commutative-swap branch.
+test('`ordered` on a node where it could not fire throws, naming the pattern', () => {
+  const inert: RewritePattern = {
+    id: 'test/inert-ordered',
+    applies: {},
+    match: { op: 'sub', ordered: true, args: [{ bind: 'X' }, { bind: 'Y' }] },
+    replaceWith: { op: 'add', args: ['X', 'Y'] },
+  };
+  expect(() => applyPattern(parse(NEG_FIRST), inert)).toThrow(/test\/inert-ordered.*'sub'/);
+});
+
+test('`unsequencedRightFirst` naming a non-replaceWith operand throws, naming the pattern', () => {
+  const bogus: RewritePattern = { ...HWMOD_SEQ, id: 'test/bogus-seq', unsequencedRightFirst: ['A', 'Z'] };
+  expect(() => applyPattern(parse(MOD_BEFORE), bogus)).toThrow(/test\/bogus-seq.*'Z'/);
+});
