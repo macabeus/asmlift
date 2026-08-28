@@ -20,6 +20,7 @@
       ],
       "prependC": "typedef struct { unsigned int w0; unsigned int w1; } Gfx;",
       "funcC": "Gfx* gfxopen(Gfx* gfxHead) {\n    return gfxHead + 1;\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/gfxalloc.c#L4-L6"
     },
     {
@@ -31,6 +32,7 @@
       ],
       "prependC": "#define NULL ((void*)0)\ntypedef struct ListAlloc {\n    struct ListAlloc* prev;\n    struct ListAlloc* next;\n} ListAlloc;",
       "funcC": "ListAlloc* ListAlloc_Init(ListAlloc* this) {\n    this->prev = NULL;\n    this->next = NULL;\n    return this;\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/listalloc.c#L4-L8"
     },
     {
@@ -41,6 +43,7 @@
       ],
       "prependC": "typedef unsigned char u8;\ntypedef unsigned int size_t;",
       "funcC": "void mem_copy(u8* dest, u8* src, size_t len) {\n    while (len != 0) {\n        *dest = *src;\n        src++;\n        dest++;\n        len--;\n    }\n}",
+      "m2cCtx": true,
       "proto": {
         "mem_copy": {
           "returnsVoid": true
@@ -56,6 +59,7 @@
       ],
       "prependC": "typedef unsigned char u8;\ntypedef unsigned int size_t;",
       "funcC": "void mem_clear(u8* ptr, size_t len, u8 value) {\n    size_t i;\n\n    for (i = 0; i < len; i++) {*ptr++ = value;}\n}",
+      "m2cCtx": true,
       "proto": {
         "mem_clear": {
           "returnsVoid": true
@@ -71,6 +75,7 @@
       ],
       "prependC": "typedef unsigned char u8;\ntypedef int s32;\ntypedef unsigned int size_t;",
       "funcC": "s32 mem_cmp(u8* ptr1, u8* ptr2, size_t len) {\n    while (len != 0) {\n        if (*ptr1 != *ptr2) {\n            return 0;\n        }\n        ptr1++;\n        ptr2++;\n        len--;\n    }\n    return 1;\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L31-L41"
     },
     {
@@ -82,6 +87,7 @@
       ],
       "prependC": "typedef short s16;\ntypedef int s32;\n#define TRUE 1\n#define FALSE 0",
       "funcC": "s32 chase_s(s16* pValue, s16 target, s16 step) {\n    if (step) {\n        if (*pValue > target) {\n            step = -step;\n        }\n\n        *pValue += step;\n\n        if ((step * (*pValue - target)) >= 0) {\n            *pValue = target;\n            return TRUE;\n        }\n    } else {\n        if (*pValue == target) {\n            return TRUE;\n        }\n    }\n    return FALSE;\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L72-L90"
     },
     {
@@ -93,6 +99,7 @@
       ],
       "prependC": "typedef short s16;\ntypedef int s32;",
       "funcC": "s32 chase_s2(s16* pValue, s16 limit, s16 step) {\n    s16 prev = *pValue;\n\n    *pValue += step;\n    if ((*pValue - limit) * (prev - limit) <= 0) {\n        *pValue = limit;\n        return 1;\n    }\n    return 0;\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L124-L133"
     },
     {
@@ -102,6 +109,7 @@
       ],
       "prependC": "typedef int s32;\n#define lbRk_KYUU_LEAP_MONTH 13",
       "funcC": "s32 lbRk_IsLeapMonth(s32 month) {\n    if (month == lbRk_KYUU_LEAP_MONTH) {\n        return 1;\n    }\n\n    return 0;\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/lb_reki.c#L77-L83"
     },
     {
@@ -137,6 +145,7 @@
       ],
       "prependC": "typedef short s16;\ntypedef int s32;\n#define TRUE 1\n#define FALSE 0",
       "funcC": "s32 chase_s3(s16* pValue, s16 target, s16 step) {\n    if (step) {\n        s32 diff = target - *pValue;\n\n        if (diff < 0) {\n            step = -step;\n        }\n\n        if (diff >= 0x8000) {\n            step = -step;\n            diff = -0xFFFF - -diff;\n        } else if (diff <= -0x8000) {\n            step = -step;\n            diff += 0xFFFF;\n        }\n\n        *pValue += step;\n\n        if ((diff * step) <= 0) {\n            *pValue = target;\n            return TRUE;\n        }\n\n    } else if (target == *pValue) {\n        return TRUE;\n    }\n    return FALSE;\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L135-L162"
     },
     {
@@ -148,6 +157,7 @@
       ],
       "prependC": "typedef int s32;\ntypedef float f32;",
       "funcC": "f32 get_percent(s32 max, s32 min, s32 x) {\n    f32 denom;\n    f32 percent;\n\n    percent = 1.0f;\n    if (x < min) {\n        percent = 0.0f;\n    } else if (x < max) {\n        denom = (f32)(max - min);\n        if (denom != 0.0f) {\n            percent = (f32)(x - min) / denom;\n            if (percent > 1.0f) {\n                percent = 1.0f;\n            }\n        }\n    }\n    return percent;\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L737-L754"
     },
     {
@@ -158,6 +168,7 @@
       ],
       "prependC": "typedef int s32;\ntypedef float f32;",
       "funcC": "f32 check_percent_abs(f32 x, f32 min, f32 max, f32 scale, s32 shiftMin) {\n    if ((-min <= x) && (x <= min)) {\n        return 0.0f;\n    }\n    if (x >= max) {\n        return 1.0f;\n    }\n    if (x <= -max) {\n        return -1.0f;\n    }\n    if (shiftMin) {\n        if (x > 0.0f) {\n            return (x - min) * scale;\n        } else {\n            return (x + min) * scale;\n        }\n    } else {\n        return x * scale;\n    }\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L652-L671"
     },
     {
@@ -169,6 +180,7 @@
       ],
       "prependC": "typedef float f32;",
       "funcC": "void add_calc2(f32* pValue, f32 target, f32 fraction, f32 step) {\n    f32 stepSize;\n    if (*pValue != target) {\n        stepSize = fraction * (target - *pValue);\n\n        if (stepSize > step) {\n            stepSize = step;\n        } else if (stepSize < -step) {\n            stepSize = -step;\n        }\n\n        *pValue += stepSize;\n    }\n}",
+      "m2cCtx": true,
       "proto": {
         "add_calc2": {
           "returnsVoid": true
@@ -185,6 +197,7 @@
       ],
       "prependC": "typedef float f32;",
       "funcC": "void add_calc0(f32* pValue, f32 fraction, f32 step) {\n    f32 stepSize = *pValue * fraction;\n\n    if (stepSize > step) {\n        stepSize = step;\n    } else if (stepSize < -step) {\n        stepSize = -step;\n    }\n\n    *pValue -= stepSize;\n}",
+      "m2cCtx": true,
       "proto": {
         "add_calc0": {
           "returnsVoid": true
@@ -201,6 +214,7 @@
       ],
       "prependC": "typedef short s16;",
       "funcC": "void adds(s16* pValue, s16 target, s16 scale, s16 maxStep) {\n    s16 diff = target - *pValue;\n    diff /= scale;\n\n    if (diff > maxStep) {\n        *pValue += maxStep;\n        return;\n    }\n\n    if (diff < -maxStep) {\n        *pValue -= maxStep;\n        return;\n    }\n\n    *pValue += diff;\n}",
+      "m2cCtx": true,
       "proto": {
         "adds": {
           "returnsVoid": true
@@ -217,6 +231,7 @@
       ],
       "prependC": "typedef short s16;\ntypedef unsigned short u16;\ntypedef int s32;\ntypedef float f32;",
       "funcC": "s16 add_calc_short_angle3(s16* pValue, s16 target, f32 fraction, s16 maxStep, s16 minStep) {\n    f32 stepSize;\n    s32 uTarget;\n    s32 newValue;\n    s32 uValue;\n\n    if (target != *pValue) {\n        uValue = (u16)*pValue;\n        uTarget = (u16)target;\n\n        if (uValue > uTarget) {\n            uTarget += 0x10000;\n        }\n\n        stepSize = (uTarget - uValue) * fraction;\n\n        if (stepSize > maxStep) {\n            stepSize = maxStep;\n        } else if (stepSize < minStep) {\n            stepSize = minStep;\n        }\n\n        newValue = uValue + (s32)stepSize;\n        if (newValue > uTarget) {\n            newValue = uTarget;\n        }\n        *pValue = newValue;\n    }\n\n    return target - *pValue;\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L533-L563"
     },
     {
@@ -228,6 +243,7 @@
       ],
       "prependC": "typedef float f32;\ntypedef struct xyz_t { f32 x; f32 y; f32 z; } xyz_t;",
       "funcC": "void xyz_t_sub(xyz_t* minuend, xyz_t* subtrahend, xyz_t* diff) {\n    diff->x = minuend->x - subtrahend->x;\n    diff->y = minuend->y - subtrahend->y;\n    diff->z = minuend->z - subtrahend->z;\n}",
+      "m2cCtx": true,
       "proto": {
         "xyz_t_sub": {
           "returnsVoid": true
@@ -244,6 +260,7 @@
       ],
       "prependC": "typedef unsigned char u8;\ntypedef struct { u8 r; u8 g; u8 b; u8 a; } Color_RGBA8;",
       "funcC": "void rgba_t_move(Color_RGBA8* dest, Color_RGBA8* src) {\n    dest->r = src->r;\n    dest->g = src->g;\n    dest->b = src->b;\n    dest->a = src->a;\n}",
+      "m2cCtx": true,
       "proto": {
         "rgba_t_move": {
           "returnsVoid": true
@@ -260,6 +277,7 @@
       ],
       "prependC": "typedef unsigned char u8;\ntypedef unsigned int u32;\ntypedef short s16;\ntypedef int s32;\ntypedef struct { u32 cont: 1; u32 type: 4; u32 offset: 11; s32 value: 16; } ValueSet;\ntypedef struct s_xyz { s16 x; s16 y; s16 z; } s_xyz;",
       "funcC": "void ValueSet__s_xyz(u8* ptr, ValueSet* value_set) {\n    s_xyz* vec = (s_xyz*)(ptr + value_set->offset);\n    s16 val = value_set->value;\n\n    vec->z = val;\n    vec->y = val;\n    vec->x = val;\n}",
+      "m2cCtx": true,
       "proto": {
         "ValueSet__s_xyz": {
           "returnsVoid": true
@@ -276,6 +294,7 @@
       ],
       "prependC": "typedef float f32;\n#define CLAMP_MAX(x, max) ((x) > (max) ? (max) : (x))\n#define CLAMP_MIN(x, min) ((x) < (min) ? (min) : (x))",
       "funcC": "f32 never_zero(f32 val, f32 min) {\n    if (val < 0.0f) {\n        return CLAMP_MAX(val, -min);\n    } else {\n        return CLAMP_MIN(val, min);\n    }\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_olib.c#L38-L44"
     },
     {
@@ -287,6 +306,7 @@
       ],
       "prependC": "typedef float f32;\n#define CLAMP_MAX(x, max) ((x) > (max) ? (max) : (x))\n#define CLAMP_MIN(x, min) ((x) < (min) ? (min) : (x))",
       "funcC": "f32 limiter(f32 val, f32 max) {\n    if (val < 0.0f) {\n        return CLAMP_MIN(val, -max);\n    } else {\n        return CLAMP_MAX(val, max);\n    }\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_olib.c#L50-L56"
     },
     {
@@ -310,6 +330,7 @@
       ],
       "prependC": "typedef short s16;\ntypedef int s32;\ntypedef float f32;\n#define TRUE 1\n#define FALSE 0\nextern f32 game_GameFrame_2F;",
       "funcC": "s32 chase_angle(s16* pValue, s16 target, s16 step) {\n    if (step != 0) {\n        f32 updateScale = game_GameFrame_2F;\n\n        if ((s16)(*pValue - target) > 0) {\n            step = -step;\n        }\n\n        *pValue += (s16)(step * updateScale);\n\n        if (((s16)(*pValue - target) * step) >= 0) {\n            *pValue = target;\n            return TRUE;\n        }\n    } else if (*pValue == target) {\n        return TRUE;\n    }\n\n    return FALSE;\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L51-L70"
     },
     {
@@ -320,6 +341,7 @@
       ],
       "prependC": "typedef int s32;\ntypedef float f32;\n#define TRUE 1\n#define FALSE 0",
       "funcC": "s32 chase_f(f32* pValue, f32 target, f32 step) {\n    if (step) {\n        if (*pValue > target) {\n            step = -step;\n        }\n\n        *pValue += step;\n\n        if ((step * (*pValue - target)) >= 0.0f) {\n            *pValue = target;\n            return TRUE;\n        }\n    } else {\n        if (*pValue == target) {\n            return TRUE;\n        }\n    }\n    return FALSE;\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L92-L110"
     },
     {
@@ -330,6 +352,7 @@
       ],
       "prependC": "typedef int s32;\ntypedef float f32;",
       "funcC": "s32 chase_f3(f32* pValue, f32 target, f32 incrStep, f32 decrStep) {\n    f32 step = (target >= *pValue) ? incrStep : decrStep;\n\n    if (step != 0.0f) {\n        if (target < *pValue) {\n            step = -step;\n        }\n\n        *pValue += step;\n\n        if (((*pValue - target) * step) >= 0) {\n            *pValue = target;\n            return 1;\n        }\n    } else if (target == *pValue) {\n        return 1;\n    }\n\n    return 0;\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L175-L194"
     },
     {
@@ -340,6 +363,7 @@
       ],
       "prependC": "typedef int s32;\ntypedef float f32;",
       "funcC": "void inter_float(f32* pValue, f32 arg1, s32 stepCount) {\n    if (stepCount <= 0) {\n        *pValue = arg1;\n    } else {\n        f32 diff = arg1 - *pValue;\n\n        *pValue += diff / stepCount;\n    }\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L196-L204"
     },
     {
@@ -349,6 +373,7 @@
       ],
       "prependC": "typedef float f32;\ntypedef struct xyz_t { f32 x; f32 y; f32 z; } xyz_t;",
       "funcC": "void xyz_t_add(xyz_t* augend, xyz_t* addend, xyz_t* total) {\n    total->x = augend->x + addend->x;\n    total->y = augend->y + addend->y;\n    total->z = augend->z + addend->z;\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L236-L240"
     },
     {
@@ -359,6 +384,7 @@
       ],
       "prependC": "typedef float f32;\ntypedef struct xyz_t { f32 x; f32 y; f32 z; } xyz_t;",
       "funcC": "void xyz_t_mult_v(xyz_t* multiplicand, f32 multiplier) {\n    multiplicand->x *= multiplier;\n    multiplicand->y *= multiplier;\n    multiplicand->z *= multiplier;\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L254-L258"
     },
     {
@@ -379,6 +405,7 @@
       ],
       "prependC": "typedef short s16;\ntypedef float f32;\ntypedef struct xyz_t { f32 x; f32 y; f32 z; } xyz_t;\ntypedef struct s_xyz { s16 x; s16 y; s16 z; } s_xyz;",
       "funcC": "void xyz_t_sub_ss(xyz_t* dest, s_xyz* minuend, s_xyz* subtrahend) {\n    dest->x = minuend->x - subtrahend->x;\n    dest->y = minuend->y - subtrahend->y;\n    dest->z = minuend->z - subtrahend->z;\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L248-L252"
     },
     {
@@ -389,6 +416,7 @@
       ],
       "prependC": "typedef short s16;\ntypedef float f32;\ntypedef struct xyz_t { f32 x; f32 y; f32 z; } xyz_t;\ntypedef struct { f32 r; s16 pitch; s16 yaw; } VecSphGeo;\ntypedef VecSphGeo VecSph;\nf32 cos_s(s16 angle);\nf32 sin_s(s16 angle);",
       "funcC": "xyz_t spolar2world(VecSph* sph) {\n    xyz_t v;\n    f32 sinPitch;\n    f32 cosPitch = cos_s(sph->pitch);\n    f32 sinYaw;\n    f32 cosYaw = cos_s(sph->yaw);\n\n    sinPitch = sin_s(sph->pitch);\n    sinYaw = sin_s(sph->yaw);\n\n    v.x = sph->r * sinPitch * sinYaw;\n    v.y = sph->r * cosPitch;\n    v.z = sph->r * sinPitch * cosYaw;\n\n    return v;\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_olib.c#L82-L97"
     },
     {
@@ -399,6 +427,7 @@
         "arithmetic"
       ],
       "funcC": "void Skin_Matrix_MulMatrix(MtxF* mfA, MtxF* mfB, MtxF* dest) {\n    f32 cx;\n    f32 cy;\n    f32 cz;\n    f32 cw;\n\n    f32 rx = mfA->xx;\n    f32 ry = mfA->xy;\n    f32 rz = mfA->xz;\n    f32 rw = mfA->xw;\n\n    cx = mfB->xx;\n    cy = mfB->yx;\n    cz = mfB->zx;\n    cw = mfB->wx;\n    dest->xx = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    cx = mfB->xy;\n    cy = mfB->yy;\n    cz = mfB->zy;\n    cw = mfB->wy;\n    dest->xy = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    cx = mfB->xz;\n    cy = mfB->yz;\n    cz = mfB->zz;\n    cw = mfB->wz;\n    dest->xz = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    cx = mfB->xw;\n    cy = mfB->yw;\n    cz = mfB->zw;\n    cw = mfB->ww;\n    dest->xw = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    rx = mfA->yx;\n    ry = mfA->yy;\n    rz = mfA->yz;\n    rw = mfA->yw;\n\n    cx = mfB->xx;\n    cy = mfB->yx;\n    cz = mfB->zx;\n    cw = mfB->wx;\n    dest->yx = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    cx = mfB->xy;\n    cy = mfB->yy;\n    cz = mfB->zy;\n    cw = mfB->wy;\n    dest->yy = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    cx = mfB->xz;\n    cy = mfB->yz;\n    cz = mfB->zz;\n    cw = mfB->wz;\n    dest->yz = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    cx = mfB->xw;\n    cy = mfB->yw;\n    cz = mfB->zw;\n    cw = mfB->ww;\n    dest->yw = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    rx = mfA->zx;\n    ry = mfA->zy;\n    rz = mfA->zz;\n    rw = mfA->zw;\n\n    cx = mfB->xx;\n    cy = mfB->yx;\n    cz = mfB->zx;\n    cw = mfB->wx;\n    dest->zx = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    cx = mfB->xy;\n    cy = mfB->yy;\n    cz = mfB->zy;\n    cw = mfB->wy;\n    dest->zy = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    cx = mfB->xz;\n    cy = mfB->yz;\n    cz = mfB->zz;\n    cw = mfB->wz;\n    dest->zz = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    cx = mfB->xw;\n    cy = mfB->yw;\n    cz = mfB->zw;\n    cw = mfB->ww;\n    dest->zw = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    rx = mfA->wx;\n    ry = mfA->wy;\n    rz = mfA->wz;\n    rw = mfA->ww;\n\n    cx = mfB->xx;\n    cy = mfB->yx;\n    cz = mfB->zx;\n    cw = mfB->wx;\n    dest->wx = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    cx = mfB->xy;\n    cy = mfB->yy;\n    cz = mfB->zy;\n    cw = mfB->wy;\n    dest->wy = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    cx = mfB->xz;\n    cy = mfB->yz;\n    cz = mfB->zz;\n    cw = mfB->wz;\n    dest->wz = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n\n    cx = mfB->xw;\n    cy = mfB->yw;\n    cz = mfB->zw;\n    cw = mfB->ww;\n    dest->ww = (rx * cx) + (ry * cy) + (rz * cz) + (rw * cw);\n}",
+      "m2cCtx": true,
       "prependC": "typedef unsigned char       u8;     /* unsigned  8-bit */\ntypedef unsigned short      u16;    /* unsigned 16-bit */\ntypedef unsigned long       u32;    /* unsigned 32-bit */\ntypedef unsigned long long  u64;    /* unsigned 64-bit */\ntypedef signed char         s8;     /* signed  8-bit */\ntypedef short               s16;    /* signed 16-bit */\ntypedef long                s32;    /* signed 32-bit */\ntypedef long long           s64;    /* signed 64-bit */\ntypedef float   f32;    /* single prec floating point */\ntypedef double  f64;    /* double prec floating point */\ntypedef struct xyz_t {\n    /* 0x0 */ f32 x;\n    /* 0x4 */ f32 y;\n    /* 0x8 */ f32 z;\n} xyz_t; // size = 0xC\n\ntypedef float MtxF_t[4][4];\ntypedef union {\n    MtxF_t mf;\n    struct {\n        float xx, yx, zx, wx, xy, yy, zy, wy, xz, yz, zz, wz, xw, yw, zw, ww;\n    };\n} MtxF; // size = 0x40\ntypedef long\tMtx_t[4][4];\n\ntypedef union {\n    Mtx_t\t\tm;\n    long long int\tforce_structure_alignment;\n} Mtx;",
       "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_skin_matrix.c#L32-L153",
       "proto": {
@@ -417,6 +446,7 @@
         "float"
       ],
       "funcC": "Mtx* _MtxF_to_Mtx(MtxF* src, Mtx* dest) {\n    s32 fp;\n    u16* intPart = (u16*)&dest->m[0][0];\n    u16* fracPart = (u16*)&dest->m[2][0];\n\n    fp = src->xx * 0x10000;\n    intPart[0] = (fp >> 0x10);\n    fracPart[0] = fp & 0xFFFF;\n\n    fp = src->yx * 0x10000;\n    intPart[1] = (fp >> 0x10);\n    fracPart[1] = fp & 0xFFFF;\n\n    fp = src->zx * 0x10000;\n    intPart[2] = (fp >> 0x10);\n    fracPart[2] = fp & 0xFFFF;\n\n    fp = src->wx * 0x10000;\n    intPart[3] = (fp >> 0x10);\n    fracPart[3] = fp & 0xFFFF;\n\n    fp = src->xy * 0x10000;\n    intPart[4] = (fp >> 0x10);\n    fracPart[4] = fp & 0xFFFF;\n\n    fp = src->yy * 0x10000;\n    intPart[5] = (fp >> 0x10);\n    fracPart[5] = fp & 0xFFFF;\n\n    // Ideally these three would use fracPart instead of intPart, but it's required to match.\n    fp = src->zy * 0x10000;\n    intPart[6] = (fp >> 0x10);\n    intPart[22] = fp & 0xFFFF;\n\n    fp = src->wy * 0x10000;\n    intPart[7] = (fp >> 0x10);\n    intPart[23] = fp & 0xFFFF;\n\n    fp = src->xz * 0x10000;\n    intPart[8] = (fp >> 0x10);\n    intPart[24] = fp & 0xFFFF;\n\n    fp = src->yz * 0x10000;\n    intPart[9] = (fp >> 0x10);\n    fracPart[9] = fp & 0xFFFF;\n\n    fp = src->zz * 0x10000;\n    intPart[10] = (fp >> 0x10);\n    fracPart[10] = fp & 0xFFFF;\n\n    fp = src->wz * 0x10000;\n    intPart[11] = (fp >> 0x10);\n    fracPart[11] = fp & 0xFFFF;\n\n    fp = src->xw * 0x10000;\n    intPart[12] = (fp >> 0x10);\n    fracPart[12] = fp & 0xFFFF;\n\n    fp = src->yw * 0x10000;\n    intPart[13] = (fp >> 0x10);\n    fracPart[13] = fp & 0xFFFF;\n\n    fp = src->zw * 0x10000;\n    intPart[14] = (fp >> 0x10);\n    fracPart[14] = fp & 0xFFFF;\n\n    fp = src->ww * 0x10000;\n    intPart[15] = (fp >> 0x10);\n    fracPart[15] = fp & 0xFFFF;\n    return dest;\n}",
+      "m2cCtx": true,
       "prependC": "typedef unsigned char       u8;     /* unsigned  8-bit */\ntypedef unsigned short      u16;    /* unsigned 16-bit */\ntypedef unsigned long       u32;    /* unsigned 32-bit */\ntypedef unsigned long long  u64;    /* unsigned 64-bit */\ntypedef signed char         s8;     /* signed  8-bit */\ntypedef short               s16;    /* signed 16-bit */\ntypedef long                s32;    /* signed 32-bit */\ntypedef long long           s64;    /* signed 64-bit */\ntypedef float   f32;    /* single prec floating point */\ntypedef double  f64;    /* double prec floating point */\ntypedef struct xyz_t {\n    /* 0x0 */ f32 x;\n    /* 0x4 */ f32 y;\n    /* 0x8 */ f32 z;\n} xyz_t; // size = 0xC\n\ntypedef float MtxF_t[4][4];\ntypedef union {\n    MtxF_t mf;\n    struct {\n        float xx, yx, zx, wx, xy, yy, zy, wy, xz, yz, zz, wz, xw, yw, zw, ww;\n    };\n} MtxF; // size = 0x40\ntypedef long\tMtx_t[4][4];\n\ntypedef union {\n    Mtx_t\t\tm;\n    long long int\tforce_structure_alignment;\n} Mtx;",
       "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/sys_matrix.c#L768-L838"
     },
@@ -428,6 +458,7 @@
         "matrix"
       ],
       "funcC": "void suMtxMakeSRT(Mtx* mtx, f32 scaleX, f32 scaleY, f32 scaleZ, s16 rotX, s16 rotY, s16 rotZ, f32 translateX,\n                  f32 translateY, f32 translateZ) {\n    struct {\n        s16 intPart[4][4];\n        u16 fracPart[4][4];\n    }* mu = (void*)mtx;\n    s32 fp;\n    f32 sinX = sin_s(rotX);\n    f32 sinY = sin_s(rotY);\n    f32 sinZ = sin_s(rotZ);\n    f32 cosX = cos_s(rotX);\n    f32 cosY = cos_s(rotY);\n    f32 cosZ = cos_s(rotZ);\n\n    fp = cosY * cosZ * scaleX * 0x10000;\n    mu->intPart[0][0] = ((u32)fp >> 0x10) & 0xFFFF;\n    mu->fracPart[0][0] = fp & 0xFFFF;\n\n    fp = cosY * sinZ * scaleX * 0x10000;\n    mu->intPart[0][1] = ((u32)fp >> 0x10) & 0xFFFF;\n    mu->fracPart[0][1] = fp & 0xFFFF;\n\n    fp = -sinY * scaleX * 0x10000;\n    mu->intPart[0][2] = ((u32)fp >> 0x10) & 0xFFFF;\n    mu->fracPart[0][2] = fp & 0xFFFF;\n\n    fp = ((sinX * sinY * cosZ) - (cosX * sinZ)) * scaleY * 0x10000;\n    mu->intPart[1][0] = ((u32)fp >> 0x10) & 0xFFFF;\n    mu->fracPart[1][0] = fp & 0xFFFF;\n\n    fp = ((sinX * sinY * sinZ) + (cosX * cosZ)) * scaleY * 0x10000;\n    mu->intPart[1][1] = ((u32)fp >> 0x10) & 0xFFFF;\n    mu->fracPart[1][1] = fp & 0xFFFF;\n\n    fp = sinX * cosY * scaleY * 0x10000;\n    mu->intPart[1][2] = ((u32)fp >> 0x10) & 0xFFFF;\n    mu->fracPart[1][2] = fp & 0xFFFF;\n\n    fp = ((cosX * sinY * cosZ) + (sinX * sinZ)) * scaleZ * 0x10000;\n    mu->intPart[2][0] = ((u32)fp >> 0x10) & 0xFFFF;\n    mu->fracPart[2][0] = fp & 0xFFFF;\n\n    fp = ((cosX * sinY * sinZ) - (sinX * cosZ)) * scaleZ * 0x10000;\n    mu->intPart[2][1] = ((u32)fp >> 0x10) & 0xFFFF;\n    mu->fracPart[2][1] = fp & 0xFFFF;\n\n    fp = cosX * cosY * scaleZ * 0x10000;\n    mu->intPart[2][2] = ((u32)fp >> 0x10) & 0xFFFF;\n    mu->fracPart[2][2] = fp & 0xFFFF;\n\n    fp = translateX * 0x10000;\n    mu->intPart[3][0] = ((u32)fp >> 0x10) & 0xFFFF;\n    mu->fracPart[3][0] = fp & 0xFFFF;\n\n    fp = translateY * 0x10000;\n    mu->intPart[3][1] = ((u32)fp >> 0x10) & 0xFFFF;\n    mu->fracPart[3][1] = fp & 0xFFFF;\n\n    fp = translateZ * 0x10000;\n    mu->intPart[3][2] = ((u32)fp >> 0x10) & 0xFFFF;\n    mu->fracPart[3][2] = fp & 0xFFFF;\n\n    mu->intPart[0][3] = mu->intPart[1][3] = mu->intPart[2][3] = 0;\n    mu->fracPart[0][3] = mu->fracPart[1][3] = mu->fracPart[2][3] = 0;\n    mu->intPart[3][3] = 1;\n    mu->fracPart[3][3] = 0;\n}",
+      "m2cCtx": true,
       "prependC": "typedef unsigned char       u8;     /* unsigned  8-bit */\ntypedef unsigned short      u16;    /* unsigned 16-bit */\ntypedef unsigned long       u32;    /* unsigned 32-bit */\ntypedef unsigned long long  u64;    /* unsigned 64-bit */\ntypedef signed char         s8;     /* signed  8-bit */\ntypedef short               s16;    /* signed 16-bit */\ntypedef long                s32;    /* signed 32-bit */\ntypedef long long           s64;    /* signed 64-bit */\ntypedef float   f32;    /* single prec floating point */\ntypedef double  f64;    /* double prec floating point */\ntypedef struct xyz_t {\n    /* 0x0 */ f32 x;\n    /* 0x4 */ f32 y;\n    /* 0x8 */ f32 z;\n} xyz_t; // size = 0xC\n\ntypedef float MtxF_t[4][4];\ntypedef union {\n    MtxF_t mf;\n    struct {\n        float xx, yx, zx, wx, xy, yy, zy, wy, xz, yz, zz, wz, xw, yw, zw, ww;\n    };\n} MtxF; // size = 0x40\ntypedef long\tMtx_t[4][4];\n\ntypedef union {\n    Mtx_t\t\tm;\n    long long int\tforce_structure_alignment;\n} Mtx;",
       "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/sys_matrix.c#L1448-L1514",
       "proto": {
@@ -442,6 +473,7 @@
         "branch"
       ],
       "funcC": "s32 sAdo_Get_KokeruLabel(s32 type) {\n    u16 label = sAdo_Get_WalkLabel(type);\n    s32 ret;\n\n    switch (label) {\n        case 0x201:\n            ret = 0xe;\n            break;\n\n        case 0x206:\n            ret = 0x13;\n            break;\n\n        case 0x202:\n            ret = 0xf;\n            break;\n\n        case 0x203:\n            ret = 0x10;\n            break;\n\n        case 0x204:\n            ret = 0x11;\n            break;\n\n        case 0x205:\n            ret = 0x12;\n            break;\n\n        case 0x208:\n            ret = 0x156;\n            break;\n\n        case 0x209:\n            ret = 0x157;\n            break;\n\n        default:\n            ret = 15;\n            break;\n    }\n    return ret;\n}",
+      "m2cCtx": true,
       "prependC": "typedef unsigned char       u8;     /* unsigned  8-bit */\ntypedef unsigned short      u16;    /* unsigned 16-bit */\ntypedef unsigned long       u32;    /* unsigned 32-bit */\ntypedef unsigned long long  u64;    /* unsigned 64-bit */\ntypedef signed char         s8;     /* signed  8-bit */\ntypedef short               s16;    /* signed 16-bit */\ntypedef long                s32;    /* signed 32-bit */\ntypedef long long           s64;    /* signed 64-bit */\ntypedef float   f32;    /* single prec floating point */\ntypedef double  f64;    /* double prec floating point */\ntypedef struct xyz_t {\n    /* 0x0 */ f32 x;\n    /* 0x4 */ f32 y;\n    /* 0x8 */ f32 z;\n} xyz_t; // size = 0xC\n\ntypedef float MtxF_t[4][4];\ntypedef union {\n    MtxF_t mf;\n    struct {\n        float xx, yx, zx, wx, xy, yy, zy, wy, xz, yz, zz, wz, xw, yw, zw, ww;\n    };\n} MtxF; // size = 0x40\ntypedef long\tMtx_t[4][4];\n\ntypedef union {\n    Mtx_t\t\tm;\n    long long int\tforce_structure_alignment;\n} Mtx;",
       "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/audio.c#L382-L424"
     },
@@ -454,6 +486,7 @@
         "arithmetic"
       ],
       "funcC": "f32 add_calc_a(f32* pValue, f32 target, f32 fraction, f32 step, f32 minStep) {\n    f32 stepSize = 0.0f;\n    f32 diff = target - *pValue;\n\n    if (target != *pValue) {\n        if (diff > 180.0f) {\n            diff = -(360.0f - diff);\n        } else if (diff < -180.0f) {\n            diff = 360.0f + diff;\n        }\n\n        stepSize = diff * fraction;\n\n        if ((stepSize >= minStep) || (stepSize <= -minStep)) {\n            if (step < stepSize) {\n                stepSize = step;\n            } else if (stepSize < -step) {\n                stepSize = -step;\n            }\n\n            *pValue += stepSize;\n\n            if (stepSize > 0.0f) {\n                if (target < *pValue) {\n                    *pValue = target;\n                }\n            } else if (*pValue < target) {\n                *pValue = target;\n            }\n        } else {\n            if (stepSize > 0.0f) {\n                stepSize = minStep;\n                *pValue += stepSize;\n                if (target < *pValue) {\n                    *pValue = target;\n                }\n            } else {\n                stepSize = -minStep;\n                *pValue += -minStep;\n                if (*pValue < target) {\n                    *pValue = target;\n                }\n            }\n        }\n    }\n    if (*pValue >= 360.0f) {\n        *pValue -= 360.0f;\n    }\n    if (*pValue < 0.0f) {\n        *pValue += 360.0f;\n    }\n    return stepSize;\n}",
+      "m2cCtx": true,
       "prependC": "typedef unsigned char       u8;     /* unsigned  8-bit */\ntypedef unsigned short      u16;    /* unsigned 16-bit */\ntypedef unsigned long       u32;    /* unsigned 32-bit */\ntypedef unsigned long long  u64;    /* unsigned 64-bit */\ntypedef signed char         s8;     /* signed  8-bit */\ntypedef short               s16;    /* signed 16-bit */\ntypedef long                s32;    /* signed 32-bit */\ntypedef long long           s64;    /* signed 64-bit */\ntypedef float   f32;    /* single prec floating point */\ntypedef double  f64;    /* double prec floating point */\ntypedef struct xyz_t {\n    /* 0x0 */ f32 x;\n    /* 0x4 */ f32 y;\n    /* 0x8 */ f32 z;\n} xyz_t; // size = 0xC\n\ntypedef float MtxF_t[4][4];\ntypedef union {\n    MtxF_t mf;\n    struct {\n        float xx, yx, zx, wx, xy, yy, zy, wy, xz, yz, zz, wz, xw, yw, zw, ww;\n    };\n} MtxF; // size = 0x40\ntypedef long\tMtx_t[4][4];\n\ntypedef union {\n    Mtx_t\t\tm;\n    long long int\tforce_structure_alignment;\n} Mtx;",
       "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L437-L489"
     },
@@ -465,6 +498,7 @@
         "arithmetic"
       ],
       "funcC": "f32 get_percent_forAccelBrake(f32 x, f32 min, f32 max, f32 accelRange, f32 brakeRange) {\n    f32 percent;\n    f32 range;\n    f32 cur;\n    f32 scale;\n\n    if (x >= max) {\n        return 1.0f;\n    }\n    if (x <= min) {\n        return 0.0f;\n    }\n\n    cur = x - min;\n    range = max - min;\n\n    if (range < accelRange + brakeRange) {\n        return 0.0f;\n    }\n\n    scale = 1.0f / (2.0f * range - accelRange - brakeRange);\n\n    if (accelRange != 0.0f) {\n        if (cur <= accelRange) {\n            percent = scale * cur * cur;\n            percent /= accelRange;\n            return percent;\n        } else {\n            percent = scale * accelRange;\n        }\n    } else {\n        percent = 0.0f;\n    }\n\n    if (cur <= range - brakeRange) {\n        percent += (scale * 2.0f) * (cur - accelRange);\n        return percent;\n    }\n\n    percent += 2.0f * scale * (range - accelRange - brakeRange);\n\n    if (brakeRange != 0.0f) {\n        percent += scale * brakeRange;\n        if (cur < range) {\n            f32 left = range - cur;\n\n            percent -= scale * left * left / brakeRange;\n        }\n    }\n    return percent;\n}",
+      "m2cCtx": true,
       "prependC": "typedef unsigned char       u8;     /* unsigned  8-bit */\ntypedef unsigned short      u16;    /* unsigned 16-bit */\ntypedef unsigned long       u32;    /* unsigned 32-bit */\ntypedef unsigned long long  u64;    /* unsigned 64-bit */\ntypedef signed char         s8;     /* signed  8-bit */\ntypedef short               s16;    /* signed 16-bit */\ntypedef long                s32;    /* signed 32-bit */\ntypedef long long           s64;    /* signed 64-bit */\ntypedef float   f32;    /* single prec floating point */\ntypedef double  f64;    /* double prec floating point */\ntypedef struct xyz_t {\n    /* 0x0 */ f32 x;\n    /* 0x4 */ f32 y;\n    /* 0x8 */ f32 z;\n} xyz_t; // size = 0xC\n\ntypedef float MtxF_t[4][4];\ntypedef union {\n    MtxF_t mf;\n    struct {\n        float xx, yx, zx, wx, xy, yy, zy, wy, xz, yz, zz, wz, xw, yw, zw, ww;\n    };\n} MtxF; // size = 0x40\ntypedef long\tMtx_t[4][4];\n\ntypedef union {\n    Mtx_t\t\tm;\n    long long int\tforce_structure_alignment;\n} Mtx;",
       "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_lib.c#L673-L723"
     },
@@ -476,6 +510,7 @@
         "arithmetic"
       ],
       "funcC": "void Skin_Matrix_SetQuaternion(MtxF* mf, f32* q) {\n    f32 n;\n    f32 xNorm;\n    f32 yNorm;\n    f32 zNorm;\n    f32 wxNorm;\n    f32 wyNorm;\n    f32 wzNorm;\n    f32 xxNorm;\n    f32 xyNorm;\n    f32 xzNorm;\n    f32 yyNorm;\n    f32 yzNorm;\n    f32 zzNorm;\n\n    n = 2.0f / ((q[3] * q[3]) + ((q[2] * q[2]) + ((q[1] * q[1]) + (q[0] * q[0]))));\n    xNorm = q[0] * n;\n    yNorm = q[1] * n;\n    zNorm = q[2] * n;\n\n    wxNorm = q[3] * xNorm;\n    wyNorm = q[3] * yNorm;\n    wzNorm = q[3] * zNorm;\n    xxNorm = q[0] * xNorm;\n    xyNorm = q[0] * yNorm;\n    xzNorm = q[0] * zNorm;\n    yyNorm = q[1] * yNorm;\n    yzNorm = q[1] * zNorm;\n    zzNorm = q[2] * zNorm;\n\n    mf->xx = (1.0f - (yyNorm + zzNorm));\n    mf->yx = (xyNorm + wzNorm);\n    mf->zx = (xzNorm - wyNorm);\n    mf->wx = 0.0f;\n    mf->xy = (xyNorm - wzNorm);\n    mf->yy = (1.0f - (xxNorm + zzNorm));\n    mf->zy = (yzNorm + wxNorm);\n    mf->wy = 0.0f;\n    mf->xz = (yzNorm + wyNorm);\n    mf->yz = (yzNorm - wxNorm);\n    mf->zz = (1.0f - (xxNorm + yyNorm));\n    mf->wz = 0.0f;\n    mf->xw = 0.0f;\n    mf->yw = 0.0f;\n    mf->ww = 1.0f;\n    mf->zw = 0.0f;\n}",
+      "m2cCtx": true,
       "prependC": "typedef unsigned char       u8;     /* unsigned  8-bit */\ntypedef unsigned short      u16;    /* unsigned 16-bit */\ntypedef unsigned long       u32;    /* unsigned 32-bit */\ntypedef unsigned long long  u64;    /* unsigned 64-bit */\ntypedef signed char         s8;     /* signed  8-bit */\ntypedef short               s16;    /* signed 16-bit */\ntypedef long                s32;    /* signed 32-bit */\ntypedef long long           s64;    /* signed 64-bit */\ntypedef float   f32;    /* single prec floating point */\ntypedef double  f64;    /* double prec floating point */\ntypedef struct xyz_t {\n    /* 0x0 */ f32 x;\n    /* 0x4 */ f32 y;\n    /* 0x8 */ f32 z;\n} xyz_t; // size = 0xC\n\ntypedef float MtxF_t[4][4];\ntypedef union {\n    MtxF_t mf;\n    struct {\n        float xx, yx, zx, wx, xy, yy, zy, wy, xz, yz, zz, wz, xw, yw, zw, ww;\n    };\n} MtxF; // size = 0x40\ntypedef long\tMtx_t[4][4];\n\ntypedef union {\n    Mtx_t\t\tm;\n    long long int\tforce_structure_alignment;\n} Mtx;",
       "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/m_skin_matrix.c#L581-L627",
       "proto": {
@@ -491,6 +526,7 @@
         "branch"
       ],
       "funcC": "s16 atans_table(f32 x, f32 y) {\n    s32 tbl;\n\n    if (y >= 0.0f) {\n        if (x >= 0.0f) {\n            if (y <= x) {\n                if (y != 0.0f) {\n                    tbl = U_GetAtanTable(y, x);\n                } else {\n                    tbl = 0;\n                }\n            } else {\n                tbl = 0x4000 - U_GetAtanTable(x, y);\n            }\n        } else {\n            if (-x < y) {\n                tbl = U_GetAtanTable(-x, y) + 0x4000;\n            } else {\n                tbl = 0x8000 - U_GetAtanTable(y, -x);\n            }\n        }\n    } else if (x < 0.0f) {\n        if (-y <= -x) {\n            tbl = U_GetAtanTable(-y, -x) + 0x8000;\n        } else {\n            tbl = 0xC000 - U_GetAtanTable(-x, -y);\n        }\n    } else {\n        if (x < -y) {\n            tbl = U_GetAtanTable(x, -y) + 0xC000;\n        } else {\n            tbl = -U_GetAtanTable(-y, x);\n        }\n    }\n    return tbl;\n}",
+      "m2cCtx": true,
       "prependC": "typedef unsigned char       u8;     /* unsigned  8-bit */\ntypedef unsigned short      u16;    /* unsigned 16-bit */\ntypedef unsigned long       u32;    /* unsigned 32-bit */\ntypedef unsigned long long  u64;    /* unsigned 64-bit */\ntypedef signed char         s8;     /* signed  8-bit */\ntypedef short               s16;    /* signed 16-bit */\ntypedef long                s32;    /* signed 32-bit */\ntypedef long long           s64;    /* signed 64-bit */\ntypedef float   f32;    /* single prec floating point */\ntypedef double  f64;    /* double prec floating point */\ntypedef struct xyz_t {\n    /* 0x0 */ f32 x;\n    /* 0x4 */ f32 y;\n    /* 0x8 */ f32 z;\n} xyz_t; // size = 0xC\n\ntypedef float MtxF_t[4][4];\ntypedef union {\n    MtxF_t mf;\n    struct {\n        float xx, yx, zx, wx, xy, yy, zy, wy, xz, yz, zz, wz, xw, yw, zw, ww;\n    };\n} MtxF; // size = 0x40\ntypedef long\tMtx_t[4][4];\n\ntypedef union {\n    Mtx_t\t\tm;\n    long long int\tforce_structure_alignment;\n} Mtx;",
       "sourceUrl": "https://github.com/macabeus/af/blob/ff5f68aacc7aab10d5b281277447f1b805c0a5a2/src/code/sys_math_atan.c#L101-L136"
     },
@@ -503,6 +539,7 @@
       "note": "Fourteen scattered labels through one IDO jump table. asmlift lowers the dispatch with the offset the target has ALREADY scaled, so the recovered switch indexes the table twice over.",
       "prependC": "typedef long s32;",
       "funcC": "s32 mPl_SceneNo2SoundRoomType(s32 arg0) {\n    switch (arg0) {\n        case 20:\n            return 1;\n        case 6:\n        case 9:\n        case 12:\n        case 14:\n        case 18:\n        case 21:\n        case 31:\n            return 2;\n        case 17:\n        case 22:\n        case 23:\n        case 24:\n        case 25:\n        case 29:\n            return 3;\n        default:\n            return 0;\n    }\n}",
+      "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/af/blob/4515c15b5848b1ec85e78cb3776e12990cafe004/src/overlays/gamestates/ovl_play/m_play.c#L832-L854",
       "proto": {
         "mPl_SceneNo2SoundRoomType": {
