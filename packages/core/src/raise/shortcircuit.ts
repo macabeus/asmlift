@@ -265,10 +265,12 @@ export function recognizeShortCircuit(fn: Fn): boolean {
 //     not a hand-written `||`. switch-recover.ts requires every test's `cond_br` operand to be an
 //     `icmp` (its `isCmpOpcode` gate), and a `logic_or` is not one, so folding first PERMANENTLY
 //     disqualifies the recovery and a clean `switch (x) { case 1: case 2: … }` degrades to a chain
-//     of nested `if`s. The switch is the better recovery and it is the more specific one, so it
-//     wins the shape. Cost: a genuine source-level `x == 1 || x == 2` that is NOT part of a wider
-//     tree also declines — the same conservative trade loops.ts makes when it refuses to infer a
-//     header from `cond_br` shape.
+//     of nested `if`s. The two spellings are mutually exclusive within one raise and BOTH are
+//     legitimate C — `x == 0 || x == 2` and `switch (x) { case 0: case 2: }` compile to the same
+//     shape, and the asm does not say which was written. So this is a DEFAULT rather than a
+//     decision: the switch is the more specific recovery and wins the shape here, while
+//     `foldTreeOwned` spells the connective instead and the differ referees (rank.ts's
+//     `/connective`). Both clauses below move together — they are two tests of one policy.
 //   - the shared block was reached through a RELAY, and either test's scrutinee is compared against
 //     constants more than once in the function. Same reason as the bullet above, widened because the
 //     reach is: a relay is what agbcc puts on a tree's default edge, so resolving one walks this
@@ -336,7 +338,20 @@ export function recognizeShortCircuit(fn: Fn): boolean {
 // that has no dual candidate (synthetic:ifand_near:agbcc).
 //
 // Every refusal falls through untouched — a miss, never a miscompile.
-export function recognizeBranchShortCircuit(fn: Fn): boolean {
+/** Per-call options for `recognizeBranchShortCircuit` — the tree-ownership refusal's two ends. */
+export interface BranchShortCircuitOptions {
+  /** Take the fold at a site the comparison-tree refusal owns, spelling the connective where the
+   *  default leaves the tree for switch-recover.ts. rank.ts's `/connective` axis; see the REFUSALS
+   *  note. It widens the SHAPE the fold accepts and nothing about what the fold may move — every
+   *  other refusal still applies. */
+  foldTreeOwned?: boolean;
+  /** Called at each site the tree-ownership refusal is reached, whatever `foldTreeOwned` says —
+   *  how rank.ts learns the axis has an inhabitant here without re-running the matcher. The pass
+   *  re-scans after every rewrite, so one site can report more than once; read it as a boolean. */
+  onTreeOwned?: () => void;
+}
+
+export function recognizeBranchShortCircuit(fn: Fn, opts: BranchShortCircuitOptions = {}): boolean {
   let changed = false;
   const term = (b: Block) => b.ops[b.ops.length - 1];
   let progress = true;
@@ -407,12 +422,14 @@ export function recognizeBranchShortCircuit(fn: Fn): boolean {
         // searched function-wide; a direct edge keeps the pairwise test. See the REFUSALS note —
         // the wider test is blunt, and that is why it is not asked everywhere.
         const throughRelay = sharedEdge.block !== sharedFromH.block;
-        if (
-          throughRelay
-            ? inComparisonTree(fn, defs, ht.operands[0]) || inComparisonTree(fn, defs, gt.operands[0])
-            : sameScrutineeConstTests(defs, ht.operands[0], gt.operands[0])
-        ) {
-          continue;
+        const treeOwned = throughRelay
+          ? inComparisonTree(fn, defs, ht.operands[0]) || inComparisonTree(fn, defs, gt.operands[0])
+          : sameScrutineeConstTests(defs, ht.operands[0], gt.operands[0]);
+        if (treeOwned) {
+          opts.onTreeOwned?.();
+          if (!opts.foldTreeOwned) {
+            continue;
+          }
         }
         const otherEdge = sharedEdge === gTaken ? gFall : gTaken;
         if (!sameArgs(sharedFromH.args, sharedEdge.args)) {

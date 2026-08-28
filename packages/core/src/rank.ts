@@ -758,10 +758,23 @@ export function enumerateCandidates(
   // so they are excluded from the signedness axis (see NO_PIN_KINDS). One extra lift+recover, no
   // compile. (The probe deliberately stops after recoverTypes — it only reads the param KINDS, so
   // the totality contract / return-sinking of the full spine are not run on it.)
+  //
+  // It also carries `/connective`'s enumeration gate, read off the pass's OWN refusal rather than
+  // from a second copy of its matcher: the fold reports every site the comparison-tree refusal
+  // owns, and a function with none has no inhabitant for the axis. Answered on the probe, i.e.
+  // once per function — the refusal is a CFG-shape fact, and neither the signedness pin (a type)
+  // nor the symbol map (names) nor `/setup-args` (a call's argument list) moves a `cond_br`.
   const probe = frontend.lift(name, asm, target, prototypes, opts.asmData, opts.symbols);
   verify(probe);
   applyIdiomPatterns(probe, target, opts.patterns);
-  runPreRecovery(probe, target, () => verify(probe), prototypes[name]);
+  let treeOwnedFold = false;
+  runPreRecovery(probe, target, () => verify(probe), prototypes[name], {
+    shortCircuit: {
+      onTreeOwned: () => {
+        treeOwnedFold = true;
+      },
+    },
+  });
   recoverTypes(probe);
   const ptrIdx = new Set<number>(probe.blocks[0].params.flatMap((p, i) => (NO_PIN_KINDS.has(p.type.kind) ? [i] : [])));
   // Access facts for name-only symbol declarations (see bareGlobalAccessFacts) — derived once
@@ -1365,16 +1378,37 @@ export function enumerateCandidates(
       // adds 1201 distinct candidates to 3862, all of them in the 13 rows whose narrowing changes
       // anything downstream — measured before those six kleod rows declared their callee arities,
       // and declaring one takes its row out of this population.
-      const liftVariants: { suffix: string; narrow: boolean }[] = hasSetupArgsNarrowing(base)
+      //
+      // `/connective` — spell a same-scrutinee const-test chain as `x == 0 || x == 2` rather than
+      // leaving it to switch recovery as `switch (x) { case 0: case 2: }`. Both are legitimate C
+      // for one asm shape and they are mutually exclusive within one raise (raise/shortcircuit.ts's
+      // REFUSALS note has the mechanism: a folded `logic_or` is not the `icmp` switch-recover.ts
+      // requires), so no predicate settles it — the differ does. Enumerated only where the probe
+      // saw the refusal, which is 6 of the benchmark's 923 rows.
+      //
+      // It rides the LIFT variants because the raise mutates in place: a second raise policy needs
+      // its own copy of the lifted fn, exactly as `/setup-args` needs one to narrow. Crossed with
+      // `/setup-args` rather than nested under it — dropping a call argument and choosing this
+      // shape are independent, and the four combinations dedup down to whatever the trees differ on.
+      const connectiveVariants = treeOwnedFold
         ? [
-            { suffix: '', narrow: false },
-            { suffix: '/setup-args', narrow: true },
+            { suffix: '', connective: false },
+            { suffix: '/connective', connective: true },
           ]
-        : [{ suffix: '', narrow: false }];
+        : [{ suffix: '', connective: false }];
+      const liftVariants: { suffix: string; narrow: boolean; connective: boolean }[] = (
+        hasSetupArgsNarrowing(base)
+          ? [
+              { suffix: '', narrow: false },
+              { suffix: '/setup-args', narrow: true },
+            ]
+          : [{ suffix: '', narrow: false }]
+      ).flatMap((l) => connectiveVariants.map((c) => ({ ...l, ...c, suffix: `${l.suffix}${c.suffix}` })));
       for (const lv of liftVariants) {
         let fn: Fn;
         try {
-          fn = lv.narrow ? frontend.lift(name, asm, target, prototypes, opts.asmData, sv.symbols) : base;
+          fn =
+            lv.narrow || lv.connective ? frontend.lift(name, asm, target, prototypes, opts.asmData, sv.symbols) : base;
           if (lv.narrow && !narrowToSetupArgs(fn)) {
             continue; // nothing to cut after all — the base lift's own candidates already cover it
           }
@@ -1392,13 +1426,14 @@ export function enumerateCandidates(
               },
             },
             prototypes[name],
+            { shortCircuit: { foldTreeOwned: lv.connective } },
           );
         } catch (e) {
-          if (!lv.narrow) {
+          if (!lv.narrow && !lv.connective) {
             throw e; // the base lift keeps its behavior: a raising failure aborts the row
           }
           // A dropped lever, never an aborted enumeration — the same posture as `respell`.
-          opts.onLeverError?.(`${name}/setup-args`, e instanceof Error ? e.message.split('\n')[0] : String(e));
+          opts.onLeverError?.(name + lv.suffix, e instanceof Error ? e.message.split('\n')[0] : String(e));
           continue;
         }
         // the per-variant axis gates, on THIS variant's lifted fn — see the table doc
@@ -1436,7 +1471,14 @@ export function enumerateCandidates(
               ...STRUCTURING_AXES.reduce((acc, ax) => ({ ...acc, ...ax.options(s[ax.flag]) }), {}),
             });
           } catch (e) {
-            if (!lv.narrow && !s.anchor && !s.join && s.bitfields && STRUCTURING_AXES.every((ax) => !s[ax.flag])) {
+            if (
+              !lv.narrow &&
+              !lv.connective &&
+              !s.anchor &&
+              !s.join &&
+              s.bitfields &&
+              STRUCTURING_AXES.every((ax) => !s[ax.flag])
+            ) {
               throw e; // the base lift's base axes keep their behavior: a failure aborts the row
             }
             // Recorded for EVERY dropped variant: a candidate with more axes on looks its siblings
