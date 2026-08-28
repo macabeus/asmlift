@@ -609,3 +609,58 @@ test('the same tree recovers whole when nothing homes in the test block', () => 
   expect(armOrder(out)).toEqual([5, 1, 2]);
   expect(count(out, 'a1 << 2')).toBe(2);
 });
+
+// TWO VALUES, ONE BODY. agbcc routes `case 0` and `case 2` to the same block whenever the source
+// stacked their labels (or wrote the `||`), and it does NOT re-merge two written-out copies:
+// `case 0: A break; case 2: A break;` compiles to 89 instructions and a different object than
+// `case 0: case 2: A break;`, which compiles byte-identically to `if (x == 0 || x == 2) A`.
+// So emitting the body once per label is a duplication, not a spelling — see switch-recover.ts.
+const shared02 =
+  'f:\n\tmov\tr2, #0x0\n' +
+  '\tcmp\tr0, #0x1\n\tbeq\t.Lc1\t@cond_branch\n' +
+  '\tcmp\tr0, #0x1\n\tbgt\t.Lhi\t@cond_branch\n' +
+  '\tcmp\tr0, #0\n\tbeq\t.Lc0\t@cond_branch\n' +
+  '\tb\t.Ldef\n' +
+  '.Lhi:\n\tcmp\tr0, #0x2\n\tbeq\t.Lc0\t@cond_branch\n' + // case 2 lands on case 0's body
+  '\tcmp\tr0, #0x3\n\tbeq\t.Lc3\t@cond_branch\n' +
+  '\tb\t.Ldef\n' +
+  '.Lc0:\n\tadd\tr2, r1, #0x1\n\tb\t.Lend\n' +
+  '.Lc1:\n\tadd\tr2, r1, #0x2\n\tb\t.Lend\n' +
+  '.Lc3:\n\tadd\tr2, r1, #0x4\n\tb\t.Lend\n' +
+  '.Ldef:\n\tmov\tr2, #0x63\n\tb\t.Lend\n' +
+  '.Lend:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr2, [r0]\n\tbx\tlr\n';
+
+test('two case values reaching one body are ONE arm with stacked labels', () => {
+  const out = of(shared02);
+  expect(out).toContain('switch (a0)');
+  expect(armOrder(out)).toEqual([0, 2, 1, 3]); // 0 and 2 adjacent — one arm, two labels
+  expect(count(out, 'a1 + 1')).toBe(1); // the body is emitted ONCE, not once per label
+  expect(out).toMatch(/case 0:\s*\n\s*case 2:/);
+});
+
+// The same tree with the `default:` arm laid out BETWEEN two case bodies — where the arm-array
+// index `defaultLayoutPos` returns is observable. The index and the array it indexes have to be
+// the SAME list: counting the ungrouped entries (which hold `.Lc0` twice) against the grouped arm
+// array puts the label one arm too late, and this is the fixture that says so — it passed before
+// the grouping and passes after, and fails if the two lists are paired wrong.
+const shared02MidDefault =
+  'f:\n\tmov\tr2, #0x0\n' +
+  '\tcmp\tr0, #0x1\n\tbeq\t.Lc1\t@cond_branch\n' +
+  '\tcmp\tr0, #0x1\n\tbgt\t.Lhi\t@cond_branch\n' +
+  '\tcmp\tr0, #0\n\tbeq\t.Lc0\t@cond_branch\n' +
+  '\tb\t.Ldef\n' +
+  '.Lhi:\n\tcmp\tr0, #0x2\n\tbeq\t.Lc0\t@cond_branch\n' +
+  '\tcmp\tr0, #0x3\n\tbeq\t.Lc3\t@cond_branch\n' +
+  '\tb\t.Ldef\n' +
+  '.Lc0:\n\tadd\tr2, r1, #0x1\n\tb\t.Lend\n' +
+  '.Lc1:\n\tadd\tr2, r1, #0x2\n\tb\t.Lend\n' +
+  '.Ldef:\n\tmov\tr2, #0x63\n\tb\t.Lend\n' +
+  '.Lc3:\n\tadd\tr2, r1, #0x4\n\tb\t.Lend\n' +
+  '.Lend:\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n\tstr\tr2, [r0]\n\tbx\tlr\n';
+
+test('…and `default:` still lands where the LAYOUT puts it, counted in arms', () => {
+  const out = of(shared02MidDefault);
+  expect(armOrder(out)).toEqual([0, 2, 1, 3]);
+  expect(out.indexOf('default:')).toBeGreaterThan(out.indexOf('case 1:'));
+  expect(out.indexOf('default:')).toBeLessThan(out.indexOf('case 3:'));
+});

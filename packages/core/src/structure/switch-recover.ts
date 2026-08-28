@@ -604,18 +604,41 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
     // the bodies is the SOURCE's arm order instead.
     //
     // TWO arms the layout cannot order, both falling back rather than recovering:
-    //   - two case VALUES sharing one body block share its index. jump.c's CROSS-JUMP is what
-    //     produces that on agbcc (stacked labels are not: `case 2: case 3:` compiles to a range test
-    //     the walk reads as navigation and declines), so the tie is one the MERGE erased, and
-    //     ascending value breaks it;
+    //   - two case VALUES sharing one body block share its index, so the tie is one the merge (or
+    //     the source's own stacked labels) erased, and ascending value breaks it. They become ONE
+    //     arm below, so the tie only orders that arm against the others. ADJACENT stacked labels
+    //     never get here: `case 2: case 3:` compiles to a range test the walk reads as navigation
+    //     and declines, while `case 0: case 2:` compiles to the two equality tests it recovers —
+    //     both checked against agbcc;
     //   - an arm with no body of its own (`case k: break;`) has its edge resolve to the MERGE, so it
     //     inherits the merge's index and sorts after every arm that HAS a body.
     const scrutExpr = expr(scrut);
     const sortedCases = [...cases.entries()].sort((a, c) =>
       switchArmsFollowLayout ? layoutIndex(a[1]) - layoutIndex(c[1]) || a[0] - c[0] : a[0] - c[0],
     );
-    const outCases: SwitchCase[] = sortedCases.map(([k, blk]) => ({
-      values: [k],
+    // TWO VALUES ONE BODY IS ONE ARM. `SwitchCase.values` stacks labels for exactly this, and the
+    // jump-table regime has always grouped (structure.ts's `armOf`); this regime emitted the SAME
+    // body once per label instead — `structureRegion` run twice on one block — which is a
+    // duplication the IR never asked for, not a spelling choice. agbcc says so directly: the
+    // grouped arm and the `x == 0 || x == 2` the connective fold would spell compile to a
+    // BYTE-IDENTICAL object (68 instructions), while two copies of the body compile to 89 and a
+    // different object, so it is the DUPLICATE that is the unwarranted third spelling. Sound
+    // because a case entry with a phi already declined above (`asLeafOrTest`), so two edges onto
+    // one body bind nothing that could differ. Grouping preserves the sort: an arm takes the
+    // position of its FIRST value, which is the position the old array gave that value's copy.
+    // `defaultLayoutPos` is handed the GROUPED entry list for the same reason: what it returns is
+    // an INDEX INTO the arm array, so the list it counts and the list it indexes must be one list.
+    const armsByBlock = new Map<Block, number[]>();
+    for (const [k, blk] of sortedCases) {
+      const prev = armsByBlock.get(blk);
+      if (prev) {
+        prev.push(k);
+      } else {
+        armsByBlock.set(blk, [k]);
+      }
+    }
+    const outCases: SwitchCase[] = [...armsByBlock.entries()].map(([blk, values]) => ({
+      values,
       body: structureRegion(blk, merge),
       fallsThrough: false,
     }));
@@ -635,11 +658,7 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
         return succ.length > 1 && succ[1].block === blk;
       }) && dispatchTargets.filter((e) => e === blk).length < 2;
     const defaultAt = defaultBlk
-      ? defaultLayoutPos(
-          defaultBlk,
-          sortedCases.map(([, blk]) => blk),
-          ranOutInto(defaultBlk),
-        )
+      ? defaultLayoutPos(defaultBlk, [...armsByBlock.keys()], ranOutInto(defaultBlk))
       : undefined;
     const sw: Stmt = {
       k: 'switch',
