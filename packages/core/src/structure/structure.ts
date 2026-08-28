@@ -1755,7 +1755,12 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         // but only one whose name survives the C3 interference check (else the edge copies into
         // the name would clobber a still-live value).
         let name: string | undefined;
-        /** Set when the ONE reason this merge went unnamed is `freshParamMerge`'s refusal. */
+        /** Set when a param carrier reached `freshParamMerge`'s clause and was refused there AND no
+         *  carrier was adopted afterwards. NOT "the one reason this merge went unnamed": carriers
+         *  the loop rejects earlier (`carriesPreUpdate` / `canTakeName`) `continue` without
+         *  recording, so a merge can carry this flag and also have had an unrelated refusal. The
+         *  consequence is reach-only — an over-marked entry makes one downstream merge take an
+         *  extra fresh home, a spelling the differ referees, never a wrong answer. */
         let refusedParamCarrier = false;
         for (const c of [
           ...incoming.filter((c) => varName.has(c.v)),
@@ -1774,16 +1779,42 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
           // absent it nothing changes.
           //
           // REFUSAL CONDITIONS — outside these the carrier is adopted exactly as before:
-          //   - the carrier must be an ENTRY param, or a merge home this rule itself minted. Both
-          //     are homes the compiler was not free to place — the ABI pinned one at entry, and the
-          //     other is already carrying a conditional overwrite — so a second merge that took
-          //     either would chain the two values into one register. A local that merely CARRIES a
-          //     parameter's name (a loop header that adopted it under coalesceLoopInit) is neither:
-          //     the register was already re-homed there, so refusing again would only add a copy;
+          //   - the carrier must be an ENTRY param, or a merge home this rule itself minted. THE
+          //     PREMISE IS THE ABI PIN, and only that: a parameter's home is the register the ABI
+          //     handed it, and a home minted BECAUSE of that pin inherits it — the value it carries
+          //     is the parameter's, one copy along. Clause 2 is the transitive closure of clause 1.
+          //
+          //     It is NOT "a carrier already holding a conditional overwrite would chain two values
+          //     through one register". That reason is equally true of an ORDINARY merge home, which
+          //     this rule deliberately leaves alone (`fresh-merge.test.ts`: 'a merge over ordinary
+          //     locals is untouched'), so stating it would make the implementation read as narrower
+          //     than its own reason. The chain-rooted widening is a DIFFERENT axis and unmeasured:
+          //     293 of 721 map-less corpus rows carry ≥1 conditional merge slot (925 slots) and the
+          //     param rooting admits 109 of those 293. `LoadBGTilemapData` is one of the other 184
+          //     — 37 conditional merge slots, none rooted in either of its 2 entry parameters — so
+          //     the axis having no reach there is a fact about THE ROOTING, not about the function;
           //   - a REDUNDANT phi (every edge passes the same value) is refused nothing. It overwrites
           //     the parameter on no path, so a fresh name buys a copy and changes no placement;
           //   - a LOOP HEADER param is never seen here — `seedLoopParams` named it already, and
           //     under `coalesceLoopInit` it deliberately keeps the parameter's own register.
+          //
+          // NO TYPE GUARD IS NEEDED HERE, and the reason is `canTakeName` two lines up, not this
+          // rule: it refuses any carrier whose declared width differs from the merge's, and any
+          // sub-32 signedness disagreement. So the two spellings this axis offers always declare
+          // the value at the same width — a narrow carrier is never adopted by a wider merge under
+          // EITHER setting, which is what would have made them two programs rather than two
+          // spellings (#106's class). Instrumenting the refusal over every row's full axis cross
+          // gives 5232 firings, 2064 with differing declared types and every one of those u32
+          // against s32 at width 32 — the `/unsigned` axis's own refereed question, which stores
+          // the same bits. `fresh-merge.test.ts` pins the narrow-carrier case rather than leaving
+          // it to this paragraph.
+          //
+          // Carrier eligibility is asked a SECOND time, of a different question, by
+          // `namecoalesce.ts`'s `param` gate ('a function parameter is the signature the source
+          // wrote, not a recovered local'). The two are not one predicate: that one refuses merging
+          // two already-settled NAME CLASSES and is on by default within `/merge-names`; this one
+          // refuses one carrier at one merge SLOT, is off by default, and closes over its own
+          // homes. Kept separate deliberately — see the mirror note there.
           if (freshParamMerge && !allSame && (entryParams.has(c.v) || paramSeededMerges.has(c.v))) {
             refusedParamCarrier = true;
             continue;

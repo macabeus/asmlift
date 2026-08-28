@@ -151,3 +151,42 @@ test('…and a function whose only merge carries the SAME parameter on every edg
   const all = enumerateCandidates('f', ALIAS_ASM, ARMV4T_AGBCC, {});
   expect(all.some((c) => c.label.includes('/fresh-merge'))).toBe(false);
 });
+
+// ── a NARROWER carrier is never adopted, under either setting ─────────────────────────────────
+// Adoption declares the merged value with the CARRIER's type and refusal with the merge's own, so a
+// carrier narrower than the merge would make this axis two PROGRAMS — every assignment truncates on
+// one side — rather than two spellings, and `scoreObjects` has no standing to referee that. It
+// cannot happen, and the guard is `canTakeName`'s carrier width/sign check running on the same
+// carrier one step earlier, NOT anything in this rule: the merge takes a fresh home either way.
+// Pinned here because the rule's header used to rest this on an incidental fact — every corpus row
+// that could reach it is a loop header `seedLoopParams` names first — instead of on the guard.
+const NARROWCARRIER = `fn narrowcarrier {
+^bb0(%0: u8, %1: s32*):
+  %2: s32 = load %1 {off=0, width=4, signed=true}
+  %3: s32 = const {value=0}
+  %4: u32 = icmp_eq %2, %3
+  cond_br %4, ^bb2(%0), ^bb1()
+^bb1():
+  %5: u16 = const {value=7}
+  br ^bb2(%5)
+^bb2(%6: u16):
+  %7: s32 = zext %6 {width=2}
+  ret %7
+}
+`;
+
+test('a merge WIDER than its parameter carrier takes a fresh home under BOTH settings', () => {
+  const off = emit(NARROWCARRIER, false);
+  expect(emit(NARROWCARRIER, true)).toBe(off);
+  expect(off).toMatch(/u16 v0;/);
+  expect(off).not.toMatch(/a0 = /);
+});
+
+// …and the guard does not swallow the whole axis: at EQUAL width the carrier is adopted by default
+// and re-homed under the rule, which is the case the corpus actually inhabits.
+const WIDECARRIER = NARROWCARRIER.replace('%0: u8', '%0: u16');
+
+test('…while an equal-width carrier is adopted by default and re-homed by the rule', () => {
+  expect(emit(WIDECARRIER, false)).toMatch(/a0 = 7;/);
+  expect(emit(WIDECARRIER, true)).toMatch(/v0 = a0;/);
+});
