@@ -720,8 +720,7 @@ export interface FreshMergeCarrier {
  *  `LoadBGTilemapData` is one of the other 184, which is why the axis has no reach there.
  *
  *  The rooting is over carrier VALUES, and two shapes carry a parameter's value past it under
- *  another name. Both are reach-only — a spelling the differ referees, never a wrong answer — and
- *  both are measured, not argued: a redundant phi keeps the parameter's own name (`redundant-phi`)
+ *  another name, both reach-only: a redundant phi keeps the parameter's own name (`redundant-phi`)
  *  and its result is then an ordinary carrier, which fires on 0 of 721 lifted corpus rows; and the
  *  minted-home set records only merges that ended up FRESH, so a merge that refuses a parameter and
  *  then adopts an ordinary local is not recorded — 336 firings over 6 rows. */
@@ -735,7 +734,7 @@ export const FRESH_MERGE_GATES: readonly Gate<FreshMergeCarrier>[] = [
   },
   {
     id: 'param-rooted',
-    why: "only a parameter's register, or a home minted because of one, carries placement evidence",
+    why: "the rule's scope — a chain rooted in an ordinary merge home is a separate, unmeasured axis",
     sound: false,
     guardedBy: 'fresh-merge.test.ts: a merge over ordinary locals is untouched',
     rejects: (c) => !c.paramRooted,
@@ -743,9 +742,9 @@ export const FRESH_MERGE_GATES: readonly Gate<FreshMergeCarrier>[] = [
 ];
 
 /** Whether any merge slot could reach `FRESH_MERGE_GATES` at all: an in-edge argument list that
- *  differs and includes an entry parameter. `rank.ts` gates enumeration of `/fresh-merge` on it, so
- *  it lives beside the rule rather than restated next to the axis. An OVER-approximation, which is
- *  the safe direction for a gate that only decides whether to enumerate: the walk can still refuse
+ *  differs and includes an entry parameter — what `rank.ts` gates enumeration of `/fresh-merge` on.
+ *  An OVER-approximation, which is the safe direction for a gate that only decides whether to
+ *  enumerate: the walk can still refuse
  *  the carrier (`carriesPreUpdate`, `canTakeName`), and a slot whose carrier is a home this rule
  *  mints is not visible here at all. */
 export function hasParamRootedMerge(fn: Fn): boolean {
@@ -914,9 +913,8 @@ export interface StructureOptions {
   // function. Over the whole benchmark the axis wins one row by 3 points and loses none, which is
   // what a differ-refereed spelling looks like.
   coalesceMergeNames?: boolean;
-  // Give a merge that conditionally overwrites a FUNCTION PARAMETER its own local, instead of
-  // assigning back into the parameter's name (`if (a1 < a0) { v0 = a0; } else { v0 = a1; }` for
-  // `if (a1 < a0) a1 = a0;`). Off by default; rank.ts enumerates the ON spelling as the
+  // Give a merge whose carrier is a FUNCTION PARAMETER its own local, instead of assigning back
+  // into the parameter's name. Off by default; rank.ts enumerates the ON spelling as the
   // `/fresh-merge` axis, and `FRESH_MERGE_GATES` holds the admission and the argument for it.
   //
   // NOT `materializeJoinFeeds` widened to parameters. That axis reaches its shape by giving the
@@ -2019,7 +2017,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   //   - the merge variable names any OTHER SSA value (a shared name has readers and writers
   //     between the def site and the edge that edge placement respects and anchoring would not).
   //     A loop header's carried value is the exception above: its other claimants all live in
-  //     the body. `freshParamMerge` WIDENS what this admits — a re-homed merge is sole by
+  //     the body. `freshParamMerge` WIDENS what this admits — a minted home is sole by
   //     construction — which is the pairing `/fresh-merge` and `/defsite` match `clampu8` on;
   //   - another anchored const of the same variable lies on a path from this one to this one's
   //     edge (the later write would clobber this arg's value; both stay at their edges instead).

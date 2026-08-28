@@ -225,15 +225,16 @@ const STRUCTURING_AXES: readonly StructuringAxis[] = [
     strip: true,
   },
   // `/fresh-merge` — the parameter-merge-home axis (structure.ts `freshParamMerge`, whose
-  // `FRESH_MERGE_GATES` carry the argument): a merge that conditionally overwrites a parameter
-  // takes its own local (`if (a1 < a0) { v0 = a0; } else { v0 = a1; }`) where the default assigns
-  // back into the parameter (`if (a1 < a0) a1 = a0;`). Both are ordinary C over the same values, so
+  // `FRESH_MERGE_GATES` carry the argument): a merge whose carrier is a parameter takes its own
+  // local (`if (a1 < a0) { v0 = a0; } else { v0 = a1; }`) where the default assigns back into the
+  // parameter (`if (a1 < a0) a1 = a0;`). Both are ordinary C over the same values, so
   // the differ decides. At TWO arguments they compile to the SAME bytes on agbcc and on mwcc
   // (measured, both directions), which is why `maxi`/`mini` hold under the axis.
   //
   // IT ALSO UNLOCKS `/defsite`. `anchorConstCopies` refuses a merge whose name claims another SSA
-  // value, so a merge that adopted its parameter is never anchored, while a fresh home is sole by
-  // construction and a constant arm then writes above the branch. That pair spells m2c's own
+  // value, so a merge that adopted its parameter is never anchored, while a minted home is sole by
+  // construction and clears that one refusal — a constant arm then writes above the branch, where
+  // the remaining placement rules allow it. That pair spells m2c's own
   // `v0 = 0xFF; if (a0 <= 0xFF) v0 = a0;`, which is how `synthetic:clampu8:mwcc_242_81` matches
   // under `signed/defsite/fresh-merge` — `signed/defsite` is inert on the base tree and does not
   // appear in that row's fan at all. Priced at the guard it widens: sole-claimant admissions go

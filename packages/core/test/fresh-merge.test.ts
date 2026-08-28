@@ -1,12 +1,16 @@
-// The parameter-merge-home rule (structure.ts freshParamMerge): a merge that conditionally
-// overwrites a function PARAMETER takes its own local instead of assigning back into the
-// parameter's name. Off by default.
+// The parameter-merge-home rule (structure.ts `freshParamMerge` and `FRESH_MERGE_GATES`): a merge
+// whose carrier is an entry parameter — or a home the rule itself minted — takes its own local
+// rather than assigning back into that name. Off by default; `/fresh-merge` enumerates it.
 //
-// What these tests pin is the SCOPE, since the carrier is the whole evidence: an entry parameter,
-// or a home this rule itself minted — and nothing else, so a merge over ordinary locals keeps the
-// adoption the rest of the naming walk rests on. The refusals are here too — a redundant phi, which
-// overwrites the parameter on no path, and a loop header, which `seedLoopParams` has already named
-// — and so is the axis that enumerates the spelling, with the function it costs nothing.
+// The carrier is the whole evidence, so the SCOPE is what most of these pin: an ordinary local
+// still lends its name, a redundant phi keeps the parameter, and a loop header never reaches the
+// walk. It is NOT "every conditional write into a parameter disappears" — the rooting is over
+// carrier VALUES, so a value that reaches the merge under the parameter's name is out of scope and
+// its write survives.
+//
+// The rest pin what the rule touches beyond naming: the carrier width guard that keeps the two
+// spellings two SPELLINGS, and `anchorConstCopies`, which a minted home unlocks by making the name
+// a sole claimant.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -27,7 +31,7 @@ const emit = (ir: string, on: boolean, extra: StructureOptions = {}, hooks: Stru
 
 // ── the isolate: `int m = a>b?a:b; return m>c?m:c;` at agbcc -O2 ──────────────────────────────
 // Two merges in a row. The first is over the parameters `a1`/`a0`; the second is over `a2` and the
-// first merge's own result, which is what makes the rule's second clause observable.
+// first merge's own result, which is what makes the minted-home half of `param-rooted` observable.
 const MAX3 = `fn max3 {
 ^bb0(%0: s32, %1: s32, %2: s32):
   %3: u32 = icmp_sge %1, %0
@@ -52,8 +56,8 @@ test('a merge over parameters takes its own home instead of writing one of them'
 });
 
 test('…and the merge above it does not take that home either — two values, two homes', () => {
-  // `%6` merges the parameter `a2` with `%4`, the home the rule just minted. Adopting it would
-  // chain both values through one register; the rule refuses its own homes for that reason.
+  // `%6` merges the parameter `a2` with `%4`, the home the rule just minted. Adopting it would chain
+  // both values through one register, which is the spelling `max3` scores 6 on against its own 0.
   const on = emit(MAX3, true);
   expect(on).toMatch(/s32 v1;/);
   expect(on).toMatch(/return v1;/);
@@ -146,7 +150,7 @@ test('/fresh-merge is enumerated where a merge slot mixes a parameter with somet
 });
 
 test('…and a function whose only merge carries the SAME parameter on every edge pays nothing', () => {
-  // The redundant-phi refusal, read off the gate rather than the rule: `r0` reaches the join
+  // The redundant-phi refusal, read off the probe gate rather than the rule: `r0` reaches the join
   // unchanged on both paths, so there is no conditional overwrite to re-home.
   const ALIAS_ASM = 'f:\n\tcmp\tr0, #0\n\tbeq\t.L2\n\tmov\tr2, #0\n\tstr\tr2, [r1]\n.L2:\n\tbx\tlr\n';
   const all = enumerateCandidates('f', ALIAS_ASM, ARMV4T_AGBCC, {});
@@ -159,8 +163,6 @@ test('…and a function whose only merge carries the SAME parameter on every edg
 // one side — rather than two spellings, and `scoreObjects` has no standing to referee that. It
 // cannot happen, and the guard is `canTakeName`'s carrier width/sign check running on the same
 // carrier one step earlier, NOT anything in this rule: the merge takes a fresh home either way.
-// Pinned here because the rule's header used to rest this on an incidental fact — every corpus row
-// that could reach it is a loop header `seedLoopParams` names first — instead of on the guard.
 const NARROWCARRIER = `fn narrowcarrier {
 ^bb0(%0: u8, %1: s32*):
   %2: s32 = load %1 {off=0, width=4, signed=true}
@@ -194,9 +196,10 @@ test('…while an equal-width carrier is adopted by default and re-homed by the 
 
 // ── the axis widens `anchorConstCopies` ───────────────────────────────────────────────────────
 // Anchoring a constant edge copy at its def site needs the merge's name to claim no other SSA
-// value; adopting the parameter always leaves two claimants, so the default is never anchored and a
-// fresh home always is. That is a SECOND thing the axis buys, and it is what makes `/defsite`
-// non-inert on `synthetic:clampu8:mwcc_242_81`, whose winner is `signed/defsite/fresh-merge`.
+// value; adopting the parameter always leaves two claimants, so the default is never anchored, and
+// a minted home clears that one refusal (the placement rules still apply). That is a SECOND thing
+// the axis buys, and what makes `/defsite` non-inert on `synthetic:clampu8:mwcc_242_81`, whose
+// winner is `signed/defsite/fresh-merge`.
 const CLAMPISH = `fn clampish {
 ^bb0(%0: s32):
   %1: s32 = const {value=255}
