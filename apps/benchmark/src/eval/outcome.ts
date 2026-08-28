@@ -10,11 +10,12 @@
 //
 // The LABEL is symmetric; the CAUSE is not, and the shape of m2c's half CHANGED. It used to be
 // context starvation: most real rows carried no `--context` at all, so m2c declined on `?`
-// placeholders for types the project had written down. The real tier now hands m2c its project's
-// own vendored context on every row (cases/manifests.ts states the provisioning policy and its
-// residuals), and what survives is mostly a callee or a type the CONTEXT does not declare either
-// — `? func_80038388_38F88(?)`. The SYNTHETIC tier is unchanged and deliberately starved on both
-// sides: neither tool gets project data there.
+// placeholders for types the project had written down. Every real row now carries one — 246 the
+// project's vendored context, six a hand-written list of callees the headers omit (see
+// cases/manifests.ts for the provisioning policy and its residuals) — and what survives is mostly
+// a callee the CONTEXT does not declare either: `? func_80038388_38F88(?)`, 10 of the real tier's
+// 15 m2c declines. The SYNTHETIC tier is unchanged and deliberately starved on both sides:
+// neither tool gets project data there.
 //
 // Note the PRECEDENCE, because it moves rows between labels without anything getting better or
 // worse: classification runs before any compile, so a decline marker outranks a compile failure.

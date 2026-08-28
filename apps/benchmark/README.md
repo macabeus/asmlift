@@ -37,10 +37,11 @@ context**: 246 rows are flagged `m2cCtx` in their manifest, which feeds m2c that
 project context verbatim (the row publishes the file as `ctxRef`); six kleod rows instead carry a
 hand-written `ctx` naming callees the project's headers do not declare, held symmetric with the
 `proto` hints asmlift gets by `test/authored-facts.test.ts`. Synthetic rows carry the prototype in
-the dataset (`ctx` — mirroring `proto`) and nothing else. The boundary is firm: a context is what
-that translation unit preprocesses to, **never an authored type** (where a project types a global
-as a raw byte arena, an invented struct would copy the answer out of the reference source), and it
-never carries the row's own signature as the reference source spells it. Remaining m2c declines
+the dataset (`ctx` — mirroring `proto`) and nothing else. The boundary is firm: a real context is
+what that translation unit preprocesses to, **never an invented type** (where a project types a
+global as a raw byte arena, a made-up struct would copy the answer out of the reference source),
+and the row's own signature is not pasted into it out of `funcC` — the one channel by which it
+still arrives on 8 rows is residual 4 below, disclosed and measured. Remaining m2c declines
 are genuine modeling gaps — carry flags, unknown instructions, and callees the project itself
 never declares — that context cannot fix; same class as asmlift's declines (the decline-reason
 Pareto in Gap Analysis is the roadmap).
@@ -86,13 +87,13 @@ extents, volatility, const-ness, address-cast macro bodies, and, where the vendo
 callee signatures and struct tags with full field tables. So m2c is given the matching thing —
 that row's own vendored preprocessed context, verbatim, via `--context` — on every real row.
 
-**Neither tool is handed the row's own signature out of the reference source.** That is the
-harness's own leakage rule (core's `asIfUndecompiled`: "only CALLEE signatures transfer"), and it
-now applies to both halves. The row's own declaration reaches m2c only where the context already
+**The row's own signature is no longer pasted into m2c's context out of the reference source.**
+That is the harness's own leakage rule (core's `asIfUndecompiled`: "only CALLEE signatures
+transfer"), and it now applies to both halves — with residual 4 as the one measured exception. The row's own declaration reaches m2c only where the context already
 carries it (39 rows: 31 declared by the project's headers, as a user mid-decomp genuinely has, and
 8 by the forward declaration the manifest needs to compile the reference standalone — residual 4)
 or as the one line `proto` also gives asmlift (`m2cOwnPrototype`, at most `void f(…);`, 84 rows).
-The remaining 129 rows get nothing appended, and m2c infers the signature as asmlift does.
+The remaining 123 rows get nothing appended, and m2c infers the signature as asmlift does.
 
 It is **not exact parity**, and pretending otherwise would be the same defect with the sign
 flipped. The residuals run in both directions; none is closed here, because closing any of them
@@ -128,9 +129,10 @@ _Favouring asmlift._
    row's context, all on `sa3:sub_8001FD4` (`ValidateSave`, `PackSaveSector`, `WriteSaveSector`,
    `sub_8001A90`).
 7. **Non-void rows.** On the 6 rows whose `proto` says the function is non-void and whose context
-   does not declare it, asmlift is told that — and on 2 of them the parameter types
-   (`af:mPl_SceneNo2SoundRoomType`, `pokeemerald:GetAnchorCoord`) — while m2c is told nothing:
-   `proto` carries no return type to state, and inventing one would not be parity.
+   does not declare it, asmlift is told that — and on 3 of them a parameter list as well
+   (`af:mPl_SceneNo2SoundRoomType` `["s32"]`, `pokeemerald:GetAnchorCoord` `["s32","s32","s32"]`,
+   `sa3:sub_8001FD4` `[]`, i.e. arity 0) — while m2c is told nothing: `proto` carries no return
+   type to state, and inventing one would not be parity.
 
 **A context is not one uniform thing**, and the repro scripts say so per row rather than
 generalising. It is whatever that TU preprocesses to: af's manifest has `headers: []` — its

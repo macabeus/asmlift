@@ -116,8 +116,8 @@ export interface FunctionResult {
    *  referenced rather than embedded). */
   ctxRef?: string;
   /** The single line appended after that blob: the function's own prototype, present only where
-   *  the project's headers do not declare it AND the row's `proto` says it returns void. Derived
-   *  from `proto` — never from the reference source. */
+   *  the context does not already declare the symbol AND the row's `proto` says it returns void.
+   *  Derived from `proto` — never from the reference source. */
   ctxProto?: string;
   /** Prototype hints asmlift received (structurally mirrors @asmlift/core/proto Prototypes —
    *  spelled out here so this package stays dependency-free): a callee's `params` (a bare arity

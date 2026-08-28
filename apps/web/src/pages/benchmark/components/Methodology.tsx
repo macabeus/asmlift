@@ -98,11 +98,12 @@ export function Methodology({ rows }: { rows: FunctionResult[] }) {
           <span className="font-mono">--context</span> and to asmlift as prototype hints. For real functions the
           standard is different, because there the project itself is available to both: m2c receives that function's own
           preprocessed translation-unit context via <span className="font-mono">--context</span> and asmlift receives
-          the project's symbol map, on every row. The real tier therefore measures recovery <em>with</em> the project in
-          hand, which is the situation a decompiler is actually used in. It is not exact parity — the two channels carry
-          different things, and the residuals (in both directions) are listed in the benchmark's README. The boundary is
-          firm: both carry what the project itself declares, never authored types, and neither is handed the reference
-          source. Remaining declines are genuine capability gaps on both sides.
+          the project's symbol map, on every row (six rows carry a hand-written context instead). The real tier
+          therefore measures recovery <em>with</em> the project in hand, which is the situation a decompiler is actually
+          used in. It is not exact parity — the two channels carry different things, and the residuals, in both
+          directions, are listed in the benchmark's README. The boundary is firm: a context is what that translation
+          unit preprocesses to, never an invented type, and neither tool is handed the row's own signature out of the
+          reference source. Remaining declines are genuine capability gaps on both sides.
         </P>
         <P>
           asmlift's analogue of that context is the project's <em>symbol map</em>: names and declaration shapes derived

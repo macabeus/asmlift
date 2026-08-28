@@ -86,9 +86,11 @@ export function appendCtxProto(ctx: string, proto: string | null): string {
  *  provisioning on the other.
  *
  *  WHAT SURVIVES, in order:
- *    1. the project's own headers declare the symbol → nothing is appended, m2c reads the real
- *       declaration out of the context. That is a fact a user mid-decomp genuinely has: a header
- *       declares a function whose body is still `INCLUDE_ASM`.
+ *    1. the context already declares the symbol → nothing is appended, m2c reads that
+ *       declaration. On 31 of those rows it is the project's own header, which is a fact a user
+ *       mid-decomp genuinely has: a header declares a function whose body is still `INCLUDE_ASM`.
+ *       On 8 it is the manifest's `prependC`, which is a residual and is disclosed as one
+ *       (README residual 4, pinned by test/authored-facts.test.ts).
  *    2. otherwise, at most what `proto[sym]` gives asmlift. `returnsVoid: true` is the only
  *       return-type fact in that field, so it is the only one emitted; a non-void row gets
  *       nothing, which is already m2c's default assumption. Parameter TYPES ride along where
