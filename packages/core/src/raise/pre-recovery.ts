@@ -31,8 +31,8 @@ import { recognizeStructs } from './structs';
 
 /** Per-call options for the pass list — ONE field per pass that takes any, named for the pass, so
  *  a caller reads which recognizer it is steering and a pass that takes none says so by absence.
- *  Nothing here changes what a pass may do to the IR; each field is a spelling choice its own
- *  recognizer documents. */
+ *  A field here selects between spellings its pass can already produce; none of them relaxes a
+ *  soundness refusal, and each recognizer documents its own. */
 export interface PreRecoveryOptions {
   /** raise/shortcircuit.ts `recognizeBranchShortCircuit` — the connective-vs-comparison-tree axis. */
   shortCircuit?: BranchShortCircuitOptions;

@@ -32,8 +32,9 @@ describe('/connective is enumerated wherever the tree refusal has an inhabitant'
   });
 
   test('…and the tree spelling survives beside it', () => {
-    // The control the corpus census named: `pokeemerald:IsStringLengthAtLeast` scores 8 on the
-    // tree and 19 on the connective, so an axis that REPLACED the default would cost it 11.
+    // `pokeemerald:IsStringLengthAtLeast` is the corpus row this protects: its refusal covers a
+    // real fall-through `switch`, and it keeps its score only because the tree spelling is still
+    // in the fan to win it. An axis that REPLACED the default rather than joining it costs it.
     const all = cands(TREE);
     expect(all.some((c) => !c.label.includes('/connective') && !/ \|\| /.test(c.source))).toBe(true);
   });

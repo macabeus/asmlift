@@ -583,9 +583,9 @@ function comparisonTree(): Fn {
   return { name: 'f', blocks: [head, g, shared, other] };
 }
 
-// The tree-ownership refusal is the ONE refusal in this pass that is not a way the fold would be
-// wrong — both spellings are the same program — so it is the one with a second arm. `foldTreeOwned`
-// takes it; `onTreeOwned` reports it either way, which is how rank.ts gates the axis.
+// The tree-ownership refusal chooses a SPELLING where every other refusal in this pass guards
+// soundness, so it is the one with a second arm: `foldTreeOwned` takes the fold, `onTreeOwned`
+// reports the site either way, and rank.ts gates its axis on that report.
 describe('the connective-vs-tree axis', () => {
   test('`foldTreeOwned` takes the fold the tree refusal owns, and the result verifies', () => {
     const fn = comparisonTree();

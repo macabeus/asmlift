@@ -761,9 +761,12 @@ export function enumerateCandidates(
   //
   // It also carries `/connective`'s enumeration gate, read off the pass's OWN refusal rather than
   // from a second copy of its matcher: the fold reports every site the comparison-tree refusal
-  // owns, and a function with none has no inhabitant for the axis. Answered on the probe, i.e.
-  // once per function — the refusal is a CFG-shape fact, and neither the signedness pin (a type)
-  // nor the symbol map (names) nor `/setup-args` (a call's argument list) moves a `cond_br`.
+  // owns, and a function with none has no inhabitant for the axis. Answered once per function, on
+  // the probe. The pin and `/setup-args` cannot move the answer — neither a parameter's type nor a
+  // call's argument list moves a `cond_br` — while a SYMBOL MAP in principle can, by lifting a
+  // pool-loaded comparison constant as a `gaddr` the const-test test then does not read. Over the
+  // benchmark's 923 rows the count is identical in both configurations, and the failure mode if
+  // one ever diverges is a variant not enumerated, never a wrong one.
   const probe = frontend.lift(name, asm, target, prototypes, opts.asmData, opts.symbols);
   verify(probe);
   applyIdiomPatterns(probe, target, opts.patterns);
