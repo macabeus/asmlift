@@ -70,6 +70,64 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ALL,
   },
   {
+    sym: 'umodv',
+    src: 'unsigned umodv(unsigned a,unsigned b){ return a%b; }',
+    features: ['arithmetic', 'mod-reg', 'unsigned'],
+    toolchains: ALL,
+  },
+  // The remainder written OUT, as a source-level subtract-multiply-divide. It is not a `%` and must
+  // not be respelled as one: on an ISA that synthesizes `%` from exactly these three instructions,
+  // the two spellings differ by the multiply's operand order.
+  {
+    sym: 'modb',
+    src: 'int modb(int a,int b){ return a - b*(a/b); }',
+    features: ['arithmetic', 'div-reg', 'signed'],
+    toolchains: ALL,
+  },
+  // The remainder whose two operands are CALLS, in the order the machine runs them. Folding the
+  // written-out idiom to `%` would drop both from two uses to one and inline them into the one
+  // expression, where C leaves their order unspecified and mwcc runs the RIGHT one first — so the
+  // fold must refuse here and spell the decomposition out, which names them and states the order.
+  // This row is that refusal's price: it is the shape the guard costs, published rather than argued.
+  {
+    sym: 'modseq',
+    src: 'int lo(void);\nint hi(void);\nint modseq(void){ int a = lo(); return a % hi(); }',
+    features: ['arithmetic', 'mod-reg', 'signed'],
+    toolchains: CALL,
+    ctx: 'int lo(void); int hi(void);',
+    proto: { lo: { params: 0 }, hi: { params: 0 } },
+  },
+  // `modseq` one PURE op deeper. The structurer inlines through single-use pure ops, so what lands
+  // at an operand of the invented `%` is the operand's whole CONE — a `+ 1` between the call and the
+  // fold does not make the call stay put. Sampling the refusal only where the effect is the operand's
+  // immediate def cannot see that, which is what this row exists to stop.
+  {
+    sym: 'modcone',
+    src: 'int lo(void);\nint hi(void);\nint modcone(void){ int a = lo() + 1; return a % hi(); }',
+    features: ['arithmetic', 'mod-reg', 'signed'],
+    toolchains: CALL,
+    ctx: 'int lo(void); int hi(void);',
+    proto: { lo: { params: 0 }, hi: { params: 0 } },
+  },
+  // The same question asked of a memory READ rather than a second call: the read answers whichever
+  // stores ran before it, and the call it would be hoisted over is one asmlift hands the pointer to.
+  // Two reads would commute; a read against a call does not.
+  //
+  // Its agbcc cell (8) is a KNOWN, pre-existing silent de-sequencing, not a scoring curiosity —
+  // DO NOT close it by making the spelling match. agbcc reaches `smod` through raise/softdiv.ts
+  // (`bl __modsi3`), which invents the `%` exactly as the PPC fold does and carries no guard at
+  // all: asmlift emits `*a0 % (s32)hi()` and agbcc emits `bl hi | ldr r0,[r4]` against the
+  // reference's `ldr r4,[r0] | bl hi`. Proved pre-existing by decompiling the same asm with the
+  // hwmod patterns removed — byte-identical source. Guarding softdiv re-prices the largest tier.
+  {
+    sym: 'modread',
+    src: 'int hi(void);\nint modread(int *p){ int x = *p; return x % hi(); }',
+    features: ['arithmetic', 'mod-reg', 'signed', 'pointer'],
+    toolchains: CALL,
+    ctx: 'int hi(void);',
+    proto: { hi: { params: 0 } },
+  },
+  {
     sym: 'udivv',
     src: 'unsigned udivv(unsigned a,unsigned b){ return a/b; }',
     features: ['arithmetic', 'div-reg', 'unsigned'],

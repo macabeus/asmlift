@@ -67,12 +67,25 @@ export const OPCODES = {
   zext: { operands: 1, results: 1, requiredAttrs: ['width'] },
   sext: { operands: 1, results: 1, requiredAttrs: ['width'] },
   // Division/remainder. `sdiv` is variadic like the shifts: the immediate form (1 operand +
-  // `imm` attr) is the strength-reduced constant divisor an idiom folds to (`sdiv X {imm=2}`);
-  // the register form (2 operands) is a real hardware divide (`div`/`divu` + `mflo`/`mfhi` on an
-  // ISA with `capabilities.hwDivide`); the structurer branches on count. `udiv`/`smod`/`umod`
+  // `imm` attr) is the strength-reduced constant divisor an idiom folds to (`sdiv X {imm=2}`),
+  // the register form is 2 operands, and the structurer branches on count. `udiv`/`smod`/`umod`
   // are 2-operand only. `sdiv`/`udiv` = quotient, `smod`/`umod` = remainder; signedness lives in
   // the op, and L3 keeps the pair apart (`/`/`%` against `/u`/`%u`) so the C backend can spell
   // both with C's one token over an operand cast that says which.
+  //
+  // A register form does NOT mean the machine had a divide instruction — never read the ISA off it.
+  // Six recognizers at three layers build these ops, and which fires is a fact about the COMPILER's
+  // lowering, not the hardware. Quotient AND remainder: frontend/mips.ts (`mfhi` off a real `div`),
+  // raise/softdiv.ts (a `bl __modsi3` on an ISA with NO divide, gated `!hwDivide`), and
+  // pattern/engine.ts HWMOD_PATTERNS (`divw`+`mullw`+`subf`, where the hardware divides but has no
+  // remainder instruction). Quotient ONLY: raise/magicdiv.ts, raise/divpow2.ts, SDIV_POW2_2.
+  // KNOWN GAP, by pass ORDER rather than by decision: the quotient-only three run at stage 2.35,
+  // AFTER the stage-2 idiom fold, so no remainder fold can ever see the `sdiv` they build, and a
+  // remainder over a CONSTANT divisor stays written out on every target — visible in the artifact
+  // as `modc`/`umod10`, which recover `%` on agbcc+ido and the decomposition on kmc+mwcc. All four
+  // are byte-exact, so it costs 0 points; closing it re-prices those rows and re-derives both of
+  // HWMOD_PATTERNS' gates (a constant multiply carries no operand order to read), so it is its own
+  // round.
   sdiv: { operands: 'variadic', results: 1, traps: true },
   udiv: { operands: 2, results: 1, traps: true },
   smod: { operands: 2, results: 1, traps: true },

@@ -35,6 +35,31 @@ describe.runIf(HAVE_PPC)('T1: PowerPC hardware divide (divw/divwu) → a / b, by
   }
 });
 
+// T5 — PowerPC has no remainder INSTRUCTION: mwcc lowers `a % b` to `divw; mullw; subf`, so the
+// operator survives only in the source. The idiom fold (pattern/engine.ts HWMOD_PATTERNS) puts it
+// back, and only `%` recompiles to that exact triple — spelling the decomposition out instead
+// swaps the multiply's operands. The third case is the control that keeps the fold order-sensitive:
+// its reference C IS the decomposition, mwcc emits the swapped multiply for it, and asmlift must
+// leave that alone rather than fold it to a `%` that would recompile to the other order.
+describe.runIf(HAVE_PPC)('T5: PowerPC synthesized remainder (divw/mullw/subf) → a % b, byte-exact', () => {
+  const CASES = [
+    { sym: 'modv', c: 'int modv(int a, int b){ return a % b; }', expect: 'return a0 % a1;' },
+    { sym: 'umodv', c: 'unsigned umodv(unsigned a, unsigned b){ return a % b; }', expect: 'return a0 % a1;' },
+    // the divisor-first multiply: NOT a remainder recovery, and byte-exact as the decomposition
+    { sym: 'modb', c: 'int modb(int a, int b){ return a - b * (a / b); }', expect: 'return a0 - a1 * (a0 / a1);' },
+  ];
+  for (const { sym, c, expect: want } of CASES) {
+    test(`${sym} matches`, () => {
+      const { obj, asm } = compilePpcTarget(c, sym);
+      const r = decompile(sym, asm, PPC_MWCC);
+      const sc = scoreCPpc(r.source, sym, obj);
+      expect(r.source).toContain(want);
+      expect(r.source).not.toContain('?'); // no unresolved opaque
+      expect(sc.match).toBe(true); // byte-exact on real mwcc
+    });
+  }
+});
+
 describe.runIf(HAVE_DOCKER)('T3: GCC-MIPS unsigned divide with cross-block mflo → a / b, byte-exact', () => {
   test('udivg matches (mflo scheduled past the trap branch)', () => {
     const { obj, asm } = compileMipsGccTarget('unsigned udivg(unsigned a, unsigned b){ return a / b; }', 'udivg');

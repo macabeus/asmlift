@@ -5,13 +5,22 @@
 //
 // Crucially, rewrites go through replaceAllUsesWith + DCE — never in-place opcode
 // mutation of a live value.
-import { Fn, Op, Value, defOpMap, mkOp, mkValue, replaceAllUsesWith } from '../ir/core';
-import { NEGATED_ICMP, type Opcode, isDceSafe } from '../ir/opcodes';
+import { Block, Fn, Op, Value, defOpMap, mkOp, mkValue, replaceAllUsesWith } from '../ir/core';
+import { EFFECTFUL_OPS, NEGATED_ICMP, ORDER_SENSITIVE_OPS, type Opcode, isDceSafe } from '../ir/opcodes';
 import type { IrType } from '../ir/types';
 import { T } from '../ir/types';
 
 export type MatchNode =
-  | { op: string; attrEquals?: Record<string, number>; bindImm?: Record<string, string>; args: MatchNode[] }
+  | {
+      op: string;
+      attrEquals?: Record<string, number>;
+      bindImm?: Record<string, string>;
+      /** Match this node's two operands in the WRITTEN order only, even when the opcode is in
+       *  `COMMUTATIVE` — for an idiom where the machine's operand order is evidence about the
+       *  source rather than an accident of the encoding (see HWMOD_PATTERNS for the one case). */
+      ordered?: true;
+      args: MatchNode[];
+    }
   | { bind: string } // bind this operand's VALUE to a name
   | { same: string } // this operand must equal a previously-bound value
   | { constImm: string }; // this operand must be a `const`; bind its numeric VALUE to an imm name
@@ -67,6 +76,21 @@ export interface RewritePattern {
   // COMPUTED-attr half of the envelope (ImmExpr, above) IS built — earned by the
   // multiply-by-constant idioms.
   replaceWith: { op: string; args: ReplaceArg[]; attrs?: Record<string, number | ImmExpr>; resultType?: IrType };
+  /** Two REPLACEMENT operand names, in the order the replacement RENDERS them, whose defs C leaves
+   *  UNSEQUENCED against each other. A fold that collapses a multi-op idiom into one op drops its
+   *  operands from several uses to one, which lets the structurer inline both at that one use — and
+   *  then the RECOMPILING COMPILER, not asmlift, picks which of the two runs first. Naming this pair
+   *  makes the driver refuse a fold that would CHANGE the machine's order. What counts as "the
+   *  operand" and as "the order" is subtler than it reads, and `reordersUnsequenced` below owns both.
+   *
+   *  The `RightFirst` half is a compiler fact about the operator the replacement spells, verified by
+   *  compiling in both directions rather than assumed: mwcc lowers `f() % g()` as `bl g; bl f` and
+   *  `g() % f()` as `bl f; bl g`. It holds per OPERATOR, not per target — the same compiler runs
+   *  `-`'s LEFT operand first (`f() - g()` is `bl f; bl g`) — which is why it lives on the pattern
+   *  rather than on TargetDescription, and stays a field name rather than an order enum while there
+   *  is one inhabitant. The direction was measured on ONE compiler, so `validatePattern` pins the
+   *  declaring pattern's compiler gate to that set; widening it fails loud. */
+  unsequencedRightFirst?: [string, string];
 }
 
 /** Does this pattern apply to `target`? Every DECLARED axis must match: the ISA (so an idiom can be
@@ -141,6 +165,52 @@ export const SDIV_POW2_2: RewritePattern = {
   },
   replaceWith: { op: 'sdiv', args: ['X'], attrs: { imm: 2 }, resultType: T.s() },
 };
+
+// ── the synthesized remainder (PPC) ─────────────────────────────────────────────────────
+// PowerPC divides in hardware but has no remainder instruction, so `a % b` is lowered as
+// `divw rQ,a,b; mullw rP,rQ,b; subf rD,rP,a` — the operator is GONE from the machine code, spelled
+// out as its own definition. Folding the triple back to one `smod`/`umod` gives recovery and the
+// structurer the operator the source wrote, and re-emitting `%` reproduces the triple byte-exact.
+//
+// This is NOT the `capabilities.hwDivide` axis: MIPS also divides in hardware and needs no fold at
+// all, because `div` leaves the remainder in `hi` and the frontend reads it straight out. The
+// narrower fact is a hardware divide that yields the QUOTIENT ONLY; `isa: 'ppc'` STANDS IN for it
+// until a second ISA earns the capability, and `compilers` carries the measured half, that mwcc's
+// lowering is exactly this triple in exactly this order. Neither clause is independently
+// falsifiable today — PPC_MWCC is the only target either one selects.
+//
+// `ordered: true` on the multiply says quotient-first is the PRECONDITION for re-emitting `%` — NOT
+// that the order identifies what the source wrote, which is false: `int q = a / b; return a - q *
+// b;` is a decomposition that compiles quotient-first too. So over-firing is byte-neutral (verified
+// by compiling both), and the flag buys the refusal direction: matching the swapped `mullw rP,b,rQ`
+// of `a - a / b * b` would respell an already byte-exact decomposition into a miss.
+//
+// A CONSTANT divisor is out of reach and deliberately left so — see the recognizer table on
+// `smod` in ir/opcodes.ts, which owns why. It costs nothing: `mulli` has no register operand
+// order to lose, and both spellings assemble to the same bytes.
+function hwModPattern(div: 'sdiv' | 'udiv', mod: 'smod' | 'umod'): RewritePattern {
+  return {
+    id: `hwmod-${mod}`,
+    applies: { isa: 'ppc', compilers: ['mwcc'] },
+    match: {
+      op: 'sub',
+      args: [
+        { bind: 'A' },
+        {
+          op: 'mul',
+          ordered: true,
+          args: [{ op: div, args: [{ same: 'A' }, { bind: 'B' }] }, { same: 'B' }],
+        },
+      ],
+    },
+    replaceWith: { op: mod, args: ['A', 'B'] },
+    unsequencedRightFirst: ['A', 'B'],
+  };
+}
+
+/** `a - a / b * b` → `a % b`, signed and unsigned. The `same` bindings are load-bearing: a
+ *  different dividend or divisor is a subtraction, not a remainder. */
+export const HWMOD_PATTERNS: RewritePattern[] = [hwModPattern('sdiv', 'smod'), hwModPattern('udiv', 'umod')];
 
 // ── multiply-by-constant idioms (DIVMUL) ────────────────────────────────────────────────
 // A compiler strength-reduces `x * C` for a small constant C into shifts + one add/sub, because a
@@ -307,15 +377,16 @@ export const NOT_CMP_PATTERNS: RewritePattern[] = [
 
 // The DEFAULT idiom bundle `decompile()` applies when the caller passes no `patterns`. It is
 // EVERY idiom asmlift owns; the list self-selects per target through patternApplies — agbcc/gcc get
-// sdiv-pow2, agbcc/ido/gcc get the mul-const folds, mwcc gets cntlzw-eq0 + rotl-mirror, and agbcc
-// gets the casts. MOST patterns are `{compilers}`-gated because they trade one spelling for another
-// and are only byte-safe where measured; the boolean-negation folds are deliberately UNGATED (see
-// their comment — the shape is its own gate), so "gated per compiler" is the common case, not the
-// invariant. Ordered like the sub-bundles: the
-// division idiom, then the multiplies (base folds before the composite tail). Passing an explicit
-// `patterns` (including `[]`) overrides this — `[]` runs the naive lift with no idiom folding.
+// sdiv-pow2, agbcc/ido/gcc get the mul-const folds, mwcc gets cntlzw-eq0 + rotl-mirror + the PPC
+// remainder fold, and agbcc gets the casts. MOST patterns are `{compilers}`-gated because they
+// trade one spelling for another and are only byte-safe where measured; the boolean-negation folds
+// are deliberately UNGATED (see their comment — the shape is its own gate), so "gated per compiler"
+// is the common case, not the invariant. Ordered like the sub-bundles: the division idioms, then
+// the multiplies (base folds before the composite tail). Passing an explicit `patterns` (including
+// `[]`) overrides this — `[]` runs the naive lift with no idiom folding.
 export const DEFAULT_IDIOM_PATTERNS: RewritePattern[] = [
   SDIV_POW2_2,
+  ...HWMOD_PATTERNS,
   CNTLZW_EQ0,
   // AFTER cntlzw-eq0, which is what turns mwcc's `clz(x) >> 5` into the `icmp_eq` this fold then
   // negates — `!(x == 0)` composes only in that order (each pattern runs to fixpoint in turn).
@@ -331,6 +402,7 @@ export const DEFAULT_IDIOM_PATTERNS: RewritePattern[] = [
 // same test, and which one a frontend builds is an accident of how the branch was decoded — the
 // zero-test folds must match either. The ORDERED comparisons are deliberately absent: swapping the
 // operands of `a < b` is `b > a`, a different opcode, which this mechanism cannot express.
+// Membership here is about the OPCODE; a single pattern node opts back out with `ordered: true`.
 const COMMUTATIVE = new Set(['add', 'mul', 'and', 'or', 'xor', 'icmp_eq', 'icmp_ne']);
 
 interface Binds {
@@ -379,9 +451,10 @@ function tryMatch(node: MatchNode, v: Value, defs: Map<Value, Op>, b: Binds): bo
   if (d.operands.length !== node.args.length) {
     return false;
   }
-  // A commutative binary op matches its two args in EITHER order. Each order is tried on a cloned
-  // bind map so a partial (then-failed) match can't leak bindings; the first full match commits.
-  if (COMMUTATIVE.has(d.opcode) && node.args.length === 2) {
+  // A commutative binary op matches its two args in EITHER order, unless the pattern declared this
+  // node `ordered`. Each order is tried on a cloned bind map so a partial (then-failed) match can't
+  // leak bindings; the first full match commits.
+  if (COMMUTATIVE.has(d.opcode) && node.args.length === 2 && !node.ordered) {
     for (const [i, j] of [
       [0, 1],
       [1, 0],
@@ -402,8 +475,154 @@ function tryMatch(node: MatchNode, v: Value, defs: Map<Value, Op>, b: Binds): bo
   return node.args.every((a, i) => tryMatch(a, d.operands[i], defs, b));
 }
 
+/** Walk a pattern's match DAG once and reject a declaration that could not have an effect, or one
+ *  whose compiler gate outruns the evidence behind it. Same diagnosability-first rule as the
+ *  unbound-`replaceWith` throw below: `ordered` is consulted ONLY inside `tryMatch`'s
+ *  commutative-swap branch, so on a non-commutative or non-binary node it would be silently inert,
+ *  and a pattern author (or a generator emitting patterns as data) would get no error and no effect.
+ *
+ *  Everything checked here is a property of the pattern OBJECT, so the answer is memoized against it
+ *  rather than recomputed per lift — patterns may still be built at runtime, which is why this is a
+ *  WeakSet and not module-scope validation of the DEFAULT list. */
+const UNSEQUENCED_RIGHT_FIRST_MEASURED_ON = ['mwcc'];
+const validated = new WeakSet<RewritePattern>();
+
+function validatePattern(pat: RewritePattern): void {
+  if (validated.has(pat)) {
+    return;
+  }
+  validated.add(pat);
+  const walk = (n: MatchNode): void => {
+    if (!('op' in n)) {
+      return;
+    }
+    if (n.ordered && !(COMMUTATIVE.has(n.op) && n.args.length === 2)) {
+      throw new Error(
+        `pattern '${pat.id}' declares 'ordered' on a '${n.op}' node with ${n.args.length} operand(s), ` +
+          `where the written order is already the only reading — the flag would be inert`,
+      );
+    }
+    n.args.forEach(walk);
+  };
+  walk(pat.match);
+  if (!pat.unsequencedRightFirst) {
+    return;
+  }
+  for (const name of pat.unsequencedRightFirst) {
+    if (!pat.replaceWith.args.includes(name)) {
+      throw new Error(
+        `pattern '${pat.id}' names '${name}' in 'unsequencedRightFirst', which is not a replaceWith operand`,
+      );
+    }
+  }
+  const on = pat.applies.compilers ?? [];
+  const measured = UNSEQUENCED_RIGHT_FIRST_MEASURED_ON;
+  if (on.length !== measured.length || !measured.every((c) => on.includes(c))) {
+    throw new Error(
+      `pattern '${pat.id}' declares 'unsequencedRightFirst' but applies to compilers [${on.join(', ')}]; ` +
+        `the operand direction is only measured for [${measured.join(', ')}] — measure the new one and widen the set`,
+    );
+  }
+}
+
+/** Would this fold DE-SEQUENCE the two named operands — leave the recompiling compiler, rather than
+ *  the machine code, deciding which of two observable effects runs first?
+ *
+ *  The fold collapses a several-op idiom into one, which drops each named operand from two uses to
+ *  one; the structurer then inlines a single-use def at its one use, TRANSITIVELY THROUGH PURE
+ *  SINGLE-USE OPS. So what lands at an operand position is that operand's whole inlinable CONE, not
+ *  just its def, and the question has to be asked over the cones: one pure `+ 1` between an effect
+ *  and the fold's operand is the difference between `f() % g()` and `(f() + 1) % g()`, and the
+ *  second one reorders exactly as the first does. Both cones become operands of ONE expression,
+ *  where C leaves their order unspecified. asmlift's inline-at-use model (structure/analysis.ts)
+ *  exempts exactly this case — "a sibling effect inlined into the SAME statement is not a reorder,
+ *  the recompiling compiler orders unsequenced operands of one expression exactly as it originally
+ *  chose to". That premise holds only when the expression asmlift re-spells is the one the source
+ *  wrote. A fold INVENTS an expression, so it must check.
+ *
+ *  A cone's members are weighed by ORDER_SENSITIVE_OPS, not EFFECTFUL_OPS: a memory read answers
+ *  whichever stores ran before it, so hoisting a `load` over a `call` — one asmlift may itself be
+ *  passing the loaded pointer to — changes the answer as surely as swapping two calls. Two READS
+ *  are the exception and commute, the same fact the structurer states as "a load never bars a
+ *  load", so a hazard needs an EFFECT on at least one side; `*p % *q` is admitted.
+ *
+ *  Refuses only what it must — the alternative spelling (the idiom written out) names the operands
+ *  and states the order, so a refusal is a loud, correct, slightly-worse-scoring answer. */
+function reordersUnsequenced(
+  fn: Fn,
+  root: Op,
+  names: [string, string],
+  binds: Binds,
+  defs: Map<Value, Op>,
+  pid: string,
+): boolean {
+  // Both cones are read within the ROOT's block, on two different grounds. A cross-block EFFECT the
+  // structurer materializes unconditionally — its execution would otherwise become path-dependent —
+  // so the C names it and pins the order there. A cross-block READ it does not; what pins that one
+  // is the structurer's own def→render write scan, where a call counts as a write, so a read cannot
+  // reach this expression across the very call it would be racing.
+  const blk: Block | undefined = fn.blocks.find((b) => b.ops.includes(root));
+  if (!blk) {
+    return false;
+  }
+  const at = new Map<Op, number>(blk.ops.map((o, i) => [o, i]));
+  const uses = new Map<Value, number>();
+  for (const b of fn.blocks) {
+    for (const o of b.ops) {
+      for (const v of [...o.operands, ...o.successors.flatMap((x) => x.args)]) {
+        uses.set(v, (uses.get(v) ?? 0) + 1);
+      }
+    }
+  }
+  /** What the structurer may pull in at one operand position: the operand's own def — which this
+   *  fold is about to drop to a single use — then each operand def that is ALREADY single-use, a
+   *  multi-use value being named and so staying a statement of its own. */
+  const coneOf = (name: string): Set<Op> => {
+    const v = binds.values.get(name);
+    if (!v) {
+      throw new Error(`pattern '${pid}' names unbound value '${name}' in 'unsequencedRightFirst'`);
+    }
+    const cone = new Set<Op>();
+    const stack: (Op | undefined)[] = [defs.get(v)];
+    while (stack.length) {
+      const op = stack.pop();
+      if (!op || cone.has(op) || !at.has(op)) {
+        continue;
+      }
+      cone.add(op);
+      for (const o of op.operands) {
+        if (uses.get(o) === 1) {
+          stack.push(defs.get(o));
+        }
+      }
+    }
+    return cone;
+  };
+  const [lc, rc] = names.map(coneOf);
+  const sensitive = (c: Set<Op>) => [...c].filter((o) => ORDER_SENSITIVE_OPS.has(o.opcode));
+  for (const l of sensitive(lc)) {
+    for (const r of sensitive(rc)) {
+      // One op standing in BOTH cones is one evaluation and cannot be sequenced against itself; two
+      // READS commute; and a right-cone op the machine ALREADY runs first loses nothing.
+      if (l === r || at.get(l)! >= at.get(r)! || !(EFFECTFUL_OPS.has(l.opcode) || EFFECTFUL_OPS.has(r.opcode))) {
+        continue;
+      }
+      // The left one runs first, so an inlined `A op B` would swap them — UNLESS a sibling effect
+      // stands between, which the inline-at-use model refuses to cross, forcing a named temp at the
+      // def's own position. A cone member is no sibling: it is inlined into this very expression.
+      if (
+        !blk.ops.slice(at.get(l)! + 1, at.get(r)!).some((o) => EFFECTFUL_OPS.has(o.opcode) && !lc.has(o) && !rc.has(o))
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 /** Apply one pattern greedily to a fixed point. Returns the number of rewrites. */
 export function applyPattern(fn: Fn, pat: RewritePattern): number {
+  validatePattern(pat);
   let count = 0,
     changed = true;
   while (changed) {
@@ -417,6 +636,9 @@ export function applyPattern(fn: Fn, pat: RewritePattern): number {
         }
         const binds: Binds = { values: new Map(), imms: new Map() };
         if (!tryMatch(pat.match, op.results[0], defs, binds)) {
+          continue;
+        }
+        if (pat.unsequencedRightFirst && reordersUnsequenced(fn, op, pat.unsequencedRightFirst, binds, defs, pat.id)) {
           continue;
         }
         // Materialize any synthesized-constant replacement operands as their own `const` ops,
