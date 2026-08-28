@@ -58,6 +58,7 @@ import {
   hasLoopSharedPureValue,
   hasMergeFeedHome,
 } from './structure/analysis';
+import { hasParamRootedMerge } from './structure/structure';
 import { type SymbolMap, symbolsByName } from './symbols';
 import { type TargetDescription, structureOptionsFor } from './target';
 
@@ -238,24 +239,13 @@ const STRUCTURING_AXES: readonly StructuringAxis[] = [
   // appear in that row's fan at all. Priced at the guard it widens: sole-claimant admissions go
   // 196 → 245 over 679 corpus rows, 34 of them gaining 49 merges.
   //
-  // Gated on the shared probe: a merge slot whose in-edge args differ and include an entry
-  // parameter — the rule's own precondition RESTATED, not derived from it, so the two can drift.
-  // Structural, so it cannot answer differently per symbol variant.
+  // Gated on `hasParamRootedMerge`, which lives beside the rule it over-approximates. Structural,
+  // so it cannot answer differently per symbol variant.
   {
     flag: 'freshMerge',
     suffix: '/fresh-merge',
     options: (on) => ({ freshParamMerge: on }),
-    probeGate: (probe) => {
-      const entryParams = new Set<Value>(probe.blocks[0].params);
-      return probe.blocks.slice(1).some((b) =>
-        b.params.some((_, i) => {
-          const args = probe.blocks.flatMap((pr) =>
-            pr.ops[pr.ops.length - 1].successors.filter((sx) => sx.block === b).map((sx) => sx.args[i]),
-          );
-          return args.some((a) => a !== args[0]) && args.some((a) => entryParams.has(a));
-        }),
-      );
-    },
+    probeGate: (probe) => hasParamRootedMerge(probe),
     strip: true,
   },
 ];

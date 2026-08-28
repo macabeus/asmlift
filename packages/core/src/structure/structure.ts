@@ -742,6 +742,24 @@ export const FRESH_MERGE_GATES: readonly Gate<FreshMergeCarrier>[] = [
   },
 ];
 
+/** Whether any merge slot could reach `FRESH_MERGE_GATES` at all: an in-edge argument list that
+ *  differs and includes an entry parameter. `rank.ts` gates enumeration of `/fresh-merge` on it, so
+ *  it lives beside the rule rather than restated next to the axis. An OVER-approximation, which is
+ *  the safe direction for a gate that only decides whether to enumerate: the walk can still refuse
+ *  the carrier (`carriesPreUpdate`, `canTakeName`), and a slot whose carrier is a home this rule
+ *  mints is not visible here at all. */
+export function hasParamRootedMerge(fn: Fn): boolean {
+  const entryParams = new Set<Value>(fn.blocks[0].params);
+  return fn.blocks.slice(1).some((b) =>
+    b.params.some((_, i) => {
+      const args = fn.blocks.flatMap((pr) =>
+        pr.ops[pr.ops.length - 1].successors.filter((sx) => sx.block === b).map((sx) => sx.args[i]),
+      );
+      return args.some((a) => a !== args[0]) && args.some((a) => entryParams.has(a));
+    }),
+  );
+}
+
 /** True when the merge takes its own home. The table is a parameter so a test can drop one gate and
  *  re-run the real pass (`StructureHooks.freshMergeGates`). */
 export function reHomesParamMerge(
