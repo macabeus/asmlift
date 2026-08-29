@@ -393,7 +393,10 @@ export interface RegionCtx {
  *      RB       341840       262102                   63238              21724                 —
  *
  *  (`RB` reads the per-region ids; `nested-loop-use` is not in that table — see below.) */
-export const SCOPEBASE_GATES: readonly Gate<RegionCtx>[] = [
+/** The rules judged over a POPULATION OF USES — the half the region rule re-reads. Split out
+ *  because that is what `perRegionReading` below renames, so a fourth counting rule is renamed by
+ *  construction instead of by remembering to extend a list of ids. */
+const COUNTING_RULES: readonly Gate<RegionCtx>[] = [
   {
     id: 'single-use',
     why: 'one access re-materializes as cheaply as a named local',
@@ -406,6 +409,11 @@ export const SCOPEBASE_GATES: readonly Gate<RegionCtx>[] = [
     sound: false,
     rejects: (c) => c.repeatedConstOffset,
   },
+];
+
+/** The rules judged over the REGION's own loop facts, which every region rule reads the same way
+ *  (`RegionRule.judged` says why: no reachable scope answers for a use outside the region). */
+const LOOP_RULES: readonly Gate<RegionCtx>[] = [
   {
     id: 'per-iteration-use',
     why: 'no scope reachable from the use runs at a loop condition or `for` inc cadence',
@@ -420,16 +428,19 @@ export const SCOPEBASE_GATES: readonly Gate<RegionCtx>[] = [
   },
 ];
 
-/** The PER-REGION readings of the two counting rules. Same predicate, different POPULATION — under
- *  `'whole'` `single-use` and `repeated-const-offset` are judged over the KEY's uses (the cluster
- *  fallback serves a SUBSET of them, so the two really do differ), under `'per-region'` over one
- *  region's direct uses. One id naming two predicates makes `without(table, id)` two different
- *  ablations and a price table ambiguous about which reading it priced, so the per-region reading
- *  gets its own id and the population that decides it now lives in the rule value below. */
-const perRegionReading = (g: Gate<RegionCtx>): Gate<RegionCtx> =>
-  g.id === 'single-use' || g.id === 'repeated-const-offset'
-    ? { ...g, id: `region-${g.id}`, why: `${g.why} — judged over ONE region's direct uses` }
-    : g;
+export const SCOPEBASE_GATES: readonly Gate<RegionCtx>[] = [...COUNTING_RULES, ...LOOP_RULES];
+
+/** A counting rule's PER-REGION reading. Same predicate, different POPULATION — under `'whole'` it
+ *  is judged over the KEY's uses (the cluster fallback serves a SUBSET of them, so the two really
+ *  do differ), under `'per-region'` over one region's direct uses. One id naming two predicates
+ *  makes `without(table, id)` two different ablations and a price table ambiguous about which
+ *  reading it priced, so the per-region reading gets its own id and the population that decides it
+ *  lives in the rule value below. */
+const perRegionReading = (g: Gate<RegionCtx>): Gate<RegionCtx> => ({
+  ...g,
+  id: `region-${g.id}`,
+  why: `${g.why} — judged over ONE region's direct uses`,
+});
 
 /** `/regionbase`'s admission (rank.ts): the per-region readings of `SCOPEBASE_GATES`, MINUS the one
  *  rule the region rule makes vacuous, plus the one that exists only once a key can hold MORE THAN
@@ -458,7 +469,8 @@ const perRegionReading = (g: Gate<RegionCtx>): Gate<RegionCtx> =>
  *  with 0. Every entry below is guarded by a UNIT fixture in test/regionbase.test.ts and by the
  *  reach census above, and by nothing else. */
 export const REGIONBASE_GATES: readonly Gate<RegionCtx>[] = [
-  ...ablateHeuristic(SCOPEBASE_GATES.map(perRegionReading), 'nested-loop-use'),
+  ...COUNTING_RULES.map(perRegionReading),
+  ...ablateHeuristic(LOOP_RULES, 'nested-loop-use'),
   {
     id: 'regions-degenerate',
     why: 'one region is the function-top hoist basecse and /livebase already offer',

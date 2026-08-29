@@ -238,6 +238,24 @@ describe('a rule the region rule makes VACUOUS is dropped, not left reading as s
     expect(REGIONBASE_GATES.map((g) => g.id)).not.toContain('nested-loop-use');
     expect(SCOPEBASE_GATES.map((g) => g.id)).toContain('nested-loop-use');
   });
+
+  test('every counting rule is renamed for its per-region population — the whole id SET', () => {
+    // A rule added to `COUNTING_RULES` reaches `REGIONBASE_GATES` renamed by construction. This
+    // pins the other direction: a rule added anywhere else in `SCOPEBASE_GATES` would arrive
+    // un-renamed, under an id already meaning a different population.
+    expect(SCOPEBASE_GATES.map((g) => g.id)).toEqual([
+      'single-use',
+      'repeated-const-offset',
+      'per-iteration-use',
+      'nested-loop-use',
+    ]);
+    expect(REGIONBASE_GATES.map((g) => g.id)).toEqual([
+      'region-single-use',
+      'region-repeated-const-offset',
+      'per-iteration-use',
+      'regions-degenerate',
+    ]);
+  });
 });
 
 describe('the lever is OFFERED, and it reaches the shape the row needs', () => {
