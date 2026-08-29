@@ -182,6 +182,51 @@ describe('the region RULE is a VALUE, not a string branched on in three places',
   });
 });
 
+describe('a rule the region rule makes VACUOUS is dropped, not left reading as safety', () => {
+  // A use inside a loop NESTED BELOW the region is a shape `perRegions` cannot produce: a region's
+  // depth is its uses' own `path.length`, so `u.loop.slice(depth)` is the empty slice for every use
+  // it judges, and a use inside a nested loop is its OWN region at its own depth. Kept in the
+  // table, `nested-loop-use` would read as one of four inherited rules that bind — and a reviewer
+  // would reasonably believe it.
+  const IN_A_NESTED_LOOP = fn([
+    {
+      k: 'if',
+      cond: { k: 'const', value: 1 },
+      then: [put(1), put(2), { k: 'while', cond: { k: 'const', value: 1 }, body: [put(7), put(8)] }],
+      else: [],
+    },
+  ]);
+
+  /** every `nestedLoop` the admission table is asked about, under one region rule */
+  const nestedLoopFlags = (regions: 'whole' | 'per-region'): boolean[] => {
+    const seen: boolean[] = [];
+    const probe = {
+      id: 'probe',
+      why: 'records the ctx and admits — a census, not a rule',
+      sound: false,
+      rejects: (c: { nestedLoop: boolean }) => {
+        seen.push(c.nestedLoop);
+        return false;
+      },
+    };
+    const table = regions === 'whole' ? SCOPEBASE_GATES : REGIONBASE_GATES;
+    hoistScopedBases(IN_A_NESTED_LOOP, { regions, gates: [probe, ...table] });
+    return seen;
+  };
+
+  test("`'whole'` really is asked the question — the fixture is not vacuous", () => {
+    expect(nestedLoopFlags('whole').some(Boolean)).toBe(true);
+  });
+
+  test("…and under `'per-region'` the answer is always false, so the rule is not in the table", () => {
+    const flags = nestedLoopFlags('per-region');
+    expect(flags.length).toBeGreaterThan(0);
+    expect(flags.some(Boolean)).toBe(false);
+    expect(REGIONBASE_GATES.map((g) => g.id)).not.toContain('nested-loop-use');
+    expect(SCOPEBASE_GATES.map((g) => g.id)).toContain('nested-loop-use');
+  });
+});
+
 describe('the lever is OFFERED, and it reaches the shape the row needs', () => {
   // The real `synthetic:dmascope` disassembly. Its DMA base 0x040000D4 is spelled in three disjoint
   // regions — each `if` arm of a loop body, and the post-loop tail — and no lever asmlift ships

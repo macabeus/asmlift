@@ -61,7 +61,7 @@ import { assertHoistsDominate } from '../contracts';
 import { type IrType, T, scalarTypeForAccess } from '../ir/types';
 import type { Expr, SFn, Stmt } from './ast';
 import { mapExprChildren, stmtExprs, stmtLists } from './ast';
-import { type Gate, firstRejection } from './gates';
+import { type Gate, ablateHeuristic, firstRejection } from './gates';
 import { nameAllocator } from './hoist';
 import { addressableGlobals } from './storage';
 
@@ -435,8 +435,18 @@ const perRegionReading = (g: Gate<RegionCtx>): Gate<RegionCtx> =>
     ? { ...g, id: `region-${g.id}`, why: `${g.why} — judged over ONE region's direct uses` }
     : g;
 
-/** `/regionbase`'s admission (rank.ts): the per-region readings of `SCOPEBASE_GATES`, plus the one
- *  rule that exists only once a key can hold MORE THAN ONE local.
+/** `/regionbase`'s admission (rank.ts): the per-region readings of `SCOPEBASE_GATES`, MINUS the one
+ *  rule the region rule makes vacuous, plus the one that exists only once a key can hold MORE THAN
+ *  ONE local.
+ *
+ *  `nested-loop-use` CANNOT FIRE under `'per-region'` and is dropped rather than left in the table
+ *  reading as safety. `perRegions` sets a region's `depth` to `u.path.length`, and a region is
+ *  exactly the uses whose innermost enclosing list IS that region — so `u.loop.slice(depth)` is
+ *  the empty slice for every use it judges, and "a use under a loop BELOW the region" is a shape
+ *  the partition cannot produce. A use inside a nested loop is its own region, at its own depth.
+ *  Measured, not only derived: over the klonoa corpus with no symbol map (257 lifting functions,
+ *  341840 `'per-region'` admission contexts) the predicate rejects 0, while the same rule under
+ *  `'whole'` rejects 6560 of 79880 and stays in `SCOPEBASE_GATES`, where it is load-bearing.
  *
  *  `regions-degenerate` is an honest fan saving, not a codegen model, and is stated that way
  *  rather than credited with a match it does not protect: it counts regions holding two or more
@@ -444,7 +454,7 @@ const perRegionReading = (g: Gate<RegionCtx>): Gate<RegionCtx> =>
  *  gate runs. One such region is the function-top question `basecse`/`/livebase`/`/scopebase`
  *  already answer, so serving it here adds a spelling those levers already offer. */
 export const REGIONBASE_GATES: readonly Gate<RegionCtx>[] = [
-  ...SCOPEBASE_GATES.map(perRegionReading),
+  ...ablateHeuristic(SCOPEBASE_GATES.map(perRegionReading), 'nested-loop-use'),
   {
     id: 'regions-degenerate',
     why: 'one region is the function-top hoist basecse and /livebase already offer',
