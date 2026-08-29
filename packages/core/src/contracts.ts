@@ -304,13 +304,13 @@ export function assertLocalsWritten(sfn: SFn): void {
  *  answer becomes a reported lever error instead of a scored spelling.
  *
  *  IT LIVES HERE, beside `assertLocalsWritten`, because it has that check's population and that
- *  check's call site. `rank.ts` already names the population by hand — "levers that place a def —
- *  l3/sinkinit.ts, l3/basecse.ts's first-use policy, l3/nearbase.ts, l3/scopebase.ts,
- *  l3/argbase.ts — are exactly the population that can produce it, so the check belongs on every
- *  lever tree rather than on theirs" — and `assertPlacementSurvives` below is wired into `respell`
- *  for EVERY lever, not just the one whose file this used to be. The earlier argument for keeping
- *  it in `l3/scopebase.ts` ("a general dominance contract has no other inhabitant") was falsified
- *  by the commit that wired the differential.
+ *  check's call site: levers that place a def — l3/sinkinit.ts, l3/basecse.ts's first-use policy,
+ *  l3/nearbase.ts, l3/reindex.ts, l3/scopebase.ts, l3/argbase.ts — are the population that can
+ *  produce the failure, so the check belongs on every lever tree rather than on one lever's.
+ *
+ *  ABSOLUTELY, it has one caller (l3/scopebase.ts, over its own plan). Everywhere else it is
+ *  reached through `assertPlacementSurvives` below, which is a DIFFERENTIAL — so a placement no
+ *  lever's tree ever satisfied is not judged, and a lever that mints nothing is not judged at all.
  *
  *  A nested list gets a COPY of the reaching set, so an assignment inside one arm does not count as
  *  reaching anything after the `if`. */

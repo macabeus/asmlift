@@ -1296,15 +1296,23 @@ export function enumerateCandidates(
     });
     // THE PLACEMENT DIFFERENTIAL, one composition inwards. `respell` re-checks a lever's
     // placement across the statement SHAPES derived onto it; the lever-on-lever products below
-    // are the same hazard in the same file and were outside it, because the composition happens
+    // are the same hazard in the same file and are outside it, because the composition happens
     // INSIDE one `make()` thunk and the intermediate tree never reaches `respell`'s check. A
-    // def-MOVING pass (`sinkInitsToFirstUse`, `nearBaseClusters`) running on a tree a PLACING
-    // lever built can move a def below a use exactly as a shape can. Same differential, so a
-    // placement neither pass can model is not judged either way, and the throw lands inside the
-    // thunk — a reported, dropped candidate.
+    // def-MOVING pass (`sinkInitsToFirstUse`, `nearBaseClusters`, `reindexWalks`) running on a
+    // tree a PLACING lever built can move a def below a use exactly as a shape can. Same
+    // differential, so a placement neither pass can model is not judged either way, and the throw
+    // lands inside the thunk — a reported, dropped candidate.
+    //
+    // BOTH SIDES' minted locals, because the mover MINTS TOO: `nearBaseClusters` creates the
+    // cluster base it then places, and `reindexWalks` creates the induction variable, so the
+    // outer lever's name diff alone is empty for a standalone mover and a strict subset for a
+    // composition — the mover's own stranding of its own local walks straight through. Judging a
+    // name the BEFORE tree does not carry keeps the differential honest rather than turning it
+    // absolute: a name absent from `before` is never read there, so that walk passes and only the
+    // `after` placement is judged.
     const survives = (before: SFn | null, after: SFn | null): SFn | null => {
       if (before !== null && after !== null) {
-        assertPlacementSurvives(before, after, createdLocals(sfn, before));
+        assertPlacementSurvives(before, after, new Set([...createdLocals(sfn, before), ...createdLocals(sfn, after)]));
       }
       return after;
     };
@@ -1321,11 +1329,11 @@ export function enumerateCandidates(
     for (const { suffix, hoist, volatiles } of paired) {
       respell(`${suffix}/indexed`, () => {
         const r = hoist();
-        return r ? reindexWalks(r) : null;
+        return r ? survives(r, reindexWalks(r)) : null;
       });
       respell(`${suffix}/volatile/indexed`, () => {
         const r = volatiles();
-        return r ? reindexWalks(r) : null;
+        return r ? survives(r, reindexWalks(r)) : null;
       });
     }
     // The livebase × sinkinit PAIRINGS — the same admission again: row-demanded
