@@ -543,13 +543,13 @@ export function stmtChildren(s: Stmt): Stmt[] {
 /** The nested statement LISTS of a statement — the SCOPES it opens.
  *
  *  Deliberately not `stmtChildren`, which flattens a `for`'s `init`/`inc` in with its body: those
- *  are single statements, not lists, and nothing may be PLACED in either (before the loop changes
- *  when it runs, inside the body repeats it). A `for`'s body IS a list and is included.
+ *  are single statements, not lists. A `for`'s body is the only list here, which is what a caller
+ *  that PLACES into a list wants (`l3/scopebase.ts` — before the loop changes when a statement
+ *  runs, inside the body repeats it) and not what a caller that reads the init as a DEF wants
+ *  (`contracts.ts`'s dominance walk, which descends into the loop's parts itself).
  *
- *  Two callers need exactly this cut and for the same reason — `l3/scopebase.ts` places into a
- *  list and `contracts.ts`'s dominance walk gives each list its own reaching set — so it lives
- *  here, where a new `Stmt` kind carrying a list is one compile error rather than two silent
- *  misses. Exhaustive on purpose: no `default`.
+ *  It lives here so a new `Stmt` kind carrying a list is one compile error rather than a silent
+ *  miss in each caller's own recursion. Exhaustive on purpose: no `default`.
  */
 export function stmtLists(s: Stmt): Stmt[][] {
   switch (s.k) {

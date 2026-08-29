@@ -368,14 +368,16 @@ export function assertHoistsDominate(sfn: SFn, minted: ReadonlySet<string>): voi
 /** The same guarantee across a re-spelling that MOVES statements over a placement another pass
  *  already made — `rank.ts`'s statement shapes (`/initfirst`, `/pollguard`, `/pollread`), derived
  *  onto every lever tree after the lever placed its defs, and the lever-on-lever compositions in
- *  the same file where a def-moving pass (`sinkInitsToFirstUse`, `nearBaseClusters`) runs on a
- *  tree a placing lever built. `pollReads` folds a materialized re-read back into a loop
- *  condition, which is exactly such a move.
+ *  the same file where a def-moving pass (`sinkInitsToFirstUse`, `nearBaseClusters`,
+ *  `reindexWalks`) runs on a tree a placing lever built. `pollReads` folds a materialized re-read
+ *  back into a loop condition, which is exactly such a move.
  *
- *  A DIFFERENTIAL, and that is what makes it safe to apply to every lever rather than this one:
- *  the walk judges the reshaped tree only where it already described the unshaped one, so a
- *  placement it cannot model (a def inside a loop body read earlier in the same body is assigned
- *  on every iteration but the first) is not judged by it either way. */
+ *  A DIFFERENTIAL, which is what makes it safe on every lever: the walk judges the reshaped tree
+ *  only where it already described the unshaped one, so a placement it cannot model (a def inside
+ *  a loop body read earlier in the same body is assigned on every iteration but the first) is not
+ *  judged either way. `minted` may name a local `before` does not carry — a mover mints its own —
+ *  and that one is judged absolutely, which is the same thing: a name absent from `before` is
+ *  never read there. */
 export function assertPlacementSurvives(before: SFn, after: SFn, minted: ReadonlySet<string>): void {
   if (minted.size === 0) {
     return;

@@ -1,11 +1,9 @@
 // A SHAPE IS ITS OWN CANDIDATE — and it must fail as its own candidate.
 //
 // `rank.ts`'s `respell` derives the statement shapes (`/initfirst`, `/pollguard`, `/pollread`, and
-// all of them together) onto every lever tree inside the lever's ONE try. So a throw while
-// deriving the FIRST subset used to discard every later one as well — three spellings lost to a
-// failure that had nothing to do with them — and the report named `name + suffix`, the BASE
-// lever's label, which names no shape at all. Two facts, one loop: the later shapes survive, and
-// the error names the shape that failed.
+// all of them together) onto every lever tree. Each subset gets its own try, so two facts hold of
+// that loop: a throw deriving one subset leaves the later ones in the fan, and the report names
+// `name + suffix + shapeSuffix` — the shape that failed, not the base lever's label.
 //
 // The shapes are mocked because no committed disassembly fires more than `/initfirst`: the fixture
 // that would exercise this naturally is a compiler fact nobody has, and the isolation is a

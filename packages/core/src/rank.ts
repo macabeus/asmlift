@@ -996,11 +996,9 @@ export function enumerateCandidates(
           // whose def a shape moved below a read is the same wrongness as a placed one.
           const minted = createdLocals(sfn, alt);
           for (const subset of SHAPE_SUBSETS) {
-            // ONE TRY PER SHAPE. The shapes share the lever's outer try, so a throw on the first
-            // subset used to discard every LATER subset as well — `/pollguard`, `/pollread` and
-            // the all-shapes spelling vanished on a failure that had nothing to do with them —
-            // and `onLeverError` was told the base lever's suffix, which named no shape at all.
-            // A shape is its own candidate; it fails as its own candidate, under its own label.
+            // ONE TRY PER SHAPE — a shape is its own candidate and fails as its own candidate.
+            // Sharing the lever's outer try would let a throw deriving one subset discard every
+            // later one, under a label (the base lever's suffix) that names no shape at all.
             const shapeSuffix = subset.map((x) => x.suffix).join('');
             try {
               const shaped = applyShapes(subset, alt);
@@ -1203,25 +1201,20 @@ export function enumerateCandidates(
     // lever exists for is a DEVICE base (the DMA block at 0x040000D4), and the project's own
     // reference spells it `vu32 *dmaRegs`; without the product every region local this lever wins
     // with is published UNqualified, and `compareScored`'s `deviceVolatile` term — which prefers
-    // the qualified twin on a tie — never sees a qualified twin to prefer. Measured on
-    // `synthetic:dmascope` and `synthetic:dmascope2` the two spellings are byte-identical (9 and
-    // 13 either way), so the qualifier costs nothing there and the tie-break decides; on
-    // LoadBGTilemapData the same pairing is sign-varying by ±11 across the lever's own candidates,
-    // so it is a candidate like any other and the differ referees.
+    // the qualified twin on a tie — never sees a qualified twin to prefer. It is a candidate like
+    // any other where the qualifier costs bytes, and the differ referees.
     const regionVolatile = (): SFn | null => {
       const r = regionbase();
       return r ? volatilePtrLocals(r, createdLocals(sfn, r)) : null;
     };
     respell('/regionbase/volatile', regionVolatile);
-    // …and the `/vol-store` triple. `/volatile` qualifies a pointer LOCAL, `/vol-store` a STORE
-    // SITE, and this lever is the one that leaves BOTH in a single function: it homes the regions
-    // that hold two or more direct uses and leaves every other spelling of the same device address
-    // inline. On `synthetic:dmascope` that residue is `((s32 *)67109076)[2] = v1;` — the write to
-    // REG_DMA0CNT that STARTS the transfer — published bare beside three `volatile s32 *` region
-    // locals. The pairing is free (both spellings score 9 there) and `compareScored`'s
-    // `deviceVolatile` term elects the one making the extra claim, 4 against 3.
-    // (l3/volstore.ts's note that a `/volatile` × `/vol-store` pairing has no inhabitant is about
-    // `/volatile` over the tree's OWN locals, where the two levers' reach really is disjoint.)
+    // …and the `/vol-store` triple, the pairing this lever is the first to inhabit (see
+    // l3/volstore.ts, where the two qualifiers' reach over a tree's OWN locals is disjoint).
+    // `/volatile` qualifies a pointer LOCAL and `/vol-store` a STORE SITE, and this lever leaves
+    // both in one function: it homes the regions holding two or more direct uses and leaves every
+    // other spelling of the same device address inline. On `synthetic:dmascope` that residue is
+    // the write to REG_DMA0CNT that STARTS the transfer, and without the triple it is published
+    // bare beside three `volatile s32 *` region locals.
     respell('/regionbase/volatile/vol-store', () => {
       const v = regionVolatile();
       return v ? volStore(v) : null;

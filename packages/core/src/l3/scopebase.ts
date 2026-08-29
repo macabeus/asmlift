@@ -449,8 +449,7 @@ export const SCOPEBASE_GATES: readonly Gate<RegionCtx>[] = [...COUNTING_RULES, .
  *  is judged over the KEY's uses (the cluster fallback serves a SUBSET of them, so the two really
  *  do differ), under `'per-region'` over one region's direct uses. One id naming two predicates
  *  makes `without(table, id)` two different ablations and a price table ambiguous about which
- *  reading it priced, so the per-region reading gets its own id and the population that decides it
- *  lives in the rule value below. */
+ *  reading it priced, so the per-region reading gets its own id. */
 const perRegionReading = (g: Gate<RegionCtx>): Gate<RegionCtx> => ({
   ...g,
   id: `region-${g.id}`,

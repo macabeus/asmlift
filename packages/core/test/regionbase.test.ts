@@ -122,23 +122,18 @@ describe('the admission rules are judged over the REGION, and it is a refinement
     expect(hoists(arms(out).else)).toEqual(['p0']); // ...and its sibling is judged on its own uses
   });
 
-  test('regions-degenerate: a single region is basecse`s own question, and is left to it', () => {
+  test('regions-degenerate: a single region is left to the function-top hoist', () => {
     const one = fn([{ k: 'if', cond: { k: 'const', value: 1 }, then: [put(1), put(2)], else: [] }]);
     expect(hoists(arms(hoistScopedBases(one)).then)).toEqual(['p0']); // 'whole' still names it
     expect(hoistScopedBases(one, { regions: 'per-region' })).toBeNull();
   });
 
-  test('a base the function ALREADY homes is served anyway — `key-already-homed` is gone', () => {
-    // The rule refused a key when a function-top statement already assigned that base to a local.
-    // It was priced at ZERO on the row it was written against, and it MISSED the shape it names on
-    // two counts at once: `homedBases` scanned top-level statements only, while `/defsite` sinks
-    // the home into the arms; and it required a `cast` wrapper, while a base home reaches L3 as a
-    // bare `v0 = 67109076` (the backend spells the cast from the local's declared type). The
-    // branch's own published `synthetic:dmascope2` winner was the counterexample.
-    //
-    // Made to mean what it says — recursive, cast-optional — it costs that row 12 points
-    // (diff:13 -> diff:25, back to the pre-lever winner). A rule measured at zero may not take
-    // twelve, so it is deleted rather than repaired.
+  test('a base the function ALREADY homes is served anyway', () => {
+    // No rule refuses a key because some statement already assigned that base to a local, and the
+    // absence is deliberate. Such a rule has to be RECURSIVE (`/defsite` sinks the home into the
+    // arms) and CAST-OPTIONAL (a base home reaches L3 as a bare `v0 = 67109076`; the backend
+    // spells the cast from the local's declared type) to mean what it says — and stated that way
+    // it costs `synthetic:dmascope2` twelve points, diff:13 to diff:25.
     const homed: SFn = {
       ...fn([
         { k: 'assign', name: 'q', value: { k: 'cast', to: T.ptr(T.u(16)), e: { k: 'addr', name: 'g' } } },
