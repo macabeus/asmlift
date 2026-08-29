@@ -384,6 +384,15 @@ export interface RegionCtx {
  *  saw. It also SLIPS on a fixed offset not spelled as a literal — two identical `g[i]` accesses
  *  are not tallied. rank's `/livebase` takes the OPPOSITE side, ablating the same rule in
  *  `LIVEBASE_GATES` for the poll shapes it mispredicts, and the differ arbitrates. */
+/** MEASURED REACH, so a reader prices these from evidence rather than from the table's existence.
+ *  Instrumented census over the klonoa corpus with no symbol map (469 `.s`, 257 lifting functions),
+ *  every rule evaluated independently on every admission context the pass builds:
+ *
+ *      table   contexts   single-use   repeated-const-offset   per-iteration-use   nested-loop-use
+ *      SB        79880        24268                   54120               8784              6560
+ *      RB       341840       262102                   63238              21724                 —
+ *
+ *  (`RB` reads the per-region ids; `nested-loop-use` is not in that table — see below.) */
 export const SCOPEBASE_GATES: readonly Gate<RegionCtx>[] = [
   {
     id: 'single-use',
@@ -439,7 +448,15 @@ const perRegionReading = (g: Gate<RegionCtx>): Gate<RegionCtx> =>
  *  rather than credited with a match it does not protect: it counts regions holding two or more
  *  DIRECT uses, which is exactly `single-use` applied region-wise and so is computable before any
  *  gate runs. One such region is the function-top question `basecse`/`/livebase`/`/scopebase`
- *  already answer, so serving it here adds a spelling those levers already offer. */
+ *  already answer, so serving it here adds a spelling those levers already offer.
+ *
+ *  NO BENCHMARK ROW EXERCISES A `/regionbase` REFUSAL, and this table says so rather than borrowing
+ *  a control it does not have. `synthetic:dmascope1` and `synthetic:offhi_fused` are the
+ *  OVER-SCOPING controls for the ROW — they must stay MATCH — but they are ZERO-REACH for this
+ *  lever and cannot show any rule here is load-bearing: censused on their own disassembly at this
+ *  commit, `dmascope1` enumerates 6 candidates with 0 carrying `/regionbase` and `offhi_fused` 12
+ *  with 0. Every entry below is guarded by a UNIT fixture in test/regionbase.test.ts and by the
+ *  reach census above, and by nothing else. */
 export const REGIONBASE_GATES: readonly Gate<RegionCtx>[] = [
   ...ablateHeuristic(SCOPEBASE_GATES.map(perRegionReading), 'nested-loop-use'),
   {
