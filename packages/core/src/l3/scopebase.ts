@@ -8,7 +8,11 @@
 //                  ranges exist, NOT on where they are declared: the three-at-function-top spelling
 //                  and the three-block-scoped one assemble byte-identically. So there is no nested
 //                  declaration block here and none is needed — the locals are declared at function
-//                  top and only their ASSIGNMENTS are placed per region.
+//                  top and only their ASSIGNMENTS are placed per region. That compiler fact is
+//                  PINNED rather than asserted: packages/cli/test/matching/decl-scope-axis.test.ts
+//                  compiles both spellings through the project's own agbcc and compares the object
+//                  bytes, and compiles a count-collapsed third spelling to show the COUNT is not
+//                  free either.
 //
 // The lever earns its place: returning `null` from `hoistScopedBases` costs
 // kleod:UpdateHUDCounterDisplay its match, so the benchmark's zero-lost gate guards this file.

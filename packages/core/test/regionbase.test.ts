@@ -9,7 +9,9 @@
 // live ranges exist, not on where they are declared: the three-locals-at-function-top spelling and
 // the three-block-scoped-declarations spelling assemble to byte-identical code on the row this was
 // built for. So there is no nested declaration block here and none is needed — the locals are
-// declared at function top and only their ASSIGNMENTS are placed per region.
+// declared at function top and only their ASSIGNMENTS are placed per region. This file cannot
+// CHECK that (it is toolchain-free); packages/cli/test/matching/decl-scope-axis.test.ts compiles
+// both spellings and compares the bytes, in BOTH directions — placement free, count not.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
