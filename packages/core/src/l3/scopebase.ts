@@ -149,6 +149,12 @@ interface Site {
  *  `for`-part note below. The pass then declines outright. */
 let compound = false;
 
+/** Set when one `index` OBJECT sits at two tree positions. The rewrite repoints by node identity,
+ *  so a shared node is one plan entry claiming two uses it need not dominate; nothing in the L3
+ *  contract forbids the sharing and no producer emits it, so the pass declines the whole function.
+ *  Not a `Gate`: it refuses the FUNCTION, and `firstRejection` has no ctx for that. */
+let sharedNode = false;
+
 /** Walk every expression in the tree, recording each eligible access's key and its scope path. */
 function collect(
   body: Stmt[],
@@ -158,11 +164,16 @@ function collect(
   loop: boolean[],
   idxPath: number[],
   rules: readonly Gate<AccessCtx>[],
+  seenNodes: Set<Expr>,
 ): void {
   let at = 0;
   const visit = (e: Expr, perIteration: boolean): void => {
     const ix = eligible(e, globals, rules);
     if (ix) {
+      if (seenNodes.has(ix)) {
+        sharedNode = true;
+      }
+      seenNodes.add(ix);
       const k = keyOf(ix);
       const rec = out.get(k) ?? { uses: [], sample: ix, constOff: new Map<number, number>() };
       rec.uses.push({ path, loop, perIteration, idx: [...idxPath, at] });
@@ -208,7 +219,7 @@ function collect(
       stmtExprs(s.inc).forEach((e) => visit(e, true));
     }
     for (const child of childLists(s)) {
-      collect(child, globals, out, [...path, child], [...loop, isLoop], [...idxPath, i], rules);
+      collect(child, globals, out, [...path, child], [...loop, isLoop], [...idxPath, i], rules, seenNodes);
     }
   }
 }
@@ -362,13 +373,14 @@ export function hoistScopedBases(sfn: SFn, opts: ScopeBaseOpts = {}): SFn | null
   const rules = opts.eligibility ?? SCOPEBASE_ELIGIBILITY;
   const gates = opts.gates ?? SCOPEBASE_GATES;
   compound = false;
+  sharedNode = false;
   const globals = addressableGlobals(sfn);
   const found = new Map<
     string,
     { uses: Site[]; sample: Extract<Expr, { k: 'index' }>; constOff: Map<number, number> }
   >();
-  collect(sfn.body, globals, found, [], [], [], rules);
-  if (compound) {
+  collect(sfn.body, globals, found, [], [], [], rules, new Set());
+  if (compound || sharedNode) {
     return null;
   }
 

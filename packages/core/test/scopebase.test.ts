@@ -448,3 +448,22 @@ describe('the admission rules are DATA, and every one of them is load-bearing', 
     ).toEqual(['p0']);
   });
 });
+
+describe('a structurally SHARED access node makes the pass decline outright', () => {
+  test('one `index` object at two tree positions is refused, the same shape unshared fires', () => {
+    // The plan repoints by NODE IDENTITY, so one object at two positions is one entry claiming two
+    // uses the hoist need not dominate. Nothing in the L3 contract forbids the sharing and no
+    // producer emits it today, so this is a loud decline rather than a second traversal. It is a
+    // whole-FUNCTION refusal with no per-candidate ctx, which is why it is not in the gate table.
+    const shared = ix(0, { idx: { k: 'var', name: 'i' } });
+    const arm: Stmt[] = [store(shared, { k: 'const', value: 0 }), store(shared, { k: 'const', value: 0 })];
+    expect(hoistScopedBases(fn([{ k: 'if', cond: { k: 'const', value: 1 }, then: arm, else: [] }]))).toBeNull();
+
+    const distinct: Stmt[] = [
+      store(ix(0, { idx: { k: 'var', name: 'i' } }), { k: 'const', value: 0 }),
+      store(ix(0, { idx: { k: 'var', name: 'i' } }), { k: 'const', value: 0 }),
+    ];
+    const out = hoistScopedBases(fn([{ k: 'if', cond: { k: 'const', value: 1 }, then: distinct, else: [] }]));
+    expect(hoists((out!.body[0] as Extract<Stmt, { k: 'if' }>).then)).toEqual(['p0']);
+  });
+});
