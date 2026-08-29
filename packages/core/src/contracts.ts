@@ -329,18 +329,31 @@ export function assertHoistsDominate(sfn: SFn, minted: ReadonlySet<string>): voi
     });
     return bad;
   };
+  const judge = (heads: readonly Expr[], live: ReadonlySet<string>): void => {
+    for (const e of heads) {
+      const bad = readUndominated(e, live);
+      if (bad) {
+        throw new ContractError(
+          `'${sfn.name}' reads '${bad}' where its assignment does not reach — ` +
+            `a def placed below a use it claims to serve`,
+        );
+      }
+    }
+  };
   const walk = (list: Stmt[], live: Set<string>): void => {
     for (const st of list) {
-      const heads = st.k === 'for' ? [...stmtExprs(st.init), ...stmtExprs(st), ...stmtExprs(st.inc)] : stmtExprs(st);
-      for (const e of heads) {
-        const bad = readUndominated(e, live);
-        if (bad) {
-          throw new ContractError(
-            `scopebase read '${bad}' in '${sfn.name}' where its assignment does not reach — ` +
-              `a hoist placed below a use it claims to serve`,
-          );
-        }
+      // A `for`'s INIT runs once, before the condition, the inc and the body — so its assignment
+      // reaches all three, and the loop's own parts are statements with their own nested lists.
+      // `l3/reindex.ts` mints an induction variable whose ONLY def is that init, so reading the
+      // `for` as one flat head list rejects every counted walk it spells.
+      if (st.k === 'for') {
+        walk([st.init], live);
+        judge(stmtExprs(st), live);
+        walk([st.inc], new Set(live));
+        walk(st.body, new Set(live));
+        continue;
       }
+      judge(stmtExprs(st), live);
       for (const child of stmtLists(st)) {
         walk(child, new Set(live));
       }
