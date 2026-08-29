@@ -46,26 +46,17 @@
 // ORDERING: `hoistBaseLocals` (basecse) runs unconditionally in `structureChecked`, BEFORE
 // rank's levers see the tree. So this pass's `addr`/`const` input is what basecse's DEFAULT table
 // refused — EVERY gate in it, single-use bases as much as loop and repeated-constant-offset ones —
-// which is why the two refusals below re-state basecse's rather than assuming those bases never
+// which is why `SCOPEBASE_GATES` re-states basecse's rules rather than assuming those bases never
 // arrive.
 import { type IrType, T, scalarTypeForAccess } from '../ir/types';
 import type { Expr, SFn, Stmt } from './ast';
 import { mapExprChildren, stmtExprs } from './ast';
+import { type Gate, firstRejection } from './gates';
 import { nameAllocator } from './hoist';
 import { addressableGlobals } from './storage';
 
-/** A base this lever may name: a leaf whose value is a fixed address.
- *
- *  `var` is included ONLY for a name in `SFn.globals`. That list is populated by `noteGlobal` alone
- *  (two call sites in structure.ts, both on the `bareArrayLead` path, which requires
- *  `shape === 'array'`) — so a `var` base here is always an ARRAY-declared global and `(T *)&gSym`
- *  is its start address under any declaration. The invariant is worth stating because it is what
- *  keeps a POINTER-shaped global out: for one of those, `(T *)&gPtr` names the pointer CELL rather
- *  than the object it points at, which would be silently the wrong address. A local `var` is
- *  excluded for the ordinary reason: it can be assigned between the hoist point and a use. */
+/** A base this lever may name: a leaf whose value is a fixed address. */
 type LeafBase = Extract<Expr, { k: 'addr' } | { k: 'const' } | { k: 'var' }>;
-const isLeaf = (e: Expr, globals: ReadonlySet<string>): e is LeafBase =>
-  e.k === 'addr' || e.k === 'const' || (e.k === 'var' && globals.has(e.name));
 
 /** THE identity of a base — what makes two accesses "the same address".
  *
@@ -73,19 +64,60 @@ const isLeaf = (e: Expr, globals: ReadonlySet<string>): e is LeafBase =>
  *  cell; keying on the NAME alone means a function that mixes them still sees one base. */
 const baseId = (b: LeafBase): string => (b.k === 'const' ? `c:${b.value}` : `n:${b.name}`);
 
-/** An access this lever may re-point, or null.
+/** One candidate ACCESS, as the eligibility rules see it. */
+export interface AccessCtx {
+  readonly base: LeafBase;
+  readonly lead: readonly number[] | undefined;
+  /** the names declared as GLOBALS in this function — a local or param of the same name is absent */
+  readonly addressable: ReadonlySet<string>;
+}
+
+/** Which accesses this lever may re-point. BOTH rules are SOUND: each one, removed, makes the
+ *  rewrite name DIFFERENT BYTES — C that compiles, type-checks and scores, which is the failure
+ *  mode nothing downstream catches.
  *
- *  REFUSES a non-zero `lead`. `lead` pins the leading subscripts of a multidimensional array, so
- *  `g[1][i]` is a whole ROW past `g[0][i]`. The hoisted local points at the START of the object, and
- *  the rewrite DROPS the lead — sound only when every leading subscript is 0. A non-zero lead would
- *  silently address the wrong row, which no contract checks: the tree stays well-typed and
- *  spellable, it just names different bytes. (Today `bareArrayLead` only ever emits zeros; this
- *  guard is what keeps that an implementation detail rather than a correctness dependency.) */
-function eligible(e: Expr, globals: ReadonlySet<string>): Extract<Expr, { k: 'index' }> | null {
-  if (e.k !== 'index' || !isLeaf(e.base, globals)) {
+ *  `lead` pins the leading subscripts of a multidimensional array, so `g[1][i]` is a whole ROW past
+ *  `g[0][i]`; the hoisted local points at the START of the object and the rewrite DROPS the lead.
+ *  (Today `bareArrayLead` only ever emits zeros; the guard is what keeps that an implementation
+ *  detail rather than a correctness dependency.)
+ *
+ *  A `var` base is admitted ONLY for a name in `SFn.globals`. That list is populated by `noteGlobal`
+ *  alone (two call sites in structure.ts, both on the `bareArrayLead` path, which requires
+ *  `shape === 'array'`) — so a `var` base here is always an ARRAY-declared global and `(T *)&gSym`
+ *  is its start address under any declaration. For a POINTER-shaped global `(T *)&gPtr` names the
+ *  pointer CELL rather than the object it points at; for a LOCAL it names a cell something may
+ *  assign between the hoist point and a use. */
+export const SCOPEBASE_ELIGIBILITY: readonly Gate<AccessCtx>[] = [
+  {
+    id: 'nonzero-lead',
+    why: 'the rewrite drops `lead`, so a non-zero one would name a different array row',
+    sound: true,
+    guardedBy: 'scopebase.test.ts: a NON-ZERO lead is refused',
+    rejects: (c) => (c.lead ?? []).some((n) => n !== 0),
+  },
+  {
+    id: 'shadowed-or-nonarray-base',
+    why: '`&name` on a local or a pointer-shaped global names a different object',
+    sound: true,
+    guardedBy: 'addr-placement.test.ts: scopebase declines the shadowed name rather than take its address',
+    rejects: (c) => c.base.k === 'var' && !c.addressable.has(c.base.name),
+  },
+];
+
+/** An access this lever may re-point, or null. */
+function eligible(
+  e: Expr,
+  globals: ReadonlySet<string>,
+  rules: readonly Gate<AccessCtx>[],
+): Extract<Expr, { k: 'index' }> | null {
+  if (e.k !== 'index') {
     return null;
   }
-  return (e.lead ?? []).every((n) => n === 0) ? e : null;
+  const b = e.base;
+  if (b.k !== 'addr' && b.k !== 'const' && b.k !== 'var') {
+    return null;
+  }
+  return firstRejection(rules, { base: b, lead: e.lead, addressable: globals }) === null ? e : null;
 }
 
 /** The (base, access-shape) key an access shares with its reuse siblings. Width and signedness are
@@ -125,10 +157,11 @@ function collect(
   path: Stmt[][],
   loop: boolean[],
   idxPath: number[],
+  rules: readonly Gate<AccessCtx>[],
 ): void {
   let at = 0;
   const visit = (e: Expr, perIteration: boolean): void => {
-    const ix = eligible(e, globals);
+    const ix = eligible(e, globals, rules);
     if (ix) {
       const k = keyOf(ix);
       const rec = out.get(k) ?? { uses: [], sample: ix, constOff: new Map<number, number>() };
@@ -175,7 +208,7 @@ function collect(
       stmtExprs(s.inc).forEach((e) => visit(e, true));
     }
     for (const child of childLists(s)) {
-      collect(child, globals, out, [...path, child], [...loop, isLoop], [...idxPath, i]);
+      collect(child, globals, out, [...path, child], [...loop, isLoop], [...idxPath, i], rules);
     }
   }
 }
@@ -248,32 +281,93 @@ function deepestCluster(all: Site[]): { scope: Stmt[]; depth: number; uses: Site
   return best;
 }
 
-/** Does any use sit inside a LOOP nested below the chosen scope?
+/** The two loop facts, split apart because they are two different rules with two different
+ *  arguments — see the gate table.
  *
- *  OVER-REFUSES in two shapes, deliberately: a `do { … } while (g[1]) ;` body head and a
- *  `for (…; …; i = g[5])` body head both DO run at the flagged cadence, so a hoist there would be
- *  legal. Refusing them costs a missed spelling and nothing else (bench: 0 lost, 0 gained), and the
- *  precise rule needs the loop-DEPTH model an extraction would bring. Otherwise:
- *  the hoist would be loop-invariant code motion to a point the original never had — the
- *  register-pressure failure `basecse.ts`'s own `inLoop` gate refuses, and the reason that gate
- *  exists. When EVERY use is inside the loop, the common scope IS the loop body: the assignment
- *  then runs per iteration exactly as the inline spelling did, and there is nothing to refuse. */
-function underNestedLoop(uses: Site[], depth: number): boolean {
-  return uses.some((u) => u.perIteration || u.loop.slice(depth).some(Boolean));
+ *  `perIteration` OVER-REFUSES in two shapes, deliberately: a `do { … } while (g[1]) ;` body head
+ *  and a `for (…; …; i = g[5])` body head both DO run at the flagged cadence, so a hoist there
+ *  would be legal. Refusing them costs a missed spelling and nothing else (bench: 0 lost, 0
+ *  gained), and the precise rule needs a loop-DEPTH model. When EVERY use is inside the loop the
+ *  scope IS the loop body: the assignment then runs per iteration exactly as the inline spelling
+ *  did, and `nestedLoop` is false — there is nothing to refuse. */
+const runsPerIteration = (uses: Site[]): boolean => uses.some((u) => u.perIteration);
+const underNestedLoop = (uses: Site[], depth: number): boolean => uses.some((u) => u.loop.slice(depth).some(Boolean));
+
+/** One candidate REGION — a statement list, the uses it would name, and the shape facts the
+ *  admission rules read. */
+export interface RegionCtx {
+  /** how many uses the local would serve */
+  readonly uses: number;
+  /** some constant offset is reached twice through this base */
+  readonly repeatedConstOffset: boolean;
+  /** some use runs at a cadence no reachable scope has — a loop's own condition, a `for`'s inc */
+  readonly perIteration: boolean;
+  /** some use sits inside a loop nested BELOW the region */
+  readonly nestedLoop: boolean;
+}
+
+/** The admission rules. NONE is sound: a wrong choice here names the same address in a different
+ *  place, so it costs bytes and a match, never meaning — the eligibility table above is where
+ *  meaning is at stake, and `rank.ts` keeps the un-hoisted spelling beside every candidate.
+ *
+ *  `repeated-const-offset` and `nested-loop-use` are inherited from `BASECSE_GATES`, which learned
+ *  them by losing the ProcessHBlankWait match and by forcing a callee-saved register across a loop.
+ *  `per-iteration-use` is the half of the loop question basecse never faces: this pass places into
+ *  a NESTED list, and no reachable list runs at a loop condition's cadence.
+ *
+ *  `repeated-const-offset` is an EXTRAPOLATION on half this pass's input, and honestly so: the
+ *  evidence is a `const` MMIO address, and the `var` (array-global) half is input basecse never
+ *  saw. It also SLIPS on a fixed offset not spelled as a literal — two identical `g[i]` accesses
+ *  are not tallied. rank's `/livebase` takes the OPPOSITE side, ablating the same rule in
+ *  `LIVEBASE_GATES` for the poll shapes it mispredicts, and the differ arbitrates. */
+export const SCOPEBASE_GATES: readonly Gate<RegionCtx>[] = [
+  {
+    id: 'single-use',
+    why: 'one access re-materializes as cheaply as a named local',
+    sound: false,
+    rejects: (c) => c.uses < 2,
+  },
+  {
+    id: 'repeated-const-offset',
+    why: 'a fixed offset touched twice is a scalar RMW, which the compiler re-materializes',
+    sound: false,
+    rejects: (c) => c.repeatedConstOffset,
+  },
+  {
+    id: 'per-iteration-use',
+    why: 'no scope reachable from the use runs at a loop condition or `for` inc cadence',
+    sound: false,
+    rejects: (c) => c.perIteration,
+  },
+  {
+    id: 'nested-loop-use',
+    why: 'hoisting out of a nested loop is code motion to a point the original never had',
+    sound: false,
+    rejects: (c) => c.nestedLoop,
+  },
+];
+
+/** How `hoistScopedBases` may be re-run: with one rule dropped (the ablation differentials in
+ *  test/scopebase.test.ts) — nothing here changes what the default call does. */
+export interface ScopeBaseOpts {
+  readonly eligibility?: readonly Gate<AccessCtx>[];
+  readonly gates?: readonly Gate<RegionCtx>[];
 }
 
 /**
  * The `/scopebase` re-spelling, or null when nothing qualifies (the caller then adds no candidate
  * rather than a duplicate of the primary).
  */
-export function hoistScopedBases(sfn: SFn): SFn | null {
+export function hoistScopedBases(sfn: SFn, opts: ScopeBaseOpts = {}): SFn | null {
+  const rules = opts.eligibility ?? SCOPEBASE_ELIGIBILITY;
+  const gates = opts.gates ?? SCOPEBASE_GATES;
   compound = false;
   const globals = addressableGlobals(sfn);
   const found = new Map<
     string,
     { uses: Site[]; sample: Extract<Expr, { k: 'index' }>; constOff: Map<number, number> }
   >();
-  collect(sfn.body, globals, found, [], [], []);
+  collect(sfn.body, globals, found, [], [], [], rules);
   if (compound) {
     return null;
   }
@@ -282,25 +376,10 @@ export function hoistScopedBases(sfn: SFn): SFn | null {
   // key → (scope list identity, local name)
   const plan: { scope: Stmt[]; key: string; name: string; type: IrType; base: LeafBase; before: number }[] = [];
   for (const [key, rec] of found) {
-    if (rec.uses.length < 2) {
-      continue; // one access re-materializes as cheaply as a named local
-    }
-    // A constant offset touched 2+ times is a SCALAR re-access at one fixed location (an MMIO
-    // read-modify-write, a repeated `*p`), which the compiler re-materializes rather than
-    // register-holds. basecse.ts learned this by LOSING the ProcessHBlankWait match to it. Inherited
-    // here rather than re-lost — but honestly: the evidence is a `const` MMIO address, and it
-    // applies cleanly only to the `addr`/`const` half of this pass's input, which is exactly what
-    // basecse refused and left behind. For the `var` (array-global) half basecse never ran, so this
-    // is an EXTRAPOLATION, not an inheritance. Conservative direction, so the cost is a missed
-    // hoist rather than a wrong one. It also SLIPS on a fixed offset not spelled as a literal —
-    // two identical `g[i]` accesses are not tallied — which basecse acknowledges in its own comment
-    // and which this pass is MORE exposed to, since it deliberately admits loop-body uses, exactly
-    // the input basecse's `inLoop` gate kept away from that hole. rank's `/livebase` takes the
-    // OPPOSITE side — it ablates this same rule (LIVEBASE_GATES) for the poll shapes the rule
-    // mispredicts — and the differ arbitrates between the two spellings; a decision, not a drift.
-    if ([...rec.constOff.values()].some((n) => n >= 2)) {
-      continue;
-    }
+    // The count and the offset tally are judged over the KEY, the loop facts over the REGION the
+    // selector picks below — the scoping this pass has always used, now stated rather than implied
+    // by where each `continue` sat.
+    const repeatedConstOffset = [...rec.constOff.values()].some((n) => n >= 2);
     let at = commonScope(rec.uses);
     let uses = rec.uses;
     if (!at) {
@@ -325,7 +404,14 @@ export function hoistScopedBases(sfn: SFn): SFn | null {
       at = { scope: cluster.scope, depth: cluster.depth };
       uses = cluster.uses;
     }
-    if (underNestedLoop(uses, at.depth)) {
+    if (
+      firstRejection(gates, {
+        uses: rec.uses.length,
+        repeatedConstOffset,
+        perIteration: runsPerIteration(uses),
+        nestedLoop: underNestedLoop(uses, at.depth),
+      }) !== null
+    ) {
       continue;
     }
     const type = T.ptr(scalarTypeForAccess(rec.sample.width, rec.sample.signed));
@@ -349,7 +435,7 @@ export function hoistScopedBases(sfn: SFn): SFn | null {
   // to save/restore (or pass the bindings as an argument) before serving more than one cluster.
   const active = new Map<string, string>();
   const point = (e: Expr): Expr => {
-    const ix = eligible(e, globals);
+    const ix = eligible(e, globals, rules);
     if (ix) {
       const nm = active.get(keyOf(ix));
       if (nm) {

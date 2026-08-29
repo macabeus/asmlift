@@ -11,7 +11,8 @@ import { describe, expect, test } from 'vitest';
 
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
-import { hoistScopedBases } from '../src/l3/scopebase';
+import { without } from '../src/l3/gates';
+import { SCOPEBASE_ELIGIBILITY, SCOPEBASE_GATES, hoistScopedBases } from '../src/l3/scopebase';
 import { enumerateCandidates } from '../src/rank';
 import { ARMV4T_AGBCC } from '../src/target';
 
@@ -378,5 +379,72 @@ describe('a throwing lever is reported, not swallowed', () => {
     });
     // no lever throws on this input, so nothing is reported — the hook exists and is wired
     expect(seen).toEqual([]);
+  });
+});
+
+describe('the admission rules are DATA, and every one of them is load-bearing', () => {
+  // `firstRejection` cannot instrument an inline `continue`, and `without(table, id)` cannot ablate
+  // one. Each case below re-runs the REAL pass with one rule dropped and asserts the refusal it was
+  // holding back — the differential the `gates.ts` contract test cannot do for a pass.
+  const armOf = (out: SFn | null): Stmt[] => (out!.body[0] as Extract<Stmt, { k: 'if' }>).then;
+  const inArm = (arm: Stmt[], globals = G): SFn =>
+    fn([{ k: 'if', cond: { k: 'const', value: 1 }, then: arm, else: [] }], globals);
+
+  test('nonzero-lead: ablated, the pass names a base whose lead points at another ROW', () => {
+    const arm: Stmt[] = [store(ix(594, { lead: [1] }), ix(659, { lead: [1] }))];
+    expect(hoistScopedBases(inArm(arm))).toBeNull();
+    const out = hoistScopedBases(inArm(arm), { eligibility: without(SCOPEBASE_ELIGIBILITY, 'nonzero-lead') });
+    expect(hoists(armOf(out))).toEqual(['p0']);
+  });
+
+  test('shadowed-or-nonarray-base: ablated, the pass takes the address of a LOCAL', () => {
+    const arm: Stmt[] = [store(ix(1), ix(2))];
+    expect(hoistScopedBases(inArm(arm, []))).toBeNull();
+    const out = hoistScopedBases(inArm(arm, []), {
+      eligibility: without(SCOPEBASE_ELIGIBILITY, 'shadowed-or-nonarray-base'),
+    });
+    expect(hoists(armOf(out))).toEqual(['p0']);
+  });
+
+  test('single-use: ablated, one access still gets a local', () => {
+    const arm: Stmt[] = [store(ix(1), { k: 'const', value: 0 })];
+    expect(hoistScopedBases(inArm(arm))).toBeNull();
+    expect(hoists(armOf(hoistScopedBases(inArm(arm), { gates: without(SCOPEBASE_GATES, 'single-use') })))).toEqual([
+      'p0',
+    ]);
+  });
+
+  test('repeated-const-offset: ablated, the scalar RMW shape is named', () => {
+    const arm: Stmt[] = [store(ix(7), ix(7)), store(ix(7), ix(7))];
+    expect(hoistScopedBases(inArm(arm))).toBeNull();
+    expect(
+      hoists(armOf(hoistScopedBases(inArm(arm), { gates: without(SCOPEBASE_GATES, 'repeated-const-offset') }))),
+    ).toEqual(['p0']);
+  });
+
+  test('per-iteration-use: ablated, a loop-CONDITION use hoists above the loop', () => {
+    const body = [
+      {
+        k: 'while' as const,
+        cond: { k: 'bin' as const, op: '!=' as const, l: ix(1), r: { k: 'const' as const, value: 0 } },
+        body: [],
+      },
+      store(ix(2), { k: 'const', value: 0 }),
+    ];
+    expect(hoistScopedBases(inArm(body))).toBeNull();
+    expect(
+      hoists(armOf(hoistScopedBases(inArm(body), { gates: without(SCOPEBASE_GATES, 'per-iteration-use') }))),
+    ).toEqual(['p0']);
+  });
+
+  test('nested-loop-use: ablated, a use inside a nested loop is hoisted out of it', () => {
+    const body = [
+      { k: 'while' as const, cond: { k: 'const' as const, value: 1 }, body: [store(ix(1), { k: 'const', value: 0 })] },
+      store(ix(2), { k: 'const', value: 0 }),
+    ];
+    expect(hoistScopedBases(inArm(body))).toBeNull();
+    expect(
+      hoists(armOf(hoistScopedBases(inArm(body), { gates: without(SCOPEBASE_GATES, 'nested-loop-use') }))),
+    ).toEqual(['p0']);
   });
 });
