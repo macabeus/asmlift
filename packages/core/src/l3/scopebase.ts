@@ -277,13 +277,20 @@ function commonScope(uses: Site[]): { scope: Stmt[]; depth: number } | null {
   return depth === 0 ? null : { scope: first[depth - 1], depth };
 }
 
-/** The DEEPEST statement list holding 2+ uses, with just those uses — the fallback when no single
- *  scope holds them all.
+/** `'whole'`'s fallback: the DEEPEST statement list holding 2+ uses, with just those uses.
  *
  *  Ties are broken by first appearance, so emission stays deterministic. Returning a SUBSET is the
  *  whole point: the uses outside the cluster keep their original spelling, which is exactly the
  *  mixed form the compiler produces when it materializes an address in one arm and re-derives it
- *  elsewhere. */
+ *  elsewhere.
+ *
+ *  DEEPEST with no size term, and that is a limitation rather than a model of the compiler: a scope
+ *  with four uses enclosing a nested scope with two names the TWO and leaves the four re-deriving
+ *  (pinned in test/scopebase.test.ts). Only ONE cluster is ever served here — serving all of them
+ *  is what `'per-region'` does, under its own admission table.
+ *
+ *  Its uses are RESIDUAL — a list's entry holds every use beneath it, not just its direct ones —
+ *  which is why `regionsOf` builds its partition itself rather than reusing this. */
 function deepestCluster(all: Site[]): { scope: Stmt[]; depth: number; uses: Site[] } | null {
   const byList = new Map<Stmt[], { depth: number; uses: Site[] }>();
   for (const u of all) {
@@ -579,7 +586,7 @@ export function hoistScopedBases(sfn: SFn, opts: ScopeBaseOpts = {}): SFn | null
   }
 
   const fresh = nameAllocator(sfn);
-  // key → (scope list identity, local name)
+  // one entry per (key, admitted region) — several for one key under `'per-region'`
   const plan: { scope: Stmt[]; key: string; name: string; type: IrType; base: LeafBase; before: number }[] = [];
   // access node → the local that replaces its base. Built from the SITES a plan entry was judged
   // on, so the set the planner counted and the set the rewrite repoints are the same set by
@@ -591,9 +598,11 @@ export function hoistScopedBases(sfn: SFn, opts: ScopeBaseOpts = {}): SFn | null
     const siblingRegions = regions.filter((r) => r.uses.length >= 2).length;
     for (const r of regions) {
       // `'whole'` judges the count and the offset tally over the KEY and the loop facts over the
-      // chosen region — the scoping this pass has always used. `'per-region'` judges every rule
-      // over the region's own direct uses, which is a REFINEMENT and not a relaxation: an offset
-      // repeated INSIDE one region is still repeated.
+      // chosen region — the scoping this pass has always used, and the cluster case is why: its
+      // region is a SUBSET of the key's uses. `'per-region'` judges every rule over the region's
+      // own direct uses, a REFINEMENT and not a relaxation — an offset repeated INSIDE one region
+      // is still repeated. Nothing here tests the base kind: an `addr`/`const` base reaching this
+      // pass is one basecse already REFUSED (see the ordering note in the file header).
       const judged = selector === 'per-region' ? r.uses : rec.uses;
       if (
         firstRejection(gates, {

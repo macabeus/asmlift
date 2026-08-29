@@ -5,8 +5,10 @@
 // function top or an init's first use, never inside a nested scope — and only for an `addr`/`const`
 // base. Both limits cost real bytes: neither of those positions is inside the `if` arm that holds
 // the uses, and the rank-aware bare spelling `gSym[0][i]` has a `var` base basecse cannot see.
-// These pin the scope choice and every refusal — the lever is differ-refereed, so its risk is spelling
-// quality, not correctness of the winner, but a wrong REWRITE would still be shown on a nonmatch row.
+// These pin the scope choice, every refusal, and the two POSTCONDITIONS. The lever is
+// differ-refereed, so its risk is spelling quality — except for the placement, where a base local
+// the assignment does not reach is a different variable and the differ REWARDS it.
+// test/regionbase.test.ts carries the second region rule.
 import { describe, expect, test } from 'vitest';
 
 import { assertLocalsWritten } from '../src/contracts';
