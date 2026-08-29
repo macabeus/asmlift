@@ -70,10 +70,15 @@
 // (So the two are not foldable on the window, and the fold is not free: adopting it for `/volatile`
 // would delete the WritePaletteColor spelling. `deviceVolatileClaims` in volatileptr.ts already
 // unifies the COUNT side, which is the half where one answer really is enough. Nor do they
-// COMPOSE: a `/volatile × /vol-store` pairing would qualify a function's pointer-local homes and
-// its raw-constant stores together, and over 834 corpus trees both levers fire on ONE —
+// COMPOSE over the tree's OWN locals: that pairing would qualify a function's existing pointer-local
+// homes and its raw-constant stores together, and over 834 corpus trees both levers fire on ONE —
 // `kleod:SetupBG3WindowOverlay:agbcc`, which is `noncompile` on both decompilers. A pairing whose
-// whole reach is a row that does not compile is one a row has yet to demand.)
+// whole reach is a row that does not compile is one a row has yet to demand.
+//
+// A lever that MINTS the locals is a different question with a different answer, and `rank.ts`
+// pairs this pass with one: `/regionbase` homes the regions holding two or more direct uses of a
+// device base and leaves every other spelling of the same address inline, so both qualifiers have
+// something to claim in one function. `synthetic:dmascope` is that row.)
 //
 // SCOPE: STORES only. A device READ is a different question with a different answer — the idiom
 // fold's DCE drops a use-less device load outright (synthetic:dmaback), so a read that survives to

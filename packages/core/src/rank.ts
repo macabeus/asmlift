@@ -1208,9 +1208,23 @@ export function enumerateCandidates(
     // 13 either way), so the qualifier costs nothing there and the tie-break decides; on
     // LoadBGTilemapData the same pairing is sign-varying by ±11 across the lever's own candidates,
     // so it is a candidate like any other and the differ referees.
-    respell('/regionbase/volatile', () => {
+    const regionVolatile = (): SFn | null => {
       const r = regionbase();
       return r ? volatilePtrLocals(r, createdLocals(sfn, r)) : null;
+    };
+    respell('/regionbase/volatile', regionVolatile);
+    // …and the `/vol-store` triple. `/volatile` qualifies a pointer LOCAL, `/vol-store` a STORE
+    // SITE, and this lever is the one that leaves BOTH in a single function: it homes the regions
+    // that hold two or more direct uses and leaves every other spelling of the same device address
+    // inline. On `synthetic:dmascope` that residue is `((s32 *)67109076)[2] = v1;` — the write to
+    // REG_DMA0CNT that STARTS the transfer — published bare beside three `volatile s32 *` region
+    // locals. The pairing is free (both spellings score 9 there) and `compareScored`'s
+    // `deviceVolatile` term elects the one making the extra claim, 4 against 3.
+    // (l3/volstore.ts's note that a `/volatile` × `/vol-store` pairing has no inhabitant is about
+    // `/volatile` over the tree's OWN locals, where the two levers' reach really is disjoint.)
+    respell('/regionbase/volatile/vol-store', () => {
+      const v = regionVolatile();
+      return v ? volStore(v) : null;
     });
     const enumerate = (
       label: string,

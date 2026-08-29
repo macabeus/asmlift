@@ -270,6 +270,20 @@ describe('the lever is OFFERED, and it reaches the shape the row needs', () => {
     expect(vol.every((c) => /volatile s32 \* p0;/.test(c.source))).toBe(true);
   });
 
+  test('…and the store the lever leaves INLINE keeps its qualifier too', () => {
+    // The lever homes the regions that hold two or more direct uses and leaves every other
+    // spelling of the same device address inline — here `((s32 *)67109076)[2] = v1;`, the write to
+    // REG_DMA0CNT that starts the transfer. `/volatile` qualifies a pointer LOCAL and cannot reach
+    // a store that stays inline; `/vol-store` is the pass that can, and until it was paired with
+    // this lever the winning source dropped a device qualifier the un-hoisted spelling carries.
+    const triple = cands.filter((c) => c.label.includes('/regionbase/volatile/vol-store'));
+    expect(triple.length).toBeGreaterThan(0);
+    expect(triple.every((c) => /volatile s32 \* p0;/.test(c.source))).toBe(true);
+    expect(triple.every((c) => /\(\(volatile s32 \*\)67109076\)\[2\] =/.test(c.source))).toBe(true);
+    // and no candidate loses one: the pair-less spelling is still in the fan
+    expect(cands.some((c) => c.label.includes('/regionbase/volatile') && !c.label.includes('vol-store'))).toBe(true);
+  });
+
   test('and it is the ONLY label that binds the base three times', () => {
     const three = cands.filter((c) => dmaLocals(c.source) >= 3);
     expect(three.length).toBeGreaterThan(0);
