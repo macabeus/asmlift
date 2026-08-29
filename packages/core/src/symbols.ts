@@ -90,7 +90,12 @@ export interface SymbolPointee {
 
 /** One declared type in a signature — width, signedness, pointer-ness. Deliberately the same
  *  vocabulary a struct member uses, so a parameter and a field of the same C type describe
- *  identically. `size: null` = the DWARF did not size it. */
+ *  identically. `size: null` = the DWARF did not size it.
+ *
+ *  NO POINTEE, and the absence is UPSTREAM's rather than a shape asmlift dropped:
+ *  `@gba-kit/debug-info`'s `TypeFacts` — what a `FunctionSignature`'s params are made of — is
+ *  exactly these three fields. {@link SymbolInfo.pointee} exists only for a symbol AT AN ADDRESS.
+ *  Widening this is priced in docs/level-tower.md and pinned in test/param-pointee-axis.test.ts. */
 export interface SymbolTypeFacts {
   size: number | null;
   signed: boolean | null;
