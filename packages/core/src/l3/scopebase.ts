@@ -48,6 +48,7 @@
 // refused — EVERY gate in it, single-use bases as much as loop and repeated-constant-offset ones —
 // which is why `SCOPEBASE_GATES` re-states basecse's rules rather than assuming those bases never
 // arrive.
+import { ContractError } from '../contracts';
 import { type IrType, T, scalarTypeForAccess } from '../ir/types';
 import type { Expr, SFn, Stmt } from './ast';
 import { mapExprChildren, stmtExprs } from './ast';
@@ -143,6 +144,9 @@ interface Site {
    *  or a `for`'s increment. No scope reachable from `path` runs at that cadence, so a key with any
    *  such use is refused outright rather than hoisted to a point that runs once. */
   perIteration: boolean;
+  /** the access node itself — what the rewrite repoints, so `collect` and the rewrite cannot
+   *  disagree about which uses a plan entry owns */
+  node: Extract<Expr, { k: 'index' }>;
 }
 
 /** Set when the tree holds a shape `collect` and `rewriteStmt` would disagree about — see the
@@ -176,7 +180,7 @@ function collect(
       seenNodes.add(ix);
       const k = keyOf(ix);
       const rec = out.get(k) ?? { uses: [], sample: ix, constOff: new Map<number, number>() };
-      rec.uses.push({ path, loop, perIteration, idx: [...idxPath, at] });
+      rec.uses.push({ path, loop, perIteration, idx: [...idxPath, at], node: ix });
       if (ix.idx.k === 'const') {
         rec.constOff.set(ix.idx.value, (rec.constOff.get(ix.idx.value) ?? 0) + 1);
       }
@@ -365,6 +369,60 @@ export interface ScopeBaseOpts {
   readonly gates?: readonly Gate<RegionCtx>[];
 }
 
+/** Every read of a minted local must sit where that local's assignment has already run.
+ *
+ *  THE failure this pass can ship, and the only one the byte differ rewards: a base local whose
+ *  assignment does not reach a use is a DIFFERENT VARIABLE — C that compiles, scores, and can win
+ *  (the shape #106 shipped). `contracts.ts`'s `assertLocalsWritten` does not see it: it accumulates
+ *  reads and writes as SETS over the whole body, so a local assigned in one arm and read after the
+ *  `if` is written somewhere and passes.
+ *
+ *  Checked on the EMITTED tree rather than argued from the plan, because the plan is what a bug
+ *  would be in. `rank.ts`'s `respell` catches the throw and drops the candidate, so the wrong
+ *  answer becomes a reported lever error instead of a scored spelling. It lives here and not in
+ *  `contracts.ts` because a general dominance contract has no other inhabitant: every other L3 pass
+ *  places its defs in the list it reads them from.
+ *
+ *  A nested list gets a COPY of the reaching set, so an assignment inside one arm does not count as
+ *  reaching anything after the `if`. */
+export function assertHoistsDominate(sfn: SFn, minted: ReadonlySet<string>): void {
+  if (minted.size === 0) {
+    return;
+  }
+  const readUndominated = (e: Expr, live: ReadonlySet<string>): string | null => {
+    if (e.k === 'var' && minted.has(e.name) && !live.has(e.name)) {
+      return e.name;
+    }
+    let bad: string | null = null;
+    mapExprChildren(e, (c) => {
+      bad ??= readUndominated(c, live);
+      return c;
+    });
+    return bad;
+  };
+  const walk = (list: Stmt[], live: Set<string>): void => {
+    for (const st of list) {
+      const heads = st.k === 'for' ? [...stmtExprs(st.init), ...stmtExprs(st), ...stmtExprs(st.inc)] : stmtExprs(st);
+      for (const e of heads) {
+        const bad = readUndominated(e, live);
+        if (bad) {
+          throw new ContractError(
+            `scopebase read '${bad}' in '${sfn.name}' where its assignment does not reach — ` +
+              `a hoist placed below a use it claims to serve`,
+          );
+        }
+      }
+      for (const child of childLists(st)) {
+        walk(child, new Set(live));
+      }
+      if (st.k === 'assign' && minted.has(st.name)) {
+        live.add(st.name);
+      }
+    }
+  };
+  walk(sfn.body, new Set());
+}
+
 /**
  * The `/scopebase` re-spelling, or null when nothing qualifies (the caller then adds no candidate
  * rather than a duplicate of the primary).
@@ -387,6 +445,10 @@ export function hoistScopedBases(sfn: SFn, opts: ScopeBaseOpts = {}): SFn | null
   const fresh = nameAllocator(sfn);
   // key → (scope list identity, local name)
   const plan: { scope: Stmt[]; key: string; name: string; type: IrType; base: LeafBase; before: number }[] = [];
+  // access node → the local that replaces its base. Built from the SITES a plan entry was judged
+  // on, so the set the planner counted and the set the rewrite repoints are the same set by
+  // construction rather than by a second predicate that could disagree.
+  const repoint = new Map<Expr, string>();
   for (const [key, rec] of found) {
     // The count and the offset tally are judged over the KEY, the loop facts over the REGION the
     // selector picks below — the scoping this pass has always used, now stated rather than implied
@@ -431,31 +493,21 @@ export function hoistScopedBases(sfn: SFn, opts: ScopeBaseOpts = {}): SFn | null
     // `path` starts EMPTY, so `idx` carries one entry more than `path`: idx[j+1] is the index
     // within path[j]. The scope is path[depth-1], so its index is idx[depth].
     const before = Math.min(...uses.map((u) => u.idx[at.depth]));
-    plan.push({ scope: at.scope, key, name: fresh(), type, base: rec.sample.base as LeafBase, before });
+    const name = fresh();
+    uses.forEach((u) => repoint.set(u.node, name));
+    plan.push({ scope: at.scope, key, name, type, base: rec.sample.base as LeafBase, before });
   }
   if (plan.length === 0) {
     return null;
   }
 
-  // A plan entry may own only a SUBSET of its key's uses (see deepestCluster), so repointing is
-  // scoped: a key becomes active when the rewrite enters its scope and inactive on the way out.
-  // Repointing by key alone would rewrite uses the hoist does not dominate.
-  // SAFE ONLY because `plan` holds at most one entry per key, so `delete` on the way out cannot
-  // discard an outer binding. Serving a second cluster for one key — the obvious next step — makes
-  // that false, and an inner delete would silently unbind the outer one for the rest of its scope:
-  // a use of an unassigned pointer, the defect class this module has already shipped twice. Switch
-  // to save/restore (or pass the bindings as an argument) before serving more than one cluster.
-  const active = new Map<string, string>();
   const point = (e: Expr): Expr => {
-    const ix = eligible(e, globals, rules);
-    if (ix) {
-      const nm = active.get(keyOf(ix));
-      if (nm) {
-        // `lead` is DROPPED — the local already points at the object start, and `eligible` has
-        // established every leading subscript is 0.
-        const { lead: _drop, ...rest } = ix;
-        return { ...rest, base: { k: 'var', name: nm }, idx: point(ix.idx) };
-      }
+    const nm = repoint.get(e);
+    if (nm) {
+      // `lead` is DROPPED — the local already points at the object start, and `nonzero-lead` has
+      // established every leading subscript is 0.
+      const { lead: _drop, ...rest } = e as Extract<Expr, { k: 'index' }>;
+      return { ...rest, base: { k: 'var', name: nm }, idx: point(rest.idx) };
     }
     return mapExprChildren(e, point);
   };
@@ -465,22 +517,7 @@ export function hoistScopedBases(sfn: SFn, opts: ScopeBaseOpts = {}): SFn | null
   // fresh tree in one pass — a two-pass version would compare rebuilt lists that no longer match.
   const rewriteList = (list: Stmt[]): Stmt[] => {
     const here = plan.filter((p) => p.scope === list);
-    // SAVE/RESTORE, not set/delete. A plain delete on the way out is correct only while `plan`
-    // holds one entry per key; the moment a second cluster for one key is served, an inner exit
-    // would unbind an OUTER hoist for the rest of its scope — under-repointing silently. Restoring
-    // makes the nesting correct by construction instead of by an unguarded invariant.
-    const saved = here.map((p) => [p.key, active.get(p.key)] as const);
-    for (const p of here) {
-      active.set(p.key, p.name);
-    }
     const rewritten = list.map(rewriteStmt);
-    for (const [key, prev] of saved) {
-      if (prev === undefined) {
-        active.delete(key);
-      } else {
-        active.set(key, prev);
-      }
-    }
     // Insert each hoist immediately before the first statement that uses it. Descending by index so
     // earlier insertions do not shift the positions later ones were computed against. NOTE that two
     // hoists sharing a `before` come out REVERSED relative to `plan` order — the sort is stable and
@@ -538,5 +575,7 @@ export function hoistScopedBases(sfn: SFn, opts: ScopeBaseOpts = {}): SFn | null
   // Declared from `plan`, one per hoist — NOT accumulated inside `rewriteList`, which would emit a
   // duplicate declaration (non-compiling C) if a `Stmt[]` were ever structurally shared by two tree
   // positions.
-  return { ...sfn, body, locals: [...sfn.locals, ...plan.map((p) => ({ name: p.name, type: p.type }))] };
+  const out = { ...sfn, body, locals: [...sfn.locals, ...plan.map((p) => ({ name: p.name, type: p.type }))] };
+  assertHoistsDominate(out, new Set(plan.map((p) => p.name)));
+  return out;
 }

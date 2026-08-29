@@ -9,10 +9,11 @@
 // quality, not correctness of the winner, but a wrong REWRITE would still be shown on a nonmatch row.
 import { describe, expect, test } from 'vitest';
 
+import { assertLocalsWritten } from '../src/contracts';
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
 import { without } from '../src/l3/gates';
-import { SCOPEBASE_ELIGIBILITY, SCOPEBASE_GATES, hoistScopedBases } from '../src/l3/scopebase';
+import { SCOPEBASE_ELIGIBILITY, SCOPEBASE_GATES, assertHoistsDominate, hoistScopedBases } from '../src/l3/scopebase';
 import { enumerateCandidates } from '../src/rank';
 import { ARMV4T_AGBCC } from '../src/target';
 
@@ -465,5 +466,50 @@ describe('a structurally SHARED access node makes the pass decline outright', ()
     ];
     const out = hoistScopedBases(fn([{ k: 'if', cond: { k: 'const', value: 1 }, then: distinct, else: [] }]));
     expect(hoists((out!.body[0] as Extract<Stmt, { k: 'if' }>).then)).toEqual(['p0']);
+  });
+});
+
+describe('the dominance POSTCONDITION, checked on the pass`s own output', () => {
+  // The catastrophic failure this module can ship is not a bad spelling: it is a base local
+  // declared where its assignment does not reach the use, which is a DIFFERENT VARIABLE — C that
+  // compiles, scores, and can win. `rank.ts`'s `respell` catches a throw and drops the candidate,
+  // so the check turns that silent wrong answer back into a loud one.
+  const pAt = (i: number): Expr => ({
+    k: 'index',
+    base: { k: 'var', name: 'p0' },
+    idx: { k: 'const', value: i },
+    width: 2,
+    signed: false,
+  });
+  const assignP0: Stmt = {
+    k: 'assign',
+    name: 'p0',
+    value: { k: 'cast', to: T.ptr(T.u(16)), e: { k: 'addr', name: 'g' } },
+  };
+  const undominated: SFn = {
+    ...fn([
+      { k: 'if', cond: { k: 'const', value: 1 }, then: [assignP0, store(pAt(1), { k: 'const', value: 0 })], else: [] },
+      store(pAt(2), { k: 'const', value: 0 }),
+    ]),
+    locals: [{ name: 'p0', type: T.ptr(T.u(16)) }],
+  };
+
+  test('a use the assignment does not reach THROWS', () => {
+    expect(() => assertHoistsDominate(undominated, new Set(['p0']))).toThrow(/p0/);
+  });
+
+  test('the same input passes assertLocalsWritten — which is why this check has to exist', () => {
+    // `assertLocalsWritten` accumulates reads and writes as SETS over the whole body, so a local
+    // assigned in one arm and read after the `if` is written somewhere and satisfies it.
+    expect(() => assertLocalsWritten(undominated)).not.toThrow();
+  });
+
+  test('the assignment moved above the `if` is accepted', () => {
+    const dominated: SFn = { ...undominated, body: [assignP0, ...undominated.body] };
+    expect(() => assertHoistsDominate(dominated, new Set(['p0']))).not.toThrow();
+  });
+
+  test('a name the pass did not mint is not this check`s business', () => {
+    expect(() => assertHoistsDominate(undominated, new Set())).not.toThrow();
   });
 });
