@@ -163,7 +163,7 @@ let sharedNode = false;
 function collect(
   body: Stmt[],
   globals: ReadonlySet<string>,
-  out: Map<string, { uses: Site[]; sample: Extract<Expr, { k: 'index' }>; constOff: Map<number, number> }>,
+  out: Map<string, { uses: Site[]; sample: Extract<Expr, { k: 'index' }> }>,
   path: Stmt[][],
   loop: boolean[],
   idxPath: number[],
@@ -179,11 +179,8 @@ function collect(
       }
       seenNodes.add(ix);
       const k = keyOf(ix);
-      const rec = out.get(k) ?? { uses: [], sample: ix, constOff: new Map<number, number>() };
+      const rec = out.get(k) ?? { uses: [], sample: ix };
       rec.uses.push({ path, loop, perIteration, idx: [...idxPath, at], node: ix });
-      if (ix.idx.k === 'const') {
-        rec.constOff.set(ix.idx.value, (rec.constOff.get(ix.idx.value) ?? 0) + 1);
-      }
       out.set(k, rec);
     }
     mapExprChildren(e, (c) => {
@@ -352,6 +349,37 @@ function regionsOf(all: Site[], body: Stmt[], selector: RegionSelector): Region[
  *  gained), and the precise rule needs a loop-DEPTH model. When EVERY use is inside the loop the
  *  scope IS the loop body: the assignment then runs per iteration exactly as the inline spelling
  *  did, and `nestedLoop` is false — there is nothing to refuse. */
+/** Is some literal offset reached twice among these uses? Tallied from the SITES, so the answer is
+ *  scoped by whichever set the caller judges — the key's, or one region's. */
+function repeatsAConstOffset(uses: Site[]): boolean {
+  const seen = new Set<number>();
+  for (const u of uses) {
+    const i = u.node.idx;
+    if (i.k === 'const') {
+      if (seen.has(i.value)) {
+        return true;
+      }
+      seen.add(i.value);
+    }
+  }
+  return false;
+}
+
+/** Base ids a FUNCTION-TOP statement already assigns to a local — `q = (T *)&g;`. A region local
+ *  for one of these is a second name for an address the function already holds. */
+function homedBases(body: Stmt[]): Set<string> {
+  const out = new Set<string>();
+  for (const st of body) {
+    if (st.k === 'assign' && st.value.k === 'cast') {
+      const e = st.value.e;
+      if (e.k === 'const' || e.k === 'addr' || e.k === 'var') {
+        out.add(baseId(e));
+      }
+    }
+  }
+  return out;
+}
+
 const runsPerIteration = (uses: Site[]): boolean => uses.some((u) => u.perIteration);
 const underNestedLoop = (uses: Site[], depth: number): boolean => uses.some((u) => u.loop.slice(depth).some(Boolean));
 
@@ -366,6 +394,10 @@ export interface RegionCtx {
   readonly perIteration: boolean;
   /** some use sits inside a loop nested BELOW the region */
   readonly nestedLoop: boolean;
+  /** a FUNCTION-TOP statement already assigns this base to a local */
+  readonly keyHomed: boolean;
+  /** how many of this key's regions hold two or more direct uses */
+  readonly siblingRegions: number;
 }
 
 /** The admission rules. NONE is sound: a wrong choice here names the same address in a different
@@ -406,6 +438,34 @@ export const SCOPEBASE_GATES: readonly Gate<RegionCtx>[] = [
     why: 'hoisting out of a nested loop is code motion to a point the original never had',
     sound: false,
     rejects: (c) => c.nestedLoop,
+  },
+];
+
+/** `/regionbase`'s admission (rank.ts): `SCOPEBASE_GATES` plus two rules that exist only once a key
+ *  can hold MORE THAN ONE local. Both are honest fan savings, not codegen models — measured at zero
+ *  on the rows they were written against — and both are stated that way rather than credited with a
+ *  match they do not protect.
+ *
+ *  `regions-degenerate` counts regions holding two or more DIRECT uses, which is exactly
+ *  `single-use` applied region-wise and so is computable before any gate runs. One such region is
+ *  the function-top question `basecse`/`/livebase`/`/scopebase` already answer, so serving it here
+ *  adds a spelling those levers already offer.
+ *
+ *  `key-already-homed` is NOT in `SCOPEBASE_GATES`, deliberately: it would change what `/scopebase`
+ *  emits, and a rule worth zero points may not risk a shipped match to say so. */
+export const REGIONBASE_GATES: readonly Gate<RegionCtx>[] = [
+  ...SCOPEBASE_GATES,
+  {
+    id: 'regions-degenerate',
+    why: 'one region is the function-top hoist basecse and /livebase already offer',
+    sound: false,
+    rejects: (c) => c.siblingRegions < 2,
+  },
+  {
+    id: 'key-already-homed',
+    why: 'region locals buy nothing while a function-scope local still holds the same base',
+    sound: false,
+    rejects: (c) => c.keyHomed,
   },
 ];
 
@@ -477,15 +537,12 @@ export function assertHoistsDominate(sfn: SFn, minted: ReadonlySet<string>): voi
  */
 export function hoistScopedBases(sfn: SFn, opts: ScopeBaseOpts = {}): SFn | null {
   const rules = opts.eligibility ?? SCOPEBASE_ELIGIBILITY;
-  const gates = opts.gates ?? SCOPEBASE_GATES;
   const selector = opts.regions ?? 'whole';
+  const gates = opts.gates ?? (selector === 'per-region' ? REGIONBASE_GATES : SCOPEBASE_GATES);
   compound = false;
   sharedNode = false;
   const globals = addressableGlobals(sfn);
-  const found = new Map<
-    string,
-    { uses: Site[]; sample: Extract<Expr, { k: 'index' }>; constOff: Map<number, number> }
-  >();
+  const found = new Map<string, { uses: Site[]; sample: Extract<Expr, { k: 'index' }> }>();
   collect(sfn.body, globals, found, [], [], [], rules, new Set());
   if (compound || sharedNode) {
     return null;
@@ -498,18 +555,24 @@ export function hoistScopedBases(sfn: SFn, opts: ScopeBaseOpts = {}): SFn | null
   // on, so the set the planner counted and the set the rewrite repoints are the same set by
   // construction rather than by a second predicate that could disagree.
   const repoint = new Map<Expr, string>();
+  const homed = homedBases(sfn.body);
   for (const [key, rec] of found) {
-    // The count and the offset tally are judged over the KEY, the loop facts over the REGION — the
-    // scoping this pass has always used, now stated rather than implied by where each `continue`
-    // sat.
-    const repeatedConstOffset = [...rec.constOff.values()].some((n) => n >= 2);
-    for (const r of regionsOf(rec.uses, sfn.body, selector)) {
+    const regions = regionsOf(rec.uses, sfn.body, selector);
+    const siblingRegions = regions.filter((r) => r.uses.length >= 2).length;
+    for (const r of regions) {
+      // `'whole'` judges the count and the offset tally over the KEY and the loop facts over the
+      // chosen region — the scoping this pass has always used. `'per-region'` judges every rule
+      // over the region's own direct uses, which is a REFINEMENT and not a relaxation: an offset
+      // repeated INSIDE one region is still repeated.
+      const judged = selector === 'per-region' ? r.uses : rec.uses;
       if (
         firstRejection(gates, {
-          uses: rec.uses.length,
-          repeatedConstOffset,
+          uses: judged.length,
+          repeatedConstOffset: repeatsAConstOffset(judged),
           perIteration: runsPerIteration(r.uses),
           nestedLoop: underNestedLoop(r.uses, r.depth),
+          keyHomed: homed.has(baseId(rec.sample.base as LeafBase)),
+          siblingRegions,
         }) !== null
       ) {
         continue;

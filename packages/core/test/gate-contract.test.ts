@@ -15,7 +15,7 @@ import { type Gate, ablateHeuristic, gateTableDefects } from '../src/l3/gates';
 import { INLINEBASE_GATES } from '../src/l3/inlinebase';
 import { PTR_FIELD_GATES } from '../src/l3/ptrfield';
 import { COUNTDOWN_GATES } from '../src/l3/reindex';
-import { SCOPEBASE_ELIGIBILITY, SCOPEBASE_GATES } from '../src/l3/scopebase';
+import { REGIONBASE_GATES, SCOPEBASE_ELIGIBILITY, SCOPEBASE_GATES } from '../src/l3/scopebase';
 import { UNREDUCE_GATES } from '../src/l3/unreduce';
 import { VOL_SLOT_GATES } from '../src/l3/volatileval';
 import { VOL_STORE_GATES } from '../src/l3/volstore';
@@ -54,6 +54,7 @@ const TABLES: Record<string, readonly Gate<never>[]> = {
   FRESH_MERGE_GATES: FRESH_MERGE_GATES as readonly Gate<never>[],
   SCOPEBASE_ELIGIBILITY: SCOPEBASE_ELIGIBILITY as readonly Gate<never>[],
   SCOPEBASE_GATES: SCOPEBASE_GATES as readonly Gate<never>[],
+  REGIONBASE_GATES: REGIONBASE_GATES as readonly Gate<never>[],
 };
 
 /** Every `test(...)`/`describe(...)` title in the core suite, as one blob to search. */

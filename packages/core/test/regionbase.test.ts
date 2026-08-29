@@ -83,3 +83,55 @@ describe('the region rule is a SELECTOR over one collected index', () => {
     expect(baseOf(out!.body[2])).toMatchObject({ base: { k: 'var', name: 'p2' } });
   });
 });
+
+describe('the admission rules are judged over the REGION, and it is a refinement', () => {
+  test('a region reached ONCE is left inline — the local would not pay for itself', () => {
+    // The 21-point rule on the row this was built for: the single merged store below two arms keeps
+    // its inline cast rather than earning a fourth local.
+    const out = hoistScopedBases(
+      fn([{ k: 'if', cond: { k: 'const', value: 1 }, then: [put(1), put(2)], else: [put(3), put(4)] }, put(5)]),
+      { regions: 'per-region' },
+    );
+    expect(hoists(out!.body)).toEqual([]);
+    expect((out!.body[1] as Extract<Stmt, { k: 'store' }>).lval).toMatchObject({ base: { k: 'var', name: 'g' } });
+  });
+
+  test('an offset repeated ACROSS regions but once WITHIN each is admitted', () => {
+    // The whole-function tally is what refuses the DMA shape: offsets 0/1/2 are each touched once
+    // per region and three times per function. Per region the rule is unchanged in meaning.
+    const twice = fn([{ k: 'if', cond: { k: 'const', value: 1 }, then: [put(0), put(1)], else: [put(0), put(1)] }]);
+    expect(hoistScopedBases(twice)).toBeNull();
+    const out = hoistScopedBases(twice, { regions: 'per-region' });
+    expect(hoists(arms(out).then)).toEqual(['p0']);
+    expect(hoists(arms(out).else)).toEqual(['p1']);
+  });
+
+  test('and it is a REFINEMENT, not a relaxation — a poll repeating an offset IN one region is still refused', () => {
+    // `p[2] = go; while (p[2] & BUSY) {}` is the shape basecse lost ProcessHBlankWait to. Inside
+    // one region the tally still sees the repeat.
+    const poll = fn([{ k: 'if', cond: { k: 'const', value: 1 }, then: [put(2), put(2)], else: [put(3), put(4)] }]);
+    const out = hoistScopedBases(poll, { regions: 'per-region' });
+    expect(hoists(arms(out).then)).toEqual([]); // the repeat is INSIDE this region
+    expect(hoists(arms(out).else)).toEqual(['p0']); // ...and its sibling is judged on its own uses
+  });
+
+  test('regions-degenerate: a single region is basecse`s own question, and is left to it', () => {
+    const one = fn([{ k: 'if', cond: { k: 'const', value: 1 }, then: [put(1), put(2)], else: [] }]);
+    expect(hoists(arms(hoistScopedBases(one)).then)).toEqual(['p0']); // 'whole' still names it
+    expect(hoistScopedBases(one, { regions: 'per-region' })).toBeNull();
+  });
+
+  test('key-already-homed: a function-top local already holding the base pays for nothing', () => {
+    const homed: SFn = {
+      ...fn([
+        { k: 'assign', name: 'q', value: { k: 'cast', to: T.ptr(T.u(16)), e: { k: 'addr', name: 'g' } } },
+        { k: 'if', cond: { k: 'const', value: 1 }, then: [put(1), put(2)], else: [put(3), put(4)] },
+      ]),
+      locals: [{ name: 'q', type: T.ptr(T.u(16)) }],
+    };
+    expect(hoistScopedBases(homed, { regions: 'per-region' })).toBeNull();
+    // ...and it is the HOME that decided, not the shape
+    const unhomed: SFn = { ...homed, body: homed.body.slice(1) };
+    expect(hoists(arms(hoistScopedBases(unhomed, { regions: 'per-region' })).then)).toEqual(['p0']);
+  });
+});
