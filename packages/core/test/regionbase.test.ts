@@ -159,6 +159,17 @@ describe('the lever is OFFERED, and it reaches the shape the row needs', () => {
     expect(cands.filter((c) => c.label.includes('/regionbase')).length).toBeGreaterThan(0);
   });
 
+  test('`/regionbase/volatile` is in the fan too — the device base keeps its qualifier', () => {
+    // The lever's own shape is a DEVICE block (0x040000D4). Without this product every region
+    // local it wins with is published UNqualified, and `compareScored`'s deviceVolatile tie-break
+    // has no qualified twin to prefer — the qualifier would be given up by an absence in the fan
+    // rather than by a measurement.
+    const vol = cands.filter((c) => c.label.includes('/regionbase/volatile'));
+    expect(vol.length).toBeGreaterThan(0);
+    // the qualifier lands on the DECLARATION of the minted locals, not on the cast
+    expect(vol.every((c) => /volatile s32 \* p0;/.test(c.source))).toBe(true);
+  });
+
   test('and it is the ONLY label that binds the base three times', () => {
     const three = cands.filter((c) => dmaLocals(c.source) >= 3);
     expect(three.length).toBeGreaterThan(0);

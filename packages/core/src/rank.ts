@@ -1178,7 +1178,22 @@ export function enumerateCandidates(
     // disjoint regions becomes N locals, one per region, rather than one at function scope. A LEVER
     // beside `/scopebase`, not a replacement for it: both spellings and the un-hoisted primary stay
     // in the list, so the differ settles which allocation the original had.
-    respell('/regionbase', () => hoistScopedBases(sfn, { regions: 'per-region' }));
+    const regionbase = (): SFn | null => hoistScopedBases(sfn, { regions: 'per-region' });
+    respell('/regionbase', regionbase);
+    // …and its `/volatile` PRODUCT, narrowed to exactly the locals this lever mints — the same
+    // pairing `/livebase` and `/inlinebase` already carry, for the same reason. The shape this
+    // lever exists for is a DEVICE base (the DMA block at 0x040000D4), and the project's own
+    // reference spells it `vu32 *dmaRegs`; without the product every region local this lever wins
+    // with is published UNqualified, and `compareScored`'s `deviceVolatile` term — which prefers
+    // the qualified twin on a tie — never sees a qualified twin to prefer. Measured on
+    // `synthetic:dmascope` and `synthetic:dmascope2` the two spellings are byte-identical (9 and
+    // 13 either way), so the qualifier costs nothing there and the tie-break decides; on
+    // LoadBGTilemapData the same pairing is sign-varying by ±11 across the lever's own candidates,
+    // so it is a candidate like any other and the differ referees.
+    respell('/regionbase/volatile', () => {
+      const r = regionbase();
+      return r ? volatilePtrLocals(r, createdLocals(sfn, r)) : null;
+    });
     const enumerate = (
       label: string,
       from: () => SFn | null | undefined,
