@@ -1168,6 +1168,11 @@ export function enumerateCandidates(
     // runs outside `respell`'s try is the one way a lever can cost a match. `enumerate` re-runs
     // the hoist per candidate, which is pure and cheap, rather than caching it outside the guard.
     respell('/scopebase', () => hoistScopedBases(sfn));
+    // `/regionbase` — the same pass under its second region rule: a base the source spells inside N
+    // disjoint regions becomes N locals, one per region, rather than one at function scope. A LEVER
+    // beside `/scopebase`, not a replacement for it: both spellings and the un-hoisted primary stay
+    // in the list, so the differ settles which allocation the original had.
+    respell('/regionbase', () => hoistScopedBases(sfn, { regions: 'per-region' }));
     const enumerate = (
       label: string,
       from: () => SFn | null | undefined,

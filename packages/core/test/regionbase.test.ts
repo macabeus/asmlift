@@ -10,11 +10,15 @@
 // the three-block-scoped-declarations spelling assemble to byte-identical code on the row this was
 // built for. So there is no nested declaration block here and none is needed — the locals are
 // declared at function top and only their ASSIGNMENTS are placed per region.
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
 import { hoistScopedBases } from '../src/l3/scopebase';
+import { enumerateCandidates } from '../src/rank';
+import { ARMV4T_AGBCC } from '../src/target';
 
 const G = [{ name: 'g', type: T.ptr(T.u(16)) }];
 
@@ -133,5 +137,31 @@ describe('the admission rules are judged over the REGION, and it is a refinement
     // ...and it is the HOME that decided, not the shape
     const unhomed: SFn = { ...homed, body: homed.body.slice(1) };
     expect(hoists(arms(hoistScopedBases(unhomed, { regions: 'per-region' })).then)).toEqual(['p0']);
+  });
+});
+
+describe('the lever is OFFERED, and it reaches the shape the row needs', () => {
+  // The real `synthetic:dmascope` disassembly. Its DMA base 0x040000D4 is spelled in three disjoint
+  // regions — each `if` arm of a loop body, and the post-loop tail — and no lever asmlift ships
+  // binds it to more than ONE local: `basecse`/`/livebase`/`/scopebase` all place at most one.
+  const asm = readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-dmascope.s'), 'utf8');
+  const cands = enumerateCandidates('dmascope', asm, ARMV4T_AGBCC, {
+    prototypes: { dmascope: { params: ['s32'], returnsVoid: true } },
+  });
+
+  /** distinct locals a candidate binds to the DMA register block */
+  const dmaLocals = (src: string): number =>
+    new Set(
+      [...src.matchAll(/(\w+) = \(volatile s32 \*\)67109076;|(\w+) = \(s32 \*\)67109076;/g)].map((m) => m[1] ?? m[2]),
+    ).size;
+
+  test('`/regionbase` is in the fan', () => {
+    expect(cands.filter((c) => c.label.includes('/regionbase')).length).toBeGreaterThan(0);
+  });
+
+  test('and it is the ONLY label that binds the base three times', () => {
+    const three = cands.filter((c) => dmaLocals(c.source) >= 3);
+    expect(three.length).toBeGreaterThan(0);
+    expect(three.every((c) => c.label.includes('/regionbase'))).toBe(true);
   });
 });
