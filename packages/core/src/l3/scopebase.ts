@@ -370,29 +370,6 @@ export interface RegionCtx {
   readonly siblingRegions: number;
 }
 
-/** The admission rules. NONE is sound: a wrong choice here names the same address in a different
- *  place, so it costs bytes and a match, never meaning — the eligibility table above is where
- *  meaning is at stake, and `rank.ts` keeps the un-hoisted spelling beside every candidate.
- *
- *  `repeated-const-offset` and `nested-loop-use` are inherited from `BASECSE_GATES`, which learned
- *  them by losing the ProcessHBlankWait match and by forcing a callee-saved register across a loop.
- *  `per-iteration-use` is the half of the loop question basecse never faces: this pass places into
- *  a NESTED list, and no reachable list runs at a loop condition's cadence.
- *
- *  `repeated-const-offset` is an EXTRAPOLATION on half this pass's input, and honestly so: the
- *  evidence is a `const` MMIO address, and the `var` (array-global) half is input basecse never
- *  saw. It also SLIPS on a fixed offset not spelled as a literal — two identical `g[i]` accesses
- *  are not tallied. rank's `/livebase` takes the OPPOSITE side, ablating the same rule in
- *  `LIVEBASE_GATES` for the poll shapes it mispredicts, and the differ arbitrates. */
-/** MEASURED REACH, so a reader prices these from evidence rather than from the table's existence.
- *  Instrumented census over the klonoa corpus with no symbol map (469 `.s`, 257 lifting functions),
- *  every rule evaluated independently on every admission context the pass builds:
- *
- *      table   contexts   single-use   repeated-const-offset   per-iteration-use   nested-loop-use
- *      SB        79880        24268                   54120               8784              6560
- *      RB       341840       262102                   63238              21724                 —
- *
- *  (`RB` reads the per-region ids; `nested-loop-use` is not in that table — see below.) */
 /** The rules judged over a POPULATION OF USES — the half the region rule re-reads. Split out
  *  because that is what `perRegionReading` below renames, so a fourth counting rule is renamed by
  *  construction instead of by remembering to extend a list of ids. */
@@ -428,6 +405,44 @@ const LOOP_RULES: readonly Gate<RegionCtx>[] = [
   },
 ];
 
+/** The admission rules. NONE is sound: a wrong choice here names the same address in a different
+ *  place, so it costs bytes and a match, never meaning — the eligibility table above is where
+ *  meaning is at stake, and `rank.ts` keeps the un-hoisted spelling beside every candidate.
+ *
+ *  `repeated-const-offset` and `nested-loop-use` are inherited from `BASECSE_GATES`, which learned
+ *  them by losing the ProcessHBlankWait match and by forcing a callee-saved register across a loop.
+ *  `per-iteration-use` is the half of the loop question basecse never faces: this pass places into
+ *  a NESTED list, and no reachable list runs at a loop condition's cadence.
+ *
+ *  `repeated-const-offset` is an EXTRAPOLATION on half this pass's input, and honestly so: the
+ *  evidence is a `const` MMIO address, and the `var` (array-global) half is input basecse never
+ *  saw. It also SLIPS on a fixed offset not spelled as a literal — two identical `g[i]` accesses
+ *  are not tallied. rank's `/livebase` takes the OPPOSITE side, ablating the same rule in
+ *  `LIVEBASE_GATES` for the poll shapes it mispredicts, and the differ arbitrates.
+ *
+ *  MEASURED REACH, so a reader prices these from evidence rather than from the table's existence.
+ *  Instrumented census over the klonoa corpus with no symbol map (469 `.s`, 257 lifting functions),
+ *  every rule evaluated on every admission context the pass builds. `any` counts the contexts a
+ *  rule rejects; `first` the ones where it is the DECIDING rejection, which is the only column that
+ *  prices it — `firstRejection` short-circuits, so a rule that is never first changes no decision.
+ *  `relaxed` re-asks `first` with the counting rules dropped, which is what separates a rule that
+ *  decides nothing from one MASKED by the two that precede it:
+ *
+ *      table   contexts    rule                            any     first   relaxed
+ *      SB        79880     single-use                    24268     24268         —
+ *                          repeated-const-offset         54120     54120         —
+ *                          per-iteration-use              8784         0      8784
+ *                          nested-loop-use                6560       656      4768
+ *      RB       512760     region-single-use            393153    393153         —
+ *                          region-repeated-const-offset  94857     94857         —
+ *                          per-iteration-use             32586         0     32586
+ *                          regions-degenerate           353352       846    331530
+ *
+ *  So `per-iteration-use` decides nothing on this corpus in either table, and ablating it moves no
+ *  gating row. It is kept, and the `relaxed` column is why: every context it rejects it would
+ *  decide, the moment a counting rule stopped rejecting first. Dropping a masked rule is a change
+ *  one corpus licenses; `nested-loop-use` left the region table on a proof that it CANNOT fire
+ *  there, which is a different standard and the one this file holds. */
 export const SCOPEBASE_GATES: readonly Gate<RegionCtx>[] = [...COUNTING_RULES, ...LOOP_RULES];
 
 /** A counting rule's PER-REGION reading. Same predicate, different POPULATION — under `'whole'` it
@@ -451,23 +466,28 @@ const perRegionReading = (g: Gate<RegionCtx>): Gate<RegionCtx> => ({
  *  exactly the uses whose innermost enclosing list IS that region — so `u.loop.slice(depth)` is
  *  the empty slice for every use it judges, and "a use under a loop BELOW the region" is a shape
  *  the partition cannot produce. A use inside a nested loop is its own region, at its own depth.
- *  Measured, not only derived: over the klonoa corpus with no symbol map (257 lifting functions,
- *  341840 `'per-region'` admission contexts) the predicate rejects 0, while the same rule under
- *  `'whole'` rejects 6560 of 79880 and stays in `SCOPEBASE_GATES`, where it is load-bearing.
+ *  Measured on the PREDICATE, not on table membership, since a rule the table no longer holds
+ *  cannot be censused through it: over the corpus census above, `underNestedLoop` is true on 0 of
+ *  512760 `'per-region'` contexts and on 6560 of 79880 `'whole'` ones, where the rule stays in
+ *  `SCOPEBASE_GATES` and is load-bearing.
  *
- *  `regions-degenerate` is an honest fan saving, not a codegen model, and is stated that way
- *  rather than credited with a match it does not protect: it counts regions holding two or more
- *  DIRECT uses, which is exactly `single-use` applied region-wise and so is computable before any
- *  gate runs. One such region is the function-top question `basecse`/`/livebase`/`/scopebase`
- *  already answer, so serving it here adds a spelling those levers already offer.
+ *  `regions-degenerate` is a FAN SAVING, not a codegen model: it counts regions holding two or
+ *  more DIRECT uses, which is `single-use` applied region-wise and so is computable before any
+ *  gate runs. Its saving is USUALLY a duplicate — one such region is the function-top question
+ *  `basecse`/`/livebase`/`/scopebase` already answer — but not always, and this pass produces the
+ *  counterexample: one arm with three direct uses plus a nested loop holding a fourth is refused
+ *  under `'whole'` by `nested-loop-use` and here by this rule, and ablating it alone is the only
+ *  way to reach the hoist (test/regionbase.test.ts). A heuristic, and the differ referees what it
+ *  admits.
  *
- *  NO BENCHMARK ROW EXERCISES A `/regionbase` REFUSAL, and this table says so rather than borrowing
- *  a control it does not have. `synthetic:dmascope1` and `synthetic:offhi_fused` are the
- *  OVER-SCOPING controls for the ROW — they must stay MATCH — but they are ZERO-REACH for this
- *  lever and cannot show any rule here is load-bearing: censused on their own disassembly at this
- *  commit, `dmascope1` enumerates 6 candidates with 0 carrying `/regionbase` and `offhi_fused` 12
- *  with 0. Every entry below is guarded by a UNIT fixture in test/regionbase.test.ts and by the
- *  reach census above, and by nothing else. */
+ *  ONE RULE HERE IS PRICED BY A ROW; three are not. Ablating `region-single-use` moves
+ *  `synthetic:dmascope` — the lever's own row — from 9 to 30, so it is worth 21 there, while
+ *  `region-repeated-const-offset`, `per-iteration-use` and `regions-degenerate` each leave all five
+ *  gating rows exactly where they stand. The OVER-SCOPING controls (`synthetic:dmascope1`,
+ *  `synthetic:offhi_fused`) must stay MATCH but can price nothing here: censused on their own
+ *  disassembly, `dmascope1` enumerates 6 candidates with 0 carrying `/regionbase` and
+ *  `offhi_fused` 12 with 0. The other three are guarded by unit fixtures in test/regionbase.test.ts
+ *  and by the reach census above. */
 export const REGIONBASE_GATES: readonly Gate<RegionCtx>[] = [
   ...COUNTING_RULES.map(perRegionReading),
   ...ablateHeuristic(LOOP_RULES, 'nested-loop-use'),

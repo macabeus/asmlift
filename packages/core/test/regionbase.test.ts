@@ -239,6 +239,29 @@ describe('a rule the region rule makes VACUOUS is dropped, not left reading as s
     expect(SCOPEBASE_GATES.map((g) => g.id)).toContain('nested-loop-use');
   });
 
+  test('`regions-degenerate` refuses a spelling no other reading of this pass offers', () => {
+    // One arm with THREE direct uses plus a nested loop holding one more. `'whole'` refuses the
+    // key on `nested-loop-use`; `'per-region'` makes the arm a region with two-or-more uses whose
+    // only sibling has one, so `regions-degenerate` refuses it as degenerate. Ablate that rule
+    // alone and the hoist appears. The rule is an honest fan saving — but its saving is not always
+    // a duplicate.
+    const F = fn([
+      {
+        k: 'if',
+        cond: { k: 'const', value: 1 },
+        then: [put(1), put(2), put(3), { k: 'while', cond: { k: 'const', value: 9 }, body: [put(4)] }],
+        else: [],
+      },
+    ]);
+    expect(hoistScopedBases(F)).toBeNull();
+    expect(hoistScopedBases(F, { regions: 'per-region' })).toBeNull();
+    const ablated = hoistScopedBases(F, {
+      regions: 'per-region',
+      gates: without(REGIONBASE_GATES, 'regions-degenerate'),
+    });
+    expect(ablated?.locals.map((l) => l.name)).toEqual(['p0']);
+  });
+
   test('every counting rule is renamed for its per-region population — the whole id SET', () => {
     // A rule added to `COUNTING_RULES` reaches `REGIONBASE_GATES` renamed by construction. This
     // pins the other direction: a rule added anywhere else in `SCOPEBASE_GATES` would arrive
