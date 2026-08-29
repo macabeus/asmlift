@@ -989,22 +989,40 @@ export function enumerateCandidates(
           // the placement is re-checked on the shaped tree (contracts.ts). Differential: judged
           // only where the unshaped tree already satisfied the walk, so a lever whose placement it
           // never described is not dropped on the strength of a model that does not apply.
+          //
+          // `minted` is a NAME DIFF, so for a RENAMING lever (`/regspell`, `/merge-names`) it also
+          // holds locals the lever never PLACED. Harmless and deliberate: the differential's
+          // early return absorbs a name the unshaped tree already fails on, and a renamed local
+          // whose def a shape moved below a read is the same wrongness as a placed one.
           const minted = createdLocals(sfn, alt);
           for (const subset of SHAPE_SUBSETS) {
-            const shaped = applyShapes(subset, alt);
-            if (shaped !== null) {
-              assertResolved(shaped.out);
-              assertDerefsTyped(shaped.out);
-              assertLocalsWritten(shaped.out);
-              assertPlacementSurvives(alt, shaped.out, minted);
-              spellings.push({
-                suffix: `${suffix}${shaped.suffix}`,
-                source: backend.emit(shaped.out),
-                ...refsOf(shaped.out),
-                ...volOf(shaped.out),
-                // a shape derived from a proof-gated spelling inherits the requirement
-                ...proof,
-              });
+            // ONE TRY PER SHAPE. The shapes share the lever's outer try, so a throw on the first
+            // subset used to discard every LATER subset as well — `/pollguard`, `/pollread` and
+            // the all-shapes spelling vanished on a failure that had nothing to do with them —
+            // and `onLeverError` was told the base lever's suffix, which named no shape at all.
+            // A shape is its own candidate; it fails as its own candidate, under its own label.
+            const shapeSuffix = subset.map((x) => x.suffix).join('');
+            try {
+              const shaped = applyShapes(subset, alt);
+              if (shaped !== null) {
+                assertResolved(shaped.out);
+                assertDerefsTyped(shaped.out);
+                assertLocalsWritten(shaped.out);
+                assertPlacementSurvives(alt, shaped.out, minted);
+                spellings.push({
+                  suffix: `${suffix}${shaped.suffix}`,
+                  source: backend.emit(shaped.out),
+                  ...refsOf(shaped.out),
+                  ...volOf(shaped.out),
+                  // a shape derived from a proof-gated spelling inherits the requirement
+                  ...proof,
+                });
+              }
+            } catch (e) {
+              opts.onLeverError?.(
+                name + suffix + shapeSuffix,
+                e instanceof Error ? e.message.split('\n')[0] : String(e),
+              );
             }
           }
         }
