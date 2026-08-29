@@ -227,6 +227,39 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   candidate objects have one score by definition, which is where
   [`cli/src/objdiff.ts`](../packages/cli/src/objdiff.ts) collects the 20880 repeats.
 
+  **A PARAMETER'S POINTEE is refused one step earlier than that: the fact has no reader at all.**
+  The recurring proposal is to carry a struct pointee on `SymbolTypeFacts` so a project's DWARF
+  `Sprite *` argument stops arriving at `proto.ts` `typeSpelling` and leaving it as `void *`. But a
+  declared parameter type is consulted for exactly two things, and neither asks what a `*` points
+  at: `declaredWidth` answers **32 for every pointer**, and its ONE call site
+  (`raise/paramwidth.ts`) reads only the function's OWN list; a callee's list is read by
+  `protoArity` for its LENGTH. So the thread would add a fact nothing consumes — the signedness
+  twin's shape, one level down. Nor is the capability missing: asmlift already recovers a
+  parameter's pointee FROM THE ASM, synthesizing `struct Struct0 *` and spelling `a1->field_6`
+  off the access widths alone, and what DWARF would add is field NAMES — which `declare.ts`'s
+  pointer arm already states cannot move bytes, because the cell is 4 bytes whatever it addresses
+  and every stride is explicit.
+
+  The reach bounds it twice more. `asIfUndecompiled` redacts the row's own signature BY DESIGN
+  (a compiler emits one only for a function it compiled), so the transferable half is the
+  CALLEES — and of 252 real rows, 109 call anything, 25 call something whose vendored signature
+  is present, and **10 call one with a pointer parameter**; 6 of those already MATCH, 1 is a
+  noncompile, and the 3 open ones are byte-identical under every pointee spelling fed to them, in
+  both symbol-map configurations. Only two of the six projects vendor function signatures at all
+  (pokeemerald 15678, kleod 210; af, marioparty3, sa3 and snowboardkids2 vendor zero), and **no
+  signature parameter in any of the six carries a pointee**, because `@gba-kit/debug-info`'s
+  `TypeFacts` is `{size, signed, pointer?}` — the absence is upstream's, so the round's first
+  commit is an upstream release and a re-vendor before any threading. Pinned in
+  [`test/param-pointee-axis.test.ts`](../packages/core/test/param-pointee-axis.test.ts).
+
+  THE NEXT STEP THIS MEASUREMENT NAMES IS NOT THIS AXIS. There is one shape where a pointee is
+  byte-load-bearing — a whole-struct assignment, `*dst = *src` through two `struct S *`, which
+  agbcc emits as one `ldmia`/`stmia` pair while asmlift lifts it to three word copies and scores
+  **7** against the real object, identically under `void *` and `struct S *`. It needs a SIZED
+  struct type, which asmlift already synthesizes from the access pattern, not a declared pointee;
+  and it has **0 inhabitants in the real tier** — no row's `targetAsm` carries the pair. Build it
+  as a synthetic row before anyone prices it.
+
   Which population a pass belongs to decides how much its opinions cost. Several passes answer
   "is this address a local?", and what separates them is PLACEMENT: never (`raise/gvn.ts`), a
   position in the top-level statement list — the function top, the minted inits above a run already

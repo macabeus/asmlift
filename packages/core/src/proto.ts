@@ -126,7 +126,9 @@ export function validatePrototypes(value: unknown): string[] {
 
 /** The C type spelling for one declared parameter/return, or null when the facts do not
  *  determine one. A pointer is `void *` — address-identical to any object pointer, and asmlift
- *  makes every stride explicit — so nothing is guessed about what it points at. */
+ *  makes every stride explicit — so nothing is guessed about what it points at. A richer spelling
+ *  would also be INERT: `declaredWidth` answers 32 for every `*`, and a CALLEE's parameter types
+ *  are read for the list's length alone (test/param-pointee-axis.test.ts). */
 function typeSpelling(t: { size: number | null; signed: boolean | null; pointer?: boolean }): ParamType | null {
   if (t.pointer) {
     return 'void *';
