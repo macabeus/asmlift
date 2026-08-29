@@ -399,8 +399,7 @@ function homedBases(body: Stmt[]): Set<string> {
 const runsPerIteration = (uses: Site[]): boolean => uses.some((u) => u.perIteration);
 const underNestedLoop = (uses: Site[], depth: number): boolean => uses.some((u) => u.loop.slice(depth).some(Boolean));
 
-/** One candidate REGION — a statement list, the uses it would name, and the shape facts the
- *  admission rules read. */
+/** One candidate REGION, as the admission rules see it. */
 export interface RegionCtx {
   /** how many uses the local would serve */
   readonly uses: number;
@@ -485,8 +484,10 @@ export const REGIONBASE_GATES: readonly Gate<RegionCtx>[] = [
   },
 ];
 
-/** How `hoistScopedBases` may be re-run: with one rule dropped (the ablation differentials in
- *  test/scopebase.test.ts) — nothing here changes what the default call does. */
+/** `regions` picks the region rule and is the only field a caller passes in production
+ *  (`'per-region'` is `/regionbase`). The two tables are for ABLATION — the differentials in
+ *  test/scopebase.test.ts re-run the real pass with one rule dropped — and default to the pair the
+ *  selector implies. */
 export interface ScopeBaseOpts {
   readonly regions?: RegionSelector;
   readonly eligibility?: readonly Gate<AccessCtx>[];
@@ -569,8 +570,8 @@ export function assertPlacementSurvives(before: SFn, after: SFn, minted: Readonl
 }
 
 /**
- * The `/scopebase` re-spelling, or null when nothing qualifies (the caller then adds no candidate
- * rather than a duplicate of the primary).
+ * The re-spelling `regions` asks for — `/scopebase` or `/regionbase` — or null when nothing
+ * qualifies (the caller then adds no candidate rather than a duplicate of the primary).
  */
 export function hoistScopedBases(sfn: SFn, opts: ScopeBaseOpts = {}): SFn | null {
   const rules = opts.eligibility ?? SCOPEBASE_ELIGIBILITY;
