@@ -2003,7 +2003,38 @@ export const SYNTHETIC: SynthSpec[] = [
   //
   // m2c compiles none of the three, on the identical `ctx` asmlift receives: it types the call
   // result as `s32` and then dereferences it (`*(temp_r5 + var_r4)`), and on `offuse` it types the
-  // same result as `void *` and reads `temp_r0->unk4`.
+  // same result as `void *` and reads `temp_r0->unk4`. It noncompiles the two `offhi_` rows too,
+  // there on `(void *)0x03000004->unk0` — the raw-address rendering, not context withheld — and
+  // its output is the neat control on this axis: it writes the SAME fused initializer for both
+  // (`temp_r9 = getbuf(k) + 4;` on the split target, `temp_sl = getbuf(k) + 4;` on the fused one),
+  // naming the register home it read and folding the addend either way.
+  //
+  // THE SAME CONSTANT, ONE REGISTER CLASS HIGHER — `offhi_split` / `offhi_fused`. The three rows
+  // above all sit entirely in LO_REGS (`grep -c "r8\|r9\|sl\|fp"` over `offhome`'s own compiled
+  // reference: 0), and there the two spellings differ only in WHICH operand carries the 4. Raise
+  // the register pressure until the buffer pointer's home is a HIGH register and a THIRD fact
+  // appears, which those rows structurally cannot see: agbcc's `addsi3` (agbcc/gcc/thumb.md:595)
+  // offers an immediate op2 only on the alternatives that constrain op0 to `l` (LO_REGS); its two
+  // high-register alternatives (`*h`, `*r`) require op2 to be a REGISTER. So `hi = call(); hi += 4;`
+  // must become `mov rH, r0 / mov rL, #4 / add rH, rH, rL`, while `hi = call() + 4;` does the add
+  // while the result is still in `r0`. Compiled pair, this agbcc, four values kept live across the
+  // loop so the home lands above r7 and nothing spills:
+  //     p = getbuf(k); p = p + 4;   ->  bl getbuf / mov r9, r0 / mov r0, #0x4 / add r9, r9, r0
+  //     p = getbuf(k) + 4;          ->  bl getbuf / add r0, r0, #0x4 / mov sl, r0
+  // The ROM this was cut from writes the first shape (`3414: mov r8, r0` / `3416: movs r1, #4` /
+  // `3418: add r8, r1`) and asmlift writes the second — so reproducing `mov/movs/add` here is a
+  // GAIN, not the regression the shape's read-back cousin looks like.
+  //
+  // `offhi_fused` is the HIGH-register control and asmlift MATCHes it. `offhi_split` is the gap,
+  // and its endpoint is proved rather than argued: asmlift's OWN emitted C for it scores 12, and
+  // that same C with the one initializer split in two (`v0 = getbuf(a0); v0 = v0 + 4;`) scores 0,
+  // byte-exact. The whole 12 is one statement. NO REACH, censused on the candidate sources asmlift
+  // actually compiled rather than read off a gate: of its 12 candidates, 6 spell
+  // `v0 = getbuf(a0) + 4;` and 6 spell `v0 = getbuf(a0);` with the bias re-derived at every use
+  // (`*(u8 *)(v0 + 4 + v6)`, `putbuf(v0 + 4 - 4)`). Those are the two points of the `/expr-home`
+  // lattice `offhome` and `offuse` bracket, and neither of them is the split — a home that
+  // receives the RAW call result and takes the addend in a following statement is a third point
+  // the axis does not have.
   {
     sym: 'offhome',
     src:
@@ -2063,6 +2094,53 @@ export const SYNTHETIC: SynthSpec[] = [
       getbuf: { params: 1 },
       putbuf: { params: 1, returnsVoid: true },
       offloop: { returnsVoid: true },
+    },
+  },
+
+  {
+    sym: 'offhi_split',
+    src:
+      'void *getbuf(s32 k);\n' +
+      'void putbuf(void *p);\n' +
+      'void sink(s32 x);\n' +
+      '#define gW ((volatile s32 *)0x03000000)\n' +
+      'void offhi_split(s32 k){ u8 *p; s32 i, n, a, b, c, d;' +
+      ' p = (u8 *)getbuf(k); p = p + 4;' +
+      ' n = gW[0]; a = gW[1]; b = gW[2]; c = gW[3]; d = gW[4];' +
+      ' for (i = 0; i < n; i = i + 1) { sink(p[i]); sink(a); sink(b); sink(c); sink(d); }' +
+      ' sink(a); sink(b); sink(c); sink(d);' +
+      ' putbuf(p - 4); }',
+    features: ['value-home', 'pointer'],
+    toolchains: ['agbcc'],
+    ctx: 'void *getbuf(s32 k); void putbuf(void *p); void sink(s32 x); void offhi_split(s32 k);',
+    proto: {
+      getbuf: { params: 1 },
+      putbuf: { params: 1, returnsVoid: true },
+      sink: { params: 1, returnsVoid: true },
+      offhi_split: { params: ['s32'], returnsVoid: true },
+    },
+  },
+  {
+    sym: 'offhi_fused',
+    src:
+      'void *getbuf(s32 k);\n' +
+      'void putbuf(void *p);\n' +
+      'void sink(s32 x);\n' +
+      '#define gW ((volatile s32 *)0x03000000)\n' +
+      'void offhi_fused(s32 k){ u8 *p; s32 i, n, a, b, c, d;' +
+      ' p = (u8 *)getbuf(k) + 4;' +
+      ' n = gW[0]; a = gW[1]; b = gW[2]; c = gW[3]; d = gW[4];' +
+      ' for (i = 0; i < n; i = i + 1) { sink(p[i]); sink(a); sink(b); sink(c); sink(d); }' +
+      ' sink(a); sink(b); sink(c); sink(d);' +
+      ' putbuf(p - 4); }',
+    features: ['value-home', 'pointer'],
+    toolchains: ['agbcc'],
+    ctx: 'void *getbuf(s32 k); void putbuf(void *p); void sink(s32 x); void offhi_fused(s32 k);',
+    proto: {
+      getbuf: { params: 1 },
+      putbuf: { params: 1, returnsVoid: true },
+      sink: { params: 1, returnsVoid: true },
+      offhi_fused: { params: ['s32'], returnsVoid: true },
     },
   },
 
@@ -2492,6 +2570,15 @@ export const SYNTHETIC: SynthSpec[] = [
   // hand-composing the two spellings on that branch recovers a single point (31 → 30 on a hand
   // probe of the `/expr-home` shape). So no row demands it and none was written. What would earn
   // one: a target whose ranked winner carries `/expr-home` with the hoist INSIDE the guard.
+  // THAT CRITERION IS NOW MET, and the answer did not change. kleod:LoadBGTilemapData:agbcc's
+  // ranked winner (386) carries `/expr-home` AND `/initfirst`, with the hoist landing exactly
+  // here — `if (0 < *(u16 *)50345082) { v5 = 128 << 24; v14 = 0; do …`, so `then[0]` is the
+  // hoist and the pass never looks at the init on the next line. Priced on that winner's own C,
+  // one line moved and nothing else, each variant compiled and scored against the ROM object:
+  // 386 with the init hoisted above the guard and the guard still testing the constant, and 384
+  // when the guard's constant side is ALSO re-spelled against the hoisted init. The class is
+  // worth 2 there, against the 35 the same edit is worth in the REFERENCE's spelling basin, so
+  // it still earns no row — but now because it was measured, not for want of a target.
   // (`sizebound:agbcc` carries both `/expr-home` and `/initfirst`, because there the homed value
   // is parameter-derived and agbcc materialises it before the guard — that composition is not the
   // broken one.)
@@ -3219,6 +3306,131 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc'],
     ctx: 'void basehome(s32 a, s32 b, s32 *out);',
     proto: { basehome: { params: ['s32', 's32', 's32 *'], returnsVoid: true } },
+  },
+
+  // HOW MANY LOCALS ONE BASE ADDRESS IS, AND WHERE THEY ARE DECLARED. Every base-local row above
+  // spells its base ONCE — a file-scope `#define` (`dmafill`, `dmaptrsrc`, `dmavolsrc`, `dmaback`,
+  // `dmanest`) or one local at the top of the function (`dmastride`, `dmafield`, `fieldbase`,
+  // `basecell`, `foldsink`, `basehome`). This family is the case the source spells it N TIMES,
+  // once inside each region that uses it, because a MACRO carrying its own local declaration was
+  // expanded N times — the GBA `DmaSet` idiom, and the shape of every DMA macro in kleod's
+  // `include/gba/macro.h`:
+  //     #define DmaSet(src, dest, control) { vu32 *dmaRegs = (vu32 *)0x040000D4; \
+  //       dmaRegs[0] = (vu32)(src); dmaRegs[1] = (vu32)(dest); dmaRegs[2] = (vu32)(control); }
+  // Each expansion declares its OWN `dmaRegs`, and on agbcc that is not cosmetic. A pseudo born
+  // and dead inside one basic block is handled by `local_alloc` (agbcc/gcc/local-alloc.c:20-27,
+  // "In this pass we consider only regs that are born and die once within one basic block ... Two
+  // passes are used because this pass uses methods that work only on linear code, but that do a
+  // better job than the general methods used in global_alloc"); one that spans the function falls
+  // to `global_alloc`, whose priority is `floor_log2(refs)*refs / live_length`
+  // (agbcc/gcc/global.c:604-624), so a long live range is allocated late and then HOLDS its hard
+  // register through everything — and above r7 it is also a push/pop pair in the prologue, since
+  // r4-r10 are call-saved (agbcc/gcc/thumb.h:405-411).
+  //
+  // The compiled lattice on `dmascope`'s own target, every point a real compile scored against it
+  // (`-O2 -mthumb-interwork -fhex-asm -fprologue-bugfix`), all FIRST-IN from asmlift's OWN winner
+  // C so no number crosses a spelling basin:
+  //     asmlift's winner: base a bare cast at every use, third store merged below the arms .. 40
+  //     + the third store restored per arm, base still a bare cast ......................... 36
+  //     + ONE function-scope base local, third store merged ................................ 39
+  //     + ONE function-scope base local, third store per arm ............................... 19
+  //     + ONE base local PER REGION (the reference's own placement) ................. 0  MATCH
+  // So it is a CONJUNCTION and the row exists to gate it as one: the scope alone is worth 1, the
+  // un-merge alone 4, the two together 21, and the remaining 19 close only when both are right.
+  //
+  // THE GAP IS THE DECLARATION, NOT THE STATEMENT POSITION, and that is the decisive control —
+  // also compiled. asmlift's winner C with the base assignment sunk into each of the three regions
+  // but ONE function-scope declaration holding it scores 34; the same three statements with three
+  // REGION-LOCAL declarations score 0. One pseudo assigned three times is one long live range;
+  // three block-local pseudos are three, and only the second lets the invariant be hoisted into
+  // the preheader and held across the loop (`ldr r2, .L12` above `.L4` and `str r0, [r2]` in both
+  // arms of the matching build, against a fresh `ldr r3, .L12+0x4` inside each arm at 34).
+  //
+  // NO REACH, censused on the candidate SOURCES asmlift compiled rather than read off a gate:
+  // across all 189 captured `dmascope` candidate sources and all 121 captured `dmascope2` sources
+  // there is not one declaration below function top — asmlift's emitter declares every local in
+  // the function's opening block, so a base local's declaration scope is always the whole
+  // function. The ASSIGNMENT does reach a region (80 of `dmascope2`'s 120 candidates sink
+  // `v0 = (s32 *)67109076;` into both arms), which is the 34-point spelling above and not the
+  // 0-point one. Nor does the third store un-merge: 188 of 188 `dmascope` candidates write
+  // `p1[2] = v1;` through a merge temp and 0 write the constant per arm.
+  //
+  // `dmascope1` is the CONTROL and asmlift MATCHes it (`best unsigned/volatile: 0 (match)`, 6
+  // candidates): the same macro, the same base, expanded ONCE. Naming an MMIO base is not the gap
+  // — scoping it is. `dmascope2` is the minimal failing shape, one structural step from the
+  // control: that same expansion in two disjoint `if` arms, and it already fails. `dmascope` is
+  // the real function's shape — a loop whose two arms each expand the macro, plus a third
+  // expansion after the loop — and it is where the conjunction above is measured.
+  //
+  // Cut from kleod:LoadBGTilemapData:agbcc, and the two counts are the family in one line: the
+  // preprocessed reference declares FIVE `vu32 *dmaRegs`, one per DMA macro expansion
+  // (`grep -c 'vu32 \*dmaRegs'` over it: 5), while asmlift's ranked winner (386,
+  // `unsigned/flip-branch/defsite/merge-names/addr-home/expr-home/uns-cmp/livebase-block/volatile/
+  // coalesce-v20-v14/initfirst/raw-globals`) declares ONE — `volatile s32 * p0;` at function top,
+  // assigned once at the head of the body. One long live range where the source had five short
+  // ones. NOT the same class as `dmaback`: every probe here has NO read-back, and
+  // `dmascope1` — same base, same macro, read-back absent — is a byte-exact MATCH, so the two are
+  // orthogonal and separately measured. And NOT what `/livebase-block` names, whose label invites
+  // the wrong reading: `rank.ts:376-379` gives `/livebase` and `/livebase-block` the same
+  // `placement: 'head'`, and "block" there is the single-cell ELIGIBILITY gate, not a scope
+  // (`HoistPlacement = 'head' | 'first-use'`, hoist.ts:121 — both function-scope). A winner
+  // carrying `/livebase-block` is not evidence that scope was considered.
+  //
+  // agbcc only. Every claim above is a pair of spellings compiled with THIS compiler; whether
+  // ido7.1, gcc2.7.2kmc and mwcc_242_81 allocate a block-local base pseudo differently was NOT
+  // measured, so those lanes are left off rather than assumed. What would earn one: the same
+  // compiled pair on that toolchain showing the same divergence.
+  //
+  // m2c noncompiles all three, on the identical `ctx` asmlift receives, and for the reason every
+  // raw-address row in this file records rather than for anything in this family: it types the
+  // address constant as `void *` and reads members off it (`(void *)0x040000D4->unk0 = ...`,
+  // `invalid type argument of '->'`). It REACHES the construct in every case, and its output shows
+  // it has the same two absences asmlift does — no base local anywhere (all three expansions
+  // spelled through the raw constant) and the third store merged below the arms through `var_r0`.
+  {
+    sym: 'dmascope1',
+    src:
+      'typedef volatile unsigned int vu32;\n' +
+      '#define gTbl ((s32 *)0x03001000)\n' +
+      '#define DmaSet(src, dest, control) { vu32 *dmaRegs = (vu32 *)0x040000D4;' +
+      ' dmaRegs[0] = (vu32)(src); dmaRegs[1] = (vu32)(dest); dmaRegs[2] = (vu32)(control); }\n' +
+      'void dmascope1(s32 n){ DmaSet(gTbl[n], gTbl[n + 1], 0x80000020); }',
+    features: ['value-home', 'pointer', 'macro'],
+    toolchains: ['agbcc'],
+    ctx: 'void dmascope1(s32 n);',
+    proto: { dmascope1: { params: ['s32'], returnsVoid: true } },
+  },
+  {
+    sym: 'dmascope2',
+    src:
+      'typedef volatile unsigned int vu32;\n' +
+      '#define gTbl ((s32 *)0x03001000)\n' +
+      '#define DmaSet(src, dest, control) { vu32 *dmaRegs = (vu32 *)0x040000D4;' +
+      ' dmaRegs[0] = (vu32)(src); dmaRegs[1] = (vu32)(dest); dmaRegs[2] = (vu32)(control); }\n' +
+      'void dmascope2(s32 n){' +
+      ' if (gTbl[n] != 0) { DmaSet(gTbl[n], gTbl[n + 1], 0x80000020); }' +
+      ' else { DmaSet(gTbl[n + 2], gTbl[n + 3], 0x80000040); } }',
+    features: ['value-home', 'pointer', 'macro'],
+    toolchains: ['agbcc'],
+    ctx: 'void dmascope2(s32 n);',
+    proto: { dmascope2: { params: ['s32'], returnsVoid: true } },
+  },
+  {
+    sym: 'dmascope',
+    src:
+      'typedef volatile unsigned int vu32;\n' +
+      '#define gTbl ((s32 *)0x03001000)\n' +
+      '#define DmaSet(src, dest, control) { vu32 *dmaRegs = (vu32 *)0x040000D4;' +
+      ' dmaRegs[0] = (vu32)(src); dmaRegs[1] = (vu32)(dest); dmaRegs[2] = (vu32)(control); }\n' +
+      'void dmascope(s32 n){ s32 i;' +
+      ' for (i = 0; i < n; i++) {' +
+      ' if (gTbl[i] != 0) { DmaSet(gTbl[i], gTbl[i + 1], 0x80000020); }' +
+      ' else { DmaSet(gTbl[i + 2], gTbl[i + 3], 0x80000040); } }' +
+      ' DmaSet(gTbl[0], gTbl[1], 0x80000080); }',
+    features: ['value-home', 'pointer', 'macro'],
+    toolchains: ['agbcc'],
+    ctx: 'void dmascope(s32 n);',
+    proto: { dmascope: { params: ['s32'], returnsVoid: true } },
   },
 
   // A DEVICE REGISTER WRITTEN INSIDE A LOOP, WITH NOTHING READING IT BACK. A store to a DMA
