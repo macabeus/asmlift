@@ -15,6 +15,7 @@ import { assertHoistsDominate, assertLocalsWritten, assertPlacementSurvives } fr
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
 import { without } from '../src/l3/gates';
+import { pollGuards } from '../src/l3/pollguard';
 import { SCOPEBASE_ELIGIBILITY, SCOPEBASE_GATES, hoistScopedBases } from '../src/l3/scopebase';
 import { enumerateCandidates } from '../src/rank';
 import { ARMV4T_AGBCC } from '../src/target';
@@ -452,12 +453,11 @@ describe('the admission rules are DATA, and every one of them is load-bearing', 
   });
 });
 
-describe('a structurally SHARED access node makes the pass decline outright', () => {
+describe('a structurally SHARED access node refuses ITS KEY, and only its key', () => {
   test('one `index` object at two tree positions is refused, the same shape unshared fires', () => {
     // The plan repoints by NODE IDENTITY, so one object at two positions is one entry claiming two
-    // uses the hoist need not dominate. Nothing in the L3 contract forbids the sharing and no
-    // producer emits it today, so this is a loud decline rather than a second traversal. It is a
-    // whole-FUNCTION refusal with no per-candidate ctx, which is why it is not in the gate table.
+    // uses the hoist need not dominate. Nothing in the L3 contract forbids the sharing, so this is
+    // a loud decline rather than a second traversal.
     const shared = ix(0, { idx: { k: 'var', name: 'i' } });
     const arm: Stmt[] = [store(shared, { k: 'const', value: 0 }), store(shared, { k: 'const', value: 0 })];
     expect(hoistScopedBases(fn([{ k: 'if', cond: { k: 'const', value: 1 }, then: arm, else: [] }]))).toBeNull();
@@ -468,6 +468,50 @@ describe('a structurally SHARED access node makes the pass decline outright', ()
     ];
     const out = hoistScopedBases(fn([{ k: 'if', cond: { k: 'const', value: 1 }, then: distinct, else: [] }]));
     expect(hoists((out!.body[0] as Extract<Stmt, { k: 'if' }>).then)).toEqual(['p0']);
+  });
+
+  test('a SECOND key in the same function is untouched by the sharing', () => {
+    // Per KEY, not per function. A whole-function decline would make any future producer that
+    // shares one node delete every base this pass names — including the one match that returning
+    // `null` from this pass is known to cost.
+    const shared = ix(0, { idx: { k: 'var', name: 'i' }, base: { k: 'const', value: 0x40000d4 } });
+    const arm: Stmt[] = [
+      store(shared, { k: 'const', value: 0 }),
+      store(shared, { k: 'const', value: 0 }),
+      store(ix(4, { idx: { k: 'var', name: 'i' } }), { k: 'const', value: 0 }),
+      store(ix(8, { idx: { k: 'var', name: 'i' } }), { k: 'const', value: 0 }),
+    ];
+    const out = hoistScopedBases(fn([{ k: 'if', cond: { k: 'const', value: 1 }, then: arm, else: [] }]));
+    expect(out).not.toBeNull();
+    const thenArm = (out!.body[0] as Extract<Stmt, { k: 'if' }>).then;
+    // one hoist, for `g` — the shared 0x40000d4 key contributed none
+    expect(hoists(thenArm)).toEqual(['p0']);
+    expect(thenArm.filter((st) => st.k === 'assign')).toHaveLength(1);
+  });
+
+  test('`pollGuards` ALREADY shares a node, so the ordering it relies on is pinned here', () => {
+    // `l3/pollguard.ts` returns `{ k: 'if', cond: s.cond, then: [s], else: [] }` — one `cond`
+    // object at two tree positions. It is harmless only because `rank.ts` derives the statement
+    // shapes AFTER this lever, an ordering nothing else pins. Run in the other order, the key in
+    // the shared condition drops out and every other key survives.
+    const poll = ix(2, { idx: { k: 'var', name: 'i' }, base: { k: 'const', value: 0x40000d4 } });
+    const body: Stmt[] = [
+      { k: 'dowhile', cond: poll, body: [] },
+      {
+        k: 'if',
+        cond: { k: 'const', value: 1 },
+        then: [
+          store(ix(4, { idx: { k: 'var', name: 'i' } }), { k: 'const', value: 0 }),
+          store(ix(8, { idx: { k: 'var', name: 'i' } }), { k: 'const', value: 0 }),
+        ],
+        else: [],
+      },
+    ];
+    const guarded = pollGuards(fn(body));
+    expect(guarded).not.toBeNull();
+    const out = hoistScopedBases(guarded!);
+    expect(out).not.toBeNull();
+    expect(out!.locals.map((l) => l.name)).toEqual(['p0']); // `g`, not the polled device word
   });
 });
 

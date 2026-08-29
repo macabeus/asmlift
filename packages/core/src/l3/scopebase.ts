@@ -162,12 +162,6 @@ interface Site {
  *  `for`-part note below. The pass then declines outright. */
 let compound = false;
 
-/** Set when one `index` OBJECT sits at two tree positions. The rewrite repoints by node identity,
- *  so a shared node is one plan entry claiming two uses it need not dominate; nothing in the L3
- *  contract forbids the sharing and no producer emits it, so the pass declines the whole function.
- *  Not a `Gate`: it refuses the FUNCTION, and `firstRejection` has no ctx for that. */
-let sharedNode = false;
-
 /** Walk every expression in the tree, recording each eligible access's key and its scope path. */
 function collect(
   body: Stmt[],
@@ -178,16 +172,17 @@ function collect(
   idxPath: number[],
   rules: readonly Gate<AccessCtx>[],
   seenNodes: Set<Expr>,
+  sharedKeys: Set<string>,
 ): void {
   let at = 0;
   const visit = (e: Expr, perIteration: boolean): void => {
     const ix = eligible(e, globals, rules);
     if (ix) {
+      const k = keyOf(ix);
       if (seenNodes.has(ix)) {
-        sharedNode = true;
+        sharedKeys.add(k);
       }
       seenNodes.add(ix);
-      const k = keyOf(ix);
       const rec = out.get(k) ?? { uses: [], sample: ix };
       rec.uses.push({ path, loop, perIteration, idx: [...idxPath, at], node: ix });
       out.set(k, rec);
@@ -229,7 +224,7 @@ function collect(
       stmtExprs(s.inc).forEach((e) => visit(e, true));
     }
     for (const child of stmtLists(s)) {
-      collect(child, globals, out, [...path, child], [...loop, isLoop], [...idxPath, i], rules, seenNodes);
+      collect(child, globals, out, [...path, child], [...loop, isLoop], [...idxPath, i], rules, seenNodes, sharedKeys);
     }
   }
 }
@@ -475,11 +470,24 @@ export function hoistScopedBases(sfn: SFn, opts: ScopeBaseOpts = {}): SFn | null
   const selector = opts.regions ?? 'whole';
   const gates = opts.gates ?? (selector === 'per-region' ? REGIONBASE_GATES : SCOPEBASE_GATES);
   compound = false;
-  sharedNode = false;
   const globals = addressableGlobals(sfn);
   const found = new Map<string, { uses: Site[]; sample: Extract<Expr, { k: 'index' }> }>();
-  collect(sfn.body, globals, found, [], [], [], rules, new Set());
-  if (compound || sharedNode) {
+  /** The KEYS whose tree holds one `index` OBJECT at two positions. The rewrite repoints by node
+   *  identity, so a shared node is one plan entry claiming two uses it need not dominate.
+   *
+   *  PER KEY, not per function, and the difference is not hypothetical. Nothing in the L3 contract
+   *  forbids the sharing — `l3/pollguard.ts` already emits it (`{ k: 'if', cond: s.cond, then: [s] }`
+   *  puts one `cond` object at two tree positions), and it is harmless today only because the shapes
+   *  are derived AFTER this lever in `rank.ts`, an ordering nothing pins. A whole-function decline
+   *  would make a future producer that shares one node silently delete every base this pass names —
+   *  including `kleod:UpdateHUDCounterDisplay`'s match, which returning `null` costs. Refusing the
+   *  key that actually shares costs that key's spelling and nothing else, and the differ still has
+   *  every other spelling in the list.
+   *
+   *  Not a `Gate`: it is decided during `collect`, before a `RegionCtx` exists. */
+  const sharedKeys = new Set<string>();
+  collect(sfn.body, globals, found, [], [], [], rules, new Set(), sharedKeys);
+  if (compound) {
     return null;
   }
 
@@ -492,6 +500,9 @@ export function hoistScopedBases(sfn: SFn, opts: ScopeBaseOpts = {}): SFn | null
   const repoint = new Map<Expr, string>();
   const homed = homedBases(sfn.body);
   for (const [key, rec] of found) {
+    if (sharedKeys.has(key)) {
+      continue; // one node at two positions — see `sharedKeys`
+    }
     const regions = regionsOf(rec.uses, sfn.body, selector);
     const siblingRegions = regions.filter((r) => r.uses.length >= 2).length;
     for (const r of regions) {
