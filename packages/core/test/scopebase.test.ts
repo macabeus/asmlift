@@ -11,17 +11,11 @@
 // test/regionbase.test.ts carries the second region rule.
 import { describe, expect, test } from 'vitest';
 
-import { assertLocalsWritten } from '../src/contracts';
+import { assertHoistsDominate, assertLocalsWritten, assertPlacementSurvives } from '../src/contracts';
 import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
 import { without } from '../src/l3/gates';
-import {
-  SCOPEBASE_ELIGIBILITY,
-  SCOPEBASE_GATES,
-  assertHoistsDominate,
-  assertPlacementSurvives,
-  hoistScopedBases,
-} from '../src/l3/scopebase';
+import { SCOPEBASE_ELIGIBILITY, SCOPEBASE_GATES, hoistScopedBases } from '../src/l3/scopebase';
 import { enumerateCandidates } from '../src/rank';
 import { ARMV4T_AGBCC } from '../src/target';
 

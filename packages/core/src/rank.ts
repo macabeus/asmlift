@@ -9,7 +9,7 @@
 // scoreFn, so the same enumeration feeds the cli's Node/objdiff scorer and the webapp's
 // wasm/objdiff scorer alike.
 import { cBackend } from './backend/c';
-import { assertDerefsTyped, assertLocalsWritten, assertResolved } from './contracts';
+import { assertDerefsTyped, assertLocalsWritten, assertPlacementSurvives, assertResolved } from './contracts';
 import type { AsmData } from './frontend/asmdata';
 import { frontendFor } from './frontend/registry';
 import { hasSetupArgsNarrowing, narrowToSetupArgs } from './frontend/ssa';
@@ -39,7 +39,7 @@ import { pollGuards, pollReads } from './l3/pollguard';
 import { pointerFields } from './l3/ptrfield';
 import { registerishSpellings } from './l3/regspell';
 import { reindexWalks } from './l3/reindex';
-import { assertPlacementSurvives, hoistScopedBases } from './l3/scopebase';
+import { hoistScopedBases } from './l3/scopebase';
 import { sinkInitsToFirstUse } from './l3/sinkinit';
 import { type SymbolRef, collectSymbolRefs } from './l3/symbol-refs';
 import { type UnreduceResult, unreduceAccumulators } from './l3/unreduce';
@@ -986,7 +986,7 @@ export function enumerateCandidates(
         // fixed order below. A shape that never fires declines and costs nothing.
         if (!SHAPE_PRODUCTS.some(({ suffix: sx }) => suffix.includes(sx))) {
           // A shape REORDERS statements, and it is derived after a lever has placed its defs — so
-          // the placement is re-checked on the shaped tree (l3/scopebase.ts). Differential: judged
+          // the placement is re-checked on the shaped tree (contracts.ts). Differential: judged
           // only where the unshaped tree already satisfied the walk, so a lever whose placement it
           // never described is not dropped on the strength of a model that does not apply.
           const minted = createdLocals(sfn, alt);

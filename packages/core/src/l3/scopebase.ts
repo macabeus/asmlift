@@ -57,10 +57,10 @@
 // refused — EVERY gate in it, single-use bases as much as loop and repeated-constant-offset ones —
 // which is why `SCOPEBASE_GATES` re-states basecse's rules rather than assuming those bases never
 // arrive.
-import { ContractError } from '../contracts';
+import { assertHoistsDominate } from '../contracts';
 import { type IrType, T, scalarTypeForAccess } from '../ir/types';
 import type { Expr, SFn, Stmt } from './ast';
-import { mapExprChildren, stmtExprs } from './ast';
+import { mapExprChildren, stmtExprs, stmtLists } from './ast';
 import { type Gate, firstRejection } from './gates';
 import { nameAllocator } from './hoist';
 import { addressableGlobals } from './storage';
@@ -217,7 +217,7 @@ function collect(
       // rather than grow a second recursion this REFUSES the whole function — loud decline over a
       // silently unreachable definition. Delete this when `stmtLists` makes collect/rewrite share
       // one traversal.
-      if (childLists(s.init).length > 0 || childLists(s.inc).length > 0) {
+      if (stmtLists(s.init).length > 0 || stmtLists(s.inc).length > 0) {
         compound = true;
       }
       // `init` and `inc` are STATEMENTS, so their expressions are reached by neither `stmtExprs`
@@ -228,37 +228,9 @@ function collect(
       stmtExprs(s.init).forEach((e) => visit(e, false));
       stmtExprs(s.inc).forEach((e) => visit(e, true));
     }
-    for (const child of childLists(s)) {
+    for (const child of stmtLists(s)) {
       collect(child, globals, out, [...path, child], [...loop, isLoop], [...idxPath, i], rules, seenNodes);
     }
-  }
-}
-
-/** The nested statement LISTS of a statement — the scopes a hoist could land in.
- *
- *  Deliberately not `stmtChildren`, which flattens a `for`'s `init`/`inc` in with its body: those
- *  are single statements, not lists, and a hoist has nowhere legal to go in either (before the loop
- *  changes when it runs, inside the body repeats it). A `for`'s body IS a list and is included. */
-function childLists(s: Stmt): Stmt[][] {
-  switch (s.k) {
-    case 'if':
-      return [s.then, s.else];
-    case 'while':
-    case 'dowhile':
-    case 'for':
-      return [s.body];
-    case 'switch':
-      return [...s.cases.map((c) => c.body), ...(s.default ? [s.default] : [])];
-    // Exhaustive on purpose — no `default`. A future Stmt kind carrying a nested list must be a
-    // COMPILE error here, exactly as it is in `stmtChildren`: a silent `[]` would collect that
-    // kind's uses at the wrong scope while `rewriteStmt`, which IS exhaustive, still rewrote them.
-    case 'assign':
-    case 'store':
-    case 'exprstmt':
-    case 'return':
-    case 'break':
-    case 'continue':
-      return [];
   }
 }
 
@@ -492,81 +464,6 @@ export interface ScopeBaseOpts {
   readonly regions?: RegionSelector;
   readonly eligibility?: readonly Gate<AccessCtx>[];
   readonly gates?: readonly Gate<RegionCtx>[];
-}
-
-/** Every read of a minted local must sit where that local's assignment has already run.
- *
- *  THE failure this pass can ship, and the only one the byte differ rewards: a base local whose
- *  assignment does not reach a use is a DIFFERENT VARIABLE — C that compiles, scores, and can win
- *  (the shape #106 shipped). `contracts.ts`'s `assertLocalsWritten` does not see it: it accumulates
- *  reads and writes as SETS over the whole body, so a local assigned in one arm and read after the
- *  `if` is written somewhere and passes.
- *
- *  Checked on the EMITTED tree rather than argued from the plan, because the plan is what a bug
- *  would be in. `rank.ts`'s `respell` catches the throw and drops the candidate, so the wrong
- *  answer becomes a reported lever error instead of a scored spelling. It lives here and not in
- *  `contracts.ts` because a general dominance contract has no other inhabitant: every other L3 pass
- *  places its defs in the list it reads them from.
- *
- *  A nested list gets a COPY of the reaching set, so an assignment inside one arm does not count as
- *  reaching anything after the `if`. */
-export function assertHoistsDominate(sfn: SFn, minted: ReadonlySet<string>): void {
-  if (minted.size === 0) {
-    return;
-  }
-  const readUndominated = (e: Expr, live: ReadonlySet<string>): string | null => {
-    if (e.k === 'var' && minted.has(e.name) && !live.has(e.name)) {
-      return e.name;
-    }
-    let bad: string | null = null;
-    mapExprChildren(e, (c) => {
-      bad ??= readUndominated(c, live);
-      return c;
-    });
-    return bad;
-  };
-  const walk = (list: Stmt[], live: Set<string>): void => {
-    for (const st of list) {
-      const heads = st.k === 'for' ? [...stmtExprs(st.init), ...stmtExprs(st), ...stmtExprs(st.inc)] : stmtExprs(st);
-      for (const e of heads) {
-        const bad = readUndominated(e, live);
-        if (bad) {
-          throw new ContractError(
-            `scopebase read '${bad}' in '${sfn.name}' where its assignment does not reach — ` +
-              `a hoist placed below a use it claims to serve`,
-          );
-        }
-      }
-      for (const child of childLists(st)) {
-        walk(child, new Set(live));
-      }
-      if (st.k === 'assign' && minted.has(st.name)) {
-        live.add(st.name);
-      }
-    }
-  };
-  walk(sfn.body, new Set());
-}
-
-/** The same guarantee across a STATEMENT-SHAPE re-spelling (`rank.ts`'s `/initfirst`,
- *  `/pollguard`, `/pollread`), which is derived onto every lever tree AFTER this pass has placed
- *  its defs and can therefore move one — `pollReads` folds a materialized re-read back into a loop
- *  condition, a move across the placement computed here.
- *
- *  A DIFFERENTIAL, and that is what makes it safe to apply to every lever rather than this one:
- *  the walk judges the reshaped tree only where it already described the unshaped one, so a
- *  placement it cannot model (a def inside a loop body read earlier in the same body is assigned
- *  on every iteration but the first) is not judged by it either way. */
-export function assertPlacementSurvives(before: SFn, after: SFn, minted: ReadonlySet<string>): void {
-  if (minted.size === 0) {
-    return;
-  }
-  try {
-    assertHoistsDominate(before, minted);
-  } catch {
-    return;
-  }
-  assertHoistsDominate(after, minted);
 }
 
 /**

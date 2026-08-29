@@ -6,7 +6,15 @@
 import { type Block, type Fn, type Value, successorsOf } from './ir/core';
 import { type IrType, typeToString } from './ir/types';
 import type { BinOp, Expr, SFn, Stmt } from './l3/ast';
-import { exprChildren, fieldSpellsDot, gapReasonFor, stmtChildren, stmtExprs } from './l3/ast';
+import {
+  exprChildren,
+  fieldSpellsDot,
+  gapReasonFor,
+  mapExprChildren,
+  stmtChildren,
+  stmtExprs,
+  stmtLists,
+} from './l3/ast';
 import { declaredTypes, exprCType } from './l3/typing';
 
 export class ContractError extends Error {
@@ -280,6 +288,91 @@ export function assertLocalsWritten(sfn: SFn): void {
         `never assigned — a def whose assignment no render position emitted`,
     );
   }
+}
+
+/** Post-lever: every read of a MINTED local must sit where that local's assignment has already
+ *  run.
+ *
+ *  THE failure a placing lever can ship, and the only one the byte differ rewards: a base local whose
+ *  assignment does not reach a use is a DIFFERENT VARIABLE — C that compiles, scores, and can win
+ *  (the shape #106 shipped). `contracts.ts`'s `assertLocalsWritten` does not see it: it accumulates
+ *  reads and writes as SETS over the whole body, so a local assigned in one arm and read after the
+ *  `if` is written somewhere and passes.
+ *
+ *  Checked on the EMITTED tree rather than argued from the plan, because the plan is what a bug
+ *  would be in. `rank.ts`'s `respell` catches the throw and drops the candidate, so the wrong
+ *  answer becomes a reported lever error instead of a scored spelling.
+ *
+ *  IT LIVES HERE, beside `assertLocalsWritten`, because it has that check's population and that
+ *  check's call site. `rank.ts` already names the population by hand — "levers that place a def —
+ *  l3/sinkinit.ts, l3/basecse.ts's first-use policy, l3/nearbase.ts, l3/scopebase.ts,
+ *  l3/argbase.ts — are exactly the population that can produce it, so the check belongs on every
+ *  lever tree rather than on theirs" — and `assertPlacementSurvives` below is wired into `respell`
+ *  for EVERY lever, not just the one whose file this used to be. The earlier argument for keeping
+ *  it in `l3/scopebase.ts` ("a general dominance contract has no other inhabitant") was falsified
+ *  by the commit that wired the differential.
+ *
+ *  A nested list gets a COPY of the reaching set, so an assignment inside one arm does not count as
+ *  reaching anything after the `if`. */
+export function assertHoistsDominate(sfn: SFn, minted: ReadonlySet<string>): void {
+  if (minted.size === 0) {
+    return;
+  }
+  const readUndominated = (e: Expr, live: ReadonlySet<string>): string | null => {
+    if (e.k === 'var' && minted.has(e.name) && !live.has(e.name)) {
+      return e.name;
+    }
+    let bad: string | null = null;
+    mapExprChildren(e, (c) => {
+      bad ??= readUndominated(c, live);
+      return c;
+    });
+    return bad;
+  };
+  const walk = (list: Stmt[], live: Set<string>): void => {
+    for (const st of list) {
+      const heads = st.k === 'for' ? [...stmtExprs(st.init), ...stmtExprs(st), ...stmtExprs(st.inc)] : stmtExprs(st);
+      for (const e of heads) {
+        const bad = readUndominated(e, live);
+        if (bad) {
+          throw new ContractError(
+            `scopebase read '${bad}' in '${sfn.name}' where its assignment does not reach — ` +
+              `a hoist placed below a use it claims to serve`,
+          );
+        }
+      }
+      for (const child of stmtLists(st)) {
+        walk(child, new Set(live));
+      }
+      if (st.k === 'assign' && minted.has(st.name)) {
+        live.add(st.name);
+      }
+    }
+  };
+  walk(sfn.body, new Set());
+}
+
+/** The same guarantee across a re-spelling that MOVES statements over a placement another pass
+ *  already made — `rank.ts`'s statement shapes (`/initfirst`, `/pollguard`, `/pollread`), derived
+ *  onto every lever tree after the lever placed its defs, and the lever-on-lever compositions in
+ *  the same file where a def-moving pass (`sinkInitsToFirstUse`, `nearBaseClusters`) runs on a
+ *  tree a placing lever built. `pollReads` folds a materialized re-read back into a loop
+ *  condition, which is exactly such a move.
+ *
+ *  A DIFFERENTIAL, and that is what makes it safe to apply to every lever rather than this one:
+ *  the walk judges the reshaped tree only where it already described the unshaped one, so a
+ *  placement it cannot model (a def inside a loop body read earlier in the same body is assigned
+ *  on every iteration but the first) is not judged by it either way. */
+export function assertPlacementSurvives(before: SFn, after: SFn, minted: ReadonlySet<string>): void {
+  if (minted.size === 0) {
+    return;
+  }
+  try {
+    assertHoistsDominate(before, minted);
+  } catch {
+    return;
+  }
+  assertHoistsDominate(after, minted);
 }
 
 /** Post structuring: the AST's memory accesses and operators must be SPELLABLE — a `field`
